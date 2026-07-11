@@ -2,8 +2,8 @@
 
 The device publishes every decoded value to MQTT using Home Assistant
 [MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery), so a **Daikin
-Altherma** device with all sensors appears automatically — no YAML. This page covers the topics,
-the entities, and a few derived sensors (COP) you may want to add by hand.
+Altherma** device with all sensors appears automatically — no YAML. Topics, entities and
+derived (COP) sensors below.
 
 ## Enabling
 
@@ -38,8 +38,7 @@ register shows as *unknown* in HA rather than a phantom `0`.
 
 ## Derived sensors (COP)
 
-With the flow, water-temperature and current values selected, you can compute the coefficient of
-performance in `configuration.yaml` (adapt the attribute names to your selected labels — check
+With flow, water-temperature and current values enabled, compute COP in `configuration.yaml` (adapt the attribute names to your selected labels — check
 `GET /values`):
 
 ```yaml
