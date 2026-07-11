@@ -98,9 +98,10 @@ serves only this page.)
 
 ### 5.1 Setup · Step 1 — WiFi & MQTT  (on the device, first-run)
 Header: title + stepper `① WiFi · ② MQTT · ③ Heat pump`. One card, two blocks:
-- **WiFi** (read-only confirmation): SSID, IP, RSSI as an `--ok` pill "Connected". A "Change WiFi"
-  link re-opens the SoftAP flow (device drops to provisioning). Rarely used here — WiFi is already
-  up if this view renders.
+- **WiFi** (read-only confirmation): SSID, IP, RSSI as an `--ok` pill "Connected". Purely
+  informational — WiFi is provisioned once from the captive `setup.html` (§5.0) and is **not**
+  re-configurable from within the app; if the network ever changes, the device is re-provisioned via
+  the SoftAP portal.
 - **MQTT** (the actual step-1 input): broker `host:port`, username, password, TLS auto-note
   ("TLS auto-enables with credentials"). Buttons: **Save & continue** → `POST /set_mqtt` (reboots to
   apply, then returns to step 2); **Skip** (no broker) → advance without reboot.
@@ -123,18 +124,24 @@ Header + stepper `① ✓ · ② ✓ · ③ Heat pump`. One card, grouped fields
 No reboot. A live "querying N registers…" note appears once polling starts.
 
 ### 5.3 Dashboard — operating values  (default after setup)
-Header: title + a small **status hero** and a **settings gear** (opens §5.4). Layout, ordered:
+Header: title (device name + firmware version) and a **settings gear** (opens §5.4). Layout, ordered:
 
-1. **Status hero** (navy band): operation mode (Heating / Cooling / DHW / Standby / Off) as the
+1. **WiFi strip** (above the hero): the live link, read-only — signal bars + RSSI (`--ok`/`--warn`
+   by strength), the network name (SSID), and the IP address. Reflects `wifi{ssid,ip,rssi}` from
+   `/status`. It is display-only; WiFi is not re-provisionable from the app (see §5.1).
+2. **Status hero** (navy band): operation mode (Heating / Cooling / DHW / Standby / Off) as the
    headline, with fault state. Colour: `--ok` running, `--warn`/`--err` on fault; grey when no data.
-2. **Health strip** (compact row of pills): WiFi (rssi), MQTT (connected/off/TLS), HP link
-   (connected / `CRC n` / `timeout n`), last poll "Ns ago", firmware version. Semantic colours.
+   Fault text and the last-poll age surface in the hero sub-line.
 3. **Value groups** (§6) as cards, each a label→value·unit table, tabular numbers, only enabled +
    available values shown. A value that timed out this cycle shows "—" (not 0).
-No setup controls on this screen — it is operation-only.
+
+There is **no** health/badge strip: WiFi lives in its own strip (item 1), operation/fault in the
+hero (item 2), and MQTT/HP-link/firmware detail is reachable under Settings (§5.4) — the dashboard
+stays a clean hero + values layout. No setup controls on this screen — it is operation-only.
 
 ### 5.4 Settings  (from the dashboard gear)
-A menu that reopens each setup step **as its own screen** (WiFi · MQTT · Heat pump), plus
+A menu that reopens each setup step **as its own screen** (MQTT · Heat pump — WiFi is not listed;
+it is set once at provisioning, §5.0/§5.1), plus
 Diagnostics (`GET /diag`, verbose toggle, clear) and Firmware (version, **Check for update** →
 `/ota/check`→`/ota/update`). Each opens full-screen with a Back to dashboard control; the dashboard
 is never shown behind a form.
@@ -152,7 +159,8 @@ the value's register/label (the generator can also stamp a `group` tag per row).
    refrigerant liquid temp, compressor speed, fan step.
 5. **Electrical** — INV primary current, INV compressor current, CT L1/L2/L3, backup-heater
    capacity + stages.
-6. **Device** — WiFi/MQTT/HP link, poll counters, uptime, firmware (also in the health strip).
+6. **Device** — WiFi/MQTT/HP link, poll counters, uptime, firmware (WiFi also in the dashboard
+   WiFi strip; firmware also in the header).
 
 Within a group: setpoints next to their measured value; temperatures before pressures before
 currents. Units and `device_class` come from the value `dataType` (1=°C, 2=bar, 3=A). Groups with no
@@ -165,7 +173,7 @@ enabled/available values are hidden.
 - **Button** — primary: `--brand` bg / white / bold; secondary: bordered, `--fg`; quiet: link-style
   `--brand`. One primary per view.
 - **Input / select** — `--line` border, `--brand` focus ring; inline error text `--err` under field.
-- **Pill** — rounded, semantic bg tint + text; used in the health strip and connection confirmations.
+- **Pill** — rounded, semantic bg tint + text; used in the wizard WiFi/MQTT connection confirmations.
 - **Value table** — two columns (label `--muted` left, value+unit right, tabular). Missing = "—".
 - **Card** — `--card`, 1px `--line`, radius 12; section title small-caps `--muted`.
 - **Toast** — bottom-centre, transient, for Save outcomes ("Saved", "Rebooting…", "Failed").
@@ -175,10 +183,10 @@ enabled/available values are hidden.
 
 Every async action shows: idle → in-flight ("Saving…", spinner on button) → result (toast + view
 transition). Specific:
-- **Reboot writes** (WiFi/MQTT): after Save show "Rebooting — reconnecting…", poll `/status` until it
-  answers, then advance/return.
+- **Reboot writes** (MQTT): after Save show "Rebooting — reconnecting…", poll `/status` until it
+  answers, then advance/return. (WiFi is provisioned once from `setup.html`, not re-written here.)
 - **Live writes** (heat pump): "Applied", stay on view or advance; poll `/values` for first data.
-- **Connection loss**: dashboard health strip goes `--warn`/`--err`; hero greys to "No data"; the
+- **Connection loss**: hero greys to "No data" and the WiFi strip shows "WiFi offline"; the
   page keeps retrying `/status` with backoff, no hard error page.
 - **Empty**: pre-first-poll dashboard shows "Waiting for first poll…"; unknown model shows the
   *Generic* hint.
@@ -196,8 +204,9 @@ transition). Specific:
 ## 10. Firmware support required
 
 The design needs these additions to the firmware (all small, tracked as follow-ups):
-- `GET /status`: add `setup_complete` (NVS `daik_cfg/setup_done`), `mqtt.skipped`, `hp.configured`,
-  `wifi.rssi`/`wifi.ip` (live). See `main/http_status.cpp`.
+- `GET /status`: `wifi.rssi`/`wifi.ip`/`wifi.connected` (live, from `wifi_info()`) — **done**; the
+  dashboard WiFi strip (§5.3) consumes them. Still open: `setup_complete` (NVS `daik_cfg/setup_done`),
+  `mqtt.skipped`, `hp.configured`. See `main/http_status.cpp`.
 - `POST /set_hp`: set `setup_done=1` on first successful save.
 - `POST /set_mqtt`: accept an explicit "skip" (empty broker already disables; mark skipped so the
   wizard advances without re-prompting).

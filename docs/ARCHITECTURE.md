@@ -249,7 +249,9 @@ Structure:
 `www/` is split for edit locality (index.html markup + style.css + app.js) and spliced into ONE
 self-contained, pre-gzipped page at build time (`inline_assets.cmake`). The UI's Setup panel drives the config endpoints:
 
-- **WiFi** → `/set_wifi` (also reachable from the captive `setup.html` before WiFi exists).
+- **WiFi** → `/set_wifi`, driven **only** from the captive `setup.html` (provisioned once). The main
+  app does not re-provision WiFi; the dashboard shows the live link read-only (SSID + IP + RSSI signal
+  bars from `/status.wifi`, populated by `wifi_info()`).
 - **MQTT** → `/set_mqtt`.
 - **Heat pump** → `/set_hp`: the model is **auto-detected** (see Auto-detection) — the card shows
   the detected model, a reduced pick list when ambiguous, or the full list only as a fallback, plus

@@ -122,8 +122,7 @@ main { flex: 1; }
 .hero-mode { font-size: 33px; font-weight: 650; letter-spacing: -.6px; margin-top: 9px; }
 .hero-sub { font-size: 14.5px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
 
-/* ── Health strip / badges ──────────────────────────────────────────────── */
-.health { display: flex; flex-wrap: wrap; gap: 7px; margin: 14px 0; }
+/* ── Badges (pills) — used in the wizard WiFi/MQTT confirmation rows ─────── */
 .badge {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 4px 11px; border-radius: var(--r-pill); font-size: 12.5px; font-weight: 600;
@@ -238,6 +237,18 @@ main { flex: 1; }
 .detect-box.warn { background: var(--soft); color: var(--warn); }
 .detect-actions { margin-top: 12px; }
 .detect-actions button { font-size: 13.5px; }
+
+/* WiFi identity strip (dashboard): signal bars + dBm · SSID · IP */
+.wifi-strip {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  margin: 2px 2px 14px; font-size: 13.5px;
+}
+.wifi-strip .wifi-name { font-weight: 600; color: var(--fg); }
+.wifi-strip .wifi-ip {
+  color: var(--muted); font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+}
+.wifi-strip .wifi-ip::before { content: "·"; margin-right: 8px; color: var(--line); }
+.wifi-strip.off { color: var(--warn); }
 
 /* signal bars */
 .signal { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
