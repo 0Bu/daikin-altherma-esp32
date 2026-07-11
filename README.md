@@ -11,7 +11,7 @@ Reference: [docs/README.md](docs/README.md) (protocol · API · values · build)
 
 - A Daikin Altherma with an **X10A** (bi-zone: **X12A**) header.
 - ESP32, ≥4 MB flash. Reference board: Seeed XIAO ESP32-S3.
-- Desktop Chrome/Edge (Web Serial) to flash; JST-EH 2.5 mm 5-pin or Dupont wires.
+- A browser with Web Serial to flash; JST-EH 2.5 mm 5-pin or Dupont wires.
 
 ## Setup
 
