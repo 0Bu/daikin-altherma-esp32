@@ -5,3 +5,7 @@ dependencies:
   # cJSON: the bundled `json` component was removed from ESP-IDF core in v6.0, so it is pulled
   # as a managed component (used by http_config.cpp). Also resolves on 5.x.
   espressif/cjson: "^1.7.19"
+  # esp-mqtt: the bundled `mqtt` component was likewise extracted from ESP-IDF core in v6.0, so it
+  # is pulled as a managed component (used by mqtt_ha.cpp). Provides the `mqtt` component that
+  # main/CMakeLists.txt REQUIRES. Also resolves on 5.x.
+  espressif/mqtt: "^1.0.0"
