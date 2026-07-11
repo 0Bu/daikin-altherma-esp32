@@ -16,14 +16,29 @@ config survive). Docker builds, host `esptool` flashes (Docker Desktop has no US
    ```bash
    scripts/idf-docker.sh sh -c 'if [ -f sdkconfig ]; then idf.py build; else idf.py set-target <target> build; fi'
    ```
-3. **Flash** from the host (preserves nvs — `@flash_args` skips `nvs@0x9000`):
+3. **Sign the app — REQUIRED, do not skip.** This build config uses the Secure Boot v2 signature
+   scheme (`CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT`), so an **unsigned** image
+   **crash-loops at boot** (`esp_secure_boot_init_checks` abort, before `app_main`) — see
+   [docs/SECURITY.md](../../../docs/SECURITY.md). Sign with the offline RSA-3072 key
+   (`ota_signing_key.pem`, never in the repo), then point `@flash_args` at the signed image:
+   ```bash
+   espsecure.py sign_data --version 2 --keyfile "$OTA_SIGNING_KEY_FILE" \
+     --output build/daikin-signed.bin build/daikin-altherma-esp32.bin
+   cp build/daikin-signed.bin build/daikin-altherma-esp32.bin   # @flash_args flashes this path
+   ```
+   (newer esptool: `espsecure sign-data` with a hyphen.) **No key on hand?** You cannot produce a
+   bootable image locally — pull a signed build from CI, or, for a throwaway dev board only, rebuild
+   with the signature requirement off (`sdkconfig.defaults` `..._NO_SECURE_BOOT` flags → `n`).
+4. **Flash** from the host (preserves nvs — `@flash_args` skips `nvs@0x9000`):
    ```bash
    cd build && esptool --chip <target> -p <port> write_flash "@flash_args"
    ```
-4. **Verify.** After reboot, `curl http://daikin-altherma-esp32.local/status | jq .version` (or read
+5. **Verify.** After reboot, `curl http://daikin-altherma-esp32.local/status | jq .version` (or read
    the serial log: `screen <port> 115200`, exit `Ctrl-A K`). Confirm WiFi/MQTT/hp status.
 
 ## Notes
+- **Unsigned = crash-loop**, not a brick: this scheme burns no eFuses and leaves ROM download mode
+  on, so a board that got an unsigned image is recovered by re-flashing a **signed** one (step 3+4).
 - First flash of a fresh board erases NVS → set up WiFi via the `daikin-altherma-esp32-setup` portal.
 - A full-erase recovery: `esptool --chip <target> -p <port> erase_flash` then reflash.
 - This skill does NOT merge/release — that's the `ship` skill. It works on the local tree only.

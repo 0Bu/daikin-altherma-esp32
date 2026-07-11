@@ -59,6 +59,14 @@ scripts/idf-docker.sh idf.py set-target esp32s3 build   # or esp32 / esp32c3 / e
 # Optional compile-time defaults (all also settable at runtime in the web UI)
 scripts/idf-docker.sh idf.py menuconfig                 # -> Daikin Altherma Configuration
 
+# Sign the app first — REQUIRED. This config uses the Secure Boot v2 signature scheme
+# (CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT); an UNSIGNED image crash-loops at boot
+# (esp_secure_boot_init_checks abort, before app_main). Needs the offline ota_signing_key.pem
+# (never committed; see docs/SECURITY.md). No eFuses burned -> unsigned is a crash-loop, not a brick.
+espsecure.py sign_data --version 2 --keyfile "$OTA_SIGNING_KEY_FILE" \
+  --output build/daikin-signed.bin build/daikin-altherma-esp32.bin
+cp build/daikin-signed.bin build/daikin-altherma-esp32.bin   # @flash_args flashes this path
+
 # Flash from the host (preserves nvs — @flash_args skips nvs@0x9000)
 cd build && esptool --chip esp32s3 -p <port> write_flash "@flash_args"
 ```
