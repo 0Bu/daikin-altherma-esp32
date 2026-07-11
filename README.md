@@ -2,7 +2,7 @@
 
 ESP-IDF firmware: reads a **Daikin Altherma** over the **X10A** port (UART 9600 8E1, protocol I/S)
 and publishes all values to MQTT / Home Assistant (auto-discovery). Runtime config + OTA via an
-embedded web UI. Targets esp32 / esp32s3 / esp32c3 / esp32c6.
+embedded web UI. Targets esp32 / esp32s3 / esp32c3 / esp32c6 / esp32c5.
 
 Reference: [docs/README.md](docs/README.md) (protocol · API · values · build) ·
 [ARCHITECTURE](docs/ARCHITECTURE.md) · [SECURITY](docs/SECURITY.md).

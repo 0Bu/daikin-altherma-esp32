@@ -143,7 +143,7 @@ The Home Assistant bridge:
 
 Structure:
 
-- **Targets** esp32 / esp32s3 / esp32c3 / esp32c6 from one source tree; CI builds all
+- **Targets** esp32 / esp32s3 / esp32c3 / esp32c6 / esp32c5 from one source tree; CI builds all
   (`scripts/ci-build-all.sh`). No BLE is used, so the target set is just "WiFi ESP32s with ≥4 MB
   flash". Per-target deltas are config-only (`idf.py set-target`, native USB-Serial/JTAG console
   on s3/c3/c6, UART0 on the classic esp32).

@@ -1,4 +1,4 @@
-# Target is selected per build: `idf.py set-target <esp32|esp32s3|esp32c3|esp32c6>`.
+# Target is selected per build: `idf.py set-target <esp32|esp32s3|esp32c3|esp32c6|esp32c5>`.
 # Intentionally NOT pinned here so the one source tree builds for every supported target;
 # CI builds all of them. No BLE is used, so any WiFi-capable ESP32
 # with >=4 MB flash is a valid target.
@@ -10,7 +10,7 @@ CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
-# Console over native USB-Serial/JTAG — present on esp32s3 / esp32c3 / esp32c6 (the XIAO
+# Console over native USB-Serial/JTAG — present on esp32s3 / esp32c3 / esp32c6 / esp32c5 (the XIAO
 # ESP32-S3 exposes it on its USB-C port). The classic esp32 has no such peripheral, so the
 # symbol is absent for that target and the console falls back to UART0 automatically. This
 # console is a SEPARATE UART from the heat-pump X10A link (rx_pin/tx_pin), so device logs

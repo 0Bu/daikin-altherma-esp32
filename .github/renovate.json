@@ -32,7 +32,7 @@
       "description": "Remind to re-check the ESP-IDF API surface on a major bump.",
       "matchDepNames": ["espressif/esp-idf"],
       "prBodyNotes": [
-        "⚠️ **Before merging — check the ESP-IDF API surface.** ESP-IDF 6.0 bundles Mbed TLS 4.x and removes/renames several components (e.g. migrate `json` → `espressif/cjson`, review `esp-mqtt`/`esp_https_ota` TLS). Confirm the CI `build` job is green across all four targets and that `esp_mqtt`/OTA still build."
+        "⚠️ **On a major ESP-IDF bump — check the migration guide.** Mbed TLS and component moves (cJSON is already a managed dep) plus `esp-mqtt`/`esp_https_ota` TLS can change. Confirm the CI `build` job is green across all five targets."
       ]
     }
   ]

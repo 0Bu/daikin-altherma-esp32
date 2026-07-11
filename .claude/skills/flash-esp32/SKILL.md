@@ -10,7 +10,7 @@ config survive). Docker builds, host `esptool` flashes (Docker Desktop has no US
 
 ## Steps
 
-1. **Confirm the target and port.** Ask the chip (`esp32`/`esp32s3`/`esp32c3`/`esp32c6`) if
+1. **Confirm the target and port.** Ask the chip (`esp32`/`esp32s3`/`esp32c3`/`esp32c6`/`esp32c5`) if
    unclear; the reference board is the XIAO ESP32-S3. Detect the port: `ls /dev/cu.usbmodem*`.
 2. **Build** via the CI-pinned image:
    ```bash

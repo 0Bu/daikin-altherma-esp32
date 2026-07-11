@@ -34,7 +34,6 @@ idf_component_register(
         app_update
         esp_http_client
         esp-tls
-        json
         lwip
         driver
         mqtt

@@ -19,6 +19,8 @@ const char* ota_img_suffix() {
     return "-c3";
 #elif defined(CONFIG_IDF_TARGET_ESP32C6)
     return "-c6";
+#elif defined(CONFIG_IDF_TARGET_ESP32C5)
+    return "-c5";
 #else
     return "";   // classic esp32
 #endif

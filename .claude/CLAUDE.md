@@ -4,8 +4,8 @@ ESP-IDF 5.x firmware for the ESP32 family. Reads a **Daikin Altherma** heat
 pump over its **X10A** service port and bridges every value to **Home Assistant over MQTT**
 (auto-discovery). Everything — WiFi (captive portal), MQTT, the unit model, the register set,
 the RX/TX pins — is configured at runtime from a **web UI**; firmware is installed from a
-**browser** (Web Serial) and updated **OTA**. Builds for **four targets — esp32, esp32s3,
-esp32c3, esp32c6** — from ONE source tree; CI builds all four.
+**browser** (Web Serial) and updated **OTA**. Builds for **five targets — esp32, esp32s3,
+esp32c3, esp32c6, esp32c5** — from ONE source tree; CI builds all five.
 
 > **Deep reference:** this file holds the always-needed essentials. Full narrative for the poll
 > engine, value profiles, MQTT bridge, WiFi reconnect and OTA lives in
@@ -50,8 +50,8 @@ since Docker on macOS has no USB passthrough. The `flash-esp32` skill wraps both
 When waiting on CI, block on `gh run watch <run-id> --exit-status` — never sleep-poll.
 
 ```bash
-# Build (first run: set-target; afterwards plain `build` stays incremental). CI builds all four.
-scripts/idf-docker.sh idf.py set-target esp32s3 build   # or esp32 / esp32c3 / esp32c6
+# Build (first run: set-target; afterwards plain `build` stays incremental). CI builds all five.
+scripts/idf-docker.sh idf.py set-target esp32s3 build   # or esp32 / esp32c3 / esp32c6 / esp32c5
 
 # Optional compile-time defaults (all also settable at runtime in the web UI)
 scripts/idf-docker.sh idf.py menuconfig                 # -> Daikin Altherma Configuration
@@ -131,7 +131,7 @@ also stops the poll cycle and drops MQTT availability.
 
 ```bash
 scripts/run-mock-tests.sh                              # host logic tests (the fast loop)
-screen /dev/cu.usbmodemXXXX 115200                     # serial monitor (native USB on s3/c3/c6)
+screen /dev/cu.usbmodemXXXX 115200                     # serial monitor (native USB on s3/c3/c6/c5)
 curl http://daikin-altherma-esp32.local/status | jq          # device status
 curl http://daikin-altherma-esp32.local/values | jq          # decoded values
 esptool --chip esp32s3 -p <port> erase_flash           # wipe NVS (reset config)

@@ -9,7 +9,7 @@ the RX/TX pins — and updated over the air. User guide: [../README.md](../READM
 
 ## Hardware
 
-- **Targets:** esp32, esp32s3, esp32c3, esp32c6 — one source tree, per-target images (CI builds
+- **Targets:** esp32, esp32s3, esp32c3, esp32c6, esp32c5 — one source tree, per-target images (CI builds
   all). No BLE is used, so any WiFi-capable ESP32 works; the **Seeed XIAO ESP32-S3** is the
   reference board. **≥ 4 MB flash** (dual-OTA layout: two ~2 MB app slots). No PSRAM required.
 - **Heat-pump link:** the X10A port is a 5 V TTL UART at **9600 8E1**. The ESP maps any two free
@@ -42,8 +42,8 @@ the correct bootloader offset, so one command works for any chip. This erases `n
 WiFi + model config once):
 
 ```bash
-# <suffix>: "" for esp32, else -s3 / -c3 / -c6
-esptool --chip <esp32|esp32s3|esp32c3|esp32c6> write_flash 0x0 \
+# <suffix>: "" for esp32, else -s3 / -c3 / -c6 / -c5
+esptool --chip <esp32|esp32s3|esp32c3|esp32c6|esp32c5> write_flash 0x0 \
   daikin-altherma-esp32<suffix>-<version>-merged.bin
 ```
 
@@ -64,7 +64,7 @@ brew install esptool                                              # host flasher
 git clone https://github.com/0Bu/daikin-altherma-esp32.git && cd daikin-altherma-esp32
 
 # Build via the CI-pinned ESP-IDF image (first run pulls it — 2-4 min). Pick your chip:
-./scripts/idf-docker.sh idf.py set-target esp32s3 build            # or esp32 / esp32c3 / esp32c6
+./scripts/idf-docker.sh idf.py set-target esp32s3 build            # or esp32 / esp32c3 / esp32c6 / esp32c5
 
 # Optional compile-time defaults (WiFi, MQTT, model, pins) — all also settable at runtime:
 ./scripts/idf-docker.sh idf.py menuconfig                         # → Daikin Altherma Configuration

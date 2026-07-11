@@ -24,5 +24,5 @@ that couldn't be (a cloud session cannot build or USB-flash — see .claude/CLAU
 - [ ] New hardware-free logic lives in `main/logic/` with a `CHECK` in `test/test_logic.cpp` (see the `add-logic-test` skill)
 - [ ] Value/CRC/protocol changes match a verified reference; generated `def/*` came from `tools/gen_defs.py` (not hand-edited)
 - [ ] Heap-safe — no new large *contiguous* allocations; HTTP handlers stay under the OOM try/catch
-- [ ] Target-agnostic — still builds for all four chips (esp32 / esp32s3 / esp32c3 / esp32c6)
+- [ ] Target-agnostic — still builds for all five chips (esp32 / esp32s3 / esp32c3 / esp32c6 / esp32c5)
 - [ ] `/project-review` run clean (doc drift, memory, tests, multi-target)

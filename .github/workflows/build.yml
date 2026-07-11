@@ -102,12 +102,12 @@ jobs:
           chmod 600 ota_signing_key.pem
           echo "signed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Build all targets (ESP-IDF v5.5.4)
+      - name: Build all targets (ESP-IDF v6.0.2)
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.4
+          esp_idf_version: v6.0.2
           target: esp32
-          # ci-build-all.sh set-targets each of esp32 / esp32s3 / esp32c3 / esp32c6 in turn and
+          # ci-build-all.sh set-targets each of esp32 / esp32s3 / esp32c3 / esp32c6 / esp32c5 in turn and
           # stages per-target signed + merged bins + manifest.json into dist/. ONE source tree ->
           # N images; the installer auto-selects by chip; OTA pulls daikin-altherma-esp32<sfx>.bin.
           command: ./scripts/ci-build-all.sh "${{ steps.version.outputs.version }}"
