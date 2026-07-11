@@ -180,6 +180,12 @@ of the HP link.
 
 ## WiFi / LAN connectivity (reconnect + watchdog)
 
+**Modem sleep is disabled** (`esp_wifi_set_ps(WIFI_PS_NONE)` right after `esp_wifi_start()`). The
+IDF default `WIFI_PS_MIN_MODEM` parks the radio between DTIM beacons, adding ~100–300 ms (and, with
+TCP retransmits, occasionally seconds) of non-deterministic latency to every inbound request — which
+shows up as the web UI "sometimes taking very long to answer". This is a mains-powered bridge, so we
+keep the radio awake for a consistently responsive HTTP UI and MQTT link.
+
 Two layers keep the WiFi station link up:
 
 - **Event-driven reconnect** on every `WIFI_EVENT_STA_DISCONNECTED`. First-ever connect keeps a
