@@ -229,6 +229,16 @@ main { flex: 1; }
 }
 .profile-line b { font-family: var(--font-mono); font-weight: 600; color: var(--brand-strong); }
 
+/* ── Auto-detection (model) ─────────────────────────────────────────────── */
+.detect-box {
+  padding: 11px 13px; border-radius: 10px; background: var(--soft); border: 1px solid var(--line);
+  font-size: 14px; line-height: 1.45; color: var(--fg);
+}
+.detect-box.ok { background: var(--brand-tint); border-color: transparent; }
+.detect-box.warn { background: var(--soft); color: var(--warn); }
+.detect-actions { margin-top: 12px; }
+.detect-actions button { font-size: 13.5px; }
+
 /* signal bars */
 .signal { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
 .signal i { width: 3px; border-radius: 1px; background: var(--muted); opacity: .35; }

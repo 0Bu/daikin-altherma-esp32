@@ -84,7 +84,9 @@ state. First-run walks the wizard; afterwards the dashboard is default and steps
 
 `GET /status` must expose the fields the switch needs (extend the current shape):
 `wifi{ssid,ip,rssi}`, `mqtt{configured,connected,tls,skipped}`, `hp{configured,proto,rx,tx,poll_s,
-connected,…}`, `profile{id,in,out,tank,lang}`, `setup_complete`.
+connected,…}`, `profile{id,in,out,tank,lang}`,
+`detect{proto,auto,valid,capacity_kw,ou_eeprom,candidates[],ambiguous}` (drives the model card),
+`setup_complete`.
 
 ## 5. View specs
 
@@ -106,12 +108,16 @@ Validation inline (host:port shape). Primary action = brand button; Skip = quiet
 
 ### 5.2 Setup · Step 2 — Heat pump / ESP32  (first-run, gated on step 1)
 Header + stepper `① ✓ · ② ✓ · ③ Heat pump`. One card, grouped fields, top-to-bottom:
-1. **Model** — indoor / outdoor / DHW-tank selects (from `GET /models`) → resolves the value
-   profile; a read-only "Profile: `<id>`" line confirms.
-2. **Protocol** — `I` (default) / `S`, with a one-line hint (`0x15 0xEA` ⇒ S).
-3. **Wiring (ESP32)** — RX pin, TX pin (number inputs) + a per-board pin hint from `/models`
-   (`pin_hint`, e.g. XIAO S3 RX44/TX43). Language select.
-4. **Values** — the profile's value catalogue as a scrollable checklist (grouped by domain, §6),
+1. **Model** — auto-detected from the bus (`/status.detect`). The card states the outcome:
+   *Detected: `<model>`* (auto-applied) when unambiguous; a **reduced** outdoor select limited to
+   the candidate ids when ambiguous (with a `≈ kW · EEPROM …` hint to match the nameplate); the
+   full indoor/outdoor/tank selects only as a fallback (no bus / no match / "Choose manually").
+   A read-only "Profile: `<id>`" line confirms; **Auto-detect again** posts `/detect`. Protocol is
+   auto-detected — there is **no** protocol control.
+2. **Wiring (ESP32)** — RX pin, TX pin (number inputs, **auto-detected** when the bus answers —
+   a swapped wire self-corrects — but editable) + a per-board pin hint from `/models` (`pin_hint`,
+   e.g. XIAO S3 RX44/TX43). Language select.
+3. **Values** — the profile's value catalogue as a scrollable checklist (grouped by domain, §6),
    with select-all / none; poll interval (s).
 **Finish setup** → `POST /set_hp` (applies live, sets `setup_complete`) → transitions to Dashboard.
 No reboot. A live "querying N registers…" note appears once polling starts.
@@ -198,7 +204,8 @@ The design needs these additions to the firmware (all small, tracked as follow-u
 - Optional `group` field on `ValueDef` (or generator-stamped) to drive §6 grouping; until then the
   UI groups by register-id ranges + label keywords.
 - `/models`: already returns model lists, `profile_map`, `pin_hint`, per-profile value menu — the
-  wizard and dashboard consume it.
+  wizard and dashboard consume it (used for candidate-id → display name, and the fallback full list).
+- `POST /detect`: re-run auto-detection (resets `profile` to `"auto"` + invalidates the fingerprint).
 
 ## 11. Build / delivery
 

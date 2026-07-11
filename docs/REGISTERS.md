@@ -111,7 +111,7 @@ Startup / Defrost / … / Low-noise).
 | 311 | `byte & 0x07` | 3-bit counter / BUH output-capacity step (bits 0–2) |
 | 211 | `0 → "OFF"`, else the number | fan step |
 | 212 / 213 | byte as hex | MPU / option code |
-| 214 / 215 | EEPROM digit decode | model/software identification digits |
+| 214 / 215 | raw byte (no name table) | model/software EEPROM identification digits — 215 a digit pair, 214 a single digit. Exposed as the raw byte; page `0x11` is rendered as space-separated hex for display (`logic/detect.hpp` `eeprom_render`) and used only as an auto-detection hint, never decoded to a model name. |
 
 ### 3.4 Enum converters
 

@@ -5,15 +5,19 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <initializer_list>
 #include <string>
 
 #include "logic/config_model.hpp"
 #include "logic/convert.hpp"
 #include "logic/crc.hpp"
 #include "logic/demo.hpp"
+#include "logic/detect.hpp"
 #include "logic/discovery.hpp"
+#include "logic/mqtt_delta.hpp"
 #include "logic/registers.hpp"
 #include "def/registry.hpp"
+#include "def/signatures.hpp"
 
 static int g_failures = 0;
 #define CHECK(cond)                                                                       \
@@ -143,6 +147,11 @@ static void test_convert() {
     ValueDef rf{0x00, 0, 802, 0, -1, "rf"};
     CHECK(std::string(convert(rf, c).text) == "R32");
 
+    // conv 214/215 = raw EEPROM identification byte (no name table -> exposed as the byte value).
+    ValueDef ee{0x11, 0, 215, 1, -1, "ee"};
+    const uint8_t e34[] = {0x34};
+    CHECK(convert(ee, e34).ok && approx(convert(ee, e34).value, 52.0));   // 0x34 = 52
+
     // Refrigerant pressure->temperature curve is monotonic in the working range.
     CHECK(press2temp(20.0) < press2temp(30.0));
 
@@ -162,10 +171,10 @@ static void test_config_model() {
     c.tx_pin = 44;                                     // rx == tx
     CHECK(!validate(c, why));
 
-    c.tx_pin = 43; c.poll_s = 3;                       // interval too small
+    c.tx_pin = 43; c.poll_s = 0;                       // interval too small (min 1 s)
     CHECK(!validate(c, why));
 
-    c.poll_s = 30; c.sg1_pin = 44;                     // control pin collides with RX
+    c.poll_s = 2; c.sg1_pin = 44;                      // control pin collides with RX
     CHECK(!validate(c, why));
 
     CHECK(parse_protocol("S") == Protocol::S);
@@ -178,10 +187,17 @@ static void test_discovery() {
     CHECK(object_id("  A/B  ") == "a_b");
 
     ValueDef def{0x61, 10, 105, 2, 1, "DHW Tank Temp (R5T)"};
-    std::string cfg = discovery_config("daikin_abc123", "daikin-altherma-esp32/daikin_abc123/state", def);
+    const std::string base = "daikin-altherma-esp32", node = "daikin_abc123";
+    const std::string st = value_state_topic(base, node, def);
+    CHECK(st == "daikin-altherma-esp32/daikin_abc123/dhw_tank_temp_r5t/state");
+    CHECK(availability_topic(base, node) == "daikin-altherma-esp32/daikin_abc123/status");
+    std::string cfg = discovery_config(node, st, availability_topic(base, node), def);
     CHECK(cfg.find("\"dev_cla\":\"temperature\"") != std::string::npos);
+    CHECK(cfg.find("\"stat_cla\":\"measurement\"") != std::string::npos);
     CHECK(cfg.find("\"unit_of_meas\":\"°C\"") != std::string::npos);
-    CHECK(cfg.find("value_json.dhw_tank_temp_r5t") != std::string::npos);
+    CHECK(cfg.find("\"stat_t\":\"" + st + "\"") != std::string::npos);
+    CHECK(cfg.find("\"avty_t\":\"daikin-altherma-esp32/daikin_abc123/status\"") != std::string::npos);
+    CHECK(cfg.find("value_json") == std::string::npos);   // per-value topic -> no value_template
     CHECK(cfg.find("\"uniq_id\":\"daikin_abc123_dhw_tank_temp_r5t\"") != std::string::npos);
 }
 
@@ -227,6 +243,94 @@ static void test_registry() {
     CHECK(std::string(def::lookup("nonexistent").id) == "generic");   // fallback
 }
 
+// Build a page mask from a list of register pages (mirrors what hp_detect sets when a page answers).
+static uint32_t mask_of(std::initializer_list<uint8_t> regs) {
+    uint32_t m = 0;
+    for (uint8_t r : regs) m |= page_mask_bit(r);
+    return m;
+}
+
+static bool has_candidate(const char** ids, int n, const char* id) {
+    for (int i = 0; i < n; i++) if (std::string(ids[i]) == id) return true;
+    return false;
+}
+
+static void test_detect() {
+    // ── parse_kw_class: pull the capacity class out of a profile id (0.1 kW units) ──
+    int lo = -1, hi = -1;
+    CHECK(parse_kw_class("altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw", lo, hi) && lo == 40 && hi == 80);
+    CHECK(parse_kw_class("altherma_lt_11_16kw_hydrosplit_hydro_unit", lo, hi) && lo == 110 && hi == 160);
+    CHECK(parse_kw_class("altherma_ebla_edla_ewaa_ewya_d_series_9_16kw", lo, hi) && lo == 90 && hi == 160);
+    CHECK(parse_kw_class("altherma_erla03_d_ehfh_ehfz_dj_series_3kw", lo, hi) && lo == 30 && hi == 30);
+    CHECK(parse_kw_class("altherma_monobloc_ca_05_07kw", lo, hi) && lo == 50 && hi == 70);
+    CHECK(parse_kw_class("altherma_egsah_x_ewsah_x_d_series_6_10kw_geo3", lo, hi) && lo == 60 && hi == 100);
+    // Model code "12p30_50" must not be mistaken for a capacity — the "kw" token wins.
+    CHECK(parse_kw_class("altherma_erra_e_elsh_x_12p30_50_ef_series_8_12kw_ech2o", lo, hi) && lo == 80 && hi == 120);
+    // No kW in the id -> unknown (never filters on capacity).
+    CHECK(!parse_kw_class("altherma_gshp", lo, hi) && lo == -1 && hi == -1);
+    CHECK(!parse_kw_class("altherma3_r_erga", lo, hi));
+
+    // 0x11 is probed for its digits but intentionally not a page-mask bit (no profile decodes it).
+    CHECK(page_bit(0x11) < 0 && page_mask_bit(0x11) == 0);
+    CHECK(page_bit(0x00) >= 0 && page_bit(0x64) >= 0);
+
+    // ── detect_candidates against the REAL derived signatures ──
+    Signature sigs[64];
+    const int nsig = def::build_signatures(sigs, 64);
+    CHECK(nsig > 40);                                   // all non-generic profiles have a signature
+    const char* out[64];
+
+    // A unit exposing exactly {00,10,20,21,30,60,61,62,63,64} (no 65/A0/A1) — only egsah/geo3 and
+    // gshp2 share that page set. At 16 kW the geo3 kW class [6,10] is excluded -> gshp2 alone.
+    Fingerprint fp{};
+    fp.page_mask = mask_of({0x00, 0x10, 0x20, 0x21, 0x30, 0x60, 0x61, 0x62, 0x63, 0x64});
+    fp.kw_tenths = 160;
+    int n = detect_candidates(sigs, nsig, fp, out, 64);
+    CHECK(n == 1 && std::string(out[0]) == "altherma_gshp2");
+
+    // Same pages at 8 kW: geo3 [6,10] now also matches -> ambiguous set of exactly the two.
+    fp.kw_tenths = 80;
+    n = detect_candidates(sigs, nsig, fp, out, 64);
+    CHECK(n == 2);
+    CHECK(has_candidate(out, n, "altherma_gshp2"));
+    CHECK(has_candidate(out, n, "altherma_egsah_x_ewsah_x_d_series_6_10kw_geo3"));
+
+    // Feature-poor units drop feature-rich profiles: adding no extra pages keeps max-overlap only.
+    // A unit with the group-A page set {00,10,20,21,60,61,62,64} excludes anything needing 0x30/0x63.
+    Fingerprint fa{};
+    fa.page_mask = mask_of({0x00, 0x10, 0x20, 0x21, 0x60, 0x61, 0x62, 0x64});
+    fa.kw_tenths = 60;
+    n = detect_candidates(sigs, nsig, fa, out, 64);
+    CHECK(n >= 1);
+    CHECK(!has_candidate(out, n, "altherma_gshp2"));   // needs 0x30+0x63 the unit lacks
+
+    // No bus response -> no candidates.
+    Fingerprint none{};
+    CHECK(detect_candidates(sigs, nsig, none, out, 64) == 0);
+
+    // ── EEPROM render: raw hex pairs for display ──
+    const uint8_t ee[] = {0x0B, 0x02, 0x00, 0x01, 0x03, 0x02};
+    char buf[32];
+    eeprom_render(ee, 6, buf, sizeof(buf));
+    CHECK(std::string(buf) == "0B 02 00 01 03 02");
+    eeprom_render(ee, 6, buf, 5);                       // small buffer: fits one pair, still NUL-terminated
+    CHECK(std::string(buf) == "0B" && std::strlen(buf) < 5);
+}
+
+static void test_mqtt_delta() {
+    // Only changed/new values are published; unchanged ones are skipped (short poll, quiet broker).
+    std::vector<PubValue> prev = {{"oat", "3.1"}, {"lw", "35.0"}, {"mode", "Heating"}};
+    std::vector<PubValue> cur  = {{"oat", "3.1"}, {"lw", "35.4"}, {"mode", "Heating"}, {"tank", "48.0"}};
+    auto d = mqtt_changed(prev, cur);
+    CHECK(d.size() == 2);                              // lw changed, tank is new; oat/mode unchanged
+    CHECK(d[0].key == "lw" && d[0].value == "35.4");
+    CHECK(d[1].key == "tank");
+    // First publish (no prior snapshot) sends everything.
+    CHECK(mqtt_changed({}, cur).size() == cur.size());
+    // Nothing changed -> nothing to publish.
+    CHECK(mqtt_changed(cur, cur).empty());
+}
+
 int main() {
     test_crc();
     test_registers();
@@ -235,6 +339,8 @@ int main() {
     test_discovery();
     test_demo();
     test_registry();
+    test_detect();
+    test_mqtt_delta();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }
     std::printf("%d logic test(s) FAILED\n", g_failures);
     return 1;

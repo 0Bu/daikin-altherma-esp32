@@ -6,6 +6,7 @@
 #include "diag_log.hpp"
 #include "hp_comm.hpp"
 #include "hp_convert.hpp"
+#include "hp_detect.hpp"
 #include "logic/convert.hpp"
 #include "logic/crc.hpp"
 #include "logic/demo.hpp"
@@ -109,10 +110,42 @@ static void poll_demo() {
     xSemaphoreGive(s_mtx);
 }
 
+// Auto-detection cycle: sweep protocol + fingerprint the unit, then persist proto/profile/
+// fingerprint (logic/detect.hpp, hp_detect.cpp). Runs in place of a normal cycle while
+// config().profile == "auto". Only commits when the bus actually answered, so a not-yet-wired unit
+// simply retries next cycle instead of being pinned to "generic".
+static void poll_detect() {
+    DetectResult d = hp_detect_run();
+    if (!d.bus_ok) {
+        xSemaphoreTake(s_mtx, portMAX_DELAY);
+        s_stats.connected  = false;
+        s_stats.last_error = "no X10A response (detecting)";
+        s_stats.timeout_err++;
+        xSemaphoreGive(s_mtx);
+        return;                                                // keep "auto" — retry next cycle
+    }
+    Config c        = config();
+    c.proto         = d.proto;
+    c.rx_pin        = d.rx;                                    // auto-corrected pins (e.g. swapped wire)
+    c.tx_pin        = d.tx;
+    c.fp_pages      = d.page_mask;
+    c.fp_kw_tenths  = d.kw_tenths;
+    c.fp_eeprom     = d.eeprom;
+    c.fp_valid      = true;
+    c.profile_auto  = true;                                    // auto-derived; user can pin later
+    // A lone candidate is applied outright; an ambiguous set uses its best-fit as the working
+    // profile while the UI offers the reduced list; nothing matched → generic.
+    c.profile = d.candidates.empty() ? "generic" : d.candidates.front();
+    config_save(c);
+}
+
 static void poll_task(void*) {
     for (;;) {
         if (config().demo) poll_demo();
-        else               poll_once();
+        else {
+            if (config().profile == "auto") poll_detect();     // resolves to a concrete profile
+            if (config().profile != "auto") poll_once();       // then poll it (same cycle if resolved)
+        }
         vTaskDelay(pdMS_TO_TICKS(config().poll_s * 1000));     // re-reads poll_s each cycle
     }
 }

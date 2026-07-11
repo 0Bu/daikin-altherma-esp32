@@ -62,9 +62,13 @@ static esp_err_t set_hp(httpd_req_t* req) {
     cJSON* j = cJSON_Parse(body);
     if (!j) return httpd_resp_send_500(req);
     Config c    = config();
-    c.profile   = js(j, "profile", c.profile.c_str());
+    const char* prof = js(j, "profile", c.profile.c_str());
+    c.profile      = prof;
+    // A concrete model is a manual pin (stops auto-detect); "auto" requests a fresh detection.
+    c.profile_auto = (std::string(prof) == "auto");
+    if (c.profile_auto) c.fp_valid = false;
     c.lang      = js(j, "lang", c.lang.c_str());
-    c.proto     = parse_protocol(js(j, "proto", "I"));
+    // proto is auto-detected (hp_detect.cpp), not set from the UI.
     c.rx_pin    = ji(j, "rx", c.rx_pin);
     c.tx_pin    = ji(j, "tx", c.tx_pin);
     c.poll_s    = ji(j, "poll_s", c.poll_s);
@@ -85,6 +89,18 @@ static esp_err_t set_hp(httpd_req_t* req) {
         std::string e = "{\"ok\":false,\"error\":\"" + reason + "\"}";
         return http_send_json(req, e.c_str());
     }
+    config_save(c);
+    hp_poll_reconfigure();
+    return http_send_json(req, "{\"ok\":true}");
+}
+
+// Re-run auto-detection: drop back to the "auto" sentinel + invalidate the stored fingerprint, so
+// the next poll cycle sweeps protocol + re-fingerprints the unit (hp_poll.cpp poll_detect).
+static esp_err_t do_detect(httpd_req_t* req) {
+    Config c       = config();
+    c.profile      = "auto";
+    c.profile_auto = true;
+    c.fp_valid     = false;
     config_save(c);
     hp_poll_reconfigure();
     return http_send_json(req, "{\"ok\":true}");
@@ -116,6 +132,7 @@ void http_register_config(httpd_handle_t s) {
         {"/set_wifi", HTTP_POST, set_wifi, nullptr},
         {"/set_mqtt", HTTP_POST, set_mqtt, nullptr},
         {"/set_hp", HTTP_POST, set_hp, nullptr},
+        {"/detect", HTTP_POST, do_detect, nullptr},
         {"/set_relays", HTTP_POST, set_relays, nullptr},
     };
     for (auto& r : routes) httpd_register_uri_handler(s, &r);
