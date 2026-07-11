@@ -14,6 +14,11 @@ esp32c3, esp32c6** — from ONE source tree; CI builds all four.
 > [`docs/SECURITY.md`](../docs/SECURITY.md). Keep them in sync (the `project-review` skill
 > checks for drift).
 
+**Conventions:** always write the full name `daikin-altherma-esp32` (hostname, SoftAP, MQTT base
+topic, docs) — never shorten it to `daikin-altherma`. Do not reference other projects by name in
+the code or docs; the heat-pump-protocol credit belongs only in the README "Scope & credits"
+section at the bottom.
+
 ## Environment note (Claude Code on the web / remote sandbox)
 
 A cloud session **cannot build** (no Docker daemon for `scripts/idf-docker.sh`) and **cannot
