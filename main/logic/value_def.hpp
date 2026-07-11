@@ -12,7 +12,7 @@ struct ValueDef {
     uint8_t     offset;  // byte offset within the register reply payload
     int         conv;    // converter id (see logic/convert.hpp)
     uint8_t     size;    // number of bytes
-    int         type;    // dataType (reserved / converter-specific)
+    int         type;    // dataType / HA unit code: 1=°C, 2=bar, 3=A, -1=generic
     const char* label;   // human label (language-specific table)
 };
 

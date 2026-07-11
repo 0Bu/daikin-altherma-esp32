@@ -235,6 +235,9 @@ coarse control (it still cannot change the heat pump's internal register setting
 - **SG-Ready smart grid** (`sg1_pin` / `sg2_pin`) — the two SG contacts; publish `0..3` to
   `<base>/<node>/sg/set`, current mode on `<base>/<node>/sg/state`. Requires SG enabled in the
   heat pump's menu.
+- **Operation mode via two relays** (planned option) — off / heat / cool can be selected by two
+  relays wired to the unit's mode inputs; when switching, de-energise both relays first to avoid a
+  transient invalid combination. Not yet exposed by the firmware; the single on/off relay above is.
 
 Both are off by default and set from the web UI (Setup → Control). Pin choice and modes follow
 the classic Altherma conventions; wiring per your unit's schematic.

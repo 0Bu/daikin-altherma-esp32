@@ -56,24 +56,38 @@ static void test_crc() {
 }
 
 static void test_registers() {
-    const uint8_t le[] = {0x2C, 0x01};                 // 0x012C = 300 little-endian
-    CHECK(read_int(le, 2, false) == 300);
-    const uint8_t neg[] = {0xFF, 0xFF};                // -1 signed
-    CHECK(read_int(neg, 2, true) == -1);
-    CHECK(read_int(neg, 2, false) == 65535);
+    const uint8_t le[] = {0x2C, 0x01};                 // little-endian 0x012C = 300
+    CHECK(read_u16(le, 2, false) == 300);
+    CHECK(read_u16(le, 2, true) == 0x2C01);            // big-endian view of the same bytes
+    const uint8_t be[] = {0x01, 0x2C};                 // big-endian 0x012C = 300
+    CHECK(read_u16(be, 2, true) == 300);
+    const uint8_t neg[] = {0x9C, 0xFF};                // little-endian 0xFF9C = -100 signed
+    CHECK(read_s16(neg, 2, false) == -100);
+    CHECK(read_u16(neg, 2, false) == 0xFF9C);
+    const uint8_t one[] = {0x2A};                      // 1-byte field reads data[0]
+    CHECK(read_u16(one, 1, false) == 42);
+    CHECK(read_s16(one, 1, false) == 42);              // high byte 0 -> stays positive
     CHECK(in_bounds(2, 2, 10));
     CHECK(!in_bounds(9, 2, 10));
 }
 
 static void test_convert() {
-    ValueDef temp{0x61, 0, 105, 2, 1, "T"};            // conv 105 = signed*0.1
-    const uint8_t t[] = {0x2C, 0x01};                  // 300 -> 30.0
-    Reading r = convert(temp, t);
-    CHECK(r.ok && approx(r.value, 30.0));
+    // conv 105 = signed, little-endian, ×0.1 (temperature).
+    ValueDef temp{0x61, 0, 105, 2, 1, "T"};
+    const uint8_t pos[] = {0x2C, 0x01};                // LE 300 -> 30.0 °C
+    CHECK(convert(temp, pos).ok && approx(convert(temp, pos).value, 30.0));
+    const uint8_t negt[] = {0x9C, 0xFF};               // LE 0xFF9C = -100 -> -10.0 °C
+    CHECK(approx(convert(temp, negt).value, -10.0));   // sign/endianness fix: NOT 6543.6
 
-    ValueDef cnt{0x30, 0, 152, 1, -1, "n"};            // conv 152 = unsigned int
+    // conv 152 = unsigned big-endian integer (counts/steps).
+    ValueDef cnt{0x30, 0, 152, 1, -1, "n"};
     const uint8_t c[] = {0x2A};
     CHECK(approx(convert(cnt, c).value, 42.0));
+
+    // conv 161 = unsigned big-endian ×0.5 (CT current).
+    ValueDef ct{0x63, 0, 161, 1, 3, "CT"};
+    const uint8_t a[] = {0x14};                        // 20 -> 10.0 A
+    CHECK(approx(convert(ct, a).value, 10.0));
 
     ValueDef unk{0x00, 0, 999, 1, -1, "x"};            // unimplemented -> skipped
     CHECK(convert(unk, c).unimpl);
@@ -81,10 +95,11 @@ static void test_convert() {
     // Refrigerant pressure->temperature curve is monotonic in the working range.
     CHECK(press2temp(20.0) < press2temp(30.0));
 
-    // HA hints from converter id.
-    CHECK(std::string(unit_for_conv(105)) == "°C");
-    CHECK(std::string(device_class_for_conv(161)) == "current");
-    CHECK(std::string(unit_for_conv(152)).empty());
+    // HA hints derived from the dataType field.
+    CHECK(std::string(unit_for_datatype(1)) == "°C");
+    CHECK(std::string(device_class_for_datatype(3)) == "current");
+    CHECK(std::string(unit_for_datatype(2)) == "bar");
+    CHECK(std::string(unit_for_datatype(-1)).empty());
 }
 
 static void test_config_model() {
