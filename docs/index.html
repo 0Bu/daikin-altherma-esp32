@@ -27,8 +27,7 @@
 <body>
 <main>
   <h1>daikin-altherma-esp32</h1>
-  <p class="lead">Flash the monitoring firmware onto your ESP32 straight from the browser — then
-     set up WiFi, MQTT and your Daikin model from a phone. No toolchain, no cloud.</p>
+  <p class="lead">Web Serial firmware installer. Desktop Chrome / Edge.</p>
 
   <div class="banner" id="prBanner"></div>
 
@@ -41,28 +40,21 @@
       </esp-web-install-button>
     </div>
     <p style="text-align:center;color:var(--muted);font-size:13.5px;margin:14px 0 0">
-      The installer auto-detects your chip (esp32 / esp32s3 / esp32c3 / esp32c6) and does a full flash.</p>
+      Chip auto-detected (esp32 / esp32s3 / esp32c3 / esp32c6); full flash.</p>
   </div>
 
   <div class="card">
-    <h2 style="font-size:16px;margin-top:0">After flashing</h2>
+    <h2 style="font-size:16px;margin-top:0">Next</h2>
     <ol>
-      <li>Join the device's <code>daikin-altherma-esp32-setup</code> WiFi network; the setup page opens
-          automatically (else <code>http://192.168.4.1</code>). Enter your WiFi, save — it reboots.</li>
-      <li>Open <code>http://daikin-altherma-esp32.local</code>. Under <b>Setup → Heat pump</b> pick your
-          indoor / outdoor / tank model and the RX/TX pins you wired to X10A.</li>
-      <li>Under <b>Setup → MQTT</b> enter your broker for Home Assistant auto-discovery.</li>
-      <li>Wire the ESP to the heat pump's X10A port (power off first — see the guide).</li>
+      <li>Join AP <code>daikin-altherma-esp32-setup</code> (captive portal / <code>192.168.4.1</code>); enter WiFi.</li>
+      <li><code>http://daikin-altherma-esp32.local</code> → <b>Setup</b>: model, RX/TX pins, MQTT.</li>
+      <li>Wire to X10A (breaker off).</li>
     </ol>
-    <p style="margin-bottom:0">Full guide:
-      <a href="https://github.com/0Bu/daikin-altherma-esp32#readme">README</a> ·
-      <a href="https://github.com/0Bu/daikin-altherma-esp32/blob/main/docs/README.md">technical reference</a></p>
+    <p style="margin-bottom:0"><a href="https://github.com/0Bu/daikin-altherma-esp32#readme">README</a> ·
+      <a href="https://github.com/0Bu/daikin-altherma-esp32/blob/main/docs/README.md">docs</a></p>
   </div>
 
-  <footer>
-    Open-source Daikin Altherma monitor on ESP-IDF with a browser installer + OTA. MIT.
-    Not affiliated with Daikin.
-  </footer>
+  <footer>MIT · not affiliated with Daikin.</footer>
 </main>
 
 <script>
@@ -71,8 +63,7 @@
   if (m) {
     var b = document.getElementById('prBanner');
     b.style.display = 'block';
-    b.innerHTML = '⚠️ Preview build for <b>PR #' + m[1] + '</b> — for testing before merge. ' +
-      'The device still checks for OTA updates from <b>main</b>.';
+    b.innerHTML = '⚠️ Preview build for <b>PR #' + m[1] + '</b>. OTA still tracks <b>main</b>.';
   }
 </script>
 </body>

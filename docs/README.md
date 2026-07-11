@@ -121,7 +121,7 @@ makes it **runtime-selectable**:
   engine (`main/hp_poll.*`). No recompile to change model, values or pins.
 
 If no exact profile matches your unit, pick the closest or *Generic* — unimplemented registers
-simply read blank (the documented behaviour).
+read blank (documented behaviour).
 
 ---
 
