@@ -1,5 +1,5 @@
 #pragma once
-// X10A frame handling — ported verbatim from ESPAltherma include/comm.h. Pure + IDF-free so
+// X10A frame handling. Pure + IDF-free so
 // test/test_logic.cpp can assert it against real captured frames on the host. The device
 // wrapper (hp_comm.cpp) only adds the UART read/write around these.
 #include <cstdint>
@@ -8,7 +8,7 @@ namespace daik {
 
 enum class Protocol : char { I = 'I', S = 'S' };
 
-// Checksum: 8-bit sum of bytes, then bitwise-NOT. (ESPAltherma getCRC)
+// Checksum: 8-bit sum of bytes, then bitwise-NOT.
 inline uint8_t crc(const uint8_t* src, int len) {
     uint8_t b = 0;
     for (int i = 0; i < len; i++) b = static_cast<uint8_t>(b + src[i]);
@@ -50,7 +50,7 @@ inline bool crc_ok(const uint8_t* buf, int len) {
 }
 
 // Where the value payload starts inside a full reply (past the header): protocol S = 1,
-// protocol I = 3 (ESPAltherma Converter::readRegistryValues).
+// protocol I = 3.
 inline int payload_offset(Protocol proto) { return proto == Protocol::S ? 1 : 3; }
 
 } // namespace daik

@@ -1,7 +1,6 @@
 #pragma once
 // X10A UART transport. Wraps logic/crc.hpp (frame build / CRC / reply-length) around the
-// ESP-IDF uart_driver on the configured rx/tx pins at 9600 8E1. Ported from ESPAltherma
-// include/comm.h (queryRegistry).
+// ESP-IDF uart_driver on the configured rx/tx pins at 9600 8E1.
 #include <cstddef>
 #include <cstdint>
 #include "logic/crc.hpp"

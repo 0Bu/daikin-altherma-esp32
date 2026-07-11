@@ -12,11 +12,7 @@ Daikin unit you own* (indoor, outdoor, domestic-hot-water tank), which values to
 even the **RX/TX GPIO pins** you wired to X10A. There is no source file to edit and no
 recompile: flash once from the web installer, then set everything from a phone.
 
-This is a ground-up ESP-IDF reimplementation of the proven
-[ESPAltherma](https://github.com/raomin/ESPAltherma) firmware, wrapped in the browser-install
-/ captive-portal / OTA / CI toolchain of
-[tesla-key-esp32](https://github.com/0Bu/tesla-key-esp32). Full protocol, API and value model:
-[docs/README.md](docs/README.md).
+Full protocol, API and value model: [docs/README.md](docs/README.md).
 
 ---
 
@@ -46,7 +42,7 @@ those are set on the device in the next steps.
 
 ## Step 2 — Connect to WiFi (captive portal)
 
-1. On your phone/laptop, join the device's WiFi network **`daikin-altherma-setup`**.
+1. On your phone/laptop, join the device's WiFi network **`daikin-altherma-esp32-setup`**.
 2. The setup page opens automatically (captive portal). If not, browse to `http://192.168.4.1`.
 3. Pick your WiFi network from the scan list, enter the password, save. The device reboots and
    joins your network. The setup network reappears any time no WiFi is configured, so you can
@@ -56,7 +52,7 @@ those are set on the device in the next steps.
 
 ## Step 3 — Open the web UI
 
-`http://daikin-altherma.local` (or the device IP from your router).
+`http://daikin-altherma-esp32.local` (or the device IP from your router).
 
 The dashboard shows connection health (WiFi, MQTT), the live decoded values once the heat pump
 is wired, and the **Setup** panel where everything below is configured.
@@ -65,7 +61,7 @@ is wired, and the **Setup** panel where everything below is configured.
 
 ## Step 4 — Configure your Daikin unit and pins
 
-This is the part that replaces editing `setup.h` + a `def/*.h` file in classic ESPAltherma —
+This is the part that replaces hand-editing a config header + a `def/*.h` model file —
 here it is all in the **Setup → Heat pump** panel:
 
 1. **Select your model.** Choose your **indoor unit**, **outdoor unit** and **DHW tank** from
@@ -107,8 +103,7 @@ Within one poll interval the decoded values appear in the web UI and — if MQTT
 Assistant. *A dead X10A cable is the single most common fault; if you see CRC/timeout errors in
 the log, re-seat or replace the cable and confirm GND first.*
 
-The X10A serial line is 5 V TTL and the ESP32 is 3.3 V. In practice a direct connection works
-(as with classic ESPAltherma), but a level shifter on the HP-TX → ESP-RX line is the safe
+The X10A serial line is 5 V TTL and the ESP32 is 3.3 V. In practice a direct connection works, but a level shifter on the HP-TX → ESP-RX line is the safe
 option. See [docs/README.md → Voltage](docs/README.md#voltage-and-wiring).
 
 ---
@@ -134,10 +129,10 @@ A COP (coefficient of performance) template and other derived sensors are docume
 ## Notes
 
 - Keep the device on permanent power near the indoor unit (USB charger, or the X10A 5 V pin).
-- **Updates are over-the-air:** open `http://daikin-altherma.local`, tap the firmware version,
+- **Updates are over-the-air:** open `http://daikin-altherma-esp32.local`, tap the firmware version,
   confirm — the device updates itself and reboots. WiFi, MQTT and your model/pin config are
   preserved. The web installer is only needed for the first install or to recover a device.
-- **Optional heat-pump control.** Like ESPAltherma, the firmware can drive a relay wired as an
+- **Optional heat-pump control.** The firmware can optionally drive a relay wired as an
   *external on/off thermostat* and expose the SG-Ready smart-grid contacts — both configured in
   the UI and off by default. It **cannot** change the heat pump's internal settings (the X10A
   protocol is read-oriented). See [docs/README.md → Control](docs/README.md#optional-control).
@@ -151,8 +146,8 @@ A COP (coefficient of performance) template and other derived sensors are docume
 | Symptom | Fix |
 |---------|-----|
 | Installer shows no serial port | Chrome/Edge desktop, use a **data** USB cable; on a classic ESP32 hold **BOOT** while plugging in. |
-| `daikin-altherma.local` won't load | Use the device IP from your router. |
-| Need to change WiFi | The `daikin-altherma-setup` network reappears whenever no WiFi is configured — rejoin it. |
+| `daikin-altherma-esp32.local` won't load | Use the device IP from your router. |
+| Need to change WiFi | The `daikin-altherma-esp32-setup` network reappears whenever no WiFi is configured — rejoin it. |
 | Log shows `Timeout` / `Wrong CRC` | X10A cable or GND fault (most common). Re-seat/replace the cable; confirm GND; check RX/TX pins in Setup. |
 | Log shows `0x15 0xEA` from the HP | The unit speaks the older **S** protocol — switch protocol to `S` in Setup. |
 | A value always reads 0 / blank | That register isn't implemented on your unit, or the wrong model profile is selected — pick the closest, or deselect the value. |
@@ -167,8 +162,6 @@ A COP (coefficient of performance) template and other derived sensors are docume
   **[ESPAltherma](https://github.com/raomin/ESPAltherma)** by raomin (MIT) — the reverse
   engineering and register maps are theirs. This project re-homes that work on ESP-IDF with a
   browser installer, a full web-UI configuration flow, OTA and CI.
-- Project scaffolding, web installer, captive portal, MQTT/HA bridge, OTA and CI structure are
-  adapted from **[tesla-key-esp32](https://github.com/0Bu/tesla-key-esp32)**.
 - Licensed under the **MIT License** ([LICENSE](LICENSE)), matching ESPAltherma.
 - Use entirely at your own risk. Interacting with your heat pump's service port is as safe as
   serial monitoring gets, but there is no warranty. Daikin, Altherma, ROTEX and HOVAL are

@@ -1,7 +1,7 @@
 #pragma once
 // Shared split-map for the HTTP handlers registered on the server created in http_server.cpp.
 // Each translation unit registers its own routes so the handlers stay grouped by concern while
-// sharing one server + one OOM guard. (Ported split from tesla-key-esp32/http_handlers.hpp.)
+// sharing one server + one OOM guard.
 #include "esp_http_server.h"
 
 namespace daik {

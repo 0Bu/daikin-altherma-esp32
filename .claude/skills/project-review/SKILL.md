@@ -18,7 +18,7 @@ A holistic pass before a PR merges. Not a linter — it checks the things that r
    and `scripts/run-mock-tests.sh` passes. No decode/config logic buried in a device-only `.cpp`.
 4. **Multi-target.** Any pin default, sdkconfig, or partition change considered for all four
    targets (esp32/s3/c3/c6). The classic esp32 uses UART0 console + needs ECO3 for signed OTA.
-5. **Provenance.** Protocol/value changes match ESPAltherma; scaffolding changes match the
-   tesla-key-esp32 pattern. Generated `def/*` came from `tools/gen_defs.py`, not hand-edits.
+5. **Generated data.** Generated `def/*` came from `tools/gen_defs.py`, not hand-edits; and
+   value/CRC/converter changes are verified against known-good reference outputs.
 
 Report findings grouped by the above; block on doc drift and untested logic.

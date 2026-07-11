@@ -22,7 +22,7 @@
 <div class="card">
   <h1>Connect to WiFi</h1>
   <p class="sub">Pick your network so the device can join it. It will reboot and then be
-     reachable at <b>daikin-altherma.local</b>.</p>
+     reachable at <b>daikin-altherma-esp32.local</b>.</p>
   <form id="f">
     <label>Network
       <select name="ssid" id="ssid" required><option value="">Scanning…</option></select>
@@ -48,7 +48,7 @@
     try {
       await fetch("/set_wifi", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ssid: f.get("ssid"), pass: f.get("pass") }) });
-      el("msg").textContent = "Saved. Rebooting — reconnect to your WiFi, then open daikin-altherma.local";
+      el("msg").textContent = "Saved. Rebooting — reconnect to your WiFi, then open daikin-altherma-esp32.local";
     } catch { el("msg").textContent = "Failed — try again."; }
   });
 </script>

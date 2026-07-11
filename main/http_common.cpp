@@ -4,7 +4,7 @@
 // contiguous free block). A handler that builds a big response should wrap it in a try/catch and
 // return 503 on std::bad_alloc rather than letting an uncaught throw unwind through C frames to
 // std::terminate -> abort() -> reboot. Stream large output (e.g. /diag) instead of one big
-// std::string. (Same rule as tesla-key-esp32; see docs/ARCHITECTURE.md → Memory constraints.)
+// std::string. (See docs/ARCHITECTURE.md → Memory constraints.)
 #include "http_handlers.hpp"
 
 namespace daik {

@@ -1,6 +1,6 @@
 # Target is selected per build: `idf.py set-target <esp32|esp32s3|esp32c3|esp32c6>`.
 # Intentionally NOT pinned here so the one source tree builds for every supported target;
-# CI builds all of them. No BLE is used (unlike tesla-key-esp32), so any WiFi-capable ESP32
+# CI builds all of them. No BLE is used, so any WiFi-capable ESP32
 # with >=4 MB flash is a valid target.
 
 # Flash. 4 MB is the smallest supported part, so it sizes the partition table
@@ -79,7 +79,7 @@ CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
 CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA=n
 
 # C++ exceptions — HTTP handlers run under a try/catch OOM guard (503 instead of crash), the
-# same memory discipline as tesla-key-esp32.
+# same memory discipline.
 CONFIG_COMPILER_CXX_EXCEPTIONS=y
 
 # PSRAM (uncomment if your board has it; not required)

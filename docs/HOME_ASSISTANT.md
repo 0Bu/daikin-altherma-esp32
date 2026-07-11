@@ -13,7 +13,7 @@ integration enabled, the device and its sensors appear on their own. Clear the b
 ## Topics
 
 Node id is `daikin_<mac3>` (from the WiFi STA MAC, stable across config changes). `<base>`
-defaults to `daikin-altherma`, `<prefix>` to `homeassistant`.
+defaults to `daikin-altherma-esp32`, `<prefix>` to `homeassistant`.
 
 ```
 <base>/<node>/availability                         online | offline   (LWT, retained)
@@ -60,7 +60,7 @@ template:
 ```
 
 > The names above follow the sample `altherma3_r_erga` profile (English labels). If you picked a
-> different model or language, open `http://daikin-altherma.local/values` to see the exact labels,
+> different model or language, open `http://daikin-altherma-esp32.local/values` to see the exact labels,
 > then map them to the HA entity ids (HA slugs the discovery `name`).
 
 A COP that is wildly off usually means the wrong model profile (mismatched flow/temperature

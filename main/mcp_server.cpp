@@ -1,7 +1,7 @@
 // /mcp — Model Context Protocol server for AI agents (Streamable HTTP, stateless JSON-RPC 2.0;
 // GET -> 405, no SSE). Read-only tools mirror the read-only nature of the device: get_status and
-// get_hp_values (never controls the heat pump). Ported in shape from tesla-key-esp32/
-// mcp_server.cpp; the JSON-RPC core belongs in logic/mcp.hpp (host-tested) once fleshed out.
+// get_hp_values (never controls the heat pump). The JSON-RPC core belongs in logic/mcp.hpp
+// (host-tested) once fleshed out.
 #include "http_handlers.hpp"
 #include "esp_http_server.h"
 

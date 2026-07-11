@@ -47,9 +47,9 @@
   <div class="card">
     <h2 style="font-size:16px;margin-top:0">After flashing</h2>
     <ol>
-      <li>Join the device's <code>daikin-altherma-setup</code> WiFi network; the setup page opens
+      <li>Join the device's <code>daikin-altherma-esp32-setup</code> WiFi network; the setup page opens
           automatically (else <code>http://192.168.4.1</code>). Enter your WiFi, save — it reboots.</li>
-      <li>Open <code>http://daikin-altherma.local</code>. Under <b>Setup → Heat pump</b> pick your
+      <li>Open <code>http://daikin-altherma-esp32.local</code>. Under <b>Setup → Heat pump</b> pick your
           indoor / outdoor / tank model and the RX/TX pins you wired to X10A.</li>
       <li>Under <b>Setup → MQTT</b> enter your broker for Home Assistant auto-discovery.</li>
       <li>Wire the ESP to the heat pump's X10A port (power off first — see the guide).</li>
@@ -60,8 +60,8 @@
   </div>
 
   <footer>
-    Ports <a href="https://github.com/raomin/ESPAltherma">ESPAltherma</a> onto ESP-IDF with a
-    browser installer + OTA. MIT. Not affiliated with Daikin.
+    Open-source Daikin Altherma monitor on ESP-IDF with a browser installer + OTA. MIT.
+    Not affiliated with Daikin.
   </footer>
 </main>
 

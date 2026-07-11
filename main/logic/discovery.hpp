@@ -8,7 +8,7 @@
 
 namespace daik {
 
-// HA object_id: lowercase, alnum-only, spaces/others -> '_' (ESPAltherma's label->entity rule).
+// HA object_id: lowercase, alnum-only, spaces/others -> '_'.
 inline std::string object_id(const char* label) {
     std::string o;
     for (const char* p = label; *p; ++p) {
@@ -41,7 +41,7 @@ inline std::string discovery_config(const std::string& node, const std::string& 
     if (!unit.empty()) { j += "\"unit_of_meas\":\""; j += unit; j += "\","; }
     if (!dc.empty())   { j += "\"dev_cla\":\"";      j += dc;   j += "\","; j += "\"stat_cla\":\"measurement\","; }
     j += "\"dev\":{\"ids\":[\""; j += node; j += "\"],\"name\":\"Daikin Altherma\",";
-    j += "\"mf\":\"Daikin\",\"mdl\":\"Altherma (ESPAltherma)\"}";
+    j += "\"mf\":\"Daikin\",\"mdl\":\"Altherma\"}";
     j += "}";
     return j;
 }

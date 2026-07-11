@@ -11,7 +11,7 @@
 namespace daik::def {
 
 // Minimal generic fallback: a few near-universal registers so an unknown unit still reports
-// something. Real "generic" profile is generated from ESPAltherma DEFAULT.h.
+// something. The real "generic" profile is generated from the default value-definition source.
 inline constexpr ValueDef generic[] = {
     {0x10, 0, 217, 1, -1, "Operation Mode"},
     {0x20, 0, 105, 2,  1, "Outdoor Air Temp (R1T)"},

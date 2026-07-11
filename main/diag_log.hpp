@@ -1,7 +1,7 @@
 #pragma once
 // In-RAM diagnostic log ring, served by GET /diag (plain text). A static .bss buffer — never a
 // growing std::string — so it can't fragment the heap. verbose=1 also captures raw X10A RX
-// frames. Ported from tesla-key-esp32/diag_log.cpp.
+// frames.
 #include <cstddef>
 
 namespace daik {

@@ -1,5 +1,5 @@
 // Home Assistant MQTT-Discovery bridge. See mqtt_ha.hpp and docs/ARCHITECTURE.md → MQTT bridge.
-// The esp-mqtt client + streamed discovery is a TODO port from tesla-key-esp32/mqtt_ha.cpp; the
+// The esp-mqtt client + streamed discovery is a TODO; the
 // discovery payload builder itself is the host-tested logic/discovery.hpp. No-op if mqtt_uri
 // empty.
 #include "mqtt_ha.hpp"

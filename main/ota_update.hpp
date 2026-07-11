@@ -2,8 +2,7 @@
 // Pull-based signed OTA (esp_https_ota). check -> compare manifest version -> download the
 // per-target daikin-altherma-esp32<suffix>.bin into the inactive slot -> reboot. Downgrade gate
 // (refuse a not-strictly-newer image), image-signature verification, and a ~90 s health gate
-// that keeps rollback armed until the new image proves healthy. Ported from
-// tesla-key-esp32/ota_update.cpp. See docs/ARCHITECTURE.md → OTA and docs/SECURITY.md.
+// that keeps rollback armed until the new image proves healthy. See docs/ARCHITECTURE.md → OTA and docs/SECURITY.md.
 #include <cstdint>
 #include <string>
 
