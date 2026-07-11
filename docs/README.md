@@ -1,6 +1,6 @@
 # daikin-altherma-esp32 — Technical Reference
 
-ESP-IDF firmware that reads a **Daikin Altherma** (ROTEX / HOVAL Belaria) heat pump over its
+ESP-IDF firmware that reads a **Daikin Altherma** heat pump over its
 **X10A** service port and bridges every value to Home Assistant over MQTT. Configured entirely
 at runtime from a web UI — WiFi, MQTT, the unit model, the register set, the poll interval and
 the RX/TX pins — and updated over the air. User guide: [../README.md](../README.md).
@@ -25,7 +25,7 @@ X10A is 5 V TTL; the ESP32 GPIOs are 3.3 V and not officially 5 V-tolerant. A di
 typically works in practice, but the safe option is a level shifter
 on the **HP-TX → ESP-RX** line. Whatever you do, **GND must always be common** between the ESP
 and X10A, even when the ESP is USB-powered. The X10A 5 V pin can usually power the ESP (~70 mA);
-some ROTEX units have a weak 5 V rail — power the ESP from USB then.
+if that rail is weak, power the ESP from USB instead.
 
 ---
 

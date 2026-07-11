@@ -1,7 +1,7 @@
 # daikin-altherma-esp32
 
 ESP-IDF firmware turning an ESP32 (esp32 / esp32s3 / esp32c3 / esp32c6) into a **Daikin Altherma**
-(ROTEX / HOVAL) monitor: reads the **X10A** service port (9600 8E1, protocol I/S) and bridges every
+monitor: reads the **X10A** service port (9600 8E1, protocol I/S) and bridges every
 value to Home Assistant over MQTT (auto-discovery). Browser-flashed, OTA-updated, configured
 entirely from a web UI — no cloud, no LAN adapter, no recompile.
 
@@ -10,7 +10,7 @@ architecture → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · security → [d
 
 ## Requirements
 
-- Daikin Altherma (ROTEX / HOVAL Belaria) with an **X10A** (or bi-zone **X12A**) header.
+- A Daikin Altherma with an **X10A** (or bi-zone **X12A**) header.
 - An ESP32, ≥4 MB flash — reference board **Seeed XIAO ESP32-S3**. Installer auto-detects the chip.
 - Desktop Chrome/Edge (Web Serial) for the one-time flash; 5-pin JST-EH 2.5 mm or 4 Dupont wires.
 
@@ -48,5 +48,5 @@ are not broken out on the XIAO — pins are configurable. `Timeout`/`Wrong CRC` 
 - Local-network only; no API auth/TLS — never expose to the internet ([security](docs/SECURITY.md)).
 - Heat-pump protocol, value definitions and conversions are derived from
   **[ESPAltherma](https://github.com/raomin/ESPAltherma)** (MIT). Licensed **MIT** ([LICENSE](LICENSE)).
-- Use at your own risk; no warranty. Daikin / Altherma / ROTEX / HOVAL are trademarks of their
-  owners; not affiliated.
+- Use at your own risk; no warranty. Daikin and Altherma are trademarks of their owners; not
+  affiliated.

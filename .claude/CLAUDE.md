@@ -1,6 +1,6 @@
 # daikin-altherma-esp32
 
-ESP-IDF 5.x firmware for the ESP32 family. Reads a **Daikin Altherma** (ROTEX / HOVAL) heat
+ESP-IDF 5.x firmware for the ESP32 family. Reads a **Daikin Altherma** heat
 pump over its **X10A** service port and bridges every value to **Home Assistant over MQTT**
 (auto-discovery). Everything — WiFi (captive portal), MQTT, the unit model, the register set,
 the RX/TX pins — is configured at runtime from a **web UI**; firmware is installed from a
