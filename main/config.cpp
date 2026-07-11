@@ -27,6 +27,7 @@ void config_load() {
     c.sg1_pin   = nvs_get_i32("sg1_pin", CONFIG_DAIKIN_SG1_PIN);
     c.sg2_pin   = nvs_get_i32("sg2_pin", CONFIG_DAIKIN_SG2_PIN);
     c.val_mask  = nvs_get_str("val_mask", "");
+    c.demo      = nvs_get_i32("demo", 0) != 0;
 }
 
 bool config_save(const Config& c) {
@@ -47,6 +48,7 @@ bool config_save(const Config& c) {
     ok &= nvs_set_i32("sg1_pin", c.sg1_pin);
     ok &= nvs_set_i32("sg2_pin", c.sg2_pin);
     ok &= nvs_set_str("val_mask", c.val_mask);
+    ok &= nvs_set_i32("demo", c.demo ? 1 : 0);
     if (ok) g_cfg = c;
     return ok;
 }

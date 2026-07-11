@@ -10,6 +10,7 @@
 #include "logic/config_model.hpp"
 #include "logic/convert.hpp"
 #include "logic/crc.hpp"
+#include "logic/demo.hpp"
 #include "logic/discovery.hpp"
 #include "logic/registers.hpp"
 #include "def/registry.hpp"
@@ -184,6 +185,42 @@ static void test_discovery() {
     CHECK(cfg.find("\"uniq_id\":\"daikin_abc123_dhw_tank_temp_r5t\"") != std::string::npos);
 }
 
+static void test_demo() {
+    // Demo mode fabricates raw bytes that flow through the SAME convert() path as real data; assert
+    // the readings come out plausible and self-consistent (logic/demo.hpp).
+    ValueDef oat {0x20, 0, 105, 2, 1,  "R1T-Outdoor air temp."};
+    ValueDef lw  {0x60, 9, 105, 2, 1,  "LW setpoint (main)"};
+    ValueDef tank{0x61, 10, 105, 2, 1, "DHW Tank Temp (R5T)"};
+    uint8_t b[2];
+    for (uint32_t t = 1; t < 6; t++) {
+        CHECK(demo_encode(oat, t, b) == 2);
+        CHECK(convert(oat, b).value > -20.0 && convert(oat, b).value < 20.0);   // outdoor: cold-ish
+        demo_encode(tank, t, b);
+        CHECK(convert(tank, b).value > 40.0 && convert(tank, b).value < 60.0);  // DHW: hot
+    }
+    // Outdoor air reads colder than the leaving-water setpoint at a fixed tick.
+    demo_encode(oat, 3, b); const double a = convert(oat, b).value;
+    demo_encode(lw,  3, b); const double c = convert(lw,  b).value;
+    CHECK(a < c);
+
+    // Flags/enums land on the intended "actively heating" demo state.
+    ValueDef th  {0x60, 2, 303, 1, -1, "Thermostat ON/OFF"};
+    ValueDef prot{0x60, 2, 302, 1, -1, "Freeze Protection"};
+    ValueDef om  {0x10, 0, 217, 1, -1, "Operation Mode"};
+    demo_encode(th,   1, b); CHECK(std::string(convert(th,   b).text) == "ON");
+    demo_encode(prot, 1, b); CHECK(std::string(convert(prot, b).text) == "OFF");
+    demo_encode(om,   1, b); CHECK(std::string(convert(om,   b).text) == "Heating");
+
+    // Current stays in a believable amp range.
+    ValueDef ct{0x21, 0, 105, 2, -1, "INV primary current (A)"};
+    demo_encode(ct, 2, b);
+    CHECK(convert(ct, b).value > 1.0 && convert(ct, b).value < 8.0);
+
+    // A converter demo doesn't fabricate -> 0 bytes, so the value is simply skipped.
+    ValueDef unk{0x00, 0, 998, 1, -1, "x"};
+    CHECK(demo_encode(unk, 1, b) == 0);
+}
+
 static void test_registry() {
     CHECK(std::string(def::lookup("altherma3_r_erga").id) == "altherma3_r_erga");
     CHECK(def::lookup("altherma3_r_erga").count > 10);
@@ -196,6 +233,7 @@ int main() {
     test_convert();
     test_config_model();
     test_discovery();
+    test_demo();
     test_registry();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }
     std::printf("%d logic test(s) FAILED\n", g_failures);

@@ -87,7 +87,9 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge (streamed discovery; TODO esp-mqtt clie
 ota_update.cpp  pull-based signed OTA + rollback health gate (check/download: TODO)
 control.cpp     optional thermostat + SG-Ready relays (off unless pins set)
 diag_log.cpp    in-RAM diag ring served by GET /diag
-logic/          IDF-free, host-tested pure headers (crc, convert, registers, config_model, discovery)
+logic/          IDF-free, host-tested pure headers (crc, convert, registers, config_model,
+                discovery, demo). demo.hpp fabricates plausible readings for the demo-mode toggle;
+                the poll engine feeds them through the SAME convert/format path as real data.
 def/            embedded per-model value profiles + registry + models_catalog.hpp (GET /models
                 JSON). Profiles are machine-generated in the ValueDef row format from the X10A
                 value definitions (docs/REGISTERS.md); tools/gen_defs.py imports classic .h-row files
@@ -98,7 +100,7 @@ www/            web UI sources (index.html + style.css + app.js -> one gzipped p
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `wifi_ssid`/`wifi_pass`, `mqtt_uri`/`mqtt_user`/`mqtt_pass`, `hostname`, `profile`, `lang`, `proto` (I/S), `rx_pin`/`tx_pin`, `poll_s`, `val_mask`, `therm_pin`/`sg1_pin`/`sg2_pin` |
+| `daik_cfg` | `wifi_ssid`/`wifi_pass`, `mqtt_uri`/`mqtt_user`/`mqtt_pass`, `hostname`, `profile`, `lang`, `proto` (I/S), `rx_pin`/`tx_pin`, `poll_s`, `val_mask`, `therm_pin`/`sg1_pin`/`sg2_pin`, `demo` (0/1) |
 
 `nvs` at `0x9000` is untouched by OTA (partitions.csv) so config survives upgrades. Keep its
 offset/size stable across versions.
@@ -108,7 +110,7 @@ offset/size stable across versions.
 ```
 GET  /            embedded web UI (gzipped into the app binary)
 GET  /status      version, platform, wifi, mqtt, hp{proto,rx,tx,poll_s,connected,last_ok_s,
-                  registers,values,crc_err,timeout_err}, profile
+                  registers,values,crc_err,timeout_err,demo}, profile
 GET  /values      decoded readings [{label,value,unit}]
 GET  /models      model catalog: model list -> profile_map -> profile id, value menu, pin hint
                   (served from def/models_catalog.hpp; UI picks the model in the outdoor dropdown)
@@ -116,7 +118,7 @@ GET  /diag[?verbose=0|1][?clear=1]   in-memory diag log
 GET  /scan        WiFi scan (setup)
 POST /set_wifi    {ssid,pass} -> persist + reboot
 POST /set_mqtt    {broker,user,pass} -> persist + reboot ("" disables)
-POST /set_hp      {profile,lang,proto,rx,tx,poll_s,values[]} -> validate + apply live (no reboot)
+POST /set_hp      {profile,lang,proto,rx,tx,poll_s,demo,values[]} -> validate + apply live (no reboot)
 POST /set_relays  {therm_pin,sg1_pin,sg2_pin} -> optional control pins
 GET  /api/proxy/1/version   {version, platform}
 GET  /ota/check   POST /ota/update   GET /ota/status

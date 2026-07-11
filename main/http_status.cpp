@@ -48,7 +48,8 @@ static esp_err_t h_status(httpd_req_t* req) {
          ",\"registers\":" + std::to_string(hp.registers) +
          ",\"values\":" + std::to_string(hp.values) +
          ",\"crc_err\":" + std::to_string(hp.crc_err) +
-         ",\"timeout_err\":" + std::to_string(hp.timeout_err) + "},";
+         ",\"timeout_err\":" + std::to_string(hp.timeout_err) +
+         ",\"demo\":" + (c.demo ? "true" : "false") + "},";
     j += "\"profile\":{\"id\":" + jstr(c.profile) + ",\"lang\":" + jstr(c.lang) + "}";
     j += "}";
     return http_send_json(req, j.c_str());
