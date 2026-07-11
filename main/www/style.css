@@ -1,11 +1,13 @@
 :root {
+  /* Daikin brand: cyan-blue #0097e0 with a deep navy accent */
   --bg: #f4f5f7; --card: #fff; --fg: #1c2530; --muted: #6b7480;
-  --line: #e2e5ea; --accent: #0a6cff; --ok: #1a9d5a; --warn: #c9740a; --err: #d23b3b;
+  --line: #e2e5ea; --accent: #0097e0; --navy: #12235f;
+  --ok: #1a9d5a; --warn: #c9740a; --err: #d23b3b;
   --radius: 12px;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg:#12151a; --card:#1b1f27; --fg:#e6e9ee; --muted:#93a0af;
-          --line:#2a2f39; --accent:#4d9bff; }
+          --line:#2a2f39; --accent:#33abe8; --navy:#0097e0; }
 }
 * { box-sizing: border-box; }
 body {
@@ -15,9 +17,9 @@ body {
 header {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 14px 18px; position: sticky; top: 0; background: var(--bg);
-  border-bottom: 1px solid var(--line); z-index: 5;
+  border-bottom: 2px solid var(--accent); z-index: 5;
 }
-header h1 { font-size: 18px; margin: 0; font-weight: 650; }
+header h1 { font-size: 18px; margin: 0; font-weight: 650; color: var(--accent); }
 main { max-width: 720px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
 .card {
   background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
@@ -40,6 +42,9 @@ label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
 input, select {
   font: inherit; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px;
   background: var(--bg); color: var(--fg);
+}
+input:focus, select:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,151,224,.25);
 }
 .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
