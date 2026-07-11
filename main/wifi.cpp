@@ -60,6 +60,13 @@ void wifi_start_sta() {
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
     ESP_ERROR_CHECK(esp_wifi_start());
 
+    // Disable WiFi modem sleep. The IDF default is WIFI_PS_MIN_MODEM: the radio sleeps between
+    // DTIM beacons and only wakes at the DTIM interval to pull buffered downlink packets, which
+    // adds ~100-300 ms (and, with TCP retransmits, occasionally seconds) of non-deterministic
+    // latency to every inbound request — the HTTP UI then "sometimes takes very long to answer".
+    // This is a mains-powered bridge, so we trade the small idle-power saving for a responsive UI.
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+
     // Wait up to 30 s for the first IP; on failure the caller could fall back to the portal.
     xEventGroupWaitBits(s_events, CONNECTED_BIT, pdFALSE, pdTRUE, pdMS_TO_TICKS(30000));
     start_mdns();
