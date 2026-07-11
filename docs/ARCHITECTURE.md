@@ -1,0 +1,207 @@
+# Architecture reference
+
+Deep internal reference for daikin-altherma-esp32. This is the **on-demand** companion to
+[`.claude/CLAUDE.md`](../.claude/CLAUDE.md): CLAUDE.md carries the always-needed essentials
+(build/flash, component map, NVS table, HTTP API, memory constraints); the full narrative lives
+here so it isn't reloaded into every session. Read it when working on the poll engine, the value
+model, the MQTT bridge, WiFi/LAN connectivity, or OTA. Keep both in sync — the `project-review`
+skill checks for drift.
+
+## Provenance (two upstreams, cleanly separated)
+
+This firmware is the intersection of two projects:
+
+- **[ESPAltherma](https://github.com/raomin/ESPAltherma)** (Arduino, MIT) — the *domain*: the
+  X10A protocol (I and S), the register/CRC framing, the value-definition tables (`def/*`) and
+  the converter functions (`converters.h`). This is reverse-engineered knowledge we port
+  **byte-for-byte** so readings match a known-good implementation.
+- **[tesla-key-esp32](https://github.com/0Bu/tesla-key-esp32)** (ESP-IDF, AGPL) — the *chassis*:
+  the ESP-IDF/CMake multi-target build, the web installer, the captive-portal provisioning, the
+  MQTT/HA discovery bridge, signed OTA, the `main/logic/` host-test split, and the whole CI /
+  Claude-Code developer setup. We keep the **shape**, swap the payload.
+
+The rule: anything about *talking to the heat pump* comes from ESPAltherma; anything about
+*getting firmware onto a board, configuring it from a browser, and shipping it* comes from
+tesla-key-esp32. Where the two disagree (Arduino `String`/`Serial` vs IDF `esp_http_server`/
+`uart_driver`), the IDF idiom wins.
+
+## Component map
+
+```
+main.cpp            → boot: NVS init, WiFi (STA or setup AP), start HTTP server, start
+                       poll engine + MQTT bridge, arm OTA health gate
+hp_comm.cpp/.hpp    → X10A UART transport: request framing for protocol I and S, 9600 8E1,
+                       CRC (ported from ESPAltherma comm.h), timeout handling
+hp_registers.cpp    → per-register request/response layout, register→value extraction
+hp_convert.cpp/.hpp → converter functions (ported from ESPAltherma converters.h): raw bytes →
+                       typed reading (temp, int, fixed-point, enum/label, on/off, pressure)
+hp_poll.cpp/.hpp    → poll engine task: builds the active register set from the profile+mask,
+                       polls each interval, fills the thread-safe value cache, drives errors
+def/*.hpp           → embedded value-definition profiles (generated from ESPAltherma def/*),
+                       incl. localized label sets; def/registry.hpp maps model→profile
+config.cpp/.hpp     → NVS-backed runtime config (daik_cfg); load/save, defaults from Kconfig
+nvs_storage.cpp     → thin NVS helpers (namespaces, blobs, migration)
+http_server.cpp     → esp_http_server :80, wildcard dispatch + handle_all OOM try/catch (503)
+http_status.cpp     → GET / (web UI), /status, /values, /models, /diag
+http_config.cpp     → POST /set_wifi, /set_mqtt, /set_hp, /set_relays
+http_ota.cpp        → /ota/check|update|status
+mcp_server.cpp      → /mcp — read-only MCP tools (get_status, get_hp_values) for AI agents
+provisioning.cpp    → captive setup portal (SoftAP daikin-altherma-setup) when no WiFi
+mqtt_ha.cpp/.hpp    → Home Assistant MQTT-Discovery bridge (streamed discovery), read-only
+ota_update.cpp      → pull-based signed OTA (esp_https_ota), downgrade gate, health gate
+control.cpp         → optional on/off thermostat + SG-Ready relays (off by default)
+diag_log.cpp        → in-RAM console ring served by GET /diag (static .bss buffer)
+www/                → web UI sources: index.html + style.css + app.js, spliced into ONE
+                     self-contained page at build time (inline_assets.cmake) and served gzipped;
+                     setup.html is the captive-portal page (gzipped separately)
+logic/              → IDF-free, host-tested pure logic (see below)
+```
+
+## The host-tested logic core (`main/logic/`)
+
+Following tesla-key's model: everything that is pure computation lives in IDF-free headers under
+`main/logic/`, so `scripts/run-mock-tests.sh` compiles + runs it with plain g++/clang++ (no
+ESP-IDF, no board) and CI gates the firmware build on it (`logic-test` job). For this project the
+host-testable core is unusually large and valuable, because the risky parts are all pure decoding:
+
+- `logic/crc.hpp` — the X10A checksum for protocol I and S. Golden-vector tested against frames
+  captured from a real unit.
+- `logic/convert.hpp` — every converter (raw bytes → typed value). This is where a wrong sign,
+  scale or endianness would silently corrupt a reading; unit-tested per converter id against the
+  ESPAltherma reference outputs.
+- `logic/registers.hpp` — register-buffer parsing (offset/size extraction, bounds).
+- `logic/config_model.hpp` — validation of pins (no overlap, in range for the target), interval
+  clamps, protocol enum, profile/value-mask (de)serialization.
+- `logic/discovery.hpp` — the HA MQTT-Discovery payload builder (topic + config JSON per value),
+  so the exact bytes HA receives are asserted on the host, not on the device.
+
+`hp_convert.cpp`, `hp_comm.cpp`, `config.cpp`, `mqtt_ha.cpp` are thin device wrappers that call
+these headers. Add new decode/format logic to `main/logic/` and a `CHECK` in
+`test/test_logic.cpp` — never bury it in a `.cpp` that only the device can run.
+
+## Value-definition profiles (runtime-selectable models)
+
+The single biggest UX change from ESPAltherma: **no editing `setup.h` + a `def/*.h`.**
+
+- ESPAltherma's `def/*` files are C arrays of `LabelDef{registryID, offset, convId, dataSize,
+  dataType, label}`. A generator (`tools/gen_defs.py`) converts each into an embedded, `const`
+  profile table in `main/def/<profile>.hpp`, plus a `def/registry.hpp` index that maps
+  `(indoor, outdoor, tank)` selections and localized label sets to a **profile id**.
+- At runtime `config` holds the active `profile` id + a `val_mask` (which of the profile's values
+  are enabled) + `lang`. The poll engine expands this to the concrete register set to request.
+- The `/models` endpoint serves the catalog (indoor/outdoor/tank option lists, value menu per
+  profile) so the web UI can render the selector without hard-coding it in JS.
+- Flash cost is bounded by embedding **only the value tables** (a few hundred rows × families),
+  not the whole ESPAltherma tree; labels are stored once per language and shared. If size ever
+  pressures the 4 MB layout, profiles can move to a data partition — the indirection through
+  `def/registry.hpp` makes that a non-breaking change.
+
+Porting fidelity is enforced on the host: `test/test_defs.cpp` checks a sampling of profile rows
+against the ESPAltherma source so a regenerate can't silently drift.
+
+## The poll engine (`hp_poll.cpp`)
+
+A single task owns the X10A UART (there is exactly one link, like ESPAltherma). Each cycle:
+
+1. Build the ordered list of **registers** needed by the enabled values (dedup — one register
+   read serves all its values).
+2. For each register: send the protocol-`I`/`S` request, read the fixed-length reply with a
+   `SER_TIMEOUT`, CRC-check it. On timeout/CRC error, record it (`crc_err`/`timeout_err`,
+   `last_error`) and continue — one bad register never stalls the whole cycle.
+3. Extract each enabled value from its register buffer via `(offset,size)` and convert it via its
+   `convId`. Write results into the **thread-safe value cache** under a mutex.
+4. Sleep `poll_s`. The MQTT bridge and HTTP `/values` read the cache; they never touch the UART.
+
+Config changes from the web UI (`/set_hp`) apply live: the task rereads `config` at the top of the
+next cycle (pins/protocol changes re-init the UART). No reboot needed for model/values/pins/
+interval — only WiFi/MQTT changes reboot (they re-init network stacks).
+
+## WiFi / LAN connectivity (reconnect + watchdog)
+
+Ported wholesale from tesla-key's `main.cpp` — the same failure modes exist here:
+
+- **Event-driven reconnect** on every `WIFI_EVENT_STA_DISCONNECTED`. First-ever connect keeps a
+  bounded budget then falls back to the **setup portal** (credentials presumed wrong); once the
+  device has held an IP at least once, later drops reconnect **forever** (known-good creds — never
+  strand the device on a transient AP/router outage).
+- **Connectivity watchdog** (~30 s) ICMP-echoes the gateway to catch a missed-deauth "ghost"
+  association (stack thinks it's up, forwards nothing). After 2 consecutive failures it forces one
+  `esp_wifi_disconnect()` so the endless-retry handler reconnects. Guarded to act only on a
+  believed-up link and only if the gateway has answered at least once; it **never reboots** (a
+  reboot during an AP outage would drop into the setup portal and abandon good credentials).
+
+## Home Assistant MQTT bridge (`mqtt_ha.cpp`)
+
+Same design as tesla-key's bridge, retargeted to Daikin values:
+
+- **Read-only** — no command topics (the optional control relays publish their own separate
+  `sg/…` and switch topics via `control.cpp`, not this bridge).
+- **Node id** `daikin_<mac3>` (WiFi STA MAC, stable across config changes).
+- **Discovery is streamed.** A full Altherma value set can be 30–40+ entities and >10 KB of
+  discovery JSON; the bridge emits one entity's discovery config at a time (retained) so it never
+  needs one large contiguous heap block — the same memory discipline as the rest of the firmware.
+  State is one retained JSON on `<base>/<node>/state` (or per-value topics if configured).
+- **Units + device_class** are derived from the converter id, so temperatures get `°C` +
+  `temperature`, currents `A` + `current`, etc., and HA renders them correctly with history.
+- **TLS default-on with credentials** (mqtts, CA-verified, no silent plaintext fallback), reason
+  in `/status.mqtt`.
+
+## OTA, signing, partitions, multi-target
+
+Unchanged from tesla-key-esp32 except the artifact name and the target list:
+
+- **Targets** esp32 / esp32s3 / esp32c3 / esp32c6 from one source tree; CI builds all
+  (`scripts/ci-build-all.sh`). No tesla-ble dependency here, so there is **no** esp32c5
+  local-patch dance and no per-board BLE constraint — the target set is just "WiFi ESP32s with
+  ≥4 MB flash". Per-target deltas are config-only (`idf.py set-target`, native USB-Serial/JTAG
+  console on s3/c3/c6, UART0 on the classic esp32).
+- **Dual-OTA `partitions.csv`** sized to fill 4 MB; app at `0x20000`; `nvs` at `0x9000` untouched
+  by OTA so WiFi + model config survive upgrades.
+- **Signed OTA** (Secure Boot v2 RSA-3072 *without* hardware Secure Boot): running app verifies
+  the signature before installing; downgrade gate + ~90 s health gate as above. Web installer
+  publishes per-chip merged bins + a single `manifest.json` (esp-web-tools auto-selects by chip).
+- **PR preview installer**: every same-repo PR publishes a signed preview at
+  `…/PR/<N>/` on the `gh-pages` branch (fork PRs get no signing key → no preview). OTA always
+  checks against **main**.
+
+## Web UI config flow
+
+`www/` is split for edit locality (index.html markup + style.css + app.js) and spliced into ONE
+self-contained, pre-gzipped page at build time (`inline_assets.cmake`) — identical mechanism to
+tesla-key. The UI's Setup panel drives the config endpoints:
+
+- **WiFi** → `/set_wifi` (also reachable from the captive `setup.html` before WiFi exists).
+- **MQTT** → `/set_mqtt`.
+- **Heat pump** → `/set_hp`: model selection (indoor/outdoor/tank → profile), language, protocol
+  `I`/`S`, RX/TX pins (with a per-board pin hint fetched from `/models` + platform), poll
+  interval, and the per-value enable checkboxes.
+- **Control** (optional) → `/set_relays`: thermostat + SG pins.
+
+The board/platform is read from `/api/proxy/1/version` so the pin hints match the running chip
+(e.g. the XIAO ESP32-S3 pad→GPIO map).
+
+## Memory constraints
+
+Same discipline as tesla-key (WiFi + MQTT + TLS dominate the heap; the binding limit is the
+largest *contiguous* free block): keep every HTTP handler under the `handle_all` try/catch (503 on
+OOM), stream `/diag` and the MQTT discovery instead of building one big `std::string`, and treat
+any new large contiguous allocation (big JSON, OTA TLS) as a crash risk to size-check. A reboot
+loop is bad here too — it stops the poll cycle and drops MQTT availability.
+
+## ESPAltherma → ESP-IDF porting map
+
+| ESPAltherma (Arduino) | Here (ESP-IDF) |
+|---|---|
+| `src/setup.h` compile-time config | NVS `daik_cfg` + web UI + `Kconfig.projbuild` defaults |
+| `include/def/*.h` (compiled arrays) | `main/def/*.hpp` embedded profiles + `def/registry.hpp` |
+| `include/converters.h` | `main/logic/convert.hpp` (host-tested) + `hp_convert.cpp` |
+| `include/comm.h` (CRC, framing) | `main/logic/crc.hpp` + `hp_comm.cpp` (protocol I/S) |
+| `HardwareSerial MySerial(1)` | ESP-IDF `uart_driver` on `rx_pin`/`tx_pin` |
+| `src/homeassistant.cpp` (HA discovery) | `mqtt_ha.cpp` + `logic/discovery.hpp` (streamed) |
+| `include/mqtt.h` (PubSubClient) | ESP-IDF `esp-mqtt` client |
+| Serial `mqttSerial` logging | `diag_log.cpp` ring + `/diag` |
+| PlatformIO `platformio.ini` | ESP-IDF `CMakeLists.txt` + `idf-docker.sh` + CI |
+| manual USB flash | web installer + signed OTA |
+
+Anything not in this table (WiFi reconnect/watchdog, provisioning captive portal, OTA, MCP, the
+`logic/` host tests, CI, `.claude/` setup) is new, taken from tesla-key-esp32.

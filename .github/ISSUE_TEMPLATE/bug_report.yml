@@ -1,0 +1,100 @@
+name: Bug report
+description: Something in the firmware misbehaves. Give enough for Claude Code (or a human) to reproduce and fix.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. The more concrete the repro, the faster it gets fixed.
+        Note: a cloud Claude Code session can edit/review code and rely on CI, but **cannot build or USB-flash** (no Docker daemon / no USB). Real builds/flashes run on a host with the board or in CI.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What's wrong, in a sentence or two.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which component (from the architecture map in .claude/CLAUDE.md)?
+      options:
+        - X10A comm / CRC / protocol (hp_comm)
+        - Poll engine (hp_poll)
+        - Value converters / model profiles (logic/convert, def/)
+        - HTTP server / API
+        - Web UI (www/) / configuration
+        - MQTT / Home Assistant bridge
+        - WiFi / provisioning (setup portal)
+        - OTA / self-update
+        - Control relays (thermostat / SG-Ready)
+        - MCP server (/mcp)
+        - Build / CI / logic tests
+        - Docs
+        - Other / not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: targets
+    attributes:
+      label: Target chip(s) affected
+      options:
+        - All four (esp32 / esp32s3 / esp32c3 / esp32c6)
+        - esp32
+        - esp32s3 (incl. XIAO ESP32-S3)
+        - esp32c3
+        - esp32c6
+        - Unknown
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Heat pump model / profile
+      description: Indoor / outdoor / tank models, the selected profile, and protocol (I/S).
+      placeholder: "ETBH12E / ERGA04-08E / EKHWSP — profile altherma3_r_erga — proto I"
+    validations:
+      required: false
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps, curl commands, or UI actions.
+      placeholder: |
+        1. ...
+        2. curl http://daikin-altherma.local/values | jq
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: Expected vs actual
+      placeholder: |
+        Expected: ...
+        Actual: ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Firmware version / platform
+      description: From GET /api/proxy/1/version (e.g. "1.0.0 / ESP32-S3").
+    validations:
+      required: false
+  - type: textarea
+    id: diag
+    attributes:
+      label: Relevant /diag or serial log
+      description: Paste an excerpt from GET /diag (or the serial monitor). Redact your SSID.
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true

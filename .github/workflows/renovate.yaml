@@ -1,0 +1,28 @@
+name: Renovate
+on:
+  schedule:
+    - cron: '0 5 * * *'
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  renovate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: renovatebot/github-action@v40
+        with:
+          token: ${{ secrets.RENOVATE_TOKEN }}
+        env:
+          RENOVATE_PLATFORM: github
+          RENOVATE_PLATFORM_COMMIT: true
+          RENOVATE_EXTENDS: config:best-practices,helpers:pinGitHubActionDigests
+          RENOVATE_AUTODISCOVER: true
+          RENOVATE_AUTODISCOVER_FILTER: ${{ github.repository }}
+          RENOVATE_CONFIG_MIGRATION: true
+          RENOVATE_AUTOMERGE: true
+          RENOVATE_IGNORE_TESTS: false
+          RENOVATE_REBASE_WHEN: auto
+          RENOVATE_SEMANTIC_COMMITS: disabled

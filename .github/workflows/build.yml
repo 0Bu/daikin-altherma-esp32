@@ -1,0 +1,178 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:   # manual re-publish of the Pages site at the latest released version
+
+# Serialize main so the auto-incremented release version can't race; cancel superseded PR runs.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # Fast, hardware-free gate: host-side pure-logic tests (main/logic/) before the slow per-target
+  # firmware builds, so a decode/config/discovery regression fails in seconds. See test/README.md.
+  logic-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run host-side logic tests
+        run: ./scripts/run-mock-tests.sh
+
+  build:
+    needs: logic-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # tags + releases
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history + tags for versioning / change detection
+
+      - name: Compute release version
+        id: version
+        run: |
+          git fetch --tags --force
+          next="$(./scripts/next-version.sh)"
+          latest="$(git tag -l 'v*' --sort=-v:refname | head -n1 | sed 's/^v//')"
+          echo "version=$next"  >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+
+      - name: Detect firmware-relevant changes
+        id: changes
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          before="${{ github.event.before }}"
+          if [ -z "$before" ] || ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
+            changed=yes
+          elif git diff --name-only "$before" "${{ github.sha }}" \
+               | grep -qE '^(main/|CMakeLists\.txt$|sdkconfig\.defaults(\.[a-z0-9]+)?$|partitions\.csv$|version\.txt$|\.github/workflows/build\.yml$|scripts/ci-build-all\.sh$|scripts/build-pages\.sh$)'; then
+            changed=yes
+          else
+            changed=no
+          fi
+          echo "firmware=$changed" >> "$GITHUB_OUTPUT"
+
+      # Stamp the embedded firmware version (esp_app_get_description()->version) so the running
+      # image, the release tag and the manifest can never drift. version.txt is the committed
+      # FLOOR; here we overwrite it in the workspace (NOT committed) with what we publish.
+      - name: Stamp firmware version
+        id: stamp
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ steps.version.outputs.latest }}"; [ -z "$base" ] && base="${{ steps.version.outputs.version }}"
+            disp="${base}-PR-${{ github.event.pull_request.number }}"
+          elif [ "${{ steps.changes.outputs.firmware }}" = "yes" ]; then
+            disp="${{ steps.version.outputs.version }}"
+          else
+            disp="${{ steps.version.outputs.latest }}"; [ -z "$disp" ] && disp="${{ steps.version.outputs.version }}"
+          fi
+          echo "$disp" > version.txt
+          echo "disp=$disp" >> "$GITHUB_OUTPUT"
+
+      # Materialize the offline OTA signing key from the OTA_SIGNING_KEY secret (RSA-3072 PEM).
+      # Main publish w/o secret -> hard error (never publish unsigned to OTA). Fork PR w/o secret
+      # -> warn + build unsigned (compile check only, no preview). See docs/SECURITY.md.
+      - name: Provision OTA signing key
+        id: signkey
+        if: >-
+          ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')
+          || github.event_name == 'pull_request'
+        env:
+          OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
+        run: |
+          if [ -z "$OTA_SIGNING_KEY" ]; then
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "signed=false" >> "$GITHUB_OUTPUT"
+              echo "::warning::No OTA_SIGNING_KEY (fork PR?) — building UNSIGNED; no PR preview published."
+              exit 0
+            fi
+            echo "::error::Refusing to publish UNSIGNED firmware — set the OTA_SIGNING_KEY secret (docs/SECURITY.md)." >&2
+            exit 1
+          fi
+          printf '%s\n' "$OTA_SIGNING_KEY" > ota_signing_key.pem
+          chmod 600 ota_signing_key.pem
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build all targets (ESP-IDF v5.5.4)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.4
+          target: esp32
+          # ci-build-all.sh set-targets each of esp32 / esp32s3 / esp32c3 / esp32c6 in turn and
+          # stages per-target signed + merged bins + manifest.json into dist/. ONE source tree ->
+          # N images; the installer auto-selects by chip; OTA pulls daikin-altherma-esp32<sfx>.bin.
+          command: ./scripts/ci-build-all.sh "${{ steps.version.outputs.version }}"
+
+      - name: Shred OTA signing key
+        if: always()
+        run: rm -f ota_signing_key.pem
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: >-
+            ${{ github.event_name == 'pull_request'
+                && format('daikin-altherma-esp32-pr{0}-{1}', github.event.pull_request.number, steps.version.outputs.version)
+                || format('daikin-altherma-esp32-{0}', steps.version.outputs.version) }}
+          path: dist/*.bin
+
+      # PR preview installer (signed builds only) at gh-pages PR/<N>/.
+      - name: Assemble PR preview site
+        if: github.event_name == 'pull_request' && steps.signkey.outputs.signed == 'true'
+        run: ./scripts/build-pages.sh "${{ github.event.pull_request.number }}"
+      - name: Publish PR preview to gh-pages
+        if: github.event_name == 'pull_request' && steps.signkey.outputs.signed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/publish-pages-branch.sh --pr "${{ github.event.pull_request.number }}"
+
+      # Cut a release only when firmware-relevant files changed.
+      - name: Create release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.changes.outputs.firmware == 'yes'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: dist/*.bin
+
+      - name: Configure Pages
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        uses: actions/configure-pages@v5
+      - name: Assemble Pages site
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        run: ./scripts/build-pages.sh
+      - name: Publish site to gh-pages (root)
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/publish-pages-branch.sh
+      - name: Upload Pages artifact
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./_site
+
+  deploy:
+    needs: build
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

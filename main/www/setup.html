@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daikin Altherma · Setup</title>
+<style>
+  :root { --bg:#12151a; --card:#1b1f27; --fg:#e6e9ee; --muted:#93a0af; --line:#2a2f39; --accent:#4d9bff; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--fg);
+         font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; padding:20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px; width:100%; max-width:380px; }
+  h1 { font-size:18px; margin:0 0 4px; } p.sub { margin:0 0 18px; color:var(--muted); font-size:13.5px; }
+  form { display:grid; gap:12px; }
+  label { display:grid; gap:5px; font-size:13px; color:var(--muted); }
+  input, select { font:inherit; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); }
+  button { font:inherit; font-weight:600; padding:11px; border:0; border-radius:8px; background:var(--accent); color:#fff; cursor:pointer; }
+  .msg { font-size:13px; color:var(--muted); min-height:1.2em; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Connect to WiFi</h1>
+  <p class="sub">Pick your network so the device can join it. It will reboot and then be
+     reachable at <b>daikin-altherma.local</b>.</p>
+  <form id="f">
+    <label>Network
+      <select name="ssid" id="ssid" required><option value="">Scanning…</option></select>
+    </label>
+    <label>Password <input name="pass" type="password" autocomplete="off"></label>
+    <button type="submit">Save &amp; reboot</button>
+    <div class="msg" id="msg"></div>
+  </form>
+</div>
+<script>
+  const el = (id) => document.getElementById(id);
+  // Populate the network list from the device's scan (GET /scan → [{ssid,rssi}]).
+  fetch("/scan").then(r => r.json()).then(list => {
+    const sel = el("ssid");
+    sel.innerHTML = (list.networks || list || []).map(n =>
+      `<option value="${n.ssid}">${n.ssid} (${n.rssi} dBm)</option>`).join("") || "<option value=''>No networks found</option>";
+  }).catch(() => { el("ssid").innerHTML = "<option value=''>Scan failed — enter SSID</option>"; });
+
+  el("f").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    el("msg").textContent = "Saving…";
+    const f = new FormData(e.target);
+    try {
+      await fetch("/set_wifi", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ssid: f.get("ssid"), pass: f.get("pass") }) });
+      el("msg").textContent = "Saved. Rebooting — reconnect to your WiFi, then open daikin-altherma.local";
+    } catch { el("msg").textContent = "Failed — try again."; }
+  });
+</script>
+</body>
+</html>

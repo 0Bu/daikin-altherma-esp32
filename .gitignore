@@ -1,0 +1,59 @@
+# ESP-IDF build output
+build/
+sdkconfig
+sdkconfig.old
+
+# IDF Component Manager
+managed_components/
+dependencies.lock
+
+# Flash artifacts
+*.bin
+*.elf
+*.map
+
+# …but DO ship the web-installer firmware served by GitHub Pages
+!docs/*.bin
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Editor
+.vscode/settings.json
+.idea/
+*.swp
+*~
+
+# Local Claude Code preview-server config (personal tooling)
+.claude/launch.json
+
+# Personal/per-developer Claude Code settings (permissions, env) — team settings
+# live in the committed .claude/settings.json; this overlay stays local.
+.claude/settings.local.json
+
+# Logic-tests Stop-gate marker (per-tree, transient — never commit)
+.claude/.logic-tests-blocked
+
+# Build-efficiency SessionStart-hook dedup marker (last audited run id — never commit)
+.claude/.build-efficiency-audited
+
+# macOS
+.DS_Store
+
+# Sensitive — never commit real credentials
+sdkconfig.local
+secrets.env
+
+# OTA / Secure Boot signing keys — the private key lives OFFLINE and, in CI, only ever
+# as a transient file written from the OTA_SIGNING_KEY secret. NEVER commit a real key.
+*.pem
+ota_signing_key.pem
+
+# Host mock build variant
+/build_mock/
+
+# GitHub Pages site assembled by scripts/build-pages.sh
+/_site/

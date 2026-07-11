@@ -1,0 +1,28 @@
+name: pr-preview-cleanup
+
+# When a PR closes (merged or not), delete its per-PR firmware preview from gh-pages (PR/<N>/)
+# so stale builds don't linger on the installer site. Only same-repo PRs ever published a
+# preview (fork PRs can't sign/push), so fork closes are skipped.
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gh-pages-cleanup-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+      - name: Remove PR preview from gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/publish-pages-branch.sh --rm "${{ github.event.pull_request.number }}"

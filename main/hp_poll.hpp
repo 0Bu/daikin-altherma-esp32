@@ -1,0 +1,40 @@
+#pragma once
+// The heat-pump poll engine. One task owns the X10A UART: each interval it builds the register
+// set from the active profile + value mask, queries each register, decodes the enabled values
+// and writes them into a thread-safe cache the web UI (/values) and the MQTT bridge read.
+// Config changes from /set_hp apply at the top of the next cycle (no reboot). See
+// docs/ARCHITECTURE.md → The poll engine.
+#include <cstddef>
+#include <cstdint>
+#include <string>
+
+namespace daik {
+
+void hp_poll_start();
+
+// One cached reading.
+struct CachedValue {
+    std::string label;
+    std::string value;   // formatted; empty = not available this cycle
+    std::string unit;
+};
+
+// Health/status counters for /status.hp.
+struct HpStats {
+    bool     connected    = false;
+    int32_t  last_ok_s    = -1;   // seconds since last fully-good cycle (-1 = never)
+    int      registers    = 0;
+    int      values       = 0;
+    uint32_t crc_err      = 0;
+    uint32_t timeout_err  = 0;
+    std::string last_error;
+};
+
+// Thread-safe snapshot copy of the current value cache. Returns count written.
+size_t   hp_values_snapshot(CachedValue* out, size_t max);
+HpStats  hp_stats();
+
+// Signal the poll task to re-read config (called by /set_hp after config_save).
+void hp_poll_reconfigure();
+
+} // namespace daik
