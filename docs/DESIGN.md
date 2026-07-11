@@ -124,20 +124,32 @@ Header + stepper `① ✓ · ② ✓ · ③ Heat pump`. One card, grouped fields
 No reboot. A live "querying N registers…" note appears once polling starts.
 
 ### 5.3 Dashboard — operating values  (default after setup)
-Header: title (device name + firmware version) and a **settings gear** (opens §5.4). Layout, ordered:
+Header (an **outdoor-unit icon** — a fan + louvered condenser, the brand mark across the app — then
+the **model name** over the firmware version, plus a **settings gear** that opens §5.4):
 
-1. **WiFi strip** (above the hero): the live link, read-only — signal bars + RSSI (`--ok`/`--warn`
-   by strength), the network name (SSID), and the IP address. Reflects `wifi{ssid,ip,rssi}` from
-   `/status`. It is display-only; WiFi is not re-provisionable from the app (see §5.1).
-2. **Status hero** (navy band): operation mode (Heating / Cooling / DHW / Standby / Off) as the
+- **Model name** (headline line): the detected/selected heat-pump model from the catalog
+  (`/models` name for `/status`.profile.id). Long names clamp to two lines with the full name in the
+  title tooltip. Falls back to "Daikin Altherma" until a concrete profile is known (`auto`/`generic`/
+  not-yet-detected, or a profile with no catalog entry).
+
+Body, ordered:
+
+1. **Status hero** (navy band): operation mode (Heating / Cooling / DHW / Standby / Off) as the
    headline, with fault state. Colour: `--ok` running, `--warn`/`--err` on fault; grey when no data.
    Fault text and the last-poll age surface in the hero sub-line.
+2. **Status cards** — three cards styled exactly like the value groups (§6), first in the same grid:
+   - **WiFi** — signal bars + RSSI (`--ok`/`--warn` by strength), network (SSID), IP address; from
+     `wifi{ssid,ip,rssi,connected}`. Display-only; WiFi is not re-provisionable from the app (§5.1).
+   - **MQTT** — connection status, broker, TLS on/off, and Home-Assistant discovery state; from
+     `mqtt{configured,connected,tls,broker}`.
+   - **Model** — the model name (full-width heading), heat-pump link, X10A protocol, detected
+     capacity, and auto-vs-manual detection; from `hp{proto,connected}` + `detect{auto,capacity_kw}`.
 3. **Value groups** (§6) as cards, each a label→value·unit table, tabular numbers, only enabled +
    available values shown. A value that timed out this cycle shows "—" (not 0).
 
-There is **no** health/badge strip: WiFi lives in its own strip (item 1), operation/fault in the
-hero (item 2), and MQTT/HP-link/firmware detail is reachable under Settings (§5.4) — the dashboard
-stays a clean hero + values layout. No setup controls on this screen — it is operation-only.
+There is **no** health/badge strip: connectivity/identity live in the WiFi/MQTT/Model status cards,
+operation/fault in the hero, and everything flows as one continuous card grid. No setup controls on
+this screen — it is operation-only.
 
 ### 5.4 Settings  (from the dashboard gear)
 A menu that reopens each setup step **as its own screen** (MQTT · Heat pump — WiFi is not listed;
@@ -159,8 +171,8 @@ the value's register/label (the generator can also stamp a `group` tag per row).
    refrigerant liquid temp, compressor speed, fan step.
 5. **Electrical** — INV primary current, INV compressor current, CT L1/L2/L3, backup-heater
    capacity + stages.
-6. **Device** — WiFi/MQTT/HP link, poll counters, uptime, firmware (WiFi also in the dashboard
-   WiFi strip; firmware also in the header).
+6. **Device** — WiFi/MQTT/HP link, poll counters, uptime, firmware (WiFi/MQTT/link also in the
+   dashboard status cards §5.3; firmware also in the header).
 
 Within a group: setpoints next to their measured value; temperatures before pressures before
 currents. Units and `device_class` come from the value `dataType` (1=°C, 2=bar, 3=A). Groups with no
@@ -186,7 +198,7 @@ transition). Specific:
 - **Reboot writes** (MQTT): after Save show "Rebooting — reconnecting…", poll `/status` until it
   answers, then advance/return. (WiFi is provisioned once from `setup.html`, not re-written here.)
 - **Live writes** (heat pump): "Applied", stay on view or advance; poll `/values` for first data.
-- **Connection loss**: hero greys to "No data" and the WiFi strip shows "WiFi offline"; the
+- **Connection loss**: hero greys to "No data" and the WiFi card shows "Offline"; the
   page keeps retrying `/status` with backoff, no hard error page.
 - **Empty**: pre-first-poll dashboard shows "Waiting for first poll…"; unknown model shows the
   *Generic* hint.
@@ -205,7 +217,7 @@ transition). Specific:
 
 The design needs these additions to the firmware (all small, tracked as follow-ups):
 - `GET /status`: `wifi.rssi`/`wifi.ip`/`wifi.connected` (live, from `wifi_info()`) — **done**; the
-  dashboard WiFi strip (§5.3) consumes them. Still open: `setup_complete` (NVS `daik_cfg/setup_done`),
+  dashboard WiFi card (§5.3) consumes them. Still open: `setup_complete` (NVS `daik_cfg/setup_done`),
   `mqtt.skipped`, `hp.configured`. See `main/http_status.cpp`.
 - `POST /set_hp`: set `setup_done=1` on first successful save.
 - `POST /set_mqtt`: accept an explicit "skip" (empty broker already disables; mark skipped so the
