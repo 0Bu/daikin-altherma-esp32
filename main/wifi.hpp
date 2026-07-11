@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 // WiFi station bring-up with an endless-reconnect + gateway watchdog: first-ever connect has
 // a bounded budget then falls back to the
 // setup portal (creds presumed wrong); once online at least once, later drops reconnect

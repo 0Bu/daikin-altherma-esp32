@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Daikin Altherma</title>
+<title>daikin-altherma-esp32</title>
 <style>
 /*@@INLINE:style.css@@*/
 </style>
@@ -11,204 +11,57 @@
 <body>
 <div class="app">
 
-  <!-- ═══ HEADER · setup wizard (WiFi ✓ → MQTT → Heat pump) ═══ -->
-  <header class="hdr hdr-setup" id="hdrSetup" hidden>
-    <div class="brandrow">
-      <span class="logo sm">
-        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 19c1.5-1.2 1.5-2.6 0-3.8s-1.5-2.6 0-3.8 1.5-2.6 0-3.8"/><path d="M12 19c1.5-1.2 1.5-2.6 0-3.8s-1.5-2.6 0-3.8 1.5-2.6 0-3.8"/><path d="M17 19c1.5-1.2 1.5-2.6 0-3.8s-1.5-2.6 0-3.8 1.5-2.6 0-3.8"/></svg>
-      </span>
-      <span class="setup-title">Device setup</span>
-    </div>
-    <div class="stepper" id="stepper"></div>
-  </header>
-
-  <!-- ═══ HEADER · back (settings sub-screens) ═══ -->
-  <header class="hdr hdr-back" id="hdrBack" hidden>
-    <button class="iconbtn" id="btnBack" aria-label="Back">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-    </button>
-    <span class="hdr-title" id="backTitle"></span>
-  </header>
-
-  <!-- ═══ HEADER · dashboard ═══ -->
-  <header class="hdr hdr-dash" id="hdrDash" hidden>
+  <!-- ═══ HEADER · dashboard (the app is a single screen — no settings/sub-screens) ═══ -->
+  <header class="hdr hdr-dash" id="hdrDash">
     <span class="logo md">
-      <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M7 19c1.5-1.2 1.5-2.6 0-3.8s-1.5-2.6 0-3.8 1.5-2.6 0-3.8"/><path d="M12 19c1.5-1.2 1.5-2.6 0-3.8s-1.5-2.6 0-3.8 1.5-2.6 0-3.8"/><path d="M17 19c1.5-1.2 1.5-2.6 0-3.8s-1.5-2.6 0-3.8 1.5-2.6 0-3.8"/></svg>
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="13.5" rx="2.3"/><circle cx="8.6" cy="11.75" r="4.15"/><path d="M8.6 11.75C8.05 9.9 8.15 8.3 8.6 7.75 9.05 8.3 9.15 9.9 8.6 11.75Z"/><path d="M8.6 11.75C8.05 9.9 8.15 8.3 8.6 7.75 9.05 8.3 9.15 9.9 8.6 11.75Z" transform="rotate(120 8.6 11.75)"/><path d="M8.6 11.75C8.05 9.9 8.15 8.3 8.6 7.75 9.05 8.3 9.15 9.9 8.6 11.75Z" transform="rotate(240 8.6 11.75)"/><circle cx="8.6" cy="11.75" r="1.05" fill="currentColor" stroke="none"/><path d="M15 8.4h3.6M15 10.2h3.6M15 12h3.6M15 13.8h3.6M15 15.6h3.6"/><path d="M6.4 18.5V20M17.6 18.5V20"/></svg>
     </span>
     <div class="hdr-id">
-      <div class="hdr-name">Daikin Altherma</div>
-      <div class="hdr-meta" id="dashMeta">—</div>
+      <div class="hdr-name" id="hdrName">daikin-altherma-esp32</div>
     </div>
-    <button class="iconbtn bordered" id="btnSettings" aria-label="Settings">
-      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-    </button>
   </header>
 
   <main>
 
-    <!-- ═══ DASHBOARD ═══ -->
-    <section class="view" id="viewDash">
+    <!-- ═══ DASHBOARD (the only screen) ═══ -->
+    <section class="view active" id="viewDash">
       <div class="pad">
         <div class="hero">
           <div class="hero-kicker"><span class="hero-dot" id="heroDot"></span><span id="heroKicker">—</span></div>
           <div class="hero-mode" id="heroMode">—</div>
           <div class="hero-sub" id="heroSub"></div>
         </div>
-        <div class="health" id="health"></div>
         <div id="valueGroups"></div>
       </div>
     </section>
 
-    <!-- ═══ WiFi (re-provision from within the app) ═══ -->
-    <section class="view" id="viewWifi">
-      <div class="pad">
-        <form class="card" id="wifiForm">
-          <div class="section-label card-title">WiFi network</div>
-          <label class="field">
-            <span class="field-label">Network (SSID)</span>
-            <select class="input" name="ssid" id="wifiSsid"><option value="">Scanning…</option></select>
-          </label>
-          <label class="field">
-            <span class="field-label">Password</span>
-            <input class="input" name="pass" type="password" autocomplete="off" placeholder="WiFi password">
-          </label>
-          <button class="btn primary block" type="submit" id="wifiBtn">Save &amp; reboot</button>
-          <p class="hint note">Saving reboots the device to join the network.</p>
-        </form>
-      </div>
-    </section>
-
-    <!-- ═══ MQTT (wizard step 1 + settings) ═══ -->
-    <section class="view" id="viewMqtt">
-      <div class="pad">
-        <div class="card" id="wifiConfirm" hidden style="margin-bottom:14px">
-          <div class="kv" style="padding-top:0"><span class="section-label">WiFi</span><span class="badge ok" id="wcBadge">Connected</span></div>
-          <div class="kv"><span class="k">SSID</span><span class="v" id="wcSsid">—</span></div>
-          <div class="kv"><span class="k">IP address</span><span class="v mono num" id="wcIp">—</span></div>
-          <div class="kv"><span class="k">Signal</span><span class="v" id="wcSignal">—</span></div>
-          <div style="margin-top:12px"><a href="#" id="wcChange">Change WiFi network</a></div>
-        </div>
-
-        <form class="card" id="mqttForm">
-          <div class="section-label card-title">MQTT broker</div>
-          <label class="field">
-            <span class="field-label plain">Host : port</span>
-            <input class="input" name="broker" id="mqBroker" placeholder="192.168.1.10:1883" autocomplete="off">
-          </label>
-          <p class="hint err" id="mqError" hidden>Enter as host:port — e.g. 192.168.1.10:1883</p>
-          <label class="field">
-            <span class="field-label plain">Username · optional</span>
-            <input class="input" name="user" id="mqUser" placeholder="mqtt" autocomplete="off">
-          </label>
-          <label class="field">
-            <span class="field-label plain">Password · optional</span>
-            <input class="input" name="pass" id="mqPass" type="password" placeholder="••••••••" autocomplete="off">
-          </label>
-          <p class="hint">TLS auto-enables when credentials are set. Empty host disables MQTT.</p>
-          <button class="btn primary block" type="submit" id="mqBtn">Save</button>
-          <div class="btn-center" id="mqSkipWrap" hidden>
-            <button class="btn ghost" type="button" id="mqSkip">Skip — no broker</button>
-          </div>
-        </form>
-      </div>
-    </section>
-
-    <!-- ═══ HEAT PUMP (wizard step 2 + settings) ═══ -->
-    <section class="view" id="viewHp">
-      <form class="pad stack" id="hpForm">
-        <div class="card">
-          <div class="section-label card-title">Model</div>
-          <label class="field"><span class="field-label plain">Heat-pump model</span>
-            <select class="input" id="selOutdoor"></select></label>
-          <label class="field"><span class="field-label plain">Indoor unit</span>
-            <select class="input" id="selIndoor"></select></label>
-          <label class="field"><span class="field-label plain">DHW tank</span>
-            <select class="input" id="selTank"></select></label>
-          <div class="profile-line">Profile: <b id="profileId">not set</b></div>
-        </div>
-
-        <div class="card">
-          <div class="section-label card-title">Protocol</div>
-          <div class="seg" id="protoSeg">
-            <button type="button" data-proto="I" class="on">Protocol I</button>
-            <button type="button" data-proto="S">Protocol S</button>
-          </div>
-          <p class="hint">Header <span class="mono">0x15 0xEA</span> on the bus ⇒ protocol S.</p>
-        </div>
-
-        <div class="card">
-          <div class="section-label card-title">Wiring (ESP32)</div>
-          <div class="row2">
-            <label class="field"><span class="field-label plain">RX pin</span>
-              <input class="input mono num" id="inRx" type="number" min="0" max="48"></label>
-            <label class="field"><span class="field-label plain">TX pin</span>
-              <input class="input mono num" id="inTx" type="number" min="0" max="48"></label>
-          </div>
-          <p class="hint" id="pinHint"></p>
-          <label class="field"><span class="field-label">Language</span>
-            <select class="input" id="selLang">
-              <option value="en">English</option><option value="de">Deutsch</option>
-              <option value="fr">Français</option><option value="nl">Nederlands</option>
-              <option value="es">Español</option><option value="it">Italiano</option><option value="ja">日本語</option>
-            </select></label>
-        </div>
-
-        <div class="card">
-          <div class="cat-head">
-            <span class="section-label" id="valCount">Values</span>
-            <span class="links"><a href="#" id="selAll">All</a><a href="#" id="selNone">None</a></span>
-          </div>
-          <div class="catalogue" id="valMenu"><span class="empty">Select a model to load its value list…</span></div>
-          <div class="poll">
-            <span class="field-label" style="margin:0">Poll interval</span>
-            <input class="input mono num" id="inPoll" type="number" min="5" max="600" value="30">
-            <span>seconds</span>
-          </div>
-        </div>
-
-        <button class="btn primary block" type="submit" id="hpBtn">Save changes</button>
-        <p class="hint note" id="hpLiveNote" hidden>Applies live — no reboot. Querying starts immediately.</p>
-      </form>
-    </section>
-
-    <!-- ═══ SETTINGS ═══ -->
-    <section class="view" id="viewSettings">
-      <div class="pad">
-        <span class="section-label menu-group-label">Setup</span>
-        <div class="menu" id="menuSetup"></div>
-        <span class="section-label menu-group-label">System</span>
-        <div class="menu" id="menuSystem"></div>
-        <p class="footer-ver" id="settingsVer">Daikin Altherma · v—</p>
-      </div>
-    </section>
-
-    <!-- ═══ DIAGNOSTICS ═══ -->
-    <section class="view" id="viewDiag">
-      <div class="pad">
-        <div class="diag-head">
-          <span class="section-label">Device log</span>
-          <label class="diag-toggle">Verbose<input type="checkbox" id="diagVerbose"></label>
-        </div>
-        <div class="diag-log" id="diagLog">Loading…</div>
-        <div style="margin-top:14px"><button class="btn secondary" id="diagClear">Clear log</button></div>
-      </div>
-    </section>
-
-    <!-- ═══ FIRMWARE ═══ -->
-    <section class="view" id="viewFw">
-      <div class="pad">
-        <div class="card">
-          <div class="section-label card-title">Firmware</div>
-          <div class="kv"><span class="k">Installed</span><span class="v mono" id="fwVer">—</span></div>
-          <div class="kv"><span class="k">Chip</span><span class="v mono" id="fwChip">—</span></div>
-          <div class="kv"><span class="k">Heat-pump link</span><span class="v" id="fwLink">—</span></div>
-          <div style="margin-top:16px"><button class="btn primary block" id="fwCheck">Check for update</button></div>
-          <p class="hint note" id="fwResult" hidden></p>
-        </div>
-      </div>
-    </section>
-
   </main>
+
+  <!-- ═══ MQTT edit modal (opened from the dashboard MQTT card pencil) ═══ -->
+  <div class="modal" id="mqttModal" hidden>
+    <div class="modal-backdrop" id="mqttBackdrop"></div>
+    <form class="modal-card" id="mqttForm" role="dialog" aria-modal="true" aria-labelledby="mqttModalTitle">
+      <div class="section-label card-title" id="mqttModalTitle">MQTT broker</div>
+      <label class="field">
+        <span class="field-label plain">Host : port</span>
+        <input class="input" name="broker" id="mqBroker" placeholder="192.168.1.10:1883" autocomplete="off">
+      </label>
+      <p class="hint err" id="mqError" hidden>Enter host:port — e.g. 192.168.1.10:1883 — or mqtts://host:8883 for TLS</p>
+      <label class="field">
+        <span class="field-label plain">Username · optional</span>
+        <input class="input" name="user" id="mqUser" placeholder="mqtt" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label plain">Password · optional</span>
+        <input class="input" name="pass" id="mqPass" type="password" placeholder="••••••••" autocomplete="off">
+      </label>
+      <p class="hint">Credentials require a TLS broker — use an mqtts:// URL (e.g. mqtts://host:8883). Empty host disables MQTT.</p>
+      <div class="modal-actions">
+        <button class="btn secondary" type="button" id="mqCancel">Cancel</button>
+        <button class="btn primary" type="submit" id="mqBtn">Save</button>
+      </div>
+    </form>
+  </div>
 
   <div class="toasts" id="toasts"></div>
 </div>

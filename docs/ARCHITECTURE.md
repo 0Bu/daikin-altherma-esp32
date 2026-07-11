@@ -72,6 +72,10 @@ host-testable core is unusually large and valuable, because the risky parts are 
 these headers. Add new decode/format logic to `main/logic/` and a `CHECK` in
 `test/test_logic.cpp` — never bury it in a `.cpp` that only the device can run.
 
+The wire-level protocol these headers implement — frame layout, checksum, register pages, the unit
+detection handshake — is specified in [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md); the converter-id
+formulas, enum tables and a full register map are in [`REGISTERS.md`](REGISTERS.md).
+
 ## Value-definition profiles (runtime-selectable models)
 
 The single biggest UX change: **no editing a config header + a `def/*.h` by hand.**

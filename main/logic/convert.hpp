@@ -43,6 +43,28 @@ inline double press2temp(double d, int rtype = 802) {
            - 1.31924457284073*d*d + 13.4157368435437*d - 51.1813342993155;
 }
 
+// ── Enum / flag label tables (recovered from the X10A value definitions) ──────────────────────
+inline constexpr const char* OP_MODE[] = {                          // conv 217 (data[0])
+    "Fan Only", "Heating", "Cooling", "Auto", "Ventilation", "Auto Heat", "Auto Cool", "Dry",
+    "Aux.", "Cooling Storage", "Heating Storage", "UseStrdThrm(cl)1", "UseStrdThrm(cl)2",
+    "UseStrdThrm(cl)3", "UseStrdThrm(cl)4", "UseStrdThrm(ht)1", "UseStrdThrm(ht)2",
+    "UseStrdThrm(ht)3", "UseStrdThrm(ht)4", "Aux."};
+inline constexpr const char* IU_MODE[]  = {                         // conv 315 (high nibble)
+    "Stop", "Heating", "Cooling", "", "DHW", "Heating + DHW", "Cooling + DHW"};
+inline constexpr const char* ERR_TYPE[] = {"Normal", "Error", "Warning", "Caution"};  // conv 203
+inline constexpr const char* HYBRID[]   = {"H/P only", "Hybrid", "Boiler only"};      // conv 316
+// Daikin error code: two chars, indexed by the byte's high / low nibble (conv 204).
+inline constexpr char ERR_C1[16] = {' ','A','C','E','H','F','J','L','P','U','9','8','7','6','5','4'};
+inline constexpr char ERR_C2[16] = {'0','1','2','3','4','5','6','7','8','9','A','H','C','J','E','F'};
+
+// Copy a decoded label into the reading (bounded), marking it present.
+inline void set_text(Reading& r, const char* s) {
+    int i = 0;
+    for (; s[i] && i < static_cast<int>(sizeof(r.text)) - 1; i++) r.text[i] = s[i];
+    r.text[i] = '\0';
+    r.ok = true;
+}
+
 // Convert one value. `data` points at the value's bytes inside the reply payload.
 inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802) {
     Reading r;
@@ -64,10 +86,43 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802
         case 151: r.value = read_u16(data, n, false);             r.ok = true; break;
         case 152: r.value = read_u16(data, n, true);              r.ok = true; break;
         case 161: r.value = read_u16(data, n, true) * 0.5;        r.ok = true; break;    // CT current (0.5 A)
+        // Target/ECH2O temps: signed LE ×0.1, with 0x8000 (-3276.8) meaning "no data".
+        case 114:
+        case 119: r.value = read_s16(data, n, false) * 0.1;       r.ok = (r.value != -3276.8); break;
+        // Signed big-endian ×0.01 (mixed-water temp).
+        case 118: r.value = read_s16(data, n, true) * 0.01;       r.ok = true; break;
         // Refrigerant pressure raw (signed LE ×0.1) -> saturation temperature (°C).
         case 405: r.value = press2temp(read_s16(data, n, false) * 0.1, rtype); r.ok = true; break;
+
+        // ── Bit flags: conv 300+b -> bit b (0=LSB) of data[0] -> ON/OFF ──
+        case 300: case 301: case 302: case 303:
+        case 304: case 305: case 306: case 307:
+            set_text(r, (data[0] & (1 << (def.conv - 300))) ? "ON" : "OFF"); break;
+
+        // ── Enum labels ──
+        case 217: { int v = data[0];                                          // operation mode
+                    set_text(r, v < 20 ? OP_MODE[v] : "?"); break; }
+        case 315: { int v = (data[0] >> 4) & 0x0F;                            // indoor mode (hi nibble)
+                    set_text(r, (v < 7 && IU_MODE[v][0]) ? IU_MODE[v] : "?"); break; }
+        case 203: { int v = data[0];                                          // error class
+                    set_text(r, v < 4 ? ERR_TYPE[v] : "?"); break; }
+        case 316: { int v = data[0];                                          // hybrid mode
+                    set_text(r, v < 3 ? HYBRID[v] : "?"); break; }
+        case 211: if (data[0] == 0) set_text(r, "OFF");                       // fan step
+                  else { r.value = data[0]; r.ok = true; } break;
+        case 204: { char t[3] = {ERR_C1[(data[0] >> 4) & 0xF], ERR_C2[data[0] & 0xF], 0};
+                    set_text(r, t[0] == ' ' ? t + 1 : t); break; }            // error code (2 chars)
+        case 219: r.value = data[0]; r.ok = true; break;                      // I/U capacity code
+
+        // ── Refrigerant type: encoded by the converter id itself; reads no bytes ──
+        case 801: set_text(r, "R410A"); break;
+        case 802: set_text(r, "R32");   break;
+        case 803: set_text(r, "R22");   break;
+        case 804: set_text(r, "R407C"); break;
+        case 805: set_text(r, "R134a"); break;
+
         default:
-            // Enum/label converters (217/203/204/211/300-3xx/…) are generated; not yet ported.
+            // Converter id not yet ported -> value simply skipped (never reported wrong).
             r.unimpl = true;
             break;
     }

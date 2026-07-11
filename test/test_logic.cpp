@@ -89,8 +89,58 @@ static void test_convert() {
     const uint8_t a[] = {0x14};                        // 20 -> 10.0 A
     CHECK(approx(convert(ct, a).value, 10.0));
 
-    ValueDef unk{0x00, 0, 999, 1, -1, "x"};            // unimplemented -> skipped
+    ValueDef unk{0x00, 0, 998, 1, -1, "x"};            // layout marker -> unimplemented/skipped
     CHECK(convert(unk, c).unimpl);
+
+    // ── Converters recovered from the value-definition analysis ──
+    // conv 114 = signed LE ×0.1 target temp; 0x8000 (bytes 00 80) = "no data".
+    ValueDef tgt{0x10, 0, 114, 2, 1, "Tt"};
+    const uint8_t t441[] = {0xB9, 0x01};               // LE 0x01B9 = 441 -> 44.1 °C
+    CHECK(convert(tgt, t441).ok && approx(convert(tgt, t441).value, 44.1));
+    const uint8_t tnd[] = {0x00, 0x80};                // 0x8000 -> no data
+    CHECK(!convert(tgt, tnd).ok);
+
+    // conv 118 = signed big-endian ×0.01 (mixed-water temp).
+    ValueDef mw{0x64, 10, 118, 2, 1, "mw"};
+    const uint8_t mwb[] = {0x0D, 0xDA};                // BE 0x0DDA = 3546 -> 35.46
+    CHECK(approx(convert(mw, mwb).value, 35.46));
+
+    // conv 300..307 = bit b (0 = LSB) of data[0] -> ON/OFF.
+    const uint8_t bits[] = {0x80};                     // only bit 7 set
+    ValueDef b7{0x10, 1, 307, 1, -1, "b7"};
+    ValueDef b0{0x10, 1, 300, 1, -1, "b0"};
+    CHECK(std::string(convert(b7, bits).text) == "ON");
+    CHECK(std::string(convert(b0, bits).text) == "OFF");
+
+    // conv 217 = operation mode; conv 315 = indoor mode from the HIGH nibble.
+    ValueDef om{0x10, 0, 217, 1, -1, "om"};
+    const uint8_t m1[] = {0x01};
+    CHECK(std::string(convert(om, m1).text) == "Heating");
+    ValueDef im{0x60, 2, 315, 1, -1, "im"};
+    const uint8_t im10[] = {0x10};                     // hi nibble 1 -> Heating
+    CHECK(std::string(convert(im, im10).text) == "Heating");
+
+    // conv 203 = error class; conv 204 = 2-char Daikin error code (hi/lo nibble tables).
+    ValueDef et{0x10, 4, 203, 1, -1, "et"};
+    const uint8_t e0[] = {0x00};
+    CHECK(std::string(convert(et, e0).text) == "Normal");
+    ValueDef ec{0x10, 5, 204, 1, -1, "ec"};
+    const uint8_t u4[] = {0x94};                        // hi 9 -> 'U', lo 4 -> '4'
+    CHECK(std::string(convert(ec, u4).text) == "U4");
+
+    // conv 211 = fan step (0 -> OFF, else the number); conv 316 = hybrid mode.
+    ValueDef fs{0x30, 1, 211, 1, -1, "fs"};
+    const uint8_t f0[] = {0x00};
+    const uint8_t f5[] = {0x05};
+    CHECK(std::string(convert(fs, f0).text) == "OFF");
+    CHECK(convert(fs, f5).ok && approx(convert(fs, f5).value, 5.0));
+    ValueDef hy{0x64, 2, 316, 1, -1, "hy"};
+    const uint8_t h1[] = {0x01};
+    CHECK(std::string(convert(hy, h1).text) == "Hybrid");
+
+    // conv 802 = refrigerant type (encoded by the converter id; reads no bytes).
+    ValueDef rf{0x00, 0, 802, 0, -1, "rf"};
+    CHECK(std::string(convert(rf, c).text) == "R32");
 
     // Refrigerant pressure->temperature curve is monotonic in the working range.
     CHECK(press2temp(20.0) < press2temp(30.0));
