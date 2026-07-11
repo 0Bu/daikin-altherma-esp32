@@ -74,12 +74,13 @@ main.cpp        boot: NVS, config, WiFi(STA)|setup-AP, mDNS, HTTP, MQTT, poll en
 config.cpp      runtime Config (logic/config_model.hpp) backed by NVS "daik_cfg"
 nvs_storage.cpp thin NVS helpers (IDF nvs_* called with :: to avoid the daik::nvs_* collision)
 wifi.cpp        STA bring-up + scan + mDNS  (reconnect/watchdog: TODO)
-provisioning.cpp captive setup portal (SoftAP daikin-altherma-esp32-setup, serves www/setup.html)
+provisioning.cpp setup SoftAP (daikin-altherma-esp32-setup) + DHCP DNS-offer; HTTP is the shared :80 server
+captive_dns.cpp UDP:53 catch-all (every name -> 192.168.4.1) so the setup portal auto-pops (AP mode only)
 hp_comm.cpp     X10A UART (9600 8E1) + register query
 hp_convert.cpp  device value formatting over logic/convert.hpp
 hp_poll.cpp     poll engine task: profile registers -> query -> decode -> thread-safe cache
 http_server.cpp esp_http_server :80; concerns register their own routes (http_handlers.hpp)
-http_status.cpp GET / (embedded gzip UI) /status /values /models /diag /scan
+http_status.cpp GET / (setup.html in AP mode, else gzip UI) /status /values /models /diag /scan + captive catch-all
 http_config.cpp POST /set_wifi /set_mqtt /set_hp /set_relays
 http_ota.cpp    /ota/check|update|status
 mcp_server.cpp  /mcp (read-only MCP tools; TODO)

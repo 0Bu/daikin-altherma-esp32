@@ -24,6 +24,7 @@ void http_start() {
     http_register_config(s_server);
     http_register_ota(s_server);
     http_register_mcp(s_server);
+    http_register_captive(s_server);   // catch-all — keep last so specific routes win
     ESP_LOGI("http", "server on :80");
 }
 

@@ -14,6 +14,7 @@ idf_component_register(
         "http_ota.cpp"
         "mcp_server.cpp"
         "provisioning.cpp"
+        "captive_dns.cpp"
         "mqtt_ha.cpp"
         "ota_update.cpp"
         "control.cpp"

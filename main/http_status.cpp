@@ -15,6 +15,8 @@
 
 extern const unsigned char index_html_gz_start[] asm("_binary_index_html_gz_start");
 extern const unsigned char index_html_gz_end[]   asm("_binary_index_html_gz_end");
+extern const unsigned char setup_html_gz_start[] asm("_binary_setup_html_gz_start");
+extern const unsigned char setup_html_gz_end[]   asm("_binary_setup_html_gz_end");
 
 namespace daik {
 
@@ -24,7 +26,11 @@ static std::string jstr(const std::string& s) {
     return o + "\"";
 }
 
+// While unprovisioned (SoftAP setup mode) serve the captive setup page; once WiFi is configured
+// serve the full web UI. One shared :80 server handles both modes (see provisioning.cpp).
 static esp_err_t h_index(httpd_req_t* req) {
+    if (!wifi_configured())
+        return http_send_gzip(req, "text/html", setup_html_gz_start, setup_html_gz_end);
     return http_send_gzip(req, "text/html", index_html_gz_start, index_html_gz_end);
 }
 
@@ -112,6 +118,14 @@ void http_register_status(httpd_handle_t s) {
         {"/scan", HTTP_GET, h_scan, nullptr},
     };
     for (auto& r : routes) httpd_register_uri_handler(s, &r);
+}
+
+// Captive-portal / SPA catch-all — registered LAST (after every specific route) so it only handles
+// unmatched GETs: the setup page in AP mode, the web UI in STA mode (see h_index). This is what
+// makes an OS connectivity probe (routed here by captive_dns.cpp) open the setup portal.
+void http_register_captive(httpd_handle_t s) {
+    httpd_uri_t r = {"/*", HTTP_GET, h_index, nullptr};
+    httpd_register_uri_handler(s, &r);
 }
 
 } // namespace daik

@@ -18,5 +18,6 @@ void http_register_status(httpd_handle_t s);   // http_status.cpp
 void http_register_config(httpd_handle_t s);   // http_config.cpp
 void http_register_ota(httpd_handle_t s);      // http_ota.cpp
 void http_register_mcp(httpd_handle_t s);      // mcp_server.cpp
+void http_register_captive(httpd_handle_t s);  // http_status.cpp — MUST be registered last
 
 } // namespace daik
