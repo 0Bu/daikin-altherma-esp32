@@ -31,8 +31,8 @@ inline std::string discovery_topic(const std::string& prefix, const std::string&
 inline std::string discovery_config(const std::string& node, const std::string& state_topic,
                                     const ValueDef& def) {
     const std::string obj  = object_id(def.label);
-    const std::string unit = unit_for_conv(def.conv);
-    const std::string dc   = device_class_for_conv(def.conv);
+    const std::string unit = unit_for_datatype(def.type);
+    const std::string dc   = device_class_for_datatype(def.type);
     std::string j = "{";
     j += "\"name\":\"";       j += def.label; j += "\",";
     j += "\"uniq_id\":\"";    j += node; j += "_"; j += obj; j += "\",";
