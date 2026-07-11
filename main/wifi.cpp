@@ -10,12 +10,14 @@
 #include "mdns.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include <cstdio>
 #include <cstring>
 
 namespace daik {
 
 static const char* TAG = "wifi";
 static EventGroupHandle_t s_events;
+static esp_netif_t* s_sta_netif = nullptr;   // kept for live IP lookup (wifi_info)
 static const int CONNECTED_BIT = BIT0;
 
 bool wifi_configured() { return !config().wifi_ssid.empty(); }
@@ -42,11 +44,11 @@ static void start_mdns() {
 void wifi_start_sta() {
     s_events = xEventGroupCreate();
     ESP_ERROR_CHECK(esp_netif_init());
-    esp_netif_t* sta = esp_netif_create_default_wifi_sta();
+    s_sta_netif = esp_netif_create_default_wifi_sta();
     // Advertise our hostname to the router via DHCP (option 12) BEFORE the DHCP client runs, so the
     // router's client list shows "daikin-altherma-esp32", not the IDF default "espressif". This is
     // the DHCP name; mDNS (start_mdns) sets the matching <hostname>.local name separately.
-    if (sta) esp_netif_set_hostname(sta, config().hostname.c_str());
+    if (s_sta_netif) esp_netif_set_hostname(s_sta_netif, config().hostname.c_str());
     wifi_init_config_t ic = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&ic));
     esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi, nullptr, nullptr);
@@ -88,6 +90,18 @@ int wifi_scan(WifiScanEntry* out, int max) {
         count++;
     }
     return count;
+}
+
+WifiInfo wifi_info() {
+    WifiInfo info{};
+    esp_netif_ip_info_t ip{};
+    if (s_sta_netif && esp_netif_get_ip_info(s_sta_netif, &ip) == ESP_OK && ip.ip.addr != 0) {
+        snprintf(info.ip, sizeof(info.ip), IPSTR, IP2STR(&ip.ip));
+        info.connected = true;
+        wifi_ap_record_t ap{};
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) info.rssi = ap.rssi;
+    }
+    return info;
 }
 
 } // namespace daik

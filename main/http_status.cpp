@@ -40,10 +40,13 @@ static esp_err_t h_status(httpd_req_t* req) {
     const Config& c = config();
     HpStats     hp  = hp_stats();
     MqttStatus  m   = mqtt_status();
+    WifiInfo    wi  = wifi_info();
     std::string j = "{";
     j += "\"version\":" + jstr(esp_app_get_description()->version) + ",";
     j += "\"platform\":" + jstr(CONFIG_IDF_TARGET) + ",";
-    j += "\"wifi\":{\"ssid\":" + jstr(c.wifi_ssid) + "},";   // TODO: live rssi/ip via wifi.cpp getter
+    j += "\"wifi\":{\"ssid\":" + jstr(c.wifi_ssid) + ",\"ip\":" + jstr(wi.ip) +
+         ",\"rssi\":" + (wi.connected ? std::to_string(wi.rssi) : "null") +
+         ",\"connected\":" + (wi.connected ? "true" : "false") + "},";
     j += "\"mqtt\":{\"configured\":" + std::string(m.configured ? "true" : "false") +
          ",\"connected\":" + (m.connected ? "true" : "false") +
          ",\"tls\":" + (m.tls ? "true" : "false") +

@@ -19,4 +19,9 @@ void wifi_start_sta();
 struct WifiScanEntry { char ssid[33]; int8_t rssi; };
 int  wifi_scan(WifiScanEntry* out, int max);   // returns count
 
+// Live station link info for the dashboard: current IP + signal. `connected` is true once the
+// STA has a DHCP lease; `rssi` is valid only then (0 otherwise). SSID lives in Config.
+struct WifiInfo { char ip[16]; int8_t rssi; bool connected; };
+WifiInfo wifi_info();
+
 } // namespace daik
