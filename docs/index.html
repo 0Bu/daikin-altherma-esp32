@@ -27,7 +27,7 @@
 <body>
 <main>
   <h1>daikin-altherma-esp32</h1>
-  <p class="lead">Web Serial firmware installer. Desktop Chrome / Edge.</p>
+  <p class="lead">Firmware installer. Requires a browser with Web Serial.</p>
 
   <div class="banner" id="prBanner"></div>
 
@@ -35,7 +35,7 @@
     <div class="cta">
       <esp-web-install-button manifest="manifest.json">
         <button slot="activate">⚡ Install firmware</button>
-        <span slot="unsupported" class="unsupported">Your browser can't do Web Serial — use desktop Chrome or Edge.</span>
+        <span slot="unsupported" class="unsupported">This browser lacks Web Serial support.</span>
         <span slot="not-allowed" class="unsupported">Serial access was blocked — allow it and retry.</span>
       </esp-web-install-button>
     </div>
