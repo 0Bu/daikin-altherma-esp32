@@ -1,0 +1,39 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Bump the ESP-IDF version used by the CI build action",
+      "managerFilePatterns": ["/^\\.github/workflows/build\\.yml$/"],
+      "matchStrings": [
+        "esp_idf_version:\\s*(?<currentValue>v[0-9]+\\.[0-9]+(\\.[0-9]+)?)"
+      ],
+      "datasourceTemplate": "github-tags",
+      "depNameTemplate": "espressif/esp-idf"
+    },
+    {
+      "customType": "regex",
+      "description": "Bump the esp-web-tools version pinned in the browser installer",
+      "managerFilePatterns": ["/^docs/index\\.html$/"],
+      "matchStrings": [
+        "esp-web-tools@(?<currentValue>[0-9]+(\\.[0-9]+){0,2})/"
+      ],
+      "datasourceTemplate": "npm",
+      "depNameTemplate": "esp-web-tools"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Never auto-merge a tracked firmware dependency. A green build proves the firmware compiles — it does NOT prove the X10A decode path still matches a real heat pump, that WiFi/MQTT behaviour survives an ESP-IDF bump, or that the browser installer still flashes (esp-web-tools, which the build never exercises). A human reviews and merges these manually. GitHub Action digest bumps are unaffected and keep auto-merging.",
+      "matchDepNames": ["espressif/esp-idf", "esp-web-tools"],
+      "automerge": false
+    },
+    {
+      "description": "Remind to re-check the ESP-IDF API surface on a major bump.",
+      "matchDepNames": ["espressif/esp-idf"],
+      "prBodyNotes": [
+        "⚠️ **Before merging — check the ESP-IDF API surface.** ESP-IDF 6.0 bundles Mbed TLS 4.x and removes/renames several components (e.g. migrate `json` → `espressif/cjson`, review `esp-mqtt`/`esp_https_ota` TLS). Confirm the CI `build` job is green across all four targets and that `esp_mqtt`/OTA still build."
+      ]
+    }
+  ]
+}

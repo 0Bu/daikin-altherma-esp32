@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daikin Altherma</title>
+<style>
+/*@@INLINE:style.css@@*/
+</style>
+</head>
+<body>
+<header>
+  <h1>Daikin&nbsp;Altherma</h1>
+  <button id="ver" class="meta" title="Check for firmware update">v—</button>
+</header>
+
+<main>
+  <!-- Connection / heat-pump health -->
+  <section class="card" id="statusCard">
+    <h2>Status</h2>
+    <div class="grid" id="statusGrid">
+      <div><span class="k">WiFi</span><span class="v" id="s-wifi">—</span></div>
+      <div><span class="k">IP</span><span class="v" id="s-ip">—</span></div>
+      <div><span class="k">MQTT</span><span class="v" id="s-mqtt">—</span></div>
+      <div><span class="k">Heat pump</span><span class="v" id="s-hp">—</span></div>
+      <div><span class="k">Protocol / pins</span><span class="v" id="s-link">—</span></div>
+      <div><span class="k">Last poll</span><span class="v" id="s-last">—</span></div>
+      <div><span class="k">Errors</span><span class="v" id="s-err">—</span></div>
+      <div><span class="k">Profile</span><span class="v" id="s-prof">—</span></div>
+    </div>
+  </section>
+
+  <!-- Live decoded values -->
+  <section class="card">
+    <h2>Values <button class="link" id="refreshVals">refresh</button></h2>
+    <table id="values"><tbody><tr><td class="muted">Waiting for the first poll…</td></tr></tbody></table>
+  </section>
+
+  <!-- Setup: WiFi -->
+  <section class="card">
+    <h2>Setup · WiFi</h2>
+    <form id="wifiForm">
+      <label>SSID <input name="ssid" list="ssids" autocomplete="off" required></label>
+      <datalist id="ssids"></datalist>
+      <label>Password <input name="pass" type="password" autocomplete="off"></label>
+      <button type="submit">Save &amp; reboot</button>
+      <p class="note">Saving reboots the device to join the network.</p>
+    </form>
+  </section>
+
+  <!-- Setup: MQTT / Home Assistant -->
+  <section class="card">
+    <h2>Setup · MQTT (Home Assistant)</h2>
+    <form id="mqttForm">
+      <label>Broker <input name="broker" placeholder="203.0.113.27:1883"></label>
+      <label>Username <input name="user" autocomplete="off"></label>
+      <label>Password <input name="pass" type="password" autocomplete="off"></label>
+      <button type="submit">Save &amp; reboot</button>
+      <p class="note">Empty broker disables MQTT. TLS auto-enables when credentials are set.</p>
+    </form>
+  </section>
+
+  <!-- Setup: Heat pump model, protocol, pins, values -->
+  <section class="card">
+    <h2>Setup · Heat pump</h2>
+    <form id="hpForm">
+      <label>Indoor unit <select name="indoor" id="selIndoor"></select></label>
+      <label>Outdoor unit <select name="outdoor" id="selOutdoor"></select></label>
+      <label>DHW tank <select name="tank" id="selTank"></select></label>
+      <label>Language
+        <select name="lang" id="selLang">
+          <option value="en">English</option><option value="de">Deutsch</option>
+          <option value="fr">Français</option><option value="es">Español</option>
+          <option value="it">Italiano</option><option value="ja">日本語</option>
+        </select>
+      </label>
+      <label>Protocol
+        <select name="proto" id="selProto"><option value="I">I (modern)</option><option value="S">S (older)</option></select>
+      </label>
+      <div class="row">
+        <label>RX pin <input name="rx" id="inRx" type="number" min="0" max="48"></label>
+        <label>TX pin <input name="tx" id="inTx" type="number" min="0" max="48"></label>
+        <label>Poll (s) <input name="poll_s" id="inPoll" type="number" min="5" max="600" value="30"></label>
+      </div>
+      <p class="pinhint" id="pinHint"></p>
+      <fieldset>
+        <legend>Values to query</legend>
+        <div id="valMenu" class="valmenu muted">Select a model to load its value list…</div>
+      </fieldset>
+      <button type="submit">Apply (no reboot)</button>
+    </form>
+  </section>
+
+  <!-- Setup: optional control relays -->
+  <section class="card">
+    <h2>Setup · Control <span class="muted">(optional)</span></h2>
+    <form id="relayForm">
+      <div class="row">
+        <label>Thermostat pin <input name="therm_pin" type="number" min="-1" max="48" value="-1"></label>
+        <label>SG1 pin <input name="sg1_pin" type="number" min="-1" max="48" value="-1"></label>
+        <label>SG2 pin <input name="sg2_pin" type="number" min="-1" max="48" value="-1"></label>
+      </div>
+      <button type="submit">Apply</button>
+      <p class="note">-1 disables. See docs/README.md → Control.</p>
+    </form>
+  </section>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+
+<script>
+//@@INLINE:app.js@@
+</script>
+</body>
+</html>

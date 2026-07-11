@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install daikin-altherma-esp32</title>
+<!-- esp-web-tools (Web Serial installer). Renovate keeps the version current (see .github/renovate.json). -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/esp-web-tools@10.1.0/dist/web/install-button.js?module"></script>
+<style>
+  :root { --bg:#0f1216; --card:#181c22; --fg:#e8ebef; --muted:#9aa6b2; --line:#272d36; --accent:#2f7bff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  main { max-width:640px; margin:0 auto; padding:40px 20px 64px; }
+  h1 { font-size:26px; margin:0 0 4px; }
+  .lead { color:var(--muted); margin:0 0 28px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px; margin:18px 0; }
+  ol { padding-left:20px; } li { margin:6px 0; }
+  code { background:#0c0f13; border:1px solid var(--line); border-radius:5px; padding:1px 6px; font-size:14px; }
+  a { color:var(--accent); }
+  .banner { background:#3a2d0a; border:1px solid #6b5312; color:#f2d98a; border-radius:10px; padding:12px 14px; margin:0 0 18px; display:none; }
+  .cta { text-align:center; padding:8px 0 2px; }
+  esp-web-install-button { --esp-tools-button-color:#fff; --esp-tools-button-background-color:var(--accent); }
+  .unsupported { color:#f2a; font-size:14px; }
+  footer { color:var(--muted); font-size:13.5px; margin-top:28px; text-align:center; }
+</style>
+</head>
+<body>
+<main>
+  <h1>daikin-altherma-esp32</h1>
+  <p class="lead">Flash the monitoring firmware onto your ESP32 straight from the browser — then
+     set up WiFi, MQTT and your Daikin model from a phone. No toolchain, no cloud.</p>
+
+  <div class="banner" id="prBanner"></div>
+
+  <div class="card">
+    <div class="cta">
+      <esp-web-install-button manifest="manifest.json">
+        <button slot="activate">⚡ Install firmware</button>
+        <span slot="unsupported" class="unsupported">Your browser can't do Web Serial — use desktop Chrome or Edge.</span>
+        <span slot="not-allowed" class="unsupported">Serial access was blocked — allow it and retry.</span>
+      </esp-web-install-button>
+    </div>
+    <p style="text-align:center;color:var(--muted);font-size:13.5px;margin:14px 0 0">
+      The installer auto-detects your chip (esp32 / esp32s3 / esp32c3 / esp32c6) and does a full flash.</p>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:16px;margin-top:0">After flashing</h2>
+    <ol>
+      <li>Join the device's <code>daikin-altherma-setup</code> WiFi network; the setup page opens
+          automatically (else <code>http://192.168.4.1</code>). Enter your WiFi, save — it reboots.</li>
+      <li>Open <code>http://daikin-altherma.local</code>. Under <b>Setup → Heat pump</b> pick your
+          indoor / outdoor / tank model and the RX/TX pins you wired to X10A.</li>
+      <li>Under <b>Setup → MQTT</b> enter your broker for Home Assistant auto-discovery.</li>
+      <li>Wire the ESP to the heat pump's X10A port (power off first — see the guide).</li>
+    </ol>
+    <p style="margin-bottom:0">Full guide:
+      <a href="https://github.com/0Bu/daikin-altherma-esp32#readme">README</a> ·
+      <a href="https://github.com/0Bu/daikin-altherma-esp32/blob/main/docs/README.md">technical reference</a></p>
+  </div>
+
+  <footer>
+    Ports <a href="https://github.com/raomin/ESPAltherma">ESPAltherma</a> onto ESP-IDF with a
+    browser installer + OTA. MIT. Not affiliated with Daikin.
+  </footer>
+</main>
+
+<script>
+  // On a PR preview page (…/PR/<N>/) flag that this flashes that PR's build, not main.
+  var m = location.pathname.match(/\/PR\/(\d+)\//);
+  if (m) {
+    var b = document.getElementById('prBanner');
+    b.style.display = 'block';
+    b.innerHTML = '⚠️ Preview build for <b>PR #' + m[1] + '</b> — for testing before merge. ' +
+      'The device still checks for OTA updates from <b>main</b>.';
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Architecture & internals
+    url: https://github.com/0Bu/daikin-altherma-esp32/blob/main/docs/ARCHITECTURE.md
+    about: Poll engine, value profiles, MQTT/HA bridge, WiFi reconnect, OTA — read before filing a "how does X work?" issue.
+  - name: Technical reference
+    url: https://github.com/0Bu/daikin-altherma-esp32/blob/main/docs/README.md
+    about: X10A protocol, HTTP API, config model, build from source.
+  - name: Security model
+    url: https://github.com/0Bu/daikin-altherma-esp32/blob/main/docs/SECURITY.md
+    about: Trusted-LAN design, credential storage, OTA signing / key rotation.

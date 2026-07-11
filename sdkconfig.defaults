@@ -1,0 +1,86 @@
+# Target is selected per build: `idf.py set-target <esp32|esp32s3|esp32c3|esp32c6>`.
+# Intentionally NOT pinned here so the one source tree builds for every supported target;
+# CI builds all of them. No BLE is used (unlike tesla-key-esp32), so any WiFi-capable ESP32
+# with >=4 MB flash is a valid target.
+
+# Flash. 4 MB is the smallest supported part, so it sizes the partition table
+# (partitions.csv); a larger chip just leaves the top unused, so ONE image + table serves
+# every board.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Console over native USB-Serial/JTAG — present on esp32s3 / esp32c3 / esp32c6 (the XIAO
+# ESP32-S3 exposes it on its USB-C port). The classic esp32 has no such peripheral, so the
+# symbol is absent for that target and the console falls back to UART0 automatically. This
+# console is a SEPARATE UART from the heat-pump X10A link (rx_pin/tx_pin), so device logs
+# never collide with the heat-pump serial traffic.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# OTA: roll back automatically if a freshly-flashed image fails to boot/run. The new app
+# must call esp_ota_mark_app_valid_cancel_rollback() once healthy (see main.cpp / the
+# ota_health_gate), otherwise the bootloader reverts to the previous slot.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# ── Signed OTA images (Secure Boot v2 signature scheme, WITHOUT hardware Secure Boot) ──
+# Require a valid RSA-3072 app signature on every OTA update, so a compromised update host
+# can no longer push UNSIGNED firmware. No eFuses are burned: reversible, no brick risk, and
+# the web installer / USB-flash path keeps working (the running app verifies the NEXT OTA
+# image; the bootloader does not verify on boot). Trust is trust-on-first-use from the running
+# app's own signature block. Classic esp32 needs chip rev v3.0+ (see sdkconfig.defaults.esp32).
+# Full key lifecycle: docs/SECURITY.md.
+CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=y
+CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
+CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y
+# Do NOT sign during the build: CI signs the finished image in a separate step
+# (scripts/ci-build-all.sh) with the offline key, so the private key never has to be present
+# at compile time and fork/PR builds (no secret) still compile.
+CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=n
+
+# WiFi
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
+CONFIG_ESP_WIFI_TX_BUFFER_TYPE_DYNAMIC=y
+
+# HTTP Server
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_HTTPD_MAX_URI_LEN=512
+
+# LWIP sockets — the default of 10 is tight: the http server (several open sockets), its
+# listener, mDNS, SNTP, the MQTT bridge and the OTA client can leave no BSD socket free.
+# Lift the cap to match the TCP PCB pools (16) so the background OTA download has room.
+CONFIG_LWIP_MAX_SOCKETS=16
+
+# LWIP TCP windows — double the default send/receive windows (8xMSS) so the gzipped web UI
+# (~13 KB) clears in ~1-2 windows instead of three over a higher-latency WiFi link.
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=11520
+CONFIG_LWIP_TCP_WND_DEFAULT=11520
+
+# Stack sizes — a comfortable main task stack for NVS + HTTP + the poll engine.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+
+# Logging
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# ── Firmware size reduction (zero-risk / no behaviour change) ──
+# Drop code paths this firmware never uses.
+# mbedTLS human-readable error-string tables — we only log numeric TLS codes (MQTTS/OTA). ~6 KB.
+CONFIG_MBEDTLS_ERROR_STRINGS=n
+# No TLS session-ticket resumption: our TLS clients (OTA fetch, MQTTS bridge) open few,
+# long-lived connections where resumption buys nothing. ~1.8 KB.
+CONFIG_MBEDTLS_CLIENT_SSL_SESSION_TICKETS=n
+CONFIG_MBEDTLS_SERVER_SSL_SESSION_TICKETS=n
+# No filesystem: certs/keys come from the CA bundle and NVS, never a VFS path. ~1.2 KB.
+CONFIG_MBEDTLS_FS_IO=n
+# Silent asserts — keep the abort()/reboot on a failed assertion (so a bad state still
+# reverts via the rollback gate) but drop the assert string tables. ~5 KB.
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
+# No WPA3-OWE STA support — we join a WPA2-PSK home network. ~0.8 KB.
+CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA=n
+
+# C++ exceptions — HTTP handlers run under a try/catch OOM guard (503 instead of crash), the
+# same memory discipline as tesla-key-esp32.
+CONFIG_COMPILER_CXX_EXCEPTIONS=y
+
+# PSRAM (uncomment if your board has it; not required)
+# CONFIG_SPIRAM=y

@@ -1,0 +1,122 @@
+// GET routes: the web UI (embedded gzip), /status, /values, /models, /diag, /scan.
+#include "http_handlers.hpp"
+#include "config.hpp"
+#include "diag_log.hpp"
+#include "hp_poll.hpp"
+#include "mqtt_ha.hpp"
+#include "ota_update.hpp"
+#include "wifi.hpp"
+
+#include "esp_app_desc.h"
+#include "esp_http_server.h"
+#include <string>
+#include <vector>
+
+extern const unsigned char index_html_gz_start[] asm("_binary_index_html_gz_start");
+extern const unsigned char index_html_gz_end[]   asm("_binary_index_html_gz_end");
+
+namespace daik {
+
+static std::string jstr(const std::string& s) {
+    std::string o = "\"";
+    for (char c : s) { if (c == '"' || c == '\\') o += '\\'; o += c; }
+    return o + "\"";
+}
+
+static esp_err_t h_index(httpd_req_t* req) {
+    return http_send_gzip(req, "text/html", index_html_gz_start, index_html_gz_end);
+}
+
+static esp_err_t h_status(httpd_req_t* req) {
+    const Config& c = config();
+    HpStats     hp  = hp_stats();
+    MqttStatus  m   = mqtt_status();
+    std::string j = "{";
+    j += "\"version\":" + jstr(esp_app_get_description()->version) + ",";
+    j += "\"platform\":" + jstr(CONFIG_IDF_TARGET) + ",";
+    j += "\"wifi\":{\"ssid\":" + jstr(c.wifi_ssid) + "},";   // TODO: live rssi/ip via wifi.cpp getter
+    j += "\"mqtt\":{\"configured\":" + std::string(m.configured ? "true" : "false") +
+         ",\"connected\":" + (m.connected ? "true" : "false") +
+         ",\"tls\":" + (m.tls ? "true" : "false") +
+         ",\"broker\":" + jstr(m.broker) + (m.error.empty() ? "" : ",\"error\":" + jstr(m.error)) + "},";
+    j += "\"hp\":{\"proto\":" + jstr(std::string(1, static_cast<char>(c.proto))) +
+         ",\"rx\":" + std::to_string(c.rx_pin) + ",\"tx\":" + std::to_string(c.tx_pin) +
+         ",\"poll_s\":" + std::to_string(c.poll_s) +
+         ",\"connected\":" + (hp.connected ? "true" : "false") +
+         ",\"last_ok_s\":" + std::to_string(hp.last_ok_s) +
+         ",\"registers\":" + std::to_string(hp.registers) +
+         ",\"values\":" + std::to_string(hp.values) +
+         ",\"crc_err\":" + std::to_string(hp.crc_err) +
+         ",\"timeout_err\":" + std::to_string(hp.timeout_err) + "},";
+    j += "\"profile\":{\"id\":" + jstr(c.profile) + ",\"lang\":" + jstr(c.lang) + "}";
+    j += "}";
+    return http_send_json(req, j.c_str());
+}
+
+static esp_err_t h_values(httpd_req_t* req) {
+    std::vector<CachedValue> v(64);
+    size_t n = hp_values_snapshot(v.data(), v.size());
+    std::string j = "{\"values\":[";
+    for (size_t i = 0; i < n; i++) {
+        if (i) j += ",";
+        j += "{\"label\":" + jstr(v[i].label) +
+             ",\"value\":" + (v[i].value.empty() ? "null" : jstr(v[i].value)) +
+             ",\"unit\":" + jstr(v[i].unit) + "}";
+    }
+    j += "]}";
+    return http_send_json(req, j.c_str());
+}
+
+// Model catalog for the Setup UI. Minimal hand-written sample; tools/gen_defs.py extends the
+// lists + profile_map + per-profile value menu.
+static esp_err_t h_models(httpd_req_t* req) {
+    const char* json =
+        "{\"indoor\":[{\"id\":\"ETBH\",\"name\":\"ETBH (hydrobox)\"},{\"id\":\"generic\",\"name\":\"Other / unknown\"}],"
+        "\"outdoor\":[{\"id\":\"ERGA\",\"name\":\"ERGA04-08E (Altherma 3 R)\"},{\"id\":\"generic\",\"name\":\"Other / unknown\"}],"
+        "\"tank\":[{\"id\":\"EKHWSP\",\"name\":\"EKHWSP (ECH2O)\"},{\"id\":\"none\",\"name\":\"None / other\"}],"
+        "\"profile_map\":{\"ETBH|ERGA|EKHWSP\":\"altherma3_r_erga\"},"
+        "\"default_profile\":\"generic\","
+        "\"pin_hint\":\"XIAO ESP32-S3: RX=44 (D7), TX=43 (D6). GPIO16/17 are not broken out.\","
+        "\"default_values\":[]}";
+    return http_send_json(req, json);
+}
+
+static esp_err_t h_diag(httpd_req_t* req) {
+    char q[32];
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
+        char v[4];
+        if (httpd_query_key_value(q, "clear", v, sizeof(v)) == ESP_OK) diag_clear();
+        if (httpd_query_key_value(q, "verbose", v, sizeof(v)) == ESP_OK) diag_set_verbose(v[0] == '1');
+    }
+    static char buf[6144];
+    size_t n = diag_dump(buf, sizeof(buf));
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_send(req, buf, n);
+}
+
+static esp_err_t h_scan(httpd_req_t* req) {
+    WifiScanEntry e[20];
+    int n = wifi_scan(e, 20);
+    std::string j = "{\"networks\":[";
+    for (int i = 0; i < n; i++) {
+        if (i) j += ",";
+        j += "{\"ssid\":" + jstr(e[i].ssid) + ",\"rssi\":" + std::to_string(e[i].rssi) + "}";
+    }
+    j += "]}";
+    return http_send_json(req, j.c_str());
+}
+
+void http_register_status(httpd_handle_t s) {
+    httpd_uri_t routes[] = {
+        {"/", HTTP_GET, h_index, nullptr},
+        {"/index.html", HTTP_GET, h_index, nullptr},
+        {"/status", HTTP_GET, h_status, nullptr},
+        {"/values", HTTP_GET, h_values, nullptr},
+        {"/models", HTTP_GET, h_models, nullptr},
+        {"/diag", HTTP_GET, h_diag, nullptr},
+        {"/scan", HTTP_GET, h_scan, nullptr},
+    };
+    for (auto& r : routes) httpd_register_uri_handler(s, &r);
+}
+
+} // namespace daik

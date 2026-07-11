@@ -1,0 +1,141 @@
+menu "Daikin Altherma Configuration"
+
+    comment "All of these are ALSO settable at runtime in the web UI (stored in NVS, which"
+    comment "overrides these). These are only the first-boot compile-time defaults."
+
+    # ── WiFi ──────────────────────────────────────────────────────────────────
+    config DAIKIN_WIFI_SSID
+        string "WiFi SSID"
+        default ""
+        help
+            SSID of the WiFi network to connect to. Leave empty to boot into the SoftAP
+            setup portal ("daikin-altherma-setup") on first start, where WiFi can be
+            entered from a phone (captive portal).
+
+    config DAIKIN_WIFI_PASSWORD
+        string "WiFi Password"
+        default ""
+        help
+            Password for the WiFi network.
+
+    config DAIKIN_HOSTNAME
+        string "Hostname (mDNS)"
+        default "daikin-altherma"
+        help
+            mDNS/host name — the device is reachable at http://<hostname>.local.
+
+    # ── Heat-pump link (X10A) ─────────────────────────────────────────────────
+    config DAIKIN_PROTOCOL
+        string "Heat-pump protocol (I or S)"
+        default "I"
+        help
+            "I" for modern Altherma units (default). "S" for older units (~2010 and earlier)
+            that reply 0x15 0xEA to protocol-I requests. Settable at runtime.
+
+    config DAIKIN_RX_PIN
+        int "X10A RX GPIO (heat pump TX -> ESP RX)"
+        default 16 if IDF_TARGET_ESP32
+        default 44
+        help
+            GPIO wired to X10A pin 2 (the heat pump's TX). Default 16 on the classic ESP32,
+            44 elsewhere (XIAO ESP32-S3 pad D7). GPIO16/17 are NOT broken out on the XIAO.
+
+    config DAIKIN_TX_PIN
+        int "X10A TX GPIO (ESP TX -> heat pump RX)"
+        default 17 if IDF_TARGET_ESP32
+        default 43
+        help
+            GPIO wired to X10A pin 3 (the heat pump's RX). Default 17 on the classic ESP32,
+            43 elsewhere (XIAO ESP32-S3 pad D6).
+
+    config DAIKIN_POLL_INTERVAL_S
+        int "Poll interval (seconds)"
+        default 30
+        range 5 600
+        help
+            How often the enabled register set is queried from the heat pump.
+
+    config DAIKIN_PROFILE
+        string "Value-definition profile id"
+        default "generic"
+        help
+            Which embedded value-definition profile (register map + labels) to use, derived
+            from your indoor/outdoor/tank model. "generic" = the safe fallback. Set from the
+            web UI (Setup -> Heat pump) once running.
+
+    config DAIKIN_LANG
+        string "Label language (en/de/fr/es/it/ja)"
+        default "en"
+        help
+            Language for the value labels published to Home Assistant.
+
+    # ── MQTT / Home Assistant ─────────────────────────────────────────────────
+    config DAIKIN_MQTT_BROKER_URI
+        string "MQTT broker URI (Home Assistant)"
+        default ""
+        help
+            MQTT broker for the Home Assistant bridge, e.g. "mqtt://203.0.113.27:1883". A bare
+            "host:port" is also accepted. Empty = MQTT disabled. NVS "mqtt_uri" overrides this.
+
+    config DAIKIN_MQTT_USERNAME
+        string "MQTT username (optional)"
+        default ""
+
+    config DAIKIN_MQTT_PASSWORD
+        string "MQTT password (optional)"
+        default ""
+
+    config DAIKIN_MQTT_DISCOVERY_PREFIX
+        string "Home Assistant MQTT discovery prefix"
+        default "homeassistant"
+        help
+            Discovery topic prefix HA listens on. Default "homeassistant" matches the stock
+            Home Assistant MQTT integration.
+
+    config DAIKIN_MQTT_BASE_TOPIC
+        string "MQTT base topic prefix"
+        default "daikin-altherma"
+        help
+            Prefix for state topics. The per-device node id is appended, e.g.
+            "daikin-altherma/daikin_a1b2c3/state".
+
+    config DAIKIN_MQTT_PUBLISH_INTERVAL_S
+        int "MQTT publish interval (seconds)"
+        default 15
+        range 5 600
+        help
+            How often the cached value set + device status is republished (retained).
+            Discovery + an immediate snapshot are also sent on every (re)connect.
+
+    # ── OTA ───────────────────────────────────────────────────────────────────
+    config DAIKIN_OTA_MANIFEST_URL
+        string "OTA manifest URL"
+        default "https://0bu.github.io/daikin-altherma-esp32/manifest.json"
+        help
+            HTTPS URL of the manifest.json published by CI. Its "version" field is compared
+            against the running firmware to decide whether an update is available.
+
+    config DAIKIN_OTA_FIRMWARE_BASE_URL
+        string "OTA firmware base URL (directory)"
+        default "https://0bu.github.io/daikin-altherma-esp32/"
+        help
+            HTTPS base URL (with trailing slash) where per-target images are published. The
+            device appends "daikin-altherma-esp32<suffix>.bin" for its own chip.
+
+    # ── Optional control (off by default) ─────────────────────────────────────
+    config DAIKIN_THERM_PIN
+        int "On/off thermostat relay GPIO (-1 = disabled)"
+        default -1
+        help
+            Optional. GPIO driving a relay wired as an external on/off thermostat. Exposed as
+            a Home Assistant switch. -1 disables it (the default).
+
+    config DAIKIN_SG1_PIN
+        int "SG-Ready SG1 relay GPIO (-1 = disabled)"
+        default -1
+
+    config DAIKIN_SG2_PIN
+        int "SG-Ready SG2 relay GPIO (-1 = disabled)"
+        default -1
+
+endmenu
