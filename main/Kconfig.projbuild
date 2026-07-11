@@ -35,18 +35,21 @@ menu "Daikin Altherma Configuration"
     config DAIKIN_RX_PIN
         int "X10A RX GPIO (heat pump TX -> ESP RX)"
         default 16 if IDF_TARGET_ESP32
+        default 5 if IDF_TARGET_ESP32C5
         default 44
         help
             GPIO wired to X10A pin 2 (the heat pump's TX). Default 16 on the classic ESP32,
-            44 elsewhere (XIAO ESP32-S3 pad D7). GPIO16/17 are NOT broken out on the XIAO.
+            5 on the C5, 44 elsewhere (XIAO ESP32-S3 pad D7). Overridable at runtime; GPIO16/17
+            are NOT broken out on the XIAO.
 
     config DAIKIN_TX_PIN
         int "X10A TX GPIO (ESP TX -> heat pump RX)"
         default 17 if IDF_TARGET_ESP32
+        default 4 if IDF_TARGET_ESP32C5
         default 43
         help
             GPIO wired to X10A pin 3 (the heat pump's RX). Default 17 on the classic ESP32,
-            43 elsewhere (XIAO ESP32-S3 pad D6).
+            4 on the C5, 43 elsewhere (XIAO ESP32-S3 pad D6).
 
     config DAIKIN_POLL_INTERVAL_S
         int "Poll interval (seconds)"

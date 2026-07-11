@@ -1,4 +1,7 @@
 dependencies:
-  idf: ">=5.0.1"
+  idf: ">=5.5"
   # mDNS so the device is reachable at http://daikin-altherma-esp32.local (see main.cpp).
   espressif/mdns: "^1.2.0"
+  # cJSON: the bundled `json` component was removed from ESP-IDF core in v6.0, so it is pulled
+  # as a managed component (used by http_config.cpp). Also resolves on 5.x.
+  espressif/cjson: "^1.7.19"

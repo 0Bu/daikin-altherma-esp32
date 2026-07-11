@@ -8,7 +8,7 @@
 
 namespace daik {
 
-// Per-target OTA image suffix ("" for esp32, else -s3/-c3/-c6), picked from CONFIG_IDF_TARGET.
+// Per-target OTA image suffix ("" for esp32, else -s3/-c3/-c6/-c5), picked from CONFIG_IDF_TARGET.
 const char* ota_img_suffix();
 
 void ota_check_async(int64_t browser_epoch_ms);   // GET /ota/check

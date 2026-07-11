@@ -28,7 +28,7 @@ struct Config {
     std::string val_mask;
 };
 
-// Highest GPIO across the supported targets (esp32c6/s3 go to 48; classic esp32 to 39). The
+// Highest GPIO across the supported targets (s3/c6 to 48, c5 to 28, classic esp32 to 39). The
 // per-target UI narrows this further via /models pin_hint; this is the coarse guard.
 inline bool gpio_in_range(int p) { return p >= 0 && p <= 48; }
 
