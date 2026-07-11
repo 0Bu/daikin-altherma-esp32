@@ -52,7 +52,11 @@ main { flex: 1; }
 .hdr-back { border-bottom: 1px solid var(--line); }
 .hdr-dash { padding-bottom: 10px; }
 .hdr-title { font-size: 18px; font-weight: 650; letter-spacing: -.2px; color: var(--fg); }
-.hdr-name { font-size: 19px; font-weight: 650; letter-spacing: -.2px; color: var(--fg); }
+.hdr-name {
+  font-size: 19px; font-weight: 650; letter-spacing: -.2px; color: var(--fg); line-height: 1.2;
+  /* detected model names can be long — clamp to two lines, full name in the title tooltip */
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
 .hdr-id { flex: 1; min-width: 0; }
 .hdr-meta { font-size: 13.5px; color: var(--muted); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
@@ -133,13 +137,16 @@ main { flex: 1; }
 .badge.err  { background: color-mix(in srgb, var(--err) 16%, transparent);  color: var(--err); }
 
 /* ── Value groups (dashboard) ───────────────────────────────────────────── */
-.vgroup { margin-top: 12px; }
+#valueGroups { margin-top: 14px; }
+.vgroup + .vgroup { margin-top: 12px; }
 .vgroup .section-label { display: block; margin-bottom: 2px; }
 .vrow {
   display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
   padding: 9px 0; border-top: 1px solid var(--line);
 }
 .vrow-label { font-size: 14.5px; color: var(--muted); }
+/* full-width value line (e.g. the model name in the Model card) — wraps instead of squeezing a row */
+.vname { font-size: 15px; font-weight: 600; color: var(--fg); line-height: 1.35; padding: 9px 0; border-top: 1px solid var(--line); }
 .vrow-val { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--fg); white-space: nowrap; }
 .vrow-val.ok { color: var(--ok); } .vrow-val.warn { color: var(--warn); } .vrow-val.err { color: var(--err); }
 .vrow-unit { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 3px; }
@@ -238,19 +245,7 @@ main { flex: 1; }
 .detect-actions { margin-top: 12px; }
 .detect-actions button { font-size: 13.5px; }
 
-/* WiFi identity strip (dashboard): signal bars + dBm · SSID · IP */
-.wifi-strip {
-  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
-  margin: 2px 2px 14px; font-size: 13.5px;
-}
-.wifi-strip .wifi-name { font-weight: 600; color: var(--fg); }
-.wifi-strip .wifi-ip {
-  color: var(--muted); font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-}
-.wifi-strip .wifi-ip::before { content: "·"; margin-right: 8px; color: var(--line); }
-.wifi-strip.off { color: var(--warn); }
-
-/* signal bars */
+/* signal bars (WiFi status card) */
 .signal { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
 .signal i { width: 3px; border-radius: 1px; background: var(--muted); opacity: .35; }
 .signal i:nth-child(1) { height: 5px; } .signal i:nth-child(2) { height: 8px; }
