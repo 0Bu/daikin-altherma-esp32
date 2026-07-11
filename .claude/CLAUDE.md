@@ -11,8 +11,8 @@ esp32c3, esp32c6, esp32c5** — from ONE source tree; CI builds all five.
 > engine, value profiles, MQTT bridge, WiFi reconnect and OTA lives in
 > [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) — read it on demand. User-facing docs:
 > [`README.md`](../README.md), [`docs/README.md`](../docs/README.md),
-> [`docs/SECURITY.md`](../docs/SECURITY.md). Keep them in sync (the `project-review` skill
-> checks for drift).
+> [`docs/SECURITY.md`](../docs/SECURITY.md), [`docs/DESIGN.md`](../docs/DESIGN.md) (web-UI design
+> contract). Keep them in sync (the `project-review` skill checks for drift).
 
 **Conventions:** always write the full name `daikin-altherma-esp32` (hostname, SoftAP, MQTT base
 topic, docs) — never shorten it to `daikin-altherma`. Do not reference other projects by name in

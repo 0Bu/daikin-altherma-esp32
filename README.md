@@ -5,7 +5,7 @@ and publishes all values to MQTT / Home Assistant (auto-discovery). Runtime conf
 embedded web UI. Targets esp32 / esp32s3 / esp32c3 / esp32c6 / esp32c5.
 
 Reference: [docs/README.md](docs/README.md) (protocol · API · values · build) ·
-[ARCHITECTURE](docs/ARCHITECTURE.md) · [SECURITY](docs/SECURITY.md).
+[ARCHITECTURE](docs/ARCHITECTURE.md) · [DESIGN](docs/DESIGN.md) · [SECURITY](docs/SECURITY.md).
 
 ## Requirements
 
