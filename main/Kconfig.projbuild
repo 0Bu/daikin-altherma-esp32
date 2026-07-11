@@ -53,11 +53,11 @@ menu "Daikin Altherma Configuration"
 
     config DAIKIN_POLL_INTERVAL_S
         int "Poll interval (seconds)"
-        default 2
+        default 1
         range 1 600
         help
             How often the enabled register set is queried from the heat pump. Defaults to the
-            practical minimum (2 s) for near-real-time readings; the MQTT bridge publishes only
+            minimum (1 s) for near-real-time readings; the MQTT bridge publishes only
             values that changed, so a short interval does not flood the broker.
 
     config DAIKIN_PROFILE

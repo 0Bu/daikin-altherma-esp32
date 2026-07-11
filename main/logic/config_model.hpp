@@ -20,7 +20,7 @@ struct Config {
     Protocol    proto    = Protocol::I;  // initial guess before detection; then the detected variant
     int         rx_pin   = 44;
     int         tx_pin   = 43;
-    int         poll_s   = 2;        // minimal by default — near-real-time; MQTT publishes only changes
+    int         poll_s   = 1;        // minimum by default — near-real-time; MQTT publishes only changes
     int         therm_pin = -1;     // -1 = disabled
     int         sg1_pin   = -1;
     int         sg2_pin   = -1;
