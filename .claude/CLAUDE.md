@@ -9,7 +9,10 @@ esp32c3, esp32c6, esp32c5** — from ONE source tree; CI builds all five.
 
 > **Deep reference:** this file holds the always-needed essentials. Full narrative for the poll
 > engine, value profiles, MQTT bridge, WiFi reconnect and OTA lives in
-> [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) — read it on demand. User-facing docs:
+> [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) — read it on demand. The X10A wire protocol
+> (framing, checksum, register pages, detection) is in
+> [`docs/X10A_PROTOCOL.md`](../docs/X10A_PROTOCOL.md), and the converter-id/enum tables plus a full
+> register map in [`docs/REGISTERS.md`](../docs/REGISTERS.md). User-facing docs:
 > [`README.md`](../README.md), [`docs/README.md`](../docs/README.md),
 > [`docs/SECURITY.md`](../docs/SECURITY.md), [`docs/DESIGN.md`](../docs/DESIGN.md) (web-UI design
 > contract). Keep them in sync (the `project-review` skill checks for drift).

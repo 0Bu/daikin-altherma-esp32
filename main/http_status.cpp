@@ -1,6 +1,7 @@
 // GET routes: the web UI (embedded gzip), /status, /values, /models, /diag, /scan.
 #include "http_handlers.hpp"
 #include "config.hpp"
+#include "def/models_catalog.hpp"
 #include "diag_log.hpp"
 #include "hp_poll.hpp"
 #include "mqtt_ha.hpp"
@@ -67,18 +68,11 @@ static esp_err_t h_values(httpd_req_t* req) {
     return http_send_json(req, j.c_str());
 }
 
-// Model catalog for the Setup UI. Minimal hand-written sample; tools/gen_defs.py extends the
-// lists + profile_map + per-profile value menu.
+// Model catalog for the Setup UI. Every embedded profile is listed as an "outdoor unit"
+// choice; the web UI maps the selection to a profile id. The JSON is generated into
+// def/models_catalog.hpp alongside the def/*.hpp profiles.
 static esp_err_t h_models(httpd_req_t* req) {
-    const char* json =
-        "{\"indoor\":[{\"id\":\"ETBH\",\"name\":\"ETBH (hydrobox)\"},{\"id\":\"generic\",\"name\":\"Other / unknown\"}],"
-        "\"outdoor\":[{\"id\":\"ERGA\",\"name\":\"ERGA04-08E (Altherma 3 R)\"},{\"id\":\"generic\",\"name\":\"Other / unknown\"}],"
-        "\"tank\":[{\"id\":\"EKHWSP\",\"name\":\"EKHWSP (ECH2O)\"},{\"id\":\"none\",\"name\":\"None / other\"}],"
-        "\"profile_map\":{\"ETBH|ERGA|EKHWSP\":\"altherma3_r_erga\"},"
-        "\"default_profile\":\"generic\","
-        "\"pin_hint\":\"XIAO ESP32-S3: RX=44 (D7), TX=43 (D6). GPIO16/17 are not broken out.\","
-        "\"default_values\":[]}";
-    return http_send_json(req, json);
+    return http_send_json(req, def::MODELS_JSON);
 }
 
 static esp_err_t h_diag(httpd_req_t* req) {
