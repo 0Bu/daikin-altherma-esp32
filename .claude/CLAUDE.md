@@ -73,26 +73,32 @@ broken out on the XIAO.
 main.cpp        boot: NVS, config, WiFi(STA)|setup-AP, mDNS, HTTP, MQTT, poll engine, OTA gate
 config.cpp      runtime Config (logic/config_model.hpp) backed by NVS "daik_cfg"
 nvs_storage.cpp thin NVS helpers (IDF nvs_* called with :: to avoid the daik::nvs_* collision)
-wifi.cpp        STA bring-up + scan + mDNS  (reconnect/watchdog: TODO)
+wifi.cpp        STA bring-up + scan + DHCP hostname (option 12) + mDNS  (reconnect/watchdog: TODO)
 provisioning.cpp setup SoftAP (daikin-altherma-esp32-setup) + DHCP DNS-offer; HTTP is the shared :80 server
 captive_dns.cpp UDP:53 catch-all (every name -> 192.168.4.1) so the setup portal auto-pops (AP mode only)
 hp_comm.cpp     X10A UART (9600 8E1) + register query
 hp_convert.cpp  device value formatting over logic/convert.hpp
-hp_poll.cpp     poll engine task: profile registers -> query -> decode -> thread-safe cache
+hp_detect.cpp   auto-detect glue: protocol sweep + page probe -> fingerprint -> candidate models
+hp_poll.cpp     poll engine task: (auto-detect if profile=="auto") profile registers -> query ->
+                decode -> thread-safe cache
 http_server.cpp esp_http_server :80; concerns register their own routes (http_handlers.hpp)
 http_status.cpp GET / (setup.html in AP mode, else gzip UI) /status /values /models /diag /scan + captive catch-all
 http_config.cpp POST /set_wifi /set_mqtt /set_hp /set_relays
 http_ota.cpp    /ota/check|update|status
 mcp_server.cpp  /mcp (read-only MCP tools; TODO)
-mqtt_ha.cpp     HA MQTT-Discovery bridge (streamed discovery; TODO esp-mqtt client)
+mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; per-value retained state
+                topics, publish-on-change (logic/mqtt_delta.hpp), LWT availability, mqtts+CA on creds
 ota_update.cpp  pull-based signed OTA + rollback health gate (check/download: TODO)
 control.cpp     optional thermostat + SG-Ready relays (off unless pins set)
 diag_log.cpp    in-RAM diag ring served by GET /diag
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, config_model,
-                discovery, demo). demo.hpp fabricates plausible readings for the demo-mode toggle;
-                the poll engine feeds them through the SAME convert/format path as real data.
+                discovery, demo, detect, mqtt_delta). demo.hpp fabricates plausible readings for the
+                demo-mode toggle; the poll engine feeds them through the SAME convert/format path as
+                real data. detect.hpp narrows the model profiles from a bus fingerprint (page mask +
+                capacity); mqtt_delta.hpp filters a publish to only changed values.
 def/            embedded per-model value profiles + registry + models_catalog.hpp (GET /models
-                JSON). Profiles are machine-generated in the ValueDef row format from the X10A
+                JSON) + signatures.hpp (per-profile detection signature derived from the tables).
+                Profiles are machine-generated in the ValueDef row format from the X10A
                 value definitions (docs/REGISTERS.md); tools/gen_defs.py imports classic .h-row files
 www/            web UI sources (index.html + style.css + app.js -> one gzipped page) + setup.html
 ```
@@ -101,7 +107,7 @@ www/            web UI sources (index.html + style.css + app.js -> one gzipped p
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `wifi_ssid`/`wifi_pass`, `mqtt_uri`/`mqtt_user`/`mqtt_pass`, `hostname`, `profile`, `lang`, `proto` (I/S), `rx_pin`/`tx_pin`, `poll_s`, `val_mask`, `therm_pin`/`sg1_pin`/`sg2_pin`, `demo` (0/1) |
+| `daik_cfg` | `wifi_ssid`/`wifi_pass`, `mqtt_uri`/`mqtt_user`/`mqtt_pass`, `hostname`, `profile` (`"auto"` until detected), `lang`, `proto` (I/S — auto-detected, not UI-set), `rx_pin`/`tx_pin`, `poll_s`, `val_mask`, `therm_pin`/`sg1_pin`/`sg2_pin`, `demo` (0/1), `prof_auto` (0/1 — model auto vs user-pinned), `fp_pages`/`fp_kw`/`fp_eeprom`/`fp_valid` (cached detection fingerprint) |
 
 `nvs` at `0x9000` is untouched by OTA (partitions.csv) so config survives upgrades. Keep its
 offset/size stable across versions.
@@ -111,15 +117,21 @@ offset/size stable across versions.
 ```
 GET  /            embedded web UI (gzipped into the app binary)
 GET  /status      version, platform, wifi, mqtt, hp{proto,rx,tx,poll_s,connected,last_ok_s,
-                  registers,values,crc_err,timeout_err,demo}, profile
+                  registers,values,crc_err,timeout_err,demo}, profile,
+                  detect{proto,auto,valid,capacity_kw,ou_eeprom,candidates[],ambiguous}
 GET  /values      decoded readings [{label,value,unit}]
 GET  /models      model catalog: model list -> profile_map -> profile id, value menu, pin hint
-                  (served from def/models_catalog.hpp; UI picks the model in the outdoor dropdown)
+                  (served from def/models_catalog.hpp; UI shows it only when auto-detect is
+                  ambiguous or fails — a lone candidate is auto-applied)
 GET  /diag[?verbose=0|1][?clear=1]   in-memory diag log
 GET  /scan        WiFi scan (setup)
 POST /set_wifi    {ssid,pass} -> persist + reboot
 POST /set_mqtt    {broker,user,pass} -> persist + reboot ("" disables)
-POST /set_hp      {profile,lang,proto,rx,tx,poll_s,demo,values[]} -> validate + apply live (no reboot)
+POST /set_hp      {profile,lang,rx,tx,poll_s,demo,values[]} -> validate + apply live (no reboot).
+                  profile="auto" keeps auto-detect; a concrete id pins it. proto is NOT accepted
+                  here (auto-detected).
+POST /detect      re-run auto-detection: reset profile to "auto" + invalidate fingerprint -> the
+                  next poll cycle sweeps protocol + re-fingerprints the unit
 POST /set_relays  {therm_pin,sg1_pin,sg2_pin} -> optional control pins
 GET  /api/proxy/1/version   {version, platform}
 GET  /ota/check   POST /ota/update   GET /ota/status

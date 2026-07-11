@@ -114,6 +114,13 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802
                     set_text(r, t[0] == ' ' ? t + 1 : t); break; }            // error code (2 chars)
         case 219: r.value = data[0]; r.ok = true; break;                      // I/U capacity code
 
+        // ── EEPROM model-identification digits (page 0x11 / 0x63): raw byte. conv 215 packs a
+        //    digit pair, conv 214 a single digit. There is no digits->model-name table in the repo
+        //    (docs/REGISTERS.md), so these are exposed raw; hp_detect renders page 0x11 for display
+        //    via logic/detect.hpp eeprom_render(). ──
+        case 214:
+        case 215: r.value = data[0]; r.ok = true; break;
+
         // ── Refrigerant type: encoded by the converter id itself; reads no bytes ──
         case 801: set_text(r, "R410A"); break;
         case 802: set_text(r, "R32");   break;

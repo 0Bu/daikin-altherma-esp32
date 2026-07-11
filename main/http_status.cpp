@@ -2,8 +2,10 @@
 #include "http_handlers.hpp"
 #include "config.hpp"
 #include "def/models_catalog.hpp"
+#include "def/signatures.hpp"
 #include "diag_log.hpp"
 #include "hp_poll.hpp"
+#include "logic/detect.hpp"
 #include "mqtt_ha.hpp"
 #include "ota_update.hpp"
 #include "wifi.hpp"
@@ -56,7 +58,33 @@ static esp_err_t h_status(httpd_req_t* req) {
          ",\"crc_err\":" + std::to_string(hp.crc_err) +
          ",\"timeout_err\":" + std::to_string(hp.timeout_err) +
          ",\"demo\":" + (c.demo ? "true" : "false") + "},";
-    j += "\"profile\":{\"id\":" + jstr(c.profile) + ",\"lang\":" + jstr(c.lang) + "}";
+    j += "\"profile\":{\"id\":" + jstr(c.profile) + ",\"lang\":" + jstr(c.lang) + "},";
+
+    // Auto-detection: proto/model derived from the X10A bus (hp_detect.cpp). The candidate set is
+    // recomputed cheaply from the stored fingerprint (no re-probe) via the pure logic/detect.hpp;
+    // the UI auto-applies a lone candidate and offers the reduced set when ambiguous.
+    j += "\"detect\":{\"proto\":" + jstr(std::string(1, static_cast<char>(c.proto)));
+    j += ",\"rx\":" + std::to_string(c.rx_pin) + ",\"tx\":" + std::to_string(c.tx_pin);
+    j += ",\"auto\":" + std::string(c.profile_auto ? "true" : "false");
+    j += ",\"valid\":" + std::string(c.fp_valid ? "true" : "false");
+    if (c.fp_kw_tenths >= 0)
+        j += ",\"capacity_kw\":" + std::to_string(c.fp_kw_tenths / 10) + "." + std::to_string(c.fp_kw_tenths % 10);
+    else
+        j += ",\"capacity_kw\":null";
+    j += ",\"ou_eeprom\":" + jstr(c.fp_eeprom) + ",\"candidates\":[";
+    int total = 0;
+    if (c.fp_valid) {
+        Fingerprint fp{};
+        fp.page_mask = c.fp_pages;
+        fp.kw_tenths = c.fp_kw_tenths;
+        int nsig = 0;
+        const Signature* sigs = def::signatures(nsig);
+        const char* out[64];
+        total = detect_candidates(sigs, nsig, fp, out, static_cast<int>(sizeof(out) / sizeof(out[0])));
+        const int shown = total < 64 ? total : 64;
+        for (int i = 0; i < shown; i++) { if (i) j += ","; j += jstr(out[i]); }
+    }
+    j += "],\"ambiguous\":" + std::string(total > 1 ? "true" : "false") + "}";
     j += "}";
     return http_send_json(req, j.c_str());
 }

@@ -14,6 +14,10 @@ and the OTA-signing / key lifecycle.
   heat pump's internal settings. The only outputs are the **optional** control relays (thermostat
   on/off, SG-Ready), which are off unless you wire and enable them.
 - **Home Assistant integration is read-only** — the MQTT bridge subscribes to no command topics.
+- **MQTT credentials are never sent in cleartext.** If an MQTT username/password is configured, the
+  bridge requires an `mqtts://` broker URI and verifies the broker against the mbedTLS certificate
+  bundle; a non-TLS URI with credentials is **refused** (the reason shows in `/status.mqtt`) rather
+  than falling back to plaintext. A credential-free broker may be plaintext on the trusted LAN.
 
 ## Credential storage
 

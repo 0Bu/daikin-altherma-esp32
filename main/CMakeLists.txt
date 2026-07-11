@@ -6,6 +6,7 @@ idf_component_register(
         "wifi.cpp"
         "hp_comm.cpp"
         "hp_convert.cpp"
+        "hp_detect.cpp"
         "hp_poll.cpp"
         "http_server.cpp"
         "http_common.cpp"

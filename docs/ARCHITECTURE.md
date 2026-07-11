@@ -70,6 +70,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
 - `logic/demo.hpp` — demo mode: fabricates plausible register bytes per value so the poll engine
   can fill the cache with realistic readings **without a wired unit**. Isolated in one header so
   the feature is trivial to extend (a converter case) or remove; host-tested like the rest.
+- `logic/detect.hpp` — model auto-detection: maps a bus `Fingerprint` (answering pages + capacity)
+  against per-profile signatures to a candidate set (see the Auto-detection section). Pure, so the
+  narrowing rule is asserted on the host against the real derived signatures.
 
 `hp_convert.cpp`, `hp_comm.cpp`, `config.cpp`, `mqtt_ha.cpp` are thin device wrappers that call
 these headers. Add new decode/format logic to `main/logic/` and a `CHECK` in
@@ -126,6 +129,46 @@ web UI, `/values` and the MQTT bridge are all unaware — they just read realist
 is one bool in the config model + one poll-engine branch + one pure header, so the feature adds no
 weight to the real path and is easy to pull out.
 
+## Auto-detection (protocol + model) — `hp_detect.cpp` + `logic/detect.hpp`
+
+The goal is **zero manual model/protocol picking** where the bus allows it. `Config::profile`
+defaults to the sentinel `"auto"`; while it holds, the poll task runs one detection pass
+(`poll_detect()`) instead of a normal cycle:
+
+1. **Pin + protocol sweep** — try the identity page `0x00` on candidate RX/TX pairs (the configured
+   pins, their **swap** — a reversed X10A wire is the commonest mistake — then the per-target
+   default and its swap) × protocol `I`/`S`; keep the pins **and** framing that return a valid
+   CRC-checked reply instead of `15 EA`. Only X10A-designated pins are probed (no arbitrary GPIO).
+   The winning pins are persisted, so a swapped wire self-corrects.
+2. **Page probe** — query every page any profile can reference (`0x00,0x10,0x20,0x21,0x30,0x60–0x65,
+   0xA0,0xA1`) plus `0x11`; set a bit in a **page mask** for each page that answers.
+3. **Capacity + EEPROM** — read the O/U capacity from page `0x00` offset 12 (0.1 kW units) and the
+   O/U EEPROM identification digits from page `0x11`.
+
+Those facts form a `Fingerprint`. The pure, host-tested `logic/detect.hpp` narrows the profiles:
+each profile's **signature** (its page mask + a capacity class parsed from its id) is derived
+automatically from the embedded `ValueDef` tables (`def/signatures.hpp`) — no hand-maintained
+table. A profile is a candidate when its pages are a subset of the answering pages **and** the
+unit's capacity falls in its class; among those, only the ones with **maximal page overlap** are
+kept (this drops feature-poor profiles that are merely a subset of a feature-rich unit).
+
+The result is committed only when the bus actually answered (so a not-yet-wired unit retries next
+cycle instead of pinning `generic`):
+
+- **exactly one candidate** → applied automatically; the UI shows only "Detected: <model>".
+- **several candidates** → the best-fit becomes the working profile and the UI offers just the
+  reduced (ambiguous) set. Many Altherma variants are electrically identical on X10A (e.g.
+  EHV/EHB/EHVZ = one PCB, different packaging) and genuinely cannot be told apart from bus data —
+  the EEPROM digits are shown to help the user match the nameplate but are **not** decoded to a
+  model name (there is no digit→name table).
+- **none** → `generic`, UI shows the full list.
+
+`proto`, the resolved `profile`, and the fingerprint (`fp_pages`/`fp_kw`/`fp_eeprom`) are persisted,
+so detection runs **once** — not on every boot. `/status.detect` recomputes the candidate set from
+the stored fingerprint cheaply (no re-probe). `POST /detect` resets `profile` to `"auto"` and
+invalidates the fingerprint to force a fresh pass; a manual pick from the web UI sets `prof_auto=0`
+and pins the chosen profile. Protocol is no longer a UI control.
+
 ## Push vs. poll (why the engine polls)
 
 The X10A service port is a **strict request/response bus** — the ESP is always the master and the
@@ -156,14 +199,27 @@ The Home Assistant bridge:
 - **Read-only** — no command topics (the optional control relays publish their own separate
   `sg/…` and switch topics via `control.cpp`, not this bridge).
 - **Node id** `daikin_<mac3>` (WiFi STA MAC, stable across config changes).
-- **Discovery is streamed.** A full Altherma value set can be 30–40+ entities and >10 KB of
-  discovery JSON; the bridge emits one entity's discovery config at a time (retained) so it never
-  needs one large contiguous heap block — the same memory discipline as the rest of the firmware.
-  State is one retained JSON on `<base>/<node>/state` (or per-value topics if configured).
+- **Own publish task + esp-mqtt client.** The event handler only flips status flags; all publishing
+  happens in the task, so the mqtt event loop is never blocked by string building.
+- **Discovery is streamed.** A full Altherma value set can be 30–40+ entities; the bridge emits one
+  entity's discovery config at a time (retained) on (re)connect, so it never needs one large
+  contiguous heap block — the same memory discipline as the rest of the firmware. Layout-marker
+  converters (docs/REGISTERS.md §3.6) get no sensor.
+- **Per-value retained state topics** `<base>/<node>/<object_id>/state` (no shared JSON blob / no
+  `value_template`) — this is what makes true publish-on-change possible.
 - **Units + device_class** are derived from the converter id, so temperatures get `°C` +
   `temperature`, currents `A` + `current`, etc., and HA renders them correctly with history.
-- **TLS default-on with credentials** (mqtts, CA-verified, no silent plaintext fallback), reason
-  in `/status.mqtt`.
+- **Publish-on-change.** The heat pump is polled at a short interval (default 2 s) for near-
+  real-time readings, but each cycle the task publishes **only the values that changed** since the
+  last cycle (`logic/mqtt_delta.hpp` `mqtt_changed`, host-tested). A full retained seed of all
+  values goes out only on (re)connect (and when auto-detection resolves a new profile, which also
+  re-streams discovery). So a short poll interval does not flood the broker.
+- **Availability / LWT** on `<base>/<node>/status` (`online`/`offline`, retained) — the broker's
+  last-will marks the device offline if it drops, and every sensor's `avty_t` points at it.
+- **TLS default-on with credentials** (mqtts, CA-verified via the mbedTLS certificate bundle). If
+  credentials are set but the URI is not `mqtts://`, the bridge **refuses to connect** and reports
+  the reason in `/status.mqtt` rather than sending them in cleartext — no silent plaintext fallback.
+  A credential-free plaintext broker on the trusted LAN is allowed (nothing secret to leak).
 
 ## OTA, signing, partitions, multi-target
 
@@ -189,9 +245,11 @@ self-contained, pre-gzipped page at build time (`inline_assets.cmake`). The UI's
 
 - **WiFi** → `/set_wifi` (also reachable from the captive `setup.html` before WiFi exists).
 - **MQTT** → `/set_mqtt`.
-- **Heat pump** → `/set_hp`: model selection (indoor/outdoor/tank → profile), language, protocol
-  `I`/`S`, RX/TX pins (with a per-board pin hint fetched from `/models` + platform), poll
-  interval, and the per-value enable checkboxes.
+- **Heat pump** → `/set_hp`: the model is **auto-detected** (see Auto-detection) — the card shows
+  the detected model, a reduced pick list when ambiguous, or the full list only as a fallback, plus
+  an "Auto-detect again" action (`/detect`). Protocol is auto-detected and has no UI control. The
+  form still sets language, RX/TX pins (with a per-board pin hint from `/models` + platform), poll
+  interval, demo mode, and the per-value enable checkboxes.
 - **Control** (optional) → `/set_relays`: thermostat + SG pins.
 
 The board/platform is read from `/api/proxy/1/version` so the pin hints match the running chip

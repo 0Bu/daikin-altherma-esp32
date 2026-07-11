@@ -42,7 +42,11 @@ static void start_mdns() {
 void wifi_start_sta() {
     s_events = xEventGroupCreate();
     ESP_ERROR_CHECK(esp_netif_init());
-    esp_netif_create_default_wifi_sta();
+    esp_netif_t* sta = esp_netif_create_default_wifi_sta();
+    // Advertise our hostname to the router via DHCP (option 12) BEFORE the DHCP client runs, so the
+    // router's client list shows "daikin-altherma-esp32", not the IDF default "espressif". This is
+    // the DHCP name; mDNS (start_mdns) sets the matching <hostname>.local name separately.
+    if (sta) esp_netif_set_hostname(sta, config().hostname.c_str());
     wifi_init_config_t ic = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&ic));
     esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi, nullptr, nullptr);

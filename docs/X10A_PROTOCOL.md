@@ -187,6 +187,17 @@ A representative probe/response pair (Protocol `I`, reading identity page `0x00`
 `0x0C = 12 = LEN(1) + payload(10) + cksum(1)`; payload `0B 02 00 01 03 02 02 04 40 07` = the counts
 in page `0x00` (sensor qty, compressor qty, …).
 
+### Model fingerprint
+
+Once the protocol is known, the firmware fingerprints the **model** the same way: it probes each
+register page and notes which answer (valid reply vs `15 EA`), reads the O/U capacity from page
+`0x00` offset 12 and the O/U EEPROM identification digits from page `0x11`. The set of answering
+pages plus the capacity narrows the embedded value profiles to the ones consistent with the unit
+(`main/logic/detect.hpp`). This is a **coarse** signal — many variants share the same pages and
+capacity, so it usually yields a small candidate set rather than a single model; the EEPROM digits
+are surfaced to the user but not decoded to a model name (no digit→name table exists). See
+[`ARCHITECTURE.md`](ARCHITECTURE.md) "Auto-detection".
+
 ---
 
 ## 8. Worked example

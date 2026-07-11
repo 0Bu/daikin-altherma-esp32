@@ -53,18 +53,21 @@ menu "Daikin Altherma Configuration"
 
     config DAIKIN_POLL_INTERVAL_S
         int "Poll interval (seconds)"
-        default 30
-        range 5 600
+        default 2
+        range 1 600
         help
-            How often the enabled register set is queried from the heat pump.
+            How often the enabled register set is queried from the heat pump. Defaults to the
+            practical minimum (2 s) for near-real-time readings; the MQTT bridge publishes only
+            values that changed, so a short interval does not flood the broker.
 
     config DAIKIN_PROFILE
         string "Value-definition profile id"
-        default "generic"
+        default "auto"
         help
             Which embedded value-definition profile (register map + labels) to use, derived
-            from your indoor/outdoor/tank model. "generic" = the safe fallback. Set from the
-            web UI (Setup -> Heat pump) once running.
+            from your indoor/outdoor/tank model. "auto" (default) = auto-detect the model from
+            the X10A bus on first poll (falls back to a reduced pick list when ambiguous, or
+            "generic" when nothing answers). Set a concrete id from the web UI to pin it.
 
     config DAIKIN_LANG
         string "Label language (en/de/fr/es/it/ja)"
