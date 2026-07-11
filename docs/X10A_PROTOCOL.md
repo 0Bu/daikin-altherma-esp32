@@ -25,6 +25,13 @@ The link is a single point-to-point serial connection. There is exactly one mast
 one bus; only one transaction is in flight at a time. See [`docs/README.md`](README.md#hardware) for
 the electrical/wiring details and the 3.3 V ↔ 5 V level-shifter note.
 
+> **Poll only — the unit never pushes.** The host is always the master and the unit answers *only*
+> a query; there is no opcode, register or frame for the unit to send values unsolicited. So the
+> firmware **must poll** each register on an interval — a "the pump pushes readings to us" (push
+> instead of poll) mode does not exist on X10A. The only push in the product is firmware → MQTT
+> (the [HA bridge](ARCHITECTURE.md#home-assistant-mqtt-bridge-mqtt_hacpp) publishes on its own
+> cadence), which is a separate hop and unrelated to how values leave the heat pump.
+
 ---
 
 ## 2. Protocol variants: `I` and `S`

@@ -67,6 +67,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
   clamps, protocol enum, profile/value-mask (de)serialization.
 - `logic/discovery.hpp` — the HA MQTT-Discovery payload builder (topic + config JSON per value),
   so the exact bytes HA receives are asserted on the host, not on the device.
+- `logic/demo.hpp` — demo mode: fabricates plausible register bytes per value so the poll engine
+  can fill the cache with realistic readings **without a wired unit**. Isolated in one header so
+  the feature is trivial to extend (a converter case) or remove; host-tested like the rest.
 
 `hp_convert.cpp`, `hp_comm.cpp`, `config.cpp`, `mqtt_ha.cpp` are thin device wrappers that call
 these headers. Add new decode/format logic to `main/logic/` and a `CHECK` in
@@ -114,6 +117,23 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
 Config changes from the web UI (`/set_hp`) apply live: the task rereads `config` at the top of the
 next cycle (pins/protocol changes re-init the UART). No reboot needed for model/values/pins/
 interval — only WiFi/MQTT changes reboot (they re-init network stacks).
+
+**Demo mode** (`Config::demo`, toggled in the Heat pump settings view): when on, the task takes a
+separate branch (`poll_demo()`) that **never touches the UART**. It asks `logic/demo.hpp` to
+fabricate the raw bytes for each value in the active profile and runs them through the *same*
+`convert()`/`hp_format()` path as real data, then fills the cache and marks the link connected. The
+web UI, `/values` and the MQTT bridge are all unaware — they just read realistic readings. `demo`
+is one bool in the config model + one poll-engine branch + one pure header, so the feature adds no
+weight to the real path and is easy to pull out.
+
+## Push vs. poll (why the engine polls)
+
+The X10A service port is a **strict request/response bus** — the ESP is always the master and the
+unit only ever answers a query (see [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md) §1). There is no
+opcode, register or framing for the unit to send unsolicited/push frames, so **the firmware must
+poll**; a "the pump pushes values to us" mode is not possible at the wire level. The only push in
+the system is firmware → MQTT (the bridge publishes state on its own cadence), which is independent
+of the HP link.
 
 ## WiFi / LAN connectivity (reconnect + watchdog)
 

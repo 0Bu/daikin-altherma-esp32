@@ -68,6 +68,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
     c.rx_pin    = ji(j, "rx", c.rx_pin);
     c.tx_pin    = ji(j, "tx", c.tx_pin);
     c.poll_s    = ji(j, "poll_s", c.poll_s);
+    { cJSON* d = cJSON_GetObjectItem(j, "demo"); if (cJSON_IsBool(d)) c.demo = cJSON_IsTrue(d); }
     // values[] -> comma-joined mask
     std::string mask;
     cJSON* arr = cJSON_GetObjectItem(j, "values");

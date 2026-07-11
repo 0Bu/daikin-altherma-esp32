@@ -26,6 +26,8 @@ struct Config {
     int         sg2_pin   = -1;
     // Which values of the profile are enabled (opaque id set); serialized as a comma list.
     std::string val_mask;
+    // Demo mode: fabricate plausible readings instead of polling the X10A UART (logic/demo.hpp).
+    bool        demo      = false;
 };
 
 // Highest GPIO across the supported targets (s3/c6 to 48, c5 to 28, classic esp32 to 39). The
