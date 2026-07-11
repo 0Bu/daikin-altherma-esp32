@@ -1,27 +1,33 @@
-// Captive setup portal: SoftAP "daikin-altherma-esp32-setup" serving www/setup.html so WiFi can be
-// entered from a phone. See provisioning.hpp. SoftAP + the embedded page are wired below; the
-// DNS catch-all that makes it a true captive portal and the shared /scan + /set_wifi routes
-// are a TODO.
+// Captive setup portal: SoftAP "daikin-altherma-esp32-setup" so WiFi can be entered from a phone.
+// This file brings up the SoftAP + a captive-portal DNS; the setup page (setup.html), /scan and
+// /set_wifi are served by the ONE shared :80 server (http_server.cpp / http_status.cpp), which
+// serves setup.html while unprovisioned. Running a second httpd here would collide on port 80
+// (EADDRINUSE). See provisioning.hpp.
 #include "provisioning.hpp"
-#include "esp_event.h"
-#include "esp_http_server.h"
+#include "captive_dns.hpp"
+
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include <cstring>
 
-extern const unsigned char setup_html_gz_start[] asm("_binary_setup_html_gz_start");
-extern const unsigned char setup_html_gz_end[]   asm("_binary_setup_html_gz_end");
-
 namespace daik {
 
 static const char* TAG = "prov";
 
-static esp_err_t setup_page(httpd_req_t* req) {
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
-    return httpd_resp_send(req, reinterpret_cast<const char*>(setup_html_gz_start),
-                           setup_html_gz_end - setup_html_gz_start);
+// Make the SoftAP DHCP hand out 192.168.4.1 as the DNS server, so every client resolves through
+// our captive DNS (captive_dns.cpp) and its connectivity probe lands on the setup page.
+static void offer_self_as_dns() {
+    esp_netif_t* ap = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+    if (!ap) return;
+    esp_netif_dns_info_t dns = {};
+    dns.ip.type            = ESP_IPADDR_TYPE_V4;
+    dns.ip.u_addr.ip4.addr = ESP_IP4TOADDR(192, 168, 4, 1);
+    uint8_t offer_dns = 0x02;   // dhcps_offer_t OFFER_DNS — advertise the DNS option
+    esp_netif_dhcps_stop(ap);
+    esp_netif_set_dns_info(ap, ESP_NETIF_DNS_MAIN, &dns);
+    esp_netif_dhcps_option(ap, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &offer_dns, sizeof(offer_dns));
+    esp_netif_dhcps_start(ap);
 }
 
 void provisioning_start_ap() {
@@ -38,17 +44,11 @@ void provisioning_start_ap() {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
     ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_LOGI(TAG, "setup AP 'daikin-altherma-esp32-setup' up (http://192.168.4.1)");
 
-    // Minimal server: the setup page on any path (wildcard) + TODO: /scan + /set_wifi + captive
-    // DNS so the page opens automatically. (The full config server runs after the STA reboot.)
-    httpd_handle_t s = nullptr;
-    httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.uri_match_fn = httpd_uri_match_wildcard;
-    if (httpd_start(&s, &cfg) == ESP_OK) {
-        httpd_uri_t root = {"/*", HTTP_GET, setup_page, nullptr};
-        httpd_register_uri_handler(s, &root);
-    }
+    offer_self_as_dns();
+    captive_dns_start();   // resolves every lookup to 192.168.4.1 -> captive-portal auto-popup
+    ESP_LOGI(TAG, "setup AP 'daikin-altherma-esp32-setup' up (http://192.168.4.1)");
+    // HTTP (setup.html + /scan + /set_wifi + captive catch-all) is served by http_start().
 }
 
 } // namespace daik

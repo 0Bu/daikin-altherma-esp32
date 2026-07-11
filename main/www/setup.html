@@ -75,17 +75,17 @@ button:disabled { opacity: .6; cursor: default; box-shadow: none; }
   // Populate the SSID list from the device's scan (GET /scan → {networks:[{ssid,rssi}]}).
   fetch("/scan").then((r) => r.json()).then((r) => {
     const list = (r.networks || r || []).slice().sort((a, b) => (b.rssi || -999) - (a.rssi || -999));
-    const sel = el("ssid");
-    sel.innerHTML = list.length
-      ? list.map((n) => `<option value="${n.ssid}">${n.ssid} · ${n.rssi} dBm</option>`).join("")
-      : `<option value="">No networks found — reload</option>`;
-  }).catch(() => {
-    // Scan unavailable: swap the dropdown for a free-text SSID input so setup still works.
-    const sel = el("ssid");
+    if (!list.length) { textInput(); return; }   // SoftAP can't scan → let the user type the SSID
+    el("ssid").innerHTML = list.map((n) => `<option value="${n.ssid}">${n.ssid} · ${n.rssi} dBm</option>`).join("");
+  }).catch(textInput);
+  // Scan unavailable or empty: swap the dropdown for a free-text SSID input so setup still works.
+  function textInput() {
+    const cur = el("ssid");
+    if (cur.tagName === "INPUT") return;
     const inp = document.createElement("input");
-    inp.id = "ssid"; inp.name = "ssid"; inp.placeholder = "Network name (SSID)"; inp.required = true;
-    sel.replaceWith(inp);
-  });
+    inp.id = "ssid"; inp.name = "ssid"; inp.placeholder = "Network name (SSID)"; inp.required = true; inp.autocomplete = "off";
+    cur.replaceWith(inp);
+  }
 
   el("f").addEventListener("submit", async (e) => {
     e.preventDefault();
