@@ -192,6 +192,9 @@ main { flex: 1; }
 .btn.block { width: 100%; }
 .btn:disabled { opacity: .6; cursor: default; box-shadow: none; }
 .btn-center { text-align: center; margin-top: 8px; }
+/* Model + Wiring commit: button right, "unsaved" hint pushed to the left */
+.save-row { display: flex; align-items: center; justify-content: flex-end; gap: 14px; }
+.save-row .hint { margin: 0 auto 0 0; color: var(--warn); }
 
 /* segmented control (protocol) */
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r-input); overflow: hidden; }

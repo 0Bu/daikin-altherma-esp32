@@ -137,7 +137,9 @@ POST /set_wifi    {ssid,pass} -> persist + reboot
 POST /set_mqtt    {broker,user,pass} -> persist + reboot ("" disables)
 POST /set_hp      {profile,lang,rx,tx,poll_s,demo,values[]} -> validate + apply live (no reboot).
                   profile="auto" keeps auto-detect; a concrete id pins it. proto is NOT accepted
-                  here (auto-detected).
+                  here (auto-detected). All keys optional — an omitted key keeps its stored value
+                  (incl. values[] -> preserves val_mask), so the UI sends partial updates: Model +
+                  Wiring via an explicit Save, other controls live on change.
 POST /detect      re-run auto-detection: reset profile to "auto" + invalidate fingerprint -> the
                   next poll cycle sweeps protocol + re-fingerprints the unit
 POST /set_relays  {therm_pin,sg1_pin,sg2_pin} -> optional control pins
