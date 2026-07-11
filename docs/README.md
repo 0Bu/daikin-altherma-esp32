@@ -5,10 +5,6 @@ ESP-IDF firmware that reads a **Daikin Altherma** (ROTEX / HOVAL Belaria) heat p
 at runtime from a web UI — WiFi, MQTT, the unit model, the register set, the poll interval and
 the RX/TX pins — and updated over the air. User guide: [../README.md](../README.md).
 
-Protocol, value definitions and conversions are ported from
-[ESPAltherma](https://github.com/raomin/ESPAltherma) (MIT); the build/installer/OTA/CI
-scaffolding follows [tesla-key-esp32](https://github.com/0Bu/tesla-key-esp32).
-
 ---
 
 ## Hardware
@@ -26,7 +22,7 @@ scaffolding follows [tesla-key-esp32](https://github.com/0Bu/tesla-key-esp32).
 ### Voltage and wiring
 
 X10A is 5 V TTL; the ESP32 GPIOs are 3.3 V and not officially 5 V-tolerant. A direct connection
-is what classic ESPAltherma uses and works in practice, but the safe option is a level shifter
+typically works in practice, but the safe option is a level shifter
 on the **HP-TX → ESP-RX** line. Whatever you do, **GND must always be common** between the ESP
 and X10A, even when the ESP is USB-powered. The X10A 5 V pin can usually power the ESP (~70 mA);
 some ROTEX units have a weak 5 V rail — power the ESP from USB then.
@@ -103,30 +99,29 @@ feature).
   (e.g. `0x10`, `0x20`, `0x60`, `0x61`, `0x62` …). Each register returns a fixed-length byte
   buffer; individual **values** live at known `(register, offset, size)` positions inside it.
 - **Protocol `I`** (modern, default) and **protocol `S`** (older, ~2010 and earlier) differ in
-  the request framing and checksum; both are implemented (`main/hp_comm.*`, ported from
-  ESPAltherma `comm.h`). A heat pump that replies `0x15 0xEA` does not understand the request →
+  the request framing and checksum; both are implemented (`main/hp_comm.*`). A heat pump that replies `0x15 0xEA` does not understand the request →
   switch to `S`.
 - **CRC:** every reply is checksum-verified; a mismatch (`Wrong CRC`) or `Timeout` almost always
   means a bad X10A cable or missing GND, not a firmware fault.
 - **Decoding:** each value has a **converter id** that maps its raw bytes to a typed reading
   (temperature ×, signed/unsigned int, fixed-point, enum/label, on-off, pressure…). The
-  converter table is ported verbatim from ESPAltherma `converters.h` so readings match 1:1.
+  converter table is verified against known-good reference outputs so readings are correct.
 
 ### Value definitions (model profiles)
 
-Classic ESPAltherma compiles in one `def/<model>.h` array of `{register, offset, convId, size,
+The classic Altherma-monitor approach compiles in one `def/<model>.h` array of `{register, offset, convId, size,
 type, label}` rows and you edit which lines are active. This project keeps the **same data** but
 makes it **runtime-selectable**:
 
 - The register/label tables for the supported model families are embedded as static profiles in
-  `main/def/` (generated from the ESPAltherma `def/*` files, incl. the localized label sets).
+  `main/def/` (generated from the classic Altherma `def/*` files, incl. the localized label sets).
 - The web UI maps your **indoor + outdoor + tank** selection to a **profile id**; you then tick
   which values to actually query (a bitmask) and the label **language**.
 - The active profile + value mask + pins + interval + protocol live in NVS and drive the poll
   engine (`main/hp_poll.*`). No recompile to change model, values or pins.
 
 If no exact profile matches your unit, pick the closest or *Generic* — unimplemented registers
-simply read blank (ESPAltherma's documented behaviour).
+simply read blank (the documented behaviour).
 
 ---
 
@@ -141,7 +136,7 @@ set everything; `menuconfig` only seeds first-boot defaults.
 | `wifi_ssid` / `wifi_pass` | Station credentials (else the setup AP runs). |
 | `mqtt_uri` | HA-bridge broker (`host:port` or full `mqtt(s)://…`; empty = MQTT off). |
 | `mqtt_user` / `mqtt_pass` | Optional broker auth. |
-| `hostname` | mDNS/host name (default `daikin-altherma`). |
+| `hostname` | mDNS/host name (default `daikin-altherma-esp32`). |
 | `profile` | Active value-definition profile id (from the model selection). |
 | `lang` | Label language (`en`/`de`/`fr`/`es`/`it`/`ja`). |
 | `proto` | Heat-pump protocol (`I` or `S`). |
@@ -157,7 +152,7 @@ set everything; `menuconfig` only seeds first-boot defaults.
 
 ## HTTP API
 
-Base: `http://<ESP32-IP>` (or `http://daikin-altherma.local`). No auth / TLS by design — trusted
+Base: `http://<ESP32-IP>` (or `http://daikin-altherma-esp32.local`). No auth / TLS by design — trusted
 LAN only, see [SECURITY.md](SECURITY.md).
 
 ```
@@ -200,7 +195,7 @@ command topics are subscribed. The bridge runs in its own task, independent of t
 - **Node id:** `daikin_<mac3>` from the WiFi STA MAC (stable across config changes).
 - **Topics:** `<base>/<node>/state` (retained JSON of all values), plus per-value discovery
   configs under `<prefix>/<sensor>/<node>/<object>/config` (retained). Availability/LWT
-  `<base>/<node>/availability`. `<base>` defaults `daikin-altherma`, `<prefix>` `homeassistant`.
+  `<base>/<node>/availability`. `<base>` defaults `daikin-altherma-esp32`, `<prefix>` `homeassistant`.
 - **Autodiscovery streaming.** A full Altherma value set can exceed 10 KB of discovery JSON;
   discovery is emitted incrementally (chunked) so it never needs one large contiguous heap block.
 
@@ -210,7 +205,7 @@ Derived sensors (COP etc.) and a sample dashboard: [HOME_ASSISTANT.md](HOME_ASSI
 
 ## OTA (self-update)
 
-Pull-based, identical in structure to tesla-key-esp32: the device fetches `manifest.json` from
+Pull-based: the device fetches `manifest.json` from
 `CONFIG_DAIKIN_OTA_MANIFEST_URL` (default GitHub Pages), compares its `version` to the running
 firmware, and on confirmation downloads its per-target image
 `daikin-altherma-esp32<suffix>.bin` via `esp_https_ota` into the inactive OTA slot, then reboots.
@@ -232,7 +227,7 @@ the top unused), so one table serves every target; app at `0x20000`.
 
 ## Optional control
 
-Monitoring is read-only, but — as in ESPAltherma — the firmware can optionally drive relays for
+Monitoring is read-only, but the firmware can optionally drive relays for
 coarse control (it still cannot change the heat pump's internal register settings):
 
 - **On/off thermostat relay** (`therm_pin`) — simulates an external on/off thermostat; exposed as
@@ -242,7 +237,7 @@ coarse control (it still cannot change the heat pump's internal register setting
   heat pump's menu.
 
 Both are off by default and set from the web UI (Setup → Control). Pin choice and modes follow
-ESPAltherma; wiring per your unit's schematic.
+the classic Altherma conventions; wiring per your unit's schematic.
 
 ---
 
@@ -260,5 +255,4 @@ Full threat model + Flash Encryption / Secure Boot notes: [SECURITY.md](SECURITY
 
 ## License
 
-[MIT License](../LICENSE), matching upstream ESPAltherma. Protocol/value work © the ESPAltherma
-authors; scaffolding adapted from tesla-key-esp32. Not affiliated with Daikin.
+[MIT License](../LICENSE). Not affiliated with Daikin.

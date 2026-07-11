@@ -17,9 +17,9 @@ on them (`logic-test` job). Keep that discipline.
    (no `esp_*`, no FreeRTOS). The device `.cpp` (`hp_comm.cpp`, `hp_convert.cpp`, `config.cpp`,
    `mqtt_ha.cpp`) must be a thin wrapper that *calls* the header, never a second copy.
 2. **Add a `CHECK` in `test/test_logic.cpp`.** Assert against a known-good reference — for
-   converters, the ESPAltherma output for the same raw bytes; for CRC, a real captured frame.
+   converters, a known-good reference output for the same raw bytes; for CRC, a real captured frame.
 3. **Run it:** `scripts/run-mock-tests.sh` (cmake + g++/clang++, no ESP-IDF). Must pass before
    stopping (the Stop hook enforces this).
-4. If porting a converter from ESPAltherma `include/converters.h`, copy the maths **verbatim**
+4. When adding a converter, copy the reference maths **verbatim**
    and cite the conv id in a comment — a subtle sign/scale/endianness change silently corrupts a
    reading.

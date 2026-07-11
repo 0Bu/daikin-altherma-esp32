@@ -25,9 +25,9 @@ Claude Desktop / Code (`mcpServers`):
 ```json
 {
   "mcpServers": {
-    "daikin-altherma": {
+    "daikin-altherma-esp32": {
       "type": "http",
-      "url": "http://daikin-altherma.local/mcp"
+      "url": "http://daikin-altherma-esp32.local/mcp"
     }
   }
 }
@@ -36,7 +36,7 @@ Claude Desktop / Code (`mcpServers`):
 ## Wire example
 
 ```bash
-curl -s http://daikin-altherma.local/mcp \
+curl -s http://daikin-altherma-esp32.local/mcp \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq
 ```

@@ -20,10 +20,10 @@ config survive). Docker builds, host `esptool` flashes (Docker Desktop has no US
    ```bash
    cd build && esptool --chip <target> -p <port> write_flash "@flash_args"
    ```
-4. **Verify.** After reboot, `curl http://daikin-altherma.local/status | jq .version` (or read
+4. **Verify.** After reboot, `curl http://daikin-altherma-esp32.local/status | jq .version` (or read
    the serial log: `screen <port> 115200`, exit `Ctrl-A K`). Confirm WiFi/MQTT/hp status.
 
 ## Notes
-- First flash of a fresh board erases NVS → set up WiFi via the `daikin-altherma-setup` portal.
+- First flash of a fresh board erases NVS → set up WiFi via the `daikin-altherma-esp32-setup` portal.
 - A full-erase recovery: `esptool --chip <target> -p <port> erase_flash` then reflash.
 - This skill does NOT merge/release — that's the `ship` skill. It works on the local tree only.

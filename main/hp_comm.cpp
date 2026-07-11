@@ -1,4 +1,4 @@
-// X10A UART transport. Real port of ESPAltherma queryRegistry over the ESP-IDF uart driver.
+// X10A UART transport over the ESP-IDF uart driver.
 #include "hp_comm.hpp"
 #include "diag_log.hpp"
 #include "driver/uart.h"
@@ -41,7 +41,7 @@ int hp_query(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen) {
     int replyLen = reply_len(reg, proto);
     int len = 0;
     const int64_t start = esp_timer_get_time();
-    const int64_t TIMEOUT_US = 300000;   // ESPAltherma SER_TIMEOUT (300 ms)
+    const int64_t TIMEOUT_US = 300000;   // serial reply timeout (300 ms)
 
     while (len < replyLen && (esp_timer_get_time() - start) < TIMEOUT_US) {
         uint8_t ch;

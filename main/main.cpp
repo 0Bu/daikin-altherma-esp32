@@ -1,9 +1,9 @@
 // daikin-altherma-esp32 — boot orchestration.
 //
-// Boot flow (mirrors tesla-key-esp32/main.cpp, retargeted to the Daikin poll engine):
+// Boot flow:
 //   1. NVS + runtime config load (config.cpp; defaults from Kconfig).
 //   2. WiFi: if configured -> STA (with the endless-reconnect + gateway watchdog); else start
-//      the captive setup portal (provisioning.cpp, SoftAP "daikin-altherma-setup").
+//      the captive setup portal (provisioning.cpp, SoftAP "daikin-altherma-esp32-setup").
 //   3. mDNS (<hostname>.local), HTTP server (:80), MQTT/HA bridge, OTA health gate.
 //   4. Heat-pump poll engine (hp_poll.cpp): owns the X10A UART, polls each interval, fills the
 //      value cache the web UI / MQTT read.

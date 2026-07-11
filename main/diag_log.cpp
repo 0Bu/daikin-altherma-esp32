@@ -1,5 +1,5 @@
 // In-RAM diagnostic ring served by GET /diag. Static .bss buffer, no heap growth. See
-// diag_log.hpp. (Simplified port of tesla-key-esp32/diag_log.cpp.)
+// diag_log.hpp.
 #include "diag_log.hpp"
 #include "esp_log.h"
 #include <cstdarg>

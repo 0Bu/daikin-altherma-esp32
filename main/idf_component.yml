@@ -1,4 +1,4 @@
 dependencies:
   idf: ">=5.0.1"
-  # mDNS so the device is reachable at http://daikin-altherma.local (see main.cpp).
+  # mDNS so the device is reachable at http://daikin-altherma-esp32.local (see main.cpp).
   espressif/mdns: "^1.2.0"

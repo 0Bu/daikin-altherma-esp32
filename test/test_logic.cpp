@@ -28,7 +28,7 @@ static bool approx(double a, double b) { return std::fabs(a - b) < 1e-6; }
 using namespace daik;
 
 static void test_crc() {
-    // Sum-then-NOT (ESPAltherma getCRC).
+    // Sum-then-NOT (X10A checksum).
     const uint8_t d[] = {0x03, 0x40, 0x60};
     CHECK(crc(d, 3) == static_cast<uint8_t>(~(0x03 + 0x40 + 0x60)));
 
@@ -112,7 +112,7 @@ static void test_discovery() {
     CHECK(object_id("  A/B  ") == "a_b");
 
     ValueDef def{0x61, 10, 105, 2, 1, "DHW Tank Temp (R5T)"};
-    std::string cfg = discovery_config("daikin_abc123", "daikin-altherma/daikin_abc123/state", def);
+    std::string cfg = discovery_config("daikin_abc123", "daikin-altherma-esp32/daikin_abc123/state", def);
     CHECK(cfg.find("\"dev_cla\":\"temperature\"") != std::string::npos);
     CHECK(cfg.find("\"unit_of_meas\":\"°C\"") != std::string::npos);
     CHECK(cfg.find("value_json.dhw_tank_temp_r5t") != std::string::npos);

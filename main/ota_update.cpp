@@ -1,6 +1,6 @@
 // Pull-based signed OTA. See ota_update.hpp and docs/ARCHITECTURE.md → OTA. The manifest
-// check + esp_https_ota download + downgrade gate are TODO ports from tesla-key-esp32/
-// ota_update.cpp; the rollback health gate below is implemented so a bad OTA image reverts.
+// check + esp_https_ota download + downgrade gate are TODO; the rollback health gate below is
+// implemented so a bad OTA image reverts.
 #include "ota_update.hpp"
 #include "esp_app_desc.h"
 #include "esp_log.h"
@@ -28,7 +28,7 @@ void ota_check_async(int64_t /*browser_epoch_ms*/) {
     // TODO: fetch CONFIG_DAIKIN_OTA_MANIFEST_URL, compare "version" to running, set s_status.
     s_status.state   = "idle";
     s_status.current = esp_app_get_description()->version;
-    ESP_LOGW("ota", "check TODO — port from tesla-key-esp32/ota_update.cpp");
+    ESP_LOGW("ota", "check TODO");
 }
 
 void ota_update_async() {

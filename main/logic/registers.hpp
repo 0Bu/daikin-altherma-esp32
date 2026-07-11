@@ -4,7 +4,7 @@
 
 namespace daik {
 
-// Read `size` bytes starting at `data` as an integer. ESPAltherma's getSignedValue equivalent:
+// Read `size` bytes starting at `data` as an integer:
 // little-endian, optionally sign-extended. (VALIDATE against captured frames in test/ — a wrong
 // endianness/sign here silently corrupts every numeric reading; that is exactly why this lives
 // in a host-tested header rather than buried in a .cpp.)

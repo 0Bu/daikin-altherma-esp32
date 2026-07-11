@@ -1,7 +1,7 @@
-// Captive setup portal: SoftAP "daikin-altherma-setup" serving www/setup.html so WiFi can be
+// Captive setup portal: SoftAP "daikin-altherma-esp32-setup" serving www/setup.html so WiFi can be
 // entered from a phone. See provisioning.hpp. SoftAP + the embedded page are wired below; the
-// DNS catch-all that makes it a true captive portal and the shared /scan + /set_wifi routes are
-// a TODO port from tesla-key-esp32/provisioning.cpp.
+// DNS catch-all that makes it a true captive portal and the shared /scan + /set_wifi routes
+// are a TODO.
 #include "provisioning.hpp"
 #include "esp_event.h"
 #include "esp_http_server.h"
@@ -31,14 +31,14 @@ void provisioning_start_ap() {
     ESP_ERROR_CHECK(esp_wifi_init(&ic));
 
     wifi_config_t ap = {};
-    strcpy(reinterpret_cast<char*>(ap.ap.ssid), "daikin-altherma-setup");
-    ap.ap.ssid_len       = strlen("daikin-altherma-setup");
+    strcpy(reinterpret_cast<char*>(ap.ap.ssid), "daikin-altherma-esp32-setup");
+    ap.ap.ssid_len       = strlen("daikin-altherma-esp32-setup");
     ap.ap.max_connection = 4;
     ap.ap.authmode       = WIFI_AUTH_OPEN;
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
     ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_LOGI(TAG, "setup AP 'daikin-altherma-setup' up (http://192.168.4.1)");
+    ESP_LOGI(TAG, "setup AP 'daikin-altherma-esp32-setup' up (http://192.168.4.1)");
 
     // Minimal server: the setup page on any path (wildcard) + TODO: /scan + /set_wifi + captive
     // DNS so the page opens automatically. (The full config server runs after the STA reboot.)

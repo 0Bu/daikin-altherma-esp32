@@ -63,7 +63,7 @@ body:
       description: Exact steps, curl commands, or UI actions.
       placeholder: |
         1. ...
-        2. curl http://daikin-altherma.local/values | jq
+        2. curl http://daikin-altherma-esp32.local/values | jq
         3. ...
     validations:
       required: true

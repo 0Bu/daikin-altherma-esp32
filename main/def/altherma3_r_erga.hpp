@@ -1,11 +1,10 @@
 #pragma once
 // GENERATED-STYLE example profile — Daikin Altherma 3 R (outdoor ERGA04-08E, indoor ETBH,
-// tank EKHWSP). Rows are {reg, offset, conv, size, type, label}, ported from ESPAltherma
-// def/German/Altherma(ERGA E EHV-EHB-EHVZ E_EJ series 04-08kW).h (English labels here).
+// tank EKHWSP). Rows are {reg, offset, conv, size, type, label} (English labels here).
 //
 // In the real build tools/gen_defs.py emits one such header per model family and per language
-// from the ESPAltherma def/* tree; this hand-written sample shows the shape the generator
-// targets and gives the host tests + a first real device something to run against.
+// from the classic Altherma value-definition files; this hand-written sample shows the shape
+// the generator targets, and gives the host tests + a first real device something to run against.
 #include "../logic/value_def.hpp"
 
 namespace daik::def {

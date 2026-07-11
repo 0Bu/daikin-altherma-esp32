@@ -14,7 +14,7 @@ struct Config {
     std::string mqtt_uri;          // "" = MQTT disabled
     std::string mqtt_user;
     std::string mqtt_pass;
-    std::string hostname = "daikin-altherma";
+    std::string hostname = "daikin-altherma-esp32";
     std::string profile  = "generic";
     std::string lang     = "en";
     Protocol    proto    = Protocol::I;

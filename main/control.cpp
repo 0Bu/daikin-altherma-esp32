@@ -1,6 +1,6 @@
 // Optional control relays (thermostat + SG-Ready). No-op unless the pins are configured. See
-// control.hpp and docs/README.md → Optional control. Ported in spirit from ESPAltherma's
-// PIN_THERM / PIN_SG1 / PIN_SG2 handling.
+// control.hpp and docs/README.md → Optional control. Drives the optional thermostat / SG1 /
+// SG2 relay GPIOs when configured.
 #include "control.hpp"
 #include "config.hpp"
 #include "driver/gpio.h"
@@ -35,7 +35,7 @@ void control_set_thermostat(bool on) {
 }
 
 void control_set_sg_mode(int mode) {
-    // SG-Ready truth table (ESPAltherma README): 0 open/open, 1 open/close, 2 close/open,
+    // SG-Ready truth table: 0 open/open, 1 open/close, 2 close/open,
     // 3 close/close. SG1=bit1, SG2=bit0 per that table.
     const Config& c = config();
     s_sg_mode = mode & 0x3;

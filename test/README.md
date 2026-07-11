@@ -35,7 +35,7 @@ regression fails in seconds instead of after four ESP-IDF builds.
 1. Put the logic in the right `main/logic/*.hpp` (IDF-free — no `esp_*`, no FreeRTOS). The device
    `.cpp` must be a thin wrapper that calls it, never a second copy.
 2. Add a `CHECK(...)` in `test_logic.cpp` asserting against a known-good reference (for converters,
-   the ESPAltherma output for the same raw bytes; for CRC, a real captured frame).
+   a known-good reference output for the same raw bytes; for CRC, a real captured frame).
 3. `scripts/run-mock-tests.sh` — must pass (the Stop hook and CI enforce it).
 
 See the `add-logic-test` skill (`.claude/skills/add-logic-test/`).

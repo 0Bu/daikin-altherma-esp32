@@ -1,6 +1,6 @@
 // WiFi station bring-up + scan + mDNS. See wifi.hpp. The endless-reconnect handler and the
-// gateway ICMP watchdog (docs/ARCHITECTURE.md → WiFi/LAN connectivity) are TODO ports from
-// tesla-key-esp32/main.cpp — the STA connect + mDNS below are enough for a first bring-up.
+// gateway ICMP watchdog (docs/ARCHITECTURE.md → WiFi/LAN connectivity) are TODO — the STA
+// connect + mDNS below are enough for a first bring-up.
 #include "wifi.hpp"
 #include "config.hpp"
 #include "esp_event.h"

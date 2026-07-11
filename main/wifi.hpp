@@ -1,6 +1,6 @@
 #pragma once
-// WiFi station bring-up with the endless-reconnect + gateway watchdog behaviour ported from
-// tesla-key-esp32/main.cpp: first-ever connect has a bounded budget then falls back to the
+// WiFi station bring-up with an endless-reconnect + gateway watchdog: first-ever connect has
+// a bounded budget then falls back to the
 // setup portal (creds presumed wrong); once online at least once, later drops reconnect
 // forever; a ~30 s ICMP-to-gateway watchdog catches missed-deauth "ghost" associations and
 // forces one reconnect (never reboots). See docs/ARCHITECTURE.md → WiFi/LAN connectivity.

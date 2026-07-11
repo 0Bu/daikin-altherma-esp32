@@ -7,7 +7,7 @@ and the OTA-signing / key lifecycle.
 ## Trust boundary
 
 - **The HTTP API and web UI have no authentication or TLS.** This is deliberate — the device is
-  meant to sit on a trusted home LAN. Anyone who can reach `http://daikin-altherma.local` can read
+  meant to sit on a trusted home LAN. Anyone who can reach `http://daikin-altherma-esp32.local` can read
   values and change the configuration. **Never expose it to the internet.** If you need access
   control, front it with a reverse proxy or put it on an isolated VLAN.
 - **The heat-pump link is read-oriented.** The firmware polls X10A registers; it cannot change the

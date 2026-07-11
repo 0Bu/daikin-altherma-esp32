@@ -9,7 +9,7 @@ menu "Daikin Altherma Configuration"
         default ""
         help
             SSID of the WiFi network to connect to. Leave empty to boot into the SoftAP
-            setup portal ("daikin-altherma-setup") on first start, where WiFi can be
+            setup portal ("daikin-altherma-esp32-setup") on first start, where WiFi can be
             entered from a phone (captive portal).
 
     config DAIKIN_WIFI_PASSWORD
@@ -20,7 +20,7 @@ menu "Daikin Altherma Configuration"
 
     config DAIKIN_HOSTNAME
         string "Hostname (mDNS)"
-        default "daikin-altherma"
+        default "daikin-altherma-esp32"
         help
             mDNS/host name — the device is reachable at http://<hostname>.local.
 
@@ -94,10 +94,10 @@ menu "Daikin Altherma Configuration"
 
     config DAIKIN_MQTT_BASE_TOPIC
         string "MQTT base topic prefix"
-        default "daikin-altherma"
+        default "daikin-altherma-esp32"
         help
             Prefix for state topics. The per-device node id is appended, e.g.
-            "daikin-altherma/daikin_a1b2c3/state".
+            "daikin-altherma-esp32/daikin_a1b2c3/state".
 
     config DAIKIN_MQTT_PUBLISH_INTERVAL_S
         int "MQTT publish interval (seconds)"
