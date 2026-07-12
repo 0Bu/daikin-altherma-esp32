@@ -47,6 +47,58 @@ The classic ESP32 needs chip revision **v3.0+ (ECO3)** for the V2 RSA scheme
 (`CONFIG_ESP32_REV_MIN_3` in `sdkconfig.defaults.esp32`); s3/c3/c6/c5 support it at their default min
 revision.
 
+## Boot recovery (anti-brick)
+
+A signed-app build has a sharp edge: **an unsigned app does not boot.** It aborts in
+`check_signature_on_update_check()` (ESP-IDF `bootloader_support`, called from `esp_efuse_startup`)
+**before `app_main`** — the running app verifies it carries a signature block so it can vouch for the
+*next* OTA, and `abort()`s if it doesn't. Because this is pre-`app_main`, **no firmware code can
+intercept it** (not the health gate, not a recovery handler); only the bootloader can pick a
+different image, and only if a good one still exists on the chip.
+
+Three failure modes, and what recovers each:
+
+| # | How a bad image arrives | Auto-recovery |
+|---|---|---|
+| 1 | **OTA** installs an image that boots but is broken/crashes | ✅ dual-OTA + `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` + the health gate. The image boots `PENDING_VERIFY`; it must prove healthy or the bootloader reverts to the previous slot. |
+| 2 | **OTA** installs an *unsigned/tampered* image | ✅ prevented — `esp_https_ota` verifies the RSA signature before it ever writes/activates the slot. |
+| 3 | **Direct USB / Web-Serial flash** of an unsigned (or early-crashing) build | ⚠️ not auto-recoverable — see below. Prevented instead by `scripts/require-signed.sh`. |
+
+### Why mode 3 can't roll back — and how it's contained
+
+The rollback in mode 1 works because the *previous* firmware is still intact in the other OTA slot
+and otadata marks the new one `PENDING_VERIFY`. A **full `@flash_args` USB flash does neither**: it
+rewrites the bootloader, partition table and **otadata (blanked to `0xFFFFFFFF`)** and writes only
+`ota_0`. After it, `ota_1` is empty and otadata is blank → the bootloader boots `ota_0` in
+`ESP_OTA_IMG_UNDEFINED` state (not `PENDING_VERIFY`), and **there is no previous firmware anywhere on
+the chip to fall back to.** So for a directly-flashed unsigned build, "boot the previous FW" is
+mechanically impossible regardless of mechanism — the previous FW was overwritten.
+
+This is **never a brick**: no eFuses are burned and ROM download mode stays enabled, so the board is
+always re-flashable over USB. The containment is therefore *prevention*, not recovery:
+
+- **`scripts/require-signed.sh <app.bin>`** refuses to flash an unsigned image (it parses
+  `espsecure signature-info-v2`) and prints the signing command. The `flash-esp32` skill and the
+  CLAUDE.md flash steps run it before `esptool write_flash`, so the mode-3 crash-loop is stopped at
+  the source. Recovery from a board that already got an unsigned image = re-flash a **signed** one.
+
+### The health gate (mode 1)
+
+`ota_health_gate_arm()` (`ota_update.cpp`) starts a task that runs **only** for a `PENDING_VERIFY`
+image — i.e. one installed via `esp_ota_*` (a real OTA), which always leaves a valid previous slot.
+It commits the image (`esp_ota_mark_app_valid_cancel_rollback()`) only once it has proven **healthy**,
+not merely survived a timer: it must run past a base window (~90 s — survives an early crash-loop) AND
+reach connectivity (STA online, or the setup portal when no credentials are stored). An update that
+boots but can't get online — e.g. a WiFi regression that could never be re-flashed OTA — is left
+`PENDING_VERIFY` up to a hard cap (~10 min, forgiving of a briefly-offline site); the next reboot
+then rolls it back to the previous firmware. The decision is the host-tested `daik::health_gate_decide()` in `main/logic/health_gate.hpp`
+(covered by `test/test_logic.cpp`). A USB/`@flash_args` image is `UNDEFINED`, never `PENDING_VERIFY`,
+so the gate is a no-op for it and can never strand a fresh board.
+
+> **Manual updates and rollback:** only the OTA path (`esp_ota_*`, which writes the *inactive* slot
+> and arms `PENDING_VERIFY`) is auto-rollback-protected. A host `esptool` flash overwrites the running
+> slot in place and cannot roll back — which is why the signed-image guard gates that path instead.
+
 ## Signing key lifecycle
 
 - The private key is an **RSA-3072 PEM** kept **offline**. It is never committed (`.gitignore`

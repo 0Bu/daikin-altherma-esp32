@@ -13,6 +13,7 @@
 #include "logic/crc.hpp"
 #include "logic/detect.hpp"
 #include "logic/discovery.hpp"
+#include "logic/health_gate.hpp"
 #include "logic/mqtt_delta.hpp"
 #include "logic/registers.hpp"
 #include "def/registry.hpp"
@@ -324,6 +325,24 @@ static void test_mqtt_delta() {
     CHECK(mqtt_changed(cur, cur).empty());
 }
 
+static void test_health_gate() {
+    // base=90s, cap=300s. STA-configured device.
+    const int base = 90, cap = 300;
+    // Not yet at the base window -> keep waiting even if already online.
+    CHECK(health_gate_decide(0,   base, cap, /*cfg=*/true, /*conn=*/true)  == HealthVerdict::Wait);
+    CHECK(health_gate_decide(85,  base, cap, true,  true)  == HealthVerdict::Wait);
+    // Past the base window AND online -> commit (seal image in, cancel rollback).
+    CHECK(health_gate_decide(90,  base, cap, true,  true)  == HealthVerdict::Commit);
+    CHECK(health_gate_decide(120, base, cap, true,  true)  == HealthVerdict::Commit);
+    // Configured but never online -> wait until the hard cap, then give up (leave rollback armed).
+    CHECK(health_gate_decide(90,  base, cap, true,  false) == HealthVerdict::Wait);
+    CHECK(health_gate_decide(295, base, cap, true,  false) == HealthVerdict::Wait);
+    CHECK(health_gate_decide(300, base, cap, true,  false) == HealthVerdict::GiveUp);
+    // No credentials = legitimate setup-AP mode: connectivity isn't expected, so it's healthy.
+    CHECK(health_gate_decide(90,  base, cap, false, false) == HealthVerdict::Commit);
+    CHECK(health_gate_decide(0,   base, cap, false, false) == HealthVerdict::Wait);   // still honour base window
+}
+
 int main() {
     test_crc();
     test_registers();
@@ -333,6 +352,7 @@ int main() {
     test_registry();
     test_detect();
     test_mqtt_delta();
+    test_health_gate();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }
     std::printf("%d logic test(s) FAILED\n", g_failures);
     return 1;
