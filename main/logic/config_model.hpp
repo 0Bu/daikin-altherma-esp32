@@ -54,4 +54,13 @@ inline Protocol parse_protocol(const std::string& s) {
     return (!s.empty() && (s[0] == 'S' || s[0] == 's')) ? Protocol::S : Protocol::I;
 }
 
+// A /set_hp update carries the model "profile" only when the request explicitly sends it. The live
+// controls (poll interval, language, value toggles) send a partial patch that OMITS profile, and
+// such a patch must not disturb a settled detection. Only an explicit "auto" — a re-detect request
+// or the Model/Wiring Save — clears the cached fingerprint so the next poll re-sweeps; a concrete id
+// pins the model and leaves the fingerprint alone. Returns whether fp_valid should be cleared.
+inline bool set_hp_clears_fingerprint(bool profile_present, const std::string& profile_value) {
+    return profile_present && profile_value == "auto";
+}
+
 } // namespace daik

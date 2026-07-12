@@ -61,11 +61,17 @@ static esp_err_t set_hp(httpd_req_t* req) {
     cJSON* j = cJSON_Parse(body);
     if (!j) return httpd_resp_send_500(req);
     Config c    = config();
-    const char* prof = js(j, "profile", c.profile.c_str());
-    c.profile      = prof;
-    // A concrete model is a manual pin (stops auto-detect); "auto" requests a fresh detection.
-    c.profile_auto = (std::string(prof) == "auto");
-    if (c.profile_auto) c.fp_valid = false;
+    // The model profile is only touched when the request explicitly sends "profile". The live
+    // controls (poll/lang/values) send a partial patch that omits it — that must not re-select the
+    // model or invalidate a settled fingerprint (which would force a spurious re-detect next poll).
+    cJSON* profItem     = cJSON_GetObjectItem(j, "profile");
+    bool   profile_sent = cJSON_IsString(profItem);
+    if (profile_sent) {
+        c.profile      = profItem->valuestring;
+        // A concrete model is a manual pin (stops auto-detect); "auto" requests a fresh detection.
+        c.profile_auto = (c.profile == "auto");
+    }
+    if (set_hp_clears_fingerprint(profile_sent, c.profile)) c.fp_valid = false;
     c.lang      = js(j, "lang", c.lang.c_str());
     // proto is auto-detected (hp_detect.cpp), not set from the UI.
     c.rx_pin    = ji(j, "rx", c.rx_pin);
