@@ -2,6 +2,7 @@
 // diag_log.hpp.
 #include "diag_log.hpp"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -28,16 +29,24 @@ static void append(const char* p, size_t n) {
 
 void diag_printf(const char* fmt, ...) {
     char line[256];
+    // Uptime prefix — the device has no RTC/wall clock (no SNTP), so timestamp each line with
+    // seconds.milliseconds since boot, e.g. "[   123.456] ".
+    int64_t us  = esp_timer_get_time();
+    int     pre = snprintf(line, sizeof(line), "[%6lld.%03lld] ",
+                           (long long)(us / 1000000), (long long)((us / 1000) % 1000));
+    if (pre < 0 || pre >= (int)sizeof(line)) pre = 0;
     va_list ap;
     va_start(ap, fmt);
-    int n = vsnprintf(line, sizeof(line), fmt, ap);
+    int n = vsnprintf(line + pre, sizeof(line) - pre, fmt, ap);
     va_end(ap);
     if (n <= 0) return;
-    if (n > (int)sizeof(line)) n = sizeof(line);
+    // vsnprintf returns the length it *would* have written; clamp to what actually fit.
+    if (n > (int)sizeof(line) - pre - 1) n = (int)sizeof(line) - pre - 1;
+    int total = pre + n;
     if (s_mtx) xSemaphoreTake(s_mtx, portMAX_DELAY);
-    append(line, n);
+    append(line, total);
     if (s_mtx) xSemaphoreGive(s_mtx);
-    ESP_LOGI("diag", "%.*s", n, line);
+    ESP_LOGI("diag", "%.*s", total, line);
 }
 
 void diag_set_verbose(bool on) { s_verbose = on; }
