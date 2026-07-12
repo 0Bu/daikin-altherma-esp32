@@ -95,10 +95,11 @@ static void poll_detect() {
     c.fp_kw_tenths  = d.kw_tenths;
     c.fp_eeprom     = d.eeprom;
     c.fp_valid      = true;
-    c.profile_auto  = true;                                    // auto-derived; user can pin later
-    // A lone candidate is applied outright; an ambiguous set uses its best-fit as the working
-    // profile while the UI offers the reduced list; nothing matched → generic.
-    c.profile = d.candidates.empty() ? "generic" : d.candidates.front();
+    c.profile_auto  = true;                                    // fully auto — no manual override
+    // Read with the best-fit representative (deterministic ranking, not registry order). Every
+    // candidate in the set is register-equivalent, so this picks correct VALUES regardless of which
+    // marketing variant it names; nothing matched but bus answered → generic Altherma profile.
+    c.profile = d.best.empty() ? "generic" : d.best;
     config_save(c);
 }
 

@@ -54,12 +54,65 @@
 
 namespace daik::def {
 
-// Minimal generic fallback: a few near-universal registers so an unknown unit still reports
-// something.
+// Generic Altherma fallback: the universal register core present (with identical layout) in >=95%
+// of the 41 catalog Altherma "I"-protocol models — so a unit whose exact model can't be identified,
+// or an older/S-protocol unit, still reports every essential value over X10A. Machine-derived as the
+// high-frequency intersection of the decoded model catalog (tools/gen_profiles.py, --generic); keep
+// in sync when regenerating. Pages a given unit lacks simply time out and are skipped by the poller.
 inline constexpr ValueDef generic[] = {
+    {0x00, 12, 105, 1, -1, "O/U capacity (kW)"},
     {0x10, 0, 217, 1, -1, "Operation Mode"},
-    {0x20, 0, 105, 2,  1, "Outdoor Air Temp (R1T)"},
-    {0x61, 10, 105, 2, 1, "DHW Tank Temp (R5T)"},
+    {0x10, 1, 304, 1, -1, "Defrost Operation"},
+    {0x10, 4, 203, 1, -1, "Error type"},
+    {0x10, 5, 204, 1, -1, "Error Code"},
+    {0x10, 6, 114, 2, 1, "Target Evap. Temp."},
+    {0x10, 8, 114, 2, 1, "Target Cond. Temp."},
+    {0x20, 0, 105, 2, 1, "R1T-Outdoor air temp."},
+    {0x21, 0, 105, 2, -1, "INV primary current (A)"},
+    {0x21, 2, 105, 2, -1, "INV secondary current (A)"},
+    {0x60, 2, 315, 1, -1, "I/U operation mode"},
+    {0x60, 2, 303, 1, -1, "Thermostat ON/OFF"},
+    {0x60, 2, 302, 1, -1, "Freeze Protection"},
+    {0x60, 2, 301, 1, -1, "Silent Mode"},
+    {0x60, 2, 300, 1, -1, "Freeze Protection for water piping"},
+    {0x60, 3, 204, 1, -1, "Error Code"},
+    {0x60, 6, 219, 1, -1, "I/U capacity code"},
+    {0x60, 7, 105, 2, 1, "DHW setpoint"},
+    {0x60, 9, 105, 2, 1, "LW setpoint (main)"},
+    {0x60, 11, 307, 1, -1, "Water flow switch"},
+    {0x60, 11, 305, 1, -1, "Thermal protector BSH"},
+    {0x60, 11, 304, 1, -1, "Benefit kWh rate power supply"},
+    {0x60, 11, 300, 1, -1, "Bivalent Operation"},
+    {0x60, 12, 307, 1, -1, "2way valve(On:Heat_Off:Cool)"},
+    {0x60, 12, 306, 1, -1, "3way valve(On:DHW_Off:Space)"},
+    {0x60, 12, 305, 1, -1, "BSH"},
+    {0x60, 12, 304, 1, -1, "BUH Step1"},
+    {0x60, 12, 303, 1, -1, "BUH Step2"},
+    {0x60, 12, 301, 1, -1, "Water pump operation"},
+    {0x60, 12, 300, 1, -1, "Solar pump operation"},
+    {0x61, 6, 105, 2, 1, "Refrig. Temp. liquid side (R3T)"},
+    {0x61, 8, 105, 2, 1, "Inlet water temp.(R4T)"},
+    {0x61, 10, 105, 2, 1, "DHW tank temp. (R5T)"},
+    {0x61, 12, 105, 2, 1, "Indoor ambient temp. (R1T)"},
+    {0x62, 2, 307, 1, -1, "Reheat ON/OFF"},
+    {0x62, 2, 306, 1, -1, "Storage ECO ON/OFF"},
+    {0x62, 2, 305, 1, -1, "Storage comfort ON/OFF"},
+    {0x62, 2, 304, 1, -1, "Powerful DHW Operation. ON/OFF"},
+    {0x62, 2, 303, 1, -1, "Space heating Operation ON/OFF"},
+    {0x62, 2, 300, 1, -1, "Emergency (indoor) active/not active"},
+    {0x62, 3, 105, 2, 1, "LW setpoint (add)"},
+    {0x62, 5, 105, 2, 1, "RT setpoint"},
+    {0x62, 8, 302, 1, -1, "Circulation pump operation"},
+    {0x62, 8, 301, 1, -1, "Alarm output"},
+    {0x62, 8, 300, 1, -1, "Space H Operation output"},
+    {0x62, 9, 105, 2, -1, "Flow sensor (l/min)"},
+    {0x62, 12, 152, 1, -1, "Water pump signal (0:max-100:stop)"},
+    {0x64, 2, 316, 1, -1, "Hybrid Op. Mode"},
+    {0x64, 2, 303, 1, -1, "Boiler Operation Demand"},
+    {0x64, 2, 302, 1, -1, "Boiler DHW Demand"},
+    {0x64, 3, 105, 2, -1, "BE_COP"},
+    {0x64, 5, 105, 2, 1, "Hybrid Heating Target Temp."},
+    {0x64, 7, 105, 2, 1, "Boiler Heating Target Temp."},
 };
 
 struct Profile {

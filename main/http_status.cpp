@@ -1,6 +1,7 @@
 // GET routes: the web UI (embedded gzip), /status, /values, /models, /diag, /scan.
 #include "http_handlers.hpp"
 #include "config.hpp"
+#include "def/model_names.hpp"
 #include "def/models_catalog.hpp"
 #include "def/signatures.hpp"
 #include "diag_log.hpp"
@@ -12,6 +13,7 @@
 
 #include "esp_app_desc.h"
 #include "esp_http_server.h"
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -73,8 +75,13 @@ static esp_err_t h_status(httpd_req_t* req) {
         j += ",\"capacity_kw\":" + std::to_string(c.fp_kw_tenths / 10) + "." + std::to_string(c.fp_kw_tenths % 10);
     else
         j += ",\"capacity_kw\":null";
-    j += ",\"ou_eeprom\":" + jstr(c.fp_eeprom) + ",\"candidates\":[";
+    j += ",\"ou_eeprom\":" + jstr(c.fp_eeprom);
+    // Candidate ids + the DISTINCT model families among them. Detection is coarse — models that share
+    // a page_mask+capacity are register-identical on X10A — so the UI shows a single family only when
+    // all candidates agree; a mixed set is reported honestly as "not uniquely identifiable" rather
+    // than asserting the (arbitrary) best-fit's name.
     int total = 0;
+    std::string cand, fams;
     if (c.fp_valid) {
         Fingerprint fp{};
         fp.page_mask = c.fp_pages;
@@ -84,9 +91,29 @@ static esp_err_t h_status(httpd_req_t* req) {
         const char* out[64];
         total = detect_candidates(sigs, nsig, fp, out, static_cast<int>(sizeof(out) / sizeof(out[0])));
         const int shown = total < 64 ? total : 64;
-        for (int i = 0; i < shown; i++) { if (i) j += ","; j += jstr(out[i]); }
+        std::vector<std::string> seen;
+        for (int i = 0; i < shown; i++) {
+            if (i) cand += ",";
+            cand += jstr(out[i]);
+            const def::ModelName* mn = def::model_name(out[i]);
+            std::string fam = mn ? mn->family : "Altherma";
+            if (std::find(seen.begin(), seen.end(), fam) == seen.end()) {
+                if (!seen.empty()) fams += ",";
+                fams += jstr(fam);
+                seen.push_back(fam);
+            }
+        }
     }
-    j += "],\"ambiguous\":" + std::string(total > 1 ? "true" : "false") + "}";
+    j += ",\"candidates\":[" + cand + "]";
+    j += ",\"families\":[" + fams + "]";
+    j += ",\"ambiguous\":" + std::string(total > 1 ? "true" : "false");
+    // Display metadata for the profile actually being read (best-fit representative or generic).
+    const def::ModelName* wm = def::model_name(c.profile.c_str());
+    j += ",\"model\":";
+    j += wm ? "{\"name\":" + jstr(wm->name) + ",\"family\":" + jstr(wm->family) +
+                  ",\"marketing\":" + jstr(wm->marketing) + "}"
+            : "null";
+    j += "}";
     j += "}";
     return http_send_json(req, j.c_str());
 }

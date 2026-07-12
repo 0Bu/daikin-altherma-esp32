@@ -237,7 +237,9 @@ static void test_detect() {
     // ── detect_candidates against the REAL derived signatures ──
     Signature sigs[64];
     const int nsig = def::build_signatures(sigs, 64);
-    CHECK(nsig > 40);                                   // all non-generic profiles have a signature
+    CHECK(nsig >= 39);                                  // Altherma-only detection models
+    // Altherma-only: no non-Altherma (minichiller_*) profile is ever a detection candidate.
+    for (int i = 0; i < nsig; i++) CHECK(std::strncmp(sigs[i].id, "altherma", 8) == 0);
     const char* out[64];
 
     // A unit exposing exactly {00,10,20,21,30,60,61,62,63,64} (no 65/A0/A1) — only egsah/geo3 and
@@ -267,6 +269,30 @@ static void test_detect() {
     // No bus response -> no candidates.
     Fingerprint none{};
     CHECK(detect_candidates(sigs, nsig, none, out, 64) == 0);
+
+    // ── detect_best: a single deterministic representative to read with ──
+    // Unambiguous case (gshp2 alone at 16 kW) → best is exactly that model.
+    Fingerprint g2{};
+    g2.page_mask = mask_of({0x00, 0x10, 0x20, 0x21, 0x30, 0x60, 0x61, 0x62, 0x63, 0x64});
+    g2.kw_tenths = 160;
+    CHECK(detect_best(sigs, nsig, g2) && std::string(detect_best(sigs, nsig, g2)) == "altherma_gshp2");
+    // User's ERGA04-08E fingerprint (0x1bff, ~6 kW): best is an Altherma model, is one of the
+    // candidates, and is never a chiller. The exact ERGA-vs-EBLA variant is register-identical so
+    // which one is named is arbitrary — but it must be a consistent candidate, not registry-order junk.
+    Fingerprint erga{};
+    erga.page_mask = mask_of({0x00, 0x10, 0x20, 0x21, 0x30, 0x60, 0x61, 0x62, 0x63, 0x64, 0xA0, 0xA1});
+    erga.kw_tenths = 60;
+    const char* eb = detect_best(sigs, nsig, erga);
+    CHECK(eb && std::strncmp(eb, "altherma", 8) == 0);
+    int ecount = detect_candidates(sigs, nsig, erga, out, 64);
+    CHECK(ecount > 1 && has_candidate(out, ecount, eb));   // best is drawn from the candidate set
+    // No bus → no best-fit.
+    CHECK(detect_best(sigs, nsig, none) == nullptr);
+
+    // Generic Altherma fallback = the universal register core (not the old 3-row stub); an unknown id
+    // resolves to it — this is what an unrecognized / S-protocol unit reads with.
+    CHECK(def::lookup("generic").count > 40);
+    CHECK(std::string(def::lookup("no_such_profile").id) == "generic");
 
     // ── EEPROM render: raw hex pairs for display ──
     const uint8_t ee[] = {0x0B, 0x02, 0x00, 0x01, 0x03, 0x02};

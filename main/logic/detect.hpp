@@ -134,6 +134,34 @@ inline int detect_candidates(const Signature* sigs, int nsig, const Fingerprint&
     return n;
 }
 
+// Pick the single best-fit candidate id for READING, or nullptr if none is consistent. Ranking,
+// best first: (1) most pages in common with the unit (maximal page_mask overlap — drops feature-poor
+// profiles, so this never returns a profile outside detect_candidates()' set); (2) tightest kW class
+// that still contains the capacity (a narrow rated class beats a broad one, and a classed profile
+// beats a class-less one); (3) first in signature order, a stable deterministic tie-break — NOT
+// registry order chosen blindly, which was the old candidates.front() bug that applied an EBLA
+// monobloc to an ERGA split.
+//
+// NOTE: models that share a page_mask AND kW class are register-identical on X10A (they differ only
+// by untestable flag bits / labels), so among them the tie-break is arbitrary — every such candidate
+// reads the SAME values, so any is an equally-correct working profile. The exact marketing variant
+// is not knowable from bus data; the caller surfaces the candidate set (and the O/U EEPROM code) for
+// display instead of asserting one. See docs/ARCHITECTURE.md ("Auto-detection").
+inline const char* detect_best(const Signature* sigs, int nsig, const Fingerprint& fp) {
+    const char* best = nullptr;
+    int best_pop = -1, best_span = 0;
+    for (int i = 0; i < nsig; i++) {
+        if (!signature_consistent(sigs[i], fp)) continue;
+        const int pop  = __builtin_popcount(sigs[i].page_mask);
+        const int span = (sigs[i].kw_min_tenths >= 0)
+                             ? (sigs[i].kw_max_tenths - sigs[i].kw_min_tenths) : 1000;
+        if (best == nullptr || pop > best_pop || (pop == best_pop && span < best_span)) {
+            best = sigs[i].id; best_pop = pop; best_span = span;
+        }
+    }
+    return best;
+}
+
 // Render the O/U EEPROM digit bytes to a printable string (space-separated hex pairs) for display
 // only — there is no digits->model-name table in the repo (docs/REGISTERS.md), so these bytes help
 // a human match a nameplate but are not decoded to a model name. Always NUL-terminates `out`.
