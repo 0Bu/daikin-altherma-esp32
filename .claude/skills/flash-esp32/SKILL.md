@@ -30,16 +30,24 @@ config survive). Docker builds, host `esptool` flashes (Docker Desktop has no US
    (newer esptool: `espsecure sign-data` with a hyphen.) **No key on hand?** You cannot produce a
    bootable image locally — pull a signed build from CI, or, for a throwaway dev board only, rebuild
    with the signature requirement off (`sdkconfig.defaults` `..._NO_SECURE_BOOT` flags → `n`).
-4. **Flash** from the host (preserves nvs — `@flash_args` skips `nvs@0x9000`):
+4. **Guard — refuse to flash an unsigned image.** Run the check before touching the chip; it exits
+   non-zero (and prints the exact signing command) if the image is unsigned, so a crash-looping board
+   is prevented rather than diagnosed after the fact:
+   ```bash
+   scripts/require-signed.sh build/daikin-altherma-esp32.bin
+   ```
+5. **Flash** from the host (preserves nvs — `@flash_args` skips `nvs@0x9000`):
    ```bash
    cd build && esptool --chip <target> -p <port> write_flash "@flash_args"
    ```
-5. **Verify.** After reboot, `curl http://daikin-altherma-esp32.local/status | jq .version` (or read
+6. **Verify.** After reboot, `curl http://daikin-altherma-esp32.local/status | jq .version` (or read
    the serial log: `screen <port> 115200`, exit `Ctrl-A K`). Confirm WiFi/MQTT/hp status.
 
 ## Notes
 - **Unsigned = crash-loop**, not a brick: this scheme burns no eFuses and leaves ROM download mode
-  on, so a board that got an unsigned image is recovered by re-flashing a **signed** one (step 3+4).
+  on, so a board that got an unsigned image is recovered by re-flashing a **signed** one (step 3→5).
+  The step-4 guard exists so this never happens in the first place. Boot-recovery model +
+  auto-rollback details: [docs/SECURITY.md](../../../docs/SECURITY.md) → Boot recovery.
 - First flash of a fresh board erases NVS → set up WiFi via the `daikin-altherma-esp32-setup` portal.
 - A full-erase recovery: `esptool --chip <target> -p <port> erase_flash` then reflash.
 - This skill does NOT merge/release — that's the `ship` skill. It works on the local tree only.

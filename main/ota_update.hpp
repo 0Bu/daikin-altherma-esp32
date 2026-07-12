@@ -1,8 +1,10 @@
 #pragma once
 // Pull-based signed OTA (esp_https_ota). check -> compare manifest version -> download the
 // per-target daikin-altherma-esp32<suffix>.bin into the inactive slot -> reboot. Downgrade gate
-// (refuse a not-strictly-newer image), image-signature verification, and a ~90 s health gate
-// that keeps rollback armed until the new image proves healthy. See docs/ARCHITECTURE.md → OTA and docs/SECURITY.md.
+// (refuse a not-strictly-newer image), image-signature verification, and a connectivity health gate
+// that keeps rollback armed until the new image proves healthy (survives a base window AND gets
+// online, else it stays PENDING_VERIFY and a reboot reverts). See docs/ARCHITECTURE.md → OTA,
+// docs/SECURITY.md → Boot recovery, and logic/health_gate.hpp.
 #include <cstdint>
 #include <string>
 
