@@ -51,11 +51,8 @@ main { flex: 1; }
 }
 .hdr-name {
   font-size: 19px; font-weight: 650; letter-spacing: -.2px; color: var(--fg); line-height: 1.2;
-  /* detected model names can be long — clamp to two lines, full name in the title tooltip */
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
 }
 .hdr-id { flex: 1; min-width: 0; }
-.hdr-meta { font-size: 13.5px; color: var(--muted); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
 /* logo mark: rounded brand square holding the "waves" glyph */
 .logo {
@@ -102,12 +99,12 @@ main { flex: 1; }
 /* editable card header: label left, pencil right (e.g. the MQTT card) */
 .vgroup-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .vgroup-head .section-label { margin-bottom: 2px; }
-.card-edit {
-  flex: none; display: grid; place-items: center; cursor: pointer;
-  border: 0; background: none; color: var(--muted);
-  width: 28px; height: 28px; border-radius: 8px; margin: -4px -4px -2px 0;
+.vgroup-btn {
+  width: 100%; font: inherit; background: none; border: 0; cursor: pointer; text-align: left;
+  padding: 0;
 }
-.card-edit:hover { color: var(--brand-strong); background: var(--soft); }
+.vgroup-btn .vcard-edit-icon { color: var(--muted); margin-bottom: 2px; }
+.vgroup-btn:hover .section-label, .vgroup-btn:hover .vcard-edit-icon { color: var(--brand-strong); }
 .vrow {
   display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
   padding: 9px 0; border-top: 1px solid var(--line);
@@ -124,7 +121,6 @@ main { flex: 1; }
 /* tappable value row (ESP32 card's Firmware row → check for OTA update) */
 .vrow-btn { width: 100%; font: inherit; background: none; border: 0; border-top: 1px solid var(--line); cursor: pointer; text-align: left; }
 .vrow-btn:hover .vrow-label, .vrow-btn:hover .vrow-val { color: var(--brand-strong); }
-.vrow-chev { color: var(--muted); margin-left: 5px; vertical-align: -2px; }
 .empty { color: var(--muted); font-size: 14px; padding: 8px 0; }
 
 /* ── Forms ──────────────────────────────────────────────────────────────── */
@@ -205,8 +201,10 @@ main { flex: 1; }
 .toast.ok .disc { background: var(--ok); } .toast.err .disc { background: var(--err); }
 @keyframes tin { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
-/* ≥560px: value tables two-up per DESIGN.md §9 */
+/* ≥560px: cards flow into two columns packed top-down (masonry via multicol) per DESIGN.md §9.
+   A CSS grid would row-align, so a tall card (e.g. ESP32) left big gaps beside a short one; the
+   column flow keeps both columns tight to the top regardless of uneven card heights. */
 @media (min-width: 560px) {
-  #valueGroups { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
-  #valueGroups .vgroup { margin-top: 0; }
+  #valueGroups { column-count: 2; column-gap: 12px; }
+  #valueGroups .vgroup { margin: 0 0 12px; break-inside: avoid; }
 }
