@@ -71,9 +71,8 @@ static esp_err_t set_hp(httpd_req_t* req) {
     c.rx_pin    = ji(j, "rx", c.rx_pin);
     c.tx_pin    = ji(j, "tx", c.tx_pin);
     c.poll_s    = ji(j, "poll_s", c.poll_s);
-    { cJSON* d = cJSON_GetObjectItem(j, "demo"); if (cJSON_IsBool(d)) c.demo = cJSON_IsTrue(d); }
     // values[] -> comma-joined mask. Absent key preserves the stored mask, so the UI can send
-    // partial updates (a live poll/language/demo change must not wipe the value selection).
+    // partial updates (a live poll/language change must not wipe the value selection).
     cJSON* arr = cJSON_GetObjectItem(j, "values");
     if (cJSON_IsArray(arr)) {
         std::string mask;

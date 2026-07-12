@@ -9,7 +9,6 @@
 #include "hp_detect.hpp"
 #include "logic/convert.hpp"
 #include "logic/crc.hpp"
-#include "logic/demo.hpp"
 
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -74,42 +73,6 @@ static void poll_once() {
     xSemaphoreGive(s_mtx);
 }
 
-// Demo cycle: fabricate the whole active profile through the same decode/format path as real data
-// (logic/demo.hpp). Never touches the UART. Isolated so removing demo mode is a one-function delete.
-static void poll_demo() {
-    static uint32_t tick = 0;
-    tick++;
-    const Config& c    = config();
-    const auto&   prof = def::lookup(c.profile.c_str());
-
-    std::vector<CachedValue> fresh;
-    uint8_t seen[256] = {0};
-    int     regs      = 0;
-
-    for (size_t i = 0; i < prof.count; i++) {
-        const ValueDef& d = prof.values[i];
-        if (!seen[d.reg]) { seen[d.reg] = 1; regs++; }
-
-        uint8_t raw[2] = {0, 0};
-        int     n      = demo_encode(d, tick, raw);
-        ValueDef at0   = d; at0.offset = 0;                    // demo bytes live at raw[0..]
-        CachedValue cv;
-        cv.label = d.label;
-        cv.unit  = unit_for_datatype(d.type);
-        std::string val;
-        if (hp_format(at0, raw, n > 0 ? n : 2, val)) cv.value = val;
-        fresh.push_back(std::move(cv));
-    }
-
-    xSemaphoreTake(s_mtx, portMAX_DELAY);
-    s_cache           = std::move(fresh);
-    s_stats.connected = true;
-    s_stats.registers = regs;
-    s_stats.values    = static_cast<int>(s_cache.size());
-    s_last_ok_us      = esp_timer_get_time();
-    xSemaphoreGive(s_mtx);
-}
-
 // Auto-detection cycle: sweep protocol + fingerprint the unit, then persist proto/profile/
 // fingerprint (logic/detect.hpp, hp_detect.cpp). Runs in place of a normal cycle while
 // config().profile == "auto". Only commits when the bus actually answered, so a not-yet-wired unit
@@ -141,11 +104,8 @@ static void poll_detect() {
 
 static void poll_task(void*) {
     for (;;) {
-        if (config().demo) poll_demo();
-        else {
-            if (config().profile == "auto") poll_detect();     // resolves to a concrete profile
-            if (config().profile != "auto") poll_once();       // then poll it (same cycle if resolved)
-        }
+        if (config().profile == "auto") poll_detect();         // resolves to a concrete profile
+        if (config().profile != "auto") poll_once();           // then poll it (same cycle if resolved)
         vTaskDelay(pdMS_TO_TICKS(config().poll_s * 1000));     // re-reads poll_s each cycle
     }
 }

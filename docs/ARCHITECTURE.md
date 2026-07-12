@@ -12,7 +12,7 @@ skill checks for drift.
 Two concerns, cleanly separated. The **domain** — the X10A protocol (I and S), the register/CRC
 framing, the value-definition tables (`def/*`) and the converter functions — is reverse-engineered
 heat-pump knowledge, ported byte-for-byte so readings match a known-good implementation. The
-**chassis** — the ESP-IDF/CMake multi-target build, the web installer, captive-portal
+**chassis** — the ESP-IDF/CMake esp32s3 build, the web installer, captive-portal
 provisioning, the MQTT/HA discovery bridge, signed OTA, the `main/logic/` host-test split and the
 CI / Claude-Code developer setup — is the delivery machinery. Anything about *talking to the heat
 pump* is the domain; anything about *installing, configuring and shipping* is the chassis. IDF
@@ -23,25 +23,34 @@ idioms are used throughout (`esp_http_server`, `uart_driver`, `esp-mqtt`).
 ```
 main.cpp            → boot: NVS init, WiFi (STA or setup AP), start HTTP server, start
                        poll engine + MQTT bridge, arm OTA health gate
+wifi.cpp/.hpp       → STA bring-up (all-channel scan → strongest AP by RSSI) + endless reconnect
+                       (first-boot budget → setup portal) + ICMP gateway watchdog + DHCP hostname + mDNS
 hp_comm.cpp/.hpp    → X10A UART transport: request framing for protocol I and S, 9600 8E1,
                        CRC, timeout handling
-hp_registers.cpp    → per-register request/response layout, register→value extraction
+hp_detect.cpp/.hpp  → auto-detect glue: protocol sweep + page probe → bus fingerprint → candidate
+                       models (logic/detect.hpp); register→value extraction is in logic/registers.hpp
 hp_convert.cpp/.hpp → converter functions: raw bytes →
                        typed reading (temp, int, fixed-point, enum/label, on/off, pressure)
-hp_poll.cpp/.hpp    → poll engine task: builds the active register set from the profile+mask,
-                       polls each interval, fills the thread-safe value cache, drives errors
+hp_poll.cpp/.hpp    → poll engine task: builds the active register set from the profile,
+                       polls each interval, fills the thread-safe value cache, drives errors, and
+                       pushes the /events WebSocket (values each cycle, status every 4th)
 def/*.hpp           → embedded per-model value profiles (machine-generated in the ValueDef row
                        format); def/registry.hpp maps profile id→table, models_catalog.hpp = /models
-config.cpp/.hpp     → NVS-backed runtime config (daik_cfg); load/save, defaults from Kconfig
+config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + link cache (pins/proto) persisted,
+                      model RAM-only; mutex-guarded snapshot via config()
 nvs_storage.cpp     → thin NVS helpers (namespaces, blobs, migration)
 http_server.cpp     → esp_http_server :80, wildcard dispatch + handle_all OOM try/catch (503)
-http_status.cpp     → GET / (web UI), /status, /values, /models, /diag
+http_status.cpp     → GET / (web UI), /status, /values, /models, /diag, /scan, /coredump, and the
+                      /events WebSocket (live status/values push)
 http_config.cpp     → POST /set_wifi, /set_mqtt, /set_hp, /detect
 http_ota.cpp        → /ota/check|update|status
-mcp_server.cpp      → /mcp — read-only MCP tools (get_status, get_hp_values) for AI agents
+mcp_server.cpp      → /mcp — read-only MCP tools (get_status, get_hp_values) for AI agents — PLANNED
+                      (route exists; returns a JSON-RPC "not implemented" error for now)
 provisioning.cpp    → captive setup portal (SoftAP daikin-altherma-esp32-setup) when no WiFi
+captive_dns.cpp     → UDP:53 catch-all (every name → 192.168.4.1) so the setup portal auto-pops
 mqtt_ha.cpp/.hpp    → Home Assistant MQTT-Discovery bridge (streamed discovery), read-only
-ota_update.cpp      → pull-based signed OTA (esp_https_ota), downgrade gate, health gate
+ota_update.cpp      → OTA: rollback health gate (implemented); pull check/download + downgrade
+                      gate via esp_https_ota (TODO stubs — see ota_update.hpp)
 diag_log.cpp        → in-RAM console ring served by GET /diag (static .bss buffer)
 www/                → web UI sources: index.html + style.css + app.js, spliced into ONE
                      self-contained page at build time (inline_assets.cmake) and served gzipped;
@@ -62,16 +71,17 @@ host-testable core is unusually large and valuable, because the risky parts are 
   scale or endianness would silently corrupt a reading; unit-tested per converter id against
   known-good reference outputs.
 - `logic/registers.hpp` — register-buffer parsing (offset/size extraction, bounds).
-- `logic/config_model.hpp` — validation of pins (no overlap, in range for the target), interval
-  clamps, protocol enum, profile/value-mask (de)serialization.
+- `logic/config_model.hpp` — validation of pins (no overlap, in range for the target), protocol
+  enum, and the fixed `POLL_INTERVAL_S` constant.
 - `logic/discovery.hpp` — the HA MQTT-Discovery payload builder (topic + config JSON per value),
   so the exact bytes HA receives are asserted on the host, not on the device.
-- `logic/demo.hpp` — demo mode: fabricates plausible register bytes per value so the poll engine
-  can fill the cache with realistic readings **without a wired unit**. Isolated in one header so
-  the feature is trivial to extend (a converter case) or remove; host-tested like the rest.
 - `logic/detect.hpp` — model auto-detection: maps a bus `Fingerprint` (answering pages + capacity)
   against per-profile signatures to a candidate set (see the Auto-detection section). Pure, so the
   narrowing rule is asserted on the host against the real derived signatures.
+- `logic/board_pins.hpp` — per-target list of usable X10A GPIOs (the pins broken out + safe on each
+  chip's reference board; the XIAO ESP32-S3 is authoritative). Feeds `/status.pins_avail` and hence
+  the dashboard RX/TX pin dropdown. Pure, so the lists are asserted host-side (sorted, in range, and
+  the reference-board set excludes not-broken-out pins like GPIO47).
 
 `hp_convert.cpp`, `hp_comm.cpp`, `config.cpp`, `mqtt_ha.cpp` are thin device wrappers that call
 these headers. Add new decode/format logic to `main/logic/` and a `CHECK` in
@@ -88,17 +98,19 @@ The single biggest UX change: **no editing a config header + a `def/*.h` by hand
 - Each value is a `ValueDef{reg, offset, conv, size, type, label}` row; one model profile is an
   array of them, embedded as `const` in `main/def/<profile>.hpp`. The tables are machine-generated
   from the X10A value definitions (see [`REGISTERS.md`](REGISTERS.md)) — curated to the useful
-  monitoring values — and `def/registry.hpp` maps a **profile id** to its table. `tools/gen_defs.py`
-  is the importer for classic `.h`-row model files in the same output format.
-- At runtime `config` holds the active `profile` id + a `val_mask` (which of the profile's values
-  are enabled) + `lang`. The poll engine expands this to the concrete register set to request.
-- The `/models` endpoint serves the catalog (`def/models_catalog.hpp`): the model list + a
-  `profile_map` (model→profile id) + pin hint, so the web UI's model dropdown resolves the profile
-  without hard-coding it in JS.
+  monitoring values — and `def/registry.hpp` maps a **profile id** to its table. `tools/profiles/`
+  decodes Daikin's proprietary value catalog (encrypted `.ldd` = zlib + NRBF) into these tables
+  (`gen_profiles.py`) and the id→name table (`gen_names_generic.py`).
+- At runtime `config` holds the active `profile` id. The poll engine expands it to the concrete
+  register set to request (every value of the profile — there is no per-value enable mask). Labels
+  are English-only — there is no `lang` field.
+- The `/models` endpoint serves the catalog (`def/models_catalog.hpp`): the profile list + pin
+  hint. Detection is fully automatic (see the Auto-detection section) — the web UI shows the
+  detected model read-only, so this is metadata only; there is no manual model dropdown.
 - Flash cost is bounded by embedding **only the value tables** (a few hundred rows × families),
-  not the whole source tree; labels are stored once per language and shared. If size ever
-  pressures the 4 MB layout, profiles can move to a data partition — the indirection through
-  `def/registry.hpp` makes that a non-breaking change.
+  not the whole source tree; labels are English-only. If size ever pressures the 4 MB layout,
+  profiles can move to a data partition — the indirection through `def/registry.hpp` makes that a
+  non-breaking change.
 
 Porting fidelity is enforced on the host: `test/test_defs.cpp` checks a sampling of profile rows
 against the source rows so a regenerate can't silently drift.
@@ -107,75 +119,87 @@ against the source rows so a regenerate can't silently drift.
 
 A single task owns the X10A UART (there is exactly one link). Each cycle:
 
-1. Build the ordered list of **registers** needed by the enabled values (dedup — one register
+1. Build the ordered list of **registers** needed by the profile's values (dedup — one register
    read serves all its values).
 2. For each register: send the protocol-`I`/`S` request, read the fixed-length reply with a
    `SER_TIMEOUT`, CRC-check it. On timeout/CRC error, record it (`crc_err`/`timeout_err`,
    `last_error`) and continue — one bad register never stalls the whole cycle.
-3. Extract each enabled value from its register buffer via `(offset,size)` and convert it via its
+3. Extract each value from its register buffer via `(offset,size)` and convert it via its
    `convId`. Write results into the **thread-safe value cache** under a mutex.
-4. Sleep `poll_s`. The MQTT bridge and HTTP `/values` read the cache; they never touch the UART.
+4. Sleep `POLL_INTERVAL_S` (fixed 1 s — see `config.cpp`). The MQTT bridge and HTTP `/values` read
+   the cache; they never touch the UART.
 
 Config changes from the web UI (`/set_hp`) apply live: the task rereads `config` at the top of the
-next cycle (pins/protocol changes re-init the UART). No reboot needed for model/values/pins/
-interval — only WiFi/MQTT changes reboot (they re-init network stacks).
-
-**Demo mode** (`Config::demo`, toggled in the Heat pump settings view): when on, the task takes a
-separate branch (`poll_demo()`) that **never touches the UART**. It asks `logic/demo.hpp` to
-fabricate the raw bytes for each value in the active profile and runs them through the *same*
-`convert()`/`hp_format()` path as real data, then fills the cache and marks the link connected. The
-web UI, `/values` and the MQTT bridge are all unaware — they just read realistic readings. `demo`
-is one bool in the config model + one poll-engine branch + one pure header, so the feature adds no
-weight to the real path and is easy to pull out.
+next cycle (pins/protocol changes re-init the UART). No reboot needed for model/pins — only
+WiFi/MQTT changes reboot (they re-init network stacks).
 
 ## Auto-detection (protocol + model) — `hp_detect.cpp` + `logic/detect.hpp`
 
-The goal is **zero manual model/protocol picking** where the bus allows it. `Config::profile`
-defaults to the sentinel `"auto"`; while it holds, the poll task runs one detection pass
-(`poll_detect()`) instead of a normal cycle:
+The goal is **zero manual model/protocol picking** where the bus allows it, on **every boot**. The
+**model** is never persisted: `config_load` always seeds `Config::profile` with the sentinel
+`"auto"`, so a fresh identification runs after every reset (a swapped unit is re-identified). The
+**link** (RX/TX pins + protocol) *is* persisted as a boot-invariant cache — loaded first, tried
+first, re-saved on change — with the compile-time defaults as fallback so a stale cache self-heals.
+While `profile == "auto"`, the poll task runs one detection pass (`poll_detect()`) instead of a
+normal cycle:
 
-1. **Pin + protocol sweep** — try the identity page `0x00` on candidate RX/TX pairs (the configured
-   pins, their **swap** — a reversed X10A wire is the commonest mistake — then the per-target
-   default and its swap) × protocol `I`/`S`; keep the pins **and** framing that return a valid
-   CRC-checked reply instead of `15 EA`. Only X10A-designated pins are probed (no arbitrary GPIO).
-   The winning pins are persisted, so a swapped wire self-corrects.
+1. **Pin + protocol sweep** — try the identity page `0x00` on candidate RX/TX pairs (the cached
+   pins first, their **swap** — a reversed X10A wire is the commonest mistake — then the per-target
+   default and its swap) × protocol (cached framing first, then the other); keep the pins **and**
+   framing that return a valid CRC-checked reply instead of `15 EA`. Only X10A-designated pins are
+   probed (no arbitrary GPIO). The winning pins/protocol are re-persisted only when they changed
+   (a UI pin override survives reboot); an unchanged link is confirmed with no NVS write.
 2. **Page probe** — query every page any profile can reference (`0x00,0x10,0x20,0x21,0x30,0x60–0x65,
    0xA0,0xA1`) plus `0x11`; set a bit in a **page mask** for each page that answers.
 3. **Capacity + EEPROM** — read the O/U capacity from page `0x00` offset 12 (0.1 kW units) and the
    O/U EEPROM identification digits from page `0x11`.
 
-Those facts form a `Fingerprint`. The pure, host-tested `logic/detect.hpp` narrows the profiles:
-each profile's **signature** (its page mask + a capacity class parsed from its id) is derived
-automatically from the embedded `ValueDef` tables (`def/signatures.hpp`) — no hand-maintained
-table. A profile is a candidate when its pages are a subset of the answering pages **and** the
-unit's capacity falls in its class; among those, only the ones with **maximal page overlap** are
-kept (this drops feature-poor profiles that are merely a subset of a feature-rich unit).
+Those facts form a `Fingerprint`. The pure, host-tested `logic/detect.hpp` narrows the **Altherma-only**
+profiles (`def/signatures.hpp::is_detection_model` excludes the non-Altherma mini-chillers so they
+can't be false candidates): each profile's **signature** (its page mask + a capacity class parsed from
+its id) is derived automatically from the embedded `ValueDef` tables — no hand-maintained table. A
+profile is a candidate when its pages are a subset of the answering pages **and** the unit's capacity
+falls in its class; among those, only the ones with **maximal page overlap** are kept (dropping
+feature-poor profiles). `detect_best()` then picks one deterministic representative (maximal overlap →
+tightest kW class → stable order) — never the old blind `candidates.front()` registry order.
 
-The result is committed only when the bus actually answered (so a not-yet-wired unit retries next
-cycle instead of pinning `generic`):
+The result is applied only when the bus actually answered (a not-yet-wired unit retries next cycle
+instead of pinning `generic`); the model goes to the in-RAM config (`config_set_runtime`), while a
+changed link cache (pins/proto) is persisted (`config_save`):
 
-- **exactly one candidate** → applied automatically; the UI shows only "Detected: <model>".
-- **several candidates** → the best-fit becomes the working profile and the UI offers just the
-  reduced (ambiguous) set. Many Altherma variants are electrically identical on X10A (e.g.
-  EHV/EHB/EHVZ = one PCB, different packaging) and genuinely cannot be told apart from bus data —
-  the EEPROM digits are shown to help the user match the nameplate but are **not** decoded to a
-  model name (there is no digit→name table).
-- **none** → `generic`, UI shows the full list.
+- **exactly one candidate** → applied; the UI shows "Detected: <family> · ~kW".
+- **several candidates** → the best-fit representative is read with — **every candidate is
+  register-equivalent, so the decoded VALUES are identical regardless of which is named**. The 41
+  Altherma models collapse to a few page-mask classes; within a class they differ only by untestable
+  flag bits (e.g. an ERGA split vs an EBLA monobloc differ by one bit with identical labels), so the
+  exact model **cannot** be determined from bus data. The UI reports this honestly — the distinct
+  candidate **families** plus the O/U EEPROM digits to match the nameplate — rather than asserting a
+  guessed name. The EEPROM is **not** decoded to a model name (no digit→name table; the one real path
+  to exact ID would need an external EEPROM-code table).
+- **none, bus answered** → the **generic Altherma profile** (`def/registry.hpp` `generic[]` = the ≥95%
+  universal register core), so an unrecognized or S-protocol unit still reports every essential value.
+- **no bus** → stays `auto` and retries; the UI reports the unit isn't responding (check X10A wiring).
 
-`proto`, the resolved `profile`, and the fingerprint (`fp_pages`/`fp_kw`/`fp_eeprom`) are persisted,
-so detection runs **once** — not on every boot. `/status.detect` recomputes the candidate set from
-the stored fingerprint cheaply (no re-probe). `POST /detect` resets `profile` to `"auto"` and
-invalidates the fingerprint to force a fresh pass; a manual pick from the web UI sets `prof_auto=0`
-and pins the chosen profile. Protocol is no longer a UI control.
+The resolved `profile` and fingerprint (`fp_pages`/`fp_kw`/`fp_eeprom`) live only in the in-RAM config
+— **the model is never persisted**, so it is re-identified on **every boot** (a unit moved to another
+pump is always re-detected; no stale model survives a reset). The `proto`/`rx_pin`/`tx_pin` link cache
+*is* persisted (see above). Within the session, `/status.detect` recomputes the candidates, their
+distinct `families`, and the
+`model{name,family,marketing}` display name from the in-RAM fingerprint cheaply (no re-probe; names
+from `def/model_names.hpp`). `POST /detect` resets `profile` to `"auto"` and invalidates the
+fingerprint to force a fresh pass immediately (no reboot needed). Detection is **fully automatic** —
+there is no manual model selection or protocol control in the UI, and the UI shows model/protocol
+only while the link is live (a cached fingerprint is never presented as a live reading).
 
 ## Push vs. poll (why the engine polls)
 
 The X10A service port is a **strict request/response bus** — the ESP is always the master and the
 unit only ever answers a query (see [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md) §1). There is no
 opcode, register or framing for the unit to send unsolicited/push frames, so **the firmware must
-poll**; a "the pump pushes values to us" mode is not possible at the wire level. The only push in
-the system is firmware → MQTT (the bridge publishes state on its own cadence), which is independent
-of the HP link.
+poll**; a "the pump pushes values to us" mode is not possible at the wire level. The pushes in the
+system are all firmware → client: firmware → MQTT (the bridge publishes state on its own cadence)
+and firmware → browser over the `/events` WebSocket (the poll task broadcasts values/status on
+change). Both are downstream of — and independent of — the polled HP link.
 
 ## WiFi / LAN connectivity (reconnect + watchdog)
 
@@ -184,6 +208,20 @@ IDF default `WIFI_PS_MIN_MODEM` parks the radio between DTIM beacons, adding ~10
 TCP retransmits, occasionally seconds) of non-deterministic latency to every inbound request — which
 shows up as the web UI "sometimes taking very long to answer". This is a mains-powered bridge, so we
 keep the radio awake for a consistently responsive HTTP UI and MQTT link.
+
+**Strongest AP is selected, not the first one heard.** The STA config sets
+`scan_method = WIFI_ALL_CHANNEL_SCAN` + `sort_method = WIFI_CONNECT_AP_BY_SIGNAL`. The IDF default
+`WIFI_FAST_SCAN` stops at the first matching BSSID (channel-order/timing dependent), so on a
+multi-AP network (mesh / several access points sharing one SSID) this stationary bridge would latch
+onto whatever answered first — often a distant, weak AP — and never roam off it (the "weak WiFi
+signal" symptom). The all-channel scan adds ~1–2 s per connect; the config persists, so every
+reconnect re-selects the strongest AP. `failure_retry_cnt = 3` makes the STA **retry the ranked
+(strongest) AP** a few times before falling back to the next one — without it the default (0) drops
+to a weaker AP on the first association hiccup (observed live: a transient WPA3-SAE Hunt-and-Peck
+auth failure on the −47 dBm AP handed the bridge a −74 dBm one). `sae_pwe_h2e = WPA3_SAE_PWE_BOTH`
+advertises Hash-to-Element so the faster/robuster PWE is used when the AP supports it (H&P stays the
+fallback). The `STA_DISCONNECTED` handler logs the disconnect `reason` (15/202/204 = transient
+SAE/handshake, 201/211 = wrong creds) so a failed connect is diagnosable from `/diag`.
 
 Two layers keep the WiFi station link up:
 
@@ -210,35 +248,79 @@ The Home Assistant bridge:
   entity's discovery config at a time (retained) on (re)connect, so it never needs one large
   contiguous heap block — the same memory discipline as the rest of the firmware. Layout-marker
   converters (docs/REGISTERS.md §3.6) get no sensor.
-- **Per-value retained state topics** `<base>/<node>/<object_id>/state` (no shared JSON blob / no
-  `value_template`) — this is what makes true publish-on-change possible.
-- **Units + device_class** are derived from the converter id, so temperatures get `°C` +
-  `temperature`, currents `A` + `current`, etc., and HA renders them correctly with history.
-- **Publish-on-change.** The heat pump is polled at a short interval (default 2 s) for near-
-  real-time readings, but each cycle the task publishes **only the values that changed** since the
-  last cycle (`logic/mqtt_delta.hpp` `mqtt_changed`, host-tested). A full retained seed of all
-  values goes out only on (re)connect (and when auto-detection resolves a new profile, which also
-  re-streams discovery). So a short poll interval does not flood the broker.
+- **One shared grouped-JSON state topic** `<base>/<node>/state` (retained). Each cycle the task
+  builds a single JSON object of every value, grouped one level deep by X10A register page
+  (`logic/mqtt_group.hpp`, host-tested): `{ "<group>": { "<object_id>": value, … }, … }` (max
+  nesting depth 1, e.g. `hydronic`, `outdoor_state`, `inverter`). Numbers are emitted unquoted,
+  enum/text quoted. Every sensor's discovery config points at this one topic and subscripts its
+  value out with a `value_template` (`value_json['<group>']['<object_id>']` — bracket notation, so a
+  digit-leading slug like `2way_valve…` stays valid).
+- **Units + device_class** are derived from each value's `dataType` field (the def's HA unit hint —
+  1 = °C/temperature, 2 = bar/pressure, 3 = A/current; `unit_for_datatype`/`device_class_for_datatype`
+  in `logic/convert.hpp`), so temperatures get `°C` + `temperature`, currents `A` + `current`, etc.,
+  and HA renders them correctly with history.
+- **Publish-on-change.** The heat pump is polled at a fixed 1 s interval for near-real-time readings,
+  but the task republishes the state JSON **only when the payload actually changed** since the last
+  publish (a plain string compare — a single JSON topic can't be updated per-value, so it is
+  all-or-nothing). A full retained (re)seed goes out on (re)connect and when auto-detection resolves
+  a new profile (which also re-streams discovery). So an idle pump does not flood the broker. The
+  per-cycle build is wrapped in a try/catch: an OOM `std::string` build skips the cycle rather than
+  throwing through the FreeRTOS task and rebooting.
 - **Availability / LWT** on `<base>/<node>/status` (`online`/`offline`, retained) — the broker's
   last-will marks the device offline if it drops, and every sensor's `avty_t` points at it.
+- **Heartbeat topic** `<base>/<node>/heartbeat` (not retained) carries board/link diagnostics,
+  separate from heat-pump values, built by `logic/heartbeat.hpp` (host-tested):
+  - **Board**: `version`, `platform`, `uptime_s` + a `"Ddd+HH:MM:SS.mmm"` `uptime` display string
+    (`format_uptime`), `free_heap` / `min_free_heap` / `max_alloc` (largest free block — the
+    binding OOM limit on this firmware).
+  - **`wifi`**: `connected`, `rssi`, `quality_pct` (0-100%, `wifi_signal_quality_pct` — the
+    standard dBm→% mapping, -50 dBm=100%/-100 dBm=0%), `reconnects` (cumulative RE-connects since
+    boot, `wifi_reconnect_count()` in `wifi.cpp`, excludes the first-ever connect).
+  - **`mqtt`**: `connected`, `count`/`fails` (every `esp_mqtt_client_publish()` call funnels through
+    one `mqtt_publish()` wrapper in `mqtt_ha.cpp` so these cover discovery+state+heartbeat+LWT, not
+    just one topic), `reconnects` (cumulative, excludes the first-ever connect).
+  - **`bus`**: the X10A stats already tracked in `HpStats` — `connected`, `proto`, `registers`,
+    `values`, `last_ok_s`, and nested:
+    - **`rx`**: `received` / `fails` (cumulative successful/failed register reads, `HpStats.rx_ok`/`rx_fail_total`),
+      `crc_err` / `timeout_err` (breakdown).
+    - **`tx`**: `reads` (= `received + fails`, i.e. every register-read request sent), `writes`/`fails` always `0`
+      (reported for schema parity since the X10A bridge is read-only).
+
+  Published on a fixed `HEARTBEAT_INTERVAL_S` (10 s) cadence — unlike the state topic, this is
+  diagnostics rather than real-time telemetry, so it always sends the latest snapshot rather than
+  only on change. 13 diagnostic HA entities (WiFi signal/quality/reconnects, free heap, uptime, X10A bus
+  status/CRC/timeout/rx errors/rx received, MQTT publish count/fails/reconnects — tagged
+  `"ent_cat":"diagnostic"`) point at this topic via their own discovery configs, streamed once per
+  connection independently of heat-pump profile detection — so they show up even while the model is
+  still "auto". Cumulative since-boot counters get `"stat_cla":"total_increasing"` (not
+  `"measurement"`) so HA's long-term statistics handle a reboot's reset to 0 correctly. Mirrors the
+  "device diagnostics" pattern of other ESP32 HA bridges (e.g. EMS-ESP's `heartbeat` topic).
 - **TLS default-on with credentials** (mqtts, CA-verified via the mbedTLS certificate bundle). If
   credentials are set but the URI is not `mqtts://`, the bridge **refuses to connect** and reports
   the reason in `/status.mqtt` rather than sending them in cleartext — no silent plaintext fallback.
   A credential-free plaintext broker on the trusted LAN is allowed (nothing secret to leak).
 
-## OTA, signing, partitions, multi-target
+## OTA, signing, partitions
 
 Structure:
 
-- **Targets** esp32 / esp32s3 / esp32c3 / esp32c6 / esp32c5 from one source tree; CI builds all
-  (`scripts/ci-build-all.sh`). No BLE is used, so the target set is just "WiFi ESP32s with ≥4 MB
-  flash". Per-target deltas are config-only (`idf.py set-target`, native USB-Serial/JTAG console
-  on s3/c3/c6, UART0 on the classic esp32).
+- **Target:** esp32s3 only (`scripts/ci-build-all.sh`). No BLE is used, so the target is just "WiFi ESP32-S3s with ≥4 MB flash". Uses native USB-Serial/JTAG console.
 - **Dual-OTA `partitions.csv`** sized to fill 4 MB; app at `0x20000`; `nvs` at `0x9000` untouched
   by OTA so WiFi + model config survive upgrades.
-- **Signed OTA** (Secure Boot v2 RSA-3072 *without* hardware Secure Boot): running app verifies
-  the signature before installing; downgrade gate + ~90 s health gate as above. Web installer
-  publishes per-chip merged bins + a single `manifest.json` (esp-web-tools auto-selects by chip).
+- **Core Dump to Flash (Crash Archiving)**:
+  - Enabled via `CONFIG_ESP_COREDUMP_ENABLE`, `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH`, and `CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF` in `sdkconfig.defaults`.
+  - A dedicated `coredump` partition of size `0xc000` (48 KB) is placed at offset `0x12000` (in the unused gap between `phy_init` and `ota_0`), leaving the start offsets of `nvs`, `otadata`, `phy_init`, `ota_0`, and `ota_1` completely untouched for backward compatibility and OTA safety.
+  - Exposed via a chunked HTTP GET endpoint `/coredump` (implemented in `http_status.cpp`) that streams the binary crash dump in 512-byte blocks to prevent OOM errors on the tight ESP32 heap.
+  - Supports erasing the partition via `GET /coredump?clear=1` (invokes `esp_core_dump_image_erase()`).
+- **Signed OTA** (Secure Boot v2 RSA-3072 *without* hardware Secure Boot): the running app verifies
+  the signature before installing. The **connectivity health gate is implemented** (commit only after
+  a base window AND getting online, else stay `PENDING_VERIFY` → a reboot rolls back); the **pull
+  check/download + downgrade gate are TODO stubs** (`ota_update.cpp`). Web installer publishes
+  merged bin + a single `manifest.json` (esp-web-tools loads this).
+- **Boot recovery / anti-brick** — an unsigned app aborts pre-`app_main`, so only the bootloader can
+  recover, and only via a previous OTA slot; a direct USB flash of an unsigned build both crash-loops
+  and wipes the fallback. Contained by the pre-flash guard `scripts/require-signed.sh`. Full model,
+  including the three failure modes and the health gate, in [SECURITY.md](SECURITY.md) → Boot recovery.
 - **PR preview installer**: every same-repo PR publishes a signed preview at
   `…/PR/<N>/` on the `gh-pages` branch (fork PRs get no signing key → no preview). OTA always
   checks against **main**.
@@ -246,20 +328,26 @@ Structure:
 ## Web UI config flow
 
 `www/` is split for edit locality (index.html markup + style.css + app.js) and spliced into ONE
-self-contained, pre-gzipped page at build time (`inline_assets.cmake`). The UI's Setup panel drives the config endpoints:
+self-contained, pre-gzipped page at build time (`inline_assets.cmake`). The UI is a **single
+dashboard** — no Settings page, no sub-screens; it drives the config endpoints in place:
 
 - **WiFi** → `/set_wifi`, driven **only** from the captive `setup.html` (provisioned once). The main
   app does not re-provision WiFi; the dashboard shows the live link read-only (SSID + IP + RSSI signal
   bars from `/status.wifi`, populated by `wifi_info()`).
-- **MQTT** → `/set_mqtt`.
-- **Heat pump** → `/set_hp`: the model is **auto-detected** (see Auto-detection) — the card shows
-  the detected model, a reduced pick list when ambiguous, or the full list only as a fallback, plus
-  an "Auto-detect again" action (`/detect`). Protocol is auto-detected and has no UI control. The
-  form still sets language, RX/TX pins (with a per-board pin hint from `/models` + platform), poll
-  interval, demo mode, and the per-value enable checkboxes.
+- **MQTT** → `/set_mqtt` (edited from a dashboard modal off the MQTT card).
+- **Heat pump** → `/set_hp`: fully automatic. The model is **auto-detected** (see Auto-detection) and
+  shown read-only on the dashboard **Model** card. The dashboard **ESP32** card shows the X10A link +
+  protocol and the **RX/TX pins**, which are also auto-detected: **read-only** while the bus answers,
+  and a **dropdown** of the board's usable GPIOs (`/status.pins_avail`) when it doesn't — picking a
+  pin posts `{profile:"auto", rx, tx}` to re-run detection on that pair. The RX/TX pins are
+  **persisted** (a manual pick survives reboot); the model is session-only. Protocol is auto-detected
+  (no UI control), the poll interval is fixed at 1 s (not sent), and labels are English-only (no
+  `lang`). `/set_hp` accepts only `{profile, rx, tx}`.
+- **Firmware / OTA** — tapping the version on the ESP32 card checks for an update (`/ota/*`; a TODO
+  placeholder until a release feed exists, see `ota_update.cpp`).
 
-The board/platform is read from `/api/proxy/1/version` so the pin hints match the running chip
-(e.g. the XIAO ESP32-S3 pad→GPIO map).
+The board/platform is reported by `/status.platform` — the chip name
+shows on the dashboard ESP32 card.
 
 ## Memory constraints
 
