@@ -295,6 +295,12 @@ static void test_detect() {
     CHECK(eb && std::strncmp(eb, "altherma", 8) == 0);
     int ecount = detect_candidates(sigs, nsig, erga, out, 64);
     CHECK(ecount > 1 && has_candidate(out, ecount, eb));   // best is drawn from the candidate set
+    // The candidate set spans DIFFERENT marketing families — the ERGA-E split and the EBLA monobloc
+    // are register-identical on X10A — which is exactly why /status reports it ambiguous and the UI
+    // must not assert one model name. Lock both members so a signature change can't silently collapse
+    // this to a confident (and, for half the owners, wrong) single pick.
+    CHECK(has_candidate(out, ecount, "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw"));
+    CHECK(has_candidate(out, ecount, "altherma_ebla_edla_d_series_4_8kw_monobloc"));
     // No bus → no best-fit.
     CHECK(detect_best(sigs, nsig, none) == nullptr);
 
