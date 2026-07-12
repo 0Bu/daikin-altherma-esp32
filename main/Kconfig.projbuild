@@ -62,14 +62,9 @@ menu "Daikin Altherma Configuration"
             GPIO wired to X10A pin 3 (the heat pump's RX). Default 17 on the classic ESP32,
             4 on the C5, 43 elsewhere (XIAO ESP32-S3 pad D6).
 
-    config DAIKIN_POLL_INTERVAL_S
-        int "Poll interval (seconds)"
-        default 1
-        range 1 600
-        help
-            How often the enabled register set is queried from the heat pump. Defaults to the
-            minimum (1 s) for near-real-time readings; the MQTT bridge publishes only
-            values that changed, so a short interval does not flood the broker.
+    # Poll interval is fixed at 1 s in firmware (config.cpp) — near-real-time; the MQTT bridge
+    # publishes only changed values, so it never floods the broker. Not a compile-time or runtime
+    # option, so there is no Kconfig knob for it.
 
     config DAIKIN_PROFILE
         string "Value-definition profile id"
@@ -80,11 +75,7 @@ menu "Daikin Altherma Configuration"
             the X10A bus on first poll (falls back to a reduced pick list when ambiguous, or
             "generic" when nothing answers). Set a concrete id from the web UI to pin it.
 
-    config DAIKIN_LANG
-        string "Label language (en/de/fr/es/it/ja)"
-        default "en"
-        help
-            Language for the value labels published to Home Assistant.
+    # Firmware is English-only — labels are fixed English; there is no language option (UI or Kconfig).
 
     # ── MQTT / Home Assistant ─────────────────────────────────────────────────
     config DAIKIN_MQTT_BROKER_URI

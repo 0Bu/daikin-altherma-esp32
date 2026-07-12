@@ -16,7 +16,6 @@ struct Config {
     std::string mqtt_pass;
     std::string hostname = "daikin-altherma-esp32";
     std::string profile  = "auto";  // "auto" = detect on next poll cycle; else a concrete profile id
-    std::string lang     = "en";
     Protocol    proto    = Protocol::I;  // initial guess before detection; then the detected variant
     int         rx_pin   = 44;
     int         tx_pin   = 43;

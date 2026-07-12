@@ -18,11 +18,12 @@ void config_load() {
     c.mqtt_pass = nvs_get_str("mqtt_pass", CONFIG_DAIKIN_MQTT_PASSWORD);
     c.hostname  = nvs_get_str("hostname", CONFIG_DAIKIN_HOSTNAME);
     c.profile   = nvs_get_str("profile", CONFIG_DAIKIN_PROFILE);
-    c.lang      = nvs_get_str("lang", CONFIG_DAIKIN_LANG);
     c.proto     = parse_protocol(nvs_get_str("proto", CONFIG_DAIKIN_PROTOCOL));
     c.rx_pin    = nvs_get_i32("rx_pin", CONFIG_DAIKIN_RX_PIN);
     c.tx_pin    = nvs_get_i32("tx_pin", CONFIG_DAIKIN_TX_PIN);
-    c.poll_s    = nvs_get_i32("poll_s", CONFIG_DAIKIN_POLL_INTERVAL_S);
+    // Poll interval is fixed at 1 s (near-real-time; MQTT still publishes only changes) and is no
+    // longer user-configurable — ignore any stale stored value from an older firmware.
+    c.poll_s    = 1;
     c.val_mask  = nvs_get_str("val_mask", "");
     // Default: fresh device (profile=="auto") auto-detects; a pre-existing concrete profile from an
     // older firmware (no prof_auto key) is treated as a user pin so the UI keeps showing it.
@@ -42,7 +43,6 @@ bool config_save(const Config& c) {
     ok &= nvs_set_str("mqtt_pass", c.mqtt_pass);
     ok &= nvs_set_str("hostname", c.hostname);
     ok &= nvs_set_str("profile", c.profile);
-    ok &= nvs_set_str("lang", c.lang);
     ok &= nvs_set_str("proto", std::string(1, static_cast<char>(c.proto)));
     ok &= nvs_set_i32("rx_pin", c.rx_pin);
     ok &= nvs_set_i32("tx_pin", c.tx_pin);

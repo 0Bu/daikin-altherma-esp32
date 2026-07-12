@@ -8,6 +8,7 @@
 #include <initializer_list>
 #include <string>
 
+#include "logic/board_pins.hpp"
 #include "logic/config_model.hpp"
 #include "logic/convert.hpp"
 #include "logic/crc.hpp"
@@ -343,11 +344,35 @@ static void test_health_gate() {
     CHECK(health_gate_decide(0,   base, cap, false, false) == HealthVerdict::Wait);   // still honour base window
 }
 
+static void test_board_pins() {
+    auto has = [](BoardPins b, int p) {
+        for (int i = 0; i < b.count; i++) if (b.pins[i] == p) return true;
+        return false;
+    };
+    // Reference board (Seeed XIAO ESP32-S3): exactly the broken-out pads, with the X10A defaults
+    // present and the not-broken-out pins (16/17, 47/48) absent — the whole point of the dropdown.
+    BoardPins s3 = board_pins("esp32s3");
+    CHECK(s3.count == 11);
+    CHECK(has(s3, 43) && has(s3, 44));                              // D6/D7 — the X10A defaults
+    CHECK(!has(s3, 16) && !has(s3, 17) && !has(s3, 47) && !has(s3, 48));
+    // Every supported target: non-empty and strictly ascending (⇒ sorted + de-duped) within GPIO range.
+    for (const char* t : {"esp32", "esp32s3", "esp32c3", "esp32c6", "esp32c5"}) {
+        BoardPins b = board_pins(t);
+        CHECK(b.count > 0);
+        for (int i = 0; i < b.count; i++) CHECK(gpio_in_range(b.pins[i]));
+        for (int i = 1; i < b.count; i++) CHECK(b.pins[i] > b.pins[i - 1]);
+    }
+    // Unknown / null target falls back to the reference board (never an empty list).
+    CHECK(board_pins("nope").count == s3.count);
+    CHECK(board_pins(nullptr).count == s3.count);
+}
+
 int main() {
     test_crc();
     test_registers();
     test_convert();
     test_config_model();
+    test_board_pins();
     test_discovery();
     test_registry();
     test_detect();
