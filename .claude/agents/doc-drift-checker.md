@@ -2,6 +2,7 @@
 name: doc-drift-checker
 description: Checks that code changes stay in sync with the docs that describe them — .claude/CLAUDE.md, docs/README.md, docs/ARCHITECTURE.md. Invoke before opening/merging a PR, or after changing the component map, NVS keys, HTTP API, config model, or poll/MQTT/OTA behaviour.
 tools: Read, Grep, Glob, Bash
+model: sonnet
 ---
 
 You verify the documentation still matches the code after a change. Drift here is silent and

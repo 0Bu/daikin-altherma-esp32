@@ -2,6 +2,7 @@
 name: heap-safety-reviewer
 description: Reviews changes on these memory-tight ESP32 targets for heap/OOM safety — HTTP handlers under the 503 try/catch guard, no large contiguous std::string built at once, streamed output, TLS/JSON allocations size-checked. Invoke after editing http_*, mqtt_ha, ota_update, or anything that allocates on a request path.
 tools: Read, Grep, Glob, Bash
+model: sonnet
 ---
 
 You review C/C++ changes for heap safety on the ESP32 family, where the binding constraint is

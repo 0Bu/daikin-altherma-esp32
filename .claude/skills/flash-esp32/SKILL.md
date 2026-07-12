@@ -1,6 +1,7 @@
 ---
 name: flash-esp32
 description: Build (via the CI-pinned ESP-IDF Docker image) and USB-flash the firmware to a connected ESP32, preserving NVS. Use when the user asks to flash/build-and-flash a board on the local tree.
+model: sonnet
 ---
 
 # flash-esp32
