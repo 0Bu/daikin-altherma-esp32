@@ -1,6 +1,7 @@
 ---
 name: project-review
 description: Pre-merge project review — check the diff for doc drift (CLAUDE.md ↔ docs ↔ code), memory-safety on HTTP handlers, multi-target build implications, and that new pure logic has host tests. Use before opening/merging a PR.
+model: sonnet
 ---
 
 # project-review
