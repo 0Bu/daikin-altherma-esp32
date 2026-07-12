@@ -43,8 +43,9 @@ Assistant **or** Grafana — and take their ratio:
 
 1. **Thermal energy produced** = ∫ (flow × ΔT) dt — buildable **only** because the device exposes
    the water **flow rate** *and* **both** leaving and return water temperatures. (Daikin's own
-   Onecta cloud and the BRP069A LAN adapter expose neither flow nor return temp, so they cannot
-   produce a heat figure at all — see [Why not the shortcuts](#why-not-the-obvious-shortcuts).)
+   Onecta cloud and the BRP069A LAN adapter expose neither, so they can't form a heat figure at all;
+   Daikin's **EKRHH Modbus hub** *does* expose them — see
+   [Why not the shortcuts](#why-not-the-obvious-shortcuts).)
 2. **Electrical energy consumed** = from a **real electricity meter** on the heat-pump circuit — not
    from compressor current, not from Onecta's estimate.
 
@@ -184,6 +185,22 @@ integrate($P[$__range]) / 3600 / increase(heatpump_energy_kwh[$__range])
   electrical kWh — widely unreliable (documented cases of a >40× overestimate, and negative values in
   HA's Energy dashboard), in ~2-hour buckets, behind a ~200-calls/day cloud rate limit (~10-min-stale
   data). This device's local 1 s data is strictly better for metering.
+- **Daikin EKRHH "HomeHub" / local Modbus — different from the cloud, a peer of this firmware.** In
+  its Modbus mode (commissioned as use-case UC3, Modbus TCP `:502`) the HomeHub *does* expose the
+  water **flow rate** (input reg 49), **return** (reg 42) and **leaving** water temps (reg 40 PHE /
+  41 BUH), so you can build the **same virtual heat meter** — the community HA integrations
+  (`gerione/daikin-ha-ekrhh-modbus`, `joklee/ha_daikin_altherma4_modbus`) compute
+  `thermal_W = flow × |LWT−RWT| × ~70` exactly this way, and evcc reads it to modulate PV-surplus
+  power. It adds one thing this firmware lacks — an instantaneous **power** figure (reg 51, kW) — but
+  that is Daikin's internal *estimate*, not a metered watt, and there is still **no accumulated kWh,
+  heat-kWh or COP register** (you integrate downstream in HA/evcc, exactly as above), so a
+  trustworthy JAZ still wants an external CT/Shelly (plus a MID heat meter for a certified SCOP). On
+  the *metering* ingredients EKRHH and this firmware are therefore **peers**, not a shortcut past
+  them — EKRHH's real edge is **bidirectional control** (SG-Ready / §14a power modulation /
+  setpoints, the evcc path), where this firmware is read-only telemetry. Practical differences: EKRHH
+  is a separate **paid** Daikin accessory, must run in Modbus mode UC3 (its PV modes UC1/UC2 expose no
+  bus at all), and taps the **P1/P2** room-controller bus — not the **X10A** service port this
+  firmware reads.
 - **The heat pump's own internal kWh counter** (MMI / P1P2, whole-kWh, ~hourly) is itself just a
   ΔT×flow integration on the same uncalibrated sensors — not a higher-grade measurement. It is only
   more accurate when an external pulse kWh meter is wired to the unit's metering input. For a
