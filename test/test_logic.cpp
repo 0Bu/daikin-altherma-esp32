@@ -176,6 +176,13 @@ static void test_config_model() {
     CHECK(parse_protocol("S") == Protocol::S);
     CHECK(parse_protocol("I") == Protocol::I);
     CHECK(parse_protocol("") == Protocol::I);
+
+    // /set_hp fingerprint rule: a partial live update (no "profile" key) never clears the cached
+    // detection, whatever the stored profile is; only an explicit "auto" does; a manual pin doesn't.
+    CHECK(!set_hp_clears_fingerprint(false, "auto"));            // live poll/lang/value patch
+    CHECK(!set_hp_clears_fingerprint(false, "altherma_gshp"));   // partial update on a pinned model
+    CHECK(set_hp_clears_fingerprint(true, "auto"));             // explicit re-detect / wiring Save
+    CHECK(!set_hp_clears_fingerprint(true, "altherma_gshp"));    // manual pin keeps the fingerprint
 }
 
 static void test_discovery() {
