@@ -42,9 +42,10 @@ extern "C" void app_main() {
              cfg.profile.c_str(), static_cast<char>(cfg.proto), cfg.rx_pin, cfg.tx_pin, cfg.poll_s);
 
     // --- Networking: STA or captive setup portal ---
-    if (daik::wifi_configured()) {
-        daik::wifi_start_sta();          // endless reconnect + gateway watchdog (see wifi.cpp)
-    } else {
+    // wifi_start_sta() returns false on a first-boot connect failure (creds presumed wrong) after
+    // tearing the STA stack back down, so the portal comes up on a clean WiFi state. Runtime drops
+    // (once online) are handled forever by wifi.cpp's reconnect handler + gateway watchdog.
+    if (!daik::wifi_configured() || !daik::wifi_start_sta()) {
         daik::provisioning_start_ap();   // SoftAP + captive portal; serves www/setup.html
     }
 

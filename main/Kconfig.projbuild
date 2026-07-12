@@ -24,6 +24,17 @@ menu "Daikin Altherma Configuration"
         help
             mDNS/host name — the device is reachable at http://<hostname>.local.
 
+    config DAIKIN_WIFI_PREFER_5G
+        bool "Prefer 5 GHz WiFi (ESP32-C5 dual-band; experimental)"
+        depends on SOC_WIFI_SUPPORT_5G
+        default n
+        help
+            ESP32-C5 only. When the same SSID is broadcast on both 2.4 GHz and 5 GHz
+            (band steering), bias AP selection toward the 5 GHz radio (adds a fixed
+            RSSI bonus to 5 GHz APs during the strongest-AP scan). Leave off unless the
+            unit sits within reliable 5 GHz range of the router. The strongest-AP scan
+            itself (all-channel scan, connect by signal) is always on and needs no option.
+
     # ── Heat-pump link (X10A) ─────────────────────────────────────────────────
     config DAIKIN_PROTOCOL
         string "Heat-pump protocol (I or S)"
