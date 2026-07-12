@@ -36,7 +36,7 @@ configurable. `Timeout`/`Wrong CRC` = cable/GND; `0x15 0xEA` = use protocol `S`.
 ## Notes
 
 - OTA from the web UI (config preserved). Web installer = first flash / recovery only.
-- Read-only; optional external on/off thermostat + SG-Ready relays, off unless wired.
+- Read-only monitor: it polls X10A and never actuates the heat pump (X10A has no write command).
 - HA templates / COP: [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md). PR previews: `…/PR/<n>/`.
 
 ## Scope & credits

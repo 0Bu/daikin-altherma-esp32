@@ -18,7 +18,6 @@ idf_component_register(
         "captive_dns.cpp"
         "mqtt_ha.cpp"
         "ota_update.cpp"
-        "control.cpp"
         "diag_log.cpp"
     INCLUDE_DIRS
         "."
@@ -37,7 +36,6 @@ idf_component_register(
         esp_http_client
         esp-tls
         lwip
-        esp_driver_gpio
         esp_driver_uart
         mqtt
         esp_timer

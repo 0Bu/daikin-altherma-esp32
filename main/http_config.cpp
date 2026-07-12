@@ -1,8 +1,7 @@
-// POST config routes: /set_wifi, /set_mqtt, /set_hp, /set_relays. Parse JSON, validate, persist
+// POST config routes: /set_wifi, /set_mqtt, /set_hp, /detect. Parse JSON, validate, persist
 // to NVS (config.cpp), apply live or reboot as appropriate.
 #include "http_handlers.hpp"
 #include "config.hpp"
-#include "control.hpp"
 #include "hp_poll.hpp"
 #include "logic/config_model.hpp"
 
@@ -107,34 +106,12 @@ static esp_err_t do_detect(httpd_req_t* req) {
     return http_send_json(req, "{\"ok\":true}");
 }
 
-static esp_err_t set_relays(httpd_req_t* req) {
-    char body[256];
-    if (http_read_body(req, body, sizeof(body)) < 0) return httpd_resp_send_500(req);
-    cJSON* j = cJSON_Parse(body);
-    if (!j) return httpd_resp_send_500(req);
-    Config c    = config();
-    c.therm_pin = ji(j, "therm_pin", -1);
-    c.sg1_pin   = ji(j, "sg1_pin", -1);
-    c.sg2_pin   = ji(j, "sg2_pin", -1);
-    cJSON_Delete(j);
-    std::string reason;
-    if (!validate(c, reason)) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        std::string e = "{\"ok\":false,\"error\":\"" + reason + "\"}";
-        return http_send_json(req, e.c_str());
-    }
-    config_save(c);
-    control_init();
-    return http_send_json(req, "{\"ok\":true}");
-}
-
 void http_register_config(httpd_handle_t s) {
     httpd_uri_t routes[] = {
         {"/set_wifi", HTTP_POST, set_wifi, nullptr},
         {"/set_mqtt", HTTP_POST, set_mqtt, nullptr},
         {"/set_hp", HTTP_POST, set_hp, nullptr},
         {"/detect", HTTP_POST, do_detect, nullptr},
-        {"/set_relays", HTTP_POST, set_relays, nullptr},
     };
     for (auto& r : routes) httpd_register_uri_handler(s, &r);
 }

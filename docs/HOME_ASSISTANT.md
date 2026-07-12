@@ -28,13 +28,10 @@ temperatures render as °C with history, currents as A, and so on.
 Numeric values are emitted only when the heat pump reported them this cycle, so an unimplemented
 register shows as *unknown* in HA rather than a phantom `0`.
 
-## Optional control (if you wired the relays)
-
-```
-<base>/<node>/switch/thermostat/set                ON | OFF          (external on/off thermostat)
-<base>/<node>/sg/set                               0 | 1 | 2 | 3     (SG-Ready mode)
-<base>/<node>/sg/state                             current SG mode   (retained)
-```
+> **Read-only bridge — no command topics.** The firmware only mirrors X10A telemetry; it never
+> actuates the heat pump. To *control* the unit (e.g. SG-Ready boost on PV surplus), drive the
+> heat pump's own SG-Ready / thermostat contacts or a Modbus/EKRHH interface from your energy
+> manager — that is out of scope for this firmware.
 
 ## Derived sensors (COP)
 
