@@ -24,7 +24,6 @@ void config_load() {
     c.tx_pin    = nvs_get_i32("tx_pin", CONFIG_DAIKIN_TX_PIN);
     c.poll_s    = nvs_get_i32("poll_s", CONFIG_DAIKIN_POLL_INTERVAL_S);
     c.val_mask  = nvs_get_str("val_mask", "");
-    c.demo      = nvs_get_i32("demo", 0) != 0;
     // Default: fresh device (profile=="auto") auto-detects; a pre-existing concrete profile from an
     // older firmware (no prof_auto key) is treated as a user pin so the UI keeps showing it.
     c.profile_auto = nvs_get_i32("prof_auto", c.profile == "auto" ? 1 : 0) != 0;
@@ -49,7 +48,6 @@ bool config_save(const Config& c) {
     ok &= nvs_set_i32("tx_pin", c.tx_pin);
     ok &= nvs_set_i32("poll_s", c.poll_s);
     ok &= nvs_set_str("val_mask", c.val_mask);
-    ok &= nvs_set_i32("demo", c.demo ? 1 : 0);
     ok &= nvs_set_i32("prof_auto", c.profile_auto ? 1 : 0);
     ok &= nvs_set_i32("fp_pages", static_cast<int32_t>(c.fp_pages));
     ok &= nvs_set_i32("fp_kw", c.fp_kw_tenths);

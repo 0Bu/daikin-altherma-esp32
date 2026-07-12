@@ -23,8 +23,6 @@ struct Config {
     int         poll_s   = 1;        // minimum by default — near-real-time; MQTT publishes only changes
     // Which values of the profile are enabled (opaque id set); serialized as a comma list.
     std::string val_mask;
-    // Demo mode: fabricate plausible readings instead of polling the X10A UART (logic/demo.hpp).
-    bool        demo      = false;
 
     // ── Auto-detection (protocol + model). Set by hp_detect.cpp; see logic/detect.hpp. ──
     // profile_auto: the profile was auto-derived and not yet pinned by the user. When true the web

@@ -59,8 +59,7 @@ static esp_err_t h_status(httpd_req_t* req) {
          ",\"registers\":" + std::to_string(hp.registers) +
          ",\"values\":" + std::to_string(hp.values) +
          ",\"crc_err\":" + std::to_string(hp.crc_err) +
-         ",\"timeout_err\":" + std::to_string(hp.timeout_err) +
-         ",\"demo\":" + (c.demo ? "true" : "false") + "},";
+         ",\"timeout_err\":" + std::to_string(hp.timeout_err) + "},";
     j += "\"profile\":{\"id\":" + jstr(c.profile) + ",\"lang\":" + jstr(c.lang) + "},";
 
     // Auto-detection: proto/model derived from the X10A bus (hp_detect.cpp). The candidate set is
