@@ -18,7 +18,8 @@ struct DetectResult {
     uint32_t    page_mask = 0;           // pages that answered (logic/detect.hpp page_bit)
     int         kw_tenths = -1;          // O/U capacity in 0.1 kW; -1 = unknown
     std::string eeprom;                  // rendered O/U EEPROM digits ("" if page 0x11 absent)
-    std::vector<std::string> candidates; // best-fit model ids (empty = none → generic)
+    std::vector<std::string> candidates; // register-equivalent model ids (empty = none → generic)
+    std::string best;                    // single best-fit id to READ with ("" = none → generic)
 };
 
 // Run one detection pass on the configured rx/tx pins. UART I/O — call only from the poll task.

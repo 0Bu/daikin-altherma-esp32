@@ -9,13 +9,22 @@
 
 namespace daik::def {
 
-// Fill out[] (capacity `max`) with one Signature per selectable profile; returns the count written.
-// `generic` (the "nothing detected" fallback) and `altherma3_r_erga` (the hand-written host-test
-// sample, not a catalog outdoor option) are skipped: neither is a real detection candidate.
+// Is this profile id a real Daikin Altherma model (a legitimate auto-detection candidate)? Detection
+// is Altherma-only by product scope, so non-Altherma profiles (the `minichiller_*` commercial
+// chillers) are excluded from the candidate pool — otherwise a 4-8 kW chiller, being register-similar
+// on X10A, shows up as a false candidate for a 4-8 kW Altherma split. `generic` (the fallback) and
+// `altherma3_r_erga` (the hand-written host-test fixture, a duplicate of the real ERGA-E profile) are
+// likewise not detection candidates.
+inline bool is_detection_model(const char* id) {
+    if (std::strcmp(id, "generic") == 0 || std::strcmp(id, "altherma3_r_erga") == 0) return false;
+    return std::strncmp(id, "altherma", 8) == 0;   // Altherma-only; drops minichiller_*
+}
+
+// Fill out[] (capacity `max`) with one Signature per Altherma detection model; returns the count.
 inline int build_signatures(Signature* out, int max) {
     int n = 0;
     for (const auto& p : profiles) {
-        if (std::strcmp(p.id, "generic") == 0 || std::strcmp(p.id, "altherma3_r_erga") == 0) continue;
+        if (!is_detection_model(p.id)) continue;
         if (n >= max) break;
         uint32_t mask = 0;
         for (size_t i = 0; i < p.count; i++) mask |= page_mask_bit(p.values[i].reg);

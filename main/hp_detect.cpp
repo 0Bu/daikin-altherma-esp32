@@ -110,10 +110,13 @@ DetectResult hp_detect_run() {
     const int n = detect_candidates(sigs, nsig, fp, out, static_cast<int>(sizeof(out) / sizeof(out[0])));
     for (int i = 0; i < n && i < static_cast<int>(sizeof(out) / sizeof(out[0])); i++)
         r.candidates.emplace_back(out[i]);
+    // Best-fit representative to actually read with (deterministic, not registry order). Every
+    // candidate is register-equivalent so this only affects the displayed model, not the values.
+    if (const char* b = detect_best(sigs, nsig, fp)) r.best = b;
 
-    diag_printf("detect: proto=%c rx=%d tx=%d pages=0x%04x kw=%d eeprom=[%s] -> %d candidate(s)\n",
+    diag_printf("detect: proto=%c rx=%d tx=%d pages=0x%04x kw=%d eeprom=[%s] -> %d candidate(s), best=%s\n",
                 static_cast<char>(r.proto), r.rx, r.tx, static_cast<unsigned>(fp.page_mask),
-                fp.kw_tenths, ee, n);
+                fp.kw_tenths, ee, n, r.best.empty() ? "(none)" : r.best.c_str());
     return r;
 }
 
