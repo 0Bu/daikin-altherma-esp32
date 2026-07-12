@@ -33,31 +33,156 @@ register shows as *unknown* in HA rather than a phantom `0`.
 > heat pump's own SG-Ready / thermostat contacts or a Modbus/EKRHH interface from your energy
 > manager — that is out of scope for this firmware.
 
-## Derived sensors (COP)
+## Derived power, energy & COP / SCOP / JAZ
 
-With flow, water-temperature and current values enabled, compute COP in `configuration.yaml` (adapt the attribute names to your selected labels — check
-`GET /values`):
+The X10A bus (and this firmware) streams **instantaneous sensor values only** — there is no
+accumulated-energy (kWh), electrical-power (W) or run-hour register anywhere in the protocol. The
+firmware deliberately does **not** integrate energy on-device (heap is tight, and the integral
+belongs where the electricity meter also lives). So you compute two things **downstream** — in Home
+Assistant **or** Grafana — and take their ratio:
+
+1. **Thermal energy produced** = ∫ (flow × ΔT) dt — buildable **only** because the device exposes
+   the water **flow rate** *and* **both** leaving and return water temperatures. (Daikin's own
+   Onecta cloud and the BRP069A LAN adapter expose neither flow nor return temp, so they cannot
+   produce a heat figure at all — see [Why not the shortcuts](#why-not-the-obvious-shortcuts).)
+2. **Electrical energy consumed** = from a **real electricity meter** on the heat-pump circuit — not
+   from compressor current, not from Onecta's estimate.
+
+Then **COP = P_thermal / P_electrical** (instantaneous) and **SCOP / JAZ = ΣkWh_thermal ⁄ ΣkWh_electrical**
+over a period (month, heating season, year).
+
+> Entity ids below follow the sample `altherma3_r_erga` profile (English labels). For a different
+> model or language, open `http://daikin-altherma-esp32.local/values` for the exact labels, then map
+> them to your HA entity ids (HA slugs the discovery `name`). `sensor.heatpump_power` /
+> `sensor.heatpump_energy` are **your external meter** (e.g. a Shelly EM/3EM or DIN-rail kWh meter),
+> not this device.
+
+### 1. Instantaneous thermal power (virtual heat meter)
+
+`P_thermal [kW] = flow [l/min] × ΔT [K] × Cf`, where ΔT = leaving − return water temp and `Cf` is
+the volumetric heat capacity of the loop fluid, `ρ·cp/60`:
+
+| Loop fluid | `Cf` |
+|---|---|
+| Pure water | **0.070** |
+| ~30 % propylene glycol | ~0.063 |
+| ~30 % ethylene glycol | ~0.066 |
 
 ```yaml
 template:
   - sensor:
-      - name: "Altherma COP"
-        unique_id: "altherma_cop"
-        unit_of_measurement: "COP"
+      - name: "Altherma Thermal Power"
+        unique_id: altherma_thermal_power
+        device_class: power
+        unit_of_measurement: "kW"
+        state_class: measurement
         state: >
-          {% set flow   = state_attr('sensor.daikin_altherma_flow_rate_lmin','value') | float(0) %}
-          {% set t_out  = states('sensor.daikin_altherma_leaving_water_temp_after_buh_r2t') | float(0) %}
-          {% set t_in   = states('sensor.daikin_altherma_return_water_temp_before_phe_r4t') | float(0) %}
-          {% set amps   = states('sensor.daikin_altherma_inv_primary_current_a') | float(0) %}
-          {% set volts  = 230 %}
-          {% set p_th   = flow * 0.06 * 1.16 * (t_out - t_in) %}
-          {% set p_el   = amps * volts / 1000 %}
-          {{ (p_th / p_el) | round(2) if p_el > 0 else 0 }}
+          {% set flow  = states('sensor.daikin_altherma_flow_rate_lmin') | float(0) %}
+          {% set t_out = states('sensor.daikin_altherma_leaving_water_temp_after_buh_r2t') | float(0) %}
+          {% set t_in  = states('sensor.daikin_altherma_return_water_temp_before_phe_r4t') | float(0) %}
+          {% set cf    = 0.070 %}   {# 0.070 water · ~0.063 for 30% propylene glycol — set to your loop #}
+          {{ [flow * cf * (t_out - t_in), 0] | max | round(3) }}
 ```
 
-> The names above follow the sample `altherma3_r_erga` profile (English labels). If you picked a
-> different model or language, open `http://daikin-altherma-esp32.local/values` to see the exact labels,
-> then map them to the HA entity ids (HA slugs the discovery `name`).
+The `max(…, 0)` clamp stops idle/defrost reverse-ΔT from registering as negative "production".
 
-A COP that is wildly off usually means the wrong model profile (mismatched flow/temperature
-registers) — re-check **Setup → Heat pump**.
+### 2. Instantaneous COP (live gauge)
+
+Prefer the **measured** electrical power from your meter (a Shelly EM reports live W):
+
+```yaml
+      - name: "Altherma COP (live)"
+        unique_id: altherma_cop_live
+        state: >
+          {% set p_th = states('sensor.altherma_thermal_power') | float(0) %}
+          {% set p_el = states('sensor.heatpump_power') | float(0) %}   {# external meter, kW #}
+          {{ (p_th / p_el) | round(2) if p_el > 0.05 else 'unknown' }}
+```
+
+### 3. Integrate to energy → SCOP / JAZ
+
+**Home Assistant** — turn the thermal-power sensor into a thermal-**energy** counter with the
+[`integration`](https://www.home-assistant.io/integrations/integration/) (Riemann-sum) platform,
+bucket it per period with [`utility_meter`](https://www.home-assistant.io/integrations/utility_meter/),
+and divide by the meter's electrical energy for the same period:
+
+```yaml
+sensor:
+  - platform: integration
+    source: sensor.altherma_thermal_power     # kW  -> kWh
+    name: Altherma Thermal Energy
+    unique_id: altherma_thermal_energy
+    unit_prefix: k
+    unit_time: h
+    method: trapezoidal
+
+utility_meter:
+  altherma_thermal_energy_yearly:
+    source: sensor.altherma_thermal_energy
+    cycle: yearly
+  heatpump_electrical_energy_yearly:
+    source: sensor.heatpump_energy            # your external kWh meter counter
+    cycle: yearly
+
+template:
+  - sensor:
+      - name: "Altherma JAZ (yearly SCOP)"
+        unique_id: altherma_jaz
+        state: >
+          {% set q = states('sensor.altherma_thermal_energy_yearly') | float(0) %}
+          {% set e = states('sensor.heatpump_electrical_energy_yearly') | float(0) %}
+          {{ (q / e) | round(2) if e > 0 else 'unknown' }}
+```
+
+**Grafana** (if you route the MQTT values into a Prometheus-compatible TSDB, e.g. Telegraf's MQTT
+consumer → VictoriaMetrics) — compute the heat meter in the query and integrate over the dashboard
+range. Metric names follow your Telegraf field naming:
+
+```promql
+# instantaneous thermal power [kW]  (reuse as $P below)
+clamp_min(daikin_flow_rate_lmin
+  * (daikin_leaving_water_temp_after_buh_r2t - daikin_return_water_temp_before_phe_r4t)
+  * 0.070, 0)
+
+# produced heat [kWh] over $__range  — MetricsQL integrate() returns value·seconds, so ÷3600
+integrate($P[$__range]) / 3600
+
+# consumed electricity [kWh] over $__range, from the meter's kWh counter
+increase(heatpump_energy_kwh[$__range])
+
+# JAZ over the range
+integrate($P[$__range]) / 3600 / increase(heatpump_energy_kwh[$__range])
+```
+
+> `integrate()` is MetricsQL (VictoriaMetrics). On vanilla Prometheus use a recording rule for `$P`
+> and `sum_over_time($P[$__range]) * <scrape_interval_s> / 3600`, or `increase()` on a counter.
+
+### Accuracy — what matters (and what doesn't)
+
+- **Not the poll interval.** Heat-pump thermal output is heavily low-passed (minutes-scale water
+  loop); discrete integration at even 30 s costs ~0.01–0.1 % of the yearly total, and rising/falling
+  edges largely cancel. This firmware polls every **1 s** by default (configurable 1–600 s via
+  **Setup → Heat pump**), so the integral is not sampling-bound.
+- **What dominates instead:** (a) the loop-fluid constant — a glycol mix lowers `Cf` ~10 % vs water,
+  a systematic error if you leave it at 0.070; (b) small-ΔT amplification — ±0.1 K on a 3 K heating
+  ΔT is already ~3 %, and the leaving/return sensors are uncalibrated factory parts (~±0.5–1 K);
+  (c) whether a genuine volumetric flow signal exists at all (some newer hybrid models omit the flow
+  sensor — then heat cannot be computed).
+- A live COP that is wildly off usually means the **wrong model profile** (mismatched flow/temperature
+  registers) — re-check **Setup → Heat pump**.
+
+### Why not the obvious shortcuts
+
+- **Compressor current × 230 V for electricity.** The inverter's power factor is well below 1 and
+  varies with load, the CT resolves only 0.5 A steps, and the current excludes the pump and — the big
+  one — the **electric backup heater (BUH)**, which can dominate winter consumption. Errors run
+  10–30 %+. Use a real meter whose measurement boundary **includes the BUH**.
+- **Daikin Onecta cloud / BRP069A gateway.** They expose no flow rate and no return-water temp, so
+  they cannot compute produced heat or COP at all; their only energy figure is Daikin's *estimated*
+  electrical kWh — widely unreliable (documented cases of a >40× overestimate, and negative values in
+  HA's Energy dashboard), in ~2-hour buckets, behind a ~200-calls/day cloud rate limit (~10-min-stale
+  data). This device's local 1 s data is strictly better for metering.
+- **The heat pump's own internal kWh counter** (MMI / P1P2, whole-kWh, ~hourly) is itself just a
+  ΔT×flow integration on the same uncalibrated sensors — not a higher-grade measurement. It is only
+  more accurate when an external pulse kWh meter is wired to the unit's metering input. For a
+  trustworthy JAZ, meter the electricity externally regardless.
