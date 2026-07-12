@@ -112,6 +112,15 @@ main { flex: 1; }
 #valueGroups { margin-top: 14px; }
 .vgroup + .vgroup { margin-top: 12px; }
 .vgroup .section-label { display: block; margin-bottom: 2px; }
+/* editable card header: label left, pencil right (e.g. the MQTT card) */
+.vgroup-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.vgroup-head .section-label { margin-bottom: 2px; }
+.card-edit {
+  flex: none; display: grid; place-items: center; cursor: pointer;
+  border: 0; background: none; color: var(--muted);
+  width: 28px; height: 28px; border-radius: 8px; margin: -4px -4px -2px 0;
+}
+.card-edit:hover { color: var(--brand-strong); background: var(--soft); }
 .vrow {
   display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
   padding: 9px 0; border-top: 1px solid var(--line);
@@ -266,6 +275,17 @@ main { flex: 1; }
 .provision-mark { display: flex; align-items: center; gap: 11px; }
 .provision-mark .name { font-family: var(--font-mono); font-size: 15px; font-weight: 600; letter-spacing: .2px; color: var(--fg); }
 .served { font-size: 12.5px; color: var(--muted); text-align: center; margin: 16px 0 0; font-family: var(--font-mono); }
+
+/* ── Modal (dashboard edit popups, e.g. MQTT) ───────────────────────────── */
+.modal { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 18px; }
+.modal-backdrop { position: absolute; inset: 0; background: rgba(16,20,28,.5); animation: fade .18s ease; }
+.modal-card {
+  position: relative; width: 100%; max-width: 420px; max-height: calc(100vh - 36px); overflow-y: auto;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card);
+  box-shadow: var(--shadow-card); padding: 20px; animation: tin .22s cubic-bezier(.2,.7,.3,1);
+}
+.modal-actions { display: flex; gap: 10px; margin-top: 18px; }
+.modal-actions .btn { flex: 1; }
 
 /* ── Toasts ─────────────────────────────────────────────────────────────── */
 .toasts {
