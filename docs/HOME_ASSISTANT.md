@@ -166,8 +166,10 @@ integrate($P[$__range]) / 3600 / increase(heatpump_energy_kwh[$__range])
 - **What dominates instead:** (a) the loop-fluid constant — a glycol mix lowers `Cf` ~10 % vs water,
   a systematic error if you leave it at 0.070; (b) small-ΔT amplification — ±0.1 K on a 3 K heating
   ΔT is already ~3 %, and the leaving/return sensors are uncalibrated factory parts (~±0.5–1 K);
-  (c) whether a genuine volumetric flow signal exists at all (some newer hybrid models omit the flow
-  sensor — then heat cannot be computed).
+  (c) whether a genuine volumetric flow signal exists. Every model profile shipped here defines the
+  flow sensor (`0x62/9`) plus both leaving (`0x61/2|4`) and return (`0x61/8`) water temps, so the
+  heat meter is available across the whole catalog — but if a specific unit variant physically lacks
+  the flow sensor its reading is no-data and `P_thermal` can't be formed.
 - A live COP that is wildly off usually means the **wrong model profile** (mismatched flow/temperature
   registers) — re-check **Setup → Heat pump**.
 
