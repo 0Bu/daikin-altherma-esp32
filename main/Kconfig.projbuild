@@ -128,20 +128,4 @@ menu "Daikin Altherma Configuration"
             HTTPS base URL (with trailing slash) where per-target images are published. The
             device appends "daikin-altherma-esp32<suffix>.bin" for its own chip.
 
-    # ── Optional control (off by default) ─────────────────────────────────────
-    config DAIKIN_THERM_PIN
-        int "On/off thermostat relay GPIO (-1 = disabled)"
-        default -1
-        help
-            Optional. GPIO driving a relay wired as an external on/off thermostat. Exposed as
-            a Home Assistant switch. -1 disables it (the default).
-
-    config DAIKIN_SG1_PIN
-        int "SG-Ready SG1 relay GPIO (-1 = disabled)"
-        default -1
-
-    config DAIKIN_SG2_PIN
-        int "SG-Ready SG2 relay GPIO (-1 = disabled)"
-        default -1
-
 endmenu

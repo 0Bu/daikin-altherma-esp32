@@ -91,13 +91,12 @@ hp_poll.cpp     poll engine task: (auto-detect if profile=="auto") profile regis
                 decode -> thread-safe cache
 http_server.cpp esp_http_server :80; concerns register their own routes (http_handlers.hpp)
 http_status.cpp GET / (setup.html in AP mode, else gzip UI) /status /values /models /diag /scan + captive catch-all
-http_config.cpp POST /set_wifi /set_mqtt /set_hp /set_relays
+http_config.cpp POST /set_wifi /set_mqtt /set_hp /detect
 http_ota.cpp    /ota/check|update|status
 mcp_server.cpp  /mcp (read-only MCP tools; TODO)
 mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; per-value retained state
                 topics, publish-on-change (logic/mqtt_delta.hpp), LWT availability, mqtts+CA on creds
 ota_update.cpp  pull-based signed OTA + rollback health gate (check/download: TODO)
-control.cpp     optional thermostat + SG-Ready relays (off unless pins set)
 diag_log.cpp    in-RAM diag ring served by GET /diag
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, config_model,
                 discovery, demo, detect, mqtt_delta). demo.hpp fabricates plausible readings for the
@@ -115,7 +114,7 @@ www/            web UI sources (index.html + style.css + app.js -> one gzipped p
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `wifi_ssid`/`wifi_pass`, `mqtt_uri`/`mqtt_user`/`mqtt_pass`, `hostname`, `profile` (`"auto"` until detected), `lang`, `proto` (I/S — auto-detected, not UI-set), `rx_pin`/`tx_pin`, `poll_s`, `val_mask`, `therm_pin`/`sg1_pin`/`sg2_pin`, `demo` (0/1), `prof_auto` (0/1 — model auto vs user-pinned), `fp_pages`/`fp_kw`/`fp_eeprom`/`fp_valid` (cached detection fingerprint) |
+| `daik_cfg` | `wifi_ssid`/`wifi_pass`, `mqtt_uri`/`mqtt_user`/`mqtt_pass`, `hostname`, `profile` (`"auto"` until detected), `lang`, `proto` (I/S — auto-detected, not UI-set), `rx_pin`/`tx_pin`, `poll_s`, `val_mask`, `demo` (0/1), `prof_auto` (0/1 — model auto vs user-pinned), `fp_pages`/`fp_kw`/`fp_eeprom`/`fp_valid` (cached detection fingerprint) |
 
 `nvs` at `0x9000` is untouched by OTA (partitions.csv) so config survives upgrades. Keep its
 offset/size stable across versions.
@@ -142,7 +141,6 @@ POST /set_hp      {profile,lang,rx,tx,poll_s,demo,values[]} -> validate + apply 
                   Wiring via an explicit Save, other controls live on change.
 POST /detect      re-run auto-detection: reset profile to "auto" + invalidate fingerprint -> the
                   next poll cycle sweeps protocol + re-fingerprints the unit
-POST /set_relays  {therm_pin,sg1_pin,sg2_pin} -> optional control pins
 GET  /api/proxy/1/version   {version, platform}
 GET  /ota/check   POST /ota/update   GET /ota/status
 POST /mcp         MCP server (read-only)

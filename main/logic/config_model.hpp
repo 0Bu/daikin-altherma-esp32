@@ -21,9 +21,6 @@ struct Config {
     int         rx_pin   = 44;
     int         tx_pin   = 43;
     int         poll_s   = 1;        // minimum by default — near-real-time; MQTT publishes only changes
-    int         therm_pin = -1;     // -1 = disabled
-    int         sg1_pin   = -1;
-    int         sg2_pin   = -1;
     // Which values of the profile are enabled (opaque id set); serialized as a comma list.
     std::string val_mask;
     // Demo mode: fabricate plausible readings instead of polling the X10A UART (logic/demo.hpp).
@@ -52,11 +49,6 @@ inline bool validate(const Config& c, std::string& reason) {
     if (c.rx_pin == c.tx_pin)     { reason = "rx_pin and tx_pin must differ"; return false; }
     if (c.poll_s < 1 || c.poll_s > 600) { reason = "poll interval must be 1..600 s"; return false; }
     if (c.proto != Protocol::I && c.proto != Protocol::S) { reason = "protocol must be I or S"; return false; }
-    for (int p : {c.therm_pin, c.sg1_pin, c.sg2_pin})
-        if (p != -1 && !gpio_in_range(p)) { reason = "control pin out of range"; return false; }
-    // A control pin must not collide with the X10A UART pins.
-    for (int p : {c.therm_pin, c.sg1_pin, c.sg2_pin})
-        if (p != -1 && (p == c.rx_pin || p == c.tx_pin)) { reason = "control pin conflicts with RX/TX"; return false; }
     return true;
 }
 

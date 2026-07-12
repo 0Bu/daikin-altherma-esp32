@@ -10,9 +10,9 @@ and the OTA-signing / key lifecycle.
   meant to sit on a trusted home LAN. Anyone who can reach `http://daikin-altherma-esp32.local` can read
   values and change the configuration. **Never expose it to the internet.** If you need access
   control, front it with a reverse proxy or put it on an isolated VLAN.
-- **The heat-pump link is read-oriented.** The firmware polls X10A registers; it cannot change the
-  heat pump's internal settings. The only outputs are the **optional** control relays (thermostat
-  on/off, SG-Ready), which are off unless you wire and enable them.
+- **The heat-pump link is read-only.** The firmware only polls X10A registers; the X10A protocol
+  has no write command, so the firmware cannot change the heat pump's settings or actuate it in any
+  way. There are no control outputs.
 - **Home Assistant integration is read-only** — the MQTT bridge subscribes to no command topics.
 - **MQTT credentials are never sent in cleartext.** If an MQTT username/password is configured, the
   bridge requires an `mqtts://` broker URI and verifies the broker against the mbedTLS certificate

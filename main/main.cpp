@@ -16,7 +16,6 @@
 
 #include "config.hpp"
 #include "diag_log.hpp"
-#include "control.hpp"
 #include "hp_poll.hpp"
 #include "http_server.hpp"
 #include "mqtt_ha.hpp"
@@ -50,7 +49,6 @@ extern "C" void app_main() {
     }
 
     // --- Services ---
-    daik::control_init();                // optional thermostat / SG relays (no-op if pins == -1)
     daik::http_start();                  // esp_http_server on :80 (web UI + config + OTA + MCP)
     daik::mqtt_ha_start();               // HA MQTT-Discovery bridge (no-op if mqtt_uri empty)
     daik::hp_poll_start();               // X10A poll engine

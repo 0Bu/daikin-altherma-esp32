@@ -36,13 +36,12 @@ config.cpp/.hpp     → NVS-backed runtime config (daik_cfg); load/save, default
 nvs_storage.cpp     → thin NVS helpers (namespaces, blobs, migration)
 http_server.cpp     → esp_http_server :80, wildcard dispatch + handle_all OOM try/catch (503)
 http_status.cpp     → GET / (web UI), /status, /values, /models, /diag
-http_config.cpp     → POST /set_wifi, /set_mqtt, /set_hp, /set_relays
+http_config.cpp     → POST /set_wifi, /set_mqtt, /set_hp, /detect
 http_ota.cpp        → /ota/check|update|status
 mcp_server.cpp      → /mcp — read-only MCP tools (get_status, get_hp_values) for AI agents
 provisioning.cpp    → captive setup portal (SoftAP daikin-altherma-esp32-setup) when no WiFi
 mqtt_ha.cpp/.hpp    → Home Assistant MQTT-Discovery bridge (streamed discovery), read-only
 ota_update.cpp      → pull-based signed OTA (esp_https_ota), downgrade gate, health gate
-control.cpp         → optional on/off thermostat + SG-Ready relays (off by default)
 diag_log.cpp        → in-RAM console ring served by GET /diag (static .bss buffer)
 www/                → web UI sources: index.html + style.css + app.js, spliced into ONE
                      self-contained page at build time (inline_assets.cmake) and served gzipped;
@@ -202,8 +201,8 @@ Two layers keep the WiFi station link up:
 
 The Home Assistant bridge:
 
-- **Read-only** — no command topics (the optional control relays publish their own separate
-  `sg/…` and switch topics via `control.cpp`, not this bridge).
+- **Read-only** — no command topics. The firmware only mirrors X10A telemetry; it never actuates
+  the heat pump (the X10A protocol has no write command), so there is nothing to subscribe to.
 - **Node id** `daikin_<mac3>` (WiFi STA MAC, stable across config changes).
 - **Own publish task + esp-mqtt client.** The event handler only flips status flags; all publishing
   happens in the task, so the mqtt event loop is never blocked by string building.
@@ -258,7 +257,6 @@ self-contained, pre-gzipped page at build time (`inline_assets.cmake`). The UI's
   an "Auto-detect again" action (`/detect`). Protocol is auto-detected and has no UI control. The
   form still sets language, RX/TX pins (with a per-board pin hint from `/models` + platform), poll
   interval, demo mode, and the per-value enable checkboxes.
-- **Control** (optional) → `/set_relays`: thermostat + SG pins.
 
 The board/platform is read from `/api/proxy/1/version` so the pin hints match the running chip
 (e.g. the XIAO ESP32-S3 pad→GPIO map).

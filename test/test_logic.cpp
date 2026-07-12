@@ -174,9 +174,6 @@ static void test_config_model() {
     c.tx_pin = 43; c.poll_s = 0;                       // interval too small (min 1 s)
     CHECK(!validate(c, why));
 
-    c.poll_s = 2; c.sg1_pin = 44;                      // control pin collides with RX
-    CHECK(!validate(c, why));
-
     CHECK(parse_protocol("S") == Protocol::S);
     CHECK(parse_protocol("I") == Protocol::I);
     CHECK(parse_protocol("") == Protocol::I);
