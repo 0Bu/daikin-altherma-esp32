@@ -72,11 +72,10 @@ static esp_err_t set_hp(httpd_req_t* req) {
         c.profile_auto = (c.profile == "auto");
     }
     if (set_hp_clears_fingerprint(profile_sent, c.profile)) c.fp_valid = false;
-    c.lang      = js(j, "lang", c.lang.c_str());
-    // proto is auto-detected (hp_detect.cpp), not set from the UI.
+    // proto is auto-detected (hp_detect.cpp), not set from the UI. poll_s is fixed at 1 s (config.cpp),
+    // so the UI no longer sends it and it is not accepted here. lang was removed (English-only firmware).
     c.rx_pin    = ji(j, "rx", c.rx_pin);
     c.tx_pin    = ji(j, "tx", c.tx_pin);
-    c.poll_s    = ji(j, "poll_s", c.poll_s);
     // values[] -> comma-joined mask. Absent key preserves the stored mask, so the UI can send
     // partial updates (a live poll/language change must not wipe the value selection).
     cJSON* arr = cJSON_GetObjectItem(j, "values");

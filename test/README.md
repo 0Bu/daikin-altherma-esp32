@@ -27,6 +27,8 @@ regression fails in seconds instead of after four ESP-IDF builds.
 - `logic/convert.hpp` — numeric converters + the refrigerant pressure→temperature curve + the
   HA unit/device_class hints.
 - `logic/config_model.hpp` — pin/interval/protocol validation, RX/TX collision.
+- `logic/board_pins.hpp` — per-target usable X10A GPIO lists (sorted, in range; the XIAO ESP32-S3
+  reference set excludes not-broken-out pins).
 - `logic/discovery.hpp` — object-id slugging + the discovery config JSON.
 - `def/registry.hpp` — profile lookup + generic fallback.
 

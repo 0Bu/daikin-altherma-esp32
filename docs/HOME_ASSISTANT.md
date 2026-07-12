@@ -7,8 +7,9 @@ derived (COP) sensors below.
 
 ## Enabling
 
-Web UI → **Setup → MQTT** → enter `IP:PORT` (+ user/pass if needed) → save. With the HA MQTT
-integration enabled, the device and its sensors appear on their own. Clear the broker to disable.
+Web UI → tap the **pencil on the dashboard MQTT card** → enter `IP:PORT` (+ user/pass if needed) →
+save. With the HA MQTT integration enabled, the device and its sensors appear on their own. Clear the
+broker to disable.
 
 ## Topics
 
@@ -52,8 +53,9 @@ Assistant **or** Grafana — and take their ratio:
 Then **COP = P_thermal / P_electrical** (instantaneous) and **SCOP / JAZ = ΣkWh_thermal ⁄ ΣkWh_electrical**
 over a period (month, heating season, year).
 
-> Entity ids below follow the sample `altherma3_r_erga` profile (English labels). For a different
-> model or language, open `http://daikin-altherma-esp32.local/values` for the exact labels, then map
+> Entity ids below follow the sample `altherma3_r_erga` profile (English labels — the firmware is
+> English-only). For a different model, open `http://daikin-altherma-esp32.local/values` for the
+> exact labels, then map
 > them to your HA entity ids (HA slugs the discovery `name`). `sensor.heatpump_power` /
 > `sensor.heatpump_energy` are **your external meter** (e.g. a Shelly EM/3EM or DIN-rail kWh meter),
 > not this device.
@@ -162,8 +164,8 @@ integrate($P[$__range]) / 3600 / increase(heatpump_energy_kwh[$__range])
 
 - **Not the poll interval.** Heat-pump thermal output is heavily low-passed (minutes-scale water
   loop); discrete integration at even 30 s costs ~0.01–0.1 % of the yearly total, and rising/falling
-  edges largely cancel. This firmware polls every **1 s** by default (configurable 1–600 s via
-  **Setup → Heat pump**), so the integral is not sampling-bound.
+  edges largely cancel. This firmware polls every **1 s** (fixed, not configurable), so the integral
+  is not sampling-bound.
 - **What dominates instead:** (a) the loop-fluid constant — a glycol mix lowers `Cf` ~10 % vs water,
   a systematic error if you leave it at 0.070; (b) small-ΔT amplification — ±0.1 K on a 3 K heating
   ΔT is already ~3 %, and the leaving/return sensors are uncalibrated factory parts (~±0.5–1 K);
@@ -172,7 +174,8 @@ integrate($P[$__range]) / 3600 / increase(heatpump_energy_kwh[$__range])
   heat meter is available across the whole catalog — but if a specific unit variant physically lacks
   the flow sensor its reading is no-data and `P_thermal` can't be formed.
 - A live COP that is wildly off usually means the **wrong model profile** (mismatched flow/temperature
-  registers) — re-check **Setup → Heat pump**.
+  registers) — check the detected model on the dashboard **Model** card, or `POST /detect` to re-run
+  auto-detection.
 
 ### Why not the obvious shortcuts
 

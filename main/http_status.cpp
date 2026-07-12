@@ -1,6 +1,7 @@
 // GET routes: the web UI (embedded gzip), /status, /values, /models, /diag, /scan.
 #include "http_handlers.hpp"
 #include "config.hpp"
+#include "logic/board_pins.hpp"
 #include "def/model_names.hpp"
 #include "def/models_catalog.hpp"
 #include "def/signatures.hpp"
@@ -13,6 +14,7 @@
 
 #include "esp_app_desc.h"
 #include "esp_http_server.h"
+#include "esp_timer.h"
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -46,6 +48,12 @@ static esp_err_t h_status(httpd_req_t* req) {
     std::string j = "{";
     j += "\"version\":" + jstr(esp_app_get_description()->version) + ",";
     j += "\"platform\":" + jstr(CONFIG_IDF_TARGET) + ",";
+    j += "\"uptime_s\":" + std::to_string(esp_timer_get_time() / 1000000) + ",";
+    // GPIOs the UI offers in the RX/TX pin dropdown (per-target, broken-out + safe; logic/board_pins.hpp).
+    BoardPins bp = board_pins(CONFIG_IDF_TARGET);
+    j += "\"pins_avail\":[";
+    for (int i = 0; i < bp.count; i++) { if (i) j += ","; j += std::to_string(bp.pins[i]); }
+    j += "],";
     j += "\"wifi\":{\"ssid\":" + jstr(c.wifi_ssid) + ",\"ip\":" + jstr(wi.ip) +
          ",\"rssi\":" + (wi.connected ? std::to_string(wi.rssi) : "null") +
          ",\"connected\":" + (wi.connected ? "true" : "false") + "},";
@@ -62,7 +70,7 @@ static esp_err_t h_status(httpd_req_t* req) {
          ",\"values\":" + std::to_string(hp.values) +
          ",\"crc_err\":" + std::to_string(hp.crc_err) +
          ",\"timeout_err\":" + std::to_string(hp.timeout_err) + "},";
-    j += "\"profile\":{\"id\":" + jstr(c.profile) + ",\"lang\":" + jstr(c.lang) + "},";
+    j += "\"profile\":{\"id\":" + jstr(c.profile) + "},";
 
     // Auto-detection: proto/model derived from the X10A bus (hp_detect.cpp). The candidate set is
     // recomputed cheaply from the stored fingerprint (no re-probe) via the pure logic/detect.hpp;

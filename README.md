@@ -17,9 +17,10 @@ Reference: [docs/README.md](docs/README.md) (protocol · API · values · build)
 
 1. Flash: [web installer](https://0bu.github.io/daikin-altherma-esp32/).
 2. WiFi: join AP `daikin-altherma-esp32-setup` (captive portal / `192.168.4.1`).
-3. Configure at `http://daikin-altherma-esp32.local`: RX/TX pins, poll interval, language,
-   MQTT `host:port`. The unit model and X10A protocol are **auto-detected** from the bus — no
-   manual pick. Live-applied, NVS-backed, OTA-persistent.
+3. Configure at `http://daikin-altherma-esp32.local`: just the MQTT `host:port`. The unit model, the
+   X10A protocol **and the RX/TX pins** are **auto-detected** from the bus (if the pins can't be
+   found, the dashboard ESP32 card offers a dropdown of the board's usable GPIOs to pick from). The
+   poll interval is fixed at 1 s and labels are English-only. Live-applied, NVS-backed, OTA-persistent.
 
 ## Wiring — X10A (breaker OFF)
 
