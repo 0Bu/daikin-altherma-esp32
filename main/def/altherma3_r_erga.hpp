@@ -28,7 +28,7 @@ inline constexpr ValueDef altherma3_r_erga[] = {
     {0x61,  8, 105, 2,  1, "Return Water Temp before PHE (R4T)"},
     {0x61, 10, 105, 2,  1, "DHW Tank Temp (R5T)"},
     {0x62,  9, 105, 2, -1, "Flow Rate (l/min)"},
-    {0x62, 11, 405, 1,  1, "Water Pressure"},
+    {0x62, 11, 105, 1,  2, "Water Pressure"},
     {0x62, 12, 152, 1, -1, "Pump Speed"},
     {0x63, 14, 161, 1, -1, "CT Sensor (L1)"},
     {0x63, 15, 161, 1, -1, "CT Sensor (L2)"},

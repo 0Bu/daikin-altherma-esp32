@@ -91,7 +91,7 @@ inline constexpr ValueDef altherma_erga_e_ehsh_x_p30_50_e_ef_series_04_08kw_ech2
     {0x62, 8, 301, 1, -1, "Alarm output"},  // default_on
     {0x62, 8, 300, 1, -1, "Space H Operation output"},  // default_on
     {0x62, 9, 105, 2, -1, "Flow sensor (l/min)"},  // default_on
-    {0x62, 11, 405, 1, 1, "Water pressure"},  // default_on
+    {0x62, 11, 105, 1, 2, "Water pressure"},  // default_on
     {0x62, 12, 152, 1, -1, "Water pump signal (0:max-100:stop)"},  // default_on
     {0x62, 15, 105, 2, 2, "Refrigerant pressure sensor"},  // default_on
     {0x62, 15, 405, 2, 1, "Pressure sensor(T)"},  // default_on

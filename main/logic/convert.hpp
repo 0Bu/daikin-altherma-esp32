@@ -45,7 +45,7 @@ inline double press2temp(double d, int rtype = 802) {
 
 // ── Enum / flag label tables (recovered from the X10A value definitions) ──────────────────────
 inline constexpr const char* OP_MODE[] = {                          // conv 217 (data[0])
-    "Fan Only", "Heating", "Cooling", "Auto", "Ventilation", "Auto Heat", "Auto Cool", "Dry",
+    "Fan Only", "Heating", "Cooling", "Auto", "Ventilation", "Auto Cool", "Auto Heat", "Dry",
     "Aux.", "Cooling Storage", "Heating Storage", "UseStrdThrm(cl)1", "UseStrdThrm(cl)2",
     "UseStrdThrm(cl)3", "UseStrdThrm(cl)4", "UseStrdThrm(ht)1", "UseStrdThrm(ht)2",
     "UseStrdThrm(ht)3", "UseStrdThrm(ht)4", "Aux."};
@@ -134,6 +134,26 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802
             break;
     }
     return r;
+}
+
+// The active profile declares its refrigerant once via a size-0 row whose conv id is 801-805
+// (801=R410A, 802=R32, 803=R22, 804=R407C, 805=R134a). That id selects the press2temp curve used by
+// conv-405 saturation-temperature rows; without it every unit would decode on the R32 curve (the
+// press2temp default), off by several °C on an R410A/R22 unit. Returns the declared id, or 802 (R32)
+// when the profile carries no refrigerant row. 804/805 have no dedicated curve and fall back to R32.
+inline int profile_refrigerant(const ValueDef* v, size_t count) {
+    for (size_t i = 0; i < count; i++)
+        if (v[i].conv >= 801 && v[i].conv <= 805) return v[i].conv;
+    return 802;
+}
+
+// Decimal places for a numeric converter's display/publish string. conv 118 is a signed ×0.01 value
+// (two decimals); the ×0.1 / ÷256 / ×0.5 scaled families (103-119, 161, 405) keep one; everything
+// else is an integer. Kept here (not in the device .cpp) so the precision policy is host-tested.
+inline int display_decimals(int conv) {
+    if (conv == 118) return 2;
+    if ((conv >= 103 && conv <= 119) || conv == 161 || conv == 405) return 1;
+    return 0;
 }
 
 // Home Assistant hints from the value's dataType field — the classic Altherma unit code

@@ -7,8 +7,10 @@
 
 namespace daik {
 
-// Format a value for the /values API and MQTT (e.g. "34.5"). Returns false if the reading is
-// absent/unimplemented (skip it).
-bool hp_format(const ValueDef& def, const uint8_t* payload, int payload_len, std::string& out);
+// Format a value for the /values API and MQTT (e.g. "34.5"). `rtype` is the active profile's
+// refrigerant converter id (801-805; see logic::profile_refrigerant) and only affects conv-405
+// saturation-temperature rows. Returns false if the reading is absent/unimplemented (skip it).
+bool hp_format(const ValueDef& def, const uint8_t* payload, int payload_len, int rtype,
+               std::string& out);
 
 } // namespace daik

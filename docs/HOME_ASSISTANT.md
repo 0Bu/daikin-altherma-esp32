@@ -34,8 +34,10 @@ at that shared topic and pulls its value out with a `value_template`:
 
 Each value's `object_id` is a lowercase, alnum-only slug of its label (e.g. *"DHW Tank Temp
 (R5T)"* → `dhw_tank_temp_r5t`). The template uses bracket subscripts, so a slug that starts with a
-digit (*"2way valve…"* → `2way_valve_…`) stays valid. Units and `device_class` are derived from the
-converter id, so temperatures render as °C with history, currents as A, and so on. This grouped JSON
+digit (*"2way valve…"* → `2way_valve_…`) stays valid. Units and `device_class` are derived from each
+value's `dataType` field (the def's HA unit hint: 1 = °C/temperature, 2 = bar/pressure, 3 = A/current;
+see `unit_for_datatype`/`device_class_for_datatype` in `logic/convert.hpp`), so temperatures render
+as °C with history, currents as A, and so on. This grouped JSON
 is also directly consumable by a Telegraf MQTT `json_v2` parser (→ VictoriaMetrics/Grafana).
 
 Numeric values are emitted (unquoted) only when the heat pump reported them this cycle, so an

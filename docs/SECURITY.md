@@ -28,6 +28,12 @@ this also prevents reading the config off a stolen board.
 
 ## OTA image signing
 
+> **Implementation status.** The *flash-time* signing described here and the **rollback health gate**
+> are implemented and host-tested. The **pull-OTA path itself — manifest check, image download, and
+> the downgrade gate — is not yet implemented**: `ota_update.cpp`'s `ota_check_async` /
+> `ota_update_async` are TODO stubs. The signature-verify-on-update and downgrade-gate points below
+> describe the intended design that lands with that path, not current runtime behaviour.
+
 OTA updates are **signed** (Secure Boot v2 RSA-3072 signature scheme *without* hardware Secure
 Boot): the running app verifies the RSA signature of a downloaded image before installing it, so a
 compromised update host (or its GitHub Pages source) cannot push unsigned or tampered firmware.
@@ -38,10 +44,12 @@ compromised update host (or its GitHub Pages source) cannot push unsigned or tam
 - **Trust is bootstrapped TOFU** — the first signed image reaches a device from the current
   unsigned build (which doesn't verify) or via USB; from then on every OTA image must be signed
   with the same offline key.
-- **Downgrade gate** — before the bulk download, the running app reads the incoming image's own
-  version and refuses anything not strictly newer. A signature proves authenticity, not freshness.
-- **Rollback health gate** — a freshly-flashed image stays `PENDING_VERIFY` until it has run
-  healthily for ~90 s (`ota_update.cpp`), so a boots-but-crashes image is reverted.
+- **Downgrade gate** *(planned — not yet implemented)* — before the bulk download, the running app
+  reads the incoming image's own version and refuses anything not strictly newer. A signature proves
+  authenticity, not freshness.
+- **Rollback health gate** *(implemented)* — a freshly-flashed image stays `PENDING_VERIFY` until it
+  has run healthily for ~90 s (`ota_update.cpp`, `logic/health_gate.hpp`), so a boots-but-crashes
+  image is reverted.
 
 The classic ESP32 needs chip revision **v3.0+ (ECO3)** for the V2 RSA scheme
 (`CONFIG_ESP32_REV_MIN_3` in `sdkconfig.defaults.esp32`); s3/c3/c6/c5 support it at their default min
@@ -61,7 +69,7 @@ Three failure modes, and what recovers each:
 | # | How a bad image arrives | Auto-recovery |
 |---|---|---|
 | 1 | **OTA** installs an image that boots but is broken/crashes | ✅ dual-OTA + `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` + the health gate. The image boots `PENDING_VERIFY`; it must prove healthy or the bootloader reverts to the previous slot. |
-| 2 | **OTA** installs an *unsigned/tampered* image | ✅ prevented — `esp_https_ota` verifies the RSA signature before it ever writes/activates the slot. |
+| 2 | **OTA** installs an *unsigned/tampered* image | ✅ by design — `esp_https_ota` verifies the RSA signature before it ever writes/activates the slot. *(The pull-OTA download is currently a TODO stub, so no OTA image installs yet; this is the behaviour that lands with it.)* |
 | 3 | **Direct USB / Web-Serial flash** of an unsigned (or early-crashing) build | ⚠️ not auto-recoverable — see below. Prevented instead by `scripts/require-signed.sh`. |
 
 ### Why mode 3 can't roll back — and how it's contained

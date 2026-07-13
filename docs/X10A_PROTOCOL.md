@@ -1,7 +1,7 @@
 # X10A Service-Port Protocol
 
-Wire-level reference for the **X10A** service connector on Daikin Altherma (and ROTEX / HOVAL
-Belaria) heat pumps. This is the transport the firmware speaks in [`hp_comm.cpp`](../main/hp_comm.cpp)
+Wire-level reference for the **X10A** service connector on Daikin Altherma heat pumps. This is the
+transport the firmware speaks in [`hp_comm.cpp`](../main/hp_comm.cpp)
 and frames in [`logic/crc.hpp`](../main/logic/crc.hpp); the register payloads it carries are
 documented in [`REGISTERS.md`](REGISTERS.md).
 
@@ -81,7 +81,9 @@ is the single validity test for a received frame. Implemented as `daik::crc()` i
 - **`0x03`** — length: the count of bytes that follow (`40`, `reg`, `cksum`).
 - **`0x40`** — the read opcode (all `I` queries use it).
 - **`reg`** — the register/page to read (e.g. `0x20`, `0x60`; see [§5](#5-register-pages)). Some
-  pages take a sub-index byte, giving a 5-byte request `04 40 <reg> <sub> <cksum>`.
+  pages take a sub-index byte, giving a 5-byte request `04 40 <reg> <sub> <cksum>`. **Not implemented:
+  `build_request` (`logic/crc.hpp`) emits only the 4-byte (`I`) / 3-byte (`S`) forms, and no shipped
+  profile needs a sub-index.**
 - **`cksum`** — as above.
 
 ### Request (Protocol `S`)
@@ -172,10 +174,13 @@ first (address 0) block is the one to read; the enable flag tells you whether th
 
 ## 7. Unit detection
 
-At start-up the type is unknown, so the host sweeps the variants in order — outdoor multi-unit
-(`@`), multi-split (`M`), indoor (`I`), short (`S`) — sending each one's identity query and keeping
-the framing that answers instead of `15 EA`. For Altherma the winning framing is `I`, confirmed by a
-valid `0x00`/`0x10` reply.
+At start-up the type is unknown. The broader Daikin protocol family defines several request framings
+— outdoor multi-unit (`@`), multi-split (`M`), indoor (`I`), short (`S`) — but on the X10A service
+port an Altherma answers only `I` (modern units) or `S` (older units / Rotex). **The firmware
+therefore sweeps just `I` and `S`** (`enum Protocol { I, S }` in `logic/crc.hpp`, swept in
+`hp_detect.cpp`), keeping the framing that answers instead of `15 EA`; `@`/`M` are not implemented.
+For Altherma the winning
+framing is `I`, confirmed by a valid `0x00`/`0x10` reply.
 
 A representative probe/response pair (Protocol `I`, reading identity page `0x00`):
 

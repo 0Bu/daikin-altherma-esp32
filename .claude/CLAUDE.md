@@ -11,7 +11,10 @@ the RX/TX pins — is configured at runtime from a **web UI**; firmware is insta
 > [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) — read it on demand. The X10A wire protocol
 > (framing, checksum, register pages, detection) is in
 > [`docs/X10A_PROTOCOL.md`](../docs/X10A_PROTOCOL.md), and the converter-id/enum tables plus a full
-> register map in [`docs/REGISTERS.md`](../docs/REGISTERS.md). User-facing docs:
+> register map in [`docs/REGISTERS.md`](../docs/REGISTERS.md). A **fact-checked comparison vs upstream
+> ESPAltherma** — verified protocol facts, quarantined misleading claims, and the gap/fix log — is in
+> [`docs/ESPALTHERMA_COMPARISON.md`](../docs/ESPALTHERMA_COMPARISON.md) (consult before porting
+> anything from upstream). User-facing docs:
 > [`README.md`](../README.md), [`docs/README.md`](../docs/README.md),
 > [`docs/SECURITY.md`](../docs/SECURITY.md), [`docs/DESIGN.md`](../docs/DESIGN.md) (web-UI design
 > contract). Keep them in sync (the `project-review` skill checks for drift).
