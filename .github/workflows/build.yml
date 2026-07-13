@@ -1,11 +1,19 @@
 name: build
 
+# PUBLIC-ONLY PUBLISHING GATE
+# While this repo is PRIVATE, CI still runs the full pipeline (host logic tests + all-target
+# firmware build + artifact upload) but publishes NOTHING outward: no git tags, no GitHub
+# Releases, no GitHub Pages (neither the root installer site nor per-PR previews). Every such
+# step is gated on `github.event.repository.private == false`. The moment the repo is flipped to
+# PUBLIC, these steps re-enable automatically — no edit to this file required. Until then the
+# firmware version stays at the version.txt floor (1.0.0) because no v* tags are ever created.
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-  workflow_dispatch:   # manual re-publish of the Pages site at the latest released version
+  workflow_dispatch:   # manual re-publish of the Pages site at the latest released version (public only)
 
 # Serialize main so the auto-incremented release version can't race; cancel superseded PR runs.
 concurrency:
@@ -125,19 +133,19 @@ jobs:
                 || format('daikin-altherma-esp32-{0}', steps.version.outputs.version) }}
           path: dist/*.bin
 
-      # PR preview installer (signed builds only) at gh-pages PR/<N>/.
+      # PR preview installer (signed builds only) at gh-pages PR/<N>/. Public repos only.
       - name: Assemble PR preview site
-        if: github.event_name == 'pull_request' && steps.signkey.outputs.signed == 'true'
+        if: github.event_name == 'pull_request' && steps.signkey.outputs.signed == 'true' && github.event.repository.private == false
         run: ./scripts/build-pages.sh "${{ github.event.pull_request.number }}"
       - name: Publish PR preview to gh-pages
-        if: github.event_name == 'pull_request' && steps.signkey.outputs.signed == 'true'
+        if: github.event_name == 'pull_request' && steps.signkey.outputs.signed == 'true' && github.event.repository.private == false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/publish-pages-branch.sh --pr "${{ github.event.pull_request.number }}"
 
-      # Cut a release only when firmware-relevant files changed.
+      # Cut a release only when firmware-relevant files changed. Public repos only (creates a v* tag).
       - name: Create release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.changes.outputs.firmware == 'yes'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.changes.outputs.firmware == 'yes' && github.event.repository.private == false
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
@@ -146,25 +154,25 @@ jobs:
           files: dist/*.bin
 
       - name: Configure Pages
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.event.repository.private == false
         uses: actions/configure-pages@v5
       - name: Assemble Pages site
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.event.repository.private == false
         run: ./scripts/build-pages.sh
       - name: Publish site to gh-pages (root)
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.event.repository.private == false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/publish-pages-branch.sh
       - name: Upload Pages artifact
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.event.repository.private == false
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./_site
 
   deploy:
     needs: build
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.event.repository.private == false
     runs-on: ubuntu-latest
     permissions:
       pages: write
