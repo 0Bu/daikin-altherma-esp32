@@ -121,7 +121,7 @@ Startup / Defrost / … / Low-noise).
 | **217** | byte | Operation mode — see [§4.1](#41-operation-mode-conv-217) |
 | **315** | `(byte & 0xF0) >> 4` (**high nibble**) | Indoor/hydronic operation mode — see [§4.2](#42-indoorhydronic-operation-mode-conv-315) |
 | **203** | byte | Error class: `0` Normal, `1` Error, `2` Warning, `3` Caution |
-| **204** | byte | Error code — first character from the map in [§4.3](#43-error-code-conv-204), then digits |
+| **204** | byte | Error code — high nibble → first-char table, low nibble → second-char table, see [§4.3](#43-error-code-conv-204) |
 | 219 | byte | Indoor-unit capacity class code (maps to nominal kW) |
 | 316 | byte | Hybrid op mode: `0` H/P only, `1` Hybrid, `2` Boiler only |
 | 314 / 317 | byte | Software/version codes |
@@ -176,15 +176,18 @@ High nibble of the byte (`(byte & 0xF0) >> 4`):
 
 ### 4.3 Error code (conv 204)
 
-The error byte's high nibble indexes a **first-character** table; the low nibble/next byte gives the
-digits. The Daikin first-character map (index 0…):
+The fault code is packed into **one byte** as two nibbles: the **high** nibble indexes a
+first-character table, the **low** nibble a second-character table. Both are 16 entries, indexed by a
+4-bit nibble (`0`–`F`), and are the exact tables in `logic/convert.hpp` (`ERR_C1` / `ERR_C2`):
 
-```
-- 1 2 3 4 5 6 7 8 9 A C E F * H J E L U * P P P U 2 A E F * * *
-```
+| Nibble | `0` | `1` | `2` | `3` | `4` | `5` | `6` | `7` | `8` | `9` | `A` | `B` | `C` | `D` | `E` | `F` |
+|-------:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **high → char 1** (`ERR_C1`) | _(blank)_ | A | C | E | H | F | J | L | P | U | 9 | 8 | 7 | 6 | 5 | 4 |
+| **low → char 2** (`ERR_C2`)  | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | A | H | C | J | E | F |
 
-e.g. a code decoding to first-char `U` + `4` displays as **`U4`**. Error *class* comes from
-`conv 203` (Normal / Error / Warning / Caution).
+e.g. byte `0x94` → high nibble `9` → `U`, low nibble `4` → `4` → **`U4`**. A high nibble of `0`
+yields a blank first character (the code is shown as its single second character). Error *class* comes
+from `conv 203` (Normal / Error / Warning / Caution).
 
 ---
 
