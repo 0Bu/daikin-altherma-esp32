@@ -135,8 +135,7 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
 // throw through the FreeRTOS task and reboot the device.
 static void mqtt_task(void*) {
     for (;;) {
-        int delay_s = config().poll_s;
-        if (delay_s < 1) delay_s = 1;
+        const int delay_s = POLL_INTERVAL_S;
 
         try {
             if (s_connected) {

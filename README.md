@@ -2,7 +2,7 @@
 
 ESP-IDF firmware: reads a **Daikin Altherma** over the **X10A** port (UART 9600 8E1, protocol I/S)
 and publishes all values to MQTT / Home Assistant (auto-discovery). Runtime config + OTA via an
-embedded web UI. Targets esp32 / esp32s3 / esp32c3 / esp32c6 / esp32c5.
+embedded web UI. Targets esp32s3 only.
 
 Reference: [docs/README.md](docs/README.md) (protocol · API · values · build) ·
 [ARCHITECTURE](docs/ARCHITECTURE.md) · [DESIGN](docs/DESIGN.md) · [SECURITY](docs/SECURITY.md).
@@ -10,17 +10,18 @@ Reference: [docs/README.md](docs/README.md) (protocol · API · values · build)
 ## Requirements
 
 - A Daikin Altherma with an **X10A** (bi-zone: **X12A**) header.
-- ESP32, ≥4 MB flash. Reference board: Seeed XIAO ESP32-S3.
+- ESP32-S3, ≥4 MB flash. Reference board: Seeed XIAO ESP32-S3.
 - A browser with Web Serial to flash; JST-EH 2.5 mm 5-pin or Dupont wires.
 
 ## Setup
 
 1. Flash: [web installer](https://0bu.github.io/daikin-altherma-esp32/).
 2. WiFi: join AP `daikin-altherma-esp32-setup` (captive portal / `192.168.4.1`).
-3. Configure at `http://daikin-altherma-esp32.local`: just the MQTT `host:port`. The unit model, the
-   X10A protocol **and the RX/TX pins** are **auto-detected** from the bus (if the pins can't be
-   found, the dashboard ESP32 card offers a dropdown of the board's usable GPIOs to pick from). The
-   poll interval is fixed at 1 s and labels are English-only. Live-applied, NVS-backed, OTA-persistent.
+3. Configure at `http://daikin-altherma-esp32.local`: just the MQTT `host:port`. The unit model and
+   X10A protocol are **auto-detected** from the bus on every boot; the **RX/TX pins** are auto-detected
+   too (if they can't be found, the dashboard ESP32 card offers a dropdown of the board's usable GPIOs
+   to pick from). The poll interval is fixed at 1 s and labels are English-only. MQTT + the RX/TX pin
+   cache are NVS-backed and OTA-persistent; the model is re-detected each boot.
 
 ## Wiring — X10A (breaker OFF)
 

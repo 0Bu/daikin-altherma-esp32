@@ -1,8 +1,8 @@
 #pragma once
 // A single queryable value — a row of
 //   {registryID, offset, convId, dataSize, dataType, label}
-// These rows are generated into main/def/*.hpp by tools/gen_defs.py from the classic Altherma
-// value-definition files. IDF-free so the host tests can use it.
+// These rows are generated into main/def/*.hpp by tools/catalog/gen_profiles.py from Daikin's
+// decoded catalog catalog. IDF-free so the host tests can use it.
 #include <cstdint>
 
 namespace daik {
@@ -13,7 +13,7 @@ struct ValueDef {
     int         conv;    // converter id (see logic/convert.hpp)
     uint8_t     size;    // number of bytes
     int         type;    // dataType / HA unit code: 1=°C, 2=bar, 3=A, -1=generic
-    const char* label;   // human label (language-specific table)
+    const char* label;   // human label (English)
 };
 
 } // namespace daik

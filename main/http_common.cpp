@@ -1,13 +1,44 @@
 // Shared HTTP helpers. See http_handlers.hpp.
 //
 // OOM discipline: heap is tight (WiFi + MQTT + TLS dominate; the binding limit is the largest
-// contiguous free block). A handler that builds a big response should wrap it in a try/catch and
-// return 503 on std::bad_alloc rather than letting an uncaught throw unwind through C frames to
-// std::terminate -> abort() -> reboot. Stream large output (e.g. /diag) instead of one big
-// std::string. (See docs/ARCHITECTURE.md → Memory constraints.)
+// contiguous free block). EVERY route registered via http_register() runs under handle_all, which
+// catches std::bad_alloc and returns 503 instead of letting an uncaught throw unwind through
+// esp_http_server's C frames to std::terminate -> abort() -> reboot. Handlers should still stream
+// large output (e.g. /diag) instead of one big std::string. (See docs/ARCHITECTURE.md → Memory constraints.)
 #include "http_handlers.hpp"
+#include <new>          // std::bad_alloc
 
 namespace daik {
+
+// The single OOM/exception guard every HTTP handler runs under. http_register() stashes the real
+// handler in user_ctx and installs this trampoline as the route handler; we call the real handler
+// inside try/catch so an out-of-memory throw (std::string / cJSON / TLS) turns into a 503 rather
+// than crashing the device (which would also drop the poll cycle + MQTT availability).
+static esp_err_t handle_all(httpd_req_t* req) {
+    auto fn = reinterpret_cast<esp_err_t (*)(httpd_req_t*)>(req->user_ctx);
+    if (!fn) return httpd_resp_send_500(req);
+    try {
+        return fn(req);
+    } catch (const std::bad_alloc&) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "text/plain");
+        return httpd_resp_sendstr(req, "out of memory");
+    } catch (...) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_set_type(req, "text/plain");
+        return httpd_resp_sendstr(req, "handler error");
+    }
+}
+
+void http_register(httpd_handle_t s, const char* uri, httpd_method_t method,
+                   esp_err_t (*fn)(httpd_req_t*)) {
+    httpd_uri_t u = {};
+    u.uri      = uri;
+    u.method   = method;
+    u.handler  = handle_all;
+    u.user_ctx = reinterpret_cast<void*>(fn);
+    httpd_register_uri_handler(s, &u);
+}
 
 esp_err_t http_send_json(httpd_req_t* req, const char* json) {
     httpd_resp_set_type(req, "application/json");

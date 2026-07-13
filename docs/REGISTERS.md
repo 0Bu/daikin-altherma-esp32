@@ -28,7 +28,7 @@ matching `daik::ValueDef` in [`logic/value_def.hpp`](../main/logic/value_def.hpp
 | `conv` | Converter id — how the bytes become a number/enum (see [§3](#3-converter-reference)) |
 | `size` | Field width in bytes (1 or 2) |
 | `type` | Unit/`device_class` hint: `1`=°C, `2`=bar, `3`=A, `-1`=generic. Independent of `conv` |
-| `label` | Human label (language-specific) |
+| `label` | Human label (English) |
 
 A model profile is just an array of these rows. One register request feeds many rows (all the
 values whose `reg` matches), each sliced out by `(offset, size)` and decoded by `conv`.

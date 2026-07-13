@@ -33,12 +33,9 @@ static esp_err_t ota_stat(httpd_req_t* req) {
 }
 
 void http_register_ota(httpd_handle_t s) {
-    httpd_uri_t routes[] = {
-        {"/ota/check", HTTP_GET, ota_check, nullptr},
-        {"/ota/update", HTTP_POST, ota_do, nullptr},
-        {"/ota/status", HTTP_GET, ota_stat, nullptr},
-    };
-    for (auto& r : routes) httpd_register_uri_handler(s, &r);
+    http_register(s, "/ota/check", HTTP_GET, ota_check);
+    http_register(s, "/ota/update", HTTP_POST, ota_do);
+    http_register(s, "/ota/status", HTTP_GET, ota_stat);
 }
 
 } // namespace daik
