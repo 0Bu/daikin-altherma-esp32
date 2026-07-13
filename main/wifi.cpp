@@ -39,6 +39,8 @@ static volatile bool s_wifi_connected = false;
 // Set true on the first GOT_IP, never cleared. Distinguishes a boot-time connect (budget spent →
 // creds presumed wrong → setup portal) from a runtime drop (creds known-good → reconnect forever).
 static volatile bool s_wifi_ever_connected = false;
+// Cumulative RE-connect count (excludes the first-ever GOT_IP) — see wifi_reconnect_count().
+static volatile uint32_t s_reconnects = 0;
 
 bool wifi_configured() { return !config().wifi_ssid.empty(); }
 
@@ -69,6 +71,7 @@ static void on_wifi(void*, esp_event_base_t base, int32_t id, void* data) {
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         auto* e = static_cast<ip_event_got_ip_t*>(data);
         ESP_LOGI(TAG, "connected, ip=" IPSTR, IP2STR(&e->ip_info.ip));
+        if (s_wifi_ever_connected) s_reconnects = s_reconnects + 1;   // a later GOT_IP is a RE-connect
         s_retry_num           = 0;
         s_wifi_connected      = true;
         s_wifi_ever_connected = true;
@@ -310,5 +313,7 @@ WifiInfo wifi_info() {
     }
     return info;
 }
+
+uint32_t wifi_reconnect_count() { return s_reconnects; }
 
 } // namespace daik

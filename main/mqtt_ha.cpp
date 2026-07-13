@@ -7,6 +7,9 @@
 //   • Each cycle: rebuild the grouped state JSON (logic/mqtt_group.hpp) and publish it to the ONE
 //     shared topic <base>/<node>/state — but only when the payload actually changed, so a quiet
 //     pump doesn't spam the broker.
+//   • Each cycle: same publish-on-change treatment for the board/link diagnostics JSON
+//     (logic/heartbeat.hpp) on <base>/<node>/heartbeat — uptime ticks every cycle, so in practice
+//     it publishes about once a second while connected.
 // Read-only: no command subscriptions. No-op if mqtt_uri is empty. Memory-safe: discovery is one
 // small publish per value; the state JSON is a single few-KB build, guarded against OOM.
 #include "mqtt_ha.hpp"
@@ -15,9 +18,14 @@
 #include "diag_log.hpp"
 #include "hp_poll.hpp"
 #include "logic/discovery.hpp"
+#include "logic/heartbeat.hpp"
 #include "logic/mqtt_group.hpp"
+#include "wifi.hpp"
 
+#include "esp_app_desc.h"
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "mqtt_client.h"
 #include "sdkconfig.h"
@@ -39,9 +47,17 @@ static volatile bool            s_connected = false;
 static volatile bool            s_announce  = false;  // set on connect -> task re-announces
 
 // Persisted so the pointers handed to esp-mqtt (and reused by the task) stay valid.
-static std::string s_uri, s_user, s_pass, s_node, s_base, s_prefix, s_avail, s_state;
+static std::string s_uri, s_user, s_pass, s_node, s_base, s_prefix, s_avail, s_state, s_heartbeat;
 static std::string s_announced_profile;               // profile we last published discovery for
 static std::string s_last_json;                       // last state JSON published (dedup guard)
+static std::string s_last_heartbeat_json;              // last heartbeat JSON published (dedup guard)
+static bool         s_heartbeat_announced = false;     // diagnostic discovery streamed this connection?
+static bool         s_mqtt_ever_connected = false;     // distinguishes the first connect from a RE-connect
+
+// Cumulative publish counters for the heartbeat's mqtt.{count,fails,reconnects} — see mqtt_publish().
+static uint32_t s_mqtt_pub_ok   = 0;
+static uint32_t s_mqtt_pub_fail = 0;
+static uint32_t s_mqtt_reconnects = 0;
 
 static void set_status(bool connected, const char* err) {
     xSemaphoreTake(s_mtx, portMAX_DELAY);
@@ -58,6 +74,15 @@ static std::string node_id() {
     char b[20];
     std::snprintf(b, sizeof(b), "daikin_%02x%02x%02x", m[3], m[4], m[5]);
     return b;
+}
+
+// Every outbound publish funnels through here so the heartbeat's mqtt.count/mqtt.fails (the
+// EMS-ESP-style "mqttcount"/"mqttfails" pair) reflect every discovery/state/heartbeat/availability
+// message, not just one of them. esp_mqtt_client_publish() returns the message id (>=0) on success
+// or -1 if it couldn't even be queued (e.g. dropped mid-disconnect).
+static void mqtt_publish(const std::string& topic, const char* payload, int len, int qos, int retain) {
+    const int rc = esp_mqtt_client_publish(s_client, topic.c_str(), payload, len, qos, retain);
+    if (rc >= 0) s_mqtt_pub_ok++; else s_mqtt_pub_fail++;
 }
 
 // Layout-marker / grid converters carry no measured value (docs/REGISTERS.md §3.6) — no sensor.
@@ -91,7 +116,7 @@ static void publish_discovery() {
         if (obj.empty()) continue;
         const std::string ct  = discovery_topic(s_prefix, s_node, d);
         const std::string cfg = discovery_config(s_node, s_state, s_avail, d);
-        esp_mqtt_client_publish(s_client, ct.c_str(), cfg.c_str(), 0, 0, 1);   // retained
+        mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained
     }
 }
 
@@ -100,20 +125,73 @@ static void publish_discovery() {
 static bool publish_state(bool force) {
     const std::string js = build_grouped_json(current_grouped());
     if (!force && js == s_last_json) return false;
-    esp_mqtt_client_publish(s_client, s_state.c_str(), js.c_str(),
-                            static_cast<int>(js.size()), 0, 1);                 // retained
+    mqtt_publish(s_state, js.c_str(), static_cast<int>(js.size()), 0, 1);       // retained
     s_last_json = js;
+    return true;
+}
+
+// Stream one retained discovery config per diagnostic sensor (logic/heartbeat.hpp). These describe
+// the ESP32 board + X10A link itself, not a heat-pump value, so — unlike publish_discovery() —
+// they don't wait on profile detection: WiFi signal and free heap are meaningful even while
+// profile == "auto".
+static void publish_heartbeat_discovery() {
+    for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++) {
+        const HeartbeatSensor& s = HEARTBEAT_SENSORS[i];
+        const std::string ct  = heartbeat_discovery_topic(s_prefix, s_node, s);
+        const std::string cfg = heartbeat_discovery_config(s_node, s_heartbeat, s_avail, s);
+        mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained
+    }
+}
+
+// Snapshot board/link diagnostics from the IDF heap/timer APIs + the poll/WiFi/MQTT state, and
+// publish it to the heartbeat topic (not retained) — but, like publish_state(), only when the
+// payload actually changed since the last publish, so a completely idle device doesn't spam the
+// broker every second. `uptime_s` changes every cycle while connected, so in practice this fires
+// about once a second — publish-on-change, not a slower fixed interval.
+static bool publish_heartbeat(bool force) {
+    HpStats  hp = hp_stats();
+    WifiInfo wi = wifi_info();
+    HeartbeatFields f;
+    f.version         = esp_app_get_description()->version;
+    f.platform        = CONFIG_IDF_TARGET;
+    f.uptime_ms       = static_cast<uint64_t>(esp_timer_get_time() / 1000);
+    f.free_heap       = esp_get_free_heap_size();
+    f.min_free_heap   = esp_get_minimum_free_heap_size();
+    f.max_alloc       = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
+    f.wifi_connected  = wi.connected;
+    f.wifi_rssi       = wi.rssi;
+    f.wifi_reconnects = wifi_reconnect_count();
+    f.mqtt_connected  = s_connected;
+    f.mqtt_count      = s_mqtt_pub_ok;
+    f.mqtt_fails      = s_mqtt_pub_fail;
+    f.mqtt_reconnects = s_mqtt_reconnects;
+    f.bus_connected   = hp.connected;
+    f.bus_proto       = static_cast<char>(config().proto);
+    f.registers       = hp.registers;
+    f.values          = hp.values;
+    f.crc_err         = hp.crc_err;
+    f.timeout_err     = hp.timeout_err;
+    f.rx_received     = hp.rx_ok;
+    f.rx_fails        = hp.rx_fail_total;
+    f.last_ok_s       = hp.last_ok_s;
+
+    const std::string js = build_heartbeat_json(f);
+    if (!force && js == s_last_heartbeat_json) return false;
+    mqtt_publish(s_heartbeat, js.c_str(), static_cast<int>(js.size()), 0, 0);   // not retained
+    s_last_heartbeat_json = js;
     return true;
 }
 
 static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
     switch (static_cast<esp_mqtt_event_id_t>(id)) {
     case MQTT_EVENT_CONNECTED:
+        if (s_mqtt_ever_connected) s_mqtt_reconnects++;   // a later CONNECTED is a RE-connect
+        s_mqtt_ever_connected = true;
         s_connected = true; s_announce = true; set_status(true, nullptr);
         diag_printf("mqtt: connected\n");
         break;
     case MQTT_EVENT_DISCONNECTED:
-        s_connected = false; set_status(false, nullptr);
+        s_connected = false; s_heartbeat_announced = false; set_status(false, nullptr);
         diag_printf("mqtt: disconnected (will retry)\n");
         break;
     case MQTT_EVENT_ERROR: {
@@ -143,7 +221,12 @@ static void mqtt_task(void*) {
                     s_announce = false;
                     s_announced_profile.clear();               // force a fresh discovery below
                     s_last_json.clear();                       // force a full state re-seed
-                    esp_mqtt_client_publish(s_client, s_avail.c_str(), "online", 0, 0, 1);
+                    s_last_heartbeat_json.clear();              // force a full heartbeat re-seed
+                    mqtt_publish(s_avail, "online", 0, 0, 1);
+                }
+                if (!s_heartbeat_announced) {                  // board/link diagnostics — independent
+                    publish_heartbeat_discovery();              // of heat-pump profile detection
+                    s_heartbeat_announced = true;
                 }
                 const std::string prof = config().profile;
                 if (prof != "auto" && prof != s_announced_profile) {
@@ -154,6 +237,11 @@ static void mqtt_task(void*) {
                     publish_state(false);                      // republish only when it changed
                 }
                 // prof == "auto" (detection pending): wait — don't publish transient generic sensors.
+
+                // Checked every poll cycle (1 s), but only actually sent when the payload changed —
+                // uptime_s ticks every second while connected, so in practice this publishes about
+                // once a second, same cadence as the state topic, not on a slower fixed timer.
+                publish_heartbeat(false);
             }
         } catch (const std::exception& e) {
             diag_printf("mqtt: publish skipped (%s)\n", e.what());
@@ -217,8 +305,9 @@ void mqtt_ha_start() {
     s_node   = node_id();
     s_base   = CONFIG_DAIKIN_MQTT_BASE_TOPIC;
     s_prefix = CONFIG_DAIKIN_MQTT_DISCOVERY_PREFIX;
-    s_avail  = availability_topic(s_base, s_node);
-    s_state  = state_topic(s_base, s_node);
+    s_avail     = availability_topic(s_base, s_node);
+    s_state     = state_topic(s_base, s_node);
+    s_heartbeat = heartbeat_topic(s_base, s_node);
 
     if (!build_client()) return;                               // policy error already surfaced
     esp_mqtt_client_start(s_client);

@@ -44,6 +44,7 @@ static void poll_once() {
         uint8_t buf[64];
         int n = hp_query(reg, c.proto, buf, sizeof(buf));
         if (n < 0) {
+            s_stats.rx_fail_total++;
             if (n == -1)      s_stats.timeout_err++;
             else if (n == -3) s_stats.crc_err++;
             char eb[32];
@@ -51,6 +52,7 @@ static void poll_once() {
             s_stats.last_error = eb;
             continue;
         }
+        s_stats.rx_ok++;
         any_ok = true;
         const int      poff    = payload_offset(c.proto);
         const int      paylen  = n - poff - 1;                 // minus header, minus CRC byte
@@ -90,6 +92,7 @@ static void poll_detect() {
         s_stats.connected  = false;
         s_stats.last_error = "no X10A response (detecting)";
         s_stats.timeout_err++;
+        s_stats.rx_fail_total++;
         xSemaphoreGive(s_mtx);
         return;                                                // keep "auto" — retry next cycle
     }

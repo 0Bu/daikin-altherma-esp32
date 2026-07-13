@@ -28,4 +28,10 @@ int  wifi_scan(WifiScanEntry* out, int max);   // returns count
 struct WifiInfo { char ip[16]; int8_t rssi; bool connected; };
 WifiInfo wifi_info();
 
+// Cumulative count of successful RE-connects since boot (the first-ever GOT_IP doesn't count) —
+// for the MQTT heartbeat (logic/heartbeat.hpp). Every drop the endless-reconnect handler recovers
+// from (router reboot, roaming, a delivered deauth, a watchdog-forced re-association) increments
+// this once it gets a new IP.
+uint32_t wifi_reconnect_count();
+
 } // namespace daik
