@@ -16,7 +16,9 @@ concurrency:
 
 jobs:
   cleanup:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Gated on public: while the repo is private no PR preview is ever published (see build.yml),
+    # so there is nothing to clean and no gh-pages branch should be touched. Re-enables on public.
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.repository.private == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
