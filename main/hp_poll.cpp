@@ -58,6 +58,7 @@ static void poll_once() {
             CachedValue cv;
             cv.label = prof.values[k].label;
             cv.unit  = unit_for_datatype(prof.values[k].type);
+            cv.reg   = prof.values[k].reg;
             std::string val;
             if (hp_format(prof.values[k], payload, paylen, val)) cv.value = val;
             fresh.push_back(std::move(cv));

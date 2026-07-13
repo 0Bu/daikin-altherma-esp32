@@ -15,7 +15,7 @@
 #include "logic/detect.hpp"
 #include "logic/discovery.hpp"
 #include "logic/health_gate.hpp"
-#include "logic/mqtt_delta.hpp"
+#include "logic/mqtt_group.hpp"
 #include "logic/registers.hpp"
 #include "def/registry.hpp"
 #include "def/signatures.hpp"
@@ -193,17 +193,24 @@ static void test_discovery() {
 
     ValueDef def{0x61, 10, 105, 2, 1, "DHW Tank Temp (R5T)"};
     const std::string base = "daikin-altherma-esp32", node = "daikin_abc123";
-    const std::string st = value_state_topic(base, node, def);
-    CHECK(st == "daikin-altherma-esp32/daikin_abc123/dhw_tank_temp_r5t/state");
+    const std::string st = state_topic(base, node);       // ONE shared topic for every sensor
+    CHECK(st == "daikin-altherma-esp32/daikin_abc123/state");
     CHECK(availability_topic(base, node) == "daikin-altherma-esp32/daikin_abc123/status");
     std::string cfg = discovery_config(node, st, availability_topic(base, node), def);
     CHECK(cfg.find("\"dev_cla\":\"temperature\"") != std::string::npos);
     CHECK(cfg.find("\"stat_cla\":\"measurement\"") != std::string::npos);
     CHECK(cfg.find("\"unit_of_meas\":\"°C\"") != std::string::npos);
-    CHECK(cfg.find("\"stat_t\":\"" + st + "\"") != std::string::npos);
+    CHECK(cfg.find("\"stat_t\":\"daikin-altherma-esp32/daikin_abc123/state\"") != std::string::npos);
     CHECK(cfg.find("\"avty_t\":\"daikin-altherma-esp32/daikin_abc123/status\"") != std::string::npos);
-    CHECK(cfg.find("value_json") == std::string::npos);   // per-value topic -> no value_template
+    // Shared JSON topic -> value_template subscripts group (page 0x61 -> hydronic_temps) + object.
+    CHECK(cfg.find("\"val_tpl\":\"{{ value_json['hydronic_temps']['dhw_tank_temp_r5t'] }}\"")
+          != std::string::npos);
     CHECK(cfg.find("\"uniq_id\":\"daikin_abc123_dhw_tank_temp_r5t\"") != std::string::npos);
+
+    // A slug that starts with a digit must stay valid — bracket notation, not attribute access.
+    ValueDef way{0x60, 12, 307, 1, -1, "2way valve(On:Heat_Off:Cool)"};
+    std::string wc = discovery_config(node, st, availability_topic(base, node), way);
+    CHECK(wc.find("value_json['hydronic']['2way_valve_on_heat_off_cool']") != std::string::npos);
 }
 
 static void test_registry() {
@@ -318,18 +325,29 @@ static void test_detect() {
     CHECK(std::string(buf) == "0B" && std::strlen(buf) < 5);
 }
 
-static void test_mqtt_delta() {
-    // Only changed/new values are published; unchanged ones are skipped (short poll, quiet broker).
-    std::vector<PubValue> prev = {{"oat", "3.1"}, {"lw", "35.0"}, {"mode", "Heating"}};
-    std::vector<PubValue> cur  = {{"oat", "3.1"}, {"lw", "35.4"}, {"mode", "Heating"}, {"tank", "48.0"}};
-    auto d = mqtt_changed(prev, cur);
-    CHECK(d.size() == 2);                              // lw changed, tank is new; oat/mode unchanged
-    CHECK(d[0].key == "lw" && d[0].value == "35.4");
-    CHECK(d[1].key == "tank");
-    // First publish (no prior snapshot) sends everything.
-    CHECK(mqtt_changed({}, cur).size() == cur.size());
-    // Nothing changed -> nothing to publish.
-    CHECK(mqtt_changed(cur, cur).empty());
+static void test_mqtt_group() {
+    // Register page -> friendly group name (docs/X10A_PROTOCOL.md §5); unknown page -> "other".
+    CHECK(std::string(group_for_page(0x61)) == "hydronic_temps");
+    CHECK(std::string(group_for_page(0x10)) == "outdoor_state");
+    CHECK(std::string(group_for_page(0x64)) == "hybrid");
+    CHECK(std::string(group_for_page(0x7F)) == "other");
+
+    // Numbers (as hp_format emits them) are emitted unquoted; enum/text stays a quoted string.
+    CHECK(is_json_number("48") && is_json_number("-3.5") && is_json_number("0.0"));
+    CHECK(!is_json_number("") && !is_json_number("-") && !is_json_number("3."));
+    CHECK(!is_json_number("1.2.3") && !is_json_number("A1") && !is_json_number("ON"));
+
+    // Grouped JSON: max depth 1, groups+keys in first-seen order, numeric vs string typing.
+    std::vector<GroupedValue> vals = {
+        {"outdoor_state", "operation_mode", "Heating"},
+        {"hydronic",      "dhw_setpoint",   "48"},
+        {"hydronic",      "lw_setpoint",    "35.4"},
+        {"outdoor_state", "error_type",     "Normal"},   // back to an earlier group -> same bucket
+    };
+    const std::string j = build_grouped_json(vals);
+    CHECK(j == "{\"outdoor_state\":{\"operation_mode\":\"Heating\",\"error_type\":\"Normal\"},"
+               "\"hydronic\":{\"dhw_setpoint\":48,\"lw_setpoint\":35.4}}");
+    CHECK(build_grouped_json({}) == "{}");
 }
 
 static void test_health_gate() {
@@ -382,7 +400,7 @@ int main() {
     test_discovery();
     test_registry();
     test_detect();
-    test_mqtt_delta();
+    test_mqtt_group();
     test_health_gate();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }
     std::printf("%d logic test(s) FAILED\n", g_failures);

@@ -3,18 +3,19 @@
 //   • TLS policy: credentials present ⇒ mqtts:// + CA-verified (esp_crt_bundle); NEVER send
 //     credentials over plaintext (no silent fallback — refuse with an error in /status.mqtt).
 //   • On (re)connect: mark availability "online", stream one retained discovery config per value of
-//     the active profile (logic/discovery.hpp), then seed each value's retained state topic.
-//   • Each cycle: publish ONLY the values that changed (logic/mqtt_delta.hpp) — the poll interval is
-//     short (near-real-time) but the broker only sees deltas.
-// Read-only: no command subscriptions. No-op if mqtt_uri is empty. Memory-safe: discovery/state are
-// small per-value publishes, never one big contiguous JSON.
+//     the active profile (logic/discovery.hpp), then publish the full grouped state JSON.
+//   • Each cycle: rebuild the grouped state JSON (logic/mqtt_group.hpp) and publish it to the ONE
+//     shared topic <base>/<node>/state — but only when the payload actually changed, so a quiet
+//     pump doesn't spam the broker.
+// Read-only: no command subscriptions. No-op if mqtt_uri is empty. Memory-safe: discovery is one
+// small publish per value; the state JSON is a single few-KB build, guarded against OOM.
 #include "mqtt_ha.hpp"
 #include "config.hpp"
 #include "def/registry.hpp"
 #include "diag_log.hpp"
 #include "hp_poll.hpp"
 #include "logic/discovery.hpp"
-#include "logic/mqtt_delta.hpp"
+#include "logic/mqtt_group.hpp"
 
 #include "esp_crt_bundle.h"
 #include "esp_wifi.h"
@@ -25,6 +26,7 @@
 #include "freertos/task.h"
 
 #include <cstdio>
+#include <exception>
 #include <string>
 #include <vector>
 
@@ -37,9 +39,9 @@ static volatile bool            s_connected = false;
 static volatile bool            s_announce  = false;  // set on connect -> task re-announces
 
 // Persisted so the pointers handed to esp-mqtt (and reused by the task) stay valid.
-static std::string s_uri, s_user, s_pass, s_node, s_base, s_prefix, s_avail;
+static std::string s_uri, s_user, s_pass, s_node, s_base, s_prefix, s_avail, s_state;
 static std::string s_announced_profile;               // profile we last published discovery for
-static std::vector<PubValue> s_last;                  // last published per-value snapshot
+static std::string s_last_json;                       // last state JSON published (dedup guard)
 
 static void set_status(bool connected, const char* err) {
     xSemaphoreTake(s_mtx, portMAX_DELAY);
@@ -61,20 +63,25 @@ static std::string node_id() {
 // Layout-marker / grid converters carry no measured value (docs/REGISTERS.md §3.6) — no sensor.
 static bool is_publishable(int conv) { return !(conv == 0 || (conv >= 995 && conv <= 999)); }
 
-// Current publishable values from the poll cache: object_id -> formatted value (skip "no data").
-static std::vector<PubValue> current_values() {
-    std::vector<CachedValue> cache(64);
+// Current publishable values from the poll cache, grouped by register page (skip "no data"). The
+// scratch buffer is sized to the active profile's row count — an exact upper bound on the cached
+// value count, so nothing is truncated out of the JSON without over-allocating a fixed worst case.
+static std::vector<GroupedValue> current_grouped() {
+    const size_t cap = def::lookup(config().profile.c_str()).count;
+    std::vector<CachedValue> cache(cap ? cap : 1);
     const size_t n = hp_values_snapshot(cache.data(), cache.size());
-    std::vector<PubValue> out;
+    std::vector<GroupedValue> out;
     out.reserve(n);
     for (size_t i = 0; i < n; i++) {
         if (cache[i].value.empty()) continue;
-        out.push_back({object_id(cache[i].label.c_str()), cache[i].value});
+        out.push_back({group_for_page(cache[i].reg), object_id(cache[i].label.c_str()),
+                       cache[i].value});
     }
     return out;
 }
 
-// Stream one retained discovery config per value of the active profile.
+// Stream one retained discovery config per value of the active profile. Every sensor points at the
+// one shared state topic (s_state) and pulls its value out via a value_template.
 static void publish_discovery() {
     const auto& prof = def::lookup(config().profile.c_str());
     for (size_t i = 0; i < prof.count; i++) {
@@ -83,17 +90,20 @@ static void publish_discovery() {
         const std::string obj = object_id(d.label);
         if (obj.empty()) continue;
         const std::string ct  = discovery_topic(s_prefix, s_node, d);
-        const std::string st  = value_state_topic(s_base, s_node, d);
-        const std::string cfg = discovery_config(s_node, st, s_avail, d);
+        const std::string cfg = discovery_config(s_node, s_state, s_avail, d);
         esp_mqtt_client_publish(s_client, ct.c_str(), cfg.c_str(), 0, 0, 1);   // retained
     }
 }
 
-static void publish_values(const std::vector<PubValue>& vals) {
-    for (const auto& v : vals) {
-        const std::string t = s_base + "/" + s_node + "/" + v.key + "/state";
-        esp_mqtt_client_publish(s_client, t.c_str(), v.value.c_str(), 0, 0, 1); // retained
-    }
+// Build + publish the grouped state JSON to the shared topic, but only when it changed since the
+// last publish (`force` overrides for the post-(re)connect seed). Returns true if it published.
+static bool publish_state(bool force) {
+    const std::string js = build_grouped_json(current_grouped());
+    if (!force && js == s_last_json) return false;
+    esp_mqtt_client_publish(s_client, s_state.c_str(), js.c_str(),
+                            static_cast<int>(js.size()), 0, 1);                 // retained
+    s_last_json = js;
+    return true;
 }
 
 static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
@@ -120,30 +130,36 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
     }
 }
 
-// Publish task: announce on (re)connect / profile change, then publish only changed values.
+// Publish task: announce on (re)connect / profile change, then publish the grouped state JSON when
+// it changes. The per-cycle body is guarded — an OOM std::string build must skip the cycle, not
+// throw through the FreeRTOS task and reboot the device.
 static void mqtt_task(void*) {
     for (;;) {
         int delay_s = config().poll_s;
         if (delay_s < 1) delay_s = 1;
 
-        if (s_connected) {
-            if (s_announce) {                                  // just (re)connected
-                s_announce = false;
-                s_announced_profile.clear();                   // force a fresh discovery below
-                esp_mqtt_client_publish(s_client, s_avail.c_str(), "online", 0, 0, 1);
+        try {
+            if (s_connected) {
+                if (s_announce) {                              // just (re)connected
+                    s_announce = false;
+                    s_announced_profile.clear();               // force a fresh discovery below
+                    s_last_json.clear();                       // force a full state re-seed
+                    esp_mqtt_client_publish(s_client, s_avail.c_str(), "online", 0, 0, 1);
+                }
+                const std::string prof = config().profile;
+                if (prof != "auto" && prof != s_announced_profile) {
+                    publish_discovery();                       // discovery for the (new) profile
+                    s_announced_profile = prof;
+                    publish_state(true);                       // full retained seed
+                } else if (!s_announced_profile.empty() && prof == s_announced_profile) {
+                    publish_state(false);                      // republish only when it changed
+                }
+                // prof == "auto" (detection pending): wait — don't publish transient generic sensors.
             }
-            const std::string prof = config().profile;
-            if (prof != "auto" && prof != s_announced_profile) {
-                publish_discovery();                           // discovery for the (new) profile
-                s_announced_profile = prof;
-                s_last = current_values();
-                publish_values(s_last);                        // full retained seed
-            } else if (!s_announced_profile.empty() && prof == s_announced_profile) {
-                auto cur = current_values();
-                publish_values(mqtt_changed(s_last, cur));     // deltas only
-                s_last = std::move(cur);
-            }
-            // prof == "auto" (detection pending): wait — don't publish transient generic sensors.
+        } catch (const std::exception& e) {
+            diag_printf("mqtt: publish skipped (%s)\n", e.what());
+        } catch (...) {
+            diag_printf("mqtt: publish skipped (oom?)\n");
         }
         vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
     }
@@ -203,6 +219,7 @@ void mqtt_ha_start() {
     s_base   = CONFIG_DAIKIN_MQTT_BASE_TOPIC;
     s_prefix = CONFIG_DAIKIN_MQTT_DISCOVERY_PREFIX;
     s_avail  = availability_topic(s_base, s_node);
+    s_state  = state_topic(s_base, s_node);
 
     if (!build_client()) return;                               // policy error already surfaced
     esp_mqtt_client_start(s_client);
