@@ -4,8 +4,11 @@
 // across http_status.cpp (GET UI/status/values/models/diag/scan), http_config.cpp (POST
 // /set_*), http_ota.cpp (/ota/*) and mcp_server.cpp (/mcp).
 
+#include "esp_http_server.h"
+
 namespace daik {
 
 void http_start();
+httpd_handle_t http_server_handle();
 
 } // namespace daik

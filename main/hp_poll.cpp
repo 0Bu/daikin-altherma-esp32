@@ -9,6 +9,7 @@
 #include "hp_detect.hpp"
 #include "logic/convert.hpp"
 #include "logic/crc.hpp"
+#include "http_handlers.hpp"
 
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -119,6 +120,7 @@ static void poll_task(void*) {
     for (;;) {
         if (config().profile == "auto") poll_detect();         // resolves to a concrete profile
         if (config().profile != "auto") poll_once();           // then poll it (same cycle if resolved)
+        ws_broadcast_values();
         vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));     // fixed 1 s cadence
     }
 }
