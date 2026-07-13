@@ -122,6 +122,10 @@ static void test_convert() {
     ValueDef om{0x10, 0, 217, 1, -1, "om"};
     const uint8_t m1[] = {0x01};
     CHECK(std::string(convert(om, m1).text) == "Heating");
+    const uint8_t m5[] = {0x05};
+    const uint8_t m6[] = {0x06};
+    CHECK(std::string(convert(om, m5).text) == "Auto Cool");   // indices 5/6 match upstream r217
+    CHECK(std::string(convert(om, m6).text) == "Auto Heat");   // (were swapped)
     ValueDef im{0x60, 2, 315, 1, -1, "im"};
     const uint8_t im10[] = {0x10};                     // hi nibble 1 -> Heating
     CHECK(std::string(convert(im, im10).text) == "Heating");
@@ -155,6 +159,42 @@ static void test_convert() {
 
     // Refrigerant pressure->temperature curve is monotonic in the working range.
     CHECK(press2temp(20.0) < press2temp(30.0));
+    // Refrigerant type selects the curve: R410A (801) and R22 (803) differ from the R32 (802)
+    // default; unknown ids (804/805) fall back to R32. A conv-405 row must honour rtype.
+    CHECK(!approx(press2temp(20.0, 801), press2temp(20.0, 802)));
+    CHECK(!approx(press2temp(20.0, 803), press2temp(20.0, 802)));
+    CHECK(approx(press2temp(20.0, 804), press2temp(20.0, 802)));
+    ValueDef p405{0x62, 0, 405, 2, 1, "Pt"};
+    const uint8_t p200[] = {0xC8, 0x00};               // LE 200 -> 20.0 bar in
+    CHECK(!approx(convert(p405, p200, 801).value, convert(p405, p200, 802).value));
+    CHECK(approx(convert(p405, p200, 802).value, convert(p405, p200).value));   // default == R32
+
+    // profile_refrigerant: pick the 801-805 row's id, else default to R32 (802).
+    const ValueDef prof801[] = {{0x00, 0, 801, 0, -1, "*Refrigerant type"}, {0x61, 0, 105, 2, 1, "T"}};
+    const ValueDef prof_none[] = {{0x61, 0, 105, 2, 1, "T"}};
+    CHECK(profile_refrigerant(prof801, 2) == 801);
+    CHECK(profile_refrigerant(prof_none, 1) == 802);
+
+    // display_decimals: ×0.01 -> 2, scaled families (incl. 161 CT current and 405) -> 1, integers 0.
+    CHECK(display_decimals(118) == 2);
+    CHECK(display_decimals(161) == 1);                 // was formatted as an integer, losing 0.5
+    CHECK(display_decimals(105) == 1);
+    CHECK(display_decimals(405) == 1);
+    CHECK(display_decimals(152) == 0);
+    CHECK(display_decimals(217) == 0);
+
+    // Catalog-wide regression guard for the catalog "Water pressure" quirk: the hydronic water
+    // pressure at reg 0x62 offset 11 must decode as raw bar (conv 105, type 2) in EVERY profile —
+    // never the refrigerant saturation-temp curve (conv 405) the catalog mis-assigned on the 4-8kW /
+    // E-series models. (Legit conv-405 refrigerant "(T)" rows live at other offsets, e.g. 0x62[15].)
+    int wp_checked = 0;
+    for (const auto& p : def::profiles)
+        for (size_t i = 0; i < p.count; i++)
+            if (p.values[i].reg == 0x62 && p.values[i].offset == 11) {
+                CHECK(p.values[i].conv == 105 && p.values[i].type == 2);
+                wp_checked++;
+            }
+    CHECK(wp_checked >= 40);   // every model carries this row; all must be raw bar
 
     // HA hints derived from the dataType field.
     CHECK(std::string(unit_for_datatype(1)) == "°C");

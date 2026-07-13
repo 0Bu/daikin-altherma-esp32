@@ -14,6 +14,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include <cstdio>
 #include <vector>
 
 namespace daik {
@@ -29,9 +30,10 @@ static void poll_once() {
     hp_uart_init(c.rx_pin, c.tx_pin);
 
     std::vector<CachedValue> fresh;
-    bool    any_ok = false;
-    int     regs   = 0;
-    uint8_t seen[256] = {0};
+    bool      any_ok = false;
+    int       regs   = 0;
+    uint8_t   seen[256] = {0};
+    const int rtype  = profile_refrigerant(prof.values, prof.count);   // conv-405 curve selector
 
     for (size_t i = 0; i < prof.count; i++) {
         uint8_t reg = prof.values[i].reg;
@@ -44,7 +46,9 @@ static void poll_once() {
         if (n < 0) {
             if (n == -1)      s_stats.timeout_err++;
             else if (n == -3) s_stats.crc_err++;
-            s_stats.last_error = "reg error 0x" ;
+            char eb[32];
+            snprintf(eb, sizeof(eb), "reg 0x%02X error %d", reg, n);   // identify the failing register
+            s_stats.last_error = eb;
             continue;
         }
         any_ok = true;
@@ -59,7 +63,7 @@ static void poll_once() {
             cv.unit  = unit_for_datatype(prof.values[k].type);
             cv.reg   = prof.values[k].reg;
             std::string val;
-            if (hp_format(prof.values[k], payload, paylen, val)) cv.value = val;
+            if (hp_format(prof.values[k], payload, paylen, rtype, val)) cv.value = val;
             fresh.push_back(std::move(cv));
         }
     }

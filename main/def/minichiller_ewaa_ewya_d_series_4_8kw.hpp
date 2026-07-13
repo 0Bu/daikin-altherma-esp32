@@ -91,7 +91,7 @@ inline constexpr ValueDef minichiller_ewaa_ewya_d_series_4_8kw[] = {
     {0x62, 8, 301, 1, -1, "Alarm output"},  // default_on
     {0x62, 8, 300, 1, -1, "Space H Operation output"},  // default_on
     {0x62, 9, 105, 2, -1, "Flow sensor (l/min)"},  // default_on
-    {0x62, 11, 405, 1, 1, "Water pressure"},  // default_on
+    {0x62, 11, 105, 1, 2, "Water pressure"},  // default_on
     {0x62, 12, 152, 1, -1, "Water pump signal (0:max-100:stop)"},  // default_on
     {0x62, 15, 105, 2, 2, "Refrigerant pressure sensor"},  // default_on
     {0x62, 15, 405, 2, 1, "Pressure sensor(T)"},  // default_on

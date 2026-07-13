@@ -82,8 +82,9 @@ just `data[0]`. Sign is chosen by the converter. This is `read_u16`/`read_s16` i
 
 **Base units.** Temperatures are **°C**; pressures are **kgf/cm²** at the wire (0.098 → MPa,
 0.981 → bar, 14.223 → psi if a different display unit is wanted). The firmware works in °C and
-bar. `114 / 119` are target temperatures with a **`0x0080` (byte hi = 0x80) "no data" marker → `---`**,
-otherwise `raw × 0.1`.
+bar. `114 / 119` are target temperatures with a **"no data" marker** — raw little-endian bytes
+`00 80`, i.e. the signed 16-bit value `0x8000` = `-3276.8` (matched on the decoded value in
+`logic/convert.hpp`), rendered as `---` — otherwise `raw × 0.1`.
 
 The same raw refrigerant-pressure bytes appear twice in a model: once as the pressure itself
 (`conv 105`, `type = 2` → bar) and once as the **saturation temperature** (`conv 405`, `type = 1` →
@@ -153,12 +154,12 @@ It selects the pressure→saturation-temperature curve for `conv 405/406`.
 
 | Val | Mode | Val | Mode |
 |----:|------|----:|------|
-| 0 | Fan Only | 6 | Auto Cool |
+| 0 | Fan Only | 6 | Auto Heat |
 | 1 | Heating | 7 | Dry |
 | 2 | Cooling | 8 | Aux. |
 | 3 | Auto | 9 | Cooling Storage |
 | 4 | Ventilation | 10 | Heating Storage |
-| 5 | Auto Heat | 11–18 | Use-stored-thermostat (cool 1–4 / heat 1–4) |
+| 5 | Auto Cool | 11–18 | Use-stored-thermostat (cool 1–4 / heat 1–4) |
 
 ### 4.2 Indoor/hydronic operation mode (conv 315)
 

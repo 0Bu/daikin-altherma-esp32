@@ -6,17 +6,16 @@
 
 namespace daik {
 
-bool hp_format(const ValueDef& def, const uint8_t* payload, int payload_len, std::string& out) {
-    // TODO: pass the configured refrigerant type (R32/R410A/R22) once exposed in config.
+bool hp_format(const ValueDef& def, const uint8_t* payload, int payload_len, int rtype,
+               std::string& out) {
     if (def.offset + def.size > payload_len) return false;
-    Reading r = convert(def, payload + def.offset);
+    Reading r = convert(def, payload + def.offset, rtype);   // rtype selects the conv-405 curve
     if (r.unimpl) return false;
     if (!r.ok && r.text[0] == '\0') return false;
     if (r.text[0]) { out = r.text; return true; }
     char b[32];
-    // One decimal for scaled temperatures; integers otherwise.
-    bool frac = (def.conv >= 103 && def.conv <= 119) || def.conv == 405;
-    snprintf(b, sizeof(b), frac ? "%.1f" : "%.0f", r.value);
+    // Per-converter decimal precision (logic/convert.hpp): 2 for ×0.01, 1 for scaled, 0 for integers.
+    snprintf(b, sizeof(b), "%.*f", display_decimals(def.conv), r.value);
     out = b;
     return true;
 }
