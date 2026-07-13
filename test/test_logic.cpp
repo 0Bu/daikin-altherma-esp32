@@ -443,9 +443,9 @@ static void test_heartbeat() {
                "\"free_heap\":170000,\"min_free_heap\":150000,\"max_alloc\":87000,"
                "\"wifi\":{\"connected\":true,\"rssi\":-76,\"quality_pct\":48,\"reconnects\":3},"
                "\"mqtt\":{\"connected\":true,\"count\":89282,\"fails\":0,\"reconnects\":1},"
-               "\"bus\":{\"connected\":true,\"proto\":\"I\",\"registers\":10,\"values\":48,"
-               "\"crc_err\":0,\"timeout_err\":2,\"rx_received\":763732,\"rx_fails\":2,\"last_ok_s\":1},"
-               "\"tx\":{\"reads\":763734,\"writes\":0,\"fails\":0}}");
+               "\"bus\":{\"connected\":true,\"proto\":\"I\",\"registers\":10,\"values\":48,\"last_ok_s\":1,"
+               "\"rx\":{\"received\":763732,\"fails\":2,\"crc_err\":0,\"timeout_err\":2},"
+               "\"tx\":{\"reads\":763734,\"writes\":0,\"fails\":0}}}");
 
     // WiFi down -> rssi/quality reported null, not a stale/garbage reading.
     HeartbeatFields down;
@@ -466,7 +466,7 @@ static void test_heartbeat() {
     CHECK(dt == "homeassistant/sensor/daikin_abc123/wifi_signal/config");
     std::string dc = heartbeat_discovery_config(node, hb, av, rssi);
     CHECK(dc.find("\"stat_t\":\"daikin-altherma-esp32/daikin_abc123/heartbeat\"") != std::string::npos);
-    CHECK(dc.find("\"val_tpl\":\"{{ value_json['wifi']['rssi'] }}\"") != std::string::npos);
+    CHECK(dc.find("\"val_tpl\":\"{{ value_json.wifi.rssi }}\"") != std::string::npos);
     CHECK(dc.find("\"ent_cat\":\"diagnostic\"") != std::string::npos);
     CHECK(dc.find("\"dev_cla\":\"signal_strength\"") != std::string::npos);
     CHECK(dc.find("\"stat_cla\":\"measurement\"") != std::string::npos);
@@ -480,7 +480,7 @@ static void test_heartbeat() {
     CHECK(heartbeat_discovery_topic("homeassistant", node, *bus)
           == "homeassistant/binary_sensor/daikin_abc123/bus_status/config");
     std::string busc = heartbeat_discovery_config(node, hb, av, *bus);
-    CHECK(busc.find("val_tpl\":\"{{ value_json['bus']['connected'] }}") != std::string::npos);
+    CHECK(busc.find("val_tpl\":\"{{ value_json.bus.connected }}") != std::string::npos);
     CHECK(busc.find("\"stat_cla\"") == std::string::npos);
 
     // A since-boot counter (e.g. mqtt_count) is "total_increasing", not "measurement" — HA's

@@ -99,51 +99,49 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += ",\"proto\":\""; j += f.bus_proto; j += "\"";
     j += ",\"registers\":" + std::to_string(f.registers);
     j += ",\"values\":" + std::to_string(f.values);
+    j += ",\"last_ok_s\":" + std::to_string(f.last_ok_s);
+    j += ",\"rx\":{\"received\":" + std::to_string(f.rx_received);
+    j += ",\"fails\":" + std::to_string(f.rx_fails);
     j += ",\"crc_err\":" + std::to_string(f.crc_err);
     j += ",\"timeout_err\":" + std::to_string(f.timeout_err);
-    j += ",\"rx_received\":" + std::to_string(f.rx_received);
-    j += ",\"rx_fails\":" + std::to_string(f.rx_fails);
-    j += ",\"last_ok_s\":" + std::to_string(f.last_ok_s);
-    j += "},";
     // The X10A protocol has no write command (docs/ARCHITECTURE.md → MQTT bridge is read-only), so
     // tx.writes/fails are always 0 — reported for parity with the EMS-ESP-style field set rather
     // than because this firmware could ever be busy writing.
-    j += "\"tx\":{\"reads\":" + std::to_string(f.rx_received + f.rx_fails) +
-         ",\"writes\":0,\"fails\":0}";
-    j += "}";
+    j += "},\"tx\":{\"reads\":" + std::to_string(f.rx_received + f.rx_fails);
+    j += ",\"writes\":0,\"fails\":0}";
+    j += "}}";
     return j;
 }
 
-// One HA diagnostic entity sourced from the heartbeat topic. `path1` may be nullptr for a
-// top-level field. All of these get `"ent_cat":"diagnostic"` so HA tucks them under the device's
-// Diagnostics section rather than mixing them into the heat-pump value list. `state_class` is ""
-// for non-numeric/binary entities, "measurement" for a fluctuating reading, or "total_increasing"
-// for a monotonic since-boot counter (so HA's long-term stats handle a reboot's reset correctly).
+// One HA diagnostic entity sourced from the heartbeat topic. All of these get
+// `"ent_cat":"diagnostic"` so HA tucks them under the device's Diagnostics section rather than
+// mixing them into the heat-pump value list. `state_class` is "" for non-numeric/binary entities,
+// "measurement" for a fluctuating reading, or "total_increasing" for a monotonic since-boot counter
+// (so HA's long-term stats handle a reboot's reset correctly).
 struct HeartbeatSensor {
     const char* component;     // "sensor" | "binary_sensor"
     const char* object_id;
     const char* name;
-    const char* path0;
-    const char* path1;         // nullptr = top-level field
+    const char* json_path;     // Dot-notation JSON path, e.g. "wifi.rssi", "bus.rx.received", "free_heap"
     const char* unit;          // "" = none
     const char* device_class;  // "" = none
     const char* state_class;   // "" | "measurement" | "total_increasing"
 };
 
 inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
-    {"sensor",        "wifi_signal",      "WiFi Signal",         "wifi", "rssi",        "dBm", "signal_strength", "measurement"},
-    {"sensor",        "wifi_quality",     "WiFi Quality",        "wifi", "quality_pct", "%",   "",                 "measurement"},
-    {"sensor",        "wifi_reconnects",  "WiFi Reconnects",     "wifi", "reconnects",  "",    "",                 "total_increasing"},
-    {"sensor",        "free_heap",        "Free Heap",           "free_heap", nullptr,  "B",   "",                 "measurement"},
-    {"sensor",        "uptime",           "Uptime",              "uptime_s", nullptr,   "s",   "duration",         "measurement"},
-    {"binary_sensor", "bus_status",       "X10A Bus",            "bus", "connected",    "",    "connectivity",     ""},
-    {"sensor",        "bus_crc_err",      "X10A CRC Errors",     "bus", "crc_err",      "",    "",                 "total_increasing"},
-    {"sensor",        "bus_timeout_err",  "X10A Timeout Errors", "bus", "timeout_err",  "",    "",                 "total_increasing"},
-    {"sensor",        "bus_rx_received",  "X10A RX Received",    "bus", "rx_received",  "",    "",                 "total_increasing"},
-    {"sensor",        "bus_rx_fails",     "X10A RX Fails",       "bus", "rx_fails",     "",    "",                 "total_increasing"},
-    {"sensor",        "mqtt_count",       "MQTT Publishes",      "mqtt", "count",       "",    "",                 "total_increasing"},
-    {"sensor",        "mqtt_fails",       "MQTT Publish Fails",  "mqtt", "fails",       "",    "",                 "total_increasing"},
-    {"sensor",        "mqtt_reconnects",  "MQTT Reconnects",     "mqtt", "reconnects",  "",    "",                 "total_increasing"},
+    {"sensor",        "wifi_signal",      "WiFi Signal",         "wifi.rssi",        "dBm", "signal_strength", "measurement"},
+    {"sensor",        "wifi_quality",     "WiFi Quality",        "wifi.quality_pct", "%",   "",                 "measurement"},
+    {"sensor",        "wifi_reconnects",  "WiFi Reconnects",     "wifi.reconnects",  "",    "",                 "total_increasing"},
+    {"sensor",        "free_heap",        "Free Heap",           "free_heap",        "B",   "",                 "measurement"},
+    {"sensor",        "uptime",           "Uptime",              "uptime_s",         "s",   "duration",         "measurement"},
+    {"binary_sensor", "bus_status",       "X10A Bus",            "bus.connected",    "",    "connectivity",     ""},
+    {"sensor",        "bus_crc_err",      "X10A CRC Errors",     "bus.rx.crc_err",   "",    "",                 "total_increasing"},
+    {"sensor",        "bus_timeout_err",  "X10A Timeout Errors", "bus.rx.timeout_err","",    "",                 "total_increasing"},
+    {"sensor",        "bus_rx_received",  "X10A RX Received",    "bus.rx.received",  "",    "",                 "total_increasing"},
+    {"sensor",        "bus_rx_fails",     "X10A RX Fails",       "bus.rx.fails",     "",    "",                 "total_increasing"},
+    {"sensor",        "mqtt_count",       "MQTT Publishes",      "mqtt.count",       "",    "",                 "total_increasing"},
+    {"sensor",        "mqtt_fails",       "MQTT Publish Fails",  "mqtt.fails",       "",    "",                 "total_increasing"},
+    {"sensor",        "mqtt_reconnects",  "MQTT Reconnects",     "mqtt.reconnects",  "",    "",                 "total_increasing"},
 };
 inline constexpr int HEARTBEAT_SENSOR_COUNT =
     sizeof(HEARTBEAT_SENSORS) / sizeof(HEARTBEAT_SENSORS[0]);
@@ -160,9 +158,7 @@ inline std::string heartbeat_discovery_config(const std::string& node, const std
     j += "\"name\":\""; j += s.name; j += "\",";
     j += "\"uniq_id\":\""; j += node; j += "_"; j += s.object_id; j += "\",";
     j += "\"stat_t\":\""; j += hb_topic; j += "\",";
-    j += "\"val_tpl\":\"{{ value_json['"; j += s.path0; j += "']";
-    if (s.path1) { j += "['"; j += s.path1; j += "']"; }
-    j += " }}\",";
+    j += "\"val_tpl\":\"{{ value_json."; j += s.json_path; j += " }}\",";
     j += "\"avty_t\":\""; j += avail_topic; j += "\",";
     if (s.unit[0])         { j += "\"unit_of_meas\":\""; j += s.unit; j += "\","; }
     if (s.device_class[0]) { j += "\"dev_cla\":\""; j += s.device_class; j += "\","; }
