@@ -63,7 +63,6 @@ static esp_err_t h_status(httpd_req_t* req) {
          ",\"broker\":" + jstr(m.broker) + (m.error.empty() ? "" : ",\"error\":" + jstr(m.error)) + "},";
     j += "\"hp\":{\"proto\":" + jstr(std::string(1, static_cast<char>(c.proto))) +
          ",\"rx\":" + std::to_string(c.rx_pin) + ",\"tx\":" + std::to_string(c.tx_pin) +
-         ",\"poll_s\":" + std::to_string(c.poll_s) +
          ",\"connected\":" + (hp.connected ? "true" : "false") +
          ",\"last_ok_s\":" + std::to_string(hp.last_ok_s) +
          ",\"registers\":" + std::to_string(hp.registers) +
@@ -77,7 +76,6 @@ static esp_err_t h_status(httpd_req_t* req) {
     // the UI auto-applies a lone candidate and offers the reduced set when ambiguous.
     j += "\"detect\":{\"proto\":" + jstr(std::string(1, static_cast<char>(c.proto)));
     j += ",\"rx\":" + std::to_string(c.rx_pin) + ",\"tx\":" + std::to_string(c.tx_pin);
-    j += ",\"auto\":" + std::string(c.profile_auto ? "true" : "false");
     j += ",\"valid\":" + std::string(c.fp_valid ? "true" : "false");
     if (c.fp_kw_tenths >= 0)
         j += ",\"capacity_kw\":" + std::to_string(c.fp_kw_tenths / 10) + "." + std::to_string(c.fp_kw_tenths % 10);
@@ -173,24 +171,20 @@ static esp_err_t h_scan(httpd_req_t* req) {
 }
 
 void http_register_status(httpd_handle_t s) {
-    httpd_uri_t routes[] = {
-        {"/", HTTP_GET, h_index, nullptr},
-        {"/index.html", HTTP_GET, h_index, nullptr},
-        {"/status", HTTP_GET, h_status, nullptr},
-        {"/values", HTTP_GET, h_values, nullptr},
-        {"/models", HTTP_GET, h_models, nullptr},
-        {"/diag", HTTP_GET, h_diag, nullptr},
-        {"/scan", HTTP_GET, h_scan, nullptr},
-    };
-    for (auto& r : routes) httpd_register_uri_handler(s, &r);
+    http_register(s, "/", HTTP_GET, h_index);
+    http_register(s, "/index.html", HTTP_GET, h_index);
+    http_register(s, "/status", HTTP_GET, h_status);
+    http_register(s, "/values", HTTP_GET, h_values);
+    http_register(s, "/models", HTTP_GET, h_models);
+    http_register(s, "/diag", HTTP_GET, h_diag);
+    http_register(s, "/scan", HTTP_GET, h_scan);
 }
 
 // Captive-portal / SPA catch-all — registered LAST (after every specific route) so it only handles
 // unmatched GETs: the setup page in AP mode, the web UI in STA mode (see h_index). This is what
 // makes an OS connectivity probe (routed here by captive_dns.cpp) open the setup portal.
 void http_register_captive(httpd_handle_t s) {
-    httpd_uri_t r = {"/*", HTTP_GET, h_index, nullptr};
-    httpd_register_uri_handler(s, &r);
+    http_register(s, "/*", HTTP_GET, h_index);
 }
 
 } // namespace daik

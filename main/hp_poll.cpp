@@ -1,5 +1,5 @@
 // Heat-pump poll engine. One task owns the X10A UART; each cycle it queries the active
-// profile's registers, decodes the enabled values, and publishes them to a thread-safe cache.
+// profile's registers, decodes the values, and publishes them to a thread-safe cache.
 #include "hp_poll.hpp"
 #include "config.hpp"
 #include "def/registry.hpp"
@@ -23,7 +23,6 @@ static std::vector<CachedValue> s_cache;
 static HpStats               s_stats;
 static int64_t               s_last_ok_us = -1;
 
-// TODO: honour Config::val_mask (currently every value in the profile is queried).
 static void poll_once() {
     const Config& c    = config();
     const auto&   prof = def::lookup(c.profile.c_str());
@@ -74,10 +73,12 @@ static void poll_once() {
     xSemaphoreGive(s_mtx);
 }
 
-// Auto-detection cycle: sweep protocol + fingerprint the unit, then persist proto/profile/
-// fingerprint (logic/detect.hpp, hp_detect.cpp). Runs in place of a normal cycle while
-// config().profile == "auto". Only commits when the bus actually answered, so a not-yet-wired unit
-// simply retries next cycle instead of being pinned to "generic".
+// Auto-detection cycle: sweep protocol + fingerprint the unit, then apply proto/pins/profile to the
+// in-RAM config (logic/detect.hpp, hp_detect.cpp). Runs in place of a normal cycle while
+// config().profile == "auto". The MODEL (profile + fingerprint) is session-only, re-detected fresh
+// every boot; the LINK cache (pins + protocol) is persisted, but only when it changed (a swapped
+// wire self-corrects once, then subsequent boots confirm it with no NVS write). Only commits when
+// the bus actually answered, so a not-yet-wired unit simply retries instead of being pinned to "generic".
 static void poll_detect() {
     DetectResult d = hp_detect_run();
     if (!d.bus_ok) {
@@ -88,7 +89,8 @@ static void poll_detect() {
         xSemaphoreGive(s_mtx);
         return;                                                // keep "auto" — retry next cycle
     }
-    Config c        = config();
+    Config c              = config();
+    const bool link_changed = (c.rx_pin != d.rx) || (c.tx_pin != d.tx) || (c.proto != d.proto);
     c.proto         = d.proto;
     c.rx_pin        = d.rx;                                    // auto-corrected pins (e.g. swapped wire)
     c.tx_pin        = d.tx;
@@ -96,19 +98,21 @@ static void poll_detect() {
     c.fp_kw_tenths  = d.kw_tenths;
     c.fp_eeprom     = d.eeprom;
     c.fp_valid      = true;
-    c.profile_auto  = true;                                    // fully auto — no manual override
     // Read with the best-fit representative (deterministic ranking, not registry order). Every
     // candidate in the set is register-equivalent, so this picks correct VALUES regardless of which
     // marketing variant it names; nothing matched but bus answered → generic Altherma profile.
     c.profile = d.best.empty() ? "generic" : d.best;
-    config_save(c);
+    // Persist the link cache (pins+proto) only on change; config_save writes link+creds and refreshes
+    // RAM, the model rides along in RAM but is never written. Unchanged link → RAM-only update.
+    if (link_changed) config_save(c);
+    else              config_set_runtime(c);
 }
 
 static void poll_task(void*) {
     for (;;) {
         if (config().profile == "auto") poll_detect();         // resolves to a concrete profile
         if (config().profile != "auto") poll_once();           // then poll it (same cycle if resolved)
-        vTaskDelay(pdMS_TO_TICKS(config().poll_s * 1000));     // re-reads poll_s each cycle
+        vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));     // fixed 1 s cadence
     }
 }
 

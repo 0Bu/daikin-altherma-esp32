@@ -23,10 +23,8 @@ static esp_err_t mcp_get(httpd_req_t* req) {
 }
 
 void http_register_mcp(httpd_handle_t s) {
-    httpd_uri_t post = {"/mcp", HTTP_POST, mcp_post, nullptr};
-    httpd_uri_t get  = {"/mcp", HTTP_GET, mcp_get, nullptr};
-    httpd_register_uri_handler(s, &post);
-    httpd_register_uri_handler(s, &get);
+    http_register(s, "/mcp", HTTP_POST, mcp_post);
+    http_register(s, "/mcp", HTTP_GET, mcp_get);
 }
 
 } // namespace daik

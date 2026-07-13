@@ -38,8 +38,8 @@ extern "C" void app_main() {
     daik::config_load();
     const daik::Config& cfg = daik::config();
     ESP_LOGI(TAG, "daikin-altherma-esp32 %s", esp_app_get_description()->version);
-    ESP_LOGI(TAG, "cfg: profile=%s proto=%c rx=%d tx=%d poll=%ds",
-             cfg.profile.c_str(), static_cast<char>(cfg.proto), cfg.rx_pin, cfg.tx_pin, cfg.poll_s);
+    ESP_LOGI(TAG, "cfg: profile=%s proto=%c rx=%d tx=%d",
+             cfg.profile.c_str(), static_cast<char>(cfg.proto), cfg.rx_pin, cfg.tx_pin);
 
     // --- Networking: STA or captive setup portal ---
     // wifi_start_sta() returns false on a first-boot connect failure (creds presumed wrong) after

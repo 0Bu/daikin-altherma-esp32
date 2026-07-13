@@ -24,16 +24,7 @@ menu "Daikin Altherma Configuration"
         help
             mDNS/host name — the device is reachable at http://<hostname>.local.
 
-    config DAIKIN_WIFI_PREFER_5G
-        bool "Prefer 5 GHz WiFi (ESP32-C5 dual-band; experimental)"
-        depends on SOC_WIFI_SUPPORT_5G
-        default n
-        help
-            ESP32-C5 only. When the same SSID is broadcast on both 2.4 GHz and 5 GHz
-            (band steering), bias AP selection toward the 5 GHz radio (adds a fixed
-            RSSI bonus to 5 GHz APs during the strongest-AP scan). Leave off unless the
-            unit sits within reliable 5 GHz range of the router. The strongest-AP scan
-            itself (all-channel scan, connect by signal) is always on and needs no option.
+
 
     # ── Heat-pump link (X10A) ─────────────────────────────────────────────────
     config DAIKIN_PROTOCOL
@@ -45,37 +36,17 @@ menu "Daikin Altherma Configuration"
 
     config DAIKIN_RX_PIN
         int "X10A RX GPIO (heat pump TX -> ESP RX)"
-        default 16 if IDF_TARGET_ESP32
-        default 5 if IDF_TARGET_ESP32C5
         default 44
         help
-            GPIO wired to X10A pin 2 (the heat pump's TX). Default 16 on the classic ESP32,
-            5 on the C5, 44 elsewhere (XIAO ESP32-S3 pad D7). Overridable at runtime; GPIO16/17
-            are NOT broken out on the XIAO.
+            GPIO wired to X10A pin 2 (the heat pump's TX). Default 44 (XIAO ESP32-S3 pad D7).
+            This is only the first-boot default: a runtime override (web UI) is persisted
+            and tried first, so custom wiring survives reboot.
 
     config DAIKIN_TX_PIN
         int "X10A TX GPIO (ESP TX -> heat pump RX)"
-        default 17 if IDF_TARGET_ESP32
-        default 4 if IDF_TARGET_ESP32C5
         default 43
         help
-            GPIO wired to X10A pin 3 (the heat pump's RX). Default 17 on the classic ESP32,
-            4 on the C5, 43 elsewhere (XIAO ESP32-S3 pad D6).
-
-    # Poll interval is fixed at 1 s in firmware (config.cpp) — near-real-time; the MQTT bridge
-    # publishes only changed values, so it never floods the broker. Not a compile-time or runtime
-    # option, so there is no Kconfig knob for it.
-
-    config DAIKIN_PROFILE
-        string "Value-definition profile id"
-        default "auto"
-        help
-            Which embedded value-definition profile (register map + labels) to use, derived
-            from your indoor/outdoor/tank model. "auto" (default) = auto-detect the model from
-            the X10A bus on first poll (falls back to a reduced pick list when ambiguous, or
-            "generic" when nothing answers). Set a concrete id from the web UI to pin it.
-
-    # Firmware is English-only — labels are fixed English; there is no language option (UI or Kconfig).
+            GPIO wired to X10A pin 3 (the heat pump's RX). Default 43 (XIAO ESP32-S3 pad D6).
 
     # ── MQTT / Home Assistant ─────────────────────────────────────────────────
     config DAIKIN_MQTT_BROKER_URI
@@ -107,14 +78,6 @@ menu "Daikin Altherma Configuration"
             Prefix for state topics. The per-device node id is appended, e.g.
             "daikin-altherma-esp32/daikin_a1b2c3/state".
 
-    config DAIKIN_MQTT_PUBLISH_INTERVAL_S
-        int "MQTT publish interval (seconds)"
-        default 15
-        range 5 600
-        help
-            How often the cached value set + device status is republished (retained).
-            Discovery + an immediate snapshot are also sent on every (re)connect.
-
     # ── OTA ───────────────────────────────────────────────────────────────────
     config DAIKIN_OTA_MANIFEST_URL
         string "OTA manifest URL"
@@ -130,4 +93,32 @@ menu "Daikin Altherma Configuration"
             HTTPS base URL (with trailing slash) where per-target images are published. The
             device appends "daikin-altherma-esp32<suffix>.bin" for its own chip.
 
+    # ── Status LED ────────────────────────────────────────────────────────────
+    config DAIKIN_STATUS_LED_ENABLE
+        bool "Enable Status LED indicator"
+        default y
+        help
+            Blink the onboard LED to show the system status:
+            - Fast blinking (100ms): Connecting to WiFi.
+            - Slow blinking (1s): Running SoftAP (setup portal).
+            - Solid ON (or OFF if inverted): Connected and running healthy (WiFi + MQTT + X10A OK).
+            - Double blink / brief off: X10A poll error / timeout.
+
+    config DAIKIN_STATUS_LED_GPIO
+        int "Status LED GPIO pin"
+        depends on DAIKIN_STATUS_LED_ENABLE
+        default 21
+        help
+            GPIO pin of the status LED. Set to -1 to disable, or match your board's onboard LED.
+            On Seeed XIAO ESP32-S3 it is 21.
+
+    config DAIKIN_STATUS_LED_INVERTED
+        bool "Invert LED state (Active Low)"
+        depends on DAIKIN_STATUS_LED_ENABLE
+        default y
+        help
+            Invert the LED logic. On Seeed XIAO boards, the built-in LED is Active Low
+            (GPIO Low = LED ON).
+
 endmenu
+

@@ -42,10 +42,10 @@ DetectResult hp_detect_run() {
     r.rx = c.rx_pin;
     r.tx = c.tx_pin;
 
-    // 1. Pin + protocol sweep. Candidate RX/TX pairs: the configured pins, their swap (a swapped
-    //    X10A wire is the most common mistake), then the per-target Kconfig default and its swap —
-    //    all pins already designated for X10A, so no arbitrary/unsafe GPIO probing. Keep the framing
-    //    (and pins) that answer the identity page.
+    // 1. Pin + protocol sweep. Candidate RX/TX pairs, in order: the persisted-cache pins (c.rx/tx,
+    //    tried FIRST), their swap (a swapped X10A wire is the most common mistake), then the per-target
+    //    Kconfig default and its swap — so a stale/default cache still self-heals to the real wiring.
+    //    All pins are X10A-designated (no arbitrary GPIO probing). Keep the framing + pins that answer.
     struct PinPair { int rx, tx; };
     PinPair cand[4];
     int nc = 0;
@@ -59,10 +59,12 @@ DetectResult hp_detect_run() {
     add(CONFIG_DAIKIN_RX_PIN, CONFIG_DAIKIN_TX_PIN);
     add(CONFIG_DAIKIN_TX_PIN, CONFIG_DAIKIN_RX_PIN);
 
+    const Protocol p0 = c.proto;                               // cached framing — try it first
+    const Protocol p1 = (p0 == Protocol::I) ? Protocol::S : Protocol::I;
     for (int i = 0; i < nc && !r.bus_ok; i++) {
         hp_uart_init(cand[i].rx, cand[i].tx);
-        if (proto_answers(Protocol::I))      { r.proto = Protocol::I; r.bus_ok = true; }
-        else if (proto_answers(Protocol::S)) { r.proto = Protocol::S; r.bus_ok = true; }
+        if (proto_answers(p0))      { r.proto = p0; r.bus_ok = true; }
+        else if (proto_answers(p1)) { r.proto = p1; r.bus_ok = true; }
         if (r.bus_ok) { r.rx = cand[i].rx; r.tx = cand[i].tx; }
     }
     if (!r.bus_ok) { diag_printf("detect: no X10A response on any pin/proto — check wiring/GND\n"); return r; }

@@ -165,15 +165,22 @@ static void test_convert() {
 
 static void test_config_model() {
     Config c;
-    c.rx_pin = 44; c.tx_pin = 43; c.poll_s = 30;
+    c.rx_pin = 44; c.tx_pin = 43;
     std::string why;
     CHECK(validate(c, why));
 
     c.tx_pin = 44;                                     // rx == tx
     CHECK(!validate(c, why));
 
-    c.tx_pin = 43; c.poll_s = 0;                       // interval too small (min 1 s)
+    c.tx_pin = 99;                                     // tx out of GPIO range (default max 48)
     CHECK(!validate(c, why));
+    c.tx_pin = 43;
+    CHECK(validate(c, why));
+
+    // Target-aware GPIO range: the ESP32-S3 default 44/43 is valid on a 48-GPIO target but must be
+    // rejected on an ESP32-C3 (max GPIO 21), where those pins physically don't exist.
+    CHECK(validate(c, why, 48));
+    CHECK(!validate(c, why, 21));
 
     CHECK(parse_protocol("S") == Protocol::S);
     CHECK(parse_protocol("I") == Protocol::I);
@@ -181,7 +188,7 @@ static void test_config_model() {
 
     // /set_hp fingerprint rule: a partial live update (no "profile" key) never clears the cached
     // detection, whatever the stored profile is; only an explicit "auto" does; a manual pin doesn't.
-    CHECK(!set_hp_clears_fingerprint(false, "auto"));            // live poll/lang/value patch
+    CHECK(!set_hp_clears_fingerprint(false, "auto"));            // wiring-only patch (no "profile")
     CHECK(!set_hp_clears_fingerprint(false, "altherma_gshp"));   // partial update on a pinned model
     CHECK(set_hp_clears_fingerprint(true, "auto"));             // explicit re-detect / wiring Save
     CHECK(!set_hp_clears_fingerprint(true, "altherma_gshp"));    // manual pin keeps the fingerprint

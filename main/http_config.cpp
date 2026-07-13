@@ -1,5 +1,6 @@
-// POST config routes: /set_wifi, /set_mqtt, /set_hp, /detect. Parse JSON, validate, persist
-// to NVS (config.cpp), apply live or reboot as appropriate.
+// POST config routes: /set_wifi, /set_mqtt, /set_hp, /detect. Parse JSON, validate, then apply:
+// WiFi/MQTT persist to NVS + reboot; /set_hp persists the RX/TX pin cache (no reboot) but keeps the
+// model session-only; /detect re-runs detection in RAM.
 #include "http_handlers.hpp"
 #include "config.hpp"
 #include "hp_poll.hpp"
@@ -10,6 +11,7 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "soc/soc_caps.h"   // SOC_GPIO_PIN_COUNT — per-target GPIO count for pin validation
 
 namespace daik {
 
@@ -26,9 +28,15 @@ static int ji(cJSON* o, const char* k, int def) {
 
 static esp_err_t set_wifi(httpd_req_t* req) {
     char body[512];
-    if (http_read_body(req, body, sizeof(body)) < 0) { httpd_resp_set_status(req, "400 Bad Request"); return httpd_resp_sendstr(req, "bad body"); }
+    if (http_read_body(req, body, sizeof(body)) < 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "bad body");
+    }
     cJSON* j = cJSON_Parse(body);
-    if (!j) return httpd_resp_send_500(req);
+    if (!j) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "bad json");
+    }
     Config c = config();
     c.wifi_ssid = js(j, "ssid");
     c.wifi_pass = js(j, "pass");
@@ -41,9 +49,15 @@ static esp_err_t set_wifi(httpd_req_t* req) {
 
 static esp_err_t set_mqtt(httpd_req_t* req) {
     char body[512];
-    if (http_read_body(req, body, sizeof(body)) < 0) return httpd_resp_send_500(req);
+    if (http_read_body(req, body, sizeof(body)) < 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "bad body");
+    }
     cJSON* j = cJSON_Parse(body);
-    if (!j) return httpd_resp_send_500(req);
+    if (!j) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "bad json");
+    }
     Config c = config();
     c.mqtt_uri  = js(j, "broker");
     c.mqtt_user = js(j, "user");
@@ -57,67 +71,59 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
 
 static esp_err_t set_hp(httpd_req_t* req) {
     char body[2048];
-    if (http_read_body(req, body, sizeof(body)) < 0) return httpd_resp_send_500(req);
+    if (http_read_body(req, body, sizeof(body)) < 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "bad body");
+    }
     cJSON* j = cJSON_Parse(body);
-    if (!j) return httpd_resp_send_500(req);
+    if (!j) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "bad json");
+    }
     Config c    = config();
-    // The model profile is only touched when the request explicitly sends "profile". The live
-    // controls (poll/lang/values) send a partial patch that omits it — that must not re-select the
-    // model or invalidate a settled fingerprint (which would force a spurious re-detect next poll).
+    // The RX/TX pins are the physical X10A wiring: PERSISTED so a manual override survives a reboot
+    // (config_save below). The model "profile" is session-only — only touched when the request
+    // explicitly sends "profile"; a wiring-only patch omits it so it does not re-select the model or
+    // invalidate a settled fingerprint (which would force a spurious re-detect next poll).
     cJSON* profItem     = cJSON_GetObjectItem(j, "profile");
     bool   profile_sent = cJSON_IsString(profItem);
-    if (profile_sent) {
-        c.profile      = profItem->valuestring;
-        // A concrete model is a manual pin (stops auto-detect); "auto" requests a fresh detection.
-        c.profile_auto = (c.profile == "auto");
-    }
+    // "auto" (the UI's only value) requests a fresh detection; a concrete id pins the model for this
+    // session (accepted for API flexibility, never offered in the UI).
+    if (profile_sent) c.profile = profItem->valuestring;
     if (set_hp_clears_fingerprint(profile_sent, c.profile)) c.fp_valid = false;
-    // proto is auto-detected (hp_detect.cpp), not set from the UI. poll_s is fixed at 1 s (config.cpp),
-    // so the UI no longer sends it and it is not accepted here. lang was removed (English-only firmware).
+    // proto is auto-detected (hp_detect.cpp), not set from the UI.
     c.rx_pin    = ji(j, "rx", c.rx_pin);
     c.tx_pin    = ji(j, "tx", c.tx_pin);
-    // values[] -> comma-joined mask. Absent key preserves the stored mask, so the UI can send
-    // partial updates (a live poll/language change must not wipe the value selection).
-    cJSON* arr = cJSON_GetObjectItem(j, "values");
-    if (cJSON_IsArray(arr)) {
-        std::string mask;
-        cJSON* it;
-        cJSON_ArrayForEach(it, arr) if (cJSON_IsString(it)) { if (!mask.empty()) mask += ","; mask += it->valuestring; }
-        c.val_mask = mask;
-    }
     cJSON_Delete(j);
 
     std::string reason;
-    if (!validate(c, reason)) {
+    if (!validate(c, reason, SOC_GPIO_PIN_COUNT - 1)) {
         httpd_resp_set_status(req, "400 Bad Request");
         std::string e = "{\"ok\":false,\"error\":\"" + reason + "\"}";
         return http_send_json(req, e.c_str());
     }
-    config_save(c);
+    config_save(c);   // persist the pin cache (config_save writes link+creds; profile/fp stay RAM)
     hp_poll_reconfigure();
     return http_send_json(req, "{\"ok\":true}");
 }
 
-// Re-run auto-detection: drop back to the "auto" sentinel + invalidate the stored fingerprint, so
-// the next poll cycle sweeps protocol + re-fingerprints the unit (hp_poll.cpp poll_detect).
+// Re-run auto-detection now (without waiting for a reboot): drop back to the "auto" sentinel +
+// invalidate the fingerprint, so the next poll cycle sweeps protocol + re-fingerprints the unit
+// (hp_poll.cpp poll_detect). Detection state is session-only, so this is a RAM-only reset.
 static esp_err_t do_detect(httpd_req_t* req) {
-    Config c       = config();
-    c.profile      = "auto";
-    c.profile_auto = true;
-    c.fp_valid     = false;
-    config_save(c);
+    Config c   = config();
+    c.profile  = "auto";
+    c.fp_valid = false;
+    config_set_runtime(c);
     hp_poll_reconfigure();
     return http_send_json(req, "{\"ok\":true}");
 }
 
 void http_register_config(httpd_handle_t s) {
-    httpd_uri_t routes[] = {
-        {"/set_wifi", HTTP_POST, set_wifi, nullptr},
-        {"/set_mqtt", HTTP_POST, set_mqtt, nullptr},
-        {"/set_hp", HTTP_POST, set_hp, nullptr},
-        {"/detect", HTTP_POST, do_detect, nullptr},
-    };
-    for (auto& r : routes) httpd_register_uri_handler(s, &r);
+    http_register(s, "/set_wifi", HTTP_POST, set_wifi);
+    http_register(s, "/set_mqtt", HTTP_POST, set_mqtt);
+    http_register(s, "/set_hp", HTTP_POST, set_hp);
+    http_register(s, "/detect", HTTP_POST, do_detect);
 }
 
 } // namespace daik

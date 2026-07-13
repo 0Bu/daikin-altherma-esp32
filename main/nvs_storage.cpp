@@ -46,6 +46,4 @@ bool nvs_set_i32(const char* key, int32_t val) {
     return ok;
 }
 
-void nvs_commit() { /* per-call commit above; kept for API symmetry */ }
-
 } // namespace daik

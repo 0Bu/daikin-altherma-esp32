@@ -1,9 +1,8 @@
 #pragma once
-// The heat-pump poll engine. One task owns the X10A UART: each interval it builds the register
-// set from the active profile + value mask, queries each register, decodes the enabled values
-// and writes them into a thread-safe cache the web UI (/values) and the MQTT bridge read.
-// Config changes from /set_hp apply at the top of the next cycle (no reboot). See
-// docs/ARCHITECTURE.md → The poll engine.
+// The heat-pump poll engine. One task owns the X10A UART: each interval (POLL_INTERVAL_S) it builds
+// the register set from the active profile, queries each register, decodes the values and writes
+// them into a thread-safe cache the web UI (/values) and the MQTT bridge read. Config changes from
+// /set_hp apply at the top of the next cycle (no reboot). See docs/ARCHITECTURE.md → The poll engine.
 #include <cstddef>
 #include <cstdint>
 #include <string>

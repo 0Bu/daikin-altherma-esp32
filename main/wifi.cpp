@@ -5,6 +5,7 @@
 // Also starts mDNS (<hostname>.local). See wifi.hpp and docs/ARCHITECTURE.md → WiFi/LAN.
 #include "wifi.hpp"
 #include "config.hpp"
+#include "sdkconfig.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -184,7 +185,7 @@ static void wifi_watchdog_task(void*) {
 
 static void start_mdns() {
     if (mdns_init() != ESP_OK) return;
-    mdns_hostname_set(config().hostname.c_str());
+    mdns_hostname_set(CONFIG_DAIKIN_HOSTNAME);
     mdns_service_add(nullptr, "_http", "_tcp", 80, nullptr, 0);
 }
 
@@ -207,7 +208,7 @@ bool wifi_start_sta() {
     // Advertise our hostname to the router via DHCP (option 12) BEFORE the DHCP client runs, so the
     // router's client list shows "daikin-altherma-esp32", not the IDF default "espressif". This is
     // the DHCP name; mDNS (start_mdns) sets the matching <hostname>.local name separately.
-    if (s_sta_netif) esp_netif_set_hostname(s_sta_netif, config().hostname.c_str());
+    if (s_sta_netif) esp_netif_set_hostname(s_sta_netif, CONFIG_DAIKIN_HOSTNAME);
     wifi_init_config_t ic = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&ic));
     esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi, nullptr, &s_h_wifi);
