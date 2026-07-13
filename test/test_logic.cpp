@@ -15,6 +15,7 @@
 #include "logic/detect.hpp"
 #include "logic/discovery.hpp"
 #include "logic/health_gate.hpp"
+#include "logic/heartbeat.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/registers.hpp"
 #include "def/registry.hpp"
@@ -397,6 +398,102 @@ static void test_mqtt_group() {
     CHECK(build_grouped_json({}) == "{}");
 }
 
+static void test_heartbeat() {
+    const std::string base = "daikin-altherma-esp32", node = "daikin_abc123";
+    CHECK(heartbeat_topic(base, node) == "daikin-altherma-esp32/daikin_abc123/heartbeat");
+
+    // wifi_signal_quality_pct: matches the observed EMS-ESP-style dBm->% samples exactly
+    // (-76 dBm -> 48%, -78 dBm -> 44%), clamped at the -50/-100 dBm ends.
+    CHECK(wifi_signal_quality_pct(-76) == 48);
+    CHECK(wifi_signal_quality_pct(-78) == 44);
+    CHECK(wifi_signal_quality_pct(-50) == 100 && wifi_signal_quality_pct(-40) == 100);
+    CHECK(wifi_signal_quality_pct(-100) == 0 && wifi_signal_quality_pct(-110) == 0);
+
+    // format_uptime: "Ddd+HH:MM:SS.mmm" — 7 days, 21:05:31.860 (a real EMS-ESP heartbeat sample).
+    const uint64_t sample_ms = ((7ULL * 24 + 21) * 3600 + 5 * 60 + 31) * 1000 + 860;
+    CHECK(format_uptime(sample_ms) == "007+21:05:31.860");
+    CHECK(format_uptime(0) == "000+00:00:00.000");
+
+    HeartbeatFields f;
+    f.version         = "1.2.3";
+    f.platform        = "esp32s3";
+    f.uptime_ms       = sample_ms;
+    f.free_heap       = 170000;
+    f.min_free_heap   = 150000;
+    f.max_alloc       = 87000;
+    f.wifi_connected  = true;
+    f.wifi_rssi       = -76;
+    f.wifi_reconnects = 3;
+    f.mqtt_connected  = true;
+    f.mqtt_count      = 89282;
+    f.mqtt_fails      = 0;
+    f.mqtt_reconnects = 1;
+    f.bus_connected   = true;
+    f.bus_proto       = 'I';
+    f.registers       = 10;
+    f.values          = 48;
+    f.crc_err         = 0;
+    f.timeout_err     = 2;
+    f.rx_received     = 763732;
+    f.rx_fails        = 2;
+    f.last_ok_s       = 1;
+    const std::string j = build_heartbeat_json(f);
+    CHECK(j == "{\"version\":\"1.2.3\",\"platform\":\"esp32s3\","
+               "\"uptime_s\":680731,\"uptime\":\"007+21:05:31.860\","
+               "\"free_heap\":170000,\"min_free_heap\":150000,\"max_alloc\":87000,"
+               "\"wifi\":{\"connected\":true,\"rssi\":-76,\"quality_pct\":48,\"reconnects\":3},"
+               "\"mqtt\":{\"connected\":true,\"count\":89282,\"fails\":0,\"reconnects\":1},"
+               "\"bus\":{\"connected\":true,\"proto\":\"I\",\"registers\":10,\"values\":48,"
+               "\"crc_err\":0,\"timeout_err\":2,\"rx_received\":763732,\"rx_fails\":2,\"last_ok_s\":1},"
+               "\"tx\":{\"reads\":763734,\"writes\":0,\"fails\":0}}");
+
+    // WiFi down -> rssi/quality reported null, not a stale/garbage reading.
+    HeartbeatFields down;
+    down.wifi_connected = false;
+    down.wifi_rssi       = -50;    // stale value must not leak into the JSON
+    const std::string dj = build_heartbeat_json(down);
+    CHECK(dj.find("\"rssi\":null") != std::string::npos);
+    CHECK(dj.find("\"quality_pct\":null") != std::string::npos);
+
+    // Diagnostic discovery: separate topics/component types, entity_category diagnostic, and the
+    // value_template points at the heartbeat topic (not the heat-pump state topic).
+    const std::string hb = heartbeat_topic(base, node);
+    const std::string av = availability_topic(base, node);
+    CHECK(HEARTBEAT_SENSOR_COUNT == 13);
+    const HeartbeatSensor& rssi = HEARTBEAT_SENSORS[0];
+    CHECK(std::string(rssi.object_id) == "wifi_signal");
+    std::string dt = heartbeat_discovery_topic("homeassistant", node, rssi);
+    CHECK(dt == "homeassistant/sensor/daikin_abc123/wifi_signal/config");
+    std::string dc = heartbeat_discovery_config(node, hb, av, rssi);
+    CHECK(dc.find("\"stat_t\":\"daikin-altherma-esp32/daikin_abc123/heartbeat\"") != std::string::npos);
+    CHECK(dc.find("\"val_tpl\":\"{{ value_json['wifi']['rssi'] }}\"") != std::string::npos);
+    CHECK(dc.find("\"ent_cat\":\"diagnostic\"") != std::string::npos);
+    CHECK(dc.find("\"dev_cla\":\"signal_strength\"") != std::string::npos);
+    CHECK(dc.find("\"stat_cla\":\"measurement\"") != std::string::npos);
+
+    // The binary_sensor (bus_status) lands under the binary_sensor component, not sensor, and has
+    // no stat_cla (not a numeric measurement).
+    const HeartbeatSensor* bus = nullptr;
+    for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++)
+        if (std::string(HEARTBEAT_SENSORS[i].object_id) == "bus_status") bus = &HEARTBEAT_SENSORS[i];
+    CHECK(bus != nullptr);
+    CHECK(heartbeat_discovery_topic("homeassistant", node, *bus)
+          == "homeassistant/binary_sensor/daikin_abc123/bus_status/config");
+    std::string busc = heartbeat_discovery_config(node, hb, av, *bus);
+    CHECK(busc.find("val_tpl\":\"{{ value_json['bus']['connected'] }}") != std::string::npos);
+    CHECK(busc.find("\"stat_cla\"") == std::string::npos);
+
+    // A since-boot counter (e.g. mqtt_count) is "total_increasing", not "measurement" — HA's
+    // long-term statistics then handle a reboot's reset to 0 correctly instead of reading it as a
+    // (nonsensical) huge negative delta.
+    const HeartbeatSensor* mc = nullptr;
+    for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++)
+        if (std::string(HEARTBEAT_SENSORS[i].object_id) == "mqtt_count") mc = &HEARTBEAT_SENSORS[i];
+    CHECK(mc != nullptr);
+    CHECK(heartbeat_discovery_config(node, hb, av, *mc).find("\"stat_cla\":\"total_increasing\"")
+          != std::string::npos);
+}
+
 static void test_health_gate() {
     // base=90s, cap=300s. STA-configured device.
     const int base = 90, cap = 300;
@@ -448,6 +545,7 @@ int main() {
     test_registry();
     test_detect();
     test_mqtt_group();
+    test_heartbeat();
     test_health_gate();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }
     std::printf("%d logic test(s) FAILED\n", g_failures);

@@ -27,6 +27,11 @@ struct HpStats {
     int      values       = 0;
     uint32_t crc_err      = 0;
     uint32_t timeout_err  = 0;
+    // Cumulative since boot (never reset) — the heartbeat's bus.rx_received/rx_fails
+    // (logic/heartbeat.hpp). rx_ok+rx_fail_total = every register query ever attempted;
+    // rx_fail_total = crc_err+timeout_err+other reply errors (e.g. the 0x15 0xEA bus-busy reply).
+    uint32_t rx_ok         = 0;
+    uint32_t rx_fail_total = 0;
     std::string last_error;
 };
 
