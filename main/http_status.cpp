@@ -45,7 +45,7 @@ static esp_err_t h_index(httpd_req_t* req) {
     return http_send_gzip(req, "text/html", index_html_gz_start, index_html_gz_end);
 }
 
-static esp_err_t h_status(httpd_req_t* req) {
+static std::string build_status_json_string() {
     const Config& c = config();
     HpStats     hp  = hp_stats();
     MqttStatus  m   = mqtt_status();
@@ -126,6 +126,11 @@ static esp_err_t h_status(httpd_req_t* req) {
             : "null";
     j += "}";
     j += "}";
+    return j;
+}
+
+static esp_err_t h_status(httpd_req_t* req) {
+    std::string j = build_status_json_string();
     return http_send_json(req, j.c_str());
 }
 
@@ -226,7 +231,7 @@ void ws_broadcast_values() {
 
     std::vector<CachedValue> v(64);
     size_t n = hp_values_snapshot(v.data(), v.size());
-    std::string j = "{\"values\":[";
+    std::string j = "{\"type\":\"values\",\"values\":[";
     for (size_t i = 0; i < n; i++) {
         if (i) j += ",";
         j += "{\"label\":" + jstr(v[i].label) +
@@ -249,9 +254,67 @@ void ws_broadcast_values() {
     xSemaphoreGive(s_ws_mtx);
 }
 
+void ws_broadcast_status() {
+    httpd_handle_t server = http_server_handle();
+    if (!server || !s_ws_mtx) return;
+
+    bool any_clients = false;
+    xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
+    for (int i = 0; i < 8; i++) {
+        if (s_ws_fds[i] != -1) {
+            any_clients = true;
+            break;
+        }
+    }
+    xSemaphoreGive(s_ws_mtx);
+
+    if (!any_clients) return;
+
+    std::string stat = build_status_json_string();
+    std::string j = "{\"type\":\"status\",\"status\":" + stat + "}";
+
+    httpd_ws_frame_t frame = {};
+    frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j.c_str()));
+    frame.len = j.size();
+    frame.type = HTTPD_WS_TYPE_TEXT;
+
+    xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
+    for (int i = 0; i < 8; i++) {
+        if (s_ws_fds[i] != -1) {
+            httpd_ws_send_frame_async(server, s_ws_fds[i], &frame);
+        }
+    }
+    xSemaphoreGive(s_ws_mtx);
+}
+
 static esp_err_t h_ws_events(httpd_req_t* req) {
     int fd = httpd_req_to_sockfd(req);
     http_register_ws_client(fd);
+
+    // Initialen Status und Werte direkt an diesen neuen Client senden
+    std::string stat = build_status_json_string();
+    std::string j_stat = "{\"type\":\"status\",\"status\":" + stat + "}";
+    httpd_ws_frame_t f_stat = {};
+    f_stat.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_stat.c_str()));
+    f_stat.len = j_stat.size();
+    f_stat.type = HTTPD_WS_TYPE_TEXT;
+    httpd_ws_send_frame(req, &f_stat);
+
+    std::vector<CachedValue> v(64);
+    size_t n = hp_values_snapshot(v.data(), v.size());
+    std::string j_val = "{\"type\":\"values\",\"values\":[";
+    for (size_t i = 0; i < n; i++) {
+        if (i) j_val += ",";
+        j_val += "{\"label\":" + jstr(v[i].label) +
+                 ",\"value\":" + (v[i].value.empty() ? "null" : jstr(v[i].value)) +
+                 ",\"unit\":" + jstr(v[i].unit) + "}";
+    }
+    j_val += "]}";
+    httpd_ws_frame_t f_val = {};
+    f_val.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_val.c_str()));
+    f_val.len = j_val.size();
+    f_val.type = HTTPD_WS_TYPE_TEXT;
+    httpd_ws_send_frame(req, &f_val);
 
     if (req->method != HTTP_GET) {
         httpd_ws_frame_t ws_pkt = {};

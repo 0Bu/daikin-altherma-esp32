@@ -117,10 +117,16 @@ static void poll_detect() {
 }
 
 static void poll_task(void*) {
+    int ticks = 0;
     for (;;) {
         if (config().profile == "auto") poll_detect();         // resolves to a concrete profile
         if (config().profile != "auto") poll_once();           // then poll it (same cycle if resolved)
         ws_broadcast_values();
+        ticks++;
+        if (ticks >= 4) {
+            ticks = 0;
+            ws_broadcast_status();
+        }
         vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));     // fixed 1 s cadence
     }
 }
