@@ -19,6 +19,7 @@ idf_component_register(
         "mqtt_ha.cpp"
         "ota_update.cpp"
         "diag_log.cpp"
+        "status_led.cpp"
     INCLUDE_DIRS
         "."
     EMBED_FILES
@@ -37,6 +38,7 @@ idf_component_register(
         esp-tls
         lwip
         esp_driver_uart
+        esp_driver_gpio
         mqtt
         esp_timer
         bootloader_support

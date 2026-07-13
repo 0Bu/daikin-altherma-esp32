@@ -21,6 +21,7 @@
 #include "mqtt_ha.hpp"
 #include "ota_update.hpp"
 #include "provisioning.hpp"
+#include "status_led.hpp"
 #include "wifi.hpp"
 
 static const char* TAG = "main";
@@ -33,6 +34,9 @@ extern "C" void app_main() {
         ESP_ERROR_CHECK(nvs_flash_init());
     }
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    // --- Status LED ---
+    daik::status_led_start();
 
     daik::diag_log_init();
     daik::config_load();
