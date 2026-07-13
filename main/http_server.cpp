@@ -10,12 +10,17 @@ namespace daik {
 
 static httpd_handle_t s_server = nullptr;
 
+static void ws_close_fn(httpd_handle_t hd, int sockfd) {
+    http_unregister_ws_client(sockfd);
+}
+
 void http_start() {
     httpd_config_t cfg   = HTTPD_DEFAULT_CONFIG();
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
     cfg.max_uri_handlers = 24;
     cfg.lru_purge_enable = true;
     cfg.stack_size       = 8192;
+    cfg.close_fn         = ws_close_fn;
     if (httpd_start(&s_server, &cfg) != ESP_OK) {
         ESP_LOGE("http", "server start failed");
         return;
@@ -26,6 +31,10 @@ void http_start() {
     http_register_mcp(s_server);
     http_register_captive(s_server);   // catch-all — keep last so specific routes win
     ESP_LOGI("http", "server on :80");
+}
+
+httpd_handle_t http_server_handle() {
+    return s_server;
 }
 
 } // namespace daik

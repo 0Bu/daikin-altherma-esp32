@@ -15,6 +15,11 @@
 #include "esp_app_desc.h"
 #include "esp_http_server.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
+#include "http_server.hpp"
+#include "diag_log.hpp"
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -170,11 +175,111 @@ static esp_err_t h_scan(httpd_req_t* req) {
     return http_send_json(req, j.c_str());
 }
 
+static SemaphoreHandle_t s_ws_mtx = nullptr;
+static int s_ws_fds[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+
+void http_register_ws_client(int fd) {
+    if (!s_ws_mtx) s_ws_mtx = xSemaphoreCreateMutex();
+    xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
+    for (int i = 0; i < 8; i++) {
+        if (s_ws_fds[i] == fd) {
+            xSemaphoreGive(s_ws_mtx);
+            return;
+        }
+    }
+    for (int i = 0; i < 8; i++) {
+        if (s_ws_fds[i] == -1) {
+            s_ws_fds[i] = fd;
+            break;
+        }
+    }
+    xSemaphoreGive(s_ws_mtx);
+}
+
+void http_unregister_ws_client(int fd) {
+    if (!s_ws_mtx) return;
+    xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
+    for (int i = 0; i < 8; i++) {
+        if (s_ws_fds[i] == fd) {
+            s_ws_fds[i] = -1;
+            break;
+        }
+    }
+    xSemaphoreGive(s_ws_mtx);
+}
+
+void ws_broadcast_values() {
+    httpd_handle_t server = http_server_handle();
+    if (!server || !s_ws_mtx) return;
+
+    bool any_clients = false;
+    xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
+    for (int i = 0; i < 8; i++) {
+        if (s_ws_fds[i] != -1) {
+            any_clients = true;
+            break;
+        }
+    }
+    xSemaphoreGive(s_ws_mtx);
+
+    if (!any_clients) return;
+
+    std::vector<CachedValue> v(64);
+    size_t n = hp_values_snapshot(v.data(), v.size());
+    std::string j = "{\"values\":[";
+    for (size_t i = 0; i < n; i++) {
+        if (i) j += ",";
+        j += "{\"label\":" + jstr(v[i].label) +
+             ",\"value\":" + (v[i].value.empty() ? "null" : jstr(v[i].value)) +
+             ",\"unit\":" + jstr(v[i].unit) + "}";
+    }
+    j += "]}";
+
+    httpd_ws_frame_t frame = {};
+    frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j.c_str()));
+    frame.len = j.size();
+    frame.type = HTTPD_WS_TYPE_TEXT;
+
+    xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
+    for (int i = 0; i < 8; i++) {
+        if (s_ws_fds[i] != -1) {
+            httpd_ws_send_frame_async(server, s_ws_fds[i], &frame);
+        }
+    }
+    xSemaphoreGive(s_ws_mtx);
+}
+
+static esp_err_t h_ws_events(httpd_req_t* req) {
+    int fd = httpd_req_to_sockfd(req);
+    http_register_ws_client(fd);
+
+    if (req->method != HTTP_GET) {
+        httpd_ws_frame_t ws_pkt = {};
+        esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
+        if (ret == ESP_OK && ws_pkt.len > 0) {
+            uint8_t buf[16];
+            ws_pkt.payload = buf;
+            size_t max_len = ws_pkt.len < sizeof(buf) ? ws_pkt.len : sizeof(buf);
+            httpd_ws_recv_frame(req, &ws_pkt, max_len);
+        }
+    }
+    return ESP_OK;
+}
+
 void http_register_status(httpd_handle_t s) {
     http_register(s, "/", HTTP_GET, h_index);
     http_register(s, "/index.html", HTTP_GET, h_index);
     http_register(s, "/status", HTTP_GET, h_status);
     http_register(s, "/values", HTTP_GET, h_values);
+
+    httpd_uri_t ws_uri = {};
+    ws_uri.uri          = "/events";
+    ws_uri.method       = HTTP_GET;
+    ws_uri.handler      = h_ws_events;
+    ws_uri.user_ctx     = nullptr;
+    ws_uri.is_websocket = true;
+    httpd_register_uri_handler(s, &ws_uri);
+
     http_register(s, "/models", HTTP_GET, h_models);
     http_register(s, "/diag", HTTP_GET, h_diag);
     http_register(s, "/scan", HTTP_GET, h_scan);

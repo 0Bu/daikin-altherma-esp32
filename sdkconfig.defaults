@@ -62,6 +62,9 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
 # Logging
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
+# WebSockets support
+CONFIG_HTTPD_WS_SUPPORT=y
+
 # ── Firmware size reduction (zero-risk / no behaviour change) ──
 # Drop code paths this firmware never uses.
 # mbedTLS human-readable error-string tables — we only log numeric TLS codes (MQTTS/OTA). ~6 KB.

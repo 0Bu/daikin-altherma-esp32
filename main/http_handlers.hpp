@@ -27,4 +27,8 @@ void http_register_ota(httpd_handle_t s);      // http_ota.cpp
 void http_register_mcp(httpd_handle_t s);      // mcp_server.cpp
 void http_register_captive(httpd_handle_t s);  // http_status.cpp — MUST be registered last
 
+void http_register_ws_client(int fd);
+void http_unregister_ws_client(int fd);
+void ws_broadcast_values();
+
 } // namespace daik
