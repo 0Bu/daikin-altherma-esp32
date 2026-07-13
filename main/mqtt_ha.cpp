@@ -7,9 +7,9 @@
 //   • Each cycle: rebuild the grouped state JSON (logic/mqtt_group.hpp) and publish it to the ONE
 //     shared topic <base>/<node>/state — but only when the payload actually changed, so a quiet
 //     pump doesn't spam the broker.
-//   • Each cycle: same publish-on-change treatment for the board/link diagnostics JSON
-//     (logic/heartbeat.hpp) on <base>/<node>/heartbeat — uptime ticks every cycle, so in practice
-//     it publishes about once a second while connected.
+//   • Every HEARTBEAT_INTERVAL_S (10 s): rebuild + publish the board/link diagnostics JSON
+//     (logic/heartbeat.hpp) to <base>/<node>/heartbeat — diagnostics, not real-time telemetry, so
+//     unlike the state topic it's a fixed cadence, not publish-on-change.
 // Read-only: no command subscriptions. No-op if mqtt_uri is empty. Memory-safe: discovery is one
 // small publish per value; the state JSON is a single few-KB build, guarded against OOM.
 #include "mqtt_ha.hpp"
@@ -50,7 +50,6 @@ static volatile bool            s_announce  = false;  // set on connect -> task 
 static std::string s_uri, s_user, s_pass, s_node, s_base, s_prefix, s_avail, s_state, s_heartbeat;
 static std::string s_announced_profile;               // profile we last published discovery for
 static std::string s_last_json;                       // last state JSON published (dedup guard)
-static std::string s_last_heartbeat_json;              // last heartbeat JSON published (dedup guard)
 static bool         s_heartbeat_announced = false;     // diagnostic discovery streamed this connection?
 static bool         s_mqtt_ever_connected = false;     // distinguishes the first connect from a RE-connect
 
@@ -58,6 +57,10 @@ static bool         s_mqtt_ever_connected = false;     // distinguishes the firs
 static uint32_t s_mqtt_pub_ok   = 0;
 static uint32_t s_mqtt_pub_fail = 0;
 static uint32_t s_mqtt_reconnects = 0;
+
+// Heartbeat is diagnostics, not real-time telemetry — publish on a fixed cadence rather than on
+// every poll cycle.
+static constexpr int HEARTBEAT_INTERVAL_S = 10;
 
 static void set_status(bool connected, const char* err) {
     xSemaphoreTake(s_mtx, portMAX_DELAY);
@@ -144,11 +147,10 @@ static void publish_heartbeat_discovery() {
 }
 
 // Snapshot board/link diagnostics from the IDF heap/timer APIs + the poll/WiFi/MQTT state, and
-// publish it to the heartbeat topic (not retained) — but, like publish_state(), only when the
-// payload actually changed since the last publish, so a completely idle device doesn't spam the
-// broker every second. `uptime_s` changes every cycle while connected, so in practice this fires
-// about once a second — publish-on-change, not a slower fixed interval.
-static bool publish_heartbeat(bool force) {
+// publish it to the heartbeat topic (not retained). Called on a fixed HEARTBEAT_INTERVAL_S cadence
+// (mqtt_task) — diagnostics, not real-time telemetry, so unlike the state topic it always publishes
+// rather than only on change.
+static void publish_heartbeat() {
     HpStats  hp = hp_stats();
     WifiInfo wi = wifi_info();
     HeartbeatFields f;
@@ -176,10 +178,7 @@ static bool publish_heartbeat(bool force) {
     f.last_ok_s       = hp.last_ok_s;
 
     const std::string js = build_heartbeat_json(f);
-    if (!force && js == s_last_heartbeat_json) return false;
     mqtt_publish(s_heartbeat, js.c_str(), static_cast<int>(js.size()), 0, 0);   // not retained
-    s_last_heartbeat_json = js;
-    return true;
 }
 
 static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
@@ -212,6 +211,7 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
 // it changes. The per-cycle body is guarded — an OOM std::string build must skip the cycle, not
 // throw through the FreeRTOS task and reboot the device.
 static void mqtt_task(void*) {
+    int heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S;    // publish immediately on the first connected cycle
     for (;;) {
         const int delay_s = POLL_INTERVAL_S;
 
@@ -221,7 +221,7 @@ static void mqtt_task(void*) {
                     s_announce = false;
                     s_announced_profile.clear();               // force a fresh discovery below
                     s_last_json.clear();                       // force a full state re-seed
-                    s_last_heartbeat_json.clear();              // force a full heartbeat re-seed
+                    heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S; // publish it right away, then every 10 s
                     mqtt_publish(s_avail, "online", 0, 0, 1);
                 }
                 if (!s_heartbeat_announced) {                  // board/link diagnostics — independent
@@ -238,10 +238,13 @@ static void mqtt_task(void*) {
                 }
                 // prof == "auto" (detection pending): wait — don't publish transient generic sensors.
 
-                // Checked every poll cycle (1 s), but only actually sent when the payload changed —
-                // uptime_s ticks every second while connected, so in practice this publishes about
-                // once a second, same cadence as the state topic, not on a slower fixed timer.
-                publish_heartbeat(false);
+                // Fixed HEARTBEAT_INTERVAL_S cadence — diagnostics, not real-time telemetry, so it
+                // doesn't need the state topic's every-cycle publish-on-change treatment.
+                heartbeat_elapsed_s += delay_s;
+                if (heartbeat_elapsed_s >= HEARTBEAT_INTERVAL_S) {
+                    publish_heartbeat();
+                    heartbeat_elapsed_s = 0;
+                }
             }
         } catch (const std::exception& e) {
             diag_printf("mqtt: publish skipped (%s)\n", e.what());
