@@ -30,5 +30,6 @@ void http_register_captive(httpd_handle_t s);  // http_status.cpp — MUST be re
 void http_register_ws_client(int fd);
 void http_unregister_ws_client(int fd);
 void ws_broadcast_values();
+void ws_broadcast_status();
 
 } // namespace daik
