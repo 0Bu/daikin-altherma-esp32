@@ -17,6 +17,7 @@ struct CachedValue {
     std::string label;
     std::string value;   // formatted; empty = not available this cycle
     std::string unit;
+    uint8_t     reg = 0; // X10A register page it came from (MQTT groups values by page)
 };
 
 // Health/status counters for /status.hp.

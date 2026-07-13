@@ -17,17 +17,30 @@ Node id is `daikin_<mac3>` (from the WiFi STA MAC, stable across config changes)
 defaults to `daikin-altherma-esp32`, `<prefix>` to `homeassistant`.
 
 ```
-<base>/<node>/availability                         online | offline   (LWT, retained)
-<base>/<node>/state                                {<object_id>: value, …}   (retained JSON)
+<base>/<node>/status                               online | offline   (LWT, retained)
+<base>/<node>/state                                {<group>: {<object_id>: value, …}, …}  (retained JSON)
 <prefix>/sensor/<node>/<object_id>/config          discovery config per value (retained)
 ```
 
-Each value's `object_id` is a lowercase, alnum-only slug of its label (e.g. *"DHW Tank Temp
-(R5T)"* → `dhw_tank_temp_r5t`). Units and `device_class` are derived from the converter id, so
-temperatures render as °C with history, currents as A, and so on.
+All values ride in **one** retained JSON on `<base>/<node>/state`, grouped one level deep by X10A
+register page (`{ "hydronic": { "dhw_setpoint": 48, … }, "outdoor_state": { … }, … }`, max nesting
+depth 1 — group names come from `logic/mqtt_group.hpp`). Each discovery config points every sensor
+at that shared topic and pulls its value out with a `value_template`:
 
-Numeric values are emitted only when the heat pump reported them this cycle, so an unimplemented
-register shows as *unknown* in HA rather than a phantom `0`.
+```yaml
+"stat_t": "daikin-altherma-esp32/daikin_a1b2c3/state"
+"val_tpl": "{{ value_json['hydronic']['dhw_setpoint'] }}"
+```
+
+Each value's `object_id` is a lowercase, alnum-only slug of its label (e.g. *"DHW Tank Temp
+(R5T)"* → `dhw_tank_temp_r5t`). The template uses bracket subscripts, so a slug that starts with a
+digit (*"2way valve…"* → `2way_valve_…`) stays valid. Units and `device_class` are derived from the
+converter id, so temperatures render as °C with history, currents as A, and so on. This grouped JSON
+is also directly consumable by a Telegraf MQTT `json_v2` parser (→ VictoriaMetrics/Grafana).
+
+Numeric values are emitted (unquoted) only when the heat pump reported them this cycle, so an
+unimplemented register is absent from the JSON and shows as *unknown* in HA rather than a phantom
+`0`; enum/text values (op-mode, ON/OFF, error codes) are emitted as JSON strings.
 
 > **Read-only bridge — no command topics.** The firmware only mirrors X10A telemetry; it never
 > actuates the heat pump. To *control* the unit (e.g. SG-Ready boost on PV surplus), drive the
