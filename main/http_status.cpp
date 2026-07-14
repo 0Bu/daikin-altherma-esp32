@@ -216,6 +216,7 @@ void http_unregister_ws_client(int fd) {
 
 struct WsPacketContext {
     std::string payload;
+    httpd_ws_frame_t frame;
 };
 
 static void ws_transfer_complete(esp_err_t err, int socket, void *arg) {
@@ -253,14 +254,16 @@ void ws_broadcast_values() {
     xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
     for (int i = 0; i < 8; i++) {
         if (s_ws_fds[i] != -1) {
-            auto* ctx = new WsPacketContext{j};
-            httpd_ws_frame_t frame = {};
-            frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(ctx->payload.c_str()));
-            frame.len = ctx->payload.size();
-            frame.type = HTTPD_WS_TYPE_TEXT;
-            frame.final = true;
+            WsPacketContext* ctx = new WsPacketContext();
+            ctx->payload = j;
+            
+            memset(&ctx->frame, 0, sizeof(httpd_ws_frame_t));
+            ctx->frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(ctx->payload.c_str()));
+            ctx->frame.len = ctx->payload.size();
+            ctx->frame.type = HTTPD_WS_TYPE_TEXT;
+            ctx->frame.final = true;
 
-            esp_err_t err = httpd_ws_send_data_async(server, s_ws_fds[i], &frame, ws_transfer_complete, ctx);
+            esp_err_t err = httpd_ws_send_data_async(server, s_ws_fds[i], &ctx->frame, ws_transfer_complete, ctx);
             if (err != ESP_OK) {
                 delete ctx;
             }
@@ -291,14 +294,16 @@ void ws_broadcast_status() {
     xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
     for (int i = 0; i < 8; i++) {
         if (s_ws_fds[i] != -1) {
-            auto* ctx = new WsPacketContext{j};
-            httpd_ws_frame_t frame = {};
-            frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(ctx->payload.c_str()));
-            frame.len = ctx->payload.size();
-            frame.type = HTTPD_WS_TYPE_TEXT;
-            frame.final = true;
+            WsPacketContext* ctx = new WsPacketContext();
+            ctx->payload = j;
+            
+            memset(&ctx->frame, 0, sizeof(httpd_ws_frame_t));
+            ctx->frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(ctx->payload.c_str()));
+            ctx->frame.len = ctx->payload.size();
+            ctx->frame.type = HTTPD_WS_TYPE_TEXT;
+            ctx->frame.final = true;
 
-            esp_err_t err = httpd_ws_send_data_async(server, s_ws_fds[i], &frame, ws_transfer_complete, ctx);
+            esp_err_t err = httpd_ws_send_data_async(server, s_ws_fds[i], &ctx->frame, ws_transfer_complete, ctx);
             if (err != ESP_OK) {
                 delete ctx;
             }

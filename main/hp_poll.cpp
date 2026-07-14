@@ -133,7 +133,7 @@ static void poll_task(void*) {
 
 void hp_poll_start() {
     s_mtx = xSemaphoreCreateMutex();
-    xTaskCreate(poll_task, "hp_poll", 4096, nullptr, 5, nullptr);
+    xTaskCreate(poll_task, "hp_poll", 8192, nullptr, 5, nullptr);
 }
 
 size_t hp_values_snapshot(CachedValue* out, size_t max) {
