@@ -213,6 +213,15 @@ void http_unregister_ws_client(int fd) {
     xSemaphoreGive(s_ws_mtx);
 }
 
+struct WsPacketContext {
+    std::string payload;
+};
+
+static void ws_transfer_complete(esp_err_t err, int socket, void *arg) {
+    auto* ctx = static_cast<WsPacketContext*>(arg);
+    delete ctx;
+}
+
 void ws_broadcast_values() {
     httpd_handle_t server = http_server_handle();
     if (!server || !s_ws_mtx) return;
@@ -240,15 +249,20 @@ void ws_broadcast_values() {
     }
     j += "]}";
 
-    httpd_ws_frame_t frame = {};
-    frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j.c_str()));
-    frame.len = j.size();
-    frame.type = HTTPD_WS_TYPE_TEXT;
-
     xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
     for (int i = 0; i < 8; i++) {
         if (s_ws_fds[i] != -1) {
-            httpd_ws_send_frame_async(server, s_ws_fds[i], &frame);
+            auto* ctx = new WsPacketContext{j};
+            httpd_ws_frame_t frame = {};
+            frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(ctx->payload.c_str()));
+            frame.len = ctx->payload.size();
+            frame.type = HTTPD_WS_TYPE_TEXT;
+            frame.final = true;
+
+            esp_err_t err = httpd_ws_send_data_async(server, s_ws_fds[i], &frame, ws_transfer_complete, ctx);
+            if (err != ESP_OK) {
+                delete ctx;
+            }
         }
     }
     xSemaphoreGive(s_ws_mtx);
@@ -273,15 +287,20 @@ void ws_broadcast_status() {
     std::string stat = build_status_json_string();
     std::string j = "{\"type\":\"status\",\"status\":" + stat + "}";
 
-    httpd_ws_frame_t frame = {};
-    frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j.c_str()));
-    frame.len = j.size();
-    frame.type = HTTPD_WS_TYPE_TEXT;
-
     xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
     for (int i = 0; i < 8; i++) {
         if (s_ws_fds[i] != -1) {
-            httpd_ws_send_frame_async(server, s_ws_fds[i], &frame);
+            auto* ctx = new WsPacketContext{j};
+            httpd_ws_frame_t frame = {};
+            frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(ctx->payload.c_str()));
+            frame.len = ctx->payload.size();
+            frame.type = HTTPD_WS_TYPE_TEXT;
+            frame.final = true;
+
+            esp_err_t err = httpd_ws_send_data_async(server, s_ws_fds[i], &frame, ws_transfer_complete, ctx);
+            if (err != ESP_OK) {
+                delete ctx;
+            }
         }
     }
     xSemaphoreGive(s_ws_mtx);
@@ -289,42 +308,47 @@ void ws_broadcast_status() {
 
 static esp_err_t h_ws_events(httpd_req_t* req) {
     int fd = httpd_req_to_sockfd(req);
-    http_register_ws_client(fd);
 
-    // Initialen Status und Werte direkt an diesen neuen Client senden
-    std::string stat = build_status_json_string();
-    std::string j_stat = "{\"type\":\"status\",\"status\":" + stat + "}";
-    httpd_ws_frame_t f_stat = {};
-    f_stat.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_stat.c_str()));
-    f_stat.len = j_stat.size();
-    f_stat.type = HTTPD_WS_TYPE_TEXT;
-    httpd_ws_send_frame(req, &f_stat);
+    if (req->method == HTTP_GET) {
+        http_register_ws_client(fd);
 
-    std::vector<CachedValue> v(64);
-    size_t n = hp_values_snapshot(v.data(), v.size());
-    std::string j_val = "{\"type\":\"values\",\"values\":[";
-    for (size_t i = 0; i < n; i++) {
-        if (i) j_val += ",";
-        j_val += "{\"label\":" + jstr(v[i].label) +
-                 ",\"value\":" + (v[i].value.empty() ? "null" : jstr(v[i].value)) +
-                 ",\"unit\":" + jstr(v[i].unit) + "}";
-    }
-    j_val += "]}";
-    httpd_ws_frame_t f_val = {};
-    f_val.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_val.c_str()));
-    f_val.len = j_val.size();
-    f_val.type = HTTPD_WS_TYPE_TEXT;
-    httpd_ws_send_frame(req, &f_val);
+        // Initialen Status und Werte direkt an diesen neuen Client senden
+        std::string stat = build_status_json_string();
+        std::string j_stat = "{\"type\":\"status\",\"status\":" + stat + "}";
+        httpd_ws_frame_t f_stat = {};
+        f_stat.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_stat.c_str()));
+        f_stat.len = j_stat.size();
+        f_stat.type = HTTPD_WS_TYPE_TEXT;
+        f_stat.final = true;
+        httpd_ws_send_frame(req, &f_stat);
 
-    if (req->method != HTTP_GET) {
-        httpd_ws_frame_t ws_pkt = {};
-        esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
-        if (ret == ESP_OK && ws_pkt.len > 0) {
-            uint8_t buf[16];
-            ws_pkt.payload = buf;
-            size_t max_len = ws_pkt.len < sizeof(buf) ? ws_pkt.len : sizeof(buf);
-            httpd_ws_recv_frame(req, &ws_pkt, max_len);
+        std::vector<CachedValue> v(64);
+        size_t n = hp_values_snapshot(v.data(), v.size());
+        std::string j_val = "{\"type\":\"values\",\"values\":[";
+        for (size_t i = 0; i < n; i++) {
+            if (i) j_val += ",";
+            j_val += "{\"label\":" + jstr(v[i].label) +
+                     ",\"value\":" + (v[i].value.empty() ? "null" : jstr(v[i].value)) +
+                     ",\"unit\":" + jstr(v[i].unit) + "}";
         }
+        j_val += "]}";
+        httpd_ws_frame_t f_val = {};
+        f_val.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_val.c_str()));
+        f_val.len = j_val.size();
+        f_val.type = HTTPD_WS_TYPE_TEXT;
+        f_val.final = true;
+        httpd_ws_send_frame(req, &f_val);
+
+        return ESP_OK;
+    }
+
+    httpd_ws_frame_t ws_pkt = {};
+    esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
+    if (ret == ESP_OK && ws_pkt.len > 0) {
+        uint8_t buf[16];
+        ws_pkt.payload = buf;
+        size_t max_len = ws_pkt.len < sizeof(buf) ? ws_pkt.len : sizeof(buf);
+        httpd_ws_recv_frame(req, &ws_pkt, max_len);
     }
     return ESP_OK;
 }
