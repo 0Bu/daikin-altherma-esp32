@@ -16,6 +16,8 @@
 #include "esp_app_desc.h"
 #include "esp_http_server.h"
 #include "esp_timer.h"
+#include "esp_partition.h"
+#include "esp_core_dump.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -167,6 +169,62 @@ static esp_err_t h_diag(httpd_req_t* req) {
     size_t n = diag_dump(buf, sizeof(buf));
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_send(req, buf, n);
+}
+
+static esp_err_t h_coredump(httpd_req_t* req) {
+    char q[32];
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
+        char v[4];
+        if (httpd_query_key_value(q, "clear", v, sizeof(v)) == ESP_OK && v[0] == '1') {
+            esp_err_t err = esp_core_dump_image_erase();
+            if (err == ESP_OK) {
+                return http_send_json(req, "{\"ok\":true}");
+            } else {
+                return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to erase coredump");
+            }
+        }
+    }
+
+    size_t address = 0;
+    size_t size = 0;
+    esp_err_t err = esp_core_dump_image_get(&address, &size);
+    if (err == ESP_ERR_NOT_FOUND) {
+        httpd_resp_set_status(req, "404 Not Found");
+        httpd_resp_set_type(req, "text/plain");
+        return httpd_resp_sendstr(req, "No coredump found");
+    } else if (err != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to retrieve coredump metadata");
+    }
+
+    const esp_partition_t* pt = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA,
+        ESP_PARTITION_SUBTYPE_DATA_COREDUMP,
+        nullptr
+    );
+    if (!pt) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Coredump partition not found");
+    }
+
+    httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"coredump.bin\"");
+
+    char chunk[512];
+    size_t offset = 0;
+    while (offset < size) {
+        size_t to_read = (size - offset > sizeof(chunk)) ? sizeof(chunk) : (size - offset);
+        if (esp_partition_read(pt, offset, chunk, to_read) != ESP_OK) {
+            // Abort chunked transfer by sending end-of-chunks with error status (though HTTP protocol allows just closing connection)
+            httpd_resp_send_chunk(req, nullptr, 0);
+            return ESP_FAIL;
+        }
+        if (httpd_resp_send_chunk(req, chunk, to_read) != ESP_OK) {
+            return ESP_FAIL;
+        }
+        offset += to_read;
+    }
+    // End chunked transfer
+    httpd_resp_send_chunk(req, nullptr, 0);
+    return ESP_OK;
 }
 
 static esp_err_t h_scan(httpd_req_t* req) {
@@ -380,6 +438,7 @@ void http_register_status(httpd_handle_t s) {
     http_register(s, "/models", HTTP_GET, h_models);
     http_register(s, "/diag", HTTP_GET, h_diag);
     http_register(s, "/scan", HTTP_GET, h_scan);
+    http_register(s, "/coredump", HTTP_GET, h_coredump);
 }
 
 // Captive-portal / SPA catch-all — registered LAST (after every specific route) so it only handles
