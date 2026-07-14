@@ -16,7 +16,11 @@ namespace daik {
 #if CONFIG_DAIKIN_STATUS_LED_ENABLE
 
 static const gpio_num_t s_led_gpio = static_cast<gpio_num_t>(CONFIG_DAIKIN_STATUS_LED_GPIO);
-static const bool s_inverted = CONFIG_DAIKIN_STATUS_LED_INVERTED;
+#ifdef CONFIG_DAIKIN_STATUS_LED_INVERTED
+static const bool s_inverted = true;
+#else
+static const bool s_inverted = false;
+#endif
 
 static void set_led(bool on) {
     if (s_led_gpio < 0) return;

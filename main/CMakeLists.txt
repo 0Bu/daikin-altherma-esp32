@@ -43,6 +43,7 @@ idf_component_register(
         esp_timer
         bootloader_support
         mdns
+        espcoredump
 )
 
 # Assemble + pre-compress the web UI at build time. The sources are split for edit locality —
