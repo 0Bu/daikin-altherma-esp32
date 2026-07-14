@@ -5,6 +5,7 @@
 #include "def/model_names.hpp"
 #include "def/models_catalog.hpp"
 #include "def/signatures.hpp"
+#include "def/registry.hpp"
 #include "diag_log.hpp"
 #include "hp_poll.hpp"
 #include "logic/detect.hpp"
@@ -138,7 +139,8 @@ static esp_err_t h_status(httpd_req_t* req) {
 }
 
 static esp_err_t h_values(httpd_req_t* req) {
-    std::vector<CachedValue> v(64);
+    const size_t cap = def::lookup(config().profile.c_str()).count;
+    std::vector<CachedValue> v(cap ? cap : 1);
     size_t n = hp_values_snapshot(v.data(), v.size());
     std::string j = "{\"values\":[";
     for (size_t i = 0; i < n; i++) {
@@ -298,7 +300,8 @@ void ws_broadcast_values() {
 
     if (!any_clients) return;
 
-    std::vector<CachedValue> v(64);
+    const size_t cap = def::lookup(config().profile.c_str()).count;
+    std::vector<CachedValue> v(cap ? cap : 1);
     size_t n = hp_values_snapshot(v.data(), v.size());
     std::string j = "{\"type\":\"values\",\"values\":[";
     for (size_t i = 0; i < n; i++) {
@@ -399,7 +402,8 @@ static esp_err_t h_ws_events(httpd_req_t* req) {
                 httpd_ws_send_frame(req, &f_stat);
 
                 // Send values
-                std::vector<CachedValue> v(64);
+                const size_t cap = def::lookup(config().profile.c_str()).count;
+                std::vector<CachedValue> v(cap ? cap : 1);
                 size_t n = hp_values_snapshot(v.data(), v.size());
                 std::string j_val = "{\"type\":\"values\",\"values\":[";
                 for (size_t i = 0; i < n; i++) {
