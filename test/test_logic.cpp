@@ -550,8 +550,8 @@ static void test_board_pins() {
     CHECK(s3.count == 11);
     CHECK(has(s3, 43) && has(s3, 44));                              // D6/D7 — the X10A defaults
     CHECK(!has(s3, 16) && !has(s3, 17) && !has(s3, 47) && !has(s3, 48));
-    // Every supported target: non-empty and strictly ascending (⇒ sorted + de-duped) within GPIO range.
-    for (const char* t : {"esp32", "esp32s3", "esp32c3", "esp32c6", "esp32c5"}) {
+    // Supported target: non-empty and strictly ascending (⇒ sorted + de-duped) within GPIO range.
+    for (const char* t : {"esp32s3"}) {
         BoardPins b = board_pins(t);
         CHECK(b.count > 0);
         for (int i = 0; i < b.count; i++) CHECK(gpio_in_range(b.pins[i]));

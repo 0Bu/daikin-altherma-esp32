@@ -40,12 +40,7 @@ body:
     attributes:
       label: Target chip(s) affected
       options:
-        - All five (esp32 / esp32s3 / esp32c3 / esp32c6 / esp32c5)
-        - esp32
         - esp32s3 (incl. XIAO ESP32-S3)
-        - esp32c3
-        - esp32c6
-        - esp32c5
         - Unknown
     validations:
       required: true
@@ -81,7 +76,7 @@ body:
     id: version
     attributes:
       label: Firmware version / platform
-      description: From GET /api/proxy/1/version (e.g. "1.0.0 / ESP32-S3").
+      description: From GET /api/proxy/1/version (e.g. "1.0.0 / esp32s3").
     validations:
       required: false
   - type: textarea
