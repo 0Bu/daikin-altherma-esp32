@@ -31,6 +31,9 @@ inline int reply_len(uint8_t reg, Protocol proto) {
     if (proto == Protocol::I) return 12;
     switch (reg) {
         case 0x50: return 6;
+        // NOTE: There is an unverified discrepancy in S-protocol register 0x56.
+        // Some upstream documentation suggests the size is 6 bytes, but our implementation
+        // currently uses 4 bytes. This remains to be verified against real hardware.
         case 0x56: return 4;
         default:   return 18;
     }

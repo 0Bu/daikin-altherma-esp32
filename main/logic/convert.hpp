@@ -128,6 +128,19 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802
         case 804: set_text(r, "R407C"); break;
         case 805: set_text(r, "R134a"); break;
 
+        // --- Reference Converter IDs documented in REGISTERS.md but not implemented/used by profiles ---
+        // Stubs for future extensions or unimplemented catalog converters.
+        case 112: case 113: case 115: case 116: case 117:
+        case 153: case 154: case 155: case 156: case 157: case 158: case 159: case 160:
+        case 162: case 163:
+        case 401: case 402: case 403: case 404: case 406: case 407: case 408: case 409:
+        case 410: case 411: case 412: case 413: case 414: case 415: case 416: case 417: case 418:
+        case 451: case 452: case 453: case 454: case 455: case 456: case 457: case 458: case 459:
+        case 460: case 461: case 462: case 463: case 464: case 465:
+        case 881: case 882: case 883: case 884: case 885:
+            r.unimpl = true;
+            break;
+
         default:
             // Converter id not yet ported -> value simply skipped (never reported wrong).
             r.unimpl = true;
