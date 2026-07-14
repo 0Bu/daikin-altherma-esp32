@@ -285,6 +285,13 @@ static void test_registry() {
     CHECK(std::string(def::lookup("altherma3_r_erga").id) == "altherma3_r_erga");
     CHECK(def::lookup("altherma3_r_erga").count > 10);
     CHECK(std::string(def::lookup("nonexistent").id) == "generic");   // fallback
+
+    // --- Profile size limits (Vulnerability 2.2) ---
+    // Ensure that some profiles in the registry contain more than 64 values.
+    // This verifies that a hardcoded limit of 64 in Web UI / REST / WebSocket snapshots (Vulnerability 2.2)
+    // would cause telemetry truncation, and validates the need for dynamic sizing via def::lookup().
+    const auto& epra = def::lookup("altherma_epra_d_d7_etsh_x_16p30_50_e_e7_series_14_18kw_ech2o");
+    CHECK(epra.count > 64);
 }
 
 // Build a page mask from a list of register pages (mirrors what hp_detect sets when a page answers).
