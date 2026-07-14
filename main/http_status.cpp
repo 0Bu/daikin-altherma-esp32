@@ -12,6 +12,7 @@
 #include "ota_update.hpp"
 #include "wifi.hpp"
 
+#include "esp_log.h"
 #include "esp_app_desc.h"
 #include "esp_http_server.h"
 #include "esp_timer.h"
@@ -307,48 +308,52 @@ void ws_broadcast_status() {
 }
 
 static esp_err_t h_ws_events(httpd_req_t* req) {
-    int fd = httpd_req_to_sockfd(req);
-
     if (req->method == HTTP_GET) {
-        http_register_ws_client(fd);
-
-        // Initialen Status und Werte direkt an diesen neuen Client senden
-        std::string stat = build_status_json_string();
-        std::string j_stat = "{\"type\":\"status\",\"status\":" + stat + "}";
-        httpd_ws_frame_t f_stat = {};
-        f_stat.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_stat.c_str()));
-        f_stat.len = j_stat.size();
-        f_stat.type = HTTPD_WS_TYPE_TEXT;
-        f_stat.final = true;
-        httpd_ws_send_frame(req, &f_stat);
-
-        std::vector<CachedValue> v(64);
-        size_t n = hp_values_snapshot(v.data(), v.size());
-        std::string j_val = "{\"type\":\"values\",\"values\":[";
-        for (size_t i = 0; i < n; i++) {
-            if (i) j_val += ",";
-            j_val += "{\"label\":" + jstr(v[i].label) +
-                     ",\"value\":" + (v[i].value.empty() ? "null" : jstr(v[i].value)) +
-                     ",\"unit\":" + jstr(v[i].unit) + "}";
-        }
-        j_val += "]}";
-        httpd_ws_frame_t f_val = {};
-        f_val.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_val.c_str()));
-        f_val.len = j_val.size();
-        f_val.type = HTTPD_WS_TYPE_TEXT;
-        f_val.final = true;
-        httpd_ws_send_frame(req, &f_val);
-
         return ESP_OK;
     }
 
+    int fd = httpd_req_to_sockfd(req);
+    http_register_ws_client(fd);
+
     httpd_ws_frame_t ws_pkt = {};
     esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
-    if (ret == ESP_OK && ws_pkt.len > 0) {
-        uint8_t buf[16];
-        ws_pkt.payload = buf;
-        size_t max_len = ws_pkt.len < sizeof(buf) ? ws_pkt.len : sizeof(buf);
-        httpd_ws_recv_frame(req, &ws_pkt, max_len);
+    if (ret == ESP_OK) {
+        if (ws_pkt.len > 0) {
+            uint8_t buf[16];
+            ws_pkt.payload = buf;
+            size_t max_len = ws_pkt.len < sizeof(buf) ? ws_pkt.len : sizeof(buf);
+            httpd_ws_recv_frame(req, &ws_pkt, max_len);
+
+            if (max_len >= 3 && memcmp(buf, "sub", 3) == 0) {
+                // Send status
+                std::string stat = build_status_json_string();
+                std::string j_stat = "{\"type\":\"status\",\"status\":" + stat + "}";
+                httpd_ws_frame_t f_stat = {};
+                f_stat.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_stat.c_str()));
+                f_stat.len = j_stat.size();
+                f_stat.type = HTTPD_WS_TYPE_TEXT;
+                f_stat.final = true;
+                httpd_ws_send_frame(req, &f_stat);
+
+                // Send values
+                std::vector<CachedValue> v(64);
+                size_t n = hp_values_snapshot(v.data(), v.size());
+                std::string j_val = "{\"type\":\"values\",\"values\":[";
+                for (size_t i = 0; i < n; i++) {
+                    if (i) j_val += ",";
+                    j_val += "{\"label\":" + jstr(v[i].label) +
+                             ",\"value\":" + (v[i].value.empty() ? "null" : jstr(v[i].value)) +
+                             ",\"unit\":" + jstr(v[i].unit) + "}";
+                }
+                j_val += "]}";
+                httpd_ws_frame_t f_val = {};
+                f_val.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_val.c_str()));
+                f_val.len = j_val.size();
+                f_val.type = HTTPD_WS_TYPE_TEXT;
+                f_val.final = true;
+                httpd_ws_send_frame(req, &f_val);
+            }
+        }
     }
     return ESP_OK;
 }
