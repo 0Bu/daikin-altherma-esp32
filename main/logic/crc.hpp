@@ -39,6 +39,11 @@ inline int reply_len(uint8_t reg, Protocol proto) {
 // Protocol-I dynamic override applied after 3 bytes are read.
 inline int reply_len_dynamic(const uint8_t* buf) { return buf[2] + 2; }
 
+// Validate that the dynamic reply length is within safe bounds (i.e., does not exceed the buffer capacity).
+inline bool is_valid_dynamic_len(int reply_len, size_t buflen) {
+    return reply_len >= 0 && static_cast<size_t>(reply_len) <= buflen;
+}
+
 // HP "did not understand the request" reply (both protocols).
 inline bool is_error_reply(const uint8_t* buf, int len) {
     return len >= 2 && buf[0] == 0x15 && buf[1] == 0xea;

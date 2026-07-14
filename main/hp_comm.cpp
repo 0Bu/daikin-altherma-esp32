@@ -48,7 +48,13 @@ int hp_query(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen) {
         if (uart_read_bytes(PORT, &ch, 1, pdMS_TO_TICKS(20)) == 1) {
             if (static_cast<size_t>(len) < buflen) buf[len] = ch;
             len++;
-            if (proto == Protocol::I && len == 3) replyLen = reply_len_dynamic(buf);
+            if (proto == Protocol::I && len == 3) {
+                replyLen = reply_len_dynamic(buf);
+                if (!is_valid_dynamic_len(replyLen, buflen)) {
+                    diag_printf("HP invalid dynamic reply len %d (max %u) on reg 0x%02x\n", replyLen, buflen, reg);
+                    return -1;
+                }
+            }
             if (len == 2 && is_error_reply(buf, len)) {
                 diag_printf("HP error 0x15 0xEA on reg 0x%02x (try protocol S?)\n", reg);
                 return -2;
