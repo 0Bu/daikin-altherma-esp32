@@ -1,6 +1,5 @@
-# Target is selected per build: `idf.py set-target <esp32|esp32s3|esp32c3|esp32c6|esp32c5>`.
-# Intentionally NOT pinned here so the one source tree builds for every supported target;
-# CI builds all of them. No BLE is used, so any WiFi-capable ESP32
+# Target is esp32s3.
+# No BLE is used, so any WiFi-capable ESP32-S3
 # with >=4 MB flash is a valid target.
 
 # Flash. 4 MB is the smallest supported part, so it sizes the partition table
@@ -10,11 +9,10 @@ CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
-# Console over native USB-Serial/JTAG — present on esp32s3 / esp32c3 / esp32c6 / esp32c5 (the XIAO
-# ESP32-S3 exposes it on its USB-C port). The classic esp32 has no such peripheral, so the
-# symbol is absent for that target and the console falls back to UART0 automatically. This
-# console is a SEPARATE UART from the heat-pump X10A link (rx_pin/tx_pin), so device logs
-# never collide with the heat-pump serial traffic.
+# Console over native USB-Serial/JTAG — present on esp32s3 (the XIAO
+# ESP32-S3 exposes it on its USB-C port). This console is a SEPARATE UART from the
+# heat-pump X10A link (rx_pin/tx_pin), so device logs never collide with the
+# heat-pump serial traffic.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
 # OTA: roll back automatically if a freshly-flashed image fails to boot/run. The new app
@@ -27,8 +25,7 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 # can no longer push UNSIGNED firmware. No eFuses are burned: reversible, no brick risk, and
 # the web installer / USB-flash path keeps working (the running app verifies the NEXT OTA
 # image; the bootloader does not verify on boot). Trust is trust-on-first-use from the running
-# app's own signature block. Classic esp32 needs chip rev v3.0+ (see sdkconfig.defaults.esp32).
-# Full key lifecycle: docs/SECURITY.md.
+# app's own signature block. Full key lifecycle: docs/SECURITY.md.
 CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=y
 CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
 CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y

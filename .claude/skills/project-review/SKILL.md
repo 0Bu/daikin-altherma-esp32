@@ -17,8 +17,7 @@ A holistic pass before a PR merges. Not a linter — it checks the things that r
    contiguous `std::string`, stream large output). New large allocations (JSON, TLS) size-checked.
 3. **Host tests.** New pure logic is in `main/logic/` with a `CHECK` in `test/test_logic.cpp`,
    and `scripts/run-mock-tests.sh` passes. No decode/config logic buried in a device-only `.cpp`.
-4. **Multi-target.** Any pin default, sdkconfig, or partition change considered for all five
-   targets (esp32/s3/c3/c6/c5). The classic esp32 uses UART0 console + needs ECO3 for signed OTA.
+4. **Target.** Any pin default, sdkconfig, or partition change verified for the esp32s3 target.
 5. **Generated data.** Generated `def/*` came from `tools/catalog/` (catalog decode), not hand-edits; and
    value/CRC/converter changes are verified against known-good reference outputs.
 

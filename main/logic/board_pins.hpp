@@ -19,21 +19,9 @@ struct BoardPins {
     int        count;
 };
 
-// Usable X10A GPIOs for a CONFIG_IDF_TARGET string. Unknown/null target → the reference board (s3).
-inline BoardPins board_pins(const char* target) {
+// Usable X10A GPIOs for the reference board (s3).
+inline BoardPins board_pins(const char* /*target*/ = nullptr) {
     static const int esp32s3[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 43, 44};                             // XIAO ESP32-S3 pads (D0..D10; D6=43/TX, D7=44/RX)
-    static const int esp32c3[] = {2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 21};                            // XIAO ESP32-C3 pads (D6=21/TX, D7=20/RX)
-    static const int esp32c6[] = {0, 1, 2, 16, 17, 18, 19, 20, 21, 22, 23};                       // XIAO ESP32-C6 pads (D6=16/TX, D7=17/RX)
-    static const int esp32c5[] = {0, 1, 3, 4, 5, 6, 10, 11};                                      // ESP32-C5 conservative safe set (default 4/5)
-    static const int esp32[]   = {4, 5, 13, 14, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33};  // classic ESP32 DevKit safe GPIOs (default 16/17)
-
-    if (target) {
-        if (!std::strcmp(target, "esp32s3")) return {esp32s3, (int)(sizeof(esp32s3) / sizeof(int))};
-        if (!std::strcmp(target, "esp32c3")) return {esp32c3, (int)(sizeof(esp32c3) / sizeof(int))};
-        if (!std::strcmp(target, "esp32c6")) return {esp32c6, (int)(sizeof(esp32c6) / sizeof(int))};
-        if (!std::strcmp(target, "esp32c5")) return {esp32c5, (int)(sizeof(esp32c5) / sizeof(int))};
-        if (!std::strcmp(target, "esp32"))   return {esp32,   (int)(sizeof(esp32) / sizeof(int))};
-    }
     return {esp32s3, (int)(sizeof(esp32s3) / sizeof(int))};
 }
 

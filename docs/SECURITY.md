@@ -51,9 +51,7 @@ compromised update host (or its GitHub Pages source) cannot push unsigned or tam
   has run healthily for ~90 s (`ota_update.cpp`, `logic/health_gate.hpp`), so a boots-but-crashes
   image is reverted.
 
-The classic ESP32 needs chip revision **v3.0+ (ECO3)** for the V2 RSA scheme
-(`CONFIG_ESP32_REV_MIN_3` in `sdkconfig.defaults.esp32`); s3/c3/c6/c5 support it at their default min
-revision.
+The ESP32-S3 supports the V2 RSA scheme at its default minimum revision.
 
 ## Boot recovery (anti-brick)
 

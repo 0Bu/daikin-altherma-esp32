@@ -62,7 +62,7 @@ jobs:
           if [ -z "$before" ] || ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
             changed=yes
           elif git diff --name-only "$before" "${{ github.sha }}" \
-               | grep -qE '^(main/|CMakeLists\.txt$|sdkconfig\.defaults(\.[a-z0-9]+)?$|partitions\.csv$|version\.txt$|\.github/workflows/build\.yml$|scripts/ci-build-all\.sh$|scripts/build-pages\.sh$)'; then
+               | grep -qE '^(main/|CMakeLists\.txt$|sdkconfig\.defaults$|partitions\.csv$|version\.txt$|\.github/workflows/build\.yml$|scripts/ci-build-all\.sh$|scripts/build-pages\.sh$)'; then
             changed=yes
           else
             changed=no
@@ -110,14 +110,13 @@ jobs:
           chmod 600 ota_signing_key.pem
           echo "signed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Build all targets (ESP-IDF v6.0.2)
+      - name: Build target (ESP-IDF v6.0.2)
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v6.0.2
-          target: esp32
-          # ci-build-all.sh set-targets each of esp32 / esp32s3 / esp32c3 / esp32c6 / esp32c5 in turn and
-          # stages per-target signed + merged bins + manifest.json into dist/. ONE source tree ->
-          # N images; the installer auto-selects by chip; OTA pulls daikin-altherma-esp32<sfx>.bin.
+          target: esp32s3
+          # ci-build-all.sh builds esp32s3 target and stages signed + merged bins + manifest.json
+          # into dist/. OTA pulls daikin-altherma-esp32.bin.
           command: ./scripts/ci-build-all.sh "${{ steps.version.outputs.version }}"
 
       - name: Shred OTA signing key

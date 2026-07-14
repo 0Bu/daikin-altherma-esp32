@@ -11,11 +11,10 @@ config survive). Docker builds, host `esptool` flashes (Docker Desktop has no US
 
 ## Steps
 
-1. **Confirm the target and port.** Ask the chip (`esp32`/`esp32s3`/`esp32c3`/`esp32c6`/`esp32c5`) if
-   unclear; the reference board is the XIAO ESP32-S3. Detect the port: `ls /dev/cu.usbmodem*`.
+1. **Confirm the port.** The target chip is always `esp32s3` (reference board: XIAO ESP32-S3). Detect the port: `ls /dev/cu.usbmodem*`.
 2. **Build** via the CI-pinned image:
    ```bash
-   scripts/idf-docker.sh sh -c 'if [ -f sdkconfig ]; then idf.py build; else idf.py set-target <target> build; fi'
+   scripts/idf-docker.sh sh -c 'if [ -f sdkconfig ]; then idf.py build; else idf.py set-target esp32s3 build; fi'
    ```
 3. **Sign the app — REQUIRED, do not skip.** This build config uses the Secure Boot v2 signature
    scheme (`CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT`), so an **unsigned** image
@@ -38,7 +37,7 @@ config survive). Docker builds, host `esptool` flashes (Docker Desktop has no US
    ```
 5. **Flash** from the host (preserves nvs — `@flash_args` skips `nvs@0x9000`):
    ```bash
-   cd build && esptool --chip <target> -p <port> write_flash "@flash_args"
+   cd build && esptool --chip esp32s3 -p <port> write_flash "@flash_args"
    ```
 6. **Verify.** After reboot, `curl http://daikin-altherma-esp32.local/status | jq .version` (or read
    the serial log: `screen <port> 115200`, exit `Ctrl-A K`). Confirm WiFi/MQTT/hp status.
@@ -49,5 +48,5 @@ config survive). Docker builds, host `esptool` flashes (Docker Desktop has no US
   The step-4 guard exists so this never happens in the first place. Boot-recovery model +
   auto-rollback details: [docs/SECURITY.md](../../../docs/SECURITY.md) → Boot recovery.
 - First flash of a fresh board erases NVS → set up WiFi via the `daikin-altherma-esp32-setup` portal.
-- A full-erase recovery: `esptool --chip <target> -p <port> erase_flash` then reflash.
+- A full-erase recovery: `esptool --chip esp32s3 -p <port> erase_flash` then reflash.
 - This skill does NOT merge/release — that's the `ship` skill. It works on the local tree only.

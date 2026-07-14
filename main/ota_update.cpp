@@ -15,17 +15,7 @@ namespace daik {
 static OtaStatus s_status;
 
 const char* ota_img_suffix() {
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
-    return "-s3";
-#elif defined(CONFIG_IDF_TARGET_ESP32C3)
-    return "-c3";
-#elif defined(CONFIG_IDF_TARGET_ESP32C6)
-    return "-c6";
-#elif defined(CONFIG_IDF_TARGET_ESP32C5)
-    return "-c5";
-#else
-    return "";   // classic esp32
-#endif
+    return "";   // esp32s3 is the only target, no suffix needed
 }
 
 void ota_check_async(int64_t /*browser_epoch_ms*/) {
