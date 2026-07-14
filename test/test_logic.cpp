@@ -60,6 +60,26 @@ static void test_crc() {
     CHECK(crc_ok(frame, 4));
     frame[3] ^= 0xff;
     CHECK(!crc_ok(frame, 4));
+
+    // --- Dynamic length and safety bounds checks (Vulnerability 2.1) ---
+    // Test that reply_len_dynamic parses the length byte at index 2 correctly (buf[2] + 2).
+    uint8_t d_buf[] = {0x40, 0x00, 10}; // buf[2] = 10 -> reply length should be 12
+    CHECK(reply_len_dynamic(d_buf) == 12);
+
+    // Test the safety boundary check (is_valid_dynamic_len) with a 64-byte buffer:
+    const size_t test_buflen = 64;
+    // 1. Valid cases: length within buffer capacity
+    CHECK(is_valid_dynamic_len(12, test_buflen) == true);
+    CHECK(is_valid_dynamic_len(64, test_buflen) == true);
+    CHECK(is_valid_dynamic_len(0, test_buflen) == true);
+
+    // 2. Provoke and test out-of-bounds cases:
+    // Length exactly 1 byte over capacity (should be rejected)
+    CHECK(is_valid_dynamic_len(65, test_buflen) == false);
+    // Extreme overrun case, e.g. 257 bytes due to a 0xFF corrupt length byte (should be rejected)
+    CHECK(is_valid_dynamic_len(257, test_buflen) == false);
+    // Negative length case (should be rejected)
+    CHECK(is_valid_dynamic_len(-1, test_buflen) == false);
 }
 
 static void test_registers() {
