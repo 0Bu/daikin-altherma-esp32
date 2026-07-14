@@ -5,6 +5,7 @@
 #include "http_handlers.hpp"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include <unistd.h>
 
 namespace daik {
 
@@ -12,6 +13,7 @@ static httpd_handle_t s_server = nullptr;
 
 static void ws_close_fn(httpd_handle_t hd, int sockfd) {
     http_unregister_ws_client(sockfd);
+    close(sockfd);
 }
 
 void http_start() {
