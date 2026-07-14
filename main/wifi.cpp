@@ -149,6 +149,7 @@ static bool gateway_reachable() {
     // harmless because s_wd is persistent (see above).
     xSemaphoreTake(s_wd.done, pdMS_TO_TICKS(kWdPingCount * (kWdPingTimeoutMs + 250) + 2000));
     esp_ping_stop(hdl);
+    vTaskDelay(pdMS_TO_TICKS(100)); // allow the ping task context to safely exit before deletion
     esp_ping_delete_session(hdl);
 
     bool ok = s_wd.received > 0;
