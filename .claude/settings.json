@@ -61,20 +61,7 @@
             "statusMessage": "Checking partition-table safety…"
           }
         ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/report-capabilities.sh\"",
-            "statusMessage": "Detecting toolchain capabilities…"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
+      },
       {
         "matcher": "Bash",
         "hooks": [
@@ -92,6 +79,17 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-project-review.sh\"",
             "statusMessage": "Checking project-review gate…"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/report-capabilities.sh\"",
+            "statusMessage": "Detecting toolchain capabilities…"
           }
         ]
       }
