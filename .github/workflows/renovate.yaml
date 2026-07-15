@@ -1,4 +1,11 @@
 name: Renovate
+
+# main is kept strictly LINEAR and every commit GPG-signed (see .github/renovate.json).
+# Automerge squashes (linear + GitHub-signed) — never a merge commit. Do NOT re-linearize main
+# with `git rebase --root` + force-push while PRs are open: it rewrites every SHA, leaving open
+# PRs with a disjoint history, and GitHub then auto-closes them (Renovate marks the update ignored).
+# A from-root rewrite is a one-time historical re-sign, not a routine step; run it only with no
+# open PRs, or close/merge them first.
 on:
   schedule:
     - cron: '0 5 * * *'
