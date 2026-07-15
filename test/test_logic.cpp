@@ -145,8 +145,8 @@ static void test_convert() {
     CHECK(std::string(convert(om, m1).text) == "Heating");
     const uint8_t m5[] = {0x05};
     const uint8_t m6[] = {0x06};
-    CHECK(std::string(convert(om, m5).text) == "Auto Cool");   // indices 5/6 match upstream r217
-    CHECK(std::string(convert(om, m6).text) == "Auto Heat");   // (were swapped)
+    CHECK(std::string(convert(om, m5).text) == "Auto Cool");   // mode index 5 = Auto Cool
+    CHECK(std::string(convert(om, m6).text) == "Auto Heat");   // mode index 6 = Auto Heat
     ValueDef im{0x60, 2, 315, 1, -1, "im"};
     const uint8_t im10[] = {0x10};                     // hi nibble 1 -> Heating
     CHECK(std::string(convert(im, im10).text) == "Heating");
@@ -204,7 +204,7 @@ static void test_convert() {
     CHECK(display_decimals(152) == 0);
     CHECK(display_decimals(217) == 0);
 
-    // Catalog-wide regression guard for the catalog "Water pressure" quirk: the hydronic water
+    // Catalog-wide regression guard for the "Water pressure" quirk: the hydronic water
     // pressure at reg 0x62 offset 11 must decode as raw bar (conv 105, type 2) in EVERY profile —
     // never the refrigerant saturation-temp curve (conv 405) the catalog mis-assigned on the 4-8kW /
     // E-series models. (Legit conv-405 refrigerant "(T)" rows live at other offsets, e.g. 0x62[15].)
