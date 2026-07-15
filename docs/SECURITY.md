@@ -35,6 +35,12 @@ and the OTA-signing / key lifecycle.
   bridge requires an `mqtts://` broker URI and verifies the broker against the mbedTLS certificate
   bundle; a non-TLS URI with credentials is **refused** (the reason shows in `/status.mqtt`) rather
   than falling back to plaintext. A credential-free broker may be plaintext on the trusted LAN.
+- **Syslog forwarding is cleartext, unauthenticated UDP** — opt-in and off by default (empty
+  `syslog_host`). When enabled, every diag-log line (WiFi/MQTT/X10A state, timeouts, reset reasons)
+  is sent as a plaintext RFC 5424 datagram to the configured host; there is no TLS option, unlike
+  MQTT. The diag log carries **no credentials** (no WiFi/MQTT passwords or TLS material pass through
+  it), so this is an operational-metadata flow, not a secret-disclosure one — but like the rest of
+  the API it assumes the trusted LAN. Don't point it at an untrusted collector or across the internet.
 
 ## Credential storage
 

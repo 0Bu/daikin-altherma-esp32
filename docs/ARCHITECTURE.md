@@ -42,7 +42,7 @@ nvs_storage.cpp     → thin NVS helpers (namespaces, blobs, migration)
 http_server.cpp     → esp_http_server :80, wildcard dispatch + handle_all OOM try/catch (503)
 http_status.cpp     → GET / (web UI), /status, /values, /models, /diag, /scan, /coredump, and the
                       /events WebSocket (live status/values push)
-http_config.cpp     → POST /set_wifi, /set_mqtt, /set_hp, /detect
+http_config.cpp     → POST /set_wifi, /set_mqtt, /set_syslog, /set_hp, /detect
 http_ota.cpp        → /ota/check|update|status
 mcp_server.cpp      → /mcp — read-only MCP tools (get_status, get_hp_values) for AI agents — PLANNED
                       (route exists; returns a JSON-RPC "not implemented" error for now)
@@ -51,7 +51,15 @@ captive_dns.cpp     → UDP:53 catch-all (every name → 192.168.4.1) so the set
 mqtt_ha.cpp/.hpp    → Home Assistant MQTT-Discovery bridge (streamed discovery), read-only
 ota_update.cpp      → OTA: rollback health gate (implemented); pull check/download + downgrade
                       gate via esp_https_ota (TODO stubs — see ota_update.hpp)
-diag_log.cpp        → in-RAM console ring served by GET /diag (static .bss buffer)
+diag_log.cpp        → in-RAM console ring served by GET /diag (static .bss buffer); each line is
+                      also handed to syslog_send() for optional off-device forwarding
+syslog.cpp          → optional syslog UDP client (RFC 5424, off when syslog_host is empty). A task
+                      DNS-resolves the host and forwards each diag line as one UDP datagram, gated on
+                      DNS only; an ARP(local)/ICMP reachability probe is ADVISORY (feeds
+                      /status.syslog.reachable, never gates delivery — syslog is best-effort UDP and a
+                      collector may firewall ICMP). File-scope ping-control (like wifi.cpp s_wd) keeps
+                      the async esp_ping callback from a use-after-free. Self-loop-guarded (drops
+                      "syslog:" lines); syslog_status() feeds /status
 www/                → web UI sources: index.html + style.css + app.js, spliced into ONE
                      self-contained page at build time (inline_assets.cmake) and served gzipped;
                      setup.html is the captive-portal page (gzipped separately)
@@ -358,6 +366,11 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
   app does not re-provision WiFi; the dashboard shows the live link read-only (SSID + IP + RSSI signal
   bars from `/status.wifi`, populated by `wifi_info()`).
 - **MQTT** → `/set_mqtt` (edited from a dashboard modal off the MQTT card).
+- **Syslog** → `/set_syslog` (edited from a dashboard modal off the Syslog card). Save only
+  validates the port range (no request-path network block); an empty host disables forwarding. DNS
+  resolution and the advisory reachability probe run in the syslog task and surface on the card via
+  `/status.syslog` (`resolved`/`reachable`/`error`) — "Enabled", "…host not answering ping", or "DNS
+  lookup failed" — after the reboot.
 - **Heat pump** → `/set_hp`: fully automatic. The model is **auto-detected** (see Auto-detection) and
   shown read-only on the dashboard **Model** card. The dashboard **ESP32** card shows the X10A link +
   protocol and the **RX/TX pins**, which are also auto-detected: **read-only** while the bus answers,

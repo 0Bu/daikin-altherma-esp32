@@ -104,7 +104,8 @@ serves only this page.)
 
 ### 5.1 MQTT edit  (modal, from the dashboard MQTT card)
 The dashboard's **MQTT** status card (§5.3) carries a **pencil** in its header; tapping it opens a
-centred **modal** over a dimmed dashboard (the only overlay in the app). One form:
+centred **modal** over a dimmed dashboard. MQTT and Syslog (§5.3) are the two status cards edited
+this way, and they share the identical overlay pattern. One form:
 - **MQTT**: broker (`host:port`, or `mqtts://host:8883` for TLS), username, password, TLS note
   ("credentials require an mqtts:// URL"). **Save** → `POST /set_mqtt` (reboots to apply, then closes
   back to the dashboard); **Cancel** (and the backdrop / `Esc`) dismiss without writing. An empty
@@ -149,7 +150,7 @@ Body, ordered:
 1. **Status hero** (navy band): operation mode (Heating / Cooling / DHW / Standby / Off) as the
    headline, with fault state. Colour: `--ok` running, `--warn`/`--err` on fault; grey when no data.
    Fault text and the last-poll age surface in the hero sub-line.
-2. **Status cards** — four cards styled exactly like the value groups (§6), first in the same grid:
+2. **Status cards** — five cards styled exactly like the value groups (§6), first in the same grid:
    - **ESP32** — the board itself: chip (`platform`), **firmware version** (a tappable row that checks
      for an OTA update, §5.4), uptime (`uptime_s`), the heat-pump link (Online/Offline) and X10A
      protocol, and the **RX/TX pins** — read-only when detected, else a usable-GPIO dropdown (§5.2).
@@ -158,7 +159,13 @@ Body, ordered:
      `wifi{ssid,ip,rssi,connected}`. Display-only; WiFi is not re-provisionable from the app (§5.0).
    - **MQTT** — connection status, broker, TLS on/off, and Home-Assistant discovery state; from
      `mqtt{configured,connected,tls,broker}`. A **pencil** in the card header opens the MQTT edit
-     modal (§5.1) — the only status card edited via a modal.
+     modal (§5.1) — one of the two status cards edited via a modal (the other is Syslog).
+   - **Syslog** — off-device log forwarding status: **Disabled** when no host is set, else the
+     server (`host:port`) and a state badge — **Enabled** once DNS resolves (delivery is best-effort
+     UDP, gated on resolution only), warn-flagged **"host not answering ping"** when the advisory
+     reachability probe is silent (still forwarding), or a **DNS error** — from
+     `syslog{configured,resolved,reachable,host,port,error}`. A **pencil** opens the Syslog edit modal
+     (§5.1), which posts `host:port` to `/set_syslog`.
    - **ESP32** — the board's X10A bus: chip, firmware, uptime, **Heat-pump link** (Online/Offline,
      honest), **Protocol** (shown only while live), and the **RX/TX pins** (read-only when the bus
      answers, else a `pins_avail` dropdown). From `hp{proto,rx,tx,connected}` + `pins_avail[]`.

@@ -18,6 +18,8 @@ struct Config {
     std::string mqtt_uri;          // "" = MQTT disabled
     std::string mqtt_user;
     std::string mqtt_pass;
+    std::string syslog_host;       // "" = Syslog disabled
+    int         syslog_port = 514;
     std::string profile  = "auto";  // "auto" = detect on next poll cycle; else a concrete profile id
     // X10A link cache — PERSISTED (config.cpp): the wiring/protocol is boot-invariant, cached and
     // tried first by the detection sweep, re-persisted on change (hp_poll.cpp poll_detect).
@@ -48,6 +50,7 @@ inline bool validate(const Config& c, std::string& reason, int max_gpio = 48) {
     if (!gpio_in_range(c.tx_pin, max_gpio)) { reason = "tx_pin out of range"; return false; }
     if (c.rx_pin == c.tx_pin)     { reason = "rx_pin and tx_pin must differ"; return false; }
     if (c.proto != Protocol::I && c.proto != Protocol::S) { reason = "protocol must be I or S"; return false; }
+    if (!c.syslog_host.empty() && (c.syslog_port < 1 || c.syslog_port > 65535)) { reason = "syslog_port out of range"; return false; }
     return true;
 }
 

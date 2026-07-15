@@ -239,6 +239,15 @@ static void test_config_model() {
     c.tx_pin = 43;
     CHECK(validate(c, why));
 
+    c.syslog_host = "1.2.3.4";
+    c.syslog_port = 0;                                 // syslog port out of range
+    CHECK(!validate(c, why));
+    c.syslog_port = 65536;                             // syslog port out of range
+    CHECK(!validate(c, why));
+    c.syslog_port = 514;                               // valid syslog port
+    CHECK(validate(c, why));
+    c.syslog_host = "";                                // reset to default
+
     // Target-aware GPIO range: the ESP32-S3 default 44/43 is valid on a 48-GPIO target but must be
     // rejected on an ESP32-C3 (max GPIO 21), where those pins physically don't exist.
     CHECK(validate(c, why, 48));

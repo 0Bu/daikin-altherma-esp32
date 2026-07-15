@@ -1,6 +1,7 @@
 // In-RAM diagnostic ring served by GET /diag. Static .bss buffer, no heap growth. See
 // diag_log.hpp.
 #include "diag_log.hpp"
+#include "syslog.hpp"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <cstdarg>
@@ -46,6 +47,7 @@ void diag_printf(const char* fmt, ...) {
     if (s_mtx) xSemaphoreTake(s_mtx, portMAX_DELAY);
     append(line, total);
     if (s_mtx) xSemaphoreGive(s_mtx);
+    syslog_send(line, total);
     ESP_LOGI("diag", "%.*s", total, line);
 }
 

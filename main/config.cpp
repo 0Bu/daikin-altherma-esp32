@@ -44,6 +44,8 @@ void config_load() {
     c.mqtt_uri  = nvs_get_str("mqtt_uri", CONFIG_DAIKIN_MQTT_BROKER_URI);
     c.mqtt_user = nvs_get_str("mqtt_user", CONFIG_DAIKIN_MQTT_USERNAME);
     c.mqtt_pass = nvs_get_str("mqtt_pass", CONFIG_DAIKIN_MQTT_PASSWORD);
+    c.syslog_host = nvs_get_str("syslog_host", CONFIG_DAIKIN_SYSLOG_HOST);
+    c.syslog_port = nvs_get_i32("syslog_port", CONFIG_DAIKIN_SYSLOG_PORT);
 
     // Persisted X10A LINK cache: RX/TX pins + protocol. The wiring is physically boot-invariant, so
     // it is cached (fallback = compile-time Kconfig default) and tried FIRST by the detection sweep;
@@ -70,6 +72,8 @@ bool config_save(const Config& c) {
     ok &= nvs_set_str("mqtt_uri", c.mqtt_uri);
     ok &= nvs_set_str("mqtt_user", c.mqtt_user);
     ok &= nvs_set_str("mqtt_pass", c.mqtt_pass);
+    ok &= nvs_set_str("syslog_host", c.syslog_host);
+    ok &= nvs_set_i32("syslog_port", c.syslog_port);
     ok &= nvs_set_i32("rx_pin", c.rx_pin);
     ok &= nvs_set_i32("tx_pin", c.tx_pin);
     ok &= nvs_set_str("proto", std::string(1, static_cast<char>(c.proto)));

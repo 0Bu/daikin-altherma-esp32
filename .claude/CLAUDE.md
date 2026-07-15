@@ -100,7 +100,7 @@ hp_poll.cpp     poll engine task: (auto-detect if profile=="auto") profile regis
 http_server.cpp esp_http_server :80; concerns register their own routes (http_handlers.hpp)
 http_status.cpp GET / (setup.html in AP mode, else gzip UI) /status /values /models /diag /scan
                 /coredump + /events (WebSocket live push) + captive catch-all
-http_config.cpp POST /set_wifi /set_mqtt /set_hp /detect
+http_config.cpp POST /set_wifi /set_mqtt /set_syslog /set_hp /detect
 http_ota.cpp    /ota/check|update|status
 mcp_server.cpp  /mcp (read-only MCP tools; TODO)
 mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE shared grouped-JSON
@@ -115,7 +115,14 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 dump). Every publish funnels through one mqtt_publish() wrapper so mqtt.count/mqtt.fails
                 cover every topic, not just state.
 ota_update.cpp  pull-based signed OTA + rollback health gate (check/download: TODO)
-diag_log.cpp    in-RAM diag ring served by GET /diag
+diag_log.cpp    in-RAM diag ring served by GET /diag; each line is also forwarded to syslog_send()
+syslog.cpp      optional syslog UDP client (RFC 5424): a task DNS-resolves the configured host, then
+                forwards every diag_printf() line as one UDP datagram; disabled when syslog_host is
+                empty. Delivery is gated on DNS ONLY — an ARP(local)/ICMP reachability probe is
+                ADVISORY (feeds /status.syslog.reachable, never gates sends: syslog is best-effort UDP
+                and a healthy collector may firewall ICMP). File-scope ping-control (like wifi.cpp's
+                s_wd) so the async esp_ping callback can't use-after-free. syslog_status() feeds
+                /status. Self-loop-guarded (drops "syslog:" lines).
 diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + core-dump SUMMARY
                 (esp_core_dump_get_summary: crashed task/PC/backtrace/app-elf-sha) into a cached
                 CrashInfo (logic/crashinfo.hpp); read by /status.last_crash + the MQTT crash topic —
@@ -143,7 +150,7 @@ www/            web UI sources (index.html + style.css + app.js -> one gzipped p
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `wifi_ssid`/`wifi_pass`, `mqtt_uri`/`mqtt_user`/`mqtt_pass`, and the X10A **link cache** `rx_pin`/`tx_pin`/`proto`. (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
+| `daik_cfg` | `wifi_ssid`/`wifi_pass`, `mqtt_uri`/`mqtt_user`/`mqtt_pass`, `syslog_host`/`syslog_port` (empty host = off), and the X10A **link cache** `rx_pin`/`tx_pin`/`proto`. (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -161,7 +168,8 @@ offset/size stable across versions.
 GET  /            embedded web UI (gzipped into the app binary)
 GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity — matches a core dump
                   to its .elf), pins_avail[] (per-target usable X10A GPIOs for the RX/TX picker —
-                  logic/board_pins.hpp), wifi, mqtt, hp{proto,rx,tx,connected,
+                  logic/board_pins.hpp), wifi, mqtt, syslog{configured,resolved,reachable,host,port,error},
+                  hp{proto,rx,tx,connected,
                   last_ok_s,registers,values,crc_err,timeout_err}, profile{id},
                   last_crash (null on a clean boot, else {reason,reason_code,fault,coredump,task,pc,
                   backtrace[],corrupted,elf_sha256} from the boot-time cache — drives the crash
@@ -186,6 +194,9 @@ GET  /coredump[?clear=1]   stream the flash core-dump image (chunked octet-strea
                   UI surfaces a crash banner + one-click download when /status.last_crash is set.
 POST /set_wifi    {ssid,pass} -> persist + reboot
 POST /set_mqtt    {broker,user,pass} -> persist + reboot ("" disables)
+POST /set_syslog  {host,port} -> validate port range -> persist + reboot. Empty host disables syslog.
+                  DNS/reachability are NOT checked here (no request-path network block); they resolve
+                  in the syslog task and surface via /status.syslog {resolved,reachable,error}.
 POST /set_hp      {profile,rx,tx} -> validate + apply live (no reboot). rx/tx PERSIST (the physical
                   pin cache — a manual override survives reboot); profile is session-only. The UI
                   always sends profile="auto" (fully automatic — no manual model pick); a concrete id

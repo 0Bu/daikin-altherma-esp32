@@ -14,6 +14,7 @@
 #include "mqtt_ha.hpp"
 #include "ota_update.hpp"
 #include "wifi.hpp"
+#include "syslog.hpp"
 
 #include "esp_log.h"
 #include "esp_app_desc.h"
@@ -78,6 +79,13 @@ static std::string build_status_json_string() {
          ",\"connected\":" + (m.connected ? "true" : "false") +
          ",\"tls\":" + (m.tls ? "true" : "false") +
          ",\"broker\":" + jstr(m.broker) + (m.error.empty() ? "" : ",\"error\":" + jstr(m.error)) + "},";
+    SyslogStatus sy = syslog_status();
+    j += "\"syslog\":{\"configured\":" + std::string(sy.configured ? "true" : "false") +
+         ",\"resolved\":" + (sy.resolved ? "true" : "false") +
+         ",\"reachable\":" + (sy.reachable ? "true" : "false") +
+         ",\"host\":" + jstr(sy.host) +
+         ",\"port\":" + std::to_string(sy.port) +
+         (sy.error.empty() ? "" : ",\"error\":" + jstr(sy.error)) + "},";
     j += "\"hp\":{\"proto\":" + jstr(std::string(1, static_cast<char>(c.proto))) +
          ",\"rx\":" + std::to_string(c.rx_pin) + ",\"tx\":" + std::to_string(c.tx_pin) +
          ",\"connected\":" + (hp.connected ? "true" : "false") +
