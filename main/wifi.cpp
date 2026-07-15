@@ -248,15 +248,6 @@ bool wifi_start_sta() {
     // AP supports it (build: CONFIG_ESP_WIFI_ENABLE_SAE_H2E); H&P stays the fallback for older APs.
     wc.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
 
-#ifdef CONFIG_DAIKIN_WIFI_PREFER_5G
-    // ESP32-C5 (dual-band) opt-in: when the SSID is band-steered onto both 2.4 and 5 GHz, give 5 GHz
-    // APs a fixed RSSI bonus so the BY_SIGNAL sort above prefers the (usually cleaner) 5 GHz radio.
-    // Band mode stays AUTO, so a unit out of 5 GHz range still falls back to 2.4 GHz — no reconnect
-    // trap. Gated behind CONFIG_DAIKIN_WIFI_PREFER_5G (Kconfig depends on SOC_WIFI_SUPPORT_5G, so the
-    // field and this block exist only on the C5). 10 dB: prefer 5 GHz unless it is >~10 dB weaker.
-    wc.sta.threshold.rssi_5g_adjustment = 10;
-#endif
-
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
     ESP_ERROR_CHECK(esp_wifi_start());

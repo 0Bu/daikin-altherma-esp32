@@ -1,15 +1,15 @@
 #pragma once
-// Per-target list of GPIOs usable for the X10A UART wiring — the pins actually broken out (and safe)
-// on the reference board for each supported chip. Drives the dashboard ESP32 card's RX/TX pin
-// *dropdown*, which the UI shows only when auto-detection has NOT locked a working pin pair; the user
-// then picks from real, wire-able pins. Power pads (GND/VCC) and not-broken-out GPIOs never appear
-// (e.g. GPIO47 on the XIAO ESP32-S3), and pins that don't exist on the chip can't be listed. Once the
-// bus answers on a pair, the UI shows the pins read-only instead — no picking needed.
+// List of GPIOs usable for the X10A UART wiring — the pins actually broken out (and safe) on the
+// reference board. Drives the dashboard ESP32 card's RX/TX pin *dropdown*, which the UI shows only
+// when auto-detection has NOT locked a working pin pair; the user then picks from real, wire-able
+// pins. Power pads (GND/VCC) and not-broken-out GPIOs never appear (e.g. GPIO47 on the XIAO
+// ESP32-S3), and pins that don't exist on the chip can't be listed. Once the bus answers on a pair,
+// the UI shows the pins read-only instead — no picking needed.
 //
-// esp32s3 is the Seeed XIAO ESP32-S3 (the project's reference board): pads D0..D10 = GPIO 1..9,43,44;
-// GPIO16/17 and 47/48 are NOT broken out, so they are absent. c3/c6 are the matching Seeed XIAO
-// boards; esp32 is a classic DevKit safe-GPIO set; c5 is a conservative default. Pure header (no IDF),
-// so it's host-tested in test/test_logic.cpp.
+// The firmware targets esp32s3 only: the Seeed XIAO ESP32-S3 (the project's reference board), pads
+// D0..D10 = GPIO 1..9,43,44; GPIO16/17 and 47/48 are NOT broken out, so they are absent. The
+// `target` argument is accepted (and ignored) so callers need not special-case it. Pure header (no
+// IDF), so it's host-tested in test/test_logic.cpp.
 #include <cstring>
 
 namespace daik {

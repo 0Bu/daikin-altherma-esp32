@@ -10,6 +10,13 @@ and the OTA-signing / key lifecycle.
   meant to sit on a trusted home LAN. Anyone who can reach `http://daikin-altherma-esp32.local` can read
   values and change the configuration. **Never expose it to the internet.** If you need access
   control, front it with a reverse proxy or put it on an isolated VLAN.
+- **`GET /coredump` streams a raw crash memory image.** It exists for post-crash diagnostics and is
+  subject to the same no-auth trust boundary as the rest of the API — but a core dump is more
+  sensitive than the other endpoints: it is an ELF snapshot of task stacks/RAM that **can contain
+  secrets** (the WiFi/MQTT passwords and TLS session material that pass through RAM). On the trusted
+  LAN this is acceptable; anywhere less trusted it is a remote credential-disclosure vector with no
+  physical access needed. A dump is written only when the firmware actually crashes; erase it with
+  `GET /coredump?clear=1` once retrieved so a stale image isn't left readable.
 - **The heat-pump link is read-only.** The firmware only polls X10A registers; the X10A protocol
   has no write command, so the firmware cannot change the heat pump's settings or actuate it in any
   way. There are no control outputs.

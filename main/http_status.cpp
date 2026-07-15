@@ -25,6 +25,7 @@
 #include "http_server.hpp"
 #include "diag_log.hpp"
 #include <algorithm>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -284,93 +285,77 @@ static void ws_transfer_complete(esp_err_t err, int socket, void *arg) {
     delete ctx;
 }
 
-void ws_broadcast_values() {
-    httpd_handle_t server = http_server_handle();
-    if (!server || !s_ws_mtx) return;
-
-    bool any_clients = false;
+static bool ws_any_clients() {
+    bool any = false;
     xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
     for (int i = 0; i < 8; i++) {
-        if (s_ws_fds[i] != -1) {
-            any_clients = true;
-            break;
-        }
+        if (s_ws_fds[i] != -1) { any = true; break; }
     }
     xSemaphoreGive(s_ws_mtx);
+    return any;
+}
 
-    if (!any_clients) return;
-
-    const size_t cap = def::lookup(config().profile.c_str()).count;
-    std::vector<CachedValue> v(cap ? cap : 1);
-    size_t n = hp_values_snapshot(v.data(), v.size());
-    std::string j = "{\"type\":\"values\",\"values\":[";
-    for (size_t i = 0; i < n; i++) {
-        if (i) j += ",";
-        j += "{\"label\":" + jstr(v[i].label) +
-             ",\"value\":" + (v[i].value.empty() ? "null" : jstr(v[i].value)) +
-             ",\"unit\":" + jstr(v[i].unit) + "}";
-    }
-    j += "]}";
-
+// Queue an async copy of `j` to every registered WS client. These broadcasts run in the poll task
+// (hp_poll.cpp), which has NO OOM guard above it — so, unlike an HTTP handler, an uncaught
+// std::bad_alloc here would abort the whole device. Allocate each per-client send buffer with
+// nothrow-new and a guarded copy, and just skip any client we cannot allocate for this tick.
+static void ws_send_to_all(const std::string& j) {
+    httpd_handle_t server = http_server_handle();
+    if (!server || !s_ws_mtx) return;
     xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
     for (int i = 0; i < 8; i++) {
-        if (s_ws_fds[i] != -1) {
-            WsPacketContext* ctx = new WsPacketContext();
+        if (s_ws_fds[i] == -1) continue;
+        WsPacketContext* ctx = new (std::nothrow) WsPacketContext();
+        if (!ctx) continue;
+        try {
             ctx->payload = j;
-            
-            memset(&ctx->frame, 0, sizeof(httpd_ws_frame_t));
-            ctx->frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(ctx->payload.c_str()));
-            ctx->frame.len = ctx->payload.size();
-            ctx->frame.type = HTTPD_WS_TYPE_TEXT;
-            ctx->frame.final = true;
-
-            esp_err_t err = httpd_ws_send_data_async(server, s_ws_fds[i], &ctx->frame, ws_transfer_complete, ctx);
-            if (err != ESP_OK) {
-                delete ctx;
-            }
+        } catch (const std::bad_alloc&) {
+            delete ctx;
+            continue;
         }
+        memset(&ctx->frame, 0, sizeof(httpd_ws_frame_t));
+        ctx->frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(ctx->payload.c_str()));
+        ctx->frame.len = ctx->payload.size();
+        ctx->frame.type = HTTPD_WS_TYPE_TEXT;
+        ctx->frame.final = true;
+        esp_err_t err = httpd_ws_send_data_async(server, s_ws_fds[i], &ctx->frame, ws_transfer_complete, ctx);
+        if (err != ESP_OK) delete ctx;
     }
     xSemaphoreGive(s_ws_mtx);
 }
 
+void ws_broadcast_values() {
+    if (!http_server_handle() || !s_ws_mtx || !ws_any_clients()) return;
+
+    std::string j;
+    try {
+        const size_t cap = def::lookup(config().profile.c_str()).count;
+        std::vector<CachedValue> v(cap ? cap : 1);
+        size_t n = hp_values_snapshot(v.data(), v.size());
+        j = "{\"type\":\"values\",\"values\":[";
+        for (size_t i = 0; i < n; i++) {
+            if (i) j += ",";
+            j += "{\"label\":" + jstr(v[i].label) +
+                 ",\"value\":" + (v[i].value.empty() ? "null" : jstr(v[i].value)) +
+                 ",\"unit\":" + jstr(v[i].unit) + "}";
+        }
+        j += "]}";
+    } catch (const std::bad_alloc&) {
+        return;   // skip this tick under memory pressure rather than abort the poll task
+    }
+    ws_send_to_all(j);
+}
+
 void ws_broadcast_status() {
-    httpd_handle_t server = http_server_handle();
-    if (!server || !s_ws_mtx) return;
+    if (!http_server_handle() || !s_ws_mtx || !ws_any_clients()) return;
 
-    bool any_clients = false;
-    xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
-    for (int i = 0; i < 8; i++) {
-        if (s_ws_fds[i] != -1) {
-            any_clients = true;
-            break;
-        }
+    std::string j;
+    try {
+        j = "{\"type\":\"status\",\"status\":" + build_status_json_string() + "}";
+    } catch (const std::bad_alloc&) {
+        return;   // skip this tick under memory pressure rather than abort the poll task
     }
-    xSemaphoreGive(s_ws_mtx);
-
-    if (!any_clients) return;
-
-    std::string stat = build_status_json_string();
-    std::string j = "{\"type\":\"status\",\"status\":" + stat + "}";
-
-    xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
-    for (int i = 0; i < 8; i++) {
-        if (s_ws_fds[i] != -1) {
-            WsPacketContext* ctx = new WsPacketContext();
-            ctx->payload = j;
-            
-            memset(&ctx->frame, 0, sizeof(httpd_ws_frame_t));
-            ctx->frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(ctx->payload.c_str()));
-            ctx->frame.len = ctx->payload.size();
-            ctx->frame.type = HTTPD_WS_TYPE_TEXT;
-            ctx->frame.final = true;
-
-            esp_err_t err = httpd_ws_send_data_async(server, s_ws_fds[i], &ctx->frame, ws_transfer_complete, ctx);
-            if (err != ESP_OK) {
-                delete ctx;
-            }
-        }
-    }
-    xSemaphoreGive(s_ws_mtx);
+    ws_send_to_all(j);
 }
 
 static esp_err_t h_ws_events(httpd_req_t* req) {
@@ -391,34 +376,42 @@ static esp_err_t h_ws_events(httpd_req_t* req) {
             httpd_ws_recv_frame(req, &ws_pkt, max_len);
 
             if (max_len >= 3 && memcmp(buf, "sub", 3) == 0) {
-                // Send status
-                std::string stat = build_status_json_string();
-                std::string j_stat = "{\"type\":\"status\",\"status\":" + stat + "}";
-                httpd_ws_frame_t f_stat = {};
-                f_stat.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_stat.c_str()));
-                f_stat.len = j_stat.size();
-                f_stat.type = HTTPD_WS_TYPE_TEXT;
-                f_stat.final = true;
-                httpd_ws_send_frame(req, &f_stat);
+                // This WS route is registered with httpd_register_uri_handler (is_websocket needs the
+                // raw registration), so it does NOT run under http_register's handle_all try/catch.
+                // Guard the JSON build here so a std::bad_alloc under memory pressure drops the send
+                // instead of unwinding through esp_http_server's C dispatch -> std::terminate -> reboot.
+                try {
+                    // Send status
+                    std::string stat = build_status_json_string();
+                    std::string j_stat = "{\"type\":\"status\",\"status\":" + stat + "}";
+                    httpd_ws_frame_t f_stat = {};
+                    f_stat.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_stat.c_str()));
+                    f_stat.len = j_stat.size();
+                    f_stat.type = HTTPD_WS_TYPE_TEXT;
+                    f_stat.final = true;
+                    httpd_ws_send_frame(req, &f_stat);
 
-                // Send values
-                const size_t cap = def::lookup(config().profile.c_str()).count;
-                std::vector<CachedValue> v(cap ? cap : 1);
-                size_t n = hp_values_snapshot(v.data(), v.size());
-                std::string j_val = "{\"type\":\"values\",\"values\":[";
-                for (size_t i = 0; i < n; i++) {
-                    if (i) j_val += ",";
-                    j_val += "{\"label\":" + jstr(v[i].label) +
-                             ",\"value\":" + (v[i].value.empty() ? "null" : jstr(v[i].value)) +
-                             ",\"unit\":" + jstr(v[i].unit) + "}";
+                    // Send values
+                    const size_t cap = def::lookup(config().profile.c_str()).count;
+                    std::vector<CachedValue> v(cap ? cap : 1);
+                    size_t n = hp_values_snapshot(v.data(), v.size());
+                    std::string j_val = "{\"type\":\"values\",\"values\":[";
+                    for (size_t i = 0; i < n; i++) {
+                        if (i) j_val += ",";
+                        j_val += "{\"label\":" + jstr(v[i].label) +
+                                 ",\"value\":" + (v[i].value.empty() ? "null" : jstr(v[i].value)) +
+                                 ",\"unit\":" + jstr(v[i].unit) + "}";
+                    }
+                    j_val += "]}";
+                    httpd_ws_frame_t f_val = {};
+                    f_val.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_val.c_str()));
+                    f_val.len = j_val.size();
+                    f_val.type = HTTPD_WS_TYPE_TEXT;
+                    f_val.final = true;
+                    httpd_ws_send_frame(req, &f_val);
+                } catch (const std::bad_alloc&) {
+                    return ESP_OK;   // drop the subscription snapshot under OOM; client can retry
                 }
-                j_val += "]}";
-                httpd_ws_frame_t f_val = {};
-                f_val.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_val.c_str()));
-                f_val.len = j_val.size();
-                f_val.type = HTTPD_WS_TYPE_TEXT;
-                f_val.final = true;
-                httpd_ws_send_frame(req, &f_val);
             }
         }
     }
