@@ -257,9 +257,14 @@ function esp32CardHtml() {
 function statusCardsHtml() {
   const w = S.status?.wifi || {}, m = S.status?.mqtt || {}, sy = S.status?.syslog || {}, hp = S.status?.hp || {}, d = S.status?.detect || {};
   const wifi = (w.connected && (w.rssi != null || w.ssid))
-    ? vrow("Signal", w.rssi != null ? signalBars(w.rssi) : "—", { html: true }) +
-      vrow("Network", w.ssid || "—") +
-      vrow("IP address", w.ip || location.hostname, { cls: "num" })
+    ? vrow((w.std || "Wi-Fi").toUpperCase(),
+           (w.rssi != null ? signalBars(w.rssi) : "") +
+           (w.rssi != null ? ` <span style="margin-left: 4px; margin-right: 4px; font-weight: 500; font-size: 14.5px; color: var(--muted);">${w.rssi} dBm</span>` : "") +
+           (w.ssid ? ` <span style="color: var(--ok); font-weight: 600;">${esc(w.ssid)}</span>` : ""),
+           { html: true }) +
+      vrow("IP address", w.ip || location.hostname, { cls: "num" }) +
+      (w.mac ? vrow("MAC", w.mac, { cls: "mono num" }) : "") +
+      (w.bssid ? vrow("BSSID", w.bssid, { cls: "mono num" }) : "")
     : vrow("Status", "Offline", { cls: "warn" });
 
   let mqtt;
@@ -298,7 +303,7 @@ function statusCardsHtml() {
 
   // Model identity is only meaningful while the bus answers — hide the card entirely when the
   // heat-pump link is down instead of naming a unit (or showing a stale capacity) that isn't live.
-  return esp32CardHtml() + vcard("WiFi", wifi) + vcardEdit("MQTT", mqtt, "mqtt") + vcardEdit("Syslog", syslog, "syslog") + (hp.connected ? vcard("Model", model) : "");
+  return esp32CardHtml() + vcardEdit("WiFi", wifi, "wifi") + vcardEdit("MQTT", mqtt, "mqtt") + vcardEdit("Syslog", syslog, "syslog") + (hp.connected ? vcard("Model", model) : "");
 }
 // Heat-pump value groups (grouped by domain, §6) as card markup. Hidden entirely while the
 // heat-pump link is down — there's nothing to poll, so "Waiting for the first poll…" would be
@@ -318,6 +323,23 @@ function valueGroupsHtml(vals, connected) {
   for (const [name, rows] of buckets) if (!done.has(name)) emit(name, rows); // firmware-supplied custom groups
   return html;
 }
+
+// ── WiFi (dashboard edit modal) ───────────────────────────────────────────
+function fillWifi() {
+  const w = S.status?.wifi || {};
+  $("wfSSID").value = w.ssid || "";
+  $("wfPass").value = "";
+}
+function openWifi() {
+  fillWifi();
+  $("wfSSID").classList.remove("invalid");
+  $("wfPass").classList.remove("invalid");
+  $("wfSSIDError").hidden = true;
+  $("wfPassError").hidden = true;
+  $("wifiModal").hidden = false;
+  $("wfSSID").focus();
+}
+function closeWifi() { $("wifiModal").hidden = true; }
 
 // ── MQTT (dashboard edit modal) ───────────────────────────────────────────
 // The MQTT broker is edited in a modal opened from the dashboard card's pencil — there is no
@@ -359,7 +381,7 @@ function signalBars(rssi) {
   const lit = rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1;
   const tone = rssi >= -70 ? "var(--ok)" : "var(--warn)";
   let bars = ""; for (let i = 1; i <= 4; i++) bars += `<i class="${i <= lit ? "on" : ""}"></i>`;
-  return `<span class="signal lit" style="color:${tone}">${bars}</span> <span class="num" style="color:${tone};font-weight:600">${rssi} dBm</span>`;
+  return `<span class="signal lit" style="color:${tone}">${bars}</span>`;
 }
 
 // ── Heat pump (model identity + wiring) ──────────────────────────────────
@@ -424,6 +446,7 @@ function wire() {
   // checks for an OTA update, and its RX/TX dropdowns re-run pin auto-detection on change.
   $("valueGroups").addEventListener("click", (e) => {
     const edit = e.target.closest("[data-edit]");
+    if (edit && edit.dataset.edit === "wifi") { openWifi(); return; }
     if (edit && edit.dataset.edit === "mqtt") { openMqtt(); return; }
     if (edit && edit.dataset.edit === "syslog") { openSyslog(); return; }
     const act = e.target.closest("[data-act]");
@@ -439,6 +462,36 @@ function wire() {
     if (act.dataset.cact === "dismiss") { S.crashDismissed = $("crashBanner").dataset.sig; $("crashBanner").hidden = true; }
     else if (act.dataset.cact === "copy") copyDiagnostics();
   });
+  $("wfCancel").onclick = closeWifi;
+  $("wifiBackdrop").onclick = closeWifi;
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("wifiModal").hidden) closeWifi(); });
+  $("wifiForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const ssid = $("wfSSID").value.trim();
+    const pass = $("wfPass").value;
+    let valid = true;
+    if (!ssid || ssid.length > 32) {
+      $("wfSSID").classList.add("invalid");
+      $("wfSSIDError").hidden = false;
+      valid = false;
+    } else {
+      $("wfSSID").classList.remove("invalid");
+      $("wfSSIDError").hidden = true;
+    }
+    if (pass.length > 0 && (pass.length < 8 || pass.length > 63)) {
+      $("wfPass").classList.add("invalid");
+      $("wfPassError").hidden = false;
+      valid = false;
+    } else {
+      $("wfPass").classList.remove("invalid");
+      $("wfPassError").hidden = true;
+    }
+    if (!valid) { toast("Check WiFi settings", "err"); return; }
+    saveReboot("/set_wifi", { ssid, pass }, () => { closeWifi(); renderDashboard(); });
+  });
+  $("wfSSID").addEventListener("input", () => { $("wfSSID").classList.remove("invalid"); $("wfSSIDError").hidden = true; });
+  $("wfPass").addEventListener("input", () => { $("wfPass").classList.remove("invalid"); $("wfPassError").hidden = true; });
+
   $("mqCancel").onclick = closeMqtt;
   $("mqttBackdrop").onclick = closeMqtt;
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("mqttModal").hidden) closeMqtt(); });

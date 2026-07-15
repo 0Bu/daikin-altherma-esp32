@@ -21,6 +21,9 @@ struct Config {
     std::string syslog_host;       // "" = Syslog disabled
     int         syslog_port = 514;
     std::string profile  = "auto";  // "auto" = detect on next poll cycle; else a concrete profile id
+    std::string wifi_ssid_backup;
+    std::string wifi_pass_backup;
+    bool        wifi_rollback_active = false;
     // X10A link cache — PERSISTED (config.cpp): the wiring/protocol is boot-invariant, cached and
     // tried first by the detection sweep, re-persisted on change (hp_poll.cpp poll_detect).
     Protocol    proto    = Protocol::I;  // last detected framing (I/S); tried first, then the other
@@ -51,6 +54,16 @@ inline bool validate(const Config& c, std::string& reason, int max_gpio = 48) {
     if (c.rx_pin == c.tx_pin)     { reason = "rx_pin and tx_pin must differ"; return false; }
     if (c.proto != Protocol::I && c.proto != Protocol::S) { reason = "protocol must be I or S"; return false; }
     if (!c.syslog_host.empty() && (c.syslog_port < 1 || c.syslog_port > 65535)) { reason = "syslog_port out of range"; return false; }
+    return true;
+}
+
+// Validate WiFi credentials from POST /set_wifi. The SSID must be 1..32 bytes (the 802.11 limit);
+// the password is either empty (open network) or a WPA-PSK-length 8..63 bytes. Same bounds the web
+// UI enforces client-side (main/www/app.js) — kept here so the authoritative check is host-tested.
+// Returns false + a reason on the first problem.
+inline bool wifi_credentials_valid(const std::string& ssid, const std::string& pass, std::string& reason) {
+    if (ssid.empty() || ssid.size() > 32)                     { reason = "invalid ssid";     return false; }
+    if (!pass.empty() && (pass.size() < 8 || pass.size() > 63)) { reason = "invalid password"; return false; }
     return true;
 }
 

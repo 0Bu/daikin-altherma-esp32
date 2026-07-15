@@ -49,9 +49,26 @@ static esp_err_t set_wifi(httpd_req_t* req) {
         httpd_resp_set_status(req, "400 Bad Request");
         return httpd_resp_sendstr(req, "bad json");
     }
+    std::string ssid = js(j, "ssid");
+    std::string pass = js(j, "pass");
+    std::string reason;
+    if (!wifi_credentials_valid(ssid, pass, reason)) {
+        cJSON_Delete(j);
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, reason.c_str());
+    }
     Config c = config();
-    c.wifi_ssid = js(j, "ssid");
-    c.wifi_pass = js(j, "pass");
+    if (!c.wifi_ssid.empty()) {
+        c.wifi_ssid_backup = c.wifi_ssid;
+        c.wifi_pass_backup = c.wifi_pass;
+        c.wifi_rollback_active = true;
+    } else {
+        c.wifi_ssid_backup = "";
+        c.wifi_pass_backup = "";
+        c.wifi_rollback_active = false;
+    }
+    c.wifi_ssid = ssid;
+    c.wifi_pass = pass;
     cJSON_Delete(j);
     config_save(c);
     http_send_json(req, "{\"ok\":true,\"reboot\":true}");

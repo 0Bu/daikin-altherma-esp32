@@ -258,6 +258,17 @@ static void test_config_model() {
     CHECK(parse_protocol("I") == Protocol::I);
     CHECK(parse_protocol("") == Protocol::I);
 
+    // WiFi credential validation (POST /set_wifi): SSID 1..32, password empty (open) or 8..63.
+    std::string wr;
+    CHECK(wifi_credentials_valid("MyNet", "", wr));                       // open network, ok
+    CHECK(wifi_credentials_valid("MyNet", "hunter22", wr));               // 8-char password, ok
+    CHECK(wifi_credentials_valid(std::string(32, 'x'), "", wr));          // 32-char SSID boundary, ok
+    CHECK(wifi_credentials_valid("MyNet", std::string(63, 'p'), wr));     // 63-char password boundary, ok
+    CHECK(!wifi_credentials_valid("", "password", wr));                   // empty SSID rejected
+    CHECK(!wifi_credentials_valid(std::string(33, 'x'), "", wr));         // 33-char SSID rejected
+    CHECK(!wifi_credentials_valid("MyNet", "short", wr));                 // <8-char password rejected
+    CHECK(!wifi_credentials_valid("MyNet", std::string(64, 'p'), wr));    // >63-char password rejected
+
     // /set_hp fingerprint rule: a partial live update (no "profile" key) never clears the cached
     // detection, whatever the stored profile is; only an explicit "auto" does; a manual pin doesn't.
     CHECK(!set_hp_clears_fingerprint(false, "auto"));            // wiring-only patch (no "profile")

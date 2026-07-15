@@ -25,7 +25,14 @@ int  wifi_scan(WifiScanEntry* out, int max);   // returns count
 
 // Live station link info for the dashboard: current IP + signal. `connected` is true once the
 // STA has a DHCP lease; `rssi` is valid only then (0 otherwise). SSID lives in Config.
-struct WifiInfo { char ip[16]; int8_t rssi; bool connected; };
+struct WifiInfo {
+    char ip[16];
+    int8_t rssi;
+    bool connected;
+    uint8_t bssid[6];
+    char std[16];
+    uint8_t mac[6];
+};
 WifiInfo wifi_info();
 
 // Cumulative count of successful RE-connects since boot (the first-ever GOT_IP doesn't count) —

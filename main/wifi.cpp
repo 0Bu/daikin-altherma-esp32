@@ -41,6 +41,8 @@ static volatile bool s_wifi_connected = false;
 static volatile bool s_wifi_ever_connected = false;
 // Cumulative RE-connect count (excludes the first-ever GOT_IP) — see wifi_reconnect_count().
 static volatile uint32_t s_reconnects = 0;
+// Track consecutive WPA2/WPA3 auth or handshake failures at runtime
+static int s_auth_fail_count = 0;
 
 bool wifi_configured() { return !config().wifi_ssid.empty(); }
 
@@ -52,6 +54,20 @@ static void on_wifi(void*, esp_event_base_t base, int32_t id, void* data) {
         // reason tells a transient SAE/handshake failure (15 4WAY_TIMEOUT, 202 AUTH_FAIL,
         // 204 HANDSHAKE_TIMEOUT) apart from wrong creds (201/211) or a real outage (200/8/deauth).
         auto* d = static_cast<wifi_event_sta_disconnected_t*>(data);
+
+        // Detect consecutive authentication failures at runtime.
+        if (d && (d->reason == 202 || d->reason == 15 || d->reason == 204)) {
+            s_auth_fail_count++;
+            if (s_wifi_ever_connected && s_auth_fail_count >= 5) {
+                ESP_LOGW(TAG, "consecutive authentication failures (%d) -> credentials likely changed. Rebooting to fallback/portal...",
+                         s_auth_fail_count);
+                vTaskDelay(pdMS_TO_TICKS(500));
+                esp_restart();
+            }
+        } else {
+            s_auth_fail_count = 0;
+        }
+
         if (!s_wifi_ever_connected && s_retry_num >= MAX_RETRY) {
             // Never online AND the boot budget is spent → creds are almost certainly wrong. Stop so
             // wifi_start_sta() unblocks on FAIL_BIT and the caller opens the setup portal.
@@ -73,6 +89,7 @@ static void on_wifi(void*, esp_event_base_t base, int32_t id, void* data) {
         ESP_LOGI(TAG, "connected, ip=" IPSTR, IP2STR(&e->ip_info.ip));
         if (s_wifi_ever_connected) s_reconnects = s_reconnects + 1;   // a later GOT_IP is a RE-connect
         s_retry_num           = 0;
+        s_auth_fail_count     = 0;
         s_wifi_connected      = true;
         s_wifi_ever_connected = true;
         xEventGroupSetBits(s_events, CONNECTED_BIT);
@@ -263,9 +280,30 @@ bool wifi_start_sta() {
     EventBits_t bits = xEventGroupWaitBits(s_events, CONNECTED_BIT | FAIL_BIT, pdFALSE, pdFALSE,
                                            pdMS_TO_TICKS(30000));
     if (!(bits & CONNECTED_BIT)) {
+        Config rollback_cfg = config();
+        if (rollback_cfg.wifi_rollback_active && !rollback_cfg.wifi_ssid_backup.empty()) {
+            ESP_LOGW(TAG, "STA connect failed with new credentials. Rolling back to backup: %s", rollback_cfg.wifi_ssid_backup.c_str());
+            rollback_cfg.wifi_ssid = rollback_cfg.wifi_ssid_backup;
+            rollback_cfg.wifi_pass = rollback_cfg.wifi_pass_backup;
+            rollback_cfg.wifi_rollback_active = false;
+            rollback_cfg.wifi_ssid_backup = "";
+            rollback_cfg.wifi_pass_backup = "";
+            config_save(rollback_cfg);
+            vTaskDelay(pdMS_TO_TICKS(500));
+            esp_restart();
+        }
         ESP_LOGW(TAG, "STA connect failed on first boot — falling back to setup portal");
         wifi_stop_sta();
         return false;
+    }
+
+    // Success! Clear rollback/backup if active
+    Config success_cfg = config();
+    if (success_cfg.wifi_rollback_active) {
+        success_cfg.wifi_rollback_active = false;
+        success_cfg.wifi_ssid_backup = "";
+        success_cfg.wifi_pass_backup = "";
+        config_save(success_cfg);
     }
 
     start_mdns();
@@ -301,8 +339,19 @@ WifiInfo wifi_info() {
         // Only read the AP record while the link is up: mid-association its fields are transiently
         // null and a concurrent read faults (LoadProhibited). See s_wifi_connected.
         wifi_ap_record_t ap{};
-        if (s_wifi_connected && esp_wifi_sta_get_ap_info(&ap) == ESP_OK) info.rssi = ap.rssi;
+        if (s_wifi_connected && esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+            info.rssi = ap.rssi;
+            memcpy(info.bssid, ap.bssid, 6);
+            const char* std_ = ap.phy_11ax ? "Wi-Fi 6"
+                             : ap.phy_11ac ? "Wi-Fi 5"
+                             : ap.phy_11n  ? "Wi-Fi 4"
+                             : ap.phy_11g  ? "802.11g"
+                             : ap.phy_11b  ? "802.11b" : "Wi-Fi";
+            strncpy(info.std, std_, sizeof(info.std) - 1);
+            info.std[sizeof(info.std) - 1] = '\0';
+        }
     }
+    esp_wifi_get_mac(WIFI_IF_STA, info.mac);
     return info;
 }
 

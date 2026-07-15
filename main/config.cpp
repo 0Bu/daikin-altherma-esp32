@@ -41,6 +41,9 @@ void config_load() {
     // CONFIG_DAIKIN_HOSTNAME, the poll cadence at POLL_INTERVAL_S, labels are English-only.)
     c.wifi_ssid = nvs_get_str("wifi_ssid", CONFIG_DAIKIN_WIFI_SSID);
     c.wifi_pass = nvs_get_str("wifi_pass", CONFIG_DAIKIN_WIFI_PASSWORD);
+    c.wifi_ssid_backup = nvs_get_str("wifi_ssid_back", "");
+    c.wifi_pass_backup = nvs_get_str("wifi_pass_back", "");
+    c.wifi_rollback_active = nvs_get_i32("wifi_rollback", 0) != 0;
     c.mqtt_uri  = nvs_get_str("mqtt_uri", CONFIG_DAIKIN_MQTT_BROKER_URI);
     c.mqtt_user = nvs_get_str("mqtt_user", CONFIG_DAIKIN_MQTT_USERNAME);
     c.mqtt_pass = nvs_get_str("mqtt_pass", CONFIG_DAIKIN_MQTT_PASSWORD);
@@ -69,6 +72,9 @@ bool config_save(const Config& c) {
     bool ok = true;
     ok &= nvs_set_str("wifi_ssid", c.wifi_ssid);
     ok &= nvs_set_str("wifi_pass", c.wifi_pass);
+    ok &= nvs_set_str("wifi_ssid_back", c.wifi_ssid_backup);
+    ok &= nvs_set_str("wifi_pass_back", c.wifi_pass_backup);
+    ok &= nvs_set_i32("wifi_rollback", c.wifi_rollback_active ? 1 : 0);
     ok &= nvs_set_str("mqtt_uri", c.mqtt_uri);
     ok &= nvs_set_str("mqtt_user", c.mqtt_user);
     ok &= nvs_set_str("mqtt_pass", c.mqtt_pass);
