@@ -26,3 +26,4 @@ that couldn't be (a cloud session cannot build or USB-flash — see .claude/CLAU
 - [ ] Heap-safe — no new large *contiguous* allocations; HTTP handlers stay under the OOM try/catch
 - [ ] Target-specific — builds for esp32s3
 - [ ] `/project-review` run clean (doc drift, memory, tests, multi-target)
+- [ ] `/feature-docs` run if a technical feature changed — `docs/FEATURES.md` catalog synced
