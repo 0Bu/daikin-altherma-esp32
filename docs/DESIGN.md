@@ -107,12 +107,18 @@ The dashboard's **MQTT** status card (§5.3) carries a **pencil** in its header;
 centred **modal** over a dimmed dashboard. MQTT and Syslog (§5.3) are the two status cards edited
 this way, and they share the identical overlay pattern. One form:
 - **MQTT**: broker (`host:port`, or `mqtts://host:8883` for TLS), username, password, TLS note
-  ("credentials require an mqtts:// URL"). **Save** → `POST /set_mqtt` (reboots to apply, then closes
-  back to the dashboard); **Cancel** (and the backdrop / `Esc`) dismiss without writing. An empty
-  broker disables MQTT.
-Only the broker prefills (username/password aren't exposed by `/status`). Validation inline
-(bare `host:port`, or a `mqtt(s)://` / `ws(s)://` URL). Actions row at the bottom: Cancel
-(secondary) + Save (brand).
+  ("credentials require an mqtts:// URL"). **Save** → `POST /set_mqtt`, which **pre-flights the
+  broker** (DNS → TCP → a real MQTT connect/auth) before writing: on success the device reboots to
+  apply and the modal closes; on failure the modal **stays open** and shows the reason inline
+  (e.g. "Broker port unreachable", "Invalid username or password") — nothing is saved. **Cancel**
+  (and the backdrop / `Esc`) dismiss without writing. An empty broker disables MQTT (no probe).
+Only the broker prefills (username/password aren't exposed by `/status`). Because the credential
+fields start blank, **leaving them empty keeps the stored credentials** — to change them, retype
+them; to remove them, disable MQTT and re-add the broker without them. Typing a username or password
+**auto-upgrades the broker scheme to TLS** (`mqtt://`→`mqtts://`, `ws://`→`wss://`, or prepends
+`mqtts://`) since the bridge refuses credentials over plaintext; clearing them strips the scheme
+back. Validation is also inline client-side (bare `host:port`, or a `mqtt(s)://` / `ws(s)://` URL).
+Actions row at the bottom: Cancel (secondary) + Save (brand).
 
 ### 5.2 Heat pump — no settings screen (fully automatic)
 The heat pump has **no configuration screen**. The model is **auto-detected** from the X10A bus

@@ -196,7 +196,12 @@ GET  /coredump[?clear=1]   stream the flash core-dump image (chunked octet-strea
                   .elf: scripts/decode-coredump.sh coredump.bin (CI archives the .elf per build). The
                   UI surfaces a crash banner + one-click download when /status.last_crash is set.
 POST /set_wifi    {ssid,pass} -> persist + reboot
-POST /set_mqtt    {broker,user,pass} -> persist + reboot ("" disables)
+POST /set_mqtt    {broker,user,pass} -> pre-flight the broker synchronously (DNS -> TCP probe ->
+                  short-lived esp-mqtt CONNECT/auth, mirroring mqtt_ha's creds-require-mqtts:// policy)
+                  -> on success persist + reboot; on failure 400 {ok:false,error} and nothing is saved.
+                  Unchanged settings short-circuit to {ok:true,reboot:false} (no probe, no reboot).
+                  "" (empty broker) disables MQTT and skips the probe. Blocks up to ~8 s — the one
+                  request-path network block (syslog/wifi don't); safe under the handle_all 503 guard.
 POST /set_syslog  {host,port} -> validate port range -> persist + reboot. Empty host disables syslog.
                   DNS/reachability are NOT checked here (no request-path network block); they resolve
                   in the syslog task and surface via /status.syslog {resolved,reachable,error}.
