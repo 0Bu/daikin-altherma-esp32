@@ -128,7 +128,7 @@ jobs:
       # version/PR keeps every build's crashes decodable — even while the repo is private and cuts no
       # public Release. Artifact retention (default 90 days) is the archive.
       - name: Upload firmware artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: >-
             ${{ github.event_name == 'pull_request'
