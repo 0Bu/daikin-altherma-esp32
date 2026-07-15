@@ -195,7 +195,9 @@ GET  /coredump[?clear=1]           # stream the flash core-dump image (chunked; 
                                    #   ?clear=1 erases the coredump partition. Decode offline with
                                    #   scripts/decode-coredump.sh coredump.bin (matching-version .elf).
 POST /set_wifi                     # { ssid, pass } → persist + reboot
-POST /set_mqtt                     # { broker, user?, pass? } → persist + reboot ("" disables)
+POST /set_mqtt                     # { broker, user?, pass? } → pre-flight the broker (DNS/TCP/connect
+                                   #   +auth) → on success persist + reboot, on failure 400 {error}
+                                   #   (nothing saved). Empty user+pass keeps stored creds; "" disables.
 POST /set_syslog                   # { host, port } → validate port range, persist + reboot ("" host
                                    #   disables). DNS/reachability resolve async, shown in /status.syslog
 POST /set_hp                       # { profile?, rx?, tx? } → apply live (no reboot); rx/tx PERSIST

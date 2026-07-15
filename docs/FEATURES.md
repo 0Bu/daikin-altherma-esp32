@@ -46,12 +46,13 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 16 | Captive-portal provisioning (SoftAP + UDP:53 DNS catch-all) | ✅ | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp) |
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | X10A auto-detection (protocol sweep → fingerprint → model) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 19 | **IDF-free host-tested logic core** (212 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 19 | **IDF-free host-tested logic core** (227 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 20 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 21 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 22 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 23 | Status-LED state indicator | ✅ | [`status_led.cpp`](../main/status_led.cpp) |
 | 24 | Read-only MCP server route | 🔭 | [`mcp_server.cpp`](../main/mcp_server.cpp) |
+| 25 | **MQTT broker save-time pre-flight** (DNS/TCP/connect+auth, heap-guarded) before persist | ✅ | [`http_config.cpp`](../main/http_config.cpp) |
 
 ---
 
@@ -205,6 +206,14 @@ IDF v6.0 extracted it from core — [`idf_component.yml`](../main/idf_component.
 - **✅ TLS with the IDF CA bundle.** Credentials present ⇒ `mqtts://` + `esp_crt_bundle` verification.
   Credentials are **never** sent over a plaintext broker — the client refuses to start and surfaces
   the reason in `/status.mqtt`, with **no silent fallback**.
+- **✅ Save-time broker pre-flight** ([`http_config.cpp`](../main/http_config.cpp)): `POST /set_mqtt`
+  verifies the broker **before** it persists — WiFi up → the same `mqtts://`-for-credentials policy as
+  the bridge → DNS → a non-blocking TCP port probe → a short-lived esp-mqtt client that must actually
+  `CONNECT` (and authenticate) — so a wrong host, closed port or bad password is rejected **inline at
+  Save** rather than failing silently after the reboot. The transient (TLS) validation client is
+  guarded by a largest-free-block check: under heap pressure it skips the connect probe (DNS + port
+  were already checked) rather than risk OOM-ing the live bridge. Empty username+password means *keep
+  the stored credentials*, so a broker-only edit never wipes them.
 - **✅ Availability (LWT).** A retained `offline` last-will on `<base>/<node>/availability`, flipped to
   `online` on connect — HA marks every entity unavailable if the device drops.
 - **Read-only by design.** No command subscriptions; the bridge only reads the pump.
@@ -272,7 +281,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   extraction (`registers.hpp`), the config model/validation (`config_model.hpp`), HA-discovery payloads
   (`discovery.hpp`), detection (`detect.hpp`), the OTA health gate (`health_gate.hpp`), heartbeat &
   crash formatting (`heartbeat.hpp`, `crashinfo.hpp`), grouped state JSON (`mqtt_group.hpp`), board pins
-  (`board_pins.hpp`). **212 `CHECK`s** in [`test/test_logic.cpp`](../test/test_logic.cpp).
+  (`board_pins.hpp`). **227 `CHECK`s** in [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
   real "run it and see" loop even in an environment that can't build firmware or USB-flash.
@@ -359,7 +368,7 @@ security of signed firmware with none of the brick risk. It refuses to roll a ba
 and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-associations no event
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 13-entity heartbeat diagnostics). And the risky parts — decode,
-CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (212 checks),
+CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (227 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

@@ -442,14 +442,91 @@ function wire() {
   $("mqCancel").onclick = closeMqtt;
   $("mqttBackdrop").onclick = closeMqtt;
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("mqttModal").hidden) closeMqtt(); });
-  $("mqttForm").addEventListener("submit", (e) => {
+  $("mqttForm").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const broker = $("mqBroker").value;
-    if (!validMqtt(broker)) { $("mqBroker").classList.add("invalid"); $("mqError").hidden = false; toast("Check the broker address", "err"); return; }
-    $("mqBroker").classList.remove("invalid"); $("mqError").hidden = true;
-    saveReboot("/set_mqtt", { broker, user: $("mqUser").value, pass: $("mqPass").value }, () => { closeMqtt(); renderDashboard(); });
+    const broker = $("mqBroker").value.trim();
+    if (!validMqtt(broker)) {
+      $("mqBroker").classList.add("invalid");
+      $("mqError").textContent = "Enter host:port — e.g. 192.168.1.10:1883 — or mqtts://host:8883 for TLS";
+      $("mqError").hidden = false;
+      toast("Check the broker address", "err");
+      return;
+    }
+    if (S.busy) return;
+    S.busy = true;
+    toast("Verifying MQTT connection…", "info");
+    try {
+      const r = await post("/set_mqtt", { broker, user: $("mqUser").value.trim(), pass: $("mqPass").value });
+      if (!r.ok) {
+        const errObj = await r.json().catch(() => ({}));
+        $("mqBroker").classList.add("invalid");
+        $("mqError").textContent = errObj.error || "Connection failed";
+        $("mqError").hidden = false;
+        S.busy = false;
+        return;
+      }
+      const resObj = await r.json().catch(() => ({}));
+      if (resObj.reboot === false) {
+        closeMqtt();
+        toast("No changes", "info");
+        S.busy = false;
+        return;
+      }
+    } catch {
+      $("mqBroker").classList.add("invalid");
+      $("mqError").textContent = "Device connection lost";
+      $("mqError").hidden = false;
+      S.busy = false;
+      return;
+    }
+
+    closeMqtt();
+    toast("Rebooting — reconnecting…", "info");
+    let tries = 0;
+    const poll = setInterval(async () => {
+      tries++;
+      try {
+        S.status = await j("/status");
+        clearInterval(poll);
+        S.busy = false;
+        toast("Saved", "ok");
+        renderDashboard();
+      } catch {
+        if (tries > 14) {
+          clearInterval(poll);
+          S.busy = false;
+          toast("Rebooted — reconnect to the device", "info");
+        }
+      }
+    }, 1500);
   });
   $("mqBroker").addEventListener("input", () => { $("mqBroker").classList.remove("invalid"); $("mqError").hidden = true; });
+  // Typing credentials upgrades the broker scheme to TLS (the bridge refuses plaintext + creds);
+  // clearing them again strips the scheme back to bare. Only mutates the broker while editing the
+  // credential fields — typing in the broker field itself is left untouched.
+  const handleCredsInput = () => {
+    const hasCreds = $("mqUser").value.trim().length > 0 || $("mqPass").value.length > 0;
+    const broker = $("mqBroker").value.trim();
+    if (hasCreds) {
+      if (broker) {
+        if (!broker.includes("://")) {
+          $("mqBroker").value = "mqtts://" + broker;
+        } else if (broker.startsWith("mqtt://")) {
+          $("mqBroker").value = "mqtts://" + broker.substring(7);
+        } else if (broker.startsWith("ws://")) {
+          $("mqBroker").value = "wss://" + broker.substring(5);
+        }
+      }
+    } else {
+      if (broker.startsWith("mqtts://")) {
+        $("mqBroker").value = broker.substring(8);
+      } else if (broker.startsWith("wss://")) {
+        $("mqBroker").value = broker.substring(6);
+      }
+    }
+  };
+  $("mqUser").addEventListener("input", () => { $("mqBroker").classList.remove("invalid"); $("mqError").hidden = true; handleCredsInput(); });
+  $("mqPass").addEventListener("input", () => { $("mqBroker").classList.remove("invalid"); $("mqError").hidden = true; handleCredsInput(); });
 
   $("slHost").addEventListener("input", () => { $("slHost").classList.remove("invalid"); $("slError").hidden = true; });
 

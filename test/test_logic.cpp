@@ -18,6 +18,7 @@
 #include "logic/health_gate.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/mqtt_group.hpp"
+#include "logic/mqtt_uri.hpp"
 #include "logic/registers.hpp"
 #include "def/registry.hpp"
 #include "def/signatures.hpp"
@@ -435,6 +436,38 @@ static void test_mqtt_group() {
     CHECK(build_grouped_json({}) == "{}");
 }
 
+static void test_mqtt_uri() {
+    // Broker URI -> host / port / TLS split (logic/mqtt_uri.hpp), matching mqtt_ha's scheme policy.
+    std::string host;
+    int port = 0;
+    bool tls = false;
+
+    // Bare host:port -> plaintext, explicit port.
+    CHECK(parse_mqtt_uri("192.168.1.10:1883", host, port, tls) && host == "192.168.1.10" && port == 1883 && !tls);
+    // Bare host, no port -> default plaintext 1883.
+    CHECK(parse_mqtt_uri("broker.local", host, port, tls) && host == "broker.local" && port == 1883 && !tls);
+    // Explicit mqtt:// scheme keeps plaintext + its port.
+    CHECK(parse_mqtt_uri("mqtt://h:1884", host, port, tls) && host == "h" && port == 1884 && !tls);
+    // mqtts:// with port -> TLS.
+    CHECK(parse_mqtt_uri("mqtts://h:8884", host, port, tls) && host == "h" && port == 8884 && tls);
+    // mqtts:// without port -> default TLS 8883.
+    CHECK(parse_mqtt_uri("mqtts://h", host, port, tls) && host == "h" && port == 8883 && tls);
+    // wss:// without port -> default TLS 8883.
+    CHECK(parse_mqtt_uri("wss://h", host, port, tls) && host == "h" && port == 8883 && tls);
+    // ws:// with port -> plaintext websocket.
+    CHECK(parse_mqtt_uri("ws://h:9001", host, port, tls) && host == "h" && port == 9001 && !tls);
+    // Empty string -> rejected.
+    CHECK(!parse_mqtt_uri("", host, port, tls));
+    // Scheme only, no host -> rejected.
+    CHECK(!parse_mqtt_uri("mqtts://", host, port, tls));
+    // Trailing colon (empty port) -> non-numeric -> rejected.
+    CHECK(!parse_mqtt_uri("host:", host, port, tls));
+    // IPv6 literal with port -> parsed with brackets intact (device AF_INET resolve then rejects it).
+    CHECK(parse_mqtt_uri("[::1]:1883", host, port, tls) && host == "[::1]" && port == 1883 && !tls);
+    // IPv6 literal, no port -> brackets kept, default port (colon is inside the brackets).
+    CHECK(parse_mqtt_uri("[fe80::1]", host, port, tls) && host == "[fe80::1]" && port == 1883 && !tls);
+}
+
 static void test_heartbeat() {
     const std::string base = "daikin-altherma-esp32", node = "daikin_abc123";
     CHECK(heartbeat_topic(base, node) == "daikin-altherma-esp32/daikin_abc123/heartbeat");
@@ -668,6 +701,7 @@ int main() {
     test_registry();
     test_detect();
     test_mqtt_group();
+    test_mqtt_uri();
     test_heartbeat();
     test_crashinfo();
     test_health_gate();

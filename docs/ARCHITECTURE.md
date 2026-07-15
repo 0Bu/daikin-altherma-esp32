@@ -365,7 +365,10 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
 - **WiFi** → `/set_wifi`, driven **only** from the captive `setup.html` (provisioned once). The main
   app does not re-provision WiFi; the dashboard shows the live link read-only (SSID + IP + RSSI signal
   bars from `/status.wifi`, populated by `wifi_info()`).
-- **MQTT** → `/set_mqtt` (edited from a dashboard modal off the MQTT card).
+- **MQTT** → `/set_mqtt` (edited from a dashboard modal off the MQTT card). Unlike Syslog, Save
+  **pre-flights the broker synchronously** (DNS → TCP port → a short-lived esp-mqtt connect/auth,
+  heap-guarded) and only persists + reboots on success — a bad host/port/password is rejected inline;
+  an empty username+password keeps the stored credentials.
 - **Syslog** → `/set_syslog` (edited from a dashboard modal off the Syslog card). Save only
   validates the port range (no request-path network block); an empty host disables forwarding. DNS
   resolution and the advisory reachability probe run in the syslog task and surface on the card via
