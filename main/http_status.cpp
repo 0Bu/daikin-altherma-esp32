@@ -6,8 +6,10 @@
 #include "def/models_catalog.hpp"
 #include "def/signatures.hpp"
 #include "def/registry.hpp"
+#include "diag_crash.hpp"
 #include "diag_log.hpp"
 #include "hp_poll.hpp"
+#include "logic/crashinfo.hpp"
 #include "logic/detect.hpp"
 #include "mqtt_ha.hpp"
 #include "ota_update.hpp"
@@ -59,6 +61,11 @@ static std::string build_status_json_string() {
     j += "\"version\":" + jstr(esp_app_get_description()->version) + ",";
     j += "\"platform\":" + jstr(CONFIG_IDF_TARGET) + ",";
     j += "\"uptime_s\":" + std::to_string(esp_timer_get_time() / 1000000) + ",";
+    // Build identity: the running app's ELF sha (hex) — matches a core dump to the exact firmware
+    // that produced it (scripts/decode-coredump.sh), and pairs with last_crash below.
+    char elf_sha[65] = {0};
+    esp_app_get_elf_sha256(elf_sha, sizeof(elf_sha));
+    j += "\"app_elf_sha256\":" + jstr(elf_sha) + ",";
     // GPIOs the UI offers in the RX/TX pin dropdown (per-target, broken-out + safe; logic/board_pins.hpp).
     BoardPins bp = board_pins(CONFIG_IDF_TARGET);
     j += "\"pins_avail\":[";
@@ -80,6 +87,13 @@ static std::string build_status_json_string() {
          ",\"crc_err\":" + std::to_string(hp.crc_err) +
          ",\"timeout_err\":" + std::to_string(hp.timeout_err) + "},";
     j += "\"profile\":{\"id\":" + jstr(c.profile) + "},";
+
+    // Last reset: null on a clean boot, else the cached crash summary (reset reason + core-dump
+    // backtrace). Read from the boot-time CACHE (diag_crash.cpp) — never re-parsed from flash here,
+    // since build_status_json_string() also runs in the poll task's WS broadcaster, which only
+    // self-guards std::bad_alloc by dropping the frame; keep this path cheap (no flash parse).
+    const CrashInfo& crash = diag_crash_info();
+    j += "\"last_crash\":" + std::string(crash_is_notable(crash) ? build_crash_json(crash) : "null") + ",";
 
     // Auto-detection: proto/model derived from the X10A bus (hp_detect.cpp). The candidate set is
     // recomputed cheaply from the stored fingerprint (no re-probe) via the pure logic/detect.hpp;

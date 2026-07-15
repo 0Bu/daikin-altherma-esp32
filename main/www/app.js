@@ -42,6 +42,7 @@ function markUnreachable() {
 }
 
 function renderDashboard() {
+  renderCrashBanner();
   const s = S.status || {}, hp = s.hp || {};
   // Header is a fixed product title ("Daikin Altherma ESP32", set in index.html) — the detected
   // model name lives in the Model card (statusCardsHtml), not the header.
@@ -84,6 +85,77 @@ function faultValue() {
   if (bad) return String(bad.value);
   if (codes.length) return String(codes[0].value);
   return pickValue(/fault|error/i);
+}
+
+// ── Crash banner ─────────────────────────────────────────────────────────
+// Shown when /status.last_crash is set — a fault reset (panic / watchdog / brown-out) or a core dump
+// still waiting in flash. Offers the raw dump download (symbolized offline against the matching .elf
+// — scripts/decode-coredump.sh) and a copy-paste diagnostics bundle for a bug report. Lives outside
+// #valueGroups (rebuilt every poll), so its dismissed state survives re-renders; dismissal is keyed
+// to the crash signature, so a NEW crash re-shows the banner.
+function renderCrashBanner() {
+  const el = $("crashBanner"), c = S.status?.last_crash;
+  if (!c) { el.hidden = true; return; }
+  const sig = `${c.reason}:${c.pc || ""}:${c.task || ""}`;
+  if (S.crashDismissed === sig) { el.hidden = true; return; }
+  if (el.dataset.sig === sig && !el.hidden) return;   // already rendered this crash — don't thrash the DOM
+  el.dataset.sig = sig;
+
+  const s = S.status || {}, bt = Array.isArray(c.backtrace) ? c.backtrace : [];
+  const bits = [`Reset: <b>${esc(c.reason)}</b>`];
+  if (c.task) bits.push(`task <span class="mono">${esc(c.task)}</span>`);
+  if (s.version) bits.push(`fw v${esc(s.version)}`);
+  if (s.app_elf_sha256) bits.push(`elf <span class="mono">${esc(s.app_elf_sha256.slice(0, 12))}…</span>`);
+  const btHtml = bt.length
+    ? `<div class="crash-bt mono">${esc(bt.join(" "))}${c.corrupted ? " (corrupted)" : ""}</div>` : "";
+  const dl = c.coredump
+    ? `<a class="btn secondary sm" href="/coredump" download="coredump.bin">Download crash report</a>` : "";
+  el.innerHTML =
+    `<div class="crash-head"><span class="crash-ico">!</span>` +
+    `<div class="crash-txt"><div class="crash-title">Device restarted after a crash</div>` +
+    `<div class="crash-meta">${bits.join(" · ")}</div>${btHtml}</div></div>` +
+    `<div class="crash-actions">${dl}` +
+    `<button class="btn secondary sm" type="button" data-cact="copy">Copy diagnostics</button>` +
+    `<button class="btn ghost sm" type="button" data-cact="dismiss">Dismiss</button></div>`;
+  el.hidden = false;
+}
+
+// Copy text to the clipboard. The async Clipboard API needs a SECURE context (https/localhost), but
+// the device is served over plain http on the LAN (no TLS by design) — there navigator.clipboard is
+// undefined, so fall back to the legacy execCommand path, which still works in an http page.
+async function copyText(text) {
+  try {
+    if (window.isSecureContext && navigator.clipboard) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* fall through to the legacy path */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.setAttribute("readonly", "");
+    ta.style.position = "fixed"; ta.style.top = "0"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch { return false; }
+}
+
+// Assemble a paste-ready diagnostics bundle (identity + crash summary + the /diag ring) and copy it
+// to the clipboard, so a user can drop it straight into a bug report without pulling the binary dump.
+async function copyDiagnostics() {
+  let diag = "";
+  try { diag = await (await fetch("/diag")).text(); } catch { /* keep the rest of the bundle */ }
+  const s = S.status || {}, c = s.last_crash || {}, bt = Array.isArray(c.backtrace) ? c.backtrace : [];
+  const lines = [
+    "daikin-altherma-esp32 crash report",
+    `firmware: v${s.version || "?"} (${s.platform || "?"})`,
+    `app_elf_sha256: ${s.app_elf_sha256 || "?"}`,
+    `reset: ${c.reason || "?"}  fault=${!!c.fault}  coredump=${!!c.coredump}`,
+  ];
+  if (c.task) lines.push(`task: ${c.task}  pc: ${c.pc || "?"}`);
+  if (bt.length) lines.push(`backtrace: ${bt.join(" ")}${c.corrupted ? "  (corrupted)" : ""}`);
+  if (c.elf_sha256 && c.elf_sha256 !== s.app_elf_sha256) lines.push(`crashed build elf_sha256: ${c.elf_sha256}`);
+  lines.push("", "--- /diag ---", diag.trim());
+  if (await copyText(lines.join("\n"))) toast("Diagnostics copied — paste into a bug report", "ok");
+  else toast("Copy failed — open /coredump and /diag manually", "err");
 }
 
 // ── Values (dashboard) ───────────────────────────────────────────────────
@@ -326,6 +398,13 @@ function wire() {
   });
   $("valueGroups").addEventListener("change", (e) => {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();
+  });
+  // Crash banner: Copy diagnostics / Dismiss. The download link is a plain <a download> (no handler).
+  $("crashBanner").addEventListener("click", (e) => {
+    const act = e.target.closest("[data-cact]");
+    if (!act) return;
+    if (act.dataset.cact === "dismiss") { S.crashDismissed = $("crashBanner").dataset.sig; $("crashBanner").hidden = true; }
+    else if (act.dataset.cact === "copy") copyDiagnostics();
   });
   $("mqCancel").onclick = closeMqtt;
   $("mqttBackdrop").onclick = closeMqtt;

@@ -3,6 +3,8 @@
 # key (if present), and stage the artifacts the web installer + OTA consume into dist/:
 #   daikin-altherma-esp32<suffix>.bin          signed app image (OTA pulls this)
 #   daikin-altherma-esp32<suffix>-merged.bin   full-flash image (web installer flashes this)
+#   daikin-altherma-esp32<suffix>.elf          unstripped ELF — decodes a core dump from THIS build
+#   daikin-altherma-esp32<suffix>.elf.sha256   integrity checksum of the ELF
 #   manifest.json                              esp-web-tools builds[] + OTA version field
 #
 # Calls idf.py / esptool / espsecure.py DIRECTLY — it assumes an ESP-IDF environment is already
@@ -45,6 +47,13 @@ for t in "${TARGETS[@]}"; do
 
     # Full-flash merged image for the browser installer.
     ( cd build && esptool --chip "$t" merge_bin -o "../$DIST/daikin-altherma-esp32${sfx}-merged.bin" @flash_args )
+
+    # Archive the unstripped ELF (+ its checksum) so a core dump from THIS build can be symbolized
+    # later (scripts/decode-coredump.sh). The ELF is the ONLY artifact that decodes a dump — the
+    # shipped .bin can't — and it's matched to a dump by the app_elf_sha256 the dump embeds. Keep it
+    # per build so any version's dumps stay decodable.
+    cp "build/daikin-altherma-esp32.elf" "$DIST/daikin-altherma-esp32${sfx}.elf"
+    ( cd "$DIST" && sha256sum "daikin-altherma-esp32${sfx}.elf" > "daikin-altherma-esp32${sfx}.elf.sha256" )
 
     cf="$(chipfamily "$t")"
     builds_json="${builds_json:+$builds_json,}{\"chipFamily\":\"$cf\",\"parts\":[{\"path\":\"daikin-altherma-esp32${sfx}-merged.bin\",\"offset\":0}]}"

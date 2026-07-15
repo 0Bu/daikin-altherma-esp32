@@ -109,18 +109,28 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 (logic/heartbeat.hpp), published on a fixed 10s cadence (HEARTBEAT_INTERVAL_S) —
                 heap/uptime/wifi(+reconnects)/mqtt(pub count+fails+reconnects)/X10A bus
                 (rx_received/rx_fails) stats, 13 diagnostic HA entities streamed independently of
-                profile detection. Every publish funnels through one mqtt_publish() wrapper so
-                mqtt.count/mqtt.fails cover every topic, not just state.
+                profile detection. Also RETAINS the boot-time crash summary on <base>/<node>/crash
+                (logic/crashinfo.hpp) once per (re)connect — last reset reason + a "dump waiting"
+                flag as 2 more diagnostic HA entities (reason/backtrace only, never secrets or the raw
+                dump). Every publish funnels through one mqtt_publish() wrapper so mqtt.count/mqtt.fails
+                cover every topic, not just state.
 ota_update.cpp  pull-based signed OTA + rollback health gate (check/download: TODO)
 diag_log.cpp    in-RAM diag ring served by GET /diag
+diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + core-dump SUMMARY
+                (esp_core_dump_get_summary: crashed task/PC/backtrace/app-elf-sha) into a cached
+                CrashInfo (logic/crashinfo.hpp); read by /status.last_crash + the MQTT crash topic —
+                the summary is NEVER re-parsed on a request path (build_status_json also runs in the
+                poll task's WS broadcaster, which only self-guards std::bad_alloc by dropping the frame)
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, config_model,
-                discovery, detect, mqtt_group, heartbeat, board_pins). detect.hpp narrows the
+                discovery, detect, mqtt_group, heartbeat, crashinfo, board_pins). detect.hpp narrows the
                 Altherma-only model profiles from a bus fingerprint (page mask + capacity) to a
                 register-equivalent candidate set + a best-fit representative (detect_best);
                 mqtt_group.hpp maps a register page to a friendly group name and builds the grouped
                 state JSON; heartbeat.hpp builds the board/link diagnostics JSON + its diagnostic HA
-                discovery configs; board_pins.hpp = per-target usable X10A GPIOs (the RX/TX
-                pin-picker dropdown when detection hasn't locked the pins).
+                discovery configs; crashinfo.hpp turns a captured CrashInfo (reset reason + core-dump
+                summary) into the last_crash JSON / MQTT crash payload + a paste-friendly text bundle,
+                and classifies which reset reasons are faults; board_pins.hpp = per-target usable X10A
+                GPIOs (the RX/TX pin-picker dropdown when detection hasn't locked the pins).
 def/            embedded per-model value profiles + registry (incl. the generic Altherma fallback =
                 universal register core) + models_catalog.hpp (GET /models) + model_names.hpp
                 (id→display/family/marketing name for /status) + signatures.hpp (Altherma-only
@@ -149,10 +159,13 @@ offset/size stable across versions.
 
 ```
 GET  /            embedded web UI (gzipped into the app binary)
-GET  /status      version, platform, uptime_s, pins_avail[] (per-target usable X10A GPIOs for the
-                  RX/TX picker — logic/board_pins.hpp), wifi, mqtt, hp{proto,rx,tx,connected,
+GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity — matches a core dump
+                  to its .elf), pins_avail[] (per-target usable X10A GPIOs for the RX/TX picker —
+                  logic/board_pins.hpp), wifi, mqtt, hp{proto,rx,tx,connected,
                   last_ok_s,registers,values,crc_err,timeout_err}, profile{id},
-                  detect{proto,valid,capacity_kw,ou_eeprom,candidates[],families[],ambiguous,
+                  last_crash (null on a clean boot, else {reason,reason_code,fault,coredump,task,pc,
+                  backtrace[],corrupted,elf_sha256} from the boot-time cache — drives the crash
+                  banner), detect{proto,valid,capacity_kw,ou_eeprom,candidates[],families[],ambiguous,
                   model{name,family,marketing}} — drives the dashboard ESP32 board card + model card.
                   RX/TX are auto-detected: read-only on the card while the bus answers, a pins_avail
                   dropdown (re-runs detection) when it doesn't.
@@ -168,7 +181,9 @@ GET  /models      pin hint + catalog metadata (def/models_catalog.hpp). Detectio
 GET  /diag[?verbose=0|1][?clear=1]   in-memory diag log
 GET  /scan        WiFi scan (setup)
 GET  /coredump[?clear=1]   stream the flash core-dump image (chunked octet-stream; 404 if none);
-                  ?clear=1 erases the coredump partition
+                  ?clear=1 erases the coredump partition. Decode offline against the matching-version
+                  .elf: scripts/decode-coredump.sh coredump.bin (CI archives the .elf per build). The
+                  UI surfaces a crash banner + one-click download when /status.last_crash is set.
 POST /set_wifi    {ssid,pass} -> persist + reboot
 POST /set_mqtt    {broker,user,pass} -> persist + reboot ("" disables)
 POST /set_hp      {profile,rx,tx} -> validate + apply live (no reboot). rx/tx PERSIST (the physical
@@ -199,7 +214,9 @@ also stops the poll cycle and drops MQTT availability.
 ```bash
 scripts/run-mock-tests.sh                              # host logic tests (the fast loop)
 screen /dev/cu.usbmodemXXXX 115200                     # serial monitor (native USB on s3)
-curl http://daikin-altherma-esp32.local/status | jq          # device status
+curl http://daikin-altherma-esp32.local/status | jq          # device status (incl. last_crash)
 curl http://daikin-altherma-esp32.local/values | jq          # decoded values
+curl http://daikin-altherma-esp32.local/coredump -o coredump.bin   # pull a crash dump (if any)
+scripts/decode-coredump.sh coredump.bin                # symbolize it against the matching .elf
 esptool --chip esp32s3 -p <port> erase_flash           # wipe NVS (reset config)
 ```

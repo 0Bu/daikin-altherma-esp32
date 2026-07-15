@@ -312,6 +312,29 @@ Structure:
   - A dedicated `coredump` partition of size `0xc000` (48 KB) is placed at offset `0x12000` (in the unused gap between `phy_init` and `ota_0`), leaving the start offsets of `nvs`, `otadata`, `phy_init`, `ota_0`, and `ota_1` completely untouched for backward compatibility and OTA safety.
   - Exposed via a chunked HTTP GET endpoint `/coredump` (implemented in `http_status.cpp`) that streams the binary crash dump in 512-byte blocks to prevent OOM errors on the tight ESP32 heap.
   - Supports erasing the partition via `GET /coredump?clear=1` (invokes `esp_core_dump_image_erase()`).
+  - **Boot-time capture + surfacing (so a crash isn't a silent blob in flash).** `diag_crash.cpp`
+    runs once early in `app_main`: it reads `esp_reset_reason()` and, if a valid dump exists, parses
+    its **summary** (`esp_core_dump_get_summary()` — crashed task, exception PC, backtrace PCs, and
+    the crashed build's `app_elf_sha256`) into a cached `CrashInfo`. The pure formatting is
+    `logic/crashinfo.hpp` (host-tested); the summary is parsed **once** and cached — never re-read
+    from flash on a request path, since `build_status_json_string()` also runs in the poll task's
+    WebSocket broadcaster (which only self-guards `std::bad_alloc` by dropping the frame). A *fault*
+    reset (panic / watchdog / brown-out / CPU lockup) or an orphan dump is "notable"; a clean
+    power-on / software reboot is not.
+  - **How a user hands a crash over.** `GET /status.last_crash` is `null` on a clean boot, else the
+    cached summary; the running app's `app_elf_sha256` is also on `/status`. The web UI shows a crash
+    **banner** (`renderCrashBanner()`) with the reset reason + hex backtrace, a one-click
+    `coredump.bin` download, and a "copy diagnostics" bundle (`/status` + `/diag` + summary) for a bug
+    report. The MQTT bridge additionally **retains** the summary on `<base>/<node>/crash` (reason +
+    "dump waiting" flag as 2 diagnostic HA entities — reason/backtrace only, never secrets or the raw
+    dump), so Home Assistant (or Telegraf → VictoriaLogs) sees crashes over time.
+  - **Decoding (maintainer side).** A raw dump is useless without the *matching-version* unstripped
+    `.elf` (the shipped `.bin` has no symbols), so CI archives `daikin-altherma-esp32.elf` + its
+    sha256 per build (artifact + Release asset, `scripts/ci-build-all.sh`). `scripts/decode-coredump.sh
+    coredump.bin [app.elf]` runs `esp-coredump info_corefile` inside the CI-pinned ESP-IDF Docker
+    image and matches the dump to the ELF by `app_elf_sha256` (warns on mismatch). VictoriaTraces is
+    *not* the sink for this — a crash is a log/event, not a span; VictoriaLogs (via the retained MQTT
+    topic + Telegraf) is.
 - **Signed OTA** (Secure Boot v2 RSA-3072 *without* hardware Secure Boot): the running app verifies
   the signature before installing. The **connectivity health gate is implemented** (commit only after
   a base window AND getting online, else stay `PENDING_VERIFY` → a reboot rolls back); the **pull

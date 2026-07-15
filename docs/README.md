@@ -167,12 +167,14 @@ LAN only, see [SECURITY.md](SECURITY.md).
 
 ```
 GET  /  (alias /index.html)        # embedded web UI (gzipped into the app binary)
-GET  /status                       # { version, platform, uptime_s, pins_avail:[..],
+GET  /status                       # { version, platform, uptime_s, app_elf_sha256, pins_avail:[..],
                                    #   wifi:{ssid,rssi,ip},
                                    #   mqtt:{configured,connected,tls,broker,error?},
                                    #   hp:{proto,rx,tx,connected,last_ok_s,
                                    #        registers,values,crc_err,timeout_err},
                                    #   profile:{id},
+                                   #   last_crash: null | {reason,reason_code,fault,coredump,
+                                   #        task,pc,backtrace[],corrupted,elf_sha256},
                                    #   detect:{proto,valid,capacity_kw,ou_eeprom,candidates[],
                                    #        families[],ambiguous,model:{name,family,marketing}} }
 GET  /values                       # decoded readings [{label,value,unit}] (last poll cycle)
@@ -184,7 +186,8 @@ GET  /models                       # profile catalog + pin hint (detection is au
 GET  /diag[?verbose=0|1][?clear=1] # plain-text in-memory diag log (raw RX frames when verbose)
 GET  /scan                         # WiFi scan for the setup portal → [{ssid,rssi,auth}]
 GET  /coredump[?clear=1]           # stream the flash core-dump image (chunked; 404 if none);
-                                   #   ?clear=1 erases the coredump partition
+                                   #   ?clear=1 erases the coredump partition. Decode offline with
+                                   #   scripts/decode-coredump.sh coredump.bin (matching-version .elf).
 POST /set_wifi                     # { ssid, pass } → persist + reboot
 POST /set_mqtt                     # { broker, user?, pass? } → persist + reboot ("" disables)
 POST /set_hp                       # { profile?, rx?, tx? } → apply live (no reboot); rx/tx PERSIST
@@ -224,6 +227,12 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   `<prefix>/sensor/<node>/<object>/config` (retained) whose `value_template` reads the group+object
   out of that JSON. Availability/LWT `<base>/<node>/status`. `<base>` defaults `daikin-altherma-esp32`,
   `<prefix>` `homeassistant`.
+- **Diagnostics topics.** `<base>/<node>/heartbeat` (board/link health on a fixed 10 s cadence —
+  heap, uptime, WiFi/MQTT/bus counters) and `<base>/<node>/crash` (retained; last reset reason + a
+  "dump waiting" flag, published once per (re)connect) each expose their own `entity_category:
+  diagnostic` HA sensors. The crash topic carries only the reason + a hex backtrace — never a secret
+  or the raw dump; pull the full dump from `GET /coredump` and decode it with
+  `scripts/decode-coredump.sh`.
 - **Autodiscovery streaming.** A full Altherma value set can exceed 10 KB of discovery JSON;
   discovery is emitted incrementally (chunked) so it never needs one large contiguous heap block.
 

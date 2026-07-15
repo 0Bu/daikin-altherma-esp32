@@ -85,9 +85,12 @@ in-place config is the MQTT broker (a **modal** off the dashboard's MQTT card) a
 - MQTT is optional — an empty broker disables it.
 
 `GET /status` exposes the fields the dashboard keys off:
-`version`, `platform`, `uptime_s`, `pins_avail[]` (per-target usable X10A GPIOs for the RX/TX picker),
+`version`, `platform`, `uptime_s`, `app_elf_sha256` (build identity, shown in the crash banner),
+`pins_avail[]` (per-target usable X10A GPIOs for the RX/TX picker),
 `wifi{ssid,ip,rssi,connected}`, `mqtt{configured,connected,tls,broker}`,
 `hp{proto,rx,tx,connected,last_ok_s,…}`, `profile{id}`,
+`last_crash` (`null` on a clean boot, else `{reason,reason_code,fault,coredump,task,pc,backtrace[],
+corrupted,elf_sha256}` — drives the crash banner),
 `detect{proto,valid,capacity_kw,ou_eeprom,candidates[],families[],ambiguous,model{name,family,
 marketing}}` (drives the dashboard ESP32 board card + the read-only model card).
 
@@ -136,6 +139,13 @@ the **product name**). There is **no settings gear** — the app has no other sc
 
 Body, ordered:
 
+0. **Crash banner** (only when `last_crash` is set — a fault reset or a core dump waiting; hidden on a
+   clean boot). An `--err`-accented card **above the hero**: title "Device restarted after a crash",
+   a meta line (reset reason · crashed task · fw version · short `app_elf_sha256`), the raw hex
+   backtrace, and actions — **Download crash report** (`GET /coredump`, shown only when a dump
+   exists), **Copy diagnostics** (`/status` + `/diag` + summary to the clipboard for a bug report),
+   and **Dismiss**. Dismissal is keyed to the crash signature, so a *new* crash re-shows it. Lives
+   outside the poll-rebuilt card grid, so its dismissed state survives re-renders.
 1. **Status hero** (navy band): operation mode (Heating / Cooling / DHW / Standby / Off) as the
    headline, with fault state. Colour: `--ok` running, `--warn`/`--err` on fault; grey when no data.
    Fault text and the last-poll age surface in the hero sub-line.
@@ -204,6 +214,9 @@ enabled/available values are hidden.
 - **Card** — `--card`, 1px `--line`, radius 12; section title small-caps `--muted`.
 - **Toast** — bottom-centre, transient, for Save outcomes ("Saved", "Rebooting…", "Failed").
 - **Hero** — navy band, brand/white text, one headline + one sub-line.
+- **Crash banner** — `--err`-accented card above the hero (§5.3 item 0), shown only when
+  `last_crash` is set: title + meta + hex backtrace, with Download / Copy-diagnostics / Dismiss
+  actions. Small `.sm` buttons + a quiet `.ghost` Dismiss.
 
 ## 8. States & feedback
 
@@ -220,6 +233,10 @@ transition). Specific:
   5 s (hero shows "Unreachable — retrying…"), no hard error page.
 - **Empty**: pre-first-poll dashboard shows "Waiting for first poll…"; unknown model shows the
   *Generic* hint.
+- **Post-crash**: if the last reset was a fault (or a core dump is waiting), the crash banner (§5.3
+  item 0) appears above the hero until dismissed. "Copy diagnostics" toasts "Diagnostics copied — paste
+  into a bug report" on success, or "Copy failed — open /coredump and /diag manually" if the clipboard
+  is unavailable.
 - **Errors**: 4xx from a write → inline field error + toast; 503 (device OOM) → "Device busy, retry".
 
 ## 9. Responsive & accessibility
