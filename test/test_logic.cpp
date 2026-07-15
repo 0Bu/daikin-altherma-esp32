@@ -11,6 +11,7 @@
 #include "logic/board_pins.hpp"
 #include "logic/config_model.hpp"
 #include "logic/convert.hpp"
+#include "logic/crashinfo.hpp"
 #include "logic/crc.hpp"
 #include "logic/detect.hpp"
 #include "logic/discovery.hpp"
@@ -562,6 +563,92 @@ static void test_board_pins() {
     CHECK(board_pins(nullptr).count == s3.count);
 }
 
+static void test_crashinfo() {
+    const std::string base = "daikin-altherma-esp32", node = "daikin_abc123";
+
+    // Reason slug + fault classification: a software reboot (config save / OTA) and a clean power-on
+    // are NORMAL; a panic / watchdog / brown-out / CPU lockup is a fault.
+    CHECK(std::string(crash_reason_slug(1)) == "poweron");
+    CHECK(std::string(crash_reason_slug(3)) == "sw");
+    CHECK(std::string(crash_reason_slug(4)) == "panic");
+    CHECK(std::string(crash_reason_slug(6)) == "task_wdt");
+    CHECK(std::string(crash_reason_slug(9)) == "brownout");
+    CHECK(std::string(crash_reason_slug(15)) == "cpu_lockup");
+    CHECK(std::string(crash_reason_slug(999)) == "unknown");
+    CHECK(!crash_reason_is_fault(1) && !crash_reason_is_fault(3) && !crash_reason_is_fault(2));
+    CHECK(crash_reason_is_fault(4) && crash_reason_is_fault(5) && crash_reason_is_fault(6));
+    CHECK(crash_reason_is_fault(9) && crash_reason_is_fault(14) && crash_reason_is_fault(15));
+
+    // Clean boot: reason reported, but not notable (no banner) and no summary fields.
+    CrashInfo clean;
+    clean.reason = 3;   // ESP_RST_SW
+    CHECK(!crash_is_notable(clean));
+    CHECK(build_crash_json(clean) == "{\"reason\":\"sw\",\"reason_code\":3,\"fault\":false,\"coredump\":false}");
+
+    // An orphan core-dump with no fault reason is still notable (a dump is waiting to be pulled).
+    CrashInfo orphan;
+    orphan.reason = 1;   // poweron
+    orphan.coredump = true;
+    CHECK(crash_is_notable(orphan));
+
+    // Panic with a parsed summary: exact JSON + text, backtrace as raw PC hex.
+    CrashInfo panic;
+    panic.reason       = 4;   // ESP_RST_PANIC
+    panic.coredump     = true;
+    panic.have_summary = true;
+    std::snprintf(panic.task, sizeof(panic.task), "%s", "mqtt_pub");
+    panic.pc           = 0x400d1234;
+    panic.bt[0]        = 0x400d1234;
+    panic.bt[1]        = 0x400d5678;
+    panic.bt_depth     = 2;
+    panic.bt_corrupted = false;
+    std::snprintf(panic.elf_sha, sizeof(panic.elf_sha), "%s", "abc123");
+    CHECK(crash_is_notable(panic));
+    CHECK(build_crash_json(panic) ==
+          "{\"reason\":\"panic\",\"reason_code\":4,\"fault\":true,\"coredump\":true,"
+          "\"task\":\"mqtt_pub\",\"pc\":\"0x400d1234\","
+          "\"backtrace\":[\"0x400d1234\",\"0x400d5678\"],\"corrupted\":false,\"elf_sha256\":\"abc123\"}");
+    CHECK(build_crash_text(panic) ==
+          "reset=panic  coredump=yes\ntask=mqtt_pub  pc=0x400d1234\n"
+          "backtrace: 0x400d1234 0x400d5678\nelf_sha256=abc123");
+
+    // bt_depth is clamped to the 16-entry buffer (a corrupt summary can over-report it).
+    CrashInfo over = panic;
+    over.bt_depth = 99;
+    const std::string oj = build_crash_json(over);
+    CHECK(oj.find("0x00000000") != std::string::npos);   // zero-filled tail entries, not OOB reads
+    size_t cnt = 0, at = 0;
+    while ((at = oj.find("0x", at)) != std::string::npos) { cnt++; at += 2; }
+    CHECK(cnt == 1 /*pc*/ + 16 /*bt[16]*/);
+
+    // Crash topic + the two diagnostic HA entities (reason sensor + coredump "problem" binary_sensor).
+    CHECK(crash_topic(base, node) == "daikin-altherma-esp32/daikin_abc123/crash");
+    const std::string ct = crash_topic(base, node);
+    const std::string av = availability_topic(base, node);
+    CHECK(CRASH_SENSOR_COUNT == 2);
+
+    const CrashSensor& reason = CRASH_SENSORS[0];
+    CHECK(std::string(reason.object_id) == "last_reset");
+    CHECK(crash_discovery_topic("homeassistant", node, reason)
+          == "homeassistant/sensor/daikin_abc123/last_reset/config");
+    const std::string rc = crash_discovery_config(node, ct, av, reason);
+    CHECK(rc.find("\"stat_t\":\"daikin-altherma-esp32/daikin_abc123/crash\"") != std::string::npos);
+    CHECK(rc.find("\"val_tpl\":\"{{ value_json.reason }}\"") != std::string::npos);
+    CHECK(rc.find("\"ent_cat\":\"diagnostic\"") != std::string::npos);
+    CHECK(rc.find("\"dev_cla\"") == std::string::npos);
+    CHECK(rc.find("pl_on") == std::string::npos);
+
+    const CrashSensor& dump = CRASH_SENSORS[1];
+    CHECK(std::string(dump.component) == "binary_sensor");
+    CHECK(crash_discovery_topic("homeassistant", node, dump)
+          == "homeassistant/binary_sensor/daikin_abc123/coredump/config");
+    const std::string dc = crash_discovery_config(node, ct, av, dump);
+    CHECK(dc.find("\"val_tpl\":\"{{ value_json.coredump | lower }}\"") != std::string::npos);
+    CHECK(dc.find("\"pl_on\":\"true\",\"pl_off\":\"false\"") != std::string::npos);
+    CHECK(dc.find("\"dev_cla\":\"problem\"") != std::string::npos);
+    CHECK(dc.find("\"ent_cat\":\"diagnostic\"") != std::string::npos);
+}
+
 int main() {
     test_crc();
     test_registers();
@@ -573,6 +660,7 @@ int main() {
     test_detect();
     test_mqtt_group();
     test_heartbeat();
+    test_crashinfo();
     test_health_gate();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }
     std::printf("%d logic test(s) FAILED\n", g_failures);

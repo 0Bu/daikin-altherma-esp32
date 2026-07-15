@@ -17,6 +17,16 @@ and the OTA-signing / key lifecycle.
   LAN this is acceptable; anywhere less trusted it is a remote credential-disclosure vector with no
   physical access needed. A dump is written only when the firmware actually crashes; erase it with
   `GET /coredump?clear=1` once retrieved so a stale image isn't left readable.
+  - **The crash *summary* is deliberately not sensitive.** What the firmware surfaces automatically —
+    `/status.last_crash`, the web-UI banner, and the retained `<base>/<node>/crash` MQTT topic — is
+    only the reset reason, the crashed task name, and raw program-counter/backtrace **addresses**.
+    Those hold no credentials, so it is safe to publish them to Home Assistant / VictoriaLogs. The
+    full memory image stays behind the manual `GET /coredump` pull; the automation never egresses it.
+  - **The archived `.elf` reveals symbols, not secrets.** CI keeps the unstripped ELF per build (to
+    decode dumps, `scripts/decode-coredump.sh`). It exposes function names and layout — expected for
+    an open-source firmware — but contains **no** runtime secrets (WiFi/MQTT credentials live only in
+    device NVS, never in the image). Signing still uses the offline OTA key, which is never built into
+    or derivable from the ELF.
 - **The heat-pump link is read-only.** The firmware only polls X10A registers; the X10A protocol
   has no write command, so the firmware cannot change the heat pump's settings or actuate it in any
   way. There are no control outputs.

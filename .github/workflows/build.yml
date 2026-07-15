@@ -123,6 +123,10 @@ jobs:
         if: always()
         run: rm -f ota_signing_key.pem
 
+      # Upload the bins AND the unstripped .elf (+ checksum): the .elf is the only artifact that can
+      # symbolize a core dump from this build (scripts/decode-coredump.sh), so retaining it per
+      # version/PR keeps every build's crashes decodable — even while the repo is private and cuts no
+      # public Release. Artifact retention (default 90 days) is the archive.
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -130,7 +134,10 @@ jobs:
             ${{ github.event_name == 'pull_request'
                 && format('daikin-altherma-esp32-pr{0}-{1}', github.event.pull_request.number, steps.version.outputs.version)
                 || format('daikin-altherma-esp32-{0}', steps.version.outputs.version) }}
-          path: dist/*.bin
+          path: |
+            dist/*.bin
+            dist/*.elf
+            dist/*.elf.sha256
 
       # PR preview installer (signed builds only) at gh-pages PR/<N>/. Public repos only.
       - name: Assemble PR preview site
@@ -150,7 +157,12 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
           generate_release_notes: true
-          files: dist/*.bin
+          # Attach the .elf (+ checksum) alongside the bins so a user's core dump can be decoded
+          # against the exact released firmware (scripts/decode-coredump.sh).
+          files: |
+            dist/*.bin
+            dist/*.elf
+            dist/*.elf.sha256
 
       - name: Configure Pages
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.event.repository.private == false

@@ -92,6 +92,28 @@ main { flex: 1; }
 .hero-mode { font-size: 33px; font-weight: 650; letter-spacing: -.6px; margin-top: 9px; }
 .hero-sub { font-size: 14.5px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
 
+/* ── Crash banner (dashboard alert when /status.last_crash is set) ─────────── */
+.crash-banner {
+  background: var(--card); border: 1px solid var(--err); border-left: 4px solid var(--err);
+  border-radius: var(--r-card); box-shadow: var(--shadow-card); padding: 16px 18px; margin-bottom: 14px;
+}
+.crash-head { display: flex; align-items: flex-start; gap: 12px; }
+.crash-ico {
+  flex: none; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%;
+  background: var(--err); color: #fff; font-weight: 700; font-size: 14px; display: grid; place-items: center;
+}
+.crash-txt { min-width: 0; }
+.crash-title { font-size: 15px; font-weight: 650; color: var(--fg); }
+.crash-meta { font-size: 13.5px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
+.crash-bt {
+  font-size: 12px; color: var(--muted); margin-top: 7px; padding: 7px 9px;
+  background: var(--soft); border-radius: 9px; overflow-x: auto; white-space: nowrap;
+}
+.crash-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
+.btn.sm { padding: 8px 13px; font-size: 13.5px; }
+.btn.ghost { background: none; color: var(--muted); border-color: transparent; }
+.btn.ghost:hover { color: var(--fg); border-color: var(--line); }
+
 /* ── Value groups (dashboard) ───────────────────────────────────────────── */
 #valueGroups { margin-top: 14px; }
 .vgroup + .vgroup { margin-top: 12px; }

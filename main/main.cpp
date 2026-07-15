@@ -15,6 +15,7 @@
 #include "nvs_flash.h"
 
 #include "config.hpp"
+#include "diag_crash.hpp"
 #include "diag_log.hpp"
 #include "hp_poll.hpp"
 #include "http_server.hpp"
@@ -39,6 +40,7 @@ extern "C" void app_main() {
     daik::status_led_start();
 
     daik::diag_log_init();
+    daik::diag_crash_capture();          // read reset reason + core-dump summary once, before services
     daik::config_load();
     const daik::Config& cfg = daik::config();
     ESP_LOGI(TAG, "daikin-altherma-esp32 %s", esp_app_get_description()->version);

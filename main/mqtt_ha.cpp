@@ -10,13 +10,18 @@
 //   • Every HEARTBEAT_INTERVAL_S (10 s): rebuild + publish the board/link diagnostics JSON
 //     (logic/heartbeat.hpp) to <base>/<node>/heartbeat — diagnostics, not real-time telemetry, so
 //     unlike the state topic it's a fixed cadence, not publish-on-change.
+//   • Once per (re)connect: RETAIN the boot-time crash summary (logic/crashinfo.hpp) on
+//     <base>/<node>/crash — last reset reason + a "dump waiting" flag, as two diagnostic HA
+//     entities. Reason/backtrace only; never the raw dump or any secret.
 // Read-only: no command subscriptions. No-op if mqtt_uri is empty. Memory-safe: discovery is one
 // small publish per value; the state JSON is a single few-KB build, guarded against OOM.
 #include "mqtt_ha.hpp"
 #include "config.hpp"
 #include "def/registry.hpp"
+#include "diag_crash.hpp"
 #include "diag_log.hpp"
 #include "hp_poll.hpp"
+#include "logic/crashinfo.hpp"
 #include "logic/discovery.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/mqtt_group.hpp"
@@ -47,7 +52,7 @@ static volatile bool            s_connected = false;
 static volatile bool            s_announce  = false;  // set on connect -> task re-announces
 
 // Persisted so the pointers handed to esp-mqtt (and reused by the task) stay valid.
-static std::string s_uri, s_user, s_pass, s_node, s_base, s_prefix, s_avail, s_state, s_heartbeat;
+static std::string s_uri, s_user, s_pass, s_node, s_base, s_prefix, s_avail, s_state, s_heartbeat, s_crash;
 static std::string s_announced_profile;               // profile we last published discovery for
 static std::string s_last_json;                       // last state JSON published (dedup guard)
 static bool         s_heartbeat_announced = false;     // diagnostic discovery streamed this connection?
@@ -146,6 +151,24 @@ static void publish_heartbeat_discovery() {
     }
 }
 
+// Crash/reset diagnostics (logic/crashinfo.hpp): stream the two diagnostic discovery configs, then
+// RETAIN the boot-time crash summary on <base>/<node>/crash. The payload is captured once at boot
+// (diag_crash.cpp) so it never changes at runtime — retained + published once per (re)connect means
+// a late subscriber (Home Assistant, or Telegraf → VictoriaLogs) still sees the last reset. It is
+// ALWAYS published (even a clean boot reports reason="sw"/"poweron"), so the "Last Reset Reason"
+// sensor reflects the current boot instead of a stale crash. Never carries secrets or the raw dump —
+// just the reason + a raw-hex backtrace; the full binary stays behind GET /coredump.
+static void publish_crash() {
+    for (int i = 0; i < CRASH_SENSOR_COUNT; i++) {
+        const CrashSensor& s = CRASH_SENSORS[i];
+        const std::string ct  = crash_discovery_topic(s_prefix, s_node, s);
+        const std::string cfg = crash_discovery_config(s_node, s_crash, s_avail, s);
+        mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained
+    }
+    const std::string js = build_crash_json(diag_crash_info());
+    mqtt_publish(s_crash, js.c_str(), static_cast<int>(js.size()), 0, 1);   // retained
+}
+
 // Snapshot board/link diagnostics from the IDF heap/timer APIs + the poll/WiFi/MQTT state, and
 // publish it to the heartbeat topic (not retained). Called on a fixed HEARTBEAT_INTERVAL_S cadence
 // (mqtt_task) — diagnostics, not real-time telemetry, so unlike the state topic it always publishes
@@ -226,6 +249,7 @@ static void mqtt_task(void*) {
                 }
                 if (!s_heartbeat_announced) {                  // board/link diagnostics — independent
                     publish_heartbeat_discovery();              // of heat-pump profile detection
+                    publish_crash();                            // last reset reason + dump-waiting flag
                     s_heartbeat_announced = true;
                 }
                 const std::string prof = config().profile;
@@ -311,6 +335,7 @@ void mqtt_ha_start() {
     s_avail     = availability_topic(s_base, s_node);
     s_state     = state_topic(s_base, s_node);
     s_heartbeat = heartbeat_topic(s_base, s_node);
+    s_crash     = crash_topic(s_base, s_node);
 
     if (!build_client()) return;                               // policy error already surfaced
     esp_mqtt_client_start(s_client);

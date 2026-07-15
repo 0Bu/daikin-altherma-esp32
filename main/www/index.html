@@ -26,6 +26,9 @@
     <!-- ═══ DASHBOARD (the only screen) ═══ -->
     <section class="view active" id="viewDash">
       <div class="pad">
+        <!-- Crash banner: shown when /status.last_crash is set (a fault reset or a core dump waiting).
+             Rendered by renderCrashBanner() from app.js; dismissible per crash signature. -->
+        <div class="crash-banner" id="crashBanner" hidden></div>
         <div class="hero">
           <div class="hero-kicker"><span class="hero-dot" id="heroDot"></span><span id="heroKicker">—</span></div>
           <div class="hero-mode" id="heroMode">—</div>

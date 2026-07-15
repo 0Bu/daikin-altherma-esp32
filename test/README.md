@@ -30,6 +30,8 @@ regression fails in seconds instead of after four ESP-IDF builds.
 - `logic/board_pins.hpp` — per-target usable X10A GPIO lists (sorted, in range; the XIAO ESP32-S3
   reference set excludes not-broken-out pins).
 - `logic/discovery.hpp` — object-id slugging + the discovery config JSON.
+- `logic/crashinfo.hpp` — reset-reason slug/fault classification, the last_crash / MQTT crash JSON +
+  text bundle (incl. backtrace clamp), and the crash diagnostic HA discovery configs.
 - `def/registry.hpp` — profile lookup + generic fallback.
 
 ## Adding a test
