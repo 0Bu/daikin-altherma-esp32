@@ -198,6 +198,9 @@ function vrow(k, v, opt = {}) {
 const vcard = (label, rows) => `<div class="vgroup"><div class="card">` +
   `<div class="section-label">${esc(label)}</div>${rows}</div></div>`;
 const editIcon = `<svg class="vcard-edit-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
+// Gray padlock shown next to the broker URL when the MQTT link is TLS (mqtts://) — a quiet
+// "this connection is encrypted" marker, not a status row.
+const lockIcon = `<svg class="vrow-lock" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="TLS encrypted"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`;
 const vcardEdit = (label, rows, edit) => `<div class="vgroup"><div class="card">` +
   `<button class="vgroup-head vgroup-btn" type="button" data-edit="${esc(edit)}" aria-label="Edit ${esc(label)}">` +
   `<span class="section-label">${esc(label)}</span>${editIcon}</button>` +
@@ -264,10 +267,11 @@ function statusCardsHtml() {
     mqtt = vrow("Status", "Disabled");
   } else {
     const st = m.connected ? ["Connected", "ok"] : m.error ? ["Error", "err"] : ["Connecting…", "warn"];
+    // A gray padlock trails the broker URL when the link is TLS (mqtts://) — the encryption state
+    // is shown inline as a marker, not as its own row.
+    const broker = esc(m.broker || "—") + (m.tls ? lockIcon : "");
     mqtt = vrow("Status", st[0], { cls: st[1] }) +
-      vrow("Broker", m.broker || "—") +
-      vrow("Encryption", m.tls ? "TLS" : "Off") +
-      vrow("Home Assistant", m.connected ? "Discovery active" : "—", { cls: m.connected ? "ok" : "" });
+      vrow("Broker", broker, { html: true });
   }
 
   // Outdoor unit as a full-width heading — model names are long and don't fit a label→value row.
