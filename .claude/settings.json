@@ -41,6 +41,28 @@
     ]
   },
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/guard-secrets.sh\"",
+            "statusMessage": "Checking for private key material…"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/guard-partitions.sh\"",
+            "statusMessage": "Checking partition-table safety…"
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [
