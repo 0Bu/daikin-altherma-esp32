@@ -17,6 +17,7 @@
 #include "config.hpp"
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
+#include "syslog.hpp"
 #include "hp_poll.hpp"
 #include "http_server.hpp"
 #include "mqtt_ha.hpp"
@@ -42,6 +43,7 @@ extern "C" void app_main() {
     daik::diag_log_init();
     daik::diag_crash_capture();          // read reset reason + core-dump summary once, before services
     daik::config_load();
+    daik::syslog_init();
     const daik::Config& cfg = daik::config();
     ESP_LOGI(TAG, "daikin-altherma-esp32 %s", esp_app_get_description()->version);
     ESP_LOGI(TAG, "cfg: profile=%s proto=%c rx=%d tx=%d",

@@ -120,5 +120,19 @@ menu "Daikin Altherma Configuration"
             Invert the LED logic. On Seeed XIAO boards, the built-in LED is Active Low
             (GPIO Low = LED ON).
 
+    # ── Syslog ────────────────────────────────────────────────────────────────
+    config DAIKIN_SYSLOG_HOST
+        string "Syslog server host/IP"
+        default ""
+        help
+            IP address or hostname of the Syslog server. Empty = Syslog disabled.
+            NVS "syslog_host" overrides this.
+
+    config DAIKIN_SYSLOG_PORT
+        int "Syslog server port"
+        default 514
+        help
+            Port of the Syslog server (usually 514). NVS "syslog_port" overrides this.
+
 endmenu
 

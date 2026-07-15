@@ -149,6 +149,7 @@ User credentials + the X10A link cache are persisted; the model is re-detected o
 | `wifi_ssid` / `wifi_pass` | Station credentials (else the setup AP runs). |
 | `mqtt_uri` | HA-bridge broker (`host:port` or full `mqtt(s)://…`; empty = MQTT off). |
 | `mqtt_user` / `mqtt_pass` | Optional broker auth. |
+| `syslog_host` / `syslog_port` | Optional syslog server (UDP, RFC 5424); empty host = syslog off, port defaults to 514. |
 | `rx_pin` / `tx_pin` / `proto` | X10A link cache (physical wiring + framing); tried first by the sweep, re-saved on change. |
 
 Not persisted: the **hostname** is fixed at `daikin-altherma-esp32`, the **poll cadence** at 1 s,
@@ -170,6 +171,7 @@ GET  /  (alias /index.html)        # embedded web UI (gzipped into the app binar
 GET  /status                       # { version, platform, uptime_s, app_elf_sha256, pins_avail:[..],
                                    #   wifi:{ssid,rssi,ip},
                                    #   mqtt:{configured,connected,tls,broker,error?},
+                                   #   syslog:{configured,resolved,reachable,host,port,error?},
                                    #   hp:{proto,rx,tx,connected,last_ok_s,
                                    #        registers,values,crc_err,timeout_err},
                                    #   profile:{id},
@@ -190,6 +192,8 @@ GET  /coredump[?clear=1]           # stream the flash core-dump image (chunked; 
                                    #   scripts/decode-coredump.sh coredump.bin (matching-version .elf).
 POST /set_wifi                     # { ssid, pass } → persist + reboot
 POST /set_mqtt                     # { broker, user?, pass? } → persist + reboot ("" disables)
+POST /set_syslog                   # { host, port } → validate port range, persist + reboot ("" host
+                                   #   disables). DNS/reachability resolve async, shown in /status.syslog
 POST /set_hp                       # { profile?, rx?, tx? } → apply live (no reboot); rx/tx PERSIST
                                    #   (pin cache), profile session-only; proto auto-detected, not accepted.
                                    #   The ESP32 card's pin dropdown posts {profile:"auto",rx,tx} to re-detect.

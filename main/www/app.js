@@ -255,7 +255,7 @@ function esp32CardHtml() {
 
 // WiFi · MQTT · Model status cards, from /status (live link, broker/HA-discovery, detected unit).
 function statusCardsHtml() {
-  const w = S.status?.wifi || {}, m = S.status?.mqtt || {}, hp = S.status?.hp || {}, d = S.status?.detect || {};
+  const w = S.status?.wifi || {}, m = S.status?.mqtt || {}, sy = S.status?.syslog || {}, hp = S.status?.hp || {}, d = S.status?.detect || {};
   const wifi = (w.connected && (w.rssi != null || w.ssid))
     ? vrow("Signal", w.rssi != null ? signalBars(w.rssi) : "—", { html: true }) +
       vrow("Network", w.ssid || "—") +
@@ -274,6 +274,20 @@ function statusCardsHtml() {
       vrow("Broker", broker, { html: true });
   }
 
+  let syslog;
+  if (!sy.configured) {
+    syslog = vrow("Status", "Disabled");
+  } else {
+    // Delivery is gated on DNS only (resolved); reachability is an advisory ping hint — "Enabled" once
+    // resolving, warn-flagged (still forwarding) when the host doesn't answer the probe.
+    let st;
+    if (sy.error) st = [sy.error, "err"];
+    else if (sy.resolved) st = sy.reachable ? ["Enabled", "ok"] : ["Enabled · host not answering ping", "warn"];
+    else st = ["Resolving…", "warn"];
+    syslog = vrow("Status", st[0], { cls: st[1] }) +
+      vrow("Server", sy.host ? `${sy.host}:${sy.port || 514}` : "—");
+  }
+
   // Outdoor unit as a full-width heading — model names are long and don't fit a label→value row.
   // The X10A link + protocol live on the ESP32 card (they're about the board's bus), not here.
   // Identity is bus-derived: the model name degrades to the brand offline (hpModelName), and capacity
@@ -284,7 +298,7 @@ function statusCardsHtml() {
 
   // Model identity is only meaningful while the bus answers — hide the card entirely when the
   // heat-pump link is down instead of naming a unit (or showing a stale capacity) that isn't live.
-  return esp32CardHtml() + vcard("WiFi", wifi) + vcardEdit("MQTT", mqtt, "mqtt") + (hp.connected ? vcard("Model", model) : "");
+  return esp32CardHtml() + vcard("WiFi", wifi) + vcardEdit("MQTT", mqtt, "mqtt") + vcardEdit("Syslog", syslog, "syslog") + (hp.connected ? vcard("Model", model) : "");
 }
 // Heat-pump value groups (grouped by domain, §6) as card markup. Hidden entirely while the
 // heat-pump link is down — there's nothing to poll, so "Waiting for the first poll…" would be
@@ -327,6 +341,20 @@ const validMqtt = (h) => {
   h = h.trim();
   return !h || /^[\w.\-]+:\d{2,5}$/.test(h) || /^(mqtts?|wss?):\/\/[\w.\-]+(:\d{2,5})?$/.test(h);
 };
+
+// ── Syslog (dashboard edit modal) ───────────────────────────────────────────
+function fillSyslog() {
+  const sy = S.status?.syslog || {};
+  $("slHost").value = sy.host ? `${sy.host}:${sy.port || 514}` : "";
+}
+function openSyslog() {
+  fillSyslog();
+  $("slHost").classList.remove("invalid");
+  $("slError").hidden = true;
+  $("syslogModal").hidden = false;
+  $("slHost").focus();
+}
+function closeSyslog() { $("syslogModal").hidden = true; }
 function signalBars(rssi) {
   const lit = rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1;
   const tone = rssi >= -70 ? "var(--ok)" : "var(--warn)";
@@ -397,6 +425,7 @@ function wire() {
   $("valueGroups").addEventListener("click", (e) => {
     const edit = e.target.closest("[data-edit]");
     if (edit && edit.dataset.edit === "mqtt") { openMqtt(); return; }
+    if (edit && edit.dataset.edit === "syslog") { openSyslog(); return; }
     const act = e.target.closest("[data-act]");
     if (act && act.dataset.act === "ota") checkFirmwareUpdate();
   });
@@ -421,6 +450,66 @@ function wire() {
     saveReboot("/set_mqtt", { broker, user: $("mqUser").value, pass: $("mqPass").value }, () => { closeMqtt(); renderDashboard(); });
   });
   $("mqBroker").addEventListener("input", () => { $("mqBroker").classList.remove("invalid"); $("mqError").hidden = true; });
+
+  $("slHost").addEventListener("input", () => { $("slHost").classList.remove("invalid"); $("slError").hidden = true; });
+
+  $("slCancel").onclick = closeSyslog;
+  $("syslogBackdrop").onclick = closeSyslog;
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("syslogModal").hidden) closeSyslog(); });
+  $("syslogForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const raw = $("slHost").value.trim();
+    let host = "";
+    let port = 514;
+    if (raw) {
+      const idx = raw.lastIndexOf(":");
+      if (idx !== -1) {
+        host = raw.substring(0, idx);
+        port = parseInt(raw.substring(idx + 1), 10) || 514;
+      } else {
+        host = raw;
+      }
+    }
+    if (S.busy) return;
+    S.busy = true;
+    toast("Saving Syslog settings…", "info");
+    try {
+      const r = await post("/set_syslog", { host, port });
+      if (!r.ok) {
+        const errObj = await r.json().catch(() => ({}));
+        $("slHost").classList.add("invalid");
+        $("slError").textContent = errObj.error || "Invalid host or port";
+        $("slError").hidden = false;
+        S.busy = false;
+        return;
+      }
+    } catch {
+      $("slHost").classList.add("invalid");
+      $("slError").textContent = "Device connection lost";
+      $("slError").hidden = false;
+      S.busy = false;
+      return;
+    }
+    closeSyslog();
+    toast("Rebooting — reconnecting…", "info");
+    let tries = 0;
+    const poll = setInterval(async () => {
+      tries++;
+      try {
+        S.status = await j("/status");
+        clearInterval(poll);
+        S.busy = false;
+        toast("Saved", "ok");
+        renderDashboard();
+      } catch {
+        if (tries > 14) {
+          clearInterval(poll);
+          S.busy = false;
+          toast("Rebooted — reconnect to the device", "info");
+        }
+      }
+    }, 1500);
+  });
 }
 
 async function boot() {

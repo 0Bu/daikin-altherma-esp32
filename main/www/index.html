@@ -66,6 +66,24 @@
     </form>
   </div>
 
+  <!-- ═══ Syslog edit modal (opened from the dashboard Syslog card pencil) ═══ -->
+  <div class="modal" id="syslogModal" hidden>
+    <div class="modal-backdrop" id="syslogBackdrop"></div>
+    <form class="modal-card" id="syslogForm" role="dialog" aria-modal="true" aria-labelledby="syslogModalTitle">
+      <div class="section-label card-title" id="syslogModalTitle">Syslog server</div>
+      <label class="field">
+        <span class="field-label plain">Host : port</span>
+        <input class="input" name="host" id="slHost" placeholder="192.168.1.50:514" autocomplete="off">
+      </label>
+      <p class="hint err" id="slError" hidden></p>
+      <p class="hint">IP address or hostname and port of the Syslog server. Empty host disables Syslog.</p>
+      <div class="modal-actions">
+        <button class="btn secondary" type="button" id="slCancel">Cancel</button>
+        <button class="btn primary" type="submit" id="slBtn">Save</button>
+      </div>
+    </form>
+  </div>
+
   <div class="toasts" id="toasts"></div>
 </div>
 
