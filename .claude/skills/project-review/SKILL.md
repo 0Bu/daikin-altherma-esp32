@@ -22,3 +22,18 @@ A holistic pass before a PR merges. Not a linter — it checks the things that r
    value/CRC/converter changes are verified against known-good reference outputs.
 
 Report findings grouped by the above; block on doc drift and untested logic.
+
+## Recording the pass (merge gate — no file marker)
+
+The `require-project-review.sh` PreToolUse hook refuses every PR merge (`gh pr merge` **and**
+`mcp__github__merge_pull_request`) until this review is recorded in the PR body as a ticked,
+SHA-stamped checkbox whose stamp still matches the PR head. So when the review passes with **no
+blocking findings**, tick + stamp the PR's `/project-review` box with the reviewed commit:
+
+```
+- [x] `/project-review` clean — merge gate @ <short-sha>    # <short-sha> = git rev-parse --short=12 HEAD
+```
+
+Edit the PR body with `gh pr edit <pr> --body-file <file>` (or the GitHub MCP update tool in
+web/remote). Any later commit changes the head sha and re-stales the box, forcing a fresh review
+before the next merge. Don't tick it if findings block the merge — fix first.
