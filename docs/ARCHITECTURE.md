@@ -24,7 +24,11 @@ idioms are used throughout (`esp_http_server`, `uart_driver`, `esp-mqtt`).
 main.cpp            → boot: NVS init, WiFi (STA or setup AP), start HTTP server, start
                        poll engine + MQTT bridge, arm OTA health gate
 wifi.cpp/.hpp       → STA bring-up (all-channel scan → strongest AP by RSSI) + endless reconnect
-                       (first-boot budget → setup portal) + ICMP gateway watchdog + DHCP hostname + mDNS
+                       (first-boot budget → setup portal) + one-shot credential rollback (new creds
+                       fail to get a lease → restore NVS backup + reboot; ≥5 consecutive AUTH_FAIL/
+                       handshake-timeout disconnects after having been online → reboot to fallback) +
+                       ICMP gateway watchdog + DHCP hostname + mDNS; wifi_info() also reports the AP's
+                       BSSID + PHY standard + this STA's MAC
 hp_comm.cpp/.hpp    → X10A UART transport: request framing for protocol I and S, 9600 8E1,
                        CRC, timeout handling
 hp_detect.cpp/.hpp  → auto-detect glue: protocol sweep + page probe → bus fingerprint → candidate
@@ -36,8 +40,8 @@ hp_poll.cpp/.hpp    → poll engine task: builds the active register set from th
                        pushes the /events WebSocket (values each cycle, status every 4th)
 def/*.hpp           → embedded per-model value profiles (machine-generated in the ValueDef row
                        format); def/registry.hpp maps profile id→table, models_catalog.hpp = /models
-config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + link cache (pins/proto) persisted,
-                      model RAM-only; mutex-guarded snapshot via config()
+config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi rollback backup + link
+                      cache (pins/proto) persisted, model RAM-only; mutex-guarded snapshot via config()
 nvs_storage.cpp     → thin NVS helpers (namespaces, blobs, migration)
 http_server.cpp     → esp_http_server :80, wildcard dispatch + handle_all OOM try/catch (503)
 http_status.cpp     → GET / (web UI), /status, /values, /models, /diag, /scan, /coredump, and the
@@ -231,7 +235,7 @@ advertises Hash-to-Element so the faster/robuster PWE is used when the AP suppor
 fallback). The `STA_DISCONNECTED` handler logs the disconnect `reason` (15/202/204 = transient
 SAE/handshake, 201/211 = wrong creds) so a failed connect is diagnosable from `/diag`.
 
-Two layers keep the WiFi station link up:
+Three layers keep the WiFi station link up:
 
 - **Event-driven reconnect** on every `WIFI_EVENT_STA_DISCONNECTED`. First-ever connect keeps a
   bounded budget then falls back to the **setup portal** (credentials presumed wrong); once the
@@ -242,6 +246,11 @@ Two layers keep the WiFi station link up:
   `esp_wifi_disconnect()` so the endless-retry handler reconnects. Guarded to act only on a
   believed-up link and only if the gateway has answered at least once; it **never reboots** (a
   reboot during an AP outage would drop into the setup portal and abandon good credentials).
+- **Credential-change recovery** for WiFi edited *from the dashboard* (see "Web UI config flow"):
+  the one-shot `/set_wifi` backup lets a bad new SSID/password roll back to the last working network,
+  and a runtime guard reboots to that fallback after ≥5 consecutive AUTH_FAIL/handshake-timeout
+  disconnects that begin only *after* the device had been online (the "password changed on the router"
+  case) — distinct from the first-boot budget, which handles creds that were wrong from the start.
 
 ## Home Assistant MQTT bridge (`mqtt_ha.cpp`)
 
@@ -362,9 +371,16 @@ Structure:
 self-contained, pre-gzipped page at build time (`inline_assets.cmake`). The UI is a **single
 dashboard** — no Settings page, no sub-screens; it drives the config endpoints in place:
 
-- **WiFi** → `/set_wifi`, driven **only** from the captive `setup.html` (provisioned once). The main
-  app does not re-provision WiFi; the dashboard shows the live link read-only (SSID + IP + RSSI signal
-  bars from `/status.wifi`, populated by `wifi_info()`).
+- **WiFi** → `/set_wifi`, provisioned first from the captive `setup.html` and thereafter **re-editable
+  from a dashboard modal** off the WiFi card (pencil). Save validates SSID (1–32) + password (empty or
+  8–63) both in the UI and via the host-tested `wifi_credentials_valid()` (`logic/config_model.hpp`),
+  then persists + reboots. The dashboard shows the live link (SSID + IP + RSSI signal bars, plus the
+  associated AP's PHY standard + BSSID and this STA's MAC) from `/status.wifi`, populated by
+  `wifi_info()`. **One-shot rollback:** if new credentials were entered over the LAN and the STA can't
+  get a lease after the reboot, `wifi_start_sta()` restores the previous credentials from an NVS backup
+  and reboots again (cleared on a successful connect) — so a wrong SSID/password never strands the
+  device in the setup AP. A runtime guard also reboots to the fallback after ≥5 consecutive
+  AUTH_FAIL/handshake-timeout disconnects that begin only after the device had been online.
 - **MQTT** → `/set_mqtt` (edited from a dashboard modal off the MQTT card). Unlike Syslog, Save
   **pre-flights the broker synchronously** (DNS → TCP port → a short-lived esp-mqtt connect/auth,
   heap-guarded) and only persists + reboots on success — a bad host/port/password is rejected inline;

@@ -40,6 +40,29 @@
 
   </main>
 
+  <!-- ═══ WiFi edit modal (opened from the dashboard WiFi card pencil) ═══ -->
+  <div class="modal" id="wifiModal" hidden>
+    <div class="modal-backdrop" id="wifiBackdrop"></div>
+    <form class="modal-card" id="wifiForm" role="dialog" aria-modal="true" aria-labelledby="wifiModalTitle">
+      <div class="section-label card-title" id="wifiModalTitle">WiFi configuration</div>
+      <label class="field">
+        <span class="field-label plain">WiFi network (SSID)</span>
+        <input class="input" name="ssid" id="wfSSID" placeholder="SSID" required autocomplete="off">
+      </label>
+      <p class="hint err" id="wfSSIDError" hidden>SSID must be 32 characters or less</p>
+      <label class="field">
+        <span class="field-label plain">WiFi password</span>
+        <input class="input" name="pass" id="wfPass" type="password" placeholder="••••••••" autocomplete="off">
+      </label>
+      <p class="hint err" id="wfPassError" hidden>Password must be empty (open network) or between 8 and 63 characters</p>
+      <p class="hint">SSID is required. If connection to the new network fails, the device rolls back to the old WiFi settings.</p>
+      <div class="modal-actions">
+        <button class="btn secondary" type="button" id="wfCancel">Cancel</button>
+        <button class="btn primary" type="submit" id="wfBtn">Save</button>
+      </div>
+    </form>
+  </div>
+
   <!-- ═══ MQTT edit modal (opened from the dashboard MQTT card pencil) ═══ -->
   <div class="modal" id="mqttModal" hidden>
     <div class="modal-backdrop" id="mqttBackdrop"></div>

@@ -183,7 +183,7 @@ main { flex: 1; }
 
 /* signal bars (WiFi status card) */
 .signal { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
-.signal i { width: 3px; border-radius: 1px; background: var(--muted); opacity: .35; }
+.signal i { width: 3px; border-radius: 1px; background: currentColor; opacity: .35; }
 .signal i:nth-child(1) { height: 5px; } .signal i:nth-child(2) { height: 8px; }
 .signal i:nth-child(3) { height: 11px; } .signal i:nth-child(4) { height: 14px; }
 .signal.lit i.on { opacity: 1; }

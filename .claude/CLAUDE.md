@@ -85,13 +85,18 @@ broken out on the XIAO.
 
 ```
 main.cpp        boot: NVS, config, WiFi(STA)|setup-AP, mDNS, HTTP, MQTT, poll engine, OTA gate
-config.cpp      runtime Config (logic/config_model.hpp): WiFi/MQTT + link cache (pins/proto) in NVS
-                "daik_cfg"; model (profile/fingerprint) RAM-only (config_set_runtime); mutex-guarded
+config.cpp      runtime Config (logic/config_model.hpp): WiFi/MQTT + one-shot WiFi rollback backup +
+                link cache (pins/proto) in NVS "daik_cfg"; model (profile/fingerprint) RAM-only
+                (config_set_runtime); mutex-guarded
 nvs_storage.cpp thin NVS helpers (IDF nvs_* called with :: to avoid the daik::nvs_* collision)
 wifi.cpp        STA bring-up (all-channel scan -> strongest AP by RSSI) + endless reconnect
-                (first-boot budget -> setup portal) + ICMP gateway watchdog (ghost-assoc
-                recovery) + scan + DHCP hostname (option 12) + mDNS; wifi_reconnect_count() —
-                cumulative RE-connects since boot, for the MQTT heartbeat
+                (first-boot budget -> setup portal) + one-shot credential rollback (new creds fail to
+                get a lease -> restore the NVS backup + reboot; runtime credential-change detection:
+                >=5 consecutive AUTH_FAIL/handshake-timeout disconnects after having been online ->
+                reboot to fallback) + ICMP gateway watchdog (ghost-assoc recovery) + scan + DHCP
+                hostname (option 12) + mDNS; wifi_info() also reports the associated AP's BSSID + PHY
+                standard + this STA's MAC; wifi_reconnect_count() — cumulative RE-connects since boot,
+                for the MQTT heartbeat
 provisioning.cpp setup SoftAP (daikin-altherma-esp32-setup) + DHCP DNS-offer; HTTP is the shared :80 server
 captive_dns.cpp UDP:53 catch-all (every name -> 192.168.4.1) so the setup portal auto-pops (AP mode only)
 hp_comm.cpp     X10A UART (9600 8E1) + register query
@@ -153,7 +158,7 @@ www/            web UI sources (index.html + style.css + app.js -> one gzipped p
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `wifi_ssid`/`wifi_pass`, `mqtt_uri`/`mqtt_user`/`mqtt_pass`, `syslog_host`/`syslog_port` (empty host = off), and the X10A **link cache** `rx_pin`/`tx_pin`/`proto`. (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
+| `daik_cfg` | `wifi_ssid`/`wifi_pass`, the one-shot WiFi rollback backup `wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback` (see `/set_wifi`), `mqtt_uri`/`mqtt_user`/`mqtt_pass`, `syslog_host`/`syslog_port` (empty host = off), and the X10A **link cache** `rx_pin`/`tx_pin`/`proto`. (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -171,7 +176,10 @@ offset/size stable across versions.
 GET  /            embedded web UI (gzipped into the app binary)
 GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity — matches a core dump
                   to its .elf), pins_avail[] (per-target usable X10A GPIOs for the RX/TX picker —
-                  logic/board_pins.hpp), wifi, mqtt, syslog{configured,resolved,reachable,host,port,error},
+                  logic/board_pins.hpp), wifi{ssid,ip,rssi,connected,bssid,mac,std} (bssid/std are the
+                  associated AP's BSSID + PHY standard name e.g. "Wi-Fi 4", null while offline; mac is
+                  this STA's own MAC, always present), mqtt,
+                  syslog{configured,resolved,reachable,host,port,error},
                   hp{proto,rx,tx,connected,
                   last_ok_s,registers,values,crc_err,timeout_err}, profile{id},
                   last_crash (null on a clean boot, else {reason,reason_code,fault,coredump,task,pc,
@@ -195,7 +203,12 @@ GET  /coredump[?clear=1]   stream the flash core-dump image (chunked octet-strea
                   ?clear=1 erases the coredump partition. Decode offline against the matching-version
                   .elf: scripts/decode-coredump.sh coredump.bin (CI archives the .elf per build). The
                   UI surfaces a crash banner + one-click download when /status.last_crash is set.
-POST /set_wifi    {ssid,pass} -> persist + reboot
+POST /set_wifi    {ssid,pass} -> validate (ssid 1-32 chars; pass empty[open] or 8-63) -> persist +
+                  reboot. If WiFi was already configured, the OLD ssid/pass are stashed as a one-shot
+                  NVS backup (wifi_rollback flag): after reboot, if the new creds fail to get a DHCP
+                  lease, wifi_start_sta restores the backup + reboots; a successful connect clears it.
+                  So a bad SSID/password entered over the LAN self-heals to the last working network
+                  instead of stranding the device in the setup AP.
 POST /set_mqtt    {broker,user,pass} -> pre-flight the broker synchronously (DNS -> TCP probe ->
                   short-lived esp-mqtt CONNECT/auth, mirroring mqtt_ha's creds-require-mqtts:// policy)
                   -> on success persist + reboot; on failure 400 {ok:false,error} and nothing is saved.

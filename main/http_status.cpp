@@ -19,6 +19,7 @@
 #include "esp_log.h"
 #include "esp_app_desc.h"
 #include "esp_http_server.h"
+#include "esp_wifi.h"
 #include "esp_timer.h"
 #include "esp_partition.h"
 #include "esp_core_dump.h"
@@ -45,9 +46,13 @@ static std::string jstr(const std::string& s) {
     return o + "\"";
 }
 
-// While unprovisioned (SoftAP setup mode) serve the captive setup page; once WiFi is configured
-// serve the full web UI. One shared :80 server handles both modes (see provisioning.cpp).
+// Serve the captive setup page if the device is running in SoftAP (setup) mode, or if
+// WiFi is not yet configured. Otherwise serve the full dashboard web UI.
 static esp_err_t h_index(httpd_req_t* req) {
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    if (esp_wifi_get_mode(&mode) == ESP_OK && mode == WIFI_MODE_AP) {
+        return http_send_gzip(req, "text/html", setup_html_gz_start, setup_html_gz_end);
+    }
     if (!wifi_configured())
         return http_send_gzip(req, "text/html", setup_html_gz_start, setup_html_gz_end);
     return http_send_gzip(req, "text/html", index_html_gz_start, index_html_gz_end);
@@ -72,9 +77,20 @@ static std::string build_status_json_string() {
     j += "\"pins_avail\":[";
     for (int i = 0; i < bp.count; i++) { if (i) j += ","; j += std::to_string(bp.pins[i]); }
     j += "],";
+    char bssid_str[18] = {0};
+    char mac_str[18] = {0};
+    if (wi.connected) {
+        snprintf(bssid_str, sizeof(bssid_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 wi.bssid[0], wi.bssid[1], wi.bssid[2], wi.bssid[3], wi.bssid[4], wi.bssid[5]);
+    }
+    snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+             wi.mac[0], wi.mac[1], wi.mac[2], wi.mac[3], wi.mac[4], wi.mac[5]);
     j += "\"wifi\":{\"ssid\":" + jstr(c.wifi_ssid) + ",\"ip\":" + jstr(wi.ip) +
          ",\"rssi\":" + (wi.connected ? std::to_string(wi.rssi) : "null") +
-         ",\"connected\":" + (wi.connected ? "true" : "false") + "},";
+         ",\"connected\":" + (wi.connected ? "true" : "false") +
+         ",\"bssid\":" + (wi.connected ? jstr(bssid_str) : "null") +
+         ",\"mac\":" + jstr(mac_str) +
+         ",\"std\":" + (wi.connected ? jstr(wi.std) : "null") + "},";
     j += "\"mqtt\":{\"configured\":" + std::string(m.configured ? "true" : "false") +
          ",\"connected\":" + (m.connected ? "true" : "false") +
          ",\"tls\":" + (m.tls ? "true" : "false") +

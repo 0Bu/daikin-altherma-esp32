@@ -9,12 +9,13 @@ setup page (see `main/CMakeLists.txt`).
 
 1. **One screen.** After provisioning, the app is a single dashboard — there is **no Settings page
    and no sub-screens**. Everything the device exposes lives on that one page; the little config
-   there (MQTT via a modal, RX/TX pins inline) happens in place.
-2. **Provision, then run.** WiFi credentials are entered once on the captive portal (`setup.html`);
-   the device reboots into your network and the app opens on the dashboard. The heat pump is fully
-   automatic (auto-detected), so there is nothing to configure for it.
+   there (WiFi, MQTT and Syslog via modals, RX/TX pins inline) happens in place.
+2. **Provision, then run.** WiFi credentials are entered first on the captive portal (`setup.html`);
+   the device reboots into your network and the app opens on the dashboard. They stay re-editable
+   later from the dashboard WiFi card (§5.1, with automatic rollback on a bad change). The heat pump
+   is fully automatic (auto-detected), so there is nothing to configure for it.
 3. **Read-only truth.** The dashboard reflects the device; it never blocks on writes. The few writes
-   (MQTT broker, RX/TX pins) are explicit and report their outcome.
+   (WiFi credentials, MQTT broker, Syslog server, RX/TX pins) are explicit and report their outcome.
 4. **Terse, dense, technical.** Tabular numbers, short labels, no decorative copy.
 5. **English only.** Labels are fixed English — there is no language selector (UI or firmware).
 
@@ -64,9 +65,10 @@ The SPA subscribes to the `/events` WebSocket (sends `"sub"`, then receives push
 frames) — this is the **only** live transport, there is no HTTP polling. A browser without WebSocket
 loads a one-time `GET /status`/`GET /values` snapshot and the user reloads the page to refresh. Once
 the device is on the network the app opens on the
-**dashboard** and never leaves it — there are **no sub-screens and no Settings page**. The only
-in-place config is the MQTT broker (a **modal** off the dashboard's MQTT card) and the RX/TX pins
-(inline on the ESP32 card). The heat pump is otherwise **fully automatic** (auto-detected).
+**dashboard** and never leaves it — there are **no sub-screens and no Settings page**. In-place config
+is the WiFi credentials, the MQTT broker and the Syslog server (each a **modal** off its dashboard
+card) plus the RX/TX pins (inline on the ESP32 card). The heat pump is otherwise **fully automatic**
+(auto-detected).
 
 ```
                     ┌─────────────── served from SoftAP (192.168.4.1) ───────────────┐
@@ -78,16 +80,18 @@ in-place config is the MQTT broker (a **modal** off the dashboard's MQTT card) a
         otherwise ..................... VIEW: Dashboard (the only screen)
 ```
 
-- There is **no in-app first-run wizard** and **no Settings page**: WiFi is provisioned once from the
-  captive `setup.html` (§5.0), the MQTT broker is edited from the dashboard card's pencil (§5.1), the
-  heat pump needs no setup (auto-detected; RX/TX pins on the dashboard ESP32 card, §5.3), and firmware
-  updates are checked by tapping the version on that card (§5.4).
+- There is **no in-app first-run wizard** and **no Settings page**: WiFi is provisioned first from the
+  captive `setup.html` (§5.0) and thereafter re-editable from the dashboard WiFi card's pencil (§5.1,
+  with automatic rollback to the last working network if the new credentials fail), the MQTT broker
+  is edited from the dashboard card's pencil (§5.1), the heat pump needs no setup (auto-detected; RX/TX
+  pins on the dashboard ESP32 card, §5.3), and firmware updates are checked by tapping the version on
+  that card (§5.4).
 - MQTT is optional — an empty broker disables it.
 
 `GET /status` exposes the fields the dashboard keys off:
 `version`, `platform`, `uptime_s`, `app_elf_sha256` (build identity, shown in the crash banner),
 `pins_avail[]` (per-target usable X10A GPIOs for the RX/TX picker),
-`wifi{ssid,ip,rssi,connected}`, `mqtt{configured,connected,tls,broker}`,
+`wifi{ssid,ip,rssi,connected,bssid,mac,std}`, `mqtt{configured,connected,tls,broker}`,
 `hp{proto,rx,tx,connected,last_ok_s,…}`, `profile{id}`,
 `last_crash` (`null` on a clean boot, else `{reason,reason_code,fault,coredump,task,pc,backtrace[],
 corrupted,elf_sha256}` — drives the crash banner),
@@ -102,10 +106,17 @@ password, **Save & reboot** → `POST /set_wifi`. Message line for scan/save sta
 On reboot the device joins STA and the main UI takes over. (This is the pre-WiFi world; the SoftAP
 serves only this page.)
 
-### 5.1 MQTT edit  (modal, from the dashboard MQTT card)
-The dashboard's **MQTT** status card (§5.3) carries a **pencil** in its header; tapping it opens a
-centred **modal** over a dimmed dashboard. MQTT and Syslog (§5.3) are the two status cards edited
-this way, and they share the identical overlay pattern. One form:
+### 5.1 WiFi / MQTT / Syslog edit  (modal, from the dashboard status card)
+The dashboard's **WiFi**, **MQTT** and **Syslog** status cards (§5.3) each carry a **pencil** in the
+header; tapping it opens a centred **modal** over a dimmed dashboard. These are the three status cards
+edited this way, and they share the identical overlay pattern (Cancel / backdrop / `Esc` dismiss
+without writing; Save reboots to apply, then closes back to the dashboard). The forms:
+- **WiFi**: SSID (required, 1–32 chars) + password (empty for an open network, else 8–63 chars),
+  validated both in the UI and by `POST /set_wifi`. Only the SSID prefills (the password is never
+  exposed by `/status`). **Save** → `POST /set_wifi` (persist + reboot). If WiFi was already
+  configured, the previous credentials are kept as a one-shot NVS backup and **automatically restored**
+  (with a reboot) when the new network fails to connect — so a wrong SSID/password entered over the LAN
+  self-heals instead of stranding the device. A note in the form states this.
 - **MQTT**: broker (`host:port`, or `mqtts://host:8883` for TLS), username, password, TLS note
   ("credentials require an mqtts:// URL"). **Save** → `POST /set_mqtt`, which **pre-flights the
   broker** (DNS → TCP → a real MQTT connect/auth) before writing: on success the device reboots to
@@ -119,6 +130,10 @@ them; to remove them, disable MQTT and re-add the broker without them. Typing a 
 `mqtts://`) since the bridge refuses credentials over plaintext; clearing them strips the scheme
 back. Validation is also inline client-side (bare `host:port`, or a `mqtt(s)://` / `ws(s)://` URL).
 Actions row at the bottom: Cancel (secondary) + Save (brand).
+- **Syslog**: host + port (`1–65535`, default 514). **Save** → `POST /set_syslog` (persist + reboot);
+  an empty host disables forwarding. Only the port range is validated on the device — DNS resolution
+  and the advisory reachability probe run in the syslog task after reboot and surface on the card via
+  `/status.syslog`. The host prefills from `/status`.
 
 ### 5.2 Heat pump — no settings screen (fully automatic)
 The heat pump has **no configuration screen**. The model is **auto-detected** from the X10A bus
@@ -161,11 +176,13 @@ Body, ordered:
      for an OTA update, §5.4), uptime (`uptime_s`), the heat-pump link (Online/Offline) and X10A
      protocol, and the **RX/TX pins** — read-only when detected, else a usable-GPIO dropdown (§5.2).
      From `platform`, `version`, `uptime_s`, `pins_avail`, `hp{proto,rx,tx,connected,last_ok_s}`.
-   - **WiFi** — signal bars + RSSI (`--ok`/`--warn` by strength), network (SSID), IP address; from
-     `wifi{ssid,ip,rssi,connected}`. Display-only; WiFi is not re-provisionable from the app (§5.0).
+   - **WiFi** — a header row combining the PHY standard name (e.g. "WI-FI 4"), signal bars + RSSI
+     (`--ok`/`--warn` by strength) and the SSID (green), then IP address, MAC and BSSID; from
+     `wifi{ssid,ip,rssi,connected,bssid,mac,std}`. A **pencil** in the card header opens the WiFi edit
+     modal (§5.1); offline the card collapses to "Offline".
    - **MQTT** — connection status, broker, TLS on/off, and Home-Assistant discovery state; from
      `mqtt{configured,connected,tls,broker}`. A **pencil** in the card header opens the MQTT edit
-     modal (§5.1) — one of the two status cards edited via a modal (the other is Syslog).
+     modal (§5.1) — one of the three status cards edited via a modal (the others are WiFi and Syslog).
    - **Syslog** — off-device log forwarding status: **Disabled** when no host is set, else the
      server (`host:port`) and a state badge — **Enabled** once DNS resolves (delivery is best-effort
      UDP, gated on resolution only), warn-flagged **"host not answering ping"** when the advisory
@@ -235,9 +252,9 @@ enabled/available values are hidden.
 
 Every async action shows: idle → in-flight ("Saving…", spinner on button) → result (toast + view
 transition). Specific:
-- **Reboot writes** (MQTT): after Save show "Rebooting — reconnecting…", poll `/status` until it
-  answers, then close the modal back to the dashboard. (WiFi is provisioned once from `setup.html`,
-  not re-written here.)
+- **Reboot writes** (WiFi / MQTT / Syslog): after Save show "Rebooting — reconnecting…", poll `/status`
+  until it answers, then close the modal back to the dashboard. (A WiFi change that can't reach the new
+  network rolls back to the previous credentials and reboots again — see §5.1.)
 - **Live writes** (heat pump): "Applied", stay on view; the `/events` WebSocket pushes the new
   values on the next poll cycle (a pin-pick also refreshes `/status` a few times to catch the connect).
 - **Connection loss**: hero greys to "No data"; the WiFi card shows "Offline" if WiFi dropped, and

@@ -151,6 +151,7 @@ User credentials + the X10A link cache are persisted; the model is re-detected o
 | NVS key | Meaning |
 |---------|---------|
 | `wifi_ssid` / `wifi_pass` | Station credentials (else the setup AP runs). |
+| `wifi_ssid_back` / `wifi_pass_back` / `wifi_rollback` | One-shot backup of the previous credentials + a flag, written by `/set_wifi`; restored automatically if the new network fails to connect, then cleared. |
 | `mqtt_uri` | HA-bridge broker (`host:port` or full `mqtt(s)://…`; empty = MQTT off). |
 | `mqtt_user` / `mqtt_pass` | Optional broker auth. |
 | `syslog_host` / `syslog_port` | Optional syslog server (UDP, RFC 5424); empty host = syslog off, port defaults to 514. |
@@ -173,7 +174,7 @@ LAN only, see [SECURITY.md](SECURITY.md).
 ```
 GET  /  (alias /index.html)        # embedded web UI (gzipped into the app binary)
 GET  /status                       # { version, platform, uptime_s, app_elf_sha256, pins_avail:[..],
-                                   #   wifi:{ssid,rssi,ip},
+                                   #   wifi:{ssid,rssi,ip,connected,bssid,mac,std},
                                    #   mqtt:{configured,connected,tls,broker,error?},
                                    #   syslog:{configured,resolved,reachable,host,port,error?},
                                    #   hp:{proto,rx,tx,connected,last_ok_s,
@@ -194,7 +195,9 @@ GET  /scan                         # WiFi scan for the setup portal → [{ssid,r
 GET  /coredump[?clear=1]           # stream the flash core-dump image (chunked; 404 if none);
                                    #   ?clear=1 erases the coredump partition. Decode offline with
                                    #   scripts/decode-coredump.sh coredump.bin (matching-version .elf).
-POST /set_wifi                     # { ssid, pass } → persist + reboot
+POST /set_wifi                     # { ssid, pass } → validate (ssid 1-32; pass ""|8-63) → persist +
+                                   #   reboot. Backs up the old creds + auto-rolls-back if the new
+                                   #   network fails to connect (see ARCHITECTURE.md → Web UI config flow)
 POST /set_mqtt                     # { broker, user?, pass? } → pre-flight the broker (DNS/TCP/connect
                                    #   +auth) → on success persist + reboot, on failure 400 {error}
                                    #   (nothing saved). Empty user+pass keeps stored creds; "" disables.
