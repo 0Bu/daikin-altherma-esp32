@@ -69,6 +69,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-project-review.sh\"",
             "statusMessage": "Checking project-review gate…"
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-feature-docs.sh\"",
+            "statusMessage": "Checking feature-docs gate…"
           }
         ]
       },
@@ -79,6 +84,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-project-review.sh\"",
             "statusMessage": "Checking project-review gate…"
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-feature-docs.sh\"",
+            "statusMessage": "Checking feature-docs gate…"
           }
         ]
       }

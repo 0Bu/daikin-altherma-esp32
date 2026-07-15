@@ -5,6 +5,10 @@ ESP-IDF firmware that reads a **Daikin Altherma** heat pump over its
 at runtime from a web UI — WiFi, MQTT and the RX/TX pins (the unit model is auto-detected; the poll
 interval is fixed at 1 s) — and updated over the air. User guide: [../README.md](../README.md).
 
+For a cross-cutting catalog of the **platform features** this firmware implements — Secure Boot v2
+signing, OTA + rollback health gate, the WebSocket live UI, the ESP-IDF component inventory,
+diagnostics, WiFi resilience — see [**FEATURES.md**](FEATURES.md).
+
 ---
 
 ## Hardware

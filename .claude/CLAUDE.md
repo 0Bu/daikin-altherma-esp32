@@ -11,7 +11,10 @@ the RX/TX pins — is configured at runtime from a **web UI**; firmware is insta
 > [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) — read it on demand. The X10A wire protocol
 > (framing, checksum, register pages, detection) is in
 > [`docs/X10A_PROTOCOL.md`](../docs/X10A_PROTOCOL.md), and the converter-id/enum tables plus a full
-> register map in [`docs/REGISTERS.md`](../docs/REGISTERS.md). User-facing docs:
+> register map in [`docs/REGISTERS.md`](../docs/REGISTERS.md). A cross-cutting catalog of the
+> platform features this firmware implements (Secure Boot v2 signing, OTA + health gate, WebSocket,
+> ESP-IDF component inventory, diagnostics) is [`docs/FEATURES.md`](../docs/FEATURES.md) — keep it
+> current with the `feature-docs` skill when a technical feature lands or changes. User-facing docs:
 > [`README.md`](../README.md), [`docs/README.md`](../docs/README.md),
 > [`docs/SECURITY.md`](../docs/SECURITY.md), [`docs/DESIGN.md`](../docs/DESIGN.md) (web-UI design
 > contract). Keep them in sync (the `project-review` skill checks for drift).
