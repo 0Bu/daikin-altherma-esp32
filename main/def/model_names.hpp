@@ -1,5 +1,5 @@
 #pragma once
-// GENERATED (tools/catalog/gen_names_generic.py) id -> display / family / marketing-name
+// GENERATED (tools/profiles/gen_names_generic.py) id -> display / family / marketing-name
 // table for the auto-detected model. Family/marketing follow Daikin sales nomenclature.
 // Used by /status.detect for an honest identification. Altherma-only.
 #include <cstddef>

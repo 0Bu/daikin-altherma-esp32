@@ -18,7 +18,7 @@ A holistic pass before a PR merges. Not a linter — it checks the things that r
 3. **Host tests.** New pure logic is in `main/logic/` with a `CHECK` in `test/test_logic.cpp`,
    and `scripts/run-mock-tests.sh` passes. No decode/config logic buried in a device-only `.cpp`.
 4. **Target.** Any pin default, sdkconfig, or partition change verified for the esp32s3 target.
-5. **Generated data.** Generated `def/*` came from `tools/catalog/` (catalog decode), not hand-edits; and
+5. **Generated data.** Generated `def/*` came from `tools/profiles/` (catalog decode), not hand-edits; and
    value/CRC/converter changes are verified against known-good reference outputs.
 
 Report findings grouped by the above; block on doc drift and untested logic.
