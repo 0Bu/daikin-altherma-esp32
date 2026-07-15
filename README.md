@@ -25,12 +25,33 @@ Reference: [docs/README.md](docs/README.md) (protocol · API · values · build)
 
 ## Wiring — X10A (breaker OFF)
 
-| X10A | Signal | ESP32 (XIAO S3) |
-|------|--------|-----------------|
-| 1 | +5 V  | `5V` (optional) |
-| 2 | HP-TX | RX `GPIO44` (D7) |
-| 3 | HP-RX | TX `GPIO43` (D6) |
-| 5 | GND   | `GND` (mandatory) |
+| X10A | Signal | Wire Color | ESP32 (XIAO S3) | Note |
+| :---: | :--- | :--- | :--- | :--- |
+| 1 | +5 V | Red | `5V` | Optional |
+| 2 | HP-TX | Brown | RX `GPIO44` (D7) | Connects to ESP32 RX |
+| 3 | HP-RX | Green | TX `GPIO43` (D6) | Connects to ESP32 TX |
+| 4 | NC | — | — | Not connected |
+| 5 | GND | Black | `GND` | Mandatory |
+
+### Visual Wiring Diagram
+
+```text
+          Daikin X10A Connector                     Seeed Studio XIAO ESP32-S3
+          +------------------------+                      +-------------+
+          |  1    2   3    4    5  |                      |   [USB-C]   |
+          | [R] [Br] [G] [NC] [Bk] |                      |             |
+          +--|----|---|---------|--+                      |             |
+             |    |   |         |             D0 (GPIO1)  | [ ]     [X] |  5V  <--- [R] (Red, Pin 1) --+
+             |    |   |         +-- GND (Black, Pin 5) -->| [ ]     [X] |  GND                         |
+             |    |   |                       D2 (GPIO3)  | [ ]     [ ] |  3V3                         |
+             |    |   |                       D3 (GPIO4)  | [ ]     [ ] |  D10                         |
+             |    |   |                       D4 (GPIO5)  | [ ]     [ ] |  D9                          |
+             |    |   |                       D5 (GPIO6)  | [ ]     [ ] |  D8                          |
+             |    |   +------- HP-RX (Green, Pin 3) ----->| [X]     [X] |  D7 (RX) <-- [Br] (Pin 2) -+ |
+             |    |                                       (D6/TX)   (D7/RX)                          | |
+             |    +----------------------------------------------------------------------------------+ |
+             +-----------------------------------------------------------------------------------------+
+```
 
 5 V TTL; level shifter on HP-TX→ESP-RX recommended. `GPIO16/17` absent on the XIAO → pins
 configurable. `Timeout`/`Wrong CRC` = cable/GND; `0x15 0xEA` = use protocol `S`.
