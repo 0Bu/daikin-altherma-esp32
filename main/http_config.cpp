@@ -67,6 +67,10 @@ static esp_err_t set_wifi(httpd_req_t* req) {
         c.wifi_pass_backup = "";
         c.wifi_rollback_active = false;
     }
+    // A fresh attempt retires the previous one's verdict: /status.wifi.rolled_back describes the
+    // change being replaced here, so leaving it set would keep reporting a rollback the user has
+    // already seen and acted on.
+    c.wifi_rolled_back = false;
     c.wifi_ssid = ssid;
     c.wifi_pass = pass;
     cJSON_Delete(j);

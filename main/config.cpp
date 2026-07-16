@@ -44,6 +44,7 @@ void config_load() {
     c.wifi_ssid_backup = nvs_get_str("wifi_ssid_back", "");
     c.wifi_pass_backup = nvs_get_str("wifi_pass_back", "");
     c.wifi_rollback_active = nvs_get_i32("wifi_rollback", 0) != 0;
+    c.wifi_rolled_back = nvs_get_i32("wifi_rolledbk", 0) != 0;
     c.mqtt_uri  = nvs_get_str("mqtt_uri", CONFIG_DAIKIN_MQTT_BROKER_URI);
     c.mqtt_user = nvs_get_str("mqtt_user", CONFIG_DAIKIN_MQTT_USERNAME);
     c.mqtt_pass = nvs_get_str("mqtt_pass", CONFIG_DAIKIN_MQTT_PASSWORD);
@@ -70,11 +71,35 @@ bool config_save(const Config& c) {
     // Persist user settings (WiFi + MQTT) and the X10A link cache (RX/TX pins + protocol). The MODEL
     // is intentionally NOT written — profile + fingerprint (fp_*) are re-derived every boot.
     bool ok = true;
-    ok &= nvs_set_str("wifi_ssid", c.wifi_ssid);
-    ok &= nvs_set_str("wifi_pass", c.wifi_pass);
-    ok &= nvs_set_str("wifi_ssid_back", c.wifi_ssid_backup);
-    ok &= nvs_set_str("wifi_pass_back", c.wifi_pass_backup);
-    ok &= nvs_set_i32("wifi_rollback", c.wifi_rollback_active ? 1 : 0);
+
+    // WiFi credentials vs. their rollback backup: the ORDER of these two groups matters. Every
+    // nvs_set_* commits on its own (nvs_storage.cpp), so config_save is a sequence of independent
+    // commits and not a transaction — a power cut lands BETWEEN two of them, and which pair it
+    // straddles decides whether the device can still find its way back to a working network. The
+    // rule is "write what must survive the cut before the state that points away from it", and its
+    // direction flips with the change:
+    //   arming a rollback (flag → true, i.e. POST /set_wifi): the backup and the flag must already
+    //     be on flash when the new credentials land. Otherwise a cut arms untried credentials with
+    //     no way back — precisely the failure this mechanism exists to prevent.
+    //   clearing one (flag → false: a rollback restoring the old credentials, or any ordinary save
+    //     that does not touch WiFi at all): the restored credentials must land before the backup
+    //     that still holds them is erased.
+    // Either way the worst case becomes the same harmless one — a stale backup/flag next to
+    // credentials that work, which the next successful connect clears (wifi.cpp). Ordered backwards,
+    // the worst case costs the credentials themselves.
+    auto save_wifi_creds = [&] {
+        ok &= nvs_set_str("wifi_ssid", c.wifi_ssid);
+        ok &= nvs_set_str("wifi_pass", c.wifi_pass);
+    };
+    auto save_wifi_rollback = [&] {
+        ok &= nvs_set_str("wifi_ssid_back", c.wifi_ssid_backup);
+        ok &= nvs_set_str("wifi_pass_back", c.wifi_pass_backup);
+        ok &= nvs_set_i32("wifi_rollback", c.wifi_rollback_active ? 1 : 0);
+        ok &= nvs_set_i32("wifi_rolledbk", c.wifi_rolled_back ? 1 : 0);
+    };
+    if (c.wifi_rollback_active) { save_wifi_rollback(); save_wifi_creds(); }
+    else                        { save_wifi_creds(); save_wifi_rollback(); }
+
     ok &= nvs_set_str("mqtt_uri", c.mqtt_uri);
     ok &= nvs_set_str("mqtt_user", c.mqtt_user);
     ok &= nvs_set_str("mqtt_pass", c.mqtt_pass);

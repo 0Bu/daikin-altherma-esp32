@@ -45,9 +45,9 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 15 | **ICMP gateway watchdog** (ghost-association recovery) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 16 | Captive-portal provisioning (SoftAP + UDP:53 DNS catch-all) | ✅ | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp) |
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
-| 18 | **In-app WiFi re-config + one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
+| 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (463 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (489 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -165,16 +165,30 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   Hunt-and-Peck.
 - **Endless reconnect with a first-boot budget.** A boot-time connect failure spends a bounded budget
   (10 attempts) → tears the STA stack down → opens the setup portal (creds presumed wrong). Once ever
-  online, a drop reconnects **forever** — a router reboot never strands the bridge.
+  online, a drop reconnects **forever** — a router reboot never strands the bridge. That guarantee is
+  unconditional on the disconnect *reason*: an earlier revision rebooted after ≥5 consecutive
+  `AUTH_FAIL`/handshake-timeout drops, which let a transient WPA3-SAE storm — the very thing
+  `failure_retry_cnt`/`sae_pwe_h2e` above exist to absorb — spend the boot budget against a healthy AP
+  and strand the bridge in the open portal with good credentials still in NVS. The budget is also
+  suspended while a credential change is pending, so ten fast `NO_AP_FOUND` scans can't pre-empt the
+  rollback grace below.
 - **✅ In-app WiFi re-config with one-shot credential rollback.** WiFi is provisioned first from the
   captive portal, then re-editable from the dashboard WiFi card (pencil → modal → `POST /set_wifi`,
   validating SSID 1–32 / password empty-or-8–63). Because a bad SSID/password entered over the LAN
   would otherwise strand the device in the setup AP, `/set_wifi` stashes the previous working
   credentials as a **one-shot NVS backup**; on the reboot into the new network, if the STA never gets a
   DHCP lease `wifi_start_sta()` restores the backup and reboots again — a successful connect clears it.
-  A companion runtime guard reboots to the fallback after **≥5 consecutive** `AUTH_FAIL`/handshake-timeout
-  disconnects that only start *after* the device had been online (the "someone changed the WiFi password"
-  case), distinct from the boot-budget path for creds that were wrong from the start.
+  The deadline is **reason-aware** ([`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp)),
+  because a rollback *destroys* the new credentials and must not be spent on a guess: only an AP that
+  **keeps refusing** them (auth class, sustained across two 30 s checkpoints — one sample cannot tell a
+  wrong password from a transient SAE failure) takes the fast path. An **absent SSID** says nothing about the
+  credentials — it is what a router that is still rebooting looks like, and re-pointing the device at a
+  just-reconfigured router is the main reason anyone edits these at all — so it waits 180 s. The blind
+  30 s deadline this replaces did the opposite: it restored an old SSID for a network that no longer
+  existed and threw the correct new credentials away. The outcome is recorded as
+  `/status.wifi.rolled_back` (sticky until the next `/set_wifi`), since the rollback's own reboot wipes
+  the diag ring and the card just shows the old SSID again — API-only for now; the dashboard banner that
+  reads it belongs to the web-UI write-feedback work.
 - **✅ ICMP gateway watchdog (ghost-association recovery).** The reconnect handler can only see drops
   the STA *knows* about. A missed deauth leaves a "ghost" association — IP held, TCP timing out, no
   `STA_DISCONNECTED` event ever fires. A background task ICMP-echoes the default gateway every 30 s and,
@@ -375,7 +389,8 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   (`discovery.hpp`), detection (`detect.hpp`), the OTA health gate (`health_gate.hpp`), heartbeat &
   crash formatting (`heartbeat.hpp`, `crashinfo.hpp`), the syslog boot/crash replay records
   (`bootlog.hpp`), the syslog hard-vs-transient send-error policy (`syslog_policy.hpp`), the
-  gateway-watchdog policy (`link_watch.hpp`), the reset-reason vocabulary (`reset_reason.hpp`),
+  gateway-watchdog policy (`link_watch.hpp`), the WiFi credential-rollback policy
+  (`wifi_rollback.hpp`), the reset-reason vocabulary (`reset_reason.hpp`),
   the boot-loop safe-mode decision (`boot_guard.hpp`), grouped state JSON (`mqtt_group.hpp`), the
   broker-URI split (`mqtt_uri.hpp`), board
   pins (`board_pins.hpp`), and **🔭 Modbus TCP framing + HomeHub register codecs** (`modbus.hpp` — MBAP
@@ -475,7 +490,7 @@ security of signed firmware with none of the brick risk. It refuses to roll a ba
 and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-associations no event
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 16-entity heartbeat diagnostics). And the risky parts — decode,
-CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (463 checks),
+CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (489 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

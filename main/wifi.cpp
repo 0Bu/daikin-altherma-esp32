@@ -7,6 +7,7 @@
 #include "config.hpp"
 #include "diag_log.hpp"
 #include "logic/link_watch.hpp"
+#include "logic/wifi_rollback.hpp"
 #include "sdkconfig.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -43,36 +44,49 @@ static volatile bool s_wifi_connected = false;
 static volatile bool s_wifi_ever_connected = false;
 // Cumulative RE-connect count (excludes the first-ever GOT_IP) — see wifi_reconnect_count().
 static volatile uint32_t s_reconnects = 0;
-// Track consecutive WPA2/WPA3 auth or handshake failures at runtime
-static int s_auth_fail_count = 0;
+// Reason code of the most recent STA_DISCONNECTED (0 = none seen this boot). Read by the boot-window
+// rollback decision to tell "the AP refused these credentials" from "the AP was not there at all" —
+// logic/wifi_rollback.hpp owns what each reason means.
+static volatile int s_last_disco_reason = 0;
+// True only for a boot that carries a PENDING credential change (POST /set_wifi armed a one-shot
+// backup). It makes this boot the trial run for the new credentials — the only boot allowed to
+// discard them — and holds the first-boot retry budget open for the whole grace window below.
+static volatile bool s_rollback_pending = false;
 
 bool wifi_configured() { return !config().wifi_ssid.empty(); }
 
 static void on_wifi(void*, esp_event_base_t base, int32_t id, void* data) {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
+        // Associated — the AP accepted us, so whatever refused us earlier is history, not evidence.
+        // Clearing the slot is what keeps the rollback decision reading the CURRENT story: without
+        // it, a transient SAE failure at t=10 s would still be the "last reason" at the t=30 s
+        // checkpoint even though we are, right now, associated to the new AP and merely waiting on a
+        // first DHCP lease — and the boot window would roll back credentials that had just worked.
+        s_last_disco_reason = 0;
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         s_wifi_connected = false;
-        // reason tells a transient SAE/handshake failure (15 4WAY_TIMEOUT, 202 AUTH_FAIL,
-        // 204 HANDSHAKE_TIMEOUT) apart from wrong creds (201/211) or a real outage (200/8/deauth).
         auto* d = static_cast<wifi_event_sta_disconnected_t*>(data);
 
-        // Detect consecutive authentication failures at runtime.
-        if (d && (d->reason == 202 || d->reason == 15 || d->reason == 204)) {
-            s_auth_fail_count++;
-            if (s_wifi_ever_connected && s_auth_fail_count >= 5) {
-                ESP_LOGW(TAG, "consecutive authentication failures (%d) -> credentials likely changed. Rebooting to fallback/portal...",
-                         s_auth_fail_count);
-                vTaskDelay(pdMS_TO_TICKS(500));
-                esp_restart();
-            }
-        } else {
-            s_auth_fail_count = 0;
-        }
+        // Remember WHY, for the boot-window rollback decision (logic/wifi_rollback.hpp). Recording
+        // the reason is ALL this handler does with it: reasons 15/202/204 mean "wrong credentials"
+        // only where wrong credentials are a live hypothesis, i.e. while a credential change is
+        // pending. They are also the transient WPA3-SAE failures this very file works around below
+        // (failure_retry_cnt, sae_pwe_h2e) and has observed live on a healthy network. An earlier
+        // revision rebooted the device after 5 of them in a row whenever it had ever been online —
+        // which handed a passing RF storm the power to strand a perfectly healthy bridge in the open
+        // setup portal, with good credentials in NVS and no way back short of a power cycle. That is
+        // the exact inversion of the invariant this handler exists to keep, so the reboot is gone:
+        // once online, EVERY disconnect reason is just something to reconnect through, forever.
+        s_last_disco_reason = d ? d->reason : 0;
 
-        if (!s_wifi_ever_connected && s_retry_num >= MAX_RETRY) {
+        if (!s_wifi_ever_connected && s_retry_num >= MAX_RETRY && !s_rollback_pending) {
             // Never online AND the boot budget is spent → creds are almost certainly wrong. Stop so
-            // wifi_start_sta() unblocks on FAIL_BIT and the caller opens the setup portal.
+            // wifi_start_sta() unblocks on FAIL_BIT and the caller opens the setup portal. With a
+            // credential change pending the budget does NOT apply: there the DEADLINE owns the
+            // decision (logic/wifi_rollback.hpp), and giving up after ten fast NO_AP_FOUND scans
+            // would roll back before a rebooting router ever had a chance to answer.
             ESP_LOGW(TAG, "first-boot connect budget spent (last reason %d) → setup portal",
                      d ? d->reason : -1);
             xEventGroupSetBits(s_events, FAIL_BIT);
@@ -91,7 +105,6 @@ static void on_wifi(void*, esp_event_base_t base, int32_t id, void* data) {
         ESP_LOGI(TAG, "connected, ip=" IPSTR, IP2STR(&e->ip_info.ip));
         if (s_wifi_ever_connected) s_reconnects = s_reconnects + 1;   // a later GOT_IP is a RE-connect
         s_retry_num           = 0;
-        s_auth_fail_count     = 0;
         s_wifi_connected      = true;
         s_wifi_ever_connected = true;
         xEventGroupSetBits(s_events, CONNECTED_BIT);
@@ -260,6 +273,12 @@ bool wifi_start_sta() {
     strncpy(reinterpret_cast<char*>(wc.sta.ssid), c.wifi_ssid.c_str(), sizeof(wc.sta.ssid) - 1);
     strncpy(reinterpret_cast<char*>(wc.sta.password), c.wifi_pass.c_str(), sizeof(wc.sta.password) - 1);
 
+    // Is this boot the trial run for freshly-changed credentials? Latched BEFORE esp_wifi_start()
+    // below, because the very first STA_DISCONNECTED can arrive before this function reaches its
+    // wait — and the handler reads it to decide whether the boot retry budget still applies.
+    const bool rollback_pending = c.wifi_rollback_active && !c.wifi_ssid_backup.empty();
+    s_rollback_pending          = rollback_pending;
+
     // Pick the STRONGEST AP for the SSID, not the first one heard. The IDF default WIFI_FAST_SCAN
     // stops at the first matching BSSID (channel-order/timing dependent), so on a multi-AP network
     // (mesh / several access points sharing one SSID) this stationary bridge latches onto whatever
@@ -296,18 +315,40 @@ bool wifi_start_sta() {
     // This is a mains-powered bridge, so we trade the small idle-power saving for a responsive UI.
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 
-    // Block until the first IP or the first-boot budget is exhausted (creds presumed wrong).
-    EventBits_t bits = xEventGroupWaitBits(s_events, CONNECTED_BIT | FAIL_BIT, pdFALSE, pdFALSE,
-                                           pdMS_TO_TICKS(30000));
+    // Block until the first IP, or until the boot window decides we are not getting one. An ordinary
+    // boot gets the flat WIFI_BOOT_WINDOW_S: the setup portal is its fallback and a user is waiting
+    // on it. A boot carrying a PENDING credential change is re-evaluated at each checkpoint instead
+    // of merely expiring — rollback_step() spends the new credentials only once the AP has actually
+    // refused them, and otherwise keeps hunting for an SSID that may just be a router still coming
+    // back up (logic/wifi_rollback.hpp).
+    EventBits_t bits = 0;
+    RollbackWatch rw;
+    for (int elapsed = 0;;) {
+        bits = xEventGroupWaitBits(s_events, CONNECTED_BIT | FAIL_BIT, pdFALSE, pdFALSE,
+                                   pdMS_TO_TICKS(WIFI_BOOT_WINDOW_S * 1000));
+        elapsed += WIFI_BOOT_WINDOW_S;
+        if (bits & (CONNECTED_BIT | FAIL_BIT)) break;
+        if (!rollback_pending) break;   // no change pending → the flat window owns the decision
+        if (rollback_step(rw, disco_class(s_last_disco_reason), elapsed) == RollbackAction::RollBack) break;
+        ESP_LOGW(TAG, "new credentials: no IP after %d s (last reason %d) — the AP may still be "
+                      "coming back; retrying up to %d s before rolling back",
+                 elapsed, s_last_disco_reason, WIFI_ROLLBACK_GRACE_S);
+    }
     if (!(bits & CONNECTED_BIT)) {
-        Config rollback_cfg = config();
-        if (rollback_cfg.wifi_rollback_active && !rollback_cfg.wifi_ssid_backup.empty()) {
-            ESP_LOGW(TAG, "STA connect failed with new credentials. Rolling back to backup: %s", rollback_cfg.wifi_ssid_backup.c_str());
+        if (rollback_pending) {
+            Config rollback_cfg = config();
+            ESP_LOGW(TAG, "STA connect failed with new credentials (last reason %d) — rolling back to %s",
+                     s_last_disco_reason, rollback_cfg.wifi_ssid_backup.c_str());
             rollback_cfg.wifi_ssid = rollback_cfg.wifi_ssid_backup;
             rollback_cfg.wifi_pass = rollback_cfg.wifi_pass_backup;
             rollback_cfg.wifi_rollback_active = false;
             rollback_cfg.wifi_ssid_backup = "";
             rollback_cfg.wifi_pass_backup = "";
+            // One-shot outcome marker, persisted so it survives the reboot this rollback is about to
+            // take. Without it the dashboard simply shows the old SSID again and the rollback is
+            // indistinguishable from a save that never happened — the user re-enters the same
+            // credentials and waits out the same three minutes. Cleared by the next POST /set_wifi.
+            rollback_cfg.wifi_rolled_back = true;
             config_save(rollback_cfg);
             vTaskDelay(pdMS_TO_TICKS(500));
             esp_restart();
@@ -317,7 +358,11 @@ bool wifi_start_sta() {
         return false;
     }
 
-    // Success! Clear rollback/backup if active
+    // The new credentials work — commit to them and drop the backup. Note what is NOT cleared here:
+    // wifi_rolled_back. The boot right after a rollback is a SUCCESSFUL one (onto the restored
+    // network), so clearing the marker on success would erase it before anyone could read it. Only
+    // the next POST /set_wifi retires it.
+    s_rollback_pending = false;
     Config success_cfg = config();
     if (success_cfg.wifi_rollback_active) {
         success_cfg.wifi_rollback_active = false;

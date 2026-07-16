@@ -21,9 +21,17 @@ struct Config {
     std::string syslog_host;       // "" = Syslog disabled
     int         syslog_port = 514;
     std::string profile  = "auto";  // "auto" = detect on next poll cycle; else a concrete profile id
+    // One-shot WiFi credential rollback (POST /set_wifi -> wifi.cpp). The working credentials are
+    // stashed here and `wifi_rollback_active` armed before the new ones are tried; the boot that
+    // tries them either commits (clears both) or restores the backup. See logic/wifi_rollback.hpp.
     std::string wifi_ssid_backup;
     std::string wifi_pass_backup;
     bool        wifi_rollback_active = false;
+    // Outcome marker: the last credential change was UNDONE — the new credentials never got a lease
+    // and wifi.cpp restored the ones above. Persisted so it outlives the rollback's own reboot, and
+    // surfaced as /status.wifi.rolled_back; otherwise a rollback is silent and the dashboard just
+    // shows the old SSID, exactly as if the save had never been made. Cleared by the next /set_wifi.
+    bool        wifi_rolled_back = false;
     // X10A link cache — PERSISTED (config.cpp): the wiring/protocol is boot-invariant, cached and
     // tried first by the detection sweep, re-persisted on change (hp_poll.cpp poll_detect).
     Protocol    proto    = Protocol::I;  // last detected framing (I/S); tried first, then the other

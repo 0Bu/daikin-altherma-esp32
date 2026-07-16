@@ -158,7 +158,8 @@ User credentials + the X10A link cache are persisted; the model is re-detected o
 | NVS key | Meaning |
 |---------|---------|
 | `wifi_ssid` / `wifi_pass` | Station credentials (else the setup AP runs). |
-| `wifi_ssid_back` / `wifi_pass_back` / `wifi_rollback` | One-shot backup of the previous credentials + a flag, written by `/set_wifi`; restored automatically if the new network fails to connect, then cleared. |
+| `wifi_ssid_back` / `wifi_pass_back` / `wifi_rollback` | One-shot backup of the previous credentials + a flag, written by `/set_wifi`; restored automatically if the new network fails to connect, then cleared. The restore deadline is reason-aware (`logic/wifi_rollback.hpp`): an AP that refuses the credentials rolls back in ~1 min, an SSID that is merely absent — a router still rebooting — gets 3 min first. |
+| `wifi_rolledbk` | Set when such a rollback actually happened, so `/status.wifi.rolled_back` can report it after the reboot; cleared by the next `/set_wifi`. |
 | `mqtt_uri` | HA-bridge broker (`host:port` or full `mqtt(s)://…`; empty = MQTT off). |
 | `mqtt_user` / `mqtt_pass` | Optional broker auth. |
 | `syslog_host` / `syslog_port` | Optional syslog server (UDP, RFC 5424); empty host = syslog off, port defaults to 514. |
@@ -181,7 +182,7 @@ LAN only, see [SECURITY.md](SECURITY.md).
 ```
 GET  /  (alias /index.html)        # embedded web UI (gzipped into the app binary)
 GET  /status                       # { version, platform, uptime_s, app_elf_sha256, pins_avail:[..],
-                                   #   wifi:{ssid,rssi,ip,connected,bssid,mac,std},
+                                   #   wifi:{ssid,rssi,ip,connected,bssid,mac,std,rolled_back},
                                    #   mqtt:{configured,connected,tls,broker,error?},
                                    #   syslog:{configured,resolved,reachable,host,port,error?},
                                    #   hp:{proto,rx,tx,connected,last_ok_s,
