@@ -13,9 +13,14 @@ namespace daik {
 // partition reads very differently from a wedged flash).
 // MIND THE POLARITY: esp_err_t is an int and ESP_OK is 0, so `if (nvs_set_str(...))` compiles and
 // means "if it FAILED" — the inverse of the bool these once returned. Always compare to ESP_OK.
+// They are also [[nodiscard]], which is what keeps that trap from being theoretical: a dropped write
+// is otherwise silent (NVS can be full or the flash worn), and only the caller knows what the
+// failure costs — safe_mode.cpp cannot latch without its counter. `bool ok = nvs_set_i32(...)` still
+// compiles and still lies; [[nodiscard]] at least makes the *ignored* result a build error rather
+// than a review catch. main/ builds with -Werror, so this bites.
 std::string nvs_get_str(const char* key, const std::string& def = "");
-esp_err_t   nvs_set_str(const char* key, const std::string& val);
+[[nodiscard]] esp_err_t nvs_set_str(const char* key, const std::string& val);
 int32_t     nvs_get_i32(const char* key, int32_t def);   // used for the persisted RX/TX pin cache
-esp_err_t   nvs_set_i32(const char* key, int32_t val);
+[[nodiscard]] esp_err_t nvs_set_i32(const char* key, int32_t val);
 
 } // namespace daik

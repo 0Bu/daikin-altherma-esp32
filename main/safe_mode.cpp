@@ -21,15 +21,34 @@ static bool s_safe_mode = false;
 void safe_mode_begin() {
     const int reason = static_cast<int>(esp_reset_reason());
     if (boot_reset_was_crash(reason)) {
-        const int next = boot_next_fail_count(nvs_get_i32(BOOT_FAILS_KEY, 0));
-        nvs_set_i32(BOOT_FAILS_KEY, next);   // commit BEFORE the risky subsystems so the bump survives another crash
+        const int32_t stored = nvs_get_i32(BOOT_FAILS_KEY, 0);
+        const int     next   = boot_next_fail_count(stored);
+        // Commit BEFORE the risky subsystems so the bump survives another crash.
+        const esp_err_t err = nvs_set_i32(BOOT_FAILS_KEY, next);
         s_safe_mode = boot_should_enter_safe_mode(next);
-        diag_printf("boot: crash reset, crash_boots=%d%s\n",
-                    next, s_safe_mode ? " -> SAFE MODE (poll + MQTT paused)" : "");
+        if (err == ESP_OK) {
+            diag_printf("boot: crash reset, crash_boots=%d%s\n",
+                        next, s_safe_mode ? " -> SAFE MODE (poll + MQTT paused)" : "");
+        } else {
+            // Report what NVS still holds, not the RAM-only `next`. A failed write means every
+            // crash boot re-reads `stored` and recomputes the same `next`, so the count can never
+            // reach the threshold — the crash loop this guard exists for would spin forever. A
+            // wedged flash is itself a plausible cause of that loop, so this line is the only
+            // warning that the guard is out of action.
+            diag_printf("boot: crash reset, FAILED to persist crash counter (err=%s) — stuck at "
+                        "%ld, safe mode cannot latch%s\n", esp_err_to_name(err),
+                        static_cast<long>(stored),
+                        s_safe_mode ? " (SAFE MODE this boot only)" : "");
+        }
     } else {
         // Clean / intentional reboot (power-on, config-save restart, OTA) — a burst of these during
         // provisioning must never accumulate into a false trip, so reset the counter.
-        if (nvs_get_i32(BOOT_FAILS_KEY, 0) != 0) nvs_set_i32(BOOT_FAILS_KEY, 0);
+        if (nvs_get_i32(BOOT_FAILS_KEY, 0) != 0) {
+            const esp_err_t err = nvs_set_i32(BOOT_FAILS_KEY, 0);
+            if (err != ESP_OK)
+                diag_printf("boot: FAILED to clear crash counter (err=%s) — unrelated crash boots "
+                            "keep accumulating and may false-trip safe mode\n", esp_err_to_name(err));
+        }
         s_safe_mode = false;
     }
 }
@@ -38,8 +57,13 @@ bool safe_mode_active() { return s_safe_mode; }
 
 static void healthy_timer_cb(void*) {
     if (nvs_get_i32(BOOT_FAILS_KEY, 0) != 0) {
-        nvs_set_i32(BOOT_FAILS_KEY, 0);
-        diag_printf("boot: healthy for %ds, cleared crash counter\n", BOOT_HEALTHY_S);
+        const esp_err_t err = nvs_set_i32(BOOT_FAILS_KEY, 0);
+        if (err == ESP_OK)
+            diag_printf("boot: healthy for %ds, cleared crash counter\n", BOOT_HEALTHY_S);
+        else
+            diag_printf("boot: healthy for %ds, FAILED to clear crash counter (err=%s) — unrelated "
+                        "crash boots keep accumulating and may false-trip safe mode\n",
+                        BOOT_HEALTHY_S, esp_err_to_name(err));
     }
 }
 

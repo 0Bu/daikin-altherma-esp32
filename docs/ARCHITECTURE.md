@@ -53,7 +53,8 @@ config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi
                       detection, whole-struct config_save for the HTTP handlers); a failed NVS write
                       names the key on /diag and returns false — config_save then publishes nothing,
                       while config_save_link still applies its RAM patch (the link is proven-good)
-nvs_storage.cpp     → thin NVS helpers (namespaces, blobs, migration); setters return esp_err_t
+nvs_storage.cpp     → thin NVS helpers (namespaces, blobs, migration); setters return esp_err_t and
+                       are [[nodiscard]] — a dropped write is silent (compare to ESP_OK, not bool)
 http_server.cpp     → esp_http_server :80, wildcard dispatch + handle_all OOM try/catch (503)
 http_status.cpp     → GET / (web UI), /status, /values, /models, /diag, /scan, /coredump, and the
                       /events WebSocket (live status/values push)
@@ -538,6 +539,15 @@ alone, that is a reboot loop whose only exit is `esptool erase_flash` over USB �
   burst of config-save reboots that must never be mistaken for a crash-loop. A one-shot timer clears
   the counter after `BOOT_HEALTHY_S` (30 s) of continuous uptime, so a single old crash doesn't
   accumulate with a much later, unrelated one.
+- **Every one of those NVS writes is checked, and the diag line reports what was *persisted*, not
+  what was intended.** The counter is the whole mechanism: if the bump can't be written (full NVS,
+  worn flash) each crash boot re-reads the same stale value and the threshold is never reached — the
+  guard is silently out of action against a crash loop a wedged flash may itself be causing, so
+  `safe_mode.cpp` says so explicitly (`err=` named via `esp_err_to_name`) rather than printing a
+  count that only exists in RAM. A failed *clear* is the mirror case: the count accumulates across
+  unrelated crash boots and can false-trip safe mode on a healthy device, pausing poll + MQTT. Note
+  the write failing does **not** stop safe mode engaging *this* boot — `boot_should_enter_safe_mode`
+  runs on the value just read — it only stops it accumulating across boots.
 - **In safe mode** `main.cpp` starts only WiFi + the HTTP web UI + the OTA health gate and **skips**
   the X10A poll engine and the MQTT bridge (the two background subsystems a bad config could crash
   on). The full recovery surface (`/set_wifi`, `/set_mqtt`, `/set_hp`, and — once #9 lands — factory
