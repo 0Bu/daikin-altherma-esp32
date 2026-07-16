@@ -110,6 +110,11 @@ always re-flashable over USB. The containment is therefore *prevention*, not rec
   `espsecure signature-info-v2`) and prints the signing command. The `flash-esp32` skill and the
   CLAUDE.md flash steps run it before `esptool write_flash`, so the mode-3 crash-loop is stopped at
   the source. Recovery from a board that already got an unsigned image = re-flash a **signed** one.
+- **`scripts/ci-build-all.sh`** closes the *Web-Serial* half of mode 3, which no host-side guard can
+  reach: after building the installer's `-merged.bin` it carves the app back out at the offset
+  `flash_args` assigned it and runs `require-signed.sh` on that region. The build fails rather than
+  publish an installer image whose app is unsigned, so the browser path cannot hand out a
+  crash-looping board.
 
 ### The health gate (mode 1)
 
