@@ -110,8 +110,19 @@ host-testable core is unusually large and valuable, because the risky parts are 
   chip's reference board; the XIAO ESP32-S3 is authoritative). Feeds `/status.pins_avail` and hence
   the dashboard RX/TX pin dropdown. Pure, so the lists are asserted host-side (sorted, in range, and
   the reference-board set excludes not-broken-out pins like GPIO47).
+- `logic/mqtt_group.hpp` — register page → friendly group name, plus the grouped state JSON for the
+  one shared state topic (depth 1, groups/keys in first-seen order). Numeric-vs-string typing is
+  asserted host-side, so a reading can't reach HA quoted and land as a string sensor.
+- `logic/mqtt_uri.hpp` — broker URI → host/port/TLS split behind `mqtt_ha`'s scheme policy: scheme
+  defaults (`mqtt://` 1883, `mqtts://`/`wss://` 8883), IPv6 literals, and the rejects (empty, scheme
+  with no host, empty port).
+- `logic/heartbeat.hpp` — the board/link diagnostics JSON + its 16 diagnostic HA discovery configs,
+  with the dBm → signal-quality curve and uptime formatting pinned to known-good samples.
+- `logic/crashinfo.hpp` — reset-reason slug + fault classification, and the `last_crash` / MQTT crash
+  payload + paste-friendly text bundle (incl. the backtrace clamp) built from a captured summary.
 - `logic/reset_reason.hpp` — maps a raw `esp_reset_reason()` code to the stable slug used by
-  `/status.sys.reset_reason` and the heartbeat, reusing `crashinfo`'s table so there is one vocabulary.
+  `/status.sys.reset_reason` and the heartbeat, reusing `crashinfo`'s table so there is one
+  vocabulary — a parity check asserts the two never drift apart.
 - `logic/boot_guard.hpp` — the boot-loop safe-mode decision logic (crash-only reset classification,
   saturating crash counter, threshold rule) behind `safe_mode.cpp`; asserted host-side so the "enter
   on the Nth crash, never on a provisioning reboot" contract can't silently regress.
@@ -121,6 +132,25 @@ host-testable core is unusually large and valuable, because the risky parts are 
   purpose: at worst case (16-deep backtrace + 64-char ELF hash) that block is ~340 bytes and would
   truncate through the backtrace and lose `elf_sha256` in diag's 256-byte line buffer. The host test
   asserts each record fits one datagram, and that a non-notable boot yields **zero** crash lines.
+- `logic/link_watch.hpp` — the ICMP gateway-watchdog policy behind `wifi.cpp`: the three-valued probe
+  result (reachable / proven-silent / unmeasurable) and the consecutive-observation counters that
+  decide when to force a re-association. Keeping "could not measure" distinct from "reachable" is the
+  whole point — folding them together made a permanently *blind* watchdog look identical to a healthy
+  one. Pure, so the ghost-association rule (and its deliberately slower blind threshold) is asserted
+  without staging a real missed deauth.
+- `logic/syslog_policy.hpp` — classifies a `sendto()`/`socket()` errno as **hard** (destination or
+  route is at fault → re-resolving now is worth it) vs **transient** (the stack momentarily could not
+  take the datagram → keep the resolved destination). This is what stops the syslog send storm: on a
+  ghosted link every send fails, and forcing a fresh DNS + blocking ICMP probe per failed line ran
+  hardest exactly when the network could least carry it. Unknown errnos default to transient by
+  design — the asymmetry is asserted host-side.
+- `logic/health_gate.hpp` — the OTA commit/wait/give-up verdict across the base window and the hard
+  cap, including the setup-AP case where no credentials means connectivity isn't expected and the
+  image is healthy anyway. Pure, so the rule that decides whether a new image sticks is testable
+  without flashing one.
+- `logic/modbus.hpp` — Modbus TCP framing (MBAP, no CRC; FC03/04/06/16 build + response/exception
+  parse) and the HomeHub `Temp16`/`Pow16`/`Int16`/`Text16` codecs + `homehub-*` mDNS filter. Host-
+  tested core for the **planned** firmware-exclusive HomeHub link (issue #32) — not yet wired in.
 
 `hp_convert.cpp`, `hp_comm.cpp`, `config.cpp`, `mqtt_ha.cpp` are thin device wrappers that call
 these headers. Add new decode/format logic to `main/logic/` and a `CHECK` in
