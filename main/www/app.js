@@ -42,6 +42,7 @@ function markUnreachable() {
 }
 
 function renderDashboard() {
+  renderRecoveryBanner();
   renderCrashBanner();
   const s = S.status || {}, hp = s.hp || {};
   // Header is a fixed product title ("Daikin Altherma ESP32", set in index.html) — the detected
@@ -85,6 +86,26 @@ function faultValue() {
   if (bad) return String(bad.value);
   if (codes.length) return String(codes[0].value);
   return pickValue(/fault|error/i);
+}
+
+// ── Recovery (safe) mode banner ──────────────────────────────────────────
+// Shown when /status.sys.safe_mode is true — the device crash-looped on a bad config and came up
+// minimally (network + web UI + OTA only; the X10A poll engine and MQTT bridge are paused). It is not
+// dismissible: it reflects a LIVE state and clears itself once a healthy reboot leaves safe mode. The
+// recovery controls (RX/TX pins on the ESP32 card, the WiFi/MQTT modals) stay fully usable underneath.
+function renderRecoveryBanner() {
+  const el = $("recoveryBanner");
+  if (!el) return;
+  if (!(S.status?.sys?.safe_mode)) { el.hidden = true; return; }
+  if (!el.hidden && el.dataset.on === "1") return;   // already shown — don't thrash the DOM
+  el.dataset.on = "1";
+  el.innerHTML =
+    `<div class="crash-head"><span class="crash-ico">!</span>` +
+    `<div class="crash-txt"><div class="crash-title">Recovery mode</div>` +
+    `<div class="crash-meta">The device restarted too many times and came up in recovery mode. ` +
+    `Heat-pump polling and MQTT are paused. Correct the configuration (for example the RX/TX pins on ` +
+    `the ESP32 card), then reboot to resume normal operation.</div></div></div>`;
+  el.hidden = false;
 }
 
 // ── Crash banner ─────────────────────────────────────────────────────────
@@ -215,6 +236,17 @@ function fmtUptime(s) {
   if (h) return `${h}h ${m}m`;
   return m ? `${m}m ${s % 60}s` : `${s}s`;
 }
+// Compact byte figure for the heap row (/status.sys.free_heap), e.g. 148512 -> "145 KB".
+function fmtBytes(b) {
+  if (b == null) return "—";
+  return `${Math.round(b / 1024)} KB`;
+}
+// Reset reasons (logic/reset_reason.hpp slugs) that mean the device FAULTED rather than rebooted
+// cleanly — the "Last reset" row is warn-coloured for these, neutral otherwise. Mirrors the
+// crash_reason_is_fault() set in logic/crashinfo.hpp (panic / any watchdog / brown-out / power
+// glitch / CPU lockup); a clean poweron / software reboot / deep-sleep wake is neutral.
+const FAULT_RESETS = ["panic", "int_wdt", "task_wdt", "wdt", "brownout", "pwr_glitch", "cpu_lockup"];
+
 // RX/TX pin dropdown row — shown only when auto-detection hasn't locked a working pin pair, so the
 // user picks from the board's actually-usable GPIOs (logic/board_pins.hpp → /status.pins_avail).
 // The current pin is always an option even if it's off-list (e.g. a stale/custom value).
@@ -235,17 +267,25 @@ const fwRow = (version) =>
 // read-only; until then a dropdown of the board's wire-able GPIOs lets the user point the firmware at
 // their wiring. A brief timeout doesn't flip back to the dropdown (last_ok_s grace window).
 function esp32CardHtml() {
-  const s = S.status || {}, hp = s.hp || {};
+  const s = S.status || {}, hp = s.hp || {}, sys = s.sys || {};
   const proto = hp.proto === "I" ? "X10A-I" : hp.proto === "S" ? "X10A-S" : "—";
   const pinsLocked = hp.connected || (typeof hp.last_ok_s === "number" && hp.last_ok_s >= 0 && hp.last_ok_s <= 30);
   const avail = Array.isArray(s.pins_avail) ? s.pins_avail : [];
   const pinRow = (label, id, val, other) => pinsLocked
     ? vrow(label, val != null ? String(val) : "—", { cls: "mono num" })
     : pinSelRow(label, id, val, avail.filter((p) => p !== other));
+  // Last reset is warn-coloured on a fault reason (panic / watchdog / brown-out …) and neutral on a
+  // clean boot; Free heap surfaces the current heap so a leak is visible without a serial console.
+  const resetRow = sys.reset_reason
+    ? vrow("Last reset", sys.reset_reason, { cls: FAULT_RESETS.includes(sys.reset_reason) ? "warn" : "" })
+    : "";
+  const heapRow = sys.free_heap != null ? vrow("Free heap", fmtBytes(sys.free_heap)) : "";
   const rows =
     vrow("Chip", s.platform || "—", { cls: "mono" }) +
     fwRow(s.version || "?") +
     vrow("Uptime", fmtUptime(s.uptime_s)) +
+    resetRow +
+    heapRow +
     vrow("Heat-pump link", hp.connected ? "Online" : "Offline", { cls: hp.connected ? "ok" : "err" }) +
     vrow("Protocol", hp.connected ? proto : "—") +
     pinRow("RX pin", "e32Rx", hp.rx, hp.tx) +

@@ -11,8 +11,10 @@
 #include "hp_poll.hpp"
 #include "logic/crashinfo.hpp"
 #include "logic/detect.hpp"
+#include "logic/reset_reason.hpp"
 #include "mqtt_ha.hpp"
 #include "ota_update.hpp"
+#include "safe_mode.hpp"
 #include "wifi.hpp"
 #include "syslog.hpp"
 
@@ -21,6 +23,8 @@
 #include "esp_http_server.h"
 #include "esp_wifi.h"
 #include "esp_timer.h"
+#include "esp_system.h"
+#include "esp_heap_caps.h"
 #include "esp_partition.h"
 #include "esp_core_dump.h"
 #include "freertos/FreeRTOS.h"
@@ -111,6 +115,20 @@ static std::string build_status_json_string() {
          ",\"crc_err\":" + std::to_string(hp.crc_err) +
          ",\"timeout_err\":" + std::to_string(hp.timeout_err) + "},";
     j += "\"profile\":{\"id\":" + jstr(c.profile) + "},";
+
+    // System health: heap headroom + why the device last booted, so both are visible from the LAN /
+    // WebSocket without a serial console (and without a broker — unlike the MQTT heartbeat). free_heap
+    // is the current free, min_free_heap the since-boot low-water mark (the leak indicator), max_alloc
+    // the largest CONTIGUOUS block (the true OOM ceiling on this heap-tight chip). reset_reason reuses
+    // the boot-time cached reason (diag_crash.cpp) mapped via logic/reset_reason.hpp; safe_mode is the
+    // latched boot-loop recovery flag (safe_mode.cpp — true once too many crash boots accumulated, so
+    // poll + MQTT were skipped). Small numbers + a short slug appended to the existing builder — no
+    // large contiguous allocation (this also runs in the WS broadcaster).
+    j += "\"sys\":{\"free_heap\":" + std::to_string(esp_get_free_heap_size()) +
+         ",\"min_free_heap\":" + std::to_string(esp_get_minimum_free_heap_size()) +
+         ",\"max_alloc\":" + std::to_string(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)) +
+         ",\"reset_reason\":" + jstr(reset_reason_name(diag_crash_info().reason)) +
+         ",\"safe_mode\":" + (safe_mode_active() ? "true" : "false") + "},";
 
     // Last reset: null on a clean boot, else the cached crash summary (reset reason + core-dump
     // backtrace). Read from the boot-time CACHE (diag_crash.cpp) — never re-parsed from flash here,

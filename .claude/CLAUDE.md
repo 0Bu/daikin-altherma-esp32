@@ -84,7 +84,12 @@ broken out on the XIAO.
 ## Architecture (component map)
 
 ```
-main.cpp        boot: NVS, config, WiFi(STA)|setup-AP, mDNS, HTTP, MQTT, poll engine, OTA gate
+main.cpp        boot: NVS, config, safe-mode guard, WiFi(STA)|setup-AP, mDNS, HTTP, MQTT, poll, OTA gate
+safe_mode.cpp   boot-loop safe mode (logic/boot_guard.hpp): counts crash-only boots in NVS "daik_cfg"
+                (boot_fails); past BOOT_FAIL_THRESHOLD it latches -> main.cpp skips the poll engine + MQTT
+                bridge (WiFi + web UI + OTA stay up) so a bad config (e.g. wrong RX/TX pins) is fixable
+                in-browser, not over USB; a clean/intentional reboot resets the count, and a
+                BOOT_HEALTHY_S-uptime timer clears it. Drives /status.sys.safe_mode + the UI recovery banner
 config.cpp      runtime Config (logic/config_model.hpp): WiFi/MQTT + one-shot WiFi rollback backup +
                 link cache (pins/proto) in NVS "daik_cfg"; model (profile/fingerprint) RAM-only
                 (config_set_runtime); mutex-guarded
@@ -117,8 +122,8 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 state topic <base>/<node>/state (logic/mqtt_group.hpp), republished on change; LWT
                 availability, mqtts+CA on creds; board/link diagnostics on <base>/<node>/heartbeat
                 (logic/heartbeat.hpp), published on a fixed 10s cadence (HEARTBEAT_INTERVAL_S) —
-                heap(free+min-free-water+largest-block)/uptime/wifi(+reconnects)/mqtt(pub count+
-                fails+reconnects)/X10A bus (rx_received/rx_fails) stats, 15 diagnostic HA entities
+                heap(free/min-free/largest-block)/uptime/reset_reason/wifi(+reconnects)/mqtt(pub
+                count+fails+reconnects)/X10A bus (rx_received/rx_fails) stats, 16 diagnostic HA entities
                 streamed independently of profile detection. Also RETAINS the boot-time crash summary
                 on <base>/<node>/crash (logic/crashinfo.hpp) once per (re)connect — last reset reason
                 + a "dump waiting" flag as 2 more diagnostic HA entities (reason/backtrace only, never
@@ -143,7 +148,11 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 the summary is NEVER re-parsed on a request path (build_status_json also runs in the
                 poll task's WS broadcaster, which only self-guards std::bad_alloc by dropping the frame)
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, config_model,
-                discovery, detect, mqtt_group, heartbeat, crashinfo, board_pins). detect.hpp narrows the
+                discovery, detect, mqtt_group, heartbeat, crashinfo, reset_reason, boot_guard, board_pins).
+                reset_reason.hpp maps a reset code to the /status.sys.reset_reason slug (reusing
+                crashinfo's crash_reason_slug — one vocabulary). boot_guard.hpp = the safe-mode decision
+                logic (crash-only counting, saturating increment, threshold) driving safe_mode.cpp.
+                detect.hpp narrows the
                 Altherma-only model profiles from a bus fingerprint (page mask + capacity) to a
                 register-equivalent candidate set + a best-fit representative (detect_best);
                 mqtt_group.hpp maps a register page to a friendly group name and builds the grouped
@@ -164,7 +173,7 @@ www/            web UI sources (index.html + style.css + app.js -> one gzipped p
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `wifi_ssid`/`wifi_pass`, the one-shot WiFi rollback backup `wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback` (see `/set_wifi`), `mqtt_uri`/`mqtt_user`/`mqtt_pass`, `syslog_host`/`syslog_port` (empty host = off), and the X10A **link cache** `rx_pin`/`tx_pin`/`proto`. (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
+| `daik_cfg` | `wifi_ssid`/`wifi_pass`, the one-shot WiFi rollback backup `wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback` (see `/set_wifi`), `mqtt_uri`/`mqtt_user`/`mqtt_pass`, `syslog_host`/`syslog_port` (empty host = off), the X10A **link cache** `rx_pin`/`tx_pin`/`proto`, and the boot-loop **crash counter** `boot_fails` (safe_mode.cpp; here so a factory reset wipes it too). (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -188,6 +197,11 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   syslog{configured,resolved,reachable,host,port,error},
                   hp{proto,rx,tx,connected,
                   last_ok_s,registers,values,crc_err,timeout_err}, profile{id},
+                  sys{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode} — heap headroom (free /
+                  since-boot low-water / largest-contiguous) + why the device last booted, ALWAYS
+                  present (unlike last_crash, and unlike the MQTT heartbeat needs no broker); reset_reason
+                  via logic/reset_reason.hpp, safe_mode = the latched boot-loop recovery flag (safe_mode.cpp;
+                  true once too many crash boots accumulated -> poll + MQTT skipped),
                   last_crash (null on a clean boot, else {reason,reason_code,fault,coredump,task,pc,
                   backtrace[],corrupted,elf_sha256} from the boot-time cache — drives the crash
                   banner), detect{proto,valid,capacity_kw,ou_eeprom,candidates[],families[],ambiguous,

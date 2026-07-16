@@ -40,14 +40,14 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 10 | **MQTTS + CA-bundle** TLS; credentials never sent in cleartext | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 11 | Core-dump-to-flash + summary capture + offline symbolication | ✅ | [`diag_crash.cpp`](../main/diag_crash.cpp), [`decode-coredump.sh`](../scripts/decode-coredump.sh) |
 | 12 | Reset-reason + crash classification, retained to MQTT | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp) |
-| 13 | 15-entity device **heartbeat** diagnostics stream | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
+| 13 | 16-entity device **heartbeat** diagnostics stream (heap trend + reset reason incl.) | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
 | 14 | Strongest-AP scan + SAE tuning + **endless reconnect** | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 15 | **ICMP gateway watchdog** (ghost-association recovery) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 16 | Captive-portal provisioning (SoftAP + UDP:53 DNS catch-all) | ✅ | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp) |
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (235 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (281 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -55,6 +55,8 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 25 | Read-only MCP server route | 🔭 | [`mcp_server.cpp`](../main/mcp_server.cpp) |
 | 26 | **MQTT broker save-time pre-flight** (DNS/TCP/connect+auth, heap-guarded) before persist | ✅ | [`http_config.cpp`](../main/http_config.cpp) |
 | 27 | **Task Watchdog** → clean reboot on a wedged poll/publish task | ✅ | [`hp_poll.cpp`](../main/hp_poll.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) |
+| 28 | **`/status.sys`** always-on heap headroom + last-boot reason (LAN/WS, no broker) | ✅ 🧪 | [`http_status.cpp`](../main/http_status.cpp), [`logic/reset_reason.hpp`](../main/logic/reset_reason.hpp) |
+| 29 | **Boot-loop safe mode** — recover a bad config in-browser (crash-only counting, distinct from OTA rollback) | ✅ 🧪 | [`safe_mode.cpp`](../main/safe_mode.cpp), [`logic/boot_guard.hpp`](../main/logic/boot_guard.hpp) |
 
 ---
 
@@ -130,6 +132,14 @@ See [`ARCHITECTURE.md` → OTA, signing, partitions](ARCHITECTURE.md) and
   patch above the latest `v*` tag (with `version.txt` as a manual floor); CI stamps that into
   `esp_app_get_description()->version` so the running image, the release tag and `manifest.json` can
   never drift.
+- **✅ 🧪 Boot-loop safe mode (config recovery)** ([`safe_mode.cpp`](../main/safe_mode.cpp),
+  [`logic/boot_guard.hpp`](../main/logic/boot_guard.hpp)): a **different** failure class from the image
+  rollback above — both OTA slots share the same `daik_cfg` NVS, so rolling back the *image* can't fix
+  a *config* crash-loop (e.g. wrong RX/TX pins). Safe mode counts **crash-only** boots (a clean/
+  config-save reboot resets the count, so provisioning never trips it) and, past a threshold, brings
+  the device up minimally — WiFi + web UI + OTA, no poll/MQTT — so the bad setting is fixable in the
+  browser instead of over USB. `/status.sys.safe_mode` + a warn-accented **Recovery mode** banner
+  surface it. The counter lives in `daik_cfg`, so a factory reset clears it too.
 
 ---
 
@@ -263,12 +273,20 @@ the fact*, from the field, without a serial cable:
   `<base>/<node>/crash` MQTT payload (2 diagnostic HA entities: reason + "dump waiting" flag —
   reason/backtrace only, **never** the raw dump or any secret). `static_assert`s pin the IDF reset-enum
   values so a renumbering fails the build rather than mislabeling every crash.
-- **✅ 🧪 15-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): on a fixed
-  10 s cadence, `<base>/<node>/heartbeat` streams heap (free / min-free low-water / **largest-free-block**,
-  the true OOM limit — each its own diagnostic entity so a slow leak or fragmentation is graphable/
-  alertable), uptime, WiFi RSSI + reconnect count, MQTT publish/fail/reconnect counters, and X10A
-  bus rx/fail/crc/timeout stats — published independently of heat-pump profile detection, so board
-  health is visible even while the model is still `auto`.
+- **✅ 🧪 16-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): on a fixed
+  10 s cadence, `<base>/<node>/heartbeat` streams heap (free / min-free / **largest-free-block**, the
+  true OOM limit — all three now their own HA entities), uptime, the **last reset reason**, WiFi RSSI +
+  reconnect count, MQTT publish/fail/reconnect counters, and X10A bus rx/fail/crc/timeout stats —
+  published independently of heat-pump profile detection, so board health is visible even while the
+  model is still `auto`.
+- **✅ 🧪 Always-on system health** ([`logic/reset_reason.hpp`](../main/logic/reset_reason.hpp)): the
+  `/status` document (and the `/events` status frame) carries a compact `sys` block — `free_heap`,
+  `min_free_heap` (since-boot low-water, the leak indicator), `max_alloc` (largest contiguous block,
+  the real OOM ceiling), the `reset_reason` slug and a `safe_mode` flag. Unlike `last_crash` it is
+  present on **every** boot, and unlike the heartbeat it needs **no broker**, so "why did it reboot?"
+  and "is the heap leaking?" are answerable from the LAN alone. `reset_reason_name()` reuses the
+  crash slug vocabulary (one naming for the sys block, the crash entity and the heartbeat). The
+  dashboard ESP32 card renders the reset reason (fault-coloured) and free heap.
 - **✅ Build identity** — `/status.app_elf_sha256` ties a running device to the exact firmware that
   produced any dump.
 - **✅ In-RAM diag ring** (`GET /diag`) and a **status LED** ([`status_led.cpp`](../main/status_led.cpp))
@@ -306,8 +324,10 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
 - **🧪 What's covered** — CRC & framing (`crc.hpp`), value converters (`convert.hpp`), register
   extraction (`registers.hpp`), the config model/validation (`config_model.hpp`), HA-discovery payloads
   (`discovery.hpp`), detection (`detect.hpp`), the OTA health gate (`health_gate.hpp`), heartbeat &
-  crash formatting (`heartbeat.hpp`, `crashinfo.hpp`), grouped state JSON (`mqtt_group.hpp`), board pins
-  (`board_pins.hpp`). **235 `CHECK`s** in [`test/test_logic.cpp`](../test/test_logic.cpp).
+  crash formatting (`heartbeat.hpp`, `crashinfo.hpp`), the reset-reason vocabulary (`reset_reason.hpp`),
+  the boot-loop safe-mode decision (`boot_guard.hpp`), grouped state JSON (`mqtt_group.hpp`), board
+  pins (`board_pins.hpp`). **281 `CHECK`s** in
+  [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
   real "run it and see" loop even in an environment that can't build firmware or USB-flash.
@@ -393,8 +413,8 @@ security of signed firmware with none of the brick risk. It refuses to roll a ba
 **connectivity-proving health gate** (not a naive uptime timer). It ships a **live WebSocket UI embedded
 and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-associations no event
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
-sha-matched ELF, retained MQTT crash + 15-entity heartbeat diagnostics). And the risky parts — decode,
-CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (235 checks),
+sha-matched ELF, retained MQTT crash + 16-entity heartbeat diagnostics). And the risky parts — decode,
+CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (281 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

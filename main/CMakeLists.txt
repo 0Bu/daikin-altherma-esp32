@@ -16,6 +16,7 @@ idf_component_register(
         "mcp_server.cpp"
         "provisioning.cpp"
         "captive_dns.cpp"
+        "safe_mode.cpp"
         "mqtt_ha.cpp"
         "ota_update.cpp"
         "diag_log.cpp"

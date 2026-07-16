@@ -22,6 +22,7 @@ struct HeartbeatFields {
     uint32_t    free_heap     = 0;   // esp_get_free_heap_size()
     uint32_t    min_free_heap = 0;   // esp_get_minimum_free_heap_size() — worst-case low-water mark
     uint32_t    max_alloc     = 0;   // heap_caps_get_largest_free_block() — the binding OOM limit
+    std::string reset_reason;         // reset_reason_name() slug — why the device last booted
 
     bool        wifi_connected  = false;
     int8_t      wifi_rssi       = 0;   // valid only if wifi_connected
@@ -87,6 +88,7 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += "\"free_heap\":" + std::to_string(f.free_heap) + ",";
     j += "\"min_free_heap\":" + std::to_string(f.min_free_heap) + ",";
     j += "\"max_alloc\":" + std::to_string(f.max_alloc) + ",";
+    j += "\"reset_reason\":\""; json_append_escaped(j, f.reset_reason); j += "\",";
     j += "\"wifi\":{\"connected\":"; j += f.wifi_connected ? "true" : "false";
     j += ",\"rssi\":"; j += f.wifi_connected ? std::to_string(f.wifi_rssi) : "null";
     j += ",\"quality_pct\":"; j += f.wifi_connected ? std::to_string(wifi_signal_quality_pct(f.wifi_rssi)) : "null";
@@ -139,6 +141,7 @@ inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
     {"sensor",        "min_free_heap",    "Min Free Heap",       "min_free_heap",    "B",   "",                 "measurement"},
     {"sensor",        "max_alloc",        "Largest Free Block",  "max_alloc",        "B",   "",                 "measurement"},
     {"sensor",        "uptime",           "Uptime",              "uptime_s",         "s",   "duration",         "measurement"},
+    {"sensor",        "reset_reason",     "Reset Reason",        "reset_reason",     "",    "",                 ""},
     {"binary_sensor", "bus_status",       "X10A Bus",            "bus.connected",    "",    "connectivity",     ""},
     {"sensor",        "bus_crc_err",      "X10A CRC Errors",     "bus.rx.crc_err",   "",    "",                 "total_increasing"},
     {"sensor",        "bus_timeout_err",  "X10A Timeout Errors", "bus.rx.timeout_err","",    "",                 "total_increasing"},

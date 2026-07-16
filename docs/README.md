@@ -180,6 +180,7 @@ GET  /status                       # { version, platform, uptime_s, app_elf_sha2
                                    #   hp:{proto,rx,tx,connected,last_ok_s,
                                    #        registers,values,crc_err,timeout_err},
                                    #   profile:{id},
+                                   #   sys:{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode},
                                    #   last_crash: null | {reason,reason_code,fault,coredump,
                                    #        task,pc,backtrace[],corrupted,elf_sha256},
                                    #   detect:{proto,valid,capacity_kw,ou_eeprom,candidates[],

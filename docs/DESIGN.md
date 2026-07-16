@@ -93,6 +93,8 @@ card) plus the RX/TX pins (inline on the ESP32 card). The heat pump is otherwise
 `pins_avail[]` (per-target usable X10A GPIOs for the RX/TX picker),
 `wifi{ssid,ip,rssi,connected,bssid,mac,std}`, `mqtt{configured,connected,tls,broker}`,
 `hp{proto,rx,tx,connected,last_ok_s,…}`, `profile{id}`,
+`sys{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode}` (heap headroom + last boot reason,
+always present — feeds the ESP32 card's Last-reset and Free-heap rows),
 `last_crash` (`null` on a clean boot, else `{reason,reason_code,fault,coredump,task,pc,backtrace[],
 corrupted,elf_sha256}` — drives the crash banner),
 `detect{proto,valid,capacity_kw,ou_eeprom,candidates[],families[],ambiguous,model{name,family,
@@ -161,6 +163,11 @@ the **product name**). There is **no settings gear** — the app has no other sc
 
 Body, ordered:
 
+0. **Recovery-mode banner** (only when `sys.safe_mode` is true). A `--warn`-accented card **above the
+   hero**: title "Recovery mode", explaining that the device restarted too many times and came up
+   minimally (heat-pump polling and MQTT paused), and to correct the configuration (e.g. the RX/TX
+   pins on the ESP32 card) and reboot. **Not dismissible** — it reflects a live state and clears
+   itself once a healthy reboot leaves safe mode. Lives outside the poll-rebuilt card grid.
 0. **Crash banner** (only when `last_crash` is set — a fault reset or a core dump waiting; hidden on a
    clean boot). An `--err`-accented card **above the hero**: title "Device restarted after a crash",
    a meta line (reset reason · crashed task · fw version · short `app_elf_sha256`), the raw hex
@@ -173,9 +180,12 @@ Body, ordered:
    Fault text and the last-poll age surface in the hero sub-line.
 2. **Status cards** — five cards styled exactly like the value groups (§6), first in the same grid:
    - **ESP32** — the board itself: chip (`platform`), **firmware version** (a tappable row that checks
-     for an OTA update, §5.4), uptime (`uptime_s`), the heat-pump link (Online/Offline) and X10A
+     for an OTA update, §5.4), uptime (`uptime_s`), **Last reset** (`sys.reset_reason` — warn-coloured
+     on a fault reason: panic / any watchdog / brown-out, neutral on a clean boot) and **Free heap**
+     (`sys.free_heap`, compact e.g. "145 KB"), the heat-pump link (Online/Offline) and X10A
      protocol, and the **RX/TX pins** — read-only when detected, else a usable-GPIO dropdown (§5.2).
-     From `platform`, `version`, `uptime_s`, `pins_avail`, `hp{proto,rx,tx,connected,last_ok_s}`.
+     From `platform`, `version`, `uptime_s`, `sys{reset_reason,free_heap}`, `pins_avail`,
+     `hp{proto,rx,tx,connected,last_ok_s}`.
    - **WiFi** — a header row combining the PHY standard name (e.g. "WI-FI 4"), signal bars + RSSI
      (`--ok`/`--warn` by strength) and the SSID (green), then IP address, MAC and BSSID; from
      `wifi{ssid,ip,rssi,connected,bssid,mac,std}`. A **pencil** in the card header opens the WiFi edit
@@ -189,9 +199,6 @@ Body, ordered:
      reachability probe is silent (still forwarding), or a **DNS error** — from
      `syslog{configured,resolved,reachable,host,port,error}`. A **pencil** opens the Syslog edit modal
      (§5.1), which posts `host:port` to `/set_syslog`.
-   - **ESP32** — the board's X10A bus: chip, firmware, uptime, **Heat-pump link** (Online/Offline,
-     honest), **Protocol** (shown only while live), and the **RX/TX pins** (read-only when the bus
-     answers, else a `pins_avail` dropdown). From `hp{proto,rx,tx,connected}` + `pins_avail[]`.
    - **Model** — the model name (full-width heading) + detected capacity, from `detect{capacity_kw,
      model}`. Both are bus-derived, so they show **only while the link is live** (`hp.connected`):
      offline the name degrades to the brand "Daikin Altherma" and the capacity is hidden — never a
@@ -247,6 +254,9 @@ enabled/available values are hidden.
 - **Crash banner** — `--err`-accented card above the hero (§5.3 item 0), shown only when
   `last_crash` is set: title + meta + hex backtrace, with Download / Copy-diagnostics / Dismiss
   actions. Small `.sm` buttons + a quiet `.ghost` Dismiss.
+- **Recovery banner** — `--warn`-accented twin of the crash banner (reuses its layout classes), above
+  the hero, shown only when `sys.safe_mode` is true: title + one explanatory line, **no actions and no
+  dismiss** (it mirrors a live state, clearing itself on a healthy reboot).
 
 ## 8. States & feedback
 
@@ -263,6 +273,10 @@ transition). Specific:
   5 s (hero shows "Unreachable — retrying…"), no hard error page.
 - **Empty**: pre-first-poll dashboard shows "Waiting for first poll…"; unknown model shows the
   *Generic* hint.
+- **Recovery mode**: if `sys.safe_mode` is true (too many crash boots), the recovery banner (§5.3
+  item 0) shows above the hero and the heat-pump cards stay collapsed (polling is paused); the WiFi,
+  MQTT and ESP32 (RX/TX) config controls remain usable so the bad setting can be corrected, then a
+  reboot returns to normal.
 - **Post-crash**: if the last reset was a fault (or a core dump is waiting), the crash banner (§5.3
   item 0) appears above the hero until dismissed. "Copy diagnostics" toasts "Diagnostics copied — paste
   into a bug report" on success, or "Copy failed — open /coredump and /diag manually" if the clipboard
