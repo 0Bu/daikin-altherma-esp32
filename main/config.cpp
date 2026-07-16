@@ -1,6 +1,7 @@
 // Runtime config: daik::Config backed by NVS, seeded from Kconfig defaults. See config.hpp.
 #include "config.hpp"
 #include "nvs_storage.hpp"
+#include "diag_log.hpp"
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -67,9 +68,26 @@ void config_load() {
     publish(c);
 }
 
+// One NVS write, with the failure named on /diag + syslog. The callers only learn THAT the save
+// failed (they turn it into a 500); without this line nobody could tell which key died or why —
+// a full partition and a wedged flash both surface as a bare "config write failed".
+static bool put_str(const char* key, const std::string& val) {
+    esp_err_t e = nvs_set_str(key, val);
+    if (e != ESP_OK) diag_printf("config: NVS write failed key=%s err=%s\n", key, esp_err_to_name(e));
+    return e == ESP_OK;
+}
+static bool put_i32(const char* key, int32_t val) {
+    esp_err_t e = nvs_set_i32(key, val);
+    if (e != ESP_OK) diag_printf("config: NVS write failed key=%s err=%s\n", key, esp_err_to_name(e));
+    return e == ESP_OK;
+}
+
 bool config_save(const Config& c) {
     // Persist user settings (WiFi + MQTT) and the X10A link cache (RX/TX pins + protocol). The MODEL
     // is intentionally NOT written — profile + fingerprint (fp_*) are re-derived every boot.
+    // Within a group every key is attempted even after a failure (`&=`, not short-circuit) so one bad
+    // key doesn't hide the rest, and each failing one gets its own diag line. ACROSS the two WiFi
+    // groups the sequence stops dead — see below.
     bool ok = true;
 
     // WiFi credentials vs. their rollback backup: the ORDER of these two groups matters. Every
@@ -87,29 +105,75 @@ bool config_save(const Config& c) {
     // Either way the worst case becomes the same harmless one — a stale backup/flag next to
     // credentials that work, which the next successful connect clears (wifi.cpp). Ordered backwards,
     // the worst case costs the credentials themselves.
+    //
+    // A WRITE FAILURE straddles these groups exactly like a power cut does, so the second group is
+    // only written if the first one fully landed. Without that stop, an NVS error hits the identical
+    // worst case the ordering exists to rule out: clearing a rollback whose credential-restore
+    // failed would go on to erase the backup that still held the only working credentials, leaving
+    // the bad ones on flash and nothing to roll back to. Bailing out keeps flash self-consistent —
+    // it just keeps the PREVIOUS consistent state, which is what `false` then tells the caller.
     auto save_wifi_creds = [&] {
-        ok &= nvs_set_str("wifi_ssid", c.wifi_ssid);
-        ok &= nvs_set_str("wifi_pass", c.wifi_pass);
+        bool g = true;
+        g &= put_str("wifi_ssid", c.wifi_ssid);
+        g &= put_str("wifi_pass", c.wifi_pass);
+        return g;
     };
     auto save_wifi_rollback = [&] {
-        ok &= nvs_set_str("wifi_ssid_back", c.wifi_ssid_backup);
-        ok &= nvs_set_str("wifi_pass_back", c.wifi_pass_backup);
-        ok &= nvs_set_i32("wifi_rollback", c.wifi_rollback_active ? 1 : 0);
-        ok &= nvs_set_i32("wifi_rolledbk", c.wifi_rolled_back ? 1 : 0);
+        bool g = true;
+        g &= put_str("wifi_ssid_back", c.wifi_ssid_backup);
+        g &= put_str("wifi_pass_back", c.wifi_pass_backup);
+        g &= put_i32("wifi_rollback", c.wifi_rollback_active ? 1 : 0);
+        g &= put_i32("wifi_rolledbk", c.wifi_rolled_back ? 1 : 0);
+        return g;
     };
-    if (c.wifi_rollback_active) { save_wifi_rollback(); save_wifi_creds(); }
-    else                        { save_wifi_creds(); save_wifi_rollback(); }
+    if (c.wifi_rollback_active) {
+        if (!save_wifi_rollback()) return false;   // no backup on flash → do NOT arm the new creds
+        ok &= save_wifi_creds();
+    } else {
+        if (!save_wifi_creds()) return false;      // creds not on flash → do NOT erase the backup
+        ok &= save_wifi_rollback();
+    }
 
-    ok &= nvs_set_str("mqtt_uri", c.mqtt_uri);
-    ok &= nvs_set_str("mqtt_user", c.mqtt_user);
-    ok &= nvs_set_str("mqtt_pass", c.mqtt_pass);
-    ok &= nvs_set_str("syslog_host", c.syslog_host);
-    ok &= nvs_set_i32("syslog_port", c.syslog_port);
-    ok &= nvs_set_i32("rx_pin", c.rx_pin);
-    ok &= nvs_set_i32("tx_pin", c.tx_pin);
-    ok &= nvs_set_str("proto", std::string(1, static_cast<char>(c.proto)));
+    ok &= put_str("mqtt_uri", c.mqtt_uri);
+    ok &= put_str("mqtt_user", c.mqtt_user);
+    ok &= put_str("mqtt_pass", c.mqtt_pass);
+    ok &= put_str("syslog_host", c.syslog_host);
+    ok &= put_i32("syslog_port", c.syslog_port);
+    ok &= put_i32("rx_pin", c.rx_pin);
+    ok &= put_i32("tx_pin", c.tx_pin);
+    ok &= put_str("proto", std::string(1, static_cast<char>(c.proto)));
     if (ok) publish(c);
     return ok;
+}
+
+// ── Field-owned commits (the detection path) ─────────────────────────────────────────────────────
+// These exist so the poll task never writes a field it doesn't own. It snapshots the config, then
+// spends a whole sweep off-lock probing the bus; committing that stale snapshot back would revert
+// any /set_wifi or /set_mqtt that landed meanwhile. See logic/config_model.hpp's ownership note.
+
+bool config_save_link(int rx_pin, int tx_pin, Protocol proto) {
+    // NVS first, off-lock (flash writes are slow — readers shouldn't queue behind them), and only
+    // the three link keys: the caller's credentials are never carried along.
+    bool ok = true;
+    ok &= put_i32("rx_pin", rx_pin);
+    ok &= put_i32("tx_pin", tx_pin);
+    ok &= put_str("proto", std::string(1, static_cast<char>(proto)));
+    // Patch RAM even when the cache write failed, unlike config_save's all-or-nothing publish: this
+    // link is PROVEN — the bus just answered on it — and the poll engine reads the pins from here
+    // every cycle. Refusing the patch would leave it hammering pins known not to work. A failed
+    // write only costs the cache (detection re-runs next boot); the `false` return tells the caller.
+    {
+        Lock lk(g_mtx);
+        apply_link(g_cfg, rx_pin, tx_pin, proto);
+    }
+    return ok;
+}
+
+// RAM-only by design: the model is re-detected every boot, so there is nothing to persist and no
+// failure to report. Allocation happens at the call site, not under the lock (apply_model swaps).
+void config_set_model(std::string profile, uint32_t fp_pages, int fp_kw_tenths, std::string fp_eeprom) {
+    Lock lk(g_mtx);
+    apply_model(g_cfg, std::move(profile), fp_pages, fp_kw_tenths, std::move(fp_eeprom));
 }
 
 void config_set_runtime(const Config& c) { publish(c); }

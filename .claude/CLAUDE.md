@@ -92,8 +92,14 @@ safe_mode.cpp   boot-loop safe mode (logic/boot_guard.hpp): counts crash-only bo
                 BOOT_HEALTHY_S-uptime timer clears it. Drives /status.sys.safe_mode + the UI recovery banner
 config.cpp      runtime Config (logic/config_model.hpp): WiFi/MQTT + one-shot WiFi rollback backup +
                 link cache (pins/proto) in NVS "daik_cfg"; model (profile/fingerprint) RAM-only
-                (config_set_runtime); mutex-guarded
-nvs_storage.cpp thin NVS helpers (IDF nvs_* called with :: to avoid the daik::nvs_* collision)
+                (config_set_model); mutex-guarded. Writers commit only the fields they OWN: the two
+                writing tasks (httpd /set_*, poll detection) would otherwise revert each other from a
+                stale snapshot — detection uses config_save_link/config_set_model, HTTP keeps
+                whole-struct config_save. A failed NVS write names the key on /diag and returns false
+                — config_save then publishes nothing, config_save_link still patches RAM (its link is
+                proven-good); every call site checks it. See "NVS namespaces"
+nvs_storage.cpp thin NVS helpers (IDF nvs_* called with :: to avoid the daik::nvs_* collision);
+                the setters return esp_err_t so config.cpp can name the failing key + error on /diag
 wifi.cpp        STA bring-up (all-channel scan -> strongest AP by RSSI) + endless reconnect
                 (first-boot budget -> setup portal; once online it NEVER reboots — no reason code
                 ends the retry, since 15/202/204 are also the transient WPA3-SAE failures this file
@@ -245,8 +251,29 @@ www/            web UI sources (index.html + style.css + app.js -> one gzipped p
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
 self-heals), and re-persisted only when they change. The **model** (`profile` + fingerprint `fp_*`) is
 re-detected on **every boot**: `config_load` seeds `profile="auto"`, and `poll_detect` applies the
-model in RAM only (`config_set_runtime`) — so a swapped unit is re-identified, and `profile`/`fp_*` are
-**not** in NVS. `poll_detect` calls `config_save` (persist) only when pins/proto change, else `config_set_runtime`.
+model in RAM only (`config_set_model`) — so a swapped unit is re-identified, and `profile`/`fp_*` are
+**not** in NVS. `poll_detect` calls `config_save_link` (persist) only when pins/proto change.
+
+**Writers commit only the fields they own.** Two tasks write the config — httpd (`/set_*`) and poll
+(detection) — so a writer that saves a whole `Config` saves whatever it snapshotted, including fields
+someone else has since changed. Detection snapshots, then probes the bus for a whole sweep before
+committing, so it must never write back a whole struct: that would revert a `/set_wifi` that landed
+during the sweep, *after* the user got `{"ok":true}`. It therefore uses the narrow setters
+`config_save_link` (rx/tx/proto, persisted) and `config_set_model` (profile/`fp_*`, RAM), which patch
+the live config in place under the mutex via `apply_link`/`apply_model` (`logic/config_model.hpp`,
+host-tested). Whole-struct `config_save` stays for the HTTP handlers: they own the credential fields
+and are serialized on the single httpd task. The rule is deliberately **asymmetric** — it closes
+poll→httpd, not httpd→poll (a `/set_*` save can still revert a link commit from its own tiny
+snapshot→save window); that direction self-corrects on the next detect, the credentials it protects
+do not.
+
+**`config_save` can fail — every caller checks it.** It returns `false` on any NVS error and then
+does *not* publish to RAM either, so an ignored return means reporting a save the device never made.
+The `/set_*` handlers answer `500 {"ok":false,"error":"config write failed"}` and skip the reboot;
+the WiFi rollback-restore falls through to the setup portal rather than rebooting into a loop it
+cannot persist its way out of (the restore lives in NVS alone, so an unpersisted one is re-decided
+identically on every boot); `config_save` itself logs the failing key + `esp_err_t` to `/diag` +
+syslog.
 
 `nvs` at `0x9000` is untouched by OTA (partitions.csv) so config survives upgrades. Keep its
 offset/size stable across versions.
@@ -336,6 +363,9 @@ POST /set_hp      {profile,rx,tx} -> validate + apply live (no reboot). rx/tx PE
                   proto is NOT accepted (auto-detected); poll_s fixed at 1 s and lang removed
                   (English-only) — neither accepted. RX/TX are auto-detected; when the bus is silent
                   the ESP32 card's pin dropdown posts {profile:"auto",rx,tx} to re-run detection.
+   (all four /set_*) a failed NVS write answers 500 {ok:false,error:"config write failed"} and does
+                  NOT reboot/apply — config_save publishes nothing on failure, so an "ok" + reboot
+                  would silently come back up on the OLD config (the failing key is on /diag)
 POST /detect      re-run auto-detection now (no reboot): reset profile to "auto" + invalidate the
                   fingerprint (RAM only) -> the next poll cycle sweeps protocol + re-fingerprints
 GET  /ota/check   POST /ota/update   GET /ota/status

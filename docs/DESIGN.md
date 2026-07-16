@@ -296,7 +296,12 @@ transition). Specific:
   a leftover dump alone doesn't report a crash that didn't happen this boot. "Copy diagnostics" toasts
   "Diagnostics copied — paste into a bug report" on success, or "Copy failed — open /coredump and
   /diag manually" if the clipboard is unavailable.
-- **Errors**: 4xx from a write → inline field error + toast; 503 (device OOM) → "Device busy, retry".
+- **Errors**: 4xx from a write → inline field error + toast; 503 (device OOM) → "Device busy, retry";
+  500 `{"ok":false,"error":"config write failed"}` (the NVS write failed — nothing was saved and the
+  device did **not** reboot) → toast the error, leave the modal open with the values intact to retry.
+  A write that answers must be read before any "saved"/"rebooting" feedback: `fetch` rejects only on
+  transport errors, never on status, so a refused save otherwise reads as a *successful* one — the
+  device is still up, so `/status` answers immediately and the UI would confirm a save that never was.
 
 ## 9. Responsive & accessibility
 

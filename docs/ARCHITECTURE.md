@@ -48,8 +48,12 @@ hp_poll.cpp/.hpp    → poll engine task: builds the active register set from th
 def/*.hpp           → embedded per-model value profiles (machine-generated in the ValueDef row
                        format); def/registry.hpp maps profile id→table, models_catalog.hpp = /models
 config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi rollback backup + link
-                      cache (pins/proto) persisted, model RAM-only; mutex-guarded snapshot via config()
-nvs_storage.cpp     → thin NVS helpers (namespaces, blobs, migration)
+                      cache (pins/proto) persisted, model RAM-only; mutex-guarded snapshot via config().
+                      Writers commit only the fields they own (config_save_link/config_set_model for
+                      detection, whole-struct config_save for the HTTP handlers); a failed NVS write
+                      names the key on /diag and returns false — config_save then publishes nothing,
+                      while config_save_link still applies its RAM patch (the link is proven-good)
+nvs_storage.cpp     → thin NVS helpers (namespaces, blobs, migration); setters return esp_err_t
 http_server.cpp     → esp_http_server :80, wildcard dispatch + handle_all OOM try/catch (503)
 http_status.cpp     → GET / (web UI), /status, /values, /models, /diag, /scan, /coredump, and the
                       /events WebSocket (live status/values push)
@@ -262,8 +266,14 @@ feature-poor profiles). `detect_best()` then picks one deterministic representat
 tightest kW class → stable order) — never the old blind `candidates.front()` registry order.
 
 The result is applied only when the bus actually answered (a not-yet-wired unit retries next cycle
-instead of pinning `generic`); the model goes to the in-RAM config (`config_set_runtime`), while a
-changed link cache (pins/proto) is persisted (`config_save`):
+instead of pinning `generic`); the model goes to the in-RAM config (`config_set_model`), while a
+changed link cache (pins/proto) is persisted (`config_save_link`). Both are **narrow, field-owned**
+setters rather than a whole-`Config` save: detection reads its snapshot before a sweep that takes
+seconds, so committing the whole struct would write that snapshot's stale credentials back over a
+`POST /set_wifi` that landed meanwhile — reverting it silently, after the user was told `{"ok":true}`.
+They patch only their own fields into the live config under its mutex (`apply_link` / `apply_model`
+in `logic/config_model.hpp`, host-tested); whole-struct `config_save` remains for the HTTP handlers,
+which own the credential fields and are serialized on the single httpd task.
 
 - **exactly one candidate** → applied; the UI shows "Detected: <family> · ~kW".
 - **several candidates** → the best-fit representative is read with — **every candidate is
@@ -542,7 +552,9 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
   `wifi_info()`. **One-shot rollback:** if new credentials were entered over the LAN and the STA can't
   get a lease after the reboot, `wifi_start_sta()` restores the previous credentials from an NVS backup
   and reboots again (cleared on a successful connect) — so a wrong SSID/password never strands the
-  device in the setup AP. The deadline is **reason-aware** (`logic/wifi_rollback.hpp`): only an AP that
+  device in the setup AP. It reboots only once the restore has actually **persisted**: the restore lives
+  in NVS alone, so rebooting on a failed write would re-read the same new credentials and roll back again
+  on every boot. A failed restore opens the setup portal instead — reachable beats looping. The deadline is **reason-aware** (`logic/wifi_rollback.hpp`): only an AP that
   *keeps refusing* the credentials spends them, and it must sustain that across **two 30 s checkpoints**
   (~60 s) — one sample cannot tell a wrong password from a transient SAE failure that merely happened to
   be the last thing logged when we looked, which is the same "never act on a single observation" rule

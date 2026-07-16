@@ -57,6 +57,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 27 | **Task Watchdog** → clean reboot on a wedged poll/publish task | ✅ | [`hp_poll.cpp`](../main/hp_poll.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 28 | **`/status.sys`** always-on heap headroom + last-boot reason (LAN/WS, no broker) | ✅ 🧪 | [`http_status.cpp`](../main/http_status.cpp), [`logic/reset_reason.hpp`](../main/logic/reset_reason.hpp) |
 | 29 | **Boot-loop safe mode** — recover a bad config in-browser (crash-only counting, distinct from OTA rollback) | ✅ 🧪 | [`safe_mode.cpp`](../main/safe_mode.cpp), [`logic/boot_guard.hpp`](../main/logic/boot_guard.hpp) |
+| 30 | **Config-write integrity** — field-owned commits (no cross-task revert) + an NVS failure that reaches the user (500, no reboot) instead of "saved" | ✅ 🧪 | [`config.cpp`](../main/config.cpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp), [`http_config.cpp`](../main/http_config.cpp) |
 
 ---
 
@@ -178,6 +179,8 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   would otherwise strand the device in the setup AP, `/set_wifi` stashes the previous working
   credentials as a **one-shot NVS backup**; on the reboot into the new network, if the STA never gets a
   DHCP lease `wifi_start_sta()` restores the backup and reboots again — a successful connect clears it.
+  The reboot is gated on the restore having **persisted**; if the NVS write fails the device opens the
+  setup portal rather than rebooting into a restore it would have to re-decide identically every boot.
   The deadline is **reason-aware** ([`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp)),
   because a rollback *destroys* the new credentials and must not be spent on a guess: only an AP that
   **keeps refusing** them (auth class, sustained across two 30 s checkpoints — one sample cannot tell a
@@ -189,6 +192,21 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   `/status.wifi.rolled_back` (sticky until the next `/set_wifi`), since the rollback's own reboot wipes
   the diag ring and the card just shows the old SSID again — API-only for now; the dashboard banner that
   reads it belongs to the web-UI write-feedback work.
+- **✅ 🧪 Config-write integrity** ([`config.cpp`](../main/config.cpp),
+  [`logic/config_model.hpp`](../main/logic/config_model.hpp)). Two tasks write the config — httpd
+  (`/set_*`) and poll (detection) — and a writer that saves a whole `Config` saves whatever it
+  *snapshotted*. Detection snapshots, then probes the bus for seconds before committing, so a
+  whole-struct write-back reverted any `/set_wifi` that landed during the sweep, silently, after the
+  user was told `{"ok":true}`. Writers now commit only the fields they **own**: `config_save_link`
+  (rx/tx/proto, persisted) and `config_set_model` (profile/`fp_*`, RAM) patch the live config in place
+  under the mutex via `apply_link`/`apply_model` — non-allocating, so the critical section stays
+  throw-free, and host-tested so "touches nothing else" is proven rather than argued. The rule is
+  deliberately asymmetric (it closes poll→httpd, not httpd→poll: a reverted link self-corrects on the
+  next detect, credentials do not). Separately, an NVS write failure now **reaches the user** — the
+  `/set_*` handlers answer `500 {"ok":false,"error":"config write failed"}` and skip the reboot rather
+  than coming back up on the old config behind an `{"ok":true}`, `config_save` names the failing key +
+  `esp_err_t` on `/diag`, and the two WiFi credential groups stop dead rather than half-write (a
+  partial save would defeat the very ordering that protects the rollback backup).
 - **✅ ICMP gateway watchdog (ghost-association recovery).** The reconnect handler can only see drops
   the STA *knows* about. A missed deauth leaves a "ghost" association — IP held, TCP timing out, no
   `STA_DISCONNECTED` event ever fires. A background task ICMP-echoes the default gateway every 30 s and,
@@ -397,7 +415,9 @@ IDF-free headers under [`main/logic/`](../main/logic) and is verified on the hos
 Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` → logic core](ARCHITECTURE.md)).
 
 - **🧪 What's covered** — CRC & framing (`crc.hpp`), value converters (`convert.hpp`), register
-  extraction (`registers.hpp`), the config model/validation (`config_model.hpp`), HA-discovery payloads
+  extraction (`registers.hpp`), the config model/validation + the field-owned detection patches
+  (`config_model.hpp` — `apply_link`/`apply_model` touch only the link / model, so a detection commit
+  cannot revert a concurrent `/set_wifi`), HA-discovery payloads
   (`discovery.hpp`), detection (`detect.hpp`), the OTA health gate (`health_gate.hpp`), heartbeat &
   crash formatting (`heartbeat.hpp`, `crashinfo.hpp`), the syslog boot/crash replay records
   (`bootlog.hpp`), the syslog hard-vs-transient send-error policy (`syslog_policy.hpp`), the
@@ -408,7 +428,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   pins (`board_pins.hpp`), and **🔭 Modbus TCP framing + HomeHub register codecs** (`modbus.hpp` — MBAP
   framing without CRC, FC03/04/06/16 build+parse, `Temp16`/`Pow16`/`Int16`/`Text16` decode/encode,
   the `homehub-*` mDNS filter; the host-tested core for the *planned* firmware-exclusive HomeHub
-  Modbus link (issue #32), **not yet wired into the firmware**). **510 `CHECK`s** in
+  Modbus link (issue #32), **not yet wired into the firmware**). **522 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
