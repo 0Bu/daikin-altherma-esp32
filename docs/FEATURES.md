@@ -102,6 +102,10 @@ into a hard gate:
 - CI never publishes unsigned firmware to OTA: [`build.yml`](../.github/workflows/build.yml) hard-errors
   on a `main` build with no `OTA_SIGNING_KEY` secret (fork PRs downgrade to an unsigned *compile-only*
   build with no preview).
+- CI applies the same guard to the **browser installer**, which no host-side check can reach:
+  [`ci-build-all.sh`](../scripts/ci-build-all.sh) carves the app back out of the `-merged.bin` it just
+  built — at the offset `flash_args` assigned it — and runs `require-signed.sh` on those bytes, so a
+  signing step that silently stops covering the installer fails the build instead of shipping.
 
 ---
 
