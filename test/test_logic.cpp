@@ -21,10 +21,12 @@
 #include "logic/health_gate.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/mqtt_group.hpp"
+#include "logic/link_watch.hpp"
 #include "logic/mqtt_uri.hpp"
 #include "logic/modbus.hpp"
 #include "logic/registers.hpp"
 #include "logic/reset_reason.hpp"
+#include "logic/syslog_policy.hpp"
 #include "def/registry.hpp"
 #include "def/signatures.hpp"
 
@@ -1194,6 +1196,96 @@ static void test_bootlog() {
     CHECK(build_boot_line(id).find("syslog:") == std::string::npos);
 }
 
+// ── syslog send-failure policy (logic/syslog_policy.hpp) ─────────────────────────────────────
+static void test_syslog_policy() {
+    // HARD: the route or the destination is implicated, so an immediate re-resolve + re-probe is
+    // worth its cost.
+    CHECK(syslog_error_is_hard(ENETUNREACH));
+    CHECK(syslog_error_is_hard(EHOSTUNREACH));
+    CHECK(syslog_error_is_hard(ENETDOWN));
+    CHECK(syslog_error_is_hard(EHOSTDOWN));
+    CHECK(syslog_error_is_hard(EADDRNOTAVAIL));
+
+    // TRANSIENT: the stack momentarily couldn't take the datagram. THE regression this guards —
+    // ENOMEM is what a ghosted link returns for every send, and treating it as hard made each
+    // failed diag line force a getaddrinfo() + a 3x1s ICMP probe. At an X10A timeout every ~0.3 s
+    // that is a self-sustaining storm, hardest exactly when the link is worst.
+    CHECK(!syslog_error_is_hard(ENOMEM));
+    CHECK(!syslog_error_is_hard(ENOBUFS));
+    CHECK(!syslog_error_is_hard(EAGAIN));
+    CHECK(!syslog_error_is_hard(EINTR));
+
+    // Unknown errno defaults to TRANSIENT. Safe by asymmetry: clearing the throttle only ACCELERATES
+    // the next resolve (the 10 s cadence runs regardless), so a misjudged hard error costs one
+    // cadence of delay, while a misjudged transient one costs the storm above.
+    CHECK(!syslog_error_is_hard(0));
+    CHECK(!syslog_error_is_hard(999999));
+}
+
+// ── connectivity-watchdog policy (logic/link_watch.hpp) ──────────────────────────────────────
+static void test_link_watch() {
+    // A link that KNOWS it is down belongs to the reconnect handler — the watchdog stays out of it
+    // and forgets any history, so a router outage doesn't bank failures toward a later re-assoc.
+    LinkWatch down;
+    down.unreachable = 1; down.blind = 5;
+    CHECK(link_watch_step(down, false, GwProbe::Unreachable, true) == WdAction::None);
+    CHECK(down.unreachable == 0 && down.blind == 0);
+
+    // Proven silence on a previously-verified gateway: act on the SECOND consecutive miss, not the
+    // first, and not before.
+    LinkWatch g;
+    CHECK(link_watch_step(g, true, GwProbe::Unreachable, true) == WdAction::None);
+    CHECK(g.unreachable == 1);
+    CHECK(link_watch_step(g, true, GwProbe::Unreachable, true) == WdAction::Reassociate);
+    CHECK(g.unreachable == 0);   // counter resets after acting — no repeat-fire on the next period
+
+    // One reply clears the count: two misses either side of a success must not add up to a ghost.
+    LinkWatch mix;
+    CHECK(link_watch_step(mix, true, GwProbe::Unreachable, true) == WdAction::None);
+    CHECK(link_watch_step(mix, true, GwProbe::Reachable, true) == WdAction::None);
+    CHECK(mix.unreachable == 0);
+    CHECK(link_watch_step(mix, true, GwProbe::Unreachable, true) == WdAction::None);
+
+    // A gateway that never answered ICMP may simply firewall it — never re-associate on its
+    // silence, however long, or a healthy link churns every ~60 s forever.
+    LinkWatch fw;
+    for (int i = 0; i < 10; i++) CHECK(link_watch_step(fw, true, GwProbe::Unreachable, false) == WdAction::None);
+
+    // THE fix. Unmeasurable is not a failure: it never trips the fast (2-period) path...
+    LinkWatch b;
+    for (int i = 0; i < WD_BLIND_TO_REASSOC - 1; i++)
+        CHECK(link_watch_step(b, true, GwProbe::Unmeasurable, true) == WdAction::None);
+    CHECK(b.unreachable == 0);   // blindness never counts as proven silence
+    // ...but a SUSTAINED inability to measure while the link claims to be up is its own proven
+    // fault. Previously this state returned "healthy" forever and silently: a wedged board was
+    // indistinguishable from a good one, so the watchdog never fired at all.
+    CHECK(link_watch_step(b, true, GwProbe::Unmeasurable, true) == WdAction::Reassociate);
+    CHECK(b.blind == 0);
+
+    // The blind path is an order of magnitude slower than the proven-silence path — acting on
+    // absence of evidence stays the last resort.
+    CHECK(WD_BLIND_TO_REASSOC > WD_UNREACHABLE_TO_REASSOC * 4);
+
+    // Blindness is gated on the same baseline as silence: only ever act on a verified link.
+    LinkWatch bn;
+    for (int i = 0; i < WD_BLIND_TO_REASSOC * 2; i++)
+        CHECK(link_watch_step(bn, true, GwProbe::Unmeasurable, false) == WdAction::None);
+
+    // A probe that RUNS ends the blind spell whatever its verdict...
+    LinkWatch c;
+    link_watch_step(c, true, GwProbe::Unmeasurable, true);
+    CHECK(c.blind == 1);
+    link_watch_step(c, true, GwProbe::Unreachable, true);
+    CHECK(c.blind == 0);
+    // ...but a blind period must not LAUNDER proven silence we already observed: one miss, then a
+    // blind gap, then a second miss still adds up to a ghost.
+    LinkWatch l;
+    CHECK(link_watch_step(l, true, GwProbe::Unreachable, true) == WdAction::None);
+    CHECK(link_watch_step(l, true, GwProbe::Unmeasurable, true) == WdAction::None);
+    CHECK(l.unreachable == 1);   // still standing
+    CHECK(link_watch_step(l, true, GwProbe::Unreachable, true) == WdAction::Reassociate);
+}
+
 int main() {
     test_crc();
     test_registers();
@@ -1209,6 +1301,8 @@ int main() {
     test_heartbeat();
     test_crashinfo();
     test_bootlog();
+    test_syslog_policy();
+    test_link_watch();
     test_reset_reason();
     test_boot_guard();
     test_health_gate();

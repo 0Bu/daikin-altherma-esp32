@@ -5,6 +5,7 @@
 #include "diag_log.hpp"
 #include "safe_mode.hpp"
 #include "logic/bootlog.hpp"
+#include "logic/syslog_policy.hpp"
 #include "esp_app_desc.h"
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
@@ -136,14 +137,23 @@ static bool syslog_ping_host(const struct in_addr& ip) {
 // queue drain AND by the one-shot boot replay, so both get identical framing/error handling.
 enum class SendResult { Ok, Empty, SocketFailed, SendFailed };
 
-static SendResult syslog_sendto(const struct sockaddr_in& dest, const char* text, size_t len) {
+// `out_err` (optional) receives the errno CAPTURED AT THE FAILING CALL, before close(). The caller
+// cannot read errno itself once this returns: close() is free to set errno, so a call site reading
+// it afterwards may classify the close instead of the send — and this errno now decides whether the
+// resolve throttle is cleared (logic/syslog_policy.hpp), so a wrong value costs a probe storm.
+static SendResult syslog_sendto(const struct sockaddr_in& dest, const char* text, size_t len,
+                                int* out_err = nullptr) {
+    if (out_err) *out_err = 0;
     while (len > 0 && (text[len - 1] == '\n' || text[len - 1] == '\r' || text[len - 1] == ' ')) {
         len--;
     }
     if (len == 0) return SendResult::Empty;
 
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (sock < 0) return SendResult::SocketFailed;
+    if (sock < 0) {
+        if (out_err) *out_err = errno;
+        return SendResult::SocketFailed;
+    }
 
     char packet[320];
     // RFC 5424: <PRI=14 user.info>1 SP TIMESTAMP HOSTNAME APP PROCID MSGID SD SP MSG.
@@ -156,11 +166,39 @@ static SendResult syslog_sendto(const struct sockaddr_in& dest, const char* text
         // snprintf returns the length it WOULD have written; clamp to what fits or sendto reads OOB.
         if (pkt_len > static_cast<int>(sizeof(packet)) - 1) pkt_len = static_cast<int>(sizeof(packet)) - 1;
         if (sendto(sock, packet, pkt_len, 0, (struct sockaddr*)&dest, sizeof(dest)) < 0) {
+            if (out_err) *out_err = errno;
             r = SendResult::SendFailed;
         }
     }
     close(sock);
     return r;
+}
+
+// One place for "a send just failed", so the sendto and socket-creation paths can't drift apart.
+//
+// Two things this must NOT do, both learned from a board that wedged itself:
+//   * Clear the resolve throttle on a TRANSIENT error (logic/syslog_policy.hpp). Only a hard routing
+//     error justifies an immediate getaddrinfo() + 3×1 s ICMP probe; on ENOMEM — the ghost-
+//     association case, where every datagram fails — doing that per failed line turns a chatty diag
+//     stream into a probe storm that runs hardest exactly when the link is worst. Holding the
+//     throttle costs nothing: the ordinary 10 s cadence still re-checks.
+//   * Log per failure. At an X10A timeout every ~0.3 s that is several lines a second, which is how
+//     the /diag ring ends up 100 % syslog-failure spam with the actual fault long overwritten. Log
+//     the transition instead — one line when forwarding breaks, one when it recovers.
+static void handle_send_failure(int err, const char* what, bool& resolved, bool& logged_state,
+                                bool& have_checked, bool& send_failing) {
+    const bool hard = syslog_error_is_hard(err);
+    set_status(false, false, hard ? "Send failed" : "Send failed (transient)");
+    if (hard) {
+        resolved     = false;   // re-resolve + re-probe now: the route/destination is implicated
+        logged_state = false;
+        have_checked = false;
+    }
+    if (!send_failing) {
+        send_failing = true;
+        diag_printf("syslog: %s failed (error %d, %s) — forwarding paused\n",
+                    what, err, hard ? "hard: re-resolving" : "transient: holding destination");
+    }
 }
 
 // Replay the boot records ONCE, as soon as a collector is resolved. diag_crash_capture() runs at the
@@ -226,7 +264,8 @@ void syslog_init() {
         std::string last_host;
         int last_port = -1;
         bool logged_state = false;    // one-shot log of the current resolve outcome
-        bool have_checked = false;    // false → re-resolve immediately (boot / config change / send error)
+        bool have_checked = false;    // false → re-resolve immediately (boot / config change / HARD send error)
+        bool send_failing = false;    // latch: forwarding is broken → log the transition, not every line
         bool replayed = false;        // one-shot: the boot/crash records have gone out (see
                                       // syslog_replay_boot) — never re-sent on a re-resolve/reconnect
         TickType_t last_check = 0;
@@ -307,24 +346,25 @@ void syslog_init() {
             SyslogMsg msg;
             if (xQueueReceive(s_queue, &msg, pdMS_TO_TICKS(500)) == pdTRUE) {
                 if (resolved) {
-                    switch (syslog_sendto(dest_addr, msg.text, msg.len)) {
+                    int err = 0;
+                    switch (syslog_sendto(dest_addr, msg.text, msg.len, &err)) {
                         case SendResult::Ok:
-                        case SendResult::Empty:
+                            if (send_failing) {   // first line through after an outage
+                                diag_printf("syslog: forwarding recovered\n");
+                                send_failing = false;
+                            }
                             break;
-                        // A hard socket error (e.g. ENETUNREACH) → force a fresh resolve next loop.
+                        case SendResult::Empty:   // nothing to send — neither success nor failure
+                            break;
+                        // Whether this clears the resolve throttle now depends on WHICH error it was
+                        // (logic/syslog_policy.hpp), not merely that one occurred.
                         case SendResult::SendFailed:
-                            set_status(false, false, "Send failed");
-                            resolved = false;
-                            logged_state = false;
-                            have_checked = false;
-                            diag_printf("syslog: sendto failed (error %d)\n", errno);
+                            handle_send_failure(err, "sendto", resolved, logged_state,
+                                                have_checked, send_failing);
                             break;
                         case SendResult::SocketFailed:
-                            set_status(false, false, "Socket creation failed");
-                            resolved = false;
-                            logged_state = false;
-                            have_checked = false;
-                            diag_printf("syslog: socket creation failed (error %d)\n", errno);
+                            handle_send_failure(err, "socket creation", resolved, logged_state,
+                                                have_checked, send_failing);
                             break;
                     }
                 }

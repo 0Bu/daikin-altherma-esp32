@@ -30,7 +30,9 @@ wifi.cpp/.hpp       → STA bring-up (all-channel scan → strongest AP by RSSI)
                        (first-boot budget → setup portal) + one-shot credential rollback (new creds
                        fail to get a lease → restore NVS backup + reboot; ≥5 consecutive AUTH_FAIL/
                        handshake-timeout disconnects after having been online → reboot to fallback) +
-                       ICMP gateway watchdog + DHCP hostname + mDNS; wifi_info() also reports the AP's
+                       ICMP gateway watchdog (three-valued probe + host-tested policy in
+                       logic/link_watch.hpp: 2 proven-silent periods, or 10 blind ones, re-associate)
+                       + DHCP hostname + mDNS; wifi_info() also reports the AP's
                        BSSID + PHY standard + this STA's MAC
 hp_comm.cpp/.hpp    → X10A UART transport: request framing for protocol I and S, 9600 8E1,
                        CRC, timeout handling
@@ -71,7 +73,13 @@ syslog.cpp          → optional syslog UDP client (RFC 5424, off when syslog_ho
                       (version/elf_sha256/reset/safe_mode) plus, after a crash, the reset reason +
                       crashed task/PC/backtrace — captured at the top of app_main, long before this
                       task or the network exists, so without the replay they reached only the in-RAM
-                      ring and were overwritten there within a minute
+                      ring and were overwritten there within a minute. A send failure is CLASSIFIED
+                      (logic/syslog_policy.hpp): only a HARD errno (ENETUNREACH/EHOSTUNREACH/...)
+                      clears the 10 s resolve throttle; a TRANSIENT one (ENOMEM — what a ghosted link
+                      returns for every datagram) holds the destination, so a chatty diag stream can't
+                      drive a getaddrinfo+ICMP storm. The errno is captured inside syslog_sendto
+                      BEFORE close() (which may clobber it, and it now decides the throttle). Failures
+                      log the TRANSITION (paused/recovered), not every dropped line
 www/                → web UI sources: index.html + style.css + app.js, spliced into ONE
                      self-contained page at build time (inline_assets.cmake) and served gzipped;
                      setup.html is the captive-portal page (gzipped separately)
@@ -277,10 +285,22 @@ Three layers keep the WiFi station link up:
   device has held an IP at least once, later drops reconnect **forever** (known-good creds — never
   strand the device on a transient AP/router outage).
 - **Connectivity watchdog** (~30 s) ICMP-echoes the gateway to catch a missed-deauth "ghost"
-  association (stack thinks it's up, forwards nothing). After 2 consecutive failures it forces one
-  `esp_wifi_disconnect()` so the endless-retry handler reconnects. Guarded to act only on a
+  association (stack thinks it's up, forwards nothing). The probe reports what it **established**,
+  three-valued — `Reachable` / `Unreachable` / `Unmeasurable` — and the policy is host-tested in
+  [`logic/link_watch.hpp`](../main/logic/link_watch.hpp). After 2 consecutive *proven-silent* probes it
+  forces one `esp_wifi_disconnect()` so the endless-retry handler reconnects. Guarded to act only on a
   believed-up link and only if the gateway has answered at least once; it **never reboots** (a
   reboot during an AP outage would drop into the setup portal and abandon good credentials).
+  A probe that cannot be *taken* (`esp_ping_new_session` fails — the first allocation to go under
+  memory pressure) is `Unmeasurable`: never counted as a failure, never trips the 2-period path. But
+  folding that into "healthy", as this once did, made a permanently **blind** watchdog indistinguishable
+  from a healthy link — and the pressure that blinds it is exactly what accompanies the wedge, so the
+  failure mode disabled its own detector. A *sustained* inability to measure (10 periods, ~5 min — an
+  order of magnitude slower, since acting on absence of evidence stays the last resort) therefore also
+  re-associates; dropping the ghost makes the STA report itself down, which stops the traffic
+  exhausting the buffers that blinded the probe. Decisions log via `diag_printf`, so they reach `/diag`
+  + syslog → VictoriaLogs; the previous `ESP_LOGW` lines were serial-only, which is why a wedged board
+  left no watchdog trace anywhere a post-mortem would look.
 - **Credential-change recovery** for WiFi edited *from the dashboard* (see "Web UI config flow"):
   the one-shot `/set_wifi` backup lets a bad new SSID/password roll back to the last working network,
   and a runtime guard reboots to that fallback after ≥5 consecutive AUTH_FAIL/handshake-timeout

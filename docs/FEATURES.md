@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (429 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (463 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -175,7 +175,14 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   `STA_DISCONNECTED` event ever fires. A background task ICMP-echoes the default gateway every 30 s and,
   **only** for the proven ghost case (link up, yet a gateway that *has* answered before now doesn't),
   forces one `esp_wifi_disconnect()` to re-associate. It never reboots and never false-alarms on a
-  router that simply drops LAN ICMP.
+  router that simply drops LAN ICMP. The probe is three-valued and its policy is host-tested
+  ([`logic/link_watch.hpp`](../main/logic/link_watch.hpp)): a probe that cannot be *taken* is
+  `Unmeasurable`, never counted as a failure — but no longer reported as *healthy* either. That
+  conflation left a **blind** watchdog indistinguishable from a good link, and the memory pressure
+  that blinds it is what accompanies the wedge it exists to break, so a *sustained* inability to
+  measure (10 periods, ~5 min vs. 2 for proven silence) now re-associates too. Decisions log via
+  `diag_printf` — reaching `/diag` + syslog — rather than the serial-only `ESP_LOGW` that left a
+  wedged board with no off-device trace.
 - **✅ Task Watchdog on the worker tasks.** The two tasks that do real, potentially-blocking I/O —
   the poll engine ([`hp_poll.cpp`](../main/hp_poll.cpp), X10A UART reads) and the MQTT publish task
   ([`mqtt_ha.cpp`](../main/mqtt_ha.cpp)) — subscribe themselves to the ESP Task Watchdog Timer
@@ -367,7 +374,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   pins (`board_pins.hpp`), and **🔭 Modbus TCP framing + HomeHub register codecs** (`modbus.hpp` — MBAP
   framing without CRC, FC03/04/06/16 build+parse, `Temp16`/`Pow16`/`Int16`/`Text16` decode/encode,
   the `homehub-*` mDNS filter; the host-tested core for the *planned* firmware-exclusive HomeHub
-  Modbus link (issue #32), **not yet wired into the firmware**). **429 `CHECK`s** in
+  Modbus link (issue #32), **not yet wired into the firmware**). **463 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
@@ -455,7 +462,7 @@ security of signed firmware with none of the brick risk. It refuses to roll a ba
 and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-associations no event
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 16-entity heartbeat diagnostics). And the risky parts — decode,
-CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (429 checks),
+CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (463 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

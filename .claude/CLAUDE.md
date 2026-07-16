@@ -98,7 +98,12 @@ wifi.cpp        STA bring-up (all-channel scan -> strongest AP by RSSI) + endles
                 (first-boot budget -> setup portal) + one-shot credential rollback (new creds fail to
                 get a lease -> restore the NVS backup + reboot; runtime credential-change detection:
                 >=5 consecutive AUTH_FAIL/handshake-timeout disconnects after having been online ->
-                reboot to fallback) + ICMP gateway watchdog (ghost-assoc recovery) + scan + DHCP
+                reboot to fallback) + ICMP gateway watchdog (ghost-assoc recovery; the probe is
+                three-valued and the policy is host-tested in logic/link_watch.hpp — proven silence
+                re-associates after 2 periods, a SUSTAINED inability to probe at all after 10, since
+                "couldn't measure" previously read as "healthy" and left a wedged board undetected
+                AND unlogged; decisions go to diag_printf so they reach /diag + syslog, not just the
+                serial console) + scan + DHCP
                 hostname (option 12) + mDNS; wifi_info() also reports the associated AP's BSSID + PHY
                 standard + this STA's MAC; wifi_reconnect_count() — cumulative RE-connects since boot,
                 for the MQTT heartbeat
@@ -151,7 +156,13 @@ syslog.cpp      optional syslog UDP client (RFC 5424): a task DNS-resolves the c
                 without the replay the crash reached only the in-RAM ring (overwritten within a
                 minute by a chatty failure mode) — never syslog. NOT via diag_printf: the queue is
                 full of the boot backlog by then and the enqueue is non-blocking (it would drop
-                exactly these lines).
+                exactly these lines). A send failure is CLASSIFIED (logic/syslog_policy.hpp): only a
+                HARD errno (ENETUNREACH/EHOSTUNREACH/...) clears the resolve throttle; a TRANSIENT one
+                (ENOMEM — what a ghosted link returns for every datagram) holds the destination and
+                waits for the 10s cadence, so a chatty diag stream can't drive a getaddrinfo+ICMP
+                storm. The errno is captured INSIDE syslog_sendto before close() (close may clobber
+                it, and it now decides the throttle). Failures log the TRANSITION (one line paused,
+                one recovered), not every dropped line.
 diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + core-dump SUMMARY
                 (esp_core_dump_get_summary: crashed task/PC/backtrace/app-elf-sha) into a cached
                 CrashInfo (logic/crashinfo.hpp); read by /status.last_crash + the MQTT crash topic —
@@ -163,13 +174,20 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 download that 404s. mqtt_ha republishes the retained crash topic when the flag changes
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, config_model,
                 discovery, detect, mqtt_group, heartbeat, crashinfo, bootlog, reset_reason,
-                boot_guard, board_pins, modbus).
+                boot_guard, board_pins, modbus, syslog_policy, link_watch).
                 bootlog.hpp = the records syslog.cpp replays once per boot: build_boot_line (version/
                 elf_sha256/reset/safe_mode — the only way to tell WHICH firmware produced a log
                 stream) + build_crash_log_lines (the crash as single-line, datagram-sized records;
                 returns 0 for a non-notable boot, so the "don't spam the collector" rule is
                 host-tested). Deliberately NOT crashinfo's multi-line build_crash_text(), which at
                 worst case (~340 B) truncates past diag's 256-byte line buffer and loses elf_sha256.
+                syslog_policy.hpp classifies a send errno HARD (route/destination implicated ->
+                re-resolve now) vs TRANSIENT (ENOMEM/ENOBUFS: hold the destination, keep the 10s
+                throttle) — treating every failure as hard turned each failed diag line into a
+                getaddrinfo + 3x1s ICMP probe, a storm on a ghosted link. link_watch.hpp = the
+                connectivity-watchdog policy: a gateway probe is three-valued (Reachable /
+                Unreachable / Unmeasurable), so "couldn't measure" stops masquerading as healthy;
+                proven silence re-associates after 2 periods, sustained blindness after 10.
                 reset_reason.hpp maps a reset code to the /status.sys.reset_reason slug (reusing
                 crashinfo's crash_reason_slug — one vocabulary). boot_guard.hpp = the safe-mode decision
                 logic (crash-only counting, saturating increment, threshold) driving safe_mode.cpp.
