@@ -28,7 +28,10 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 - `logic/registers.hpp` — little-endian signed/unsigned value reads, bounds.
 - `logic/convert.hpp` — numeric converters + the refrigerant pressure→temperature curve + the
   HA unit/device_class hints.
-- `logic/config_model.hpp` — pin/interval/protocol validation, RX/TX collision.
+- `logic/config_model.hpp` — pin/interval/protocol validation, RX/TX collision, WiFi credential
+  rules, the `/set_hp` fingerprint rule, and the field-owned detection patches (`apply_link` /
+  `apply_model` touch only the link / model — a link commit must not revert a concurrent
+  `/set_wifi`).
 - `logic/board_pins.hpp` — per-target usable X10A GPIO lists (sorted, in range; the XIAO ESP32-S3
   reference set excludes not-broken-out pins).
 - `logic/discovery.hpp` — object-id slugging + the discovery config JSON.

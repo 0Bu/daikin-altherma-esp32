@@ -21,12 +21,14 @@ std::string nvs_get_str(const char* key, const std::string& def) {
     return out;
 }
 
-bool nvs_set_str(const char* key, const std::string& val) {
+esp_err_t nvs_set_str(const char* key, const std::string& val) {
     nvs_handle_t h;
-    if (::nvs_open(NS, NVS_READWRITE, &h) != ESP_OK) return false;
-    bool ok = ::nvs_set_str(h, key, val.c_str()) == ESP_OK && ::nvs_commit(h) == ESP_OK;
+    esp_err_t e = ::nvs_open(NS, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = ::nvs_set_str(h, key, val.c_str());
+    if (e == ESP_OK) e = ::nvs_commit(h);   // the set is only durable once committed
     ::nvs_close(h);
-    return ok;
+    return e;
 }
 
 int32_t nvs_get_i32(const char* key, int32_t def) {
@@ -38,12 +40,14 @@ int32_t nvs_get_i32(const char* key, int32_t def) {
     return v;
 }
 
-bool nvs_set_i32(const char* key, int32_t val) {
+esp_err_t nvs_set_i32(const char* key, int32_t val) {
     nvs_handle_t h;
-    if (::nvs_open(NS, NVS_READWRITE, &h) != ESP_OK) return false;
-    bool ok = ::nvs_set_i32(h, key, val) == ESP_OK && ::nvs_commit(h) == ESP_OK;
+    esp_err_t e = ::nvs_open(NS, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = ::nvs_set_i32(h, key, val);
+    if (e == ESP_OK) e = ::nvs_commit(h);
     ::nvs_close(h);
-    return ok;
+    return e;
 }
 
 } // namespace daik

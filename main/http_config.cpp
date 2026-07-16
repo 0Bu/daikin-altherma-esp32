@@ -78,7 +78,12 @@ static esp_err_t set_wifi(httpd_req_t* req) {
     c.wifi_ssid = ssid;
     c.wifi_pass = pass;
     cJSON_Delete(j);
-    config_save(c);
+    // A failed save leaves NVS *and* RAM on the old credentials, so rebooting would silently drop
+    // the user back onto the old network behind an {"ok":true} — say so and stay up instead.
+    if (!config_save(c)) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"config write failed\"}");
+    }
     http_send_json(req, "{\"ok\":true,\"reboot\":true}");
     reboot_soon();
     return ESP_OK;
@@ -340,7 +345,12 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
     c.mqtt_uri  = broker;
     c.mqtt_user = user;
     c.mqtt_pass = pass;
-    config_save(c);
+    // The broker just pre-flighted clean, so a failure here is NVS, not the user's input — don't
+    // reboot into the old broker while telling them the new one was accepted.
+    if (!config_save(c)) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"config write failed\"}");
+    }
     http_send_json(req, "{\"ok\":true,\"reboot\":true}");
     reboot_soon();
     return ESP_OK;
@@ -379,7 +389,12 @@ static esp_err_t set_hp(httpd_req_t* req) {
         std::string e = "{\"ok\":false,\"error\":\"" + reason + "\"}";
         return http_send_json(req, e.c_str());
     }
-    config_save(c);   // persist the pin cache (config_save writes link+creds; profile/fp stay RAM)
+    // Persist the pin cache (config_save writes link+creds; profile/fp stay RAM). On failure RAM is
+    // untouched too, so there is no new config to hand the poll engine — skip the reconfigure.
+    if (!config_save(c)) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"config write failed\"}");
+    }
     hp_poll_reconfigure();
     return http_send_json(req, "{\"ok\":true}");
 }
@@ -412,7 +427,10 @@ static esp_err_t set_syslog(httpd_req_t* req) {
     Config c = config();
     c.syslog_host = host;
     c.syslog_port = port;
-    config_save(c);
+    if (!config_save(c)) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"config write failed\"}");
+    }
     http_send_json(req, "{\"ok\":true,\"reboot\":true}");
     reboot_soon();
     return ESP_OK;

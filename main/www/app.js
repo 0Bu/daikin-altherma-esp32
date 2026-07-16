@@ -506,8 +506,19 @@ function checkFirmwareUpdate() {
 // ── Reboot-and-reconnect writes (MQTT) ────────────────────────────────────
 async function saveReboot(url, body, then) {
   if (S.busy) return; S.busy = true;
+  let r = null;
+  try { r = await post(url, body); } catch { /* device may drop the socket as it reboots */ }
+  // An answered 4xx/5xx is a verdict, not a dropped socket: fetch rejects only on transport errors,
+  // never on status, so without this check a REFUSED save reads as a better one than a real save.
+  // The device didn't reboot (it can't persist), so /status answers on the first poll below and the
+  // user gets an instant "Saved" for a write that never happened — see POST /set_wifi's 500.
+  if (r && !r.ok) {
+    const e = await r.json().catch(() => ({}));
+    S.busy = false;
+    toast(e.error || "Save failed", "err");   // modal stays open: the values are still there to retry
+    return;
+  }
   toast("Rebooting — reconnecting…", "info");
-  try { await post(url, body); } catch { /* device may drop the socket as it reboots */ }
   let tries = 0;
   const poll = setInterval(async () => {
     tries++;

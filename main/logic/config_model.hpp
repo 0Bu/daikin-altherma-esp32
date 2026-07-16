@@ -48,6 +48,43 @@ struct Config {
     bool        fp_valid     = false;
 };
 
+// ── Field-owned patches (config.cpp applies these to the live config under its mutex) ────────────
+// Two tasks write the config: the httpd task (/set_*) and the poll task (auto-detection). A writer
+// that commits a whole Config snapshot commits everything it read AT SNAPSHOT TIME — so a detection
+// cycle whose snapshot predates a POST /set_wifi would write the OLD credentials back over the new
+// ones, and the user's change would vanish after {"ok":true}. Detection therefore patches only the
+// fields it OWNS and never carries a stale copy of anyone else's:
+//
+//   LINK  (rx/tx/proto)                  — persisted; owned by detection, overridable via /set_hp
+//   MODEL (profile + fingerprint fp_*)   — RAM-only, re-derived every boot; owned by detection
+//
+// Whole-struct config_save() stays for the HTTP handlers: they own the credential fields and are
+// serialized against each other on the single httpd task.
+//
+// The rule is therefore ASYMMETRIC, on purpose. It closes poll→httpd (a detection commit can no
+// longer revert credentials) but not httpd→poll: a /set_* save still republishes its whole snapshot,
+// so it can revert a link commit that landed in its own sub-millisecond snapshot→save window. That
+// direction is left open because it is self-correcting and cheap — detection re-runs and re-fixes
+// the link — whereas the credentials it protects are user-entered and unrecoverable.
+
+// Apply the detected X10A link. Non-allocating, so it cannot throw inside the config mutex.
+inline void apply_link(Config& c, int rx_pin, int tx_pin, Protocol proto) {
+    c.rx_pin = rx_pin;
+    c.tx_pin = tx_pin;
+    c.proto  = proto;
+}
+
+// Apply the detected model + fingerprint. Takes its strings BY VALUE and swaps them in (both
+// noexcept), so this too allocates nothing while the caller holds the mutex.
+inline void apply_model(Config& c, std::string profile, uint32_t fp_pages, int fp_kw_tenths,
+                        std::string fp_eeprom) {
+    c.profile.swap(profile);
+    c.fp_eeprom.swap(fp_eeprom);
+    c.fp_pages     = fp_pages;
+    c.fp_kw_tenths = fp_kw_tenths;
+    c.fp_valid     = true;
+}
+
 // Coarse GPIO upper-bound guard. `max_gpio` is the target's highest GPIO number; the device caller
 // passes its real per-target value (SOC_GPIO_PIN_COUNT-1), so a pin above the running chip's range
 // is rejected — e.g. the ESP32-S3 default 44 on an ESP32-C3 (max GPIO 21). The default 48 (S3 max)

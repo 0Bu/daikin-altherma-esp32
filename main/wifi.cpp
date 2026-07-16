@@ -349,9 +349,21 @@ bool wifi_start_sta() {
             // indistinguishable from a save that never happened — the user re-enters the same
             // credentials and waits out the same three minutes. Cleared by the next POST /set_wifi.
             rollback_cfg.wifi_rolled_back = true;
-            config_save(rollback_cfg);
-            vTaskDelay(pdMS_TO_TICKS(500));
-            esp_restart();
+            // Only reboot into a rollback that actually persisted. The restore lives in NVS alone, so
+            // if the write failed the next boot re-reads the SAME new credentials, spends the whole
+            // window again and rolls back again — a reboot loop for as long as NVS misbehaves, with
+            // no way in. On failure fall through to the setup portal below: reachable beats looping.
+            if (config_save(rollback_cfg)) {
+                vTaskDelay(pdMS_TO_TICKS(500));
+                esp_restart();
+            }
+            // Deliberately vague about WHAT failed: config_save's bool covers a dozen keys, so this
+            // site cannot tell a failed credential-restore from a failed cosmetic marker. The key=
+            // lines it already logged say which. Erring toward the portal costs the user a re-entry;
+            // erring toward the reboot risks the loop, so the portal is the safe read of "unsure".
+            diag_printf("wifi: rollback restore to '%s' did not fully persist (see the key= lines "
+                        "above) — opening the setup portal rather than risk a reboot loop\n",
+                        rollback_cfg.wifi_ssid.c_str());
         }
         ESP_LOGW(TAG, "STA connect failed on first boot — falling back to setup portal");
         wifi_stop_sta();
@@ -365,10 +377,16 @@ bool wifi_start_sta() {
     s_rollback_pending = false;
     Config success_cfg = config();
     if (success_cfg.wifi_rollback_active) {
+        const std::string stale_backup = success_cfg.wifi_ssid_backup;
         success_cfg.wifi_rollback_active = false;
         success_cfg.wifi_ssid_backup = "";
         success_cfg.wifi_pass_backup = "";
-        config_save(success_cfg);
+        // Harmless right now — we're online either way — but a surviving flag means the next failed
+        // connect would "roll back" to credentials the user already replaced. Log and carry on: this
+        // connection is good, and refusing it over a stale flag would be the worse trade.
+        if (!config_save(success_cfg))
+            diag_printf("wifi: could not clear the rollback backup ('%s') — "
+                        "a later connect failure may restore it\n", stale_backup.c_str());
     }
 
     start_mdns();

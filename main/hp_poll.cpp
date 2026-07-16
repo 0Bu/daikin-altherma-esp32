@@ -140,23 +140,22 @@ static void poll_detect() {
         }
         return;                                                // keep "auto" — retry next cycle
     }
-    Config c              = config();
+    // Commit ONLY the fields detection owns — the link (persisted) and the model (RAM). Never a
+    // whole-Config write-back: the snapshot below is read on the poll task while the httpd task may
+    // be saving credentials, and a whole-struct save would carry this snapshot's stale wifi/mqtt
+    // fields over a /set_wifi that landed during the sweep — silently reverting it after the user
+    // already got {"ok":true}. logic/config_model.hpp holds the ownership rule.
+    const Config c          = config();
     const bool link_changed = (c.rx_pin != d.rx) || (c.tx_pin != d.tx) || (c.proto != d.proto);
-    c.proto         = d.proto;
-    c.rx_pin        = d.rx;                                    // auto-corrected pins (e.g. swapped wire)
-    c.tx_pin        = d.tx;
-    c.fp_pages      = d.page_mask;
-    c.fp_kw_tenths  = d.kw_tenths;
-    c.fp_eeprom     = d.eeprom;
-    c.fp_valid      = true;
+    // Persist the link cache only on change (auto-corrected pins, e.g. a swapped wire); an unchanged
+    // link is already live in RAM, so there is nothing to patch and no NVS write to make.
+    if (link_changed && !config_save_link(d.rx, d.tx, d.proto))
+        diag_printf("detect: link cache write failed — pins %d/%d active this session, re-detect next boot\n",
+                    d.rx, d.tx);
     // Read with the best-fit representative (deterministic ranking, not registry order). Every
     // candidate in the set is register-equivalent, so this picks correct VALUES regardless of which
     // marketing variant it names; nothing matched but bus answered → generic Altherma profile.
-    c.profile = d.best.empty() ? "generic" : d.best;
-    // Persist the link cache (pins+proto) only on change; config_save writes link+creds and refreshes
-    // RAM, the model rides along in RAM but is never written. Unchanged link → RAM-only update.
-    if (link_changed) config_save(c);
-    else              config_set_runtime(c);
+    config_set_model(d.best.empty() ? "generic" : d.best, d.page_mask, d.kw_tenths, d.eeprom);
 }
 
 // The cycle body allocates freely — poll_once builds up to ~116 CachedValues (3 std::strings each)

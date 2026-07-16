@@ -352,6 +352,34 @@ static void test_config_model() {
     CHECK(!set_hp_clears_fingerprint(false, "altherma_gshp"));   // partial update on a pinned model
     CHECK(set_hp_clears_fingerprint(true, "auto"));             // explicit re-detect / wiring Save
     CHECK(!set_hp_clears_fingerprint(true, "altherma_gshp"));    // manual pin keeps the fingerprint
+
+    // Field-owned detection commits. The poll task snapshots the config, probes the bus for a whole
+    // sweep, then commits — so anything it writes beyond its OWN fields is written from a snapshot
+    // that may predate a /set_wifi. These patch in place and must touch nothing else.
+    Config live;                                       // stand-in for the live config
+    live.wifi_ssid = "new-net";                        // as if POST /set_wifi landed mid-sweep
+    live.wifi_pass = "new-secret";
+    live.mqtt_uri  = "mqtts://broker.lan";
+    live.syslog_host = "logs.lan";
+    live.rx_pin = 44; live.tx_pin = 43; live.proto = Protocol::I;
+
+    apply_link(live, 16, 17, Protocol::S);             // detection found the wire swapped
+    CHECK(live.rx_pin == 16 && live.tx_pin == 17 && live.proto == Protocol::S);
+    CHECK(live.wifi_ssid == "new-net");                // #49: the credentials must survive the commit
+    CHECK(live.wifi_pass == "new-secret");
+    CHECK(live.mqtt_uri == "mqtts://broker.lan");
+    CHECK(live.syslog_host == "logs.lan");
+    CHECK(live.profile == "auto");                     // link patch leaves the model alone
+
+    // "altherma3_r_erga" is >15 chars: past libstdc++'s SSO buffer, so this is the case that would
+    // heap-allocate if apply_model copied instead of swapping (config.cpp calls it under the mutex).
+    apply_model(live, "altherma3_r_erga", 0x5u, 80, "1234");
+    CHECK(live.profile == "altherma3_r_erga");
+    CHECK(live.fp_pages == 0x5u && live.fp_kw_tenths == 80 && live.fp_eeprom == "1234");
+    CHECK(live.fp_valid);                              // a committed model is always valid
+    CHECK(live.rx_pin == 16 && live.tx_pin == 17);     // model patch leaves the link alone
+    CHECK(live.wifi_ssid == "new-net");                // ...and the credentials
+    CHECK(live.mqtt_uri == "mqtts://broker.lan");
 }
 
 static void test_discovery() {

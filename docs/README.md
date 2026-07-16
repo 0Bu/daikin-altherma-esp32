@@ -217,6 +217,8 @@ POST /set_syslog                   # { host, port } → validate port range, per
 POST /set_hp                       # { profile?, rx?, tx? } → apply live (no reboot); rx/tx PERSIST
                                    #   (pin cache), profile session-only; proto auto-detected, not accepted.
                                    #   The ESP32 card's pin dropdown posts {profile:"auto",rx,tx} to re-detect.
+#  all four /set_* above           # an NVS write failure → 500 {ok:false,error:"config write failed"},
+                                   #   nothing applied and no reboot (the failing key is logged to /diag)
 POST /detect                       # re-run auto-detection (reset profile to "auto" + invalidate fingerprint)
 GET  /ota/check[?ms=<epoch>]       # start a background update check (poll /ota/status)
 POST /ota/update                   # start the background self-update (downloads, then reboots)

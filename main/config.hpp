@@ -14,12 +14,28 @@ Config config();
 // Load from NVS, seeding any missing key from its Kconfig default.
 void config_load();
 
-// Persist the given config to NVS. Returns true on success. Writes user settings (WiFi + MQTT) and
-// the X10A link cache (RX/TX pins + protocol); the model (profile + fingerprint) is NOT written.
+// Persist the given config to NVS. Returns FALSE on any NVS error, in which case nothing was
+// published to RAM either — a caller that ignores this reports a save the device never made. Writes
+// user settings (WiFi + MQTT) and the X10A link cache (RX/TX pins + protocol); the model (profile +
+// fingerprint) is NOT written. For the whole-struct writers only: the /set_* handlers, which own the
+// credential fields and are serialized on the single httpd task. The poll task must NOT use this —
+// see config_save_link / config_set_model below.
 bool config_save(const Config& c);
 
-// Update the in-RAM config singleton WITHOUT touching NVS. Used for the auto-detected MODEL (profile
-// + fingerprint), which is session-only and re-derived every boot (the link cache uses config_save).
+// Commit ONLY the X10A link (rx/tx/proto), patched into the live config under the mutex — the
+// caller's other fields are left alone, so a detection commit can never revert a concurrent
+// /set_wifi (logic/config_model.hpp documents the field-ownership rule). Returns false if the NVS
+// cache write failed; the RAM patch is applied either way (the detected link is proven-good and the
+// poll engine must keep using it this session — a lost cache just means re-detecting next boot).
+bool config_save_link(int rx_pin, int tx_pin, Protocol proto);
+
+// Commit ONLY the detected model (profile + fingerprint) to the live config. RAM-only and
+// unfailable: the model is session-only and re-derived on every boot, so it is never persisted.
+void config_set_model(std::string profile, uint32_t fp_pages, int fp_kw_tenths, std::string fp_eeprom);
+
+// Publish a whole config to the in-RAM singleton WITHOUT touching NVS. Used by POST /detect to reset
+// the session-only model back to the "auto" sentinel; the detection path itself commits through the
+// narrow setters above. Whole-struct like config_save, so the same rule applies: httpd task only.
 void config_set_runtime(const Config& c);
 
 } // namespace daik

@@ -4,12 +4,18 @@
 // (partitions.csv) so OTA preserves config.
 #include <string>
 #include <cstdint>
+#include "esp_err.h"
 
 namespace daik {
 
+// The setters return the failing esp_err_t rather than a bare bool: config.cpp logs the key + the
+// error name to /diag + syslog, which is the only way to tell WHICH write failed and why (a full
+// partition reads very differently from a wedged flash).
+// MIND THE POLARITY: esp_err_t is an int and ESP_OK is 0, so `if (nvs_set_str(...))` compiles and
+// means "if it FAILED" — the inverse of the bool these once returned. Always compare to ESP_OK.
 std::string nvs_get_str(const char* key, const std::string& def = "");
-bool        nvs_set_str(const char* key, const std::string& val);
+esp_err_t   nvs_set_str(const char* key, const std::string& val);
 int32_t     nvs_get_i32(const char* key, int32_t def);   // used for the persisted RX/TX pin cache
-bool        nvs_set_i32(const char* key, int32_t val);
+esp_err_t   nvs_set_i32(const char* key, int32_t val);
 
 } // namespace daik
