@@ -5,6 +5,8 @@
 // Also starts mDNS (<hostname>.local). See wifi.hpp and docs/ARCHITECTURE.md → WiFi/LAN.
 #include "wifi.hpp"
 #include "config.hpp"
+#include "diag_log.hpp"
+#include "logic/link_watch.hpp"
 #include "sdkconfig.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -107,9 +109,10 @@ static void on_wifi(void*, esp_event_base_t base, int32_t id, void* data) {
 // and drop into the setup portal, abandoning good credentials.
 
 static const int kWdPeriodS       = 30;   // connectivity-check cadence
-static const int kWdFailToReassoc = 2;    // consecutive failed checks (~60 s) → re-associate
 static const int kWdPingTimeoutMs = 1000; // per-echo timeout
 static const int kWdPingCount     = 3;    // echoes per check; healthy if ≥1 replies
+// The re-association thresholds live in logic/link_watch.hpp (WD_UNREACHABLE_TO_REASSOC /
+// WD_BLIND_TO_REASSOC) so the policy they express is host-tested rather than asserted here.
 
 // File-scope so the control block + semaphore outlive any in-flight esp_ping session: the ping's
 // internal thread is NOT joined by esp_ping_delete_session() and calls wd_on_ping_end()
@@ -131,19 +134,21 @@ static void wd_on_ping_end(esp_ping_handle_t hdl, void* args) {
     xSemaphoreGive(p->done);
 }
 
-// Blocking ICMP echo to the current default gateway. True if ≥1 reply came back. Returns true (no
-// false alarm) whenever the probe can't even be set up — the watchdog must act only on a *proven*
-// failure to reach a gateway that DOES answer ICMP, never on its own inability to measure.
-static bool gateway_reachable() {
-    if (!s_wd.done) return true;   // watchdog not fully initialised yet
+// Blocking ICMP echo to the current default gateway. Reports what was ESTABLISHED, not a verdict:
+// Reachable (≥1 reply), Unreachable (the probe ran, nothing replied) or Unmeasurable (it could not
+// be taken at all). The distinction matters — folding "couldn't measure" into "reachable" is what
+// let a wedged board look healthy to this watchdog forever, and silently. logic/link_watch.hpp
+// decides what to DO with each; this function only observes.
+static GwProbe gateway_probe() {
+    if (!s_wd.done) return GwProbe::Unmeasurable;   // watchdog not fully initialised yet
     esp_netif_ip_info_t ip{};
     if (!s_sta_netif || esp_netif_get_ip_info(s_sta_netif, &ip) != ESP_OK || ip.gw.addr == 0)
-        return false;              // no gateway/lease → not reachable
+        return GwProbe::Unreachable;   // no gateway/lease while link=up IS a proven broken link
 
     char gw[16];
     esp_ip4addr_ntoa(&ip.gw, gw, sizeof(gw));
     ip_addr_t target{};
-    if (!ipaddr_aton(gw, &target)) return true;   // unparseable → don't false-alarm
+    if (!ipaddr_aton(gw, &target)) return GwProbe::Unmeasurable;   // can't address it → can't measure
 
     esp_ping_config_t cfg = ESP_PING_DEFAULT_CONFIG();
     cfg.target_addr = target;
@@ -156,8 +161,11 @@ static bool gateway_reachable() {
     cbs.on_ping_end = wd_on_ping_end;
 
     esp_ping_handle_t hdl = nullptr;
+    // The allocation that goes first under memory pressure — and memory pressure is exactly what
+    // accompanies the wedge this watchdog exists to break. Reporting it as Unmeasurable (rather than
+    // as healthy) is what makes a blind watchdog visible instead of indistinguishable from a good link.
     if (esp_ping_new_session(&cfg, &cbs, &hdl) != ESP_OK || !hdl)
-        return true;               // probe setup failed → don't false-alarm
+        return GwProbe::Unmeasurable;
 
     xSemaphoreTake(s_wd.done, 0);  // drain any stale give from a prior timed-out probe
     s_wd.received = 0;
@@ -169,37 +177,49 @@ static bool gateway_reachable() {
     vTaskDelay(pdMS_TO_TICKS(100)); // allow the ping task context to safely exit before deletion
     esp_ping_delete_session(hdl);
 
-    bool ok = s_wd.received > 0;
-    if (ok) s_gw_ever_reachable = true;
-    return ok;
+    if (s_wd.received > 0) { s_gw_ever_reachable = true; return GwProbe::Reachable; }
+    return GwProbe::Unreachable;   // the probe ran and nothing answered — proven silence
 }
 
 static void wifi_watchdog_task(void*) {
     s_wd.done = xSemaphoreCreateBinary();
-    int fails = 0;
+    LinkWatch lw;              // consecutive-observation counters; the policy owns the thresholds
+    bool blind_logged = false; // latch: one line per blind SPELL, not one per 30 s period
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(kWdPeriodS * 1000));
 
         // When the link already knows it is down, the endless-retry handler owns recovery — there is
         // nothing for the watchdog to detect (the ghost case is link=up by definition), and
         // counting/logging every period would only flood the /diag ring across a long router outage.
-        if (!s_wifi_connected) { fails = 0; continue; }
-        if (gateway_reachable()) { fails = 0; continue; }
+        const bool link_up = s_wifi_connected;
+        const GwProbe probe = link_up ? gateway_probe() : GwProbe::Unmeasurable;
+        const WdAction act  = link_watch_step(lw, link_up, probe, s_gw_ever_reachable);
 
-        fails++;
-        ESP_LOGW(TAG, "watchdog: no LAN connectivity (%d/%d, link=up)", fails, kWdFailToReassoc);
-        if (fails < kWdFailToReassoc) continue;
-        fails = 0;
-
-        // Act ONLY on a true ghost association: link still believes it is up AND this gateway has
-        // answered ICMP before (so its silence is real, not a firewall). One disconnect is enough —
-        // the handler's else-branch reconnects (s_wifi_ever_connected is true), so we don't call
-        // esp_wifi_connect() ourselves and avoid a cross-task double-connect.
-        if (!s_gw_ever_reachable) {
-            ESP_LOGW(TAG, "watchdog: gateway has never answered ICMP — not forcing re-assoc");
-            continue;
+        // diag_printf, not ESP_LOGW: only diag lines reach /diag and syslog → VictoriaLogs. The old
+        // ESP_LOGW lines existed but were serial-only, so a board that wedged in a ghost association
+        // left NO watchdog trace anywhere off-device — the one place a post-mortem would look.
+        if (link_up && probe == GwProbe::Unreachable)
+            diag_printf("wifi: watchdog — no LAN connectivity (%d/%d, link=up)\n",
+                        lw.unreachable, WD_UNREACHABLE_TO_REASSOC);
+        if (link_up && probe == GwProbe::Unmeasurable && !blind_logged) {
+            blind_logged = true;   // cleared once a probe runs again (below)
+            diag_printf("wifi: watchdog — cannot probe the gateway (link=up); "
+                        "acting after %d blind periods\n", WD_BLIND_TO_REASSOC);
         }
-        ESP_LOGW(TAG, "watchdog: ghost association — forcing WiFi re-association");
+        // Unlatch once a probe actually runs again — and also when the link goes knowingly down,
+        // since we stop probing there: leaving it latched would swallow the first line of the NEXT
+        // blind spell after the link returns.
+        if (!link_up || probe != GwProbe::Unmeasurable) blind_logged = false;
+
+        if (act != WdAction::Reassociate) continue;
+
+        // Act ONLY on a link this gateway has verified before (link_watch_step gates on
+        // s_gw_ever_reachable, so its silence is real rather than a firewall). One disconnect is
+        // enough — the handler's else-branch reconnects (s_wifi_ever_connected is true), so we don't
+        // call esp_wifi_connect() ourselves and avoid a cross-task double-connect.
+        diag_printf("wifi: watchdog — %s; forcing re-association\n",
+                    probe == GwProbe::Unmeasurable ? "blind for too long while link claims up"
+                                                   : "ghost association");
         esp_wifi_disconnect();   // drops the ghost link → handler reconnects (known-good creds)
     }
 }
@@ -308,7 +328,14 @@ bool wifi_start_sta() {
 
     start_mdns();
     // Ghost-association watchdog. Started only once online; it self-guards on s_wifi_connected.
-    xTaskCreate(wifi_watchdog_task, "wifi_wd", 3072, nullptr, 4, nullptr);
+    // 4096, not 3072: this task now reports through diag_printf (so its decisions reach /diag +
+    // syslog, not just the serial console), and that call chain nests syslog_send inside
+    // diag_printf — measured at ~700 B of frame depth this task never carried while it used
+    // ESP_LOGW. 4096 is what every other diag_printf-calling task here is sized at (mqtt_pub;
+    // hp_poll takes 8192). The canary (CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY) turns an
+    // overflow into a reboot — which would land during the memory-pressure wedge this watchdog
+    // exists to break, i.e. exactly when it must not.
+    xTaskCreate(wifi_watchdog_task, "wifi_wd", 4096, nullptr, 4, nullptr);
     return true;
 }
 
