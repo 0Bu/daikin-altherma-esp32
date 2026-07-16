@@ -182,6 +182,28 @@ host-testable core is unusually large and valuable, because the risky parts are 
 - `logic/modbus.hpp` — Modbus TCP framing (MBAP, no CRC; FC03/04/06/16 build + response/exception
   parse) and the HomeHub `Temp16`/`Pow16`/`Int16`/`Text16` codecs + `homehub-*` mDNS filter. Host-
   tested core for the **planned** firmware-exclusive HomeHub link (issue #32) — not yet wired in.
+- `logic/ws_policy.hpp` — what an `/events` frame means, split across the two moments the handler has
+  to decide. `ws_frame_plan()` judges the **announced** length alone — the value `httpd_ws_recv_frame`
+  reports from the header before a single payload byte is read, which RFC 6455 lets a client set to
+  any 64-bit number. On a chip whose binding limit is the largest contiguous free block, that number
+  may reach a decision but never an allocation, so a frame is measured against a fixed 16-byte command
+  buffer and refused if it does not fit. Refusing has to mean *closing*: the IDF fails an oversized
+  read with `ESP_ERR_INVALID_SIZE` and leaves the body in the socket, and offers no way to skip it, so
+  the alternative is a stream in which the unread payload becomes the next frame's header. `ws_frame_action()`
+  then classifies only bytes a successful read delivered. Pure, so the boundary that caused the
+  original defect — one byte past the buffer, where the old handler `memcmp`'d stack the failed read
+  had never written — is asserted without a hand-built WebSocket client.
+- `logic/http_body.hpp` — request-body reassembly for `http_read_body`. A POST body is a TCP stream:
+  `httpd_req_recv` returns what has arrived, and the IDF's own docs note a large body "may" take
+  several calls. Reading once and calling it the whole body truncated any body split across segments,
+  so a valid POST came back 400 "bad json" — rare on a quiet LAN, reliable on a busy one, and looking
+  for all the world like the user mistyped their broker. The loop is templated over a classified recv
+  so segment-by-segment delivery, a mid-body close and a stalled peer are CI-gated CHECKs rather than
+  a segmentation pattern nobody can ask a real client for; `http_common.cpp` keeps only the part that
+  is genuinely IDF's — mapping `httpd_req_recv`'s return codes onto the three cases. A timeout is
+  retried, but a **bounded** number of times: unbounded patience would let one client that announces a
+  Content-Length and goes quiet park the single httpd task, taking the web UI and the OTA route out of
+  a bad config with it.
 
 `hp_convert.cpp`, `hp_comm.cpp`, `config.cpp`, `mqtt_ha.cpp` are thin device wrappers that call
 these headers. Add new decode/format logic to `main/logic/` and a `CHECK` in

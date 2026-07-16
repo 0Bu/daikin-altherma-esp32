@@ -79,6 +79,16 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   threshold (no off-by-one), and which reset reasons count as a crash.
 - `logic/health_gate.hpp` — the OTA commit/wait/give-up verdict across the base window + hard cap,
   incl. an unconfigured (setup-AP) device.
+- `logic/ws_policy.hpp` — the `/events` frame decision: that a frame one byte past the command
+  buffer is *rejected* rather than clamped-and-read (the boundary where the handler used to `memcmp`
+  stack a failed read never wrote), that an announced length up to `SIZE_MAX` reaches a decision and
+  never an allocation, and that only a **text** frame opening with `sub` subscribes — a prefix still
+  does, so clients that work today keep working.
+- `logic/http_body.hpp` — request-body reassembly: a body delivered one byte per `recv` arrives
+  whole (the fragmented POST that used to 400 as "bad json"), a timeout is retried while progress
+  resets the idle count, a peer that stalls forever is dropped after a **bounded** wait rather than
+  parking the httpd task, a mid-body close fails instead of handing over half a document, and the
+  size cap still leaves room for the terminator.
 
 `logic/value_def.hpp` has no `test_*()` of its own — it is the profile row type, exercised through
 `def/registry.hpp` and the converter tests.

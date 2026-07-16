@@ -13,6 +13,7 @@
 #include "logic/detect.hpp"
 #include "logic/json.hpp"
 #include "logic/reset_reason.hpp"
+#include "logic/ws_policy.hpp"
 #include "mqtt_ha.hpp"
 #include "ota_update.hpp"
 #include "safe_mode.hpp"
@@ -315,22 +316,24 @@ static esp_err_t h_scan(httpd_req_t* req) {
 static SemaphoreHandle_t s_ws_mtx = nullptr;
 static int s_ws_fds[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 
-void http_register_ws_client(int fd) {
+bool http_register_ws_client(int fd) {
     if (!s_ws_mtx) s_ws_mtx = xSemaphoreCreateMutex();
     xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
+    bool registered = false;
     for (int i = 0; i < 8; i++) {
-        if (s_ws_fds[i] == fd) {
-            xSemaphoreGive(s_ws_mtx);
-            return;
-        }
+        if (s_ws_fds[i] == fd) { registered = true; break; }
     }
-    for (int i = 0; i < 8; i++) {
-        if (s_ws_fds[i] == -1) {
-            s_ws_fds[i] = fd;
-            break;
+    if (!registered) {
+        for (int i = 0; i < 8; i++) {
+            if (s_ws_fds[i] == -1) {
+                s_ws_fds[i] = fd;
+                registered = true;
+                break;
+            }
         }
     }
     xSemaphoreGive(s_ws_mtx);
+    return registered;
 }
 
 void http_unregister_ws_client(int fd) {
@@ -428,62 +431,86 @@ void ws_broadcast_status() {
     ws_send_to_all(j);
 }
 
+// The /events protocol is one command: a "sub" text frame earns a status+values snapshot and a
+// slot in the broadcast list. Every decision about the frame is in logic/ws_policy.hpp, host-tested
+// — the cases that matter here (a frame too long to read, a read that failed) are precisely the
+// ones a browser never produces and a test can.
+//
+// Returning ESP_FAIL makes esp_http_server close and clean up the socket, which is the intended
+// response to a frame we could neither read nor skip past: its unread body would otherwise be
+// parsed as the next frame's header. close_fn (http_server.cpp) unregisters the fd on the way out.
 static esp_err_t h_ws_events(httpd_req_t* req) {
     if (req->method == HTTP_GET) {
+        return ESP_OK;   // handshake — no frame to read yet
+    }
+
+    // max_len = 0 reads the header only, filling in the frame's type and its ANNOUNCED length.
+    httpd_ws_frame_t ws_pkt = {};
+    if (httpd_ws_recv_frame(req, &ws_pkt, 0) != ESP_OK) return ESP_FAIL;
+
+    switch (ws_frame_plan(ws_pkt.len)) {
+        case WsPlan::Skip:
+            return ESP_OK;
+        case WsPlan::Reject:
+            diag_printf("ws: frame of %llu B exceeds the %u B command buffer — closing",
+                        static_cast<unsigned long long>(ws_pkt.len),
+                        static_cast<unsigned>(WS_CMD_MAX));
+            return ESP_FAIL;
+        case WsPlan::Read:
+            break;
+    }
+
+    uint8_t buf[WS_CMD_MAX] = {};
+    ws_pkt.payload = buf;
+    if (httpd_ws_recv_frame(req, &ws_pkt, sizeof(buf)) != ESP_OK) return ESP_FAIL;
+
+    if (ws_frame_action(ws_pkt.type == HTTPD_WS_TYPE_TEXT,
+                        reinterpret_cast<const char*>(buf), ws_pkt.len) != WsAction::Subscribe) {
+        return ESP_OK;   // not a command we know — no snapshot, and no broadcast slot
+    }
+
+    // Subscribe only now: registering on any frame at all meant a client that never asked was still
+    // pushed a frame a second, and kept a slot from one that had.
+    if (!http_register_ws_client(httpd_req_to_sockfd(req))) {
+        diag_printf("ws: broadcast list full — /events subscriber not registered");
         return ESP_OK;
     }
 
-    int fd = httpd_req_to_sockfd(req);
-    http_register_ws_client(fd);
+    // This WS route is registered with httpd_register_uri_handler (is_websocket needs the
+    // raw registration), so it does NOT run under http_register's handle_all try/catch.
+    // Guard the JSON build here so a std::bad_alloc under memory pressure drops the send
+    // instead of unwinding through esp_http_server's C dispatch -> std::terminate -> reboot.
+    try {
+        // Send status
+        std::string stat = build_status_json_string();
+        std::string j_stat = "{\"type\":\"status\",\"status\":" + stat + "}";
+        httpd_ws_frame_t f_stat = {};
+        f_stat.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_stat.c_str()));
+        f_stat.len = j_stat.size();
+        f_stat.type = HTTPD_WS_TYPE_TEXT;
+        f_stat.final = true;
+        httpd_ws_send_frame(req, &f_stat);
 
-    httpd_ws_frame_t ws_pkt = {};
-    esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
-    if (ret == ESP_OK) {
-        if (ws_pkt.len > 0) {
-            uint8_t buf[16];
-            ws_pkt.payload = buf;
-            size_t max_len = ws_pkt.len < sizeof(buf) ? ws_pkt.len : sizeof(buf);
-            httpd_ws_recv_frame(req, &ws_pkt, max_len);
-
-            if (max_len >= 3 && memcmp(buf, "sub", 3) == 0) {
-                // This WS route is registered with httpd_register_uri_handler (is_websocket needs the
-                // raw registration), so it does NOT run under http_register's handle_all try/catch.
-                // Guard the JSON build here so a std::bad_alloc under memory pressure drops the send
-                // instead of unwinding through esp_http_server's C dispatch -> std::terminate -> reboot.
-                try {
-                    // Send status
-                    std::string stat = build_status_json_string();
-                    std::string j_stat = "{\"type\":\"status\",\"status\":" + stat + "}";
-                    httpd_ws_frame_t f_stat = {};
-                    f_stat.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_stat.c_str()));
-                    f_stat.len = j_stat.size();
-                    f_stat.type = HTTPD_WS_TYPE_TEXT;
-                    f_stat.final = true;
-                    httpd_ws_send_frame(req, &f_stat);
-
-                    // Send values
-                    const size_t cap = def::lookup(config().profile.c_str()).count;
-                    std::vector<CachedValue> v(cap ? cap : 1);
-                    size_t n = hp_values_snapshot(v.data(), v.size());
-                    std::string j_val = "{\"type\":\"values\",\"values\":[";
-                    for (size_t i = 0; i < n; i++) {
-                        if (i) j_val += ",";
-                        j_val += "{\"label\":" + jstr(v[i].label) +
-                                 ",\"value\":" + (v[i].value.empty() ? "null" : jstr(v[i].value)) +
-                                 ",\"unit\":" + jstr(v[i].unit) + "}";
-                    }
-                    j_val += "]}";
-                    httpd_ws_frame_t f_val = {};
-                    f_val.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_val.c_str()));
-                    f_val.len = j_val.size();
-                    f_val.type = HTTPD_WS_TYPE_TEXT;
-                    f_val.final = true;
-                    httpd_ws_send_frame(req, &f_val);
-                } catch (const std::bad_alloc&) {
-                    return ESP_OK;   // drop the subscription snapshot under OOM; client can retry
-                }
-            }
+        // Send values
+        const size_t cap = def::lookup(config().profile.c_str()).count;
+        std::vector<CachedValue> v(cap ? cap : 1);
+        size_t n = hp_values_snapshot(v.data(), v.size());
+        std::string j_val = "{\"type\":\"values\",\"values\":[";
+        for (size_t i = 0; i < n; i++) {
+            if (i) j_val += ",";
+            j_val += "{\"label\":" + jstr(v[i].label) +
+                     ",\"value\":" + (v[i].value.empty() ? "null" : jstr(v[i].value)) +
+                     ",\"unit\":" + jstr(v[i].unit) + "}";
         }
+        j_val += "]}";
+        httpd_ws_frame_t f_val = {};
+        f_val.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_val.c_str()));
+        f_val.len = j_val.size();
+        f_val.type = HTTPD_WS_TYPE_TEXT;
+        f_val.final = true;
+        httpd_ws_send_frame(req, &f_val);
+    } catch (const std::bad_alloc&) {
+        return ESP_OK;   // drop the subscription snapshot under OOM; client can retry
     }
     return ESP_OK;
 }
