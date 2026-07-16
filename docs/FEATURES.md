@@ -40,7 +40,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 10 | **MQTTS + CA-bundle** TLS; credentials never sent in cleartext | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 11 | Core-dump-to-flash + summary capture + offline symbolication | ✅ | [`diag_crash.cpp`](../main/diag_crash.cpp), [`decode-coredump.sh`](../scripts/decode-coredump.sh) |
 | 12 | Reset-reason + crash classification, retained to MQTT | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp) |
-| 13 | 13-entity device **heartbeat** diagnostics stream | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
+| 13 | 15-entity device **heartbeat** diagnostics stream | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
 | 14 | Strongest-AP scan + SAE tuning + **endless reconnect** | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 15 | **ICMP gateway watchdog** (ghost-association recovery) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 16 | Captive-portal provisioning (SoftAP + UDP:53 DNS catch-all) | ✅ | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp) |
@@ -248,9 +248,10 @@ the fact*, from the field, without a serial cable:
   `<base>/<node>/crash` MQTT payload (2 diagnostic HA entities: reason + "dump waiting" flag —
   reason/backtrace only, **never** the raw dump or any secret). `static_assert`s pin the IDF reset-enum
   values so a renumbering fails the build rather than mislabeling every crash.
-- **✅ 🧪 13-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): on a fixed
-  10 s cadence, `<base>/<node>/heartbeat` streams heap (free / min-free / **largest-free-block**, the
-  true OOM limit), uptime, WiFi RSSI + reconnect count, MQTT publish/fail/reconnect counters, and X10A
+- **✅ 🧪 15-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): on a fixed
+  10 s cadence, `<base>/<node>/heartbeat` streams heap (free / min-free low-water / **largest-free-block**,
+  the true OOM limit — each its own diagnostic entity so a slow leak or fragmentation is graphable/
+  alertable), uptime, WiFi RSSI + reconnect count, MQTT publish/fail/reconnect counters, and X10A
   bus rx/fail/crc/timeout stats — published independently of heat-pump profile detection, so board
   health is visible even while the model is still `auto`.
 - **✅ Build identity** — `/status.app_elf_sha256` ties a running device to the exact firmware that
@@ -377,7 +378,7 @@ security of signed firmware with none of the brick risk. It refuses to roll a ba
 **connectivity-proving health gate** (not a naive uptime timer). It ships a **live WebSocket UI embedded
 and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-associations no event
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
-sha-matched ELF, retained MQTT crash + 13-entity heartbeat diagnostics). And the risky parts — decode,
+sha-matched ELF, retained MQTT crash + 15-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (235 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.

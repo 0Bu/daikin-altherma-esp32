@@ -305,9 +305,10 @@ The Home Assistant bridge:
 
   Published on a fixed `HEARTBEAT_INTERVAL_S` (10 s) cadence — unlike the state topic, this is
   diagnostics rather than real-time telemetry, so it always sends the latest snapshot rather than
-  only on change. 13 diagnostic HA entities (WiFi signal/quality/reconnects, free heap, uptime, X10A bus
-  status/CRC/timeout/rx errors/rx received, MQTT publish count/fails/reconnects — tagged
-  `"ent_cat":"diagnostic"`) point at this topic via their own discovery configs, streamed once per
+  only on change. 15 diagnostic HA entities (WiFi signal/quality/reconnects, free heap + min-free-heap
+  low-water + largest-free-block, uptime, X10A bus status/CRC/timeout/rx errors/rx received, MQTT
+  publish count/fails/reconnects — tagged `"ent_cat":"diagnostic"`; the two heap-headroom gauges are
+  `"measurement"` in bytes) point at this topic via their own discovery configs, streamed once per
   connection independently of heat-pump profile detection — so they show up even while the model is
   still "auto". Cumulative since-boot counters get `"stat_cla":"total_increasing"` (not
   `"measurement"`) so HA's long-term statistics handle a reboot's reset to 0 correctly. Mirrors the

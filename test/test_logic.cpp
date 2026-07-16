@@ -540,7 +540,7 @@ static void test_heartbeat() {
     // value_template points at the heartbeat topic (not the heat-pump state topic).
     const std::string hb = heartbeat_topic(base, node);
     const std::string av = availability_topic(base, node);
-    CHECK(HEARTBEAT_SENSOR_COUNT == 13);
+    CHECK(HEARTBEAT_SENSOR_COUNT == 15);
     const HeartbeatSensor& rssi = HEARTBEAT_SENSORS[0];
     CHECK(std::string(rssi.object_id) == "wifi_signal");
     std::string dt = heartbeat_discovery_topic("homeassistant", node, rssi);
@@ -573,6 +573,21 @@ static void test_heartbeat() {
     CHECK(mc != nullptr);
     CHECK(heartbeat_discovery_config(node, hb, av, *mc).find("\"stat_cla\":\"total_increasing\"")
           != std::string::npos);
+
+    // Heap low-water mark + largest free block: bytes, "measurement" (a fluctuating gauge, NOT a
+    // since-boot counter), diagnostic, sourced from the flat payload fields (not a nested object).
+    for (const char* oid : {"min_free_heap", "max_alloc"}) {
+        const HeartbeatSensor* h = nullptr;
+        for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++)
+            if (std::string(HEARTBEAT_SENSORS[i].object_id) == oid) h = &HEARTBEAT_SENSORS[i];
+        CHECK(h != nullptr);
+        const std::string hc = heartbeat_discovery_config(node, hb, av, *h);
+        CHECK(hc.find(std::string("\"val_tpl\":\"{{ value_json.") + oid + " }}\"") != std::string::npos);
+        CHECK(hc.find("\"unit_of_meas\":\"B\"") != std::string::npos);
+        CHECK(hc.find("\"stat_cla\":\"measurement\"") != std::string::npos);
+        CHECK(hc.find("\"ent_cat\":\"diagnostic\"") != std::string::npos);
+        CHECK(hc.find("\"dev_cla\"") == std::string::npos);   // raw bytes, no device_class
+    }
 }
 
 static void test_health_gate() {
