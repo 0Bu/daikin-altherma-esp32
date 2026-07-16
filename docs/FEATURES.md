@@ -217,7 +217,8 @@ catch-all HTTP route ([`http_status.cpp`](../main/http_status.cpp)) serves that 
   a client sends `sub`, gets a status+values snapshot, then the poll task pushes
   `{"type":"status"|"values",…}` frames on change (values ~1 s, status ~4 s). There is **no HTTP
   polling** — a browser without WebSocket falls back to a one-time snapshot. Broadcasts run in the poll
-  task and self-guard `std::bad_alloc` per client (dropping a frame rather than aborting the task).
+  task and self-guard `std::bad_alloc` per client, dropping a single frame rather than the whole poll
+  cycle (the task's own guard, below, is only their backstop).
 - **✅ Gzipped UI embedded in the app image.** [`main/CMakeLists.txt`](../main/CMakeLists.txt) inlines
   `www/{index.html,style.css,app.js}` into one page and pre-gzips it at build time (`EMBED_FILES` →
   `_binary_index_html_gz_*`); shipping it pre-compressed cuts first-paint bytes ~3× over WiFi. The
@@ -227,6 +228,17 @@ catch-all HTTP route ([`http_status.cpp`](../main/http_status.cpp)) serves that 
   esp_http_server's C frames → `std::terminate` → reboot. Large output is streamed, not built as one
   contiguous `std::string`. This is a first-class constraint on this heap-tight target — see
   [`ARCHITECTURE.md` → Memory constraints](ARCHITECTURE.md).
+- **✅ The same discipline covers every allocating FreeRTOS task loop**, since a task entry is a C
+  frame boundary exactly like a handler is: `poll_task` ([`hp_poll.cpp`](../main/hp_poll.cpp)),
+  `mqtt_task` ([`mqtt_ha.cpp`](../main/mqtt_ha.cpp)) and `status_led_task`
+  ([`status_led.cpp`](../main/status_led.cpp)) each wrap their loop body, log once and skip the cycle
+  keeping the last good state. Its corollary is that **a throw must never strand a mutex**:
+  `xSemaphoreTake` is not released by unwinding, so a throw inside a critical section would leave the
+  lock held and wedge every reader — worse than the reboot the guard prevents. Two mechanisms cover
+  it: `hp_poll.cpp`'s stat commit is written to be non-allocating (staged deltas folded in with `+=`
+  and a `noexcept` swap) so it cannot throw at all, and the readers that must copy `std::string`s out
+  under the lock — `hp_stats`/`hp_values_snapshot`, and `config()` in
+  [`config.cpp`](../main/config.cpp) — take it through an RAII `Lock` that releases on unwind.
 - **✅ Chunked core-dump streaming** (`GET /coredump`): the flash core-dump image is streamed in 512-byte
   chunks, never buffered whole.
 

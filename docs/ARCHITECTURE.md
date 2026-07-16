@@ -142,10 +142,14 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
 1. Build the ordered list of **registers** needed by the profile's values (dedup — one register
    read serves all its values).
 2. For each register: send the protocol-`I`/`S` request, read the fixed-length reply with a
-   `SER_TIMEOUT`, CRC-check it. On timeout/CRC error, record it (`crc_err`/`timeout_err`,
-   `last_error`) and continue — one bad register never stalls the whole cycle.
+   `SER_TIMEOUT`, CRC-check it. On timeout/CRC error, stage it (`crc_err`/`timeout_err`,
+   `last_error`) in locals and continue — one bad register never stalls the whole cycle.
 3. Extract each value from its register buffer via `(offset,size)` and convert it via its
-   `convId`. Write results into the **thread-safe value cache** under a mutex.
+   `convId`. Write the results into the **thread-safe value cache** — and fold the staged stat
+   deltas into `s_stats` — under the mutex, in **one** commit at the end of the cycle. The sweep
+   itself never touches shared state: the readers (`hp_stats()`) copy `s_stats` under the same
+   mutex, so an unlocked mid-sweep write to `last_error` would free a `std::string` buffer under a
+   reader. See *Memory constraints* for why the commit must also stay non-allocating.
 4. Sleep `POLL_INTERVAL_S` (fixed 1 s — see `config.cpp`). The MQTT bridge and HTTP `/values` read
    the cache; they never touch the UART.
 
@@ -481,3 +485,22 @@ largest *contiguous* free block): keep every HTTP handler under the `handle_all`
 OOM), stream `/diag` and the MQTT discovery instead of building one big `std::string`, and treat
 any new large contiguous allocation (big JSON, OTA TLS) as a crash risk to size-check. A reboot
 loop is bad here too — it stops the poll cycle and drops MQTT availability.
+
+Two rules follow from that, and they apply to **every** FreeRTOS task loop that allocates, not just
+to HTTP handlers:
+
+1. **The task loop self-guards.** A task entry is a C frame boundary exactly like a handler is, so an
+   escaping `std::bad_alloc` means `std::terminate()` → reboot. Wrap the loop *body* in
+   `try/catch (const std::exception&)` + `catch (...)`, `diag_printf` once, skip the cycle keeping
+   the last good state, and continue after the normal delay. `mqtt_task` (`mqtt_ha.cpp`) and
+   `poll_task` (`hp_poll.cpp`) both do this; `ws_broadcast_values`/`ws_broadcast_status`
+   (`http_status.cpp`) keep their own finer-grained guards inside it — they skip a single client or
+   frame rather than the whole cycle, and the task guard is only their backstop.
+2. **Nothing allocates while a mutex is held.** Rule 1 only makes an OOM survivable if the throw
+   doesn't strand a lock: `xSemaphoreTake` is not released by stack unwinding, so a throw inside a
+   critical section leaves the mutex taken forever, every reader blocks on `portMAX_DELAY`, and the
+   device wedges into a watchdog reboot — the failure the guard was supposed to prevent, in a worse
+   form. So either the critical section is non-allocating — `poll_once` stages its stat deltas and
+   error text in locals and folds them in with `+=`/`swap` (noexcept), so the commit cannot throw —
+   or the lock is taken through an RAII guard, like `hp_poll.cpp`'s `Lock`, which the readers
+   (`hp_stats`, `hp_values_snapshot`) need because they copy `std::string`s out under the lock.

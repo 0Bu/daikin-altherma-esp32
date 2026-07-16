@@ -265,6 +265,19 @@ through C frames → `std::terminate` → reboot). Stream `/diag` and the MQTT d
 one big `std::string`. Treat any new large contiguous allocation as a crash risk. A reboot loop
 also stops the poll cycle and drops MQTT availability.
 
+**Every allocating FreeRTOS task loop must self-guard.** A task is a C frame boundary like a
+handler is: an escaping `std::bad_alloc` → `std::terminate` → reboot. Wrap the loop *body* in
+`try/catch (const std::exception&)` + `catch (...)`, `diag_printf` once, skip the cycle keeping the
+last good state, and continue after the normal delay — see `mqtt_task` (mqtt_ha.cpp), `poll_task`
+(hp_poll.cpp) and the finer-grained `ws_broadcast_*` guards (http_status.cpp).
+
+**Never allocate while holding a mutex.** The guard above makes an OOM survivable only if the throw
+doesn't strand a lock: a mutex taken with a raw `xSemaphoreTake` is *not* released when the stack
+unwinds, so every reader then blocks `portMAX_DELAY` and the device wedges into a watchdog reboot —
+worse than the crash the guard prevents. Either keep the critical section non-allocating (stage the
+work in locals, `swap`/move it in — `poll_once`'s commit) or take the lock through an RAII guard
+(`hp_poll.cpp`'s `Lock`, for readers that must copy strings out under the lock).
+
 ## Typical debugging
 
 ```bash
