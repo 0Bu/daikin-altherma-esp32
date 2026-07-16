@@ -99,8 +99,7 @@ status_led.cpp/.hpp → onboard-LED status indicator task, compile-time only (DA
                       mqtt/hp state and blinks: slow 1 s = setup portal (SoftAP), fast 100 ms =
                       connecting, solid = healthy (WiFi + MQTT + X10A), double-flash = X10A link
                       down, medium 300 ms = X10A up but MQTT down, off = no WiFi mode. X10A-down
-                      outranks MQTT-down — the bus is the point of the device. (The Kconfig help
-                      text lists only the first four; it predates the medium blink.)
+                      outranks MQTT-down — the bus is the point of the device.
                       Not runtime-configurable and not on /status — a local-eyes-only signal.
                       The loop self-guards like mqtt_task/poll_task: the state getters copy
                       std::strings out, so a tick can throw under memory pressure, and a task entry

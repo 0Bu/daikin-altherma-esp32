@@ -176,9 +176,8 @@ status_led.cpp  onboard-LED status indicator task (compile-time only, DAIKIN_STA
                 samples WiFi mode + wifi/mqtt/hp state per tick and blinks the pattern — slow 1s =
                 setup portal (SoftAP), fast 100ms = connecting, solid = healthy (WiFi + MQTT + X10A),
                 double-flash = X10A link down, medium 300ms = X10A up but MQTT down, off = no WiFi
-                mode. X10A-down outranks MQTT-down (the bus is the point of the device). NOTE: the
-                Kconfig help text still lists only the first four — it predates the medium blink.
-                GPIO defaults to 21 (XIAO ESP32-S3 onboard LED) and
+                mode. X10A-down outranks MQTT-down (the bus is the point of the device). GPIO
+                defaults to 21 (XIAO ESP32-S3 onboard LED) and
                 INVERTED=y (active-low on XIAO); -1 disables. Not runtime-configurable and not on
                 /status — it is a local-eyes-only signal. The task loop self-guards like mqtt_task/
                 poll_task: wifi_info()/mqtt_status()/hp_stats() each copy std::strings out, so a tick

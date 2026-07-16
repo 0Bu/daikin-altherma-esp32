@@ -98,11 +98,19 @@ menu "Daikin Altherma Configuration"
         bool "Enable Status LED indicator"
         default y
         help
-            Blink the onboard LED to show the system status:
-            - Fast blinking (100ms): Connecting to WiFi.
-            - Slow blinking (1s): Running SoftAP (setup portal).
-            - Solid ON (or OFF if inverted): Connected and running healthy (WiFi + MQTT + X10A OK).
-            - Double blink / brief off: X10A poll error / timeout.
+            Blink the onboard LED to show the system status. "ON" is the driven level, which
+            DAIKIN_STATUS_LED_INVERTED flips (so solid-healthy reads as a dark LED on an
+            active-low board). The six states status_led_tick() drives:
+            - Slow blinking (1s ON / 1s OFF): Running SoftAP (setup portal).
+            - Fast blinking (100ms ON / 100ms OFF): Connecting to WiFi.
+            - Solid ON: Connected and running healthy — WiFi + X10A OK, and MQTT connected
+              or not configured (an unconfigured broker is not a fault).
+            - Double flash (mostly OFF, two short flashes): X10A poll error / timeout.
+            - Medium blinking (300ms ON / 300ms OFF): X10A OK, but MQTT is configured and
+              not connected.
+            - OFF: no WiFi mode / WiFi disabled.
+            X10A-down outranks MQTT-down: with both down the LED double-flashes and never
+            shows the medium blink — the bus is the point of the device.
 
     config DAIKIN_STATUS_LED_GPIO
         int "Status LED GPIO pin"
