@@ -117,9 +117,22 @@ host-testable core is unusually large and valuable, because the risky parts are 
   chip's reference board; the XIAO ESP32-S3 is authoritative). Feeds `/status.pins_avail` and hence
   the dashboard RX/TX pin dropdown. Pure, so the lists are asserted host-side (sorted, in range, and
   the reference-board set excludes not-broken-out pins like GPIO47).
+- `logic/json.hpp` — the RFC 8259 string encoder every JSON payload goes through: `/status`,
+  `/values` and `/scan` (`http_status.cpp`'s `jstr`) as well as the MQTT state, heartbeat and crash
+  topics. It escapes `"`, `\` and **every** control byte below 0x20 (`\b\f\n\r\t`, else `\u00XX`),
+  while passing raw UTF-8 through untouched. Not a detail: the strings it encodes are not all ours —
+  an SSID is arbitrary bytes chosen by any AP in radio range, and escaping only `"` and `\` (as this
+  did before) let an AP named `Free<LF>WiFi` emit a raw newline inside a JSON string, so `GET /scan`
+  failed `JSON.parse` and collapsed the setup portal's network dropdown to a free-text box for every
+  user. This sits *beneath* the portal's DOM-node SSID escaping (issue #52, fixed in #65) and is
+  orthogonal to it: that fix stops hostile SSID *markup* from being interpolated, while this one
+  only guarantees the bytes **parse** — an SSID of `"><script>` is already valid JSON here, and a
+  body that fails `JSON.parse` never reaches those DOM nodes at all. Pure, so each control char is
+  asserted host-side, including the signed-`char` trap that would otherwise mangle a non-ASCII SSID.
 - `logic/mqtt_group.hpp` — register page → friendly group name, plus the grouped state JSON for the
   one shared state topic (depth 1, groups/keys in first-seen order). Numeric-vs-string typing is
-  asserted host-side, so a reading can't reach HA quoted and land as a string sensor.
+  asserted host-side, so a reading can't reach HA quoted and land as a string sensor. Text values are
+  escaped through `logic/json.hpp`.
 - `logic/mqtt_uri.hpp` — broker URI → host/port/TLS split behind `mqtt_ha`'s scheme policy: scheme
   defaults (`mqtt://` 1883, `mqtts://` 8883, `ws://` 80, `wss://` 443 — the WebSocket transports take
   the HTTP(S) ports **esp-mqtt itself** defaults to, so the save-time pre-flight probes the port the

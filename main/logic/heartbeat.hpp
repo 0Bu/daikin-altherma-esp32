@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
-#include "mqtt_group.hpp"   // json_append_escaped
+#include "json.hpp"   // json_append_escaped
 
 namespace daik {
 

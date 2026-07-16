@@ -194,8 +194,23 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 the image mid-session; a cached flag would strand an uncleanable crash banner + a
                 download that 404s. mqtt_ha republishes the retained crash topic when the flag changes
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, config_model,
-                discovery, detect, mqtt_group, mqtt_uri, heartbeat, crashinfo, bootlog, reset_reason,
-                boot_guard, board_pins, modbus, syslog_policy, link_watch, wifi_rollback, health_gate).
+                discovery, detect, json, mqtt_group, mqtt_uri, heartbeat, crashinfo, bootlog,
+                reset_reason, boot_guard, board_pins, modbus, syslog_policy, link_watch,
+                wifi_rollback, health_gate).
+                json.hpp = the ONE RFC 8259 string encoder every JSON payload goes through (/status,
+                /values, /scan via http_status.cpp's jstr; the MQTT state/heartbeat/crash topics).
+                Escapes " and \ AND every control byte < 0x20 (\b\f\n\r\t, else \u00XX) — the strings
+                are NOT all ours: an SSID is arbitrary bytes from any AP in range, and escaping only
+                the first two let "Free<LF>WiFi" put a raw newline in a JSON string, so GET /scan
+                failed JSON.parse and setup.html's .catch fallback collapsed the network dropdown to
+                a free-text box for every portal user. BENEATH the portal's DOM-node SSID escaping
+                (#52, fixed in #65): orthogonal, neither subsumes the other — #65 stops hostile SSID
+                MARKUP, this makes the bytes PARSE at all (a decoded SSID of `"><script>` is valid
+                JSON, and #65's DOM nodes still never see it if the parse fails first). #65 kept the
+                .catch(textInput) fallback, so the scan-UI denial was live until this landed.
+                Bytes >= 0x20 pass through
+                verbatim (raw UTF-8, 0x7F) — the cast to unsigned char is load-bearing, since `char`
+                is signed and a naive c < 0x20 would mangle every non-ASCII SSID.
                 mqtt_uri.hpp = the broker-URI split (host/port/TLS) behind the /set_mqtt pre-flight.
                 Its scheme defaults track esp-mqtt's OWN (mqtt 1883, mqtts 8883, ws 80, wss 443) —
                 the probe must dial the port the client will: 1883/8883 for ws(s) probed a port

@@ -20,6 +20,7 @@
 #include "logic/discovery.hpp"
 #include "logic/health_gate.hpp"
 #include "logic/heartbeat.hpp"
+#include "logic/json.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/link_watch.hpp"
 #include "logic/mqtt_uri.hpp"
@@ -543,6 +544,55 @@ static void test_detect() {
     CHECK(std::string(buf) == "0B" && std::strlen(buf) < 5);
 }
 
+static void test_json() {
+    // Clean ASCII is passed through untouched — the overwhelmingly common case.
+    CHECK(json_quote("") == "\"\"");
+    CHECK(json_quote("FRITZ!Box 7590 GX") == "\"FRITZ!Box 7590 GX\"");
+
+    // The two chars the encoder always handled.
+    CHECK(json_quote("say \"hi\"") == "\"say \\\"hi\\\"\"");
+    CHECK(json_quote("C:\\net") == "\"C:\\\\net\"");
+    CHECK(json_quote("\"\\") == "\"\\\"\\\\\"");
+
+    // RFC 8259 §7 two-char escapes for the control chars that have one.
+    CHECK(json_quote("\b") == "\"\\b\"");
+    CHECK(json_quote("\f") == "\"\\f\"");
+    CHECK(json_quote("\n") == "\"\\n\"");
+    CHECK(json_quote("\r") == "\"\\r\"");
+    CHECK(json_quote("\t") == "\"\\t\"");
+
+    // Every other control char -> \u00XX. NUL is a real byte here (std::string is not NUL-terminated
+    // logic), 0x0B/0x1F have no shorthand.
+    CHECK(json_quote(std::string("\0", 1)) == "\"\\u0000\"");
+    CHECK(json_quote("\x01") == "\"\\u0001\"");
+    CHECK(json_quote("\x0B") == "\"\\u000b\"");
+    CHECK(json_quote("\x1F") == "\"\\u001f\"");
+
+    // The reachable case: an AP named Free<LF>WiFi. A raw newline here made GET /scan emit JSON that
+    // fails JSON.parse, collapsing the setup portal's network dropdown to a free-text box.
+    CHECK(json_quote("Free\nWiFi") == "\"Free\\nWiFi\"");
+
+    // EXHAUSTIVE: no byte below 0x20 may ever reach the output raw, whatever the escape form.
+    for (int b = 0x00; b < 0x20; ++b) {
+        const std::string out = json_quote(std::string(1, static_cast<char>(b)));
+        CHECK(out.find(static_cast<char>(b)) == std::string::npos);
+        CHECK(out.size() >= 4 && out[1] == '\\');            // "" plus at least a 2-char escape
+    }
+
+    // Bytes >= 0x20 that the RFC does NOT require escaping must survive verbatim. UTF-8 is the trap:
+    // `char` is signed, so a lead byte like 0xC3 is negative and a signed `c < 0x20` test would
+    // mangle "Café" (and every non-ASCII SSID) into garbage \u00XX.
+    CHECK(json_quote("Café") == "\"Café\"");
+    CHECK(json_quote("\xE2\x98\x95") == "\"\xE2\x98\x95\"");  // U+2615, 3-byte UTF-8
+    CHECK(json_quote("\x7F") == "\"\x7F\"");                 // DEL: legal unescaped per RFC 8259
+
+    // json_append_escaped appends to what is already there (it is the inside-the-quotes form) —
+    // crashinfo.hpp / heartbeat.hpp build their payloads that way.
+    std::string acc = "x=";
+    json_append_escaped(acc, "a\tb");
+    CHECK(acc == "x=a\\tb");
+}
+
 static void test_mqtt_group() {
     // Register page -> friendly group name (docs/X10A_PROTOCOL.md §5); unknown page -> "other".
     CHECK(std::string(group_for_page(0x61)) == "hydronic_temps");
@@ -566,6 +616,10 @@ static void test_mqtt_group() {
     CHECK(j == "{\"outdoor_state\":{\"operation_mode\":\"Heating\",\"error_type\":\"Normal\"},"
                "\"hydronic\":{\"dhw_setpoint\":48,\"lw_setpoint\":35.4}}");
     CHECK(build_grouped_json({}) == "{}");
+
+    // A text value routes through the shared logic/json.hpp encoder, so a control char in one can't
+    // break the state topic's JSON either (test_json covers the escaping itself).
+    CHECK(build_grouped_json({{"other", "raw", "a\nb"}}) == "{\"other\":{\"raw\":\"a\\nb\"}}");
 }
 
 static void test_mqtt_uri() {
@@ -1457,6 +1511,7 @@ int main() {
     test_discovery();
     test_registry();
     test_detect();
+    test_json();
     test_mqtt_group();
     test_mqtt_uri();
     test_modbus();
