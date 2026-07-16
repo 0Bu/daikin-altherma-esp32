@@ -144,7 +144,14 @@ syslog.cpp      optional syslog UDP client (RFC 5424): a task DNS-resolves the c
                 ADVISORY (feeds /status.syslog.reachable, never gates sends: syslog is best-effort UDP
                 and a healthy collector may firewall ICMP). File-scope ping-control (like wifi.cpp's
                 s_wd) so the async esp_ping callback can't use-after-free. syslog_status() feeds
-                /status. Self-loop-guarded (drops "syslog:" lines).
+                /status. Self-loop-guarded (drops "syslog:" lines). On the FIRST resolve of a boot it
+                replays the boot records ONCE (logic/bootlog.hpp) straight down the socket — a
+                build-identity line (version/elf_sha256/reset/safe_mode) + the crash records if the
+                last boot was a fault. diag_crash_capture() runs before WiFi/this task exist, so
+                without the replay the crash reached only the in-RAM ring (overwritten within a
+                minute by a chatty failure mode) — never syslog. NOT via diag_printf: the queue is
+                full of the boot backlog by then and the enqueue is non-blocking (it would drop
+                exactly these lines).
 diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + core-dump SUMMARY
                 (esp_core_dump_get_summary: crashed task/PC/backtrace/app-elf-sha) into a cached
                 CrashInfo (logic/crashinfo.hpp); read by /status.last_crash + the MQTT crash topic —
@@ -155,8 +162,14 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 the image mid-session; a cached flag would strand an uncleanable crash banner + a
                 download that 404s. mqtt_ha republishes the retained crash topic when the flag changes
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, config_model,
-                discovery, detect, mqtt_group, heartbeat, crashinfo, reset_reason, boot_guard,
-                board_pins, modbus).
+                discovery, detect, mqtt_group, heartbeat, crashinfo, bootlog, reset_reason,
+                boot_guard, board_pins, modbus).
+                bootlog.hpp = the records syslog.cpp replays once per boot: build_boot_line (version/
+                elf_sha256/reset/safe_mode — the only way to tell WHICH firmware produced a log
+                stream) + build_crash_log_lines (the crash as single-line, datagram-sized records;
+                returns 0 for a non-notable boot, so the "don't spam the collector" rule is
+                host-tested). Deliberately NOT crashinfo's multi-line build_crash_text(), which at
+                worst case (~340 B) truncates past diag's 256-byte line buffer and loses elf_sha256.
                 reset_reason.hpp maps a reset code to the /status.sys.reset_reason slug (reusing
                 crashinfo's crash_reason_slug — one vocabulary). boot_guard.hpp = the safe-mode decision
                 logic (crash-only counting, saturating increment, threshold) driving safe_mode.cpp.

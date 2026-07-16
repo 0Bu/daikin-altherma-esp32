@@ -1,7 +1,11 @@
 #include "syslog.hpp"
 #include "config.hpp"
 #include "wifi.hpp"
+#include "diag_crash.hpp"
 #include "diag_log.hpp"
+#include "safe_mode.hpp"
+#include "logic/bootlog.hpp"
+#include "esp_app_desc.h"
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
 #include "ping/ping_sock.h"
@@ -14,6 +18,7 @@
 #include "freertos/semphr.h"
 #include <cstring>
 #include <cstdio>
+#include <new>
 #include <string_view>
 
 namespace daik {
@@ -127,6 +132,87 @@ static bool syslog_ping_host(const struct in_addr& ip) {
     return s_ping.received > 0;
 }
 
+// Frame one line as RFC 5424 and push it as a single UDP datagram. The one send path — used by the
+// queue drain AND by the one-shot boot replay, so both get identical framing/error handling.
+enum class SendResult { Ok, Empty, SocketFailed, SendFailed };
+
+static SendResult syslog_sendto(const struct sockaddr_in& dest, const char* text, size_t len) {
+    while (len > 0 && (text[len - 1] == '\n' || text[len - 1] == '\r' || text[len - 1] == ' ')) {
+        len--;
+    }
+    if (len == 0) return SendResult::Empty;
+
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (sock < 0) return SendResult::SocketFailed;
+
+    char packet[320];
+    // RFC 5424: <PRI=14 user.info>1 SP TIMESTAMP HOSTNAME APP PROCID MSGID SD SP MSG.
+    // HOSTNAME must be the device's real network name (CONFIG_DAIKIN_HOSTNAME) so syslog entries
+    // correlate with the host as seen over DHCP/mDNS — never a shortened alias.
+    int pkt_len = std::snprintf(packet, sizeof(packet), "<14>1 - " CONFIG_DAIKIN_HOSTNAME " - - - - %.*s",
+                                static_cast<int>(len), text);
+    SendResult r = SendResult::Ok;
+    if (pkt_len > 0) {
+        // snprintf returns the length it WOULD have written; clamp to what fits or sendto reads OOB.
+        if (pkt_len > static_cast<int>(sizeof(packet)) - 1) pkt_len = static_cast<int>(sizeof(packet)) - 1;
+        if (sendto(sock, packet, pkt_len, 0, (struct sockaddr*)&dest, sizeof(dest)) < 0) {
+            r = SendResult::SendFailed;
+        }
+    }
+    close(sock);
+    return r;
+}
+
+// Replay the boot records ONCE, as soon as a collector is resolved. diag_crash_capture() runs at the
+// top of app_main — before WiFi, before this task exists — so its crash line could only ever reach
+// the in-RAM diag ring, which a chatty failure mode (an X10A timeout every ~0.3 s) overwrites within
+// a minute. Result: the single most useful line for forensics was readable nowhere. The boot line
+// goes out on every boot (build identity: without it a log stream cannot be tied to a binary); the
+// crash records only when there is a real crash to report (build_crash_log_lines returns 0 otherwise).
+//
+// Sent straight down syslog_sendto(), NOT via diag_printf(): by now the queue is typically full of
+// the boot backlog (nothing drains it until WiFi + DNS are up), and syslog_send()'s enqueue is
+// non-blocking — it would silently drop exactly the lines this exists to save. Returns false if a
+// send failed, leaving the one-shot unlatched so the next resolve retries.
+//
+// Consequence of bypassing diag_printf: these lines carry no "[uptime]" prefix, unlike every other
+// forwarded line. That is deliberate — they describe the PREVIOUS boot, so stamping them with this
+// boot's uptime (a few seconds) would date the crash wrong. The collector's own receive timestamp
+// remains the only honest clock here (the device has no RTC).
+static bool syslog_replay_boot(const struct sockaddr_in& dest) {
+    // Best-effort diagnostics must never take the device down. The record builders allocate (~800 B
+    // total, worst case), and an uncaught std::bad_alloc here would unwind through the FreeRTOS/C
+    // task frames → std::terminate → reboot; because the replay re-runs on EVERY boot that would be
+    // a boot LOOP, not a one-off crash. Latch the one-shot on OOM rather than retrying forever: a
+    // device that can't spare 800 bytes has a worse problem than a missing log line.
+    try {
+        char elf_sha[65] = {0};
+        esp_app_get_elf_sha256(elf_sha, sizeof(elf_sha));
+
+        BootIdent id;
+        id.version   = esp_app_get_description()->version;
+        id.elf_sha   = elf_sha;
+        id.reason    = diag_crash_info().reason;
+        id.safe_mode = safe_mode_active();
+
+        const std::string boot = build_boot_line(id);
+        if (syslog_sendto(dest, boot.data(), boot.size()) != SendResult::Ok) return false;
+
+        // Short-lived and small (<= 3 lines, each capped at ~200 bytes by construction — see
+        // logic/bootlog.hpp): no risk to the contiguous-block budget this firmware runs against.
+        std::string lines[CRASH_LOG_LINE_MAX];
+        const int n = build_crash_log_lines(diag_crash_info(), lines, CRASH_LOG_LINE_MAX);
+        for (int i = 0; i < n; i++) {
+            if (syslog_sendto(dest, lines[i].data(), lines[i].size()) != SendResult::Ok) return false;
+        }
+        diag_printf("syslog: replayed boot record + %d crash line(s)\n", n);
+        return true;
+    } catch (const std::bad_alloc&) {
+        diag_printf("syslog: boot replay skipped (out of memory)\n");
+        return true;
+    }
+}
+
 void syslog_init() {
     s_status_mtx = xSemaphoreCreateMutex();
     s_ping.done  = xSemaphoreCreateBinary();
@@ -141,6 +227,8 @@ void syslog_init() {
         int last_port = -1;
         bool logged_state = false;    // one-shot log of the current resolve outcome
         bool have_checked = false;    // false → re-resolve immediately (boot / config change / send error)
+        bool replayed = false;        // one-shot: the boot/crash records have gone out (see
+                                      // syslog_replay_boot) — never re-sent on a re-resolve/reconnect
         TickType_t last_check = 0;
         const TickType_t check_interval = pdMS_TO_TICKS(10000); // re-resolve + re-probe cadence
 
@@ -201,6 +289,9 @@ void syslog_init() {
                                     c.syslog_host.c_str(), ip_str, reachable ? "yes" : "no-ping-reply");
                         logged_state = true;
                     }
+                    // First reachable collector of this boot → replay what happened before it existed.
+                    // Ahead of the queue drain, so the crash leads the backlog rather than trailing it.
+                    if (!replayed) replayed = syslog_replay_boot(dest_addr);
                 } else {
                     resolved = false; reachable = false;
                     set_status(false, false, "DNS lookup failed");
@@ -216,38 +307,25 @@ void syslog_init() {
             SyslogMsg msg;
             if (xQueueReceive(s_queue, &msg, pdMS_TO_TICKS(500)) == pdTRUE) {
                 if (resolved) {
-                    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-                    if (sock >= 0) {
-                        int len = msg.len;
-                        while (len > 0 && (msg.text[len - 1] == '\n' || msg.text[len - 1] == '\r' || msg.text[len - 1] == ' ')) {
-                            len--;
-                        }
-                        if (len > 0) {
-                            char packet[320];
-                            // RFC 5424: <PRI=14 user.info>1 SP TIMESTAMP HOSTNAME APP PROCID MSGID SD SP MSG.
-                            // HOSTNAME must be the device's real network name (CONFIG_DAIKIN_HOSTNAME) so
-                            // syslog entries correlate with the host as seen over DHCP/mDNS — never a shortened alias.
-                            int pkt_len = std::snprintf(packet, sizeof(packet), "<14>1 - " CONFIG_DAIKIN_HOSTNAME " - - - - %.*s",
-                                                   len, msg.text);
-                            if (pkt_len > 0) {
-                                int send_res = sendto(sock, packet, pkt_len, 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
-                                if (send_res < 0) {
-                                    // Hard socket error (e.g. ENETUNREACH) → force a fresh resolve next loop.
-                                    set_status(false, false, "Send failed");
-                                    resolved = false;
-                                    logged_state = false;
-                                    have_checked = false;
-                                    diag_printf("syslog: sendto failed (error %d)\n", errno);
-                                }
-                            }
-                        }
-                        close(sock);
-                    } else {
-                        set_status(false, false, "Socket creation failed");
-                        resolved = false;
-                        logged_state = false;
-                        have_checked = false;
-                        diag_printf("syslog: socket creation failed (error %d)\n", errno);
+                    switch (syslog_sendto(dest_addr, msg.text, msg.len)) {
+                        case SendResult::Ok:
+                        case SendResult::Empty:
+                            break;
+                        // A hard socket error (e.g. ENETUNREACH) → force a fresh resolve next loop.
+                        case SendResult::SendFailed:
+                            set_status(false, false, "Send failed");
+                            resolved = false;
+                            logged_state = false;
+                            have_checked = false;
+                            diag_printf("syslog: sendto failed (error %d)\n", errno);
+                            break;
+                        case SendResult::SocketFailed:
+                            set_status(false, false, "Socket creation failed");
+                            resolved = false;
+                            logged_state = false;
+                            have_checked = false;
+                            diag_printf("syslog: socket creation failed (error %d)\n", errno);
+                            break;
                     }
                 }
             }

@@ -38,9 +38,15 @@ and the OTA-signing / key lifecycle.
 - **Syslog forwarding is cleartext, unauthenticated UDP** — opt-in and off by default (empty
   `syslog_host`). When enabled, every diag-log line (WiFi/MQTT/X10A state, timeouts, reset reasons)
   is sent as a plaintext RFC 5424 datagram to the configured host; there is no TLS option, unlike
-  MQTT. The diag log carries **no credentials** (no WiFi/MQTT passwords or TLS material pass through
-  it), so this is an operational-metadata flow, not a secret-disclosure one — but like the rest of
-  the API it assumes the trusted LAN. Don't point it at an untrusted collector or across the internet.
+  MQTT. Once per boot the syslog task additionally replays two record types that are **not** diag-log
+  lines (`logic/bootlog.hpp`): a build-identity line (firmware version + `elf_sha256`) and, after a
+  fault, the crash records (reset reason, crashed task name, exception PC, raw backtrace PCs). Like
+  the MQTT crash topic, these carry **reason/backtrace only — never the raw core dump** (that stays
+  on flash behind `GET /coredump`) and never a secret. So the whole flow — diag lines and replay
+  alike — carries **no credentials** (no WiFi/MQTT passwords or TLS material pass through it) and is
+  operational metadata rather than secret disclosure; it does reveal your firmware version and
+  internal code addresses, which is fingerprinting material. Like the rest of the API it assumes the
+  trusted LAN. Don't point it at an untrusted collector or across the internet.
 
 ## Credential storage
 
