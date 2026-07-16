@@ -58,6 +58,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 28 | **`/status.sys`** always-on heap headroom + last-boot reason (LAN/WS, no broker) | ✅ 🧪 | [`http_status.cpp`](../main/http_status.cpp), [`logic/reset_reason.hpp`](../main/logic/reset_reason.hpp) |
 | 29 | **Boot-loop safe mode** — recover a bad config in-browser (crash-only counting, distinct from OTA rollback) | ✅ 🧪 | [`safe_mode.cpp`](../main/safe_mode.cpp), [`logic/boot_guard.hpp`](../main/logic/boot_guard.hpp) |
 | 30 | **Config-write integrity** — field-owned commits (no cross-task revert) + an NVS failure that reaches the user (500, no reboot) instead of "saved" | ✅ 🧪 | [`config.cpp`](../main/config.cpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp), [`http_config.cpp`](../main/http_config.cpp) |
+| 31 | **Value-catalog domain audit** — real converters × real catalog vs the spec, each finding carrying a decode witness; co-gates CI, plus a selftest that re-catches the four decode bugs that shipped | ✅ | [`catalog_audit.cpp`](../tools/domain/catalog_audit.cpp), [`run-domain-audit.sh`](../scripts/run-domain-audit.sh), [`selftest.sh`](../tools/domain/selftest.sh) |
 
 ---
 
@@ -463,6 +464,24 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
 - **The rule** — new decode/config/discovery logic goes in `main/logic/` with a `CHECK`, never buried in
   a device-only `.cpp`. The [`add-logic-test`](../.claude/skills/add-logic-test/SKILL.md) skill and the
   [`x10a-decode-reviewer`](../.claude/agents/x10a-decode-reviewer.md) agent enforce it.
+- **✅ The limit of the above — and the second loop that covers it.** The `CHECK`s verify the logic
+  they are handed; none of them can see a value that is well-formed, compiles, drifts no doc, and is
+  *physically false*. A wrong converter id published `-971.5 °C` as a mixed-water temperature on eight
+  profiles, a valve **position** reached Home Assistant as a 12800 °C temperature sensor, and a "no
+  data" sentinel was published as a real `-3276.8 °C` reading (issues #35–#39) — all green, all
+  shipped, all found only by slow manual review. So the value catalog has its own host loop:
+  [`scripts/run-domain-audit.sh`](../scripts/run-domain-audit.sh) runs the **real** converters over the
+  **real** `def/*` catalog and cross-checks both against [`REGISTERS.md` §5](REGISTERS.md) — one source
+  of truth, nothing to drift. It reports wrong converters, spec/layout drift, cross-profile outliers,
+  non-temperatures typed °C, and straddling byte windows, each with a decode witness (wire bytes → what
+  the value should read → what the row makes of it).
+  [`tools/domain/selftest.sh`](../tools/domain/selftest.sh) re-introduces all four shipped bugs into a
+  throwaway copy and requires the audit to catch each, so a checker that has quietly stopped checking
+  cannot pass as "clean". Adjudicated deviations live in
+  [`audit_exceptions.txt`](../tools/domain/audit_exceptions.txt) and stay visible in the audit's
+  `suppressed` output. The judgement half is the
+  [`domain-review`](../.claude/skills/domain-review/SKILL.md) skill, a PR-merge gate required on every
+  merge.
 
 ---
 
@@ -473,9 +492,11 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   **read at runtime from [`.github/workflows/build.yml`](../.github/workflows/build.yml)** — a single
   source of truth (currently ESP-IDF v6.0.2, kept current by Renovate), so local builds can never drift
   from CI.
-- **✅ CI gate order** ([`build.yml`](../.github/workflows/build.yml)): the fast, hardware-free
-  `logic-test` job runs first; only then the esp32s3 firmware build → sign → merge → artifact upload.
-  A decode/config/discovery regression fails in seconds, not minutes.
+- **✅ CI gate order** ([`build.yml`](../.github/workflows/build.yml)): two fast, hardware-free jobs run
+  first and the firmware build `needs` **both** — `logic-test` (the host logic suite) and
+  `domain-audit` (the value-catalog audit + its selftest, §8); only then the esp32s3 firmware build →
+  sign → merge → artifact upload. A decode/config/discovery regression, or a value that is
+  well-formed but physically false, fails in seconds, not minutes.
 - **✅ Crash-decodable forever.** CI archives the unstripped `.elf` (+ sha256) per version/PR, so every
   build's core dumps stay symbolizable ([`ci-build-all.sh`](../scripts/ci-build-all.sh)).
 - **✅ One Pages publisher.** The browser installer is served from the **`gh-pages` branch**, pushed by

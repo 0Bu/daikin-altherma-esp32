@@ -74,6 +74,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-feature-docs.sh\"",
             "statusMessage": "Checking feature-docs gate\u2026"
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-domain-review.sh\"",
+            "statusMessage": "Checking domain-correctness gate\u2026"
           }
         ]
       },
@@ -89,6 +94,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-feature-docs.sh\"",
             "statusMessage": "Checking feature-docs gate\u2026"
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-domain-review.sh\"",
+            "statusMessage": "Checking domain-correctness gate\u2026"
           }
         ]
       }

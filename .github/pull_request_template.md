@@ -15,6 +15,7 @@ that couldn't be (a cloud session cannot build or USB-flash — see .claude/CLAU
 ## Verification
 
 - [ ] `scripts/run-mock-tests.sh` passes (host-side logic tests — CI's `logic-test` gate)
+- [ ] `scripts/run-domain-audit.sh` clean (value-catalog domain correctness — CI's `domain-audit` gate)
 - [ ] Firmware built (`scripts/idf-docker.sh idf.py build`, or relied on CI) — N/A in a cloud session (no Docker daemon / no USB)
 - [ ] Exercised against a real heat pump / device where relevant (or noted why not)
 
@@ -27,3 +28,4 @@ that couldn't be (a cloud session cannot build or USB-flash — see .claude/CLAU
 - [ ] Target-specific — builds for esp32s3
 - [ ] `/project-review` run clean (doc drift, memory, tests, multi-target)
 - [ ] `/feature-docs` run if a technical feature changed — `docs/FEATURES.md` catalog synced
+- [ ] `/domain-review` run — required on EVERY merge: values verified physically right, sensible and authentic (a PR that cannot reach a value clears in seconds, but say what you checked)
