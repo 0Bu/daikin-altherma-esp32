@@ -104,7 +104,10 @@ config.cpp      runtime Config (logic/config_model.hpp): WiFi/MQTT + one-shot Wi
                 still hold a pair (rx == tx, or a pin off this chip) the request path would have
                 rejected — a failure named on /diag is not a pair fixed on flash
 nvs_storage.cpp thin NVS helpers (IDF nvs_* called with :: to avoid the daik::nvs_* collision);
-                the setters return esp_err_t so config.cpp can name the failing key + error on /diag
+                the setters return esp_err_t so config.cpp can name the failing key + error on /diag,
+                and are [[nodiscard]] (main/ builds -Werror) — safe_mode.cpp silently dropped its
+                crash-counter write, which left safe mode unable to latch on the wedged flash that is
+                itself a plausible crash-loop cause. Compare to ESP_OK, never coerce to bool
 wifi.cpp        STA bring-up (all-channel scan -> strongest AP by RSSI) + endless reconnect
                 (first-boot budget -> setup portal; once online it NEVER reboots — no reason code
                 ends the retry, since 15/202/204 are also the transient WPA3-SAE failures this file
