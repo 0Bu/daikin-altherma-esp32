@@ -73,10 +73,22 @@ button:disabled { opacity: .6; cursor: default; box-shadow: none; }
 <script>
   const el = (id) => document.getElementById(id);
   // Populate the SSID list from the device's scan (GET /scan → {networks:[{ssid,rssi}]}).
+  // An SSID is attacker-controlled input: any AP in range picks its own 32 bytes, which is room for
+  // `"><img src=x onerror=…>`. This is also the one page where the user types their WiFi password, so
+  // the options are built as DOM nodes — createElement + .value/.textContent never parse markup —
+  // rather than concatenated into innerHTML. Keep every network-derived string on a DOM/textContent
+  // path; there is no esc() helper here (the page is standalone in AP mode).
   fetch("/scan").then((r) => r.json()).then((r) => {
     const list = (r.networks || r || []).slice().sort((a, b) => (b.rssi || -999) - (a.rssi || -999));
     if (!list.length) { textInput(); return; }   // SoftAP can't scan → let the user type the SSID
-    el("ssid").innerHTML = list.map((n) => `<option value="${n.ssid}">${n.ssid} · ${n.rssi} dBm</option>`).join("");
+    const sel = el("ssid");
+    sel.textContent = "";
+    for (const n of list) {
+      const o = document.createElement("option");
+      o.value = n.ssid;
+      o.textContent = `${n.ssid} · ${n.rssi} dBm`;
+      sel.appendChild(o);
+    }
   }).catch(textInput);
   // Scan unavailable or empty: swap the dropdown for a free-text SSID input so setup still works.
   function textInput() {
@@ -87,19 +99,56 @@ button:disabled { opacity: .6; cursor: default; box-shadow: none; }
     cur.replaceWith(inp);
   }
 
+  // Mirror the server's credential rules (logic/config_model.hpp wifi_credentials_valid) so a typo is
+  // caught before the POST. The server stays authoritative — this only saves a round-trip, and its
+  // rejection is rendered inline below.
+  function credError(ssid, pass) {
+    if (!ssid || ssid.length > 32) return "Choose or enter a network (1–32 characters).";
+    if (pass.length > 0 && (pass.length < 8 || pass.length > 63))
+      return "Password must be empty (open network) or 8–63 characters.";
+    return "";
+  }
+  // A rejection body is {"ok":false,"error":…} JSON; tolerate a plain-text body too, so the portal
+  // still surfaces the reason if it is ever served by a firmware that predates the JSON error shape.
+  async function errorText(r) {
+    const body = await r.text().catch(() => "");
+    let msg = body;
+    // A JSON body carries its message in `error`. Anything else that still parses as JSON (no error
+    // field, a bare string, null) has no human-readable text in it — blank it so the generic fallback
+    // below speaks, rather than dumping raw JSON into the form.
+    try {
+      const o = JSON.parse(body);
+      msg = (o && typeof o.error === "string") ? o.error : "";
+    } catch { /* plain-text body — show it as-is */ }
+    return msg.trim() || `Rejected (HTTP ${r.status}).`;
+  }
+  function fail(msg) {
+    el("btn").disabled = false; el("btn").textContent = "Save & reboot";
+    el("msg").className = "msg err"; el("msg").textContent = msg;
+  }
+
   el("f").addEventListener("submit", async (e) => {
     e.preventDefault();
     const ssid = el("ssid").value.trim();
-    if (!ssid) { el("msg").textContent = "Choose or enter a network."; el("msg").className = "msg err"; return; }
-    el("btn").disabled = true; el("btn").textContent = "Rebooting…";
+    const pass = el("pass").value;
+    const bad = credError(ssid, pass);
+    if (bad) { el("msg").className = "msg err"; el("msg").textContent = bad; return; }
+    el("btn").disabled = true; el("btn").textContent = "Saving…";
     el("msg").className = "msg"; el("msg").textContent = "Saving…";
     try {
-      await fetch("/set_wifi", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ssid, pass: el("pass").value }) });
+      // The device only reboots on an accepted write. Announcing "Saved — rebooting" unconditionally
+      // sent the user off to wait for a device that never left the setup AP — report what the server
+      // actually answered.
+      const r = await fetch("/set_wifi", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ssid, pass }) });
+      // 503 = the device's shared heap guard refused the request; nothing was written and the raw
+      // "out of memory" body is not a credential problem, so say retry rather than blame the input.
+      if (r.status === 503) { fail("Device busy — try again in a moment."); return; }
+      if (!r.ok) { fail(await errorText(r)); return; }
+      el("btn").textContent = "Rebooting…";
       el("msg").textContent = "Saved — rebooting. Rejoin your WiFi, then open daikin-altherma-esp32.local.";
     } catch {
-      el("btn").disabled = false; el("btn").textContent = "Save & reboot";
-      el("msg").className = "msg err"; el("msg").textContent = "Failed — try again.";
+      fail("Failed — try again.");
     }
   });
 </script>

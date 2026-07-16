@@ -29,6 +29,15 @@ namespace daik {
 
 static void reboot_soon() { vTaskDelay(pdMS_TO_TICKS(400)); esp_restart(); }
 
+// Every write endpoint answers a rejection as {"ok":false,"error":…} (DESIGN.md §8: a 4xx becomes an
+// inline field error). Both callers — the dashboard modals and the setup portal — read `error` out of
+// the JSON. `msg` is always an internal literal here (body/JSON parse failures and the fixed
+// wifi_credentials_valid reasons), so it needs no escaping; never pass caller-supplied text.
+static esp_err_t send_err(httpd_req_t* req, const char* status, const char* msg) {
+    httpd_resp_set_status(req, status);
+    return http_send_json(req, (std::string("{\"ok\":false,\"error\":\"") + msg + "\"}").c_str());
+}
+
 static const char* js(cJSON* o, const char* k, const char* def = "") {
     cJSON* v = cJSON_GetObjectItem(o, k);
     return (v && cJSON_IsString(v)) ? v->valuestring : def;
@@ -44,22 +53,15 @@ static bool jb(cJSON* o, const char* k, bool def) {
 
 static esp_err_t set_wifi(httpd_req_t* req) {
     char body[512];
-    if (http_read_body(req, body, sizeof(body)) < 0) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return httpd_resp_sendstr(req, "bad body");
-    }
+    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
     cJSON* j = cJSON_Parse(body);
-    if (!j) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return httpd_resp_sendstr(req, "bad json");
-    }
+    if (!j) return send_err(req, "400 Bad Request", "bad json");
     std::string ssid = js(j, "ssid");
     std::string pass = js(j, "pass");
     std::string reason;
     if (!wifi_credentials_valid(ssid, pass, reason)) {
         cJSON_Delete(j);
-        httpd_resp_set_status(req, "400 Bad Request");
-        return httpd_resp_sendstr(req, reason.c_str());
+        return send_err(req, "400 Bad Request", reason.c_str());
     }
     Config c = config();
     if (!c.wifi_ssid.empty()) {
@@ -195,15 +197,9 @@ static bool tcp_port_probe(const struct in_addr& ip, int port, int timeout_ms) {
 
 static esp_err_t set_mqtt(httpd_req_t* req) {
     char body[512];
-    if (http_read_body(req, body, sizeof(body)) < 0) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return httpd_resp_sendstr(req, "bad body");
-    }
+    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
     cJSON* j = cJSON_Parse(body);
-    if (!j) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return httpd_resp_sendstr(req, "bad json");
-    }
+    if (!j) return send_err(req, "400 Bad Request", "bad json");
     std::string broker      = js(j, "broker");
     std::string user        = js(j, "user");
     std::string pass        = js(j, "pass");
@@ -331,9 +327,9 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
                 return http_send_json(req, "{\"ok\":false,\"error\":\"MQTT connection timeout\"}");
             }
             if (!ctx.connected) {
-                const char* err_msg = ctx.error_msg ? ctx.error_msg : "MQTT connection refused";
-                httpd_resp_set_status(req, "400 Bad Request");
-                return http_send_json(req, (std::string("{\"ok\":false,\"error\":\"") + err_msg + "\"}").c_str());
+                // error_msg is a string literal by construction (see MqttValidateCtx) — never broker
+                // text, so it satisfies send_err's no-escaping precondition.
+                return send_err(req, "400 Bad Request", ctx.error_msg ? ctx.error_msg : "MQTT connection refused");
             }
         } else {
             if (ctx.sem) vSemaphoreDelete(ctx.sem);
@@ -358,15 +354,9 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
 
 static esp_err_t set_hp(httpd_req_t* req) {
     char body[2048];
-    if (http_read_body(req, body, sizeof(body)) < 0) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return httpd_resp_sendstr(req, "bad body");
-    }
+    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
     cJSON* j = cJSON_Parse(body);
-    if (!j) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return httpd_resp_sendstr(req, "bad json");
-    }
+    if (!j) return send_err(req, "400 Bad Request", "bad json");
     Config c    = config();
     // The RX/TX pins are the physical X10A wiring: PERSISTED so a manual override survives a reboot
     // (config_save below). The model "profile" is session-only — only touched when the request
@@ -384,32 +374,19 @@ static esp_err_t set_hp(httpd_req_t* req) {
     cJSON_Delete(j);
 
     std::string reason;
-    if (!validate(c, reason, SOC_GPIO_PIN_COUNT - 1)) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        std::string e = "{\"ok\":false,\"error\":\"" + reason + "\"}";
-        return http_send_json(req, e.c_str());
-    }
+    if (!validate(c, reason, SOC_GPIO_PIN_COUNT - 1)) return send_err(req, "400 Bad Request", reason.c_str());
     // Persist the pin cache (config_save writes link+creds; profile/fp stay RAM). On failure RAM is
     // untouched too, so there is no new config to hand the poll engine — skip the reconfigure.
-    if (!config_save(c)) {
-        httpd_resp_set_status(req, "500 Internal Server Error");
-        return http_send_json(req, "{\"ok\":false,\"error\":\"config write failed\"}");
-    }
+    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
     hp_poll_reconfigure();
     return http_send_json(req, "{\"ok\":true}");
 }
 
 static esp_err_t set_syslog(httpd_req_t* req) {
     char body[512];
-    if (http_read_body(req, body, sizeof(body)) < 0) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return httpd_resp_sendstr(req, "bad body");
-    }
+    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
     cJSON* j = cJSON_Parse(body);
-    if (!j) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return httpd_resp_sendstr(req, "bad json");
-    }
+    if (!j) return send_err(req, "400 Bad Request", "bad json");
     std::string host = js(j, "host");
     int port = ji(j, "port", 514);
     cJSON_Delete(j);

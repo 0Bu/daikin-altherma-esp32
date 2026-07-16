@@ -327,7 +327,9 @@ GET  /coredump[?clear=1]   stream the flash core-dump image (chunked octet-strea
                   .elf: scripts/decode-coredump.sh coredump.bin (CI archives the .elf per build). The
                   UI surfaces a crash banner + one-click download when /status.last_crash is set.
 POST /set_wifi    {ssid,pass} -> validate (ssid 1-32 chars; pass empty[open] or 8-63) -> persist +
-                  reboot. If WiFi was already configured, the OLD ssid/pass are stashed as a one-shot
+                  reboot. A rejection is 400 {ok:false,error} like every other write endpoint (the
+                  shared send_err) — it used to be bare text, which the setup portal couldn't tell
+                  apart from success. If WiFi was already configured, the OLD ssid/pass are stashed as a one-shot
                   NVS backup (wifi_rollback flag) and wifi_rolledbk is cleared (a new attempt retires
                   the old verdict): after reboot, if the new creds fail to get a DHCP lease,
                   wifi_start_sta restores the backup + reboots (setting wifi_rolledbk ->

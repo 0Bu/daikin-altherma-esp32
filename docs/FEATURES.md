@@ -190,8 +190,9 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   30 s deadline this replaces did the opposite: it restored an old SSID for a network that no longer
   existed and threw the correct new credentials away. The outcome is recorded as
   `/status.wifi.rolled_back` (sticky until the next `/set_wifi`), since the rollback's own reboot wipes
-  the diag ring and the card just shows the old SSID again — API-only for now; the dashboard banner that
-  reads it belongs to the web-UI write-feedback work.
+  the diag ring and the card just shows the old SSID again. The dashboard reads it as a **rollback
+  banner** — necessarily a banner off `/status` rather than a toast on the save, because the verdict
+  takes 60–180 s and lands long after the save's ~21 s reconnect poll has given up.
 - **✅ 🧪 Config-write integrity** ([`config.cpp`](../main/config.cpp),
   [`logic/config_model.hpp`](../main/logic/config_model.hpp)). Two tasks write the config — httpd
   (`/set_*`) and poll (detection) — and a writer that saves a whole `Config` saves whatever it

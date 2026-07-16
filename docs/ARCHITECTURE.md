@@ -567,9 +567,11 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
   fast `NO_AP_FOUND` scans and roll back before the router ever answered. A rollback also **records its
   outcome**: it sets `/status.wifi.rolled_back` (sticky until the next `/set_wifi`), because the reboot
   it takes wipes the diag ring and the SSID on the card is simply the old one again — leaving a rollback
-  indistinguishable from a save that never happened. Today that lives on the API only; the dashboard
-  banner that consumes it is part of the web-UI write-feedback work, so until then the answer to "did my
-  save stick?" is `curl /status | jq .wifi.rolled_back`.
+  indistinguishable from a save that never happened. The dashboard consumes it as a **rollback banner**
+  (`renderRollbackBanner`, DESIGN.md §5.3 item 0). It has to be a banner off `/status` rather than a
+  toast on the save flow: the verdict takes 60–180 s to reach, far past the save's ~21 s reconnect poll,
+  so it almost always lands after the user has already reloaded the page. On the API the answer to "did
+  my save stick?" stays `curl /status | jq .wifi.rolled_back`.
   `config_save()` writes the backup + flag **before** the credentials when arming and **after** them when
   clearing: each `nvs_set_*` commits separately, so this ordering is what keeps a power cut from arming
   untried credentials with no way back.

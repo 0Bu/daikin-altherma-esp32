@@ -206,12 +206,13 @@ GET  /coredump[?clear=1]           # stream the flash core-dump image (chunked; 
                                    #   ?clear=1 erases the coredump partition. Decode offline with
                                    #   scripts/decode-coredump.sh coredump.bin (matching-version .elf).
 POST /set_wifi                     # { ssid, pass } → validate (ssid 1-32; pass ""|8-63) → persist +
-                                   #   reboot. Backs up the old creds + auto-rolls-back if the new
-                                   #   network fails to connect (see ARCHITECTURE.md → Web UI config flow)
+                                   #   reboot; on failure 400 {ok:false,error} (nothing saved). Backs up
+                                   #   the old creds + auto-rolls-back if the new network fails to
+                                   #   connect (see ARCHITECTURE.md → Web UI config flow)
 POST /set_mqtt                     # { broker, user?, pass?, clear_creds? } → pre-flight the broker
                                    #   (DNS/TCP/connect+auth) → on success persist + reboot, on failure
-                                   #   400 {error} (nothing saved). Empty user+pass keeps stored creds;
-                                   #   clear_creds:true removes them (anonymous); "" broker disables.
+                                   #   400 {ok:false,error} (nothing saved). Empty user+pass keeps stored
+                                   #   creds; clear_creds:true removes them (anonymous); "" broker disables.
 POST /set_syslog                   # { host, port } → validate port range, persist + reboot ("" host
                                    #   disables). DNS/reachability resolve async, shown in /status.syslog
 POST /set_hp                       # { profile?, rx?, tx? } → apply live (no reboot); rx/tx PERSIST
