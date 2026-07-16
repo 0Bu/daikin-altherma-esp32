@@ -27,6 +27,7 @@
 #include "logic/registers.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/syslog_policy.hpp"
+#include "logic/wifi_rollback.hpp"
 #include "def/registry.hpp"
 #include "def/signatures.hpp"
 
@@ -1286,6 +1287,83 @@ static void test_link_watch() {
     CHECK(link_watch_step(l, true, GwProbe::Unreachable, true) == WdAction::Reassociate);
 }
 
+// ── WiFi credential-rollback policy (logic/wifi_rollback.hpp) ────────────────────────────────
+static void test_wifi_rollback() {
+    // The whole point of the classifier: an AP that REFUSED us is evidence about the credentials; an
+    // AP that was never on the air is evidence about the ROUTER and says nothing about credentials.
+    CHECK(disco_class(202) == DiscoClass::Auth);        // AUTH_FAIL
+    CHECK(disco_class(15)  == DiscoClass::Auth);        // 4WAY_HANDSHAKE_TIMEOUT — PSK did not verify
+    CHECK(disco_class(204) == DiscoClass::Auth);        // HANDSHAKE_TIMEOUT
+    CHECK(disco_class(211) == DiscoClass::Auth);        // NO_AP_FOUND_IN_AUTHMODE — security mismatch
+    CHECK(disco_class(210) == DiscoClass::Auth);        // NO_AP_FOUND_W_COMPATIBLE_SECURITY
+    CHECK(disco_class(201) == DiscoClass::ApAbsent);    // NO_AP_FOUND — the SSID was not there
+    CHECK(disco_class(212) == DiscoClass::ApAbsent);    // NO_AP_FOUND_IN_RSSI_THRESHOLD — out of range
+    CHECK(disco_class(0)   == DiscoClass::None);        // nothing observed yet
+    CHECK(disco_class(200) == DiscoClass::Other);       // BEACON_TIMEOUT — a link fault, not creds
+    CHECK(disco_class(8)   == DiscoClass::Other);       // ASSOC_LEAVE (deauth)
+
+    // Nothing is decided before the ordinary window is up — not even for the auth class. Those
+    // reasons double as the transient WPA3-SAE failures wifi.cpp works around, so an early one must
+    // never be enough on its own to spend credentials that cannot be recovered.
+    {
+        RollbackWatch w;
+        CHECK(rollback_step(w, DiscoClass::Auth, 0) == RollbackAction::Wait);
+        CHECK(rollback_step(w, DiscoClass::Auth, WIFI_BOOT_WINDOW_S - 1) == RollbackAction::Wait);
+    }
+
+    // Wrong password: the AP answers and keeps saying no. It must SUSTAIN that across checkpoints —
+    // one sample cannot tell a wrong password from a transient SAE failure that merely happened to
+    // be the last thing logged when we looked — but two roll back, still within issue #47's "~1 boot
+    // cycle".
+    {
+        RollbackWatch w;
+        CHECK(rollback_step(w, DiscoClass::Auth, WIFI_BOOT_WINDOW_S) == RollbackAction::Wait);
+        CHECK(rollback_step(w, DiscoClass::Auth, WIFI_BOOT_WINDOW_S * 2) == RollbackAction::RollBack);
+        CHECK(WIFI_BOOT_WINDOW_S * WIFI_AUTH_TO_ROLLBACK <= 60);
+    }
+
+    // A refusal that does NOT persist must not spend the credentials: wifi.cpp clears the reason slot
+    // on STA_CONNECTED, so an association mid-window reports None and breaks the streak. This is the
+    // transient-SAE-then-slow-DHCP boot — the AP took us, we are just waiting on a lease.
+    {
+        RollbackWatch w;
+        CHECK(rollback_step(w, DiscoClass::Auth, WIFI_BOOT_WINDOW_S) == RollbackAction::Wait);
+        CHECK(rollback_step(w, DiscoClass::None, WIFI_BOOT_WINDOW_S * 2) == RollbackAction::Wait);
+        CHECK(w.auth == 0);   // the streak is broken, not merely paused
+        CHECK(rollback_step(w, DiscoClass::Auth, WIFI_BOOT_WINDOW_S * 3) == RollbackAction::Wait);
+    }
+
+    // THE fix. A router that is still rebooting shows up as an absent SSID, which the blind deadline
+    // read as "wrong credentials" and answered by destroying the correct new ones. Absence of
+    // evidence now buys the full grace window instead — and no amount of it ever takes the fast path.
+    {
+        RollbackWatch w;
+        for (int t = WIFI_BOOT_WINDOW_S; t < WIFI_ROLLBACK_GRACE_S; t += WIFI_BOOT_WINDOW_S)
+            CHECK(rollback_step(w, DiscoClass::ApAbsent, t) == RollbackAction::Wait);
+        // Bounded, though: an SSID that never appears at all (a typo'd name) must still fall back to
+        // the network we know works, rather than leaving the device off the LAN forever.
+        CHECK(rollback_step(w, DiscoClass::ApAbsent, WIFI_ROLLBACK_GRACE_S) == RollbackAction::RollBack);
+    }
+
+    // Inconclusive is treated exactly like absent — associated but no DHCP lease yet, or any other
+    // fault. Only the AP's own sustained "no" is allowed to be fast.
+    for (DiscoClass k : {DiscoClass::None, DiscoClass::Other}) {
+        RollbackWatch w;
+        CHECK(rollback_step(w, k, WIFI_BOOT_WINDOW_S) == RollbackAction::Wait);
+        CHECK(rollback_step(w, k, WIFI_ROLLBACK_GRACE_S) == RollbackAction::RollBack);
+    }
+
+    // The acceptance criterion from issue #47, as a check: valid new credentials with the router
+    // offline for 2 minutes must still be waiting, not rolled back.
+    CHECK(WIFI_ROLLBACK_GRACE_S > 120);
+    {
+        RollbackWatch w;
+        CHECK(rollback_step(w, DiscoClass::ApAbsent, 120) == RollbackAction::Wait);
+    }
+    // ...and the grace must be a MATERIAL extension of the flat window, not a nudge.
+    CHECK(WIFI_ROLLBACK_GRACE_S >= WIFI_BOOT_WINDOW_S * 4);
+}
+
 int main() {
     test_crc();
     test_registers();
@@ -1303,6 +1381,7 @@ int main() {
     test_bootlog();
     test_syslog_policy();
     test_link_watch();
+    test_wifi_rollback();
     test_reset_reason();
     test_boot_guard();
     test_health_gate();

@@ -95,10 +95,17 @@ config.cpp      runtime Config (logic/config_model.hpp): WiFi/MQTT + one-shot Wi
                 (config_set_runtime); mutex-guarded
 nvs_storage.cpp thin NVS helpers (IDF nvs_* called with :: to avoid the daik::nvs_* collision)
 wifi.cpp        STA bring-up (all-channel scan -> strongest AP by RSSI) + endless reconnect
-                (first-boot budget -> setup portal) + one-shot credential rollback (new creds fail to
-                get a lease -> restore the NVS backup + reboot; runtime credential-change detection:
-                >=5 consecutive AUTH_FAIL/handshake-timeout disconnects after having been online ->
-                reboot to fallback) + ICMP gateway watchdog (ghost-assoc recovery; the probe is
+                (first-boot budget -> setup portal; once online it NEVER reboots — no reason code
+                ends the retry, since 15/202/204 are also the transient WPA3-SAE failures this file
+                works around, and a runtime auth-fail reboot let an RF storm strand a healthy board
+                in the open portal) + REASON-AWARE one-shot credential rollback (new creds fail to
+                get a lease -> restore the NVS backup + reboot, marking wifi_rolledbk so /status can
+                say so; policy host-tested in logic/wifi_rollback.hpp — only an AP that KEEPS refusing
+                the creds takes the fast path, and must sustain it across 2 checkpoints (~60 s), since
+                one sample can't tell a wrong password from a transient SAE fail; an ABSENT SSID (a
+                router still rebooting, 1-3 min) gets a 180 s grace instead, since the blind deadline
+                destroyed valid new creds; a pending change also suspends the first-boot retry budget)
+                + ICMP gateway watchdog (ghost-assoc recovery; the probe is
                 three-valued and the policy is host-tested in logic/link_watch.hpp — proven silence
                 re-associates after 2 periods, a SUSTAINED inability to probe at all after 10, since
                 "couldn't measure" previously read as "healthy" and left a wedged board undetected
@@ -174,7 +181,7 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 download that 404s. mqtt_ha republishes the retained crash topic when the flag changes
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, config_model,
                 discovery, detect, mqtt_group, heartbeat, crashinfo, bootlog, reset_reason,
-                boot_guard, board_pins, modbus, syslog_policy, link_watch).
+                boot_guard, board_pins, modbus, syslog_policy, link_watch, wifi_rollback).
                 bootlog.hpp = the records syslog.cpp replays once per boot: build_boot_line (version/
                 elf_sha256/reset/safe_mode — the only way to tell WHICH firmware produced a log
                 stream) + build_crash_log_lines (the crash as single-line, datagram-sized records;
@@ -188,6 +195,11 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, con
                 connectivity-watchdog policy: a gateway probe is three-valued (Reachable /
                 Unreachable / Unmeasurable), so "couldn't measure" stops masquerading as healthy;
                 proven silence re-associates after 2 periods, sustained blindness after 10.
+                wifi_rollback.hpp = the credential-rollback policy: classifies a disconnect reason by
+                what it says about the CREDENTIALS (Auth = the AP refused them -> evidence; ApAbsent/
+                None/Other = a router still rebooting or a slow DHCP -> no evidence) and gates the
+                boot-window decision on it. A rollback is destructive (the new creds are gone), so
+                absence of evidence buys the 180 s grace and only the AP's own "no" is fast.
                 reset_reason.hpp maps a reset code to the /status.sys.reset_reason slug (reusing
                 crashinfo's crash_reason_slug — one vocabulary). boot_guard.hpp = the safe-mode decision
                 logic (crash-only counting, saturating increment, threshold) driving safe_mode.cpp.
@@ -215,7 +227,7 @@ www/            web UI sources (index.html + style.css + app.js -> one gzipped p
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `wifi_ssid`/`wifi_pass`, the one-shot WiFi rollback backup `wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback` (see `/set_wifi`), `mqtt_uri`/`mqtt_user`/`mqtt_pass`, `syslog_host`/`syslog_port` (empty host = off), the X10A **link cache** `rx_pin`/`tx_pin`/`proto`, and the boot-loop **crash counter** `boot_fails` (safe_mode.cpp; here so a factory reset wipes it too). (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
+| `daik_cfg` | `wifi_ssid`/`wifi_pass`, the one-shot WiFi rollback backup `wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback` plus the `wifi_rolledbk` outcome marker (see `/set_wifi`; `config_save` writes the backup+flag BEFORE the creds when arming and AFTER them when clearing — each `nvs_set_*` commits on its own, so the order decides what a power cut leaves behind), `mqtt_uri`/`mqtt_user`/`mqtt_pass`, `syslog_host`/`syslog_port` (empty host = off), the X10A **link cache** `rx_pin`/`tx_pin`/`proto`, and the boot-loop **crash counter** `boot_fails` (safe_mode.cpp; here so a factory reset wipes it too). (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -233,9 +245,12 @@ offset/size stable across versions.
 GET  /            embedded web UI (gzipped into the app binary)
 GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity — matches a core dump
                   to its .elf), pins_avail[] (per-target usable X10A GPIOs for the RX/TX picker —
-                  logic/board_pins.hpp), wifi{ssid,ip,rssi,connected,bssid,mac,std} (bssid/std are the
-                  associated AP's BSSID + PHY standard name e.g. "Wi-Fi 4", null while offline; mac is
-                  this STA's own MAC, always present), mqtt,
+                  logic/board_pins.hpp), wifi{ssid,ip,rssi,connected,bssid,mac,std,rolled_back}
+                  (bssid/std are the associated AP's BSSID + PHY standard name e.g. "Wi-Fi 4", null
+                  while offline; mac is this STA's own MAC, always present; rolled_back = the last
+                  /set_wifi was UNDONE by the credential rollback — sticky until the next /set_wifi,
+                  and the only trace of it, since the rollback reboots and the SSID shown is just the
+                  old one again), mqtt,
                   syslog{configured,resolved,reachable,host,port,error},
                   hp{proto,rx,tx,connected,
                   last_ok_s,registers,values,crc_err,timeout_err}, profile{id},
@@ -270,10 +285,17 @@ GET  /coredump[?clear=1]   stream the flash core-dump image (chunked octet-strea
                   UI surfaces a crash banner + one-click download when /status.last_crash is set.
 POST /set_wifi    {ssid,pass} -> validate (ssid 1-32 chars; pass empty[open] or 8-63) -> persist +
                   reboot. If WiFi was already configured, the OLD ssid/pass are stashed as a one-shot
-                  NVS backup (wifi_rollback flag): after reboot, if the new creds fail to get a DHCP
-                  lease, wifi_start_sta restores the backup + reboots; a successful connect clears it.
-                  So a bad SSID/password entered over the LAN self-heals to the last working network
-                  instead of stranding the device in the setup AP.
+                  NVS backup (wifi_rollback flag) and wifi_rolledbk is cleared (a new attempt retires
+                  the old verdict): after reboot, if the new creds fail to get a DHCP lease,
+                  wifi_start_sta restores the backup + reboots (setting wifi_rolledbk ->
+                  /status.wifi.rolled_back); a successful connect clears the backup. So a bad
+                  SSID/password entered over the LAN self-heals to the last working network instead of
+                  stranding the device in the setup AP. The deadline is REASON-aware
+                  (logic/wifi_rollback.hpp): rolling back is destructive, so only an AP that SUSTAINS
+                  its refusal (auth class at 2 consecutive 30 s checkpoints, ~60 s) spends them — an
+                  absent SSID or a slow DHCP is no evidence against them and gets 180 s, long enough
+                  for a rebooting router. wifi.cpp clears the reason on STA_CONNECTED, so an earlier
+                  refusal can't outlive the association that disproved it.
 POST /set_mqtt    {broker,user,pass} -> pre-flight the broker synchronously (DNS -> TCP probe ->
                   short-lived esp-mqtt CONNECT/auth, mirroring mqtt_ha's creds-require-mqtts:// policy)
                   -> on success persist + reboot; on failure 400 {ok:false,error} and nothing is saved.

@@ -94,7 +94,13 @@ static std::string build_status_json_string() {
          ",\"connected\":" + (wi.connected ? "true" : "false") +
          ",\"bssid\":" + (wi.connected ? jstr(bssid_str) : "null") +
          ",\"mac\":" + jstr(mac_str) +
-         ",\"std\":" + (wi.connected ? jstr(wi.std) : "null") + "},";
+         ",\"std\":" + (wi.connected ? jstr(wi.std) : "null") +
+         // The last credential change was undone (wifi.cpp restored the previous network). Sticky
+         // until the next POST /set_wifi, because a rollback leaves no other trace: the reboot it
+         // takes wipes the diag ring and the card just shows the old SSID again. The dashboard does
+         // not render this yet (a banner lands with the web-UI write-feedback work, PR #65) — for
+         // now it is the API's answer to "did my save actually stick?".
+         ",\"rolled_back\":" + std::string(c.wifi_rolled_back ? "true" : "false") + "},";
     j += "\"mqtt\":{\"configured\":" + std::string(m.configured ? "true" : "false") +
          ",\"connected\":" + (m.connected ? "true" : "false") +
          ",\"tls\":" + (m.tls ? "true" : "false") +

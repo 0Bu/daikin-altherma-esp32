@@ -27,9 +27,11 @@ safe_mode.cpp/.hpp  → boot-loop safe mode (logic/boot_guard.hpp): crash-only b
                        (boot_fails) → past a threshold, come up minimally (WiFi + web UI + OTA, no
                        poll/MQTT) to recover a bad config in-browser. See "Boot-loop safe mode" below
 wifi.cpp/.hpp       → STA bring-up (all-channel scan → strongest AP by RSSI) + endless reconnect
-                       (first-boot budget → setup portal) + one-shot credential rollback (new creds
-                       fail to get a lease → restore NVS backup + reboot; ≥5 consecutive AUTH_FAIL/
-                       handshake-timeout disconnects after having been online → reboot to fallback) +
+                       (first-boot budget → setup portal; once online NO reason code ever reboots it)
+                       + reason-aware one-shot credential rollback (new creds fail to get a lease →
+                       restore NVS backup + reboot + mark /status.wifi.rolled_back; host-tested
+                       policy in logic/wifi_rollback.hpp: a SUSTAINED auth-class refusal rolls back
+                       after 2 checkpoints (~60 s), an absent SSID gets 180 s for a rebooting router) +
                        ICMP gateway watchdog (three-valued probe + host-tested policy in
                        logic/link_watch.hpp: 2 proven-silent periods, or 10 blind ones, re-associate)
                        + DHCP hostname + mDNS; wifi_info() also reports the AP's
@@ -138,6 +140,12 @@ host-testable core is unusually large and valuable, because the risky parts are 
   whole point — folding them together made a permanently *blind* watchdog look identical to a healthy
   one. Pure, so the ghost-association rule (and its deliberately slower blind threshold) is asserted
   without staging a real missed deauth.
+- `logic/wifi_rollback.hpp` — the credential-rollback policy behind `wifi.cpp`'s boot window: what a
+  disconnect reason says about the **credentials** (`Auth` = the AP reached us and refused them —
+  evidence; `ApAbsent`/`None`/`Other` = a router still rebooting, or DHCP still running — no evidence
+  at all), and how long to wait on each before restoring the backup. A rollback destroys the new
+  credentials, so absence of evidence must buy patience: only the AP's own "no" is allowed to be fast.
+  Pure, so the rule is asserted without power-cycling a router for three minutes.
 - `logic/syslog_policy.hpp` — classifies a `sendto()`/`socket()` errno as **hard** (destination or
   route is at fault → re-resolving now is worth it) vs **transient** (the stack momentarily could not
   take the datagram → keep the resolved destination). This is what stops the syslog send storm: on a
@@ -332,10 +340,17 @@ Three layers keep the WiFi station link up:
   + syslog → VictoriaLogs; the previous `ESP_LOGW` lines were serial-only, which is why a wedged board
   left no watchdog trace anywhere a post-mortem would look.
 - **Credential-change recovery** for WiFi edited *from the dashboard* (see "Web UI config flow"):
-  the one-shot `/set_wifi` backup lets a bad new SSID/password roll back to the last working network,
-  and a runtime guard reboots to that fallback after ≥5 consecutive AUTH_FAIL/handshake-timeout
-  disconnects that begin only *after* the device had been online (the "password changed on the router"
-  case) — distinct from the first-boot budget, which handles creds that were wrong from the start.
+  the one-shot `/set_wifi` backup lets a bad new SSID/password roll back to the last working network —
+  distinct from the first-boot budget, which handles creds that were wrong from the start. What the
+  device must **not** do is reboot on disconnect *reasons* once it has been online. An earlier revision
+  did, after ≥5 consecutive AUTH_FAIL/handshake-timeout disconnects, on the theory that the router's
+  password had been changed. But reasons 15/202/204 are also the transient WPA3-SAE failures this same
+  file works around with `failure_retry_cnt`/`sae_pwe_h2e` — observed live on a *healthy* network — so
+  a passing RF storm could reboot the bridge, spend the first-boot budget against an AP that was fine,
+  and leave it in the open setup portal with good credentials in NVS and no way back short of a power
+  cycle. That inverts the endless-reconnect invariant this layer exists to keep, and it bought little:
+  a genuinely changed router password reaches the same portal on the user's next power cycle anyway.
+  Once online, every reason is now just something to reconnect through.
 
 ## Home Assistant MQTT bridge (`mqtt_ha.cpp`)
 
@@ -522,8 +537,25 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
   `wifi_info()`. **One-shot rollback:** if new credentials were entered over the LAN and the STA can't
   get a lease after the reboot, `wifi_start_sta()` restores the previous credentials from an NVS backup
   and reboots again (cleared on a successful connect) — so a wrong SSID/password never strands the
-  device in the setup AP. A runtime guard also reboots to the fallback after ≥5 consecutive
-  AUTH_FAIL/handshake-timeout disconnects that begin only after the device had been online.
+  device in the setup AP. The deadline is **reason-aware** (`logic/wifi_rollback.hpp`): only an AP that
+  *keeps refusing* the credentials spends them, and it must sustain that across **two 30 s checkpoints**
+  (~60 s) — one sample cannot tell a wrong password from a transient SAE failure that merely happened to
+  be the last thing logged when we looked, which is the same "never act on a single observation" rule
+  `link_watch.hpp` follows. `wifi.cpp` clears the reason on `STA_CONNECTED` for the same reason: an
+  earlier refusal must not outlive the association that disproved it, or a slow first DHCP lease would
+  roll back credentials that had just worked. An **absent SSID** is not evidence against them — it is
+  what a router that is still rebooting looks like, and reconfiguring a router then re-pointing the
+  device at it is the main reason anyone edits these credentials at all — so it gets 180 s first. A
+  pending change also suspends the first-boot retry budget, which would otherwise give up after ten
+  fast `NO_AP_FOUND` scans and roll back before the router ever answered. A rollback also **records its
+  outcome**: it sets `/status.wifi.rolled_back` (sticky until the next `/set_wifi`), because the reboot
+  it takes wipes the diag ring and the SSID on the card is simply the old one again — leaving a rollback
+  indistinguishable from a save that never happened. Today that lives on the API only; the dashboard
+  banner that consumes it is part of the web-UI write-feedback work, so until then the answer to "did my
+  save stick?" is `curl /status | jq .wifi.rolled_back`.
+  `config_save()` writes the backup + flag **before** the credentials when arming and **after** them when
+  clearing: each `nvs_set_*` commits separately, so this ordering is what keeps a power cut from arming
+  untried credentials with no way back.
 - **MQTT** → `/set_mqtt` (edited from a dashboard modal off the MQTT card). Unlike Syslog, Save
   **pre-flights the broker synchronously** (DNS → TCP port → a short-lived esp-mqtt connect/auth,
   heap-guarded) and only persists + reboots on success — a bad host/port/password is rejected inline;

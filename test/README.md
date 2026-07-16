@@ -56,6 +56,11 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   probe, never on a gateway that has never answered ICMP, never on a link that knows it is down. An
   unmeasurable probe never counts as silence (nor launders silence already observed), but a
   sustained blind spell is its own fault — on a threshold kept an order of magnitude slower.
+- `logic/wifi_rollback.hpp` — the credential-rollback step: which disconnect reasons are evidence the
+  credentials are wrong (auth class) versus evidence about the router only (`NO_AP_FOUND`), that
+  nothing rolls back before the 30 s window is even up, and that an absent SSID keeps waiting past the
+  two minutes a rebooting router needs — the case where the old blind deadline destroyed valid new
+  credentials — while still falling back eventually so a typo'd SSID can't strand the device.
 - `logic/reset_reason.hpp` — reset code → `/status.sys.reset_reason` slug, unknown codes included,
   plus a parity guard that it stays ONE vocabulary with `crashinfo`.
 - `logic/boot_guard.hpp` — crash-only boot counting (saturating, corrupt reads), the safe-mode
