@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (400 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (429 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -310,10 +310,25 @@ the fact*, from the field, without a serial cable:
   crash slug vocabulary (one naming for the sys block, the crash entity and the heartbeat). The
   dashboard ESP32 card renders the reset reason (fault-coloured) and free heap.
 - **✅ Build identity** — `/status.app_elf_sha256` ties a running device to the exact firmware that
-  produced any dump.
+  produced any dump, and the syslog boot line (below) puts the same hash in the **log stream**, so a
+  captured stream stays attributable to a binary after the device has moved on.
 - **✅ In-RAM diag ring** (`GET /diag`) and a **status LED** ([`status_led.cpp`](../main/status_led.cpp))
   encoding WiFi-connecting / setup-portal / all-healthy / X10A-error / MQTT-error as distinct blink
   patterns.
+- **✅ Off-device log forwarding** ([`syslog.cpp`](../main/syslog.cpp)): every diag line is also
+  forwarded as one RFC 5424 UDP datagram to an optional collector (`/set_syslog`; empty host = off).
+  Delivery is gated on **DNS only** — the ARP/ICMP reachability probe is advisory (`/status.syslog`),
+  since a healthy collector may firewall ICMP. Self-loop-guarded (drops its own `syslog:` lines).
+- **✅ 🧪 One-shot boot replay to syslog** ([`logic/bootlog.hpp`](../main/logic/bootlog.hpp)): the
+  crash summary is captured at the top of `app_main` — before WiFi and before the syslog task exists —
+  so it could only ever reach the in-RAM ring, where a chatty failure mode overwrites it within a
+  minute. On the **first DNS resolve of a boot** the syslog task replays it once, straight down the
+  socket (the queue is full of the boot backlog by then, and the enqueue is non-blocking): a
+  build-identity line (`version` / `elf_sha256` / `reset` / `safe_mode`) always, plus the reset reason
+  and crashed task/PC/backtrace when the last boot was a fault. Records are **single-line and
+  datagram-sized** — the multi-line `build_crash_text()` is ~340 B at worst case and truncates past
+  diag's 256-byte line buffer, losing the backtrace tail and `elf_sha256`. Host tests assert the size
+  budget and that a clean boot emits **zero** crash lines.
 
 ---
 
@@ -346,12 +361,13 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
 - **🧪 What's covered** — CRC & framing (`crc.hpp`), value converters (`convert.hpp`), register
   extraction (`registers.hpp`), the config model/validation (`config_model.hpp`), HA-discovery payloads
   (`discovery.hpp`), detection (`detect.hpp`), the OTA health gate (`health_gate.hpp`), heartbeat &
-  crash formatting (`heartbeat.hpp`, `crashinfo.hpp`), the reset-reason vocabulary (`reset_reason.hpp`),
+  crash formatting (`heartbeat.hpp`, `crashinfo.hpp`), the syslog boot/crash replay records
+  (`bootlog.hpp`), the reset-reason vocabulary (`reset_reason.hpp`),
   the boot-loop safe-mode decision (`boot_guard.hpp`), grouped state JSON (`mqtt_group.hpp`), board
   pins (`board_pins.hpp`), and **🔭 Modbus TCP framing + HomeHub register codecs** (`modbus.hpp` — MBAP
   framing without CRC, FC03/04/06/16 build+parse, `Temp16`/`Pow16`/`Int16`/`Text16` decode/encode,
   the `homehub-*` mDNS filter; the host-tested core for the *planned* firmware-exclusive HomeHub
-  Modbus link (issue #32), **not yet wired into the firmware**). **400 `CHECK`s** in
+  Modbus link (issue #32), **not yet wired into the firmware**). **429 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
@@ -439,7 +455,7 @@ security of signed firmware with none of the brick risk. It refuses to roll a ba
 and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-associations no event
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 16-entity heartbeat diagnostics). And the risky parts — decode,
-CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (400 checks),
+CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (429 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

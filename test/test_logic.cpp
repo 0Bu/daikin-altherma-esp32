@@ -11,6 +11,7 @@
 
 #include "logic/board_pins.hpp"
 #include "logic/boot_guard.hpp"
+#include "logic/bootlog.hpp"
 #include "logic/config_model.hpp"
 #include "logic/convert.hpp"
 #include "logic/crashinfo.hpp"
@@ -1075,6 +1076,124 @@ static void test_modbus() {
     CHECK(mb_first_homehub(none, 2) == -1);
 }
 
+// The syslog replay records (logic/bootlog.hpp): the build-identity boot line + the crash rendered as
+// datagram-sized single-line records. syslog.cpp sends these once, after DNS resolves.
+static void test_bootlog() {
+    // ── Build identity: emitted on EVERY boot, clean or not — it is what ties a log stream to a binary.
+    BootIdent id;
+    id.version = "1.4.2";
+    id.elf_sha = "deadbeef";
+    id.reason  = 1;   // poweron
+    CHECK(build_boot_line(id) == "boot: version=1.4.2 elf_sha256=deadbeef reset=poweron safe_mode=no");
+
+    // Safe mode is visible in the log stream: it explains a device that is up but publishes nothing.
+    BootIdent safe = id;
+    safe.reason    = 6;   // task_wdt
+    safe.safe_mode = true;
+    CHECK(build_boot_line(safe) == "boot: version=1.4.2 elf_sha256=deadbeef reset=task_wdt safe_mode=yes");
+
+    // Missing identity degrades to "?" — never a dangling "version= elf_sha256=".
+    BootIdent blank;
+    CHECK(build_boot_line(blank) == "boot: version=? elf_sha256=? reset=unknown safe_mode=no");
+    BootIdent nulls;
+    nulls.version = nullptr;
+    nulls.elf_sha = nullptr;
+    CHECK(build_boot_line(nulls) == "boot: version=? elf_sha256=? reset=unknown safe_mode=no");
+
+    std::string lines[CRASH_LOG_LINE_MAX];
+
+    // A clean boot produces NO crash records — the notability rule lives in the pure function, so the
+    // device caller cannot spam the collector with "crash:" lines after every config-save reboot.
+    CrashInfo clean;
+    clean.reason = 3;   // sw
+    CHECK(build_crash_log_lines(clean, lines, CRASH_LOG_LINE_MAX) == 0);
+
+    // Orphan dump, no parsable summary: the header line alone (nothing to say about task/pc/bt).
+    CrashInfo orphan;
+    orphan.reason   = 1;   // poweron
+    orphan.coredump = true;
+    CHECK(build_crash_log_lines(orphan, lines, CRASH_LOG_LINE_MAX) == 1);
+    CHECK(lines[0] == "crash: reset=poweron fault=no coredump=yes");
+
+    // Fault with no dump (dump partition full / erased): still notable, still one header line.
+    CrashInfo nodump;
+    nodump.reason = 6;   // task_wdt
+    CHECK(build_crash_log_lines(nodump, lines, CRASH_LOG_LINE_MAX) == 1);
+    CHECK(lines[0] == "crash: reset=task_wdt fault=yes coredump=no");
+
+    // Full panic summary → all three records, each self-contained and greppable as "crash".
+    CrashInfo panic;
+    panic.reason       = 4;   // ESP_RST_PANIC
+    panic.coredump     = true;
+    panic.have_summary = true;
+    std::snprintf(panic.task, sizeof(panic.task), "%s", "mqtt_pub");
+    panic.pc           = 0x400d1234;
+    panic.bt[0]        = 0x400d1234;
+    panic.bt[1]        = 0x400d5678;
+    panic.bt_depth     = 2;
+    std::snprintf(panic.elf_sha, sizeof(panic.elf_sha), "%s", "abc123");
+    CHECK(build_crash_log_lines(panic, lines, CRASH_LOG_LINE_MAX) == 3);
+    CHECK(lines[0] == "crash: reset=panic fault=yes coredump=yes");
+    CHECK(lines[1] == "crash: task=mqtt_pub pc=0x400d1234 elf_sha256=abc123");
+    CHECK(lines[2] == "crash: backtrace=0x400d1234 0x400d5678");
+
+    // An unreliable unwind is flagged inline rather than silently passing off a bogus backtrace.
+    CrashInfo corrupt = panic;
+    corrupt.bt_corrupted = true;
+    CHECK(build_crash_log_lines(corrupt, lines, CRASH_LOG_LINE_MAX) == 3);
+    CHECK(corrupt.bt_corrupted && lines[1] == "crash: task=mqtt_pub pc=0x400d1234 corrupted=yes elf_sha256=abc123");
+
+    // A summary with an empty backtrace drops the bt record (no "backtrace=" with nothing after it).
+    CrashInfo nobt = panic;
+    nobt.bt_depth = 0;
+    CHECK(build_crash_log_lines(nobt, lines, CRASH_LOG_LINE_MAX) == 2);
+
+    // bt_depth is clamped to the 16-entry buffer — a corrupt summary can over-report it (OOB read).
+    CrashInfo over = panic;
+    over.bt_depth = 99;
+    CHECK(build_crash_log_lines(over, lines, CRASH_LOG_LINE_MAX) == 3);
+    size_t cnt = 0, at = 0;
+    while ((at = lines[2].find("0x", at)) != std::string::npos) { cnt++; at += 2; }
+    CHECK(cnt == 16);
+
+    // A caller with a smaller array gets a truncated set, never an overrun.
+    std::string one[1];
+    CHECK(build_crash_log_lines(panic, one, 1) == 1);
+    CHECK(one[0] == "crash: reset=panic fault=yes coredump=yes");
+    CHECK(build_crash_log_lines(panic, lines, 0) == 0);
+    CHECK(build_crash_log_lines(panic, nullptr, CRASH_LOG_LINE_MAX) == 0);
+
+    // ── The reason these records exist: EVERY line must survive a worst-case crash whole. ──
+    // build_crash_text() at this input is ~340 bytes — past diag_printf's 256-byte line buffer and
+    // past the 256-byte syslog queue slot, so it truncates through the backtrace and loses
+    // elf_sha256 entirely. Each record here must stay under one datagram's worth. The budget is the
+    // 256-byte syslog.cpp SyslogMsg slot minus the ~38-byte RFC 5424 header it is framed with.
+    const size_t CRASH_LOG_LINE_BUDGET = 200;
+    CrashInfo worst;
+    worst.reason       = 6;
+    worst.coredump     = true;
+    worst.have_summary = true;
+    worst.bt_corrupted = true;
+    std::snprintf(worst.task, sizeof(worst.task), "%s", "123456789012345");   // fills task[16]
+    worst.pc = 0xffffffff;
+    for (int i = 0; i < 16; i++) worst.bt[i] = 0xffffffff;
+    worst.bt_depth = 16;
+    for (int i = 0; i < 64; i++) worst.elf_sha[i] = 'f';                      // fills elf_sha[65]
+    const int wn = build_crash_log_lines(worst, lines, CRASH_LOG_LINE_MAX);
+    CHECK(wn == 3);
+    for (int i = 0; i < wn; i++) CHECK(lines[i].size() <= CRASH_LOG_LINE_BUDGET);
+    CHECK(build_crash_text(worst).size() > 256);   // the multi-line block that would NOT have fitted
+    // The two facts truncation used to eat are present, in full, in a record that fits.
+    CHECK(lines[1].find("elf_sha256=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+          != std::string::npos);
+    CHECK(lines[2].find("0xffffffff 0xffffffff") != std::string::npos);
+
+    // Nothing carries the "syslog:" tag: syslog_send() drops any line containing it (its self-loop
+    // guard), so a record that ever picked up that substring would be silently unsendable.
+    for (int i = 0; i < wn; i++) CHECK(lines[i].find("syslog:") == std::string::npos);
+    CHECK(build_boot_line(id).find("syslog:") == std::string::npos);
+}
+
 int main() {
     test_crc();
     test_registers();
@@ -1089,6 +1208,7 @@ int main() {
     test_modbus();
     test_heartbeat();
     test_crashinfo();
+    test_bootlog();
     test_reset_reason();
     test_boot_guard();
     test_health_gate();

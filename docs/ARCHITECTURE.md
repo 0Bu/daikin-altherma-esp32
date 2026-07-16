@@ -66,7 +66,12 @@ syslog.cpp          → optional syslog UDP client (RFC 5424, off when syslog_ho
                       /status.syslog.reachable, never gates delivery — syslog is best-effort UDP and a
                       collector may firewall ICMP). File-scope ping-control (like wifi.cpp s_wd) keeps
                       the async esp_ping callback from a use-after-free. Self-loop-guarded (drops
-                      "syslog:" lines); syslog_status() feeds /status
+                      "syslog:" lines); syslog_status() feeds /status. On the FIRST resolve of a boot
+                      it replays the boot records once (logic/bootlog.hpp): a build-identity line
+                      (version/elf_sha256/reset/safe_mode) plus, after a crash, the reset reason +
+                      crashed task/PC/backtrace — captured at the top of app_main, long before this
+                      task or the network exists, so without the replay they reached only the in-RAM
+                      ring and were overwritten there within a minute
 www/                → web UI sources: index.html + style.css + app.js, spliced into ONE
                      self-contained page at build time (inline_assets.cmake) and served gzipped;
                      setup.html is the captive-portal page (gzipped separately)
@@ -102,6 +107,12 @@ host-testable core is unusually large and valuable, because the risky parts are 
 - `logic/boot_guard.hpp` — the boot-loop safe-mode decision logic (crash-only reset classification,
   saturating crash counter, threshold rule) behind `safe_mode.cpp`; asserted host-side so the "enter
   on the Nth crash, never on a provisioning reboot" contract can't silently regress.
+- `logic/bootlog.hpp` — the boot records `syslog.cpp` replays once per boot: a build-identity line
+  (`build_boot_line`) and the crash rendered as **single-line, datagram-sized** records
+  (`build_crash_log_lines`). Separate from `crashinfo.hpp`'s multi-line `build_crash_text()` on
+  purpose: at worst case (16-deep backtrace + 64-char ELF hash) that block is ~340 bytes and would
+  truncate through the backtrace and lose `elf_sha256` in diag's 256-byte line buffer. The host test
+  asserts each record fits one datagram, and that a non-notable boot yields **zero** crash lines.
 
 `hp_convert.cpp`, `hp_comm.cpp`, `config.cpp`, `mqtt_ha.cpp` are thin device wrappers that call
 these headers. Add new decode/format logic to `main/logic/` and a `CHECK` in
