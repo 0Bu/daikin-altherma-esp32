@@ -374,8 +374,10 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   extraction (`registers.hpp`), the config model/validation (`config_model.hpp`), HA-discovery payloads
   (`discovery.hpp`), detection (`detect.hpp`), the OTA health gate (`health_gate.hpp`), heartbeat &
   crash formatting (`heartbeat.hpp`, `crashinfo.hpp`), the syslog boot/crash replay records
-  (`bootlog.hpp`), the reset-reason vocabulary (`reset_reason.hpp`),
-  the boot-loop safe-mode decision (`boot_guard.hpp`), grouped state JSON (`mqtt_group.hpp`), board
+  (`bootlog.hpp`), the syslog hard-vs-transient send-error policy (`syslog_policy.hpp`), the
+  gateway-watchdog policy (`link_watch.hpp`), the reset-reason vocabulary (`reset_reason.hpp`),
+  the boot-loop safe-mode decision (`boot_guard.hpp`), grouped state JSON (`mqtt_group.hpp`), the
+  broker-URI split (`mqtt_uri.hpp`), board
   pins (`board_pins.hpp`), and **🔭 Modbus TCP framing + HomeHub register codecs** (`modbus.hpp` — MBAP
   framing without CRC, FC03/04/06/16 build+parse, `Temp16`/`Pow16`/`Int16`/`Text16` decode/encode,
   the `homehub-*` mDNS filter; the host-tested core for the *planned* firmware-exclusive HomeHub
