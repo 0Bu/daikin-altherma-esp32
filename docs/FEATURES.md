@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (395 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (400 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -279,15 +279,21 @@ the fact*, from the field, without a serial cable:
 - **✅ Core dump to flash (ELF format).** `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH` +
   `..._DATA_FORMAT_ELF` into a dedicated `coredump` partition. [`diag_crash.cpp`](../main/diag_crash.cpp)
   reads the reset reason + `esp_core_dump_get_summary()` **once at boot** (crashed task/PC/backtrace/
-  app-elf-sha), caches it, and never re-parses on a request path.
+  app-elf-sha), caches it, and never re-parses on a request path. The cheap `coredump` **presence
+  flag** is deliberately *not* cached — `diag_crash_info_live()` re-reads it (one 4-byte flash read)
+  per request, so a dump erased via `/coredump?clear=1` can't strand a banner advertising a dump that
+  is gone.
 - **✅ Offline symbolication** ([`decode-coredump.sh`](../scripts/decode-coredump.sh)): `GET /coredump`
   pulls the raw image; the script symbolizes it with `esp-coredump` in the CI-pinned IDF image against
   the matching **unstripped `.elf`** (archived per build/PR by CI). The dump embeds `app_elf_sha256`
   and the device reports the same on `/status`, so a wrong ELF is *caught*, not silently mis-decoded.
 - **✅ 🧪 Reset/crash classification** ([`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp)): the
-  captured summary becomes the `/status.last_crash` JSON (drives the UI crash banner) and a **retained**
+  captured summary becomes the `/status.last_crash` JSON (drives the UI crash banner, whose title keys
+  on `fault` — an orphan dump alone never claims the device crashed *this* boot) and a **retained**
   `<base>/<node>/crash` MQTT payload (2 diagnostic HA entities: reason + "dump waiting" flag —
-  reason/backtrace only, **never** the raw dump or any secret). `static_assert`s pin the IDF reset-enum
+  reason/backtrace only, **never** the raw dump or any secret), published per (re)connect and
+  republished on the heartbeat cadence when the "dump waiting" flag changes, so it can't latch ON after
+  the dump is cleared. `static_assert`s pin the IDF reset-enum
   values so a renumbering fails the build rather than mislabeling every crash.
 - **✅ 🧪 16-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): on a fixed
   10 s cadence, `<base>/<node>/heartbeat` streams heap (free / min-free / **largest-free-block**, the
@@ -345,7 +351,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   pins (`board_pins.hpp`), and **🔭 Modbus TCP framing + HomeHub register codecs** (`modbus.hpp` — MBAP
   framing without CRC, FC03/04/06/16 build+parse, `Temp16`/`Pow16`/`Int16`/`Text16` decode/encode,
   the `homehub-*` mDNS filter; the host-tested core for the *planned* firmware-exclusive HomeHub
-  Modbus link (issue #32), **not yet wired into the firmware**). **395 `CHECK`s** in
+  Modbus link (issue #32), **not yet wired into the firmware**). **400 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
@@ -433,7 +439,7 @@ security of signed firmware with none of the brick risk. It refuses to roll a ba
 and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-associations no event
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 16-entity heartbeat diagnostics). And the risky parts — decode,
-CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (395 checks),
+CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (400 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

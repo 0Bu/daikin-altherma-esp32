@@ -24,13 +24,28 @@ static_assert(static_cast<uint32_t>(CrashReason::BROWNOUT)   == ESP_RST_BROWNOUT
 
 static CrashInfo s_ci;   // filled once by diag_crash_capture(); read-only thereafter
 
-void diag_crash_capture() {
-    s_ci.reason = static_cast<uint32_t>(esp_reset_reason());
-
-    // A dump is "downloadable" on the same terms GET /coredump uses (esp_core_dump_image_get): the
-    // image exists and has a non-zero size, even if its checksum is bad.
+// A dump is "downloadable" on EXACTLY the terms GET /coredump uses: h_coredump streams the image iff
+// esp_core_dump_image_get() returns ESP_OK, so this predicate is that same call and nothing more —
+// any extra condition here could make /status advertise a dump the endpoint refuses, or vice versa,
+// which is the disagreement this whole path exists to prevent. (An ESP_OK return already guarantees
+// a sane size: esp_core_dump_partition_and_size_get rejects a blank partition — the size word reading
+// back 0xffffffff — with ESP_ERR_NOT_FOUND, and anything < 4 bytes with ESP_ERR_INVALID_SIZE.) Cost
+// is one 4-byte flash read of that size word — orders of magnitude cheaper than parsing the summary,
+// hence safe on a request path.
+bool diag_crash_coredump_present() {
     size_t addr = 0, size = 0;
-    s_ci.coredump = (esp_core_dump_image_get(&addr, &size) == ESP_OK && size > 0);
+    return esp_core_dump_image_get(&addr, &size) == ESP_OK;
+}
+
+CrashInfo diag_crash_info_live() {
+    CrashInfo c = s_ci;                            // boot-time reason + parsed summary
+    c.coredump  = diag_crash_coredump_present();   // ...but the image itself may be gone by now
+    return c;
+}
+
+void diag_crash_capture() {
+    s_ci.reason   = static_cast<uint32_t>(esp_reset_reason());
+    s_ci.coredump = diag_crash_coredump_present();
 
 #if defined(CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF)
     // Parse the summary only from a VALID image (checksum ok). Allocate on the heap — the summary

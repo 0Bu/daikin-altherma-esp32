@@ -818,6 +818,27 @@ static void test_crashinfo() {
     orphan.coredump = true;
     CHECK(crash_is_notable(orphan));
 
+    // A USB re-plug (ESP32-S3 native USB resets the chip on re-enumeration) is NOT a fault, so with
+    // no dump in flash it must not raise the banner. The device reports `coredump` from a LIVE flash
+    // read (diag_crash_info_live), not the boot-time cache: a dump erased via /coredump?clear=1 while
+    // the device runs used to leave this true forever, which pinned an uncleanable "crash" banner on
+    // a device that never crashed and a "Download crash report" button that 404s.
+    CrashInfo usb_replug;
+    usb_replug.reason   = 11;      // ESP_RST_USB
+    usb_replug.coredump = false;   // image gone from flash — nothing to offer
+    CHECK(std::string(crash_reason_slug(11)) == "usb");
+    CHECK(!crash_reason_is_fault(11));
+    CHECK(!crash_is_notable(usb_replug));
+    CHECK(build_crash_json(usb_replug) ==
+          "{\"reason\":\"usb\",\"reason_code\":11,\"fault\":false,\"coredump\":false}");
+
+    // ...but clearing the dump must NOT erase the memory of a real crash: a fault reset stays
+    // notable (banner + reason), it just loses the download link.
+    CrashInfo fault_cleared;
+    fault_cleared.reason   = 6;       // ESP_RST_TASK_WDT
+    fault_cleared.coredump = false;
+    CHECK(crash_is_notable(fault_cleared));
+
     // Panic with a parsed summary: exact JSON + text, backtrace as raw PC hex.
     CrashInfo panic;
     panic.reason       = 4;   // ESP_RST_PANIC

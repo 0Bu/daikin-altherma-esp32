@@ -130,11 +130,14 @@ static std::string build_status_json_string() {
          ",\"reset_reason\":" + jstr(reset_reason_name(diag_crash_info().reason)) +
          ",\"safe_mode\":" + (safe_mode_active() ? "true" : "false") + "},";
 
-    // Last reset: null on a clean boot, else the cached crash summary (reset reason + core-dump
-    // backtrace). Read from the boot-time CACHE (diag_crash.cpp) — never re-parsed from flash here,
-    // since build_status_json_string() also runs in the poll task's WS broadcaster, which only
-    // self-guards std::bad_alloc by dropping the frame; keep this path cheap (no flash parse).
-    const CrashInfo& crash = diag_crash_info();
+    // Last reset: null on a clean boot, else the crash summary (reset reason + core-dump backtrace).
+    // The reason/backtrace come from the boot-time CACHE (diag_crash.cpp) — never re-parsed from
+    // flash here, since build_status_json_string() also runs in the poll task's WS broadcaster, which
+    // only self-guards std::bad_alloc by dropping the frame; keep this path cheap (no flash PARSE).
+    // `coredump` is the exception: it must reflect flash NOW, not at boot, or a dump erased via
+    // /coredump?clear=1 leaves a banner that can't be cleared and a download that 404s. Refreshing it
+    // costs one 4-byte flash read — the same read GET /coredump already does per request.
+    const CrashInfo crash = diag_crash_info_live();
     j += "\"last_crash\":" + std::string(crash_is_notable(crash) ? build_crash_json(crash) : "null") + ",";
 
     // Auto-detection: proto/model derived from the X10A bus (hp_detect.cpp). The candidate set is

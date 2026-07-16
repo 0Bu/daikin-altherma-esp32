@@ -370,9 +370,12 @@ Structure:
     the crashed build's `app_elf_sha256`) into a cached `CrashInfo`. The pure formatting is
     `logic/crashinfo.hpp` (host-tested); the summary is parsed **once** and cached — never re-read
     from flash on a request path, since `build_status_json_string()` also runs in the poll task's
-    WebSocket broadcaster (which only self-guards `std::bad_alloc` by dropping the frame). A *fault*
-    reset (panic / watchdog / brown-out / CPU lockup) or an orphan dump is "notable"; a clean
-    power-on / software reboot is not.
+    WebSocket broadcaster (which only self-guards `std::bad_alloc` by dropping the frame). The
+    `coredump` **presence flag** is the one exception: it IS re-checked from flash per request
+    (`diag_crash_info_live()` — a 4-byte size-word read, not the summary reparse), because the image
+    can be erased mid-session via `/coredump?clear=1` and a cached flag would then advertise a dump
+    that flash no longer holds. A *fault* reset (panic / watchdog / brown-out / CPU lockup) or an
+    orphan dump is "notable"; a clean power-on / software reboot is not.
   - **Always-on system health (no fault required).** `build_status_json_string()` also carries a
     compact `sys` block — `free_heap` / `min_free_heap` (since-boot low-water, the leak indicator) /
     `max_alloc` (largest contiguous block, the true OOM ceiling), the `reset_reason` slug (via
@@ -382,12 +385,17 @@ Structure:
     broker** — the MQTT heartbeat carries the same heap figures, but only when MQTT is configured. The
     dashboard ESP32 card shows the reset reason (fault-coloured) and free heap.
   - **How a user hands a crash over.** `GET /status.last_crash` is `null` on a clean boot, else the
-    cached summary; the running app's `app_elf_sha256` is also on `/status`. The web UI shows a crash
-    **banner** (`renderCrashBanner()`) with the reset reason + hex backtrace, a one-click
-    `coredump.bin` download, and a "copy diagnostics" bundle (`/status` + `/diag` + summary) for a bug
-    report. The MQTT bridge additionally **retains** the summary on `<base>/<node>/crash` (reason +
-    "dump waiting" flag as 2 diagnostic HA entities — reason/backtrace only, never secrets or the raw
-    dump), so Home Assistant (or Telegraf → VictoriaLogs) sees crashes over time.
+    boot-time cached reason/summary — with `coredump` re-read live from flash on every request
+    (`diag_crash_info_live()`), so a dump cleared via `/coredump?clear=1` can't leave a stale banner or
+    a dead download link. The running app's `app_elf_sha256` is also on `/status`. The web UI shows a
+    crash **banner** (`renderCrashBanner()`) — titled on `fault`, so an orphan dump doesn't claim this
+    boot crashed — with the reset reason + hex backtrace, a one-click `coredump.bin` download, and a
+    "copy diagnostics" bundle (`/status` + `/diag` + summary) for a bug report. The MQTT bridge
+    additionally **retains** the summary on `<base>/<node>/crash` (reason + "dump waiting" flag as 2
+    diagnostic HA entities — reason/backtrace only, never secrets or the raw dump), so Home Assistant
+    (or Telegraf → VictoriaLogs) sees crashes over time; it is published once per (re)connect **and**
+    republished on the heartbeat cadence whenever the `coredump` flag changes, so a retained "Crash
+    Dump Waiting" can't stay latched ON after the dump is pulled and cleared.
   - **Decoding (maintainer side).** A raw dump is useless without the *matching-version* unstripped
     `.elf` (the shipped `.bin` has no symbols), so CI archives `daikin-altherma-esp32.elf` + its
     sha256 per build (artifact + Release asset, `scripts/ci-build-all.sh`). `scripts/decode-coredump.sh

@@ -243,7 +243,8 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   `<prefix>` `homeassistant`.
 - **Diagnostics topics.** `<base>/<node>/heartbeat` (board/link health on a fixed 10 s cadence —
   heap, uptime, WiFi/MQTT/bus counters) and `<base>/<node>/crash` (retained; last reset reason + a
-  "dump waiting" flag, published once per (re)connect) each expose their own `entity_category:
+  "dump waiting" flag, published once per (re)connect and republished on the heartbeat cadence if the
+  "dump waiting" flag changes, so clearing a dump can't leave it latched ON) each expose their own `entity_category:
   diagnostic` HA sensors. The crash topic carries only the reason + a hex backtrace — never a secret
   or the raw dump; pull the full dump from `GET /coredump` and decode it with
   `scripts/decode-coredump.sh`.
