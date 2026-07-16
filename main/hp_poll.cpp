@@ -17,6 +17,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include <cstdio>
+#include <exception>
 #include <vector>
 
 namespace daik {
@@ -25,6 +26,22 @@ static SemaphoreHandle_t      s_mtx = nullptr;
 static std::vector<CachedValue> s_cache;
 static HpStats               s_stats;
 static int64_t               s_last_ok_us = -1;
+
+// RAII guard around s_mtx (same idiom as config.cpp), used by every take in this file. It matters
+// most for the readers: they copy std::strings OUT of s_stats/s_cache under the lock, so they can
+// throw std::bad_alloc mid-critical-section. Releasing on unwind makes that a skipped read (every
+// caller guards — the HTTP handlers via handle_all, ws_broadcast_* and status_led_task/mqtt_task via
+// their own) instead of a mutex left held, which would block the poll task on its next commit and
+// wedge the device into a watchdog reboot — defeating poll_task's guard. The writers' commits are
+// non-allocating and cannot throw, but they take it through Lock as well: it costs nothing, and it
+// keeps a later edit that adds an allocating field to a commit from silently reintroducing the bug.
+namespace {
+struct Lock {
+    explicit Lock(SemaphoreHandle_t m) : m_(m) { if (m_) xSemaphoreTake(m_, portMAX_DELAY); }
+    ~Lock() { if (m_) xSemaphoreGive(m_); }
+    SemaphoreHandle_t m_;
+};
+}  // namespace
 
 static void poll_once() {
     const Config& c    = config();
@@ -36,6 +53,14 @@ static void poll_once() {
     int       regs   = 0;
     uint8_t   seen[256] = {0};
     const int rtype  = profile_refrigerant(prof.values, prof.count);   // conv-405 curve selector
+
+    // Stat deltas are staged in locals and folded into s_stats under s_mtx at the end of the cycle.
+    // NOTHING in the sweep may touch s_stats directly: hp_stats() readers (MQTT heartbeat, /status,
+    // the WS status broadcast) copy it under the mutex, and an unlocked last_error assignment would
+    // free the old std::string buffer while a reader is copying it — use-after-free on a flaky bus,
+    // where this path runs every second.
+    uint32_t    d_rx_ok = 0, d_rx_fail = 0, d_timeout = 0, d_crc = 0;
+    std::string err;                                                   // last error text, if any
 
     for (size_t i = 0; i < prof.count; i++) {
         uint8_t reg = prof.values[i].reg;
@@ -50,15 +75,15 @@ static void poll_once() {
         uint8_t buf[64];
         int n = hp_query(reg, c.proto, buf, sizeof(buf));
         if (n < 0) {
-            s_stats.rx_fail_total++;
-            if (n == -1)      s_stats.timeout_err++;
-            else if (n == -3) s_stats.crc_err++;
+            d_rx_fail++;
+            if (n == -1)      d_timeout++;
+            else if (n == -3) d_crc++;
             char eb[32];
             snprintf(eb, sizeof(eb), "reg 0x%02X error %d", reg, n);   // identify the failing register
-            s_stats.last_error = eb;
+            err = eb;
             continue;
         }
-        s_stats.rx_ok++;
+        d_rx_ok++;
         any_ok = true;
         const int      poff    = payload_offset(c.proto);
         const int      paylen  = n - poff - 1;                 // minus header, minus CRC byte
@@ -76,13 +101,24 @@ static void poll_once() {
         }
     }
 
-    xSemaphoreTake(s_mtx, portMAX_DELAY);
-    s_cache            = std::move(fresh);
-    s_stats.connected  = any_ok;
-    s_stats.registers  = regs;
-    s_stats.values     = static_cast<int>(s_cache.size());
-    if (any_ok) s_last_ok_us = esp_timer_get_time();
-    xSemaphoreGive(s_mtx);
+    // One commit, one lock site, and deliberately non-allocating: the vector move-assign steals
+    // fresh's buffer and last_error is swapped (noexcept) rather than assigned, so the critical
+    // section cannot throw. Lock backs that up — keep both, the invariant is what makes this correct
+    // and the guard is what keeps a future allocating field here from stranding the mutex. The
+    // buffers swap hands back to `err`/`fresh` are freed after the give, when no reader can see them.
+    {
+        Lock lk(s_mtx);
+        s_cache            = std::move(fresh);
+        s_stats.connected  = any_ok;
+        s_stats.registers  = regs;
+        s_stats.values     = static_cast<int>(s_cache.size());
+        s_stats.rx_ok         += d_rx_ok;
+        s_stats.rx_fail_total += d_rx_fail;
+        s_stats.timeout_err   += d_timeout;
+        s_stats.crc_err       += d_crc;
+        if (!err.empty()) s_stats.last_error.swap(err);
+        if (any_ok) s_last_ok_us = esp_timer_get_time();
+    }
 }
 
 // Auto-detection cycle: sweep protocol + fingerprint the unit, then apply proto/pins/profile to the
@@ -94,12 +130,14 @@ static void poll_once() {
 static void poll_detect() {
     DetectResult d = hp_detect_run();
     if (!d.bus_ok) {
-        xSemaphoreTake(s_mtx, portMAX_DELAY);
-        s_stats.connected  = false;
-        s_stats.last_error = "no X10A response (detecting)";
-        s_stats.timeout_err++;
-        s_stats.rx_fail_total++;
-        xSemaphoreGive(s_mtx);
+        std::string err = "no X10A response (detecting)";     // built before the lock: it allocates
+        {
+            Lock lk(s_mtx);
+            s_stats.connected  = false;
+            s_stats.last_error.swap(err);                      // noexcept — see poll_once's commit
+            s_stats.timeout_err++;
+            s_stats.rx_fail_total++;
+        }
         return;                                                // keep "auto" — retry next cycle
     }
     Config c              = config();
@@ -121,18 +159,30 @@ static void poll_detect() {
     else              config_set_runtime(c);
 }
 
+// The cycle body allocates freely — poll_once builds up to ~116 CachedValues (3 std::strings each)
+// every second, hp_detect_run grows more — so the whole body is guarded like mqtt_task's: an OOM in a
+// fragmented moment (concurrent MQTT TLS reconnect, /set_mqtt's probe client) must skip the cycle and
+// keep the last good cache, not throw through this FreeRTOS task into std::terminate() and reboot.
+// The ws_broadcast_* self-guards stay: they recover finer-grained (skip one client/frame, not the
+// cycle), and this handler is only their backstop.
 static void poll_task(void*) {
     esp_task_wdt_add(NULL);                                    // this task owns the X10A UART — watch it
     int ticks = 0;
     for (;;) {
         esp_task_wdt_reset();                                  // top of cycle; poll_once also resets per register
-        if (config().profile == "auto") poll_detect();         // resolves to a concrete profile
-        if (config().profile != "auto") poll_once();           // then poll it (same cycle if resolved)
-        ws_broadcast_values();
         ticks++;
-        if (ticks >= 4) {
-            ticks = 0;
-            ws_broadcast_status();
+        try {
+            if (config().profile == "auto") poll_detect();     // resolves to a concrete profile
+            if (config().profile != "auto") poll_once();       // then poll it (same cycle if resolved)
+            ws_broadcast_values();
+            if (ticks >= 4) {
+                ticks = 0;
+                ws_broadcast_status();
+            }
+        } catch (const std::exception& e) {
+            diag_printf("poll: cycle skipped (%s)\n", e.what());
+        } catch (...) {
+            diag_printf("poll: cycle skipped (oom?)\n");
         }
         vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));     // fixed 1 s cadence
     }
@@ -145,21 +195,19 @@ void hp_poll_start() {
 
 size_t hp_values_snapshot(CachedValue* out, size_t max) {
     if (!s_mtx) return 0;
-    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    Lock lk(s_mtx);
     size_t n = s_cache.size() < max ? s_cache.size() : max;
     for (size_t i = 0; i < n; i++) out[i] = s_cache[i];
-    xSemaphoreGive(s_mtx);
     return n;
 }
 
 HpStats hp_stats() {
     HpStats st;
     if (!s_mtx) return st;
-    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    Lock lk(s_mtx);
     st = s_stats;
     st.last_ok_s = s_last_ok_us < 0 ? -1
                  : static_cast<int32_t>((esp_timer_get_time() - s_last_ok_us) / 1000000);
-    xSemaphoreGive(s_mtx);
     return st;
 }
 
