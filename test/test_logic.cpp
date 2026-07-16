@@ -300,6 +300,67 @@ static void test_convert() {
             if (p.values[i].reg == 0x30 && p.values[i].offset == 2)
                 CHECK(p.values[i].size == 1);
 
+    // conv 311 = BUH output-capacity step, bits 0-2 ONLY. The upper bits belong to other fields,
+    // so the whole byte must never be published: 0x85 is step 5, not 133.
+    ValueDef buh{0x63, 13, 311, 1, -1, "BUH output capacity"};
+    const uint8_t buh85[] = {0x85};
+    CHECK(convert(buh, buh85).ok && approx(convert(buh, buh85).value, 5.0));
+    const uint8_t buh07[] = {0x07};
+    CHECK(approx(convert(buh, buh07).value, 7.0));    // full 3-bit range passes through
+    const uint8_t buhF8[] = {0xF8};
+    CHECK(approx(convert(buh, buhF8).value, 0.0));    // only the high bits set -> step 0
+
+    // Catalog guard: "BUH output capacity" at reg 0x63 offset 13 is the 3-bit conv 311 in EVERY
+    // profile — never conv 152, which publishes the whole byte (0x85 -> 133 instead of 5).
+    int buh_checked = 0;
+    for (const auto& p : def::profiles)
+        for (size_t i = 0; i < p.count; i++)
+            if (p.values[i].reg == 0x63 && p.values[i].offset == 13) {
+                CHECK(p.values[i].conv == 311 && p.values[i].size == 1);
+                buh_checked++;
+            }
+    CHECK(buh_checked >= 10);   // 10 profiles carry this row; all must be conv 311
+
+    // Catalog guard: "Ext. indoor ambient sensor (R6T)" sits at reg 0x61 offset 14. At offset 13 a
+    // size-2 read straddles "Indoor ambient temp. (R1T)" [12..13], assembling R6T out of R1T's high
+    // byte and R6T's low byte.
+    int r6t_checked = 0;
+    for (const auto& p : def::profiles)
+        for (size_t i = 0; i < p.count; i++)
+            if (p.values[i].reg == 0x61 && std::string(p.values[i].label).find("(R6T)") != std::string::npos) {
+                CHECK(p.values[i].offset == 14);
+                r6t_checked++;
+            }
+    CHECK(r6t_checked >= 39);   // 39 profiles carry this row; all at offset 14
+
+    // Catalog guard: conv 405 converts a pressure to a saturation TEMPERATURE, so every 405 row
+    // must be typed °C — type -1 strips the unit and device_class off the HA entity.
+    int t405_checked = 0;
+    for (const auto& p : def::profiles)
+        for (size_t i = 0; i < p.count; i++)
+            if (p.values[i].conv == 405) {
+                CHECK(p.values[i].type == 1);
+                t405_checked++;
+            }
+    CHECK(t405_checked >= 40);
+
+    // Catalog guard (generalises #37): within one register, no two rows may STRADDLE each other's
+    // bytes. Sharing a field on purpose is an idiom here (raw pressure + its saturation temp; the
+    // per-accessory 0x65 variants) and those windows start at the SAME offset. Two windows starting
+    // at DIFFERENT offsets and overlapping have no legitimate reading: one value is assembled from
+    // two unrelated fields and its neighbour's is lost.
+    for (const auto& p : def::profiles)
+        for (size_t i = 0; i < p.count; i++)
+            for (size_t j = i + 1; j < p.count; j++) {
+                const ValueDef& a = p.values[i];
+                const ValueDef& b = p.values[j];
+                if (a.reg != b.reg || a.size == 0 || b.size == 0) continue;
+                if (a.offset == b.offset) continue;              // same start = dual view / variant
+                const int a0 = a.offset, a1 = a.offset + a.size - 1;
+                const int b0 = b.offset, b1 = b.offset + b.size - 1;
+                CHECK(a1 < b0 || b1 < a0);                       // else: straddling collision
+            }
+
     // HA hints derived from the dataType field.
     CHECK(std::string(unit_for_datatype(1)) == "°C");
     CHECK(std::string(device_class_for_datatype(3)) == "current");

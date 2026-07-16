@@ -62,7 +62,7 @@ inline constexpr ValueDef altherma_gshp2[] = {
     {0x61, 8, 105, 2, 1, "Inlet water temp.(R4T)"},  // default_on
     {0x61, 10, 105, 2, 1, "DHW tank temp. (R5T)"},  // default_on
     {0x61, 12, 105, 2, 1, "Indoor ambient temp. (R1T)"},  // default_on
-    {0x61, 13, 105, 2, 1, "Ext. indoor ambient sensor (R6T)"},  // default_on
+    {0x61, 14, 105, 2, 1, "Ext. indoor ambient sensor (R6T)"},  // default_on
     {0x62, 2, 307, 1, -1, "Reheat ON/OFF"},  // default_on
     {0x62, 2, 306, 1, -1, "Storage ECO ON/OFF"},  // default_on
     {0x62, 2, 305, 1, -1, "Storage comfort ON/OFF"},  // default_on
@@ -79,7 +79,7 @@ inline constexpr ValueDef altherma_gshp2[] = {
     {0x62, 11, 105, 1, 2, "Water pressure"},  // default_on
     {0x62, 12, 152, 1, -1, "Water pump signal (0:max-100:stop)"},  // default_on
     {0x62, 15, 105, 2, 2, "Refrigerant pressure sensor"},  // default_on
-    {0x63, 13, 152, 1, -1, "BUH output capacity"},  // default_on
+    {0x63, 13, 311, 1, -1, "BUH output capacity"},  // default_on
     {0x63, 14, 161, 1, -1, "Current measured by CT sensor of L1"},  // default_on
     {0x63, 15, 161, 1, -1, "Current measured by CT sensor of L2"},  // default_on
     {0x63, 16, 161, 1, -1, "Current measured by CT sensor of L3"},  // default_on

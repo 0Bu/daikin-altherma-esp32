@@ -56,7 +56,7 @@ inline constexpr ValueDef altherma_egsqh_a_series_10kw_geo2[] = {
     {0x61, 8, 105, 2, 1, "Inlet water temp.(R4T)"},  // default_on
     {0x61, 10, 105, 2, 1, "DHW tank temp. (R5T)"},  // default_on
     {0x61, 12, 105, 2, 1, "Indoor ambient temp. (R1T)"},  // default_on
-    {0x61, 13, 105, 2, 1, "Ext. indoor ambient sensor (R6T)"},  // default_on
+    {0x61, 14, 105, 2, 1, "Ext. indoor ambient sensor (R6T)"},  // default_on
     {0x62, 2, 307, 1, -1, "Reheat ON/OFF"},  // default_on
     {0x62, 2, 306, 1, -1, "Storage ECO ON/OFF"},  // default_on
     {0x62, 2, 305, 1, -1, "Storage comfort ON/OFF"},  // default_on

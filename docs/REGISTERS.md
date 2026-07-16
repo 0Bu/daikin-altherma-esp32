@@ -518,7 +518,11 @@ per indoor unit (see [`X10A_PROTOCOL.md` §6](X10A_PROTOCOL.md#6-multi-unit-addr
 4. Ensure every `conv` used is implemented in [`logic/convert.hpp`](../main/logic/convert.hpp); add a
    `CHECK` in [`test/test_logic.cpp`](../test/test_logic.cpp) for any new converter (see the
    `add-logic-test` skill). All converters used by the shipped profiles are implemented — numeric
-   (`101–119`, `151–163`, `405`), bit flags (`300–307`), and the enum/label converters (`203` error
-   class, `204` error code, `211` fan step, `217` operating mode, `219` capacity code, `315` indoor
-   mode, `316` hybrid mode, `801–805` refrigerant). A `conv` id with no `case` returns `unimpl` and
-   is skipped, never mis-decoded.
+   (`101–119`, `151–163`, `405`), bit flags (`300–307`), and the enum/label/count converters (`203`
+   error class, `204` error code, `211` fan step, `217` operating mode, `219` capacity code, `311`
+   BUH output-capacity step, `315` indoor mode, `316` hybrid mode, `801–805` refrigerant). A `conv`
+   id with no `case` returns `unimpl` and is skipped, never mis-decoded — but "skipped" is only safe
+   for a conv nothing uses. A row pointed at an unimplemented conv publishes nothing, and a row
+   pointed at the *wrong implemented* conv publishes a lie: `311` was documented here yet missing
+   from `convert.hpp`, so ten profiles read the BUH step with `152` (the whole byte) and published
+   `133` for a step of `5` until it was implemented.
