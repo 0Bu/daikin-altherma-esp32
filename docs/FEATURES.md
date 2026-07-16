@@ -54,6 +54,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 24 | Status-LED state indicator | ✅ | [`status_led.cpp`](../main/status_led.cpp) |
 | 25 | Read-only MCP server route | 🔭 | [`mcp_server.cpp`](../main/mcp_server.cpp) |
 | 26 | **MQTT broker save-time pre-flight** (DNS/TCP/connect+auth, heap-guarded) before persist | ✅ | [`http_config.cpp`](../main/http_config.cpp) |
+| 27 | **Task Watchdog** → clean reboot on a wedged poll/publish task | ✅ | [`hp_poll.cpp`](../main/hp_poll.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) |
 
 ---
 
@@ -161,6 +162,20 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   **only** for the proven ghost case (link up, yet a gateway that *has* answered before now doesn't),
   forces one `esp_wifi_disconnect()` to re-associate. It never reboots and never false-alarms on a
   router that simply drops LAN ICMP.
+- **✅ Task Watchdog on the worker tasks.** The two tasks that do real, potentially-blocking I/O —
+  the poll engine ([`hp_poll.cpp`](../main/hp_poll.cpp), X10A UART reads) and the MQTT publish task
+  ([`mqtt_ha.cpp`](../main/mqtt_ha.cpp)) — subscribe themselves to the ESP Task Watchdog Timer
+  (`CONFIG_ESP_TASK_WDT_*` in [`sdkconfig.defaults`](../sdkconfig.defaults), `TIMEOUT_S=20`,
+  `PANIC=y`). `hp_poll` feeds it per cycle **and once per register** during the sweep (so a
+  slow-but-progressing 9600-baud read is never mistaken for a hang); `mqtt_pub` feeds it
+  unconditionally at the top of its 1 s loop (**not** gated on connection/publish, so a long broker
+  outage can't false-trip) **and once per publish** (a ~30-message reconnect burst on a slow link
+  stays within budget — the symmetric analogue of the per-register poll reset). The default
+  idle-task watch catches CPU *starvation*; this adds the *blocked-but-still-scheduled* case (a
+  wedged UART read or a stuck publish) it can't see. On a trip the device reboots cleanly with
+  `esp_reset_reason() == ESP_RST_TASK_WDT` — classified as a fault and surfaced on
+  `/status.last_crash` + the retained MQTT crash topic (§6), so a genuine hang becomes a
+  diagnosable, self-healing reboot instead of a silent stall that needs a power-cycle.
 - **Modem sleep disabled** (`WIFI_PS_NONE`): trades the idle-power saving of DTIM sleep for a
   consistently responsive HTTP UI (no ~100–300 ms wake latency per inbound request).
 - **mDNS + DHCP hostname** — reachable at `daikin-altherma-esp32.local`, and the router's client list
