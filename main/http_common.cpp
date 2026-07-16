@@ -6,6 +6,7 @@
 // esp_http_server's C frames to std::terminate -> abort() -> reboot. Handlers should still stream
 // large output (e.g. /diag) instead of one big std::string. (See docs/ARCHITECTURE.md → Memory constraints.)
 #include "http_handlers.hpp"
+#include "logic/http_body.hpp"
 #include <new>          // std::bad_alloc
 
 namespace daik {
@@ -52,13 +53,16 @@ esp_err_t http_send_gzip(httpd_req_t* req, const char* content_type,
     return httpd_resp_send(req, reinterpret_cast<const char*>(start), end - start);
 }
 
+// Reassemble the body across however many segments it arrives in — the loop and its stall bound
+// are host-tested in logic/http_body.hpp; what stays here is the part that is IDF's: translating
+// httpd_req_recv's return codes into the three cases the policy reasons about.
 int http_read_body(httpd_req_t* req, char* buf, size_t max) {
-    int total = req->content_len;
-    if (total <= 0 || static_cast<size_t>(total) >= max) return -1;
-    int r = httpd_req_recv(req, buf, total);
-    if (r <= 0) return -1;
-    buf[r] = '\0';
-    return r;
+    return http_body_read(buf, max, req->content_len, [req](char* dst, size_t len) -> BodyChunk {
+        const int r = httpd_req_recv(req, dst, len);
+        if (r == HTTPD_SOCK_ERR_TIMEOUT) return { BodyRecv::Timeout, 0 };
+        if (r <= 0)                      return { BodyRecv::Error,   0 };
+        return { BodyRecv::Data, static_cast<size_t>(r) };
+    });
 }
 
 } // namespace daik

@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <initializer_list>
 #include <string>
 
@@ -20,6 +21,7 @@
 #include "logic/discovery.hpp"
 #include "logic/health_gate.hpp"
 #include "logic/heartbeat.hpp"
+#include "logic/http_body.hpp"
 #include "logic/json.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/link_watch.hpp"
@@ -29,6 +31,7 @@
 #include "logic/reset_reason.hpp"
 #include "logic/syslog_policy.hpp"
 #include "logic/wifi_rollback.hpp"
+#include "logic/ws_policy.hpp"
 #include "def/registry.hpp"
 #include "def/signatures.hpp"
 
@@ -1502,6 +1505,150 @@ static void test_wifi_rollback() {
     CHECK(WIFI_ROLLBACK_GRACE_S >= WIFI_BOOT_WINDOW_S * 4);
 }
 
+// ── /events WebSocket command policy (logic/ws_policy.hpp) ───────────────────────────────────
+static void test_ws_policy() {
+    // An empty frame carries no command and leaves no body in the stream: ignore it, keep the
+    // connection. Anything that fits the command buffer is safe to read.
+    CHECK(ws_frame_plan(0) == WsPlan::Skip);
+    CHECK(ws_frame_plan(3) == WsPlan::Read);
+
+    // The boundary that is the whole bug. A frame of exactly WS_CMD_MAX still fits; ONE byte more
+    // used to be clamped to the buffer size, fail the read with ESP_ERR_INVALID_SIZE, and then get
+    // memcmp'd anyway — comparing against stack the failed read had never written.
+    CHECK(ws_frame_plan(WS_CMD_MAX)     == WsPlan::Read);
+    CHECK(ws_frame_plan(WS_CMD_MAX + 1) == WsPlan::Reject);
+
+    // The announced length is a 64-bit number the client asserts before anything is read. It must
+    // reach a decision, never an allocation: sizing a buffer from it would make one frame an OOM on
+    // a chip whose binding limit is the largest contiguous free block.
+    CHECK(ws_frame_plan(1u << 20)            == WsPlan::Reject);
+    CHECK(ws_frame_plan(SIZE_MAX)            == WsPlan::Reject);
+
+    // The one command we speak.
+    CHECK(ws_frame_action(true, "sub", 3) == WsAction::Subscribe);
+
+    // A prefix still subscribes — that is what the handler has always accepted, and this change is
+    // about frames that were never read, not about narrowing the grammar on working clients.
+    CHECK(ws_frame_action(true, "sub\n", 4)     == WsAction::Subscribe);
+    CHECK(ws_frame_action(true, "subscribe", 9) == WsAction::Subscribe);
+
+    // Everything else earns nothing: no snapshot, and no slot in the broadcast list.
+    CHECK(ws_frame_action(true, "nope", 4) == WsAction::Ignore);
+    CHECK(ws_frame_action(true, "su",   2) == WsAction::Ignore);   // too short to be the command
+    CHECK(ws_frame_action(true, "",     0) == WsAction::Ignore);
+
+    // A binary frame is not the text protocol, whatever bytes it carries.
+    CHECK(ws_frame_action(false, "sub", 3) == WsAction::Ignore);
+
+    // A caller that passes a buffer no read filled must not be taken at its word.
+    CHECK(ws_frame_action(true, nullptr, 3) == WsAction::Ignore);
+}
+
+// ── request-body reassembly (logic/http_body.hpp) ────────────────────────────────────────────
+static void test_http_body() {
+    // The common case: the body arrives in one recv, is NUL-terminated, and reports its length.
+    {
+        const std::string body = R"({"ssid":"home","pass":"secret12"})";
+        char buf[128] = {};
+        size_t sent = 0;
+        const int r = http_body_read(buf, sizeof(buf), body.size(),
+            [&](char* dst, size_t len) -> BodyChunk {
+                std::memcpy(dst, body.data() + sent, len);
+                sent += len;
+                return { BodyRecv::Data, len };
+            });
+        CHECK(r == static_cast<int>(body.size()));
+        CHECK(std::string(buf) == body);
+    }
+
+    // THE regression. httpd_req_recv hands over what has ARRIVED, not the whole body — its own docs
+    // say a large body may take multiple calls. The old single-call read took the first segment for
+    // the entire body, so a POST split across TCP segments was answered 400 "bad json" while being
+    // perfectly valid. One byte per call is that failure at its most extreme.
+    {
+        const std::string body = R"({"broker":"mqtts://nas.lan:8883","user":"ha"})";
+        char buf[128] = {};
+        size_t sent = 0;
+        int calls = 0;
+        const int r = http_body_read(buf, sizeof(buf), body.size(),
+            [&](char* dst, size_t) -> BodyChunk {
+                calls++;
+                dst[0] = body[sent++];
+                return { BodyRecv::Data, 1 };
+            });
+        CHECK(r == static_cast<int>(body.size()));
+        CHECK(std::string(buf) == body);
+        CHECK(calls == static_cast<int>(body.size()));   // it really did reassemble, segment by segment
+    }
+
+    // A timeout is "nothing arrived yet", not "give up" — and progress clears the idle count, so a
+    // body that keeps trickling in is never abandoned however long it takes overall.
+    {
+        const std::string body = "0123456789";
+        char buf[32] = {};
+        size_t sent = 0;
+        int n = 0;
+        const int r = http_body_read(buf, sizeof(buf), body.size(),
+            [&](char* dst, size_t) -> BodyChunk {
+                if (n++ % 3 != 2) return { BodyRecv::Timeout, 0 };   // 2 stalls, then a byte, forever
+                dst[0] = body[sent++];
+                return { BodyRecv::Data, 1 };
+            });
+        CHECK(r == static_cast<int>(body.size()));
+        CHECK(std::string(buf) == body);
+    }
+
+    // A peer that announces a body and then goes silent must lose, and must lose BOUNDED: retrying
+    // forever would park the single httpd task on one client, taking the web UI — and the OTA route
+    // that is the way out of a bad config — down with it.
+    {
+        char buf[64] = {};
+        int calls = 0;
+        const int r = http_body_read(buf, sizeof(buf), 10,
+            [&](char*, size_t) -> BodyChunk { calls++; return { BodyRecv::Timeout, 0 }; });
+        CHECK(r == -1);
+        CHECK(calls == BODY_MAX_IDLE + 1);   // it gave up, and did not spin
+        // The bound is absolute, not merely relative to itself: each idle round is a full socket
+        // timeout (CONFIG_HTTPD_REQ_RECV_TMO, 5 s), so it must stay small enough that one silent
+        // client cannot hold the httpd task for minutes, yet leave room to ride out a slow segment.
+        CHECK(BODY_MAX_IDLE >= 1 && BODY_MAX_IDLE <= 4);
+    }
+
+    // A peer that closes mid-body fails the read: half a JSON document must never reach a handler
+    // as if it were whole.
+    {
+        char buf[64] = {};
+        size_t sent = 0;
+        const int r = http_body_read(buf, sizeof(buf), 20,
+            [&](char* dst, size_t) -> BodyChunk {
+                if (sent >= 5) return { BodyRecv::Error, 0 };
+                dst[0] = 'x'; sent++;
+                return { BodyRecv::Data, 1 };
+            });
+        CHECK(r == -1);
+    }
+
+    // The size cap is preserved, terminator included: a body of exactly `cap` has nowhere to put
+    // the NUL, so it is refused rather than truncated.
+    {
+        char buf[16] = {};
+        const auto never = [](char*, size_t) -> BodyChunk { return { BodyRecv::Error, 0 }; };
+        CHECK(http_body_read(buf, sizeof(buf), sizeof(buf),     never) == -1);
+        CHECK(http_body_read(buf, sizeof(buf), sizeof(buf) + 1, never) == -1);
+        CHECK(http_body_read(buf, sizeof(buf), 0,               never) == -1);   // no body at all
+        CHECK(http_body_read(nullptr, sizeof(buf), 4,           never) == -1);
+    }
+
+    // `bytes` bounds a write into the caller's buffer, so a recv that reports more than it was
+    // asked for is refused rather than trusted.
+    {
+        char buf[16] = {};
+        const int r = http_body_read(buf, sizeof(buf), 4,
+            [](char*, size_t) -> BodyChunk { return { BodyRecv::Data, 99 }; });
+        CHECK(r == -1);
+    }
+}
+
 int main() {
     test_crc();
     test_registers();
@@ -1524,6 +1671,8 @@ int main() {
     test_reset_reason();
     test_boot_guard();
     test_health_gate();
+    test_ws_policy();
+    test_http_body();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }
     std::printf("%d logic test(s) FAILED\n", g_failures);
     return 1;

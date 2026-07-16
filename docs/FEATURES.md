@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (552 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (582 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -264,6 +264,24 @@ catch-all HTTP route ([`http_status.cpp`](../main/http_status.cpp)) serves that 
   polling** — a browser without WebSocket falls back to a one-time snapshot. Broadcasts run in the poll
   task and self-guard `std::bad_alloc` per client, dropping a single frame rather than the whole poll
   cycle (the task's own guard, below, is only their backstop).
+- **🧪 Frame handling is a policy, not an `if`** ([`logic/ws_policy.hpp`](../main/logic/ws_policy.hpp)).
+  Two rules, both host-tested. **Only a `sub` text frame takes a broadcast slot** — registering on any
+  frame at all meant a client that never subscribed was still pushed a frame a second, and held one of
+  the 8 slots from a client that had. And **a frame that does not fit the 16-byte command buffer is
+  refused, not clamped**: the length known at that point is one `httpd_ws_recv_frame` read out of the
+  header, which RFC 6455 lets a client set to any 64-bit value with nothing read to back it up — on a
+  chip bounded by its largest contiguous free block it may decide, never allocate. Refusing means
+  closing the connection, because the IDF fails an oversized read with `ESP_ERR_INVALID_SIZE`, leaves
+  the body in the socket, and offers no way to skip it — so the unread payload would otherwise be
+  parsed as the next frame's header.
+- **🧪 Request bodies are reassembled, not assumed**
+  ([`logic/http_body.hpp`](../main/logic/http_body.hpp)). A POST body is a TCP stream and
+  `httpd_req_recv` returns only what has arrived — the IDF's own docs say a large body may take several
+  calls. `http_read_body` loops until `content_len` is consumed, keeping the size cap and the 503
+  guard, so a body split across segments no longer reaches the handler truncated and comes back as a
+  spurious 400 "bad json". A `HTTPD_SOCK_ERR_TIMEOUT` is retried while progress keeps resetting the
+  idle count, but only `BODY_MAX_IDLE` times consecutively: unbounded patience would let one client
+  that announces a Content-Length and goes quiet park the single httpd task.
 - **✅ Gzipped UI embedded in the app image.** [`main/CMakeLists.txt`](../main/CMakeLists.txt) inlines
   `www/{index.html,style.css,app.js}` into one page and pre-gzips it at build time (`EMBED_FILES` →
   `_binary_index_html_gz_*`); shipping it pre-compressed cuts first-paint bytes ~3× over WiFi. The
@@ -428,10 +446,14 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   RFC 8259 JSON string encoder every payload shares (`json.hpp` — escapes `"`, `\` and every control
   byte, so an SSID from any AP in radio range can't emit JSON the setup portal fails to parse), the
   broker-URI split (`mqtt_uri.hpp`), board
-  pins (`board_pins.hpp`), and **🔭 Modbus TCP framing + HomeHub register codecs** (`modbus.hpp` — MBAP
+  pins (`board_pins.hpp`), the `/events` frame policy (`ws_policy.hpp` — an announced frame length is
+  a client-asserted 64-bit number, so it decides and never allocates; only a `sub` **text** frame
+  earns a broadcast slot), request-body reassembly (`http_body.hpp` — a body arrives across as many
+  TCP segments as the network chooses, and a peer that stalls forever must lose *bounded*),
+  and **🔭 Modbus TCP framing + HomeHub register codecs** (`modbus.hpp` — MBAP
   framing without CRC, FC03/04/06/16 build+parse, `Temp16`/`Pow16`/`Int16`/`Text16` decode/encode,
   the `homehub-*` mDNS filter; the host-tested core for the *planned* firmware-exclusive HomeHub
-  Modbus link (issue #32), **not yet wired into the firmware**). **552 `CHECK`s** in
+  Modbus link (issue #32), **not yet wired into the firmware**). **582 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
@@ -525,7 +547,7 @@ security of signed firmware with none of the brick risk. It refuses to roll a ba
 and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-associations no event
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 16-entity heartbeat diagnostics). And the risky parts — decode,
-CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (552 checks),
+CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (582 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

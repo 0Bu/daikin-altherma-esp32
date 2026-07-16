@@ -198,7 +198,10 @@ GET  /values                       # decoded readings [{label,value,unit}] (last
 GET  /events                       # WebSocket live push (the only live UI transport). Send "sub" →
                                    #   status+values snapshot, then {"type":"status"|"values",...} on
                                    #   change. No HTTP polling; no-WebSocket browsers load once and
-                                   #   the user reloads to refresh.
+                                   #   the user reloads to refresh. "sub" is what subscribes: any
+                                   #   other frame is ignored, and one longer than 16 B closes the
+                                   #   connection (it can't be read into the command buffer, and its
+                                   #   unread body would desync every frame after it).
 GET  /models                       # profile catalog + pin hint (detection is automatic; no manual picker)
 GET  /diag[?verbose=0|1][?clear=1] # plain-text in-memory diag log (raw RX frames when verbose)
 GET  /scan                         # WiFi scan for the setup portal → [{ssid,rssi,auth}]

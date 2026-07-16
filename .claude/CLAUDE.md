@@ -196,7 +196,7 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, config_model,
                 discovery, detect, json, mqtt_group, mqtt_uri, heartbeat, crashinfo, bootlog,
                 reset_reason, boot_guard, board_pins, modbus, syslog_policy, link_watch,
-                wifi_rollback, health_gate).
+                wifi_rollback, health_gate, ws_policy, http_body).
                 json.hpp = the ONE RFC 8259 string encoder every JSON payload goes through (/status,
                 /values, /scan via http_status.cpp's jstr; the MQTT state/heartbeat/crash topics).
                 Escapes " and \ AND every control byte < 0x20 (\b\f\n\r\t, else \u00XX) — the strings
@@ -211,6 +211,17 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, con
                 Bytes >= 0x20 pass through
                 verbatim (raw UTF-8, 0x7F) — the cast to unsigned char is load-bearing, since `char`
                 is signed and a naive c < 0x20 would mangle every non-ASCII SSID.
+                ws_policy.hpp = the /events frame policy: ws_frame_plan() decides on the ANNOUNCED
+                length alone (Skip empty / Read what fits the 16 B command buffer / Reject the rest)
+                and ws_frame_action() classifies only bytes a read actually delivered. The length is
+                a client-asserted 64-bit number read before any payload, so it must reach a decision
+                and never an allocation; a rejected frame closes the connection because
+                esp_http_server cannot skip a frame body and its unread payload would be parsed as
+                the next frame's header. http_body.hpp = the request-body recv loop
+                (http_body_read), templated over a classified recv so segment-by-segment
+                reassembly, a mid-body close and a stalled peer are host-tested; the IDF return-code
+                mapping stays in http_common.cpp. A timeout is retried at most BODY_MAX_IDLE times —
+                unbounded retries would park the single httpd task on one silent client.
                 mqtt_uri.hpp = the broker-URI split (host/port/TLS) behind the /set_mqtt pre-flight.
                 Its scheme defaults track esp-mqtt's OWN (mqtt 1883, mqtts 8883, ws 80, wss 443) —
                 the probe must dial the port the client will: 1883/8883 for ws(s) probed a port
@@ -340,7 +351,14 @@ GET  /events      WebSocket live push (is_websocket). Client sends "sub" -> gets
                   (status ~4s, values ~1s). The ONLY live UI transport — there is no HTTP polling; a
                   browser without WebSocket loads a one-time /status+/values snapshot and the user
                   reloads to refresh. NOT under the http_register OOM guard (raw registration
-                  needed) — the handler self-guards its JSON build.
+                  needed) — the handler self-guards its JSON build. Frame handling is decided by
+                  logic/ws_policy.hpp, never inline: ONLY a "sub" text frame takes a broadcast slot
+                  (registering on any frame at all pushed a frame per second to a client that never
+                  asked, and held a slot from one that had), and a frame longer than the 16 B command
+                  buffer is refused + the connection closed — its announced length is an unbacked
+                  64-bit client claim, so it may never size a buffer, and esp_http_server can neither
+                  read it into a smaller one (ESP_ERR_INVALID_SIZE, buffer untouched — the old code
+                  memcmp'd that uninitialised stack) nor skip past it.
 GET  /models      pin hint + catalog metadata (def/models_catalog.hpp). Detection is fully automatic;
                   the UI no longer offers a manual model picker.
 GET  /diag[?verbose=0|1][?clear=1]   in-memory diag log
