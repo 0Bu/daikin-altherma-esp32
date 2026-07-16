@@ -23,6 +23,7 @@
 #include "mqtt_ha.hpp"
 #include "ota_update.hpp"
 #include "provisioning.hpp"
+#include "safe_mode.hpp"
 #include "status_led.hpp"
 #include "wifi.hpp"
 
@@ -43,6 +44,7 @@ extern "C" void app_main() {
     daik::diag_log_init();
     daik::diag_crash_capture();          // read reset reason + core-dump summary once, before services
     daik::config_load();
+    daik::safe_mode_begin();             // crash-loop guard: count crash boots, latch safe mode past threshold
     daik::syslog_init();
     const daik::Config& cfg = daik::config();
     ESP_LOGI(TAG, "daikin-altherma-esp32 %s", esp_app_get_description()->version);
@@ -58,8 +60,16 @@ extern "C" void app_main() {
     }
 
     // --- Services ---
+    // The web UI + OTA are ALWAYS started (they are the recovery surface). In safe mode the two
+    // background subsystems a bad config could crash on — the X10A poll engine and the MQTT bridge —
+    // are skipped, so a wrong-pin config-loop stays fixable from the browser instead of over USB.
     daik::http_start();                  // esp_http_server on :80 (web UI + config + OTA + MCP)
-    daik::mqtt_ha_start();               // HA MQTT-Discovery bridge (no-op if mqtt_uri empty)
-    daik::hp_poll_start();               // X10A poll engine
+    if (!daik::safe_mode_active()) {
+        daik::mqtt_ha_start();           // HA MQTT-Discovery bridge (no-op if mqtt_uri empty)
+        daik::hp_poll_start();           // X10A poll engine
+    } else {
+        ESP_LOGW(TAG, "SAFE MODE: X10A poll engine + MQTT bridge skipped — recover the config via the web UI");
+    }
     daik::ota_health_gate_arm();         // keep rollback armed until this image proves healthy
+    daik::safe_mode_arm_healthy();       // clear the crash counter after BOOT_HEALTHY_S of continuous uptime
 }

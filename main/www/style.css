@@ -110,6 +110,13 @@ main { flex: 1; }
   background: var(--soft); border-radius: 9px; overflow-x: auto; white-space: nowrap;
 }
 .crash-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
+/* Recovery (safe) mode banner — warn-accented twin of the crash banner (reuses .crash-head/-txt/
+   -title/-meta for layout). Shown when /status.sys.safe_mode is set. */
+.recovery-banner {
+  background: var(--card); border: 1px solid var(--warn); border-left: 4px solid var(--warn);
+  border-radius: var(--r-card); box-shadow: var(--shadow-card); padding: 16px 18px; margin-bottom: 14px;
+}
+.recovery-banner .crash-ico { background: var(--warn); }
 .btn.sm { padding: 8px 13px; font-size: 13.5px; }
 .btn.ghost { background: none; color: var(--muted); border-color: transparent; }
 .btn.ghost:hover { color: var(--fg); border-color: var(--line); }

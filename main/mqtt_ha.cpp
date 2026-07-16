@@ -25,6 +25,7 @@
 #include "logic/discovery.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/mqtt_group.hpp"
+#include "logic/reset_reason.hpp"
 #include "wifi.hpp"
 
 #include "esp_app_desc.h"
@@ -191,6 +192,7 @@ static void publish_heartbeat() {
     f.free_heap       = esp_get_free_heap_size();
     f.min_free_heap   = esp_get_minimum_free_heap_size();
     f.max_alloc       = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
+    f.reset_reason    = reset_reason_name(diag_crash_info().reason);   // cached boot reason (diag_crash.cpp)
     f.wifi_connected  = wi.connected;
     f.wifi_rssi       = wi.rssi;
     f.wifi_reconnects = wifi_reconnect_count();

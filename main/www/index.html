@@ -26,6 +26,10 @@
     <!-- ═══ DASHBOARD (the only screen) ═══ -->
     <section class="view active" id="viewDash">
       <div class="pad">
+        <!-- Recovery (safe) mode banner: shown when /status.sys.safe_mode is true (the device
+             crash-looped on a bad config and came up minimally). Rendered by renderRecoveryBanner();
+             not dismissible — it reflects a live state and clears itself on a healthy reboot. -->
+        <div class="recovery-banner" id="recoveryBanner" hidden></div>
         <!-- Crash banner: shown when /status.last_crash is set (a fault reset or a core dump waiting).
              Rendered by renderCrashBanner() from app.js; dismissible per crash signature. -->
         <div class="crash-banner" id="crashBanner" hidden></div>

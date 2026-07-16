@@ -128,6 +128,26 @@ so the gate is a no-op for it and can never strand a fresh board.
 > and arms `PENDING_VERIFY`) is auto-rollback-protected. A host `esptool` flash overwrites the running
 > slot in place and cannot roll back — which is why the signed-image guard gates that path instead.
 
+### Config crash-loop recovery (safe mode) — a distinct failure class
+
+The anti-brick model above protects the *firmware image*. It does **nothing** for a bad
+*configuration*: both OTA slots read the same `daik_cfg` NVS, so an image rollback keeps the
+offending setting (most plausibly wrong RX/TX pins, but any config that crashes a background task at
+start-up). Without a separate mechanism the only exit is `esptool erase_flash` over USB — the same
+cable-bound recovery the web-UI design exists to avoid.
+
+**Safe mode** (`safe_mode.cpp` over the host-tested `logic/boot_guard.hpp`) is that mechanism. It
+counts **crash-only** boots (panic / interrupt-wdt / task-wdt / other-wdt / brownout — a clean or
+intentional config-save reboot resets the count, so provisioning never trips it) in the `boot_fails`
+NVS key; once `BOOT_FAIL_THRESHOLD` (4) accumulate, the device comes up **minimally** — WiFi + the
+web UI + the OTA health gate only, with the X10A poll engine and the MQTT bridge skipped. The user
+fixes the config in the browser and reboots; a healthy 30 s of uptime also clears the counter. This
+recovers a *config* crash-loop the image health gate cannot, and needs no USB cable.
+
+Security note: safe mode **reduces** the running surface (it starts strictly fewer subsystems) and
+adds no new endpoint or privilege — the recovery controls are the same `/set_*` handlers already
+present on the trusted LAN. The counter lives in `daik_cfg`, so a factory reset clears it too.
+
 ## Signing key lifecycle
 
 - The private key is an **RSA-3072 PEM** kept **offline**. It is never committed (`.gitignore`

@@ -10,6 +10,7 @@
 #include <string>
 
 #include "logic/board_pins.hpp"
+#include "logic/boot_guard.hpp"
 #include "logic/config_model.hpp"
 #include "logic/convert.hpp"
 #include "logic/crashinfo.hpp"
@@ -21,6 +22,7 @@
 #include "logic/mqtt_group.hpp"
 #include "logic/mqtt_uri.hpp"
 #include "logic/registers.hpp"
+#include "logic/reset_reason.hpp"
 #include "def/registry.hpp"
 #include "def/signatures.hpp"
 
@@ -572,6 +574,7 @@ static void test_heartbeat() {
     f.free_heap       = 170000;
     f.min_free_heap   = 150000;
     f.max_alloc       = 87000;
+    f.reset_reason    = "panic";
     f.wifi_connected  = true;
     f.wifi_rssi       = -76;
     f.wifi_reconnects = 3;
@@ -592,6 +595,7 @@ static void test_heartbeat() {
     CHECK(j == "{\"version\":\"1.2.3\",\"platform\":\"esp32s3\","
                "\"uptime_s\":680731,\"uptime\":\"007+21:05:31.860\","
                "\"free_heap\":170000,\"min_free_heap\":150000,\"max_alloc\":87000,"
+               "\"reset_reason\":\"panic\","
                "\"wifi\":{\"connected\":true,\"rssi\":-76,\"quality_pct\":48,\"reconnects\":3},"
                "\"mqtt\":{\"connected\":true,\"count\":89282,\"fails\":0,\"reconnects\":1},"
                "\"bus\":{\"connected\":true,\"proto\":\"I\",\"registers\":10,\"values\":48,\"last_ok_s\":1,"
@@ -610,7 +614,7 @@ static void test_heartbeat() {
     // value_template points at the heartbeat topic (not the heat-pump state topic).
     const std::string hb = heartbeat_topic(base, node);
     const std::string av = availability_topic(base, node);
-    CHECK(HEARTBEAT_SENSOR_COUNT == 15);
+    CHECK(HEARTBEAT_SENSOR_COUNT == 16);
     const HeartbeatSensor& rssi = HEARTBEAT_SENSORS[0];
     CHECK(std::string(rssi.object_id) == "wifi_signal");
     std::string dt = heartbeat_discovery_topic("homeassistant", node, rssi);
@@ -644,12 +648,27 @@ static void test_heartbeat() {
     CHECK(heartbeat_discovery_config(node, hb, av, *mc).find("\"stat_cla\":\"total_increasing\"")
           != std::string::npos);
 
+    // The three device-health entities added alongside /status.sys (issue #5): reset_reason is a
+    // plain text sensor (no unit / device_class / state_class), min_free_heap + max_alloc are byte
+    // measurements. All diagnostic, all sourced from the heartbeat topic. Count is 16, not 13.
+    auto find_hb = [](const char* oid) -> const HeartbeatSensor* {
+        for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++)
+            if (std::string(HEARTBEAT_SENSORS[i].object_id) == oid) return &HEARTBEAT_SENSORS[i];
+        return nullptr;
+    };
+    const HeartbeatSensor* rr = find_hb("reset_reason");
+    CHECK(rr != nullptr && std::string(rr->name) == "Reset Reason");
+    const std::string rrc = heartbeat_discovery_config(node, hb, av, *rr);
+    CHECK(rrc.find("\"val_tpl\":\"{{ value_json.reset_reason }}\"") != std::string::npos);
+    CHECK(rrc.find("\"ent_cat\":\"diagnostic\"") != std::string::npos);
+    CHECK(rrc.find("\"unit_of_meas\"") == std::string::npos);   // text: no unit
+    CHECK(rrc.find("\"dev_cla\"") == std::string::npos);        // ...no device_class
+    CHECK(rrc.find("\"stat_cla\"") == std::string::npos);       // ...no state_class
+
     // Heap low-water mark + largest free block: bytes, "measurement" (a fluctuating gauge, NOT a
     // since-boot counter), diagnostic, sourced from the flat payload fields (not a nested object).
     for (const char* oid : {"min_free_heap", "max_alloc"}) {
-        const HeartbeatSensor* h = nullptr;
-        for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++)
-            if (std::string(HEARTBEAT_SENSORS[i].object_id) == oid) h = &HEARTBEAT_SENSORS[i];
+        const HeartbeatSensor* h = find_hb(oid);
         CHECK(h != nullptr);
         const std::string hc = heartbeat_discovery_config(node, hb, av, *h);
         CHECK(hc.find(std::string("\"val_tpl\":\"{{ value_json.") + oid + " }}\"") != std::string::npos);
@@ -658,6 +677,75 @@ static void test_heartbeat() {
         CHECK(hc.find("\"ent_cat\":\"diagnostic\"") != std::string::npos);
         CHECK(hc.find("\"dev_cla\"") == std::string::npos);   // raw bytes, no device_class
     }
+}
+
+static void test_reset_reason() {
+    // /status.sys.reset_reason (logic/reset_reason.hpp): a raw esp_reset_reason_t code -> a short,
+    // stable slug; anything unknown/newer -> "unknown" rather than a wrong cause.
+    CHECK(std::string(reset_reason_name(1)) == "poweron");
+    CHECK(std::string(reset_reason_name(3)) == "sw");
+    CHECK(std::string(reset_reason_name(4)) == "panic");
+    CHECK(std::string(reset_reason_name(6)) == "task_wdt");
+    CHECK(std::string(reset_reason_name(9)) == "brownout");
+    CHECK(std::string(reset_reason_name(0)) == "unknown");
+    CHECK(std::string(reset_reason_name(999)) == "unknown");
+
+    // Parity guard: reset_reason_name and crash_reason_slug are ONE vocabulary (the sys block, the
+    // crash HA entity and the heartbeat must never disagree on how a reset is named). If a future edit
+    // splits them into two tables, this fails for the first code that diverges.
+    for (int code = -1; code <= 20; code++)
+        CHECK(std::string(reset_reason_name(code)) ==
+              std::string(crash_reason_slug(static_cast<uint32_t>(code))));
+}
+
+static void test_boot_guard() {
+    // Threshold rule (issue #6): safe mode on the Nth crash boot, no off-by-one (the counter is bumped
+    // BEFORE the check, so with threshold 4 the 4th crash makes fail_count == threshold).
+    CHECK(!boot_should_enter_safe_mode(0, 4));
+    CHECK(!boot_should_enter_safe_mode(3, 4));
+    CHECK(boot_should_enter_safe_mode(4, 4));
+    CHECK(boot_should_enter_safe_mode(5, 4));
+    CHECK(boot_should_enter_safe_mode(BOOT_FAIL_THRESHOLD));       // default threshold
+    CHECK(!boot_should_enter_safe_mode(BOOT_FAIL_THRESHOLD - 1));
+
+    // Saturating increment; a corrupt (negative or absurdly large) / first-run read starts from 0.
+    CHECK(boot_next_fail_count(0) == 1);
+    CHECK(boot_next_fail_count(3) == 4);
+    CHECK(boot_next_fail_count(-1) == 1);
+    CHECK(boot_next_fail_count(-999999) == 1);
+    // A value ABOVE the cap is never written, so reading one means corruption -> treated as 0 -> 1.
+    CHECK(boot_next_fail_count(BOOT_FAIL_MAX + 500) == 1);
+    CHECK(boot_next_fail_count(BOOT_FAIL_MAX) == BOOT_FAIL_MAX);          // saturates at the cap
+    CHECK(boot_next_fail_count(BOOT_FAIL_MAX - 1) == BOOT_FAIL_MAX);
+
+    // A crash-loop from a clean start reaches safe mode EXACTLY on the 4th crash boot, not before.
+    int c = 0;
+    for (int i = 0; i < BOOT_FAIL_THRESHOLD - 1; i++) {
+        c = boot_next_fail_count(c);
+        CHECK(!boot_should_enter_safe_mode(c));
+    }
+    c = boot_next_fail_count(c);
+    CHECK(c == BOOT_FAIL_THRESHOLD && boot_should_enter_safe_mode(c));
+
+    // Crash classification: ONLY panic / int-wdt / task-wdt / other-wdt / brownout accumulate.
+    CHECK(boot_reset_was_crash(4));    // panic
+    CHECK(boot_reset_was_crash(5));    // int_wdt
+    CHECK(boot_reset_was_crash(6));    // task_wdt
+    CHECK(boot_reset_was_crash(7));    // other_wdt
+    CHECK(boot_reset_was_crash(9));    // brownout
+    // Clean / intentional / non-config faults do NOT — a provisioning burst is reset reason "sw" (3),
+    // and power-glitch (14) / CPU-lockup (15) are hardware faults a config change can't fix, so unlike
+    // crash_reason_is_fault() this set deliberately excludes them.
+    CHECK(!boot_reset_was_crash(1));   // poweron
+    CHECK(!boot_reset_was_crash(2));   // ext
+    CHECK(!boot_reset_was_crash(3));   // sw (config-save / OTA reboot)
+    CHECK(!boot_reset_was_crash(8));   // deepsleep
+    CHECK(!boot_reset_was_crash(14));  // pwr_glitch
+    CHECK(!boot_reset_was_crash(15));  // cpu_lockup
+    CHECK(!boot_reset_was_crash(0));   // unknown
+    // Consistency with the shared reset vocabulary: the crash codes boot_guard counts are a SUBSET of
+    // crashinfo's fault set (both agree these five are faults), guarding against the enum drifting apart.
+    for (int code : {4, 5, 6, 7, 9}) CHECK(boot_reset_was_crash(code) && crash_reason_is_fault(code));
 }
 
 static void test_health_gate() {
@@ -800,6 +888,8 @@ int main() {
     test_mqtt_uri();
     test_heartbeat();
     test_crashinfo();
+    test_reset_reason();
+    test_boot_guard();
     test_health_gate();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }
     std::printf("%d logic test(s) FAILED\n", g_failures);

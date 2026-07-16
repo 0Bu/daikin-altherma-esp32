@@ -21,8 +21,11 @@ idioms are used throughout (`esp_http_server`, `uart_driver`, `esp-mqtt`).
 ## Component map
 
 ```
-main.cpp            → boot: NVS init, WiFi (STA or setup AP), start HTTP server, start
-                       poll engine + MQTT bridge, arm OTA health gate
+main.cpp            → boot: NVS init, safe-mode guard, WiFi (STA or setup AP), start HTTP server,
+                       start poll engine + MQTT bridge (both SKIPPED in safe mode), arm OTA health gate
+safe_mode.cpp/.hpp  → boot-loop safe mode (logic/boot_guard.hpp): crash-only boot counter in NVS
+                       (boot_fails) → past a threshold, come up minimally (WiFi + web UI + OTA, no
+                       poll/MQTT) to recover a bad config in-browser. See "Boot-loop safe mode" below
 wifi.cpp/.hpp       → STA bring-up (all-channel scan → strongest AP by RSSI) + endless reconnect
                        (first-boot budget → setup portal) + one-shot credential rollback (new creds
                        fail to get a lease → restore NVS backup + reboot; ≥5 consecutive AUTH_FAIL/
@@ -94,6 +97,11 @@ host-testable core is unusually large and valuable, because the risky parts are 
   chip's reference board; the XIAO ESP32-S3 is authoritative). Feeds `/status.pins_avail` and hence
   the dashboard RX/TX pin dropdown. Pure, so the lists are asserted host-side (sorted, in range, and
   the reference-board set excludes not-broken-out pins like GPIO47).
+- `logic/reset_reason.hpp` — maps a raw `esp_reset_reason()` code to the stable slug used by
+  `/status.sys.reset_reason` and the heartbeat, reusing `crashinfo`'s table so there is one vocabulary.
+- `logic/boot_guard.hpp` — the boot-loop safe-mode decision logic (crash-only reset classification,
+  saturating crash counter, threshold rule) behind `safe_mode.cpp`; asserted host-side so the "enter
+  on the Nth crash, never on a provisioning reboot" contract can't silently regress.
 
 `hp_convert.cpp`, `hp_comm.cpp`, `config.cpp`, `mqtt_ha.cpp` are thin device wrappers that call
 these headers. Add new decode/format logic to `main/logic/` and a `CHECK` in
@@ -317,10 +325,10 @@ The Home Assistant bridge:
 
   Published on a fixed `HEARTBEAT_INTERVAL_S` (10 s) cadence — unlike the state topic, this is
   diagnostics rather than real-time telemetry, so it always sends the latest snapshot rather than
-  only on change. 15 diagnostic HA entities (WiFi signal/quality/reconnects, free heap + min-free-heap
-  low-water + largest-free-block, uptime, X10A bus status/CRC/timeout/rx errors/rx received, MQTT
-  publish count/fails/reconnects — tagged `"ent_cat":"diagnostic"`; the two heap-headroom gauges are
-  `"measurement"` in bytes) point at this topic via their own discovery configs, streamed once per
+  only on change. 16 diagnostic HA entities (WiFi signal/quality/reconnects, heap free/min-free/
+  largest-block, uptime, last reset reason, X10A bus status/CRC/timeout/rx errors/rx received, MQTT
+  publish count/fails/reconnects — tagged `"ent_cat":"diagnostic"`) point at this topic via their own
+  discovery configs, streamed once per
   connection independently of heat-pump profile detection — so they show up even while the model is
   still "auto". Cumulative since-boot counters get `"stat_cla":"total_increasing"` (not
   `"measurement"`) so HA's long-term statistics handle a reboot's reset to 0 correctly. Mirrors the
@@ -361,6 +369,14 @@ Structure:
     WebSocket broadcaster (which only self-guards `std::bad_alloc` by dropping the frame). A *fault*
     reset (panic / watchdog / brown-out / CPU lockup) or an orphan dump is "notable"; a clean
     power-on / software reboot is not.
+  - **Always-on system health (no fault required).** `build_status_json_string()` also carries a
+    compact `sys` block — `free_heap` / `min_free_heap` (since-boot low-water, the leak indicator) /
+    `max_alloc` (largest contiguous block, the true OOM ceiling), the `reset_reason` slug (via
+    `logic/reset_reason.hpp`, reusing the same vocabulary as `last_crash`) and a `safe_mode` flag
+    (always `false` until the boot-loop safe-mode feature lands). These answer "why did it reboot?"
+    and "is the heap leaking?" from the LAN / `/events` WebSocket **on every boot** and **without a
+    broker** — the MQTT heartbeat carries the same heap figures, but only when MQTT is configured. The
+    dashboard ESP32 card shows the reset reason (fault-coloured) and free heap.
   - **How a user hands a crash over.** `GET /status.last_crash` is `null` on a clean boot, else the
     cached summary; the running app's `app_elf_sha256` is also on `/status`. The web UI shows a crash
     **banner** (`renderCrashBanner()`) with the reset reason + hex backtrace, a one-click
@@ -387,6 +403,37 @@ Structure:
 - **PR preview installer**: every same-repo PR publishes a signed preview at
   `…/PR/<N>/` on the `gh-pages` branch (fork PRs get no signing key → no preview). OTA always
   checks against **main**.
+
+## Boot-loop safe mode (config recovery)
+
+The OTA rollback health gate recovers a bad *firmware image*. It does **not** help a bad *config* —
+both OTA slots read the same `daik_cfg` NVS, so rolling the image back keeps the offending setting
+(most plausibly wrong RX/TX pins, or anything that crashes a background task at start-up). Left
+alone, that is a reboot loop whose only exit is `esptool erase_flash` over USB — which breaks the
+"recover everything from the web UI" promise. Safe mode closes that gap:
+
+- **Decision logic** is the pure, host-tested `logic/boot_guard.hpp`: `boot_reset_was_crash()`
+  classifies a reset as a crash **only** for panic / interrupt-wdt / task-wdt / other-wdt / brownout
+  (deliberately narrower than `crashinfo`'s fault set — a power-glitch or CPU-lockup a config change
+  can't fix does not count); `boot_next_fail_count()` is a saturating increment that treats a
+  corrupt/first-run read as 0; `boot_should_enter_safe_mode()` is the threshold rule
+  (`BOOT_FAIL_THRESHOLD`, default 4).
+- **Device glue** is `safe_mode.cpp`, called from `app_main` right after `config_load` and **before**
+  any risky subsystem. On a crash reset it increments the `boot_fails` counter in `daik_cfg` and
+  **commits it before** the poll engine / MQTT start (so the bump survives another crash), latching
+  safe mode at the threshold. A clean or intentional reboot (power-on, a config-save restart, OTA)
+  **resets the counter to 0** — this is the key correctness point, because provisioning is a rapid
+  burst of config-save reboots that must never be mistaken for a crash-loop. A one-shot timer clears
+  the counter after `BOOT_HEALTHY_S` (30 s) of continuous uptime, so a single old crash doesn't
+  accumulate with a much later, unrelated one.
+- **In safe mode** `main.cpp` starts only WiFi + the HTTP web UI + the OTA health gate and **skips**
+  the X10A poll engine and the MQTT bridge (the two background subsystems a bad config could crash
+  on). The full recovery surface (`/set_wifi`, `/set_mqtt`, `/set_hp`, and — once #9 lands — factory
+  reset / import) stays available. `/status.sys.safe_mode` is `true` and the UI shows a warn-accented
+  **Recovery mode** banner. The counter lives in `daik_cfg`, so a factory reset wipes it too.
+
+This is distinct from the image anti-brick recovery above; both are covered in
+[SECURITY.md](SECURITY.md) → Boot recovery.
 
 ## Web UI config flow
 
