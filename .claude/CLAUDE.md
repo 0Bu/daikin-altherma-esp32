@@ -1,10 +1,12 @@
 # daikin-altherma-esp32
 
-ESP-IDF 5.x firmware for the ESP32-S3 chip. Reads a **Daikin Altherma** heat
-pump over its **X10A** service port and bridges every value to **Home Assistant over MQTT**
-(auto-discovery). Everything — WiFi (captive portal), MQTT, the unit model, the register set,
-the RX/TX pins — is configured at runtime from a **web UI**; firmware is installed from a
-**browser** (Web Serial) and updated **OTA**. Builds for the **esp32s3** target only.
+ESP-IDF 6.x firmware for the ESP32-S3 chip (CI pins **v6.0.2**; `main/idf_component.yml` keeps a
+`>=5.5` floor on purpose — the managed components still resolve on 5.x). Reads a **Daikin Altherma**
+heat pump over its **X10A** service port and bridges every value to **Home Assistant over MQTT**
+(auto-discovery). WiFi (captive portal), MQTT, syslog and the RX/TX pins are configured at runtime
+from a **web UI**; the unit **model** and its register set are **auto-detected** from the bus every
+boot — there is no manual picker. Firmware is installed from a **browser** (Web Serial) and updated
+**OTA**. Builds for the **esp32s3** target only.
 
 > **Deep reference:** this file holds the always-needed essentials. Full narrative for the poll
 > engine, value profiles, MQTT bridge, WiFi reconnect and OTA lives in
@@ -14,7 +16,9 @@ the RX/TX pins — is configured at runtime from a **web UI**; firmware is insta
 > register map in [`docs/REGISTERS.md`](../docs/REGISTERS.md). A cross-cutting catalog of the
 > platform features this firmware implements (Secure Boot v2 signing, OTA + health gate, WebSocket,
 > ESP-IDF component inventory, diagnostics) is [`docs/FEATURES.md`](../docs/FEATURES.md) — keep it
-> current with the `feature-docs` skill when a technical feature lands or changes. User-facing docs:
+> current with the `feature-docs` skill when a technical feature lands or changes. The MQTT/HA entity
+> contract as seen from Home Assistant is [`docs/HOME_ASSISTANT.md`](../docs/HOME_ASSISTANT.md), and
+> the (planned) read-only MCP surface is [`docs/MCP.md`](../docs/MCP.md). User-facing docs:
 > [`README.md`](../README.md), [`docs/README.md`](../docs/README.md),
 > [`docs/SECURITY.md`](../docs/SECURITY.md), [`docs/DESIGN.md`](../docs/DESIGN.md) (web-UI design
 > contract). Keep them in sync (the `project-review` skill checks for drift).
@@ -139,6 +143,11 @@ hp_poll.cpp     poll engine task: (auto-detect if profile=="auto") profile regis
                 Task Watchdog (esp_task_wdt_add): reset per cycle + once per register in the sweep, so
                 a wedged X10A read reboots cleanly (reset reason task_wdt) instead of hanging silently.
 http_server.cpp esp_http_server :80; concerns register their own routes (http_handlers.hpp)
+http_common.cpp shared HTTP helpers + the ONE OOM guard every route runs under: http_register()
+                stashes the real handler in user_ctx and installs a handle_all trampoline that calls
+                it inside try/catch — std::bad_alloc -> 503, any other throw -> 500, instead of
+                unwinding through esp_http_server's C frames to std::terminate -> reboot. /events is
+                the deliberate exception (raw registration needed for the WebSocket; it self-guards)
 http_status.cpp GET / (setup.html in AP mode, else gzip UI) /status /values /models /diag /scan
                 /coredump + /events (WebSocket live push) + captive catch-all
 http_config.cpp POST /set_wifi /set_mqtt /set_syslog /set_hp /detect
@@ -163,6 +172,18 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 mqtt_publish() (so a ~30-publish reconnect burst on a slow link can't exceed the 20s
                 budget) — a wedged publish reboots, a slow-but-progressing one never does.
 ota_update.cpp  pull-based signed OTA + rollback health gate (check/download: TODO)
+status_led.cpp  onboard-LED status indicator task (compile-time only, DAIKIN_STATUS_LED_* Kconfig):
+                samples WiFi mode + wifi/mqtt/hp state per tick and blinks the pattern — slow 1s =
+                setup portal (SoftAP), fast 100ms = connecting, solid = healthy (WiFi + MQTT + X10A),
+                double-flash = X10A link down, medium 300ms = X10A up but MQTT down, off = no WiFi
+                mode. X10A-down outranks MQTT-down (the bus is the point of the device). NOTE: the
+                Kconfig help text still lists only the first four — it predates the medium blink.
+                GPIO defaults to 21 (XIAO ESP32-S3 onboard LED) and
+                INVERTED=y (active-low on XIAO); -1 disables. Not runtime-configurable and not on
+                /status — it is a local-eyes-only signal. The task loop self-guards like mqtt_task/
+                poll_task: wifi_info()/mqtt_status()/hp_stats() each copy std::strings out, so a tick
+                can throw under memory pressure — an escape would reboot the board over a cosmetic
+                LED. A dropped tick costs nothing (the pattern is recomputed from scratch each time)
 diag_log.cpp    in-RAM diag ring served by GET /diag; each line is also forwarded to syslog_send()
 syslog.cpp      optional syslog UDP client (RFC 5424): a task DNS-resolves the configured host, then
                 forwards every diag_printf() line as one UDP datagram; disabled when syslog_host is
@@ -193,10 +214,14 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 — a 4-byte size-word read, NOT the summary parse), because /coredump?clear=1 can erase
                 the image mid-session; a cached flag would strand an uncleanable crash banner + a
                 download that 404s. mqtt_ha republishes the retained crash topic when the flag changes
-logic/          IDF-free, host-tested pure headers (crc, convert, registers, config_model,
+logic/          IDF-free, host-tested pure headers (crc, convert, registers, value_def, config_model,
                 discovery, detect, json, mqtt_group, mqtt_uri, heartbeat, crashinfo, bootlog,
                 reset_reason, boot_guard, board_pins, modbus, syslog_policy, link_watch,
                 wifi_rollback, health_gate, ws_policy, http_body).
+                value_def.hpp = the ValueDef row type the generated def/ profile tables are written
+                in ({reg, offset, conv, size, type, label} — registry id, byte offset in the reply
+                payload, converter id for convert.hpp, byte count, HA unit code, English label): the
+                shared vocabulary between the offline generator's output and the decode path.
                 json.hpp = the ONE RFC 8259 string encoder every JSON payload goes through (/status,
                 /values, /scan via http_status.cpp's jstr; the MQTT state/heartbeat/crash topics).
                 Escapes " and \ AND every control byte < 0x20 (\b\f\n\r\t, else \u00XX) — the strings
@@ -271,7 +296,10 @@ def/            embedded per-model value profiles + registry (incl. the generic 
                 universal register core) + models_catalog.hpp (GET /models) + model_names.hpp
                 (id→display/family/marketing name for /status) + signatures.hpp (Altherma-only
                 detection signatures derived from the tables). Profiles are machine-generated in the
-                ValueDef row format by decoding Daikin's value catalog (tools/profiles/, docs/REGISTERS.md).
+                ValueDef row format by the offline value-catalog decode tooling (gen_profiles.py),
+                which is maintained OUTSIDE this repo — there is no tools/ directory on main. Never
+                hand-edit a generated table: regenerate it, and verify rows against docs/REGISTERS.md
+                (the in-repo source of truth, and the check any contributor can actually run).
 www/            web UI sources (index.html + style.css + app.js -> one gzipped page) + setup.html
 ```
 
@@ -360,7 +388,10 @@ GET  /events      WebSocket live push (is_websocket). Client sends "sub" -> gets
                   read it into a smaller one (ESP_ERR_INVALID_SIZE, buffer untouched — the old code
                   memcmp'd that uninitialised stack) nor skip past it.
 GET  /models      pin hint + catalog metadata (def/models_catalog.hpp). Detection is fully automatic;
-                  the UI no longer offers a manual model picker.
+                  the UI no longer offers a manual model picker. NO shipped client reads this — the
+                  web UI never fetches it, and the RX/TX dropdown takes its GPIOs from
+                  /status.pins_avail (logic/board_pins.hpp), NOT from this pin_hint. Legacy metadata
+                  behind a read-only inspection endpoint for humans/scripts
 GET  /diag[?verbose=0|1][?clear=1]   in-memory diag log
 GET  /scan        WiFi scan (setup)
 GET  /coredump[?clear=1]   stream the flash core-dump image (chunked octet-stream; 404 if none);

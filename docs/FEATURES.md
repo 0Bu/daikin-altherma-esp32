@@ -340,7 +340,7 @@ IDF v6.0 extracted it from core — [`idf_component.yml`](../main/idf_component.
   an explicit set and wins over the flag. It is the only path from an authenticated `mqtts://` broker
   to an anonymous one — previously the kept credentials rejected every plaintext broker and only a
   flash erase escaped.
-- **✅ Availability (LWT).** A retained `offline` last-will on `<base>/<node>/availability`, flipped to
+- **✅ Availability (LWT).** A retained `offline` last-will on `<base>/<node>/status`, flipped to
   `online` on connect — HA marks every entity unavailable if the device drops.
 - **Read-only by design.** No command subscriptions; the bridge only reads the pump.
 
@@ -434,7 +434,8 @@ IDF-free headers under [`main/logic/`](../main/logic) and is verified on the hos
 Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` → logic core](ARCHITECTURE.md)).
 
 - **🧪 What's covered** — CRC & framing (`crc.hpp`), value converters (`convert.hpp`), register
-  extraction (`registers.hpp`), the config model/validation + the field-owned detection patches
+  extraction (`registers.hpp`), the `ValueDef` profile-row type the generated `def/*` tables are
+  written in (`value_def.hpp`), the config model/validation + the field-owned detection patches
   (`config_model.hpp` — `apply_link`/`apply_model` touch only the link / model, so a detection commit
   cannot revert a concurrent `/set_wifi`), HA-discovery payloads
   (`discovery.hpp`), detection (`detect.hpp`), the OTA health gate (`health_gate.hpp`), heartbeat &
@@ -532,10 +533,23 @@ Every ESP-IDF component this firmware links, and what it powers (from
 | `espcoredump` | core dump to flash + `esp_core_dump_get_summary` |
 | `cjson` (managed) | POST body parsing (`http_config.cpp`) |
 
-**Runtime-configurable at first boot** via `Kconfig.projbuild` (all also settable in the web UI,
-NVS-overridden): WiFi SSID/pass, hostname, X10A protocol + RX/TX pins, MQTT URI/user/pass + discovery
-prefix + base topic, OTA manifest/firmware URLs, status-LED GPIO/enable/inversion. See
-[`main/Kconfig.projbuild`](../main/Kconfig.projbuild).
+**Compile-time defaults** live in [`main/Kconfig.projbuild`](../main/Kconfig.projbuild). Only some of
+them are also settable at runtime (web UI → NVS, which then overrides the Kconfig default):
+
+| Kconfig default | Runtime override |
+|---|---|
+| `DAIKIN_WIFI_SSID` / `_PASSWORD` | ✅ `POST /set_wifi` → NVS |
+| `DAIKIN_MQTT_BROKER_URI` / `_USERNAME` / `_PASSWORD` | ✅ `POST /set_mqtt` → NVS |
+| `DAIKIN_SYSLOG_HOST` / `_PORT` | ✅ `POST /set_syslog` → NVS |
+| `DAIKIN_RX_PIN` / `DAIKIN_TX_PIN` | ✅ auto-detected; `POST /set_hp` pins them → NVS |
+| `DAIKIN_PROTOCOL` | ⚙️ auto-detected from the bus — deliberately **not** settable (`/set_hp` rejects `proto`) |
+| `DAIKIN_HOSTNAME` | ❌ compile-time only |
+| `DAIKIN_MQTT_DISCOVERY_PREFIX` / `_BASE_TOPIC` | ❌ compile-time only |
+| `DAIKIN_OTA_MANIFEST_URL` / `_FIRMWARE_BASE_URL` | ❌ compile-time only |
+| `DAIKIN_STATUS_LED_ENABLE` / `_GPIO` / `_INVERTED` | ❌ compile-time only |
+
+The **model** is not in this table at all: it is re-detected from the X10A bus on every boot and held
+in RAM only — there is no manual picker and no NVS key (see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
 
 ---
 

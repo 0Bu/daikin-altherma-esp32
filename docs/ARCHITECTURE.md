@@ -55,7 +55,13 @@ config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi
                       while config_save_link still applies its RAM patch (the link is proven-good)
 nvs_storage.cpp     → thin NVS helpers (namespaces, blobs, migration); setters return esp_err_t and
                        are [[nodiscard]] — a dropped write is silent (compare to ESP_OK, not bool)
-http_server.cpp     → esp_http_server :80, wildcard dispatch + handle_all OOM try/catch (503)
+http_server.cpp     → esp_http_server :80, wildcard dispatch; concerns register their own routes
+http_common.cpp     → shared HTTP helpers + the single OOM guard: http_register() stashes the real
+                      handler in user_ctx and installs the handle_all trampoline, which calls it
+                      inside try/catch — std::bad_alloc → 503, any other throw → 500, instead of
+                      unwinding through esp_http_server's C frames to std::terminate → reboot.
+                      /events is the deliberate exception (raw registration for the WebSocket; it
+                      self-guards its own JSON build instead)
 http_status.cpp     → GET / (web UI), /status, /values, /models, /diag, /scan, /coredump, and the
                       /events WebSocket (live status/values push)
 http_config.cpp     → POST /set_wifi, /set_mqtt, /set_syslog, /set_hp, /detect
@@ -87,6 +93,18 @@ syslog.cpp          → optional syslog UDP client (RFC 5424, off when syslog_ho
                       drive a getaddrinfo+ICMP storm. The errno is captured inside syslog_sendto
                       BEFORE close() (which may clobber it, and it now decides the throttle). Failures
                       log the TRANSITION (paused/recovered), not every dropped line
+status_led.cpp/.hpp → onboard-LED status indicator task, compile-time only (DAIKIN_STATUS_LED_*
+                      Kconfig; GPIO defaults to 21 = the XIAO ESP32-S3 onboard LED, INVERTED=y for
+                      its active-low wiring, -1 disables). Each tick samples the WiFi mode + wifi/
+                      mqtt/hp state and blinks: slow 1 s = setup portal (SoftAP), fast 100 ms =
+                      connecting, solid = healthy (WiFi + MQTT + X10A), double-flash = X10A link
+                      down, medium 300 ms = X10A up but MQTT down, off = no WiFi mode. X10A-down
+                      outranks MQTT-down — the bus is the point of the device. (The Kconfig help
+                      text lists only the first four; it predates the medium blink.)
+                      Not runtime-configurable and not on /status — a local-eyes-only signal.
+                      The loop self-guards like mqtt_task/poll_task: the state getters copy
+                      std::strings out, so a tick can throw under memory pressure, and a task entry
+                      is a C frame boundary — an escape would reboot the board over a cosmetic LED
 www/                → web UI sources: index.html + style.css + app.js, spliced into ONE
                      self-contained page at build time (inline_assets.cmake) and served gzipped;
                      setup.html is the captive-portal page (gzipped separately)
@@ -106,6 +124,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
   scale or endianness would silently corrupt a reading; unit-tested per converter id against
   known-good reference outputs.
 - `logic/registers.hpp` — register-buffer parsing (offset/size extraction, bounds).
+- `logic/value_def.hpp` — the `ValueDef{reg, offset, conv, size, type, label}` row type the generated
+  `def/*` profile tables are written in: the shared vocabulary between the offline generator's output
+  and `convert.hpp`'s decode. IDF-free so the host tests can build the same tables the device runs.
 - `logic/config_model.hpp` — validation of pins (no overlap, in range for the target), protocol
   enum, and the fixed `POLL_INTERVAL_S` constant.
 - `logic/discovery.hpp` — the HA MQTT-Discovery payload builder (topic + config JSON per value),
@@ -220,9 +241,11 @@ The single biggest UX change: **no editing a config header + a `def/*.h` by hand
 - Each value is a `ValueDef{reg, offset, conv, size, type, label}` row; one model profile is an
   array of them, embedded as `const` in `main/def/<profile>.hpp`. The tables are machine-generated
   from the X10A value definitions (see [`REGISTERS.md`](REGISTERS.md)) — curated to the useful
-  monitoring values — and `def/registry.hpp` maps a **profile id** to its table. `tools/profiles/`
+  monitoring values — and `def/registry.hpp` maps a **profile id** to its table. The generator is
+  **offline tooling maintained outside this repo** (there is no `tools/` directory on `main`): it
   decodes Daikin's proprietary value catalog (encrypted `.ldd` = zlib + NRBF) into these tables
-  (`gen_profiles.py`) and the id→name table (`gen_names_generic.py`).
+  (`gen_profiles.py`) and the id→name table (`gen_names_generic.py`). Generated tables are never
+  hand-edited — they are regenerated, and their rows verified against [`REGISTERS.md`](REGISTERS.md).
 - At runtime `config` holds the active `profile` id. The poll engine expands it to the concrete
   register set to request (every value of the profile — there is no per-value enable mask). Labels
   are English-only — there is no `lang` field.

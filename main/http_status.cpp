@@ -153,8 +153,10 @@ static std::string build_status_json_string() {
     j += "\"last_crash\":" + std::string(crash_is_notable(crash) ? build_crash_json(crash) : "null") + ",";
 
     // Auto-detection: proto/model derived from the X10A bus (hp_detect.cpp). The candidate set is
-    // recomputed cheaply from the stored fingerprint (no re-probe) via the pure logic/detect.hpp;
-    // the UI auto-applies a lone candidate and offers the reduced set when ambiguous.
+    // recomputed cheaply from the stored fingerprint (no re-probe) via the pure logic/detect.hpp.
+    // Detection is fully automatic — the firmware applies the best-fit representative itself and the
+    // UI only DISPLAYS the outcome (the Model card); candidates[]/ambiguous are reported for
+    // diagnostics, not for a picker. There is no manual model selection anywhere in the UI.
     j += "\"detect\":{\"proto\":" + jstr(std::string(1, static_cast<char>(c.proto)));
     j += ",\"rx\":" + std::to_string(c.rx_pin) + ",\"tx\":" + std::to_string(c.tx_pin);
     j += ",\"valid\":" + std::string(c.fp_valid ? "true" : "false");
@@ -225,9 +227,12 @@ static esp_err_t h_values(httpd_req_t* req) {
     return http_send_json(req, j.c_str());
 }
 
-// Model catalog for the Setup UI. Every embedded profile is listed as an "outdoor unit"
-// choice; the web UI maps the selection to a profile id. The JSON is generated into
-// def/models_catalog.hpp alongside the def/*.hpp profiles.
+// Model catalog + pin hint (def/models_catalog.hpp, generated alongside the def/*.hpp profiles).
+// Detection is fully automatic, so this is NOT a picker feed — and in fact NO shipped client reads
+// it: the web UI never fetches /models (the RX/TX dropdown takes its GPIOs from /status.pins_avail,
+// via logic/board_pins.hpp — a separate mechanism from the embedded `pin_hint`). The whole payload
+// (pin_hint, profile_map, outdoor/indoor/tank lists) is legacy metadata, kept as a read-only
+// inspection endpoint for humans and scripts.
 static esp_err_t h_models(httpd_req_t* req) {
     return http_send_json(req, def::MODELS_JSON);
 }

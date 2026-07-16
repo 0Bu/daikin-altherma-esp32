@@ -57,8 +57,9 @@ namespace daik::def {
 // Generic Altherma fallback: the universal register core present (with identical layout) in >=95%
 // of the 41 Altherma "I"-protocol models — so a unit whose exact model can't be identified,
 // or an older/S-protocol unit, still reports every essential value over X10A. Machine-derived as the
-// high-frequency intersection of the decoded model catalog (tools/profiles/gen_profiles.py); keep
-// in sync when regenerating. Pages a given unit lacks simply time out and are skipped by the poller.
+// high-frequency intersection of the decoded model catalog by the offline generator
+// (gen_profiles.py, maintained outside this repo); keep in sync when regenerating and verify rows
+// against docs/REGISTERS.md. Pages a given unit lacks simply time out and are skipped by the poller.
 inline constexpr ValueDef generic[] = {
     {0x00, 12, 105, 1, -1, "O/U capacity (kW)"},
     {0x10, 0, 217, 1, -1, "Operation Mode"},

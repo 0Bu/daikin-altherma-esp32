@@ -3,7 +3,8 @@
 How raw X10A register payloads (see [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md)) become typed readings.
 This is the reference behind [`logic/value_def.hpp`](../main/logic/value_def.hpp),
 [`logic/convert.hpp`](../main/logic/convert.hpp) and the generated `def/*` profiles; it is the
-source of truth for [`tools/profiles/gen_profiles.py`](../tools/profiles/gen_profiles.py).
+source of truth for the offline value-catalog decode tooling (`gen_profiles.py`) that emits them,
+which is maintained outside this repo.
 
 All values, converter formulas and enum tables were recovered by protocol analysis and validated
 against live captures and the existing implementation (converter scale/sign/endianness match
@@ -512,7 +513,7 @@ per indoor unit (see [`X10A_PROTOCOL.md` §6](X10A_PROTOCOL.md#6-multi-unit-addr
 ## 7. Porting a model
 
 1. Get the model's rows as `{reg, offset, conv, size, type, label}` (one row per value).
-2. Feed them to [`tools/profiles/gen_profiles.py`](../tools/profiles/gen_profiles.py) → an embedded `def/<family>.hpp` table.
+2. Feed them to the offline profile generator (`gen_profiles.py`, maintained outside this repo) → an embedded `def/<family>.hpp` table.
 3. Wire the profile into `def/registry.hpp` and the `/models` catalog.
 4. Ensure every `conv` used is implemented in [`logic/convert.hpp`](../main/logic/convert.hpp); add a
    `CHECK` in [`test/test_logic.cpp`](../test/test_logic.cpp) for any new converter (see the

@@ -1,8 +1,8 @@
 #pragma once
 // A single queryable value — a row of
 //   {registryID, offset, convId, dataSize, dataType, label}
-// These rows are generated into main/def/*.hpp by tools/profiles/gen_profiles.py from Daikin's
-// decoded value catalog. IDF-free so the host tests can use it.
+// These rows are generated into main/def/*.hpp from Daikin's decoded value catalog by the offline
+// generator (gen_profiles.py, maintained outside this repo). IDF-free so the host tests can use it.
 #include <cstdint>
 
 namespace daik {

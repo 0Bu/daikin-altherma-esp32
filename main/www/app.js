@@ -46,7 +46,7 @@ function renderDashboard() {
   renderRollbackBanner();
   renderCrashBanner();
   const s = S.status || {}, hp = s.hp || {};
-  // Header is a fixed product title ("Daikin Altherma ESP32", set in index.html) — the detected
+  // Header is a fixed product title ("daikin-altherma-esp32", set in index.html) — the detected
   // model name lives in the Model card (statusCardsHtml), not the header.
 
   // hero: operation mode + fault state
