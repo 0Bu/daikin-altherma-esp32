@@ -2,6 +2,7 @@
 // scripts/run-mock-tests.sh (cmake+ctest, or a direct g++/clang++ compile). CI's logic-test job
 // gates the firmware build on this. Add a CHECK here whenever you touch a converter / CRC / the
 // config model / a discovery payload — the riskiest, silently-wrong parts of the port.
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -113,6 +114,15 @@ static void test_convert() {
     const uint8_t c[] = {0x2A};
     CHECK(approx(convert(cnt, c).value, 42.0));
 
+    // conv 151 = unsigned LITTLE-endian (expansion-valve pulses, 27 profiles); conv 152 reads the
+    // SAME bytes big-endian. Pin both byte orders so a 151/152 transcription slip can't ship silently.
+    ValueDef u151{0x30, 3, 151, 2, -1, "u151"};
+    ValueDef u152{0x30, 3, 152, 2, -1, "u152"};
+    const uint8_t u2b[] = {0x2C, 0x01};                // LE -> 300, BE -> 0x2C01 = 11265
+    CHECK(convert(u151, u2b).ok && approx(convert(u151, u2b).value, 300.0));
+    CHECK(convert(u152, u2b).ok && approx(convert(u152, u2b).value, 11265.0));
+    CHECK(!approx(convert(u151, u2b).value, convert(u152, u2b).value));  // 151 != 152 on the same bytes
+
     // conv 161 = unsigned big-endian ×0.5 (CT current).
     ValueDef ct{0x63, 0, 161, 1, 3, "CT"};
     const uint8_t a[] = {0x14};                        // 20 -> 10.0 A
@@ -171,14 +181,24 @@ static void test_convert() {
     const uint8_t h1[] = {0x01};
     CHECK(std::string(convert(hy, h1).text) == "Hybrid");
 
-    // conv 802 = refrigerant type (encoded by the converter id; reads no bytes).
+    // conv 801-805 = refrigerant type (encoded by the converter id; reads no bytes). The id -> curve
+    // mapping in profile_refrigerant depends on each label decoding correctly.
     ValueDef rf{0x00, 0, 802, 0, -1, "rf"};
     CHECK(std::string(convert(rf, c).text) == "R32");
+    CHECK(std::string(convert(ValueDef{0x00, 0, 801, 0, -1, "rf"}, c).text) == "R410A");
+    CHECK(std::string(convert(ValueDef{0x00, 0, 803, 0, -1, "rf"}, c).text) == "R22");
+    CHECK(std::string(convert(ValueDef{0x00, 0, 804, 0, -1, "rf"}, c).text) == "R407C");
+    CHECK(std::string(convert(ValueDef{0x00, 0, 805, 0, -1, "rf"}, c).text) == "R134a");
 
     // conv 214/215 = raw EEPROM identification byte (no name table -> exposed as the byte value).
     ValueDef ee{0x11, 0, 215, 1, -1, "ee"};
     const uint8_t e34[] = {0x34};
     CHECK(convert(ee, e34).ok && approx(convert(ee, e34).value, 52.0));   // 0x34 = 52
+
+    // conv 219 = I/U capacity code (raw byte, 43 profiles) -> exposed as the raw code value.
+    ValueDef cap{0x00, 0, 219, 1, -1, "cap"};
+    const uint8_t cap8[] = {0x08};
+    CHECK(convert(cap, cap8).ok && approx(convert(cap, cap8).value, 8.0));
 
     // Refrigerant pressure->temperature curve is monotonic in the working range.
     CHECK(press2temp(20.0) < press2temp(30.0));
@@ -218,6 +238,56 @@ static void test_convert() {
                 wp_checked++;
             }
     CHECK(wp_checked >= 40);   // every model carries this row; all must be raw bar
+
+    // Catalog guard (#35): "Mixed water temp." at reg 0x64 offset 10 is signed BE ×0.01 (conv 118)
+    // in EVERY profile — never conv 105 (signed LE ×0.1), which decodes 0D DA as -971.5 °C.
+    int mw_checked = 0;
+    for (const auto& p : def::profiles)
+        for (size_t i = 0; i < p.count; i++)
+            if (p.values[i].reg == 0x64 && p.values[i].offset == 10) {
+                CHECK(p.values[i].conv == 118);
+                mw_checked++;
+            }
+    CHECK(mw_checked >= 36);    // 36 profiles carry this row; all must be conv 118
+
+    // Catalog guard (#36): a reg 0x65 offset-0 row that is NOT a temperature (e.g. the [EKMIK]
+    // mix-valve position M1S) must be a raw signed byte — size 1, non-°C (type != 1) — never the
+    // size-2/type-1 (°C) shape that published the valve position as a phantom 12800 °C sensor.
+    auto label_has_temp = [](const char* s) {
+        std::string t(s);
+        for (char& ch : t) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        return t.find("temp") != std::string::npos;
+    };
+    int m1s_checked = 0;
+    for (const auto& p : def::profiles)
+        for (size_t i = 0; i < p.count; i++)
+            if (p.values[i].reg == 0x65 && p.values[i].offset == 0 &&
+                !label_has_temp(p.values[i].label)) {
+                CHECK(p.values[i].size == 1 && p.values[i].type != 1);
+                m1s_checked++;
+            }
+    CHECK(m1s_checked >= 4);    // the 4 EPRA M1S valve-position rows
+
+    // Catalog guard (#38): "Target Evap./Cond. Temp." at reg 0x10 offsets 6 and 8 uses conv 114
+    // (signed LE ×0.1 with the 0x8000 no-data sentinel) in EVERY profile — never conv 105, which
+    // publishes the 0x8000 idle marker as a real -3276.8 °C reading.
+    int tgt_checked = 0;
+    for (const auto& p : def::profiles)
+        for (size_t i = 0; i < p.count; i++)
+            if (p.values[i].reg == 0x10 &&
+                (p.values[i].offset == 6 || p.values[i].offset == 8)) {
+                CHECK(p.values[i].conv == 114);
+                tgt_checked++;
+            }
+    CHECK(tgt_checked >= 80);   // both offsets across ~44 profiles
+
+    // Catalog guard (#37): reg 0x30 offset 2 is "Fan 2 (step)" (conv 211, size 1) where present —
+    // never a size-2 field. A size-2 read there swallows the Fan 2 byte into the expansion-valve
+    // count (Fan 2 dropped, valve fabricated). Expansion valve 1 lives at offset 3.
+    for (const auto& p : def::profiles)
+        for (size_t i = 0; i < p.count; i++)
+            if (p.values[i].reg == 0x30 && p.values[i].offset == 2)
+                CHECK(p.values[i].size == 1);
 
     // HA hints derived from the dataType field.
     CHECK(std::string(unit_for_datatype(1)) == "°C");

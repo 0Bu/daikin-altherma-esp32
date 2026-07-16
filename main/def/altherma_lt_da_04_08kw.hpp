@@ -13,8 +13,8 @@ inline constexpr ValueDef altherma_lt_da_04_08kw[] = {
     {0x10, 1, 304, 1, -1, "Defrost Operation"},  // default_on
     {0x10, 4, 203, 1, -1, "Error type"},  // default_on
     {0x10, 5, 204, 1, -1, "Error Code"},  // default_on
-    {0x10, 6, 105, 2, 1, "Target Evap. Temp."},  // default_on
-    {0x10, 8, 105, 2, 1, "Target Cond. Temp."},  // default_on
+    {0x10, 6, 114, 2, 1, "Target Evap. Temp."},  // default_on
+    {0x10, 8, 114, 2, 1, "Target Cond. Temp."},  // default_on
     {0x20, 0, 105, 2, 1, "R1T-Outdoor air temp."},  // default_on
     {0x20, 2, 105, 2, 1, "O/U Heat Exch. Temp."},
     {0x20, 4, 105, 2, 1, "Discharge pipe temp."},  // default_on
@@ -79,7 +79,7 @@ inline constexpr ValueDef altherma_lt_da_04_08kw[] = {
     {0x64, 3, 105, 2, -1, "BE_COP"},
     {0x64, 5, 105, 2, 1, "Hybrid Heating Target Temp."},
     {0x64, 7, 105, 2, 1, "Boiler Heating Target Temp."},
-    {0x64, 10, 105, 2, 1, "Mixed water temp."},  // default_on
+    {0x64, 10, 118, 2, 1, "Mixed water temp."},  // default_on
     {0x64, 12, 105, 2, 1, "2nd Domestic hot water temperature"},  // default_on
 };
 

@@ -110,7 +110,7 @@ inline constexpr ValueDef altherma_epra_e_etv16_etb16_etvz16_e_ej_series_8_12kw[
     {0x64, 12, 105, 2, 1, "2nd Domestic hot water temperature"},  // default_on
     {0x65, 0, 105, 2, 1, "Outlet water heat exchanger temp (hydro split model) DLWB2"},  // default_on
     {0x65, 0, 105, 2, 1, "[EKMIK] Bizone kit mixed leaving water temperature R1T"},  // default_on
-    {0x65, 0, 152, 2, 1, "[EKMIK] Bizone kit mix valve position M1S"},  // default_on
+    {0x65, 0, 101, 1, -1, "[EKMIK] Bizone kit mix valve position M1S"},  // default_on
 };
 
 } // namespace daik::def

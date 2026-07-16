@@ -32,7 +32,8 @@ inline constexpr ValueDef altherma_lt_da_pair_bml[] = {
     {0x21, 13, 105, 2, 1, "Refrig. temp. evap.Out"},  // default_on
     {0x30, 0, 152, 1, -1, "INV frequency (rps)"},  // default_on
     {0x30, 1, 211, 1, -1, "Fan 1 (10 rpm)"},  // default_on
-    {0x30, 2, 151, 2, -1, "Expansion valve (pls)"},  // default_on
+    {0x30, 2, 211, 1, -1, "Fan 2 (step)"},
+    {0x30, 3, 151, 2, -1, "Expansion valve 1 (pls)"},  // default_on
     {0x30, 10, 105, 1, 1, "Inlet water temp. (DMW)"},
     {0x30, 11, 105, 1, 1, "Outlet water hex temp. before BUH (DLWB2)"},
     {0x60, 2, 315, 1, -1, "I/U operation mode"},  // default_on
@@ -84,7 +85,7 @@ inline constexpr ValueDef altherma_lt_da_pair_bml[] = {
     {0x64, 3, 105, 2, -1, "BE_COP"},
     {0x64, 5, 105, 2, 1, "Hybrid Heating Target Temp."},
     {0x64, 7, 105, 2, 1, "Boiler Heating Target Temp."},
-    {0x64, 10, 105, 2, 1, "Mixed water temp."},
+    {0x64, 10, 118, 2, 1, "Mixed water temp."},
     {0x64, 12, 105, 2, 1, "2nd Domestic hot water temperature"},  // default_on
 };
 
