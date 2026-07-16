@@ -43,6 +43,7 @@ function markUnreachable() {
 
 function renderDashboard() {
   renderRecoveryBanner();
+  renderRollbackBanner();
   renderCrashBanner();
   const s = S.status || {}, hp = s.hp || {};
   // Header is a fixed product title ("Daikin Altherma ESP32", set in index.html) — the detected
@@ -105,6 +106,42 @@ function renderRecoveryBanner() {
     `<div class="crash-meta">The device restarted too many times and came up in recovery mode. ` +
     `Heat-pump polling and MQTT are paused. Correct the configuration (for example the RX/TX pins on ` +
     `the ESP32 card), then reboot to resume normal operation.</div></div></div>`;
+  el.hidden = false;
+}
+
+// ── WiFi rollback banner ─────────────────────────────────────────────────
+// /status.wifi.rolled_back = the last /set_wifi was UNDONE: the new credentials never got a lease, so
+// wifi.cpp restored the previous ones and rebooted. Without this the failure is invisible — the device
+// simply reappears on the old SSID and the dashboard looks entirely normal, so the user is left
+// believing the change took effect.
+//
+// This CANNOT be reported from the save flow: wifi.cpp spends 60–180 s deciding
+// (logic/wifi_rollback.hpp — an AP that keeps refusing the creds is fast, an absent one gets a grace
+// period), far past saveReboot's ~21 s poll, so the verdict almost always lands after the user has
+// already reloaded the page. Hence a banner off /status rather than a toast.
+//
+// Not dismissible: the marker is sticky in NVS until the next /set_wifi retires it, which is exactly
+// the "until the user acts on it" lifetime a banner wants.
+function renderRollbackBanner() {
+  const el = $("rollbackBanner");
+  if (!el) return;
+  const w = S.status?.wifi || {};
+  if (!w.rolled_back) { el.hidden = true; el.dataset.on = ""; return; }
+  // Key the re-render on what the banner DRAWS (the fallback SSID), not just on "is it shown" — the
+  // same rule renderCrashBanner's `rsig` follows. A boolean key would leave a stale SSID on screen if
+  // the name ever changed under a held marker.
+  const rsig = `1:${w.ssid || ""}`;
+  if (el.dataset.on === rsig && !el.hidden) return;   // already rendered this — don't thrash the DOM
+  el.dataset.on = rsig;
+  // After the rollback the device is back on the OLD network, so /status.wifi.ssid names exactly the
+  // network it fell back to.
+  const back = w.ssid ? ` (<b>${esc(w.ssid)}</b>)` : "";
+  el.innerHTML =
+    `<div class="crash-head"><span class="crash-ico">!</span>` +
+    `<div class="crash-txt"><div class="crash-title">WiFi change failed — rolled back</div>` +
+    `<div class="crash-meta">The new WiFi credentials couldn't connect, so the device restored the ` +
+    `previous network${back} and restarted. Open the WiFi card to check the name and password, then ` +
+    `try again.</div></div></div>`;
   el.hidden = false;
 }
 
@@ -398,6 +435,15 @@ function openWifi() {
   $("wfSSID").focus();
 }
 function closeWifi() { $("wifiModal").hidden = true; }
+// Route a /set_wifi rejection to the field it names — wifi_credentials_valid answers "invalid ssid" /
+// "invalid password", and the modal's two hints already state exactly those rules, so mark the field
+// and unhide its own hint rather than overwriting it with the terser server wording (the toast carries
+// that verbatim anyway). A message naming neither field (a malformed body) stays toast-only rather
+// than blaming an arbitrary field.
+function wifiFieldError(msg) {
+  if (/ssid/i.test(msg)) { $("wfSSID").classList.add("invalid"); $("wfSSIDError").hidden = false; }
+  else if (/pass/i.test(msg)) { $("wfPass").classList.add("invalid"); $("wfPassError").hidden = false; }
+}
 
 // ── MQTT (dashboard edit modal) ───────────────────────────────────────────
 // The MQTT broker is edited in a modal opened from the dashboard card's pencil — there is no
@@ -503,28 +549,87 @@ function checkFirmwareUpdate() {
   toast("Update checking isn’t available yet", "info");
 }
 
-// ── Reboot-and-reconnect writes (MQTT) ────────────────────────────────────
-async function saveReboot(url, body, then) {
-  if (S.busy) return; S.busy = true;
-  let r = null;
-  try { r = await post(url, body); } catch { /* device may drop the socket as it reboots */ }
-  // An answered 4xx/5xx is a verdict, not a dropped socket: fetch rejects only on transport errors,
-  // never on status, so without this check a REFUSED save reads as a better one than a real save.
-  // The device didn't reboot (it can't persist), so /status answers on the first poll below and the
-  // user gets an instant "Saved" for a write that never happened — see POST /set_wifi's 500.
-  if (r && !r.ok) {
-    const e = await r.json().catch(() => ({}));
-    S.busy = false;
-    toast(e.error || "Save failed", "err");   // modal stays open: the values are still there to retry
-    return;
+// ── Reboot-and-reconnect writes (WiFi / MQTT / Syslog) ────────────────────
+// Mark a save button in-flight: disabled + spinner (DESIGN.md §8). The /set_mqtt broker pre-flight
+// blocks up to ~8 s, long enough that an un-styled disabled button reads as an ignored click.
+function setBusy(id, on) {
+  const b = $(id);
+  if (!b) return;
+  b.disabled = on;
+  if (on) {
+    if (b.dataset.label == null) b.dataset.label = b.textContent;   // remember the idle label once
+    b.innerHTML = `<span class="spin"></span>Saving…`;              // static markup — no interpolation
+  } else {
+    b.textContent = b.dataset.label || "Save";
   }
-  toast("Rebooting — reconnecting…", "info");
+}
+
+// Read the {"ok":false,"error":…} body every write endpoint answers a rejection with. Take the value
+// only when it really is a non-empty error string: .catch covers an unparseable body, but a body that
+// parses to JSON `null` would still resolve, and `null.error` throws — which here would escape
+// saveReboot before idle() runs and strand S.busy + the Save button disabled for good. Mirrors
+// setup.html's errorText().
+async function errorOf(r, fallback) {
+  const o = await r.json().catch(() => null);
+  return (o && typeof o.error === "string" && o.error) || fallback;
+}
+
+// Poll /status until the rebooted device answers again, then hand back to `then`.
+// A WiFi rollback deliberately outruns this window (wifi.cpp takes 60–180 s to decide), so the
+// rollback outcome is NOT reported here — renderRollbackBanner() surfaces it off /status instead.
+function rebootPoll(then) {
   let tries = 0;
   const poll = setInterval(async () => {
     tries++;
-    try { S.status = await j("/status"); clearInterval(poll); S.busy = false; toast("Saved", "ok"); then(); }
-    catch { if (tries > 14) { clearInterval(poll); S.busy = false; toast("Rebooted — reconnect to the device", "info"); } }
+    try {
+      S.status = await j("/status");
+      clearInterval(poll); S.busy = false;
+      toast("Saved", "ok");
+      then();
+    } catch {
+      if (tries > 14) { clearInterval(poll); S.busy = false; toast("Rebooted — reconnect to the device", "info"); }
+    }
   }, 1500);
+}
+
+// One flow for all three modal saves. The endpoints share a contract: {"ok":true,"reboot":true} →
+// persisted, device restarts; {"ok":true,"reboot":false} → nothing changed, no restart; a 4xx →
+// {"ok":false,"error":…} and NOTHING was written; a 503 → the shared heap guard refused the request.
+//
+// Only a 2xx may enter the reboot-poll. fetch rejects on transport errors ONLY, never on status, so
+// an answered 4xx/5xx is a verdict that arrives as a perfectly resolved promise — and firing the poll
+// off it reported "Saved" for REJECTED writes: with no reboot to wait for, the follow-up /status
+// answers on the first try, which the poll can't tell apart from a device that came back up.
+// (/set_wifi's 500 on a failed config_save is the same shape: nothing persisted, no reboot.)
+async function saveReboot(url, body, { btn, showError, close, then, busyMsg }) {
+  // The reboot-poll keeps S.busy set for ~22 s AFTER the modal closes, so the card is reopenable
+  // while a change is still landing. Say so — a silent `return` here is exactly the ignored-write
+  // feedback gap this whole flow exists to close.
+  if (S.busy) { toast("Still applying the last change…", "info"); return; }
+  S.busy = true;
+  setBusy(btn, true);
+  if (busyMsg) toast(busyMsg, "info");
+  const idle = () => { S.busy = false; setBusy(btn, false); };
+  const reject = (msg) => { idle(); showError(msg); toast(msg, "err"); };
+  let r;
+  try {
+    r = await post(url, body);
+  } catch {
+    // The endpoints answer BEFORE rebooting (reboot_soon fires ~400 ms after the response), so a
+    // throw here means the request never landed — nothing was written and the modal must stay open.
+    reject("Couldn't reach the device");
+    return;
+  }
+  // 503 is the device out of contiguous heap, not a bad field: nothing was written and the same save
+  // is worth retrying verbatim, so it gets a toast and no inline field error blaming the input.
+  if (r.status === 503) { idle(); toast("Device busy — retry in a moment", "err"); return; }
+  if (!r.ok) { reject(await errorOf(r, "Rejected")); return; }
+  const res = await r.json().catch(() => ({}));
+  setBusy(btn, false);
+  close();
+  if (res.reboot === false) { S.busy = false; toast("No changes", "info"); return; }   // /set_mqtt: unchanged
+  toast("Rebooting — reconnecting…", "info");
+  rebootPoll(then);   // stays busy until the device answers again (or the poll gives up)
 }
 
 // ── Boot ─────────────────────────────────────────────────────────────────
@@ -575,7 +680,12 @@ function wire() {
       $("wfPassError").hidden = true;
     }
     if (!valid) { toast("Check WiFi settings", "err"); return; }
-    saveReboot("/set_wifi", { ssid, pass }, () => { closeWifi(); renderDashboard(); });
+    saveReboot("/set_wifi", { ssid, pass }, {
+      btn: "wfBtn",
+      showError: wifiFieldError,
+      close: closeWifi,
+      then: renderDashboard,
+    });
   });
   $("wfSSID").addEventListener("input", () => { $("wfSSID").classList.remove("invalid"); $("wfSSIDError").hidden = true; });
   $("wfPass").addEventListener("input", () => { $("wfPass").classList.remove("invalid"); $("wfPassError").hidden = true; });
@@ -583,7 +693,7 @@ function wire() {
   $("mqCancel").onclick = closeMqtt;
   $("mqttBackdrop").onclick = closeMqtt;
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("mqttModal").hidden) closeMqtt(); });
-  $("mqttForm").addEventListener("submit", async (e) => {
+  $("mqttForm").addEventListener("submit", (e) => {
     e.preventDefault();
     const broker = $("mqBroker").value.trim();
     if (!validMqtt(broker)) {
@@ -593,58 +703,18 @@ function wire() {
       toast("Check the broker address", "err");
       return;
     }
-    if (S.busy) return;
-    S.busy = true;
-    toast("Verifying MQTT connection…", "info");
-    try {
-      const r = await post("/set_mqtt", {
-        broker,
-        user: $("mqUser").value.trim(),
-        pass: $("mqPass").value,
-        clear_creds: $("mqClearCreds").checked,
-      });
-      if (!r.ok) {
-        const errObj = await r.json().catch(() => ({}));
-        $("mqBroker").classList.add("invalid");
-        $("mqError").textContent = errObj.error || "Connection failed";
-        $("mqError").hidden = false;
-        S.busy = false;
-        return;
-      }
-      const resObj = await r.json().catch(() => ({}));
-      if (resObj.reboot === false) {
-        closeMqtt();
-        toast("No changes", "info");
-        S.busy = false;
-        return;
-      }
-    } catch {
-      $("mqBroker").classList.add("invalid");
-      $("mqError").textContent = "Device connection lost";
-      $("mqError").hidden = false;
-      S.busy = false;
-      return;
-    }
-
-    closeMqtt();
-    toast("Rebooting — reconnecting…", "info");
-    let tries = 0;
-    const poll = setInterval(async () => {
-      tries++;
-      try {
-        S.status = await j("/status");
-        clearInterval(poll);
-        S.busy = false;
-        toast("Saved", "ok");
-        renderDashboard();
-      } catch {
-        if (tries > 14) {
-          clearInterval(poll);
-          S.busy = false;
-          toast("Rebooted — reconnect to the device", "info");
-        }
-      }
-    }, 1500);
+    saveReboot("/set_mqtt", {
+      broker,
+      user: $("mqUser").value.trim(),
+      pass: $("mqPass").value,
+      clear_creds: $("mqClearCreds").checked,   // explicit credential clear (blank fields keep them)
+    }, {
+      btn: "mqBtn",
+      showError: (msg) => { $("mqBroker").classList.add("invalid"); $("mqError").textContent = msg; $("mqError").hidden = false; },
+      close: closeMqtt,
+      then: renderDashboard,
+      busyMsg: "Verifying MQTT connection…",   // the endpoint pre-flights the broker (DNS→TCP→CONNECT)
+    });
   });
   $("mqBroker").addEventListener("input", () => { $("mqBroker").classList.remove("invalid"); $("mqError").hidden = true; });
   // Typing credentials upgrades the broker scheme to TLS (the bridge refuses plaintext + creds);
@@ -694,7 +764,7 @@ function wire() {
   $("slCancel").onclick = closeSyslog;
   $("syslogBackdrop").onclick = closeSyslog;
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("syslogModal").hidden) closeSyslog(); });
-  $("syslogForm").addEventListener("submit", async (e) => {
+  $("syslogForm").addEventListener("submit", (e) => {
     e.preventDefault();
     const raw = $("slHost").value.trim();
     let host = "";
@@ -708,45 +778,13 @@ function wire() {
         host = raw;
       }
     }
-    if (S.busy) return;
-    S.busy = true;
-    toast("Saving Syslog settings…", "info");
-    try {
-      const r = await post("/set_syslog", { host, port });
-      if (!r.ok) {
-        const errObj = await r.json().catch(() => ({}));
-        $("slHost").classList.add("invalid");
-        $("slError").textContent = errObj.error || "Invalid host or port";
-        $("slError").hidden = false;
-        S.busy = false;
-        return;
-      }
-    } catch {
-      $("slHost").classList.add("invalid");
-      $("slError").textContent = "Device connection lost";
-      $("slError").hidden = false;
-      S.busy = false;
-      return;
-    }
-    closeSyslog();
-    toast("Rebooting — reconnecting…", "info");
-    let tries = 0;
-    const poll = setInterval(async () => {
-      tries++;
-      try {
-        S.status = await j("/status");
-        clearInterval(poll);
-        S.busy = false;
-        toast("Saved", "ok");
-        renderDashboard();
-      } catch {
-        if (tries > 14) {
-          clearInterval(poll);
-          S.busy = false;
-          toast("Rebooted — reconnect to the device", "info");
-        }
-      }
-    }, 1500);
+    saveReboot("/set_syslog", { host, port }, {
+      btn: "slBtn",
+      showError: (msg) => { $("slHost").classList.add("invalid"); $("slError").textContent = msg; $("slError").hidden = false; },
+      close: closeSyslog,
+      then: renderDashboard,
+      busyMsg: "Saving Syslog settings…",
+    });
   });
 }
 
@@ -770,8 +808,15 @@ async function boot() {
           } else if (r.type === "values") {
             S._values = r.values;
             renderDashboard();
-          } else {
-            S._values = r.values || r || [];
+          } else if (Array.isArray(r.values)) {
+            // Defensive only: every frame the firmware sends today is typed (http_status.cpp sends
+            // "status"/"values" for both the live pushes and the "sub" snapshot), so this branch is
+            // for a future/renamed frame that still carries a values array. The old fallback was
+            // `r.values || r || []`, which assigned the frame OBJECT itself for anything without a
+            // values key — every later pickValue()/faultValue() then ran .find/.filter on a non-array
+            // and threw. Accept only an actual values array; drop unknown frames and keep the last
+            // good values on screen.
+            S._values = r.values;
             renderDashboard();
           }
         } catch (err) {

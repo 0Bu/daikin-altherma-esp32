@@ -91,7 +91,9 @@ card) plus the RX/TX pins (inline on the ESP32 card). The heat pump is otherwise
 `GET /status` exposes the fields the dashboard keys off:
 `version`, `platform`, `uptime_s`, `app_elf_sha256` (build identity, shown in the crash banner),
 `pins_avail[]` (per-target usable X10A GPIOs for the RX/TX picker),
-`wifi{ssid,ip,rssi,connected,bssid,mac,std}`, `mqtt{configured,connected,tls,has_creds,broker}`
+`wifi{ssid,ip,rssi,connected,bssid,mac,std,rolled_back}` (`rolled_back` = the last `/set_wifi` was
+undone by the credential rollback — sticky until the next one; drives the rollback banner, §5.3 item 0),
+`mqtt{configured,connected,tls,has_creds,broker}`
 (`has_creds` = whether credentials are stored, never what they are — gates the modal's remove-credentials
 checkbox),
 `hp{proto,rx,tx,connected,last_ok_s,…}`, `profile{id}`,
@@ -110,6 +112,19 @@ password, **Save & reboot** → `POST /set_wifi`. Message line for scan/save sta
 On reboot the device joins STA and the main UI takes over. (This is the pre-WiFi world; the SoftAP
 serves only this page.)
 
+The credential rules are mirrored client-side (SSID 1–32, password empty or 8–63) and a rejection is
+rendered inline on the message line — the page announces "Saved — rebooting" **only** on an accepted
+write, since the device reboots only then and a false success sends the user off to wait for a device
+that never left the setup AP. It reads the reason from the `{"ok":false,"error":…}` body and tolerates
+a plain-text body too; a 503 reads as "Device busy — try again in a moment" rather than surfacing the
+heap guard's raw text as a credential problem (§8).
+
+Scan results are **attacker-controlled**: any AP in range picks its own SSID, and 32 bytes is room for
+`"><svg onload=…>`. This is also the one page where the user types their WiFi password, so the options
+are built as DOM nodes (`createElement` + `.value`/`.textContent`, which never parse markup) rather
+than concatenated into `innerHTML`. Every network-derived string on this page must stay on a
+DOM/`textContent` path — it is served standalone in AP mode and has no `esc()` helper.
+
 ### 5.1 WiFi / MQTT / Syslog edit  (modal, from the dashboard status card)
 The dashboard's **WiFi**, **MQTT** and **Syslog** status cards (§5.3) each carry a **pencil** in the
 header; tapping it opens a centred **modal** over a dimmed dashboard. These are the three status cards
@@ -120,7 +135,10 @@ without writing; Save reboots to apply, then closes back to the dashboard). The 
   exposed by `/status`). **Save** → `POST /set_wifi` (persist + reboot). If WiFi was already
   configured, the previous credentials are kept as a one-shot NVS backup and **automatically restored**
   (with a reboot) when the new network fails to connect — so a wrong SSID/password entered over the LAN
-  self-heals instead of stranding the device. A note in the form states this.
+  self-heals instead of stranding the device. A note in the form states this. The restore is reported
+  after the fact by the **rollback banner** (§5.3 item 0), not by this modal: the device takes 60–180 s
+  to decide, long after Save has returned. A rejected write (4xx) keeps the modal **open** with the
+  reason inline on the offending field — only an accepted write enters the reboot-poll.
 - **MQTT**: broker (`host:port`, or `mqtts://host:8883` for TLS), username, password, a **remove
   stored credentials** checkbox, TLS note ("credentials require an mqtts:// URL"). **Save** →
   `POST /set_mqtt`, which **pre-flights the broker** (DNS → TCP → a real MQTT connect/auth) before
@@ -177,6 +195,15 @@ Body, ordered:
    minimally (heat-pump polling and MQTT paused), and to correct the configuration (e.g. the RX/TX
    pins on the ESP32 card) and reboot. **Not dismissible** — it reflects a live state and clears
    itself once a healthy reboot leaves safe mode. Lives outside the poll-rebuilt card grid.
+0. **WiFi-rollback banner** (only when `wifi.rolled_back` is true). A `--warn`-accented card **above
+   the hero**: title "WiFi change failed — rolled back", explaining that the new credentials couldn't
+   connect, so the device restored the previous network (named from `wifi.ssid`, which after the
+   rollback *is* the network it fell back to) and restarted, and to open the WiFi card to try again.
+   This cannot be a toast on the save flow: the device takes 60–180 s to reach the rollback verdict
+   (§5.1) — far past the save's ~21 s reconnect poll — so the outcome almost always lands after the
+   user has reloaded. **Not dismissible**: the marker is sticky until the next `/set_wifi` retires it,
+   which is exactly the "until the user acts on it" lifetime wanted. Without it the failure is
+   invisible — the device simply reappears on the old SSID and the dashboard looks normal.
 0. **Crash banner** (only when `last_crash` is set — a fault reset or a core dump waiting; hidden on a
    clean boot). An `--err`-accented card **above the hero**. The title is keyed on `fault`, i.e. on
    whether *this* boot was itself a crash: "Device restarted after a crash" when it was, else "Crash
@@ -276,9 +303,14 @@ enabled/available values are hidden.
 
 Every async action shows: idle → in-flight ("Saving…", spinner on button) → result (toast + view
 transition). Specific:
-- **Reboot writes** (WiFi / MQTT / Syslog): after Save show "Rebooting — reconnecting…", poll `/status`
-  until it answers, then close the modal back to the dashboard. (A WiFi change that can't reach the new
-  network rolls back to the previous credentials and reboots again — see §5.1.)
+- **Reboot writes** (WiFi / MQTT / Syslog): Save disables the button and shows a spinner + "Saving…"
+  while the request is in flight (the `/set_mqtt` broker pre-flight blocks up to ~8 s). **Only a 2xx**
+  then shows "Rebooting — reconnecting…" and polls `/status` until it answers, closing the modal back
+  to the dashboard; a `reboot:false` answer (nothing changed) closes with "No changes" and never polls.
+  A rejected write must not enter the poll: with no reboot to wait for, `/status` answers on the first
+  try and would report a phantom "Saved". (A WiFi change that can't reach the new network rolls back to
+  the previous credentials and reboots again — see §5.1; the outcome surfaces on the rollback banner,
+  §5.3 item 0, since it lands long after this poll gives up.)
 - **Live writes** (heat pump): "Applied", stay on view; the `/events` WebSocket pushes the new
   values on the next poll cycle (a pin-pick also refreshes `/status` a few times to catch the connect).
 - **Connection loss**: hero greys to "No data"; the WiFi card shows "Offline" if WiFi dropped, and
@@ -296,12 +328,16 @@ transition). Specific:
   a leftover dump alone doesn't report a crash that didn't happen this boot. "Copy diagnostics" toasts
   "Diagnostics copied — paste into a bug report" on success, or "Copy failed — open /coredump and
   /diag manually" if the clipboard is unavailable.
-- **Errors**: 4xx from a write → inline field error + toast; 503 (device OOM) → "Device busy, retry";
-  500 `{"ok":false,"error":"config write failed"}` (the NVS write failed — nothing was saved and the
-  device did **not** reboot) → toast the error, leave the modal open with the values intact to retry.
-  A write that answers must be read before any "saved"/"rebooting" feedback: `fetch` rejects only on
-  transport errors, never on status, so a refused save otherwise reads as a *successful* one — the
-  device is still up, so `/status` answers immediately and the UI would confirm a save that never was.
+- **Errors**: a write that answers must be **read** before any "saved"/"rebooting" feedback. `fetch`
+  rejects only on transport errors, never on status, so a refused save otherwise reads as a
+  *successful* one — the device is still up, so `/status` answers immediately and the UI would confirm
+  a save that never was. The reason always comes from the endpoint's `{"ok":false,"error":…}` body —
+  every write endpoint answers a rejection in that shape, including the captive portal's `/set_wifi`.
+  - **4xx** → inline field error + toast, modal stays open, nothing was saved.
+  - **500** `{"error":"config write failed"}` (the NVS write failed — nothing saved, device did **not**
+    reboot) → toast the error, leave the modal open with the values intact to retry.
+  - **503** (device OOM) → "Device busy — retry in a moment": nothing was written and the same save is
+    worth retrying verbatim, so it is a toast only and blames no field.
 
 ## 9. Responsive & accessibility
 

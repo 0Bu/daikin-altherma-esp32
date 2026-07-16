@@ -30,6 +30,11 @@
              crash-looped on a bad config and came up minimally). Rendered by renderRecoveryBanner();
              not dismissible — it reflects a live state and clears itself on a healthy reboot. -->
         <div class="recovery-banner" id="recoveryBanner" hidden></div>
+        <!-- WiFi rollback banner: shown when /status.wifi.rolled_back is true (the last /set_wifi was
+             undone — the new credentials never connected, so the device restored the old ones and
+             rebooted). Rendered by renderRollbackBanner(); not dismissible — the marker is sticky
+             until the next /set_wifi retires it. -->
+        <div class="rollback-banner" id="rollbackBanner" hidden></div>
         <!-- Crash banner: shown when /status.last_crash is set (a fault reset or a core dump waiting).
              Rendered by renderCrashBanner() from app.js; dismissible per crash signature. -->
         <div class="crash-banner" id="crashBanner" hidden></div>
