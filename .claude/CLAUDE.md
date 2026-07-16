@@ -104,7 +104,9 @@ hp_convert.cpp  device value formatting over logic/convert.hpp
 hp_detect.cpp   auto-detect glue: protocol sweep + page probe -> fingerprint -> candidate models
 hp_poll.cpp     poll engine task: (auto-detect if profile=="auto") profile registers -> query ->
                 decode -> thread-safe cache; also drives the /events WebSocket push
-                (ws_broadcast_values every cycle, ws_broadcast_status every 4th)
+                (ws_broadcast_values every cycle, ws_broadcast_status every 4th). Subscribed to the
+                Task Watchdog (esp_task_wdt_add): reset per cycle + once per register in the sweep, so
+                a wedged X10A read reboots cleanly (reset reason task_wdt) instead of hanging silently.
 http_server.cpp esp_http_server :80; concerns register their own routes (http_handlers.hpp)
 http_status.cpp GET / (setup.html in AP mode, else gzip UI) /status /values /models /diag /scan
                 /coredump + /events (WebSocket live push) + captive catch-all
@@ -121,7 +123,11 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 on <base>/<node>/crash (logic/crashinfo.hpp) once per (re)connect — last reset reason
                 + a "dump waiting" flag as 2 more diagnostic HA entities (reason/backtrace only, never
                 secrets or the raw dump). Every publish funnels through one mqtt_publish() wrapper so mqtt.count/mqtt.fails
-                cover every topic, not just state.
+                cover every topic, not just state. The mqtt_pub task is Task-Watchdog-subscribed
+                (esp_task_wdt_add) and resets UNCONDITIONALLY at the top of each 1s cycle (not gated on
+                connect/publish, so a long broker outage can't false-trip) PLUS once per publish inside
+                mqtt_publish() (so a ~30-publish reconnect burst on a slow link can't exceed the 20s
+                budget) — a wedged publish reboots, a slow-but-progressing one never does.
 ota_update.cpp  pull-based signed OTA + rollback health gate (check/download: TODO)
 diag_log.cpp    in-RAM diag ring served by GET /diag; each line is also forwarded to syslog_send()
 syslog.cpp      optional syslog UDP client (RFC 5424): a task DNS-resolves the configured host, then

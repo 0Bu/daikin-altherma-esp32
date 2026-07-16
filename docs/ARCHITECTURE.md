@@ -145,6 +145,18 @@ Config changes from the web UI (`/set_hp`) apply live: the task rereads `config`
 next cycle (pins/protocol changes re-init the UART). No reboot needed for model/pins — only
 WiFi/MQTT changes reboot (they re-init network stacks).
 
+**Task Watchdog.** The poll task is the one worker that does real, potentially-blocking I/O (the
+X10A UART reads), so it subscribes itself to the ESP Task Watchdog Timer (`esp_task_wdt_add`) and
+feeds it (`esp_task_wdt_reset`) **at the top of every cycle and once per register during the
+sweep** — a slow-but-progressing 9600-baud sweep (worst case a silent bus, ~13 regs × 300 ms ≈ 4 s)
+keeps feeding it, so only a genuinely *stuck* read trips the 20 s timeout. The idle-task watch
+catches CPU starvation; this adds the blocked-but-still-scheduled case it can't see. On a trip,
+`CONFIG_ESP_TASK_WDT_PANIC=y` turns the hang into a clean reboot whose `esp_reset_reason()` is
+`ESP_RST_TASK_WDT` — classified as a fault by `logic/crashinfo.hpp` and surfaced on
+`/status.last_crash` + the retained MQTT crash topic (see *Diagnostics*). The detection pass
+(`poll_detect()`, ~7 s worst case) is bounded by the same per-cycle reset, so it needs no internal
+feed. Config keys live in [`sdkconfig.defaults`](../sdkconfig.defaults).
+
 ## Auto-detection (protocol + model) — `hp_detect.cpp` + `logic/detect.hpp`
 
 The goal is **zero manual model/protocol picking** where the bus allows it, on **every boot**. The
@@ -317,6 +329,16 @@ The Home Assistant bridge:
   credentials are set but the URI is not `mqtts://`, the bridge **refuses to connect** and reports
   the reason in `/status.mqtt` rather than sending them in cleartext — no silent plaintext fallback.
   A credential-free plaintext broker on the trusted LAN is allowed (nothing secret to leak).
+- **Task-Watchdog-subscribed.** The `mqtt_pub` publish task subscribes to the Task Watchdog and
+  feeds it **unconditionally at the top of its 1 s loop** — deliberately *not* gated on `s_connected`
+  or an actual publish, because the loop keeps spinning during a broker outage (it just doesn't
+  publish), and a reset gated on publishing would false-trip. It **also** feeds once per publish
+  inside `mqtt_publish()` (the funnel every message goes through), mirroring `poll_once`'s
+  per-register reset: a single (re)connect cycle bursts ~30 publishes (discovery + crash + state +
+  heartbeat) and each `esp_mqtt_client_publish()` can block up to the client network timeout, so
+  without a per-publish feed a slow-but-alive link could push one burst past the 20 s budget. So only
+  a publish that genuinely wedges reboots the device; see *The poll engine → Task Watchdog* for the
+  shared mechanism.
 
 ## OTA, signing, partitions
 

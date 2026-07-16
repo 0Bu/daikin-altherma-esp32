@@ -30,6 +30,7 @@
 #include "esp_app_desc.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "mqtt_client.h"
@@ -91,6 +92,13 @@ static std::string node_id() {
 static void mqtt_publish(const std::string& topic, const char* payload, int len, int qos, int retain) {
     const int rc = esp_mqtt_client_publish(s_client, topic.c_str(), payload, len, qos, retain);
     if (rc >= 0) s_mqtt_pub_ok++; else s_mqtt_pub_fail++;
+    // Feed the watchdog per completed publish — mirrors poll_once's per-register reset. A single
+    // (re)connect cycle bursts ~30 publishes (discovery + crash + state + heartbeat), and each
+    // esp_mqtt_client_publish() can block up to the client's network timeout; without this a
+    // slow-but-alive broker/link could push one burst past the 20 s budget and reboot a task that
+    // is still making progress. This runs only in mqtt_pub (the sole caller path), which is
+    // subscribed, so a genuinely wedged write still trips the timeout — a progressing one never does.
+    esp_task_wdt_reset();
 }
 
 // Layout-marker / grid converters carry no measured value (docs/REGISTERS.md §3.6) — no sensor.
@@ -234,8 +242,13 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
 // it changes. The per-cycle body is guarded — an OOM std::string build must skip the cycle, not
 // throw through the FreeRTOS task and reboot the device.
 static void mqtt_task(void*) {
+    esp_task_wdt_add(NULL);                            // watch the publish task for a wedged broker write
     int heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S;    // publish immediately on the first connected cycle
     for (;;) {
+        // Feed the watchdog unconditionally at the top of every cycle — the loop wakes each second
+        // regardless of connection state, so this must NOT be gated on s_connected or an actual
+        // publish, or a long MQTT disconnect (no publishes) would false-trip the timeout.
+        esp_task_wdt_reset();
         const int delay_s = POLL_INTERVAL_S;
 
         try {

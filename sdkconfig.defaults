@@ -89,3 +89,22 @@ CONFIG_COMPILER_CXX_EXCEPTIONS=y
 CONFIG_ESP_COREDUMP_ENABLE=y
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+
+# ── Task Watchdog Timer (TWDT) ──
+# Turn a genuinely-wedged worker task into a clean, automatic REBOOT instead of a silent hang. The
+# poll engine (hp_poll) and the MQTT publish task (mqtt_pub) do the real, potentially-blocking I/O
+# (X10A UART reads / MQTT publishes); each subscribes itself (esp_task_wdt_add) and feeds the
+# watchdog every cycle — hp_poll also once per register during the X10A sweep, so a slow-but-
+# progressing 9600-baud sweep never looks like a hang. A read or publish that is genuinely stuck
+# trips the 20 s timeout. The idle-task watch (INIT=y) still catches CPU starvation; this adds the
+# blocked-but-scheduled case it can't see.
+#   TIMEOUT_S=20 — comfortably above the 1 s poll cadence and any real register sweep (worst case a
+#     silent bus is ~13 regs × 300 ms ≈ 4 s), so only a real hang fires.
+#   PANIC=y — a timeout REBOOTS (panic handler) rather than only printing a warning; esp_reset_reason()
+#     then reports ESP_RST_TASK_WDT, which the crash pipeline classifies as a fault and surfaces on
+#     /status.last_crash + the retained MQTT crash topic (logic/crashinfo.hpp — "task_wdt").
+#   INIT=y — initialise the TWDT at startup and keep the default idle-task subscription.
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=20
+CONFIG_ESP_TASK_WDT_PANIC=y

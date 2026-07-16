@@ -11,6 +11,7 @@
 #include "logic/crc.hpp"
 #include "http_handlers.hpp"
 
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -41,6 +42,10 @@ static void poll_once() {
         if (seen[reg]) continue;
         seen[reg] = 1;
         regs++;
+        // Feed the watchdog once per register: each hp_query blocks up to its serial timeout, so a
+        // silent bus makes the whole sweep take (regs × timeout). Resetting per read keeps a
+        // slow-but-progressing sweep from ever looking like a hang — only a genuinely stuck read trips.
+        esp_task_wdt_reset();
 
         uint8_t buf[64];
         int n = hp_query(reg, c.proto, buf, sizeof(buf));
@@ -117,8 +122,10 @@ static void poll_detect() {
 }
 
 static void poll_task(void*) {
+    esp_task_wdt_add(NULL);                                    // this task owns the X10A UART — watch it
     int ticks = 0;
     for (;;) {
+        esp_task_wdt_reset();                                  // top of cycle; poll_once also resets per register
         if (config().profile == "auto") poll_detect();         // resolves to a concrete profile
         if (config().profile != "auto") poll_once();           // then poll it (same cycle if resolved)
         ws_broadcast_values();
