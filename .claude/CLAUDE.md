@@ -180,8 +180,20 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 the image mid-session; a cached flag would strand an uncleanable crash banner + a
                 download that 404s. mqtt_ha republishes the retained crash topic when the flag changes
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, config_model,
-                discovery, detect, mqtt_group, heartbeat, crashinfo, bootlog, reset_reason,
-                boot_guard, board_pins, modbus, syslog_policy, link_watch, wifi_rollback).
+                discovery, detect, mqtt_group, mqtt_uri, heartbeat, crashinfo, bootlog, reset_reason,
+                boot_guard, board_pins, modbus, syslog_policy, link_watch, wifi_rollback, health_gate).
+                mqtt_uri.hpp = the broker-URI split (host/port/TLS) behind the /set_mqtt pre-flight.
+                Its scheme defaults track esp-mqtt's OWN (mqtt 1883, mqtts 8883, ws 80, wss 443) —
+                the probe must dial the port the client will: 1883/8883 for ws(s) probed a port
+                nothing listens on. A port outside 1-65535 is rejected at PARSE time, since the
+                probe's htons() truncates (:65537 -> :1) and would call a wrong port reachable; the
+                port must be ALL digits (stoi alone skips whitespace, takes a sign and stops at the
+                first non-digit -> "1883x" read as 1883, which esp-mqtt's own parser would reject).
+                A URL path is trimmed BEFORE the port split: `/mqtt` is the de-facto standard path
+                for MQTT-over-WebSocket, so wss://host:8084/mqtt is the NORMAL shape of a ws(s)
+                broker — untrimmed it lands in the port field (or, portless, in the host, where it
+                surfaced as a misleading "DNS lookup failed"). Only host/port are taken here; the
+                caller hands esp-mqtt the full URI, path included.
                 bootlog.hpp = the records syslog.cpp replays once per boot: build_boot_line (version/
                 elf_sha256/reset/safe_mode — the only way to tell WHICH firmware produced a log
                 stream) + build_crash_log_lines (the crash as single-line, datagram-sized records;
@@ -250,7 +262,11 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   while offline; mac is this STA's own MAC, always present; rolled_back = the last
                   /set_wifi was UNDONE by the credential rollback — sticky until the next /set_wifi,
                   and the only trace of it, since the rollback reboots and the SSID shown is just the
-                  old one again), mqtt,
+                  old one again),
+                  mqtt{configured,connected,tls,has_creds,broker,error} (has_creds = whether creds are
+                  stored, never their value; read from the CONFIG not the client — creds outlive a
+                  disabled broker, which is exactly the state the UI must offer to clear via
+                  /set_mqtt's clear_creds),
                   syslog{configured,resolved,reachable,host,port,error},
                   hp{proto,rx,tx,connected,
                   last_ok_s,registers,values,crc_err,timeout_err}, profile{id},
@@ -296,12 +312,20 @@ POST /set_wifi    {ssid,pass} -> validate (ssid 1-32 chars; pass empty[open] or 
                   absent SSID or a slow DHCP is no evidence against them and gets 180 s, long enough
                   for a rebooting router. wifi.cpp clears the reason on STA_CONNECTED, so an earlier
                   refusal can't outlive the association that disproved it.
-POST /set_mqtt    {broker,user,pass} -> pre-flight the broker synchronously (DNS -> TCP probe ->
-                  short-lived esp-mqtt CONNECT/auth, mirroring mqtt_ha's creds-require-mqtts:// policy)
-                  -> on success persist + reboot; on failure 400 {ok:false,error} and nothing is saved.
-                  Unchanged settings short-circuit to {ok:true,reboot:false} (no probe, no reboot).
+POST /set_mqtt    {broker,user,pass,clear_creds} -> pre-flight the broker synchronously (DNS -> TCP
+                  probe -> short-lived esp-mqtt CONNECT/auth, mirroring mqtt_ha's creds-require-mqtts://
+                  policy) -> on success persist + reboot; on failure 400 {ok:false,error} and nothing is
+                  saved. Unchanged settings short-circuit to {ok:true,reboot:false} (no probe, no reboot).
                   "" (empty broker) disables MQTT and skips the probe. Blocks up to ~8 s — the one
                   request-path network block (syslog/wifi don't); safe under the handle_all 503 guard.
+                  CREDENTIALS: the modal never prefills them, so an empty user+pass means KEEP the
+                  stored ones (else an unrelated broker edit would wipe a working login). Empty can
+                  therefore not also mean "clear" — clear_creds:true (the UI's "remove stored
+                  credentials" checkbox, shown when /status.mqtt.has_creds) is the explicit signal; a
+                  non-empty user/pass is an explicit SET and wins over the flag. Without it an
+                  authenticated mqtts:// broker can never migrate to an anonymous mqtt:// one: disable
+                  + re-add both send empty creds -> both keep -> the kept creds then 400 every
+                  plaintext broker ("Credentials require mqtts://"). Only a flash erase escaped that.
 POST /set_syslog  {host,port} -> validate port range -> persist + reboot. Empty host disables syslog.
                   DNS/reachability are NOT checked here (no request-path network block); they resolve
                   in the syslog task and surface via /status.syslog {resolved,reachable,error}.

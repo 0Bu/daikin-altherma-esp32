@@ -540,16 +540,56 @@ static void test_mqtt_uri() {
     CHECK(parse_mqtt_uri("mqtts://h:8884", host, port, tls) && host == "h" && port == 8884 && tls);
     // mqtts:// without port -> default TLS 8883.
     CHECK(parse_mqtt_uri("mqtts://h", host, port, tls) && host == "h" && port == 8883 && tls);
-    // wss:// without port -> default TLS 8883.
-    CHECK(parse_mqtt_uri("wss://h", host, port, tls) && host == "h" && port == 8883 && tls);
-    // ws:// with port -> plaintext websocket.
+    // ws:// / wss:// without port -> the WebSocket transports default to the HTTP(S) ports esp-mqtt
+    // itself uses (80/443), NOT 1883/8883 — the pre-flight must probe the port the client will use.
+    CHECK(parse_mqtt_uri("wss://h", host, port, tls) && host == "h" && port == 443 && tls);
+    CHECK(parse_mqtt_uri("ws://h", host, port, tls) && host == "h" && port == 80 && !tls);
+    // An explicit port always wins over the scheme default.
     CHECK(parse_mqtt_uri("ws://h:9001", host, port, tls) && host == "h" && port == 9001 && !tls);
+    CHECK(parse_mqtt_uri("wss://h:9002", host, port, tls) && host == "h" && port == 9002 && tls);
     // Empty string -> rejected.
     CHECK(!parse_mqtt_uri("", host, port, tls));
     // Scheme only, no host -> rejected.
     CHECK(!parse_mqtt_uri("mqtts://", host, port, tls));
     // Trailing colon (empty port) -> non-numeric -> rejected.
     CHECK(!parse_mqtt_uri("host:", host, port, tls));
+    // Port range: 0 and >65535 are rejected at PARSE time — the probe's htons() would truncate
+    // (:65537 -> :1) and report a port reachable that the client never dials.
+    CHECK(!parse_mqtt_uri("h:0", host, port, tls));
+    CHECK(!parse_mqtt_uri("h:65536", host, port, tls));
+    CHECK(!parse_mqtt_uri("h:99999", host, port, tls));
+    CHECK(!parse_mqtt_uri("mqtt://h:-1", host, port, tls));
+    // Past int range entirely (stoi throws out_of_range) -> rejected, not wrapped.
+    CHECK(!parse_mqtt_uri("h:99999999999999999999", host, port, tls));
+    // The range boundaries themselves stay valid.
+    CHECK(parse_mqtt_uri("h:1", host, port, tls) && port == 1);
+    CHECK(parse_mqtt_uri("h:65535", host, port, tls) && port == 65535);
+    // Trailing garbage: stoi would stop at the first non-digit and report 1883 — reject instead, so
+    // a typo can't silently probe a different port than it reads.
+    CHECK(!parse_mqtt_uri("h:1883x", host, port, tls));
+    CHECK(!parse_mqtt_uri("h:18 83", host, port, tls));
+    // stoi also skips leading whitespace and accepts a sign; esp-mqtt's URL parser accepts neither,
+    // and the pre-flight must not read a port the client wouldn't.
+    CHECK(!parse_mqtt_uri("h:+1883", host, port, tls));
+    CHECK(!parse_mqtt_uri("h: 1883", host, port, tls));
+    // A PATH must not be mistaken for part of the port — `/mqtt` is the de-facto standard path for
+    // MQTT-over-WebSocket, so this is the normal shape of a ws(s) broker. Only host/port are taken;
+    // esp-mqtt still receives the full URI with its path.
+    CHECK(parse_mqtt_uri("wss://broker.example:8084/mqtt", host, port, tls) &&
+          host == "broker.example" && port == 8084 && tls);
+    CHECK(parse_mqtt_uri("ws://h:8083/mqtt", host, port, tls) && host == "h" && port == 8083 && !tls);
+    // Path with no explicit port -> scheme default, and the path never leaks into the host (it used
+    // to become a bogus "h/mqtt" hostname and surfaced later as a misleading "DNS lookup failed").
+    CHECK(parse_mqtt_uri("ws://h/mqtt", host, port, tls) && host == "h" && port == 80 && !tls);
+    CHECK(parse_mqtt_uri("wss://h/mqtt", host, port, tls) && host == "h" && port == 443 && tls);
+    CHECK(parse_mqtt_uri("mqtt://h:1883/", host, port, tls) && host == "h" && port == 1883 && !tls);
+    // Path but no host -> still rejected.
+    CHECK(!parse_mqtt_uri("ws:///mqtt", host, port, tls));
+    // The failure reason is distinct so /set_mqtt can tell a bad port from a bad URI.
+    const char* why = nullptr;
+    CHECK(!parse_mqtt_uri("h:99999", host, port, tls, &why) && std::string(why) == "Invalid port");
+    why = nullptr;
+    CHECK(!parse_mqtt_uri("mqtts://", host, port, tls, &why) && std::string(why) == "Invalid broker URI");
     // IPv6 literal with port -> parsed with brackets intact (device AF_INET resolve then rejects it).
     CHECK(parse_mqtt_uri("[::1]:1883", host, port, tls) && host == "[::1]" && port == 1883 && !tls);
     // IPv6 literal, no port -> brackets kept, default port (colon is inside the brackets).

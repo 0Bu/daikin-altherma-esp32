@@ -116,8 +116,13 @@ host-testable core is unusually large and valuable, because the risky parts are 
   one shared state topic (depth 1, groups/keys in first-seen order). Numeric-vs-string typing is
   asserted host-side, so a reading can't reach HA quoted and land as a string sensor.
 - `logic/mqtt_uri.hpp` — broker URI → host/port/TLS split behind `mqtt_ha`'s scheme policy: scheme
-  defaults (`mqtt://` 1883, `mqtts://`/`wss://` 8883), IPv6 literals, and the rejects (empty, scheme
-  with no host, empty port).
+  defaults (`mqtt://` 1883, `mqtts://` 8883, `ws://` 80, `wss://` 443 — the WebSocket transports take
+  the HTTP(S) ports **esp-mqtt itself** defaults to, so the save-time pre-flight probes the port the
+  client will really dial), IPv6 literals, a **URL path** (`wss://host:8084/mqtt` — the normal shape
+  of a WebSocket broker; the path is trimmed off the pre-flight's host/port, and esp-mqtt still gets
+  the full URI), and the rejects (empty, scheme with no host, empty or non-digit port, and a port
+  outside 1–65535 — caught at parse time because the probe's `htons()` would truncate `:65537` to
+  `:1` and call a wrong port reachable).
 - `logic/heartbeat.hpp` — the board/link diagnostics JSON + its 16 diagnostic HA discovery configs,
   with the dBm → signal-quality curve and uptime formatting pinned to known-good samples.
 - `logic/crashinfo.hpp` — reset-reason slug + fault classification, and the `last_crash` / MQTT crash
@@ -558,8 +563,15 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
   untried credentials with no way back.
 - **MQTT** → `/set_mqtt` (edited from a dashboard modal off the MQTT card). Unlike Syslog, Save
   **pre-flights the broker synchronously** (DNS → TCP port → a short-lived esp-mqtt connect/auth,
-  heap-guarded) and only persists + reboots on success — a bad host/port/password is rejected inline;
-  an empty username+password keeps the stored credentials.
+  heap-guarded) and only persists + reboots on success — a bad host/port/password is rejected inline.
+  An empty username+password **keeps** the stored credentials (the modal never prefills them, so empty
+  is what an unrelated broker edit sends). Clearing them therefore needs its own explicit signal:
+  `clear_creds:true` (the modal's "remove stored credentials" checkbox, shown when
+  `/status.mqtt.has_creds`) makes empty mean empty. A non-empty user/pass is an explicit set and wins
+  over the flag. Without that signal an authenticated `mqtts://` broker could never migrate to an
+  anonymous one — disabling MQTT and re-adding the broker both arrive with empty credentials, so both
+  keep, and the kept credentials then reject every plaintext broker with "Credentials require
+  mqtts://" (only a flash erase got out of it).
 - **Syslog** → `/set_syslog` (edited from a dashboard modal off the Syslog card). Save only
   validates the port range (no request-path network block); an empty host disables forwarding. DNS
   resolution and the advisory reachability probe run in the syslog task and surface on the card via

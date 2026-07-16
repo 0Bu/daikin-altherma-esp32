@@ -173,6 +173,11 @@ main { flex: 1; }
 }
 .input.invalid { border-color: var(--err); }
 .input::placeholder { color: var(--muted); opacity: .8; }
+/* Inline checkbox + label on one row (MQTT "remove stored credentials"). */
+.field.check { display: flex; align-items: center; gap: 9px; cursor: pointer; }
+.field.check input { width: 16px; height: 16px; accent-color: var(--brand); margin: 0; flex: none; }
+.field.check input:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); border-radius: 3px; }
+.field.check span { font-size: 12px; color: var(--muted); }
 .hint { font-size: 13px; color: var(--muted); margin: 9px 2px 0; line-height: 1.5; }
 .hint.err { color: var(--err); margin-top: 6px; }
 

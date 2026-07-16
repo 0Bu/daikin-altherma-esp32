@@ -91,7 +91,9 @@ card) plus the RX/TX pins (inline on the ESP32 card). The heat pump is otherwise
 `GET /status` exposes the fields the dashboard keys off:
 `version`, `platform`, `uptime_s`, `app_elf_sha256` (build identity, shown in the crash banner),
 `pins_avail[]` (per-target usable X10A GPIOs for the RX/TX picker),
-`wifi{ssid,ip,rssi,connected,bssid,mac,std}`, `mqtt{configured,connected,tls,broker}`,
+`wifi{ssid,ip,rssi,connected,bssid,mac,std}`, `mqtt{configured,connected,tls,has_creds,broker}`
+(`has_creds` = whether credentials are stored, never what they are — gates the modal's remove-credentials
+checkbox),
 `hp{proto,rx,tx,connected,last_ok_s,…}`, `profile{id}`,
 `sys{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode}` (heap headroom + last boot reason,
 always present — feeds the ESP32 card's Last-reset and Free-heap rows),
@@ -119,18 +121,25 @@ without writing; Save reboots to apply, then closes back to the dashboard). The 
   configured, the previous credentials are kept as a one-shot NVS backup and **automatically restored**
   (with a reboot) when the new network fails to connect — so a wrong SSID/password entered over the LAN
   self-heals instead of stranding the device. A note in the form states this.
-- **MQTT**: broker (`host:port`, or `mqtts://host:8883` for TLS), username, password, TLS note
-  ("credentials require an mqtts:// URL"). **Save** → `POST /set_mqtt`, which **pre-flights the
-  broker** (DNS → TCP → a real MQTT connect/auth) before writing: on success the device reboots to
-  apply and the modal closes; on failure the modal **stays open** and shows the reason inline
-  (e.g. "Broker port unreachable", "Invalid username or password") — nothing is saved. **Cancel**
-  (and the backdrop / `Esc`) dismiss without writing. An empty broker disables MQTT (no probe).
+- **MQTT**: broker (`host:port`, or `mqtts://host:8883` for TLS), username, password, a **remove
+  stored credentials** checkbox, TLS note ("credentials require an mqtts:// URL"). **Save** →
+  `POST /set_mqtt`, which **pre-flights the broker** (DNS → TCP → a real MQTT connect/auth) before
+  writing: on success the device reboots to apply and the modal closes; on failure the modal **stays
+  open** and shows the reason inline (e.g. "Broker port unreachable", "Invalid username or password",
+  "Invalid port") — nothing is saved. **Cancel** (and the backdrop / `Esc`) dismiss without writing.
+  An empty broker disables MQTT (no probe).
 Only the broker prefills (username/password aren't exposed by `/status`). Because the credential
-fields start blank, **leaving them empty keeps the stored credentials** — to change them, retype
-them; to remove them, disable MQTT and re-add the broker without them. Typing a username or password
-**auto-upgrades the broker scheme to TLS** (`mqtt://`→`mqtts://`, `ws://`→`wss://`, or prepends
-`mqtts://`) since the bridge refuses credentials over plaintext; clearing them strips the scheme
-back. Validation is also inline client-side (bare `host:port`, or a `mqtt(s)://` / `ws(s)://` URL).
+fields start blank, **leaving them empty keeps the stored credentials** — to change them, retype them.
+Empty therefore can't also mean "remove", so clearing is its own explicit control: the **remove stored
+credentials** checkbox (shown only when `/status.mqtt.has_creds`, and it empties + disables the two
+fields while ticked) sends `clear_creds:true`. That is the only path from an authenticated `mqtts://`
+broker to an anonymous one — without it the kept credentials reject every later plaintext broker with
+"Credentials require mqtts://". Ticking it deliberately **leaves the broker scheme alone**: dropping
+credentials is not a request to drop TLS, and an anonymous `mqtts://` broker is a valid target.
+Typing a username or password **auto-upgrades the broker scheme to TLS** (`mqtt://`→`mqtts://`,
+`ws://`→`wss://`, or prepends `mqtts://`) since the bridge refuses credentials over plaintext;
+clearing the fields by hand strips the scheme back. Validation is also inline client-side (bare
+`host:port`, or a `mqtt(s)://` / `ws(s)://` URL).
 Actions row at the bottom: Cancel (secondary) + Save (brand).
 - **Syslog**: host + port (`1–65535`, default 514). **Save** → `POST /set_syslog` (persist + reboot);
   an empty host disables forwarding. Only the port range is validated on the device — DNS resolution

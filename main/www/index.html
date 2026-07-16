@@ -85,6 +85,12 @@
         <span class="field-label plain">Password · optional</span>
         <input class="input" name="pass" id="mqPass" type="password" placeholder="••••••••" autocomplete="off">
       </label>
+      <!-- Only way to clear stored credentials: the fields are never prefilled, so leaving them empty
+           means "keep". Shown only when /status reports mqtt.has_creds. -->
+      <label class="field check" id="mqClearRow" hidden>
+        <input type="checkbox" id="mqClearCreds">
+        <span>Remove stored credentials — connect anonymously</span>
+      </label>
       <p class="hint">Credentials require a TLS broker — use an mqtts:// URL (e.g. mqtts://host:8883). Empty host disables MQTT.</p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="mqCancel">Cancel</button>
