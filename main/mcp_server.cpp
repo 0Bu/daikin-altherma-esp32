@@ -11,7 +11,17 @@ namespace daik {
 // minimal well-formed JSON-RPC error so the route exists and clients get a clean response.
 static esp_err_t mcp_post(httpd_req_t* req) {
     char body[1024];
-    http_read_body(req, body, sizeof(body));
+    // Checked even though the stub never reads `body`: http_read_body leaves the buffer untouched
+    // when it fails (empty or oversized body, stalled or vanished peer), so the tools/call
+    // implementation that starts parsing here must not inherit uninitialised stack. id is null
+    // because a body we could not read is a body we could not find an id in. Same guard as the
+    // /set_* handlers in http_config.cpp.
+    if (http_read_body(req, body, sizeof(body)) < 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return http_send_json(
+            req, "{\"jsonrpc\":\"2.0\",\"id\":null,"
+                 "\"error\":{\"code\":-32700,\"message\":\"Parse error\"}}");
+    }
     return http_send_json(
         req, "{\"jsonrpc\":\"2.0\",\"id\":null,"
              "\"error\":{\"code\":-32601,\"message\":\"MCP not yet implemented\"}}");
