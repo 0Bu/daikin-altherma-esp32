@@ -33,8 +33,26 @@ jobs:
       - name: Run host-side logic tests
         run: ./scripts/run-mock-tests.sh
 
+  # Domain-correctness gate: are the published values physically RIGHT? The logic tests above
+  # verify the logic they are handed; they cannot see a well-formed value that is simply false —
+  # a wrong converter compiles, passes them all, and publishes -971.5 °C to Home Assistant
+  # (issues #35-#39). This runs the real converters over the real catalog against docs/REGISTERS.md.
+  # Hardware-free and seconds long, so it gates the build like logic-test does. The human half of
+  # the gate is the /domain-review skill + its PR checkbox; this is the mechanical half.
+  domain-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Audit the value catalog
+        run: ./scripts/run-domain-audit.sh
+      # A checker that has stopped checking turns "clean" from evidence into a lie, so the audit
+      # must keep catching the four decode bugs it was built for (re-introduced into a throwaway
+      # copy; the tree is never touched).
+      - name: Verify the audit still has teeth
+        run: ./tools/domain/selftest.sh
+
   build:
-    needs: logic-test
+    needs: [logic-test, domain-audit]
     runs-on: ubuntu-latest
     permissions:
       contents: write   # tags + releases + the gh-pages branch push (the only Pages publisher)

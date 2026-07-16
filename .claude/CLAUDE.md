@@ -39,7 +39,8 @@ logic with the plain system toolchain (no ESP-IDF/Docker/board), so decoding/con
 changes can be *verified*, not just reasoned about, even in a cloud session:
 
 ```bash
-scripts/run-mock-tests.sh   # compile + run host logic tests in seconds (cmake + g++/clang++)
+scripts/run-mock-tests.sh    # compile + run host logic tests in seconds (cmake + g++/clang++)
+scripts/run-domain-audit.sh  # is the value catalog physically RIGHT? (the domain-correctness gate)
 ```
 
 It covers the X10A **CRC** and framing (`logic/crc.hpp`), the **value converters**
@@ -49,6 +50,28 @@ It covers the X10A **CRC** and framing (`logic/crc.hpp`), the **value converters
 (`logic-test` job). Add new decode/format logic to `main/logic/` and a `CHECK` in
 `test/test_logic.cpp` — never bury it in a `.cpp` only the device can run. Full detail:
 [`test/README.md`](../test/README.md).
+
+**Passing the tests is not the same as being RIGHT.** The tests verify the logic they are handed;
+they cannot see a value that is well-formed, compiles, drifts no doc — and is physically false. A
+wrong converter id published `-971.5 °C` as a mixed-water temperature on eight profiles, a valve
+*position* reached Home Assistant as a 12800 °C temperature sensor, and a "no data" sentinel was
+published as a real `-3276.8 °C` reading (issues #35–#39) — all found by slow manual review. So the
+value catalog has its own gate, separate from the technical ones:
+
+```bash
+scripts/run-domain-audit.sh   # real converters x real catalog, cross-checked vs docs/REGISTERS.md §5
+tools/domain/selftest.sh      # does the audit still catch the four bugs it was built for?
+```
+
+It reports wrong converters, spec/layout drift, cross-profile outliers, non-temperatures typed °C,
+and straddling byte windows — each with a decode witness (wire bytes → what it should read → what it
+does). CI gates the build on it (`domain-audit` job); the judgement half is the `/domain-review`
+skill, a **PR-merge gate** required on **every** merge — like `/project-review`, and unlike the
+conditional `/feature-docs`. Unconditional because deciding up front which files can change a
+value's meaning is a guess, and it is the guess that let #35–#39 ship; a PR that cannot reach a
+value clears in seconds, but a person states that rather than a regex assuming it. Adjudicated
+deviations live in `tools/domain/audit_exceptions.txt` (which also ledgers the four *pre-existing*
+defects the audit found on its first run).
 
 ## Build & Flash
 
@@ -472,6 +495,7 @@ work in locals, `swap`/move it in — `poll_once`'s commit) or take the lock thr
 
 ```bash
 scripts/run-mock-tests.sh                              # host logic tests (the fast loop)
+scripts/run-domain-audit.sh                            # are the catalog's values physically right?
 screen /dev/cu.usbmodemXXXX 115200                     # serial monitor (native USB on s3)
 curl http://daikin-altherma-esp32.local/status | jq          # device status (incl. last_crash)
 curl http://daikin-altherma-esp32.local/values | jq          # decoded values
