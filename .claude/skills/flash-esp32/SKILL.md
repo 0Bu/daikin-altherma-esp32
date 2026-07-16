@@ -49,4 +49,6 @@ config survive). Docker builds, host `esptool` flashes (Docker Desktop has no US
   auto-rollback details: [docs/SECURITY.md](../../../docs/SECURITY.md) → Boot recovery.
 - First flash of a fresh board erases NVS → set up WiFi via the `daikin-altherma-esp32-setup` portal.
 - A full-erase recovery: `esptool --chip esp32s3 -p <port> erase_flash` then reflash.
-- This skill does NOT merge/release — that's the `ship` skill. It works on the local tree only.
+- This skill does NOT merge or release — it works on the local tree only. PRs merge with
+  `gh pr merge` once the `/project-review` + `/feature-docs` gate boxes are ticked and SHA-stamped;
+  releases are cut by CI from `main` ([build.yml](../../../.github/workflows/build.yml)).

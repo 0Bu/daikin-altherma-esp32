@@ -1,7 +1,7 @@
 name: build
 
 # PUBLIC-ONLY PUBLISHING GATE
-# While this repo is PRIVATE, CI still runs the full pipeline (host logic tests + all-target
+# While this repo is PRIVATE, CI still runs the full pipeline (host logic tests + the esp32s3
 # firmware build + artifact upload) but publishes NOTHING outward: no git tags, no GitHub
 # Releases, no GitHub Pages (neither the root installer site nor per-PR previews). Every such
 # step is gated on `github.event.repository.private == false`. The moment the repo is flipped to
@@ -24,8 +24,8 @@ permissions:
   contents: read
 
 jobs:
-  # Fast, hardware-free gate: host-side pure-logic tests (main/logic/) before the slow per-target
-  # firmware builds, so a decode/config/discovery regression fails in seconds. See test/README.md.
+  # Fast, hardware-free gate: host-side pure-logic tests (main/logic/) before the slow esp32s3
+  # firmware build, so a decode/config/discovery regression fails in seconds. See test/README.md.
   logic-test:
     runs-on: ubuntu-latest
     steps:
@@ -108,8 +108,8 @@ jobs:
           chmod 600 ota_signing_key.pem
           echo "signed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Build target (ESP-IDF v6.0.2)
-        uses: espressif/esp-idf-ci-action@v1
+      - name: Build firmware
+        uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5 # v1.2.0
         with:
           esp_idf_version: v6.0.2
           target: esp32s3

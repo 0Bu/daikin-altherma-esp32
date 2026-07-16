@@ -17,8 +17,8 @@ scripts/run-mock-tests.sh
 
 Uses `cmake` + `ctest` when present, else a direct `g++`/`clang++` compile of the single
 translation unit ([`test_logic.cpp`](test_logic.cpp)) with `-std=c++17 -Wall -Wextra -Werror`.
-CI runs the same thing as the `logic-test` job, gating the per-target firmware builds — a logic
-regression fails in seconds instead of after four ESP-IDF builds.
+CI runs the same thing as the `logic-test` job, gating the esp32s3 firmware build — a logic
+regression fails in seconds instead of after a full ESP-IDF build.
 
 ## Covered
 
@@ -32,7 +32,7 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   rules, the `/set_hp` fingerprint rule, and the field-owned detection patches (`apply_link` /
   `apply_model` touch only the link / model — a link commit must not revert a concurrent
   `/set_wifi`).
-- `logic/board_pins.hpp` — per-target usable X10A GPIO lists (sorted, in range; the XIAO ESP32-S3
+- `logic/board_pins.hpp` — the usable X10A GPIO list (sorted, in range; the XIAO ESP32-S3
   reference set excludes not-broken-out pins).
 - `logic/discovery.hpp` — object-id slugging + the discovery config JSON.
 - `def/registry.hpp` — profile lookup + generic fallback.

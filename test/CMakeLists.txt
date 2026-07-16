@@ -1,4 +1,5 @@
-cmake_minimum_required(VERSION 3.16)
+# 3.20: scripts/run-mock-tests.sh drives this with `ctest --test-dir`, which older ctest lacks.
+cmake_minimum_required(VERSION 3.20)
 project(daikin_logic_tests CXX)
 
 # Host-side mock build: the pure logic in main/logic/ (IDF-free) compiled with the plain system
