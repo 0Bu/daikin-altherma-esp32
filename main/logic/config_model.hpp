@@ -91,12 +91,22 @@ inline void apply_model(Config& c, std::string profile, uint32_t fp_pages, int f
 // is only the host-test fallback. This is a range guard, not a full per-pad reachability map.
 inline bool gpio_in_range(int p, int max_gpio = 48) { return p >= 0 && p <= max_gpio; }
 
+// The X10A link rule, as a PAIR: two individually-legal pins are still an illegal link if they name
+// the same pad. One predicate because two paths must apply it — the request path (validate, below)
+// and the LOAD path (config.cpp). The latter needs it because config_save commits rx_pin and tx_pin
+// as separate NVS writes, so flash can hold a pair that no request could have set.
+inline bool link_pins_valid(int rx, int tx, int max_gpio = 48) {
+    return gpio_in_range(rx, max_gpio) && gpio_in_range(tx, max_gpio) && rx != tx;
+}
+
 // Validate a config coming from the web UI. Returns false + a reason on the first problem. Pass the
-// target's highest GPIO as `max_gpio` so pins are checked against the actual chip.
+// target's highest GPIO as `max_gpio` so pins are checked against the actual chip. The two range
+// checks exist to name WHICH pin is wrong; link_pins_valid is the authority on the pair itself, so a
+// rule added there is inherited here.
 inline bool validate(const Config& c, std::string& reason, int max_gpio = 48) {
     if (!gpio_in_range(c.rx_pin, max_gpio)) { reason = "rx_pin out of range"; return false; }
     if (!gpio_in_range(c.tx_pin, max_gpio)) { reason = "tx_pin out of range"; return false; }
-    if (c.rx_pin == c.tx_pin)     { reason = "rx_pin and tx_pin must differ"; return false; }
+    if (!link_pins_valid(c.rx_pin, c.tx_pin, max_gpio)) { reason = "rx_pin and tx_pin must differ"; return false; }
     if (c.proto != Protocol::I && c.proto != Protocol::S) { reason = "protocol must be I or S"; return false; }
     if (!c.syslog_host.empty() && (c.syslog_port < 1 || c.syslog_port > 65535)) { reason = "syslog_port out of range"; return false; }
     return true;
