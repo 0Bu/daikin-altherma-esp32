@@ -101,7 +101,7 @@ inline constexpr ValueDef altherma_lt_d7_e_bml[] = {
     {0x64, 3, 105, 2, -1, "BE_COP"},
     {0x64, 5, 105, 2, 1, "Hybrid Heating Target Temp."},
     {0x64, 7, 105, 2, 1, "Boiler Heating Target Temp."},
-    {0x64, 10, 105, 2, 1, "Mixed water temp."},  // default_on
+    {0x64, 10, 118, 2, 1, "Mixed water temp."},  // default_on
     {0x64, 12, 105, 2, 1, "2nd Domestic hot water temperature"},  // default_on
 };
 
