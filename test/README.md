@@ -37,7 +37,10 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   narrowing + the deterministic `detect_best` pick (Altherma-only), EEPROM hex render.
 - `logic/mqtt_group.hpp` — register page → group name, number-vs-string JSON typing, the grouped
   state JSON (depth 1, first-seen order).
-- `logic/mqtt_uri.hpp` — broker URI → host/port/TLS split: scheme defaults, IPv6 literals, rejects.
+- `logic/mqtt_uri.hpp` — broker URI → host/port/TLS split: scheme defaults (incl. `ws://` 80 /
+  `wss://` 443, matching esp-mqtt so the pre-flight probes the port the client dials), IPv6 literals,
+  a URL path (`wss://host:8084/mqtt`) kept out of both the port and the host, the 1–65535 port range,
+  and the rejects (empty, no host, empty/non-digit/signed/whitespace/trailing-garbage port).
 - `logic/modbus.hpp` — Modbus TCP framing (MBAP + FC03/04/06/16 request build, response/exception
   parse, per-request register maxima) + the HomeHub Temp16/Pow16/Int16/Text16 codecs (special-value
   guard, encode round-trip + range/sentinel rejects) and the `homehub-*` mDNS filter.

@@ -101,9 +101,14 @@ static std::string build_status_json_string() {
          // not render this yet (a banner lands with the web-UI write-feedback work, PR #65) — for
          // now it is the API's answer to "did my save actually stick?".
          ",\"rolled_back\":" + std::string(c.wifi_rolled_back ? "true" : "false") + "},";
+    // has_creds says only WHETHER credentials are stored — never what they are (/status stays
+    // secret-free). Read from the CONFIG, not from MqttStatus: creds outlive a disabled broker, and
+    // that is exactly the state the UI must offer to clear. It drives the MQTT modal's "remove
+    // stored credentials" checkbox, which is the only way to reach /set_mqtt's clear_creds.
     j += "\"mqtt\":{\"configured\":" + std::string(m.configured ? "true" : "false") +
          ",\"connected\":" + (m.connected ? "true" : "false") +
          ",\"tls\":" + (m.tls ? "true" : "false") +
+         ",\"has_creds\":" + ((!c.mqtt_user.empty() || !c.mqtt_pass.empty()) ? "true" : "false") +
          ",\"broker\":" + jstr(m.broker) + (m.error.empty() ? "" : ",\"error\":" + jstr(m.error)) + "},";
     SyslogStatus sy = syslog_status();
     j += "\"syslog\":{\"configured\":" + std::string(sy.configured ? "true" : "false") +

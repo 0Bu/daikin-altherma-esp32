@@ -183,7 +183,8 @@ LAN only, see [SECURITY.md](SECURITY.md).
 GET  /  (alias /index.html)        # embedded web UI (gzipped into the app binary)
 GET  /status                       # { version, platform, uptime_s, app_elf_sha256, pins_avail:[..],
                                    #   wifi:{ssid,rssi,ip,connected,bssid,mac,std,rolled_back},
-                                   #   mqtt:{configured,connected,tls,broker,error?},
+                                   #   mqtt:{configured,connected,tls,has_creds,broker,error?},
+                                   #     (has_creds = whether creds are stored, never their value)
                                    #   syslog:{configured,resolved,reachable,host,port,error?},
                                    #   hp:{proto,rx,tx,connected,last_ok_s,
                                    #        registers,values,crc_err,timeout_err},
@@ -207,9 +208,10 @@ GET  /coredump[?clear=1]           # stream the flash core-dump image (chunked; 
 POST /set_wifi                     # { ssid, pass } → validate (ssid 1-32; pass ""|8-63) → persist +
                                    #   reboot. Backs up the old creds + auto-rolls-back if the new
                                    #   network fails to connect (see ARCHITECTURE.md → Web UI config flow)
-POST /set_mqtt                     # { broker, user?, pass? } → pre-flight the broker (DNS/TCP/connect
-                                   #   +auth) → on success persist + reboot, on failure 400 {error}
-                                   #   (nothing saved). Empty user+pass keeps stored creds; "" disables.
+POST /set_mqtt                     # { broker, user?, pass?, clear_creds? } → pre-flight the broker
+                                   #   (DNS/TCP/connect+auth) → on success persist + reboot, on failure
+                                   #   400 {error} (nothing saved). Empty user+pass keeps stored creds;
+                                   #   clear_creds:true removes them (anonymous); "" broker disables.
 POST /set_syslog                   # { host, port } → validate port range, persist + reboot ("" host
                                    #   disables). DNS/reachability resolve async, shown in /status.syslog
 POST /set_hp                       # { profile?, rx?, tx? } → apply live (no reboot); rx/tx PERSIST

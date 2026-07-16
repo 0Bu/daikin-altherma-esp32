@@ -406,6 +406,22 @@ function closeWifi() { $("wifiModal").hidden = true; }
 function fillMqtt() {
   const m = S.status?.mqtt || {};
   $("mqBroker").value = m.broker || "";
+  // The credential fields start empty every time (/status never exposes them), which the firmware
+  // reads as "keep the stored ones". So empty can't also mean "clear" — the checkbox is the explicit
+  // signal, and it only has anything to do when credentials are actually stored (mqtt.has_creds).
+  $("mqUser").value = "";
+  $("mqPass").value = "";
+  setMqttClear(false);
+  $("mqClearRow").hidden = !m.has_creds;
+}
+// Checking "remove stored credentials" means the save must carry NO credentials — the firmware treats
+// a non-empty user/pass as an explicit set that overrides the flag, so an editable field here would
+// let the user build a request that contradicts itself. Empty + disable them while it's checked.
+function setMqttClear(on) {
+  $("mqClearCreds").checked = on;
+  if (on) { $("mqUser").value = ""; $("mqPass").value = ""; }
+  $("mqUser").disabled = on;
+  $("mqPass").disabled = on;
 }
 function openMqtt() {
   fillMqtt();
@@ -417,9 +433,12 @@ function closeMqtt() { $("mqttModal").hidden = true; }
 // Accept a bare host:port (defaults to plaintext mqtt://) OR an explicit scheme. Credentials require
 // mqtts:// (the bridge refuses plaintext + creds), so the field MUST allow a scheme — otherwise the
 // only secure path is un-enterable. mqtt(s)://host[:port] and ws(s):// forms pass; empty disables.
+// A URL path is allowed because a WebSocket broker normally has one (`wss://host:8084/mqtt`) — the
+// device takes only host+port for its pre-flight probe and hands esp-mqtt the whole URI. A bare
+// host:port is raw TCP, where a path would be meaningless, so it stays path-less.
 const validMqtt = (h) => {
   h = h.trim();
-  return !h || /^[\w.\-]+:\d{2,5}$/.test(h) || /^(mqtts?|wss?):\/\/[\w.\-]+(:\d{2,5})?$/.test(h);
+  return !h || /^[\w.\-]+:\d{2,5}$/.test(h) || /^(mqtts?|wss?):\/\/[\w.\-]+(:\d{2,5})?(\/\S*)?$/.test(h);
 };
 
 // ── Syslog (dashboard edit modal) ───────────────────────────────────────────
@@ -567,7 +586,12 @@ function wire() {
     S.busy = true;
     toast("Verifying MQTT connection…", "info");
     try {
-      const r = await post("/set_mqtt", { broker, user: $("mqUser").value.trim(), pass: $("mqPass").value });
+      const r = await post("/set_mqtt", {
+        broker,
+        user: $("mqUser").value.trim(),
+        pass: $("mqPass").value,
+        clear_creds: $("mqClearCreds").checked,
+      });
       if (!r.ok) {
         const errObj = await r.json().catch(() => ({}));
         $("mqBroker").classList.add("invalid");
@@ -616,7 +640,15 @@ function wire() {
   // clearing them again strips the scheme back to bare. Only mutates the broker while editing the
   // credential fields — typing in the broker field itself is left untouched.
   const handleCredsInput = () => {
-    const hasCreds = $("mqUser").value.trim().length > 0 || $("mqPass").value.length > 0;
+    // Empty fields are NOT "no credentials". With credentials stored and the remove box unticked, the
+    // device KEEPS them — that is the whole point of the empty-means-keep default — so the broker
+    // still needs mqtts://. Inferring "no creds" from the fields alone let the else-branch strip the
+    // scheme off a broker the user never touched (type a password, change your mind, backspace it —
+    // and mqtts://host silently became host), producing a save the firmware then rejects with
+    // "Credentials require mqtts://": an error blaming a scheme this page removed on its own.
+    // (Ticked, the fields are disabled and this can't fire; the term keeps the intent explicit.)
+    const typed = $("mqUser").value.trim().length > 0 || $("mqPass").value.length > 0;
+    const hasCreds = typed || (!!S.status?.mqtt?.has_creds && !$("mqClearCreds").checked);
     const broker = $("mqBroker").value.trim();
     if (hasCreds) {
       if (broker) {
@@ -638,6 +670,13 @@ function wire() {
   };
   $("mqUser").addEventListener("input", () => { $("mqBroker").classList.remove("invalid"); $("mqError").hidden = true; handleCredsInput(); });
   $("mqPass").addEventListener("input", () => { $("mqBroker").classList.remove("invalid"); $("mqError").hidden = true; handleCredsInput(); });
+  // Deliberately does NOT strip an mqtts:// broker back to plaintext the way clearing the cred fields
+  // does: dropping credentials is not a request to drop TLS, and an anonymous mqtts:// broker is a
+  // valid target. The scheme stays the user's call.
+  $("mqClearCreds").addEventListener("change", (e) => {
+    setMqttClear(e.target.checked);
+    $("mqBroker").classList.remove("invalid"); $("mqError").hidden = true;
+  });
 
   $("slHost").addEventListener("input", () => { $("slHost").classList.remove("invalid"); $("slError").hidden = true; });
 

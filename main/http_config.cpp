@@ -37,6 +37,10 @@ static int ji(cJSON* o, const char* k, int def) {
     cJSON* v = cJSON_GetObjectItem(o, k);
     return (v && cJSON_IsNumber(v)) ? v->valueint : def;
 }
+static bool jb(cJSON* o, const char* k, bool def) {
+    cJSON* v = cJSON_GetObjectItem(o, k);
+    return cJSON_IsBool(v) ? cJSON_IsTrue(v) : def;
+}
 
 static esp_err_t set_wifi(httpd_req_t* req) {
     char body[512];
@@ -195,9 +199,10 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
         httpd_resp_set_status(req, "400 Bad Request");
         return httpd_resp_sendstr(req, "bad json");
     }
-    std::string broker = js(j, "broker");
-    std::string user   = js(j, "user");
-    std::string pass   = js(j, "pass");
+    std::string broker      = js(j, "broker");
+    std::string user        = js(j, "user");
+    std::string pass        = js(j, "pass");
+    const bool  clear_creds = jb(j, "clear_creds", false);
     cJSON_Delete(j);
 
     Config c = config();
@@ -205,9 +210,15 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
     // come back empty whenever the user didn't retype them. An empty user AND pass therefore means
     // "keep the stored credentials" — NOT "clear them". Without this, editing only the broker would
     // silently wipe a working username/password (and the pre-flight below would connect anonymously
-    // and either destroy the creds or reject a broker the real creds would have accepted). To actually
-    // clear credentials, disable MQTT (empty broker) and re-add the broker without them.
-    if (user.empty() && pass.empty()) {
+    // and either destroy the creds or reject a broker the real creds would have accepted).
+    //
+    // That default alone left NO way to clear them: disabling MQTT and re-adding the broker both
+    // arrive with empty creds, so both KEEP — and every later plain mqtt:// save is then rejected
+    // "Credentials require mqtts://" by the kept creds. Migrating an authenticated mqtts:// broker to
+    // an anonymous one needed a flash erase. `clear_creds:true` (the modal's "remove stored
+    // credentials" checkbox) is the explicit signal for the other meaning of empty. A non-empty
+    // user/pass is an explicit SET and wins regardless — the flag only disambiguates the empty case.
+    if (user.empty() && pass.empty() && !clear_creds) {
         user = c.mqtt_user;
         pass = c.mqtt_pass;
     }
@@ -238,9 +249,10 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
         std::string host;
         int port = 0;
         bool is_tls = false;
-        if (!parse_mqtt_uri(test_uri, host, port, is_tls)) {
+        const char* uri_err = "Invalid broker URI";
+        if (!parse_mqtt_uri(test_uri, host, port, is_tls, &uri_err)) {
             httpd_resp_set_status(req, "400 Bad Request");
-            return http_send_json(req, "{\"ok\":false,\"error\":\"Invalid broker URI\"}");
+            return http_send_json(req, (std::string("{\"ok\":false,\"error\":\"") + uri_err + "\"}").c_str());
         }
 
         // 4. Resolve DNS
@@ -293,7 +305,15 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
             esp_mqtt_client_register_event(client, static_cast<esp_mqtt_event_id_t>(MQTT_EVENT_ANY),
                                            on_mqtt_validate, &ctx);
 
-            esp_mqtt_client_start(client);
+            // A failed start never produces an event, so waiting on the semaphore would burn the full
+            // 5 s and then blame a "connection timeout" — report the real cause immediately instead.
+            // No stop() here: nothing was started.
+            if (esp_mqtt_client_start(client) != ESP_OK) {
+                esp_mqtt_client_destroy(client);
+                vSemaphoreDelete(ctx.sem);
+                httpd_resp_set_status(req, "500 Internal Server Error");
+                return http_send_json(req, "{\"ok\":false,\"error\":\"MQTT client start failed\"}");
+            }
 
             bool finished = xSemaphoreTake(ctx.sem, pdMS_TO_TICKS(5000)) == pdTRUE;
 

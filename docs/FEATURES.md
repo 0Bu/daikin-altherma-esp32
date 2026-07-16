@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (489 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (510 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -289,8 +289,20 @@ IDF v6.0 extracted it from core — [`idf_component.yml`](../main/idf_component.
   `CONNECT` (and authenticate) — so a wrong host, closed port or bad password is rejected **inline at
   Save** rather than failing silently after the reboot. The transient (TLS) validation client is
   guarded by a largest-free-block check: under heap pressure it skips the connect probe (DNS + port
-  were already checked) rather than risk OOM-ing the live bridge. Empty username+password means *keep
-  the stored credentials*, so a broker-only edit never wipes them.
+  were already checked) rather than risk OOM-ing the live bridge. The parsed host/port come from the
+  host-tested [`mqtt_uri.hpp`](../main/logic/mqtt_uri.hpp), whose scheme defaults track **esp-mqtt's
+  own** (`mqtt://` 1883, `mqtts://` 8883, `ws://` 80, `wss://` 443) so the probe dials the port the
+  client will, which keeps a WebSocket broker's URL path (`wss://host:8084/mqtt`) out of the host and
+  port while esp-mqtt still receives the full URI, and which rejects a non-digit port or one outside
+  1–65535 at parse time (the probe's `htons()` truncates `:65537` to `:1`).
+- **✅ Explicit credential clearing** ([`http_config.cpp`](../main/http_config.cpp)): empty
+  username+password means *keep the stored credentials* — the modal never prefills them, so a
+  broker-only edit never wipes them. Empty therefore can't also mean *remove*, so `clear_creds:true`
+  (the MQTT modal's "remove stored credentials" checkbox, gated on `/status.mqtt.has_creds` — whether
+  credentials are stored, never their value) is the explicit signal; a non-empty username/password is
+  an explicit set and wins over the flag. It is the only path from an authenticated `mqtts://` broker
+  to an anonymous one — previously the kept credentials rejected every plaintext broker and only a
+  flash erase escaped.
 - **✅ Availability (LWT).** A retained `offline` last-will on `<base>/<node>/availability`, flipped to
   `online` on connect — HA marks every entity unavailable if the device drops.
 - **Read-only by design.** No command subscriptions; the bridge only reads the pump.
@@ -396,7 +408,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   pins (`board_pins.hpp`), and **🔭 Modbus TCP framing + HomeHub register codecs** (`modbus.hpp` — MBAP
   framing without CRC, FC03/04/06/16 build+parse, `Temp16`/`Pow16`/`Int16`/`Text16` decode/encode,
   the `homehub-*` mDNS filter; the host-tested core for the *planned* firmware-exclusive HomeHub
-  Modbus link (issue #32), **not yet wired into the firmware**). **463 `CHECK`s** in
+  Modbus link (issue #32), **not yet wired into the firmware**). **510 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
@@ -490,7 +502,7 @@ security of signed firmware with none of the brick risk. It refuses to roll a ba
 and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-associations no event
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 16-entity heartbeat diagnostics). And the risky parts — decode,
-CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (489 checks),
+CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (510 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 
