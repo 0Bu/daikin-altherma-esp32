@@ -389,8 +389,8 @@ the fact*, from the field, without a serial cable:
   produced any dump, and the syslog boot line (below) puts the same hash in the **log stream**, so a
   captured stream stays attributable to a binary after the device has moved on.
 - **✅ In-RAM diag ring** (`GET /diag`) and a **status LED** ([`status_led.cpp`](../main/status_led.cpp))
-  encoding WiFi-connecting / setup-portal / all-healthy / X10A-error / MQTT-error as distinct blink
-  patterns.
+  encoding setup-portal / WiFi-connecting / all-healthy / X10A-error / MQTT-error / no-WiFi-mode as
+  six distinct blink patterns (X10A-error outranks MQTT-error — the bus is the point of the device).
 - **✅ Off-device log forwarding** ([`syslog.cpp`](../main/syslog.cpp)): every diag line is also
   forwarded as one RFC 5424 UDP datagram to an optional collector (`/set_syslog`; empty host = off).
   Delivery is gated on **DNS only** — the ARP/ICMP reachability probe is advisory (`/status.syslog`),
