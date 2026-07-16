@@ -38,8 +38,14 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 - `def/registry.hpp` — profile lookup + generic fallback.
 - `logic/detect.hpp` — capacity class parsed out of a profile id, page-mask fingerprint → candidate
   narrowing + the deterministic `detect_best` pick (Altherma-only), EEPROM hex render.
+- `logic/json.hpp` — RFC 8259 string escaping: the `"`/`\` pair, the five shorthand control escapes,
+  every remaining byte under 0x20 as `\u00XX` (exhaustively — no control byte may reach the output
+  raw), and the reachable case, an SSID like `Free<LF>WiFi` that made `GET /scan` unparseable. Also
+  asserts what must *not* change: raw UTF-8 and 0x7F survive verbatim, since `char` is signed and a
+  naive `c < 0x20` would mangle every non-ASCII SSID.
 - `logic/mqtt_group.hpp` — register page → group name, number-vs-string JSON typing, the grouped
-  state JSON (depth 1, first-seen order).
+  state JSON (depth 1, first-seen order), and that a text value routes through the shared
+  `logic/json.hpp` encoder.
 - `logic/mqtt_uri.hpp` — broker URI → host/port/TLS split: scheme defaults (incl. `ws://` 80 /
   `wss://` 443, matching esp-mqtt so the pre-flight probes the port the client dials), IPv6 literals,
   a URL path (`wss://host:8084/mqtt`) kept out of both the port and the host, the 1–65535 port range,

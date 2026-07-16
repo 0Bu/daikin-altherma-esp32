@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "json.hpp"   // json_append_escaped — the shared RFC 8259 string encoder
 
 namespace daik {
 
@@ -55,14 +56,6 @@ inline bool is_json_number(const std::string& s) {
         return false;
     }
     return digit;
-}
-
-// Append `s` to `out` as the inside of a JSON string, escaping the two chars that would break it.
-inline void json_append_escaped(std::string& out, const std::string& s) {
-    for (const char c : s) {
-        if (c == '"' || c == '\\') out += '\\';
-        out += c;
-    }
 }
 
 // One publishable reading destined for the grouped JSON.

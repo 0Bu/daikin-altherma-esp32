@@ -11,6 +11,7 @@
 #include "hp_poll.hpp"
 #include "logic/crashinfo.hpp"
 #include "logic/detect.hpp"
+#include "logic/json.hpp"
 #include "logic/reset_reason.hpp"
 #include "mqtt_ha.hpp"
 #include "ota_update.hpp"
@@ -44,11 +45,10 @@ extern const unsigned char setup_html_gz_end[]   asm("_binary_setup_html_gz_end"
 
 namespace daik {
 
-static std::string jstr(const std::string& s) {
-    std::string o = "\"";
-    for (char c : s) { if (c == '"' || c == '\\') o += '\\'; o += c; }
-    return o + "\"";
-}
+// Quote a string for JSON via the shared RFC 8259 encoder (logic/json.hpp) — the same one the MQTT
+// payloads use. Not a local escaper: /scan echoes SSIDs, i.e. arbitrary bytes chosen by any AP in
+// radio range, and a control char in one used to emit unparseable JSON.
+static std::string jstr(const std::string& s) { return json_quote(s); }
 
 // Serve the captive setup page if the device is running in SoftAP (setup) mode, or if
 // WiFi is not yet configured. Otherwise serve the full dashboard web UI.
