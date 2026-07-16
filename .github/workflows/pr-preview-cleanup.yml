@@ -24,6 +24,10 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.pull_request.base.ref }}
+          # gh-pages must be fetched for publish-pages-branch.sh to check it out and push it back
+          # (the script re-fetches defensively, but a shallow clone can't push the result). This
+          # matches build.yml, whose gh-pages push works from the same full-history checkout.
+          fetch-depth: 0
       - name: Remove PR preview from gh-pages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

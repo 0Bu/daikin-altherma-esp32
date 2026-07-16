@@ -42,6 +42,13 @@ bins. (While the repository is **private**, CI only builds, tests and uploads th
 run artifact — the Pages installer, tags and releases activate automatically once the repo is made
 public; see the gate comment atop [`.github/workflows/build.yml`](../.github/workflows/build.yml).)
 
+> **Required repo setting:** Pages source must be **Deploy from a branch → `gh-pages` / `(root)`**
+> (Settings → Pages). CI publishes the site by pushing the `gh-pages` branch
+> ([`scripts/publish-pages-branch.sh`](../scripts/publish-pages-branch.sh)) and nothing else — the
+> branch model is what allows each open PR to serve its own installer at `PR/<N>/`, which the
+> atomic whole-site Actions deployment cannot. Setting the source to "GitHub Actions" instead
+> serves nothing, since no workflow uploads a Pages artifact.
+
 Flash by hand (needs `brew install esptool`). Use the **merged** image — it bakes in the correct
 bootloader offset, so one command flashes the whole esp32s3 image. This erases `nvs` (you re-enter
 WiFi + model config once):

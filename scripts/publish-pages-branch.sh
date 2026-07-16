@@ -17,11 +17,36 @@ git config user.name  "github-actions[bot]" 2>/dev/null || true
 git config user.email "github-actions[bot]@users.noreply.github.com" 2>/dev/null || true
 
 work="$(mktemp -d)"
-if git show-ref --quiet refs/remotes/origin/gh-pages || git show-ref --quiet refs/heads/gh-pages; then
-    git worktree add -f "$work" gh-pages
+
+# "Not fetched" is not "does not exist". A checkout that never fetched gh-pages (actions/checkout
+# defaults to fetch-depth 1, i.e. the one ref it checked out) has no origin/gh-pages, and taking
+# the --orphan path there builds a history disjoint from the live branch — the push is then
+# rejected and the caller fails every time. Ask the remote before deciding, and let an ls-remote
+# failure be fatal rather than silently degrade into that orphan.
+if ! git show-ref --quiet refs/remotes/origin/gh-pages; then
+    remote_head="$(git ls-remote --heads origin gh-pages)"   # empty = truly no branch yet
+    [ -z "$remote_head" ] || git fetch --no-tags origin gh-pages:refs/remotes/origin/gh-pages
+fi
+
+if git show-ref --quiet refs/remotes/origin/gh-pages; then
+    # Branch from the REMOTE ref explicitly. `worktree add <path> gh-pages` resolves only a LOCAL
+    # branch, and in any CI checkout gh-pages exists solely as a remote-tracking ref -> "invalid
+    # reference" (worktree's DWIM to <remote>/<branch> is opt-in via --guess-remote). -B also
+    # re-points a stale local gh-pages at the remote, so we always publish onto the live tree.
+    git worktree add -f -B gh-pages "$work" origin/gh-pages
+elif git show-ref --quiet refs/heads/gh-pages; then
+    git worktree add -f "$work" gh-pages          # local-only branch: never pushed yet
 else
-    git worktree add -f --orphan gh-pages "$work"
-    ( cd "$work" && git rm -rf . >/dev/null 2>&1 || true )
+    # First publish ever: start gh-pages as an unborn branch with an empty tree. Done with
+    # `checkout --orphan` inside a detached worktree rather than `worktree add --orphan`, whose
+    # signature moved between git releases (it takes no branch argument here, so the obvious
+    # `--orphan gh-pages "$work"` reads "$work" as a commit-ish and dies) — this idiom is stable
+    # across versions, and this path gets exactly one chance: it is the site going live.
+    # Only the `git rm` may fail (it errors on an already-empty tree) — keep the `|| true` scoped to
+    # it, so a failing --orphan checkout still aborts here instead of surfacing as a baffling
+    # "src refspec gh-pages does not match any" from the push at the end.
+    git worktree add -f --detach "$work" HEAD
+    ( cd "$work" && git checkout --quiet --orphan gh-pages && { git rm -rqf . >/dev/null 2>&1 || true; } )
 fi
 
 case "$mode" in

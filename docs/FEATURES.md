@@ -133,9 +133,14 @@ See [`ARCHITECTURE.md` → OTA, signing, partitions](ARCHITECTURE.md) and
   downgrade gate are stubbed TODOs. `/ota/check` / `/ota/update` / `/ota/status` routes exist and
   return the current state.
 - **Version pipeline**: [`next-version.sh`](../scripts/next-version.sh) auto-increments a monotonic
-  patch above the latest `v*` tag (with `version.txt` as a manual floor); CI stamps that into
-  `esp_app_get_description()->version` so the running image, the release tag and `manifest.json` can
-  never drift.
+  patch above the latest `v*` tag (with `version.txt` as a manual floor). CI stamps the version it is
+  actually publishing into `version.txt` *before* the build, so ESP-IDF bakes that exact string into
+  `esp_app_get_description()->version`, and `manifest.json` is written from the **same** stamped
+  string — not the next release version, which only coincides on a release-cutting push.
+  [`ci-build-all.sh`](../scripts/ci-build-all.sh) then reads the version back out of the built
+  image's app descriptor and **fails the build** if the two disagree, so the running image, the
+  release tag and the manifest can't drift apart: OTA compares the manifest against the version the
+  running app reports, making a mismatch a permanent re-download loop rather than a cosmetic slip.
 - **✅ 🧪 Boot-loop safe mode (config recovery)** ([`safe_mode.cpp`](../main/safe_mode.cpp),
   [`logic/boot_guard.hpp`](../main/logic/boot_guard.hpp)): a **different** failure class from the image
   rollback above — both OTA slots share the same `daik_cfg` NVS, so rolling back the *image* can't fix
@@ -397,6 +402,12 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   A decode/config/discovery regression fails in seconds, not minutes.
 - **✅ Crash-decodable forever.** CI archives the unstripped `.elf` (+ sha256) per version/PR, so every
   build's core dumps stay symbolizable ([`ci-build-all.sh`](../scripts/ci-build-all.sh)).
+- **✅ One Pages publisher.** The browser installer is served from the **`gh-pages` branch**, pushed by
+  [`publish-pages-branch.sh`](../scripts/publish-pages-branch.sh); the repo's Pages source must be set to
+  that branch ([`README.md`](README.md)). The branch model is what lets every open PR serve its own
+  installer at `PR/<N>/` — an atomic whole-site Actions deployment cannot — so the
+  `configure-pages`/`deploy-pages` path is deliberately absent rather than redundant: a repo's Pages
+  source is either a branch or Actions, never both.
 - **✅ Public-only publishing gate.** While the repo is private, CI builds/tests/uploads but publishes
   nothing outward (no tags, releases, or Pages installer); every such step is gated on
   `repository.private == false` and re-enables automatically when the repo goes public.
