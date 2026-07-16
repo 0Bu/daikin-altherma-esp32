@@ -12,12 +12,18 @@
 # on PATH. In CI that is provided by espressif/esp-idf-ci-action. LOCALLY, run it wrapped:
 #   scripts/idf-docker.sh ./scripts/ci-build-all.sh 1.0.0
 #
-# Usage: scripts/ci-build-all.sh [version]   (defaults to scripts/next-version.sh)
+# The version argument must be the version the build EMBEDS — ESP-IDF takes PROJECT_VER from
+# version.txt, and this script verifies the two agree before writing the manifest (see below).
+# CI stamps version.txt first and passes the same string; the default here is version.txt for the
+# same reason. NOT scripts/next-version.sh: that is the next RELEASE version, which is deliberately
+# ahead of the version.txt floor once tags exist, i.e. exactly the drift the check rejects.
+#
+# Usage: scripts/ci-build-all.sh [version]   (defaults to the version.txt the build embeds)
 # OTA_SIGNING_KEY_FILE (a PEM path) enables signing; absent -> unsigned (fork/PR without secret).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="${1:-$(scripts/next-version.sh)}"
+VERSION="${1:-$(tr -d '[:space:]' < version.txt)}"
 TARGETS=(esp32s3)
 DIST=dist; rm -rf "$DIST"; mkdir -p "$DIST"
 SIGN_KEY="${OTA_SIGNING_KEY_FILE:-ota_signing_key.pem}"
@@ -33,6 +39,23 @@ for t in "${TARGETS[@]}"; do
     idf.py set-target "$t" build
     sfx="$(suffix "$t")"
     app="build/daikin-altherma-esp32.bin"
+
+    # The version this script stamps into manifest.json and the version the IMAGE embeds must be
+    # the same string. The OTA client compares the manifest version against the version the
+    # running app reports, so a drift is not cosmetic: every device downloads an "update" that
+    # installs the version it already runs, then sees the same manifest again — forever. The two
+    # come from different places (this argument vs. PROJECT_VER, which ESP-IDF reads from
+    # version.txt), so read it back out of the built image and fail here rather than ship the loop.
+    # esp_app_desc_t sits at a fixed 0x20 offset in an app image; its version[32] field at +0x10.
+    magic="$(dd if="$app" bs=1 skip=32 count=4 status=none | od -An -tx1 | tr -d ' \n')"
+    [ "$magic" = "3254cdab" ] || { echo "$app: no app-descriptor magic at 0x20 (got $magic)" >&2; exit 1; }
+    embedded="$(dd if="$app" bs=1 skip=48 count=32 status=none | tr -d '\000')"
+    [ "$embedded" = "$VERSION" ] || {
+        echo "version drift: manifest would say '$VERSION' but $app embeds '$embedded'" >&2
+        echo "PROJECT_VER comes from version.txt — in CI the 'Stamp firmware version' step writes it," >&2
+        echo "locally it is the committed floor. Pass that same version to this script." >&2
+        exit 1
+    }
 
     # Sign the app image (RSA-3072, Secure Boot v2 scheme, no hardware Secure Boot).
     # The signed image must land back on $app itself: flash_args flashes the app BY PATH

@@ -37,9 +37,7 @@ jobs:
     needs: logic-test
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # tags + releases
-      pages: write
-      id-token: write
+      contents: write   # tags + releases + the gh-pages branch push (the only Pages publisher)
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -117,7 +115,14 @@ jobs:
           target: esp32s3
           # ci-build-all.sh builds esp32s3 target and stages signed + merged bins + manifest.json
           # into dist/. OTA pulls daikin-altherma-esp32.bin.
-          command: ./scripts/ci-build-all.sh "${{ steps.version.outputs.version }}"
+          #
+          # Pass the STAMPED version (what version.txt above put into the image), never the next
+          # release version: OTA compares the manifest version to the version the running app
+          # reports, so publishing a manifest the bins don't embed makes every device download an
+          # "update" that changes nothing, forever. They differ on exactly the triggers that don't
+          # cut a release (docs-only push, workflow_dispatch, PR). ci-build-all.sh reads the
+          # version back out of the built image and fails if the two ever drift apart again.
+          command: ./scripts/ci-build-all.sh "${{ steps.stamp.outputs.disp }}"
 
       - name: Shred OTA signing key
         if: always()
@@ -127,13 +132,13 @@ jobs:
       # symbolize a core dump from this build (scripts/decode-coredump.sh), so retaining it per
       # version/PR keeps every build's crashes decodable — even while the repo is private and cuts no
       # public Release. Artifact retention (default 90 days) is the archive.
+      # Named after the STAMPED version (disp), not the next release version: this artifact is how
+      # a core dump finds its .elf, and a dump reports the version the image embeds. On a PR that
+      # is "<base>-PR-<N>", so PR builds stay self-labelling without a separate name shape.
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: >-
-            ${{ github.event_name == 'pull_request'
-                && format('daikin-altherma-esp32-pr{0}-{1}', github.event.pull_request.number, steps.version.outputs.version)
-                || format('daikin-altherma-esp32-{0}', steps.version.outputs.version) }}
+          name: daikin-altherma-esp32-${{ steps.stamp.outputs.disp }}
           path: |
             dist/*.bin
             dist/*.elf
@@ -164,9 +169,13 @@ jobs:
             dist/*.elf
             dist/*.elf.sha256
 
-      - name: Configure Pages
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.event.repository.private == false
-        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      # The gh-pages BRANCH is the single publisher — the repo's Pages source must be set to
+      # "Deploy from a branch: gh-pages / (root)" (docs/README.md). The Actions-deployment path
+      # (configure-pages -> upload-pages-artifact -> deploy-pages) is deliberately NOT used: it
+      # deploys one atomic whole-site artifact, which cannot host the per-PR preview subpaths
+      # (PR/<N>/) that build-pages.sh + pr-preview-cleanup.yml maintain. The two mechanisms are
+      # mutually exclusive — a repo's Pages source is either a branch or Actions, so running both
+      # meant one of them was always dead or failing.
       - name: Assemble Pages site
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.event.repository.private == false
         run: ./scripts/build-pages.sh
@@ -175,23 +184,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/publish-pages-branch.sh
-      - name: Upload Pages artifact
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.event.repository.private == false
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
-        with:
-          path: ./_site
-
-  deploy:
-    needs: build
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.event.repository.private == false
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
