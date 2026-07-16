@@ -28,8 +28,8 @@ Palette taken from the Daikin logo: the cyan wordmark, the light-cyan and deep-n
 | `--brand`        | `#0097E0` | `#33ABE8` | Primary brand (Daikin cyan): buttons, active step, links, focus, header rule |
 | `--brand-strong` | `#0079BD` | `#0097E0` | Hover/pressed, primary text-on-light |
 | `--brand-sky`    | `#5AC8F0` | `#5AC8F0` | Light-cyan highlight: progress fill, chart/line, subtle gradient |
-| `--brand-navy`   | `#14285A` | `#0E1C43` | Deep navy: top bar / hero background, high-emphasis surfaces, footer |
-| `--brand-tint`   | `#E9F6FD` | `#12202b` | Faint cyan fill: selected rows, info blocks, step background |
+| `--brand-navy`   | `#14285A` | `#0E1C43` | Deep navy from the logo triangle. **Defined but currently unused** — the heroes ship on `--brand-tint` (§5.0, §5.3). Kept as the reserved high-emphasis accent |
+| `--brand-tint`   | `#E9F6FD` | `#12202b` | Faint cyan fill: **hero bands** (setup + dashboard), selected rows, info blocks, step background |
 | `--bg`           | `#F4F5F7` | `#12151A` | Page background |
 | `--card`         | `#FFFFFF` | `#1B1F27` | Card / surface |
 | `--fg`           | `#1C2530` | `#E6E9EE` | Body text |
@@ -43,8 +43,9 @@ Rules:
 - **Brand = navigation & identity** (header rule, title, active step, primary button, focus ring,
   links). **Semantic = state** (ok/warn/err) for values and connection status — never recoloured
   to brand, so status is unambiguous.
-- Navy is for the setup hero band and the dashboard status hero background; cyan text/icons ride on
-  navy. Body remains on neutral `--bg`.
+- `--brand-tint` is for the setup hero band and the dashboard status hero background — a faint cyan
+  fill carrying normal `--fg` text with a `--brand-strong` kicker, bordered like a card rather than
+  reading as a dark chrome band. Body remains on neutral `--bg`.
 - Focus ring: `0 0 0 3px rgba(0,151,224,.25)` on every interactive element (keyboard-visible).
 - Contrast: white on `--brand`/`--brand-strong` for bold button text; body text stays on neutral
   surfaces. `--muted` meets AA on `--card`.
@@ -107,7 +108,7 @@ marketing}}` (drives the dashboard ESP32 board card + the read-only model card).
 ## 5. View specs
 
 ### 5.0 Provision (captive portal, `setup.html`)
-Standalone, navy hero + one card. Only WiFi. Network dropdown from `GET /scan` (ssid · dBm),
+Standalone, `--brand-tint` hero + one card. Only WiFi. Network dropdown from `GET /scan` (ssid · dBm),
 password, **Save & reboot** → `POST /set_wifi`. Message line for scan/save state. No other controls.
 On reboot the device joins STA and the main UI takes over. (This is the pre-WiFi world; the SoftAP
 serves only this page.)
@@ -184,9 +185,11 @@ on the **dashboard**:
 Header (an **outdoor-unit icon** — a fan + louvered condenser, the brand mark across the app — then
 the **product name**). There is **no settings gear** — the app has no other screen.
 
-- **Product name** (headline line): the fixed title **"Daikin Altherma ESP32"** — a stable app
-  identity, not the detected model and no firmware version. The detected/selected heat-pump model
-  is shown instead in the **Model** status card (§5.3 body).
+- **Product name** (headline line): the fixed title **`daikin-altherma-esp32`** — a stable app
+  identity, not the detected model and no firmware version. Spelled in full lower-case exactly like
+  the hostname / SoftAP / MQTT base topic (the project-wide naming convention), never "Daikin
+  Altherma ESP32". The detected heat-pump model is shown instead in the **Model** status card
+  (§5.3 body).
 
 Body, ordered:
 
@@ -216,7 +219,7 @@ Body, ordered:
    and **Dismiss**. Dismissal is keyed to the crash signature (reason/PC/task — *not* the dump state,
    so pulling the dump can't resurrect a dismissed banner), so a *new* crash re-shows it. Lives
    outside the poll-rebuilt card grid, so its dismissed state survives re-renders.
-1. **Status hero** (navy band): operation mode (Heating / Cooling / DHW / Standby / Off) as the
+1. **Status hero** (`--brand-tint` band): operation mode (Heating / Cooling / DHW / Standby / Off) as the
    headline, with fault state. Colour: `--ok` running, `--warn`/`--err` on fault; grey when no data.
    Fault text and the last-poll age surface in the hero sub-line.
 2. **Status cards** — five cards styled exactly like the value groups (§6), first in the same grid:
@@ -231,9 +234,13 @@ Body, ordered:
      (`--ok`/`--warn` by strength) and the SSID (green), then IP address, MAC and BSSID; from
      `wifi{ssid,ip,rssi,connected,bssid,mac,std}`. A **pencil** in the card header opens the WiFi edit
      modal (§5.1); offline the card collapses to "Offline".
-   - **MQTT** — connection status, broker, TLS on/off, and Home-Assistant discovery state; from
-     `mqtt{configured,connected,tls,broker}`. A **pencil** in the card header opens the MQTT edit
-     modal (§5.1) — one of the three status cards edited via a modal (the others are WiFi and Syslog).
+   - **MQTT** — **Disabled** when no broker is set, else two rows: **Status** (Connected / Error /
+     Connecting…) and **Broker**, the latter trailed by a small grey **padlock** when the link is TLS
+     (`mqtts://`) — encryption is an inline marker, not a row of its own. There is **no** "HA
+     discovery" row: discovery is streamed unconditionally on every (re)connect, so a row saying so
+     would carry no information. From `mqtt{configured,connected,tls,broker,error}`. A **pencil** in
+     the card header opens the MQTT edit modal (§5.1) — one of the three status cards edited via a
+     modal (the others are WiFi and Syslog).
    - **Syslog** — off-device log forwarding status: **Disabled** when no host is set, else the
      server (`host:port`) and a state badge — **Enabled** once DNS resolves (delivery is best-effort
      UDP, gated on resolution only), warn-flagged **"host not answering ping"** when the advisory
@@ -291,7 +298,8 @@ enabled/available values are hidden.
 - **Value table** — two columns (label `--muted` left, value+unit right, tabular). Missing = "—".
 - **Card** — `--card`, 1px `--line`, radius 12; section title small-caps `--muted`.
 - **Toast** — bottom-centre, transient, for Save outcomes ("Saved", "Rebooting…", "Failed").
-- **Hero** — navy band, brand/white text, one headline + one sub-line.
+- **Hero** — `--brand-tint` band bordered like a card, `--fg` text under a `--brand-strong` kicker,
+  one headline + one sub-line.
 - **Crash banner** — `--err`-accented card above the hero (§5.3 item 0), shown only when
   `last_crash` is set: title + meta + hex backtrace, with Download / Copy-diagnostics / Dismiss
   actions. Small `.sm` buttons + a quiet `.ghost` Dismiss.

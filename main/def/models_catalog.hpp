@@ -1,8 +1,10 @@
 #pragma once
-// Model catalog served by GET /models — assembled from tools/profiles/gen_profiles.py's catalog.json
-// alongside the def/*.hpp profiles. Detection is fully automatic: the web UI consumes only `pin_hint`
-// from here (there is no manual model picker); the `profile_map` and indoor/outdoor/tank lists are
-// legacy metadata. See docs/REGISTERS.md and tools/profiles/README.md.
+// Model catalog served by GET /models — assembled from the offline generator's catalog.json
+// (gen_profiles.py, maintained outside this repo) alongside the def/*.hpp profiles. Detection is
+// fully automatic (there is no manual model picker), and no shipped client reads this: the web UI
+// never fetches /models, and its RX/TX dropdown comes from /status.pins_avail (logic/board_pins.hpp),
+// not from `pin_hint`. All of it — pin_hint, profile_map, indoor/outdoor/tank lists — is legacy
+// metadata behind a read-only inspection endpoint. See docs/REGISTERS.md.
 
 namespace daik::def {
 
