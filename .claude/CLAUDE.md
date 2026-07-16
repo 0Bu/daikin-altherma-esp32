@@ -115,12 +115,12 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 state topic <base>/<node>/state (logic/mqtt_group.hpp), republished on change; LWT
                 availability, mqtts+CA on creds; board/link diagnostics on <base>/<node>/heartbeat
                 (logic/heartbeat.hpp), published on a fixed 10s cadence (HEARTBEAT_INTERVAL_S) —
-                heap/uptime/wifi(+reconnects)/mqtt(pub count+fails+reconnects)/X10A bus
-                (rx_received/rx_fails) stats, 13 diagnostic HA entities streamed independently of
-                profile detection. Also RETAINS the boot-time crash summary on <base>/<node>/crash
-                (logic/crashinfo.hpp) once per (re)connect — last reset reason + a "dump waiting"
-                flag as 2 more diagnostic HA entities (reason/backtrace only, never secrets or the raw
-                dump). Every publish funnels through one mqtt_publish() wrapper so mqtt.count/mqtt.fails
+                heap(free+min-free-water+largest-block)/uptime/wifi(+reconnects)/mqtt(pub count+
+                fails+reconnects)/X10A bus (rx_received/rx_fails) stats, 15 diagnostic HA entities
+                streamed independently of profile detection. Also RETAINS the boot-time crash summary
+                on <base>/<node>/crash (logic/crashinfo.hpp) once per (re)connect — last reset reason
+                + a "dump waiting" flag as 2 more diagnostic HA entities (reason/backtrace only, never
+                secrets or the raw dump). Every publish funnels through one mqtt_publish() wrapper so mqtt.count/mqtt.fails
                 cover every topic, not just state.
 ota_update.cpp  pull-based signed OTA + rollback health gate (check/download: TODO)
 diag_log.cpp    in-RAM diag ring served by GET /diag; each line is also forwarded to syslog_send()

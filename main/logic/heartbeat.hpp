@@ -133,6 +133,11 @@ inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
     {"sensor",        "wifi_quality",     "WiFi Quality",        "wifi.quality_pct", "%",   "",                 "measurement"},
     {"sensor",        "wifi_reconnects",  "WiFi Reconnects",     "wifi.reconnects",  "",    "",                 "total_increasing"},
     {"sensor",        "free_heap",        "Free Heap",           "free_heap",        "B",   "",                 "measurement"},
+    // Heap low-water mark + largest contiguous free block: both already ride the payload, exposed as
+    // their own diagnostic sensors so a slow leak (min_free_heap creeping down) or fragmentation
+    // (max_alloc — the binding OOM limit on this firmware) is graphable/alertable in HA.
+    {"sensor",        "min_free_heap",    "Min Free Heap",       "min_free_heap",    "B",   "",                 "measurement"},
+    {"sensor",        "max_alloc",        "Largest Free Block",  "max_alloc",        "B",   "",                 "measurement"},
     {"sensor",        "uptime",           "Uptime",              "uptime_s",         "s",   "duration",         "measurement"},
     {"binary_sensor", "bus_status",       "X10A Bus",            "bus.connected",    "",    "connectivity",     ""},
     {"sensor",        "bus_crc_err",      "X10A CRC Errors",     "bus.rx.crc_err",   "",    "",                 "total_increasing"},
