@@ -26,11 +26,11 @@ promoted, or corrected:
 |------------------------|----------------|
 | new entry in `main/CMakeLists.txt` `REQUIRES` or `main/idf_component.yml` | add a row to the **ESP-IDF component inventory** (§11) + a feature section |
 | a `CONFIG_*` added/flipped in `sdkconfig.defaults` | new capability (§ relevant) or a footprint-trim row (§10) |
-| new `main/logic/*.hpp` header or new `CHECK`s in `test/test_logic.cpp` | update the logic-core list + the **212-checks** count (§8) |
+| new `main/logic/*.hpp` header or new `CHECK`s in `test/test_logic.cpp` | update the logic-core list + the CHECK count (§8) — derive it with `grep -o 'CHECK(' test/test_logic.cpp \| wc -l` minus 1 for the `#define CHECK` line (`-o` not `-c`: `-c` counts lines and would undercount two `CHECK`s on one line) |
 | new `http_register(...)` route / `is_websocket` handler | HTTP/WebSocket feature (§4) + the matrix |
 | a `TODO`/stub in `ota_update.cpp` / `mcp_server.cpp` becoming real | promote the status label `🔭`/`🟡` → `✅` (§2, §11, matrix) |
 | new `partitions.csv` layout, signing/OTA/rollback change | §1/§2 + cross-check [`SECURITY.md`](../../../docs/SECURITY.md) |
-| new MQTT topic / HA entity, heartbeat/crash field | §5/§6 + the entity counts (13 heartbeat, 2 crash) |
+| new MQTT topic / HA entity, heartbeat/crash field | §5/§6 + the entity counts — read them off `HEARTBEAT_SENSOR_COUNT` (`main/logic/heartbeat.hpp`) and `CRASH_SENSOR_COUNT` (`main/logic/crashinfo.hpp`), each a `sizeof` over its sensor table |
 | new WiFi/mDNS/DHCP/watchdog behaviour | §3 |
 
 If the diff touches none of these, FEATURES.md probably needs nothing — say so and stop.
