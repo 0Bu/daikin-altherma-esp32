@@ -1,5 +1,5 @@
-// Physische Status-LED-Unterstützung.
-// Steuert die onboard LED, um Systemzustände (WiFi-Verbindung, SoftAP-Modus, X10A-Fehler) anzuzeigen.
+// Physical status-LED support.
+// Drives the onboard LED to indicate system state (WiFi connection, SoftAP mode, X10A errors).
 #include "status_led.hpp"
 #include "config.hpp"
 #include "wifi.hpp"
@@ -61,7 +61,7 @@ static void status_led_tick() {
                 set_led(true);
                 vTaskDelay(pdMS_TO_TICKS(500));
             } else if (!hp_ok) {
-                // X10A Link Down / Error -> Doppel-Blitzen (überwiegend AUS, zwei kurze Blitze)
+                // X10A Link Down / Error -> Double flash (mostly OFF, two short flashes)
                 set_led(false);
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 set_led(true);

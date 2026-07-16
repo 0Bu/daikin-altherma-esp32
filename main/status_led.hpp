@@ -1,10 +1,10 @@
 #pragma once
-// Physische Status-LED-Unterstützung.
-// Steuert die onboard LED, um Verbindungs- und Busstatus zu signalisieren.
+// Physical status-LED support.
+// Drives the onboard LED to signal link and bus status.
 
 namespace daik {
 
-// Startet den Hintergrundtask zur Steuerung der Status-LED.
+// Starts the background task that drives the status LED.
 void status_led_start();
 
 } // namespace daik
