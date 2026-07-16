@@ -331,6 +331,22 @@ static void test_config_model() {
     CHECK(validate(c, why, 48));
     CHECK(!validate(c, why, 21));
 
+    // The link pair rule on its own — config.cpp applies it to the pins coming back OUT of NVS,
+    // where there is no Config to validate() and no reason string to report. rx_pin/tx_pin are two
+    // independent NVS commits, so the pair that matters most is the one no request could have set:
+    // a half-applied swap {44,43} -> {43,44} that leaves rx == tx.
+    CHECK(link_pins_valid(44, 43));
+    CHECK(link_pins_valid(43, 44));                    // the swap is a legal link, just mirrored
+    CHECK(!link_pins_valid(43, 43));                   // half-applied swap: rx write through, tx not
+    CHECK(!link_pins_valid(-1, 43));                   // negative rx (NVS default miss)
+    CHECK(!link_pins_valid(44, 99));                   // tx above the range
+    CHECK(!link_pins_valid(44, 43, 21));               // valid pair, wrong chip (S3 pins on a C3)
+    // Agrees with validate() on the pair, since validate() defers to it.
+    c.rx_pin = 43; c.tx_pin = 43;
+    CHECK(!validate(c, why) && !link_pins_valid(c.rx_pin, c.tx_pin));
+    c.rx_pin = 44; c.tx_pin = 43;
+    CHECK(validate(c, why) && link_pins_valid(c.rx_pin, c.tx_pin));
+
     CHECK(parse_protocol("S") == Protocol::S);
     CHECK(parse_protocol("I") == Protocol::I);
     CHECK(parse_protocol("") == Protocol::I);

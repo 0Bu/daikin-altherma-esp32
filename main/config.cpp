@@ -3,6 +3,7 @@
 #include "nvs_storage.hpp"
 #include "diag_log.hpp"
 #include "sdkconfig.h"
+#include "soc/soc_caps.h"   // SOC_GPIO_PIN_COUNT — per-target GPIO count for the link-pin check
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -59,6 +60,24 @@ void config_load() {
     // sentinel/empty and are re-detected on every boot (a swapped unit is re-identified).
     c.rx_pin       = nvs_get_i32("rx_pin", CONFIG_DAIKIN_RX_PIN);
     c.tx_pin       = nvs_get_i32("tx_pin", CONFIG_DAIKIN_TX_PIN);
+    // Re-check the pair on the way IN. BOTH write paths commit rx_pin and tx_pin as two independent
+    // NVS writes — config_save and, since the field-owned split, config_save_link — so a save cut or
+    // failed between them leaves a pair on flash the request path would have rejected outright:
+    // correcting a swapped wire {44,43} -> {43,44} with only the rx write through leaves rx == tx ==
+    // 43. Naming the failing key on /diag (put_i32) reports that write; it does not undo the one that
+    // landed. validate() enforces the pair, but only on the request path (http_config.cpp); NVS stops
+    // being trusted the moment a partial write is possible.
+    // A guard, not a repair: the sweep already drops an rx == tx candidate and falls back to these
+    // same defaults (hp_detect.cpp), so the bus still comes up. What this adds is the upper-bound
+    // check the sweep lacks — it guards rx == tx and negatives, not a pin off this chip — and a
+    // /status that never reports an unconfigurable link as fact. Not re-persisted: poll_detect writes
+    // the winning pins back once the bus answers; until then the line below repeats each boot.
+    if (!link_pins_valid(c.rx_pin, c.tx_pin, SOC_GPIO_PIN_COUNT - 1)) {
+        diag_printf("config: persisted X10A pins rejected (rx=%d tx=%d) — using build defaults %d/%d\n",
+                    c.rx_pin, c.tx_pin, CONFIG_DAIKIN_RX_PIN, CONFIG_DAIKIN_TX_PIN);
+        c.rx_pin = CONFIG_DAIKIN_RX_PIN;
+        c.tx_pin = CONFIG_DAIKIN_TX_PIN;
+    }
     c.proto        = parse_protocol(nvs_get_str("proto", CONFIG_DAIKIN_PROTOCOL));
     c.profile      = "auto";
     c.fp_pages     = 0;

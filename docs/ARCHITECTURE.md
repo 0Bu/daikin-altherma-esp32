@@ -242,6 +242,15 @@ The goal is **zero manual model/protocol picking** where the bus allows it, on *
 `"auto"`, so a fresh identification runs after every reset (a swapped unit is re-identified). The
 **link** (RX/TX pins + protocol) *is* persisted as a boot-invariant cache — loaded first, tried
 first, re-saved on change — with the compile-time defaults as fallback so a stale cache self-heals.
+The loaded pins are re-checked as a **pair** (`link_pins_valid`, the same rule the request path
+enforces) and dropped for those defaults if they fail: both write paths — `config_save` and
+`config_save_link` — commit `rx_pin` and `tx_pin` as two independent NVS writes, so a save cut or
+failed between them can leave a pair on flash (`rx == tx`, or a pin outside this chip's range) that
+no request could have set. Naming the failing key on `/diag` reports that write; it does not undo the
+one that landed, which is why the check belongs on the way back in. The sweep already skips an
+`rx == tx` candidate on its own, so this is a guard rather than a repair; what it adds is the
+upper-bound check the sweep lacks, and a `/status` pin readout that never reports an unconfigurable
+link as fact.
 While `profile == "auto"`, the poll task runs one detection pass (`poll_detect()`) instead of a
 normal cycle:
 

@@ -97,7 +97,12 @@ config.cpp      runtime Config (logic/config_model.hpp): WiFi/MQTT + one-shot Wi
                 stale snapshot — detection uses config_save_link/config_set_model, HTTP keeps
                 whole-struct config_save. A failed NVS write names the key on /diag and returns false
                 — config_save then publishes nothing, config_save_link still patches RAM (its link is
-                proven-good); every call site checks it. See "NVS namespaces"
+                proven-good); every call site checks it. See "NVS namespaces".
+                config_load re-checks the persisted RX/TX as a PAIR (link_pins_valid) and falls back
+                to the Kconfig defaults + a diag line if they fail: rx_pin/tx_pin are two independent
+                commits on BOTH write paths (config_save_link as much as config_save), so flash can
+                still hold a pair (rx == tx, or a pin off this chip) the request path would have
+                rejected — a failure named on /diag is not a pair fixed on flash
 nvs_storage.cpp thin NVS helpers (IDF nvs_* called with :: to avoid the daik::nvs_* collision);
                 the setters return esp_err_t so config.cpp can name the failing key + error on /diag
 wifi.cpp        STA bring-up (all-channel scan -> strongest AP by RSSI) + endless reconnect
