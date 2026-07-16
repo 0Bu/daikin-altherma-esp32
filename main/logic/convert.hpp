@@ -114,6 +114,10 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802
         case 204: { char t[3] = {ERR_C1[(data[0] >> 4) & 0xF], ERR_C2[data[0] & 0xF], 0};
                     set_text(r, t[0] == ' ' ? t + 1 : t); break; }            // error code (2 chars)
         case 219: r.value = data[0]; r.ok = true; break;                      // I/U capacity code
+        // 3-bit counter / BUH output-capacity step, bits 0-2 (docs/REGISTERS.md §3.3). The byte's
+        // upper bits belong to OTHER fields, so they must be masked off, not published: reading the
+        // whole byte reported 133 for a step of 5 whenever any high bit was set.
+        case 311: r.value = data[0] & 0x07; r.ok = true; break;               // BUH output capacity
 
         // ── EEPROM model-identification digits (page 0x11 / 0x63): raw byte. conv 215 packs a
         //    digit pair, conv 214 a single digit. There is no digits->model-name table in the repo

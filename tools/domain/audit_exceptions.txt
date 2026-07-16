@@ -21,55 +21,10 @@
 # the catalog. (Converter ids that decode identically at a given width — conv 101 vs 152 on a
 # 1-byte field — are already proven equivalent by execution and never reach this file.)
 #
-# ── KNOWN-DEFECT: pre-existing on main @ a5629b5, found by this audit's first run (2026-07-16) ──
-#
-# These are the audit's own first catch: four real decode defects the 2026-07-16 manual review did
-# NOT find, all still live. They are ledgered — not fixed — because fixing them is a separate,
-# evidence-gathering change (per issue #37's rule: a genuinely different model layout cannot be
-# excluded from the catalog alone), and because a gate must land clean to be usable at all.
-#
-# (1) 0x61+13 "Ext. indoor ambient sensor (R6T)" — size-2 field starting one byte early.
-#     Spec (docs/REGISTERS.md:404) puts R6T at offset 14; these 4 geo profiles read [13..14] —
-#     the HIGH byte of "Indoor ambient temp. (R1T)" [12..13] plus R6T's low byte. R6T is therefore
-#     assembled from two unrelated sensors and R1T's own reading is intact but R6T's is fabricated.
-#     Straddling overlap is impossible on ANY model regardless of family, so no live capture is
-#     needed to call this wrong — only to confirm the intended offset is 14.
-OVERLAP:altherma_gshp:0x61:12:indoorambienttempr1t~extindoorambientsensorr6t
-OVERLAP:altherma_gshp2:0x61:12:indoorambienttempr1t~extindoorambientsensorr6t
-OVERLAP:altherma_egsqh_a_series_10kw_geo2:0x61:12:indoorambienttempr1t~extindoorambientsensorr6t
-OVERLAP:altherma_egsah_x_ewsah_x_d_series_6_10kw_geo3:0x61:12:indoorambienttempr1t~extindoorambientsensorr6t
-#
-# (2) 0x63+13 "BUH output capacity" — whole byte published as a 3-bit field's value.
-#     Spec (docs/REGISTERS.md:462) says conv 311 = `byte & 0x07` (backup-heater step 0-7).
-#     Every profile carrying this row (derive: `grep -rl '"BUH output capacity"' main/def/ | wc -l`)
-#     uses conv 152 = the raw u16/byte, so every bit above bit 2 lands in the reading: a byte of
-#     0x85 publishes 133 instead of 5. conv 311 is currently a documented-but-unimplemented stub
-#     (main/logic/convert.hpp), so the fix is to implement 311 + repoint these rows, with a host
-#     CHECK pinning `0x85 -> 5`.
-SPEC-CONV:altherma_gshp2:0x63:13:buhoutputcapacity
-SPEC-CONV:altherma_egsah_x_ewsah_x_d_series_6_10kw_geo3:0x63:13:buhoutputcapacity
-SPEC-CONV:altherma_epra_d_d7_etsh_x_16p30_50_e_e7_series_14_18kw_ech2o:0x63:13:buhoutputcapacity
-SPEC-CONV:altherma_epra_d_d7_etv16_etb16_etvz16_e_e7_series_14_18kw:0x63:13:buhoutputcapacity
-SPEC-CONV:altherma_epra_e_etsh_x_16p30_50_e_series_8_12kw_ech2o:0x63:13:buhoutputcapacity
-SPEC-CONV:altherma_epra_e_etv16_etb16_etvz16_e_ej_series_8_12kw:0x63:13:buhoutputcapacity
-SPEC-CONV:altherma_erla_d_ebsh_x_16p30_50_d_series_11_16kw_ech2o:0x63:13:buhoutputcapacity
-SPEC-CONV:altherma_erla_d_ebv_ebb_ebvz_d_series_11_16kw:0x63:13:buhoutputcapacity
-SPEC-CONV:altherma_erra_e_elsh_x_12p30_50_ef_series_8_12kw_ech2o:0x63:13:buhoutputcapacity
-SPEC-CONV:altherma_erra_e_elv12_elb12_elvz12_ef_ej_series_8_12kw:0x63:13:buhoutputcapacity
-#
-# (3) 0x20+14 "Low Pressure(T)" — saturation temperature shipped without its unit.
-#     conv 405 converts pressure to a temperature in °C, and the spec (docs/REGISTERS.md:281) plus
-#     22 sibling profiles type it 1 (°C). This one profile types it -1, so discovery.hpp stamps no
-#     unit and no device_class: HA gets a bare number instead of a temperature entity. The value is
-#     right; what HA is told it MEANS is not.
-SPEC-CONV:altherma_epga_d_eab_eav_eavz_d_j_series_11_16kw:0x20:14:lowpressuret
-CONSENSUS:altherma_epga_d_eab_eav_eavz_d_j_series_11_16kw:0x20:14:lowpressuret
-#
-# (4) 0x30+11 "Outlet water hex temp. before BUH (DLWB2)" — water temp on the outdoor page.
-#     Spec (docs/REGISTERS.md:305) puts the 4-Way Valve at 0x30+11 on this shared outdoor page.
-#     This profile reads a 1-byte conv-105 temperature there (and another at +10, inside the
-#     "Expansion valve 4" window). A size-1 conv-105 temperature can only ever report 0.0-25.5 °C
-#     and never a negative — plausible enough to pass a glance, which is what makes it this
-#     catalog's characteristic failure. Same file as issue #37's expansion-valve drift, so treat
-#     the whole profile as suspect. Needs a live capture from a BML pair unit to fix confidently.
-SPEC-LAYOUT:altherma_lt_da_pair_bml:0x30:11:outletwaterhextempbeforebuhdlwb2
+
+# ── No live entries. ──────────────────────────────────────────────────────────────────────────
+# The four defects this ledger opened with (R6T reading a byte early, BUH capacity publishing a
+# whole byte, Low Pressure(T) missing its °C type, and lt_da_pair_bml's 1-byte water temps) are
+# FIXED in PR #82, so their entries are gone with them — a KNOWN-DEFECT that outlives its fix
+# silences the guard against the fix regressing. Each is now pinned by a catalog CHECK in
+# test/test_logic.cpp instead.

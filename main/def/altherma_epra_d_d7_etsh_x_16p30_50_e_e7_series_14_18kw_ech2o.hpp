@@ -95,7 +95,7 @@ inline constexpr ValueDef altherma_epra_d_d7_etsh_x_16p30_50_e_e7_series_14_18kw
     {0x62, 12, 152, 1, -1, "Water pump signal (0:max-100:stop)"},  // default_on
     {0x62, 15, 105, 2, 2, "Refrigerant pressure sensor"},
     {0x63, 8, 105, 2, 1, "[HPSU] Mixed leaving water temperature after the tank R7T (DLWA2)"},  // default_on
-    {0x63, 13, 152, 1, -1, "BUH output capacity"},
+    {0x63, 13, 311, 1, -1, "BUH output capacity"},
     {0x63, 14, 161, 1, -1, "Current measured by CT sensor of L1"},
     {0x63, 15, 161, 1, -1, "Current measured by CT sensor of L2"},
     {0x63, 16, 161, 1, -1, "Current measured by CT sensor of L3"},

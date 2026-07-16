@@ -24,7 +24,7 @@ inline constexpr ValueDef altherma_epga_d_eab_eav_eavz_d_j_series_11_16kw[] = {
     {0x20, 12, 105, 2, 2, "High Pressure"},  // default_on
     {0x20, 12, 405, 2, 1, "High Pressure(T)"},  // default_on
     {0x20, 14, 105, 2, 2, "Low Pressure"},  // default_on
-    {0x20, 14, 405, 2, -1, "Low Pressure(T)"},  // default_on
+    {0x20, 14, 405, 2, 1, "Low Pressure(T)"},  // default_on
     {0x21, 0, 105, 2, -1, "INV primary current (A)"},  // default_on
     {0x21, 2, 105, 2, -1, "INV secondary current (A)"},  // default_on
     {0x21, 4, 105, 2, 1, "INV fin temp."},  // default_on
