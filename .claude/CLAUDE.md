@@ -148,7 +148,8 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 the summary is NEVER re-parsed on a request path (build_status_json also runs in the
                 poll task's WS broadcaster, which only self-guards std::bad_alloc by dropping the frame)
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, config_model,
-                discovery, detect, mqtt_group, heartbeat, crashinfo, reset_reason, boot_guard, board_pins).
+                discovery, detect, mqtt_group, heartbeat, crashinfo, reset_reason, boot_guard,
+                board_pins, modbus).
                 reset_reason.hpp maps a reset code to the /status.sys.reset_reason slug (reusing
                 crashinfo's crash_reason_slug — one vocabulary). boot_guard.hpp = the safe-mode decision
                 logic (crash-only counting, saturating increment, threshold) driving safe_mode.cpp.
@@ -160,7 +161,10 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, con
                 discovery configs; crashinfo.hpp turns a captured CrashInfo (reset reason + core-dump
                 summary) into the last_crash JSON / MQTT crash payload + a paste-friendly text bundle,
                 and classifies which reset reasons are faults; board_pins.hpp = per-target usable X10A
-                GPIOs (the RX/TX pin-picker dropdown when detection hasn't locked the pins).
+                GPIOs (the RX/TX pin-picker dropdown when detection hasn't locked the pins);
+                modbus.hpp = Modbus TCP framing (MBAP, no CRC) + HomeHub register codecs
+                (Temp16/Pow16/Int16/Text16 decode+encode) + the homehub-* mDNS filter — host-tested
+                core for the PLANNED firmware-exclusive HomeHub Modbus link (issue #32), not yet wired.
 def/            embedded per-model value profiles + registry (incl. the generic Altherma fallback =
                 universal register core) + models_catalog.hpp (GET /models) + model_names.hpp
                 (id→display/family/marketing name for /status) + signatures.hpp (Altherma-only

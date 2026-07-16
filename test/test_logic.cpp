@@ -21,6 +21,7 @@
 #include "logic/heartbeat.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/mqtt_uri.hpp"
+#include "logic/modbus.hpp"
 #include "logic/registers.hpp"
 #include "logic/reset_reason.hpp"
 #include "def/registry.hpp"
@@ -875,6 +876,184 @@ static void test_crashinfo() {
     CHECK(dc.find("\"ent_cat\":\"diagnostic\"") != std::string::npos);
 }
 
+static void test_modbus() {
+    // ── Big-endian helpers + 1-based offset -> 0-based PDU address (EKRHH guide §9.2) ──
+    uint8_t w[2];
+    mb_put_u16(w, 0x1234);
+    CHECK(w[0] == 0x12 && w[1] == 0x34);            // Modbus is big-endian on the wire
+    CHECK(mb_get_u16(w) == 0x1234);
+    uint16_t addr = 0xFFFF;
+    CHECK(mb_pdu_address(1, addr) && addr == 0);    // offset 1 -> PDU address 0
+    CHECK(mb_pdu_address(40, addr) && addr == 39);  // input reg 40 (LWT PHE) -> 39
+    CHECK(!mb_pdu_address(0, addr));                // offset 0 is invalid
+
+    // ── FC03 read-holding request framing: MBAP[txn,proto=0,len,unit] + [fc,addr,qty] = 12 bytes ──
+    uint8_t buf[64];
+    int n = mb_build_read(buf, sizeof(buf), 0x0007, 1, MbFunc::ReadHolding, /*addr*/55, /*qty*/1);
+    CHECK(n == 12);
+    CHECK(mb_get_u16(buf + 0) == 0x0007);           // transaction id
+    CHECK(mb_get_u16(buf + 2) == 0x0000);           // protocol id (always 0 for Modbus)
+    CHECK(mb_get_u16(buf + 4) == 6);                // length = unit(1) + PDU(5)
+    CHECK(buf[6] == 1);                             // unit id
+    CHECK(buf[7] == 0x03);                          // function code FC03
+    CHECK(mb_get_u16(buf + 8) == 55 && mb_get_u16(buf + 10) == 1);
+    // FC04 read-input uses the same shape with a different function code.
+    CHECK(mb_build_read(buf, sizeof(buf), 1, 1, MbFunc::ReadInput, 40, 6) == 12 && buf[7] == 0x04);
+    // Guards: a write FC, qty 0, and an undersized buffer are all rejected.
+    CHECK(mb_build_read(buf, sizeof(buf), 1, 1, MbFunc::WriteSingle, 1, 1) == -1);
+    CHECK(mb_build_read(buf, sizeof(buf), 1, 1, MbFunc::ReadHolding, 1, 0) == -1);
+    CHECK(mb_build_read(buf, 8, 1, 1, MbFunc::ReadHolding, 1, 1) == -1);
+    // A read response states its size in ONE byte, so qty tops out at 125 (§6.3): 125 builds, 126 is
+    // refused rather than sent to earn an "illegal data value" exception.
+    CHECK(mb_build_read(buf, sizeof(buf), 1, 1, MbFunc::ReadHolding, 1, MB_MAX_READ_REGS) == 12);
+    CHECK(mb_build_read(buf, sizeof(buf), 1, 1, MbFunc::ReadHolding, 1, MB_MAX_READ_REGS + 1) == -1);
+    CHECK(mb_build_read(buf, sizeof(buf), 1, 1, MbFunc::ReadInput, 1, 1000) == -1);
+
+    // ── FC06 write-single request framing ──
+    n = mb_build_write_single(buf, sizeof(buf), 0x0042, 1, /*addr*/55, /*value*/2000);
+    CHECK(n == 12 && buf[7] == 0x06);
+    CHECK(mb_get_u16(buf + 0) == 0x0042 && mb_get_u16(buf + 8) == 55 && mb_get_u16(buf + 10) == 2000);
+
+    // ── FC16 write-multiple request framing: 2 registers -> bytecount 4, ADU 17 bytes ──
+    // MBAP(7) + PDU[fc(1),addr(2),qty(2),bytecount(1),data(4)] = 7 + 10 = 17.
+    const uint16_t vals[] = {0x00C8, 0xFB2E};
+    n = mb_build_write_multiple(buf, sizeof(buf), 0x0001, 1, /*addr*/56, vals, 2);
+    CHECK(n == 17);
+    CHECK(mb_get_u16(buf + 4) == 11);               // length = unit(1) + PDU(10)
+    CHECK(buf[7] == 0x10 && mb_get_u16(buf + 8) == 56 && mb_get_u16(buf + 10) == 2);
+    CHECK(buf[12] == 4);                            // byte count = 2 * qty
+    CHECK(mb_get_u16(buf + 13) == 0x00C8 && mb_get_u16(buf + 15) == 0xFB2E);
+    CHECK(mb_build_write_multiple(buf, sizeof(buf), 1, 1, 1, vals, 0) == -1);   // qty 0 rejected
+    CHECK(mb_build_write_multiple(buf, 12, 1, 1, 1, vals, 2) == -1);            // buffer too small
+    // FC16 states its payload size in ONE byte, so qty tops out at 123 (§6.12). Past that the count
+    // would narrow to a lie — qty 128 once framed a 256-byte payload as "0" — so the builder refuses.
+    // 123 still builds, and its byte-count field must equal 2*qty (the invariant truncation broke).
+    uint8_t big[300];
+    uint16_t many[130] = {0};
+    n = mb_build_write_multiple(big, sizeof(big), 1, 1, 1, many, MB_MAX_WRITE_REGS);
+    CHECK(n == 7 + 6 + 2 * MB_MAX_WRITE_REGS);
+    CHECK(big[12] == 2 * MB_MAX_WRITE_REGS && mb_get_u16(big + 10) == MB_MAX_WRITE_REGS);
+    CHECK(mb_build_write_multiple(big, sizeof(big), 1, 1, 1, many, MB_MAX_WRITE_REGS + 1) == -1);
+    CHECK(mb_build_write_multiple(big, sizeof(big), 1, 1, 1, many, 128) == -1);
+
+    // ── Parse a well-formed FC03 read response: 3 registers ──
+    MbResponse r;
+    // MBAP(txn=7,proto=0,len=9,unit=1) + PDU[fc=03, bytecount=6, d0..d5]
+    uint8_t resp[] = {0x00,0x07, 0x00,0x00, 0x00,0x09, 0x01,
+                      0x03, 0x06, 0x07,0xD0, 0xFB,0x2E, 0x7F,0xFE};
+    CHECK(mb_parse_response(resp, sizeof(resp), 7, 1, MbFunc::ReadHolding, r) == MbParse::Ok);
+    CHECK(r.ok && !r.exception && r.txn == 7 && r.unit == 1 && r.fc == 0x03);
+    CHECK(mb_reg_count(r) == 3);
+    uint16_t rv = 0;
+    CHECK(mb_reg_at(r, 0, rv) && rv == 0x07D0);     // 2000
+    CHECK(mb_reg_at(r, 1, rv) && rv == 0xFB2E);     // -1234
+    CHECK(mb_reg_at(r, 2, rv) && rv == 0x7FFE);     // 32766 (unavailable sentinel)
+    CHECK(!mb_reg_at(r, 3, rv));                    // out-of-range index rejected
+
+    // ── Parse a write-single echo (FC06) ──
+    uint8_t wecho[] = {0x00,0x42, 0x00,0x00, 0x00,0x06, 0x01, 0x06, 0x00,0x37, 0x07,0xD0};
+    CHECK(mb_parse_response(wecho, sizeof(wecho), 0x42, 1, MbFunc::WriteSingle, r) == MbParse::Ok);
+    CHECK(r.ok && r.fc == 0x06);
+    // A write echo is exactly [fc, addr(2), value|qty(2)]; a truncated one is Malformed, not Ok.
+    uint8_t wshort[] = {0x00,0x42, 0x00,0x00, 0x00,0x04, 0x01, 0x06, 0x00,0x37};
+    CHECK(mb_parse_response(wshort, sizeof(wshort), 0x42, 1, MbFunc::WriteSingle, r) == MbParse::Malformed);
+    CHECK(!r.ok);
+
+    // ── Parse a Modbus exception response (FC03 | 0x80, code 0x02 = illegal data address) ──
+    uint8_t exc[] = {0x00,0x07, 0x00,0x00, 0x00,0x03, 0x01, 0x83, 0x02};
+    CHECK(mb_parse_response(exc, sizeof(exc), 7, 1, MbFunc::ReadHolding, r) == MbParse::Exception);
+    CHECK(!r.ok && r.exception && r.exc_code == 0x02 && r.fc == 0x03);
+
+    // ── Parse-error paths ──
+    CHECK(mb_parse_response(resp, 5, 7, 1, MbFunc::ReadHolding, r) == MbParse::TooShort);
+    uint8_t badproto[] = {0x00,0x07, 0x00,0x01, 0x00,0x03, 0x01, 0x03, 0x00};  // proto id != 0
+    CHECK(mb_parse_response(badproto, sizeof(badproto), 7, 1, MbFunc::ReadHolding, r) == MbParse::BadProtocol);
+    uint8_t badlen[] = {0x00,0x07, 0x00,0x00, 0x00,0x09, 0x01, 0x03, 0x00};    // len 9 != actual
+    CHECK(mb_parse_response(badlen, sizeof(badlen), 7, 1, MbFunc::ReadHolding, r) == MbParse::BadLength);
+    CHECK(mb_parse_response(resp, sizeof(resp), 8, 1, MbFunc::ReadHolding, r) == MbParse::TxnMismatch);
+    CHECK(mb_parse_response(resp, sizeof(resp), 7, 2, MbFunc::ReadHolding, r) == MbParse::UnitMismatch);
+    CHECK(mb_parse_response(resp, sizeof(resp), 7, 1, MbFunc::ReadInput, r) == MbParse::FcMismatch);
+    // Consistent MBAP length (6 = unit + 5-byte PDU) but an odd register byte count (3) -> Malformed.
+    uint8_t oddbc[] = {0x00,0x07, 0x00,0x00, 0x00,0x06, 0x01, 0x03, 0x03, 0x01,0x02,0x03};
+    CHECK(mb_parse_response(oddbc, sizeof(oddbc), 7, 1, MbFunc::ReadHolding, r) == MbParse::Malformed);
+
+    // ── Value codecs: decode (EKRHH guide §9.2 data formats) ──
+    CHECK(approx(mb_decode(MbType::Temp16, 0x07D0).value, 20.0));     // 2000 /100
+    CHECK(mb_decode(MbType::Temp16, 0x07D0).ok);
+    CHECK(approx(mb_decode(MbType::Temp16, 0xFB2E).value, -12.34));   // -1234 /100 (two's complement)
+    CHECK(approx(mb_decode(MbType::Pow16, 0x01C2).value, 4.5));       // 450 /100 kW
+    CHECK(approx(mb_decode(MbType::Int16, 0xFFFF).value, -1.0));      // signed, as-is
+    CHECK(approx(mb_decode(MbType::Int16, 0x0002).value, 2.0));       // op-mode "Cooling"
+    // Text16: the unit error-code example from the guide — 0x5538 -> "U8".
+    MbValue tx = mb_decode(MbType::Text16, 0x5538);
+    CHECK(tx.ok && std::string(tx.text) == "U8");
+
+    // ── Special-value guard: 32765/66/67 are "no value", boundaries are real ──
+    CHECK(mb_is_special(32765) && mb_is_special(32766) && mb_is_special(32767));
+    CHECK(!mb_is_special(32764) && !mb_is_special(0x8000));          // 0x8000 = -32768, a real reading
+    CHECK(mb_decode(MbType::Int16, 32767).special && !mb_decode(MbType::Int16, 32767).ok);
+    CHECK(mb_decode(MbType::Temp16, 32766).special);
+    CHECK(mb_decode(MbType::Int16, 32764).ok && !mb_decode(MbType::Int16, 32764).special);
+
+    // ── Encode (inverse), incl. explicit values and round-trips ──
+    uint16_t e = 0;
+    CHECK(mb_encode(MbType::Temp16, 20.0, e) && e == 0x07D0);
+    CHECK(mb_encode(MbType::Temp16, -12.34, e) && e == 0xFB2E);
+    CHECK(mb_encode(MbType::Pow16, 4.5, e) && e == 0x01C2);         // write kW: ×100
+    CHECK(mb_encode(MbType::Int16, -1.0, e) && e == 0xFFFF);
+    CHECK(mb_encode(MbType::Int16, 2.0, e) && e == 0x0002);
+    CHECK(mb_encode_text16('U', '8') == 0x5538);
+    // encode(decode(x)) == x for every non-special raw across the numeric types.
+    for (uint16_t raw : {uint16_t(0x0000), uint16_t(0x0001), uint16_t(0x07D0), uint16_t(0xFB2E),
+                         uint16_t(0x1234), uint16_t(0x7FFC), uint16_t(0x8000), uint16_t(0xFFFF)}) {
+        for (MbType t : {MbType::Int16, MbType::Temp16, MbType::Pow16}) {
+            MbValue d = mb_decode(t, raw);
+            uint16_t back = 0;
+            CHECK(d.ok && mb_encode(t, d.value, back) && back == raw);
+        }
+    }
+    CHECK(mb_encode_text16(mb_decode(MbType::Text16, 0x5538).text[0],
+                           mb_decode(MbType::Text16, 0x5538).text[1]) == 0x5538);
+
+    // ── Encode rejects anything that would not round-trip, instead of wrapping silently ──
+    // Out of int16 range: 400 °C once encoded to 0x9C40, which reads back as -255.36 °C.
+    uint16_t untouched = 0xABCD;
+    CHECK(!mb_encode(MbType::Temp16, 400.0, untouched) && untouched == 0xABCD);  // out param preserved
+    CHECK(!mb_encode(MbType::Temp16, -400.0, untouched));
+    CHECK(!mb_encode(MbType::Pow16, -500.0, untouched));                         // once gave +155.36 kW
+    CHECK(!mb_encode(MbType::Int16, 40000.0, untouched));
+    CHECK(!mb_encode(MbType::Int16, -40000.0, untouched));
+    // Boundaries: the extremes of int16 still encode, one step beyond does not.
+    CHECK(mb_encode(MbType::Temp16, -327.68, e) && e == 0x8000);
+    CHECK(mb_encode(MbType::Int16, -32768.0, e) && e == 0x8000);
+    CHECK(!mb_encode(MbType::Int16, -32769.0, untouched));
+    CHECK(mb_encode(MbType::Int16, 32764.0, e) && e == 0x7FFC);
+    // Encoding a sentinel is refused — we must never write a value decode reports as "no value".
+    CHECK(!mb_encode(MbType::Int16, 32765.0, untouched));
+    CHECK(!mb_encode(MbType::Int16, 32766.0, untouched));
+    CHECK(!mb_encode(MbType::Int16, 32767.0, untouched));
+    CHECK(!mb_encode(MbType::Temp16, 327.67, untouched));           // scales onto MB_UNSUPPORTED
+    // Text16 is two packed chars, not a number -> rejected; mb_encode_text16 is the way.
+    CHECK(!mb_encode(MbType::Text16, 1.0, untouched));
+    // Non-finite input has no defined rounding -> rejected rather than fed to lround.
+    CHECK(!mb_encode(MbType::Temp16, std::nan(""), untouched));
+    CHECK(!mb_encode(MbType::Temp16, HUGE_VAL, untouched));
+    CHECK(!mb_encode(MbType::Temp16, -HUGE_VAL, untouched));
+
+    // ── mDNS HomeHub hostname filter: keep real HomeHubs, drop our own advert / unrelated hosts ──
+    CHECK(is_homehub_hostname("homehub-524288-123456"));            // EKRHH guide §13.1.2 form
+    CHECK(is_homehub_hostname("homehub-524288-1.local"));
+    CHECK(is_homehub_hostname("HomeHub-524288-1"));                 // case-insensitive
+    CHECK(!is_homehub_hostname("daikin-altherma-esp32"));           // THIS firmware's own advert
+    CHECK(!is_homehub_hostname("home"));                            // shorter than the prefix
+    CHECK(!is_homehub_hostname(""));
+    CHECK(!is_homehub_hostname(nullptr));
+    const char* names[] = {"daikin-altherma-esp32.local", "some-printer", "homehub-524288-9.local"};
+    CHECK(mb_first_homehub(names, 3) == 2);
+    const char* none[] = {"daikin-altherma-esp32", "nas"};
+    CHECK(mb_first_homehub(none, 2) == -1);
+}
+
 int main() {
     test_crc();
     test_registers();
@@ -886,6 +1065,7 @@ int main() {
     test_detect();
     test_mqtt_group();
     test_mqtt_uri();
+    test_modbus();
     test_heartbeat();
     test_crashinfo();
     test_reset_reason();
