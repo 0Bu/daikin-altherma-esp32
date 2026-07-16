@@ -86,9 +86,12 @@ CONFIG_COMPILER_CXX_EXCEPTIONS=y
 # CONFIG_SPIRAM=y
 
 # Core Dump to Flash (Method 2)
+# ENABLE_TO_FLASH is the line that does the work — it select-s ESP_COREDUMP_ENABLE. Don't add
+# CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF: ELF is the only format in IDF v6 and the symbol is no longer
+# declared, so the assignment never reaches the generated sdkconfig — it reads like a guarantee
+# while doing nothing.
 CONFIG_ESP_COREDUMP_ENABLE=y
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
-CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
 
 # ── Task Watchdog Timer (TWDT) ──
 # Turn a genuinely-wedged worker task into a clean, automatic REBOOT instead of a silent hang. The

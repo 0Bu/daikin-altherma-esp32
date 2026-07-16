@@ -351,8 +351,9 @@ IDF v6.0 extracted it from core — [`idf_component.yml`](../main/idf_component.
 A deliberately strong story for a hobby-scale device — everything needed to explain a crash *after
 the fact*, from the field, without a serial cable:
 
-- **✅ Core dump to flash (ELF format).** `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH` +
-  `..._DATA_FORMAT_ELF` into a dedicated `coredump` partition. [`diag_crash.cpp`](../main/diag_crash.cpp)
+- **✅ Core dump to flash (ELF format).** `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH` into a dedicated
+  `coredump` partition; ELF is the only core-dump format IDF v6 emits, so nothing selects it
+  explicitly. [`diag_crash.cpp`](../main/diag_crash.cpp)
   reads the reset reason + `esp_core_dump_get_summary()` **once at boot** (crashed task/PC/backtrace/
   app-elf-sha), caches it, and never re-parses on a request path. The cheap `coredump` **presence
   flag** is deliberately *not* cached — `diag_crash_info_live()` re-reads it (one 4-byte flash read)
@@ -473,7 +474,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   source of truth (currently ESP-IDF v6.0.2, kept current by Renovate), so local builds can never drift
   from CI.
 - **✅ CI gate order** ([`build.yml`](../.github/workflows/build.yml)): the fast, hardware-free
-  `logic-test` job runs first; only then the per-target firmware build → sign → merge → artifact upload.
+  `logic-test` job runs first; only then the esp32s3 firmware build → sign → merge → artifact upload.
   A decode/config/discovery regression fails in seconds, not minutes.
 - **✅ Crash-decodable forever.** CI archives the unstripped `.elf` (+ sha256) per version/PR, so every
   build's core dumps stay symbolizable ([`ci-build-all.sh`](../scripts/ci-build-all.sh)).

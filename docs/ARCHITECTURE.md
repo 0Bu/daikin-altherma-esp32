@@ -519,7 +519,7 @@ Structure:
 - **Dual-OTA `partitions.csv`** sized to fill 4 MB; app at `0x20000`; `nvs` at `0x9000` untouched
   by OTA so WiFi + model config survive upgrades.
 - **Core Dump to Flash (Crash Archiving)**:
-  - Enabled via `CONFIG_ESP_COREDUMP_ENABLE`, `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH`, and `CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF` in `sdkconfig.defaults`.
+  - Enabled via `CONFIG_ESP_COREDUMP_ENABLE` and `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH` in `sdkconfig.defaults`. The format is ELF — the only one IDF v6 emits, so no `CONFIG_*` selects it.
   - A dedicated `coredump` partition of size `0xc000` (48 KB) is placed at offset `0x12000` (in the unused gap between `phy_init` and `ota_0`), leaving the start offsets of `nvs`, `otadata`, `phy_init`, `ota_0`, and `ota_1` completely untouched for backward compatibility and OTA safety.
   - Exposed via a chunked HTTP GET endpoint `/coredump` (implemented in `http_status.cpp`) that streams the binary crash dump in 512-byte blocks to prevent OOM errors on the tight ESP32 heap.
   - Supports erasing the partition via `GET /coredump?clear=1` (invokes `esp_core_dump_image_erase()`).
