@@ -59,6 +59,7 @@ static std::string s_announced_profile;               // profile we last publish
 static std::string s_last_json;                       // last state JSON published (dedup guard)
 static bool         s_heartbeat_announced = false;     // diagnostic discovery streamed this connection?
 static bool         s_mqtt_ever_connected = false;     // distinguishes the first connect from a RE-connect
+static bool         s_crash_dump_pub      = false;     // `coredump` flag as last published on s_crash
 
 // Cumulative publish counters for the heartbeat's mqtt.{count,fails,reconnects} — see mqtt_publish().
 static uint32_t s_mqtt_pub_ok   = 0;
@@ -174,8 +175,12 @@ static void publish_crash() {
         const std::string cfg = crash_discovery_config(s_node, s_crash, s_avail, s);
         mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained
     }
-    const std::string js = build_crash_json(diag_crash_info());
+    // _live(): the "Crash Dump Waiting" binary_sensor must not latch ON once the dump is pulled +
+    // cleared — this topic is RETAINED, so a stale true would be replayed to every later subscriber.
+    const CrashInfo   ci = diag_crash_info_live();
+    const std::string js = build_crash_json(ci);
     mqtt_publish(s_crash, js.c_str(), static_cast<int>(js.size()), 0, 1);   // retained
+    s_crash_dump_pub = ci.coredump;
 }
 
 // Snapshot board/link diagnostics from the IDF heap/timer APIs + the poll/WiFi/MQTT state, and
@@ -282,6 +287,13 @@ static void mqtt_task(void*) {
                 heartbeat_elapsed_s += delay_s;
                 if (heartbeat_elapsed_s >= HEARTBEAT_INTERVAL_S) {
                     publish_heartbeat();
+                    // The crash topic is RETAINED but otherwise only published once per connect, so a
+                    // dump pulled + cleared (/coredump?clear=1) mid-session would leave HA's "Crash
+                    // Dump Waiting" ON until the next reconnect. Re-check on the heartbeat cadence
+                    // (one 4-byte flash read, no summary parse) and republish only on a real change.
+                    // Done HERE, not in the /coredump handler: mqtt_publish() feeds the Task Watchdog
+                    // and is only valid from this (subscribed) task.
+                    if (diag_crash_coredump_present() != s_crash_dump_pub) publish_crash();
                     heartbeat_elapsed_s = 0;
                 }
             }

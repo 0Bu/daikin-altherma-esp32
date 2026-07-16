@@ -169,11 +169,16 @@ Body, ordered:
    pins on the ESP32 card) and reboot. **Not dismissible** — it reflects a live state and clears
    itself once a healthy reboot leaves safe mode. Lives outside the poll-rebuilt card grid.
 0. **Crash banner** (only when `last_crash` is set — a fault reset or a core dump waiting; hidden on a
-   clean boot). An `--err`-accented card **above the hero**: title "Device restarted after a crash",
-   a meta line (reset reason · crashed task · fw version · short `app_elf_sha256`), the raw hex
-   backtrace, and actions — **Download crash report** (`GET /coredump`, shown only when a dump
-   exists), **Copy diagnostics** (`/status` + `/diag` + summary to the clipboard for a bug report),
-   and **Dismiss**. Dismissal is keyed to the crash signature, so a *new* crash re-shows it. Lives
+   clean boot). An `--err`-accented card **above the hero**. The title is keyed on `fault`, i.e. on
+   whether *this* boot was itself a crash: "Device restarted after a crash" when it was, else "Crash
+   report waiting from an earlier restart" — an orphan dump left in flash raises the banner on every
+   later boot (including a clean power-on or a USB re-plug), and must not claim a crash that did not
+   happen. Then a meta line (reset reason · crashed task · fw version · short `app_elf_sha256`), the
+   raw hex backtrace, and actions — **Download crash report** (`GET /coredump`, shown only while a
+   dump actually exists — `/status` reports that live, so the button disappears once the dump is
+   cleared), **Copy diagnostics** (`/status` + `/diag` + summary to the clipboard for a bug report),
+   and **Dismiss**. Dismissal is keyed to the crash signature (reason/PC/task — *not* the dump state,
+   so pulling the dump can't resurrect a dismissed banner), so a *new* crash re-shows it. Lives
    outside the poll-rebuilt card grid, so its dismissed state survives re-renders.
 1. **Status hero** (navy band): operation mode (Heating / Cooling / DHW / Standby / Off) as the
    headline, with fault state. Colour: `--ok` running, `--warn`/`--err` on fault; grey when no data.
@@ -278,9 +283,10 @@ transition). Specific:
   MQTT and ESP32 (RX/TX) config controls remain usable so the bad setting can be corrected, then a
   reboot returns to normal.
 - **Post-crash**: if the last reset was a fault (or a core dump is waiting), the crash banner (§5.3
-  item 0) appears above the hero until dismissed. "Copy diagnostics" toasts "Diagnostics copied — paste
-  into a bug report" on success, or "Copy failed — open /coredump and /diag manually" if the clipboard
-  is unavailable.
+  item 0) appears above the hero until dismissed — with the title distinguishing the two triggers, so
+  a leftover dump alone doesn't report a crash that didn't happen this boot. "Copy diagnostics" toasts
+  "Diagnostics copied — paste into a bug report" on success, or "Copy failed — open /coredump and
+  /diag manually" if the clipboard is unavailable.
 - **Errors**: 4xx from a write → inline field error + toast; 503 (device OOM) → "Device busy, retry".
 
 ## 9. Responsive & accessibility

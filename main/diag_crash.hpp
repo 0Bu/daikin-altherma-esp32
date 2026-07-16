@@ -2,15 +2,29 @@
 // One-shot crash/reset capture. diag_crash_capture() runs ONCE at boot: it reads the reset reason
 // (esp_reset_reason) and, if a core-dump image is in flash, parses its SUMMARY
 // (esp_core_dump_get_summary — crashed task, PC, backtrace, app ELF sha) into a cached CrashInfo.
-// Everything downstream (GET /status.last_crash, the MQTT crash topic) reads the CACHE — the summary
-// is never re-parsed from flash on a request path (build_status_json_string also runs in the poll
-// task's WS broadcaster, which only self-guards std::bad_alloc by dropping the frame). See
-// logic/crashinfo.hpp for the pure formatting + docs/ARCHITECTURE.md.
+// The reason + summary are boot-time FACTS and stay cached — the summary is never re-parsed from
+// flash on a request path (build_status_json_string also runs in the poll task's WS broadcaster,
+// which only self-guards std::bad_alloc by dropping the frame).
+//
+// The `coredump` flag is the ONE field that is NOT a boot-time fact: the image it describes can be
+// erased while the device runs (GET /coredump?clear=1), so a cached copy goes stale and claims a
+// dump is downloadable that flash no longer holds — a crash banner that can't be cleared and a
+// download that 404s. Callers that report it (/status.last_crash, the MQTT crash topic) therefore
+// use diag_crash_info_live(), which re-reads the flag. See logic/crashinfo.hpp for the pure
+// formatting + docs/ARCHITECTURE.md.
 #include "logic/crashinfo.hpp"
 
 namespace daik {
 
 void             diag_crash_capture();   // call once, early in app_main (after diag_log_init)
-const CrashInfo& diag_crash_info();       // cached snapshot; read-only, safe from any task
+const CrashInfo& diag_crash_info();      // cached snapshot; read-only, safe from any task
+
+// Is a downloadable dump in flash RIGHT NOW? Cheap (one 4-byte flash read), NOT the summary parse —
+// safe to call on a request path. Use this, not diag_crash_info().coredump, to decide "downloadable".
+bool             diag_crash_coredump_present();
+
+// diag_crash_info() with `coredump` refreshed from flash. Returns a COPY: refreshing the shared
+// cache in place would race the WS broadcaster / HTTP / MQTT tasks that read it concurrently.
+CrashInfo        diag_crash_info_live();
 
 } // namespace daik

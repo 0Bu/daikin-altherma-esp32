@@ -125,7 +125,10 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 heap(free/min-free/largest-block)/uptime/reset_reason/wifi(+reconnects)/mqtt(pub
                 count+fails+reconnects)/X10A bus (rx_received/rx_fails) stats, 16 diagnostic HA entities
                 streamed independently of profile detection. Also RETAINS the boot-time crash summary
-                on <base>/<node>/crash (logic/crashinfo.hpp) once per (re)connect — last reset reason
+                on <base>/<node>/crash (logic/crashinfo.hpp) once per (re)connect PLUS a republish on
+                the heartbeat cadence whenever the "dump waiting" flag changes (diag_crash_info_live();
+                a retained true would otherwise latch ON in HA until the next reconnect once the dump
+                is pulled + cleared) — last reset reason
                 + a "dump waiting" flag as 2 more diagnostic HA entities (reason/backtrace only, never
                 secrets or the raw dump). Every publish funnels through one mqtt_publish() wrapper so mqtt.count/mqtt.fails
                 cover every topic, not just state. The mqtt_pub task is Task-Watchdog-subscribed
@@ -146,7 +149,11 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 (esp_core_dump_get_summary: crashed task/PC/backtrace/app-elf-sha) into a cached
                 CrashInfo (logic/crashinfo.hpp); read by /status.last_crash + the MQTT crash topic —
                 the summary is NEVER re-parsed on a request path (build_status_json also runs in the
-                poll task's WS broadcaster, which only self-guards std::bad_alloc by dropping the frame)
+                poll task's WS broadcaster, which only self-guards std::bad_alloc by dropping the frame).
+                EXCEPTION: the `coredump` flag is re-read from flash per request (diag_crash_info_live()
+                — a 4-byte size-word read, NOT the summary parse), because /coredump?clear=1 can erase
+                the image mid-session; a cached flag would strand an uncleanable crash banner + a
+                download that 404s. mqtt_ha republishes the retained crash topic when the flag changes
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, config_model,
                 discovery, detect, mqtt_group, heartbeat, crashinfo, reset_reason, boot_guard,
                 board_pins, modbus).
@@ -206,9 +213,12 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   present (unlike last_crash, and unlike the MQTT heartbeat needs no broker); reset_reason
                   via logic/reset_reason.hpp, safe_mode = the latched boot-loop recovery flag (safe_mode.cpp;
                   true once too many crash boots accumulated -> poll + MQTT skipped),
-                  last_crash (null on a clean boot, else {reason,reason_code,fault,coredump,task,pc,
-                  backtrace[],corrupted,elf_sha256} from the boot-time cache — drives the crash
-                  banner), detect{proto,valid,capacity_kw,ou_eeprom,candidates[],families[],ambiguous,
+                  last_crash (null unless this boot was a FAULT or a dump is still in flash, else
+                  {reason,reason_code,fault,coredump,task,pc,backtrace[],corrupted,elf_sha256} — the
+                  reason/summary from the boot-time cache, `coredump` re-read from flash per request
+                  so a cleared dump can't strand the banner; drives the crash banner, whose title keys
+                  on `fault` — an orphan dump alone is NOT "restarted after a crash"),
+                  detect{proto,valid,capacity_kw,ou_eeprom,candidates[],families[],ambiguous,
                   model{name,family,marketing}} — drives the dashboard ESP32 board card + model card.
                   RX/TX are auto-detected: read-only on the card while the bus answers, a pins_avail
                   dropdown (re-runs detection) when it doesn't.

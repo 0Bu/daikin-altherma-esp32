@@ -114,13 +114,28 @@ function renderRecoveryBanner() {
 // — scripts/decode-coredump.sh) and a copy-paste diagnostics bundle for a bug report. Lives outside
 // #valueGroups (rebuilt every poll), so its dismissed state survives re-renders; dismissal is keyed
 // to the crash signature, so a NEW crash re-shows the banner.
+//
+// Those two cases need DIFFERENT wording: last_crash is notable when `fault` OR `coredump` is set,
+// so an orphan dump left in flash from an earlier crash raises the banner on every later boot — even
+// a clean power-on or a USB re-plug (reset=usb, fault=false). Titling that "Device restarted after a
+// crash" reports a crash that did not happen on this boot. Key the title on `fault`, which is the
+// only field that says THIS boot was a crash.
 function renderCrashBanner() {
   const el = $("crashBanner"), c = S.status?.last_crash;
   if (!c) { el.hidden = true; return; }
-  const sig = `${c.reason}:${c.pc || ""}:${c.task || ""}`;
+  // Two different identities. `sig` is WHICH crash this is — the dismissal key, so pulling the dump
+  // doesn't resurrect a banner the user dismissed. `rsig` is what the banner currently DRAWS, which
+  // also depends on c.coredump (it gates the download button, and /status now reports it live, so it
+  // flips to false the moment the dump is cleared). Keying the re-render on `sig` alone would leave a
+  // stale "Download crash report" button pointing at a dump that is gone — a 404 — until a reload.
+  // They must stay SEPARATE attributes: the dismiss click handler reads dataset.sig, so folding the
+  // dump state into it would compare "usb::true" against sig "usb::" here and silently break Dismiss.
+  const sig  = `${c.reason}:${c.pc || ""}:${c.task || ""}`;
+  const rsig = `${sig}:${!!c.coredump}`;
   if (S.crashDismissed === sig) { el.hidden = true; return; }
-  if (el.dataset.sig === sig && !el.hidden) return;   // already rendered this crash — don't thrash the DOM
-  el.dataset.sig = sig;
+  if (el.dataset.rsig === rsig && !el.hidden) return;   // already rendered this — don't thrash the DOM
+  el.dataset.sig  = sig;    // dismissal key (read by the Dismiss handler)
+  el.dataset.rsig = rsig;   // render key
 
   const s = S.status || {}, bt = Array.isArray(c.backtrace) ? c.backtrace : [];
   const bits = [`Reset: <b>${esc(c.reason)}</b>`];
@@ -131,9 +146,12 @@ function renderCrashBanner() {
     ? `<div class="crash-bt mono">${esc(bt.join(" "))}${c.corrupted ? " (corrupted)" : ""}</div>` : "";
   const dl = c.coredump
     ? `<a class="btn secondary sm" href="/coredump" download="coredump.bin">Download crash report</a>` : "";
+  const title = c.fault
+    ? "Device restarted after a crash"
+    : "Crash report waiting from an earlier restart";
   el.innerHTML =
     `<div class="crash-head"><span class="crash-ico">!</span>` +
-    `<div class="crash-txt"><div class="crash-title">Device restarted after a crash</div>` +
+    `<div class="crash-txt"><div class="crash-title">${title}</div>` +
     `<div class="crash-meta">${bits.join(" · ")}</div>${btHtml}</div></div>` +
     `<div class="crash-actions">${dl}` +
     `<button class="btn secondary sm" type="button" data-cact="copy">Copy diagnostics</button>` +
