@@ -48,7 +48,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/guard-secrets.sh\"",
-            "statusMessage": "Checking for private key material…"
+            "statusMessage": "Checking for private key material\u2026"
           }
         ]
       },
@@ -58,7 +58,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/guard-partitions.sh\"",
-            "statusMessage": "Checking partition-table safety…"
+            "statusMessage": "Checking partition-table safety\u2026"
           }
         ]
       },
@@ -68,12 +68,12 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-project-review.sh\"",
-            "statusMessage": "Checking project-review gate…"
+            "statusMessage": "Checking project-review gate\u2026"
           },
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-feature-docs.sh\"",
-            "statusMessage": "Checking feature-docs gate…"
+            "statusMessage": "Checking feature-docs gate\u2026"
           }
         ]
       },
@@ -83,12 +83,12 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-project-review.sh\"",
-            "statusMessage": "Checking project-review gate…"
+            "statusMessage": "Checking project-review gate\u2026"
           },
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-feature-docs.sh\"",
-            "statusMessage": "Checking feature-docs gate…"
+            "statusMessage": "Checking feature-docs gate\u2026"
           }
         ]
       }
@@ -99,7 +99,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/report-capabilities.sh\"",
-            "statusMessage": "Detecting toolchain capabilities…"
+            "statusMessage": "Detecting toolchain capabilities\u2026"
           }
         ]
       }
@@ -111,7 +111,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/clang-format-edit.sh\"",
-            "statusMessage": "Formatting edited C/C++…"
+            "statusMessage": "Formatting edited C/C++\u2026"
           }
         ]
       }
@@ -122,7 +122,18 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/run-logic-tests.sh\"",
-            "statusMessage": "Running host logic tests…"
+            "statusMessage": "Running host logic tests\u2026"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/crash-triage-context.sh\"",
+            "statusMessage": "Checking for a device-crash report\u2026"
           }
         ]
       }
