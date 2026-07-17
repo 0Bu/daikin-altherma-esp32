@@ -77,10 +77,23 @@ static std::string build_status_json_string() {
     char elf_sha[65] = {0};
     esp_app_get_elf_sha256(elf_sha, sizeof(elf_sha));
     j += "\"app_elf_sha256\":" + jstr(elf_sha) + ",";
-    // GPIOs the UI offers in the RX/TX pin dropdown (per-target, broken-out + safe; logic/board_pins.hpp).
-    BoardPins bp = board_pins(CONFIG_IDF_TARGET);
+    // GPIOs the UI offers in the RX/TX pin dropdown: the ESP32-S3 chip-safe set, reserving
+    // GPIO33-37 only when this build's flash/PSRAM actually run Octal I/O, and dropping the status
+    // LED's pin — the one GPIO this firmware itself drives (logic/board_pins.hpp).
+#if defined(CONFIG_ESPTOOLPY_OCT_FLASH) || defined(CONFIG_SPIRAM_MODE_OCTAL)
+    constexpr bool kOctalSpi = true;
+#else
+    constexpr bool kOctalSpi = false;
+#endif
+#if CONFIG_DAIKIN_STATUS_LED_ENABLE
+    constexpr int kLedGpio = CONFIG_DAIKIN_STATUS_LED_GPIO;   // already -1 if the user disabled it
+#else
+    constexpr int kLedGpio = -1;
+#endif
+    int pins[BOARD_PINS_MAX];
+    int npins = board_pins_offerable(pins, BOARD_PINS_MAX, kOctalSpi, kLedGpio);
     j += "\"pins_avail\":[";
-    for (int i = 0; i < bp.count; i++) { if (i) j += ","; j += std::to_string(bp.pins[i]); }
+    for (int i = 0; i < npins; i++) { if (i) j += ","; j += std::to_string(pins[i]); }
     j += "],";
     char bssid_str[18] = {0};
     char mac_str[18] = {0};

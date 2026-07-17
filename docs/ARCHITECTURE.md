@@ -133,10 +133,13 @@ host-testable core is unusually large and valuable, because the risky parts are 
 - `logic/detect.hpp` — model auto-detection: maps a bus `Fingerprint` (answering pages + capacity)
   against per-profile signatures to a candidate set (see the Auto-detection section). Pure, so the
   narrowing rule is asserted on the host against the real derived signatures.
-- `logic/board_pins.hpp` — per-target list of usable X10A GPIOs (the pins broken out + safe on each
-  chip's reference board; the XIAO ESP32-S3 is authoritative). Feeds `/status.pins_avail` and hence
-  the dashboard RX/TX pin dropdown. Pure, so the lists are asserted host-side (sorted, in range, and
-  the reference-board set excludes not-broken-out pins like GPIO47).
+- `logic/board_pins.hpp` — the ESP32-S3 chip-safe GPIO set (excludes SPI flash, strapping, USB-JTAG
+  and dedicated JTAG pins; an `octal_spi` flag additionally excludes GPIO33-37 on builds whose
+  flash/PSRAM run Octal I/O, derived from Kconfig at the `http_status.cpp` call site). Deliberately
+  NOT a claim about what any specific board breaks out to a header — firmware has no way to learn
+  that (no board-ID EEPROM), so the list is a chip-level safety floor, not a board-specific one.
+  Feeds `/status.pins_avail` and hence the dashboard RX/TX pin dropdown. Pure, so both list variants
+  are asserted host-side (sorted, in range, and each excludes exactly its reserved pins).
 - `logic/json.hpp` — the RFC 8259 string encoder every JSON payload goes through: `/status`,
   `/values` and `/scan` (`http_status.cpp`'s `jstr`) as well as the MQTT state, heartbeat and crash
   topics. It escapes `"`, `\` and **every** control byte below 0x20 (`\b\f\n\r\t`, else `\u00XX`),
@@ -670,7 +673,7 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
 - **Heat pump** → `/set_hp`: fully automatic. The model is **auto-detected** (see Auto-detection) and
   shown read-only on the dashboard **Model** card. The dashboard **ESP32** card shows the X10A link +
   protocol and the **RX/TX pins**, which are also auto-detected: **read-only** while the bus answers,
-  and a **dropdown** of the board's usable GPIOs (`/status.pins_avail`) when it doesn't — picking a
+  and a **dropdown** of the chip's safe GPIOs (`/status.pins_avail`) when it doesn't — picking a
   pin posts `{profile:"auto", rx, tx}` to re-run detection on that pair. The RX/TX pins are
   **persisted** (a manual pick survives reboot); the model is session-only. Protocol is auto-detected
   (no UI control), the poll interval is fixed at 1 s (not sent), and labels are English-only (no

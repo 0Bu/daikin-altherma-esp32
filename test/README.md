@@ -32,8 +32,8 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   rules, the `/set_hp` fingerprint rule, and the field-owned detection patches (`apply_link` /
   `apply_model` touch only the link / model — a link commit must not revert a concurrent
   `/set_wifi`).
-- `logic/board_pins.hpp` — the usable X10A GPIO list (sorted, in range; the XIAO ESP32-S3
-  reference set excludes not-broken-out pins).
+- `logic/board_pins.hpp` — the ESP32-S3 chip-safe GPIO list (sorted, in range; excludes SPI
+  flash/strapping/USB-JTAG/JTAG, plus GPIO33-37 on Octal-flash/PSRAM builds).
 - `logic/discovery.hpp` — object-id slugging + the discovery config JSON.
 - `def/registry.hpp` — profile lookup + generic fallback.
 - `logic/detect.hpp` — capacity class parsed out of a profile id, page-mask fingerprint → candidate

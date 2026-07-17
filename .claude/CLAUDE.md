@@ -309,8 +309,16 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 state JSON; heartbeat.hpp builds the board/link diagnostics JSON + its diagnostic HA
                 discovery configs; crashinfo.hpp turns a captured CrashInfo (reset reason + core-dump
                 summary) into the last_crash JSON / MQTT crash payload + a paste-friendly text bundle,
-                and classifies which reset reasons are faults; board_pins.hpp = per-target usable X10A
-                GPIOs (the RX/TX pin-picker dropdown when detection hasn't locked the pins);
+                and classifies which reset reasons are faults; board_pins.hpp = the ESP32-S3 CHIP-safe
+                X10A GPIOs (the RX/TX pin-picker dropdown when detection hasn't locked the pins) —
+                minus flash/strapping/USB-JTAG/JTAG always, minus GPIO33-37 when the build runs Octal
+                flash/PSRAM, and minus the status LED's own pin: chip-safe is not free, and offering a
+                pin status_led.cpp holds as a push-pull output is a pick that cannot work. Both
+                inputs (octal_spi, reserved) come from Kconfig at the http_status.cpp call site, since
+                logic/ must not see CONFIG_*. board_pins_offerable() fills a CALLER-owned buffer — a
+                filtered static would race, as build_status_json runs on httpd AND the poll task's WS
+                broadcaster. It says nothing about which pins a given BOARD breaks out to a header
+                (no board-ID EEPROM exists); README.md carries that per-board table for humans;
                 modbus.hpp = Modbus TCP framing (MBAP, no CRC) + HomeHub register codecs
                 (Temp16/Pow16/Int16/Text16 decode+encode) + the homehub-* mDNS filter — host-tested
                 core for the PLANNED firmware-exclusive HomeHub Modbus link (issue #32), not yet wired.
@@ -367,8 +375,8 @@ offset/size stable across versions.
 ```
 GET  /            embedded web UI (gzipped into the app binary)
 GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity — matches a core dump
-                  to its .elf), pins_avail[] (per-target usable X10A GPIOs for the RX/TX picker —
-                  logic/board_pins.hpp), wifi{ssid,ip,rssi,connected,bssid,mac,std,rolled_back}
+                  to its .elf), pins_avail[] (the chip-safe X10A GPIOs for the RX/TX picker, minus the
+                  status LED's pin — logic/board_pins.hpp), wifi{ssid,ip,rssi,connected,bssid,mac,std,rolled_back}
                   (bssid/std are the associated AP's BSSID + PHY standard name e.g. "Wi-Fi 4", null
                   while offline; mac is this STA's own MAC, always present; rolled_back = the last
                   /set_wifi was UNDONE by the credential rollback — sticky until the next /set_wifi,
