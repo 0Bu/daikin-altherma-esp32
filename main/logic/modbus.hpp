@@ -2,8 +2,10 @@
 // Modbus TCP framing + HomeHub value codecs. Pure + IDF-free so test/test_logic.cpp can assert it
 // on the host; the device wrapper (hp_modbus.cpp, a later phase) only adds the lwIP socket around
 // these. This is the transport core for the firmware-EXCLUSIVE Modbus TCP link to a Daikin HomeHub
-// (EKRHH) — read input/holding registers and, for the on-device decision engine only, write holding
-// registers. No external control surface is built on top of this (see issue #32 / docs/SECURITY.md).
+// (EKRHH) — full read/write of every register the HomeHub exposes: all input registers (read-only
+// by the Modbus spec itself) and all holding registers, including the Smart Grid / power-limit /
+// setpoint ones (EKRHH guide §9.2.1 regs 56-58) — not just an internal decision-engine subset (see
+// issue #32 / docs/SECURITY.md for how that surface is exposed).
 //
 // Wire facts (EKRHH Installer reference guide 4P744838-1E, §9): Modbus TCP on port 502 (no
 // encryption). Modbus is big-endian on the wire. Frame = MBAP header [txn(2), proto=0(2), len(2),
