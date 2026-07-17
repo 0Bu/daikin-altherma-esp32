@@ -10,7 +10,7 @@ Reference: [docs/README.md](docs/README.md) (protocol · API · values · build)
 ## Requirements
 
 - A Daikin Altherma with an **X10A** header.
-- ESP32-S3, ≥4 MB flash. Reference board: Seeed XIAO ESP32-S3.
+- ESP32-S3, ≥4 MB flash.
 - A browser with Web Serial to flash.
 - JST-EH 2.5 mm 5-pin or Dupont wires.
 
