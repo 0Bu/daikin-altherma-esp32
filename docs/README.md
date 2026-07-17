@@ -19,16 +19,32 @@ diagnostics, WiFi resilience — see [**FEATURES.md**](FEATURES.md).
   GPIOs to a hardware UART (`RX_PIN` ← X10A pin 2 / HP-TX, `TX_PIN` → X10A pin 3 / HP-RX). The
   USB/native-USB console is a *separate* UART, so device logs never collide with the HP link.
 - **Reference wiring (XIAO ESP32-S3):** `RX = GPIO44` (pad D7), `TX = GPIO43` (pad D6),
-  `GND` mandatory, `5V` optional. `GPIO16/17` — the classic-ESP32 default — are **not** broken
-  out on the XIAO, which is why pins are configurable.
+  `GND` mandatory, `5V` optional and out of spec (see below — prefer USB power). `GPIO16/17` — the
+  classic-ESP32 default — are **not** broken out on the XIAO, which is why pins are configurable.
 
 ### Voltage and wiring
 
 X10A is 5 V TTL; the ESP32 GPIOs are 3.3 V and not officially 5 V-tolerant. A direct connection
 typically works in practice, but the safe option is a level shifter
-on the **HP-TX → ESP-RX** line. Whatever you do, **GND must always be common** between the ESP
-and X10A, even when the ESP is USB-powered. The X10A 5 V pin can usually power the ESP (~70 mA);
-if that rail is weak, power the ESP from USB instead.
+on the **HP-TX → ESP-RX** line — only on that one line: the link is request/response, so the unit's
+RX demonstrably accepts the ESP's 3.3 V TX (it is a TTL input, VIH ≈ 2 V). Whatever you do,
+**GND must always be common** between the ESP and X10A, even when the ESP is USB-powered.
+
+**If you do shift, use a passive divider, not an auto-direction shifter.** A resistor divider
+(e.g. 10 kΩ / 20 kΩ) is ample at 9600 baud. The popular auto-direction converter ICs (TXS0108E and
+relatives) sense direction through weak pull-ups and one-shot edge accelerators — that scheme
+assumes a line no one drives continuously, which is exactly what a UART is not, and it has been
+observed to kill the link outright (ESP reads nothing at all). A shifter chosen wrong breaks the
+bus rather than protecting it; the divider has no such failure mode.
+
+**Powering the ESP from the X10A 5 V pin is out of spec.** Daikin rates the port at **max. 5 V /
+50 mA** — that is the spec of its own [EKPCCAB PC-cable accessory][ekpccab] (p. 1), which plugs into
+X10A. An ESP32 draws ~70 mA average and 240 mA+ on WiFi-TX peaks, so it exceeds the rating even at
+idle. It works on many units anyway (some feed X10A from a 1 A regulator), but the headroom is
+per-model and unpublished — an unstable rail is what running out of it looks like. Prefer USB power
+and leave pin 1 unconnected.
+
+[ekpccab]: https://www.daikin.co.uk/content/dam/document-library/installation-manuals/ctrl/EKPCCAB4_4PW74106-1E_2018_06_Installation%20manual.pdf
 
 ---
 

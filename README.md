@@ -29,7 +29,7 @@ Reference: [docs/README.md](docs/README.md) (protocol · API · values · build)
 
 | X10A | Signal | Wire Color | ESP32 (XIAO S3) | Note |
 | :---: | :--- | :--- | :--- | :--- |
-| 1 | +5 V | Red | `5V` | Optional |
+| 1 | +5 V | Red | `5V` | Optional — out of spec, prefer USB power |
 | 2 | HP-TX | Brown | RX `GPIO44` (D7) | Connects to ESP32 RX |
 | 3 | HP-RX | Green | TX `GPIO43` (D6) | Connects to ESP32 TX |
 | 4 | NC | — | — | Not connected |
@@ -55,8 +55,9 @@ Reference: [docs/README.md](docs/README.md) (protocol · API · values · build)
              +-----------------------------------------------------------------------------------------+
 ```
 
-5 V TTL; level shifter on HP-TX→ESP-RX recommended. `GPIO16/17` absent on the XIAO → pins
-configurable. `Timeout`/`Wrong CRC` = cable/GND; `0x15 0xEA` = use protocol `S`.
+5 V TTL; level shifter on HP-TX→ESP-RX recommended. Daikin rates X10A at 5 V / **50 mA**, less than
+an ESP32 draws — prefer USB power ([details](docs/README.md#voltage-and-wiring)). `GPIO16/17` absent
+on the XIAO → pins configurable. `Timeout`/`Wrong CRC` = cable/GND; `0x15 0xEA` = use protocol `S`.
 
 ## Notes
 
