@@ -51,19 +51,26 @@ int hp_query(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen) {
             if (proto == Protocol::I && len == 3) {
                 replyLen = reply_len_dynamic(buf);
                 if (!is_valid_dynamic_len(replyLen, buflen)) {
-                    diag_printf("HP invalid dynamic reply len %d (max %u) on reg 0x%02x\n", replyLen, buflen, reg);
+                    diag_printf("HP invalid dynamic reply len %d (max %u) on reg 0x%02x (rx=%d tx=%d)\n",
+                                replyLen, buflen, reg, s_rx, s_tx);
                     return -1;
                 }
             }
             if (len == 2 && is_error_reply(buf, len)) {
-                diag_printf("HP error 0x15 0xEA on reg 0x%02x (try protocol S?)\n", reg);
+                diag_printf("HP error 0x15 0xEA on reg 0x%02x (try protocol S?) (rx=%d tx=%d)\n", reg, s_rx, s_tx);
                 return -2;
             }
         }
     }
-    if (len == 0)         { diag_printf("HP timeout reg 0x%02x — check X10A cable / GND\n", reg); return -1; }
-    if (len < replyLen)   { diag_printf("HP short reply reg 0x%02x %d/%d\n", reg, len, replyLen); return -1; }
-    if (!crc_ok(buf, len)) { diag_printf("HP wrong CRC reg 0x%02x\n", reg); return -3; }
+    if (len == 0) {
+        diag_printf("HP timeout reg 0x%02x on rx=%d tx=%d — check X10A cable / GND\n", reg, s_rx, s_tx);
+        return -1;
+    }
+    if (len < replyLen) {
+        diag_printf("HP short reply reg 0x%02x %d/%d (rx=%d tx=%d)\n", reg, len, replyLen, s_rx, s_tx);
+        return -1;
+    }
+    if (!crc_ok(buf, len)) { diag_printf("HP wrong CRC reg 0x%02x (rx=%d tx=%d)\n", reg, s_rx, s_tx); return -3; }
     return len;
 }
 

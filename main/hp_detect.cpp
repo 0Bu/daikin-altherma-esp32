@@ -62,12 +62,22 @@ DetectResult hp_detect_run() {
     const Protocol p0 = c.proto;                               // cached framing — try it first
     const Protocol p1 = (p0 == Protocol::I) ? Protocol::S : Protocol::I;
     for (int i = 0; i < nc && !r.bus_ok; i++) {
+        diag_printf("detect: probing rx=%d tx=%d (proto %c/%c)\n",
+                    cand[i].rx, cand[i].tx, static_cast<char>(p0), static_cast<char>(p1));
         hp_uart_init(cand[i].rx, cand[i].tx);
         if (proto_answers(p0))      { r.proto = p0; r.bus_ok = true; }
         else if (proto_answers(p1)) { r.proto = p1; r.bus_ok = true; }
         if (r.bus_ok) { r.rx = cand[i].rx; r.tx = cand[i].tx; }
     }
-    if (!r.bus_ok) { diag_printf("detect: no X10A response on any pin/proto — check wiring/GND\n"); return r; }
+    if (!r.bus_ok) {
+        if (nc > 0) {
+            diag_printf("detect: no X10A response on any pin/proto (last tried rx=%d tx=%d) — check wiring/GND\n",
+                        cand[nc - 1].rx, cand[nc - 1].tx);
+        } else {
+            diag_printf("detect: no valid rx/tx pin candidates to probe — check config\n");
+        }
+        return r;
+    }
     hp_uart_init(r.rx, r.tx);                                   // settle on the winning pins
 
     // 2. Probe pages; capture the 0x00 (capacity) and 0x11 (EEPROM) payloads.
