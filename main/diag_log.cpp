@@ -30,8 +30,11 @@ static void append(const char* p, size_t n) {
 
 void diag_printf(const char* fmt, ...) {
     char line[256];
-    // Uptime prefix — the device has no RTC/wall clock (no SNTP), so timestamp each line with
-    // seconds.milliseconds since boot, e.g. "[   123.456] ".
+    // Uptime prefix, e.g. "[   123.456] " (seconds.milliseconds since boot) — kept even now that
+    // SNTP (sntp_time.cpp) gives the device a wall clock, since it is what device-triage's boot-
+    // reconstruction technique keys on (an uptime that jumps backwards = a reboot) and stays
+    // available before the very first sync of a boot, when a wall-clock prefix would still be blank.
+    // The wall clock reaches the log stream a different way: syslog.cpp's RFC 5424 TIMESTAMP field.
     int64_t us  = esp_timer_get_time();
     int     pre = snprintf(line, sizeof(line), "[%6lld.%03lld] ",
                            (long long)(us / 1000000), (long long)((us / 1000) % 1000));

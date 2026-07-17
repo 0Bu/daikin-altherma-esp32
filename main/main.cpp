@@ -4,7 +4,7 @@
 //   1. NVS + runtime config load (config.cpp; defaults from Kconfig).
 //   2. WiFi: if configured -> STA (with the endless-reconnect + gateway watchdog); else start
 //      the captive setup portal (provisioning.cpp, SoftAP "daikin-altherma-esp32-setup").
-//   3. mDNS (<hostname>.local), HTTP server (:80), MQTT/HA bridge, OTA health gate.
+//   3. SNTP (wall clock), mDNS (<hostname>.local), HTTP server (:80), MQTT/HA bridge, OTA health gate.
 //   4. Heat-pump poll engine (hp_poll.cpp): owns the X10A UART, polls each interval, fills the
 //      value cache the web UI / MQTT read.
 //
@@ -24,6 +24,7 @@
 #include "ota_update.hpp"
 #include "provisioning.hpp"
 #include "safe_mode.hpp"
+#include "sntp_time.hpp"
 #include "status_led.hpp"
 #include "wifi.hpp"
 
@@ -58,6 +59,11 @@ extern "C" void app_main() {
     if (!daik::wifi_configured() || !daik::wifi_start_sta()) {
         daik::provisioning_start_ap();   // SoftAP + captive portal; serves www/setup.html
     }
+
+    // --- Wall clock ---
+    // Both branches above already called esp_netif_init(); harmless to start before the STA has an
+    // IP (or in AP-only setup mode) — the client idles/retries on its own task until one shows up.
+    daik::sntp_time_start();
 
     // --- Services ---
     // The web UI + OTA are ALWAYS started (they are the recovery surface). In safe mode the two

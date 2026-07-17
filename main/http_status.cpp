@@ -13,10 +13,12 @@
 #include "logic/detect.hpp"
 #include "logic/json.hpp"
 #include "logic/reset_reason.hpp"
+#include "logic/timestamp.hpp"
 #include "logic/ws_policy.hpp"
 #include "mqtt_ha.hpp"
 #include "ota_update.hpp"
 #include "safe_mode.hpp"
+#include "sntp_time.hpp"
 #include "wifi.hpp"
 #include "syslog.hpp"
 
@@ -154,6 +156,17 @@ static std::string build_status_json_string() {
          ",\"max_alloc\":" + std::to_string(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)) +
          ",\"reset_reason\":" + jstr(reset_reason_name(diag_crash_info().reason)) +
          ",\"safe_mode\":" + (safe_mode_active() ? "true" : "false") + "},";
+
+    // NTP: its own top-level block (not folded into sys), mirroring syslog{} — it is a runtime-
+    // configurable network service like syslog/MQTT (POST /set_ntp -> NVS "ntp_server"), not a static
+    // board fact like the rest of sys{}. server is the CONFIGURED address (config().ntp_server,
+    // resolved from NVS/Kconfig at boot — sntp_time.cpp never changes it live, a server edit reboots),
+    // not necessarily who actually answered. synced/time are null/false until the first SNTP reply of
+    // this boot lands.
+    const TimeStatus ts = time_status();
+    j += "\"ntp\":{\"server\":" + jstr(ts.server) +
+         ",\"synced\":" + (ts.synced ? "true" : "false") +
+         ",\"time\":" + (ts.synced ? jstr(rfc3339_utc(ts.unix_time)) : "null") + "},";
 
     // Last reset: null on a clean boot, else the crash summary (reset reason + core-dump backtrace).
     // The reason/backtrace come from the boot-time CACHE (diag_crash.cpp) — never re-parsed from

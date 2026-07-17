@@ -111,7 +111,7 @@ broken out on the XIAO.
 ## Architecture (component map)
 
 ```
-main.cpp        boot: NVS, config, safe-mode guard, WiFi(STA)|setup-AP, mDNS, HTTP, MQTT, poll, OTA gate
+main.cpp        boot: NVS, config, safe-mode guard, WiFi(STA)|setup-AP, SNTP, mDNS, HTTP, MQTT, poll, OTA gate
 safe_mode.cpp   boot-loop safe mode (logic/boot_guard.hpp): counts crash-only boots in NVS "daik_cfg"
                 (boot_fails); past BOOT_FAIL_THRESHOLD it latches -> main.cpp skips the poll engine + MQTT
                 bridge (WiFi + web UI + OTA stay up) so a bad config (e.g. wrong RX/TX pins) is fixable
@@ -155,6 +155,26 @@ wifi.cpp        STA bring-up (all-channel scan -> strongest AP by RSSI) + endles
                 hostname (option 12) + mDNS; wifi_info() also reports the associated AP's BSSID + PHY
                 standard + this STA's MAC; wifi_reconnect_count() — cumulative RE-connects since boot,
                 for the MQTT heartbeat
+sntp_time.cpp   SNTP client (esp_netif_sntp, config().ntp_server — NVS "ntp_server" override of
+                CONFIG_DAIKIN_NTP_SERVER default "pool.ntp.org", runtime-editable via POST /set_ntp
+                exactly like syslog_host/POST /set_syslog) — started right after WiFi(STA)|setup-AP
+                in main.cpp, once config_load() has run (both WiFi paths already call
+                esp_netif_init()); non-blocking, idles/retries on its own task until a route to the
+                server exists, so it is harmless to start in AP-only setup mode too. Before this the
+                device had no wall clock at all: diag_printf's "[uptime]" prefix and syslog's RFC 5424
+                TIMESTAMP were the only timestamps anywhere, both relative to an unknown boot instant.
+                time_synced()/time_now()/time_status() expose the sync flag + current UTC instant
+                (read straight from newlib's clock, which the sync callback drives via
+                settimeofday() — no separate offset-tracking to drift out of sync with it);
+                logic/timestamp.hpp renders it as RFC 3339 for syslog.cpp's TIMESTAMP field and the
+                top-level /status.ntp block. The uptime prefix stays as-is everywhere it already was
+                (device-triage's boot-reconstruction technique keys on it jumping backwards on a
+                reboot, and it is available before the very first sync of a boot, when the wall clock
+                is still unset) — SNTP adds a second, absolute clock rather than replacing the first.
+                The server string is resolved ONCE at startup into a file-scope std::string (lwip's
+                SNTP module stores the raw pointer it's given, not a copy, so it must outlive the
+                client) — a later /set_ntp edit reboots into a fresh config_load() rather than
+                mutating it live.
 provisioning.cpp setup SoftAP (daikin-altherma-esp32-setup) + DHCP DNS-offer; HTTP is the shared :80 server
 captive_dns.cpp UDP:53 catch-all (every name -> 192.168.4.1) so the setup portal auto-pops (AP mode only)
 hp_comm.cpp     X10A UART (9600 8E1) + register query
@@ -173,15 +193,16 @@ http_common.cpp shared HTTP helpers + the ONE OOM guard every route runs under: 
                 the deliberate exception (raw registration needed for the WebSocket; it self-guards)
 http_status.cpp GET / (setup.html in AP mode, else gzip UI) /status /values /models /diag /scan
                 /coredump + /events (WebSocket live push) + captive catch-all
-http_config.cpp POST /set_wifi /set_mqtt /set_syslog /set_hp /detect
+http_config.cpp POST /set_wifi /set_mqtt /set_syslog /set_ntp /set_hp /detect
 http_ota.cpp    /ota/check|update|status
 mcp_server.cpp  /mcp (read-only MCP tools; TODO)
 mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE shared grouped-JSON
                 state topic <base>/<node>/state (logic/mqtt_group.hpp), republished on change; LWT
                 availability, mqtts+CA on creds; board/link diagnostics on <base>/<node>/heartbeat
                 (logic/heartbeat.hpp), published on a fixed 10s cadence (HEARTBEAT_INTERVAL_S) —
-                heap(free/min-free/largest-block)/uptime/reset_reason/wifi(+reconnects)/mqtt(pub
-                count+fails+reconnects)/X10A bus (rx_received/rx_fails) stats, 16 diagnostic HA entities
+                heap(free/min-free/largest-block)/uptime/reset_reason/the SNTP wall clock (sntp_time.cpp,
+                "time" — HA device_class "timestamp", null until synced)/wifi(+reconnects)/mqtt(pub
+                count+fails+reconnects)/X10A bus (rx_received/rx_fails) stats, 17 diagnostic HA entities
                 streamed independently of profile detection. Also RETAINS the boot-time crash summary
                 on <base>/<node>/crash (logic/crashinfo.hpp) once per (re)connect PLUS a republish on
                 the heartbeat cadence whenever the "dump waiting" flag changes (diag_crash_info_live();
@@ -209,7 +230,11 @@ status_led.cpp  onboard-LED status indicator task (compile-time only, DAIKIN_STA
 diag_log.cpp    in-RAM diag ring served by GET /diag; each line is also forwarded to syslog_send()
 syslog.cpp      optional syslog UDP client (RFC 5424): a task DNS-resolves the configured host, then
                 forwards every diag_printf() line as one UDP datagram; disabled when syslog_host is
-                empty. Delivery is gated on DNS ONLY — an ARP(local)/ICMP reachability probe is
+                empty. The RFC 5424 TIMESTAMP field is the SNTP wall clock (sntp_time.cpp,
+                logic/timestamp.hpp) once synced, else the "-" NILVALUE a collector conventionally
+                substitutes its own receive time for — so a boot's first few lines (sent before the
+                client's first sync lands) just carry a slightly-later effective timestamp, never a
+                fabricated pre-epoch one. Delivery is gated on DNS ONLY — an ARP(local)/ICMP reachability probe is
                 ADVISORY (feeds /status.syslog.reachable, never gates sends: syslog is best-effort UDP
                 and a healthy collector may firewall ICMP). File-scope ping-control (like wifi.cpp's
                 s_wd) so the async esp_ping callback can't use-after-free. syslog_status() feeds
@@ -239,7 +264,7 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, value_def, config_model,
                 discovery, detect, json, mqtt_group, mqtt_uri, heartbeat, crashinfo, bootlog,
                 reset_reason, boot_guard, board_pins, modbus, syslog_policy, link_watch,
-                wifi_rollback, health_gate, ws_policy, http_body).
+                wifi_rollback, health_gate, ws_policy, http_body, timestamp).
                 value_def.hpp = the ValueDef row type the generated def/ profile tables are written
                 in ({reg, offset, conv, size, type, label} — registry id, byte offset in the reply
                 payload, converter id for convert.hpp, byte count, HA unit code, English label): the
@@ -322,6 +347,12 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 modbus.hpp = Modbus TCP framing (MBAP, no CRC) + HomeHub register codecs
                 (Temp16/Pow16/Int16/Text16 decode+encode) + the homehub-* mDNS filter — host-tested
                 core for the PLANNED firmware-exclusive HomeHub Modbus link (issue #32), not yet wired.
+                timestamp.hpp = rfc3339_utc(unix_s, ms) — the ONE UTC formatter the SNTP wall clock
+                (sntp_time.cpp) renders through, for syslog.cpp's RFC 5424 TIMESTAMP field,
+                /status.ntp.time, and mqtt_ha.cpp's heartbeat "time" field. A negative unix_s
+                (sntp_time.cpp's "never synced" sentinel) returns
+                "" rather than a plausible-looking 1970-01-01 — callers key on the empty string to
+                fall back to the RFC 5424 NILVALUE / JSON null instead of asserting a wrong instant.
 def/            embedded per-model value profiles + registry (incl. the generic Altherma fallback =
                 universal register core) + models_catalog.hpp (GET /models) + model_names.hpp
                 (id→display/family/marketing name for /status) + signatures.hpp (Altherma-only
@@ -337,7 +368,7 @@ www/            web UI sources (index.html + style.css + app.js -> one gzipped p
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `wifi_ssid`/`wifi_pass`, the one-shot WiFi rollback backup `wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback` plus the `wifi_rolledbk` outcome marker (see `/set_wifi`; `config_save` writes the backup+flag BEFORE the creds when arming and AFTER them when clearing — each `nvs_set_*` commits on its own, so the order decides what a power cut leaves behind), `mqtt_uri`/`mqtt_user`/`mqtt_pass`, `syslog_host`/`syslog_port` (empty host = off), the X10A **link cache** `rx_pin`/`tx_pin`/`proto`, and the boot-loop **crash counter** `boot_fails` (safe_mode.cpp; here so a factory reset wipes it too). (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
+| `daik_cfg` | `wifi_ssid`/`wifi_pass`, the one-shot WiFi rollback backup `wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback` plus the `wifi_rolledbk` outcome marker (see `/set_wifi`; `config_save` writes the backup+flag BEFORE the creds when arming and AFTER them when clearing — each `nvs_set_*` commits on its own, so the order decides what a power cut leaves behind), `mqtt_uri`/`mqtt_user`/`mqtt_pass`, `syslog_host`/`syslog_port` (empty host = off), `ntp_server` (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` compile-time default on next boot — unlike `syslog_host`, SNTP has no disabled state to preserve), the X10A **link cache** `rx_pin`/`tx_pin`/`proto`, and the boot-loop **crash counter** `boot_fails` (safe_mode.cpp; here so a factory reset wipes it too). (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -387,13 +418,20 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   disabled broker, which is exactly the state the UI must offer to clear via
                   /set_mqtt's clear_creds),
                   syslog{configured,resolved,reachable,host,port,error},
+                  ntp{server,synced,time} — server is the CONFIGURED address (config().ntp_server:
+                  NVS "ntp_server" override of CONFIG_DAIKIN_NTP_SERVER, runtime-editable via
+                  POST /set_ntp exactly like syslog_host/POST /set_syslog), not necessarily who
+                  answered; synced/time are false/null until the first SNTP reply of this boot lands,
+                  else RFC 3339 UTC (logic/timestamp.hpp) — mirrors syslog{} rather than sys{} below,
+                  since it is a runtime-configurable network service too, not a static board fact,
                   hp{proto,rx,tx,connected,
                   last_ok_s,registers,values,crc_err,timeout_err}, profile{id},
-                  sys{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode} — heap headroom (free /
-                  since-boot low-water / largest-contiguous) + why the device last booted, ALWAYS
-                  present (unlike last_crash, and unlike the MQTT heartbeat needs no broker); reset_reason
-                  via logic/reset_reason.hpp, safe_mode = the latched boot-loop recovery flag (safe_mode.cpp;
-                  true once too many crash boots accumulated -> poll + MQTT skipped),
+                  sys{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode} — heap
+                  headroom (free / since-boot low-water / largest-contiguous) + why the device last
+                  booted, ALWAYS present (unlike last_crash, and unlike the MQTT heartbeat needs no
+                  broker); reset_reason via logic/reset_reason.hpp, safe_mode = the latched boot-loop
+                  recovery flag (safe_mode.cpp; true once too many crash boots accumulated -> poll +
+                  MQTT skipped),
                   last_crash (null unless this boot was a FAULT or a dump is still in flash, else
                   {reason,reason_code,fault,coredump,task,pc,backtrace[],corrupted,elf_sha256} — the
                   reason/summary from the boot-time cache, `coredump` re-read from flash per request
@@ -460,6 +498,12 @@ POST /set_mqtt    {broker,user,pass,clear_creds} -> pre-flight the broker synchr
 POST /set_syslog  {host,port} -> validate port range -> persist + reboot. Empty host disables syslog.
                   DNS/reachability are NOT checked here (no request-path network block); they resolve
                   in the syslog task and surface via /status.syslog {resolved,reachable,error}.
+POST /set_ntp     {server} -> persist + reboot. No request-path network probe (the SNTP client
+                  resolves + retries on its own task after reboot, same as syslog); an empty server
+                  is accepted and read by config_load() on the next boot as "reset to the
+                  CONFIG_DAIKIN_NTP_SERVER compile-time default" (SNTP has no disabled state, unlike
+                  syslog_host's empty-means-off). Unchanged settings short-circuit to
+                  {ok:true,reboot:false}, same as /set_mqtt.
 POST /set_hp      {profile,rx,tx} -> validate + apply live (no reboot). rx/tx PERSIST (the physical
                   pin cache — a manual override survives reboot); profile is session-only. The UI
                   always sends profile="auto" (fully automatic — no manual model pick); a concrete id
@@ -467,7 +511,7 @@ POST /set_hp      {profile,rx,tx} -> validate + apply live (no reboot). rx/tx PE
                   proto is NOT accepted (auto-detected); poll_s fixed at 1 s and lang removed
                   (English-only) — neither accepted. RX/TX are auto-detected; when the bus is silent
                   the ESP32 card's pin dropdown posts {profile:"auto",rx,tx} to re-run detection.
-   (all four /set_*) a failed NVS write answers 500 {ok:false,error:"config write failed"} and does
+   (all five /set_*) a failed NVS write answers 500 {ok:false,error:"config write failed"} and does
                   NOT reboot/apply — config_save publishes nothing on failure, so an "ok" + reboot
                   would silently come back up on the OLD config (the failing key is on /diag)
 POST /detect      re-run auto-detection now (no reboot): reset profile to "auto" + invalidate the

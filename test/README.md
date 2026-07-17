@@ -54,7 +54,8 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   parse, per-request register maxima) + the HomeHub Temp16/Pow16/Int16/Text16 codecs (special-value
   guard, encode round-trip + range/sentinel rejects) and the `homehub-*` mDNS filter.
 - `logic/heartbeat.hpp` — dBm → signal quality %, uptime formatting, the heartbeat JSON (rssi null
-  while offline) + the 16 diagnostic HA discovery configs.
+  while offline, the SNTP wall-clock `time` field null until synced) + the 17 diagnostic HA discovery
+  configs (incl. the `device_class:"timestamp"` device-time sensor).
 - `logic/crashinfo.hpp` — reset-reason slug/fault classification, the last_crash / MQTT crash JSON +
   text bundle (incl. backtrace clamp), and the crash diagnostic HA discovery configs.
 - `logic/bootlog.hpp` — the once-per-boot syslog records: the build-identity line (absent fields
@@ -64,6 +65,10 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 - `logic/syslog_policy.hpp` — send-errno classification: hard (route/destination implicated →
   re-resolve now) vs transient. `ENOMEM`/`ENOBUFS` — what a ghosted link returns for every send, and
   the storm this guards against — stay transient, as does an unknown errno.
+- `logic/timestamp.hpp` — RFC 3339 UTC formatting for the SNTP wall clock (`main/sntp_time.cpp`):
+  the epoch, a leap-year/year-boundary date, millisecond zero-padding, and that a negative (never
+  synced) input renders as `""` rather than a plausible-looking `1970-01-01` — the sentinel
+  `syslog.cpp`'s RFC 5424 TIMESTAMP field checks to fall back to the `-` NILVALUE.
 - `logic/link_watch.hpp` — the gateway-watchdog step: re-associate on the second *proven*-silent
   probe, never on a gateway that has never answered ICMP, never on a link that knows it is down. An
   unmeasurable probe never counts as silence (nor launders silence already observed), but a

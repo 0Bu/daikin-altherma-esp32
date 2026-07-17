@@ -122,6 +122,24 @@
     </form>
   </div>
 
+  <!-- ═══ NTP edit modal (opened from the dashboard NTP card pencil) ═══ -->
+  <div class="modal" id="ntpModal" hidden>
+    <div class="modal-backdrop" id="ntpBackdrop"></div>
+    <form class="modal-card" id="ntpForm" role="dialog" aria-modal="true" aria-labelledby="ntpModalTitle">
+      <div class="section-label card-title" id="ntpModalTitle">NTP server</div>
+      <label class="field">
+        <span class="field-label plain">Server</span>
+        <input class="input" name="server" id="ntpServer" placeholder="pool.ntp.org" autocomplete="off">
+      </label>
+      <p class="hint err" id="ntpError" hidden></p>
+      <p class="hint">Hostname or IP of the NTP server the device syncs its clock from. Empty resets to the firmware default.</p>
+      <div class="modal-actions">
+        <button class="btn secondary" type="button" id="ntpCancel">Cancel</button>
+        <button class="btn primary" type="submit" id="ntpBtn">Save</button>
+      </div>
+    </form>
+  </div>
+
   <div class="toasts" id="toasts"></div>
 </div>
 

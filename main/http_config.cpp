@@ -1,6 +1,6 @@
-// POST config routes: /set_wifi, /set_mqtt, /set_syslog, /set_hp, /detect. Parse JSON, validate, then
-// apply: WiFi/MQTT/syslog persist to NVS + reboot; /set_hp persists the RX/TX pin cache (no reboot)
-// but keeps the model session-only; /detect re-runs detection in RAM.
+// POST config routes: /set_wifi, /set_mqtt, /set_syslog, /set_ntp, /set_hp, /detect. Parse JSON,
+// validate, then apply: WiFi/MQTT/syslog/NTP persist to NVS + reboot; /set_hp persists the RX/TX pin
+// cache (no reboot) but keeps the model session-only; /detect re-runs detection in RAM.
 #include "http_handlers.hpp"
 #include "config.hpp"
 #include "hp_poll.hpp"
@@ -413,6 +413,32 @@ static esp_err_t set_syslog(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// POST /set_ntp {server} -> persist + reboot, mirroring /set_syslog: no request-path network probe
+// (the SNTP client resolves + retries on its own task after reboot), an empty server is accepted —
+// config_load() reads it as "reset to the CONFIG_DAIKIN_NTP_SERVER compile-time default" — and the
+// only validation here is the same shape a hostname/IP field ever gets in this codebase (none; the
+// SNTP client itself just fails to resolve a garbage name and keeps retrying, same as a bad syslog
+// host does today).
+static esp_err_t set_ntp(httpd_req_t* req) {
+    char body[256];
+    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
+    cJSON* j = cJSON_Parse(body);
+    if (!j) return send_err(req, "400 Bad Request", "bad json");
+    std::string server = js(j, "server");
+    cJSON_Delete(j);
+
+    Config c = config();
+    if (server == c.ntp_server) return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
+    c.ntp_server = server;
+    if (!config_save(c)) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"config write failed\"}");
+    }
+    http_send_json(req, "{\"ok\":true,\"reboot\":true}");
+    reboot_soon();
+    return ESP_OK;
+}
+
 // Re-run auto-detection now (without waiting for a reboot): drop back to the "auto" sentinel +
 // invalidate the fingerprint, so the next poll cycle sweeps protocol + re-fingerprints the unit
 // (hp_poll.cpp poll_detect). Detection state is session-only, so this is a RAM-only reset.
@@ -429,6 +455,7 @@ void http_register_config(httpd_handle_t s) {
     http_register(s, "/set_wifi", HTTP_POST, set_wifi);
     http_register(s, "/set_mqtt", HTTP_POST, set_mqtt);
     http_register(s, "/set_syslog", HTTP_POST, set_syslog);
+    http_register(s, "/set_ntp", HTTP_POST, set_ntp);
     http_register(s, "/set_hp", HTTP_POST, set_hp);
     http_register(s, "/detect", HTTP_POST, do_detect);
 }

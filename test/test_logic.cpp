@@ -31,6 +31,7 @@
 #include "logic/registers.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/syslog_policy.hpp"
+#include "logic/timestamp.hpp"
 #include "logic/wifi_rollback.hpp"
 #include "logic/ws_policy.hpp"
 #include "def/registry.hpp"
@@ -813,12 +814,18 @@ static void test_heartbeat() {
     CHECK(j == "{\"version\":\"1.2.3\",\"platform\":\"esp32s3\","
                "\"uptime_s\":680731,\"uptime\":\"007+21:05:31.860\","
                "\"free_heap\":170000,\"min_free_heap\":150000,\"max_alloc\":87000,"
-               "\"reset_reason\":\"panic\","
+               "\"reset_reason\":\"panic\",\"time\":null,"
                "\"wifi\":{\"connected\":true,\"rssi\":-76,\"quality_pct\":48,\"reconnects\":3},"
                "\"mqtt\":{\"connected\":true,\"count\":89282,\"fails\":0,\"reconnects\":1},"
                "\"bus\":{\"connected\":true,\"proto\":\"I\",\"registers\":10,\"values\":48,\"last_ok_s\":1,"
                "\"rx\":{\"received\":763732,\"fails\":2,\"crc_err\":0,\"timeout_err\":2},"
                "\"tx\":{\"reads\":763734,\"writes\":0,\"fails\":0}}}");
+
+    // Synced: "time" carries the RFC 3339 instant verbatim (the caller — mqtt_ha.cpp — already
+    // rendered it via logic/timestamp.hpp; this header only decides null-vs-quoted).
+    f.time = "2026-07-17T21:15:00.000Z";
+    CHECK(build_heartbeat_json(f).find("\"reset_reason\":\"panic\",\"time\":\"2026-07-17T21:15:00.000Z\",")
+          != std::string::npos);
 
     // WiFi down -> rssi/quality reported null, not a stale/garbage reading.
     HeartbeatFields down;
@@ -827,12 +834,13 @@ static void test_heartbeat() {
     const std::string dj = build_heartbeat_json(down);
     CHECK(dj.find("\"rssi\":null") != std::string::npos);
     CHECK(dj.find("\"quality_pct\":null") != std::string::npos);
+    CHECK(dj.find("\"time\":null") != std::string::npos);   // never synced -> null, not 1970-01-01
 
     // Diagnostic discovery: separate topics/component types, entity_category diagnostic, and the
     // value_template points at the heartbeat topic (not the heat-pump state topic).
     const std::string hb = heartbeat_topic(base, node);
     const std::string av = availability_topic(base, node);
-    CHECK(HEARTBEAT_SENSOR_COUNT == 16);
+    CHECK(HEARTBEAT_SENSOR_COUNT == 17);
     const HeartbeatSensor& rssi = HEARTBEAT_SENSORS[0];
     CHECK(std::string(rssi.object_id) == "wifi_signal");
     std::string dt = heartbeat_discovery_topic("homeassistant", node, rssi);
@@ -868,7 +876,7 @@ static void test_heartbeat() {
 
     // The three device-health entities added alongside /status.sys (issue #5): reset_reason is a
     // plain text sensor (no unit / device_class / state_class), min_free_heap + max_alloc are byte
-    // measurements. All diagnostic, all sourced from the heartbeat topic. Count is 16, not 13.
+    // measurements. All diagnostic, all sourced from the heartbeat topic. Count is 17, not 13.
     auto find_hb = [](const char* oid) -> const HeartbeatSensor* {
         for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++)
             if (std::string(HEARTBEAT_SENSORS[i].object_id) == oid) return &HEARTBEAT_SENSORS[i];
@@ -882,6 +890,16 @@ static void test_heartbeat() {
     CHECK(rrc.find("\"unit_of_meas\"") == std::string::npos);   // text: no unit
     CHECK(rrc.find("\"dev_cla\"") == std::string::npos);        // ...no device_class
     CHECK(rrc.find("\"stat_cla\"") == std::string::npos);       // ...no state_class
+
+    // device_time: HA's native "timestamp" device_class (renders as "N minutes ago", the one
+    // HA-idiomatic use of the SNTP wall clock) — no unit, no state_class (not a numeric measurement).
+    const HeartbeatSensor* dtm = find_hb("device_time");
+    CHECK(dtm != nullptr);
+    const std::string dtc = heartbeat_discovery_config(node, hb, av, *dtm);
+    CHECK(dtc.find("\"val_tpl\":\"{{ value_json.time }}\"") != std::string::npos);
+    CHECK(dtc.find("\"dev_cla\":\"timestamp\"") != std::string::npos);
+    CHECK(dtc.find("\"unit_of_meas\"") == std::string::npos);
+    CHECK(dtc.find("\"stat_cla\"") == std::string::npos);
 
     // Heap low-water mark + largest free block: bytes, "measurement" (a fluctuating gauge, NOT a
     // since-boot counter), diagnostic, sourced from the flat payload fields (not a nested object).
@@ -1463,6 +1481,30 @@ static void test_syslog_policy() {
     CHECK(!syslog_error_is_hard(999999));
 }
 
+// ── RFC 3339 UTC timestamp formatting (logic/timestamp.hpp) ─────────────────────────────────
+static void test_timestamp() {
+    // The Unix epoch itself — the one instant every implementation agrees on without a reference
+    // library, so it doubles as a sanity check on the leap-year/month-length math in gmtime_r.
+    CHECK(rfc3339_utc(0) == "1970-01-01T00:00:00.000Z");
+    // A known instant with a non-trivial date/time (cross-checked against `date -u -d @...`).
+    CHECK(rfc3339_utc(1700000000) == "2023-11-14T22:13:20.000Z");
+    // Millisecond formatting: zero-padded to 3 digits, not truncated/rounded.
+    CHECK(rfc3339_utc(1700000000, 7) == "2023-11-14T22:13:20.007Z");
+    CHECK(rfc3339_utc(1700000000, 999) == "2023-11-14T22:13:20.999Z");
+    // A leap-year Feb 29 and a year boundary — both exercise gmtime_r's calendar math, not just the
+    // snprintf formatting.
+    CHECK(rfc3339_utc(1709208296) == "2024-02-29T12:04:56.000Z");   // 2024 is a leap year
+    CHECK(rfc3339_utc(1735689599) == "2024-12-31T23:59:59.000Z");
+    // "Never synced" (sntp_time.cpp's time_now() sentinel) must render as empty, never as a
+    // plausible-looking 1970-01-01 — a caller forwarding this straight into the RFC 5424 TIMESTAMP
+    // field falls back to "-" (the NILVALUE) exactly because this is "" rather than the epoch.
+    CHECK(rfc3339_utc(-1) == "");
+    CHECK(rfc3339_utc(-1000) == "");
+    // Out-of-range ms clamps rather than corrupting the format string.
+    CHECK(rfc3339_utc(0, -5) == "1970-01-01T00:00:00.000Z");
+    CHECK(rfc3339_utc(0, 5000) == "1970-01-01T00:00:00.999Z");
+}
+
 // ── connectivity-watchdog policy (logic/link_watch.hpp) ──────────────────────────────────────
 static void test_link_watch() {
     // A link that KNOWS it is down belongs to the reconnect handler — the watchdog stays out of it
@@ -1765,6 +1807,7 @@ int main() {
     test_crashinfo();
     test_bootlog();
     test_syslog_policy();
+    test_timestamp();
     test_link_watch();
     test_wifi_rollback();
     test_reset_reason();

@@ -204,6 +204,7 @@ GET  /status                       # { version, platform, uptime_s, app_elf_sha2
                                    #   mqtt:{configured,connected,tls,has_creds,broker,error?},
                                    #     (has_creds = whether creds are stored, never their value)
                                    #   syslog:{configured,resolved,reachable,host,port,error?},
+                                   #   ntp:{server,synced,time},   # time = RFC 3339 UTC once SNTP syncs
                                    #   hp:{proto,rx,tx,connected,last_ok_s,
                                    #        registers,values,crc_err,timeout_err},
                                    #   profile:{id},
@@ -236,10 +237,14 @@ POST /set_mqtt                     # { broker, user?, pass?, clear_creds? } → 
                                    #   creds; clear_creds:true removes them (anonymous); "" broker disables.
 POST /set_syslog                   # { host, port } → validate port range, persist + reboot ("" host
                                    #   disables). DNS/reachability resolve async, shown in /status.syslog
+POST /set_ntp                      # { server } → persist + reboot, no request-path network probe (the
+                                   #   SNTP client resolves + retries after reboot, same as syslog); an
+                                   #   empty server resets to the compile-time default on next boot —
+                                   #   SNTP has no disabled state, unlike syslog's empty-means-off.
 POST /set_hp                       # { profile?, rx?, tx? } → apply live (no reboot); rx/tx PERSIST
                                    #   (pin cache), profile session-only; proto auto-detected, not accepted.
                                    #   The ESP32 card's pin dropdown posts {profile:"auto",rx,tx} to re-detect.
-#  all four /set_* above           # an NVS write failure → 500 {ok:false,error:"config write failed"},
+#  all five /set_* above           # an NVS write failure → 500 {ok:false,error:"config write failed"},
                                    #   nothing applied and no reboot (the failing key is logged to /diag)
 POST /detect                       # re-run auto-detection (reset profile to "auto" + invalidate fingerprint)
 GET  /ota/check[?ms=<epoch>]       # start a background update check (poll /ota/status)

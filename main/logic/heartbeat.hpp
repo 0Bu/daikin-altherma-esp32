@@ -42,6 +42,13 @@ struct HeartbeatFields {
     int32_t     last_ok_s      = -1;      // seconds since last fully-good X10A cycle (-1 = never)
     uint32_t    rx_received    = 0;       // cumulative successful register reads (HpStats.rx_ok)
     uint32_t    rx_fails       = 0;       // cumulative failed reads (HpStats.rx_fail_total)
+    // SNTP wall clock (main/sntp_time.cpp) at publish time, pre-rendered by the caller
+    // (logic/timestamp.hpp's rfc3339_utc) so this header stays IDF-free — "" until the first sync of
+    // this boot lands, matching the /status.ntp / syslog TIMESTAMP precedent of never emitting a
+    // plausible-looking pre-epoch date. Lets an HA automation (or a human) compare the device's own
+    // clock against HA's own "last seen" for this message and catch a drifted/never-synced device —
+    // the one thing neither `uptime` nor HA's own message-receipt time can tell you.
+    std::string time;
 };
 
 // Heartbeat topic: <base>/<node>/heartbeat — separate from the shared state topic so a Telegraf/HA
@@ -89,6 +96,10 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += "\"min_free_heap\":" + std::to_string(f.min_free_heap) + ",";
     j += "\"max_alloc\":" + std::to_string(f.max_alloc) + ",";
     j += "\"reset_reason\":\""; json_append_escaped(j, f.reset_reason); j += "\",";
+    // "" (never synced this boot) renders as JSON null, not a fabricated pre-epoch date — same
+    // contract as /status.ntp.time and the syslog RFC 5424 TIMESTAMP field.
+    j += "\"time\":"; j += f.time.empty() ? "null" : ("\"" + f.time + "\"");
+    j += ",";
     j += "\"wifi\":{\"connected\":"; j += f.wifi_connected ? "true" : "false";
     j += ",\"rssi\":"; j += f.wifi_connected ? std::to_string(f.wifi_rssi) : "null";
     j += ",\"quality_pct\":"; j += f.wifi_connected ? std::to_string(wifi_signal_quality_pct(f.wifi_rssi)) : "null";
@@ -142,6 +153,11 @@ inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
     {"sensor",        "max_alloc",        "Largest Free Block",  "max_alloc",        "B",   "",                 "measurement"},
     {"sensor",        "uptime",           "Uptime",              "uptime_s",         "s",   "duration",         "measurement"},
     {"sensor",        "reset_reason",     "Reset Reason",        "reset_reason",     "",    "",                 ""},
+    // device_class "timestamp" is HA's native "when did this last update" class (renders as "N
+    // minutes ago", supports drift/staleness automations) — the one HA-idiomatic use of the SNTP wall
+    // clock (main/sntp_time.cpp) this firmware now has. Null (unsynced) reads as HA's normal
+    // "unknown" state for the class, same as every other nullable field in this payload.
+    {"sensor",        "device_time",      "Device Time",         "time",             "",    "timestamp",        ""},
     {"binary_sensor", "bus_status",       "X10A Bus",            "bus.connected",    "",    "connectivity",     ""},
     {"sensor",        "bus_crc_err",      "X10A CRC Errors",     "bus.rx.crc_err",   "",    "",                 "total_increasing"},
     {"sensor",        "bus_timeout_err",  "X10A Timeout Errors", "bus.rx.timeout_err","",    "",                 "total_increasing"},
