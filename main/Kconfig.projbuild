@@ -128,6 +128,17 @@ menu "Daikin Altherma Configuration"
             Invert the LED logic. On Seeed XIAO boards, the built-in LED is Active Low
             (GPIO Low = LED ON).
 
+    # ── SNTP (wall clock) ────────────────────────────────────────────────────
+    config DAIKIN_NTP_SERVER
+        string "NTP server (SNTP time sync)"
+        default "pool.ntp.org"
+        help
+            First-boot default for the server the SNTP client polls once online, giving syslog's
+            TIMESTAMP field and /status.ntp a real UTC clock instead of only uptime-since-boot.
+            pool.ntp.org suits every deployment this firmware targets (a home LAN with outbound
+            internet) — override it here for an offline LAN's own NTP server, or at runtime in the
+            web UI (NVS "ntp_server" overrides this, same as WiFi/MQTT/syslog).
+
     # ── Syslog ────────────────────────────────────────────────────────────────
     config DAIKIN_SYSLOG_HOST
         string "Syslog server host/IP"

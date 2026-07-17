@@ -9,13 +9,14 @@ setup page (see `main/CMakeLists.txt`).
 
 1. **One screen.** After provisioning, the app is a single dashboard — there is **no Settings page
    and no sub-screens**. Everything the device exposes lives on that one page; the little config
-   there (WiFi, MQTT and Syslog via modals, RX/TX pins inline) happens in place.
+   there (WiFi, MQTT, Syslog and NTP via modals, RX/TX pins inline) happens in place.
 2. **Provision, then run.** WiFi credentials are entered first on the captive portal (`setup.html`);
    the device reboots into your network and the app opens on the dashboard. They stay re-editable
    later from the dashboard WiFi card (§5.1, with automatic rollback on a bad change). The heat pump
    is fully automatic (auto-detected), so there is nothing to configure for it.
 3. **Read-only truth.** The dashboard reflects the device; it never blocks on writes. The few writes
-   (WiFi credentials, MQTT broker, Syslog server, RX/TX pins) are explicit and report their outcome.
+   (WiFi credentials, MQTT broker, Syslog server, NTP server, RX/TX pins) are explicit and report
+   their outcome.
 4. **Terse, dense, technical.** Tabular numbers, short labels, no decorative copy.
 5. **English only.** Labels are fixed English — there is no language selector (UI or firmware).
 
@@ -67,9 +68,9 @@ frames) — this is the **only** live transport, there is no HTTP polling. A bro
 loads a one-time `GET /status`/`GET /values` snapshot and the user reloads the page to refresh. Once
 the device is on the network the app opens on the
 **dashboard** and never leaves it — there are **no sub-screens and no Settings page**. In-place config
-is the WiFi credentials, the MQTT broker and the Syslog server (each a **modal** off its dashboard
-card) plus the RX/TX pins (inline on the ESP32 card). The heat pump is otherwise **fully automatic**
-(auto-detected).
+is the WiFi credentials, the MQTT broker, the Syslog server and the NTP server (each a **modal** off
+its dashboard card) plus the RX/TX pins (inline on the ESP32 card). The heat pump is otherwise
+**fully automatic** (auto-detected).
 
 ```
                     ┌─────────────── served from SoftAP (192.168.4.1) ───────────────┐
@@ -126,10 +127,10 @@ are built as DOM nodes (`createElement` + `.value`/`.textContent`, which never p
 than concatenated into `innerHTML`. Every network-derived string on this page must stay on a
 DOM/`textContent` path — it is served standalone in AP mode and has no `esc()` helper.
 
-### 5.1 WiFi / MQTT / Syslog edit  (modal, from the dashboard status card)
-The dashboard's **WiFi**, **MQTT** and **Syslog** status cards (§5.3) each carry a **pencil** in the
-header; tapping it opens a centred **modal** over a dimmed dashboard. These are the three status cards
-edited this way, and they share the identical overlay pattern (Cancel / backdrop / `Esc` dismiss
+### 5.1 WiFi / MQTT / Syslog / NTP edit  (modal, from the dashboard status card)
+The dashboard's **WiFi**, **MQTT**, **Syslog** and **NTP** status cards (§5.3) each carry a **pencil**
+in the header; tapping it opens a centred **modal** over a dimmed dashboard. These are the four status
+cards edited this way, and they share the identical overlay pattern (Cancel / backdrop / `Esc` dismiss
 without writing; Save reboots to apply, then closes back to the dashboard). The forms:
 - **WiFi**: SSID (required, 1–32 chars) + password (empty for an open network, else 8–63 chars),
   validated both in the UI and by `POST /set_wifi`. Only the SSID prefills (the password is never
@@ -164,6 +165,10 @@ Actions row at the bottom: Cancel (secondary) + Save (brand).
   an empty host disables forwarding. Only the port range is validated on the device — DNS resolution
   and the advisory reachability probe run in the syslog task after reboot and surface on the card via
   `/status.syslog`. The host prefills from `/status`.
+- **NTP**: a single server field (hostname or IP), no port. **Save** → `POST /set_ntp` (persist +
+  reboot); no validation beyond what the field accepts — an empty server is **not** a disabled state
+  (unlike Syslog/MQTT) but a reset to the firmware's compile-time default on the next boot, since
+  SNTP has nothing to turn off. The field prefills from `/status.ntp.server`.
 
 ### 5.2 Heat pump — no settings screen (fully automatic)
 The heat pump has **no configuration screen**. The model is **auto-detected** from the X10A bus
@@ -222,7 +227,7 @@ Body, ordered:
 1. **Status hero** (`--brand-tint` band): operation mode (Heating / Cooling / DHW / Standby / Off) as the
    headline, with fault state. Colour: `--ok` running, `--warn`/`--err` on fault; grey when no data.
    Fault text and the last-poll age surface in the hero sub-line.
-2. **Status cards** — five cards styled exactly like the value groups (§6), first in the same grid:
+2. **Status cards** — six cards styled exactly like the value groups (§6), first in the same grid:
    - **ESP32** — the board itself: chip (`platform`), **firmware version** (a tappable row that checks
      for an OTA update, §5.4), uptime (`uptime_s`), **Last reset** (`sys.reset_reason` — warn-coloured
      on a fault reason: panic / any watchdog / brown-out, neutral on a clean boot) and **Free heap**
@@ -239,14 +244,20 @@ Body, ordered:
      (`mqtts://`) — encryption is an inline marker, not a row of its own. There is **no** "HA
      discovery" row: discovery is streamed unconditionally on every (re)connect, so a row saying so
      would carry no information. From `mqtt{configured,connected,tls,broker,error}`. A **pencil** in
-     the card header opens the MQTT edit modal (§5.1) — one of the three status cards edited via a
-     modal (the others are WiFi and Syslog).
+     the card header opens the MQTT edit modal (§5.1) — one of the four status cards edited via a
+     modal (the others are WiFi, Syslog and NTP).
    - **Syslog** — off-device log forwarding status: **Disabled** when no host is set, else the
      server (`host:port`) and a state badge — **Enabled** once DNS resolves (delivery is best-effort
      UDP, gated on resolution only), warn-flagged **"host not answering ping"** when the advisory
      reachability probe is silent (still forwarding), or a **DNS error** — from
      `syslog{configured,resolved,reachable,host,port,error}`. A **pencil** opens the Syslog edit modal
      (§5.1), which posts `host:port` to `/set_syslog`.
+   - **NTP** — the SNTP wall clock: a status badge (**Synced** once the first reply of this boot has
+     landed, else **Syncing…** — there is no "Disabled", SNTP always has a configured server), the
+     configured **Server**, and — once synced — **Device time** rendered in the *browser's* local
+     timezone (`new Date(status.ntp.time).toLocaleString()`) so a glance answers "does the device
+     agree with my clock" without converting UTC by hand. From `ntp{server,synced,time}`. A **pencil**
+     opens the NTP edit modal (§5.1), which posts `{server}` to `/set_ntp`.
    - **Model** — the model name (full-width heading) + detected capacity, from `detect{capacity_kw,
      model}`. Both are bus-derived, so they show **only while the link is live** (`hp.connected`):
      offline the name degrades to the brand "Daikin Altherma" and the capacity is hidden — never a
@@ -311,7 +322,7 @@ enabled/available values are hidden.
 
 Every async action shows: idle → in-flight ("Saving…", spinner on button) → result (toast + view
 transition). Specific:
-- **Reboot writes** (WiFi / MQTT / Syslog): Save disables the button and shows a spinner + "Saving…"
+- **Reboot writes** (WiFi / MQTT / Syslog / NTP): Save disables the button and shows a spinner + "Saving…"
   while the request is in flight (the `/set_mqtt` broker pre-flight blocks up to ~8 s). **Only a 2xx**
   then shows "Rebooting — reconnecting…" and polls `/status` until it answers, closing the modal back
   to the dashboard; a `reboot:false` answer (nothing changed) closes with "No changes" and never polls.

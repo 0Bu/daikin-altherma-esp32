@@ -52,6 +52,11 @@ void config_load() {
     c.mqtt_pass = nvs_get_str("mqtt_pass", CONFIG_DAIKIN_MQTT_PASSWORD);
     c.syslog_host = nvs_get_str("syslog_host", CONFIG_DAIKIN_SYSLOG_HOST);
     c.syslog_port = nvs_get_i32("syslog_port", CONFIG_DAIKIN_SYSLOG_PORT);
+    // "" on flash (either no key yet, or an explicit empty save via POST /set_ntp) both fall back to
+    // the Kconfig default — unlike syslog_host, an empty ntp_server is not a disabled state to
+    // preserve, so nvs_get_str's own default-on-missing-key isn't enough on its own.
+    c.ntp_server = nvs_get_str("ntp_server", CONFIG_DAIKIN_NTP_SERVER);
+    if (c.ntp_server.empty()) c.ntp_server = CONFIG_DAIKIN_NTP_SERVER;
 
     // Persisted X10A LINK cache: RX/TX pins + protocol. The wiring is physically boot-invariant, so
     // it is cached (fallback = compile-time Kconfig default) and tried FIRST by the detection sweep;
@@ -158,6 +163,7 @@ bool config_save(const Config& c) {
     ok &= put_str("mqtt_pass", c.mqtt_pass);
     ok &= put_str("syslog_host", c.syslog_host);
     ok &= put_i32("syslog_port", c.syslog_port);
+    ok &= put_str("ntp_server", c.ntp_server);
     ok &= put_i32("rx_pin", c.rx_pin);
     ok &= put_i32("tx_pin", c.tx_pin);
     ok &= put_str("proto", std::string(1, static_cast<char>(c.proto)));

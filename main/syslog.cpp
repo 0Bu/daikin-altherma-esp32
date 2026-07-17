@@ -4,8 +4,10 @@
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
 #include "safe_mode.hpp"
+#include "sntp_time.hpp"
 #include "logic/bootlog.hpp"
 #include "logic/syslog_policy.hpp"
+#include "logic/timestamp.hpp"
 #include "esp_app_desc.h"
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
@@ -157,10 +159,28 @@ static SendResult syslog_sendto(const struct sockaddr_in& dest, const char* text
 
     char packet[320];
     // RFC 5424: <PRI=14 user.info>1 SP TIMESTAMP HOSTNAME APP PROCID MSGID SD SP MSG.
+    // TIMESTAMP is the SNTP wall clock (main/sntp_time.cpp) once synced, else the RFC 5424 NILVALUE
+    // "-" — never a fabricated pre-epoch date. A collector conventionally substitutes its own receive
+    // time for "-", so a boot's first few lines (sent before the client's first sync lands) just carry
+    // a slightly-later effective timestamp rather than a wrong one.
+    // rfc3339_utc() returns (a short-lived, heap-allocating) std::string; syslog_task's loop has no
+    // top-level OOM guard (unlike mqtt_task/poll_task), so an escaping std::bad_alloc here would
+    // unwind straight into std::terminate. Fall back to the NILVALUE instead — one skipped timestamp
+    // costs nothing, an escaping exception costs a reboot.
+    const char* ts_str = "-";
+    std::string ts;
+    try {
+        int64_t unix_s; int32_t ms;
+        time_now(unix_s, ms);
+        ts = rfc3339_utc(unix_s, ms);
+        if (!ts.empty()) ts_str = ts.c_str();
+    } catch (const std::bad_alloc&) {
+        // ts_str stays "-"
+    }
     // HOSTNAME must be the device's real network name (CONFIG_DAIKIN_HOSTNAME) so syslog entries
     // correlate with the host as seen over DHCP/mDNS — never a shortened alias.
-    int pkt_len = std::snprintf(packet, sizeof(packet), "<14>1 - " CONFIG_DAIKIN_HOSTNAME " - - - - %.*s",
-                                static_cast<int>(len), text);
+    int pkt_len = std::snprintf(packet, sizeof(packet), "<14>1 %s " CONFIG_DAIKIN_HOSTNAME " - - - - %.*s",
+                                ts_str, static_cast<int>(len), text);
     SendResult r = SendResult::Ok;
     if (pkt_len > 0) {
         // snprintf returns the length it WOULD have written; clamp to what fits or sendto reads OOB.
@@ -215,8 +235,10 @@ static void handle_send_failure(int err, const char* what, bool& resolved, bool&
 //
 // Consequence of bypassing diag_printf: these lines carry no "[uptime]" prefix, unlike every other
 // forwarded line. That is deliberate — they describe the PREVIOUS boot, so stamping them with this
-// boot's uptime (a few seconds) would date the crash wrong. The collector's own receive timestamp
-// remains the only honest clock here (the device has no RTC).
+// boot's uptime (a few seconds) would date the crash wrong. syslog_sendto()'s RFC 5424 TIMESTAMP
+// field dates the REPLAY (this boot, once SNTP has synced) — not the crash, which happened sometime
+// in the previous, likely-unsynced boot; the collector's own receive timestamp is still the only
+// honest clock for *that*.
 static bool syslog_replay_boot(const struct sockaddr_in& dest) {
     // Best-effort diagnostics must never take the device down. The record builders allocate (~800 B
     // total, worst case), and an uncaught std::bad_alloc here would unwind through the FreeRTOS/C

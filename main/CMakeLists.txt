@@ -23,6 +23,7 @@ idf_component_register(
         "syslog.cpp"
         "diag_crash.cpp"
         "status_led.cpp"
+        "sntp_time.cpp"
     INCLUDE_DIRS
         "."
     EMBED_FILES

@@ -40,14 +40,14 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 10 | **MQTTS + CA-bundle** TLS; credentials never sent in cleartext | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 11 | Core-dump-to-flash + summary capture + offline symbolication | ✅ | [`diag_crash.cpp`](../main/diag_crash.cpp), [`decode-coredump.sh`](../scripts/decode-coredump.sh) |
 | 12 | Reset-reason + crash classification, retained to MQTT | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp) |
-| 13 | 16-entity device **heartbeat** diagnostics stream (heap trend + reset reason incl.) | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
+| 13 | 17-entity device **heartbeat** diagnostics stream (heap trend + reset reason + SNTP wall clock incl.) | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
 | 14 | Strongest-AP scan + SAE tuning + **endless reconnect** | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 15 | **ICMP gateway watchdog** (ghost-association recovery) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 16 | Captive-portal provisioning (SoftAP + UDP:53 DNS catch-all) | ✅ | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp) |
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (613 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (630 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -59,6 +59,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 29 | **Boot-loop safe mode** — recover a bad config in-browser (crash-only counting, distinct from OTA rollback) | ✅ 🧪 | [`safe_mode.cpp`](../main/safe_mode.cpp), [`logic/boot_guard.hpp`](../main/logic/boot_guard.hpp) |
 | 30 | **Config-write integrity** — field-owned commits (no cross-task revert) + an NVS failure that reaches the user (500, no reboot) instead of "saved" | ✅ 🧪 | [`config.cpp`](../main/config.cpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp), [`http_config.cpp`](../main/http_config.cpp) |
 | 31 | **Value-catalog domain audit** — real converters × real catalog vs the spec, each finding carrying a decode witness; co-gates CI, plus a selftest that re-catches the four decode bugs that shipped | ✅ | [`catalog_audit.cpp`](../tools/domain/catalog_audit.cpp), [`run-domain-audit.sh`](../scripts/run-domain-audit.sh), [`selftest.sh`](../tools/domain/selftest.sh) |
+| 32 | **SNTP wall clock**, runtime-configurable server — real UTC for the syslog TIMESTAMP field + `/status.ntp` | ✅ 🧪 | [`sntp_time.cpp`](../main/sntp_time.cpp), [`logic/timestamp.hpp`](../main/logic/timestamp.hpp), [`http_config.cpp`](../main/http_config.cpp) |
 
 ---
 
@@ -372,12 +373,14 @@ the fact*, from the field, without a serial cable:
   republished on the heartbeat cadence when the "dump waiting" flag changes, so it can't latch ON after
   the dump is cleared. `static_assert`s pin the IDF reset-enum
   values so a renumbering fails the build rather than mislabeling every crash.
-- **✅ 🧪 16-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): on a fixed
+- **✅ 🧪 17-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): on a fixed
   10 s cadence, `<base>/<node>/heartbeat` streams heap (free / min-free / **largest-free-block**, the
-  true OOM limit — all three now their own HA entities), uptime, the **last reset reason**, WiFi RSSI +
-  reconnect count, MQTT publish/fail/reconnect counters, and X10A bus rx/fail/crc/timeout stats —
-  published independently of heat-pump profile detection, so board health is visible even while the
-  model is still `auto`.
+  true OOM limit — all three now their own HA entities), uptime, the **last reset reason**, the
+  **SNTP wall clock** (`sntp_time.cpp`, `device_class:"timestamp"` — HA's native "N ago" entity,
+  the one HA-idiomatic use of the device's own clock; `null` until synced, never a fabricated
+  epoch date), WiFi RSSI + reconnect count, MQTT publish/fail/reconnect counters, and X10A bus
+  rx/fail/crc/timeout stats — published independently of heat-pump profile detection, so board
+  health is visible even while the model is still `auto`.
 - **✅ 🧪 Always-on system health** ([`logic/reset_reason.hpp`](../main/logic/reset_reason.hpp)): the
   `/status` document (and the `/events` status frame) carries a compact `sys` block — `free_heap`,
   `min_free_heap` (since-boot low-water, the leak indicator), `max_alloc` (largest contiguous block,
@@ -392,10 +395,29 @@ the fact*, from the field, without a serial cable:
 - **✅ In-RAM diag ring** (`GET /diag`) and a **status LED** ([`status_led.cpp`](../main/status_led.cpp))
   encoding setup-portal / WiFi-connecting / all-healthy / X10A-error / MQTT-error / no-WiFi-mode as
   six distinct blink patterns (X10A-error outranks MQTT-error — the bus is the point of the device).
+- **✅ 🧪 SNTP wall clock, runtime-configurable** ([`sntp_time.cpp`](../main/sntp_time.cpp)): before
+  this the device had no timestamp anywhere except uptime-since-boot. `esp_netif_sntp` polls the
+  configured server (`config().ntp_server` — NVS `ntp_server` override of `CONFIG_DAIKIN_NTP_SERVER`
+  default `pool.ntp.org`, editable at runtime via `POST /set_ntp` and the dashboard **NTP** card,
+  exactly like Syslog) once online — non-blocking, so it idles/retries harmlessly even during
+  AP-only setup mode. Once synced, the RFC 3339 UTC instant
+  ([`logic/timestamp.hpp`](../main/logic/timestamp.hpp)) reaches the top-level `/status.ntp` block
+  (`{server,synced,time}`, mirroring `syslog{}` rather than `sys{}` — it's a runtime-configurable
+  service, not a static board fact) and the syslog TIMESTAMP field below; before the first sync of a
+  boot both fall back to `null`/`-` rather than a fabricated epoch date. The dashboard NTP card shows
+  the sync state, the configured server, and — once synced — the device's own clock rendered in the
+  **browser's** timezone, so a glance answers "does this match my wall clock" without a UTC
+  conversion. An empty `/set_ntp` save is read on the next boot as "reset to the compile-time
+  default" — unlike Syslog/MQTT, SNTP has no disabled state to preserve, so empty can't mean "off"
+  here. The diag ring's uptime prefix is unchanged — it's what `device-triage` keys on to reconstruct
+  reboots (an uptime that jumps backwards) and stays available before SNTP has synced, when a
+  wall-clock prefix would still be blank.
 - **✅ Off-device log forwarding** ([`syslog.cpp`](../main/syslog.cpp)): every diag line is also
   forwarded as one RFC 5424 UDP datagram to an optional collector (`/set_syslog`; empty host = off).
-  Delivery is gated on **DNS only** — the ARP/ICMP reachability probe is advisory (`/status.syslog`),
-  since a healthy collector may firewall ICMP. Self-loop-guarded (drops its own `syslog:` lines).
+  The TIMESTAMP field is the SNTP wall clock once synced, else the `-` NILVALUE a collector
+  conventionally substitutes its own receive time for. Delivery is gated on **DNS only** — the
+  ARP/ICMP reachability probe is advisory (`/status.syslog`), since a healthy collector may firewall
+  ICMP. Self-loop-guarded (drops its own `syslog:` lines).
 - **✅ 🧪 One-shot boot replay to syslog** ([`logic/bootlog.hpp`](../main/logic/bootlog.hpp)): the
   crash summary is captured at the top of `app_main` — before WiFi and before the syslog task exists —
   so it could only ever reach the in-RAM ring, where a chatty failure mode overwrites it within a
@@ -459,10 +481,13 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   the English description lookup layered on the conv-204 fault code
   (`error_codes.hpp` — a presentation-only enrichment: it never changes what conv 204 decodes,
   and a code outside its coverage still publishes as the bare code),
-  and **🔭 Modbus TCP framing + HomeHub register codecs** (`modbus.hpp` — MBAP
+  **🔭 Modbus TCP framing + HomeHub register codecs** (`modbus.hpp` — MBAP
   framing without CRC, FC03/04/06/16 build+parse, `Temp16`/`Pow16`/`Int16`/`Text16` decode/encode,
   the `homehub-*` mDNS filter; the host-tested core for the *planned* firmware-exclusive HomeHub
-  Modbus link (issue #32), **not yet wired into the firmware**). **613 `CHECK`s** in
+  Modbus link (issue #32), **not yet wired into the firmware**), and the SNTP wall-clock RFC 3339
+  formatter (`timestamp.hpp` — the one place the syslog TIMESTAMP field, `/status.ntp.time` and the
+  MQTT heartbeat's `time` field render through; a negative/never-synced input renders `""`, never a
+  fabricated `1970-01-01`). **630 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
@@ -546,14 +571,14 @@ Every ESP-IDF component this firmware links, and what it powers (from
 |-----------|--------|
 | `nvs_flash` | runtime config + X10A link cache (`daik_cfg` namespace) |
 | `esp_wifi` | STA (strongest-AP scan, SAE) + SoftAP setup portal |
-| `esp_event` / `esp_netif` | event loop + network interfaces, DHCP hostname |
+| `esp_event` / `esp_netif` | event loop + network interfaces, DHCP hostname, SNTP client (`esp_netif_sntp`) |
 | `esp_http_server` | `:80` UI/API server + **WebSocket** (`CONFIG_HTTPD_WS_SUPPORT`) |
 | `esp_https_ota` / `app_update` / `esp_app_format` | OTA slot writes, rollback, app descriptor (version, ELF sha) |
 | `esp_http_client` / `esp-tls` | OTA fetch + TLS transport |
 | `bootloader_support` | Secure Boot v2 signature verification on the update path |
 | `mqtt` (managed) | HA MQTT-discovery bridge |
 | `esp_crt_bundle` | CA bundle for MQTTS / OTA TLS verification |
-| `lwip` (+ `ping/ping_sock`) | BSD sockets (captive DNS), ICMP gateway watchdog |
+| `lwip` (+ `ping/ping_sock`) | BSD sockets (captive DNS), ICMP gateway watchdog, SNTP protocol |
 | `esp_driver_uart` | X10A 9600 8E1 link on `UART_NUM_1` |
 | `esp_driver_gpio` | status LED + pin config |
 | `esp_timer` | uptime, poll/serial timing |
@@ -569,6 +594,7 @@ them are also settable at runtime (web UI → NVS, which then overrides the Kcon
 | `DAIKIN_WIFI_SSID` / `_PASSWORD` | ✅ `POST /set_wifi` → NVS |
 | `DAIKIN_MQTT_BROKER_URI` / `_USERNAME` / `_PASSWORD` | ✅ `POST /set_mqtt` → NVS |
 | `DAIKIN_SYSLOG_HOST` / `_PORT` | ✅ `POST /set_syslog` → NVS |
+| `DAIKIN_NTP_SERVER` | ✅ `POST /set_ntp` → NVS (empty resets to this default, not "off" — SNTP has no disabled state) |
 | `DAIKIN_RX_PIN` / `DAIKIN_TX_PIN` | ✅ auto-detected; `POST /set_hp` pins them → NVS |
 | `DAIKIN_PROTOCOL` | ⚙️ auto-detected from the bus — deliberately **not** settable (`/set_hp` rejects `proto`) |
 | `DAIKIN_HOSTNAME` | ❌ compile-time only |
@@ -588,8 +614,8 @@ security of signed firmware with none of the brick risk. It refuses to roll a ba
 **connectivity-proving health gate** (not a naive uptime timer). It ships a **live WebSocket UI embedded
 and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-associations no event
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
-sha-matched ELF, retained MQTT crash + 16-entity heartbeat diagnostics). And the risky parts — decode,
-CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (613 checks),
+sha-matched ELF, retained MQTT crash + 17-entity heartbeat diagnostics). And the risky parts — decode,
+CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (630 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

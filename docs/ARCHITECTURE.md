@@ -21,8 +21,9 @@ idioms are used throughout (`esp_http_server`, `uart_driver`, `esp-mqtt`).
 ## Component map
 
 ```
-main.cpp            → boot: NVS init, safe-mode guard, WiFi (STA or setup AP), start HTTP server,
-                       start poll engine + MQTT bridge (both SKIPPED in safe mode), arm OTA health gate
+main.cpp            → boot: NVS init, safe-mode guard, WiFi (STA or setup AP), start SNTP, start HTTP
+                       server, start poll engine + MQTT bridge (both SKIPPED in safe mode), arm OTA
+                       health gate
 safe_mode.cpp/.hpp  → boot-loop safe mode (logic/boot_guard.hpp): crash-only boot counter in NVS
                        (boot_fails) → past a threshold, come up minimally (WiFi + web UI + OTA, no
                        poll/MQTT) to recover a bad config in-browser. See "Boot-loop safe mode" below
@@ -36,6 +37,18 @@ wifi.cpp/.hpp       → STA bring-up (all-channel scan → strongest AP by RSSI)
                        logic/link_watch.hpp: 2 proven-silent periods, or 10 blind ones, re-associate)
                        + DHCP hostname + mDNS; wifi_info() also reports the AP's
                        BSSID + PHY standard + this STA's MAC
+sntp_time.cpp/.hpp  → SNTP client (esp_netif_sntp, config().ntp_server — NVS "ntp_server" override of
+                       CONFIG_DAIKIN_NTP_SERVER default "pool.ntp.org", runtime-editable via
+                       POST /set_ntp exactly like syslog_host/POST /set_syslog). Started right after
+                       WiFi(STA)|setup-AP in main.cpp, once config_load() has run; non-blocking,
+                       idles/retries on its own task until a route exists, so it's harmless to start
+                       in AP-only setup mode too. Gives the device a wall clock for the first time —
+                       logic/timestamp.hpp renders it as RFC 3339 for syslog.cpp's TIMESTAMP field and
+                       the top-level /status.ntp block; the diag ring's uptime prefix is unchanged
+                       (see "Diagnostics & observability" in docs/FEATURES.md). The server string is
+                       resolved once at startup into a file-scope std::string — lwip's SNTP module
+                       stores the raw pointer it's given, not a copy — so a later /set_ntp edit
+                       reboots into a fresh config_load() rather than mutating it live.
 hp_comm.cpp/.hpp    → X10A UART transport: request framing for protocol I and S, 9600 8E1,
                        CRC, timeout handling
 hp_detect.cpp/.hpp  → auto-detect glue: protocol sweep + page probe → bus fingerprint → candidate
@@ -75,8 +88,10 @@ ota_update.cpp      → OTA: rollback health gate (implemented); pull check/down
                       gate via esp_https_ota (TODO stubs — see ota_update.hpp)
 diag_log.cpp        → in-RAM console ring served by GET /diag (static .bss buffer); each line is
                       also handed to syslog_send() for optional off-device forwarding
-syslog.cpp          → optional syslog UDP client (RFC 5424, off when syslog_host is empty). A task
-                      DNS-resolves the host and forwards each diag line as one UDP datagram, gated on
+syslog.cpp          → optional syslog UDP client (RFC 5424, off when syslog_host is empty). The
+                      TIMESTAMP field is the SNTP wall clock (sntp_time.cpp) once synced, else the
+                      "-" NILVALUE a collector conventionally substitutes its own receive time for.
+                      A task DNS-resolves the host and forwards each diag line as one UDP datagram, gated on
                       DNS only; an ARP(local)/ICMP reachability probe is ADVISORY (feeds
                       /status.syslog.reachable, never gates delivery — syslog is best-effort UDP and a
                       collector may firewall ICMP). File-scope ping-control (like wifi.cpp s_wd) keeps
@@ -164,8 +179,11 @@ host-testable core is unusually large and valuable, because the risky parts are 
   the full URI), and the rejects (empty, scheme with no host, empty or non-digit port, and a port
   outside 1–65535 — caught at parse time because the probe's `htons()` would truncate `:65537` to
   `:1` and call a wrong port reachable).
-- `logic/heartbeat.hpp` — the board/link diagnostics JSON + its 16 diagnostic HA discovery configs,
-  with the dBm → signal-quality curve and uptime formatting pinned to known-good samples.
+- `logic/heartbeat.hpp` — the board/link diagnostics JSON + its 17 diagnostic HA discovery configs,
+  with the dBm → signal-quality curve and uptime formatting pinned to known-good samples. Includes
+  the SNTP wall clock (`sntp_time.cpp`) as a `device_class: "timestamp"` sensor — HA's native
+  "last updated N ago" entity, rendering `null` (unsynced) as its normal "unknown" state rather than
+  a fabricated epoch date.
 - `logic/crashinfo.hpp` — reset-reason slug + fault classification, and the `last_crash` / MQTT crash
   payload + paste-friendly text bundle (incl. the backtrace clamp) built from a captured summary.
 - `logic/reset_reason.hpp` — maps a raw `esp_reset_reason()` code to the stable slug used by
@@ -198,6 +216,14 @@ host-testable core is unusually large and valuable, because the risky parts are 
   ghosted link every send fails, and forcing a fresh DNS + blocking ICMP probe per failed line ran
   hardest exactly when the network could least carry it. Unknown errnos default to transient by
   design — the asymmetry is asserted host-side.
+- `logic/timestamp.hpp` — `rfc3339_utc(unix_s, ms)`, the one UTC formatter the SNTP wall clock
+  (`sntp_time.cpp`) renders through for `syslog.cpp`'s RFC 5424 TIMESTAMP field, the top-level
+  `/status.ntp` block, and `mqtt_ha.cpp`'s heartbeat `"time"` field. A negative `unix_s` —
+  `sntp_time.cpp`'s "never synced" sentinel — returns `""`
+  rather than a plausible-looking `1970-01-01`, so a caller can tell "no wall clock yet" from a real
+  epoch-adjacent instant and fall back to the RFC 5424 NILVALUE / JSON `null` instead. Pure, so the
+  leap-year/year-boundary calendar math and the millisecond zero-padding are asserted against known
+  instants on the host rather than only once a real NTP reply lands on a board.
 - `logic/health_gate.hpp` — the OTA commit/wait/give-up verdict across the base window and the hard
   cap, including the setup-AP case where no credentials means connectivity isn't expected and the
   image is healthy anyway. Pure, so the rule that decides whether a new image sticks is testable
@@ -490,8 +516,9 @@ The Home Assistant bridge:
 
   Published on a fixed `HEARTBEAT_INTERVAL_S` (10 s) cadence — unlike the state topic, this is
   diagnostics rather than real-time telemetry, so it always sends the latest snapshot rather than
-  only on change. 16 diagnostic HA entities (WiFi signal/quality/reconnects, heap free/min-free/
-  largest-block, uptime, last reset reason, X10A bus status/CRC/timeout/rx errors/rx received, MQTT
+  only on change. 17 diagnostic HA entities (WiFi signal/quality/reconnects, heap free/min-free/
+  largest-block, uptime, last reset reason, the SNTP wall clock as a `device_class:"timestamp"`
+  sensor, X10A bus status/CRC/timeout/rx errors/rx received, MQTT
   publish count/fails/reconnects — tagged `"ent_cat":"diagnostic"`) point at this topic via their own
   discovery configs, streamed once per
   connection independently of heat-pump profile detection — so they show up even while the model is
@@ -670,6 +697,14 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
   resolution and the advisory reachability probe run in the syslog task and surface on the card via
   `/status.syslog` (`resolved`/`reachable`/`error`) — "Enabled", "…host not answering ping", or "DNS
   lookup failed" — after the reboot.
+- **NTP** → `/set_ntp` (edited from a dashboard modal off the NTP card), the same persist-then-reboot
+  shape as Syslog: no request-path network probe (the SNTP client resolves + retries on its own task
+  after reboot), and an **empty server is accepted** — `config_load()` reads it on the next boot as
+  "reset to the `CONFIG_DAIKIN_NTP_SERVER` compile-time default" rather than a disabled state, since
+  unlike Syslog/MQTT, SNTP has no "off" to preserve. The card shows Synced/Syncing…, the configured
+  server, and — once synced — the device's own wall clock rendered in the **browser's** timezone
+  (`new Date(status.ntp.time)`), so a glance answers "does this match my clock" without a UTC↔local
+  conversion.
 - **Heat pump** → `/set_hp`: fully automatic. The model is **auto-detected** (see Auto-detection) and
   shown read-only on the dashboard **Model** card. The dashboard **ESP32** card shows the X10A link +
   protocol and the **RX/TX pins**, which are also auto-detected: **read-only** while the bus answers,

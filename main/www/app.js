@@ -350,7 +350,7 @@ function esp32CardHtml() {
 
 // WiFi · MQTT · Model status cards, from /status (live link, broker/HA-discovery, detected unit).
 function statusCardsHtml() {
-  const w = S.status?.wifi || {}, m = S.status?.mqtt || {}, sy = S.status?.syslog || {}, hp = S.status?.hp || {}, d = S.status?.detect || {};
+  const w = S.status?.wifi || {}, m = S.status?.mqtt || {}, sy = S.status?.syslog || {}, nt = S.status?.ntp || {}, hp = S.status?.hp || {}, d = S.status?.detect || {};
   const wifi = (w.connected && (w.rssi != null || w.ssid))
     ? vrow((w.std || "Wi-Fi").toUpperCase(),
            (w.rssi != null ? signalBars(w.rssi) : "") +
@@ -388,6 +388,14 @@ function statusCardsHtml() {
       vrow("Server", sy.host ? `${sy.host}:${sy.port || 514}` : "—");
   }
 
+  // NTP has no "disabled" state (unlike MQTT/Syslog) — it always has a server, so the status row
+  // reads Synced/Syncing… rather than Enabled/Disabled. The local-time row uses the BROWSER's own
+  // timezone (new Date() on the RFC 3339 UTC string /status.ntp.time carries) so it reads as "does
+  // this match my wall clock", not a raw UTC string the user has to convert by hand.
+  const ntp = vrow("Status", nt.synced ? "Synced" : "Syncing…", { cls: nt.synced ? "ok" : "warn" }) +
+    vrow("Server", nt.server || "—") +
+    (nt.synced && nt.time ? vrow("Device time", new Date(nt.time).toLocaleString()) : "");
+
   // Outdoor unit as a full-width heading — model names are long and don't fit a label→value row.
   // The X10A link + protocol live on the ESP32 card (they're about the board's bus), not here.
   // Identity is bus-derived: the model name degrades to the brand offline (hpModelName), and capacity
@@ -398,7 +406,7 @@ function statusCardsHtml() {
 
   // Model identity is only meaningful while the bus answers — hide the card entirely when the
   // heat-pump link is down instead of naming a unit (or showing a stale capacity) that isn't live.
-  return esp32CardHtml() + vcardEdit("WiFi", wifi, "wifi") + vcardEdit("MQTT", mqtt, "mqtt") + vcardEdit("Syslog", syslog, "syslog") + (hp.connected ? vcard("Model", model) : "");
+  return esp32CardHtml() + vcardEdit("WiFi", wifi, "wifi") + vcardEdit("MQTT", mqtt, "mqtt") + vcardEdit("Syslog", syslog, "syslog") + vcardEdit("NTP", ntp, "ntp") + (hp.connected ? vcard("Model", model) : "");
 }
 // Heat-pump value groups (grouped by domain, §6) as card markup. Hidden entirely while the
 // heat-pump link is down — there's nothing to poll, so "Waiting for the first poll…" would be
@@ -500,6 +508,19 @@ function openSyslog() {
   $("slHost").focus();
 }
 function closeSyslog() { $("syslogModal").hidden = true; }
+
+// ── NTP (dashboard edit modal) ──────────────────────────────────────────────
+function fillNtp() {
+  $("ntpServer").value = S.status?.ntp?.server || "";
+}
+function openNtp() {
+  fillNtp();
+  $("ntpServer").classList.remove("invalid");
+  $("ntpError").hidden = true;
+  $("ntpModal").hidden = false;
+  $("ntpServer").focus();
+}
+function closeNtp() { $("ntpModal").hidden = true; }
 function signalBars(rssi) {
   const lit = rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1;
   const tone = rssi >= -70 ? "var(--ok)" : "var(--warn)";
@@ -642,6 +663,7 @@ function wire() {
     if (edit && edit.dataset.edit === "wifi") { openWifi(); return; }
     if (edit && edit.dataset.edit === "mqtt") { openMqtt(); return; }
     if (edit && edit.dataset.edit === "syslog") { openSyslog(); return; }
+    if (edit && edit.dataset.edit === "ntp") { openNtp(); return; }
     const act = e.target.closest("[data-act]");
     if (act && act.dataset.act === "ota") checkFirmwareUpdate();
   });
@@ -784,6 +806,22 @@ function wire() {
       close: closeSyslog,
       then: renderDashboard,
       busyMsg: "Saving Syslog settings…",
+    });
+  });
+
+  $("ntpServer").addEventListener("input", () => { $("ntpServer").classList.remove("invalid"); $("ntpError").hidden = true; });
+  $("ntpCancel").onclick = closeNtp;
+  $("ntpBackdrop").onclick = closeNtp;
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("ntpModal").hidden) closeNtp(); });
+  $("ntpForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const server = $("ntpServer").value.trim();
+    saveReboot("/set_ntp", { server }, {
+      btn: "ntpBtn",
+      showError: (msg) => { $("ntpServer").classList.add("invalid"); $("ntpError").textContent = msg; $("ntpError").hidden = false; },
+      close: closeNtp,
+      then: renderDashboard,
+      busyMsg: "Saving NTP settings…",
     });
   });
 }

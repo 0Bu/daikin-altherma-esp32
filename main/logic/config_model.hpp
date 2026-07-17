@@ -20,6 +20,12 @@ struct Config {
     std::string mqtt_pass;
     std::string syslog_host;       // "" = Syslog disabled
     int         syslog_port = 514;
+    // SNTP server (main/sntp_time.cpp). Unlike syslog_host, "" is not "off" — SNTP has no disabled
+    // state, it just idles until a route to the server exists — so an empty save is read by
+    // config_load() as "reset to the CONFIG_DAIKIN_NTP_SERVER compile-time default", the same way a
+    // missing NVS key falls back to it on first boot. Runtime-overridable via POST /set_ntp, exactly
+    // like syslog_host is via /set_syslog.
+    std::string ntp_server;
     std::string profile  = "auto";  // "auto" = detect on next poll cycle; else a concrete profile id
     // One-shot WiFi credential rollback (POST /set_wifi -> wifi.cpp). The working credentials are
     // stashed here and `wifi_rollback_active` armed before the new ones are tried; the boot that
