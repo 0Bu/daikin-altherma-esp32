@@ -1,7 +1,7 @@
 ---
 name: add-logic-test
 description: Add host-testable pure logic to main/logic/ and a CHECK in test/test_logic.cpp so a decode/config/discovery change is verified locally and in CI. Use when adding or changing converters, CRC, config validation, or HA-discovery payloads.
-model: sonnet
+model: opus
 ---
 
 # add-logic-test
