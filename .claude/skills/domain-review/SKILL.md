@@ -1,7 +1,7 @@
 ---
 name: domain-review
 description: Pre-merge domain-correctness review — are the published values physically right, sensible and authentic? Runs the catalog audit (converters, spec conformance, HA semantics, byte layout) and judges what the audit cannot. Required before EVERY PR merge; a PR that cannot change what a value means clears in seconds, but a person has to say so.
-model: sonnet
+model: opus
 ---
 
 # domain-review
