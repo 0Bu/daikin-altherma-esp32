@@ -19,6 +19,7 @@
 #include "logic/crc.hpp"
 #include "logic/detect.hpp"
 #include "logic/discovery.hpp"
+#include "logic/error_codes.hpp"
 #include "logic/health_gate.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/http_body.hpp"
@@ -181,6 +182,16 @@ static void test_convert() {
     ValueDef ec{0x10, 5, 204, 1, -1, "ec"};
     const uint8_t u4[] = {0x94};                        // hi 9 -> 'U', lo 4 -> '4'
     CHECK(std::string(convert(ec, u4).text) == "U4");
+
+    // error_codes.hpp: English description lookup on top of the raw conv-204 code, keyed on the
+    // exact same code strings ERR_C1/ERR_C2 produce (docs/REGISTERS.md §4.3).
+    CHECK(std::string(error_code_description("U4")) == "Indoor/outdoor unit communication problem");
+    CHECK(std::string(error_code_description("E3")) == "Outdoor unit high-pressure switch activated");
+    CHECK(std::string(error_code_description("7H")) == "Water flow problem");
+    CHECK(std::string(error_code_description("UF")) == "Reversed piping or faulty communication wiring detected");
+    CHECK(std::string(error_code_description("ZZ")) == "");    // not in the table -> empty, not a guess
+    CHECK(std::string(format_error_code("U4")) == "U4: Indoor/outdoor unit communication problem");
+    CHECK(std::string(format_error_code("ZZ")) == "ZZ");       // unknown code -> bare code, unchanged
 
     // conv 211 = fan step (0 -> OFF, else the number); conv 316 = hybrid mode.
     ValueDef fs{0x30, 1, 211, 1, -1, "fs"};

@@ -42,7 +42,10 @@ is also directly consumable by a Telegraf MQTT `json_v2` parser (→ VictoriaMet
 
 Numeric values are emitted (unquoted) only when the heat pump reported them this cycle, so an
 unimplemented register is absent from the JSON and shows as *unknown* in HA rather than a phantom
-`0`; enum/text values (op-mode, ON/OFF, error codes) are emitted as JSON strings.
+`0`; enum/text values (op-mode, ON/OFF, error codes) are emitted as JSON strings. The "Error Code"
+value is the raw 2-char code (e.g. `U4`), enriched with an English description when
+`logic/error_codes.hpp` covers it (`"U4: Indoor/outdoor unit communication problem"`); a code
+outside that table's coverage still publishes as the bare code.
 
 > **Read-only bridge — no command topics.** The firmware only mirrors X10A telemetry; it never
 > actuates the heat pump. To *control* the unit (e.g. SG-Ready boost on PV surplus), drive the

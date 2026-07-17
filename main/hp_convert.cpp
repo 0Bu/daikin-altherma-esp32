@@ -2,6 +2,7 @@
 #include "hp_convert.hpp"
 #include "logic/convert.hpp"
 #include "logic/crc.hpp"
+#include "logic/error_codes.hpp"
 #include <cstdio>
 
 namespace daik {
@@ -12,7 +13,9 @@ bool hp_format(const ValueDef& def, const uint8_t* payload, int payload_len, int
     Reading r = convert(def, payload + def.offset, rtype);   // rtype selects the conv-405 curve
     if (r.unimpl) return false;
     if (!r.ok && r.text[0] == '\0') return false;
-    if (r.text[0]) { out = r.text; return true; }
+    // conv 204 (fault code) gets an English description appended when the table covers it;
+    // every other text converter (enum labels, ON/OFF) publishes its decoded text verbatim.
+    if (r.text[0]) { out = (def.conv == 204) ? format_error_code(r.text) : r.text; return true; }
     char b[32];
     // Per-converter decimal precision (logic/convert.hpp): 2 for ×0.01, 1 for scaled, 0 for integers.
     snprintf(b, sizeof(b), "%.*f", display_decimals(def.conv), r.value);
