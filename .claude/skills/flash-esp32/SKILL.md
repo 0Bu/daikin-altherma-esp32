@@ -50,5 +50,7 @@ config survive). Docker builds, host `esptool` flashes (Docker Desktop has no US
 - First flash of a fresh board erases NVS → set up WiFi via the `daikin-altherma-esp32-setup` portal.
 - A full-erase recovery: `esptool --chip esp32s3 -p <port> erase_flash` then reflash.
 - This skill does NOT merge or release — it works on the local tree only. PRs merge with
-  `gh pr merge` once the `/project-review` + `/feature-docs` gate boxes are ticked and SHA-stamped;
-  releases are cut by CI from `main` ([build.yml](../../../.github/workflows/build.yml)).
+  `gh pr merge` once every applicable gate box is ticked and SHA-stamped; derive which apply from
+  `ls .claude/hooks/require-*.sh` (each names its gate + relevance filter) rather than a list
+  written down here, which goes stale as gates are added. Releases are cut by CI from `main`
+  ([build.yml](../../../.github/workflows/build.yml)).
