@@ -176,8 +176,8 @@ on the **dashboard**:
   **ESP32** card (§5.3). The RX/TX pins are the physical X10A link, so they are **persisted** (a
   manual pick survives reboot) and the detection sweep tries the cached pair first (defaults as
   fallback, so a stale cache self-heals). RX/TX are **auto-detected**: while the bus answers they show
-  **read-only** (just the number). When it doesn't, each becomes a **dropdown** of the board's usable
-  GPIOs (`/status.pins_avail`, per-target `logic/board_pins.hpp` — power pads and not-broken-out pins
+  **read-only** (just the number). When it doesn't, each becomes a **dropdown** of the chip's safe
+  GPIOs (`/status.pins_avail`, per-target `logic/board_pins.hpp` — SPI flash/strapping/JTAG pins
   never appear); picking a pin posts `{profile:"auto", rx, tx}`, which re-runs detection on the chosen
   pair (+ its swap) next cycle. The current pin is always in its own list even if off-catalogue.
 

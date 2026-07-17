@@ -21,8 +21,9 @@ Reference: [docs/README.md](docs/README.md) (protocol · API · values · build)
    changed later from the dashboard's WiFi card (a bad password rolls back to the previous network
    automatically). The unit model and
    X10A protocol are **auto-detected** from the bus on every boot; the **RX/TX pins** are auto-detected
-   too (if they can't be found, the dashboard ESP32 card offers a dropdown of the board's usable GPIOs
-   to pick from). The poll interval is fixed at 1 s and labels are English-only. MQTT + the RX/TX pin
+   too (if they can't be found, the dashboard ESP32 card offers a dropdown of the chip's safe GPIOs
+   to pick from — see "Picking pins on a different board" below). The poll interval is fixed at 1 s
+   and labels are English-only. MQTT + the RX/TX pin
    cache are NVS-backed and OTA-persistent; the model is re-detected each boot.
 
 ## Wiring — X10A (breaker OFF)
@@ -58,6 +59,26 @@ Reference: [docs/README.md](docs/README.md) (protocol · API · values · build)
 5 V TTL; level shifter on HP-TX→ESP-RX recommended. Daikin rates X10A at 5 V / **50 mA**, less than
 an ESP32 draws — prefer USB power ([details](docs/README.md#voltage-and-wiring)). `GPIO16/17` absent
 on the XIAO → pins configurable. `Timeout`/`Wrong CRC` = cable/GND; `0x15 0xEA` = use protocol `S`.
+
+### Picking pins on a different board
+
+The dropdown (`/status.pins_avail`, driven by `logic/board_pins.hpp`) is a **chip-level** safe list —
+every GPIO the ESP32-S3 itself doesn't reserve for boot flash, PSRAM, strapping, USB-JTAG or JTAG,
+minus the status LED's pin (`DAIKIN_STATUS_LED_GPIO`, default 21) since the firmware drives that one
+itself. It is **not** aware of any specific vendor board's silkscreen, since firmware has no way to
+learn which of a chip's pins are actually wired to a header on the PCB it's soldered to. To find your
+two wires on a board other than the XIAO, cross-reference that dropdown against your board's own
+pinout diagram — here's that cross-reference already done for the boards that have come up:
+
+| Board | Chip | Safe pins this board breaks out | Exceptions (broken out but NOT in the dropdown) |
+| :--- | :--- | :--- | :--- |
+| Seeed XIAO ESP32-S3 | ESP32-S3 | 1, 2, 4, 5, 6, 7, 8, 9, 43, 44 | GPIO3 (D2) — chip-level JTAG-select strap, even though the XIAO breaks it out as a plain pad |
+| Waveshare ESP32-S3-DevKitC-1 | ESP32-S3 | 1, 2, 4–18, 35, 36, 37, 38, 43, 44, 47, 48 | GPIO0/3/45/46 (strapping), 19/20 (USB-JTAG, already the console), 39–42 (dedicated JTAG), 21 (status LED) |
+| M5Stack AtomS3 Lite | ESP32-S3FN8 | 1, 2, 5, 6, 7, 8, 38 | GPIO39 ("CLK_OUT3" on this board's silkscreen) — chip-level dedicated JTAG (MTCK) regardless of what a board relabels it |
+
+Pick any two distinct pins from a board's "safe pins" column for RX/TX, wire them to X10A, then set
+them in the dashboard's dropdown (`POST /set_hp`) — see "Wiring" above for why the firmware won't
+find them on its own until you do.
 
 ## Notes
 

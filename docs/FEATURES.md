@@ -448,15 +448,18 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   the boot-loop safe-mode decision (`boot_guard.hpp`), grouped state JSON (`mqtt_group.hpp`), the
   RFC 8259 JSON string encoder every payload shares (`json.hpp` — escapes `"`, `\` and every control
   byte, so an SSID from any AP in radio range can't emit JSON the setup portal fails to parse), the
-  broker-URI split (`mqtt_uri.hpp`), board
-  pins (`board_pins.hpp`), the `/events` frame policy (`ws_policy.hpp` — an announced frame length is
+  broker-URI split (`mqtt_uri.hpp`), the X10A GPIOs the RX/TX picker may offer
+  (`board_pins.hpp` — the ESP32-S3 chip-safe set, minus GPIO33-37 on Octal flash/PSRAM builds and
+  minus the status LED's own pin, since chip-safe is not the same as free: `status_led.cpp` holds
+  that pin as a push-pull output, so offering it would be a pick that cannot work),
+  the `/events` frame policy (`ws_policy.hpp` — an announced frame length is
   a client-asserted 64-bit number, so it decides and never allocates; only a `sub` **text** frame
   earns a broadcast slot), request-body reassembly (`http_body.hpp` — a body arrives across as many
   TCP segments as the network chooses, and a peer that stalls forever must lose *bounded*),
   and **🔭 Modbus TCP framing + HomeHub register codecs** (`modbus.hpp` — MBAP
   framing without CRC, FC03/04/06/16 build+parse, `Temp16`/`Pow16`/`Int16`/`Text16` decode/encode,
   the `homehub-*` mDNS filter; the host-tested core for the *planned* firmware-exclusive HomeHub
-  Modbus link (issue #32), **not yet wired into the firmware**). **592 `CHECK`s** in
+  Modbus link (issue #32), **not yet wired into the firmware**). **606 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the

@@ -303,7 +303,7 @@ function fmtBytes(b) {
 const FAULT_RESETS = ["panic", "int_wdt", "task_wdt", "wdt", "brownout", "pwr_glitch", "cpu_lockup"];
 
 // RX/TX pin dropdown row — shown only when auto-detection hasn't locked a working pin pair, so the
-// user picks from the board's actually-usable GPIOs (logic/board_pins.hpp → /status.pins_avail).
+// user picks from the chip's safe GPIOs (logic/board_pins.hpp → /status.pins_avail).
 // The current pin is always an option even if it's off-list (e.g. a stale/custom value).
 function pinSelRow(label, id, val, pins) {
   const list = (val != null && !pins.includes(val)) ? [val, ...pins].sort((a, b) => a - b) : pins;

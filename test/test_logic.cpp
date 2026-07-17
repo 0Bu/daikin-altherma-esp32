@@ -978,22 +978,49 @@ static void test_board_pins() {
         for (int i = 0; i < b.count; i++) if (b.pins[i] == p) return true;
         return false;
     };
-    // Reference board (Seeed XIAO ESP32-S3): exactly the broken-out pads, with the X10A defaults
-    // present and the not-broken-out pins (16/17, 47/48) absent — the whole point of the dropdown.
+    // Conservative (octal_spi=true, the default): chip-safe minus SPI flash, Octal PSRAM/flash,
+    // strapping, USB-JTAG and dedicated JTAG. GPIO43/44 (the X10A Kconfig defaults) stay present.
     BoardPins s3 = board_pins("esp32s3");
-    CHECK(s3.count == 11);
-    CHECK(has(s3, 43) && has(s3, 44));                              // D6/D7 — the X10A defaults
-    CHECK(!has(s3, 16) && !has(s3, 17) && !has(s3, 47) && !has(s3, 48));
-    // Supported target: non-empty and strictly ascending (⇒ sorted + de-duped) within GPIO range.
-    for (const char* t : {"esp32s3"}) {
-        BoardPins b = board_pins(t);
+    CHECK(s3.count == 23);
+    CHECK(has(s3, 43) && has(s3, 44));
+    CHECK(!has(s3, 33) && !has(s3, 34) && !has(s3, 35) && !has(s3, 36) && !has(s3, 37));  // Octal SPI
+    CHECK(!has(s3, 0) && !has(s3, 3) && !has(s3, 45) && !has(s3, 46));                    // strapping
+    CHECK(!has(s3, 19) && !has(s3, 20));                                                  // USB-JTAG
+    CHECK(!has(s3, 26) && !has(s3, 32));                                                  // SPI flash
+    CHECK(!has(s3, 39) && !has(s3, 42));                                                  // dedicated JTAG
+    // Permissive (octal_spi=false): a Quad/no-PSRAM build frees GPIO33-37 too.
+    BoardPins s3_quad = board_pins("esp32s3", false);
+    CHECK(s3_quad.count == 28);
+    CHECK(has(s3_quad, 33) && has(s3_quad, 34) && has(s3_quad, 35) && has(s3_quad, 36) && has(s3_quad, 37));
+    // Non-empty and strictly ascending (⇒ sorted + de-duped) within GPIO range, for both variants.
+    for (BoardPins b : {s3, s3_quad}) {
         CHECK(b.count > 0);
         for (int i = 0; i < b.count; i++) CHECK(gpio_in_range(b.pins[i]));
         for (int i = 1; i < b.count; i++) CHECK(b.pins[i] > b.pins[i - 1]);
     }
-    // Unknown / null target falls back to the reference board (never an empty list).
+    // Unknown / null target falls back to the same (default-arg) conservative list.
     CHECK(board_pins("nope").count == s3.count);
     CHECK(board_pins(nullptr).count == s3.count);
+    // BOARD_PINS_MAX really does bound both lists (it sizes the caller's buffer in http_status.cpp).
+    CHECK(s3.count <= BOARD_PINS_MAX && s3_quad.count <= BOARD_PINS_MAX);
+
+    // board_pins_offerable(): drops the pin the firmware itself drives (the status LED, GPIO21 by
+    // default) — offering it would be a pick that cannot work, since the LED holds it as an output.
+    int buf[BOARD_PINS_MAX];
+    int n = board_pins_offerable(buf, BOARD_PINS_MAX, /*octal_spi=*/false, /*reserved=*/21);
+    CHECK(n == s3_quad.count - 1);
+    for (int i = 0; i < n; i++) CHECK(buf[i] != 21);
+    for (int i = 1; i < n; i++) CHECK(buf[i] > buf[i - 1]);          // still strictly ascending
+    // reserved = -1 (LED disabled) keeps every chip-safe pin, GPIO21 included.
+    n = board_pins_offerable(buf, BOARD_PINS_MAX, /*octal_spi=*/false, /*reserved=*/-1);
+    CHECK(n == s3_quad.count);
+    CHECK(has({buf, n}, 21));
+    // A reserved pin that isn't in the list at all (e.g. GPIO0) drops nothing.
+    n = board_pins_offerable(buf, BOARD_PINS_MAX, /*octal_spi=*/true, /*reserved=*/0);
+    CHECK(n == s3.count);
+    // Honours the buffer cap instead of overrunning it.
+    n = board_pins_offerable(buf, 3, /*octal_spi=*/false, /*reserved=*/-1);
+    CHECK(n == 3);
 }
 
 static void test_crashinfo() {

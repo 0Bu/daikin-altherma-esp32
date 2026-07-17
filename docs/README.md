@@ -147,8 +147,10 @@ them. This project keeps that data but makes it **runtime-selectable**:
   fingerprint) and selects the matching profile — there is no manual model picker; the web UI shows
   the detected model read-only. The **RX/TX pins are auto-detected** too (the firmware sweeps the
   cached pair, its swap and the board default); they show read-only while the bus answers and fall
-  back to a dropdown of the board's usable GPIOs when it doesn't. Labels are English-only and the
-  poll interval is fixed at 1 s.
+  back to a dropdown of the chip's safe GPIOs when it doesn't (`logic/board_pins.hpp` — the ESP32-S3
+  pins not reserved for flash/PSRAM, strapping, USB-JTAG or JTAG, minus the status LED's own pin;
+  which of them a given board breaks out to a header is the user's to know, see the board table in
+  the top-level README). Labels are English-only and the poll interval is fixed at 1 s.
 - The **model** (active profile + fingerprint) is **re-detected on every boot** (never written to
   NVS); the **link** (RX/TX pins + protocol) is a persisted cache, tried first by the sweep. Both
   drive the poll engine (`main/hp_poll.*`). See the Configuration model below.
