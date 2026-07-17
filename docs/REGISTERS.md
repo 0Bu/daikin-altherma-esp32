@@ -190,6 +190,12 @@ e.g. byte `0x94` → high nibble `9` → `U`, low nibble `4` → `4` → **`U4`*
 yields a blank first character (the code is shown as its single second character). Error *class* comes
 from `conv 203` (Normal / Error / Warning / Caution).
 
+`logic/error_codes.hpp` holds an optional code → short-English-description lookup for the subset of
+2-char codes a reference service manual documents for one Altherma model family; `hp_convert.cpp`
+appends the description to the published value when the table covers the decoded code (e.g. `U4:
+Indoor/outdoor unit communication problem`), and otherwise leaves the bare code unchanged. It is a
+presentation layer only — it never affects what conv 204 decodes off the wire.
+
 ---
 
 ## 5. Register catalog (per model)
