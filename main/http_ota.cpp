@@ -1,6 +1,7 @@
 // /ota/check, /ota/update, /ota/status — thin HTTP layer over ota_update.cpp.
 #include "http_handlers.hpp"
 #include "ota_update.hpp"
+#include "logic/json.hpp"   // json_quote — the ONE RFC 8259 encoder every payload goes through
 #include "esp_http_server.h"
 #include <cstdlib>
 #include <string>
@@ -25,10 +26,18 @@ static esp_err_t ota_do(httpd_req_t* req) {
 
 static esp_err_t ota_stat(httpd_req_t* req) {
     OtaStatus s = ota_status();
-    std::string j = "{\"state\":\"" + s.state + "\",\"progress\":" + std::to_string(s.progress) +
-                    ",\"message\":\"" + s.message + "\",\"update_available\":" +
-                    (s.update_available ? "true" : "false") + ",\"available\":\"" + s.available +
-                    "\",\"current\":\"" + s.current + "\"}";
+    // Every string field goes through json_quote (json.hpp), not raw concatenation: `message` and
+    // `available` become network-derived once the manifest check (issue #12) lands (an HTTP/mbedTLS
+    // error rendering, a version parsed from a remote manifest), and one '"' or control byte there
+    // would break JSON.parse in the UI's update flow. `state`/`current` are internal today, but
+    // routing all four through the one encoder is the invariant that keeps #12 from having to
+    // remember. json_quote emits the surrounding quotes.
+    std::string j = "{\"state\":" + json_quote(s.state) +
+                    ",\"progress\":" + std::to_string(s.progress) +
+                    ",\"message\":" + json_quote(s.message) +
+                    ",\"update_available\":" + (s.update_available ? "true" : "false") +
+                    ",\"available\":" + json_quote(s.available) +
+                    ",\"current\":" + json_quote(s.current) + "}";
     return http_send_json(req, j.c_str());
 }
 

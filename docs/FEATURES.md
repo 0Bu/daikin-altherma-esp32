@@ -43,11 +43,11 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 13 | 17-entity device **heartbeat** diagnostics stream (heap trend + reset reason + SNTP wall clock incl.) | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
 | 14 | Strongest-AP scan + SAE tuning + **endless reconnect** | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 15 | **ICMP gateway watchdog** (ghost-association recovery) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
-| 16 | Captive-portal provisioning (SoftAP + UDP:53 DNS catch-all) | ✅ | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp) |
+| 16 | Captive-portal provisioning (APSTA SoftAP with a working `/scan` + UDP:53 DNS catch-all) | ✅ | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp) |
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (650 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (666 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -57,7 +57,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 27 | **Task Watchdog** → clean reboot on a wedged poll/publish task | ✅ | [`hp_poll.cpp`](../main/hp_poll.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 28 | **`/status.sys`** always-on heap headroom + last-boot reason (LAN/WS, no broker) | ✅ 🧪 | [`http_status.cpp`](../main/http_status.cpp), [`logic/reset_reason.hpp`](../main/logic/reset_reason.hpp) |
 | 29 | **Boot-loop safe mode** — recover a bad config in-browser (crash-only counting, distinct from OTA rollback) | ✅ 🧪 | [`safe_mode.cpp`](../main/safe_mode.cpp), [`logic/boot_guard.hpp`](../main/logic/boot_guard.hpp) |
-| 30 | **Config-write integrity** — field-owned commits (no cross-task revert) + an NVS failure that reaches the user (500, no reboot) instead of "saved" | ✅ 🧪 | [`config.cpp`](../main/config.cpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp), [`http_config.cpp`](../main/http_config.cpp) |
+| 30 | **Config-write integrity** — field-owned commits (no cross-task revert), reserved-GPIO rejection on both the request and the load path, + an NVS failure that reaches the user (500, no reboot) instead of "saved" | ✅ 🧪 | [`config.cpp`](../main/config.cpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp), [`logic/board_pins.hpp`](../main/logic/board_pins.hpp), [`http_config.cpp`](../main/http_config.cpp) |
 | 31 | **Value-catalog domain audit** — real converters × real catalog vs the spec, each finding carrying a decode witness; co-gates CI, plus a selftest that re-catches the four decode bugs that shipped | ✅ | [`catalog_audit.cpp`](../tools/domain/catalog_audit.cpp), [`run-domain-audit.sh`](../scripts/run-domain-audit.sh), [`selftest.sh`](../tools/domain/selftest.sh) |
 | 32 | **SNTP wall clock**, runtime-configurable server — real UTC for the syslog TIMESTAMP field + `/status.ntp` | ✅ 🧪 | [`sntp_time.cpp`](../main/sntp_time.cpp), [`logic/timestamp.hpp`](../main/logic/timestamp.hpp), [`http_config.cpp`](../main/http_config.cpp) |
 | 33 | **Detect-sweep heap hardening** — install-once UART + register-only pin remap (no per-swap driver realloc) and silent-bus detect backoff, closing a fragmentation panic caught by a symbolized coredump | ✅ 🧪 | [`hp_comm.cpp`](../main/hp_comm.cpp), [`logic/uart_plan.hpp`](../main/logic/uart_plan.hpp), [`hp_poll.cpp`](../main/hp_poll.cpp), [`logic/detect_backoff.hpp`](../main/logic/detect_backoff.hpp) |
@@ -254,6 +254,13 @@ First boot with no WiFi config comes up as SoftAP `daikin-altherma-esp32-setup`
 joining phone's OS connectivity probe resolves to the device and auto-pops the setup page. The `/*`
 catch-all HTTP route ([`http_status.cpp`](../main/http_status.cpp)) serves that page. One shared `:80`
 `esp_http_server` handles both AP-setup and STA-run modes.
+
+The portal runs the radio in **APSTA**, not AP-only: `esp_wifi_scan_start()` needs a *started* station
+interface, so an AP-only setup mode could never serve `GET /scan` — the page's network dropdown always
+fell back to `setup.html`'s free-text SSID box, i.e. the picker was dead in the only mode it runs in.
+The STA side is created and started purely so the radio can scan; it is never handed credentials or
+told to connect. Scanning hops channels briefly, a tolerable blip for the associated phone during a
+one-time setup.
 
 ---
 
@@ -488,7 +495,11 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   broker-URI split (`mqtt_uri.hpp`), the X10A GPIOs the RX/TX picker may offer
   (`board_pins.hpp` — the ESP32-S3 chip-safe set, minus GPIO33-37 on Octal flash/PSRAM builds and
   minus the status LED's own pin, since chip-safe is not the same as free: `status_led.cpp` holds
-  that pin as a push-pull output, so offering it would be a pick that cannot work),
+  that pin as a push-pull output, so offering it would be a pick that cannot work — and
+  `board_pin_offerable()` makes that list a *rule* rather than a dropdown filter, enforced on the
+  request path (`validate()`, naming the offending pin) and on the load path (`config_load()` via
+  `link_pins_safe()`), so neither a raw `POST /set_hp` nor a stale NVS link cache can route the X10A
+  UART onto a flash/strapping/JTAG pad and crash-loop the board),
   the `/events` frame policy (`ws_policy.hpp` — an announced frame length is
   a client-asserted 64-bit number, so it decides and never allocates; only a `sub` **text** frame
   earns a broadcast slot), request-body reassembly (`http_body.hpp` — a body arrives across as many
@@ -506,7 +517,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   Modbus link (issue #32), **not yet wired into the firmware**), and the SNTP wall-clock RFC 3339
   formatter (`timestamp.hpp` — the one place the syslog TIMESTAMP field, `/status.ntp.time` and the
   MQTT heartbeat's `time` field render through; a negative/never-synced input renders `""`, never a
-  fabricated `1970-01-01`). **650 `CHECK`s** in
+  fabricated `1970-01-01`). **666 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
@@ -634,7 +645,7 @@ security of signed firmware with none of the brick risk. It refuses to roll a ba
 and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-associations no event
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 17-entity heartbeat diagnostics). And the risky parts — decode,
-CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (650 checks),
+CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (666 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

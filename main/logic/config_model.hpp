@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 #include "crc.hpp"
+#include "board_pins.hpp"   // board_pin_offerable — the chip-reserved-pin rule validate() enforces
 
 namespace daik {
 
@@ -45,9 +46,11 @@ struct Config {
     int         tx_pin   = 43;
 
     // ── Auto-detected MODEL (not the link). Set by hp_detect.cpp; see logic/detect.hpp. ──
-    // SESSION-ONLY: applied to the in-RAM config via config_set_runtime and NEVER persisted — the
-    // model is re-detected on every boot (config_load seeds profile="auto"), so a swapped unit is
-    // re-identified. The fingerprint lets /status recompute the candidate set cheaply (no re-probe).
+    // SESSION-ONLY: applied to the in-RAM config via config_set_model (apply_model, below) and NEVER
+    // persisted — the model is re-detected on every boot (config_load seeds profile="auto"), so a
+    // swapped unit is re-identified. The fingerprint lets /status recompute the candidate set cheaply
+    // (no re-probe). (config_set_runtime — whole-struct RAM publish — survives only for POST /detect's
+    // reset to "auto"; the poll task uses the field-owned config_set_model so it never reverts creds.)
     uint32_t    fp_pages     = 0;   // page mask that answered (logic/detect.hpp page_bit)
     int         fp_kw_tenths = -1;  // O/U capacity in 0.1 kW; -1 = unknown
     std::string fp_eeprom;          // rendered O/U EEPROM digits (display only)
@@ -105,14 +108,35 @@ inline bool link_pins_valid(int rx, int tx, int max_gpio = 48) {
     return gpio_in_range(rx, max_gpio) && gpio_in_range(tx, max_gpio) && rx != tx;
 }
 
+// The full link rule: the pair rule (above) PLUS the chip-reserved-pin rule (logic/board_pins.hpp).
+// Two individually-legal, distinct pins are still an illegal link if either names a pad this
+// chip/build reserves (SPI flash, strapping, JTAG, USB-Serial/JTAG, octal-SPI) or the pin the status
+// LED drives — the range-only link_pins_valid could not see those. Both the request path (validate)
+// and the LOAD path (config.cpp) apply it, so a /set_hp and a persisted cache can only hold a pair the
+// UI would also have offered. `octal_spi`/`reserved` are supplied by the caller from Kconfig
+// (config.cpp hw_octal_spi()/hw_status_led_gpio()), keeping this header CONFIG_-free.
+inline bool link_pins_safe(int rx, int tx, bool octal_spi, int reserved, int max_gpio = 48) {
+    return link_pins_valid(rx, tx, max_gpio)
+        && board_pin_offerable(rx, octal_spi, reserved)
+        && board_pin_offerable(tx, octal_spi, reserved);
+}
+
 // Validate a config coming from the web UI. Returns false + a reason on the first problem. Pass the
 // target's highest GPIO as `max_gpio` so pins are checked against the actual chip. The two range
 // checks exist to name WHICH pin is wrong; link_pins_valid is the authority on the pair itself, so a
 // rule added there is inherited here.
-inline bool validate(const Config& c, std::string& reason, int max_gpio = 48) {
+// `octal_spi`/`reserved` gate the chip-reserved-pin check (board_pins.hpp); their defaults
+// (conservative octal=true, nothing reserved) keep the pair check strict for host tests that don't
+// pass them. The device call site (http_config.cpp /set_hp) passes the real Kconfig-derived values so
+// a reserved GPIO — a flash/strapping/JTAG pad, or the status-LED pin — is rejected with the pin named
+// instead of range-accepted and persisted into a crash loop.
+inline bool validate(const Config& c, std::string& reason, int max_gpio = 48,
+                     bool octal_spi = true, int reserved = -1) {
     if (!gpio_in_range(c.rx_pin, max_gpio)) { reason = "rx_pin out of range"; return false; }
     if (!gpio_in_range(c.tx_pin, max_gpio)) { reason = "tx_pin out of range"; return false; }
     if (!link_pins_valid(c.rx_pin, c.tx_pin, max_gpio)) { reason = "rx_pin and tx_pin must differ"; return false; }
+    if (!board_pin_offerable(c.rx_pin, octal_spi, reserved)) { reason = "rx_pin is a reserved GPIO"; return false; }
+    if (!board_pin_offerable(c.tx_pin, octal_spi, reserved)) { reason = "tx_pin is a reserved GPIO"; return false; }
     if (c.proto != Protocol::I && c.proto != Protocol::S) { reason = "protocol must be I or S"; return false; }
     if (!c.syslog_host.empty() && (c.syslog_port < 1 || c.syslog_port > 65535)) { reason = "syslog_port out of range"; return false; }
     return true;

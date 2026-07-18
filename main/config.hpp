@@ -38,4 +38,14 @@ void config_set_model(std::string profile, uint32_t fp_pages, int fp_kw_tenths, 
 // narrow setters above. Whole-struct like config_save, so the same rule applies: httpd task only.
 void config_set_runtime(const Config& c);
 
+// ── Build/hardware facts read from Kconfig, exposed so logic/board_pins.hpp's octal_spi/reserved
+// inputs come from ONE place (this file) instead of a #if block copied into each call site; logic/
+// must not see CONFIG_* itself. ──
+// True iff THIS build's flash and/or PSRAM run Octal I/O, so GPIO33-37 carry SPIIO4-7/DQS and are
+// unsafe for the X10A link (logic/board_pins.hpp `octal_spi`).
+bool hw_octal_spi();
+// The GPIO the status LED drives (a push-pull output the X10A link must not reuse), or -1 when the
+// LED is compiled out / disabled. Feeds board_pins' `reserved`.
+int  hw_status_led_gpio();
+
 } // namespace daik

@@ -22,6 +22,7 @@
 #include <cstring>
 #include <cstdio>
 #include <new>
+#include <exception>
 #include <string_view>
 
 namespace daik {
@@ -33,7 +34,24 @@ struct SyslogMsg {
 
 static QueueHandle_t s_queue = nullptr;
 static SemaphoreHandle_t s_status_mtx = nullptr;
-static SyslogStatus s_status;
+// Status guarded by s_status_mtx. Stored as primitives + a string-LITERAL pointer, never a
+// std::string: set_status runs on this task and the reader must be able to snapshot it without any
+// allocation happening while the mutex is held (see the RAII Lock note below). host/port/configured
+// are not kept here — syslog_status() reads them fresh from config().
+static bool        s_resolved = false;
+static bool        s_reachable = false;
+static const char* s_error = "";   // string literal only — assigned by set_status without allocating
+
+// RAII guard around s_status_mtx (same idiom as config.cpp / hp_poll.cpp). Replaces the raw
+// take/give pairs so an exception on a reader can't strand the mutex — which would block every later
+// syslog_status()/set_status() at portMAX_DELAY and wedge the device.
+namespace {
+struct Lock {
+    explicit Lock(SemaphoreHandle_t m) : m_(m) { if (m_) xSemaphoreTake(m_, portMAX_DELAY); }
+    ~Lock() { if (m_) xSemaphoreGive(m_); }
+    SemaphoreHandle_t m_;
+};
+}  // namespace
 
 // File-scope so the control block + semaphore outlive any in-flight esp_ping session: the ping's
 // internal thread is NOT joined by esp_ping_delete_session() and calls the callback unconditionally
@@ -42,13 +60,15 @@ static SyslogStatus s_status;
 struct PingCtl { SemaphoreHandle_t done; uint32_t received; };
 static PingCtl s_ping = { nullptr, 0 };
 
-static void set_status(bool resolved, bool reachable, const std::string& error) {
-    if (s_status_mtx && xSemaphoreTake(s_status_mtx, portMAX_DELAY) == pdTRUE) {
-        s_status.resolved = resolved;
-        s_status.reachable = reachable;
-        s_status.error = error;
-        xSemaphoreGive(s_status_mtx);
-    }
+// `error` is a string LITERAL (every call site passes one) — stored as a bare pointer so nothing
+// allocates while the mutex is held. This runs on the syslog task, whose loop guard (below) turns an
+// OOM into a skipped cycle; an allocating assignment here could still leave the lock stranded on an
+// unwind, so it must not allocate at all.
+static void set_status(bool resolved, bool reachable, const char* error) {
+    Lock lk(s_status_mtx);
+    s_resolved  = resolved;
+    s_reachable = reachable;
+    s_error     = error ? error : "";
 }
 
 SyslogStatus syslog_status() {
@@ -59,12 +79,14 @@ SyslogStatus syslog_status() {
     copy.port = c.syslog_port;
     copy.resolved = false;
     copy.reachable = false;
-    if (s_status_mtx && xSemaphoreTake(s_status_mtx, portMAX_DELAY) == pdTRUE) {
-        copy.resolved = s_status.resolved;
-        copy.reachable = s_status.reachable;
-        copy.error = s_status.error;
-        xSemaphoreGive(s_status_mtx);
+    const char* err = "";
+    {
+        Lock lk(s_status_mtx);
+        copy.resolved  = s_resolved;
+        copy.reachable = s_reachable;
+        err            = s_error;   // pointer copy under the lock — no allocation
     }
+    copy.error = err;               // std::string built from the literal OUTSIDE the lock
     return copy;
 }
 
@@ -294,6 +316,14 @@ void syslog_init() {
         const TickType_t check_interval = pdMS_TO_TICKS(10000); // re-resolve + re-probe cadence
 
         while (true) {
+          // Guard the whole cycle like mqtt_task/poll_task (.claude/CLAUDE.md → Memory constraints):
+          // this loop allocates every pass (the config() snapshot copies ~10 std::strings, plus
+          // getaddrinfo/last_host), and a FreeRTOS task entry is a C-frame boundary — an escaping
+          // std::bad_alloc would reach std::terminate and reboot, dropping the poll cycle + MQTT the
+          // reboot was supposed to preserve. Skip the cycle, keep the last state, delay so a starved
+          // task can't hot-spin. (The "syslog:" tag self-drops from forwarding; the line still reaches
+          // /diag + serial.)
+          try {
             const Config& c = config();
             bool configured = !c.syslog_host.empty();
             bool wifi_ok = wifi_info().connected;
@@ -391,6 +421,13 @@ void syslog_init() {
                     }
                 }
             }
+          } catch (const std::exception& e) {
+              diag_printf("syslog: task cycle skipped (%s)\n", e.what());
+              vTaskDelay(pdMS_TO_TICKS(1000));
+          } catch (...) {
+              diag_printf("syslog: task cycle skipped (oom?)\n");
+              vTaskDelay(pdMS_TO_TICKS(1000));
+          }
         }
         // 6144: this task runs getaddrinfo() + raw socket()/sendto() directly on its own stack (unlike
         // esp-mqtt, whose socket work lives in an internal task). 4096 is too thin for that call chain.

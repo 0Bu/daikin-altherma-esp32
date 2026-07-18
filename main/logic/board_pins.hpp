@@ -79,4 +79,18 @@ inline int board_pins_offerable(int* out, int cap, bool octal_spi, int reserved 
     return n;
 }
 
+// Membership test for the SAME set board_pins_offerable() emits: is `pin` chip-safe for this build
+// AND not the firmware-reserved pin? The authoritative request path (config_model.hpp validate) and
+// the load-path guard (config.cpp) both call this so the pins a /set_hp — or a persisted link cache —
+// can hold match exactly the set the UI offers. Without it, validate()'s range-only check accepted a
+// curl POST that routed the X10A UART onto the SPI-flash pins (GPIO26-32): flash traffic corrupts, the
+// board crash-loops, and the toxic pair is already persisted so every boot re-tries it.
+inline bool board_pin_offerable(int pin, bool octal_spi, int reserved = -1) {
+    if (pin == reserved) return false;
+    BoardPins bp = board_pins(nullptr, octal_spi);
+    for (int i = 0; i < bp.count; i++)
+        if (bp.pins[i] == pin) return true;
+    return false;
+}
+
 } // namespace daik

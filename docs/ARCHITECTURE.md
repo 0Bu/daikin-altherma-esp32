@@ -81,7 +81,11 @@ http_config.cpp     → POST /set_wifi, /set_mqtt, /set_syslog, /set_hp, /detect
 http_ota.cpp        → /ota/check|update|status
 mcp_server.cpp      → /mcp — read-only MCP tools (get_status, get_hp_values) for AI agents — PLANNED
                       (route exists; returns a JSON-RPC "not implemented" error for now)
-provisioning.cpp    → captive setup portal (SoftAP daikin-altherma-esp32-setup) when no WiFi
+provisioning.cpp    → captive setup portal (SoftAP daikin-altherma-esp32-setup) when no WiFi.
+                      Runs APSTA, not AP: esp_wifi_scan_start() needs a STARTED station interface,
+                      so in AP-only mode GET /scan always failed and the portal's SSID dropdown
+                      always degraded to setup.html's free-text fallback. The STA side is idle —
+                      created and started only so the radio can scan, never given credentials
 captive_dns.cpp     → UDP:53 catch-all (every name → 192.168.4.1) so the setup portal auto-pops
 mqtt_ha.cpp/.hpp    → Home Assistant MQTT-Discovery bridge (streamed discovery), read-only
 ota_update.cpp      → OTA: rollback health gate (implemented); pull check/download + downgrade
@@ -142,7 +146,12 @@ host-testable core is unusually large and valuable, because the risky parts are 
   `def/*` profile tables are written in: the shared vocabulary between the offline generator's output
   and `convert.hpp`'s decode. IDF-free so the host tests can build the same tables the device runs.
 - `logic/config_model.hpp` — validation of pins (no overlap, in range for the target), protocol
-  enum, and the fixed `POLL_INTERVAL_S` constant.
+  enum, and the fixed `POLL_INTERVAL_S` constant. Range and distinctness are not the whole link rule:
+  `validate()` also applies `board_pins.hpp`'s chip-reserved-pin test per pin, so a pad the UI would
+  never offer is rejected by name (`"rx_pin is a reserved GPIO"`) rather than range-accepted, and
+  `link_pins_safe()` bundles that test with the pair rule for the load path. The
+  `octal_spi`/`reserved` parameters are supplied by the caller from Kconfig
+  (`config.cpp`'s `hw_octal_spi()`/`hw_status_led_gpio()`), keeping the header `CONFIG_`-free.
 - `logic/discovery.hpp` — the HA MQTT-Discovery payload builder (topic + config JSON per value),
   so the exact bytes HA receives are asserted on the host, not on the device.
 - `logic/detect.hpp` — model auto-detection: maps a bus `Fingerprint` (answering pages + capacity)
@@ -155,9 +164,19 @@ host-testable core is unusually large and valuable, because the risky parts are 
   that (no board-ID EEPROM), so the list is a chip-level safety floor, not a board-specific one.
   Feeds `/status.pins_avail` and hence the dashboard RX/TX pin dropdown. Pure, so both list variants
   are asserted host-side (sorted, in range, and each excludes exactly its reserved pins).
+  `board_pin_offerable()` is the membership test for that same set, and it is what makes the list a
+  **rule** rather than a UI convenience: the dropdown filter can only constrain the dashboard, so
+  before it existed a `curl POST /set_hp` could route the X10A UART onto the SPI-flash pins — flash
+  traffic corrupts, the board crash-loops, and the toxic pair is already persisted, so every
+  subsequent boot re-tries it. Both the request path (`validate()`) and the load path
+  (`config_load()`) now apply it, so neither a POST nor a stale NVS link cache can hold a
+  pair the UI would not have offered. They reach it differently on purpose: `validate()` calls
+  `board_pin_offerable()` once per pin so it can name the offender (`"rx_pin is a reserved GPIO"`),
+  while `config_load()` takes the combined `link_pins_safe()`, which folds the pair rule and both
+  pin tests into one bool.
 - `logic/json.hpp` — the RFC 8259 string encoder every JSON payload goes through: `/status`,
-  `/values` and `/scan` (`http_status.cpp`'s `jstr`) as well as the MQTT state, heartbeat and crash
-  topics. It escapes `"`, `\` and **every** control byte below 0x20 (`\b\f\n\r\t`, else `\u00XX`),
+  `/values` and `/scan` (`http_status.cpp`'s `jstr`), `/ota/status` (`json_quote`), as well as the
+  MQTT state, heartbeat and crash topics. It escapes `"`, `\` and **every** control byte below 0x20 (`\b\f\n\r\t`, else `\u00XX`),
   while passing raw UTF-8 through untouched. Not a detail: the strings it encodes are not all ours —
   an SSID is arbitrary bytes chosen by any AP in radio range, and escaping only `"` and `\` (as this
   did before) let an AP named `Free<LF>WiFi` emit a raw newline inside a JSON string, so `GET /scan`
@@ -329,15 +348,16 @@ The goal is **zero manual model/protocol picking** where the bus allows it, on *
 `"auto"`, so a fresh identification runs after every reset (a swapped unit is re-identified). The
 **link** (RX/TX pins + protocol) *is* persisted as a boot-invariant cache — loaded first, tried
 first, re-saved on change — with the compile-time defaults as fallback so a stale cache self-heals.
-The loaded pins are re-checked as a **pair** (`link_pins_valid`, the same rule the request path
-enforces) and dropped for those defaults if they fail: both write paths — `config_save` and
+The loaded pins are re-checked with `link_pins_safe` — the **pair** rule plus the chip-reserved-pin
+rule, the same ground the request path covers via `validate` — and dropped for those defaults if they
+fail: both write paths — `config_save` and
 `config_save_link` — commit `rx_pin` and `tx_pin` as two independent NVS writes, so a save cut or
-failed between them can leave a pair on flash (`rx == tx`, or a pin outside this chip's range) that
-no request could have set. Naming the failing key on `/diag` reports that write; it does not undo the
+failed between them can leave a pair on flash (`rx == tx`, a pin outside this chip's range, or a
+reserved flash/strapping/JTAG pad) that no request could have set. Naming the failing key on `/diag` reports that write; it does not undo the
 one that landed, which is why the check belongs on the way back in. The sweep already skips an
-`rx == tx` candidate on its own, so this is a guard rather than a repair; what it adds is the
-upper-bound check the sweep lacks, and a `/status` pin readout that never reports an unconfigurable
-link as fact.
+`rx == tx` candidate on its own, so this is a guard rather than a repair; what it adds is the two
+checks the sweep lacks — the upper GPIO bound and the chip-reserved-pin rule — and a `/status` pin
+readout that never reports an unconfigurable link as fact.
 While `profile == "auto"`, the poll task runs one detection pass (`poll_detect()`) instead of a
 normal cycle. These passes are **not** run blindly every second: on a **silent bus** the sweep backs
 off from the 1 s poll cadence toward a 60 s ceiling (`logic/detect_backoff.hpp`, host-tested),
@@ -705,7 +725,11 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
   mqtts://" (only a flash erase got out of it).
 - **Syslog** → `/set_syslog` (edited from a dashboard modal off the Connections tile's Syslog row).
   Save only validates the port range (no request-path network block); an empty host disables
-  forwarding. DNS resolution and the advisory reachability probe run in the syslog task and surface
+  forwarding. An **unchanged** host/port short-circuits to `{"ok":true,"reboot":false}` — no NVS
+  write, no reboot — the same shape as `/set_mqtt` and `/set_ntp`, since persisting identical values
+  and rebooting would drop the poll cycle, MQTT availability and every open WebSocket for nothing.
+  (`/set_wifi` is deliberately *not* short-circuited: a re-save there re-arms the credential-rollback
+  trial.) DNS resolution and the advisory reachability probe run in the syslog task and surface
   on that row via `/status.syslog` (`resolved`/`reachable`/`error`) — coloured `--ok`, `--warn`
   ("host not answering ping"), or `--err` (DNS lookup failed) — after the reboot.
 - **NTP** → `/set_ntp` (edited from a dashboard modal off the Connections tile's NTP row), the same
@@ -721,8 +745,11 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
   shown read-only on the dashboard **Model** card. The dashboard **ESP32** card shows the X10A link +
   protocol and the **RX/TX pins**, which are also auto-detected: **read-only** while the bus answers,
   and a **dropdown** of the chip's safe GPIOs (`/status.pins_avail`) when it doesn't — picking a
-  pin posts `{profile:"auto", rx, tx}` to re-run detection on that pair. The RX/TX pins are
-  **persisted** (a manual pick survives reboot); the model is session-only. Protocol is auto-detected
+  pin posts `{profile:"auto", rx, tx}` to re-run detection on that pair. That dropdown is a filter,
+  not the rule — `validate()` rejects a **chip-reserved** GPIO server-side (`board_pin_offerable()`
+  per pin, with the octal-SPI and status-LED facts from Kconfig), so a raw `curl POST` cannot route the UART onto a
+  flash/strapping/JTAG pad, and `config_load()` re-applies the same test to the persisted cache. The
+  RX/TX pins are **persisted** (a manual pick survives reboot); the model is session-only. Protocol is auto-detected
   (no UI control), the poll interval is fixed at 1 s (not sent), and labels are English-only (no
   `lang`). `/set_hp` accepts only `{profile, rx, tx}`.
 - **Firmware / OTA** — tapping the version on the ESP32 card checks for an update (`/ota/*`; a TODO
@@ -745,8 +772,9 @@ to HTTP handlers:
 1. **The task loop self-guards.** A task entry is a C frame boundary exactly like a handler is, so an
    escaping `std::bad_alloc` means `std::terminate()` → reboot. Wrap the loop *body* in
    `try/catch (const std::exception&)` + `catch (...)`, `diag_printf` once, skip the cycle keeping
-   the last good state, and continue after the normal delay. `mqtt_task` (`mqtt_ha.cpp`) and
-   `poll_task` (`hp_poll.cpp`) both do this; `ws_broadcast_values`/`ws_broadcast_status`
+   the last good state, and continue after the normal delay. `mqtt_task` (`mqtt_ha.cpp`),
+   `poll_task` (`hp_poll.cpp`) and `syslog_task` (`syslog.cpp` — its per-cycle `config()` snapshot
+   copies ~10 `std::string`s) all do this; `ws_broadcast_values`/`ws_broadcast_status`
    (`http_status.cpp`) keep their own finer-grained guards inside it — they skip a single client or
    frame rather than the whole cycle, and the task guard is only their backstop.
 2. **Nothing allocates while a mutex is held.** Rule 1 only makes an OOM survivable if the throw
@@ -757,3 +785,10 @@ to HTTP handlers:
    error text in locals and folds them in with `+=`/`swap` (noexcept), so the commit cannot throw —
    or the lock is taken through an RAII guard, like `hp_poll.cpp`'s `Lock`, which the readers
    (`hp_stats`, `hp_values_snapshot`) need because they copy `std::string`s out under the lock.
+   The status mutexes in `syslog.cpp` and `mqtt_ha.cpp` take the first route: their `set_status()`
+   stores the error text as a **string-literal pointer**, never a `std::string`, and the reader
+   (`syslog_status()`/`mqtt_status()`) copies only that pointer under the lock and builds the
+   `std::string` outside it. That matters most for `mqtt_ha`'s, which is written from `on_mqtt` on
+   esp-mqtt's own event task — a task with no guard of its own, where rule 1 is unavailable and an
+   allocating assignment would both `abort()` and, under a raw take/give, strand the mutex. Both
+   files also moved their raw `xSemaphoreTake`/`Give` pairs to the RAII `Lock`.
