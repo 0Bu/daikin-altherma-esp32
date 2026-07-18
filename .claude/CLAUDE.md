@@ -70,8 +70,11 @@ skill, a **PR-merge gate** required on **every** merge — like `/project-review
 conditional `/feature-docs`. Unconditional because deciding up front which files can change a
 value's meaning is a guess, and it is the guess that let #35–#39 ship; a PR that cannot reach a
 value clears in seconds, but a person states that rather than a regex assuming it. Adjudicated
-deviations live in `tools/domain/audit_exceptions.txt` (which also ledgers the four *pre-existing*
-defects the audit found on its first run).
+deviations live in `tools/domain/audit_exceptions.txt`; it distinguishes an on-record ADJUDICATION
+(a real per-model difference) from a temporary KNOWN-DEFECT (tracked + deleted by its fix). The four
+*pre-existing* defects the audit opened with (#35–#39) are fixed (PR #82) and their entries removed —
+a KNOWN-DEFECT that outlives its fix would silence the guard against the fix regressing — so the
+ledger currently carries no live entries; each defect is now pinned by a catalog `CHECK` instead.
 
 ## Build & Flash
 
@@ -125,10 +128,12 @@ config.cpp      runtime Config (logic/config_model.hpp): WiFi/MQTT + one-shot Wi
                 whole-struct config_save. A failed NVS write names the key on /diag and returns false
                 — config_save then publishes nothing, config_save_link still patches RAM (its link is
                 proven-good); every call site checks it. See "NVS namespaces".
-                config_load re-checks the persisted RX/TX as a PAIR (link_pins_valid) and falls back
+                config_load re-checks the persisted RX/TX with link_pins_safe (the PAIR rule plus the
+                chip-reserved-pin rule of logic/board_pins.hpp) and falls back
                 to the Kconfig defaults + a diag line if they fail: rx_pin/tx_pin are two independent
                 commits on BOTH write paths (config_save_link as much as config_save), so flash can
-                still hold a pair (rx == tx, or a pin off this chip) the request path would have
+                still hold a pair (rx == tx, a pin off this chip, or a reserved flash/strapping/JTAG
+                pad) the request path would have
                 rejected — a failure named on /diag is not a pair fixed on flash
 nvs_storage.cpp thin NVS helpers (IDF nvs_* called with :: to avoid the daik::nvs_* collision);
                 the setters return esp_err_t so config.cpp can name the failing key + error on /diag,
@@ -175,8 +180,12 @@ sntp_time.cpp   SNTP client (esp_netif_sntp, config().ntp_server — NVS "ntp_se
                 SNTP module stores the raw pointer it's given, not a copy, so it must outlive the
                 client) — a later /set_ntp edit reboots into a fresh config_load() rather than
                 mutating it live.
-provisioning.cpp setup SoftAP (daikin-altherma-esp32-setup) + DHCP DNS-offer; HTTP is the shared :80 server
-captive_dns.cpp UDP:53 catch-all (every name -> 192.168.4.1) so the setup portal auto-pops (AP mode only)
+provisioning.cpp setup SoftAP (daikin-altherma-esp32-setup) + DHCP DNS-offer; HTTP is the shared :80
+                server. Runs APSTA (not AP-only): the STA interface is brought up idle (never given
+                creds) purely so GET /scan -> wifi_scan() -> esp_wifi_scan_start() can populate the
+                setup page's SSID dropdown — an AP-only radio can't scan, so the picker used to always
+                collapse to the free-text fallback. h_index treats APSTA like AP (serve setup.html)
+captive_dns.cpp UDP:53 catch-all (every name -> 192.168.4.1) so the setup portal auto-pops (setup mode only)
 hp_comm.cpp     X10A UART (9600 8E1) + register query. hp_uart_init installs the driver ONCE, then a
                 pin change is a register-only uart_set_pin remap (logic/uart_plan.hpp) — NOT a
                 uart_driver_delete+install. The old reinstall-per-swap allocated a fresh RX ring +
@@ -369,8 +378,9 @@ def/            embedded per-model value profiles + registry (incl. the generic 
                 universal register core) + models_catalog.hpp (GET /models) + model_names.hpp
                 (id→display/family/marketing name for /status) + signatures.hpp (Altherma-only
                 detection signatures derived from the tables). Profiles are machine-generated in the
-                ValueDef row format by the offline value-catalog decode tooling (gen_profiles.py),
-                which is maintained OUTSIDE this repo — there is no tools/ directory on main. Never
+                ValueDef row format by the offline value-catalog *profile generator* (gen_profiles.py),
+                which is maintained OUTSIDE this repo — do not confuse it with the in-repo
+                `tools/domain/` audit tooling, which is a different toolset entirely. Never
                 hand-edit a generated table: regenerate it, and verify rows against docs/REGISTERS.md
                 (the in-repo source of truth, and the check any contributor can actually run).
 www/            web UI sources (index.html + style.css + app.js -> one gzipped page) + setup.html
@@ -508,6 +518,8 @@ POST /set_mqtt    {broker,user,pass,clear_creds} -> pre-flight the broker synchr
                   + re-add both send empty creds -> both keep -> the kept creds then 400 every
                   plaintext broker ("Credentials require mqtts://"). Only a flash erase escaped that.
 POST /set_syslog  {host,port} -> validate port range -> persist + reboot. Empty host disables syslog.
+                  Unchanged settings short-circuit to {ok:true,reboot:false}, same as /set_mqtt and
+                  /set_ntp — a re-save of identical values would otherwise reboot for nothing.
                   DNS/reachability are NOT checked here (no request-path network block); they resolve
                   in the syslog task and surface via /status.syslog {resolved,reachable,error}.
 POST /set_ntp     {server} -> persist + reboot. No request-path network probe (the SNTP client
@@ -546,14 +558,18 @@ also stops the poll cycle and drops MQTT availability.
 handler is: an escaping `std::bad_alloc` → `std::terminate` → reboot. Wrap the loop *body* in
 `try/catch (const std::exception&)` + `catch (...)`, `diag_printf` once, skip the cycle keeping the
 last good state, and continue after the normal delay — see `mqtt_task` (mqtt_ha.cpp), `poll_task`
-(hp_poll.cpp) and the finer-grained `ws_broadcast_*` guards (http_status.cpp).
+(hp_poll.cpp), `syslog_task` (syslog.cpp — its per-cycle `config()` snapshot copies ~10 strings) and
+the finer-grained `ws_broadcast_*` guards (http_status.cpp).
 
 **Never allocate while holding a mutex.** The guard above makes an OOM survivable only if the throw
 doesn't strand a lock: a mutex taken with a raw `xSemaphoreTake` is *not* released when the stack
 unwinds, so every reader then blocks `portMAX_DELAY` and the device wedges into a watchdog reboot —
 worse than the crash the guard prevents. Either keep the critical section non-allocating (stage the
 work in locals, `swap`/move it in — `poll_once`'s commit) or take the lock through an RAII guard
-(`hp_poll.cpp`'s `Lock`, for readers that must copy strings out under the lock).
+(`hp_poll.cpp`'s `Lock`, for readers that must copy strings out under the lock). The status mutexes
+in syslog.cpp and mqtt_ha.cpp take the first route: `set_status` stores the error as a string-LITERAL
+pointer, never a `std::string`, so the writer cannot allocate at all — load-bearing for mqtt_ha's,
+which runs on esp-mqtt's own unguarded event task where the rule above is unavailable.
 
 ## Typical debugging
 

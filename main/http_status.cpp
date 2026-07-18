@@ -57,7 +57,10 @@ static std::string jstr(const std::string& s) { return json_quote(s); }
 // WiFi is not yet configured. Otherwise serve the full dashboard web UI.
 static esp_err_t h_index(httpd_req_t* req) {
     wifi_mode_t mode = WIFI_MODE_NULL;
-    if (esp_wifi_get_mode(&mode) == ESP_OK && mode == WIFI_MODE_AP) {
+    // The setup portal runs in APSTA now (provisioning.cpp brings up a STA interface so /scan works),
+    // so BOTH AP and APSTA mean "serve the setup page". The normal STA path uses WIFI_MODE_STA only,
+    // so APSTA never occurs during normal operation — matching it here can't hide the dashboard.
+    if (esp_wifi_get_mode(&mode) == ESP_OK && (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA)) {
         return http_send_gzip(req, "text/html", setup_html_gz_start, setup_html_gz_end);
     }
     if (!wifi_configured())
@@ -82,18 +85,10 @@ static std::string build_status_json_string() {
     // GPIOs the UI offers in the RX/TX pin dropdown: the ESP32-S3 chip-safe set, reserving
     // GPIO33-37 only when this build's flash/PSRAM actually run Octal I/O, and dropping the status
     // LED's pin — the one GPIO this firmware itself drives (logic/board_pins.hpp).
-#if defined(CONFIG_ESPTOOLPY_OCT_FLASH) || defined(CONFIG_SPIRAM_MODE_OCTAL)
-    constexpr bool kOctalSpi = true;
-#else
-    constexpr bool kOctalSpi = false;
-#endif
-#if CONFIG_DAIKIN_STATUS_LED_ENABLE
-    constexpr int kLedGpio = CONFIG_DAIKIN_STATUS_LED_GPIO;   // already -1 if the user disabled it
-#else
-    constexpr int kLedGpio = -1;
-#endif
+    // octal-SPI + status-LED facts come from config.cpp's hw_* helpers (the single Kconfig source,
+    // shared with /set_hp validation and config_load) rather than a #if block copied in here.
     int pins[BOARD_PINS_MAX];
-    int npins = board_pins_offerable(pins, BOARD_PINS_MAX, kOctalSpi, kLedGpio);
+    int npins = board_pins_offerable(pins, BOARD_PINS_MAX, hw_octal_spi(), hw_status_led_gpio());
     j += "\"pins_avail\":[";
     for (int i = 0; i < npins; i++) { if (i) j += ","; j += std::to_string(pins[i]); }
     j += "],";
@@ -238,18 +233,28 @@ static esp_err_t h_status(httpd_req_t* req) {
     return http_send_json(req, j.c_str());
 }
 
-static esp_err_t h_values(httpd_req_t* req) {
+// The decoded-values JSON array "[{label,value,unit},…]" — the ONE builder behind GET /values, the
+// WS "values" broadcast and the WS subscription snapshot, which all constructed the identical body
+// (same snapshot call, same null-for-empty rule, same escaping). Callers wrap it in their own
+// envelope ({"values":…} for HTTP, {"type":"values","values":…} for WS). Can throw std::bad_alloc —
+// every caller already guards (handle_all, or the WS try/catch), so this stays unguarded.
+static std::string build_values_array() {
     const size_t cap = def::lookup(config().profile.c_str()).count;
     std::vector<CachedValue> v(cap ? cap : 1);
     size_t n = hp_values_snapshot(v.data(), v.size());
-    std::string j = "{\"values\":[";
+    std::string j = "[";
     for (size_t i = 0; i < n; i++) {
         if (i) j += ",";
         j += "{\"label\":" + jstr(v[i].label) +
              ",\"value\":" + (v[i].value.empty() ? "null" : jstr(v[i].value)) +
              ",\"unit\":" + jstr(v[i].unit) + "}";
     }
-    j += "]}";
+    j += "]";
+    return j;
+}
+
+static esp_err_t h_values(httpd_req_t* req) {
+    std::string j = "{\"values\":" + build_values_array() + "}";
     return http_send_json(req, j.c_str());
 }
 
@@ -433,17 +438,7 @@ void ws_broadcast_values() {
 
     std::string j;
     try {
-        const size_t cap = def::lookup(config().profile.c_str()).count;
-        std::vector<CachedValue> v(cap ? cap : 1);
-        size_t n = hp_values_snapshot(v.data(), v.size());
-        j = "{\"type\":\"values\",\"values\":[";
-        for (size_t i = 0; i < n; i++) {
-            if (i) j += ",";
-            j += "{\"label\":" + jstr(v[i].label) +
-                 ",\"value\":" + (v[i].value.empty() ? "null" : jstr(v[i].value)) +
-                 ",\"unit\":" + jstr(v[i].unit) + "}";
-        }
-        j += "]}";
+        j = "{\"type\":\"values\",\"values\":" + build_values_array() + "}";
     } catch (const std::bad_alloc&) {
         return;   // skip this tick under memory pressure rather than abort the poll task
     }
@@ -523,17 +518,7 @@ static esp_err_t h_ws_events(httpd_req_t* req) {
         httpd_ws_send_frame(req, &f_stat);
 
         // Send values
-        const size_t cap = def::lookup(config().profile.c_str()).count;
-        std::vector<CachedValue> v(cap ? cap : 1);
-        size_t n = hp_values_snapshot(v.data(), v.size());
-        std::string j_val = "{\"type\":\"values\",\"values\":[";
-        for (size_t i = 0; i < n; i++) {
-            if (i) j_val += ",";
-            j_val += "{\"label\":" + jstr(v[i].label) +
-                     ",\"value\":" + (v[i].value.empty() ? "null" : jstr(v[i].value)) +
-                     ",\"unit\":" + jstr(v[i].unit) + "}";
-        }
-        j_val += "]}";
+        std::string j_val = "{\"type\":\"values\",\"values\":" + build_values_array() + "}";
         httpd_ws_frame_t f_val = {};
         f_val.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_val.c_str()));
         f_val.len = j_val.size();

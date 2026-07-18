@@ -80,7 +80,7 @@ button:disabled { opacity: .6; cursor: default; box-shadow: none; }
   // path; there is no esc() helper here (the page is standalone in AP mode).
   fetch("/scan").then((r) => r.json()).then((r) => {
     const list = (r.networks || r || []).slice().sort((a, b) => (b.rssi || -999) - (a.rssi || -999));
-    if (!list.length) { textInput(); return; }   // SoftAP can't scan → let the user type the SSID
+    if (!list.length) { textInput(); return; }   // empty/failed scan (or a hidden SSID) → let the user type it
     const sel = el("ssid");
     sel.textContent = "";
     for (const n of list) {

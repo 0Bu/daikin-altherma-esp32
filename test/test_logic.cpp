@@ -426,6 +426,33 @@ static void test_config_model() {
     c.rx_pin = 44; c.tx_pin = 43;
     CHECK(validate(c, why) && link_pins_valid(c.rx_pin, c.tx_pin));
 
+    // Chip-reserved-pin rule (#103): a range-valid, DISTINCT pair is still an illegal link if either
+    // pin is a pad this chip/build reserves — the hole that let a curl POST to /set_hp route the X10A
+    // UART onto the SPI-flash pins and crash-loop the board. board_pin_offerable is the membership
+    // test; link_pins_safe and validate both defer to it.
+    CHECK(board_pin_offerable(44, /*octal*/true, /*reserved*/-1));   // the X10A default is offerable
+    CHECK(board_pin_offerable(43, true, -1));
+    CHECK(!board_pin_offerable(27, true, -1));                       // GPIO27 = SPI flash — never offerable
+    CHECK(!board_pin_offerable(0,  true, -1));                       // GPIO0  = strapping
+    CHECK(!board_pin_offerable(19, true, -1));                       // GPIO19 = USB-Serial/JTAG
+    CHECK(board_pin_offerable(33,  /*octal*/false, -1));             // GPIO33 free on a Quad-SPI build
+    CHECK(!board_pin_offerable(33, /*octal*/true,  -1));             // ...reserved on an Octal build
+    CHECK(!board_pin_offerable(21, true, /*reserved*/21));           // the status-LED pin is claimed
+
+    CHECK(link_pins_safe(44, 43, true, -1));                         // the pair rule AND the reserved rule
+    CHECK(!link_pins_safe(27, 43, true, -1));                        // rx on flash
+    CHECK(!link_pins_safe(44, 27, true, -1));                        // tx on flash
+    CHECK(!link_pins_safe(44, 44, true, -1));                        // still catches rx == tx
+    CHECK(!link_pins_safe(44, 21, true, /*reserved*/21));            // tx is the LED pin
+
+    // validate() names WHICH pin is reserved (the device passes the real octal/reserved facts).
+    c.rx_pin = 27; c.tx_pin = 43;                                    // rx on SPI flash
+    CHECK(!validate(c, why, 48, /*octal*/true, /*reserved*/-1));
+    c.rx_pin = 44; c.tx_pin = 21;                                    // tx is the status-LED pin
+    CHECK(!validate(c, why, 48, true, /*reserved*/21));
+    CHECK(validate(c, why, 48, true, /*reserved*/-1));               // ...allowed when the LED is off
+    c.rx_pin = 44; c.tx_pin = 43;                                    // restore
+
     CHECK(parse_protocol("S") == Protocol::S);
     CHECK(parse_protocol("I") == Protocol::I);
     CHECK(parse_protocol("") == Protocol::I);

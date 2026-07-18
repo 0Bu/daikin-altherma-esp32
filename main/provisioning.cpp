@@ -33,6 +33,14 @@ static void offer_self_as_dns() {
 void provisioning_start_ap() {
     ESP_ERROR_CHECK(esp_netif_init());
     esp_netif_create_default_wifi_ap();
+    // A STA netif too, and APSTA mode below: the setup page's network dropdown is filled by GET /scan
+    // -> wifi_scan() -> esp_wifi_scan_start(), which needs a STARTED station interface. In AP-only mode
+    // the scan fails, so the dropdown ALWAYS collapsed to a free-text SSID box (setup.html's fallback)
+    // — the picker was effectively dead in the only context it runs. APSTA keeps the SoftAP serving the
+    // portal while the STA interface (idle — never given credentials or told to connect here, it exists
+    // only so the radio can scan) makes the scan work. Scanning briefly hops channels, a tolerable blip
+    // for the associated phone during a one-time setup.
+    esp_netif_create_default_wifi_sta();
     wifi_init_config_t ic = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&ic));
 
@@ -41,7 +49,7 @@ void provisioning_start_ap() {
     ap.ap.ssid_len       = strlen("daikin-altherma-esp32-setup");
     ap.ap.max_connection = 4;
     ap.ap.authmode       = WIFI_AUTH_OPEN;
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
     ESP_ERROR_CHECK(esp_wifi_start());
 

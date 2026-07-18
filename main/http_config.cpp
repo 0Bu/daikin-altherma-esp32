@@ -374,7 +374,11 @@ static esp_err_t set_hp(httpd_req_t* req) {
     cJSON_Delete(j);
 
     std::string reason;
-    if (!validate(c, reason, SOC_GPIO_PIN_COUNT - 1)) return send_err(req, "400 Bad Request", reason.c_str());
+    // Pass the real Kconfig-derived octal-SPI + status-LED facts (config.cpp) so validate() rejects a
+    // chip-reserved GPIO — a flash/strapping/JTAG pad the UI dropdown never offers but a raw curl POST
+    // could send — with the pin named, instead of range-accepting it and persisting a crash-loop pair.
+    if (!validate(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi(), hw_status_led_gpio()))
+        return send_err(req, "400 Bad Request", reason.c_str());
     // Persist the pin cache (config_save writes link+creds; profile/fp stay RAM). On failure RAM is
     // untouched too, so there is no new config to hand the poll engine — skip the reconfigure.
     if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
@@ -402,6 +406,13 @@ static esp_err_t set_syslog(httpd_req_t* req) {
     }
 
     Config c = config();
+    // Unchanged settings short-circuit — no NVS write, no reboot — exactly like /set_mqtt and
+    // /set_ntp. A re-save of the same host/port would otherwise persist identical values and reboot,
+    // dropping the poll cycle, MQTT availability and any open WebSocket for nothing. The UI already
+    // handles {"reboot":false} (app.js "No changes"). /set_wifi is deliberately NOT short-circuited:
+    // a re-save there re-arms the credential-rollback trial.
+    if (host == c.syslog_host && port == c.syslog_port)
+        return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
     c.syslog_host = host;
     c.syslog_port = port;
     if (!config_save(c)) {

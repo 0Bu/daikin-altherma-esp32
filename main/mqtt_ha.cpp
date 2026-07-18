@@ -50,10 +50,25 @@
 namespace daik {
 
 static esp_mqtt_client_handle_t s_client = nullptr;
-static SemaphoreHandle_t        s_mtx    = nullptr;   // guards s_status
+static SemaphoreHandle_t        s_mtx    = nullptr;   // guards s_status + s_error
 static MqttStatus               s_status;
+// Error text stored as a string LITERAL pointer, NOT in s_status.error: set_status runs on esp-mqtt's
+// event task (on_mqtt), which has no exception guard, so it must not allocate. mqtt_status() stringifies
+// it for the caller under the lock (a reader may allocate under RAII). s_status.error stays unused.
+static const char*              s_error   = "";
 static volatile bool            s_connected = false;
 static volatile bool            s_announce  = false;  // set on connect -> task re-announces
+
+// RAII guard around s_mtx (same idiom as config.cpp / hp_poll.cpp). Replaces the raw take/give pairs
+// so a throw on a reader (the broker copy in mqtt_status) can't strand the mutex and wedge every
+// later reader/writer at portMAX_DELAY.
+namespace {
+struct Lock {
+    explicit Lock(SemaphoreHandle_t m) : m_(m) { if (m_) xSemaphoreTake(m_, portMAX_DELAY); }
+    ~Lock() { if (m_) xSemaphoreGive(m_); }
+    SemaphoreHandle_t m_;
+};
+}  // namespace
 
 // Persisted so the pointers handed to esp-mqtt (and reused by the task) stay valid.
 static std::string s_uri, s_user, s_pass, s_node, s_base, s_prefix, s_avail, s_state, s_heartbeat, s_crash;
@@ -72,12 +87,14 @@ static uint32_t s_mqtt_reconnects = 0;
 // every poll cycle.
 static constexpr int HEARTBEAT_INTERVAL_S = 10;
 
+// Non-allocating under the lock: `err` is always a string literal, stored as a bare pointer. Runs on
+// esp-mqtt's event task with no exception guard, so an allocating std::string assignment that threw
+// would abort() — and, under a raw take/give, strand the mutex too. Both are gone now.
 static void set_status(bool connected, const char* err) {
-    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    Lock lk(s_mtx);
     s_status.connected = connected;
-    if (err) s_status.error = err;
-    else if (connected) s_status.error.clear();
-    xSemaphoreGive(s_mtx);
+    if (err) s_error = err;
+    else if (connected) s_error = "";
 }
 
 // node id daikin_<mac3> (STA MAC low 3 bytes) — stable across config changes.
@@ -350,9 +367,7 @@ static bool build_client() {
     if (!s_client) { set_status(false, "mqtt init failed"); return false; }
     esp_mqtt_client_register_event(s_client, static_cast<esp_mqtt_event_id_t>(MQTT_EVENT_ANY),
                                    on_mqtt, nullptr);
-    xSemaphoreTake(s_mtx, portMAX_DELAY);
-    s_status.tls = is_tls;
-    xSemaphoreGive(s_mtx);
+    { Lock lk(s_mtx); s_status.tls = is_tls; }
     return true;
 }
 
@@ -378,9 +393,9 @@ void mqtt_ha_start() {
 
 MqttStatus mqtt_status() {
     if (!s_mtx) return s_status;
-    xSemaphoreTake(s_mtx, portMAX_DELAY);
-    MqttStatus st = s_status;
-    xSemaphoreGive(s_mtx);
+    Lock lk(s_mtx);
+    MqttStatus st = s_status;   // reader may allocate under an RAII lock (the broker std::string copy)
+    st.error = s_error;         // error is kept as a literal pointer; stringified here, under the lock
     return st;
 }
 

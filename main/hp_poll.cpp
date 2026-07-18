@@ -56,7 +56,21 @@ struct Lock {
 static void poll_once() {
     const Config& c    = config();
     const auto&   prof = def::lookup(c.profile.c_str());
-    hp_uart_init(c.rx_pin, c.tx_pin);
+    // If the UART can't be brought up on these pins, do NOT sweep: every hp_query would then read an
+    // uninstalled driver and emit a misleading "HP timeout — check X10A cable / GND" per register.
+    // Name the real cause once and keep the last good cache. (validate()/config_load now reject
+    // reserved pins, so this is a belt-and-braces guard rather than the common path.)
+    if (!hp_uart_init(c.rx_pin, c.tx_pin)) {
+        char eb[48];
+        snprintf(eb, sizeof(eb), "UART init failed (rx=%d tx=%d)", c.rx_pin, c.tx_pin);
+        std::string err = eb;                              // built before the lock (allocates)
+        {
+            Lock lk(s_mtx);
+            s_stats.connected = false;
+            s_stats.last_error.swap(err);                  // noexcept — see the commit below
+        }
+        return;
+    }
 
     std::vector<CachedValue> fresh;
     fresh.reserve(prof.count);   // exact upper bound (<= 1 entry per ValueDef row): one sized allocation

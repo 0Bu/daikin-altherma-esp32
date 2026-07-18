@@ -73,11 +73,14 @@ void config_load() {
     // landed. validate() enforces the pair, but only on the request path (http_config.cpp); NVS stops
     // being trusted the moment a partial write is possible.
     // A guard, not a repair: the sweep already drops an rx == tx candidate and falls back to these
-    // same defaults (hp_detect.cpp), so the bus still comes up. What this adds is the upper-bound
-    // check the sweep lacks — it guards rx == tx and negatives, not a pin off this chip — and a
-    // /status that never reports an unconfigurable link as fact. Not re-persisted: poll_detect writes
-    // the winning pins back once the bus answers; until then the line below repeats each boot.
-    if (!link_pins_valid(c.rx_pin, c.tx_pin, SOC_GPIO_PIN_COUNT - 1)) {
+    // same defaults (hp_detect.cpp), so the bus still comes up. link_pins_safe adds the checks the
+    // sweep lacks — the upper GPIO bound AND the chip-reserved-pin rule (board_pins.hpp), the same
+    // rule the request path enforces (validate) — so a pair that reaches flash via a curl POST to
+    // /set_hp (flash/strapping/JTAG pad) is not silently re-tried every boot into a crash loop, and
+    // /status never reports an unconfigurable link as fact. Not re-persisted: poll_detect writes the
+    // winning pins back once the bus answers; until then the line below repeats each boot.
+    if (!link_pins_safe(c.rx_pin, c.tx_pin, hw_octal_spi(), hw_status_led_gpio(),
+                        SOC_GPIO_PIN_COUNT - 1)) {
         diag_printf("config: persisted X10A pins rejected (rx=%d tx=%d) — using build defaults %d/%d\n",
                     c.rx_pin, c.tx_pin, CONFIG_DAIKIN_RX_PIN, CONFIG_DAIKIN_TX_PIN);
         c.rx_pin = CONFIG_DAIKIN_RX_PIN;
@@ -201,6 +204,29 @@ void config_set_model(std::string profile, uint32_t fp_pages, int fp_kw_tenths, 
     apply_model(g_cfg, std::move(profile), fp_pages, fp_kw_tenths, std::move(fp_eeprom));
 }
 
+// Whole-struct RAM publish (no NVS). Sole caller is POST /detect (http_config.cpp), which resets
+// profile->"auto" + clears the fingerprint: acceptable as a whole-struct write because it runs on the
+// httpd task, which OWNS the credential fields (serialized against the other /set_* handlers), so it
+// cannot revert them. The poll task must NOT use this — it uses the field-owned config_set_model.
 void config_set_runtime(const Config& c) { publish(c); }
+
+// Kconfig-derived hardware facts (see config.hpp). Kept here — the one file that already owns the
+// CONFIG_* → link mapping — so board_pins' octal_spi/reserved inputs have a single source of truth
+// rather than a #if block duplicated across http_status.cpp, http_config.cpp and config_load().
+bool hw_octal_spi() {
+#if defined(CONFIG_ESPTOOLPY_OCT_FLASH) || defined(CONFIG_SPIRAM_MODE_OCTAL)
+    return true;
+#else
+    return false;
+#endif
+}
+
+int hw_status_led_gpio() {
+#if CONFIG_DAIKIN_STATUS_LED_ENABLE
+    return CONFIG_DAIKIN_STATUS_LED_GPIO;   // already -1 if the user disabled it in menuconfig
+#else
+    return -1;
+#endif
+}
 
 } // namespace daik
