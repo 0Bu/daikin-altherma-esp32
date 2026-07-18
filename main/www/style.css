@@ -53,6 +53,9 @@ main { flex: 1; }
   font-size: 19px; font-weight: 650; letter-spacing: -.2px; color: var(--fg); line-height: 1.2;
 }
 .hdr-id { flex: 1; min-width: 0; }
+/* IP address (or the mDNS hostname while offline) under the product name — board identity, not a
+   WiFi-row fact, so it lives in the header rather than the Connections tile below. */
+.hdr-ip { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
 
 /* logo mark: rounded brand square holding the "waves" glyph */
 .logo {
@@ -92,6 +95,34 @@ main { flex: 1; }
 .hero-mode { font-size: 33px; font-weight: 650; letter-spacing: -.6px; margin-top: 9px; }
 .hero-sub { font-size: 14.5px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
 
+/* ── Connections tile (dashboard, WiFi · MQTT · Syslog · NTP combined) ─────────────────────── */
+/* Full width like the hero and every #valueGroups card — the whole dashboard is one column
+   (§9 of docs/DESIGN.md). */
+.conn-tile {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card);
+  box-shadow: var(--shadow-card); padding: 18px; margin-top: 12px;
+}
+.conn-tile .section-label { display: block; margin-bottom: 4px; }
+.conn-row {
+  display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 11px 0; border-top: 1px solid var(--line);
+  font: inherit; background: none; border-left: 0; border-right: 0; border-bottom: 0;
+  cursor: pointer; text-align: left; color: inherit;
+}
+.conn-row:hover .conn-label, .conn-row:hover .vcard-edit-icon { color: var(--brand-strong); }
+.conn-row .vcard-edit-icon { flex: none; margin-bottom: 0; }
+.conn-label {
+  font-size: 12px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase;
+  color: var(--muted); flex: none;
+}
+.conn-val {
+  flex: 1; min-width: 0; margin-left: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--fg); text-align: right;
+}
+.conn-val.ok { color: var(--ok); } .conn-val.warn { color: var(--warn); } .conn-val.err { color: var(--err); }
+.conn-dbm { font-weight: 500; font-size: 14.5px; color: var(--muted); }
+.conn-name { font-weight: 600; }
+
 /* ── Crash banner (dashboard alert when /status.last_crash is set) ─────────── */
 .crash-banner {
   background: var(--card); border: 1px solid var(--err); border-left: 4px solid var(--err);
@@ -126,15 +157,6 @@ main { flex: 1; }
 #valueGroups { margin-top: 14px; }
 .vgroup + .vgroup { margin-top: 12px; }
 .vgroup .section-label { display: block; margin-bottom: 2px; }
-/* editable card header: label left, pencil right (e.g. the MQTT card) */
-.vgroup-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.vgroup-head .section-label { margin-bottom: 2px; }
-.vgroup-btn {
-  width: 100%; font: inherit; background: none; border: 0; cursor: pointer; text-align: left;
-  padding: 0;
-}
-.vgroup-btn .vcard-edit-icon { color: var(--muted); margin-bottom: 2px; }
-.vgroup-btn:hover .section-label, .vgroup-btn:hover .vcard-edit-icon { color: var(--brand-strong); }
 .vrow {
   display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
   padding: 9px 0; border-top: 1px solid var(--line);
@@ -145,8 +167,6 @@ main { flex: 1; }
 .vrow-val { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--fg); white-space: nowrap; }
 .vrow-val.ok { color: var(--ok); } .vrow-val.warn { color: var(--warn); } .vrow-val.err { color: var(--err); }
 .vrow-unit { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 3px; }
-/* Gray padlock trailing the broker URL on a TLS (mqtts://) link */
-.vrow-lock { color: var(--muted); margin-left: 6px; vertical-align: -1px; }
 /* RX/TX pin dropdown inside a value row (ESP32 card, shown until auto-detection locks the pins):
    compact native select sitting at the right of the row */
 .vrow .pin-sel { width: auto; min-width: 76px; padding: 6px 8px; border-radius: 9px; appearance: auto; font-size: 14px; }
@@ -246,10 +266,28 @@ main { flex: 1; }
 .toast.ok .disc { background: var(--ok); } .toast.err .disc { background: var(--err); }
 @keyframes tin { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
-/* ≥560px: cards flow into two columns packed top-down (masonry via multicol) per DESIGN.md §9.
-   A CSS grid would row-align, so a tall card (e.g. ESP32) left big gaps beside a short one; the
-   column flow keeps both columns tight to the top regardless of uneven card heights. */
-@media (min-width: 560px) {
-  #valueGroups { column-count: 2; column-gap: 12px; }
-  #valueGroups .vgroup { margin: 0 0 12px; break-inside: avoid; }
+/* Single column at every width (DESIGN.md §9): every card — the hero, the Connections tile and each
+   value group — is the same full container width, stacked top-down. (An earlier ≥560px two-column
+   multicol packed the value cards into two columns; it left an empty second column — with a stray
+   card shadow at the column gap — whenever only the ESP32 card showed, e.g. while the heat-pump link
+   is down.) */
+
+/* ≥600px (tablet / desktop): the single mobile-sized column reads small and sparse on a big screen
+   (e.g. a wall-mounted tablet) — lots of empty margin, little content. Widen the column and scale the
+   whole type ramp up ~1.15× together, so the same layout stays proportional and comfortably legible
+   at arm's length. Kept as ONE place to bump every size, so the ramp scales coherently (DESIGN.md §9). */
+@media (min-width: 600px) {
+  .app { max-width: 820px; }
+  body { font-size: 17px; }
+  .hdr-name { font-size: 22px; }
+  .hdr-ip { font-size: 14.5px; }
+  .hero-kicker span:last-child { font-size: 13.5px; }
+  .hero-mode { font-size: 38px; }
+  .hero-sub { font-size: 16.5px; }
+  .section-label, .conn-label { font-size: 13.5px; }
+  .conn-val, .vrow-val, .vname { font-size: 17px; }
+  .conn-dbm, .vrow-label { font-size: 16.5px; }
+  .vrow-unit { font-size: 13.5px; }
+  .conn-row { padding: 14px 0; }
+  .vrow, .vname { padding-top: 11px; padding-bottom: 11px; }
 }

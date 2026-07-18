@@ -269,7 +269,7 @@ these chips): the JSON routes return `503`; the `/events` WebSocket handler is r
 Altherma** device with all entities appears in HA automatically — no YAML. **Read-only:** no
 command topics are subscribed. The bridge runs in its own task, independent of the poll engine.
 
-- **Enable:** set the broker in the web UI (pencil on the dashboard MQTT card). Stored in NVS `mqtt_uri`.
+- **Enable:** set the broker in the web UI (pencil on the MQTT row of the dashboard Connections tile). Stored in NVS `mqtt_uri`.
 - **TLS:** a schemeless entry defaults to plaintext `mqtt://`. Credentials require an explicit
   `mqtts://` broker URL (CA-verified via the mbedTLS bundle) so the password isn't sniffable — the
   bridge **refuses** a plaintext broker with credentials rather than silently downgrading or guessing

@@ -12,8 +12,8 @@ setup page (see `main/CMakeLists.txt`).
    there (WiFi, MQTT, Syslog and NTP via modals, RX/TX pins inline) happens in place.
 2. **Provision, then run.** WiFi credentials are entered first on the captive portal (`setup.html`);
    the device reboots into your network and the app opens on the dashboard. They stay re-editable
-   later from the dashboard WiFi card (§5.1, with automatic rollback on a bad change). The heat pump
-   is fully automatic (auto-detected), so there is nothing to configure for it.
+   later from the dashboard Connections tile's WiFi row (§5.1, with automatic rollback on a bad
+   change). The heat pump is fully automatic (auto-detected), so there is nothing to configure for it.
 3. **Read-only truth.** The dashboard reflects the device; it never blocks on writes. The few writes
    (WiFi credentials, MQTT broker, Syslog server, NTP server, RX/TX pins) are explicit and report
    their outcome.
@@ -55,10 +55,12 @@ Theme follows `prefers-color-scheme`; both light and dark are first-class (token
 
 ## 3. Layout tokens
 
-- Font: system UI stack, 15px/1.5 base; numbers `font-variant-numeric: tabular-nums`.
+- Font: system UI stack, 15px/1.5 base (mobile); the whole ramp scales ~1.15× at ≥600px (§9).
+  Numbers `font-variant-numeric: tabular-nums`.
 - Spacing scale: 4 · 8 · 12 · 16 · 24 · 32. Card padding 16–18. Grid gap 16.
 - Radius: 8 (controls), 12 (cards), 20 (pills/toast). Elevation: 1px border + soft shadow on hero.
-- Container: `max-width 720px`, centred. Mobile-first (setup is done from a phone).
+- Container: `max-width 720px` (mobile), widening to `820px` at ≥600px (§9), centred. Mobile-first
+  (setup is done from a phone).
 - Header: sticky, 2px `--brand` bottom rule, title in `--brand`.
 
 ## 4. Information architecture (the state machine)
@@ -69,8 +71,8 @@ loads a one-time `GET /status`/`GET /values` snapshot and the user reloads the p
 the device is on the network the app opens on the
 **dashboard** and never leaves it — there are **no sub-screens and no Settings page**. In-place config
 is the WiFi credentials, the MQTT broker, the Syslog server and the NTP server (each a **modal** off
-its dashboard card) plus the RX/TX pins (inline on the ESP32 card). The heat pump is otherwise
-**fully automatic** (auto-detected).
+its row in the dashboard **Connections tile**, §5.3) plus the RX/TX pins (inline on the ESP32 card).
+The heat pump is otherwise **fully automatic** (auto-detected).
 
 ```
                     ┌─────────────── served from SoftAP (192.168.4.1) ───────────────┐
@@ -83,11 +85,11 @@ its dashboard card) plus the RX/TX pins (inline on the ESP32 card). The heat pum
 ```
 
 - There is **no in-app first-run wizard** and **no Settings page**: WiFi is provisioned first from the
-  captive `setup.html` (§5.0) and thereafter re-editable from the dashboard WiFi card's pencil (§5.1,
-  with automatic rollback to the last working network if the new credentials fail), the MQTT broker
-  is edited from the dashboard card's pencil (§5.1), the heat pump needs no setup (auto-detected; RX/TX
-  pins on the dashboard ESP32 card, §5.3), and firmware updates are checked by tapping the version on
-  that card (§5.4).
+  captive `setup.html` (§5.0) and thereafter re-editable from the WiFi row's pencil in the dashboard
+  **Connections tile** (§5.1, with automatic rollback to the last working network if the new
+  credentials fail), the MQTT broker is edited from that same tile's MQTT row (§5.1), the heat pump
+  needs no setup (auto-detected; RX/TX pins on the dashboard ESP32 card, §5.3), and firmware updates
+  are checked by tapping the version on that card (§5.4).
 - MQTT is optional — an empty broker disables it.
 
 `GET /status` exposes the fields the dashboard keys off:
@@ -127,11 +129,12 @@ are built as DOM nodes (`createElement` + `.value`/`.textContent`, which never p
 than concatenated into `innerHTML`. Every network-derived string on this page must stay on a
 DOM/`textContent` path — it is served standalone in AP mode and has no `esc()` helper.
 
-### 5.1 WiFi / MQTT / Syslog / NTP edit  (modal, from the dashboard status card)
-The dashboard's **WiFi**, **MQTT**, **Syslog** and **NTP** status cards (§5.3) each carry a **pencil**
-in the header; tapping it opens a centred **modal** over a dimmed dashboard. These are the four status
-cards edited this way, and they share the identical overlay pattern (Cancel / backdrop / `Esc` dismiss
-without writing; Save reboots to apply, then closes back to the dashboard). The forms:
+### 5.1 WiFi / MQTT / Syslog / NTP edit  (modal, from the dashboard Connections tile)
+The dashboard's **Connections tile** (§5.3) combines WiFi, MQTT, Syslog and NTP into one row each;
+every row carries a trailing **pencil** and the whole row is tappable, opening a centred **modal**
+over a dimmed dashboard. These are the four rows edited this way, and they share the identical
+overlay pattern (Cancel / backdrop / `Esc` dismiss without writing; Save reboots to apply, then closes
+back to the dashboard). The forms:
 - **WiFi**: SSID (required, 1–32 chars) + password (empty for an open network, else 8–63 chars),
   validated both in the UI and by `POST /set_wifi`. Only the SSID prefills (the password is never
   exposed by `/status`). **Save** → `POST /set_wifi` (persist + reboot). If WiFi was already
@@ -163,7 +166,7 @@ clearing the fields by hand strips the scheme back. Validation is also inline cl
 Actions row at the bottom: Cancel (secondary) + Save (brand).
 - **Syslog**: host + port (`1–65535`, default 514). **Save** → `POST /set_syslog` (persist + reboot);
   an empty host disables forwarding. Only the port range is validated on the device — DNS resolution
-  and the advisory reachability probe run in the syslog task after reboot and surface on the card via
+  and the advisory reachability probe run in the syslog task after reboot and surface on that row via
   `/status.syslog`. The host prefills from `/status`.
 - **NTP**: a single server field (hostname or IP), no port. **Save** → `POST /set_ntp` (persist +
   reboot); no validation beyond what the field accepts — an empty server is **not** a disabled state
@@ -193,8 +196,11 @@ the **product name**). There is **no settings gear** — the app has no other sc
 - **Product name** (headline line): the fixed title **`daikin-altherma-esp32`** — a stable app
   identity, not the detected model and no firmware version. Spelled in full lower-case exactly like
   the hostname / SoftAP / MQTT base topic (the project-wide naming convention), never "Daikin
-  Altherma ESP32". The detected heat-pump model is shown instead in the **Model** status card
-  (§5.3 body).
+  Altherma ESP32". Under it, a small identity line shows the current **IP address** (`wifi.ip`,
+  falling back to the browser's own `location.hostname` — e.g. the mDNS name — while it is empty) —
+  board identity, not a WiFi *link* fact, so it lives in the header rather than the Connections
+  tile's WiFi row (§5.3 item 2). The detected heat-pump model is shown instead in the **Model**
+  status card (§5.3 body).
 
 Body, ordered:
 
@@ -206,7 +212,8 @@ Body, ordered:
 0. **WiFi-rollback banner** (only when `wifi.rolled_back` is true). A `--warn`-accented card **above
    the hero**: title "WiFi change failed — rolled back", explaining that the new credentials couldn't
    connect, so the device restored the previous network (named from `wifi.ssid`, which after the
-   rollback *is* the network it fell back to) and restarted, and to open the WiFi card to try again.
+   rollback *is* the network it fell back to) and restarted, and to open the Connections tile's WiFi
+   row to try again.
    This cannot be a toast on the save flow: the device takes 60–180 s to reach the rollback verdict
    (§5.1) — far past the save's ~21 s reconnect poll — so the outcome almost always lands after the
    user has reloaded. **Not dismissible**: the marker is sticky until the next `/set_wifi` retires it,
@@ -227,7 +234,38 @@ Body, ordered:
 1. **Status hero** (`--brand-tint` band): operation mode (Heating / Cooling / DHW / Standby / Off) as the
    headline, with fault state. Colour: `--ok` running, `--warn`/`--err` on fault; grey when no data.
    Fault text and the last-poll age surface in the hero sub-line.
-2. **Status cards** — six cards styled exactly like the value groups (§6), first in the same grid:
+2. **Connections tile** — one full-width card directly under the hero. Combines **WiFi**, **MQTT**,
+   **Syslog** and **NTP** into one row each: a label on the left,
+   a single colour-coded value on the right (`--ok` connected/synced/enabled, `--warn`
+   connecting/syncing/unreachable-but-forwarding, `--err` down/disabled-by-error), and a trailing
+   **pencil** — the whole row is tappable and opens that link's edit modal (§5.1). The value itself
+   *is* the address/name (not a separate "Connected" word next to it), matching MQTT/Syslog/NTP's
+   `host:port`/server display; because that means state is conveyed by colour alone on the row's
+   face, each row's accessible name (`aria-label`) spells the status out in words for screen readers
+   and colourblind users, satisfying §9's "status never conveyed by colour alone" without changing
+   the visual design. MAC and BSSID are **not shown anywhere** (bus-level detail nobody edits from
+   here); the IP address lives in the header instead (§5.3 body, above), not on this tile.
+   - **WiFi** — label is the PHY standard name (e.g. "WI-FI 4"); value is signal bars + RSSI dBm +
+     the SSID, coloured `--ok` while connected or plain **Offline** in `--err` otherwise (there is no
+     "connecting" state in `/status.wifi`, just `connected: true/false`) — from
+     `wifi{ssid,rssi,connected,std}`.
+   - **MQTT** — **Disabled** (neutral, no colour) when no broker is set; else the **broker** string
+     itself coloured `--ok` (Connected) / `--warn` (Connecting…) / `--err` (Error) — from
+     `mqtt{configured,connected,broker,error}`. There is **no** TLS padlock marker: an `mqtts://`
+     broker already shows its scheme in the URL, so the icon only restated the string (`mqtt.tls` is
+     therefore unused by the UI). There is also **no** "HA discovery" row: discovery is streamed
+     unconditionally on every (re)connect, so a row saying so would carry no information.
+   - **Syslog** — **Disabled** (neutral) when no host is set; else `host:port` coloured `--ok` once
+     DNS resolves and the advisory reachability probe answers, `--warn` while resolving or when the
+     probe is silent (still forwarding — delivery is gated on DNS only), `--err` on a DNS error —
+     from `syslog{configured,resolved,reachable,host,port,error}`.
+   - **NTP** — the configured **server**, coloured `--ok` once the first SNTP reply of this boot has
+     landed, else `--warn` (there is no "Disabled" state — SNTP always has a configured server) —
+     from `ntp{server,synced}`. Unlike the earlier per-card NTP layout, the synced wall clock
+     (`ntp.time`) is **not** shown on this row (no room in a one-line tile); it remains available via
+     the MQTT heartbeat's `device_time` sensor and `/status.ntp.time`.
+3. **Status cards** — two cards styled exactly like the value groups (§6), stacked full-width below
+   the Connections tile:
    - **ESP32** — the board itself: chip (`platform`), **firmware version** (a tappable row that checks
      for an OTA update, §5.4), uptime (`uptime_s`), **Last reset** (`sys.reset_reason` — warn-coloured
      on a fault reason: panic / any watchdog / brown-out, neutral on a clean boot) and **Free heap**
@@ -235,39 +273,17 @@ Body, ordered:
      protocol, and the **RX/TX pins** — read-only when detected, else a usable-GPIO dropdown (§5.2).
      From `platform`, `version`, `uptime_s`, `sys{reset_reason,free_heap}`, `pins_avail`,
      `hp{proto,rx,tx,connected,last_ok_s}`.
-   - **WiFi** — a header row combining the PHY standard name (e.g. "WI-FI 4"), signal bars + RSSI
-     (`--ok`/`--warn` by strength) and the SSID (green), then IP address, MAC and BSSID; from
-     `wifi{ssid,ip,rssi,connected,bssid,mac,std}`. A **pencil** in the card header opens the WiFi edit
-     modal (§5.1); offline the card collapses to "Offline".
-   - **MQTT** — **Disabled** when no broker is set, else two rows: **Status** (Connected / Error /
-     Connecting…) and **Broker**, the latter trailed by a small grey **padlock** when the link is TLS
-     (`mqtts://`) — encryption is an inline marker, not a row of its own. There is **no** "HA
-     discovery" row: discovery is streamed unconditionally on every (re)connect, so a row saying so
-     would carry no information. From `mqtt{configured,connected,tls,broker,error}`. A **pencil** in
-     the card header opens the MQTT edit modal (§5.1) — one of the four status cards edited via a
-     modal (the others are WiFi, Syslog and NTP).
-   - **Syslog** — off-device log forwarding status: **Disabled** when no host is set, else the
-     server (`host:port`) and a state badge — **Enabled** once DNS resolves (delivery is best-effort
-     UDP, gated on resolution only), warn-flagged **"host not answering ping"** when the advisory
-     reachability probe is silent (still forwarding), or a **DNS error** — from
-     `syslog{configured,resolved,reachable,host,port,error}`. A **pencil** opens the Syslog edit modal
-     (§5.1), which posts `host:port` to `/set_syslog`.
-   - **NTP** — the SNTP wall clock: a status badge (**Synced** once the first reply of this boot has
-     landed, else **Syncing…** — there is no "Disabled", SNTP always has a configured server), the
-     configured **Server**, and — once synced — **Device time** rendered in the *browser's* local
-     timezone (`new Date(status.ntp.time).toLocaleString()`) so a glance answers "does the device
-     agree with my clock" without converting UTC by hand. From `ntp{server,synced,time}`. A **pencil**
-     opens the NTP edit modal (§5.1), which posts `{server}` to `/set_ntp`.
    - **Model** — the model name (full-width heading) + detected capacity, from `detect{capacity_kw,
      model}`. Both are bus-derived, so they show **only while the link is live** (`hp.connected`):
      offline the name degrades to the brand "Daikin Altherma" and the capacity is hidden — never a
      cached fingerprint read as live. There is **no** "Detection: auto/manual" row (fully automatic).
-3. **Value groups** (§6) as cards, each a label→value·unit table, tabular numbers; every value of the
+4. **Value groups** (§6) as cards, each a label→value·unit table, tabular numbers; every value of the
    detected profile is shown. A value that timed out this cycle shows "—" (not 0).
 
-There is **no** health/badge strip: the board + connectivity/identity live in the ESP32/WiFi/MQTT/
-Model status cards, operation/fault in the hero, and everything flows as one continuous card grid.
-The only setup control on this screen is the ESP32 card's RX/TX pins (§5.2); otherwise it is
+There is **no** health/badge strip: connectivity/identity lives in the Connections tile, the board in
+the ESP32/Model status cards, operation/fault in the hero, and every card — hero, Connections tile,
+status cards and value groups — is the same full container width, stacked in one column (§9). The
+only setup control on this screen is the ESP32 card's RX/TX pins (§5.2); otherwise it is
 operation-only.
 
 ### 5.4 Firmware / OTA  (tap the version on the ESP32 card)
@@ -294,8 +310,9 @@ the value's register/label (the generator can also stamp a `group` tag per row).
    refrigerant liquid temp, compressor speed, fan step.
 5. **Electrical** — INV primary current, INV compressor current, CT L1/L2/L3, backup-heater
    capacity + stages.
-6. **Device** — WiFi/MQTT/HP link, poll counters, uptime, firmware (WiFi/MQTT in their status cards;
-   HP link/protocol, uptime and firmware on the ESP32 card §5.3; model name also in the header).
+6. **Device** — WiFi/MQTT/HP link, poll counters, uptime, firmware (WiFi/MQTT in the Connections tile,
+   §5.3 item 2; HP link/protocol, uptime and firmware on the ESP32 card §5.3; model name also in the
+   header).
 
 Within a group: setpoints next to their measured value; temperatures before pressures before
 currents. Units and `device_class` come from the value `dataType` (1=°C, 2=bar, 3=A). Groups with no
@@ -311,6 +328,9 @@ enabled/available values are hidden.
 - **Toast** — bottom-centre, transient, for Save outcomes ("Saved", "Rebooting…", "Failed").
 - **Hero** — `--brand-tint` band bordered like a card, `--fg` text under a `--brand-strong` kicker,
   one headline + one sub-line.
+- **Connections tile** — `--card` bordered like the value-group cards, full width like every other
+  card (§9) — one row per link (WiFi/MQTT/Syslog/NTP), each a label + a single colour-coded value +
+  a trailing pencil (§5.3 item 2).
 - **Crash banner** — `--err`-accented card above the hero (§5.3 item 0), shown only when
   `last_crash` is set: title + meta + hex backtrace, with Download / Copy-diagnostics / Dismiss
   actions. Small `.sm` buttons + a quiet `.ghost` Dismiss.
@@ -332,7 +352,7 @@ transition). Specific:
   §5.3 item 0, since it lands long after this poll gives up.)
 - **Live writes** (heat pump): "Applied", stay on view; the `/events` WebSocket pushes the new
   values on the next poll cycle (a pin-pick also refreshes `/status` a few times to catch the connect).
-- **Connection loss**: hero greys to "No data"; the WiFi card shows "Offline" if WiFi dropped, and
+- **Connection loss**: hero greys to "No data"; the Connections tile's WiFi row shows "Offline" if WiFi dropped, and
   the **Heat-pump card collapses to a bare "Offline"** if the X10A link is down — model, protocol and
   capacity vanish rather than showing stale cached values. The `/events` WebSocket reconnects every
   5 s (hero shows "Unreachable — retrying…"), no hard error page.
@@ -360,19 +380,30 @@ transition). Specific:
 
 ## 9. Responsive & accessibility
 
-- Mobile-first single column; ≥560px the cards flow into two columns packed top-down (masonry via
-  CSS multicol, not a row-aligned grid) so uneven card heights don't leave big gaps beside short cards.
+- **Single column at every width.** Every card — hero, Connections tile, status cards and value
+  groups — is the same full container width, centred, stacked top-down. Unlike the earlier ≥560px
+  two-column multicol, this never leaves an empty second column (with a stray card shadow at the column
+  gap) when only one card is present — e.g. just the ESP32 card while the heat-pump link is down.
+- **Type scales up on larger viewports.** Mobile is the base ramp (15px body, `max-width: 720px`);
+  at **≥600px** (tablet / desktop) the container widens to `820px` and the whole type ramp scales up
+  ~1.15× **together** — otherwise the mobile-sized column reads small and sparse on a big screen (a
+  wall-mounted tablet), lots of empty margin around little content. The bump lives in **one** media
+  block so the ramp stays coherent; it never changes the single-column layout, only its size.
 - Wide content (long value tables) never causes horizontal page scroll; the table scrolls in its card.
 - Keyboard: logical tab order, visible focus ring, Enter submits the view's primary action.
 - Contrast AA for text; status never conveyed by colour alone (pills carry text: "Connected",
-  "CRC 3", "off").
+  "CRC 3", "off"). The Connections tile (§5.3 item 2) is the one deliberate exception to *visible*
+  text — its rows show only a colour-tinted address/name — so the status word that would otherwise
+  be a pill instead goes into the row's `aria-label`, keeping the rule for screen readers and
+  satisfying it programmatically rather than visually.
 - Respect `prefers-reduced-motion` (no non-essential transitions).
 
 ## 10. Firmware support required
 
 The design needs these additions to the firmware (all small, tracked as follow-ups):
 - `GET /status`: `wifi.rssi`/`wifi.ip`/`wifi.connected` (live, from `wifi_info()`) — **done**; the
-  dashboard WiFi card (§5.3) consumes them. See `main/http_status.cpp`.
+  dashboard Connections tile's WiFi row consumes `rssi`/`connected` (§5.3 item 2) and the header
+  identity line consumes `ip` (§5.3 body). See `main/http_status.cpp`.
 - `POST /set_hp`: **every field is optional** — an omitted key keeps its current value, so the
   dashboard ESP32 card posts just `{profile:"auto",rx,tx}` on a pin change. `poll_s` is **not**
   accepted (fixed at 1 s); `proto` is auto-detected and not accepted; there is no value mask.

@@ -18,6 +18,7 @@
     </span>
     <div class="hdr-id">
       <div class="hdr-name" id="hdrName">daikin-altherma-esp32</div>
+      <div class="hdr-ip mono num" id="hdrIp"></div>
     </div>
   </header>
 
@@ -43,13 +44,16 @@
           <div class="hero-mode" id="heroMode">—</div>
           <div class="hero-sub" id="heroSub"></div>
         </div>
+        <!-- Connections tile: WiFi/MQTT/Syslog/NTP combined, full width like the hero and every card
+             in #valueGroups below (all one column). Populated by connectionsHtml() in app.js. -->
+        <div class="conn-tile" id="connTile"></div>
         <div id="valueGroups"></div>
       </div>
     </section>
 
   </main>
 
-  <!-- ═══ WiFi edit modal (opened from the dashboard WiFi card pencil) ═══ -->
+  <!-- ═══ WiFi edit modal (opened from the Connections tile's WiFi row pencil) ═══ -->
   <div class="modal" id="wifiModal" hidden>
     <div class="modal-backdrop" id="wifiBackdrop"></div>
     <form class="modal-card" id="wifiForm" role="dialog" aria-modal="true" aria-labelledby="wifiModalTitle">
@@ -72,7 +76,7 @@
     </form>
   </div>
 
-  <!-- ═══ MQTT edit modal (opened from the dashboard MQTT card pencil) ═══ -->
+  <!-- ═══ MQTT edit modal (opened from the Connections tile's MQTT row pencil) ═══ -->
   <div class="modal" id="mqttModal" hidden>
     <div class="modal-backdrop" id="mqttBackdrop"></div>
     <form class="modal-card" id="mqttForm" role="dialog" aria-modal="true" aria-labelledby="mqttModalTitle">
@@ -104,7 +108,7 @@
     </form>
   </div>
 
-  <!-- ═══ Syslog edit modal (opened from the dashboard Syslog card pencil) ═══ -->
+  <!-- ═══ Syslog edit modal (opened from the Connections tile's Syslog row pencil) ═══ -->
   <div class="modal" id="syslogModal" hidden>
     <div class="modal-backdrop" id="syslogBackdrop"></div>
     <form class="modal-card" id="syslogForm" role="dialog" aria-modal="true" aria-labelledby="syslogModalTitle">
@@ -122,7 +126,7 @@
     </form>
   </div>
 
-  <!-- ═══ NTP edit modal (opened from the dashboard NTP card pencil) ═══ -->
+  <!-- ═══ NTP edit modal (opened from the Connections tile's NTP row pencil) ═══ -->
   <div class="modal" id="ntpModal" hidden>
     <div class="modal-backdrop" id="ntpBackdrop"></div>
     <form class="modal-card" id="ntpForm" role="dialog" aria-modal="true" aria-labelledby="ntpModalTitle">

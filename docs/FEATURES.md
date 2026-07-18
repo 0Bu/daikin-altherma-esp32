@@ -176,8 +176,8 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   suspended while a credential change is pending, so ten fast `NO_AP_FOUND` scans can't pre-empt the
   rollback grace below.
 - **✅ In-app WiFi re-config with one-shot credential rollback.** WiFi is provisioned first from the
-  captive portal, then re-editable from the dashboard WiFi card (pencil → modal → `POST /set_wifi`,
-  validating SSID 1–32 / password empty-or-8–63). Because a bad SSID/password entered over the LAN
+  captive portal, then re-editable from the WiFi row of the dashboard Connections tile (pencil → modal
+  → `POST /set_wifi`, validating SSID 1–32 / password empty-or-8–63). Because a bad SSID/password entered over the LAN
   would otherwise strand the device in the setup AP, `/set_wifi` stashes the previous working
   credentials as a **one-shot NVS backup**; on the reboot into the new network, if the STA never gets a
   DHCP lease `wifi_start_sta()` restores the backup and reboots again — a successful connect clears it.
@@ -192,7 +192,7 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   30 s deadline this replaces did the opposite: it restored an old SSID for a network that no longer
   existed and threw the correct new credentials away. The outcome is recorded as
   `/status.wifi.rolled_back` (sticky until the next `/set_wifi`), since the rollback's own reboot wipes
-  the diag ring and the card just shows the old SSID again. The dashboard reads it as a **rollback
+  the diag ring and the Connections tile's WiFi row just shows the old SSID again. The dashboard reads it as a **rollback
   banner** — necessarily a banner off `/status` rather than a toast on the save, because the verdict
   takes 60–180 s and lands long after the save's ~21 s reconnect poll has given up.
 - **✅ 🧪 Config-write integrity** ([`config.cpp`](../main/config.cpp),
@@ -398,16 +398,17 @@ the fact*, from the field, without a serial cable:
 - **✅ 🧪 SNTP wall clock, runtime-configurable** ([`sntp_time.cpp`](../main/sntp_time.cpp)): before
   this the device had no timestamp anywhere except uptime-since-boot. `esp_netif_sntp` polls the
   configured server (`config().ntp_server` — NVS `ntp_server` override of `CONFIG_DAIKIN_NTP_SERVER`
-  default `pool.ntp.org`, editable at runtime via `POST /set_ntp` and the dashboard **NTP** card,
-  exactly like Syslog) once online — non-blocking, so it idles/retries harmlessly even during
-  AP-only setup mode. Once synced, the RFC 3339 UTC instant
+  default `pool.ntp.org`, editable at runtime via `POST /set_ntp` and the NTP row of the dashboard
+  Connections tile, exactly like Syslog) once online — non-blocking, so it idles/retries harmlessly
+  even during AP-only setup mode. Once synced, the RFC 3339 UTC instant
   ([`logic/timestamp.hpp`](../main/logic/timestamp.hpp)) reaches the top-level `/status.ntp` block
   (`{server,synced,time}`, mirroring `syslog{}` rather than `sys{}` — it's a runtime-configurable
   service, not a static board fact) and the syslog TIMESTAMP field below; before the first sync of a
-  boot both fall back to `null`/`-` rather than a fabricated epoch date. The dashboard NTP card shows
-  the sync state, the configured server, and — once synced — the device's own clock rendered in the
-  **browser's** timezone, so a glance answers "does this match my wall clock" without a UTC
-  conversion. An empty `/set_ntp` save is read on the next boot as "reset to the compile-time
+  boot both fall back to `null`/`-` rather than a fabricated epoch date. The dashboard's NTP row shows
+  the configured server, coloured `--ok` once synced and `--warn` while syncing (DESIGN.md §5.3 item
+  2) — the synced wall clock itself isn't shown on the row (no room in a one-line tile), but remains
+  available via the MQTT heartbeat's `device_time` sensor and `/status.ntp.time`. An empty
+  `/set_ntp` save is read on the next boot as "reset to the compile-time
   default" — unlike Syslog/MQTT, SNTP has no disabled state to preserve, so empty can't mean "off"
   here. The diag ring's uptime prefix is unchanged — it's what `device-triage` keys on to reconstruct
   reboots (an uptime that jumps backwards) and stays available before SNTP has synced, when a
