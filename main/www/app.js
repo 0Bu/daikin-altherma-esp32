@@ -63,7 +63,16 @@ function renderDashboard() {
                    : (hp.last_ok_s != null ? `Polled ${hp.last_ok_s}s ago` : "Running");
     heroSet("Operating", mode || "Online", sub, "var(--ok)");
   }
+  renderHeaderIp();
+  renderConnections();
   renderCards();
+}
+// Header identity line: the IP address (or the mDNS hostname while offline/unknown — whatever the
+// browser is actually reached at) shown under the fixed product name. Moved out of the WiFi row
+// (connectionsHtml) since it is board identity, not a WiFi *link* fact.
+function renderHeaderIp() {
+  const w = S.status?.wifi || {};
+  $("hdrIp").textContent = w.ip || location.hostname;
 }
 function heroSet(kicker, mode, sub, dot) {
   $("heroKicker").textContent = kicker; $("heroMode").textContent = mode;
@@ -140,7 +149,7 @@ function renderRollbackBanner() {
     `<div class="crash-head"><span class="crash-ico">!</span>` +
     `<div class="crash-txt"><div class="crash-title">WiFi change failed — rolled back</div>` +
     `<div class="crash-meta">The new WiFi credentials couldn't connect, so the device restored the ` +
-    `previous network${back} and restarted. Open the WiFi card to check the name and password, then ` +
+    `previous network${back} and restarted. Open the Connections tile's WiFi row to check the name and password, then ` +
     `try again.</div></div></div>`;
   el.hidden = false;
 }
@@ -255,8 +264,9 @@ async function refreshValues() {
   S._values = r.values || r || [];
   renderDashboard();
 }
-// Dashboard cards: connectivity/identity (WiFi · MQTT · Model) first, then the heat-pump value
-// groups — all one continuous card grid, each block styled like OPERATION.
+// Dashboard cards: the board (ESP32) + detected unit (Model) first, then the heat-pump value groups —
+// all one continuous card grid, each block styled like OPERATION. WiFi/MQTT/Syslog/NTP render
+// separately in the full-width Connections tile (#connTile, see connectionsHtml/renderConnections).
 function renderCards() {
   // The card grid is rebuilt on every poll (4/8 s). The ESP32 card's RX/TX pin dropdown is
   // interactive, so skip the rebuild while it's focused/open — otherwise the poll would collapse it
@@ -274,13 +284,6 @@ function vrow(k, v, opt = {}) {
 const vcard = (label, rows) => `<div class="vgroup"><div class="card">` +
   `<div class="section-label">${esc(label)}</div>${rows}</div></div>`;
 const editIcon = `<svg class="vcard-edit-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
-// Gray padlock shown next to the broker URL when the MQTT link is TLS (mqtts://) — a quiet
-// "this connection is encrypted" marker, not a status row.
-const lockIcon = `<svg class="vrow-lock" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="TLS encrypted"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`;
-const vcardEdit = (label, rows, edit) => `<div class="vgroup"><div class="card">` +
-  `<button class="vgroup-head vgroup-btn" type="button" data-edit="${esc(edit)}" aria-label="Edit ${esc(label)}">` +
-  `<span class="section-label">${esc(label)}</span>${editIcon}</button>` +
-  `${rows}</div></div>`;
 
 // Human-readable uptime from a seconds count (/status.uptime_s).
 function fmtUptime(s) {
@@ -348,54 +351,10 @@ function esp32CardHtml() {
   return vcard("ESP32", rows);
 }
 
-// WiFi · MQTT · Model status cards, from /status (live link, broker/HA-discovery, detected unit).
+// ESP32 · Model status cards, from /status (board facts + detected unit). WiFi/MQTT/Syslog/NTP moved
+// out to the full-width Connections tile (connectionsHtml) — see renderConnections().
 function statusCardsHtml() {
-  const w = S.status?.wifi || {}, m = S.status?.mqtt || {}, sy = S.status?.syslog || {}, nt = S.status?.ntp || {}, hp = S.status?.hp || {}, d = S.status?.detect || {};
-  const wifi = (w.connected && (w.rssi != null || w.ssid))
-    ? vrow((w.std || "Wi-Fi").toUpperCase(),
-           (w.rssi != null ? signalBars(w.rssi) : "") +
-           (w.rssi != null ? ` <span style="margin-left: 4px; margin-right: 4px; font-weight: 500; font-size: 14.5px; color: var(--muted);">${w.rssi} dBm</span>` : "") +
-           (w.ssid ? ` <span style="color: var(--ok); font-weight: 600;">${esc(w.ssid)}</span>` : ""),
-           { html: true }) +
-      vrow("IP address", w.ip || location.hostname, { cls: "num" }) +
-      (w.mac ? vrow("MAC", w.mac, { cls: "mono num" }) : "") +
-      (w.bssid ? vrow("BSSID", w.bssid, { cls: "mono num" }) : "")
-    : vrow("Status", "Offline", { cls: "warn" });
-
-  let mqtt;
-  if (!m.configured) {
-    mqtt = vrow("Status", "Disabled");
-  } else {
-    const st = m.connected ? ["Connected", "ok"] : m.error ? ["Error", "err"] : ["Connecting…", "warn"];
-    // A gray padlock trails the broker URL when the link is TLS (mqtts://) — the encryption state
-    // is shown inline as a marker, not as its own row.
-    const broker = esc(m.broker || "—") + (m.tls ? lockIcon : "");
-    mqtt = vrow("Status", st[0], { cls: st[1] }) +
-      vrow("Broker", broker, { html: true });
-  }
-
-  let syslog;
-  if (!sy.configured) {
-    syslog = vrow("Status", "Disabled");
-  } else {
-    // Delivery is gated on DNS only (resolved); reachability is an advisory ping hint — "Enabled" once
-    // resolving, warn-flagged (still forwarding) when the host doesn't answer the probe.
-    let st;
-    if (sy.error) st = [sy.error, "err"];
-    else if (sy.resolved) st = sy.reachable ? ["Enabled", "ok"] : ["Enabled · host not answering ping", "warn"];
-    else st = ["Resolving…", "warn"];
-    syslog = vrow("Status", st[0], { cls: st[1] }) +
-      vrow("Server", sy.host ? `${sy.host}:${sy.port || 514}` : "—");
-  }
-
-  // NTP has no "disabled" state (unlike MQTT/Syslog) — it always has a server, so the status row
-  // reads Synced/Syncing… rather than Enabled/Disabled. The local-time row uses the BROWSER's own
-  // timezone (new Date() on the RFC 3339 UTC string /status.ntp.time carries) so it reads as "does
-  // this match my wall clock", not a raw UTC string the user has to convert by hand.
-  const ntp = vrow("Status", nt.synced ? "Synced" : "Syncing…", { cls: nt.synced ? "ok" : "warn" }) +
-    vrow("Server", nt.server || "—") +
-    (nt.synced && nt.time ? vrow("Device time", new Date(nt.time).toLocaleString()) : "");
-
+  const hp = S.status?.hp || {}, d = S.status?.detect || {};
   // Outdoor unit as a full-width heading — model names are long and don't fit a label→value row.
   // The X10A link + protocol live on the ESP32 card (they're about the board's bus), not here.
   // Identity is bus-derived: the model name degrades to the brand offline (hpModelName), and capacity
@@ -406,7 +365,76 @@ function statusCardsHtml() {
 
   // Model identity is only meaningful while the bus answers — hide the card entirely when the
   // heat-pump link is down instead of naming a unit (or showing a stale capacity) that isn't live.
-  return esp32CardHtml() + vcardEdit("WiFi", wifi, "wifi") + vcardEdit("MQTT", mqtt, "mqtt") + vcardEdit("Syslog", syslog, "syslog") + vcardEdit("NTP", ntp, "ntp") + (hp.connected ? vcard("Model", model) : "");
+  return esp32CardHtml() + (hp.connected ? vcard("Model", model) : "");
+}
+
+// ── Connections tile (WiFi · MQTT · Syslog · NTP, full width under the hero) ──────────────────
+// One tappable row per link: label, colour-coded value (green connected/synced, yellow reconnecting/
+// syncing, red down — the same ok/warn/err semantics the rest of the dashboard uses), a trailing
+// pencil that opens that link's existing edit modal (§5.1 in docs/DESIGN.md). MAC/BSSID are dropped
+// entirely (bus-level detail nobody edits from here) and the IP address moved to the header
+// (renderHeaderIp) — it is board identity, not a per-row WiFi fact.
+//
+// The row itself conveys state by colour alone (the value IS the address/name, just tinted) — DESIGN.md
+// §9's "status never conveyed by colour alone" would otherwise be broken for colourblind users and
+// screen readers, so `state` (a plain-text status word, never shown visually) goes into the row's
+// aria-label instead of the generic "Edit X" every other edit affordance in this app uses.
+function connRow(label, valueHtml, cls, edit, state) {
+  return `<button class="conn-row" type="button" data-edit="${esc(edit)}" aria-label="${esc(label)}: ${esc(state)}. Tap to edit.">` +
+    `<span class="conn-label">${esc(label)}</span>` +
+    `<span class="conn-val ${cls || ""}">${valueHtml}</span>` +
+    `${editIcon}</button>`;
+}
+function connectionsHtml() {
+  const w = S.status?.wifi || {}, m = S.status?.mqtt || {}, sy = S.status?.syslog || {}, nt = S.status?.ntp || {};
+
+  // WiFi has no "connecting" state in /status (just connected: true/false), so it is a two-state
+  // ok/err row — signal bars keep their own strength-based tone regardless.
+  let wifiVal, wifiCls, wifiState;
+  if (w.connected && (w.rssi != null || w.ssid)) {
+    wifiVal = (w.rssi != null ? signalBars(w.rssi) : "") +
+      (w.rssi != null ? ` <span class="conn-dbm">${w.rssi} dBm</span>` : "") +
+      (w.ssid ? ` <span class="conn-name">${esc(w.ssid)}</span>` : "");
+    wifiCls = "ok"; wifiState = "Connected" + (w.ssid ? ` to ${w.ssid}` : "");
+  } else {
+    wifiVal = "Offline";
+    wifiCls = "err"; wifiState = "Offline";
+  }
+  const wifiRow = connRow((w.std || "Wi-Fi").toUpperCase(), wifiVal, wifiCls, "wifi", wifiState);
+
+  let mqttVal, mqttCls, mqttState;
+  if (!m.configured) {
+    mqttVal = "Disabled"; mqttCls = ""; mqttState = "Disabled";
+  } else {
+    mqttCls = m.connected ? "ok" : m.error ? "err" : "warn";
+    mqttState = m.connected ? "Connected" : m.error ? `Error: ${m.error}` : "Connecting…";
+    // No TLS padlock marker: an mqtts:// broker already carries its own scheme in the URL, so the
+    // icon only restated what the string says. A schemeless/mqtt:// broker is plaintext and shows none.
+    mqttVal = esc(m.broker || "—");
+  }
+  const mqttRow = connRow("MQTT", mqttVal, mqttCls, "mqtt", mqttState);
+
+  let syVal, syCls, syState;
+  if (!sy.configured) {
+    syVal = "Disabled"; syCls = ""; syState = "Disabled";
+  } else {
+    // Delivery is gated on DNS only (resolved); reachability is an advisory ping hint — green once
+    // resolving, yellow (still forwarding) when the host doesn't answer the probe or resolution is
+    // still pending, red on a DNS error.
+    syCls = sy.error ? "err" : sy.resolved ? (sy.reachable ? "ok" : "warn") : "warn";
+    syState = sy.error ? sy.error : sy.resolved ? (sy.reachable ? "Enabled" : "Enabled, host not answering ping") : "Resolving…";
+    syVal = esc(sy.host ? `${sy.host}:${sy.port || 514}` : "—");
+  }
+  const syslogRow = connRow("Syslog", syVal, syCls, "syslog", syState);
+
+  // NTP has no "disabled" or error state (unlike MQTT/Syslog) — it always has a server, so it is a
+  // two-state ok/warn row keyed on whether the first sync of this boot has landed.
+  const ntpRow = connRow("NTP", esc(nt.server || "—"), nt.synced ? "ok" : "warn", "ntp", nt.synced ? "Synced" : "Syncing…");
+
+  return `<div class="section-label">Connections</div>` + wifiRow + mqttRow + syslogRow + ntpRow;
+}
+function renderConnections() {
+  $("connTile").innerHTML = connectionsHtml();
 }
 // Heat-pump value groups (grouped by domain, §6) as card markup. Hidden entirely while the
 // heat-pump link is down — there's nothing to poll, so "Waiting for the first poll…" would be
@@ -454,8 +482,8 @@ function wifiFieldError(msg) {
 }
 
 // ── MQTT (dashboard edit modal) ───────────────────────────────────────────
-// The MQTT broker is edited in a modal opened from the dashboard card's pencil — there is no
-// settings sub-screen. Only the broker prefills (user/pass aren't exposed by /status); a Save
+// The MQTT broker is edited in a modal opened from the Connections tile's MQTT row pencil — there is
+// no settings sub-screen. Only the broker prefills (user/pass aren't exposed by /status); a Save
 // reboots to apply (saveReboot), Cancel/backdrop/Esc dismiss without a write.
 function fillMqtt() {
   const m = S.status?.mqtt || {};
@@ -656,19 +684,24 @@ async function saveReboot(url, body, { btn, showError, close, then, busyMsg }) {
 // ── Boot ─────────────────────────────────────────────────────────────────
 function wire() {
   // The dashboard card grid (#valueGroups) is rebuilt on every poll, so its interactive controls are
-  // wired by delegation: the MQTT card's pencil opens the edit modal, the ESP32 card's Firmware row
-  // checks for an OTA update, and its RX/TX dropdowns re-run pin auto-detection on change.
+  // wired by delegation: the ESP32 card's Firmware row checks for an OTA update, and its RX/TX
+  // dropdowns re-run pin auto-detection on change.
   $("valueGroups").addEventListener("click", (e) => {
-    const edit = e.target.closest("[data-edit]");
-    if (edit && edit.dataset.edit === "wifi") { openWifi(); return; }
-    if (edit && edit.dataset.edit === "mqtt") { openMqtt(); return; }
-    if (edit && edit.dataset.edit === "syslog") { openSyslog(); return; }
-    if (edit && edit.dataset.edit === "ntp") { openNtp(); return; }
     const act = e.target.closest("[data-act]");
     if (act && act.dataset.act === "ota") checkFirmwareUpdate();
   });
   $("valueGroups").addEventListener("change", (e) => {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();
+  });
+  // Connections tile (#connTile) is rebuilt every poll too — each row's pencil opens its own edit
+  // modal (WiFi/MQTT/Syslog/NTP), delegated the same way.
+  $("connTile").addEventListener("click", (e) => {
+    const edit = e.target.closest("[data-edit]");
+    if (!edit) return;
+    if (edit.dataset.edit === "wifi") openWifi();
+    else if (edit.dataset.edit === "mqtt") openMqtt();
+    else if (edit.dataset.edit === "syslog") openSyslog();
+    else if (edit.dataset.edit === "ntp") openNtp();
   });
   // Crash banner: Copy diagnostics / Dismiss. The download link is a plain <a download> (no handler).
   $("crashBanner").addEventListener("click", (e) => {

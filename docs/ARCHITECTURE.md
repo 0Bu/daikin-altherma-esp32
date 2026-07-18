@@ -651,11 +651,12 @@ self-contained, pre-gzipped page at build time (`inline_assets.cmake`). The UI i
 dashboard** — no Settings page, no sub-screens; it drives the config endpoints in place:
 
 - **WiFi** → `/set_wifi`, provisioned first from the captive `setup.html` and thereafter **re-editable
-  from a dashboard modal** off the WiFi card (pencil). Save validates SSID (1–32) + password (empty or
-  8–63) both in the UI and via the host-tested `wifi_credentials_valid()` (`logic/config_model.hpp`),
-  then persists + reboots. The dashboard shows the live link (SSID + IP + RSSI signal bars, plus the
-  associated AP's PHY standard + BSSID and this STA's MAC) from `/status.wifi`, populated by
-  `wifi_info()`. **One-shot rollback:** if new credentials were entered over the LAN and the STA can't
+  from a dashboard modal** off the Connections tile's WiFi row (pencil). Save validates SSID (1–32) +
+  password (empty or 8–63) both in the UI and via the host-tested `wifi_credentials_valid()`
+  (`logic/config_model.hpp`), then persists + reboots. The dashboard shows the live link (the PHY
+  standard + signal bars/RSSI + SSID on the Connections tile's WiFi row, coloured `--ok`/`--err`, and
+  the IP address under the product name in the header) from `/status.wifi`, populated by
+  `wifi_info()`; MAC and BSSID are reported by the API but not shown in the UI. **One-shot rollback:** if new credentials were entered over the LAN and the STA can't
   get a lease after the reboot, `wifi_start_sta()` restores the previous credentials from an NVS backup
   and reboots again (cleared on a successful connect) — so a wrong SSID/password never strands the
   device in the setup AP. It reboots only once the restore has actually **persisted**: the restore lives
@@ -672,7 +673,7 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
   pending change also suspends the first-boot retry budget, which would otherwise give up after ten
   fast `NO_AP_FOUND` scans and roll back before the router ever answered. A rollback also **records its
   outcome**: it sets `/status.wifi.rolled_back` (sticky until the next `/set_wifi`), because the reboot
-  it takes wipes the diag ring and the SSID on the card is simply the old one again — leaving a rollback
+  it takes wipes the diag ring and the SSID on the Connections tile's WiFi row is simply the old one again — leaving a rollback
   indistinguishable from a save that never happened. The dashboard consumes it as a **rollback banner**
   (`renderRollbackBanner`, DESIGN.md §5.3 item 0). It has to be a banner off `/status` rather than a
   toast on the save flow: the verdict takes 60–180 s to reach, far past the save's ~21 s reconnect poll,
@@ -681,7 +682,7 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
   `config_save()` writes the backup + flag **before** the credentials when arming and **after** them when
   clearing: each `nvs_set_*` commits separately, so this ordering is what keeps a power cut from arming
   untried credentials with no way back.
-- **MQTT** → `/set_mqtt` (edited from a dashboard modal off the MQTT card). Unlike Syslog, Save
+- **MQTT** → `/set_mqtt` (edited from a dashboard modal off the Connections tile's MQTT row). Unlike Syslog, Save
   **pre-flights the broker synchronously** (DNS → TCP port → a short-lived esp-mqtt connect/auth,
   heap-guarded) and only persists + reboots on success — a bad host/port/password is rejected inline.
   An empty username+password **keeps** the stored credentials (the modal never prefills them, so empty
@@ -692,19 +693,20 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
   anonymous one — disabling MQTT and re-adding the broker both arrive with empty credentials, so both
   keep, and the kept credentials then reject every plaintext broker with "Credentials require
   mqtts://" (only a flash erase got out of it).
-- **Syslog** → `/set_syslog` (edited from a dashboard modal off the Syslog card). Save only
-  validates the port range (no request-path network block); an empty host disables forwarding. DNS
-  resolution and the advisory reachability probe run in the syslog task and surface on the card via
-  `/status.syslog` (`resolved`/`reachable`/`error`) — "Enabled", "…host not answering ping", or "DNS
-  lookup failed" — after the reboot.
-- **NTP** → `/set_ntp` (edited from a dashboard modal off the NTP card), the same persist-then-reboot
-  shape as Syslog: no request-path network probe (the SNTP client resolves + retries on its own task
-  after reboot), and an **empty server is accepted** — `config_load()` reads it on the next boot as
-  "reset to the `CONFIG_DAIKIN_NTP_SERVER` compile-time default" rather than a disabled state, since
-  unlike Syslog/MQTT, SNTP has no "off" to preserve. The card shows Synced/Syncing…, the configured
-  server, and — once synced — the device's own wall clock rendered in the **browser's** timezone
-  (`new Date(status.ntp.time)`), so a glance answers "does this match my clock" without a UTC↔local
-  conversion.
+- **Syslog** → `/set_syslog` (edited from a dashboard modal off the Connections tile's Syslog row).
+  Save only validates the port range (no request-path network block); an empty host disables
+  forwarding. DNS resolution and the advisory reachability probe run in the syslog task and surface
+  on that row via `/status.syslog` (`resolved`/`reachable`/`error`) — coloured `--ok`, `--warn`
+  ("host not answering ping"), or `--err` (DNS lookup failed) — after the reboot.
+- **NTP** → `/set_ntp` (edited from a dashboard modal off the Connections tile's NTP row), the same
+  persist-then-reboot shape as Syslog: no request-path network probe (the SNTP client resolves +
+  retries on its own task after reboot), and an **empty server is accepted** — `config_load()` reads it
+  on the next boot as "reset to the `CONFIG_DAIKIN_NTP_SERVER` compile-time default" rather than a
+  disabled state, since unlike Syslog/MQTT, SNTP has no "off" to preserve. The row shows the
+  configured server, coloured `--ok` once synced and `--warn` while syncing; the device's own wall
+  clock (`status.ntp.time`, previously rendered inline in the browser's timezone on the old per-link
+  NTP card) is no longer shown on the row — it remains available via the MQTT heartbeat's
+  `device_time` sensor and the raw API.
 - **Heat pump** → `/set_hp`: fully automatic. The model is **auto-detected** (see Auto-detection) and
   shown read-only on the dashboard **Model** card. The dashboard **ESP32** card shows the X10A link +
   protocol and the **RX/TX pins**, which are also auto-detected: **read-only** while the bus answers,
