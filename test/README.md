@@ -94,6 +94,14 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   resets the idle count, a peer that stalls forever is dropped after a **bounded** wait rather than
   parking the httpd task, a mid-body close fails instead of handing over half a document, and the
   size cap still leaves room for the terminator.
+- `logic/uart_plan.hpp` — the X10A UART (re)init decision: probing the SAME pins is a `Noop` (no
+  reinstall, no heap), the detect sweep's `{44,43}↔{43,44}` alternation is a register-only `Remap`
+  (**not** an `Install`) — the exact turn that used to reinstall the driver ~2×/s and fragment the
+  heap into the `hp_poll` abort — and a one-sided pin change never reads as a false `Noop`.
+- `logic/detect_backoff.hpp` — the silent-bus detect cadence: full 1 s cadence through the grace
+  window (so a bus that answers early is never delayed), then geometric growth **clamped** to the
+  60 s ceiling, monotonic and overflow-safe under saturation, with a bus answer resetting to the
+  floor at once (a swapped-in unit is swept the next cycle, not up to a minute later).
 
 `logic/value_def.hpp` has no `test_*()` of its own — it is the profile row type, exercised through
 `def/registry.hpp` and the converter tests.

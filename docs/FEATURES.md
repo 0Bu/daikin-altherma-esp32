@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (630 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (650 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -60,6 +60,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 30 | **Config-write integrity** — field-owned commits (no cross-task revert) + an NVS failure that reaches the user (500, no reboot) instead of "saved" | ✅ 🧪 | [`config.cpp`](../main/config.cpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp), [`http_config.cpp`](../main/http_config.cpp) |
 | 31 | **Value-catalog domain audit** — real converters × real catalog vs the spec, each finding carrying a decode witness; co-gates CI, plus a selftest that re-catches the four decode bugs that shipped | ✅ | [`catalog_audit.cpp`](../tools/domain/catalog_audit.cpp), [`run-domain-audit.sh`](../scripts/run-domain-audit.sh), [`selftest.sh`](../tools/domain/selftest.sh) |
 | 32 | **SNTP wall clock**, runtime-configurable server — real UTC for the syslog TIMESTAMP field + `/status.ntp` | ✅ 🧪 | [`sntp_time.cpp`](../main/sntp_time.cpp), [`logic/timestamp.hpp`](../main/logic/timestamp.hpp), [`http_config.cpp`](../main/http_config.cpp) |
+| 33 | **Detect-sweep heap hardening** — install-once UART + register-only pin remap (no per-swap driver realloc) and silent-bus detect backoff, closing a fragmentation panic caught by a symbolized coredump | ✅ 🧪 | [`hp_comm.cpp`](../main/hp_comm.cpp), [`logic/uart_plan.hpp`](../main/logic/uart_plan.hpp), [`hp_poll.cpp`](../main/hp_poll.cpp), [`logic/detect_backoff.hpp`](../main/logic/detect_backoff.hpp) |
 
 ---
 
@@ -438,9 +439,22 @@ Deep dives: [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md), [`REGISTERS.md`](REGISTERS.m
 
 - **✅ Dedicated hardware UART at 9600 8E1** ([`hp_comm.cpp`](../main/hp_comm.cpp)) on `UART_NUM_1`,
   physically separate from the native USB-Serial/JTAG console, so device logs never collide with
-  heat-pump traffic. Any two free GPIOs map to it (the RX/TX pin cache in NVS).
+  heat-pump traffic. Any two free GPIOs map to it (the RX/TX pin cache in NVS). The driver installs
+  **once**; a pin change is a register-only `uart_set_pin` **remap**, not a `uart_driver_delete` +
+  `install` (host-tested decision in [`logic/uart_plan.hpp`](../main/logic/uart_plan.hpp)). The old
+  reinstall-per-swap allocated a fresh RX ring + driver struct every call, and the detect sweep
+  alternates the pins ~2×/s on a silent bus — that alloc/free churn fragmented the heap until an
+  unrelated allocation ([`hp_poll.cpp`](../main/hp_poll.cpp)'s value `vector`) threw a `std::bad_alloc`
+  too starved to unwind → `std::terminate` → `abort`, **confirmed by a symbolized coredump**.
 - **✅ 🧪 Poll engine** ([`hp_poll.cpp`](../main/hp_poll.cpp)): profile registers → query → decode →
   thread-safe value cache the web UI and MQTT read; also drives the WebSocket broadcast each cycle.
+  The value vector is `reserve`d to its exact upper bound (one sized allocation, not `log2(n)` regrows).
+- **✅ 🧪 Silent-bus detect backoff** ([`logic/detect_backoff.hpp`](../main/logic/detect_backoff.hpp)):
+  while no unit answers, the auto-detect sweep stretches from the 1 s poll cadence toward a 60 s
+  ceiling by **skipping sweep ticks** — the poll task's 1 s top-of-loop watchdog reset still fires, so
+  any ceiling stays watchdog-safe and the ceiling is a detection-latency choice, not a WDT constraint.
+  A bus answer, `POST /detect` or `POST /set_hp` (new pins) resets it to full cadence at once, so a
+  just-wired unit is still detected on the next cycle.
 - **✅ 🧪 Auto-detection every boot** ([`hp_detect.cpp`](../main/hp_detect.cpp),
   [`logic/detect.hpp`](../main/logic/detect.hpp)): a protocol sweep + page probe builds a bus
   *fingerprint* (page mask + capacity + OU EEPROM) that narrows the Altherma-only signatures to a
@@ -479,6 +493,10 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   a client-asserted 64-bit number, so it decides and never allocates; only a `sub` **text** frame
   earns a broadcast slot), request-body reassembly (`http_body.hpp` — a body arrives across as many
   TCP segments as the network chooses, and a peer that stalls forever must lose *bounded*),
+  the X10A UART (re)init decision (`uart_plan.hpp` — probing the same pins is a no-op and a pin change
+  is a register-only remap, not a driver reinstall, so the detect sweep stops churning the heap),
+  the silent-bus detect backoff (`detect_backoff.hpp` — full cadence through a grace window, then
+  geometric growth clamped to the ceiling, monotonic and overflow-safe, reset the instant the bus answers),
   the English description lookup layered on the conv-204 fault code
   (`error_codes.hpp` — a presentation-only enrichment: it never changes what conv 204 decodes,
   and a code outside its coverage still publishes as the bare code),
@@ -488,7 +506,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   Modbus link (issue #32), **not yet wired into the firmware**), and the SNTP wall-clock RFC 3339
   formatter (`timestamp.hpp` — the one place the syslog TIMESTAMP field, `/status.ntp.time` and the
   MQTT heartbeat's `time` field render through; a negative/never-synced input renders `""`, never a
-  fabricated `1970-01-01`). **630 `CHECK`s** in
+  fabricated `1970-01-01`). **650 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
@@ -616,7 +634,7 @@ security of signed firmware with none of the brick risk. It refuses to roll a ba
 and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-associations no event
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 17-entity heartbeat diagnostics). And the risky parts — decode,
-CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (630 checks),
+CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (650 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 
