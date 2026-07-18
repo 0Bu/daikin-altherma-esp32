@@ -9,6 +9,7 @@
 #include "hp_detect.hpp"
 #include "logic/convert.hpp"
 #include "logic/crc.hpp"
+#include "logic/detect_backoff.hpp"
 #include "http_handlers.hpp"
 
 #include "esp_task_wdt.h"
@@ -16,6 +17,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include <atomic>
 #include <cstdio>
 #include <exception>
 #include <vector>
@@ -26,6 +28,14 @@ static SemaphoreHandle_t      s_mtx = nullptr;
 static std::vector<CachedValue> s_cache;
 static HpStats               s_stats;
 static int64_t               s_last_ok_us = -1;
+
+// Auto-detect backoff state — poll-task-owned, RAM only (model/detection is never persisted: it is
+// re-derived every boot). s_next_detect_us gates the next silent-bus sweep on the monotonic clock;
+// s_detect_reset is the httpd->poll one-shot that forces a fast re-detect after POST /detect or
+// POST /set_hp (cross-task, so it MUST be atomic, not a plain bool). See logic/detect_backoff.hpp.
+static DetectBackoff         s_backoff;
+static int64_t               s_next_detect_us = 0;
+static std::atomic<bool>     s_detect_reset{false};
 
 // RAII guard around s_mtx (same idiom as config.cpp), used by every take in this file. It matters
 // most for the readers: they copy std::strings OUT of s_stats/s_cache under the lock, so they can
@@ -49,6 +59,10 @@ static void poll_once() {
     hp_uart_init(c.rx_pin, c.tx_pin);
 
     std::vector<CachedValue> fresh;
+    fresh.reserve(prof.count);   // exact upper bound (<= 1 entry per ValueDef row): one sized allocation
+                                 // instead of ~log2(count) grow/free pairs + the transient old+new
+                                 // buffer coexistence — lowers peak on the WIRED path too. Still under
+                                 // poll_task's try/catch, so an OOM here remains a skipped cycle.
     bool      any_ok = false;
     int       regs   = 0;
     uint8_t   seen[256] = {0};
@@ -127,7 +141,7 @@ static void poll_once() {
 // every boot; the LINK cache (pins + protocol) is persisted, but only when it changed (a swapped
 // wire self-corrects once, then subsequent boots confirm it with no NVS write). Only commits when
 // the bus actually answered, so a not-yet-wired unit simply retries instead of being pinned to "generic".
-static void poll_detect() {
+static bool poll_detect() {                                    // returns true iff the bus answered
     DetectResult d = hp_detect_run();
     if (!d.bus_ok) {
         std::string err = "no X10A response (detecting)";     // built before the lock: it allocates
@@ -138,7 +152,7 @@ static void poll_detect() {
             s_stats.timeout_err++;
             s_stats.rx_fail_total++;
         }
-        return;                                                // keep "auto" — retry next cycle
+        return false;                                          // keep "auto" — retry per backoff
     }
     // Commit ONLY the fields detection owns — the link (persisted) and the model (RAM). Never a
     // whole-Config write-back: the snapshot below is read on the poll task while the httpd task may
@@ -156,6 +170,7 @@ static void poll_detect() {
     // candidate in the set is register-equivalent, so this picks correct VALUES regardless of which
     // marketing variant it names; nothing matched but bus answered → generic Altherma profile.
     config_set_model(d.best.empty() ? "generic" : d.best, d.page_mask, d.kw_tenths, d.eeprom);
+    return true;
 }
 
 // The cycle body allocates freely — poll_once builds up to ~116 CachedValues (3 std::strings each)
@@ -171,7 +186,20 @@ static void poll_task(void*) {
         esp_task_wdt_reset();                                  // top of cycle; poll_once also resets per register
         ticks++;
         try {
-            if (config().profile == "auto") poll_detect();     // resolves to a concrete profile
+            if (config().profile == "auto") {
+                // Silent-bus detect backoff: sweep at the poll floor at first, then stretch toward the
+                // ceiling the longer the bus stays quiet (logic/detect_backoff.hpp). Applied by SKIPPING
+                // sweep ticks — the top-of-loop esp_task_wdt_reset() above still fires every second, so
+                // any ceiling is watchdog-safe. A resolved profile leaves "auto" and is polled below the
+                // same cycle, exactly as before; a skipped cycle leaves the UART untouched (no churn).
+                if (s_detect_reset.exchange(false)) { s_backoff.silent = 0; s_next_detect_us = 0; }
+                const int64_t now = esp_timer_get_time();
+                if (now >= s_next_detect_us) {
+                    const bool answered = poll_detect();
+                    const int  wait_s   = detect_backoff_step(s_backoff, answered);
+                    s_next_detect_us    = now + static_cast<int64_t>(wait_s) * 1000000;
+                }
+            }
             if (config().profile != "auto") poll_once();       // then poll it (same cycle if resolved)
             ws_broadcast_values();
             if (ticks >= 4) {
@@ -210,6 +238,13 @@ HpStats hp_stats() {
     return st;
 }
 
-void hp_poll_reconfigure() { /* poll_task re-reads config() at the top of each cycle */ }
+void hp_poll_reconfigure() {
+    // POST /detect and POST /set_hp (new pins) run on the httpd task and put profile back to "auto".
+    // Drop any accumulated detect backoff so a just-rewired bus is swept on the NEXT poll cycle, not
+    // up to DETECT_MAX_INTERVAL_S later. Cross-task (httpd->poll), so it MUST be atomic — the poll
+    // task consumes it via exchange() at the top of its auto branch. (Config itself is re-read there
+    // every cycle already; this only resets the backoff timer.)
+    s_detect_reset.store(true);
+}
 
 } // namespace daik

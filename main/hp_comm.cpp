@@ -1,6 +1,7 @@
 // X10A UART transport over the ESP-IDF uart driver.
 #include "hp_comm.hpp"
 #include "diag_log.hpp"
+#include "logic/uart_plan.hpp"
 #include "driver/uart.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -12,20 +13,48 @@ static bool s_inited = false;
 static int  s_rx = -1, s_tx = -1;
 
 bool hp_uart_init(int rx, int tx) {
-    if (s_inited && rx == s_rx && tx == s_tx) return true;
-    if (s_inited) uart_driver_delete(PORT);
-    uart_config_t cfg = {};
-    cfg.baud_rate   = 9600;
-    cfg.data_bits   = UART_DATA_8_BITS;
-    cfg.parity      = UART_PARITY_EVEN;              // 8E1 — the X10A framing
-    cfg.stop_bits   = UART_STOP_BITS_1;
-    cfg.flow_ctrl   = UART_HW_FLOWCTRL_DISABLE;
-    cfg.source_clk  = UART_SCLK_DEFAULT;
-    if (uart_param_config(PORT, &cfg) != ESP_OK) return false;
-    if (uart_set_pin(PORT, tx, rx, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE) != ESP_OK) return false;
-    if (uart_driver_install(PORT, 256, 0, 0, nullptr, 0) != ESP_OK) return false;
-    s_inited = true; s_rx = rx; s_tx = tx;
-    return true;
+    // The detect sweep re-inits per candidate and alternates the pins {44,43}<->{43,44} every poll
+    // second on a silent bus. Reinstalling the driver each time (uart_driver_delete + install)
+    // allocated a fresh 256 B RX ring + driver struct + sync primitives ~2x/second and fragmented the
+    // heap until an unrelated allocation crashed (a symbolized coredump: hp_poll's std::vector build
+    // threw a bad_alloc too starved to unwind -> std::terminate -> abort). So install ONCE, then a
+    // genuine pin change is a register-only uart_set_pin re-route that allocates nothing.
+    // logic/uart_plan.hpp holds the (host-tested) decision.
+    switch (uart_plan(s_inited, s_rx, s_tx, rx, tx)) {
+    case UartAction::Noop:
+        return true;
+
+    case UartAction::Remap:
+        // Driver stays installed — re-route the signals only. NO heap, NO delete. A failed set_pin
+        // leaves the driver valid on the OLD pins (safer than the old delete-first path, which could
+        // strand s_inited==true with no driver).
+        if (uart_set_pin(PORT, tx, rx, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE) != ESP_OK) return false;
+        uart_flush_input(PORT);                     // drop bytes latched on the OLD pins (redundant
+                                                    // with hp_query's flush — keeps the invariant local)
+        s_rx = rx; s_tx = tx;
+        return true;
+
+    case UartAction::Install: {                     // first bring-up only
+        uart_config_t cfg = {};
+        cfg.baud_rate   = 9600;
+        cfg.data_bits   = UART_DATA_8_BITS;
+        cfg.parity      = UART_PARITY_EVEN;         // 8E1 — the X10A framing
+        cfg.stop_bits   = UART_STOP_BITS_1;
+        cfg.flow_ctrl   = UART_HW_FLOWCTRL_DISABLE;
+        cfg.source_clk  = UART_SCLK_DEFAULT;
+        // Order matters: set_pin BEFORE install. If the pin config fails (a reserved GPIO can reach the
+        // link cache via /set_hp, whose validate() only range-checks — unlike the UI's board_pins
+        // filter), NO driver is installed, so s_inited stays false and the detect sweep cleanly falls
+        // through to the next candidate pair. Installing first and failing on set_pin would leak the
+        // driver AND wedge every later install (ESP_ERR_INVALID_STATE) — the X10A link dead the whole boot.
+        if (uart_param_config(PORT, &cfg) != ESP_OK) return false;
+        if (uart_set_pin(PORT, tx, rx, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE) != ESP_OK) return false;
+        if (uart_driver_install(PORT, 256, 0, 0, nullptr, 0) != ESP_OK) return false;
+        s_inited = true; s_rx = rx; s_tx = tx;
+        return true;
+    }
+    }
+    return false;   // unreachable — satisfies -Werror=return-type (main/ builds -Werror)
 }
 
 void hp_uart_deinit() {

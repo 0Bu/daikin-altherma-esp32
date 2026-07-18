@@ -177,7 +177,12 @@ sntp_time.cpp   SNTP client (esp_netif_sntp, config().ntp_server — NVS "ntp_se
                 mutating it live.
 provisioning.cpp setup SoftAP (daikin-altherma-esp32-setup) + DHCP DNS-offer; HTTP is the shared :80 server
 captive_dns.cpp UDP:53 catch-all (every name -> 192.168.4.1) so the setup portal auto-pops (AP mode only)
-hp_comm.cpp     X10A UART (9600 8E1) + register query
+hp_comm.cpp     X10A UART (9600 8E1) + register query. hp_uart_init installs the driver ONCE, then a
+                pin change is a register-only uart_set_pin remap (logic/uart_plan.hpp) — NOT a
+                uart_driver_delete+install. The old reinstall-per-swap allocated a fresh RX ring +
+                driver struct every call; the detect sweep alternates the pins ~2x/s on a silent bus,
+                so that churn fragmented the heap until an unrelated alloc (hp_poll's vector) hit an
+                unwind-starved bad_alloc -> std::terminate -> abort (confirmed by a symbolized coredump)
 hp_convert.cpp  device value formatting over logic/convert.hpp
 hp_detect.cpp   auto-detect glue: protocol sweep + page probe -> fingerprint -> candidate models
 hp_poll.cpp     poll engine task: (auto-detect if profile=="auto") profile registers -> query ->
@@ -185,6 +190,12 @@ hp_poll.cpp     poll engine task: (auto-detect if profile=="auto") profile regis
                 (ws_broadcast_values every cycle, ws_broadcast_status every 4th). Subscribed to the
                 Task Watchdog (esp_task_wdt_add): reset per cycle + once per register in the sweep, so
                 a wedged X10A read reboots cleanly (reset reason task_wdt) instead of hanging silently.
+                On a SILENT bus the auto-detect sweep BACKS OFF (logic/detect_backoff.hpp): full 1s
+                cadence at first, then stretched toward a 60s ceiling by SKIPPING sweep ticks (the 1s
+                top-of-loop wdt reset still fires, so any ceiling is wdt-safe; the ceiling is a
+                detection-latency choice, not a wdt constraint). Reset to fast cadence on a bus answer
+                or via hp_poll_reconfigure() (POST /detect, POST /set_hp — atomic httpd->poll one-shot).
+                poll_once reserves the value vector up front (one sized alloc, not log2(n) regrows)
 http_server.cpp esp_http_server :80; concerns register their own routes (http_handlers.hpp)
 http_common.cpp shared HTTP helpers + the ONE OOM guard every route runs under: http_register()
                 stashes the real handler in user_ctx and installs a handle_all trampoline that calls
@@ -264,7 +275,8 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, value_def, config_model,
                 discovery, detect, json, mqtt_group, mqtt_uri, heartbeat, crashinfo, bootlog,
                 reset_reason, boot_guard, board_pins, modbus, syslog_policy, link_watch,
-                wifi_rollback, health_gate, ws_policy, http_body, timestamp).
+                wifi_rollback, health_gate, ws_policy, http_body, timestamp, uart_plan,
+                detect_backoff).
                 value_def.hpp = the ValueDef row type the generated def/ profile tables are written
                 in ({reg, offset, conv, size, type, label} — registry id, byte offset in the reply
                 payload, converter id for convert.hpp, byte count, HA unit code, English label): the

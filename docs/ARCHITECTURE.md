@@ -339,14 +339,23 @@ one that landed, which is why the check belongs on the way back in. The sweep al
 upper-bound check the sweep lacks, and a `/status` pin readout that never reports an unconfigurable
 link as fact.
 While `profile == "auto"`, the poll task runs one detection pass (`poll_detect()`) instead of a
-normal cycle:
+normal cycle. These passes are **not** run blindly every second: on a **silent bus** the sweep backs
+off from the 1 s poll cadence toward a 60 s ceiling (`logic/detect_backoff.hpp`, host-tested),
+applied by *skipping ticks* so the top-of-cycle watchdog reset still fires every second (the ceiling
+is a detection-latency choice, not a watchdog constraint). The backoff resets to full cadence the
+instant the bus answers, or on `POST /detect` / `POST /set_hp` (`hp_poll_reconfigure`), so a
+just-wired unit is still identified promptly. A pass does:
 
 1. **Pin + protocol sweep** — try the identity page `0x00` on candidate RX/TX pairs (the cached
    pins first, their **swap** — a reversed X10A wire is the commonest mistake — then the per-target
    default and its swap) × protocol (cached framing first, then the other); keep the pins **and**
    framing that return a valid CRC-checked reply instead of `15 EA`. Only X10A-designated pins are
-   probed (no arbitrary GPIO). The winning pins/protocol are re-persisted only when they changed
-   (a UI pin override survives reboot); an unchanged link is confirmed with no NVS write.
+   probed (no arbitrary GPIO). The UART driver is **installed once** and each candidate is a
+   register-only pin remap (`uart_set_pin`), not a driver reinstall (`logic/uart_plan.hpp`,
+   host-tested) — the old reinstall-per-candidate allocated a fresh RX ring + driver struct on every
+   swap and, on a silent bus that alternates pins forever, fragmented the heap into an `abort()`. The
+   winning pins/protocol are re-persisted only when they changed (a UI pin override survives reboot);
+   an unchanged link is confirmed with no NVS write.
 2. **Page probe** — query every page any profile can reference (`0x00,0x10,0x20,0x21,0x30,0x60–0x65,
    0xA0,0xA1`) plus `0x11`; set a bit in a **page mask** for each page that answers.
 3. **Capacity + EEPROM** — read the O/U capacity from page `0x00` offset 12 (0.1 kW units) and the
@@ -361,8 +370,9 @@ falls in its class; among those, only the ones with **maximal page overlap** are
 feature-poor profiles). `detect_best()` then picks one deterministic representative (maximal overlap →
 tightest kW class → stable order) — never the old blind `candidates.front()` registry order.
 
-The result is applied only when the bus actually answered (a not-yet-wired unit retries next cycle
-instead of pinning `generic`); the model goes to the in-RAM config (`config_set_model`), while a
+The result is applied only when the bus actually answered (a not-yet-wired unit retries on the
+backoff cadence instead of pinning `generic`); the model goes to the in-RAM config
+(`config_set_model`), while a
 changed link cache (pins/proto) is persisted (`config_save_link`). Both are **narrow, field-owned**
 setters rather than a whole-`Config` save: detection reads its snapshot before a sweep that takes
 seconds, so committing the whole struct would write that snapshot's stale credentials back over a

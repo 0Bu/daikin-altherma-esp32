@@ -18,6 +18,7 @@
 #include "logic/crashinfo.hpp"
 #include "logic/crc.hpp"
 #include "logic/detect.hpp"
+#include "logic/detect_backoff.hpp"
 #include "logic/discovery.hpp"
 #include "logic/error_codes.hpp"
 #include "logic/health_gate.hpp"
@@ -32,6 +33,7 @@
 #include "logic/reset_reason.hpp"
 #include "logic/syslog_policy.hpp"
 #include "logic/timestamp.hpp"
+#include "logic/uart_plan.hpp"
 #include "logic/wifi_rollback.hpp"
 #include "logic/ws_policy.hpp"
 #include "def/registry.hpp"
@@ -1790,6 +1792,49 @@ static void test_http_body() {
     }
 }
 
+static void test_uart_plan() {
+    CHECK(uart_plan(false, -1, -1, 44, 43) == UartAction::Install);   // cold start
+    // Re-probing the SAME pins is a Noop — no delete, no reinstall, no heap.
+    CHECK(uart_plan(true, 44, 43, 44, 43) == UartAction::Noop);
+    // THE fix: the sweep's {44,43}<->{43,44} alternation is a genuine change -> Remap (uart_set_pin
+    // only), NOT Install. This turns ~2 reinstalls/second into zero heap allocations.
+    CHECK(uart_plan(true, 44, 43, 43, 44) == UartAction::Remap);
+    CHECK(uart_plan(true, 43, 44, 44, 43) == UartAction::Remap);
+    // A one-sided change (only rx, or only tx) is a Remap, never a false Noop.
+    CHECK(uart_plan(true, 44, 43, 44, 40) == UartAction::Remap);
+    CHECK(uart_plan(true, 44, 43, 40, 43) == UartAction::Remap);
+    // Not-inited always installs, regardless of stale pin memory from a prior session.
+    CHECK(uart_plan(false, 44, 43, 44, 43) == UartAction::Install);
+}
+
+static void test_detect_backoff() {
+    // WIRED common case: through the grace window the interval stays at the floor, so backoff never
+    // delays a bus that answers early.
+    CHECK(detect_backoff_interval_s(0) == DETECT_MIN_INTERVAL_S);
+    CHECK(detect_backoff_interval_s(DETECT_BACKOFF_AFTER) == DETECT_MIN_INTERVAL_S);    // still floor
+    CHECK(detect_backoff_interval_s(DETECT_BACKOFF_AFTER + 1) > DETECT_MIN_INTERVAL_S); // then it grows
+    CHECK(detect_backoff_interval_s(1000000) == DETECT_MAX_INTERVAL_S);                 // shift guard: no UB
+    int prev = 0;                                                                       // monotonic, clamped
+    for (int n = 0; n < 200; n++) {
+        const int v = detect_backoff_interval_s(n);
+        CHECK(v >= DETECT_MIN_INTERVAL_S && v <= DETECT_MAX_INTERVAL_S && v >= prev);
+        prev = v;
+    }
+    CHECK(DETECT_MAX_INTERVAL_S > DETECT_MIN_INTERVAL_S * 4);   // a material stretch, not a nudge
+    // step(): full cadence through the grace window, then back off, and a fingerprint resets at once.
+    DetectBackoff s;
+    for (int i = 0; i < DETECT_BACKOFF_AFTER; i++)
+        CHECK(detect_backoff_step(s, false) == DETECT_MIN_INTERVAL_S);
+    CHECK(s.silent == DETECT_BACKOFF_AFTER);
+    CHECK(detect_backoff_step(s, false) > DETECT_MIN_INTERVAL_S);   // silent past grace -> grows
+    CHECK(detect_backoff_step(s, true) == DETECT_MIN_INTERVAL_S);   // a swapped-in unit is swept at once
+    CHECK(s.silent == 0);
+    // Saturation: no overflow however long the bus stays silent; interval pinned at the ceiling.
+    for (int i = 0; i < 10000; i++) detect_backoff_step(s, false);
+    CHECK(s.silent == DETECT_SILENT_MAX);
+    CHECK(detect_backoff_step(s, false) == DETECT_MAX_INTERVAL_S);
+}
+
 int main() {
     test_crc();
     test_registers();
@@ -1815,6 +1860,8 @@ int main() {
     test_health_gate();
     test_ws_policy();
     test_http_body();
+    test_uart_plan();
+    test_detect_backoff();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }
     std::printf("%d logic test(s) FAILED\n", g_failures);
     return 1;
