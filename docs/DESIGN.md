@@ -335,9 +335,22 @@ operation-only.
 There is **no Settings page**. Firmware updates are triggered from the dashboard: the **Firmware**
 row on the ESP32 card (§5.3) is a button (chevron affordance) that checks for an OTA update.
 
-- **TODO** — the check is a placeholder toast today (no published GitHub release feed yet; the
-  firmware `ota_update.cpp` check is also a stub). Once a release source exists it wires to
-  `/ota/check` → `/ota/status` → `/ota/update`.
+- **The flow** — `GET /ota/check`, then poll `GET /ota/status` until the check finishes (every OTA
+  phase is asynchronous on the device, so the UI watches a state machine it doesn't drive). Up to
+  date → an `ok` toast naming the running version. Update available → a confirmation naming both
+  versions; on confirm `POST /ota/update`, then poll again surfacing `progress` as a toast, and on
+  `done` hand off to the same **reboot-and-reconnect poll** the modal saves use (§5.1), so the page
+  reconnects itself instead of going dead. A `503` from the shared OOM guard is reported as a
+  retryable "Device busy", never as a timeout.
+- **The one native dialog in the UI.** The update confirmation is a browser `confirm()`, not the
+  modal overlay pattern every other decision uses (§5.1). Deliberate and deliberately isolated: it
+  is a single yes/no with **no fields**, and the overlay machinery exists to host *inputs* — adding a
+  fourth modal for one boolean would cost more UI surface than it buys. It is the **only**
+  `confirm()`/`alert()` in `app.js`; if a second one is ever wanted, that is the signal to build the
+  overlay properly instead of spreading native dialogs.
+- **What "up to date" can also mean.** While the repository is private, CI publishes no manifest, so
+  a check legitimately finds nothing and says so. The UI does not distinguish "no newer version" from
+  "no feed configured" — both are honestly "up to date" from the device's point of view.
 - The **device log** is no longer surfaced in the UI (there was a Diagnostics screen; it was removed
   with the Settings page). It remains available out-of-band at `GET /diag` (verbose/clear via query).
 - There is **no language selector** — the firmware is English-only (§1).

@@ -57,11 +57,12 @@ this also prevents reading the config off a stolen board.
 
 ## OTA image signing
 
-> **Implementation status.** The *flash-time* signing described here and the **rollback health gate**
-> are implemented and host-tested. The **pull-OTA path itself — manifest check, image download, and
-> the downgrade gate — is not yet implemented**: `ota_update.cpp`'s `ota_check_async` /
-> `ota_update_async` are TODO stubs. The signature-verify-on-update and downgrade-gate points below
-> describe the intended design that lands with that path, not current runtime behaviour.
+> **Implementation status.** All of it is implemented: flash-time signing, the **rollback health
+> gate**, and the **pull-OTA path** (`ota_check_async` / `ota_update_async` in `ota_update.cpp` —
+> manifest check, `esp_https_ota` download, signature verify on install, and the downgrade gate).
+> What is *not* live is the **feed**: every publishing step in CI is gated on the repository being
+> public, so while it is private no manifest or image is served and a check reports "up to date".
+> The trust properties below are runtime behaviour, not intent.
 
 OTA updates are **signed** (Secure Boot v2 RSA-3072 signature scheme *without* hardware Secure
 Boot): the running app verifies the RSA signature of a downloaded image before installing it, so a
@@ -73,9 +74,25 @@ compromised update host (or its GitHub Pages source) cannot push unsigned or tam
 - **Trust is bootstrapped TOFU** — the first signed image reaches a device from the current
   unsigned build (which doesn't verify) or via USB; from then on every OTA image must be signed
   with the same offline key.
-- **Downgrade gate** *(planned — not yet implemented)* — before the bulk download, the running app
-  reads the incoming image's own version and refuses anything not strictly newer. A signature proves
-  authenticity, not freshness.
+- **Downgrade gate** *(implemented — `logic/version_cmp.hpp`, host-tested)* — the running app
+  refuses anything not strictly newer. A signature proves authenticity, not freshness: without this,
+  a compromised host could serve a genuine, correctly-signed **older** image and walk a fleet
+  backwards onto an already-fixed vulnerability, and every signature check would pass.
+
+  It is enforced at **two** points, because the manifest and the image are two separately-controlled
+  artifacts and only the second one binds:
+
+  1. Against the **manifest's** `version`, before the download starts — cheap, and stops a pointless
+     transfer. On its own this is *not* sufficient: it only checks what the host *claims*.
+  2. Against the **image's own embedded version** (`esp_app_desc_t`, read via
+     `esp_https_ota_get_img_desc()` once the transfer has begun but before anything is committed).
+     This is what defeats a host that advertises `9.9.9` in the manifest and serves a signed 1.0.0
+     binary. A mismatch between the two is refused outright — CI already verifies that a published
+     manifest agrees with the image it ships, so in the field a disagreement is a stale cache or an
+     attack, and neither is worth installing.
+
+  Version ordering is numeric, not lexical (`1.10.0 > 1.9.0`), and **fails closed**: an unparseable
+  version on either side refuses the update rather than assuming an ordering.
 - **Rollback health gate** *(implemented)* — a freshly-flashed image stays `PENDING_VERIFY` until it
   has run healthily for ~90 s (`ota_update.cpp`, `logic/health_gate.hpp`), so a boots-but-crashes
   image is reverted.
@@ -96,7 +113,8 @@ Three failure modes, and what recovers each:
 | # | How a bad image arrives | Auto-recovery |
 |---|---|---|
 | 1 | **OTA** installs an image that boots but is broken/crashes | ✅ dual-OTA + `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` + the health gate. The image boots `PENDING_VERIFY`; it must prove healthy or the bootloader reverts to the previous slot. |
-| 2 | **OTA** installs an *unsigned/tampered* image | ✅ by design — `esp_https_ota` verifies the RSA signature before it ever writes/activates the slot. *(The pull-OTA download is currently a TODO stub, so no OTA image installs yet; this is the behaviour that lands with it.)* |
+| 2 | **OTA** installs an *unsigned/tampered* image | ✅ `esp_https_ota_finish()` verifies the RSA-3072 signature before the slot is ever activated; a failure is surfaced to the UI as "Update rejected: bad signature" and the running image is untouched. |
+| 2b | **OTA** installs an authentically-signed but **older** image (downgrade onto a fixed bug) | ✅ the downgrade gate above — checked against the manifest *and* against the image's own embedded version, so a host that lies in the manifest is still refused. |
 | 3 | **Direct USB / Web-Serial flash** of an unsigned (or early-crashing) build | ⚠️ not auto-recoverable — see below. Prevented instead by `scripts/require-signed.sh`. |
 
 ### Why mode 3 can't roll back — and how it's contained

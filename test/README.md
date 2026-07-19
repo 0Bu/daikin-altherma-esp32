@@ -84,6 +84,15 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   threshold (no off-by-one), and which reset reasons count as a crash.
 - `logic/health_gate.hpp` — the OTA commit/wait/give-up verdict across the base window + hard cap,
   incl. an unconfigured (setup-AP) device.
+- `logic/version_cmp.hpp` — the OTA downgrade gate: numeric (not lexical) dotted-version ordering, so
+  `1.10.0 > 1.9.0`; equal and older refused; a `v` prefix and a semver pre-release suffix handled;
+  a 400-digit version saturates instead of overflowing; and an unparseable version on either side
+  **fails closed** rather than being assumed newer.
+- `logic/ota_manifest.hpp` — bounded extraction of the manifest's top-level `"version"`, driven with
+  hostile input: a `"version"` nested in `builds[]` must not shadow the real one, a crafted value
+  must not close its own string and inject a second key, an oversized value is **refused rather than
+  truncated** (a truncated `1.10.0` → `1.1` is well-formed and ordered wrong), and the parser must
+  respect the caller's length on a response cut short mid-value.
 - `logic/ws_policy.hpp` — the `/events` frame decision: that a frame one byte past the command
   buffer is *rejected* rather than clamped-and-read (the boundary where the handler used to `memcmp`
   stack a failed read never wrote), that an announced length up to `SIZE_MAX` reaches a decision and
