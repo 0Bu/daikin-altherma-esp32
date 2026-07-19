@@ -49,8 +49,11 @@ function renderDashboard() {
   // Header is a fixed product title ("daikin-altherma-esp32", set in index.html) — the detected
   // model name lives in the Model card (statusCardsHtml), not the header.
 
-  // hero: operation mode + fault state
-  const mode = pickValue(/operation mode|^mode$/i);
+  // hero: operation mode + fault state. Prefer the hydronic I/U mode (conv 315 — Stop/Heating/
+  // Cooling/DHW/…) over the outdoor unit's Operation Mode: during a DHW run the outdoor unit still
+  // reports "Heating" (it IS heating — the tank), but the user-relevant answer is what the water
+  // side is doing. Plain first-match sorted the outdoor row first.
+  const mode = pickValue(/i\/u operation mode/i) || pickValue(/operation mode|^mode$/i);
   const fault = faultValue();
   const faulted = fault && !FAULT_OK.test(String(fault).trim());
   if (!hp.connected) {
@@ -65,6 +68,7 @@ function renderDashboard() {
   }
   renderHeaderIp();
   renderConnections();
+  renderLive();
   renderCards();
 }
 // Header identity line: the IP address (or the mDNS hostname while offline/unknown — whatever the
@@ -453,6 +457,196 @@ function valueGroupsHtml(vals, connected) {
   for (const name of order) if (buckets.has(name)) { emit(name, buckets.get(name)); done.add(name); }
   for (const [name, rows] of buckets) if (!done.has(name)) emit(name, rows); // firmware-supplied custom groups
   return html;
+}
+
+// ── Live system section (hero chips/figures, schematic, KPI tiles, trend) ────────────────────
+// Everything here reads /values through label patterns — the same technique pickValue() already
+// uses — so the section degrades per model: a value the profile doesn't carry renders "—", and a
+// missing tank/room sensor hides that schematic part entirely (.no-dhw/.no-room). The DOM is
+// static (index.html) and updated in place: an innerHTML rebuild like #valueGroups' would restart
+// the CSS flow animations on every poll.
+const vRow = (re) => (S._values || []).find((x) => re.test(x.label || "") && x.value != null);
+const vNum = (re) => { const r = vRow(re); if (!r) return null; const n = parseFloat(r.value); return Number.isFinite(n) ? n : null; };
+// Bit-flag values arrive as "ON"/"OFF" text (logic/convert.hpp conv 300-307). null = row absent.
+const vOn = (re) => { const r = vRow(re); return r ? /^on$/i.test(String(r.value).trim()) : null; };
+const fmt1 = (n) => (n == null ? "—" : n.toFixed(1));
+const fmt0 = (n) => (n == null ? "—" : String(Math.round(n)));
+const setTxt = (id, s) => { const el = $(id); if (el && el.textContent !== s) el.textContent = s; };
+
+// Nominal compressor top speed for the modulation bar — a display scale, not a datum (the real
+// maximum is model-specific and not on the bus).
+const RPS_MAX = 120;
+
+function liveData() {
+  // ΔT is measured across the PHE: leaving water BEFORE the backup heater minus inlet water — with
+  // the BUH off (the normal case) before/after are equal, and the derived heat output must not
+  // credit the resistive heater to the heat pump.
+  const lwt = vNum(/leaving water.*before/i) ?? vNum(/leaving water/i);
+  const ret = vNum(/inlet water/i);
+  const cts = (S._values || []).filter((x) => /current measured by ct/i.test(x.label || "") && x.value != null);
+  const ct = cts.reduce((a, x) => a + (parseFloat(x.value) || 0), 0);
+  const inv = vNum(/inv primary current/i);
+  const d = {
+    lwt, ret,
+    dt: lwt != null && ret != null ? lwt - ret : null,
+    out: vNum(/outdoor air/i),
+    flow: vNum(/flow sensor/i),
+    wp: vNum(/^water pressure$/i),
+    rps: vNum(/inv frequency/i),
+    hp: vNum(/^high pressure$/i),
+    lp: vNum(/^low pressure$/i),
+    disch: vNum(/discharge pipe temp/i),
+    eev: vNum(/expansion valve ?1/i),
+    tank: vNum(/dhw tank temp/i),
+    tankSet: vNum(/dhw setpoint/i),
+    room: vNum(/^indoor ambient temp/i),
+    roomSet: vNum(/^rt setpoint/i),
+    dtSet: vNum(/target delta t heating/i),
+    pumpSig: vNum(/water pump signal/i),
+    pumpOn: vOn(/water pump operation/i),
+    valveDhw: vOn(/3.?way valve/i),          // label documents On:DHW / Off:Space
+    buh1: vOn(/buh step ?1/i),
+    buh2: vOn(/buh step ?2/i),
+    defrost: vOn(/defrost operation/i),
+    thermo: vOn(/thermostat on/i),
+    quiet: vOn(/low noise control|silent mode/i),
+  };
+  // Pump % — the wire value is inverted ("Water pump signal (0:max-100:stop)").
+  d.pump = d.pumpSig == null ? null : Math.min(100, Math.max(0, 100 - d.pumpSig));
+  // Derived figures, marked "est." in the UI — the bus has no energy registers. Thermal output from
+  // flow × ΔT (water ≈ 4.186 kJ/kg·K); electrical from the CT phase currents at an assumed 230 V,
+  // falling back to the inverter primary current when the profile has no CT rows.
+  // SIGNED on purpose: during a defrost the unit pulls heat back OUT of the heating water, so ΔT is
+  // genuinely negative. Clamping that to 0 published a measured-looking "0.0 kW" while ~5 kW flowed
+  // the other way — the same shape as the #37 sentinel-as-reading bug. Show what is actually there.
+  d.pth = d.flow != null && d.dt != null ? d.flow / 60 * 4.186 * d.dt : null;
+  d.pel = cts.length && ct > 0 ? ct * 230 / 1000 : inv != null ? inv * 230 / 1000 : null;
+  d.pelSrc = cts.length && ct > 0 ? "CT" : "INV";
+  const running = (d.rps ?? 0) > 5 && (d.dt ?? 0) > 0.5;
+  d.cop = running && d.pth != null && d.pel != null && d.pel > 0.2 ? d.pth / d.pel : null;
+  return d;
+}
+
+const chipHtml = (txt, cls) => `<span class="chip${cls ? " " + cls : ""}">${txt}</span>`;
+
+function renderLive() {
+  const live = !!(S.status?.hp?.connected) && (S._values || []).length > 0;
+  $("hpLive").hidden = !live;
+  $("heroChips").hidden = !live;
+  $("heroFigs").hidden = !live;
+  if (!live) return;
+  const d = liveData();
+
+  // Hero figures + chips (chips only for states this profile actually reports; text is static
+  // English — no user-controlled strings, so no esc() needed)
+  setTxt("hfLwt", fmt1(d.lwt));
+  setTxt("hfOut", fmt1(d.out));
+  $("hfPthFig").hidden = d.pth == null;
+  setTxt("hfPth", fmt1(d.pth));
+  const pumping = d.pumpOn ?? (d.flow != null ? d.flow > 1 : null);
+  const chips = [];
+  if (d.thermo != null) chips.push(chipHtml(d.thermo ? "Thermostat ON" : "Thermostat off", d.thermo ? "on" : ""));
+  if (pumping != null) chips.push(chipHtml(pumping ? "Pump ON" : "Pump off", pumping ? "on" : ""));
+  if (d.buh1 != null || d.buh2 != null) {
+    const on = !!(d.buh1 || d.buh2);
+    chips.push(chipHtml(on ? (d.buh2 ? "BUH step 2" : "BUH step 1") : "BUH off", on ? "hot" : ""));
+  }
+  if (d.defrost) chips.push(chipHtml("Defrost", "ice"));
+  if (d.quiet) chips.push(chipHtml("Quiet", ""));
+  $("heroChips").innerHTML = chips.join("");
+
+  // Schematic badges
+  setTxt("svOut", fmt1(d.out)); setTxt("svRps", fmt0(d.rps));
+  setTxt("svHp", fmt1(d.hp)); setTxt("svLp", fmt1(d.lp));
+  setTxt("svDisch", fmt0(d.disch)); setTxt("svEev", fmt0(d.eev));
+  setTxt("svLwt", fmt1(d.lwt)); setTxt("svRwt", fmt1(d.ret));
+  setTxt("svDt", fmt1(d.dt)); setTxt("svFlow", fmt1(d.flow));
+  setTxt("svWp", fmt1(d.wp)); setTxt("svPump", fmt0(d.pump));
+  setTxt("svTank", fmt1(d.tank)); setTxt("svTankSet", fmt1(d.tankSet));
+  setTxt("svRoom", fmt1(d.room)); setTxt("svRoomSet", fmt1(d.roomSet));
+  const toDhw = d.valveDhw === true;
+  setTxt("svValve", "3WV → " + (toDhw ? "DHW" : "heating"));
+
+  // Schematic state classes drive the CSS animations (flows, fan, pump, BUH glow, defrost)
+  const sc = $("schem");
+  const rpsOn = (d.rps ?? 0) > 0;
+  sc.classList.toggle("fan-on", rpsOn && d.defrost !== true);
+  sc.classList.toggle("pump-on", pumping === true);
+  sc.classList.toggle("buh-on", !!(d.buh1 || d.buh2));
+  sc.classList.toggle("defrost-on", d.defrost === true);
+  sc.classList.toggle("no-dhw", d.tank == null);
+  sc.classList.toggle("no-room", d.room == null);
+  const onCls = (id, on) => $(id).classList.toggle("on", !!on);
+  onCls("fSup1", pumping); onCls("fSup2", pumping); onCls("fRet", pumping);
+  onCls("fTank", pumping && toDhw); onCls("fCoil", pumping && toDhw); onCls("fTankRet", pumping && toDhw);
+  onCls("fHeat", pumping && !toDhw); onCls("fHeatRet", pumping && !toDhw);
+  onCls("rfHot", rpsOn); onCls("rfCold", rpsOn);
+  $("rfHot").classList.toggle("rev", d.defrost === true);   // defrost reverses the refrigerant loop
+  $("rfCold").classList.toggle("rev", d.defrost === true);
+
+  // KPI tiles
+  setTxt("kRps", fmt0(d.rps));
+  $("kRpsBar").style.width = d.rps != null ? Math.min(100, Math.round(d.rps / RPS_MAX * 100)) + "%" : "0%";
+  setTxt("kFlow", fmt1(d.flow)); setTxt("kPump", fmt0(d.pump));
+  setTxt("kDt", fmt1(d.dt)); setTxt("kDtSet", fmt1(d.dtSet));
+  setTxt("kWp", fmt1(d.wp));
+  $("kWpBar").style.width = d.wp != null ? Math.min(100, Math.round(d.wp / 3 * 100)) + "%" : "0%";
+  setTxt("kPth", fmt1(d.pth));
+  // Bar floors at 0 — it cannot render a negative length. The figure above it carries the sign, so
+  // a defrost reads "-5.2 kW" over an empty bar rather than a filled bar over a clamped zero.
+  $("kPthBar").style.width = d.pth != null ? Math.min(100, Math.max(0, Math.round(d.pth / 16 * 100))) + "%" : "0%";
+  setTxt("kCop", d.cop == null ? "—" : d.cop.toFixed(1));
+  setTxt("kPelSub", d.pel != null ? `${fmt1(d.pel)} kW el. (${d.pelSrc})` : "no current sensor");
+
+  trendSample(d);
+}
+
+// ── Short-term trend: client-side ring buffer over the /events pushes ────────────────────────
+// One sample every 10 s, 180 samples ≈ 30 min — enough to make cycling, DHW runs and defrost dips
+// visible. Lost on reload by design; long-term history is Home Assistant/Grafana's job.
+const TREND_MS = 10000, TREND_N = 180;
+const trend = { t: 0, lwt: [], out: [] };
+function trendSample(d) {
+  const now = Date.now();
+  if (now - trend.t < TREND_MS) return;
+  trend.t = now;
+  trend.lwt.push(d.lwt);
+  trend.out.push(d.out);
+  if (trend.lwt.length > TREND_N) { trend.lwt.shift(); trend.out.shift(); }
+  drawTrend();
+}
+function drawTrend() {
+  const W = 640, H = 150, PL = 36, PR = 64, PT = 10, PB = 14;
+  const fin = (a) => a.filter((x) => x != null && Number.isFinite(x));
+  const finL = fin(trend.lwt), finO = fin(trend.out);
+  $("tlOut").hidden = finO.length < 2;      // legend names only series that draw
+  if (finL.length < 2 && finO.length < 2) {
+    $("trend").innerHTML = `<text class="tr-empty" x="${W / 2}" y="${H / 2}" text-anchor="middle">Collecting data…</text>`;
+    return;
+  }
+  const all = finL.concat(finO);
+  const lo = Math.floor(Math.min(...all) - 1), hi = Math.ceil(Math.max(...all) + 1);
+  const n = trend.lwt.length;
+  const x = (i) => PL + (n < 2 ? 0 : i / (n - 1) * (W - PL - PR));
+  const y = (t) => PT + (1 - (t - lo) / (hi - lo)) * (H - PT - PB);
+  const gy1 = y(lo + (hi - lo) * 0.25), gy2 = y(lo + (hi - lo) * 0.75);
+  let svg =
+    `<line class="tr-grid" x1="${PL}" y1="${gy1.toFixed(1)}" x2="${W - PR}" y2="${gy1.toFixed(1)}"/>` +
+    `<line class="tr-grid" x1="${PL}" y1="${gy2.toFixed(1)}" x2="${W - PR}" y2="${gy2.toFixed(1)}"/>` +
+    `<text class="tr-axis" x="4" y="${(y(hi) + 10).toFixed(1)}">${hi}°</text>` +
+    `<text class="tr-axis" x="4" y="${y(lo).toFixed(1)}">${lo}°</text>`;
+  const series = (buf, col) => {
+    if (fin(buf).length < 2) return;
+    const pts = buf.map((t, i) => (t == null ? null : `${x(i).toFixed(1)},${y(t).toFixed(1)}`)).filter(Boolean).join(" ");
+    let li = buf.length - 1;
+    while (li >= 0 && buf[li] == null) li--;
+    svg += `<polyline class="tr-line" style="stroke:var(${col})" points="${pts}"/>` +
+      `<circle class="tr-end" cx="${x(li).toFixed(1)}" cy="${y(buf[li]).toFixed(1)}" r="3.5" fill="var(${col})"/>` +
+      `<text class="tr-val" x="${(x(li) + 8).toFixed(1)}" y="${(y(buf[li]) + 4).toFixed(1)}" fill="var(${col})">${buf[li].toFixed(1)}°</text>`;
+  };
+  series(trend.out, "--flow-cold");
+  series(trend.lwt, "--flow-hot");
+  $("trend").innerHTML = svg;
 }
 
 // ── WiFi (dashboard edit modal) ───────────────────────────────────────────
