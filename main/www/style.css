@@ -6,6 +6,11 @@
   --brand:#0097E0; --brand-strong:#0079BD; --brand-sky:#5AC8F0; --brand-navy:#14285A; --brand-tint:#E9F6FD;
   --bg:#F4F5F7; --card:#FFFFFF; --fg:#1C2530; --muted:#6B7480; --line:#E2E5EA; --soft:#F1F3F5;
   --ok:#1A9D5A; --warn:#C9740A; --err:#D23B3B;
+  /* Supply/return flow colours (system schematic pipes + trend series) — a CVD-validated pair,
+     deliberately separate from the ok/warn/err STATE colours: they encode temperature, not health.
+     The schematic's idle-pipe/plate greys derive from the neutral ramp, no extra brand tokens. */
+  --flow-hot:#DC5A32; --flow-cold:#3F7FD0;
+  --pipe:#C9CED6; --hatch:#EDF0F3;
   --focus-ring:rgba(0,151,224,.22);
   --shadow-logo:0 2px 8px rgba(0,151,224,.35);
   --shadow-cta:0 3px 12px rgba(0,151,224,.30);
@@ -19,6 +24,8 @@
     --brand:#33ABE8; --brand-strong:#0097E0; --brand-navy:#0E1C43; --brand-tint:#12202B;
     --bg:#12151A; --card:#1B1F27; --fg:#E6E9EE; --muted:#93A0AF; --line:#2A2F39; --soft:#20242C;
     --ok:#3FBE7A; --warn:#E08A2B; --err:#EA5A5A;
+    --flow-hot:#E06A40; --flow-cold:#5A97DE;
+    --pipe:#3A414D; --hatch:#232935;
     --shadow-card:0 1px 2px rgba(0,0,0,.5),0 10px 28px rgba(0,0,0,.45);
   }
 }
@@ -94,6 +101,88 @@ main { flex: 1; }
 }
 .hero-mode { font-size: 33px; font-weight: 650; letter-spacing: -.6px; margin-top: 9px; }
 .hero-sub { font-size: 14.5px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
+
+/* ── Hero "Now" panel: state chips + key figures (shown while the X10A link is live) ─────── */
+.hero-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 13px; }
+.chip {
+  font-size: 11.5px; font-weight: 600; border-radius: var(--r-pill); padding: 3px 10px;
+  border: 1px solid var(--line); background: var(--card); color: var(--muted);
+}
+.chip.on  { color: var(--ok);  border-color: var(--ok); }
+.chip.hot { color: var(--warn); border-color: var(--warn); }
+.chip.ice { color: var(--flow-cold); border-color: var(--flow-cold); }
+.hero-figs { display: flex; gap: 26px; flex-wrap: wrap; margin-top: 14px; }
+.fig-k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.fig-k small { text-transform: none; letter-spacing: 0; }
+.fig-v { font-size: 19px; font-weight: 700; }
+.fig-v small { font-size: 12px; color: var(--muted); font-weight: 500; }
+
+/* ── Live system section: schematic + KPI tiles + trend ──────────────────── */
+#hpLive { margin-top: 12px; }
+.schem-card { margin: 0 0 12px; padding: 14px 12px 8px; }
+.schem-card .section-label { display: block; margin: 0 6px 6px; }
+.schem-scroll { overflow-x: auto; }
+.schem-scroll svg { display: block; min-width: 640px; width: 100%; height: auto; }
+svg .sc-box { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+svg .sc-plate { fill: var(--hatch); stroke: var(--line); }
+svg .sc-lbl { fill: var(--muted); font: 700 10px var(--font-sans); letter-spacing: .08em; }
+svg .sc-pill { fill: var(--card); stroke: var(--line); }
+svg .sc-val { fill: var(--fg); font: 600 11px var(--font-sans); font-variant-numeric: tabular-nums; }
+svg .sc-sub { fill: var(--muted); font: 500 9.5px var(--font-sans); }
+svg .sc-state { fill: var(--muted); font: 600 10px var(--font-sans); }
+svg .sc-pipe { fill: none; stroke: var(--pipe); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+svg .sc-rpipe { fill: none; stroke: var(--pipe); stroke-width: 3.5; stroke-linecap: round; }
+svg .sc-flow {
+  fill: none; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 9 15; opacity: 0; transition: opacity .4s;
+}
+svg .sc-rflow { fill: none; stroke-width: 3.5; stroke-linecap: round; stroke-dasharray: 6 12; opacity: 0; transition: opacity .4s; }
+svg .hot  { stroke: var(--flow-hot); }
+svg .cold { stroke: var(--flow-cold); }
+@keyframes dashfwd { to { stroke-dashoffset: -24; } }
+@keyframes rdashfwd { to { stroke-dashoffset: -18; } }
+@keyframes rdashrev { to { stroke-dashoffset: 18; } }
+svg .sc-flow.on { opacity: 1; animation: dashfwd 1.1s linear infinite; }
+svg .sc-rflow.on { opacity: 1; animation: rdashfwd 1.1s linear infinite; }
+svg .sc-rflow.on.rev { animation-name: rdashrev; }
+#scFan, #scPump { transform-box: fill-box; transform-origin: center; }
+.fan-on #scFan { animation: spin 1.6s linear infinite; }
+.pump-on #scPump { animation: spin 1.2s linear infinite; }
+svg .sc-valve { fill: var(--card); stroke: var(--muted); stroke-width: 1.5; }
+svg .sc-comp { fill: var(--brand-tint); stroke: var(--brand-strong); stroke-width: 1.5; }
+svg .sc-buh { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+.buh-on .sc-buh { fill: var(--brand-tint); stroke: var(--warn); }
+.buh-on .sc-bolt { fill: var(--warn); }
+svg .sc-bolt { fill: var(--muted); }
+svg .sc-snow { opacity: 0; transition: opacity .3s; }
+.defrost-on .sc-snow { opacity: 1; }
+/* Models without a DHW tank / room sensor: hide those schematic parts instead of dangling "—" */
+.no-dhw .g-dhw { display: none; }
+.no-room .g-room { display: none; }
+
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.kpi { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-tile); box-shadow: var(--shadow-card); padding: 12px 14px; }
+.kpi-k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.kpi-k small { text-transform: none; letter-spacing: 0; }
+.kpi-v { font-size: 21px; font-weight: 700; margin-top: 2px; }
+.kpi-v small { font-size: 12px; color: var(--muted); font-weight: 500; }
+.kpi-sub { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.meter { height: 5px; border-radius: 3px; background: var(--line); margin-top: 8px; overflow: hidden; }
+.meter i { display: block; height: 100%; width: 0; border-radius: 3px; background: var(--brand); transition: width .6s; }
+.meter.warm i { background: var(--flow-hot); }
+
+.trend-card { margin-top: 12px; padding: 16px 18px 12px; }
+.trend-card .section-label { display: block; margin-bottom: 8px; }
+.trend-legend { display: flex; gap: 16px; align-items: center; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.trend-legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+.trend-scroll { overflow-x: auto; }
+.trend-scroll svg { display: block; min-width: 560px; width: 100%; height: auto; }
+svg .tr-grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 5; }
+svg .tr-axis { fill: var(--muted); font: 500 10px var(--font-sans); font-variant-numeric: tabular-nums; }
+svg .tr-line { fill: none; stroke-width: 2; stroke-linejoin: round; }
+svg .tr-end { stroke: var(--card); stroke-width: 2; }
+svg .tr-val { font: 700 11px var(--font-sans); font-variant-numeric: tabular-nums; }
+svg .tr-empty { fill: var(--muted); font: 500 13px var(--font-sans); }
 
 /* ── Connections tile (dashboard, WiFi · MQTT · Syslog · NTP combined) ─────────────────────── */
 /* Full width like the hero and every #valueGroups card — the whole dashboard is one column
@@ -290,4 +379,9 @@ main { flex: 1; }
   .vrow-unit { font-size: 13.5px; }
   .conn-row { padding: 14px 0; }
   .vrow, .vname { padding-top: 11px; padding-bottom: 11px; }
+  .fig-k, .kpi-k { font-size: 12.5px; }
+  .fig-v { font-size: 22px; }
+  .kpi-v { font-size: 24px; }
+  .chip { font-size: 13px; }
+  .kpi-sub, .trend-legend { font-size: 13px; }
 }

@@ -43,7 +43,173 @@
           <div class="hero-kicker"><span class="hero-dot" id="heroDot"></span><span id="heroKicker">—</span></div>
           <div class="hero-mode" id="heroMode">—</div>
           <div class="hero-sub" id="heroSub"></div>
+          <!-- "Now" panel: state chips (thermostat/pump/BUH/defrost bit-flags) + three key figures.
+               Populated by renderLive(); hidden while the X10A link is down. -->
+          <div class="hero-chips" id="heroChips" hidden></div>
+          <div class="hero-figs" id="heroFigs" hidden>
+            <div class="fig"><div class="fig-k">Leaving water</div><div class="fig-v num"><span id="hfLwt">—</span> <small>°C</small></div></div>
+            <div class="fig"><div class="fig-k">Outdoor</div><div class="fig-v num"><span id="hfOut">—</span> <small>°C</small></div></div>
+            <div class="fig" id="hfPthFig"><div class="fig-k">Heat output <small>est.</small></div><div class="fig-v num"><span id="hfPth">—</span> <small>kW</small></div></div>
+          </div>
         </div>
+
+        <!-- ═══ Live system section: schematic + KPI tiles + trend (DESIGN.md §5.3) ═══
+             Static DOM updated in place by renderLive()/drawTrend() — deliberately NOT rebuilt per
+             poll like #valueGroups: an innerHTML rebuild would restart the CSS flow animations and
+             drop the trend SVG every second. Hidden while the X10A link is down. -->
+        <section id="hpLive" hidden>
+          <figure class="card schem-card" id="schem"
+                  aria-label="Live system schematic: outdoor unit, refrigerant circuit, plate heat exchanger, water circuit with backup heater and 3-way valve, domestic hot water tank and heating circuit">
+            <div class="section-label">System</div>
+            <div class="schem-scroll">
+              <svg viewBox="0 0 760 470" role="img" aria-hidden="true">
+                <!-- Outdoor unit -->
+                <rect class="sc-box" x="24" y="120" width="180" height="230" rx="10"/>
+                <text class="sc-lbl" x="40" y="142">OUTDOOR UNIT</text>
+                <circle cx="80" cy="205" r="34" fill="none" stroke="var(--line)" stroke-width="2"/>
+                <g id="scFan">
+                  <path d="M80 205 m0 -26 a10 10 0 0 1 6 18 l-6 -18z M80 205 m22 13 a10 10 0 0 1 -19 3 l19 -3z M80 205 m-22 13 a10 10 0 0 1 13 -21 l-13 21z" fill="var(--brand)" opacity=".85"/>
+                  <circle cx="80" cy="205" r="5" fill="var(--brand-strong)"/>
+                </g>
+                <circle class="sc-comp" cx="152" cy="300" r="25"/>
+                <text class="sc-state" x="152" y="297" text-anchor="middle" style="font-size:9px">COMP</text>
+                <text class="sc-val" x="152" y="310" text-anchor="middle"><tspan id="svRps">—</tspan> rps</text>
+                <g class="sc-snow">
+                  <rect class="sc-pill" x="96" y="252" width="70" height="20" rx="10" style="stroke:var(--flow-cold)"/>
+                  <text class="sc-val" x="131" y="266" text-anchor="middle" style="fill:var(--flow-cold)">❄ defrost</text>
+                </g>
+                <g>
+                  <rect class="sc-pill" x="30" y="88" width="112" height="22" rx="11"/>
+                  <text class="sc-val" x="86" y="103" text-anchor="middle">Outdoor <tspan id="svOut">—</tspan> °C</text>
+                </g>
+                <!-- Refrigerant circuit (outdoor unit ↔ PHE) -->
+                <path class="sc-rpipe" d="M204 180 H 330"/>
+                <path class="sc-rflow hot" id="rfHot" d="M204 180 H 330"/>
+                <path class="sc-rpipe" d="M330 300 H 204"/>
+                <path class="sc-rflow cold" id="rfCold" d="M330 300 H 204"/>
+                <g>
+                  <rect class="sc-pill" x="212" y="146" width="112" height="22" rx="11"/>
+                  <text class="sc-val" x="268" y="161" text-anchor="middle"><tspan id="svHp">—</tspan> bar · <tspan id="svDisch">—</tspan> °C</text>
+                </g>
+                <g>
+                  <rect class="sc-pill" x="212" y="316" width="112" height="22" rx="11"/>
+                  <text class="sc-val" x="268" y="331" text-anchor="middle"><tspan id="svLp">—</tspan> bar · EEV <tspan id="svEev">—</tspan></text>
+                </g>
+                <!-- Plate heat exchanger -->
+                <rect class="sc-plate" x="330" y="150" width="48" height="170" rx="6"/>
+                <path d="M340 158 v154 M349 158 v154 M358 158 v154 M367 158 v154" stroke="var(--line)" stroke-width="1.5" fill="none"/>
+                <text class="sc-lbl" x="354" y="340" text-anchor="middle">PHE</text>
+                <g>
+                  <rect class="sc-pill" x="390" y="228" width="76" height="22" rx="11"/>
+                  <text class="sc-val" x="428" y="243" text-anchor="middle">ΔT <tspan id="svDt">—</tspan> K</text>
+                </g>
+                <!-- Water circuit: supply -->
+                <path class="sc-pipe" d="M378 180 H 430"/>
+                <path class="sc-pipe" d="M474 180 H 520"/>
+                <path class="sc-flow hot" id="fSup1" d="M378 180 H 430"/>
+                <path class="sc-flow hot" id="fSup2" d="M474 180 H 520"/>
+                <g>
+                  <rect class="sc-pill" x="352" y="118" width="66" height="22" rx="11"/>
+                  <text class="sc-val" x="385" y="133" text-anchor="middle"><tspan id="svLwt">—</tspan> °C</text>
+                  <text class="sc-sub" x="385" y="112" text-anchor="middle">leaving water</text>
+                </g>
+                <!-- Backup heater -->
+                <rect class="sc-buh" x="430" y="164" width="44" height="32" rx="6"/>
+                <path class="sc-bolt" d="M454 168 l-8 12 h6 l-4 12 10 -14 h-6 l6 -10z"/>
+                <text class="sc-lbl" x="452" y="212" text-anchor="middle">BUH</text>
+                <!-- 3-way valve -->
+                <circle class="sc-valve" cx="520" cy="180" r="14"/>
+                <path d="M508 180 h24 M520 168 v12" stroke="var(--muted)" stroke-width="2" fill="none"/>
+                <text class="sc-state" x="520" y="216" text-anchor="middle" id="svValve">3WV</text>
+                <!-- DHW tank branch (hidden via .no-dhw when the model has no tank values) -->
+                <g class="g-dhw">
+                  <path class="sc-pipe" d="M520 180 V 70 H 585"/>
+                  <path class="sc-flow hot" id="fTank" d="M520 180 V 70 H 585"/>
+                  <rect class="sc-box" x="585" y="34" width="120" height="140" rx="14"/>
+                  <text class="sc-lbl" x="600" y="54">DHW TANK</text>
+                  <path d="M600 150 q10 -12 20 0 t20 0 t20 0 t20 0" fill="none" stroke="var(--pipe)" stroke-width="4" stroke-linecap="round"/>
+                  <path class="sc-flow hot" id="fCoil" style="stroke-width:4" d="M600 150 q10 -12 20 0 t20 0 t20 0 t20 0"/>
+                  <text class="sc-val" x="645" y="102" text-anchor="middle" style="font-size:17px"><tspan id="svTank">—</tspan> °C</text>
+                  <text class="sc-sub" x="645" y="120" text-anchor="middle">set <tspan id="svTankSet">—</tspan> °C</text>
+                  <!-- tank return joins the return line at y=400 -->
+                  <path class="sc-pipe" d="M600 174 V 400"/>
+                  <path class="sc-flow cold" id="fTankRet" d="M600 174 V 400"/>
+                </g>
+                <!-- Heating circuit -->
+                <path class="sc-pipe" d="M520 180 H 690 V 268"/>
+                <path class="sc-flow hot" id="fHeat" d="M520 180 H 690 V 268"/>
+                <rect class="sc-box" x="640" y="268" width="100" height="56" rx="8"/>
+                <path d="M654 276 v40 M672 276 v40 M690 276 v40 M708 276 v40 M726 276 v40" stroke="var(--line)" stroke-width="3" fill="none"/>
+                <text class="sc-lbl" x="636" y="346">HEATING</text>
+                <!-- Return line -->
+                <path class="sc-pipe" d="M690 386 V 400 H 400 V 300 H 378"/>
+                <path class="sc-flow cold" id="fRet" d="M690 386 V 400 H 400 V 300 H 378"/>
+                <path class="sc-pipe" d="M690 324 V 386"/>
+                <path class="sc-flow cold" id="fHeatRet" d="M690 324 V 386"/>
+                <circle class="sc-valve" cx="470" cy="400" r="17"/>
+                <g id="scPump"><path d="M470 400 l-8 -9 h16 z" fill="var(--brand)"/></g>
+                <text class="sc-lbl" x="470" y="432" text-anchor="middle">PUMP <tspan class="sc-val" id="svPump">—</tspan>%</text>
+                <g>
+                  <rect class="sc-pill" x="510" y="411" width="66" height="22" rx="11"/>
+                  <text class="sc-val" x="543" y="426" text-anchor="middle"><tspan id="svRwt">—</tspan> °C</text>
+                  <text class="sc-sub" x="543" y="447" text-anchor="middle">return</text>
+                </g>
+                <g>
+                  <rect class="sc-pill" x="286" y="411" width="150" height="22" rx="11"/>
+                  <text class="sc-val" x="361" y="426" text-anchor="middle"><tspan id="svFlow">—</tspan> l/min · <tspan id="svWp">—</tspan> bar</text>
+                </g>
+                <!-- Room pill drawn last so it sits above the return pipes crossing beneath it -->
+                <g class="g-room">
+                  <rect class="sc-pill" x="622" y="356" width="136" height="22" rx="11"/>
+                  <text class="sc-val" x="690" y="371" text-anchor="middle">Room <tspan id="svRoom">—</tspan> / <tspan id="svRoomSet">—</tspan> °C</text>
+                </g>
+              </svg>
+            </div>
+          </figure>
+
+          <!-- KPI tiles: the working point in numbers; est. values are derived, never measured -->
+          <div class="kpis">
+            <div class="kpi"><div class="kpi-k">Compressor</div>
+              <div class="kpi-v num"><span id="kRps">—</span> <small>rps</small></div>
+              <div class="meter"><i id="kRpsBar"></i></div>
+            </div>
+            <div class="kpi"><div class="kpi-k">Flow</div>
+              <div class="kpi-v num"><span id="kFlow">—</span> <small>l/min</small></div>
+              <div class="kpi-sub">pump <span class="num" id="kPump">—</span> %</div>
+            </div>
+            <div class="kpi"><div class="kpi-k">ΔT water</div>
+              <div class="kpi-v num"><span id="kDt">—</span> <small>K</small></div>
+              <div class="kpi-sub">target <span class="num" id="kDtSet">—</span> K</div>
+            </div>
+            <div class="kpi"><div class="kpi-k">Water pressure</div>
+              <div class="kpi-v num"><span id="kWp">—</span> <small>bar</small></div>
+              <div class="meter"><i id="kWpBar"></i></div>
+            </div>
+            <div class="kpi"><div class="kpi-k">Heat output <small>est.</small></div>
+              <div class="kpi-v num"><span id="kPth">—</span> <small>kW</small></div>
+              <div class="meter warm"><i id="kPthBar"></i></div>
+            </div>
+            <div class="kpi"><div class="kpi-k">COP <small>est.</small></div>
+              <div class="kpi-v num" id="kCop">—</div>
+              <div class="kpi-sub num" id="kPelSub">—</div>
+            </div>
+          </div>
+
+          <!-- Short-term trend from a client-side ring buffer over the /events pushes (lost on
+               reload — long-term history stays in Home Assistant/Grafana) -->
+          <div class="card trend-card">
+            <div class="section-label">Trend — last 30 min</div>
+            <div class="trend-legend">
+              <span><i style="background:var(--flow-hot)"></i>Leaving water</span>
+              <span id="tlOut"><i style="background:var(--flow-cold)"></i>Outdoor</span>
+            </div>
+            <div class="trend-scroll">
+              <svg id="trend" viewBox="0 0 640 150" role="img"
+                   aria-label="Trend lines: leaving-water and outdoor temperature over the last 30 minutes"></svg>
+            </div>
+          </div>
+        </section>
+
         <!-- Connections tile: WiFi/MQTT/Syslog/NTP combined, full width like the hero and every card
              in #valueGroups below (all one column). Populated by connectionsHtml() in app.js. -->
         <div class="conn-tile" id="connTile"></div>

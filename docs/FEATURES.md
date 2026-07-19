@@ -414,7 +414,8 @@ the fact*, from the field, without a serial cable:
   service, not a static board fact) and the syslog TIMESTAMP field below; before the first sync of a
   boot both fall back to `null`/`-` rather than a fabricated epoch date. The dashboard's NTP row shows
   the configured server, coloured `--ok` once synced and `--warn` while syncing (DESIGN.md §5.3 item
-  2) — the synced wall clock itself isn't shown on the row (no room in a one-line tile), but remains
+  5, the Connections tile) — the synced wall clock itself isn't shown on the row (no room in a
+  one-line tile), but remains
   available via the MQTT heartbeat's `device_time` sensor and `/status.ntp.time`. An empty
   `/set_ntp` save is read on the next boot as "reset to the compile-time
   default" — unlike Syslog/MQTT, SNTP has no disabled state to preserve, so empty can't mean "off"
