@@ -788,8 +788,69 @@ async function onPinPick() {
 // Tapping the Firmware version checks for an OTA update. TODO: wire to /ota/check + /ota/status +
 // /ota/update once a published GitHub release feed exists (ota_update.cpp check is also a stub). For
 // now there is no release source, so this is an honest placeholder instead of a misleading result.
-function checkFirmwareUpdate() {
-  toast("Update checking isn’t available yet", "info");
+// Poll /ota/status until `state` leaves the set we're waiting on, or we run out of patience.
+// Every OTA phase is asynchronous on the device (the download runs on its own task so the single
+// httpd worker stays free), so the UI's whole job here is to watch a state machine it does not drive.
+async function otaPoll(waitStates, tries, onTick) {
+  for (let i = 0; i < tries; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    let s;
+    try { s = await j("/ota/status"); } catch { continue; }   // a dropped poll is not a failure
+    if (onTick) onTick(s);
+    if (!waitStates.includes(s.state)) return s;
+  }
+  return null;
+}
+
+async function checkFirmwareUpdate() {
+  if (S.busy) { toast("Still applying the last change…", "info"); return; }
+  S.busy = true;
+  // rebootPoll() clears S.busy itself, asynchronously, once the device answers again — so the exit
+  // path must hand ownership over rather than clear the flag on the way out. Clearing it here after
+  // starting the poll would re-enable the UI while the device is still rebooting.
+  let handedOff = false;
+  try {
+    toast("Checking for updates…", "info");
+    try { await j("/ota/check?ms=" + Date.now()); }
+    catch { toast("Couldn't reach the device", "err"); return; }
+
+    const s = await otaPoll(["checking"], 30);
+    if (!s)                 { toast("Update check timed out", "err"); return; }
+    if (s.state === "error"){ toast(s.message || "Update check failed", "err"); return; }
+    if (!s.update_available) { toast(`Up to date (v${s.current})`, "ok"); return; }
+
+    // The device re-fetches the manifest and re-runs the downgrade gate before downloading, so this
+    // prompt is a courtesy, not the safety check — declining here changes nothing on the device.
+    if (!confirm(`Update available: v${s.current} → v${s.available}\n\n` +
+                 `The device downloads and installs the signed image, then reboots. ` +
+                 `If the new firmware can't get online it rolls back automatically.`)) {
+      toast("Update cancelled", "info");
+      return;
+    }
+
+    // fetch resolves for ANY answered status, so a 503 from the shared OOM guard arrives as a
+    // perfectly successful promise. Left unchecked it would fall through into the poll below and
+    // surface 5 minutes later as "Update timed out" — the wrong diagnosis for a retryable refusal.
+    let r;
+    try { r = await post("/ota/update", {}); }
+    catch { toast("Couldn't start the update", "err"); return; }
+    if (r.status === 503) { toast("Device busy — retry in a moment", "err"); return; }
+    if (!r.ok) { toast(await errorOf(r, "Couldn't start the update"), "err"); return; }
+
+    toast("Downloading… keep the device powered", "info");
+    const done = await otaPoll(["checking", "updating"], 300,
+                               (t) => { if (t.state === "updating") toast(`Downloading… ${t.progress}%`, "info"); });
+    if (!done)                  { toast("Update timed out", "err"); return; }
+    if (done.state === "error") { toast(done.message || "Update failed", "err"); return; }
+
+    // state === "done": the device reboots ~600 ms after reporting it. Hand off to the same
+    // reboot-poll the config saves use, so the UI reconnects instead of showing a dead page.
+    toast("Installed — rebooting…", "ok");
+    rebootPoll(renderDashboard);
+    handedOff = true;
+  } finally {
+    if (!handedOff) S.busy = false;
+  }
 }
 
 // ── Reboot-and-reconnect writes (WiFi / MQTT / Syslog) ────────────────────

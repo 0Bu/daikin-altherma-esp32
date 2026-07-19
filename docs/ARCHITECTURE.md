@@ -88,8 +88,9 @@ provisioning.cpp    → captive setup portal (SoftAP daikin-altherma-esp32-setup
                       created and started only so the radio can scan, never given credentials
 captive_dns.cpp     → UDP:53 catch-all (every name → 192.168.4.1) so the setup portal auto-pops
 mqtt_ha.cpp/.hpp    → Home Assistant MQTT-Discovery bridge (streamed discovery), read-only
-ota_update.cpp      → OTA: rollback health gate (implemented); pull check/download + downgrade
-                      gate via esp_https_ota (TODO stubs — see ota_update.hpp)
+ota_update.cpp      → OTA: manifest check + esp_https_ota download + the two-point downgrade
+                      gate + the rollback health gate. Both network ops run on ONE on-demand
+                      task (never the httpd worker), one at a time; status behind a mutex
 diag_log.cpp        → in-RAM console ring served by GET /diag (static .bss buffer); each line is
                       also handed to syslog_send() for optional off-device forwarding
 syslog.cpp          → optional syslog UDP client (RFC 5424, off when syslog_host is empty). The
@@ -247,6 +248,17 @@ host-testable core is unusually large and valuable, because the risky parts are 
   cap, including the setup-AP case where no credentials means connectivity isn't expected and the
   image is healthy anyway. Pure, so the rule that decides whether a new image sticks is testable
   without flashing one.
+- `logic/version_cmp.hpp` — the OTA **downgrade gate**: numeric dotted-version ordering
+  (`1.10.0 > 1.9.0`, which a `strcmp` gets backwards) and `ota_is_upgrade()`, which accepts only a
+  strictly-newer candidate and **fails closed** on anything it cannot parse. A signature proves a
+  build is authentic, not newer, so this is the only thing standing between the update feed and an
+  authentically-signed downgrade — hence pure and host-tested rather than an inline comparison.
+- `logic/ota_manifest.hpp` — bounded extraction of the top-level `"version"` from the OTA manifest.
+  The one place a remote, attacker-influencable byte stream is parsed on this device, so it is pure
+  and host-tested: it allocates nothing, never reads past the length it is given, only accepts the
+  key at depth 1 (a nested `"version"` cannot shadow it), honours string escapes (so a crafted value
+  cannot close its own string and inject a second key), and **refuses rather than truncates** an
+  oversized value — a truncated `1.10.0` → `1.1` is a well-formed version that is ordered wrong.
 - `logic/modbus.hpp` — Modbus TCP framing (MBAP, no CRC; FC03/04/06/16 build + response/exception
   parse) and the HomeHub `Temp16`/`Pow16`/`Int16`/`Text16` codecs + `homehub-*` mDNS filter. Host-
   tested core for the **planned** firmware-exclusive HomeHub link (issue #32) — not yet wired in.
@@ -622,10 +634,13 @@ Structure:
     *not* the sink for this — a crash is a log/event, not a span; VictoriaLogs (via the retained MQTT
     topic + Telegraf) is.
 - **Signed OTA** (Secure Boot v2 RSA-3072 *without* hardware Secure Boot): the running app verifies
-  the signature before installing. The **connectivity health gate is implemented** (commit only after
-  a base window AND getting online, else stay `PENDING_VERIFY` → a reboot rolls back); the **pull
-  check/download + downgrade gate are TODO stubs** (`ota_update.cpp`). Web installer publishes
-  merged bin + a single `manifest.json` (esp-web-tools loads this).
+  the signature before installing. Fully implemented (`ota_update.cpp`) — manifest check,
+  `esp_https_ota` download into the inactive slot, the **two-point downgrade gate** (manifest
+  version *and* the image's own embedded `esp_app_desc_t` version, so a lying manifest is still
+  refused), and the **connectivity health gate** (commit only after a base window AND getting
+  online, else stay `PENDING_VERIFY` → a reboot rolls back). Publishing is gated on the repo being
+  public, so no feed is served while it is private. Web installer publishes merged bin + a single
+  `manifest.json`, which doubles as the OTA feed (esp-web-tools loads the same file).
 - **Boot recovery / anti-brick** — an unsigned app aborts pre-`app_main`, so only the bootloader can
   recover, and only via a previous OTA slot; a direct USB flash of an unsigned build both crash-loops
   and wipes the fallback. Contained by the pre-flash guard `scripts/require-signed.sh`. Full model,
@@ -752,8 +767,9 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
   RX/TX pins are **persisted** (a manual pick survives reboot); the model is session-only. Protocol is auto-detected
   (no UI control), the poll interval is fixed at 1 s (not sent), and labels are English-only (no
   `lang`). `/set_hp` accepts only `{profile, rx, tx}`.
-- **Firmware / OTA** — tapping the version on the ESP32 card checks for an update (`/ota/*`; a TODO
-  placeholder until a release feed exists, see `ota_update.cpp`).
+- **Firmware / OTA** — tapping the version on the ESP32 card runs the real update flow: `GET
+  /ota/check`, poll `GET /ota/status` until the check finishes, confirm, `POST /ota/update`, then
+  poll again showing download progress and hand off to the shared reboot-reconnect poll.
 
 The board/platform is reported by `/status.platform` — the chip name
 shows on the dashboard ESP32 card.

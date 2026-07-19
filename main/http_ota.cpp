@@ -27,11 +27,11 @@ static esp_err_t ota_do(httpd_req_t* req) {
 static esp_err_t ota_stat(httpd_req_t* req) {
     OtaStatus s = ota_status();
     // Every string field goes through json_quote (json.hpp), not raw concatenation: `message` and
-    // `available` become network-derived once the manifest check (issue #12) lands (an HTTP/mbedTLS
-    // error rendering, a version parsed from a remote manifest), and one '"' or control byte there
-    // would break JSON.parse in the UI's update flow. `state`/`current` are internal today, but
-    // routing all four through the one encoder is the invariant that keeps #12 from having to
-    // remember. json_quote emits the surrounding quotes.
+    // `available` ARE network-derived now that the manifest check has landed (a version parsed from
+    // a remote manifest, an error string chosen from a fetch failure), and one '"' or control byte
+    // there would break JSON.parse in the UI's update flow. `state`/`current` remain internal, but
+    // routing all four through the one encoder is what meant the OTA work did not have to remember.
+    // json_quote emits the surrounding quotes.
     std::string j = "{\"state\":" + json_quote(s.state) +
                     ",\"progress\":" + std::to_string(s.progress) +
                     ",\"message\":" + json_quote(s.message) +

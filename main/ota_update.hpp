@@ -1,12 +1,16 @@
 #pragma once
-// Pull-based signed OTA (esp_https_ota). Intended flow: check -> compare manifest version -> download
-// the per-target daikin-altherma-esp32<suffix>.bin into the inactive slot -> reboot, with a downgrade
-// gate (refuse a not-strictly-newer image) and image-signature verification.
-// STATUS: only the connectivity health gate below is implemented — it keeps rollback armed until the
-// new image proves healthy (survives a base window AND gets online, else it stays PENDING_VERIFY and
-// a reboot reverts). The manifest check + esp_https_ota download + downgrade gate (ota_check_async /
-// ota_update_async) are TODO stubs. See docs/ARCHITECTURE.md → OTA, docs/SECURITY.md → OTA image
-// signing, and logic/health_gate.hpp.
+// Pull-based signed OTA (esp_https_ota). Flow: check -> compare the manifest version -> download
+// daikin-altherma-esp32<suffix>.bin into the inactive slot -> verify signature -> reboot, with a
+// downgrade gate that refuses anything not strictly newer.
+//
+// Both halves are implemented. The DELIVERY half (ota_check_async / ota_update_async) runs on one
+// on-demand task, never the httpd worker; the ROLLBACK half (ota_health_gate_arm) keeps a fresh
+// image PENDING_VERIFY until it survives a base window AND gets online, else a reboot reverts it.
+//
+// The downgrade gate is enforced TWICE — against the manifest's version and against the image's own
+// embedded esp_app_desc_t version — because those are separately-controlled artifacts and only the
+// second binds a lying manifest to the bytes actually served. See docs/SECURITY.md → OTA image
+// signing, docs/ARCHITECTURE.md → OTA, logic/version_cmp.hpp and logic/health_gate.hpp.
 #include <cstdint>
 #include <string>
 

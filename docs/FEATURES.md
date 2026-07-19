@@ -32,7 +32,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 2 | Refuse-to-flash-unsigned guard | ✅ | [`require-signed.sh`](../scripts/require-signed.sh) |
 | 3 | Dual-OTA partition layout, NVS-preserving | ✅ | [`partitions.csv`](../partitions.csv) |
 | 4 | OTA rollback + **connectivity-proving health gate** | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/health_gate.hpp`](../main/logic/health_gate.hpp) |
-| 5 | OTA manifest check + signed download | 🔭 | [`ota_update.cpp`](../main/ota_update.cpp) |
+| 5 | OTA manifest check + signed download + **two-point downgrade gate** | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp) |
 | 6 | WebSocket live push (`/events`) — the only live transport | ✅ | [`http_status.cpp`](../main/http_status.cpp) |
 | 7 | Gzipped web UI **embedded in the app image**, assembled at build time | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt) |
 | 8 | HTTP handlers under an **OOM `try/catch` → 503** discipline | ✅ | [`http_common.cpp`](../main/http_common.cpp), [`http_status.cpp`](../main/http_status.cpp) |
@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (666 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (720 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -132,10 +132,27 @@ See [`ARCHITECTURE.md` → OTA, signing, partitions](ARCHITECTURE.md) and
   never get back online to be re-flashed — is left un-committed and **rolls back on the next reboot**
   instead of sealing the break in. USB/`@flash_args` images boot `UNDEFINED`, never `PENDING_VERIFY`,
   so the gate can never strand a fresh board.
-- **🟡 / 🔭 Manifest check & signed download** ([`ota_update.cpp`](../main/ota_update.cpp)): the
-  rollback health gate is implemented and shipping; the manifest fetch + `esp_https_ota` download +
-  downgrade gate are stubbed TODOs. `/ota/check` / `/ota/update` / `/ota/status` routes exist and
-  return the current state.
+- **✅ 🧪 Manifest check & signed download** ([`ota_update.cpp`](../main/ota_update.cpp)):
+  `/ota/check` fetches `manifest.json` over TLS (public CA bundle) and compares its `version` to the
+  running image; `/ota/update` streams the signed `.bin` into the inactive slot via `esp_https_ota`,
+  reporting progress on `/ota/status`. Both run on **one on-demand task, one at a time** — never on
+  the httpd worker (a multi-MB TLS download would park the single HTTP task and take the web UI down
+  with it), and never twice concurrently (two TLS sessions compete for the largest *contiguous*
+  block). The manifest is parsed by [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp) —
+  bounded, allocation-free, depth-aware, and it **refuses rather than truncates** an oversized value.
+- **✅ 🧪 Two-point downgrade gate** ([`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp)): a
+  signature proves a build is *authentic*, not *newer*, so an attacker who can serve a genuine old
+  image could otherwise walk a fleet backwards onto a fixed bug. The gate refuses anything not
+  strictly newer, checked **twice**: against the manifest's `version` (cheap, avoids a pointless
+  download) and — the check that actually binds — against the **image's own embedded
+  `esp_app_desc_t` version**, read via `esp_https_ota_get_img_desc()` before anything is committed.
+  The manifest and the image are separately-controlled artifacts, so only the second check catches a
+  host that advertises `9.9.9` while serving a signed `1.0.0`. Ordering is numeric
+  (`1.10.0 > 1.9.0` — a `strcmp` gets this backwards) and **fails closed** on an unparseable version.
+- **🔭 The feed itself**: CI builds, signs and stages `manifest.json` + the image, but every
+  publishing step is gated on the repository being **public** — while it is private nothing is
+  served and a check honestly reports "up to date". Point `CONFIG_DAIKIN_OTA_MANIFEST_URL` /
+  `CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL` at any HTTPS host to run your own.
 - **Version pipeline**: [`next-version.sh`](../scripts/next-version.sh) auto-increments a monotonic
   patch above the latest `v*` tag (with `version.txt` as a manual floor). CI stamps the version it is
   actually publishing into `version.txt` *before* the build, so ESP-IDF bakes that exact string into
@@ -518,7 +535,11 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   Modbus link (issue #32), **not yet wired into the firmware**), and the SNTP wall-clock RFC 3339
   formatter (`timestamp.hpp` — the one place the syslog TIMESTAMP field, `/status.ntp.time` and the
   MQTT heartbeat's `time` field render through; a negative/never-synced input renders `""`, never a
-  fabricated `1970-01-01`). **675 `CHECK`s** in
+  fabricated `1970-01-01`), the **OTA downgrade gate** (`version_cmp.hpp` — numeric dotted-version
+  ordering plus `ota_is_upgrade()`, which fails closed on anything it can't parse) and the **OTA
+  manifest parser** (`ota_manifest.hpp` — the one place a remote, attacker-influencable byte stream is
+  parsed on this device: bounded, allocation-free, depth-aware, escape-aware, and it refuses rather
+  than truncates an oversized value). **720 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
@@ -646,7 +667,8 @@ security of signed firmware with none of the brick risk. It refuses to roll a ba
 and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-associations no event
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 17-entity heartbeat diagnostics). And the risky parts — decode,
-CRC, config, discovery, the health gate — are **pure IDF-free logic verified on the host** (666 checks),
+CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
+on the host** (720 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

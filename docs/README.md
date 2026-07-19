@@ -296,18 +296,25 @@ Derived sensors (COP etc.) and a sample dashboard: [HOME_ASSISTANT.md](HOME_ASSI
 
 ## OTA (self-update)
 
-> **Status:** only the **rollback health gate** below is implemented today. The pull path itself —
-> manifest check, image download and the downgrade gate (`ota_check_async`/`ota_update_async`) — is a
-> **TODO stub** (`ota_update.cpp`); updates currently arrive via the web installer / USB. The design
-> below is the intended behaviour that lands with that path.
+Pull-based: the device fetches `manifest.json` from `CONFIG_DAIKIN_OTA_MANIFEST_URL` (default GitHub
+Pages), compares its `version` to the running firmware, and on confirmation downloads its image
+`daikin-altherma-esp32.bin` via `esp_https_ota` into the inactive OTA slot, then reboots. Tap the
+**Firmware** row on the ESP32 card to check; the UI then shows download progress and reconnects
+after the reboot. Both the check and the download run on their own task, never on the HTTP worker.
 
-Pull-based (planned): the device fetches `manifest.json` from
-`CONFIG_DAIKIN_OTA_MANIFEST_URL` (default GitHub Pages), compares its `version` to the running
-firmware, and on confirmation downloads its image
-`daikin-altherma-esp32.bin` via `esp_https_ota` into the inactive OTA slot, then reboots.
+> **What you need for it to find anything:** a reachable `manifest.json` + signed `.bin`. CI builds
+> and stages both (`scripts/ci-build-all.sh`), but every publishing step is gated on the repository
+> being **public** — while it is private nothing is served, and a check simply reports the device is
+> up to date. Point the two `CONFIG_DAIKIN_OTA_*` URLs at any HTTPS host to use your own feed.
 
-- **Downgrade gate** *(planned)*: before the bulk download, `ota_task` reads the image's own version
-  and refuses anything not strictly newer — a signature proves authenticity, not freshness.
+- **Downgrade gate** *(implemented)*: refuses anything not strictly newer — a signature proves
+  authenticity, not freshness. It is checked **twice**, and the second check is the load-bearing one:
+  once against the manifest's `version` (cheap, avoids a pointless download), then again against the
+  **image's own embedded version**, read from its `esp_app_desc_t` after the transfer starts but
+  before anything is committed. The manifest and the image are separate artifacts, so a host that
+  advertises a high version while serving a genuine, correctly-signed *old* binary would otherwise
+  walk the device backwards onto a fixed bug. Ordering is numeric (`logic/version_cmp.hpp`), so
+  `1.10.0 > 1.9.0`, and an unparseable version on either side refuses the update rather than guessing.
 - **Rollback armed** *(implemented)*: `main.cpp` defers `esp_ota_mark_app_valid_cancel_rollback()` to
   a health gate (~90 s), so a boots-but-crashes image reverts.
 - **Signed images:** Secure Boot v2 RSA-3072 signing *without* hardware Secure Boot — the running

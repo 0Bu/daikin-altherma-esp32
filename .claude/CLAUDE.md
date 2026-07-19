@@ -235,7 +235,16 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 connect/publish, so a long broker outage can't false-trip) PLUS once per publish inside
                 mqtt_publish() (so a ~30-publish reconnect burst on a slow link can't exceed the 20s
                 budget) — a wedged publish reboots, a slow-but-progressing one never does.
-ota_update.cpp  pull-based signed OTA + rollback health gate (check/download: TODO)
+ota_update.cpp  pull-based signed OTA: manifest check -> TWO-POINT downgrade gate -> esp_https_ota
+                into the inactive slot -> signature verify on install -> reboot, plus the rollback
+                health gate. Both network ops run on ONE on-demand task (never the httpd worker —
+                /set_mqtt's pre-flight is deliberately the only request-path network block) and only
+                one at a time (two TLS sessions would fight over the largest contiguous block).
+                s_status is mutex-guarded behind an RAII Lock, since readers copy std::strings out.
+                The gate is checked against the MANIFEST version (cheap pre-check) AND against the
+                image's OWN esp_app_desc_t version via esp_https_ota_get_img_desc() — the manifest
+                and the image are separately-controlled artifacts, so a host advertising 9.9.9 while
+                serving a signed 1.0.0 binary is caught only by the second check
 status_led.cpp  onboard-LED status indicator task (compile-time only, DAIKIN_STATUS_LED_* Kconfig):
                 samples WiFi mode + wifi/mqtt/hp state per tick and blinks the pattern — slow 1s =
                 setup portal (SoftAP), fast 100ms = connecting, solid = healthy (WiFi + MQTT + X10A),
@@ -284,8 +293,8 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, value_def, config_model,
                 discovery, detect, json, mqtt_group, mqtt_uri, heartbeat, crashinfo, bootlog,
                 reset_reason, boot_guard, board_pins, modbus, syslog_policy, link_watch,
-                wifi_rollback, health_gate, ws_policy, http_body, timestamp, uart_plan,
-                detect_backoff).
+                wifi_rollback, health_gate, version_cmp, ota_manifest, ws_policy, http_body,
+                timestamp, uart_plan, detect_backoff).
                 value_def.hpp = the ValueDef row type the generated def/ profile tables are written
                 in ({reg, offset, conv, size, type, label} — registry id, byte offset in the reply
                 payload, converter id for convert.hpp, byte count, HA unit code, English label): the
@@ -540,7 +549,13 @@ POST /set_hp      {profile,rx,tx} -> validate + apply live (no reboot). rx/tx PE
                   would silently come back up on the OLD config (the failing key is on /diag)
 POST /detect      re-run auto-detection now (no reboot): reset profile to "auto" + invalidate the
                   fingerprint (RAM only) -> the next poll cycle sweeps protocol + re-fingerprints
-GET  /ota/check   POST /ota/update   GET /ota/status
+GET  /ota/check   start an async manifest check (?ms= is parsed but gates nothing — TLS date
+                  validation is compiled out, so OTA needs no wall clock even though SNTP now exists)
+POST /ota/update  start the async download. Re-fetches the manifest and re-runs the downgrade gate
+                  itself rather than trusting what /ota/check left behind: this route is reachable on
+                  its own, so gating only in /ota/check would mean no gate at all for a direct caller
+GET  /ota/status  {state:idle|checking|updating|done|error, progress, message, update_available,
+                  available, current} — the UI polls this; all strings go through json_quote
 POST /mcp         MCP server (read-only; planned — route returns a JSON-RPC "not implemented" error)
 ```
 

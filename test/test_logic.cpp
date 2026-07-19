@@ -22,6 +22,8 @@
 #include "logic/discovery.hpp"
 #include "logic/error_codes.hpp"
 #include "logic/health_gate.hpp"
+#include "logic/version_cmp.hpp"
+#include "logic/ota_manifest.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/http_body.hpp"
 #include "logic/json.hpp"
@@ -1897,6 +1899,118 @@ static void test_detect_backoff() {
     CHECK(detect_backoff_step(s, false) == DETECT_MAX_INTERVAL_S);
 }
 
+// ── OTA downgrade gate (logic/version_cmp.hpp) ───────────────────────────────────────────────
+static void test_version_cmp() {
+    // The ordering the whole gate rests on: numeric, not lexical. A strcmp would call 1.9.0 the
+    // newer build and strand every device one release short, forever.
+    CHECK(version_compare("1.10.0", "1.9.0") > 0);
+    CHECK(version_compare("1.9.0", "1.10.0") < 0);
+    CHECK(version_compare("2.0.0", "1.99.99") > 0);
+    CHECK(version_compare("1.0.0", "1.0.0") == 0);
+    CHECK(version_compare("1.0", "1.0.0") == 0);       // missing segments read as 0
+    CHECK(version_compare("1.0.1", "1.0.0") > 0);
+
+    // The gate itself: strictly newer only. Equal and older are refused — a signature proves a
+    // build is authentic, not that it is newer, so an authentically-signed OLD image must not pass.
+    CHECK(ota_is_upgrade("1.0.0", "1.0.1"));
+    CHECK(ota_is_upgrade("1.9.0", "1.10.0"));
+    CHECK(!ota_is_upgrade("1.0.0", "1.0.0"));          // equal -> no update, no reboot loop
+    CHECK(!ota_is_upgrade("1.0.1", "1.0.0"));          // older -> the downgrade attack
+    CHECK(!ota_is_upgrade("2.0.0", "1.99.99"));
+
+    // Fails CLOSED. "We could not parse it" must never be answered the same way as "it is newer":
+    // an empty manifest field, an HTML error page a broken host served, a NUL version.
+    CHECK(!ota_is_upgrade("1.0.0", ""));
+    CHECK(!ota_is_upgrade("", "1.0.1"));
+    CHECK(!ota_is_upgrade("1.0.0", "unknown"));
+    CHECK(!ota_is_upgrade("1.0.0", "<!DOCTYPE html>"));
+    CHECK(!version_valid("") && !version_valid("v") && !version_valid("abc"));
+    CHECK(version_valid("1") && version_valid("1.0.0") && version_valid("v1.0.0"));
+
+    // A git tag pasted into the manifest ("v1.0.1"). Without the 'v' skip its core parses as 0 and
+    // it compares BELOW every real version — a silent, permanent refusal to ever update.
+    CHECK(ota_is_upgrade("1.0.0", "v1.0.1"));
+    CHECK(!ota_is_upgrade("1.0.1", "v1.0.0"));
+    CHECK(version_compare("v1.0.0", "1.0.0") == 0);
+
+    // Semver pre-release ordering, and the case that matters: a pre-release of the version we
+    // already run is NOT an upgrade.
+    CHECK(version_compare("1.0.0-rc1", "1.0.0") < 0);
+    CHECK(!ota_is_upgrade("1.0.0", "1.0.0-rc1"));
+    CHECK(ota_is_upgrade("1.0.0", "1.0.1-rc1"));       // pre-release of a NEWER version still is
+    CHECK(version_compare("1.0.0-rc2", "1.0.0-rc1") > 0);
+    // A local git-describe build ("1.0.0-3-gabc123") still accepts the next real release.
+    CHECK(ota_is_upgrade("1.0.0-3-gabc123", "1.0.1"));
+
+    // A hostile 400-digit version must not overflow a signed long long (UB). Saturation gives a
+    // defined, ordered result instead: it ranks ABOVE a real version (harmless — passing the
+    // downgrade gate is not permission to install; the RSA-3072 signature check still has to pass),
+    // and two saturated versions compare EQUAL, which the gate refuses.
+    const std::string huge(400, '9');
+    CHECK(ota_is_upgrade("1.0.0", huge));     // orders above a real version, no UB
+    CHECK(!ota_is_upgrade(huge, "1.0.0"));    // and a real version is not "newer" than it
+    CHECK(!ota_is_upgrade(huge, huge));       // saturated-equal -> refused, not "newer"
+}
+
+// ── OTA manifest parsing (logic/ota_manifest.hpp) ────────────────────────────────────────────
+static void test_ota_manifest() {
+    char v[32];
+    // The real manifest, exactly as scripts/ci-build-all.sh writes it.
+    const char* real =
+        "{\n  \"name\": \"daikin-altherma-esp32\",\n  \"version\": \"1.0.0\",\n"
+        "  \"new_install_prompt_erase\": true,\n"
+        "  \"builds\": [{\"chipFamily\":\"ESP32-S3\",\"parts\":[{\"path\":\"x-merged.bin\",\"offset\":0}]}]\n}\n";
+    CHECK(manifest_version(real, std::strlen(real), v, sizeof(v)) && std::string(v) == "1.0.0");
+
+    // Whitespace-free and reordered variants still parse.
+    const char* tight = "{\"version\":\"2.3.4\",\"name\":\"x\"}";
+    CHECK(manifest_version(tight, std::strlen(tight), v, sizeof(v)) && std::string(v) == "2.3.4");
+
+    // Top-level ONLY: a "version" nested inside builds[] must not be picked up, or an attacker who
+    // can add an array element could shadow the real field from below.
+    const char* nested =
+        "{\"name\":\"x\",\"builds\":[{\"version\":\"9.9.9\"}],\"version\":\"1.0.0\"}";
+    CHECK(manifest_version(nested, std::strlen(nested), v, sizeof(v)) && std::string(v) == "1.0.0");
+    const char* only_nested = "{\"builds\":[{\"version\":\"9.9.9\"}]}";
+    CHECK(!manifest_version(only_nested, std::strlen(only_nested), v, sizeof(v)) && v[0] == 0);
+
+    // A STRING whose content is "version" is a value, not a key — it must not be mistaken for one.
+    const char* as_value = "{\"name\":\"version\",\"version\":\"1.2.3\"}";
+    CHECK(manifest_version(as_value, std::strlen(as_value), v, sizeof(v)) && std::string(v) == "1.2.3");
+
+    // Escape handling: a crafted value must not be able to close its own string early and inject a
+    // second, higher "version" key.
+    const char* inject = "{\"name\":\"\\\" , \\\"version\\\": \\\"9.9.9\\\"\",\"version\":\"1.0.0\"}";
+    CHECK(manifest_version(inject, std::strlen(inject), v, sizeof(v)) && std::string(v) == "1.0.0");
+
+    // Never TRUNCATE: "1.10.0" cut to "1.1" is a well-formed version that is ordered WRONG — the
+    // exact failure the downgrade gate exists to prevent. Too long => no answer at all.
+    char tiny[4];
+    CHECK(!manifest_version(tight, std::strlen(tight), tiny, sizeof(tiny)) && tiny[0] == 0);
+
+    // Malformed / missing / hostile inputs -> false, never a partial answer.
+    CHECK(!manifest_version("", 0, v, sizeof(v)));
+    CHECK(!manifest_version("not json at all", 15, v, sizeof(v)));
+    CHECK(!manifest_version("{\"name\":\"x\"}", 12, v, sizeof(v)));          // no version key
+    const char* unterminated = "{\"version\":\"1.0.0";
+    CHECK(!manifest_version(unterminated, std::strlen(unterminated), v, sizeof(v)));
+    const char* nonstring = "{\"version\":123}";
+    CHECK(!manifest_version(nonstring, std::strlen(nonstring), v, sizeof(v)));
+    const char* empty_val = "{\"version\":\"\"}";
+    CHECK(!manifest_version(empty_val, std::strlen(empty_val), v, sizeof(v)));
+    const char* escaped_val = "{\"version\":\"1.0\\u0030\"}";
+    CHECK(!manifest_version(escaped_val, std::strlen(escaped_val), v, sizeof(v)));
+
+    // It must respect `len` and never read past it — the device hands it a fixed buffer that is NOT
+    // NUL-terminated at the point the version would appear if the response was cut short.
+    const char* cut = "{\"version\":\"1.0.0\"}";
+    CHECK(!manifest_version(cut, 12, v, sizeof(v)));   // len stops mid-value
+
+    // End to end: what the parser yields feeds the gate.
+    CHECK(manifest_version(real, std::strlen(real), v, sizeof(v)));
+    CHECK(ota_is_upgrade("0.9.0", v) && !ota_is_upgrade("1.0.0", v));
+}
+
 int main() {
     test_crc();
     test_registers();
@@ -1924,6 +2038,8 @@ int main() {
     test_http_body();
     test_uart_plan();
     test_detect_backoff();
+    test_version_cmp();
+    test_ota_manifest();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }
     std::printf("%d logic test(s) FAILED\n", g_failures);
     return 1;
