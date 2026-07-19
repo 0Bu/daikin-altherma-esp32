@@ -314,6 +314,41 @@ static void test_convert() {
             if (p.values[i].reg == 0x30 && p.values[i].offset == 2)
                 CHECK(p.values[i].size == 1);
 
+    // conv 310 = protection-retry counter, bits 4-6 ONLY (docs/REGISTERS.md §3.3). Page 0x10 bytes
+    // 10-12 pack a drop-control flag (bit 7, conv 307), this counter (bits 4-6), a second drop flag
+    // (bit 3, conv 303) and a second counter (bits 0-2, conv 311) into ONE byte, so an unmasked read
+    // would publish a retry count of 1 as 149. This is UC5's core signal (issue #69 step 0.2).
+    ValueDef retry{0x10, 10, 310, 1, -1, "Discharge Temp. Protection Retry Qty"};
+    const uint8_t rt95[] = {0x95};   // 1001 0101: drop set, retry 1, low counter 5
+    CHECK(convert(retry, rt95).ok && approx(convert(retry, rt95).value, 1.0));
+    CHECK(approx(convert(ValueDef{0x10, 10, 311, 1, -1, "low"}, rt95).value, 5.0));  // same byte, other window
+    const uint8_t rt70[] = {0x70};
+    CHECK(approx(convert(retry, rt70).value, 7.0));   // full 3-bit range passes through
+    const uint8_t rt8F[] = {0x8F};
+    CHECK(approx(convert(retry, rt8F).value, 0.0));   // only bits OUTSIDE the window set -> 0
+    const uint8_t rtFF[] = {0xFF};
+    CHECK(approx(convert(retry, rtFF).value, 7.0));   // saturates at 7, never 255
+    // A retry count is a whole number of retries — "1.0 retries" in HA would be a formatting bug.
+    CHECK(display_decimals(310) == 0);
+
+    // Catalog guard, armed ahead of the rows (issue #69 step 0.2): page 0x10 offsets 10-12 are the
+    // four-fields-per-byte protection words. NO def/ profile carries them yet — the generator
+    // (gen_profiles.py, out-of-repo) has to emit them — so this loop is vacuous TODAY and is here to
+    // catch the generator's first output, not to check the present catalog. Do not delete it as
+    // dead: the failures it guards against are a size-2 read straddling two protection words, a
+    // plain byte converter publishing 149 where the spec says 1, and — the #36 failure mode — a
+    // dimensionless retry COUNT typed as °C, which reaches Home Assistant as a phantom temperature
+    // entity that looks entirely plausible. None of the four fields packed into these bytes is a
+    // temperature: two are drop-control flags, two are counters. type 1 (°C) is always wrong here.
+    for (const auto& p : def::profiles)
+        for (size_t i = 0; i < p.count; i++)
+            if (p.values[i].reg == 0x10 && p.values[i].offset >= 10 && p.values[i].offset <= 12) {
+                CHECK(p.values[i].size == 1);
+                const int c = p.values[i].conv;
+                CHECK(c == 303 || c == 307 || c == 310 || c == 311);
+                CHECK(p.values[i].type != 1);   // never °C — see #36
+            }
+
     // conv 311 = BUH output-capacity step, bits 0-2 ONLY. The upper bits belong to other fields,
     // so the whole byte must never be published: 0x85 is step 5, not 133.
     ValueDef buh{0x63, 13, 311, 1, -1, "BUH output capacity"};

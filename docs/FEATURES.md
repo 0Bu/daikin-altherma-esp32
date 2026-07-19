@@ -518,7 +518,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   Modbus link (issue #32), **not yet wired into the firmware**), and the SNTP wall-clock RFC 3339
   formatter (`timestamp.hpp` — the one place the syslog TIMESTAMP field, `/status.ntp.time` and the
   MQTT heartbeat's `time` field render through; a negative/never-synced input renders `""`, never a
-  fabricated `1970-01-01`). **666 `CHECK`s** in
+  fabricated `1970-01-01`). **675 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the

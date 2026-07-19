@@ -114,6 +114,13 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802
         case 204: { char t[3] = {ERR_C1[(data[0] >> 4) & 0xF], ERR_C2[data[0] & 0xF], 0};
                     set_text(r, t[0] == ' ' ? t + 1 : t); break; }            // error code (2 chars)
         case 219: r.value = data[0]; r.ok = true; break;                      // I/U capacity code
+        // 3-bit protection-retry counter, bits 4-6 (docs/REGISTERS.md §3.3). Page 0x10 packs FOUR
+        // fields into each of bytes 10-12 — a drop-control flag at bit 7 (conv 307), this retry
+        // counter at bits 4-6, a second drop flag at bit 3 (conv 303) and a second retry counter at
+        // bits 0-2 (conv 311 below) — so the window must be masked out, never the whole byte: 0x95
+        // is 1 retry (alongside Drop-Control set and 5 in the low counter), not 149.
+        case 310: r.value = (data[0] & 0x70) >> 4; r.ok = true; break;        // protection retry qty
+
         // 3-bit counter / BUH output-capacity step, bits 0-2 (docs/REGISTERS.md §3.3). The byte's
         // upper bits belong to OTHER fields, so they must be masked off, not published: reading the
         // whole byte reported 133 for a step of 5 whenever any high bit was set.
