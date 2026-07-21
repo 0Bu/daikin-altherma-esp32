@@ -33,7 +33,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 3 | Dual-OTA partition layout, NVS-preserving | ✅ | [`partitions.csv`](../partitions.csv) |
 | 4 | OTA rollback + **connectivity-proving health gate** | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/health_gate.hpp`](../main/logic/health_gate.hpp) |
 | 5 | OTA manifest check + signed download + **two-point downgrade gate** | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp) |
-| 6 | WebSocket live push (`/events`) — the only live transport | ✅ | [`http_status.cpp`](../main/http_status.cpp) |
+| 6 | WebSocket live push (`/events`) — bounded async backpressure, the only live transport | ✅ 🧪 | [`http_status.cpp`](../main/http_status.cpp), [`logic/ws_tx_gate.hpp`](../main/logic/ws_tx_gate.hpp) |
 | 7 | Gzipped web UI **embedded in the app image**, assembled at build time | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt) |
 | 8 | HTTP handlers under an **OOM `try/catch` → 503** discipline | ✅ | [`http_common.cpp`](../main/http_common.cpp), [`http_status.cpp`](../main/http_status.cpp) |
 | 9 | Home Assistant MQTT auto-discovery, grouped state, LWT | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/discovery.hpp`](../main/logic/discovery.hpp) |
@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (720 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (731 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -289,8 +289,18 @@ one-time setup.
   a client sends `sub`, gets a status+values snapshot, then the poll task pushes
   `{"type":"status"|"values",…}` frames on change (values ~1 s, status ~4 s). There is **no HTTP
   polling** — a browser without WebSocket falls back to a one-time snapshot. Broadcasts run in the poll
-  task and self-guard `std::bad_alloc` per client, dropping a single frame rather than the whole poll
-  cycle (the task's own guard, below, is only their backstop).
+  task and self-guard `std::bad_alloc`, dropping a frame rather than the whole poll cycle (the task's
+  own guard, below, is only their backstop).
+- **🧪 Async sends have bounded backpressure**
+  ([`logic/ws_tx_gate.hpp`](../main/logic/ws_tx_gate.hpp)). ESP-IDF queues each cross-task send and
+  owns only a shallow frame copy until its completion callback runs. A congested HTTP control queue
+  can therefore retain a payload after `httpd_ws_send_data_async()` has returned success. One
+  independent gate for values and one for status admits at most one outstanding broadcast of each
+  kind; while a callback is pending, newer ticks are dropped instead of consuming heap every second.
+  Every client in a batch shares one immutable payload through a completion refcount, and the client
+  list is snapshotted under its mutex before any IDF queue call. Thus a delayed or lost callback can
+  hold at most two application payloads, not drain the whole device heap or couple the queue to the
+  socket-close path.
 - **🧪 Frame handling is a policy, not an `if`** ([`logic/ws_policy.hpp`](../main/logic/ws_policy.hpp)).
   Two rules, both host-tested. **Only a `sub` text frame takes a broadcast slot** — registering on any
   frame at all meant a client that never subscribed was still pushed a frame a second, and held one of
@@ -520,8 +530,10 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   UART onto a flash/strapping/JTAG pad and crash-loop the board),
   the `/events` frame policy (`ws_policy.hpp` — an announced frame length is
   a client-asserted 64-bit number, so it decides and never allocates; only a `sub` **text** frame
-  earns a broadcast slot), request-body reassembly (`http_body.hpp` — a body arrives across as many
-  TCP segments as the network chooses, and a peer that stalls forever must lose *bounded*),
+  earns a broadcast slot), its async-send backpressure (`ws_tx_gate.hpp` — at most one values and one
+  status batch are retained while the HTTP task is busy), request-body reassembly
+  (`http_body.hpp` — a body arrives across as many TCP segments as the network chooses, and a peer
+  that stalls forever must lose *bounded*),
   the X10A UART (re)init decision (`uart_plan.hpp` — probing the same pins is a no-op and a pin change
   is a register-only remap, not a driver reinstall, so the detect sweep stops churning the heap),
   the silent-bus detect backoff (`detect_backoff.hpp` — full cadence through a grace window, then
@@ -539,7 +551,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   ordering plus `ota_is_upgrade()`, which fails closed on anything it can't parse) and the **OTA
   manifest parser** (`ota_manifest.hpp` — the one place a remote, attacker-influencable byte stream is
   parsed on this device: bounded, allocation-free, depth-aware, escape-aware, and it refuses rather
-  than truncates an oversized value). **720 `CHECK`s** in
+  than truncates an oversized value). **731 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
@@ -668,7 +680,7 @@ and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 17-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (720 checks),
+on the host** (731 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

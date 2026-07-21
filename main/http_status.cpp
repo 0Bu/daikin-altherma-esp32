@@ -15,6 +15,7 @@
 #include "logic/reset_reason.hpp"
 #include "logic/timestamp.hpp"
 #include "logic/ws_policy.hpp"
+#include "logic/ws_tx_gate.hpp"
 #include "mqtt_ha.hpp"
 #include "ota_update.hpp"
 #include "safe_mode.hpp"
@@ -37,8 +38,10 @@
 #include "http_server.hpp"
 #include "diag_log.hpp"
 #include <algorithm>
+#include <atomic>
 #include <new>
 #include <string>
+#include <utility>
 #include <vector>
 
 extern const unsigned char index_html_gz_start[] asm("_binary_index_html_gz_start");
@@ -351,9 +354,12 @@ static esp_err_t h_scan(httpd_req_t* req) {
 
 static SemaphoreHandle_t s_ws_mtx = nullptr;
 static int s_ws_fds[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+static WsTxGate s_ws_values_gate;
+static WsTxGate s_ws_status_gate;
 
 bool http_register_ws_client(int fd) {
     if (!s_ws_mtx) s_ws_mtx = xSemaphoreCreateMutex();
+    if (!s_ws_mtx) return false;
     xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
     bool registered = false;
     for (int i = 0; i < 8; i++) {
@@ -384,14 +390,30 @@ void http_unregister_ws_client(int fd) {
     xSemaphoreGive(s_ws_mtx);
 }
 
-struct WsPacketContext {
+struct WsBroadcastContext {
     std::string payload;
-    httpd_ws_frame_t frame;
+
+    explicit WsBroadcastContext(std::string&& data, WsTxGate& tx_gate)
+        : payload(std::move(data)), gate(tx_gate) {}
+
+    void retain() { refs.fetch_add(1, std::memory_order_relaxed); }
+
+    void release() {
+        if (refs.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+            gate.complete();
+            delete this;
+        }
+    }
+
+private:
+    // The initial reference protects construction while callbacks may already run on the HTTP task.
+    std::atomic<unsigned> refs{1};
+    WsTxGate& gate;
 };
 
 static void ws_transfer_complete(esp_err_t err, int socket, void *arg) {
-    auto* ctx = static_cast<WsPacketContext*>(arg);
-    delete ctx;
+    auto* ctx = static_cast<WsBroadcastContext*>(arg);
+    ctx->release();
 }
 
 static bool ws_any_clients() {
@@ -404,57 +426,81 @@ static bool ws_any_clients() {
     return any;
 }
 
-// Queue an async copy of `j` to every registered WS client. These broadcasts run in the poll task
-// (hp_poll.cpp), which has NO OOM guard above it — so, unlike an HTTP handler, an uncaught
-// std::bad_alloc here would abort the whole device. Allocate each per-client send buffer with
-// nothrow-new and a guarded copy, and just skip any client we cannot allocate for this tick.
-static void ws_send_to_all(const std::string& j) {
+// Queue one shared immutable payload to a snapshot of the registered WS clients. The caller has
+// already acquired `gate`; it remains occupied until every IDF completion callback has run. This is
+// deliberate backpressure: if the HTTP task stops draining its async-work queue, later poll ticks
+// are dropped and retained heap stays bounded to one values batch plus one status batch.
+//
+// Never hold s_ws_mtx while entering the IDF queue. Its completion/close paths run on another task
+// and may unregister a client; keeping the registry lock around queue_work would couple those paths
+// and can amplify a stalled HTTP task.
+static void ws_send_to_all(std::string&& j, WsTxGate& gate) {
     httpd_handle_t server = http_server_handle();
-    if (!server || !s_ws_mtx) return;
+    if (!server || !s_ws_mtx) {
+        gate.complete();
+        return;
+    }
+
+    auto* ctx = new (std::nothrow) WsBroadcastContext(std::move(j), gate);
+    if (!ctx) {
+        gate.complete();
+        return;
+    }
+
+    int fds[8];
+    int fd_count = 0;
     xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
     for (int i = 0; i < 8; i++) {
-        if (s_ws_fds[i] == -1) continue;
-        WsPacketContext* ctx = new (std::nothrow) WsPacketContext();
-        if (!ctx) continue;
-        try {
-            ctx->payload = j;
-        } catch (const std::bad_alloc&) {
-            delete ctx;
-            continue;
-        }
-        memset(&ctx->frame, 0, sizeof(httpd_ws_frame_t));
-        ctx->frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(ctx->payload.c_str()));
-        ctx->frame.len = ctx->payload.size();
-        ctx->frame.type = HTTPD_WS_TYPE_TEXT;
-        ctx->frame.final = true;
-        esp_err_t err = httpd_ws_send_data_async(server, s_ws_fds[i], &ctx->frame, ws_transfer_complete, ctx);
-        if (err != ESP_OK) delete ctx;
+        if (s_ws_fds[i] != -1) fds[fd_count++] = s_ws_fds[i];
     }
     xSemaphoreGive(s_ws_mtx);
+
+    httpd_ws_frame_t frame = {};
+    frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(ctx->payload.c_str()));
+    frame.len = ctx->payload.size();
+    frame.type = HTTPD_WS_TYPE_TEXT;
+    frame.final = true;
+
+    for (int i = 0; i < fd_count; i++) {
+        if (httpd_ws_get_fd_info(server, fds[i]) != HTTPD_WS_CLIENT_WEBSOCKET) continue;
+
+        // Retain before queueing: the HTTP task may run the callback before this loop advances.
+        ctx->retain();
+        esp_err_t err = httpd_ws_send_data_async(server, fds[i], &frame,
+                                                  ws_transfer_complete, ctx);
+        if (err != ESP_OK) ctx->release();
+    }
+
+    // Drop the construction reference. The final queued transfer releases the gate and payload.
+    ctx->release();
 }
 
 void ws_broadcast_values() {
     if (!http_server_handle() || !s_ws_mtx || !ws_any_clients()) return;
+    if (!s_ws_values_gate.try_begin()) return;
 
     std::string j;
     try {
         j = "{\"type\":\"values\",\"values\":" + build_values_array() + "}";
     } catch (const std::bad_alloc&) {
+        s_ws_values_gate.complete();
         return;   // skip this tick under memory pressure rather than abort the poll task
     }
-    ws_send_to_all(j);
+    ws_send_to_all(std::move(j), s_ws_values_gate);
 }
 
 void ws_broadcast_status() {
     if (!http_server_handle() || !s_ws_mtx || !ws_any_clients()) return;
+    if (!s_ws_status_gate.try_begin()) return;
 
     std::string j;
     try {
         j = "{\"type\":\"status\",\"status\":" + build_status_json_string() + "}";
     } catch (const std::bad_alloc&) {
+        s_ws_status_gate.complete();
         return;   // skip this tick under memory pressure rather than abort the poll task
     }
-    ws_send_to_all(j);
+    ws_send_to_all(std::move(j), s_ws_status_gate);
 }
 
 // The /events protocol is one command: a "sub" text frame earns a status+values snapshot and a
