@@ -196,7 +196,8 @@ hp_convert.cpp  device value formatting over logic/convert.hpp
 hp_detect.cpp   auto-detect glue: protocol sweep + page probe -> fingerprint -> candidate models
 hp_poll.cpp     poll engine task: (auto-detect if profile=="auto") profile registers -> query ->
                 decode -> thread-safe cache; also drives the /events WebSocket push
-                (ws_broadcast_values every cycle, ws_broadcast_status every 4th). Subscribed to the
+                (ws_broadcast_values every cycle, ws_broadcast_status every 4th), with one
+                outstanding async batch allowed per stream (logic/ws_tx_gate.hpp). Subscribed to the
                 Task Watchdog (esp_task_wdt_add): reset per cycle + once per register in the sweep, so
                 a wedged X10A read reboots cleanly (reset reason task_wdt) instead of hanging silently.
                 On a SILENT bus the auto-detect sweep BACKS OFF (logic/detect_backoff.hpp): full 1s
@@ -212,7 +213,8 @@ http_common.cpp shared HTTP helpers + the ONE OOM guard every route runs under: 
                 unwinding through esp_http_server's C frames to std::terminate -> reboot. /events is
                 the deliberate exception (raw registration needed for the WebSocket; it self-guards)
 http_status.cpp GET / (setup.html in AP mode, else gzip UI) /status /values /models /diag /scan
-                /coredump + /events (WebSocket live push) + captive catch-all
+                /coredump + /events (WebSocket live push; shared-payload, refcounted completion and
+                bounded one-in-flight backpressure per values/status stream) + captive catch-all
 http_config.cpp POST /set_wifi /set_mqtt /set_syslog /set_ntp /set_hp /detect
 http_ota.cpp    /ota/check|update|status
 mcp_server.cpp  /mcp (read-only MCP tools; TODO)
@@ -293,7 +295,7 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, value_def, config_model,
                 discovery, detect, json, mqtt_group, mqtt_uri, heartbeat, crashinfo, bootlog,
                 reset_reason, boot_guard, board_pins, modbus, syslog_policy, link_watch,
-                wifi_rollback, health_gate, version_cmp, ota_manifest, ws_policy, http_body,
+                wifi_rollback, health_gate, version_cmp, ota_manifest, ws_policy, ws_tx_gate, http_body,
                 timestamp, uart_plan, detect_backoff).
                 value_def.hpp = the ValueDef row type the generated def/ profile tables are written
                 in ({reg, offset, conv, size, type, label} — registry id, byte offset in the reply
@@ -319,7 +321,11 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 a client-asserted 64-bit number read before any payload, so it must reach a decision
                 and never an allocation; a rejected frame closes the connection because
                 esp_http_server cannot skip a frame body and its unread payload would be parsed as
-                the next frame's header. http_body.hpp = the request-body recv loop
+                the next frame's header. ws_tx_gate.hpp = the async-broadcast backpressure rule:
+                one values and one status batch may be outstanding; a busy stream drops newer ticks
+                instead of retaining another payload while IDF completion work is delayed. Clients
+                in a batch share one refcounted immutable payload, and the fd-list mutex is released
+                before any IDF queue call. http_body.hpp = the request-body recv loop
                 (http_body_read), templated over a classified recv so segment-by-segment
                 reassembly, a mid-body close and a stalled peer are host-tested; the IDF return-code
                 mapping stays in http_common.cpp. A timeout is retried at most BODY_MAX_IDLE times —
@@ -485,7 +491,9 @@ GET  /events      WebSocket live push (is_websocket). Client sends "sub" -> gets
                   buffer is refused + the connection closed — its announced length is an unbacked
                   64-bit client claim, so it may never size a buffer, and esp_http_server can neither
                   read it into a smaller one (ESP_ERR_INVALID_SIZE, buffer untouched — the old code
-                  memcmp'd that uninitialised stack) nor skip past it.
+                  memcmp'd that uninitialised stack) nor skip past it. Background sends use
+                  logic/ws_tx_gate.hpp: at most one values and one status batch remain in flight;
+                  newer ticks are dropped until all completion callbacks release the shared payload.
 GET  /models      pin hint + catalog metadata (def/models_catalog.hpp). Detection is fully automatic;
                   the UI no longer offers a manual model picker. NO shipped client reads this — the
                   web UI never fetches it, and the RX/TX dropdown takes its GPIOs from

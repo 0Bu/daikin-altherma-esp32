@@ -38,6 +38,7 @@
 #include "logic/uart_plan.hpp"
 #include "logic/wifi_rollback.hpp"
 #include "logic/ws_policy.hpp"
+#include "logic/ws_tx_gate.hpp"
 #include "def/registry.hpp"
 #include "def/signatures.hpp"
 
@@ -1751,6 +1752,33 @@ static void test_ws_policy() {
     CHECK(ws_frame_action(true, nullptr, 3) == WsAction::Ignore);
 }
 
+// ── /events async-send backpressure (logic/ws_tx_gate.hpp) ──────────────────────────────────
+static void test_ws_tx_gate() {
+    WsTxGate values;
+    WsTxGate status;
+
+    CHECK(!values.in_flight());
+    CHECK(values.try_begin());
+    CHECK(values.in_flight());
+
+    // A stalled completion callback cannot admit another payload on the same stream.
+    CHECK(!values.try_begin());
+    CHECK(values.in_flight());
+
+    // Values and status use independent gates: a slow values frame must not suppress every status
+    // update, while each stream still retains at most one payload batch.
+    CHECK(status.try_begin());
+    CHECK(status.in_flight());
+
+    values.complete();
+    CHECK(!values.in_flight());
+    CHECK(values.try_begin());
+    values.complete();
+    status.complete();
+    CHECK(!values.in_flight());
+    CHECK(!status.in_flight());
+}
+
 // ── request-body reassembly (logic/http_body.hpp) ────────────────────────────────────────────
 static void test_http_body() {
     // The common case: the body arrives in one recv, is NUL-terminated, and reports its length.
@@ -2035,6 +2063,7 @@ int main() {
     test_boot_guard();
     test_health_gate();
     test_ws_policy();
+    test_ws_tx_gate();
     test_http_body();
     test_uart_plan();
     test_detect_backoff();

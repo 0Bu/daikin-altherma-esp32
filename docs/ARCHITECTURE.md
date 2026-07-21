@@ -57,7 +57,8 @@ hp_convert.cpp/.hpp → converter functions: raw bytes →
                        typed reading (temp, int, fixed-point, enum/label, on/off, pressure)
 hp_poll.cpp/.hpp    → poll engine task: builds the active register set from the profile,
                        polls each interval, fills the thread-safe value cache, drives errors, and
-                       pushes the /events WebSocket (values each cycle, status every 4th)
+                       pushes the /events WebSocket (values each cycle, status every 4th; each
+                       stream admits only one async batch until its completion callbacks finish)
 def/*.hpp           → embedded per-model value profiles (machine-generated in the ValueDef row
                        format); def/registry.hpp maps profile id→table, models_catalog.hpp = /models
 config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi rollback backup + link
@@ -76,7 +77,8 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
                       /events is the deliberate exception (raw registration for the WebSocket; it
                       self-guards its own JSON build instead)
 http_status.cpp     → GET / (web UI), /status, /values, /models, /diag, /scan, /coredump, and the
-                      /events WebSocket (live status/values push)
+                      /events WebSocket (live status/values push with shared-payload, bounded
+                      in-flight backpressure via logic/ws_tx_gate.hpp)
 http_config.cpp     → POST /set_wifi, /set_mqtt, /set_syslog, /set_hp, /detect
 http_ota.cpp        → /ota/check|update|status
 mcp_server.cpp      → /mcp — read-only MCP tools (get_status, get_hp_values) for AI agents — PLANNED
@@ -273,6 +275,13 @@ host-testable core is unusually large and valuable, because the risky parts are 
   then classifies only bytes a successful read delivered. Pure, so the boundary that caused the
   original defect — one byte past the buffer, where the old handler `memcmp`'d stack the failed read
   had never written — is asserted without a hand-built WebSocket client.
+- `logic/ws_tx_gate.hpp` — bounded backpressure for `/events` broadcasts. ESP-IDF's cross-task
+  helper shallow-copies the frame into a queued work item, so the payload must remain alive until a
+  completion callback. Each values/status stream admits one batch at a time; a busy gate drops a
+  newer tick rather than retaining payloads without limit when the HTTP task cannot drain its work
+  queue. The streams are independent so one slow values frame does not suppress every status update.
+  The firmware shares one immutable payload across the batch and releases it only after the last
+  callback; the pure gate transition is host-tested without ESP-IDF.
 - `logic/http_body.hpp` — request-body reassembly for `http_read_body`. A POST body is a TCP stream:
   `httpd_req_recv` returns what has arrived, and the IDF's own docs note a large body "may" take
   several calls. Reading once and calling it the whole body truncated any body split across segments,
@@ -445,7 +454,10 @@ opcode, register or framing for the unit to send unsolicited/push frames, so **t
 poll**; a "the pump pushes values to us" mode is not possible at the wire level. The pushes in the
 system are all firmware → client: firmware → MQTT (the bridge publishes state on its own cadence)
 and firmware → browser over the `/events` WebSocket (the poll task broadcasts values/status on
-change). Both are downstream of — and independent of — the polled HP link.
+change). The WebSocket path applies one-in-flight backpressure independently to values and status:
+if the HTTP task has not completed the previous batch, the next tick is dropped rather than queued
+and retained on the ESP32 heap. Both transports are downstream of — and independent of — the polled
+HP link.
 
 ## WiFi / LAN connectivity (reconnect + watchdog)
 
@@ -791,8 +803,10 @@ to HTTP handlers:
    the last good state, and continue after the normal delay. `mqtt_task` (`mqtt_ha.cpp`),
    `poll_task` (`hp_poll.cpp`) and `syslog_task` (`syslog.cpp` — its per-cycle `config()` snapshot
    copies ~10 `std::string`s) all do this; `ws_broadcast_values`/`ws_broadcast_status`
-   (`http_status.cpp`) keep their own finer-grained guards inside it — they skip a single client or
-   frame rather than the whole cycle, and the task guard is only their backstop.
+   (`http_status.cpp`) keep their own finer-grained guards inside it — they skip a frame rather than
+   the whole cycle, and the task guard is only their backstop. Their async queue is also bounded to
+   one values and one status batch, so a missing completion callback cannot turn skipped work into an
+   unbounded payload leak.
 2. **Nothing allocates while a mutex is held.** Rule 1 only makes an OOM survivable if the throw
    doesn't strand a lock: `xSemaphoreTake` is not released by stack unwinding, so a throw inside a
    critical section leaves the mutex taken forever, every reader blocks on `portMAX_DELAY`, and the
