@@ -245,6 +245,37 @@ static void test_convert() {
     CHECK(!approx(convert(p405, p200, 801).value, convert(p405, p200, 802).value));
     CHECK(approx(convert(p405, p200, 802).value, convert(p405, p200).value));   // default == R32
 
+    // conv 405 saturation temp from a 0-bar sensor (absent on many hydrobox units, or the compressor
+    // simply off) must NOT publish its press2temp(0) ≈ -51 °C placeholder — drop it INTRINSICALLY in
+    // convert() (the 0-bar decision needs the raw pressure, which the publish-time filter never sees).
+    const uint8_t zerobar[] = {0x00, 0x00};            // 0 bar in -> no meaningful sat temp
+    CHECK(!convert(p405, zerobar).ok);
+    const uint8_t realbar[] = {0x64, 0x00};            // LE 100 -> 10.0 bar -> a real sat temp kept
+    CHECK(convert(p405, realbar).ok);
+
+    // reading_plausible: the publish-time °C envelope (TEMP_MIN_C/TEMP_MAX_C), applied by hp_format —
+    // NOT inside convert(), which keeps its intrinsic per-converter semantics so the catalog audit can
+    // still tell conv 105 from conv 114 (see convert.hpp / tools/domain/selftest.sh #38). This is what
+    // stops an idle OU's 576 °C outdoor-HX or a 231.6 °C target-evap reaching Home Assistant.
+    ValueDef ot{0x20, 2, 105, 2, 1, "outdoor HX"};
+    const uint8_t hot576[] = {0x80, 0x16};             // LE 0x1680 = 5760 -> 576.0 °C, impossible
+    CHECK(convert(ot, hot576).ok);                     // convert() still decodes it (intrinsic, unchanged)
+    CHECK(!reading_plausible(ot, convert(ot, hot576)));// but it is not fit to publish
+    ValueDef evap{0x10, 6, 114, 2, 1, "evap"};
+    const uint8_t evap2316[] = {0x0C, 0x09};           // LE 0x090C = 2316 -> 231.6 °C, impossible
+    CHECK(!reading_plausible(evap, convert(evap, evap2316)));
+    const uint8_t warm[] = {0xF4, 0x01};               // LE 500 -> 50.0 °C, a real reading
+    CHECK(reading_plausible(ot, convert(ot, warm)) && approx(convert(ot, warm).value, 50.0));
+    // A ±3276.x no-data sentinel on conv 105 (which has NO intrinsic guard) is also caught here — the
+    // general backstop that #35–#39 never had for conv 105.
+    const uint8_t nd105[] = {0x00, 0x80};              // 0x8000 -> -3276.8 °C on conv 105
+    CHECK(convert(ot, nd105).ok && !reading_plausible(ot, convert(ot, nd105)));
+    // Keyed on the °C dataType, never the converter id: conv 105 also carries kW / COP rows at
+    // dataType -1 (e.g. BE_COP), which must publish even when numerically large.
+    ValueDef cop{0x64, 3, 105, 2, -1, "BE_COP"};
+    const uint8_t cop3000[] = {0xB8, 0x0B};            // LE 3000 -> 300.0, must NOT be clipped (not °C)
+    CHECK(reading_plausible(cop, convert(cop, cop3000)) && approx(convert(cop, cop3000).value, 300.0));
+
     // profile_refrigerant: pick the 801-805 row's id, else default to R32 (802).
     const ValueDef prof801[] = {{0x00, 0, 801, 0, -1, "*Refrigerant type"}, {0x61, 0, 105, 2, 1, "T"}};
     const ValueDef prof_none[] = {{0x61, 0, 105, 2, 1, "T"}};
@@ -678,6 +709,29 @@ static void test_detect() {
     CHECK(has_candidate(out, ecount, "altherma_ebla_edla_d_series_4_8kw_monobloc"));
     // No bus → no best-fit.
     CHECK(detect_best(sigs, nsig, none) == nullptr);
+
+    // ── detect_best I/U-capacity fallback (.159's real case): the full 0x1bff page set but the O/U
+    //    capacity ABSENT (a short 0x00 descriptor -> kw_tenths=-1). Without a capacity hint the
+    //    tightest-span rule lands on a 14-16 kW class; the I/U capacity code (reg 0x60/6 = 80 ->
+    //    8.0 kW) must steer the representative to a class that CONTAINS 8.0 kW instead. ──
+    Fingerprint amb{};
+    amb.page_mask = mask_of({0x00, 0x10, 0x20, 0x21, 0x30, 0x60, 0x61, 0x62, 0x63, 0x64, 0xA0, 0xA1});
+    amb.kw_tenths = -1;                                 // O/U capacity unreadable (short 0x00 reply)
+    const char* nofb = detect_best(sigs, nsig, amb);   // no capacity hint at all
+    int nlo = -1, nhi = -1;
+    CHECK(nofb && parse_kw_class(nofb, nlo, nhi) && !(nlo <= 80 && 80 <= nhi));  // wrong class w/o hint
+    amb.iu_kw_tenths = 80;                              // I/U capacity code fallback = 8.0 kW
+    const char* withfb = detect_best(sigs, nsig, amb);
+    int wlo = -1, whi = -1;
+    CHECK(withfb && parse_kw_class(withfb, wlo, whi) && wlo <= 80 && 80 <= whi);  // class now holds 8 kW
+    int acount = detect_candidates(sigs, nsig, amb, out, 64);
+    CHECK(has_candidate(out, acount, withfb));          // representative still drawn from the set
+    // The I/U fallback must NEVER override a KNOWN O/U capacity: set kw_tenths to 16 kW and the 8 kW
+    // I/U hint is ignored — the representative stays in the 16 kW class.
+    amb.kw_tenths = 160;
+    const char* ou = detect_best(sigs, nsig, amb);
+    int olo = -1, ohi = -1;
+    CHECK(ou && parse_kw_class(ou, olo, ohi) && olo <= 160 && 160 <= ohi);
 
     // Generic Altherma fallback = the universal register core (not the old 3-row stub); an unknown id
     // resolves to it — this is what an unrecognized / S-protocol unit reads with.

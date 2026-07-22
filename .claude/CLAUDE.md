@@ -200,8 +200,15 @@ hp_comm.cpp     X10A UART (9600 8E1) + register query. hp_uart_init installs the
                 driver struct every call; the detect sweep alternates the pins ~2x/s on a silent bus,
                 so that churn fragmented the heap until an unrelated alloc (hp_poll's vector) hit an
                 unwind-starved bad_alloc -> std::terminate -> abort (confirmed by a symbolized coredump)
-hp_convert.cpp  device value formatting over logic/convert.hpp
-hp_detect.cpp   auto-detect glue: protocol sweep + page probe -> fingerprint -> candidate models
+hp_convert.cpp  device value formatting over logic/convert.hpp; applies its reading_plausible() at
+                PUBLISH time — an impossible °C reading (idle-unit 576 °C, a ±3276.x sentinel) or a
+                0-bar saturation temp reaches HA as unavailable, not a false value. Kept out of
+                convert() so the domain audit still sees each converter's intrinsic semantics
+hp_detect.cpp   auto-detect glue: protocol sweep + page probe -> fingerprint -> candidate models. The
+                O/U capacity is read from a VARIABLE-LENGTH page 0x00 (a smaller unit's short reply
+                omits offset 12); when absent, the I/U capacity code (0x60/6, same kW×10 units) is a
+                fallback that only RANKS detect_best (never excludes a candidate; no-op when the O/U
+                capacity is known). The detect diag line prints iu_kw=
 hp_poll.cpp     poll engine task: (auto-detect if profile=="auto") profile registers -> query ->
                 decode -> thread-safe cache; also drives the /events WebSocket push
                 (ws_broadcast_values every cycle, ws_broadcast_status every 4th), with one
@@ -400,8 +407,11 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 crashinfo's crash_reason_slug — one vocabulary). boot_guard.hpp = the safe-mode decision
                 logic (crash-only counting, saturating increment, threshold) driving safe_mode.cpp.
                 detect.hpp narrows the
-                Altherma-only model profiles from a bus fingerprint (page mask + capacity) to a
-                register-equivalent candidate set + a best-fit representative (detect_best);
+                Altherma-only model profiles from a bus fingerprint (page mask + capacity, O/U or the
+                I/U-code fallback) to a candidate set + a best-fit representative (detect_best; ranks by
+                maximal page overlap -> kW class containing the capacity -> tightest class). The set is
+                register-equivalent only when the capacity is KNOWN; when it is absent the set spans kW
+                classes, so the I/U-capacity fallback that ranks the representative does affect values;
                 mqtt_group.hpp maps a register page to a friendly group name and builds the grouped
                 state JSON; heartbeat.hpp builds the board/link diagnostics JSON (FLAT — each field
                 prefixed by its block name, e.g. wifi_rssi/wifi_mac/bus_rx_received, not nested) + its

@@ -190,7 +190,9 @@ A representative probe/response pair (Protocol `I`, reading identity page `0x00`
 ```
 
 `0x0C = 12 = LEN(1) + payload(10) + cksum(1)`; payload `0B 02 00 01 03 02 02 04 40 07` = the counts
-in page `0x00` (sensor qty, compressor qty, …).
+in page `0x00` (sensor qty, compressor qty, …). This descriptor is **variable-length**: this 10-byte
+reply ends at offset 9 (Connected-IU Qty) and does **not** carry the O/U capacity byte at offset 12 —
+a larger unit returns a longer reply that does. So the O/U capacity is not always available here.
 
 ### Model fingerprint
 

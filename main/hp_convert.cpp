@@ -12,6 +12,7 @@ bool hp_format(const ValueDef& def, const uint8_t* payload, int payload_len, int
     if (def.offset + def.size > payload_len) return false;
     Reading r = convert(def, payload + def.offset, rtype);   // rtype selects the conv-405 curve
     if (r.unimpl) return false;
+    if (!reading_plausible(def, r)) return false;            // drop impossible °C placeholders (576 °C, ...)
     if (!r.ok && r.text[0] == '\0') return false;
     // conv 204 (fault code) gets an English description appended when the table covers it;
     // every other text converter (enum labels, ON/OFF) publishes its decoded text verbatim.
