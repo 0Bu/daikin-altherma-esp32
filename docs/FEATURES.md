@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (808 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (813 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -406,11 +406,22 @@ the fact*, from the field, without a serial cable:
 - **✅ 🧪 Reset/crash classification** ([`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp)): the
   captured summary becomes the `/status.last_crash` JSON (drives the UI crash banner, whose title keys
   on `fault` — an orphan dump alone never claims the device crashed *this* boot) and a **retained**
-  `<base>/crash` MQTT payload (2 diagnostic HA entities: reason + "dump waiting" flag —
-  reason/backtrace only, **never** the raw dump or any secret), published per (re)connect and
+  `<base>/crash` MQTT payload (**one** diagnostic HA entity: a "dump waiting" flag —
+  reason/backtrace only, **never** the raw dump or any secret; the reset reason is the heartbeat's own
+  "Reset Reason" sensor, so the old duplicate "Last Reset Reason" crash entity was dropped + is
+  actively retired — its stale retained discovery config is deleted on upgrade). The crash topic is
+  **crash-only**:
+  `build_crash_mqtt_payload()` emits the JSON only when the boot is *notable* (a real fault **or** a
+  core-dump still in flash) and returns `""` otherwise, which the bridge publishes as a **zero-length
+  retained** message that **clears** the topic — so a normal boot (USB re-enumeration, config-save/OTA
+  reboot, clean power-on) sends no crash message, and a stale crash record disappears from the broker
+  (and HA) as soon as the device reboots cleanly, i.e. once the problem is resolved. Clearing loses no
+  information — the reset reason is carried unconditionally by the heartbeat's own "Reset Reason"
+  sensor (`reset_reason_name` == `crash_reason_slug`, host-asserted). Published per (re)connect and
   republished on the heartbeat cadence when the "dump waiting" flag changes, so it can't latch ON after
-  the dump is cleared. `static_assert`s pin the IDF reset-enum
-  values so a renumbering fails the build rather than mislabeling every crash.
+  the dump is cleared (and an orphan-dump-only boot is then re-decided not-notable and cleared).
+  `static_assert`s pin the IDF reset-enum values so a renumbering fails the build rather than
+  mislabeling every crash.
 - **✅ 🧪 19-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): on a fixed
   10 s cadence, `<base>/heartbeat` streams a **flat** JSON (each field prefixed by its block name —
   `wifi_rssi`, `wifi_mac`, `bus_rx_received`, … — no nested `wifi`/`mqtt`/`bus` sub-objects) of heap
@@ -427,7 +438,8 @@ the fact*, from the field, without a serial cable:
   the real OOM ceiling), the `reset_reason` slug and a `safe_mode` flag. Unlike `last_crash` it is
   present on **every** boot, and unlike the heartbeat it needs **no broker**, so "why did it reboot?"
   and "is the heap leaking?" are answerable from the LAN alone. `reset_reason_name()` reuses the
-  crash slug vocabulary (one naming for the sys block, the crash entity and the heartbeat). The
+  crash slug vocabulary (one naming for the sys block, the `last_crash`/crash payload and the
+  heartbeat's "Reset Reason" sensor). The
   dashboard ESP32 card renders the reset reason (fault-coloured) and free heap.
 - **✅ Build identity** — `/status.app_elf_sha256` ties a running device to the exact firmware that
   produced any dump, and the syslog boot line (below) puts the same hash in the **log stream**, so a
@@ -566,7 +578,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   planned MCP route (`mcp_jsonrpc.hpp` — parse-error / invalid-request / notification-no-response /
   method-not-found, and which id may be echoed) and the **query-flag policy** (`query_flag.hpp` — a `?clear=1`-style flag
   acts only on exactly `1`, so `?clear=0` no longer wipes the diag log).
-  **800 `CHECK`s** in
+  **813 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
@@ -695,7 +707,7 @@ and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 19-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (800 checks),
+on the host** (813 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

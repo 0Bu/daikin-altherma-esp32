@@ -23,7 +23,7 @@ changes) still identifies the device to Home Assistant, but only inside each dis
 <base>/status                                      online | offline   (LWT, retained)
 <base>/state                                       {<group>: {<object_id>: value, …}, …}  (retained JSON)
 <base>/heartbeat                                   board/link diagnostics (flat JSON, 10 s cadence)
-<base>/crash                                       last reset reason + dump-waiting flag (retained)
+<base>/crash                                       crash report, retained — ONLY on a fault/dump boot; cleared otherwise
 <prefix>/sensor/<node>/<object_id>/config          discovery config per value (retained)
 ```
 

@@ -218,7 +218,10 @@ host-testable core is unusually large and valuable, because the risky parts are 
   "last updated N ago" entity, rendering `null` (unsynced) as its normal "unknown" state rather than
   a fabricated epoch date.
 - `logic/crashinfo.hpp` — reset-reason slug + fault classification, and the `last_crash` / MQTT crash
-  payload + paste-friendly text bundle (incl. the backtrace clamp) built from a captured summary.
+  payload + paste-friendly text bundle (incl. the backtrace clamp) built from a captured summary. The
+  retained MQTT crash payload (`build_crash_mqtt_payload`) is **crash-only**: the JSON when the boot is
+  *notable* (a real fault or a core-dump still in flash), else `""` — the bridge publishes that as a
+  zero-length retained message to **clear** the topic, so no crash message lingers after a clean boot.
 - `logic/reset_reason.hpp` — maps a raw `esp_reset_reason()` code to the stable slug used by
   `/status.sys.reset_reason` and the heartbeat, reusing `crashinfo`'s table so there is one
   vocabulary — a parity check asserts the two never drift apart.
@@ -678,11 +681,21 @@ Structure:
     crash **banner** (`renderCrashBanner()`) — titled on `fault`, so an orphan dump doesn't claim this
     boot crashed — with the reset reason + hex backtrace, a one-click `coredump.bin` download, and a
     "copy diagnostics" bundle (`/status` + `/diag` + summary) for a bug report. The MQTT bridge
-    additionally **retains** the summary on `<base>/crash` (reason + "dump waiting" flag as 2
-    diagnostic HA entities — reason/backtrace only, never secrets or the raw dump), so Home Assistant
-    (or Telegraf → VictoriaLogs) sees crashes over time; it is published once per (re)connect **and**
-    republished on the heartbeat cadence whenever the `coredump` flag changes, so a retained "Crash
-    Dump Waiting" can't stay latched ON after the dump is pulled and cleared.
+    additionally **retains** the summary on `<base>/crash` as **one** diagnostic HA entity — a "dump
+    waiting" flag (reason/backtrace only, never secrets or the raw dump), so Home Assistant (or
+    Telegraf → VictoriaLogs) sees crashes over time. The reset reason is *not* a crash entity: it is
+    the heartbeat's own "Reset Reason" sensor, so a crash entity for it would be a duplicate — the old
+    "Last Reset Reason" crash entity was dropped and is now actively retired (its stale retained
+    discovery config is deleted on upgrade via a zero-length retained publish). The topic is
+    **crash-only**
+    (`build_crash_mqtt_payload`): the summary is retained only when the boot is *notable* (a real fault
+    or a dump still in flash); a normal boot (USB re-enumeration, config-save/OTA reboot, clean
+    power-on) publishes a **zero-length retained** message that **clears** the topic, so no crash
+    message lingers once the problem is resolved — the reset reason stays visible on the heartbeat's
+    own "Reset Reason" sensor regardless. Published once per (re)connect **and** republished on the
+    heartbeat cadence whenever the `coredump` flag changes, so a retained "Crash Dump Waiting" can't
+    stay latched ON after the dump is pulled and cleared (and an orphan-dump-only boot is then
+    re-decided not-notable and the topic cleared).
   - **Decoding (maintainer side).** A raw dump is useless without the *matching-version* unstripped
     `.elf` (the shipped `.bin` has no symbols), so CI archives `daikin-altherma-esp32.elf` + its
     sha256 per build (artifact + Release asset, `scripts/ci-build-all.sh`). `scripts/decode-coredump.sh
