@@ -37,7 +37,11 @@ CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=n
 # WiFi
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
-CONFIG_ESP_WIFI_TX_BUFFER_TYPE_DYNAMIC=y
+# Dynamic TX buffers. ESP-IDF 6 dropped the CONFIG_ESP_WIFI_TX_BUFFER_TYPE_DYNAMIC boolean and
+# selects the policy through CONFIG_ESP_WIFI_TX_BUFFER instead (0 = static, 1 = dynamic); the old
+# symbol is now "unknown" and silently ignored at build time, so pinning it pinned nothing. 1 keeps
+# the intended dynamic-TX-buffer policy actually in effect.
+CONFIG_ESP_WIFI_TX_BUFFER_TYPE=1
 
 # HTTP Server
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024

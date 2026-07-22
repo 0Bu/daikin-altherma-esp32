@@ -42,6 +42,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#include <atomic>
 #include <cstdio>
 #include <exception>
 #include <string>
@@ -56,8 +57,14 @@ static MqttStatus               s_status;
 // event task (on_mqtt), which has no exception guard, so it must not allocate. mqtt_status() stringifies
 // it for the caller under the lock (a reader may allocate under RAII). s_status.error stays unused.
 static const char*              s_error   = "";
-static volatile bool            s_connected = false;
-static volatile bool            s_announce  = false;  // set on connect -> task re-announces
+// Shared between esp-mqtt's event task (on_mqtt) and the publish task (mqtt_task). std::atomic, not
+// volatile: volatile gives no cross-task visibility/ordering under the C++ memory model. Each is a
+// standalone flag/counter (no multi-field invariant to lock), so a plain atomic is enough — the
+// publish task tolerates eventual consistency (it re-announces on the next cycle after a reconnect).
+static std::atomic<bool>        s_connected{false};
+static std::atomic<bool>        s_announce{false};   // set on connect -> task re-announces (consumed
+                                                     // once via exchange(false) so a reconnect can't
+                                                     // be lost to a racing clear)
 
 // RAII guard around s_mtx (same idiom as config.cpp / hp_poll.cpp). Replaces the raw take/give pairs
 // so a throw on a reader (the broker copy in mqtt_status) can't strand the mutex and wedge every
@@ -72,16 +79,20 @@ struct Lock {
 
 // Persisted so the pointers handed to esp-mqtt (and reused by the task) stay valid.
 static std::string s_uri, s_user, s_pass, s_node, s_base, s_prefix, s_avail, s_state, s_heartbeat, s_crash;
-static std::string s_announced_profile;               // profile we last published discovery for
-static std::string s_last_json;                       // last state JSON published (dedup guard)
-static bool         s_heartbeat_announced = false;     // diagnostic discovery streamed this connection?
-static bool         s_mqtt_ever_connected = false;     // distinguishes the first connect from a RE-connect
-static bool         s_crash_dump_pub      = false;     // `coredump` flag as last published on s_crash
+static std::string s_announced_profile;               // profile we last published discovery for (mqtt_task only)
+static std::string s_last_json;                       // last state JSON published (dedup guard; mqtt_task only)
+// Written false by the event task on DISCONNECT, written true + read by the publish task -> atomic.
+static std::atomic<bool> s_heartbeat_announced{false}; // diagnostic discovery streamed this connection?
+static bool         s_mqtt_ever_connected = false;     // event-task-only: first connect vs. a RE-connect
+static bool         s_crash_dump_pub      = false;     // mqtt_task-only: `coredump` flag last published on s_crash
 
 // Cumulative publish counters for the heartbeat's mqtt.{count,fails,reconnects} — see mqtt_publish().
+// pub_ok/pub_fail are touched only on the publish task (mqtt_publish + publish_heartbeat both run
+// there), so they stay plain; reconnects is bumped on the EVENT task and read on the publish task, so
+// it is atomic.
 static uint32_t s_mqtt_pub_ok   = 0;
 static uint32_t s_mqtt_pub_fail = 0;
-static uint32_t s_mqtt_reconnects = 0;
+static std::atomic<uint32_t> s_mqtt_reconnects{0};
 
 // Heartbeat is diagnostics, not real-time telemetry — publish on a fixed cadence rather than on
 // every poll cycle.
@@ -246,7 +257,7 @@ static void publish_heartbeat() {
 static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
     switch (static_cast<esp_mqtt_event_id_t>(id)) {
     case MQTT_EVENT_CONNECTED:
-        if (s_mqtt_ever_connected) s_mqtt_reconnects++;   // a later CONNECTED is a RE-connect
+        if (s_mqtt_ever_connected) s_mqtt_reconnects.fetch_add(1);   // a later CONNECTED is a RE-connect
         s_mqtt_ever_connected = true;
         s_connected = true; s_announce = true; set_status(true, nullptr);
         diag_printf("mqtt: connected\n");
@@ -284,10 +295,15 @@ static void mqtt_task(void*) {
 
         try {
             if (s_connected) {
-                if (s_announce) {                              // just (re)connected
-                    s_announce = false;
+                if (s_announce.exchange(false)) {              // consume: just (re)connected
                     s_announced_profile.clear();               // force a fresh discovery below
                     s_last_json.clear();                       // force a full state re-seed
+                    // Force the board/link diagnostic discovery to re-publish on THIS (re)connect. The
+                    // disconnect handler also clears s_heartbeat_announced, but a DISCONNECT landing
+                    // mid-discovery (after the check below, before the publishes finish) could leave it
+                    // stuck true and skip discovery after the next reconnect. Tying the reset to the
+                    // announce — set on EVERY connect — closes that race.
+                    s_heartbeat_announced = false;
                     heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S; // publish it right away, then every 10 s
                     mqtt_publish(s_avail, "online", 0, 0, 1);
                 }
@@ -374,6 +390,7 @@ static bool build_client() {
 void mqtt_ha_start() {
     const Config& c = config();
     s_mtx = xSemaphoreCreateMutex();
+    if (!s_mtx) diag_printf("mqtt: status mutex alloc failed — status reads run unsynchronized\n");
     s_status.configured = !c.mqtt_uri.empty();
     s_status.broker     = c.mqtt_uri;
     if (!s_status.configured) return;
@@ -388,7 +405,12 @@ void mqtt_ha_start() {
 
     if (!build_client()) return;                               // policy error already surfaced
     esp_mqtt_client_start(s_client);
-    xTaskCreate(mqtt_task, "mqtt_pub", 4096, nullptr, 4, nullptr);
+    if (xTaskCreate(mqtt_task, "mqtt_pub", 4096, nullptr, 4, nullptr) != pdPASS) {
+        // No publish task -> discovery/state/heartbeat never go out. The client keeps its connection
+        // (and LWT), but say so rather than looking configured-but-silent in /status.
+        set_status(false, "publish task alloc failed");
+        diag_printf("mqtt: publish task alloc failed — no MQTT publishing this boot\n");
+    }
 }
 
 MqttStatus mqtt_status() {

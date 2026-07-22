@@ -71,7 +71,10 @@ static void dns_task(void*) {
 }
 
 void captive_dns_start() {
-    xTaskCreate(dns_task, "captive_dns", 4096, nullptr, 5, nullptr);
+    // If the DNS-redirect task can't start, the captive portal simply won't auto-pop — the user can
+    // still reach the setup page at 192.168.4.1. Non-fatal, but report it.
+    if (xTaskCreate(dns_task, "captive_dns", 4096, nullptr, 5, nullptr) != pdPASS)
+        ESP_LOGE(TAG, "captive DNS task alloc failed — portal won't auto-open (browse to 192.168.4.1)");
 }
 
 } // namespace daik

@@ -10,6 +10,7 @@
 //
 // Most of the heavy lifting lives in the modules; this file just wires them up in order.
 #include "esp_app_desc.h"
+#include "esp_err.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
@@ -32,17 +33,29 @@ static const char* TAG = "main";
 
 extern "C" void app_main() {
     // --- NVS ---
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ESP_ERROR_CHECK(nvs_flash_init());
+    // A full partition or a newer-IDF layout is recoverable: erase + retry. ANY other error (and the
+    // residual after a failed erase/retry) is NOT ignored — the old code checked only the two known
+    // codes and let every other one fall through, booting on with persistence silently unavailable.
+    // We continue on purpose (the web-UI recovery surface must still come up, and nvs_get_* already
+    // fall back to their defaults when nvs_open fails) but make the degraded state LOUD, and replay it
+    // into the diag ring below once it exists so it also reaches /diag + syslog.
+    esp_err_t nvs_err = nvs_flash_init();
+    if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES || nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        if (nvs_flash_erase() == ESP_OK) nvs_err = nvs_flash_init();
     }
+    if (nvs_err != ESP_OK)
+        ESP_LOGE(TAG, "nvs_flash_init failed: %s — continuing WITHOUT persistence this boot "
+                      "(config, WiFi-rollback backup and the safe-mode crash counter are not durable)",
+                 esp_err_to_name(nvs_err));
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     // --- Status LED ---
     daik::status_led_start();
 
     daik::diag_log_init();
+    if (nvs_err != ESP_OK)               // now that the diag ring exists, record the degraded boot
+        daik::diag_printf("nvs: init failed (%s) — running WITHOUT persistence this boot\n",
+                          esp_err_to_name(nvs_err));
     daik::diag_crash_capture();          // read reset reason + core-dump summary once, before services
     daik::config_load();
     daik::safe_mode_begin();             // crash-loop guard: count crash boots, latch safe mode past threshold

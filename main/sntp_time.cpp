@@ -5,6 +5,7 @@
 #include "esp_err.h"
 #include "esp_netif_sntp.h"
 #include "sdkconfig.h"
+#include <atomic>
 #include <sys/time.h>
 
 namespace daik {
@@ -17,11 +18,12 @@ namespace daik {
 // same as syslog_host); POST /set_ntp changes it by rebooting into a fresh config_load(), not by
 // mutating this live, so there's no reason to re-read config() anywhere below.
 static std::string s_server;
-// Set from the sync callback (an internal SNTP task), read from the httpd/diag/syslog tasks — a
-// single flag write/read needs nothing heavier than volatile. Once true it never reverts: a later
-// resolve failure doesn't undo the settimeofday() the first successful sync already applied, so the
-// wall clock stays valid (if increasingly stale) rather than flapping back to "unsynced".
-static volatile bool s_synced = false;
+// Set from the sync callback (an internal SNTP task), read from the httpd/diag/syslog tasks. An
+// std::atomic<bool>, not volatile: volatile gives no cross-task visibility or ordering guarantee in
+// the C++ memory model, so a cross-task flag is exactly what atomics are for. Once true it never
+// reverts: a later resolve failure doesn't undo the settimeofday() the first successful sync applied,
+// so the wall clock stays valid (if increasingly stale) rather than flapping back to "unsynced".
+static std::atomic<bool> s_synced{false};
 
 static void on_sync(struct timeval*) {
     if (!s_synced) diag_printf("sntp: time synced (%s)\n", s_server.c_str());

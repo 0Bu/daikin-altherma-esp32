@@ -219,9 +219,13 @@ integrate($P[$__range]) / 3600 / increase(heatpump_energy_kwh[$__range])
   the *metering* ingredients EKRHH and this firmware are therefore **peers**, not a shortcut past
   them — EKRHH's real edge is **bidirectional control** (SG-Ready / §14a power modulation /
   setpoints, the evcc path), where this firmware is (for now) read-only telemetry: a
-  firmware-exclusive Modbus client with full read/write of every HomeHub register is planned
+  firmware-exclusive Modbus client that reads and writes the HomeHub register set is planned
   (issue #32, not yet wired in — see the transport core in `logic/modbus.hpp`), so this line
-  describes today's shipped behaviour, not the intended end state. Practical differences: EKRHH
+  describes today's shipped behaviour, not the intended end state. That end state is **conditional**,
+  not "every register unconditionally": the Modbus map needs Unified MMI2 ≥ 7.8.0 on the audited
+  ERGA-EV/EHBH/X-E family, some registers are inoperative per model (e.g. holding regs 59 & 61 on
+  Micon 20002203), and the link will be plaintext Modbus TCP `:502` by choice — the hub's TLS `:802`
+  is available but out of scope for a trusted-LAN client. Practical differences: EKRHH
   is a separate **paid** Daikin accessory, must run in Modbus mode UC3 (its PV modes UC1/UC2 expose no
   bus at all), and taps the **P1/P2** room-controller bus — not the **X10A** service port this
   firmware reads.

@@ -20,6 +20,7 @@
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 
@@ -35,23 +36,28 @@ static const int FAIL_BIT      = BIT1;
 static int s_retry_num       = 0;
 static const int MAX_RETRY   = 10;   // first-boot connect attempts before falling back to the portal
 
+// Cross-task flags below are std::atomic, not volatile: volatile carries no cross-task visibility or
+// ordering guarantee under the C++ memory model — sharing a flag between the WiFi event task and the
+// HTTP / watchdog / main tasks is exactly what atomics are for. Each is a single value with no
+// multi-field invariant, so a plain atomic (default seq_cst) is enough; no mutex is needed.
+//
 // True only while the STA holds an IP. Gates esp_wifi_sta_get_ap_info() (wifi_info) so it never
 // reads the AP record mid-association, when its fields are transiently null and a concurrent read
 // faults (LoadProhibited). Written from the event-loop task, read from the HTTP / watchdog tasks.
-static volatile bool s_wifi_connected = false;
+static std::atomic<bool> s_wifi_connected{false};
 // Set true on the first GOT_IP, never cleared. Distinguishes a boot-time connect (budget spent →
 // creds presumed wrong → setup portal) from a runtime drop (creds known-good → reconnect forever).
-static volatile bool s_wifi_ever_connected = false;
+static std::atomic<bool> s_wifi_ever_connected{false};
 // Cumulative RE-connect count (excludes the first-ever GOT_IP) — see wifi_reconnect_count().
-static volatile uint32_t s_reconnects = 0;
+static std::atomic<uint32_t> s_reconnects{0};
 // Reason code of the most recent STA_DISCONNECTED (0 = none seen this boot). Read by the boot-window
 // rollback decision to tell "the AP refused these credentials" from "the AP was not there at all" —
 // logic/wifi_rollback.hpp owns what each reason means.
-static volatile int s_last_disco_reason = 0;
+static std::atomic<int> s_last_disco_reason{0};
 // True only for a boot that carries a PENDING credential change (POST /set_wifi armed a one-shot
 // backup). It makes this boot the trial run for the new credentials — the only boot allowed to
 // discard them — and holds the first-boot retry budget open for the whole grace window below.
-static volatile bool s_rollback_pending = false;
+static std::atomic<bool> s_rollback_pending{false};
 
 bool wifi_configured() { return !config().wifi_ssid.empty(); }
 
@@ -103,7 +109,7 @@ static void on_wifi(void*, esp_event_base_t base, int32_t id, void* data) {
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         auto* e = static_cast<ip_event_got_ip_t*>(data);
         ESP_LOGI(TAG, "connected, ip=" IPSTR, IP2STR(&e->ip_info.ip));
-        if (s_wifi_ever_connected) s_reconnects = s_reconnects + 1;   // a later GOT_IP is a RE-connect
+        if (s_wifi_ever_connected) s_reconnects.fetch_add(1);   // a later GOT_IP is a RE-connect
         s_retry_num           = 0;
         s_wifi_connected      = true;
         s_wifi_ever_connected = true;
@@ -137,7 +143,7 @@ static WdPing s_wd = { nullptr, 0 };
 // True the first time the gateway answers ICMP, never cleared. Until a baseline exists we have no
 // evidence this gateway answers echo at all, so a router that drops LAN ICMP must NOT read as "link
 // dead" (that would re-associate a healthy link every ~60 s forever). A real ghost replied before.
-static volatile bool s_gw_ever_reachable = false;
+static std::atomic<bool> s_gw_ever_reachable{false};
 
 static void wd_on_ping_end(esp_ping_handle_t hdl, void* args) {
     auto* p = static_cast<WdPing*>(args);
@@ -196,6 +202,14 @@ static GwProbe gateway_probe() {
 
 static void wifi_watchdog_task(void*) {
     s_wd.done = xSemaphoreCreateBinary();
+    if (!s_wd.done) {
+        // Without the completion semaphore every probe would report Unmeasurable (gateway_probe
+        // guards on it), which the policy eventually reads as a wedge and would re-associate a
+        // healthy link on a timer. Don't run blind — retire the task and log it.
+        diag_printf("wifi: watchdog semaphore alloc failed — ghost-association recovery disabled\n");
+        vTaskDelete(nullptr);
+        return;
+    }
     LinkWatch lw;              // consecutive-observation counters; the policy owns the thresholds
     bool blind_logged = false; // latch: one line per blind SPELL, not one per 30 s period
     for (;;) {
@@ -257,6 +271,13 @@ static void wifi_stop_sta() {
 
 bool wifi_start_sta() {
     s_events = xEventGroupCreate();
+    if (!s_events) {
+        // The connect handshake (this function's wait + the event handler's SetBits) is entirely
+        // driven through this event group; a null handle would fault the moment either touched it.
+        // Fail safe: report false so main.cpp brings up the setup portal instead.
+        ESP_LOGE(TAG, "event group alloc failed — cannot start STA; falling back to setup portal");
+        return false;
+    }
     ESP_ERROR_CHECK(esp_netif_init());
     s_sta_netif = esp_netif_create_default_wifi_sta();
     // Advertise our hostname to the router via DHCP (option 12) BEFORE the DHCP client runs, so the
@@ -332,13 +353,13 @@ bool wifi_start_sta() {
         if (rollback_step(rw, disco_class(s_last_disco_reason), elapsed) == RollbackAction::RollBack) break;
         ESP_LOGW(TAG, "new credentials: no IP after %d s (last reason %d) — the AP may still be "
                       "coming back; retrying up to %d s before rolling back",
-                 elapsed, s_last_disco_reason, WIFI_ROLLBACK_GRACE_S);
+                 elapsed, s_last_disco_reason.load(), WIFI_ROLLBACK_GRACE_S);
     }
     if (!(bits & CONNECTED_BIT)) {
         if (rollback_pending) {
             Config rollback_cfg = config();
             ESP_LOGW(TAG, "STA connect failed with new credentials (last reason %d) — rolling back to %s",
-                     s_last_disco_reason, rollback_cfg.wifi_ssid_backup.c_str());
+                     s_last_disco_reason.load(), rollback_cfg.wifi_ssid_backup.c_str());
             rollback_cfg.wifi_ssid = rollback_cfg.wifi_ssid_backup;
             rollback_cfg.wifi_pass = rollback_cfg.wifi_pass_backup;
             rollback_cfg.wifi_rollback_active = false;
@@ -398,7 +419,8 @@ bool wifi_start_sta() {
     // hp_poll takes 8192). The canary (CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY) turns an
     // overflow into a reboot — which would land during the memory-pressure wedge this watchdog
     // exists to break, i.e. exactly when it must not.
-    xTaskCreate(wifi_watchdog_task, "wifi_wd", 4096, nullptr, 4, nullptr);
+    if (xTaskCreate(wifi_watchdog_task, "wifi_wd", 4096, nullptr, 4, nullptr) != pdPASS)
+        diag_printf("wifi: watchdog task alloc failed — ghost-association recovery disabled this boot\n");
     return true;
 }
 

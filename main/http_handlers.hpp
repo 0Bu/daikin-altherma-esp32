@@ -3,6 +3,7 @@
 // Each translation unit registers its own routes so the handlers stay grouped by concern while
 // sharing one server + one OOM guard.
 #include "esp_http_server.h"
+#include "logic/http_surface.hpp"   // HttpSurface — which routes each trust surface exposes (F01)
 
 namespace daik {
 
@@ -20,12 +21,19 @@ int       http_read_body(httpd_req_t* req, char* buf, size_t max);
 void http_register(httpd_handle_t s, const char* uri, httpd_method_t method,
                    esp_err_t (*fn)(httpd_req_t*));
 
-// Route registration (one per concern)
-void http_register_status(httpd_handle_t s);   // http_status.cpp
-void http_register_config(httpd_handle_t s);   // http_config.cpp
-void http_register_ota(httpd_handle_t s);      // http_ota.cpp
-void http_register_mcp(httpd_handle_t s);      // mcp_server.cpp
-void http_register_captive(httpd_handle_t s);  // http_status.cpp — MUST be registered last
+// Like http_register, but only if the trust `surface` exposes this route (logic/http_surface.hpp).
+// The concern-registration functions below call this for every route so the AP/LAN boundary is one
+// host-tested policy rather than a per-file judgement call.
+void http_register_on(httpd_handle_t s, HttpSurface surface, const char* uri, httpd_method_t method,
+                      esp_err_t (*fn)(httpd_req_t*));
+
+// Route registration (one per concern). `surface` selects which routes are exposed: on the open
+// setup AP only the provisioning routes register; on the trusted LAN, the full API.
+void http_register_status(httpd_handle_t s, HttpSurface surface);   // http_status.cpp
+void http_register_config(httpd_handle_t s, HttpSurface surface);   // http_config.cpp
+void http_register_ota(httpd_handle_t s, HttpSurface surface);      // http_ota.cpp
+void http_register_mcp(httpd_handle_t s, HttpSurface surface);      // mcp_server.cpp
+void http_register_captive(httpd_handle_t s);  // http_status.cpp — MUST be registered last (both surfaces)
 
 // Add fd to the /events broadcast list (idempotent). Register ONLY a socket that has actually
 // subscribed — every registered fd is pushed a frame every poll cycle. Returns false when all 8

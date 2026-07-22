@@ -970,7 +970,10 @@ function wire() {
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("wifiModal").hidden) closeWifi(); });
   $("wifiForm").addEventListener("submit", (e) => {
     e.preventDefault();
-    const ssid = $("wfSSID").value.trim();
+    // NOT trimmed: leading/trailing spaces are valid SSID bytes (an AP may legitimately name itself
+    // " home " or "wifi "), so the field is an opaque identifier — trimming it would submit, and try
+    // to join, a different network than the one the user selected.
+    const ssid = $("wfSSID").value;
     const pass = $("wfPass").value;
     let valid = true;
     if (!ssid || ssid.length > 32) {
@@ -1015,7 +1018,9 @@ function wire() {
     }
     saveReboot("/set_mqtt", {
       broker,
-      user: $("mqUser").value.trim(),
+      // user is an opaque credential like pass — NOT trimmed. Spaces can be significant in a broker
+      // username, and mangling it here would fail auth against a broker that would otherwise accept it.
+      user: $("mqUser").value,
       pass: $("mqPass").value,
       clear_creds: $("mqClearCreds").checked,   // explicit credential clear (blank fields keep them)
     }, {
@@ -1038,7 +1043,7 @@ function wire() {
     // and mqtts://host silently became host), producing a save the firmware then rejects with
     // "Credentials require mqtts://": an error blaming a scheme this page removed on its own.
     // (Ticked, the fields are disabled and this can't fire; the term keeps the intent explicit.)
-    const typed = $("mqUser").value.trim().length > 0 || $("mqPass").value.length > 0;
+    const typed = $("mqUser").value.length > 0 || $("mqPass").value.length > 0;
     const hasCreds = typed || (!!S.status?.mqtt?.has_creds && !$("mqClearCreds").checked);
     const broker = $("mqBroker").value.trim();
     if (hasCreds) {
@@ -1076,14 +1081,24 @@ function wire() {
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("syslogModal").hidden) closeSyslog(); });
   $("syslogForm").addEventListener("submit", (e) => {
     e.preventDefault();
-    const raw = $("slHost").value.trim();
+    const raw = $("slHost").value.trim();   // host:port is an address, not a credential — OK to trim
     let host = "";
     let port = 514;
     if (raw) {
       const idx = raw.lastIndexOf(":");
       if (idx !== -1) {
         host = raw.substring(0, idx);
-        port = parseInt(raw.substring(idx + 1), 10) || 514;
+        // Validate the FULL port string. `parseInt(...) || 514` silently turned "0", "abc" and
+        // "514abc" into 514 — masking a typo as a valid save. Require all-digits in 1–65535 instead.
+        const portStr = raw.substring(idx + 1);
+        if (!/^\d+$/.test(portStr) || +portStr < 1 || +portStr > 65535) {
+          $("slHost").classList.add("invalid");
+          $("slError").textContent = "Port must be a whole number 1–65535 (e.g. logs.example.com:514).";
+          $("slError").hidden = false;
+          toast("Check the Syslog port", "err");
+          return;
+        }
+        port = +portStr;
       } else {
         host = raw;
       }

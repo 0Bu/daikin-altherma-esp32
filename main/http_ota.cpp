@@ -41,10 +41,12 @@ static esp_err_t ota_stat(httpd_req_t* req) {
     return http_send_json(req, j.c_str());
 }
 
-void http_register_ota(httpd_handle_t s) {
-    http_register(s, "/ota/check", HTTP_GET, ota_check);
-    http_register(s, "/ota/update", HTTP_POST, ota_do);
-    http_register(s, "/ota/status", HTTP_GET, ota_stat);
+void http_register_ota(httpd_handle_t s, HttpSurface surface) {
+    // OTA is trusted-LAN only — never exposed on the open setup AP (F01). http_register_on withholds
+    // all three on the SetupAp surface.
+    http_register_on(s, surface, "/ota/check", HTTP_GET, ota_check);
+    http_register_on(s, surface, "/ota/update", HTTP_POST, ota_do);
+    http_register_on(s, surface, "/ota/status", HTTP_GET, ota_stat);
 }
 
 } // namespace daik

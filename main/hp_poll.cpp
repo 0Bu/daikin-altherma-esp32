@@ -231,7 +231,11 @@ static void poll_task(void*) {
 
 void hp_poll_start() {
     s_mtx = xSemaphoreCreateMutex();
-    xTaskCreate(poll_task, "hp_poll", 8192, nullptr, 5, nullptr);
+    if (!s_mtx) diag_printf("hp_poll: cache mutex alloc failed — value snapshots return empty\n");
+    // The poll engine is the core of the device; if its task can't be created there is no heat-pump
+    // polling at all. Report it loudly — the web UI + OTA still come up, so the board stays fixable.
+    if (xTaskCreate(poll_task, "hp_poll", 8192, nullptr, 5, nullptr) != pdPASS)
+        diag_printf("hp_poll: poll task alloc failed — X10A polling disabled this boot\n");
 }
 
 size_t hp_values_snapshot(CachedValue* out, size_t max) {

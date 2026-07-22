@@ -2,10 +2,14 @@
 #include "config.hpp"
 #include "nvs_storage.hpp"
 #include "diag_log.hpp"
+#include "logic/config_store.hpp"   // ConfigBlob (de)serialize — the atomic CRC-checked config blob
 #include "sdkconfig.h"
 #include "soc/soc_caps.h"   // SOC_GPIO_PIN_COUNT — per-target GPIO count for the link-pin check
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include <cstdlib>          // abort() — the fail-stop when the config mutex can't be created
+#include <vector>
 
 namespace daik {
 
@@ -38,24 +42,48 @@ static void publish(const Config& c) {   // swap g_cfg under the lock
 
 void config_load() {
     g_mtx = xSemaphoreCreateMutex();
+    // FAIL STOP if the config mutex can't be created. config() is read + written concurrently by the
+    // httpd and poll tasks; without the mutex it hands out TORN std::string snapshots — a real data
+    // race, not a cosmetic one. Logging and continuing (the old behaviour) is not fail-safe. A mutex
+    // alloc failing this early means the heap is exhausted before any task exists, so there is no safe
+    // degraded mode to fall into — abort so the reset reason + coredump are visible, rather than run
+    // with silent memory corruption. (Reviewed: F04.)
+    if (!g_mtx) {
+        ESP_LOGE("config", "config mutex alloc failed at boot — aborting (cannot run config unsynchronized)");
+        abort();
+    }
     Config c;
-    // Persisted user settings: WiFi + MQTT credentials. (The hostname is fixed at
-    // CONFIG_DAIKIN_HOSTNAME, the poll cadence at POLL_INTERVAL_S, labels are English-only.)
-    c.wifi_ssid = nvs_get_str("wifi_ssid", CONFIG_DAIKIN_WIFI_SSID);
-    c.wifi_pass = nvs_get_str("wifi_pass", CONFIG_DAIKIN_WIFI_PASSWORD);
-    c.wifi_ssid_backup = nvs_get_str("wifi_ssid_back", "");
-    c.wifi_pass_backup = nvs_get_str("wifi_pass_back", "");
-    c.wifi_rollback_active = nvs_get_i32("wifi_rollback", 0) != 0;
-    c.wifi_rolled_back = nvs_get_i32("wifi_rolledbk", 0) != 0;
-    c.mqtt_uri  = nvs_get_str("mqtt_uri", CONFIG_DAIKIN_MQTT_BROKER_URI);
-    c.mqtt_user = nvs_get_str("mqtt_user", CONFIG_DAIKIN_MQTT_USERNAME);
-    c.mqtt_pass = nvs_get_str("mqtt_pass", CONFIG_DAIKIN_MQTT_PASSWORD);
-    c.syslog_host = nvs_get_str("syslog_host", CONFIG_DAIKIN_SYSLOG_HOST);
-    c.syslog_port = nvs_get_i32("syslog_port", CONFIG_DAIKIN_SYSLOG_PORT);
-    // "" on flash (either no key yet, or an explicit empty save via POST /set_ntp) both fall back to
-    // the Kconfig default — unlike syslog_host, an empty ntp_server is not a disabled state to
-    // preserve, so nvs_get_str's own default-on-missing-key isn't enough on its own.
-    c.ntp_server = nvs_get_str("ntp_server", CONFIG_DAIKIN_NTP_SERVER);
+    // Persisted user settings: WiFi + MQTT + syslog + NTP. These are read FIRST from the atomic
+    // CRC-checked "cfg" blob (logic/config_store.hpp); it is written all-or-nothing by config_save, so
+    // it is never half-updated. If it is absent (a fresh device, or an OTA upgrade from the pre-blob
+    // per-key layout) or fails its CRC, fall back to the legacy individual keys — which for a fresh
+    // device are just the Kconfig defaults. (The hostname is fixed at CONFIG_DAIKIN_HOSTNAME, the poll
+    // cadence at POLL_INTERVAL_S, labels are English-only.)
+    ConfigBlob b;
+    std::vector<uint8_t> raw;
+    if (nvs_get_blob("cfg", raw) && config_blob_deserialize(raw.data(), raw.size(), b)) {
+        c.wifi_ssid = b.wifi_ssid;                     c.wifi_pass = b.wifi_pass;
+        c.wifi_ssid_backup = b.wifi_ssid_backup;       c.wifi_pass_backup = b.wifi_pass_backup;
+        c.wifi_rollback_active = b.wifi_rollback_active; c.wifi_rolled_back = b.wifi_rolled_back;
+        c.mqtt_uri = b.mqtt_uri;   c.mqtt_user = b.mqtt_user;   c.mqtt_pass = b.mqtt_pass;
+        c.syslog_host = b.syslog_host; c.syslog_port = b.syslog_port; c.ntp_server = b.ntp_server;
+    } else {
+        // Legacy / first-boot fallback (per-key + Kconfig defaults).
+        c.wifi_ssid = nvs_get_str("wifi_ssid", CONFIG_DAIKIN_WIFI_SSID);
+        c.wifi_pass = nvs_get_str("wifi_pass", CONFIG_DAIKIN_WIFI_PASSWORD);
+        c.wifi_ssid_backup = nvs_get_str("wifi_ssid_back", "");
+        c.wifi_pass_backup = nvs_get_str("wifi_pass_back", "");
+        c.wifi_rollback_active = nvs_get_i32("wifi_rollback", 0) != 0;
+        c.wifi_rolled_back = nvs_get_i32("wifi_rolledbk", 0) != 0;
+        c.mqtt_uri  = nvs_get_str("mqtt_uri", CONFIG_DAIKIN_MQTT_BROKER_URI);
+        c.mqtt_user = nvs_get_str("mqtt_user", CONFIG_DAIKIN_MQTT_USERNAME);
+        c.mqtt_pass = nvs_get_str("mqtt_pass", CONFIG_DAIKIN_MQTT_PASSWORD);
+        c.syslog_host = nvs_get_str("syslog_host", CONFIG_DAIKIN_SYSLOG_HOST);
+        c.syslog_port = nvs_get_i32("syslog_port", CONFIG_DAIKIN_SYSLOG_PORT);
+        c.ntp_server = nvs_get_str("ntp_server", CONFIG_DAIKIN_NTP_SERVER);
+    }
+    // "" (either no ntp_server yet, or an explicit empty save via POST /set_ntp) falls back to the
+    // Kconfig default — unlike syslog_host, an empty ntp_server is not a disabled state to preserve.
     if (c.ntp_server.empty()) c.ntp_server = CONFIG_DAIKIN_NTP_SERVER;
 
     // Persisted X10A LINK cache: RX/TX pins + protocol. The wiring is physically boot-invariant, so
@@ -110,68 +138,48 @@ static bool put_i32(const char* key, int32_t val) {
 }
 
 bool config_save(const Config& c) {
-    // Persist user settings (WiFi + MQTT) and the X10A link cache (RX/TX pins + protocol). The MODEL
-    // is intentionally NOT written — profile + fingerprint (fp_*) are re-derived every boot.
-    // Within a group every key is attempted even after a failure (`&=`, not short-circuit) so one bad
-    // key doesn't hide the rest, and each failing one gets its own diag line. ACROSS the two WiFi
-    // groups the sequence stops dead — see below.
-    bool ok = true;
-
-    // WiFi credentials vs. their rollback backup: the ORDER of these two groups matters. Every
-    // nvs_set_* commits on its own (nvs_storage.cpp), so config_save is a sequence of independent
-    // commits and not a transaction — a power cut lands BETWEEN two of them, and which pair it
-    // straddles decides whether the device can still find its way back to a working network. The
-    // rule is "write what must survive the cut before the state that points away from it", and its
-    // direction flips with the change:
-    //   arming a rollback (flag → true, i.e. POST /set_wifi): the backup and the flag must already
-    //     be on flash when the new credentials land. Otherwise a cut arms untried credentials with
-    //     no way back — precisely the failure this mechanism exists to prevent.
-    //   clearing one (flag → false: a rollback restoring the old credentials, or any ordinary save
-    //     that does not touch WiFi at all): the restored credentials must land before the backup
-    //     that still holds them is erased.
-    // Either way the worst case becomes the same harmless one — a stale backup/flag next to
-    // credentials that work, which the next successful connect clears (wifi.cpp). Ordered backwards,
-    // the worst case costs the credentials themselves.
+    // Persist user settings (WiFi + MQTT + syslog + NTP) and the X10A link cache (RX/TX pins +
+    // protocol). The MODEL is intentionally NOT written — profile + fingerprint (fp_*) are re-derived
+    // every boot.
     //
-    // A WRITE FAILURE straddles these groups exactly like a power cut does, so the second group is
-    // only written if the first one fully landed. Without that stop, an NVS error hits the identical
-    // worst case the ordering exists to rule out: clearing a rollback whose credential-restore
-    // failed would go on to erase the backup that still held the only working credentials, leaving
-    // the bad ones on flash and nothing to roll back to. Bailing out keeps flash self-consistent —
-    // it just keeps the PREVIOUS consistent state, which is what `false` then tells the caller.
-    auto save_wifi_creds = [&] {
-        bool g = true;
-        g &= put_str("wifi_ssid", c.wifi_ssid);
-        g &= put_str("wifi_pass", c.wifi_pass);
-        return g;
-    };
-    auto save_wifi_rollback = [&] {
-        bool g = true;
-        g &= put_str("wifi_ssid_back", c.wifi_ssid_backup);
-        g &= put_str("wifi_pass_back", c.wifi_pass_backup);
-        g &= put_i32("wifi_rollback", c.wifi_rollback_active ? 1 : 0);
-        g &= put_i32("wifi_rolledbk", c.wifi_rolled_back ? 1 : 0);
-        return g;
-    };
-    if (c.wifi_rollback_active) {
-        if (!save_wifi_rollback()) return false;   // no backup on flash → do NOT arm the new creds
-        ok &= save_wifi_creds();
-    } else {
-        if (!save_wifi_creds()) return false;      // creds not on flash → do NOT erase the backup
-        ok &= save_wifi_rollback();
+    // ATOMIC credential/service save (F02). The credential + service fields go into ONE CRC-checked
+    // blob (logic/config_store.hpp) written with a single nvs_set_blob. That entry is atomic — either
+    // the whole new blob lands or the previous one survives — so the save is all-or-nothing across
+    // both a mid-write NVS failure AND a power cut, with no per-key rollback and no write-ordering to
+    // get right (the old multi-commit save needed both, and still left a partial state on a rollback
+    // that could not complete). Because this blob is written HERE (the httpd task) alone, the poll
+    // task (config_save_link) can never revert a credential change — the field-ownership guarantee is
+    // kept without the narrow per-key writes.
+    ConfigBlob b;
+    b.wifi_ssid = c.wifi_ssid;                 b.wifi_pass = c.wifi_pass;
+    b.wifi_ssid_backup = c.wifi_ssid_backup;   b.wifi_pass_backup = c.wifi_pass_backup;
+    b.wifi_rollback_active = c.wifi_rollback_active; b.wifi_rolled_back = c.wifi_rolled_back;
+    b.mqtt_uri = c.mqtt_uri;   b.mqtt_user = c.mqtt_user;   b.mqtt_pass = c.mqtt_pass;
+    b.syslog_host = c.syslog_host; b.syslog_port = c.syslog_port; b.ntp_server = c.ntp_server;
+    const std::vector<uint8_t> blob = config_blob_serialize(b);
+
+    const esp_err_t e = nvs_set_blob("cfg", blob.data(), blob.size());
+    if (e != ESP_OK) {
+        // The atomic write failed, so the PREVIOUS blob is still intact — nothing net saved. Don't
+        // publish RAM; the caller turns `false` into a 500 and skips the reboot.
+        diag_printf("config: NVS blob write failed key=cfg err=%s — nothing saved\n", esp_err_to_name(e));
+        return false;
     }
 
-    ok &= put_str("mqtt_uri", c.mqtt_uri);
-    ok &= put_str("mqtt_user", c.mqtt_user);
-    ok &= put_str("mqtt_pass", c.mqtt_pass);
-    ok &= put_str("syslog_host", c.syslog_host);
-    ok &= put_i32("syslog_port", c.syslog_port);
-    ok &= put_str("ntp_server", c.ntp_server);
-    ok &= put_i32("rx_pin", c.rx_pin);
-    ok &= put_i32("tx_pin", c.tx_pin);
-    ok &= put_str("proto", std::string(1, static_cast<char>(c.proto)));
-    if (ok) publish(c);
-    return ok;
+    // The X10A LINK cache (RX/TX/proto) stays as separate self-healing keys, NOT in the blob: it has
+    // two owners (this path for a manual /set_hp override, and the poll task's config_save_link for a
+    // detected pin), and a partial write self-heals on the next detect and is re-validated on load by
+    // link_pins_safe. Written AFTER the blob so a link-key hiccup never taints the atomic credential
+    // save; the credential/service state is already durably committed by the time we get here.
+    bool link_ok = true;
+    link_ok &= put_i32("rx_pin", c.rx_pin);
+    link_ok &= put_i32("tx_pin", c.tx_pin);
+    link_ok &= put_str("proto", std::string(1, static_cast<char>(c.proto)));
+    publish(c);   // the atomic blob landed — RAM must reflect the new credential/service state
+    if (!link_ok)
+        diag_printf("config: link-cache key write failed after the atomic blob save "
+                    "(self-heals on the next detect; re-validated on load)\n");
+    return link_ok;
 }
 
 // ── Field-owned commits (the detection path) ─────────────────────────────────────────────────────

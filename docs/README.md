@@ -175,13 +175,10 @@ User credentials + the X10A link cache are persisted; the model is re-detected o
 
 | NVS key | Meaning |
 |---------|---------|
-| `wifi_ssid` / `wifi_pass` | Station credentials (else the setup AP runs). |
-| `wifi_ssid_back` / `wifi_pass_back` / `wifi_rollback` | One-shot backup of the previous credentials + a flag, written by `/set_wifi`; restored automatically if the new network fails to connect, then cleared. The restore deadline is reason-aware (`logic/wifi_rollback.hpp`): an AP that refuses the credentials rolls back in ~1 min, an SSID that is merely absent — a router still rebooting — gets 3 min first. |
-| `wifi_rolledbk` | Set when such a rollback actually happened, so `/status.wifi.rolled_back` can report it after the reboot; cleared by the next `/set_wifi`. |
-| `mqtt_uri` | HA-bridge broker (`host:port` or full `mqtt(s)://…`; empty = MQTT off). |
-| `mqtt_user` / `mqtt_pass` | Optional broker auth. |
-| `syslog_host` / `syslog_port` | Optional syslog server (UDP, RFC 5424); empty host = syslog off, port defaults to 514. |
-| `rx_pin` / `tx_pin` / `proto` | X10A link cache (physical wiring + framing); tried first by the sweep, re-saved on change. |
+| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + the one-shot rollback backup + flags, MQTT (`uri`/`user`/`pass`), syslog (host/port; empty host = off), and the SNTP server (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` default on next boot). One CRC-checked entry written with a single `nvs_set_blob`, so a save is **all-or-nothing** across a write failure *and* a power cut. WiFi rollback: the previous credentials are backed up here by `/set_wifi` and restored automatically if the new network fails to connect (reason-aware deadline, `logic/wifi_rollback.hpp`); `/status.wifi.rolled_back` reports it after the reboot. |
+| *(legacy per-key)* | `wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback`/`wifi_rolledbk`/`mqtt_*`/`syslog_*`/`ntp_server` — the pre-blob layout, still **read** as a fallback when `cfg` is absent (fresh device / OTA from an older build); superseded on the next save. |
+| `rx_pin` / `tx_pin` / `proto` | X10A link cache (physical wiring + framing) — kept as separate self-healing keys, tried first by the sweep, re-saved on change, re-validated on load. |
+| `boot_fails` | Boot-loop crash counter (`safe_mode.cpp`); increments on a crash-only boot, latches recovery mode past the threshold, cleared after a healthy uptime. Lives here so a factory reset wipes it too. |
 
 Not persisted: the **hostname** is fixed at `daikin-altherma-esp32`, the **poll cadence** at 1 s,
 labels are **English-only**; and the **model** (`profile` + the detection fingerprint) is re-detected
@@ -223,7 +220,8 @@ GET  /events                       # WebSocket live push (the only live UI trans
                                    #   unread body would desync every frame after it).
 GET  /models                       # profile catalog + pin hint (detection is automatic; no manual picker)
 GET  /diag[?verbose=0|1][?clear=1] # plain-text in-memory diag log (raw RX frames when verbose)
-GET  /scan                         # WiFi scan for the setup portal → [{ssid,rssi,auth}]
+GET  /scan                         # WiFi scan for the setup portal → {"networks":[{ssid,rssi}]}
+                                   #   (no auth field — the setup UI only needs the name + signal)
 GET  /coredump[?clear=1]           # stream the flash core-dump image (chunked; 404 if none);
                                    #   ?clear=1 erases the coredump partition. Decode offline with
                                    #   scripts/decode-coredump.sh coredump.bin (matching-version .elf).
@@ -250,9 +248,12 @@ POST /detect                       # re-run auto-detection (reset profile to "au
 GET  /ota/check[?ms=<epoch>]       # start a background update check (poll /ota/status)
 POST /ota/update                   # start the background self-update (downloads, then reboots)
 GET  /ota/status                   # { state, progress, message, available, update_available, current }
-POST /mcp                          # MCP server for AI agents — PLANNED (route exists; currently
-                                   #   returns a JSON-RPC "not implemented" error). read-only
-                                   #   get_hp_values / get_status are the intended tools.
+POST /mcp                          # MCP server for AI agents — PLANNED (route exists; no tools yet).
+                                   #   Today it returns a spec-compliant JSON-RPC 2.0 error (policy in
+                                   #   logic/mcp_jsonrpc.hpp): bad JSON → -32700, invalid request →
+                                   #   -32600, a notification (no id) → 204, a well-formed call →
+                                   #   -32601 with its id echoed. read-only; get_status / get_hp_values
+                                   #   are the intended tools.
 ```
 
 Every handler runs under an OOM try/catch rather than crashing (memory is the binding constraint on

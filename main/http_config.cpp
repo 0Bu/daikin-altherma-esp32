@@ -462,13 +462,16 @@ static esp_err_t do_detect(httpd_req_t* req) {
     return http_send_json(req, "{\"ok\":true}");
 }
 
-void http_register_config(httpd_handle_t s) {
-    http_register(s, "/set_wifi", HTTP_POST, set_wifi);
-    http_register(s, "/set_mqtt", HTTP_POST, set_mqtt);
-    http_register(s, "/set_syslog", HTTP_POST, set_syslog);
-    http_register(s, "/set_ntp", HTTP_POST, set_ntp);
-    http_register(s, "/set_hp", HTTP_POST, set_hp);
-    http_register(s, "/detect", HTTP_POST, do_detect);
+void http_register_config(httpd_handle_t s, HttpSurface surface) {
+    // /set_wifi is the ONE config route the open setup AP exposes (it is how you provision the
+    // network); http_register_on withholds the rest there (F01) — MQTT/syslog/NTP/HP config and
+    // re-detect are trusted-LAN only, so a nearby radio client cannot reconfigure the device.
+    http_register_on(s, surface, "/set_wifi", HTTP_POST, set_wifi);
+    http_register_on(s, surface, "/set_mqtt", HTTP_POST, set_mqtt);
+    http_register_on(s, surface, "/set_syslog", HTTP_POST, set_syslog);
+    http_register_on(s, surface, "/set_ntp", HTTP_POST, set_ntp);
+    http_register_on(s, surface, "/set_hp", HTTP_POST, set_hp);
+    http_register_on(s, surface, "/detect", HTTP_POST, do_detect);
 }
 
 } // namespace daik

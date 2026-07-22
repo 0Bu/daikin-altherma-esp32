@@ -4,6 +4,8 @@
 // (partitions.csv) so OTA preserves config.
 #include <string>
 #include <cstdint>
+#include <cstddef>
+#include <vector>
 #include "esp_err.h"
 
 namespace daik {
@@ -22,5 +24,12 @@ std::string nvs_get_str(const char* key, const std::string& def = "");
 [[nodiscard]] esp_err_t nvs_set_str(const char* key, const std::string& val);
 int32_t     nvs_get_i32(const char* key, int32_t def);   // used for the persisted RX/TX pin cache
 [[nodiscard]] esp_err_t nvs_set_i32(const char* key, int32_t val);
+
+// Blob get/set for the atomic config store (logic/config_store.hpp). nvs_set_blob writes the whole
+// value as ONE NVS entry (atomic: the old entry survives a failed/interrupted write), which is what
+// makes config_save all-or-nothing. nvs_get_blob returns false on a missing key or any read error,
+// so a fresh device / an OTA from the pre-blob layout falls back to the legacy per-key load.
+[[nodiscard]] esp_err_t nvs_set_blob(const char* key, const void* data, size_t len);
+bool                    nvs_get_blob(const char* key, std::vector<uint8_t>& out);
 
 } // namespace daik

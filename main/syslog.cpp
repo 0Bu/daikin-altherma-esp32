@@ -299,9 +299,17 @@ void syslog_init() {
     s_status_mtx = xSemaphoreCreateMutex();
     s_ping.done  = xSemaphoreCreateBinary();
     s_queue = xQueueCreate(32, sizeof(SyslogMsg));
-    if (!s_queue) return;
+    // The queue is load-bearing (syslog_send enqueues, the task drains); without it there is no
+    // syslog, so bail. The status mutex + ping semaphore are advisory — their readers null-guard
+    // (Lock, and the ping probe's `if (!s_ping.done)`) — so a failure there is logged, not fatal.
+    if (!s_status_mtx || !s_ping.done)
+        diag_printf("syslog: status mutex / ping semaphore alloc failed — status + reachability degraded\n");
+    if (!s_queue) {
+        diag_printf("syslog: message queue alloc failed — syslog forwarding disabled this boot\n");
+        return;
+    }
 
-    xTaskCreate([](void*) {
+    if (pdPASS != xTaskCreate([](void*) {
         struct sockaddr_in dest_addr{};
         bool resolved = false;        // DNS resolved → dest_addr valid → forwarding lines
         bool reachable = false;       // advisory probe result (see syslog_ping_host)
@@ -431,7 +439,8 @@ void syslog_init() {
         }
         // 6144: this task runs getaddrinfo() + raw socket()/sendto() directly on its own stack (unlike
         // esp-mqtt, whose socket work lives in an internal task). 4096 is too thin for that call chain.
-    }, "syslog_task", 6144, nullptr, 3, nullptr);
+    }, "syslog_task", 6144, nullptr, 3, nullptr))
+        diag_printf("syslog: task alloc failed — syslog forwarding disabled this boot\n");
 }
 
 void syslog_send(const char* msg, size_t len) {
