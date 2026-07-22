@@ -92,8 +92,17 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802
         case 119: r.value = read_s16(data, n, false) * 0.1;       r.ok = (r.value != -3276.8); break;
         // Signed big-endian ×0.01 (mixed-water temp).
         case 118: r.value = read_s16(data, n, true) * 0.01;       r.ok = true; break;
-        // Refrigerant pressure raw (signed LE ×0.1) -> saturation temperature (°C).
-        case 405: r.value = press2temp(read_s16(data, n, false) * 0.1, rtype); r.ok = true; break;
+        // Refrigerant pressure raw (signed LE ×0.1) -> saturation temperature (°C). A 0/negative
+        // pressure is an absent/idle sensor (an OU with the compressor off publishes 0 bar), not a
+        // reading — its saturation temperature (press2temp(0) ≈ -51 °C) is a placeholder, so drop it
+        // rather than publish an impossible sat-temp. A running circuit's low-side pressure is well
+        // above 0, so this never hides a real reading.
+        case 405: {
+            const double bar = read_s16(data, n, false) * 0.1;
+            if (bar <= 0.0) break;                                 // absent sensor -> r.ok stays false
+            r.value = press2temp(bar, rtype);                     r.ok = true;
+            break;
+        }
 
         // ── Bit flags: conv 300+b -> bit b (0=LSB) of data[0] -> ON/OFF ──
         case 300: case 301: case 302: case 303:
@@ -159,6 +168,31 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802
             break;
     }
     return r;
+}
+
+// Physical envelope for a °C reading (dataType 1). A decoded temperature outside this range is a
+// no-data / absent-sensor placeholder — an idle outdoor unit reporting 576 °C or a 231 °C target, a
+// floating sensor, or a ±3276.x sentinel — never a real Altherma reading. The widest LEGITIMATE span
+// is roughly the outdoor coil in hard frost (about -30 °C) to compressor discharge under load (about
+// 130 °C), so these bounds clip nothing real while dropping the impossible values.
+inline constexpr double TEMP_MIN_C = -60.0;
+inline constexpr double TEMP_MAX_C = 200.0;
+
+// Publish-time plausibility filter: is this decoded Reading fit to publish? Drops a °C temperature
+// (dataType 1) outside the physical envelope. Keyed on the °C dataType, NOT the converter id, because
+// the temperature converters (105/114/118/119/405) are also used for non-°C rows (conv 105 carries
+// O/U capacity kW and BE_COP at dataType -1) that must pass through unchanged.
+//
+// Deliberately SEPARATE from convert() and applied by hp_format at publish time, not folded into the
+// converter: convert() must keep its INTRINSIC per-converter semantics so the catalog audit's
+// converters_equivalent() can still tell conv 105 (no sentinel guard) from conv 114 (drops raw 0x8000
+// as "no data") — the exact distinction behind the #38 no-data-sentinel bug. Folding the envelope
+// into convert() makes 105 and 114 decode identically on °C rows, which silently blinds that gate
+// (tools/domain/selftest.sh #38). This is a backstop, never a licence to use the wrong converter.
+inline bool reading_plausible(const ValueDef& def, const Reading& r) {
+    if (!r.ok) return true;                       // no numeric value to bound (text, or already dropped)
+    if (def.type == 1 && (r.value < TEMP_MIN_C || r.value > TEMP_MAX_C)) return false;
+    return true;
 }
 
 // The active profile declares its refrigerant once via a size-0 row whose conv id is 801-805

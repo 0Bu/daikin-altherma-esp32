@@ -153,7 +153,11 @@ host-testable core is unusually large and valuable, because the risky parts are 
   captured from a real unit.
 - `logic/convert.hpp` — every converter (raw bytes → typed value). This is where a wrong sign,
   scale or endianness would silently corrupt a reading; unit-tested per converter id against
-  known-good reference outputs.
+  known-good reference outputs. Also `reading_plausible()` — the **publish-time** filter that drops a
+  °C reading (dataType 1) outside a physical envelope (an idle unit's 576 °C, a ±3276.x sentinel);
+  applied by `hp_format`, deliberately **not** folded into `convert()` so the domain audit still sees
+  each converter's intrinsic semantics (conv 105 vs 114 on the no-data sentinel). conv 405 separately
+  drops a saturation temp derived from a 0-bar (absent/idle) pressure.
 - `logic/registers.hpp` — register-buffer parsing (offset/size extraction, bounds).
 - `logic/value_def.hpp` — the `ValueDef{reg, offset, conv, size, type, label}` row type the generated
   `def/*` profile tables are written in: the shared vocabulary between the offline generator's output
@@ -439,7 +443,10 @@ just-wired unit is still identified promptly. A pass does:
 2. **Page probe** — query every page any profile can reference (`0x00,0x10,0x20,0x21,0x30,0x60–0x65,
    0xA0,0xA1`) plus `0x11`; set a bit in a **page mask** for each page that answers.
 3. **Capacity + EEPROM** — read the O/U capacity from page `0x00` offset 12 (0.1 kW units) and the
-   O/U EEPROM identification digits from page `0x11`.
+   O/U EEPROM identification digits from page `0x11`. The `0x00` descriptor is **variable-length**: a
+   smaller unit returns a short reply that omits offset 12 (see [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md)),
+   leaving the O/U capacity unknown. When it is absent, the **I/U capacity code** (page `0x60` offset 6,
+   same 0.1 kW units) is captured as a fallback so the model can still be classed.
 
 Those facts form a `Fingerprint`. The pure, host-tested `logic/detect.hpp` narrows the **Altherma-only**
 profiles (`def/signatures.hpp::is_detection_model` excludes the non-Altherma mini-chillers so they
@@ -448,7 +455,11 @@ its id) is derived automatically from the embedded `ValueDef` tables — no hand
 profile is a candidate when its pages are a subset of the answering pages **and** the unit's capacity
 falls in its class; among those, only the ones with **maximal page overlap** are kept (dropping
 feature-poor profiles). `detect_best()` then picks one deterministic representative (maximal overlap →
-tightest kW class → stable order) — never the old blind `candidates.front()` registry order.
+kW class containing the known/derived capacity → tightest kW class → stable order) — never the old
+blind `candidates.front()` registry order. The I/U-capacity fallback feeds only this **ranking**
+(never candidate exclusion — indoor≈outdoor capacity is an approximation) and is a no-op when the O/U
+capacity is known, so it only ever moves the pick for a unit that doesn't report O/U capacity — where
+the candidate set spans kW classes and is therefore not register-identical.
 
 The result is applied only when the bus actually answered (a not-yet-wired unit retries on the
 backoff cadence instead of pinning `generic`); the model goes to the in-RAM config

@@ -91,7 +91,16 @@ The same raw refrigerant-pressure bytes appear twice in a model: once as the pre
 (`conv 105`, `type = 2` → bar) and once as the **saturation temperature** (`conv 405`, `type = 1` →
 °C). For the "(T)" saturation form, `conv 405` in [`logic/convert.hpp`](../main/logic/convert.hpp)
 takes `raw × 0.1` and applies a per-refrigerant pressure→saturation-temperature polynomial
-(R410A / R32 / R22), selected by the refrigerant from page `0x00`.
+(R410A / R32 / R22), selected by the refrigerant from page `0x00`. A **0-bar** input (an absent/idle
+pressure sensor) is dropped rather than published as its `press2temp(0) ≈ -51 °C` placeholder.
+
+**Publish-time plausibility (`reading_plausible`).** Beyond the per-converter `-3276.8` marker above,
+a decoded **°C** reading (`type = 1`) outside a physical envelope (`[-60, 200]`) is dropped at publish
+by `hp_format` — an idle outdoor unit's `576 °C` / `231.6 °C` placeholder reaches Home Assistant as
+*unavailable*, not a false reading. This is a runtime backstop kept **out** of `convert()` so the
+catalog audit still distinguishes the intrinsic converters (`conv 105` vs `114` on the no-data
+sentinel); it is keyed on the °C `type`, so the non-temperature rows sharing those converter ids
+(kW / COP at `type = -1`) pass through unchanged.
 
 ### 3.2 Bit-flag converters (300–307)
 
@@ -213,6 +222,11 @@ per indoor unit (see [`X10A_PROTOCOL.md` §6](X10A_PROTOCOL.md#6-multi-unit-addr
 `Bit` column = bit index for `conv 300–307`; `Type` = HA unit hint.
 
 #### Register `0x00`
+
+This descriptor is **variable-length** — a smaller unit returns a short reply that ends early and omits
+the trailing fields, including the O/U capacity at offset 12 (see [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md)
+§7 for a real 10-byte example). Detection reads the capacity when present and otherwise falls back to
+the I/U capacity code (`0x60` offset 6).
 
 | Off | Len | Conv | Bit | Type | Value |
 |----:|----:|:----:|:---:|:----:|-------|

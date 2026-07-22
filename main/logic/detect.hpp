@@ -46,6 +46,11 @@ inline uint32_t page_mask_bit(uint8_t reg) {
 struct Fingerprint {
     uint32_t page_mask = 0;      // one bit per answering page (page_bit)
     int      kw_tenths = -1;     // O/U capacity in 0.1 kW; -1 = unknown / not reported
+    int      iu_kw_tenths = -1;  // I/U capacity code (reg 0x60 off 6, same kW×10 units); -1 = unknown.
+                                 // FALLBACK capacity when the O/U 0x00 descriptor is too short to
+                                 // carry offset 12 (a smaller unit) -> kw_tenths stays -1. Used only
+                                 // to RANK the representative (detect_best), never to exclude a
+                                 // candidate, since indoor≈outdoor capacity is an approximation.
     uint8_t  eeprom[6] = {0};    // O/U EEPROM digits (page 0x11 offsets 0..5)
     bool     eeprom_ok = false;
 };
@@ -147,16 +152,31 @@ inline int detect_candidates(const Signature* sigs, int nsig, const Fingerprint&
 // reads the SAME values, so any is an equally-correct working profile. The exact marketing variant
 // is not knowable from bus data; the caller surfaces the candidate set (and the O/U EEPROM code) for
 // display instead of asserting one. See docs/ARCHITECTURE.md ("Auto-detection").
+//
+// When the O/U capacity is UNKNOWN (a short 0x00 descriptor -> kw_tenths<0) the candidate set spans
+// DIFFERENT kW classes, so it is NOT register-identical and the representative choice does affect the
+// values. Criterion (2) breaks that with the I/U capacity fallback: prefer a candidate whose kW class
+// contains the derived capacity. This is scoped — when the O/U capacity IS known, signature_consistent
+// has already filtered to matching classes, so every survivor scores match=1 and criterion (2) is a
+// no-op; the fallback only ever moves the pick for units that don't report O/U capacity.
 inline const char* detect_best(const Signature* sigs, int nsig, const Fingerprint& fp) {
+    // O/U capacity if the unit reported it, else the I/U capacity code as an approximate fallback.
+    const int cap = (fp.kw_tenths >= 0) ? fp.kw_tenths : fp.iu_kw_tenths;
     const char* best = nullptr;
-    int best_pop = -1, best_span = 0;
+    int best_pop = -1, best_match = -1, best_span = 0;
     for (int i = 0; i < nsig; i++) {
         if (!signature_consistent(sigs[i], fp)) continue;
-        const int pop  = __builtin_popcount(sigs[i].page_mask);
-        const int span = (sigs[i].kw_min_tenths >= 0)
-                             ? (sigs[i].kw_max_tenths - sigs[i].kw_min_tenths) : 1000;
-        if (best == nullptr || pop > best_pop || (pop == best_pop && span < best_span)) {
-            best = sigs[i].id; best_pop = pop; best_span = span;
+        const int pop   = __builtin_popcount(sigs[i].page_mask);
+        const int match = (cap >= 0 && sigs[i].kw_min_tenths >= 0 &&
+                           cap >= sigs[i].kw_min_tenths && cap <= sigs[i].kw_max_tenths) ? 1 : 0;
+        const int span  = (sigs[i].kw_min_tenths >= 0)
+                              ? (sigs[i].kw_max_tenths - sigs[i].kw_min_tenths) : 1000;
+        // Rank, best first: (1) maximal page overlap, (2) kW class contains the known/derived
+        // capacity, (3) tightest kW class, (4) signature order (stable deterministic tie-break).
+        if (best == nullptr || pop > best_pop ||
+            (pop == best_pop && match > best_match) ||
+            (pop == best_pop && match == best_match && span < best_span)) {
+            best = sigs[i].id; best_pop = pop; best_match = match; best_span = span;
         }
     }
     return best;

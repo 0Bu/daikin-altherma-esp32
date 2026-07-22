@@ -84,6 +84,7 @@ DetectResult hp_detect_run() {
     Fingerprint fp{};
     uint8_t page00[32]; int len00 = -1;
     uint8_t page11[16]; int len11 = -1;
+    uint8_t page60[32]; int len60 = -1;
     for (uint8_t reg : PROBE_PAGES) {
         uint8_t pay[32];
         const int paylen = read_page(reg, r.proto, pay, static_cast<int>(sizeof(pay)));
@@ -97,11 +98,19 @@ DetectResult hp_detect_run() {
         if (reg == 0x00) {
             len00 = paylen;
             for (int i = 0; i < paylen && i < static_cast<int>(sizeof(page00)); i++) page00[i] = pay[i];
+        } else if (reg == 0x60) {
+            len60 = paylen;
+            for (int i = 0; i < paylen && i < static_cast<int>(sizeof(page60)); i++) page60[i] = pay[i];
         }
     }
 
-    // 3. Capacity from page 0x00 offset 12 (conv 105 raw byte = 0.1 kW units).
+    // 3. Capacity from page 0x00 offset 12 (conv 105 raw byte = 0.1 kW units). This descriptor is
+    //    variable-length; a smaller unit returns a short 0x00 that omits offset 12, leaving kw_tenths
+    //    at -1 (docs/X10A_PROTOCOL.md §7). Fall back to the I/U capacity code (page 0x60 offset 6,
+    //    conv 219, same kW×10 units) so detect_best can still class the model (a byte 0 = not
+    //    reported). The fallback only RANKS the representative, never excludes a candidate.
     if (len00 > 12) fp.kw_tenths = page00[12];
+    if (len60 > 6 && page60[6] != 0) fp.iu_kw_tenths = page60[6];
 
     // 4. EEPROM digits from page 0x11 offsets 0..5 (display only — no digits→name table).
     char ee[32] = {0};
@@ -122,13 +131,15 @@ DetectResult hp_detect_run() {
     const int n = detect_candidates(sigs, nsig, fp, out, static_cast<int>(sizeof(out) / sizeof(out[0])));
     for (int i = 0; i < n && i < static_cast<int>(sizeof(out) / sizeof(out[0])); i++)
         r.candidates.emplace_back(out[i]);
-    // Best-fit representative to actually read with (deterministic, not registry order). Every
-    // candidate is register-equivalent so this only affects the displayed model, not the values.
+    // Best-fit representative to actually read with (deterministic, not registry order). When the
+    // capacity is known the candidates share a kW class and are register-equivalent, so this only
+    // names the displayed model; when the O/U capacity is absent (short 0x00) the set spans classes,
+    // so detect_best leans on the I/U capacity fallback to pick the right-class reading profile.
     if (const char* b = detect_best(sigs, nsig, fp)) r.best = b;
 
-    diag_printf("detect: proto=%c rx=%d tx=%d pages=0x%04x kw=%d eeprom=[%s] -> %d candidate(s), best=%s\n",
+    diag_printf("detect: proto=%c rx=%d tx=%d pages=0x%04x kw=%d iu_kw=%d eeprom=[%s] -> %d candidate(s), best=%s\n",
                 static_cast<char>(r.proto), r.rx, r.tx, static_cast<unsigned>(fp.page_mask),
-                fp.kw_tenths, ee, n, r.best.empty() ? "(none)" : r.best.c_str());
+                fp.kw_tenths, fp.iu_kw_tenths, ee, n, r.best.empty() ? "(none)" : r.best.c_str());
     return r;
 }
 
