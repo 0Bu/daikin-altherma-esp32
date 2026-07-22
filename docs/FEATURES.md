@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (731 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (800 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -57,10 +57,11 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 27 | **Task Watchdog** → clean reboot on a wedged poll/publish task | ✅ | [`hp_poll.cpp`](../main/hp_poll.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 28 | **`/status.sys`** always-on heap headroom + last-boot reason (LAN/WS, no broker) | ✅ 🧪 | [`http_status.cpp`](../main/http_status.cpp), [`logic/reset_reason.hpp`](../main/logic/reset_reason.hpp) |
 | 29 | **Boot-loop safe mode** — recover a bad config in-browser (crash-only counting, distinct from OTA rollback) | ✅ 🧪 | [`safe_mode.cpp`](../main/safe_mode.cpp), [`logic/boot_guard.hpp`](../main/logic/boot_guard.hpp) |
-| 30 | **Config-write integrity** — field-owned commits (no cross-task revert), reserved-GPIO rejection on both the request and the load path, + an NVS failure that reaches the user (500, no reboot) instead of "saved" | ✅ 🧪 | [`config.cpp`](../main/config.cpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp), [`logic/board_pins.hpp`](../main/logic/board_pins.hpp), [`http_config.cpp`](../main/http_config.cpp) |
+| 30 | **Config-write integrity** — the credential/service config is one **atomic CRC-checked NVS blob** (all-or-nothing across a write failure AND a power cut); field-owned commits (the poll task never reverts an HTTP credential write; the reverse — an HTTP save clobbering a self-healing link commit — is left open by design, detection re-runs it), reserved-GPIO rejection on both the request and the load path, + an NVS failure that reaches the user (500, no reboot) instead of "saved" | ✅ 🧪 | [`config.cpp`](../main/config.cpp), [`logic/config_store.hpp`](../main/logic/config_store.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp), [`logic/board_pins.hpp`](../main/logic/board_pins.hpp), [`http_config.cpp`](../main/http_config.cpp) |
 | 31 | **Value-catalog domain audit** — real converters × real catalog vs the spec, each finding carrying a decode witness; co-gates CI, plus a selftest that re-catches the four decode bugs that shipped | ✅ | [`catalog_audit.cpp`](../tools/domain/catalog_audit.cpp), [`run-domain-audit.sh`](../scripts/run-domain-audit.sh), [`selftest.sh`](../tools/domain/selftest.sh) |
 | 32 | **SNTP wall clock**, runtime-configurable server — real UTC for the syslog TIMESTAMP field + `/status.ntp` | ✅ 🧪 | [`sntp_time.cpp`](../main/sntp_time.cpp), [`logic/timestamp.hpp`](../main/logic/timestamp.hpp), [`http_config.cpp`](../main/http_config.cpp) |
 | 33 | **Detect-sweep heap hardening** — install-once UART + register-only pin remap (no per-swap driver realloc) and silent-bus detect backoff, closing a fragmentation panic caught by a symbolized coredump | ✅ 🧪 | [`hp_comm.cpp`](../main/hp_comm.cpp), [`logic/uart_plan.hpp`](../main/logic/uart_plan.hpp), [`hp_poll.cpp`](../main/hp_poll.cpp), [`logic/detect_backoff.hpp`](../main/logic/detect_backoff.hpp) |
+| 34 | **HTTP trust-surface split** — the open setup AP registers only the provisioning routes; `/coredump`, `/diag` and the config/OTA/MCP surface exist only on the trusted STA LAN | ✅ 🧪 | [`http_server.cpp`](../main/http_server.cpp), [`logic/http_surface.hpp`](../main/logic/http_surface.hpp), [`http_common.cpp`](../main/http_common.cpp) |
 
 ---
 
@@ -542,7 +543,9 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   (`error_codes.hpp` — a presentation-only enrichment: it never changes what conv 204 decodes,
   and a code outside its coverage still publishes as the bare code),
   **🔭 Modbus TCP framing + HomeHub register codecs** (`modbus.hpp` — MBAP
-  framing without CRC, FC03/04/06/16 build+parse, `Temp16`/`Pow16`/`Int16`/`Text16` decode/encode,
+  framing without CRC, FC03/04/06/16 build + **request-bound** parse (an exception PDU must be exactly
+  2 bytes, a read reply must carry the requested register quantity, and a write echo must match the
+  requested address + value/quantity), `Temp16`/`Pow16`/`Int16`/`Text16` decode/encode,
   the `homehub-*` mDNS filter; the host-tested core for the *planned* firmware-exclusive HomeHub
   Modbus link (issue #32), **not yet wired into the firmware**), and the SNTP wall-clock RFC 3339
   formatter (`timestamp.hpp` — the one place the syslog TIMESTAMP field, `/status.ntp.time` and the
@@ -551,7 +554,15 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   ordering plus `ota_is_upgrade()`, which fails closed on anything it can't parse) and the **OTA
   manifest parser** (`ota_manifest.hpp` — the one place a remote, attacker-influencable byte stream is
   parsed on this device: bounded, allocation-free, depth-aware, escape-aware, and it refuses rather
-  than truncates an oversized value). **731 `CHECK`s** in
+  than truncates an oversized value), the **HTTP trust-surface boundary** (`http_surface.hpp` — which
+  routes each surface exposes, so the open setup AP serves only the provisioning routes while
+  `/coredump`, `/diag` and the config/OTA/MCP surface stay trusted-LAN-only), the **atomic config
+  save** (`config_store.hpp` — the credential/service fields are one CRC-checked NVS blob so a save is
+  all-or-nothing across a write failure or a power cut), the **JSON-RPC 2.0 response policy** for the
+  planned MCP route (`mcp_jsonrpc.hpp` — parse-error / invalid-request / notification-no-response /
+  method-not-found, and which id may be echoed) and the **query-flag policy** (`query_flag.hpp` — a `?clear=1`-style flag
+  acts only on exactly `1`, so `?clear=0` no longer wipes the diag log).
+  **800 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
@@ -680,7 +691,7 @@ and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 17-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (731 checks),
+on the host** (800 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

@@ -50,4 +50,26 @@ esp_err_t nvs_set_i32(const char* key, int32_t val) {
     return e;
 }
 
+esp_err_t nvs_set_blob(const char* key, const void* data, size_t len) {
+    nvs_handle_t h;
+    esp_err_t e = ::nvs_open(NS, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = ::nvs_set_blob(h, key, data, len);
+    if (e == ESP_OK) e = ::nvs_commit(h);   // one atomic entry: the old value survives a failed write
+    ::nvs_close(h);
+    return e;
+}
+
+bool nvs_get_blob(const char* key, std::vector<uint8_t>& out) {
+    nvs_handle_t h;
+    if (::nvs_open(NS, NVS_READONLY, &h) != ESP_OK) return false;
+    size_t len = 0;
+    esp_err_t e = ::nvs_get_blob(h, key, nullptr, &len);   // query size first
+    if (e != ESP_OK || len == 0) { ::nvs_close(h); return false; }
+    out.resize(len);
+    e = ::nvs_get_blob(h, key, out.data(), &len);
+    ::nvs_close(h);
+    return e == ESP_OK;
+}
+
 } // namespace daik

@@ -129,7 +129,10 @@ button:disabled { opacity: .6; cursor: default; box-shadow: none; }
 
   el("f").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const ssid = el("ssid").value.trim();
+    // NOT trimmed: leading/trailing spaces are valid SSID bytes, so the field is an opaque identifier
+    // — trimming would submit a different network name than the one picked/typed. Same rule as the
+    // dashboard WiFi form (app.js).
+    const ssid = el("ssid").value;
     const pass = el("pass").value;
     const bad = credError(ssid, pass);
     if (bad) { el("msg").className = "msg err"; el("msg").textContent = bad; return; }

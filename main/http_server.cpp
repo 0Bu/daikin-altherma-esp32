@@ -5,6 +5,7 @@
 #include "http_handlers.hpp"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_wifi.h"   // esp_wifi_get_mode — pick the HTTP trust surface (F01)
 #include <unistd.h>
 
 namespace daik {
@@ -27,12 +28,24 @@ void http_start() {
         ESP_LOGE("http", "server start failed");
         return;
     }
-    http_register_status(s_server);
-    http_register_config(s_server);
-    http_register_ota(s_server);
-    http_register_mcp(s_server);
-    http_register_captive(s_server);   // catch-all — keep last so specific routes win
-    ESP_LOGI("http", "server on :80");
+    // Pick the trust surface from the WiFi mode, FAILING CLOSED: only a definitely-detected station
+    // mode (WIFI_MODE_STA, the normal path) is the trusted LAN. Any esp_wifi_get_mode() error, or
+    // AP/APSTA/NULL (the setup portal runs APSTA — provisioning.cpp), falls to the restricted
+    // setup-AP surface. A security boundary must never WIDEN on an unreadable mode: the previous
+    // `!= AP && != APSTA` test treated a query error as trusted-LAN and would have exposed /coredump,
+    // /diag and the config/OTA/MCP surface to an unauthenticated radio client (F01). Decided ONCE
+    // here: http_start() runs after wifi_start_sta()/provisioning_start_ap() have set the mode.
+    // logic/http_surface.hpp owns which routes each surface exposes.
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    const bool sta_trusted = (esp_wifi_get_mode(&mode) == ESP_OK && mode == WIFI_MODE_STA);
+    const HttpSurface surface = sta_trusted ? HttpSurface::TrustedLan : HttpSurface::SetupAp;
+
+    http_register_status(s_server, surface);
+    http_register_config(s_server, surface);
+    http_register_ota(s_server, surface);
+    http_register_mcp(s_server, surface);
+    http_register_captive(s_server);   // catch-all — both surfaces, keep last so specific routes win
+    ESP_LOGI("http", "server on :80 (%s surface)", sta_trusted ? "trusted-LAN" : "setup-AP");
 }
 
 httpd_handle_t http_server_handle() {

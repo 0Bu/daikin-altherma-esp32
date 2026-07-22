@@ -41,6 +41,15 @@ void http_register(httpd_handle_t s, const char* uri, httpd_method_t method,
     httpd_register_uri_handler(s, &u);
 }
 
+void http_register_on(httpd_handle_t s, HttpSurface surface, const char* uri, httpd_method_t method,
+                      esp_err_t (*fn)(httpd_req_t*)) {
+    // The AP/LAN boundary is one host-tested decision (logic/http_surface.hpp), not a per-route
+    // judgement scattered across files: on the open setup AP a withheld GET falls through to the
+    // captive catch-all (the setup page, never data) and a withheld POST 404s.
+    if (http_surface_serves(surface, uri, method == HTTP_POST))
+        http_register(s, uri, method, fn);
+}
+
 esp_err_t http_send_json(httpd_req_t* req, const char* json) {
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, json);

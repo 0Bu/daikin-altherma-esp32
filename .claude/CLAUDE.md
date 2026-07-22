@@ -127,7 +127,15 @@ config.cpp      runtime Config (logic/config_model.hpp): WiFi/MQTT + one-shot Wi
                 stale snapshot — detection uses config_save_link/config_set_model, HTTP keeps
                 whole-struct config_save. A failed NVS write names the key on /diag and returns false
                 — config_save then publishes nothing, config_save_link still patches RAM (its link is
-                proven-good); every call site checks it. See "NVS namespaces".
+                proven-good); every call site checks it. The credential/service half of config_save is
+                ATOMIC: those fields go into ONE CRC-checked blob (logic/config_store.hpp) written with
+                a single nvs_set_blob, so a save is all-or-nothing across BOTH a write failure AND a
+                power cut — no per-key rollback and no WiFi creds-vs-backup write-ordering to get right
+                (both are now inside the one atomic blob). The blob is written by the httpd task alone,
+                so the poll task can never revert a credential change. The RX/TX/proto LINK cache stays
+                as separate self-healing keys (two owners; re-validated on load). config_load reads the
+                blob first and falls back to the legacy per-key layout when it is absent (fresh device /
+                pre-blob OTA) or fails its CRC. See "NVS namespaces".
                 config_load re-checks the persisted RX/TX with link_pins_safe (the PAIR rule plus the
                 chip-reserved-pin rule of logic/board_pins.hpp) and falls back
                 to the Kconfig defaults + a diag line if they fail: rx_pin/tx_pin are two independent
@@ -206,7 +214,12 @@ hp_poll.cpp     poll engine task: (auto-detect if profile=="auto") profile regis
                 detection-latency choice, not a wdt constraint). Reset to fast cadence on a bus answer
                 or via hp_poll_reconfigure() (POST /detect, POST /set_hp — atomic httpd->poll one-shot).
                 poll_once reserves the value vector up front (one sized alloc, not log2(n) regrows)
-http_server.cpp esp_http_server :80; concerns register their own routes (http_handlers.hpp)
+http_server.cpp esp_http_server :80; concerns register their own routes (http_handlers.hpp). Picks
+                the trust surface from the WiFi mode (esp_wifi_get_mode): the OPEN setup AP registers
+                ONLY the provisioning routes (GET / /index.html /scan, POST /set_wifi + captive) and
+                withholds /coredump /diag + the config/OTA/MCP surface from an unauthenticated radio
+                client; STA (trusted LAN) registers the full API. Boundary = host-tested
+                logic/http_surface.hpp, applied via http_register_on (http_common.cpp)
 http_common.cpp shared HTTP helpers + the ONE OOM guard every route runs under: http_register()
                 stashes the real handler in user_ctx and installs a handle_all trampoline that calls
                 it inside try/catch — std::bad_alloc -> 503, any other throw -> 500, instead of
@@ -293,10 +306,10 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 the image mid-session; a cached flag would strand an uncleanable crash banner + a
                 download that 404s. mqtt_ha republishes the retained crash topic when the flag changes
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, value_def, config_model,
-                discovery, detect, json, mqtt_group, mqtt_uri, heartbeat, crashinfo, bootlog,
-                reset_reason, boot_guard, board_pins, modbus, syslog_policy, link_watch,
-                wifi_rollback, health_gate, version_cmp, ota_manifest, ws_policy, ws_tx_gate, http_body,
-                timestamp, uart_plan, detect_backoff).
+                config_store, discovery, detect, json, mqtt_group, mqtt_uri, heartbeat, crashinfo,
+                bootlog, reset_reason, boot_guard, board_pins, modbus, syslog_policy, link_watch,
+                wifi_rollback, health_gate, version_cmp, ota_manifest, ws_policy, ws_tx_gate,
+                http_body, http_surface, query_flag, mcp_jsonrpc, timestamp, uart_plan, detect_backoff).
                 value_def.hpp = the ValueDef row type the generated def/ profile tables are written
                 in ({reg, offset, conv, size, type, label} — registry id, byte offset in the reply
                 payload, converter id for convert.hpp, byte count, HA unit code, English label): the
@@ -405,7 +418,7 @@ www/            web UI sources (index.html + style.css + app.js -> one gzipped p
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `wifi_ssid`/`wifi_pass`, the one-shot WiFi rollback backup `wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback` plus the `wifi_rolledbk` outcome marker (see `/set_wifi`; `config_save` writes the backup+flag BEFORE the creds when arming and AFTER them when clearing — each `nvs_set_*` commits on its own, so the order decides what a power cut leaves behind), `mqtt_uri`/`mqtt_user`/`mqtt_pass`, `syslog_host`/`syslog_port` (empty host = off), `ntp_server` (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` compile-time default on next boot — unlike `syslog_host`, SNTP has no disabled state to preserve), the X10A **link cache** `rx_pin`/`tx_pin`/`proto`, and the boot-loop **crash counter** `boot_fails` (safe_mode.cpp; here so a factory reset wipes it too). (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
+| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi creds + the one-shot rollback backup + flags (`wifi_rolledbk` outcome marker included), MQTT (`uri`/`user`/`pass`), syslog (empty host = off), and `ntp_server` (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` compile-time default on next boot). One CRC-checked entry written all-or-nothing, so the whole credential/service state survives a write failure or power cut together — no per-key write-ordering. The X10A **link cache** `rx_pin`/`tx_pin`/`proto` stays as SEPARATE self-healing keys (two owners: `config_save` for a manual override, `config_save_link` for a detected pin; re-validated on load). Legacy per-key credential keys (`wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/…/`ntp_server`) are still READ as the fallback when `cfg` is absent (fresh device / pre-blob OTA). Plus the boot-loop **crash counter** `boot_fails` (safe_mode.cpp; here so a factory reset wipes it too). (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -427,8 +440,13 @@ poll→httpd, not httpd→poll (a `/set_*` save can still revert a link commit f
 snapshot→save window); that direction self-corrects on the next detect, the credentials it protects
 do not.
 
-**`config_save` can fail — every caller checks it.** It returns `false` on any NVS error and then
-does *not* publish to RAM either, so an ignored return means reporting a save the device never made.
+**`config_save` can fail — every caller checks it.** The credential/service fields are written as one
+CRC-checked blob with a single **atomic** `nvs_set_blob` (`logic/config_store.hpp`): it fails
+all-or-nothing, so on error the PREVIOUS blob is intact and `config_save` returns `false` without
+publishing to RAM — "nothing net saved", never a partial credential state, across both a write failure
+and a power cut. (The self-healing RX/TX/proto link keys are written after the blob; a hiccup there is
+logged, self-heals on the next detect, and is re-validated by `config_load`'s `link_pins_safe`.)
+An ignored return means reporting a save the device never made.
 The `/set_*` handlers answer `500 {"ok":false,"error":"config write failed"}` and skip the reboot;
 the WiFi rollback-restore falls through to the setup portal rather than rebooting into a loop it
 cannot persist its way out of (the restore lives in NVS alone, so an unpersisted one is re-decided

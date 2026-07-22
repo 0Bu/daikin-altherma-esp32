@@ -31,6 +31,10 @@
 #include "logic/link_watch.hpp"
 #include "logic/mqtt_uri.hpp"
 #include "logic/modbus.hpp"
+#include "logic/query_flag.hpp"
+#include "logic/config_store.hpp"
+#include "logic/mcp_jsonrpc.hpp"
+#include "logic/http_surface.hpp"
 #include "logic/registers.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/syslog_policy.hpp"
@@ -1291,7 +1295,9 @@ static void test_modbus() {
     // MBAP(txn=7,proto=0,len=9,unit=1) + PDU[fc=03, bytecount=6, d0..d5]
     uint8_t resp[] = {0x00,0x07, 0x00,0x00, 0x00,0x09, 0x01,
                       0x03, 0x06, 0x07,0xD0, 0xFB,0x2E, 0x7F,0xFE};
-    CHECK(mb_parse_response(resp, sizeof(resp), 7, 1, MbFunc::ReadHolding, r) == MbParse::Ok);
+    // The parse is request-bound: pass the address + quantity that were requested (addr is unused for
+    // reads — a read reply doesn't echo it — but the register count MUST match the requested qty=3).
+    CHECK(mb_parse_response(resp, sizeof(resp), 7, 1, MbFunc::ReadHolding, /*addr*/40, /*qty*/3, r) == MbParse::Ok);
     CHECK(r.ok && !r.exception && r.txn == 7 && r.unit == 1 && r.fc == 0x03);
     CHECK(mb_reg_count(r) == 3);
     uint16_t rv = 0;
@@ -1299,33 +1305,51 @@ static void test_modbus() {
     CHECK(mb_reg_at(r, 1, rv) && rv == 0xFB2E);     // -1234
     CHECK(mb_reg_at(r, 2, rv) && rv == 0x7FFE);     // 32766 (unavailable sentinel)
     CHECK(!mb_reg_at(r, 3, rv));                    // out-of-range index rejected
+    // Asking for a different quantity than the reply carries is a desync (QtyMismatch), not Ok.
+    CHECK(mb_parse_response(resp, sizeof(resp), 7, 1, MbFunc::ReadHolding, 40, 2, r) == MbParse::QtyMismatch);
+    CHECK(!r.ok);
+    CHECK(mb_parse_response(resp, sizeof(resp), 7, 1, MbFunc::ReadHolding, 40, 4, r) == MbParse::QtyMismatch);
 
-    // ── Parse a write-single echo (FC06) ──
+    // ── Parse a write-single echo (FC06): addr 0x37, value 0x07D0 ──
     uint8_t wecho[] = {0x00,0x42, 0x00,0x00, 0x00,0x06, 0x01, 0x06, 0x00,0x37, 0x07,0xD0};
-    CHECK(mb_parse_response(wecho, sizeof(wecho), 0x42, 1, MbFunc::WriteSingle, r) == MbParse::Ok);
-    CHECK(r.ok && r.fc == 0x06);
+    CHECK(mb_parse_response(wecho, sizeof(wecho), 0x42, 1, MbFunc::WriteSingle, /*addr*/0x37, /*value*/0x07D0, r) == MbParse::Ok);
+    CHECK(r.ok && r.fc == 0x06 && r.echo_addr == 0x37 && r.echo_value == 0x07D0);   // echo exposed
+    // The echo must match the request: a different echoed address or value is EchoMismatch, never a
+    // confirmed write (the hub acted on a register/value we didn't ask for).
+    CHECK(mb_parse_response(wecho, sizeof(wecho), 0x42, 1, MbFunc::WriteSingle, 0x38, 0x07D0, r) == MbParse::EchoMismatch);
+    CHECK(!r.ok);
+    CHECK(mb_parse_response(wecho, sizeof(wecho), 0x42, 1, MbFunc::WriteSingle, 0x37, 0x07D1, r) == MbParse::EchoMismatch);
+    // FC16 write-multiple echo [fc, addr(2), qty(2)]: addr 56, qty 2.
+    uint8_t wmecho[] = {0x00,0x01, 0x00,0x00, 0x00,0x06, 0x01, 0x10, 0x00,0x38, 0x00,0x02};
+    CHECK(mb_parse_response(wmecho, sizeof(wmecho), 1, 1, MbFunc::WriteMultiple, /*addr*/56, /*qty*/2, r) == MbParse::Ok);
+    CHECK(r.ok && r.echo_addr == 56 && r.echo_value == 2);
+    CHECK(mb_parse_response(wmecho, sizeof(wmecho), 1, 1, MbFunc::WriteMultiple, 56, 3, r) == MbParse::EchoMismatch);   // qty
     // A write echo is exactly [fc, addr(2), value|qty(2)]; a truncated one is Malformed, not Ok.
     uint8_t wshort[] = {0x00,0x42, 0x00,0x00, 0x00,0x04, 0x01, 0x06, 0x00,0x37};
-    CHECK(mb_parse_response(wshort, sizeof(wshort), 0x42, 1, MbFunc::WriteSingle, r) == MbParse::Malformed);
+    CHECK(mb_parse_response(wshort, sizeof(wshort), 0x42, 1, MbFunc::WriteSingle, 0x37, 0x07D0, r) == MbParse::Malformed);
     CHECK(!r.ok);
 
     // ── Parse a Modbus exception response (FC03 | 0x80, code 0x02 = illegal data address) ──
     uint8_t exc[] = {0x00,0x07, 0x00,0x00, 0x00,0x03, 0x01, 0x83, 0x02};
-    CHECK(mb_parse_response(exc, sizeof(exc), 7, 1, MbFunc::ReadHolding, r) == MbParse::Exception);
+    CHECK(mb_parse_response(exc, sizeof(exc), 7, 1, MbFunc::ReadHolding, /*addr*/0, /*qty*/1, r) == MbParse::Exception);
     CHECK(!r.ok && r.exception && r.exc_code == 0x02 && r.fc == 0x03);
+    // An exception PDU with a TRAILING byte (len bumped to 4, an extra 0x00) must be Malformed — the
+    // old `pdu_len < 2` check accepted [fc|0x80, code, <junk>] as a clean exception.
+    uint8_t exctrail[] = {0x00,0x07, 0x00,0x00, 0x00,0x04, 0x01, 0x83, 0x02, 0x00};
+    CHECK(mb_parse_response(exctrail, sizeof(exctrail), 7, 1, MbFunc::ReadHolding, 0, 1, r) == MbParse::Malformed);
 
     // ── Parse-error paths ──
-    CHECK(mb_parse_response(resp, 5, 7, 1, MbFunc::ReadHolding, r) == MbParse::TooShort);
+    CHECK(mb_parse_response(resp, 5, 7, 1, MbFunc::ReadHolding, 40, 3, r) == MbParse::TooShort);
     uint8_t badproto[] = {0x00,0x07, 0x00,0x01, 0x00,0x03, 0x01, 0x03, 0x00};  // proto id != 0
-    CHECK(mb_parse_response(badproto, sizeof(badproto), 7, 1, MbFunc::ReadHolding, r) == MbParse::BadProtocol);
+    CHECK(mb_parse_response(badproto, sizeof(badproto), 7, 1, MbFunc::ReadHolding, 40, 3, r) == MbParse::BadProtocol);
     uint8_t badlen[] = {0x00,0x07, 0x00,0x00, 0x00,0x09, 0x01, 0x03, 0x00};    // len 9 != actual
-    CHECK(mb_parse_response(badlen, sizeof(badlen), 7, 1, MbFunc::ReadHolding, r) == MbParse::BadLength);
-    CHECK(mb_parse_response(resp, sizeof(resp), 8, 1, MbFunc::ReadHolding, r) == MbParse::TxnMismatch);
-    CHECK(mb_parse_response(resp, sizeof(resp), 7, 2, MbFunc::ReadHolding, r) == MbParse::UnitMismatch);
-    CHECK(mb_parse_response(resp, sizeof(resp), 7, 1, MbFunc::ReadInput, r) == MbParse::FcMismatch);
+    CHECK(mb_parse_response(badlen, sizeof(badlen), 7, 1, MbFunc::ReadHolding, 40, 3, r) == MbParse::BadLength);
+    CHECK(mb_parse_response(resp, sizeof(resp), 8, 1, MbFunc::ReadHolding, 40, 3, r) == MbParse::TxnMismatch);
+    CHECK(mb_parse_response(resp, sizeof(resp), 7, 2, MbFunc::ReadHolding, 40, 3, r) == MbParse::UnitMismatch);
+    CHECK(mb_parse_response(resp, sizeof(resp), 7, 1, MbFunc::ReadInput, 40, 3, r) == MbParse::FcMismatch);
     // Consistent MBAP length (6 = unit + 5-byte PDU) but an odd register byte count (3) -> Malformed.
     uint8_t oddbc[] = {0x00,0x07, 0x00,0x00, 0x00,0x06, 0x01, 0x03, 0x03, 0x01,0x02,0x03};
-    CHECK(mb_parse_response(oddbc, sizeof(oddbc), 7, 1, MbFunc::ReadHolding, r) == MbParse::Malformed);
+    CHECK(mb_parse_response(oddbc, sizeof(oddbc), 7, 1, MbFunc::ReadHolding, 40, 3, r) == MbParse::Malformed);
 
     // ── Value codecs: decode (EKRHH guide §9.2 data formats) ──
     CHECK(approx(mb_decode(MbType::Temp16, 0x07D0).value, 20.0));     // 2000 /100
@@ -2039,10 +2063,159 @@ static void test_ota_manifest() {
     CHECK(ota_is_upgrade("0.9.0", v) && !ota_is_upgrade("1.0.0", v));
 }
 
+static void test_query_flag() {
+    // A flag fires only on exactly "1" — the value the HTTP API documents for ?clear / ?verbose.
+    CHECK(query_flag_on("1"));
+    // The regression this guards: ?clear=0 (present, but not "1") must NOT trigger the destructive
+    // clear — the old handler acted on key PRESENCE and wiped the diag log / coredump on ?clear=0.
+    CHECK(!query_flag_on("0"));
+    CHECK(!query_flag_on(""));      // ?clear= (empty value)
+    CHECK(!query_flag_on(nullptr)); // key absent
+    CHECK(!query_flag_on("10"));    // exactly "1", not a prefix
+    CHECK(!query_flag_on("1x"));
+    CHECK(!query_flag_on("true"));
+    CHECK(!query_flag_on("2"));
+}
+
+static void test_config_store() {
+    // CRC-32 golden vector (the check byte itself is what makes the blob all-or-nothing on load).
+    CHECK(config_crc32(reinterpret_cast<const uint8_t*>("123456789"), 9) == 0xCBF43926u);
+    CHECK(config_crc32(nullptr, 0) == 0u);
+
+    // Round-trip every field, including bytes that must survive verbatim (spaces are valid SSID/user
+    // bytes — the F08 fix — and a blob must not mangle them), and the two packed flags.
+    ConfigBlob a;
+    a.wifi_ssid = " my wifi ";  a.wifi_pass = "p@ss word";
+    a.wifi_ssid_backup = "old"; a.wifi_pass_backup = "";
+    a.wifi_rollback_active = true; a.wifi_rolled_back = false;
+    a.mqtt_uri = "mqtts://broker:8883"; a.mqtt_user = "u ser"; a.mqtt_pass = "";
+    a.syslog_host = "logs.example.com"; a.syslog_port = 514;
+    a.ntp_server = "pool.ntp.org";
+    std::vector<uint8_t> buf = config_blob_serialize(a);
+    ConfigBlob b;
+    CHECK(config_blob_deserialize(buf.data(), buf.size(), b));
+    CHECK(b.wifi_ssid == a.wifi_ssid && b.wifi_pass == a.wifi_pass);
+    CHECK(b.wifi_ssid_backup == a.wifi_ssid_backup && b.wifi_pass_backup == a.wifi_pass_backup);
+    CHECK(b.wifi_rollback_active == true && b.wifi_rolled_back == false);
+    CHECK(b.mqtt_uri == a.mqtt_uri && b.mqtt_user == a.mqtt_user && b.mqtt_pass == a.mqtt_pass);
+    CHECK(b.syslog_host == a.syslog_host && b.syslog_port == 514);
+    CHECK(b.ntp_server == a.ntp_server);
+
+    // The other flag combination, and a negative-looking port stored as-is.
+    ConfigBlob c; c.wifi_rolled_back = true; c.wifi_rollback_active = false; c.syslog_port = 65535;
+    std::vector<uint8_t> cb = config_blob_serialize(c);
+    ConfigBlob d;
+    CHECK(config_blob_deserialize(cb.data(), cb.size(), d));
+    CHECK(d.wifi_rolled_back == true && d.wifi_rollback_active == false && d.syslog_port == 65535);
+
+    // All-or-nothing on LOAD: any corruption -> reject (false), never a partial decode. `out` is left
+    // untouched so the caller falls back to defaults / the legacy per-key layout.
+    ConfigBlob out; out.wifi_ssid = "sentinel";
+    std::vector<uint8_t> bad = buf;
+    bad[10] ^= 0xFF;                                                   // flip a payload byte -> CRC fails
+    CHECK(!config_blob_deserialize(bad.data(), bad.size(), out) && out.wifi_ssid == "sentinel");
+    CHECK(!config_blob_deserialize(buf.data(), buf.size() - 1, out)); // truncated (CRC + length short)
+    CHECK(!config_blob_deserialize(buf.data(), 4, out));              // shorter than the header+crc floor
+    CHECK(!config_blob_deserialize(nullptr, 0, out));
+    CHECK(!config_blob_deserialize(buf.data(), 0, out));             // zero length
+    std::vector<uint8_t> badmagic = buf; badmagic[0] = 'X';
+    CHECK(!config_blob_deserialize(badmagic.data(), badmagic.size(), out));
+    // Helper: re-stamp a valid CRC over v[0 .. size-4) so that ONLY a non-CRC rule can reject v.
+    auto restamp = [](std::vector<uint8_t>& v) {
+        const uint32_t k = config_crc32(v.data(), v.size() - 4);
+        v[v.size()-4] = k & 0xFF; v[v.size()-3] = (k>>8) & 0xFF;
+        v[v.size()-2] = (k>>16) & 0xFF; v[v.size()-1] = (k>>24) & 0xFF;
+    };
+    // Unknown version, CRC re-stamped: rejected by the version check alone.
+    std::vector<uint8_t> badver = buf; badver[4] = 2; restamp(badver);
+    CHECK(!config_blob_deserialize(badver.data(), badver.size(), out));
+    // Trailing garbage after a valid body, CRC re-stamped: rejected by the "p != body_end" rule alone.
+    std::vector<uint8_t> extra = buf; extra.insert(extra.end() - 4, 0x00); restamp(extra);
+    CHECK(!config_blob_deserialize(extra.data(), extra.size(), out));
+}
+
+static void test_mcp_jsonrpc() {
+    auto make = [](bool vj, bool obj, bool jr, bool m, JrIdKind id) {
+        JrRequest r; r.valid_json = vj; r.is_object = obj; r.jsonrpc_ok = jr; r.has_method = m; r.id_kind = id;
+        return r;
+    };
+    // Not JSON at all -> Parse error, id null.
+    JrDecision d = mcp_jsonrpc_decide(make(false, false, false, false, JrIdKind::None));
+    CHECK(d.action == JrAction::Error && d.code == -32700 && !mcp_jsonrpc_echo_id(d));
+
+    // Valid JSON but not a conforming Request object -> Invalid Request (-32600), id null. Each of the
+    // structural faults on its own must trip it: not an object, wrong jsonrpc, missing method, or an
+    // id of a disallowed type (array/object/bool) — which must never be mirrored back.
+    CHECK(mcp_jsonrpc_decide(make(true, false, true,  true,  JrIdKind::Number)).code == -32600);  // not object
+    CHECK(mcp_jsonrpc_decide(make(true, true,  false, true,  JrIdKind::Number)).code == -32600);  // jsonrpc != 2.0
+    CHECK(mcp_jsonrpc_decide(make(true, true,  true,  false, JrIdKind::Number)).code == -32600);  // no method
+    d = mcp_jsonrpc_decide(make(true, true, true, true, JrIdKind::Invalid));                      // bad id type
+    CHECK(d.code == -32600 && !mcp_jsonrpc_echo_id(d));
+
+    // Well-formed NOTIFICATION (no id) -> NO response, even for an unknown method.
+    d = mcp_jsonrpc_decide(make(true, true, true, true, JrIdKind::None));
+    CHECK(d.action == JrAction::NoResponse);
+
+    // Well-formed request with a valid id -> Method not found (-32601), and the request's id IS echoed.
+    for (JrIdKind k : {JrIdKind::Number, JrIdKind::String, JrIdKind::Null}) {
+        d = mcp_jsonrpc_decide(make(true, true, true, true, k));
+        CHECK(d.action == JrAction::Error && d.code == -32601 && mcp_jsonrpc_echo_id(d));
+    }
+    CHECK(std::string(mcp_jsonrpc_message(-32700)) == "Parse error");
+    CHECK(std::string(mcp_jsonrpc_message(-32600)) == "Invalid Request");
+    CHECK(std::string(mcp_jsonrpc_message(-32601)) == "Method not found");
+}
+
+static void test_http_surface() {
+    const HttpSurface ap  = HttpSurface::SetupAp;
+    const HttpSurface lan = HttpSurface::TrustedLan;
+
+    // Trusted LAN exposes the full API — every route, either method.
+    for (const char* p : {"/", "/index.html", "/scan", "/status", "/values", "/diag", "/coredump",
+                          "/models", "/set_wifi", "/set_mqtt", "/set_ntp", "/set_hp", "/detect",
+                          "/ota/check", "/ota/update", "/mcp"}) {
+        CHECK(http_surface_serves(lan, p, false));
+        CHECK(http_surface_serves(lan, p, true));
+    }
+
+    // Open setup AP: ONLY the provisioning routes.
+    CHECK(http_surface_serves(ap, "/", false));
+    CHECK(http_surface_serves(ap, "/index.html", false));
+    CHECK(http_surface_serves(ap, "/scan", false));
+    CHECK(http_surface_serves(ap, "/set_wifi", true));
+
+    // …and nothing that reads state, carries secrets, or reconfigures the device. This is the F01
+    // regression: /coredump and /diag can hold WiFi/MQTT credentials, and the config/OTA/MCP routes
+    // reprogram the board — none may be reachable from an unauthenticated radio client.
+    CHECK(!http_surface_serves(ap, "/status", false));
+    CHECK(!http_surface_serves(ap, "/values", false));
+    CHECK(!http_surface_serves(ap, "/diag", false));
+    CHECK(!http_surface_serves(ap, "/coredump", false));
+    CHECK(!http_surface_serves(ap, "/models", false));
+    CHECK(!http_surface_serves(ap, "/set_mqtt", true));
+    CHECK(!http_surface_serves(ap, "/set_syslog", true));
+    CHECK(!http_surface_serves(ap, "/set_ntp", true));
+    CHECK(!http_surface_serves(ap, "/set_hp", true));
+    CHECK(!http_surface_serves(ap, "/detect", true));
+    CHECK(!http_surface_serves(ap, "/ota/check", false));
+    CHECK(!http_surface_serves(ap, "/ota/update", true));
+    CHECK(!http_surface_serves(ap, "/mcp", true));
+
+    // Method matters on the AP: /set_wifi is POST-only, /scan is GET-only — the mismatched method is
+    // withheld (a GET /set_wifi or POST /scan must not slip through the provisioning allow-list).
+    CHECK(!http_surface_serves(ap, "/set_wifi", false));
+    CHECK(!http_surface_serves(ap, "/scan", true));
+    CHECK(!http_surface_serves(ap, "/", true));
+}
+
 int main() {
     test_crc();
     test_registers();
     test_convert();
+    test_query_flag();
+    test_config_store();
+    test_mcp_jsonrpc();
+    test_http_surface();
     test_config_model();
     test_board_pins();
     test_discovery();

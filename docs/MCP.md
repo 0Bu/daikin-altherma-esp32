@@ -1,24 +1,30 @@
 # MCP integration
 
-The device exposes a small **Model Context Protocol** server at `POST /mcp` so AI agents (Claude
-Code/Desktop, VS Code, the Python SDK, …) can read heat-pump state directly. It is **read-only** —
-the tools only *read* cached values, mirroring the read-only nature of the whole device (it never
-changes heat-pump settings).
+> **Status: PLANNED — not yet implemented.** The `POST /mcp` route exists, but it does not yet
+> serve any tools. Today it only returns a **spec-compliant JSON-RPC 2.0 error** (policy host-tested in
+> `main/logic/mcp_jsonrpc.hpp`): a body that isn't valid JSON → `-32700` *Parse error* (`id:null`); a
+> structurally-invalid request → `-32600` *Invalid Request* (`id:null`); a well-formed **notification**
+> (no `id`) → **no response** (`204`); a well-formed call → `-32601` *Method not found* with the
+> request's own `id` echoed (a number/string/null id only — array/object/boolean ids are never
+> mirrored). The tools, client config and wire example below describe the **intended** surface once the
+> read-only tools land (`main/mcp_server.cpp`) — a design target, not shipped behaviour.
+
+The device is planned to expose a small **Model Context Protocol** server at `POST /mcp` so AI agents
+(Claude Code/Desktop, VS Code, the Python SDK, …) can read heat-pump state directly. It will be
+**read-only** — the tools only *read* cached values, mirroring the read-only nature of the whole
+device (it never changes heat-pump settings).
 
 > Transport: **Streamable HTTP**, stateless JSON-RPC 2.0. `GET /mcp` → `405` (no SSE). Same
 > trusted-LAN-only caveat as the rest of the API — no auth/TLS, keep it on your LAN.
 
-## Tools
+## Tools (planned)
 
 | Tool | Args | Returns |
 |------|------|---------|
 | `get_status` | — | device/WiFi/MQTT/heat-pump health (same shape as `GET /status`) |
 | `get_hp_values` | — | the latest decoded readings (same shape as `GET /values`) |
 
-*(The MCP core is a work in progress — see `main/mcp_server.cpp`. The JSON-RPC method routing
-belongs in a host-tested `main/logic/mcp.hpp`.)*
-
-## Client config
+## Client config (once implemented)
 
 Claude Desktop / Code (`mcpServers`):
 

@@ -6,6 +6,7 @@
 #include "mqtt_ha.hpp"
 #include "hp_poll.hpp"
 #include "driver/gpio.h"
+#include "esp_log.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -124,7 +125,10 @@ static void status_led_task(void*) {
 void status_led_start() {
 #if CONFIG_DAIKIN_STATUS_LED_ENABLE
     if (CONFIG_DAIKIN_STATUS_LED_GPIO >= 0) {
-        xTaskCreate(status_led_task, "status_led", 2048, nullptr, 2, nullptr);
+        // Purely cosmetic (a local-eyes-only LED), so a failed task is harmless — but don't swallow
+        // the allocation failure silently.
+        if (xTaskCreate(status_led_task, "status_led", 2048, nullptr, 2, nullptr) != pdPASS)
+            ESP_LOGW("led", "status-LED task alloc failed — indicator disabled this boot");
     }
 #endif
 }

@@ -64,12 +64,22 @@ def/*.hpp           → embedded per-model value profiles (machine-generated in 
 config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi rollback backup + link
                       cache (pins/proto) persisted, model RAM-only; mutex-guarded snapshot via config().
                       Writers commit only the fields they own (config_save_link/config_set_model for
-                      detection, whole-struct config_save for the HTTP handlers); a failed NVS write
-                      names the key on /diag and returns false — config_save then publishes nothing,
-                      while config_save_link still applies its RAM patch (the link is proven-good)
+                      detection, config_save for the HTTP handlers). config_save writes the
+                      credential/service fields as ONE CRC-checked atomic blob (logic/config_store.hpp,
+                      host-tested) — a single nvs_set_blob, so the save is all-or-nothing across a write
+                      failure AND a power cut; on failure the old blob is intact, config_save returns
+                      false and publishes nothing ("nothing net saved"). The RX/TX/proto link cache
+                      stays as separate self-healing keys; config_save_link applies its RAM patch (the
+                      link is proven-good). config_load reads the blob first, falling back to the legacy
+                      per-key keys when it is absent (fresh device / pre-blob OTA) or CRC-invalid
 nvs_storage.cpp     → thin NVS helpers (namespaces, blobs, migration); setters return esp_err_t and
                        are [[nodiscard]] — a dropped write is silent (compare to ESP_OK, not bool)
-http_server.cpp     → esp_http_server :80, wildcard dispatch; concerns register their own routes
+http_server.cpp     → esp_http_server :80, wildcard dispatch; concerns register their own routes.
+                      Picks the trust surface from the WiFi mode (esp_wifi_get_mode): the OPEN setup
+                      AP registers ONLY the provisioning routes (GET / , /index.html, /scan, POST
+                      /set_wifi + captive), withholding /coredump, /diag, config/OTA/MCP from an
+                      unauthenticated radio client; the STA (trusted LAN) registers the full API.
+                      Boundary = host-tested logic/http_surface.hpp (F01)
 http_common.cpp     → shared HTTP helpers + the single OOM guard: http_register() stashes the real
                       handler in user_ctx and installs the handle_all trampoline, which calls it
                       inside try/catch — std::bad_alloc → 503, any other throw → 500, instead of
@@ -79,7 +89,7 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
 http_status.cpp     → GET / (web UI), /status, /values, /models, /diag, /scan, /coredump, and the
                       /events WebSocket (live status/values push with shared-payload, bounded
                       in-flight backpressure via logic/ws_tx_gate.hpp)
-http_config.cpp     → POST /set_wifi, /set_mqtt, /set_syslog, /set_hp, /detect
+http_config.cpp     → POST /set_wifi, /set_mqtt, /set_syslog, /set_ntp, /set_hp, /detect
 http_ota.cpp        → /ota/check|update|status
 mcp_server.cpp      → /mcp — read-only MCP tools (get_status, get_hp_values) for AI agents — PLANNED
                       (route exists; returns a JSON-RPC "not implemented" error for now)
@@ -293,6 +303,29 @@ host-testable core is unusually large and valuable, because the risky parts are 
   retried, but a **bounded** number of times: unbounded patience would let one client that announces a
   Content-Length and goes quiet park the single httpd task, taking the web UI and the OTA route out of
   a bad config with it.
+- `logic/http_surface.hpp` — the HTTP trust-surface boundary (F01). `http_surface_serves(surface,
+  path, is_post)` says which routes each surface exposes: on the trusted STA LAN, everything; on the
+  OPEN setup AP, ONLY `GET /`, `/index.html`, `/scan` and `POST /set_wifi`. `http_start()` picks the
+  surface from the WiFi mode and every concern registers through `http_register_on()`, so `/coredump`,
+  `/diag` and the config/OTA/MCP routes never exist on the unauthenticated radio. Host-tested so the
+  allow-list is asserted, not re-derived per file.
+- `logic/query_flag.hpp` — `query_flag_on(value)`: a `?clear=1`-style flag fires only on exactly
+  `"1"`. `httpd_query_key_value` succeeds on key PRESENCE, so acting on that alone let `?clear=0` wipe
+  the diag log / coredump; the policy is now one host-tested predicate used by `/diag` and `/coredump`.
+- `logic/config_store.hpp` — the atomic config blob (F02): `config_blob_serialize` / `deserialize`
+  pack the credential + service fields (WiFi creds + rollback backup + flags, MQTT, syslog, NTP) into
+  one length-checked, CRC32-protected byte blob written to a single NVS key. A single `nvs_set_blob`
+  is entry-atomic, so `config_save` is all-or-nothing across BOTH a mid-write NVS failure AND a power
+  cut — no per-key rollback, no write-ordering. `deserialize` returns false (leaving its out-param
+  untouched) on any corruption, so a fresh device / a pre-blob OTA falls back to the legacy per-key
+  load. Host-tested: CRC golden vector, round-trip, and every corruption path (bad CRC/magic/version,
+  truncation, trailing garbage).
+- `logic/mcp_jsonrpc.hpp` — the JSON-RPC 2.0 response policy for the planned `/mcp` route (F14):
+  `mcp_jsonrpc_decide()` maps a request's shape (valid JSON? object? `"jsonrpc":"2.0"`? string
+  `method`? id kind) to the interim response — `-32700` parse / `-32600` invalid-request / **no
+  response** for a notification / `-32601` method-not-found — plus which id may be echoed (only a
+  number/string/null, never an array/object/bool). Host-tested; `mcp_server.cpp` only extracts the
+  shape with cJSON and renders the decision.
 
 `hp_convert.cpp`, `hp_comm.cpp`, `config.cpp`, `mqtt_ha.cpp` are thin device wrappers that call
 these headers. Add new decode/format logic to `main/logic/` and a `CHECK` in
@@ -372,9 +405,11 @@ first, re-saved on change — with the compile-time defaults as fallback so a st
 The loaded pins are re-checked with `link_pins_safe` — the **pair** rule plus the chip-reserved-pin
 rule, the same ground the request path covers via `validate` — and dropped for those defaults if they
 fail: both write paths — `config_save` and
-`config_save_link` — commit `rx_pin` and `tx_pin` as two independent NVS writes, so a save cut or
-failed between them can leave a pair on flash (`rx == tx`, a pin outside this chip's range, or a
-reserved flash/strapping/JTAG pad) that no request could have set. Naming the failing key on `/diag` reports that write; it does not undo the
+`config_save_link` — commit `rx_pin` and `tx_pin` as two independent, **self-healing** NVS keys
+(the link cache is deliberately NOT in the atomic credential/service blob — it has two owners and is
+re-validated on load), so a **power cut** or a write failure between them can leave a pair on flash
+(`rx == tx`, a pin outside this chip's range, or a reserved flash/strapping/JTAG pad) that no request
+could have set. Naming the failing key on `/diag` reports that write; it does not undo the
 one that landed, which is why the check belongs on the way back in. The sweep already skips an
 `rx == tx` candidate on its own, so this is a guard rather than a repair; what it adds is the two
 checks the sweep lacks — the upper GPIO bound and the chip-reserved-pin rule — and a `/status` pin

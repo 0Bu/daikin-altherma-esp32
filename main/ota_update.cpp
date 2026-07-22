@@ -408,7 +408,11 @@ static void health_gate_task(void*) {
 }
 
 void ota_health_gate_arm() {
-    xTaskCreate(health_gate_task, "ota_health", 3072, nullptr, 4, nullptr);
+    // If the gate task can't be created, a PENDING_VERIFY OTA image is never marked valid and the
+    // bootloader will roll it back on the next reboot — safe, but say so (a silent failure looks like
+    // a healthy commit that never happened).
+    if (xTaskCreate(health_gate_task, "ota_health", 3072, nullptr, 4, nullptr) != pdPASS)
+        ESP_LOGE("ota", "health-gate task alloc failed — a pending OTA image will roll back on reboot");
 }
 
 } // namespace daik

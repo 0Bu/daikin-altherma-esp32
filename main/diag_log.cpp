@@ -19,7 +19,12 @@ static bool             s_wrapped = false;
 static bool             s_verbose = false;
 static SemaphoreHandle_t s_mtx = nullptr;
 
-void diag_log_init() { s_mtx = xSemaphoreCreateMutex(); }
+void diag_log_init() {
+    s_mtx = xSemaphoreCreateMutex();
+    // Every append/dump/clear already null-guards s_mtx, so a failure degrades to an unsynchronized
+    // ring rather than a crash — but say so on the console (diag_printf itself still works).
+    if (!s_mtx) ESP_LOGE("diag", "diag mutex alloc failed — /diag ring runs unsynchronized");
+}
 
 static void append(const char* p, size_t n) {
     for (size_t i = 0; i < n; i++) {

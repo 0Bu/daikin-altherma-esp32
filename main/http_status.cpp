@@ -12,6 +12,7 @@
 #include "logic/crashinfo.hpp"
 #include "logic/detect.hpp"
 #include "logic/json.hpp"
+#include "logic/query_flag.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/timestamp.hpp"
 #include "logic/ws_policy.hpp"
@@ -275,8 +276,11 @@ static esp_err_t h_diag(httpd_req_t* req) {
     char q[32];
     if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
         char v[4];
-        if (httpd_query_key_value(q, "clear", v, sizeof(v)) == ESP_OK) diag_clear();
-        if (httpd_query_key_value(q, "verbose", v, sizeof(v)) == ESP_OK) diag_set_verbose(v[0] == '1');
+        // clear is DESTRUCTIVE, so it fires only on ?clear=1 (the documented value) — not on mere
+        // key presence, which used to let ?clear=0 wipe the log. verbose routes through the same
+        // policy: verbose=1 -> on, anything else (incl. verbose=0) -> off.
+        if (httpd_query_key_value(q, "clear", v, sizeof(v)) == ESP_OK && query_flag_on(v)) diag_clear();
+        if (httpd_query_key_value(q, "verbose", v, sizeof(v)) == ESP_OK) diag_set_verbose(query_flag_on(v));
     }
     static char buf[6144];
     size_t n = diag_dump(buf, sizeof(buf));
@@ -288,7 +292,7 @@ static esp_err_t h_coredump(httpd_req_t* req) {
     char q[32];
     if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
         char v[4];
-        if (httpd_query_key_value(q, "clear", v, sizeof(v)) == ESP_OK && v[0] == '1') {
+        if (httpd_query_key_value(q, "clear", v, sizeof(v)) == ESP_OK && query_flag_on(v)) {
             esp_err_t err = esp_core_dump_image_erase();
             if (err == ESP_OK) {
                 return http_send_json(req, "{\"ok\":true}");
@@ -358,7 +362,9 @@ static WsTxGate s_ws_values_gate;
 static WsTxGate s_ws_status_gate;
 
 bool http_register_ws_client(int fd) {
-    if (!s_ws_mtx) s_ws_mtx = xSemaphoreCreateMutex();
+    // s_ws_mtx is created once in http_register_status() (single main task, at startup). It is NOT
+    // lazily created here: the old lazy path handed a null xSemaphoreCreateMutex() return (OOM)
+    // straight to xSemaphoreTake() — a null-deref. If it's missing, refuse the registration.
     if (!s_ws_mtx) return false;
     xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
     bool registered = false;
@@ -577,9 +583,24 @@ static esp_err_t h_ws_events(httpd_req_t* req) {
     return ESP_OK;
 }
 
-void http_register_status(httpd_handle_t s) {
-    http_register(s, "/", HTTP_GET, h_index);
-    http_register(s, "/index.html", HTTP_GET, h_index);
+void http_register_status(httpd_handle_t s, HttpSurface surface) {
+    // Create the WS broadcast mutex ONCE, here, on the single main task — not lazily on the first
+    // /events subscribe, where a null creation result was fed straight to xSemaphoreTake(). If it
+    // can't be allocated, the live-push list stays disabled (register + broadcast all guard on it)
+    // rather than crashing the device.
+    if (!s_ws_mtx) {
+        s_ws_mtx = xSemaphoreCreateMutex();
+        if (!s_ws_mtx) ESP_LOGE("http", "WS broadcast mutex alloc failed — /events live push disabled");
+    }
+    // Provisioning surface (served on the open setup AP too): the setup page + the SSID scan.
+    http_register_on(s, surface, "/", HTTP_GET, h_index);
+    http_register_on(s, surface, "/index.html", HTTP_GET, h_index);
+    http_register_on(s, surface, "/scan", HTTP_GET, h_scan);
+
+    // Everything below is trusted-LAN only — withheld from the open setup AP (F01). /diag and
+    // /coredump can carry WiFi/MQTT secrets; /status/values/events/models expose live device state.
+    if (!http_surface_serves(surface, "/status", /*is_post=*/false)) return;
+
     http_register(s, "/status", HTTP_GET, h_status);
     http_register(s, "/values", HTTP_GET, h_values);
 
@@ -593,7 +614,6 @@ void http_register_status(httpd_handle_t s) {
 
     http_register(s, "/models", HTTP_GET, h_models);
     http_register(s, "/diag", HTTP_GET, h_diag);
-    http_register(s, "/scan", HTTP_GET, h_scan);
     http_register(s, "/coredump", HTTP_GET, h_coredump);
 }
 
