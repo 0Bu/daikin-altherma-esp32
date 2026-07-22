@@ -276,19 +276,22 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   `mqtts://` broker URL (CA-verified via the mbedTLS bundle) so the password isn't sniffable — the
   bridge **refuses** a plaintext broker with credentials rather than silently downgrading or guessing
   a TLS port. An explicit scheme is always honoured. Reason surfaces in `/status.mqtt`.
-- **Node id:** `daikin_<mac3>` from the WiFi STA MAC (stable across config changes).
-- **Topics:** `<base>/<node>/state` (one retained JSON of all values, grouped by register page —
+- **Node id:** `daikin_<mac3>` from the WiFi STA MAC (stable across config changes). It disambiguates
+  the *device* in each discovery config's `uniq_id`/`dev.ids`, but is **not** part of the message
+  topics — those sit directly under `<base>` (one board per base topic).
+- **Topics:** `<base>/state` (one retained JSON of all values, grouped by register page —
   `{ "<group>": { "<object>": value } }`, max depth 1), plus per-value discovery configs under
   `<prefix>/sensor/<node>/<object>/config` (retained) whose `value_template` reads the group+object
-  out of that JSON. Availability/LWT `<base>/<node>/status`. `<base>` defaults `daikin-altherma-esp32`,
+  out of that JSON. Availability/LWT `<base>/status`. `<base>` defaults `daikin-altherma-esp32`,
   `<prefix>` `homeassistant`.
-- **Diagnostics topics.** `<base>/<node>/heartbeat` (board/link health on a fixed 10 s cadence —
-  heap, uptime, WiFi/MQTT/bus counters) and `<base>/<node>/crash` (retained; last reset reason + a
-  "dump waiting" flag, published once per (re)connect and republished on the heartbeat cadence if the
-  "dump waiting" flag changes, so clearing a dump can't leave it latched ON) each expose their own `entity_category:
-  diagnostic` HA sensors. The crash topic carries only the reason + a hex backtrace — never a secret
-  or the raw dump; pull the full dump from `GET /coredump` and decode it with
-  `scripts/decode-coredump.sh`.
+- **Diagnostics topics.** `<base>/heartbeat` (board/link health on a fixed 10 s cadence — a **flat**
+  JSON of heap, uptime, WiFi/MQTT/bus counters, each field prefixed by its block name: `wifi_rssi`,
+  `wifi_mac`, `wifi_bssid`, `mqtt_count`, `bus_rx_received`, …) and `<base>/crash` (retained; last
+  reset reason + a "dump waiting" flag, published once per (re)connect and republished on the
+  heartbeat cadence if the "dump waiting" flag changes, so clearing a dump can't leave it latched ON)
+  each expose their own `entity_category: diagnostic` HA sensors. The crash topic carries only the
+  reason + a hex backtrace — never a secret or the raw dump; pull the full dump from `GET /coredump`
+  and decode it with `scripts/decode-coredump.sh`.
 - **Autodiscovery streaming.** A full Altherma value set can exceed 10 KB of discovery JSON;
   discovery is emitted incrementally (chunked) so it never needs one large contiguous heap block.
 

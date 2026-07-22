@@ -211,7 +211,8 @@ host-testable core is unusually large and valuable, because the risky parts are 
   the full URI), and the rejects (empty, scheme with no host, empty or non-digit port, and a port
   outside 1–65535 — caught at parse time because the probe's `htons()` would truncate `:65537` to
   `:1` and call a wrong port reachable).
-- `logic/heartbeat.hpp` — the board/link diagnostics JSON + its 17 diagnostic HA discovery configs,
+- `logic/heartbeat.hpp` — the board/link diagnostics JSON (a flat object, each field prefixed by its
+  block name: `wifi_rssi`, `wifi_mac`, `bus_rx_received`, …) + its 19 diagnostic HA discovery configs,
   with the dBm → signal-quality curve and uptime formatting pinned to known-good samples. Includes
   the SNTP wall clock (`sntp_time.cpp`) as a `device_class: "timestamp"` sensor — HA's native
   "last updated N ago" entity, rendering `null` (unsynced) as its normal "unknown" state rather than
@@ -565,7 +566,10 @@ The Home Assistant bridge:
   entity's discovery config at a time (retained) on (re)connect, so it never needs one large
   contiguous heap block — the same memory discipline as the rest of the firmware. Layout-marker
   converters (docs/REGISTERS.md §3.6) get no sensor.
-- **One shared grouped-JSON state topic** `<base>/<node>/state` (retained). Each cycle the task
+- **One shared grouped-JSON state topic** `<base>/state` (retained). The message topics sit directly
+  under `<base>` — one board per base topic, so there is no `<node>` segment in the payload paths; the
+  node id `daikin_<mac3>` disambiguates the *device* only in each discovery config's `uniq_id`/`dev.ids`
+  and its `<prefix>/sensor/<node>/…` discovery topic. Each cycle the task
   builds a single JSON object of every value, grouped one level deep by X10A register page
   (`logic/mqtt_group.hpp`, host-tested): `{ "<group>": { "<object_id>": value, … }, … }` (max
   nesting depth 1, e.g. `hydronic`, `outdoor_state`, `inverter`). Numbers are emitted unquoted,
@@ -583,31 +587,37 @@ The Home Assistant bridge:
   a new profile (which also re-streams discovery). So an idle pump does not flood the broker. The
   per-cycle build is wrapped in a try/catch: an OOM `std::string` build skips the cycle rather than
   throwing through the FreeRTOS task and rebooting.
-- **Availability / LWT** on `<base>/<node>/status` (`online`/`offline`, retained) — the broker's
+- **Availability / LWT** on `<base>/status` (`online`/`offline`, retained) — the broker's
   last-will marks the device offline if it drops, and every sensor's `avty_t` points at it.
-- **Heartbeat topic** `<base>/<node>/heartbeat` (not retained) carries board/link diagnostics,
-  separate from heat-pump values, built by `logic/heartbeat.hpp` (host-tested):
+- **Heartbeat topic** `<base>/heartbeat` (not retained) carries board/link diagnostics, separate from
+  heat-pump values, built by `logic/heartbeat.hpp` (host-tested). The payload is a **flat** JSON object
+  — each field carried under its block name as a prefix rather than nested `wifi`/`mqtt`/`bus`
+  sub-objects, so a Telegraf/InfluxDB line-protocol consumer and an HA `value_template` both read a
+  plain snake_case key:
   - **Board**: `version`, `platform`, `uptime_s` + a `"Ddd+HH:MM:SS.mmm"` `uptime` display string
     (`format_uptime`), `free_heap` / `min_free_heap` / `max_alloc` (largest free block — the
-    binding OOM limit on this firmware).
-  - **`wifi`**: `connected`, `rssi`, `quality_pct` (0-100%, `wifi_signal_quality_pct` — the
-    standard dBm→% mapping, -50 dBm=100%/-100 dBm=0%), `reconnects` (cumulative RE-connects since
-    boot, `wifi_reconnect_count()` in `wifi.cpp`, excludes the first-ever connect).
-  - **`mqtt`**: `connected`, `count`/`fails` (every `esp_mqtt_client_publish()` call funnels through
-    one `mqtt_publish()` wrapper in `mqtt_ha.cpp` so these cover discovery+state+heartbeat+LWT, not
-    just one topic), `reconnects` (cumulative, excludes the first-ever connect).
-  - **`bus`**: the X10A stats already tracked in `HpStats` — `connected`, `proto`, `registers`,
-    `values`, `last_ok_s`, and nested:
-    - **`rx`**: `received` / `fails` (cumulative successful/failed register reads, `HpStats.rx_ok`/`rx_fail_total`),
-      `crc_err` / `timeout_err` (breakdown).
-    - **`tx`**: `reads` (= `received + fails`, i.e. every register-read request sent), `writes`/`fails` always `0`
-      (reported for schema parity since the X10A bridge is read-only).
+    binding OOM limit on this firmware), `reset_reason`, `time` (SNTP wall clock, null until synced).
+  - **`wifi_*`**: `wifi_connected`, `wifi_rssi`, `wifi_quality_pct` (0-100%, `wifi_signal_quality_pct`
+    — the standard dBm→% mapping, -50 dBm=100%/-100 dBm=0%), `wifi_reconnects` (cumulative RE-connects
+    since boot, `wifi_reconnect_count()` in `wifi.cpp`, excludes the first-ever connect), `wifi_mac`
+    (this STA's own MAC, always present) and `wifi_bssid` (the associated AP's MAC, null while offline)
+    — the `/status.wifi.mac`/`.bssid` pair, now on the diagnostics stream too.
+  - **`mqtt_*`**: `mqtt_connected`, `mqtt_count`/`mqtt_fails` (every `esp_mqtt_client_publish()` call
+    funnels through one `mqtt_publish()` wrapper in `mqtt_ha.cpp` so these cover
+    discovery+state+heartbeat+LWT, not just one topic), `mqtt_reconnects` (cumulative, excludes the
+    first-ever connect).
+  - **`bus_*`**: the X10A stats already tracked in `HpStats` — `bus_connected`, `bus_proto`,
+    `bus_registers`, `bus_values`, `bus_last_ok_s`, `bus_rx_received` / `bus_rx_fails` (cumulative
+    successful/failed register reads, `HpStats.rx_ok`/`rx_fail_total`), `bus_crc_err` /
+    `bus_timeout_err` (breakdown), and `bus_tx_reads` (= `rx_received + rx_fails`, every register-read
+    request sent) with `bus_tx_writes`/`bus_tx_fails` always `0` (reported for schema parity since the
+    X10A bridge is read-only).
 
   Published on a fixed `HEARTBEAT_INTERVAL_S` (10 s) cadence — unlike the state topic, this is
   diagnostics rather than real-time telemetry, so it always sends the latest snapshot rather than
-  only on change. 17 diagnostic HA entities (WiFi signal/quality/reconnects, heap free/min-free/
-  largest-block, uptime, last reset reason, the SNTP wall clock as a `device_class:"timestamp"`
-  sensor, X10A bus status/CRC/timeout/rx errors/rx received, MQTT
+  only on change. 19 diagnostic HA entities (WiFi signal/quality/reconnects/MAC/BSSID, heap
+  free/min-free/largest-block, uptime, last reset reason, the SNTP wall clock as a
+  `device_class:"timestamp"` sensor, X10A bus status/CRC/timeout/rx errors/rx received, MQTT
   publish count/fails/reconnects — tagged `"ent_cat":"diagnostic"`) point at this topic via their own
   discovery configs, streamed once per
   connection independently of heat-pump profile detection — so they show up even while the model is
@@ -668,7 +678,7 @@ Structure:
     crash **banner** (`renderCrashBanner()`) — titled on `fault`, so an orphan dump doesn't claim this
     boot crashed — with the reset reason + hex backtrace, a one-click `coredump.bin` download, and a
     "copy diagnostics" bundle (`/status` + `/diag` + summary) for a bug report. The MQTT bridge
-    additionally **retains** the summary on `<base>/<node>/crash` (reason + "dump waiting" flag as 2
+    additionally **retains** the summary on `<base>/crash` (reason + "dump waiting" flag as 2
     diagnostic HA entities — reason/backtrace only, never secrets or the raw dump), so Home Assistant
     (or Telegraf → VictoriaLogs) sees crashes over time; it is published once per (re)connect **and**
     republished on the heartbeat cadence whenever the `coredump` flag changes, so a retained "Crash

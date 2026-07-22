@@ -232,19 +232,25 @@ http_config.cpp POST /set_wifi /set_mqtt /set_syslog /set_ntp /set_hp /detect
 http_ota.cpp    /ota/check|update|status
 mcp_server.cpp  /mcp (read-only MCP tools; TODO)
 mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE shared grouped-JSON
-                state topic <base>/<node>/state (logic/mqtt_group.hpp), republished on change; LWT
-                availability, mqtts+CA on creds; board/link diagnostics on <base>/<node>/heartbeat
-                (logic/heartbeat.hpp), published on a fixed 10s cadence (HEARTBEAT_INTERVAL_S) —
+                state topic <base>/state (logic/mqtt_group.hpp), republished on change; LWT
+                availability, mqtts+CA on creds. Message topics sit DIRECTLY under <base> (no
+                daikin_<mac> node segment — one board per base topic); the node id disambiguates the
+                DEVICE only in each discovery config's uniq_id/dev.ids + the <prefix>/sensor/<node>/…
+                discovery topic. Board/link diagnostics on <base>/heartbeat (logic/heartbeat.hpp),
+                published on a fixed 10s cadence (HEARTBEAT_INTERVAL_S) — a FLAT JSON (each field
+                prefixed by its block name: wifi_connected, wifi_rssi, wifi_mac, wifi_bssid, mqtt_count,
+                bus_rx_received, … — no nested wifi/mqtt/bus objects) of
                 heap(free/min-free/largest-block)/uptime/reset_reason/the SNTP wall clock (sntp_time.cpp,
-                "time" — HA device_class "timestamp", null until synced)/wifi(+reconnects)/mqtt(pub
-                count+fails+reconnects)/X10A bus (rx_received/rx_fails) stats, 17 diagnostic HA entities
-                streamed independently of profile detection. Also RETAINS the boot-time crash summary
-                on <base>/<node>/crash (logic/crashinfo.hpp) once per (re)connect PLUS a republish on
+                "time" — HA device_class "timestamp", null until synced)/wifi(rssi+reconnects+MAC+BSSID,
+                mac always present, bssid null offline)/mqtt(pub count+fails+reconnects)/X10A bus
+                (rx_received/rx_fails) stats, 19 diagnostic HA entities streamed independently of profile
+                detection. Also RETAINS the boot-time crash summary
+                on <base>/crash (logic/crashinfo.hpp) once per (re)connect PLUS a republish on
                 the heartbeat cadence whenever the "dump waiting" flag changes (diag_crash_info_live();
                 a retained true would otherwise latch ON in HA until the next reconnect once the dump
                 is pulled + cleared) — last reset reason
                 + a "dump waiting" flag as 2 more diagnostic HA entities (reason/backtrace only, never
-                secrets or the raw dump). Every publish funnels through one mqtt_publish() wrapper so mqtt.count/mqtt.fails
+                secrets or the raw dump). Every publish funnels through one mqtt_publish() wrapper so mqtt_count/mqtt_fails
                 cover every topic, not just state. The mqtt_pub task is Task-Watchdog-subscribed
                 (esp_task_wdt_add) and resets UNCONDITIONALLY at the top of each 1s cycle (not gated on
                 connect/publish, so a long broker outage can't false-trip) PLUS once per publish inside
@@ -380,8 +386,9 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 Altherma-only model profiles from a bus fingerprint (page mask + capacity) to a
                 register-equivalent candidate set + a best-fit representative (detect_best);
                 mqtt_group.hpp maps a register page to a friendly group name and builds the grouped
-                state JSON; heartbeat.hpp builds the board/link diagnostics JSON + its diagnostic HA
-                discovery configs; crashinfo.hpp turns a captured CrashInfo (reset reason + core-dump
+                state JSON; heartbeat.hpp builds the board/link diagnostics JSON (FLAT — each field
+                prefixed by its block name, e.g. wifi_rssi/wifi_mac/bus_rx_received, not nested) + its
+                diagnostic HA discovery configs; crashinfo.hpp turns a captured CrashInfo (reset reason + core-dump
                 summary) into the last_crash JSON / MQTT crash payload + a paste-friendly text bundle,
                 and classifies which reset reasons are faults; board_pins.hpp = the ESP32-S3 CHIP-safe
                 X10A GPIOs (the RX/TX pin-picker dropdown when detection hasn't locked the pins) —

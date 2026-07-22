@@ -5,14 +5,16 @@
 //   • On (re)connect: mark availability "online", stream one retained discovery config per value of
 //     the active profile (logic/discovery.hpp), then publish the full grouped state JSON.
 //   • Each cycle: rebuild the grouped state JSON (logic/mqtt_group.hpp) and publish it to the ONE
-//     shared topic <base>/<node>/state — but only when the payload actually changed, so a quiet
-//     pump doesn't spam the broker.
+//     shared topic <base>/state — but only when the payload actually changed, so a quiet pump doesn't
+//     spam the broker. Message topics sit directly under <base> (no daikin_<mac> node segment — one
+//     board per base topic); the node id disambiguates the DEVICE only in each discovery config's
+//     uniq_id/dev.ids + the <prefix>/sensor/<node>/… discovery topic.
 //   • Every HEARTBEAT_INTERVAL_S (10 s): rebuild + publish the board/link diagnostics JSON
-//     (logic/heartbeat.hpp) to <base>/<node>/heartbeat — diagnostics, not real-time telemetry, so
-//     unlike the state topic it's a fixed cadence, not publish-on-change.
-//   • Once per (re)connect: RETAIN the boot-time crash summary (logic/crashinfo.hpp) on
-//     <base>/<node>/crash — last reset reason + a "dump waiting" flag, as two diagnostic HA
-//     entities. Reason/backtrace only; never the raw dump or any secret.
+//     (logic/heartbeat.hpp) to <base>/heartbeat — diagnostics, not real-time telemetry, so unlike the
+//     state topic it's a fixed cadence, not publish-on-change.
+//   • Once per (re)connect: RETAIN the boot-time crash summary (logic/crashinfo.hpp) on <base>/crash —
+//     last reset reason + a "dump waiting" flag, as two diagnostic HA entities. Reason/backtrace only;
+//     never the raw dump or any secret.
 // Read-only: no command subscriptions. No-op if mqtt_uri is empty. Memory-safe: discovery is one
 // small publish per value; the state JSON is a single few-KB build, guarded against OOM.
 #include "mqtt_ha.hpp"
@@ -86,7 +88,7 @@ static std::atomic<bool> s_heartbeat_announced{false}; // diagnostic discovery s
 static bool         s_mqtt_ever_connected = false;     // event-task-only: first connect vs. a RE-connect
 static bool         s_crash_dump_pub      = false;     // mqtt_task-only: `coredump` flag last published on s_crash
 
-// Cumulative publish counters for the heartbeat's mqtt.{count,fails,reconnects} — see mqtt_publish().
+// Cumulative publish counters for the heartbeat's mqtt_{count,fails,reconnects} — see mqtt_publish().
 // pub_ok/pub_fail are touched only on the publish task (mqtt_publish + publish_heartbeat both run
 // there), so they stay plain; reconnects is bumped on the EVENT task and read on the publish task, so
 // it is atomic.
@@ -117,7 +119,7 @@ static std::string node_id() {
     return b;
 }
 
-// Every outbound publish funnels through here so the heartbeat's mqtt.count/mqtt.fails (the
+// Every outbound publish funnels through here so the heartbeat's mqtt_count/mqtt_fails (the
 // EMS-ESP-style "mqttcount"/"mqttfails" pair) reflect every discovery/state/heartbeat/availability
 // message, not just one of them. esp_mqtt_client_publish() returns the message id (>=0) on success
 // or -1 if it couldn't even be queued (e.g. dropped mid-disconnect).
@@ -192,7 +194,7 @@ static void publish_heartbeat_discovery() {
 }
 
 // Crash/reset diagnostics (logic/crashinfo.hpp): stream the two diagnostic discovery configs, then
-// RETAIN the boot-time crash summary on <base>/<node>/crash. The payload is captured once at boot
+// RETAIN the boot-time crash summary on <base>/crash. The payload is captured once at boot
 // (diag_crash.cpp) so it never changes at runtime — retained + published once per (re)connect means
 // a late subscriber (Home Assistant, or Telegraf → VictoriaLogs) still sees the last reset. It is
 // ALWAYS published (even a clean boot reports reason="sw"/"poweron"), so the "Last Reset Reason"
@@ -236,6 +238,18 @@ static void publish_heartbeat() {
     f.wifi_connected  = wi.connected;
     f.wifi_rssi       = wi.rssi;
     f.wifi_reconnects = wifi_reconnect_count();
+    // Pre-render the MAC strings here (keeps logic/heartbeat.hpp IDF-free, same as `time`). The STA's
+    // own MAC is always present; the AP BSSID only while associated ("" -> JSON null, like /status).
+    char mac_str[18];
+    std::snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+                  wi.mac[0], wi.mac[1], wi.mac[2], wi.mac[3], wi.mac[4], wi.mac[5]);
+    f.wifi_mac = mac_str;
+    if (wi.connected) {
+        char bssid_str[18];
+        std::snprintf(bssid_str, sizeof(bssid_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+                      wi.bssid[0], wi.bssid[1], wi.bssid[2], wi.bssid[3], wi.bssid[4], wi.bssid[5]);
+        f.wifi_bssid = bssid_str;
+    }
     f.mqtt_connected  = s_connected;
     f.mqtt_count      = s_mqtt_pub_ok;
     f.mqtt_fails      = s_mqtt_pub_fail;
@@ -398,10 +412,10 @@ void mqtt_ha_start() {
     s_node   = node_id();
     s_base   = CONFIG_DAIKIN_MQTT_BASE_TOPIC;
     s_prefix = CONFIG_DAIKIN_MQTT_DISCOVERY_PREFIX;
-    s_avail     = availability_topic(s_base, s_node);
-    s_state     = state_topic(s_base, s_node);
-    s_heartbeat = heartbeat_topic(s_base, s_node);
-    s_crash     = crash_topic(s_base, s_node);
+    s_avail     = availability_topic(s_base);
+    s_state     = state_topic(s_base);
+    s_heartbeat = heartbeat_topic(s_base);
+    s_crash     = crash_topic(s_base);
 
     if (!build_client()) return;                               // policy error already surfaced
     esp_mqtt_client_start(s_client);

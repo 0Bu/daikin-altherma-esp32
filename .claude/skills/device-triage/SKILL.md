@@ -25,8 +25,8 @@ the IP and use it verbatim. Put the host in `H` for the commands below: `H=daiki
    stop here; there's nothing more to read.
 
 2. **Summarize, don't dump.** From `/status` report, in a few lines:
-   - **WiFi** — connected? RSSI, `wifi.reconnects` (climbing = flaky link / ghost-assoc).
-   - **MQTT** — connected? `mqtt.count` / `mqtt.fails` / reconnects (fails climbing = broker/TLS/creds).
+   - **WiFi** — connected? RSSI, `wifi_reconnects` (heartbeat; climbing = flaky link / ghost-assoc).
+   - **MQTT** — connected? `mqtt_count` / `mqtt_fails` / reconnects (heartbeat; fails climbing = broker/TLS/creds).
    - **X10A** — `hp.connected`, `hp.last_ok_s`, `hp.registers`/`hp.values`, `hp.crc_err`,
      `hp.timeout_err` (timeouts = wrong RX/TX pins or a silent bus; crc_err = noise/wrong proto).
    - **Model** — `detect.model` + `profile.id`; note if `detect.ambiguous`.

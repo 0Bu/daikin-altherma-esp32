@@ -28,16 +28,18 @@ inline std::string discovery_topic(const std::string& prefix, const std::string&
     return prefix + "/sensor/" + node + "/" + object_id(def.label) + "/config";
 }
 
-// Shared retained state topic: <base>/<node>/state. ALL sensors read from this one topic — the
-// bridge publishes a single grouped JSON object of every value (logic/mqtt_group.hpp) and each
-// sensor's value_template subscripts its group + object out of it.
-inline std::string state_topic(const std::string& base, const std::string& node) {
-    return base + "/" + node + "/state";
+// Shared retained state topic: <base>/state. ALL sensors read from this one topic — the bridge
+// publishes a single grouped JSON object of every value (logic/mqtt_group.hpp) and each sensor's
+// value_template subscripts its group + object out of it. The device-disambiguating node id lives in
+// each discovery config's uniq_id/dev.ids (below), NOT in the message topic — one board per <base>,
+// so the payload topics sit directly under it.
+inline std::string state_topic(const std::string& base) {
+    return base + "/state";
 }
 
-// Device availability topic (LWT): <base>/<node>/status -> "online"/"offline".
-inline std::string availability_topic(const std::string& base, const std::string& node) {
-    return base + "/" + node + "/status";
+// Device availability topic (LWT): <base>/status -> "online"/"offline".
+inline std::string availability_topic(const std::string& base) {
+    return base + "/status";
 }
 
 // Discovery config JSON for one value. `state_topic` is the ONE shared grouped-JSON topic; the

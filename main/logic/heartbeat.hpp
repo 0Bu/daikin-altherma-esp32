@@ -27,6 +27,13 @@ struct HeartbeatFields {
     bool        wifi_connected  = false;
     int8_t      wifi_rssi       = 0;   // valid only if wifi_connected
     uint32_t    wifi_reconnects = 0;   // cumulative since boot (wifi_reconnect_count())
+    // Pre-rendered "AA:BB:CC:DD:EE:FF" MAC strings so this header stays IDF-free (same contract as
+    // `time`): wifi_mac is this STA's own MAC (always present); wifi_bssid is the associated AP's MAC
+    // ("" while offline -> JSON null, since there is no AP). Both let an HA/Telegraf consumer pin a
+    // heartbeat to a specific board and see which AP it roamed onto — the /status.wifi.mac/.bssid
+    // pair, now on the diagnostics stream too.
+    std::string wifi_mac;
+    std::string wifi_bssid;
 
     bool        mqtt_connected  = false;
     uint32_t    mqtt_count      = 0;   // cumulative successful publishes (state+heartbeat+discovery)
@@ -51,10 +58,10 @@ struct HeartbeatFields {
     std::string time;
 };
 
-// Heartbeat topic: <base>/<node>/heartbeat — separate from the shared state topic so a Telegraf/HA
-// consumer can subscribe to device health independently of heat-pump values.
-inline std::string heartbeat_topic(const std::string& base, const std::string& node) {
-    return base + "/" + node + "/heartbeat";
+// Heartbeat topic: <base>/heartbeat — separate from the shared state topic so a Telegraf/HA consumer
+// can subscribe to device health independently of heat-pump values.
+inline std::string heartbeat_topic(const std::string& base) {
+    return base + "/heartbeat";
 }
 
 // WiFi signal quality 0-100%, the same dBm->% mapping other ESP32 firmware (and most consumer WiFi
@@ -85,6 +92,10 @@ inline std::string format_uptime(uint64_t uptime_ms) {
     return buf;
 }
 
+// The payload is a FLAT object: the former wifi/mqtt/bus sub-objects are gone, each field carried as
+// its block name + "_" prefix (wifi_connected, mqtt_count, bus_rx_received, …). A flat map is what a
+// Telegraf/InfluxDB line-protocol consumer and an HA value_template both want — no per-consumer
+// nesting to subscript through — and it keeps every heartbeat key a plain snake_case identifier.
 inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     const uint32_t uptime_s = static_cast<uint32_t>(f.uptime_ms / 1000);
     std::string j = "{";
@@ -100,29 +111,35 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     // contract as /status.ntp.time and the syslog RFC 5424 TIMESTAMP field.
     j += "\"time\":"; j += f.time.empty() ? "null" : ("\"" + f.time + "\"");
     j += ",";
-    j += "\"wifi\":{\"connected\":"; j += f.wifi_connected ? "true" : "false";
-    j += ",\"rssi\":"; j += f.wifi_connected ? std::to_string(f.wifi_rssi) : "null";
-    j += ",\"quality_pct\":"; j += f.wifi_connected ? std::to_string(wifi_signal_quality_pct(f.wifi_rssi)) : "null";
-    j += ",\"reconnects\":" + std::to_string(f.wifi_reconnects) + "},";
-    j += "\"mqtt\":{\"connected\":"; j += f.mqtt_connected ? "true" : "false";
-    j += ",\"count\":" + std::to_string(f.mqtt_count);
-    j += ",\"fails\":" + std::to_string(f.mqtt_fails);
-    j += ",\"reconnects\":" + std::to_string(f.mqtt_reconnects) + "},";
-    j += "\"bus\":{\"connected\":"; j += f.bus_connected ? "true" : "false";
-    j += ",\"proto\":\""; j += f.bus_proto; j += "\"";
-    j += ",\"registers\":" + std::to_string(f.registers);
-    j += ",\"values\":" + std::to_string(f.values);
-    j += ",\"last_ok_s\":" + std::to_string(f.last_ok_s);
-    j += ",\"rx\":{\"received\":" + std::to_string(f.rx_received);
-    j += ",\"fails\":" + std::to_string(f.rx_fails);
-    j += ",\"crc_err\":" + std::to_string(f.crc_err);
-    j += ",\"timeout_err\":" + std::to_string(f.timeout_err);
+    // wifi_* — rssi/quality null while offline (a stale reading must not leak); mac always present;
+    // bssid null while offline (no AP).
+    j += "\"wifi_connected\":"; j += f.wifi_connected ? "true" : "false";
+    j += ",\"wifi_rssi\":"; j += f.wifi_connected ? std::to_string(f.wifi_rssi) : "null";
+    j += ",\"wifi_quality_pct\":"; j += f.wifi_connected ? std::to_string(wifi_signal_quality_pct(f.wifi_rssi)) : "null";
+    j += ",\"wifi_reconnects\":" + std::to_string(f.wifi_reconnects);
+    j += ",\"wifi_mac\":"; j += f.wifi_mac.empty() ? "null" : ("\"" + f.wifi_mac + "\"");
+    j += ",\"wifi_bssid\":"; j += f.wifi_bssid.empty() ? "null" : ("\"" + f.wifi_bssid + "\"");
+    // mqtt_*
+    j += ",\"mqtt_connected\":"; j += f.mqtt_connected ? "true" : "false";
+    j += ",\"mqtt_count\":" + std::to_string(f.mqtt_count);
+    j += ",\"mqtt_fails\":" + std::to_string(f.mqtt_fails);
+    j += ",\"mqtt_reconnects\":" + std::to_string(f.mqtt_reconnects);
+    // bus_*
+    j += ",\"bus_connected\":"; j += f.bus_connected ? "true" : "false";
+    j += ",\"bus_proto\":\""; j += f.bus_proto; j += "\"";
+    j += ",\"bus_registers\":" + std::to_string(f.registers);
+    j += ",\"bus_values\":" + std::to_string(f.values);
+    j += ",\"bus_last_ok_s\":" + std::to_string(f.last_ok_s);
+    j += ",\"bus_rx_received\":" + std::to_string(f.rx_received);
+    j += ",\"bus_rx_fails\":" + std::to_string(f.rx_fails);
+    j += ",\"bus_crc_err\":" + std::to_string(f.crc_err);
+    j += ",\"bus_timeout_err\":" + std::to_string(f.timeout_err);
     // The X10A protocol has no write command (docs/ARCHITECTURE.md → MQTT bridge is read-only), so
-    // tx.writes/fails are always 0 — reported for parity with the EMS-ESP-style field set rather
+    // bus_tx_writes/fails are always 0 — reported for parity with the EMS-ESP-style field set rather
     // than because this firmware could ever be busy writing.
-    j += "},\"tx\":{\"reads\":" + std::to_string(f.rx_received + f.rx_fails);
-    j += ",\"writes\":0,\"fails\":0}";
-    j += "}}";
+    j += ",\"bus_tx_reads\":" + std::to_string(f.rx_received + f.rx_fails);
+    j += ",\"bus_tx_writes\":0,\"bus_tx_fails\":0";
+    j += "}";
     return j;
 }
 
@@ -135,16 +152,20 @@ struct HeartbeatSensor {
     const char* component;     // "sensor" | "binary_sensor"
     const char* object_id;
     const char* name;
-    const char* json_path;     // Dot-notation JSON path, e.g. "wifi.rssi", "bus.rx.received", "free_heap"
+    const char* json_path;     // Flat JSON key, e.g. "wifi_rssi", "bus_rx_received", "free_heap"
     const char* unit;          // "" = none
     const char* device_class;  // "" = none
     const char* state_class;   // "" | "measurement" | "total_increasing"
 };
 
 inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
-    {"sensor",        "wifi_signal",      "WiFi Signal",         "wifi.rssi",        "dBm", "signal_strength", "measurement"},
-    {"sensor",        "wifi_quality",     "WiFi Quality",        "wifi.quality_pct", "%",   "",                 "measurement"},
-    {"sensor",        "wifi_reconnects",  "WiFi Reconnects",     "wifi.reconnects",  "",    "",                 "total_increasing"},
+    {"sensor",        "wifi_signal",      "WiFi Signal",         "wifi_rssi",        "dBm", "signal_strength", "measurement"},
+    {"sensor",        "wifi_quality",     "WiFi Quality",        "wifi_quality_pct", "%",   "",                 "measurement"},
+    {"sensor",        "wifi_reconnects",  "WiFi Reconnects",     "wifi_reconnects",  "",    "",                 "total_increasing"},
+    // MAC (this STA) + BSSID (the associated AP) as text diagnostics — which physical board, and which
+    // AP it roamed onto. No unit/device_class/state_class; bssid reads HA-"unknown" while offline (null).
+    {"sensor",        "wifi_mac",         "WiFi MAC",            "wifi_mac",         "",    "",                 ""},
+    {"sensor",        "wifi_bssid",       "WiFi BSSID",          "wifi_bssid",       "",    "",                 ""},
     {"sensor",        "free_heap",        "Free Heap",           "free_heap",        "B",   "",                 "measurement"},
     // Heap low-water mark + largest contiguous free block: both already ride the payload, exposed as
     // their own diagnostic sensors so a slow leak (min_free_heap creeping down) or fragmentation
@@ -158,14 +179,14 @@ inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
     // clock (main/sntp_time.cpp) this firmware now has. Null (unsynced) reads as HA's normal
     // "unknown" state for the class, same as every other nullable field in this payload.
     {"sensor",        "device_time",      "Device Time",         "time",             "",    "timestamp",        ""},
-    {"binary_sensor", "bus_status",       "X10A Bus",            "bus.connected",    "",    "connectivity",     ""},
-    {"sensor",        "bus_crc_err",      "X10A CRC Errors",     "bus.rx.crc_err",   "",    "",                 "total_increasing"},
-    {"sensor",        "bus_timeout_err",  "X10A Timeout Errors", "bus.rx.timeout_err","",    "",                 "total_increasing"},
-    {"sensor",        "bus_rx_received",  "X10A RX Received",    "bus.rx.received",  "",    "",                 "total_increasing"},
-    {"sensor",        "bus_rx_fails",     "X10A RX Fails",       "bus.rx.fails",     "",    "",                 "total_increasing"},
-    {"sensor",        "mqtt_count",       "MQTT Publishes",      "mqtt.count",       "",    "",                 "total_increasing"},
-    {"sensor",        "mqtt_fails",       "MQTT Publish Fails",  "mqtt.fails",       "",    "",                 "total_increasing"},
-    {"sensor",        "mqtt_reconnects",  "MQTT Reconnects",     "mqtt.reconnects",  "",    "",                 "total_increasing"},
+    {"binary_sensor", "bus_status",       "X10A Bus",            "bus_connected",    "",    "connectivity",     ""},
+    {"sensor",        "bus_crc_err",      "X10A CRC Errors",     "bus_crc_err",      "",    "",                 "total_increasing"},
+    {"sensor",        "bus_timeout_err",  "X10A Timeout Errors", "bus_timeout_err",  "",    "",                 "total_increasing"},
+    {"sensor",        "bus_rx_received",  "X10A RX Received",    "bus_rx_received",  "",    "",                 "total_increasing"},
+    {"sensor",        "bus_rx_fails",     "X10A RX Fails",       "bus_rx_fails",     "",    "",                 "total_increasing"},
+    {"sensor",        "mqtt_count",       "MQTT Publishes",      "mqtt_count",       "",    "",                 "total_increasing"},
+    {"sensor",        "mqtt_fails",       "MQTT Publish Fails",  "mqtt_fails",       "",    "",                 "total_increasing"},
+    {"sensor",        "mqtt_reconnects",  "MQTT Reconnects",     "mqtt_reconnects",  "",    "",                 "total_increasing"},
 };
 inline constexpr int HEARTBEAT_SENSOR_COUNT =
     sizeof(HEARTBEAT_SENSORS) / sizeof(HEARTBEAT_SENSORS[0]);

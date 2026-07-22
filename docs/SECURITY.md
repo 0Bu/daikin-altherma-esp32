@@ -30,7 +30,7 @@ and the OTA-signing / key lifecycle.
   physical access needed. A dump is written only when the firmware actually crashes; erase it with
   `GET /coredump?clear=1` once retrieved so a stale image isn't left readable.
   - **The crash *summary* is deliberately not sensitive.** What the firmware surfaces automatically —
-    `/status.last_crash`, the web-UI banner, and the retained `<base>/<node>/crash` MQTT topic — is
+    `/status.last_crash`, the web-UI banner, and the retained `<base>/crash` MQTT topic — is
     only the reset reason, the crashed task name, and raw program-counter/backtrace **addresses**.
     Those hold no credentials, so it is safe to publish them to Home Assistant / VictoriaLogs. The
     full memory image stays behind the manual `GET /coredump` pull; the automation never egresses it.

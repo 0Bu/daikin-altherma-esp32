@@ -13,24 +13,35 @@ appear on their own. Clear the broker to disable.
 
 ## Topics
 
-Node id is `daikin_<mac3>` (from the WiFi STA MAC, stable across config changes). `<base>`
-defaults to `daikin-altherma-esp32`, `<prefix>` to `homeassistant`.
+`<base>` defaults to `daikin-altherma-esp32`, `<prefix>` to `homeassistant`. The device's message
+topics sit **directly under `<base>`** — one board per base topic, so there is no `<node>` segment in
+the payload paths. The per-device node id `daikin_<mac3>` (from the WiFi STA MAC, stable across config
+changes) still identifies the device to Home Assistant, but only inside each discovery config's
+`uniq_id`/`dev.ids` and in the discovery topic path.
 
 ```
-<base>/<node>/status                               online | offline   (LWT, retained)
-<base>/<node>/state                                {<group>: {<object_id>: value, …}, …}  (retained JSON)
+<base>/status                                      online | offline   (LWT, retained)
+<base>/state                                       {<group>: {<object_id>: value, …}, …}  (retained JSON)
+<base>/heartbeat                                   board/link diagnostics (flat JSON, 10 s cadence)
+<base>/crash                                       last reset reason + dump-waiting flag (retained)
 <prefix>/sensor/<node>/<object_id>/config          discovery config per value (retained)
 ```
 
-All values ride in **one** retained JSON on `<base>/<node>/state`, grouped one level deep by X10A
-register page (`{ "hydronic": { "dhw_setpoint": 48, … }, "outdoor_state": { … }, … }`, max nesting
-depth 1 — group names come from `logic/mqtt_group.hpp`). Each discovery config points every sensor
-at that shared topic and pulls its value out with a `value_template`:
+All values ride in **one** retained JSON on `<base>/state`, grouped one level deep by X10A register
+page (`{ "hydronic": { "dhw_setpoint": 48, … }, "outdoor_state": { … }, … }`, max nesting depth 1 —
+group names come from `logic/mqtt_group.hpp`). Each discovery config points every sensor at that
+shared topic and pulls its value out with a `value_template`:
 
 ```yaml
-"stat_t": "daikin-altherma-esp32/daikin_a1b2c3/state"
+"stat_t": "daikin-altherma-esp32/state"
 "val_tpl": "{{ value_json['hydronic']['dhw_setpoint'] }}"
 ```
+
+The board/link diagnostics on `<base>/heartbeat` are a **flat** JSON object — each field carried under
+its block name as a prefix (`wifi_connected`, `wifi_rssi`, `wifi_mac`, `wifi_bssid`, `mqtt_count`,
+`bus_rx_received`, …) rather than nested `wifi`/`mqtt`/`bus` sub-objects. The device's own MAC and the
+associated AP's BSSID ride the `wifi_` set, so a heartbeat can be pinned to a specific board and the AP
+it roamed onto.
 
 Each value's `object_id` is a lowercase, alnum-only slug of its label (e.g. *"DHW Tank Temp
 (R5T)"* → `dhw_tank_temp_r5t`). The template uses bracket subscripts, so a slug that starts with a
