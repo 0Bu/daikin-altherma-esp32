@@ -32,6 +32,10 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   rules, the `/set_hp` fingerprint rule, and the field-owned detection patches (`apply_link` /
   `apply_model` touch only the link / model — a link commit must not revert a concurrent
   `/set_wifi`).
+- `logic/lwt_select.hpp` — the web UI's leaving-water MEASUREMENT picker (twin of `www/app.js`
+  `vLwt`): the pre-BUH heat-exchanger outlet (R1T) is chosen over a setpoint, a mixed-zone R1T, or
+  the post-BUH (R2T) twin, across the four alias label forms — and, catalog-wide, every detectable
+  profile resolves a real measurement and never a setpoint (issue #121, the #35–#39 failure shape).
 - `logic/board_pins.hpp` — the ESP32-S3 chip-safe GPIO list (sorted, in range; excludes SPI
   flash/strapping/USB-JTAG/JTAG, plus GPIO33-37 on Octal-flash/PSRAM builds).
 - `logic/discovery.hpp` — object-id slugging + the discovery config JSON.

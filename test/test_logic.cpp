@@ -29,6 +29,7 @@
 #include "logic/json.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/link_watch.hpp"
+#include "logic/lwt_select.hpp"
 #include "logic/mqtt_uri.hpp"
 #include "logic/modbus.hpp"
 #include "logic/query_flag.hpp"
@@ -2249,6 +2250,116 @@ static void test_http_surface() {
     CHECK(!http_surface_serves(ap, "/", true));
 }
 
+// logic/lwt_select.hpp — the leaving-water MEASUREMENT picker that feeds ΔT / heat output / COP.
+// Host-testable twin of www/app.js pickLwtRow(); guards issue #121 (a setpoint must never be
+// selected) and the post-BUH mis-credit (R2T must never win over R1T), across the real profile
+// catalog and the alias label forms plain "leaving water.*before" misses.
+static void test_lwt_select() {
+    using logic::lwt_select;
+
+    // --- the #121 case: a "Leaving water" SETPOINT sorts before the R1T measurement (the fixture
+    //     layout). The old fallback `vNum(/leaving water/i)` picked index 0 — a 45 °C setpoint. ---
+    {
+        const char* rows[] = {
+            "Leaving Water Setpoint (main)",       // 0x60 — sorts FIRST, must be refused
+            "Leaving Water Temp after PHE (R1T)",  // 0x61 — the correct pre-BUH sensor
+            "Leaving Water Temp after BUH (R2T)",  // 0x61 — post-BUH, must be refused
+        };
+        CHECK(lwt_select(rows, 3) == 1);           // R1T, not the setpoint, not R2T
+    }
+
+    // --- the 44+ mainstream profiles: "before BUH (R1T)" wins over its R2T twin and the setpoint,
+    //     regardless of which sorts first. ---
+    {
+        const char* rows[] = {
+            "Leaving Water Setpoint (main)",
+            "Leaving water temp. before BUH (R1T)",
+            "Leaving water temp. after BUH (R2T)",
+        };
+        CHECK(lwt_select(rows, 3) == 1);
+    }
+
+    // --- alias label forms that carry NO "leaving water" string, so the old primary+fallback both
+    //     missed and the tiles went blank. Now the (R1T) tier lights them up. ---
+    {
+        const char* hpsu[] = {                     // HPSU / hybrid
+            "LW setpoint (main)",
+            "Outlet Water Heat Exch. Temp. (R1T)",
+            "Outlet Water BUH Temp. (R2T)",
+        };
+        CHECK(lwt_select(hpsu, 3) == 1);
+        const char* ech2o[] = {                    // ECH2O D-series
+            "LW setpoint (main)",
+            "[HPSU] Tv inflow Temp  (R1T)",
+            "[HPSU] Tvbh inflow Temp after Buffer/BUH (R2T)",
+        };
+        CHECK(lwt_select(ech2o, 3) == 1);
+    }
+
+    // --- traps that must NOT be selected as the main leaving-water measurement ---
+    {
+        // EKMIK bizone mixed-zone R1T must lose to the main circuit's before-BUH R1T ("mixed" reject).
+        const char* bizone[] = {
+            "Leaving water temp. before BUH (R1T)",
+            "[EKMIK] Bizone kit mixed leaving water temperature R1T",
+        };
+        CHECK(lwt_select(bizone, 2) == 0);
+
+        // DLWB2 hydro-split outlet carries no (R1T): the pre-BUH R1T must win even when DLWB2 sorts
+        // first — proving Tier 1 beats a generic outlet-water row by rank, not by table order.
+        const char* dlwb2[] = {
+            "Outlet water heat exchanger temp (hydro split model) DLWB2",
+            "Leaving water temp. before BUH (R1T)",
+        };
+        CHECK(lwt_select(dlwb2, 2) == 1);
+
+        // A bare "heat exch" keyword would grab these refrigerant/outdoor rows — the picker must not.
+        const char* refr[] = { "O/U Heat Exch. Temp.(R4T)", "Outdoor heat exchanger temp." };
+        CHECK(lwt_select(refr, 2) == -1);
+    }
+
+    // --- Tier 2 fallback: an un-tagged leaving-water measurement is still selected (not a setpoint) ---
+    {
+        const char* generic[] = { "DHW setpoint", "Leaving water temperature" };
+        CHECK(lwt_select(generic, 2) == 1);
+        // ...but if the ONLY leaving-water row is a setpoint, select nothing (blank beats wrong).
+        const char* only_sp[] = { "Leaving Water Setpoint (main)", "DHW setpoint" };
+        CHECK(lwt_select(only_sp, 2) == -1);
+    }
+
+    // --- catalog conformance: EVERY detectable profile must resolve a real pre-BUH measurement,
+    //     and it must never be a setpoint / mixed-zone / post-BUH row. Fails loudly if a future
+    //     generated profile introduces a leaving-water row that trips the selection (the issue's
+    //     "so no future generated profile can reintroduce this"). ---
+    int detectable_checked = 0;
+    for (const auto& p : def::profiles) {
+        if (!def::is_detection_model(p.id)) continue;   // generic + fixture + minichillers excluded
+        const char* labels[128];
+        size_t n = 0;
+        for (size_t i = 0; i < p.count && n < 128; i++) labels[n++] = p.values[i].label;
+        int idx = lwt_select(labels, n);
+        CHECK(idx >= 0);                                // no detectable profile is blank any more
+        if (idx >= 0) {
+            const char* sel = labels[idx];
+            CHECK(logic::lwt_is_water(sel) && !logic::lwt_is_reject(sel));   // measurement, not setpoint/mixed/R2T
+        }
+        detectable_checked++;
+    }
+    CHECK(detectable_checked >= 39);                    // the current detectable Altherma catalog
+
+    // The non-detection fixture reproduces the #121 layout (setpoint, then after-PHE R1T): assert
+    // the picker refuses its setpoint too, pinning the exact scenario the issue was filed on.
+    {
+        const auto& fx = def::lookup("altherma3_r_erga");
+        const char* labels[128];
+        size_t n = 0;
+        for (size_t i = 0; i < fx.count && n < 128; i++) labels[n++] = fx.values[i].label;
+        int idx = lwt_select(labels, n);
+        CHECK(idx >= 0);
+        if (idx >= 0) CHECK(!logic::lwt_is_reject(labels[idx]) && logic::lwt_ci_contains(labels[idx], "r1t"));
+    }
+}
+
 int main() {
     test_crc();
     test_registers();
@@ -2257,6 +2368,7 @@ int main() {
     test_config_store();
     test_mcp_jsonrpc();
     test_http_surface();
+    test_lwt_select();
     test_config_model();
     test_board_pins();
     test_discovery();

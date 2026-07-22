@@ -323,7 +323,16 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 config_store, discovery, detect, json, mqtt_group, mqtt_uri, heartbeat, crashinfo,
                 bootlog, reset_reason, boot_guard, board_pins, modbus, syslog_policy, link_watch,
                 wifi_rollback, health_gate, version_cmp, ota_manifest, ws_policy, ws_tx_gate,
-                http_body, http_surface, query_flag, mcp_jsonrpc, timestamp, uart_plan, detect_backoff).
+                http_body, http_surface, query_flag, mcp_jsonrpc, timestamp, uart_plan, detect_backoff,
+                lwt_select).
+                lwt_select.hpp = the leaving-water MEASUREMENT picker (host-testable twin of
+                www/app.js's vLwt): the row that feeds the UI's ΔT / heat-output / COP must be the
+                pre-BUH heat-exchanger outlet (R1T) and NEVER a setpoint / mixed-zone / post-BUH (R2T)
+                row — a setpoint substituted for a measurement makes all three plausibly wrong (#121,
+                the #35-#39 failure shape). Keyed on the (R1T) tag so the alias label forms ("Outlet
+                Water Heat Exch", "Tv inflow", "after PHE") resolve too, not just "leaving water before
+                BUH". Not a firmware caller — it exists so the CI logic-test gates the browser rule
+                against the whole def/ catalog (every detectable profile selects a real measurement).
                 value_def.hpp = the ValueDef row type the generated def/ profile tables are written
                 in ({reg, offset, conv, size, type, label} — registry id, byte offset in the reply
                 payload, converter id for convert.hpp, byte count, HA unit code, English label): the

@@ -469,6 +469,27 @@ const vRow = (re) => (S._values || []).find((x) => re.test(x.label || "") && x.v
 const vNum = (re) => { const r = vRow(re); if (!r) return null; const n = parseFloat(r.value); return Number.isFinite(n) ? n : null; };
 // Bit-flag values arrive as "ON"/"OFF" text (logic/convert.hpp conv 300-307). null = row absent.
 const vOn = (re) => { const r = vRow(re); return r ? /^on$/i.test(String(r.value).trim()) : null; };
+
+// Leaving-water MEASUREMENT for ΔT / heat output / COP — NOT a plain vNum, because a measurement
+// regex that can also match a setpoint row poisons all three (issue #121, the #35-#39 failure
+// shape). Host-tested twin: main/logic/lwt_select.hpp + test/test_logic.cpp test_lwt_select() —
+// keep the token lists below byte-for-byte in sync (lowercase substring, no regex).
+//   Tier 1 = the pre-BUH heat-exchanger outlet (R1T) under any label form — "before BUH (R1T)",
+//     "after PHE (R1T)", "Outlet Water Heat Exch. Temp. (R1T)", "[HPSU] Tv inflow Temp (R1T)";
+//     keying on the (R1T) tag (not a "heat exch" keyword, which also hits outdoor/refrigerant rows)
+//     lights up the alias-labelled profiles that "leaving water.*before" alone missed.
+//   Tier 2 = any leaving/outlet-water measurement that is NOT a setpoint / mixed-zone / post-BUH.
+const lwtWater = (l) => l.includes("leaving water") || l.includes("outlet water") || l.includes("inflow");
+const lwtReject = (l) => l.includes("setpoint") || l.includes("mixed") || l.includes("r2t") || l.includes("after buh") || l.includes("after buffer");
+const vLwt = () => {
+  const vals = (S._values || []).filter((x) => x.value != null);
+  const low = (x) => (x.label || "").toLowerCase();
+  let r = vals.find((x) => { const l = low(x); return lwtWater(l) && !lwtReject(l) && l.includes("r1t"); });
+  if (!r) r = vals.find((x) => { const l = low(x); return lwtWater(l) && !lwtReject(l); });
+  if (!r) return null;
+  const n = parseFloat(r.value);
+  return Number.isFinite(n) ? n : null;
+};
 const fmt1 = (n) => (n == null ? "—" : n.toFixed(1));
 const fmt0 = (n) => (n == null ? "—" : String(Math.round(n)));
 const setTxt = (id, s) => { const el = $(id); if (el && el.textContent !== s) el.textContent = s; };
@@ -481,7 +502,7 @@ function liveData() {
   // ΔT is measured across the PHE: leaving water BEFORE the backup heater minus inlet water — with
   // the BUH off (the normal case) before/after are equal, and the derived heat output must not
   // credit the resistive heater to the heat pump.
-  const lwt = vNum(/leaving water.*before/i) ?? vNum(/leaving water/i);
+  const lwt = vLwt();   // pre-BUH R1T measurement, never a setpoint (see vLwt / logic/lwt_select.hpp)
   const ret = vNum(/inlet water/i);
   const cts = (S._values || []).filter((x) => /current measured by ct/i.test(x.label || "") && x.value != null);
   const ct = cts.reduce((a, x) => a + (parseFloat(x.value) || 0), 0);

@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (813 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (827 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -577,8 +577,14 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   all-or-nothing across a write failure or a power cut), the **JSON-RPC 2.0 response policy** for the
   planned MCP route (`mcp_jsonrpc.hpp` — parse-error / invalid-request / notification-no-response /
   method-not-found, and which id may be echoed) and the **query-flag policy** (`query_flag.hpp` — a `?clear=1`-style flag
-  acts only on exactly `1`, so `?clear=0` no longer wipes the diag log).
-  **813 `CHECK`s** in
+  acts only on exactly `1`, so `?clear=0` no longer wipes the diag log), and the **leaving-water
+  measurement picker** (`lwt_select.hpp` — the host-testable twin of the web UI's `vLwt`: the row
+  that feeds the dashboard's ΔT / heat output / COP must be the pre-BUH heat-exchanger outlet (R1T)
+  and never a setpoint / mixed-zone / post-BUH (R2T) row — a setpoint substituted for a measurement
+  makes all three plausibly wrong, issue #121, the #35–#39 failure shape; keyed on the (R1T) tag so
+  the alias label forms resolve too, and gated catalog-wide so every detectable profile selects a
+  real measurement).
+  **827 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
@@ -707,7 +713,7 @@ and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 19-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (813 checks),
+on the host** (827 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 
