@@ -116,6 +116,18 @@ inline std::string build_crash_json(const CrashInfo& c) {
     return j;
 }
 
+// The RETAINED <base>/crash MQTT payload. A crash topic carries a message ONLY when the last reset
+// is NOTABLE (a real fault OR an orphan core-dump still in flash — crash_is_notable): the crash JSON.
+// Otherwise the payload is EMPTY, and the caller publishes it as a zero-length RETAINED message,
+// which CLEARS the retained topic — so a normal boot (USB re-enumeration, config-save / OTA reboot,
+// clean power-on) leaves no crash message, and a stale crash record disappears from the broker (and
+// Home Assistant) the moment the device reboots cleanly, i.e. once the problem is resolved. The reset
+// reason itself is never lost by clearing this: the heartbeat topic carries it as its own "Reset
+// Reason" sensor (reset_reason_name == crash_reason_slug, host-asserted), independent of a crash.
+inline std::string build_crash_mqtt_payload(const CrashInfo& c) {
+    return crash_is_notable(c) ? build_crash_json(c) : std::string();
+}
+
 // Human/paste-friendly multi-line text of the same fields — logged to the diag ring at boot and
 // reused wherever a plain-text crash line is nicer than JSON.
 inline std::string build_crash_text(const CrashInfo& c) {
@@ -141,8 +153,9 @@ inline std::string crash_topic(const std::string& base) {
 }
 
 // Diagnostic HA entities sourced from the crash topic (mirrors HeartbeatSensor). The "problem"
-// binary_sensor turns ON while a downloadable dump is waiting; the reason sensor shows the last
-// reset cause. Both are entity_category "diagnostic".
+// binary_sensor turns ON while a downloadable dump is waiting; entity_category "diagnostic". (The
+// reset reason is NOT surfaced here — the heartbeat's own "Reset Reason" sensor owns it, so a crash
+// entity for it would be an exact duplicate. See RETIRED_CRASH_SENSORS.)
 struct CrashSensor {
     const char* component;     // "sensor" | "binary_sensor"
     const char* object_id;
@@ -152,14 +165,33 @@ struct CrashSensor {
 };
 
 inline const CrashSensor CRASH_SENSORS[] = {
-    {"sensor",        "last_reset", "Last Reset Reason",  "reason",   ""},
     {"binary_sensor", "coredump",   "Crash Dump Waiting", "coredump", "problem"},
 };
 inline constexpr int CRASH_SENSOR_COUNT = sizeof(CRASH_SENSORS) / sizeof(CRASH_SENSORS[0]);
 
+// HA entities this firmware ONCE published on the crash topic but no longer does. Their retained
+// discovery configs must be actively DELETED (a zero-length retained publish to the discovery topic),
+// or an install upgraded from an older build keeps a stale, permanently-"unavailable" entity forever.
+// "last_reset" (the "Last Reset Reason" sensor) was dropped once it became an exact duplicate of the
+// heartbeat's own "Reset Reason" sensor (reset_reason_name == crash_reason_slug, host-asserted).
+struct RetiredHaSensor {
+    const char* component;   // discovery-topic <component> segment
+    const char* object_id;
+};
+inline const RetiredHaSensor RETIRED_CRASH_SENSORS[] = {
+    {"sensor", "last_reset"},   // superseded by the heartbeat "Reset Reason" sensor
+};
+inline constexpr int RETIRED_CRASH_SENSOR_COUNT =
+    sizeof(RETIRED_CRASH_SENSORS) / sizeof(RETIRED_CRASH_SENSORS[0]);
+
+// The retained HA discovery-config topic for one entity: <prefix>/<component>/<node>/<object_id>/config.
+inline std::string crash_discovery_topic(const std::string& prefix, const std::string& component,
+                                         const std::string& node, const std::string& object_id) {
+    return prefix + "/" + component + "/" + node + "/" + object_id + "/config";
+}
 inline std::string crash_discovery_topic(const std::string& prefix, const std::string& node,
                                          const CrashSensor& s) {
-    return prefix + "/" + s.component + "/" + node + "/" + s.object_id + "/config";
+    return crash_discovery_topic(prefix, s.component, node, s.object_id);
 }
 
 inline std::string crash_discovery_config(const std::string& node, const std::string& crash_top,

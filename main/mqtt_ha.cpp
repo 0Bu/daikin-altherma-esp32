@@ -12,9 +12,12 @@
 //   • Every HEARTBEAT_INTERVAL_S (10 s): rebuild + publish the board/link diagnostics JSON
 //     (logic/heartbeat.hpp) to <base>/heartbeat — diagnostics, not real-time telemetry, so unlike the
 //     state topic it's a fixed cadence, not publish-on-change.
-//   • Once per (re)connect: RETAIN the boot-time crash summary (logic/crashinfo.hpp) on <base>/crash —
-//     last reset reason + a "dump waiting" flag, as two diagnostic HA entities. Reason/backtrace only;
-//     never the raw dump or any secret.
+//   • Once per (re)connect: RETAIN the boot-time crash summary (logic/crashinfo.hpp) on <base>/crash
+//     ONLY when the reset was a real fault or a core-dump is still in flash; a normal boot clears the
+//     topic (zero-length retained) so no crash message lingers once the problem is resolved. When a
+//     crash IS reported it drives one diagnostic HA entity — a "dump waiting" flag (the reset reason
+//     is the heartbeat's own "Reset Reason" sensor, so a crash entity for it would be a duplicate).
+//     Reason/backtrace only; never the raw dump or any secret.
 // Read-only: no command subscriptions. No-op if mqtt_uri is empty. Memory-safe: discovery is one
 // small publish per value; the state JSON is a single few-KB build, guarded against OOM.
 #include "mqtt_ha.hpp"
@@ -193,25 +196,40 @@ static void publish_heartbeat_discovery() {
     }
 }
 
-// Crash/reset diagnostics (logic/crashinfo.hpp): stream the two diagnostic discovery configs, then
-// RETAIN the boot-time crash summary on <base>/crash. The payload is captured once at boot
-// (diag_crash.cpp) so it never changes at runtime — retained + published once per (re)connect means
-// a late subscriber (Home Assistant, or Telegraf → VictoriaLogs) still sees the last reset. It is
-// ALWAYS published (even a clean boot reports reason="sw"/"poweron"), so the "Last Reset Reason"
-// sensor reflects the current boot instead of a stale crash. Never carries secrets or the raw dump —
-// just the reason + a raw-hex backtrace; the full binary stays behind GET /coredump.
+// Crash/reset diagnostics (logic/crashinfo.hpp): delete any retired entity, stream the discovery
+// config for the "dump waiting" binary_sensor, then
+// publish <base>/crash — but ONLY when the last reset is NOTABLE (a real fault OR an orphan core-dump
+// still in flash). A normal boot (USB re-enumeration, config-save / OTA reboot, clean power-on) is
+// not a crash, so build_crash_mqtt_payload() returns "" and we publish a zero-length RETAINED message
+// that CLEARS the topic: no crash message is sent when nothing crashed, and a stale crash record
+// disappears from the broker (and HA) as soon as the device reboots cleanly — i.e. once the problem
+// is resolved. The reset reason is still surfaced (unconditionally) by the heartbeat's own "Reset
+// Reason" sensor, so clearing here loses nothing. Retained so a late subscriber still sees a live
+// crash; captured once at boot (diag_crash.cpp) so the summary never changes at runtime. Never
+// carries secrets or the raw dump — just the reason + a raw-hex backtrace; the binary stays behind
+// GET /coredump.
 static void publish_crash() {
+    // Delete any entity we USED to publish here but no longer do — a zero-length retained message to
+    // its old discovery topic removes it from HA, so an install upgraded from an older build doesn't
+    // keep a stale, permanently-unavailable entity (e.g. the old "Last Reset Reason" sensor, now the
+    // heartbeat's job). Cheap + retained, so once per (re)connect is fine.
+    for (int i = 0; i < RETIRED_CRASH_SENSOR_COUNT; i++) {
+        const RetiredHaSensor& r = RETIRED_CRASH_SENSORS[i];
+        const std::string ct = crash_discovery_topic(s_prefix, r.component, s_node, r.object_id);
+        mqtt_publish(ct, "", 0, 0, 1);   // retained, zero-length -> deletes the discovery config
+    }
     for (int i = 0; i < CRASH_SENSOR_COUNT; i++) {
         const CrashSensor& s = CRASH_SENSORS[i];
         const std::string ct  = crash_discovery_topic(s_prefix, s_node, s);
         const std::string cfg = crash_discovery_config(s_node, s_crash, s_avail, s);
         mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained
     }
-    // _live(): the "Crash Dump Waiting" binary_sensor must not latch ON once the dump is pulled +
-    // cleared — this topic is RETAINED, so a stale true would be replayed to every later subscriber.
+    // _live(): read `coredump` from flash, not the boot-time cache — a dump pulled + cleared via
+    // /coredump?clear=1 while the device runs turns an orphan-dump boot NOT-notable, so this then
+    // publishes "" and clears the retained topic (a stale true would otherwise be replayed forever).
     const CrashInfo   ci = diag_crash_info_live();
-    const std::string js = build_crash_json(ci);
-    mqtt_publish(s_crash, js.c_str(), static_cast<int>(js.size()), 0, 1);   // retained
+    const std::string js = build_crash_mqtt_payload(ci);   // "" when not notable -> clears the topic
+    mqtt_publish(s_crash, js.c_str(), static_cast<int>(js.size()), 0, 1);   // retained (zero-len clears)
     s_crash_dump_pub = ci.coredump;
 }
 
@@ -323,7 +341,7 @@ static void mqtt_task(void*) {
                 }
                 if (!s_heartbeat_announced) {                  // board/link diagnostics — independent
                     publish_heartbeat_discovery();              // of heat-pump profile detection
-                    publish_crash();                            // last reset reason + dump-waiting flag
+                    publish_crash();                            // crash report if notable, else clears the topic
                     s_heartbeat_announced = true;
                 }
                 const std::string prof = config().profile;
@@ -343,8 +361,11 @@ static void mqtt_task(void*) {
                     publish_heartbeat();
                     // The crash topic is RETAINED but otherwise only published once per connect, so a
                     // dump pulled + cleared (/coredump?clear=1) mid-session would leave HA's "Crash
-                    // Dump Waiting" ON until the next reconnect. Re-check on the heartbeat cadence
-                    // (one 4-byte flash read, no summary parse) and republish only on a real change.
+                    // Dump Waiting" ON until the next reconnect (and, for an orphan-dump-only boot,
+                    // leave a stale crash record no longer backed by anything). Re-check on the
+                    // heartbeat cadence (one 4-byte flash read, no summary parse) and republish only
+                    // on a real change — publish_crash() then re-decides notability and clears the
+                    // topic if the boot is no longer notable.
                     // Done HERE, not in the /coredump handler: mqtt_publish() feeds the Task Watchdog
                     // and is only valid from this (subscribed) task.
                     if (diag_crash_coredump_present() != s_crash_dump_pub) publish_crash();

@@ -1194,6 +1194,16 @@ static void test_crashinfo() {
     fault_cleared.coredump = false;
     CHECK(crash_is_notable(fault_cleared));
 
+    // The RETAINED <base>/crash MQTT payload is crash-ONLY: it carries the crash JSON when the boot
+    // is notable, and "" otherwise. The caller publishes "" as a zero-length retained message, which
+    // CLEARS the topic — so a normal boot sends no crash message and a stale crash record disappears
+    // once the device reboots cleanly (the problem resolved). Reset reason is not lost: the heartbeat
+    // carries it independently (parity asserted in test_boot_guard: reset_reason_name==crash_reason_slug).
+    CHECK(build_crash_mqtt_payload(clean).empty());       // config-save/OTA reboot -> clear
+    CHECK(build_crash_mqtt_payload(usb_replug).empty());  // USB re-enumeration -> clear
+    CHECK(build_crash_mqtt_payload(orphan) == build_crash_json(orphan));            // dump waiting -> report
+    CHECK(build_crash_mqtt_payload(fault_cleared) == build_crash_json(fault_cleared)); // fault sans dump -> report
+
     // Panic with a parsed summary: exact JSON + text, backtrace as raw PC hex.
     CrashInfo panic;
     panic.reason       = 4;   // ESP_RST_PANIC
@@ -1214,6 +1224,7 @@ static void test_crashinfo() {
     CHECK(build_crash_text(panic) ==
           "reset=panic  coredump=yes\ntask=mqtt_pub  pc=0x400d1234\n"
           "backtrace: 0x400d1234 0x400d5678\nelf_sha256=abc123");
+    CHECK(build_crash_mqtt_payload(panic) == build_crash_json(panic));   // notable -> full report
 
     // bt_depth is clamped to the 16-entry buffer (a corrupt summary can over-report it).
     CrashInfo over = panic;
@@ -1224,32 +1235,40 @@ static void test_crashinfo() {
     while ((at = oj.find("0x", at)) != std::string::npos) { cnt++; at += 2; }
     CHECK(cnt == 1 /*pc*/ + 16 /*bt[16]*/);
 
-    // Crash topic + the two diagnostic HA entities (reason sensor + coredump "problem" binary_sensor).
+    // Crash topic + its ONE diagnostic HA entity (the coredump "problem" binary_sensor). The reset
+    // reason is NOT a crash entity — it is the heartbeat's own "Reset Reason" sensor, so a crash entity
+    // for it would be an exact duplicate; it was dropped and is now actively retired (below).
     CHECK(crash_topic(base) == "daikin-altherma-esp32/crash");   // node NOT in the message topic
     const std::string ct = crash_topic(base);
     const std::string av = availability_topic(base);
-    CHECK(CRASH_SENSOR_COUNT == 2);
+    CHECK(CRASH_SENSOR_COUNT == 1);
 
-    const CrashSensor& reason = CRASH_SENSORS[0];
-    CHECK(std::string(reason.object_id) == "last_reset");
-    CHECK(crash_discovery_topic("homeassistant", node, reason)
-          == "homeassistant/sensor/daikin_abc123/last_reset/config");
-    const std::string rc = crash_discovery_config(node, ct, av, reason);
-    CHECK(rc.find("\"stat_t\":\"daikin-altherma-esp32/crash\"") != std::string::npos);
-    CHECK(rc.find("\"val_tpl\":\"{{ value_json.reason }}\"") != std::string::npos);
-    CHECK(rc.find("\"ent_cat\":\"diagnostic\"") != std::string::npos);
-    CHECK(rc.find("\"dev_cla\"") == std::string::npos);
-    CHECK(rc.find("pl_on") == std::string::npos);
-
-    const CrashSensor& dump = CRASH_SENSORS[1];
+    const CrashSensor& dump = CRASH_SENSORS[0];
     CHECK(std::string(dump.component) == "binary_sensor");
+    CHECK(std::string(dump.object_id) == "coredump");
     CHECK(crash_discovery_topic("homeassistant", node, dump)
           == "homeassistant/binary_sensor/daikin_abc123/coredump/config");
     const std::string dc = crash_discovery_config(node, ct, av, dump);
+    CHECK(dc.find("\"stat_t\":\"daikin-altherma-esp32/crash\"") != std::string::npos);
     CHECK(dc.find("\"val_tpl\":\"{{ value_json.coredump | lower }}\"") != std::string::npos);
     CHECK(dc.find("\"pl_on\":\"true\",\"pl_off\":\"false\"") != std::string::npos);
     CHECK(dc.find("\"dev_cla\":\"problem\"") != std::string::npos);
     CHECK(dc.find("\"ent_cat\":\"diagnostic\"") != std::string::npos);
+
+    // No crash entity publishes the reset reason any more (it duplicated the heartbeat's).
+    for (int i = 0; i < CRASH_SENSOR_COUNT; i++)
+        CHECK(std::string(CRASH_SENSORS[i].object_id) != "last_reset");
+
+    // The retired "Last Reset Reason" sensor: its discovery config must be actively DELETED on
+    // upgrade (the device publishes a zero-length RETAINED message to this exact topic), or an old
+    // install keeps a stale, permanently-unavailable entity forever. The 2-arg topic builder used to
+    // clear it must match the 3-arg one that once created it.
+    CHECK(RETIRED_CRASH_SENSOR_COUNT == 1);
+    const RetiredHaSensor& retired = RETIRED_CRASH_SENSORS[0];
+    CHECK(std::string(retired.component) == "sensor");
+    CHECK(std::string(retired.object_id) == "last_reset");
+    CHECK(crash_discovery_topic("homeassistant", retired.component, node, retired.object_id)
+          == "homeassistant/sensor/daikin_abc123/last_reset/config");
 }
 
 static void test_modbus() {

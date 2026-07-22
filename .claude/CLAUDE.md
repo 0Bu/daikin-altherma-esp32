@@ -245,12 +245,20 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 mac always present, bssid null offline)/mqtt(pub count+fails+reconnects)/X10A bus
                 (rx_received/rx_fails) stats, 19 diagnostic HA entities streamed independently of profile
                 detection. Also RETAINS the boot-time crash summary
-                on <base>/crash (logic/crashinfo.hpp) once per (re)connect PLUS a republish on
-                the heartbeat cadence whenever the "dump waiting" flag changes (diag_crash_info_live();
+                on <base>/crash (logic/crashinfo.hpp) once per (re)connect — but ONLY when the boot is
+                NOTABLE (a real fault or a core-dump still in flash, crash_is_notable). A normal boot
+                (USB re-enumeration, config-save/OTA reboot, clean power-on) publishes a zero-length
+                RETAINED payload that CLEARS the topic (build_crash_mqtt_payload returns ""), so no
+                crash message lingers once the problem is resolved; the reset reason is not lost — the
+                heartbeat carries it as its own "Reset Reason" sensor. PLUS a republish on the
+                heartbeat cadence whenever the "dump waiting" flag changes (diag_crash_info_live();
                 a retained true would otherwise latch ON in HA until the next reconnect once the dump
-                is pulled + cleared) — last reset reason
-                + a "dump waiting" flag as 2 more diagnostic HA entities (reason/backtrace only, never
-                secrets or the raw dump). Every publish funnels through one mqtt_publish() wrapper so mqtt_count/mqtt_fails
+                is pulled + cleared — and an orphan-dump-only boot is then re-decided not-notable and
+                the topic cleared). When a crash IS reported it drives ONE diagnostic HA entity — a
+                "dump waiting" flag (reason/backtrace only, never secrets or the raw dump); the reset
+                reason is NOT a crash entity (it duplicated the heartbeat's own "Reset Reason" sensor,
+                so the old "Last Reset Reason" crash entity was dropped + is actively retired — its
+                stale retained discovery config is deleted on upgrade, RETIRED_CRASH_SENSORS). Every publish funnels through one mqtt_publish() wrapper so mqtt_count/mqtt_fails
                 cover every topic, not just state. The mqtt_pub task is Task-Watchdog-subscribed
                 (esp_task_wdt_add) and resets UNCONDITIONALLY at the top of each 1s cycle (not gated on
                 connect/publish, so a long broker outage can't false-trip) PLUS once per publish inside
