@@ -1,6 +1,6 @@
 #pragma once
 // Crash / reset diagnostics — turns the ESP-IDF reset reason + the on-flash core-dump SUMMARY into
-// a compact JSON (for /status.last_crash + the MQTT <base>/<node>/crash topic) and a paste-friendly
+// a compact JSON (for /status.last_crash + the MQTT <base>/crash topic) and a paste-friendly
 // text block (the diag ring + the web UI "copy diagnostics" bundle). Pure string building, IDF-free,
 // host-tested (test/test_logic.cpp). The device fills CrashInfo once at boot (diag_crash.cpp) from
 // esp_reset_reason() + esp_core_dump_get_summary(); nothing here touches hardware or the ELF — the
@@ -134,10 +134,10 @@ inline std::string build_crash_text(const CrashInfo& c) {
     return t;
 }
 
-// Crash topic: <base>/<node>/crash — retained, republished once per MQTT (re)connect so a late
-// subscriber (Home Assistant, or Telegraf → VictoriaLogs) still sees the last reset.
-inline std::string crash_topic(const std::string& base, const std::string& node) {
-    return base + "/" + node + "/crash";
+// Crash topic: <base>/crash — retained, republished once per MQTT (re)connect so a late subscriber
+// (Home Assistant, or Telegraf → VictoriaLogs) still sees the last reset.
+inline std::string crash_topic(const std::string& base) {
+    return base + "/crash";
 }
 
 // Diagnostic HA entities sourced from the crash topic (mirrors HeartbeatSensor). The "problem"

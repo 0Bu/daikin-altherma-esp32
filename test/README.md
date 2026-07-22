@@ -53,9 +53,10 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 - `logic/modbus.hpp` — Modbus TCP framing (MBAP + FC03/04/06/16 request build, response/exception
   parse, per-request register maxima) + the HomeHub Temp16/Pow16/Int16/Text16 codecs (special-value
   guard, encode round-trip + range/sentinel rejects) and the `homehub-*` mDNS filter.
-- `logic/heartbeat.hpp` — dBm → signal quality %, uptime formatting, the heartbeat JSON (rssi null
-  while offline, the SNTP wall-clock `time` field null until synced) + the 17 diagnostic HA discovery
-  configs (incl. the `device_class:"timestamp"` device-time sensor).
+- `logic/heartbeat.hpp` — dBm → signal quality %, uptime formatting, the flat heartbeat JSON (each
+  field prefixed by its block name — `wifi_rssi`/`wifi_mac`/`bus_rx_received` — with rssi/bssid null
+  while offline and the SNTP wall-clock `time` field null until synced) + the 19 diagnostic HA
+  discovery configs (incl. the `device_class:"timestamp"` device-time sensor and the WiFi MAC/BSSID).
 - `logic/crashinfo.hpp` — reset-reason slug/fault classification, the last_crash / MQTT crash JSON +
   text bundle (incl. backtrace clamp), and the crash diagnostic HA discovery configs.
 - `logic/bootlog.hpp` — the once-per-boot syslog records: the build-identity line (absent fields

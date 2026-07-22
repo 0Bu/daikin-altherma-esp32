@@ -552,23 +552,24 @@ static void test_discovery() {
 
     ValueDef def{0x61, 10, 105, 2, 1, "DHW Tank Temp (R5T)"};
     const std::string base = "daikin-altherma-esp32", node = "daikin_abc123";
-    const std::string st = state_topic(base, node);       // ONE shared topic for every sensor
-    CHECK(st == "daikin-altherma-esp32/daikin_abc123/state");
-    CHECK(availability_topic(base, node) == "daikin-altherma-esp32/daikin_abc123/status");
-    std::string cfg = discovery_config(node, st, availability_topic(base, node), def);
+    const std::string st = state_topic(base);             // ONE shared topic for every sensor
+    CHECK(st == "daikin-altherma-esp32/state");            // node NOT in the message topic (one board/base)
+    CHECK(availability_topic(base) == "daikin-altherma-esp32/status");
+    std::string cfg = discovery_config(node, st, availability_topic(base), def);
     CHECK(cfg.find("\"dev_cla\":\"temperature\"") != std::string::npos);
     CHECK(cfg.find("\"stat_cla\":\"measurement\"") != std::string::npos);
     CHECK(cfg.find("\"unit_of_meas\":\"°C\"") != std::string::npos);
-    CHECK(cfg.find("\"stat_t\":\"daikin-altherma-esp32/daikin_abc123/state\"") != std::string::npos);
-    CHECK(cfg.find("\"avty_t\":\"daikin-altherma-esp32/daikin_abc123/status\"") != std::string::npos);
+    CHECK(cfg.find("\"stat_t\":\"daikin-altherma-esp32/state\"") != std::string::npos);
+    CHECK(cfg.find("\"avty_t\":\"daikin-altherma-esp32/status\"") != std::string::npos);
     // Shared JSON topic -> value_template subscripts group (page 0x61 -> hydronic_temps) + object.
     CHECK(cfg.find("\"val_tpl\":\"{{ value_json['hydronic_temps']['dhw_tank_temp_r5t'] }}\"")
           != std::string::npos);
+    // The node id still disambiguates the DEVICE in uniq_id/dev.ids — just not in the message topic.
     CHECK(cfg.find("\"uniq_id\":\"daikin_abc123_dhw_tank_temp_r5t\"") != std::string::npos);
 
     // A slug that starts with a digit must stay valid — bracket notation, not attribute access.
     ValueDef way{0x60, 12, 307, 1, -1, "2way valve(On:Heat_Off:Cool)"};
-    std::string wc = discovery_config(node, st, availability_topic(base, node), way);
+    std::string wc = discovery_config(node, st, availability_topic(base), way);
     CHECK(wc.find("value_json['hydronic']['2way_valve_on_heat_off_cool']") != std::string::npos);
 }
 
@@ -843,7 +844,7 @@ static void test_mqtt_uri() {
 
 static void test_heartbeat() {
     const std::string base = "daikin-altherma-esp32", node = "daikin_abc123";
-    CHECK(heartbeat_topic(base, node) == "daikin-altherma-esp32/daikin_abc123/heartbeat");
+    CHECK(heartbeat_topic(base) == "daikin-altherma-esp32/heartbeat");   // node NOT in the message topic
 
     // wifi_signal_quality_pct: matches the observed EMS-ESP-style dBm->% samples exactly
     // (-76 dBm -> 48%, -78 dBm -> 44%), clamped at the -50/-100 dBm ends.
@@ -868,6 +869,8 @@ static void test_heartbeat() {
     f.wifi_connected  = true;
     f.wifi_rssi       = -76;
     f.wifi_reconnects = 3;
+    f.wifi_mac        = "A1:B2:C3:D4:E5:F6";
+    f.wifi_bssid      = "00:11:22:33:44:55";
     f.mqtt_connected  = true;
     f.mqtt_count      = 89282;
     f.mqtt_fails      = 0;
@@ -882,15 +885,19 @@ static void test_heartbeat() {
     f.rx_fails        = 2;
     f.last_ok_s       = 1;
     const std::string j = build_heartbeat_json(f);
+    // FLAT payload: the former wifi/mqtt/bus sub-objects are gone, each field carried under its block
+    // name as a prefix (wifi_connected, mqtt_count, bus_rx_received, …). MAC/BSSID ride the wifi_ set.
     CHECK(j == "{\"version\":\"1.2.3\",\"platform\":\"esp32s3\","
                "\"uptime_s\":680731,\"uptime\":\"007+21:05:31.860\","
                "\"free_heap\":170000,\"min_free_heap\":150000,\"max_alloc\":87000,"
                "\"reset_reason\":\"panic\",\"time\":null,"
-               "\"wifi\":{\"connected\":true,\"rssi\":-76,\"quality_pct\":48,\"reconnects\":3},"
-               "\"mqtt\":{\"connected\":true,\"count\":89282,\"fails\":0,\"reconnects\":1},"
-               "\"bus\":{\"connected\":true,\"proto\":\"I\",\"registers\":10,\"values\":48,\"last_ok_s\":1,"
-               "\"rx\":{\"received\":763732,\"fails\":2,\"crc_err\":0,\"timeout_err\":2},"
-               "\"tx\":{\"reads\":763734,\"writes\":0,\"fails\":0}}}");
+               "\"wifi_connected\":true,\"wifi_rssi\":-76,\"wifi_quality_pct\":48,\"wifi_reconnects\":3,"
+               "\"wifi_mac\":\"A1:B2:C3:D4:E5:F6\",\"wifi_bssid\":\"00:11:22:33:44:55\","
+               "\"mqtt_connected\":true,\"mqtt_count\":89282,\"mqtt_fails\":0,\"mqtt_reconnects\":1,"
+               "\"bus_connected\":true,\"bus_proto\":\"I\",\"bus_registers\":10,\"bus_values\":48,"
+               "\"bus_last_ok_s\":1,\"bus_rx_received\":763732,\"bus_rx_fails\":2,"
+               "\"bus_crc_err\":0,\"bus_timeout_err\":2,"
+               "\"bus_tx_reads\":763734,\"bus_tx_writes\":0,\"bus_tx_fails\":0}");
 
     // Synced: "time" carries the RFC 3339 instant verbatim (the caller — mqtt_ha.cpp — already
     // rendered it via logic/timestamp.hpp; this header only decides null-vs-quoted).
@@ -898,27 +905,30 @@ static void test_heartbeat() {
     CHECK(build_heartbeat_json(f).find("\"reset_reason\":\"panic\",\"time\":\"2026-07-17T21:15:00.000Z\",")
           != std::string::npos);
 
-    // WiFi down -> rssi/quality reported null, not a stale/garbage reading.
+    // WiFi down -> rssi/quality/bssid reported null, not a stale/garbage reading; mac still present.
     HeartbeatFields down;
     down.wifi_connected = false;
     down.wifi_rssi       = -50;    // stale value must not leak into the JSON
+    down.wifi_mac        = "A1:B2:C3:D4:E5:F6";   // this STA's own MAC — known even while offline
     const std::string dj = build_heartbeat_json(down);
-    CHECK(dj.find("\"rssi\":null") != std::string::npos);
-    CHECK(dj.find("\"quality_pct\":null") != std::string::npos);
+    CHECK(dj.find("\"wifi_rssi\":null") != std::string::npos);
+    CHECK(dj.find("\"wifi_quality_pct\":null") != std::string::npos);
+    CHECK(dj.find("\"wifi_mac\":\"A1:B2:C3:D4:E5:F6\"") != std::string::npos);
+    CHECK(dj.find("\"wifi_bssid\":null") != std::string::npos);   // no AP while offline
     CHECK(dj.find("\"time\":null") != std::string::npos);   // never synced -> null, not 1970-01-01
 
     // Diagnostic discovery: separate topics/component types, entity_category diagnostic, and the
     // value_template points at the heartbeat topic (not the heat-pump state topic).
-    const std::string hb = heartbeat_topic(base, node);
-    const std::string av = availability_topic(base, node);
-    CHECK(HEARTBEAT_SENSOR_COUNT == 17);
+    const std::string hb = heartbeat_topic(base);
+    const std::string av = availability_topic(base);
+    CHECK(HEARTBEAT_SENSOR_COUNT == 19);   // +2: wifi_mac, wifi_bssid
     const HeartbeatSensor& rssi = HEARTBEAT_SENSORS[0];
     CHECK(std::string(rssi.object_id) == "wifi_signal");
     std::string dt = heartbeat_discovery_topic("homeassistant", node, rssi);
     CHECK(dt == "homeassistant/sensor/daikin_abc123/wifi_signal/config");
     std::string dc = heartbeat_discovery_config(node, hb, av, rssi);
-    CHECK(dc.find("\"stat_t\":\"daikin-altherma-esp32/daikin_abc123/heartbeat\"") != std::string::npos);
-    CHECK(dc.find("\"val_tpl\":\"{{ value_json.wifi.rssi }}\"") != std::string::npos);
+    CHECK(dc.find("\"stat_t\":\"daikin-altherma-esp32/heartbeat\"") != std::string::npos);
+    CHECK(dc.find("\"val_tpl\":\"{{ value_json.wifi_rssi }}\"") != std::string::npos);   // flat key
     CHECK(dc.find("\"ent_cat\":\"diagnostic\"") != std::string::npos);
     CHECK(dc.find("\"dev_cla\":\"signal_strength\"") != std::string::npos);
     CHECK(dc.find("\"stat_cla\":\"measurement\"") != std::string::npos);
@@ -932,7 +942,7 @@ static void test_heartbeat() {
     CHECK(heartbeat_discovery_topic("homeassistant", node, *bus)
           == "homeassistant/binary_sensor/daikin_abc123/bus_status/config");
     std::string busc = heartbeat_discovery_config(node, hb, av, *bus);
-    CHECK(busc.find("val_tpl\":\"{{ value_json.bus.connected }}") != std::string::npos);
+    CHECK(busc.find("val_tpl\":\"{{ value_json.bus_connected }}") != std::string::npos);   // flat key
     CHECK(busc.find("\"stat_cla\"") == std::string::npos);
 
     // A since-boot counter (e.g. mqtt_count) is "total_increasing", not "measurement" — HA's
@@ -947,12 +957,24 @@ static void test_heartbeat() {
 
     // The three device-health entities added alongside /status.sys (issue #5): reset_reason is a
     // plain text sensor (no unit / device_class / state_class), min_free_heap + max_alloc are byte
-    // measurements. All diagnostic, all sourced from the heartbeat topic. Count is 17, not 13.
+    // measurements. All diagnostic, all sourced from the heartbeat topic. Count is 19, not 13.
     auto find_hb = [](const char* oid) -> const HeartbeatSensor* {
         for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++)
             if (std::string(HEARTBEAT_SENSORS[i].object_id) == oid) return &HEARTBEAT_SENSORS[i];
         return nullptr;
     };
+    // wifi_mac / wifi_bssid: plain text diagnostics (no unit/device_class/state_class), read from the
+    // flat wifi_ keys — which board, which AP.
+    for (const char* oid : {"wifi_mac", "wifi_bssid"}) {
+        const HeartbeatSensor* h = find_hb(oid);
+        CHECK(h != nullptr);
+        const std::string hc = heartbeat_discovery_config(node, hb, av, *h);
+        CHECK(hc.find(std::string("\"val_tpl\":\"{{ value_json.") + oid + " }}\"") != std::string::npos);
+        CHECK(hc.find("\"ent_cat\":\"diagnostic\"") != std::string::npos);
+        CHECK(hc.find("\"unit_of_meas\"") == std::string::npos);
+        CHECK(hc.find("\"dev_cla\"") == std::string::npos);
+        CHECK(hc.find("\"stat_cla\"") == std::string::npos);
+    }
     const HeartbeatSensor* rr = find_hb("reset_reason");
     CHECK(rr != nullptr && std::string(rr->name) == "Reset Reason");
     const std::string rrc = heartbeat_discovery_config(node, hb, av, *rr);
@@ -1203,9 +1225,9 @@ static void test_crashinfo() {
     CHECK(cnt == 1 /*pc*/ + 16 /*bt[16]*/);
 
     // Crash topic + the two diagnostic HA entities (reason sensor + coredump "problem" binary_sensor).
-    CHECK(crash_topic(base, node) == "daikin-altherma-esp32/daikin_abc123/crash");
-    const std::string ct = crash_topic(base, node);
-    const std::string av = availability_topic(base, node);
+    CHECK(crash_topic(base) == "daikin-altherma-esp32/crash");   // node NOT in the message topic
+    const std::string ct = crash_topic(base);
+    const std::string av = availability_topic(base);
     CHECK(CRASH_SENSOR_COUNT == 2);
 
     const CrashSensor& reason = CRASH_SENSORS[0];
@@ -1213,7 +1235,7 @@ static void test_crashinfo() {
     CHECK(crash_discovery_topic("homeassistant", node, reason)
           == "homeassistant/sensor/daikin_abc123/last_reset/config");
     const std::string rc = crash_discovery_config(node, ct, av, reason);
-    CHECK(rc.find("\"stat_t\":\"daikin-altherma-esp32/daikin_abc123/crash\"") != std::string::npos);
+    CHECK(rc.find("\"stat_t\":\"daikin-altherma-esp32/crash\"") != std::string::npos);
     CHECK(rc.find("\"val_tpl\":\"{{ value_json.reason }}\"") != std::string::npos);
     CHECK(rc.find("\"ent_cat\":\"diagnostic\"") != std::string::npos);
     CHECK(rc.find("\"dev_cla\"") == std::string::npos);

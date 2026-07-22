@@ -3,7 +3,7 @@
 // and host-tested (test/test_logic.cpp) so the exact bytes the broker — and Home Assistant's
 // value_template / a Telegraf JSON parser — receive are asserted on the host, not the device.
 //
-// The MQTT bridge publishes ONE retained JSON object to <base>/<node>/state per cycle. Values are
+// The MQTT bridge publishes ONE retained JSON object to <base>/state per cycle. Values are
 // grouped one level deep by their X10A register page:
 //     { "<group>": { "<object_id>": value, … }, … }   (max nesting depth 1)
 // Each HA discovery config points every sensor at this shared topic with a value_template that
@@ -67,7 +67,7 @@ struct GroupedValue {
 
 // Build the retained state payload { "<group>": { "<key>": value, … }, … }. Groups and keys keep
 // first-seen order (the poll cache is already page-ordered). Numeric values are emitted unquoted,
-// enum/text values quoted. Pure — the device streams the result to <base>/<node>/state.
+// enum/text values quoted. Pure — the device streams the result to <base>/state.
 inline std::string build_grouped_json(const std::vector<GroupedValue>& vals) {
     std::vector<std::string>                     order;    // group names, in first-seen order
     std::vector<std::vector<const GroupedValue*>> buckets; // values per group, index-aligned to order
