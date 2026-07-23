@@ -170,6 +170,25 @@ static void publish_discovery() {
     const auto& prof = def::lookup(config().profile.c_str());
     for (size_t i = 0; i < prof.count; i++) {
         const ValueDef& d = prof.values[i];
+        // Detect-only rows carry no state (hp_poll never caches them). RETRACT rather than merely
+        // skip: an install upgrading from a build that DID publish this row already has a RETAINED
+        // discovery config in the broker, which would survive forever as a permanently-unavailable HA
+        // entity — the exact orphan this flag exists to remove. A zero-length retained payload deletes
+        // it (same mechanism as RETIRED_CRASH_SENSORS), and is harmless on a fresh install where the
+        // topic never existed.
+        if (d.no_publish) {
+            if (!object_id(d.label).empty()) {
+                mqtt_publish(discovery_topic(s_prefix, s_node, d), "", 0, 0, 1);
+                // A BINARY row's pre-split config lived under .../sensor/... — retract that too, for
+                // exactly the reason the publishing path below does it: the device cannot know which
+                // builds this broker has already seen, and deleting a config that was never published
+                // is a no-op. Without this, a detect-only bit-flag row (e.g. "Boiler Operation
+                // Demand") would strand its legacy sensor entity as a permanent orphan.
+                if (conv_is_binary(d.conv))
+                    mqtt_publish(retired_sensor_discovery_topic(s_prefix, s_node, d), "", 0, 0, 1);
+            }
+            continue;
+        }
         if (!is_publishable(d.conv)) continue;
         const std::string obj = object_id(d.label);
         if (obj.empty()) continue;

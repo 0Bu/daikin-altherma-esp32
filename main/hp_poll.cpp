@@ -91,6 +91,11 @@ static void poll_once() {
     std::string err;                                                   // last error text, if any
 
     for (size_t i = 0; i < prof.count; i++) {
+        // Detect-only rows (ValueDef::no_publish) never contribute a queryable register: a page whose
+        // rows are ALL flagged is not read at all, saving one bus round-trip per cycle. The page still
+        // counts toward the profile's DETECTION signature (def/signatures.hpp reads every row), which
+        // is exactly why the row is kept rather than deleted.
+        if (prof.values[i].no_publish) continue;
         uint8_t reg = prof.values[i].reg;
         if (seen[reg]) continue;
         seen[reg] = 1;
@@ -119,6 +124,7 @@ static void poll_once() {
 
         for (size_t k = 0; k < prof.count; k++) {
             if (prof.values[k].reg != reg) continue;
+            if (prof.values[k].no_publish) continue;   // detect-only: decoded for nobody (MIXED page)
             CachedValue cv;
             cv.label = prof.values[k].label;
             cv.unit  = unit_for_datatype(prof.values[k].type);

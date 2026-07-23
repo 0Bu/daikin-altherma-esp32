@@ -2508,6 +2508,51 @@ static void test_lwt_select() {
     }
 }
 
+// ── ValueDef::no_publish — the detect-only row flag ───────────────────────────────────────────
+// The 0x64 hybrid/boiler page is absent-feature on a non-hybrid monobloc/hydrobox: the unit ANSWERS
+// the page, but every value on it is a placeholder (2nd DHW -40.4 °C, "Boiler only", Mixed water
+// 0.0). The rows are deliberately KEPT and flagged rather than deleted — deleting them drops the
+// page from the profile's detection signature (def/signatures.hpp builds page_mask over every row)
+// and detect_candidates picks MAXIMAL page overlap, so the correct profile would lose to a
+// feature-richer WRONG one that kept 0x64: the model mis-detects and the same garbage returns
+// through that table. This test pins BOTH halves — the rows are flagged, and the signature that
+// makes detection work is unchanged.
+static void test_no_publish() {
+    static const char* kFlagged[] = {
+        "altherma_ebla_edla_d_series_4_8kw_monobloc",
+        "altherma_erga_d_ehv_ehb_ehvz_dj_series_04_08_kw",
+        "altherma_erga_d_ehv_ehb_ehvz_da_series_04_08kw",
+        "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw",
+    };
+    for (const char* id : kFlagged) {
+        const auto& p = def::lookup(id);
+        CHECK(std::string(p.id) == id);                    // profile really exists under this id
+        int      flagged = 0;
+        uint32_t mask    = 0;
+        for (size_t i = 0; i < p.count; i++) {
+            mask |= page_mask_bit(p.values[i].reg);        // signature spans EVERY row, flagged too
+            if (p.values[i].no_publish) {
+                flagged++;
+                CHECK(p.values[i].reg == 0x64);            // only the hybrid page is detect-only
+            }
+        }
+        CHECK(flagged == 8);                               // the whole 0x64 hybrid/boiler cluster
+        CHECK((mask & page_mask_bit(0x64)) != 0);          // SIGNATURE INTACT — the reason for the flag
+    }
+    // Contained: nothing outside the non-hybrid 4-8 kW set is flagged (a genuine hybrid must keep
+    // publishing its boiler values).
+    int total = 0;
+    for (const auto& p : def::profiles)
+        for (size_t i = 0; i < p.count; i++)
+            if (p.values[i].no_publish) total++;
+    CHECK(total == 8 * 4);
+    // Defaults false: an ordinary generated `{reg,offset,conv,size,type,label}` row stays publishable
+    // without having to say so, so the flag is additive to every existing table.
+    const auto& m = def::lookup("altherma_ebla_edla_d_series_4_8kw_monobloc");
+    for (size_t i = 0; i < m.count; i++)
+        if (m.values[i].reg != 0x64) CHECK(!m.values[i].no_publish);
+}
+
 int main() {
     test_crc();
     test_registers();
@@ -2517,6 +2562,7 @@ int main() {
     test_mcp_jsonrpc();
     test_http_surface();
     test_lwt_select();
+    test_no_publish();
     test_config_model();
     test_board_pins();
     test_discovery();

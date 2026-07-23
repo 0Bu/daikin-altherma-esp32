@@ -337,7 +337,7 @@ the I/U capacity code (`0x60` offset 6).
 | 2 | 2 | 119 |  | °C | Outdoor heat exchanger temp. |
 | 4 | 2 | 119 |  | °C | Liquid pipe temp. |
 | 6 | 2 | 119 |  | bar | Pressure |
-| 8 | 2 | 151 |  |  | Expansion valve 3 (pls) |
+| 8 | 2 | 151 |  |  | Expansion valve 3 (pls) [OU-II] |
 | 10 | 1 | 152 |  |  | O/U MPU ID |
 | 11 | 1 | 152 |  |  | O/U MPU ID |
 | 12 | 1 | 307 | 7 |  | HPS operation |

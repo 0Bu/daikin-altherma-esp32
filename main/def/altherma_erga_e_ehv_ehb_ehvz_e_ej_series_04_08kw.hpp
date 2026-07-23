@@ -42,7 +42,7 @@ inline constexpr ValueDef altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw[] = {
     {0xA0, 2, 119, 2, 1, "Outdoor heat exchanger temp."},
     {0xA0, 4, 119, 2, 1, "Liquid pipe temp."},
     {0xA0, 6, 119, 2, 2, "Pressure"},
-    {0xA0, 8, 151, 2, -1, "Expansion valve 3 (pls)"},
+    {0xA0, 8, 151, 2, -1, "Expansion valve 3 (pls) [OU-II]"},
     {0xA0, 14, 105, 2, 1, "Compressor port temperature"},
     {0xA1, 0, 119, 2, 1, "(Raw data)Water heat exchanger inlet temp."},
     {0xA1, 2, 119, 2, 1, "(Raw data)Water heat exchanger outlet temp."},
@@ -98,14 +98,16 @@ inline constexpr ValueDef altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw[] = {
     {0x63, 14, 161, 1, -1, "Current measured by CT sensor of L1"},
     {0x63, 15, 161, 1, -1, "Current measured by CT sensor of L2"},
     {0x63, 16, 161, 1, -1, "Current measured by CT sensor of L3"},
-    {0x64, 2, 316, 1, -1, "Hybrid Op. Mode"},
-    {0x64, 2, 303, 1, -1, "Boiler Operation Demand"},
-    {0x64, 2, 302, 1, -1, "Boiler DHW Demand"},
-    {0x64, 3, 105, 2, -1, "BE_COP"},
-    {0x64, 5, 105, 2, 1, "Hybrid Heating Target Temp."},
-    {0x64, 7, 105, 2, 1, "Boiler Heating Target Temp."},
-    {0x64, 10, 118, 2, 1, "Mixed water temp."},  // default_on
-    {0x64, 12, 105, 2, 1, "2nd Domestic hot water temperature"},  // default_on
+    // 0x64 hybrid/boiler page: absent-feature on this non-hybrid model. Kept so the page still
+    // counts toward the DETECTION signature, flagged detect-only so it is never published.
+    {0x64, 2, 316, 1, -1, "Hybrid Op. Mode", true},
+    {0x64, 2, 303, 1, -1, "Boiler Operation Demand", true},
+    {0x64, 2, 302, 1, -1, "Boiler DHW Demand", true},
+    {0x64, 3, 105, 2, -1, "BE_COP", true},
+    {0x64, 5, 105, 2, 1, "Hybrid Heating Target Temp.", true},
+    {0x64, 7, 105, 2, 1, "Boiler Heating Target Temp.", true},
+    {0x64, 10, 118, 2, 1, "Mixed water temp.", true},  // default_on
+    {0x64, 12, 105, 2, 1, "2nd Domestic hot water temperature", true},  // default_on
 };
 
 } // namespace daik::def
