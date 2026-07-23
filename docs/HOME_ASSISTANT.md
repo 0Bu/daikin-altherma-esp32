@@ -24,8 +24,11 @@ changes) still identifies the device to Home Assistant, but only inside each dis
 <base>/state                                       {<group>: {<object_id>: value, …}, …}  (retained JSON)
 <base>/heartbeat                                   board/link diagnostics (flat JSON, 10 s cadence)
 <base>/crash                                       crash report, retained — ONLY on a fault/dump boot; cleared otherwise
-<prefix>/sensor/<node>/<object_id>/config          discovery config per value (retained)
+<prefix>/<component>/<node>/<object_id>/config    discovery config per value (retained)
 ```
+
+`<component>` is `binary_sensor` for a bit-flag value (pump running, 3-way valve, thermostat
+ON/OFF — converter family 300-307) and `sensor` for everything else.
 
 All values ride in **one** retained JSON on `<base>/state`, grouped one level deep by X10A register
 page (`{ "hydronic": { "dhw_setpoint": 48, … }, "outdoor_state": { … }, … }`, max nesting depth 1 —
@@ -51,9 +54,30 @@ see `unit_for_datatype`/`device_class_for_datatype` in `logic/convert.hpp`), so 
 as °C with history, currents as A, and so on. This grouped JSON
 is also directly consumable by a Telegraf MQTT `json_v2` parser (→ VictoriaMetrics/Grafana).
 
+### Binary values are numbers, not "ON"/"OFF"
+
+A bit-flag value (converter family 300-307 — *"Water pump operation"*, *"3way valve"*, *"Thermostat
+ON/OFF"*, …) is published as the JSON **number `1` or `0`**, and its discovery config is a
+`binary_sensor` declaring `"pl_on": "1"` / `"pl_off": "0"`. HA therefore shows a proper on/off entity
+rather than a text sensor whose state happens to read `ON`.
+
+The number, rather than the text or a JSON bool, is what makes these values usable outside HA: a
+metrics pipeline (Telegraf → VictoriaMetrics) stores numbers and **discards both strings and
+booleans**, so roughly 30 of an ERGA profile's ~99 values — every binary one — used to reach Home
+Assistant but never a graph. The same reasoning applies to `wifi_connected` / `mqtt_connected` /
+`bus_connected` on the heartbeat topic, which are `1`/`0` for the same reason.
+
+The device's own web UI, `GET /values` and the `/events` WebSocket are unaffected — they read the
+poll cache directly and still show `ON`/`OFF`.
+
+> **Upgrading:** these entities change domain (`sensor.…` → `binary_sensor.…`), so their recorder
+> history does not carry over and any automation or template referencing one by entity id needs its
+> name updated. The firmware deletes the stale retained `sensor` discovery config on its next
+> connect, so no duplicate, permanently-unavailable entity is left behind.
+
 Numeric values are emitted (unquoted) only when the heat pump reported them this cycle, so an
 unimplemented register is absent from the JSON and shows as *unknown* in HA rather than a phantom
-`0`; enum/text values (op-mode, ON/OFF, error codes) are emitted as JSON strings. The "Error Code"
+`0`; enum/text values (op-mode, error codes) are emitted as JSON strings. The "Error Code"
 value is the raw 2-char code (e.g. `U4`), enriched with an English description when
 `logic/error_codes.hpp` covers it (`"U4: Indoor/outdoor unit communication problem"`); a code
 outside that table's coverage still publishes as the bare code.

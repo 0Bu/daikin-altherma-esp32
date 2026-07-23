@@ -3,12 +3,13 @@
 //   • TLS policy: credentials present ⇒ mqtts:// + CA-verified (esp_crt_bundle); NEVER send
 //     credentials over plaintext (no silent fallback — refuse with an error in /status.mqtt).
 //   • On (re)connect: mark availability "online", stream one retained discovery config per value of
-//     the active profile (logic/discovery.hpp), then publish the full grouped state JSON.
+//     the active profile (logic/discovery.hpp) — a bit-flag row as a `binary_sensor` reading 1/0,
+//     every other row as a `sensor` — then publish the full grouped state JSON.
 //   • Each cycle: rebuild the grouped state JSON (logic/mqtt_group.hpp) and publish it to the ONE
 //     shared topic <base>/state — but only when the payload actually changed, so a quiet pump doesn't
 //     spam the broker. Message topics sit directly under <base> (no daikin_<mac> node segment — one
 //     board per base topic); the node id disambiguates the DEVICE only in each discovery config's
-//     uniq_id/dev.ids + the <prefix>/sensor/<node>/… discovery topic.
+//     uniq_id/dev.ids + the <prefix>/<component>/<node>/… discovery topic.
 //   • Every HEARTBEAT_INTERVAL_S (10 s): rebuild + publish the board/link diagnostics JSON
 //     (logic/heartbeat.hpp) to <base>/heartbeat — diagnostics, not real-time telemetry, so unlike the
 //     state topic it's a fixed cadence, not publish-on-change.
@@ -152,14 +153,19 @@ static std::vector<GroupedValue> current_grouped() {
     out.reserve(n);
     for (size_t i = 0; i < n; i++) {
         if (cache[i].value.empty()) continue;
+        // A binary row's decoded text ("ON"/"OFF") is re-encoded as the JSON number 1/0 for the wire.
+        // /values, the web UI and the WebSocket keep reading the cache directly, so they still show
+        // ON/OFF — only the MQTT payload changes, and only for the rows HA types as binary_sensor.
+        const char* bin = conv_is_binary(cache[i].conv) ? binary_state_number(cache[i].value) : nullptr;
         out.push_back({group_for_page(cache[i].reg), object_id(cache[i].label.c_str()),
-                       cache[i].value});
+                       bin ? bin : cache[i].value});
     }
     return out;
 }
 
-// Stream one retained discovery config per value of the active profile. Every sensor points at the
-// one shared state topic (s_state) and pulls its value out via a value_template.
+// Stream one retained discovery config per value of the active profile. Every entity points at the
+// one shared state topic (s_state) and pulls its value out via a value_template. A bit-flag row lands
+// under the binary_sensor component, everything else under sensor (logic/discovery.hpp ha_component).
 static void publish_discovery() {
     const auto& prof = def::lookup(config().profile.c_str());
     for (size_t i = 0; i < prof.count; i++) {
@@ -167,6 +173,14 @@ static void publish_discovery() {
         if (!is_publishable(d.conv)) continue;
         const std::string obj = object_id(d.label);
         if (obj.empty()) continue;
+        // Builds before the binary_sensor split published EVERY row as a `sensor`. For a binary row
+        // that retained config is now stale: HA would keep a second, permanently-unavailable text
+        // entity beside the new binary_sensor, so delete it first (zero-length retained). Deliberately
+        // unconditional — the device cannot know whether this broker ever saw an older build, and a
+        // delete for a config that was never published is a no-op. Same intent as
+        // RETIRED_CRASH_SENSORS, minus the hand-maintained table: the old topic is derivable.
+        if (conv_is_binary(d.conv))
+            mqtt_publish(retired_sensor_discovery_topic(s_prefix, s_node, d), "", 0, 0, 1);
         const std::string ct  = discovery_topic(s_prefix, s_node, d);
         const std::string cfg = discovery_config(s_node, s_state, s_avail, d);
         mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained

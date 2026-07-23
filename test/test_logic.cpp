@@ -599,10 +599,73 @@ static void test_discovery() {
     // The node id still disambiguates the DEVICE in uniq_id/dev.ids — just not in the message topic.
     CHECK(cfg.find("\"uniq_id\":\"daikin_abc123_dhw_tank_temp_r5t\"") != std::string::npos);
 
+    // A non-binary row keeps the sensor component and carries no binary payload contract.
+    CHECK(std::string(ha_component(def)) == "sensor");
+    CHECK(discovery_topic("homeassistant", node, def)
+          == "homeassistant/sensor/daikin_abc123/dhw_tank_temp_r5t/config");
+    CHECK(cfg.find("\"pl_on\"") == std::string::npos);
+
+    // --- Bit-flag rows are binary_sensors reading 1/0, not text sensors reading "ON"/"OFF" ---
     // A slug that starts with a digit must stay valid — bracket notation, not attribute access.
     ValueDef way{0x60, 12, 307, 1, -1, "2way valve(On:Heat_Off:Cool)"};
     std::string wc = discovery_config(node, st, availability_topic(base), way);
     CHECK(wc.find("value_json['hydronic']['2way_valve_on_heat_off_cool']") != std::string::npos);
+
+    CHECK(std::string(ha_component(way)) == "binary_sensor");
+    CHECK(discovery_topic("homeassistant", node, way)
+          == "homeassistant/binary_sensor/daikin_abc123/2way_valve_on_heat_off_cool/config");
+    // pl_on/pl_off must be SPELLED OUT: the state is the number 1/0, HA's defaults are "ON"/"OFF",
+    // and a mismatch leaves the entity stuck at `unknown` rather than failing loudly.
+    CHECK(wc.find("\"pl_on\":\"1\",\"pl_off\":\"0\"") != std::string::npos);
+    // dataType -1 -> no unit, no device_class, and hence no state_class either.
+    CHECK(wc.find("\"unit_of_meas\"") == std::string::npos);
+    CHECK(wc.find("\"dev_cla\"") == std::string::npos);
+    CHECK(wc.find("\"stat_cla\"") == std::string::npos);
+    // The pre-split `sensor` config for the SAME row is what the bridge deletes on announce, so it
+    // must keep pointing at the old topic (only the component segment differs).
+    CHECK(retired_sensor_discovery_topic("homeassistant", node, way)
+          == "homeassistant/sensor/daikin_abc123/2way_valve_on_heat_off_cool/config");
+    CHECK(retired_sensor_discovery_topic("homeassistant", node, way)
+          != discovery_topic("homeassistant", node, way));
+    // For a non-binary row nothing is retired — the "old" topic IS the current one.
+    CHECK(retired_sensor_discovery_topic("homeassistant", node, def)
+          == discovery_topic("homeassistant", node, def));
+
+    // The binary family is exactly 300-307 (one bit of data[0]); neighbours are not binary.
+    CHECK(!conv_is_binary(299) && !conv_is_binary(308) && !conv_is_binary(105));
+    for (int c = 300; c <= 307; c++) CHECK(conv_is_binary(c));
+}
+
+// Every bit-flag row in the SHIPPED catalog must survive the whole binary path: convert() has to
+// decode both bit states to text binary_state_number() recognises, or the bridge silently falls back
+// to publishing "ON"/"OFF" as a string into an entity HA has typed as a binary_sensor — a value that
+// would read `unknown` in HA and never reach a metrics store. Also pins the layout the discovery
+// branch assumes (size 1, dataType -1 -> no unit/device_class to reconcile).
+static void test_binary_catalog() {
+    int checked = 0;
+    for (const auto& p : def::profiles) {
+        for (size_t i = 0; i < p.count; i++) {
+            const ValueDef& d = p.values[i];
+            if (!conv_is_binary(d.conv)) continue;
+            CHECK(d.size == 1);
+            CHECK(d.type == -1);
+            const uint8_t bit = static_cast<uint8_t>(1u << (d.conv - 300));
+            const uint8_t set_byte = bit, clear_byte = static_cast<uint8_t>(~bit);
+            Reading on  = convert(d, &set_byte);
+            Reading off = convert(d, &clear_byte);
+            CHECK(std::string(on.text)  == "ON");
+            CHECK(std::string(off.text) == "OFF");
+            const char* n_on  = binary_state_number(on.text);
+            const char* n_off = binary_state_number(off.text);
+            CHECK(n_on  != nullptr); CHECK(std::string(n_on  ? n_on  : "") == "1");
+            CHECK(n_off != nullptr); CHECK(std::string(n_off ? n_off : "") == "0");
+            // ...and 1/0 must land in the state JSON UNQUOTED, or a metrics consumer drops it again.
+            CHECK(is_json_number(n_on ? n_on : ""));
+            CHECK(is_json_number(n_off ? n_off : ""));
+            checked++;
+        }
+    }
+    CHECK(checked > 500);   // ~30 binary rows x 44 profiles — the catalog really was traversed
 }
 
 static void test_registry() {
@@ -808,6 +871,17 @@ static void test_mqtt_group() {
     CHECK(!is_json_number("") && !is_json_number("-") && !is_json_number("3."));
     CHECK(!is_json_number("1.2.3") && !is_json_number("A1") && !is_json_number("ON"));
 
+    // Bit-flag rows go on the wire as the NUMBERS 1/0 — a JSON string OR a JSON bool is dropped by a
+    // metrics consumer (measured: Telegraf's json parser drops both), and HA reads them back via
+    // pl_on "1" / pl_off "0". Anything that is not the expected ON/OFF text returns nullptr so the
+    // caller publishes the decoded text rather than inventing a 0.
+    CHECK(std::string(binary_state_number("ON")) == "1");
+    CHECK(std::string(binary_state_number("OFF")) == "0");
+    CHECK(binary_state_number("Heating") == nullptr);
+    CHECK(binary_state_number("") == nullptr);
+    CHECK(binary_state_number("on") == nullptr);      // decoded text is upper-case; no fuzzy matching
+    CHECK(is_json_number("1") && is_json_number("0"));   // ...so they land unquoted in the payload
+
     // Grouped JSON: max depth 1, groups+keys in first-seen order, numeric vs string typing.
     std::vector<GroupedValue> vals = {
         {"outdoor_state", "operation_mode", "Heating"},
@@ -819,6 +893,12 @@ static void test_mqtt_group() {
     CHECK(j == "{\"outdoor_state\":{\"operation_mode\":\"Heating\",\"error_type\":\"Normal\"},"
                "\"hydronic\":{\"dhw_setpoint\":48,\"lw_setpoint\":35.4}}");
     CHECK(build_grouped_json({}) == "{}");
+
+    // A binary row arrives here already re-encoded (mqtt_ha's current_grouped), so it must serialize
+    // as a bare 1/0 next to the text values — not as "1", which would put it back out of reach.
+    CHECK(build_grouped_json({{"hydronic", "thermostat_on_off", "1"},
+                              {"hydronic", "silent_mode",       "0"}})
+          == "{\"hydronic\":{\"thermostat_on_off\":1,\"silent_mode\":0}}");
 
     // A text value routes through the shared logic/json.hpp encoder, so a control char in one can't
     // break the state topic's JSON either (test_json covers the escaping itself).
@@ -946,10 +1026,10 @@ static void test_heartbeat() {
                "\"uptime_s\":680731,\"uptime\":\"007+21:05:31.860\","
                "\"free_heap\":170000,\"min_free_heap\":150000,\"max_alloc\":87000,"
                "\"reset_reason\":\"panic\",\"time\":null,"
-               "\"wifi_connected\":true,\"wifi_rssi\":-76,\"wifi_quality_pct\":48,\"wifi_reconnects\":3,"
+               "\"wifi_connected\":1,\"wifi_rssi\":-76,\"wifi_quality_pct\":48,\"wifi_reconnects\":3,"
                "\"wifi_mac\":\"A1:B2:C3:D4:E5:F6\",\"wifi_bssid\":\"00:11:22:33:44:55\","
-               "\"mqtt_connected\":true,\"mqtt_count\":89282,\"mqtt_fails\":0,\"mqtt_reconnects\":1,"
-               "\"bus_connected\":true,\"bus_proto\":\"I\",\"bus_registers\":10,\"bus_values\":48,"
+               "\"mqtt_connected\":1,\"mqtt_count\":89282,\"mqtt_fails\":0,\"mqtt_reconnects\":1,"
+               "\"bus_connected\":1,\"bus_proto\":\"I\",\"bus_registers\":10,\"bus_values\":48,"
                "\"bus_last_ok_s\":1,\"bus_rx_received\":763732,\"bus_rx_fails\":2,"
                "\"bus_crc_err\":0,\"bus_timeout_err\":2,"
                "\"bus_tx_reads\":763734,\"bus_tx_writes\":0,\"bus_tx_fails\":0}");
@@ -971,6 +1051,14 @@ static void test_heartbeat() {
     CHECK(dj.find("\"wifi_mac\":\"A1:B2:C3:D4:E5:F6\"") != std::string::npos);
     CHECK(dj.find("\"wifi_bssid\":null") != std::string::npos);   // no AP while offline
     CHECK(dj.find("\"time\":null") != std::string::npos);   // never synced -> null, not 1970-01-01
+    // The connectivity flags are 1/0 NUMBERS in both directions — never JSON bools, which a metrics
+    // consumer drops exactly like it drops a string (these three were the only heartbeat fields
+    // missing from VictoriaMetrics before this).
+    CHECK(dj.find("\"wifi_connected\":0") != std::string::npos);
+    CHECK(dj.find("\"mqtt_connected\":0") != std::string::npos);
+    CHECK(dj.find("\"bus_connected\":0")  != std::string::npos);
+    CHECK(dj.find("true")  == std::string::npos);
+    CHECK(dj.find("false") == std::string::npos);
 
     // Diagnostic discovery: separate topics/component types, entity_category diagnostic, and the
     // value_template points at the heartbeat topic (not the heat-pump state topic).
@@ -999,6 +1087,12 @@ static void test_heartbeat() {
     std::string busc = heartbeat_discovery_config(node, hb, av, *bus);
     CHECK(busc.find("val_tpl\":\"{{ value_json.bus_connected }}") != std::string::npos);   // flat key
     CHECK(busc.find("\"stat_cla\"") == std::string::npos);
+    // ...and it must declare the 1/0 payload contract. Without this the entity inherits HA's "ON"/"OFF"
+    // defaults, matches neither 1/0 nor the `True`/`False` a JSON bool rendered as, and sits at
+    // `unknown` forever — silently, since a non-matching payload is simply ignored.
+    CHECK(busc.find("\"pl_on\":\"1\",\"pl_off\":\"0\"") != std::string::npos);
+    // A plain sensor must NOT carry the binary contract.
+    CHECK(dc.find("\"pl_on\"") == std::string::npos);
 
     // A since-boot counter (e.g. mqtt_count) is "total_increasing", not "measurement" — HA's
     // long-term statistics then handle a reboot's reset to 0 correctly instead of reading it as a
@@ -2426,6 +2520,7 @@ int main() {
     test_config_model();
     test_board_pins();
     test_discovery();
+    test_binary_catalog();
     test_registry();
     test_detect();
     test_json();

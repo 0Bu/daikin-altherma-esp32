@@ -281,8 +281,11 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   topics — those sit directly under `<base>` (one board per base topic).
 - **Topics:** `<base>/state` (one retained JSON of all values, grouped by register page —
   `{ "<group>": { "<object>": value } }`, max depth 1), plus per-value discovery configs under
-  `<prefix>/sensor/<node>/<object>/config` (retained) whose `value_template` reads the group+object
-  out of that JSON. Availability/LWT `<base>/status`. `<base>` defaults `daikin-altherma-esp32`,
+  `<prefix>/<component>/<node>/<object>/config` (retained) whose `value_template` reads the
+  group+object out of that JSON. `<component>` is `binary_sensor` for a bit-flag value (pump running,
+  3-way valve, thermostat ON/OFF), whose state rides as the number `1`/`0` so it is usable in a
+  metrics store as well as in HA, and `sensor` for everything else.
+  Availability/LWT `<base>/status`. `<base>` defaults `daikin-altherma-esp32`,
   `<prefix>` `homeassistant`.
 - **Diagnostics topics.** `<base>/heartbeat` (board/link health on a fixed 10 s cadence — a **flat**
   JSON of heap, uptime, WiFi/MQTT/bus counters, each field prefixed by its block name: `wifi_rssi`,
