@@ -324,6 +324,16 @@ Body, ordered:
    detected profile is shown. A value that timed out this cycle shows "—" (not 0). The schematic
    answers "what is happening"; these tables stay as the exact-value reference — both read the same
    `/values` dataset.
+   - **Tap a value → plain-language explainer.** Each value row whose label is recognised is a button
+     (trailing chevron affordance, like the Firmware row); tapping it slides open a short description
+     beneath the row — what the reading means and, where useful, what is normal vs worth a look. The
+     text is keyed to the value **label** by a first-match-wins pattern table (`DESCRIPTIONS` in
+     `app.js`), the same label-pattern technique the hero/grouping already use, so one entry serves
+     every profile's spelling of a quantity; a label that matches nothing stays a plain, non-expandable
+     row. English only (§1), matching the fixed English labels. The open state lives in app state
+     (`S.descOpen`), not the DOM, so the per-poll rebuild of `#valueGroups` re-emits an expanded row
+     open instead of collapsing it every second; the click toggles the live element so the slide
+     animates, and updates the set for the next rebuild.
 
 There is **no** health/badge strip: connectivity/identity lives in the Connections tile, the board in
 the ESP32/Model status cards, operation/fault in the hero, and every card — hero, Connections tile,
@@ -382,6 +392,12 @@ enabled/available values are hidden.
   `--brand`. One primary per view.
 - **Input / select** — `--line` border, `--brand` focus ring; inline error text `--err` under field.
 - **Value table** — two columns (label `--muted` left, value+unit right, tabular). Missing = "—".
+  A recognised value row is also an expander: a full-width button with a trailing chevron that
+  rotates on open, revealing the description in its **own inset `--brand-tint` info box** — held in
+  from the row edges with a gap above/below, so the rows read as parting to make room for it rather
+  than the row growing taller. Bold `--fg` "Normal:" lead-in on `--muted` body; slides down via a
+  `grid-template-rows: 0fr→1fr` transition (§5.3 item 7). Unrecognised labels render as a plain,
+  non-interactive row.
 - **Card** — `--card`, 1px `--line`, radius 12; section title small-caps `--muted`.
 - **Toast** — bottom-centre, transient, for Save outcomes ("Saved", "Rebooting…", "Failed").
 - **Hero** — `--brand-tint` band bordered like a card, `--fg` text under a `--brand-strong` kicker,
@@ -462,7 +478,10 @@ transition). Specific:
   wall-mounted tablet), lots of empty margin around little content. The bump lives in **one** media
   block so the ramp stays coherent; it never changes the single-column layout, only its size.
 - Wide content (long value tables) never causes horizontal page scroll; the table scrolls in its card.
-- Keyboard: logical tab order, visible focus ring, Enter submits the view's primary action.
+- Keyboard: logical tab order, visible focus ring, Enter submits the view's primary action. The
+  value-description expanders (§5.3 item 7) are real `<button>`s carrying `aria-expanded`, so they
+  are focusable and toggle on Enter/Space with no extra key handling; the slide honours
+  `prefers-reduced-motion`.
 - Contrast AA for text; status never conveyed by colour alone (pills carry text: "Connected",
   "CRC 3", "off"). The Connections tile (§5.3 item 5) is the one deliberate exception to *visible*
   text — its rows show only a colour-tinted address/name — so the status word that would otherwise
