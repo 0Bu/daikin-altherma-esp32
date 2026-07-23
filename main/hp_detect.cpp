@@ -7,6 +7,7 @@
 #include "hp_comm.hpp"
 #include "logic/crc.hpp"
 #include "logic/detect.hpp"
+#include "logic/hexdump.hpp"
 #include "sdkconfig.h"
 
 namespace daik {
@@ -85,6 +86,8 @@ DetectResult hp_detect_run() {
     uint8_t page00[32]; int len00 = -1;
     uint8_t page11[16]; int len11 = -1;
     uint8_t page60[32]; int len60 = -1;
+    uint8_t pageA0[32]; int lenA0 = -1;              // O/U-II rows — raw, for the diag dump below
+    uint8_t pageA1[32]; int lenA1 = -1;
     for (uint8_t reg : PROBE_PAGES) {
         uint8_t pay[32];
         const int paylen = read_page(reg, r.proto, pay, static_cast<int>(sizeof(pay)));
@@ -101,6 +104,35 @@ DetectResult hp_detect_run() {
         } else if (reg == 0x60) {
             len60 = paylen;
             for (int i = 0; i < paylen && i < static_cast<int>(sizeof(page60)); i++) page60[i] = pay[i];
+        } else if (reg == 0xA0) {
+            lenA0 = paylen;
+            for (int i = 0; i < paylen && i < static_cast<int>(sizeof(pageA0)); i++) pageA0[i] = pay[i];
+        } else if (reg == 0xA1) {
+            lenA1 = paylen;
+            for (int i = 0; i < paylen && i < static_cast<int>(sizeof(pageA1)); i++) pageA1[i] = pay[i];
+        }
+    }
+
+    // 2b. RAW payload dump for the three pages whose LAYOUT is still an open question. HTTP exposes
+    //     only decoded values, so a physically impossible reading cannot be attributed to a wrong
+    //     converter vs. a wrong offset vs. a per-unit layout difference without the wire bytes —
+    //     and they are otherwise unobservable off-device. 0x00 answers "why is the O/U capacity
+    //     absent?" (a short descriptor omits offset 12); 0xA0/0xA1 answer "why do some O/U-II rows
+    //     read a constant 0.0 while others read ~190 °C under load?". One line per page, only on a
+    //     detect pass (not per poll cycle), so the diag ring and syslog stay readable.
+    {
+        const struct { uint8_t reg; const uint8_t* buf; int len; } raw[] = {
+            {0x00, page00, len00}, {0xA0, pageA0, lenA0}, {0xA1, pageA1, lenA1},
+        };
+        for (const auto& pg : raw) {
+            if (pg.len < 0) {                        // page did not answer — say so, don't stay silent
+                diag_printf("detect: raw 0x%02X no reply\n", pg.reg);
+                continue;
+            }
+            char hex[104];                           // 32 B -> 95 chars + NUL; see logic/hexdump.hpp
+            const int capped = pg.len < 32 ? pg.len : 32;
+            hex_render(pg.buf, capped, hex, static_cast<int>(sizeof(hex)));
+            diag_printf("detect: raw 0x%02X len=%d [%s]\n", pg.reg, pg.len, hex);
         }
     }
 

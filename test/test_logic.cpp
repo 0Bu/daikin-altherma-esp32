@@ -39,6 +39,7 @@
 #include "logic/registers.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/syslog_policy.hpp"
+#include "logic/hexdump.hpp"
 #include "logic/timestamp.hpp"
 #include "logic/uart_plan.hpp"
 #include "logic/wifi_rollback.hpp"
@@ -1786,6 +1787,66 @@ static void test_timestamp() {
     CHECK(rfc3339_utc(0, 5000) == "1970-01-01T00:00:00.999Z");
 }
 
+// ── raw page hex rendering (logic/hexdump.hpp) ───────────────────────────────────────────────
+static void test_hexdump() {
+    char out[128];
+
+    // Basic rendering: lowercase, space-separated, no trailing space. The return value is the
+    // character count WITHOUT the terminator, so a caller can compare it against the 3*len-1 a
+    // complete dump needs to detect truncation.
+    const uint8_t p[] = {0xA0, 0x00, 0x1F, 0xFF};
+    CHECK(hex_render(p, 4, out, sizeof(out)) == 11);
+    CHECK(std::string(out) == "a0 00 1f ff");
+
+    // A single byte gets no leading space.
+    CHECK(hex_render(p, 1, out, sizeof(out)) == 2);
+    CHECK(std::string(out) == "a0");
+
+    // Leading zeros are preserved — a page payload is read positionally, so "0f" must not print
+    // as "f" or the offsets shift for whoever reads the dump.
+    const uint8_t z[] = {0x00, 0x0F, 0x09};
+    hex_render(z, 3, out, sizeof(out));
+    CHECK(std::string(out) == "00 0f 09");
+
+    // Truncation stops after the last COMPLETE byte and still terminates: a trailing nibble would
+    // read as a different value entirely. "a0 00 1f" is 8 chars + NUL = 9, so a 9-byte buffer holds
+    // exactly three bytes and must not begin a fourth (which would need 12).
+    CHECK(hex_render(p, 4, out, 9) == 8);
+    CHECK(std::string(out) == "a0 00 1f");
+    // One char less and the third byte no longer fits with its separator + NUL, so it is dropped
+    // whole rather than emitting "a0 00 1" — the half-byte a naive bound would leave behind.
+    CHECK(hex_render(p, 4, out, 8) == 5);
+    CHECK(std::string(out) == "a0 00");
+
+    // Degenerate inputs must terminate the buffer rather than leave it unwritten — the caller
+    // passes `out` straight into a diag_printf %s, so an untouched buffer would print stack garbage.
+    out[0] = 'X';
+    CHECK(hex_render(nullptr, 4, out, sizeof(out)) == 0);
+    CHECK(out[0] == '\0');
+    out[0] = 'X';
+    CHECK(hex_render(p, 0, out, sizeof(out)) == 0);
+    CHECK(out[0] == '\0');
+    out[0] = 'X';
+    CHECK(hex_render(p, -1, out, sizeof(out)) == 0);
+    CHECK(out[0] == '\0');
+    // A zero/negative-sized buffer must write nothing at all (not even the terminator).
+    out[0] = 'X';
+    CHECK(hex_render(p, 4, out, 0) == 0);
+    CHECK(out[0] == 'X');
+    CHECK(hex_render(p, 4, nullptr, sizeof(out)) == 0);
+    // A 1-char buffer holds only the terminator — no room for even one pair.
+    CHECK(hex_render(p, 4, out, 1) == 0);
+    CHECK(out[0] == '\0');
+
+    // The real call path: a full 32-byte page payload renders to 95 chars and fits hp_detect's
+    // 104-byte buffer complete — i.e. the on-device dump is never truncated.
+    uint8_t page[32];
+    for (int i = 0; i < 32; i++) page[i] = static_cast<uint8_t>(i);
+    char big[104];
+    CHECK(hex_render(page, 32, big, sizeof(big)) == 95);
+    CHECK(std::string(big).substr(0, 11) == "00 01 02 03");
+}
+
 // ── connectivity-watchdog policy (logic/link_watch.hpp) ──────────────────────────────────────
 static void test_link_watch() {
     // A link that KNOWS it is down belongs to the reconnect handler — the watchdog stays out of it
@@ -2578,6 +2639,7 @@ int main() {
     test_bootlog();
     test_syslog_policy();
     test_timestamp();
+    test_hexdump();
     test_link_watch();
     test_wifi_rollback();
     test_reset_reason();

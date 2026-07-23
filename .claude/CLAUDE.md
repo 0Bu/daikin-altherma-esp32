@@ -345,6 +345,7 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 bootlog, reset_reason, boot_guard, board_pins, modbus, syslog_policy, link_watch,
                 wifi_rollback, health_gate, version_cmp, ota_manifest, ws_policy, ws_tx_gate,
                 http_body, http_surface, query_flag, mcp_jsonrpc, timestamp, uart_plan, detect_backoff,
+                hexdump,
                 lwt_select).
                 lwt_select.hpp = the leaving-water MEASUREMENT picker (host-testable twin of
                 www/app.js's vLwt): the row that feeds the UI's ΔT / heat-output / COP must be the
@@ -464,6 +465,13 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 (sntp_time.cpp's "never synced" sentinel) returns
                 "" rather than a plausible-looking 1970-01-01 — callers key on the empty string to
                 fall back to the RFC 5424 NILVALUE / JSON null instead of asserting a wrong instant.
+                hexdump.hpp = hex_render() for the RAW X10A page payloads hp_detect.cpp puts on
+                /diag (pages 0x00, 0xA0, 0xA1, one line each, only on a detect pass). HTTP exposes
+                only DECODED values, so a physically impossible reading cannot be attributed to a
+                wrong converter vs. a wrong byte offset vs. a per-unit layout difference without the
+                wire bytes — and they otherwise never leave the device. Truncation is by WHOLE bytes:
+                a trailing nibble would read as a different value, and a hex dump exists to be read
+                literally. A 32-byte payload renders to 95 chars, well inside diag's 256-byte line.
 def/            embedded per-model value profiles + registry (incl. the generic Altherma fallback =
                 universal register core) + models_catalog.hpp (GET /models) + model_names.hpp
                 (id→display/family/marketing name for /status) + signatures.hpp (Altherma-only
