@@ -47,9 +47,9 @@
                Populated by renderLive(); hidden while the X10A link is down. -->
           <div class="hero-chips" id="heroChips" hidden></div>
           <div class="hero-figs" id="heroFigs" hidden>
-            <div class="fig"><div class="fig-k">Leaving water</div><div class="fig-v num"><span id="hfLwt">—</span> <small>°C</small></div></div>
-            <div class="fig"><div class="fig-k">Outdoor</div><div class="fig-v num"><span id="hfOut">—</span> <small>°C</small></div></div>
-            <div class="fig" id="hfPthFig"><div class="fig-k">Heat output <small>est.</small></div><div class="fig-v num"><span id="hfPth">—</span> <small>kW</small></div></div>
+            <div class="fig"><div class="fig-k" data-i18n="fig.lw">Leaving water</div><div class="fig-v num"><span id="hfLwt">—</span> <small>°C</small></div></div>
+            <div class="fig"><div class="fig-k" data-i18n="fig.outdoor">Outdoor</div><div class="fig-v num"><span id="hfOut">—</span> <small>°C</small></div></div>
+            <div class="fig" id="hfPthFig"><div class="fig-k"><span data-i18n="fig.pth">Heat output</span> <small data-i18n="abbr.est">est.</small></div><div class="fig-v num"><span id="hfPth">—</span> <small>kW</small></div></div>
           </div>
         </div>
 
@@ -60,12 +60,12 @@
         <section id="hpLive" hidden>
           <figure class="card schem-card" id="schem"
                   aria-label="Live system schematic: outdoor unit, refrigerant circuit, plate heat exchanger, water circuit with backup heater and 3-way valve, domestic hot water tank and heating circuit">
-            <div class="section-label">System</div>
+            <div class="section-label" data-i18n="card.system">System</div>
             <div class="schem-scroll">
               <svg viewBox="0 0 760 470" role="img" aria-hidden="true">
                 <!-- Outdoor unit -->
                 <rect class="sc-box" x="24" y="120" width="180" height="230" rx="10"/>
-                <text class="sc-lbl" x="40" y="142">OUTDOOR UNIT</text>
+                <text class="sc-lbl" x="40" y="142" data-i18n="schem.outdoor_unit">OUTDOOR UNIT</text>
                 <circle cx="80" cy="205" r="34" fill="none" stroke="var(--line)" stroke-width="2"/>
                 <g id="scFan">
                   <path d="M80 205 m0 -26 a10 10 0 0 1 6 18 l-6 -18z M80 205 m22 13 a10 10 0 0 1 -19 3 l19 -3z M80 205 m-22 13 a10 10 0 0 1 13 -21 l-13 21z" fill="var(--brand)" opacity=".85"/>
@@ -76,11 +76,11 @@
                 <text class="sc-val" x="152" y="310" text-anchor="middle"><tspan id="svRps">—</tspan> rps</text>
                 <g class="sc-snow">
                   <rect class="sc-pill" x="96" y="252" width="70" height="20" rx="10" style="stroke:var(--flow-cold)"/>
-                  <text class="sc-val" x="131" y="266" text-anchor="middle" style="fill:var(--flow-cold)">❄ defrost</text>
+                  <text class="sc-val" x="131" y="266" text-anchor="middle" style="fill:var(--flow-cold)" data-i18n="schem.defrost_pill">❄ defrost</text>
                 </g>
                 <g>
                   <rect class="sc-pill" x="30" y="88" width="112" height="22" rx="11"/>
-                  <text class="sc-val" x="86" y="103" text-anchor="middle">Outdoor <tspan id="svOut">—</tspan> °C</text>
+                  <text class="sc-val" x="86" y="103" text-anchor="middle"><tspan data-i18n="schem.outdoor">Outdoor</tspan> <tspan id="svOut">—</tspan> °C</text>
                 </g>
                 <!-- Refrigerant circuit (outdoor unit ↔ PHE) -->
                 <path class="sc-rpipe" d="M204 180 H 330"/>
@@ -111,7 +111,7 @@
                 <g>
                   <rect class="sc-pill" x="352" y="118" width="66" height="22" rx="11"/>
                   <text class="sc-val" x="385" y="133" text-anchor="middle"><tspan id="svLwt">—</tspan> °C</text>
-                  <text class="sc-sub" x="385" y="112" text-anchor="middle">leaving water</text>
+                  <text class="sc-sub" x="385" y="112" text-anchor="middle" data-i18n="schem.leaving_water">leaving water</text>
                 </g>
                 <!-- Backup heater -->
                 <rect class="sc-buh" x="430" y="164" width="44" height="32" rx="6"/>
@@ -126,11 +126,11 @@
                   <path class="sc-pipe" d="M520 180 V 70 H 585"/>
                   <path class="sc-flow hot" id="fTank" d="M520 180 V 70 H 585"/>
                   <rect class="sc-box" x="585" y="34" width="120" height="140" rx="14"/>
-                  <text class="sc-lbl" x="600" y="54">DHW TANK</text>
+                  <text class="sc-lbl" x="600" y="54" data-i18n="schem.dhw_tank">DHW TANK</text>
                   <path d="M600 150 q10 -12 20 0 t20 0 t20 0 t20 0" fill="none" stroke="var(--pipe)" stroke-width="4" stroke-linecap="round"/>
                   <path class="sc-flow hot" id="fCoil" style="stroke-width:4" d="M600 150 q10 -12 20 0 t20 0 t20 0 t20 0"/>
                   <text class="sc-val" x="645" y="102" text-anchor="middle" style="font-size:17px"><tspan id="svTank">—</tspan> °C</text>
-                  <text class="sc-sub" x="645" y="120" text-anchor="middle">set <tspan id="svTankSet">—</tspan> °C</text>
+                  <text class="sc-sub" x="645" y="120" text-anchor="middle"><tspan data-i18n="schem.set">set</tspan> <tspan id="svTankSet">—</tspan> °C</text>
                   <!-- tank return joins the return line at y=400 -->
                   <path class="sc-pipe" d="M600 174 V 400"/>
                   <path class="sc-flow cold" id="fTankRet" d="M600 174 V 400"/>
@@ -140,7 +140,7 @@
                 <path class="sc-flow hot" id="fHeat" d="M520 180 H 690 V 268"/>
                 <rect class="sc-box" x="640" y="268" width="100" height="56" rx="8"/>
                 <path d="M654 276 v40 M672 276 v40 M690 276 v40 M708 276 v40 M726 276 v40" stroke="var(--line)" stroke-width="3" fill="none"/>
-                <text class="sc-lbl" x="636" y="346">HEATING</text>
+                <text class="sc-lbl" x="636" y="346" data-i18n="schem.heating">HEATING</text>
                 <!-- Return line -->
                 <path class="sc-pipe" d="M690 386 V 400 H 400 V 300 H 378"/>
                 <path class="sc-flow cold" id="fRet" d="M690 386 V 400 H 400 V 300 H 378"/>
@@ -148,11 +148,11 @@
                 <path class="sc-flow cold" id="fHeatRet" d="M690 324 V 386"/>
                 <circle class="sc-valve" cx="470" cy="400" r="17"/>
                 <g id="scPump"><path d="M470 400 l-8 -9 h16 z" fill="var(--brand)"/></g>
-                <text class="sc-lbl" x="470" y="432" text-anchor="middle">PUMP <tspan class="sc-val" id="svPump">—</tspan>%</text>
+                <text class="sc-lbl" x="470" y="432" text-anchor="middle"><tspan data-i18n="schem.pump">PUMP</tspan> <tspan class="sc-val" id="svPump">—</tspan>%</text>
                 <g>
                   <rect class="sc-pill" x="510" y="411" width="66" height="22" rx="11"/>
                   <text class="sc-val" x="543" y="426" text-anchor="middle"><tspan id="svRwt">—</tspan> °C</text>
-                  <text class="sc-sub" x="543" y="447" text-anchor="middle">return</text>
+                  <text class="sc-sub" x="543" y="447" text-anchor="middle" data-i18n="schem.return">return</text>
                 </g>
                 <g>
                   <rect class="sc-pill" x="286" y="411" width="150" height="22" rx="11"/>
@@ -161,7 +161,7 @@
                 <!-- Room pill drawn last so it sits above the return pipes crossing beneath it -->
                 <g class="g-room">
                   <rect class="sc-pill" x="622" y="356" width="136" height="22" rx="11"/>
-                  <text class="sc-val" x="690" y="371" text-anchor="middle">Room <tspan id="svRoom">—</tspan> / <tspan id="svRoomSet">—</tspan> °C</text>
+                  <text class="sc-val" x="690" y="371" text-anchor="middle"><tspan data-i18n="schem.room">Room</tspan> <tspan id="svRoom">—</tspan> / <tspan id="svRoomSet">—</tspan> °C</text>
                 </g>
               </svg>
             </div>
@@ -169,27 +169,27 @@
 
           <!-- KPI tiles: the working point in numbers; est. values are derived, never measured -->
           <div class="kpis">
-            <div class="kpi"><div class="kpi-k">Compressor</div>
+            <div class="kpi"><div class="kpi-k" data-i18n="kpi.compressor">Compressor</div>
               <div class="kpi-v num"><span id="kRps">—</span> <small>rps</small></div>
               <div class="meter"><i id="kRpsBar"></i></div>
             </div>
-            <div class="kpi"><div class="kpi-k">Flow</div>
+            <div class="kpi"><div class="kpi-k" data-i18n="kpi.flow">Flow</div>
               <div class="kpi-v num"><span id="kFlow">—</span> <small>l/min</small></div>
-              <div class="kpi-sub">pump <span class="num" id="kPump">—</span> %</div>
+              <div class="kpi-sub"><span data-i18n="kpi.pump">pump</span> <span class="num" id="kPump">—</span> %</div>
             </div>
-            <div class="kpi"><div class="kpi-k">ΔT water</div>
+            <div class="kpi"><div class="kpi-k" data-i18n="kpi.dt">ΔT water</div>
               <div class="kpi-v num"><span id="kDt">—</span> <small>K</small></div>
-              <div class="kpi-sub">target <span class="num" id="kDtSet">—</span> K</div>
+              <div class="kpi-sub"><span data-i18n="kpi.target">target</span> <span class="num" id="kDtSet">—</span> K</div>
             </div>
-            <div class="kpi"><div class="kpi-k">Water pressure</div>
+            <div class="kpi"><div class="kpi-k" data-i18n="kpi.wp">Water pressure</div>
               <div class="kpi-v num"><span id="kWp">—</span> <small>bar</small></div>
               <div class="meter"><i id="kWpBar"></i></div>
             </div>
-            <div class="kpi"><div class="kpi-k">Heat output <small>est.</small></div>
+            <div class="kpi"><div class="kpi-k"><span data-i18n="fig.pth">Heat output</span> <small data-i18n="abbr.est">est.</small></div>
               <div class="kpi-v num"><span id="kPth">—</span> <small>kW</small></div>
               <div class="meter warm"><i id="kPthBar"></i></div>
             </div>
-            <div class="kpi"><div class="kpi-k">COP <small>est.</small></div>
+            <div class="kpi"><div class="kpi-k">COP <small data-i18n="abbr.est">est.</small></div>
               <div class="kpi-v num" id="kCop">—</div>
               <div class="kpi-sub num" id="kPelSub">—</div>
             </div>
@@ -198,10 +198,10 @@
           <!-- Short-term trend from a client-side ring buffer over the /events pushes (lost on
                reload — long-term history stays in Home Assistant/Grafana) -->
           <div class="card trend-card">
-            <div class="section-label">Trend — last 30 min</div>
+            <div class="section-label" data-i18n="trend.title">Trend — last 30 min</div>
             <div class="trend-legend">
-              <span><i style="background:var(--flow-hot)"></i>Leaving water</span>
-              <span id="tlOut"><i style="background:var(--flow-cold)"></i>Outdoor</span>
+              <span><i style="background:var(--flow-hot)"></i><span data-i18n="fig.lw">Leaving water</span></span>
+              <span id="tlOut"><i style="background:var(--flow-cold)"></i><span data-i18n="fig.outdoor">Outdoor</span></span>
             </div>
             <div class="trend-scroll">
               <svg id="trend" viewBox="0 0 640 150" role="img"
@@ -223,21 +223,21 @@
   <div class="modal" id="wifiModal" hidden>
     <div class="modal-backdrop" id="wifiBackdrop"></div>
     <form class="modal-card" id="wifiForm" role="dialog" aria-modal="true" aria-labelledby="wifiModalTitle">
-      <div class="section-label card-title" id="wifiModalTitle">WiFi configuration</div>
+      <div class="section-label card-title" id="wifiModalTitle" data-i18n="wifi.title">WiFi configuration</div>
       <label class="field">
-        <span class="field-label plain">WiFi network (SSID)</span>
+        <span class="field-label plain" data-i18n="wifi.ssid">WiFi network (SSID)</span>
         <input class="input" name="ssid" id="wfSSID" placeholder="SSID" required autocomplete="off">
       </label>
-      <p class="hint err" id="wfSSIDError" hidden>SSID must be 32 characters or less</p>
+      <p class="hint err" id="wfSSIDError" data-i18n="wifi.err_ssid" hidden>SSID must be 32 characters or less</p>
       <label class="field">
-        <span class="field-label plain">WiFi password</span>
+        <span class="field-label plain" data-i18n="wifi.pass">WiFi password</span>
         <input class="input" name="pass" id="wfPass" type="password" placeholder="••••••••" autocomplete="off">
       </label>
-      <p class="hint err" id="wfPassError" hidden>Password must be empty (open network) or between 8 and 63 characters</p>
-      <p class="hint">SSID is required. If connection to the new network fails, the device rolls back to the old WiFi settings.</p>
+      <p class="hint err" id="wfPassError" data-i18n="wifi.err_pass" hidden>Password must be empty (open network) or between 8 and 63 characters</p>
+      <p class="hint" data-i18n="wifi.hint">SSID is required. If connection to the new network fails, the device rolls back to the old WiFi settings.</p>
       <div class="modal-actions">
-        <button class="btn secondary" type="button" id="wfCancel">Cancel</button>
-        <button class="btn primary" type="submit" id="wfBtn">Save</button>
+        <button class="btn secondary" type="button" id="wfCancel" data-i18n="btn.cancel">Cancel</button>
+        <button class="btn primary" type="submit" id="wfBtn" data-i18n="btn.save">Save</button>
       </div>
     </form>
   </div>
@@ -246,30 +246,30 @@
   <div class="modal" id="mqttModal" hidden>
     <div class="modal-backdrop" id="mqttBackdrop"></div>
     <form class="modal-card" id="mqttForm" role="dialog" aria-modal="true" aria-labelledby="mqttModalTitle">
-      <div class="section-label card-title" id="mqttModalTitle">MQTT broker</div>
+      <div class="section-label card-title" id="mqttModalTitle" data-i18n="mqtt.title">MQTT broker</div>
       <label class="field">
-        <span class="field-label plain">Host : port</span>
+        <span class="field-label plain" data-i18n="mqtt.hostport">Host : port</span>
         <input class="input" name="broker" id="mqBroker" placeholder="192.168.1.10:1883" autocomplete="off">
       </label>
-      <p class="hint err" id="mqError" hidden>Enter host:port — e.g. 192.168.1.10:1883 — or mqtts://host:8883 for TLS</p>
+      <p class="hint err" id="mqError" data-i18n="mq.err_format" hidden>Enter host:port — e.g. 192.168.1.10:1883 — or mqtts://host:8883 for TLS</p>
       <label class="field">
-        <span class="field-label plain">Username · optional</span>
+        <span class="field-label plain" data-i18n="mqtt.user">Username · optional</span>
         <input class="input" name="user" id="mqUser" placeholder="mqtt" autocomplete="off">
       </label>
       <label class="field">
-        <span class="field-label plain">Password · optional</span>
+        <span class="field-label plain" data-i18n="mqtt.pass">Password · optional</span>
         <input class="input" name="pass" id="mqPass" type="password" placeholder="••••••••" autocomplete="off">
       </label>
       <!-- Only way to clear stored credentials: the fields are never prefilled, so leaving them empty
            means "keep". Shown only when /status reports mqtt.has_creds. -->
       <label class="field check" id="mqClearRow" hidden>
         <input type="checkbox" id="mqClearCreds">
-        <span>Remove stored credentials — connect anonymously</span>
+        <span data-i18n="mqtt.clear">Remove stored credentials — connect anonymously</span>
       </label>
-      <p class="hint">Credentials require a TLS broker — use an mqtts:// URL (e.g. mqtts://host:8883). Empty host disables MQTT.</p>
+      <p class="hint" data-i18n="mqtt.hint">Credentials require a TLS broker — use an mqtts:// URL (e.g. mqtts://host:8883). Empty host disables MQTT.</p>
       <div class="modal-actions">
-        <button class="btn secondary" type="button" id="mqCancel">Cancel</button>
-        <button class="btn primary" type="submit" id="mqBtn">Save</button>
+        <button class="btn secondary" type="button" id="mqCancel" data-i18n="btn.cancel">Cancel</button>
+        <button class="btn primary" type="submit" id="mqBtn" data-i18n="btn.save">Save</button>
       </div>
     </form>
   </div>
@@ -278,16 +278,16 @@
   <div class="modal" id="syslogModal" hidden>
     <div class="modal-backdrop" id="syslogBackdrop"></div>
     <form class="modal-card" id="syslogForm" role="dialog" aria-modal="true" aria-labelledby="syslogModalTitle">
-      <div class="section-label card-title" id="syslogModalTitle">Syslog server</div>
+      <div class="section-label card-title" id="syslogModalTitle" data-i18n="syslog.title">Syslog server</div>
       <label class="field">
-        <span class="field-label plain">Host : port</span>
+        <span class="field-label plain" data-i18n="syslog.hostport">Host : port</span>
         <input class="input" name="host" id="slHost" placeholder="192.168.1.50:514" autocomplete="off">
       </label>
       <p class="hint err" id="slError" hidden></p>
-      <p class="hint">IP address or hostname and port of the Syslog server. Empty host disables Syslog.</p>
+      <p class="hint" data-i18n="syslog.hint">IP address or hostname and port of the Syslog server. Empty host disables Syslog.</p>
       <div class="modal-actions">
-        <button class="btn secondary" type="button" id="slCancel">Cancel</button>
-        <button class="btn primary" type="submit" id="slBtn">Save</button>
+        <button class="btn secondary" type="button" id="slCancel" data-i18n="btn.cancel">Cancel</button>
+        <button class="btn primary" type="submit" id="slBtn" data-i18n="btn.save">Save</button>
       </div>
     </form>
   </div>
@@ -296,16 +296,16 @@
   <div class="modal" id="ntpModal" hidden>
     <div class="modal-backdrop" id="ntpBackdrop"></div>
     <form class="modal-card" id="ntpForm" role="dialog" aria-modal="true" aria-labelledby="ntpModalTitle">
-      <div class="section-label card-title" id="ntpModalTitle">NTP server</div>
+      <div class="section-label card-title" id="ntpModalTitle" data-i18n="ntp.title">NTP server</div>
       <label class="field">
-        <span class="field-label plain">Server</span>
+        <span class="field-label plain" data-i18n="ntp.server">Server</span>
         <input class="input" name="server" id="ntpServer" placeholder="pool.ntp.org" autocomplete="off">
       </label>
       <p class="hint err" id="ntpError" hidden></p>
-      <p class="hint">Hostname or IP of the NTP server the device syncs its clock from. Empty resets to the firmware default.</p>
+      <p class="hint" data-i18n="ntp.hint">Hostname or IP of the NTP server the device syncs its clock from. Empty resets to the firmware default.</p>
       <div class="modal-actions">
-        <button class="btn secondary" type="button" id="ntpCancel">Cancel</button>
-        <button class="btn primary" type="submit" id="ntpBtn">Save</button>
+        <button class="btn secondary" type="button" id="ntpCancel" data-i18n="btn.cancel">Cancel</button>
+        <button class="btn primary" type="submit" id="ntpBtn" data-i18n="btn.save">Save</button>
       </div>
     </form>
   </div>

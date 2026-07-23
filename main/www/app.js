@@ -9,6 +9,196 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 const j = async (url, opts) => { const r = await fetch(url, opts); if (!r.ok) throw new Error(r.status); return r.json(); };
 const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
+// ── i18n: browser-detected UI language (de | en) ─────────────────────────────
+// The device serves ONE page; the language is chosen client-side from the browser, no selector and
+// no server round-trip (DESIGN.md §1). German for a `de*` browser, English otherwise — English is
+// the fallback for every key. The heat-pump VALUE LABELS are NOT translated here: they arrive from
+// the firmware over /values as English X10A register names (docs/REGISTERS.md) and stay verbatim;
+// the tap-to-expand descriptions carry the German explanation instead. Dynamic strings built in this
+// file go through t(); the static markup in index.html is localised by applyStaticI18n() reading
+// data-i18n attributes. Keep this the single source of UI copy so both paths agree.
+const LANG = /^de\b/i.test(navigator.language || "") ? "de" : "en";
+// Each key is a string, or a function for the parameterised ones (same arity in both languages).
+const I18N = {
+  en: {
+    "hero.nodata": "No data", "hero.unreachable": "Unreachable",
+    "hero.unreachable_sub": "Can't reach the device — retrying…",
+    "hero.waiting": "Waiting for the heat pump…", "hero.operating": "Operating",
+    "hero.online": "Online", "hero.fault": "Fault", "hero.running": "Running",
+    "hero.fault_kicker": (c) => "Fault · " + c,
+    "hero.fault_sub": (c) => "Unit reported " + c + " — check the outdoor unit.",
+    "hero.lw": (lw, oat) => `Leaving water ${lw} °C` + (oat ? ` · outdoor ${oat} °C` : ""),
+    "hero.polled": (s) => `Polled ${s}s ago`,
+    "recovery.title": "Recovery mode",
+    "recovery.meta": "The device restarted too many times and came up in recovery mode. Heat-pump polling and MQTT are paused. Correct the configuration (for example the RX/TX pins on the ESP32 card), then reboot to resume normal operation.",
+    "rollback.title": "WiFi change failed — rolled back",
+    "rollback.meta": (back) => `The new WiFi credentials couldn't connect, so the device restored the previous network${back} and restarted. Open the Connections tile's WiFi row to check the name and password, then try again.`,
+    "crash.title_fault": "Device restarted after a crash",
+    "crash.title_orphan": "Crash report waiting from an earlier restart",
+    "crash.reset": "Reset", "crash.task": "task", "crash.fw": "fw", "crash.elf": "elf", "crash.corrupted": "corrupted",
+    "crash.download": "Download crash report", "crash.copy": "Copy diagnostics", "crash.dismiss": "Dismiss",
+    "crash.copied": "Diagnostics copied — paste into a bug report",
+    "crash.copy_fail": "Copy failed — open /coredump and /diag manually",
+    "conn.title": "Connections", "conn.offline": "Offline", "conn.disabled": "Disabled",
+    "conn.connecting": "Connecting…", "conn.connected": "Connected", "conn.resolving": "Resolving…",
+    "conn.enabled": "Enabled", "conn.enabled_noping": "Enabled, host not answering ping",
+    "conn.synced": "Synced", "conn.syncing": "Syncing…",
+    "conn.error": (e) => "Error: " + e, "conn.connected_to": (s) => "Connected to " + s,
+    "conn.aria": (label, state) => `${label}: ${state}. Tap to edit.`,
+    "card.model": "Model", "card.uptime": "Uptime", "card.lastreset": "Last reset",
+    "card.freeheap": "Free heap", "card.hplink": "Heat-pump link", "card.online": "Online",
+    "card.offline": "Offline", "card.protocol": "Protocol", "card.rxpin": "RX pin",
+    "card.txpin": "TX pin", "card.capacity": "Capacity",
+    "values.waiting": "Waiting for the first poll…",
+    "group.Operation": "Operation", "group.Domestic hot water": "Domestic hot water",
+    "group.Water circuit": "Water circuit", "group.Refrigerant / outdoor": "Refrigerant / outdoor",
+    "group.Electrical": "Electrical", "group.Device": "Device", "group.Other values": "Other values",
+    "group.Values": "Values",
+    "chip.thermo_on": "Thermostat ON", "chip.thermo_off": "Thermostat off",
+    "chip.pump_on": "Pump ON", "chip.pump_off": "Pump off",
+    "chip.buh2": "BUH step 2", "chip.buh1": "BUH step 1", "chip.buh_off": "BUH off",
+    "chip.defrost": "Defrost", "chip.quiet": "Quiet",
+    "schem.to_dhw": "3WV → DHW", "schem.to_heat": "3WV → heating",
+    "trend.collecting": "Collecting data…",
+    "normal.label": "Normal:",
+    "toast.saved": "Saved", "toast.no_changes": "No changes",
+    "toast.reboot": "Rebooting — reconnecting…", "toast.rebooted": "Rebooted — reconnect to the device",
+    "toast.busy_retry": "Device busy — retry in a moment", "toast.unreachable": "Couldn't reach the device",
+    "toast.rejected": "Rejected", "toast.applying": "Still applying the last change…",
+    "toast.check_wifi": "Check WiFi settings", "toast.check_broker": "Check the broker address",
+    "toast.check_syslog_port": "Check the Syslog port",
+    "toast.ota_checking": "Checking for updates…", "toast.ota_uptodate": (v) => `Up to date (v${v})`,
+    "toast.ota_timeout": "Update check timed out", "toast.ota_failed": "Update check failed",
+    "toast.ota_cancelled": "Update cancelled", "toast.ota_start_fail": "Couldn't start the update",
+    "toast.ota_downloading": "Downloading… keep the device powered",
+    "toast.ota_progress": (p) => `Downloading… ${p}%`, "toast.ota_update_timeout": "Update timed out",
+    "toast.ota_update_failed": "Update failed", "toast.ota_installed": "Installed — rebooting…",
+    "toast.verifying_mqtt": "Verifying MQTT connection…", "toast.saving_syslog": "Saving Syslog settings…",
+    "toast.saving_ntp": "Saving NTP settings…", "toast.trying_pins": "Trying pins…",
+    "ota.confirm": (cur, avail) => `Update available: v${cur} → v${avail}\n\nThe device downloads and installs the signed image, then reboots. If the new firmware can't get online it rolls back automatically.`,
+    "aria.ota": "Check for firmware updates",
+    "mq.err_format": "Enter host:port — e.g. 192.168.1.10:1883 — or mqtts://host:8883 for TLS",
+    "sl.err_port": "Port must be a whole number 1–65535 (e.g. logs.example.com:514).",
+    "btn.saving": "Saving…", "btn.save": "Save", "btn.cancel": "Cancel",
+    // static index.html markup (data-i18n)
+    "fig.lw": "Leaving water", "fig.outdoor": "Outdoor", "fig.pth": "Heat output", "abbr.est": "est.",
+    "card.system": "System",
+    "schem.outdoor_unit": "OUTDOOR UNIT", "schem.defrost_pill": "❄ defrost", "schem.outdoor": "Outdoor",
+    "schem.leaving_water": "leaving water", "schem.dhw_tank": "DHW TANK", "schem.set": "set",
+    "schem.heating": "HEATING", "schem.pump": "PUMP", "schem.return": "return", "schem.room": "Room",
+    "kpi.compressor": "Compressor", "kpi.flow": "Flow", "kpi.pump": "pump", "kpi.dt": "ΔT water",
+    "kpi.target": "target", "kpi.wp": "Water pressure", "kpi.no_ct": "no current sensor",
+    "kpi.pel": (kw, src) => `${kw} kW el. (${src})`,
+    "trend.title": "Trend — last 30 min",
+    "wifi.title": "WiFi configuration", "wifi.ssid": "WiFi network (SSID)", "wifi.pass": "WiFi password",
+    "wifi.err_ssid": "SSID must be 32 characters or less",
+    "wifi.err_pass": "Password must be empty (open network) or between 8 and 63 characters",
+    "wifi.hint": "SSID is required. If connection to the new network fails, the device rolls back to the old WiFi settings.",
+    "mqtt.title": "MQTT broker", "mqtt.hostport": "Host : port", "mqtt.user": "Username · optional",
+    "mqtt.pass": "Password · optional", "mqtt.clear": "Remove stored credentials — connect anonymously",
+    "mqtt.hint": "Credentials require a TLS broker — use an mqtts:// URL (e.g. mqtts://host:8883). Empty host disables MQTT.",
+    "syslog.title": "Syslog server", "syslog.hostport": "Host : port",
+    "syslog.hint": "IP address or hostname and port of the Syslog server. Empty host disables Syslog.",
+    "ntp.title": "NTP server", "ntp.server": "Server",
+    "ntp.hint": "Hostname or IP of the NTP server the device syncs its clock from. Empty resets to the firmware default.",
+  },
+  de: {
+    "hero.nodata": "Keine Daten", "hero.unreachable": "Nicht erreichbar",
+    "hero.unreachable_sub": "Gerät nicht erreichbar — erneuter Versuch…",
+    "hero.waiting": "Warte auf die Wärmepumpe…", "hero.operating": "In Betrieb",
+    "hero.online": "Online", "hero.fault": "Störung", "hero.running": "läuft",
+    "hero.fault_kicker": (c) => "Störung · " + c,
+    "hero.fault_sub": (c) => "Gerät meldet " + c + " — Außeneinheit prüfen.",
+    "hero.lw": (lw, oat) => `Vorlauf ${lw} °C` + (oat ? ` · außen ${oat} °C` : ""),
+    "hero.polled": (s) => `vor ${s}s abgefragt`,
+    "recovery.title": "Wiederherstellungsmodus",
+    "recovery.meta": "Das Gerät ist zu oft neu gestartet und im Wiederherstellungsmodus hochgefahren. Wärmepumpen-Abfrage und MQTT sind pausiert. Korrigiere die Konfiguration (z. B. die RX/TX-Pins auf der ESP32-Karte) und starte neu, um den Normalbetrieb fortzusetzen.",
+    "rollback.title": "WLAN-Änderung fehlgeschlagen — zurückgesetzt",
+    "rollback.meta": (back) => `Die neuen WLAN-Zugangsdaten konnten sich nicht verbinden, daher hat das Gerät das vorherige Netzwerk${back} wiederhergestellt und neu gestartet. Öffne die WLAN-Zeile in der Verbindungen-Kachel, prüfe Name und Passwort und versuche es erneut.`,
+    "crash.title_fault": "Gerät ist nach einem Absturz neu gestartet",
+    "crash.title_orphan": "Absturzbericht von einem früheren Neustart",
+    "crash.reset": "Reset", "crash.task": "Task", "crash.fw": "FW", "crash.elf": "elf", "crash.corrupted": "beschädigt",
+    "crash.download": "Absturzbericht herunterladen", "crash.copy": "Diagnose kopieren", "crash.dismiss": "Ausblenden",
+    "crash.copied": "Diagnose kopiert — in einen Fehlerbericht einfügen",
+    "crash.copy_fail": "Kopieren fehlgeschlagen — /coredump und /diag manuell öffnen",
+    "conn.title": "Verbindungen", "conn.offline": "Offline", "conn.disabled": "Deaktiviert",
+    "conn.connecting": "Verbinde…", "conn.connected": "Verbunden", "conn.resolving": "Löse auf…",
+    "conn.enabled": "Aktiv", "conn.enabled_noping": "Aktiv, Host antwortet nicht auf Ping",
+    "conn.synced": "Synchronisiert", "conn.syncing": "Synchronisiere…",
+    "conn.error": (e) => "Fehler: " + e, "conn.connected_to": (s) => "Verbunden mit " + s,
+    "conn.aria": (label, state) => `${label}: ${state}. Zum Bearbeiten tippen.`,
+    "card.model": "Modell", "card.uptime": "Laufzeit", "card.lastreset": "Letzter Reset",
+    "card.freeheap": "Freier Heap", "card.hplink": "Wärmepumpen-Verbindung", "card.online": "Online",
+    "card.offline": "Offline", "card.protocol": "Protokoll", "card.rxpin": "RX-Pin",
+    "card.txpin": "TX-Pin", "card.capacity": "Leistung",
+    "values.waiting": "Warte auf die erste Abfrage…",
+    "group.Operation": "Betrieb", "group.Domestic hot water": "Warmwasser",
+    "group.Water circuit": "Wasserkreis", "group.Refrigerant / outdoor": "Kältemittel / Außen",
+    "group.Electrical": "Elektrik", "group.Device": "Gerät", "group.Other values": "Weitere Werte",
+    "group.Values": "Werte",
+    "chip.thermo_on": "Thermostat EIN", "chip.thermo_off": "Thermostat aus",
+    "chip.pump_on": "Pumpe EIN", "chip.pump_off": "Pumpe aus",
+    "chip.buh2": "BUH Stufe 2", "chip.buh1": "BUH Stufe 1", "chip.buh_off": "BUH aus",
+    "chip.defrost": "Abtauen", "chip.quiet": "Leise",
+    "schem.to_dhw": "3WV → WW", "schem.to_heat": "3WV → Heizung",
+    "trend.collecting": "Sammle Daten…",
+    "normal.label": "Normal:",
+    "toast.saved": "Gespeichert", "toast.no_changes": "Keine Änderungen",
+    "toast.reboot": "Neustart — verbinde neu…", "toast.rebooted": "Neu gestartet — bitte neu mit dem Gerät verbinden",
+    "toast.busy_retry": "Gerät ausgelastet — gleich erneut versuchen", "toast.unreachable": "Gerät nicht erreichbar",
+    "toast.rejected": "Abgelehnt", "toast.applying": "Letzte Änderung wird noch angewendet…",
+    "toast.check_wifi": "WLAN-Einstellungen prüfen", "toast.check_broker": "Broker-Adresse prüfen",
+    "toast.check_syslog_port": "Syslog-Port prüfen",
+    "toast.ota_checking": "Suche nach Updates…", "toast.ota_uptodate": (v) => `Aktuell (v${v})`,
+    "toast.ota_timeout": "Update-Prüfung Zeitüberschreitung", "toast.ota_failed": "Update-Prüfung fehlgeschlagen",
+    "toast.ota_cancelled": "Update abgebrochen", "toast.ota_start_fail": "Update konnte nicht gestartet werden",
+    "toast.ota_downloading": "Lade herunter… Gerät eingeschaltet lassen",
+    "toast.ota_progress": (p) => `Lade herunter… ${p}%`, "toast.ota_update_timeout": "Update Zeitüberschreitung",
+    "toast.ota_update_failed": "Update fehlgeschlagen", "toast.ota_installed": "Installiert — Neustart…",
+    "toast.verifying_mqtt": "Prüfe MQTT-Verbindung…", "toast.saving_syslog": "Speichere Syslog-Einstellungen…",
+    "toast.saving_ntp": "Speichere NTP-Einstellungen…", "toast.trying_pins": "Teste Pins…",
+    "ota.confirm": (cur, avail) => `Update verfügbar: v${cur} → v${avail}\n\nDas Gerät lädt das signierte Abbild, installiert es und startet neu. Kommt die neue Firmware nicht online, wird automatisch zurückgesetzt.`,
+    "aria.ota": "Nach Firmware-Updates suchen",
+    "mq.err_format": "Host:Port eingeben — z. B. 192.168.1.10:1883 — oder mqtts://host:8883 für TLS",
+    "sl.err_port": "Port muss eine ganze Zahl 1–65535 sein (z. B. logs.example.com:514).",
+    "btn.saving": "Speichere…", "btn.save": "Speichern", "btn.cancel": "Abbrechen",
+    // static index.html markup (data-i18n)
+    "fig.lw": "Vorlauf", "fig.outdoor": "Außen", "fig.pth": "Wärmeleistung", "abbr.est": "gesch.",
+    "card.system": "System",
+    "schem.outdoor_unit": "AUSSENEINHEIT", "schem.defrost_pill": "❄ Abtauen", "schem.outdoor": "Außen",
+    "schem.leaving_water": "Vorlauf", "schem.dhw_tank": "WW-SPEICHER", "schem.set": "Soll",
+    "schem.heating": "HEIZUNG", "schem.pump": "PUMPE", "schem.return": "Rücklauf", "schem.room": "Raum",
+    "kpi.compressor": "Verdichter", "kpi.flow": "Durchfluss", "kpi.pump": "Pumpe", "kpi.dt": "ΔT Wasser",
+    "kpi.target": "Ziel", "kpi.wp": "Wasserdruck", "kpi.no_ct": "kein Stromsensor",
+    "kpi.pel": (kw, src) => `${kw} kW el. (${src})`,
+    "trend.title": "Verlauf — letzte 30 Min",
+    "wifi.title": "WLAN-Konfiguration", "wifi.ssid": "WLAN-Netzwerk (SSID)", "wifi.pass": "WLAN-Passwort",
+    "wifi.err_ssid": "SSID darf höchstens 32 Zeichen haben",
+    "wifi.err_pass": "Passwort muss leer (offenes Netz) oder 8–63 Zeichen lang sein",
+    "wifi.hint": "SSID ist erforderlich. Scheitert die Verbindung zum neuen Netz, setzt das Gerät auf die alten WLAN-Einstellungen zurück.",
+    "mqtt.title": "MQTT-Broker", "mqtt.hostport": "Host : Port", "mqtt.user": "Benutzername · optional",
+    "mqtt.pass": "Passwort · optional", "mqtt.clear": "Gespeicherte Zugangsdaten entfernen — anonym verbinden",
+    "mqtt.hint": "Zugangsdaten erfordern einen TLS-Broker — mqtts://-URL verwenden (z. B. mqtts://host:8883). Leerer Host deaktiviert MQTT.",
+    "syslog.title": "Syslog-Server", "syslog.hostport": "Host : Port",
+    "syslog.hint": "IP-Adresse oder Hostname und Port des Syslog-Servers. Leerer Host deaktiviert Syslog.",
+    "ntp.title": "NTP-Server", "ntp.server": "Server",
+    "ntp.hint": "Hostname oder IP des NTP-Servers, mit dem das Gerät seine Uhr synchronisiert. Leer setzt auf den Firmware-Standard zurück.",
+  },
+};
+function t(k, ...a) {
+  const v = (I18N[LANG] && I18N[LANG][k] != null) ? I18N[LANG][k] : I18N.en[k];
+  if (v == null) return k;
+  return typeof v === "function" ? v(...a) : v;
+}
+// Localise the static markup in index.html: elements tagged data-i18n get their text set from the
+// dictionary. Runs once at boot (the static DOM is never rebuilt). SVG <text>/<tspan> nodes work the
+// same as HTML here (textContent). Value units (°C, kW, bar, rps, l/min, K) carry no data-i18n — they
+// are language-neutral and left verbatim.
+function applyStaticI18n() {
+  document.documentElement.lang = LANG;
+  document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
+}
+
 // ── App state ────────────────────────────────────────────────────────────
 const S = {
   status: null,
@@ -41,9 +231,9 @@ async function refreshStatus() {
   renderDashboard();
 }
 function markUnreachable() {
-  $("heroKicker").textContent = "No data";
-  $("heroMode").textContent = "Unreachable";
-  $("heroSub").textContent = "Can't reach the device — retrying…";
+  $("heroKicker").textContent = t("hero.nodata");
+  $("heroMode").textContent = t("hero.unreachable");
+  $("heroSub").textContent = t("hero.unreachable_sub");
   $("heroDot").style.background = "var(--err)";
 }
 
@@ -63,14 +253,14 @@ function renderDashboard() {
   const fault = faultValue();
   const faulted = fault && !FAULT_OK.test(String(fault).trim());
   if (!hp.connected) {
-    heroSet("No data", "No data", "Waiting for the heat pump…", "var(--muted)");
+    heroSet(t("hero.nodata"), t("hero.nodata"), t("hero.waiting"), "var(--muted)");
   } else if (faulted) {
-    heroSet("Fault · " + fault, mode || "Fault", "Unit reported " + fault + " — check the outdoor unit.", "var(--err)");
+    heroSet(t("hero.fault_kicker", fault), mode || t("hero.fault"), t("hero.fault_sub", fault), "var(--err)");
   } else {
     const lw = pickValue(/leaving water/i), oat = pickValue(/outdoor air|outdoor$/i);
-    const sub = lw ? `Leaving water ${lw} °C${oat ? " · outdoor " + oat + " °C" : ""}`
-                   : (hp.last_ok_s != null ? `Polled ${hp.last_ok_s}s ago` : "Running");
-    heroSet("Operating", mode || "Online", sub, "var(--ok)");
+    const sub = lw ? t("hero.lw", lw, oat)
+                   : (hp.last_ok_s != null ? t("hero.polled", hp.last_ok_s) : t("hero.running"));
+    heroSet(t("hero.operating"), mode || t("hero.online"), sub, "var(--ok)");
   }
   renderHeaderIp();
   renderConnections();
@@ -121,10 +311,8 @@ function renderRecoveryBanner() {
   el.dataset.on = "1";
   el.innerHTML =
     `<div class="crash-head"><span class="crash-ico">!</span>` +
-    `<div class="crash-txt"><div class="crash-title">Recovery mode</div>` +
-    `<div class="crash-meta">The device restarted too many times and came up in recovery mode. ` +
-    `Heat-pump polling and MQTT are paused. Correct the configuration (for example the RX/TX pins on ` +
-    `the ESP32 card), then reboot to resume normal operation.</div></div></div>`;
+    `<div class="crash-txt"><div class="crash-title">${esc(t("recovery.title"))}</div>` +
+    `<div class="crash-meta">${esc(t("recovery.meta"))}</div></div></div>`;
   el.hidden = false;
 }
 
@@ -157,10 +345,8 @@ function renderRollbackBanner() {
   const back = w.ssid ? ` (<b>${esc(w.ssid)}</b>)` : "";
   el.innerHTML =
     `<div class="crash-head"><span class="crash-ico">!</span>` +
-    `<div class="crash-txt"><div class="crash-title">WiFi change failed — rolled back</div>` +
-    `<div class="crash-meta">The new WiFi credentials couldn't connect, so the device restored the ` +
-    `previous network${back} and restarted. Open the Connections tile's WiFi row to check the name and password, then ` +
-    `try again.</div></div></div>`;
+    `<div class="crash-txt"><div class="crash-title">${esc(t("rollback.title"))}</div>` +
+    `<div class="crash-meta">${t("rollback.meta", back)}</div></div></div>`;
   el.hidden = false;
 }
 
@@ -194,24 +380,22 @@ function renderCrashBanner() {
   el.dataset.rsig = rsig;   // render key
 
   const s = S.status || {}, bt = Array.isArray(c.backtrace) ? c.backtrace : [];
-  const bits = [`Reset: <b>${esc(c.reason)}</b>`];
-  if (c.task) bits.push(`task <span class="mono">${esc(c.task)}</span>`);
-  if (s.version) bits.push(`fw v${esc(s.version)}`);
-  if (s.app_elf_sha256) bits.push(`elf <span class="mono">${esc(s.app_elf_sha256.slice(0, 12))}…</span>`);
+  const bits = [`${esc(t("crash.reset"))}: <b>${esc(c.reason)}</b>`];
+  if (c.task) bits.push(`${esc(t("crash.task"))} <span class="mono">${esc(c.task)}</span>`);
+  if (s.version) bits.push(`${esc(t("crash.fw"))} v${esc(s.version)}`);
+  if (s.app_elf_sha256) bits.push(`${esc(t("crash.elf"))} <span class="mono">${esc(s.app_elf_sha256.slice(0, 12))}…</span>`);
   const btHtml = bt.length
-    ? `<div class="crash-bt mono">${esc(bt.join(" "))}${c.corrupted ? " (corrupted)" : ""}</div>` : "";
+    ? `<div class="crash-bt mono">${esc(bt.join(" "))}${c.corrupted ? " (" + esc(t("crash.corrupted")) + ")" : ""}</div>` : "";
   const dl = c.coredump
-    ? `<a class="btn secondary sm" href="/coredump" download="coredump.bin">Download crash report</a>` : "";
-  const title = c.fault
-    ? "Device restarted after a crash"
-    : "Crash report waiting from an earlier restart";
+    ? `<a class="btn secondary sm" href="/coredump" download="coredump.bin">${esc(t("crash.download"))}</a>` : "";
+  const title = c.fault ? t("crash.title_fault") : t("crash.title_orphan");
   el.innerHTML =
     `<div class="crash-head"><span class="crash-ico">!</span>` +
-    `<div class="crash-txt"><div class="crash-title">${title}</div>` +
+    `<div class="crash-txt"><div class="crash-title">${esc(title)}</div>` +
     `<div class="crash-meta">${bits.join(" · ")}</div>${btHtml}</div></div>` +
     `<div class="crash-actions">${dl}` +
-    `<button class="btn secondary sm" type="button" data-cact="copy">Copy diagnostics</button>` +
-    `<button class="btn ghost sm" type="button" data-cact="dismiss">Dismiss</button></div>`;
+    `<button class="btn secondary sm" type="button" data-cact="copy">${esc(t("crash.copy"))}</button>` +
+    `<button class="btn ghost sm" type="button" data-cact="dismiss">${esc(t("crash.dismiss"))}</button></div>`;
   el.hidden = false;
 }
 
@@ -249,8 +433,8 @@ async function copyDiagnostics() {
   if (bt.length) lines.push(`backtrace: ${bt.join(" ")}${c.corrupted ? "  (corrupted)" : ""}`);
   if (c.elf_sha256 && c.elf_sha256 !== s.app_elf_sha256) lines.push(`crashed build elf_sha256: ${c.elf_sha256}`);
   lines.push("", "--- /diag ---", diag.trim());
-  if (await copyText(lines.join("\n"))) toast("Diagnostics copied — paste into a bug report", "ok");
-  else toast("Copy failed — open /coredump and /diag manually", "err");
+  if (await copyText(lines.join("\n"))) toast(t("crash.copied"), "ok");
+  else toast(t("crash.copy_fail"), "err");
 }
 
 // ── Values (dashboard) ───────────────────────────────────────────────────
@@ -326,7 +510,7 @@ function pinSelRow(label, id, val, pins) {
 }
 
 const fwRow = (version) =>
-  `<button class="vrow vrow-btn" type="button" data-act="ota" aria-label="Check for firmware updates">` +
+  `<button class="vrow vrow-btn" type="button" data-act="ota" aria-label="${esc(t("aria.ota"))}">` +
   `<span class="vrow-label">Firmware</span>` +
   `<span class="vrow-val mono">v${esc(version)}</span></button>`;
 
@@ -345,19 +529,19 @@ function esp32CardHtml() {
   // Last reset is warn-coloured on a fault reason (panic / watchdog / brown-out …) and neutral on a
   // clean boot; Free heap surfaces the current heap so a leak is visible without a serial console.
   const resetRow = sys.reset_reason
-    ? vrow("Last reset", sys.reset_reason, { cls: FAULT_RESETS.includes(sys.reset_reason) ? "warn" : "" })
+    ? vrow(t("card.lastreset"), sys.reset_reason, { cls: FAULT_RESETS.includes(sys.reset_reason) ? "warn" : "" })
     : "";
-  const heapRow = sys.free_heap != null ? vrow("Free heap", fmtBytes(sys.free_heap)) : "";
+  const heapRow = sys.free_heap != null ? vrow(t("card.freeheap"), fmtBytes(sys.free_heap)) : "";
   const rows =
     vrow("Chip", s.platform || "—", { cls: "mono" }) +
     fwRow(s.version || "?") +
-    vrow("Uptime", fmtUptime(s.uptime_s)) +
+    vrow(t("card.uptime"), fmtUptime(s.uptime_s)) +
     resetRow +
     heapRow +
-    vrow("Heat-pump link", hp.connected ? "Online" : "Offline", { cls: hp.connected ? "ok" : "err" }) +
-    vrow("Protocol", hp.connected ? proto : "—") +
-    pinRow("RX pin", "e32Rx", hp.rx, hp.tx) +
-    pinRow("TX pin", "e32Tx", hp.tx, hp.rx);
+    vrow(t("card.hplink"), hp.connected ? t("card.online") : t("card.offline"), { cls: hp.connected ? "ok" : "err" }) +
+    vrow(t("card.protocol"), hp.connected ? proto : "—") +
+    pinRow(t("card.rxpin"), "e32Rx", hp.rx, hp.tx) +
+    pinRow(t("card.txpin"), "e32Tx", hp.tx, hp.rx);
   return vcard("ESP32", rows);
 }
 
@@ -371,11 +555,11 @@ function statusCardsHtml() {
   // (from the cached fingerprint) is shown ONLY while connected — never a stale value read as live.
   // No "Detection: auto/manual" row: detection is fully automatic, an internal detail.
   let model = `<div class="vname">${esc(hpModelName())}</div>`;
-  if (hp.connected && d.capacity_kw != null) model += vrow("Capacity", String(d.capacity_kw), { unit: "kW" });
+  if (hp.connected && d.capacity_kw != null) model += vrow(t("card.capacity"), String(d.capacity_kw), { unit: "kW" });
 
   // Model identity is only meaningful while the bus answers — hide the card entirely when the
   // heat-pump link is down instead of naming a unit (or showing a stale capacity) that isn't live.
-  return esp32CardHtml() + (hp.connected ? vcard("Model", model) : "");
+  return esp32CardHtml() + (hp.connected ? vcard(t("card.model"), model) : "");
 }
 
 // ── Connections tile (WiFi · MQTT · Syslog · NTP, full width under the hero) ──────────────────
@@ -390,7 +574,7 @@ function statusCardsHtml() {
 // screen readers, so `state` (a plain-text status word, never shown visually) goes into the row's
 // aria-label instead of the generic "Edit X" every other edit affordance in this app uses.
 function connRow(label, valueHtml, cls, edit, state) {
-  return `<button class="conn-row" type="button" data-edit="${esc(edit)}" aria-label="${esc(label)}: ${esc(state)}. Tap to edit.">` +
+  return `<button class="conn-row" type="button" data-edit="${esc(edit)}" aria-label="${esc(t("conn.aria", label, state))}">` +
     `<span class="conn-label">${esc(label)}</span>` +
     `<span class="conn-val ${cls || ""}">${valueHtml}</span>` +
     `${editIcon}</button>`;
@@ -405,19 +589,19 @@ function connectionsHtml() {
     wifiVal = (w.rssi != null ? signalBars(w.rssi) : "") +
       (w.rssi != null ? ` <span class="conn-dbm">${w.rssi} dBm</span>` : "") +
       (w.ssid ? ` <span class="conn-name">${esc(w.ssid)}</span>` : "");
-    wifiCls = "ok"; wifiState = "Connected" + (w.ssid ? ` to ${w.ssid}` : "");
+    wifiCls = "ok"; wifiState = w.ssid ? t("conn.connected_to", w.ssid) : t("conn.connected");
   } else {
-    wifiVal = "Offline";
-    wifiCls = "err"; wifiState = "Offline";
+    wifiVal = t("conn.offline");
+    wifiCls = "err"; wifiState = t("conn.offline");
   }
   const wifiRow = connRow((w.std || "Wi-Fi").toUpperCase(), wifiVal, wifiCls, "wifi", wifiState);
 
   let mqttVal, mqttCls, mqttState;
   if (!m.configured) {
-    mqttVal = "Disabled"; mqttCls = ""; mqttState = "Disabled";
+    mqttVal = t("conn.disabled"); mqttCls = ""; mqttState = t("conn.disabled");
   } else {
     mqttCls = m.connected ? "ok" : m.error ? "err" : "warn";
-    mqttState = m.connected ? "Connected" : m.error ? `Error: ${m.error}` : "Connecting…";
+    mqttState = m.connected ? t("conn.connected") : m.error ? t("conn.error", m.error) : t("conn.connecting");
     // No TLS padlock marker: an mqtts:// broker already carries its own scheme in the URL, so the
     // icon only restated what the string says. A schemeless/mqtt:// broker is plaintext and shows none.
     mqttVal = esc(m.broker || "—");
@@ -426,22 +610,22 @@ function connectionsHtml() {
 
   let syVal, syCls, syState;
   if (!sy.configured) {
-    syVal = "Disabled"; syCls = ""; syState = "Disabled";
+    syVal = t("conn.disabled"); syCls = ""; syState = t("conn.disabled");
   } else {
     // Delivery is gated on DNS only (resolved); reachability is an advisory ping hint — green once
     // resolving, yellow (still forwarding) when the host doesn't answer the probe or resolution is
     // still pending, red on a DNS error.
     syCls = sy.error ? "err" : sy.resolved ? (sy.reachable ? "ok" : "warn") : "warn";
-    syState = sy.error ? sy.error : sy.resolved ? (sy.reachable ? "Enabled" : "Enabled, host not answering ping") : "Resolving…";
+    syState = sy.error ? sy.error : sy.resolved ? (sy.reachable ? t("conn.enabled") : t("conn.enabled_noping")) : t("conn.resolving");
     syVal = esc(sy.host ? `${sy.host}:${sy.port || 514}` : "—");
   }
   const syslogRow = connRow("Syslog", syVal, syCls, "syslog", syState);
 
   // NTP has no "disabled" or error state (unlike MQTT/Syslog) — it always has a server, so it is a
   // two-state ok/warn row keyed on whether the first sync of this boot has landed.
-  const ntpRow = connRow("NTP", esc(nt.server || "—"), nt.synced ? "ok" : "warn", "ntp", nt.synced ? "Synced" : "Syncing…");
+  const ntpRow = connRow("NTP", esc(nt.server || "—"), nt.synced ? "ok" : "warn", "ntp", nt.synced ? t("conn.synced") : t("conn.syncing"));
 
-  return `<div class="section-label">Connections</div>` + wifiRow + mqttRow + syslogRow + ntpRow;
+  return `<div class="section-label">${esc(t("conn.title"))}</div>` + wifiRow + mqttRow + syslogRow + ntpRow;
 }
 function renderConnections() {
   $("connTile").innerHTML = connectionsHtml();
@@ -460,199 +644,306 @@ const DESCRIPTIONS = [
   // ── Domestic hot water ──
   { re: /dhw setpoint|dhw set ?point/i,
     what: "Target temperature for the hot-water tank. The unit runs DHW mode until the tank sensor reaches it, then stops.",
-    normal: "usually 45–55 °C. Higher leans on the electric backup heater and costs more; a weekly ≥60 °C cycle is the normal anti-legionella boost." },
+    normal: "usually 45–55 °C. Higher leans on the electric backup heater and costs more; a weekly ≥60 °C cycle is the normal anti-legionella boost.",
+    de: { what: "Zieltemperatur für den Warmwasserspeicher. Das Gerät läuft im Warmwasser-Modus, bis der Speicherfühler sie erreicht, dann stoppt es.",
+          normal: "meist 45–55 °C. Höher belastet den elektrischen Zusatzheizer und kostet mehr; ein wöchentlicher Zyklus auf ≥60 °C ist die normale Legionellen-Aufheizung." } },
   { re: /2nd domestic hot water/i,
-    what: "A second temperature sensor in the hot-water tank (used on tanks with two sensors, e.g. top and bottom)." },
+    what: "A second temperature sensor in the hot-water tank (used on tanks with two sensors, e.g. top and bottom).",
+    de: { what: "Ein zweiter Temperaturfühler im Warmwasserspeicher (bei Speichern mit zwei Fühlern, z. B. oben und unten)." } },
   { re: /dhw tank temp|dhw tank/i,
     what: "The water temperature actually measured inside the hot-water tank (sensor R5T).",
-    normal: "sits below the DHW setpoint and climbs during a DHW cycle. Staying far below setpoint with the tank idle means it's simply been used up, or a sensor/heating fault." },
+    normal: "sits below the DHW setpoint and climbs during a DHW cycle. Staying far below setpoint with the tank idle means it's simply been used up, or a sensor/heating fault.",
+    de: { what: "Die tatsächlich im Warmwasserspeicher gemessene Wassertemperatur (Fühler R5T).",
+          normal: "liegt unter dem Warmwasser-Sollwert und steigt während eines Warmwasser-Zyklus. Bleibt sie im Ruhezustand weit unter dem Sollwert, ist der Speicher schlicht verbraucht — oder es liegt ein Fühler-/Heizfehler vor." } },
   { re: /powerful dhw/i,
     what: "A one-off boost that heats the tank to the setpoint as fast as possible, calling in the backup heater if needed.",
-    normal: "OFF in day-to-day use; ON only while you've triggered a manual boost." },
+    normal: "OFF in day-to-day use; ON only while you've triggered a manual boost.",
+    de: { what: "Eine einmalige Schnellaufheizung, die den Speicher so schnell wie möglich auf den Sollwert bringt und bei Bedarf den Zusatzheizer zuschaltet.",
+          normal: "im Alltag AUS; nur EIN, während du eine manuelle Aufheizung ausgelöst hast." } },
   { re: /tank preheat/i,
     what: "The tank is being warmed ahead of an expected draw (from the schedule or weather forecast) so hot water is ready in time.",
-    normal: "briefly ON around scheduled/anticipated demand, OFF otherwise." },
+    normal: "briefly ON around scheduled/anticipated demand, OFF otherwise.",
+    de: { what: "Der Speicher wird vor einer erwarteten Entnahme (nach Zeitplan oder Wetterprognose) vorgewärmt, damit rechtzeitig Warmwasser bereitsteht.",
+          normal: "kurz EIN rund um geplanten/erwarteten Bedarf, sonst AUS." } },
   { re: /reheat on/i,
     what: "The tank is being topped back up to its comfort temperature between scheduled heating slots.",
-    normal: "ON in short bursts to hold the tank warm; OFF most of the time." },
+    normal: "ON in short bursts to hold the tank warm; OFF most of the time.",
+    de: { what: "Der Speicher wird zwischen geplanten Heizzeiten wieder auf seine Komforttemperatur nachgeladen.",
+          normal: "EIN in kurzen Schüben, um den Speicher warm zu halten; die meiste Zeit AUS." } },
   { re: /storage (eco|comfort)/i,
-    what: "Which stored-hot-water target is active: Comfort keeps the tank fuller/hotter, ECO holds a lower reserve to save energy." },
+    what: "Which stored-hot-water target is active: Comfort keeps the tank fuller/hotter, ECO holds a lower reserve to save energy.",
+    de: { what: "Welches Warmwasser-Speicherziel aktiv ist: Komfort hält den Speicher voller/heißer, ECO hält eine niedrigere Reserve, um Energie zu sparen." } },
   { re: /boiler dhw demand/i,
     what: "On a hybrid (heat-pump + gas boiler) system: the boiler has been asked to make the hot water instead of the heat pump.",
-    normal: "OFF on a heat-pump-only system; on a hybrid it comes ON when the boiler is cheaper/faster than the heat pump for DHW." },
+    normal: "OFF on a heat-pump-only system; on a hybrid it comes ON when the boiler is cheaper/faster than the heat pump for DHW.",
+    de: { what: "Bei einem Hybridsystem (Wärmepumpe + Gaskessel): Der Kessel wurde angefordert, das Warmwasser statt der Wärmepumpe zu erzeugen.",
+          normal: "AUS bei reinem Wärmepumpenbetrieb; im Hybridsystem EIN, wenn der Kessel für Warmwasser günstiger/schneller ist als die Wärmepumpe." } },
 
   // ── Valves ──
   { re: /3.?way valve/i,
     what: "The diverter valve that sends heated water either to the DHW tank (ON = DHW) or to the space-heating circuit (OFF = heating). It can only feed one at a time.",
-    normal: "ON only during a hot-water cycle; OFF (feeding heating) the rest of the time." },
+    normal: "ON only during a hot-water cycle; OFF (feeding heating) the rest of the time.",
+    de: { what: "Das Umschaltventil, das erwärmtes Wasser entweder zum Warmwasserspeicher (EIN = WW) oder in den Heizkreis (AUS = Heizung) leitet. Es kann immer nur eines versorgen.",
+          normal: "nur während eines Warmwasser-Zyklus EIN; sonst AUS (versorgt die Heizung)." } },
   { re: /2.?way valve/i,
-    what: "Selects the water path for the current mode — ON in heating, OFF in cooling (per the label)." },
+    what: "Selects the water path for the current mode — ON in heating, OFF in cooling (per the label).",
+    de: { what: "Wählt den Wasserweg für den aktuellen Modus — EIN im Heizbetrieb, AUS im Kühlbetrieb (laut Bezeichnung)." } },
   { re: /mix valve position|bizone kit mix valve/i,
     what: "Opening of the bizone mixing valve, blending hot flow with cooler return to hold a lower temperature for a second (e.g. underfloor) zone.",
-    normal: "modulates between fully closed and fully open to hold that zone's target." },
+    normal: "modulates between fully closed and fully open to hold that zone's target.",
+    de: { what: "Öffnung des Bizone-Mischventils, das heißen Vorlauf mit kühlerem Rücklauf mischt, um für eine zweite Zone (z. B. Fußbodenheizung) eine niedrigere Temperatur zu halten.",
+          normal: "regelt zwischen ganz geschlossen und ganz offen, um das Ziel dieser Zone zu halten." } },
 
   // ── Leaving / return / mixed water ──
   { re: /(leaving water|lw) set ?point/i,
     what: "The target flow (leaving-water) temperature the controller is aiming for — usually set automatically by weather compensation, warmer when it's colder outside.",
-    normal: "tracks the outdoor temperature: higher on cold days, lower on mild ones." },
+    normal: "tracks the outdoor temperature: higher on cold days, lower on mild ones.",
+    de: { what: "Die Ziel-Vorlauftemperatur, die der Regler anstrebt — meist automatisch über die Witterungsführung gesetzt, wärmer wenn es draußen kälter ist.",
+          normal: "folgt der Außentemperatur: höher an kalten, niedriger an milden Tagen." } },
   { re: /mixed (leaving|water)/i,
-    what: "Blended flow temperature of a mixed heating zone (after its mixing valve) — typically a cooler underfloor loop fed off a hotter primary circuit." },
+    what: "Blended flow temperature of a mixed heating zone (after its mixing valve) — typically a cooler underfloor loop fed off a hotter primary circuit.",
+    de: { what: "Gemischte Vorlauftemperatur einer gemischten Heizzone (nach ihrem Mischventil) — typisch ein kühlerer Fußbodenkreis, gespeist aus einem heißeren Primärkreis." } },
   { re: /after buh|outlet water buh|after buffer|tvbh/i,
     what: "Water temperature after the electric backup heater (sensor R2T) — the temperature that actually reaches your radiators/underfloor.",
-    normal: "equal to the before-BUH temperature when the backup heater is off (the usual case); higher only while the BUH is firing." },
+    normal: "equal to the before-BUH temperature when the backup heater is off (the usual case); higher only while the BUH is firing.",
+    de: { what: "Wassertemperatur nach dem elektrischen Zusatzheizer (Fühler R2T) — die Temperatur, die tatsächlich an Heizkörper/Fußbodenheizung ankommt.",
+          normal: "gleich der Temperatur vor dem BUH, wenn der Zusatzheizer aus ist (der Normalfall); höher nur, während der BUH heizt." } },
   { re: /before buh|after phe|outlet water heat exch|leaving water.*\(?r1t\)?|tv inflow|outlet water heat exchanger/i,
     what: "Water temperature leaving the heat pump's own heat exchanger, before the backup heater (sensor R1T) — the true heat-pump output temperature and the one used for ΔT / heat-output / COP.",
-    normal: "space heating ~30–45 °C (underfloor lower, radiators higher); up to ~55 °C on a DHW run. Much higher than the target usually means the backup heater is contributing." },
+    normal: "space heating ~30–45 °C (underfloor lower, radiators higher); up to ~55 °C on a DHW run. Much higher than the target usually means the backup heater is contributing.",
+    de: { what: "Wassertemperatur, die den Wärmetauscher der Wärmepumpe verlässt, vor dem Zusatzheizer (Fühler R1T) — die eigentliche Vorlauftemperatur der Wärmepumpe und die Basis für ΔT / Wärmeleistung / COP.",
+          normal: "Raumheizung ~30–45 °C (Fußboden niedriger, Heizkörper höher); bis ~55 °C bei einem Warmwasser-Lauf. Deutlich über dem Ziel heißt meist, dass der Zusatzheizer mitwirkt." } },
   { re: /inlet water|return water|tr return/i,
     what: "Water returning from the house back into the unit (sensor R4T). Leaving-water minus this is the ΔT across the system.",
-    normal: "a few degrees below the leaving-water temperature; a healthy heating ΔT is around 5 K." },
+    normal: "a few degrees below the leaving-water temperature; a healthy heating ΔT is around 5 K.",
+    de: { what: "Wasser, das aus dem Haus zurück ins Gerät strömt (Fühler R4T). Vorlauf minus dieser Wert ergibt das ΔT über die Anlage.",
+          normal: "einige Grad unter der Vorlauftemperatur; ein gesundes Heiz-ΔT liegt bei etwa 5 K." } },
 
   // ── Flow / pressure / pump ──
   { re: /flow (sensor|rate)|flow rate/i,
     what: "How fast water is circulating through the heating/DHW circuit.",
-    normal: "typically ~10–30 l/min depending on unit size and pump speed. Too low can trip a flow fault and stop the compressor — suspect air, a closed valve or a dirty filter." },
+    normal: "typically ~10–30 l/min depending on unit size and pump speed. Too low can trip a flow fault and stop the compressor — suspect air, a closed valve or a dirty filter.",
+    de: { what: "Wie schnell das Wasser durch den Heiz-/Warmwasserkreis zirkuliert.",
+          normal: "typisch ~10–30 l/min je nach Gerätegröße und Pumpendrehzahl. Zu wenig kann einen Durchfluss-Fehler auslösen und den Verdichter stoppen — Verdacht: Luft, ein geschlossenes Ventil oder ein verschmutzter Filter." } },
   { re: /water pressure/i,
     what: "Water pressure in the sealed heating circuit.",
-    normal: "roughly 1.0–2.0 bar when cold. Below ~0.5 bar needs topping up; a persistent low reading can stop the pump." },
+    normal: "roughly 1.0–2.0 bar when cold. Below ~0.5 bar needs topping up; a persistent low reading can stop the pump.",
+    de: { what: "Wasserdruck im geschlossenen Heizkreis.",
+          normal: "kalt etwa 1,0–2,0 bar. Unter ~0,5 bar muss nachgefüllt werden; ein dauerhaft niedriger Wert kann die Pumpe stoppen." } },
   { re: /water pump signal/i,
     what: "The speed command sent to the circulation pump. Note it is inverted — 0 means full speed, 100 means stopped (per the label).",
-    normal: "a low number (fast pump) while heating or making DHW; 100 (stopped) when idle." },
+    normal: "a low number (fast pump) while heating or making DHW; 100 (stopped) when idle.",
+    de: { what: "Der Drehzahlbefehl an die Umwälzpumpe. Beachte: invertiert — 0 bedeutet volle Drehzahl, 100 bedeutet gestoppt (laut Bezeichnung).",
+          normal: "eine niedrige Zahl (schnelle Pumpe) beim Heizen oder Warmwasserbereiten; 100 (gestoppt) im Leerlauf." } },
   { re: /water pump operation|circulation pump|solar pump|main pump|add pump|pump speed/i,
     what: "The circulation pump that moves water between the unit and the tank/emitters — whether it's running (or how hard, for a speed reading).",
-    normal: "running while heating, cooling or making hot water; may keep going briefly afterwards or periodically to anti-seize." },
+    normal: "running while heating, cooling or making hot water; may keep going briefly afterwards or periodically to anti-seize.",
+    de: { what: "Die Umwälzpumpe, die Wasser zwischen Gerät und Speicher/Heizflächen bewegt — ob sie läuft (oder wie stark, bei einem Drehzahlwert).",
+          normal: "läuft beim Heizen, Kühlen oder Warmwasserbereiten; läuft evtl. kurz nach oder periodisch zum Schutz vor Festsitzen." } },
   { re: /water flow switch/i,
     what: "A safety switch that confirms water is genuinely flowing before the compressor or backup heater are allowed to run — protecting the heat exchanger from running dry.",
-    normal: "ON (flow proven) whenever the pump is running." },
+    normal: "ON (flow proven) whenever the pump is running.",
+    de: { what: "Ein Sicherheitsschalter, der bestätigt, dass tatsächlich Wasser fließt, bevor Verdichter oder Zusatzheizer laufen dürfen — schützt den Wärmetauscher vor Trockenlauf.",
+          normal: "EIN (Durchfluss bestätigt), sobald die Pumpe läuft." } },
 
   // ── Operation / mode / fault ──
   { re: /i\/u operation mode/i,
     what: "What the water (indoor) side is doing right now: Stop, Heating, Cooling, Domestic Hot Water, or a heating+DHW combination.",
-    normal: "reflects the current job. During a hot-water cycle it reads DHW even though the outdoor unit still shows Heating." },
+    normal: "reflects the current job. During a hot-water cycle it reads DHW even though the outdoor unit still shows Heating.",
+    de: { what: "Was die Wasserseite (Inneneinheit) gerade tut: Stopp, Heizen, Kühlen, Warmwasser oder eine Kombination aus Heizen+Warmwasser.",
+          normal: "spiegelt die aktuelle Aufgabe wider. Während eines Warmwasser-Zyklus steht hier WW, obwohl die Außeneinheit weiterhin Heizen anzeigt." } },
   { re: /operation mode|operation \/ fault|^operation$/i,
-    what: "The outdoor unit's thermodynamic mode (Heating, Cooling, …). While it heats the tank it still reports Heating — it is heating, just the water in the tank rather than the house." },
+    what: "The outdoor unit's thermodynamic mode (Heating, Cooling, …). While it heats the tank it still reports Heating — it is heating, just the water in the tank rather than the house.",
+    de: { what: "Der thermodynamische Modus der Außeneinheit (Heizen, Kühlen, …). Während sie den Speicher aufheizt, meldet sie weiterhin Heizen — sie heizt ja, nur das Wasser im Speicher statt das Haus." } },
   { re: /defrost/i,
     what: "The unit is melting frost off the outdoor coil by briefly running its cycle in reverse. Heating output pauses and steam may rise from the outdoor unit.",
-    normal: "normal and self-clearing in cold, damp weather; a few minutes every so often. Constant defrosting suggests low refrigerant or poor airflow." },
+    normal: "normal and self-clearing in cold, damp weather; a few minutes every so often. Constant defrosting suggests low refrigerant or poor airflow.",
+    de: { what: "Das Gerät taut Reif von der Außeneinheit ab, indem es den Kreislauf kurz umkehrt. Die Heizleistung pausiert, und aus der Außeneinheit kann Dampf aufsteigen.",
+          normal: "normal und selbstbeendend bei kaltem, feuchtem Wetter; ab und zu ein paar Minuten. Ständiges Abtauen deutet auf zu wenig Kältemittel oder schlechten Luftstrom hin." } },
   { re: /error type/i,
     what: "The severity class of any active fault: Normal, Error, Warning or Caution.",
-    normal: "Normal. Anything else points to an active fault or advisory — check the fault code." },
+    normal: "Normal. Anything else points to an active fault or advisory — check the fault code.",
+    de: { what: "Die Schwereklasse einer aktiven Störung: Normal, Fehler, Warnung oder Hinweis.",
+          normal: "Normal. Alles andere weist auf eine aktive Störung oder einen Hinweis hin — den Fehlercode prüfen." } },
   { re: /error code|fault code/i,
     what: "The Daikin fault code (e.g. U4, H3). Blank or 0 means no fault. If the unit stops, note this code — it identifies the problem for a service tech.",
-    normal: "blank / no fault. A code present with the unit stopped means it has shut down on that fault." },
+    normal: "blank / no fault. A code present with the unit stopped means it has shut down on that fault.",
+    de: { what: "Der Daikin-Fehlercode (z. B. U4, H3). Leer oder 0 bedeutet keine Störung. Stoppt das Gerät, notiere diesen Code — er benennt das Problem für den Servicetechniker.",
+          normal: "leer / keine Störung. Ein vorhandener Code bei gestopptem Gerät bedeutet, dass es sich wegen dieser Störung abgeschaltet hat." } },
   { re: /emergency/i,
-    what: "Emergency operation: the system is running in a fallback mode (often backup-heater only) after a fault, to keep some heat/hot water until it's serviced." },
+    what: "Emergency operation: the system is running in a fallback mode (often backup-heater only) after a fault, to keep some heat/hot water until it's serviced.",
+    de: { what: "Notbetrieb: Die Anlage läuft nach einer Störung in einem Ersatzbetrieb (oft nur Zusatzheizer), um bis zur Wartung etwas Wärme/Warmwasser zu liefern." } },
   { re: /alarm output/i,
-    what: "The unit's alarm relay — switched ON to signal a fault to any external alarm/monitoring wired to it." },
+    what: "The unit's alarm relay — switched ON to signal a fault to any external alarm/monitoring wired to it.",
+    de: { what: "Das Alarmrelais des Geräts — schaltet EIN, um eine Störung an eine angeschlossene externe Alarm-/Überwachungseinrichtung zu melden." } },
 
   // ── Room / thermostat ──
   { re: /thermostat/i,
     what: "Whether the room or zone is currently calling for heat. ON = there is demand and the unit may run; OFF = the room is up to temperature.",
-    normal: "cycles ON and OFF as the room drifts around its target." },
+    normal: "cycles ON and OFF as the room drifts around its target.",
+    de: { what: "Ob der Raum bzw. die Zone gerade Wärme anfordert. EIN = Bedarf vorhanden, das Gerät darf laufen; AUS = der Raum ist auf Temperatur.",
+          normal: "schaltet EIN und AUS, während der Raum um sein Ziel pendelt." } },
   { re: /space heating operation|space h operation/i,
-    what: "Whether space heating (as opposed to hot-water production) is currently active or being called for." },
+    what: "Whether space heating (as opposed to hot-water production) is currently active or being called for.",
+    de: { what: "Ob die Raumheizung (im Unterschied zur Warmwasserbereitung) gerade aktiv ist oder angefordert wird." } },
   { re: /rt set ?point/i,
-    what: "The target room temperature you've set for the zone the unit's own room sensor controls." },
+    what: "The target room temperature you've set for the zone the unit's own room sensor controls.",
+    de: { what: "Die von dir eingestellte Ziel-Raumtemperatur für die Zone, die der eigene Raumfühler des Geräts regelt." } },
   { re: /\brt temp|indoor ambient|ext\. indoor ambient/i,   // \b so "po(rt temp)erature" doesn't hit this
     what: "The room temperature measured by the unit's built-in or wired room sensor.",
-    normal: "sits near the room setpoint once the zone is satisfied." },
+    normal: "sits near the room setpoint once the zone is satisfied.",
+    de: { what: "Die vom eingebauten oder verdrahteten Raumfühler des Geräts gemessene Raumtemperatur.",
+          normal: "liegt nahe am Raum-Sollwert, sobald die Zone zufrieden ist." } },
 
   // ── Outdoor / refrigerant circuit ──
   { re: /outdoor air|outdoor ambient|r1t-outdoor|^outdoor/i,
     what: "The outside air temperature measured at the unit — the source it draws heat from.",
-    normal: "the colder it is outside, the lower the efficiency (COP) and the more the backup heater may help out." },
+    normal: "the colder it is outside, the lower the efficiency (COP) and the more the backup heater may help out.",
+    de: { what: "Die am Gerät gemessene Außenlufttemperatur — die Quelle, aus der es Wärme bezieht.",
+          normal: "je kälter es draußen ist, desto geringer die Effizienz (COP) und desto eher hilft der Zusatzheizer mit." } },
   { re: /water heat exchanger (inlet|outlet)/i,
-    what: "Raw water temperatures at the inlet/outlet of the plate heat exchanger that transfers heat between the refrigerant and the water." },
+    what: "Raw water temperatures at the inlet/outlet of the plate heat exchanger that transfers heat between the refrigerant and the water.",
+    de: { what: "Rohe Wassertemperaturen am Ein-/Austritt des Plattenwärmetauschers, der Wärme zwischen Kältemittel und Wasser überträgt." } },
   { re: /o\/u heat exch|outdoor heat exchanger|heat exchanger mid-?temp|heat exch\. (mid-?)?temp/i,
     what: "Temperature of the outdoor coil, where refrigerant boils off (heating) or condenses (cooling) by exchanging heat with the outside air.",
-    normal: "near or below freezing in cold-weather heating — that frost build-up is what triggers the periodic defrost." },
+    normal: "near or below freezing in cold-weather heating — that frost build-up is what triggers the periodic defrost.",
+    de: { what: "Temperatur der Außeneinheit-Wärmetauscherlamellen, wo das Kältemittel verdampft (Heizen) oder kondensiert (Kühlen) und dabei Wärme mit der Außenluft tauscht.",
+          normal: "beim Heizen im Kalten nahe oder unter dem Gefrierpunkt — diese Reifbildung löst das periodische Abtauen aus." } },
   { re: /discharge pipe|compressor outlet|inv discharge/i,
     what: "Temperature of the hot compressed refrigerant gas leaving the compressor.",
-    normal: "the hottest point in the circuit, well above the condensing temperature. A very high value makes the unit throttle back to protect the compressor." },
+    normal: "the hottest point in the circuit, well above the condensing temperature. A very high value makes the unit throttle back to protect the compressor.",
+    de: { what: "Temperatur des heißen, verdichteten Kältemittelgases, das den Verdichter verlässt.",
+          normal: "der heißeste Punkt im Kreislauf, deutlich über der Kondensationstemperatur. Ein sehr hoher Wert lässt das Gerät zurückregeln, um den Verdichter zu schützen." } },
   { re: /suction (pipe )?temp|suction temp/i,
-    what: "Temperature of the cool low-pressure refrigerant gas returning to the compressor." },
+    what: "Temperature of the cool low-pressure refrigerant gas returning to the compressor.",
+    de: { what: "Temperatur des kühlen Kältemittelgases mit niedrigem Druck, das zum Verdichter zurückströmt." } },
   { re: /liquid (pipe )?temp|liquid temperature|refrig\. temp\. liquid/i,
-    what: "Refrigerant temperature on the liquid line between the heat exchangers." },
+    what: "Refrigerant temperature on the liquid line between the heat exchangers.",
+    de: { what: "Kältemitteltemperatur in der Flüssigkeitsleitung zwischen den Wärmetauschern." } },
   { re: /refrig\. temp\. evap/i,
-    what: "Refrigerant temperature entering/leaving the evaporator (the heat exchanger absorbing heat)." },
+    what: "Refrigerant temperature entering/leaving the evaporator (the heat exchanger absorbing heat).",
+    de: { what: "Kältemitteltemperatur beim Ein-/Austritt des Verdampfers (der Wärme aufnehmende Wärmetauscher)." } },
   { re: /injection tube|2 phase thermistor|r4t-deicer/i,
-    what: "Temperature of a vapour/liquid-injection or de-icer sensor used by the compressor's internal control." },
+    what: "Temperature of a vapour/liquid-injection or de-icer sensor used by the compressor's internal control.",
+    de: { what: "Temperatur eines Dampf-/Flüssigkeits-Einspritz- oder Enteiser-Fühlers, den die interne Verdichterregelung nutzt." } },
   { re: /(high|low) pressure ?\(?(sat|t)/i,
-    what: "The high/low refrigerant pressure expressed as a saturation temperature — the temperature the refrigerant boils/condenses at for that pressure. Easier to sanity-check than raw bar." },
+    what: "The high/low refrigerant pressure expressed as a saturation temperature — the temperature the refrigerant boils/condenses at for that pressure. Easier to sanity-check than raw bar.",
+    de: { what: "Der Hoch-/Niederdruck des Kältemittels ausgedrückt als Sättigungstemperatur — die Temperatur, bei der das Kältemittel bei diesem Druck siedet/kondensiert. Leichter einzuschätzen als reine bar." } },
   { re: /(high|low) pressure/i,
     what: "Refrigerant pressure on the high (compressor discharge) or low (compressor suction) side. The gap between them is what the compressor works against, and it drives efficiency.",
-    normal: "varies with outdoor temperature and load; steady during stable running." },
+    normal: "varies with outdoor temperature and load; steady during stable running.",
+    de: { what: "Kältemitteldruck auf der Hochdruck- (Verdichter-Druckseite) bzw. Niederdruckseite (Verdichter-Saugseite). Die Differenz dazwischen ist es, wogegen der Verdichter arbeitet, und sie bestimmt die Effizienz.",
+          normal: "variiert mit Außentemperatur und Last; im stabilen Betrieb gleichmäßig." } },
   { re: /compressor speed|inv frequency|frequency \(rps\)/i,
     what: "How fast the inverter-driven compressor is spinning, in revolutions per second. This is the unit's main output control.",
-    normal: "modulates from 0 up to ~100+ rps to match demand — higher when there's more to heat, 0 when idle." },
+    normal: "modulates from 0 up to ~100+ rps to match demand — higher when there's more to heat, 0 when idle.",
+    de: { what: "Wie schnell der invertergeregelte Verdichter dreht, in Umdrehungen pro Sekunde. Das ist die wichtigste Leistungsstellgröße des Geräts.",
+          normal: "moduliert von 0 bis ~100+ rps je nach Bedarf — höher, wenn mehr zu heizen ist, 0 im Leerlauf." } },
   { re: /expansion valve/i,
     what: "Opening of the electronic expansion valve, in steps/pulses. It meters exactly how much refrigerant flows into the evaporator.",
-    normal: "continuously adjusts while running to keep the refrigerant cycle in its sweet spot." },
+    normal: "continuously adjusts while running to keep the refrigerant cycle in its sweet spot.",
+    de: { what: "Öffnung des elektronischen Expansionsventils, in Schritten/Impulsen. Es dosiert genau, wie viel Kältemittel in den Verdampfer strömt.",
+          normal: "regelt im Betrieb ständig nach, um den Kältekreis im optimalen Bereich zu halten." } },
   { re: /fan\d? fin temp|fan \d fin/i,
-    what: "Temperature of the outdoor fan motor's driver electronics." },
+    what: "Temperature of the outdoor fan motor's driver electronics.",
+    de: { what: "Temperatur der Leistungselektronik des Außenlüftermotors." } },
   { re: /^fan ?\d|fan \d \(/i,
     what: "Outdoor fan speed, as a step or in rpm. The fan pulls outside air across the coil.",
-    normal: "ramps up with compressor load; drops to 0 when idle and during parts of a defrost." },
+    normal: "ramps up with compressor load; drops to 0 when idle and during parts of a defrost.",
+    de: { what: "Drehzahl des Außenlüfters, als Stufe oder in U/min. Der Lüfter zieht Außenluft über die Lamellen.",
+          normal: "steigt mit der Verdichterlast; fällt im Leerlauf und in Teilen eines Abtauvorgangs auf 0." } },
   { re: /target (evap|cond)/i,
-    what: "An internal control target the unit is steering the refrigerant circuit toward (target evaporating/condensing temperature) — not a value you set." },
+    what: "An internal control target the unit is steering the refrigerant circuit toward (target evaporating/condensing temperature) — not a value you set.",
+    de: { what: "Eine interne Regelvorgabe, auf die das Gerät den Kältekreis steuert (Ziel-Verdampfungs-/Kondensationstemperatur) — kein von dir eingestellter Wert." } },
   { re: /target (discharge|port)/i,
-    what: "An internal control target for the compressor discharge/port temperature — used by the unit's own protection logic." },
+    what: "An internal control target for the compressor discharge/port temperature — used by the unit's own protection logic.",
+    de: { what: "Eine interne Regelvorgabe für die Verdichter-Druckgas-/Anschlusstemperatur — genutzt von der eigenen Schutzlogik des Geräts." } },
   { re: /target delta t/i,
     what: "The target temperature difference (ΔT) between leaving and returning water the controller aims to maintain across the circuit.",
-    normal: "commonly around 5 K for heating; the pump speed is trimmed to hold it." },
+    normal: "commonly around 5 K for heating; the pump speed is trimmed to hold it.",
+    de: { what: "Die Ziel-Temperaturdifferenz (ΔT) zwischen Vor- und Rücklauf, die der Regler über den Kreis halten will.",
+          normal: "beim Heizen üblich um 5 K; die Pumpendrehzahl wird nachgeregelt, um sie zu halten." } },
   { re: /refrigerant type/i,
-    what: "The refrigerant this unit is charged with (e.g. R32 or R410A). It sets the pressure↔temperature curve used for the saturation-temperature readings." },
+    what: "The refrigerant this unit is charged with (e.g. R32 or R410A). It sets the pressure↔temperature curve used for the saturation-temperature readings.",
+    de: { what: "Das Kältemittel, mit dem dieses Gerät gefüllt ist (z. B. R32 oder R410A). Es legt die Druck-Temperatur-Kurve für die Sättigungstemperatur-Werte fest." } },
   { re: /compressor port/i,
-    what: "Temperature measured at a compressor port — part of the unit's internal protection monitoring." },
+    what: "Temperature measured at a compressor port — part of the unit's internal protection monitoring.",
+    de: { what: "An einem Verdichteranschluss gemessene Temperatur — Teil der internen Schutzüberwachung des Geräts." } },
   { re: /refrigerant pressure|pressure/i,
-    what: "A refrigerant-circuit pressure reading from the outdoor unit." },
+    what: "A refrigerant-circuit pressure reading from the outdoor unit.",
+    de: { what: "Ein Druckwert aus dem Kältekreis der Außeneinheit." } },
 
   // ── Electrical ──
   { re: /ct sensor|current measured by ct/i,
     what: "Mains current on one phase (L1/L2/L3), measured by a clamp (CT) sensor. Combined, these estimate the electrical power the unit is drawing.",
-    normal: "rises with compressor and backup-heater load; near zero when idle." },
+    normal: "rises with compressor and backup-heater load; near zero when idle.",
+    de: { what: "Netzstrom einer Phase (L1/L2/L3), gemessen mit einem Stromwandler (CT). Zusammen schätzen sie die elektrische Leistungsaufnahme des Geräts.",
+          normal: "steigt mit Verdichter- und Zusatzheizer-Last; nahe null im Leerlauf." } },
   { re: /inv (primary|secondary|compressor) current|inv .*current \(a\)/i,
-    what: "Current drawn by the compressor inverter — a proxy for how hard the compressor is working." },
+    what: "Current drawn by the compressor inverter — a proxy for how hard the compressor is working.",
+    de: { what: "Vom Verdichter-Inverter aufgenommener Strom — ein Maß dafür, wie stark der Verdichter arbeitet." } },
   { re: /inv fin temp|fin temp|heat sink temp/i,
     what: "Temperature of the inverter/power-electronics heatsink in the outdoor unit.",
-    normal: "warm under load; a very high value makes the unit throttle to protect the electronics." },
+    normal: "warm under load; a very high value makes the unit throttle to protect the electronics.",
+    de: { what: "Temperatur des Kühlkörpers der Inverter-/Leistungselektronik in der Außeneinheit.",
+          normal: "unter Last warm; ein sehr hoher Wert lässt das Gerät zurückregeln, um die Elektronik zu schützen." } },
 
   // ── Backup / booster heater ──
   { re: /buh output capacity/i,
     what: "Which stage(s) of the electric backup heater are engaged, as a capacity step.",
-    normal: "0 when the heat pump covers the load alone; higher only in very cold weather or a fast DHW boost." },
+    normal: "0 when the heat pump covers the load alone; higher only in very cold weather or a fast DHW boost.",
+    de: { what: "Welche Stufe(n) des elektrischen Zusatzheizers aktiv sind, als Leistungsstufe.",
+          normal: "0, wenn die Wärmepumpe die Last allein deckt; höher nur bei sehr kaltem Wetter oder einer schnellen Warmwasser-Aufheizung." } },
   { re: /buh step/i,
     what: "An electric backup-heater stage. These use resistive electricity (efficiency ≈ 1, unlike the heat pump), so they add heat when the heat pump can't keep up.",
-    normal: "OFF most of the time. Frequent use noticeably raises running cost — expected only in a cold snap or during a boost." },
+    normal: "OFF most of the time. Frequent use noticeably raises running cost — expected only in a cold snap or during a boost.",
+    de: { what: "Eine Stufe des elektrischen Zusatzheizers. Diese nutzen Widerstandsstrom (Wirkungsgrad ≈ 1, anders als die Wärmepumpe) und ergänzen Wärme, wenn die Wärmepumpe nicht nachkommt.",
+          normal: "die meiste Zeit AUS. Häufiger Einsatz erhöht die Betriebskosten spürbar — erwartbar nur bei Kälteeinbruch oder während einer Aufheizung." } },
   { re: /\bbsh\b|thermal protector/i,
     what: "The booster/backup heater for the hot-water tank, or its thermal cut-out protection.",
-    normal: "the thermal protector should read normal/closed; it trips only on an over-temperature fault." },
+    normal: "the thermal protector should read normal/closed; it trips only on an over-temperature fault.",
+    de: { what: "Der Zusatz-/Boosterheizer für den Warmwasserspeicher bzw. dessen thermische Schutzabschaltung.",
+          normal: "der Thermoschutz sollte normal/geschlossen anzeigen; er löst nur bei Übertemperatur aus." } },
   { re: /freeze protection/i,
     what: "Anti-freeze protection: the unit runs the pump (and if needed the heater) to stop water in the pipes freezing while it's otherwise idle in the cold.",
-    normal: "ON only in freezing conditions when the system is idle." },
+    normal: "ON only in freezing conditions when the system is idle.",
+    de: { what: "Frostschutz: Das Gerät lässt die Pumpe (und bei Bedarf den Heizer) laufen, damit das Wasser in den Leitungen im Kalten nicht einfriert, während sonst Ruhe herrscht.",
+          normal: "nur bei Frost und ruhender Anlage EIN." } },
 
   // ── Geothermal / brine ──
   { re: /brine (inlet|outlet|temp|pump)|entering brine|leaving brine/i,
     what: "Ground-loop (brine) circuit reading on a geothermal unit — the fluid that carries heat to/from the ground, and its pump.",
-    normal: "brine temperatures stay in a narrow band set by the ground; a slow seasonal drift is normal, a sharp drop is not." },
+    normal: "brine temperatures stay in a narrow band set by the ground; a slow seasonal drift is normal, a sharp drop is not.",
+    de: { what: "Messwert des Solekreises (Erdreich) bei einer Erdwärmepumpe — die Flüssigkeit, die Wärme aus dem/ins Erdreich trägt, sowie ihre Pumpe.",
+          normal: "Sole-Temperaturen bleiben in einem engen, vom Erdreich bestimmten Band; eine langsame saisonale Drift ist normal, ein plötzlicher Einbruch nicht." } },
 
   // ── Hybrid / second source / smart grid ──
   { re: /hybrid (op|heating)/i,
-    what: "On a hybrid heat-pump + boiler system: which source the controller has chosen (heat pump only, hybrid, or boiler only) and its target." },
+    what: "On a hybrid heat-pump + boiler system: which source the controller has chosen (heat pump only, hybrid, or boiler only) and its target.",
+    de: { what: "Bei einem Hybridsystem aus Wärmepumpe + Kessel: welche Quelle der Regler gewählt hat (nur Wärmepumpe, Hybrid oder nur Kessel) und deren Zielwert." } },
   { re: /bivalent|boiler operation|boiler heating target/i,
-    what: "A second heat source (typically a boiler) being called in a bivalent/hybrid setup when the heat pump alone isn't enough or isn't the cheaper option." },
+    what: "A second heat source (typically a boiler) being called in a bivalent/hybrid setup when the heat pump alone isn't enough or isn't the cheaper option.",
+    de: { what: "Eine zweite Wärmequelle (meist ein Kessel), die in einem bivalenten/Hybrid-Aufbau zugeschaltet wird, wenn die Wärmepumpe allein nicht ausreicht oder nicht die günstigere Wahl ist." } },
   { re: /be_cop|^cop\b/i,
     what: "The unit's own live estimate of its coefficient of performance — heat delivered ÷ electricity used. Higher is more efficient (3 means 3 kW of heat per 1 kW of power).",
-    normal: "typically ~3–5 in mild heating; lower in hard frost or during DHW, and drops toward 1 whenever the backup heater runs." },
+    normal: "typically ~3–5 in mild heating; lower in hard frost or during DHW, and drops toward 1 whenever the backup heater runs.",
+    de: { what: "Die geräteeigene Live-Schätzung der Leistungszahl — gelieferte Wärme ÷ aufgenommener Strom. Höher ist effizienter (3 bedeutet 3 kW Wärme je 1 kW Strom).",
+          normal: "typisch ~3–5 bei milder Heizung; niedriger bei strengem Frost oder Warmwasser und fällt Richtung 1, sobald der Zusatzheizer läuft." } },
   { re: /benefit kwh|smartgrid|smart grid|solar input/i,
     what: "An external utility/smart-grid or solar signal input — e.g. a cheap-tariff or surplus-PV window telling the unit it's a good time to store extra heat.",
-    normal: "ON only while that external signal is active." },
+    normal: "ON only while that external signal is active.",
+    de: { what: "Ein externes Versorger-/Smart-Grid- oder Solar-Signal — z. B. ein Niedrigtarif- oder PV-Überschuss-Fenster, das dem Gerät signalisiert, dass es günstig ist, zusätzliche Wärme zu speichern.",
+          normal: "nur EIN, solange dieses externe Signal aktiv ist." } },
 
   // ── Capacity / identity (put after BUH-capacity above) ──
   { re: /capacity/i,
-    what: "The nominal rated capacity/size class of the unit (indoor or outdoor), in kW or as a code. It's a fixed property of the model, not a live measurement." },
+    what: "The nominal rated capacity/size class of the unit (indoor or outdoor), in kW or as a code. It's a fixed property of the model, not a live measurement.",
+    de: { what: "Die nominale Leistungs-/Größenklasse des Geräts (Innen- oder Außeneinheit), in kW oder als Code. Eine feste Eigenschaft des Modells, kein Live-Messwert." } },
   { re: /silent mode|low noise/i,
     what: "Low-noise / quiet mode: caps fan and compressor speed to run more quietly, at the cost of some heating output.",
-    normal: "ON during any scheduled quiet hours you've set; OFF otherwise." },
+    normal: "ON during any scheduled quiet hours you've set; OFF otherwise.",
+    de: { what: "Geräuscharm-/Leise-Modus: begrenzt Lüfter- und Verdichterdrehzahl für leiseren Betrieb, auf Kosten etwas Heizleistung.",
+          normal: "EIN während eingestellter Ruhezeiten; sonst AUS." } },
 ];
 
 // First matching description for a value label, or null (→ a plain, non-expandable row).
@@ -665,8 +956,9 @@ function descFor(label) {
 // All text is our own static English (labels come from the firmware's own def/ tables), but escape
 // anyway — cheap and keeps the one-encoder rule.
 function descBodyHtml(d) {
-  let h = esc(d.what);
-  if (d.normal) h += ` <span class="vdesc-n">Normal:</span> ${esc(d.normal)}`;
+  const b = (LANG === "de" && d.de) ? d.de : d;   // German copy when present, else the English row
+  let h = esc(b.what);
+  if (b.normal) h += ` <span class="vdesc-n">${esc(t("normal.label"))}</span> ${esc(b.normal)}`;
   return h;
 }
 const chevIcon = `<svg class="vrow-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>`;
@@ -712,14 +1004,17 @@ function toggleDesc(btn) {
 // misleading (implies data is imminent) rather than "not connected".
 function valueGroupsHtml(vals, connected) {
   if (!connected) return "";
-  if (!vals.length) return `<div class="vgroup"><div class="card"><span class="empty">Waiting for the first poll…</span></div></div>`;
+  if (!vals.length) return `<div class="vgroup"><div class="card"><span class="empty">${esc(t("values.waiting"))}</span></div></div>`;
   const order = [...GROUPS.map((g) => g[0]), "Other values"];
   const buckets = new Map();
   for (const v of vals) { const g = groupOf(v); (buckets.get(g) || buckets.set(g, []).get(g)).push(v); }
   const grouped = buckets.size > 1;
   const rowsOf = (rows) => rows.map((v) => vDescRow(v)).join("");
+  // Group headings are translated; a firmware-supplied custom group (not in the dictionary) keeps its
+  // own name. Bucket KEYS stay the English group name (groupOf) — only the display label is localised.
+  const groupLabel = (name) => (I18N.en["group." + name] != null ? t("group." + name) : name);
   let html = ""; const done = new Set();
-  const emit = (name, rows) => { html += vcard(grouped ? name : "Values", rowsOf(rows)); };
+  const emit = (name, rows) => { html += vcard(grouped ? groupLabel(name) : t("group.Values"), rowsOf(rows)); };
   for (const name of order) if (buckets.has(name)) { emit(name, buckets.get(name)); done.add(name); }
   for (const [name, rows] of buckets) if (!done.has(name)) emit(name, rows); // firmware-supplied custom groups
   return html;
@@ -840,14 +1135,14 @@ function renderLive() {
   setTxt("hfPth", fmt1(d.pth));
   const pumping = d.pumpOn ?? (d.flow != null ? d.flow > 1 : null);
   const chips = [];
-  if (d.thermo != null) chips.push(chipHtml(d.thermo ? "Thermostat ON" : "Thermostat off", d.thermo ? "on" : ""));
-  if (pumping != null) chips.push(chipHtml(pumping ? "Pump ON" : "Pump off", pumping ? "on" : ""));
+  if (d.thermo != null) chips.push(chipHtml(esc(t(d.thermo ? "chip.thermo_on" : "chip.thermo_off")), d.thermo ? "on" : ""));
+  if (pumping != null) chips.push(chipHtml(esc(t(pumping ? "chip.pump_on" : "chip.pump_off")), pumping ? "on" : ""));
   if (d.buh1 != null || d.buh2 != null) {
     const on = !!(d.buh1 || d.buh2);
-    chips.push(chipHtml(on ? (d.buh2 ? "BUH step 2" : "BUH step 1") : "BUH off", on ? "hot" : ""));
+    chips.push(chipHtml(esc(t(on ? (d.buh2 ? "chip.buh2" : "chip.buh1") : "chip.buh_off")), on ? "hot" : ""));
   }
-  if (d.defrost) chips.push(chipHtml("Defrost", "ice"));
-  if (d.quiet) chips.push(chipHtml("Quiet", ""));
+  if (d.defrost) chips.push(chipHtml(esc(t("chip.defrost")), "ice"));
+  if (d.quiet) chips.push(chipHtml(esc(t("chip.quiet")), ""));
   $("heroChips").innerHTML = chips.join("");
 
   // Schematic badges
@@ -863,7 +1158,7 @@ function renderLive() {
   setTxt("svTank", fmt1(d.tank)); setTxt("svTankSet", fmt1(d.tankSet));
   setTxt("svRoom", fmt1(d.room)); setTxt("svRoomSet", fmt1(d.roomSet));
   const toDhw = d.valveDhw === true;
-  setTxt("svValve", "3WV → " + (toDhw ? "DHW" : "heating"));
+  setTxt("svValve", t(toDhw ? "schem.to_dhw" : "schem.to_heat"));
 
   // Schematic state classes drive the CSS animations (flows, fan, pump, BUH glow, defrost)
   const sc = $("schem");
@@ -894,7 +1189,7 @@ function renderLive() {
   // a defrost reads "-5.2 kW" over an empty bar rather than a filled bar over a clamped zero.
   $("kPthBar").style.width = d.pth != null ? Math.min(100, Math.max(0, Math.round(d.pth / 16 * 100))) + "%" : "0%";
   setTxt("kCop", d.cop == null ? "—" : d.cop.toFixed(1));
-  setTxt("kPelSub", d.pel != null ? `${fmt1(d.pel)} kW el. (${d.pelSrc})` : "no current sensor");
+  setTxt("kPelSub", d.pel != null ? t("kpi.pel", fmt1(d.pel), d.pelSrc) : t("kpi.no_ct"));
 
   trendSample(d);
 }
@@ -919,7 +1214,7 @@ function drawTrend() {
   const finL = fin(trend.lwt), finO = fin(trend.out);
   $("tlOut").hidden = finO.length < 2;      // legend names only series that draw
   if (finL.length < 2 && finO.length < 2) {
-    $("trend").innerHTML = `<text class="tr-empty" x="${W / 2}" y="${H / 2}" text-anchor="middle">Collecting data…</text>`;
+    $("trend").innerHTML = `<text class="tr-empty" x="${W / 2}" y="${H / 2}" text-anchor="middle">${esc(t("trend.collecting"))}</text>`;
     return;
   }
   const all = finL.concat(finO);
@@ -1065,10 +1360,10 @@ function hpModelName() {
 async function applyLive(patch, okMsg) {
   try {
     const r = await post("/set_hp", patch);
-    if (!r.ok) { const e = await r.json().catch(() => ({})); toast(e.error || "Rejected", "err"); return false; }
+    if (!r.ok) { const e = await r.json().catch(() => ({})); toast(e.error || t("toast.rejected"), "err"); return false; }
     if (okMsg) toast(okMsg, "ok");
     return true;
-  } catch { toast("Couldn't reach the device", "err"); return false; }
+  } catch { toast(t("toast.unreachable"), "err"); return false; }
 }
 
 // Picking RX/TX from the dropdown points auto-detection at those pins: reset to "auto" so the next
@@ -1077,9 +1372,9 @@ async function applyLive(patch, okMsg) {
 async function onPinPick() {
   const rx = +$("e32Rx").value, tx = +$("e32Tx").value;
   $("e32Rx").blur(); $("e32Tx").blur();
-  if (!(await applyLive({ profile: "auto", rx, tx }, "Trying pins…"))) return;
+  if (!(await applyLive({ profile: "auto", rx, tx }, t("toast.trying_pins")))) return;
   let n = 0;
-  const t = setInterval(async () => { await refreshStatus(); if (++n >= 5 || S.status?.hp?.connected) clearInterval(t); }, 1500);
+  const iv = setInterval(async () => { await refreshStatus(); if (++n >= 5 || S.status?.hp?.connected) clearInterval(iv); }, 1500);
 }
 
 // ── Firmware / OTA ───────────────────────────────────────────────────────
@@ -1101,28 +1396,26 @@ async function otaPoll(waitStates, tries, onTick) {
 }
 
 async function checkFirmwareUpdate() {
-  if (S.busy) { toast("Still applying the last change…", "info"); return; }
+  if (S.busy) { toast(t("toast.applying"), "info"); return; }
   S.busy = true;
   // rebootPoll() clears S.busy itself, asynchronously, once the device answers again — so the exit
   // path must hand ownership over rather than clear the flag on the way out. Clearing it here after
   // starting the poll would re-enable the UI while the device is still rebooting.
   let handedOff = false;
   try {
-    toast("Checking for updates…", "info");
+    toast(t("toast.ota_checking"), "info");
     try { await j("/ota/check?ms=" + Date.now()); }
-    catch { toast("Couldn't reach the device", "err"); return; }
+    catch { toast(t("toast.unreachable"), "err"); return; }
 
     const s = await otaPoll(["checking"], 30);
-    if (!s)                 { toast("Update check timed out", "err"); return; }
-    if (s.state === "error"){ toast(s.message || "Update check failed", "err"); return; }
-    if (!s.update_available) { toast(`Up to date (v${s.current})`, "ok"); return; }
+    if (!s)                 { toast(t("toast.ota_timeout"), "err"); return; }
+    if (s.state === "error"){ toast(s.message || t("toast.ota_failed"), "err"); return; }
+    if (!s.update_available) { toast(t("toast.ota_uptodate", s.current), "ok"); return; }
 
     // The device re-fetches the manifest and re-runs the downgrade gate before downloading, so this
     // prompt is a courtesy, not the safety check — declining here changes nothing on the device.
-    if (!confirm(`Update available: v${s.current} → v${s.available}\n\n` +
-                 `The device downloads and installs the signed image, then reboots. ` +
-                 `If the new firmware can't get online it rolls back automatically.`)) {
-      toast("Update cancelled", "info");
+    if (!confirm(t("ota.confirm", s.current, s.available))) {
+      toast(t("toast.ota_cancelled"), "info");
       return;
     }
 
@@ -1131,19 +1424,19 @@ async function checkFirmwareUpdate() {
     // surface 5 minutes later as "Update timed out" — the wrong diagnosis for a retryable refusal.
     let r;
     try { r = await post("/ota/update", {}); }
-    catch { toast("Couldn't start the update", "err"); return; }
-    if (r.status === 503) { toast("Device busy — retry in a moment", "err"); return; }
-    if (!r.ok) { toast(await errorOf(r, "Couldn't start the update"), "err"); return; }
+    catch { toast(t("toast.ota_start_fail"), "err"); return; }
+    if (r.status === 503) { toast(t("toast.busy_retry"), "err"); return; }
+    if (!r.ok) { toast(await errorOf(r, t("toast.ota_start_fail")), "err"); return; }
 
-    toast("Downloading… keep the device powered", "info");
+    toast(t("toast.ota_downloading"), "info");
     const done = await otaPoll(["checking", "updating"], 300,
-                               (t) => { if (t.state === "updating") toast(`Downloading… ${t.progress}%`, "info"); });
-    if (!done)                  { toast("Update timed out", "err"); return; }
-    if (done.state === "error") { toast(done.message || "Update failed", "err"); return; }
+                               (st) => { if (st.state === "updating") toast(t("toast.ota_progress", st.progress), "info"); });
+    if (!done)                  { toast(t("toast.ota_update_timeout"), "err"); return; }
+    if (done.state === "error") { toast(done.message || t("toast.ota_update_failed"), "err"); return; }
 
     // state === "done": the device reboots ~600 ms after reporting it. Hand off to the same
     // reboot-poll the config saves use, so the UI reconnects instead of showing a dead page.
-    toast("Installed — rebooting…", "ok");
+    toast(t("toast.ota_installed"), "ok");
     rebootPoll(renderDashboard);
     handedOff = true;
   } finally {
@@ -1160,9 +1453,9 @@ function setBusy(id, on) {
   b.disabled = on;
   if (on) {
     if (b.dataset.label == null) b.dataset.label = b.textContent;   // remember the idle label once
-    b.innerHTML = `<span class="spin"></span>Saving…`;              // static markup — no interpolation
+    b.innerHTML = `<span class="spin"></span>${esc(t("btn.saving"))}`;
   } else {
-    b.textContent = b.dataset.label || "Save";
+    b.textContent = b.dataset.label || t("btn.save");
   }
 }
 
@@ -1186,10 +1479,10 @@ function rebootPoll(then) {
     try {
       S.status = await j("/status");
       clearInterval(poll); S.busy = false;
-      toast("Saved", "ok");
+      toast(t("toast.saved"), "ok");
       then();
     } catch {
-      if (tries > 14) { clearInterval(poll); S.busy = false; toast("Rebooted — reconnect to the device", "info"); }
+      if (tries > 14) { clearInterval(poll); S.busy = false; toast(t("toast.rebooted"), "info"); }
     }
   }, 1500);
 }
@@ -1207,7 +1500,7 @@ async function saveReboot(url, body, { btn, showError, close, then, busyMsg }) {
   // The reboot-poll keeps S.busy set for ~22 s AFTER the modal closes, so the card is reopenable
   // while a change is still landing. Say so — a silent `return` here is exactly the ignored-write
   // feedback gap this whole flow exists to close.
-  if (S.busy) { toast("Still applying the last change…", "info"); return; }
+  if (S.busy) { toast(t("toast.applying"), "info"); return; }
   S.busy = true;
   setBusy(btn, true);
   if (busyMsg) toast(busyMsg, "info");
@@ -1219,18 +1512,18 @@ async function saveReboot(url, body, { btn, showError, close, then, busyMsg }) {
   } catch {
     // The endpoints answer BEFORE rebooting (reboot_soon fires ~400 ms after the response), so a
     // throw here means the request never landed — nothing was written and the modal must stay open.
-    reject("Couldn't reach the device");
+    reject(t("toast.unreachable"));
     return;
   }
   // 503 is the device out of contiguous heap, not a bad field: nothing was written and the same save
   // is worth retrying verbatim, so it gets a toast and no inline field error blaming the input.
-  if (r.status === 503) { idle(); toast("Device busy — retry in a moment", "err"); return; }
-  if (!r.ok) { reject(await errorOf(r, "Rejected")); return; }
+  if (r.status === 503) { idle(); toast(t("toast.busy_retry"), "err"); return; }
+  if (!r.ok) { reject(await errorOf(r, t("toast.rejected"))); return; }
   const res = await r.json().catch(() => ({}));
   setBusy(btn, false);
   close();
-  if (res.reboot === false) { S.busy = false; toast("No changes", "info"); return; }   // /set_mqtt: unchanged
-  toast("Rebooting — reconnecting…", "info");
+  if (res.reboot === false) { S.busy = false; toast(t("toast.no_changes"), "info"); return; }   // /set_mqtt: unchanged
+  toast(t("toast.reboot"), "info");
   rebootPoll(then);   // stays busy until the device answers again (or the poll gives up)
 }
 
@@ -1293,7 +1586,7 @@ function wire() {
       $("wfPass").classList.remove("invalid");
       $("wfPassError").hidden = true;
     }
-    if (!valid) { toast("Check WiFi settings", "err"); return; }
+    if (!valid) { toast(t("toast.check_wifi"), "err"); return; }
     saveReboot("/set_wifi", { ssid, pass }, {
       btn: "wfBtn",
       showError: wifiFieldError,
@@ -1312,9 +1605,9 @@ function wire() {
     const broker = $("mqBroker").value.trim();
     if (!validMqtt(broker)) {
       $("mqBroker").classList.add("invalid");
-      $("mqError").textContent = "Enter host:port — e.g. 192.168.1.10:1883 — or mqtts://host:8883 for TLS";
+      $("mqError").textContent = t("mq.err_format");
       $("mqError").hidden = false;
-      toast("Check the broker address", "err");
+      toast(t("toast.check_broker"), "err");
       return;
     }
     saveReboot("/set_mqtt", {
@@ -1329,7 +1622,7 @@ function wire() {
       showError: (msg) => { $("mqBroker").classList.add("invalid"); $("mqError").textContent = msg; $("mqError").hidden = false; },
       close: closeMqtt,
       then: renderDashboard,
-      busyMsg: "Verifying MQTT connection…",   // the endpoint pre-flights the broker (DNS→TCP→CONNECT)
+      busyMsg: t("toast.verifying_mqtt"),   // the endpoint pre-flights the broker (DNS→TCP→CONNECT)
     });
   });
   $("mqBroker").addEventListener("input", () => { $("mqBroker").classList.remove("invalid"); $("mqError").hidden = true; });
@@ -1394,9 +1687,9 @@ function wire() {
         const portStr = raw.substring(idx + 1);
         if (!/^\d+$/.test(portStr) || +portStr < 1 || +portStr > 65535) {
           $("slHost").classList.add("invalid");
-          $("slError").textContent = "Port must be a whole number 1–65535 (e.g. logs.example.com:514).";
+          $("slError").textContent = t("sl.err_port");
           $("slError").hidden = false;
-          toast("Check the Syslog port", "err");
+          toast(t("toast.check_syslog_port"), "err");
           return;
         }
         port = +portStr;
@@ -1409,7 +1702,7 @@ function wire() {
       showError: (msg) => { $("slHost").classList.add("invalid"); $("slError").textContent = msg; $("slError").hidden = false; },
       close: closeSyslog,
       then: renderDashboard,
-      busyMsg: "Saving Syslog settings…",
+      busyMsg: t("toast.saving_syslog"),
     });
   });
 
@@ -1425,12 +1718,13 @@ function wire() {
       showError: (msg) => { $("ntpServer").classList.add("invalid"); $("ntpError").textContent = msg; $("ntpError").hidden = false; },
       close: closeNtp,
       then: renderDashboard,
-      busyMsg: "Saving NTP settings…",
+      busyMsg: t("toast.saving_ntp"),
     });
   });
 }
 
 async function boot() {
+  applyStaticI18n();   // localise the static index.html markup (data-i18n) before the first render
   wire();
 
   if (window.WebSocket) {

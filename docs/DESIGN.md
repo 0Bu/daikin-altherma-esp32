@@ -18,7 +18,16 @@ setup page (see `main/CMakeLists.txt`).
    (WiFi credentials, MQTT broker, Syslog server, NTP server, RX/TX pins) are explicit and report
    their outcome.
 4. **Terse, dense, technical.** Tabular numbers, short labels, no decorative copy.
-5. **English only.** Labels are fixed English — there is no language selector (UI or firmware).
+5. **Browser-detected language (de / en), no selector.** The UI **chrome** (hero states, card
+   titles, connection rows, KPI/schematic labels, modals, banners, toasts) and the tap-to-expand
+   value **descriptions** (§6) are rendered in German for a `de*` browser (`navigator.language`) and
+   English otherwise — English is the fallback for every string. There is **no manual language
+   selector** and no server round-trip: the choice is made client-side at load (`LANG` in `app.js`,
+   which also stamps `<html lang>`). The **firmware is still English-only** — the heat-pump **value
+   labels** arrive over `/values` as English X10A register names (`docs/REGISTERS.md`) and are shown
+   verbatim in **both** languages (the German descriptions explain them); the firmware ships no
+   localized strings. All UI copy lives in one `I18N` dictionary; dynamic strings go through `t()`,
+   static `index.html` markup through `data-i18n` + `applyStaticI18n()`.
 
 ## 2. Brand & colour tokens
 
@@ -330,7 +339,9 @@ Body, ordered:
      text is keyed to the value **label** by a first-match-wins pattern table (`DESCRIPTIONS` in
      `app.js`), the same label-pattern technique the hero/grouping already use, so one entry serves
      every profile's spelling of a quantity; a label that matches nothing stays a plain, non-expandable
-     row. English only (§1), matching the fixed English labels. The open state lives in app state
+     row. Each entry carries an English `what`/`normal` plus a German `de` copy; the browser language
+     (§1) picks which is shown (English fallback). The value label above the box stays the English
+     register name in both languages. The open state lives in app state
      (`S.descOpen`), not the DOM, so the per-poll rebuild of `#valueGroups` re-emits an expanded row
      open instead of collapsing it every second; the click toggles the live element so the slide
      animates, and updates the set for the next rebuild.
@@ -363,7 +374,8 @@ row on the ESP32 card (§5.3) is a button (chevron affordance) that checks for a
   "no feed configured" — both are honestly "up to date" from the device's point of view.
 - The **device log** is no longer surfaced in the UI (there was a Diagnostics screen; it was removed
   with the Settings page). It remains available out-of-band at `GET /diag` (verbose/clear via query).
-- There is **no language selector** — the firmware is English-only (§1).
+- There is **no manual language selector** — the UI language follows the browser (de / en), and the
+  firmware itself ships no localized strings (§1).
 
 ## 6. Dashboard value grouping & order
 
