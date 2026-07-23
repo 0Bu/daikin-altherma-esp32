@@ -264,6 +264,36 @@ svg .tr-empty { fill: var(--muted); font: 500 13px var(--font-sans); }
 .vrow-btn:hover .vrow-label, .vrow-btn:hover .vrow-val { color: var(--brand-strong); }
 .empty { color: var(--muted); font-size: 14px; padding: 8px 0; }
 
+/* ── Expandable value description (tap a heat-pump value row → its explainer slides down) ─────
+   The row itself is a full-width button; the .vitem wrapper carries the divider so the header and
+   the panel below it read as one item. Open state is re-emitted from S.descOpen on every poll
+   rebuild (app.js), so the panel doesn't flicker shut ~1×/s. */
+.vitem { border-top: 1px solid var(--line); }
+.vitem .vrow { border-top: 0; }          /* the wrapper draws the divider now, not the row */
+.vrow-desc {
+  width: 100%; font: inherit; background: none; border: 0; cursor: pointer; text-align: left; color: inherit;
+}
+.vrow-desc .vrow-label { transition: color .15s; }
+.vrow-desc:hover .vrow-label, .vrow-desc:hover .vrow-chev { color: var(--brand-strong); }
+/* keep the value + its expand chevron together on the right of the flex row */
+.vrow-end { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; }
+.vrow-chev { flex: none; color: var(--muted); transition: transform .2s ease; align-self: center; }
+.vitem.open .vrow-chev { transform: rotate(90deg); }
+/* the collapsible: grid 0fr→1fr animates height cleanly without a fixed max-height guess */
+.vdesc { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .22s ease; }
+.vitem.open .vdesc { grid-template-rows: 1fr; }
+.vdesc-inner { overflow: hidden; }
+/* The explainer sits in its OWN inset box that appears to wedge between the value rows — a faint
+   --brand-tint info block (DESIGN.md §2) held slightly in from the row edges, with a gap above and
+   below so the rows read as parting to make room for it (not the row simply growing taller). */
+.vdesc-body {
+  margin: 6px 2px 12px; padding: 12px 14px;
+  background: var(--brand-tint); border: 1px solid var(--line); border-radius: var(--r-tile);
+  font-size: 13.5px; color: var(--muted); line-height: 1.55;
+}
+.vdesc-n { color: var(--fg); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .vdesc, .vrow-chev { transition: none; } }
+
 /* ── Forms ──────────────────────────────────────────────────────────────── */
 .field { display: block; margin-bottom: 14px; }
 .field:last-child { margin-bottom: 0; }
@@ -377,6 +407,7 @@ svg .tr-empty { fill: var(--muted); font: 500 13px var(--font-sans); }
   .conn-val, .vrow-val, .vname { font-size: 17px; }
   .conn-dbm, .vrow-label { font-size: 16.5px; }
   .vrow-unit { font-size: 13.5px; }
+  .vdesc-body { font-size: 15px; }
   .conn-row { padding: 14px 0; }
   .vrow, .vname { padding-top: 11px; padding-bottom: 11px; }
   .fig-k, .kpi-k { font-size: 12.5px; }

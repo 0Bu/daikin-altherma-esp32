@@ -13,6 +13,12 @@ const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Typ
 const S = {
   status: null,
   busy: false,
+  // Labels of value rows whose description accordion is currently expanded. Kept in app state (not
+  // the DOM) because #valueGroups is rebuilt on every poll (renderCards) — a purely-DOM open state
+  // would collapse ~1×/s. valueGroupsHtml re-emits the `open` class from this set, so an expanded
+  // row survives the rebuild; the click handler only toggles the live element (so the CSS slide
+  // animates) and updates this set for the next rebuild to honour.
+  descOpen: new Set(),
 };
 
 // ── Toasts ───────────────────────────────────────────────────────────────
@@ -440,6 +446,267 @@ function connectionsHtml() {
 function renderConnections() {
   $("connTile").innerHTML = connectionsHtml();
 }
+// ── Value descriptions (tap a value row → a plain-language explainer slides down) ─────────────
+// Each heat-pump reading gets a short "what is this / what's normal" note, keyed to the value LABEL
+// by a first-match-wins regex — the same pattern-over-label technique pickValue()/groupOf()/vLwt use,
+// so one entry covers every profile's spelling of a concept (there are ~200 distinct labels but far
+// fewer physical quantities). English only, matching the fixed English labels and the §1 design
+// contract (there is no language selector). ORDER MATTERS: put specific/compound labels before the
+// general ones they contain (e.g. "after BUH" before plain "leaving water", BUH/capacity before the
+// bare "capacity" catch). A row whose label matches nothing here stays a plain, non-expandable row.
+// `normal` is optional guidance on typical vs worth-a-look values — deliberately hedged; the exact
+// figures are model- and install-specific.
+const DESCRIPTIONS = [
+  // ── Domestic hot water ──
+  { re: /dhw setpoint|dhw set ?point/i,
+    what: "Target temperature for the hot-water tank. The unit runs DHW mode until the tank sensor reaches it, then stops.",
+    normal: "usually 45–55 °C. Higher leans on the electric backup heater and costs more; a weekly ≥60 °C cycle is the normal anti-legionella boost." },
+  { re: /2nd domestic hot water/i,
+    what: "A second temperature sensor in the hot-water tank (used on tanks with two sensors, e.g. top and bottom)." },
+  { re: /dhw tank temp|dhw tank/i,
+    what: "The water temperature actually measured inside the hot-water tank (sensor R5T).",
+    normal: "sits below the DHW setpoint and climbs during a DHW cycle. Staying far below setpoint with the tank idle means it's simply been used up, or a sensor/heating fault." },
+  { re: /powerful dhw/i,
+    what: "A one-off boost that heats the tank to the setpoint as fast as possible, calling in the backup heater if needed.",
+    normal: "OFF in day-to-day use; ON only while you've triggered a manual boost." },
+  { re: /tank preheat/i,
+    what: "The tank is being warmed ahead of an expected draw (from the schedule or weather forecast) so hot water is ready in time.",
+    normal: "briefly ON around scheduled/anticipated demand, OFF otherwise." },
+  { re: /reheat on/i,
+    what: "The tank is being topped back up to its comfort temperature between scheduled heating slots.",
+    normal: "ON in short bursts to hold the tank warm; OFF most of the time." },
+  { re: /storage (eco|comfort)/i,
+    what: "Which stored-hot-water target is active: Comfort keeps the tank fuller/hotter, ECO holds a lower reserve to save energy." },
+  { re: /boiler dhw demand/i,
+    what: "On a hybrid (heat-pump + gas boiler) system: the boiler has been asked to make the hot water instead of the heat pump.",
+    normal: "OFF on a heat-pump-only system; on a hybrid it comes ON when the boiler is cheaper/faster than the heat pump for DHW." },
+
+  // ── Valves ──
+  { re: /3.?way valve/i,
+    what: "The diverter valve that sends heated water either to the DHW tank (ON = DHW) or to the space-heating circuit (OFF = heating). It can only feed one at a time.",
+    normal: "ON only during a hot-water cycle; OFF (feeding heating) the rest of the time." },
+  { re: /2.?way valve/i,
+    what: "Selects the water path for the current mode — ON in heating, OFF in cooling (per the label)." },
+  { re: /mix valve position|bizone kit mix valve/i,
+    what: "Opening of the bizone mixing valve, blending hot flow with cooler return to hold a lower temperature for a second (e.g. underfloor) zone.",
+    normal: "modulates between fully closed and fully open to hold that zone's target." },
+
+  // ── Leaving / return / mixed water ──
+  { re: /(leaving water|lw) set ?point/i,
+    what: "The target flow (leaving-water) temperature the controller is aiming for — usually set automatically by weather compensation, warmer when it's colder outside.",
+    normal: "tracks the outdoor temperature: higher on cold days, lower on mild ones." },
+  { re: /mixed (leaving|water)/i,
+    what: "Blended flow temperature of a mixed heating zone (after its mixing valve) — typically a cooler underfloor loop fed off a hotter primary circuit." },
+  { re: /after buh|outlet water buh|after buffer|tvbh/i,
+    what: "Water temperature after the electric backup heater (sensor R2T) — the temperature that actually reaches your radiators/underfloor.",
+    normal: "equal to the before-BUH temperature when the backup heater is off (the usual case); higher only while the BUH is firing." },
+  { re: /before buh|after phe|outlet water heat exch|leaving water.*\(?r1t\)?|tv inflow|outlet water heat exchanger/i,
+    what: "Water temperature leaving the heat pump's own heat exchanger, before the backup heater (sensor R1T) — the true heat-pump output temperature and the one used for ΔT / heat-output / COP.",
+    normal: "space heating ~30–45 °C (underfloor lower, radiators higher); up to ~55 °C on a DHW run. Much higher than the target usually means the backup heater is contributing." },
+  { re: /inlet water|return water|tr return/i,
+    what: "Water returning from the house back into the unit (sensor R4T). Leaving-water minus this is the ΔT across the system.",
+    normal: "a few degrees below the leaving-water temperature; a healthy heating ΔT is around 5 K." },
+
+  // ── Flow / pressure / pump ──
+  { re: /flow (sensor|rate)|flow rate/i,
+    what: "How fast water is circulating through the heating/DHW circuit.",
+    normal: "typically ~10–30 l/min depending on unit size and pump speed. Too low can trip a flow fault and stop the compressor — suspect air, a closed valve or a dirty filter." },
+  { re: /water pressure/i,
+    what: "Water pressure in the sealed heating circuit.",
+    normal: "roughly 1.0–2.0 bar when cold. Below ~0.5 bar needs topping up; a persistent low reading can stop the pump." },
+  { re: /water pump signal/i,
+    what: "The speed command sent to the circulation pump. Note it is inverted — 0 means full speed, 100 means stopped (per the label).",
+    normal: "a low number (fast pump) while heating or making DHW; 100 (stopped) when idle." },
+  { re: /water pump operation|circulation pump|solar pump|main pump|add pump|pump speed/i,
+    what: "The circulation pump that moves water between the unit and the tank/emitters — whether it's running (or how hard, for a speed reading).",
+    normal: "running while heating, cooling or making hot water; may keep going briefly afterwards or periodically to anti-seize." },
+  { re: /water flow switch/i,
+    what: "A safety switch that confirms water is genuinely flowing before the compressor or backup heater are allowed to run — protecting the heat exchanger from running dry.",
+    normal: "ON (flow proven) whenever the pump is running." },
+
+  // ── Operation / mode / fault ──
+  { re: /i\/u operation mode/i,
+    what: "What the water (indoor) side is doing right now: Stop, Heating, Cooling, Domestic Hot Water, or a heating+DHW combination.",
+    normal: "reflects the current job. During a hot-water cycle it reads DHW even though the outdoor unit still shows Heating." },
+  { re: /operation mode|operation \/ fault|^operation$/i,
+    what: "The outdoor unit's thermodynamic mode (Heating, Cooling, …). While it heats the tank it still reports Heating — it is heating, just the water in the tank rather than the house." },
+  { re: /defrost/i,
+    what: "The unit is melting frost off the outdoor coil by briefly running its cycle in reverse. Heating output pauses and steam may rise from the outdoor unit.",
+    normal: "normal and self-clearing in cold, damp weather; a few minutes every so often. Constant defrosting suggests low refrigerant or poor airflow." },
+  { re: /error type/i,
+    what: "The severity class of any active fault: Normal, Error, Warning or Caution.",
+    normal: "Normal. Anything else points to an active fault or advisory — check the fault code." },
+  { re: /error code|fault code/i,
+    what: "The Daikin fault code (e.g. U4, H3). Blank or 0 means no fault. If the unit stops, note this code — it identifies the problem for a service tech.",
+    normal: "blank / no fault. A code present with the unit stopped means it has shut down on that fault." },
+  { re: /emergency/i,
+    what: "Emergency operation: the system is running in a fallback mode (often backup-heater only) after a fault, to keep some heat/hot water until it's serviced." },
+  { re: /alarm output/i,
+    what: "The unit's alarm relay — switched ON to signal a fault to any external alarm/monitoring wired to it." },
+
+  // ── Room / thermostat ──
+  { re: /thermostat/i,
+    what: "Whether the room or zone is currently calling for heat. ON = there is demand and the unit may run; OFF = the room is up to temperature.",
+    normal: "cycles ON and OFF as the room drifts around its target." },
+  { re: /space heating operation|space h operation/i,
+    what: "Whether space heating (as opposed to hot-water production) is currently active or being called for." },
+  { re: /rt set ?point/i,
+    what: "The target room temperature you've set for the zone the unit's own room sensor controls." },
+  { re: /\brt temp|indoor ambient|ext\. indoor ambient/i,   // \b so "po(rt temp)erature" doesn't hit this
+    what: "The room temperature measured by the unit's built-in or wired room sensor.",
+    normal: "sits near the room setpoint once the zone is satisfied." },
+
+  // ── Outdoor / refrigerant circuit ──
+  { re: /outdoor air|outdoor ambient|r1t-outdoor|^outdoor/i,
+    what: "The outside air temperature measured at the unit — the source it draws heat from.",
+    normal: "the colder it is outside, the lower the efficiency (COP) and the more the backup heater may help out." },
+  { re: /water heat exchanger (inlet|outlet)/i,
+    what: "Raw water temperatures at the inlet/outlet of the plate heat exchanger that transfers heat between the refrigerant and the water." },
+  { re: /o\/u heat exch|outdoor heat exchanger|heat exchanger mid-?temp|heat exch\. (mid-?)?temp/i,
+    what: "Temperature of the outdoor coil, where refrigerant boils off (heating) or condenses (cooling) by exchanging heat with the outside air.",
+    normal: "near or below freezing in cold-weather heating — that frost build-up is what triggers the periodic defrost." },
+  { re: /discharge pipe|compressor outlet|inv discharge/i,
+    what: "Temperature of the hot compressed refrigerant gas leaving the compressor.",
+    normal: "the hottest point in the circuit, well above the condensing temperature. A very high value makes the unit throttle back to protect the compressor." },
+  { re: /suction (pipe )?temp|suction temp/i,
+    what: "Temperature of the cool low-pressure refrigerant gas returning to the compressor." },
+  { re: /liquid (pipe )?temp|liquid temperature|refrig\. temp\. liquid/i,
+    what: "Refrigerant temperature on the liquid line between the heat exchangers." },
+  { re: /refrig\. temp\. evap/i,
+    what: "Refrigerant temperature entering/leaving the evaporator (the heat exchanger absorbing heat)." },
+  { re: /injection tube|2 phase thermistor|r4t-deicer/i,
+    what: "Temperature of a vapour/liquid-injection or de-icer sensor used by the compressor's internal control." },
+  { re: /(high|low) pressure ?\(?(sat|t)/i,
+    what: "The high/low refrigerant pressure expressed as a saturation temperature — the temperature the refrigerant boils/condenses at for that pressure. Easier to sanity-check than raw bar." },
+  { re: /(high|low) pressure/i,
+    what: "Refrigerant pressure on the high (compressor discharge) or low (compressor suction) side. The gap between them is what the compressor works against, and it drives efficiency.",
+    normal: "varies with outdoor temperature and load; steady during stable running." },
+  { re: /compressor speed|inv frequency|frequency \(rps\)/i,
+    what: "How fast the inverter-driven compressor is spinning, in revolutions per second. This is the unit's main output control.",
+    normal: "modulates from 0 up to ~100+ rps to match demand — higher when there's more to heat, 0 when idle." },
+  { re: /expansion valve/i,
+    what: "Opening of the electronic expansion valve, in steps/pulses. It meters exactly how much refrigerant flows into the evaporator.",
+    normal: "continuously adjusts while running to keep the refrigerant cycle in its sweet spot." },
+  { re: /fan\d? fin temp|fan \d fin/i,
+    what: "Temperature of the outdoor fan motor's driver electronics." },
+  { re: /^fan ?\d|fan \d \(/i,
+    what: "Outdoor fan speed, as a step or in rpm. The fan pulls outside air across the coil.",
+    normal: "ramps up with compressor load; drops to 0 when idle and during parts of a defrost." },
+  { re: /target (evap|cond)/i,
+    what: "An internal control target the unit is steering the refrigerant circuit toward (target evaporating/condensing temperature) — not a value you set." },
+  { re: /target (discharge|port)/i,
+    what: "An internal control target for the compressor discharge/port temperature — used by the unit's own protection logic." },
+  { re: /target delta t/i,
+    what: "The target temperature difference (ΔT) between leaving and returning water the controller aims to maintain across the circuit.",
+    normal: "commonly around 5 K for heating; the pump speed is trimmed to hold it." },
+  { re: /refrigerant type/i,
+    what: "The refrigerant this unit is charged with (e.g. R32 or R410A). It sets the pressure↔temperature curve used for the saturation-temperature readings." },
+  { re: /compressor port/i,
+    what: "Temperature measured at a compressor port — part of the unit's internal protection monitoring." },
+  { re: /refrigerant pressure|pressure/i,
+    what: "A refrigerant-circuit pressure reading from the outdoor unit." },
+
+  // ── Electrical ──
+  { re: /ct sensor|current measured by ct/i,
+    what: "Mains current on one phase (L1/L2/L3), measured by a clamp (CT) sensor. Combined, these estimate the electrical power the unit is drawing.",
+    normal: "rises with compressor and backup-heater load; near zero when idle." },
+  { re: /inv (primary|secondary|compressor) current|inv .*current \(a\)/i,
+    what: "Current drawn by the compressor inverter — a proxy for how hard the compressor is working." },
+  { re: /inv fin temp|fin temp|heat sink temp/i,
+    what: "Temperature of the inverter/power-electronics heatsink in the outdoor unit.",
+    normal: "warm under load; a very high value makes the unit throttle to protect the electronics." },
+
+  // ── Backup / booster heater ──
+  { re: /buh output capacity/i,
+    what: "Which stage(s) of the electric backup heater are engaged, as a capacity step.",
+    normal: "0 when the heat pump covers the load alone; higher only in very cold weather or a fast DHW boost." },
+  { re: /buh step/i,
+    what: "An electric backup-heater stage. These use resistive electricity (efficiency ≈ 1, unlike the heat pump), so they add heat when the heat pump can't keep up.",
+    normal: "OFF most of the time. Frequent use noticeably raises running cost — expected only in a cold snap or during a boost." },
+  { re: /\bbsh\b|thermal protector/i,
+    what: "The booster/backup heater for the hot-water tank, or its thermal cut-out protection.",
+    normal: "the thermal protector should read normal/closed; it trips only on an over-temperature fault." },
+  { re: /freeze protection/i,
+    what: "Anti-freeze protection: the unit runs the pump (and if needed the heater) to stop water in the pipes freezing while it's otherwise idle in the cold.",
+    normal: "ON only in freezing conditions when the system is idle." },
+
+  // ── Geothermal / brine ──
+  { re: /brine (inlet|outlet|temp|pump)|entering brine|leaving brine/i,
+    what: "Ground-loop (brine) circuit reading on a geothermal unit — the fluid that carries heat to/from the ground, and its pump.",
+    normal: "brine temperatures stay in a narrow band set by the ground; a slow seasonal drift is normal, a sharp drop is not." },
+
+  // ── Hybrid / second source / smart grid ──
+  { re: /hybrid (op|heating)/i,
+    what: "On a hybrid heat-pump + boiler system: which source the controller has chosen (heat pump only, hybrid, or boiler only) and its target." },
+  { re: /bivalent|boiler operation|boiler heating target/i,
+    what: "A second heat source (typically a boiler) being called in a bivalent/hybrid setup when the heat pump alone isn't enough or isn't the cheaper option." },
+  { re: /be_cop|^cop\b/i,
+    what: "The unit's own live estimate of its coefficient of performance — heat delivered ÷ electricity used. Higher is more efficient (3 means 3 kW of heat per 1 kW of power).",
+    normal: "typically ~3–5 in mild heating; lower in hard frost or during DHW, and drops toward 1 whenever the backup heater runs." },
+  { re: /benefit kwh|smartgrid|smart grid|solar input/i,
+    what: "An external utility/smart-grid or solar signal input — e.g. a cheap-tariff or surplus-PV window telling the unit it's a good time to store extra heat.",
+    normal: "ON only while that external signal is active." },
+
+  // ── Capacity / identity (put after BUH-capacity above) ──
+  { re: /capacity/i,
+    what: "The nominal rated capacity/size class of the unit (indoor or outdoor), in kW or as a code. It's a fixed property of the model, not a live measurement." },
+  { re: /silent mode|low noise/i,
+    what: "Low-noise / quiet mode: caps fan and compressor speed to run more quietly, at the cost of some heating output.",
+    normal: "ON during any scheduled quiet hours you've set; OFF otherwise." },
+];
+
+// First matching description for a value label, or null (→ a plain, non-expandable row).
+function descFor(label) {
+  const l = label || "";
+  for (const d of DESCRIPTIONS) if (d.re.test(l)) return d;
+  return null;
+}
+// Description body: the plain "what is it" sentence, plus an optional "Normal:" note in stronger ink.
+// All text is our own static English (labels come from the firmware's own def/ tables), but escape
+// anyway — cheap and keeps the one-encoder rule.
+function descBodyHtml(d) {
+  let h = esc(d.what);
+  if (d.normal) h += ` <span class="vdesc-n">Normal:</span> ${esc(d.normal)}`;
+  return h;
+}
+const chevIcon = `<svg class="vrow-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>`;
+
+// One value row. If a description matches the label, render an expandable accordion (a <button>
+// header + a collapsible panel that slides down beneath it); otherwise a plain, unchanged row.
+// The open state is read from S.descOpen so it survives the per-poll rebuild of #valueGroups.
+function vDescRow(v) {
+  const label = v.label || "";
+  const cls = v.state || v.class || "";
+  const val = esc(v.value == null ? "—" : String(v.value)) +
+    (v.unit ? `<span class="vrow-unit">${esc(v.unit)}</span>` : "");
+  const d = descFor(label);
+  if (!d) {
+    return `<div class="vrow"><span class="vrow-label">${esc(label)}</span>` +
+      `<span class="vrow-val ${cls}">${val}</span></div>`;
+  }
+  const open = S.descOpen.has(label);
+  return `<div class="vitem${open ? " open" : ""}">` +
+    `<button class="vrow vrow-desc" type="button" data-desc="${esc(label)}" aria-expanded="${open ? "true" : "false"}">` +
+    `<span class="vrow-label">${esc(label)}</span>` +
+    `<span class="vrow-end"><span class="vrow-val ${cls}">${val}</span>${chevIcon}</span>` +
+    `</button>` +
+    `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body">${descBodyHtml(d)}</div></div></div>` +
+    `</div>`;
+}
+// Toggle a value row's description accordion. Only the LIVE element is flipped here (so the CSS
+// height transition actually runs); S.descOpen carries the state into the next per-poll rebuild,
+// which re-emits the row already-open (no re-animation). A <button> header means Enter/Space work
+// for free — no extra key handling needed.
+function toggleDesc(btn) {
+  const item = btn.closest(".vitem");
+  if (!item) return;
+  const label = btn.dataset.desc || "";
+  const open = !item.classList.contains("open");
+  item.classList.toggle("open", open);
+  btn.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) S.descOpen.add(label); else S.descOpen.delete(label);
+}
+
 // Heat-pump value groups (grouped by domain, §6) as card markup. Hidden entirely while the
 // heat-pump link is down — there's nothing to poll, so "Waiting for the first poll…" would be
 // misleading (implies data is imminent) rather than "not connected".
@@ -450,8 +717,7 @@ function valueGroupsHtml(vals, connected) {
   const buckets = new Map();
   for (const v of vals) { const g = groupOf(v); (buckets.get(g) || buckets.set(g, []).get(g)).push(v); }
   const grouped = buckets.size > 1;
-  const rowsOf = (rows) => rows.map((v) =>
-    vrow(v.label, v.value == null ? "—" : String(v.value), { cls: v.state || v.class || "", unit: v.unit })).join("");
+  const rowsOf = (rows) => rows.map((v) => vDescRow(v)).join("");
   let html = ""; const done = new Set();
   const emit = (name, rows) => { html += vcard(grouped ? name : "Values", rowsOf(rows)); };
   for (const name of order) if (buckets.has(name)) { emit(name, buckets.get(name)); done.add(name); }
@@ -964,7 +1230,10 @@ function wire() {
   // dropdowns re-run pin auto-detection on change.
   $("valueGroups").addEventListener("click", (e) => {
     const act = e.target.closest("[data-act]");
-    if (act && act.dataset.act === "ota") checkFirmwareUpdate();
+    if (act && act.dataset.act === "ota") { checkFirmwareUpdate(); return; }
+    // Tapping a value row (that has a description) expands/collapses its explainer accordion.
+    const desc = e.target.closest("[data-desc]");
+    if (desc) toggleDesc(desc);
   });
   $("valueGroups").addEventListener("change", (e) => {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();
