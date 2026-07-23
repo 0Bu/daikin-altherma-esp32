@@ -364,6 +364,18 @@ IDF v6.0 extracted it from core — [`idf_component.yml`](../main/idf_component.
   *and* bools) finally gets the ~30 binary rows per profile that used to be invisible to it. The
   device's own `/values`, web UI and WebSocket keep showing `ON`/`OFF`. The pre-split `sensor`
   discovery config is actively deleted on upgrade (`retired_sensor_discovery_topic`).
+- **✅ 🧪 Detect-only rows are never announced — and are actively retracted.** A profile row flagged
+  `ValueDef::no_publish` ([`logic/value_def.hpp`](../main/logic/value_def.hpp)) is skipped by the poll
+  cache, and `publish_discovery` publishes a **zero-length retained** payload to its discovery topic
+  so an install upgrading from a build that *did* announce the row doesn't keep a retained config —
+  and therefore a permanently-unavailable HA entity — forever. This covers an absent-feature register
+  such as the `0x64` hybrid/boiler page on a non-hybrid monobloc/hydrobox: the unit answers the page,
+  but every value on it is a placeholder (a `-40.4 °C` 2nd-DHW probe that does not exist, `Hybrid Op.
+  Mode` "Boiler only" with no boiler). The row is **kept** rather than deleted because a profile's
+  detection signature is the set of pages its rows reference (`def/signatures.hpp`) and
+  `detect_candidates` picks maximal page overlap — dropping the row would make the correct profile
+  lose a page to a feature-richer *wrong* profile that kept it, so the model would mis-detect and the
+  same garbage would return through that table. Pinned by `test_no_publish()`.
 - **✅ TLS with the IDF CA bundle.** Credentials present ⇒ `mqtts://` + `esp_crt_bundle` verification.
   Credentials are **never** sent over a plaintext broker — the client refuses to start and surfaces
   the reason in `/status.mqtt`, with **no silent fallback**.
@@ -591,7 +603,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   makes all three plausibly wrong, issue #121, the #35–#39 failure shape; keyed on the (R1T) tag so
   the alias label forms resolve too, and gated catalog-wide so every detectable profile selects a
   real measurement).
-  **878 `CHECK`s** in
+  **884 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the

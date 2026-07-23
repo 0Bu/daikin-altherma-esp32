@@ -42,7 +42,7 @@ inline constexpr ValueDef altherma_epra_d_etsh_x_16p30_50_d_series_14_16kw_ech2o
     {0xA0, 2, 119, 2, 1, "Outdoor heat exchanger temp."},
     {0xA0, 4, 119, 2, 1, "Liquid pipe temp."},
     {0xA0, 6, 119, 2, 2, "Pressure"},
-    {0xA0, 8, 151, 2, -1, "Expansion valve 3 (pls)"},
+    {0xA0, 8, 151, 2, -1, "Expansion valve 3 (pls) [OU-II]"},
     {0xA0, 14, 105, 2, 1, "Compressor port temperature"},
     {0xA1, 0, 119, 2, 1, "(Raw data)Water heat exchanger inlet temp."},  // default_on
     {0xA1, 2, 119, 2, 1, "(Raw data)Water heat exchanger outlet temp."},  // default_on

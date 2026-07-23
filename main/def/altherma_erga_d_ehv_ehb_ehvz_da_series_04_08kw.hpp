@@ -75,14 +75,16 @@ inline constexpr ValueDef altherma_erga_d_ehv_ehb_ehvz_da_series_04_08kw[] = {
     {0x62, 12, 152, 1, -1, "Water pump signal (0:max-100:stop)"},  // default_on
     {0x62, 15, 105, 2, 2, "Refrigerant pressure sensor"},  // default_on
     {0x62, 15, 405, 2, 1, "Pressure sensor(T)"},  // default_on
-    {0x64, 2, 316, 1, -1, "Hybrid Op. Mode"},
-    {0x64, 2, 303, 1, -1, "Boiler Operation Demand"},
-    {0x64, 2, 302, 1, -1, "Boiler DHW Demand"},
-    {0x64, 3, 105, 2, -1, "BE_COP"},
-    {0x64, 5, 105, 2, 1, "Hybrid Heating Target Temp."},
-    {0x64, 7, 105, 2, 1, "Boiler Heating Target Temp."},
-    {0x64, 10, 118, 2, 1, "Mixed water temp."},  // default_on
-    {0x64, 12, 105, 2, 1, "2nd Domestic hot water temperature"},  // default_on
+    // 0x64 hybrid/boiler page: absent-feature on this non-hybrid model. Kept so the page still
+    // counts toward the DETECTION signature, flagged detect-only so it is never published.
+    {0x64, 2, 316, 1, -1, "Hybrid Op. Mode", true},
+    {0x64, 2, 303, 1, -1, "Boiler Operation Demand", true},
+    {0x64, 2, 302, 1, -1, "Boiler DHW Demand", true},
+    {0x64, 3, 105, 2, -1, "BE_COP", true},
+    {0x64, 5, 105, 2, 1, "Hybrid Heating Target Temp.", true},
+    {0x64, 7, 105, 2, 1, "Boiler Heating Target Temp.", true},
+    {0x64, 10, 118, 2, 1, "Mixed water temp.", true},  // default_on
+    {0x64, 12, 105, 2, 1, "2nd Domestic hot water temperature", true},  // default_on
 };
 
 } // namespace daik::def

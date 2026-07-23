@@ -357,7 +357,17 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 value_def.hpp = the ValueDef row type the generated def/ profile tables are written
                 in ({reg, offset, conv, size, type, label} — registry id, byte offset in the reply
                 payload, converter id for convert.hpp, byte count, HA unit code, English label): the
-                shared vocabulary between the offline generator's output and the decode path.
+                shared vocabulary between the offline generator's output and the decode path. Plus an
+                optional 7th field `no_publish` (defaults false, so every existing generated row is
+                unchanged) = a DETECT-ONLY row: the page exists on this model and must keep counting
+                toward the detection signature, but the value is an absent-feature placeholder that
+                hp_poll never caches and publish_discovery never announces. Kept-not-deleted ON
+                PURPOSE: a profile's signature IS the set of pages its rows reference
+                (def/signatures.hpp) and detect_candidates picks MAXIMAL page overlap, so deleting the
+                row makes the correct profile lose a page to a feature-richer WRONG profile that kept
+                it — the model mis-detects and the same garbage returns through that table. Used for
+                the 0x64 hybrid/boiler page on the non-hybrid 4-8 kW monobloc/hydrobox profiles
+                (test_no_publish pins both halves)
                 json.hpp = the ONE RFC 8259 string encoder every JSON payload goes through (/status,
                 /values, /scan via http_status.cpp's jstr; the MQTT state/heartbeat/crash topics).
                 Escapes " and \ AND every control byte < 0x20 (\b\f\n\r\t, else \u00XX) — the strings

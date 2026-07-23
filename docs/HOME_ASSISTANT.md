@@ -24,11 +24,25 @@ changes) still identifies the device to Home Assistant, but only inside each dis
 <base>/state                                       {<group>: {<object_id>: value, …}, …}  (retained JSON)
 <base>/heartbeat                                   board/link diagnostics (flat JSON, 10 s cadence)
 <base>/crash                                       crash report, retained — ONLY on a fault/dump boot; cleared otherwise
-<prefix>/<component>/<node>/<object_id>/config    discovery config per value (retained)
+<prefix>/<component>/<node>/<object_id>/config    discovery config per PUBLISHED value (retained)
 ```
 
 `<component>` is `binary_sensor` for a bit-flag value (pump running, 3-way valve, thermostat
 ON/OFF — converter family 300-307) and `sensor` for everything else.
+
+Not every catalog row becomes an entity. A row flagged **detect-only** (`ValueDef::no_publish`) is
+one the model's bus answers but never populates with a real reading — e.g. the `0x64` hybrid/boiler
+page on a non-hybrid monobloc/hydrobox, whose "2nd Domestic hot water temperature" is a frozen
+`-40.4 °C` from a probe that does not exist and whose "Hybrid Op. Mode" reports "Boiler only" on a
+unit with no boiler. Those rows are polled by nobody and announced to nobody, and the firmware
+**deletes** any discovery config a previous build published for them (zero-length retained), so they
+leave no permanently-unavailable entity behind.
+
+> **Upgrading:** on the non-hybrid 4-8 kW profiles (EBLA/EDLA monobloc, ERGA/EHB hydrobox) the eight
+> `0x64` hybrid/boiler entities — *2nd Domestic hot water temperature, Hybrid Op. Mode, Boiler
+> Operation Demand, Boiler DHW Demand, BE_COP, Hybrid/Boiler Heating Target Temp., Mixed water
+> temp.* — disappear on the next connect. None carried a real measurement; the heating target they
+> mirrored remains available as **LW setpoint (main)**.
 
 All values ride in **one** retained JSON on `<base>/state`, grouped one level deep by X10A register
 page (`{ "hydronic": { "dhw_setpoint": 48, … }, "outdoor_state": { … }, … }`, max nesting depth 1 —

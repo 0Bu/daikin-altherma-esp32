@@ -356,8 +356,13 @@ The single biggest UX change: **no editing a config header + a `def/*.h` by hand
   (`gen_profiles.py`) and the id→name table (`gen_names_generic.py`). Generated tables are never
   hand-edited — they are regenerated, and their rows verified against [`REGISTERS.md`](REGISTERS.md).
 - At runtime `config` holds the active `profile` id. The poll engine expands it to the concrete
-  register set to request (every value of the profile — there is no per-value enable mask). Labels
-  are English-only — there is no `lang` field.
+  register set to request — every value of the profile except rows flagged `ValueDef::no_publish`
+  ("detect-only"). There is no *user-facing* enable mask; the flag is a catalog property for
+  absent-feature registers, and a page whose rows are **all** flagged is never even queried. Such a
+  row is deliberately **kept** in the table rather than deleted, because a profile's detection
+  signature is the set of pages its rows reference (`def/signatures.hpp`) and `detect_candidates`
+  picks maximal page overlap — deleting it would cost the correct profile a page and hand the match
+  to a feature-richer wrong one. Labels are English-only — there is no `lang` field.
 - The `/models` endpoint serves the catalog (`def/models_catalog.hpp`): the profile list + pin
   hint. Detection is fully automatic (see the Auto-detection section) — the web UI shows the
   detected model read-only, so this is metadata only; there is no manual model dropdown.

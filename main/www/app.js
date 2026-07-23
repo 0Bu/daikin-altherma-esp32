@@ -782,6 +782,7 @@ function liveData() {
     rps: vNum(/inv frequency/i),
     hp: vNum(/^high pressure$/i),
     lp: vNum(/^low pressure$/i),
+    rp: vNum(/^refrigerant pressure sensor$/i),
     disch: vNum(/discharge pipe temp/i),
     eev: vNum(/expansion valve ?1/i),
     tank: vNum(/dhw tank temp/i),
@@ -800,6 +801,13 @@ function liveData() {
   };
   // Pump % — the wire value is inverted ("Water pump signal (0:max-100:stop)").
   d.pump = d.pumpSig == null ? null : Math.min(100, Math.max(0, 100 - d.pumpSig));
+  // Circuit refrigerant pressure for the schematic's high-side badge. The outdoor unit's own High
+  // Pressure transducer (reg 0x20) reads 0 bar while the compressor is off — but a sealed R32 circuit
+  // is never at 0 bar, so "0.0 bar" paints a live-looking fault on an idle unit. Fall back to the
+  // always-live Refrigerant pressure sensor (reg 0x62/15), which reports the real equalised system
+  // pressure at rest (~14 bar for R32 near 20 °C). When the compressor runs, High Pressure is the true
+  // discharge pressure and wins. Neither present (17 profiles carry no pressure row) → null → "—".
+  d.circP = d.hp != null && d.hp > 0 ? d.hp : d.rp;
   // Derived figures, marked "est." in the UI — the bus has no energy registers. Thermal output from
   // flow × ΔT (water ≈ 4.186 kJ/kg·K); electrical from the CT phase currents at an assumed 230 V,
   // falling back to the inverter primary current when the profile has no CT rows.
@@ -844,7 +852,10 @@ function renderLive() {
 
   // Schematic badges
   setTxt("svOut", fmt1(d.out)); setTxt("svRps", fmt0(d.rps));
-  setTxt("svHp", fmt1(d.hp)); setTxt("svLp", fmt1(d.lp));
+  // High-side badge shows the circuit pressure (real refrigerant sensor when the compressor's own HP
+  // transducer is idle-zero — see d.circP). Low/suction side has no equivalent at-rest gauge, so show
+  // "—" rather than a misleading 0.0 bar when the compressor is off.
+  setTxt("svHp", fmt1(d.circP)); setTxt("svLp", d.lp != null && d.lp > 0 ? fmt1(d.lp) : "—");
   setTxt("svDisch", fmt0(d.disch)); setTxt("svEev", fmt0(d.eev));
   setTxt("svLwt", fmt1(d.lwt)); setTxt("svRwt", fmt1(d.ret));
   setTxt("svDt", fmt1(d.dt)); setTxt("svFlow", fmt1(d.flow));
