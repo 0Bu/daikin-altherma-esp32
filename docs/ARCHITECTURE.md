@@ -452,6 +452,11 @@ just-wired unit is still identified promptly. A pass does:
    smaller unit returns a short reply that omits offset 12 (see [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md)),
    leaving the O/U capacity unknown. When it is absent, the **I/U capacity code** (page `0x60` offset 6,
    same 0.1 kW units) is captured as a fallback so the model can still be classed.
+4. **Raw dump** — the wire bytes of pages `0x00`, `0xA0` and `0xA1` go to `/diag`, one line each
+   (`logic/hexdump.hpp`), only on a detect pass. Every other surface the device offers is *decoded*,
+   so an impossible reading cannot be attributed to a wrong converter vs. a wrong byte offset vs. a
+   per-unit layout difference without these bytes — and they otherwise never leave the board. `0x00`
+   also makes the short-descriptor case above directly observable (`len=` vs. the expected ≥13).
 
 Those facts form a `Fingerprint`. The pure, host-tested `logic/detect.hpp` narrows the **Altherma-only**
 profiles (`def/signatures.hpp::is_detection_model` excludes the non-Altherma mini-chillers so they

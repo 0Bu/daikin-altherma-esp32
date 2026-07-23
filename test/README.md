@@ -74,6 +74,13 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   the epoch, a leap-year/year-boundary date, millisecond zero-padding, and that a negative (never
   synced) input renders as `""` rather than a plausible-looking `1970-01-01` — the sentinel
   `syslog.cpp`'s RFC 5424 TIMESTAMP field checks to fall back to the `-` NILVALUE.
+- `logic/hexdump.hpp` — hex rendering for the raw X10A page payloads on `/diag`: lowercase,
+  space-separated, leading zeros preserved (a page is read positionally, so `0f` must not print as
+  `f` or every offset after it shifts). Truncation stops after the last **complete** byte — a
+  trailing nibble would read as a different value — and degenerate inputs (null pointer, zero/
+  negative length, 1-byte buffer) still terminate the buffer, since the caller hands it straight to
+  a `diag_printf` `%s`. Also pins that a full 32-byte payload renders to 95 chars, i.e. the
+  on-device dump is never truncated.
 - `logic/link_watch.hpp` — the gateway-watchdog step: re-associate on the second *proven*-silent
   probe, never on a gateway that has never answered ICMP, never on a link that knows it is down. An
   unmeasurable probe never counts as silence (nor launders silence already observed), but a
