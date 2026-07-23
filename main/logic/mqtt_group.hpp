@@ -58,6 +58,25 @@ inline bool is_json_number(const std::string& s) {
     return digit;
 }
 
+// MQTT-payload encoding for a BINARY reading (converter family 300-307, decoded to "ON"/"OFF" by
+// convert.hpp's conv_is_binary set): the state topic carries the JSON NUMBER 1 or 0.
+//
+// Not the text, and not a JSON bool — both are DROPPED by a metrics consumer. Measured against this
+// install's Telegraf → VictoriaMetrics pipeline: of the ~99 rows an ERGA profile publishes, only the
+// 58 that were JSON numbers ever became series; all 30 bit-flag rows were missing, and so were the
+// heartbeat's `wifi_connected`/`mqtt_connected`/`bus_connected` JSON bools. Only a real JSON number
+// survives the json parser, so 1/0 is the encoding — a bool would have fixed nothing. Home Assistant
+// is served by typing these rows as `binary_sensor` with pl_on "1" / pl_off "0" (logic/discovery.hpp),
+// so neither consumer has to translate.
+//
+// Returns nullptr for anything that is not the expected ON/OFF text, so the caller publishes the
+// decoded text verbatim instead of asserting a 0 it cannot back up.
+inline const char* binary_state_number(const std::string& text) {
+    if (text == "ON")  return "1";
+    if (text == "OFF") return "0";
+    return nullptr;
+}
+
 // One publishable reading destined for the grouped JSON.
 struct GroupedValue {
     std::string group;   // group_for_page(reg)

@@ -583,7 +583,7 @@ The Home Assistant bridge:
 - **One shared grouped-JSON state topic** `<base>/state` (retained). The message topics sit directly
   under `<base>` — one board per base topic, so there is no `<node>` segment in the payload paths; the
   node id `daikin_<mac3>` disambiguates the *device* only in each discovery config's `uniq_id`/`dev.ids`
-  and its `<prefix>/sensor/<node>/…` discovery topic. Each cycle the task
+  and its `<prefix>/<component>/<node>/…` discovery topic. Each cycle the task
   builds a single JSON object of every value, grouped one level deep by X10A register page
   (`logic/mqtt_group.hpp`, host-tested): `{ "<group>": { "<object_id>": value, … }, … }` (max
   nesting depth 1, e.g. `hydronic`, `outdoor_state`, `inverter`). Numbers are emitted unquoted,
@@ -594,6 +594,25 @@ The Home Assistant bridge:
   1 = °C/temperature, 2 = bar/pressure, 3 = A/current; `unit_for_datatype`/`device_class_for_datatype`
   in `logic/convert.hpp`), so temperatures get `°C` + `temperature`, currents `A` + `current`, etc.,
   and HA renders them correctly with history.
+- **Binary values are `binary_sensor`s carrying 1/0.** A bit-flag row (converter family 300-307 —
+  `conv_is_binary` in `logic/convert.hpp`) decodes to the text `"ON"`/`"OFF"`, which is what
+  `/values`, the web UI and the WebSocket show. On the wire it is re-encoded as the JSON **number**
+  `1`/`0` (`binary_state_number`, `logic/mqtt_group.hpp`) and typed as an HA `binary_sensor`
+  (`ha_component`, `logic/discovery.hpp`) whose config spells out `"pl_on":"1"` / `"pl_off":"0"` —
+  HA's defaults are `"ON"`/`"OFF"`, and a mismatch leaves the entity silently at `unknown`. Both
+  sites key on the one `conv_is_binary` predicate rather than on the decoded text, so the payload
+  encoding and the entity type cannot drift apart. Every such row is `size 1`/`dataType -1`, so
+  there is no unit or `device_class` to reconcile; a *meaningful* device class (`running`, `problem`,
+  `heat`) is a per-label domain judgement and is deliberately **not** inferred.
+
+  The number — not the text, and not a JSON bool — is the point: a metrics consumer stores numbers
+  and drops both strings and bools, so all ~30 binary rows of a profile reached HA but never a graph.
+  Measured on a live install before the change: of ~99 published values only the 58 numeric ones
+  became VictoriaMetrics series. Builds before this published every row as a `sensor`; that stale
+  retained discovery config is actively deleted for binary rows on each announce
+  (`retired_sensor_discovery_topic`), so an upgraded install doesn't keep a duplicate,
+  permanently-unavailable text entity. The entity domain changes, so HA history for these does not
+  carry over.
 - **Publish-on-change.** The heat pump is polled at a fixed 1 s interval for near-real-time readings,
   but the task republishes the state JSON **only when the payload actually changed** since the last
   publish (a plain string compare — a single JSON topic can't be updated per-value, so it is
@@ -607,7 +626,13 @@ The Home Assistant bridge:
   heat-pump values, built by `logic/heartbeat.hpp` (host-tested). The payload is a **flat** JSON object
   — each field carried under its block name as a prefix rather than nested `wifi`/`mqtt`/`bus`
   sub-objects, so a Telegraf/InfluxDB line-protocol consumer and an HA `value_template` both read a
-  plain snake_case key:
+  plain snake_case key. The three connectivity flags (`wifi_connected`, `mqtt_connected`,
+  `bus_connected`) are the numbers `1`/`0`, not JSON bools, for the same reason the state topic's
+  bit-flag rows are — a metrics consumer drops a bool exactly as it drops a string, and these three
+  were the only heartbeat fields that never became series. The `bus_status` `binary_sensor` declares
+  the matching `"pl_on":"1"`/`"pl_off":"0"`; without it the entity inherits HA's `"ON"`/`"OFF"`
+  defaults and sits at `unknown`. (The crash topic keeps `true`/`false` + a `| lower` template: it is
+  an event payload, not a metrics stream, and its `binary_sensor` already reads correctly.)
   - **Board**: `version`, `platform`, `uptime_s` + a `"Ddd+HH:MM:SS.mmm"` `uptime` display string
     (`format_uptime`), `free_heap` / `min_free_heap` / `max_alloc` (largest free block — the
     binding OOM limit on this firmware), `reset_reason`, `time` (SNTP wall clock, null until synced).

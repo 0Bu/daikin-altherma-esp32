@@ -23,8 +23,26 @@ inline std::string object_id(const char* label) {
     return o;
 }
 
+// HA component (the discovery topic's <component> segment + the entity domain) for one value: a
+// bit-flag row is a `binary_sensor`, everything else a `sensor`. Keyed on the converter id via
+// conv_is_binary, the same predicate the state-payload encoder uses.
+inline const char* ha_component(const ValueDef& def) {
+    return conv_is_binary(def.conv) ? "binary_sensor" : "sensor";
+}
+
 inline std::string discovery_topic(const std::string& prefix, const std::string& node,
                                    const ValueDef& def) {
+    return prefix + "/" + ha_component(def) + "/" + node + "/" + object_id(def.label) + "/config";
+}
+
+// The topic a value's discovery config was published on by builds BEFORE the binary_sensor split,
+// when EVERY row was a `sensor`. For a binary row this is now a stale retained config that HA would
+// keep as a second, permanently-unavailable text entity, so the bridge deletes it (zero-length
+// retained publish) alongside publishing the new one — the RETIRED_CRASH_SENSORS pattern, except the
+// old topic is derivable from the row instead of needing a hand-maintained table. Returns the same
+// string as discovery_topic() for a non-binary row, where there is nothing to retire.
+inline std::string retired_sensor_discovery_topic(const std::string& prefix, const std::string& node,
+                                                  const ValueDef& def) {
     return prefix + "/sensor/" + node + "/" + object_id(def.label) + "/config";
 }
 
@@ -58,6 +76,13 @@ inline std::string discovery_config(const std::string& node, const std::string& 
     j += "\"stat_t\":\"";     j += state_topic; j += "\",";
     j += "\"val_tpl\":\"{{ value_json['"; j += group; j += "']['"; j += obj; j += "'] }}\",";
     j += "\"avty_t\":\"";     j += avail_topic; j += "\",";
+    // A binary row's state is the number 1/0 (logic/mqtt_group.hpp binary_state_number), which the
+    // template renders as "1"/"0" — so pl_on/pl_off must be spelled out; HA's defaults are "ON"/"OFF"
+    // and would leave every one of these entities stuck at `unknown`. No unit / device_class /
+    // state_class: every 300-307 row is dataType -1, so unit and dc are empty here anyway, and a
+    // meaningful HA device_class (running / problem / heat) is a per-LABEL domain judgement — exactly
+    // the kind of guess that produced #35-#39 — so it is deliberately left unset rather than inferred.
+    if (conv_is_binary(def.conv)) { j += "\"pl_on\":\"1\",\"pl_off\":\"0\","; }
     if (!unit.empty()) { j += "\"unit_of_meas\":\""; j += unit; j += "\","; }
     if (!dc.empty())   { j += "\"dev_cla\":\"";      j += dc;   j += "\","; j += "\"stat_cla\":\"measurement\","; }
     j += "\"dev\":{\"ids\":[\""; j += node; j += "\"],\"name\":\"Daikin Altherma\",";

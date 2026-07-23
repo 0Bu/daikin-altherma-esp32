@@ -111,21 +111,30 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     // contract as /status.ntp.time and the syslog RFC 5424 TIMESTAMP field.
     j += "\"time\":"; j += f.time.empty() ? "null" : ("\"" + f.time + "\"");
     j += ",";
+    // The three connectivity flags ride as the NUMBERS 1/0, not JSON bools. Measured on this
+    // install's Telegraf → VictoriaMetrics pipeline: wifi_connected/mqtt_connected/bus_connected were
+    // the only heartbeat fields that never became series — the json parser drops a bool exactly like
+    // it drops a string, and a metrics store has nowhere to put either. Same reasoning and same
+    // encoding as the state topic's bit-flag rows (logic/mqtt_group.hpp binary_state_number); HA is
+    // served by the matching pl_on "1" / pl_off "0" below.
+    // (The crash topic keeps its true/false + `| lower` template: it is an event payload, published
+    // empty on a normal boot and deliberately not subscribed by the metrics pipeline, so it has no
+    // consumer that a bool costs anything — and its binary_sensor already reads correctly in HA.)
     // wifi_* — rssi/quality null while offline (a stale reading must not leak); mac always present;
     // bssid null while offline (no AP).
-    j += "\"wifi_connected\":"; j += f.wifi_connected ? "true" : "false";
+    j += "\"wifi_connected\":"; j += f.wifi_connected ? "1" : "0";
     j += ",\"wifi_rssi\":"; j += f.wifi_connected ? std::to_string(f.wifi_rssi) : "null";
     j += ",\"wifi_quality_pct\":"; j += f.wifi_connected ? std::to_string(wifi_signal_quality_pct(f.wifi_rssi)) : "null";
     j += ",\"wifi_reconnects\":" + std::to_string(f.wifi_reconnects);
     j += ",\"wifi_mac\":"; j += f.wifi_mac.empty() ? "null" : ("\"" + f.wifi_mac + "\"");
     j += ",\"wifi_bssid\":"; j += f.wifi_bssid.empty() ? "null" : ("\"" + f.wifi_bssid + "\"");
     // mqtt_*
-    j += ",\"mqtt_connected\":"; j += f.mqtt_connected ? "true" : "false";
+    j += ",\"mqtt_connected\":"; j += f.mqtt_connected ? "1" : "0";
     j += ",\"mqtt_count\":" + std::to_string(f.mqtt_count);
     j += ",\"mqtt_fails\":" + std::to_string(f.mqtt_fails);
     j += ",\"mqtt_reconnects\":" + std::to_string(f.mqtt_reconnects);
     // bus_*
-    j += ",\"bus_connected\":"; j += f.bus_connected ? "true" : "false";
+    j += ",\"bus_connected\":"; j += f.bus_connected ? "1" : "0";
     j += ",\"bus_proto\":\""; j += f.bus_proto; j += "\"";
     j += ",\"bus_registers\":" + std::to_string(f.registers);
     j += ",\"bus_values\":" + std::to_string(f.values);
@@ -205,6 +214,10 @@ inline std::string heartbeat_discovery_config(const std::string& node, const std
     j += "\"stat_t\":\""; j += hb_topic; j += "\",";
     j += "\"val_tpl\":\"{{ value_json."; j += s.json_path; j += " }}\",";
     j += "\"avty_t\":\""; j += avail_topic; j += "\",";
+    // A binary_sensor here reads a 1/0 NUMBER (see build_heartbeat_json), so it must say so: HA's
+    // pl_on/pl_off default to "ON"/"OFF" and match neither 1/0 nor the `True`/`False` a JSON bool used
+    // to render as — which is why the "X10A Bus" entity never left `unknown` before this.
+    if (s.component[0] == 'b') { j += "\"pl_on\":\"1\",\"pl_off\":\"0\","; }   // "binary_sensor"
     if (s.unit[0])         { j += "\"unit_of_meas\":\""; j += s.unit; j += "\","; }
     if (s.device_class[0]) { j += "\"dev_cla\":\""; j += s.device_class; j += "\","; }
     if (s.state_class[0])  { j += "\"stat_cla\":\""; j += s.state_class; j += "\","; }

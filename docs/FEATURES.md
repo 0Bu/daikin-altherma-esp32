@@ -358,6 +358,12 @@ IDF v6.0 extracted it from core — [`idf_component.yml`](../main/idf_component.
   republished only when the payload changes so a quiet pump doesn't spam the broker. The message
   topics sit directly under `<base>` (one board per base topic); the per-device node id `daikin_<mac3>`
   disambiguates the device only in each discovery config's `uniq_id`/`dev.ids`, not the payload path.
+  A **bit-flag** value (converter family 300-307, `conv_is_binary`) is typed as a `binary_sensor` with
+  an explicit `pl_on:"1"`/`pl_off:"0"` and published as the JSON **number** `1`/`0`
+  (`binary_state_number`) — HA gets a real on/off entity, and a metrics consumer (which drops strings
+  *and* bools) finally gets the ~30 binary rows per profile that used to be invisible to it. The
+  device's own `/values`, web UI and WebSocket keep showing `ON`/`OFF`. The pre-split `sensor`
+  discovery config is actively deleted on upgrade (`retired_sensor_discovery_topic`).
 - **✅ TLS with the IDF CA bundle.** Credentials present ⇒ `mqtts://` + `esp_crt_bundle` verification.
   Credentials are **never** sent over a plaintext broker — the client refuses to start and surfaces
   the reason in `/status.mqtt`, with **no silent fallback**.
@@ -585,7 +591,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   makes all three plausibly wrong, issue #121, the #35–#39 failure shape; keyed on the (R1T) tag so
   the alias label forms resolve too, and gated catalog-wide so every detectable profile selects a
   real measurement).
-  **839 `CHECK`s** in
+  **878 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the

@@ -105,6 +105,9 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802
         }
 
         // ── Bit flags: conv 300+b -> bit b (0=LSB) of data[0] -> ON/OFF ──
+        // Stays TEXT here (see conv_is_binary below): "ON"/"OFF" is what /values, the web UI and the
+        // WebSocket show. The MQTT bridge re-encodes it as 1/0 at publish time; the converter's own
+        // semantics are unchanged so the domain audit still reads this as one bit of data[0].
         case 300: case 301: case 302: case 303:
         case 304: case 305: case 306: case 307:
             set_text(r, (data[0] & (1 << (def.conv - 300))) ? "ON" : "OFF"); break;
@@ -169,6 +172,17 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802
     }
     return r;
 }
+
+// Is this converter's reading a BOOLEAN — one bit of data[0], decoded to "ON"/"OFF" above? The
+// bit-flag family 300-307 is the whole set; every row using it is size 1 / dataType -1 (no unit, no
+// device class), which is why a binary row needs no unit handling anywhere downstream.
+//
+// Two consumers key on this and MUST agree, which is why it lives here as one predicate rather than
+// as a text comparison at each site: logic/discovery.hpp types the row as an HA `binary_sensor`, and
+// the MQTT bridge encodes its state as 1/0 (logic/mqtt_group.hpp binary_state_number). Sniffing for
+// the literal "ON" instead would let the two drift apart the moment any other converter emits that
+// text — a binary_sensor pointed at a string state, or a number published for a text sensor.
+inline bool conv_is_binary(int conv) { return conv >= 300 && conv <= 307; }
 
 // Physical envelope for a °C reading (dataType 1). A decoded temperature outside this range is a
 // no-data / absent-sensor placeholder — an idle outdoor unit reporting 576 °C or a 231 °C target, a

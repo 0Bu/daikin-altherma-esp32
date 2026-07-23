@@ -242,11 +242,25 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 state topic <base>/state (logic/mqtt_group.hpp), republished on change; LWT
                 availability, mqtts+CA on creds. Message topics sit DIRECTLY under <base> (no
                 daikin_<mac> node segment — one board per base topic); the node id disambiguates the
-                DEVICE only in each discovery config's uniq_id/dev.ids + the <prefix>/sensor/<node>/…
-                discovery topic. Board/link diagnostics on <base>/heartbeat (logic/heartbeat.hpp),
+                DEVICE only in each discovery config's uniq_id/dev.ids + the <prefix>/<component>/<node>/…
+                discovery topic. A BIT-FLAG row (conv 300-307, conv_is_binary) is published as the JSON
+                NUMBER 1/0 (binary_state_number) and typed as an HA binary_sensor (ha_component) with an
+                explicit pl_on:"1"/pl_off:"0" — HA's defaults are "ON"/"OFF" and a mismatch parks the
+                entity at `unknown`. The NUMBER is the point: a metrics consumer (Telegraf →
+                VictoriaMetrics) drops strings AND bools, so ~30 of a profile's ~99 values reached HA but
+                never a graph (measured: 58 of ~99 became series). /values, the web UI and the WebSocket
+                read the poll cache and still show ON/OFF — only the wire format changed. Both call sites
+                key on conv_is_binary, never on the text, so the encoding and the entity type can't drift
+                apart. Builds before the split published these as `sensor`; that stale retained config is
+                DELETED per binary row on each announce (retired_sensor_discovery_topic) so no duplicate
+                unavailable entity survives an upgrade — the entity DOMAIN changes, so HA history for
+                these does not carry over. Board/link diagnostics on <base>/heartbeat (logic/heartbeat.hpp),
                 published on a fixed 10s cadence (HEARTBEAT_INTERVAL_S) — a FLAT JSON (each field
                 prefixed by its block name: wifi_connected, wifi_rssi, wifi_mac, wifi_bssid, mqtt_count,
-                bus_rx_received, … — no nested wifi/mqtt/bus objects) of
+                bus_rx_received, … — no nested wifi/mqtt/bus objects; the three connectivity flags are
+                1/0 NUMBERS, not bools, for the same metrics-consumer reason as the bit-flag rows, and
+                bus_status carries the matching pl_on/pl_off — the crash topic keeps true/false + `| lower`
+                since it is an event payload, not a metrics stream) of
                 heap(free/min-free/largest-block)/uptime/reset_reason/the SNTP wall clock (sntp_time.cpp,
                 "time" — HA device_class "timestamp", null until synced)/wifi(rssi+reconnects+MAC+BSSID,
                 mac always present, bssid null offline)/mqtt(pub count+fails+reconnects)/X10A bus
@@ -412,8 +426,12 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 maximal page overlap -> kW class containing the capacity -> tightest class). The set is
                 register-equivalent only when the capacity is KNOWN; when it is absent the set spans kW
                 classes, so the I/U-capacity fallback that ranks the representative does affect values;
-                mqtt_group.hpp maps a register page to a friendly group name and builds the grouped
-                state JSON; heartbeat.hpp builds the board/link diagnostics JSON (FLAT — each field
+                mqtt_group.hpp maps a register page to a friendly group name, builds the grouped
+                state JSON, and encodes a BINARY reading for the wire (binary_state_number: "ON"->1,
+                "OFF"->0, anything else -> nullptr so the caller publishes the text rather than
+                inventing a 0); discovery.hpp's ha_component types the same rows as binary_sensor and
+                retired_sensor_discovery_topic yields the pre-split `sensor` topic to delete;
+                heartbeat.hpp builds the board/link diagnostics JSON (FLAT — each field
                 prefixed by its block name, e.g. wifi_rssi/wifi_mac/bus_rx_received, not nested) + its
                 diagnostic HA discovery configs; crashinfo.hpp turns a captured CrashInfo (reset reason + core-dump
                 summary) into the last_crash JSON / MQTT crash payload + a paste-friendly text bundle,

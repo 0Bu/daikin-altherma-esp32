@@ -123,6 +123,7 @@ static void poll_once() {
             cv.label = prof.values[k].label;
             cv.unit  = unit_for_datatype(prof.values[k].type);
             cv.reg   = prof.values[k].reg;
+            cv.conv  = prof.values[k].conv;
             std::string val;
             if (hp_format(prof.values[k], payload, paylen, rtype, val)) cv.value = val;
             fresh.push_back(std::move(cv));
