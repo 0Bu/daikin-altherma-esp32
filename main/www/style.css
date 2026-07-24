@@ -148,6 +148,13 @@ svg .sc-plate { fill: var(--hatch); stroke: var(--line); }
 svg .sc-lbl { fill: var(--muted); font: 700 10px var(--font-sans); letter-spacing: .08em; }
 svg .sc-pill { fill: var(--card); stroke: var(--line); }
 svg .sc-val { fill: var(--fg); font: 600 11px var(--font-sans); font-variant-numeric: tabular-nums; }
+/* A reading the outdoor unit has stopped refreshing (compressor off — logic/ou_stale.hpp): the last
+   run's value, not a current measurement. Shown but visibly demoted to the muted colour, NOT blanked
+   to "—": blanking cost a number the user wanted and read as "the firmware lost the plant", while
+   printing it live asserted a false reading (the pre-1.0.7 bug). Applied per TSPAN, not per pill —
+   the high-side badge pairs a HELD discharge temperature with a LIVE refrigerant pressure, and
+   dimming the whole pill would libel the live half. #heldNote under the drawing says why. */
+svg .sc-val tspan.held { fill: var(--muted); font-weight: 500; }
 svg .sc-sub { fill: var(--muted); font: 500 9.5px var(--font-sans); }
 svg .sc-state { fill: var(--muted); font: 600 10px var(--font-sans); }
 /* Status block inside the drawing (#scStatus): the operation mode as the drawing's headline, with
@@ -231,6 +238,10 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    source; the live half (reading, state sentence, member rows) is rebuilt from the poll cache. */
 .inspect { margin: 4px 6px 6px; }
 .inspect-hint { font-size: 12.5px; color: var(--muted); padding: 6px 2px; }
+/* Legend for the greyed outdoor readings, shown only while any are actually held over (renderLive).
+   Lives OUTSIDE the SVG on purpose: the schematic's pills are fixed-width rects, so a caption long
+   enough to explain itself cannot go in one without overflowing it. */
+.held-note { font-size: 12.5px; color: var(--muted); padding: 0 2px 6px; line-height: 1.45; }
 .inspect-card {
   background: var(--brand-tint); border: 1px solid var(--line); border-radius: var(--r-tile);
   padding: 12px 14px;

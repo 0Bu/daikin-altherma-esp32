@@ -123,12 +123,18 @@ static std::string build_status_json_string() {
     // why). Drives the ESP32 card's hardware rows; /set_board writes them back.
     int lpins[BOARD_LOCAL_PINS_MAX];
     int nlpins = board_pins_local(lpins, BOARD_LOCAL_PINS_MAX, hw_octal_spi());
-    j += "\"board\":{\"led_gpio\":" + std::to_string(c.led_gpio) +
-         ",\"led_type\":" + std::to_string(c.led_type) +
-         ",\"led_inverted\":" + std::string(c.led_inverted ? "true" : "false") +
-         ",\"btn_gpio\":" + std::to_string(c.btn_gpio) +
-         ",\"btn_active_low\":" + std::string(c.btn_active_low ? "true" : "false") +
-         ",\"pins_local\":[";
+    // Appended piece by piece with `+=` rather than as one `a + b + c + …` chain. A chain has to
+    // materialise EVERY intermediate std::string at once — each one a live object in this frame — and
+    // this function overflowed the httpd task's stack doing exactly that (see http_server.cpp for the
+    // measurement and the crash it caused). `+=` holds one temporary at a time and takes a bare string
+    // literal with no std::string wrapper at all, so it drops the allocations too. Same shape below
+    // for the presets, and worth keeping if this block grows again.
+    j += "\"board\":{\"led_gpio\":";  j += std::to_string(c.led_gpio);
+    j += ",\"led_type\":";            j += std::to_string(c.led_type);
+    j += ",\"led_inverted\":";        j += c.led_inverted ? "true" : "false";
+    j += ",\"btn_gpio\":";            j += std::to_string(c.btn_gpio);
+    j += ",\"btn_active_low\":";      j += c.btn_active_low ? "true" : "false";
+    j += ",\"pins_local\":[";
     for (int i = 0; i < nlpins; i++) { if (i) j += ","; j += std::to_string(lpins[i]); }
     // ...and the ready-made settings for the boards this project documents (logic/board_presets.hpp),
     // so the Hardware modal can fill all five fields from one pick instead of asking the user to
@@ -141,12 +147,13 @@ static std::string build_status_json_string() {
     j += "],\"presets\":[";
     for (int i = 0; i < npre; i++) {
         if (i) j += ",";
-        j += "{\"name\":" + jstr(presets[i]->name) +
-             ",\"led_gpio\":" + std::to_string(presets[i]->led_gpio) +
-             ",\"led_type\":" + std::to_string(presets[i]->led_type) +
-             ",\"led_inverted\":" + std::string(presets[i]->led_inverted ? "true" : "false") +
-             ",\"btn_gpio\":" + std::to_string(presets[i]->btn_gpio) +
-             ",\"btn_active_low\":" + std::string(presets[i]->btn_active_low ? "true" : "false") + "}";
+        j += "{\"name\":";            j += jstr(presets[i]->name);
+        j += ",\"led_gpio\":";        j += std::to_string(presets[i]->led_gpio);
+        j += ",\"led_type\":";        j += std::to_string(presets[i]->led_type);
+        j += ",\"led_inverted\":";    j += presets[i]->led_inverted ? "true" : "false";
+        j += ",\"btn_gpio\":";        j += std::to_string(presets[i]->btn_gpio);
+        j += ",\"btn_active_low\":";  j += presets[i]->btn_active_low ? "true" : "false";
+        j += "}";
     }
     j += "]},";
     char bssid_str[18] = {0};

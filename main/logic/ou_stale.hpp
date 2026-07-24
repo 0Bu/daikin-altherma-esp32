@@ -19,10 +19,16 @@
 //
 // Host-testable twin of www/app.js's `d.ouHeldOver` (like logic/lwt_select.hpp there is no firmware
 // caller): the rule keys on the generated def/ profile REGISTER ids, which are C++, so the CI
-// logic-test gates it against the whole catalog — every profile must keep the readings the UI blanks
+// logic-test gates it against the whole catalog — every profile must keep the readings the UI GREYS
 // on a held-over page, AND must keep the readings that DECIDE the run state on a live one. That
 // second half is the load-bearing one: it is what makes "Standby — not running" trustworthy while
 // the pills around it are not.
+//
+// WHAT the UI does with a held-over reading is the UI's call, and it changed after v1.0.11: the pills
+// are GREYED and captioned, not blanked. Blanking discarded a number the user wanted and read as a
+// lost link (reported as "the firmware says the plant is unreachable" against a healthy bus). This
+// header is unaffected either way — it answers "is this reading still current", not "how should it be
+// drawn" — which is exactly why the rule lives here and the presentation does not.
 
 namespace daik::logic {
 

@@ -316,17 +316,24 @@ Body, ordered:
    why, so instead every value pill blanks to "—", every animation stops, the 3-way-valve label falls
    back to a bare "3WV" (no branch claimed) and the thermostat pill disappears — an idle plant with no
    readings, not a stale one — nothing on this screen is hidden by a dead bus.
-   **A sleeping outdoor unit is the same rule at one-page scale.** The outdoor unit refreshes its own
-   register pages only while it *runs*; stopped, it keeps answering with the last run's values
-   (`logic/ou_stale.hpp`, host-tested against the whole catalog). So the outdoor-air and discharge
-   pills blank to "—" while the compressor is stopped, rather than repeat a reading nobody is still
-   taking — measured on a live unit, outdoor air held exactly 19.0 °C for five hours and stepped only
-   when the compressor started. The high-side badge already survives this (it falls back to the
-   always-live refrigerant-pressure sensor, §5.5); ΔT blanks too when the pump is off and flow reads
-   zero, because a difference between two *stagnant* sensors is not a working point. What the pill
-   cannot say, the inspector does: the outdoor unit's idle explanation names the reason. The run state
-   itself is never affected — the compressor witness (`INV frequency`) sits on a page that stays live
-   in every profile, which is what makes "Standby — not running" trustworthy beside blanked pills.
+   **A sleeping outdoor unit is a related but DIFFERENT case, and it resolves the other way.** The
+   outdoor unit refreshes its own register pages only while it *runs*; stopped, it keeps answering
+   with the last run's values (`logic/ou_stale.hpp`, host-tested against the whole catalog) — measured
+   on a live unit, outdoor air held exactly 19.0 °C for five hours, stepped when the compressor
+   started, then sat at exactly 25.5 °C for three hours. Unlike a dead bus, we know both the value
+   *and* exactly why it is not current, so the honest rendering is neither extreme: the outdoor-air
+   and discharge pills stay **visible but greyed** (`.sc-val tspan.held`), with a legend under the
+   drawing (`#heldNote`) naming where they came from. Printing them plain asserts the last run's
+   number as a live reading; blanking them to "—" throws away a number the user wants and is read as
+   a lost connection — that failure is on record, as a "the firmware says the plant is unreachable"
+   bug report against the blanking build. The greying is applied per *tspan*, not per pill, because
+   the high-side badge pairs a held discharge temperature with a live refrigerant pressure (§5.5).
+   ΔT is a different case again and does still blank: with the pump off and flow zero, the difference
+   between two *stagnant* sensors is not a stale working point, it is not a working point at all.
+   What the pill cannot say, the inspector does: the outdoor unit's idle explanation names the reason.
+   The run state itself is never affected — the compressor witness (`INV frequency`) sits on a page
+   that stays live in every profile, which is what makes "Standby — not running" trustworthy beside
+   greyed pills.
 2. **System schematic** — the body of that card, drawing the hydraulic + refrigerant circuit
    as an inline SVG: outdoor unit (fan + compressor with rps), refrigerant lines (gas + liquid — the
    lower one is the **liquid** line, not a suction line: the expansion valve sits in the outdoor unit

@@ -8,11 +8,13 @@
 namespace daik {
 
 bool hp_format(const ValueDef& def, const uint8_t* payload, int payload_len, int rtype,
-               std::string& out) {
+               std::string& out, const ValueDef* profile, size_t count) {
     if (def.offset + def.size > payload_len) return false;
     Reading r = convert(def, payload + def.offset, rtype);   // rtype selects the conv-405 curve
     if (r.unimpl) return false;
-    if (!reading_plausible(def, r)) return false;            // drop impossible °C placeholders (576 °C, ...)
+    // Drop impossible placeholders: a °C reading off the physical envelope (576 °C, ±3276.x), or a
+    // refrigerant pressure at 0 bar (an unreported transducer — a sealed circuit is never at vacuum).
+    if (!reading_plausible(def, r, profile, count)) return false;
     if (!r.ok && r.text[0] == '\0') return false;
     // conv 204 (fault code) gets an English description appended when the table covers it;
     // every other text converter (enum labels, ON/OFF) publishes its decoded text verbatim.

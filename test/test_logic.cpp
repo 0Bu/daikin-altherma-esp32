@@ -282,6 +282,49 @@ static void test_convert() {
     const uint8_t cop3000[] = {0xB8, 0x0B};            // LE 3000 -> 300.0, must NOT be clipped (not °C)
     CHECK(reading_plausible(cop, convert(cop, cop3000)) && approx(convert(cop, cop3000).value, 300.0));
 
+    // A REFRIGERANT pressure of 0 bar is an unreported transducer, not a reading: these are ABSOLUTE
+    // pressures and a sealed circuit is never at vacuum. Measured on a live 4-8 kW unit, High/Low
+    // Pressure (0x20/12+14) read exactly 0.0 bar both at rest and at 42 rps, while the 0x62/15
+    // refrigerant sensor read a correct 15.3 bar — so the 0.0 reached HA as a real pressure (#35-#39
+    // shape). WATER pressure must keep publishing 0 bar: a drained system genuinely reads it.
+    // The refrigerant/water split is taken from the CATALOG — a conv-405 saturation-temperature
+    // companion at the same (reg, offset) — never from the label, which an alias could flip.
+    const ValueDef pprof[] = {
+        {0x20, 12, 105, 2, 2, "High Pressure"}, {0x20, 12, 405, 2, 1, "High Pressure(T)"},
+        {0x62, 11, 105, 1, 2, "Water pressure"},                       // no 405 companion -> water
+        {0x62, 15, 105, 2, 2, "Refrigerant pressure sensor"}, {0x62, 15, 405, 2, 1, "Pressure sensor(T)"},
+    };
+    const size_t pn = sizeof(pprof) / sizeof(pprof[0]);
+    CHECK(is_refrigerant_pressure(pprof[0], pprof, pn));      // 0x20/12 — outdoor page AND a 405 twin
+    CHECK(is_refrigerant_pressure(pprof[3], pprof, pn));      // 0x62/15 — hydronic page, reached by the twin
+    CHECK(!is_refrigerant_pressure(pprof[2], pprof, pn));     // 0x62/11 water pressure: neither signal
+    // The PAGE signal alone must carry an outdoor bar row that has no 405 twin (0xA0 "Pressure"),
+    // and must not need the profile at all — that is what makes signal 1 independent of signal 2.
+    const ValueDef aux{0xA0, 6, 119, 2, 2, "Pressure"};
+    CHECK(is_refrigerant_pressure(aux, pprof, pn));
+    CHECK(is_refrigerant_pressure(aux, nullptr, 0));
+    // Same (reg,offset) but a different PAGE must not borrow the twin: 0x20/12 vs 0x62/12.
+    const ValueDef otherpage{0x62, 12, 105, 2, 2, "some other bar"};
+    CHECK(!is_refrigerant_pressure(otherpage, pprof, pn));
+    // A non-bar row on an outdoor page is not a pressure at all — the page signal must not swallow it.
+    const ValueDef outdoor_temp{0x20, 2, 105, 2, 1, "R1T-Outdoor air temp."};
+    CHECK(!is_refrigerant_pressure(outdoor_temp, pprof, pn));
+    const uint8_t p0bar[]  = {0x00, 0x00};                    // 0 -> 0.0 bar
+    const uint8_t bar153[] = {0x99, 0x00};                    // LE 153 -> 15.3 bar, the real at-rest value
+    CHECK(convert(pprof[0], p0bar).ok);                                      // still decoded (intrinsic)
+    CHECK(!reading_plausible(pprof[0], convert(pprof[0], p0bar), pprof, pn));    // but not published
+    CHECK(reading_plausible(pprof[3], convert(pprof[3], bar153), pprof, pn) &&
+          approx(convert(pprof[3], bar153).value, 15.3));                     // a real one survives
+    CHECK(reading_plausible(pprof[2], convert(pprof[2], p0bar), pprof, pn));  // 0 bar WATER publishes
+    // Called WITHOUT a profile, the two signals degrade differently, and that split is the point:
+    // the PAGE signal needs no table, so an outdoor 0-bar row is still withheld...
+    CHECK(!reading_plausible(pprof[0], convert(pprof[0], p0bar)));            // 0x20 — still caught
+    // ...while the conv-405 twin cannot be looked up, so a hydronic refrigerant row falls back to
+    // publishing rather than being guessed at. A caller with no table in hand gets the weaker
+    // guarantee, never a wrong one.
+    CHECK(reading_plausible(pprof[3], convert(pprof[3], p0bar)));             // 0x62/15 — not caught
+    CHECK(!reading_plausible(pprof[3], convert(pprof[3], p0bar), pprof, pn)); // ...but caught with it
+
     // profile_refrigerant: pick the 801-805 row's id, else default to R32 (802).
     const ValueDef prof801[] = {{0x00, 0, 801, 0, -1, "*Refrigerant type"}, {0x61, 0, 105, 2, 1, "T"}};
     const ValueDef prof_none[] = {{0x61, 0, 105, 2, 1, "T"}};
@@ -785,6 +828,43 @@ static void test_binary_catalog() {
         }
     }
     CHECK(checked > 500);   // ~30 binary rows x 44 profiles — the catalog really was traversed
+}
+
+// is_refrigerant_pressure() across the SHIPPED catalog. The production rule is STRUCTURAL (outdoor
+// page, or a conv-405 saturation twin) and must never consult the label — an alias or a translation
+// would flip it. The TEST is allowed to know exactly what the rule must not depend on: it uses the
+// label as an independent oracle to prove the structural rule agrees with reality.
+//
+// The load-bearing assertion is the NEGATIVE one. A false positive here withholds a legitimate 0-bar
+// reading from a drained water circuit — inventing missing data — which is worse than the 0-bar
+// refrigerant reading the filter exists to suppress. So: no row that names itself water may ever be
+// classified refrigerant, on any profile, by either signal.
+static void test_refrigerant_pressure_catalog() {
+    int refrig = 0, water = 0, outdoor = 0;
+    for (const auto& p : def::profiles) {
+        for (size_t i = 0; i < p.count; i++) {
+            const ValueDef& d = p.values[i];
+            if (d.type != 2) continue;                       // bar rows only
+            std::string lbl;
+            for (const char* c = d.label; c && *c; c++) lbl += static_cast<char>(std::tolower(*c));
+            const bool names_water = lbl.find("water") != std::string::npos;
+            const bool flagged     = is_refrigerant_pressure(d, p.values, p.count);
+            if (names_water) { CHECK(!flagged); water++; }   // <- the one that must never fail
+            if (flagged) refrig++;
+            // Every bar row on an outdoor page is refrigerant by the page signal alone, profile or no
+            // profile: there is no water circuit in the outdoor unit.
+            if (d.reg == 0x20 || d.reg == 0x21 || d.reg == 0xA0 || d.reg == 0xA1) {
+                CHECK(flagged);
+                CHECK(is_refrigerant_pressure(d, nullptr, 0));
+                outdoor++;
+            }
+        }
+    }
+    // Traversal proof + coverage floor, so a regression that quietly stops classifying anything
+    // (or stops finding the catalog at all) fails here instead of passing silently.
+    CHECK(water   >= 40);    // ~44 water-pressure rows across the catalog
+    CHECK(outdoor >= 80);    // ~85 outdoor bar rows
+    CHECK(refrig  >= 90);    // outdoor + the 0x62 rows a 405 twin reaches
 }
 
 static void test_registry() {
@@ -3179,6 +3259,7 @@ int main() {
     test_button();
     test_discovery();
     test_binary_catalog();
+    test_refrigerant_pressure_catalog();
     test_registry();
     test_detect();
     test_json();

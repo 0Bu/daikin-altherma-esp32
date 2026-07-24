@@ -231,8 +231,24 @@ hp_comm.cpp     X10A UART (9600 8E1) + register query. hp_uart_init installs the
                 so that churn fragmented the heap until an unrelated alloc (hp_poll's vector) hit an
                 unwind-starved bad_alloc -> std::terminate -> abort (confirmed by a symbolized coredump)
 hp_convert.cpp  device value formatting over logic/convert.hpp; applies its reading_plausible() at
-                PUBLISH time — an impossible °C reading (idle-unit 576 °C, a ±3276.x sentinel) or a
-                0-bar saturation temp reaches HA as unavailable, not a false value. Kept out of
+                PUBLISH time — an impossible °C reading (idle-unit 576 °C, a ±3276.x sentinel), a
+                0-bar saturation temp, or a 0-bar REFRIGERANT pressure reaches HA as unavailable, not
+                a false value. The pressure rule needs the whole profile table (passed down from
+                hp_poll), because 0 bar is impossible for refrigerant — these are ABSOLUTE pressures
+                and a sealed circuit is never at vacuum — but ordinary for WATER (a drained system).
+                is_refrigerant_pressure() takes that split STRUCTURALLY, never from the label (an
+                alias or a translation would flip it), on either of two signals: the PAGE (0x20/0x21/
+                0xA0/0xA1 are the outdoor unit's own — no water circuit out there; measured across all
+                45 profiles, every bar row on 0x20/0xA0 is refrigerant and no water row appears on
+                either), or a conv-405 saturation-temperature twin at the same (reg, offset), which is
+                what reaches the refrigerant rows on the MIXED hydronic page 0x62 (0x62/15 refrigerant
+                vs 0x62/11 water). Covers 93 of the catalog's bar rows; the KNOWN GAP is 16
+                "Refrigerant pressure sensor" + 1 "Pressure sensor" on 0x62 with no twin, left rather
+                than closed by label-matching. test_refrigerant_pressure_catalog() pins both the
+                coverage and the direction that matters — no water row is EVER flagged, since a false
+                positive would withhold a real 0-bar reading from a drained system. Measured on a
+                live 4-8 kW unit, High/Low Pressure read exactly 0.0 bar at rest AND at 42 rps while
+                the 0x62/15 sensor read a correct 15.3 bar. Kept out of
                 convert() so the domain audit still sees each converter's intrinsic semantics
 hp_detect.cpp   auto-detect glue: protocol sweep + page probe -> fingerprint -> candidate models. The
                 O/U capacity is read from a VARIABLE-LENGTH page 0x00 (a smaller unit's short reply
@@ -474,7 +490,15 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 temperature, the #35-#39 shape with no numeric tell. Only the PAGE plus the
                 compressor state can tell, so DESIGN.md's dead-bus rule ("an idle plant with no
                 readings, not a stale one") is applied to one sleeping UNIT instead of one silent
-                BUS: www/app.js's `d.ouHeldOver` blanks the outdoor pills to "—". Deliberately NOT
+                BUS — but resolved the OTHER way, because unlike a dead bus we know the value AND why
+                it is not current: www/app.js's `d.ouHeldOver` GREYS the outdoor pills
+                (`.sc-val tspan.held`) and shows the `#heldNote` legend, rather than blanking them.
+                It blanked them to "—" through v1.0.11, which cost a number the user wanted and was
+                read as a lost link — reported as "die aktuelle FW behauptet die Anlage wäre nicht
+                erreichbar" on a board whose bus was in fact healthy. Per-TSPAN, not per pill: the
+                high-side badge pairs a held discharge temp with a LIVE refrigerant pressure.
+                ΔT still blanks — with no flow it is not a stale working point but none at all.
+                Deliberately NOT
                 page 0x10 — it carries Defrost Operation, which FEEDS the run-state decision, and no
                 measurement could prove whether it freezes (its Target Cond. Temp. reads 0.0 even
                 mid-run, a useless witness); blanking a reading costs information, suppressing a
@@ -854,6 +878,25 @@ block). Keep HTTP handlers under a try/catch that returns 503 on OOM (an uncaugh
 through C frames → `std::terminate` → reboot). Stream `/diag` and the MQTT discovery instead of
 one big `std::string`. Treat any new large contiguous allocation as a crash risk. A reboot loop
 also stops the poll cycle and drops MQTT availability.
+
+**The STACK is a second, separate budget — and it fails silently.** Everything above is about the
+heap; the crash that took v1.0.12 down was a *stack* overflow, and none of the heap rules could see
+it. `build_status_json_string()` runs on the httpd task, which had 8 KB; the core dump's task table
+read `httpd 7728/460` — 460 bytes off its floor — so it wrote past `pxStack` into its own TCB,
+clobbering `pvThreadLocalStoragePointers[0]` with `0x4`, and died ~44 s later inside lwip's
+`pthread_getspecific` with a backtrace pointing at an innocent WebSocket send. Two rules follow:
+- **Build long JSON with successive `+=`, never one `a + b + c + …` chain.** A chain materialises
+  every intermediate `std::string` at once, all live in the same frame; `+=` holds one at a time and
+  takes a bare literal with no wrapper (so it also drops the allocations). http_status.cpp's board /
+  presets blocks are the worked example.
+- **Read the task table in any core dump you open** (`USED/FREE` per task). It is the only place this
+  is visible: nothing on `/status` reports stack headroom, and a task can sit one frame from death
+  while every heap number looks perfect. Anything under ~1 KB free wants raising —
+  `cfg.stack_size` in http_server.cpp, `xTaskCreate` for the rest.
+`CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y` (sdkconfig.defaults) now makes the *first* write past a
+limit panic at the offending instruction. IDF's default canary is only compared at a context switch
+and a sparsely-writing frame can skip over it — which is exactly what happened here (TLS[1], the
+neighbour it would have had to cross, was left intact).
 
 **Every allocating FreeRTOS task loop must self-guard.** A task is a C frame boundary like a
 handler is: an escaping `std::bad_alloc` → `std::terminate` → reboot. Wrap the loop *body* in

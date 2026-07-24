@@ -192,10 +192,58 @@ inline bool conv_is_binary(int conv) { return conv >= 300 && conv <= 307; }
 inline constexpr double TEMP_MIN_C = -60.0;
 inline constexpr double TEMP_MAX_C = 200.0;
 
+// Is this bar row (dataType 2) a REFRIGERANT-circuit pressure rather than a WATER one? The
+// distinction matters because 0 bar is impossible for one and ordinary for the other, so a single
+// "0 bar is bogus" rule would be wrong half the time.
+//
+// STRUCTURAL, never label-based: an alias or a translation must not be able to flip it (the
+// lwt_select.hpp lesson), and a hand-written (reg, offset) list would rot the next time the profiles
+// are regenerated. Two independent structural signals, either of which is sufficient:
+//
+//  1. The PAGE. 0x20/0x21 (outdoor sensors + inverter) and 0xA0/0xA1 (the second outdoor unit) are
+//     the outdoor unit's own pages — there is no water circuit out there. Measured across all 45
+//     shipped profiles: every dataType-2 row on 0x20 and 0xA0 is a refrigerant pressure (High/Low
+//     Pressure, "Pressure", "Pressure sensor") and NOT ONE water-pressure row appears on either.
+//     0x21/0xA1 carry no bar row today and are included because the same physical argument covers
+//     them, not because anything was measured there.
+//  2. A conv-405 SATURATION-TEMPERATURE twin at the same (reg, offset). 405 converts a pressure to
+//     its refrigerant saturation temperature, so the generator only ever pairs one with a
+//     refrigerant pressure. This is what reaches the refrigerant rows on the HYDRONIC page 0x62,
+//     where signal 1 cannot help: 0x62 genuinely carries both kinds — "Water pressure" (0x62/11) and
+//     "Refrigerant pressure sensor" (0x62/15) sit on the same page.
+//
+// KNOWN GAP, deliberately left rather than papered over: 16 of the 24 "Refrigerant pressure sensor"
+// rows (and one "Pressure sensor") sit on 0x62 with NO 405 twin, so neither signal reaches them and
+// they still publish a 0.0 bar. Closing that would mean keying on the label, which is the one thing
+// this must not do. Those rows are no worse off than before this filter existed, and the catalog-wide
+// test pins both the coverage and — the direction that actually matters — that no water-pressure row
+// is ever caught by either signal.
+inline bool is_refrigerant_pressure(const ValueDef& def, const ValueDef* profile, size_t count) {
+    if (def.type != 2) return false;
+    if (def.reg == 0x20 || def.reg == 0x21 || def.reg == 0xA0 || def.reg == 0xA1) return true;
+    if (!profile) return false;
+    for (size_t i = 0; i < count; i++)
+        if (profile[i].conv == 405 && profile[i].reg == def.reg && profile[i].offset == def.offset)
+            return true;
+    return false;
+}
+
 // Publish-time plausibility filter: is this decoded Reading fit to publish? Drops a °C temperature
 // (dataType 1) outside the physical envelope. Keyed on the °C dataType, NOT the converter id, because
 // the temperature converters (105/114/118/119/405) are also used for non-°C rows (conv 105 carries
 // O/U capacity kW and BE_COP at dataType -1) that must pass through unchanged.
+//
+// ALSO drops a refrigerant pressure at or below 0 bar. These are ABSOLUTE pressures (measured: 15.3
+// bar at a 22.1 °C saturation temperature, matching R32's saturation curve), and a sealed refrigerant
+// circuit is never at absolute vacuum — so 0.0 bar is an absent/unreported transducer, not a reading.
+// Observed on a live 4-8 kW unit: "High Pressure" and "Low Pressure" (0x20/12+14) read exactly 0.0
+// bar both at rest AND with the compressor at 42 rps, while the always-live 0x62/15 refrigerant
+// sensor read a correct 15.3 bar. Publishing that 0.0 as a measurement is the #35-#39 shape — a
+// well-formed, plausible-looking, physically false value — and it reached Home Assistant as a real
+// pressure. Their conv-405 saturation-temperature companions were already dropped by the °C envelope
+// above (press2temp of 0 bar falls off the curve), so this only makes the pressure agree with the
+// temperature the same row already declines to publish. Water pressure is deliberately NOT covered:
+// a drained or depressurised system genuinely reads 0 bar and must keep saying so.
 //
 // Deliberately SEPARATE from convert() and applied by hp_format at publish time, not folded into the
 // converter: convert() must keep its INTRINSIC per-converter semantics so the catalog audit's
@@ -203,9 +251,15 @@ inline constexpr double TEMP_MAX_C = 200.0;
 // as "no data") — the exact distinction behind the #38 no-data-sentinel bug. Folding the envelope
 // into convert() makes 105 and 114 decode identically on °C rows, which silently blinds that gate
 // (tools/domain/selftest.sh #38). This is a backstop, never a licence to use the wrong converter.
-inline bool reading_plausible(const ValueDef& def, const Reading& r) {
+//
+// `profile`/`count` are the active model's whole ValueDef table, needed only for the refrigerant test
+// above; they default to none, so a caller that has no table in hand keeps exactly the old °C-only
+// behaviour rather than silently losing the pressure rule to a wrong answer.
+inline bool reading_plausible(const ValueDef& def, const Reading& r,
+                              const ValueDef* profile = nullptr, size_t count = 0) {
     if (!r.ok) return true;                       // no numeric value to bound (text, or already dropped)
     if (def.type == 1 && (r.value < TEMP_MIN_C || r.value > TEMP_MAX_C)) return false;
+    if (r.value <= 0.0 && is_refrigerant_pressure(def, profile, count)) return false;
     return true;
 }
 
