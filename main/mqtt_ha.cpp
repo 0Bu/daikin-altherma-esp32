@@ -7,9 +7,13 @@
 //     every other row as a `sensor` — then publish the full grouped state JSON.
 //   • Each cycle: rebuild the grouped state JSON (logic/mqtt_group.hpp) and publish it to the ONE
 //     shared topic <base>/state — but only when the payload actually changed, so a quiet pump doesn't
-//     spam the broker. Message topics sit directly under <base> (no daikin_<mac> node segment — one
-//     board per base topic); the node id disambiguates the DEVICE only in each discovery config's
-//     uniq_id/dev.ids + the <prefix>/<component>/<node>/… discovery topic.
+//     spam the broker. Message topics sit directly under <base> — one board per base topic; the node
+//     id identifies the DEVICE only in each discovery config's uniq_id/dev.ids + the
+//     <prefix>/<component>/<node>/… discovery topic. That node id is derived from the BASE TOPIC
+//     (logic/ha_device.hpp), not from the board's MAC, so replacing the ESP32 keeps ONE HA device
+//     and its entities; this board's MAC-derived id stays on as the MQTT client id and a second
+//     dev.ids entry (HA merges on it, so an install upgrading from a MAC-identified build keeps its
+//     device). The configs an older build published under the MAC id are retracted once per boot.
 //   • Every HEARTBEAT_INTERVAL_S (10 s): rebuild + publish the board/link diagnostics JSON
 //     (logic/heartbeat.hpp) to <base>/heartbeat — diagnostics, not real-time telemetry, so unlike the
 //     state topic it's a fixed cadence, not publish-on-change.
@@ -84,9 +88,18 @@ struct Lock {
 }  // namespace
 
 // Persisted so the pointers handed to esp-mqtt (and reused by the task) stay valid.
-static std::string s_uri, s_user, s_pass, s_node, s_base, s_prefix, s_avail, s_state, s_heartbeat, s_crash;
+static std::string s_uri, s_user, s_pass, s_node, s_board, s_base, s_prefix, s_avail, s_state,
+                   s_heartbeat, s_crash;
 static std::string s_announced_profile;               // profile we last published discovery for (mqtt_task only)
 static std::string s_last_json;                       // last state JSON published (dedup guard; mqtt_task only)
+// Legacy-identity migration (mqtt_task only) — see retract_legacy_* below.
+static bool        s_legacy_fixed_retracted = false;   // heartbeat + crash entities: once per boot
+static std::string s_legacy_values_profile;            // value entities: the profile they were
+                                                       // retracted for ("" = not yet). Keyed on the
+                                                       // profile, not a bool, because the row set IS
+                                                       // the profile: a re-detect (POST /detect, or
+                                                       // an ambiguous first fingerprint settling)
+                                                       // brings rows the earlier pass never saw.
 // Written false by the event task on DISCONNECT, written true + read by the publish task -> atomic.
 static std::atomic<bool> s_heartbeat_announced{false}; // diagnostic discovery streamed this connection?
 static bool         s_mqtt_ever_connected = false;     // event-task-only: first connect vs. a RE-connect
@@ -114,8 +127,12 @@ static void set_status(bool connected, const char* err) {
     else if (connected) s_error = "";
 }
 
-// node id daikin_<mac3> (STA MAC low 3 bytes) — stable across config changes.
-static std::string node_id() {
+// This BOARD's own id, daikin_<mac3> (STA MAC low 3 bytes). It is the MQTT client id (which must be
+// unique per connection — two boards briefly online during a swap must not kick each other off the
+// broker) and a second `dev.ids` entry so HA merges an install that was set up under the old
+// MAC-based identity into the one device. It is NOT the HA device id any more: that is s_node,
+// derived from the base topic (logic/ha_device.hpp), so replacing the ESP32 keeps the device.
+static std::string board_id() {
     uint8_t m[6] = {0};
     esp_wifi_get_mac(WIFI_IF_STA, m);
     char b[20];
@@ -163,11 +180,59 @@ static std::vector<GroupedValue> current_grouped() {
     return out;
 }
 
+// ── Legacy (MAC-identified) discovery configs ────────────────────────────────────────────────────
+// Builds up to this one identified the HA DEVICE by this board's MAC (node id daikin_<mac3>), so
+// replacing the ESP32 produced a SECOND "Daikin Altherma" device in HA and every entity — with it,
+// every long-term statistic — started over. The device id now comes from the MQTT base topic
+// (logic/ha_device.hpp): the installation, not the hardware.
+//
+// The configs published under the old MAC id are RETAINED, so they would otherwise outlive the
+// change and keep their entities as permanently-unavailable duplicates. Each is deleted
+// (zero-length retained publish) exactly once per boot and — crucially — BEFORE the replacement
+// config for the same entity goes out: HA drops the old registry entry, freeing its entity_id, and
+// the new entity (same device, since the board id rides along in dev.ids and HA merges on it; same
+// name) takes that entity_id back. History and statistics are keyed by entity_id and carry over;
+// per-entity UI customisations are keyed by unique_id and do not.
+//
+// Only THIS board's own legacy topics can be retracted — a board that has already been swapped out
+// is gone and cannot clean up after itself. docs/HOME_ASSISTANT.md says how to remove its leftovers.
+static void retract_legacy_fixed() {   // heartbeat + crash entities (no profile needed)
+    s_legacy_fixed_retracted = true;
+    if (s_board == s_node) return;     // ids coincide -> there is no separate legacy identity
+    for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++)
+        mqtt_publish(heartbeat_discovery_topic(s_prefix, s_board, HEARTBEAT_SENSORS[i]), "", 0, 0, 1);
+    for (int i = 0; i < CRASH_SENSOR_COUNT; i++)
+        mqtt_publish(crash_discovery_topic(s_prefix, s_board, CRASH_SENSORS[i]), "", 0, 0, 1);
+    for (int i = 0; i < RETIRED_CRASH_SENSOR_COUNT; i++)
+        mqtt_publish(crash_discovery_topic(s_prefix, RETIRED_CRASH_SENSORS[i].component, s_board,
+                                           RETIRED_CRASH_SENSORS[i].object_id), "", 0, 0, 1);
+    diag_printf("mqtt: retired legacy HA device %s (now %s)\n", s_board.c_str(), s_node.c_str());
+}
+
+static void retract_legacy_values(const def::Profile& prof, const std::string& profile_id) {
+    s_legacy_values_profile = profile_id;
+    if (s_board == s_node) return;
+    for (size_t i = 0; i < prof.count; i++) {
+        const ValueDef& d = prof.values[i];
+        // Every row an older build published — including a row that is detect-only (no_publish)
+        // TODAY: it was a plain sensor before the flag existed, and that config is still retained.
+        if (!is_publishable(d.conv) || object_id(d.label).empty()) continue;
+        mqtt_publish(retired_sensor_discovery_topic(s_prefix, s_board, d), "", 0, 0, 1);   // `sensor` form
+        if (conv_is_binary(d.conv))                                                        // + the post-split
+            mqtt_publish(discovery_topic(s_prefix, s_board, d), "", 0, 0, 1);              // `binary_sensor` one
+    }
+}
+
 // Stream one retained discovery config per value of the active profile. Every entity points at the
 // one shared state topic (s_state) and pulls its value out via a value_template. A bit-flag row lands
 // under the binary_sensor component, everything else under sensor (logic/discovery.hpp ha_component).
 static void publish_discovery() {
-    const auto& prof = def::lookup(config().profile.c_str());
+    const std::string profile_id = config().profile;
+    const auto& prof = def::lookup(profile_id.c_str());
+    // Delete the configs published under the old identity FIRST — the freed entity_id is what the
+    // replacement below reclaims. Runs once per profile, not once per (re)connect: a broker restart
+    // must not re-send ~100 deletes for entities that no longer exist under that id.
+    if (s_legacy_values_profile != profile_id) retract_legacy_values(prof, profile_id);
     for (size_t i = 0; i < prof.count; i++) {
         const ValueDef& d = prof.values[i];
         // Detect-only rows carry no state (hp_poll never caches them). RETRACT rather than merely
@@ -201,7 +266,7 @@ static void publish_discovery() {
         if (conv_is_binary(d.conv))
             mqtt_publish(retired_sensor_discovery_topic(s_prefix, s_node, d), "", 0, 0, 1);
         const std::string ct  = discovery_topic(s_prefix, s_node, d);
-        const std::string cfg = discovery_config(s_node, s_state, s_avail, d);
+        const std::string cfg = discovery_config(s_node, s_board, s_state, s_avail, d);
         mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained
     }
 }
@@ -221,10 +286,11 @@ static bool publish_state(bool force) {
 // they don't wait on profile detection: WiFi signal and free heap are meaningful even while
 // profile == "auto".
 static void publish_heartbeat_discovery() {
+    if (!s_legacy_fixed_retracted) retract_legacy_fixed();   // delete the old ids FIRST
     for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++) {
         const HeartbeatSensor& s = HEARTBEAT_SENSORS[i];
         const std::string ct  = heartbeat_discovery_topic(s_prefix, s_node, s);
-        const std::string cfg = heartbeat_discovery_config(s_node, s_heartbeat, s_avail, s);
+        const std::string cfg = heartbeat_discovery_config(s_node, s_board, s_heartbeat, s_avail, s);
         mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained
     }
 }
@@ -242,6 +308,7 @@ static void publish_heartbeat_discovery() {
 // carries secrets or the raw dump — just the reason + a raw-hex backtrace; the binary stays behind
 // GET /coredump.
 static void publish_crash() {
+    if (!s_legacy_fixed_retracted) retract_legacy_fixed();   // delete the old ids FIRST (see above)
     // Delete any entity we USED to publish here but no longer do — a zero-length retained message to
     // its old discovery topic removes it from HA, so an install upgraded from an older build doesn't
     // keep a stale, permanently-unavailable entity (e.g. the old "Last Reset Reason" sensor, now the
@@ -254,7 +321,7 @@ static void publish_crash() {
     for (int i = 0; i < CRASH_SENSOR_COUNT; i++) {
         const CrashSensor& s = CRASH_SENSORS[i];
         const std::string ct  = crash_discovery_topic(s_prefix, s_node, s);
-        const std::string cfg = crash_discovery_config(s_node, s_crash, s_avail, s);
+        const std::string cfg = crash_discovery_config(s_node, s_board, s_crash, s_avail, s);
         mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained
     }
     // _live(): read `coredump` from flash, not the boot-time cache — a dump pulled + cleared via
@@ -437,7 +504,7 @@ static bool build_client() {
     esp_mqtt_client_config_t cfg = {};
     cfg.broker.address.uri = s_uri.c_str();
     if (is_tls) cfg.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;
-    cfg.credentials.client_id = s_node.c_str();
+    cfg.credentials.client_id = s_board.c_str();   // per-BOARD: a client id must be unique per connection
     if (!s_user.empty()) cfg.credentials.username = s_user.c_str();
     if (!s_pass.empty()) cfg.credentials.authentication.password = s_pass.c_str();
     cfg.session.keepalive         = 30;
@@ -463,8 +530,9 @@ void mqtt_ha_start() {
     s_status.broker     = c.mqtt_uri;
     if (!s_status.configured) return;
 
-    s_node   = node_id();
     s_base   = CONFIG_DAIKIN_MQTT_BASE_TOPIC;
+    s_node   = device_node_id(s_base);   // HA device id: the installation, NOT this board
+    s_board  = board_id();               // this board: MQTT client id + dev.ids merge key
     s_prefix = CONFIG_DAIKIN_MQTT_DISCOVERY_PREFIX;
     s_avail     = availability_topic(s_base);
     s_state     = state_topic(s_base);

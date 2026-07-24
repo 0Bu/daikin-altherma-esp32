@@ -7,7 +7,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
-#include "json.hpp"   // json_append_escaped
+#include "ha_device.hpp"   // device_json — one HA device across values/diagnostics/crash
+#include "json.hpp"        // json_append_escaped
 
 namespace daik {
 
@@ -205,7 +206,8 @@ inline std::string heartbeat_discovery_topic(const std::string& prefix, const st
     return prefix + "/" + s.component + "/" + node + "/" + s.object_id + "/config";
 }
 
-inline std::string heartbeat_discovery_config(const std::string& node, const std::string& hb_topic,
+inline std::string heartbeat_discovery_config(const std::string& node, const std::string& board_id,
+                                              const std::string& hb_topic,
                                               const std::string& avail_topic,
                                               const HeartbeatSensor& s) {
     std::string j = "{";
@@ -222,8 +224,7 @@ inline std::string heartbeat_discovery_config(const std::string& node, const std
     if (s.device_class[0]) { j += "\"dev_cla\":\""; j += s.device_class; j += "\","; }
     if (s.state_class[0])  { j += "\"stat_cla\":\""; j += s.state_class; j += "\","; }
     j += "\"ent_cat\":\"diagnostic\",";
-    j += "\"dev\":{\"ids\":[\""; j += node; j += "\"],\"name\":\"Daikin Altherma\",";
-    j += "\"mf\":\"Daikin\",\"mdl\":\"Altherma\"}";
+    j += device_json(node, board_id);
     j += "}";
     return j;
 }

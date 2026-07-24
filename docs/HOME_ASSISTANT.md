@@ -15,9 +15,9 @@ appear on their own. Clear the broker to disable.
 
 `<base>` defaults to `daikin-altherma-esp32`, `<prefix>` to `homeassistant`. The device's message
 topics sit **directly under `<base>`** — one board per base topic, so there is no `<node>` segment in
-the payload paths. The per-device node id `daikin_<mac3>` (from the WiFi STA MAC, stable across config
-changes) still identifies the device to Home Assistant, but only inside each discovery config's
-`uniq_id`/`dev.ids` and in the discovery topic path.
+the payload paths. The node id identifies the device to Home Assistant only inside each discovery
+config's `uniq_id`/`dev.ids` and in the discovery topic path, and it is the **slugified base topic**
+(`daikin-altherma-esp32` → `daikin_altherma_esp32`) — see [Device identity](#device-identity).
 
 ```
 <base>/status                                      online | offline   (LWT, retained)
@@ -67,6 +67,49 @@ value's `dataType` field (the def's HA unit hint: 1 = °C/temperature, 2 = bar/p
 see `unit_for_datatype`/`device_class_for_datatype` in `logic/convert.hpp`), so temperatures render
 as °C with history, currents as A, and so on. This grouped JSON
 is also directly consumable by a Telegraf MQTT `json_v2` parser (→ VictoriaMetrics/Grafana).
+
+### Device identity
+
+Every entity — heat-pump values, board diagnostics, the crash flag — belongs to **one** Home
+Assistant device, identified by the **slugified MQTT base topic** (`daikin-altherma-esp32` →
+`daikin_altherma_esp32`) in `dev.ids` and as the prefix of every `uniq_id`. The id therefore names
+the **installation, not the board**: replace the ESP32 (or erase its flash and set it up again) and
+the replacement publishes exactly the same unique ids, so HA keeps the same device, the same
+entities, and their whole history and long-term statistics. Two boards on one broker means two base
+topics (`CONFIG_DAIKIN_MQTT_BASE_TOPIC`, compile-time) and then, deliberately, two devices.
+
+The board's own id `daikin_<mac3>` (low three bytes of the WiFi STA MAC) still exists, but only
+where the *hardware* is what's being identified: as the **MQTT client id** — which has to be unique
+per connection, so two boards briefly online during a swap don't kick each other off the broker —
+and as a **second `dev.ids` entry**. HA matches a device by any one of its identifiers and merges
+the rest in, so an install created by an older, MAC-identified build keeps its existing device
+(name, area, device-level settings) instead of gaining a second one.
+
+> **Upgrading from a MAC-identified build:** every `uniq_id` changes, since its prefix is no longer
+> the MAC. On its first connect the firmware **deletes** each retained discovery config it published
+> under its old id, immediately before publishing the replacement: HA drops the old registry entry,
+> which frees its `entity_id`, and the new entity — same device, same name — claims that `entity_id`
+> back. Recorder history and long-term statistics are keyed by `entity_id`, so they continue;
+> per-entity customisations (a renamed entity, a custom icon) are keyed by `unique_id` and do not
+> carry over.
+>
+> Home Assistant should be **connected to the broker while this happens**. The deletions are
+> zero-length retained messages: they remove the retained config from the broker, so a subscriber
+> that was offline at that moment never sees them and would keep the old entities alongside the new
+> ones (which then land as `…_2`). If that happens, delete the stale device in HA and rename the new
+> entities to the old ids — HA migrates the statistics along with a rename.
+>
+> A board that has **already been swapped out** cannot clean up after itself: its retained configs
+> sit in the broker and HA keeps showing its device. Clear them once — `<mac3>` is the node segment
+> of the dead board, visible in the discovery topics:
+>
+> ```bash
+> mosquitto_sub -h <broker> -t 'homeassistant/+/daikin_<mac3>/#' -v --retained-only -W 2 | awk '{print $1}' | xargs -r -I{} mosquitto_pub -h <broker> -r -n -t {}
+> ```
+>
+> (`-r -n` publishes an empty retained message, which deletes the config and with it the entity; the
+> device disappears once its last entity is gone.) Recent Home Assistant versions also offer
+> **⋮ → Delete** on an MQTT device's page, which clears the same configs for you.
 
 ### Binary values are numbers, not "ON"/"OFF"
 

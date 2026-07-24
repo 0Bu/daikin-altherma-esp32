@@ -9,7 +9,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
-#include "json.hpp"   // json_append_escaped
+#include "ha_device.hpp"   // device_json — one HA device across values/diagnostics/crash
+#include "json.hpp"        // json_append_escaped
 
 namespace daik {
 
@@ -194,7 +195,8 @@ inline std::string crash_discovery_topic(const std::string& prefix, const std::s
     return crash_discovery_topic(prefix, s.component, node, s.object_id);
 }
 
-inline std::string crash_discovery_config(const std::string& node, const std::string& crash_top,
+inline std::string crash_discovery_config(const std::string& node, const std::string& board_id,
+                                          const std::string& crash_top,
                                           const std::string& avail_topic, const CrashSensor& s) {
     const bool is_binary = (s.component[0] == 'b');   // "binary_sensor"
     std::string j = "{";
@@ -211,8 +213,7 @@ inline std::string crash_discovery_config(const std::string& node, const std::st
     j += "\"avty_t\":\""; j += avail_topic; j += "\",";
     if (s.device_class[0]) { j += "\"dev_cla\":\""; j += s.device_class; j += "\","; }
     j += "\"ent_cat\":\"diagnostic\",";
-    j += "\"dev\":{\"ids\":[\""; j += node; j += "\"],\"name\":\"Daikin Altherma\",";
-    j += "\"mf\":\"Daikin\",\"mdl\":\"Altherma\"}";
+    j += device_json(node, board_id);
     j += "}";
     return j;
 }
