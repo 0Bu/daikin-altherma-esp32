@@ -16,7 +16,10 @@ embedded web UI. ESP32-S3 only.
 ## Setup
 
 1. Flash: [web installer](https://0bu.github.io/daikin-altherma-esp32/). An update without
-   **Erase** preserves the existing configuration.
+   **Erase** preserves the existing configuration — but **not yet on the release feed**: the
+   published `1.0.13` manifest predates that and still flashes one merged image over `nvs`. Until
+   the next release is cut, use the [dev installer](https://0bu.github.io/daikin-altherma-esp32/dev/)
+   (or OTA) when the configuration must survive.
 2. On a first install or after **Erase**, join AP `daikin-altherma-esp32-setup`
    (captive portal / `192.168.4.1`).
 3. Configure at `http://daikin-altherma-esp32.local`:
@@ -97,7 +100,8 @@ it on its own. Per-board hardware inventory: [docs/BOARDS.md](docs/BOARDS.md); w
 
 ## Notes
 
-- OTA from the web UI (config preserved). Web installer = first flash / recovery only.
+- OTA from the web UI is the normal update path (config preserved). The Web installer also supports
+  a manual NVS-preserving update when **Erase** stays off; use **Erase** only for a deliberate reset.
 - Two update feeds: **Release** (cut by hand) and **Development** (every merge to `main`). Pick one
   per device under the gear → **ESP32** → *Update channel*; the [dev
   installer](https://0bu.github.io/daikin-altherma-esp32/dev/) flashes the latest merge.

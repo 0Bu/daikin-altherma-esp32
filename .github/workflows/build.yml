@@ -137,6 +137,8 @@ jobs:
       # fails before the build, not after it.
       - name: Test the gh-pages publish (incl. concurrent publishers)
         run: ./scripts/run-pages-publish-tests.sh
+      - name: Test the NVS-preserving Web Serial plan gate
+        run: ./scripts/run-web-installer-plan-tests.sh
 
       # Does this change reach anything the FIRMWARE BUILD or the PUBLISHED SITE is made of? If
       # not, the ~5-minute build job below is skipped entirely — on a pull request as much as on a

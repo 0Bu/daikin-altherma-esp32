@@ -138,6 +138,11 @@ for t in "${TARGETS[@]}"; do
             web_name="daikin-altherma-esp32${sfx}-web-$base"
         fi
         dd if="$merged" of="$DIST/$web_name" bs=1 skip="$part_offset" count="$part_size" status=none
+        staged_size="$(stat -f%z "$DIST/$web_name" 2>/dev/null || stat -c%s "$DIST/$web_name")"
+        [ "$staged_size" -eq "$part_size" ] || {
+            echo "short Web Serial part $web_name: $staged_size != $part_size" >&2
+            exit 1
+        }
         web_parts="${web_parts:+$web_parts,}{\"path\":\"$web_name\",\"offset\":$part_offset}"
         web_part_count=$((web_part_count + 1))
     done < <(awk '$1 ~ /^0x[0-9a-fA-F]+$/ { print $1, $2 }' build/flash_args)

@@ -100,6 +100,11 @@ The Web Serial installer writes separate manifest parts around `nvs@0x9000`. Dec
 **Erase** option therefore preserves WiFi, MQTT, board and X10A configuration during an update;
 choosing **Erase** deliberately performs a factory reset first.
 
+> **Deployment note:** the currently published `1.0.13` release manifest predates the sparse-part
+> plan and still flashes one merged image at offset 0. Do not use that release installer when the
+> existing configuration must survive. The development feed is already sparse; remove this warning
+> after publishing the next release.
+
 For a manual factory-reset flash (needs `brew install esptool`), use the **merged** image — it bakes
 in the correct bootloader offset, so one command flashes the whole esp32s3 image. Its `0xff` gap
 padding overwrites `nvs`, so you re-enter the configuration once:
@@ -401,6 +406,10 @@ new UI. Both the check and the download run on their own task, never on the HTTP
   advertises a high version while serving a genuine, correctly-signed *old* binary would otherwise
   walk the device backwards onto a fixed bug. Ordering is numeric (`logic/version_cmp.hpp`), so
   `1.10.0 > 1.9.0`, and an unparseable version on either side refuses the update rather than guessing.
+  Ordering alone is not identity, though: two *different* artifacts can each be newer than what is
+  running, so the two versions must also be **exactly equal** — the manifest has to describe the
+  image actually being installed, not merely advertise something newer. CI publishes both strings
+  from one stamped value, so in the field a mismatch is a stale cache or a dishonest host.
 - **Rollback armed** *(implemented)*: `main.cpp` defers `esp_ota_mark_app_valid_cancel_rollback()` to
   a health gate (~90 s), so a boots-but-crashes image reverts.
 - **Signed images:** Secure Boot v2 RSA-3072 signing *without* hardware Secure Boot — the running

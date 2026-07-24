@@ -37,22 +37,21 @@ inline long long version_segment(const char*& p, const char* end) {
 }
 
 // Compare two dot-separated PRE-RELEASE identifier lists (semver §11.4), each still carrying its
-// leading '-'/'+' marker. Load-bearing since the dev channel exists: CI stamps every merge to main
+// leading '-' marker. Load-bearing since the dev channel exists: CI stamps every merge to main
 // as "<next release>-dev.<n>" (scripts/next-version.sh), so a device on the dev feed asks this
 // function whether dev.12 is newer than dev.9 — and a plain strcmp answers NO (it compares '1' to
 // '9'), which would freeze a dev board at the ninth build of a series forever. Numeric identifiers
 // therefore compare NUMERICALLY; a numeric identifier ranks below an alphanumeric one; a prefix
 // ranks below the longer list ("dev" < "dev.1"). Saturates like version_segment for the same reason.
-inline int prerelease_compare(const char* a, const char* b) {
-    if (*a != *b) return *a < *b ? -1 : 1;   // '-' vs '+': different kinds of suffix, ordered by byte
-    ++a; ++b;                                 // skip the marker both sides share
+inline int prerelease_compare(const char* a, const char* aend, const char* b, const char* bend) {
+    ++a; ++b;                                 // skip the '-' marker both sides share
     while (true) {
-        if (*a == 0 || *b == 0) {
-            if (*a == 0 && *b == 0) return 0;
-            return *a == 0 ? -1 : 1;          // fewer identifiers -> lower precedence
+        if (a == aend || b == bend) {
+            if (a == aend && b == bend) return 0;
+            return a == aend ? -1 : 1;        // fewer identifiers -> lower precedence
         }
-        const char* ae = a; while (*ae && *ae != '.') ++ae;
-        const char* be = b; while (*be && *be != '.') ++be;
+        const char* ae = a; while (ae < aend && *ae != '.') ++ae;
+        const char* be = b; while (be < bend && *be != '.') ++be;
         auto all_digits = [](const char* p, const char* e) {
             if (p == e) return false;
             for (; p < e; ++p) if (*p < '0' || *p > '9') return false;
@@ -73,8 +72,8 @@ inline int prerelease_compare(const char* a, const char* b) {
             if (c != 0)         return c < 0 ? -1 : 1;
             if (alen != blen)   return alen < blen ? -1 : 1;
         }
-        a = (*ae == '.') ? ae + 1 : ae;
-        b = (*be == '.') ? be + 1 : be;
+        a = (ae < aend) ? ae + 1 : ae;
+        b = (be < bend) ? be + 1 : be;
     }
 }
 
@@ -101,17 +100,48 @@ inline bool version_valid(const std::string& s) {
     const char *core, *core_end, *suffix;
     detail::version_split(s, core, core_end, suffix);
     if (core == core_end) return false;
-    bool digit = false;
+    bool segment_digit = false;
+    int  segments      = 1;
     for (const char* p = core; p < core_end; ++p) {
-        if (*p >= '0' && *p <= '9') digit = true;
-        else if (*p != '.')         return false;
+        if (*p >= '0' && *p <= '9') {
+            segment_digit = true;
+        } else if (*p == '.') {
+            if (!segment_digit || ++segments > 4) return false;
+            segment_digit = false;
+        } else {
+            return false;
+        }
     }
-    return digit;
+    if (!segment_digit) return false;
+
+    // Optional pre-release/build identifiers. Empty identifiers, a second '+', whitespace and
+    // punctuation outside SemVer's [0-9A-Za-z-] vocabulary all fail closed. CI emits only
+    // "-dev.N"/"-PR-N", but this defensive path must not accept malformed host input as ordered.
+    if (*suffix == 0) return true;
+    bool build = *suffix == '+';
+    bool ident = false;
+    for (const char* p = suffix + 1; *p; ++p) {
+        const bool word = (*p >= '0' && *p <= '9') || (*p >= 'A' && *p <= 'Z') ||
+                          (*p >= 'a' && *p <= 'z') || *p == '-';
+        if (word) {
+            ident = true;
+        } else if (*p == '.') {
+            if (!ident) return false;
+            ident = false;
+        } else if (*p == '+' && !build) {
+            if (!ident) return false;
+            build = true;
+            ident = false;
+        } else {
+            return false;
+        }
+    }
+    return ident;
 }
 
 // Returns <0, 0, >0 like strcmp. Numeric segments compare NUMERICALLY, so 1.10.0 > 1.9.0 — the
 // whole reason this is not a strcmp. Equal cores fall back to the semver pre-release rule
-// (1.0.0-rc1 < 1.0.0), then a lexical suffix tie-break.
+// (1.0.0-rc1 < 1.0.0); build metadata does not affect precedence.
 inline int version_compare(const std::string& a, const std::string& b) {
     const char *ac, *ae, *as;  detail::version_split(a, ac, ae, as);
     const char *bc, *be, *bs;  detail::version_split(b, bc, be, bs);
@@ -121,10 +151,14 @@ inline int version_compare(const std::string& a, const std::string& b) {
         const long long bv = detail::version_segment(bp, be);
         if (av != bv) return av < bv ? -1 : 1;
     }
-    const bool a_pre = *as != 0, b_pre = *bs != 0;
+    // Build metadata ('+...') never changes SemVer precedence. Only a '-' pre-release participates,
+    // and its comparison stops before an optional '+metadata' tail.
+    const bool a_pre = *as == '-', b_pre = *bs == '-';
     if (a_pre != b_pre) return a_pre ? -1 : 1;   // a release outranks its own pre-releases
     if (!a_pre) return 0;
-    return detail::prerelease_compare(as, bs);
+    const char* apre_end = as; while (*apre_end && *apre_end != '+') ++apre_end;
+    const char* bpre_end = bs; while (*bpre_end && *bpre_end != '+') ++bpre_end;
+    return detail::prerelease_compare(as, apre_end, bs, bpre_end);
 }
 
 // THE GATE: may we install `candidate` while running `running`?
@@ -148,6 +182,16 @@ inline bool ota_install_allowed(const std::string& running, const std::string& c
     if (!version_valid(running) || !version_valid(candidate)) return false;
     const int c = version_compare(candidate, running);
     return allow_downgrade ? c != 0 : c > 0;
+}
+
+// Bind the two independently-fetched OTA artifacts together. Passing the ordering gate twice is
+// NOT enough: while running 1.0.0, a manifest that claims 9.9.9 and a signed image carrying 1.0.1
+// are each "newer", yet the manifest did not describe the image that is about to be installed.
+// CI publishes exact matching strings, so any field mismatch is a stale cache, a broken host or an
+// attack. Refuse all three rather than trying to normalize a leading `v` or equivalent spellings.
+inline bool ota_artifact_versions_match(const std::string& manifest,
+                                        const std::string& image) {
+    return version_valid(manifest) && version_valid(image) && manifest == image;
 }
 
 // The automatic gate: strictly newer only.

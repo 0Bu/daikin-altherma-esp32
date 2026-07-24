@@ -275,6 +275,22 @@ void run_update(bool allow_downgrade) {
     }
     char imgver[sizeof(img.version) + 1] = {0};
     std::memcpy(imgver, img.version, sizeof(img.version));   // version[] need not be NUL-terminated
+    // ...and that the image the host actually served is the one the manifest DESCRIBED. Passing the
+    // ordering gate twice is not the same as passing it on one artifact: running 1.0.0, a manifest
+    // claiming 9.9.9 and a signed image carrying 1.0.1 are each "newer", yet nothing checked that
+    // the version this device decided to install is the version it is installing. CI publishes the
+    // two strings from one stamped value (ci-build-all.sh reads the built image back), so in the
+    // field a mismatch is a stale cache, a broken host or an attack.
+    if (!ota_artifact_versions_match(avail, imgver)) {
+        diag_printf("ota: REFUSING image v%s: manifest claimed %s (artifact mismatch)\n", imgver,
+                    avail);
+        esp_https_ota_abort(h);
+        Lock lk(s_mtx);
+        s_status.state            = "error";
+        s_status.message          = "Update rejected: manifest and image versions differ";
+        s_status.update_available = false;
+        return;
+    }
     if (!ota_install_allowed(running, imgver, allow_downgrade)) {
         diag_printf("ota: REFUSING image v%s while running v%s (manifest claimed %s)\n", imgver,
                     running.c_str(), avail);

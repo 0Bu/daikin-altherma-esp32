@@ -380,9 +380,11 @@ static esp_err_t set_hp(httpd_req_t* req) {
     // could send — with the pin named, instead of range-accepting it and persisting a crash-loop pair.
     if (!validate(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi(), config_reserved_pins(c)))
         return send_err(req, "400 Bad Request", reason.c_str());
-    // Persist the pin cache (config_save writes link+creds; profile/fp stay RAM). On failure RAM is
-    // untouched too, so there is no new config to hand the poll engine — skip the reconfigure.
-    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    // This route OWNS the pin cache, unlike the service routes whose link writes are only
+    // best-effort maintenance. Require all three cache keys; on failure RAM stays untouched, so
+    // there is no new link to hand the poll engine and reconfigure must be skipped.
+    if (!config_save(c, /*require_link=*/true))
+        return send_err(req, "500 Internal Server Error", "config write failed");
     hp_poll_reconfigure();
     return http_send_json(req, "{\"ok\":true}");
 }

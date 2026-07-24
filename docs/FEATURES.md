@@ -30,7 +30,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 |---|---------|:------:|-------------|
 | 1 | Secure Boot v2 **signed images without hardware Secure Boot** (RSA-3072) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 2 | Refuse-to-flash-unsigned guard | ✅ | [`require-signed.sh`](../scripts/require-signed.sh) |
-| 3 | Dual-OTA layout + **NVS-preserving OTA and no-Erase Web Serial updates** | ✅ | [`partitions.csv`](../partitions.csv), [`ci-build-all.sh`](../scripts/ci-build-all.sh), [`check-web-installer-plan.py`](../scripts/check-web-installer-plan.py) |
+| 3 | Dual-OTA layout + **NVS-preserving OTA and no-Erase Web Serial updates** | ✅ 🧪 | [`partitions.csv`](../partitions.csv), [`ci-build-all.sh`](../scripts/ci-build-all.sh), [`check-web-installer-plan.py`](../scripts/check-web-installer-plan.py), [`test_web_installer_plan.py`](../test/test_web_installer_plan.py) |
 | 4 | OTA rollback + **connectivity-proving health gate** | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/health_gate.hpp`](../main/logic/health_gate.hpp) |
 | 5 | OTA manifest check + signed download + **two-point downgrade gate** | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp) |
 | 6 | WebSocket live push (`/events`) — bounded async backpressure, the only live transport | ✅ 🧪 | [`http_status.cpp`](../main/http_status.cpp), [`logic/ws_tx_gate.hpp`](../main/logic/ws_tx_gate.hpp) |
@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1101 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1188 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -136,6 +136,15 @@ See [`ARCHITECTURE.md` → OTA, signing, partitions](ARCHITECTURE.md) and
   [`check-web-installer-plan.py`](../scripts/check-web-installer-plan.py) gate requires the Erase
   choice to remain enabled, rounds every part to its actual 4 KB erase sectors and fails the build
   if any overlaps NVS. Selecting **Erase** in ESP Web Tools remains the explicit factory-reset path.
+  Two things make that gate evidence rather than ceremony. It is checked for **fail-closed**
+  behaviour by [`test_web_installer_plan.py`](../test/test_web_installer_plan.py)
+  ([`run-web-installer-plan-tests.sh`](../scripts/run-web-installer-plan-tests.sh), a CI `gates`
+  step): running it on the real manifest only ever proved that today's good plan passes, so the
+  tests feed it the bad ones — a part over `nvs`, a path outside the manifest directory, a directory
+  where an image belongs, a `true` where an offset belongs, malformed JSON. And the parts are
+  checked for **length**, not just for address: `ci-build-all.sh` verifies each carved file is
+  exactly the size its offset plan declares, because a short `dd` produces a truncated image that
+  the overlap check still calls safe.
 - **Rollback armed until proven healthy** (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`): a freshly-booted
   OTA image starts `PENDING_VERIFY`. If it reboots before being marked valid, the bootloader reverts.
 - **✅ 🧪 Health gate, not a timer** — the distinctive part. Instead of blindly committing after an
@@ -170,7 +179,9 @@ See [`ARCHITECTURE.md` → OTA, signing, partitions](ARCHITECTURE.md) and
   download) and — the check that actually binds — against the **image's own embedded
   `esp_app_desc_t` version**, read via `esp_https_ota_get_img_desc()` before anything is committed.
   The manifest and the image are separately-controlled artifacts, so only the second check catches a
-  host that advertises `9.9.9` while serving a signed `1.0.0`. Ordering is numeric
+  host that advertises `9.9.9` while serving a signed `1.0.0`; it also requires both artifact-version
+  strings to match exactly, so two independently “newer” but different artifacts are refused.
+  Ordering is numeric
   (`1.10.0 > 1.9.0` — a `strcmp` gets this backwards), pre-release identifiers compare numerically
   too (`-dev.12 > -dev.9`, semver §11.4 — a `strcmp` freezes a dev board at the ninth build of a
   series), and it **fails closed** on an unparseable version. The one relaxation is the **channel
@@ -233,6 +244,13 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   and strand the bridge in the open portal with good credentials still in NVS. The budget is also
   suspended while a credential change is pending, so ten fast `NO_AP_FOUND` scans can't pre-empt the
   rollback grace below.
+- **✅ One ESP-NETIF initialization for both network paths.** [`main.cpp`](../main/main.cpp) calls
+  `esp_netif_init()` once at startup; [`wifi.cpp`](../main/wifi.cpp) and
+  [`provisioning.cpp`](../main/provisioning.cpp) only create and destroy their *own* interfaces.
+  It is a process-wide singleton, and each branch used to initialize it itself — which is fine
+  until they run in sequence, i.e. on exactly the first-boot STA-failure → setup-portal fallback
+  that leads into the recovery path. The same teardown now also deletes the STA event group it
+  discards, so falling back to the portal no longer leaks it.
 - **✅ In-app WiFi re-config with one-shot credential rollback.** WiFi is provisioned first from the
   captive portal, then re-editable from the WiFi row of the Connections tile in Settings (gear → Connections →
   WiFi → modal → `POST /set_wifi`, validating SSID 1–32 / password empty-or-8–63). Because a bad SSID/password entered over the LAN
@@ -263,11 +281,14 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   under the mutex via `apply_link`/`apply_model` — non-allocating, so the critical section stays
   throw-free, and host-tested so "touches nothing else" is proven rather than argued. The rule is
   deliberately asymmetric (it closes poll→httpd, not httpd→poll: a reverted link self-corrects on the
-  next detect, credentials do not). Separately, an NVS write failure now **reaches the user** — the
-  `/set_*` handlers answer `500 {"ok":false,"error":"config write failed"}` and skip the reboot rather
-  than coming back up on the old config behind an `{"ok":true}`, `config_save` names the failing key +
+  next detect, credentials do not). Separately, an NVS write failure now **reaches the user**:
+  failure of the route-owned atomic blob answers `500 {"ok":false,"error":"config write failed"}` and
+  skips the reboot; failure of an unrelated self-healing link-cache maintenance write is logged but
+  does not falsely reject an already-committed service change. `/set_hp` is the exception because it
+  owns the link: it requires all three cache keys and leaves RAM untouched if one fails. The
+  distinction is host-tested in `config_save_succeeded()`. `config_save` names every failing key +
   `esp_err_t` on `/diag`, and the two WiFi credential groups stop dead rather than half-write (a
-  partial save would defeat the very ordering that protects the rollback backup).
+  partial blob save would defeat the ordering that protects the rollback backup).
 - **✅ ICMP gateway watchdog (ghost-association recovery).** The reconnect handler can only see drops
   the STA *knows* about. A missed deauth leaves a "ghost" association — IP held, TCP timing out, no
   `STA_DISCONNECTED` event ever fires. A background task ICMP-echoes the default gateway every 30 s and,
@@ -722,8 +743,9 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   formatter (`timestamp.hpp` — the one place the syslog TIMESTAMP field, `/status.ntp.time` and the
   MQTT heartbeat's `time` field render through; a negative/never-synced input renders `""`, never a
   fabricated `1970-01-01`), the **OTA downgrade gate** (`version_cmp.hpp` — numeric dotted-version
-  ordering plus `ota_is_upgrade()`, which fails closed on anything it can't parse) and the **OTA
-  manifest parser** (`ota_manifest.hpp` — the one place a remote, attacker-influencable byte stream is
+  ordering plus `ota_is_upgrade()`, which fails closed on anything it can't parse, and exact
+  manifest↔image artifact binding) and the **OTA manifest parser** (`ota_manifest.hpp` — the one
+  place a remote, attacker-influencable byte stream is
   parsed on this device: bounded, allocation-free, depth-aware, escape-aware, and it refuses rather
   than truncates an oversized value), the **HTTP trust-surface boundary** (`http_surface.hpp` — which
   routes each surface exposes, so the open setup AP serves only the provisioning routes while
@@ -765,8 +787,10 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   `0x00`/`0x10`/`0x20`/`0xA0`/`0xA1` on `/diag`; truncation stops after the last *complete* byte, since a trailing
   nibble would read as a different value, and degenerate inputs still terminate the buffer the caller
   hands to a `diag_printf` `%s`).
-  **1169 `CHECK`s** in
-  [`test/test_logic.cpp`](../test/test_logic.cpp).
+  **1188 `CHECK`s** in
+  [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
+  drift together, so re-derive them rather than adjust one:
+  `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
   real "run it and see" loop even in an environment that can't build firmware or USB-flash.
@@ -950,7 +974,7 @@ and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 19-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (922 checks),
+on the host** (1188 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

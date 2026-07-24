@@ -66,11 +66,13 @@ config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi
                       Writers commit only the fields they own (config_save_link/config_set_model for
                       detection, config_save for the HTTP handlers). config_save writes the
                       credential/service fields as ONE CRC-checked atomic blob (logic/config_store.hpp,
-                      host-tested) — a single nvs_set_blob, so the save is all-or-nothing across a write
-                      failure AND a power cut; on failure the old blob is intact, config_save returns
-                      false and publishes nothing ("nothing net saved"). The RX/TX/proto link cache
-                      stays as separate self-healing keys; config_save_link applies its RAM patch (the
-                      link is proven-good). config_load reads the blob first, falling back to the legacy
+                      host-tested) — a single nvs_set_blob, so that blob is all-or-nothing across a
+                      write failure AND a power cut; on failure the old blob is intact, config_save
+                      returns false and publishes nothing. The RX/TX/proto link cache stays as separate
+                      self-healing keys. A cache-write failure after a successful blob is logged but
+                      does not falsely fail an unrelated service save; /set_hp requires the cache and
+                      leaves RAM untouched on failure. config_save_link applies its RAM patch (the link
+                      is proven-good). config_load reads the blob first, falling back to the legacy
                       per-key keys when it is absent (fresh device / pre-blob OTA) or CRC-invalid
 nvs_storage.cpp     → thin NVS helpers (namespaces, blobs, migration); setters return esp_err_t and
                        are [[nodiscard]] — a dropped write is silent (compare to ESP_OK, not bool)
@@ -424,11 +426,13 @@ host-testable core is unusually large and valuable, because the risky parts are 
 - `logic/config_store.hpp` — the atomic config blob (F02): `config_blob_serialize` / `deserialize`
   pack the credential + service fields (WiFi creds + rollback backup + flags, MQTT, syslog, NTP) into
   one length-checked, CRC32-protected byte blob written to a single NVS key. A single `nvs_set_blob`
-  is entry-atomic, so `config_save` is all-or-nothing across BOTH a mid-write NVS failure AND a power
-  cut — no per-key rollback, no write-ordering. `deserialize` returns false (leaving its out-param
-  untouched) on any corruption, so a fresh device / a pre-blob OTA falls back to the legacy per-key
-  load. Host-tested: CRC golden vector, round-trip, and every corruption path (bad CRC/magic/version,
-  truncation, trailing garbage).
+  is entry-atomic, so the blob is all-or-nothing across BOTH a mid-write NVS failure AND a power cut
+  — no per-key rollback, no write-ordering. The separate self-healing link-cache writes do not undo
+  that commit: ordinary service routes succeed once their blob lands, while `/set_hp` explicitly
+  requires the cache (`config_save_succeeded`, host-tested). `deserialize` returns false (leaving its
+  out-param untouched) on any corruption, so a fresh device / a pre-blob OTA falls back to the legacy
+  per-key load. Host-tested: CRC golden vector, round-trip, and every corruption path (bad
+  CRC/magic/version, truncation, trailing garbage).
 - `logic/mcp_jsonrpc.hpp` — the JSON-RPC 2.0 response policy for the planned `/mcp` route (F14):
   `mcp_jsonrpc_decide()` maps a request's shape (valid JSON? object? `"jsonrpc":"2.0"`? string
   `method`? id kind) to the interim response — `-32700` parse / `-32600` invalid-request / **no
@@ -882,11 +886,13 @@ Structure:
 - **Signed OTA** (Secure Boot v2 RSA-3072 *without* hardware Secure Boot): the running app verifies
   the signature before installing. Fully implemented (`ota_update.cpp`) — manifest check,
   `esp_https_ota` download into the inactive slot, the **two-point downgrade gate** (manifest
-  version *and* the image's own embedded `esp_app_desc_t` version, so a lying manifest is still
-  refused), and the **connectivity health gate** (commit only after a base window AND getting
-  online, else stay `PENDING_VERIFY` → a reboot rolls back). Publishing runs on a private repo too
-  (the Pages site is public either way — see [`README.md`](README.md)); with nothing served a check
-  honestly reports "up to date". The web installer carves prepared sparse parts from the merged
+  version *and* the image's own embedded `esp_app_desc_t` version, with exact artifact-version
+  equality required, so a lying or stale manifest is refused), and the **connectivity health gate**
+  (commit only after a base window AND getting
+  online, else stay `PENDING_VERIFY` → a reboot rolls back). Both default feeds are live, and
+  publishing runs on a private repo too (the Pages site is public either way — see
+  [`README.md`](README.md)); a self-hosted URL with nothing served honestly reports "up to date".
+  The web installer carves prepared sparse parts from the merged
   image so a no-Erase flash skips NVS; the single `manifest.json` lists those parts and also doubles
   as the OTA feed (esp-web-tools and the device load the same file).
 - **Boot recovery / anti-brick** — an unsigned app aborts pre-`app_main`, so only the bootloader can

@@ -207,7 +207,7 @@ static bool put_i32(const char* key, int32_t val) {
     return e == ESP_OK;
 }
 
-bool config_save(const Config& c) {
+bool config_save(const Config& c, bool require_link) {
     // Persist user settings (WiFi + MQTT + syslog + NTP) and the X10A link cache (RX/TX pins +
     // protocol). The MODEL is intentionally NOT written — profile + fingerprint (fp_*) are re-derived
     // every boot.
@@ -253,11 +253,17 @@ bool config_save(const Config& c) {
     link_ok &= put_i32("rx_pin", c.rx_pin);
     link_ok &= put_i32("tx_pin", c.tx_pin);
     link_ok &= put_str("proto", std::string(1, static_cast<char>(c.proto)));
-    publish(c);   // the atomic blob landed — RAM must reflect the new credential/service state
     if (!link_ok)
         diag_printf("config: link-cache key write failed after the atomic blob save "
                     "(self-heals on the next detect; re-validated on load)\n");
-    return link_ok;
+    if (!config_save_succeeded(/*blob_ok=*/true, link_ok, require_link)) {
+        // /set_hp owns the link and cannot call this a save when its cache did not land. Do not
+        // publish its requested pins to RAM or wake the poll task. (The atomic blob also landed, but
+        // /set_hp changed none of its fields; for every other route that blob is the requested save.)
+        return false;
+    }
+    publish(c);
+    return true;
 }
 
 // ── Field-owned commits (the detection path) ─────────────────────────────────────────────────────
@@ -272,10 +278,10 @@ bool config_save_link(int rx_pin, int tx_pin, Protocol proto) {
     ok &= put_i32("rx_pin", rx_pin);
     ok &= put_i32("tx_pin", tx_pin);
     ok &= put_str("proto", std::string(1, static_cast<char>(proto)));
-    // Patch RAM even when the cache write failed, unlike config_save's all-or-nothing publish: this
-    // link is PROVEN — the bus just answered on it — and the poll engine reads the pins from here
-    // every cycle. Refusing the patch would leave it hammering pins known not to work. A failed
-    // write only costs the cache (detection re-runs next boot); the `false` return tells the caller.
+    // Patch RAM even when the cache write failed, unlike /set_hp's require_link config_save call:
+    // this link is PROVEN — the bus just answered on it — and the poll engine reads the pins from
+    // here every cycle. Refusing the patch would leave it hammering pins known not to work. A
+    // failed write only costs the cache (detection re-runs next boot); `false` tells the caller.
     {
         Lock lk(g_mtx);
         apply_link(g_cfg, rx_pin, tx_pin, proto);
