@@ -43,11 +43,11 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 13 | 19-entity device **heartbeat** diagnostics stream (heap trend + reset reason + SNTP wall clock + WiFi MAC/BSSID incl.) | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
 | 14 | Strongest-AP scan + SAE tuning + **endless reconnect** | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 15 | **ICMP gateway watchdog** (ghost-association recovery) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
-| 16 | Captive-portal provisioning (AP-only SoftAP, typed SSID + UDP:53 DNS catch-all) | ✅ | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp) |
+| 16 | Captive-portal provisioning (AP-only SoftAP, typed SSID, UDP:53 DNS catch-all, 302 probe redirect + RFC 8910 option 114) | ✅ 🧪 | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp), [`logic/captive.hpp`](../main/logic/captive.hpp) |
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1047 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1061 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -285,9 +285,25 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
 First boot with no WiFi config comes up as SoftAP `daikin-altherma-esp32-setup`
 ([`provisioning.cpp`](../main/provisioning.cpp)). A hand-rolled UDP:53 DNS server
 ([`captive_dns.cpp`](../main/captive_dns.cpp)) answers **every** A query with `192.168.4.1`, so a
-joining phone's OS connectivity probe resolves to the device and auto-pops the setup page. The `/*`
-catch-all HTTP route ([`http_status.cpp`](../main/http_status.cpp)) serves that page. One shared `:80`
-`esp_http_server` handles both AP-setup and STA-run modes.
+joining phone's OS connectivity probe resolves to the device. One shared `:80` `esp_http_server`
+handles both AP-setup and STA-run modes.
+
+Auto-popping the portal then depends on answering that probe the way the OS recognises. Each one
+fetches a well-known URL over plain HTTP right after associating — iOS/macOS
+`captive.apple.com/hotspot-detect.html` (expects a `Success` body), Android
+`connectivitycheck.gstatic.com/generate_204` (expects `204` + empty body), Windows
+`msftconnecttest.com/connecttest.txt`. The `/*` catch-all
+([`http_status.cpp`](../main/http_status.cpp)) answers all of them with **`302` +
+`Location: http://192.168.4.1/`** plus `Cache-Control: no-store`, which is the one signal all three
+agents act on; the portal root itself serves the page. Through **v1.0.7** the catch-all served the
+page directly with `200`, which is only a heuristic (Android additionally weighs a parallel HTTPS
+probe it cannot reach here) and sent `Content-Encoding: gzip` to probe agents that are minimal HTTP
+clients rather than browsers — a redirect has an empty body, so gzip leaves the probe path entirely
+while the browser that follows the redirect still gets the compressed page. Belt and braces, the
+SoftAP's DHCP also advertises the **RFC 8910** captive-portal URI (option 114), which recent
+iOS/Android prefer over probing at all. The setup-vs-STA split is
+[`logic/captive.hpp`](../main/logic/captive.hpp), host-tested — in STA mode the same catch-all is the
+dashboard's SPA shell and must not redirect.
 
 The portal takes the SSID as **typed text** — it does not scan, offers no network dropdown, and
 fetches nothing. So the radio runs **AP-only**: an earlier version ran APSTA with an idle station
@@ -628,6 +644,13 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   status batch are retained while the HTTP task is busy), request-body reassembly
   (`http_body.hpp` — a body arrives across as many TCP segments as the network chooses, and a peer
   that stalls forever must lose *bounded*),
+  the captive-portal reply policy (`captive.hpp` — whether the `/*` catch-all answers an unmatched
+  GET with the page or a `302` to the portal. The tested half is the **STA carve-out**: in setup
+  mode the OS connectivity probes must get the redirect all three agents act on, but in STA mode the
+  same route is the dashboard's SPA shell and must not redirect — and of those two regressions only
+  the first gets reported, so the second is exactly the kind that needs a `CHECK`. It also pins the
+  portal address to one literal, since a redirect to a host the captive DNS does not answer for is a
+  dead end nothing on the device would notice),
   the X10A UART (re)init decision (`uart_plan.hpp` — probing the same pins is a no-op and a pin change
   is a register-only remap, not a driver reinstall, so the detect sweep stops churning the heap),
   the silent-bus detect backoff (`detect_backoff.hpp` — full cadence through a grace window, then

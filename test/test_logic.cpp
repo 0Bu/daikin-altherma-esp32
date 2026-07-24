@@ -11,6 +11,7 @@
 #include <string>
 
 #include "logic/board_pins.hpp"
+#include "logic/captive.hpp"
 #include "logic/boot_guard.hpp"
 #include "logic/button.hpp"
 #include "logic/led_pattern.hpp"
@@ -2310,6 +2311,39 @@ static void test_wifi_rollback() {
     CHECK(WIFI_ROLLBACK_GRACE_S >= WIFI_BOOT_WINDOW_S * 4);
 }
 
+// ── captive-portal reply policy (logic/captive.hpp) ──────────────────────────────────────────
+static void test_captive() {
+    // SETUP MODE (SoftAP live). The OS connectivity probes are the whole point: each must get the
+    // 302 that its captive-portal agent recognises, NOT the 200 + gzipped setup page that used to be
+    // served here and left the portal silently un-popped.
+    CHECK(captive_reply_for("/hotspot-detect.html", true)   == CaptiveReply::Redirect);  // iOS/macOS
+    CHECK(captive_reply_for("/generate_204", true)          == CaptiveReply::Redirect);  // Android
+    CHECK(captive_reply_for("/connecttest.txt", true)       == CaptiveReply::Redirect);  // Windows
+    CHECK(captive_reply_for("/ncsi.txt", true)              == CaptiveReply::Redirect);  // Windows (legacy)
+    CHECK(captive_reply_for("/success.txt", true)           == CaptiveReply::Redirect);  // Firefox
+    CHECK(captive_reply_for("/favicon.ico", true)           == CaptiveReply::Redirect);
+
+    // ...but the portal root itself must SERVE the page, or following that redirect loops forever.
+    CHECK(captive_reply_for("/", true)           == CaptiveReply::Page);
+    CHECK(captive_reply_for("/index.html", true) == CaptiveReply::Page);
+
+    // STA MODE: this same catch-all is the dashboard's SPA shell. Redirecting here would break every
+    // deep link — and unlike a portal that stops popping, nobody reports it as a captive-portal bug.
+    CHECK(captive_reply_for("/", false)                   == CaptiveReply::Page);
+    CHECK(captive_reply_for("/index.html", false)         == CaptiveReply::Page);
+    CHECK(captive_reply_for("/hotspot-detect.html", false) == CaptiveReply::Page);
+    CHECK(captive_reply_for("/anything/at/all", false)    == CaptiveReply::Page);
+
+    // The four advertisements of the portal address must agree, or the redirect points somewhere
+    // the DNS never answers for and nothing on the device would notice. The octets feed the DNS
+    // A-record RDATA and the SoftAP's own DHCP address; the string feeds the Location header and
+    // the RFC 8910 option-114 payload.
+    CHECK(std::string(CAPTIVE_PORTAL_URI) == "http://" + std::string(CAPTIVE_PORTAL_IP) + "/");
+    CHECK(std::to_string(CAPTIVE_PORTAL_OCTETS[0]) + "." + std::to_string(CAPTIVE_PORTAL_OCTETS[1]) +
+          "." + std::to_string(CAPTIVE_PORTAL_OCTETS[2]) + "." + std::to_string(CAPTIVE_PORTAL_OCTETS[3])
+          == std::string(CAPTIVE_PORTAL_IP));
+}
+
 // ── /events WebSocket command policy (logic/ws_policy.hpp) ───────────────────────────────────
 static void test_ws_policy() {
     // An empty frame carries no command and leaves no body in the stream: ignore it, keep the
@@ -3082,6 +3116,7 @@ int main() {
     test_reset_reason();
     test_boot_guard();
     test_health_gate();
+    test_captive();
     test_ws_policy();
     test_ws_tx_gate();
     test_http_body();

@@ -2,6 +2,7 @@
 #include "http_handlers.hpp"
 #include "config.hpp"
 #include "logic/board_pins.hpp"
+#include "logic/captive.hpp"
 #include "def/model_names.hpp"
 #include "def/models_catalog.hpp"
 #include "def/signatures.hpp"
@@ -57,19 +58,37 @@ namespace daik {
 // radio range, and a control char in one used to emit unparseable JSON.
 static std::string jstr(const std::string& s) { return json_quote(s); }
 
+// Is a SoftAP live, i.e. are we the provisioning portal rather than the dashboard? The setup portal
+// runs AP-only (provisioning.cpp); APSTA is matched too because it is never the normal operating
+// mode (the STA path sets WIFI_MODE_STA), so any mode carrying a live SoftAP means "setup".
+static bool setup_mode() {
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    return esp_wifi_get_mode(&mode) == ESP_OK && (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA);
+}
+
 // Serve the captive setup page if the device is running in SoftAP (setup) mode, or if
 // WiFi is not yet configured. Otherwise serve the full dashboard web UI.
 static esp_err_t h_index(httpd_req_t* req) {
-    wifi_mode_t mode = WIFI_MODE_NULL;
-    // The setup portal runs AP-only (provisioning.cpp); APSTA is matched too because it is never the
-    // normal operating mode (the STA path sets WIFI_MODE_STA), so any mode carrying a live SoftAP
-    // means "serve the setup page" — matching it here can't hide the dashboard.
-    if (esp_wifi_get_mode(&mode) == ESP_OK && (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA)) {
-        return http_send_gzip(req, "text/html", setup_html_gz_start, setup_html_gz_end);
-    }
-    if (!wifi_configured())
+    if (setup_mode() || !wifi_configured())
         return http_send_gzip(req, "text/html", setup_html_gz_start, setup_html_gz_end);
     return http_send_gzip(req, "text/html", index_html_gz_start, index_html_gz_end);
+}
+
+// The catch-all ("/*"). In SETUP mode an unmatched GET is an OS connectivity probe far more often
+// than it is a person typing a URL, so it gets the 302 every captive-portal agent recognises —
+// serving the page with 200 (what this did before) is not a signal iOS/Android/Windows act on, and
+// dragged the gzip Content-Encoding onto a probe path walked by minimal HTTP clients, not browsers.
+// In STA mode this is the dashboard's SPA shell and must NOT redirect. logic/captive.hpp owns the
+// split; both branches are host-tested there.
+static esp_err_t h_captive(httpd_req_t* req) {
+    if (captive_reply_for(req->uri, setup_mode()) == CaptiveReply::Page) return h_index(req);
+    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Location", CAPTIVE_PORTAL_URI);
+    // The probe result must not be cached: a phone that once saw this network answer a probe from
+    // cache would skip the portal on the next join, which is the same invisible failure again.
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_send(req, nullptr, 0);   // empty body — nothing to gzip, nothing to render
 }
 
 static std::string build_status_json_string() {
@@ -634,10 +653,10 @@ void http_register_status(httpd_handle_t s, HttpSurface surface) {
 }
 
 // Captive-portal / SPA catch-all — registered LAST (after every specific route) so it only handles
-// unmatched GETs: the setup page in AP mode, the web UI in STA mode (see h_index). This is what
-// makes an OS connectivity probe (routed here by captive_dns.cpp) open the setup portal.
+// unmatched GETs: a 302 to the portal in AP mode, the web UI in STA mode (see h_captive). This is
+// what makes an OS connectivity probe (routed here by captive_dns.cpp) open the setup portal.
 void http_register_captive(httpd_handle_t s) {
-    http_register(s, "/*", HTTP_GET, h_index);
+    http_register(s, "/*", HTTP_GET, h_captive);
 }
 
 } // namespace daik

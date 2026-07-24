@@ -96,8 +96,14 @@ mcp_server.cpp      → /mcp — read-only MCP tools (get_status, get_hp_values)
 provisioning.cpp    → captive setup portal (SoftAP daikin-altherma-esp32-setup) when no WiFi.
                       Runs AP-only: the portal takes the SSID as free text and never scans, so it
                       needs no station interface (esp_wifi_scan_start() would — an earlier version
-                      ran APSTA with an idle STA purely to feed the page's since-removed dropdown)
-captive_dns.cpp     → UDP:53 catch-all (every name → 192.168.4.1) so the setup portal auto-pops
+                      ran APSTA with an idle STA purely to feed the page's since-removed dropdown).
+                      The DHCP hand-off offers itself as DNS *and* advertises the RFC 8910
+                      captive-portal URI (option 114); every step is checked and named on diag
+captive_dns.cpp     → UDP:53 catch-all (every name → 192.168.4.1) so the setup portal auto-pops.
+                      Copies the query's RD bit and sets RA (RFC 1035 §4.1.1) so a stub resolver
+                      cannot discard the answer; AAAA gets a 0-answer NOERROR
+logic/captive.hpp   → what the "/*" catch-all answers: a 302 to the portal in setup mode (the only
+                      signal iOS/Android/Windows probe agents all act on), the SPA shell in STA mode
 mqtt_ha.cpp/.hpp    → Home Assistant MQTT-Discovery bridge (streamed discovery), read-only
 ota_update.cpp      → OTA: manifest check + esp_https_ota download + the two-point downgrade
                       gate + the rollback health gate. Both network ops run on ONE on-demand
