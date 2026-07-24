@@ -47,3 +47,30 @@ Pick any two distinct pins from a board's "safe pins" column for RX/TX, wire the
 them in the dashboard's dropdown (`POST /set_hp`) — see the pin table in
 [README.md § Wiring — X10A](../README.md#wiring--x10a-breaker-off) for why the firmware won't find
 them on its own until you do.
+
+On the AtomS3 Lite the **Grove HY2.0-4P port carries GND, 5 V, G2 and G1** — the same four wires
+X10A needs — so a Grove cable is the tidiest way to reach the service port. The 5 V/level-shifter
+and "power the board over USB, not off X10A's 50 mA" notes in the README apply unchanged.
+
+## Status LED and recovery button
+
+These are the board's own onboard parts, and they are **runtime settings**, not build options: CI
+publishes one `esp32s3` image, and the boards it runs on disagree about what they have. Set them in
+the dashboard under **ESP32 → Hardware** (`POST /set_board`); a save reboots.
+
+| Board | Status LED | Recovery button |
+| :--- | :--- | :--- |
+| Seeed XIAO ESP32-S3 | GPIO21, plain LED, **active low** | none broken out |
+| M5Stack AtomS3 Lite | GPIO35, **WS2812** (addressable RGB) | GPIO41, **active low** |
+
+The picker for these two offers a slightly **wider** pin set than the RX/TX one: it also includes
+the dedicated-JTAG pads GPIO39–42. Those are withheld from the X10A dropdown only to keep an
+external debug probe usable — a preference, not a hardware conflict — and it is exactly where the
+AtomS3 Lite's button sits (GPIO41 = MTDI). Flash, strapping and the USB-Serial/JTAG console pins
+stay excluded from both.
+
+Leave the button on **None** unless one is really wired. An unconnected input pin floats, and a
+floating pin that happens to read "pressed" for five seconds would factory-reset a board nobody
+touched. When one *is* configured, holding it erases every stored setting (WiFi, MQTT, Syslog/NTP,
+the X10A pin cache) and reboots into the setup portal — the LED flashes red once the reset is armed
+(release to abort), then goes solid white while erasing.

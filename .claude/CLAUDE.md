@@ -21,7 +21,10 @@ boot — there is no manual picker. Firmware is installed from a **browser** (We
 > the (planned) read-only MCP surface is [`docs/MCP.md`](../docs/MCP.md). User-facing docs:
 > [`README.md`](../README.md), [`docs/README.md`](../docs/README.md),
 > [`docs/SECURITY.md`](../docs/SECURITY.md), [`docs/DESIGN.md`](../docs/DESIGN.md) (web-UI design
-> contract). Contributor-facing: [`CONTRIBUTING.md`](../CONTRIBUTING.md) (what the local gates
+> contract), [`docs/WIRING.md`](../docs/WIRING.md) (X10A wiring + picking RX/TX on other boards) and
+> [`docs/BOARDS.md`](../docs/BOARDS.md) (per-board hardware inventory + which parts the firmware
+> uses — the place a newly-supported board's LED/button/pin facts belong).
+> Contributor-facing: [`CONTRIBUTING.md`](../CONTRIBUTING.md) (what the local gates
 > are, where logic goes, how PRs land on a linear+signed `main`) and
 > [`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) — CONTRIBUTING states the outside-contributor half of
 > the rules this file states for us, so a change to the gates, the `main/logic/` + test rule or the
@@ -319,17 +322,45 @@ ota_update.cpp  pull-based signed OTA: manifest check -> TWO-POINT downgrade gat
                 image's OWN esp_app_desc_t version via esp_https_ota_get_img_desc() — the manifest
                 and the image are separately-controlled artifacts, so a host advertising 9.9.9 while
                 serving a signed 1.0.0 binary is caught only by the second check
-status_led.cpp  onboard-LED status indicator task (compile-time only, DAIKIN_STATUS_LED_* Kconfig):
-                samples WiFi mode + wifi/mqtt/hp state per tick and blinks the pattern — slow 1s =
+status_led.cpp  onboard status-indicator task. TWO back-ends behind one host-tested pattern table
+                (logic/led_pattern.hpp): a level-driven GPIO LED and an addressable WS2812 (RMT, via
+                the espressif/led_strip managed component). Pin + driver + polarity are RUNTIME
+                (config led_gpio/led_type/led_inverted, NVS, POST /set_board) — Kconfig
+                DAIKIN_STATUS_LED_* only seeds first boot — because CI publishes ONE esp32s3 image
+                and the boards disagree about their onboard parts (XIAO: plain LED GPIO21 active-low;
+                M5Stack AtomS3 Lite: WS2812 GPIO35). Compiling either in would fork the artifact +
+                manifest + OTA feed per board. Six operating patterns, timings unchanged: slow 1s =
                 setup portal (SoftAP), fast 100ms = connecting, solid = healthy (WiFi + MQTT + X10A),
                 double-flash = X10A link down, medium 300ms = X10A up but MQTT down, off = no WiFi
-                mode. X10A-down outranks MQTT-down (the bus is the point of the device). GPIO
-                defaults to 21 (XIAO ESP32-S3 onboard LED) and
-                INVERTED=y (active-low on XIAO); -1 disables. Not runtime-configurable and not on
-                /status — it is a local-eyes-only signal. The task loop self-guards like mqtt_task/
-                poll_task: wifi_info()/mqtt_status()/hp_stats() each copy std::strings out, so a tick
-                can throw under memory pressure — an escape would reboot the board over a cosmetic
-                LED. A dropped tick costs nothing (the pattern is recomputed from scratch each time)
+                mode. X10A-down outranks MQTT-down (the bus is the point of the device). Plus two
+                the recovery button asserts via status_led_signal() (an atomic, so no lock is taken
+                on the erase path): red 60ms strobe = factory reset ARMED, solid white = erasing.
+                The override pre-empts every operating phase — a board being deliberately reset is
+                usually perfectly healthy, so gating the warning on a fault would hide it exactly
+                when it matters. Waits are SLICED (25ms) and re-check the signal, so the override
+                shows within a slice instead of up to a full 1s pattern later. Started AFTER
+                config_load (it reads the config). Exposed on /status.board (pin/driver/polarity),
+                never as a value — the light itself is local-eyes-only. The task loop self-guards
+                like mqtt_task/poll_task: wifi_info()/mqtt_status()/hp_stats() each copy std::strings
+                out, so a tick can throw under memory pressure — an escape would reboot the board
+                over a cosmetic LED. A dropped tick costs nothing (recomputed from scratch each time)
+recovery_button.cpp  physical factory-reset button (config btn_gpio/btn_active_low, DISABLED by
+                default): held BUTTON_FIRE_MS (5s) it erases the WHOLE daik_cfg NVS namespace
+                (nvs_erase_all) and reboots into the setup portal. The only config reset that does
+                not require reaching the device over the network — the cure for "it joined a network
+                I can't reach", which wifi.cpp's credential rollback cannot cover (that handles a
+                REJECTED password, not a wrong-but-accepted LAN). Press classification is the pure
+                logic/button.hpp: an ARM checkpoint at 1.5s lights the warning while there is still
+                time to let go, a debounced release (3 samples @20ms) means one bounced sample can
+                neither cancel a hold nor silently restart its clock. Default -1 ON PURPOSE — an
+                unconfigured input FLOATS, and a floating pin reading "pressed" for five seconds
+                would wipe a board nobody touched. A button already held at boot is ignored until
+                the pin reads released once (a stuck switch must not fire 5s into every boot). The
+                erase is milliseconds, so the indicator LEADS it (250ms) and is held to 1.5s total —
+                a signal that merely bracketed the write would be invisible. A FAILED erase does NOT
+                reboot: coming back up on the config it just said it deleted is worse than staying up
+                and logging why. Started even in safe mode (a boot-looping board is exactly when a
+                physical reset is the only way in)
 diag_log.cpp    in-RAM diag ring served by GET /diag; each line is also forwarded to syslog_send()
 syslog.cpp      optional syslog UDP client (RFC 5424): a task DNS-resolves the configured host, then
                 forwards every diag_printf() line as one UDP datagram; disabled when syslog_host is
@@ -369,8 +400,19 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 bootlog, reset_reason, boot_guard, board_pins, modbus, syslog_policy, link_watch,
                 wifi_rollback, health_gate, version_cmp, ota_manifest, ws_policy, ws_tx_gate,
                 http_body, http_surface, query_flag, mcp_jsonrpc, timestamp, uart_plan, detect_backoff,
-                hexdump,
+                hexdump, led_pattern, button,
                 lwt_select).
+                led_pattern.hpp = the status indicator's state -> pattern rule + the button
+                override's PRIORITY, shared by both back-ends (GPIO LED / WS2812) so they cannot
+                drift apart, and so "which signal wins" is asserted rather than buried in a blink
+                loop. Shape, not colour, carries the state — a monochrome LED sees no colour, so
+                every phase is distinguishable by timing alone (the tests pin that exactly two
+                phases are solid, and why that pair is safe).
+                button.hpp = the recovery button's press classifier (arm / fire / abort +
+                debounce). The interesting half is the ABORT path: the action it gates erases the
+                user's whole configuration, so "held 4.9s then let go" must destroy nothing, and a
+                single bounced sample must not read as a release. Pure, so that is tested rather
+                than discovered by holding a button on a desk.
                 lwt_select.hpp = the leaving-water MEASUREMENT picker (host-testable twin of
                 www/app.js's vLwt): the row that feeds the UI's ΔT / heat-output / COP must be the
                 pre-BUH heat-exchanger outlet (R1T) and NEVER a setpoint / mixed-zone / post-BUH (R2T)
@@ -482,10 +524,17 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 and classifies which reset reasons are faults; board_pins.hpp = the ESP32-S3 CHIP-safe
                 X10A GPIOs (the RX/TX pin-picker dropdown when detection hasn't locked the pins) —
                 minus flash/strapping/USB-JTAG/JTAG always, minus GPIO33-37 when the build runs Octal
-                flash/PSRAM, and minus the status LED's own pin: chip-safe is not free, and offering a
-                pin status_led.cpp holds as a push-pull output is a pick that cannot work. Both
-                inputs (octal_spi, reserved) come from Kconfig at the http_status.cpp call site, since
-                logic/ must not see CONFIG_*. board_pins_offerable() fills a CALLER-owned buffer — a
+                flash/PSRAM, and minus the pins the firmware itself drives (ReservedPins: the status
+                indicator AND the recovery button): chip-safe is not free, and offering a pin
+                status_led.cpp holds as a push-pull output — or that button.cpp holds as a pulled
+                input — is a pick that cannot work. A SECOND, wider set,
+                board_pin_local_io()/board_pins_local(), is what the indicator + button themselves may
+                use: it adds back exactly the dedicated-JTAG pads 39-42, which the X10A list withholds
+                as a PREFERENCE (keep a debug probe usable) rather than a hardware conflict — a
+                preference that cannot survive an onboard part soldered there, e.g. the AtomS3 Lite's
+                button on GPIO41. `octal_spi` still comes from Kconfig at the call site (config.cpp
+                hw_octal_spi()); `reserved` now comes from the live CONFIG (config_reserved_pins),
+                since both pins are runtime. board_pins_offerable() fills a CALLER-owned buffer — a
                 filtered static would race, as build_status_json runs on httpd AND the poll task's WS
                 broadcaster. It says nothing about which pins a given BOARD breaks out to a header
                 (no board-ID EEPROM exists); README.md carries that per-board table for humans;
@@ -525,7 +574,7 @@ www/            web UI sources (index.html + style.css + app.js -> one gzipped p
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi creds + the one-shot rollback backup + flags (`wifi_rolledbk` outcome marker included), MQTT (`uri`/`user`/`pass`), syslog (empty host = off), and `ntp_server` (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` compile-time default on next boot). One CRC-checked entry written all-or-nothing, so the whole credential/service state survives a write failure or power cut together — no per-key write-ordering. The X10A **link cache** `rx_pin`/`tx_pin`/`proto` stays as SEPARATE self-healing keys (two owners: `config_save` for a manual override, `config_save_link` for a detected pin; re-validated on load). Legacy per-key credential keys (`wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/…/`ntp_server`) are still READ as the fallback when `cfg` is absent (fresh device / pre-blob OTA). Plus the boot-loop **crash counter** `boot_fails` (safe_mode.cpp; here so a factory reset wipes it too). (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
+| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi creds + the one-shot rollback backup + flags (`wifi_rolledbk` outcome marker included), MQTT (`uri`/`user`/`pass`), syslog (empty host = off), `ntp_server` (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` compile-time default on next boot), and (blob **v2**) the **board-local hardware** `led_gpio`/`led_type`/`led_inverted`/`btn_gpio`/`btn_active_low` — in the blob because, like the credentials and unlike the link cache, it has exactly ONE writer (httpd, `POST /set_board`). A **v1** blob (pre-board OTA) is still ACCEPTED and reports `has_board=false`, so `config_load` seeds the board fields from Kconfig instead of reading "absent" as "indicator off" — rejecting it would drop that user's WiFi/MQTT creds on the upgrade. One CRC-checked entry written all-or-nothing, so the whole credential/service state survives a write failure or power cut together — no per-key write-ordering. The X10A **link cache** `rx_pin`/`tx_pin`/`proto` stays as SEPARATE self-healing keys (two owners: `config_save` for a manual override, `config_save_link` for a detected pin; re-validated on load). Legacy per-key credential keys (`wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/…/`ntp_server`) are still READ as the fallback when `cfg` is absent (fresh device / pre-blob OTA). Plus the boot-loop **crash counter** `boot_fails` (safe_mode.cpp; here so a factory reset wipes it too). (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -569,7 +618,13 @@ offset/size stable across versions.
 GET  /            embedded web UI (gzipped into the app binary)
 GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity — matches a core dump
                   to its .elf), pins_avail[] (the chip-safe X10A GPIOs for the RX/TX picker, minus the
-                  status LED's pin — logic/board_pins.hpp), wifi{ssid,ip,rssi,connected,bssid,mac,std,rolled_back}
+                  pins the firmware itself drives — the status indicator and the recovery button —
+                  logic/board_pins.hpp),
+                  board{led_gpio,led_type,led_inverted,btn_gpio,btn_active_low,pins_local[]} (the
+                  runtime board-hardware config written by POST /set_board; pins_local[] is the
+                  LED/button-eligible set, WIDER than pins_avail by the dedicated-JTAG pads — it
+                  drives the two pin pickers in the ESP32 card's Hardware modal),
+                  wifi{ssid,ip,rssi,connected,bssid,mac,std,rolled_back}
                   (bssid/std are the associated AP's BSSID + PHY standard name e.g. "Wi-Fi 4", null
                   while offline; mac is this STA's own MAC, always present; rolled_back = the last
                   /set_wifi was UNDONE by the credential rollback — sticky until the next /set_wifi,
@@ -679,7 +734,21 @@ POST /set_hp      {profile,rx,tx} -> validate + apply live (no reboot). rx/tx PE
                   proto is NOT accepted (auto-detected); poll_s fixed at 1 s and lang removed
                   (English-only) — neither accepted. RX/TX are auto-detected; when the bus is silent
                   the ESP32 card's pin dropdown posts {profile:"auto",rx,tx} to re-run detection.
-   (all five /set_*) a failed NVS write answers 500 {ok:false,error:"config write failed"} and does
+POST /set_board   {led_gpio,led_type,led_inverted,btn_gpio,btn_active_low} -> validate + persist +
+                  REBOOT. The board's own onboard parts: which pin the status indicator is on, whether
+                  it is a plain LED (led_type 0) or a WS2812 (1), and which pin (if any) carries the
+                  factory-reset button. -1 = absent for either pin. Runtime rather than Kconfig because
+                  CI publishes ONE esp32s3 image and boards disagree about their onboard hardware.
+                  Reboots (unlike /set_hp's live apply): both are claimed once at task start — the
+                  WS2812 opens an RMT channel, the button installs a pull — and hot-swapping a running
+                  driver from another task buys nothing for a once-per-board setting. Unchanged
+                  settings short-circuit to {ok:true,reboot:false} like /set_mqtt//set_syslog//set_ntp.
+                  Validation (board_hw_valid) checks the chip-safe LOCAL-I/O set — wider than the X10A
+                  set by exactly the dedicated-JTAG pads 39-42, since a board's button legitimately
+                  sits there (AtomS3 Lite: GPIO41) — plus the collision rules, in BOTH directions: no
+                  pin may be claimed by the indicator, the button and the X10A link at once, whichever
+                  endpoint is called second
+   (all six /set_*) a failed NVS write answers 500 {ok:false,error:"config write failed"} and does
                   NOT reboot/apply — config_save publishes nothing on failure, so an "ok" + reboot
                   would silently come back up on the OLD config (the failing key is on /diag)
 POST /detect      re-run auto-detection now (no reboot): reset profile to "auto" + invalidate the

@@ -377,7 +377,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
     // Pass the real Kconfig-derived octal-SPI + status-LED facts (config.cpp) so validate() rejects a
     // chip-reserved GPIO — a flash/strapping/JTAG pad the UI dropdown never offers but a raw curl POST
     // could send — with the pin named, instead of range-accepting it and persisting a crash-loop pair.
-    if (!validate(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi(), hw_status_led_gpio()))
+    if (!validate(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi(), config_reserved_pins(c)))
         return send_err(req, "400 Bad Request", reason.c_str());
     // Persist the pin cache (config_save writes link+creds; profile/fp stay RAM). On failure RAM is
     // untouched too, so there is no new config to hand the poll engine — skip the reconfigure.
@@ -450,6 +450,47 @@ static esp_err_t set_ntp(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// POST /set_board {led_gpio, led_type, led_inverted, btn_gpio, btn_active_low} -> validate + persist
+// + reboot. This is the board's own hardware — which pin the status indicator is on, whether it is a
+// plain LED or a WS2812, and which pin (if any) carries the factory-reset button — kept in NVS
+// rather than Kconfig so ONE published image serves boards that disagree about their onboard parts.
+//
+// Unlike /set_hp (which applies pins live), this REBOOTS. Both settings are claimed once at task
+// start: the indicator opens an RMT channel for a WS2812, the button installs a pull on its pin.
+// Hot-swapping either means tearing down a running driver from a different task while it blinks —
+// a whole class of failure bought for nothing, since changing an indicator pin is a once-per-board
+// action. A reboot is also what the four service endpoints already do, so the UI path is identical.
+static esp_err_t set_board(httpd_req_t* req) {
+    char body[512];
+    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
+    cJSON* j = cJSON_Parse(body);
+    if (!j) return send_err(req, "400 Bad Request", "bad json");
+    Config c = config();
+    c.led_gpio       = ji(j, "led_gpio", c.led_gpio);
+    c.led_type       = ji(j, "led_type", c.led_type);
+    c.led_inverted   = jb(j, "led_inverted", c.led_inverted);
+    c.btn_gpio       = ji(j, "btn_gpio", c.btn_gpio);
+    c.btn_active_low = jb(j, "btn_active_low", c.btn_active_low);
+    cJSON_Delete(j);
+
+    std::string reason;
+    // Checks the pins against the chip AND against the X10A link in the same snapshot, so neither
+    // side can steal the other's GPIO whichever endpoint is called second (logic/config_model.hpp).
+    if (!board_hw_valid(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi()))
+        return send_err(req, "400 Bad Request", reason.c_str());
+
+    const Config& cur = config();
+    if (c.led_gpio == cur.led_gpio && c.led_type == cur.led_type &&
+        c.led_inverted == cur.led_inverted && c.btn_gpio == cur.btn_gpio &&
+        c.btn_active_low == cur.btn_active_low)
+        return http_send_json(req, "{\"ok\":true,\"reboot\":false}");   // no change, no reboot
+
+    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    http_send_json(req, "{\"ok\":true,\"reboot\":true}");
+    reboot_soon();
+    return ESP_OK;
+}
+
 // Re-run auto-detection now (without waiting for a reboot): drop back to the "auto" sentinel +
 // invalidate the fingerprint, so the next poll cycle sweeps protocol + re-fingerprints the unit
 // (hp_poll.cpp poll_detect). Detection state is session-only, so this is a RAM-only reset.
@@ -471,6 +512,7 @@ void http_register_config(httpd_handle_t s, HttpSurface surface) {
     http_register_on(s, surface, "/set_syslog", HTTP_POST, set_syslog);
     http_register_on(s, surface, "/set_ntp", HTTP_POST, set_ntp);
     http_register_on(s, surface, "/set_hp", HTTP_POST, set_hp);
+    http_register_on(s, surface, "/set_board", HTTP_POST, set_board);
     http_register_on(s, surface, "/detect", HTTP_POST, do_detect);
 }
 

@@ -47,11 +47,11 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (922 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1029 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
-| 24 | Status-LED state indicator | ✅ | [`status_led.cpp`](../main/status_led.cpp) |
+| 24 | Status indicator — **runtime-selectable GPIO-LED / WS2812 back-end**, one image per board family | ✅ 🧪 | [`status_led.cpp`](../main/status_led.cpp), [`logic/led_pattern.hpp`](../main/logic/led_pattern.hpp) |
 | 25 | Read-only MCP server route | 🔭 | [`mcp_server.cpp`](../main/mcp_server.cpp) |
 | 26 | **MQTT broker save-time pre-flight** (DNS/TCP/connect+auth, heap-guarded) before persist | ✅ | [`http_config.cpp`](../main/http_config.cpp) |
 | 27 | **Task Watchdog** → clean reboot on a wedged poll/publish task | ✅ | [`hp_poll.cpp`](../main/hp_poll.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -64,6 +64,8 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 34 | **HTTP trust-surface split** — the open setup AP registers only the provisioning routes; `/coredump`, `/diag` and the config/OTA/MCP surface exist only on the trusted STA LAN | ✅ 🧪 | [`http_server.cpp`](../main/http_server.cpp), [`logic/http_surface.hpp`](../main/logic/http_surface.hpp), [`http_common.cpp`](../main/http_common.cpp) |
 | 35 | **Publish-time value-plausibility filter** — a decoded °C reading outside a physical envelope, or a saturation temp from a 0-bar sensor, is dropped at publish (HA gets *unavailable*, never a false 576 °C / −51.2 °C); the runtime backstop to the build-time catalog audit (#31), kept out of `convert()` so the audit still distinguishes the intrinsic converters | ✅ 🧪 | [`logic/convert.hpp`](../main/logic/convert.hpp), [`hp_convert.cpp`](../main/hp_convert.cpp) |
 | 36 | **Raw page dump on `/diag`** — the wire bytes of pages `0x00`/`0x10`/`0x20`/`0xA0`/`0xA1`, one line per detect pass. Everything else the device exposes is *decoded*, so an impossible reading cannot be attributed to a wrong converter vs. a wrong offset vs. a per-unit layout difference without these bytes — and they otherwise never leave the board. `0x10`/`0x20` cover impossible readings that fall *inside* the plausibility window and are therefore never masked | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/hexdump.hpp`](../main/logic/hexdump.hpp) |
+| 37 | **Physical recovery button** — a 5 s hold erases the whole stored config and reboots into the setup portal: the only config reset that needs no network access to the device. Armed/erasing are signalled on the status indicator, and the destructive path (arm checkpoint, debounced abort) is host-tested | ✅ 🧪 | [`recovery_button.cpp`](../main/recovery_button.cpp), [`logic/button.hpp`](../main/logic/button.hpp), [`nvs_storage.cpp`](../main/nvs_storage.cpp) |
+| 38 | **Board-hardware runtime config** (`POST /set_board`) — indicator pin/driver/polarity + button pin live in NVS, not Kconfig, so one published image serves boards with different onboard parts | ✅ 🧪 | [`http_config.cpp`](../main/http_config.cpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp), [`logic/board_pins.hpp`](../main/logic/board_pins.hpp) |
 
 ---
 
@@ -478,9 +480,31 @@ the fact*, from the field, without a serial cable:
 - **✅ Build identity** — `/status.app_elf_sha256` ties a running device to the exact firmware that
   produced any dump, and the syslog boot line (below) puts the same hash in the **log stream**, so a
   captured stream stays attributable to a binary after the device has moved on.
-- **✅ In-RAM diag ring** (`GET /diag`) and a **status LED** ([`status_led.cpp`](../main/status_led.cpp))
+- **✅ In-RAM diag ring** (`GET /diag`) and a **status indicator** ([`status_led.cpp`](../main/status_led.cpp))
   encoding setup-portal / WiFi-connecting / all-healthy / X10A-error / MQTT-error / no-WiFi-mode as
-  six distinct blink patterns (X10A-error outranks MQTT-error — the bus is the point of the device).
+  six distinct blink patterns (X10A-error outranks MQTT-error — the bus is the point of the device),
+  plus two the recovery button asserts (reset armed / erasing). Two back-ends — a level-driven GPIO
+  LED and an addressable WS2812 over RMT — render **one** host-tested pattern table
+  ([`logic/led_pattern.hpp`](../main/logic/led_pattern.hpp)), and the pin, driver and polarity come
+  from NVS (`POST /set_board`), not Kconfig: CI publishes a single `esp32s3` image, while a Seeed
+  XIAO ESP32-S3 (plain LED, GPIO21, active-low) and an M5Stack AtomS3 Lite (WS2812, GPIO35) disagree
+  about their onboard parts, so compiling one in would fork the artifact, the manifest and the OTA
+  feed per board. Because a monochrome LED sees no colour, every phase stays distinguishable by
+  blink *shape* alone; the colour is a bonus on an RGB board, never the sole carrier of a state.
+- **✅ 🧪 Physical recovery button** ([`recovery_button.cpp`](../main/recovery_button.cpp)): held for
+  5 s it erases the whole `daik_cfg` NVS namespace and reboots into the setup portal. It is the only
+  config reset that does not go through the network, which is exactly the failure the other paths
+  cannot reach: the device joined a network the user can no longer get onto. (The credential rollback
+  in [`wifi.cpp`](../main/wifi.cpp) covers a *rejected* password — not a wrong-but-accepted LAN.)
+  Before this, the cure was opening the enclosure for USB + `erase_flash`. Classification is pure and
+  host-tested ([`logic/button.hpp`](../main/logic/button.hpp)): an **arm checkpoint** at 1.5 s lights
+  the warning while there is still time to let go, and a debounced release means one bounced sample
+  can neither cancel a hold nor silently restart its clock. It is **disabled by default** (`-1`) —
+  an unconfigured input floats, and a floating pin reading "pressed" for five seconds would wipe a
+  board nobody touched — and a button already held at boot is ignored until the pin reads released
+  once. The erase itself is milliseconds, so the indicator leads it and is held to a duration a human
+  registers; a **failed** erase deliberately does not reboot, since coming back up on the config it
+  just claimed to delete is worse than staying up and logging why.
 - **✅ 🧪 SNTP wall clock, runtime-configurable** ([`sntp_time.cpp`](../main/sntp_time.cpp)): before
   this the device had no timestamp anywhere except uptime-since-boot. `esp_netif_sntp` polls the
   configured server (`config().ntp_server` — NVS `ntp_server` override of `CONFIG_DAIKIN_NTP_SERVER`
@@ -575,12 +599,23 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   byte, so an SSID from any AP in radio range can't emit JSON the setup portal fails to parse), the
   broker-URI split (`mqtt_uri.hpp`), the X10A GPIOs the RX/TX picker may offer
   (`board_pins.hpp` — the ESP32-S3 chip-safe set, minus GPIO33-37 on Octal flash/PSRAM builds and
-  minus the status LED's own pin, since chip-safe is not the same as free: `status_led.cpp` holds
-  that pin as a push-pull output, so offering it would be a pick that cannot work — and
+  minus the pins the firmware itself drives (`ReservedPins`: the status indicator **and** the
+  recovery button), since chip-safe is not the same as free: `status_led.cpp` holds its pin as a
+  push-pull output and `recovery_button.cpp` holds its own as a pulled input, so offering either
+  would be a pick that cannot work — and
   `board_pin_offerable()` makes that list a *rule* rather than a dropdown filter, enforced on the
   request path (`validate()`, naming the offending pin) and on the load path (`config_load()` via
   `link_pins_safe()`), so neither a raw `POST /set_hp` nor a stale NVS link cache can route the X10A
-  UART onto a flash/strapping/JTAG pad and crash-loop the board),
+  UART onto a flash/strapping/JTAG pad and crash-loop the board; the *wider* local-I/O set
+  (`board_pin_local_io()`) is what the indicator and button themselves may use — it adds back the
+  four dedicated-JTAG pads, withheld from the X10A list only to keep a debug probe usable, which is
+  a preference an onboard part soldered to GPIO41 simply overrides),
+  the status indicator's state→pattern rule and the button override's priority
+  (`led_pattern.hpp` — shared by the GPIO and WS2812 back-ends so they cannot drift apart; *shape*,
+  not colour, carries the state, since a monochrome LED sees no colour at all),
+  the recovery button's press classifier (`button.hpp` — the tested half is the **abort** path: the
+  action it gates erases the user's whole configuration, so "held 4.9 s then let go" must destroy
+  nothing and one bounced sample must not read as a release),
   the `/events` frame policy (`ws_policy.hpp` — an announced frame length is
   a client-asserted 64-bit number, so it decides and never allocates; only a `sub` **text** frame
   earns a broadcast slot), its async-send backpressure (`ws_tx_gate.hpp` — at most one values and one
@@ -739,7 +774,9 @@ Every ESP-IDF component this firmware links, and what it powers (from
 | `esp_crt_bundle` | CA bundle for MQTTS / OTA TLS verification |
 | `lwip` (+ `ping/ping_sock`) | BSD sockets (captive DNS), ICMP gateway watchdog, SNTP protocol |
 | `esp_driver_uart` | X10A 9600 8E1 link on `UART_NUM_1` |
-| `esp_driver_gpio` | status LED + pin config |
+| `esp_driver_gpio` | status indicator (GPIO back-end), recovery-button input + pin config |
+| `esp_driver_rmt` | RMT peripheral behind the WS2812 indicator back-end |
+| `led_strip` (managed) | WS2812/WS2812C pixel driver — an addressable LED encodes its colour in pulse timings, so it cannot be driven with `gpio_set_level` |
 | `esp_timer` | uptime, poll/serial timing |
 | `mdns` (managed) | `<hostname>.local` discovery |
 | `espcoredump` | core dump to flash + `esp_core_dump_get_summary` |
@@ -759,7 +796,8 @@ them are also settable at runtime (web UI → NVS, which then overrides the Kcon
 | `DAIKIN_HOSTNAME` | ❌ compile-time only |
 | `DAIKIN_MQTT_DISCOVERY_PREFIX` / `_BASE_TOPIC` | ❌ compile-time only |
 | `DAIKIN_OTA_MANIFEST_URL` / `_FIRMWARE_BASE_URL` | ❌ compile-time only |
-| `DAIKIN_STATUS_LED_ENABLE` / `_GPIO` / `_INVERTED` | ❌ compile-time only |
+| `DAIKIN_STATUS_LED_ENABLE` / `_GPIO` / `_WS2812` / `_INVERTED` | ✅ `POST /set_board` → NVS (these are only the first-boot seed) |
+| `DAIKIN_BUTTON_GPIO` / `_ACTIVE_LOW` | ✅ `POST /set_board` → NVS; defaults to `-1` (**disabled**) because an unconfigured input floats and a floating pin reading "pressed" would factory-reset an untouched board |
 
 The **model** is not in this table at all: it is re-detected from the X10A bus on every boot and held
 in RAM only — there is no manual picker and no NVS key (see [`ARCHITECTURE.md`](ARCHITECTURE.md)).

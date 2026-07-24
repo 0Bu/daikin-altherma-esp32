@@ -33,6 +33,28 @@ embedded web UI. ESP32-S3 only.
 
 Visual wiring diagram + picking pins on a different board: [docs/WIRING.md](docs/WIRING.md).
 
+## Board hardware — status LED and recovery button
+
+One firmware image serves every ESP32-S3 board, so the parts that differ *between* boards are
+runtime settings, configured in the dashboard under **ESP32 → Hardware**:
+
+| Board | Status LED | Recovery button |
+| :--- | :--- | :--- |
+| Seeed XIAO ESP32-S3 | `GPIO21`, plain LED, active low | none broken out |
+| M5Stack AtomS3 Lite | `GPIO35`, WS2812 (addressable RGB) | `GPIO41`, active low |
+
+The LED shows link and bus state at a glance — blue = setup portal, yellow = connecting, green =
+healthy, red double-flash = X10A link down, orange = MQTT down (a plain single-colour LED shows the
+same states as distinct blink patterns).
+
+A configured **recovery button held for 5 seconds erases every stored setting** — WiFi, MQTT,
+Syslog/NTP, the X10A pin cache — and reboots into the setup portal. It is the way back in when the
+device has joined a network you can no longer reach, which is otherwise a USB-and-`erase_flash` job.
+The LED flashes red once the reset is armed (let go to abort) and turns solid white while erasing.
+Leave it set to **None** unless a button is actually wired: an unconnected pin can float and trigger
+it on its own. Per-board hardware inventory: [docs/BOARDS.md](docs/BOARDS.md); wiring:
+[docs/WIRING.md](docs/WIRING.md).
+
 ## Reference
 
 | Doc | Description |
@@ -44,6 +66,7 @@ Visual wiring diagram + picking pins on a different board: [docs/WIRING.md](docs
 | [docs/REGISTERS.md](docs/REGISTERS.md) | Register map + converter/enum tables behind the value catalog |
 | [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md) | MQTT topics, entities and derived (COP) sensors |
 | [docs/WIRING.md](docs/WIRING.md) | Visual wiring diagram + picking RX/TX pins on other boards |
+| [docs/BOARDS.md](docs/BOARDS.md) | Supported boards: what hardware each has and which parts the firmware uses |
 | [docs/FEATURES.md](docs/FEATURES.md) | Catalog of platform features (Secure Boot, OTA, WebSocket, diagnostics, …) |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model + OTA signing/key lifecycle |
 | [docs/MCP.md](docs/MCP.md) | Planned read-only MCP surface (not yet implemented) |

@@ -6,6 +6,7 @@
 #include <string>
 #include "crc.hpp"
 #include "board_pins.hpp"   // board_pin_offerable — the chip-reserved-pin rule validate() enforces
+#include "led_pattern.hpp"  // LedType — the indicator back-end, now a runtime choice not a Kconfig one
 
 namespace daik {
 
@@ -44,6 +45,23 @@ struct Config {
     Protocol    proto    = Protocol::I;  // last detected framing (I/S); tried first, then the other
     int         rx_pin   = 44;
     int         tx_pin   = 43;
+
+    // ── Board-local hardware: the status indicator + the recovery button — PERSISTED ─────────────
+    // RUNTIME, not Kconfig, and that is the whole point. CI publishes ONE esp32s3 image
+    // (scripts/ci-build-all.sh), but the boards it runs on disagree about their own onboard parts:
+    // a Seeed XIAO ESP32-S3 has a plain active-low LED on GPIO21 and no button; an M5Stack AtomS3
+    // Lite has a WS2812 on GPIO35 and a button on GPIO41. Compiling either in would fork the
+    // published artifact (and with it the manifest, the web installer and the OTA feed) per board.
+    // So the image carries BOTH drivers and picks from NVS at boot — exactly the way the X10A
+    // rx/tx pins already work. Kconfig supplies only the first-boot defaults.
+    // -1 = absent/disabled, and it is the default for the button on purpose: an unconfigured input
+    // pin FLOATS, and a floating pin that reads low for five seconds would factory-reset a board
+    // nobody touched. Opt-in, never inherited from a default.
+    int         led_gpio       = -1;
+    int         led_type       = static_cast<int>(LedType::Gpio);   // stored as int: it is on-flash
+    bool        led_inverted   = false;   // true = active-low (drive LOW to light); GPIO type only
+    int         btn_gpio       = -1;
+    bool        btn_active_low = true;    // the usual wiring: pin to GND through the switch
 
     // ── Auto-detected MODEL (not the link). Set by hp_detect.cpp; see logic/detect.hpp. ──
     // SESSION-ONLY: applied to the in-RAM config via config_set_model (apply_model, below) and NEVER
@@ -111,14 +129,47 @@ inline bool link_pins_valid(int rx, int tx, int max_gpio = 48) {
 // The full link rule: the pair rule (above) PLUS the chip-reserved-pin rule (logic/board_pins.hpp).
 // Two individually-legal, distinct pins are still an illegal link if either names a pad this
 // chip/build reserves (SPI flash, strapping, JTAG, USB-Serial/JTAG, octal-SPI) or the pin the status
-// LED drives — the range-only link_pins_valid could not see those. Both the request path (validate)
-// and the LOAD path (config.cpp) apply it, so a /set_hp and a persisted cache can only hold a pair the
-// UI would also have offered. `octal_spi`/`reserved` are supplied by the caller from Kconfig
-// (config.cpp hw_octal_spi()/hw_status_led_gpio()), keeping this header CONFIG_-free.
-inline bool link_pins_safe(int rx, int tx, bool octal_spi, int reserved, int max_gpio = 48) {
+// indicator or the recovery button already occupies — the range-only link_pins_valid could not see
+// those. Both the request path (validate) and the LOAD path (config.cpp) apply it, so a /set_hp and a
+// persisted cache can only hold a pair the UI would also have offered. `octal_spi` is supplied by the
+// caller from Kconfig (config.cpp hw_octal_spi()) and `reserved` from the live config
+// (config_reserved_pins), keeping this header CONFIG_-free.
+inline bool link_pins_safe(int rx, int tx, bool octal_spi, ReservedPins reserved, int max_gpio = 48) {
     return link_pins_valid(rx, tx, max_gpio)
         && board_pin_offerable(rx, octal_spi, reserved)
         && board_pin_offerable(tx, octal_spi, reserved);
+}
+
+// The GPIOs the firmware itself drives, as board_pins.hpp's `reserved` input. One accessor so the
+// three places that need it — /status's pin dropdown, /set_hp's validation and config_load()'s
+// load-path re-check — cannot disagree about which pins are spoken for.
+inline ReservedPins config_reserved_pins(const Config& c) { return ReservedPins{c.led_gpio, c.btn_gpio}; }
+
+// Validate the board-local hardware half of a config (POST /set_board, and the load path). Separate
+// from validate() below because it is checked on its own route and must name its own field; the two
+// share the collision rules so a pin can never be claimed twice.
+//
+// Both pins are optional (-1 = absent) and are checked against board_pin_local_io, NOT against the
+// X10A offerable set: the indicator and the button legitimately sit on the dedicated-JTAG pads that
+// the X10A dropdown withholds as a preference (board_pins.hpp explains the difference — the AtomS3
+// Lite's button is on GPIO41). What they may NOT do is collide: with each other, or with the X10A
+// link, in either direction. Checking it here as well as in validate() is not redundant — the two
+// routes can be called in either order, and whichever runs second must see the other's pins.
+inline bool board_hw_valid(const Config& c, std::string& reason, int max_gpio = 48,
+                           bool octal_spi = true) {
+    if (!led_type_valid(c.led_type)) { reason = "led_type unknown"; return false; }
+    if (c.led_gpio >= 0) {
+        if (!gpio_in_range(c.led_gpio, max_gpio))          { reason = "led_gpio out of range";  return false; }
+        if (!board_pin_local_io(c.led_gpio, octal_spi))    { reason = "led_gpio is a reserved GPIO"; return false; }
+        if (c.led_gpio == c.rx_pin || c.led_gpio == c.tx_pin) { reason = "led_gpio is in use by the X10A link"; return false; }
+    }
+    if (c.btn_gpio >= 0) {
+        if (!gpio_in_range(c.btn_gpio, max_gpio))          { reason = "btn_gpio out of range";  return false; }
+        if (!board_pin_local_io(c.btn_gpio, octal_spi))    { reason = "btn_gpio is a reserved GPIO"; return false; }
+        if (c.btn_gpio == c.rx_pin || c.btn_gpio == c.tx_pin) { reason = "btn_gpio is in use by the X10A link"; return false; }
+        if (c.btn_gpio == c.led_gpio)                      { reason = "btn_gpio and led_gpio must differ"; return false; }
+    }
+    return true;
 }
 
 // Validate a config coming from the web UI. Returns false + a reason on the first problem. Pass the
@@ -127,11 +178,11 @@ inline bool link_pins_safe(int rx, int tx, bool octal_spi, int reserved, int max
 // rule added there is inherited here.
 // `octal_spi`/`reserved` gate the chip-reserved-pin check (board_pins.hpp); their defaults
 // (conservative octal=true, nothing reserved) keep the pair check strict for host tests that don't
-// pass them. The device call site (http_config.cpp /set_hp) passes the real Kconfig-derived values so
-// a reserved GPIO — a flash/strapping/JTAG pad, or the status-LED pin — is rejected with the pin named
+// pass them. The device call site (http_config.cpp /set_hp) passes the real values so a reserved
+// GPIO — a flash/strapping/JTAG pad, or the pin the indicator/button holds — is rejected with the pin named
 // instead of range-accepted and persisted into a crash loop.
 inline bool validate(const Config& c, std::string& reason, int max_gpio = 48,
-                     bool octal_spi = true, int reserved = -1) {
+                     bool octal_spi = true, ReservedPins reserved = {}) {
     if (!gpio_in_range(c.rx_pin, max_gpio)) { reason = "rx_pin out of range"; return false; }
     if (!gpio_in_range(c.tx_pin, max_gpio)) { reason = "tx_pin out of range"; return false; }
     if (!link_pins_valid(c.rx_pin, c.tx_pin, max_gpio)) { reason = "rx_pin and tx_pin must differ"; return false; }

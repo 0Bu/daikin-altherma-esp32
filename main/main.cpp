@@ -24,6 +24,7 @@
 #include "mqtt_ha.hpp"
 #include "ota_update.hpp"
 #include "provisioning.hpp"
+#include "recovery_button.hpp"
 #include "safe_mode.hpp"
 #include "sntp_time.hpp"
 #include "status_led.hpp"
@@ -49,15 +50,22 @@ extern "C" void app_main() {
                  esp_err_to_name(nvs_err));
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    // --- Status LED ---
-    daik::status_led_start();
-
     daik::diag_log_init();
     if (nvs_err != ESP_OK)               // now that the diag ring exists, record the degraded boot
         daik::diag_printf("nvs: init failed (%s) — running WITHOUT persistence this boot\n",
                           esp_err_to_name(nvs_err));
     daik::diag_crash_capture();          // read reset reason + core-dump summary once, before services
     daik::config_load();
+    // --- Board-local hardware (status indicator + recovery button) ---
+    // AFTER config_load, not before: both the indicator's pin/driver and the button's pin are
+    // runtime settings now (one image, several boards — see logic/config_model.hpp), so starting
+    // them earlier would read an unloaded config. It costs the few tens of milliseconds of NVS init
+    // and crash capture above, during which the indicator stays dark; the alternative was a
+    // compile-time pin, which is the thing this replaces.
+    // The button starts even in safe mode (below): a boot-looping board is exactly when a physical
+    // factory reset is the only way back in.
+    daik::status_led_start();
+    daik::recovery_button_start();
     daik::safe_mode_begin();             // crash-loop guard: count crash boots, latch safe mode past threshold
     daik::syslog_init();
     const daik::Config& cfg = daik::config();

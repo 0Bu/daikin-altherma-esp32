@@ -9,3 +9,8 @@ dependencies:
   # is pulled as a managed component (used by mqtt_ha.cpp). Provides the `mqtt` component that
   # main/CMakeLists.txt REQUIRES. Also resolves on 5.x.
   espressif/mqtt: "^1.0.0"
+  # led_strip: the WS2812 back-end of the runtime-selectable status indicator (status_led.cpp).
+  # An addressable pixel encodes its colour in RMT pulse timings, so unlike a plain GPIO LED it
+  # cannot be driven with gpio_set_level — this component is what makes the M5Stack AtomS3 Lite's
+  # onboard RGB LED usable from the same image that drives the XIAO's plain one.
+  espressif/led_strip: "^3.0.0"

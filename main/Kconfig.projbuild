@@ -97,13 +97,18 @@ menu "Daikin Altherma Configuration"
             device appends "daikin-altherma-esp32<suffix>.bin" for its own chip.
 
     # ── Status LED ────────────────────────────────────────────────────────────
+    # DEFAULTS ONLY. The indicator's pin, driver and polarity are runtime settings (NVS, POST
+    # /set_board) so ONE published image can serve boards with different onboard parts — a Seeed
+    # XIAO ESP32-S3 (plain LED, GPIO21, active-low) and an M5Stack AtomS3 Lite (WS2812, GPIO35).
+    # These values only seed a device that has never been configured. Same relationship Kconfig
+    # already has with DAIKIN_RX_PIN / DAIKIN_TX_PIN.
     config DAIKIN_STATUS_LED_ENABLE
-        bool "Enable Status LED indicator"
+        bool "Status LED indicator: enabled by default"
         default y
         help
-            Blink the onboard LED to show the system status. "ON" is the driven level, which
+            First-boot default for the status indicator. "ON" is the driven level, which
             DAIKIN_STATUS_LED_INVERTED flips (so solid-healthy reads as a dark LED on an
-            active-low board). The six states status_led_tick() drives:
+            active-low board). The six operating states, plus two the recovery button asserts:
             - Slow blinking (1s ON / 1s OFF): Running SoftAP (setup portal).
             - Fast blinking (100ms ON / 100ms OFF): Connecting to WiFi.
             - Solid ON: Connected and running healthy — WiFi + X10A OK, and MQTT connected
@@ -114,22 +119,58 @@ menu "Daikin Altherma Configuration"
             - OFF: no WiFi mode / WiFi disabled.
             X10A-down outranks MQTT-down: with both down the LED double-flashes and never
             shows the medium blink — the bus is the point of the device.
+            - Red strobe (60ms): the recovery button is held and the factory reset is ARMED.
+            - Solid white: the factory reset is RUNNING (config being erased).
 
     config DAIKIN_STATUS_LED_GPIO
-        int "Status LED GPIO pin"
+        int "Status LED GPIO pin (first-boot default)"
         depends on DAIKIN_STATUS_LED_ENABLE
         default 21
         help
             GPIO pin of the status LED. Set to -1 to disable, or match your board's onboard LED.
-            On Seeed XIAO ESP32-S3 it is 21.
+            On Seeed XIAO ESP32-S3 it is 21; on M5Stack AtomS3 Lite it is 35 (a WS2812 — also
+            set DAIKIN_STATUS_LED_WS2812). Runtime-changeable in the web UI, so this only
+            matters for a device that has never been configured.
+
+    config DAIKIN_STATUS_LED_WS2812
+        bool "Status LED is an addressable WS2812 (first-boot default)"
+        depends on DAIKIN_STATUS_LED_ENABLE
+        default n
+        help
+            The indicator is a WS2812/WS2812C addressable pixel driven over RMT, not a plain
+            level-driven LED. Both drivers are compiled in and the choice is runtime — this is
+            only the first-boot default. Set for M5Stack AtomS3 / AtomS3 Lite (GPIO35).
 
     config DAIKIN_STATUS_LED_INVERTED
-        bool "Invert LED state (Active Low)"
+        bool "Invert LED state (Active Low, first-boot default)"
         depends on DAIKIN_STATUS_LED_ENABLE
         default y
         help
             Invert the LED logic. On Seeed XIAO boards, the built-in LED is Active Low
-            (GPIO Low = LED ON).
+            (GPIO Low = LED ON). Ignored for a WS2812, which encodes "off" as the zero colour.
+
+    # ── Recovery button ───────────────────────────────────────────────────────
+    config DAIKIN_BUTTON_GPIO
+        int "Recovery button GPIO pin (first-boot default)"
+        default -1
+        help
+            GPIO of a momentary button that FACTORY-RESETS the device when held for 5 seconds:
+            the whole stored config (WiFi, MQTT, syslog/NTP, X10A pin cache) is erased and the
+            device reboots into the setup portal. It is the only config reset that does not need
+            network access to the device — the cure for "it joined a network I can't reach".
+
+            DEFAULT -1 (disabled) ON PURPOSE. An unconfigured input pin floats, and a floating
+            pin that happens to read "pressed" for five seconds would erase the config of a board
+            nobody touched. Enable it deliberately, per board, in the web UI (or here).
+            On M5Stack AtomS3 Lite the onboard button is GPIO41, active-low.
+
+    config DAIKIN_BUTTON_ACTIVE_LOW
+        bool "Recovery button is active-low (first-boot default)"
+        default y
+        help
+            The button shorts the pin to GND when pressed (the usual wiring, and what the
+            M5Stack AtomS3 Lite does). The firmware enables the matching internal pull, so the
+            pin never floats while the button is open.
 
     # ── SNTP (wall clock) ────────────────────────────────────────────────────
     config DAIKIN_NTP_SERVER

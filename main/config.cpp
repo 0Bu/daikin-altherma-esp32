@@ -16,6 +16,34 @@ namespace daik {
 static Config            g_cfg;
 static SemaphoreHandle_t g_mtx = nullptr;   // guards g_cfg; created in config_load() before tasks start
 
+// The board-local hardware as this BUILD was configured — the first-boot / recovery values for the
+// indicator + recovery button, exactly as CONFIG_DAIKIN_RX_PIN is for the X10A link. Kconfig is the
+// default only; NVS is the authority once the user has saved anything (POST /set_board), which is
+// what lets one published image serve boards with different onboard parts.
+static void seed_board_defaults(Config& c) {
+#if CONFIG_DAIKIN_STATUS_LED_ENABLE
+    c.led_gpio = CONFIG_DAIKIN_STATUS_LED_GPIO;
+#else
+    c.led_gpio = -1;
+#endif
+#ifdef CONFIG_DAIKIN_STATUS_LED_WS2812
+    c.led_type = static_cast<int>(LedType::Ws2812);
+#else
+    c.led_type = static_cast<int>(LedType::Gpio);
+#endif
+#ifdef CONFIG_DAIKIN_STATUS_LED_INVERTED
+    c.led_inverted = true;
+#else
+    c.led_inverted = false;
+#endif
+    c.btn_gpio = CONFIG_DAIKIN_BUTTON_GPIO;
+#ifdef CONFIG_DAIKIN_BUTTON_ACTIVE_LOW
+    c.btn_active_low = true;
+#else
+    c.btn_active_low = false;
+#endif
+}
+
 // RAII guard around g_mtx. Releases on exception too, so a std::bad_alloc thrown while copying
 // g_cfg's std::strings can't leave the mutex held (which would deadlock every later config() call).
 namespace {
@@ -67,6 +95,15 @@ void config_load() {
         c.wifi_rollback_active = b.wifi_rollback_active; c.wifi_rolled_back = b.wifi_rolled_back;
         c.mqtt_uri = b.mqtt_uri;   c.mqtt_user = b.mqtt_user;   c.mqtt_pass = b.mqtt_pass;
         c.syslog_host = b.syslog_host; c.syslog_port = b.syslog_port; c.ntp_server = b.ntp_server;
+        // has_board is false for a blob written before the board block existed (v1). Those fields
+        // were compile-time then, so "absent" must read as the Kconfig default, NOT as disabled —
+        // otherwise the OTA that introduces this feature turns a XIAO user's working LED off.
+        if (b.has_board) {
+            c.led_gpio = b.led_gpio; c.led_type = b.led_type; c.led_inverted = b.led_inverted;
+            c.btn_gpio = b.btn_gpio; c.btn_active_low = b.btn_active_low;
+        } else {
+            seed_board_defaults(c);
+        }
     } else {
         // Legacy / first-boot fallback (per-key + Kconfig defaults).
         c.wifi_ssid = nvs_get_str("wifi_ssid", CONFIG_DAIKIN_WIFI_SSID);
@@ -81,6 +118,34 @@ void config_load() {
         c.syslog_host = nvs_get_str("syslog_host", CONFIG_DAIKIN_SYSLOG_HOST);
         c.syslog_port = nvs_get_i32("syslog_port", CONFIG_DAIKIN_SYSLOG_PORT);
         c.ntp_server = nvs_get_str("ntp_server", CONFIG_DAIKIN_NTP_SERVER);
+        seed_board_defaults(c);   // the legacy layout never held these — Kconfig is all there is
+    }
+    // Re-check the board-local pins on the way IN, for the same reason the X10A pair is re-checked
+    // below: NVS holds whatever an older build, a different board's blob or a hand-crafted POST put
+    // there, and both of these pins are DRIVEN (an output, or an input with a pull). A bad one is
+    // not cosmetic — pointing the indicator at a flash pad corrupts flash traffic, and pointing the
+    // button at a floating pad factory-resets the device by itself. The link pins are excluded from
+    // this particular check (rx/tx are re-validated separately, just below, against the board pins
+    // that survive here) so the two checks can't deadlock each other into rejecting both.
+    {
+        Config probe = c;
+        probe.rx_pin = probe.tx_pin = -1;
+        std::string why;
+        if (!board_hw_valid(probe, why, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi())) {
+            diag_printf("config: persisted board hardware rejected (%s; led=%d type=%d btn=%d) "
+                        "— using build defaults\n", why.c_str(), c.led_gpio, c.led_type, c.btn_gpio);
+            seed_board_defaults(c);
+            probe = c;
+            probe.rx_pin = probe.tx_pin = -1;
+            // A build whose OWN defaults don't validate is a misconfigured Kconfig, not user input.
+            // Disable both rather than drive a pin that just failed the safety rule twice.
+            if (!board_hw_valid(probe, why, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi())) {
+                diag_printf("config: build board defaults also rejected (%s) — indicator + button off\n",
+                            why.c_str());
+                c.led_gpio = -1;
+                c.btn_gpio = -1;
+            }
+        }
     }
     // "" (either no ntp_server yet, or an explicit empty save via POST /set_ntp) falls back to the
     // Kconfig default — unlike syslog_host, an empty ntp_server is not a disabled state to preserve.
@@ -107,7 +172,7 @@ void config_load() {
     // /set_hp (flash/strapping/JTAG pad) is not silently re-tried every boot into a crash loop, and
     // /status never reports an unconfigurable link as fact. Not re-persisted: poll_detect writes the
     // winning pins back once the bus answers; until then the line below repeats each boot.
-    if (!link_pins_safe(c.rx_pin, c.tx_pin, hw_octal_spi(), hw_status_led_gpio(),
+    if (!link_pins_safe(c.rx_pin, c.tx_pin, hw_octal_spi(), config_reserved_pins(c),
                         SOC_GPIO_PIN_COUNT - 1)) {
         diag_printf("config: persisted X10A pins rejected (rx=%d tx=%d) — using build defaults %d/%d\n",
                     c.rx_pin, c.tx_pin, CONFIG_DAIKIN_RX_PIN, CONFIG_DAIKIN_TX_PIN);
@@ -156,6 +221,12 @@ bool config_save(const Config& c) {
     b.wifi_rollback_active = c.wifi_rollback_active; b.wifi_rolled_back = c.wifi_rolled_back;
     b.mqtt_uri = c.mqtt_uri;   b.mqtt_user = c.mqtt_user;   b.mqtt_pass = c.mqtt_pass;
     b.syslog_host = c.syslog_host; b.syslog_port = c.syslog_port; b.ntp_server = c.ntp_server;
+    // Board-local hardware rides the same atomic blob: like the credentials it has exactly ONE
+    // writer (the httpd task, POST /set_board), so it needs no self-healing per-key treatment — and
+    // being in the blob is what makes "save the indicator pin" all-or-nothing rather than a pin
+    // written without its polarity.
+    b.led_gpio = c.led_gpio; b.led_type = c.led_type; b.led_inverted = c.led_inverted;
+    b.btn_gpio = c.btn_gpio; b.btn_active_low = c.btn_active_low;
     const std::vector<uint8_t> blob = config_blob_serialize(b);
 
     const esp_err_t e = nvs_set_blob("cfg", blob.data(), blob.size());
@@ -226,14 +297,6 @@ bool hw_octal_spi() {
     return true;
 #else
     return false;
-#endif
-}
-
-int hw_status_led_gpio() {
-#if CONFIG_DAIKIN_STATUS_LED_ENABLE
-    return CONFIG_DAIKIN_STATUS_LED_GPIO;   // already -1 if the user disabled it in menuconfig
-#else
-    return -1;
 #endif
 }
 
