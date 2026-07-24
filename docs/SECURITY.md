@@ -14,8 +14,10 @@ and the OTA-signing / key lifecycle.
   reachable at boot, the device falls back to an unauthenticated `WIFI_AUTH_OPEN` SoftAP
   (`daikin-altherma-esp32-setup`) so WiFi can be entered from a phone — any radio client in range can
   associate with no credential. On that surface the HTTP server registers **only** `GET /`,
-  `GET /index.html`, `GET /scan` and `POST /set_wifi` (plus the captive catch-all, which serves the
-  setup page). The full read/config/OTA/MCP API — including `/coredump` and `/diag`, which can carry
+  `GET /index.html` and `POST /set_wifi` (plus the captive catch-all, which serves the setup page).
+  `GET /scan` is withheld too: the portal takes the SSID as free text and never scans, so nothing is
+  lost by not handing an unauthenticated radio client a survey of every AP in range (SSIDs + RSSI —
+  a location fingerprint). The full read/config/OTA/MCP API — including `/coredump` and `/diag`, which can carry
   WiFi/MQTT secrets — is **withheld** on the AP and registered only once the device is on the
   configured STA network (the trusted LAN). So a nearby client can join the device to WiFi but cannot
   read a core dump, read live state, or reconfigure it. The boundary is one host-tested policy

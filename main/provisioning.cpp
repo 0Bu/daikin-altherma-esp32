@@ -1,7 +1,7 @@
 // Captive setup portal: SoftAP "daikin-altherma-esp32-setup" so WiFi can be entered from a phone.
-// This file brings up the SoftAP + a captive-portal DNS; the setup page (setup.html), /scan and
-// /set_wifi are served by the ONE shared :80 server (http_server.cpp / http_status.cpp), which
-// serves setup.html while unprovisioned. Running a second httpd here would collide on port 80
+// This file brings up the SoftAP + a captive-portal DNS; the setup page (setup.html) and /set_wifi
+// are served by the ONE shared :80 server (http_server.cpp / http_status.cpp), which serves
+// setup.html while unprovisioned. Running a second httpd here would collide on port 80
 // (EADDRINUSE). See provisioning.hpp.
 #include "provisioning.hpp"
 #include "captive_dns.hpp"
@@ -33,14 +33,11 @@ static void offer_self_as_dns() {
 void provisioning_start_ap() {
     ESP_ERROR_CHECK(esp_netif_init());
     esp_netif_create_default_wifi_ap();
-    // A STA netif too, and APSTA mode below: the setup page's network dropdown is filled by GET /scan
-    // -> wifi_scan() -> esp_wifi_scan_start(), which needs a STARTED station interface. In AP-only mode
-    // the scan fails, so the dropdown ALWAYS collapsed to a free-text SSID box (setup.html's fallback)
-    // — the picker was effectively dead in the only context it runs. APSTA keeps the SoftAP serving the
-    // portal while the STA interface (idle — never given credentials or told to connect here, it exists
-    // only so the radio can scan) makes the scan work. Scanning briefly hops channels, a tolerable blip
-    // for the associated phone during a one-time setup.
-    esp_netif_create_default_wifi_sta();
+    // AP-ONLY, deliberately. An earlier version ran APSTA with an idle station interface for one
+    // reason: esp_wifi_scan_start() needs a STARTED STA, and the setup page filled its SSID dropdown
+    // from GET /scan. The portal now takes the SSID as free text and never scans, so that interface
+    // (and the channel-hopping blip a scan inflicts on the associated phone) buys nothing — and
+    // AP-only keeps the open radio to exactly the one job it has here.
     wifi_init_config_t ic = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&ic));
 
@@ -49,14 +46,14 @@ void provisioning_start_ap() {
     ap.ap.ssid_len       = strlen("daikin-altherma-esp32-setup");
     ap.ap.max_connection = 4;
     ap.ap.authmode       = WIFI_AUTH_OPEN;
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
     ESP_ERROR_CHECK(esp_wifi_start());
 
     offer_self_as_dns();
     captive_dns_start();   // resolves every lookup to 192.168.4.1 -> captive-portal auto-popup
     ESP_LOGI(TAG, "setup AP 'daikin-altherma-esp32-setup' up (http://192.168.4.1)");
-    // HTTP (setup.html + /scan + /set_wifi + captive catch-all) is served by http_start().
+    // HTTP (setup.html + /set_wifi + captive catch-all) is served by http_start().
 }
 
 } // namespace daik

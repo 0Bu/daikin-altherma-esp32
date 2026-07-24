@@ -138,8 +138,9 @@ marketing}}` (drives the dashboard ESP32 board card + the read-only model card).
 ## 5. View specs
 
 ### 5.0 Provision (captive portal, `setup.html`)
-Standalone, `--brand-tint` hero + one card. Only WiFi. Network dropdown from `GET /scan` (ssid · dBm),
-password, **Save & reboot** → `POST /set_wifi`. Message line for scan/save state. No other controls.
+Standalone, `--brand-tint` hero + one card. Only WiFi. SSID as a **typed** text field (no scan, no
+dropdown — a hidden network is entered exactly like a visible one, and the page fetches nothing),
+password, **Save & reboot** → `POST /set_wifi`. Message line for save state. No other controls.
 On reboot the device joins STA and the main UI takes over. (This is the pre-WiFi world; the SoftAP
 serves only this page.)
 

@@ -61,9 +61,9 @@ static std::string jstr(const std::string& s) { return json_quote(s); }
 // WiFi is not yet configured. Otherwise serve the full dashboard web UI.
 static esp_err_t h_index(httpd_req_t* req) {
     wifi_mode_t mode = WIFI_MODE_NULL;
-    // The setup portal runs in APSTA now (provisioning.cpp brings up a STA interface so /scan works),
-    // so BOTH AP and APSTA mean "serve the setup page". The normal STA path uses WIFI_MODE_STA only,
-    // so APSTA never occurs during normal operation — matching it here can't hide the dashboard.
+    // The setup portal runs AP-only (provisioning.cpp); APSTA is matched too because it is never the
+    // normal operating mode (the STA path sets WIFI_MODE_STA), so any mode carrying a live SoftAP
+    // means "serve the setup page" — matching it here can't hide the dashboard.
     if (esp_wifi_get_mode(&mode) == ESP_OK && (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA)) {
         return http_send_gzip(req, "text/html", setup_html_gz_start, setup_html_gz_end);
     }
@@ -592,10 +592,10 @@ void http_register_status(httpd_handle_t s, HttpSurface surface) {
         s_ws_mtx = xSemaphoreCreateMutex();
         if (!s_ws_mtx) ESP_LOGE("http", "WS broadcast mutex alloc failed — /events live push disabled");
     }
-    // Provisioning surface (served on the open setup AP too): the setup page + the SSID scan.
+    // Provisioning surface (served on the open setup AP too): the setup page, nothing else. The
+    // portal takes a TYPED SSID, so /scan is NOT part of it (see logic/http_surface.hpp).
     http_register_on(s, surface, "/", HTTP_GET, h_index);
     http_register_on(s, surface, "/index.html", HTTP_GET, h_index);
-    http_register_on(s, surface, "/scan", HTTP_GET, h_scan);
 
     // Everything below is trusted-LAN only — withheld from the open setup AP (F01). /diag and
     // /coredump can carry WiFi/MQTT secrets; /status/values/events/models expose live device state.
@@ -603,6 +603,7 @@ void http_register_status(httpd_handle_t s, HttpSurface surface) {
 
     http_register(s, "/status", HTTP_GET, h_status);
     http_register(s, "/values", HTTP_GET, h_values);
+    http_register(s, "/scan", HTTP_GET, h_scan);
 
     httpd_uri_t ws_uri = {};
     ws_uri.uri          = "/events";

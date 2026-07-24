@@ -76,9 +76,9 @@ nvs_storage.cpp     → thin NVS helpers (namespaces, blobs, migration); setters
                        are [[nodiscard]] — a dropped write is silent (compare to ESP_OK, not bool)
 http_server.cpp     → esp_http_server :80, wildcard dispatch; concerns register their own routes.
                       Picks the trust surface from the WiFi mode (esp_wifi_get_mode): the OPEN setup
-                      AP registers ONLY the provisioning routes (GET / , /index.html, /scan, POST
-                      /set_wifi + captive), withholding /coredump, /diag, config/OTA/MCP from an
-                      unauthenticated radio client; the STA (trusted LAN) registers the full API.
+                      AP registers ONLY the provisioning routes (GET / , /index.html, POST
+                      /set_wifi + captive), withholding /scan, /coredump, /diag, config/OTA/MCP from
+                      an unauthenticated radio client; the STA (trusted LAN) registers the full API.
                       Boundary = host-tested logic/http_surface.hpp (F01)
 http_common.cpp     → shared HTTP helpers + the single OOM guard: http_register() stashes the real
                       handler in user_ctx and installs the handle_all trampoline, which calls it
@@ -94,10 +94,9 @@ http_ota.cpp        → /ota/check|update|status
 mcp_server.cpp      → /mcp — read-only MCP tools (get_status, get_hp_values) for AI agents — PLANNED
                       (route exists; returns a JSON-RPC "not implemented" error for now)
 provisioning.cpp    → captive setup portal (SoftAP daikin-altherma-esp32-setup) when no WiFi.
-                      Runs APSTA, not AP: esp_wifi_scan_start() needs a STARTED station interface,
-                      so in AP-only mode GET /scan always failed and the portal's SSID dropdown
-                      always degraded to setup.html's free-text fallback. The STA side is idle —
-                      created and started only so the radio can scan, never given credentials
+                      Runs AP-only: the portal takes the SSID as free text and never scans, so it
+                      needs no station interface (esp_wifi_scan_start() would — an earlier version
+                      ran APSTA with an idle STA purely to feed the page's since-removed dropdown)
 captive_dns.cpp     → UDP:53 catch-all (every name → 192.168.4.1) so the setup portal auto-pops
 mqtt_ha.cpp/.hpp    → Home Assistant MQTT-Discovery bridge (streamed discovery), read-only
 ota_update.cpp      → OTA: manifest check + esp_https_ota download + the two-point downgrade
@@ -196,10 +195,13 @@ host-testable core is unusually large and valuable, because the risky parts are 
   MQTT state, heartbeat and crash topics. It escapes `"`, `\` and **every** control byte below 0x20 (`\b\f\n\r\t`, else `\u00XX`),
   while passing raw UTF-8 through untouched. Not a detail: the strings it encodes are not all ours —
   an SSID is arbitrary bytes chosen by any AP in radio range, and escaping only `"` and `\` (as this
-  did before) let an AP named `Free<LF>WiFi` emit a raw newline inside a JSON string, so `GET /scan`
-  failed `JSON.parse` and collapsed the setup portal's network dropdown to a free-text box for every
-  user. This sits *beneath* the portal's DOM-node SSID escaping (issue #52, fixed in #65) and is
-  orthogonal to it: that fix stops hostile SSID *markup* from being interpolated, while this one
+  did before) let an AP named `Free<LF>WiFi` emit a raw newline inside a JSON string, so the whole
+  response failed `JSON.parse`. That first broke the setup portal, which parsed `GET /scan` to fill
+  an SSID dropdown; the portal now takes a **typed** SSID and fetches nothing, but the same bytes
+  still arrive through `/status.wifi.ssid` (the associated AP names itself) and `/scan`, where one
+  bad field takes down the entire response. This sits *beneath* the DOM escaping of a rendered SSID
+  (issue #52, fixed in #65) and is orthogonal to it: that fix stops hostile SSID *markup* from being
+  interpolated, while this one
   only guarantees the bytes **parse** — an SSID of `"><script>` is already valid JSON here, and a
   body that fails `JSON.parse` never reaches those DOM nodes at all. Pure, so each control char is
   asserted host-side, including the signed-`char` trap that would otherwise mangle a non-ASCII SSID.
@@ -313,7 +315,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
   a bad config with it.
 - `logic/http_surface.hpp` — the HTTP trust-surface boundary (F01). `http_surface_serves(surface,
   path, is_post)` says which routes each surface exposes: on the trusted STA LAN, everything; on the
-  OPEN setup AP, ONLY `GET /`, `/index.html`, `/scan` and `POST /set_wifi`. `http_start()` picks the
+  OPEN setup AP, ONLY `GET /`, `/index.html` and `POST /set_wifi` — `/scan` included in what is
+  withheld, since the portal takes a typed SSID and an open radio has no reason to be handed a
+  survey of every AP in range. `http_start()` picks the
   surface from the WiFi mode and every concern registers through `http_register_on()`, so `/coredump`,
   `/diag` and the config/OTA/MCP routes never exist on the unauthenticated radio. Host-tested so the
   allow-list is asserted, not re-derived per file.
