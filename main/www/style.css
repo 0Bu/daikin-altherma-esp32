@@ -50,19 +50,21 @@ a:hover { color: var(--brand-strong); }
 }
 main { flex: 1; }
 
-/* ── Header (dashboard — the only screen) ─────────────────────────────────── */
+/* ── Headers (dashboard + the back header of Settings and its sub-screens) ──── */
 .hdr { padding: 16px 18px; }
-.hdr-dash {
+.hdr-dash, .hdr-back {
   display: flex; align-items: center; gap: 12px;
   position: sticky; top: 0; z-index: 6; background: var(--bg); padding-bottom: 10px;
 }
+.hdr-back { border-bottom: 1px solid var(--line); }
+.hdr-title { font-size: 18px; font-weight: 650; letter-spacing: -.2px; color: var(--fg); }
 .hdr-name {
   font-size: 19px; font-weight: 650; letter-spacing: -.2px; color: var(--fg); line-height: 1.2;
 }
 .hdr-id { flex: 1; min-width: 0; }
 /* Meta line under the product name: IP address (or the mDNS hostname while offline) · firmware
    version · inline OTA status. Board identity, not WiFi-row facts, so it lives in the header rather
-   than the Connections tile below. Only the IP may ellipsise — the version and the OTA readout are
+   than on the Connections tile in Settings. Only the IP may ellipsise — the version and the OTA readout are
    short and fixed-width-ish, and truncating THOSE would hide the number the user is watching. */
 .hdr-meta {
   display: flex; align-items: center; min-width: 0; margin-top: 2px;
@@ -92,6 +94,23 @@ main { flex: 1; }
 .otastat.err { color: var(--err); }
 .otaspin { animation: otaspin .9s linear infinite; transform-origin: 50% 50%; }
 @keyframes otaspin { to { transform: rotate(360deg); } }
+
+/* ── Icon buttons (header gear + back chevron) ─────────────────────────────── */
+.iconbtn {
+  position: relative; flex: none; display: grid; place-items: center; cursor: pointer;
+  border: 0; background: var(--soft); color: var(--fg);
+  width: 34px; height: 34px; border-radius: 50%; padding: 0;
+}
+.iconbtn.bordered { background: var(--card); border: 1px solid var(--line); width: 38px; height: 38px; }
+.iconbtn:hover { color: var(--brand-strong); }
+.iconbtn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
+/* Attention marker on the gear: a connection row is DOWN. The rows themselves live behind the gear
+   now, so this is the dashboard's only sign of it — the button's aria-label carries the same fact
+   in words, so the dot is never the sole carrier (DESIGN.md §9). */
+.iconbtn-dot {
+  position: absolute; top: -1px; right: -1px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--err); border: 2px solid var(--bg);
+}
 
 /* logo mark: rounded brand square holding the "waves" glyph */
 .logo {
@@ -245,12 +264,20 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .no-pth #gPth { display: none; }
 .no-thermo #gThermo { display: none; }
 
-/* ── Connections tile (dashboard, WiFi · MQTT · Syslog · NTP combined) ─────────────────────── */
-/* Full width like the system card and every #valueGroups card — the whole dashboard is one column
-   (§9 of docs/DESIGN.md). */
+/* ── Settings screen (behind the header gear) ─────────────────────────────────
+   Holds the Connections tile + the ESP32 card, both exactly as they were built for the dashboard
+   (same .card / .conn-tile shells, one column, §9 of docs/DESIGN.md) — the gear changed WHERE the
+   config lives, not what it looks like. */
+#settingsCards { margin-top: 12px; }
+.footer-ver {
+  font-size: 12.5px; color: var(--muted); text-align: center; margin: 20px 0 0;
+  font-family: var(--font-mono);
+}
+
+/* ── Connections tile (Settings, WiFi · MQTT · Syslog · NTP combined) ──────────────────────── */
 .conn-tile {
   background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card);
-  box-shadow: var(--shadow-card); padding: 18px; margin-top: 12px;
+  box-shadow: var(--shadow-card); padding: 18px;
 }
 .conn-tile .section-label { display: block; margin-bottom: 4px; }
 .conn-row {
@@ -450,8 +477,8 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .toast.ok .disc { background: var(--ok); } .toast.err .disc { background: var(--err); }
 @keyframes tin { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
-/* Single column at every width (DESIGN.md §9): every card — the system card, the Connections tile
-   and each value group — is the same full container width, stacked top-down. (An earlier ≥560px two-column
+/* Single column at every width (DESIGN.md §9): every card — the system card, each value group and
+   the Connections/ESP32 cards behind the gear — is the same full container width, stacked top-down. (An earlier ≥560px two-column
    multicol packed the value cards into two columns; it left an empty second column — with a stray
    card shadow at the column gap — whenever only the ESP32 card showed, e.g. while the heat-pump link
    is down.) */
@@ -465,6 +492,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   body { font-size: 17px; }
   .hdr-name { font-size: 22px; }
   .hdr-meta { font-size: 14.5px; }
+  .hdr-title { font-size: 20px; }
   .section-label, .conn-label { font-size: 13.5px; }
   .conn-val, .vrow-val, .vname { font-size: 17px; }
   .conn-dbm, .vrow-label { font-size: 16.5px; }

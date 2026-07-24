@@ -14,12 +14,17 @@ page lives outside the firmware and cannot include `main/www/style.css`, so its 
 
 ## 1. Principles
 
-1. **One screen.** After provisioning, the app is a single dashboard — there is **no Settings page
-   and no sub-screens**. Everything the device exposes lives on that one page; the little config
-   there (WiFi, MQTT, Syslog and NTP via modals, RX/TX pins inline) happens in place.
+1. **Two screens: the plant, and the box.** After provisioning the app opens on the **dashboard**,
+   which is the heat pump — the live schematic, the detected model, every reading. The header
+   **gear** opens **Settings**, which is the ESP32 and what it talks to: the Connections tile
+   (WiFi/MQTT/Syslog/NTP) and the ESP32 board card (firmware/OTA, uptime, heap, X10A link, RX/TX
+   pins, board hardware). Nothing sits between the gear and those cards — Settings is **flat**, no
+   menu of entries to tap through, because there is little enough of it that a menu would exist only
+   to hide a card behind a second tap. Settings still reports forward: a link that is **down** marks
+   the gear (§5.6), so putting a card behind it hides the controls, never the failures.
 2. **Provision, then run.** WiFi credentials are entered first on the captive portal (`setup.html`);
    the device reboots into your network and the app opens on the dashboard. They stay re-editable
-   later from the dashboard Connections tile's WiFi row (§5.1, with automatic rollback on a bad
+   later from Settings › Connections › WiFi (§5.1, with automatic rollback on a bad
    change). The heat pump is fully automatic (auto-detected), so there is nothing to configure for it.
 3. **Read-only truth.** The dashboard reflects the device; it never blocks on writes. The few writes
    (WiFi credentials, MQTT broker, Syslog server, NTP server, RX/TX pins) are explicit and report
@@ -96,11 +101,9 @@ Theme follows `prefers-color-scheme`; both light and dark are first-class (token
 The SPA subscribes to the `/events` WebSocket (sends `"sub"`, then receives pushed `status`/`values`
 frames) — this is the **only** live transport, there is no HTTP polling. A browser without WebSocket
 loads a one-time `GET /status`/`GET /values` snapshot and the user reloads the page to refresh. Once
-the device is on the network the app opens on the
-**dashboard** and never leaves it — there are **no sub-screens and no Settings page**. In-place config
-is the WiFi credentials, the MQTT broker, the Syslog server and the NTP server (each a **modal** off
-its row in the dashboard **Connections tile**, §5.3) plus the RX/TX pins (inline on the ESP32 card).
-The heat pump is otherwise **fully automatic** (auto-detected).
+the device is on the network the app opens on the **dashboard** and stays there unless the user asks
+for **Settings** (the header gear, §5.6). That is the whole navigation tree — two screens, one way
+back (the header chevron, or `Esc`):
 
 ```
                     ┌─────────────── served from SoftAP (192.168.4.1) ───────────────┐
@@ -109,15 +112,29 @@ The heat pump is otherwise **fully automatic** (auto-detected).
                                                  │ device reboots into STA
    GET /status on the device (STA) →  view:
         wifi.ip == none ............... (shouldn't happen on STA; show "reconnecting")
-        otherwise ..................... VIEW: Dashboard (the only screen)
+        otherwise ..................... VIEW: Dashboard  ──── gear ────▶  Settings (§5.6)
+                                                          ◀── chevron ──   · Connections tile
+                                                                              └─ row ─▶ modal (§5.1)
+                                                                           · ESP32 card
+                                                                              └─ Hardware ─▶ modal
 ```
 
-- There is **no in-app first-run wizard** and **no Settings page**: WiFi is provisioned first from the
-  captive `setup.html` (§5.0) and thereafter re-editable from the WiFi row's pencil in the dashboard
-  **Connections tile** (§5.1, with automatic rollback to the last working network if the new
-  credentials fail), the MQTT broker is edited from that same tile's MQTT row (§5.1), the heat pump
-  needs no setup (auto-detected; RX/TX pins on the dashboard ESP32 card, §5.3), and firmware updates
-  are checked by tapping the version in the header meta line (§5.4).
+There is **no routing and no history integration**: the screen is app state, not a URL. The page is
+served from the device with no paths, and a hash route would survive a reload into a screen the user
+did not ask to be on.
+
+The **dashboard** carries no config at all. Every write lives on **Settings** (§5.6): the WiFi
+credentials, MQTT broker, Syslog and NTP servers are a **modal** off their row on the Connections
+tile, and the RX/TX pins + board hardware are on the ESP32 card there. The one dashboard control
+that isn't a reading is the **firmware version** in the header, which triggers the OTA check (§5.4).
+The heat pump is otherwise **fully automatic** (auto-detected).
+
+- There is **no in-app first-run wizard**: WiFi is provisioned first from the
+  captive `setup.html` (§5.0) and thereafter re-editable from the gear → Connections → WiFi
+  (§5.1, with automatic rollback to the last working network if the new
+  credentials fail), the MQTT broker from the same tile's MQTT row (§5.1), the heat pump
+  needs no setup (auto-detected; RX/TX pins on the ESP32 card in Settings, §5.6), and firmware
+  updates are checked by tapping the version in the header meta line (§5.4).
 - MQTT is optional — an empty broker disables it.
 
 `GET /status` exposes the fields the dashboard keys off:
@@ -130,7 +147,7 @@ undone by the credential rollback — sticky until the next one; drives the roll
 checkbox),
 `hp{proto,rx,tx,connected,last_ok_s,…}`, `profile{id}`,
 `sys{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode}` (heap headroom + last boot reason,
-always present — feeds the ESP32 card's Last-reset and Free-heap rows),
+always present — feeds the Settings ESP32 card's Last-reset and Free-heap rows),
 `last_crash` (`null` on a clean boot, else `{reason,reason_code,fault,coredump,task,pc,backtrace[],
 corrupted,elf_sha256}` — drives the crash banner),
 `detect{proto,valid,capacity_kw,ou_eeprom,candidates[],families[],ambiguous,model{name,family,
@@ -158,12 +175,12 @@ are built as DOM nodes (`createElement` + `.value`/`.textContent`, which never p
 than concatenated into `innerHTML`. Every network-derived string on this page must stay on a
 DOM/`textContent` path — it is served standalone in AP mode and has no `esc()` helper.
 
-### 5.1 WiFi / MQTT / Syslog / NTP edit  (modal, from the dashboard Connections tile)
-The dashboard's **Connections tile** (§5.3) combines WiFi, MQTT, Syslog and NTP into one row each;
+### 5.1 WiFi / MQTT / Syslog / NTP edit  (modal, from the Connections tile)
+The **Connections tile** on Settings (§5.6) combines WiFi, MQTT, Syslog and NTP into one row each;
 every row carries a trailing **pencil** and the whole row is tappable, opening a centred **modal**
-over a dimmed dashboard. These are the four rows edited this way, and they share the identical
+over the dimmed screen. These are the four rows edited this way, and they share the identical
 overlay pattern (Cancel / backdrop / `Esc` dismiss without writing; Save reboots to apply, then closes
-back to the dashboard). The forms:
+back to Settings — `Esc` closes the modal only, never also the screen behind it). The forms:
 - **WiFi**: SSID (required, 1–32 chars) + password (empty for an open network, else 8–63 chars),
   validated both in the UI and by `POST /set_wifi`. Only the SSID prefills (the password is never
   exposed by `/status`). **Save** → `POST /set_wifi` (persist + reboot). If WiFi was already
@@ -205,12 +222,12 @@ Actions row at the bottom: Cancel (secondary) + Save (brand).
 ### 5.2 Heat pump — no settings screen (fully automatic)
 The heat pump has **no configuration screen**. The model is **auto-detected** from the X10A bus
 (`/status.detect`) — there is no manual model picker, no protocol control, no value checklist, and
-no poll-interval control (poll is fixed at 1 s). Everything the user might want to see or touch lives
-on the **dashboard**:
+no poll-interval control (poll is fixed at 1 s). What there is to see or touch is split the way
+everything else is — what the *unit* is on the dashboard, what the *board* is in Settings:
 - **Model** name (the brand while offline) and detected capacity (shown only while the link is live)
   → the dashboard **Model** card (§5.3). There is no "auto-vs-manual detection" indicator.
-- **X10A link** (Online/Offline), **protocol** (X10A-I/S) and the **RX/TX pins** → the dashboard
-  **ESP32** card (§5.3). The RX/TX pins are the physical X10A link, so they are **persisted** (a
+- **X10A link** (Online/Offline), **protocol** (X10A-I/S) and the **RX/TX pins** → the **ESP32**
+  card in Settings (§5.6). The RX/TX pins are the physical X10A link, so they are **persisted** (a
   manual pick survives reboot) and the detection sweep tries the cached pair first (defaults as
   fallback, so a stale cache self-heals). RX/TX are **auto-detected**: while the bus answers they show
   **read-only** (just the number). When it doesn't, each becomes a **dropdown** of the chip's safe
@@ -218,9 +235,9 @@ on the **dashboard**:
   never appear); picking a pin posts `{profile:"auto", rx, tx}`, which re-runs detection on the chosen
   pair (+ its swap) next cycle. The current pin is always in its own list even if off-catalogue.
 
-### 5.3 Dashboard — the only screen  (default after setup)
+### 5.3 Dashboard — the operating screen  (default after setup)
 Header (an **outdoor-unit icon** — a fan + louvered condenser, the brand mark across the app — then
-the **product name**). There is **no settings gear** — the app has no other screen.
+the **product name**, then the **settings gear** on the right, the one way off this screen, §5.6).
 
 - **Product name** (headline line): the fixed title **`daikin-altherma-esp32`** — a stable app
   identity, not the detected model. Spelled in full lower-case exactly like
@@ -230,7 +247,7 @@ the **product name**). There is **no settings gear** — the app has no other sc
 - **Meta line** (under the name): **IP address · firmware version · inline OTA status**. The IP is
   `wifi.ip`, falling back to the browser's own `location.hostname` (e.g. the mDNS name) while it is
   empty — board identity, not a WiFi *link* fact, so it lives here rather than in the Connections
-  tile's WiFi row (§5.3 item 4). The **version** (`version`) sits beside it as a button: tapping it
+  tile's WiFi row (§5.6). The **version** (`version`) sits beside it as a button: tapping it
   checks for an OTA update, and the whole check/download reports back **in this line**, right next to
   the number it is about (§5.4). Both stay `--muted`: an available update is announced by the
   confirm dialog, not by colouring the header, and the version picks up the brand tint only on
@@ -247,13 +264,13 @@ Body, ordered:
 0. **Recovery-mode banner** (only when `sys.safe_mode` is true). A `--warn`-accented card **above the
    system card**: title "Recovery mode", explaining that the device restarted too many times and came up
    minimally (heat-pump polling and MQTT paused), and to correct the configuration (e.g. the RX/TX
-   pins on the ESP32 card) and reboot. **Not dismissible** — it reflects a live state and clears
+   pins on the ESP32 card in Settings) and reboot. **Not dismissible** — it reflects a live state and clears
    itself once a healthy reboot leaves safe mode. Lives outside the poll-rebuilt card grid.
 0. **WiFi-rollback banner** (only when `wifi.rolled_back` is true). A `--warn`-accented card **above
    the system card**: title "WiFi change failed — rolled back", explaining that the new credentials couldn't
    connect, so the device restored the previous network (named from `wifi.ssid`, which after the
-   rollback *is* the network it fell back to) and restarted, and to open the Connections tile's WiFi
-   row to try again.
+   rollback *is* the network it fell back to) and restarted, and to open Settings › Connections ›
+   WiFi to try again.
    This cannot be a toast on the save flow: the device takes 60–180 s to reach the rollback verdict
    (§5.1) — far past the save's ~21 s reconnect poll — so the outcome almost always lands after the
    user has reloaded. **Not dismissible**: the marker is sticky until the next `/set_wifi` retires it,
@@ -349,7 +366,7 @@ Body, ordered:
    components ("Running — compressor at 62 rps.", "Paused — the valve is feeding the hot-water tank
    right now."), the **explainer** (what it is, and `Normal:` guidance where useful), and the
    **member readings** of that component as a compact label→value list.
-   The explainer copy comes from the **same `DESCRIPTIONS` table** the value rows use (§5.3 item 6) —
+   The explainer copy comes from the **same `DESCRIPTIONS` table** the value rows use (§5.3 item 5) —
    one source for "what does this mean", never a second parallel one. A value target resolves it
    through a canonical register label rather than the live one, so a profile's own spelling cannot
    drift onto a neighbouring entry. Component copy (outdoor unit, PHE, ΔT, heat output, heating
@@ -362,52 +379,14 @@ Body, ordered:
    **There is no trend/history card.** The firmware stores no history and a browser-side ring buffer
    is lost on every reload, so a 30-minute sparkline could never answer a question a person actually
    has — long-term analysis belongs to Home Assistant/Grafana, which hold the real series.
-4. **Connections tile** — one full-width card below the live section. Combines **WiFi**, **MQTT**,
-   **Syslog** and **NTP** into one row each: a label on the left,
-   a single colour-coded value on the right (`--ok` connected/synced/enabled, `--warn`
-   connecting/syncing/unreachable-but-forwarding, `--err` down/disabled-by-error), and a trailing
-   **pencil** — the whole row is tappable and opens that link's edit modal (§5.1). The value itself
-   *is* the address/name (not a separate "Connected" word next to it), matching MQTT/Syslog/NTP's
-   `host:port`/server display; because that means state is conveyed by colour alone on the row's
-   face, each row's accessible name (`aria-label`) spells the status out in words for screen readers
-   and colourblind users, satisfying §9's "status never conveyed by colour alone" without changing
-   the visual design. MAC and BSSID are **not shown anywhere** (bus-level detail nobody edits from
-   here); the IP address lives in the header instead (§5.3 body, above), not on this tile.
-   - **WiFi** — label is the PHY standard name (e.g. "WI-FI 4"); value is signal bars + RSSI dBm +
-     the SSID, coloured `--ok` while connected or plain **Offline** in `--err` otherwise (there is no
-     "connecting" state in `/status.wifi`, just `connected: true/false`) — from
-     `wifi{ssid,rssi,connected,std}`.
-   - **MQTT** — **Disabled** (neutral, no colour) when no broker is set; else the **broker** string
-     itself coloured `--ok` (Connected) / `--warn` (Connecting…) / `--err` (Error) — from
-     `mqtt{configured,connected,broker,error}`. There is **no** TLS padlock marker: an `mqtts://`
-     broker already shows its scheme in the URL, so the icon only restated the string (`mqtt.tls` is
-     therefore unused by the UI). There is also **no** "HA discovery" row: discovery is streamed
-     unconditionally on every (re)connect, so a row saying so would carry no information.
-   - **Syslog** — **Disabled** (neutral) when no host is set; else `host:port` coloured `--ok` once
-     DNS resolves and the advisory reachability probe answers, `--warn` while resolving or when the
-     probe is silent (still forwarding — delivery is gated on DNS only), `--err` on a DNS error —
-     from `syslog{configured,resolved,reachable,host,port,error}`.
-   - **NTP** — the configured **server**, coloured `--ok` once the first SNTP reply of this boot has
-     landed, else `--warn` (there is no "Disabled" state — SNTP always has a configured server) —
-     from `ntp{server,synced}`. Unlike the earlier per-card NTP layout, the synced wall clock
-     (`ntp.time`) is **not** shown on this row (no room in a one-line tile); it remains available via
-     the MQTT heartbeat's `device_time` sensor and `/status.ntp.time`.
-5. **Status cards** — two cards styled exactly like the value groups (§6), stacked full-width below
-   the Connections tile:
-   - **ESP32** — the board itself: chip (`platform`), uptime (`uptime_s`), **Last reset**
-     (`sys.reset_reason` — warn-coloured
-     on a fault reason: panic / any watchdog / brown-out, neutral on a clean boot) and **Free heap**
-     (`sys.free_heap`, compact e.g. "145 KB"), the heat-pump link (Online/Offline) and X10A
-     protocol, and the **RX/TX pins** — read-only when detected, else a usable-GPIO dropdown (§5.2).
-     From `platform`, `uptime_s`, `sys{reset_reason,free_heap}`, `pins_avail`,
-     `hp{proto,rx,tx,connected,last_ok_s}`. The **firmware version is not here** — it lives in the
-     header meta line (§5.3 header, §5.4), where it reads as board identity next to the IP rather
-     than as one row among the board's internals.
-   - **Model** — the model name (full-width heading) + detected capacity, from `detect{capacity_kw,
-     model}`. Both are bus-derived, so they show **only while the link is live** (`hp.connected`):
-     offline the name degrades to the brand "Daikin Altherma" and the capacity is hidden — never a
-     cached fingerprint read as live. There is **no** "Detection: auto/manual" row (fully automatic).
-6. **Value groups** (§6) as cards, each a label→value·unit table, tabular numbers; every value of the
+4. **Model card** — styled exactly like the value groups (§6), full-width below the live section:
+   the model name (full-width heading) + detected capacity, from `detect{capacity_kw,
+   model}`. Both are bus-derived, so they show **only while the link is live** (`hp.connected`):
+   offline the name degrades to the brand "Daikin Altherma" and the capacity is hidden — never a
+   cached fingerprint read as live. There is **no** "Detection: auto/manual" row (fully automatic).
+   The **ESP32** card that used to sit above it is in Settings now (§5.6): this card is the *unit*,
+   that one is the *board*.
+5. **Value groups** (§6) as cards, each a label→value·unit table, tabular numbers; every value of the
    detected profile is shown. A value that timed out this cycle shows "—" (not 0). The schematic
    answers "what is happening"; these tables stay as the exact-value reference — both read the same
    `/values` dataset.
@@ -426,15 +405,17 @@ Body, ordered:
      open instead of collapsing it every second; the click toggles the live element so the slide
      animates, and updates the set for the next rebuild.
 
-There is **no** health/badge strip: connectivity/identity lives in the Connections tile, the board in
-the ESP32/Model status cards, operation/fault in the schematic's own status block, and every card —
-system card, Connections tile, status cards and value groups — is the same full container width, stacked in one column (§9). The
-only setup control on this screen is the ESP32 card's RX/TX pins (§5.2); otherwise it is
-operation-only.
+There is **no** health/badge strip: connectivity and board identity live in Settings behind the gear
+(§5.6, which marks the gear when a link is down), operation/fault in the schematic's own status
+block, and every card — system card, Model card and value groups — is the same full container width,
+stacked in one column (§9). The dashboard carries **no setup control at all**; it is operation-only,
+and the gear is its only affordance that isn't a reading.
 
 ### 5.4 Firmware / OTA  (tap the version in the header)
-There is **no Settings page**. Firmware updates are triggered from the dashboard: the **version** in
-the header meta line (§5.3 header) is a button that checks for an OTA update.
+The one write that is **not** behind the gear: the **version** in the dashboard's header meta line
+(§5.3 header) is a button that checks for an OTA update. It stays on the dashboard because it is
+board *identity* — the number a user quotes in a bug report — and because the check reports its
+progress in that same line, where the page underneath stays readable.
 
 - **The status reports inline, in that same line** — a small progress ring plus a short label,
   immediately after the version (`#otaStat`): `192.0.2.159 · v1.2.3 ◔ 78%`. It is deliberately
@@ -486,8 +467,9 @@ the header meta line (§5.3 header) is a button that checks for an OTA update.
   or the two `CONFIG_DAIKIN_OTA_*` URLs point somewhere empty — a check legitimately
   finds nothing and says so. The UI does not distinguish "no newer version" from "no feed configured";
   both are honestly "up to date" from the device's point of view.
-- The **device log** is no longer surfaced in the UI (there was a Diagnostics screen; it was removed
-  with the Settings page). It remains available out-of-band at `GET /diag` (verbose/clear via query).
+- The **device log** is not surfaced in the UI (an early Diagnostics screen was dropped). It remains
+  available out-of-band at `GET /diag` (verbose/clear via query); a third card on Settings is where
+  it would go if it ever comes back.
 - There is **no manual language selector** — the UI language follows the browser (de / en), and the
   firmware itself ships no localized strings (§1).
 
@@ -536,6 +518,73 @@ block butted against the round CTA and steps cards below.
   beyond the PR-banner check. The divergence from the dashboard is **not** a gap to close — do not
   add a translation layer here to make the two consistent.
 
+### 5.6 Settings — the screen behind the gear (Connections + ESP32)
+The dashboard header's **gear** (right, `.iconbtn.bordered`) is the only way off the dashboard. It
+opens **Settings**, which swaps the dashboard header for a **back header** — a chevron plus the
+screen title. `Esc` leaves the same way, but only when no modal is open: a modal owns `Esc` first, so
+one key press never both closes a dialog and leaves the screen behind it.
+
+**Settings is flat.** No menu of entries, no sub-screens: the gear lands directly on the two cards,
+stacked in the same single column as everything else (§9). Both are the *same* cards they were on the
+dashboard — the move changed where the configuration lives, not how it looks:
+
+1. **Connections tile** — one full-width card, `--card` bordered like the value groups, titled
+   "Connections". Combines **WiFi**, **MQTT**, **Syslog** and **NTP** into one row each: a label on
+   the left, a single colour-coded value on the right (`--ok` connected/synced/enabled, `--warn`
+   connecting/syncing/unreachable-but-forwarding, `--err` down/disabled-by-error), and a trailing
+   **pencil** — the whole row is tappable and opens that link's edit modal (§5.1). The value itself
+   *is* the address/name (not a separate "Connected" word next to it), matching MQTT/Syslog/NTP's
+   `host:port`/server display; because that means state is conveyed by colour alone on the row's
+   face, each row's accessible name (`aria-label`) spells the status out in words for screen readers
+   and colourblind users, satisfying §9's "status never conveyed by colour alone" without changing
+   the visual design. MAC and BSSID are **not shown anywhere** (bus-level detail nobody edits from
+   here); the IP address lives in the dashboard header instead (§5.3 body).
+   - **WiFi** — label is the PHY standard name (e.g. "WI-FI 4"); value is signal bars + RSSI dBm +
+     the SSID, coloured `--ok` while connected or plain **Offline** in `--err` otherwise (there is no
+     "connecting" state in `/status.wifi`, just `connected: true/false`) — from
+     `wifi{ssid,rssi,connected,std}`.
+   - **MQTT** — **Disabled** (neutral, no colour) when no broker is set; else the **broker** string
+     itself coloured `--ok` (Connected) / `--warn` (Connecting…) / `--err` (Error) — from
+     `mqtt{configured,connected,broker,error}`. There is **no** TLS padlock marker: an `mqtts://`
+     broker already shows its scheme in the URL, so the icon only restated the string (`mqtt.tls` is
+     therefore unused by the UI). There is also **no** "HA discovery" row: discovery is streamed
+     unconditionally on every (re)connect, so a row saying so would carry no information.
+   - **Syslog** — **Disabled** (neutral) when no host is set; else `host:port` coloured `--ok` once
+     DNS resolves and the advisory reachability probe answers, `--warn` while resolving or when the
+     probe is silent (still forwarding — delivery is gated on DNS only), `--err` on a DNS error —
+     from `syslog{configured,resolved,reachable,host,port,error}`.
+   - **NTP** — the configured **server**, coloured `--ok` once the first SNTP reply of this boot has
+     landed, else `--warn` (there is no "Disabled" state — SNTP always has a configured server) —
+     from `ntp{server,synced}`. The synced wall clock (`ntp.time`) is **not** shown on this row (no
+     room in a one-line tile); it remains available via the MQTT heartbeat's `device_time` sensor and
+     `/status.ntp.time`.
+2. **ESP32 card** — the board itself, styled exactly like the value groups (§6): chip (`platform`),
+   uptime (`uptime_s`),
+   **Last reset** (`sys.reset_reason` — warn-coloured on a fault reason: panic / any watchdog /
+   brown-out, neutral on a clean boot) and **Free heap** (`sys.free_heap`, compact e.g. "145 KB"),
+   the heat-pump link (Online/Offline) and X10A protocol, the **RX/TX pins** — read-only when
+   detected, else a usable-GPIO dropdown (§5.2) — and the **Hardware** row (status indicator +
+   recovery-button pins), which opens the board-hardware modal. From `platform`,
+   `uptime_s`, `sys{reset_reason,free_heap}`, `pins_avail`, `hp{proto,rx,tx,connected,last_ok_s}`,
+   `board{…}`. The **firmware version is not here** — it stays in the dashboard header beside the IP
+   (§5.3 header, §5.4), where it reads as board identity rather than as one row among the board's
+   internals, and where the OTA readout has a line to report into.
+
+Under both, a `--muted` monospace footer line naming the product and running version.
+
+**The gear's attention dot** — an `--err` dot on the gear whenever a connection is **down**, since
+the Connections rows are no longer on the dashboard and a broker that stopped answering would
+otherwise be invisible from the screen the user is on all day. Only `--err` raises it: `--warn` is
+the transient half of the vocabulary (MQTT still connecting, NTP not yet synced, a syslog host that
+ignores ping) and every boot passes through it, so warning on warn would leave the gear permanently
+marked and the mark would stop meaning anything. A **disabled** link is a choice, not a fault, and
+raises nothing. The dot is never the only carrier: the button's `aria-label` states the count in
+words (§9).
+
+**Rebuild rule.** Both cards are rebuilt from `/status` on every push (uptime alone changes each
+second), so the write goes through the same change-guard the rest of the app uses — and the rebuild
+is skipped entirely while an RX/TX dropdown has focus, or the poll would collapse it mid-pick.
+
 ## 6. Dashboard value grouping & order
 
 Values are grouped by domain and ordered from "what is it doing" → detail. Grouping is derived from
@@ -549,9 +598,9 @@ the value's register/label (the generator can also stamp a `group` tag per row).
    refrigerant liquid temp, compressor speed, fan step.
 5. **Electrical** — INV primary current, INV compressor current, CT L1/L2/L3, backup-heater
    capacity + stages.
-6. **Device** — WiFi/MQTT/HP link, poll counters, uptime, firmware (WiFi/MQTT in the Connections tile,
-   §5.3 item 4; HP link/protocol and uptime on the ESP32 card §5.3; firmware version in the header
-   meta line §5.4; model name in the Model card).
+6. **Device** — WiFi/MQTT/HP link, poll counters, uptime, firmware (WiFi/MQTT and HP
+   link/protocol/uptime in Settings, §5.6 — the Connections tile and the ESP32 card; firmware
+   version in the dashboard's header meta line §5.4; model name in the Model card, §5.3 item 4).
 
 Within a group: setpoints next to their measured value; temperatures before pressures before
 currents. Units and `device_class` come from the value `dataType` (1=°C, 2=bar, 3=A). Groups with no
@@ -567,7 +616,7 @@ enabled/available values are hidden.
   rotates on open, revealing the description in its **own inset `--brand-tint` info box** — held in
   from the row edges with a gap above/below, so the rows read as parting to make room for it rather
   than the row growing taller. Bold `--fg` "Normal:" lead-in on `--muted` body; slides down via a
-  `grid-template-rows: 0fr→1fr` transition (§5.3 item 6). Unrecognised labels render as a plain,
+  `grid-template-rows: 0fr→1fr` transition (§5.3 item 5). Unrecognised labels render as a plain,
   non-interactive row.
 - **Card** — `--card`, 1px `--line`, radius 12; section title small-caps `--muted`.
 - **Toast** — bottom-centre, transient, for Save outcomes ("Saved", "Rebooting…", "Failed"). Note it
@@ -598,7 +647,10 @@ enabled/available values are hidden.
   heat output + COP), and hidden outright when its model has no such reading.
 - **Connections tile** — `--card` bordered like the value-group cards, full width like every other
   card (§9) — one row per link (WiFi/MQTT/Syslog/NTP), each a label + a single colour-coded value +
-  a trailing pencil (§5.3 item 4).
+  a trailing pencil (§5.6).
+- **Icon button** — the header gear and back chevron: a `--soft` (gear: `--card` + `--line`) circle,
+  `--brand-strong` on hover, `--focus-ring` on `:focus-visible`. The gear carries an optional `--err`
+  dot (§5.6) marking a connection that is down.
 - **Crash banner** — `--err`-accented card above the system card (§5.3 item 0), shown only when
   `last_crash` is set: title + meta + hex backtrace, with Download / Copy-diagnostics / Dismiss
   actions. Small `.sm` buttons + a quiet `.ghost` Dismiss.
@@ -622,7 +674,7 @@ page under near-identical cards). Specific:
   §5.3 item 0, since it lands long after this poll gives up.)
 - **Live writes** (heat pump): "Applied", stay on view; the `/events` WebSocket pushes the new
   values on the next poll cycle (a pin-pick also refreshes `/status` a few times to catch the connect).
-- **Connection loss**: the system card's status header greys to "No data"; the Connections tile's WiFi row shows "Offline" if WiFi dropped, and
+- **Connection loss**: the system card's status header greys to "No data"; the Connections tile's WiFi row shows "Offline" if WiFi dropped (and the gear is marked, §5.6), and
   the **Heat-pump card collapses to a bare "Offline"** if the X10A link is down — model, protocol and
   capacity vanish rather than showing stale cached values. The schematic blanks every pill to "—"
   and stops every animation — an animated pipe over a silent bus would assert a flow nobody measured,
@@ -632,8 +684,8 @@ page under near-identical cards). Specific:
   *Generic* hint.
 - **Recovery mode**: if `sys.safe_mode` is true (too many crash boots), the recovery banner (§5.3
   item 0) shows above the system card and the heat-pump cards stay collapsed (polling is paused); the WiFi,
-  MQTT and ESP32 (RX/TX) config controls remain usable so the bad setting can be corrected, then a
-  reboot returns to normal.
+  MQTT and ESP32 (RX/TX) config controls behind the gear remain usable so the bad setting can be
+  corrected, then a reboot returns to normal.
 - **Post-crash**: if the last reset was a fault (or a core dump is waiting), the crash banner (§5.3
   item 0) appears above the system card until dismissed — with the title distinguishing the two triggers, so
   a leftover dump alone doesn't report a crash that didn't happen this boot. "Copy diagnostics" toasts
@@ -652,10 +704,10 @@ page under near-identical cards). Specific:
 
 ## 9. Responsive & accessibility
 
-- **Single column at every width.** Every card — system card, Connections tile, status cards and value
-  groups — is the same full container width, centred, stacked top-down. Unlike the earlier ≥560px
+- **Single column at every width.** Every card — system card, Model card, value groups and the
+  Connections/ESP32 cards behind the gear — is the same full container width, centred, stacked top-down. Unlike the earlier ≥560px
   two-column multicol, this never leaves an empty second column (with a stray card shadow at the column
-  gap) when only one card is present — e.g. just the ESP32 card while the heat-pump link is down.
+  gap) when only one card is present — e.g. just the value groups while the heat-pump link is down.
 - **Type scales up on larger viewports.** Mobile is the base ramp (15px body, `max-width: 720px`);
   at **≥600px** (tablet / desktop) the container widens to `820px` and the whole type ramp scales up
   ~1.15× **together** — otherwise the mobile-sized column reads small and sparse on a big screen (a
@@ -663,26 +715,27 @@ page under near-identical cards). Specific:
   block so the ramp stays coherent; it never changes the single-column layout, only its size.
 - Wide content (long value tables) never causes horizontal page scroll; the table scrolls in its card.
 - Keyboard: logical tab order, visible focus ring, Enter submits the view's primary action. The
-  value-description expanders (§5.3 item 6) are real `<button>`s carrying `aria-expanded`, so they
+  value-description expanders (§5.3 item 5) are real `<button>`s carrying `aria-expanded`, so they
   are focusable and toggle on Enter/Space with no extra key handling; the slide honours
   `prefers-reduced-motion`.
 - Contrast AA for text; status never conveyed by colour alone (pills carry text: "Connected",
-  "CRC 3", "off"). The Connections tile (§5.3 item 4) is the one deliberate exception to *visible*
-  text — its rows show only a colour-tinted address/name — so the status word that would otherwise
+  "CRC 3", "off"). The Connections rows (§5.6) are the one deliberate exception to *visible*
+  text — a row shows only a colour-tinted address/name — so the status word that would otherwise
   be a pill instead goes into the row's `aria-label`, keeping the rule for screen readers and
-  satisfying it programmatically rather than visually.
+  satisfying it programmatically rather than visually. The gear's attention dot follows the same
+  rule: the button's accessible name says how many connections are down.
 - Respect `prefers-reduced-motion` (no non-essential transitions).
 
 ## 10. Firmware support required
 
 The design needs these additions to the firmware (all small, tracked as follow-ups):
 - `GET /status`: `wifi.rssi`/`wifi.ip`/`wifi.connected` (live, from `wifi_info()`) — **done**; the
-  dashboard Connections tile's WiFi row consumes `rssi`/`connected` (§5.3 item 4) and the header
+  Connections tile's WiFi row consumes `rssi`/`connected` (§5.6) and the dashboard header
   identity line consumes `ip` (§5.3 body). See `main/http_status.cpp`.
 - `POST /set_hp`: **every field is optional** — an omitted key keeps its current value, so the
-  dashboard ESP32 card posts just `{profile:"auto",rx,tx}` on a pin change. `poll_s` is **not**
+  Settings ESP32 card posts just `{profile:"auto",rx,tx}` on a pin change. `poll_s` is **not**
   accepted (fixed at 1 s); `proto` is auto-detected and not accepted; there is no value mask.
-- `GET /status`: `uptime_s` (seconds since boot) feeds the dashboard ESP32 card's Uptime row.
+- `GET /status`: `uptime_s` (seconds since boot) feeds the Settings ESP32 card's Uptime row.
 - Optional `group` field on `ValueDef` (or generator-stamped) to drive §6 grouping; until then the
   UI groups by register-id ranges + label keywords.
 - `/models`: returns model lists, `profile_map`, `pin_hint`, per-profile value menu — still served

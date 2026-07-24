@@ -664,7 +664,9 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   so a cleared dump can't strand the banner; drives the crash banner, whose title keys
                   on `fault` — an orphan dump alone is NOT "restarted after a crash"),
                   detect{proto,valid,capacity_kw,ou_eeprom,candidates[],families[],ambiguous,
-                  model{name,family,marketing}} — drives the dashboard ESP32 board card + model card.
+                  model{name,family,marketing}} — drives the SETTINGS ESP32 board card (behind the
+                  header gear, with the Connections tile; the dashboard keeps the model card + values)
+                  and the dashboard's model card.
                   RX/TX are auto-detected: read-only on the card while the bus answers, a pins_avail
                   dropdown (re-runs detection) when it doesn't.
 GET  /values      decoded readings [{label,value,unit}]

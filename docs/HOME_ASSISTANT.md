@@ -7,7 +7,7 @@ derived (COP) sensors below.
 
 ## Enabling
 
-Web UI → tap the **pencil on the MQTT row of the dashboard Connections tile** → enter `IP:PORT`
+Web UI → the **header gear → Connections → MQTT** → enter `IP:PORT`
 (+ user/pass if needed) → save. With the HA MQTT integration enabled, the device and its sensors
 appear on their own. Clear the broker to disable.
 

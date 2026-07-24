@@ -273,7 +273,7 @@ POST /set_ntp                      # { server } → persist + reboot, no request
                                    #   SNTP has no disabled state, unlike syslog's empty-means-off.
 POST /set_hp                       # { profile?, rx?, tx? } → apply live (no reboot); rx/tx PERSIST
                                    #   (pin cache), profile session-only; proto auto-detected, not accepted.
-                                   #   The ESP32 card's pin dropdown posts {profile:"auto",rx,tx} to re-detect.
+                                   #   The Settings ESP32 card's pin dropdown posts {profile:"auto",rx,tx} to re-detect.
 POST /set_board                    # { led_gpio, led_type, led_inverted, btn_gpio, btn_active_low }
                                    #   → validate + persist + REBOOT (both are claimed once at task
                                    #   start, so they are not hot-swapped). The board's own onboard
@@ -313,7 +313,7 @@ broadcasts to one values plus one status batch while ESP-IDF completion callback
 Altherma** device with all entities appears in HA automatically — no YAML. **Read-only:** no
 command topics are subscribed. The bridge runs in its own task, independent of the poll engine.
 
-- **Enable:** set the broker in the web UI (pencil on the MQTT row of the dashboard Connections tile). Stored in NVS `mqtt_uri`.
+- **Enable:** set the broker in the web UI (gear → Connections → MQTT). Stored in NVS `mqtt_uri`.
 - **TLS:** a schemeless entry defaults to plaintext `mqtt://`. Credentials require an explicit
   `mqtts://` broker URL (CA-verified via the mbedTLS bundle) so the password isn't sniffable — the
   bridge **refuses** a plaintext broker with credentials rather than silently downgrading or guessing
