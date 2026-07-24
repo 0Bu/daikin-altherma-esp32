@@ -1255,13 +1255,26 @@ function liveData() {
   };
   // Pump % — the wire value is inverted ("Water pump signal (0:max-100:stop)").
   d.pump = d.pumpSig == null ? null : Math.min(100, Math.max(0, 100 - d.pumpSig));
+  // The outdoor unit refreshes its OWN register pages (0x20 sensors, 0x21 inverter) only while it
+  // RUNS — stopped, it answers with the LAST RUN's values (logic/ou_stale.hpp, host-tested against
+  // the whole catalog). Measured on a live unit: outdoor air held exactly 19.0 °C for five hours,
+  // then stepped to 25.5 at the instant the compressor started, while the hydronic pages decayed
+  // smoothly throughout. Those readings must therefore not be drawn as current — DESIGN.md's
+  // dead-bus rule ("an idle plant with no readings, not a stale one"), applied to one sleeping unit.
+  // A held-over 19.0 °C is exactly the #35-#39 shape: well-formed, plausible, and false — and it is
+  // what made an idle plant look like a running one next to a "not running" headline.
+  // UNKNOWN rps (a profile with no such row) reads as CURRENT, never as held over: that is absence
+  // of evidence, and blanking on a guess would cost a reading that may well be live.
+  d.ouHeldOver = d.rps != null && d.rps === 0;
   // Circuit refrigerant pressure for the schematic's high-side badge. The outdoor unit's own High
   // Pressure transducer (reg 0x20) reads 0 bar while the compressor is off — but a sealed R32 circuit
   // is never at 0 bar, so "0.0 bar" paints a live-looking fault on an idle unit. Fall back to the
   // always-live Refrigerant pressure sensor (reg 0x62/15), which reports the real equalised system
   // pressure at rest (~14 bar for R32 near 20 °C). When the compressor runs, High Pressure is the true
   // discharge pressure and wins. Neither present (17 profiles carry no pressure row) → null → "—".
-  d.circP = d.hp != null && d.hp > 0 ? d.hp : d.rp;
+  // Gated on ouHeldOver too: this unit reads 0 bar at rest so the fallback already fires, but a unit
+  // whose 0x20 freezes at a NON-zero pressure would otherwise show that stale bar as the live one.
+  d.circP = !d.ouHeldOver && d.hp != null && d.hp > 0 ? d.hp : d.rp;
   // Derived figures, marked "est." in the UI — the bus has no energy registers. Thermal output from
   // flow × ΔT (water ≈ 4.186 kJ/kg·K); electrical from the CT phase currents at an assumed 230 V,
   // falling back to the inverter primary current when the profile has no CT rows.
@@ -1317,14 +1330,23 @@ function renderLive() {
   setTxt("svBuh", d.buh2 ? "\u00A02" : d.buh1 ? "\u00A01" : "");
 
   // Schematic badges
-  setTxt("svOut", fmt1(d.out)); setTxt("svRps", fmt0(d.rps));
+  // Outdoor air + discharge come off the pages the outdoor unit stops refreshing when it stops
+  // running (d.ouHeldOver): blank them rather than assert a reading from the last cycle as current.
+  setTxt("svOut", d.ouHeldOver ? "—" : fmt1(d.out)); setTxt("svRps", fmt0(d.rps));
   // High-side badge shows the circuit pressure (real refrigerant sensor when the compressor's own HP
   // transducer is idle-zero — see d.circP). Low/suction side has no equivalent at-rest gauge, so show
   // "—" rather than a misleading 0.0 bar when the compressor is off.
-  setTxt("svHp", fmt1(d.circP)); setTxt("svLp", d.lp != null && d.lp > 0 ? fmt1(d.lp) : "—");
-  setTxt("svDisch", fmt0(d.disch)); setTxt("svEev", fmt0(d.eev));
+  setTxt("svHp", fmt1(d.circP));
+  setTxt("svLp", !d.ouHeldOver && d.lp != null && d.lp > 0 ? fmt1(d.lp) : "—");
+  setTxt("svDisch", d.ouHeldOver ? "—" : fmt0(d.disch)); setTxt("svEev", fmt0(d.eev));
   setTxt("svLwt", fmt1(d.lwt)); setTxt("svRwt", fmt1(d.ret));
-  setTxt("svDt", fmt1(d.dt)); setTxt("svFlow", fmt1(d.flow));
+  // ΔT is a WORKING POINT across the exchanger — it needs water moving to mean anything. With the
+  // pump off, R1T and R4T are two stagnant sensors cooling at different rates, and their difference
+  // (measured: 14.6 K on a plant that had been idle for an hour) reads as a live working point
+  // directly beside a "not running" headline. Unknown flow AND unknown pump (no rows) still prints:
+  // that is not evidence of no flow. Same reasoning as the derived kW/COP, which already gate.
+  const stagnant = d.pumpOn === false && d.flow != null && d.flow <= 0;
+  setTxt("svDt", stagnant ? "—" : fmt1(d.dt)); setTxt("svFlow", fmt1(d.flow));
   setTxt("svWp", fmt1(d.wp)); setTxt("svPump", fmt0(d.pump));
   setTxt("svTank", fmt1(d.tank)); setTxt("svTankSet", fmt1(d.tankSet));
   setTxt("svRoom", fmt1(d.room)); setTxt("svRoomSet", fmt1(d.roomSet));
@@ -1402,8 +1424,11 @@ const INSPECT = {
       : (d.rps ?? 0) > 0
         ? { en: `Running — compressor at ${fmt0(d.rps)} rps${d.quiet ? ", capped by quiet mode" : ""}.`,
             de: `Läuft — Verdichter mit ${fmt0(d.rps)} rps${d.quiet ? ", durch den Leise-Modus begrenzt" : ""}.` }
-        : { en: "Idle — the compressor is stopped, so no heat is being produced.",
-            de: "Standby — der Verdichter steht, es wird gerade keine Wärme erzeugt." },
+        // Says why the outdoor pills read "—" at rest: the unit stops refreshing its own registers
+        // when it stops, so those readings would be the LAST run's (logic/ou_stale.hpp). This is the
+        // discoverable half of the fix — the pill can only blank, it cannot explain itself.
+        : { en: "Idle — the compressor is stopped, so no heat is being produced. The outdoor unit also stops refreshing its own sensors while it rests, so outdoor air and discharge temperature read \"—\" rather than repeat the last run's values.",
+            de: "Standby — der Verdichter steht, es wird gerade keine Wärme erzeugt. Die Außeneinheit aktualisiert im Stillstand auch ihre eigenen Sensoren nicht mehr; Außenluft und Heißgastemperatur zeigen daher „—\" statt die Werte des letzten Laufs zu wiederholen." },
     rows: [/outdoor air/i, /inv frequency/i, /^high pressure$/i, /discharge pipe temp/i, /expansion valve ?1/i, /defrost operation/i],
   },
   comp: {
