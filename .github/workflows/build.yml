@@ -68,8 +68,20 @@ jobs:
       - name: Verify the audit still has teeth
         run: ./tools/domain/selftest.sh
 
+  # The gh-pages publish is the LAST step of the build job below, after ~5 minutes of firmware
+  # work — so when it breaks, it breaks expensively and at the worst moment. It is also the one
+  # step with a concurrency hazard: three publishers (main's root, every PR preview, and
+  # pr-preview-cleanup) write one branch. Exercise it here against a throwaway bare repo — no
+  # network, no credentials, seconds long — so a regression fails before the build, not after it.
+  pages-publish-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test the gh-pages publish (incl. concurrent publishers)
+        run: ./scripts/run-pages-publish-tests.sh
+
   build:
-    needs: [logic-test, domain-audit]
+    needs: [logic-test, domain-audit, pages-publish-test]
     runs-on: ubuntu-latest
     permissions:
       contents: write   # tags + releases + the gh-pages branch push (the only Pages publisher)

@@ -666,6 +666,21 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   installer at `PR/<N>/` — an atomic whole-site Actions deployment cannot — so the
   `configure-pages`/`deploy-pages` path is deliberately absent rather than redundant: a repo's Pages
   source is either a branch or Actions, never both.
+- **✅ Concurrent publishers survive losing the race.** That one branch has *three* writers — main's
+  root publish, every open PR's preview, and `pr-preview-cleanup`'s removal — and they overlap
+  routinely. Actions cannot serialize them: a `concurrency:` group is per **job**, and the publish is
+  the last step of a ~5-minute firmware build, so grouping would serialize that entire build across
+  every PR to protect a 2-second push. So the script survives the race instead of avoiding it — it
+  refreshes `origin/gh-pages` immediately before publishing (never trusting the ref
+  `actions/checkout` froze at job start) and, on a non-fast-forward, re-applies its change onto the
+  winner's commit and pushes again, up to 5 attempts. Only a lost race retries; an auth or
+  hook rejection is fatal at once. This is sound only because every mode is **declarative** — `--pr`
+  replaces `PR/<N>/` wholesale, `--rm` deletes it, root replaces everything except `PR/` — so
+  re-applying yields the same tree as winning would have. Guarded by
+  [`run-pages-publish-tests.sh`](../scripts/run-pages-publish-tests.sh) (CI job `pages-publish-test`),
+  which races two publishers against a throwaway bare repo, including one that lands *between* the
+  loser's fetch and its push. Before this, the loser's push was simply rejected and its whole build
+  went red — and because a re-run always went green, it read as a flake rather than a bug.
 - **✅ Publishes from a private repo — and the Pages site is public.** The pipeline no longer gates
   publishing on `repository.private == false`; that gate was removed so the installer and the OTA feed
   can go live before the source does. Two consequences worth knowing precisely: **(a)** a Pages site
