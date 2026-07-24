@@ -21,7 +21,7 @@ boot — there is no manual picker. Firmware is installed from a **browser** (We
 > the (planned) read-only MCP surface is [`docs/MCP.md`](../docs/MCP.md). User-facing docs:
 > [`README.md`](../README.md), [`docs/README.md`](../docs/README.md),
 > [`docs/SECURITY.md`](../docs/SECURITY.md), [`docs/DESIGN.md`](../docs/DESIGN.md) (web-UI design
-> contract). Contributor-facing: [`CONTRIBUTING.md`](../CONTRIBUTING.md) (what the two local gates
+> contract). Contributor-facing: [`CONTRIBUTING.md`](../CONTRIBUTING.md) (what the local gates
 > are, where logic goes, how PRs land on a linear+signed `main`) and
 > [`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) — CONTRIBUTING states the outside-contributor half of
 > the rules this file states for us, so a change to the gates, the `main/logic/` + test rule or the
@@ -46,6 +46,10 @@ changes can be *verified*, not just reasoned about, even in a cloud session:
 scripts/run-mock-tests.sh    # compile + run host logic tests in seconds (cmake + g++/clang++)
 scripts/run-domain-audit.sh  # is the value catalog physically RIGHT? (the domain-correctness gate)
 ```
+
+(A third fast CI job, `pages-publish-test`, guards the Pages publish rather than the firmware —
+`scripts/run-pages-publish-tests.sh`, git-only, relevant only when `scripts/publish-pages-branch.sh`
+changes. See CONTRIBUTING.md.)
 
 It covers the X10A **CRC** and framing (`logic/crc.hpp`), the **value converters**
 (`logic/convert.hpp` — the riskiest part of the port), register extraction

@@ -45,6 +45,19 @@ If you touch the audit itself, also run `tools/domain/selftest.sh` — it re-int
 the audit was built for into a throwaway copy and asserts all four are still caught. A checker that
 has stopped checking turns "clean" from evidence into a lie.
 
+A third fast job, `pages-publish-test`, guards the **GitHub Pages publish** rather than the
+firmware, so most PRs never need it locally — run it only if you touch
+[`scripts/publish-pages-branch.sh`](scripts/publish-pages-branch.sh):
+
+```bash
+scripts/run-pages-publish-tests.sh   # CI job `pages-publish-test` — needs only git, no toolchain
+```
+
+It races two publishers against a throwaway bare repo, because `gh-pages` has three concurrent
+writers (main's root publish, each PR's preview, and the preview cleanup) and the loser used to
+fail its entire build — a bug that read as a flake, since re-running always cleared it. Like the
+other two, it gates `build`.
+
 ## Building the firmware
 
 There is no local ESP-IDF install. Builds go through the Docker image pinned to the version CI uses
@@ -111,7 +124,7 @@ enforced by a branch ruleset on `main` (require linear history, require signed c
 - Rebase onto `main` rather than merging `main` into your branch. Merge commits can't be accepted.
 - Sign your commits (`git commit -S`, or let GitHub sign a web merge).
 - `main` moves under open PRs — expect to rebase before merge.
-- A red CI job blocks the merge, including on a docs-only PR — the two fast gates are cheap and
+- A red CI job blocks the merge, including on a docs-only PR — the fast gates are cheap and
   hardware-free precisely so this is never a burden.
 
 Fork PRs build and run all gates, but get no signing key: they compile-check only and publish no
