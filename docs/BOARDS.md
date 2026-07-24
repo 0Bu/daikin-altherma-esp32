@@ -26,9 +26,64 @@ SD slot. None of them are used.
 
 ---
 
-## Seeed XIAO ESP32-S3 — the reference board
+## M5Stack AtomS3 Lite — the board the wiring guide is written for
 
-The board the pin defaults, the wiring diagram and the README's pin table are written for.
+A 24 × 24 mm cased board. Its two onboard parts are exactly the two the firmware can drive, and its
+Grove port reaches X10A with no soldering — which is why [WIRING.md](WIRING.md) and the README's pin
+table are written for it.
+
+| | |
+|---|---|
+| Chip / flash / PSRAM | ESP32-S3FN8 · 8 MB flash · no PSRAM |
+| USB | USB-C, native USB-Serial/JTAG |
+| X10A-safe pins broken out | **1, 2** (Grove), **5, 6, 7, 8, 38** (female header on the case) |
+| X10A pins to set | **RX = 1 (G1)**, **TX = 2 (G2)** for the Grove port — *not* a default; pick them once |
+| Status LED | **GPIO35**, WS2812C-2020 — an **addressable RGB** pixel |
+| Button | **GPIO41**, front button, **active low** |
+| Also on board | IR transmitter LED (GPIO4), reset button, Grove HY2.0-4P port |
+
+**The pins are not automatic on this board.** The shipped `CONFIG_DAIKIN_RX_PIN`/`_TX_PIN` defaults
+are the XIAO's 44/43, and detection only ever probes the cached pair, the default pair and each of
+them swapped — none of which the AtomS3 Lite breaks out. So the bus stays silent until the pins are
+picked once in the dashboard (**ESP32** card → RX/TX dropdown, `POST /set_hp`); after that they are
+cached in NVS and re-used every boot. Their order does not matter: the swap is probed too.
+
+**Firmware mapping.** Set in the dashboard under **ESP32 → Hardware** (a save reboots):
+
+- Status LED → `led_gpio 35`, type **WS2812**. The six operating states then come out as colours —
+  blue = setup portal, yellow = connecting, green = healthy, red double-flash = X10A down, orange =
+  MQTT down — plus the recovery button's red strobe (armed) and solid white (erasing). *Active low*
+  does not apply to a WS2812: it encodes "off" as the zero colour, so there is no drive level to
+  invert.
+- Recovery button → `btn_gpio 41`, **active low**. Held 5 s it erases all stored config and reboots
+  into the setup portal.
+
+**The Grove port is the tidy way in.** HY2.0-4P carries **GND, 5 V, G2, G1** — the same four wires
+X10A needs — so one Grove → Dupont cable reaches the service port. Without one, the female header on
+the case carries `5V`, `GND` and G5–G8/G38 for plain Dupont wires. The 5 V level-shifter advice and
+"power the board from USB, not off X10A's 50 mA" still apply exactly as in [WIRING.md](WIRING.md).
+
+**Watch out:**
+
+- **GPIO41 is a dedicated-JTAG pad (MTDI).** The firmware withholds GPIO39–42 from the *X10A* pin
+  picker to keep an external debug probe usable — a preference, not a hardware conflict — but the
+  LED/button picker offers them, because that is where this board's button physically is. Configuring
+  the button costs you nothing unless you actually attach a JTAG probe.
+- **GPIO39 is silkscreened "CLK_OUT3"** but is chip-level JTAG (MTCK) regardless of the label, so it
+  is not offered for X10A.
+- **GPIO35 is only safe because this build uses Quad (DIO) flash and no PSRAM.** On a build with
+  Octal flash/PSRAM, GPIO33–37 carry SPIIO4-7/DQS and the firmware refuses them — for the indicator
+  as well as for X10A.
+- **The IR LED (GPIO4) has no use here.** The Altherma is controlled over X10A (and, for the planned
+  HomeHub link, Modbus); there is no infrared path on the unit for the firmware to talk to.
+- **No display** — the LCD is on the non-Lite AtomS3. Nothing in the firmware renders to one.
+
+---
+
+## Seeed XIAO ESP32-S3 — the board the pin defaults are written for
+
+The only board that needs no pin configuration at all: `CONFIG_DAIKIN_RX_PIN`/`_TX_PIN` are its pads,
+so a freshly flashed XIAO finds the bus on its own.
 
 | | |
 |---|---|
@@ -47,50 +102,6 @@ button to one of the free pins.
 **Watch out:** GPIO3 (D2) is broken out as an ordinary pad but is the chip's JTAG-source-select
 **strapping** pin, so the firmware never offers it for X10A. GPIO16/17 do not exist on the XIAO's
 header at all.
-
----
-
-## M5Stack AtomS3 Lite
-
-A 24 × 24 mm cased board. Its two onboard parts are exactly the two the firmware can drive.
-
-| | |
-|---|---|
-| Chip / flash / PSRAM | ESP32-S3FN8 · 8 MB flash · no PSRAM |
-| USB | USB-C, native USB-Serial/JTAG |
-| X10A-safe pins broken out | **1, 2** (Grove), **5, 6, 7, 8, 38** (bottom header) |
-| Status LED | **GPIO35**, WS2812C-2020 — an **addressable RGB** pixel |
-| Button | **GPIO41**, front button, **active low** |
-| Also on board | IR transmitter LED (GPIO4), reset button, Grove HY2.0-4P port |
-
-**Firmware mapping.** Set in the dashboard under **ESP32 → Hardware** (a save reboots):
-
-- Status LED → `led_gpio 35`, type **WS2812**. The six operating states then come out as colours —
-  blue = setup portal, yellow = connecting, green = healthy, red double-flash = X10A down, orange =
-  MQTT down — plus the recovery button's red strobe (armed) and solid white (erasing). *Active low*
-  does not apply to a WS2812: it encodes "off" as the zero colour, so there is no drive level to
-  invert.
-- Recovery button → `btn_gpio 41`, **active low**. Held 5 s it erases all stored config and reboots
-  into the setup portal.
-
-**The Grove port is the tidy way in.** HY2.0-4P carries **GND, 5 V, G2, G1** — the same four wires
-X10A needs — so one Grove cable reaches the service port. The 5 V level-shifter advice and "power
-the board from USB, not off X10A's 50 mA" still apply exactly as in [WIRING.md](WIRING.md).
-
-**Watch out:**
-
-- **GPIO41 is a dedicated-JTAG pad (MTDI).** The firmware withholds GPIO39–42 from the *X10A* pin
-  picker to keep an external debug probe usable — a preference, not a hardware conflict — but the
-  LED/button picker offers them, because that is where this board's button physically is. Configuring
-  the button costs you nothing unless you actually attach a JTAG probe.
-- **GPIO39 is silkscreened "CLK_OUT3"** but is chip-level JTAG (MTCK) regardless of the label, so it
-  is not offered for X10A.
-- **GPIO35 is only safe because this build uses Quad (DIO) flash and no PSRAM.** On a build with
-  Octal flash/PSRAM, GPIO33–37 carry SPIIO4-7/DQS and the firmware refuses them — for the indicator
-  as well as for X10A.
-- **The IR LED (GPIO4) has no use here.** The Altherma is controlled over X10A (and, for the planned
-  HomeHub link, Modbus); there is no infrared path on the unit for the firmware to talk to.
-- **No display** — the LCD is on the non-Lite AtomS3. Nothing in the firmware renders to one.
 
 ---
 
@@ -118,14 +129,14 @@ a board nobody touched.
 
 `✅` used · `➖` present but not used by this firmware · `—` not on the board
 
-| Firmware feature | XIAO ESP32-S3 | AtomS3 Lite |
+| Firmware feature | AtomS3 Lite | XIAO ESP32-S3 |
 |---|:---:|:---:|
-| X10A link (2 GPIOs) | ✅ 44/43 | ✅ pick from 1, 2, 5–8, 38 |
+| X10A link (2 GPIOs) | ✅ pick from 1, 2, 5–8, 38 | ✅ 44/43, the defaults |
 | Browser (Web Serial) install + serial console | ✅ | ✅ |
 | OTA self-update (dual slot, signed) | ✅ | ✅ |
-| Status indicator | ✅ plain LED, GPIO21 | ✅ WS2812, GPIO35 |
-| Recovery button (5 s factory reset) | — | ✅ GPIO41 |
-| Grove connector for X10A | — | ✅ 5 V/GND/G1/G2 |
-| PSRAM | ➖ 8 MB, unused | — |
-| IR transmitter | — | ➖ no use case |
-| Display | — | — (non-Lite AtomS3 only) |
+| Status indicator | ✅ WS2812, GPIO35 | ✅ plain LED, GPIO21 |
+| Recovery button (5 s factory reset) | ✅ GPIO41 | — |
+| Grove connector for X10A | ✅ 5 V/GND/G1/G2 | — |
+| PSRAM | — | ➖ 8 MB, unused |
+| IR transmitter | ➖ no use case | — |
+| Display | — (non-Lite AtomS3 only) | — |

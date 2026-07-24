@@ -13,14 +13,20 @@ diagnostics, WiFi resilience — see [**FEATURES.md**](FEATURES.md).
 
 ## Hardware
 
-- **Targets:** esp32s3 only — the **Seeed XIAO ESP32-S3** is the
-  reference board. **≥ 4 MB flash** (dual-OTA layout: two ~2 MB app slots). No PSRAM required.
+- **Targets:** esp32s3 only. The **M5Stack AtomS3 Lite** is the board the wiring guide is written
+  for; the **Seeed XIAO ESP32-S3** is the board the compile-time pin defaults are written for.
+  **≥ 4 MB flash** (dual-OTA layout: two ~2 MB app slots). No PSRAM required.
 - **Heat-pump link:** the X10A port is a 5 V TTL UART at **9600 8E1**. The ESP maps any two free
   GPIOs to a hardware UART (`RX_PIN` ← X10A pin 2 / HP-TX, `TX_PIN` → X10A pin 3 / HP-RX). The
   USB/native-USB console is a *separate* UART, so device logs never collide with the HP link.
-- **Reference wiring (XIAO ESP32-S3):** `RX = GPIO44` (pad D7), `TX = GPIO43` (pad D6),
-  `GND` mandatory, `5V` optional and out of spec (see below — prefer USB power). `GPIO16/17` — the
-  classic-ESP32 default — are **not** broken out on the XIAO, which is why pins are configurable.
+- **Reference wiring (AtomS3 Lite, Grove):** `RX = GPIO1` (G1), `TX = GPIO2` (G2), `GND` mandatory,
+  `5V` optional and out of spec (see below — prefer USB power). These are **not** the shipped
+  defaults, so they have to be set once via `POST /set_hp`; detection probes only the cached pair,
+  the Kconfig pair and each of them swapped.
+- **Default wiring (XIAO ESP32-S3):** `RX = GPIO44` (pad D7), `TX = GPIO43` (pad D6) — the
+  `CONFIG_DAIKIN_RX_PIN`/`_TX_PIN` values, so this board needs no pin configuration. `GPIO16/17` —
+  the classic-ESP32 default — are **not** broken out on either board, which is why pins are
+  configurable.
 
 ### Voltage and wiring
 

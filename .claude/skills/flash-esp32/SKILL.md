@@ -11,7 +11,7 @@ config survive). Docker builds, host `esptool` flashes (Docker Desktop has no US
 
 ## Steps
 
-1. **Confirm the port.** The target chip is always `esp32s3` (reference board: XIAO ESP32-S3). Detect the port: `ls /dev/cu.usbmodem*`.
+1. **Confirm the port.** The target chip is always `esp32s3` (both documented boards — XIAO ESP32-S3 and M5Stack AtomS3 Lite — are esp32s3 with native USB-Serial/JTAG). Detect the port: `ls /dev/cu.usbmodem*`.
 2. **Build** via the CI-pinned image:
    ```bash
    scripts/idf-docker.sh sh -c 'if [ -f sdkconfig ]; then idf.py build; else idf.py set-target esp32s3 build; fi'
