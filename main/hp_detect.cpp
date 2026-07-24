@@ -86,6 +86,8 @@ DetectResult hp_detect_run() {
     uint8_t page00[32]; int len00 = -1;
     uint8_t page11[16]; int len11 = -1;
     uint8_t page60[32]; int len60 = -1;
+    uint8_t page10[32]; int len10 = -1;              // dump-only (below): target temps
+    uint8_t page20[32]; int len20 = -1;              // dump-only (below): O/U sensors + pressures
     uint8_t pageA0[32]; int lenA0 = -1;              // O/U-II rows — raw, for the diag dump below
     uint8_t pageA1[32]; int lenA1 = -1;
     for (uint8_t reg : PROBE_PAGES) {
@@ -104,6 +106,12 @@ DetectResult hp_detect_run() {
         } else if (reg == 0x60) {
             len60 = paylen;
             for (int i = 0; i < paylen && i < static_cast<int>(sizeof(page60)); i++) page60[i] = pay[i];
+        } else if (reg == 0x10) {
+            len10 = paylen;
+            for (int i = 0; i < paylen && i < static_cast<int>(sizeof(page10)); i++) page10[i] = pay[i];
+        } else if (reg == 0x20) {
+            len20 = paylen;
+            for (int i = 0; i < paylen && i < static_cast<int>(sizeof(page20)); i++) page20[i] = pay[i];
         } else if (reg == 0xA0) {
             lenA0 = paylen;
             for (int i = 0; i < paylen && i < static_cast<int>(sizeof(pageA0)); i++) pageA0[i] = pay[i];
@@ -113,16 +121,24 @@ DetectResult hp_detect_run() {
         }
     }
 
-    // 2b. RAW payload dump for the three pages whose LAYOUT is still an open question. HTTP exposes
-    //     only decoded values, so a physically impossible reading cannot be attributed to a wrong
+    // 2b. RAW payload dump for the pages whose LAYOUT is still an open question. HTTP exposes only
+    //     decoded values, so a physically impossible reading cannot be attributed to a wrong
     //     converter vs. a wrong offset vs. a per-unit layout difference without the wire bytes —
-    //     and they are otherwise unobservable off-device. 0x00 answers "why is the O/U capacity
-    //     absent?" (a short descriptor omits offset 12); 0xA0/0xA1 answer "why do some O/U-II rows
-    //     read a constant 0.0 while others read ~190 °C under load?". One line per page, only on a
-    //     detect pass (not per poll cycle), so the diag ring and syslog stay readable.
+    //     and they are otherwise unobservable off-device. Each page here answers one such question:
+    //       0x00  "why is the O/U capacity absent?" — a short descriptor omits offset 12.
+    //       0xA0  "why do some O/U-II rows read a constant 0.0 while others read ~190 °C?"
+    //       0xA1  same block; every row on it decoded to a constant 0.0 on a live unit.
+    //       0x10  Target Evap. Temp. (offset 6) reached 199.6 °C on a live unit — impossible, and
+    //             0.4 °C UNDER reading_plausible()'s +200 °C ceiling, so nothing masks it.
+    //       0x20  the two outdoor pressures (offsets 12/14) stayed at 0.0 bar in every sample taken
+    //             while the compressor ran at 42 rps with 104.5 °C discharge; an R32 high side runs
+    //             25-40 bar there. Absent sensor or wrong offset — the bytes decide, the decode can't.
+    //     One line per page, only on a detect pass (not per poll cycle), so the diag ring (6 KB) and
+    //     syslog stay readable: 5 lines of ~120 chars against a 256-byte line buffer.
     {
         const struct { uint8_t reg; const uint8_t* buf; int len; } raw[] = {
-            {0x00, page00, len00}, {0xA0, pageA0, lenA0}, {0xA1, pageA1, lenA1},
+            {0x00, page00, len00}, {0x10, page10, len10}, {0x20, page20, len20},
+            {0xA0, pageA0, lenA0}, {0xA1, pageA1, lenA1},
         };
         for (const auto& pg : raw) {
             if (pg.len < 0) {                        // page did not answer — say so, don't stay silent

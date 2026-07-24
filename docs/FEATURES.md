@@ -63,7 +63,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 33 | **Detect-sweep heap hardening** — install-once UART + register-only pin remap (no per-swap driver realloc) and silent-bus detect backoff, closing a fragmentation panic caught by a symbolized coredump | ✅ 🧪 | [`hp_comm.cpp`](../main/hp_comm.cpp), [`logic/uart_plan.hpp`](../main/logic/uart_plan.hpp), [`hp_poll.cpp`](../main/hp_poll.cpp), [`logic/detect_backoff.hpp`](../main/logic/detect_backoff.hpp) |
 | 34 | **HTTP trust-surface split** — the open setup AP registers only the provisioning routes; `/coredump`, `/diag` and the config/OTA/MCP surface exist only on the trusted STA LAN | ✅ 🧪 | [`http_server.cpp`](../main/http_server.cpp), [`logic/http_surface.hpp`](../main/logic/http_surface.hpp), [`http_common.cpp`](../main/http_common.cpp) |
 | 35 | **Publish-time value-plausibility filter** — a decoded °C reading outside a physical envelope, or a saturation temp from a 0-bar sensor, is dropped at publish (HA gets *unavailable*, never a false 576 °C / −51.2 °C); the runtime backstop to the build-time catalog audit (#31), kept out of `convert()` so the audit still distinguishes the intrinsic converters | ✅ 🧪 | [`logic/convert.hpp`](../main/logic/convert.hpp), [`hp_convert.cpp`](../main/hp_convert.cpp) |
-| 36 | **Raw page dump on `/diag`** — the wire bytes of pages `0x00`/`0xA0`/`0xA1`, one line per detect pass. Everything else the device exposes is *decoded*, so an impossible reading cannot be attributed to a wrong converter vs. a wrong offset vs. a per-unit layout difference without these bytes — and they otherwise never leave the board | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/hexdump.hpp`](../main/logic/hexdump.hpp) |
+| 36 | **Raw page dump on `/diag`** — the wire bytes of pages `0x00`/`0x10`/`0x20`/`0xA0`/`0xA1`, one line per detect pass. Everything else the device exposes is *decoded*, so an impossible reading cannot be attributed to a wrong converter vs. a wrong offset vs. a per-unit layout difference without these bytes — and they otherwise never leave the board. `0x10`/`0x20` cover impossible readings that fall *inside* the plausibility window and are therefore never masked | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/hexdump.hpp`](../main/logic/hexdump.hpp) |
 
 ---
 
@@ -610,7 +610,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   makes all three plausibly wrong, issue #121, the #35–#39 failure shape; keyed on the (R1T) tag so
   the alias label forms resolve too, and gated catalog-wide so every detectable profile selects a
   real measurement), and the **raw-page hex rendering** (`hexdump.hpp` — the wire bytes of pages
-  `0x00`/`0xA0`/`0xA1` on `/diag`; truncation stops after the last *complete* byte, since a trailing
+  `0x00`/`0x10`/`0x20`/`0xA0`/`0xA1` on `/diag`; truncation stops after the last *complete* byte, since a trailing
   nibble would read as a different value, and degenerate inputs still terminate the buffer the caller
   hands to a `diag_printf` `%s`).
   **906 `CHECK`s** in
