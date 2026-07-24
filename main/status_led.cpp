@@ -152,12 +152,28 @@ bool indicator_init(const Config& c) {
     return true;
 }
 
+// Announce which pin and driver the indicator actually resolved to, exactly as recovery_button.cpp
+// announces its pin. Until this line existed, only a FAILED init said anything — and the failure
+// that actually reaches users does not fail: pointed at a valid-but-wrong pin (the shipped XIAO
+// default of GPIO21 on an AtomS3 Lite, whose only light is a WS2812 on GPIO35), init succeeds and
+// the firmware drives a pin with nothing on it. The board looks dead while being perfectly healthy,
+// and the sole evidence on /diag was the ABSENCE of an error — which reads identically to a working
+// indicator. One line turns "the LED doesn't light" into a five-second diagnosis.
+void log_indicator(const Config& c) {
+    if (static_cast<LedType>(c.led_type) == LedType::Ws2812)
+        diag_printf("led: WS2812 indicator on GPIO%d\n", c.led_gpio);
+    else
+        diag_printf("led: LED indicator on GPIO%d (active %s)\n",
+                    c.led_gpio, c.led_inverted ? "low" : "high");
+}
+
 void status_led_task(void*) {
     const Config c = config();
     if (!indicator_init(c)) {
         vTaskDelete(nullptr);
         return;
     }
+    log_indicator(c);
     emit(false, LedPattern{});   // start dark, whatever the pin's reset state was
 
     for (;;) {

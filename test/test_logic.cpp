@@ -11,6 +11,7 @@
 #include <string>
 
 #include "logic/board_pins.hpp"
+#include "logic/board_presets.hpp"
 #include "logic/captive.hpp"
 #include "logic/boot_guard.hpp"
 #include "logic/button.hpp"
@@ -1460,6 +1461,84 @@ static void test_board_pins_local() {
     for (int i = 0; i < n; i++) CHECK(board_pin_local_io(buf[i], false));
     // Cap honoured, like board_pins_offerable.
     CHECK(board_pins_local(buf, 5, false) == 5);
+}
+
+// The board-hardware presets the UI's "Board" dropdown fills its five fields from. The whole point
+// of keeping this table in firmware rather than in www/app.js is that these CHECKs can run against
+// the very validator POST /set_board applies — a preset that fills pins the device then rejects
+// would be worse than no preset at all.
+static void test_board_presets() {
+    int all_n = 0;
+    const BoardPreset* all = board_presets_all(all_n);
+    CHECK(all_n == BOARD_PRESETS_MAX);          // the constant really does size a caller's buffer
+
+    // EVERY preset must pass the request-path validator, on a build that reserves nothing extra.
+    // This is the check the JS-side table could never have.
+    for (int i = 0; i < all_n; i++) {
+        Config c;
+        c.rx_pin = c.tx_pin = -1;               // isolate: the X10A collision rule is tested below
+        c.led_gpio = all[i].led_gpio; c.led_type = all[i].led_type;
+        c.led_inverted = all[i].led_inverted;
+        c.btn_gpio = all[i].btn_gpio; c.btn_active_low = all[i].btn_active_low;
+        std::string why;
+        CHECK(board_hw_valid(c, why, 48, /*octal_spi=*/false));
+        CHECK(led_type_valid(all[i].led_type));
+        CHECK(all[i].name != nullptr && all[i].name[0] != '\0');
+    }
+    // Names are what the user picks by, so they must be distinct — two "AtomS3 Lite" rows would make
+    // the dropdown a coin toss.
+    for (int i = 0; i < all_n; i++)
+        for (int k = i + 1; k < all_n; k++) CHECK(std::string(all[i].name) != all[k].name);
+
+    // The two documented boards, by their docs/BOARDS.md facts. Pinned as VALUES: this table is the
+    // executed half of that doc, and a silent edit here is a user flashing the wrong pin.
+    CHECK(std::string(all[0].name) == "M5Stack AtomS3 Lite");
+    CHECK(all[0].led_gpio == 35 && all[0].led_type == 1 && !all[0].led_inverted);
+    CHECK(all[0].btn_gpio == 41 && all[0].btn_active_low);
+    CHECK(std::string(all[1].name) == "Seeed XIAO ESP32-S3");
+    CHECK(all[1].led_gpio == 21 && all[1].led_type == 0 && all[1].led_inverted);
+    CHECK(all[1].btn_gpio == -1);               // no button broken out — never guess a pin for one
+
+    // The AtomS3 Lite's button sits on a dedicated-JTAG pad. That it is legal for board-local I/O but
+    // NOT for the X10A picker is the exact asymmetry this preset depends on (board_pins.hpp).
+    CHECK(board_pin_local_io(41, /*octal_spi=*/false));
+    CHECK(!board_pin_offerable(41, /*octal_spi=*/false));
+
+    // Offering is build-aware: GPIO35 is free on this project's Quad-flash build and is SPIIO4 on an
+    // Octal one, so an Octal build withholds the AtomS3 Lite preset instead of offering a pick that
+    // POST /set_board would refuse.
+    const BoardPreset* buf[BOARD_PRESETS_MAX];
+    int n = board_presets_offerable(buf, BOARD_PRESETS_MAX, /*octal_spi=*/false);
+    CHECK(n == all_n);
+    n = board_presets_offerable(buf, BOARD_PRESETS_MAX, /*octal_spi=*/true);
+    CHECK(n == 1 && std::string(buf[0]->name) == "Seeed XIAO ESP32-S3");
+    // Whatever survives the filter must still validate under the SAME build flag it was filtered by.
+    for (int oct = 0; oct <= 1; oct++) {
+        n = board_presets_offerable(buf, BOARD_PRESETS_MAX, oct != 0);
+        for (int i = 0; i < n; i++) {
+            Config c;
+            c.rx_pin = c.tx_pin = -1;
+            c.led_gpio = buf[i]->led_gpio; c.led_type = buf[i]->led_type;
+            c.btn_gpio = buf[i]->btn_gpio;
+            std::string why;
+            CHECK(board_hw_valid(c, why, 48, oct != 0));
+        }
+    }
+    // Cap honoured, like board_pins_offerable/board_pins_local.
+    CHECK(board_presets_offerable(buf, 1, /*octal_spi=*/false) == 1);
+    CHECK(board_presets_offerable(buf, 0, /*octal_spi=*/false) == 0);
+
+    // A preset does not bypass the collision rules: applying one onto a device whose X10A link
+    // already sits on that pin is still rejected, with the link named. (The UI offers the preset
+    // anyway — same as its pin dropdowns, which also list pins the link may hold — and lets the
+    // request path answer with the reason.)
+    Config c;
+    c.rx_pin = 35; c.tx_pin = 44;
+    c.led_gpio = all[0].led_gpio; c.led_type = all[0].led_type;
+    c.btn_gpio = all[0].btn_gpio;
+    std::string why;
+    CHECK(!board_hw_valid(c, why, 48, /*octal_spi=*/false));
+    CHECK(why.find("X10A") != std::string::npos);
 }
 
 // The status indicator's state -> pattern rule, shared by the GPIO and WS2812 back-ends.
@@ -3095,6 +3174,7 @@ int main() {
     test_board_pins();
     test_ha_device();
     test_board_pins_local();
+    test_board_presets();
     test_led_pattern();
     test_button();
     test_discovery();

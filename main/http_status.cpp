@@ -2,6 +2,7 @@
 #include "http_handlers.hpp"
 #include "config.hpp"
 #include "logic/board_pins.hpp"
+#include "logic/board_presets.hpp"
 #include "logic/captive.hpp"
 #include "def/model_names.hpp"
 #include "def/models_catalog.hpp"
@@ -129,6 +130,24 @@ static std::string build_status_json_string() {
          ",\"btn_active_low\":" + std::string(c.btn_active_low ? "true" : "false") +
          ",\"pins_local\":[";
     for (int i = 0; i < nlpins; i++) { if (i) j += ","; j += std::to_string(lpins[i]); }
+    // ...and the ready-made settings for the boards this project documents (logic/board_presets.hpp),
+    // so the Hardware modal can fill all five fields from one pick instead of asking the user to
+    // transcribe pin numbers out of docs/BOARDS.md. Sent HERE rather than from a route of their own
+    // because the modal already reads pins_local from this payload: one source, no second fetch to
+    // fail, and the presets cannot arrive disagreeing with the pin lists they must fit inside. Two
+    // fixed rows (~170 bytes) — bounded, unlike the per-value payloads the heap rules are about.
+    const BoardPreset* presets[BOARD_PRESETS_MAX];
+    int npre = board_presets_offerable(presets, BOARD_PRESETS_MAX, hw_octal_spi());
+    j += "],\"presets\":[";
+    for (int i = 0; i < npre; i++) {
+        if (i) j += ",";
+        j += "{\"name\":" + jstr(presets[i]->name) +
+             ",\"led_gpio\":" + std::to_string(presets[i]->led_gpio) +
+             ",\"led_type\":" + std::to_string(presets[i]->led_type) +
+             ",\"led_inverted\":" + std::string(presets[i]->led_inverted ? "true" : "false") +
+             ",\"btn_gpio\":" + std::to_string(presets[i]->btn_gpio) +
+             ",\"btn_active_low\":" + std::string(presets[i]->btn_active_low ? "true" : "false") + "}";
+    }
     j += "]},";
     char bssid_str[18] = {0};
     char mac_str[18] = {0};

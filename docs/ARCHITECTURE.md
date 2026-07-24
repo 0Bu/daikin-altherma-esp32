@@ -237,6 +237,22 @@ host-testable core is unusually large and valuable, because the risky parts are 
   of them: the M5Stack AtomS3 Lite's only button is on GPIO41 (MTDI). Everything the chip hard-
   reserves (flash, octal flash/PSRAM, strapping, and GPIO19/20 which *are* the USB-Serial/JTAG
   console this firmware logs over) is still excluded from both sets.
+- `logic/board_presets.hpp` — the same per-board facts made *applicable*. One published image serves
+  every board, so the indicator and button are runtime settings seeded from Kconfig — and that seed
+  is the XIAO's plain LED on GPIO21. On an AtomS3 Lite, whose only light is a WS2812 on GPIO35, the
+  firmware then drives a pin with nothing on it: the board looks dead while being perfectly healthy.
+  This table carries the five settings (`led_gpio`, `led_type`, `led_inverted`, `btn_gpio`,
+  `btn_active_low`) for each **documented** board, served as `/status.board.presets`, so the Hardware
+  modal fills them from one pick instead of asking the user to transcribe pin numbers out of
+  [BOARDS.md](BOARDS.md). It lives in firmware rather than in `www/app.js` for the reason
+  `lwt_select.hpp` exists: a browser-side copy would be a second statement of the same facts, free to
+  drift, and a preset that fills pins the device then *rejects* is worse than no preset. Here, the CI
+  logic test asserts every offered preset passes the very validator `POST /set_board` applies
+  (`board_hw_valid`). `board_presets_offerable()` withholds a preset whose pins **this build**
+  reserves — the AtomS3 Lite's GPIO35 is free on this project's Quad-flash build and is SPIIO4 on an
+  Octal one — the same "a pick that cannot work is not a pick" rule the X10A dropdown follows. It
+  asserts nothing about which board this *is* (still unknowable): picking a preset is the **user**
+  telling the firmware what the hardware is.
 - `logic/json.hpp` — the RFC 8259 string encoder every JSON payload goes through: `/status`,
   `/values` and `/scan` (`http_status.cpp`'s `jstr`), `/ota/status` (`json_quote`), as well as the
   MQTT state, heartbeat and crash topics. It escapes `"`, `\` and **every** control byte below 0x20 (`\b\f\n\r\t`, else `\u00XX`),

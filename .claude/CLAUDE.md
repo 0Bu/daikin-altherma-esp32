@@ -356,7 +356,14 @@ status_led.cpp  onboard status-indicator task. TWO back-ends behind one host-tes
                 when it matters. Waits are SLICED (25ms) and re-check the signal, so the override
                 shows within a slice instead of up to a full 1s pattern later. Started AFTER
                 config_load (it reads the config). Exposed on /status.board (pin/driver/polarity),
-                never as a value — the light itself is local-eyes-only. The task loop self-guards
+                never as a value — the light itself is local-eyes-only. ANNOUNCES the resolved
+                pin+driver+polarity on /diag at task start ("led: WS2812 indicator on GPIO35"), like
+                recovery_button.cpp does: the failure users actually hit does NOT fail — pointed at a
+                valid-but-wrong pin (the shipped XIAO default of GPIO21 on an AtomS3 Lite, whose only
+                light is a WS2812 on GPIO35) init succeeds and the firmware drives a pin with nothing
+                on it, so the board looks dead while being perfectly healthy and the only evidence was
+                the ABSENCE of an error line — indistinguishable from a working indicator. The five
+                settings that fix that are one pick in the UI (logic/board_presets.hpp). The task loop self-guards
                 like mqtt_task/poll_task: wifi_info()/mqtt_status()/hp_stats() each copy std::strings
                 out, so a tick can throw under memory pressure — an escape would reboot the board
                 over a cosmetic LED. A dropped tick costs nothing (recomputed from scratch each time)
@@ -413,7 +420,7 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 download that 404s. mqtt_ha republishes the retained crash topic when the flag changes
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, value_def, config_model,
                 config_store, discovery, ha_device, detect, json, mqtt_group, mqtt_uri, heartbeat, crashinfo,
-                bootlog, reset_reason, boot_guard, board_pins, modbus, syslog_policy, link_watch,
+                bootlog, reset_reason, boot_guard, board_pins, board_presets, modbus, syslog_policy, link_watch,
                 wifi_rollback, health_gate, version_cmp, ota_manifest, ws_policy, ws_tx_gate,
                 http_body, http_surface, query_flag, mcp_jsonrpc, timestamp, uart_plan, detect_backoff,
                 hexdump, led_pattern, button, captive,
@@ -594,6 +601,16 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 filtered static would race, as build_status_json runs on httpd AND the poll task's WS
                 broadcaster. It says nothing about which pins a given BOARD breaks out to a header
                 (no board-ID EEPROM exists); README.md carries that per-board table for humans;
+                board_presets.hpp = the SAME per-board facts made applicable: the five board-local
+                settings (led_gpio/led_type/led_inverted/btn_gpio/btn_active_low) for each documented
+                board, served as /status.board.presets and filled into the Hardware modal by one
+                pick. In firmware, not in www/app.js, so a preset can be host-tested against the very
+                validator POST /set_board applies (board_hw_valid) and cannot drift from
+                docs/BOARDS.md into pins the device would reject; board_presets_offerable() withholds
+                a preset this BUILD reserves (the AtomS3 Lite's GPIO35 LED is SPIIO4 on an Octal
+                build), because a pick that cannot work is not a pick — the same rule
+                board_pins_offerable applies to the X10A dropdown. Says nothing about which board
+                this IS (unknowable); picking one is the USER stating the hardware;
                 modbus.hpp = Modbus TCP framing (MBAP, no CRC) + HomeHub register codecs
                 (Temp16/Pow16/Int16/Text16 decode+encode) + the homehub-* mDNS filter — host-tested
                 core for the PLANNED firmware-exclusive HomeHub Modbus link (issue #32), not yet wired.
@@ -676,10 +693,17 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   to its .elf), pins_avail[] (the chip-safe X10A GPIOs for the RX/TX picker, minus the
                   pins the firmware itself drives — the status indicator and the recovery button —
                   logic/board_pins.hpp),
-                  board{led_gpio,led_type,led_inverted,btn_gpio,btn_active_low,pins_local[]} (the
-                  runtime board-hardware config written by POST /set_board; pins_local[] is the
+                  board{led_gpio,led_type,led_inverted,btn_gpio,btn_active_low,pins_local[],presets[]}
+                  (the runtime board-hardware config written by POST /set_board; pins_local[] is the
                   LED/button-eligible set, WIDER than pins_avail by the dedicated-JTAG pads — it
-                  drives the two pin pickers in the ESP32 card's Hardware modal),
+                  drives the two pin pickers in the ESP32 card's Hardware modal; presets[] =
+                  {name,led_gpio,led_type,led_inverted,btn_gpio,btn_active_low} per DOCUMENTED board
+                  (logic/board_presets.hpp), the modal's "Board" dropdown, which only FILLS the five
+                  fields — nothing is saved until the user submits. Carried in this payload rather
+                  than a route of its own because the modal already reads pins_local from it: one
+                  source, no second fetch to fail, and a preset cannot arrive disagreeing with the
+                  pin lists it must fit inside. Empty on a build whose reserved pins withhold every
+                  preset — the UI then hides the row),
                   wifi{ssid,ip,rssi,connected,bssid,mac,std,rolled_back}
                   (bssid/std are the associated AP's BSSID + PHY standard name e.g. "Wi-Fi 4", null
                   while offline; mac is this STA's own MAC, always present; rolled_back = the last
