@@ -835,8 +835,9 @@ static void test_json() {
     CHECK(json_quote("\x0B") == "\"\\u000b\"");
     CHECK(json_quote("\x1F") == "\"\\u001f\"");
 
-    // The reachable case: an AP named Free<LF>WiFi. A raw newline here made GET /scan emit JSON that
-    // fails JSON.parse, collapsing the setup portal's network dropdown to a free-text box.
+    // The reachable case: an AP named Free<LF>WiFi. A raw newline here makes the WHOLE response fail
+    // JSON.parse — /status.wifi.ssid on the dashboard, /scan on the LAN (and, before the portal took
+    // a typed SSID, its network dropdown, which collapsed to a free-text box).
     CHECK(json_quote("Free\nWiFi") == "\"Free\\nWiFi\"");
 
     // EXHAUSTIVE: no byte below 0x20 may ever reach the output raw, whatever the escape form.
@@ -2432,7 +2433,6 @@ static void test_http_surface() {
     // Open setup AP: ONLY the provisioning routes.
     CHECK(http_surface_serves(ap, "/", false));
     CHECK(http_surface_serves(ap, "/index.html", false));
-    CHECK(http_surface_serves(ap, "/scan", false));
     CHECK(http_surface_serves(ap, "/set_wifi", true));
 
     // …and nothing that reads state, carries secrets, or reconfigures the device. This is the F01
@@ -2443,6 +2443,9 @@ static void test_http_surface() {
     CHECK(!http_surface_serves(ap, "/diag", false));
     CHECK(!http_surface_serves(ap, "/coredump", false));
     CHECK(!http_surface_serves(ap, "/models", false));
+    // …including /scan: the portal takes a TYPED SSID (main/www/setup.html has no dropdown and issues
+    // no fetch), so an open radio has no reason to be handed a list of every AP in range.
+    CHECK(!http_surface_serves(ap, "/scan", false));
     CHECK(!http_surface_serves(ap, "/set_mqtt", true));
     CHECK(!http_surface_serves(ap, "/set_syslog", true));
     CHECK(!http_surface_serves(ap, "/set_ntp", true));
@@ -2452,11 +2455,12 @@ static void test_http_surface() {
     CHECK(!http_surface_serves(ap, "/ota/update", true));
     CHECK(!http_surface_serves(ap, "/mcp", true));
 
-    // Method matters on the AP: /set_wifi is POST-only, /scan is GET-only — the mismatched method is
-    // withheld (a GET /set_wifi or POST /scan must not slip through the provisioning allow-list).
+    // Method matters on the AP: /set_wifi is POST-only and the page routes are GET-only — the
+    // mismatched method is withheld (a GET /set_wifi must not slip through the provisioning
+    // allow-list, nor a POST to the setup page).
     CHECK(!http_surface_serves(ap, "/set_wifi", false));
-    CHECK(!http_surface_serves(ap, "/scan", true));
     CHECK(!http_surface_serves(ap, "/", true));
+    CHECK(!http_surface_serves(ap, "/index.html", true));
 }
 
 // logic/lwt_select.hpp — the leaving-water MEASUREMENT picker that feeds ΔT / heat output / COP.

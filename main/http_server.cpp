@@ -30,7 +30,7 @@ void http_start() {
     }
     // Pick the trust surface from the WiFi mode, FAILING CLOSED: only a definitely-detected station
     // mode (WIFI_MODE_STA, the normal path) is the trusted LAN. Any esp_wifi_get_mode() error, or
-    // AP/APSTA/NULL (the setup portal runs APSTA — provisioning.cpp), falls to the restricted
+    // AP/APSTA/NULL (the setup portal runs AP — provisioning.cpp), falls to the restricted
     // setup-AP surface. A security boundary must never WIDEN on an unreadable mode: the previous
     // `!= AP && != APSTA` test treated a query error as trusted-LAN and would have exposed /coredump,
     // /diag and the config/OTA/MCP surface to an unauthenticated radio client (F01). Decided ONCE

@@ -8,17 +8,18 @@
 //
 // RFC 8259 §7 requires escaping '"', '\' AND every control character below 0x20. Escaping only the
 // first two — as this encoder did before — let an AP named "Free<LF>WiFi" put a raw newline inside
-// a JSON string: GET /scan then fails JSON.parse ("Bad control character in string literal"),
-// which rejects setup.html's fetch("/scan").then(r => r.json()) and drops the portal into its
-// .catch(textInput) fallback — the network dropdown collapses to a free-text SSID box for every
-// user, a denial of the scan UI from radio range.
+// a JSON string, so the whole payload fails JSON.parse ("Bad control character in string literal").
+// Historically that broke the setup portal, which parsed GET /scan to fill an SSID dropdown; the
+// portal now takes a TYPED SSID and fetches nothing, but the hostile bytes did not go away — they
+// still reach the dashboard through /status.wifi.ssid (the associated AP names itself) and /scan,
+// where one unparseable field takes down the ENTIRE response, not just that field.
 //
-// This sits BENEATH the setup portal's DOM-node SSID escaping (issue #52, fixed in #65). The two
-// are orthogonal and neither subsumes the other: #65 stops a hostile SSID from being interpolated
-// as MARKUP, while this encoder only guarantees the bytes PARSE as JSON — an SSID of `"><script>`
-// is already valid JSON here, and conversely a body that fails JSON.parse never reaches those DOM
-// nodes at all, because #65 kept the .catch(textInput) fallback. Do not read a fix on either layer
-// as covering the other.
+// This sits BENEATH the DOM escaping of any SSID that is rendered (issue #52, fixed in #65 — the
+// dashboard's esc()). The two are orthogonal and neither subsumes the other: #65 stops a hostile
+// SSID from being interpolated as MARKUP, while this encoder only guarantees the bytes PARSE as
+// JSON — an SSID of `"><script>` is already valid JSON here, and conversely a body that fails
+// JSON.parse never reaches those DOM nodes at all. Do not read a fix on either layer as covering
+// the other.
 #include <string>
 
 namespace daik {

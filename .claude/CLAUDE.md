@@ -193,10 +193,13 @@ sntp_time.cpp   SNTP client (esp_netif_sntp, config().ntp_server — NVS "ntp_se
                 client) — a later /set_ntp edit reboots into a fresh config_load() rather than
                 mutating it live.
 provisioning.cpp setup SoftAP (daikin-altherma-esp32-setup) + DHCP DNS-offer; HTTP is the shared :80
-                server. Runs APSTA (not AP-only): the STA interface is brought up idle (never given
-                creds) purely so GET /scan -> wifi_scan() -> esp_wifi_scan_start() can populate the
-                setup page's SSID dropdown — an AP-only radio can't scan, so the picker used to always
-                collapse to the free-text fallback. h_index treats APSTA like AP (serve setup.html)
+                server. AP-ONLY: the portal takes the SSID as TYPED TEXT (setup.html has no dropdown
+                and fetches nothing), so the idle STA interface an earlier APSTA version brought up
+                purely to make esp_wifi_scan_start() work is gone with the scan — and a hidden network
+                is entered like any other. /scan stays a trusted-LAN-only route (logic/http_surface.hpp:
+                an open radio has no reason to be handed every AP in range). h_index still treats
+                APSTA like AP (serve setup.html) — the STA path is WIFI_MODE_STA, so any mode with a
+                live SoftAP means setup
 captive_dns.cpp UDP:53 catch-all (every name -> 192.168.4.1) so the setup portal auto-pops (setup mode only)
 hp_comm.cpp     X10A UART (9600 8E1) + register query. hp_uart_init installs the driver ONCE, then a
                 pin change is a register-only uart_set_pin remap (logic/uart_plan.hpp) — NOT a
@@ -227,9 +230,9 @@ hp_poll.cpp     poll engine task: (auto-detect if profile=="auto") profile regis
                 poll_once reserves the value vector up front (one sized alloc, not log2(n) regrows)
 http_server.cpp esp_http_server :80; concerns register their own routes (http_handlers.hpp). Picks
                 the trust surface from the WiFi mode (esp_wifi_get_mode): the OPEN setup AP registers
-                ONLY the provisioning routes (GET / /index.html /scan, POST /set_wifi + captive) and
-                withholds /coredump /diag + the config/OTA/MCP surface from an unauthenticated radio
-                client; STA (trusted LAN) registers the full API. Boundary = host-tested
+                ONLY the provisioning routes (GET / /index.html, POST /set_wifi + captive) and
+                withholds /scan /coredump /diag + the config/OTA/MCP surface from an unauthenticated
+                radio client; STA (trusted LAN) registers the full API. Boundary = host-tested
                 logic/http_surface.hpp, applied via http_register_on (http_common.cpp)
 http_common.cpp shared HTTP helpers + the ONE OOM guard every route runs under: http_register()
                 stashes the real handler in user_ctx and installs a handle_all trampoline that calls
@@ -377,13 +380,14 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 /values, /scan via http_status.cpp's jstr; the MQTT state/heartbeat/crash topics).
                 Escapes " and \ AND every control byte < 0x20 (\b\f\n\r\t, else \u00XX) — the strings
                 are NOT all ours: an SSID is arbitrary bytes from any AP in range, and escaping only
-                the first two let "Free<LF>WiFi" put a raw newline in a JSON string, so GET /scan
-                failed JSON.parse and setup.html's .catch fallback collapsed the network dropdown to
-                a free-text box for every portal user. BENEATH the portal's DOM-node SSID escaping
+                the first two let "Free<LF>WiFi" put a raw newline in a JSON string, so the WHOLE
+                response failed JSON.parse — first seen as the setup portal's network dropdown
+                collapsing to a free-text box, and still reachable via /status.wifi.ssid (the
+                associated AP names itself) + /scan now that the portal takes a TYPED SSID and parses
+                nothing. BENEATH the DOM-node escaping of a RENDERED SSID
                 (#52, fixed in #65): orthogonal, neither subsumes the other — #65 stops hostile SSID
                 MARKUP, this makes the bytes PARSE at all (a decoded SSID of `"><script>` is valid
-                JSON, and #65's DOM nodes still never see it if the parse fails first). #65 kept the
-                .catch(textInput) fallback, so the scan-UI denial was live until this landed.
+                JSON, and #65's DOM nodes still never see it if the parse fails first).
                 Bytes >= 0x20 pass through
                 verbatim (raw UTF-8, 0x7F) — the cast to unsigned char is load-bearing, since `char`
                 is signed and a naive c < 0x20 would mangle every non-ASCII SSID.
@@ -596,7 +600,9 @@ GET  /models      pin hint + catalog metadata (def/models_catalog.hpp). Detectio
                   /status.pins_avail (logic/board_pins.hpp), NOT from this pin_hint. Legacy metadata
                   behind a read-only inspection endpoint for humans/scripts
 GET  /diag[?verbose=0|1][?clear=1]   in-memory diag log
-GET  /scan        WiFi scan (setup)
+GET  /scan        WiFi scan {"networks":[{ssid,rssi}]} — TRUSTED-LAN ONLY and read by NO shipped
+                  client: the setup portal takes a TYPED SSID (no dropdown, no fetch), so this is a
+                  humans/scripts diagnostic like /models, not part of the provisioning surface
 GET  /coredump[?clear=1]   stream the flash core-dump image (chunked octet-stream; 404 if none);
                   ?clear=1 erases the coredump partition. Decode offline against the matching-version
                   .elf: scripts/decode-coredump.sh coredump.bin (CI archives the .elf per build). The

@@ -43,7 +43,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 13 | 19-entity device **heartbeat** diagnostics stream (heap trend + reset reason + SNTP wall clock + WiFi MAC/BSSID incl.) | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
 | 14 | Strongest-AP scan + SAE tuning + **endless reconnect** | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 15 | **ICMP gateway watchdog** (ghost-association recovery) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
-| 16 | Captive-portal provisioning (APSTA SoftAP with a working `/scan` + UDP:53 DNS catch-all) | ✅ | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp) |
+| 16 | Captive-portal provisioning (AP-only SoftAP, typed SSID + UDP:53 DNS catch-all) | ✅ | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp) |
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
@@ -281,12 +281,16 @@ joining phone's OS connectivity probe resolves to the device and auto-pops the s
 catch-all HTTP route ([`http_status.cpp`](../main/http_status.cpp)) serves that page. One shared `:80`
 `esp_http_server` handles both AP-setup and STA-run modes.
 
-The portal runs the radio in **APSTA**, not AP-only: `esp_wifi_scan_start()` needs a *started* station
-interface, so an AP-only setup mode could never serve `GET /scan` — the page's network dropdown always
-fell back to `setup.html`'s free-text SSID box, i.e. the picker was dead in the only mode it runs in.
-The STA side is created and started purely so the radio can scan; it is never handed credentials or
-told to connect. Scanning hops channels briefly, a tolerable blip for the associated phone during a
-one-time setup.
+The portal takes the SSID as **typed text** — it does not scan, offers no network dropdown, and
+fetches nothing. So the radio runs **AP-only**: an earlier version ran APSTA with an idle station
+interface for the single reason that `esp_wifi_scan_start()` needs a *started* STA, and without one
+`GET /scan` failed and the dropdown fell back to a free-text box anyway. With the scan gone, so are
+the extra interface and the channel-hopping blip a scan inflicts on the associated phone. `GET /scan`
+itself survives as a trusted-LAN diagnostic; it is not on the open AP's surface
+([`logic/http_surface.hpp`](../main/logic/http_surface.hpp)).
+
+A typed SSID also handles what the picker could not: a **hidden** (non-broadcasting) network is
+entered exactly like a visible one.
 
 ---
 

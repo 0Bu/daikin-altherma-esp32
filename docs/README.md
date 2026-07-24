@@ -233,8 +233,11 @@ GET  /events                       # WebSocket live push (the only live UI trans
                                    #   unread body would desync every frame after it).
 GET  /models                       # profile catalog + pin hint (detection is automatic; no manual picker)
 GET  /diag[?verbose=0|1][?clear=1] # plain-text in-memory diag log (raw RX frames when verbose)
-GET  /scan                         # WiFi scan for the setup portal → {"networks":[{ssid,rssi}]}
-                                   #   (no auth field — the setup UI only needs the name + signal)
+GET  /scan                         # WiFi scan → {"networks":[{ssid,rssi}]} (name + signal only, no
+                                   #   auth field). Trusted-LAN only, and read by no shipped client:
+                                   #   the setup portal takes a TYPED SSID and never scans. A
+                                   #   diagnostic ("what does the board see, how strong?") for
+                                   #   humans/scripts, like /models
 GET  /coredump[?clear=1]           # stream the flash core-dump image (chunked; 404 if none);
                                    #   ?clear=1 erases the coredump partition. Decode offline with
                                    #   scripts/decode-coredump.sh coredump.bin (matching-version .elf).
