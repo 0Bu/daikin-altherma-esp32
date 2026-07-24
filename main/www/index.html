@@ -432,6 +432,14 @@
     <div class="modal-backdrop" id="boardBackdrop"></div>
     <form class="modal-card" id="boardForm" role="dialog" aria-modal="true" aria-labelledby="boardModalTitle">
       <div class="section-label card-title" id="boardModalTitle" data-i18n="board.title">Board hardware</div>
+      <!-- Ready-made settings for the boards this project documents (logic/board_presets.hpp, served
+           in /status.board.presets). Picking one only FILLS the fields below — nothing is saved until
+           Save — so it stays a shortcut the user can inspect and override, not a hidden action. The
+           row hides itself when the device sent no presets. -->
+      <label class="field" id="bdPresetRow" hidden>
+        <span class="field-label plain" data-i18n="board.preset">Board</span>
+        <select class="input" id="bdPreset"></select>
+      </label>
       <label class="field">
         <span class="field-label plain" data-i18n="board.ledtype">Status LED</span>
         <select class="input" id="bdLedType">

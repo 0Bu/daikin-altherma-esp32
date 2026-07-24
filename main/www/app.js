@@ -106,6 +106,7 @@ const I18N = {
     "ntp.title": "NTP server", "ntp.server": "Server",
     "ntp.hint": "Hostname or IP of the NTP server the device syncs its clock from. Empty resets to the firmware default.",
     "board.title": "Board hardware", "board.ledtype": "Status LED", "board.none": "None",
+    "board.preset": "Board", "board.preset_custom": "Custom",
     "board.led_gpio": "Plain LED (GPIO)", "board.led_ws2812": "Addressable RGB (WS2812)",
     "board.ledpin": "LED pin", "board.btnpin": "Reset button pin",
     "board.ledinv": "Active low (LED lights when the pin is driven LOW)",
@@ -195,6 +196,7 @@ const I18N = {
     "ntp.title": "NTP-Server", "ntp.server": "Server",
     "ntp.hint": "Hostname oder IP des NTP-Servers, mit dem das Gerät seine Uhr synchronisiert. Leer setzt auf den Firmware-Standard zurück.",
     "board.title": "Board-Hardware", "board.ledtype": "Status-LED", "board.none": "Keine",
+    "board.preset": "Board", "board.preset_custom": "Benutzerdefiniert",
     "board.led_gpio": "Einfache LED (GPIO)", "board.led_ws2812": "Adressierbare RGB-LED (WS2812)",
     "board.ledpin": "LED-Pin", "board.btnpin": "Reset-Taster-Pin",
     "board.ledinv": "Active low (LED leuchtet, wenn der Pin auf LOW liegt)",
@@ -1879,8 +1881,55 @@ function syncBoardFields() {
   $("bdLedInvRow").hidden = type !== 0;
   $("bdBtnInvRow").hidden = +$("bdBtnPin").value < 0;
 }
+// ── Board presets ───────────────────────────────────────────────────────────
+// The ready-made per-board settings the device serves in /status.board.presets (logic/
+// board_presets.hpp — one table, host-tested against the same validator POST /set_board applies, so
+// the browser never carries a second copy of the board facts that could drift from it).
+//
+// A pick only FILLS the five fields; nothing is written until Save. The reverse direction matters
+// just as much: any hand-edit that leaves a preset's values snaps the select back to "Custom", so
+// the dropdown can never claim a board the fields below no longer describe.
+function boardPresets() {
+  return Array.isArray(S.status?.board?.presets) ? S.status.board.presets : [];
+}
+// Compare only the fields that are actually in play: polarity is meaningless for a WS2812 (it
+// encodes "off" as the zero colour) and for an absent LED/button, so a difference there must not
+// downgrade an otherwise-exact match to "Custom".
+function boardFieldsMatch(p) {
+  const type = +$("bdLedType").value;
+  const led = type < 0 ? -1 : +$("bdLedPin").value;
+  if (p.led_gpio !== led) return false;
+  if (led >= 0) {
+    if (p.led_type !== type) return false;
+    if (type === 0 && !!p.led_inverted !== $("bdLedInv").checked) return false;
+  }
+  const btn = +$("bdBtnPin").value;
+  if (p.btn_gpio !== btn) return false;
+  if (btn >= 0 && p.btn_active_low !== $("bdBtnInv").checked) return false;
+  return true;
+}
+// findIndex returns -1 when nothing matches, which is exactly the "Custom" option's value.
+function syncPresetSelection() {
+  if (boardPresets().length) $("bdPreset").value = String(boardPresets().findIndex(boardFieldsMatch));
+}
+function applyPreset() {
+  const p = boardPresets()[+$("bdPreset").value];
+  if (!p) return;                       // "Custom" — leave the fields exactly as the user has them
+  $("bdLedType").value = String(p.led_gpio < 0 ? -1 : p.led_type);
+  if (p.led_gpio >= 0) boardPinOptions($("bdLedPin"), p.led_gpio, false);
+  $("bdLedInv").checked = !!p.led_inverted;
+  boardPinOptions($("bdBtnPin"), p.btn_gpio, true);
+  $("bdBtnInv").checked = p.btn_active_low !== false;
+  syncBoardFields();
+}
 function fillBoard() {
   const b = S.status?.board || {};
+  const presets = boardPresets();
+  // Hidden when the device sent none — an older firmware, or a build whose reserved pins withhold
+  // every preset (board_presets_offerable). The manual fields still do the whole job.
+  $("bdPresetRow").hidden = presets.length === 0;
+  $("bdPreset").innerHTML = `<option value="-1">${esc(t("board.preset_custom"))}</option>` +
+    presets.map((p, i) => `<option value="${i}">${esc(p.name)}</option>`).join("");
   const hasLed = b.led_gpio != null && b.led_gpio >= 0;
   $("bdLedType").value = hasLed ? String(b.led_type ?? 0) : "-1";
   boardPinOptions($("bdLedPin"), hasLed ? b.led_gpio : -1, false);
@@ -1888,6 +1937,7 @@ function fillBoard() {
   boardPinOptions($("bdBtnPin"), b.btn_gpio, true);
   $("bdBtnInv").checked = b.btn_active_low !== false;
   syncBoardFields();
+  syncPresetSelection();   // name the board if what is stored happens to BE one of the presets
 }
 function openBoard() {
   fillBoard();
@@ -2484,8 +2534,13 @@ function wire() {
   $("bdCancel").onclick = closeBoard;
   $("boardBackdrop").onclick = closeBoard;
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("boardModal").hidden) closeBoard(); });
-  $("bdLedType").addEventListener("change", syncBoardFields);
-  $("bdBtnPin").addEventListener("change", syncBoardFields);
+  $("bdPreset").addEventListener("change", applyPreset);
+  // Every field the presets cover re-decides which preset (if any) the form now describes — see
+  // syncPresetSelection. The two that also change the form's SHAPE keep doing that first.
+  $("bdLedType").addEventListener("change", () => { syncBoardFields(); syncPresetSelection(); });
+  $("bdBtnPin").addEventListener("change", () => { syncBoardFields(); syncPresetSelection(); });
+  for (const id of ["bdLedPin", "bdLedInv", "bdBtnInv"])
+    $(id).addEventListener("change", syncPresetSelection);
   $("boardForm").addEventListener("submit", (e) => {
     e.preventDefault();
     const type = +$("bdLedType").value;

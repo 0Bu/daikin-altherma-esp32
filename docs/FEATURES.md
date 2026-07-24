@@ -65,7 +65,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 35 | **Publish-time value-plausibility filter** — a decoded °C reading outside a physical envelope, or a saturation temp from a 0-bar sensor, is dropped at publish (HA gets *unavailable*, never a false 576 °C / −51.2 °C); the runtime backstop to the build-time catalog audit (#31), kept out of `convert()` so the audit still distinguishes the intrinsic converters | ✅ 🧪 | [`logic/convert.hpp`](../main/logic/convert.hpp), [`hp_convert.cpp`](../main/hp_convert.cpp) |
 | 36 | **Raw page dump on `/diag`** — the wire bytes of pages `0x00`/`0x10`/`0x20`/`0xA0`/`0xA1`, one line per detect pass. Everything else the device exposes is *decoded*, so an impossible reading cannot be attributed to a wrong converter vs. a wrong offset vs. a per-unit layout difference without these bytes — and they otherwise never leave the board. `0x10`/`0x20` cover impossible readings that fall *inside* the plausibility window and are therefore never masked | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/hexdump.hpp`](../main/logic/hexdump.hpp) |
 | 37 | **Physical recovery button** — a 5 s hold erases the whole stored config and reboots into the setup portal: the only config reset that needs no network access to the device. Armed/erasing are signalled on the status indicator, and the destructive path (arm checkpoint, debounced abort) is host-tested | ✅ 🧪 | [`recovery_button.cpp`](../main/recovery_button.cpp), [`logic/button.hpp`](../main/logic/button.hpp), [`nvs_storage.cpp`](../main/nvs_storage.cpp) |
-| 38 | **Board-hardware runtime config** (`POST /set_board`) — indicator pin/driver/polarity + button pin live in NVS, not Kconfig, so one published image serves boards with different onboard parts | ✅ 🧪 | [`http_config.cpp`](../main/http_config.cpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp), [`logic/board_pins.hpp`](../main/logic/board_pins.hpp) |
+| 38 | **Board-hardware runtime config** (`POST /set_board`) — indicator pin/driver/polarity + button pin live in NVS, not Kconfig, so one published image serves boards with different onboard parts; per-board **presets** (`/status.board.presets`) fill all five fields from one pick and are host-tested against the request path's own validator, and the indicator **announces its resolved pin/driver on `/diag`** at boot — a valid-but-wrong pin initialises fine and drives nothing, which otherwise looks exactly like a working LED | ✅ 🧪 | [`http_config.cpp`](../main/http_config.cpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp), [`logic/board_pins.hpp`](../main/logic/board_pins.hpp), [`logic/board_presets.hpp`](../main/logic/board_presets.hpp), [`status_led.cpp`](../main/status_led.cpp) |
 
 ---
 
@@ -632,6 +632,12 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   (`board_pin_local_io()`) is what the indicator and button themselves may use — it adds back the
   four dedicated-JTAG pads, withheld from the X10A list only to keep a debug probe usable, which is
   a preference an onboard part soldered to GPIO41 simply overrides),
+  the ready-made per-board settings behind the Hardware modal's *Board* pick
+  (`board_presets.hpp` — the five board-local fields for each **documented** board, served as
+  `/status.board.presets`; in firmware rather than in `www/app.js` precisely so these `CHECK`s can
+  assert every offered preset passes the same `board_hw_valid()` the request path applies, and so a
+  build that reserves a preset's pin withholds it instead of offering a pick `POST /set_board` would
+  refuse — it asserts nothing about which board this *is*, which stays unknowable),
   the status indicator's state→pattern rule and the button override's priority
   (`led_pattern.hpp` — shared by the GPIO and WS2812 back-ends so they cannot drift apart; *shape*,
   not colour, carries the state, since a monochrome LED sees no colour at all),
@@ -699,7 +705,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   `0x00`/`0x10`/`0x20`/`0xA0`/`0xA1` on `/diag`; truncation stops after the last *complete* byte, since a trailing
   nibble would read as a different value, and degenerate inputs still terminate the buffer the caller
   hands to a `diag_printf` `%s`).
-  **1047 `CHECK`s** in
+  **1081 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the

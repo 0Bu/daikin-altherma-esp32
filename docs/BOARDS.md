@@ -48,7 +48,11 @@ them swapped — none of which the AtomS3 Lite breaks out. So the bus stays sile
 picked once in the dashboard (**ESP32** card → RX/TX dropdown, `POST /set_hp`); after that they are
 cached in NVS and re-used every boot. Their order does not matter: the swap is probed too.
 
-**Firmware mapping.** Set in the dashboard under **ESP32 → Hardware** (a save reboots):
+**Firmware mapping.** Set in the dashboard under **ESP32 → Hardware** (a save reboots). Pick
+**M5Stack AtomS3 Lite** from the *Board* dropdown at the top of that dialog and all five fields below
+fill in — the dropdown is this table, served by the firmware (`logic/board_presets.hpp`), so it
+cannot drift from what follows. Nothing is written until you press Save, and editing any field
+afterwards switches the dropdown back to *Custom*.
 
 - Status LED → `led_gpio 35`, type **WS2812**. The six operating states then come out as colours —
   blue = setup portal, yellow = connecting, green = healthy, red double-flash = X10A down, orange =
@@ -97,7 +101,8 @@ so a freshly flashed XIAO finds the bus on its own.
 **Firmware mapping.** Status indicator: `led_gpio 21`, `led_type` *plain LED*, **active low**
 (the shipped first-boot default, so a XIAO needs no configuration). Recovery button: none — a XIAO
 has no free momentary switch, so a factory reset stays a web-UI or USB job unless you wire your own
-button to one of the free pins.
+button to one of the free pins. Available as **Seeed XIAO ESP32-S3** in the *Board* dropdown under
+**ESP32 → Hardware**, should the settings ever need restoring.
 
 **Watch out:** GPIO3 (D2) is broken out as an ordinary pad but is the chip's JTAG-source-select
 **strapping** pin, so the firmware never offers it for X10A. GPIO16/17 do not exist on the XIAO's
@@ -116,8 +121,14 @@ boards that have come up, including the Waveshare ESP32-S3-DevKitC-1.
 
 For the indicator and the button, read your board's schematic for the onboard LED pin, its polarity
 (or whether it is a WS2812), and any free momentary switch, then enter them under **ESP32 →
-Hardware**. If your board has no LED the firmware can drive, leave the indicator on *None* — every
-state it shows is also on `/status` and in the dashboard.
+Hardware** — leaving the *Board* dropdown on *Custom*, since the presets cover only the two boards
+above. If your board has no LED the firmware can drive, leave the indicator on *None* — every state
+it shows is also on `/status` and in the dashboard.
+
+A board with no preset is worth knowing about for one reason: until you set the indicator, it runs
+on the shipped default (a plain LED on GPIO21) and will silently drive that pin whether or not
+anything is on it. `/diag` says which pin and driver it resolved to at boot (`led: LED indicator on
+GPIO21 (active low)`), so a dark board is one line away from an explanation.
 
 **Leave the recovery button on *None* unless one is really wired.** An unconfigured input pin
 floats, and a floating pin that happens to read "pressed" for five seconds would erase the config of

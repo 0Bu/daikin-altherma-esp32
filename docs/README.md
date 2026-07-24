@@ -222,10 +222,12 @@ LAN only, see [SECURITY.md](SECURITY.md).
 GET  /  (alias /index.html)        # embedded web UI (gzipped into the app binary)
 GET  /status                       # { version, platform, uptime_s, app_elf_sha256, pins_avail:[..],
                                    #   board:{led_gpio,led_type,led_inverted,btn_gpio,
-                                   #        btn_active_low,pins_local:[..]},
+                                   #        btn_active_low,pins_local:[..],presets:[..]},
                                    #     (pins_local = the LED/button-eligible GPIOs — WIDER than
                                    #      pins_avail: the dedicated-JTAG pads are legal for an
-                                   #      onboard part but withheld from the X10A picker)
+                                   #      onboard part but withheld from the X10A picker;
+                                   #      presets = ready-made {name,led_*,btn_*} settings per
+                                   #      documented board, the Hardware modal's "Board" pick)
                                    #   wifi:{ssid,rssi,ip,connected,bssid,mac,std,rolled_back},
                                    #   mqtt:{configured,connected,tls,has_creds,broker,error?},
                                    #     (has_creds = whether creds are stored, never their value)
