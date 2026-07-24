@@ -187,10 +187,33 @@ host-testable core is unusually large and valuable, because the risky parts are 
 - `logic/convert.hpp` — every converter (raw bytes → typed value). This is where a wrong sign,
   scale or endianness would silently corrupt a reading; unit-tested per converter id against
   known-good reference outputs. Also `reading_plausible()` — the **publish-time** filter that drops a
-  °C reading (dataType 1) outside a physical envelope (an idle unit's 576 °C, a ±3276.x sentinel);
-  applied by `hp_format`, deliberately **not** folded into `convert()` so the domain audit still sees
-  each converter's intrinsic semantics (conv 105 vs 114 on the no-data sentinel). conv 405 separately
-  drops a saturation temp derived from a 0-bar (absent/idle) pressure.
+  °C reading (dataType 1) outside a physical envelope (an idle unit's 576 °C, a ±3276.x sentinel),
+  **and** a refrigerant pressure at or below 0 bar; applied by `hp_format`, deliberately **not** folded
+  into `convert()` so the domain audit still sees each converter's intrinsic semantics (conv 105 vs 114
+  on the no-data sentinel). conv 405 separately drops a saturation temp derived from a 0-bar
+  (absent/idle) pressure — the pressure rule makes the bar row agree with the °C row beside it, which
+  was already being withheld.
+  The pressure rule may need the **whole profile table**, because 0 bar is physically impossible for
+  refrigerant (absolute pressure; a sealed circuit is never at vacuum) yet perfectly real for water (a
+  drained system). `is_refrigerant_pressure()` decides which is which **structurally**, never from the
+  label — an alias or a translation would flip it, the `lwt_select.hpp` lesson — on either of two
+  signals:
+  1. **The page.** `0x20`/`0x21`/`0xA0`/`0xA1` are the outdoor unit's own pages; there is no water
+     circuit out there. Measured across all 45 shipped profiles: every `dataType 2` row on `0x20` and
+     `0xA0` is a refrigerant pressure, and no water-pressure row appears on either. This signal needs
+     no profile table at all.
+  2. **A conv-405 saturation-temperature twin** at the same `(reg, offset)` — 405 only ever accompanies
+     a refrigerant pressure. This is what reaches the refrigerant rows on the *mixed* hydronic page
+     `0x62`, which carries both `Water pressure` (`0x62/11`) and `Refrigerant pressure sensor`
+     (`0x62/15`). This signal is the one that needs the table.
+
+  Together they cover 93 of the catalog's bar rows. **Known gap:** 16 `Refrigerant pressure sensor`
+  rows and one `Pressure sensor` sit on `0x62` with no 405 twin and are still published at 0 bar;
+  closing that would mean matching on the label, which is the one thing this must not do. They are no
+  worse off than before the filter existed. `test_refrigerant_pressure_catalog()` pins the coverage
+  and, more importantly, that **no** water-pressure row is ever classified refrigerant on any profile —
+  a false positive there would withhold a genuine 0-bar reading from a drained system, which is worse
+  than the reading being suppressed is good.
 - `logic/registers.hpp` — register-buffer parsing (offset/size extraction, bounds).
 - `logic/value_def.hpp` — the `ValueDef{reg, offset, conv, size, type, label}` row type the generated
   `def/*` profile tables are written in: the shared vocabulary between the offline generator's output

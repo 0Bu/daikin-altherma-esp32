@@ -60,6 +60,18 @@ CONFIG_LWIP_TCP_WND_DEFAULT=11520
 # Stack sizes — a comfortable main task stack for NVS + HTTP + the poll engine.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
 
+# Catch a stack overflow AT THE FIRST WRITE past the limit, with a hardware watchpoint, instead of
+# at the next context switch. IDF's default is the CANARY check, and v1.0.12 is exactly the failure
+# the canary misses: the httpd task ran 460 bytes off its floor, wrote past it into its own TCB
+# (clobbering pvThreadLocalStoragePointers[0] with 0x4) and kept running. A canary is only compared
+# when the scheduler switches, and a frame that writes SPARSELY below the limit can miss the canary
+# words entirely — this one left the neighbouring TLS[1] intact, which is how we know it did. The
+# task then died ~44 s later inside lwip's pthread_getspecific, with a backtrace pointing at the
+# WebSocket send rather than at anything responsible, and diagnosing it took a core dump and gdb.
+# A watchpoint panics at the offending instruction instead. Cost: one of the two ESP32-S3 debug
+# watchpoints, which this project does not otherwise use (it debugs from core dumps, not JTAG).
+CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y
+
 # Logging
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 

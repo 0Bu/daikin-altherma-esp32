@@ -131,7 +131,10 @@ static void poll_once() {
             cv.reg   = prof.values[k].reg;
             cv.conv  = prof.values[k].conv;
             std::string val;
-            if (hp_format(prof.values[k], payload, paylen, rtype, val)) cv.value = val;
+            // The whole table goes along: reading_plausible needs it to tell a refrigerant pressure
+            // (0 bar impossible) from the water one (0 bar = a drained system, and real).
+            if (hp_format(prof.values[k], payload, paylen, rtype, val, prof.values, prof.count))
+                cv.value = val;
             fresh.push_back(std::move(cv));
         }
     }

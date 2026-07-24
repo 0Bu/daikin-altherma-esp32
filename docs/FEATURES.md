@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1061 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1101 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -62,10 +62,11 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 32 | **SNTP wall clock**, runtime-configurable server — real UTC for the syslog TIMESTAMP field + `/status.ntp` | ✅ 🧪 | [`sntp_time.cpp`](../main/sntp_time.cpp), [`logic/timestamp.hpp`](../main/logic/timestamp.hpp), [`http_config.cpp`](../main/http_config.cpp) |
 | 33 | **Detect-sweep heap hardening** — install-once UART + register-only pin remap (no per-swap driver realloc) and silent-bus detect backoff, closing a fragmentation panic caught by a symbolized coredump | ✅ 🧪 | [`hp_comm.cpp`](../main/hp_comm.cpp), [`logic/uart_plan.hpp`](../main/logic/uart_plan.hpp), [`hp_poll.cpp`](../main/hp_poll.cpp), [`logic/detect_backoff.hpp`](../main/logic/detect_backoff.hpp) |
 | 34 | **HTTP trust-surface split** — the open setup AP registers only the provisioning routes; `/coredump`, `/diag` and the config/OTA/MCP surface exist only on the trusted STA LAN | ✅ 🧪 | [`http_server.cpp`](../main/http_server.cpp), [`logic/http_surface.hpp`](../main/logic/http_surface.hpp), [`http_common.cpp`](../main/http_common.cpp) |
-| 35 | **Publish-time value-plausibility filter** — a decoded °C reading outside a physical envelope, or a saturation temp from a 0-bar sensor, is dropped at publish (HA gets *unavailable*, never a false 576 °C / −51.2 °C); the runtime backstop to the build-time catalog audit (#31), kept out of `convert()` so the audit still distinguishes the intrinsic converters | ✅ 🧪 | [`logic/convert.hpp`](../main/logic/convert.hpp), [`hp_convert.cpp`](../main/hp_convert.cpp) |
+| 35 | **Publish-time value-plausibility filter** — a decoded °C reading outside a physical envelope, a saturation temp from a 0-bar sensor, or a **refrigerant pressure at ≤ 0 bar** (absolute; a sealed circuit is never at vacuum) is dropped at publish (HA gets *unavailable*, never a false 576 °C / −51.2 °C / 0.0 bar); the runtime backstop to the build-time catalog audit (#31), kept out of `convert()` so the audit still distinguishes the intrinsic converters. Refrigerant vs. water is decided **structurally** — outdoor page, or a conv-405 saturation twin — never by label, and a catalog-wide test pins that no water-pressure row is ever caught (a drained system's real 0 bar must still publish) | ✅ 🧪 | [`logic/convert.hpp`](../main/logic/convert.hpp), [`hp_convert.cpp`](../main/hp_convert.cpp) |
 | 36 | **Raw page dump on `/diag`** — the wire bytes of pages `0x00`/`0x10`/`0x20`/`0xA0`/`0xA1`, one line per detect pass. Everything else the device exposes is *decoded*, so an impossible reading cannot be attributed to a wrong converter vs. a wrong offset vs. a per-unit layout difference without these bytes — and they otherwise never leave the board. `0x10`/`0x20` cover impossible readings that fall *inside* the plausibility window and are therefore never masked | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/hexdump.hpp`](../main/logic/hexdump.hpp) |
 | 37 | **Physical recovery button** — a 5 s hold erases the whole stored config and reboots into the setup portal: the only config reset that needs no network access to the device. Armed/erasing are signalled on the status indicator, and the destructive path (arm checkpoint, debounced abort) is host-tested | ✅ 🧪 | [`recovery_button.cpp`](../main/recovery_button.cpp), [`logic/button.hpp`](../main/logic/button.hpp), [`nvs_storage.cpp`](../main/nvs_storage.cpp) |
 | 38 | **Board-hardware runtime config** (`POST /set_board`) — indicator pin/driver/polarity + button pin live in NVS, not Kconfig, so one published image serves boards with different onboard parts; per-board **presets** (`/status.board.presets`) fill all five fields from one pick and are host-tested against the request path's own validator, and the indicator **announces its resolved pin/driver on `/diag`** at boot — a valid-but-wrong pin initialises fine and drives nothing, which otherwise looks exactly like a working LED | ✅ 🧪 | [`http_config.cpp`](../main/http_config.cpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp), [`logic/board_pins.hpp`](../main/logic/board_pins.hpp), [`logic/board_presets.hpp`](../main/logic/board_presets.hpp), [`status_led.cpp`](../main/status_led.cpp) |
+| 39 | **Stack-overflow watchpoint** — a hardware watchpoint on every task's stack limit, so the *first* write past it panics at the offending instruction instead of corrupting a neighbour silently. IDF's default canary is only compared at a context switch and a sparsely-writing frame can step over it — which is how a v1.0.12 `httpd` overflow overwrote its own TCB and died 44 s later in unrelated lwip code. Shipped with the `httpd` stack raised to 12 KB and the `/status` JSON built by `+=` rather than long `+` chains | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults), [`http_server.cpp`](../main/http_server.cpp), [`http_status.cpp`](../main/http_status.cpp) |
 
 ---
 
@@ -266,6 +267,19 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   `esp_reset_reason() == ESP_RST_TASK_WDT` — classified as a fault and surfaced on
   `/status.last_crash` + the retained MQTT crash topic (§6), so a genuine hang becomes a
   diagnosable, self-healing reboot instead of a silent stall that needs a power-cycle.
+- **✅ Stack-overflow watchpoint** (`CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y` in
+  [`sdkconfig.defaults`](../sdkconfig.defaults)). A hardware watchpoint on each task's stack limit, so
+  the **first** write past it panics at the offending instruction. IDF's default is the canary check,
+  which is only compared at a context switch — and v1.0.12 is the case it misses: the `httpd` task ran
+  460 bytes off its floor (`httpd 7728/460` in the core dump's task table), wrote past `pxStack` into
+  its own TCB, overwrote `pvThreadLocalStoragePointers[0]` with `0x4`, and kept going; it died ~44 s
+  later inside lwip's `pthread_getspecific` with a backtrace pointing at a WebSocket send that had
+  nothing to do with it. A sparsely-writing frame can step over the canary words entirely (the
+  neighbouring TLS[1] survived, which is how we know it did). Costs one of the two ESP32-S3 debug
+  watchpoints — unused here, since this firmware is debugged from core dumps rather than JTAG. The
+  same fix raised `httpd` to 12 KB ([`http_server.cpp`](../main/http_server.cpp)) and cut the peak by
+  building the `/status` JSON with `+=` instead of long `+` chains
+  ([`http_status.cpp`](../main/http_status.cpp)).
 - **Modem sleep disabled** (`WIFI_PS_NONE`): trades the idle-power saving of DTIM sleep for a
   consistently responsive HTTP UI (no ~100–300 ms wake latency per inbound request).
 - **mDNS + DHCP hostname** — reachable at `daikin-altherma-esp32.local`, and the router's client list
