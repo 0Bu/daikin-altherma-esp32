@@ -649,7 +649,10 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   planned MCP route (`mcp_jsonrpc.hpp` — parse-error / invalid-request / notification-no-response /
   method-not-found, and which id may be echoed) and the **query-flag policy** (`query_flag.hpp` — a `?clear=1`-style flag
   acts only on exactly `1`, so `?clear=0` no longer wipes the diag log), and the **leaving-water
-  measurement picker** (`lwt_select.hpp` — the host-testable twin of the web UI's `vLwt`: the row
+  measurement picker** (`lwt_select.hpp` — the host-testable twin of the web UI's `lwtRow`/`vLwt`,
+  through which *every* browser consumer resolves — the schematic pill, the derived figures and the
+  inspector's leaving-water rows alike, so a looser second copy cannot re-open the substitution
+  outside the gate's reach: the row
   that feeds the dashboard's ΔT / heat output / COP must be the pre-BUH heat-exchanger outlet (R1T)
   and never a setpoint / mixed-zone / post-BUH (R2T) row — a setpoint substituted for a measurement
   makes all three plausibly wrong, issue #121, the #35–#39 failure shape; keyed on the (R1T) tag so

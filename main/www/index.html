@@ -39,178 +39,234 @@
         <!-- Crash banner: shown when /status.last_crash is set (a fault reset or a core dump waiting).
              Rendered by renderCrashBanner() from app.js; dismissible per crash signature. -->
         <div class="crash-banner" id="crashBanner" hidden></div>
-        <div class="hero">
-          <div class="hero-kicker"><span class="hero-dot" id="heroDot"></span><span id="heroKicker">—</span></div>
-          <div class="hero-mode" id="heroMode">—</div>
-          <div class="hero-sub" id="heroSub"></div>
-          <!-- "Now" panel: state chips (thermostat/pump/BUH/defrost bit-flags) + three key figures.
-               Populated by renderLive(); hidden while the X10A link is down. -->
-          <div class="hero-chips" id="heroChips" hidden></div>
-          <div class="hero-figs" id="heroFigs" hidden>
-            <div class="fig"><div class="fig-k" data-i18n="fig.lw">Leaving water</div><div class="fig-v num"><span id="hfLwt">—</span> <small>°C</small></div></div>
-            <div class="fig"><div class="fig-k" data-i18n="fig.outdoor">Outdoor</div><div class="fig-v num"><span id="hfOut">—</span> <small>°C</small></div></div>
-            <div class="fig" id="hfPthFig"><div class="fig-k"><span data-i18n="fig.pth">Heat output</span> <small data-i18n="abbr.est">est.</small></div><div class="fig-v num"><span id="hfPth">—</span> <small>kW</small></div></div>
-          </div>
-        </div>
 
-        <!-- ═══ Live system section: schematic + KPI tiles + trend (DESIGN.md §5.3) ═══
-             Static DOM updated in place by renderLive()/drawTrend() — deliberately NOT rebuilt per
-             poll like #valueGroups: an innerHTML rebuild would restart the CSS flow animations and
-             drop the trend SVG every second. Hidden while the X10A link is down. -->
-        <section id="hpLive" hidden>
+        <!-- ═══ Live system section: the interactive schematic (DESIGN.md §5.3) ═══
+             The FIRST thing on the dashboard — the diagram is the answer to "what is the plant doing
+             right now", so nothing sits above it but the alert banners, and nothing beside it: there
+             is no status band and no chip row. Every fact the old hero carried is IN the drawing, at
+             the component it describes — mode/health in the status block, the thermostat on the
+             heating riser, the BUH step in its label, low-noise on the outdoor unit.
+             Static DOM updated in place by renderLive() — deliberately NOT rebuilt per poll like
+             #valueGroups: an innerHTML rebuild would restart the CSS flow animations every second.
+             The schematic never hides: when the X10A link drops it blanks to "—" (clearSchematic),
+             since it holds the only thing that can still say why. -->
+        <section id="hpLive">
           <figure class="card schem-card" id="schem"
                   aria-label="Live system schematic: outdoor unit, refrigerant circuit, plate heat exchanger, water circuit with backup heater and 3-way valve, domestic hot water tank and heating circuit">
-            <div class="section-label" data-i18n="card.system">System</div>
+            <!-- EVERY value pill and component below is a hit target (class sc-hit + data-insp):
+                 tapping one fills the inspector panel under the drawing with what it is, what is
+                 normal, and what it is doing right now (renderInspect / INSPECT in app.js). The
+                 groups carry role=button + tabindex so keyboard and screen readers reach them, which
+                 is also why the <svg> is a labelled group and no longer aria-hidden — a hidden
+                 subtree must not contain focusable elements. -->
             <div class="schem-scroll">
-              <svg viewBox="0 0 760 470" role="img" aria-hidden="true">
-                <!-- Outdoor unit -->
-                <rect class="sc-box" x="24" y="120" width="180" height="230" rx="10"/>
-                <text class="sc-lbl" x="40" y="142" data-i18n="schem.outdoor_unit">OUTDOOR UNIT</text>
-                <circle cx="80" cy="205" r="34" fill="none" stroke="var(--line)" stroke-width="2"/>
-                <g id="scFan">
-                  <path d="M80 205 m0 -26 a10 10 0 0 1 6 18 l-6 -18z M80 205 m22 13 a10 10 0 0 1 -19 3 l19 -3z M80 205 m-22 13 a10 10 0 0 1 13 -21 l-13 21z" fill="var(--brand)" opacity=".85"/>
-                  <circle cx="80" cy="205" r="5" fill="var(--brand-strong)"/>
+              <svg viewBox="0 0 760 470" role="group"
+                   aria-label="Live system schematic — tap a value or component for an explanation">
+                <!-- Status block — the plant's own title: state dot + operation mode + one status
+                     line (status word / fault / "waiting" / "unreachable" / last-poll age). Written
+                     by sysSet(). It lives INSIDE the drawing on purpose: there is no status band
+                     above the card, and this is the only thing that stays readable when the X10A
+                     link drops (every pill then reads "—", so nothing asserts a stale value). -->
+                <g id="scStatus" class="sc-hit" data-insp="status" role="button" tabindex="0">
+                  <circle id="svDot" cx="34" cy="26" r="6" fill="var(--muted)"/>
+                  <text class="sc-mode" id="svMode" x="50" y="34">—</text>
+                  <text class="sc-status" id="svStatus" x="50" y="56"></text>
                 </g>
-                <circle class="sc-comp" cx="152" cy="300" r="25"/>
-                <text class="sc-state" x="152" y="297" text-anchor="middle" style="font-size:9px">COMP</text>
-                <text class="sc-val" x="152" y="310" text-anchor="middle"><tspan id="svRps">—</tspan> rps</text>
-                <g class="sc-snow">
+                <!-- Outdoor unit. The box is drawn first so the parts sitting on it (compressor,
+                     pills) are later in paint order and win the hit test inside its area. -->
+                <g class="sc-hit" data-insp="ou" role="button" tabindex="0">
+                  <rect class="sc-box" x="24" y="120" width="180" height="230" rx="10"/>
+                  <text class="sc-lbl" x="40" y="142" data-i18n="schem.outdoor_unit">OUTDOOR UNIT</text>
+                  <circle cx="80" cy="205" r="34" fill="none" stroke="var(--line)" stroke-width="2"/>
+                  <g id="scFan">
+                    <path d="M80 205 m0 -26 a10 10 0 0 1 6 18 l-6 -18z M80 205 m22 13 a10 10 0 0 1 -19 3 l19 -3z M80 205 m-22 13 a10 10 0 0 1 13 -21 l-13 21z" fill="var(--brand)" opacity=".85"/>
+                    <circle cx="80" cy="205" r="5" fill="var(--brand-strong)"/>
+                  </g>
+                </g>
+                <g class="sc-hit" data-insp="comp" role="button" tabindex="0">
+                  <circle class="sc-comp" cx="152" cy="300" r="25"/>
+                  <text class="sc-state" x="152" y="297" text-anchor="middle" style="font-size:9px">COMP</text>
+                  <text class="sc-val" x="152" y="310" text-anchor="middle"><tspan id="svRps">—</tspan> rps</text>
+                </g>
+                <g class="sc-snow sc-hit" data-insp="defrost" role="button" tabindex="0">
                   <rect class="sc-pill" x="96" y="252" width="70" height="20" rx="10" style="stroke:var(--flow-cold)"/>
                   <text class="sc-val" x="131" y="266" text-anchor="middle" style="fill:var(--flow-cold)" data-i18n="schem.defrost_pill">❄ defrost</text>
                 </g>
-                <g>
+                <!-- Low-noise mode: a state OF the outdoor unit (fan/compressor capped), so it sits
+                     on the outdoor unit like the defrost pill. Shown only while active (.quiet-on). -->
+                <g class="sc-quiet sc-hit" data-insp="quiet" role="button" tabindex="0">
+                  <rect class="sc-pill" x="126" y="224" width="64" height="20" rx="10" style="stroke:var(--brand)"/>
+                  <text class="sc-val" x="158" y="238" text-anchor="middle" style="fill:var(--brand)" data-i18n="chip.quiet">Quiet</text>
+                </g>
+                <g class="sc-hit" data-insp="pel" role="button" tabindex="0">
+                  <rect class="sc-pill" x="30" y="300" width="88" height="20" rx="10"/>
+                  <text class="sc-val" x="74" y="314" text-anchor="middle">≈ <tspan id="svPel">—</tspan> kW el.</text>
+                  <text class="sc-sub" x="74" y="332" text-anchor="middle" id="svPelSrc"></text>
+                </g>
+                <g class="sc-hit" data-insp="out" role="button" tabindex="0">
                   <rect class="sc-pill" x="30" y="88" width="112" height="22" rx="11"/>
                   <text class="sc-val" x="86" y="103" text-anchor="middle"><tspan data-i18n="schem.outdoor">Outdoor</tspan> <tspan id="svOut">—</tspan> °C</text>
                 </g>
-                <!-- Refrigerant circuit (outdoor unit ↔ PHE) -->
-                <path class="sc-rpipe" d="M204 180 H 330"/>
+                <!-- Refrigerant circuit (outdoor unit ↔ PHE). Each run pairs its drawn pipe with a
+                     fat transparent sc-hitline: a 3.5–5 px stroke is not a tappable target on a
+                     phone, so the hit area is widened without widening the drawing. -->
+                <g class="sc-hit" data-insp="rhot" role="button" tabindex="0">
+                  <path class="sc-rpipe" d="M204 180 H 330"/>
+                  <path class="sc-hitline" d="M204 180 H 330"/>
+                </g>
                 <path class="sc-rflow hot" id="rfHot" d="M204 180 H 330"/>
-                <path class="sc-rpipe" d="M330 300 H 204"/>
+                <g class="sc-hit" data-insp="rcold" role="button" tabindex="0">
+                  <path class="sc-rpipe" d="M330 300 H 204"/>
+                  <path class="sc-hitline" d="M330 300 H 204"/>
+                </g>
                 <path class="sc-rflow cold" id="rfCold" d="M330 300 H 204"/>
-                <g>
+                <g class="sc-hit" data-insp="disch" role="button" tabindex="0">
                   <rect class="sc-pill" x="212" y="146" width="112" height="22" rx="11"/>
                   <text class="sc-val" x="268" y="161" text-anchor="middle"><tspan id="svHp">—</tspan> bar · <tspan id="svDisch">—</tspan> °C</text>
                 </g>
-                <g>
+                <g class="sc-hit" data-insp="suction" role="button" tabindex="0">
                   <rect class="sc-pill" x="212" y="316" width="112" height="22" rx="11"/>
                   <text class="sc-val" x="268" y="331" text-anchor="middle"><tspan id="svLp">—</tspan> bar · EEV <tspan id="svEev">—</tspan></text>
                 </g>
                 <!-- Plate heat exchanger -->
-                <rect class="sc-plate" x="330" y="150" width="48" height="170" rx="6"/>
-                <path d="M340 158 v154 M349 158 v154 M358 158 v154 M367 158 v154" stroke="var(--line)" stroke-width="1.5" fill="none"/>
-                <text class="sc-lbl" x="354" y="340" text-anchor="middle">PHE</text>
-                <g>
-                  <rect class="sc-pill" x="390" y="228" width="76" height="22" rx="11"/>
-                  <text class="sc-val" x="428" y="243" text-anchor="middle">ΔT <tspan id="svDt">—</tspan> K</text>
+                <g class="sc-hit" data-insp="phe" role="button" tabindex="0">
+                  <rect class="sc-plate" x="330" y="150" width="48" height="170" rx="6"/>
+                  <path d="M340 158 v154 M349 158 v154 M358 158 v154 M367 158 v154" stroke="var(--line)" stroke-width="1.5" fill="none"/>
+                  <text class="sc-lbl" x="354" y="340" text-anchor="middle">PHE</text>
+                </g>
+                <g class="sc-hit" data-insp="dt" role="button" tabindex="0">
+                  <rect class="sc-pill" x="390" y="214" width="120" height="22" rx="11"/>
+                  <text class="sc-val" x="450" y="229" text-anchor="middle">ΔT <tspan id="svDt">—</tspan> K<tspan id="svDtSet"></tspan></text>
+                </g>
+                <!-- Heat actually crossing the PHE into the water — flow × ΔT, so it belongs at the
+                     PHE and nowhere else. DERIVED, never measured: the "≈" and the "est." sub-label
+                     are load-bearing (DESIGN.md §5.3 item 3). Hidden via .no-pth when flow or ΔT is
+                     missing, rather than drawing a confident "0.0 kW" from an absent row. -->
+                <g id="gPth" class="sc-hit" data-insp="pth" role="button" tabindex="0">
+                  <rect class="sc-pill" x="390" y="244" width="120" height="22" rx="11"/>
+                  <text class="sc-val" x="450" y="259" text-anchor="middle">≈ <tspan id="svPth">—</tspan> kW · COP <tspan id="svCop">—</tspan></text>
+                  <text class="sc-sub" x="450" y="278" text-anchor="middle" data-i18n="schem.est">estimated</text>
                 </g>
                 <!-- Water circuit: supply -->
-                <path class="sc-pipe" d="M378 180 H 430"/>
-                <path class="sc-pipe" d="M474 180 H 520"/>
+                <g class="sc-hit" data-insp="wsup" role="button" tabindex="0">
+                  <path class="sc-pipe" d="M378 180 H 430"/>
+                  <path class="sc-pipe" d="M474 180 H 520"/>
+                  <path class="sc-hitline" d="M378 180 H 430"/>
+                  <path class="sc-hitline" d="M474 180 H 506"/>
+                </g>
                 <path class="sc-flow hot" id="fSup1" d="M378 180 H 430"/>
                 <path class="sc-flow hot" id="fSup2" d="M474 180 H 520"/>
-                <g>
+                <g class="sc-hit" data-insp="lwt" role="button" tabindex="0">
                   <rect class="sc-pill" x="352" y="118" width="66" height="22" rx="11"/>
                   <text class="sc-val" x="385" y="133" text-anchor="middle"><tspan id="svLwt">—</tspan> °C</text>
                   <text class="sc-sub" x="385" y="112" text-anchor="middle" data-i18n="schem.leaving_water">leaving water</text>
                 </g>
                 <!-- Backup heater -->
-                <rect class="sc-buh" x="430" y="164" width="44" height="32" rx="6"/>
-                <path class="sc-bolt" d="M454 168 l-8 12 h6 l-4 12 10 -14 h-6 l6 -10z"/>
-                <text class="sc-lbl" x="452" y="212" text-anchor="middle">BUH</text>
+                <g class="sc-hit" data-insp="buh" role="button" tabindex="0">
+                  <rect class="sc-buh" x="430" y="164" width="44" height="32" rx="6"/>
+                  <path class="sc-bolt" d="M454 168 l-8 12 h6 l-4 12 10 -14 h-6 l6 -10z"/>
+                <!-- The active STEP is part of the label ("BUH 1"/"BUH 2"), not just the warn tint:
+                     the tint says "on", the digit says how much resistive heat is being paid for. -->
+                  <text class="sc-lbl" x="452" y="212" text-anchor="middle">BUH<tspan id="svBuh"></tspan></text>
+                </g>
                 <!-- 3-way valve -->
-                <circle class="sc-valve" cx="520" cy="180" r="14"/>
-                <path d="M508 180 h24 M520 168 v12" stroke="var(--muted)" stroke-width="2" fill="none"/>
-                <text class="sc-state" x="520" y="216" text-anchor="middle" id="svValve">3WV</text>
+                <g class="sc-hit" data-insp="valve" role="button" tabindex="0">
+                  <circle class="sc-valve" cx="520" cy="180" r="14"/>
+                  <path d="M508 180 h24 M520 168 v12" stroke="var(--muted)" stroke-width="2" fill="none"/>
+                  <text class="sc-state" x="520" y="216" text-anchor="middle" id="svValve">3WV</text>
+                </g>
                 <!-- DHW tank branch (hidden via .no-dhw when the model has no tank values) -->
                 <g class="g-dhw">
-                  <path class="sc-pipe" d="M520 180 V 70 H 585"/>
+                  <g class="sc-hit" data-insp="wtank" role="button" tabindex="0">
+                    <path class="sc-pipe" d="M520 180 V 70 H 585"/>
+                    <path class="sc-hitline" d="M520 166 V 70 H 585"/>
+                    <path class="sc-hitline" d="M600 190 V 400"/>
+                  </g>
                   <path class="sc-flow hot" id="fTank" d="M520 180 V 70 H 585"/>
-                  <rect class="sc-box" x="585" y="34" width="120" height="140" rx="14"/>
-                  <text class="sc-lbl" x="600" y="54" data-i18n="schem.dhw_tank">DHW TANK</text>
-                  <path d="M600 150 q10 -12 20 0 t20 0 t20 0 t20 0" fill="none" stroke="var(--pipe)" stroke-width="4" stroke-linecap="round"/>
-                  <path class="sc-flow hot" id="fCoil" style="stroke-width:4" d="M600 150 q10 -12 20 0 t20 0 t20 0 t20 0"/>
-                  <text class="sc-val" x="645" y="102" text-anchor="middle" style="font-size:17px"><tspan id="svTank">—</tspan> °C</text>
-                  <text class="sc-sub" x="645" y="120" text-anchor="middle"><tspan data-i18n="schem.set">set</tspan> <tspan id="svTankSet">—</tspan> °C</text>
+                  <g class="sc-hit" data-insp="tank" role="button" tabindex="0">
+                    <rect class="sc-box" x="585" y="34" width="120" height="140" rx="14"/>
+                    <text class="sc-lbl" x="600" y="54" data-i18n="schem.dhw_tank">DHW TANK</text>
+                    <path d="M600 150 q10 -12 20 0 t20 0 t20 0 t20 0" fill="none" stroke="var(--pipe)" stroke-width="4" stroke-linecap="round"/>
+                    <path class="sc-flow hot" id="fCoil" style="stroke-width:4" d="M600 150 q10 -12 20 0 t20 0 t20 0 t20 0"/>
+                    <text class="sc-val" x="645" y="102" text-anchor="middle" style="font-size:17px"><tspan id="svTank">—</tspan> °C</text>
+                    <text class="sc-sub" x="645" y="120" text-anchor="middle"><tspan data-i18n="schem.set">set</tspan> <tspan id="svTankSet">—</tspan> °C</text>
+                  </g>
                   <!-- tank return joins the return line at y=400 -->
                   <path class="sc-pipe" d="M600 174 V 400"/>
                   <path class="sc-flow cold" id="fTankRet" d="M600 174 V 400"/>
                 </g>
                 <!-- Heating circuit -->
-                <path class="sc-pipe" d="M520 180 H 690 V 268"/>
+                <g class="sc-hit" data-insp="wheat" role="button" tabindex="0">
+                  <path class="sc-pipe" d="M520 180 H 690 V 268"/>
+                  <path class="sc-hitline" d="M540 180 H 690 V 268"/>
+                </g>
                 <path class="sc-flow hot" id="fHeat" d="M520 180 H 690 V 268"/>
-                <rect class="sc-box" x="640" y="268" width="100" height="56" rx="8"/>
-                <path d="M654 276 v40 M672 276 v40 M690 276 v40 M708 276 v40 M726 276 v40" stroke="var(--line)" stroke-width="3" fill="none"/>
-                <text class="sc-lbl" x="636" y="346" data-i18n="schem.heating">HEATING</text>
+                <!-- Room-thermostat demand: it gates THIS branch, so it sits on the heating riser
+                     above the emitter rather than in a chip row. Hidden (.no-thermo) on a profile
+                     that reports no thermostat flag, and while the link is down. -->
+                <g id="gThermo" class="sc-hit" data-insp="thermo" role="button" tabindex="0">
+                  <rect class="sc-pill" x="634" y="232" width="112" height="20" rx="10"/>
+                  <text class="sc-val" x="690" y="246" text-anchor="middle" style="font-size:10px" id="svThermo">—</text>
+                </g>
+                <g class="sc-hit" data-insp="heat" role="button" tabindex="0">
+                  <rect class="sc-box" x="640" y="268" width="100" height="56" rx="8"/>
+                  <path d="M654 276 v40 M672 276 v40 M690 276 v40 M708 276 v40 M726 276 v40" stroke="var(--line)" stroke-width="3" fill="none"/>
+                  <text class="sc-lbl" x="636" y="346" data-i18n="schem.heating">HEATING</text>
+                </g>
                 <!-- Return line -->
-                <path class="sc-pipe" d="M690 386 V 400 H 400 V 300 H 378"/>
+                <g class="sc-hit" data-insp="wret" role="button" tabindex="0">
+                  <path class="sc-pipe" d="M690 386 V 400 H 400 V 300 H 378"/>
+                  <path class="sc-pipe" d="M690 324 V 386"/>
+                  <path class="sc-hitline" d="M690 324 V 400 H 400 V 300 H 378"/>
+                </g>
                 <path class="sc-flow cold" id="fRet" d="M690 386 V 400 H 400 V 300 H 378"/>
-                <path class="sc-pipe" d="M690 324 V 386"/>
                 <path class="sc-flow cold" id="fHeatRet" d="M690 324 V 386"/>
-                <circle class="sc-valve" cx="470" cy="400" r="17"/>
-                <g id="scPump"><path d="M470 400 l-8 -9 h16 z" fill="var(--brand)"/></g>
-                <text class="sc-lbl" x="470" y="432" text-anchor="middle"><tspan data-i18n="schem.pump">PUMP</tspan> <tspan class="sc-val" id="svPump">—</tspan>%</text>
-                <g>
+                <g class="sc-hit" data-insp="pump" role="button" tabindex="0">
+                  <circle class="sc-valve" cx="470" cy="400" r="17"/>
+                  <g id="scPump"><path d="M470 400 l-8 -9 h16 z" fill="var(--brand)"/></g>
+                  <text class="sc-lbl" x="470" y="432" text-anchor="middle"><tspan data-i18n="schem.pump">PUMP</tspan> <tspan class="sc-val" id="svPump">—</tspan>%</text>
+                </g>
+                <g class="sc-hit" data-insp="rwt" role="button" tabindex="0">
                   <rect class="sc-pill" x="510" y="411" width="66" height="22" rx="11"/>
                   <text class="sc-val" x="543" y="426" text-anchor="middle"><tspan id="svRwt">—</tspan> °C</text>
                   <text class="sc-sub" x="543" y="447" text-anchor="middle" data-i18n="schem.return">return</text>
                 </g>
-                <g>
+                <g class="sc-hit" data-insp="flow" role="button" tabindex="0">
                   <rect class="sc-pill" x="286" y="411" width="150" height="22" rx="11"/>
                   <text class="sc-val" x="361" y="426" text-anchor="middle"><tspan id="svFlow">—</tspan> l/min · <tspan id="svWp">—</tspan> bar</text>
                 </g>
                 <!-- Room pill drawn last so it sits above the return pipes crossing beneath it -->
-                <g class="g-room">
+                <g class="g-room sc-hit" data-insp="room" role="button" tabindex="0">
                   <rect class="sc-pill" x="622" y="356" width="136" height="22" rx="11"/>
                   <text class="sc-val" x="690" y="371" text-anchor="middle"><tspan data-i18n="schem.room">Room</tspan> <tspan id="svRoom">—</tspan> / <tspan id="svRoomSet">—</tspan> °C</text>
                 </g>
               </svg>
             </div>
+            <!-- Inspector: filled by renderInspect() when a schematic hit target is tapped. Sits in
+                 the same card, directly under the drawing, so the explanation and the thing it
+                 explains are visible together. With nothing selected it shows the discovery hint —
+                 the affordance for "this picture is clickable". Its live half (reading, state
+                 sentence, row values) re-renders every poll while it is open. -->
+            <div class="inspect" id="inspect">
+              <div class="inspect-hint" id="inspHint" data-i18n="insp.hint">Tap a value or component in the diagram for an explanation.</div>
+              <div class="inspect-card" id="inspCard" hidden>
+                <div class="inspect-head">
+                  <div class="inspect-id">
+                    <div class="inspect-title" id="inspTitle"></div>
+                    <div class="inspect-src mono" id="inspSrc"></div>
+                  </div>
+                  <div class="inspect-now num" id="inspNow"></div>
+                  <button class="inspect-x" type="button" id="inspClose" aria-label="Close">✕</button>
+                </div>
+                <div class="inspect-body" id="inspBody"></div>
+                <div class="inspect-rows" id="inspRows"></div>
+              </div>
+            </div>
           </figure>
 
-          <!-- KPI tiles: the working point in numbers; est. values are derived, never measured -->
-          <div class="kpis">
-            <div class="kpi"><div class="kpi-k" data-i18n="kpi.compressor">Compressor</div>
-              <div class="kpi-v num"><span id="kRps">—</span> <small>rps</small></div>
-              <div class="meter"><i id="kRpsBar"></i></div>
-            </div>
-            <div class="kpi"><div class="kpi-k" data-i18n="kpi.flow">Flow</div>
-              <div class="kpi-v num"><span id="kFlow">—</span> <small>l/min</small></div>
-              <div class="kpi-sub"><span data-i18n="kpi.pump">pump</span> <span class="num" id="kPump">—</span> %</div>
-            </div>
-            <div class="kpi"><div class="kpi-k" data-i18n="kpi.dt">ΔT water</div>
-              <div class="kpi-v num"><span id="kDt">—</span> <small>K</small></div>
-              <div class="kpi-sub"><span data-i18n="kpi.target">target</span> <span class="num" id="kDtSet">—</span> K</div>
-            </div>
-            <div class="kpi"><div class="kpi-k" data-i18n="kpi.wp">Water pressure</div>
-              <div class="kpi-v num"><span id="kWp">—</span> <small>bar</small></div>
-              <div class="meter"><i id="kWpBar"></i></div>
-            </div>
-            <div class="kpi"><div class="kpi-k"><span data-i18n="fig.pth">Heat output</span> <small data-i18n="abbr.est">est.</small></div>
-              <div class="kpi-v num"><span id="kPth">—</span> <small>kW</small></div>
-              <div class="meter warm"><i id="kPthBar"></i></div>
-            </div>
-            <div class="kpi"><div class="kpi-k">COP <small data-i18n="abbr.est">est.</small></div>
-              <div class="kpi-v num" id="kCop">—</div>
-              <div class="kpi-sub num" id="kPelSub">—</div>
-            </div>
-          </div>
-
-          <!-- Short-term trend from a client-side ring buffer over the /events pushes (lost on
-               reload — long-term history stays in Home Assistant/Grafana) -->
-          <div class="card trend-card">
-            <div class="section-label" data-i18n="trend.title">Trend — last 30 min</div>
-            <div class="trend-legend">
-              <span><i style="background:var(--flow-hot)"></i><span data-i18n="fig.lw">Leaving water</span></span>
-              <span id="tlOut"><i style="background:var(--flow-cold)"></i><span data-i18n="fig.outdoor">Outdoor</span></span>
-            </div>
-            <div class="trend-scroll">
-              <svg id="trend" viewBox="0 0 640 150" role="img"
-                   aria-label="Trend lines: leaving-water and outdoor temperature over the last 30 minutes"></svg>
-            </div>
-          </div>
         </section>
 
-        <!-- Connections tile: WiFi/MQTT/Syslog/NTP combined, full width like the hero and every card
+        <!-- Connections tile: WiFi/MQTT/Syslog/NTP combined, full width like the system card and every
              in #valueGroups below (all one column). Populated by connectionsHtml() in app.js. -->
         <div class="conn-tile" id="connTile"></div>
         <div id="valueGroups"></div>

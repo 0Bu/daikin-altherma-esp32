@@ -6,7 +6,7 @@
   --brand:#0097E0; --brand-strong:#0079BD; --brand-sky:#5AC8F0; --brand-navy:#14285A; --brand-tint:#E9F6FD;
   --bg:#F4F5F7; --card:#FFFFFF; --fg:#1C2530; --muted:#6B7480; --line:#E2E5EA; --soft:#F1F3F5;
   --ok:#1A9D5A; --warn:#C9740A; --err:#D23B3B;
-  /* Supply/return flow colours (system schematic pipes + trend series) — a CVD-validated pair,
+  /* Supply/return flow colours (the system schematic's pipes) — a CVD-validated pair,
      deliberately separate from the ok/warn/err STATE colours: they encode temperature, not health.
      The schematic's idle-pipe/plate greys derive from the neutral ramp, no extra brand tokens. */
   --flow-hot:#DC5A32; --flow-cold:#3F7FD0;
@@ -89,38 +89,10 @@ main { flex: 1; }
 }
 .card-title { margin-bottom: 14px; }
 
-/* ── Hero (dashboard status band) ───────────────────────────────────────── */
-.hero {
-  background: var(--brand-tint); border: 1px solid var(--line); border-radius: var(--r-card);
-  box-shadow: var(--shadow-card); padding: 20px 22px; color: var(--fg);
-}
-.hero-kicker { display: flex; align-items: center; gap: 9px; }
-.hero-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); flex: none; }
-.hero-kicker span:last-child {
-  font-size: 12px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase; color: var(--brand-strong);
-}
-.hero-mode { font-size: 33px; font-weight: 650; letter-spacing: -.6px; margin-top: 9px; }
-.hero-sub { font-size: 14.5px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
-
-/* ── Hero "Now" panel: state chips + key figures (shown while the X10A link is live) ─────── */
-.hero-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 13px; }
-.chip {
-  font-size: 11.5px; font-weight: 600; border-radius: var(--r-pill); padding: 3px 10px;
-  border: 1px solid var(--line); background: var(--card); color: var(--muted);
-}
-.chip.on  { color: var(--ok);  border-color: var(--ok); }
-.chip.hot { color: var(--warn); border-color: var(--warn); }
-.chip.ice { color: var(--flow-cold); border-color: var(--flow-cold); }
-.hero-figs { display: flex; gap: 26px; flex-wrap: wrap; margin-top: 14px; }
-.fig-k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
-.fig-k small { text-transform: none; letter-spacing: 0; }
-.fig-v { font-size: 19px; font-weight: 700; }
-.fig-v small { font-size: 12px; color: var(--muted); font-weight: 500; }
-
-/* ── Live system section: schematic + KPI tiles + trend ──────────────────── */
-#hpLive { margin-top: 12px; }
+/* ── Live system section: the interactive schematic ─────────────────────── */
+/* The dashboard opens on this card, and the drawing carries its own status — there is no band
+   above it and no chip row beside it (DESIGN.md §5.3 item 1). */
 .schem-card { margin: 0 0 12px; padding: 14px 12px 8px; }
-.schem-card .section-label { display: block; margin: 0 6px 6px; }
 .schem-scroll { overflow-x: auto; }
 .schem-scroll svg { display: block; min-width: 640px; width: 100%; height: auto; }
 svg .sc-box { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
@@ -130,6 +102,13 @@ svg .sc-pill { fill: var(--card); stroke: var(--line); }
 svg .sc-val { fill: var(--fg); font: 600 11px var(--font-sans); font-variant-numeric: tabular-nums; }
 svg .sc-sub { fill: var(--muted); font: 500 9.5px var(--font-sans); }
 svg .sc-state { fill: var(--muted); font: 600 10px var(--font-sans); }
+/* Status block inside the drawing (#scStatus): the operation mode as the drawing's headline, with
+   one status line under it. `err` = fault, `dim` = no data / unreachable — the dot repeats the same
+   state as colour, but the words always carry it too (§9: never colour alone). */
+svg .sc-mode { fill: var(--fg); font: 650 24px var(--font-sans); letter-spacing: -.4px; }
+svg .sc-status { fill: var(--brand-strong); font: 600 11.5px var(--font-sans); }
+svg .sc-status.err { fill: var(--err); }
+svg .sc-status.dim { fill: var(--muted); }
 svg .sc-pipe { fill: none; stroke: var(--pipe); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
 svg .sc-rpipe { fill: none; stroke: var(--pipe); stroke-width: 3.5; stroke-linecap: round; }
 svg .sc-flow {
@@ -137,6 +116,14 @@ svg .sc-flow {
   stroke-dasharray: 9 15; opacity: 0; transition: opacity .4s;
 }
 svg .sc-rflow { fill: none; stroke-width: 3.5; stroke-linecap: round; stroke-dasharray: 6 12; opacity: 0; transition: opacity .4s; }
+/* The animated overlays are pure decoration drawn over the pipes. `opacity: 0` still receives
+   pointer events, so without this an idle flow path would swallow every click meant for its pipe.
+   The DRAWN pipes are inert for the same reason from the other side: a pipe run is later in paint
+   order than the fitting it meets, so its own 5 px stroke would steal the clicks of the 3-way valve
+   and the pump it passes through. Hit areas come from sc-hitline alone, whose geometry is trimmed
+   back at exactly those junctions — one place that decides what is clickable, and it is visible in
+   the markup. */
+svg .sc-flow, svg .sc-rflow, svg .sc-pipe, svg .sc-rpipe { pointer-events: none; }
 svg .hot  { stroke: var(--flow-hot); }
 svg .cold { stroke: var(--flow-cold); }
 @keyframes dashfwd { to { stroke-dashoffset: -24; } }
@@ -154,38 +141,79 @@ svg .sc-buh { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
 .buh-on .sc-buh { fill: var(--brand-tint); stroke: var(--warn); }
 .buh-on .sc-bolt { fill: var(--warn); }
 svg .sc-bolt { fill: var(--muted); }
-svg .sc-snow { opacity: 0; transition: opacity .3s; }
-.defrost-on .sc-snow { opacity: 1; }
-/* Models without a DHW tank / room sensor: hide those schematic parts instead of dangling "—" */
+/* Both are hidden by opacity alone, which stops NEITHER hit testing NOR tab focus — and since they
+   are now hit targets, an invisible pill would both answer clicks and sit in the keyboard tab order
+   showing nothing. `visibility` fixes both at once; the delayed transition on it lets the opacity
+   fade finish before the element goes away (and applies instantly on the way in). */
+svg .sc-snow, svg .sc-quiet {
+  opacity: 0; visibility: hidden; transition: opacity .3s, visibility 0s .3s;
+}
+.defrost-on .sc-snow, .quiet-on .sc-quiet {
+  opacity: 1; visibility: visible; transition: opacity .3s, visibility 0s;
+}
+/* Room-thermostat pill on the heating riser: --ok while the room is calling for heat, neutral
+   otherwise. The text names the state either way, so the tint only reinforces it. */
+#gThermo.on .sc-pill { stroke: var(--ok); }
+#gThermo.on .sc-val { fill: var(--ok); }
+/* ── Clickable schematic: every value pill and component is a hit target ──────────────────────
+   Hover/focus/selected all reinforce the SAME affordance (the shape's outline turns brand) so the
+   picture reads as explorable without adding a single visual element to the drawing. Selected is
+   thicker, not a different colour — one accent, two weights. */
+svg .sc-hit { cursor: pointer; }
+svg .sc-hit:hover :is(.sc-pill, .sc-box, .sc-plate, .sc-buh, .sc-comp, .sc-valve) { stroke: var(--brand); }
+svg .sc-hit.sel :is(.sc-pill, .sc-box, .sc-plate, .sc-buh, .sc-comp, .sc-valve) { stroke: var(--brand); stroke-width: 2.5; }
+/* Pipes: a 3.5–5 px stroke is far too thin to tap, so each run carries an invisible fat hit line.
+   `pointer-events: stroke` is deliberate — it hit-tests the stroke area regardless of the paint
+   being transparent, which `visibleStroke`/`visiblePainted` do not agree on across engines. */
+svg .sc-hitline { fill: none; stroke: transparent; stroke-width: 18; stroke-linecap: round; stroke-linejoin: round; pointer-events: stroke; }
+svg .sc-hit:hover :is(.sc-pipe, .sc-rpipe) { stroke: var(--brand); }
+svg .sc-hit.sel :is(.sc-pipe, .sc-rpipe) { stroke: var(--brand); }
+svg .sc-hit:hover .sc-lbl, svg .sc-hit.sel .sc-lbl, svg .sc-hit.sel .sc-state { fill: var(--brand-strong); }
+/* The status block has no shape to outline — tint its headline instead. */
+svg .sc-hit:hover .sc-mode, svg .sc-hit.sel .sc-mode { fill: var(--brand-strong); }
+svg .sc-hit:focus { outline: none; }
+svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; border-radius: 4px; }
+
+/* ── Inspector panel (under the schematic, same card) ────────────────────────────────────────
+   Reuses the value-row explainer copy (DESCRIPTIONS) so "what is this / what's normal" has ONE
+   source; the live half (reading, state sentence, member rows) is rebuilt from the poll cache. */
+.inspect { margin: 4px 6px 6px; }
+.inspect-hint { font-size: 12.5px; color: var(--muted); padding: 6px 2px; }
+.inspect-card {
+  background: var(--brand-tint); border: 1px solid var(--line); border-radius: var(--r-tile);
+  padding: 12px 14px;
+}
+.inspect-head { display: flex; align-items: baseline; gap: 12px; }
+.inspect-id { flex: 1; min-width: 0; }
+.inspect-title { font-size: 12px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--fg); }
+/* The /values row this pill is drawn from — names the source so a reading can be traced to the
+   register list below, and stays verbatim English like every other value label. */
+.inspect-src { font-size: 11px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+.inspect-now { font-size: 19px; font-weight: 700; color: var(--fg); white-space: nowrap; }
+.inspect-x {
+  flex: none; align-self: flex-start; font: inherit; font-size: 13px; line-height: 1;
+  background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px 0 2px 4px;
+}
+.inspect-x:hover { color: var(--fg); }
+.inspect-body { font-size: 13.5px; color: var(--muted); line-height: 1.55; margin-top: 9px; }
+.inspect-rows { margin-top: 9px; }
+.inspect-row {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  padding: 5px 0; border-top: 1px solid var(--line); font-size: 12.5px;
+}
+.inspect-row span:first-child { color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.inspect-row span:last-child { font-weight: 600; color: var(--fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* Models without a DHW tank / room sensor: hide those schematic parts instead of dangling "—".
+   Same rule for the two derived/flag pills: .no-pth when flow or ΔT is missing (no heat estimate),
+   .no-thermo when the profile reports no thermostat flag — or while the link is down. */
 .no-dhw .g-dhw { display: none; }
 .no-room .g-room { display: none; }
-
-.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
-.kpi { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-tile); box-shadow: var(--shadow-card); padding: 12px 14px; }
-.kpi-k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
-.kpi-k small { text-transform: none; letter-spacing: 0; }
-.kpi-v { font-size: 21px; font-weight: 700; margin-top: 2px; }
-.kpi-v small { font-size: 12px; color: var(--muted); font-weight: 500; }
-.kpi-sub { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
-.meter { height: 5px; border-radius: 3px; background: var(--line); margin-top: 8px; overflow: hidden; }
-.meter i { display: block; height: 100%; width: 0; border-radius: 3px; background: var(--brand); transition: width .6s; }
-.meter.warm i { background: var(--flow-hot); }
-
-.trend-card { margin-top: 12px; padding: 16px 18px 12px; }
-.trend-card .section-label { display: block; margin-bottom: 8px; }
-.trend-legend { display: flex; gap: 16px; align-items: center; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-.trend-legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
-.trend-scroll { overflow-x: auto; }
-.trend-scroll svg { display: block; min-width: 560px; width: 100%; height: auto; }
-svg .tr-grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 5; }
-svg .tr-axis { fill: var(--muted); font: 500 10px var(--font-sans); font-variant-numeric: tabular-nums; }
-svg .tr-line { fill: none; stroke-width: 2; stroke-linejoin: round; }
-svg .tr-end { stroke: var(--card); stroke-width: 2; }
-svg .tr-val { font: 700 11px var(--font-sans); font-variant-numeric: tabular-nums; }
-svg .tr-empty { fill: var(--muted); font: 500 13px var(--font-sans); }
+.no-pth #gPth { display: none; }
+.no-thermo #gThermo { display: none; }
 
 /* ── Connections tile (dashboard, WiFi · MQTT · Syslog · NTP combined) ─────────────────────── */
-/* Full width like the hero and every #valueGroups card — the whole dashboard is one column
+/* Full width like the system card and every #valueGroups card — the whole dashboard is one column
    (§9 of docs/DESIGN.md). */
 .conn-tile {
   background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card);
@@ -385,8 +413,8 @@ svg .tr-empty { fill: var(--muted); font: 500 13px var(--font-sans); }
 .toast.ok .disc { background: var(--ok); } .toast.err .disc { background: var(--err); }
 @keyframes tin { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
-/* Single column at every width (DESIGN.md §9): every card — the hero, the Connections tile and each
-   value group — is the same full container width, stacked top-down. (An earlier ≥560px two-column
+/* Single column at every width (DESIGN.md §9): every card — the system card, the Connections tile
+   and each value group — is the same full container width, stacked top-down. (An earlier ≥560px two-column
    multicol packed the value cards into two columns; it left an empty second column — with a stray
    card shadow at the column gap — whenever only the ESP32 card showed, e.g. while the heat-pump link
    is down.) */
@@ -400,9 +428,6 @@ svg .tr-empty { fill: var(--muted); font: 500 13px var(--font-sans); }
   body { font-size: 17px; }
   .hdr-name { font-size: 22px; }
   .hdr-ip { font-size: 14.5px; }
-  .hero-kicker span:last-child { font-size: 13.5px; }
-  .hero-mode { font-size: 38px; }
-  .hero-sub { font-size: 16.5px; }
   .section-label, .conn-label { font-size: 13.5px; }
   .conn-val, .vrow-val, .vname { font-size: 17px; }
   .conn-dbm, .vrow-label { font-size: 16.5px; }
@@ -410,9 +435,9 @@ svg .tr-empty { fill: var(--muted); font: 500 13px var(--font-sans); }
   .vdesc-body { font-size: 15px; }
   .conn-row { padding: 14px 0; }
   .vrow, .vname { padding-top: 11px; padding-bottom: 11px; }
-  .fig-k, .kpi-k { font-size: 12.5px; }
-  .fig-v { font-size: 22px; }
-  .kpi-v { font-size: 24px; }
-  .chip { font-size: 13px; }
-  .kpi-sub, .trend-legend { font-size: 13px; }
+  .inspect-hint, .inspect-src { font-size: 13.5px; }
+  .inspect-title { font-size: 13.5px; }
+  .inspect-now { font-size: 21px; }
+  .inspect-body { font-size: 15px; }
+  .inspect-row { font-size: 14px; }
 }
