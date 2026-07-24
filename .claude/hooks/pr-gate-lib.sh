@@ -58,12 +58,37 @@ gate_head_sha() { git -C "${GATE_PROJ:-$PWD}" rev-parse --short=12 HEAD 2>/dev/n
 gate_branch() { git -C "${GATE_PROJ:-$PWD}" rev-parse --abbrev-ref HEAD 2>/dev/null; }
 
 # gate_repo_slug  -> owner/repo, from gh else the origin remote URL. Empty if undeterminable.
+#
+# The remote URL is NOT always a github.com one. Claude Code on the web clones through a local git
+# proxy, so origin reads e.g. http://local_proxy@127.0.0.1:41729/git/0Bu/daikin-altherma-esp32 —
+# and the old host-anchored sed matched nothing there, returning the whole URL as the "slug". Every
+# REST call then went to a nonsense path, gate_fetch_pr returned 2, and the merge gates failed
+# CLOSED with "could not read the pull request" on the exact environment they say they support
+# ("Two merge paths are gated, so the gate holds in BOTH environments" — require-project-review.sh).
+# Failing closed is the right default, but here it fired on every web-session merge regardless of
+# whether the review had actually been done, which makes the gate unusable rather than strict.
+#
+# So: strip the transport, keep the PATH, and take its LAST TWO segments — everything in front is
+# proxy routing (/git/…) or a host. Deliberately only for URLs that carry a scheme or the scp-like
+# git@host:path form; a bare local path (a plain clone of a directory) yields "" and the caller
+# still fails closed, because guessing a slug from a filesystem path could name a real but WRONG
+# GitHub repo, and reading some other repo's checkboxes is worse than refusing to read any.
 gate_repo_slug() {
-  local s
+  local s url path
   s="${GATE_REPO_SLUG:-}"
   [ -z "$s" ] && command -v gh >/dev/null 2>&1 && s="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)"
-  [ -z "$s" ] && s="$(git -C "${GATE_PROJ:-$PWD}" remote get-url origin 2>/dev/null \
-        | sed -E 's#^git@github\.com:##; s#^https://github\.com/##; s#\.git$##')"
+  if [ -z "$s" ]; then
+    url="$(git -C "${GATE_PROJ:-$PWD}" remote get-url origin 2>/dev/null)"
+    url="${url%.git}"
+    path=""
+    case "$url" in
+      *://*) path="${url#*://}"; path="${path#*@}"; path="${path#*/}" ;;  # scheme://[user@]host[:port]/PATH
+      *:*/*) path="${url#*:}" ;;                                          # git@host:PATH
+    esac
+    case "$path" in
+      */*) s="$(printf '%s' "$path" | awk -F/ 'NF>=2 { print $(NF-1) "/" $NF }')" ;;
+    esac
+  fi
   printf '%s' "$s"
 }
 
