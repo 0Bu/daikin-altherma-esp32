@@ -79,6 +79,12 @@ h1 { font-size: 26px; font-weight: 650; letter-spacing: -.5px; margin: 20px 0 7p
 .btn:focus-visible { outline: none; box-shadow: var(--shadow-cta), 0 0 0 3px var(--focus-ring); }
 .note { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 14px 0 0; }
 .note.err { color: var(--err); display: block; }
+/* Which build this page flashes — read from manifest.json at load (the SAME file the install
+   button hands esp-web-tools), so the number can't drift from the image that actually gets
+   written. Mono + --fg for the number itself: it is the one fact here worth quoting back. */
+.ver { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 14px 0 0; }
+.ver span { font-family: var(--font-mono); color: var(--fg); font-weight: 600; }
+.ver + .note { margin-top: 4px; }   /* the qualifier belongs to the version line, not apart from it */
 
 /* ── Steps (numbered rows, divided like the dashboard's value rows) ────────── */
 .steps { list-style: none; margin: 6px 0 0; padding: 0; counter-reset: step; }
@@ -156,6 +162,7 @@ footer { color: var(--muted); font-size: 12.5px; text-align: center; padding: 0 
         <span slot="unsupported" class="note err">This browser lacks Web Serial support — use Chrome or Edge on a desktop.</span>
         <span slot="not-allowed" class="note err">Serial access was blocked — allow it and retry.</span>
       </esp-web-install-button>
+      <p class="ver" id="fwVersion" hidden>Version <span id="fwVersionValue"></span></p>
       <p class="note">ESP32-S3 only · full flash (erases the device's existing configuration)</p>
     </div>
 
@@ -187,6 +194,22 @@ footer { color: var(--muted); font-size: 12.5px; text-align: center; padding: 0 
     document.getElementById('prBannerTxt').innerHTML =
       'Preview build for <b>PR #' + m[1] + '</b>. OTA still tracks <b>main</b>.';
   }
+
+  // Name the build this page installs. Read from manifest.json — the same file passed to
+  // <esp-web-install-button manifest="…">, so the version shown and the image flashed cannot
+  // disagree; anything hard-coded here would go stale on the next release. ci-build-all.sh
+  // stamps it "1.2.3" on main and "1.2.3-PR-<N>" for a preview, so a preview says so twice.
+  // textContent, never innerHTML: a version string is data to display, not markup to run.
+  // Silent on failure — the line stays hidden rather than claiming a version we couldn't read
+  // (this is also what happens when the page is opened from disk, with no manifest beside it).
+  fetch('manifest.json', { cache: 'no-store' })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (mf) {
+      if (!mf || typeof mf.version !== 'string' || !mf.version) return;
+      document.getElementById('fwVersionValue').textContent = mf.version;
+      document.getElementById('fwVersion').hidden = false;
+    })
+    .catch(function () { /* offline or no manifest — show nothing rather than something wrong */ });
 </script>
 </body>
 </html>

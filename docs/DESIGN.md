@@ -409,6 +409,15 @@ block butted against the round CTA and steps cards below.
   them beside a slotted button leaves a native grey browser button sitting on the brand page (the
   state this page shipped in). A slotted button is styled by this page's CSS, full stop. The
   `unsupported` / `not-allowed` slots are `--err` text.
+- **Version line** (`.ver`, between the button and the note) — names the build this page installs:
+  `--muted` "Version" + the number itself in `--font-mono`/`--fg`, since that is the one string a
+  user quotes back in a bug report. Read at load from **`manifest.json`** — deliberately the same
+  file the install button is handed, so the version shown and the image actually written cannot
+  disagree; a number typed into the page would go stale at the next release. `ci-build-all.sh`
+  stamps it `1.2.3` on main and `1.2.3-PR-<N>` on a preview, so a preview states its provenance
+  here as well as in the banner. Injected with `textContent`, never `innerHTML`. If the fetch fails
+  (no manifest, or the page opened from disk) the line **stays hidden** — showing nothing beats
+  asserting a version that could not be read.
 - **Steps card** — "After flashing" as a `.section-label`, then the three steps as `--line`-divided
   rows with a `--brand-tint` numbered disc, matching the dashboard's value rows. Each `<li>` is the
   flex row and its text is wrapped in a single `<span>`: without the wrapper every inline node of the
