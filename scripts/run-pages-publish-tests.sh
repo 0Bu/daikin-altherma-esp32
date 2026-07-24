@@ -1,21 +1,25 @@
 #!/usr/bin/env bash
 # Regression tests for scripts/publish-pages-branch.sh — specifically its CONCURRENCY behaviour.
 #
-# gh-pages has several independent publishers (the manual release's root publish, every merge's
-# dev-channel publish, each PR's preview, and pr-preview-cleanup's removal) writing one branch, and
-# they overlap routinely. The failure mode
+# gh-pages has two independent publishers (the manual release's root publish and every merge's
+# dev-channel publish) writing one branch, and they overlap routinely. The failure mode
 # they produce is nasty to catch by hand: the loser's push is rejected, its build job goes red,
 # and a plain re-run goes green — so it reads as a flake and gets re-run rather than fixed. It
 # shipped exactly that way once (PR #149's build).
 #
+# There used to be four publishers: each PR's preview and pr-preview-cleanup's removal are gone
+# with the per-PR preview feature, so the `--pr` / `--rm` modes these tests exercised no longer
+# exist. Two publishers still race — a release run and a merge are minutes apart, not serialized —
+# so every scenario below is the same one, re-cast onto root vs. dev.
+#
 # Everything here runs against a throwaway bare repo standing in for origin, so it needs no
 # network, no GitHub and no credentials — just git. Seconds long and hardware-free, like the
-# logic-test and domain-audit gates.
+# logic and domain-audit gates it shares a job with.
 #
 #   scripts/run-pages-publish-tests.sh [path-to-publish-pages-branch.sh]
 #
 # Pass a path to test a different copy — running it against the PRE-FIX script is how you check
-# these tests still have teeth (it should fail scenarios 3-5 and 7).
+# these tests still have teeth (it should fail scenarios 3-5).
 # No `set -e`: a failing check must be counted and reported, not abort the suite mid-scenario.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
@@ -52,7 +56,6 @@ clone() {   # clone <name>: a checkout with the script under test + room for a _
 }
 site_root()  { mkdir -p "$T/$1/_site";       echo "root-$2"  > "$T/$1/_site/index.html"; }
 site_dev()   { mkdir -p "$T/$1/_site/dev";   echo "dev-$2"   > "$T/$1/_site/dev/index.html"; }
-site_pr()    { mkdir -p "$T/$1/_site/PR/$2"; echo "pr-$2-$3" > "$T/$1/_site/PR/$2/index.html"; }
 run()        { local d="$1"; shift; ( cd "$T/$d" && ./scripts/publish-pages-branch.sh "$@" ) >"$T/out.log" 2>&1; }
 remote_file(){ git -C "$T/origin.git" show "gh-pages:$1" 2>/dev/null; }
 remote_has() { git -C "$T/origin.git" rev-parse --verify -q "gh-pages:$1" >/dev/null 2>&1 && echo yes || echo no; }
@@ -65,49 +68,35 @@ run A; rc=$?
 check "root publish succeeds"      "$rc" "0"
 check "root landed"                "$(remote_file index.html)" "root-v1"
 
-echo "== 2. two PR previews + the root coexist =="
-site_pr A 1 a; run A --pr 1; rc1=$?
-site_pr B 2 b; ( cd "$T/B" && git fetch -q origin ); run B --pr 2; rc2=$?
-check "PR/1 publish succeeds"      "$rc1" "0"
-check "PR/2 publish succeeds"      "$rc2" "0"
-check "PR/1 present"               "$(remote_file PR/1/index.html)" "pr-1-a"
-check "PR/2 present"               "$(remote_file PR/2/index.html)" "pr-2-b"
-check "root survived both"         "$(remote_file index.html)" "root-v1"
+echo "== 2. root and dev coexist, each owning only its own slice =="
+( cd "$T/B" && git fetch -q origin ); site_dev B d1; run B --dev; rc=$?
+check "dev publish succeeds"       "$rc" "0"
+check "dev landed"                 "$(remote_file dev/index.html)" "dev-d1"
+check "root survived the dev push" "$(remote_file index.html)" "root-v1"
 
-echo "== 3. stale origin/gh-pages: another publisher landed since our checkout =="
+echo "== 3. stale origin/gh-pages: the other publisher landed since our checkout =="
 # The CI shape exactly: the runner fetches gh-pages at job start (actions/checkout fetch-depth: 0),
-# another PR publishes during the ~5-minute build, and only then do we push.
+# the other feed publishes during the ~5-minute build, and only then do we push.
 ( cd "$T/A" && git fetch -q origin 'gh-pages:refs/remotes/origin/gh-pages' 2>/dev/null || true )
 stale="$(git -C "$T/A" rev-parse refs/remotes/origin/gh-pages)"
-site_pr B 2 b2; run B --pr 2
+site_dev B d2; run B --dev
 moved="$(git -C "$T/origin.git" rev-parse gh-pages)"
 check "B moved the branch"         "$([ "$stale" != "$moved" ] && echo yes || echo no)" "yes"
-site_pr A 3 a3; run A --pr 3; rc=$?
-check "A's publish still succeeds" "$rc" "0"
-check "A's own PR/3 landed"        "$(remote_file PR/3/index.html)" "pr-3-a3"
-check "B's PR/2 preserved"         "$(remote_file PR/2/index.html)" "pr-2-b2"
-check "PR/1 untouched"             "$(remote_file PR/1/index.html)" "pr-1-a"
-check "root untouched"             "$(remote_file index.html)" "root-v1"
-
-echo "== 4. a root publish races a PR publish (main vs PR, not only PR vs PR) =="
-( cd "$T/A" && git fetch -q origin 'gh-pages:refs/remotes/origin/gh-pages' )
-site_pr B 4 b4; run B --pr 4
 site_root A v2; run A; rc=$?
-check "root publish succeeds"      "$rc" "0"
-check "root updated"               "$(remote_file index.html)" "root-v2"
-check "PR/4 preserved by root"     "$(remote_file PR/4/index.html)" "pr-4-b4"
-check "PR/3 preserved by root"     "$(remote_file PR/3/index.html)" "pr-3-a3"
+check "A's publish still succeeds" "$rc" "0"
+check "A's own root landed"        "$(remote_file index.html)" "root-v2"
+check "B's dev preserved"          "$(remote_file dev/index.html)" "dev-d2"
 
-echo "== 5. --rm races too (pr-preview-cleanup vs a live publish) =="
+echo "== 4. the same race the other way round (a merge publishes over a fresh release) =="
 ( cd "$T/B" && git fetch -q origin 'gh-pages:refs/remotes/origin/gh-pages' )
-site_pr A 5 a5; run A --pr 5
-run B --rm 1; rc=$?
-check "--rm succeeds"              "$rc" "0"
-check "PR/1 removed"               "$(remote_has PR/1)" "no"
-check "PR/5 (the racer) survived"  "$(remote_file PR/5/index.html)" "pr-5-a5"
+site_root A v3; run A
+site_dev B d3; run B --dev; rc=$?
+check "dev publish succeeds"       "$rc" "0"
+check "dev updated"                "$(remote_file dev/index.html)" "dev-d3"
+check "the new root is preserved"  "$(remote_file index.html)" "root-v3"
 
-echo "== 6. true interleaving: the branch moves BETWEEN our fetch and our push =="
-# Scenarios 3-5 only prove the refresh half of the fix — the other publisher is already finished
+echo "== 5. true interleaving: the branch moves BETWEEN our fetch and our push =="
+# Scenarios 3-4 only prove the refresh half of the fix — the other publisher is already finished
 # when we start, so our fresh fetch sees its commit and the FIRST push succeeds. The retry loop
 # never runs. Force the real interleaving with a `git` shim on A's PATH that lets B publish from
 # inside A's fetch, so A's push is a genuine non-fast-forward.
@@ -118,50 +107,54 @@ cat > "$T/shim/git" <<SHIM
 "$REALGIT" "\$@"; rc=\$?
 if [ ! -e "$T/raced" ] && [ "\$1" = "fetch" ] && printf '%s ' "\$@" | grep -q gh-pages; then
     touch "$T/raced"      # once only — B's own publish runs through this same shim
-    ( cd "$T/B" && ./scripts/publish-pages-branch.sh --pr 8 ) > "$T/b-interleaved.log" 2>&1
+    ( cd "$T/B" && ./scripts/publish-pages-branch.sh --dev ) > "$T/b-interleaved.log" 2>&1
 fi
 exit \$rc
 SHIM
 chmod +x "$T/shim/git"
-site_pr B 8 b8; site_pr A 7 a7
-( cd "$T/A" && PATH="$T/shim:$PATH" ./scripts/publish-pages-branch.sh --pr 7 ) >"$T/out.log" 2>&1; rc=$?
+site_dev B d4; site_root A v4
+( cd "$T/A" && PATH="$T/shim:$PATH" ./scripts/publish-pages-branch.sh ) >"$T/out.log" 2>&1; rc=$?
 check "A survives a mid-run loss"  "$rc" "0"
 check "the retry actually ran"     "$([ "$(grep -c 're-applying onto the new tip' "$T/out.log")" -ge 1 ] && echo yes || echo no)" "yes"
-check "A's PR/7 landed"            "$(remote_file PR/7/index.html)" "pr-7-a7"
-check "B's interleaved PR/8 kept"  "$(remote_file PR/8/index.html)" "pr-8-b8"
-check "root still intact"          "$(remote_file index.html)" "root-v2"
+check "A's root landed"            "$(remote_file index.html)" "root-v4"
+check "B's interleaved dev kept"   "$(remote_file dev/index.html)" "dev-d4"
 
-echo "== 7. the dev channel is its own slice: it survives a release, and preserves one =="
-# Release and dev are now cut by DIFFERENT events (a manual workflow run vs. every merge to main),
-# so the two feeds are published minutes or weeks apart and each must leave the other standing. A
-# root publish that swept dev/ away would take every dev-channel device's update check offline
-# until the next merge — silently, since nothing else reads that path.
+echo "== 6. each slice is replaced WHOLESALE, so nothing stale can linger =="
+# Declarative, not incremental — which is also what makes the retry above sound: re-applying onto
+# the winner's commit yields the tree winning would have.
 ( cd "$T/A" && git fetch -q origin 'gh-pages:refs/remotes/origin/gh-pages' )
-site_dev A d1; run A --dev; rc=$?
-check "dev publish succeeds"       "$rc" "0"
-check "dev landed"                 "$(remote_file dev/index.html)" "dev-d1"
-check "root survived the dev push" "$(remote_file index.html)" "root-v2"
-check "PR/7 survived the dev push" "$(remote_file PR/7/index.html)" "pr-7-a7"
-# ...and now the other direction: a release republishes the root over a live dev feed.
-( cd "$T/B" && git fetch -q origin 'gh-pages:refs/remotes/origin/gh-pages' )
-site_root B v3; run B; rc=$?
-check "root publish succeeds"      "$rc" "0"
-check "root updated"               "$(remote_file index.html)" "root-v3"
-check "dev survived the release"   "$(remote_file dev/index.html)" "dev-d1"
-check "PR/7 survived the release"  "$(remote_file PR/7/index.html)" "pr-7-a7"
-# A second dev publish replaces its own tree wholesale (declarative, like every other mode), so a
-# file the previous dev build left behind cannot linger into the next one.
-( cd "$T/A" && git fetch -q origin 'gh-pages:refs/remotes/origin/gh-pages' )
-echo stale > "$T/A/_site/dev/old.bin"
-run A --dev
+site_dev A d5; echo stale > "$T/A/_site/dev/old.bin"; run A --dev
 check "dev stale file present first" "$(remote_has dev/old.bin)" "yes"
 ( cd "$T/A" && git fetch -q origin 'gh-pages:refs/remotes/origin/gh-pages' )
-rm -f "$T/A/_site/dev/old.bin"; site_dev A d2; run A --dev
-check "dev replaced wholesale"     "$(remote_file dev/index.html)" "dev-d2"
+rm -f "$T/A/_site/dev/old.bin"; site_dev A d6; run A --dev
+check "dev replaced wholesale"     "$(remote_file dev/index.html)" "dev-d6"
 check "stale dev file gone"        "$(remote_has dev/old.bin)" "no"
-check "root still intact"          "$(remote_file index.html)" "root-v3"
+check "root still intact"          "$(remote_file index.html)" "root-v4"
 
-echo "== 8. an UNRETRYABLE push failure is fatal immediately, not after 5 rounds =="
+echo "== 7. the root sweep takes everything it owns — including a retired PR/ preview =="
+# The per-PR preview publisher is gone, so PR/<N>/ trees left on the branch by the old builds have
+# no owner and no cleanup workflow. The root sweep used to spare PR/ by name; it must not any
+# more, or those previews would stay on the public site forever. dev/ is still spared.
+( cd "$T/B" && git fetch -q origin 'gh-pages:refs/remotes/origin/gh-pages' )
+git -C "$T/B" worktree add -qf -B gh-pages "$T/ghp" origin/gh-pages
+mkdir -p "$T/ghp/PR/42"; echo leftover > "$T/ghp/PR/42/index.html"
+git -C "$T/ghp" add -A && git -C "$T/ghp" commit -qm "an old PR preview" && git -C "$T/ghp" push -q origin gh-pages
+git -C "$T/B" worktree remove --force "$T/ghp"
+check "leftover preview is there"  "$(remote_has PR/42)" "yes"
+( cd "$T/B" && git fetch -q origin 'gh-pages:refs/remotes/origin/gh-pages' )
+site_root B v5; run B; rc=$?
+check "root publish succeeds"      "$rc" "0"
+check "leftover preview swept"     "$(remote_has PR/42)" "no"
+check "dev untouched by the sweep" "$(remote_file dev/index.html)" "dev-d6"
+
+echo "== 8. an unknown mode is refused, never treated as a root publish =="
+# `--pr <N>` was a real mode until the preview feature was removed. A stale caller must fail
+# loudly: silently falling through to `root` would overwrite the RELEASE feed.
+run A --pr 7; rc=$?
+check "unknown mode exits non-zero" "$([ "$rc" -ne 0 ] && echo yes || echo no)" "yes"
+check "release feed untouched"      "$(remote_file index.html)" "root-v5"
+
+echo "== 9. an UNRETRYABLE push failure is fatal immediately, not after 5 rounds =="
 # Deliberately asserted on the retry COUNT and not on elapsed time: a wall-clock bound is the
 # very kind of assertion that goes intermittently red on a loaded runner, which is the class of
 # bug this file exists to prevent.
@@ -171,8 +164,9 @@ echo "nope" >&2
 exit 1
 HOOK
 chmod +x "$T/origin.git/hooks/pre-receive"
-site_pr A 6 a6
-run A --pr 6; rc=$?
+( cd "$T/A" && git fetch -q origin 'gh-pages:refs/remotes/origin/gh-pages' )
+site_dev A d7
+run A --dev; rc=$?
 check "declined push exits non-zero" "$([ "$rc" -ne 0 ] && echo yes || echo no)" "yes"
 check "did not retry"                "$(grep -c 're-applying onto the new tip' "$T/out.log")" "0"
 rm -f "$T/origin.git/hooks/pre-receive"

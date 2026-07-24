@@ -21,11 +21,12 @@ likely to be declined — the comment density and the "why" notes in this codeba
 ## The local loop — no board or ESP-IDF required
 
 Two scripts run on a plain system toolchain (cmake + g++/clang++) in seconds. **Run both before
-opening a PR.** They are also the first two CI jobs, so a failure here fails the build anyway.
+opening a PR.** They are also the first two steps of CI's `gates` job, so a failure here fails the
+build anyway.
 
 ```bash
-scripts/run-mock-tests.sh     # CI job `logic-test`   — host-side pure-logic tests
-scripts/run-domain-audit.sh   # CI job `domain-audit` — is the value catalog physically RIGHT?
+scripts/run-mock-tests.sh     # CI gates step 1 — host-side pure-logic tests
+scripts/run-domain-audit.sh   # CI gates step 2 — is the value catalog physically RIGHT?
 ```
 
 `run-mock-tests.sh` compiles the IDF-free headers in [`main/logic/`](main/logic/) against
@@ -45,18 +46,22 @@ If you touch the audit itself, also run `tools/domain/selftest.sh` — it re-int
 the audit was built for into a throwaway copy and asserts all four are still caught. A checker that
 has stopped checking turns "clean" from evidence into a lie.
 
-A third fast job, `pages-publish-test`, guards the **GitHub Pages publish** rather than the
+A third fast gate guards the **GitHub Pages publish** rather than the
 firmware, so most PRs never need it locally — run it only if you touch
 [`scripts/publish-pages-branch.sh`](scripts/publish-pages-branch.sh):
 
 ```bash
-scripts/run-pages-publish-tests.sh   # CI job `pages-publish-test` — needs only git, no toolchain
+scripts/run-pages-publish-tests.sh   # CI gates step 3 — needs only git, no toolchain
 ```
 
 It races two publishers against a throwaway bare repo, because `gh-pages` has three concurrent
 writers (main's root publish, each PR's preview, and the preview cleanup) and the loser used to
 fail its entire build — a bug that read as a flake, since re-running always cleared it. Like the
 other two, it gates `build`.
+
+All three are **steps of one `gates` job**, not a job each. Actions bills every job rounded up to
+the next whole minute, so three ~15-second jobs cost three minutes for under a minute of work; a
+step boundary names the failure just as precisely.
 
 ## Building the firmware
 
@@ -119,8 +124,7 @@ above plus an honest note about hardware.
 
 `main` is kept **strictly linear** and every commit **signed**, so PRs land as **squash merges** —
 enforced by a branch ruleset on `main` (require a pull request, require linear history, require
-signed commits, and the `logic-test` / `domain-audit` / `pages-publish-test` / `build` checks
-green), not left to convention. Nobody is exempt: the ruleset carries no bypass actors, so this
+signed commits, and the `gates` / `build` checks green), not left to convention. Nobody is exempt: the ruleset carries no bypass actors, so this
 holds for the maintainer too — `main` takes no direct pushes at all. Practical consequences:
 
 - Everything lands through a PR, including a one-line docs fix. There is no push-to-`main` path.
@@ -129,9 +133,21 @@ holds for the maintainer too — `main` takes no direct pushes at all. Practical
 - `main` moves under open PRs — expect to rebase before merge.
 - A red CI job blocks the merge, including on a docs-only PR — the fast gates are cheap and
   hardware-free precisely so this is never a burden.
+- A docs-only PR runs the `gates` job and **skips** the firmware build: prose cannot change the
+  image, and a skipped job still reports its check, so the ruleset is satisfied. What counts as
+  build-relevant is the path list in the *Detect build-relevant changes* step of
+  [`build.yml`](.github/workflows/build.yml) — add to it if you introduce a file the image or the
+  published site is made of.
 
-Fork PRs build and run all gates, but get no signing key: they compile-check only and publish no
-preview installer. That is deliberate, not a failure.
+Fork PRs build and run all gates, but get no signing key: they compile-check only. That is
+deliberate, not a failure.
+
+**A PR publishes no installer.** Per-PR previews at `…/PR/<N>/` are retired: each one was a
+`gh-pages` push, and every `gh-pages` push starts a full GitHub Pages deployment on top of the
+build. To flash a build in a browser, use the **dev channel** (`…/dev/`), republished by every
+firmware-relevant merge. The PR's own image is still there as a build **artifact** on the run, for
+7 days. Actions minutes are a metered monthly resource on this account — the same reason the fast
+gates share one job and the firmware build is skipped when it cannot matter.
 
 ## Releases (a merge does not cut one)
 

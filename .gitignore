@@ -55,5 +55,9 @@ ota_signing_key.pem
 # Host mock build variant
 /build_mock/
 
+# Compiler cache (scripts/ci-build-all.sh; in CI it is restored/saved by the build workflow, and
+# it has to live inside the workspace because the build runs in the ESP-IDF container)
+/.ccache/
+
 # GitHub Pages site assembled by scripts/build-pages.sh
 /_site/

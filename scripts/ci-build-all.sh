@@ -25,6 +25,27 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# ccache, when the toolchain image has it. `idf.py set-target` below wipes the build directory, so
+# every build compiles ~1100 objects from scratch — in CI that was ~3 minutes of a ~5 minute job,
+# repeated per PR push. ESP-IDF wires ccache in itself once IDF_CCACHE_ENABLE is set; the cache
+# lives in the WORKSPACE (gitignored) because CI runs this inside the ESP-IDF container and only
+# the mounted workspace survives it (.github/workflows/build.yml restores/saves that directory).
+#
+# Guarded on the binary rather than assumed: without it CMake would launch a compiler that is not
+# there and fail the build, and this script must keep working on any IDF image. Locally (via
+# scripts/idf-docker.sh) the same cache makes a repeat build cheap too.
+if command -v ccache >/dev/null 2>&1; then
+    export IDF_CCACHE_ENABLE=1
+    export CCACHE_DIR="${CCACHE_DIR:-$PWD/.ccache}"
+    export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-400M}"
+    # Hash the compiler's CONTENT, not its mtime: a container image re-pulled per CI run has fresh
+    # timestamps on identical binaries, which under the default mtime check would miss every time.
+    export CCACHE_COMPILERCHECK=content
+    echo "ccache: enabled ($CCACHE_DIR, max $CCACHE_MAXSIZE)"
+else
+    echo "ccache: not installed — building without it"
+fi
+
 VERSION="${1:-$(tr -d '[:space:]' < version.txt)}"
 TARGETS=(esp32s3)
 DIST=dist; rm -rf "$DIST"; mkdir -p "$DIST"

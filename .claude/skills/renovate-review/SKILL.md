@@ -43,10 +43,11 @@ which is exactly what differs between versions. 10.3.0 replaced the DTR/RTS rese
 fail on real hardware, and the reference board is native USB-Serial/JTAG, where reset behaviour is
 most fragile.
 
-**A PR preview may not exist to click.** [`build.yml`](../../../.github/workflows/build.yml) publishes
-previews from a private repo too, but a **fork** PR gets no signing key and therefore no preview — and
-none exists at all until the Pages source has been pointed at `gh-pages` for the first time. When
-there is no preview, local is the only path.
+**There is no PR preview to click.** The per-PR preview installer is retired (each one cost a
+`gh-pages` push and the Pages deployment that follows it), so an esp-web-tools bump cannot be
+flashed straight from the PR. Two paths remain, and for this dependency they are the whole test:
+build and serve the installer page locally, or **merge to `main` and flash the dev channel**
+(`…/dev/`), which republishes on the merge and is what a dev-channel board would receive anyway.
 
 ### 2.1 Check the contract against the dependency's own source
 

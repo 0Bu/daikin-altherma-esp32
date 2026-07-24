@@ -7,12 +7,15 @@
 # The site hosts TWO independent feeds, because a merge to main no longer cuts a release:
 #   _site/            the RELEASE channel — written only by a manual release run
 #   _site/dev/        the DEV channel     — written by every firmware-relevant merge to main
-#   _site/PR/<N>/     a PR preview        — written by that PR's build
-# All three have the same shape (index.html + manifest.json + bins), so the installer page and the
-# device OTA client work identically against any of them; only the URL differs
+# Both have the same shape (index.html + manifest.json + bins), so the installer page and the
+# device OTA client work identically against either; only the URL differs
 # (main/logic/ota_channel.hpp derives the dev one by appending "dev/").
 #
-# Usage: scripts/build-pages.sh [--dev | PR_NUMBER]
+# A third target used to exist — _site/PR/<N>/, a per-PR preview installer built by every PR run.
+# It is retired: the dev channel covers "flash what is on main from a browser" at one publish per
+# merge rather than one per PR commit, and each publish also triggers a GitHub Pages deployment.
+#
+# Usage: scripts/build-pages.sh [--dev]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -22,7 +25,7 @@ ARG="${1:-}"
 case "$ARG" in
     --dev) OUT="_site/dev" ;;
     "")    OUT="_site" ;;
-    *)     OUT="_site/PR/$ARG" ;;
+    *)     echo "build-pages: unknown argument '$ARG' (expected none, or --dev)" >&2; exit 1 ;;
 esac
 rm -rf "$OUT"; mkdir -p "$OUT"
 

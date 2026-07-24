@@ -64,14 +64,13 @@ by hand:**
 |------|-----------|--------------|--------------|
 | Release | `…/` | `…/manifest.json` | a **manual** workflow run (Actions → *build* → *Run workflow* → `release: true`) — the only thing that creates a `v*` tag + a [GitHub release](https://github.com/0Bu/daikin-altherma-esp32/releases/latest) |
 | Development | `…/dev/` | `…/dev/manifest.json` | every firmware-relevant push to `main`; no tag, no release |
-| PR preview | `…/PR/<N>/` | — | that PR's build |
 
 A device follows one feed at a time — gear → **ESP32** → *Update channel* (`POST /set_ota`). Dev
 builds are versioned `<next release>-dev.<n>`, a semver pre-release, so a dev board upgrades itself
 to the next release when one is cut. Going the other way (dev → the last release) means installing
 an *older* build, which the downgrade gate refuses unless the request explicitly asks for it — the
 UI does exactly that after a channel switch, and confirms it first. Publishing does **not** depend on the repository being public — CI publishes the Pages
-installer, the per-PR previews, the tags and the releases from a private repo too. See the policy
+installer, the tags and the releases from a private repo too. See the policy
 comment atop [`.github/workflows/build.yml`](../.github/workflows/build.yml).
 
 > **⚠️ The Pages site is PUBLIC even when the repository is private.** Restricting who can view a
@@ -92,9 +91,10 @@ comment atop [`.github/workflows/build.yml`](../.github/workflows/build.yml).
 > **Required repo setting:** Pages source must be **Deploy from a branch → `gh-pages` / `(root)`**
 > (Settings → Pages). CI publishes the site by pushing the `gh-pages` branch
 > ([`scripts/publish-pages-branch.sh`](../scripts/publish-pages-branch.sh)) and nothing else — the
-> branch model is what allows each open PR to serve its own installer at `PR/<N>/`, which the
-> atomic whole-site Actions deployment cannot. Setting the source to "GitHub Actions" instead
-> serves nothing, since no workflow uploads a Pages artifact.
+> branch model is what allows the release root and the `dev/` channel to be published
+> independently, minutes or weeks apart, which the atomic whole-site Actions deployment cannot.
+> Setting the source to "GitHub Actions" instead serves nothing, since no workflow uploads a Pages
+> artifact.
 
 The Web Serial installer writes separate manifest parts around `nvs@0x9000`. Declining its
 **Erase** option therefore preserves WiFi, MQTT, board and X10A configuration during an update;

@@ -559,10 +559,10 @@ block butted against the round CTA and steps cards below.
   columns. `<code>` chips are `--soft` on `--line` and wrap (`overflow-wrap: anywhere`) so a long
   hostname never widens the card. The first step distinguishes a first install / explicit Erase
   (join the setup AP) from a no-Erase update (the stored WiFi reconnects).
-- **Provenance banner** — the same `--warn`-accented banner of §5.3 item 0, in two variants, because
-  the identical page is served from three paths (`scripts/build-pages.sh`): a `…/PR/<N>/` preview
-  says the build is that PR's, and `…/dev/` says it is the latest merge to `main` rather than a cut
-  release. The release root shows none — a release needs no caveat. Keyed on the **path**, not on
+- **Provenance banner** — the same `--warn`-accented banner of §5.3 item 0, because the identical
+  page is served from two paths (`scripts/build-pages.sh`): on `…/dev/` it says the build is the
+  latest merge to `main` rather than a cut release. The release root shows none — a release needs
+  no caveat. (A third path, `…/PR/<N>/`, had its own variant until the per-PR preview was retired.) Keyed on the **path**, not on
   the version string: the banner has to be right before `manifest.json` has been fetched, and if
   that fetch fails it is all the page can say. Both variants point at the device's own *Update
   channel* setting (§5.4), since flashing a page is a one-off but the channel is what the device

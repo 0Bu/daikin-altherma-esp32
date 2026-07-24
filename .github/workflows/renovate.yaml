@@ -6,11 +6,15 @@ name: Renovate
 # PRs with a disjoint history, and GitHub then auto-closes them (Renovate marks the update ignored).
 # A from-root rewrite is a one-time historical re-sign, not a routine step; run it only with no
 # open PRs, or close/merge them first.
+#
+# TRIGGERS: the daily schedule and an on-demand dispatch — deliberately NOT a push to main. Every
+# merge used to start a full autodiscover scan (~1.2 min wall, 2 billed minutes), so a busy day of
+# merges cost more Renovate runs than dependency updates exist in a month. What that trigger bought
+# was a faster rebase of open Renovate PRs after a merge; the next scheduled run does the same
+# thing, and `Run workflow` does it now when someone is actually waiting for it.
 on:
   schedule:
     - cron: '0 5 * * *'
-  push:
-    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -18,6 +22,7 @@ permissions:
 jobs:
   renovate:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: renovatebot/github-action@3064367f740a1a91cca218698a63902689cce200 # v46.1.20
         with:

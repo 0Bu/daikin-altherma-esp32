@@ -18,8 +18,8 @@ alone — those are Claude Code skills in this repo's .claude/ directory and are
 
 ## Verification
 
-- [ ] `scripts/run-mock-tests.sh` passes (host-side logic tests — CI's `logic-test` gate)
-- [ ] `scripts/run-domain-audit.sh` clean (value-catalog domain correctness — CI's `domain-audit` gate)
+- [ ] `scripts/run-mock-tests.sh` passes (host-side logic tests — CI's `gates` job, step 1)
+- [ ] `scripts/run-domain-audit.sh` clean (value-catalog domain correctness — CI's `gates` job, step 2)
 - [ ] Firmware built (`scripts/idf-docker.sh idf.py build`, or relied on CI) — N/A in a cloud session (no Docker daemon / no USB)
 - [ ] Exercised against a real heat pump / device where relevant (or noted why not)
 

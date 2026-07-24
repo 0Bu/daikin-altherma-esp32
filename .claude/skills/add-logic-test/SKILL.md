@@ -9,7 +9,7 @@ model: opus
 The riskiest parts of this firmware are pure computations (X10A CRC, value converters, config
 validation, HA-discovery JSON). They live in IDF-free headers under `main/logic/` so
 `scripts/run-mock-tests.sh` can run them on the host in seconds, and CI gates the firmware build
-on them (`logic-test` job). Keep that discipline.
+on them (the `gates` job's host-logic step). Keep that discipline.
 
 ## Steps
 
