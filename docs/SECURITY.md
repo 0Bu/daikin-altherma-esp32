@@ -153,13 +153,12 @@ Three failure modes, and what recovers each:
 
 ### Why mode 3 can't roll back — and how it's contained
 
-The rollback in mode 1 works because the *previous* firmware is still intact in the other OTA slot
-and otadata marks the new one `PENDING_VERIFY`. A **full `@flash_args` USB flash does neither**: it
-rewrites the bootloader, partition table and **otadata (blanked to `0xFFFFFFFF`)** and writes only
-`ota_0`. After it, `ota_1` is empty and otadata is blank → the bootloader boots `ota_0` in
-`ESP_OTA_IMG_UNDEFINED` state (not `PENDING_VERIFY`), and **there is no previous firmware anywhere on
-the chip to fall back to.** So for a directly-flashed unsigned build, "boot the previous FW" is
-mechanically impossible regardless of mechanism — the previous FW was overwritten.
+The rollback in mode 1 works because the *previous* firmware is selected by valid otadata while the
+new one is `PENDING_VERIFY`. A **full `@flash_args` USB flash does neither**: it rewrites the
+bootloader, partition table and **otadata (blanked to `0xFFFFFFFF`)** and writes `ota_0` directly.
+The bootloader therefore starts it in `ESP_OTA_IMG_UNDEFINED` state (not `PENDING_VERIFY`) and has no
+rollback record, even if old bytes happen to remain in `ota_1`. For a directly-flashed unsigned
+build, "boot the previous FW automatically" is mechanically unavailable.
 
 This is **never a brick**: no eFuses are burned and ROM download mode stays enabled, so the board is
 always re-flashable over USB. The containment is therefore *prevention*, not recovery:
@@ -169,10 +168,15 @@ always re-flashable over USB. The containment is therefore *prevention*, not rec
   CLAUDE.md flash steps run it before `esptool write_flash`, so the mode-3 crash-loop is stopped at
   the source. Recovery from a board that already got an unsigned image = re-flash a **signed** one.
 - **`scripts/ci-build-all.sh`** closes the *Web-Serial* half of mode 3, which no host-side guard can
-  reach: after building the installer's `-merged.bin` it carves the app back out at the offset
-  `flash_args` assigned it and runs `require-signed.sh` on that region. The build fails rather than
-  publish an installer image whose app is unsigned, so the browser path cannot hand out a
-  crash-looping board.
+  reach: after building the canonical `-merged.bin`, it carves out the individual `flash_args`
+  ranges, runs `require-signed.sh` on the final staged app and publishes those sparse parts. The
+  build fails rather than publish an installer whose app is unsigned.
+- The sparse Web Serial plan is also the configuration boundary: without **Erase**, no published
+  part covers `nvs@0x9000`, so WiFi/MQTT/board/X10A settings survive. The build runs
+  `check-web-installer-plan.py`, which requires the user-facing Erase choice and compares every
+  part's rounded 4 KB erase interval with the NVS partition. Selecting **Erase** still deliberately
+  erases the whole chip. The separately published `-merged.bin` remains a manual factory-reset
+  image; writing it at offset 0 writes its `0xff` gap through NVS.
 
 ### The health gate (mode 1)
 

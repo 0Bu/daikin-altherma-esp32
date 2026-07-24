@@ -163,14 +163,15 @@ footer { color: var(--muted); font-size: 12.5px; text-align: center; padding: 0 
         <span slot="not-allowed" class="note err">Serial access was blocked — allow it and retry.</span>
       </esp-web-install-button>
       <p class="ver" id="fwVersion" hidden>Version <span id="fwVersionValue"></span></p>
-      <p class="note">ESP32-S3 only · full flash (erases the device's existing configuration)</p>
+      <p class="note">ESP32-S3 only · without Erase, existing configuration is kept</p>
     </div>
 
     <div class="card">
       <span class="section-label">After flashing</span>
       <ol class="steps">
-        <li><span>Join the WiFi network <code>daikin-altherma-esp32-setup</code>. The captive portal
-          opens by itself — or visit <code>192.168.4.1</code> — and asks for your home WiFi.</span></li>
+        <li><span>On a first install or after choosing Erase, join
+          <code>daikin-altherma-esp32-setup</code>. The captive portal opens by itself — or visit
+          <code>192.168.4.1</code>. An update without Erase reconnects with the saved WiFi.</span></li>
         <li><span>Once it reboots onto your network, open <code>http://daikin-altherma-esp32.local</code>.
           That dashboard is the whole app: the heat-pump model is detected automatically, and MQTT,
           syslog and NTP are set from the gear → Connections.</span></li>

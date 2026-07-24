@@ -2,7 +2,7 @@
 # Assemble the GitHub Pages site (the browser installer) into _site/ from the built dist/:
 #   _site/index.html      the installer page (docs/index.html)
 #   _site/manifest.json   esp-web-tools + OTA manifest
-#   _site/*.bin           per-target merged (installer) + signed app (OTA) images
+#   _site/*.bin           sparse installer parts + signed app (OTA) + manual merged image
 #
 # The site hosts TWO independent feeds, because a merge to main no longer cuts a release:
 #   _site/            the RELEASE channel — written only by a manual release run

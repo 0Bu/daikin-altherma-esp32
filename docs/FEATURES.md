@@ -30,7 +30,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 |---|---------|:------:|-------------|
 | 1 | Secure Boot v2 **signed images without hardware Secure Boot** (RSA-3072) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 2 | Refuse-to-flash-unsigned guard | ✅ | [`require-signed.sh`](../scripts/require-signed.sh) |
-| 3 | Dual-OTA partition layout, NVS-preserving | ✅ | [`partitions.csv`](../partitions.csv) |
+| 3 | Dual-OTA layout + **NVS-preserving OTA and no-Erase Web Serial updates** | ✅ | [`partitions.csv`](../partitions.csv), [`ci-build-all.sh`](../scripts/ci-build-all.sh), [`check-web-installer-plan.py`](../scripts/check-web-installer-plan.py) |
 | 4 | OTA rollback + **connectivity-proving health gate** | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/health_gate.hpp`](../main/logic/health_gate.hpp) |
 | 5 | OTA manifest check + signed download + **two-point downgrade gate** | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp) |
 | 6 | WebSocket live push (`/events`) — bounded async backpressure, the only live transport | ✅ 🧪 | [`http_status.cpp`](../main/http_status.cpp), [`logic/ws_tx_gate.hpp`](../main/logic/ws_tx_gate.hpp) |
@@ -102,8 +102,8 @@ Full key lifecycle, threat model, and the boot-recovery reasoning: [`SECURITY.md
 
 Because the app itself must carry a valid signature to run under this config, an **unsigned image
 crash-loops** in `esp_secure_boot_init_checks` *before* `app_main`, with no app-level recovery — and
-a full `@flash_args` flash of one also wipes the fallback slot. The project turns that sharp edge
-into a hard gate:
+a full `@flash_args` flash also blanks otadata, leaving the bootloader no rollback record. The
+project turns that sharp edge into a hard gate:
 
 - [`scripts/require-signed.sh`](../scripts/require-signed.sh) inspects a `.bin` with
   `espsecure signature-info-v2` and **exits non-zero with the exact signing command** if the
@@ -113,9 +113,9 @@ into a hard gate:
   on a `main` build with no `OTA_SIGNING_KEY` secret (fork PRs downgrade to an unsigned *compile-only*
   build with no preview).
 - CI applies the same guard to the **browser installer**, which no host-side check can reach:
-  [`ci-build-all.sh`](../scripts/ci-build-all.sh) carves the app back out of the `-merged.bin` it just
-  built — at the offset `flash_args` assigned it — and runs `require-signed.sh` on those bytes, so a
-  signing step that silently stops covering the installer fails the build instead of shipping.
+  [`ci-build-all.sh`](../scripts/ci-build-all.sh) carves each published Web Serial part out of the
+  prepared `-merged.bin`, then runs `require-signed.sh` on the final staged app bytes. A signing step
+  that silently stops covering the installer therefore fails the build instead of shipping.
 
 ---
 
@@ -128,6 +128,13 @@ See [`ARCHITECTURE.md` → OTA, signing, partitions](ARCHITECTURE.md) and
   sized to fill 4 MB flash exactly, with `otadata`, `phy_init` and a `coredump` partition.
   `esp_https_ota` writes the **inactive** slot, so an update never touches `nvs@0x9000` — WiFi, MQTT
   and the X10A pin cache survive upgrades.
+- **✅ NVS-preserving Web Serial updates** ([`ci-build-all.sh`](../scripts/ci-build-all.sh)):
+  `merge_bin` remains the canonical prepared image, but the manifest publishes only the occupied
+  `flash_args` ranges as separate parts. A no-Erase install therefore skips `nvs@0x9000` instead of
+  writing the merged image's `0xff` gap through it. The independent
+  [`check-web-installer-plan.py`](../scripts/check-web-installer-plan.py) gate requires the Erase
+  choice to remain enabled, rounds every part to its actual 4 KB erase sectors and fails the build
+  if any overlaps NVS. Selecting **Erase** in ESP Web Tools remains the explicit factory-reset path.
 - **Rollback armed until proven healthy** (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`): a freshly-booted
   OTA image starts `PENDING_VERIFY`. If it reboots before being marked valid, the bootloader reverts.
 - **✅ 🧪 Health gate, not a timer** — the distinctive part. Instead of blindly committing after an
@@ -817,8 +824,9 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   publishing on `repository.private == false`; that gate was removed so the installer and the OTA feed
   can go live before the source does. Two consequences worth knowing precisely: **(a)** a Pages site
   cannot be access-controlled outside an *organization* on GitHub Enterprise Cloud, so the signed
-  firmware, merged image and `manifest.json` are world-readable while the source stays private —
-  tags/releases are *not* (repo-read only); **(b)** ungating Pages alone would have been useless: the
+  firmware, browser-installer parts, manual merged image and `manifest.json` are world-readable
+  while the source stays private — tags/releases are *not* (repo-read only); **(b)** ungating Pages
+  alone would have been useless: the
   release step is the only thing that creates a `v*` tag,
   [`next-version.sh`](../scripts/next-version.sh) derives the next version from the latest tag, and
   with no tags it returns the `version.txt` floor forever — a live feed pinned at 1.0.0 where every
