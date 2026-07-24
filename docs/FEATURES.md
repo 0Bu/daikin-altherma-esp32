@@ -179,16 +179,17 @@ See [`ARCHITECTURE.md` → OTA, signing, partitions](ARCHITECTURE.md) and
   signature check, never an equal version, never on the manifest's say-so, and never persisted.
   Without it the release channel would be unreachable from a dev board; with it, the property that
   matters still holds — a hostile manifest host cannot walk a fleet backwards on its own.
-- **🟡 The feed itself**: the publishing half is written and works — CI builds, signs and stages
-  `manifest.json` + the image and pushes them to the `gh-pages` branch — but **no feed is live yet**,
-  so the device-side client above currently has nothing to find. One precondition outside the firmware
-  is open: the Pages source must point at `gh-pages` ([`README.md`](README.md)), which cannot be set
-  before a publish creates that branch. (The repo no longer has to be public — that gate was
-  removed; note the resulting Pages site *is* public regardless of repo visibility.) **TODO:** run one
-  publish, point Pages at the branch, then verify `CONFIG_DAIKIN_OTA_MANIFEST_URL` returns 200 (at the
-  time of writing it is a 404) and promote this entry to ✅. Until then a check honestly reports "up to
-  date" rather than failing. Point `CONFIG_DAIKIN_OTA_MANIFEST_URL` /
-  `CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL` at any HTTPS host to run your own.
+- **✅ The feeds themselves**: both are live on the `gh-pages` branch and published by CI — the
+  RELEASE channel at the root (`manifest.json` + the images, written only by a manual release run)
+  and the DEV channel at `dev/` (rewritten by every firmware-relevant merge to main). The
+  precondition outside the firmware is met: the repo's Pages source points at `gh-pages` /
+  `(root)` ([`README.md`](README.md)), which is why the branch had to exist first. (The repo does
+  not have to be public — that gate was removed; note the resulting Pages site *is* public
+  regardless of repo visibility.) A device follows one feed at a time
+  (`ota_channel`, above); against a channel with nothing served a check honestly reports "up to
+  date" rather than failing, which is also what a self-hosted setup falls back to — point
+  `CONFIG_DAIKIN_OTA_MANIFEST_URL` / `CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL` at any HTTPS host to run
+  your own (the dev URL is derived from the latter, so one setting moves both).
 - **Version pipeline**: [`next-version.sh`](../scripts/next-version.sh) prints either the next
   **release** (`patch`/`minor`/`major` above the latest `v*` tag, with `version.txt` as a manual
   floor) or the next **dev** version (`--dev` → `<next patch>-dev.<commits since the tag>`). Which

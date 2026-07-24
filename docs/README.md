@@ -381,11 +381,17 @@ firmware **version** in the header (next to the IP address) to check; the UI the
 progress inline beside that version, waits for the board to come back up and reloads itself onto the
 new UI. Both the check and the download run on their own task, never on the HTTP worker.
 
-> **What you need for it to find anything:** a reachable `manifest.json` + signed `.bin`. CI builds
-> and stages both (`scripts/ci-build-all.sh`) and publishes them to GitHub Pages once the repository
-> is **public** and its Pages source points at `gh-pages` (see "Flash prebuilt artifacts" above).
-> With nothing served, a check simply reports the device is up to date. Point the two
+> **Which feed it checks:** the device follows one channel at a time — gear → **ESP32** → *Update
+> channel* (`POST /set_ota`, applied live). `release` reads the Pages root, `dev` reads `…/dev/`;
+> both are published by CI (see "Flash prebuilt artifacts" above), and the dev URL is derived from
+> `CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL`, so one setting moves both. Publishing does **not** require
+> the repository to be public; it does require the Pages source to point at `gh-pages`. With nothing
+> served on the selected channel, a check simply reports the device is up to date. Point the two
 > `CONFIG_DAIKIN_OTA_*` URLs at any HTTPS host to use your own feed.
+>
+> Switching from `dev` back to `release` installs an **older** build, which the gate below refuses
+> unless the request explicitly asks (`?downgrade=1`) — the UI does that after a channel switch, and
+> confirms it first.
 
 - **Downgrade gate** *(implemented)*: refuses anything not strictly newer — a signature proves
   authenticity, not freshness. It is checked **twice**, and the second check is the load-bearing one:
