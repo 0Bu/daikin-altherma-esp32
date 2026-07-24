@@ -24,6 +24,8 @@ const I18N = {
     "sys.nodata": "No data", "sys.unreachable": "Unreachable",
     "sys.unreachable_sub": "Can't reach the device — retrying…",
     "sys.waiting": "Waiting for the heat pump…", "sys.operating": "Operating",
+    "sys.standby": "Standby — not running", "sys.defrosting": "Defrosting",
+    "sys.circulating": "Circulating — compressor off",
     "sys.online": "Online", "sys.fault": "Fault",
     "sys.fault_line": (c) => "Fault · " + c + " — check the outdoor unit.",
     "sys.polled": (s) => `Polled ${s}s ago`,
@@ -84,7 +86,7 @@ const I18N = {
     "schem.est": "estimated",
     "insp.hint": "Tap a value or component in the diagram for an explanation.",
     "insp.close": "Close",
-    "schem.leaving_water": "leaving water", "schem.dhw_tank": "DHW TANK", "schem.set": "set",
+    "schem.leaving_water": "leaving water · pre-BUH", "schem.dhw_tank": "DHW TANK", "schem.set": "set",
     "schem.heating": "HEATING", "schem.pump": "PUMP", "schem.return": "return", "schem.room": "Room",
     "kpi.target": "target",
     "schem.est_src": (s) => "estimated · " + s, "schem.no_ct": "no current sensor",
@@ -112,6 +114,8 @@ const I18N = {
     "sys.nodata": "Keine Daten", "sys.unreachable": "Nicht erreichbar",
     "sys.unreachable_sub": "Gerät nicht erreichbar — erneuter Versuch…",
     "sys.waiting": "Warte auf die Wärmepumpe…", "sys.operating": "In Betrieb",
+    "sys.standby": "Bereitschaft — läuft nicht", "sys.defrosting": "Abtauen",
+    "sys.circulating": "Umwälzung — Verdichter aus",
     "sys.online": "Online", "sys.fault": "Störung",
     "sys.fault_line": (c) => "Störung · " + c + " — Außeneinheit prüfen.",
     "sys.polled": (s) => `vor ${s}s abgefragt`,
@@ -169,7 +173,7 @@ const I18N = {
     "schem.est": "geschätzt",
     "insp.hint": "Tippe im Schema auf einen Wert oder ein Bauteil für eine Erklärung.",
     "insp.close": "Schließen",
-    "schem.leaving_water": "Vorlauf", "schem.dhw_tank": "WW-SPEICHER", "schem.set": "Soll",
+    "schem.leaving_water": "Vorlauf · vor BUH", "schem.dhw_tank": "WW-SPEICHER", "schem.set": "Soll",
     "schem.heating": "HEIZUNG", "schem.pump": "PUMPE", "schem.return": "Rücklauf", "schem.room": "Raum",
     "kpi.target": "Ziel",
     "schem.est_src": (s) => "gesch. · " + s, "schem.no_ct": "kein Stromsensor",
@@ -269,6 +273,10 @@ function renderDashboard() {
   const mode = pickValue(/i\/u operation mode/i) || pickValue(/operation mode|^mode$/i);
   const fault = faultValue();
   const faulted = fault && !FAULT_OK.test(String(fault).trim());
+  // Decode the readings ONCE, here: the status block and the drawing must not disagree about what
+  // the plant is doing, and they did — the headline was written from the link state alone while the
+  // pills beneath it were written from the values.
+  S.live = hp.connected && (S._values || []).length > 0 ? liveData() : null;
   if (!hp.connected) {
     sysSet(t("sys.nodata"), t("sys.waiting"), "dim");
   } else if (faulted) {
@@ -278,7 +286,8 @@ function renderDashboard() {
     // only adds the poll age when there is no leaving-water pill to prove freshness (vLwt, the same
     // measurement picker the schematic uses; a plain /leaving water/ match could hit a setpoint).
     const stale = vLwt() == null && hp.last_ok_s != null ? " · " + t("sys.polled", hp.last_ok_s) : "";
-    sysSet(mode || t("sys.online"), t("sys.operating") + stale, "");
+    const p = plantState(S.live);
+    sysSet(mode || t("sys.online"), t(p.key) + stale, p.tone);
   }
   renderHeaderMeta();
   renderConnections();
@@ -305,7 +314,27 @@ function renderHeaderMeta() {
 // or the offline state, when there is no mode to report — over one status line, with a state dot.
 // `tone` is "" (running), "err" (fault) or "dim" (no data / unreachable); it colours the line and the
 // dot, but the words always say the state too, so colour is never the only carrier (DESIGN.md §9).
-const TONE_FILL = { err: "var(--err)", dim: "var(--muted)", "": "var(--ok)" };
+const TONE_FILL = { err: "var(--err)", dim: "var(--muted)", idle: "var(--muted)", "": "var(--ok)" };
+// What the plant is actually DOING, read off the machine rather than off the fact that the X10A bus
+// answers. "Operating" used to be printed unconditionally whenever the link was up, so an idle unit
+// — compressor stopped, pump at 0 %, no flow — was announced as running, in green, directly above
+// pills that all read zero. It also made the headline mode ("DHW") look like an active charge while
+// the 3-way valve right below it said "→ heating"; a parked plant reports its LAST mode, and only
+// the activity words can tell that apart from a live one.
+// `idle` mutes the DOT but not the text — distinct from `dim` (no data at all), which mutes both.
+const PLANT_RUNNING = { key: "sys.operating", tone: "" };
+const PLANT_DEFROST = { key: "sys.defrosting", tone: "" };
+const PLANT_CIRC = { key: "sys.circulating", tone: "" };
+const PLANT_STANDBY = { key: "sys.standby", tone: "idle" };
+function plantState(d) {
+  if (!d) return PLANT_STANDBY;
+  if (d.defrost === true) return PLANT_DEFROST;
+  if ((d.rps ?? 0) > 0) return PLANT_RUNNING;
+  // Compressor off but water still moving: pump overrun, or the backup heater carrying the load on
+  // its own. Something IS happening — it just isn't the heat pump, which is the point of saying so.
+  if (d.pumpOn ?? (d.flow != null && d.flow > 1)) return PLANT_CIRC;
+  return PLANT_STANDBY;
+}
 function sysSet(mode, status, tone) {
   setTxt("svMode", mode);
   setTxt("svStatus", status);
@@ -1182,13 +1211,15 @@ function clearSchematic() {
 }
 
 function renderLive() {
-  const live = !!(S.status?.hp?.connected) && (S._values || []).length > 0;
+  // The readings were decoded once in renderDashboard (S.live, null when the link is down or no
+  // value has arrived). The status block above and this drawing therefore render from the SAME
+  // snapshot and cannot disagree about whether the plant is running. The inspector reads it too, so
+  // an open explainer follows the live values.
+  const d = S.live;
   // Nothing hides when the link drops: the schematic carries the status block (mode / fault /
   // "no data"), which is exactly what must survive a dead bus. Every pill blanks to "—" and every
   // animation stops instead, so the drawing shows an idle plant with no readings, not a stale one.
-  if (!live) { clearSchematic(); S.live = null; renderInspect(); return; }
-  const d = liveData();
-  S.live = d;          // the inspector reads this, so an open explainer follows the live values
+  if (!d) { clearSchematic(); renderInspect(); return; }
 
   // Bit-flag states, each drawn at the component it belongs to: the room thermostat on the heating
   // riser, the BUH step in the BUH label, low-noise mode on the outdoor unit. (Pump and defrost were
@@ -1229,7 +1260,7 @@ function renderLive() {
   sc.classList.toggle("no-pth", d.pth == null);
   sc.classList.toggle("no-thermo", d.thermo == null);
   const onCls = (id, on) => $(id).classList.toggle("on", !!on);
-  onCls("fSup1", pumping); onCls("fSup2", pumping); onCls("fRet", pumping);
+  onCls("fSup1", pumping); onCls("fSup2", pumping); onCls("fSup3", pumping); onCls("fRet", pumping);
   onCls("fTank", pumping && toDhw); onCls("fCoil", pumping && toDhw); onCls("fTankRet", pumping && toDhw);
   onCls("fHeat", pumping && !toDhw); onCls("fHeatRet", pumping && !toDhw);
   onCls("rfHot", rpsOn); onCls("rfCold", rpsOn);
@@ -1301,8 +1332,16 @@ const INSPECT = {
     re: /^high pressure$/i, sample: "High pressure",
     rows: [/^high pressure$/i, /discharge pipe temp/i, /^refrigerant pressure sensor$/i],
   },
+  // Both readings on this pill belong to the OUTDOOR unit, not to the liquid line they are drawn on:
+  // the expansion valve is fitted there, and the low pressure is what exists downstream of it. The
+  // pill sits at this end of the pipe because that is where the valve is — naming it "suction side"
+  // implied the pipe itself was the suction leg, which it is not (see rcold).
   suction: {
-    t: { en: "Suction side", de: "Saugseite" },
+    t: { en: "Low side & expansion valve", de: "Niederdruck & Expansionsventil" },
+    what: {
+      en: "Both belong to the outdoor unit at the far end of this pipe: the electronic expansion valve meters how much refrigerant is let through, and the low pressure is what the circuit drops to once past it. A low-pressure reading is not available on every model — the outdoor unit here has a high-pressure switch but no low-pressure transducer, so this half often stays \"—\".",
+      de: "Beides gehört zum Außengerät am fernen Ende dieser Leitung: Das elektronische Expansionsventil dosiert, wie viel Kältemittel durchgelassen wird, und der Niederdruck ist der Druck, auf den der Kreis dahinter abfällt. Nicht jedes Modell liefert einen Niederdruckwert — das Außengerät hier hat einen Hochdruckschalter, aber keinen Niederdruckgeber, daher bleibt diese Hälfte oft \"—\".",
+    },
     re: /^low pressure$/i, sample: "Low pressure",
     rows: [/^low pressure$/i, /expansion valve ?1/i],
   },
@@ -1320,7 +1359,7 @@ const INSPECT = {
     rows: [lwtRow, /inlet water/i, /flow sensor/i],
   },
   lwt: {
-    t: { en: "Leaving water", de: "Vorlauf" },
+    t: { en: "Leaving water (pre-BUH, R1T)", de: "Vorlauf (vor BUH, R1T)" },
     pick: lwtRow,
     sample: "Leaving Water Temp. before BUH (R1T)",
   },
@@ -1397,10 +1436,18 @@ const INSPECT = {
   },
   pump: {
     t: { en: "Circulation pump", de: "Umwälzpumpe" },
+    what: {
+      en: "Drives the water round the whole circuit. It sits on the supply side, after the plate exchanger and after the backup heater, and is the last part the water passes before it leaves the unit for the 3-way valve. Its speed is modulated to hold the target ΔT: the harder the house pulls heat out, the faster it runs.",
+      de: "Treibt das Wasser durch den gesamten Kreis. Sie sitzt im Vorlauf, nach dem Plattenwärmetauscher und nach dem Zusatzheizer, und ist das letzte Bauteil, das das Wasser durchläuft, bevor es das Gerät zum 3-Wege-Ventil verlässt. Ihre Drehzahl wird geregelt, um das Ziel-ΔT zu halten: Je mehr Wärme das Haus entnimmt, desto schneller läuft sie.",
+    },
     re: /water pump operation/i, sample: "Water pump operation",
+    // 0 % is a stopped pump, not a pump "running at 0 %" — the old wording asserted circulation on
+    // an idle plant, next to a flow pill reading 0.0 l/min.
     now: (d) => d.pump == null ? null
-      : { en: `Running at ${fmt0(d.pump)} % of full speed, moving ${fmt1(d.flow)} l/min.`,
-          de: `Läuft mit ${fmt0(d.pump)} % der vollen Drehzahl und fördert ${fmt1(d.flow)} l/min.` },
+      : d.pump > 0
+        ? { en: `Running at ${fmt0(d.pump)} % of full speed, moving ${fmt1(d.flow)} l/min.`,
+            de: `Läuft mit ${fmt0(d.pump)} % der vollen Drehzahl und fördert ${fmt1(d.flow)} l/min.` }
+        : { en: "Stopped — no water is circulating.", de: "Steht — es zirkuliert kein Wasser." },
     rows: [/water pump signal/i, /flow sensor/i, /^water pressure$/i],
   },
   pel: {
@@ -1428,11 +1475,16 @@ const INSPECT = {
 
   // ── Pipe runs. Each says what is IN it, which way it goes, and whether anything is moving now —
   //    the questions a schematic invites and that no value row answers.
+  // The two interconnecting pipes are named for what they CARRY, which is fixed, not for the role
+  // they play, which flips with the mode: this is the gas line and the one below is the liquid line
+  // in both directions of the cycle. Calling the lower one a "suction line" was wrong in heating —
+  // there it holds warm condensed liquid on the HIGH-pressure side, because the expansion valve sits
+  // in the outdoor unit at its far end. The suction leg proper never leaves the outdoor unit.
   rhot: {
-    t: { en: "Discharge line (hot gas)", de: "Heißgasleitung" },
+    t: { en: "Gas line (hot gas in heating)", de: "Gasleitung (Heißgas im Heizbetrieb)" },
     what: {
-      en: "Refrigerant leaves the compressor here as a hot, high-pressure gas and carries the heat to the plate exchanger, where it condenses and gives that heat to the water. This is the hottest point in the machine — the discharge temperature beside it is measured right at the compressor outlet.",
-      de: "Hier verlässt das Kältemittel den Verdichter als heißes Gas unter hohem Druck und trägt die Wärme zum Plattenwärmetauscher, wo es kondensiert und die Wärme ans Wasser abgibt. Das ist der heißeste Punkt der Maschine — die Heißgastemperatur daneben wird direkt am Verdichteraustritt gemessen.",
+      en: "The thick pipe between the units. In heating, refrigerant leaves the compressor here as a hot, high-pressure gas and carries the heat to the plate exchanger, where it condenses and gives that heat to the water — the hottest point in the machine, and the discharge temperature beside it is measured right at the compressor outlet. In cooling the flow reverses and this same pipe returns cool gas from the exchanger to the compressor.",
+      de: "Die dicke Leitung zwischen den Geräten. Im Heizbetrieb verlässt das Kältemittel den Verdichter hier als heißes Gas unter hohem Druck und trägt die Wärme zum Plattenwärmetauscher, wo es kondensiert und die Wärme ans Wasser abgibt — der heißeste Punkt der Maschine; die Heißgastemperatur daneben wird direkt am Verdichteraustritt gemessen. Im Kühlbetrieb kehrt sich die Richtung um und dieselbe Leitung führt kühles Gas vom Wärmetauscher zurück zum Verdichter.",
     },
     now: (d) => (d.rps ?? 0) > 0
       ? { en: `Flowing — ${fmt1(d.circP)} bar at ${fmt0(d.disch)} °C.`,
@@ -1442,10 +1494,10 @@ const INSPECT = {
     rows: [/^high pressure$/i, /discharge pipe temp/i],
   },
   rcold: {
-    t: { en: "Suction line (cold)", de: "Saugleitung (kalt)" },
+    t: { en: "Liquid line", de: "Flüssigkeitsleitung" },
     what: {
-      en: "The cold, low-pressure return: after giving up its heat the refrigerant expands through the valve and comes back to the outdoor coil to pick up more heat from the air. It is colder than the outside air on purpose — that temperature difference is what lets it absorb heat at all, and it is also why the coil frosts up and needs defrosting.",
-      de: "Der kalte Rücklauf mit niedrigem Druck: Nachdem das Kältemittel seine Wärme abgegeben hat, entspannt es über das Ventil und kehrt zum Außenwärmetauscher zurück, um wieder Wärme aus der Luft aufzunehmen. Es ist absichtlich kälter als die Außenluft — erst dieser Temperaturunterschied lässt es überhaupt Wärme aufnehmen, und genau deshalb bereift der Wärmetauscher und muss abgetaut werden.",
+      en: "The thin pipe between the units. In heating it carries the refrigerant back as a warm liquid, still under high pressure: it condensed in the plate exchanger and gave its heat to the water, but it has not expanded yet — the expansion valve sits in the outdoor unit at the far end of this pipe. Only past that valve does it turn cold and low-pressure, and only then does it pick up heat from the outside air in the outdoor coil, which is why that coil frosts up and needs defrosting.",
+      de: "Die dünne Leitung zwischen den Geräten. Im Heizbetrieb führt sie das Kältemittel als warme Flüssigkeit zurück, weiterhin unter hohem Druck: Es ist im Plattenwärmetauscher kondensiert und hat seine Wärme ans Wasser abgegeben, aber es ist noch nicht entspannt — das Expansionsventil sitzt im Außengerät am fernen Ende dieser Leitung. Erst hinter diesem Ventil wird es kalt und niederdruckseitig, und erst dann nimmt es im Außenwärmetauscher Wärme aus der Luft auf; deshalb bereift dieser und muss abgetaut werden.",
     },
     now: (d) => (d.rps ?? 0) > 0
       ? { en: `Flowing — expansion valve at ${fmt0(d.eev)} pulses.`,
@@ -1456,8 +1508,8 @@ const INSPECT = {
   wsup: {
     t: { en: "Flow pipe", de: "Vorlaufleitung" },
     what: {
-      en: "Heated water on its way from the plate exchanger, past the electric backup heater, to the 3-way valve that decides whether it goes to the tank or to the house. Nothing heats it between the exchanger and the valve unless the backup heater is firing.",
-      de: "Erwärmtes Wasser auf dem Weg vom Plattenwärmetauscher, am elektrischen Zusatzheizer vorbei, zum 3-Wege-Ventil, das entscheidet, ob es zum Speicher oder ins Haus geht. Zwischen Wärmetauscher und Ventil erwärmt es nichts weiter — außer der Zusatzheizer heizt gerade.",
+      en: "Heated water on its way from the plate exchanger, past the electric backup heater and through the circulation pump, to the 3-way valve that decides whether it goes to the tank or to the house. Nothing heats it between the exchanger and the valve unless the backup heater is firing — which is why the temperature shown before the heater is the one the heat pump itself produced.",
+      de: "Erwärmtes Wasser auf dem Weg vom Plattenwärmetauscher, am elektrischen Zusatzheizer vorbei und durch die Umwälzpumpe, zum 3-Wege-Ventil, das entscheidet, ob es zum Speicher oder ins Haus geht. Zwischen Wärmetauscher und Ventil erwärmt es nichts weiter — außer der Zusatzheizer heizt gerade; deshalb ist die vor dem Heizer gezeigte Temperatur die, die die Wärmepumpe selbst erzeugt hat.",
     },
     now: (d) => (d.pumpOn ?? (d.flow != null && d.flow > 1))
       ? { en: `Carrying ${degC(d.lwt)} at ${fmt1(d.flow)} l/min${d.buh1 || d.buh2 ? ", reheated by the backup heater" : ""}.`,
@@ -1497,8 +1549,8 @@ const INSPECT = {
   wret: {
     t: { en: "Return pipe", de: "Rücklaufleitung" },
     what: {
-      en: "Cooled water coming back from the house and the tank, through the circulation pump, into the plate exchanger to be warmed again. Its temperature is the honest measure of how much heat the building actually absorbed.",
-      de: "Abgekühltes Wasser, das aus Haus und Speicher zurückkommt, durch die Umwälzpumpe läuft und im Plattenwärmetauscher wieder erwärmt wird. Seine Temperatur ist das ehrliche Maß dafür, wie viel Wärme das Gebäude tatsächlich aufgenommen hat.",
+      en: "Cooled water coming back from the house and the tank, past the dirt filter and the flow and pressure sensors, into the plate exchanger to be warmed again. Its temperature is the honest measure of how much heat the building actually absorbed. The pump is not in this line — it sits on the supply side, after the backup heater.",
+      de: "Abgekühltes Wasser, das aus Haus und Speicher zurückkommt, am Schmutzfilter und den Durchfluss- und Drucksensoren vorbei in den Plattenwärmetauscher läuft und dort wieder erwärmt wird. Seine Temperatur ist das ehrliche Maß dafür, wie viel Wärme das Gebäude tatsächlich aufgenommen hat. Die Pumpe sitzt nicht in dieser Leitung, sondern im Vorlauf hinter dem Zusatzheizer.",
     },
     now: (d) => (d.pumpOn ?? (d.flow != null && d.flow > 1))
       ? { en: `Returning at ${degC(d.ret)}, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.`,

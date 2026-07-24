@@ -133,6 +133,10 @@ svg .sc-mode { fill: var(--fg); font: 650 24px var(--font-sans); letter-spacing:
 svg .sc-status { fill: var(--brand-strong); font: 600 11.5px var(--font-sans); }
 svg .sc-status.err { fill: var(--err); }
 svg .sc-status.dim { fill: var(--muted); }
+/* Standby — the plant is healthy but not running. Only the DOT is muted (TONE_FILL in app.js); the
+   text keeps its normal colour, which is what separates it from .dim (no data at all, both muted).
+   The words say which it is either way, so neither reading depends on the colour. */
+svg .sc-status.idle { fill: var(--brand-strong); }
 svg .sc-pipe { fill: none; stroke: var(--pipe); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
 svg .sc-rpipe { fill: none; stroke: var(--pipe); stroke-width: 3.5; stroke-linecap: round; }
 svg .sc-flow {

@@ -271,11 +271,19 @@ Body, ordered:
    said now lives *inside the drawing*, each fact at the component it describes, so one look at the
    picture answers "what is the plant doing right now".
    **Status block** (top-left of the SVG, where a drawing's title goes — it describes the whole
-   plant, not one component): a state **dot** (`--ok` running, `--err` fault, `--muted` no data), the
-   **operation mode** as the headline (Heating / Cooling / DHW / Defrost / Stop — the hydronic I/U
-   mode, see item 2), and one status line under it — "Operating", "Fault · U4 — check the outdoor
-   unit.", "Waiting for the heat pump…", "Can't reach the device — retrying…". The last-poll age is
+   plant, not one component): a state **dot** (`--ok` running, `--err` fault, `--muted` standby *or*
+   no data), the **operation mode** as the headline (Heating / Cooling / DHW / Defrost / Stop — the
+   hydronic I/U mode, see item 2), and one status line under it — "Operating", "Defrosting",
+   "Circulating — compressor off", "Standby — not running", "Fault · U4 — check the outdoor unit.",
+   "Waiting for the heat pump…", "Can't reach the device — retrying…". The last-poll age is
    appended only when the drawing has no leaving-water pill to prove freshness itself.
+   The status line is derived from the **readings** (compressor rps, defrost flag, pump/flow), never
+   from the fact that the X10A bus answers: it once said "Operating" in green whenever the link was
+   up, so an idle plant was announced as running directly above pills that all read zero — and a
+   parked unit still reporting its last mode ("DHW") read as a live tank charge while the 3-way
+   valve beside it said "→ heating". The headline names the mode; only the status line claims
+   activity. **Standby mutes the dot but not the text**, which is what separates it from "no data"
+   (both muted) — and the words say which it is regardless of colour (§9).
    **State flags are drawn at their component**, never as a chip row: the room thermostat is a pill
    on the **heating riser** above the emitter (`--ok` while calling), the BUH step is part of the
    **BUH label** ("BUH 1"/"BUH 2", over the existing `--warn` tint — the tint says *on*, the digit
@@ -287,9 +295,14 @@ Body, ordered:
    back to a bare "3WV" (no branch claimed) and the thermostat pill disappears — an idle plant with no
    readings, not a stale one — nothing on this screen is hidden by a dead bus.
 2. **System schematic** — the body of that card, drawing the hydraulic + refrigerant circuit
-   as an inline SVG: outdoor unit (fan + compressor with rps), refrigerant lines, plate heat
-   exchanger, supply line through the backup heater to the 3-way valve, DHW tank with coil, heating
-   circuit, and the return line through the pump. Value pills sit at their physical measuring
+   as an inline SVG: outdoor unit (fan + compressor with rps), refrigerant lines (gas + liquid — the
+   lower one is the **liquid** line, not a suction line: the expansion valve sits in the outdoor unit
+   at its far end), plate heat exchanger, supply line through the backup heater **and then the
+   circulation pump** to the 3-way valve, DHW tank with coil, heating circuit, and the return line.
+   The component **order is the manufacturer's** (installer reference §16.2: exchanger → R1T →
+   backup heater → pump → R2T → outlet, then the field-supplied 3-way valve), not a drawing
+   convenience — the pump is on the **supply** side, and drawing it in the return misplaced a real
+   part. Value pills sit at their physical measuring
    points (outdoor temp, high/low pressure + discharge, EEV pulses, leaving/return water, ΔT, the
    estimated **heat output and COP** at the PHE, the estimated **electrical input** on the outdoor
    unit where the power goes in, flow + water pressure, pump %, tank temp/setpoint, room
@@ -560,7 +573,8 @@ enabled/available values are hidden.
   action whose number changes throughout and belongs next to the version it is about.
 - **Status block** — inside the schematic, top-left (§5.3 item 1): state dot + `--fg` headline (the
   operation mode) over one `--brand-strong` status line (`--err` on fault, `--muted` when there is no
-  data). Drawn as SVG text, not HTML — it is part of the picture, not a band above it.
+  data; on **standby** only the dot goes `--muted`, the line stays `--brand-strong`). Drawn as SVG
+  text, not HTML — it is part of the picture, not a band above it.
 - **System schematic** — full-width card holding the live hydraulic/refrigerant SVG (§5.3 item 2):
   neutral pipe skeleton with animated `--flow-hot`/`--flow-cold` dash overlays, `--card` value
   pills with `--line` borders, `--muted` small-caps part labels. Scrolls horizontally inside the

@@ -144,54 +144,75 @@
                   <text class="sc-lbl" x="354" y="340" text-anchor="middle">PHE</text>
                 </g>
                 <g class="sc-hit" data-insp="dt" role="button" tabindex="0">
-                  <rect class="sc-pill" x="390" y="214" width="120" height="22" rx="11"/>
-                  <text class="sc-val" x="450" y="229" text-anchor="middle">ΔT <tspan id="svDt">—</tspan> K<tspan id="svDtSet"></tspan></text>
+                  <rect class="sc-pill" x="390" y="220" width="120" height="22" rx="11"/>
+                  <text class="sc-val" x="450" y="235" text-anchor="middle">ΔT <tspan id="svDt">—</tspan> K<tspan id="svDtSet"></tspan></text>
                 </g>
                 <!-- Heat actually crossing the PHE into the water — flow × ΔT, so it belongs at the
                      PHE and nowhere else. DERIVED, never measured: the "≈" and the "est." sub-label
                      are load-bearing (DESIGN.md §5.3 item 3). Hidden via .no-pth when flow or ΔT is
                      missing, rather than drawing a confident "0.0 kW" from an absent row. -->
                 <g id="gPth" class="sc-hit" data-insp="pth" role="button" tabindex="0">
-                  <rect class="sc-pill" x="390" y="244" width="120" height="22" rx="11"/>
-                  <text class="sc-val" x="450" y="259" text-anchor="middle">≈ <tspan id="svPth">—</tspan> kW · COP <tspan id="svCop">—</tspan></text>
-                  <text class="sc-sub" x="450" y="278" text-anchor="middle" data-i18n="schem.est">estimated</text>
+                  <rect class="sc-pill" x="390" y="250" width="120" height="22" rx="11"/>
+                  <text class="sc-val" x="450" y="265" text-anchor="middle">≈ <tspan id="svPth">—</tspan> kW · COP <tspan id="svCop">—</tspan></text>
+                  <text class="sc-sub" x="450" y="284" text-anchor="middle" data-i18n="schem.est">estimated</text>
                 </g>
-                <!-- Water circuit: supply -->
+                <!-- Water circuit: supply. The component ORDER is the manufacturer's, not a drawing
+                     convenience — installer reference §16.2 (indoor-unit piping) and the system
+                     diagram in §8 both run: plate exchanger (d) → R1T → backup heater (l) → PUMP (m)
+                     → R2T → outlet, and only THEN the field-supplied 3-way valve. So the pump sits
+                     here, on the supply side as the last part before the water leaves the unit —
+                     NOT in the return line, where this drawing used to put it. -->
                 <g class="sc-hit" data-insp="wsup" role="button" tabindex="0">
-                  <path class="sc-pipe" d="M378 180 H 430"/>
-                  <path class="sc-pipe" d="M474 180 H 520"/>
-                  <path class="sc-hitline" d="M378 180 H 430"/>
-                  <path class="sc-hitline" d="M474 180 H 506"/>
+                  <path class="sc-pipe" d="M378 180 H 398"/>
+                  <path class="sc-pipe" d="M442 180 H 470"/>
+                  <path class="sc-pipe" d="M504 180 H 526"/>
+                  <path class="sc-hitline" d="M378 180 H 398"/>
+                  <path class="sc-hitline" d="M442 180 H 470"/>
+                  <path class="sc-hitline" d="M504 180 H 526"/>
                 </g>
-                <path class="sc-flow hot" id="fSup1" d="M378 180 H 430"/>
-                <path class="sc-flow hot" id="fSup2" d="M474 180 H 520"/>
+                <path class="sc-flow hot" id="fSup1" d="M378 180 H 398"/>
+                <path class="sc-flow hot" id="fSup2" d="M442 180 H 470"/>
+                <path class="sc-flow hot" id="fSup3" d="M504 180 H 526"/>
+                <!-- R1T, at the exchanger's water outlet and BEFORE the backup heater — which is
+                     exactly where it is drawn. The sub-label says "pre-BUH" because the pill is NOT
+                     the system supply temperature: that is R2T, after the heater and the pump. The
+                     two are equal whenever the BUH is off (the normal case) and diverge the moment
+                     it fires, so an unqualified "leaving water" would over-claim precisely when it
+                     matters. R1T is what ΔT / heat output / COP must be built on (lwt_select.hpp). -->
                 <g class="sc-hit" data-insp="lwt" role="button" tabindex="0">
                   <rect class="sc-pill" x="352" y="118" width="66" height="22" rx="11"/>
                   <text class="sc-val" x="385" y="133" text-anchor="middle"><tspan id="svLwt">—</tspan> °C</text>
-                  <text class="sc-sub" x="385" y="112" text-anchor="middle" data-i18n="schem.leaving_water">leaving water</text>
+                  <text class="sc-sub" x="385" y="112" text-anchor="middle" data-i18n="schem.leaving_water">leaving water · pre-BUH</text>
                 </g>
                 <!-- Backup heater -->
                 <g class="sc-hit" data-insp="buh" role="button" tabindex="0">
-                  <rect class="sc-buh" x="430" y="164" width="44" height="32" rx="6"/>
-                  <path class="sc-bolt" d="M454 168 l-8 12 h6 l-4 12 10 -14 h-6 l6 -10z"/>
+                  <rect class="sc-buh" x="398" y="164" width="44" height="32" rx="6"/>
+                  <path class="sc-bolt" d="M422 168 l-8 12 h6 l-4 12 10 -14 h-6 l6 -10z"/>
                 <!-- The active STEP is part of the label ("BUH 1"/"BUH 2"), not just the warn tint:
                      the tint says "on", the digit says how much resistive heat is being paid for. -->
-                  <text class="sc-lbl" x="452" y="212" text-anchor="middle">BUH<tspan id="svBuh"></tspan></text>
+                  <text class="sc-lbl" x="420" y="212" text-anchor="middle">BUH<tspan id="svBuh"></tspan></text>
                 </g>
-                <!-- 3-way valve -->
+                <!-- Circulation pump — last component on the supply side (see the order note above).
+                     Label sits ABOVE the pipe: below it is the ΔT / heat-output pill column. -->
+                <g class="sc-hit" data-insp="pump" role="button" tabindex="0">
+                  <circle class="sc-valve" cx="487" cy="180" r="17"/>
+                  <g id="scPump"><path d="M487 180 l-8 -9 h16 z" fill="var(--brand)"/></g>
+                  <text class="sc-lbl" x="487" y="152" text-anchor="middle"><tspan data-i18n="schem.pump">PUMP</tspan> <tspan class="sc-val" id="svPump">—</tspan>%</text>
+                </g>
+                <!-- 3-way valve — field-supplied, downstream of the whole indoor unit -->
                 <g class="sc-hit" data-insp="valve" role="button" tabindex="0">
-                  <circle class="sc-valve" cx="520" cy="180" r="14"/>
-                  <path d="M508 180 h24 M520 168 v12" stroke="var(--muted)" stroke-width="2" fill="none"/>
-                  <text class="sc-state" x="520" y="216" text-anchor="middle" id="svValve">3WV</text>
+                  <circle class="sc-valve" cx="540" cy="180" r="14"/>
+                  <path d="M528 180 h24 M540 168 v12" stroke="var(--muted)" stroke-width="2" fill="none"/>
+                  <text class="sc-state" x="540" y="216" text-anchor="middle" id="svValve">3WV</text>
                 </g>
                 <!-- DHW tank branch (hidden via .no-dhw when the model has no tank values) -->
                 <g class="g-dhw">
                   <g class="sc-hit" data-insp="wtank" role="button" tabindex="0">
-                    <path class="sc-pipe" d="M520 180 V 70 H 585"/>
-                    <path class="sc-hitline" d="M520 166 V 70 H 585"/>
+                    <path class="sc-pipe" d="M540 180 V 70 H 585"/>
+                    <path class="sc-hitline" d="M540 166 V 70 H 585"/>
                     <path class="sc-hitline" d="M600 190 V 400"/>
                   </g>
-                  <path class="sc-flow hot" id="fTank" d="M520 180 V 70 H 585"/>
+                  <path class="sc-flow hot" id="fTank" d="M540 180 V 70 H 585"/>
                   <g class="sc-hit" data-insp="tank" role="button" tabindex="0">
                     <rect class="sc-box" x="585" y="34" width="120" height="140" rx="14"/>
                     <text class="sc-lbl" x="600" y="54" data-i18n="schem.dhw_tank">DHW TANK</text>
@@ -206,10 +227,10 @@
                 </g>
                 <!-- Heating circuit -->
                 <g class="sc-hit" data-insp="wheat" role="button" tabindex="0">
-                  <path class="sc-pipe" d="M520 180 H 690 V 268"/>
-                  <path class="sc-hitline" d="M540 180 H 690 V 268"/>
+                  <path class="sc-pipe" d="M540 180 H 690 V 268"/>
+                  <path class="sc-hitline" d="M560 180 H 690 V 268"/>
                 </g>
-                <path class="sc-flow hot" id="fHeat" d="M520 180 H 690 V 268"/>
+                <path class="sc-flow hot" id="fHeat" d="M540 180 H 690 V 268"/>
                 <!-- Room-thermostat demand: it gates THIS branch, so it sits on the heating riser
                      above the emitter rather than in a chip row. Hidden (.no-thermo) on a profile
                      that reports no thermostat flag, and while the link is down. -->
@@ -230,11 +251,11 @@
                 </g>
                 <path class="sc-flow cold" id="fRet" d="M690 386 V 400 H 400 V 300 H 378"/>
                 <path class="sc-flow cold" id="fHeatRet" d="M690 324 V 386"/>
-                <g class="sc-hit" data-insp="pump" role="button" tabindex="0">
-                  <circle class="sc-valve" cx="470" cy="400" r="17"/>
-                  <g id="scPump"><path d="M470 400 l-8 -9 h16 z" fill="var(--brand)"/></g>
-                  <text class="sc-lbl" x="470" y="432" text-anchor="middle"><tspan data-i18n="schem.pump">PUMP</tspan> <tspan class="sc-val" id="svPump">—</tspan>%</text>
-                </g>
+                <!-- Return line carries no pump (it is on the supply side — see the order note at
+                     the supply run). What it does carry, in the manufacturer's order seen from the
+                     house: R4T at the inlet, then the dirt filter, the pressure sensor and the flow
+                     sensor, then the exchanger — so the return pill sits right of the flow/pressure
+                     pill, which is upstream-first along a right-to-left flow. -->
                 <g class="sc-hit" data-insp="rwt" role="button" tabindex="0">
                   <rect class="sc-pill" x="510" y="411" width="66" height="22" rx="11"/>
                   <text class="sc-val" x="543" y="426" text-anchor="middle"><tspan id="svRwt">—</tspan> °C</text>
