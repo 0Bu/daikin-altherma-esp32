@@ -88,7 +88,6 @@ const I18N = {
     // static index.html markup (data-i18n)
     "schem.outdoor_unit": "OUTDOOR UNIT", "schem.defrost_pill": "❄ defrost", "schem.outdoor": "Outdoor",
     "schem.est": "estimated",
-    "schem.held_note": "Greyed outdoor readings are from the last compressor run — the outdoor unit stops refreshing its own sensors when it stops.",
     "insp.hint": "Tap a value or component in the diagram for an explanation.",
     "insp.close": "Close",
     "schem.leaving_water": "leaving water · pre-BUH", "schem.dhw_tank": "DHW TANK", "schem.set": "set",
@@ -191,7 +190,6 @@ const I18N = {
     // static index.html markup (data-i18n)
     "schem.outdoor_unit": "AUSSENEINHEIT", "schem.defrost_pill": "❄ Abtauen", "schem.outdoor": "Außen",
     "schem.est": "geschätzt",
-    "schem.held_note": "Grau dargestellte Außenwerte stammen vom letzten Verdichterlauf — die Außeneinheit aktualisiert ihre eigenen Sensoren im Stillstand nicht.",
     "insp.hint": "Tippe im Schema auf einen Wert oder ein Bauteil für eine Erklärung.",
     "insp.close": "Schließen",
     "schem.leaving_water": "Vorlauf · vor BUH", "schem.dhw_tank": "WW-SPEICHER", "schem.set": "Soll",
@@ -1254,10 +1252,6 @@ const vLwt = () => {
 const fmt1 = (n) => (n == null ? "—" : n.toFixed(1));
 const fmt0 = (n) => (n == null ? "—" : String(Math.round(n)));
 const setTxt = (id, s) => { const el = $(id); if (el && el.textContent !== s) el.textContent = s; };
-// Mark one value tspan as HELD OVER — shown, but visibly not a current measurement (style.css
-// .sc-val tspan.held). Per tspan rather than per pill because one pill can pair a held reading with
-// a live one (high side: held discharge temp + live refrigerant pressure).
-const setHeld = (id, on) => { const el = $(id); if (el) el.classList.toggle("held", !!on); };
 
 function liveData() {
   // ΔT is measured across the PHE: leaving water BEFORE the backup heater minus inlet water — with
@@ -1351,11 +1345,7 @@ const SCHEM_PILL_IDS = [
   "svFlow", "svWp", "svPump", "svTank", "svTankSet", "svRoom", "svRoomSet", "svPth", "svCop", "svPel",
 ];
 function clearSchematic() {
-  SCHEM_PILL_IDS.forEach((id) => { setTxt(id, "—"); setHeld(id, false); });
-  // A dead bus is "no data", not "held over from the last run" — the legend would explain a greying
-  // that is no longer on screen, and would outlive the link that produced it.
-  const heldNote = $("heldNote");
-  if (heldNote) heldNote.hidden = true;
+  SCHEM_PILL_IDS.forEach((id) => setTxt(id, "—"));
   setTxt("svPelSrc", "");
   setTxt("svDtSet", "");     // an optional trailing segment, not a value — blanks to nothing, not "—"
   setTxt("svBuh", "");                 // no BUH step to report
@@ -1389,23 +1379,16 @@ function renderLive() {
 
   // Schematic badges
   // Outdoor air + discharge come off the pages the outdoor unit stops refreshing when it stops
-  // running (d.ouHeldOver). Neither extreme is honest: printing them plain asserts the last run's
-  // number as a live reading (the pre-1.0.7 bug — outdoor air sat at exactly 19.0 °C for five hours),
-  // and blanking them to "—" throws away a number the user wants and reads as a lost connection,
-  // which is how this landed as a "the firmware says the plant is unreachable" bug report. So: show
-  // the value, greyed, with #heldNote under the drawing saying where it came from.
-  setTxt("svOut", fmt1(d.out)); setHeld("svOut", d.ouHeldOver && d.out != null);
-  setTxt("svRps", fmt0(d.rps));
+  // running (d.ouHeldOver): blank them rather than assert a reading from the last cycle as current.
+  // A held-over number is shown as no number at all — the same answer the drawing gives for every
+  // other reading it cannot state right now, so nothing on screen has to be read as half-valid.
+  setTxt("svOut", d.ouHeldOver ? "—" : fmt1(d.out)); setTxt("svRps", fmt0(d.rps));
   // High-side badge shows the circuit pressure (real refrigerant sensor when the compressor's own HP
   // transducer is idle-zero — see d.circP). Low/suction side has no equivalent at-rest gauge, so show
   // "—" rather than a misleading 0.0 bar when the compressor is off.
   setTxt("svHp", fmt1(d.circP));
   setTxt("svLp", !d.ouHeldOver && d.lp != null && d.lp > 0 ? fmt1(d.lp) : "—");
-  setTxt("svDisch", fmt0(d.disch)); setHeld("svDisch", d.ouHeldOver && d.disch != null);
-  setTxt("svEev", fmt0(d.eev));
-  // The legend appears only when something on screen is actually greyed — never as standing furniture.
-  const heldNote = $("heldNote");
-  if (heldNote) heldNote.hidden = !(d.ouHeldOver && (d.out != null || d.disch != null));
+  setTxt("svDisch", d.ouHeldOver ? "—" : fmt0(d.disch)); setTxt("svEev", fmt0(d.eev));
   setTxt("svLwt", fmt1(d.lwt)); setTxt("svRwt", fmt1(d.ret));
   // ΔT is a WORKING POINT across the exchanger — it needs water moving to mean anything. With the
   // pump off, R1T and R4T are two stagnant sensors cooling at different rates, and their difference
@@ -1492,11 +1475,11 @@ const INSPECT = {
       : (d.rps ?? 0) > 0
         ? { en: `Running — compressor at ${fmt0(d.rps)} rps${d.quiet ? ", capped by quiet mode" : ""}.`,
             de: `Läuft — Verdichter mit ${fmt0(d.rps)} rps${d.quiet ? ", durch den Leise-Modus begrenzt" : ""}.` }
-        // Says why the outdoor pills are GREYED at rest: the unit stops refreshing its own registers
-        // when it stops, so those readings are the LAST run's (logic/ou_stale.hpp). This is the
-        // detailed half — #heldNote under the drawing carries the one-line version.
-        : { en: "Idle — the compressor is stopped, so no heat is being produced. The outdoor unit also stops refreshing its own sensors while it rests, so outdoor air and discharge temperature are shown greyed: they are the last run's values, not current measurements.",
-            de: "Standby — der Verdichter steht, es wird gerade keine Wärme erzeugt. Die Außeneinheit aktualisiert im Stillstand auch ihre eigenen Sensoren nicht mehr; Außenluft und Heißgastemperatur werden daher grau dargestellt — sie stammen vom letzten Lauf und sind keine aktuellen Messwerte." },
+        // Says why the outdoor pills read "—" at rest: the unit stops refreshing its own registers
+        // when it stops, so those readings would be the LAST run's (logic/ou_stale.hpp). This is the
+        // discoverable half of the fix — the pill can only blank, it cannot explain itself.
+        : { en: "Idle — the compressor is stopped, so no heat is being produced. The outdoor unit also stops refreshing its own sensors while it rests, so outdoor air and discharge temperature read \"—\" rather than repeat the last run's values.",
+            de: "Standby — der Verdichter steht, es wird gerade keine Wärme erzeugt. Die Außeneinheit aktualisiert im Stillstand auch ihre eigenen Sensoren nicht mehr; Außenluft und Heißgastemperatur zeigen daher „—\" statt die Werte des letzten Laufs zu wiederholen." },
     rows: [/outdoor air/i, /inv frequency/i, /^high pressure$/i, /discharge pipe temp/i, /expansion valve ?1/i, /defrost operation/i],
   },
   comp: {

@@ -319,31 +319,29 @@ Body, ordered:
    why, so instead every value pill blanks to "—", every animation stops, the 3-way-valve label falls
    back to a bare "3WV" (no branch claimed) and the thermostat pill disappears — an idle plant with no
    readings, not a stale one — nothing on this screen is hidden by a dead bus.
-   **A sleeping outdoor unit is a related but DIFFERENT case, and it resolves the other way.** The
+   **A sleeping outdoor unit is a related case, and it is resolved the SAME way.** The
    outdoor unit refreshes its own register pages only while it *runs*; stopped, it keeps answering
    with the last run's values (`logic/ou_stale.hpp`, host-tested against the whole catalog) — measured
    on a live unit, outdoor air held exactly 19.0 °C for five hours, stepped when the compressor
-   started, then sat at exactly 25.5 °C for three hours. Unlike a dead bus, we know both the value
-   *and* exactly why it is not current, so the honest rendering is neither extreme: the outdoor-air
-   and discharge pills stay **visible but greyed** (`.sc-val tspan.held`), with a legend under the
-   drawing (`#heldNote`) naming where they came from. Printing them plain asserts the last run's
-   number as a live reading; blanking them to "—" throws away a number the user wants and is read as
-   a lost connection — that failure is on record, as a "the firmware says the plant is unreachable"
-   bug report against the blanking build. The greying is applied per *tspan*, not per pill, because
-   the high-side badge pairs a held discharge temperature with a live refrigerant pressure (§5.5).
-   ΔT is a different case again and does still blank: with the pump off and flow zero, the difference
+   started, then sat at exactly 25.5 °C for three hours. So the outdoor-air and discharge pills
+   **blank to "—"** while the compressor is stopped, exactly as they do on a dead bus: a value the
+   unit is no longer measuring is not reported, rather than reported with a caveat attached. The
+   drawing has one vocabulary for "no reading right now" and this is it — a second, dimmer register
+   of half-valid numbers asks the user to remember which pills mean what, on a screen whose whole
+   job is to be read at a glance. What the pill cannot say, the inspector does: the outdoor unit's
+   idle explanation names the reason.
+   ΔT blanks for a related but distinct reason: with the pump off and flow zero, the difference
    between two *stagnant* sensors is not a stale working point, it is not a working point at all.
-   The **electrical input** is on that same side of the line whenever it is falling back to the
+   The **electrical input** is the same whenever it is falling back to the
    inverter current (a `0x21` row that freezes too): a stopped compressor is not drawing the 1.4 kW
-   the held current implies, it is drawing ~0, so greying it would say "real, just old" about a
-   figure that is simply wrong. Its sub-label then reads "compressor off · no live reading" rather
+   the held current implies, it is drawing ~0. Its sub-label then reads "compressor off · no live
+   reading" rather
    than the "no current sensor" it shows when the profile genuinely has no such row — the profile has
    one, it is the *reading* that is not current. The CT-clamp path is unaffected: those sit on a live
    hydronic page, so a non-zero reading at rest is genuine standby draw and is shown normally.
-   What the pill cannot say, the inspector does: the outdoor unit's idle explanation names the reason.
    The run state itself is never affected — the compressor witness (`INV frequency`) sits on a page
    that stays live in every profile, which is what makes "Standby — not running" trustworthy beside
-   greyed pills.
+   blanked pills.
 2. **System schematic** — the body of that card, drawing the hydraulic + refrigerant circuit
    as an inline SVG: outdoor unit (fan + compressor with rps), refrigerant lines (gas + liquid — the
    lower one is the **liquid** line, not a suction line: the expansion valve sits in the outdoor unit
@@ -370,8 +368,8 @@ Body, ordered:
    refreshing (a non-zero reading at rest is genuine standby draw and is shown), while the inverter
    current freezes with the rest of the outdoor unit's pages — so with the compressor off the INV
    fallback is suppressed and the sub-label reads **"compressor off · no live reading"** rather than
-   the "no current sensor" it shows when the profile genuinely has no such row. Blanking a figure is
-   a loss of information; standing a *second* wrong explanation in front of the first is worse. **The pipes animate in flow
+   the "no current sensor" it shows when the profile genuinely has no such row — suppressing one
+   wrong claim must not stand a *second* one in front of it. **The pipes animate in flow
    direction** while the pump runs — supply in `--flow-hot`, return in `--flow-cold`; the 3-way
    valve state switches the animated branch (heating circuit ↔ tank coil), a defrost cycle reverses
    the refrigerant-loop animation and shows a `--flow-cold` "❄ defrost" pill, and an active BUH
