@@ -1,9 +1,16 @@
 # UI design specification
 
-Design contract for the embedded web UI (`main/www/`) and the captive portal (`main/www/setup.html`).
+Design contract for the embedded web UI (`main/www/`), the captive portal (`main/www/setup.html`)
+and the browser installer served from GitHub Pages (`docs/index.html`, §5.5).
 Implementation-ready: colours, tokens, information architecture, per-view specs, states, and the
 firmware fields the UI keys off. No framework — one self-contained gzipped page + the standalone
-setup page (see `main/CMakeLists.txt`).
+setup page (see `main/CMakeLists.txt`) + the standalone installer page.
+
+The three pages are the **one** product a user walks through in order — install, provision, operate —
+so all three ship the same tokens (§2), brand mark, hero band, card and primary button. The installer
+page lives outside the firmware and cannot include `main/www/style.css`, so its `:root` block is a
+**duplicate** of the token set: a change to the palette in §2 has to land in `style.css`,
+`setup.html` **and** `docs/index.html`.
 
 ## 1. Principles
 
@@ -18,7 +25,9 @@ setup page (see `main/CMakeLists.txt`).
    (WiFi credentials, MQTT broker, Syslog server, NTP server, RX/TX pins) are explicit and report
    their outcome.
 4. **Terse, dense, technical.** Tabular numbers, short labels, no decorative copy.
-5. **Browser-detected language (de / en), no selector.** The UI **chrome** (hero states, card
+5. **Browser-detected language (de / en), no selector.** This principle scopes to the **device UI**
+   (`main/www/`) — the GitHub Pages installer of §5.5 is English-only by decision, and `setup.html`
+   is served before `app.js` exists. The UI **chrome** (hero states, card
    titles, connection rows, KPI/schematic labels, modals, banners, toasts) and the tap-to-expand
    value **descriptions** (§6) are rendered in German for a `de*` browser (`navigator.language`) and
    English otherwise — English is the fallback for every string. There is **no manual language
@@ -27,7 +36,8 @@ setup page (see `main/CMakeLists.txt`).
    labels** arrive over `/values` as English X10A register names (`docs/REGISTERS.md`) and are shown
    verbatim in **both** languages (the German descriptions explain them); the firmware ships no
    localized strings. All UI copy lives in one `I18N` dictionary; dynamic strings go through `t()`,
-   static `index.html` markup through `data-i18n` + `applyStaticI18n()`.
+   static `main/www/index.html` markup through `data-i18n` + `applyStaticI18n()` (spelled in full
+   now that this contract also covers a second `index.html`, the installer of §5.5).
 
 ## 2. Brand & colour tokens
 
@@ -377,6 +387,37 @@ row on the ESP32 card (§5.3) is a button (chevron affordance) that checks for a
   with the Settings page). It remains available out-of-band at `GET /diag` (verbose/clear via query).
 - There is **no manual language selector** — the UI language follows the browser (de / en), and the
   firmware itself ships no localized strings (§1).
+
+### 5.5 Installer landing page (`docs/index.html`, GitHub Pages)
+The page a user meets **first** — before the device runs any of the firmware's own UI — so it opens
+the same way the captive portal does (§5.0): the `--brand-tint` hero band carrying the brand mark +
+the monospace product name, then cards on neutral `--bg`. Same container as the dashboard
+(`max-width: 720px`, `820px` + the ~1.15× type ramp at ≥600px, §9) rather than the portal's phone
+width — Web Serial is desktop-only, so this page is read on a big screen.
+
+- **CTA card** — the `<esp-web-install-button manifest="manifest.json">` with a `slot="activate"`
+  button styled as the app's `.btn.primary` (brand fill, white, `--shadow-cta`, `--focus-ring` on
+  `:focus-visible`), plus a `--muted` note naming the target and that it is a full flash.
+  esp-web-tools' `--esp-tools-button-*` custom properties are **not** used and must not come back:
+  they style only the element's *own* default button, which `slot="activate"` replaces — setting
+  them beside a slotted button leaves a native grey browser button sitting on the brand page (the
+  state this page shipped in). A slotted button is styled by this page's CSS, full stop. The
+  `unsupported` / `not-allowed` slots are `--err` text.
+- **Steps card** — "After flashing" as a `.section-label`, then the three steps as `--line`-divided
+  rows with a `--brand-tint` numbered disc, matching the dashboard's value rows. Each `<li>` is the
+  flex row and its text is wrapped in a single `<span>`: without the wrapper every inline node of the
+  sentence (text, `<code>`, `<a>`) becomes its own flex item and the step lays out as a row of
+  columns. `<code>` chips are `--soft` on `--line` and wrap (`overflow-wrap: anywhere`) so a long
+  hostname never widens the card.
+- **PR-preview banner** — on a `…/PR/<N>/` path (`scripts/build-pages.sh`), the `--warn`-accented
+  banner of §5.3 item 0, saying the build is that PR's and that OTA still tracks `main`.
+- The copy states what the firmware actually does: the model is **auto-detected** and the device has
+  **one dashboard** — there is no "Setup" screen, no model picker and no RX/TX step to send people to
+  (§5.2, §5.3).
+- **English only — deliberately, not by omission.** The de/en browser detection of §1 stops at the
+  device UI: it is an `app.js` mechanism, and this page ships no `I18N` dictionary and no script
+  beyond the PR-banner check. The divergence from the dashboard is **not** a gap to close — do not
+  add a translation layer here to make the two consistent.
 
 ## 6. Dashboard value grouping & order
 
