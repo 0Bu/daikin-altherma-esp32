@@ -54,17 +54,22 @@ Browser flasher + captive-portal setup: [../README.md](../README.md). The flashe
 GitHub Pages (ESP Web Tools / Web Serial), rebuilt and deployed by CI on every firmware change;
 each change also publishes a
 [GitHub release](https://github.com/0Bu/daikin-altherma-esp32/releases/latest) with the same
-bins. Every outward publish — tags, releases, the Pages installer, per-PR previews — is gated on the
-repository being **public**; on a private repo CI still builds, tests and uploads the firmware as a
-run artifact but serves nothing. See the gate comment atop
-[`.github/workflows/build.yml`](../.github/workflows/build.yml).
+bins. Publishing does **not** depend on the repository being public — CI publishes the Pages
+installer, the per-PR previews, the tags and the releases from a private repo too. See the policy
+comment atop [`.github/workflows/build.yml`](../.github/workflows/build.yml).
 
-> **Bringing the site up the first time — the order matters.** Flipping the repo to public does not
-> itself run a workflow, and the Pages source cannot be pointed at a branch that does not exist yet.
-> So: (1) make the repo public, (2) trigger one publish — `gh workflow run build.yml` (the
-> `workflow_dispatch` trigger exists for exactly this) or push any firmware-relevant change — which
-> creates the `gh-pages` branch, then (3) set **Settings → Pages → Deploy from a branch →
-> `gh-pages` / `(root)`**. Until step 3 the installer URL in the top-level README 404s.
+> **⚠️ The Pages site is PUBLIC even when the repository is private.** Restricting who can view a
+> Pages site requires an **organization on GitHub Enterprise Cloud**; it is not available to a user
+> account on GitHub Pro. So the signed firmware, the merged installer image and `manifest.json` are
+> downloadable by anyone on the internet while the source stays private. Git tags and GitHub
+> Releases are *not* public on a private repo — only accounts with repo read access see those.
+
+> **Bringing the site up the first time — the order matters.** A repo-settings change does not itself
+> run a workflow, and the Pages source cannot be pointed at a branch that does not exist yet. So:
+> (1) trigger one publish — `gh workflow run build.yml` (the `workflow_dispatch` trigger exists for
+> exactly this) or push any firmware-relevant change — which creates the `gh-pages` branch, then
+> (2) set **Settings → Pages → Deploy from a branch → `gh-pages` / `(root)`**. Until step 2 the
+> installer URL in the top-level README 404s.
 
 > **Required repo setting:** Pages source must be **Deploy from a branch → `gh-pages` / `(root)`**
 > (Settings → Pages). CI publishes the site by pushing the `gh-pages` branch

@@ -761,9 +761,10 @@ Structure:
   `esp_https_ota` download into the inactive slot, the **two-point downgrade gate** (manifest
   version *and* the image's own embedded `esp_app_desc_t` version, so a lying manifest is still
   refused), and the **connectivity health gate** (commit only after a base window AND getting
-  online, else stay `PENDING_VERIFY` → a reboot rolls back). Publishing is gated on the repo being
-  public; with nothing served a check honestly reports "up to date". Web installer publishes merged
-  bin + a single `manifest.json`, which doubles as the OTA feed (esp-web-tools loads the same file).
+  online, else stay `PENDING_VERIFY` → a reboot rolls back). Publishing runs on a private repo too
+  (the Pages site is public either way — see [`README.md`](README.md)); with nothing served a check
+  honestly reports "up to date". Web installer publishes merged bin + a single `manifest.json`, which
+  doubles as the OTA feed (esp-web-tools loads the same file).
 - **Boot recovery / anti-brick** — an unsigned app aborts pre-`app_main`, so only the bootloader can
   recover, and only via a previous OTA slot; a direct USB flash of an unsigned build both crash-loops
   and wipes the fallback. Contained by the pre-flash guard `scripts/require-signed.sh`. Full model,

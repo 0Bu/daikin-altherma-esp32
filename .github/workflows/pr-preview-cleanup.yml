@@ -16,9 +16,10 @@ concurrency:
 
 jobs:
   cleanup:
-    # Gated on public to mirror build.yml: a private repo publishes no PR preview at all, so there is
-    # nothing to clean and no gh-pages branch should be created just to delete from it.
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.repository.private == false
+    # Same-repo PRs only: a fork PR gets no signing key, so it never published a preview to clean up
+    # (build.yml). No visibility gate — build.yml publishes previews from a private repo too, so a
+    # closed PR must have its preview removed either way or stale builds linger on the public site.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
