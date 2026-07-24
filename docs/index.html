@@ -8,7 +8,7 @@
 <script type="module" src="https://cdn.jsdelivr.net/npm/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
 <style>
 /* Installer landing page (GitHub Pages). Same design system as the device UI — docs/DESIGN.md:
-   the tokens, the brand mark, the hero band, the card and the primary button are the ones
+   the tokens, the brand mark, the hero, the card and the primary button are the ones
    main/www/style.css + main/www/setup.html ship, so flashing → captive portal → dashboard reads
    as one product. Standalone by necessity (this page is served from Pages, not the device), so
    the token block is duplicated rather than shared; keep it in step with style.css :root. */
@@ -42,8 +42,11 @@ a:hover { color: var(--brand-strong); }
 .wrap { max-width: 720px; margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column; }
 main { flex: 1; }
 
-/* ── Hero band (the setup portal's, so the two pages open the same way) ───── */
-.hero { background: var(--brand-tint); padding: 30px 24px 32px; border-bottom: 1px solid var(--line); }
+/* ── Hero (the DASHBOARD's status hero, not the portal's full-bleed band): a --brand-tint card,
+   rounded + bordered + elevated like every card below it and inset to the same gutter, so the
+   page reads as one stack of cards rather than a square band butted against round ones. */
+.hero { background: var(--brand-tint); border: 1px solid var(--line); border-radius: var(--r-card);
+        box-shadow: var(--shadow-card); margin: 22px 20px 0; padding: 24px 22px 26px; }
 .mark { display: flex; align-items: center; gap: 11px; }
 .logo { width: 38px; height: 38px; flex: none; border-radius: var(--r-logo); background: var(--brand);
         display: grid; place-items: center; box-shadow: var(--shadow-logo); color: #fff; }
@@ -52,7 +55,8 @@ h1 { font-size: 26px; font-weight: 650; letter-spacing: -.5px; margin: 20px 0 7p
 .sub { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.5; max-width: 44ch; }
 
 /* ── Cards ────────────────────────────────────────────────────────────────── */
-.body { padding: 22px 20px 28px; }
+/* Top padding is the card+card gap, not the old band's breathing room — the hero is a card now. */
+.body { padding: 14px 20px 28px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card);
         box-shadow: var(--shadow-card); padding: 18px; }
 .card + .card { margin-top: 14px; }
