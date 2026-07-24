@@ -43,9 +43,10 @@ which is exactly what differs between versions. 10.3.0 replaced the DTR/RTS rese
 fail on real hardware, and the reference board is native USB-Serial/JTAG, where reset behaviour is
 most fragile.
 
-**A PR preview may not exist to click.** [`build.yml`](../../../.github/workflows/build.yml) gates the
-preview publish on `github.event.repository.private == false` (and a fork PR gets no signing key
-either way), so on a private repo or a fork, local is the only path.
+**A PR preview may not exist to click.** [`build.yml`](../../../.github/workflows/build.yml) publishes
+previews from a private repo too, but a **fork** PR gets no signing key and therefore no preview — and
+none exists at all until the Pages source has been pointed at `gh-pages` for the first time. When
+there is no preview, local is the only path.
 
 ### 2.1 Check the contract against the dependency's own source
 

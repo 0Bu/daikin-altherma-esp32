@@ -1,14 +1,28 @@
 name: build
 
-# PUBLIC-ONLY PUBLISHING GATE
-# On a PRIVATE repo, CI still runs the full pipeline (host logic tests + the esp32s3 firmware build
-# + artifact upload) but publishes NOTHING outward: no git tags, no GitHub Releases, no GitHub Pages
-# (neither the root installer site nor per-PR previews). Every such step is gated on
-# `github.event.repository.private == false`, evaluated per run — so flipping the repo to PUBLIC
-# re-enables them with no edit to this file. NOTE: a visibility change does not itself trigger a
-# run. The first publish needs one `workflow_dispatch` (or a firmware-relevant push), and that run
-# is what CREATES the gh-pages branch the Pages source must then be pointed at — see docs/README.md
-# ("Bringing the site up the first time"). Until a v* tag exists the firmware version stays at the
+# PUBLISHING POLICY — publishes from a PRIVATE repo too, and the Pages site is PUBLIC
+#
+# This pipeline used to gate every outward publish on `github.event.repository.private == false`.
+# That gate is GONE on purpose: GitHub Pro can serve Pages from a private repository, and this
+# project wants the browser installer + the OTA feed live before the source goes public.
+#
+# Be clear about what that means, because the two halves differ:
+#   • GitHub Pages (the root installer site AND the per-PR previews) is PUBLIC — readable by anyone
+#     on the internet, regardless of repo visibility. Making a Pages site access-controlled needs an
+#     ORGANIZATION on GitHub Enterprise Cloud; it is not available to a user account on Pro. So the
+#     signed firmware, the merged installer image and manifest.json are world-downloadable while the
+#     SOURCE stays private. That is an accepted trade, not an oversight.
+#   • Git tags + GitHub Releases are NOT public on a private repo — only accounts with repo read
+#     access see them. They are un-gated anyway because they are what makes the OTA feed WORK: the
+#     release step below is the only thing that creates a v* tag, next-version.sh derives the next
+#     version from the latest tag, and with no tags it returns the version.txt floor forever. Ungating
+#     Pages while leaving releases gated would publish a manifest pinned at 1.0.0 for all time —
+#     a feed that is live but frozen, where every device reports "up to date" and never updates.
+#
+# NOTE: the first publish still needs a run — a repo-settings change does not trigger one. Use one
+# `workflow_dispatch` (or a firmware-relevant push); that run CREATES the gh-pages branch which the
+# Pages source must then be pointed at (Settings -> Pages -> gh-pages / (root)), see docs/README.md
+# ("Bringing the site up the first time"). Until a v* tag exists the version stays at the
 # version.txt floor (1.0.0).
 
 on:
@@ -16,7 +30,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  workflow_dispatch:   # manual re-publish of the Pages site at the latest released version (public only)
+  workflow_dispatch:   # manual re-publish of the Pages site at the latest released version
 
 # Serialize main so the auto-incremented release version can't race; cancel superseded PR runs.
 concurrency:
@@ -167,17 +181,17 @@ jobs:
 
       # PR preview installer (signed builds only) at gh-pages PR/<N>/. Public repos only.
       - name: Assemble PR preview site
-        if: github.event_name == 'pull_request' && steps.signkey.outputs.signed == 'true' && github.event.repository.private == false
+        if: github.event_name == 'pull_request' && steps.signkey.outputs.signed == 'true'
         run: ./scripts/build-pages.sh "${{ github.event.pull_request.number }}"
       - name: Publish PR preview to gh-pages
-        if: github.event_name == 'pull_request' && steps.signkey.outputs.signed == 'true' && github.event.repository.private == false
+        if: github.event_name == 'pull_request' && steps.signkey.outputs.signed == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/publish-pages-branch.sh --pr "${{ github.event.pull_request.number }}"
 
       # Cut a release only when firmware-relevant files changed. Public repos only (creates a v* tag).
       - name: Create release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.changes.outputs.firmware == 'yes' && github.event.repository.private == false
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.changes.outputs.firmware == 'yes'
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           tag_name: v${{ steps.version.outputs.version }}
@@ -198,10 +212,10 @@ jobs:
       # mutually exclusive — a repo's Pages source is either a branch or Actions, so running both
       # meant one of them was always dead or failing.
       - name: Assemble Pages site
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.event.repository.private == false
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         run: ./scripts/build-pages.sh
       - name: Publish site to gh-pages (root)
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.event.repository.private == false
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/publish-pages-branch.sh
