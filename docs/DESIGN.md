@@ -7,7 +7,7 @@ firmware fields the UI keys off. No framework — one self-contained gzipped pag
 setup page (see `main/CMakeLists.txt`) + the standalone installer page.
 
 The three pages are the **one** product a user walks through in order — install, provision, operate —
-so all three ship the same tokens (§2), brand mark, hero band, card and primary button. The installer
+so all three ship the same tokens (§2), brand mark, hero, card and primary button. The installer
 page lives outside the firmware and cannot include `main/www/style.css`, so its `:root` block is a
 **duplicate** of the token set: a change to the palette in §2 has to land in `style.css`,
 `setup.html` **and** `docs/index.html`.
@@ -391,10 +391,15 @@ row on the ESP32 card (§5.3) is a button (chevron affordance) that checks for a
 
 ### 5.5 Installer landing page (`docs/index.html`, GitHub Pages)
 The page a user meets **first** — before the device runs any of the firmware's own UI — so it opens
-the same way the captive portal does (§5.0): the `--brand-tint` hero band carrying the brand mark +
-the monospace product name, then cards on neutral `--bg`. Same container as the dashboard
+on the same `--brand-tint` hero the captive portal does (§5.0), carrying the brand mark + the
+monospace product name, then cards on neutral `--bg`. Same container as the dashboard
 (`max-width: 720px`, `820px` + the ~1.15× type ramp at ≥600px, §9) rather than the portal's phone
-width — Web Serial is desktop-only, so this page is read on a big screen.
+width — Web Serial is desktop-only, so this page is read on a big screen. The hero takes the
+**dashboard's** shape, not the portal's: a `--r-card` rounded, `--line`-bordered, `--shadow-card`
+card inset to the same gutter as the cards below it (§7 "Hero" — a tinted band *bordered like a
+card*), so the page is one stack of cards. The portal's full-bleed square band is right there — it
+fills a phone screen edge to edge with nothing under it — and wrong here, where it sat as a square
+block butted against the round CTA and steps cards below.
 
 - **CTA card** — the `<esp-web-install-button manifest="manifest.json">` with a `slot="activate"`
   button styled as the app's `.btn.primary` (brand fill, white, `--shadow-cta`, `--focus-ring` on
