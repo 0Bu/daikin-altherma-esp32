@@ -251,10 +251,23 @@ http_ota.cpp    /ota/check|update|status
 mcp_server.cpp  /mcp (read-only MCP tools; TODO)
 mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE shared grouped-JSON
                 state topic <base>/state (logic/mqtt_group.hpp), republished on change; LWT
-                availability, mqtts+CA on creds. Message topics sit DIRECTLY under <base> (no
-                daikin_<mac> node segment — one board per base topic); the node id disambiguates the
+                availability, mqtts+CA on creds. Message topics sit DIRECTLY under <base> (no node
+                segment — one board per base topic); the node id identifies the
                 DEVICE only in each discovery config's uniq_id/dev.ids + the <prefix>/<component>/<node>/…
-                discovery topic. A BIT-FLAG row (conv 300-307, conv_is_binary) is published as the JSON
+                discovery topic, and is the SLUGIFIED BASE TOPIC (logic/ha_device.hpp), NOT the
+                board's MAC: the HA device is the INSTALLATION, so swapping the ESP32 keeps one
+                device with its entities, history and statistics instead of creating a second one and
+                restarting every statistic. The MAC-derived daikin_<mac3> lives on as (a) the MQTT
+                CLIENT id — unique per connection, so two boards briefly online during a swap don't
+                kick each other off — and (b) a SECOND dev.ids entry: HA matches a device by any
+                identifier and merges the rest in, so an install created by a MAC-identified build is
+                adopted, not duplicated. The retained configs an older build published under the MAC
+                id are RETRACTED once per boot (retract_legacy_{fixed,values}) immediately BEFORE the
+                replacement config for the same entity — HA drops the old registry entry, freeing its
+                entity_id, and the new entity takes it back; history/statistics key on entity_id and
+                carry over, per-entity UI customisations key on unique_id and do not. Only THIS
+                board's own legacy topics can be retracted (a swapped-out board is gone —
+                docs/HOME_ASSISTANT.md "Device identity" has the broker-side cleanup). A BIT-FLAG row (conv 300-307, conv_is_binary) is published as the JSON
                 NUMBER 1/0 (binary_state_number) and typed as an HA binary_sensor (ha_component) with an
                 explicit pl_on:"1"/pl_off:"0" — HA's defaults are "ON"/"OFF" and a mismatch parks the
                 entity at `unknown`. The NUMBER is the point: a metrics consumer (Telegraf →
@@ -352,7 +365,7 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 the image mid-session; a cached flag would strand an uncleanable crash banner + a
                 download that 404s. mqtt_ha republishes the retained crash topic when the flag changes
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, value_def, config_model,
-                config_store, discovery, detect, json, mqtt_group, mqtt_uri, heartbeat, crashinfo,
+                config_store, discovery, ha_device, detect, json, mqtt_group, mqtt_uri, heartbeat, crashinfo,
                 bootlog, reset_reason, boot_guard, board_pins, modbus, syslog_policy, link_watch,
                 wifi_rollback, health_gate, version_cmp, ota_manifest, ws_policy, ws_tx_gate,
                 http_body, http_surface, query_flag, mcp_jsonrpc, timestamp, uart_plan, detect_backoff,
@@ -380,6 +393,14 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 it — the model mis-detects and the same garbage returns through that table. Used for
                 the 0x64 hybrid/boiler page on the non-hybrid 4-8 kW monobloc/hydrobox profiles
                 (test_no_publish pins both halves)
+                ha_device.hpp = the ONE Home Assistant DEVICE identity all three discovery surfaces
+                share (discovery.hpp values, heartbeat.hpp diagnostics, crashinfo.hpp crash): the
+                slug rules (ha_slug, which object_id now delegates to), device_node_id(base) =
+                the node id derived from the MQTT BASE TOPIC — an INSTALLATION id, so a board swap
+                keeps the device — and device_json(node, board_id) = the dev block, stable id first
+                and this board's MAC id second (dropped when empty or equal; a duplicated identifier
+                is malformed for HA). A dev block that drifted between the three builders would split
+                the board across two HA devices again, so the test asserts all three carry the same one.
                 json.hpp = the ONE RFC 8259 string encoder every JSON payload goes through (/status,
                 /values, /scan via http_status.cpp's jstr; the MQTT state/heartbeat/crash topics).
                 Escapes " and \ AND every control byte < 0x20 (\b\f\n\r\t, else \u00XX) — the strings

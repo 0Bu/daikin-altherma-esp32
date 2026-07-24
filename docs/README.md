@@ -292,9 +292,13 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   `mqtts://` broker URL (CA-verified via the mbedTLS bundle) so the password isn't sniffable — the
   bridge **refuses** a plaintext broker with credentials rather than silently downgrading or guessing
   a TLS port. An explicit scheme is always honoured. Reason surfaces in `/status.mqtt`.
-- **Node id:** `daikin_<mac3>` from the WiFi STA MAC (stable across config changes). It disambiguates
-  the *device* in each discovery config's `uniq_id`/`dev.ids`, but is **not** part of the message
-  topics — those sit directly under `<base>` (one board per base topic).
+- **Node id:** the slugified base topic (`daikin-altherma-esp32` → `daikin_altherma_esp32`). It
+  identifies the *device* in each discovery config's `uniq_id`/`dev.ids`, but is **not** part of the
+  message topics — those sit directly under `<base>` (one board per base topic). Board-independent
+  on purpose: **swap the ESP32 and Home Assistant keeps the same device and entities** (and their
+  statistics). The board's own `daikin_<mac3>` remains the MQTT client id and a second `dev.ids`
+  entry so an install from a MAC-identified build is merged, not duplicated — see
+  [HOME_ASSISTANT.md → Device identity](HOME_ASSISTANT.md#device-identity).
 - **Topics:** `<base>/state` (one retained JSON of all values, grouped by register page —
   `{ "<group>": { "<object>": value } }`, max depth 1), plus per-value discovery configs under
   `<prefix>/<component>/<node>/<object>/config` (retained) whose `value_template` reads the

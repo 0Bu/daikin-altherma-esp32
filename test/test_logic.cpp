@@ -579,16 +579,58 @@ static void test_config_model() {
     CHECK(live.mqtt_uri == "mqtts://broker.lan");
 }
 
+// The HA DEVICE identity (logic/ha_device.hpp). The one property that matters: it is a pure
+// function of the MQTT base topic and contains nothing board-specific — replacing the ESP32 must
+// keep ONE device in HA (and with it the entities, their history and their statistics), which the
+// old MAC-derived node id could not do.
+static void test_ha_device() {
+    CHECK(device_node_id("daikin-altherma-esp32") == "daikin_altherma_esp32");
+    CHECK(device_node_id("home/heating/daikin altherma") == "home_heating_daikin_altherma");
+    CHECK(device_node_id("Daikin_2") == "daikin_2");
+    // A base topic that slugifies to nothing must still yield a usable discovery-topic segment —
+    // an empty node would produce "homeassistant/sensor//x/config", which HA silently ignores.
+    CHECK(device_node_id("///") == "daikin");
+    CHECK(device_node_id("") == "daikin");
+    // Two base topics stay two devices (that is how a second board is separated), one base topic
+    // stays ONE device no matter which hardware publishes it.
+    CHECK(device_node_id("daikin-altherma-esp32") != device_node_id("daikin-altherma-esp32-2"));
+
+    // The device block: stable id FIRST (the anchor HA matches on after a swap), board id second.
+    CHECK(device_json("daikin_altherma_esp32", "daikin_abc123") ==
+          "\"dev\":{\"ids\":[\"daikin_altherma_esp32\",\"daikin_abc123\"],"
+          "\"name\":\"Daikin Altherma\",\"mf\":\"Daikin\",\"mdl\":\"Altherma\"}");
+    // No board id, or a board id that IS the node id -> a single identifier. A duplicated entry
+    // would be a malformed device for HA, not a harmless repeat.
+    CHECK(device_json("daikin_altherma_esp32", "").find("\"ids\":[\"daikin_altherma_esp32\"],")
+          != std::string::npos);
+    CHECK(device_json("daikin_x", "daikin_x").find("\"ids\":[\"daikin_x\"],") != std::string::npos);
+
+    // All THREE discovery surfaces must describe the same device — values, board diagnostics and the
+    // crash entity. A dev block that drifted between them would split the board across two HA
+    // devices again, which is the failure this identity exists to remove.
+    const std::string node = device_node_id("daikin-altherma-esp32"), brd = "daikin_abc123";
+    const std::string dev  = device_json(node, brd);
+    ValueDef v{0x61, 10, 105, 2, 1, "DHW Tank Temp (R5T)"};
+    CHECK(discovery_config(node, brd, "s", "a", v).find(dev) != std::string::npos);
+    CHECK(heartbeat_discovery_config(node, brd, "s", "a", HEARTBEAT_SENSORS[0]).find(dev)
+          != std::string::npos);
+    CHECK(crash_discovery_config(node, brd, "s", "a", CRASH_SENSORS[0]).find(dev)
+          != std::string::npos);
+}
+
 static void test_discovery() {
     CHECK(object_id("DHW Tank Temp (R5T)") == "dhw_tank_temp_r5t");
     CHECK(object_id("  A/B  ") == "a_b");
 
     ValueDef def{0x61, 10, 105, 2, 1, "DHW Tank Temp (R5T)"};
-    const std::string base = "daikin-altherma-esp32", node = "daikin_abc123";
+    const std::string base  = "daikin-altherma-esp32";
+    const std::string node  = device_node_id(base);        // the INSTALLATION — survives a board swap
+    const std::string board = "daikin_abc123";             // this board's own MAC-derived id
+    CHECK(node == "daikin_altherma_esp32");
     const std::string st = state_topic(base);             // ONE shared topic for every sensor
     CHECK(st == "daikin-altherma-esp32/state");            // node NOT in the message topic (one board/base)
     CHECK(availability_topic(base) == "daikin-altherma-esp32/status");
-    std::string cfg = discovery_config(node, st, availability_topic(base), def);
+    std::string cfg = discovery_config(node, board, st, availability_topic(base), def);
     CHECK(cfg.find("\"dev_cla\":\"temperature\"") != std::string::npos);
     CHECK(cfg.find("\"stat_cla\":\"measurement\"") != std::string::npos);
     CHECK(cfg.find("\"unit_of_meas\":\"°C\"") != std::string::npos);
@@ -597,24 +639,34 @@ static void test_discovery() {
     // Shared JSON topic -> value_template subscripts group (page 0x61 -> hydronic_temps) + object.
     CHECK(cfg.find("\"val_tpl\":\"{{ value_json['hydronic_temps']['dhw_tank_temp_r5t'] }}\"")
           != std::string::npos);
-    // The node id still disambiguates the DEVICE in uniq_id/dev.ids — just not in the message topic.
-    CHECK(cfg.find("\"uniq_id\":\"daikin_abc123_dhw_tank_temp_r5t\"") != std::string::npos);
+    // The node id identifies the DEVICE in uniq_id/dev.ids — just not in the message topic. It is
+    // the BASE-TOPIC id, so a replacement board publishes the same unique_ids and HA keeps the
+    // entities (and their statistics) instead of starting a second device from scratch.
+    CHECK(cfg.find("\"uniq_id\":\"daikin_altherma_esp32_dhw_tank_temp_r5t\"") != std::string::npos);
+    CHECK(cfg.find("\"uniq_id\":\"daikin_abc123") == std::string::npos);
+    // …and the board id rides along as a SECOND device identifier: HA matches a device by any of
+    // them, so an install set up under the old MAC-only identity is merged, not duplicated.
+    CHECK(cfg.find("\"dev\":{\"ids\":[\"daikin_altherma_esp32\",\"daikin_abc123\"]") != std::string::npos);
 
     // A non-binary row keeps the sensor component and carries no binary payload contract.
     CHECK(std::string(ha_component(def)) == "sensor");
     CHECK(discovery_topic("homeassistant", node, def)
+          == "homeassistant/sensor/daikin_altherma_esp32/dhw_tank_temp_r5t/config");
+    // The same builder with the BOARD id yields the legacy topic the bridge retracts on the first
+    // announce after an upgrade — the only configs a board can clean up are the ones it published.
+    CHECK(discovery_topic("homeassistant", board, def)
           == "homeassistant/sensor/daikin_abc123/dhw_tank_temp_r5t/config");
     CHECK(cfg.find("\"pl_on\"") == std::string::npos);
 
     // --- Bit-flag rows are binary_sensors reading 1/0, not text sensors reading "ON"/"OFF" ---
     // A slug that starts with a digit must stay valid — bracket notation, not attribute access.
     ValueDef way{0x60, 12, 307, 1, -1, "2way valve(On:Heat_Off:Cool)"};
-    std::string wc = discovery_config(node, st, availability_topic(base), way);
+    std::string wc = discovery_config(node, board, st, availability_topic(base), way);
     CHECK(wc.find("value_json['hydronic']['2way_valve_on_heat_off_cool']") != std::string::npos);
 
     CHECK(std::string(ha_component(way)) == "binary_sensor");
     CHECK(discovery_topic("homeassistant", node, way)
-          == "homeassistant/binary_sensor/daikin_abc123/2way_valve_on_heat_off_cool/config");
+          == "homeassistant/binary_sensor/daikin_altherma_esp32/2way_valve_on_heat_off_cool/config");
     // pl_on/pl_off must be SPELLED OUT: the state is the number 1/0, HA's defaults are "ON"/"OFF",
     // and a mismatch leaves the entity stuck at `unknown` rather than failing loudly.
     CHECK(wc.find("\"pl_on\":\"1\",\"pl_off\":\"0\"") != std::string::npos);
@@ -625,7 +677,7 @@ static void test_discovery() {
     // The pre-split `sensor` config for the SAME row is what the bridge deletes on announce, so it
     // must keep pointing at the old topic (only the component segment differs).
     CHECK(retired_sensor_discovery_topic("homeassistant", node, way)
-          == "homeassistant/sensor/daikin_abc123/2way_valve_on_heat_off_cool/config");
+          == "homeassistant/sensor/daikin_altherma_esp32/2way_valve_on_heat_off_cool/config");
     CHECK(retired_sensor_discovery_topic("homeassistant", node, way)
           != discovery_topic("homeassistant", node, way));
     // For a non-binary row nothing is retired — the "old" topic IS the current one.
@@ -980,7 +1032,8 @@ static void test_mqtt_uri() {
 }
 
 static void test_heartbeat() {
-    const std::string base = "daikin-altherma-esp32", node = "daikin_abc123";
+    const std::string base = "daikin-altherma-esp32", node = device_node_id(base),
+                      board = "daikin_abc123";   // installation id + this board's own id
     CHECK(heartbeat_topic(base) == "daikin-altherma-esp32/heartbeat");   // node NOT in the message topic
 
     // wifi_signal_quality_pct: matches the observed EMS-ESP-style dBm->% samples exactly
@@ -1070,8 +1123,8 @@ static void test_heartbeat() {
     const HeartbeatSensor& rssi = HEARTBEAT_SENSORS[0];
     CHECK(std::string(rssi.object_id) == "wifi_signal");
     std::string dt = heartbeat_discovery_topic("homeassistant", node, rssi);
-    CHECK(dt == "homeassistant/sensor/daikin_abc123/wifi_signal/config");
-    std::string dc = heartbeat_discovery_config(node, hb, av, rssi);
+    CHECK(dt == "homeassistant/sensor/daikin_altherma_esp32/wifi_signal/config");
+    std::string dc = heartbeat_discovery_config(node, board, hb, av, rssi);
     CHECK(dc.find("\"stat_t\":\"daikin-altherma-esp32/heartbeat\"") != std::string::npos);
     CHECK(dc.find("\"val_tpl\":\"{{ value_json.wifi_rssi }}\"") != std::string::npos);   // flat key
     CHECK(dc.find("\"ent_cat\":\"diagnostic\"") != std::string::npos);
@@ -1085,8 +1138,8 @@ static void test_heartbeat() {
         if (std::string(HEARTBEAT_SENSORS[i].object_id) == "bus_status") bus = &HEARTBEAT_SENSORS[i];
     CHECK(bus != nullptr);
     CHECK(heartbeat_discovery_topic("homeassistant", node, *bus)
-          == "homeassistant/binary_sensor/daikin_abc123/bus_status/config");
-    std::string busc = heartbeat_discovery_config(node, hb, av, *bus);
+          == "homeassistant/binary_sensor/daikin_altherma_esp32/bus_status/config");
+    std::string busc = heartbeat_discovery_config(node, board, hb, av, *bus);
     CHECK(busc.find("val_tpl\":\"{{ value_json.bus_connected }}") != std::string::npos);   // flat key
     CHECK(busc.find("\"stat_cla\"") == std::string::npos);
     // ...and it must declare the 1/0 payload contract. Without this the entity inherits HA's "ON"/"OFF"
@@ -1103,7 +1156,7 @@ static void test_heartbeat() {
     for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++)
         if (std::string(HEARTBEAT_SENSORS[i].object_id) == "mqtt_count") mc = &HEARTBEAT_SENSORS[i];
     CHECK(mc != nullptr);
-    CHECK(heartbeat_discovery_config(node, hb, av, *mc).find("\"stat_cla\":\"total_increasing\"")
+    CHECK(heartbeat_discovery_config(node, board, hb, av, *mc).find("\"stat_cla\":\"total_increasing\"")
           != std::string::npos);
 
     // The three device-health entities added alongside /status.sys (issue #5): reset_reason is a
@@ -1119,7 +1172,7 @@ static void test_heartbeat() {
     for (const char* oid : {"wifi_mac", "wifi_bssid"}) {
         const HeartbeatSensor* h = find_hb(oid);
         CHECK(h != nullptr);
-        const std::string hc = heartbeat_discovery_config(node, hb, av, *h);
+        const std::string hc = heartbeat_discovery_config(node, board, hb, av, *h);
         CHECK(hc.find(std::string("\"val_tpl\":\"{{ value_json.") + oid + " }}\"") != std::string::npos);
         CHECK(hc.find("\"ent_cat\":\"diagnostic\"") != std::string::npos);
         CHECK(hc.find("\"unit_of_meas\"") == std::string::npos);
@@ -1128,7 +1181,7 @@ static void test_heartbeat() {
     }
     const HeartbeatSensor* rr = find_hb("reset_reason");
     CHECK(rr != nullptr && std::string(rr->name) == "Reset Reason");
-    const std::string rrc = heartbeat_discovery_config(node, hb, av, *rr);
+    const std::string rrc = heartbeat_discovery_config(node, board, hb, av, *rr);
     CHECK(rrc.find("\"val_tpl\":\"{{ value_json.reset_reason }}\"") != std::string::npos);
     CHECK(rrc.find("\"ent_cat\":\"diagnostic\"") != std::string::npos);
     CHECK(rrc.find("\"unit_of_meas\"") == std::string::npos);   // text: no unit
@@ -1139,7 +1192,7 @@ static void test_heartbeat() {
     // HA-idiomatic use of the SNTP wall clock) — no unit, no state_class (not a numeric measurement).
     const HeartbeatSensor* dtm = find_hb("device_time");
     CHECK(dtm != nullptr);
-    const std::string dtc = heartbeat_discovery_config(node, hb, av, *dtm);
+    const std::string dtc = heartbeat_discovery_config(node, board, hb, av, *dtm);
     CHECK(dtc.find("\"val_tpl\":\"{{ value_json.time }}\"") != std::string::npos);
     CHECK(dtc.find("\"dev_cla\":\"timestamp\"") != std::string::npos);
     CHECK(dtc.find("\"unit_of_meas\"") == std::string::npos);
@@ -1150,7 +1203,7 @@ static void test_heartbeat() {
     for (const char* oid : {"min_free_heap", "max_alloc"}) {
         const HeartbeatSensor* h = find_hb(oid);
         CHECK(h != nullptr);
-        const std::string hc = heartbeat_discovery_config(node, hb, av, *h);
+        const std::string hc = heartbeat_discovery_config(node, board, hb, av, *h);
         CHECK(hc.find(std::string("\"val_tpl\":\"{{ value_json.") + oid + " }}\"") != std::string::npos);
         CHECK(hc.find("\"unit_of_meas\":\"B\"") != std::string::npos);
         CHECK(hc.find("\"stat_cla\":\"measurement\"") != std::string::npos);
@@ -1297,7 +1350,8 @@ static void test_board_pins() {
 }
 
 static void test_crashinfo() {
-    const std::string base = "daikin-altherma-esp32", node = "daikin_abc123";
+    const std::string base = "daikin-altherma-esp32", node = device_node_id(base),
+                      board = "daikin_abc123";   // installation id + this board's own id
 
     // Reason slug + fault classification: a software reboot (config save / OTA) and a clean power-on
     // are NORMAL; a panic / watchdog / brown-out / CPU lockup is a fault.
@@ -1398,8 +1452,8 @@ static void test_crashinfo() {
     CHECK(std::string(dump.component) == "binary_sensor");
     CHECK(std::string(dump.object_id) == "coredump");
     CHECK(crash_discovery_topic("homeassistant", node, dump)
-          == "homeassistant/binary_sensor/daikin_abc123/coredump/config");
-    const std::string dc = crash_discovery_config(node, ct, av, dump);
+          == "homeassistant/binary_sensor/daikin_altherma_esp32/coredump/config");
+    const std::string dc = crash_discovery_config(node, board, ct, av, dump);
     CHECK(dc.find("\"stat_t\":\"daikin-altherma-esp32/crash\"") != std::string::npos);
     CHECK(dc.find("\"val_tpl\":\"{{ value_json.coredump | lower }}\"") != std::string::npos);
     CHECK(dc.find("\"pl_on\":\"true\",\"pl_off\":\"false\"") != std::string::npos);
@@ -1419,7 +1473,7 @@ static void test_crashinfo() {
     CHECK(std::string(retired.component) == "sensor");
     CHECK(std::string(retired.object_id) == "last_reset");
     CHECK(crash_discovery_topic("homeassistant", retired.component, node, retired.object_id)
-          == "homeassistant/sensor/daikin_abc123/last_reset/config");
+          == "homeassistant/sensor/daikin_altherma_esp32/last_reset/config");
 }
 
 static void test_modbus() {
@@ -2630,6 +2684,7 @@ int main() {
     test_no_publish();
     test_config_model();
     test_board_pins();
+    test_ha_device();
     test_discovery();
     test_binary_catalog();
     test_registry();

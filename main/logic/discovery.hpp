@@ -6,22 +6,14 @@
 #include <string>
 #include "value_def.hpp"
 #include "convert.hpp"
+#include "ha_device.hpp"
 #include "mqtt_group.hpp"
 
 namespace daik {
 
-// HA object_id: lowercase, alnum-only, spaces/others -> '_'.
-inline std::string object_id(const char* label) {
-    std::string o;
-    for (const char* p = label; *p; ++p) {
-        char c = *p;
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) o += c;
-        else if (!o.empty() && o.back() != '_')             o += '_';
-    }
-    while (!o.empty() && o.back() == '_') o.pop_back();
-    return o;
-}
+// HA object_id: lowercase, alnum-only, spaces/others -> '_' (logic/ha_device.hpp ha_slug — the same
+// rules the device node id is built with).
+inline std::string object_id(const char* label) { return ha_slug(label); }
 
 // HA component (the discovery topic's <component> segment + the entity domain) for one value: a
 // bit-flag row is a `binary_sensor`, everything else a `sensor`. Keyed on the converter id via
@@ -63,8 +55,10 @@ inline std::string availability_topic(const std::string& base) {
 // Discovery config JSON for one value. `state_topic` is the ONE shared grouped-JSON topic; the
 // value_template subscripts this value's group + object out of it (bracket notation, so a slug that
 // starts with a digit — "2way_valve…" — is still valid). `avail_topic` ties the sensor to device
-// availability.
-inline std::string discovery_config(const std::string& node, const std::string& state_topic,
+// availability. `node` is the stable installation id (logic/ha_device.hpp) and `board_id` this
+// board's own MAC-derived id — see device_json() for why the device carries both.
+inline std::string discovery_config(const std::string& node, const std::string& board_id,
+                                    const std::string& state_topic,
                                     const std::string& avail_topic, const ValueDef& def) {
     const std::string obj   = object_id(def.label);
     const std::string group = group_for_page(def.reg);
@@ -85,8 +79,7 @@ inline std::string discovery_config(const std::string& node, const std::string& 
     if (conv_is_binary(def.conv)) { j += "\"pl_on\":\"1\",\"pl_off\":\"0\","; }
     if (!unit.empty()) { j += "\"unit_of_meas\":\""; j += unit; j += "\","; }
     if (!dc.empty())   { j += "\"dev_cla\":\"";      j += dc;   j += "\","; j += "\"stat_cla\":\"measurement\","; }
-    j += "\"dev\":{\"ids\":[\""; j += node; j += "\"],\"name\":\"Daikin Altherma\",";
-    j += "\"mf\":\"Daikin\",\"mdl\":\"Altherma\"}";
+    j += device_json(node, board_id);
     j += "}";
     return j;
 }

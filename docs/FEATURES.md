@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (906 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (922 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -367,8 +367,12 @@ IDF v6.0 extracted it from core — [`idf_component.yml`](../main/idf_component.
   ([`logic/discovery.hpp`](../main/logic/discovery.hpp)); every sensor points at **one shared grouped
   state topic** `<base>/state` ([`logic/mqtt_group.hpp`](../main/logic/mqtt_group.hpp)),
   republished only when the payload changes so a quiet pump doesn't spam the broker. The message
-  topics sit directly under `<base>` (one board per base topic); the per-device node id `daikin_<mac3>`
-  disambiguates the device only in each discovery config's `uniq_id`/`dev.ids`, not the payload path.
+  topics sit directly under `<base>` (one board per base topic); the node id
+  ([`logic/ha_device.hpp`](../main/logic/ha_device.hpp)) identifies the device only in each discovery
+  config's `uniq_id`/`dev.ids`, not the payload path — and it is the slugified **base topic**, not
+  the board's MAC, so replacing the ESP32 keeps one HA device with its entities and statistics
+  instead of creating a second one (the MAC id stays on as the MQTT client id + a second `dev.ids`
+  entry HA merges on, and the configs published under it are retracted once per boot).
   A **bit-flag** value (converter family 300-307, `conv_is_binary`) is typed as a `binary_sensor` with
   an explicit `pl_on:"1"`/`pl_off:"0"` and published as the JSON **number** `1`/`0`
   (`binary_state_number`) — HA gets a real on/off entity, and a metrics consumer (which drops strings
@@ -559,7 +563,9 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   written in (`value_def.hpp`), the config model/validation + the field-owned detection patches
   (`config_model.hpp` — `apply_link`/`apply_model` touch only the link / model, so a detection commit
   cannot revert a concurrent `/set_wifi`), HA-discovery payloads
-  (`discovery.hpp`), detection (`detect.hpp`), the OTA health gate (`health_gate.hpp`), heartbeat &
+  (`discovery.hpp`) and the HA **device identity** every one of them shares (`ha_device.hpp` — the
+  node id is the slugified MQTT base topic, so replacing the board keeps one device in Home
+  Assistant instead of duplicating it), detection (`detect.hpp`), the OTA health gate (`health_gate.hpp`), heartbeat &
   crash formatting (`heartbeat.hpp`, `crashinfo.hpp`), the syslog boot/crash replay records
   (`bootlog.hpp`), the syslog hard-vs-transient send-error policy (`syslog_policy.hpp`), the
   gateway-watchdog policy (`link_watch.hpp`), the WiFi credential-rollback policy
@@ -617,7 +623,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   `0x00`/`0x10`/`0x20`/`0xA0`/`0xA1` on `/diag`; truncation stops after the last *complete* byte, since a trailing
   nibble would read as a different value, and degenerate inputs still terminate the buffer the caller
   hands to a `diag_printf` `%s`).
-  **906 `CHECK`s** in
+  **922 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
@@ -769,7 +775,7 @@ and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 19-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (906 checks),
+on the host** (922 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

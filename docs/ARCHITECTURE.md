@@ -594,7 +594,14 @@ The Home Assistant bridge:
 
 - **Read-only** — no command topics. The firmware only mirrors X10A telemetry; it never actuates
   the heat pump (the X10A protocol has no write command), so there is nothing to subscribe to.
-- **Node id** `daikin_<mac3>` (WiFi STA MAC, stable across config changes).
+- **Node id = the installation, not the board.** The HA device id is the slugified MQTT base topic
+  (`daikin-altherma-esp32` → `daikin_altherma_esp32`, `logic/ha_device.hpp`), so replacing the ESP32
+  keeps ONE device with its entities, history and long-term statistics — where the old MAC-derived
+  `daikin_<mac3>` produced a second device and restarted every statistic. The board's MAC id lives
+  on as the **MQTT client id** (unique per connection) and a **second `dev.ids` entry** (HA matches a
+  device by any identifier and merges, so a MAC-identified install is adopted rather than
+  duplicated); the configs an older build published under it are retracted once per boot, right
+  before each replacement is published, so the freed `entity_id` is reclaimed by the new entity.
 - **Own publish task + esp-mqtt client.** The event handler only flips status flags; all publishing
   happens in the task, so the mqtt event loop is never blocked by string building.
 - **Discovery is streamed.** A full Altherma value set can be 30–40+ entities; the bridge emits one
@@ -603,7 +610,7 @@ The Home Assistant bridge:
   converters (docs/REGISTERS.md §3.6) get no sensor.
 - **One shared grouped-JSON state topic** `<base>/state` (retained). The message topics sit directly
   under `<base>` — one board per base topic, so there is no `<node>` segment in the payload paths; the
-  node id `daikin_<mac3>` disambiguates the *device* only in each discovery config's `uniq_id`/`dev.ids`
+  node id identifies the *device* only in each discovery config's `uniq_id`/`dev.ids`
   and its `<prefix>/<component>/<node>/…` discovery topic. Each cycle the task
   builds a single JSON object of every value, grouped one level deep by X10A register page
   (`logic/mqtt_group.hpp`, host-tested): `{ "<group>": { "<object_id>": value, … }, … }` (max

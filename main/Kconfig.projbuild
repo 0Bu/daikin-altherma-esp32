@@ -75,8 +75,11 @@ menu "Daikin Altherma Configuration"
         string "MQTT base topic prefix"
         default "daikin-altherma-esp32"
         help
-            Prefix for state topics. The per-device node id is appended, e.g.
-            "daikin-altherma-esp32/daikin_a1b2c3/state".
+            Base topic for this installation: the state/heartbeat/crash topics sit directly under
+            it, e.g. "daikin-altherma-esp32/state". It is also the HA device identity — the
+            slugified base topic ("daikin_altherma_esp32") is the discovery node id, so replacing
+            the board keeps one device in Home Assistant. Two boards on one broker therefore need
+            two base topics.
 
     # ── OTA ───────────────────────────────────────────────────────────────────
     config DAIKIN_OTA_MANIFEST_URL
