@@ -355,9 +355,13 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vrow-val { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--fg); white-space: nowrap; }
 .vrow-val.ok { color: var(--ok); } .vrow-val.warn { color: var(--warn); } .vrow-val.err { color: var(--err); }
 .vrow-unit { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 3px; }
-/* RX/TX pin dropdown inside a value row (ESP32 card, shown until auto-detection locks the pins):
-   compact native select sitting at the right of the row */
-.vrow .pin-sel { width: auto; min-width: 76px; padding: 6px 8px; border-radius: 9px; appearance: auto; font-size: 14px; }
+/* A native select sitting at the right of a value row (ESP32 card): the RX/TX pin pickers, shown
+   until auto-detection locks the pins, and the update-channel picker. `.input` is width:100%, which
+   inside the label→value flex row would push the label off the card — so both are pinned compact
+   here. The channel names are words, not two-digit pin numbers, hence the wider floor. */
+.vrow .pin-sel, .vrow .chan-sel { width: auto; padding: 6px 8px; border-radius: 9px; appearance: auto; font-size: 14px; }
+.vrow .pin-sel { min-width: 76px; }
+.vrow .chan-sel { min-width: 124px; max-width: 60%; }
 /* tappable value row (ESP32 card's Firmware row → check for OTA update) */
 .vrow-btn { width: 100%; font: inherit; background: none; border: 0; border-top: 1px solid var(--line); cursor: pointer; text-align: left; }
 .vrow-btn:hover .vrow-label, .vrow-btn:hover .vrow-val { color: var(--brand-strong); }

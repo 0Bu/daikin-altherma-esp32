@@ -138,9 +138,18 @@ See [`ARCHITECTURE.md` → OTA, signing, partitions](ARCHITECTURE.md) and
   never get back online to be re-flashed — is left un-committed and **rolls back on the next reboot**
   instead of sealing the break in. USB/`@flash_args` images boot `UNDEFINED`, never `PENDING_VERIFY`,
   so the gate can never strand a fresh board.
+- **✅ 🧪 Update channels** ([`logic/ota_channel.hpp`](../main/logic/ota_channel.hpp), `POST /set_ota`,
+  `/status.ota.channel`): a merge to `main` no longer cuts a release, so CI publishes **two** feeds —
+  `release` (the gh-pages root, republished only by a manual workflow run that tags `v*`) and `dev`
+  (`…/dev/`, republished by every firmware-relevant merge) — and each device follows one. The dev
+  URL is *derived* from the configured firmware base (`…/dev/`), never configured separately, so the
+  two feeds cannot drift onto different hosts. Persisted in the config blob (v3, one writer) and
+  applied **live** — no reboot, since nothing claims a channel at task start. Dev builds are stamped
+  `<next release>-dev.<n>`: a semver **pre-release**, so ordering alone gets both directions right —
+  a dev board upgrades itself to the next release, a release board never drifts onto a dev build.
 - **✅ 🧪 Manifest check & signed download** ([`ota_update.cpp`](../main/ota_update.cpp)):
-  `/ota/check` fetches `manifest.json` over TLS (public CA bundle) and compares its `version` to the
-  running image; `/ota/update` streams the signed `.bin` into the inactive slot via `esp_https_ota`,
+  `/ota/check` fetches the **selected channel's** `manifest.json` over TLS (public CA bundle) and
+  compares its `version` to the running image; `/ota/update` streams the signed `.bin` into the inactive slot via `esp_https_ota`,
   reporting progress on `/ota/status`. Both run on **one on-demand task, one at a time** — never on
   the httpd worker (a multi-MB TLS download would park the single HTTP task and take the web UI down
   with it), and never twice concurrently (two TLS sessions compete for the largest *contiguous*
@@ -154,7 +163,14 @@ See [`ARCHITECTURE.md` → OTA, signing, partitions](ARCHITECTURE.md) and
   `esp_app_desc_t` version**, read via `esp_https_ota_get_img_desc()` before anything is committed.
   The manifest and the image are separately-controlled artifacts, so only the second check catches a
   host that advertises `9.9.9` while serving a signed `1.0.0`. Ordering is numeric
-  (`1.10.0 > 1.9.0` — a `strcmp` gets this backwards) and **fails closed** on an unparseable version.
+  (`1.10.0 > 1.9.0` — a `strcmp` gets this backwards), pre-release identifiers compare numerically
+  too (`-dev.12 > -dev.9`, semver §11.4 — a `strcmp` freezes a dev board at the ninth build of a
+  series), and it **fails closed** on an unparseable version. The one relaxation is the **channel
+  switch**: going from the dev feed back to the last release is an older version by definition, so
+  `POST /ota/update?downgrade=1` (`ota_install_allowed`) relaxes the *ordering* — never the
+  signature check, never an equal version, never on the manifest's say-so, and never persisted.
+  Without it the release channel would be unreachable from a dev board; with it, the property that
+  matters still holds — a hostile manifest host cannot walk a fleet backwards on its own.
 - **🟡 The feed itself**: the publishing half is written and works — CI builds, signs and stages
   `manifest.json` + the image and pushes them to the `gh-pages` branch — but **no feed is live yet**,
   so the device-side client above currently has nothing to find. One precondition outside the firmware
@@ -165,11 +181,14 @@ See [`ARCHITECTURE.md` → OTA, signing, partitions](ARCHITECTURE.md) and
   time of writing it is a 404) and promote this entry to ✅. Until then a check honestly reports "up to
   date" rather than failing. Point `CONFIG_DAIKIN_OTA_MANIFEST_URL` /
   `CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL` at any HTTPS host to run your own.
-- **Version pipeline**: [`next-version.sh`](../scripts/next-version.sh) auto-increments a monotonic
-  patch above the latest `v*` tag (with `version.txt` as a manual floor). CI stamps the version it is
-  actually publishing into `version.txt` *before* the build, so ESP-IDF bakes that exact string into
+- **Version pipeline**: [`next-version.sh`](../scripts/next-version.sh) prints either the next
+  **release** (`patch`/`minor`/`major` above the latest `v*` tag, with `version.txt` as a manual
+  floor) or the next **dev** version (`--dev` → `<next patch>-dev.<commits since the tag>`). Which
+  one a run stamps is decided by the run mode: a merge to `main` is always a dev build, and only a
+  manual `workflow_dispatch` with `release: true` produces a tagged release. CI stamps that version
+  into `version.txt` *before* the build, so ESP-IDF bakes that exact string into
   `esp_app_get_description()->version`, and `manifest.json` is written from the **same** stamped
-  string — not the next release version, which only coincides on a release-cutting push.
+  string.
   [`ci-build-all.sh`](../scripts/ci-build-all.sh) then reads the version back out of the built
   image's app descriptor and **fails the build** if the two disagree, so the running image, the
   release tag and the manifest can't drift apart: OTA compares the manifest against the version the
@@ -768,17 +787,28 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   installer at `PR/<N>/` — an atomic whole-site Actions deployment cannot — so the
   `configure-pages`/`deploy-pages` path is deliberately absent rather than redundant: a repo's Pages
   source is either a branch or Actions, never both.
-- **✅ Concurrent publishers survive losing the race.** That one branch has *three* writers — main's
-  root publish, every open PR's preview, and `pr-preview-cleanup`'s removal — and they overlap
-  routinely. Actions cannot serialize them: a `concurrency:` group is per **job**, and the publish is
+- **✅ Releases are manual; merges publish a dev channel.** ([`build.yml`](../.github/workflows/build.yml))
+  A push to `main` builds, stamps `<next release>-dev.<n>` and republishes **`gh-pages` `dev/`** —
+  no tag, no GitHub Release. A release is an explicit act: *Run workflow* with `release: true` and a
+  bump level, which stamps `X.Y.Z`, creates the `v*` tag + Release, and republishes the **root**.
+  The two feeds are otherwise identical in shape, so the installer page, `esp-web-tools` and the
+  device OTA client work against either without a special case. Before this, every firmware-relevant
+  merge auto-tagged a release, so "the latest release" only ever meant "the last thing merged" and
+  there was no way to run a build that had been deliberately cut.
+- **✅ Concurrent publishers survive losing the race.** That one branch has *four* writers — the
+  release root publish, every merge's `dev/` publish, every open PR's preview, and
+  `pr-preview-cleanup`'s removal — and they overlap routinely. Actions cannot serialize them: a `concurrency:` group is per **job**, and the publish is
   the last step of a ~5-minute firmware build, so grouping would serialize that entire build across
   every PR to protect a 2-second push. So the script survives the race instead of avoiding it — it
   refreshes `origin/gh-pages` immediately before publishing (never trusting the ref
   `actions/checkout` froze at job start) and, on a non-fast-forward, re-applies its change onto the
   winner's commit and pushes again, up to 5 attempts. Only a lost race retries; an auth or
   hook rejection is fatal at once. This is sound only because every mode is **declarative** — `--pr`
-  replaces `PR/<N>/` wholesale, `--rm` deletes it, root replaces everything except `PR/` — so
-  re-applying yields the same tree as winning would have. Guarded by
+  replaces `PR/<N>/` wholesale, `--rm` deletes it, `--dev` replaces `dev/`, and root replaces
+  everything except `PR/` and `dev/` — so re-applying yields the same tree as winning would have.
+  Naming `dev/` in the root's sweep is load-bearing, not tidiness: a release would otherwise take
+  the dev feed offline until the next merge happened to republish it, silently, since nothing else
+  reads that path. Guarded by
   [`run-pages-publish-tests.sh`](../scripts/run-pages-publish-tests.sh) (CI job `pages-publish-test`),
   which races two publishers against a throwaway bare repo, including one that lands *between* the
   loser's fetch and its push. Before this, the loser's push was simply rejected and its whole build

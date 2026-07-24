@@ -227,6 +227,15 @@ static std::string build_status_json_string() {
          ",\"synced\":" + (ts.synced ? "true" : "false") +
          ",\"time\":" + (ts.synced ? jstr(rfc3339_utc(ts.unix_time)) : "null") + "},";
 
+    // Which OTA feed this device follows (logic/ota_channel.hpp; POST /set_ota). Reported HERE and
+    // not only on /ota/status because the Settings screen's ESP32 card renders the selector from
+    // /status like every other setting — reading a second endpoint on every poll just to colour one
+    // dropdown would be a second fetch to fail. `dev` is the same fact the running version already
+    // carries in its "-dev.N" suffix, but a device can be SET to a channel it is not running a build
+    // from (that is exactly the state between picking a channel and installing from it), so the
+    // setting is reported on its own rather than inferred from the version string.
+    j += "\"ota\":{\"channel\":" + jstr(ota_channel_name(c.ota_channel)) + "},";
+
     // Last reset: null on a clean boot, else the crash summary (reset reason + core-dump backtrace).
     // The reason/backtrace come from the boot-time CACHE (diag_crash.cpp) — never re-parsed from
     // flash here, since build_status_json_string() also runs in the poll task's WS broadcaster, which

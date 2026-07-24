@@ -6,7 +6,9 @@ heat pump over its **X10A** service port and bridges every value to **Home Assis
 (auto-discovery). WiFi (captive portal), MQTT, syslog and the RX/TX pins are configured at runtime
 from a **web UI**; the unit **model** and its register set are **auto-detected** from the bus every
 boot — there is no manual picker. Firmware is installed from a **browser** (Web Serial) and updated
-**OTA**. Builds for the **esp32s3** target only.
+**OTA** from one of two published feeds — a **release** (cut by hand, via a manual CI workflow run)
+or the **dev** channel (every firmware-relevant merge to `main`), picked per device in the UI.
+Builds for the **esp32s3** target only.
 
 > **Deep reference:** this file holds the always-needed essentials. Full narrative for the poll
 > engine, value profiles, MQTT bridge, WiFi reconnect and OTA lives in
@@ -281,7 +283,7 @@ http_common.cpp shared HTTP helpers + the ONE OOM guard every route runs under: 
 http_status.cpp GET / (setup.html in AP mode, else gzip UI) /status /values /models /diag /scan
                 /coredump + /events (WebSocket live push; shared-payload, refcounted completion and
                 bounded one-in-flight backpressure per values/status stream) + captive catch-all
-http_config.cpp POST /set_wifi /set_mqtt /set_syslog /set_ntp /set_hp /detect
+http_config.cpp POST /set_wifi /set_mqtt /set_syslog /set_ntp /set_hp /set_board /set_ota /detect
 http_ota.cpp    /ota/check|update|status
 mcp_server.cpp  /mcp (read-only MCP tools; TODO)
 mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE shared grouped-JSON
@@ -346,7 +348,18 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 budget) — a wedged publish reboots, a slow-but-progressing one never does.
 ota_update.cpp  pull-based signed OTA: manifest check -> TWO-POINT downgrade gate -> esp_https_ota
                 into the inactive slot -> signature verify on install -> reboot, plus the rollback
-                health gate. Both network ops run on ONE on-demand task (never the httpd worker —
+                health gate. Reads the CHANNEL (config ota_channel, logic/ota_channel.hpp) fresh on
+                every check/update, so a switch applies live: `release` = the gh-pages ROOT manifest
+                (republished only by a MANUAL workflow run that tags v*), `dev` = <base>/dev/
+                (republished by every firmware-relevant merge to main). A merge no longer cuts a
+                release. Dev builds are stamped <next release>-dev.<n> — a semver PRE-RELEASE, so
+                ordering alone gets both directions right: a dev board upgrades itself to the next
+                release, a release board never drifts onto a dev build. Switching BACK (dev -> the
+                last release) is an older version, refused unless the request carries ?downgrade=1
+                (ota_install_allowed) — which relaxes the ORDER only: never the signature, never an
+                equal version, never on the manifest's say-so, never persisted. Without it the
+                release channel would be a one-way door; with it a hostile manifest host still
+                cannot walk a fleet backwards. Both network ops run on ONE on-demand task (never the httpd worker —
                 /set_mqtt's pre-flight is deliberately the only request-path network block) and only
                 one at a time (two TLS sessions would fight over the largest contiguous block).
                 s_status is mutex-guarded behind an RAII Lock, since readers copy std::strings out.
@@ -435,9 +448,9 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 the image mid-session; a cached flag would strand an uncleanable crash banner + a
                 download that 404s. mqtt_ha republishes the retained crash topic when the flag changes
 logic/          IDF-free, host-tested pure headers (crc, convert, registers, value_def, config_model,
-                config_store, discovery, ha_device, detect, json, mqtt_group, mqtt_uri, heartbeat, crashinfo,
+                config_store, discovery, ha_device, detect, json, mqtt_group, mqtt_uri, ota_channel, heartbeat, crashinfo,
                 bootlog, reset_reason, boot_guard, board_pins, board_presets, modbus, syslog_policy, link_watch,
-                wifi_rollback, health_gate, version_cmp, ota_manifest, ws_policy, ws_tx_gate,
+                wifi_rollback, health_gate, version_cmp, ota_manifest, ota_channel, ws_policy, ws_tx_gate,
                 http_body, http_surface, query_flag, mcp_jsonrpc, timestamp, uart_plan, detect_backoff,
                 hexdump, led_pattern, button, captive,
                 lwt_select, ou_stale).
@@ -572,6 +585,17 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 broker — untrimmed it lands in the port field (or, portless, in the host, where it
                 surfaced as a misleading "DNS lookup failed"). Only host/port are taken here; the
                 caller hands esp-mqtt the full URI, path included.
+                ota_channel.hpp = which published FEED this device follows, and the URLs for it.
+                Two feeds exist because a merge to main no longer cuts a release: `release` (the
+                gh-pages root, cut by a manual workflow run) and `dev` (<base>/dev/, every
+                firmware-relevant merge). The dev URL is DERIVED from the configured firmware base,
+                never a second Kconfig string — a separately-configurable dev URL is a second thing
+                that can silently point elsewhere, and the dev feed is a subdirectory of the release
+                feed by construction (scripts/build-pages.sh --dev writes it, publish-pages-branch.sh
+                --dev owns exactly that subtree). Pure so the join rules are asserted: a base with or
+                without its trailing slash yields the same URL, and an EMPTY base yields "" (the
+                caller says "no update URL configured") rather than a relative path that would be
+                fetched against nothing and reported as an unreachable server
                 bootlog.hpp = the records syslog.cpp replays once per boot: build_boot_line (version/
                 elf_sha256/reset/safe_mode — the only way to tell WHICH firmware produced a log
                 stream) + build_crash_log_lines (the crash as single-line, datagram-sized records;
@@ -671,7 +695,7 @@ www/            web UI sources (index.html + style.css + app.js -> one gzipped p
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi creds + the one-shot rollback backup + flags (`wifi_rolledbk` outcome marker included), MQTT (`uri`/`user`/`pass`), syslog (empty host = off), `ntp_server` (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` compile-time default on next boot), and (blob **v2**) the **board-local hardware** `led_gpio`/`led_type`/`led_inverted`/`btn_gpio`/`btn_active_low` — in the blob because, like the credentials and unlike the link cache, it has exactly ONE writer (httpd, `POST /set_board`). A **v1** blob (pre-board OTA) is still ACCEPTED and reports `has_board=false`, so `config_load` seeds the board fields from Kconfig instead of reading "absent" as "indicator off" — rejecting it would drop that user's WiFi/MQTT creds on the upgrade. One CRC-checked entry written all-or-nothing, so the whole credential/service state survives a write failure or power cut together — no per-key write-ordering. The X10A **link cache** `rx_pin`/`tx_pin`/`proto` stays as SEPARATE self-healing keys (two owners: `config_save` for a manual override, `config_save_link` for a detected pin; re-validated on load). Legacy per-key credential keys (`wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/…/`ntp_server`) are still READ as the fallback when `cfg` is absent (fresh device / pre-blob OTA). Plus the boot-loop **crash counter** `boot_fails` (safe_mode.cpp; here so a factory reset wipes it too). (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
+| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi creds + the one-shot rollback backup + flags (`wifi_rolledbk` outcome marker included), MQTT (`uri`/`user`/`pass`), syslog (empty host = off), `ntp_server` (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` compile-time default on next boot), (blob **v2**) the **board-local hardware** `led_gpio`/`led_type`/`led_inverted`/`btn_gpio`/`btn_active_low` and (blob **v3**) the **OTA update channel** (`ota_channel`, 0 = release / 1 = dev) — in the blob because, like the credentials and unlike the link cache, each has exactly ONE writer (httpd, `POST /set_board` / `POST /set_ota`). An OLDER blob is still ACCEPTED: **v1** (pre-board OTA) reports `has_board=false`, so `config_load` seeds the board fields from Kconfig instead of reading "absent" as "indicator off"; **v2** (pre-channel OTA) reports `has_ota=false`, which needs no Kconfig fallback — the pre-v3 world had exactly ONE feed, and that is the release channel the struct already defaults to. Rejecting either would drop that user's WiFi/MQTT creds on the upgrade. One CRC-checked entry written all-or-nothing, so the whole credential/service state survives a write failure or power cut together — no per-key write-ordering. The X10A **link cache** `rx_pin`/`tx_pin`/`proto` stays as SEPARATE self-healing keys (two owners: `config_save` for a manual override, `config_save_link` for a detected pin; re-validated on load). Legacy per-key credential keys (`wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/…/`ntp_server`) are still READ as the fallback when `cfg` is absent (fresh device / pre-blob OTA). Plus the boot-loop **crash counter** `boot_fails` (safe_mode.cpp; here so a factory reset wipes it too). (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -739,6 +763,11 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   disabled broker, which is exactly the state the UI must offer to clear via
                   /set_mqtt's clear_creds),
                   syslog{configured,resolved,reachable,host,port,error},
+                  ota{channel} — "release"|"dev", the FEED the next OTA check reads (POST /set_ota).
+                  On /status and not only /ota/status because the Settings ESP32 card renders its
+                  selector from /status like every other setting; a device can be SET to a channel it
+                  is not yet running a build from, so it is reported rather than inferred from the
+                  running version's "-dev.N" suffix,
                   ntp{server,synced,time} — server is the CONFIGURED address (config().ntp_server:
                   NVS "ntp_server" override of CONFIG_DAIKIN_NTP_SERVER, runtime-editable via
                   POST /set_ntp exactly like syslog_host/POST /set_syslog), not necessarily who
@@ -854,18 +883,30 @@ POST /set_board   {led_gpio,led_type,led_inverted,btn_gpio,btn_active_low} -> va
                   sits there (AtomS3 Lite: GPIO41) — plus the collision rules, in BOTH directions: no
                   pin may be claimed by the indicator, the button and the X10A link at once, whichever
                   endpoint is called second
-   (all six /set_*) a failed NVS write answers 500 {ok:false,error:"config write failed"} and does
+   (all seven /set_*) a failed NVS write answers 500 {ok:false,error:"config write failed"} and does
                   NOT reboot/apply — config_save publishes nothing on failure, so an "ok" + reboot
                   would silently come back up on the OLD config (the failing key is on /diag)
+POST /set_ota     {channel:"release"|"dev"} -> validate + persist, applied LIVE (no reboot, unlike
+                  /set_board: nothing claims the channel at task start — ota_update.cpp reads it when
+                  it fetches, so the very next check uses the new feed). An unknown name is REJECTED,
+                  not defaulted — answering ok to a typo would look like a saved setting. Unchanged
+                  -> {"ok":true,"reboot":false} like the other /set_* routes
 POST /detect      re-run auto-detection now (no reboot): reset profile to "auto" + invalidate the
                   fingerprint (RAM only) -> the next poll cycle sweeps protocol + re-fingerprints
 GET  /ota/check   start an async manifest check (?ms= is parsed but gates nothing — TLS date
                   validation is compiled out, so OTA needs no wall clock even though SNTP now exists)
-POST /ota/update  start the async download. Re-fetches the manifest and re-runs the downgrade gate
+POST /ota/update[?downgrade=1]  start the async download of the SELECTED channel's build.
+                  Re-fetches the manifest and re-runs the downgrade gate
                   itself rather than trusting what /ota/check left behind: this route is reachable on
-                  its own, so gating only in /ota/check would mean no gate at all for a direct caller
+                  its own, so gating only in /ota/check would mean no gate at all for a direct caller.
+                  ?downgrade=1 (query_flag_on — fires on "1" and nothing else) is the CHANNEL SWITCH:
+                  the only way to install a build older than the running one (dev -> the last
+                  release). Per-request, never stored
 GET  /ota/status  {state:idle|checking|updating|done|error, progress, message, update_available,
-                  available, current} — the UI polls this; all strings go through json_quote
+                  downgrade, channel, available, current} — the UI polls this; all strings go through
+                  json_quote. `downgrade` = the offered build is installable but OLDER (the
+                  dev -> release direction); the UI needs BOTH flags, since update_available alone
+                  makes a release-channel check on a dev board read "up to date" forever
 POST /mcp         MCP server (read-only; planned — route returns a JSON-RPC "not implemented" error)
 ```
 

@@ -1,6 +1,7 @@
-// POST config routes: /set_wifi, /set_mqtt, /set_syslog, /set_ntp, /set_hp, /detect. Parse JSON,
-// validate, then apply: WiFi/MQTT/syslog/NTP persist to NVS + reboot; /set_hp persists the RX/TX pin
-// cache (no reboot) but keeps the model session-only; /detect re-runs detection in RAM.
+// POST config routes: /set_wifi, /set_mqtt, /set_syslog, /set_ntp, /set_hp, /set_board, /set_ota,
+// /detect. Parse JSON, validate, then apply: WiFi/MQTT/syslog/NTP/board persist to NVS + reboot;
+// /set_hp persists the RX/TX pin cache (no reboot) but keeps the model session-only; /set_ota
+// persists the OTA update channel and applies it live; /detect re-runs detection in RAM.
 #include "http_handlers.hpp"
 #include "config.hpp"
 #include "hp_poll.hpp"
@@ -491,6 +492,34 @@ static esp_err_t set_board(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// POST /set_ota {channel:"release"|"dev"} -> validate + persist, applied LIVE (no reboot).
+//
+// Which published feed this device follows. Since a merge to main stopped cutting a release, there
+// are two: `release` (only a manual CI workflow run tags and publishes one) and `dev` (every
+// firmware-relevant merge). See logic/ota_channel.hpp.
+//
+// No reboot, unlike /set_board: nothing claims the channel at task start — ota_update.cpp reads it
+// when it fetches, so the very next check already uses the new feed. An unknown channel name is
+// REJECTED rather than defaulted: answering {"ok":true} to a typo would look like a saved setting.
+static esp_err_t set_ota(httpd_req_t* req) {
+    char body[128];
+    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
+    cJSON* j = cJSON_Parse(body);
+    if (!j) return send_err(req, "400 Bad Request", "bad json");
+    std::string channel = js(j, "channel");
+    cJSON_Delete(j);
+
+    if (!ota_channel_valid(channel)) return send_err(req, "400 Bad Request", "unknown channel");
+
+    Config c = config();
+    const OtaChannel want = ota_channel_parse(channel);
+    if (want == c.ota_channel) return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
+    c.ota_channel = want;
+    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    diag_printf("ota: update channel set to %s\n", ota_channel_name(want));
+    return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
+}
+
 // Re-run auto-detection now (without waiting for a reboot): drop back to the "auto" sentinel +
 // invalidate the fingerprint, so the next poll cycle sweeps protocol + re-fingerprints the unit
 // (hp_poll.cpp poll_detect). Detection state is session-only, so this is a RAM-only reset.
@@ -513,6 +542,7 @@ void http_register_config(httpd_handle_t s, HttpSurface surface) {
     http_register_on(s, surface, "/set_ntp", HTTP_POST, set_ntp);
     http_register_on(s, surface, "/set_hp", HTTP_POST, set_hp);
     http_register_on(s, surface, "/set_board", HTTP_POST, set_board);
+    http_register_on(s, surface, "/set_ota", HTTP_POST, set_ota);
     http_register_on(s, surface, "/detect", HTTP_POST, do_detect);
 }
 

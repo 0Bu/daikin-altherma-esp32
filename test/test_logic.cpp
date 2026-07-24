@@ -27,6 +27,7 @@
 #include "logic/error_codes.hpp"
 #include "logic/health_gate.hpp"
 #include "logic/version_cmp.hpp"
+#include "logic/ota_channel.hpp"
 #include "logic/ota_manifest.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/http_body.hpp"
@@ -2768,6 +2769,88 @@ static void test_version_cmp() {
     CHECK(ota_is_upgrade("1.0.0", huge));     // orders above a real version, no UB
     CHECK(!ota_is_upgrade(huge, "1.0.0"));    // and a real version is not "newer" than it
     CHECK(!ota_is_upgrade(huge, huge));       // saturated-equal -> refused, not "newer"
+
+    // ── The dev channel's versions (CI stamps "<next release>-dev.<n>", scripts/next-version.sh) ──
+    // A device on the dev feed compares one dev build against the next, so the pre-release
+    // identifiers must compare NUMERICALLY. A plain strcmp reads "dev.12" as older than "dev.9"
+    // ('1' < '9') and freezes a dev board at the ninth build of a series until the next release.
+    CHECK(ota_is_upgrade("1.0.8-dev.9", "1.0.8-dev.12"));
+    CHECK(!ota_is_upgrade("1.0.8-dev.12", "1.0.8-dev.9"));
+    CHECK(version_compare("1.0.8-dev.10", "1.0.8-dev.9") > 0);
+    CHECK(version_compare("1.0.8-dev.2", "1.0.8-dev.10") < 0);
+    CHECK(version_compare("1.0.8-dev.3", "1.0.8-dev.3") == 0);
+    // Fewer identifiers rank lower; a numeric identifier ranks below an alphanumeric one (semver).
+    CHECK(version_compare("1.0.0-dev", "1.0.0-dev.1") < 0);
+    CHECK(version_compare("1.0.0-1", "1.0.0-alpha") < 0);
+    // A dev build is BELOW the release it leads to, and above the release it followed — which is
+    // what makes "dev -> next release" a plain upgrade needing no downgrade flag at all.
+    CHECK(ota_is_upgrade("1.0.8-dev.4", "1.0.8"));
+    CHECK(!ota_is_upgrade("1.0.8", "1.0.8-dev.4"));
+    CHECK(ota_is_upgrade("1.0.7", "1.0.8-dev.1"));
+    // The old alphanumeric behaviour is untouched where it was already right.
+    CHECK(version_compare("1.0.0-rc2", "1.0.0-rc1") > 0);
+    CHECK(version_compare("1.0.0-3-gabc123", "1.0.0") < 0);
+
+    // ── The CHANNEL SWITCH: an explicit downgrade, and only an explicit one ──────────────────────
+    // Going from the dev feed back to the last release means installing an OLDER version. Without
+    // this the release channel would be unreachable from a dev board — a one-way door — but the
+    // permission must come from the request (POST /ota/update?downgrade=1), never from the manifest.
+    CHECK(!ota_is_upgrade("1.0.8-dev.4", "1.0.7"));                          // the automatic gate refuses
+    CHECK(ota_install_allowed("1.0.8-dev.4", "1.0.7", /*allow_downgrade=*/true));
+    CHECK(!ota_install_allowed("1.0.8-dev.4", "1.0.7", /*allow_downgrade=*/false));
+    // EQUAL is refused in BOTH modes: re-installing what is already running is not a channel switch.
+    CHECK(!ota_install_allowed("1.0.7", "1.0.7", true));
+    CHECK(!ota_install_allowed("1.0.7", "v1.0.7", true));
+    // And it still fails closed on an unparseable version — the flag opens the ORDER, not the parse.
+    CHECK(!ota_install_allowed("1.0.7", "", true));
+    CHECK(!ota_install_allowed("", "1.0.7", true));
+    CHECK(!ota_install_allowed("1.0.7", "<!DOCTYPE html>", true));
+    // Newer still installs with the flag set (a channel switch that happens to be an upgrade).
+    CHECK(ota_install_allowed("1.0.7", "1.0.8", true));
+}
+
+// ── OTA update channel (logic/ota_channel.hpp) ───────────────────────────────────────────────
+static void test_ota_channel() {
+    CHECK(std::string(ota_channel_name(OtaChannel::Release)) == "release");
+    CHECK(std::string(ota_channel_name(OtaChannel::Dev)) == "dev");
+    CHECK(ota_channel_valid("release") && ota_channel_valid("dev"));
+    // A typo is REFUSED, not defaulted: /set_ota answering ok to "develop" would look like a save.
+    CHECK(!ota_channel_valid("") && !ota_channel_valid("Dev") && !ota_channel_valid("develop"));
+    CHECK(ota_channel_parse("dev") == OtaChannel::Dev);
+    CHECK(ota_channel_parse("release") == OtaChannel::Release);
+    CHECK(ota_channel_parse("nonsense") == OtaChannel::Release);          // load-path fallback
+    CHECK(ota_channel_parse("nonsense", OtaChannel::Dev) == OtaChannel::Dev);
+    // The on-flash byte. An unknown value decodes to Release — a garbled NVS byte must not move a
+    // board onto the fast feed, and "release" is the state every pre-v3 device is already in.
+    CHECK(ota_channel_to_int(OtaChannel::Release) == 0 && ota_channel_to_int(OtaChannel::Dev) == 1);
+    CHECK(ota_channel_from_int(0) == OtaChannel::Release && ota_channel_from_int(1) == OtaChannel::Dev);
+    CHECK(ota_channel_from_int(2) == OtaChannel::Release && ota_channel_from_int(-1) == OtaChannel::Release);
+
+    // The URL joins. The release feed is the configured manifest URL verbatim; the dev feed is
+    // always <firmware base>/dev/manifest.json, so the two cannot be pointed at different sites.
+    const std::string mf   = "https://x.github.io/p/manifest.json";
+    const std::string base = "https://x.github.io/p/";
+    CHECK(ota_channel_manifest_url(mf, base, OtaChannel::Release) == mf);
+    CHECK(ota_channel_manifest_url(mf, base, OtaChannel::Dev) == "https://x.github.io/p/dev/manifest.json");
+    // A base without its trailing slash must produce the SAME URL — Kconfig documents the slash but
+    // does not enforce it, and "…/pdev/manifest.json" would be a 404 nobody could explain.
+    CHECK(ota_channel_manifest_url(mf, "https://x.github.io/p", OtaChannel::Dev) ==
+          "https://x.github.io/p/dev/manifest.json");
+    CHECK(ota_channel_firmware_url(base, OtaChannel::Release, "daikin-altherma-esp32.bin") ==
+          "https://x.github.io/p/daikin-altherma-esp32.bin");
+    CHECK(ota_channel_firmware_url(base, OtaChannel::Dev, "daikin-altherma-esp32.bin") ==
+          "https://x.github.io/p/dev/daikin-altherma-esp32.bin");
+    // An EMPTY base yields an EMPTY url, never a relative path: the caller must say "no update URL
+    // configured" rather than fetch nothing and report an unreachable server.
+    CHECK(ota_channel_manifest_url("", "", OtaChannel::Dev).empty());
+    CHECK(ota_channel_firmware_url("", OtaChannel::Dev, "x.bin").empty());
+    CHECK(ota_channel_firmware_url("", OtaChannel::Release, "x.bin").empty());
+
+    // The dev LABEL (display only — the install decision is version_cmp's). Keyed on the
+    // pre-release identifier, not on the substring: an "-rcdev" build is not a dev build.
+    CHECK(ota_version_is_dev("1.0.8-dev.3") && ota_version_is_dev("1.0.8-dev"));
+    CHECK(!ota_version_is_dev("1.0.8") && !ota_version_is_dev("1.0.8-rcdev") && !ota_version_is_dev(""));
+    CHECK(!ota_version_is_dev("1.0.8-PR-42"));      // a PR preview build is its own thing
 }
 
 // ── OTA manifest parsing (logic/ota_manifest.hpp) ────────────────────────────────────────────
@@ -2909,7 +2992,7 @@ static void test_config_store() {
     board.led_gpio = 35; board.led_type = 1; board.led_inverted = false;
     board.btn_gpio = 41; board.btn_active_low = true;
     std::vector<uint8_t> bb = config_blob_serialize(board);
-    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 2);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 3);
     ConfigBlob rt;
     CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
     CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
@@ -2931,10 +3014,11 @@ static void test_config_store() {
     // user's WiFi and MQTT credentials on the upgrade. It must decode, and it must report
     // has_board == false so the caller seeds the Kconfig defaults instead of reading "absent" as
     // "indicator disabled" (which would silently darken every XIAO's LED).
-    std::vector<uint8_t> v1 = buf;                       // `buf` was serialized... as v2 by this build,
-    // so build a genuine v1 body: header + the v1 fields only, taken from the v2 encoding by
-    // dropping the 13-byte board block (3x u32 + 1 flag byte) that precedes the CRC.
-    v1.erase(v1.end() - 4 - 13, v1.end() - 4);
+    std::vector<uint8_t> v1 = buf;                       // `buf` was serialized... as v3 by this build,
+    // so build a genuine v1 body: header + the v1 fields only, taken from the v3 encoding by
+    // dropping the 13-byte board block (3x u32 + 1 flag byte) AND the 1-byte v3 channel that
+    // precede the CRC.
+    v1.erase(v1.end() - 4 - 14, v1.end() - 4);
     v1[4] = 1;
     restamp(v1);
     ConfigBlob legacy;
@@ -2943,12 +3027,35 @@ static void test_config_store() {
     CHECK(!legacy.has_board);
     CHECK(legacy.wifi_ssid == a.wifi_ssid && legacy.mqtt_uri == a.mqtt_uri);   // v1 payload intact
     CHECK(legacy.led_gpio == -1);                        // the struct default, not the 999 sentinel
-    // A TRUNCATED v2 must not decode as a valid v1 with silently-default pins: the version byte
-    // still says 2, so the missing board block is caught by the length rule, not papered over.
+    // A TRUNCATED v3 must not decode as a valid v2/v1 with silently-default pins: the version byte
+    // still says 3, so the missing blocks are caught by the length rule, not papered over.
     std::vector<uint8_t> trunc = bb;
-    trunc.erase(trunc.end() - 4 - 13, trunc.end() - 4);
+    trunc.erase(trunc.end() - 4 - 14, trunc.end() - 4);
     restamp(trunc);
     CHECK(!config_blob_deserialize(trunc.data(), trunc.size(), out));
+
+    // ── v3: the OTA update channel ───────────────────────────────────────────────────────────────
+    ConfigBlob chan; chan.wifi_ssid = "net"; chan.ota_channel = 1;   // 1 = dev
+    std::vector<uint8_t> cbv = config_blob_serialize(chan);
+    ConfigBlob crt;
+    CHECK(config_blob_deserialize(cbv.data(), cbv.size(), crt));
+    CHECK(crt.has_ota && crt.ota_channel == 1 && crt.wifi_ssid == "net");
+    chan.ota_channel = 0;
+    cbv = config_blob_serialize(chan);
+    CHECK(config_blob_deserialize(cbv.data(), cbv.size(), crt) && crt.ota_channel == 0 && crt.has_ota);
+    // The same upgrade guarantee v1 got: a device that has only ever been written by a pre-channel
+    // build carries a v2 blob, and it must decode — losing the credentials to gain a channel byte
+    // would be a spectacularly bad trade. has_ota == false is how the caller tells "no channel
+    // stored" from "explicitly release"; both mean release, only the diag line differs.
+    std::vector<uint8_t> v2 = bb;
+    v2.erase(v2.end() - 4 - 1, v2.end() - 4);            // drop the v3 channel byte
+    v2[4] = 2;
+    restamp(v2);
+    ConfigBlob pre;
+    pre.ota_channel = 7;                                 // sentinel: must be left untouched
+    CHECK(config_blob_deserialize(v2.data(), v2.size(), pre));
+    CHECK(!pre.has_ota && pre.ota_channel == 0);         // the struct default, not the 7 sentinel
+    CHECK(pre.has_board && pre.led_gpio == -1 && pre.wifi_ssid == "net");   // v2 payload intact
 }
 
 static void test_mcp_jsonrpc() {
@@ -3285,6 +3392,7 @@ int main() {
     test_detect_backoff();
     test_version_cmp();
     test_ota_manifest();
+    test_ota_channel();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }
     std::printf("%d logic test(s) FAILED\n", g_failures);
     return 1;

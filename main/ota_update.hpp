@@ -20,7 +20,11 @@ namespace daik {
 const char* ota_img_suffix();
 
 void ota_check_async(int64_t browser_epoch_ms);   // GET /ota/check
-void ota_update_async();                           // POST /ota/update
+// POST /ota/update. `allow_downgrade` is set ONLY by an explicit ?downgrade=1 — the UI sends it
+// after the user picks a channel whose newest build is older than what is running (dev -> release).
+// It relaxes the version ORDER and nothing else: the signature check is untouched, and a manifest
+// can never ask for it. See logic/version_cmp.hpp → ota_install_allowed.
+void ota_update_async(bool allow_downgrade = false);
 void ota_health_gate_arm();                        // main.cpp: arm rollback health gate
 
 struct OtaStatus {
@@ -28,8 +32,13 @@ struct OtaStatus {
     int         progress = 0;     // 0..100
     std::string message;
     bool        update_available = false;
-    std::string available;        // manifest version
+    std::string available;        // manifest version of the SELECTED channel
     std::string current;          // running version
+    std::string channel;          // "release" | "dev" — the feed `available` was read from
+    // The offered build is INSTALLABLE but OLDER than what is running (the dev -> release
+    // direction). Reported separately from update_available so the UI can word it as a switch-back
+    // and ask for confirmation, rather than either hiding it or calling an older build an "update".
+    bool        downgrade = false;
 };
 OtaStatus ota_status();
 

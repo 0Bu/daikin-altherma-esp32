@@ -107,8 +107,26 @@ compromised update host (or its GitHub Pages source) cannot push unsigned or tam
      manifest agrees with the image it ships, so in the field a disagreement is a stale cache or an
      attack, and neither is worth installing.
 
-  Version ordering is numeric, not lexical (`1.10.0 > 1.9.0`), and **fails closed**: an unparseable
-  version on either side refuses the update rather than assuming an ordering.
+  Version ordering is numeric, not lexical (`1.10.0 > 1.9.0`) — including inside a pre-release
+  identifier (`-dev.12 > -dev.9`), which is what keeps the dev channel moving forward — and **fails
+  closed**: an unparseable version on either side refuses the update rather than assuming an ordering.
+
+  **The one relaxation: an explicit channel switch.** Since releases became manual, a device can
+  follow either the `release` or the `dev` feed (`POST /set_ota`). A board on `dev` runs a version
+  *ahead* of the last release, so "install the latest release" is a downgrade by version and the
+  gate above refuses it — which would make the release channel a one-way door. `POST
+  /ota/update?downgrade=1` (`ota_install_allowed`, host-tested) relaxes the **ordering only**, and
+  only for the request that carries the flag:
+  - it is never inferred from the manifest, so a hostile or stale host still cannot walk a fleet
+    backwards on its own say-so — the property this gate exists for is intact;
+  - it is never persisted, so a later automatic check cannot inherit it;
+  - it does not touch the signature check: the RSA-3072 Secure Boot v2 verification on install is
+    unchanged, so the older image must still be one this project signed;
+  - an **equal** version is still refused, in both modes.
+
+  The requester is a trusted-LAN client that just picked a channel in the web UI and confirmed a
+  dialog spelling out that the build is older — the same trust level that can already erase the
+  config or re-point the X10A pins.
 - **Rollback health gate** *(implemented)* — a freshly-flashed image stays `PENDING_VERIFY` until it
   has run healthily for ~90 s (`ota_update.cpp`, `logic/health_gate.hpp`), so a boots-but-crashes
   image is reverted.

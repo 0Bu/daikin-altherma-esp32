@@ -98,8 +98,17 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   incl. an unconfigured (setup-AP) device.
 - `logic/version_cmp.hpp` — the OTA downgrade gate: numeric (not lexical) dotted-version ordering, so
   `1.10.0 > 1.9.0`; equal and older refused; a `v` prefix and a semver pre-release suffix handled;
-  a 400-digit version saturates instead of overflowing; and an unparseable version on either side
-  **fails closed** rather than being assumed newer.
+  pre-release identifiers compare numerically too (`-dev.12 > -dev.9`), which is what keeps the dev
+  channel moving forward; a dev build sorts above the release it followed and below the one it leads
+  to; the explicit channel-switch downgrade (`ota_install_allowed`) relaxes the ordering and nothing
+  else (an equal version and an unparseable one are still refused); a 400-digit version saturates
+  instead of overflowing; and an unparseable version on either side **fails closed** rather than
+  being assumed newer.
+- `logic/ota_channel.hpp` — which published feed a device follows: the two accepted channel names
+  (a typo is refused, not defaulted), the on-flash byte (an unknown value decodes to `release`, so a
+  garbled NVS byte cannot move a board onto the fast feed), and the URL joins — a base URL with or
+  without its trailing slash must produce the same dev URL, and an **empty** base must produce an
+  empty string rather than a relative path fetched against nothing.
 - `logic/ota_manifest.hpp` — bounded extraction of the manifest's top-level `"version"`, driven with
   hostile input: a `"version"` nested in `builds[]` must not shadow the real one, a crafted value
   must not close its own string and inject a second key, an oversized value is **refused rather than

@@ -16,8 +16,10 @@
 //     TLS context on a heap whose binding limit is the largest CONTIGUOUS free block.
 #include "ota_update.hpp"
 #include "logic/health_gate.hpp"
+#include "logic/ota_channel.hpp"
 #include "logic/ota_manifest.hpp"
 #include "logic/version_cmp.hpp"
+#include "config.hpp"
 #include "diag_log.hpp"
 #include "wifi.hpp"
 #include "esp_app_desc.h"
@@ -83,12 +85,23 @@ void set_progress(int pct) {
     s_status.progress = pct;
 }
 
-// Fetch CONFIG_DAIKIN_OTA_MANIFEST_URL and extract its "version" into `out`.
+// The feed this device follows right now (config ota_channel, POST /set_ota). Read fresh on every
+// check/update rather than cached at boot: switching channels applies LIVE, so a user who picks
+// "Development" in the UI and immediately taps check must get the dev manifest, not the one that
+// was configured when the board booted.
+OtaChannel channel_now() { return config().ota_channel; }
+
+// Fetch the manifest for `url` and extract its "version" into `out`.
 // `err` receives a short, USER-FACING reason on failure — the UI shows it verbatim, so it must say
 // what to do about it, not just what failed.
-bool fetch_manifest_version(char* out, size_t outlen, const char*& err) {
+bool fetch_manifest_version(const std::string& url, char* out, size_t outlen, const char*& err) {
+    // An empty URL means this build has no feed configured for the selected channel (an empty
+    // firmware base URL — see logic/ota_channel.hpp). Say that, rather than letting the client
+    // fail on a relative path and reporting an unreachable server.
+    if (url.empty()) { err = "No update URL configured"; return false; }
+
     esp_http_client_config_t cfg = {};
-    cfg.url               = CONFIG_DAIKIN_OTA_MANIFEST_URL;
+    cfg.url               = url.c_str();
     cfg.timeout_ms        = kHttpTimeoutMs;
     cfg.crt_bundle_attach = esp_crt_bundle_attach;   // public CA bundle, same as MQTTS
     cfg.keep_alive_enable = false;
@@ -128,30 +141,41 @@ bool fetch_manifest_version(char* out, size_t outlen, const char*& err) {
 void run_check() {
     set_state("checking");
     const std::string running = esp_app_get_description()->version;
+    const OtaChannel  ch      = channel_now();
+    const std::string url     = ota_channel_manifest_url(CONFIG_DAIKIN_OTA_MANIFEST_URL,
+                                                         CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL, ch);
 
     char        avail[32] = {0};
     const char* err       = "Update check failed";
-    if (!fetch_manifest_version(avail, sizeof(avail), err)) {
-        diag_printf("ota: check failed: %s", err);
+    if (!fetch_manifest_version(url, avail, sizeof(avail), err)) {
+        diag_printf("ota: check failed (%s channel): %s", ota_channel_name(ch), err);
         Lock lk(s_mtx);
         s_status.state            = "error";
         s_status.message          = err;
         s_status.update_available = false;
+        s_status.downgrade        = false;
+        s_status.channel          = ota_channel_name(ch);
         return;
     }
 
     const bool newer = ota_is_upgrade(running, avail);
-    diag_printf("ota: manifest %s, running %s -> %s", avail, running.c_str(),
-                newer ? "update available" : "up to date");
+    // Installable but OLDER — the dev -> release direction. Reported so the UI can offer it as a
+    // switch back rather than silently calling the release channel "up to date" on a dev board.
+    const bool down = !newer && ota_install_allowed(running, avail, /*allow_downgrade=*/true);
+    diag_printf("ota: %s manifest %s, running %s -> %s", ota_channel_name(ch), avail, running.c_str(),
+                newer ? "update available" : down ? "older build offered" : "up to date");
     Lock lk(s_mtx);
     s_status.state            = "idle";
     s_status.message          = "";
     s_status.available        = avail;
     s_status.update_available = newer;
+    s_status.downgrade        = down;
+    s_status.channel          = ota_channel_name(ch);
 }
 
-void run_update() {
+void run_update(bool allow_downgrade) {
     const std::string running = esp_app_get_description()->version;
+    const OtaChannel  ch      = channel_now();
     set_state("checking", "Verifying the update");
 
     // Re-fetch the manifest instead of trusting whatever /ota/check left in s_status. Two reasons,
@@ -161,8 +185,10 @@ void run_update() {
     // all. The gate has to sit on the path that downloads, not on the path that merely informs.
     char        avail[32] = {0};
     const char* err       = "Update check failed";
-    if (!fetch_manifest_version(avail, sizeof(avail), err)) {
-        diag_printf("ota: update aborted, manifest fetch failed: %s", err);
+    if (!fetch_manifest_version(ota_channel_manifest_url(CONFIG_DAIKIN_OTA_MANIFEST_URL,
+                                                         CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL, ch),
+                                avail, sizeof(avail), err)) {
+        diag_printf("ota: update aborted, %s manifest fetch failed: %s", ota_channel_name(ch), err);
         set_state("error", err);
         return;
     }
@@ -170,11 +196,20 @@ void run_update() {
     // THE DOWNGRADE GATE — before a single byte of image is fetched. Gating the install instead of
     // the download would still let a hostile host burn the inactive slot and the bandwidth, and
     // would trust that the image we verify is the image we were offered.
-    if (!ota_is_upgrade(running, avail)) {
-        diag_printf("ota: refusing %s while running %s (not strictly newer)", avail, running.c_str());
+    //
+    // `allow_downgrade` comes from the REQUEST (?downgrade=1), never from the manifest, and only
+    // relaxes the ordering — an equal version and an unparseable one are still refused. It is what
+    // makes the release channel reachable from a board that has been following dev.
+    if (!ota_install_allowed(running, avail, allow_downgrade)) {
+        diag_printf("ota: refusing %s while running %s (%s)", avail, running.c_str(),
+                    allow_downgrade ? "not a different version" : "not strictly newer");
         Lock lk(s_mtx);
         s_status.state            = "error";
-        s_status.message          = "No newer firmware available";
+        // With the downgrade flag set, "no NEWER firmware" would be a wrong diagnosis: the only way
+        // to land here is an equal (or unparseable) version, i.e. the channel already serves what is
+        // running — which is the ordinary outcome of switching to a channel you are already on.
+        s_status.message          = allow_downgrade ? "This channel already serves the running build"
+                                                    : "No newer firmware available";
         s_status.available        = avail;
         s_status.update_available = false;
         return;
@@ -184,14 +219,22 @@ void run_update() {
         Lock lk(s_mtx);
         s_status.available        = avail;
         s_status.update_available = true;
+        s_status.channel          = ota_channel_name(ch);
         s_status.progress         = 0;
         s_status.state            = "updating";
         s_status.message          = "";
     }
 
-    const std::string url = std::string(CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL) +
-                            "daikin-altherma-esp32" + ota_img_suffix() + ".bin";
-    diag_printf("ota: downloading %s (%s -> %s)", url.c_str(), running.c_str(), avail);
+    const std::string url = ota_channel_firmware_url(
+        CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL, ch,
+        std::string("daikin-altherma-esp32") + ota_img_suffix() + ".bin");
+    if (url.empty()) {
+        diag_printf("ota: no firmware URL configured for the %s channel", ota_channel_name(ch));
+        set_state("error", "No update URL configured");
+        return;
+    }
+    diag_printf("ota: downloading %s (%s -> %s, %s channel)", url.c_str(), running.c_str(), avail,
+                ota_channel_name(ch));
 
     esp_http_client_config_t http = {};
     http.url               = url.c_str();
@@ -232,7 +275,7 @@ void run_update() {
     }
     char imgver[sizeof(img.version) + 1] = {0};
     std::memcpy(imgver, img.version, sizeof(img.version));   // version[] need not be NUL-terminated
-    if (!ota_is_upgrade(running, imgver)) {
+    if (!ota_install_allowed(running, imgver, allow_downgrade)) {
         diag_printf("ota: REFUSING image v%s while running v%s (manifest claimed %s)", imgver,
                     running.c_str(), avail);
         esp_https_ota_abort(h);
@@ -295,9 +338,16 @@ void run_update() {
     esp_restart();
 }
 
-// Distinguishes the two modes through xTaskCreate's void* parameter. Its ADDRESS is the signal —
-// the value is never read — so there is no lifetime question and no allocation.
-const char kUpdateMode = 0;
+// The three modes, carried through xTaskCreate's void* parameter: nullptr = check, otherwise a
+// pointer to one of these static bytes whose VALUE says which install. Static storage, so there is
+// no lifetime question and no allocation; distinct VALUES rather than distinct addresses, because
+// two identical const objects are exactly what a linker doing identical-code/data folding may merge
+// — and a merged pair would silently turn every update into a downgrade-permitted one.
+//
+// A static bool alongside the busy flag would also work, but it would be state that outlives the
+// task and could be read by the NEXT run: "install an older build" must not be inheritable.
+const char kUpdateMode          = 1;
+const char kUpdateDowngradeMode = 2;
 
 // One task body for both operations, so there is exactly one stack and one place the busy flag is
 // cleared. The body self-guards: a task is a C frame boundary like an HTTP handler is, so an
@@ -305,9 +355,11 @@ const char kUpdateMode = 0;
 // because an update CHECK ran out of memory would be absurd (.claude/CLAUDE.md → every allocating
 // FreeRTOS task loop must self-guard).
 void ota_task(void* arg) {
-    const bool update = arg != nullptr;
+    const char mode      = arg ? *static_cast<const char*>(arg) : 0;
+    const bool update    = mode != 0;
+    const bool downgrade = mode == kUpdateDowngradeMode;
     try {
-        if (update) run_update();
+        if (update) run_update(downgrade);
         else        run_check();
     } catch (const std::exception& ex) {
         diag_printf("ota: aborted (%s)", ex.what());
@@ -321,13 +373,14 @@ void ota_task(void* arg) {
 }
 
 // Spawn the single OTA task, refusing if one is already running. Returns false if busy.
-bool start(bool update) {
+bool start(bool update, bool allow_downgrade = false) {
     {
         Lock lk(s_mtx);
         if (s_busy) return false;
         s_busy = true;
     }
-    void* mode = update ? const_cast<void*>(static_cast<const void*>(&kUpdateMode)) : nullptr;
+    const char* sentinel = allow_downgrade ? &kUpdateDowngradeMode : &kUpdateMode;
+    void* mode = update ? const_cast<void*>(static_cast<const void*>(sentinel)) : nullptr;
     if (xTaskCreate(ota_task, "ota", kTaskStack, mode, kTaskPrio, nullptr) != pdPASS) {
         // Task creation failed (no heap). Clear the flag — otherwise the guard above latches ON for
         // the rest of the boot and OTA is dead until a reboot, with no way for the user to tell.
@@ -354,13 +407,21 @@ void ota_check_async(int64_t /*browser_epoch_ms*/) {
     if (!start(/*update=*/false)) ESP_LOGW("ota", "check ignored: an OTA operation is already running");
 }
 
-void ota_update_async() {
-    if (!start(/*update=*/true)) ESP_LOGW("ota", "update ignored: an OTA operation is already running");
+void ota_update_async(bool allow_downgrade) {
+    if (!start(/*update=*/true, allow_downgrade))
+        ESP_LOGW("ota", "update ignored: an OTA operation is already running");
 }
 
 OtaStatus ota_status() {
+    // The channel is answered from the LIVE config, not from whatever the last check left behind:
+    // /ota/status is what the UI reads back after POST /set_ota, and before any check has run there
+    // is nothing in s_status to read. Read BEFORE taking s_mtx — config() takes the config mutex
+    // and copies strings out of it, and nesting one status lock inside another buys a lock-order
+    // rule to remember for a value that is one enum wide.
+    const char* ch = ota_channel_name(config().ota_channel);
     Lock lk(s_mtx);
     s_status.current = esp_app_get_description()->version;
+    s_status.channel = ch;
     return s_status;
 }
 

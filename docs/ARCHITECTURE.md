@@ -853,6 +853,19 @@ Structure:
     image and matches the dump to the ELF by `app_elf_sha256` (warns on mismatch). VictoriaTraces is
     *not* the sink for this — a crash is a log/event, not a span; VictoriaLogs (via the retained MQTT
     topic + Telegraf) is.
+- **Two update channels** (`logic/ota_channel.hpp`, `POST /set_ota`, `/status.ota.channel`). A merge
+  to `main` no longer cuts a release, so there are two published feeds and a device follows one:
+  `release` (the gh-pages root, republished only by a **manual** workflow run that tags `v*`) and
+  `dev` (`…/dev/`, republished by every firmware-relevant merge). The URLs are *derived*, not
+  configured twice — the dev feed is by construction the `dev/` subdirectory of the configured
+  firmware base URL, so the two cannot be pointed at different hosts. The channel is persisted in
+  the config blob (v3) and applied **live**: nothing claims it at task start, `ota_update.cpp` reads
+  it when it fetches, so a check right after the switch already reads the new feed. Dev builds are
+  stamped `<next release>-dev.<n>` — a semver pre-release, so ordering does the work: a dev board
+  upgrades to the next release on its own, and a release board never drifts onto a dev build.
+  Switching *back* (dev → the last release) is a downgrade by version, which the gate below refuses
+  unless the request explicitly carries `?downgrade=1`; the web UI sends it only after the user
+  picks a channel and confirms. Without that the release channel would be a one-way door.
 - **Signed OTA** (Secure Boot v2 RSA-3072 *without* hardware Secure Boot): the running app verifies
   the signature before installing. Fully implemented (`ota_update.cpp`) — manifest check,
   `esp_https_ota` download into the inactive slot, the **two-point downgrade gate** (manifest
@@ -867,8 +880,9 @@ Structure:
   and wipes the fallback. Contained by the pre-flash guard `scripts/require-signed.sh`. Full model,
   including the three failure modes and the health gate, in [SECURITY.md](SECURITY.md) → Boot recovery.
 - **PR preview installer**: every same-repo PR publishes a signed preview at
-  `…/PR/<N>/` on the `gh-pages` branch (fork PRs get no signing key → no preview). OTA always
-  checks against **main**.
+  `…/PR/<N>/` on the `gh-pages` branch (fork PRs get no signing key → no preview). A preview is
+  flashed over USB and is not a feed: a board flashed from `PR/<N>/` follows whichever channel it is
+  set to, so its next OTA check leaves the preview behind.
 
 ## Boot-loop safe mode (config recovery)
 
