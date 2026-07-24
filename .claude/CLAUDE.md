@@ -210,8 +210,20 @@ provisioning.cpp setup SoftAP (daikin-altherma-esp32-setup) + DHCP DNS-offer; HT
                 is entered like any other. /scan stays a trusted-LAN-only route (logic/http_surface.hpp:
                 an open radio has no reason to be handed every AP in range). h_index still treats
                 APSTA like AP (serve setup.html) — the STA path is WIFI_MODE_STA, so any mode with a
-                live SoftAP means setup
-captive_dns.cpp UDP:53 catch-all (every name -> 192.168.4.1) so the setup portal auto-pops (setup mode only)
+                live SoftAP means setup. The DHCP hand-off also advertises the RFC 8910 captive-portal
+                URI (option 114, ESP_NETIF_CAPTIVEPORTAL_URI) alongside the DNS offer — recent
+                iOS/Android prefer it over probing at all, and a client that ignores it still finds
+                the portal via the probe redirect (logic/captive.hpp). The URI is a STATIC buffer:
+                IDF stores the POINTER it is handed, not a copy, so it must outlive the DHCP server —
+                the same lifetime trap as sntp_time.cpp's server string. All four steps are CHECKED
+                and a failure is named on diag (serial only in AP mode — /diag is withheld from the
+                open setup-AP surface); discarding those return codes is what made "the portal
+                doesn't pop" a report with no evidence behind it
+captive_dns.cpp UDP:53 catch-all (every name -> 192.168.4.1) so the setup portal auto-pops (setup mode
+                only). The response copies the query's RD bit and sets RA (RFC 1035 4.1.1) — a stub
+                resolver that sees Recursion-Desired come back cleared may discard the answer, and a
+                discarded answer means the OS probe never reaches us. Non-A queries (AAAA) get a
+                0-answer NOERROR, so a phone can't prefer an IPv6 route off-device
 hp_comm.cpp     X10A UART (9600 8E1) + register query. hp_uart_init installs the driver ONCE, then a
                 pin change is a register-only uart_set_pin remap (logic/uart_plan.hpp) — NOT a
                 uart_driver_delete+install. The old reinstall-per-swap allocated a fresh RX ring +
@@ -404,8 +416,22 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 bootlog, reset_reason, boot_guard, board_pins, modbus, syslog_policy, link_watch,
                 wifi_rollback, health_gate, version_cmp, ota_manifest, ws_policy, ws_tx_gate,
                 http_body, http_surface, query_flag, mcp_jsonrpc, timestamp, uart_plan, detect_backoff,
-                hexdump, led_pattern, button,
+                hexdump, led_pattern, button, captive,
                 lwt_select, ou_stale).
+                captive.hpp = the captive-portal reply policy for the ONE catch-all route ("/*"):
+                in SETUP mode an unmatched GET is a 302 to CAPTIVE_PORTAL_URI, in STA mode it is the
+                dashboard's SPA shell. The portal only auto-pops if the joining OS's connectivity
+                probe (captive.apple.com/hotspot-detect.html, /generate_204, /connecttest.txt) gets
+                the answer that OS keys on, and a 302+Location is the only one all three agents
+                understand; serving the PAGE with 200 (what this did through v1.0.7) is a heuristic
+                Android may leave undecided, and dragged http_send_gzip's Content-Encoding onto a
+                path walked by minimal HTTP clients, not browsers — a redirect's body is empty, so
+                gzip leaves the probe path while the real browser that follows it still gets the
+                compressed page. Also the ONE place the portal address is written (CAPTIVE_PORTAL_IP
+                /_URI), so the DNS answer, the RFC 8910 DHCP option and the Location header cannot
+                drift apart. Pure because the STA carve-out is the regression nobody would notice:
+                a portal that stops popping gets reported, a dashboard deep link that starts
+                redirecting does not
                 led_pattern.hpp = the status indicator's state -> pattern rule + the button
                 override's PRIORITY, shared by both back-ends (GPIO LED / WS2812) so they cannot
                 drift apart, and so "which signal wins" is asserted rather than buried in a blink
