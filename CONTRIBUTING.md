@@ -133,6 +133,23 @@ holds for the maintainer too — `main` takes no direct pushes at all. Practical
 Fork PRs build and run all gates, but get no signing key: they compile-check only and publish no
 preview installer. That is deliberate, not a failure.
 
+## Releases (a merge does not cut one)
+
+Merging a PR publishes a **development build**, not a release. There are two feeds, and they move
+at different rates:
+
+| Feed | URL | Cut by |
+|------|-----|--------|
+| **Release** | [`…/manifest.json`](https://0bu.github.io/daikin-altherma-esp32/manifest.json) | a **manual** run: Actions → **build** → *Run workflow* → `release: true` (+ `bump`) |
+| **Development** | `…/dev/manifest.json` | every firmware-relevant push to `main` |
+
+A release run is the only thing that creates a `v*` tag and a GitHub Release; a merge creates
+neither. Dev builds are versioned `<next release>-dev.<commits since the tag>` — a semver
+pre-release, so they sort *above* the release they followed and *below* the release they lead to.
+A device picks its feed in the web UI (gear → **ESP32** → *Update channel*); nothing about a PR
+changes that, so a contributor never has to think about which feed their change lands in. It lands
+in dev, and a maintainer decides when a release is cut from it.
+
 ## License
 
 Contributions are under the [MIT License](LICENSE). The X10A protocol and value definitions derive

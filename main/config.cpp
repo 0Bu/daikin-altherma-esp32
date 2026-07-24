@@ -104,6 +104,11 @@ void config_load() {
         } else {
             seed_board_defaults(c);
         }
+        // The OTA channel (blob v3). has_ota == false is a blob written before the channel existed,
+        // i.e. a device from the era when there was exactly ONE feed — which is the release channel.
+        // So absent and "release" mean the same thing here (unlike the board block above, where
+        // absent had to fall back to Kconfig); the struct default already says so.
+        if (b.has_ota) c.ota_channel = ota_channel_from_int(b.ota_channel);
     } else {
         // Legacy / first-boot fallback (per-key + Kconfig defaults).
         c.wifi_ssid = nvs_get_str("wifi_ssid", CONFIG_DAIKIN_WIFI_SSID);
@@ -227,6 +232,8 @@ bool config_save(const Config& c) {
     // written without its polarity.
     b.led_gpio = c.led_gpio; b.led_type = c.led_type; b.led_inverted = c.led_inverted;
     b.btn_gpio = c.btn_gpio; b.btn_active_low = c.btn_active_low;
+    // The OTA channel rides the same blob for the same reason: one writer (POST /set_ota, httpd).
+    b.ota_channel = ota_channel_to_int(c.ota_channel);
     const std::vector<uint8_t> blob = config_blob_serialize(b);
 
     const esp_err_t e = nvs_set_blob("cfg", blob.data(), blob.size());

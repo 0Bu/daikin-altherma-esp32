@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Regression tests for scripts/publish-pages-branch.sh — specifically its CONCURRENCY behaviour.
 #
-# gh-pages has three independent publishers (main's root publish, each PR's preview, and
-# pr-preview-cleanup's removal) writing one branch, and they overlap routinely. The failure mode
+# gh-pages has several independent publishers (the manual release's root publish, every merge's
+# dev-channel publish, each PR's preview, and pr-preview-cleanup's removal) writing one branch, and
+# they overlap routinely. The failure mode
 # they produce is nasty to catch by hand: the loser's push is rejected, its build job goes red,
 # and a plain re-run goes green — so it reads as a flake and gets re-run rather than fixed. It
 # shipped exactly that way once (PR #149's build).
@@ -50,6 +51,7 @@ clone() {   # clone <name>: a checkout with the script under test + room for a _
     chmod +x scripts/publish-pages-branch.sh )
 }
 site_root()  { mkdir -p "$T/$1/_site";       echo "root-$2"  > "$T/$1/_site/index.html"; }
+site_dev()   { mkdir -p "$T/$1/_site/dev";   echo "dev-$2"   > "$T/$1/_site/dev/index.html"; }
 site_pr()    { mkdir -p "$T/$1/_site/PR/$2"; echo "pr-$2-$3" > "$T/$1/_site/PR/$2/index.html"; }
 run()        { local d="$1"; shift; ( cd "$T/$d" && ./scripts/publish-pages-branch.sh "$@" ) >"$T/out.log" 2>&1; }
 remote_file(){ git -C "$T/origin.git" show "gh-pages:$1" 2>/dev/null; }
@@ -129,7 +131,37 @@ check "A's PR/7 landed"            "$(remote_file PR/7/index.html)" "pr-7-a7"
 check "B's interleaved PR/8 kept"  "$(remote_file PR/8/index.html)" "pr-8-b8"
 check "root still intact"          "$(remote_file index.html)" "root-v2"
 
-echo "== 7. an UNRETRYABLE push failure is fatal immediately, not after 5 rounds =="
+echo "== 7. the dev channel is its own slice: it survives a release, and preserves one =="
+# Release and dev are now cut by DIFFERENT events (a manual workflow run vs. every merge to main),
+# so the two feeds are published minutes or weeks apart and each must leave the other standing. A
+# root publish that swept dev/ away would take every dev-channel device's update check offline
+# until the next merge — silently, since nothing else reads that path.
+( cd "$T/A" && git fetch -q origin 'gh-pages:refs/remotes/origin/gh-pages' )
+site_dev A d1; run A --dev; rc=$?
+check "dev publish succeeds"       "$rc" "0"
+check "dev landed"                 "$(remote_file dev/index.html)" "dev-d1"
+check "root survived the dev push" "$(remote_file index.html)" "root-v2"
+check "PR/7 survived the dev push" "$(remote_file PR/7/index.html)" "pr-7-a7"
+# ...and now the other direction: a release republishes the root over a live dev feed.
+( cd "$T/B" && git fetch -q origin 'gh-pages:refs/remotes/origin/gh-pages' )
+site_root B v3; run B; rc=$?
+check "root publish succeeds"      "$rc" "0"
+check "root updated"               "$(remote_file index.html)" "root-v3"
+check "dev survived the release"   "$(remote_file dev/index.html)" "dev-d1"
+check "PR/7 survived the release"  "$(remote_file PR/7/index.html)" "pr-7-a7"
+# A second dev publish replaces its own tree wholesale (declarative, like every other mode), so a
+# file the previous dev build left behind cannot linger into the next one.
+( cd "$T/A" && git fetch -q origin 'gh-pages:refs/remotes/origin/gh-pages' )
+echo stale > "$T/A/_site/dev/old.bin"
+run A --dev
+check "dev stale file present first" "$(remote_has dev/old.bin)" "yes"
+( cd "$T/A" && git fetch -q origin 'gh-pages:refs/remotes/origin/gh-pages' )
+rm -f "$T/A/_site/dev/old.bin"; site_dev A d2; run A --dev
+check "dev replaced wholesale"     "$(remote_file dev/index.html)" "dev-d2"
+check "stale dev file gone"        "$(remote_has dev/old.bin)" "no"
+check "root still intact"          "$(remote_file index.html)" "root-v3"
+
+echo "== 8. an UNRETRYABLE push failure is fatal immediately, not after 5 rounds =="
 # Deliberately asserted on the retry COUNT and not on elapsed time: a wall-clock bound is the
 # very kind of assertion that goes intermittently red on a loaded runner, which is the class of
 # bug this file exists to prevent.

@@ -7,6 +7,7 @@
 #include "crc.hpp"
 #include "board_pins.hpp"   // board_pin_offerable — the chip-reserved-pin rule validate() enforces
 #include "led_pattern.hpp"  // LedType — the indicator back-end, now a runtime choice not a Kconfig one
+#include "ota_channel.hpp"  // OtaChannel — which published feed this device follows
 
 namespace daik {
 
@@ -29,6 +30,12 @@ struct Config {
     // like syslog_host is via /set_syslog.
     std::string ntp_server;
     std::string profile  = "auto";  // "auto" = detect on next poll cycle; else a concrete profile id
+    // Which OTA feed this device follows (logic/ota_channel.hpp) — PERSISTED, one writer (POST
+    // /set_ota). Release by default: a merge to main no longer cuts a release, so the two feeds
+    // move at completely different rates and a device must never drift onto the fast one by
+    // accident. Applied LIVE (no reboot) — ota_update.cpp reads it when it fetches, nothing claims
+    // it at task start the way the LED driver does.
+    OtaChannel  ota_channel = OtaChannel::Release;
     // One-shot WiFi credential rollback (POST /set_wifi -> wifi.cpp). The working credentials are
     // stashed here and `wifi_rollback_active` armed before the new ones are tried; the boot that
     // tries them either commits (clears both) or restores the backup. See logic/wifi_rollback.hpp.

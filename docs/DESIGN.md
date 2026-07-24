@@ -27,8 +27,8 @@ page lives outside the firmware and cannot include `main/www/style.css`, so its 
    later from Settings › Connections › WiFi (§5.1, with automatic rollback on a bad
    change). The heat pump is fully automatic (auto-detected), so there is nothing to configure for it.
 3. **Read-only truth.** The dashboard reflects the device; it never blocks on writes. The few writes
-   (WiFi credentials, MQTT broker, Syslog server, NTP server, RX/TX pins) are explicit and report
-   their outcome.
+   (WiFi credentials, MQTT broker, Syslog server, NTP server, RX/TX pins, board hardware, OTA update
+   channel) are explicit and report their outcome.
 4. **Terse, dense, technical.** Tabular numbers, short labels, no decorative copy.
 5. **Browser-detected language (de / en), no selector.** This principle scopes to the **device UI**
    (`main/www/`) — the GitHub Pages installer of §5.5 is English-only by decision, and `setup.html`
@@ -148,6 +148,9 @@ checkbox),
 `hp{proto,rx,tx,connected,last_ok_s,…}`, `profile{id}`,
 `sys{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode}` (heap headroom + last boot reason,
 always present — feeds the Settings ESP32 card's Last-reset and Free-heap rows),
+`ota{channel}` (`"release"` | `"dev"` — which published feed the next update check reads; the
+SETTING, not the running build, since a device can be set to a channel it has not installed from
+yet — drives the ESP32 card's Update-channel select, §5.4),
 `last_crash` (`null` on a clean boot, else `{reason,reason_code,fault,coredump,task,pc,backtrace[],
 corrupted,elf_sha256}` — drives the crash banner),
 `detect{proto,valid,capacity_kw,ou_eeprom,candidates[],families[],ambiguous,model{name,family,
@@ -453,6 +456,20 @@ progress in that same line, where the page underneath stays readable.
   and on `done` wait for the board to come back and **reload the page** (below). A `503` from the
   shared OOM guard is reported as a retryable "device busy", never as a timeout. Errors show in
   `--err` and linger longer than a success before clearing.
+- **Which feed it checks is a setting, and it lives in Settings** — the **Update channel** row on
+  the ESP32 card (§5.6), a two-option select: *Release* (cut by hand) or *Development* (every merge
+  to `main`). It sits directly under a read-only **Version** row, because a channel picker with no
+  version beside it asks the user to hold "what am I running" in their head while choosing what to
+  run. Picking one is a live write (`POST /set_ota`, no reboot), and it then **returns to the
+  dashboard and starts the check** — nobody switches channel for the setting itself, they switch to
+  get that channel's build, and the check has to report where the inline readout is. This is the
+  one navigation an ordinary control performs, and it performs it *towards* the screen that can show
+  the result rather than leaving a flow running under one that cannot.
+- **A backwards switch is stated as one** — Development → Release means installing an **older**
+  build, which the device refuses unless the request explicitly asks (`?downgrade=1`). So that
+  confirmation is not a courtesy like the ordinary one above: it *is* the permission, and its text
+  says outright that the running build is newer. Same dialog shape, different sentence — a user who
+  reads only the first line still learns which direction they are going.
 - **After the install the page RELOADS, it does not just re-render** (`otaWaitReboot`). This is the
   one place the dashboard cannot use the **reboot-and-reconnect poll** the modal saves use (§5.1):
   that one re-renders from a fresh `/status`, which is right when only the *data* changed — but an
@@ -516,8 +533,9 @@ block butted against the round CTA and steps cards below.
   user quotes back in a bug report. Read at load from **`manifest.json`** — deliberately the same
   file the install button is handed, so the version shown and the image actually written cannot
   disagree; a number typed into the page would go stale at the next release. `ci-build-all.sh`
-  stamps it `1.2.3` on main and `1.2.3-PR-<N>` on a preview, so a preview states its provenance
-  here as well as in the banner. Injected with `textContent`, never `innerHTML`. If the fetch fails
+  stamps it `1.2.3` for a release, `1.2.3-dev.<n>` on the dev channel and `1.2.3-PR-<N>` on a
+  preview, so a non-release build states its provenance here as well as in the banner (which is
+  keyed on the **path**, so it is right before — and even without — the manifest fetch). Injected with `textContent`, never `innerHTML`. If the fetch fails
   (no manifest, or the page opened from disk) the line **stays hidden** — showing nothing beats
   asserting a version that could not be read.
 - **Steps card** — "After flashing" as a `.section-label`, then the three steps as `--line`-divided
@@ -526,8 +544,14 @@ block butted against the round CTA and steps cards below.
   sentence (text, `<code>`, `<a>`) becomes its own flex item and the step lays out as a row of
   columns. `<code>` chips are `--soft` on `--line` and wrap (`overflow-wrap: anywhere`) so a long
   hostname never widens the card.
-- **PR-preview banner** — on a `…/PR/<N>/` path (`scripts/build-pages.sh`), the `--warn`-accented
-  banner of §5.3 item 0, saying the build is that PR's and that OTA still tracks `main`.
+- **Provenance banner** — the same `--warn`-accented banner of §5.3 item 0, in two variants, because
+  the identical page is served from three paths (`scripts/build-pages.sh`): a `…/PR/<N>/` preview
+  says the build is that PR's, and `…/dev/` says it is the latest merge to `main` rather than a cut
+  release. The release root shows none — a release needs no caveat. Keyed on the **path**, not on
+  the version string: the banner has to be right before `manifest.json` has been fetched, and if
+  that fetch fails it is all the page can say. Both variants point at the device's own *Update
+  channel* setting (§5.4), since flashing a page is a one-off but the channel is what the device
+  keeps following afterwards.
 - The copy states what the firmware actually does: the model is **auto-detected** and the device has
   **one dashboard** — there is no "Setup" screen, no model picker and no RX/TX step to send people to
   (§5.2, §5.3).
@@ -584,9 +608,13 @@ dashboard — the move changed where the configuration lives, not how it looks:
    detected, else a usable-GPIO dropdown (§5.2) — and the **Hardware** row (status indicator +
    recovery-button pins), which opens the board-hardware modal. From `platform`,
    `uptime_s`, `sys{reset_reason,free_heap}`, `pins_avail`, `hp{proto,rx,tx,connected,last_ok_s}`,
-   `board{…}`. The **firmware version is not here** — it stays in the dashboard header beside the IP
-   (§5.3 header, §5.4), where it reads as board identity rather than as one row among the board's
-   internals, and where the OTA readout has a line to report into.
+   `board{…}`. Then the **Version** (`version`, read-only) and the **Update channel** select
+   (`ota.channel` → `POST /set_ota`, §5.4). The version being here *as well as* in the dashboard
+   header is not a duplicated readout and the two are not interchangeable: the header line is the
+   **affordance** — tap it to check, and the progress reports into that same line — while this row
+   exists so the channel selector above/below it is legible, since "which feed do I follow" is
+   unanswerable without "what am I running". The header keeps board identity where a user quotes it
+   from; Settings keeps the setting where every other setting is.
 
 Under both, a `--muted` monospace footer line naming the product and running version.
 
@@ -601,7 +629,9 @@ words (§9).
 
 **Rebuild rule.** Both cards are rebuilt from `/status` on every push (uptime alone changes each
 second), so the write goes through the same change-guard the rest of the app uses — and the rebuild
-is skipped entirely while an RX/TX dropdown has focus, or the poll would collapse it mid-pick.
+is skipped entirely while an RX/TX dropdown **or the update-channel select** has focus, or the poll
+would collapse it mid-pick. (Any future select on these cards has to join that guard — an open
+native dropdown is destroyed by an `innerHTML` write, and the poll is ~1×/s.)
 
 ## 6. Dashboard value grouping & order
 

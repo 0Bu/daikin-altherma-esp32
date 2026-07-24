@@ -187,18 +187,31 @@ footer { color: var(--muted); font-size: 12.5px; text-align: center; padding: 0 
 </div>
 
 <script>
-  // On a PR preview page (…/PR/<N>/) flag that this flashes that PR's build, not main.
+  // The same page is served from three paths, and it must say WHICH build it flashes:
+  //   /            the release channel — cut by hand, the default the device follows
+  //   /dev/        the dev channel — republished by every firmware-relevant merge to main
+  //   /PR/<N>/     a preview of one pull request
+  // Keyed on the PATH rather than on the version string: this banner has to be right before
+  // manifest.json has been fetched (and if that fetch fails, it is all the page can say).
   var m = location.pathname.match(/\/PR\/(\d+)\//);
   if (m) {
     document.getElementById('prBanner').hidden = false;
     document.getElementById('prBannerTxt').innerHTML =
-      'Preview build for <b>PR #' + m[1] + '</b>. OTA still tracks <b>main</b>.';
+      'Preview build for <b>PR #' + m[1] + '</b>, not a release. After flashing, set the update ' +
+      'channel under the gear \u2192 ESP32 to choose which feed the device follows.';
+  } else if (/\/dev\/(index\.html)?$/.test(location.pathname)) {
+    document.getElementById('prBanner').hidden = false;
+    document.getElementById('prBannerTxt').innerHTML =
+      '<b>Development build</b> \u2014 the latest merge to main, not a cut release. It is signed ' +
+      'and tested by the same gates, but it has not been released deliberately. The device keeps ' +
+      'following this channel once flashed; switch it under the gear \u2192 ESP32 \u2192 Update channel.';
   }
 
   // Name the build this page installs. Read from manifest.json — the same file passed to
   // <esp-web-install-button manifest="…">, so the version shown and the image flashed cannot
   // disagree; anything hard-coded here would go stale on the next release. ci-build-all.sh
-  // stamps it "1.2.3" on main and "1.2.3-PR-<N>" for a preview, so a preview says so twice.
+  // stamps it "1.2.3" for a release, "1.2.3-dev.<n>" on the dev channel and "1.2.3-PR-<N>" for
+  // a preview, so a non-release build says so twice.
   // textContent, never innerHTML: a version string is data to display, not markup to run.
   // Silent on failure — the line stays hidden rather than claiming a version we couldn't read
   // (this is also what happens when the page is opened from disk, with no manifest beside it).

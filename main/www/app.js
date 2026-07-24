@@ -115,6 +115,13 @@ const I18N = {
     "board.hint": "Holding the reset button for 5 seconds ERASES all stored settings (WiFi, MQTT, Syslog/NTP) and reboots into the setup portal — the LED flashes red while it is armed, then turns solid white while erasing. Leave the button on \"None\" unless one is actually wired: an unconnected pin can float and trigger it.",
     "card.hardware": "Hardware", "card.hw_off": "None",
     "card.hw_led": (pin, kind) => `GPIO${pin} · ${kind}`, "card.hw_btn": (pin) => `GPIO${pin}`,
+    // Firmware / update channel (ESP32 card). Two published feeds: releases are cut by hand, the
+    // dev feed follows every merge to main. "Version" is the running build, "Update channel" is
+    // which feed the next check reads.
+    "card.firmware": "Version", "card.channel": "Update channel",
+    "chan.release": "Release", "chan.dev": "Development",
+    "chan.saved": (c) => `Update channel: ${c}`,
+    "ota.downgrade_confirm": (cur, avail) => `Switch back to v${avail}?\n\nThe device is running v${cur}, which is NEWER. Installing an older build is only offered because you picked a different update channel; the signed image is verified exactly as an update is, and the device rolls back automatically if it can't get online.`,
   },
   de: {
     "sys.nodata": "Keine Daten", "sys.unreachable": "Nicht erreichbar",
@@ -206,6 +213,10 @@ const I18N = {
     "board.hint": "Den Reset-Taster 5 Sekunden zu halten LÖSCHT alle gespeicherten Einstellungen (WLAN, MQTT, Syslog/NTP) und startet ins Setup-Portal neu — die LED blinkt rot, solange der Vorgang scharf ist, und leuchtet dann weiß, während gelöscht wird. Den Taster auf „Keine“ lassen, solange keiner verdrahtet ist: ein offener Pin kann floaten und ihn auslösen.",
     "card.hardware": "Hardware", "card.hw_off": "Keine",
     "card.hw_led": (pin, kind) => `GPIO${pin} · ${kind}`, "card.hw_btn": (pin) => `GPIO${pin}`,
+    "card.firmware": "Version", "card.channel": "Update-Kanal",
+    "chan.release": "Release", "chan.dev": "Development",
+    "chan.saved": (c) => `Update-Kanal: ${c}`,
+    "ota.downgrade_confirm": (cur, avail) => `Zur\u00fcck auf v${avail} wechseln?\n\nDas Ger\u00e4t l\u00e4uft auf v${cur} \u2014 also NEUER. Ein \u00e4lterer Stand wird nur angeboten, weil du einen anderen Update-Kanal gew\u00e4hlt hast; das signierte Abbild wird genauso gepr\u00fcft wie bei einem Update, und das Ger\u00e4t setzt automatisch zur\u00fcck, wenn es nicht online kommt.`,
   },
 };
 function t(k, ...a) {
@@ -625,9 +636,23 @@ function pinSelRow(label, id, val, pins) {
     `<select class="input mono num pin-sel" id="${id}" aria-label="${esc(label)}">${opts}</select></div>`;
 }
 
+// The update-channel row (ESP32 card): which published feed the next OTA check reads. Two feeds
+// exist because a merge to main no longer cuts a release — "Release" is the manually-cut, tagged
+// build, "Development" is the last merge. Rendered from /status.ota.channel (the SETTING) rather
+// than from the running version's "-dev" suffix (what is INSTALLED): the two differ for exactly as
+// long as it takes to switch channels and install, which is when the row matters most.
+function channelRow(cur) {
+  const opt = (v, label) =>
+    `<option value="${v}"${v === cur ? " selected" : ""}>${esc(label)}</option>`;
+  return `<div class="vrow"><span class="vrow-label">${esc(t("card.channel"))}</span>` +
+    `<select class="input chan-sel" id="e32Chan" aria-label="${esc(t("card.channel"))}">` +
+    opt("release", t("chan.release")) + opt("dev", t("chan.dev")) + `</select></div>`;
+}
+
 // ESP32 board status card (on the Settings screen — renderSettings): chip / uptime, the X10A link +
-// protocol, and the RX/TX pins. (The firmware version is NOT here — it sits in the dashboard's
-// header meta line beside the IP, where tapping it runs the OTA check; DESIGN.md §5.4.) Pins are
+// protocol, the RX/TX pins, and the firmware version + its update channel. (Tapping the version in
+// the dashboard header still runs the OTA check — DESIGN.md §5.4; what lives here is the SETTING
+// that decides which feed that check reads, not a second copy of the flow.) Pins are
 // auto-detected: once the bus answers on a pair they show read-only; until then a dropdown of the
 // board's wire-able GPIOs lets the user point the firmware at their wiring. A brief timeout doesn't
 // flip back to the dropdown (last_ok_s grace).
@@ -654,6 +679,8 @@ function esp32CardHtml() {
     vrow(t("card.protocol"), hp.connected ? proto : "—") +
     pinRow(t("card.rxpin"), "e32Rx", hp.rx, hp.tx) +
     pinRow(t("card.txpin"), "e32Tx", hp.tx, hp.rx) +
+    vrow(t("card.firmware"), "v" + (s.version || "?"), { cls: "mono" }) +
+    channelRow(s.ota?.channel === "dev" ? "dev" : "release") +
     boardRow();
   return vcard("ESP32", rows);
 }
@@ -777,7 +804,7 @@ function renderSettings() {
   // poll would collapse it mid-pick. It resumes once focus leaves (onPinPick blurs it after
   // applying). setHtml keeps the rest from thrashing rows the user is tapping.
   const a = document.activeElement;
-  if (!(a && a.classList && a.classList.contains("pin-sel"))) {
+  if (!(a && a.classList && (a.classList.contains("pin-sel") || a.classList.contains("chan-sel")))) {
     setHtml("connTile", connectionsHtml());
     setHtml("settingsCards", esp32CardHtml());
   }
@@ -2005,6 +2032,26 @@ async function onPinPick() {
   const iv = setInterval(async () => { await refreshStatus(); if (++n >= 5 || S.status?.hp?.connected) clearInterval(iv); }, 1500);
 }
 
+// Picking an update channel saves it (POST /set_ota — live, no reboot) and then immediately runs
+// the normal OTA flow against the newly-selected feed. Doing the check straight away is the point
+// of the pick: nobody switches channel for the setting itself, they switch to get that channel's
+// build, and leaving them to find the version in the header afterwards would make a two-step job
+// out of one. The flow REPORTS in the dashboard header (#otaStat, where a download's percentage
+// ticks in place), so go() there first rather than run it under a screen that cannot show it.
+async function onChannelPick() {
+  const sel = $("e32Chan");
+  const channel = sel.value;
+  sel.blur();
+  try {
+    const r = await post("/set_ota", { channel });
+    if (!r.ok) { toast(await errorOf(r, t("toast.rejected")), "err"); await refreshStatus(); return; }
+  } catch { toast(t("toast.unreachable"), "err"); return; }
+  toast(t("chan.saved", t(channel === "dev" ? "chan.dev" : "chan.release")), "ok");
+  await refreshStatus();
+  go("dashboard");
+  checkFirmwareUpdate();
+}
+
 // ── Firmware / OTA ───────────────────────────────────────────────────────
 // Tapping the version in the header meta line checks for an OTA update, and offers to install one:
 // the full /ota/check -> /ota/status -> /ota/update flow is wired below against the device-side
@@ -2102,20 +2149,26 @@ async function checkFirmwareUpdate() {
     const s = await otaPoll(["checking"], 30);
     if (!s)                  { otaFail(t("ota.timeout")); return; }
     if (s.state === "error") { otaFail(s.message || t("ota.check_failed")); return; }
-    if (!s.update_available) {
+    // `downgrade` is the selected channel offering an OLDER build than the one running — the
+    // dev → release direction. Without honouring it here, picking "Release" on a board that has
+    // been following dev would report "up to date" forever and the channel would be a one-way door.
+    if (!s.update_available && !s.downgrade) {
       S.otaAvail = null; renderHeaderMeta();
       S.otaBusy = false;
       otaInline(t("ota.uptodate")); otaInlineClear();
       return;
     }
+    const back = !s.update_available && s.downgrade;
 
     // A version is on offer: record it so the version's tooltip says so, and clear the readout while
     // the modal dialog is up (confirm() blocks, and a stale spinner behind it explains nothing).
     S.otaAvail = s.available || null; renderHeaderMeta();
     otaInline("");
-    // The device re-fetches the manifest and re-runs the downgrade gate before downloading, so this
-    // prompt is a courtesy, not the safety check — declining here changes nothing on the device.
-    if (!confirm(t("ota.confirm", s.current, s.available))) {
+    // The device re-fetches the manifest and re-runs the gate before downloading, so this prompt is
+    // a courtesy, not the safety check — declining here changes nothing on the device. Going
+    // BACKWARDS is the exception: the device refuses that outright unless this flow asks for it
+    // explicitly (?downgrade=1 below), so for that direction the confirm is the whole permission.
+    if (!confirm(t(back ? "ota.downgrade_confirm" : "ota.confirm", s.current, s.available))) {
       S.otaBusy = false;
       otaInline(t("ota.cancelled")); otaInlineClear();
       return;
@@ -2126,7 +2179,7 @@ async function checkFirmwareUpdate() {
     // perfectly successful promise. Left unchecked it would fall through into the poll below and
     // surface 5 minutes later as "Update timed out" — the wrong diagnosis for a retryable refusal.
     let r;
-    try { r = await post("/ota/update", {}); }
+    try { r = await post("/ota/update" + (back ? "?downgrade=1" : ""), {}); }
     catch { otaFail(t("ota.failed")); return; }
     if (r.status === 503) { otaFail(t("ota.busy")); return; }
     if (!r.ok) { otaFail(await errorOf(r, t("ota.failed"))); return; }
@@ -2368,6 +2421,7 @@ function wire() {
   });
   $("settingsCards").addEventListener("change", (e) => {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();
+    else if (e.target.id === "e32Chan") onChannelPick();
   });
   // The Connections tile (#connTile) is rebuilt every poll too — each row's pencil opens its own
   // edit modal (WiFi/MQTT/Syslog/NTP), delegated the same way.

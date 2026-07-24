@@ -1,5 +1,20 @@
 name: build
 
+# RELEASE MANAGEMENT — a merge does NOT cut a release
+#
+# There are two published feeds, cut by two different events:
+#
+#   RELEASE  (gh-pages root, /manifest.json)      only a MANUAL run of this workflow with
+#                                                 `release: true` tags v* and republishes it
+#   DEV      (gh-pages dev/,  /dev/manifest.json) every firmware-relevant push to main
+#
+# Before this split, every firmware-relevant merge auto-tagged a release, so the version number
+# moved with the branch and "the latest release" meant "whatever was merged last" — there was no
+# such thing as a build that had been deliberately cut, and no way to run one. Now `main` moves
+# freely on the dev feed and a release is an act: Actions -> build -> Run workflow -> release: true,
+# picking the bump level. The device chooses which feed it follows (Settings -> ESP32 -> Update
+# channel, POST /set_ota); the two feeds have identical shape, so nothing downstream is special-cased.
+#
 # PUBLISHING POLICY — publishes from a PRIVATE repo too, and the Pages site is PUBLIC
 #
 # This pipeline used to gate every outward publish on `github.event.repository.private == false`.
@@ -7,32 +22,44 @@ name: build
 # project wants the browser installer + the OTA feed live before the source goes public.
 #
 # Be clear about what that means, because the two halves differ:
-#   • GitHub Pages (the root installer site AND the per-PR previews) is PUBLIC — readable by anyone
-#     on the internet, regardless of repo visibility. Making a Pages site access-controlled needs an
-#     ORGANIZATION on GitHub Enterprise Cloud; it is not available to a user account on Pro. So the
-#     signed firmware, the merged installer image and manifest.json are world-downloadable while the
-#     SOURCE stays private. That is an accepted trade, not an oversight.
+#   • GitHub Pages (the root installer site, the dev channel AND the per-PR previews) is PUBLIC —
+#     readable by anyone on the internet, regardless of repo visibility. Making a Pages site
+#     access-controlled needs an ORGANIZATION on GitHub Enterprise Cloud; it is not available to a
+#     user account on Pro. So the signed firmware, the merged installer image and manifest.json are
+#     world-downloadable while the SOURCE stays private. That is an accepted trade, not an oversight.
 #   • Git tags + GitHub Releases are NOT public on a private repo — only accounts with repo read
-#     access see them. They are un-gated anyway because they are what makes the OTA feed WORK: the
-#     release step below is the only thing that creates a v* tag, next-version.sh derives the next
-#     version from the latest tag, and with no tags it returns the version.txt floor forever. Ungating
-#     Pages while leaving releases gated would publish a manifest pinned at 1.0.0 for all time —
-#     a feed that is live but frozen, where every device reports "up to date" and never updates.
+#     access see them. They are un-gated anyway because they are what makes the OTA release feed
+#     WORK: the release step below is the only thing that creates a v* tag, next-version.sh derives
+#     the next version from the latest tag, and with no tags it returns the version.txt floor
+#     forever. Ungating Pages while leaving releases gated would publish a manifest pinned at 1.0.0
+#     for all time — a feed that is live but frozen, where every device reports "up to date".
 #
 # NOTE: the first publish still needs a run — a repo-settings change does not trigger one. Use one
 # `workflow_dispatch` (or a firmware-relevant push); that run CREATES the gh-pages branch which the
 # Pages source must then be pointed at (Settings -> Pages -> gh-pages / (root)), see docs/README.md
 # ("Bringing the site up the first time"). Until a v* tag exists the version stays at the
-# version.txt floor (1.0.0).
+# version.txt floor (1.0.0) and only the dev feed moves.
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-  workflow_dispatch:   # manual re-publish of the Pages site at the latest released version
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Cut a RELEASE (tag v*, GitHub Release, publish the release channel)"
+        type: boolean
+        default: false
+      bump:
+        description: "Which version segment the release bumps (ignored unless release is checked)"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
 
-# Serialize main so the auto-incremented release version can't race; cancel superseded PR runs.
+# Serialize main so the release version + the two feeds can't race; cancel superseded PR runs.
+# A release dispatch and a push to main share this group deliberately: they both derive a version
+# from the tag list, and a release must never be computed against a tag another run is creating.
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -70,9 +97,10 @@ jobs:
 
   # The gh-pages publish is the LAST step of the build job below, after ~5 minutes of firmware
   # work — so when it breaks, it breaks expensively and at the worst moment. It is also the one
-  # step with a concurrency hazard: three publishers (main's root, every PR preview, and
-  # pr-preview-cleanup) write one branch. Exercise it here against a throwaway bare repo — no
-  # network, no credentials, seconds long — so a regression fails before the build, not after it.
+  # step with a concurrency hazard: four publishers (the release root, every merge's dev channel,
+  # every PR preview, and pr-preview-cleanup) write one branch. Exercise it here against a
+  # throwaway bare repo — no network, no credentials, seconds long — so a regression fails before
+  # the build, not after it.
   pages-publish-test:
     runs-on: ubuntu-latest
     steps:
@@ -90,15 +118,27 @@ jobs:
         with:
           fetch-depth: 0   # full history + tags for versioning / change detection
 
-      - name: Compute release version
-        id: version
+      # What is this run FOR? Exactly one of: release (manual only), dev, or pr. Decided once, in
+      # one place, so no later step has to re-derive it from a three-way `if:` expression.
+      - name: Decide the run mode
+        id: mode
         run: |
-          git fetch --tags --force
-          next="$(./scripts/next-version.sh)"
-          latest="$(git tag -l 'v*' --sort=-v:refname | head -n1 | sed 's/^v//')"
-          echo "version=$next"  >> "$GITHUB_OUTPUT"
-          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            mode=pr
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.release }}" = "true" ] \
+               && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            mode=release
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            mode=dev
+          else
+            mode=none        # a dispatch on a branch other than main: build only, publish nothing
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "run mode: $mode"
 
+      # Detect firmware-relevant changes on a push to main. A docs-only merge still builds (the
+      # gates run) but must not republish the dev feed: the version would move and every dev device
+      # would download a byte-identical image for a README edit.
       - name: Detect firmware-relevant changes
         id: changes
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -107,7 +147,7 @@ jobs:
           if [ -z "$before" ] || ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
             changed=yes
           elif git diff --name-only "$before" "${{ github.sha }}" \
-               | grep -qE '^(main/|CMakeLists\.txt$|sdkconfig\.defaults$|partitions\.csv$|version\.txt$|\.github/workflows/build\.yml$|scripts/ci-build-all\.sh$|scripts/build-pages\.sh$)'; then
+               | grep -qE '^(main/|CMakeLists\.txt$|sdkconfig\.defaults$|partitions\.csv$|version\.txt$|\.github/workflows/build\.yml$|scripts/ci-build-all\.sh$|scripts/build-pages\.sh$|scripts/next-version\.sh$)'; then
             changed=yes
           else
             changed=no
@@ -117,28 +157,35 @@ jobs:
       # Stamp the embedded firmware version (esp_app_get_description()->version) so the running
       # image, the release tag and the manifest can never drift. version.txt is the committed
       # FLOOR; here we overwrite it in the workspace (NOT committed) with what we publish.
+      #
+      #   release  X.Y.Z              (the bump level the dispatch picked; the only tagged shape)
+      #   dev      X.Y.Z-dev.N        (N = commits since the last tag — a semver PRE-RELEASE of the
+      #                                next release, so it sorts above the last release and below
+      #                                the next one; see scripts/next-version.sh)
+      #   pr       X.Y.Z-PR-<number>  (never published to a feed; the preview site only)
       - name: Stamp firmware version
         id: stamp
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="${{ steps.version.outputs.latest }}"; [ -z "$base" ] && base="${{ steps.version.outputs.version }}"
-            disp="${base}-PR-${{ github.event.pull_request.number }}"
-          elif [ "${{ steps.changes.outputs.firmware }}" = "yes" ]; then
-            disp="${{ steps.version.outputs.version }}"
-          else
-            disp="${{ steps.version.outputs.latest }}"; [ -z "$disp" ] && disp="${{ steps.version.outputs.version }}"
-          fi
+          git fetch --tags --force
+          latest="$(git tag -l 'v*' --sort=-v:refname | head -n1 | sed 's/^v//')"
+          case "${{ steps.mode.outputs.mode }}" in
+            release) disp="$(./scripts/next-version.sh '${{ inputs.bump }}')" ;;
+            pr)      base="$latest"; [ -z "$base" ] && base="$(./scripts/next-version.sh)"
+                     disp="${base}-PR-${{ github.event.pull_request.number }}" ;;
+            *)       disp="$(./scripts/next-version.sh --dev)" ;;
+          esac
           echo "$disp" > version.txt
           echo "disp=$disp" >> "$GITHUB_OUTPUT"
+          echo "stamping $disp"
 
       # Materialize the offline OTA signing key from the OTA_SIGNING_KEY secret (RSA-3072 PEM).
       # Main publish w/o secret -> hard error (never publish unsigned to OTA). Fork PR w/o secret
       # -> warn + build unsigned (compile check only, no preview). See docs/SECURITY.md.
       - name: Provision OTA signing key
         id: signkey
-        if: >-
-          ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')
-          || github.event_name == 'pull_request'
+        # Skipped only for mode `none` (a dispatch on a branch that publishes nothing): that build
+        # is a compile check, so a missing secret there must not be a hard error.
+        if: steps.mode.outputs.mode != 'none'
         env:
           OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
         run: |
@@ -163,12 +210,11 @@ jobs:
           # ci-build-all.sh builds esp32s3 target and stages signed + merged bins + manifest.json
           # into dist/. OTA pulls daikin-altherma-esp32.bin.
           #
-          # Pass the STAMPED version (what version.txt above put into the image), never the next
-          # release version: OTA compares the manifest version to the version the running app
-          # reports, so publishing a manifest the bins don't embed makes every device download an
-          # "update" that changes nothing, forever. They differ on exactly the triggers that don't
-          # cut a release (docs-only push, workflow_dispatch, PR). ci-build-all.sh reads the
-          # version back out of the built image and fails if the two ever drift apart again.
+          # Pass the STAMPED version (what version.txt above put into the image). OTA compares the
+          # manifest version to the version the running app reports, so publishing a manifest the
+          # bins don't embed makes every device download an "update" that changes nothing, forever.
+          # ci-build-all.sh reads the version back out of the built image and fails if the two ever
+          # drift apart again.
           command: ./scripts/ci-build-all.sh "${{ steps.stamp.outputs.disp }}"
 
       - name: Shred OTA signing key
@@ -179,9 +225,9 @@ jobs:
       # symbolize a core dump from this build (scripts/decode-coredump.sh), so retaining it per
       # version/PR keeps every build's crashes decodable — even while the repo is private and cuts no
       # public Release. Artifact retention (default 90 days) is the archive.
-      # Named after the STAMPED version (disp), not the next release version: this artifact is how
-      # a core dump finds its .elf, and a dump reports the version the image embeds. On a PR that
-      # is "<base>-PR-<N>", so PR builds stay self-labelling without a separate name shape.
+      # Named after the STAMPED version (disp): this artifact is how a core dump finds its .elf, and
+      # a dump reports the version the image embeds. That is "1.0.8-dev.7" on a merge and
+      # "<base>-PR-<N>" on a PR, so every build stays self-labelling without a separate name shape.
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -191,23 +237,45 @@ jobs:
             dist/*.elf
             dist/*.elf.sha256
 
-      # PR preview installer (signed builds only) at gh-pages PR/<N>/. Public repos only.
+      # PR preview installer (signed builds only) at gh-pages PR/<N>/.
       - name: Assemble PR preview site
-        if: github.event_name == 'pull_request' && steps.signkey.outputs.signed == 'true'
+        if: steps.mode.outputs.mode == 'pr' && steps.signkey.outputs.signed == 'true'
         run: ./scripts/build-pages.sh "${{ github.event.pull_request.number }}"
       - name: Publish PR preview to gh-pages
-        if: github.event_name == 'pull_request' && steps.signkey.outputs.signed == 'true'
+        if: steps.mode.outputs.mode == 'pr' && steps.signkey.outputs.signed == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/publish-pages-branch.sh --pr "${{ github.event.pull_request.number }}"
 
-      # Cut a release only when firmware-relevant files changed. Public repos only (creates a v* tag).
+      # ── DEV CHANNEL: every firmware-relevant merge to main ────────────────────────────────────
+      # Publishes gh-pages dev/ only — the release root and every PR preview are left standing
+      # (scripts/publish-pages-branch.sh --dev). No tag, no GitHub Release: a dev build is a
+      # position on a branch, not a version anyone was asked to run. A manual dispatch WITHOUT
+      # `release` lands here too, which is how the dev feed gets re-published on demand.
+      - name: Assemble dev-channel site
+        if: >-
+          steps.mode.outputs.mode == 'dev'
+          && (github.event_name == 'workflow_dispatch' || steps.changes.outputs.firmware == 'yes')
+        run: ./scripts/build-pages.sh --dev
+      - name: Publish dev channel to gh-pages
+        if: >-
+          steps.mode.outputs.mode == 'dev'
+          && (github.event_name == 'workflow_dispatch' || steps.changes.outputs.firmware == 'yes')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/publish-pages-branch.sh --dev
+
+      # ── RELEASE: manual only ──────────────────────────────────────────────────────────────────
+      # Creates the v* tag + the GitHub Release, then republishes the gh-pages ROOT (the release
+      # channel). Not gated on change detection, unlike the dev publish: a release is an explicit
+      # act, and "nothing firmware-relevant changed since the last one" is the maintainer's call to
+      # make, not something to discover by having the run quietly do nothing.
       - name: Create release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.changes.outputs.firmware == 'yes'
+        if: steps.mode.outputs.mode == 'release'
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: v${{ steps.version.outputs.version }}
+          tag_name: v${{ steps.stamp.outputs.disp }}
+          name: v${{ steps.stamp.outputs.disp }}
           generate_release_notes: true
           # Attach the .elf (+ checksum) alongside the bins so a user's core dump can be decoded
           # against the exact released firmware (scripts/decode-coredump.sh).
@@ -220,14 +288,14 @@ jobs:
       # "Deploy from a branch: gh-pages / (root)" (docs/README.md). The Actions-deployment path
       # (configure-pages -> upload-pages-artifact -> deploy-pages) is deliberately NOT used: it
       # deploys one atomic whole-site artifact, which cannot host the per-PR preview subpaths
-      # (PR/<N>/) that build-pages.sh + pr-preview-cleanup.yml maintain. The two mechanisms are
-      # mutually exclusive — a repo's Pages source is either a branch or Actions, so running both
-      # meant one of them was always dead or failing.
-      - name: Assemble Pages site
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+      # (PR/<N>/) or the dev/ channel that build-pages.sh + pr-preview-cleanup.yml maintain. The two
+      # mechanisms are mutually exclusive — a repo's Pages source is either a branch or Actions, so
+      # running both meant one of them was always dead or failing.
+      - name: Assemble Pages site (release channel)
+        if: steps.mode.outputs.mode == 'release'
         run: ./scripts/build-pages.sh
       - name: Publish site to gh-pages (root)
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        if: steps.mode.outputs.mode == 'release'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/publish-pages-branch.sh

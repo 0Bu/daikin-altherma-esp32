@@ -57,10 +57,20 @@ and leave pin 1 unconnected.
 ## Flash prebuilt artifacts
 
 Browser flasher + captive-portal setup: [../README.md](../README.md). The flasher is served on
-GitHub Pages (ESP Web Tools / Web Serial), rebuilt and deployed by CI on every firmware change;
-each change also publishes a
-[GitHub release](https://github.com/0Bu/daikin-altherma-esp32/releases/latest) with the same
-bins. Publishing does **not** depend on the repository being public — CI publishes the Pages
+GitHub Pages (ESP Web Tools / Web Serial). **Two feeds are published, and only one of them is cut
+by hand:**
+
+| Feed | Installer | OTA manifest | Published by |
+|------|-----------|--------------|--------------|
+| Release | `…/` | `…/manifest.json` | a **manual** workflow run (Actions → *build* → *Run workflow* → `release: true`) — the only thing that creates a `v*` tag + a [GitHub release](https://github.com/0Bu/daikin-altherma-esp32/releases/latest) |
+| Development | `…/dev/` | `…/dev/manifest.json` | every firmware-relevant push to `main`; no tag, no release |
+| PR preview | `…/PR/<N>/` | — | that PR's build |
+
+A device follows one feed at a time — gear → **ESP32** → *Update channel* (`POST /set_ota`). Dev
+builds are versioned `<next release>-dev.<n>`, a semver pre-release, so a dev board upgrades itself
+to the next release when one is cut. Going the other way (dev → the last release) means installing
+an *older* build, which the downgrade gate refuses unless the request explicitly asks for it — the
+UI does exactly that after a channel switch, and confirms it first. Publishing does **not** depend on the repository being public — CI publishes the Pages
 installer, the per-PR previews, the tags and the releases from a private repo too. See the policy
 comment atop [`.github/workflows/build.yml`](../.github/workflows/build.yml).
 
@@ -73,7 +83,8 @@ comment atop [`.github/workflows/build.yml`](../.github/workflows/build.yml).
 > **Bringing the site up the first time — the order matters.** A repo-settings change does not itself
 > run a workflow, and the Pages source cannot be pointed at a branch that does not exist yet. So:
 > (1) trigger one publish — `gh workflow run build.yml` (the `workflow_dispatch` trigger exists for
-> exactly this) or push any firmware-relevant change — which creates the `gh-pages` branch, then
+> exactly this; leave `release` unchecked to publish the dev channel, check it to cut the first
+> release) or push any firmware-relevant change — which creates the `gh-pages` branch, then
 > (2) set **Settings → Pages → Deploy from a branch → `gh-pages` / `(root)`**. Until step 2 the
 > installer URL in the top-level README 404s.
 

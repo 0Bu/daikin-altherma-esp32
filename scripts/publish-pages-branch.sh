@@ -4,14 +4,22 @@
 # and needs the bins same-origin, and per-PR subpaths (PR/<N>/) can't live in the atomic
 # whole-site Actions deploy.
 #
-# Main owns the gh-pages ROOT; each PR owns PR/<N>/. A root publish preserves the existing PR/
-# tree; a PR publish only touches its own PR/<N>/ subdir; --rm deletes one PR/<N>/. Usage:
-#   scripts/publish-pages-branch.sh              # publish _site/ as the root (main)
+# The branch is sliced by OWNER, and every mode states only its own slice: a manual RELEASE run
+# owns the ROOT, every merge to main owns dev/, each PR owns PR/<N>/. A root publish preserves the
+# existing dev/ and PR/ trees; a dev publish touches only dev/; a PR publish only its own PR/<N>/;
+# --rm deletes one PR/<N>/. Usage:
+#   scripts/publish-pages-branch.sh              # publish _site/ as the root (a release)
+#   scripts/publish-pages-branch.sh --dev        # publish _site/dev/ only (a merge to main)
 #   scripts/publish-pages-branch.sh --pr <N>     # publish _site/PR/<N>/ only
 #   scripts/publish-pages-branch.sh --rm <N>     # remove PR/<N>/ (pr-preview-cleanup)
 #
-# CONCURRENCY: gh-pages is ONE branch with three independent publishers — main's root publish,
-# every open PR's preview, and pr-preview-cleanup's removal — and they overlap routinely. Actions
+# The root's "delete everything I do not own" sweep is why dev/ has to be named there as explicitly
+# as PR/ is: a release would otherwise take the dev feed offline until the next merge republished
+# it, and every device on the dev channel would report its check as a failed fetch in the meantime.
+#
+# CONCURRENCY: gh-pages is ONE branch with several independent publishers — the release root
+# publish, every merge's dev publish, every open PR's preview, and pr-preview-cleanup's removal —
+# and they overlap routinely. Actions
 # cannot serialize them for us: a `concurrency:` group is per job, and this publish is the last
 # step of a ~5-minute firmware build, so grouping the job would serialize that whole build across
 # every PR to protect a 2-second push. The script therefore has to SURVIVE losing the race rather
@@ -30,6 +38,7 @@ case "$mode" in
           msg="pages: PR/$num preview" ;;
     --rm) [ -n "$num" ] || { echo "publish: --rm needs a number" >&2; exit 1; }
           msg="pages: remove PR/$num" ;;
+    --dev) msg="pages: publish dev channel" ;;
     root|*) msg="pages: publish root" ;;
 esac
 
@@ -93,9 +102,18 @@ apply_mutation() {
             cp -R _site/PR/"$num"/. "$work/PR/$num/" ;;
         --rm)
             rm -rf "$work/PR/$num" ;;
+        --dev)
+            rm -rf "$work/dev"; mkdir -p "$work/dev"
+            cp -R _site/dev/. "$work/dev/" ;;
         root|*)
-            find "$work" -mindepth 1 -maxdepth 1 ! -name .git ! -name PR -exec rm -rf {} +
-            cp -R _site/. "$work/" ;;
+            # Everything at the top level that the root does NOT own is named here. dev/ and PR/
+            # belong to other publishers; sweeping them away would take the dev feed and every open
+            # preview offline until their next build happened to run.
+            find "$work" -mindepth 1 -maxdepth 1 ! -name .git ! -name PR ! -name dev -exec rm -rf {} +
+            # ...and the root's own copy must not drag them back in either: _site/ still holds the
+            # dev/ subtree when one job builds both (a release run assembles only the root, but a
+            # future caller reusing _site/ would). Copy the root files only.
+            find _site -mindepth 1 -maxdepth 1 ! -name PR ! -name dev -exec cp -R {} "$work/" \; ;;
     esac
 }
 

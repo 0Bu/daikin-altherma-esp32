@@ -36,6 +36,48 @@ inline long long version_segment(const char*& p, const char* end) {
     return v;
 }
 
+// Compare two dot-separated PRE-RELEASE identifier lists (semver §11.4), each still carrying its
+// leading '-'/'+' marker. Load-bearing since the dev channel exists: CI stamps every merge to main
+// as "<next release>-dev.<n>" (scripts/next-version.sh), so a device on the dev feed asks this
+// function whether dev.12 is newer than dev.9 — and a plain strcmp answers NO (it compares '1' to
+// '9'), which would freeze a dev board at the ninth build of a series forever. Numeric identifiers
+// therefore compare NUMERICALLY; a numeric identifier ranks below an alphanumeric one; a prefix
+// ranks below the longer list ("dev" < "dev.1"). Saturates like version_segment for the same reason.
+inline int prerelease_compare(const char* a, const char* b) {
+    if (*a != *b) return *a < *b ? -1 : 1;   // '-' vs '+': different kinds of suffix, ordered by byte
+    ++a; ++b;                                 // skip the marker both sides share
+    while (true) {
+        if (*a == 0 || *b == 0) {
+            if (*a == 0 && *b == 0) return 0;
+            return *a == 0 ? -1 : 1;          // fewer identifiers -> lower precedence
+        }
+        const char* ae = a; while (*ae && *ae != '.') ++ae;
+        const char* be = b; while (*be && *be != '.') ++be;
+        auto all_digits = [](const char* p, const char* e) {
+            if (p == e) return false;
+            for (; p < e; ++p) if (*p < '0' || *p > '9') return false;
+            return true;
+        };
+        const bool an = all_digits(a, ae), bn = all_digits(b, be);
+        if (an && bn) {
+            long long av = 0, bv = 0;
+            for (const char* p = a; p < ae; ++p) if (av < 100000000LL) av = av * 10 + (*p - '0');
+            for (const char* p = b; p < be; ++p) if (bv < 100000000LL) bv = bv * 10 + (*p - '0');
+            if (av != bv) return av < bv ? -1 : 1;
+        } else if (an != bn) {
+            return an ? -1 : 1;               // numeric identifiers rank below alphanumeric ones
+        } else {
+            const size_t alen = static_cast<size_t>(ae - a), blen = static_cast<size_t>(be - b);
+            const size_t n    = alen < blen ? alen : blen;
+            const int    c    = n ? std::memcmp(a, b, n) : 0;
+            if (c != 0)         return c < 0 ? -1 : 1;
+            if (alen != blen)   return alen < blen ? -1 : 1;
+        }
+        a = (*ae == '.') ? ae + 1 : ae;
+        b = (*be == '.') ? be + 1 : be;
+    }
+}
+
 // Split a version into its numeric core and its pre-release/build suffix, skipping one leading
 // 'v'/'V' (a git tag pasted into a manifest reads as "v1.0.1"; without this it would parse as a
 // core of 0 and compare BELOW every real version — a silent refusal to ever update).
@@ -82,16 +124,35 @@ inline int version_compare(const std::string& a, const std::string& b) {
     const bool a_pre = *as != 0, b_pre = *bs != 0;
     if (a_pre != b_pre) return a_pre ? -1 : 1;   // a release outranks its own pre-releases
     if (!a_pre) return 0;
-    const int c = std::strcmp(as, bs);
-    return c < 0 ? -1 : (c > 0 ? 1 : 0);
+    return detail::prerelease_compare(as, bs);
 }
 
 // THE GATE: may we install `candidate` while running `running`?
-// Fails CLOSED — an unparseable version on either side refuses the update rather than assuming an
-// ordering. "We could not tell" and "it is newer" must never be the same answer here.
-inline bool ota_is_upgrade(const std::string& running, const std::string& candidate) {
+//
+// `allow_downgrade` is the CHANNEL SWITCH, and nothing else. A device that has been following the
+// dev feed runs a version ahead of the last release, so "install the latest release" is a
+// DOWNGRADE by version and the automatic gate below refuses it — leaving the release channel
+// unreachable from a dev board, i.e. a one-way door. The flag opens that door, but only ever on a
+// request that explicitly asked for it (POST /ota/update?downgrade=1, from a trusted-LAN client
+// that just picked a channel in the UI). It is never inferred from the manifest, never persisted,
+// and never the default — so the property that matters is intact: a hostile or stale manifest host
+// still cannot walk a fleet backwards on its own say-so. It also does not weaken anything else:
+// the RSA-3072 Secure Boot v2 signature check still has to pass on the image that arrives.
+//
+// Fails CLOSED — an unparseable version on either side refuses the install rather than assuming an
+// ordering. "We could not tell" and "it is newer" must never be the same answer here. An EQUAL
+// version is refused in both modes: re-installing what is already running is not a channel switch,
+// it is a reboot loop.
+inline bool ota_install_allowed(const std::string& running, const std::string& candidate,
+                                bool allow_downgrade) {
     if (!version_valid(running) || !version_valid(candidate)) return false;
-    return version_compare(candidate, running) > 0;
+    const int c = version_compare(candidate, running);
+    return allow_downgrade ? c != 0 : c > 0;
+}
+
+// The automatic gate: strictly newer only.
+inline bool ota_is_upgrade(const std::string& running, const std::string& candidate) {
+    return ota_install_allowed(running, candidate, /*allow_downgrade=*/false);
 }
 
 }  // namespace daik
