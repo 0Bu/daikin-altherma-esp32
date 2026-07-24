@@ -405,7 +405,7 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 wifi_rollback, health_gate, version_cmp, ota_manifest, ws_policy, ws_tx_gate,
                 http_body, http_surface, query_flag, mcp_jsonrpc, timestamp, uart_plan, detect_backoff,
                 hexdump, led_pattern, button,
-                lwt_select).
+                lwt_select, ou_stale).
                 led_pattern.hpp = the status indicator's state -> pattern rule + the button
                 override's PRIORITY, shared by both back-ends (GPIO LED / WS2812) so they cannot
                 drift apart, and so "which signal wins" is asserted rather than buried in a blink
@@ -430,6 +430,27 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 pattern is the failure mode to watch for: it re-opens exactly the substitution this
                 header exists to prevent (it matched the bizone kit's MIXED leaving-water row), and
                 being a copy, the CI gate on this rule no longer covers it.
+                ou_stale.hpp = which readings stop being CURRENT while the compressor is off. The
+                outdoor unit refreshes its OWN pages (0x20 sensors, 0x21 inverter) only while it
+                RUNS; stopped, it answers with the LAST RUN's values. Measured on a live unit:
+                outdoor air read exactly 19.0 °C for five hours, stepped 19.0→23→24→25.5 at the
+                instant the compressor started, then sat at 25.5 for two hours, while the HYDRONIC
+                pages moved continuously the whole time (leaving water 53.4→49.2 °C over one hour) —
+                so it is the unit going quiet, not the poll engine stalling. reading_plausible()
+                cannot see this and neither can the domain audit: 19.0 °C IS a plausible outdoor
+                temperature, the #35-#39 shape with no numeric tell. Only the PAGE plus the
+                compressor state can tell, so DESIGN.md's dead-bus rule ("an idle plant with no
+                readings, not a stale one") is applied to one sleeping UNIT instead of one silent
+                BUS: www/app.js's `d.ouHeldOver` blanks the outdoor pills to "—". Deliberately NOT
+                page 0x10 — it carries Defrost Operation, which FEEDS the run-state decision, and no
+                measurement could prove whether it freezes (its Target Cond. Temp. reads 0.0 even
+                mid-run, a useless witness); blanking a reading costs information, suppressing a
+                state input would corrupt the state machine. UNKNOWN rps (no such row in the
+                profile) reads as CURRENT, never held-over — absence of evidence. Like lwt_select
+                there is no firmware caller: it exists so the CI logic-test gates the browser rule
+                against the whole catalog, and the load-bearing half is the SECOND assertion — every
+                profile keeps "INV frequency (rps)" on a LIVE page (0x30 in all 27 that have it), which
+                is what makes "Standby — not running" trustworthy while the pills around it are not
                 value_def.hpp = the ValueDef row type the generated def/ profile tables are written
                 in ({reg, offset, conv, size, type, label} — registry id, byte offset in the reply
                 payload, converter id for convert.hpp, byte count, HA unit code, English label): the

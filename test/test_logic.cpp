@@ -32,6 +32,7 @@
 #include "logic/mqtt_group.hpp"
 #include "logic/link_watch.hpp"
 #include "logic/lwt_select.hpp"
+#include "logic/ou_stale.hpp"
 #include "logic/mqtt_uri.hpp"
 #include "logic/modbus.hpp"
 #include "logic/query_flag.hpp"
@@ -2944,6 +2945,62 @@ static void test_lwt_select() {
     }
 }
 
+// ── logic/ou_stale.hpp — readings the outdoor unit stops refreshing while the compressor is off ──
+// The unit answers its own pages with the LAST RUN's values when it is stopped (see the header for
+// the measurement). Two halves are gated here, and the second is the important one: the readings
+// that DECIDE the run state must live on pages that stay live, or "Standby — not running" would be
+// derived from the same frozen bytes it is contradicting.
+static void test_ou_stale() {
+    using logic::ou_page_holds_over;
+    using logic::ou_reading_held_over;
+
+    // The two outdoor-unit pages, and only those.
+    CHECK(ou_page_holds_over(0x20));
+    CHECK(ou_page_holds_over(0x21));
+    CHECK(!ou_page_holds_over(0x10));      // carries Defrost Operation — a state input, never silenced
+    CHECK(!ou_page_holds_over(0x30));      // INV frequency (rps) — the compressor witness
+    CHECK(!ou_page_holds_over(0x60));      // indoor/hydronic
+    CHECK(!ou_page_holds_over(0x61));
+    CHECK(!ou_page_holds_over(0x62));
+
+    // UNKNOWN compressor state is not "stopped": a profile with no rps row must not have its outdoor
+    // readings blanked on a guess. Only a known-stopped compressor is evidence of a held-over page.
+    CHECK(ou_reading_held_over(0x20, /*known=*/true, /*running=*/false));
+    CHECK(!ou_reading_held_over(0x20, /*known=*/true, /*running=*/true));
+    CHECK(!ou_reading_held_over(0x20, /*known=*/false, /*running=*/false));   // unknown -> current
+    CHECK(!ou_reading_held_over(0x61, /*known=*/true, /*running=*/false));    // hydronic stays live
+
+    // --- catalog conformance -------------------------------------------------------------------
+    // Every detectable profile: the readings the UI blanks must sit on a held-over page, and the
+    // compressor witness must NOT. A future generated profile that moves "INV frequency (rps)" onto
+    // 0x20/0x21 would make the run state stale-derived and must fail loudly here.
+    int rps_rows = 0, out_rows = 0, disch_rows = 0, checked = 0;
+    for (const auto& p : def::profiles) {
+        if (!def::is_detection_model(p.id)) continue;
+        for (size_t i = 0; i < p.count; i++) {
+            const char* l = p.values[i].label;
+            const unsigned reg = p.values[i].reg;
+            if (logic::lwt_ci_contains(l, "inv frequency")) {
+                CHECK(!ou_page_holds_over(reg));   // the run-state witness must stay live
+                rps_rows++;
+            }
+            if (logic::lwt_ci_contains(l, "outdoor air temp")) {
+                CHECK(ou_page_holds_over(reg));    // the pill the UI blanks
+                out_rows++;
+            }
+            if (logic::lwt_ci_contains(l, "discharge pipe temp")) {
+                CHECK(ou_page_holds_over(reg));
+                disch_rows++;
+            }
+        }
+        checked++;
+    }
+    CHECK(checked >= 39);        // the current detectable Altherma catalog (mirrors test_lwt_select)
+    CHECK(rps_rows >= 20);       // the witness exists across the catalog, not on one profile
+    CHECK(out_rows >= 20);
+    CHECK(disch_rows >= 20);
+}
+
 // ── ValueDef::no_publish — the detect-only row flag ───────────────────────────────────────────
 // The 0x64 hybrid/boiler page is absent-feature on a non-hybrid monobloc/hydrobox: the unit ANSWERS
 // the page, but every value on it is a placeholder (2nd DHW -40.4 °C, "Boiler only", Mixed water
@@ -2998,6 +3055,7 @@ int main() {
     test_mcp_jsonrpc();
     test_http_surface();
     test_lwt_select();
+    test_ou_stale();
     test_no_publish();
     test_config_model();
     test_board_pins();

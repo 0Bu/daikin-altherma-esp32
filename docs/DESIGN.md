@@ -316,6 +316,17 @@ Body, ordered:
    why, so instead every value pill blanks to "—", every animation stops, the 3-way-valve label falls
    back to a bare "3WV" (no branch claimed) and the thermostat pill disappears — an idle plant with no
    readings, not a stale one — nothing on this screen is hidden by a dead bus.
+   **A sleeping outdoor unit is the same rule at one-page scale.** The outdoor unit refreshes its own
+   register pages only while it *runs*; stopped, it keeps answering with the last run's values
+   (`logic/ou_stale.hpp`, host-tested against the whole catalog). So the outdoor-air and discharge
+   pills blank to "—" while the compressor is stopped, rather than repeat a reading nobody is still
+   taking — measured on a live unit, outdoor air held exactly 19.0 °C for five hours and stepped only
+   when the compressor started. The high-side badge already survives this (it falls back to the
+   always-live refrigerant-pressure sensor, §5.5); ΔT blanks too when the pump is off and flow reads
+   zero, because a difference between two *stagnant* sensors is not a working point. What the pill
+   cannot say, the inspector does: the outdoor unit's idle explanation names the reason. The run state
+   itself is never affected — the compressor witness (`INV frequency`) sits on a page that stays live
+   in every profile, which is what makes "Standby — not running" trustworthy beside blanked pills.
 2. **System schematic** — the body of that card, drawing the hydraulic + refrigerant circuit
    as an inline SVG: outdoor unit (fan + compressor with rps), refrigerant lines (gas + liquid — the
    lower one is the **liquid** line, not a suction line: the expansion valve sits in the outdoor unit

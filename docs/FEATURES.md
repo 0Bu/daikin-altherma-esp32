@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1029 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1047 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -663,11 +663,20 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   and never a setpoint / mixed-zone / post-BUH (R2T) row — a setpoint substituted for a measurement
   makes all three plausibly wrong, issue #121, the #35–#39 failure shape; keyed on the (R1T) tag so
   the alias label forms resolve too, and gated catalog-wide so every detectable profile selects a
-  real measurement), and the **raw-page hex rendering** (`hexdump.hpp` — the wire bytes of pages
+  real measurement), the **held-over outdoor reading rule** (`ou_stale.hpp` — the other host-testable
+  twin of a browser rule: the outdoor unit refreshes its *own* register pages (`0x20` sensors, `0x21`
+  inverter) only while it runs, and stopped it answers with the last run's values, so the schematic
+  blanks those pills instead of drawing a reading nobody is still taking — measured, outdoor air held
+  exactly 19.0 °C for five hours and stepped only when the compressor started. Page `0x10` is
+  deliberately excluded: it carries `Defrost Operation`, a run-state input, and blanking a reading
+  costs information where suppressing a state input would corrupt the state machine. Gated
+  catalog-wide, and the load-bearing half is the second assertion — every profile keeps
+  `INV frequency (rps)` on a page that stays live, which is what makes "Standby — not running"
+  trustworthy beside blanked pills), and the **raw-page hex rendering** (`hexdump.hpp` — the wire bytes of pages
   `0x00`/`0x10`/`0x20`/`0xA0`/`0xA1` on `/diag`; truncation stops after the last *complete* byte, since a trailing
   nibble would read as a different value, and degenerate inputs still terminate the buffer the caller
   hands to a `diag_printf` `%s`).
-  **922 `CHECK`s** in
+  **1047 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
