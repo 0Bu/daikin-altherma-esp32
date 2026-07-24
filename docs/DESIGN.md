@@ -235,7 +235,12 @@ the **product name**). There is **no settings gear** — the app has no other sc
   the number it is about (§5.4). Both stay `--muted`: an available update is announced by the
   confirm dialog, not by colouring the header, and the version picks up the brand tint only on
   hover/focus — the same affordance the tappable value rows use. Only the IP may ellipsise on a
-  narrow screen; the version and the OTA readout are short and must stay whole.
+  narrow screen; the version and the OTA readout are short and must stay whole. Both are `--font-mono`
+  with tabular figures (§3): they are one identity string reading `<ip> · <version>`, and a split
+  face makes the line look like two unrelated facts. Stated because it is easy to break invisibly —
+  the version is a `<button>`, and resetting its UA styling with the `font:` SHORTHAND silently
+  discards font-family *and* font-variant-numeric, dropping it back to the sans face with the
+  `mono num` classes still sitting in the markup, apparently applied.
 
 Body, ordered:
 
