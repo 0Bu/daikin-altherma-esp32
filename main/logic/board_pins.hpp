@@ -43,22 +43,29 @@ struct BoardPins {
 // against the real lists host-side, so it can't silently drift from the arrays below.
 inline constexpr int BOARD_PINS_MAX = 28;
 
-// The GPIOs THIS FIRMWARE has claimed for itself, and which the X10A link therefore may not reuse:
-// the status indicator (a pin status_led.cpp drives as an output, or clocks WS2812 bits onto) and
-// the recovery button (a pin button.cpp holds as an input with a pull). Both are runtime-configured
-// (config_model.hpp, NVS) rather than compile-time, so the "reserved" input can no longer be a
-// single Kconfig number.
+// Up to two GPIOs that are already SPOKEN FOR, and which the list being built therefore may not
+// offer. Deliberately generic (pin_a/pin_b, not led/button), because the reservation runs in BOTH
+// directions and naming the fields after one direction made the other read as a lie:
+//
+//   X10A picker  reserves the status indicator + the recovery button — pins status_led.cpp drives
+//                as an output (or clocks WS2812 bits onto) and button.cpp holds as a pulled input.
+//   LED/button   reserves the X10A link's rx/tx — pins hp_comm.cpp routes a UART onto.
+//   pickers
+//
+// Which pair is which is stated at the call site by the two factories in config_model.hpp
+// (config_reserved_pins / config_link_pins), never inferred from a field name here. All four pins
+// are runtime-configured (NVS), so neither side can be a compile-time constant any more.
 //
 // The int constructor is deliberately NOT explicit: it keeps `board_pin_offerable(p, octal, 21)`
 // — the single-reservation call shape from before the button existed — compiling and meaning
 // exactly what it did, so adding a second reservation didn't require touching every call site and
 // test at once. -1 in either field means "nothing reserved there".
 struct ReservedPins {
-    int led    = -1;
-    int button = -1;
+    int pin_a = -1;
+    int pin_b = -1;
     constexpr ReservedPins() = default;
-    constexpr ReservedPins(int led_pin, int button_pin = -1) : led(led_pin), button(button_pin) {}
-    constexpr bool claims(int pin) const { return pin >= 0 && (pin == led || pin == button); }
+    constexpr ReservedPins(int a, int b = -1) : pin_a(a), pin_b(b) {}
+    constexpr bool claims(int pin) const { return pin >= 0 && (pin == pin_a || pin == pin_b); }
 };
 
 // octal_spi: true if THIS build's flash and/or PSRAM run Octal I/O (GPIO33-37 then carry
@@ -124,6 +131,11 @@ inline bool board_pin_offerable(int pin, bool octal_spi, ReservedPins rsv = {}) 
 // button). Everything the chip HARD-reserves is still excluded: SPI flash, octal flash/PSRAM when
 // this build uses it, the strapping pins, and GPIO19/20 which ARE the USB-Serial/JTAG console this
 // firmware logs over.
+//
+// board_pin_local_io() is the CHIP-level membership test and deliberately takes NO reservation: it
+// answers "may a local peripheral sit on this pad at all", which is the question board_hw_valid()
+// asks before it goes on to check the collisions itself. The reservation belongs to the offered
+// LIST (board_pins_local, below), not to the validity rule.
 inline constexpr int BOARD_LOCAL_PINS_MAX = BOARD_PINS_MAX + 4;
 
 inline bool board_pin_local_io(int pin, bool octal_spi) {
@@ -133,7 +145,14 @@ inline bool board_pin_local_io(int pin, bool octal_spi) {
 
 // The local-I/O set as an ascending list, for the UI's LED/button pin pickers. Same caller-owned
 // buffer rule as board_pins_offerable(); size `out` with BOARD_LOCAL_PINS_MAX.
-inline int board_pins_local(int* out, int cap, bool octal_spi) {
+//
+// `rsv` is the X10A link (config_link_pins) — the MIRROR of what board_pins_offerable() does with
+// the indicator + button, and for the identical reason: a pad already carrying the X10A UART cannot
+// also carry the LED or the button, board_hw_valid() refuses exactly that pair, and offering it
+// anyway is a pick that cannot work. Leaving this unfiltered was the one place the reservation ran
+// in a single direction only — the X10A dropdown withheld the indicator's pin, while the indicator
+// dropdown still listed GPIO44/43 and let the user discover the conflict from a 400.
+inline int board_pins_local(int* out, int cap, bool octal_spi, ReservedPins rsv = {}) {
     BoardPins bp = board_pins(nullptr, octal_spi);
     static const int jtag[] = {39, 40, 41, 42};
     // Straight merge of two ascending, DISJOINT lists (board_pins() never contains 39-42 — the
@@ -142,7 +161,9 @@ inline int board_pins_local(int* out, int cap, bool octal_spi) {
     int n = 0, i = 0, j = 0;
     while (n < cap && (i < bp.count || j < 4)) {
         const bool take_base = (j >= 4) || (i < bp.count && bp.pins[i] < jtag[j]);
-        out[n++] = take_base ? bp.pins[i++] : jtag[j++];
+        const int  pin       = take_base ? bp.pins[i++] : jtag[j++];
+        if (rsv.claims(pin)) continue;
+        out[n++] = pin;
     }
     return n;
 }

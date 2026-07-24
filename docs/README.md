@@ -240,8 +240,10 @@ GET  /status                       # { version, platform, uptime_s, app_elf_sha2
                                    #   board:{led_gpio,led_type,led_inverted,btn_gpio,
                                    #        btn_active_low,pins_local:[..],presets:[..]},
                                    #     (pins_local = the LED/button-eligible GPIOs — WIDER than
-                                   #      pins_avail: the dedicated-JTAG pads are legal for an
-                                   #      onboard part but withheld from the X10A picker;
+                                   #      pins_avail by the dedicated-JTAG pads, which are legal for
+                                   #      an onboard part but withheld from the X10A picker, and
+                                   #      NARROWER by the link's own rx/tx, which the device would
+                                   #      refuse for either local pin;
                                    #      presets = ready-made {name,led_*,btn_*} settings per
                                    #      documented board, the Hardware modal's "Board" pick)
                                    #   wifi:{ssid,rssi,ip,connected,bssid,mac,std,rolled_back},

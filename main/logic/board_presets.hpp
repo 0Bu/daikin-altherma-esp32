@@ -62,24 +62,32 @@ inline const BoardPreset* board_presets_all(int& count) {
     return presets;
 }
 
-// The presets THIS BUILD can actually apply. A preset whose LED or button pin this build reserves is
-// withheld rather than offered and then refused at POST time — the same rule board_pins_offerable()
-// applies to the X10A dropdown, for the same reason: a pick that cannot work is not a pick. The
-// AtomS3 Lite is precisely that case, and the axis is the firmware's own build config rather than
-// the board — GPIO35 is free on this project's Quad-flash/no-PSRAM build and carries SPIIO4 on an
-// Octal one.
+// The presets THIS BUILD and THIS CONFIG can actually apply. A preset whose LED or button pin is
+// unusable here is withheld rather than offered and then refused at POST time — the same rule
+// board_pins_offerable() applies to the X10A dropdown and board_pins_local() applies to the two
+// local pickers, for the same reason: a pick that cannot work is not a pick. Two independent axes
+// make a preset unusable:
+//
+//   `octal_spi`  the firmware's own build config. GPIO35 (the AtomS3 Lite's WS2812) is free on this
+//                project's Quad-flash/no-PSRAM build and carries SPIIO4 on an Octal one.
+//   `link`       the X10A link's live rx/tx (config_link_pins). board_hw_valid() refuses a local pin
+//                that equals either, so a preset colliding with the user's current wiring is a
+//                dropdown entry whose only outcome is a 400. Runtime, hence a parameter: the same
+//                build serves a user who has moved the link onto the pad a preset wants.
 //
 // Writes borrowed pointers into a CALLER-owned buffer (size it with BOARD_PRESETS_MAX) and returns
 // the count, like board_pins_offerable(): build_status_json_string() runs on the httpd task AND on
 // the poll task's WS broadcaster, so a filtered shared static would be a data race between them. The
 // pointed-to table is immutable and has static storage duration, so the pointers stay valid.
-inline int board_presets_offerable(const BoardPreset** out, int cap, bool octal_spi) {
+inline int board_presets_offerable(const BoardPreset** out, int cap, bool octal_spi,
+                                   ReservedPins link = {}) {
     int all_n = 0;
     const BoardPreset* all = board_presets_all(all_n);
     int n = 0;
     for (int i = 0; i < all_n && n < cap; i++) {
-        if (all[i].led_gpio >= 0 && !board_pin_local_io(all[i].led_gpio, octal_spi)) continue;
-        if (all[i].btn_gpio >= 0 && !board_pin_local_io(all[i].btn_gpio, octal_spi)) continue;
+        const int led = all[i].led_gpio, btn = all[i].btn_gpio;
+        if (led >= 0 && (!board_pin_local_io(led, octal_spi) || link.claims(led))) continue;
+        if (btn >= 0 && (!board_pin_local_io(btn, octal_spi) || link.claims(btn))) continue;
         out[n++] = &all[i];
     }
     return n;

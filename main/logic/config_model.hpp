@@ -152,6 +152,14 @@ inline bool link_pins_safe(int rx, int tx, bool octal_spi, ReservedPins reserved
 // load-path re-check — cannot disagree about which pins are spoken for.
 inline ReservedPins config_reserved_pins(const Config& c) { return ReservedPins{c.led_gpio, c.btn_gpio}; }
 
+// The MIRROR of the above: the GPIOs the X10A link occupies, for the LED/button pin pickers
+// (/status.board.pins_local via board_pins_local). The reservation has to run in both directions or
+// it protects only one of them — board_hw_valid() below rejects an indicator or button pin that
+// equals rx/tx, so a picker that still offers those two is offering a pick the device will refuse.
+// Two named factories rather than one, because which pair is reserved is the caller's statement of
+// intent; board_pins.hpp's ReservedPins is deliberately anonymous about it (pin_a/pin_b).
+inline ReservedPins config_link_pins(const Config& c) { return ReservedPins{c.rx_pin, c.tx_pin}; }
+
 // Validate the board-local hardware half of a config (POST /set_board, and the load path). Separate
 // from validate() below because it is checked on its own route and must name its own field; the two
 // share the collision rules so a pin can never be claimed twice.

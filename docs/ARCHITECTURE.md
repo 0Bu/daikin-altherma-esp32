@@ -252,7 +252,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   `board_pin_offerable()` once per pin so it can name the offender (`"rx_pin is a reserved GPIO"`),
   while `config_load()` takes the combined `link_pins_safe()`, which folds the pair rule and both
   pin tests into one bool.
-  A **second, wider** set — `board_pin_local_io()` / `board_pins_local()`, surfaced as
+  A **second** set — `board_pin_local_io()` / `board_pins_local()`, surfaced as
   `/status.board.pins_local` — is what the status indicator and the recovery button may use. It adds
   back exactly the four dedicated-JTAG pads (GPIO39-42). Those are withheld from the X10A list as a
   *preference* ("don't spend a debug probe on a serial link when 20 other pins would do"), not
@@ -260,6 +260,17 @@ host-testable core is unusually large and valuable, because the risky parts are 
   of them: the M5Stack AtomS3 Lite's only button is on GPIO41 (MTDI). Everything the chip hard-
   reserves (flash, octal flash/PSRAM, strapping, and GPIO19/20 which *are* the USB-Serial/JTAG
   console this firmware logs over) is still excluded from both sets.
+
+  The **reservation runs in both directions**, and each list names its own. `board_pins_offerable()`
+  takes `config_reserved_pins()` — the indicator + button, withheld from the X10A picker.
+  `board_pins_local()` takes `config_link_pins()` — the live `rx`/`tx`, withheld from the LED and
+  button pickers. It has to: `board_hw_valid()` rejects a local pin that equals either link pin, so
+  a picker still listing GPIO44/43 was offering a choice whose only outcome is
+  `400 "led_gpio is in use by the X10A link"`. `ReservedPins` is therefore deliberately anonymous
+  about which pair it holds (`pin_a`/`pin_b`); the two factories in `logic/config_model.hpp` are
+  where the direction is stated. The same second axis applies to `board_presets_offerable()`: a
+  preset colliding with where the link currently sits is withheld, exactly as one colliding with an
+  Octal build is.
 - `logic/board_presets.hpp` — the same per-board facts made *applicable*. One published image serves
   every board, so the indicator and button are runtime settings seeded from Kconfig — and that seed
   is the XIAO's plain LED on GPIO21. On an AtomS3 Lite, whose only light is a WS2812 on GPIO35, the

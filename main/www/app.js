@@ -95,6 +95,11 @@ const I18N = {
     "schem.heating": "HEATING", "schem.pump": "PUMP", "schem.return": "return", "schem.room": "Room",
     "kpi.target": "target",
     "schem.est_src": (s) => "estimated · " + s, "schem.no_ct": "no current sensor",
+    // A THIRD state, distinct from "no current sensor": the sensor exists, but it is the outdoor
+    // unit's inverter current on a page that stops refreshing while the compressor is off (see
+    // d.pel / logic/ou_stale.hpp). Saying "no current sensor" there would be a second wrong claim
+    // standing in for the first one we just suppressed.
+    "schem.pel_held": "compressor off · no live reading",
     "wifi.title": "WiFi configuration", "wifi.ssid": "WiFi network (SSID)", "wifi.pass": "WiFi password",
     "wifi.err_ssid": "SSID must be 32 characters or less",
     "wifi.err_pass": "Password must be empty (open network) or between 8 and 63 characters",
@@ -193,6 +198,7 @@ const I18N = {
     "schem.heating": "HEIZUNG", "schem.pump": "PUMPE", "schem.return": "Rücklauf", "schem.room": "Raum",
     "kpi.target": "Ziel",
     "schem.est_src": (s) => "gesch. · " + s, "schem.no_ct": "kein Stromsensor",
+    "schem.pel_held": "Verdichter aus · kein aktueller Messwert",
     "wifi.title": "WLAN-Konfiguration", "wifi.ssid": "WLAN-Netzwerk (SSID)", "wifi.pass": "WLAN-Passwort",
     "wifi.err_ssid": "SSID darf höchstens 32 Zeichen haben",
     "wifi.err_pass": "Passwort muss leer (offenes Netz) oder 8–63 Zeichen lang sein",
@@ -1317,8 +1323,21 @@ function liveData() {
   // genuinely negative. Clamping that to 0 published a measured-looking "0.0 kW" while ~5 kW flowed
   // the other way — the same shape as the #37 sentinel-as-reading bug. Show what is actually there.
   d.pth = d.flow != null && d.dt != null ? d.flow / 60 * 4.186 * d.dt : null;
-  d.pel = cts.length && ct > 0 ? ct * 230 / 1000 : inv != null ? inv * 230 / 1000 : null;
+  // The two electrical sources fall on OPPOSITE sides of the held-over rule, so the fallback has to
+  // be gated rather than the pill blanked: the CT clamps sit on the hydronic page 0x63 and keep
+  // measuring (a non-zero reading at rest is real standby draw, worth showing), while "INV primary
+  // current" is a 0x21 outdoor-unit row that freezes with the rest of that page — every profile in
+  // the catalog carries it, only about half carry CT clamps, and an idle plant reads ct == 0, so the
+  // ungated fallback fired on the majority of installs almost all of the time. It drew last run's
+  // amps as a live kW figure right beside the "not running" headline: plausible, well-formed, false
+  // — the #35-#39 shape, and the same reason d.circP already gates. Asserted against the whole
+  // catalog by logic/ou_stale.hpp's test (which page each of these two rows lives on).
+  const invLive = !d.ouHeldOver && inv != null;
+  d.pel = cts.length && ct > 0 ? ct * 230 / 1000 : invLive ? inv * 230 / 1000 : null;
   d.pelSrc = cts.length && ct > 0 ? "CT" : "INV";
+  // Why the pill is blank, when it is: the INV source EXISTS but is frozen, which is a different
+  // statement from "this profile has no current sensor" (the sub-label's other empty case).
+  d.pelHeld = d.pel == null && d.ouHeldOver && inv != null;
   const running = (d.rps ?? 0) > 5 && (d.dt ?? 0) > 0.5;
   d.cop = running && d.pth != null && d.pel != null && d.pel > 0.2 ? d.pth / d.pel : null;
   return d;
@@ -1434,7 +1453,8 @@ function renderLive() {
   setTxt("svPel", fmt1(d.pel));
   // The source is part of the reading, not trivia: CT clamps measure the whole unit, the inverter
   // current only the compressor — so an INV-based estimate misses the backup heater entirely.
-  setTxt("svPelSrc", d.pel != null ? t("schem.est_src", d.pelSrc) : t("schem.no_ct"));
+  setTxt("svPelSrc", d.pel != null ? t("schem.est_src", d.pelSrc)
+                   : d.pelHeld ? t("schem.pel_held") : t("schem.no_ct"));
 
   renderInspect();     // keep an open explainer's reading/state sentence current
 }
@@ -1615,7 +1635,15 @@ const INSPECT = {
       de: "Was das Gerät aus dem Netz zieht, und der Nenner des COP. Ebenfalls eine SCHÄTZUNG: gemessener Strom × angenommene 230 V, der Leistungsfaktor bleibt also unberücksichtigt. Welcher Strom, ist entscheidend — Stromwandler (CT) erfassen das ganze Gerät inklusive Zusatzheizer, der Inverterstrom nur den Verdichter; ein INV-Wert unterschätzt den Verbrauch also, sobald der Zusatzheizer heizt (und der gezeigte COP ist dann zu schön).",
     },
     head: (d) => (d.pel == null ? "—" : "≈ " + fmt1(d.pel) + " kW"),
-    now: (d) => d.pel == null
+    // Three cases, not two: the profile has no current row at all, or it has one but it is the
+    // inverter current on a page the stopped outdoor unit is no longer refreshing (d.pelHeld — see
+    // liveData / logic/ou_stale.hpp). Collapsing the second into "no current reading on this
+    // profile" would state something false about the hardware, which is the same mistake as
+    // drawing the frozen figure in the first place.
+    now: (d) => d.pelHeld
+      ? { en: "The compressor is off, so the inverter current this profile reads is left over from the last run rather than measured now — no input power and no COP can be stated.",
+          de: "Der Verdichter steht, daher stammt der Inverterstrom dieses Profils vom letzten Lauf und ist kein aktueller Messwert — Leistungsaufnahme und COP lassen sich nicht angeben." }
+      : d.pel == null
       ? { en: "No current reading on this profile, so no COP can be derived either.",
           de: "Dieses Profil liefert keinen Strommesswert, daher lässt sich auch kein COP ableiten." }
       : { en: `From ${d.pelSrc === "CT" ? "the CT clamps (whole unit)" : "the inverter current (compressor only)"}.`,
@@ -1915,7 +1943,14 @@ function boardPinOptions(sel, cur, withNone) {
   const list = (cur != null && cur >= 0 && !pins.includes(cur)) ? [cur, ...pins].sort((a, b) => a - b) : pins;
   sel.innerHTML = (withNone ? `<option value="-1">${esc(t("board.none"))}</option>` : "") +
     list.map((p) => `<option value="${p}">${p}</option>`).join("");
-  sel.value = String(cur != null && cur >= 0 ? cur : -1);
+  // Without a "None" option there is no element with value "-1", so assigning it leaves the select
+  // with selectedIndex -1 and value "" — and the submit handler's `+value` turns "" into 0, posting
+  // led_gpio: 0. GPIO0 is a strapping pin, so the device answers "led_gpio is a reserved GPIO":
+  // an error naming a pin the user never picked. Reachable by saving the indicator as "None" and
+  // then switching the type back to LED. Fall back to the first offered pin instead, which is a
+  // real, valid pick the user can see and change.
+  const want = cur != null && cur >= 0 ? cur : withNone ? -1 : (list.length ? list[0] : -1);
+  sel.value = String(want);
 }
 // "None" for the LED is expressed as led_gpio = -1, but the TYPE select is what the user picks from
 // (None / plain / WS2812) — the pin row and the polarity checkbox only make sense once a type is
@@ -2617,13 +2652,17 @@ function wire() {
   $("boardForm").addEventListener("submit", (e) => {
     e.preventDefault();
     const type = +$("bdLedType").value;
+    // Belt-and-braces beside boardPinOptions' fallback: an empty select (a device that offered no
+    // local pins at all) must read as "no indicator", never as GPIO0 — `+""` is 0, and 0 is a real
+    // pin number the request path then has to reject. -1 is the honest answer for "nothing to pick".
+    const pinOf = (id) => { const v = parseInt($(id).value, 10); return Number.isFinite(v) ? v : -1; };
     saveReboot("/set_board", {
       // Type "None" is the wire's led_gpio = -1; the pin select keeps its last value so re-enabling
       // the indicator doesn't make the user find their pin again.
-      led_gpio: type < 0 ? -1 : +$("bdLedPin").value,
+      led_gpio: type < 0 ? -1 : pinOf("bdLedPin"),
       led_type: type < 0 ? 0 : type,
       led_inverted: $("bdLedInv").checked,
-      btn_gpio: +$("bdBtnPin").value,
+      btn_gpio: pinOf("bdBtnPin"),
       btn_active_low: $("bdBtnInv").checked,
     }, {
       btn: "bdBtn",

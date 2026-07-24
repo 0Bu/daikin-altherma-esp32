@@ -447,13 +447,20 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 — a 4-byte size-word read, NOT the summary parse), because /coredump?clear=1 can erase
                 the image mid-session; a cached flag would strand an uncleanable crash banner + a
                 download that 404s. mqtt_ha republishes the retained crash topic when the flag changes
-logic/          IDF-free, host-tested pure headers (crc, convert, registers, value_def, config_model,
-                config_store, discovery, ha_device, detect, json, mqtt_group, mqtt_uri, ota_channel, heartbeat, crashinfo,
+logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, registers, value_def,
+                config_model,
+                config_store, discovery, ha_device, detect, json, mqtt_group, mqtt_uri, heartbeat, crashinfo,
                 bootlog, reset_reason, boot_guard, board_pins, board_presets, modbus, syslog_policy, link_watch,
                 wifi_rollback, health_gate, version_cmp, ota_manifest, ota_channel, ws_policy, ws_tx_gate,
                 http_body, http_surface, query_flag, mcp_jsonrpc, timestamp, uart_plan, detect_backoff,
                 hexdump, led_pattern, button, captive,
                 lwt_select, ou_stale).
+                error_codes.hpp = the optional code -> short-English-description lookup layered on
+                conv 204's raw fault code (hp_convert.cpp), e.g. "U4: Indoor/outdoor unit
+                communication problem". Presentation only: it never changes what conv 204 DECODES,
+                so the domain audit still sees the converter's intrinsic semantics, and an unknown
+                code falls through to the bare code rather than inventing a description
+                (docs/REGISTERS.md §"error codes", docs/HOME_ASSISTANT.md).
                 captive.hpp = the captive-portal reply policy for the ONE catch-all route ("/*"):
                 in SETUP mode an unmatched GET is a 302 to CAPTIVE_PORTAL_URI, in STA mode it is the
                 dashboard's SPA shell. The portal only auto-pops if the joining OS's connectivity
@@ -520,7 +527,24 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 there is no firmware caller: it exists so the CI logic-test gates the browser rule
                 against the whole catalog, and the load-bearing half is the SECOND assertion — every
                 profile keeps "INV frequency (rps)" on a LIVE page (0x30 in all 27 that have it), which
-                is what makes "Standby — not running" trustworthy while the pills around it are not
+                is what makes "Standby — not running" trustworthy while the pills around it are not.
+                The rule reaches the DERIVED figures too, not just the raw pills, and the electrical
+                estimate is where it bites hardest: d.pel prefers the CT clamps (page 0x63, LIVE — a
+                non-zero reading at rest is real standby draw) and falls back to "INV primary
+                current", which is a 0x21 row and freezes with that page. Every catalog profile has
+                the INV row, only about half have CT clamps, and an idle plant reads ct == 0 — so the
+                ungated fallback drew LAST RUN's amps as a live kW figure on most installs, most of
+                the time, beside the "not running" headline it contradicted. The fallback is now
+                gated on ouHeldOver (the test pins which page each of the two sources sits on). It
+                BLANKS rather than greys, on the ΔT side of the line above and for the same reason:
+                greying says "this reading is real, just old", which is true of an outdoor
+                temperature and FALSE of an input power — a stopped compressor is not drawing 1.4 kW,
+                it is drawing ~0, so the held figure is not a stale value of the quantity but a wrong
+                one. The CT path is unaffected: those clamps are on a live page, so a non-zero
+                reading at rest is genuine standby draw and is still shown. Both the sub-label and the
+                inspector then distinguish "compressor off · no live reading" from the pre-existing
+                "no current sensor" — suppressing one wrong claim must not substitute another (the
+                profile HAS a current row; it is the reading that is not current)
                 value_def.hpp = the ValueDef row type the generated def/ profile tables are written
                 in ({reg, offset, conv, size, type, label} — registry id, byte offset in the reply
                 payload, converter id for convert.hpp, byte count, HA unit code, English label): the
@@ -643,9 +667,16 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 use: it adds back exactly the dedicated-JTAG pads 39-42, which the X10A list withholds
                 as a PREFERENCE (keep a debug probe usable) rather than a hardware conflict — a
                 preference that cannot survive an onboard part soldered there, e.g. the AtomS3 Lite's
-                button on GPIO41. `octal_spi` still comes from Kconfig at the call site (config.cpp
-                hw_octal_spi()); `reserved` now comes from the live CONFIG (config_reserved_pins),
-                since both pins are runtime. board_pins_offerable() fills a CALLER-owned buffer — a
+                button on GPIO41. The reservation runs in BOTH directions and the two accessors say
+                which is which: board_pins_offerable takes config_reserved_pins (indicator + button,
+                withheld from the X10A picker), board_pins_local takes config_link_pins (the live
+                rx/tx, withheld from the LED/button pickers). ReservedPins itself is deliberately
+                anonymous about the pair (pin_a/pin_b) — naming the fields after one direction made
+                the other read as a lie. Leaving pins_local unfiltered was the one place the rule ran
+                one-way: the picker listed GPIO44/43, board_hw_valid then refused them, and the user
+                learned of the conflict from a 400. `octal_spi` still comes from Kconfig at the call
+                site (config.cpp hw_octal_spi()); both `reserved` inputs come from the live CONFIG,
+                since all four pins are runtime. board_pins_offerable() fills a CALLER-owned buffer — a
                 filtered static would race, as build_status_json runs on httpd AND the poll task's WS
                 broadcaster. It says nothing about which pins a given BOARD breaks out to a header
                 (no board-ID EEPROM exists); README.md carries that per-board table for humans;
@@ -656,8 +687,9 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 validator POST /set_board applies (board_hw_valid) and cannot drift from
                 docs/BOARDS.md into pins the device would reject; board_presets_offerable() withholds
                 a preset this BUILD reserves (the AtomS3 Lite's GPIO35 LED is SPIIO4 on an Octal
-                build), because a pick that cannot work is not a pick — the same rule
-                board_pins_offerable applies to the X10A dropdown. Says nothing about which board
+                build) AND one this CONFIG reserves (a link moved onto that preset's LED or button
+                pin), because a pick that cannot work is not a pick — the same rule, on the same two
+                axes, that the two pin dropdowns now apply. Says nothing about which board
                 this IS (unknowable); picking one is the USER stating the hardware;
                 modbus.hpp = Modbus TCP framing (MBAP, no CRC) + HomeHub register codecs
                 (Temp16/Pow16/Int16/Text16 decode+encode) + the homehub-* mDNS filter — host-tested
@@ -743,15 +775,17 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   logic/board_pins.hpp),
                   board{led_gpio,led_type,led_inverted,btn_gpio,btn_active_low,pins_local[],presets[]}
                   (the runtime board-hardware config written by POST /set_board; pins_local[] is the
-                  LED/button-eligible set, WIDER than pins_avail by the dedicated-JTAG pads — it
+                  LED/button-eligible set — WIDER than pins_avail by the dedicated-JTAG pads,
+                  NARROWER by the X10A link's own rx/tx (board_hw_valid refuses a local pin that
+                  equals either, so offering them was offering a guaranteed 400) — it
                   drives the two pin pickers in the ESP32 card's Hardware modal; presets[] =
                   {name,led_gpio,led_type,led_inverted,btn_gpio,btn_active_low} per DOCUMENTED board
                   (logic/board_presets.hpp), the modal's "Board" dropdown, which only FILLS the five
                   fields — nothing is saved until the user submits. Carried in this payload rather
                   than a route of its own because the modal already reads pins_local from it: one
                   source, no second fetch to fail, and a preset cannot arrive disagreeing with the
-                  pin lists it must fit inside. Empty on a build whose reserved pins withhold every
-                  preset — the UI then hides the row),
+                  pin lists it must fit inside. Empty on a build (or a link position) whose reserved
+                  pins withhold every preset — the UI then hides the row),
                   wifi{ssid,ip,rssi,connected,bssid,mac,std,rolled_back}
                   (bssid/std are the associated AP's BSSID + PHY standard name e.g. "Wi-Fi 4", null
                   while offline; mac is this STA's own MAC, always present; rolled_back = the last
