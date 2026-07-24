@@ -523,14 +523,14 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 temperature, the #35-#39 shape with no numeric tell. Only the PAGE plus the
                 compressor state can tell, so DESIGN.md's dead-bus rule ("an idle plant with no
                 readings, not a stale one") is applied to one sleeping UNIT instead of one silent
-                BUS — but resolved the OTHER way, because unlike a dead bus we know the value AND why
-                it is not current: www/app.js's `d.ouHeldOver` GREYS the outdoor pills
-                (`.sc-val tspan.held`) and shows the `#heldNote` legend, rather than blanking them.
-                It blanked them to "—" through v1.0.11, which cost a number the user wanted and was
-                read as a lost link — reported as "die aktuelle FW behauptet die Anlage wäre nicht
-                erreichbar" on a board whose bus was in fact healthy. Per-TSPAN, not per pill: the
-                high-side badge pairs a held discharge temp with a LIVE refrigerant pressure.
-                ΔT still blanks — with no flow it is not a stale working point but none at all.
+                BUS, and resolved the SAME way: www/app.js's `d.ouHeldOver` BLANKS the outdoor pills
+                to "—". v1.0.13 showed them greyed with a `#heldNote` legend instead; that is
+                reverted — the drawing has ONE vocabulary for "no reading right now", and a second
+                dimmer register of half-valid numbers asks the reader to remember which pills mean
+                what. A value the unit is no longer measuring is not reported. What the pill cannot
+                say, the INSPECTOR does (the outdoor unit's idle explanation names the reason), which
+                is where the "reads as a lost link" complaint is answered instead.
+                ΔT blanks too — with no flow it is not a stale working point but none at all.
                 Deliberately NOT
                 page 0x10 — it carries Defrost Operation, which FEEDS the run-state decision, and no
                 measurement could prove whether it freezes (its Target Cond. Temp. reads 0.0 even
@@ -549,11 +549,10 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 ungated fallback drew LAST RUN's amps as a live kW figure on most installs, most of
                 the time, beside the "not running" headline it contradicted. The fallback is now
                 gated on ouHeldOver (the test pins which page each of the two sources sits on). It
-                BLANKS rather than greys, on the ΔT side of the line above and for the same reason:
-                greying says "this reading is real, just old", which is true of an outdoor
-                temperature and FALSE of an input power — a stopped compressor is not drawing 1.4 kW,
-                it is drawing ~0, so the held figure is not a stale value of the quantity but a wrong
-                one. The CT path is unaffected: those clamps are on a live page, so a non-zero
+                BLANKS like every other held reading, and it is the one where blanking is not merely
+                the house style but the only defensible answer: a stopped compressor is not drawing
+                1.4 kW, it is drawing ~0, so the held figure is not a stale value of the quantity but
+                a wrong one. The CT path is unaffected: those clamps are on a live page, so a non-zero
                 reading at rest is genuine standby draw and is still shown. Both the sub-label and the
                 inspector then distinguish "compressor off · no live reading" from the pre-existing
                 "no current sensor" — suppressing one wrong claim must not substitute another (the

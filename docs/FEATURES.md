@@ -750,11 +750,10 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   costs information where suppressing a state input would corrupt the state machine. Gated
   catalog-wide, and the load-bearing half is the second assertion — every profile keeps
   `INV frequency (rps)` on a page that stays live, which is what makes "Standby — not running"
-  trustworthy beside the held ones. **How** they stop being drawn as live splits on what the
-  quantity is. A held *measurement* is greyed with the `#heldNote` legend rather than hidden — it is
-  a real reading, just old, and blanking it read as a lost link (the v1.0.11 bug report). A held
-  *working point* is blanked, because at rest it is not an old value of the quantity but a wrong
-  one: ΔT with no flow, and the **electrical estimate**, which prefers the CT clamps on the live
+  trustworthy beside the held ones. **How** they stop being drawn as live is one rule for every
+  quantity: the pill blanks to "—", the same answer the drawing gives on a dead bus, so nothing on
+  screen has to be read as half-valid. That covers held *measurements* (outdoor air, discharge) and
+  held *working points* alike — ΔT with no flow, and the **electrical estimate**, which prefers the CT clamps on the live
   hydronic page `0x63` and falls back to
   `INV primary current`, a `0x21` row that freezes with the rest of that page. Every catalog profile
   carries the INV row and only about half carry CT clamps, and an idle plant reads a CT sum of 0 — so
