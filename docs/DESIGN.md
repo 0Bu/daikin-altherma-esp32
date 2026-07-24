@@ -369,9 +369,10 @@ row on the ESP32 card (§5.3) is a button (chevron affordance) that checks for a
   fourth modal for one boolean would cost more UI surface than it buys. It is the **only**
   `confirm()`/`alert()` in `app.js`; if a second one is ever wanted, that is the signal to build the
   overlay properly instead of spreading native dialogs.
-- **What "up to date" can also mean.** While the repository is private, CI publishes no manifest, so
-  a check legitimately finds nothing and says so. The UI does not distinguish "no newer version" from
-  "no feed configured" — both are honestly "up to date" from the device's point of view.
+- **What "up to date" can also mean.** When no manifest is reachable — the publishing gate has not
+  released one, or the two `CONFIG_DAIKIN_OTA_*` URLs point somewhere empty — a check legitimately
+  finds nothing and says so. The UI does not distinguish "no newer version" from "no feed configured";
+  both are honestly "up to date" from the device's point of view.
 - The **device log** is no longer surfaced in the UI (there was a Diagnostics screen; it was removed
   with the Settings page). It remains available out-of-band at `GET /diag` (verbose/clear via query).
 - There is **no manual language selector** — the UI language follows the browser (de / en), and the

@@ -72,9 +72,9 @@ this also prevents reading the config off a stolen board.
 > **Implementation status.** All of it is implemented: flash-time signing, the **rollback health
 > gate**, and the **pull-OTA path** (`ota_check_async` / `ota_update_async` in `ota_update.cpp` —
 > manifest check, `esp_https_ota` download, signature verify on install, and the downgrade gate).
-> What is *not* live is the **feed**: every publishing step in CI is gated on the repository being
-> public, so while it is private no manifest or image is served and a check reports "up to date".
-> The trust properties below are runtime behaviour, not intent.
+> The **feed** has preconditions outside the firmware: every publishing step in CI is gated on the
+> repository being public, and the Pages source must point at `gh-pages` — with no manifest or image
+> served, a check reports "up to date". The trust properties below are runtime behaviour, not intent.
 
 OTA updates are **signed** (Secure Boot v2 RSA-3072 signature scheme *without* hardware Secure
 Boot): the running app verifies the RSA signature of a downloaded image before installing it, so a
@@ -210,5 +210,20 @@ present on the trusted LAN. The counter lives in `daik_cfg`, so a factory reset 
 
 ## Reporting
 
-Found a security issue? Open a GitHub issue for non-sensitive reports, or contact the maintainer
-privately for anything exploitable. There is no bug bounty — this is a hobby project.
+Found a security issue?
+
+- **Anything exploitable — report it privately**, via
+  [GitHub's private vulnerability reporting](https://github.com/0Bu/daikin-altherma-esp32/security/advisories/new)
+  (Security → Advisories → *Report a vulnerability*). That channel is a private advisory draft
+  visible only to the maintainer, so a working exploit never sits in a public issue while a fix is
+  written.
+- **Anything non-sensitive** — a hardening suggestion, a question about the trust boundary, a doc
+  correction — is fine as a normal [GitHub issue](https://github.com/0Bu/daikin-altherma-esp32/issues).
+
+Please include the firmware version (`GET /status` → `version`, or the version shown in the web UI)
+and, where relevant, the `app_elf_sha256` from the same response — it pins the exact build.
+
+There is no bug bounty and no SLA: this is a hobby project maintained in spare time. Expect a first
+response within a couple of weeks, and note that the [trust boundary](#trust-boundary) above is
+deliberately "trusted LAN only" — an issue that reduces to *"an attacker already on your LAN can
+read the device's HTTP API"* is documented behaviour, not a vulnerability.

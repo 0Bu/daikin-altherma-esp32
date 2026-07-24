@@ -1378,9 +1378,12 @@ async function onPinPick() {
 }
 
 // ── Firmware / OTA ───────────────────────────────────────────────────────
-// Tapping the Firmware version checks for an OTA update. TODO: wire to /ota/check + /ota/status +
-// /ota/update once a published GitHub release feed exists (ota_update.cpp check is also a stub). For
-// now there is no release source, so this is an honest placeholder instead of a misleading result.
+// Tapping the Firmware version checks for an OTA update, and offers to install one: the full
+// /ota/check -> /ota/status -> /ota/update flow is wired below against the device-side implementation
+// in ota_update.cpp (manifest check, two-point downgrade gate, signed install, health gate). What the
+// device can actually FIND depends on a served manifest.json — CI stages one and publishes it to
+// GitHub Pages, gated on the repo being public (docs/FEATURES.md §2); against no feed the check
+// honestly reports "up to date" rather than failing.
 // Poll /ota/status until `state` leaves the set we're waiting on, or we run out of patience.
 // Every OTA phase is asynchronous on the device (the download runs on its own task so the single
 // httpd worker stays free), so the UI's whole job here is to watch a state machine it does not drive.

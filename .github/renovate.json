@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "main is kept strictly linear and every commit GPG-signed (branch protection is unavailable on a private free-plan repo, so it is maintained by hand). Automerge therefore MUST squash: a squash merge stays linear AND is signed by GitHub's web-flow key, whereas a merge commit would break linearity and force a from-root re-linearize (git rebase --root + force-push) that rewrites every SHA — orphaning and auto-closing every open PR. platformAutomerge is off so Renovate self-merges once CI is green (the repo has allow_auto_merge disabled), instead of leaving green PRs open where the next force-push would close them.",
+  "description": "main is kept strictly linear and every commit GPG-signed. On a PUBLIC repo this is enforceable for free — a ruleset on main with 'require linear history' + 'require signed commits' + the logic-test/domain-audit/build checks turns the invariant from a convention into a gate (see CONTRIBUTING.md). Automerge MUST squash either way: a squash merge stays linear AND is signed by GitHub's web-flow key, whereas a merge commit would break linearity and force a from-root re-linearize (git rebase --root + force-push) that rewrites every SHA — orphaning and auto-closing every open PR. platformAutomerge is off so Renovate self-merges once CI is green (the repo has allow_auto_merge disabled), instead of leaving green PRs open where the next force-push would close them.",
   "automergeStrategy": "squash",
   "platformAutomerge": false,
   "customManagers": [

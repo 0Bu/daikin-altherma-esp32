@@ -27,7 +27,7 @@ the end, and only after you have reported findings and the user is on board.
 ```bash
 H=daikin-altherma-esp32.local                      # or the IP the user gives (mDNS may not resolve)
 curl -sS --max-time 5 "http://$H/status" | tee /tmp/vp_status.json | jq '{mqtt,detect:.detect.model,profile}'
-BROKER=$(jq -r '.mqtt.broker' /tmp/vp_status.json)  # e.g. 203.0.113.27:1883 — the MQTT host:port
+BROKER=$(jq -r '.mqtt.broker' /tmp/vp_status.json)  # e.g. 192.168.1.10:1883 — the MQTT host:port
 BASE=daikin-altherma-esp32                          # MQTT base topic (fixed by convention)
 ```
 
