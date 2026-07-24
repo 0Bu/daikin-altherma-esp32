@@ -118,9 +118,12 @@ Leave them unchecked; the maintainer runs them before merge. Your equivalents ar
 above plus an honest note about hardware.
 
 `main` is kept **strictly linear** and every commit **signed**, so PRs land as **squash merges** —
-enforced by a branch ruleset on `main` (require linear history, require signed commits, and the
-`logic-test` / `domain-audit` / `build` checks green), not left to convention. Practical consequences:
+enforced by a branch ruleset on `main` (require a pull request, require linear history, require
+signed commits, and the `logic-test` / `domain-audit` / `pages-publish-test` / `build` checks
+green), not left to convention. Nobody is exempt: the ruleset carries no bypass actors, so this
+holds for the maintainer too — `main` takes no direct pushes at all. Practical consequences:
 
+- Everything lands through a PR, including a one-line docs fix. There is no push-to-`main` path.
 - Rebase onto `main` rather than merging `main` into your branch. Merge commits can't be accepted.
 - Sign your commits (`git commit -S`, or let GitHub sign a web merge).
 - `main` moves under open PRs — expect to rebase before merge.
