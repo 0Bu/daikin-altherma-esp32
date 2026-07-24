@@ -205,8 +205,8 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   suspended while a credential change is pending, so ten fast `NO_AP_FOUND` scans can't pre-empt the
   rollback grace below.
 - **✅ In-app WiFi re-config with one-shot credential rollback.** WiFi is provisioned first from the
-  captive portal, then re-editable from the WiFi row of the dashboard Connections tile (pencil → modal
-  → `POST /set_wifi`, validating SSID 1–32 / password empty-or-8–63). Because a bad SSID/password entered over the LAN
+  captive portal, then re-editable from the WiFi row of the Connections tile in Settings (gear → Connections →
+  WiFi → modal → `POST /set_wifi`, validating SSID 1–32 / password empty-or-8–63). Because a bad SSID/password entered over the LAN
   would otherwise strand the device in the setup AP, `/set_wifi` stashes the previous working
   credentials as a **one-shot NVS backup**; on the reboot into the new network, if the STA never gets a
   DHCP lease `wifi_start_sta()` restores the backup and reboots again — a successful connect clears it.
@@ -482,7 +482,7 @@ the fact*, from the field, without a serial cable:
   and "is the heap leaking?" are answerable from the LAN alone. `reset_reason_name()` reuses the
   crash slug vocabulary (one naming for the sys block, the `last_crash`/crash payload and the
   heartbeat's "Reset Reason" sensor). The
-  dashboard ESP32 card renders the reset reason (fault-coloured) and free heap.
+  Settings ESP32 card renders the reset reason (fault-coloured) and free heap.
 - **✅ Build identity** — `/status.app_elf_sha256` ties a running device to the exact firmware that
   produced any dump, and the syslog boot line (below) puts the same hash in the **log stream**, so a
   captured stream stays attributable to a binary after the device has moved on.
@@ -514,15 +514,15 @@ the fact*, from the field, without a serial cable:
 - **✅ 🧪 SNTP wall clock, runtime-configurable** ([`sntp_time.cpp`](../main/sntp_time.cpp)): before
   this the device had no timestamp anywhere except uptime-since-boot. `esp_netif_sntp` polls the
   configured server (`config().ntp_server` — NVS `ntp_server` override of `CONFIG_DAIKIN_NTP_SERVER`
-  default `pool.ntp.org`, editable at runtime via `POST /set_ntp` and the NTP row of the dashboard
-  Connections tile, exactly like Syslog) once online — non-blocking, so it idles/retries harmlessly
+  default `pool.ntp.org`, editable at runtime via `POST /set_ntp` and the NTP row of the Connections
+  tile in Settings, exactly like Syslog) once online — non-blocking, so it idles/retries harmlessly
   even during AP-only setup mode. Once synced, the RFC 3339 UTC instant
   ([`logic/timestamp.hpp`](../main/logic/timestamp.hpp)) reaches the top-level `/status.ntp` block
   (`{server,synced,time}`, mirroring `syslog{}` rather than `sys{}` — it's a runtime-configurable
   service, not a static board fact) and the syslog TIMESTAMP field below; before the first sync of a
-  boot both fall back to `null`/`-` rather than a fabricated epoch date. The dashboard's NTP row shows
-  the configured server, coloured `--ok` once synced and `--warn` while syncing (DESIGN.md §5.3 item
-  5, the Connections tile) — the synced wall clock itself isn't shown on the row (no room in a
+  boot both fall back to `null`/`-` rather than a fabricated epoch date. The NTP row shows
+  the configured server, coloured `--ok` once synced and `--warn` while syncing (DESIGN.md §5.6,
+  the Connections tile) — the synced wall clock itself isn't shown on the row (no room in a
   one-line tile), but remains
   available via the MQTT heartbeat's `device_time` sensor and `/status.ntp.time`. An empty
   `/set_ntp` save is read on the next boot as "reset to the compile-time

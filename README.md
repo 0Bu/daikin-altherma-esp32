@@ -57,7 +57,7 @@ on a XIAO ESP32-S3, and picking pins on any other board: [docs/WIRING.md](docs/W
 ## Board hardware — status LED and recovery button
 
 One firmware image serves every ESP32-S3 board, so the parts that differ *between* boards are
-runtime settings, configured in the dashboard under **ESP32 → Hardware**:
+runtime settings, configured in the web UI under **⚙ Settings → ESP32 → Hardware**:
 
 | Board | Status LED | Recovery button |
 | :--- | :--- | :--- |

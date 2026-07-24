@@ -1,5 +1,7 @@
-// Web UI for daikin-altherma-esp32 — a client-side, single-screen dashboard over the firmware HTTP
-// API. Everything lives on one page (no settings/sub-screens); MQTT is edited in a modal.
+// Web UI for daikin-altherma-esp32 — a client-side, view-switched SPA over the firmware HTTP API.
+// The dashboard is what the app opens on and where it spends its life; the header gear leads to a
+// Settings menu whose entries push sub-screens (Connections today), and each connection is edited
+// from a modal there.
 // Design contract: docs/DESIGN.md. Split from index.html for edit locality; spliced back in at
 // build time (inline_assets.cmake). No framework, no external assets.
 "use strict";
@@ -30,15 +32,17 @@ const I18N = {
     "sys.fault_line": (c) => "Fault · " + c + " — check the outdoor unit.",
     "sys.polled": (s) => `Polled ${s}s ago`,
     "recovery.title": "Recovery mode",
-    "recovery.meta": "The device restarted too many times and came up in recovery mode. Heat-pump polling and MQTT are paused. Correct the configuration (for example the RX/TX pins on the ESP32 card), then reboot to resume normal operation.",
+    "recovery.meta": "The device restarted too many times and came up in recovery mode. Heat-pump polling and MQTT are paused. Correct the configuration (for example the RX/TX pins on the ESP32 card in Settings), then reboot to resume normal operation.",
     "rollback.title": "WiFi change failed — rolled back",
-    "rollback.meta": (back) => `The new WiFi credentials couldn't connect, so the device restored the previous network${back} and restarted. Open the Connections tile's WiFi row to check the name and password, then try again.`,
+    "rollback.meta": (back) => `The new WiFi credentials couldn't connect, so the device restored the previous network${back} and restarted. Open Settings and check the WiFi name and password on the Connections tile, then try again.`,
     "crash.title_fault": "Device restarted after a crash",
     "crash.title_orphan": "Crash report waiting from an earlier restart",
     "crash.reset": "Reset", "crash.task": "task", "crash.fw": "fw", "crash.elf": "elf", "crash.corrupted": "corrupted",
     "crash.download": "Download crash report", "crash.copy": "Copy diagnostics", "crash.dismiss": "Dismiss",
     "crash.copied": "Diagnostics copied — paste into a bug report",
     "crash.copy_fail": "Copy failed — open /coredump and /diag manually",
+    "nav.settings": "Settings", "nav.back": "Back",
+    "nav.settings_alert": (n) => `Settings — ${n} connection${n === 1 ? "" : "s"} down`,
     "conn.title": "Connections", "conn.offline": "Offline", "conn.disabled": "Disabled",
     "conn.connecting": "Connecting…", "conn.connected": "Connected", "conn.resolving": "Resolving…",
     "conn.enabled": "Enabled", "conn.enabled_noping": "Enabled, host not answering ping",
@@ -120,15 +124,17 @@ const I18N = {
     "sys.fault_line": (c) => "Störung · " + c + " — Außeneinheit prüfen.",
     "sys.polled": (s) => `vor ${s}s abgefragt`,
     "recovery.title": "Wiederherstellungsmodus",
-    "recovery.meta": "Das Gerät ist zu oft neu gestartet und im Wiederherstellungsmodus hochgefahren. Wärmepumpen-Abfrage und MQTT sind pausiert. Korrigiere die Konfiguration (z. B. die RX/TX-Pins auf der ESP32-Karte) und starte neu, um den Normalbetrieb fortzusetzen.",
+    "recovery.meta": "Das Gerät ist zu oft neu gestartet und im Wiederherstellungsmodus hochgefahren. Wärmepumpen-Abfrage und MQTT sind pausiert. Korrigiere die Konfiguration (z. B. die RX/TX-Pins auf der ESP32-Karte in den Einstellungen) und starte neu, um den Normalbetrieb fortzusetzen.",
     "rollback.title": "WLAN-Änderung fehlgeschlagen — zurückgesetzt",
-    "rollback.meta": (back) => `Die neuen WLAN-Zugangsdaten konnten sich nicht verbinden, daher hat das Gerät das vorherige Netzwerk${back} wiederhergestellt und neu gestartet. Öffne die WLAN-Zeile in der Verbindungen-Kachel, prüfe Name und Passwort und versuche es erneut.`,
+    "rollback.meta": (back) => `Die neuen WLAN-Zugangsdaten konnten sich nicht verbinden, daher hat das Gerät das vorherige Netzwerk${back} wiederhergestellt und neu gestartet. Öffne die Einstellungen und prüfe in der Kachel „Verbindungen“ WLAN-Name und Passwort, dann versuche es erneut.`,
     "crash.title_fault": "Gerät ist nach einem Absturz neu gestartet",
     "crash.title_orphan": "Absturzbericht von einem früheren Neustart",
     "crash.reset": "Reset", "crash.task": "Task", "crash.fw": "FW", "crash.elf": "elf", "crash.corrupted": "beschädigt",
     "crash.download": "Absturzbericht herunterladen", "crash.copy": "Diagnose kopieren", "crash.dismiss": "Ausblenden",
     "crash.copied": "Diagnose kopiert — in einen Fehlerbericht einfügen",
     "crash.copy_fail": "Kopieren fehlgeschlagen — /coredump und /diag manuell öffnen",
+    "nav.settings": "Einstellungen", "nav.back": "Zurück",
+    "nav.settings_alert": (n) => `Einstellungen — ${n} Verbindung${n === 1 ? "" : "en"} gestört`,
     "conn.title": "Verbindungen", "conn.offline": "Offline", "conn.disabled": "Deaktiviert",
     "conn.connecting": "Verbinde…", "conn.connected": "Verbunden", "conn.resolving": "Löse auf…",
     "conn.enabled": "Aktiv", "conn.enabled_noping": "Aktiv, Host antwortet nicht auf Ping",
@@ -214,6 +220,9 @@ function applyStaticI18n() {
 
 // ── App state ────────────────────────────────────────────────────────────
 const S = {
+  // Which screen is showing (a key of VIEW below). The app opens on "dashboard" and the header gear
+  // is the only way off it; every other screen sits under Settings and walks back up through PARENT.
+  stage: "dashboard",
   status: null,
   busy: false,
   // Labels of value rows whose description accordion is currently expanded. Kept in app state (not
@@ -235,6 +244,47 @@ const S = {
   otaBusy: false,
 };
 
+// ── Navigation (dashboard ⇄ Settings) ────────────────────────────────────
+// Two screens, both in the DOM; only .active shows. Deliberately FLAT — the gear opens the whole
+// configuration at once, with no menu level in between: there is little enough of it that a menu
+// would be a list of one or two entries whose only job is to hide a card behind a second tap.
+// PARENT still maps the way back, so the header chevron and Esc walk the same path. There is no
+// URL/history integration on purpose — the page is served from the device with no paths, and a hash
+// route would survive a reload into a screen the user did not ask for.
+const VIEW = { dashboard: "viewDash", settings: "viewSettings" };
+const PARENT = { settings: "dashboard" };
+const TITLE = { settings: () => t("nav.settings") };
+// Every overlay that owns the Esc key; the navigation Esc stands down while one of them is open.
+const MODALS = ["wifiModal", "mqttModal", "syslogModal", "ntpModal", "boardModal"];
+
+function go(stage) {
+  S.stage = stage;
+  for (const [st, id] of Object.entries(VIEW)) $(id).classList.toggle("active", st === stage);
+  renderHeader();
+  window.scrollTo(0, 0);
+}
+function goBack() { go(PARENT[S.stage] || "dashboard"); }
+// Write innerHTML only when the markup actually changed. Both containers this guards hold buttons
+// the user taps, and a push arrives ~1×/s: a rebuild landing between mousedown and mouseup destroys
+// the element under the finger and the click never fires. (The banners guard the same way with
+// their own render keys; the cache is kept here rather than in a data- attribute so the markup
+// isn't held twice.)
+const _html = {};
+function setHtml(id, html) {
+  if (_html[id] === html) return;
+  _html[id] = html;
+  $(id).innerHTML = html;
+}
+// The dashboard header (identity + gear) and the back header (chevron + screen title) are the same
+// slot: exactly one shows. The title is re-read from TITLE on every switch rather than stored, so it
+// follows the UI language like every other string.
+function renderHeader() {
+  const dash = S.stage === "dashboard";
+  $("hdrDash").hidden = !dash;
+  $("hdrBack").hidden = dash;
+  if (!dash) $("backTitle").textContent = (TITLE[S.stage] || (() => ""))();
+}
+
 // ── Toasts ───────────────────────────────────────────────────────────────
 let _tid = 0;
 function toast(msg, type = "info") {
@@ -247,18 +297,22 @@ function toast(msg, type = "info") {
   setTimeout(() => el.remove(), type === "err" ? 4200 : 2600);
 }
 
-// ── Status (drives the whole dashboard) ──────────────────────────────────
+// ── Status (drives every screen) ─────────────────────────────────────────
 async function refreshStatus() {
   let s;
   try { s = await j("/status"); } catch { markUnreachable(); return; }
   S.status = s;
-  renderDashboard();
+  renderApp();
 }
 function markUnreachable() {
   sysSet(t("sys.unreachable"), t("sys.unreachable_sub"), "err");
 }
 
-function renderDashboard() {
+// Re-render EVERY screen from the current /status + /values, not just the visible one: the screens
+// are all in the DOM (only .active shows), a push arrives ~1×/s regardless of where the user is, and
+// rendering the hidden ones costs a few string builds — far cheaper than a per-screen refresh
+// scheme that has to remember to run when a view is switched to.
+function renderApp() {
   renderRecoveryBanner();
   renderRollbackBanner();
   renderCrashBanner();
@@ -290,7 +344,7 @@ function renderDashboard() {
     sysSet(mode || t("sys.online"), t(p.key) + stale, p.tone);
   }
   renderHeaderMeta();
-  renderConnections();
+  renderSettings();
   renderLive();
   renderCards();
 }
@@ -365,7 +419,7 @@ function faultValue() {
 // Shown when /status.sys.safe_mode is true — the device crash-looped on a bad config and came up
 // minimally (network + web UI + OTA only; the X10A poll engine and MQTT bridge are paused). It is not
 // dismissible: it reflects a LIVE state and clears itself once a healthy reboot leaves safe mode. The
-// recovery controls (RX/TX pins on the ESP32 card, the WiFi/MQTT modals) stay fully usable underneath.
+// recovery controls (behind the gear: the RX/TX pins on the ESP32 card, the WiFi/MQTT modals) stay fully usable.
 function renderRecoveryBanner() {
   const el = $("recoveryBanner");
   if (!el) return;
@@ -519,17 +573,12 @@ async function refreshValues() {
   let r;
   try { r = await j("/values"); } catch { return; }
   S._values = r.values || r || [];
-  renderDashboard();
+  renderApp();
 }
-// Dashboard cards: the board (ESP32) + detected unit (Model) first, then the heat-pump value groups —
-// all one continuous card grid, each block styled like OPERATION. WiFi/MQTT/Syslog/NTP render
-// separately in the full-width Connections tile (#connTile, see connectionsHtml/renderConnections).
+// Dashboard cards: the detected unit (Model) first, then the heat-pump value groups — all one
+// continuous card grid, each block styled like OPERATION. The board (ESP32) card and the
+// WiFi/MQTT/Syslog/NTP rows are NOT here: both moved behind the gear onto Settings (renderSettings).
 function renderCards() {
-  // The card grid is rebuilt on every poll (4/8 s). The ESP32 card's RX/TX pin dropdown is
-  // interactive, so skip the rebuild while it's focused/open — otherwise the poll would collapse it
-  // mid-pick. It resumes once focus leaves (onPinPick blurs it after applying).
-  const a = document.activeElement;
-  if (a && a.classList && a.classList.contains("pin-sel")) return;
   $("valueGroups").innerHTML = statusCardsHtml() + valueGroupsHtml(S._values || [], S.status?.hp?.connected);
 }
 // One label→value row; `v` is escaped unless opt.html (e.g. signal-bar markup).
@@ -572,11 +621,12 @@ function pinSelRow(label, id, val, pins) {
     `<select class="input mono num pin-sel" id="${id}" aria-label="${esc(label)}">${opts}</select></div>`;
 }
 
-// ESP32 board status card: chip / uptime, the X10A link + protocol, and the RX/TX pins. (The
-// firmware version is NOT here — it sits in the header meta line beside the IP, where tapping it
-// runs the OTA check; DESIGN.md §5.4.) Pins are auto-detected: once the bus answers on a pair they
-// show read-only; until then a dropdown of the board's wire-able GPIOs lets the user point the
-// firmware at their wiring. A brief timeout doesn't flip back to the dropdown (last_ok_s grace).
+// ESP32 board status card (on the Settings screen — renderSettings): chip / uptime, the X10A link +
+// protocol, and the RX/TX pins. (The firmware version is NOT here — it sits in the dashboard's
+// header meta line beside the IP, where tapping it runs the OTA check; DESIGN.md §5.4.) Pins are
+// auto-detected: once the bus answers on a pair they show read-only; until then a dropdown of the
+// board's wire-able GPIOs lets the user point the firmware at their wiring. A brief timeout doesn't
+// flip back to the dropdown (last_ok_s grace).
 function esp32CardHtml() {
   const s = S.status || {}, hp = s.hp || {}, sys = s.sys || {};
   const proto = hp.proto === "I" ? "X10A-I" : hp.proto === "S" ? "X10A-S" : "—";
@@ -619,8 +669,9 @@ function boardRow() {
     `<span class="vrow-val mono">${esc(led)} · ${esc(btn)}</span></button>`;
 }
 
-// ESP32 · Model status cards, from /status (board facts + detected unit). WiFi/MQTT/Syslog/NTP moved
-// out to the full-width Connections tile (connectionsHtml) — see renderConnections().
+// The dashboard's Model card, from /status.detect (the detected unit). The ESP32 card that used to
+// sit above it is on the Settings screen now (renderSettings), as are the WiFi/MQTT/Syslog/NTP rows
+// (connectionsHtml) — what the plant IS stays on the dashboard, what the board is SET TO moved.
 function statusCardsHtml() {
   const hp = S.status?.hp || {}, d = S.status?.detect || {};
   // Outdoor unit as a full-width heading — model names are long and don't fit a label→value row.
@@ -633,76 +684,110 @@ function statusCardsHtml() {
 
   // Model identity is only meaningful while the bus answers — hide the card entirely when the
   // heat-pump link is down instead of naming a unit (or showing a stale capacity) that isn't live.
-  return esp32CardHtml() + (hp.connected ? vcard(t("card.model"), model) : "");
+  return hp.connected ? vcard(t("card.model"), model) : "";
 }
 
-// ── Connections tile (WiFi · MQTT · Syslog · NTP, full width under the live section) ─────────
+// ── Connections tile (Settings — WiFi · MQTT · Syslog · NTP) ─────────────────────────────────
 // One tappable row per link: label, colour-coded value (green connected/synced, yellow reconnecting/
-// syncing, red down — the same ok/warn/err semantics the rest of the dashboard uses), a trailing
+// syncing, red down — the same ok/warn/err semantics the rest of the app uses), a trailing
 // pencil that opens that link's existing edit modal (§5.1 in docs/DESIGN.md). MAC/BSSID are dropped
-// entirely (bus-level detail nobody edits from here) and the IP address moved to the header
-// (renderHeaderMeta) — it is board identity, not a per-row WiFi fact.
+// entirely (bus-level detail nobody edits from here) and the IP address lives in the dashboard
+// header (renderHeaderMeta) — it is board identity, not a per-row WiFi fact.
 //
-// The row itself conveys state by colour alone (the value IS the address/name, just tinted) — DESIGN.md
-// §9's "status never conveyed by colour alone" would otherwise be broken for colourblind users and
-// screen readers, so `state` (a plain-text status word, never shown visually) goes into the row's
-// aria-label instead of the generic "Edit X" every other edit affordance in this app uses.
-function connRow(label, valueHtml, cls, edit, state) {
-  return `<button class="conn-row" type="button" data-edit="${esc(edit)}" aria-label="${esc(t("conn.aria", label, state))}">` +
-    `<span class="conn-label">${esc(label)}</span>` +
-    `<span class="conn-val ${cls || ""}">${valueHtml}</span>` +
-    `${editIcon}</button>`;
-}
-function connectionsHtml() {
+// connLinks() derives the four rows' state ONCE and both consumers read it: the rows themselves and
+// the Settings menu entry + header dot that summarise them a level up. Re-deriving "is this link
+// healthy" for the summary is exactly how a menu ends up claiming everything is fine while the row
+// behind it is red.
+function connLinks() {
   const w = S.status?.wifi || {}, m = S.status?.mqtt || {}, sy = S.status?.syslog || {}, nt = S.status?.ntp || {};
+  const links = [];
 
   // WiFi has no "connecting" state in /status (just connected: true/false), so it is a two-state
   // ok/err row — signal bars keep their own strength-based tone regardless.
-  let wifiVal, wifiCls, wifiState;
   if (w.connected && (w.rssi != null || w.ssid)) {
-    wifiVal = (w.rssi != null ? signalBars(w.rssi) : "") +
-      (w.rssi != null ? ` <span class="conn-dbm">${w.rssi} dBm</span>` : "") +
-      (w.ssid ? ` <span class="conn-name">${esc(w.ssid)}</span>` : "");
-    wifiCls = "ok"; wifiState = w.ssid ? t("conn.connected_to", w.ssid) : t("conn.connected");
+    links.push({ edit: "wifi", label: w.std || "Wi-Fi", cls: "ok",
+      value: (w.rssi != null ? signalBars(w.rssi) : "") +
+        (w.rssi != null ? ` <span class="conn-dbm">${w.rssi} dBm</span>` : "") +
+        (w.ssid ? ` <span class="conn-name">${esc(w.ssid)}</span>` : ""),
+      state: w.ssid ? t("conn.connected_to", w.ssid) : t("conn.connected") });
   } else {
-    wifiVal = t("conn.offline");
-    wifiCls = "err"; wifiState = t("conn.offline");
+    links.push({ edit: "wifi", label: w.std || "Wi-Fi", cls: "err",
+      value: t("conn.offline"), state: t("conn.offline") });
   }
-  const wifiRow = connRow((w.std || "Wi-Fi").toUpperCase(), wifiVal, wifiCls, "wifi", wifiState);
 
-  let mqttVal, mqttCls, mqttState;
   if (!m.configured) {
-    mqttVal = t("conn.disabled"); mqttCls = ""; mqttState = t("conn.disabled");
+    links.push({ edit: "mqtt", label: "MQTT", cls: "", value: t("conn.disabled"), state: t("conn.disabled") });
   } else {
-    mqttCls = m.connected ? "ok" : m.error ? "err" : "warn";
-    mqttState = m.connected ? t("conn.connected") : m.error ? t("conn.error", m.error) : t("conn.connecting");
-    // No TLS padlock marker: an mqtts:// broker already carries its own scheme in the URL, so the
-    // icon only restated what the string says. A schemeless/mqtt:// broker is plaintext and shows none.
-    mqttVal = esc(m.broker || "—");
+    links.push({ edit: "mqtt", label: "MQTT",
+      cls: m.connected ? "ok" : m.error ? "err" : "warn",
+      // No TLS padlock marker: an mqtts:// broker already carries its own scheme in the URL, so the
+      // icon only restated what the string says. A schemeless/mqtt:// broker is plaintext and shows none.
+      value: esc(m.broker || "—"),
+      state: m.connected ? t("conn.connected") : m.error ? t("conn.error", m.error) : t("conn.connecting") });
   }
-  const mqttRow = connRow("MQTT", mqttVal, mqttCls, "mqtt", mqttState);
 
-  let syVal, syCls, syState;
   if (!sy.configured) {
-    syVal = t("conn.disabled"); syCls = ""; syState = t("conn.disabled");
+    links.push({ edit: "syslog", label: "Syslog", cls: "", value: t("conn.disabled"), state: t("conn.disabled") });
   } else {
     // Delivery is gated on DNS only (resolved); reachability is an advisory ping hint — green once
     // resolving, yellow (still forwarding) when the host doesn't answer the probe or resolution is
     // still pending, red on a DNS error.
-    syCls = sy.error ? "err" : sy.resolved ? (sy.reachable ? "ok" : "warn") : "warn";
-    syState = sy.error ? sy.error : sy.resolved ? (sy.reachable ? t("conn.enabled") : t("conn.enabled_noping")) : t("conn.resolving");
-    syVal = esc(sy.host ? `${sy.host}:${sy.port || 514}` : "—");
+    links.push({ edit: "syslog", label: "Syslog",
+      cls: sy.error ? "err" : sy.resolved ? (sy.reachable ? "ok" : "warn") : "warn",
+      value: esc(sy.host ? `${sy.host}:${sy.port || 514}` : "—"),
+      state: sy.error ? sy.error : sy.resolved ? (sy.reachable ? t("conn.enabled") : t("conn.enabled_noping")) : t("conn.resolving") });
   }
-  const syslogRow = connRow("Syslog", syVal, syCls, "syslog", syState);
 
   // NTP has no "disabled" or error state (unlike MQTT/Syslog) — it always has a server, so it is a
   // two-state ok/warn row keyed on whether the first sync of this boot has landed.
-  const ntpRow = connRow("NTP", esc(nt.server || "—"), nt.synced ? "ok" : "warn", "ntp", nt.synced ? t("conn.synced") : t("conn.syncing"));
+  links.push({ edit: "ntp", label: "NTP", cls: nt.synced ? "ok" : "warn",
+    value: esc(nt.server || "—"), state: nt.synced ? t("conn.synced") : t("conn.syncing") });
 
-  return `<div class="section-label">${esc(t("conn.title"))}</div>` + wifiRow + mqttRow + syslogRow + ntpRow;
+  return links;
 }
-function renderConnections() {
-  $("connTile").innerHTML = connectionsHtml();
+// The row conveys state by colour alone (the value IS the address/name, just tinted) — DESIGN.md
+// §9's "status never conveyed by colour alone" would otherwise be broken for colourblind users and
+// screen readers, so `state` (a plain-text status word, never shown visually) goes into the row's
+// aria-label instead of the generic "Edit X" every other edit affordance in this app uses.
+function connRow(l) {
+  return `<button class="conn-row" type="button" data-edit="${esc(l.edit)}" aria-label="${esc(t("conn.aria", l.label, l.state))}">` +
+    `<span class="conn-label">${esc(l.label)}</span>` +
+    `<span class="conn-val ${l.cls || ""}">${l.value}</span>` +
+    `${editIcon}</button>`;
+}
+function connectionsHtml() {
+  return `<div class="section-label">${esc(t("conn.title"))}</div>` + connLinks().map(connRow).join("");
+}
+// The links the gear should call out as broken: `err` only. `warn` is the transient half of the
+// vocabulary (MQTT still connecting, NTP not yet synced, a syslog host that ignores ping) and every
+// boot passes through it, so raising the alarm on warn would leave the gear permanently marked and
+// the marker would stop meaning anything. A disabled link (neutral, no class) is a choice, not a fault.
+const connDown = () => connLinks().filter((l) => l.cls === "err");
+
+// ── Settings screen (behind the header gear) ─────────────────────────────────────────────────
+// The whole configuration on one screen, no menu level in between: the Connections tile and the
+// ESP32 board card, rendered by the same builders that used to place them on the dashboard.
+function renderSettings() {
+  // Both containers are rebuilt on every poll (uptime alone changes each second). The ESP32 card's
+  // RX/TX pin dropdown is interactive, so skip the rebuild while it is focused/open — otherwise the
+  // poll would collapse it mid-pick. It resumes once focus leaves (onPinPick blurs it after
+  // applying). setHtml keeps the rest from thrashing rows the user is tapping.
+  const a = document.activeElement;
+  if (!(a && a.classList && a.classList.contains("pin-sel"))) {
+    setHtml("connTile", connectionsHtml());
+    setHtml("settingsCards", esp32CardHtml());
+  }
+  $("settingsVer").textContent = "daikin-altherma-esp32 · v" + (S.status?.version || "?");
+  renderSettingsDot();
+}
+// The gear's attention marker. The connection rows live behind it now, so a broker that stopped
+// answering would otherwise be invisible from the dashboard — the screen the user is on all day.
+// The dot is never the sole carrier of the fact: the button's accessible name spells it out, which
+// is also what a screen reader announces (DESIGN.md §9).
+function renderSettingsDot() {
+  const n = connDown().length;
+  $("settingsDot").hidden = n === 0;
+  $("btnSettings").setAttribute("aria-label", n ? t("nav.settings_alert", n) : t("nav.settings"));
 }
 // ── Value descriptions (tap a value row → a plain-language explainer slides down) ─────────────
 // Each heat-pump reading gets a short "what is this / what's normal" note, keyed to the value LABEL
@@ -1651,7 +1736,7 @@ function inspectPick(key) {
   if (opening) $("inspCard").scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
-// ── WiFi (dashboard edit modal) ───────────────────────────────────────────
+// ── WiFi (edit modal) ──────────────────────────────────────────────────────
 function fillWifi() {
   const w = S.status?.wifi || {};
   $("wfSSID").value = w.ssid || "";
@@ -1677,10 +1762,10 @@ function wifiFieldError(msg) {
   else if (/pass/i.test(msg)) { $("wfPass").classList.add("invalid"); $("wfPassError").hidden = false; }
 }
 
-// ── MQTT (dashboard edit modal) ───────────────────────────────────────────
-// The MQTT broker is edited in a modal opened from the Connections tile's MQTT row pencil — there is
-// no settings sub-screen. Only the broker prefills (user/pass aren't exposed by /status); a Save
-// reboots to apply (saveReboot), Cancel/backdrop/Esc dismiss without a write.
+// ── MQTT (edit modal) ─────────────────────────────────────────────────────
+// The MQTT broker is edited in a modal opened from the Connections tile's MQTT row pencil. Only
+// the broker prefills (user/pass aren't exposed by /status); a Save reboots to apply (saveReboot),
+// Cancel/backdrop/Esc dismiss without a write.
 function fillMqtt() {
   const m = S.status?.mqtt || {};
   $("mqBroker").value = m.broker || "";
@@ -1719,7 +1804,7 @@ const validMqtt = (h) => {
   return !h || /^[\w.\-]+:\d{2,5}$/.test(h) || /^(mqtts?|wss?):\/\/[\w.\-]+(:\d{2,5})?(\/\S*)?$/.test(h);
 };
 
-// ── Syslog (dashboard edit modal) ───────────────────────────────────────────
+// ── Syslog (edit modal) ────────────────────────────────────────────────────
 function fillSyslog() {
   const sy = S.status?.syslog || {};
   $("slHost").value = sy.host ? `${sy.host}:${sy.port || 514}` : "";
@@ -1733,7 +1818,7 @@ function openSyslog() {
 }
 function closeSyslog() { $("syslogModal").hidden = true; }
 
-// ── NTP (dashboard edit modal) ──────────────────────────────────────────────
+// ── NTP (edit modal) ───────────────────────────────────────────────────────
 function fillNtp() {
   $("ntpServer").value = S.status?.ntp?.server || "";
 }
@@ -2139,19 +2224,29 @@ async function saveReboot(url, body, { btn, showError, close, then, busyMsg }) {
 
 // ── Boot ─────────────────────────────────────────────────────────────────
 function wire() {
+  // Navigation: the gear opens Settings, the back chevron returns to the dashboard.
+  $("btnSettings").onclick = () => go("settings");
+  $("btnBack").onclick = goBack;
+  $("btnBack").setAttribute("aria-label", t("nav.back"));   // the gear's own label is set by renderSettingsDot
+  // Esc leaves the same way the chevron does — but only when nothing else has claimed it:
+  // every modal and the schematic inspector install their own Esc handler, and one key closing a
+  // dialog AND leaving the screen behind it would be a single gesture doing two things.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || S.stage === "dashboard") return;
+    if (S.insp || MODALS.some((id) => !$(id).hidden)) return;
+    goBack();
+  });
+
   // The firmware version in the header is static DOM (renderHeaderMeta only rewrites its text), so
-  // it takes a direct handler rather than the delegation the rebuilt cards below need.
+  // it takes a direct handler rather than the delegation the rebuilt cards need.
   const vl = $("verLink");
   vl.setAttribute("aria-label", t("aria.ota"));
   vl.onclick = checkFirmwareUpdate;
 
-  // The dashboard card grid (#valueGroups) is rebuilt on every poll, so its interactive controls are
-  // wired by delegation: the ESP32 card's Hardware row opens the board editor, and its RX/TX
-  // dropdowns re-run pin auto-detection on change.
+  // The dashboard card grid (#valueGroups) is rebuilt on every poll, so its one interactive control
+  // is wired by delegation: tapping a value row (that has a description) expands/collapses its
+  // explainer accordion.
   $("valueGroups").addEventListener("click", (e) => {
-    const act = e.target.closest("[data-act]");
-    if (act && act.dataset.act === "board") { openBoard(); return; }
-    // Tapping a value row (that has a description) expands/collapses its explainer accordion.
     const desc = e.target.closest("[data-desc]");
     if (desc) toggleDesc(desc);
   });
@@ -2170,11 +2265,18 @@ function wire() {
   });
   $("inspClose").onclick = () => { S.insp = null; renderInspect(); };
 
-  $("valueGroups").addEventListener("change", (e) => {
+  // The ESP32 card (#settingsCards) is rebuilt every poll too, so its controls are delegated as
+  // well: the Hardware row opens the board modal, and the RX/TX dropdowns re-run pin auto-detection
+  // on change. (The OTA check is not here — it hangs off the version in the dashboard header.)
+  $("settingsCards").addEventListener("click", (e) => {
+    const act = e.target.closest("[data-act]");
+    if (act && act.dataset.act === "board") openBoard();
+  });
+  $("settingsCards").addEventListener("change", (e) => {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();
   });
-  // Connections tile (#connTile) is rebuilt every poll too — each row's pencil opens its own edit
-  // modal (WiFi/MQTT/Syslog/NTP), delegated the same way.
+  // The Connections tile (#connTile) is rebuilt every poll too — each row's pencil opens its own
+  // edit modal (WiFi/MQTT/Syslog/NTP), delegated the same way.
   $("connTile").addEventListener("click", (e) => {
     const edit = e.target.closest("[data-edit]");
     if (!edit) return;
@@ -2223,7 +2325,7 @@ function wire() {
       btn: "wfBtn",
       showError: wifiFieldError,
       close: closeWifi,
-      then: renderDashboard,
+      then: renderApp,
     });
   });
   $("wfSSID").addEventListener("input", () => { $("wfSSID").classList.remove("invalid"); $("wfSSIDError").hidden = true; });
@@ -2253,7 +2355,7 @@ function wire() {
       btn: "mqBtn",
       showError: (msg) => { $("mqBroker").classList.add("invalid"); $("mqError").textContent = msg; $("mqError").hidden = false; },
       close: closeMqtt,
-      then: renderDashboard,
+      then: renderApp,
       busyMsg: t("toast.verifying_mqtt"),   // the endpoint pre-flights the broker (DNS→TCP→CONNECT)
     });
   });
@@ -2333,7 +2435,7 @@ function wire() {
       btn: "slBtn",
       showError: (msg) => { $("slHost").classList.add("invalid"); $("slError").textContent = msg; $("slError").hidden = false; },
       close: closeSyslog,
-      then: renderDashboard,
+      then: renderApp,
       busyMsg: t("toast.saving_syslog"),
     });
   });
@@ -2349,7 +2451,7 @@ function wire() {
       btn: "ntpBtn",
       showError: (msg) => { $("ntpServer").classList.add("invalid"); $("ntpError").textContent = msg; $("ntpError").hidden = false; },
       close: closeNtp,
-      then: renderDashboard,
+      then: renderApp,
       busyMsg: t("toast.saving_ntp"),
     });
   });
@@ -2374,7 +2476,7 @@ function wire() {
       btn: "bdBtn",
       showError: (msg) => { $("bdError").textContent = msg; $("bdError").hidden = false; },
       close: closeBoard,
-      then: renderDashboard,
+      then: renderApp,
       busyMsg: t("toast.saving_board"),
     });
   });
@@ -2384,6 +2486,7 @@ async function boot() {
   applyStaticI18n();       // localise the static index.html markup (data-i18n) before the first render
   labelSchematicHits();    // name the clickable schematic parts from the INSPECT table
   wire();
+  go("dashboard");         // the app always opens on the dashboard (and this syncs the header to it)
   resumeOta();             // adopt a download already running (reload mid-update / second tab)
 
   if (window.WebSocket) {
@@ -2399,10 +2502,10 @@ async function boot() {
           const r = JSON.parse(e.data);
           if (r.type === "status") {
             S.status = r.status;
-            renderDashboard();
+            renderApp();
           } else if (r.type === "values") {
             S._values = r.values;
-            renderDashboard();
+            renderApp();
           } else if (Array.isArray(r.values)) {
             // Defensive only: every frame the firmware sends today is typed (http_status.cpp sends
             // "status"/"values" for both the live pushes and the "sub" snapshot), so this branch is
@@ -2412,7 +2515,7 @@ async function boot() {
             // and threw. Accept only an actual values array; drop unknown frames and keep the last
             // good values on screen.
             S._values = r.values;
-            renderDashboard();
+            renderApp();
           }
         } catch (err) {
           console.error("WS parse error", err);

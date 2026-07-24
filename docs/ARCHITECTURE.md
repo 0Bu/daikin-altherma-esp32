@@ -778,7 +778,7 @@ Structure:
     (always `false` until the boot-loop safe-mode feature lands). These answer "why did it reboot?"
     and "is the heap leaking?" from the LAN / `/events` WebSocket **on every boot** and **without a
     broker** — the MQTT heartbeat carries the same heap figures, but only when MQTT is configured. The
-    dashboard ESP32 card shows the reset reason (fault-coloured) and free heap.
+    Settings ESP32 card shows the reset reason (fault-coloured) and free heap.
   - **How a user hands a crash over.** `GET /status.last_crash` is `null` on a clean boot, else the
     boot-time cached reason/summary — with `coredump` re-read live from flash on every request
     (`diag_crash_info_live()`), so a dump cleared via `/coredump?clear=1` can't leave a stale banner or
@@ -868,11 +868,13 @@ This is distinct from the image anti-brick recovery above; both are covered in
 ## Web UI config flow
 
 `www/` is split for edit locality (index.html markup + style.css + app.js) and spliced into ONE
-self-contained, pre-gzipped page at build time (`inline_assets.cmake`). The UI is a **single
-dashboard** — no Settings page, no sub-screens; it drives the config endpoints in place:
+self-contained, pre-gzipped page at build time (`inline_assets.cmake`). The UI is **two screens**:
+the dashboard (the plant — schematic, model, values, no config at all) and **Settings** behind the
+header gear (the Connections tile + the ESP32 board card, flat, no sub-screens). Settings drives the
+config endpoints in place:
 
 - **WiFi** → `/set_wifi`, provisioned first from the captive `setup.html` and thereafter **re-editable
-  from a dashboard modal** off the Connections tile's WiFi row (pencil). Save validates SSID (1–32) +
+  from a modal** off the Connections tile's WiFi row in Settings. Save validates SSID (1–32) +
   password (empty or 8–63) both in the UI and via the host-tested `wifi_credentials_valid()`
   (`logic/config_model.hpp`), then persists + reboots. The dashboard shows the live link (the PHY
   standard + signal bars/RSSI + SSID on the Connections tile's WiFi row, coloured `--ok`/`--err`, and
@@ -903,7 +905,7 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
   `config_save()` writes the backup + flag **before** the credentials when arming and **after** them when
   clearing: each `nvs_set_*` commits separately, so this ordering is what keeps a power cut from arming
   untried credentials with no way back.
-- **MQTT** → `/set_mqtt` (edited from a dashboard modal off the Connections tile's MQTT row). Unlike Syslog, Save
+- **MQTT** → `/set_mqtt` (edited from a modal off the Connections tile's MQTT row). Unlike Syslog, Save
   **pre-flights the broker synchronously** (DNS → TCP port → a short-lived esp-mqtt connect/auth,
   heap-guarded) and only persists + reboots on success — a bad host/port/password is rejected inline.
   An empty username+password **keeps** the stored credentials (the modal never prefills them, so empty
@@ -914,7 +916,7 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
   anonymous one — disabling MQTT and re-adding the broker both arrive with empty credentials, so both
   keep, and the kept credentials then reject every plaintext broker with "Credentials require
   mqtts://" (only a flash erase got out of it).
-- **Syslog** → `/set_syslog` (edited from a dashboard modal off the Connections tile's Syslog row).
+- **Syslog** → `/set_syslog` (edited from a modal off the Connections tile's Syslog row).
   Save only validates the port range (no request-path network block); an empty host disables
   forwarding. An **unchanged** host/port short-circuits to `{"ok":true,"reboot":false}` — no NVS
   write, no reboot — the same shape as `/set_mqtt` and `/set_ntp`, since persisting identical values
@@ -923,7 +925,7 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
   trial.) DNS resolution and the advisory reachability probe run in the syslog task and surface
   on that row via `/status.syslog` (`resolved`/`reachable`/`error`) — coloured `--ok`, `--warn`
   ("host not answering ping"), or `--err` (DNS lookup failed) — after the reboot.
-- **NTP** → `/set_ntp` (edited from a dashboard modal off the Connections tile's NTP row), the same
+- **NTP** → `/set_ntp` (edited from a modal off the Connections tile's NTP row), the same
   persist-then-reboot shape as Syslog: no request-path network probe (the SNTP client resolves +
   retries on its own task after reboot), and an **empty server is accepted** — `config_load()` reads it
   on the next boot as "reset to the `CONFIG_DAIKIN_NTP_SERVER` compile-time default" rather than a
@@ -953,7 +955,7 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
   mid-update keeps showing the progress.
 
 The board/platform is reported by `/status.platform` — the chip name
-shows on the dashboard ESP32 card.
+shows on the Settings ESP32 card.
 
 ## Memory constraints
 
