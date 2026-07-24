@@ -118,9 +118,13 @@ scripts/require-signed.sh build/daikin-altherma-esp32.bin
 cd build && esptool --chip esp32s3 -p <port> write_flash "@flash_args"
 ```
 
-The reference board is the **Seeed XIAO ESP32-S3** — native USB-Serial/JTAG, flashes without a
-BOOT-button dance. Its X10A pins default to **RX=44 (D7) / TX=43 (D6)**; GPIO16/17 are not
-broken out on the XIAO.
+Two boards are documented, and they are the reference for *different* things. The compile-time X10A
+pin defaults are the **Seeed XIAO ESP32-S3**'s — **RX=44 (D7) / TX=43 (D6)** — so that board finds
+the bus unconfigured; GPIO16/17 are not broken out on it. The **M5Stack AtomS3 Lite** is what the
+user-facing wiring (README table, `docs/WIRING.md` diagram) is written for, because its Grove
+HY2.0-4P port carries GND/5 V/G2/G1 and reaches X10A with no soldering — but **RX=1 / TX=2 must be
+picked once** in the UI, since detection probes only the cached pair, the Kconfig pair and each of
+them swapped. Both flash over native USB-Serial/JTAG without a BOOT-button dance.
 
 ## Architecture (component map)
 
