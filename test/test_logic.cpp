@@ -2860,7 +2860,11 @@ static void test_ota_manifest() {
     const char* real =
         "{\n  \"name\": \"daikin-altherma-esp32\",\n  \"version\": \"1.0.0\",\n"
         "  \"new_install_prompt_erase\": true,\n"
-        "  \"builds\": [{\"chipFamily\":\"ESP32-S3\",\"parts\":[{\"path\":\"x-merged.bin\",\"offset\":0}]}]\n}\n";
+        "  \"builds\": [{\"chipFamily\":\"ESP32-S3\",\"parts\":["
+        "{\"path\":\"x-web-bootloader.bin\",\"offset\":0},"
+        "{\"path\":\"x-web-partition-table.bin\",\"offset\":32768},"
+        "{\"path\":\"x-web-ota_data_initial.bin\",\"offset\":61440},"
+        "{\"path\":\"x.bin\",\"offset\":131072}]}]\n}\n";
     CHECK(manifest_version(real, std::strlen(real), v, sizeof(v)) && std::string(v) == "1.0.0");
 
     // Whitespace-free and reordered variants still parse.

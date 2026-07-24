@@ -522,7 +522,8 @@ block butted against the round CTA and steps cards below.
 
 - **CTA card** — the `<esp-web-install-button manifest="manifest.json">` with a `slot="activate"`
   button styled as the app's `.btn.primary` (brand fill, white, `--shadow-cta`, `--focus-ring` on
-  `:focus-visible`), plus a `--muted` note naming the target and that it is a full flash.
+  `:focus-visible`), plus a `--muted` note naming the target and the exact configuration boundary:
+  a no-Erase update preserves NVS; choosing Erase deliberately resets it.
   esp-web-tools' `--esp-tools-button-*` custom properties are **not** used and must not come back:
   they style only the element's *own* default button, which `slot="activate"` replaces — setting
   them beside a slotted button leaves a native grey browser button sitting on the brand page (the
@@ -543,7 +544,8 @@ block butted against the round CTA and steps cards below.
   flex row and its text is wrapped in a single `<span>`: without the wrapper every inline node of the
   sentence (text, `<code>`, `<a>`) becomes its own flex item and the step lays out as a row of
   columns. `<code>` chips are `--soft` on `--line` and wrap (`overflow-wrap: anywhere`) so a long
-  hostname never widens the card.
+  hostname never widens the card. The first step distinguishes a first install / explicit Erase
+  (join the setup AP) from a no-Erase update (the stored WiFi reconnects).
 - **Provenance banner** — the same `--warn`-accented banner of §5.3 item 0, in two variants, because
   the identical page is served from three paths (`scripts/build-pages.sh`): a `…/PR/<N>/` preview
   says the build is that PR's, and `…/dev/` says it is the latest merge to `main` rather than a cut

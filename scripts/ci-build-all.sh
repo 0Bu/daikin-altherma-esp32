@@ -3,7 +3,9 @@
 # key (if present), and stage the artifacts the web installer + OTA consume into dist/:
 #   daikin-altherma-esp32<suffix>.bin          signed app image (OTA pulls this)
 #   daikin-altherma-esp32<suffix>-merged.bin   full-flash image, signed app embedded at its
-#                                              flash_args offset (web installer flashes this)
+#                                              flash_args offset (manual factory-reset flash)
+#   daikin-altherma-esp32<suffix>-web-*.bin    sparse Web Serial parts; their erase sectors skip
+#                                              NVS unless the user explicitly chooses Erase
 #   daikin-altherma-esp32<suffix>.elf          unstripped ELF — decodes a core dump from THIS build
 #   daikin-altherma-esp32<suffix>.elf.sha256   integrity checksum of the ELF
 #   manifest.json                              esp-web-tools builds[] + OTA version field
@@ -61,14 +63,14 @@ for t in "${TARGETS[@]}"; do
     # The signed image must land back on $app itself: flash_args flashes the app BY PATH
     # ("0x20000 daikin-altherma-esp32.bin"), so merge_bin below embeds whatever is at that path.
     # Leave the raw linker output there and the browser installer ships an app that aborts in
-    # esp_secure_boot_init_checks before app_main — a crash-loop with no fallback slot left.
+    # esp_secure_boot_init_checks before app_main — a crash-loop with no bootloader rollback record.
     if [ -f "$SIGN_KEY" ]; then
         espsecure.py sign_data --version 2 --keyfile "$SIGN_KEY" --output "build/daikin-signed.bin" "$app"
         cp "build/daikin-signed.bin" "$app"
         cp "$app" "$DIST/daikin-altherma-esp32${sfx}.bin"
     else
         echo "WARNING: no OTA_SIGNING_KEY_FILE — shipping UNSIGNED $t (no OTA/preview on main)" >&2
-        echo "WARNING: the -merged.bin installer image is UNSIGNED too — it crash-loops before" >&2
+        echo "WARNING: the browser installer image is UNSIGNED too — it crash-loops before" >&2
         echo "WARNING: app_main on this signature-checking config. Do NOT flash it to a board." >&2
         cp "$app" "$DIST/daikin-altherma-esp32${sfx}.bin"
     fi
@@ -77,7 +79,11 @@ for t in "${TARGETS[@]}"; do
     sz="$(stat -f%z "$app" 2>/dev/null || stat -c%s "$app")"
     [ "$sz" -le "$APP_SIZE_LIMIT" ] || { echo "app image for $t too big: $sz > $APP_SIZE_LIMIT" >&2; exit 1; }
 
-    # Full-flash merged image for the browser installer.
+    # Canonical full-flash image. Besides remaining useful for an intentional factory-reset flash,
+    # merge_bin applies any image-header transformations esp-web-tools cannot do in the browser.
+    # The Web Serial manifest does NOT flash this whole file: merge_bin fills every gap with 0xff,
+    # including nvs@0x9000, so writing it at offset 0 destroys the configuration even when the user
+    # declines the separate whole-chip Erase prompt.
     merged="$DIST/daikin-altherma-esp32${sfx}-merged.bin"
     ( cd build && esptool --chip "$t" merge_bin -o "../$merged" @flash_args )
 
@@ -94,6 +100,34 @@ for t in "${TARGETS[@]}"; do
         scripts/require-signed.sh build/merged-app.bin
     fi
 
+    # Stage only the byte ranges named by flash_args for Web Serial. Carving them from the merged
+    # image (rather than copying the inputs) retains merge_bin's header preparation, while separate
+    # manifest parts leave NVS and every other gap untouched on a no-Erase update.
+    web_parts=""
+    web_part_count=0
+    while read -r off rel; do
+        src="build/$rel"
+        [ -f "$src" ] || { echo "flash_args part does not exist: $src" >&2; exit 1; }
+        part_size="$(stat -f%z "$src" 2>/dev/null || stat -c%s "$src")"
+        part_offset=$((off))
+        base="$(basename "$rel")"
+        if [ "$base" = "$(basename "$app")" ]; then
+            web_name="daikin-altherma-esp32${sfx}.bin"
+        else
+            web_name="daikin-altherma-esp32${sfx}-web-$base"
+        fi
+        dd if="$merged" of="$DIST/$web_name" bs=1 skip="$part_offset" count="$part_size" status=none
+        web_parts="${web_parts:+$web_parts,}{\"path\":\"$web_name\",\"offset\":$part_offset}"
+        web_part_count=$((web_part_count + 1))
+    done < <(awk '$1 ~ /^0x[0-9a-fA-F]+$/ { print $1, $2 }' build/flash_args)
+    [ "$web_part_count" -gt 0 ] || { echo "no flash parts found in build/flash_args" >&2; exit 1; }
+
+    # The app served to OTA and the app carved for Web Serial are now the exact same bytes. Re-run
+    # the signing guard on that final staged file, not only on the pre-merge input.
+    if [ -f "$SIGN_KEY" ]; then
+        scripts/require-signed.sh "$DIST/daikin-altherma-esp32${sfx}.bin"
+    fi
+
     # Archive the unstripped ELF (+ its checksum) so a core dump from THIS build can be symbolized
     # later (scripts/decode-coredump.sh). The ELF is the ONLY artifact that decodes a dump — the
     # shipped .bin can't — and it's matched to a dump by the app_elf_sha256 the dump embeds. Keep it
@@ -102,7 +136,7 @@ for t in "${TARGETS[@]}"; do
     ( cd "$DIST" && sha256sum "daikin-altherma-esp32${sfx}.elf" > "daikin-altherma-esp32${sfx}.elf.sha256" )
 
     cf="$(chipfamily "$t")"
-    builds_json="${builds_json:+$builds_json,}{\"chipFamily\":\"$cf\",\"parts\":[{\"path\":\"daikin-altherma-esp32${sfx}-merged.bin\",\"offset\":0}]}"
+    builds_json="${builds_json:+$builds_json,}{\"chipFamily\":\"$cf\",\"parts\":[$web_parts]}"
 done
 
 # One manifest serves both the installer (builds[]) and OTA (version). esp-web-tools reads
@@ -115,4 +149,5 @@ cat > "$DIST/manifest.json" <<EOF
   "builds": [$builds_json]
 }
 EOF
+scripts/check-web-installer-plan.py "$DIST/manifest.json" partitions.csv
 echo "staged dist/ for $VERSION"

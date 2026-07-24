@@ -4,9 +4,9 @@
 # This build config requires a Secure Boot v2 signature on the running app
 # (CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT — sdkconfig.defaults). An unsigned image does NOT
 # boot: it aborts in check_signature_on_update_check() BEFORE app_main, so it crash-loops with no
-# app-level recovery possible (see docs/SECURITY.md → Boot recovery). A full `@flash_args` flash of
-# such an image also wipes otadata + the other OTA slot, so there is no previous firmware left to
-# fall back to. The only safe posture is therefore: never let an unsigned image reach the chip.
+# app-level recovery possible (see docs/SECURITY.md → Boot recovery). A full `@flash_args` flash
+# also blanks otadata, so the bootloader has no rollback record for a previous image. The only safe
+# posture is therefore: never let an unsigned image reach the chip.
 #
 # Run this on a .bin immediately before `esptool write_flash`. It verifies a valid RSA signature
 # block is present (via `espsecure signature-info-v2`) and exits non-zero — with the exact signing
@@ -45,7 +45,7 @@ cat >&2 <<EOF
 require-signed: REFUSING to flash — '$bin' is NOT signed.
 
 An unsigned image crash-loops at boot on this config (aborts before app_main) and cannot be
-recovered by the firmware; a full flash of it also destroys the previous firmware on the chip.
+recovered by the firmware; a full flash also removes the bootloader's rollback record.
 
 Sign it first with the offline RSA-3072 key, then flash the signed image:
 

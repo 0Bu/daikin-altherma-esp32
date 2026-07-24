@@ -15,8 +15,10 @@ embedded web UI. ESP32-S3 only.
 
 ## Setup
 
-1. Flash: [web installer](https://0bu.github.io/daikin-altherma-esp32/).
-2. WiFi: join AP `daikin-altherma-esp32-setup` (captive portal / `192.168.4.1`).
+1. Flash: [web installer](https://0bu.github.io/daikin-altherma-esp32/). An update without
+   **Erase** preserves the existing configuration.
+2. On a first install or after **Erase**, join AP `daikin-altherma-esp32-setup`
+   (captive portal / `192.168.4.1`).
 3. Configure at `http://daikin-altherma-esp32.local`:
    - Set the MQTT `host:port`.
    - Model and X10A protocol are **auto-detected**. So are the RX/TX pins on a XIAO ESP32-S3, whose

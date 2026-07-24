@@ -76,9 +76,10 @@ comment atop [`.github/workflows/build.yml`](../.github/workflows/build.yml).
 
 > **⚠️ The Pages site is PUBLIC even when the repository is private.** Restricting who can view a
 > Pages site requires an **organization on GitHub Enterprise Cloud**; it is not available to a user
-> account on GitHub Pro. So the signed firmware, the merged installer image and `manifest.json` are
-> downloadable by anyone on the internet while the source stays private. Git tags and GitHub
-> Releases are *not* public on a private repo — only accounts with repo read access see those.
+> account on GitHub Pro. So the signed firmware, the browser-installer parts, the manual merged
+> image and `manifest.json` are downloadable by anyone on the internet while the source stays
+> private. Git tags and GitHub Releases are *not* public on a private repo — only accounts with
+> repo read access see those.
 
 > **Bringing the site up the first time — the order matters.** A repo-settings change does not itself
 > run a workflow, and the Pages source cannot be pointed at a branch that does not exist yet. So:
@@ -95,16 +96,20 @@ comment atop [`.github/workflows/build.yml`](../.github/workflows/build.yml).
 > atomic whole-site Actions deployment cannot. Setting the source to "GitHub Actions" instead
 > serves nothing, since no workflow uploads a Pages artifact.
 
-Flash by hand (needs `brew install esptool`). Use the **merged** image — it bakes in the correct
-bootloader offset, so one command flashes the whole esp32s3 image. This erases `nvs` (you re-enter
-WiFi + model config once):
+The Web Serial installer writes separate manifest parts around `nvs@0x9000`. Declining its
+**Erase** option therefore preserves WiFi, MQTT, board and X10A configuration during an update;
+choosing **Erase** deliberately performs a factory reset first.
+
+For a manual factory-reset flash (needs `brew install esptool`), use the **merged** image — it bakes
+in the correct bootloader offset, so one command flashes the whole esp32s3 image. Its `0xff` gap
+padding overwrites `nvs`, so you re-enter the configuration once:
 
 ```bash
 esptool --chip esp32s3 write_flash 0x0 \
   daikin-altherma-esp32-<version>-merged.bin
 ```
 
-To preserve `nvs`, flash the separate parts from a local `build/`:
+To preserve `nvs` manually, flash the separate parts from a local `build/`:
 `cd build && esptool --chip esp32s3 write_flash "@flash_args"`.
 
 ---

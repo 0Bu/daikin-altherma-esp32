@@ -798,7 +798,9 @@ Structure:
 
 - **Target:** esp32s3 only (`scripts/ci-build-all.sh`). No BLE is used, so the target is just "WiFi ESP32-S3s with ≥4 MB flash". Uses native USB-Serial/JTAG console.
 - **Dual-OTA `partitions.csv`** sized to fill 4 MB; app at `0x20000`; `nvs` at `0x9000` untouched
-  by OTA so WiFi + model config survive upgrades.
+  by OTA so WiFi + model config survive upgrades. The Web Serial manifest likewise publishes
+  sparse `flash_args` parts around NVS; its build-time sector-overlap check makes the no-Erase path
+  preserve the same configuration.
 - **Core Dump to Flash (Crash Archiving)**:
   - Enabled via `CONFIG_ESP_COREDUMP_ENABLE` and `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH` in `sdkconfig.defaults`. The format is ELF — the only one IDF v6 emits, so no `CONFIG_*` selects it.
   - A dedicated `coredump` partition of size `0xc000` (48 KB) is placed at offset `0x12000` (in the unused gap between `phy_init` and `ota_0`), leaving the start offsets of `nvs`, `otadata`, `phy_init`, `ota_0`, and `ota_1` completely untouched for backward compatibility and OTA safety.
@@ -873,11 +875,13 @@ Structure:
   refused), and the **connectivity health gate** (commit only after a base window AND getting
   online, else stay `PENDING_VERIFY` → a reboot rolls back). Publishing runs on a private repo too
   (the Pages site is public either way — see [`README.md`](README.md)); with nothing served a check
-  honestly reports "up to date". Web installer publishes merged bin + a single `manifest.json`, which
-  doubles as the OTA feed (esp-web-tools loads the same file).
+  honestly reports "up to date". The web installer carves prepared sparse parts from the merged
+  image so a no-Erase flash skips NVS; the single `manifest.json` lists those parts and also doubles
+  as the OTA feed (esp-web-tools and the device load the same file).
 - **Boot recovery / anti-brick** — an unsigned app aborts pre-`app_main`, so only the bootloader can
-  recover, and only via a previous OTA slot; a direct USB flash of an unsigned build both crash-loops
-  and wipes the fallback. Contained by the pre-flash guard `scripts/require-signed.sh`. Full model,
+  recover, and only via a recorded previous OTA slot; a direct USB flash of an unsigned build both
+  crash-loops and blanks the otadata rollback record. Contained by the pre-flash guard
+  `scripts/require-signed.sh`. Full model,
   including the three failure modes and the health gate, in [SECURITY.md](SECURITY.md) → Boot recovery.
 - **PR preview installer**: every same-repo PR publishes a signed preview at
   `…/PR/<N>/` on the `gh-pages` branch (fork PRs get no signing key → no preview). A preview is

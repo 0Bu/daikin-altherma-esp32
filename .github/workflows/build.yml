@@ -25,8 +25,9 @@ name: build
 #   • GitHub Pages (the root installer site, the dev channel AND the per-PR previews) is PUBLIC —
 #     readable by anyone on the internet, regardless of repo visibility. Making a Pages site
 #     access-controlled needs an ORGANIZATION on GitHub Enterprise Cloud; it is not available to a
-#     user account on Pro. So the signed firmware, the merged installer image and manifest.json are
-#     world-downloadable while the SOURCE stays private. That is an accepted trade, not an oversight.
+#     user account on Pro. So the signed firmware, browser-installer parts, manual merged image and
+#     manifest.json are world-downloadable while the SOURCE stays private. That is an accepted trade,
+#     not an oversight.
 #   • Git tags + GitHub Releases are NOT public on a private repo — only accounts with repo read
 #     access see them. They are un-gated anyway because they are what makes the OTA release feed
 #     WORK: the release step below is the only thing that creates a v* tag, next-version.sh derives
@@ -147,7 +148,7 @@ jobs:
           if [ -z "$before" ] || ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
             changed=yes
           elif git diff --name-only "$before" "${{ github.sha }}" \
-               | grep -qE '^(main/|CMakeLists\.txt$|sdkconfig\.defaults$|partitions\.csv$|version\.txt$|\.github/workflows/build\.yml$|scripts/ci-build-all\.sh$|scripts/build-pages\.sh$|scripts/next-version\.sh$)'; then
+               | grep -qE '^(main/|CMakeLists\.txt$|sdkconfig\.defaults$|partitions\.csv$|version\.txt$|\.github/workflows/build\.yml$|scripts/ci-build-all\.sh$|scripts/check-web-installer-plan\.py$|scripts/build-pages\.sh$|scripts/next-version\.sh$)'; then
             changed=yes
           else
             changed=no
@@ -207,8 +208,8 @@ jobs:
         with:
           esp_idf_version: v6.0.2
           target: esp32s3
-          # ci-build-all.sh builds esp32s3 target and stages signed + merged bins + manifest.json
-          # into dist/. OTA pulls daikin-altherma-esp32.bin.
+          # ci-build-all.sh builds esp32s3 and stages the signed OTA app, sparse NVS-preserving
+          # Web Serial parts, the manual full-flash merged image and manifest.json into dist/.
           #
           # Pass the STAMPED version (what version.txt above put into the image). OTA compares the
           # manifest version to the version the running app reports, so publishing a manifest the
