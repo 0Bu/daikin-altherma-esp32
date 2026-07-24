@@ -60,9 +60,33 @@ main { flex: 1; }
   font-size: 19px; font-weight: 650; letter-spacing: -.2px; color: var(--fg); line-height: 1.2;
 }
 .hdr-id { flex: 1; min-width: 0; }
-/* IP address (or the mDNS hostname while offline) under the product name — board identity, not a
-   WiFi-row fact, so it lives in the header rather than the Connections tile below. */
-.hdr-ip { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+/* Meta line under the product name: IP address (or the mDNS hostname while offline) · firmware
+   version · inline OTA status. Board identity, not WiFi-row facts, so it lives in the header rather
+   than the Connections tile below. Only the IP may ellipsise — the version and the OTA readout are
+   short and fixed-width-ish, and truncating THOSE would hide the number the user is watching. */
+.hdr-meta {
+  display: flex; align-items: center; min-width: 0; margin-top: 2px;
+  font-size: 12.5px; color: var(--muted); line-height: 1.35;
+}
+.hdr-ip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.hdr-sep { flex: none; margin: 0 5px; }
+/* The version doubles as the OTA trigger (DESIGN.md §5.4): it stays muted like the rest of the line
+   — an update is offered by the confirm dialog, not by colouring the header — and only picks up the
+   brand tint on hover/focus, the same affordance the tappable value rows use. */
+.verlink {
+  flex: none; font: inherit; color: inherit; background: none; border: 0; padding: 0;
+  cursor: pointer; white-space: nowrap;
+}
+.verlink:hover { color: var(--brand-strong); text-decoration: underline; }
+.verlink:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 3px; }
+/* Inline OTA readout (ring + "78%" / "up to date" / an error), replacing the toast stack. Collapses
+   to nothing when empty, so the meta line is just "IP · version" whenever no update is in flight. */
+.otastat { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; white-space: nowrap; }
+.otastat:empty { display: none; }
+.otastat svg { display: block; flex: none; }
+.otastat.err { color: var(--err); }
+.otaspin { animation: otaspin .9s linear infinite; transform-origin: 50% 50%; }
+@keyframes otaspin { to { transform: rotate(360deg); } }
 
 /* logo mark: rounded brand square holding the "waves" glyph */
 .logo {
@@ -427,7 +451,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   .app { max-width: 820px; }
   body { font-size: 17px; }
   .hdr-name { font-size: 22px; }
-  .hdr-ip { font-size: 14.5px; }
+  .hdr-meta { font-size: 14.5px; }
   .section-label, .conn-label { font-size: 13.5px; }
   .conn-val, .vrow-val, .vname { font-size: 17px; }
   .conn-dbm, .vrow-label { font-size: 16.5px; }

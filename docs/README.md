@@ -351,8 +351,9 @@ Derived sensors (COP etc.) and a sample dashboard: [HOME_ASSISTANT.md](HOME_ASSI
 Pull-based: the device fetches `manifest.json` from `CONFIG_DAIKIN_OTA_MANIFEST_URL` (default GitHub
 Pages), compares its `version` to the running firmware, and on confirmation downloads its image
 `daikin-altherma-esp32.bin` via `esp_https_ota` into the inactive OTA slot, then reboots. Tap the
-**Firmware** row on the ESP32 card to check; the UI then shows download progress and reconnects
-after the reboot. Both the check and the download run on their own task, never on the HTTP worker.
+firmware **version** in the header (next to the IP address) to check; the UI then shows the download
+progress inline beside that version, waits for the board to come back up and reloads itself onto the
+new UI. Both the check and the download run on their own task, never on the HTTP worker.
 
 > **What you need for it to find anything:** a reachable `manifest.json` + signed `.bin`. CI builds
 > and stages both (`scripts/ci-build-all.sh`) and publishes them to GitHub Pages once the repository

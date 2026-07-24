@@ -943,9 +943,14 @@ dashboard** — no Settings page, no sub-screens; it drives the config endpoints
   RX/TX pins are **persisted** (a manual pick survives reboot); the model is session-only. Protocol is auto-detected
   (no UI control), the poll interval is fixed at 1 s (not sent), and labels are English-only (no
   `lang`). `/set_hp` accepts only `{profile, rx, tx}`.
-- **Firmware / OTA** — tapping the version on the ESP32 card runs the real update flow: `GET
-  /ota/check`, poll `GET /ota/status` until the check finishes, confirm, `POST /ota/update`, then
-  poll again showing download progress and hand off to the shared reboot-reconnect poll.
+- **Firmware / OTA** — tapping the version in the header meta line (beside the IP) runs the real
+  update flow: `GET /ota/check`, poll `GET /ota/status` until the check finishes, confirm, `POST
+  /ota/update`, then poll again rendering the download progress **inline next to that version**
+  (a small ring + "n%", not a toast). On `done` it does **not** use the shared reboot-reconnect poll
+  the config saves use — an OTA replaces the served UI itself, so `otaWaitReboot` waits for the board
+  to come back (version changed / `uptime_s` went backwards / seen down→up) and **reloads the page**.
+  A download already running on the device is adopted on page load (`resumeOta`), so a reload
+  mid-update keeps showing the progress.
 
 The board/platform is reported by `/status.platform` — the chip name
 shows on the dashboard ESP32 card.
