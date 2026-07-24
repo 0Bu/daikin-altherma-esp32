@@ -43,9 +43,9 @@ which is exactly what differs between versions. 10.3.0 replaced the DTR/RTS rese
 fail on real hardware, and the reference board is native USB-Serial/JTAG, where reset behaviour is
 most fragile.
 
-**There is no PR preview to click.** [`build.yml`](../../../.github/workflows/build.yml) gates the
-preview publish on `github.event.repository.private == false`; while the repo is private, local is
-the only path.
+**A PR preview may not exist to click.** [`build.yml`](../../../.github/workflows/build.yml) gates the
+preview publish on `github.event.repository.private == false` (and a fork PR gets no signing key
+either way), so on a private repo or a fork, local is the only path.
 
 ### 2.1 Check the contract against the dependency's own source
 

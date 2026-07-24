@@ -53,7 +53,7 @@ menu "Daikin Altherma Configuration"
         string "MQTT broker URI (Home Assistant)"
         default ""
         help
-            MQTT broker for the Home Assistant bridge, e.g. "mqtt://203.0.113.27:1883". A bare
+            MQTT broker for the Home Assistant bridge, e.g. "mqtt://192.168.1.10:1883". A bare
             "host:port" is also accepted. Empty = MQTT disabled. NVS "mqtt_uri" overrides this.
 
     config DAIKIN_MQTT_USERNAME

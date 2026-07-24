@@ -68,7 +68,9 @@ means the series is **intermittent**, which is itself a finding — not a reason
    query_range: count by (host) ({topic=~"daikin.*"})   start=now-7d step=2h
    ```
    More than one `host` in the window ⇒ series breaks, inflated cardinality, and `rate()`/`increase()`
-   wrong across the seam. (Fix lives in the cluster repo's `telegraf/values.yaml`, not here.)
+   wrong across the seam. The fix is to pin the label in the collector's own config (for telegraf, a
+   static `host` in `[global_tags]` / `agent.hostname`) — it lives wherever that config is deployed,
+   never in this repo.
 
 4. **What never arrives at all.** Compare `daikin_heartbeat_bus_values` (what the device decoded) with
    the number of `daikin_altherma_*` series that exist. The telegraf `json` parser keeps **numeric

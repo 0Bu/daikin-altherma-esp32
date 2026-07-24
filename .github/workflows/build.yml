@@ -1,12 +1,15 @@
 name: build
 
 # PUBLIC-ONLY PUBLISHING GATE
-# While this repo is PRIVATE, CI still runs the full pipeline (host logic tests + the esp32s3
-# firmware build + artifact upload) but publishes NOTHING outward: no git tags, no GitHub
-# Releases, no GitHub Pages (neither the root installer site nor per-PR previews). Every such
-# step is gated on `github.event.repository.private == false`. The moment the repo is flipped to
-# PUBLIC, these steps re-enable automatically — no edit to this file required. Until then the
-# firmware version stays at the version.txt floor (1.0.0) because no v* tags are ever created.
+# On a PRIVATE repo, CI still runs the full pipeline (host logic tests + the esp32s3 firmware build
+# + artifact upload) but publishes NOTHING outward: no git tags, no GitHub Releases, no GitHub Pages
+# (neither the root installer site nor per-PR previews). Every such step is gated on
+# `github.event.repository.private == false`, evaluated per run — so flipping the repo to PUBLIC
+# re-enables them with no edit to this file. NOTE: a visibility change does not itself trigger a
+# run. The first publish needs one `workflow_dispatch` (or a firmware-relevant push), and that run
+# is what CREATES the gh-pages branch the Pages source must then be pointed at — see docs/README.md
+# ("Bringing the site up the first time"). Until a v* tag exists the firmware version stays at the
+# version.txt floor (1.0.0).
 
 on:
   push:

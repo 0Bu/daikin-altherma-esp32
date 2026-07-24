@@ -16,8 +16,8 @@ concurrency:
 
 jobs:
   cleanup:
-    # Gated on public: while the repo is private no PR preview is ever published (see build.yml),
-    # so there is nothing to clean and no gh-pages branch should be touched. Re-enables on public.
+    # Gated on public to mirror build.yml: a private repo publishes no PR preview at all, so there is
+    # nothing to clean and no gh-pages branch should be created just to delete from it.
     if: github.event.pull_request.head.repo.full_name == github.repository && github.event.repository.private == false
     runs-on: ubuntu-latest
     steps:

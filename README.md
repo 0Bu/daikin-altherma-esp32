@@ -18,6 +18,8 @@ embedded web UI. ESP32-S3 only.
 3. Configure at `http://daikin-altherma-esp32.local`:
    - Set the MQTT `host:port`.
    - Model, X10A protocol and RX/TX pins are **auto-detected**.
+   - The UI follows your browser language (**German** for a `de*` browser, else English). Heat-pump
+     value labels stay English — they are the X10A register names.
 
 ## Wiring — X10A (breaker OFF)
 
@@ -45,6 +47,7 @@ Visual wiring diagram + picking pins on a different board: [docs/WIRING.md](docs
 | [docs/FEATURES.md](docs/FEATURES.md) | Catalog of platform features (Secure Boot, OTA, WebSocket, diagnostics, …) |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model + OTA signing/key lifecycle |
 | [docs/MCP.md](docs/MCP.md) | Planned read-only MCP surface (not yet implemented) |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | What's useful to report, the two local verification gates, how PRs land |
 
 ## Notes
 

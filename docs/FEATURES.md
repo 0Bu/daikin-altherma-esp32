@@ -152,10 +152,16 @@ See [`ARCHITECTURE.md` → OTA, signing, partitions](ARCHITECTURE.md) and
   The manifest and the image are separately-controlled artifacts, so only the second check catches a
   host that advertises `9.9.9` while serving a signed `1.0.0`. Ordering is numeric
   (`1.10.0 > 1.9.0` — a `strcmp` gets this backwards) and **fails closed** on an unparseable version.
-- **🔭 The feed itself**: CI builds, signs and stages `manifest.json` + the image, but every
-  publishing step is gated on the repository being **public** — while it is private nothing is
-  served and a check honestly reports "up to date". Point `CONFIG_DAIKIN_OTA_MANIFEST_URL` /
-  `CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL` at any HTTPS host to run your own.
+- **🟡 The feed itself**: the publishing half is written and works — CI builds, signs and stages
+  `manifest.json` + the image and pushes them to the `gh-pages` branch — but **no feed is live yet**,
+  so the device-side client above currently has nothing to find. Two preconditions outside the
+  firmware are open: the repository must be **public** (every publishing step is gated on
+  `repository.private == false`) and its Pages source must point at `gh-pages`
+  ([`README.md`](README.md)) — which cannot be set before a publish creates that branch. **TODO:**
+  complete both, then verify `CONFIG_DAIKIN_OTA_MANIFEST_URL` returns 200 (at the time of writing it
+  is a 404) and promote this entry to ✅. Until then a check honestly reports "up to date" rather than
+  failing. Point `CONFIG_DAIKIN_OTA_MANIFEST_URL` / `CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL` at any
+  HTTPS host to run your own.
 - **Version pipeline**: [`next-version.sh`](../scripts/next-version.sh) auto-increments a monotonic
   patch above the latest `v*` tag (with `version.txt` as a manual floor). CI stamps the version it is
   actually publishing into `version.txt` *before* the build, so ESP-IDF bakes that exact string into
@@ -656,9 +662,11 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   installer at `PR/<N>/` — an atomic whole-site Actions deployment cannot — so the
   `configure-pages`/`deploy-pages` path is deliberately absent rather than redundant: a repo's Pages
   source is either a branch or Actions, never both.
-- **✅ Public-only publishing gate.** While the repo is private, CI builds/tests/uploads but publishes
-  nothing outward (no tags, releases, or Pages installer); every such step is gated on
-  `repository.private == false` and re-enables automatically when the repo goes public.
+- **✅ Public-only publishing gate.** Every outward publish (tags, releases, Pages installer, per-PR
+  previews) is gated on `repository.private == false`; on a private repo CI still builds/tests/uploads
+  the run artifact but serves nothing. The gate is evaluated per run, so it needs no edit when the
+  visibility changes — but a visibility change alone triggers no run: one `workflow_dispatch` or push
+  is what actually brings the site up ([`README.md`](README.md)).
 - **Managed components** ([`idf_component.yml`](../main/idf_component.yml)): `mdns`, `cjson` and `mqtt`
   are pulled as managed components (the latter two were extracted from IDF core in v6.0).
 
