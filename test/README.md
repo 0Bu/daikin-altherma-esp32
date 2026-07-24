@@ -17,7 +17,7 @@ scripts/run-mock-tests.sh
 
 Uses `cmake` + `ctest` when present, else a direct `g++`/`clang++` compile of the single
 translation unit ([`test_logic.cpp`](test_logic.cpp)) with `-std=c++17 -Wall -Wextra -Werror`.
-CI runs the same thing as the `logic-test` job, gating the esp32s3 firmware build — a logic
+CI runs the same thing as the first step of the `gates` job, gating the esp32s3 firmware build — a logic
 regression fails in seconds instead of after a full ESP-IDF build.
 
 ## Covered

@@ -179,7 +179,7 @@ logic/              → IDF-free, host-tested pure logic (see below)
 
 Everything that is pure computation lives in IDF-free headers under
 `main/logic/`, so `scripts/run-mock-tests.sh` compiles + runs it with plain g++/clang++ (no
-ESP-IDF, no board) and CI gates the firmware build on it (`logic-test` job). For this project the
+ESP-IDF, no board) and CI gates the firmware build on it (first step of the `gates` job). For this project the
 host-testable core is unusually large and valuable, because the risky parts are all pure decoding:
 
 - `logic/crc.hpp` — the X10A checksum for protocol I and S. Golden-vector tested against frames
@@ -894,10 +894,14 @@ Structure:
   crash-loops and blanks the otadata rollback record. Contained by the pre-flash guard
   `scripts/require-signed.sh`. Full model,
   including the three failure modes and the health gate, in [SECURITY.md](SECURITY.md) → Boot recovery.
-- **PR preview installer**: every same-repo PR publishes a signed preview at
-  `…/PR/<N>/` on the `gh-pages` branch (fork PRs get no signing key → no preview). A preview is
-  flashed over USB and is not a feed: a board flashed from `PR/<N>/` follows whichever channel it is
-  set to, so its next OTA check leaves the preview behind.
+- **A PR publishes nothing** — it builds, signs and size-checks the image and keeps it as a build
+  artifact. Every same-repo PR used to publish a signed preview installer at
+  `…/PR/<N>/` on `gh-pages` as well, with a `pr-preview-cleanup` workflow removing it on close.
+  That is retired: each preview was a `gh-pages` push, every `gh-pages` push starts GitHub's own three-job
+  *pages build and deployment* run, and the **dev channel** already answers the same question —
+  flash what is on `main` from a browser — for one publish per merge instead of one per PR commit.
+  A `PR/<N>/` tree left on the branch by an old build is swept by the next release publish, which
+  no longer spares that path.
 
 ## Boot-loop safe mode (config recovery)
 

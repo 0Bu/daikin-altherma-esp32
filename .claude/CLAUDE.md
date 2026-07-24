@@ -52,15 +52,28 @@ scripts/run-mock-tests.sh    # compile + run host logic tests in seconds (cmake 
 scripts/run-domain-audit.sh  # is the value catalog physically RIGHT? (the domain-correctness gate)
 ```
 
-(A third fast CI job, `pages-publish-test`, guards the Pages publish rather than the firmware —
+(A third fast gate guards the Pages publish rather than the firmware —
 `scripts/run-pages-publish-tests.sh`, git-only, relevant only when `scripts/publish-pages-branch.sh`
 changes. See CONTRIBUTING.md.)
+
+All three are STEPS of CI's single `gates` job, which the firmware `build` job `needs` — not a job
+each. Actions bills every JOB rounded up to a whole minute, so three ~15 s jobs cost 3 billed
+minutes for well under one minute of work. The same budget rule shapes the rest of
+`.github/workflows/build.yml`, and it is worth knowing before editing it: the ~5-minute firmware
+build is SKIPPED (not failed — a skipped job still reports its check, which is why the gate is a
+per-job `if:` and never a workflow-level `paths-ignore:`) when the diff touches nothing the image
+or the published site is made of, on pull requests as much as on pushes; ccache is carried across
+runs; a PR publishes NOTHING (the per-PR preview installer at gh-pages `PR/<N>/` is retired —
+each preview was a `gh-pages` push and every `gh-pages` push starts GitHub's own three-job "pages
+build and deployment" run, while the dev channel answers the same question per merge); Renovate
+runs daily + on demand, not once per merge. A new always-on job, an
+ungated build or a per-commit publish is a real monthly cost, not a rounding error.
 
 It covers the X10A **CRC** and framing (`logic/crc.hpp`), the **value converters**
 (`logic/convert.hpp` — the riskiest part of the port), register extraction
 (`logic/registers.hpp`), the **config model / validation** (`logic/config_model.hpp`) and the
 **HA-discovery payloads** (`logic/discovery.hpp`). CI gates the firmware build on it
-(`logic-test` job). Add new decode/format logic to `main/logic/` and a `CHECK` in
+(the `gates` job's host-logic step). Add new decode/format logic to `main/logic/` and a `CHECK` in
 `test/test_logic.cpp` — never bury it in a `.cpp` only the device can run. Full detail:
 [`test/README.md`](../test/README.md).
 
@@ -78,7 +91,7 @@ tools/domain/selftest.sh      # does the audit still catch the four bugs it was 
 
 It reports wrong converters, spec/layout drift, cross-profile outliers, non-temperatures typed °C,
 and straddling byte windows — each with a decode witness (wire bytes → what it should read → what it
-does). CI gates the build on it (`domain-audit` job); the judgement half is the `/domain-review`
+does). CI gates the build on it (a `gates` step); the judgement half is the `/domain-review`
 skill, a **PR-merge gate** required on **every** merge — like `/project-review`, and unlike the
 conditional `/feature-docs`. Unconditional because deciding up front which files can change a
 value's meaning is a guess, and it is the guess that let #35–#39 ship; a PR that cannot reach a

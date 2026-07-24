@@ -67,6 +67,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 37 | **Physical recovery button** — a 5 s hold erases the whole stored config and reboots into the setup portal: the only config reset that needs no network access to the device. Armed/erasing are signalled on the status indicator, and the destructive path (arm checkpoint, debounced abort) is host-tested | ✅ 🧪 | [`recovery_button.cpp`](../main/recovery_button.cpp), [`logic/button.hpp`](../main/logic/button.hpp), [`nvs_storage.cpp`](../main/nvs_storage.cpp) |
 | 38 | **Board-hardware runtime config** (`POST /set_board`) — indicator pin/driver/polarity + button pin live in NVS, not Kconfig, so one published image serves boards with different onboard parts; per-board **presets** (`/status.board.presets`) fill all five fields from one pick and are host-tested against the request path's own validator, and the indicator **announces its resolved pin/driver on `/diag`** at boot — a valid-but-wrong pin initialises fine and drives nothing, which otherwise looks exactly like a working LED | ✅ 🧪 | [`http_config.cpp`](../main/http_config.cpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp), [`logic/board_pins.hpp`](../main/logic/board_pins.hpp), [`logic/board_presets.hpp`](../main/logic/board_presets.hpp), [`status_led.cpp`](../main/status_led.cpp) |
 | 39 | **Stack-overflow watchpoint** — a hardware watchpoint on every task's stack limit, so the *first* write past it panics at the offending instruction instead of corrupting a neighbour silently. IDF's default canary is only compared at a context switch and a sparsely-writing frame can step over it — which is how a v1.0.12 `httpd` overflow overwrote its own TCB and died 44 s later in unrelated lwip code. Shipped with the `httpd` stack raised to 12 KB and the `/status` JSON built by `+=` rather than long `+` chains | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults), [`http_server.cpp`](../main/http_server.cpp), [`http_status.cpp`](../main/http_status.cpp) |
+| 40 | **Cost-shaped CI** — Actions bills per job rounded up to the whole minute, so the three fast gates are one job, the firmware build is *skipped* (not failed) when nothing the image or the site is made of changed, ccache is carried across runs, the per-PR preview installer is retired in favour of the dev channel, and every job has a timeout | ✅ | [`build.yml`](../.github/workflows/build.yml), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 
 ---
 
@@ -110,8 +111,8 @@ project turns that sharp edge into a hard gate:
   signature block is absent. The [`flash-esp32`](../.claude/skills/flash-esp32/SKILL.md) skill runs
   it before every `esptool write_flash`.
 - CI never publishes unsigned firmware to OTA: [`build.yml`](../.github/workflows/build.yml) hard-errors
-  on a `main` build with no `OTA_SIGNING_KEY` secret (fork PRs downgrade to an unsigned *compile-only*
-  build with no preview).
+  on a `main` build with no `OTA_SIGNING_KEY` secret (fork PRs downgrade to an unsigned
+  *compile-only* build — nothing is published or offered for flashing).
 - CI applies the same guard to the **browser installer**, which no host-side check can reach:
   [`ci-build-all.sh`](../scripts/ci-build-all.sh) carves each published Web Serial part out of the
   prepared `-merged.bin`, then runs `require-signed.sh` on the final staged app bytes. A signing step
@@ -800,17 +801,20 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   **read at runtime from [`.github/workflows/build.yml`](../.github/workflows/build.yml)** — a single
   source of truth (currently ESP-IDF v6.0.2, kept current by Renovate), so local builds can never drift
   from CI.
-- **✅ CI gate order** ([`build.yml`](../.github/workflows/build.yml)): two fast, hardware-free jobs run
-  first and the firmware build `needs` **both** — `logic-test` (the host logic suite) and
-  `domain-audit` (the value-catalog audit + its selftest, §8); only then the esp32s3 firmware build →
-  sign → merge → artifact upload. A decode/config/discovery regression, or a value that is
-  well-formed but physically false, fails in seconds, not minutes.
+- **✅ CI gate order** ([`build.yml`](../.github/workflows/build.yml)): one fast, hardware-free
+  `gates` job runs first and the firmware build `needs` it — the host logic suite, the
+  value-catalog audit + its selftest (§8) and the Pages-publish test, as three steps; only then the
+  esp32s3 firmware build → sign → merge → artifact upload. A decode/config/discovery regression, or
+  a value that is well-formed but physically false, fails in seconds, not minutes. Three steps and
+  not three jobs because Actions bills each **job** rounded up to a whole minute: the same ~40
+  seconds of checking cost 3 billed minutes as jobs and 1 as steps.
 - **✅ Crash-decodable forever.** CI archives the unstripped `.elf` (+ sha256) per version/PR, so every
   build's core dumps stay symbolizable ([`ci-build-all.sh`](../scripts/ci-build-all.sh)).
 - **✅ One Pages publisher.** The browser installer is served from the **`gh-pages` branch**, pushed by
   [`publish-pages-branch.sh`](../scripts/publish-pages-branch.sh); the repo's Pages source must be set to
-  that branch ([`README.md`](README.md)). The branch model is what lets every open PR serve its own
-  installer at `PR/<N>/` — an atomic whole-site Actions deployment cannot — so the
+  that branch ([`README.md`](README.md)). The branch model is what lets the release root and the
+  `dev/` channel be published independently — an atomic whole-site Actions deployment replaces the
+  whole site at once and cannot — so the
   `configure-pages`/`deploy-pages` path is deliberately absent rather than redundant: a repo's Pages
   source is either a branch or Actions, never both.
 - **✅ Releases are manual; merges publish a dev channel.** ([`build.yml`](../.github/workflows/build.yml))
@@ -821,21 +825,20 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   device OTA client work against either without a special case. Before this, every firmware-relevant
   merge auto-tagged a release, so "the latest release" only ever meant "the last thing merged" and
   there was no way to run a build that had been deliberately cut.
-- **✅ Concurrent publishers survive losing the race.** That one branch has *four* writers — the
-  release root publish, every merge's `dev/` publish, every open PR's preview, and
-  `pr-preview-cleanup`'s removal — and they overlap routinely. Actions cannot serialize them: a `concurrency:` group is per **job**, and the publish is
+- **✅ Concurrent publishers survive losing the race.** That one branch has *two* writers — the
+  release root publish and every merge's `dev/` publish — and they overlap routinely. Actions cannot serialize them: a `concurrency:` group is per **job**, and the publish is
   the last step of a ~5-minute firmware build, so grouping would serialize that entire build across
-  every PR to protect a 2-second push. So the script survives the race instead of avoiding it — it
+  a merge to protect a 2-second push. So the script survives the race instead of avoiding it — it
   refreshes `origin/gh-pages` immediately before publishing (never trusting the ref
   `actions/checkout` froze at job start) and, on a non-fast-forward, re-applies its change onto the
   winner's commit and pushes again, up to 5 attempts. Only a lost race retries; an auth or
-  hook rejection is fatal at once. This is sound only because every mode is **declarative** — `--pr`
-  replaces `PR/<N>/` wholesale, `--rm` deletes it, `--dev` replaces `dev/`, and root replaces
-  everything except `PR/` and `dev/` — so re-applying yields the same tree as winning would have.
+  hook rejection is fatal at once. This is sound only because every mode is **declarative** —
+  `--dev` replaces `dev/` wholesale and root replaces everything except `dev/` — so re-applying
+  yields the same tree as winning would have.
   Naming `dev/` in the root's sweep is load-bearing, not tidiness: a release would otherwise take
   the dev feed offline until the next merge happened to republish it, silently, since nothing else
   reads that path. Guarded by
-  [`run-pages-publish-tests.sh`](../scripts/run-pages-publish-tests.sh) (CI job `pages-publish-test`),
+  [`run-pages-publish-tests.sh`](../scripts/run-pages-publish-tests.sh) (a CI `gates` step),
   which races two publishers against a throwaway bare repo, including one that lands *between* the
   loser's fetch and its push. Before this, the loser's push was simply rejected and its whole build
   went red — and because a re-run always went green, it read as a flake rather than a bug.
@@ -851,6 +854,22 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   with no tags it returns the `version.txt` floor forever — a live feed pinned at 1.0.0 where every
   device reports "up to date" and never updates. A settings change still triggers no run: one
   `workflow_dispatch` or push is what brings the site up ([`README.md`](README.md)).
+- **✅ CI runs inside a metered minute budget.** Actions bills each **job** rounded up to the next
+  whole minute, and this repo merges often, so the pipeline is shaped by cost as much as by
+  correctness ([`build.yml`](../.github/workflows/build.yml)): the three fast gates are **one job**
+  (3 billed minutes → 1); the ~5-minute firmware build is **skipped** — not failed — when the diff
+  touches nothing the image or the published site is made of, on pull requests as well as pushes,
+  which is why the gate is a per-job `if:` and not a workflow-level `paths-ignore:` (a filtered
+  workflow leaves a required check pending forever, a skipped job reports and satisfies it);
+  **ccache** is carried across runs so the compile does not start from zero after `set-target`
+  wipes the build directory (~3 of the build job's ~5 minutes; the other ~2 are the
+  `espressif/idf` image pull, which nothing here can shorten); a PR **publishes nothing** — the
+  per-PR preview installer at `PR/<N>/` is retired, since each preview was a `gh-pages` push and
+  every `gh-pages` push starts GitHub's own *pages build and deployment* run on top of this one,
+  while the dev channel already serves "flash what is on main" for one publish per merge; PR build artifacts
+  expire after 7 days instead of 90; Renovate runs on its daily schedule and on demand rather than
+  once per merge; and every job carries a `timeout-minutes` so a wedged runner cannot spend hours
+  of the allowance unnoticed.
 - **Managed components** ([`idf_component.yml`](../main/idf_component.yml)): `mdns`, `cjson` and `mqtt`
   are pulled as managed components (the latter two were extracted from IDF core in v6.0).
 

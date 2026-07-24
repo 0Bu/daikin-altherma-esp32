@@ -102,7 +102,7 @@ it on its own. Per-board hardware inventory: [docs/BOARDS.md](docs/BOARDS.md); w
   per device under the gear → **ESP32** → *Update channel*; the [dev
   installer](https://0bu.github.io/daikin-altherma-esp32/dev/) flashes the latest merge.
 - Read-only monitor: it polls X10A and never actuates the heat pump (X10A has no write command).
-- HA templates / COP: [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md). PR previews: `…/PR/<n>/`.
+- HA templates / COP: [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md).
 
 ## Scope & credits
 

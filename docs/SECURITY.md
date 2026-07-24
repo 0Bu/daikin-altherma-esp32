@@ -221,8 +221,9 @@ present on the trusted LAN. The counter lives in `daik_cfg`, so a factory reset 
   blocks `*.pem`) and, in CI, exists only transiently: `build.yml` writes it from the
   `OTA_SIGNING_KEY` repository secret, `ci-build-all.sh` signs each image, and a `always()` step
   shreds it.
-- **Fork PRs get no secret** → they build **unsigned** (a compile check only) and publish **no**
-  preview (an unsigned image would crash-loop at boot on a signed-build device).
+- **Fork PRs get no secret** → they build **unsigned**, as a compile check only. Nothing is
+  published or offered for flashing (an unsigned image would crash-loop at boot on a signed-build
+  device).
 - **Main never publishes unsigned** — if the secret is missing on a main build, CI hard-errors
   rather than shipping an image devices would reject.
 - **Rotation:** generate a new key, flash a build signed with it via USB (breaking TOFU

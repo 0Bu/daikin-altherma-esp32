@@ -1,45 +1,48 @@
 #!/usr/bin/env bash
 # Publish/maintain the gh-pages branch that hosts the browser installer. A gh-pages BRANCH (not
 # the Actions Pages artifact) is required because the browser flasher fetches every part in-page
-# and needs the bins same-origin, and per-PR subpaths (PR/<N>/) can't live in the atomic
-# whole-site Actions deploy.
+# and needs the bins same-origin, and the two feeds (the release root and dev/) are published
+# independently — minutes or weeks apart — which the atomic whole-site Actions deploy cannot do.
 #
 # The branch is sliced by OWNER, and every mode states only its own slice: a manual RELEASE run
-# owns the ROOT, every merge to main owns dev/, each PR owns PR/<N>/. A root publish preserves the
-# existing dev/ and PR/ trees; a dev publish touches only dev/; a PR publish only its own PR/<N>/;
-# --rm deletes one PR/<N>/. Usage:
+# owns the ROOT, every merge to main owns dev/. A root publish preserves the existing dev/ tree; a
+# dev publish touches only dev/. Usage:
 #   scripts/publish-pages-branch.sh              # publish _site/ as the root (a release)
 #   scripts/publish-pages-branch.sh --dev        # publish _site/dev/ only (a merge to main)
-#   scripts/publish-pages-branch.sh --pr <N>     # publish _site/PR/<N>/ only
-#   scripts/publish-pages-branch.sh --rm <N>     # remove PR/<N>/ (pr-preview-cleanup)
 #
-# The root's "delete everything I do not own" sweep is why dev/ has to be named there as explicitly
-# as PR/ is: a release would otherwise take the dev feed offline until the next merge republished
+# There was a third slice, PR/<N>/ — a per-PR preview installer, published by every PR build and
+# removed by a pr-preview-cleanup workflow. It is gone: the dev channel now serves the same need
+# (try what is on main, in a browser) for one publish per merge instead of one per PR commit, and
+# each publish here also costs a full GitHub "pages build and deployment" run. The root sweep
+# below therefore no longer spares PR/, which is what finally clears the previews left on the
+# branch by the old builds.
+#
+# The root's "delete everything I do not own" sweep is why dev/ has to be named there explicitly:
+# a release would otherwise take the dev feed offline until the next merge republished
 # it, and every device on the dev channel would report its check as a failed fetch in the meantime.
 #
-# CONCURRENCY: gh-pages is ONE branch with several independent publishers — the release root
-# publish, every merge's dev publish, every open PR's preview, and pr-preview-cleanup's removal —
+# CONCURRENCY: gh-pages is ONE branch with two independent publishers — the release root
+# publish and every merge's dev publish —
 # and they overlap routinely. Actions
 # cannot serialize them for us: a `concurrency:` group is per job, and this publish is the last
-# step of a ~5-minute firmware build, so grouping the job would serialize that whole build across
-# every PR to protect a 2-second push. The script therefore has to SURVIVE losing the race rather
+# step of a ~5-minute firmware build, so grouping the job would serialize that whole build to
+# protect a 2-second push. The script therefore has to SURVIVE losing the race rather
 # than avoid it: publish onto the tip the remote has right now, and if someone lands first,
 # re-apply onto their result and push again (see apply_mutation + the push loop below).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-mode="${1:-root}"; num="${2:-}"
+mode="${1:-root}"
 PUSH_ATTEMPTS=5
 
 # Validate + name the commit before touching the network: a malformed call should not first spend
-# a clone and a fetch to find out.
+# a clone and a fetch to find out. An UNKNOWN argument is rejected rather than treated as a root
+# publish — `--pr 12` used to be a real mode, and silently publishing the root instead would
+# overwrite the release feed with whatever dist/ happened to hold.
 case "$mode" in
-    --pr) [ -n "$num" ] || { echo "publish: --pr needs a number" >&2; exit 1; }
-          msg="pages: PR/$num preview" ;;
-    --rm) [ -n "$num" ] || { echo "publish: --rm needs a number" >&2; exit 1; }
-          msg="pages: remove PR/$num" ;;
     --dev) msg="pages: publish dev channel" ;;
-    root|*) msg="pages: publish root" ;;
+    root)  msg="pages: publish root" ;;
+    *)     echo "publish: unknown mode '$mode' (expected no argument, or --dev)" >&2; exit 1 ;;
 esac
 
 git config user.name  "github-actions[bot]" 2>/dev/null || true
@@ -55,7 +58,7 @@ trap 'git worktree remove --force "$work" >/dev/null 2>&1 || rm -rf "$work"' EXI
 # date". A checkout that never fetched gh-pages (actions/checkout defaults to fetch-depth 1, i.e.
 # the one ref it checked out) has no origin/gh-pages, and taking the --orphan path there builds a
 # history disjoint from the live branch — the push is then rejected and the caller fails every
-# time. But both real callers DO fetch it (build.yml and pr-preview-cleanup.yml check out with
+# time. But the real caller DOES fetch it (build.yml checks out with
 # fetch-depth: 0), which froze origin/gh-pages at job start: by push time it is minutes old, and
 # publishing from that snapshot is precisely how a concurrent publisher's commit gets rejected.
 # So ask the REMOTE whether the branch exists, and whenever it does, refresh the tracking ref
@@ -97,23 +100,20 @@ fi
 # Keep it that way: an "append to what's there" mode could not be retried this cheaply.
 apply_mutation() {
     case "$mode" in
-        --pr)
-            rm -rf "$work/PR/$num"; mkdir -p "$work/PR/$num"
-            cp -R _site/PR/"$num"/. "$work/PR/$num/" ;;
-        --rm)
-            rm -rf "$work/PR/$num" ;;
         --dev)
             rm -rf "$work/dev"; mkdir -p "$work/dev"
             cp -R _site/dev/. "$work/dev/" ;;
-        root|*)
-            # Everything at the top level that the root does NOT own is named here. dev/ and PR/
-            # belong to other publishers; sweeping them away would take the dev feed and every open
-            # preview offline until their next build happened to run.
-            find "$work" -mindepth 1 -maxdepth 1 ! -name .git ! -name PR ! -name dev -exec rm -rf {} +
-            # ...and the root's own copy must not drag them back in either: _site/ still holds the
+        root)
+            # Everything at the top level that the root does NOT own is named here — which is
+            # dev/, and only dev/: it belongs to the other publisher, and sweeping it away would
+            # take the dev feed offline until the next merge happened to republish it. Anything
+            # else at the top level IS the root's, including the PR/ tree the retired preview
+            # publisher left behind, which this sweep removes on the next release.
+            find "$work" -mindepth 1 -maxdepth 1 ! -name .git ! -name dev -exec rm -rf {} +
+            # ...and the root's own copy must not drag dev/ back in either: _site/ still holds the
             # dev/ subtree when one job builds both (a release run assembles only the root, but a
             # future caller reusing _site/ would). Copy the root files only.
-            find _site -mindepth 1 -maxdepth 1 ! -name PR ! -name dev -exec cp -R {} "$work/" \; ;;
+            find _site -mindepth 1 -maxdepth 1 ! -name dev -exec cp -R {} "$work/" \; ;;
     esac
 }
 
