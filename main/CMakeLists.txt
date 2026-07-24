@@ -23,6 +23,7 @@ idf_component_register(
         "syslog.cpp"
         "diag_crash.cpp"
         "status_led.cpp"
+        "recovery_button.cpp"
         "sntp_time.cpp"
     INCLUDE_DIRS
         "."
@@ -43,6 +44,8 @@ idf_component_register(
         lwip
         esp_driver_uart
         esp_driver_gpio
+        esp_driver_rmt
+        led_strip
         mqtt
         esp_timer
         bootloader_support

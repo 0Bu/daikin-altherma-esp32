@@ -188,10 +188,15 @@ User credentials + the X10A link cache are persisted; the model is re-detected o
 
 | NVS key | Meaning |
 |---------|---------|
-| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + the one-shot rollback backup + flags, MQTT (`uri`/`user`/`pass`), syslog (host/port; empty host = off), and the SNTP server (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` default on next boot). One CRC-checked entry written with a single `nvs_set_blob`, so a save is **all-or-nothing** across a write failure *and* a power cut. WiFi rollback: the previous credentials are backed up here by `/set_wifi` and restored automatically if the new network fails to connect (reason-aware deadline, `logic/wifi_rollback.hpp`); `/status.wifi.rolled_back` reports it after the reboot. |
+| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + the one-shot rollback backup + flags, MQTT (`uri`/`user`/`pass`), syslog (host/port; empty host = off), the SNTP server (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` default on next boot), and — from blob **v2** — the **board-local hardware** (`led_gpio`/`led_type`/`led_inverted`/`btn_gpio`/`btn_active_low`, written by `/set_board`). One CRC-checked entry written with a single `nvs_set_blob`, so a save is **all-or-nothing** across a write failure *and* a power cut. A **v1** blob (written before the board fields existed) is still accepted on read and the board fields fall back to their Kconfig defaults — rejecting it would drop the user's WiFi/MQTT credentials on that upgrade, and treating "absent" as "indicator off" would darken a working LED. WiFi rollback: the previous credentials are backed up here by `/set_wifi` and restored automatically if the new network fails to connect (reason-aware deadline, `logic/wifi_rollback.hpp`); `/status.wifi.rolled_back` reports it after the reboot. |
 | *(legacy per-key)* | `wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback`/`wifi_rolledbk`/`mqtt_*`/`syslog_*`/`ntp_server` — the pre-blob layout, still **read** as a fallback when `cfg` is absent (fresh device / OTA from an older build); superseded on the next save. |
 | `rx_pin` / `tx_pin` / `proto` | X10A link cache (physical wiring + framing) — kept as separate self-healing keys, tried first by the sweep, re-saved on change, re-validated on load. |
 | `boot_fails` | Boot-loop crash counter (`safe_mode.cpp`); increments on a crash-only boot, latches recovery mode past the threshold, cleared after a healthy uptime. Lives here so a factory reset wipes it too. |
+
+The whole namespace is what the **recovery button** erases (`nvs_erase_all`, `recovery_button.cpp`):
+hold the configured button for 5 s and the device drops every stored setting and reboots into the
+setup portal. It is the only config reset that does not require reaching the device over the
+network — the way back in when it has joined a network you can no longer get onto.
 
 Not persisted: the **hostname** is fixed at `daikin-altherma-esp32`, the **poll cadence** at 1 s,
 labels are **English-only**; and the **model** (`profile` + the detection fingerprint) is re-detected
@@ -210,6 +215,11 @@ LAN only, see [SECURITY.md](SECURITY.md).
 ```
 GET  /  (alias /index.html)        # embedded web UI (gzipped into the app binary)
 GET  /status                       # { version, platform, uptime_s, app_elf_sha256, pins_avail:[..],
+                                   #   board:{led_gpio,led_type,led_inverted,btn_gpio,
+                                   #        btn_active_low,pins_local:[..]},
+                                   #     (pins_local = the LED/button-eligible GPIOs — WIDER than
+                                   #      pins_avail: the dedicated-JTAG pads are legal for an
+                                   #      onboard part but withheld from the X10A picker)
                                    #   wifi:{ssid,rssi,ip,connected,bssid,mac,std,rolled_back},
                                    #   mqtt:{configured,connected,tls,has_creds,broker,error?},
                                    #     (has_creds = whether creds are stored, never their value)
@@ -258,7 +268,17 @@ POST /set_ntp                      # { server } → persist + reboot, no request
 POST /set_hp                       # { profile?, rx?, tx? } → apply live (no reboot); rx/tx PERSIST
                                    #   (pin cache), profile session-only; proto auto-detected, not accepted.
                                    #   The ESP32 card's pin dropdown posts {profile:"auto",rx,tx} to re-detect.
-#  all five /set_* above           # an NVS write failure → 500 {ok:false,error:"config write failed"},
+POST /set_board                    # { led_gpio, led_type, led_inverted, btn_gpio, btn_active_low }
+                                   #   → validate + persist + REBOOT (both are claimed once at task
+                                   #   start, so they are not hot-swapped). The board's own onboard
+                                   #   parts: indicator pin + driver (0 = plain GPIO LED, 1 = WS2812)
+                                   #   + polarity, and the recovery-button pin. -1 = absent for either.
+                                   #   Runtime rather than Kconfig because one published image serves
+                                   #   boards with different onboard hardware. Unchanged settings
+                                   #   short-circuit to {ok:true,reboot:false}. Rejects a pin the chip
+                                   #   reserves, and any pin already claimed by the other of these two
+                                   #   or by the X10A link (in both directions).
+#  all six /set_* above            # an NVS write failure → 500 {ok:false,error:"config write failed"},
                                    #   nothing applied and no reboot (the failing key is logged to /diag)
 POST /detect                       # re-run auto-detection (reset profile to "auto" + invalidate fingerprint)
 GET  /ota/check[?ms=<epoch>]       # start a background update check (poll /ota/status)

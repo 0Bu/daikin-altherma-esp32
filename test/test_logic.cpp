@@ -12,6 +12,8 @@
 
 #include "logic/board_pins.hpp"
 #include "logic/boot_guard.hpp"
+#include "logic/button.hpp"
+#include "logic/led_pattern.hpp"
 #include "logic/bootlog.hpp"
 #include "logic/config_model.hpp"
 #include "logic/convert.hpp"
@@ -527,6 +529,67 @@ static void test_config_model() {
     CHECK(!validate(c, why, 48, true, /*reserved*/21));
     CHECK(validate(c, why, 48, true, /*reserved*/-1));               // ...allowed when the LED is off
     c.rx_pin = 44; c.tx_pin = 43;                                    // restore
+
+    // ── Board-local hardware (POST /set_board) ───────────────────────────────────────────────────
+    // Both pins are optional and default to absent; the button defaults to absent DELIBERATELY (an
+    // unconfigured input floats, and a floating pin reading "pressed" would factory-reset a board
+    // nobody touched), so a default Config must validate with both off.
+    Config b;
+    CHECK(b.led_gpio == -1 && b.btn_gpio == -1);
+    CHECK(b.led_type == static_cast<int>(LedType::Gpio) && b.btn_active_low);
+    CHECK(board_hw_valid(b, why, 48, /*octal*/false));
+
+    // The reference boards must both configure cleanly: XIAO (plain LED on 21, no button) and
+    // AtomS3 Lite (WS2812 on 35, button on the JTAG pad 41).
+    b.led_gpio = 21; b.led_type = static_cast<int>(LedType::Gpio); b.led_inverted = true;
+    CHECK(board_hw_valid(b, why, 48, false));
+    b.led_gpio = 35; b.led_type = static_cast<int>(LedType::Ws2812); b.btn_gpio = 41;
+    CHECK(board_hw_valid(b, why, 48, /*octal*/false));
+    // ...but GPIO35 is genuinely unsafe on a build whose flash/PSRAM run Octal I/O.
+    CHECK(!board_hw_valid(b, why, 48, /*octal*/true));
+
+    b.led_gpio = 35; b.btn_gpio = 41;
+    CHECK(!board_hw_valid(b, why, 21, false));                 // pins don't exist on a 21-GPIO target
+    b.led_type = 7;
+    CHECK(!board_hw_valid(b, why, 48, false));                 // unknown driver id
+    b.led_type = static_cast<int>(LedType::Ws2812);
+
+    // Hard chip conflicts are refused for a local LED too — the wider local-I/O set adds ONLY the
+    // dedicated-JTAG pads, not flash or the USB console.
+    b.led_gpio = 27;
+    CHECK(!board_hw_valid(b, why, 48, false));                 // SPI flash
+    b.led_gpio = 19;
+    CHECK(!board_hw_valid(b, why, 48, false));                 // USB-Serial/JTAG console
+    b.led_gpio = 35;
+
+    // No pin may be claimed twice, in EITHER direction — whichever endpoint is called second has to
+    // see the other's pins, or /set_board and /set_hp would happily hand the same GPIO to both.
+    b.btn_gpio = 35;
+    CHECK(!board_hw_valid(b, why, 48, false));                 // button == indicator
+    b.btn_gpio = 41;
+    b.rx_pin = 35;                                             // X10A already owns the indicator's pin
+    CHECK(!board_hw_valid(b, why, 48, false));
+    b.rx_pin = 44; b.tx_pin = 41;                              // ...and the button's
+    CHECK(!board_hw_valid(b, why, 48, false));
+    b.tx_pin = 43;
+    CHECK(board_hw_valid(b, why, 48, false));
+    // The mirror image: with the indicator + button configured, /set_hp must not be able to take
+    // their pins. config_reserved_pins is the one accessor both sides read.
+    CHECK(config_reserved_pins(b).led == 35 && config_reserved_pins(b).button == 41);
+    Config steal = b;
+    steal.rx_pin = 35;                                          // try to route X10A RX onto the LED
+    CHECK(!validate(steal, why, 48, false, config_reserved_pins(b)));
+    steal.rx_pin = 44; steal.tx_pin = 41;                       // ...or TX onto the button
+    CHECK(!validate(steal, why, 48, false, config_reserved_pins(b)));
+    steal.tx_pin = 43;
+    CHECK(validate(steal, why, 48, false, config_reserved_pins(b)));
+    // With no board hardware configured, both pins are free again.
+    Config none;
+    none.rx_pin = 35; none.tx_pin = 41;
+    CHECK(config_reserved_pins(none).led == -1 && config_reserved_pins(none).button == -1);
+    CHECK(!validate(none, why, 48, false, config_reserved_pins(none)));   // 41 is JTAG: never an X10A pin
+    none.tx_pin = 43;
+    CHECK(validate(none, why, 48, false, config_reserved_pins(none)));    // 35 is fine on a Quad build
 
     CHECK(parse_protocol("S") == Protocol::S);
     CHECK(parse_protocol("I") == Protocol::I);
@@ -1347,6 +1410,209 @@ static void test_board_pins() {
     // Honours the buffer cap instead of overrunning it.
     n = board_pins_offerable(buf, 3, /*octal_spi=*/false, /*reserved=*/-1);
     CHECK(n == 3);
+
+    // ── Two reservations, not one ────────────────────────────────────────────────────────────────
+    // The firmware now drives TWO pins of its own: the status indicator and the recovery button.
+    // A ReservedPins carrying both must drop both; carrying one (the old single-int call shape,
+    // which still compiles by design) must drop exactly that one.
+    n = board_pins_offerable(buf, BOARD_PINS_MAX, /*octal_spi=*/false, ReservedPins{35, 41});
+    CHECK(n == s3_quad.count - 1);                   // 41 was never in the X10A list (JTAG); 35 was
+    for (int i = 0; i < n; i++) CHECK(buf[i] != 35 && buf[i] != 41);
+    CHECK(!board_pin_offerable(35, false, ReservedPins{35, 41}));
+    CHECK(!board_pin_offerable(21, false, ReservedPins{21}));           // implicit single-pin ctor
+    CHECK(board_pin_offerable(21, false, ReservedPins{35, 41}));        // neither reservation matches
+    // "nothing reserved" must not claim the -1 sentinel (parenthesised: a braced initialiser inside
+    // a macro argument reads as two arguments).
+    CHECK((ReservedPins{}.claims(-1)) == false);
+    CHECK((ReservedPins{-1, -1}.claims(-1)) == false);
+}
+
+// The local-I/O set: which pins the status indicator and the recovery button may use. Deliberately
+// WIDER than the X10A set by exactly the four dedicated-JTAG pads — the AtomS3 Lite's onboard button
+// is on GPIO41, and withholding it would make that board's only button unusable to protect a debug
+// probe that isn't attached. Everything the chip hard-reserves must still be refused.
+static void test_board_pins_local() {
+    CHECK(board_pin_local_io(41, /*octal_spi=*/false));    // AtomS3 Lite button (MTDI)
+    CHECK(board_pin_local_io(39, false) && board_pin_local_io(40, false) && board_pin_local_io(42, false));
+    CHECK(board_pin_local_io(35, false));                  // AtomS3 Lite WS2812, Quad-flash build
+    CHECK(!board_pin_local_io(35, /*octal_spi=*/true));     // ...but a real Octal build reserves it
+    CHECK(board_pin_local_io(21, false));                  // XIAO onboard LED
+    CHECK(!board_pin_local_io(27, false));                 // SPI flash — a hard conflict, still out
+    CHECK(!board_pin_local_io(0, false) && !board_pin_local_io(45, false));   // strapping
+    CHECK(!board_pin_local_io(19, false) && !board_pin_local_io(20, false));  // USB-Serial/JTAG console
+
+    int buf[BOARD_LOCAL_PINS_MAX];
+    const int n = board_pins_local(buf, BOARD_LOCAL_PINS_MAX, /*octal_spi=*/false);
+    CHECK(n == board_pins("esp32s3", false).count + 4);    // exactly the four JTAG pads added
+    CHECK(n <= BOARD_LOCAL_PINS_MAX);                      // the constant really does size the buffer
+    for (int i = 1; i < n; i++) CHECK(buf[i] > buf[i - 1]);   // strictly ascending — the UI renders it verbatim
+    auto in_list = [&](int p) { for (int i = 0; i < n; i++) if (buf[i] == p) return true; return false; };
+    CHECK(in_list(38) && in_list(39) && in_list(41) && in_list(42) && in_list(43));
+    CHECK(!in_list(27) && !in_list(19));
+    // The merge in board_pins_local assumes the two input lists are DISJOINT (no de-duplication).
+    // If board_pins() ever gained a JTAG pad, the merge would emit it twice and break the ordering
+    // assert above — pin the assumption itself so the failure names the cause.
+    BoardPins base = board_pins("esp32s3", false);
+    for (int i = 0; i < base.count; i++) CHECK(base.pins[i] < 39 || base.pins[i] > 42);
+    // Every element of the list must itself pass the membership predicate, and vice versa.
+    for (int i = 0; i < n; i++) CHECK(board_pin_local_io(buf[i], false));
+    // Cap honoured, like board_pins_offerable.
+    CHECK(board_pins_local(buf, 5, false) == 5);
+}
+
+// The status indicator's state -> pattern rule, shared by the GPIO and WS2812 back-ends.
+static void test_led_pattern() {
+    LedInputs in;
+    // No WiFi mode at all -> dark.
+    CHECK(led_phase(in) == LedPhase::Off);
+    // SoftAP (setup portal) wins over everything below it — APSTA counts as AP, as it did before.
+    in.ap_mode = true;
+    CHECK(led_phase(in) == LedPhase::SetupPortal);
+    in.ap_mode = false;
+
+    in.sta_mode = true;
+    CHECK(led_phase(in) == LedPhase::Connecting);            // associated? not yet
+    in.wifi_connected = true;
+    CHECK(led_phase(in) == LedPhase::BusDown);               // WiFi up, X10A silent
+    in.hp_connected = true;
+    CHECK(led_phase(in) == LedPhase::Healthy);               // MQTT unconfigured is NOT a fault
+    in.mqtt_configured = true;
+    CHECK(led_phase(in) == LedPhase::MqttDown);
+    in.mqtt_connected = true;
+    CHECK(led_phase(in) == LedPhase::Healthy);
+    // X10A-down outranks MQTT-down: with BOTH down the bus fault is what shows.
+    in.mqtt_connected = false;
+    in.hp_connected   = false;
+    CHECK(led_phase(in) == LedPhase::BusDown);
+
+    // The button's override pre-empts every operating phase — including Healthy, which is the
+    // NORMAL state of a board someone is deliberately factory-resetting. Gating the warning on a
+    // fault would hide it in exactly the case it exists for.
+    LedInputs healthy;
+    healthy.sta_mode = healthy.wifi_connected = healthy.hp_connected = true;
+    CHECK(led_phase(healthy) == LedPhase::Healthy);
+    healthy.signal = LedSignal::WipeArmed;
+    CHECK(led_phase(healthy) == LedPhase::WipeArmed);
+    healthy.signal = LedSignal::Wiping;
+    CHECK(led_phase(healthy) == LedPhase::Wiping);
+    // ...and over the setup portal / a disconnected board too (no WiFi state can suppress it).
+    LedInputs dark;
+    dark.signal = LedSignal::Wiping;
+    CHECK(led_phase(dark) == LedPhase::Wiping);
+
+    // Every phase must produce a pattern with a non-zero period: a zero-length one would spin the
+    // indicator task at 100% CPU instead of blinking.
+    for (LedPhase p : {LedPhase::Off, LedPhase::SetupPortal, LedPhase::Connecting, LedPhase::Healthy,
+                       LedPhase::BusDown, LedPhase::MqttDown, LedPhase::WipeArmed, LedPhase::Wiping})
+        CHECK(led_pattern_period_ms(led_pattern(p)) > 0);
+
+    // The six operating patterns keep the exact timings the pre-refactor status_led.cpp shipped —
+    // this split must not silently re-teach a user's board a new vocabulary.
+    CHECK(led_pattern(LedPhase::SetupPortal).on_ms == 1000 && led_pattern(LedPhase::SetupPortal).off_ms == 1000);
+    CHECK(led_pattern(LedPhase::Connecting).on_ms == 100 && led_pattern(LedPhase::Connecting).off_ms == 100);
+    CHECK(led_pattern(LedPhase::MqttDown).on_ms == 300 && led_pattern(LedPhase::MqttDown).off_ms == 300);
+    const LedPattern bus = led_pattern(LedPhase::BusDown);
+    CHECK(bus.pulses == 2 && bus.on_ms == 120 && bus.off_ms == 150 && bus.gap_ms == 1000);
+    CHECK(led_pattern(LedPhase::Off).pulses == 0);
+
+    // Shape, not colour, has to carry the state — a monochrome LED sees no colour at all. Exactly
+    // two phases are solid (Healthy and Wiping); see led_phase_is_solid's note for why that pair is
+    // safe. Everything else must be distinguishable by blink timing.
+    int solid = 0;
+    for (LedPhase p : {LedPhase::Off, LedPhase::SetupPortal, LedPhase::Connecting, LedPhase::Healthy,
+                       LedPhase::BusDown, LedPhase::MqttDown, LedPhase::WipeArmed, LedPhase::Wiping})
+        if (led_phase_is_solid(p)) solid++;
+    CHECK(solid == 2);
+    CHECK(led_phase_is_solid(LedPhase::Healthy) && led_phase_is_solid(LedPhase::Wiping));
+    // The armed strobe must be strictly faster than every operating blink, or "something is
+    // counting down" reads as ordinary activity.
+    const LedPattern armed = led_pattern(LedPhase::WipeArmed);
+    CHECK(armed.on_ms < led_pattern(LedPhase::Connecting).on_ms);
+    // led_type round-trips through the int the config blob stores it as.
+    CHECK(led_type_valid(0) && led_type_valid(1));
+    CHECK(!led_type_valid(2) && !led_type_valid(-1));
+}
+
+// The recovery button's press classifier. What is really under test is the ABORT path: the action
+// it gates erases the user's whole configuration, so "held 4.9 s then let go" must destroy nothing.
+static void test_button() {
+    ButtonState st;
+    uint64_t t = 0;
+    auto step = [&](bool pressed, uint64_t dt) { t += dt; return button_update(st, pressed, t); };
+
+    // A short press does nothing at all — not even an indicator hand-back (nothing was asserted).
+    CHECK(step(true, 20) == ButtonEvent::None);
+    CHECK(step(true, 200) == ButtonEvent::None);
+    for (int i = 0; i < BUTTON_RELEASE_SAMPLES; i++) step(false, 20);
+    CHECK(!st.down && !st.armed);
+
+    // A full hold: Armed at the checkpoint, then Fired — each exactly once, even though the
+    // predicate stays true for every later sample of the hold.
+    st = ButtonState{};
+    t = 0;
+    CHECK(step(true, 20) == ButtonEvent::None);
+    CHECK(step(true, BUTTON_ARM_MS - 100) == ButtonEvent::None);       // not there yet
+    CHECK(step(true, 200) == ButtonEvent::Armed);
+    CHECK(step(true, 20) == ButtonEvent::None);                        // ...and not again
+    int armed_again = 0, fired = 0;
+    while (t < BUTTON_FIRE_MS + 500) {
+        const ButtonEvent e = step(true, BUTTON_SAMPLE_MS);
+        if (e == ButtonEvent::Armed) armed_again++;
+        if (e == ButtonEvent::Fired) fired++;
+    }
+    CHECK(armed_again == 0 && fired == 1);
+
+    // ABORT: released after the warning but before the threshold -> Aborted, and NOTHING fired.
+    st = ButtonState{};
+    t = 0;
+    step(true, 20);
+    CHECK(step(true, BUTTON_ARM_MS) == ButtonEvent::Armed);
+    step(true, BUTTON_FIRE_MS - BUTTON_ARM_MS - 200);                  // right up to the edge
+    CHECK(!st.fired);
+    CHECK(step(false, 20) == ButtonEvent::None);                       // debouncing, not yet a release
+    CHECK(step(false, 20) == ButtonEvent::None);
+    CHECK(step(false, 20) == ButtonEvent::Aborted);                    // third consecutive sample
+    CHECK(!st.down && !st.armed && !st.fired);
+
+    // A single stray released sample mid-hold is BOUNCE, not a release: it must neither cancel the
+    // hold nor restart its clock, or a user holding the button through a noisy contact would get a
+    // silent abort with nothing on screen to explain it.
+    st = ButtonState{};
+    t = 0;
+    step(true, 20);
+    const uint64_t started = st.down_at_ms;
+    step(true, 1000);
+    CHECK(step(false, 20) == ButtonEvent::None);                       // one bad sample
+    CHECK(st.down && st.down_at_ms == started);                        // hold intact, clock unchanged
+    step(true, 20);
+    CHECK(st.release_run == 0);                                        // the bounce counter reset
+    CHECK(step(true, BUTTON_ARM_MS) == ButtonEvent::Armed);            // and the hold still counts from `started`
+
+    // A coarse sample period that crosses both thresholds at once fires: the user held it long
+    // enough, and reporting Armed first would just delay what they asked for by a whole sample.
+    st = ButtonState{};
+    t = 0;
+    step(true, 20);
+    CHECK(step(true, BUTTON_FIRE_MS + 1000) == ButtonEvent::Fired);
+
+    // Released while idle stays silent no matter how long.
+    st = ButtonState{};
+    for (int i = 0; i < 50; i++) CHECK(step(false, 100) == ButtonEvent::None);
+
+    // A release AFTER firing is not an "abort" — there is nothing left to abort, and the caller has
+    // already rebooted in the normal case.
+    st = ButtonState{};
+    t = 0;
+    step(true, 20);
+    step(true, BUTTON_FIRE_MS + 100);
+    CHECK(st.fired);
+    step(false, 20); step(false, 20);
+    CHECK(step(false, 20) == ButtonEvent::None);
+
+    // Thresholds are ordered and the arm point leaves real time to react.
+    CHECK(BUTTON_ARM_MS < BUTTON_FIRE_MS);
+    CHECK(BUTTON_FIRE_MS - BUTTON_ARM_MS >= 2000);
+    CHECK(BUTTON_RELEASE_SAMPLES * BUTTON_SAMPLE_MS < BUTTON_ARM_MS);   // debounce can't eat the warning
 }
 
 static void test_crashinfo() {
@@ -2432,12 +2698,63 @@ static void test_config_store() {
         v[v.size()-4] = k & 0xFF; v[v.size()-3] = (k>>8) & 0xFF;
         v[v.size()-2] = (k>>16) & 0xFF; v[v.size()-1] = (k>>24) & 0xFF;
     };
-    // Unknown version, CRC re-stamped: rejected by the version check alone.
-    std::vector<uint8_t> badver = buf; badver[4] = 2; restamp(badver);
-    CHECK(!config_blob_deserialize(badver.data(), badver.size(), out));
+    // Unknown version, CRC re-stamped: rejected by the version check alone — on BOTH sides of the
+    // accepted range, so a future v3 blob written by a newer build is refused rather than
+    // half-decoded by this one.
+    std::vector<uint8_t> newver = buf; newver[4] = CONFIG_BLOB_VERSION + 1; restamp(newver);
+    CHECK(!config_blob_deserialize(newver.data(), newver.size(), out));
+    std::vector<uint8_t> oldver = buf; oldver[4] = CONFIG_BLOB_VERSION_MIN - 1; restamp(oldver);
+    CHECK(!config_blob_deserialize(oldver.data(), oldver.size(), out));
     // Trailing garbage after a valid body, CRC re-stamped: rejected by the "p != body_end" rule alone.
     std::vector<uint8_t> extra = buf; extra.insert(extra.end() - 4, 0x00); restamp(extra);
     CHECK(!config_blob_deserialize(extra.data(), extra.size(), out));
+
+    // ── v2: the board-local hardware block ───────────────────────────────────────────────────────
+    ConfigBlob board;
+    board.wifi_ssid = "net";
+    board.led_gpio = 35; board.led_type = 1; board.led_inverted = false;
+    board.btn_gpio = 41; board.btn_active_low = true;
+    std::vector<uint8_t> bb = config_blob_serialize(board);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 2);
+    ConfigBlob rt;
+    CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
+    CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
+    CHECK(rt.btn_gpio == 41 && rt.btn_active_low);
+    CHECK(rt.wifi_ssid == "net");                       // the v1 fields still round-trip unchanged
+    // The two board booleans are packed into one flag byte — they must not bleed into each other.
+    board.led_inverted = true; board.btn_active_low = false;
+    bb = config_blob_serialize(board);
+    CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
+    CHECK(rt.led_inverted && !rt.btn_active_low);
+    // Negative pins (the -1 "absent" sentinel) survive the unsigned encoding.
+    board.led_gpio = -1; board.btn_gpio = -1;
+    bb = config_blob_serialize(board);
+    CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
+    CHECK(rt.led_gpio == -1 && rt.btn_gpio == -1);
+
+    // BACKWARD COMPATIBILITY, and it is not optional: a device OTA-upgraded from a pre-board build
+    // has a v1 blob on flash and NOTHING in the legacy per-key layout. Rejecting v1 would drop that
+    // user's WiFi and MQTT credentials on the upgrade. It must decode, and it must report
+    // has_board == false so the caller seeds the Kconfig defaults instead of reading "absent" as
+    // "indicator disabled" (which would silently darken every XIAO's LED).
+    std::vector<uint8_t> v1 = buf;                       // `buf` was serialized... as v2 by this build,
+    // so build a genuine v1 body: header + the v1 fields only, taken from the v2 encoding by
+    // dropping the 13-byte board block (3x u32 + 1 flag byte) that precedes the CRC.
+    v1.erase(v1.end() - 4 - 13, v1.end() - 4);
+    v1[4] = 1;
+    restamp(v1);
+    ConfigBlob legacy;
+    legacy.led_gpio = 999;                               // sentinel: must be left untouched by the decode
+    CHECK(config_blob_deserialize(v1.data(), v1.size(), legacy));
+    CHECK(!legacy.has_board);
+    CHECK(legacy.wifi_ssid == a.wifi_ssid && legacy.mqtt_uri == a.mqtt_uri);   // v1 payload intact
+    CHECK(legacy.led_gpio == -1);                        // the struct default, not the 999 sentinel
+    // A TRUNCATED v2 must not decode as a valid v1 with silently-default pins: the version byte
+    // still says 2, so the missing board block is caught by the length rule, not papered over.
+    std::vector<uint8_t> trunc = bb;
+    trunc.erase(trunc.end() - 4 - 13, trunc.end() - 4);
+    restamp(trunc);
+    CHECK(!config_blob_deserialize(trunc.data(), trunc.size(), out));
 }
 
 static void test_mcp_jsonrpc() {
@@ -2685,6 +3002,9 @@ int main() {
     test_config_model();
     test_board_pins();
     test_ha_device();
+    test_board_pins_local();
+    test_led_pattern();
+    test_button();
     test_discovery();
     test_binary_catalog();
     test_registry();

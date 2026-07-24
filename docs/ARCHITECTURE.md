@@ -124,17 +124,45 @@ syslog.cpp          → optional syslog UDP client (RFC 5424, off when syslog_ho
                       drive a getaddrinfo+ICMP storm. The errno is captured inside syslog_sendto
                       BEFORE close() (which may clobber it, and it now decides the throttle). Failures
                       log the TRANSITION (paused/recovered), not every dropped line
-status_led.cpp/.hpp → onboard-LED status indicator task, compile-time only (DAIKIN_STATUS_LED_*
-                      Kconfig; GPIO defaults to 21 = the XIAO ESP32-S3 onboard LED, INVERTED=y for
-                      its active-low wiring, -1 disables). Each tick samples the WiFi mode + wifi/
-                      mqtt/hp state and blinks: slow 1 s = setup portal (SoftAP), fast 100 ms =
-                      connecting, solid = healthy (WiFi + MQTT + X10A), double-flash = X10A link
-                      down, medium 300 ms = X10A up but MQTT down, off = no WiFi mode. X10A-down
-                      outranks MQTT-down — the bus is the point of the device.
-                      Not runtime-configurable and not on /status — a local-eyes-only signal.
+status_led.cpp/.hpp → onboard status-indicator task with TWO back-ends behind one host-tested
+                      pattern table (logic/led_pattern.hpp): a level-driven GPIO LED and an
+                      addressable WS2812 (RMT, espressif/led_strip). Pin + driver + polarity are
+                      RUNTIME (led_gpio/led_type/led_inverted in NVS, POST /set_board); Kconfig
+                      DAIKIN_STATUS_LED_* only seeds first boot. Runtime because CI publishes ONE
+                      esp32s3 image while boards disagree about their onboard parts — XIAO
+                      ESP32-S3: plain LED on GPIO21, active-low; M5Stack AtomS3 Lite: WS2812 on
+                      GPIO35. Compiling one in would fork the artifact, the manifest and the OTA
+                      feed per board. Each tick samples the WiFi mode + wifi/mqtt/hp state and
+                      blinks: slow 1 s = setup portal (SoftAP), fast 100 ms = connecting, solid =
+                      healthy (WiFi + MQTT + X10A), double-flash = X10A link down, medium 300 ms =
+                      X10A up but MQTT down, off = no WiFi mode. X10A-down outranks MQTT-down — the
+                      bus is the point of the device. Two further phases are asserted by the
+                      recovery button through status_led_signal() (an atomic — no lock on the erase
+                      path): red 60 ms strobe = factory reset ARMED, solid white = erasing. The
+                      override beats every operating phase, because a board being deliberately reset
+                      is usually perfectly healthy. Waits are sliced at 25 ms and re-check the
+                      signal, so an override appears within a slice instead of up to a full pattern
+                      later. Started AFTER config_load (it reads the config); on /status.board as
+                      configuration, never as a value — the light itself is local-eyes-only.
                       The loop self-guards like mqtt_task/poll_task: the state getters copy
                       std::strings out, so a tick can throw under memory pressure, and a task entry
                       is a C frame boundary — an escape would reboot the board over a cosmetic LED
+recovery_button.cpp/.hpp → physical factory-reset button (btn_gpio/btn_active_low, DISABLED by
+                      default). Held 5 s (BUTTON_FIRE_MS) it erases the whole daik_cfg NVS namespace
+                      and reboots into the setup portal — the only config reset that does not need
+                      network access to the device, i.e. the cure for "it joined a network I can no
+                      longer reach" (which the credential rollback cannot cover: that handles a
+                      REJECTED password, not a wrong-but-accepted LAN). Classification is the pure
+                      logic/button.hpp — an ARM checkpoint at 1.5 s lights the warning while there
+                      is still time to let go, and a debounced release means one bounced sample
+                      neither cancels a hold nor restarts its clock. Default -1 on purpose: an
+                      unconfigured input floats, and a floating pin reading "pressed" for five
+                      seconds would wipe a board nobody touched. A button already held at boot is
+                      ignored until the pin reads released once. The erase itself is milliseconds,
+                      so the indicator LEADS it by 250 ms and is held to 1.5 s total — a signal that
+                      merely bracketed the flash write would be invisible. A FAILED erase does NOT
+                      reboot (coming back up on the config it just claimed to delete is worse than
+                      staying up and logging why). Started even in safe mode
 www/                → web UI sources: index.html + style.css + app.js, spliced into ONE
                      self-contained page at build time (inline_assets.cmake) and served gzipped;
                      setup.html is the captive-portal page (gzipped separately)
@@ -165,9 +193,14 @@ host-testable core is unusually large and valuable, because the risky parts are 
   enum, and the fixed `POLL_INTERVAL_S` constant. Range and distinctness are not the whole link rule:
   `validate()` also applies `board_pins.hpp`'s chip-reserved-pin test per pin, so a pad the UI would
   never offer is rejected by name (`"rx_pin is a reserved GPIO"`) rather than range-accepted, and
-  `link_pins_safe()` bundles that test with the pair rule for the load path. The
-  `octal_spi`/`reserved` parameters are supplied by the caller from Kconfig
-  (`config.cpp`'s `hw_octal_spi()`/`hw_status_led_gpio()`), keeping the header `CONFIG_`-free.
+  `link_pins_safe()` bundles that test with the pair rule for the load path. `octal_spi` is supplied
+  by the caller from Kconfig (`config.cpp`'s `hw_octal_spi()`), keeping the header `CONFIG_`-free;
+  `reserved` is now a `ReservedPins` pair read from the live config (`config_reserved_pins()`),
+  since both firmware-driven pins — the status indicator and the recovery button — are runtime
+  settings rather than build options. `board_hw_valid()` is the mirror rule for `POST /set_board`:
+  it checks those two pins against the wider **local-I/O** set and enforces the collision rules in
+  both directions, so no GPIO can be claimed by the indicator, the button and the X10A link at once,
+  whichever endpoint is called second.
 - `logic/discovery.hpp` — the HA MQTT-Discovery payload builder (topic + config JSON per value),
   so the exact bytes HA receives are asserted on the host, not on the device.
 - `logic/detect.hpp` — model auto-detection: maps a bus `Fingerprint` (answering pages + capacity)
@@ -190,6 +223,14 @@ host-testable core is unusually large and valuable, because the risky parts are 
   `board_pin_offerable()` once per pin so it can name the offender (`"rx_pin is a reserved GPIO"`),
   while `config_load()` takes the combined `link_pins_safe()`, which folds the pair rule and both
   pin tests into one bool.
+  A **second, wider** set — `board_pin_local_io()` / `board_pins_local()`, surfaced as
+  `/status.board.pins_local` — is what the status indicator and the recovery button may use. It adds
+  back exactly the four dedicated-JTAG pads (GPIO39-42). Those are withheld from the X10A list as a
+  *preference* ("don't spend a debug probe on a serial link when 20 other pins would do"), not
+  because of a hardware conflict — and a preference cannot survive an onboard part soldered to one
+  of them: the M5Stack AtomS3 Lite's only button is on GPIO41 (MTDI). Everything the chip hard-
+  reserves (flash, octal flash/PSRAM, strapping, and GPIO19/20 which *are* the USB-Serial/JTAG
+  console this firmware logs over) is still excluded from both sets.
 - `logic/json.hpp` — the RFC 8259 string encoder every JSON payload goes through: `/status`,
   `/values` and `/scan` (`http_status.cpp`'s `jstr`), `/ota/status` (`json_quote`), as well as the
   MQTT state, heartbeat and crash topics. It escapes `"`, `\` and **every** control byte below 0x20 (`\b\f\n\r\t`, else `\u00XX`),

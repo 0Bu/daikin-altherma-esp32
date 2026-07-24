@@ -43,6 +43,24 @@ struct BoardPins {
 // against the real lists host-side, so it can't silently drift from the arrays below.
 inline constexpr int BOARD_PINS_MAX = 28;
 
+// The GPIOs THIS FIRMWARE has claimed for itself, and which the X10A link therefore may not reuse:
+// the status indicator (a pin status_led.cpp drives as an output, or clocks WS2812 bits onto) and
+// the recovery button (a pin button.cpp holds as an input with a pull). Both are runtime-configured
+// (config_model.hpp, NVS) rather than compile-time, so the "reserved" input can no longer be a
+// single Kconfig number.
+//
+// The int constructor is deliberately NOT explicit: it keeps `board_pin_offerable(p, octal, 21)`
+// — the single-reservation call shape from before the button existed — compiling and meaning
+// exactly what it did, so adding a second reservation didn't require touching every call site and
+// test at once. -1 in either field means "nothing reserved there".
+struct ReservedPins {
+    int led    = -1;
+    int button = -1;
+    constexpr ReservedPins() = default;
+    constexpr ReservedPins(int led_pin, int button_pin = -1) : led(led_pin), button(button_pin) {}
+    constexpr bool claims(int pin) const { return pin >= 0 && (pin == led || pin == button); }
+};
+
 // octal_spi: true if THIS build's flash and/or PSRAM run Octal I/O (GPIO33-37 then carry
 // SPIIO4-7/DQS and are unsafe for anything else); false (Quad/Dual flash, no PSRAM or Quad PSRAM)
 // leaves them free. Defaults to true — the conservative, always-safe answer — so a caller that
@@ -57,23 +75,23 @@ inline BoardPins board_pins(const char* /*target*/ = nullptr, bool octal_spi = t
     return {permissive, (int)(sizeof(permissive) / sizeof(int))};
 }
 
-// The pins actually OFFERED to the user: board_pins() minus `reserved` — a GPIO this firmware has
-// already claimed for itself, i.e. the status LED (CONFIG_DAIKIN_STATUS_LED_GPIO, default 21 and
-// enabled by default; -1 = nothing reserved). Chip-safe is not the same as free: status_led.cpp
-// drives its pin as a push-pull OUTPUT once per tick, so offering it would hand the user a pick that
-// silently cannot work — on TX the LED fights the UART, on RX it overpowers the bus and the port
-// reads the LED instead of the heat pump. The dropdown must not recommend a pin the firmware itself
-// is using.
+// The pins actually OFFERED to the user: board_pins() minus the GPIOs this firmware has already
+// claimed for itself — the status indicator and the recovery button (`rsv`; -1 = nothing reserved
+// there). Chip-safe is not the same as free: status_led.cpp drives its pin as a push-pull OUTPUT
+// once per tick, so offering it would hand the user a pick that silently cannot work — on TX the
+// LED fights the UART, on RX it overpowers the bus and the port reads the LED instead of the heat
+// pump. The button's pin is held as an input with a pull, which loses to a UART driver but makes
+// the button dead. The dropdown must not recommend a pin the firmware itself is using.
 //
 // Writes into a CALLER-owned buffer and returns the count, rather than returning a shared static
 // list: build_status_json_string() runs on the httpd task AND on the poll task's WS broadcaster, so
 // a filtered static would be a data race between them. Returns pins strictly ascending, like
 // board_pins(). Size `out` with BOARD_PINS_MAX.
-inline int board_pins_offerable(int* out, int cap, bool octal_spi, int reserved = -1) {
+inline int board_pins_offerable(int* out, int cap, bool octal_spi, ReservedPins rsv = {}) {
     BoardPins bp = board_pins(nullptr, octal_spi);
     int n = 0;
     for (int i = 0; i < bp.count && n < cap; i++) {
-        if (bp.pins[i] == reserved) continue;
+        if (rsv.claims(bp.pins[i])) continue;
         out[n++] = bp.pins[i];
     }
     return n;
@@ -85,12 +103,48 @@ inline int board_pins_offerable(int* out, int cap, bool octal_spi, int reserved 
 // can hold match exactly the set the UI offers. Without it, validate()'s range-only check accepted a
 // curl POST that routed the X10A UART onto the SPI-flash pins (GPIO26-32): flash traffic corrupts, the
 // board crash-loops, and the toxic pair is already persisted so every boot re-tries it.
-inline bool board_pin_offerable(int pin, bool octal_spi, int reserved = -1) {
-    if (pin == reserved) return false;
+inline bool board_pin_offerable(int pin, bool octal_spi, ReservedPins rsv = {}) {
+    if (rsv.claims(pin)) return false;
     BoardPins bp = board_pins(nullptr, octal_spi);
     for (int i = 0; i < bp.count; i++)
         if (bp.pins[i] == pin) return true;
     return false;
+}
+
+// ── Local-I/O pins: what the status indicator and the recovery button may be wired to ────────────
+// A DIFFERENT, slightly wider set than the X10A one above, and the difference is exactly the four
+// dedicated JTAG pads (GPIO39-42, MTCK/MTDO/MTDI/MTMS).
+//
+// Those four are withheld from the X10A dropdown as a PREFERENCE — "don't spend a debug probe on a
+// serial link when 20 other pins would do", costing 4 pins out of 45. That trade does not survive
+// contact with an onboard peripheral: a board's LED and button are soldered where the vendor put
+// them, and the M5Stack AtomS3 Lite puts its button on GPIO41 (MTDI). Refusing that pin would not
+// protect anything — it would just mean the board's only button cannot be used, while an external
+// JTAG probe is not attached anyway (and if one ever is, the user simply doesn't configure the
+// button). Everything the chip HARD-reserves is still excluded: SPI flash, octal flash/PSRAM when
+// this build uses it, the strapping pins, and GPIO19/20 which ARE the USB-Serial/JTAG console this
+// firmware logs over.
+inline constexpr int BOARD_LOCAL_PINS_MAX = BOARD_PINS_MAX + 4;
+
+inline bool board_pin_local_io(int pin, bool octal_spi) {
+    if (pin >= 39 && pin <= 42) return true;                 // dedicated JTAG — see above
+    return board_pin_offerable(pin, octal_spi, ReservedPins{});
+}
+
+// The local-I/O set as an ascending list, for the UI's LED/button pin pickers. Same caller-owned
+// buffer rule as board_pins_offerable(); size `out` with BOARD_LOCAL_PINS_MAX.
+inline int board_pins_local(int* out, int cap, bool octal_spi) {
+    BoardPins bp = board_pins(nullptr, octal_spi);
+    static const int jtag[] = {39, 40, 41, 42};
+    // Straight merge of two ascending, DISJOINT lists (board_pins() never contains 39-42 — the
+    // tests assert that, so no de-duplication is needed here). The result must stay strictly
+    // ascending: the UI renders it verbatim as the pin dropdown.
+    int n = 0, i = 0, j = 0;
+    while (n < cap && (i < bp.count || j < 4)) {
+        const bool take_base = (j >= 4) || (i < bp.count && bp.pins[i] < jtag[j]);
+        out[n++] = take_base ? bp.pins[i++] : jtag[j++];
+    }
+    return n;
 }
 
 } // namespace daik

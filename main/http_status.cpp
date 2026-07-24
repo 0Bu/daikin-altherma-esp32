@@ -87,15 +87,30 @@ static std::string build_status_json_string() {
     esp_app_get_elf_sha256(elf_sha, sizeof(elf_sha));
     j += "\"app_elf_sha256\":" + jstr(elf_sha) + ",";
     // GPIOs the UI offers in the RX/TX pin dropdown: the ESP32-S3 chip-safe set, reserving
-    // GPIO33-37 only when this build's flash/PSRAM actually run Octal I/O, and dropping the status
-    // LED's pin — the one GPIO this firmware itself drives (logic/board_pins.hpp).
-    // octal-SPI + status-LED facts come from config.cpp's hw_* helpers (the single Kconfig source,
-    // shared with /set_hp validation and config_load) rather than a #if block copied in here.
+    // GPIO33-37 only when this build's flash/PSRAM actually run Octal I/O, and dropping the pins
+    // this firmware itself drives — the status indicator and the recovery button
+    // (logic/board_pins.hpp). The octal-SPI fact comes from config.cpp's hw_octal_spi() and the
+    // reserved pins from the live config, the same two inputs /set_hp validation and config_load
+    // use, rather than a #if block copied in here.
     int pins[BOARD_PINS_MAX];
-    int npins = board_pins_offerable(pins, BOARD_PINS_MAX, hw_octal_spi(), hw_status_led_gpio());
+    int npins = board_pins_offerable(pins, BOARD_PINS_MAX, hw_octal_spi(), config_reserved_pins(c));
     j += "\"pins_avail\":[";
     for (int i = 0; i < npins; i++) { if (i) j += ","; j += std::to_string(pins[i]); }
     j += "],";
+    // Board-local hardware: what the indicator + recovery button are configured as, plus the pins
+    // they MAY be moved to. A separate, wider list than pins_avail — the dedicated-JTAG pads are
+    // legal for an onboard LED/button but withheld from the X10A picker (board_pins.hpp explains
+    // why). Drives the ESP32 card's hardware rows; /set_board writes them back.
+    int lpins[BOARD_LOCAL_PINS_MAX];
+    int nlpins = board_pins_local(lpins, BOARD_LOCAL_PINS_MAX, hw_octal_spi());
+    j += "\"board\":{\"led_gpio\":" + std::to_string(c.led_gpio) +
+         ",\"led_type\":" + std::to_string(c.led_type) +
+         ",\"led_inverted\":" + std::string(c.led_inverted ? "true" : "false") +
+         ",\"btn_gpio\":" + std::to_string(c.btn_gpio) +
+         ",\"btn_active_low\":" + std::string(c.btn_active_low ? "true" : "false") +
+         ",\"pins_local\":[";
+    for (int i = 0; i < nlpins; i++) { if (i) j += ","; j += std::to_string(lpins[i]); }
+    j += "]},";
     char bssid_str[18] = {0};
     char mac_str[18] = {0};
     if (wi.connected) {

@@ -310,6 +310,47 @@
     </form>
   </div>
 
+  <!-- ═══ Board hardware modal (opened from the ESP32 card's Hardware row) ═══
+       The status indicator and the recovery button are per-BOARD facts, but one published image
+       serves every board — so they are runtime settings here rather than build options. Saving
+       reboots (both are claimed once at task start; see http_config.cpp set_board). -->
+  <div class="modal" id="boardModal" hidden>
+    <div class="modal-backdrop" id="boardBackdrop"></div>
+    <form class="modal-card" id="boardForm" role="dialog" aria-modal="true" aria-labelledby="boardModalTitle">
+      <div class="section-label card-title" id="boardModalTitle" data-i18n="board.title">Board hardware</div>
+      <label class="field">
+        <span class="field-label plain" data-i18n="board.ledtype">Status LED</span>
+        <select class="input" id="bdLedType">
+          <option value="-1" data-i18n="board.none">None</option>
+          <option value="0" data-i18n="board.led_gpio">Plain LED (GPIO)</option>
+          <option value="1" data-i18n="board.led_ws2812">Addressable RGB (WS2812)</option>
+        </select>
+      </label>
+      <label class="field" id="bdLedPinRow">
+        <span class="field-label plain" data-i18n="board.ledpin">LED pin</span>
+        <select class="input mono num" id="bdLedPin"></select>
+      </label>
+      <label class="field check" id="bdLedInvRow">
+        <input type="checkbox" id="bdLedInv">
+        <span data-i18n="board.ledinv">Active low (LED lights when the pin is driven LOW)</span>
+      </label>
+      <label class="field">
+        <span class="field-label plain" data-i18n="board.btnpin">Reset button pin</span>
+        <select class="input mono num" id="bdBtnPin"></select>
+      </label>
+      <label class="field check" id="bdBtnInvRow">
+        <input type="checkbox" id="bdBtnInv">
+        <span data-i18n="board.btninv">Active low (button shorts the pin to GND)</span>
+      </label>
+      <p class="hint err" id="bdError" hidden></p>
+      <p class="hint" data-i18n="board.hint">Holding the reset button for 5 seconds ERASES all stored settings (WiFi, MQTT, Syslog/NTP) and reboots into the setup portal — the LED flashes red while it is armed, then turns solid white while erasing. Leave the button on "None" unless one is actually wired: an unconnected pin can float and trigger it.</p>
+      <div class="modal-actions">
+        <button class="btn secondary" type="button" id="bdCancel" data-i18n="btn.cancel">Cancel</button>
+        <button class="btn primary" type="submit" id="bdBtn" data-i18n="btn.save">Save</button>
+      </div>
+    </form>
+  </div>
+
   <div class="toasts" id="toasts"></div>
 </div>
 

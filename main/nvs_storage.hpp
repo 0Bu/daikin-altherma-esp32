@@ -32,4 +32,12 @@ int32_t     nvs_get_i32(const char* key, int32_t def);   // used for the persist
 [[nodiscard]] esp_err_t nvs_set_blob(const char* key, const void* data, size_t len);
 bool                    nvs_get_blob(const char* key, std::vector<uint8_t>& out);
 
+// Erase the ENTIRE "daik_cfg" namespace: WiFi credentials + the rollback backup, MQTT broker and
+// credentials, syslog, NTP, the X10A link cache and the safe-mode crash counter. The factory reset
+// behind the physical recovery button (recovery_button.cpp) — the only config reset that does not
+// require reaching the device over the network. A missing namespace counts as success (nothing
+// stored = nothing to erase); anything else is reported so the caller can refuse to reboot into a
+// config it just claimed to have deleted.
+[[nodiscard]] esp_err_t nvs_erase_all();
+
 } // namespace daik

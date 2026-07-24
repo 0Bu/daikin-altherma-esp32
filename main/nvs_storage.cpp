@@ -60,6 +60,20 @@ esp_err_t nvs_set_blob(const char* key, const void* data, size_t len) {
     return e;
 }
 
+esp_err_t nvs_erase_all() {
+    nvs_handle_t h;
+    esp_err_t e = ::nvs_open(NS, NVS_READWRITE, &h);
+    // Nothing has ever been written to this namespace, so there is nothing to erase and the caller's
+    // intent ("leave no stored config behind") is already satisfied — report success rather than
+    // making a factory reset fail on a device that was already factory-fresh.
+    if (e == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    if (e != ESP_OK) return e;
+    e = ::nvs_erase_all(h);
+    if (e == ESP_OK) e = ::nvs_commit(h);   // same as every setter: the erase is durable only on commit
+    ::nvs_close(h);
+    return e;
+}
+
 bool nvs_get_blob(const char* key, std::vector<uint8_t>& out) {
     nvs_handle_t h;
     if (::nvs_open(NS, NVS_READONLY, &h) != ESP_OK) return false;

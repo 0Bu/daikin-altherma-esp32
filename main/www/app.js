@@ -75,6 +75,7 @@ const I18N = {
     "toast.ota_update_failed": "Update failed", "toast.ota_installed": "Installed — rebooting…",
     "toast.verifying_mqtt": "Verifying MQTT connection…", "toast.saving_syslog": "Saving Syslog settings…",
     "toast.saving_ntp": "Saving NTP settings…", "toast.trying_pins": "Trying pins…",
+    "toast.saving_board": "Saving board hardware…",
     "ota.confirm": (cur, avail) => `Update available: v${cur} → v${avail}\n\nThe device downloads and installs the signed image, then reboots. If the new firmware can't get online it rolls back automatically.`,
     "aria.ota": "Check for firmware updates",
     "mq.err_format": "Enter host:port — e.g. 192.168.1.10:1883 — or mqtts://host:8883 for TLS",
@@ -101,6 +102,14 @@ const I18N = {
     "syslog.hint": "IP address or hostname and port of the Syslog server. Empty host disables Syslog.",
     "ntp.title": "NTP server", "ntp.server": "Server",
     "ntp.hint": "Hostname or IP of the NTP server the device syncs its clock from. Empty resets to the firmware default.",
+    "board.title": "Board hardware", "board.ledtype": "Status LED", "board.none": "None",
+    "board.led_gpio": "Plain LED (GPIO)", "board.led_ws2812": "Addressable RGB (WS2812)",
+    "board.ledpin": "LED pin", "board.btnpin": "Reset button pin",
+    "board.ledinv": "Active low (LED lights when the pin is driven LOW)",
+    "board.btninv": "Active low (button shorts the pin to GND)",
+    "board.hint": "Holding the reset button for 5 seconds ERASES all stored settings (WiFi, MQTT, Syslog/NTP) and reboots into the setup portal — the LED flashes red while it is armed, then turns solid white while erasing. Leave the button on \"None\" unless one is actually wired: an unconnected pin can float and trigger it.",
+    "card.hardware": "Hardware", "card.hw_off": "None",
+    "card.hw_led": (pin, kind) => `GPIO${pin} · ${kind}`, "card.hw_btn": (pin) => `GPIO${pin}`,
   },
   de: {
     "hero.nodata": "Keine Daten", "hero.unreachable": "Nicht erreichbar",
@@ -157,6 +166,7 @@ const I18N = {
     "toast.ota_update_failed": "Update fehlgeschlagen", "toast.ota_installed": "Installiert — Neustart…",
     "toast.verifying_mqtt": "Prüfe MQTT-Verbindung…", "toast.saving_syslog": "Speichere Syslog-Einstellungen…",
     "toast.saving_ntp": "Speichere NTP-Einstellungen…", "toast.trying_pins": "Teste Pins…",
+    "toast.saving_board": "Speichere Board-Hardware…",
     "ota.confirm": (cur, avail) => `Update verfügbar: v${cur} → v${avail}\n\nDas Gerät lädt das signierte Abbild, installiert es und startet neu. Kommt die neue Firmware nicht online, wird automatisch zurückgesetzt.`,
     "aria.ota": "Nach Firmware-Updates suchen",
     "mq.err_format": "Host:Port eingeben — z. B. 192.168.1.10:1883 — oder mqtts://host:8883 für TLS",
@@ -183,6 +193,14 @@ const I18N = {
     "syslog.hint": "IP-Adresse oder Hostname und Port des Syslog-Servers. Leerer Host deaktiviert Syslog.",
     "ntp.title": "NTP-Server", "ntp.server": "Server",
     "ntp.hint": "Hostname oder IP des NTP-Servers, mit dem das Gerät seine Uhr synchronisiert. Leer setzt auf den Firmware-Standard zurück.",
+    "board.title": "Board-Hardware", "board.ledtype": "Status-LED", "board.none": "Keine",
+    "board.led_gpio": "Einfache LED (GPIO)", "board.led_ws2812": "Adressierbare RGB-LED (WS2812)",
+    "board.ledpin": "LED-Pin", "board.btnpin": "Reset-Taster-Pin",
+    "board.ledinv": "Active low (LED leuchtet, wenn der Pin auf LOW liegt)",
+    "board.btninv": "Active low (Taster zieht den Pin auf GND)",
+    "board.hint": "Den Reset-Taster 5 Sekunden zu halten LÖSCHT alle gespeicherten Einstellungen (WLAN, MQTT, Syslog/NTP) und startet ins Setup-Portal neu — die LED blinkt rot, solange der Vorgang scharf ist, und leuchtet dann weiß, während gelöscht wird. Den Taster auf „Keine“ lassen, solange keiner verdrahtet ist: ein offener Pin kann floaten und ihn auslösen.",
+    "card.hardware": "Hardware", "card.hw_off": "Keine",
+    "card.hw_led": (pin, kind) => `GPIO${pin} · ${kind}`, "card.hw_btn": (pin) => `GPIO${pin}`,
   },
 };
 function t(k, ...a) {
@@ -541,8 +559,24 @@ function esp32CardHtml() {
     vrow(t("card.hplink"), hp.connected ? t("card.online") : t("card.offline"), { cls: hp.connected ? "ok" : "err" }) +
     vrow(t("card.protocol"), hp.connected ? proto : "—") +
     pinRow(t("card.rxpin"), "e32Rx", hp.rx, hp.tx) +
-    pinRow(t("card.txpin"), "e32Tx", hp.tx, hp.rx);
+    pinRow(t("card.txpin"), "e32Tx", hp.tx, hp.rx) +
+    boardRow();
   return vcard("ESP32", rows);
+}
+
+// The board's own onboard parts — status indicator + recovery button — as ONE summary row that
+// opens the editor. They are runtime settings (one firmware image serves boards with different
+// onboard hardware), but they are also set once per board and never touched again, so they get a
+// single collapsed row rather than the permanent real estate the X10A pins have.
+function boardRow() {
+  const b = S.status?.board || {};
+  const led = b.led_gpio == null || b.led_gpio < 0
+    ? t("card.hw_off")
+    : t("card.hw_led", b.led_gpio, b.led_type === 1 ? "WS2812" : "LED");
+  const btn = b.btn_gpio == null || b.btn_gpio < 0 ? t("card.hw_off") : t("card.hw_btn", b.btn_gpio);
+  return `<button class="vrow vrow-btn" type="button" data-act="board" aria-label="${esc(t("board.title"))}">` +
+    `<span class="vrow-label">${esc(t("card.hardware"))}</span>` +
+    `<span class="vrow-val mono">${esc(led)} · ${esc(btn)}</span></button>`;
 }
 
 // ESP32 · Model status cards, from /status (board facts + detected unit). WiFi/MQTT/Syslog/NTP moved
@@ -1336,6 +1370,46 @@ function openNtp() {
   $("ntpServer").focus();
 }
 function closeNtp() { $("ntpModal").hidden = true; }
+
+// ── Board hardware (dashboard edit modal) ───────────────────────────────────
+// Fills the two pin dropdowns from /status.board.pins_local — a WIDER list than the RX/TX picker's
+// pins_avail, because an onboard LED or button legitimately sits on a dedicated-JTAG pad that the
+// X10A picker withholds (logic/board_pins.hpp). The pin currently in use is always offered even if
+// it has dropped off the list (e.g. a build that switched to Octal flash), so the modal can always
+// show what the device is actually doing.
+function boardPinOptions(sel, cur, withNone) {
+  const pins = Array.isArray(S.status?.board?.pins_local) ? S.status.board.pins_local : [];
+  const list = (cur != null && cur >= 0 && !pins.includes(cur)) ? [cur, ...pins].sort((a, b) => a - b) : pins;
+  sel.innerHTML = (withNone ? `<option value="-1">${esc(t("board.none"))}</option>` : "") +
+    list.map((p) => `<option value="${p}">${p}</option>`).join("");
+  sel.value = String(cur != null && cur >= 0 ? cur : -1);
+}
+// "None" for the LED is expressed as led_gpio = -1, but the TYPE select is what the user picks from
+// (None / plain / WS2812) — the pin row and the polarity checkbox only make sense once a type is
+// chosen, and "active low" is meaningless for a WS2812 (it encodes "off" as the zero colour, so
+// there is no drive level to invert).
+function syncBoardFields() {
+  const type = +$("bdLedType").value;
+  $("bdLedPinRow").hidden = type < 0;
+  $("bdLedInvRow").hidden = type !== 0;
+  $("bdBtnInvRow").hidden = +$("bdBtnPin").value < 0;
+}
+function fillBoard() {
+  const b = S.status?.board || {};
+  const hasLed = b.led_gpio != null && b.led_gpio >= 0;
+  $("bdLedType").value = hasLed ? String(b.led_type ?? 0) : "-1";
+  boardPinOptions($("bdLedPin"), hasLed ? b.led_gpio : -1, false);
+  $("bdLedInv").checked = !!b.led_inverted;
+  boardPinOptions($("bdBtnPin"), b.btn_gpio, true);
+  $("bdBtnInv").checked = b.btn_active_low !== false;
+  syncBoardFields();
+}
+function openBoard() {
+  fillBoard();
+  $("bdError").hidden = true;
+  $("boardModal").hidden = false;
+}
+function closeBoard() { $("boardModal").hidden = true; }
 function signalBars(rssi) {
   const lit = rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1;
   const tone = rssi >= -70 ? "var(--ok)" : "var(--warn)";
@@ -1538,6 +1612,7 @@ function wire() {
   $("valueGroups").addEventListener("click", (e) => {
     const act = e.target.closest("[data-act]");
     if (act && act.dataset.act === "ota") { checkFirmwareUpdate(); return; }
+    if (act && act.dataset.act === "board") { openBoard(); return; }
     // Tapping a value row (that has a description) expands/collapses its explainer accordion.
     const desc = e.target.closest("[data-desc]");
     if (desc) toggleDesc(desc);
@@ -1722,6 +1797,31 @@ function wire() {
       close: closeNtp,
       then: renderDashboard,
       busyMsg: t("toast.saving_ntp"),
+    });
+  });
+
+  $("bdCancel").onclick = closeBoard;
+  $("boardBackdrop").onclick = closeBoard;
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("boardModal").hidden) closeBoard(); });
+  $("bdLedType").addEventListener("change", syncBoardFields);
+  $("bdBtnPin").addEventListener("change", syncBoardFields);
+  $("boardForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const type = +$("bdLedType").value;
+    saveReboot("/set_board", {
+      // Type "None" is the wire's led_gpio = -1; the pin select keeps its last value so re-enabling
+      // the indicator doesn't make the user find their pin again.
+      led_gpio: type < 0 ? -1 : +$("bdLedPin").value,
+      led_type: type < 0 ? 0 : type,
+      led_inverted: $("bdLedInv").checked,
+      btn_gpio: +$("bdBtnPin").value,
+      btn_active_low: $("bdBtnInv").checked,
+    }, {
+      btn: "bdBtn",
+      showError: (msg) => { $("bdError").textContent = msg; $("bdError").hidden = false; },
+      close: closeBoard,
+      then: renderDashboard,
+      busyMsg: t("toast.saving_board"),
     });
   });
 }
