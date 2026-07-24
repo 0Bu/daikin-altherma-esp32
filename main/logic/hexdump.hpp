@@ -9,6 +9,14 @@
 // case: several read a constant 0.0 while others read ~190 °C on the same unit under load, which is
 // the signature of an offset/layout mismatch, not a dead page. One diag line per probed page turns
 // that from a hypothesis into a decidable question.
+//
+// The sharper case is a reading that is impossible yet lands INSIDE reading_plausible()'s ±200 °C
+// window, so no gate ever fires and it reaches Home Assistant and Grafana as a real measurement:
+// measured on a live unit, Target Evap. Temp. (page 0x10 offset 6) reached 199.6 °C — 0.4 °C under
+// the ceiling — and the two outdoor pressures (page 0x20 offsets 12/14) stayed at 0.0 bar through
+// every sample taken while the compressor ran at 42 rps with 104.5 °C discharge, where an R32 high
+// side runs 25-40 bar. A plausibility bound cannot catch those; only the wire bytes distinguish an
+// absent sensor from a wrong offset, which is why 0x10 and 0x20 are dumped too.
 #include <cstdint>
 
 namespace daik {

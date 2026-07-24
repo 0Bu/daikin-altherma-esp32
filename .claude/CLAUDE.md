@@ -470,7 +470,11 @@ logic/          IDF-free, host-tested pure headers (crc, convert, registers, val
                 "" rather than a plausible-looking 1970-01-01 — callers key on the empty string to
                 fall back to the RFC 5424 NILVALUE / JSON null instead of asserting a wrong instant.
                 hexdump.hpp = hex_render() for the RAW X10A page payloads hp_detect.cpp puts on
-                /diag (pages 0x00, 0xA0, 0xA1, one line each, only on a detect pass). HTTP exposes
+                /diag (pages 0x00, 0x10, 0x20, 0xA0, 0xA1, one line each, only on a detect pass —
+                0x10/0x20 carry readings measured IMPOSSIBLE on a live unit yet inside
+                reading_plausible()'s ±200 °C window, so nothing masks them: Target Evap. Temp.
+                (0x10/6) hit 199.6 °C, and the outdoor pressures (0x20/12+14) read 0.0 bar with the
+                compressor at 42 rps). HTTP exposes
                 only DECODED values, so a physically impossible reading cannot be attributed to a
                 wrong converter vs. a wrong byte offset vs. a per-unit layout difference without the
                 wire bytes — and they otherwise never leave the device. Truncation is by WHOLE bytes:
