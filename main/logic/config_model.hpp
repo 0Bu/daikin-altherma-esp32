@@ -101,6 +101,20 @@ struct Config {
 // direction is left open because it is self-correcting and cheap — detection re-runs and re-fixes
 // the link — whereas the credentials it protects are user-entered and unrecoverable.
 
+// Decide whether a whole-struct config save achieved what its CALLER requires. The atomic service
+// blob and the self-healing X10A link cache are deliberately different durability domains:
+//
+//   * ordinary /set_wifi|mqtt|syslog|ntp|board|ota saves own only blob fields; once that one atomic
+//     write lands, a link-cache maintenance failure must not turn the already-committed request into
+//     a false HTTP 500;
+//   * /set_hp owns the link and therefore requires all three link keys as well.
+//
+// Kept pure so the distinction cannot silently collapse back to "any cache error means nothing was
+// saved" in config.cpp.
+inline bool config_save_succeeded(bool blob_ok, bool link_ok, bool require_link) {
+    return blob_ok && (!require_link || link_ok);
+}
+
 // Apply the detected X10A link. Non-allocating, so it cannot throw inside the config mutex.
 inline void apply_link(Config& c, int rx_pin, int tx_pin, Protocol proto) {
     c.rx_pin = rx_pin;

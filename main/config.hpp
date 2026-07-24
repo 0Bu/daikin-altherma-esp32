@@ -14,13 +14,14 @@ Config config();
 // Load from NVS, seeding any missing key from its Kconfig default.
 void config_load();
 
-// Persist the given config to NVS. Returns FALSE on any NVS error, in which case nothing was
-// published to RAM either — a caller that ignores this reports a save the device never made. Writes
-// user settings (WiFi + MQTT) and the X10A link cache (RX/TX pins + protocol); the model (profile +
-// fingerprint) is NOT written. For the whole-struct writers only: the /set_* handlers, which own the
-// credential fields and are serialized on the single httpd task. The poll task must NOT use this —
-// see config_save_link / config_set_model below.
-bool config_save(const Config& c);
+// Persist the given config to NVS. The credential/service/board/channel fields are one atomic blob;
+// the X10A link cache (RX/TX/proto) is a separate self-healing durability domain. Ordinary callers
+// succeed once the blob lands even if best-effort cache maintenance fails afterwards; /set_hp passes
+// require_link=true because that route owns the link and must not apply it unless all three cache
+// keys landed. The model (profile + fingerprint) is NOT written. For the whole-struct writers only:
+// the /set_* handlers, serialized on the single httpd task. The poll task must NOT use this — see
+// config_save_link / config_set_model below.
+bool config_save(const Config& c, bool require_link = false);
 
 // Commit ONLY the X10A link (rx/tx/proto), patched into the live config under the mutex — the
 // caller's other fields are left alone, so a detection commit can never revert a concurrent

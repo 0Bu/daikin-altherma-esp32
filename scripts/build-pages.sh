@@ -19,14 +19,19 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-[ -d dist ] || { echo "build-pages: run scripts/ci-build-all.sh first (no dist/)" >&2; exit 1; }
-
 ARG="${1:-}"
+# Validate the argument BEFORE the dist/ check, and before the `rm -rf "$OUT"` below: OUT is what
+# this script deletes, so a malformed call has to fail while it still names nothing. Neither mode
+# takes a value — a second word (`--dev 12`, or the retired `--pr 12`) is a call that meant
+# something else, not one word too many.
+[ "$#" -le 1 ] || { echo "build-pages: expected at most one argument" >&2; exit 1; }
 case "$ARG" in
     --dev) OUT="_site/dev" ;;
     "")    OUT="_site" ;;
     *)     echo "build-pages: unknown argument '$ARG' (expected none, or --dev)" >&2; exit 1 ;;
 esac
+
+[ -d dist ] || { echo "build-pages: run scripts/ci-build-all.sh first (no dist/)" >&2; exit 1; }
 rm -rf "$OUT"; mkdir -p "$OUT"
 
 cp docs/index.html "$OUT/index.html"

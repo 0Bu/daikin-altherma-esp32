@@ -46,21 +46,32 @@ If you touch the audit itself, also run `tools/domain/selftest.sh` — it re-int
 the audit was built for into a throwaway copy and asserts all four are still caught. A checker that
 has stopped checking turns "clean" from evidence into a lie.
 
-A third fast gate guards the **GitHub Pages publish** rather than the
-firmware, so most PRs never need it locally — run it only if you touch
-[`scripts/publish-pages-branch.sh`](scripts/publish-pages-branch.sh):
+Two more fast gates guard the **published artifacts** rather than the firmware, so most PRs never
+need them locally — run them if you touch
+[`scripts/publish-pages-branch.sh`](scripts/publish-pages-branch.sh),
+[`scripts/build-pages.sh`](scripts/build-pages.sh) or
+[`scripts/check-web-installer-plan.py`](scripts/check-web-installer-plan.py):
 
 ```bash
-scripts/run-pages-publish-tests.sh   # CI gates step 3 — needs only git, no toolchain
+scripts/run-pages-publish-tests.sh         # CI gates step 3 — needs only git, no toolchain
+scripts/run-web-installer-plan-tests.sh    # CI gates step 4 — needs only python3
 ```
 
-It races two publishers against a throwaway bare repo, because `gh-pages` has three concurrent
-writers (main's root publish, each PR's preview, and the preview cleanup) and the loser used to
-fail its entire build — a bug that read as a flake, since re-running always cleared it. Like the
-other two, it gates `build`.
+The first races two publishers against a throwaway bare repo, because `gh-pages` has two concurrent
+writers (a manual release's root publish and every merge's dev-channel publish) and the loser used
+to fail its entire build — a bug that read as a flake, since re-running always cleared it. It also
+pins that a call which is not one of the two modes fails *before* the branch is touched: the
+argument selects which slice gets overwritten, so a retired `--pr 12` treated as a root publish
+would replace the release feed.
 
-All three are **steps of one `gates` job**, not a job each. Actions bills every job rounded up to
-the next whole minute, so three ~15-second jobs cost three minutes for under a minute of work; a
+The second is the negative half of the **NVS-preservation** gate. `check-web-installer-plan.py`
+already ran in CI on the real manifest, but only ever proved that today's good plan passes — these
+tests prove it still *rejects* a part that erases `nvs`, a path outside the manifest directory, a
+directory in place of an image and malformed JSON. A checker that only sees valid input is not
+evidence.
+
+All four are **steps of one `gates` job**, not a job each. Actions bills every job rounded up to
+the next whole minute, so four ~15-second jobs cost four minutes for under a minute of work; a
 step boundary names the failure just as precisely.
 
 ## Building the firmware

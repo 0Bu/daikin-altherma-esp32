@@ -13,6 +13,7 @@
 #include "esp_err.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_netif.h"
 #include "nvs_flash.h"
 
 #include "config.hpp"
@@ -48,6 +49,10 @@ extern "C" void app_main() {
         ESP_LOGE(TAG, "nvs_flash_init failed: %s — continuing WITHOUT persistence this boot "
                       "(config, WiFi-rollback backup and the safe-mode crash counter are not durable)",
                  esp_err_to_name(nvs_err));
+    // ESP-NETIF is a process-wide singleton and its API contract requires exactly one call from
+    // app startup. Keeping it here also makes the STA-failure -> setup-portal fallback safe: both
+    // network branches create their own netif, but neither re-initializes the global stack.
+    ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     daik::diag_log_init();
@@ -82,8 +87,8 @@ extern "C" void app_main() {
     }
 
     // --- Wall clock ---
-    // Both branches above already called esp_netif_init(); harmless to start before the STA has an
-    // IP (or in AP-only setup mode) — the client idles/retries on its own task until one shows up.
+    // The network stack was initialized once above. Harmless to start before the STA has an IP (or
+    // in AP-only setup mode) — the client idles/retries on its own task until one shows up.
     daik::sntp_time_start();
 
     // --- Services ---

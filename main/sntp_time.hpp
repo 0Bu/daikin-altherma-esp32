@@ -8,8 +8,8 @@ namespace daik {
 
 // Starts the SNTP client (poll mode, config().ntp_server — NVS override of CONFIG_DAIKIN_NTP_SERVER,
 // runtime-editable via POST /set_ntp same as syslog_host/POST /set_syslog). Call once, after
-// esp_netif_init() has run (main.cpp calls it right after WiFi STA / setup-AP bring-up, both of
-// which already call esp_netif_init()) and after config_load() has populated the runtime config.
+// esp_netif_init() has run exactly once in app_main and config_load() has populated the runtime
+// config before this is called.
 // Non-blocking: the IDF SNTP client resolves + retries the server on its own internal task, so this
 // is harmless to start before the STA even has an IP — it just idles until one shows up (and, in
 // AP-only setup mode, until the device is reconfigured for STA and rebooted).

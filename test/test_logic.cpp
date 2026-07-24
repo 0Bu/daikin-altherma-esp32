@@ -507,6 +507,16 @@ static void test_convert() {
 }
 
 static void test_config_model() {
+    // The atomic service blob and the self-healing link cache have different success contracts.
+    // Ordinary service routes own only blob fields, so a cache-maintenance hiccup after that commit
+    // must not report a false 500; /set_hp owns the cache and therefore does require it.
+    CHECK(config_save_succeeded(true, true, false));
+    CHECK(config_save_succeeded(true, false, false));
+    CHECK(config_save_succeeded(true, true, true));
+    CHECK(!config_save_succeeded(true, false, true));
+    CHECK(!config_save_succeeded(false, true, false));
+    CHECK(!config_save_succeeded(false, true, true));
+
     Config c;
     c.rx_pin = 44; c.tx_pin = 43;
     std::string why;
@@ -2809,6 +2819,10 @@ static void test_version_cmp() {
     CHECK(!ota_is_upgrade("1.0.0", "<!DOCTYPE html>"));
     CHECK(!version_valid("") && !version_valid("v") && !version_valid("abc"));
     CHECK(version_valid("1") && version_valid("1.0.0") && version_valid("v1.0.0"));
+    CHECK(!version_valid(".1") && !version_valid("1.") && !version_valid("1..0"));
+    CHECK(!version_valid("1.2.3.4.5"));             // comparer intentionally supports at most 4
+    CHECK(!version_valid("1.0.0-") && !version_valid("1.0.0-dev."));
+    CHECK(!version_valid("1.0.0+") && !version_valid("1.0.0+build+again"));
 
     // A git tag pasted into the manifest ("v1.0.1"). Without the 'v' skip its core parses as 0 and
     // it compares BELOW every real version — a silent, permanent refusal to ever update.
@@ -2824,6 +2838,12 @@ static void test_version_cmp() {
     CHECK(version_compare("1.0.0-rc2", "1.0.0-rc1") > 0);
     // A local git-describe build ("1.0.0-3-gabc123") still accepts the next real release.
     CHECK(ota_is_upgrade("1.0.0-3-gabc123", "1.0.1"));
+    // Build metadata identifies an artifact but does not change SemVer precedence. Treating it as
+    // a pre-release could permit a same-version reinstall and reboot loop.
+    CHECK(version_valid("1.0.0+build.1"));
+    CHECK(version_compare("1.0.0+build.2", "1.0.0+build.1") == 0);
+    CHECK(version_compare("1.0.0-rc.1+build.2", "1.0.0-rc.1+build.1") == 0);
+    CHECK(!ota_is_upgrade("1.0.0+build.1", "1.0.0+build.2"));
 
     // A hostile 400-digit version must not overflow a signed long long (UB). Saturation gives a
     // defined, ordered result instead: it ranks ABOVE a real version (harmless — passing the
@@ -2871,6 +2891,15 @@ static void test_version_cmp() {
     CHECK(!ota_install_allowed("1.0.7", "<!DOCTYPE html>", true));
     // Newer still installs with the flag set (a channel switch that happens to be an upgrade).
     CHECK(ota_install_allowed("1.0.7", "1.0.8", true));
+
+    // The manifest and the image must describe the SAME artifact, not merely two artifacts that
+    // each happen to pass the ordering gate. This is the lying-host case the second OTA check exists
+    // to catch: both 9.9.9 and 1.0.1 are newer than 1.0.0, but they are not the same update.
+    CHECK(ota_artifact_versions_match("1.0.1", "1.0.1"));
+    CHECK(ota_artifact_versions_match("1.0.8-dev.12", "1.0.8-dev.12"));
+    CHECK(!ota_artifact_versions_match("9.9.9", "1.0.1"));
+    CHECK(!ota_artifact_versions_match("v1.0.1", "1.0.1"));  // exact published identity
+    CHECK(!ota_artifact_versions_match("", ""));
 }
 
 // ── OTA update channel (logic/ota_channel.hpp) ───────────────────────────────────────────────

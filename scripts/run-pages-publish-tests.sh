@@ -171,6 +171,38 @@ check "declined push exits non-zero" "$([ "$rc" -ne 0 ] && echo yes || echo no)"
 check "did not retry"                "$(grep -c 're-applying onto the new tip' "$T/out.log")" "0"
 rm -f "$T/origin.git/hooks/pre-receive"
 
+echo "== 10. the RETIRED and malformed argument shapes fail before the branch is touched =="
+# Scenario 8 covers a typo'd mode. These are the shapes that were once VALID: `--pr N` / `--rm N`
+# published and removed a per-PR preview, so CI history, a stale workflow or a human still types
+# them — and a second word silently dropped is what makes a retired call read as a live one
+# (a `--pr 12` treated as "root" would republish the RELEASE feed from whatever dist/ holds).
+before="$(git -C "$T/origin.git" rev-parse gh-pages)"
+run A --pr 12;        rc_pr=$?
+run A --rm 12;        rc_rm=$?
+run A --pr ../escape; rc_traversal=$?
+run A --dev extra;    rc_extra=$?
+after="$(git -C "$T/origin.git" rev-parse gh-pages)"
+check "retired --pr is rejected"    "$([ "$rc_pr" -ne 0 ] && echo yes || echo no)" "yes"
+check "retired --rm is rejected"    "$([ "$rc_rm" -ne 0 ] && echo yes || echo no)" "yes"
+check "path-like value is rejected" "$([ "$rc_traversal" -ne 0 ] && echo yes || echo no)" "yes"
+check "stray --dev value rejected"  "$([ "$rc_extra" -ne 0 ] && echo yes || echo no)" "yes"
+check "invalid calls changed none"  "$after" "$before"
+
+# build-pages.sh has the same boundary on the local side: it `rm -rf`s OUT before rebuilding it,
+# and OUT used to be derived from the argument. Exercise a standalone copy with an otherwise-valid
+# dist/, so it is argument validation — not a missing artifact — that rejects each call.
+mkdir -p "$T/pagebuild/scripts" "$T/pagebuild/dist"
+cp scripts/build-pages.sh "$T/pagebuild/scripts/build-pages.sh"
+chmod +x "$T/pagebuild/scripts/build-pages.sh"
+build_pages() { ( cd "$T/pagebuild" && ./scripts/build-pages.sh "$@" ) >"$T/build-pages.log" 2>&1; }
+build_pages ../escape; rc_build_traversal=$?
+build_pages 12;        rc_build_pr=$?
+build_pages --dev x;   rc_build_extra=$?
+check "build rejects a path"        "$([ "$rc_build_traversal" -ne 0 ] && echo yes || echo no)" "yes"
+check "build rejects a PR number"   "$([ "$rc_build_pr" -ne 0 ] && echo yes || echo no)" "yes"
+check "build rejects a stray value" "$([ "$rc_build_extra" -ne 0 ] && echo yes || echo no)" "yes"
+check "invalid build created no site" "$([ ! -e "$T/pagebuild/_site" ] && echo yes || echo no)" "yes"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "pages publish: all $pass checks passed"

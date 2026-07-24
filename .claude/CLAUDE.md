@@ -52,12 +52,14 @@ scripts/run-mock-tests.sh    # compile + run host logic tests in seconds (cmake 
 scripts/run-domain-audit.sh  # is the value catalog physically RIGHT? (the domain-correctness gate)
 ```
 
-(A third fast gate guards the Pages publish rather than the firmware —
-`scripts/run-pages-publish-tests.sh`, git-only, relevant only when `scripts/publish-pages-branch.sh`
-changes. See CONTRIBUTING.md.)
+(Two more fast gates guard the PUBLISHED ARTIFACTS rather than the firmware —
+`scripts/run-pages-publish-tests.sh`, git-only, relevant when `scripts/publish-pages-branch.sh` or
+`scripts/build-pages.sh` changes, and `scripts/run-web-installer-plan-tests.sh`, python-only, the
+NEGATIVE half of the NVS-preservation gate: CI already ran `check-web-installer-plan.py` on the
+real manifest, which only ever proved a good plan passes. See CONTRIBUTING.md.)
 
-All three are STEPS of CI's single `gates` job, which the firmware `build` job `needs` — not a job
-each. Actions bills every JOB rounded up to a whole minute, so three ~15 s jobs cost 3 billed
+All four are STEPS of CI's single `gates` job, which the firmware `build` job `needs` — not a job
+each. Actions bills every JOB rounded up to a whole minute, so four ~15 s jobs cost 4 billed
 minutes for well under one minute of work. The same budget rule shapes the rest of
 `.github/workflows/build.yml`, and it is worth knowing before editing it: the ~5-minute firmware
 build is SKIPPED (not failed — a skipped job still reports its check, which is why the gate is a
@@ -155,9 +157,12 @@ config.cpp      runtime Config (logic/config_model.hpp): WiFi/MQTT + one-shot Wi
                 (config_set_model); mutex-guarded. Writers commit only the fields they OWN: the two
                 writing tasks (httpd /set_*, poll detection) would otherwise revert each other from a
                 stale snapshot — detection uses config_save_link/config_set_model, HTTP keeps
-                whole-struct config_save. A failed NVS write names the key on /diag and returns false
-                — config_save then publishes nothing, config_save_link still patches RAM (its link is
-                proven-good); every call site checks it. The credential/service half of config_save is
+                whole-struct config_save. A failed NVS write names the key on /diag. A failed atomic
+                blob means config_save returns false and publishes nothing; a later failure in the
+                separate self-healing link cache is logged but does not falsely fail an already-saved
+                service change. /set_hp explicitly requires the cache and leaves RAM untouched if it
+                fails. config_save_link still patches RAM (its link is proven-good); every call site
+                checks its own durability contract. The credential/service half of config_save is
                 ATOMIC: those fields go into ONE CRC-checked blob (logic/config_store.hpp) written with
                 a single nvs_set_blob, so a save is all-or-nothing across BOTH a write failure AND a
                 power cut — no per-key rollback and no WiFi creds-vs-backup write-ordering to get right
@@ -201,8 +206,9 @@ wifi.cpp        STA bring-up (all-channel scan -> strongest AP by RSSI) + endles
 sntp_time.cpp   SNTP client (esp_netif_sntp, config().ntp_server — NVS "ntp_server" override of
                 CONFIG_DAIKIN_NTP_SERVER default "pool.ntp.org", runtime-editable via POST /set_ntp
                 exactly like syslog_host/POST /set_syslog) — started right after WiFi(STA)|setup-AP
-                in main.cpp, once config_load() has run (both WiFi paths already call
-                esp_netif_init()); non-blocking, idles/retries on its own task until a route to the
+                in main.cpp, once config_load() has run (the process-wide esp_netif_init() runs
+                exactly once in app_main, before either STA or the setup portal creates its own
+                interface); non-blocking, idles/retries on its own task until a route to the
                 server exists, so it is harmless to start in AP-only setup mode too. Before this the
                 device had no wall clock at all: diag_printf's "[uptime]" prefix and syslog's RFC 5424
                 TIMESTAMP were the only timestamps anywhere, both relative to an unknown boot instant.
@@ -377,9 +383,10 @@ ota_update.cpp  pull-based signed OTA: manifest check -> TWO-POINT downgrade gat
                 one at a time (two TLS sessions would fight over the largest contiguous block).
                 s_status is mutex-guarded behind an RAII Lock, since readers copy std::strings out.
                 The gate is checked against the MANIFEST version (cheap pre-check) AND against the
-                image's OWN esp_app_desc_t version via esp_https_ota_get_img_desc() — the manifest
-                and the image are separately-controlled artifacts, so a host advertising 9.9.9 while
-                serving a signed 1.0.0 binary is caught only by the second check
+                image's OWN esp_app_desc_t version via esp_https_ota_get_img_desc(), then requires
+                the two artifact-version strings to match exactly — the manifest and the image are
+                separately-controlled artifacts, so both a signed old image and two different
+                independently-newer versions are refused
 status_led.cpp  onboard status-indicator task. TWO back-ends behind one host-tested pattern table
                 (logic/led_pattern.hpp): a level-driven GPIO LED and an addressable WS2812 (RMT, via
                 the espressif/led_strip managed component). Pin + driver + polarity are RUNTIME
@@ -764,10 +771,12 @@ do not.
 **`config_save` can fail — every caller checks it.** The credential/service fields are written as one
 CRC-checked blob with a single **atomic** `nvs_set_blob` (`logic/config_store.hpp`): it fails
 all-or-nothing, so on error the PREVIOUS blob is intact and `config_save` returns `false` without
-publishing to RAM — "nothing net saved", never a partial credential state, across both a write failure
-and a power cut. (The self-healing RX/TX/proto link keys are written after the blob; a hiccup there is
-logged, self-heals on the next detect, and is re-validated by `config_load`'s `link_pins_safe`.)
-An ignored return means reporting a save the device never made.
+publishing to RAM — never a partial credential state, across both a write failure and a power cut.
+The self-healing RX/TX/proto link keys are written after the blob; a hiccup there is logged,
+self-heals on the next detect, and is re-validated by `config_load`'s `link_pins_safe`. It does not
+turn an already-committed service request into a false 500; `/set_hp`, which owns the link, opts into
+requiring those keys and leaves RAM untouched on failure. The decision is host-tested in
+`config_save_succeeded()`.
 The `/set_*` handlers answer `500 {"ok":false,"error":"config write failed"}` and skip the reboot;
 the WiFi rollback-restore falls through to the setup portal rather than rebooting into a loop it
 cannot persist its way out of (the restore lives in NVS alone, so an unpersisted one is re-decided
@@ -929,9 +938,10 @@ POST /set_board   {led_gpio,led_type,led_inverted,btn_gpio,btn_active_low} -> va
                   sits there (AtomS3 Lite: GPIO41) — plus the collision rules, in BOTH directions: no
                   pin may be claimed by the indicator, the button and the X10A link at once, whichever
                   endpoint is called second
-   (all seven /set_*) a failed NVS write answers 500 {ok:false,error:"config write failed"} and does
-                  NOT reboot/apply — config_save publishes nothing on failure, so an "ok" + reboot
-                  would silently come back up on the OLD config (the failing key is on /diag)
+   (all seven /set_*) a failed route-owned NVS write answers 500
+                  {ok:false,error:"config write failed"} and does NOT reboot/apply; unrelated
+                  self-healing link-cache maintenance failures are logged without rejecting a
+                  committed service blob, while /set_hp requires those keys (the failing key is on /diag)
 POST /set_ota     {channel:"release"|"dev"} -> validate + persist, applied LIVE (no reboot, unlike
                   /set_board: nothing claims the channel at task start — ota_update.cpp reads it when
                   it fetches, so the very next check uses the new feed). An unknown name is REJECTED,

@@ -17,14 +17,20 @@ def fail(message: str) -> None:
 
 
 def partition_geometry(path: Path, name: str) -> tuple[int, int]:
-    with path.open(newline="", encoding="utf-8") as handle:
-        for row in csv.reader(line for line in handle if not line.lstrip().startswith("#")):
-            if not row or row[0].strip() != name:
-                continue
-            try:
-                return int(row[3].strip(), 0), int(row[4].strip(), 0)
-            except (IndexError, ValueError) as exc:
-                fail(f"invalid {name!r} row in {path}: {exc}")
+    try:
+        with path.open(newline="", encoding="utf-8") as handle:
+            for row in csv.reader(line for line in handle if not line.lstrip().startswith("#")):
+                if not row or row[0].strip() != name:
+                    continue
+                try:
+                    offset, size = int(row[3].strip(), 0), int(row[4].strip(), 0)
+                except (IndexError, ValueError) as exc:
+                    fail(f"invalid {name!r} row in {path}: {exc}")
+                if offset < 0 or size <= 0:
+                    fail(f"invalid {name!r} geometry in {path}: offset={offset}, size={size}")
+                return offset, size
+    except OSError as exc:
+        fail(f"cannot read {path}: {exc}")
     fail(f"partition {name!r} not found in {path}")
 
 
@@ -34,7 +40,12 @@ def main() -> None:
 
     manifest_path = Path(sys.argv[1])
     partitions_path = Path(sys.argv[2])
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        fail(f"cannot read {manifest_path}: {exc}")
+    if not isinstance(manifest, dict):
+        fail(f"{manifest_path} must contain a JSON object")
     if manifest.get("new_install_prompt_erase") is not True:
         fail("new_install_prompt_erase must be true so the user can decline a whole-chip erase")
     builds = manifest.get("builds")
@@ -58,14 +69,26 @@ def main() -> None:
                 fail(f"{family} has an invalid part entry: {part!r}")
             relative_path = part.get("path")
             offset = part.get("offset")
-            if not isinstance(relative_path, str) or not isinstance(offset, int) or offset < 0:
+            if (
+                not isinstance(relative_path, str)
+                or not relative_path
+                or not isinstance(offset, int)
+                or isinstance(offset, bool)
+                or offset < 0
+            ):
                 fail(f"{family} has an invalid part entry: {part!r}")
 
-            image_path = manifest_path.parent / relative_path
+            part_path = Path(relative_path)
+            if part_path.is_absolute() or ".." in part_path.parts:
+                fail(f"{family} part escapes the manifest directory: {relative_path!r}")
+            image_path = manifest_path.parent / part_path
             try:
-                size = image_path.stat().st_size
-            except FileNotFoundError:
-                fail(f"{family} part does not exist: {image_path}")
+                stat = image_path.stat()
+            except OSError as exc:
+                fail(f"{family} part cannot be read: {image_path}: {exc}")
+            if not image_path.is_file():
+                fail(f"{family} part is not a regular file: {image_path}")
+            size = stat.st_size
             if size <= 0:
                 fail(f"{family} part is empty: {image_path}")
 

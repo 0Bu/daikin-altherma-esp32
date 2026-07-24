@@ -74,10 +74,9 @@ this also prevents reading the config off a stolen board.
 > **Implementation status.** All of it is implemented: flash-time signing, the **rollback health
 > gate**, and the **pull-OTA path** (`ota_check_async` / `ota_update_async` in `ota_update.cpp` —
 > manifest check, `esp_https_ota` download, signature verify on install, and the downgrade gate).
-> The **feed** has one precondition outside the firmware: the Pages source must point at `gh-pages`
-> — with no manifest or image served, a check reports "up to date". Publishing itself does not require
-> a public repository, but note that the resulting **Pages site is public regardless** of repo
-> visibility, so the signed images it serves are world-readable (see
+> The release and development **feeds are live**; the Pages source points at `gh-pages`.
+> Publishing does not require a public repository, but note that the resulting **Pages site is
+> public regardless** of repo visibility, so the signed images it serves are world-readable (see
 > [`README.md`](README.md)). The trust properties below are runtime behaviour, not intent.
 
 OTA updates are **signed** (Secure Boot v2 RSA-3072 signature scheme *without* hardware Secure

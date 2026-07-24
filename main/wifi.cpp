@@ -267,6 +267,7 @@ static void wifi_stop_sta() {
     esp_wifi_stop();
     esp_wifi_deinit();
     if (s_sta_netif) { esp_netif_destroy_default_wifi(s_sta_netif); s_sta_netif = nullptr; }
+    if (s_events) { vEventGroupDelete(s_events); s_events = nullptr; }
 }
 
 bool wifi_start_sta() {
@@ -278,7 +279,6 @@ bool wifi_start_sta() {
         ESP_LOGE(TAG, "event group alloc failed — cannot start STA; falling back to setup portal");
         return false;
     }
-    ESP_ERROR_CHECK(esp_netif_init());
     s_sta_netif = esp_netif_create_default_wifi_sta();
     // Advertise our hostname to the router via DHCP (option 12) BEFORE the DHCP client runs, so the
     // router's client list shows "daikin-altherma-esp32", not the IDF default "espressif". This is
@@ -378,12 +378,12 @@ bool wifi_start_sta() {
                 vTaskDelay(pdMS_TO_TICKS(500));
                 esp_restart();
             }
-            // Deliberately vague about WHAT failed: config_save's bool covers a dozen keys, so this
-            // site cannot tell a failed credential-restore from a failed cosmetic marker. The key=
-            // lines it already logged say which. Erring toward the portal costs the user a re-entry;
-            // erring toward the reboot risks the loop, so the portal is the safe read of "unsure".
-            diag_printf("wifi: rollback restore to '%s' did not fully persist (see the key= lines "
-                        "above) — opening the setup portal rather than risk a reboot loop\n",
+            // A false result here now means the one atomic blob did not land — not an unrelated
+            // self-healing link-cache maintenance failure — so the restored credentials themselves
+            // are definitely not durable. Erring toward the portal costs a re-entry; rebooting would
+            // re-read the rejected credentials and risk the loop this branch exists to avoid.
+            diag_printf("wifi: rollback restore to '%s' was not persisted — opening the setup "
+                        "portal rather than risk a reboot loop\n",
                         rollback_cfg.wifi_ssid.c_str());
         }
         ESP_LOGW(TAG, "STA connect failed on first boot — falling back to setup portal");

@@ -39,9 +39,14 @@ PUSH_ATTEMPTS=5
 # a clone and a fetch to find out. An UNKNOWN argument is rejected rather than treated as a root
 # publish — `--pr 12` used to be a real mode, and silently publishing the root instead would
 # overwrite the release feed with whatever dist/ happened to hold.
+# The arity is checked as strictly as the mode name: neither mode takes a value, so `--dev 12` or
+# `--pr 12` (the retired mode, whose second word used to be the PR number) must fail rather than
+# have its extra word silently dropped — which is how a retired call reads as a valid one.
 case "$mode" in
-    --dev) msg="pages: publish dev channel" ;;
-    root)  msg="pages: publish root" ;;
+    --dev) [ "$#" -eq 1 ] || { echo "publish: --dev takes no value" >&2; exit 1; }
+           msg="pages: publish dev channel" ;;
+    root)  [ "$#" -le 1 ] || { echo "publish: root takes no value" >&2; exit 1; }
+           msg="pages: publish root" ;;
     *)     echo "publish: unknown mode '$mode' (expected no argument, or --dev)" >&2; exit 1 ;;
 esac
 

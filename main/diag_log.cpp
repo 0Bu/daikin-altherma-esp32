@@ -4,6 +4,7 @@
 #include "syslog.hpp"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include <atomic>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -16,7 +17,7 @@ static constexpr size_t RING = 6144;
 static char             s_buf[RING];
 static size_t           s_len = 0;          // bytes used (grows then wraps)
 static bool             s_wrapped = false;
-static bool             s_verbose = false;
+static std::atomic<bool> s_verbose{false};
 static SemaphoreHandle_t s_mtx = nullptr;
 
 void diag_log_init() {
@@ -59,8 +60,8 @@ void diag_printf(const char* fmt, ...) {
     ESP_LOGI("diag", "%.*s", total, line);
 }
 
-void diag_set_verbose(bool on) { s_verbose = on; }
-bool diag_verbose() { return s_verbose; }
+void diag_set_verbose(bool on) { s_verbose.store(on, std::memory_order_relaxed); }
+bool diag_verbose() { return s_verbose.load(std::memory_order_relaxed); }
 
 size_t diag_dump(char* out, size_t max) {
     if (!s_mtx) return 0;

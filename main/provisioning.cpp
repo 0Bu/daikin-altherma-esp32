@@ -73,7 +73,6 @@ static void offer_self_as_dns() {
 }
 
 void provisioning_start_ap() {
-    ESP_ERROR_CHECK(esp_netif_init());
     esp_netif_create_default_wifi_ap();
     // AP-ONLY, deliberately. An earlier version ran APSTA with an idle station interface for one
     // reason: esp_wifi_scan_start() needs a STARTED STA, and the setup page filled its SSID dropdown
