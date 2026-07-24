@@ -72,9 +72,14 @@ main { flex: 1; }
 .hdr-sep { flex: none; margin: 0 5px; }
 /* The version doubles as the OTA trigger (DESIGN.md §5.4): it stays muted like the rest of the line
    — an update is offered by the confirm dialog, not by colouring the header — and only picks up the
-   brand tint on hover/focus, the same affordance the tappable value rows use. */
+   brand tint on hover/focus, the same affordance the tappable value rows use.
+   The button UA styling is reset with LONGHANDS, not the `font: inherit` shorthand: the shorthand
+   also resets font-family and font-variant-numeric, which silently killed this element's own
+   `mono num` classes (line 42/43) and rendered the version in the sans face, tabular-nums off,
+   right beside the mono IP the same two classes were styling. */
 .verlink {
-  flex: none; font: inherit; color: inherit; background: none; border: 0; padding: 0;
+  flex: none; font-size: inherit; font-weight: inherit; font-style: inherit; line-height: inherit;
+  color: inherit; background: none; border: 0; padding: 0;
   cursor: pointer; white-space: nowrap;
 }
 .verlink:hover { color: var(--brand-strong); text-decoration: underline; }
@@ -363,7 +368,11 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   padding: 11px 13px; border-radius: var(--r-input); border: 1px solid var(--line);
   background: var(--soft); color: var(--fg); appearance: none;
 }
+/* `font: inherit` above resets font-family AND font-variant-numeric, so both utility classes have to
+   be re-applied at .input specificity — the GPIO pin selects are written `class="input mono num"`
+   and would otherwise silently get neither. Same shorthand trap as .verlink in the header. */
 .input.mono { font-family: var(--font-mono); }
+.input.num { font-variant-numeric: tabular-nums; }
 .input:focus {
   outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--focus-ring);
 }

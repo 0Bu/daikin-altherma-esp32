@@ -272,7 +272,13 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   shows the real hostname via DHCP option 12 (set before the DHCP client runs).
 - **LWIP tuned for the workload** ([`sdkconfig.defaults`](../sdkconfig.defaults)): socket cap lifted to
   16 (http server + mDNS + SNTP + MQTT + OTA can otherwise starve the download of a BSD socket), and
-  the TCP send/receive windows doubled so the ~13 KB gzipped UI clears in 1–2 windows.
+  the TCP send/receive windows doubled — `CONFIG_LWIP_TCP_{SND_BUF,WND}_DEFAULT=11520`, 2× the IDF
+  default of 5760 — which halves the round-trips the page costs. The page is **~71 KB gzipped**
+  (229 KB spliced, ~3.1× compression), so it still spans ~7 window-fulls: the win is halving that,
+  not clearing it in one. It has grown with the interactive schematic and is worth re-measuring when
+  `www/` gains weight — run the build's own splice
+  ([`inline_assets.cmake`](../main/www/inline_assets.cmake)) and `gzip -9`, since nothing minifies or
+  strips comments (the served page is byte-identical to a hand-written monolithic `index.html`).
 
 ### Captive-portal provisioning
 
