@@ -668,16 +668,23 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   `board_pin_offerable()` makes that list a *rule* rather than a dropdown filter, enforced on the
   request path (`validate()`, naming the offending pin) and on the load path (`config_load()` via
   `link_pins_safe()`), so neither a raw `POST /set_hp` nor a stale NVS link cache can route the X10A
-  UART onto a flash/strapping/JTAG pad and crash-loop the board; the *wider* local-I/O set
-  (`board_pin_local_io()`) is what the indicator and button themselves may use — it adds back the
+  UART onto a flash/strapping/JTAG pad and crash-loop the board; the *different* local-I/O set
+  (`board_pin_local_io()`) is what the indicator and button themselves may use — wider by the
   four dedicated-JTAG pads, withheld from the X10A list only to keep a debug probe usable, which is
-  a preference an onboard part soldered to GPIO41 simply overrides),
+  a preference an onboard part soldered to GPIO41 simply overrides, and **narrower** by the X10A
+  link's own `rx`/`tx`, because the reservation runs in **both** directions: `board_hw_valid()`
+  refuses a local pin that equals either link pin, so a picker still listing them offers a choice
+  whose only outcome is a `400`. `ReservedPins` is deliberately anonymous about which pair it carries
+  (`pin_a`/`pin_b`) — naming its fields after one direction made the other read as a lie — and the
+  two factories `config_reserved_pins()` / `config_link_pins()` state the direction at the call site),
   the ready-made per-board settings behind the Hardware modal's *Board* pick
   (`board_presets.hpp` — the five board-local fields for each **documented** board, served as
   `/status.board.presets`; in firmware rather than in `www/app.js` precisely so these `CHECK`s can
   assert every offered preset passes the same `board_hw_valid()` the request path applies, and so a
-  build that reserves a preset's pin withholds it instead of offering a pick `POST /set_board` would
-  refuse — it asserts nothing about which board this *is*, which stays unknowable),
+  preset this **build** reserves (an Octal build over the AtomS3 Lite's GPIO35) or this **config**
+  reserves (a link moved onto that preset's LED or button pin) is withheld instead of offered as a
+  pick `POST /set_board` would refuse — it asserts nothing about which board this *is*, which stays
+  unknowable),
   the status indicator's state→pattern rule and the button override's priority
   (`led_pattern.hpp` — shared by the GPIO and WS2812 back-ends so they cannot drift apart; *shape*,
   not colour, carries the state, since a monochrome LED sees no colour at all),
@@ -735,17 +742,29 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   real measurement), the **held-over outdoor reading rule** (`ou_stale.hpp` — the other host-testable
   twin of a browser rule: the outdoor unit refreshes its *own* register pages (`0x20` sensors, `0x21`
   inverter) only while it runs, and stopped it answers with the last run's values, so the schematic
-  blanks those pills instead of drawing a reading nobody is still taking — measured, outdoor air held
+  stops drawing them as live — measured, outdoor air held
   exactly 19.0 °C for five hours and stepped only when the compressor started. Page `0x10` is
   deliberately excluded: it carries `Defrost Operation`, a run-state input, and blanking a reading
   costs information where suppressing a state input would corrupt the state machine. Gated
   catalog-wide, and the load-bearing half is the second assertion — every profile keeps
   `INV frequency (rps)` on a page that stays live, which is what makes "Standby — not running"
-  trustworthy beside blanked pills), and the **raw-page hex rendering** (`hexdump.hpp` — the wire bytes of pages
+  trustworthy beside the held ones. **How** they stop being drawn as live splits on what the
+  quantity is. A held *measurement* is greyed with the `#heldNote` legend rather than hidden — it is
+  a real reading, just old, and blanking it read as a lost link (the v1.0.11 bug report). A held
+  *working point* is blanked, because at rest it is not an old value of the quantity but a wrong
+  one: ΔT with no flow, and the **electrical estimate**, which prefers the CT clamps on the live
+  hydronic page `0x63` and falls back to
+  `INV primary current`, a `0x21` row that freezes with the rest of that page. Every catalog profile
+  carries the INV row and only about half carry CT clamps, and an idle plant reads a CT sum of 0 — so
+  an ungated fallback drew the last run's amps as a live kW figure on most installs most of the time,
+  and a stopped compressor draws ~0, not the 1.4 kW the frozen current implies.
+  The catalog test pins which page each of the two sources sits on, and both the sub-label and the
+  inspector distinguish "compressor off · no live reading" from "no current sensor": suppressing one
+  wrong claim must not substitute another), and the **raw-page hex rendering** (`hexdump.hpp` — the wire bytes of pages
   `0x00`/`0x10`/`0x20`/`0xA0`/`0xA1` on `/diag`; truncation stops after the last *complete* byte, since a trailing
   nibble would read as a different value, and degenerate inputs still terminate the buffer the caller
   hands to a `diag_printf` `%s`).
-  **1081 `CHECK`s** in
+  **1169 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp).
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the

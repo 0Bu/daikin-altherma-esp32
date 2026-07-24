@@ -622,7 +622,12 @@ static void test_config_model() {
     CHECK(board_hw_valid(b, why, 48, false));
     // The mirror image: with the indicator + button configured, /set_hp must not be able to take
     // their pins. config_reserved_pins is the one accessor both sides read.
-    CHECK(config_reserved_pins(b).led == 35 && config_reserved_pins(b).button == 41);
+    CHECK(config_reserved_pins(b).pin_a == 35 && config_reserved_pins(b).pin_b == 41);
+    // ...and the mirror accessor names the OTHER pair, for the LED/button pickers. Two factories,
+    // one anonymous two-slot struct: which pins are spoken for is stated at the call site.
+    CHECK(config_link_pins(b).pin_a == 44 && config_link_pins(b).pin_b == 43);
+    CHECK(config_link_pins(b).claims(44) && config_link_pins(b).claims(43));
+    CHECK(!config_link_pins(b).claims(35) && !config_link_pins(b).claims(-1));
     Config steal = b;
     steal.rx_pin = 35;                                          // try to route X10A RX onto the LED
     CHECK(!validate(steal, why, 48, false, config_reserved_pins(b)));
@@ -633,7 +638,7 @@ static void test_config_model() {
     // With no board hardware configured, both pins are free again.
     Config none;
     none.rx_pin = 35; none.tx_pin = 41;
-    CHECK(config_reserved_pins(none).led == -1 && config_reserved_pins(none).button == -1);
+    CHECK(config_reserved_pins(none).pin_a == -1 && config_reserved_pins(none).pin_b == -1);
     CHECK(!validate(none, why, 48, false, config_reserved_pins(none)));   // 41 is JTAG: never an X10A pin
     none.tx_pin = 43;
     CHECK(validate(none, why, 48, false, config_reserved_pins(none)));    // 35 is fine on a Quad build
@@ -1542,6 +1547,37 @@ static void test_board_pins_local() {
     for (int i = 0; i < n; i++) CHECK(board_pin_local_io(buf[i], false));
     // Cap honoured, like board_pins_offerable.
     CHECK(board_pins_local(buf, 5, false) == 5);
+
+    // ── The reservation runs in BOTH directions ──────────────────────────────────────────────────
+    // board_pins_offerable() has always withheld the indicator's and the button's pins from the X10A
+    // dropdown. The mirror was missing: the LED/button dropdowns still listed the X10A link's own
+    // rx/tx, which board_hw_valid() then refuses ("… is in use by the X10A link") — a pick whose only
+    // possible outcome is a 400. Pin both halves here, so neither can regress into a one-way rule.
+    Config link;                                   // the shipped XIAO default pair
+    link.rx_pin = 44; link.tx_pin = 43;
+    const int nl = board_pins_local(buf, BOARD_LOCAL_PINS_MAX, false, config_link_pins(link));
+    CHECK(nl == n - 2);                            // exactly the two link pins dropped
+    auto in_local = [&](int p) { for (int i = 0; i < nl; i++) if (buf[i] == p) return true; return false; };
+    CHECK(!in_local(44) && !in_local(43));
+    CHECK(in_local(21) && in_local(35) && in_local(41));   // the onboard parts both boards use
+    for (int i = 1; i < nl; i++) CHECK(buf[i] > buf[i - 1]);   // still strictly ascending after filtering
+    // Nothing the filtered list offers can collide with the link — the property the UI depends on.
+    for (int i = 0; i < nl; i++) {
+        Config c = link;
+        c.led_gpio = buf[i];
+        c.btn_gpio = -1;
+        std::string why;
+        CHECK(board_hw_valid(c, why, 48, /*octal_spi=*/false));
+    }
+    // A link on a JTAG pad is not reachable through the UI (board_pin_offerable withholds 39-42) but
+    // IS reachable by a raw POST /set_hp, so the filter must cover that pad too, not just the base set.
+    Config jt;
+    jt.rx_pin = 41; jt.tx_pin = 40;
+    const int nj = board_pins_local(buf, BOARD_LOCAL_PINS_MAX, false, config_link_pins(jt));
+    CHECK(nj == n - 2);
+    for (int i = 0; i < nj; i++) CHECK(buf[i] != 41 && buf[i] != 40);
+    // An unreserved call is unchanged — the default argument keeps every existing caller honest.
+    CHECK(board_pins_local(buf, BOARD_LOCAL_PINS_MAX, false, ReservedPins{}) == n);
 }
 
 // The board-hardware presets the UI's "Board" dropdown fills its five fields from. The whole point
@@ -1609,10 +1645,38 @@ static void test_board_presets() {
     CHECK(board_presets_offerable(buf, 1, /*octal_spi=*/false) == 1);
     CHECK(board_presets_offerable(buf, 0, /*octal_spi=*/false) == 0);
 
-    // A preset does not bypass the collision rules: applying one onto a device whose X10A link
-    // already sits on that pin is still rejected, with the link named. (The UI offers the preset
-    // anyway — same as its pin dropdowns, which also list pins the link may hold — and lets the
-    // request path answer with the reason.)
+    // Offering is also LINK-aware, the same mirror board_pins_local now applies to the two pin
+    // dropdowns: a preset that collides with where the X10A link currently sits is withheld, because
+    // board_hw_valid() would refuse it and a dropdown entry whose only outcome is a 400 is not a
+    // pick. The AtomS3 Lite's WS2812 (GPIO35) against a link moved onto 35 is exactly that case.
+    Config on35;
+    on35.rx_pin = 35; on35.tx_pin = 44;
+    n = board_presets_offerable(buf, BOARD_PRESETS_MAX, /*octal_spi=*/false, config_link_pins(on35));
+    CHECK(n == 1 && std::string(buf[0]->name) == "Seeed XIAO ESP32-S3");
+    // ...and its BUTTON pin counts too, not just the indicator.
+    Config on41;
+    on41.rx_pin = 41; on41.tx_pin = 44;
+    n = board_presets_offerable(buf, BOARD_PRESETS_MAX, false, config_link_pins(on41));
+    CHECK(n == 1 && std::string(buf[0]->name) == "Seeed XIAO ESP32-S3");
+    // The shipped default link (44/43) collides with neither board, so both stay on offer.
+    Config def;
+    def.rx_pin = 44; def.tx_pin = 43;
+    CHECK(board_presets_offerable(buf, BOARD_PRESETS_MAX, false, config_link_pins(def)) == all_n);
+    // Whatever survives BOTH filters validates against that same link — the property the modal needs.
+    for (const Config& link : {def, on35, on41}) {
+        n = board_presets_offerable(buf, BOARD_PRESETS_MAX, false, config_link_pins(link));
+        for (int i = 0; i < n; i++) {
+            Config c = link;
+            c.led_gpio = buf[i]->led_gpio; c.led_type = buf[i]->led_type;
+            c.btn_gpio = buf[i]->btn_gpio;
+            std::string why;
+            CHECK(board_hw_valid(c, why, 48, /*octal_spi=*/false));
+        }
+    }
+
+    // The request path stays the authority regardless: a preset applied onto a colliding link — via
+    // a raw POST, or a link changed after the modal was filled — is still rejected, with the link
+    // named. Withholding it from the dropdown is the courtesy; this is the guarantee.
     Config c;
     c.rx_pin = 35; c.tx_pin = 44;
     c.led_gpio = all[0].led_gpio; c.led_type = all[0].led_type;
@@ -3278,7 +3342,7 @@ static void test_ou_stale() {
     // Every detectable profile: the readings the UI blanks must sit on a held-over page, and the
     // compressor witness must NOT. A future generated profile that moves "INV frequency (rps)" onto
     // 0x20/0x21 would make the run state stale-derived and must fail loudly here.
-    int rps_rows = 0, out_rows = 0, disch_rows = 0, checked = 0;
+    int rps_rows = 0, out_rows = 0, disch_rows = 0, inv_rows = 0, ct_rows = 0, checked = 0;
     for (const auto& p : def::profiles) {
         if (!def::is_detection_model(p.id)) continue;
         for (size_t i = 0; i < p.count; i++) {
@@ -3296,6 +3360,21 @@ static void test_ou_stale() {
                 CHECK(ou_page_holds_over(reg));
                 disch_rows++;
             }
+            // The ELECTRICAL-INPUT sources, and they fall on opposite sides of the rule — which is
+            // the whole reason www/app.js has to pick between them rather than blanking the pill
+            // wholesale. "INV primary current" is an outdoor-unit row and freezes with the rest of
+            // 0x21; the CT clamps sit on the hydronic 0x63 and keep measuring. The browser's d.pel
+            // used the INV row as an unconditional fallback whenever the CT sum read 0 — which is
+            // exactly what an idle plant reads — so a stopped unit drew a plausible kW figure out of
+            // its last run, beside a "not running" headline. Same shape as #35-#39, no numeric tell.
+            if (logic::lwt_ci_contains(l, "inv primary current")) {
+                CHECK(ou_page_holds_over(reg));    // held over -> the browser must gate on ouHeldOver
+                inv_rows++;
+            }
+            if (logic::lwt_ci_contains(l, "current measured by ct")) {
+                CHECK(!ou_page_holds_over(reg));   // live -> a non-zero CT reading is real standby draw
+                ct_rows++;
+            }
         }
         checked++;
     }
@@ -3303,6 +3382,10 @@ static void test_ou_stale() {
     CHECK(rps_rows >= 20);       // the witness exists across the catalog, not on one profile
     CHECK(out_rows >= 20);
     CHECK(disch_rows >= 20);
+    // Every detectable profile carries the INV row, and only about half carry CT clamps — so the
+    // stale fallback was not an edge case, it was the default path on the majority of installs.
+    CHECK(inv_rows >= checked);
+    CHECK(ct_rows > 0);
 }
 
 // ── ValueDef::no_publish — the detect-only row flag ───────────────────────────────────────────

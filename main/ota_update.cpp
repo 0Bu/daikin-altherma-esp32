@@ -148,7 +148,7 @@ void run_check() {
     char        avail[32] = {0};
     const char* err       = "Update check failed";
     if (!fetch_manifest_version(url, avail, sizeof(avail), err)) {
-        diag_printf("ota: check failed (%s channel): %s", ota_channel_name(ch), err);
+        diag_printf("ota: check failed (%s channel): %s\n", ota_channel_name(ch), err);
         Lock lk(s_mtx);
         s_status.state            = "error";
         s_status.message          = err;
@@ -162,7 +162,7 @@ void run_check() {
     // Installable but OLDER — the dev -> release direction. Reported so the UI can offer it as a
     // switch back rather than silently calling the release channel "up to date" on a dev board.
     const bool down = !newer && ota_install_allowed(running, avail, /*allow_downgrade=*/true);
-    diag_printf("ota: %s manifest %s, running %s -> %s", ota_channel_name(ch), avail, running.c_str(),
+    diag_printf("ota: %s manifest %s, running %s -> %s\n", ota_channel_name(ch), avail, running.c_str(),
                 newer ? "update available" : down ? "older build offered" : "up to date");
     Lock lk(s_mtx);
     s_status.state            = "idle";
@@ -188,7 +188,7 @@ void run_update(bool allow_downgrade) {
     if (!fetch_manifest_version(ota_channel_manifest_url(CONFIG_DAIKIN_OTA_MANIFEST_URL,
                                                          CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL, ch),
                                 avail, sizeof(avail), err)) {
-        diag_printf("ota: update aborted, %s manifest fetch failed: %s", ota_channel_name(ch), err);
+        diag_printf("ota: update aborted, %s manifest fetch failed: %s\n", ota_channel_name(ch), err);
         set_state("error", err);
         return;
     }
@@ -201,7 +201,7 @@ void run_update(bool allow_downgrade) {
     // relaxes the ordering — an equal version and an unparseable one are still refused. It is what
     // makes the release channel reachable from a board that has been following dev.
     if (!ota_install_allowed(running, avail, allow_downgrade)) {
-        diag_printf("ota: refusing %s while running %s (%s)", avail, running.c_str(),
+        diag_printf("ota: refusing %s while running %s (%s)\n", avail, running.c_str(),
                     allow_downgrade ? "not a different version" : "not strictly newer");
         Lock lk(s_mtx);
         s_status.state            = "error";
@@ -229,11 +229,11 @@ void run_update(bool allow_downgrade) {
         CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL, ch,
         std::string("daikin-altherma-esp32") + ota_img_suffix() + ".bin");
     if (url.empty()) {
-        diag_printf("ota: no firmware URL configured for the %s channel", ota_channel_name(ch));
+        diag_printf("ota: no firmware URL configured for the %s channel\n", ota_channel_name(ch));
         set_state("error", "No update URL configured");
         return;
     }
-    diag_printf("ota: downloading %s (%s -> %s, %s channel)", url.c_str(), running.c_str(), avail,
+    diag_printf("ota: downloading %s (%s -> %s, %s channel)\n", url.c_str(), running.c_str(), avail,
                 ota_channel_name(ch));
 
     esp_http_client_config_t http = {};
@@ -252,7 +252,7 @@ void run_update(bool allow_downgrade) {
     esp_https_ota_handle_t h = nullptr;
     esp_err_t e = esp_https_ota_begin(&ota, &h);
     if (e != ESP_OK || !h) {
-        diag_printf("ota: begin failed (%s)", esp_err_to_name(e));
+        diag_printf("ota: begin failed (%s)\n", esp_err_to_name(e));
         set_state("error", "Couldn't start the download");
         return;
     }
@@ -268,7 +268,7 @@ void run_update(bool allow_downgrade) {
     esp_app_desc_t img = {};
     e = esp_https_ota_get_img_desc(h, &img);
     if (e != ESP_OK) {
-        diag_printf("ota: can't read image descriptor (%s)", esp_err_to_name(e));
+        diag_printf("ota: can't read image descriptor (%s)\n", esp_err_to_name(e));
         esp_https_ota_abort(h);
         set_state("error", "Update image is unreadable");
         return;
@@ -276,7 +276,7 @@ void run_update(bool allow_downgrade) {
     char imgver[sizeof(img.version) + 1] = {0};
     std::memcpy(imgver, img.version, sizeof(img.version));   // version[] need not be NUL-terminated
     if (!ota_install_allowed(running, imgver, allow_downgrade)) {
-        diag_printf("ota: REFUSING image v%s while running v%s (manifest claimed %s)", imgver,
+        diag_printf("ota: REFUSING image v%s while running v%s (manifest claimed %s)\n", imgver,
                     running.c_str(), avail);
         esp_https_ota_abort(h);
         Lock lk(s_mtx);
@@ -299,13 +299,13 @@ void run_update(bool allow_downgrade) {
     if (e != ESP_OK) {
         // A truncated transfer is NOT an install: esp_https_ota_abort releases the slot so a failed
         // download can't leave a half-written image behind for the bootloader to find.
-        diag_printf("ota: download failed (%s)", esp_err_to_name(e));
+        diag_printf("ota: download failed (%s)\n", esp_err_to_name(e));
         esp_https_ota_abort(h);
         set_state("error", "Download failed — check the connection");
         return;
     }
     if (!esp_https_ota_is_complete_data_received(h)) {
-        diag_printf("ota: incomplete image, aborting");
+        diag_printf("ota: incomplete image, aborting\n");
         esp_https_ota_abort(h);
         set_state("error", "Incomplete download");
         return;
@@ -318,16 +318,16 @@ void run_update(bool allow_downgrade) {
     e = esp_https_ota_finish(h);
     if (e != ESP_OK) {
         if (e == ESP_ERR_OTA_VALIDATE_FAILED) {
-            diag_printf("ota: SIGNATURE VERIFICATION FAILED — image rejected, running image intact");
+            diag_printf("ota: SIGNATURE VERIFICATION FAILED — image rejected, running image intact\n");
             set_state("error", "Update rejected: bad signature");
         } else {
-            diag_printf("ota: finish failed (%s)", esp_err_to_name(e));
+            diag_printf("ota: finish failed (%s)\n", esp_err_to_name(e));
             set_state("error", "Couldn't install the update");
         }
         return;
     }
 
-    diag_printf("ota: installed %s, rebooting (health gate arms on next boot)", avail);
+    diag_printf("ota: installed %s, rebooting (health gate arms on next boot)\n", avail);
     {
         Lock lk(s_mtx);
         s_status.state    = "done";
@@ -362,10 +362,10 @@ void ota_task(void* arg) {
         if (update) run_update(downgrade);
         else        run_check();
     } catch (const std::exception& ex) {
-        diag_printf("ota: aborted (%s)", ex.what());
+        diag_printf("ota: aborted (%s)\n", ex.what());
         set_state("error", "Out of memory — retry in a moment");
     } catch (...) {
-        diag_printf("ota: aborted (unknown exception)");
+        diag_printf("ota: aborted (unknown exception)\n");
         set_state("error", "Update failed");
     }
     { Lock lk(s_mtx); s_busy = false; }

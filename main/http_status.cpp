@@ -118,11 +118,14 @@ static std::string build_status_json_string() {
     for (int i = 0; i < npins; i++) { if (i) j += ","; j += std::to_string(pins[i]); }
     j += "],";
     // Board-local hardware: what the indicator + recovery button are configured as, plus the pins
-    // they MAY be moved to. A separate, wider list than pins_avail — the dedicated-JTAG pads are
-    // legal for an onboard LED/button but withheld from the X10A picker (board_pins.hpp explains
-    // why). Drives the ESP32 card's hardware rows; /set_board writes them back.
+    // they MAY be moved to. A separate list from pins_avail — wider by the dedicated-JTAG pads,
+    // which are legal for an onboard LED/button but withheld from the X10A picker (board_pins.hpp
+    // explains why), and narrower by the X10A link's own rx/tx, which board_hw_valid() refuses for
+    // either local pin. That second filter is the mirror of the reservation pins_avail already
+    // applies in the other direction. Drives the ESP32 card's hardware rows; /set_board writes them
+    // back.
     int lpins[BOARD_LOCAL_PINS_MAX];
-    int nlpins = board_pins_local(lpins, BOARD_LOCAL_PINS_MAX, hw_octal_spi());
+    int nlpins = board_pins_local(lpins, BOARD_LOCAL_PINS_MAX, hw_octal_spi(), config_link_pins(c));
     // Appended piece by piece with `+=` rather than as one `a + b + c + …` chain. A chain has to
     // materialise EVERY intermediate std::string at once — each one a live object in this frame — and
     // this function overflowed the httpd task's stack doing exactly that (see http_server.cpp for the
@@ -143,7 +146,8 @@ static std::string build_status_json_string() {
     // fail, and the presets cannot arrive disagreeing with the pin lists they must fit inside. Two
     // fixed rows (~170 bytes) — bounded, unlike the per-value payloads the heap rules are about.
     const BoardPreset* presets[BOARD_PRESETS_MAX];
-    int npre = board_presets_offerable(presets, BOARD_PRESETS_MAX, hw_octal_spi());
+    int npre = board_presets_offerable(presets, BOARD_PRESETS_MAX, hw_octal_spi(),
+                                       config_link_pins(c));
     j += "],\"presets\":[";
     for (int i = 0; i < npre; i++) {
         if (i) j += ",";
@@ -599,7 +603,7 @@ static esp_err_t h_ws_events(httpd_req_t* req) {
         case WsPlan::Skip:
             return ESP_OK;
         case WsPlan::Reject:
-            diag_printf("ws: frame of %llu B exceeds the %u B command buffer — closing",
+            diag_printf("ws: frame of %llu B exceeds the %u B command buffer — closing\n",
                         static_cast<unsigned long long>(ws_pkt.len),
                         static_cast<unsigned>(WS_CMD_MAX));
             return ESP_FAIL;
@@ -619,7 +623,7 @@ static esp_err_t h_ws_events(httpd_req_t* req) {
     // Subscribe only now: registering on any frame at all meant a client that never asked was still
     // pushed a frame a second, and kept a slot from one that had.
     if (!http_register_ws_client(httpd_req_to_sockfd(req))) {
-        diag_printf("ws: broadcast list full — /events subscriber not registered");
+        diag_printf("ws: broadcast list full — /events subscriber not registered\n");
         return ESP_OK;
     }
 

@@ -65,7 +65,20 @@ DetectResult hp_detect_run() {
     for (int i = 0; i < nc && !r.bus_ok; i++) {
         diag_printf("detect: probing rx=%d tx=%d (proto %c/%c)\n",
                     cand[i].rx, cand[i].tx, static_cast<char>(p0), static_cast<char>(p1));
-        hp_uart_init(cand[i].rx, cand[i].tx);
+        // CHECK the bring-up, exactly as poll_once does, and for two distinct reasons:
+        //   * A failed REMAP leaves the driver valid on the PREVIOUS pins (hp_comm.cpp keeps it that
+        //     way on purpose). Probing on anyway means an answer heard on the old pair gets recorded
+        //     as this candidate's — and poll_detect then persists that wrong pair via
+        //     config_save_link, so the next boot starts from a lie the sweep has to undo.
+        //   * A failed first INSTALL leaves no driver at all, and every hp_query then reports
+        //     "HP timeout — check X10A cable / GND": a wiring accusation against a fault that is
+        //     entirely on this side of the connector. Naming the real cause once is the whole point
+        //     of the equivalent guard in poll_once.
+        if (!hp_uart_init(cand[i].rx, cand[i].tx)) {
+            diag_printf("detect: UART bring-up failed on rx=%d tx=%d — skipping this pair\n",
+                        cand[i].rx, cand[i].tx);
+            continue;
+        }
         if (proto_answers(p0))      { r.proto = p0; r.bus_ok = true; }
         else if (proto_answers(p1)) { r.proto = p1; r.bus_ok = true; }
         if (r.bus_ok) { r.rx = cand[i].rx; r.tx = cand[i].tx; }
@@ -79,7 +92,16 @@ DetectResult hp_detect_run() {
         }
         return r;
     }
-    hp_uart_init(r.rx, r.tx);                                   // settle on the winning pins
+    // Settle on the winning pins. This is a Noop in the common case (the sweep left the driver on
+    // exactly this pair), so a failure here would mean the pins stopped being usable between the
+    // answer and now — report it and give up rather than fingerprint the unit through a link we no
+    // longer know the shape of. bus_ok is cleared so poll_detect keeps "auto" and simply retries.
+    if (!hp_uart_init(r.rx, r.tx)) {
+        diag_printf("detect: UART re-init failed on the answering pair rx=%d tx=%d — retrying\n",
+                    r.rx, r.tx);
+        r.bus_ok = false;
+        return r;
+    }
 
     // 2. Probe pages; capture the 0x00 (capacity) and 0x11 (EEPROM) payloads.
     Fingerprint fp{};
