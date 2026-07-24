@@ -21,14 +21,12 @@ const LANG = /^de\b/i.test(navigator.language || "") ? "de" : "en";
 // Each key is a string, or a function for the parameterised ones (same arity in both languages).
 const I18N = {
   en: {
-    "hero.nodata": "No data", "hero.unreachable": "Unreachable",
-    "hero.unreachable_sub": "Can't reach the device — retrying…",
-    "hero.waiting": "Waiting for the heat pump…", "hero.operating": "Operating",
-    "hero.online": "Online", "hero.fault": "Fault", "hero.running": "Running",
-    "hero.fault_kicker": (c) => "Fault · " + c,
-    "hero.fault_sub": (c) => "Unit reported " + c + " — check the outdoor unit.",
-    "hero.lw": (lw, oat) => `Leaving water ${lw} °C` + (oat ? ` · outdoor ${oat} °C` : ""),
-    "hero.polled": (s) => `Polled ${s}s ago`,
+    "sys.nodata": "No data", "sys.unreachable": "Unreachable",
+    "sys.unreachable_sub": "Can't reach the device — retrying…",
+    "sys.waiting": "Waiting for the heat pump…", "sys.operating": "Operating",
+    "sys.online": "Online", "sys.fault": "Fault",
+    "sys.fault_line": (c) => "Fault · " + c + " — check the outdoor unit.",
+    "sys.polled": (s) => `Polled ${s}s ago`,
     "recovery.title": "Recovery mode",
     "recovery.meta": "The device restarted too many times and came up in recovery mode. Heat-pump polling and MQTT are paused. Correct the configuration (for example the RX/TX pins on the ESP32 card), then reboot to resume normal operation.",
     "rollback.title": "WiFi change failed — rolled back",
@@ -54,12 +52,8 @@ const I18N = {
     "group.Water circuit": "Water circuit", "group.Refrigerant / outdoor": "Refrigerant / outdoor",
     "group.Electrical": "Electrical", "group.Device": "Device", "group.Other values": "Other values",
     "group.Values": "Values",
-    "chip.thermo_on": "Thermostat ON", "chip.thermo_off": "Thermostat off",
-    "chip.pump_on": "Pump ON", "chip.pump_off": "Pump off",
-    "chip.buh2": "BUH step 2", "chip.buh1": "BUH step 1", "chip.buh_off": "BUH off",
-    "chip.defrost": "Defrost", "chip.quiet": "Quiet",
+    "chip.thermo_on": "Thermostat ON", "chip.thermo_off": "Thermostat off", "chip.quiet": "Quiet",
     "schem.to_dhw": "3WV → DHW", "schem.to_heat": "3WV → heating",
-    "trend.collecting": "Collecting data…",
     "normal.label": "Normal:",
     "toast.saved": "Saved", "toast.no_changes": "No changes",
     "toast.reboot": "Rebooting — reconnecting…", "toast.rebooted": "Rebooted — reconnect to the device",
@@ -82,15 +76,14 @@ const I18N = {
     "sl.err_port": "Port must be a whole number 1–65535 (e.g. logs.example.com:514).",
     "btn.saving": "Saving…", "btn.save": "Save", "btn.cancel": "Cancel",
     // static index.html markup (data-i18n)
-    "fig.lw": "Leaving water", "fig.outdoor": "Outdoor", "fig.pth": "Heat output", "abbr.est": "est.",
-    "card.system": "System",
     "schem.outdoor_unit": "OUTDOOR UNIT", "schem.defrost_pill": "❄ defrost", "schem.outdoor": "Outdoor",
+    "schem.est": "estimated",
+    "insp.hint": "Tap a value or component in the diagram for an explanation.",
+    "insp.close": "Close",
     "schem.leaving_water": "leaving water", "schem.dhw_tank": "DHW TANK", "schem.set": "set",
     "schem.heating": "HEATING", "schem.pump": "PUMP", "schem.return": "return", "schem.room": "Room",
-    "kpi.compressor": "Compressor", "kpi.flow": "Flow", "kpi.pump": "pump", "kpi.dt": "ΔT water",
-    "kpi.target": "target", "kpi.wp": "Water pressure", "kpi.no_ct": "no current sensor",
-    "kpi.pel": (kw, src) => `${kw} kW el. (${src})`,
-    "trend.title": "Trend — last 30 min",
+    "kpi.target": "target",
+    "schem.est_src": (s) => "estimated · " + s, "schem.no_ct": "no current sensor",
     "wifi.title": "WiFi configuration", "wifi.ssid": "WiFi network (SSID)", "wifi.pass": "WiFi password",
     "wifi.err_ssid": "SSID must be 32 characters or less",
     "wifi.err_pass": "Password must be empty (open network) or between 8 and 63 characters",
@@ -112,14 +105,12 @@ const I18N = {
     "card.hw_led": (pin, kind) => `GPIO${pin} · ${kind}`, "card.hw_btn": (pin) => `GPIO${pin}`,
   },
   de: {
-    "hero.nodata": "Keine Daten", "hero.unreachable": "Nicht erreichbar",
-    "hero.unreachable_sub": "Gerät nicht erreichbar — erneuter Versuch…",
-    "hero.waiting": "Warte auf die Wärmepumpe…", "hero.operating": "In Betrieb",
-    "hero.online": "Online", "hero.fault": "Störung", "hero.running": "läuft",
-    "hero.fault_kicker": (c) => "Störung · " + c,
-    "hero.fault_sub": (c) => "Gerät meldet " + c + " — Außeneinheit prüfen.",
-    "hero.lw": (lw, oat) => `Vorlauf ${lw} °C` + (oat ? ` · außen ${oat} °C` : ""),
-    "hero.polled": (s) => `vor ${s}s abgefragt`,
+    "sys.nodata": "Keine Daten", "sys.unreachable": "Nicht erreichbar",
+    "sys.unreachable_sub": "Gerät nicht erreichbar — erneuter Versuch…",
+    "sys.waiting": "Warte auf die Wärmepumpe…", "sys.operating": "In Betrieb",
+    "sys.online": "Online", "sys.fault": "Störung",
+    "sys.fault_line": (c) => "Störung · " + c + " — Außeneinheit prüfen.",
+    "sys.polled": (s) => `vor ${s}s abgefragt`,
     "recovery.title": "Wiederherstellungsmodus",
     "recovery.meta": "Das Gerät ist zu oft neu gestartet und im Wiederherstellungsmodus hochgefahren. Wärmepumpen-Abfrage und MQTT sind pausiert. Korrigiere die Konfiguration (z. B. die RX/TX-Pins auf der ESP32-Karte) und starte neu, um den Normalbetrieb fortzusetzen.",
     "rollback.title": "WLAN-Änderung fehlgeschlagen — zurückgesetzt",
@@ -145,12 +136,8 @@ const I18N = {
     "group.Water circuit": "Wasserkreis", "group.Refrigerant / outdoor": "Kältemittel / Außen",
     "group.Electrical": "Elektrik", "group.Device": "Gerät", "group.Other values": "Weitere Werte",
     "group.Values": "Werte",
-    "chip.thermo_on": "Thermostat EIN", "chip.thermo_off": "Thermostat aus",
-    "chip.pump_on": "Pumpe EIN", "chip.pump_off": "Pumpe aus",
-    "chip.buh2": "BUH Stufe 2", "chip.buh1": "BUH Stufe 1", "chip.buh_off": "BUH aus",
-    "chip.defrost": "Abtauen", "chip.quiet": "Leise",
+    "chip.thermo_on": "Thermostat EIN", "chip.thermo_off": "Thermostat aus", "chip.quiet": "Leise",
     "schem.to_dhw": "3WV → WW", "schem.to_heat": "3WV → Heizung",
-    "trend.collecting": "Sammle Daten…",
     "normal.label": "Normal:",
     "toast.saved": "Gespeichert", "toast.no_changes": "Keine Änderungen",
     "toast.reboot": "Neustart — verbinde neu…", "toast.rebooted": "Neu gestartet — bitte neu mit dem Gerät verbinden",
@@ -173,15 +160,14 @@ const I18N = {
     "sl.err_port": "Port muss eine ganze Zahl 1–65535 sein (z. B. logs.example.com:514).",
     "btn.saving": "Speichere…", "btn.save": "Speichern", "btn.cancel": "Abbrechen",
     // static index.html markup (data-i18n)
-    "fig.lw": "Vorlauf", "fig.outdoor": "Außen", "fig.pth": "Wärmeleistung", "abbr.est": "gesch.",
-    "card.system": "System",
     "schem.outdoor_unit": "AUSSENEINHEIT", "schem.defrost_pill": "❄ Abtauen", "schem.outdoor": "Außen",
+    "schem.est": "geschätzt",
+    "insp.hint": "Tippe im Schema auf einen Wert oder ein Bauteil für eine Erklärung.",
+    "insp.close": "Schließen",
     "schem.leaving_water": "Vorlauf", "schem.dhw_tank": "WW-SPEICHER", "schem.set": "Soll",
     "schem.heating": "HEIZUNG", "schem.pump": "PUMPE", "schem.return": "Rücklauf", "schem.room": "Raum",
-    "kpi.compressor": "Verdichter", "kpi.flow": "Durchfluss", "kpi.pump": "Pumpe", "kpi.dt": "ΔT Wasser",
-    "kpi.target": "Ziel", "kpi.wp": "Wasserdruck", "kpi.no_ct": "kein Stromsensor",
-    "kpi.pel": (kw, src) => `${kw} kW el. (${src})`,
-    "trend.title": "Verlauf — letzte 30 Min",
+    "kpi.target": "Ziel",
+    "schem.est_src": (s) => "gesch. · " + s, "schem.no_ct": "kein Stromsensor",
     "wifi.title": "WLAN-Konfiguration", "wifi.ssid": "WLAN-Netzwerk (SSID)", "wifi.pass": "WLAN-Passwort",
     "wifi.err_ssid": "SSID darf höchstens 32 Zeichen haben",
     "wifi.err_pass": "Passwort muss leer (offenes Netz) oder 8–63 Zeichen lang sein",
@@ -227,6 +213,12 @@ const S = {
   // row survives the rebuild; the click handler only toggles the live element (so the CSS slide
   // animates) and updates this set for the next rebuild to honour.
   descOpen: new Set(),
+  // Schematic inspector: which hit target (INSPECT key) is selected, and the last liveData() the
+  // poll produced. The panel re-renders from S.live on every poll, so an open explainer keeps
+  // showing the CURRENT reading rather than the one that was on screen when it was tapped.
+  insp: null,
+  live: null,
+  inspSig: "",
 };
 
 // ── Toasts ───────────────────────────────────────────────────────────────
@@ -249,10 +241,7 @@ async function refreshStatus() {
   renderDashboard();
 }
 function markUnreachable() {
-  $("heroKicker").textContent = t("hero.nodata");
-  $("heroMode").textContent = t("hero.unreachable");
-  $("heroSub").textContent = t("hero.unreachable_sub");
-  $("heroDot").style.background = "var(--err)";
+  sysSet(t("sys.unreachable"), t("sys.unreachable_sub"), "err");
 }
 
 function renderDashboard() {
@@ -263,22 +252,23 @@ function renderDashboard() {
   // Header is a fixed product title ("daikin-altherma-esp32", set in index.html) — the detected
   // model name lives in the Model card (statusCardsHtml), not the header.
 
-  // hero: operation mode + fault state. Prefer the hydronic I/U mode (conv 315 — Stop/Heating/
-  // Cooling/DHW/…) over the outdoor unit's Operation Mode: during a DHW run the outdoor unit still
-  // reports "Heating" (it IS heating — the tank), but the user-relevant answer is what the water
-  // side is doing. Plain first-match sorted the outdoor row first.
+  // The schematic's own status block: operation mode + fault state. Prefer the hydronic I/U mode
+  // (conv 315 — Stop/Heating/Cooling/DHW/…) over the outdoor unit's Operation Mode: during a DHW run
+  // the outdoor unit still reports "Heating" (it IS heating — the tank), but the user-relevant answer
+  // is what the water side is doing. Plain first-match sorted the outdoor row first.
   const mode = pickValue(/i\/u operation mode/i) || pickValue(/operation mode|^mode$/i);
   const fault = faultValue();
   const faulted = fault && !FAULT_OK.test(String(fault).trim());
   if (!hp.connected) {
-    heroSet(t("hero.nodata"), t("hero.nodata"), t("hero.waiting"), "var(--muted)");
+    sysSet(t("sys.nodata"), t("sys.waiting"), "dim");
   } else if (faulted) {
-    heroSet(t("hero.fault_kicker", fault), mode || t("hero.fault"), t("hero.fault_sub", fault), "var(--err)");
+    sysSet(mode || t("sys.fault"), t("sys.fault_line", fault), "err");
   } else {
-    const lw = pickValue(/leaving water/i), oat = pickValue(/outdoor air|outdoor$/i);
-    const sub = lw ? t("hero.lw", lw, oat)
-                   : (hp.last_ok_s != null ? t("hero.polled", hp.last_ok_s) : t("hero.running"));
-    heroSet(t("hero.operating"), mode || t("hero.online"), sub, "var(--ok)");
+    // The drawing shows leaving water and outdoor itself, so the status line doesn't repeat them — it
+    // only adds the poll age when there is no leaving-water pill to prove freshness (vLwt, the same
+    // measurement picker the schematic uses; a plain /leaving water/ match could hit a setpoint).
+    const stale = vLwt() == null && hp.last_ok_s != null ? " · " + t("sys.polled", hp.last_ok_s) : "";
+    sysSet(mode || t("sys.online"), t("sys.operating") + stale, "");
   }
   renderHeaderIp();
   renderConnections();
@@ -292,17 +282,24 @@ function renderHeaderIp() {
   const w = S.status?.wifi || {};
   $("hdrIp").textContent = w.ip || location.hostname;
 }
-function heroSet(kicker, mode, sub, dot) {
-  $("heroKicker").textContent = kicker; $("heroMode").textContent = mode;
-  $("heroSub").textContent = sub; $("heroDot").style.background = dot;
+// The status block INSIDE the schematic (#scStatus): the operation mode is the drawing's headline —
+// or the offline state, when there is no mode to report — over one status line, with a state dot.
+// `tone` is "" (running), "err" (fault) or "dim" (no data / unreachable); it colours the line and the
+// dot, but the words always say the state too, so colour is never the only carrier (DESIGN.md §9).
+const TONE_FILL = { err: "var(--err)", dim: "var(--muted)", "": "var(--ok)" };
+function sysSet(mode, status, tone) {
+  setTxt("svMode", mode);
+  setTxt("svStatus", status);
+  $("svStatus").setAttribute("class", "sc-status" + (tone ? " " + tone : ""));
+  $("svDot").setAttribute("fill", TONE_FILL[tone || ""]);
 }
 function pickValue(re) {
   const v = (S._values || []).find((x) => re.test(x.label || ""));
   return v ? (v.value == null ? null : String(v.value)) : null;
 }
-// A "no fault" reading (also the empty/absent case). Shared by the hero + faultValue so they agree.
+// A "no fault" reading (also the empty/absent case). Shared by the status header + faultValue.
 const FAULT_OK = /^(none|no fault|normal|ok|0|—|-)?$/i;
-// The unit fault to surface in the hero. Prefer the specific *code* (conv 204, labelled "… Code" →
+// The unit fault to surface in the status header. Prefer the specific *code* (conv 204, labelled "… Code" →
 // e.g. "U4") a technician needs over the generic *class* (conv 203, "Error type" → "Error"/"Caution").
 // Both an indoor (0x60) and an outdoor (0x10) pair exist and their offset order differs per model, so
 // a plain first-match on /fault|error/ can land on the class (the outdoor "Error type" sorts first).
@@ -596,7 +593,7 @@ function statusCardsHtml() {
   return esp32CardHtml() + (hp.connected ? vcard(t("card.model"), model) : "");
 }
 
-// ── Connections tile (WiFi · MQTT · Syslog · NTP, full width under the hero) ──────────────────
+// ── Connections tile (WiFi · MQTT · Syslog · NTP, full width under the live section) ─────────
 // One tappable row per link: label, colour-coded value (green connected/synced, yellow reconnecting/
 // syncing, red down — the same ok/warn/err semantics the rest of the dashboard uses), a trailing
 // pencil that opens that link's existing edit modal (§5.1 in docs/DESIGN.md). MAC/BSSID are dropped
@@ -1054,7 +1051,7 @@ function valueGroupsHtml(vals, connected) {
   return html;
 }
 
-// ── Live system section (hero chips/figures, schematic, KPI tiles, trend) ────────────────────
+// ── Live system section (the interactive schematic) ──────────────────────────────────────────
 // Everything here reads /values through label patterns — the same technique pickValue() already
 // uses — so the section degrades per model: a value the profile doesn't carry renders "—", and a
 // missing tank/room sensor hides that schematic part entirely (.no-dhw/.no-room). The DOM is
@@ -1076,11 +1073,15 @@ const vOn = (re) => { const r = vRow(re); return r ? /^on$/i.test(String(r.value
 //   Tier 2 = any leaving/outlet-water measurement that is NOT a setpoint / mixed-zone / post-BUH.
 const lwtWater = (l) => l.includes("leaving water") || l.includes("outlet water") || l.includes("inflow");
 const lwtReject = (l) => l.includes("setpoint") || l.includes("mixed") || l.includes("r2t") || l.includes("after buh") || l.includes("after buffer");
-const vLwt = () => {
+const lwtRow = () => {
   const vals = (S._values || []).filter((x) => x.value != null);
   const low = (x) => (x.label || "").toLowerCase();
   let r = vals.find((x) => { const l = low(x); return lwtWater(l) && !lwtReject(l) && l.includes("r1t"); });
   if (!r) r = vals.find((x) => { const l = low(x); return lwtWater(l) && !lwtReject(l); });
+  return r || null;
+};
+const vLwt = () => {
+  const r = lwtRow();
   if (!r) return null;
   const n = parseFloat(r.value);
   return Number.isFinite(n) ? n : null;
@@ -1088,10 +1089,6 @@ const vLwt = () => {
 const fmt1 = (n) => (n == null ? "—" : n.toFixed(1));
 const fmt0 = (n) => (n == null ? "—" : String(Math.round(n)));
 const setTxt = (id, s) => { const el = $(id); if (el && el.textContent !== s) el.textContent = s; };
-
-// Nominal compressor top speed for the modulation bar — a display scale, not a datum (the real
-// maximum is model-specific and not on the bus).
-const RPS_MAX = 120;
 
 function liveData() {
   // ΔT is measured across the PHE: leaving water BEFORE the backup heater minus inlet water — with
@@ -1151,33 +1148,43 @@ function liveData() {
   return d;
 }
 
-const chipHtml = (txt, cls) => `<span class="chip${cls ? " " + cls : ""}">${txt}</span>`;
+// Every value pill in the schematic, so a lost link can blank the whole drawing in one pass. The
+// SVG now stays on screen when the bus goes quiet (it holds the status block — see renderLive), so
+// leaving the last readings in place would assert values nobody is measuring any more.
+const SCHEM_PILL_IDS = [
+  "svOut", "svRps", "svHp", "svLp", "svDisch", "svEev", "svLwt", "svRwt", "svDt",
+  "svFlow", "svWp", "svPump", "svTank", "svTankSet", "svRoom", "svRoomSet", "svPth", "svCop", "svPel",
+];
+function clearSchematic() {
+  SCHEM_PILL_IDS.forEach((id) => setTxt(id, "—"));
+  setTxt("svPelSrc", "");
+  setTxt("svDtSet", "");     // an optional trailing segment, not a value — blanks to nothing, not "—"
+  setTxt("svBuh", "");                 // no BUH step to report
+  setTxt("svValve", "3WV");            // valve position unknown — don't claim a branch
+  const sc = $("schem");
+  ["fan-on", "pump-on", "buh-on", "defrost-on", "quiet-on"].forEach((c) => sc.classList.remove(c));
+  sc.classList.add("no-thermo");       // no flag to show; the pill would otherwise sit stale
+  $("schem").querySelectorAll(".sc-flow, .sc-rflow").forEach((el) => el.classList.remove("on", "rev"));
+}
 
 function renderLive() {
   const live = !!(S.status?.hp?.connected) && (S._values || []).length > 0;
-  $("hpLive").hidden = !live;
-  $("heroChips").hidden = !live;
-  $("heroFigs").hidden = !live;
-  if (!live) return;
+  // Nothing hides when the link drops: the schematic carries the status block (mode / fault /
+  // "no data"), which is exactly what must survive a dead bus. Every pill blanks to "—" and every
+  // animation stops instead, so the drawing shows an idle plant with no readings, not a stale one.
+  if (!live) { clearSchematic(); S.live = null; renderInspect(); return; }
   const d = liveData();
+  S.live = d;          // the inspector reads this, so an open explainer follows the live values
 
-  // Hero figures + chips (chips only for states this profile actually reports; text is static
-  // English — no user-controlled strings, so no esc() needed)
-  setTxt("hfLwt", fmt1(d.lwt));
-  setTxt("hfOut", fmt1(d.out));
-  $("hfPthFig").hidden = d.pth == null;
-  setTxt("hfPth", fmt1(d.pth));
+  // Bit-flag states, each drawn at the component it belongs to: the room thermostat on the heating
+  // riser, the BUH step in the BUH label, low-noise mode on the outdoor unit. (Pump and defrost were
+  // already drawn — rotation + "PUMP n%", the ❄ pill + the reversed refrigerant loop.)
   const pumping = d.pumpOn ?? (d.flow != null ? d.flow > 1 : null);
-  const chips = [];
-  if (d.thermo != null) chips.push(chipHtml(esc(t(d.thermo ? "chip.thermo_on" : "chip.thermo_off")), d.thermo ? "on" : ""));
-  if (pumping != null) chips.push(chipHtml(esc(t(pumping ? "chip.pump_on" : "chip.pump_off")), pumping ? "on" : ""));
-  if (d.buh1 != null || d.buh2 != null) {
-    const on = !!(d.buh1 || d.buh2);
-    chips.push(chipHtml(esc(t(on ? (d.buh2 ? "chip.buh2" : "chip.buh1") : "chip.buh_off")), on ? "hot" : ""));
-  }
-  if (d.defrost) chips.push(chipHtml(esc(t("chip.defrost")), "ice"));
-  if (d.quiet) chips.push(chipHtml(esc(t("chip.quiet")), ""));
-  $("heroChips").innerHTML = chips.join("");
+  setTxt("svThermo", t(d.thermo ? "chip.thermo_on" : "chip.thermo_off"));
+  $("gThermo").classList.toggle("on", d.thermo === true);
+  // A non-breaking space: SVG collapses ordinary leading whitespace in a tspan, which would render
+  // the step glued to the label ("BUH2").
+  setTxt("svBuh", d.buh2 ? "\u00A02" : d.buh1 ? "\u00A01" : "");
 
   // Schematic badges
   setTxt("svOut", fmt1(d.out)); setTxt("svRps", fmt0(d.rps));
@@ -1191,6 +1198,7 @@ function renderLive() {
   setTxt("svWp", fmt1(d.wp)); setTxt("svPump", fmt0(d.pump));
   setTxt("svTank", fmt1(d.tank)); setTxt("svTankSet", fmt1(d.tankSet));
   setTxt("svRoom", fmt1(d.room)); setTxt("svRoomSet", fmt1(d.roomSet));
+  setTxt("svPth", fmt1(d.pth));   // derived — the pill carries "≈" + an "est." sub-label
   const toDhw = d.valveDhw === true;
   setTxt("svValve", t(toDhw ? "schem.to_dhw" : "schem.to_heat"));
 
@@ -1201,8 +1209,11 @@ function renderLive() {
   sc.classList.toggle("pump-on", pumping === true);
   sc.classList.toggle("buh-on", !!(d.buh1 || d.buh2));
   sc.classList.toggle("defrost-on", d.defrost === true);
+  sc.classList.toggle("quiet-on", d.quiet === true);
   sc.classList.toggle("no-dhw", d.tank == null);
   sc.classList.toggle("no-room", d.room == null);
+  sc.classList.toggle("no-pth", d.pth == null);
+  sc.classList.toggle("no-thermo", d.thermo == null);
   const onCls = (id, on) => $(id).classList.toggle("on", !!on);
   onCls("fSup1", pumping); onCls("fSup2", pumping); onCls("fRet", pumping);
   onCls("fTank", pumping && toDhw); onCls("fCoil", pumping && toDhw); onCls("fTankRet", pumping && toDhw);
@@ -1211,69 +1222,367 @@ function renderLive() {
   $("rfHot").classList.toggle("rev", d.defrost === true);   // defrost reverses the refrigerant loop
   $("rfCold").classList.toggle("rev", d.defrost === true);
 
-  // KPI tiles
-  setTxt("kRps", fmt0(d.rps));
-  $("kRpsBar").style.width = d.rps != null ? Math.min(100, Math.round(d.rps / RPS_MAX * 100)) + "%" : "0%";
-  setTxt("kFlow", fmt1(d.flow)); setTxt("kPump", fmt0(d.pump));
-  setTxt("kDt", fmt1(d.dt)); setTxt("kDtSet", fmt1(d.dtSet));
-  setTxt("kWp", fmt1(d.wp));
-  $("kWpBar").style.width = d.wp != null ? Math.min(100, Math.round(d.wp / 3 * 100)) + "%" : "0%";
-  setTxt("kPth", fmt1(d.pth));
-  // Bar floors at 0 — it cannot render a negative length. The figure above it carries the sign, so
-  // a defrost reads "-5.2 kW" over an empty bar rather than a filled bar over a clamped zero.
-  $("kPthBar").style.width = d.pth != null ? Math.min(100, Math.max(0, Math.round(d.pth / 16 * 100))) + "%" : "0%";
-  setTxt("kCop", d.cop == null ? "—" : d.cop.toFixed(1));
-  setTxt("kPelSub", d.pel != null ? t("kpi.pel", fmt1(d.pel), d.pelSrc) : t("kpi.no_ct"));
+  // The derived figures that used to live in KPI tiles below the drawing, now at their place in it:
+  // the target ΔT beside the measured one, COP beside the heat output it is computed from, and the
+  // electrical input on the outdoor unit where the power actually goes in.
+  // The target ΔT is a HEATING setpoint (the spec lists a separate cooling one), and no shipped
+  // profile currently carries either — so it is an optional trailing segment, not a fixed half of
+  // the pill: absent, or not heating, and it simply is not claimed.
+  const heating = /heat/i.test(pickValue(/i\/u operation mode/i) || "");
+  setTxt("svDtSet", d.dtSet != null && heating ? ` · ${t("kpi.target")} ${fmt1(d.dtSet)} K` : "");
+  setTxt("svCop", d.cop == null ? "—" : d.cop.toFixed(1));
+  setTxt("svPel", fmt1(d.pel));
+  // The source is part of the reading, not trivia: CT clamps measure the whole unit, the inverter
+  // current only the compressor — so an INV-based estimate misses the backup heater entirely.
+  setTxt("svPelSrc", d.pel != null ? t("schem.est_src", d.pelSrc) : t("schem.no_ct"));
 
-  trendSample(d);
+  renderInspect();     // keep an open explainer's reading/state sentence current
 }
 
-// ── Short-term trend: client-side ring buffer over the /events pushes ────────────────────────
-// One sample every 10 s, 180 samples ≈ 30 min — enough to make cycling, DHW runs and defrost dips
-// visible. Lost on reload by design; long-term history is Home Assistant/Grafana's job.
-const TREND_MS = 10000, TREND_N = 180;
-const trend = { t: 0, lwt: [], out: [] };
-function trendSample(d) {
-  const now = Date.now();
-  if (now - trend.t < TREND_MS) return;
-  trend.t = now;
-  trend.lwt.push(d.lwt);
-  trend.out.push(d.out);
-  if (trend.lwt.length > TREND_N) { trend.lwt.shift(); trend.out.shift(); }
-  drawTrend();
+// ── Schematic inspector: tap a pill or a component → what it is, what's normal, what it's doing ──
+// The point of the diagram is to be explorable: every hit target in the SVG (data-insp) maps to one
+// INSPECT entry here. Two kinds of entry, one renderer:
+//   • a VALUE (a pill) — `re` finds its live /values row for the reading and the source label, and
+//     `sample` (a canonical register label) resolves the explainer text out of DESCRIPTIONS. The
+//     explainer copy therefore has ONE source: the same table the value list below the diagram uses.
+//     `sample` is matched instead of the live label on purpose — the pill draws a CONCEPT, and a
+//     profile's own spelling of it could match a neighbouring DESCRIPTIONS entry.
+//   • a COMPONENT (outdoor unit, PHE, heating circuit, …) — carries its own `what` (nothing in
+//     DESCRIPTIONS describes an assembly) plus `now(d)`, a sentence built from the live values that
+//     says what the part is doing right now, and `rows`, the readings that belong to it.
+// Copy is bilingual like DESCRIPTIONS ({en, de}); `now` returns the same shape.
+const tx = (o) => (o == null ? "" : typeof o === "string" ? o : (LANG === "de" && o.de) ? o.de : o.en);
+const degC = (n) => (n == null ? "—" : fmt1(n) + " °C");
+
+const INSPECT = {
+  status: {
+    t: { en: "Operating mode", de: "Betriebsart" },
+    re: /i\/u operation mode/i, sample: "I/U Operation Mode",
+    rows: [/i\/u operation mode/i, /(error|fault) code/i],
+  },
+  ou: {
+    t: { en: "Outdoor unit", de: "Außeneinheit" },
+    what: {
+      en: "The outdoor half of the heat pump: a fan pulls outside air over the evaporator, where the refrigerant boils and picks up heat even well below 0 °C, and the compressor raises that heat to a useful temperature before it crosses to the water side. Everything here is refrigerant, not water.",
+      de: "Die Außenhälfte der Wärmepumpe: Ein Ventilator saugt Außenluft über den Verdampfer, in dem das Kältemittel verdampft und dabei selbst deutlich unter 0 °C Wärme aufnimmt; der Verdichter hebt diese Wärme auf ein nutzbares Temperaturniveau, bevor sie auf die Wasserseite übergeht. Hier fließt Kältemittel, kein Wasser.",
+    },
+    now: (d) => d.defrost
+      ? { en: "Defrosting — the circuit is running in reverse to melt ice off the evaporator, so heat is briefly taken back out of the heating water.",
+          de: "Abtauen — der Kreis läuft rückwärts, um den Verdampfer abzutauen; dabei wird dem Heizwasser kurzzeitig wieder Wärme entzogen." }
+      : (d.rps ?? 0) > 0
+        ? { en: `Running — compressor at ${fmt0(d.rps)} rps${d.quiet ? ", capped by quiet mode" : ""}.`,
+            de: `Läuft — Verdichter mit ${fmt0(d.rps)} rps${d.quiet ? ", durch den Leise-Modus begrenzt" : ""}.` }
+        : { en: "Idle — the compressor is stopped, so no heat is being produced.",
+            de: "Standby — der Verdichter steht, es wird gerade keine Wärme erzeugt." },
+    rows: [/outdoor air/i, /inv frequency/i, /^high pressure$/i, /discharge pipe temp/i, /expansion valve ?1/i, /defrost operation/i],
+  },
+  comp: {
+    t: { en: "Compressor", de: "Verdichter" },
+    re: /inv frequency/i, sample: "INV frequency (rps)",
+    rows: [/inv frequency/i, /inv primary current/i, /discharge pipe temp/i],
+  },
+  out: { t: { en: "Outdoor air", de: "Außentemperatur" }, re: /outdoor air/i, sample: "Outdoor Air Temp. (R1T)" },
+  disch: {
+    t: { en: "High side (discharge)", de: "Hochdruckseite" },
+    re: /^high pressure$/i, sample: "High pressure",
+    rows: [/^high pressure$/i, /discharge pipe temp/i, /^refrigerant pressure sensor$/i],
+  },
+  suction: {
+    t: { en: "Suction side", de: "Saugseite" },
+    re: /^low pressure$/i, sample: "Low pressure",
+    rows: [/^low pressure$/i, /expansion valve ?1/i],
+  },
+  phe: {
+    t: { en: "Plate heat exchanger", de: "Plattenwärmetauscher" },
+    what: {
+      en: "Where the refrigerant hands its heat over to the heating water. The two never mix — they flow through alternating thin plates. Everything to its left is refrigerant, everything to its right is water; the heat crossing it is flow × ΔT, which is the estimate shown here.",
+      de: "Hier gibt das Kältemittel seine Wärme an das Heizwasser ab. Beide vermischen sich nie — sie strömen durch abwechselnde dünne Platten. Links davon ist Kältemittel, rechts Wasser; die übertragene Wärme ist Durchfluss × ΔT, also die hier gezeigte Schätzung.",
+    },
+    now: (d) => d.pth == null
+      ? { en: "No estimate — flow rate or ΔT is missing on this model.",
+          de: "Keine Schätzung — Durchfluss oder ΔT fehlt bei diesem Modell." }
+      : { en: `About ${fmt1(d.pth)} kW crossing into the water (${fmt1(d.flow)} l/min at ΔT ${fmt1(d.dt)} K).`,
+          de: `Rund ${fmt1(d.pth)} kW gehen ins Wasser über (${fmt1(d.flow)} l/min bei ΔT ${fmt1(d.dt)} K).` },
+    rows: [lwtRow, /inlet water/i, /flow sensor/i],
+  },
+  lwt: {
+    t: { en: "Leaving water", de: "Vorlauf" },
+    pick: lwtRow,
+    sample: "Leaving Water Temp. before BUH (R1T)",
+  },
+  rwt: { t: { en: "Return water", de: "Rücklauf" }, re: /inlet water/i, sample: "Inlet Water Temp. (R4T)" },
+  dt: {
+    t: { en: "ΔT across the system", de: "ΔT über die Anlage" },
+    what: {
+      en: "Leaving water minus return water — how much heat the house actually pulled out of the circuit. Not a register: it is computed from the two temperatures. The controller varies pump speed to hold its target ΔT.",
+      de: "Vorlauf minus Rücklauf — wie viel Wärme das Haus dem Kreis tatsächlich entzogen hat. Kein Registerwert, sondern aus den beiden Temperaturen berechnet. Der Regler variiert die Pumpendrehzahl, um sein Ziel-ΔT zu halten.",
+    },
+    head: (d) => (d.dt == null ? "—" : fmt1(d.dt) + " K"),
+    now: (d) => d.dt == null ? null
+      : { en: `${fmt1(d.dt)} K${d.dtSet != null ? ` against a ${fmt1(d.dtSet)} K heating target` : ""}. Around 5 K is a healthy heating ΔT; a negative value means heat is flowing back out (a defrost).`,
+          de: `${fmt1(d.dt)} K${d.dtSet != null ? ` bei ${fmt1(d.dtSet)} K Heiz-Ziel` : ""}. Rund 5 K sind ein gesundes Heiz-ΔT; ein negativer Wert heißt, dass Wärme zurückfließt (Abtauung).` },
+    rows: [lwtRow, /inlet water/i, /target delta t heating/i],
+  },
+  pth: {
+    t: { en: "Heat output (estimated)", de: "Wärmeleistung (geschätzt)" },
+    what: {
+      en: "An ESTIMATE, not a measurement — the bus carries no energy register. It is computed from flow rate and ΔT with the heat capacity of water (4.186 kJ/kg·K), so it is only as good as the flow sensor and the two water temperatures, and it counts only heat from the heat pump's own exchanger (the backup heater sits after it). During a defrost it goes negative, which is real: heat is being taken back out of the water.",
+      de: "Eine SCHÄTZUNG, keine Messung — auf dem Bus gibt es kein Energieregister. Berechnet aus Durchflussmenge und ΔT über die Wärmekapazität von Wasser (4,186 kJ/kg·K), also nur so genau wie der Durchflusssensor und die beiden Wassertemperaturen; gezählt wird nur die Wärme aus dem Wärmetauscher der Wärmepumpe (der Zusatzheizer sitzt dahinter). Beim Abtauen wird der Wert negativ — das ist echt: dem Wasser wird Wärme entzogen.",
+    },
+    head: (d) => (d.pth == null ? "—" : "≈ " + fmt1(d.pth) + " kW"),
+    now: (d) => d.pth == null ? null
+      : { en: `≈ ${fmt1(d.pth)} kW${d.cop != null ? `, about ${d.cop.toFixed(1)} kW of heat per kW of electricity (COP)` : ""}.`,
+          de: `≈ ${fmt1(d.pth)} kW${d.cop != null ? `, etwa ${d.cop.toFixed(1)} kW Wärme je kW Strom (COP)` : ""}.` },
+    rows: [/flow sensor/i, /target delta t heating/i, /current measured by ct/i, /inv primary current/i],
+  },
+  buh: {
+    t: { en: "Backup heater (BUH)", de: "Zusatzheizer (BUH)" },
+    re: /buh step ?1/i, sample: "BUH step 1",
+    now: (d) => (d.buh1 == null && d.buh2 == null) ? null
+      : d.buh2 ? { en: "Step 2 — both stages firing.", de: "Stufe 2 — beide Stufen heizen." }
+      : d.buh1 ? { en: "Step 1 — one stage firing.", de: "Stufe 1 — eine Stufe heizt." }
+      : { en: "Off — the heat pump is covering the load on its own.", de: "Aus — die Wärmepumpe deckt die Last allein." },
+    rows: [/buh step ?1/i, /buh step ?2/i, /buh output capacity/i],
+  },
+  valve: {
+    t: { en: "3-way valve", de: "3-Wege-Ventil" },
+    re: /3.?way valve/i, sample: "3-way valve (On:DHW/Off:Space)",
+    now: (d) => d.valveDhw == null ? null
+      : d.valveDhw ? { en: "Diverted to the hot-water tank — space heating is paused meanwhile.",
+                       de: "Auf den Warmwasserspeicher geschaltet — die Raumheizung pausiert solange." }
+                   : { en: "Diverted to the heating circuit.", de: "Auf den Heizkreis geschaltet." },
+  },
+  tank: {
+    t: { en: "DHW tank", de: "Warmwasserspeicher" },
+    re: /dhw tank temp/i, sample: "DHW Tank Temp. (R5T)",
+    now: (d) => d.tank == null ? null
+      : { en: `${degC(d.tank)} in the tank${d.tankSet != null ? `, target ${degC(d.tankSet)}` : ""}.`,
+          de: `${degC(d.tank)} im Speicher${d.tankSet != null ? `, Ziel ${degC(d.tankSet)}` : ""}.` },
+    rows: [/dhw tank temp/i, /dhw setpoint/i, /3.?way valve/i],
+  },
+  heat: {
+    t: { en: "Heating circuit", de: "Heizkreis" },
+    what: {
+      en: "The radiators or underfloor loops in the house. They are fed only while the 3-way valve points here — a hot-water cycle takes priority and pauses them. How fast they give heat off depends on flow temperature and emitter size, which is why underfloor runs cooler than radiators.",
+      de: "Die Heizkörper bzw. Fußbodenkreise im Haus. Sie werden nur versorgt, solange das 3-Wege-Ventil hierher zeigt — eine Warmwasserladung hat Vorrang und pausiert sie. Wie schnell sie Wärme abgeben, hängt von Vorlauftemperatur und Heizflächengröße ab; deshalb läuft eine Fußbodenheizung kühler als Heizkörper.",
+    },
+    now: (d) => d.valveDhw === true
+      ? { en: "Paused — the valve is feeding the hot-water tank right now.",
+          de: "Pausiert — das Ventil versorgt gerade den Warmwasserspeicher." }
+      : (d.pumpOn ?? (d.flow != null && d.flow > 1))
+        ? { en: `Being fed at ${degC(d.lwt)} flow${d.thermo === false ? ", though the thermostat is satisfied" : ""}.`,
+            de: `Wird mit ${degC(d.lwt)} Vorlauf versorgt${d.thermo === false ? ", obwohl der Thermostat zufrieden ist" : ""}.` }
+        : { en: "No circulation — the pump is stopped.", de: "Keine Zirkulation — die Pumpe steht." },
+    rows: [/^indoor ambient temp/i, /^rt setpoint/i, /thermostat on/i],
+  },
+  thermo: { t: { en: "Room thermostat", de: "Raumthermostat" }, re: /thermostat on/i, sample: "Thermostat ON/OFF" },
+  room: {
+    t: { en: "Room temperature", de: "Raumtemperatur" },
+    re: /^indoor ambient temp/i, sample: "Indoor Ambient Temp. (R1T)",
+    rows: [/^indoor ambient temp/i, /^rt setpoint/i],
+  },
+  pump: {
+    t: { en: "Circulation pump", de: "Umwälzpumpe" },
+    re: /water pump operation/i, sample: "Water pump operation",
+    now: (d) => d.pump == null ? null
+      : { en: `Running at ${fmt0(d.pump)} % of full speed, moving ${fmt1(d.flow)} l/min.`,
+          de: `Läuft mit ${fmt0(d.pump)} % der vollen Drehzahl und fördert ${fmt1(d.flow)} l/min.` },
+    rows: [/water pump signal/i, /flow sensor/i, /^water pressure$/i],
+  },
+  pel: {
+    t: { en: "Electrical input (estimated)", de: "Stromaufnahme (geschätzt)" },
+    what: {
+      en: "What the unit is drawing from the mains, and the divisor of the COP. Also an ESTIMATE: it is measured current × an assumed 230 V, so it ignores power factor. Which current matters — CT clamps see the whole unit including the backup heater, the inverter current sees only the compressor, so an INV-based figure understates consumption whenever the backup heater is firing (and the COP shown is then too flattering).",
+      de: "Was das Gerät aus dem Netz zieht, und der Nenner des COP. Ebenfalls eine SCHÄTZUNG: gemessener Strom × angenommene 230 V, der Leistungsfaktor bleibt also unberücksichtigt. Welcher Strom, ist entscheidend — Stromwandler (CT) erfassen das ganze Gerät inklusive Zusatzheizer, der Inverterstrom nur den Verdichter; ein INV-Wert unterschätzt den Verbrauch also, sobald der Zusatzheizer heizt (und der gezeigte COP ist dann zu schön).",
+    },
+    head: (d) => (d.pel == null ? "—" : "≈ " + fmt1(d.pel) + " kW"),
+    now: (d) => d.pel == null
+      ? { en: "No current reading on this profile, so no COP can be derived either.",
+          de: "Dieses Profil liefert keinen Strommesswert, daher lässt sich auch kein COP ableiten." }
+      : { en: `From ${d.pelSrc === "CT" ? "the CT clamps (whole unit)" : "the inverter current (compressor only)"}.`,
+          de: `Aus ${d.pelSrc === "CT" ? "den Stromwandlern (ganzes Gerät)" : "dem Inverterstrom (nur Verdichter)"}.` },
+    rows: [/current measured by ct/i, /inv primary current/i],
+  },
+  defrost: {
+    t: { en: "Defrost", de: "Abtauen" },
+    re: /defrost operation/i, sample: "Defrost Operation",
+  },
+  quiet: {
+    t: { en: "Quiet mode", de: "Leise-Modus" },
+    re: /low noise control|silent mode/i, sample: "Low noise control",
+  },
+
+  // ── Pipe runs. Each says what is IN it, which way it goes, and whether anything is moving now —
+  //    the questions a schematic invites and that no value row answers.
+  rhot: {
+    t: { en: "Discharge line (hot gas)", de: "Heißgasleitung" },
+    what: {
+      en: "Refrigerant leaves the compressor here as a hot, high-pressure gas and carries the heat to the plate exchanger, where it condenses and gives that heat to the water. This is the hottest point in the machine — the discharge temperature beside it is measured right at the compressor outlet.",
+      de: "Hier verlässt das Kältemittel den Verdichter als heißes Gas unter hohem Druck und trägt die Wärme zum Plattenwärmetauscher, wo es kondensiert und die Wärme ans Wasser abgibt. Das ist der heißeste Punkt der Maschine — die Heißgastemperatur daneben wird direkt am Verdichteraustritt gemessen.",
+    },
+    now: (d) => (d.rps ?? 0) > 0
+      ? { en: `Flowing — ${fmt1(d.circP)} bar at ${fmt0(d.disch)} °C.`,
+          de: `Durchströmt — ${fmt1(d.circP)} bar bei ${fmt0(d.disch)} °C.` }
+      : { en: "Still — the compressor is stopped, so the circuit is at rest and simply equalised.",
+          de: "Steht — der Verdichter ist aus, der Kreis ruht und ist einfach ausgeglichen." },
+    rows: [/^high pressure$/i, /discharge pipe temp/i],
+  },
+  rcold: {
+    t: { en: "Suction line (cold)", de: "Saugleitung (kalt)" },
+    what: {
+      en: "The cold, low-pressure return: after giving up its heat the refrigerant expands through the valve and comes back to the outdoor coil to pick up more heat from the air. It is colder than the outside air on purpose — that temperature difference is what lets it absorb heat at all, and it is also why the coil frosts up and needs defrosting.",
+      de: "Der kalte Rücklauf mit niedrigem Druck: Nachdem das Kältemittel seine Wärme abgegeben hat, entspannt es über das Ventil und kehrt zum Außenwärmetauscher zurück, um wieder Wärme aus der Luft aufzunehmen. Es ist absichtlich kälter als die Außenluft — erst dieser Temperaturunterschied lässt es überhaupt Wärme aufnehmen, und genau deshalb bereift der Wärmetauscher und muss abgetaut werden.",
+    },
+    now: (d) => (d.rps ?? 0) > 0
+      ? { en: `Flowing — expansion valve at ${fmt0(d.eev)} pulses.`,
+          de: `Durchströmt — Expansionsventil bei ${fmt0(d.eev)} Impulsen.` }
+      : { en: "Still — the compressor is stopped.", de: "Steht — der Verdichter ist aus." },
+    rows: [/^low pressure$/i, /expansion valve ?1/i],
+  },
+  wsup: {
+    t: { en: "Flow pipe", de: "Vorlaufleitung" },
+    what: {
+      en: "Heated water on its way from the plate exchanger, past the electric backup heater, to the 3-way valve that decides whether it goes to the tank or to the house. Nothing heats it between the exchanger and the valve unless the backup heater is firing.",
+      de: "Erwärmtes Wasser auf dem Weg vom Plattenwärmetauscher, am elektrischen Zusatzheizer vorbei, zum 3-Wege-Ventil, das entscheidet, ob es zum Speicher oder ins Haus geht. Zwischen Wärmetauscher und Ventil erwärmt es nichts weiter — außer der Zusatzheizer heizt gerade.",
+    },
+    now: (d) => (d.pumpOn ?? (d.flow != null && d.flow > 1))
+      ? { en: `Carrying ${degC(d.lwt)} at ${fmt1(d.flow)} l/min${d.buh1 || d.buh2 ? ", reheated by the backup heater" : ""}.`,
+          de: `Führt ${degC(d.lwt)} bei ${fmt1(d.flow)} l/min${d.buh1 || d.buh2 ? ", vom Zusatzheizer nachgeheizt" : ""}.` }
+      : { en: "No circulation — the pump is stopped, so this water is standing still.",
+          de: "Keine Zirkulation — die Pumpe steht, dieses Wasser steht still." },
+    rows: [lwtRow, /flow sensor/i],
+  },
+  wtank: {
+    t: { en: "Tank circuit", de: "Speicherkreis" },
+    what: {
+      en: "The branch to the hot-water tank. The water does not enter the tank — it runs through a coil inside it and warms the stored water from the outside, then returns. It only flows while the 3-way valve points here, and a tank cycle pauses space heating for its duration.",
+      de: "Der Abzweig zum Warmwasserspeicher. Das Wasser gelangt nicht in den Speicher — es läuft durch eine Wendel darin und erwärmt das gespeicherte Wasser von außen, dann kehrt es zurück. Es fließt nur, solange das 3-Wege-Ventil hierher zeigt; eine Speicherladung pausiert währenddessen die Raumheizung.",
+    },
+    now: (d) => d.valveDhw === true
+      ? { en: `Charging the tank — ${degC(d.lwt)} in, tank at ${degC(d.tank)}.`,
+          de: `Lädt den Speicher — ${degC(d.lwt)} hinein, Speicher bei ${degC(d.tank)}.` }
+      : { en: "Closed — the valve is feeding the heating circuit instead.",
+          de: "Geschlossen — das Ventil versorgt stattdessen den Heizkreis." },
+    rows: [/dhw tank temp/i, /dhw setpoint/i, /3.?way valve/i],
+  },
+  wheat: {
+    t: { en: "Heating flow branch", de: "Heizungs-Vorlauf" },
+    what: {
+      en: "The branch that feeds the radiators or underfloor loops. What comes back down the return line is cooler by exactly the heat the house took — that difference is the ΔT shown at the exchanger.",
+      de: "Der Abzweig, der die Heizkörper bzw. Fußbodenkreise versorgt. Was über die Rücklaufleitung zurückkommt, ist genau um die vom Haus entnommene Wärme kühler — dieser Unterschied ist das am Wärmetauscher gezeigte ΔT.",
+    },
+    now: (d) => d.valveDhw === true
+      ? { en: "Paused — the valve is diverted to the hot-water tank.",
+          de: "Pausiert — das Ventil ist auf den Warmwasserspeicher umgeschaltet." }
+      : (d.pumpOn ?? (d.flow != null && d.flow > 1))
+        ? { en: `${degC(d.lwt)} out, ${degC(d.ret)} back — ΔT ${fmt1(d.dt)} K.`,
+            de: `${degC(d.lwt)} hin, ${degC(d.ret)} zurück — ΔT ${fmt1(d.dt)} K.` }
+        : { en: "No circulation — the pump is stopped.", de: "Keine Zirkulation — die Pumpe steht." },
+    rows: [lwtRow, /inlet water/i, /thermostat on/i],
+  },
+  wret: {
+    t: { en: "Return pipe", de: "Rücklaufleitung" },
+    what: {
+      en: "Cooled water coming back from the house and the tank, through the circulation pump, into the plate exchanger to be warmed again. Its temperature is the honest measure of how much heat the building actually absorbed.",
+      de: "Abgekühltes Wasser, das aus Haus und Speicher zurückkommt, durch die Umwälzpumpe läuft und im Plattenwärmetauscher wieder erwärmt wird. Seine Temperatur ist das ehrliche Maß dafür, wie viel Wärme das Gebäude tatsächlich aufgenommen hat.",
+    },
+    now: (d) => (d.pumpOn ?? (d.flow != null && d.flow > 1))
+      ? { en: `Returning at ${degC(d.ret)}, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.`,
+          de: `Kommt mit ${degC(d.ret)} zurück, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.` }
+      : { en: "No circulation — the pump is stopped.", de: "Keine Zirkulation — die Pumpe steht." },
+    rows: [/inlet water/i, /flow sensor/i, /^water pressure$/i],
+  },
+  flow: {
+    t: { en: "Flow & water pressure", de: "Durchfluss & Wasserdruck" },
+    re: /flow sensor/i, sample: "Flow sensor",
+    rows: [/flow sensor/i, /^water pressure$/i, /water pump signal/i],
+  },
+};
+
+// A row selector is either a label pattern or a PICKER FUNCTION. Quantities whose selection is a
+// judgement rather than a match — leaving water, where a setpoint / mixed-zone / post-BUH row must
+// never be substituted for the measurement (issue #121) — name their picker, so the rule lives in
+// exactly one place and stays the one CI gates through logic/lwt_select.hpp.
+const pickRow = (sel) => (typeof sel === "function" ? sel() : vRow(sel));
+const inspRow = (e) => (e.pick ? e.pick() : e.re ? vRow(e.re) : null);
+
+// The reading of a /values row as one string ("42.8 °C"); "—" for an absent row.
+const inspVal = (r) => (r == null ? "—" : String(r.value) + (r.unit ? " " + r.unit : ""));
+
+// Everything the panel would draw, as one string — the change key for the render guard above. It
+// covers the selection, the headline, the live sentence and every member reading, so a value moving
+// still repaints while an idle second does not.
+function inspectSig(e) {
+  if (!e) return "";
+  const d = S.live;
+  const row = d ? inspRow(e) : null;
+  const rows = (d && e.rows ? e.rows.map((sel) => inspVal(pickRow(sel))) : []).join(",");
+  return [S.insp, inspVal(row), d && e.head ? e.head(d) : "", d && e.now ? tx(e.now(d)) : "", rows].join("|");
 }
-function drawTrend() {
-  const W = 640, H = 150, PL = 36, PR = 64, PT = 10, PB = 14;
-  const fin = (a) => a.filter((x) => x != null && Number.isFinite(x));
-  const finL = fin(trend.lwt), finO = fin(trend.out);
-  $("tlOut").hidden = finO.length < 2;      // legend names only series that draw
-  if (finL.length < 2 && finO.length < 2) {
-    $("trend").innerHTML = `<text class="tr-empty" x="${W / 2}" y="${H / 2}" text-anchor="middle">${esc(t("trend.collecting"))}</text>`;
-    return;
-  }
-  const all = finL.concat(finO);
-  const lo = Math.floor(Math.min(...all) - 1), hi = Math.ceil(Math.max(...all) + 1);
-  const n = trend.lwt.length;
-  const x = (i) => PL + (n < 2 ? 0 : i / (n - 1) * (W - PL - PR));
-  const y = (t) => PT + (1 - (t - lo) / (hi - lo)) * (H - PT - PB);
-  const gy1 = y(lo + (hi - lo) * 0.25), gy2 = y(lo + (hi - lo) * 0.75);
-  let svg =
-    `<line class="tr-grid" x1="${PL}" y1="${gy1.toFixed(1)}" x2="${W - PR}" y2="${gy1.toFixed(1)}"/>` +
-    `<line class="tr-grid" x1="${PL}" y1="${gy2.toFixed(1)}" x2="${W - PR}" y2="${gy2.toFixed(1)}"/>` +
-    `<text class="tr-axis" x="4" y="${(y(hi) + 10).toFixed(1)}">${hi}°</text>` +
-    `<text class="tr-axis" x="4" y="${y(lo).toFixed(1)}">${lo}°</text>`;
-  const series = (buf, col) => {
-    if (fin(buf).length < 2) return;
-    const pts = buf.map((t, i) => (t == null ? null : `${x(i).toFixed(1)},${y(t).toFixed(1)}`)).filter(Boolean).join(" ");
-    let li = buf.length - 1;
-    while (li >= 0 && buf[li] == null) li--;
-    svg += `<polyline class="tr-line" style="stroke:var(${col})" points="${pts}"/>` +
-      `<circle class="tr-end" cx="${x(li).toFixed(1)}" cy="${y(buf[li]).toFixed(1)}" r="3.5" fill="var(${col})"/>` +
-      `<text class="tr-val" x="${(x(li) + 8).toFixed(1)}" y="${(y(buf[li]) + 4).toFixed(1)}" fill="var(${col})">${buf[li].toFixed(1)}°</text>`;
-  };
-  series(trend.out, "--flow-cold");
-  series(trend.lwt, "--flow-hot");
-  $("trend").innerHTML = svg;
+
+function renderInspect() {
+  const e = S.insp ? INSPECT[S.insp] : null;
+  // This runs on EVERY poll so an open explainer tracks the live values — but writing innerHTML each
+  // second would collapse a text selection the user is mid-read of. Diff the rendered result first
+  // and touch the DOM only when something actually changed.
+  const sig = inspectSig(e);
+  if (sig === S.inspSig) return;
+  S.inspSig = sig;
+  $("inspHint").hidden = !!e;
+  $("inspCard").hidden = !e;
+  document.querySelectorAll("#schem .sc-hit").forEach((el) => el.classList.toggle("sel", el.dataset.insp === S.insp));
+  if (!e) return;
+  const d = S.live;                       // null while the X10A link is down → readings show "—"
+  const row = d ? inspRow(e) : null;
+  setTxt("inspTitle", tx(e.t));
+  // The source line names the /values row this pill is drawn from, so a number in the picture can be
+  // traced to the register list below. Falls back to the canonical label when the row is absent.
+  setTxt("inspSrc", row ? row.label : (e.sample || ""));
+  $("inspSrc").hidden = !(row || e.sample);
+  // Headline = the ONE compact reading this target stands for (its row, or a derived `head` for the
+  // computed pills). An assembly like the outdoor unit has no single number, so it gets no headline
+  // at all rather than a "—" that would read as a missing value.
+  const hasHead = !!(e.re || e.pick || e.head);
+  $("inspNow").hidden = !hasHead;
+  if (hasHead) setTxt("inspNow", row ? inspVal(row) : (d && e.head ? e.head(d) : "—"));
+  // `now` is always prose — the live "what is it doing" sentence — so it opens the body in bold,
+  // ahead of the timeless explainer. Never the headline: a sentence in a 19px number slot reads as
+  // a broken value.
+  const sentence = d && e.now ? tx(e.now(d)) : null;
+  const desc = e.sample ? descFor(e.sample) : null;
+  const what = e.what ? esc(tx(e.what)) : (desc ? descBodyHtml(desc) : "");
+  $("inspBody").innerHTML = (sentence ? `<b>${esc(sentence)}</b> ` : "") + what;
+  $("inspRows").innerHTML = !d || !e.rows ? "" : e.rows
+    .map((sel) => pickRow(sel))
+    .filter((r, i, a) => r && a.indexOf(r) === i)     // a regex may hit a row an earlier one took
+    .map((r) => `<div class="inspect-row"><span>${esc(r.label)}</span><span>${esc(inspVal(r))}</span></div>`)
+    .join("");
+}
+
+// Name every schematic hit target from its INSPECT entry. An SVG <title> is BOTH the native hover
+// tooltip and the element's accessible name, so pointer users, keyboard users and screen readers all
+// get the same wording out of the one copy source — and the markup carries no duplicated English.
+function labelSchematicHits() {
+  const SVGNS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll("#schem [data-insp]").forEach((el) => {
+    const e = INSPECT[el.dataset.insp];
+    if (!e) return;
+    const name = tx(e.t);
+    el.setAttribute("aria-label", name);
+    const ttl = document.createElementNS(SVGNS, "title");
+    ttl.textContent = name;
+    el.insertBefore(ttl, el.firstChild);
+  });
+  $("inspClose").setAttribute("aria-label", t("insp.close"));
+}
+
+// Tap a hit target: select it, or close it when it is already open (tapping the same thing twice is
+// the natural "done reading" gesture, and there is no other close on touch besides the ✕).
+function inspectPick(key) {
+  const opening = S.insp !== key;
+  S.insp = opening ? key : null;
+  renderInspect();
+  if (opening) $("inspCard").scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 // ── WiFi (dashboard edit modal) ───────────────────────────────────────────
@@ -1617,6 +1926,21 @@ function wire() {
     const desc = e.target.closest("[data-desc]");
     if (desc) toggleDesc(desc);
   });
+  // Schematic inspector: the SVG hit targets are <g> elements, so Enter/Space need handling by hand
+  // (a <g role="button"> gets no native activation). Delegated, because the SVG is static DOM.
+  $("schem").addEventListener("click", (e) => {
+    const hit = e.target.closest("[data-insp]");
+    if (hit) inspectPick(hit.dataset.insp);
+  });
+  $("schem").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const hit = e.target.closest("[data-insp]");
+    if (!hit) return;
+    e.preventDefault();          // Space would otherwise scroll the page
+    inspectPick(hit.dataset.insp);
+  });
+  $("inspClose").onclick = () => { S.insp = null; renderInspect(); };
+
   $("valueGroups").addEventListener("change", (e) => {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();
   });
@@ -1640,6 +1964,7 @@ function wire() {
   $("wfCancel").onclick = closeWifi;
   $("wifiBackdrop").onclick = closeWifi;
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("wifiModal").hidden) closeWifi(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && S.insp) { S.insp = null; renderInspect(); } });
   $("wifiForm").addEventListener("submit", (e) => {
     e.preventDefault();
     // NOT trimmed: leading/trailing spaces are valid SSID bytes (an AP may legitimately name itself
@@ -1827,7 +2152,8 @@ function wire() {
 }
 
 async function boot() {
-  applyStaticI18n();   // localise the static index.html markup (data-i18n) before the first render
+  applyStaticI18n();       // localise the static index.html markup (data-i18n) before the first render
+  labelSchematicHits();    // name the clickable schematic parts from the INSPECT table
   wire();
 
   if (window.WebSocket) {

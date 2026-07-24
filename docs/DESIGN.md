@@ -27,8 +27,8 @@ page lives outside the firmware and cannot include `main/www/style.css`, so its 
 4. **Terse, dense, technical.** Tabular numbers, short labels, no decorative copy.
 5. **Browser-detected language (de / en), no selector.** This principle scopes to the **device UI**
    (`main/www/`) — the GitHub Pages installer of §5.5 is English-only by decision, and `setup.html`
-   is served before `app.js` exists. The UI **chrome** (hero states, card
-   titles, connection rows, KPI/schematic labels, modals, banners, toasts) and the tap-to-expand
+   is served before `app.js` exists. The UI **chrome** (system status block, card
+   titles, connection rows, schematic labels, the inspector, modals, banners, toasts) and the tap-to-expand
    value **descriptions** (§6) are rendered in German for a `de*` browser (`navigator.language`) and
    English otherwise — English is the fallback for every string. There is **no manual language
    selector** and no server round-trip: the choice is made client-side at load (`LANG` in `app.js`,
@@ -48,8 +48,8 @@ Palette taken from the Daikin logo: the cyan wordmark, the light-cyan and deep-n
 | `--brand`        | `#0097E0` | `#33ABE8` | Primary brand (Daikin cyan): buttons, active step, links, focus, header rule |
 | `--brand-strong` | `#0079BD` | `#0097E0` | Hover/pressed, primary text-on-light |
 | `--brand-sky`    | `#5AC8F0` | `#5AC8F0` | Light-cyan highlight: progress fill, chart/line, subtle gradient |
-| `--brand-navy`   | `#14285A` | `#0E1C43` | Deep navy from the logo triangle. **Defined but currently unused** — the heroes ship on `--brand-tint` (§5.0, §5.3). Kept as the reserved high-emphasis accent |
-| `--brand-tint`   | `#E9F6FD` | `#12202b` | Faint cyan fill: **hero bands** (setup + dashboard), selected rows, info blocks, step background |
+| `--brand-navy`   | `#14285A` | `#0E1C43` | Deep navy from the logo triangle. **Defined but currently unused** — the setup hero ships on `--brand-tint` (§5.0). Kept as the reserved high-emphasis accent |
+| `--brand-tint`   | `#E9F6FD` | `#12202b` | Faint cyan fill: the **setup hero band** (§5.0), selected rows, info blocks, step background |
 | `--bg`           | `#F4F5F7` | `#12151A` | Page background |
 | `--card`         | `#FFFFFF` | `#1B1F27` | Card / surface |
 | `--fg`           | `#1C2530` | `#E6E9EE` | Body text |
@@ -58,22 +58,23 @@ Palette taken from the Daikin logo: the cyan wordmark, the light-cyan and deep-n
 | `--ok`           | `#1A9D5A` | `#3FBE7A` | Healthy / connected / running |
 | `--warn`         | `#C9740A` | `#E08A2B` | Attention (reconnecting, CRC/timeout, weak signal) |
 | `--err`          | `#D23B3B` | `#EA5A5A` | Fault / disconnected / invalid |
-| `--flow-hot`     | `#DC5A32` | `#E06A40` | Supply/warm flow: schematic pipes in flow direction, trend "leaving water" series, heat-output meter |
-| `--flow-cold`    | `#3F7FD0` | `#5A97DE` | Return/cold flow: schematic return pipes, trend "outdoor" series, defrost accent |
+| `--flow-hot`     | `#DC5A32` | `#E06A40` | Supply/warm flow: schematic pipes in flow direction, the warm half of the drawing |
+| `--flow-cold`    | `#3F7FD0` | `#5A97DE` | Return/cold flow: schematic return pipes, defrost accent |
 
 Rules:
 - **Brand = navigation & identity** (header rule, title, active step, primary button, focus ring,
   links). **Semantic = state** (ok/warn/err) for values and connection status — never recoloured
   to brand, so status is unambiguous.
 - **Flow = temperature, not health.** `--flow-hot`/`--flow-cold` encode warm supply vs cold return
-  in the system schematic and the trend series (the universal heating-schematic convention). They
+  in the system schematic (the universal heating-schematic convention). They
   are deliberately distinct hues from `--warn`/`--err` and never signal a state; both mode pairs
   are CVD-validated (deuteranopia/protanopia/tritanopia-separable against `--card`). The
   schematic's idle-pipe/plate-fill greys are component-level colours derived from the neutral
   ramp, not tokens.
-- `--brand-tint` is for the setup hero band and the dashboard status hero background — a faint cyan
-  fill carrying normal `--fg` text with a `--brand-strong` kicker, bordered like a card rather than
-  reading as a dark chrome band. Body remains on neutral `--bg`.
+- `--brand-tint` is for the setup hero band (§5.0) — a faint cyan fill carrying normal `--fg` text
+  with a `--brand-strong` kicker, bordered like a card rather than reading as a dark chrome band.
+  The dashboard has no such band: its status header sits on the system card itself (§5.3 item 1),
+  so the first screen is the plant, not a coloured strip above it. Body remains on neutral `--bg`.
 - Focus ring: `0 0 0 3px rgba(0,151,224,.25)` on every interactive element (keyboard-visible).
 - Contrast: white on `--brand`/`--brand-strong` for bold button text; body text stays on neutral
   surfaces. `--muted` meets AA on `--card`.
@@ -85,7 +86,7 @@ Theme follows `prefers-color-scheme`; both light and dark are first-class (token
 - Font: system UI stack, 15px/1.5 base (mobile); the whole ramp scales ~1.15× at ≥600px (§9).
   Numbers `font-variant-numeric: tabular-nums`.
 - Spacing scale: 4 · 8 · 12 · 16 · 24 · 32. Card padding 16–18. Grid gap 16.
-- Radius: 8 (controls), 12 (cards), 20 (pills/toast). Elevation: 1px border + soft shadow on hero.
+- Radius: 8 (controls), 12 (cards), 20 (pills/toast). Elevation: 1px border + soft shadow on cards.
 - Container: `max-width 720px` (mobile), widening to `820px` at ≥600px (§9), centred. Mobile-first
   (setup is done from a phone).
 - Header: sticky, 2px `--brand` bottom rule, title in `--brand`.
@@ -227,18 +228,18 @@ the **product name**). There is **no settings gear** — the app has no other sc
   Altherma ESP32". Under it, a small identity line shows the current **IP address** (`wifi.ip`,
   falling back to the browser's own `location.hostname` — e.g. the mDNS name — while it is empty) —
   board identity, not a WiFi *link* fact, so it lives in the header rather than the Connections
-  tile's WiFi row (§5.3 item 5). The detected heat-pump model is shown instead in the **Model**
+  tile's WiFi row (§5.3 item 4). The detected heat-pump model is shown instead in the **Model**
   status card (§5.3 body).
 
 Body, ordered:
 
 0. **Recovery-mode banner** (only when `sys.safe_mode` is true). A `--warn`-accented card **above the
-   hero**: title "Recovery mode", explaining that the device restarted too many times and came up
+   system card**: title "Recovery mode", explaining that the device restarted too many times and came up
    minimally (heat-pump polling and MQTT paused), and to correct the configuration (e.g. the RX/TX
    pins on the ESP32 card) and reboot. **Not dismissible** — it reflects a live state and clears
    itself once a healthy reboot leaves safe mode. Lives outside the poll-rebuilt card grid.
 0. **WiFi-rollback banner** (only when `wifi.rolled_back` is true). A `--warn`-accented card **above
-   the hero**: title "WiFi change failed — rolled back", explaining that the new credentials couldn't
+   the system card**: title "WiFi change failed — rolled back", explaining that the new credentials couldn't
    connect, so the device restored the previous network (named from `wifi.ssid`, which after the
    rollback *is* the network it fell back to) and restarted, and to open the Connections tile's WiFi
    row to try again.
@@ -248,7 +249,7 @@ Body, ordered:
    which is exactly the "until the user acts on it" lifetime wanted. Without it the failure is
    invisible — the device simply reappears on the old SSID and the dashboard looks normal.
 0. **Crash banner** (only when `last_crash` is set — a fault reset or a core dump waiting; hidden on a
-   clean boot). An `--err`-accented card **above the hero**. The title is keyed on `fault`, i.e. on
+   clean boot). An `--err`-accented card **above the system card**. The title is keyed on `fault`, i.e. on
    whether *this* boot was itself a crash: "Device restarted after a crash" when it was, else "Crash
    report waiting from an earlier restart" — an orphan dump left in flash raises the banner on every
    later boot (including a clean power-on or a USB re-plug), and must not claim a crash that did not
@@ -259,45 +260,85 @@ Body, ordered:
    and **Dismiss**. Dismissal is keyed to the crash signature (reason/PC/task — *not* the dump state,
    so pulling the dump can't resurrect a dismissed banner), so a *new* crash re-shows it. Lives
    outside the poll-rebuilt card grid, so its dismissed state survives re-renders.
-1. **Status hero — the "Now" panel** (`--brand-tint` band): operation mode (Heating / Cooling / DHW /
-   Standby / Off) as the headline, with fault state. Colour: `--ok` running, `--warn`/`--err` on
-   fault; grey when no data. Fault text and the last-poll age surface in the hero sub-line. While
-   the X10A link is live the hero additionally carries **state chips** (Thermostat / Pump / BUH
-   step / Defrost / Quiet — only the flags the detected profile reports; `--ok` running, `--warn`
-   BUH, `--flow-cold` defrost) and **three key figures** (leaving water, outdoor, estimated heat
-   output — the "est." derivation in item 3). Chips and figures hide with the link, leaving the
-   original hero.
-2. **System schematic** — a full-width card ("System") drawing the hydraulic + refrigerant circuit
+1. **System card — the first thing on the dashboard, and the whole "Now" answer.** Nothing sits
+   above it but the banners. There is **no status hero and no header band**: everything the old hero
+   said now lives *inside the drawing*, each fact at the component it describes, so one look at the
+   picture answers "what is the plant doing right now".
+   **Status block** (top-left of the SVG, where a drawing's title goes — it describes the whole
+   plant, not one component): a state **dot** (`--ok` running, `--err` fault, `--muted` no data), the
+   **operation mode** as the headline (Heating / Cooling / DHW / Defrost / Stop — the hydronic I/U
+   mode, see item 2), and one status line under it — "Operating", "Fault · U4 — check the outdoor
+   unit.", "Waiting for the heat pump…", "Can't reach the device — retrying…". The last-poll age is
+   appended only when the drawing has no leaving-water pill to prove freshness itself.
+   **State flags are drawn at their component**, never as a chip row: the room thermostat is a pill
+   on the **heating riser** above the emitter (`--ok` while calling), the BUH step is part of the
+   **BUH label** ("BUH 1"/"BUH 2", over the existing `--warn` tint — the tint says *on*, the digit
+   says how much resistive heat is being paid for), low-noise mode is a pill **on the outdoor unit**
+   beside the defrost pill. Pump and defrost were already drawn (rotation + "PUMP n%", the ❄ pill +
+   the reversed refrigerant loop).
+   **The schematic never hides.** When the X10A link drops it is the only thing left that can say
+   why, so instead every value pill blanks to "—", every animation stops, the 3-way-valve label falls
+   back to a bare "3WV" (no branch claimed) and the thermostat pill disappears — an idle plant with no
+   readings, not a stale one — nothing on this screen is hidden by a dead bus.
+2. **System schematic** — the body of that card, drawing the hydraulic + refrigerant circuit
    as an inline SVG: outdoor unit (fan + compressor with rps), refrigerant lines, plate heat
    exchanger, supply line through the backup heater to the 3-way valve, DHW tank with coil, heating
    circuit, and the return line through the pump. Value pills sit at their physical measuring
-   points (outdoor temp, high/low pressure + discharge, EEV pulses, leaving/return water, ΔT, flow +
-   water pressure, pump %, tank temp/setpoint, room temp/setpoint). **The pipes animate in flow
+   points (outdoor temp, high/low pressure + discharge, EEV pulses, leaving/return water, ΔT, the
+   estimated **heat output and COP** at the PHE, the estimated **electrical input** on the outdoor
+   unit where the power goes in, flow + water pressure, pump %, tank temp/setpoint, room
+   temp/setpoint). **There is no tile row under the diagram**: the working point belongs at the
+   parts it describes, so ΔT carries its target setpoint, heat output carries the COP derived from
+   it, and the electrical figure carries its own provenance ("est. · CT" vs "est. · INV" — the
+   clamps see the whole unit, the inverter current only the compressor, so an INV-based COP is
+   flattering whenever the backup heater is firing).
+   Those three are *derived*, never measured — thermal from flow × ΔT (≈4.186 kJ/kg·K), electrical
+   from current at an assumed 230 V — so each is drawn with "≈" under an **"estimated"** sub-label:
+   the bus has no energy registers, and a derived number must never read as a measured one. COP
+   shows "—" unless the compressor is actually running, and the heat-output pill hides entirely
+   when flow or ΔT is missing rather than printing a confident 0.0. **The pipes animate in flow
    direction** while the pump runs — supply in `--flow-hot`, return in `--flow-cold`; the 3-way
    valve state switches the animated branch (heating circuit ↔ tank coil), a defrost cycle reverses
    the refrigerant-loop animation and shows a `--flow-cold` "❄ defrost" pill, and an active BUH
    tints its symbol `--warn`. All values map over `/values` **label patterns** (the same technique
-   as the hero's `pickValue`), so the card degrades per model: a missing value renders "—", a
+   as `pickValue`), so the card degrades per model: a missing value renders "—", a
    missing tank/room sensor hides that schematic branch entirely. The SVG is **static DOM updated
    in place** — never innerHTML-rebuilt per poll, which would restart the CSS animations — and the
    card scrolls horizontally inside itself below 640px content width (§9). Animations are pure CSS
    and stop under `prefers-reduced-motion` (the active branch stays visible by colour).
-3. **KPI tiles** — a responsive grid of six compact tiles under the schematic: Compressor (rps +
-   modulation bar against a nominal display maximum), Flow (l/min + pump %), ΔT water (vs. the
-   target-ΔT setpoint), Water pressure (bar + bar meter), **Heat output (est.)** and **COP (est.)**.
-   The two estimates are *derived* — thermal from flow × ΔT (≈4.186 kJ/kg·K), electrical from the
-   CT phase currents at an assumed 230 V (falling back to the inverter primary current) — and are
-   always labelled "est.": the bus has no energy registers, and a derived number must never read as
-   a measured one. COP shows "—" unless the compressor is actually running.
-4. **Trend card** — "Trend — last 30 min": leaving-water (`--flow-hot`) and outdoor (`--flow-cold`)
-   temperature sparklines from a **client-side ring buffer** over the `/events` pushes (one sample
-   per 10 s, 180 samples), with min/max axis labels, faint gridlines, endpoint dots + value labels
-   and a legend naming only the series that draw. Deliberately RAM-only in the browser and lost on
-   reload — the firmware stores no history, and long-term charts remain Home Assistant/Grafana's
-   job. Shows "Collecting data…" until two samples exist.
-   Items 2–4 (and the hero's chips/figures) render **only while the X10A link is live** — offline
-   they hide entirely rather than showing stale pipes (§8).
-5. **Connections tile** — one full-width card below the live section. Combines **WiFi**, **MQTT**,
+   **The drawing is explorable.** Every value pill and every component is a hit target: hovering or
+   focusing outlines it in `--brand`, and tapping it opens the **inspector** (item 3) below the SVG.
+   That is the whole point of the picture — a reading is only useful once you know what it means and
+   what is normal for it, so the diagram is the way in, not a separate manual. Targets are `<g>`
+   elements with `role="button"` + `tabindex`, activated by pointer, Enter or Space, each named by an
+   SVG `<title>` (native tooltip *and* accessible name, from the one copy source); the SVG is
+   therefore a labelled `role="group"`, never `aria-hidden` — a hidden subtree must not hold focusable
+   elements. Tapping the same target again, ✕, or Escape closes the panel.
+3. **Inspector** — the panel directly under the drawing, in the same card, so the explanation and the
+   thing it explains are on screen together. Idle it shows one muted hint line ("Tap a value or
+   component…") — the affordance that the picture is clickable. Selected it shows:
+   a **title** (the concept in the UI language, e.g. "Leaving water"), the **headline reading** for
+   that target (its `/values` row, or the derived figure for ΔT / heat output — an assembly like the
+   outdoor unit has no single number and gets no headline rather than a "—" that would read as a
+   missing value), the **source row label** in mono (the verbatim English register name, so a number
+   in the picture can be traced to the value list in item 6), a live **state sentence** in bold for
+   components ("Running — compressor at 62 rps.", "Paused — the valve is feeding the hot-water tank
+   right now."), the **explainer** (what it is, and `Normal:` guidance where useful), and the
+   **member readings** of that component as a compact label→value list.
+   The explainer copy comes from the **same `DESCRIPTIONS` table** the value rows use (§5.3 item 6) —
+   one source for "what does this mean", never a second parallel one. A value target resolves it
+   through a canonical register label rather than the live one, so a profile's own spelling cannot
+   drift onto a neighbouring entry. Component copy (outdoor unit, PHE, ΔT, heat output, heating
+   circuit) has no equivalent in `DESCRIPTIONS` — nothing there describes an assembly or a derived
+   figure — and lives in the inspector's own table, bilingual in the same `{en, de}` shape.
+   The panel re-renders every poll so an open explainer follows the live values, but only when what
+   it draws actually changed — an unconditional rebuild would collapse a text selection mid-read.
+   Nothing in this section hides when the X10A link drops (§8): the schematic and its inspector stay,
+   blanked to "—" (item 1), because they carry the status block that says why.
+   **There is no trend/history card.** The firmware stores no history and a browser-side ring buffer
+   is lost on every reload, so a 30-minute sparkline could never answer a question a person actually
+   has — long-term analysis belongs to Home Assistant/Grafana, which hold the real series.
+4. **Connections tile** — one full-width card below the live section. Combines **WiFi**, **MQTT**,
    **Syslog** and **NTP** into one row each: a label on the left,
    a single colour-coded value on the right (`--ok` connected/synced/enabled, `--warn`
    connecting/syncing/unreachable-but-forwarding, `--err` down/disabled-by-error), and a trailing
@@ -327,7 +368,7 @@ Body, ordered:
      from `ntp{server,synced}`. Unlike the earlier per-card NTP layout, the synced wall clock
      (`ntp.time`) is **not** shown on this row (no room in a one-line tile); it remains available via
      the MQTT heartbeat's `device_time` sensor and `/status.ntp.time`.
-6. **Status cards** — two cards styled exactly like the value groups (§6), stacked full-width below
+5. **Status cards** — two cards styled exactly like the value groups (§6), stacked full-width below
    the Connections tile:
    - **ESP32** — the board itself: chip (`platform`), **firmware version** (a tappable row that checks
      for an OTA update, §5.4), uptime (`uptime_s`), **Last reset** (`sys.reset_reason` — warn-coloured
@@ -340,7 +381,7 @@ Body, ordered:
      model}`. Both are bus-derived, so they show **only while the link is live** (`hp.connected`):
      offline the name degrades to the brand "Daikin Altherma" and the capacity is hidden — never a
      cached fingerprint read as live. There is **no** "Detection: auto/manual" row (fully automatic).
-7. **Value groups** (§6) as cards, each a label→value·unit table, tabular numbers; every value of the
+6. **Value groups** (§6) as cards, each a label→value·unit table, tabular numbers; every value of the
    detected profile is shown. A value that timed out this cycle shows "—" (not 0). The schematic
    answers "what is happening"; these tables stay as the exact-value reference — both read the same
    `/values` dataset.
@@ -348,9 +389,11 @@ Body, ordered:
      (trailing chevron affordance, like the Firmware row); tapping it slides open a short description
      beneath the row — what the reading means and, where useful, what is normal vs worth a look. The
      text is keyed to the value **label** by a first-match-wins pattern table (`DESCRIPTIONS` in
-     `app.js`), the same label-pattern technique the hero/grouping already use, so one entry serves
+     `app.js`), the same label-pattern technique the schematic/grouping already use, so one entry serves
      every profile's spelling of a quantity; a label that matches nothing stays a plain, non-expandable
-     row. Each entry carries an English `what`/`normal` plus a German `de` copy; the browser language
+     row. **The schematic inspector (§5.3 item 3) reads this same table**, so a quantity is explained
+     identically whether the user arrives from the picture or from the value list — add a concept
+     once, here. Each entry carries an English `what`/`normal` plus a German `de` copy; the browser language
      (§1) picks which is shown (English fallback). The value label above the box stays the English
      register name in both languages. The open state lives in app state
      (`S.descOpen`), not the DOM, so the per-poll rebuild of `#valueGroups` re-emits an expanded row
@@ -358,8 +401,8 @@ Body, ordered:
      animates, and updates the set for the next rebuild.
 
 There is **no** health/badge strip: connectivity/identity lives in the Connections tile, the board in
-the ESP32/Model status cards, operation/fault in the hero, and every card — hero, Connections tile,
-status cards and value groups — is the same full container width, stacked in one column (§9). The
+the ESP32/Model status cards, operation/fault in the schematic's own status block, and every card —
+system card, Connections tile, status cards and value groups — is the same full container width, stacked in one column (§9). The
 only setup control on this screen is the ESP32 card's RX/TX pins (§5.2); otherwise it is
 operation-only.
 
@@ -448,7 +491,7 @@ the value's register/label (the generator can also stamp a `group` tag per row).
 5. **Electrical** — INV primary current, INV compressor current, CT L1/L2/L3, backup-heater
    capacity + stages.
 6. **Device** — WiFi/MQTT/HP link, poll counters, uptime, firmware (WiFi/MQTT in the Connections tile,
-   §5.3 item 5; HP link/protocol, uptime and firmware on the ESP32 card §5.3; model name also in the
+   §5.3 item 4; HP link/protocol, uptime and firmware on the ESP32 card §5.3; model name also in the
    header).
 
 Within a group: setpoints next to their measured value; temperatures before pressures before
@@ -465,31 +508,37 @@ enabled/available values are hidden.
   rotates on open, revealing the description in its **own inset `--brand-tint` info box** — held in
   from the row edges with a gap above/below, so the rows read as parting to make room for it rather
   than the row growing taller. Bold `--fg` "Normal:" lead-in on `--muted` body; slides down via a
-  `grid-template-rows: 0fr→1fr` transition (§5.3 item 7). Unrecognised labels render as a plain,
+  `grid-template-rows: 0fr→1fr` transition (§5.3 item 6). Unrecognised labels render as a plain,
   non-interactive row.
 - **Card** — `--card`, 1px `--line`, radius 12; section title small-caps `--muted`.
 - **Toast** — bottom-centre, transient, for Save outcomes ("Saved", "Rebooting…", "Failed").
-- **Hero** — `--brand-tint` band bordered like a card, `--fg` text under a `--brand-strong` kicker,
-  one headline + one sub-line.
+- **Status block** — inside the schematic, top-left (§5.3 item 1): state dot + `--fg` headline (the
+  operation mode) over one `--brand-strong` status line (`--err` on fault, `--muted` when there is no
+  data). Drawn as SVG text, not HTML — it is part of the picture, not a band above it.
 - **System schematic** — full-width card holding the live hydraulic/refrigerant SVG (§5.3 item 2):
   neutral pipe skeleton with animated `--flow-hot`/`--flow-cold` dash overlays, `--card` value
   pills with `--line` borders, `--muted` small-caps part labels. Scrolls horizontally inside the
   card below 640px content width.
-- **State chip** — small pill on the hero (§5.3 item 1): `--card` on `--brand-tint`, text+border
-  tinted `--ok`/`--warn`/`--flow-cold` when the state is active, `--muted` otherwise. Text always
-  names the state ("BUH off"), never colour alone.
-- **KPI tile** — compact `--card` tile (§5.3 item 3): small-caps label, large tabular value +
-  muted unit, optional 5px meter bar (`--brand`, or `--flow-hot` for the heat-output estimate).
-- **Trend card** — sparkline card (§5.3 item 4): 2px series lines in the flow colours, dashed
-  `--line` gridlines, `--muted` axis labels, endpoint dot ringed in `--card` + value label.
+- **State pill** — a value pill carrying a flag rather than a number, sitting on the component it
+  belongs to (§5.3 item 1): `--card` fill, text+border tinted `--ok`/`--warn`/`--flow-cold`/`--brand`
+  while the state is active, `--muted` otherwise. The text always names the state ("Thermostat off"),
+  never colour alone.
+- **Inspector** — `--brand-tint` panel under the schematic (§5.3 item 3), bordered like a card: an
+  uppercase `--muted` title + mono source label on the left, the headline reading on the right, then
+  the explainer paragraph and a `--line`-divided list of that component's readings. Idle it collapses
+  to a single muted hint line.
+- **Value pill** — the schematic's unit of reading (§5.3 item 2): `--card` fill, `--line` border,
+  tabular value, optional `--muted` sub-label under it (the measurement's name, or "estimated" for a
+  derived one). Widened to carry a second related figure where the two belong together (ΔT + target,
+  heat output + COP), and hidden outright when its model has no such reading.
 - **Connections tile** — `--card` bordered like the value-group cards, full width like every other
   card (§9) — one row per link (WiFi/MQTT/Syslog/NTP), each a label + a single colour-coded value +
-  a trailing pencil (§5.3 item 5).
-- **Crash banner** — `--err`-accented card above the hero (§5.3 item 0), shown only when
+  a trailing pencil (§5.3 item 4).
+- **Crash banner** — `--err`-accented card above the system card (§5.3 item 0), shown only when
   `last_crash` is set: title + meta + hex backtrace, with Download / Copy-diagnostics / Dismiss
   actions. Small `.sm` buttons + a quiet `.ghost` Dismiss.
 - **Recovery banner** — `--warn`-accented twin of the crash banner (reuses its layout classes), above
-  the hero, shown only when `sys.safe_mode` is true: title + one explanatory line, **no actions and no
+  the system card, shown only when `sys.safe_mode` is true: title + one explanatory line, **no actions and no
   dismiss** (it mirrors a live state, clearing itself on a healthy reboot).
 
 ## 8. States & feedback
@@ -506,21 +555,20 @@ transition). Specific:
   §5.3 item 0, since it lands long after this poll gives up.)
 - **Live writes** (heat pump): "Applied", stay on view; the `/events` WebSocket pushes the new
   values on the next poll cycle (a pin-pick also refreshes `/status` a few times to catch the connect).
-- **Connection loss**: hero greys to "No data"; the Connections tile's WiFi row shows "Offline" if WiFi dropped, and
+- **Connection loss**: the system card's status header greys to "No data"; the Connections tile's WiFi row shows "Offline" if WiFi dropped, and
   the **Heat-pump card collapses to a bare "Offline"** if the X10A link is down — model, protocol and
-  capacity vanish rather than showing stale cached values. The live section (schematic, KPI tiles,
-  trend) and the hero's chips/figures **hide entirely** with the X10A link — an animated pipe over a
-  silent bus would assert a flow nobody measured. The trend buffer keeps its samples, so a short
-  drop resumes with its history (the gap simply isn't sampled). The `/events` WebSocket reconnects every
-  5 s (hero shows "Unreachable — retrying…"), no hard error page.
+  capacity vanish rather than showing stale cached values. The schematic blanks every pill to "—"
+  and stops every animation — an animated pipe over a silent bus would assert a flow nobody measured,
+  and a held-over reading would assert a value nobody is still measuring. The `/events` WebSocket reconnects every
+  5 s (the schematic's status block shows "Unreachable — retrying…"), no hard error page.
 - **Empty**: pre-first-poll dashboard shows "Waiting for first poll…"; unknown model shows the
   *Generic* hint.
 - **Recovery mode**: if `sys.safe_mode` is true (too many crash boots), the recovery banner (§5.3
-  item 0) shows above the hero and the heat-pump cards stay collapsed (polling is paused); the WiFi,
+  item 0) shows above the system card and the heat-pump cards stay collapsed (polling is paused); the WiFi,
   MQTT and ESP32 (RX/TX) config controls remain usable so the bad setting can be corrected, then a
   reboot returns to normal.
 - **Post-crash**: if the last reset was a fault (or a core dump is waiting), the crash banner (§5.3
-  item 0) appears above the hero until dismissed — with the title distinguishing the two triggers, so
+  item 0) appears above the system card until dismissed — with the title distinguishing the two triggers, so
   a leftover dump alone doesn't report a crash that didn't happen this boot. "Copy diagnostics" toasts
   "Diagnostics copied — paste into a bug report" on success, or "Copy failed — open /coredump and
   /diag manually" if the clipboard is unavailable.
@@ -537,7 +585,7 @@ transition). Specific:
 
 ## 9. Responsive & accessibility
 
-- **Single column at every width.** Every card — hero, Connections tile, status cards and value
+- **Single column at every width.** Every card — system card, Connections tile, status cards and value
   groups — is the same full container width, centred, stacked top-down. Unlike the earlier ≥560px
   two-column multicol, this never leaves an empty second column (with a stray card shadow at the column
   gap) when only one card is present — e.g. just the ESP32 card while the heat-pump link is down.
@@ -548,11 +596,11 @@ transition). Specific:
   block so the ramp stays coherent; it never changes the single-column layout, only its size.
 - Wide content (long value tables) never causes horizontal page scroll; the table scrolls in its card.
 - Keyboard: logical tab order, visible focus ring, Enter submits the view's primary action. The
-  value-description expanders (§5.3 item 7) are real `<button>`s carrying `aria-expanded`, so they
+  value-description expanders (§5.3 item 6) are real `<button>`s carrying `aria-expanded`, so they
   are focusable and toggle on Enter/Space with no extra key handling; the slide honours
   `prefers-reduced-motion`.
 - Contrast AA for text; status never conveyed by colour alone (pills carry text: "Connected",
-  "CRC 3", "off"). The Connections tile (§5.3 item 5) is the one deliberate exception to *visible*
+  "CRC 3", "off"). The Connections tile (§5.3 item 4) is the one deliberate exception to *visible*
   text — its rows show only a colour-tinted address/name — so the status word that would otherwise
   be a pill instead goes into the row's `aria-label`, keeping the rule for screen readers and
   satisfying it programmatically rather than visually.
@@ -562,7 +610,7 @@ transition). Specific:
 
 The design needs these additions to the firmware (all small, tracked as follow-ups):
 - `GET /status`: `wifi.rssi`/`wifi.ip`/`wifi.connected` (live, from `wifi_info()`) — **done**; the
-  dashboard Connections tile's WiFi row consumes `rssi`/`connected` (§5.3 item 5) and the header
+  dashboard Connections tile's WiFi row consumes `rssi`/`connected` (§5.3 item 4) and the header
   identity line consumes `ip` (§5.3 body). See `main/http_status.cpp`.
 - `POST /set_hp`: **every field is optional** — an omitted key keeps its current value, so the
   dashboard ESP32 card posts just `{profile:"auto",rx,tx}` on a pin change. `poll_s` is **not**
