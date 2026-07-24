@@ -61,17 +61,21 @@ const I18N = {
     "toast.rejected": "Rejected", "toast.applying": "Still applying the last change…",
     "toast.check_wifi": "Check WiFi settings", "toast.check_broker": "Check the broker address",
     "toast.check_syslog_port": "Check the Syslog port",
-    "toast.ota_checking": "Checking for updates…", "toast.ota_uptodate": (v) => `Up to date (v${v})`,
-    "toast.ota_timeout": "Update check timed out", "toast.ota_failed": "Update check failed",
-    "toast.ota_cancelled": "Update cancelled", "toast.ota_start_fail": "Couldn't start the update",
-    "toast.ota_downloading": "Downloading… keep the device powered",
-    "toast.ota_progress": (p) => `Downloading… ${p}%`, "toast.ota_update_timeout": "Update timed out",
-    "toast.ota_update_failed": "Update failed", "toast.ota_installed": "Installed — rebooting…",
     "toast.verifying_mqtt": "Verifying MQTT connection…", "toast.saving_syslog": "Saving Syslog settings…",
     "toast.saving_ntp": "Saving NTP settings…", "toast.trying_pins": "Trying pins…",
     "toast.saving_board": "Saving board hardware…",
+    // OTA status shown INLINE beside the header version (#otaStat) — short by design: it shares one
+    // line with the IP and the version, so these read as a suffix, not as sentences.
+    "ota.uptodate": "up to date", "ota.check_failed": "check failed", "ota.starting": "starting…",
+    "ota.pct": (p) => `${p}%`, "ota.rebooting": "rebooting…", "ota.failed": "update failed",
+    "ota.timeout": "timed out", "ota.cancelled": "cancelled", "ota.busy": "device busy",
+    "ota.unreachable": "device unreachable",
+    // The install finished; only the automatic page reload gave up waiting for the board.
+    "ota.reload_hint": "installed — reload the page",
     "ota.confirm": (cur, avail) => `Update available: v${cur} → v${avail}\n\nThe device downloads and installs the signed image, then reboots. If the new firmware can't get online it rolls back automatically.`,
     "aria.ota": "Check for firmware updates",
+    "ota.title_check": "Tap to check for firmware updates",
+    "ota.title_avail": (v) => `Update v${v} available — tap to install`,
     "mq.err_format": "Enter host:port — e.g. 192.168.1.10:1883 — or mqtts://host:8883 for TLS",
     "sl.err_port": "Port must be a whole number 1–65535 (e.g. logs.example.com:514).",
     "btn.saving": "Saving…", "btn.save": "Save", "btn.cancel": "Cancel",
@@ -145,17 +149,18 @@ const I18N = {
     "toast.rejected": "Abgelehnt", "toast.applying": "Letzte Änderung wird noch angewendet…",
     "toast.check_wifi": "WLAN-Einstellungen prüfen", "toast.check_broker": "Broker-Adresse prüfen",
     "toast.check_syslog_port": "Syslog-Port prüfen",
-    "toast.ota_checking": "Suche nach Updates…", "toast.ota_uptodate": (v) => `Aktuell (v${v})`,
-    "toast.ota_timeout": "Update-Prüfung Zeitüberschreitung", "toast.ota_failed": "Update-Prüfung fehlgeschlagen",
-    "toast.ota_cancelled": "Update abgebrochen", "toast.ota_start_fail": "Update konnte nicht gestartet werden",
-    "toast.ota_downloading": "Lade herunter… Gerät eingeschaltet lassen",
-    "toast.ota_progress": (p) => `Lade herunter… ${p}%`, "toast.ota_update_timeout": "Update Zeitüberschreitung",
-    "toast.ota_update_failed": "Update fehlgeschlagen", "toast.ota_installed": "Installiert — Neustart…",
     "toast.verifying_mqtt": "Prüfe MQTT-Verbindung…", "toast.saving_syslog": "Speichere Syslog-Einstellungen…",
     "toast.saving_ntp": "Speichere NTP-Einstellungen…", "toast.trying_pins": "Teste Pins…",
     "toast.saving_board": "Speichere Board-Hardware…",
+    "ota.uptodate": "aktuell", "ota.check_failed": "Prüfung fehlgeschlagen", "ota.starting": "starte…",
+    "ota.pct": (p) => `${p}%`, "ota.rebooting": "Neustart…", "ota.failed": "Update fehlgeschlagen",
+    "ota.timeout": "Zeitüberschreitung", "ota.cancelled": "abgebrochen", "ota.busy": "Gerät ausgelastet",
+    "ota.unreachable": "Gerät nicht erreichbar",
+    "ota.reload_hint": "installiert — Seite neu laden",
     "ota.confirm": (cur, avail) => `Update verfügbar: v${cur} → v${avail}\n\nDas Gerät lädt das signierte Abbild, installiert es und startet neu. Kommt die neue Firmware nicht online, wird automatisch zurückgesetzt.`,
     "aria.ota": "Nach Firmware-Updates suchen",
+    "ota.title_check": "Tippen, um nach Firmware-Updates zu suchen",
+    "ota.title_avail": (v) => `Update v${v} verfügbar — tippen zum Installieren`,
     "mq.err_format": "Host:Port eingeben — z. B. 192.168.1.10:1883 — oder mqtts://host:8883 für TLS",
     "sl.err_port": "Port muss eine ganze Zahl 1–65535 sein (z. B. logs.example.com:514).",
     "btn.saving": "Speichere…", "btn.save": "Speichern", "btn.cancel": "Abbrechen",
@@ -219,6 +224,11 @@ const S = {
   insp: null,
   live: null,
   inspSig: "",
+  // OTA: the version a check found (drives the header version's tooltip), and whether a check or
+  // download is running. Separate from S.busy — S.busy is the "a config write is landing" lock the
+  // OTA flow also takes, otaBusy is what keeps a second tap from starting a parallel check.
+  otaAvail: null,
+  otaBusy: false,
 };
 
 // ── Toasts ───────────────────────────────────────────────────────────────
@@ -270,17 +280,26 @@ function renderDashboard() {
     const stale = vLwt() == null && hp.last_ok_s != null ? " · " + t("sys.polled", hp.last_ok_s) : "";
     sysSet(mode || t("sys.online"), t("sys.operating") + stale, "");
   }
-  renderHeaderIp();
+  renderHeaderMeta();
   renderConnections();
   renderLive();
   renderCards();
 }
 // Header identity line: the IP address (or the mDNS hostname while offline/unknown — whatever the
-// browser is actually reached at) shown under the fixed product name. Moved out of the WiFi row
-// (connectionsHtml) since it is board identity, not a WiFi *link* fact.
-function renderHeaderIp() {
+// browser is actually reached at) and the running firmware version, under the fixed product name.
+// The IP moved out of the WiFi row (connectionsHtml) since it is board identity, not a WiFi *link*
+// fact; the version moved up out of the ESP32 card, so the one line the user reads first answers
+// both "which box is this" and "which firmware is on it" (DESIGN.md §5.4).
+//
+// This runs on EVERY status frame (~1/s), so it writes only the two fields it owns — #otaStat
+// belongs to the OTA flow below and must survive a re-render mid-download, or the percentage would
+// blink out once a second.
+function renderHeaderMeta() {
   const w = S.status?.wifi || {};
   $("hdrIp").textContent = w.ip || location.hostname;
+  const vl = $("verLink");
+  vl.textContent = "v" + (S.status?.version || "?");
+  vl.title = S.otaAvail ? t("ota.title_avail", S.otaAvail) : t("ota.title_check");
 }
 // The status block INSIDE the schematic (#scStatus): the operation mode is the drawing's headline —
 // or the offline state, when there is no mode to report — over one status line, with a state dot.
@@ -524,15 +543,11 @@ function pinSelRow(label, id, val, pins) {
     `<select class="input mono num pin-sel" id="${id}" aria-label="${esc(label)}">${opts}</select></div>`;
 }
 
-const fwRow = (version) =>
-  `<button class="vrow vrow-btn" type="button" data-act="ota" aria-label="${esc(t("aria.ota"))}">` +
-  `<span class="vrow-label">Firmware</span>` +
-  `<span class="vrow-val mono">v${esc(version)}</span></button>`;
-
-// ESP32 board status card: chip / firmware (tap = check for OTA update) / uptime, the X10A link +
-// protocol, and the RX/TX pins. Pins are auto-detected: once the bus answers on a pair they show
-// read-only; until then a dropdown of the board's wire-able GPIOs lets the user point the firmware at
-// their wiring. A brief timeout doesn't flip back to the dropdown (last_ok_s grace window).
+// ESP32 board status card: chip / uptime, the X10A link + protocol, and the RX/TX pins. (The
+// firmware version is NOT here — it sits in the header meta line beside the IP, where tapping it
+// runs the OTA check; DESIGN.md §5.4.) Pins are auto-detected: once the bus answers on a pair they
+// show read-only; until then a dropdown of the board's wire-able GPIOs lets the user point the
+// firmware at their wiring. A brief timeout doesn't flip back to the dropdown (last_ok_s grace).
 function esp32CardHtml() {
   const s = S.status || {}, hp = s.hp || {}, sys = s.sys || {};
   const proto = hp.proto === "I" ? "X10A-I" : hp.proto === "S" ? "X10A-S" : "—";
@@ -549,7 +564,6 @@ function esp32CardHtml() {
   const heapRow = sys.free_heap != null ? vrow(t("card.freeheap"), fmtBytes(sys.free_heap)) : "";
   const rows =
     vrow("Chip", s.platform || "—", { cls: "mono" }) +
-    fwRow(s.version || "?") +
     vrow(t("card.uptime"), fmtUptime(s.uptime_s)) +
     resetRow +
     heapRow +
@@ -598,7 +612,7 @@ function statusCardsHtml() {
 // syncing, red down — the same ok/warn/err semantics the rest of the dashboard uses), a trailing
 // pencil that opens that link's existing edit modal (§5.1 in docs/DESIGN.md). MAC/BSSID are dropped
 // entirely (bus-level detail nobody edits from here) and the IP address moved to the header
-// (renderHeaderIp) — it is board identity, not a per-row WiFi fact.
+// (renderHeaderMeta) — it is board identity, not a per-row WiFi fact.
 //
 // The row itself conveys state by colour alone (the value IS the address/name, just tinted) — DESIGN.md
 // §9's "status never conveyed by colour alone" would otherwise be broken for colourblind users and
@@ -1761,12 +1775,65 @@ async function onPinPick() {
 }
 
 // ── Firmware / OTA ───────────────────────────────────────────────────────
-// Tapping the Firmware version checks for an OTA update, and offers to install one: the full
-// /ota/check -> /ota/status -> /ota/update flow is wired below against the device-side implementation
-// in ota_update.cpp (manifest check, two-point downgrade gate, signed install, health gate). What the
-// device can actually FIND depends on a served manifest.json — CI stages one and publishes it to
-// GitHub Pages, gated on the repo being public (docs/FEATURES.md §2); against no feed the check
-// honestly reports "up to date" rather than failing.
+// Tapping the version in the header meta line checks for an OTA update, and offers to install one:
+// the full /ota/check -> /ota/status -> /ota/update flow is wired below against the device-side
+// implementation in ota_update.cpp (manifest check, two-point downgrade gate, signed install, health
+// gate). What the device can actually FIND depends on a served manifest.json — CI stages one and
+// publishes it to GitHub Pages, gated on the repo being public (docs/FEATURES.md §2); against no feed
+// the check honestly reports "up to date" rather than failing.
+//
+// The whole flow reports INLINE next to that version (#otaStat) rather than through toasts. A
+// download takes tens of seconds and ticks a percentage the entire time, which as toasts meant a
+// growing stack of near-identical "Downloading… 78%" cards covering the dashboard, each outliving
+// the number it carried. Inline, the progress replaces itself in place, next to the version it is
+// about, and the page stays readable underneath.
+
+// A ring sized for the 12.5px meta line: 13px, 2px stroke. `indet` (no percentage yet) draws a
+// spinning quarter-arc, otherwise the arc is the download's progress. Colour is inherited
+// (currentColor), so the .err class recolours the ring and the text together.
+function otaRing(pct, indet) {
+  const sz = 13, r = 5.2, c = 2 * Math.PI * r, cx = sz / 2;
+  const circle = (cls, extra) =>
+    `<circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="currentColor" stroke-width="2" ${extra}/>`;
+  if (indet) {
+    return `<svg class="otaspin" width="${sz}" height="${sz}" viewBox="0 0 ${sz} ${sz}">` +
+      circle("", `opacity=".25"`) +
+      circle("", `stroke-linecap="round" stroke-dasharray="${(c * 0.25).toFixed(2)} ${c.toFixed(2)}"`) +
+      `</svg>`;
+  }
+  const p = Math.max(0, Math.min(100, +pct || 0));
+  return `<svg width="${sz}" height="${sz}" viewBox="0 0 ${sz} ${sz}" style="transform:rotate(-90deg)">` +
+    circle("", `opacity=".25"`) +
+    circle("", `stroke-linecap="round" stroke-dasharray="${(c * p / 100).toFixed(2)} ${c.toFixed(2)}"`) +
+    `</svg>`;
+}
+
+// Write the inline readout. `text` is always plain text set via textContent — the only innerHTML is
+// our own ring markup, so a device-supplied /ota/status.message can never reach the DOM as markup.
+// Every write bumps otaSeq, which is what makes the delayed clear below safe.
+let otaSeq = 0;
+function otaInline(text, { ring = false, pct = null, cls = "" } = {}) {
+  const el = $("otaStat");
+  if (!el) return;
+  otaSeq++;
+  el.className = "otastat" + (cls ? " " + cls : "");
+  el.innerHTML = ring ? otaRing(pct, pct == null) : "";
+  if (text) {
+    const span = document.createElement("span");
+    span.textContent = text;
+    el.appendChild(span);
+  }
+}
+// Clear the readout after a terminal message has had time to be read — but ONLY if nothing has been
+// written since. Tapping the version twice inside the linger window (up to date → tap again) would
+// otherwise let the FIRST run's pending timer wipe the second run's message a fraction of a second
+// after it appeared: a check that looks like it silently did nothing. Sequence-guarded rather than
+// otaBusy-guarded, because a terminal message is by definition written after the flow released.
+function otaInlineClear(delay = 3500) {
+  const mine = otaSeq;
+  setTimeout(() => { if (otaSeq === mine) otaInline(""); }, delay);
+}
+
 // Poll /ota/status until `state` leaves the set we're waiting on, or we run out of patience.
 // Every OTA phase is asynchronous on the device (the download runs on its own task so the single
 // httpd worker stays free), so the UI's whole job here is to watch a state machine it does not drive.
@@ -1781,53 +1848,158 @@ async function otaPoll(waitStates, tries, onTick) {
   return null;
 }
 
+// Terminal inline failure: show it, let it linger a beat longer than a success, and release the flow.
+function otaFail(text) {
+  S.otaBusy = false;
+  otaInline(text, { cls: "err" });
+  otaInlineClear(6000);
+}
+
 async function checkFirmwareUpdate() {
-  if (S.busy) { toast(t("toast.applying"), "info"); return; }
-  S.busy = true;
+  if (S.otaBusy) return;                                       // a check/download is already running
+  if (S.busy) { otaInline(t("ota.busy")); otaInlineClear(); return; }
+  S.busy = true; S.otaBusy = true;
   // rebootPoll() clears S.busy itself, asynchronously, once the device answers again — so the exit
   // path must hand ownership over rather than clear the flag on the way out. Clearing it here after
   // starting the poll would re-enable the UI while the device is still rebooting.
   let handedOff = false;
   try {
-    toast(t("toast.ota_checking"), "info");
+    otaInline("", { ring: true });                             // checking: spinner only, no label
     try { await j("/ota/check?ms=" + Date.now()); }
-    catch { toast(t("toast.unreachable"), "err"); return; }
+    catch { otaFail(t("ota.unreachable")); return; }
 
     const s = await otaPoll(["checking"], 30);
-    if (!s)                 { toast(t("toast.ota_timeout"), "err"); return; }
-    if (s.state === "error"){ toast(s.message || t("toast.ota_failed"), "err"); return; }
-    if (!s.update_available) { toast(t("toast.ota_uptodate", s.current), "ok"); return; }
-
-    // The device re-fetches the manifest and re-runs the downgrade gate before downloading, so this
-    // prompt is a courtesy, not the safety check — declining here changes nothing on the device.
-    if (!confirm(t("ota.confirm", s.current, s.available))) {
-      toast(t("toast.ota_cancelled"), "info");
+    if (!s)                  { otaFail(t("ota.timeout")); return; }
+    if (s.state === "error") { otaFail(s.message || t("ota.check_failed")); return; }
+    if (!s.update_available) {
+      S.otaAvail = null; renderHeaderMeta();
+      S.otaBusy = false;
+      otaInline(t("ota.uptodate")); otaInlineClear();
       return;
     }
 
+    // A version is on offer: record it so the version's tooltip says so, and clear the readout while
+    // the modal dialog is up (confirm() blocks, and a stale spinner behind it explains nothing).
+    S.otaAvail = s.available || null; renderHeaderMeta();
+    otaInline("");
+    // The device re-fetches the manifest and re-runs the downgrade gate before downloading, so this
+    // prompt is a courtesy, not the safety check — declining here changes nothing on the device.
+    if (!confirm(t("ota.confirm", s.current, s.available))) {
+      S.otaBusy = false;
+      otaInline(t("ota.cancelled")); otaInlineClear();
+      return;
+    }
+
+    otaInline(t("ota.starting"), { ring: true });
     // fetch resolves for ANY answered status, so a 503 from the shared OOM guard arrives as a
     // perfectly successful promise. Left unchecked it would fall through into the poll below and
     // surface 5 minutes later as "Update timed out" — the wrong diagnosis for a retryable refusal.
     let r;
     try { r = await post("/ota/update", {}); }
-    catch { toast(t("toast.ota_start_fail"), "err"); return; }
-    if (r.status === 503) { toast(t("toast.busy_retry"), "err"); return; }
-    if (!r.ok) { toast(await errorOf(r, t("toast.ota_start_fail")), "err"); return; }
+    catch { otaFail(t("ota.failed")); return; }
+    if (r.status === 503) { otaFail(t("ota.busy")); return; }
+    if (!r.ok) { otaFail(await errorOf(r, t("ota.failed"))); return; }
 
-    toast(t("toast.ota_downloading"), "info");
-    const done = await otaPoll(["checking", "updating"], 300,
-                               (st) => { if (st.state === "updating") toast(t("toast.ota_progress", st.progress), "info"); });
-    if (!done)                  { toast(t("toast.ota_update_timeout"), "err"); return; }
-    if (done.state === "error") { toast(done.message || t("toast.ota_update_failed"), "err"); return; }
+    const done = await otaWatch();
+    if (!done)                  { otaFail(t("ota.timeout")); return; }
+    if (done.state === "error") { otaFail(done.message || t("ota.failed")); return; }
 
-    // state === "done": the device reboots ~600 ms after reporting it. Hand off to the same
-    // reboot-poll the config saves use, so the UI reconnects instead of showing a dead page.
-    toast(t("toast.ota_installed"), "ok");
-    rebootPoll(renderDashboard);
+    // state === "done": the device reboots ~600 ms after reporting it. Wait for it in the background
+    // and RELOAD the page — see otaWaitReboot.
+    otaInline(t("ota.rebooting"), { ring: true, pct: 100 });
+    otaWaitReboot();
     handedOff = true;
   } finally {
     if (!handedOff) S.busy = false;
+    if (!handedOff && S.otaBusy) S.otaBusy = false;
   }
+}
+
+// Watch a running download to its end, ticking the percentage into the header. Split out of
+// checkFirmwareUpdate() so resumeOta() can join a download already in flight — e.g. after a page
+// reload mid-update, where otherwise the header would sit silent while the device was busy.
+function otaWatch() {
+  return otaPoll(["checking", "updating"], 300, (st) => {
+    if (st.state === "updating") otaInline(t("ota.pct", st.progress ?? 0), { ring: true, pct: st.progress ?? 0 });
+  });
+}
+
+// On page load, adopt an update that is already running on the device (a reload during a download,
+// or a second browser tab). Silent when nothing is happening — a plain GET that finds `idle` leaves
+// the header exactly as it was.
+async function resumeOta() {
+  let s;
+  try { s = await j("/ota/status"); } catch { return; }
+  if (!s || (s.state !== "updating" && s.state !== "done")) return;
+  if (S.otaBusy) return;
+  S.busy = true; S.otaBusy = true;
+  let handedOff = false;
+  try {
+    if (s.state === "updating") otaInline(t("ota.pct", s.progress ?? 0), { ring: true, pct: s.progress ?? 0 });
+    const done = s.state === "done" ? s : await otaWatch();
+    if (!done)                  { otaFail(t("ota.timeout")); return; }
+    if (done.state === "error") { otaFail(done.message || t("ota.failed")); return; }
+    otaInline(t("ota.rebooting"), { ring: true, pct: 100 });
+    otaWaitReboot();
+    handedOff = true;
+  } finally {
+    if (!handedOff) S.busy = false;
+    if (!handedOff && S.otaBusy) S.otaBusy = false;
+  }
+}
+
+// After "done" the device reboots ~600 ms later — and the page in the browser was served by the OLD
+// image, so the UI itself is stale until it is re-fetched. Wait for the board to come back, then
+// RELOAD. This is why the OTA path does NOT use rebootPoll() like the config saves do: that one
+// re-renders from a fresh /status, which is right when only the DATA changed, and wrong here, where
+// the HTML, CSS and this very script are what the update replaced.
+//
+// Three independent "it rebooted" signals, because no single one is reliable:
+//   · version changed — the obvious one, but a same-version reinstall and a health-gate ROLLBACK
+//     both come back on the version we started from;
+//   · uptime went BACKWARDS — survives both of those, and is the only signal for them;
+//   · we saw it go down and come back — misses the case where the first probe lands after the board
+//     is already up again.
+// Any one of them is enough.
+const OTA_REBOOT_WAIT_MS = 120000;   // covers a slow boot AND a health-gate rollback cycle
+function otaWaitReboot() {
+  const preVer = S.status?.version || "";
+  const preUp = typeof S.status?.uptime_s === "number" ? S.status.uptime_s : null;
+  const started = Date.now();
+  let sawDown = false;
+
+  const probe = async () => {
+    // Per-request abort: a socket to a rebooting board can hang for the browser's own (much longer)
+    // timeout, which would stall the poll exactly while the interesting transition happens.
+    const ctl = "AbortController" in window ? new AbortController() : null;
+    const to = ctl ? setTimeout(() => ctl.abort(), 3000) : null;
+    let s = null;
+    try {
+      const r = await fetch("/status?ms=" + Date.now(), { cache: "no-store", signal: ctl?.signal });
+      if (!r.ok) throw new Error(r.status);
+      s = await r.json();
+    } catch {
+      sawDown = true;          // unreachable or mid-reboot: expected here, not a failure
+    } finally {
+      if (to) clearTimeout(to);
+    }
+
+    if (s) {
+      const rebooted = (preVer && s.version && s.version !== preVer) ||
+                       (preUp != null && typeof s.uptime_s === "number" && s.uptime_s < preUp) ||
+                       sawDown;
+      if (rebooted) { location.reload(); return; }
+    }
+    if (Date.now() - started <= OTA_REBOOT_WAIT_MS) { setTimeout(probe, 1000); return; }
+
+    // Out of patience. Answering but showing no sign of a reboot: reload anyway — it is harmless and
+    // settles the question either way. Never answered at all: a reload would replace the one status
+    // line the user has with a browser error page, so keep the message and let them choose when.
+    if (s) { location.reload(); return; }
+    S.busy = false; S.otaBusy = false;
+    otaInline(t("ota.reload_hint"), { cls: "err" });   // no auto-clear: it asks the user to act
+  };
+  probe();
 }
 
 // ── Reboot-and-reconnect writes (WiFi / MQTT / Syslog) ────────────────────
@@ -1915,12 +2087,17 @@ async function saveReboot(url, body, { btn, showError, close, then, busyMsg }) {
 
 // ── Boot ─────────────────────────────────────────────────────────────────
 function wire() {
+  // The firmware version in the header is static DOM (renderHeaderMeta only rewrites its text), so
+  // it takes a direct handler rather than the delegation the rebuilt cards below need.
+  const vl = $("verLink");
+  vl.setAttribute("aria-label", t("aria.ota"));
+  vl.onclick = checkFirmwareUpdate;
+
   // The dashboard card grid (#valueGroups) is rebuilt on every poll, so its interactive controls are
-  // wired by delegation: the ESP32 card's Firmware row checks for an OTA update, and its RX/TX
+  // wired by delegation: the ESP32 card's Hardware row opens the board editor, and its RX/TX
   // dropdowns re-run pin auto-detection on change.
   $("valueGroups").addEventListener("click", (e) => {
     const act = e.target.closest("[data-act]");
-    if (act && act.dataset.act === "ota") { checkFirmwareUpdate(); return; }
     if (act && act.dataset.act === "board") { openBoard(); return; }
     // Tapping a value row (that has a description) expands/collapses its explainer accordion.
     const desc = e.target.closest("[data-desc]");
@@ -2155,6 +2332,7 @@ async function boot() {
   applyStaticI18n();       // localise the static index.html markup (data-i18n) before the first render
   labelSchematicHits();    // name the clickable schematic parts from the INSPECT table
   wire();
+  resumeOta();             // adopt a download already running (reload mid-update / second tab)
 
   if (window.WebSocket) {
     const connect = () => {

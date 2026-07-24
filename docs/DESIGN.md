@@ -117,7 +117,7 @@ The heat pump is otherwise **fully automatic** (auto-detected).
   **Connections tile** (§5.1, with automatic rollback to the last working network if the new
   credentials fail), the MQTT broker is edited from that same tile's MQTT row (§5.1), the heat pump
   needs no setup (auto-detected; RX/TX pins on the dashboard ESP32 card, §5.3), and firmware updates
-  are checked by tapping the version on that card (§5.4).
+  are checked by tapping the version in the header meta line (§5.4).
 - MQTT is optional — an empty broker disables it.
 
 `GET /status` exposes the fields the dashboard keys off:
@@ -223,13 +223,19 @@ Header (an **outdoor-unit icon** — a fan + louvered condenser, the brand mark 
 the **product name**). There is **no settings gear** — the app has no other screen.
 
 - **Product name** (headline line): the fixed title **`daikin-altherma-esp32`** — a stable app
-  identity, not the detected model and no firmware version. Spelled in full lower-case exactly like
+  identity, not the detected model. Spelled in full lower-case exactly like
   the hostname / SoftAP / MQTT base topic (the project-wide naming convention), never "Daikin
-  Altherma ESP32". Under it, a small identity line shows the current **IP address** (`wifi.ip`,
-  falling back to the browser's own `location.hostname` — e.g. the mDNS name — while it is empty) —
-  board identity, not a WiFi *link* fact, so it lives in the header rather than the Connections
-  tile's WiFi row (§5.3 item 4). The detected heat-pump model is shown instead in the **Model**
+  Altherma ESP32". The detected heat-pump model is shown instead in the **Model**
   status card (§5.3 body).
+- **Meta line** (under the name): **IP address · firmware version · inline OTA status**. The IP is
+  `wifi.ip`, falling back to the browser's own `location.hostname` (e.g. the mDNS name) while it is
+  empty — board identity, not a WiFi *link* fact, so it lives here rather than in the Connections
+  tile's WiFi row (§5.3 item 4). The **version** (`version`) sits beside it as a button: tapping it
+  checks for an OTA update, and the whole check/download reports back **in this line**, right next to
+  the number it is about (§5.4). Both stay `--muted`: an available update is announced by the
+  confirm dialog, not by colouring the header, and the version picks up the brand tint only on
+  hover/focus — the same affordance the tappable value rows use. Only the IP may ellipsise on a
+  narrow screen; the version and the OTA readout are short and must stay whole.
 
 Body, ordered:
 
@@ -370,13 +376,15 @@ Body, ordered:
      the MQTT heartbeat's `device_time` sensor and `/status.ntp.time`.
 5. **Status cards** — two cards styled exactly like the value groups (§6), stacked full-width below
    the Connections tile:
-   - **ESP32** — the board itself: chip (`platform`), **firmware version** (a tappable row that checks
-     for an OTA update, §5.4), uptime (`uptime_s`), **Last reset** (`sys.reset_reason` — warn-coloured
+   - **ESP32** — the board itself: chip (`platform`), uptime (`uptime_s`), **Last reset**
+     (`sys.reset_reason` — warn-coloured
      on a fault reason: panic / any watchdog / brown-out, neutral on a clean boot) and **Free heap**
      (`sys.free_heap`, compact e.g. "145 KB"), the heat-pump link (Online/Offline) and X10A
      protocol, and the **RX/TX pins** — read-only when detected, else a usable-GPIO dropdown (§5.2).
-     From `platform`, `version`, `uptime_s`, `sys{reset_reason,free_heap}`, `pins_avail`,
-     `hp{proto,rx,tx,connected,last_ok_s}`.
+     From `platform`, `uptime_s`, `sys{reset_reason,free_heap}`, `pins_avail`,
+     `hp{proto,rx,tx,connected,last_ok_s}`. The **firmware version is not here** — it lives in the
+     header meta line (§5.3 header, §5.4), where it reads as board identity next to the IP rather
+     than as one row among the board's internals.
    - **Model** — the model name (full-width heading) + detected capacity, from `detect{capacity_kw,
      model}`. Both are bus-derived, so they show **only while the link is live** (`hp.connected`):
      offline the name degrades to the brand "Daikin Altherma" and the capacity is hidden — never a
@@ -386,7 +394,7 @@ Body, ordered:
    answers "what is happening"; these tables stay as the exact-value reference — both read the same
    `/values` dataset.
    - **Tap a value → plain-language explainer.** Each value row whose label is recognised is a button
-     (trailing chevron affordance, like the Firmware row); tapping it slides open a short description
+     (trailing chevron affordance, like the ESP32 card's Hardware row); tapping it slides open a short description
      beneath the row — what the reading means and, where useful, what is normal vs worth a look. The
      text is keyed to the value **label** by a first-match-wins pattern table (`DESCRIPTIONS` in
      `app.js`), the same label-pattern technique the schematic/grouping already use, so one entry serves
@@ -406,17 +414,50 @@ system card, Connections tile, status cards and value groups — is the same ful
 only setup control on this screen is the ESP32 card's RX/TX pins (§5.2); otherwise it is
 operation-only.
 
-### 5.4 Firmware / OTA  (tap the version on the ESP32 card)
-There is **no Settings page**. Firmware updates are triggered from the dashboard: the **Firmware**
-row on the ESP32 card (§5.3) is a button (chevron affordance) that checks for an OTA update.
+### 5.4 Firmware / OTA  (tap the version in the header)
+There is **no Settings page**. Firmware updates are triggered from the dashboard: the **version** in
+the header meta line (§5.3 header) is a button that checks for an OTA update.
 
+- **The status reports inline, in that same line** — a small progress ring plus a short label,
+  immediately after the version (`#otaStat`): `192.0.2.159 · v1.2.3 ◔ 78%`. It is deliberately
+  **not** a toast. A download runs for tens of seconds and ticks a percentage the whole time, which
+  as toasts stacked up into a column of near-identical "Downloading… 78%" cards covering the very
+  dashboard they were reporting on, each one outliving the number it carried. Inline, the reading
+  replaces itself in place, next to the version it is about, and the page stays readable underneath.
+  The labels are correspondingly terse ("up to date", "78%", "rebooting…") — they share a line with
+  the IP and the version, so they read as a suffix, not as sentences. The readout is an
+  `aria-live="polite"` region, and it collapses to nothing when idle, so the line is just
+  "IP · version" whenever no update is in flight.
 - **The flow** — `GET /ota/check`, then poll `GET /ota/status` until the check finishes (every OTA
-  phase is asynchronous on the device, so the UI watches a state machine it doesn't drive). Up to
-  date → an `ok` toast naming the running version. Update available → a confirmation naming both
-  versions; on confirm `POST /ota/update`, then poll again surfacing `progress` as a toast, and on
-  `done` hand off to the same **reboot-and-reconnect poll** the modal saves use (§5.1), so the page
-  reconnects itself instead of going dead. A `503` from the shared OOM guard is reported as a
-  retryable "Device busy", never as a timeout.
+  phase is asynchronous on the device, so the UI watches a state machine it doesn't drive). While
+  checking, the ring spins with no label — there is no number to show yet. Up to date → "up to date",
+  which clears itself after a few seconds. Update available → a confirmation naming both
+  versions; on confirm `POST /ota/update`, then poll again rendering `progress` into the ring + "n%",
+  and on `done` wait for the board to come back and **reload the page** (below). A `503` from the
+  shared OOM guard is reported as a retryable "device busy", never as a timeout. Errors show in
+  `--err` and linger longer than a success before clearing.
+- **After the install the page RELOADS, it does not just re-render** (`otaWaitReboot`). This is the
+  one place the dashboard cannot use the **reboot-and-reconnect poll** the modal saves use (§5.1):
+  that one re-renders from a fresh `/status`, which is right when only the *data* changed — but an
+  OTA replaces the HTML, the CSS and the running script, so the tab would keep showing the old UI
+  driven by new firmware. `/status` is polled in the background (per-request abort, so a socket to a
+  rebooting board can't stall the loop) and the page reloads on **any** of three signals: the
+  `version` changed, `uptime_s` went *backwards*, or the device was seen to go down and come back.
+  Three, because none is sufficient alone — a same-version reinstall and a health-gate **rollback**
+  both return on the version we started from (only uptime catches those), and a fast boot can be
+  missed entirely by a poll that starts a moment too late. After ~120 s (enough for a slow boot *and*
+  a rollback cycle) it gives up: if the device is answering it reloads anyway — harmless, and it
+  settles the question — but if it never answered at all the readout says "installed — reload the
+  page" and stays, since replacing the one status line the user has with a browser error page tells
+  them less than the message does.
+- **A running update is adopted on page load** (`resumeOta`). The download lives on the device, not
+  in the tab, so a reload mid-update — or a second browser — would otherwise show a silent header
+  while the board was busy. One `GET /ota/status` at boot joins the existing download at its current
+  percentage; finding `idle` leaves the header untouched.
+- **Terminal messages clear on a sequence guard, not a timer alone.** Each write to the readout bumps
+  a counter and a delayed clear only fires if nothing has been written since. Tapping the version
+  again inside the linger window would otherwise let the *first* run's pending timer wipe the
+  *second* run's message a moment after it appeared — a check that looks like it silently did nothing.
 - **The one native dialog in the UI.** The update confirmation is a browser `confirm()`, not the
   modal overlay pattern every other decision uses (§5.1). Deliberate and deliberately isolated: it
   is a single yes/no with **no fields**, and the overlay machinery exists to host *inputs* — adding a
@@ -491,8 +532,8 @@ the value's register/label (the generator can also stamp a `group` tag per row).
 5. **Electrical** — INV primary current, INV compressor current, CT L1/L2/L3, backup-heater
    capacity + stages.
 6. **Device** — WiFi/MQTT/HP link, poll counters, uptime, firmware (WiFi/MQTT in the Connections tile,
-   §5.3 item 4; HP link/protocol, uptime and firmware on the ESP32 card §5.3; model name also in the
-   header).
+   §5.3 item 4; HP link/protocol and uptime on the ESP32 card §5.3; firmware version in the header
+   meta line §5.4; model name in the Model card).
 
 Within a group: setpoints next to their measured value; temperatures before pressures before
 currents. Units and `device_class` come from the value `dataType` (1=°C, 2=bar, 3=A). Groups with no
@@ -511,7 +552,12 @@ enabled/available values are hidden.
   `grid-template-rows: 0fr→1fr` transition (§5.3 item 6). Unrecognised labels render as a plain,
   non-interactive row.
 - **Card** — `--card`, 1px `--line`, radius 12; section title small-caps `--muted`.
-- **Toast** — bottom-centre, transient, for Save outcomes ("Saved", "Rebooting…", "Failed").
+- **Toast** — bottom-centre, transient, for Save outcomes ("Saved", "Rebooting…", "Failed"). Note it
+  is *not* used for OTA: see the inline readout below.
+- **Inline OTA readout** — a 13px progress ring + one terse label, in the header meta line right
+  after the version (§5.4). `--muted`, `--err` on failure, collapsed to nothing when idle. The one
+  progress indicator that is neither a button spinner nor a toast, because it reports a long-running
+  action whose number changes throughout and belongs next to the version it is about.
 - **Status block** — inside the schematic, top-left (§5.3 item 1): state dot + `--fg` headline (the
   operation mode) over one `--brand-strong` status line (`--err` on fault, `--muted` when there is no
   data). Drawn as SVG text, not HTML — it is part of the picture, not a band above it.
@@ -544,7 +590,9 @@ enabled/available values are hidden.
 ## 8. States & feedback
 
 Every async action shows: idle → in-flight ("Saving…", spinner on button) → result (toast + view
-transition). Specific:
+transition) — **except the OTA flow**, whose in-flight state is a *percentage that ticks for tens of
+seconds*, and which therefore reports inline in the header instead (§5.4: a toast per tick buries the
+page under near-identical cards). Specific:
 - **Reboot writes** (WiFi / MQTT / Syslog / NTP): Save disables the button and shows a spinner + "Saving…"
   while the request is in flight (the `/set_mqtt` broker pre-flight blocks up to ~8 s). **Only a 2xx**
   then shows "Rebooting — reconnecting…" and polls `/status` until it answers, closing the modal back
