@@ -36,6 +36,20 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   `vLwt`): the pre-BUH heat-exchanger outlet (R1T) is chosen over a setpoint, a mixed-zone R1T, or
   the post-BUH (R2T) twin, across the four alias label forms — and, catalog-wide, every detectable
   profile resolves a real measurement and never a setpoint (issue #121, the #35–#39 failure shape).
+- `logic/profile_view.hpp` + `def/overlay.hpp` — the generated table plus the temporary page-`0x10`
+  supplement as one row sequence, and the **overlay rule** (a block applies only if the base already
+  references its page). Asserted: the block is withheld when the page is absent, base rows keep their
+  order and indices, the resolved page mask equals the base page mask on every profile (so detection
+  cannot move), the 11 rows decode end-to-end through the real converter (`0x95` → 1 discharge retry
+  and 5 INV-current retries, with the drop flag ON and its neighbour OFF), and no row's `object_id`
+  collides with one the profile already has. The page-`0x10` catalog guard armed vacuous in PR #111 —
+  size 1, conv ∈ {303,307,310,311}, never °C — is now live over the resolved view.
+- `logic/feature_gate.hpp` — *disable, never degrade*: which derived features may honestly run on the
+  detected model, decided from the rows. Asserted against the whole catalog: `generic` has no
+  leaving-water measurement, run-state, valve or pressure row and opens neither gate; every detectable
+  profile has a leaving-water measurement and the retry counters; the sixteen without page `0x30` lack
+  run-state **and** expansion valve together and are gated off rather than reduced; a `no_publish`
+  placeholder never counts as coverage.
 - `logic/board_pins.hpp` — the ESP32-S3 chip-safe GPIO list (sorted, in range; excludes SPI
   flash/strapping/USB-JTAG/JTAG, plus GPIO33-37 on Octal-flash/PSRAM builds).
 - `logic/discovery.hpp` — object-id slugging + the discovery config JSON.

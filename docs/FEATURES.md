@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1188 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1243 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -68,6 +68,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 38 | **Board-hardware runtime config** (`POST /set_board`) — indicator pin/driver/polarity + button pin live in NVS, not Kconfig, so one published image serves boards with different onboard parts; per-board **presets** (`/status.board.presets`) fill all five fields from one pick and are host-tested against the request path's own validator, and the indicator **announces its resolved pin/driver on `/diag`** at boot — a valid-but-wrong pin initialises fine and drives nothing, which otherwise looks exactly like a working LED | ✅ 🧪 | [`http_config.cpp`](../main/http_config.cpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp), [`logic/board_pins.hpp`](../main/logic/board_pins.hpp), [`logic/board_presets.hpp`](../main/logic/board_presets.hpp), [`status_led.cpp`](../main/status_led.cpp) |
 | 39 | **Stack-overflow watchpoint** — a hardware watchpoint on every task's stack limit, so the *first* write past it panics at the offending instruction instead of corrupting a neighbour silently. IDF's default canary is only compared at a context switch and a sparsely-writing frame can step over it — which is how a v1.0.12 `httpd` overflow overwrote its own TCB and died 44 s later in unrelated lwip code. Shipped with the `httpd` stack raised to 12 KB and the `/status` JSON built by `+=` rather than long `+` chains | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults), [`http_server.cpp`](../main/http_server.cpp), [`http_status.cpp`](../main/http_status.cpp) |
 | 40 | **Cost-shaped CI** — Actions bills per job rounded up to the whole minute, so the three fast gates are one job, the firmware build is *skipped* (not failed) when nothing the image or the site is made of changed, ccache is carried across runs, the per-PR preview installer is retired in favour of the dev channel, and every job has a timeout | ✅ | [`build.yml`](../.github/workflows/build.yml), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
+| 41 | **Protection-retry telemetry** — the outdoor unit's page-`0x10` protection words (5 retry counters + 6 drop-control flags) reach MQTT/Home Assistant as 11 entities. The signal a unit is quietly backing off to protect itself while still meeting demand — degradation with no temperature tell. Converter 310 shipped earlier with no catalog row to decode; the rows now come from a **temporary** hand-written supplement applied only to a page the detected model already reads, so it cannot move model detection or add a bus round-trip, and they are cross-checked against [`REGISTERS.md`](REGISTERS.md) §5 by the domain audit like generated rows | ✅ 🧪 | [`def/overlay.hpp`](../main/def/overlay.hpp), [`logic/profile_view.hpp`](../main/logic/profile_view.hpp), [`logic/convert.hpp`](../main/logic/convert.hpp) |
 
 ---
 
@@ -787,7 +788,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   `0x00`/`0x10`/`0x20`/`0xA0`/`0xA1` on `/diag`; truncation stops after the last *complete* byte, since a trailing
   nibble would read as a different value, and degenerate inputs still terminate the buffer the caller
   hands to a `diag_printf` `%s`).
-  **1188 `CHECK`s** in
+  **1243 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -815,6 +816,28 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   `suppressed` output. The judgement half is the
   [`domain-review`](../.claude/skills/domain-review/SKILL.md) skill, a PR-merge gate required on every
   merge.
+- **🧩 One row view, four consumers** ([`logic/profile_view.hpp`](../main/logic/profile_view.hpp), [`def/overlay.hpp`](../main/def/overlay.hpp)). The rows a model publishes are the
+  generated `def/*` table **plus** the temporary hand-written `def/overlay.hpp` supplement (the
+  page-`0x10` protection words the offline generator does not emit yet — see
+  [ARCHITECTURE.md](ARCHITECTURE.md) *Value-definition profiles*), presented as one indexable
+  sequence. It is one view rather than four merges because the consumers are coupled: `hp_poll`
+  decodes the rows, `mqtt_ha` announces one HA discovery config per row, and **both** `http_status`
+  and `mqtt_ha` size their snapshot buffer from the row **count**. A consumer reading a shorter row
+  set than the cache holds would silently truncate values out of `/values` and MQTT — an absent-value
+  bug with no error anywhere. The **overlay rule** (a supplement applies only if the base profile
+  already references its page) is what makes a hand-written block safe beside generated tables: it
+  cannot set a page bit that was not already set, so it cannot move detection and cannot add a bus
+  round-trip. The supplement's rows are audited by the domain gate exactly like generated ones.
+- **🚦 Disable, never degrade** ([`logic/feature_gate.hpp`](../main/logic/feature_gate.hpp)). Which derived features may honestly run on the
+  detected model, decided from the **rows** rather than from the profile id, and the answer when the
+  signals are missing: off. It is the third instance of a rule the UI already applies twice —
+  `lwt_select` blanks ΔT/heat/COP rather than substituting a setpoint, `ou_stale` blanks a held-over
+  reading rather than showing a dimmer register of half-valid numbers. Reading coverage off the rows
+  is what makes it correct: the `generic` fallback is the obvious starved case, but sixteen of the 43
+  *detectable* profiles also lack register page `0x30` and with it the compressor run-state input, so
+  an id check on `"generic"` would have let a decision layer run without run-state on more than a
+  third of the detected catalog. Groundwork for the on-device optimizer epic (#69); no firmware
+  caller yet, pure so the policy is asserted rather than re-argued at the future call site.
 
 ---
 
@@ -974,7 +997,7 @@ and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 19-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1188 checks),
+on the host** (1243 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

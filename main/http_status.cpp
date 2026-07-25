@@ -6,8 +6,9 @@
 #include "logic/captive.hpp"
 #include "def/model_names.hpp"
 #include "def/models_catalog.hpp"
-#include "def/signatures.hpp"
+#include "def/overlay.hpp"
 #include "def/registry.hpp"
+#include "def/signatures.hpp"
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
 #include "hp_poll.hpp"
@@ -316,7 +317,7 @@ static esp_err_t h_status(httpd_req_t* req) {
 // envelope ({"values":…} for HTTP, {"type":"values","values":…} for WS). Can throw std::bad_alloc —
 // every caller already guards (handle_all, or the WS try/catch), so this stays unguarded.
 static std::string build_values_array() {
-    const size_t cap = def::lookup(config().profile.c_str()).count;
+    const size_t cap = def::lookup_view(config().profile.c_str()).count();
     std::vector<CachedValue> v(cap ? cap : 1);
     size_t n = hp_values_snapshot(v.data(), v.size());
     std::string j = "[";

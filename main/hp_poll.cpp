@@ -2,6 +2,7 @@
 // profile's registers, decodes the values, and publishes them to a thread-safe cache.
 #include "hp_poll.hpp"
 #include "config.hpp"
+#include "def/overlay.hpp"
 #include "def/registry.hpp"
 #include "diag_log.hpp"
 #include "hp_comm.hpp"
@@ -56,6 +57,10 @@ struct Lock {
 static void poll_once() {
     const Config& c    = config();
     const auto&   prof = def::lookup(c.profile.c_str());
+    // The GENERATED rows plus the page-0x10 protection words (def/overlay.hpp). Everything below
+    // iterates the VIEW; `prof` survives only for the two calls that need a flat contiguous array
+    // (see the profile_refrigerant comment below).
+    const auto    view = def::resolved(prof);
     // If the UART can't be brought up on these pins, do NOT sweep: every hp_query would then read an
     // uninstalled driver and emit a misleading "HP timeout — check X10A cable / GND" per register.
     // Name the real cause once and keep the last good cache. (validate()/config_load now reject
@@ -73,13 +78,17 @@ static void poll_once() {
     }
 
     std::vector<CachedValue> fresh;
-    fresh.reserve(prof.count);   // exact upper bound (<= 1 entry per ValueDef row): one sized allocation
+    fresh.reserve(view.count());  // exact upper bound (<= 1 entry per ValueDef row): one sized allocation
                                  // instead of ~log2(count) grow/free pairs + the transient old+new
                                  // buffer coexistence — lowers peak on the WIRED path too. Still under
                                  // poll_task's try/catch, so an OOM here remains a skipped cycle.
     bool      any_ok = false;
     int       regs   = 0;
     uint8_t   seen[256] = {0};
+    // The BASE table, not the view: this scans for the profile's refrigerant row to pick the conv-405
+    // saturation curve, and the supplement carries no pressure or conv-405 row — a static_assert in
+    // def/overlay.hpp pins that, so this stays correct rather than merely true today. Same reasoning
+    // for the table handed to hp_format() below.
     const int rtype  = profile_refrigerant(prof.values, prof.count);   // conv-405 curve selector
 
     // Stat deltas are staged in locals and folded into s_stats under s_mtx at the end of the cycle.
@@ -90,13 +99,13 @@ static void poll_once() {
     uint32_t    d_rx_ok = 0, d_rx_fail = 0, d_timeout = 0, d_crc = 0;
     std::string err;                                                   // last error text, if any
 
-    for (size_t i = 0; i < prof.count; i++) {
+    for (size_t i = 0; i < view.count(); i++) {
         // Detect-only rows (ValueDef::no_publish) never contribute a queryable register: a page whose
         // rows are ALL flagged is not read at all, saving one bus round-trip per cycle. The page still
         // counts toward the profile's DETECTION signature (def/signatures.hpp reads every row), which
         // is exactly why the row is kept rather than deleted.
-        if (prof.values[i].no_publish) continue;
-        uint8_t reg = prof.values[i].reg;
+        if (view[i].no_publish) continue;
+        uint8_t reg = view[i].reg;
         if (seen[reg]) continue;
         seen[reg] = 1;
         regs++;
@@ -122,18 +131,19 @@ static void poll_once() {
         const int      paylen  = n - poff - 1;                 // minus header, minus CRC byte
         const uint8_t* payload = buf + poff;
 
-        for (size_t k = 0; k < prof.count; k++) {
-            if (prof.values[k].reg != reg) continue;
-            if (prof.values[k].no_publish) continue;   // detect-only: decoded for nobody (MIXED page)
+        for (size_t k = 0; k < view.count(); k++) {
+            if (view[k].reg != reg) continue;
+            if (view[k].no_publish) continue;   // detect-only: decoded for nobody (MIXED page)
             CachedValue cv;
-            cv.label = prof.values[k].label;
-            cv.unit  = unit_for_datatype(prof.values[k].type);
-            cv.reg   = prof.values[k].reg;
-            cv.conv  = prof.values[k].conv;
+            cv.label = view[k].label;
+            cv.unit  = unit_for_datatype(view[k].type);
+            cv.reg   = view[k].reg;
+            cv.conv  = view[k].conv;
             std::string val;
             // The whole table goes along: reading_plausible needs it to tell a refrigerant pressure
-            // (0 bar impossible) from the water one (0 bar = a drained system, and real).
-            if (hp_format(prof.values[k], payload, paylen, rtype, val, prof.values, prof.count))
+            // (0 bar impossible) from the water one (0 bar = a drained system, and real). The BASE
+            // table is the right argument here — see the profile_refrigerant note above.
+            if (hp_format(view[k], payload, paylen, rtype, val, prof.values, prof.count))
                 cv.value = val;
             fresh.push_back(std::move(cv));
         }

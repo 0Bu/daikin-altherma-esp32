@@ -139,6 +139,33 @@ value is the raw 2-char code (e.g. `U4`), enriched with an English description w
 `logic/error_codes.hpp` covers it (`"U4: Indoor/outdoor unit communication problem"`); a code
 outside that table's coverage still publishes as the bare code.
 
+### Protection retries & drop control (new entities)
+
+Every install gains **11 entities** from the outdoor unit's page-`0x10` protection words: five
+counters (`sensor`) and six drop-control flags (`binary_sensor`).
+
+| Entity | Kind | What it says |
+|---|---|---|
+| `Discharge Temp. Protection Retry Qty` | sensor | how often the unit backed off to protect discharge temperature |
+| `Comp. INV Current Protection Retry Qty` | sensor | …to protect compressor inverter current |
+| `HP Protection Retry Qty` / `LP Protection Retry Qty` | sensor | …on high / low refrigerant pressure |
+| `Fin Temp. Protection Retry Qty` | sensor | …to protect the inverter heat-sink fin temperature |
+| `… Drop` / `… Drop Control` | binary_sensor | that protection is limiting the unit **right now** |
+
+These are the "silent protection retries" signal: a unit that is meeting demand while quietly
+retrying is degrading in a way no temperature reading shows. Each counter is a **3-bit field, so the
+published value is always 0–7** — treat it as a rate (deltas over time), not a lifetime total.
+Whether the unit *clamps* at 7 or *wraps* to 0 is not documented and has not been observed on a live
+unit; until it has been, a delta of exactly −7 should be read as "unknown", not as a reset.
+
+They arrive from `def/overlay.hpp` rather than from a model profile, because the offline profile
+generator does not emit these rows yet; see [ARCHITECTURE.md](ARCHITECTURE.md) *Value-definition
+profiles*. Nothing about the entity contract depends on that — when the generator catches up, the
+same rows arrive by the normal route and the entities are unchanged.
+
+> **Upgrading:** these entities are new, not renamed — nothing pre-existing changes domain or
+> entity id, so no history is affected. They appear on the next connect after the update.
+
 > **Read-only bridge — no command topics.** The firmware only mirrors X10A telemetry; it never
 > actuates the heat pump. To *control* the unit (e.g. SG-Ready boost on PV surplus), drive the
 > heat pump's own SG-Ready / thermostat contacts or a Modbus/EKRHH interface from your energy
