@@ -27,7 +27,7 @@ Builds for the **esp32s3** target only.
 > [`docs/BOARDS.md`](../docs/BOARDS.md) (per-board hardware inventory + which parts the firmware
 > uses — the place a newly-supported board's LED/button/pin facts belong).
 > Contributor-facing: [`CONTRIBUTING.md`](../CONTRIBUTING.md) (what the local gates
-> are, where logic goes, how PRs land on a linear+signed `main`) and
+> are, where logic goes, how PRs land on a strictly-linear `main`) and
 > [`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) — CONTRIBUTING states the outside-contributor half of
 > the rules this file states for us, so a change to the gates, the `main/logic/` + test rule or the
 > merge model belongs in **both**. Keep them in sync (the `project-review` skill checks for drift).

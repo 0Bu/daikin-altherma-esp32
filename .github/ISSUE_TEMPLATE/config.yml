@@ -2,7 +2,7 @@ blank_issues_enabled: true
 contact_links:
   - name: Contributing guide
     url: https://github.com/0Bu/daikin-altherma-esp32/blob/main/CONTRIBUTING.md
-    about: What's most useful to report, the two local verification scripts, and how PRs land (squash onto a linear, signed main).
+    about: What's most useful to report, the two local verification scripts, and how PRs land (squash onto a strictly-linear main).
   - name: Report a security vulnerability (private)
     url: https://github.com/0Bu/daikin-altherma-esp32/security/advisories/new
     about: Anything exploitable goes here, not in a public issue. Non-sensitive hardening ideas are fine as normal issues.
