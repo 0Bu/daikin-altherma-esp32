@@ -27,6 +27,7 @@
 // small publish per value; the state JSON is a single few-KB build, guarded against OOM.
 #include "mqtt_ha.hpp"
 #include "config.hpp"
+#include "def/overlay.hpp"
 #include "def/registry.hpp"
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
@@ -163,7 +164,7 @@ static bool is_publishable(int conv) { return !(conv == 0 || (conv >= 995 && con
 // scratch buffer is sized to the active profile's row count — an exact upper bound on the cached
 // value count, so nothing is truncated out of the JSON without over-allocating a fixed worst case.
 static std::vector<GroupedValue> current_grouped() {
-    const size_t cap = def::lookup(config().profile.c_str()).count;
+    const size_t cap = def::lookup_view(config().profile.c_str()).count();
     std::vector<CachedValue> cache(cap ? cap : 1);
     const size_t n = hp_values_snapshot(cache.data(), cache.size());
     std::vector<GroupedValue> out;
@@ -209,11 +210,11 @@ static void retract_legacy_fixed() {   // heartbeat + crash entities (no profile
     diag_printf("mqtt: retired legacy HA device %s (now %s)\n", s_board.c_str(), s_node.c_str());
 }
 
-static void retract_legacy_values(const def::Profile& prof, const std::string& profile_id) {
+static void retract_legacy_values(const logic::ProfileView& prof, const std::string& profile_id) {
     s_legacy_values_profile = profile_id;
     if (s_board == s_node) return;
-    for (size_t i = 0; i < prof.count; i++) {
-        const ValueDef& d = prof.values[i];
+    for (size_t i = 0; i < prof.count(); i++) {
+        const ValueDef& d = prof[i];
         // Every row an older build published — including a row that is detect-only (no_publish)
         // TODAY: it was a plain sensor before the flag existed, and that config is still retained.
         if (!is_publishable(d.conv) || object_id(d.label).empty()) continue;
@@ -228,13 +229,16 @@ static void retract_legacy_values(const def::Profile& prof, const std::string& p
 // under the binary_sensor component, everything else under sensor (logic/discovery.hpp ha_component).
 static void publish_discovery() {
     const std::string profile_id = config().profile;
-    const auto& prof = def::lookup(profile_id.c_str());
+    // The VIEW, not the raw profile: every row hp_poll caches needs a discovery config, and the
+    // page-0x10 supplement (def/overlay.hpp) is part of that row set. Announcing fewer rows than the
+    // state topic carries would leave the extra values in MQTT with no HA entity to land in.
+    const auto prof = def::resolved(def::lookup(profile_id.c_str()));
     // Delete the configs published under the old identity FIRST — the freed entity_id is what the
     // replacement below reclaims. Runs once per profile, not once per (re)connect: a broker restart
     // must not re-send ~100 deletes for entities that no longer exist under that id.
     if (s_legacy_values_profile != profile_id) retract_legacy_values(prof, profile_id);
-    for (size_t i = 0; i < prof.count; i++) {
-        const ValueDef& d = prof.values[i];
+    for (size_t i = 0; i < prof.count(); i++) {
+        const ValueDef& d = prof[i];
         // Detect-only rows carry no state (hp_poll never caches them). RETRACT rather than merely
         // skip: an install upgrading from a build that DID publish this row already has a RETAINED
         // discovery config in the broker, which would survive forever as a permanently-unavailable HA

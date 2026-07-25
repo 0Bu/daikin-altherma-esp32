@@ -289,6 +289,31 @@ host-testable core is unusually large and valuable, because the risky parts are 
   Octal one — the same "a pick that cannot work is not a pick" rule the X10A dropdown follows. It
   asserts nothing about which board this *is* (still unknowable): picking a preset is the **user**
   telling the firmware what the hardware is.
+- `logic/profile_view.hpp` — the active model's rows **as every consumer must see them**: the
+  generated table plus the hand-written `def/overlay.hpp` supplement, as one indexable sequence. Four
+  call sites read the row set and they are not independent — `hp_poll` decodes them, `mqtt_ha`
+  announces one HA discovery config per row, and both `http_status` and `mqtt_ha` size their snapshot
+  buffer from the row **count**. Grow the cache without growing the count and the extra values are
+  silently truncated out of `/values` and MQTT: an absent-value bug with no error anywhere, the
+  #35–#39 shape. Hence one view, not four merges. It carries the **overlay rule** (a supplement
+  applies only if the base already references its page), which is what keeps a hand-written block from
+  doing what hand-editing a generated table would do — move detection — or adding a per-cycle bus
+  round-trip that, on a model which does not answer the page, reads on `/diag` exactly like a wiring
+  fault.
+- `logic/feature_gate.hpp` — which derived features may **honestly** run on the detected model, and
+  the answer when they cannot: **disable, never degrade** (issue #69 step 0.2 / #110 Part C). It is
+  the same rule the UI already applies twice — `lwt_select` blanks ΔT/heat/COP rather than
+  substituting a setpoint (#121), `ou_stale` blanks a held-over pill rather than showing a dimmer
+  register of half-valid numbers — because a reduced feature set is that already-rejected second
+  vocabulary wearing a new name, and because a model fit on a feature vector does not degrade
+  gracefully when columns disappear, it just becomes confident about a distribution it never saw.
+  Coverage is read off the **rows**, not off `profile == "generic"`: `generic` is the extreme case
+  (measured: no leaving-water measurement, only the setpoint `lwt_select` correctly rejects; no INV
+  frequency, expansion valve or pressure row at all) — but sixteen of the 43 **detectable** profiles
+  also lack page `0x30`, and with it the compressor run-state input. An id check would have let
+  inference run without run-state on more than a third of the detected catalog. No firmware caller
+  yet (#69 Phase 3 has not landed); pure and host-tested so the policy is asserted rather than
+  re-litigated at the future call site.
 - `logic/json.hpp` — the RFC 8259 string encoder every JSON payload goes through: `/status`,
   `/values` and `/scan` (`http_status.cpp`'s `jstr`), `/ota/status` (`json_quote`), as well as the
   MQTT state, heartbeat and crash topics. It escapes `"`, `\` and **every** control byte below 0x20 (`\b\f\n\r\t`, else `\u00XX`),
@@ -460,6 +485,23 @@ The single biggest UX change: **no editing a config header + a `def/*.h` by hand
   decodes Daikin's proprietary value catalog (encrypted `.ldd` = zlib + NRBF) into these tables
   (`gen_profiles.py`) and the id→name table (`gen_names_generic.py`). Generated tables are never
   hand-edited — they are regenerated, and their rows verified against [`REGISTERS.md`](REGISTERS.md).
+- **One hand-written supplement exists, and it is temporary: `def/overlay.hpp`.** Every generated
+  profile carries six rows for page `0x10` where [`REGISTERS.md`](REGISTERS.md) §5 documents
+  twenty-six — uniformly, all 43 tables agreeing row-for-row, so it is the generator's page-`0x10`
+  input that is narrow, not a per-model absence. Among the missing rows are the **protection-retry
+  counters** (offsets 10–12, converters 303/307/310/311), the input signal for the "silent protection
+  retries" early warning (issue #69 UC5 / #110). Converter 310 has been implemented since PR #111 but
+  had no row to decode, so it decoded nothing in the field. The supplement supplies those rows without
+  touching a generated table, and `logic/profile_view.hpp` presents *generated + supplement* as one
+  row sequence to every consumer. **The overlay rule — a supplement block applies only if the base
+  profile already references its register page** — is what makes this safe where hand-editing a
+  generated table would not be: it can never set a page bit that was not already set, so it cannot
+  move detection (`def/signatures.hpp` builds its mask over the base tables and never sees a view
+  anyway) and cannot add a bus round-trip. The rows are audited like generated ones —
+  `tools/domain/catalog_audit.cpp` resolves the view, so they are cross-checked against
+  [`REGISTERS.md`](REGISTERS.md) §5 per profile. **Delete this file and its plumbing when
+  `gen_profiles.py` emits the rows**; a supplement that outlives its generator run is a second source
+  of truth for the catalog.
 - At runtime `config` holds the active `profile` id. The poll engine expands it to the concrete
   register set to request — every value of the profile except rows flagged `ValueDef::no_publish`
   ("detect-only"). There is no *user-facing* enable mask; the flag is a catalog property for
@@ -483,6 +525,11 @@ against the source rows so a regenerate can't silently drift.
 
 A single task owns the X10A UART (there is exactly one link). Each cycle:
 
+0. Resolve the active profile to its **row view** (`def::resolved` — the generated table plus the
+   page-`0x10` supplement above). Everything below iterates the view, and so do the HA-discovery
+   announcer and the two `/values`/MQTT-state buffer sizings: the row **count** is the exact upper
+   bound on cached values, so a consumer reading a shorter row set than the cache would silently
+   **truncate** values out of `/values` and MQTT rather than error.
 1. Build the ordered list of **registers** needed by the profile's values (dedup — one register
    read serves all its values).
 2. For each register: send the protocol-`I`/`S` request, read the fixed-length reply with a

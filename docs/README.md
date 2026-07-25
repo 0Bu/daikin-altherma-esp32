@@ -183,6 +183,12 @@ them. This project keeps that data but makes it **runtime-selectable**:
   in `main/def/*.hpp`, curated to the useful monitoring values (temperatures, pressures, currents,
   setpoints, operating mode, errors, and the DHW/heating/pump state flags). The full register maps
   and converter reference are in [REGISTERS.md](REGISTERS.md).
+- **One temporary supplement sits beside those profiles**: `main/def/overlay.hpp` carries the
+  outdoor unit's page-`0x10` protection words (the retry counters and drop-control flags), which the
+  offline profile generator does not emit yet. It is applied on top of the detected model's table —
+  but only for a register page that model already reads, so it cannot change which model is detected
+  or add a bus round-trip. Delete it once the generator emits those rows; see
+  [ARCHITECTURE.md](ARCHITECTURE.md) → *Value-definition profiles*.
 - The firmware **auto-detects** the unit from the X10A bus (protocol sweep + a page/capacity
   fingerprint) and selects the matching profile — there is no manual model picker; the web UI shows
   the detected model read-only. The **RX/TX pins are auto-detected** too (the firmware sweeps the

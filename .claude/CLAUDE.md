@@ -474,7 +474,7 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 wifi_rollback, health_gate, version_cmp, ota_manifest, ota_channel, ws_policy, ws_tx_gate,
                 http_body, http_surface, query_flag, mcp_jsonrpc, timestamp, uart_plan, detect_backoff,
                 hexdump, led_pattern, button, captive,
-                lwt_select, ou_stale).
+                lwt_select, ou_stale, profile_view, feature_gate).
                 error_codes.hpp = the optional code -> short-English-description lookup layered on
                 conv 204's raw fault code (hp_convert.cpp), e.g. "U4: Indoor/outdoor unit
                 communication problem". Presentation only: it never changes what conv 204 DECODES,
@@ -564,6 +564,43 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 inspector then distinguish "compressor off · no live reading" from the pre-existing
                 "no current sensor" — suppressing one wrong claim must not substitute another (the
                 profile HAS a current row; it is the reading that is not current)
+                profile_view.hpp = the active model's rows AS EVERY CONSUMER MUST SEE THEM: the
+                generated table plus the def/overlay.hpp supplement, as ONE indexable sequence (two
+                spans, no allocation — the poll path reads it every second). One view rather than four
+                merges because the four consumers are NOT independent: hp_poll decodes the rows,
+                mqtt_ha announces one HA discovery config per row, and BOTH http_status (/values, the
+                WS broadcast) and mqtt_ha (the grouped state topic) size their snapshot buffer from the
+                row COUNT, which is the exact upper bound on cached values. Grow the cache without
+                growing the count and the extra values are silently TRUNCATED out of /values and MQTT —
+                an absent-value bug with no error anywhere, the #35-#39 shape. Carries the OVERLAY
+                RULE: a supplement block applies ONLY IF the base profile already references the
+                block's page. That one condition is what makes a hand-written supplement safe next to
+                generated tables — it can never set a page bit that was not already set, so (a)
+                detection cannot move (a profile's signature IS its page set, and detect_candidates
+                picks maximal overlap) and (b) no bus round-trip is added, which on a model that does
+                not answer the page would be one TIMEOUT per cycle, reading on /diag exactly like a
+                wiring fault. Belt AND braces: signatures.hpp builds its mask over def::profiles (the
+                BASE tables) and never sees a view at all — the test asserts the braces, since the belt
+                is what a refactor would remove
+                feature_gate.hpp = which derived features may HONESTLY run on the detected model, and
+                the answer when they cannot: DISABLE, NEVER DEGRADE (#69 step 0.2 / #110 Part C). The
+                same rule the UI already applies twice — lwt_select blanks ΔT/heat/COP rather than
+                substituting a setpoint (#121), ou_stale blanks a held-over pill rather than showing a
+                dimmer register of half-valid numbers — so a "reduced feature set" is that
+                already-rejected second vocabulary under a new name; and a rule (or model) fit on a
+                feature vector does not degrade gracefully when columns vanish, it just gets confident
+                about a distribution it never saw, which is the "pretend full features" outcome #69
+                rules out by name. Coverage is read off the ROWS, never off `profile == "generic"`:
+                generic IS the extreme case (measured — no leaving-water MEASUREMENT, only the
+                "LW setpoint (main)" that lwt_select correctly rejects; no INV frequency, no expansion
+                valve, no pressure row) but NOT the only one — SIXTEEN of the 43 DETECTABLE profiles
+                also lack page 0x30 and with it the compressor run-state input, so an id check would
+                have let inference run without run-state on more than a third of the detected catalog.
+                Takes the VIEW, not the base table: the retry counters live in the supplement, so
+                coverage read off the generated rows alone would answer correctly for the wrong reason
+                today and wrongly the moment the generator emits them. No firmware caller yet (#69
+                Phase 3 has not landed) — pure so the policy is ASSERTED rather than re-litigated at
+                the future call site, like lwt_select and ou_stale
                 value_def.hpp = the ValueDef row type the generated def/ profile tables are written
                 in ({reg, offset, conv, size, type, label} — registry id, byte offset in the reply
                 payload, converter id for convert.hpp, byte count, HA unit code, English label): the
@@ -739,6 +776,21 @@ def/            embedded per-model value profiles + registry (incl. the generic 
                 `tools/domain/` audit tooling, which is a different toolset entirely. Never
                 hand-edit a generated table: regenerate it, and verify rows against docs/REGISTERS.md
                 (the in-repo source of truth, and the check any contributor can actually run).
+                ONE hand-written supplement exists and is TEMPORARY: overlay.hpp, the page-0x10
+                protection words (offsets 10-12, convs 303/307/310/311 — UC5's retry counters, #110
+                Part B). Every generated profile carries SIX rows for page 0x10 where REGISTERS.md §5
+                documents TWENTY-SIX, uniformly across all 43 tables — the generator's page-0x10 input
+                is narrow, it is not a per-model absence — so conv 310 (implemented in PR #111) had no
+                row to decode and decoded nothing in the field. The supplement adds the rows WITHOUT
+                touching a generated table; logic/profile_view.hpp presents generated+supplement as one
+                row sequence and carries the OVERLAY RULE (a block applies only if the base already
+                references its page), which is why this cannot do what hand-editing would: it can
+                never set a page bit that was not already set, so detection cannot move and no bus
+                round-trip is added. The rows ARE audited — tools/domain/catalog_audit.cpp resolves the
+                view, so they are cross-checked against REGISTERS.md §5 per profile like any generated
+                row, and the page-0x10 catalog guard in test_logic.cpp (armed vacuous in #111) is live
+                on them. DELETE overlay.hpp + its plumbing when gen_profiles.py emits the rows: a
+                supplement that outlives its generator run is a second source of truth for the catalog.
 www/            web UI sources (index.html + style.css + app.js -> one gzipped page) + setup.html
 ```
 

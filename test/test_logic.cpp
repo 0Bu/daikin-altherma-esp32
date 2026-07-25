@@ -34,7 +34,9 @@
 #include "logic/json.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/link_watch.hpp"
+#include "logic/feature_gate.hpp"
 #include "logic/lwt_select.hpp"
+#include "logic/profile_view.hpp"
 #include "logic/ou_stale.hpp"
 #include "logic/mqtt_uri.hpp"
 #include "logic/modbus.hpp"
@@ -51,6 +53,7 @@
 #include "logic/wifi_rollback.hpp"
 #include "logic/ws_policy.hpp"
 #include "logic/ws_tx_gate.hpp"
+#include "def/overlay.hpp"
 #include "def/registry.hpp"
 #include "def/signatures.hpp"
 
@@ -420,23 +423,29 @@ static void test_convert() {
     // A retry count is a whole number of retries — "1.0 retries" in HA would be a formatting bug.
     CHECK(display_decimals(310) == 0);
 
-    // Catalog guard, armed ahead of the rows (issue #69 step 0.2): page 0x10 offsets 10-12 are the
-    // four-fields-per-byte protection words. NO def/ profile carries them yet — the generator
-    // (gen_profiles.py, out-of-repo) has to emit them — so this loop is vacuous TODAY and is here to
-    // catch the generator's first output, not to check the present catalog. Do not delete it as
-    // dead: the failures it guards against are a size-2 read straddling two protection words, a
-    // plain byte converter publishing 149 where the spec says 1, and — the #36 failure mode — a
-    // dimensionless retry COUNT typed as °C, which reaches Home Assistant as a phantom temperature
-    // entity that looks entirely plausible. None of the four fields packed into these bytes is a
-    // temperature: two are drop-control flags, two are counters. type 1 (°C) is always wrong here.
-    for (const auto& p : def::profiles)
-        for (size_t i = 0; i < p.count; i++)
-            if (p.values[i].reg == 0x10 && p.values[i].offset >= 10 && p.values[i].offset <= 12) {
-                CHECK(p.values[i].size == 1);
-                const int c = p.values[i].conv;
+    // Catalog guard for page 0x10 offsets 10-12, the four-fields-per-byte protection words. Armed
+    // ahead of the rows in PR #111, when it was vacuous by construction; it is LIVE now that
+    // def/overlay.hpp supplies them (#110 Part B), and it runs over the RESOLVED view so it covers
+    // the supplement exactly as it would cover the generator's output when that finally lands.
+    // The failures it guards against: a size-2 read straddling two protection words, a plain byte
+    // converter publishing 149 where the spec says 1, and — the #36 failure mode — a dimensionless
+    // retry COUNT typed as °C, which reaches Home Assistant as a phantom temperature entity that
+    // looks entirely plausible. None of the four fields packed into these bytes is a temperature:
+    // two are drop-control flags, two are counters. type 1 (°C) is always wrong here.
+    int prot_checked = 0;
+    for (const auto& p : def::profiles) {
+        const auto v = def::resolved(p);
+        for (size_t i = 0; i < v.count(); i++)
+            if (v[i].reg == 0x10 && v[i].offset >= 10 && v[i].offset <= 12) {
+                CHECK(v[i].size == 1);
+                const int c = v[i].conv;
                 CHECK(c == 303 || c == 307 || c == 310 || c == 311);
-                CHECK(p.values[i].type != 1);   // never °C — see #36
+                CHECK(v[i].type != 1);   // never °C — see #36
+                prot_checked++;
             }
+    }
+    // No longer vacuous: 11 supplement rows on every profile that reads page 0x10 (all 45).
+    CHECK(prot_checked >= 11 * 45);
 
     // conv 311 = BUH output-capacity step, bits 0-2 ONLY. The upper bits belong to other fields,
     // so the whole byte must never be published: 0x85 is step 5, not 133.
@@ -3462,6 +3471,184 @@ static void test_no_publish() {
         if (m.values[i].reg != 0x64) CHECK(!m.values[i].no_publish);
 }
 
+// ── logic/profile_view.hpp + def/overlay.hpp — the page-0x10 protection-word supplement (#110 B) ──
+static void test_profile_view() {
+    using namespace daik::logic;
+
+    // THE OVERLAY RULE: a supplement applies only if the base already reads its page. This is what
+    // keeps a hand-written block from doing what hand-editing a generated table would do — move
+    // detection — and from adding a per-cycle bus round-trip (and, on a model that does not answer,
+    // a per-cycle TIMEOUT that reads on /diag exactly like a wiring fault).
+    ValueDef base_with[]    = {{0x10, 0, 217, 1, -1, "Operation Mode"}, {0x60, 3, 204, 1, -1, "Error Code"}};
+    ValueDef base_without[] = {{0x60, 3, 204, 1, -1, "Error Code"}};
+    ValueDef extra[]        = {{0x10, 10, 310, 1, -1, "Discharge Temp. Protection Retry Qty"}};
+
+    const auto applied = profile_view(base_with, 2, extra, 1, 0x10);
+    CHECK(applied.count() == 3);
+    CHECK(applied[0].conv == 217 && applied[1].conv == 204);   // base rows keep their order + indices
+    CHECK(applied[2].conv == 310 && applied[2].offset == 10);  // supplement lands after them
+
+    const auto skipped = profile_view(base_without, 1, extra, 1, 0x10);
+    CHECK(skipped.count() == 1);          // page absent -> block withheld entirely
+    CHECK(skipped.extra_count == 0);
+    CHECK(!profile_has_page(base_without, 1, 0x10));
+    CHECK(profile_has_page(base_with, 2, 0x10));
+
+    // An empty supplement is a no-op, not a crash: the block is deleted the day the generator emits
+    // these rows, and the deletion must not have to be atomic with the call-site cleanup.
+    CHECK(profile_view(base_with, 2, nullptr, 0, 0x10).count() == 2);
+
+    // ── The real catalog ────────────────────────────────────────────────────────────────────────
+    // Every profile reads page 0x10, so every profile gets the supplement. If a future generated
+    // profile drops the page this CHECK fails rather than the device quietly gaining a round-trip.
+    for (const auto& p : def::profiles) {
+        const auto v = def::resolved(p);
+        CHECK(v.count() == p.count + def::RETRY_ROW_COUNT);
+        CHECK(v.extra_count == def::RETRY_ROW_COUNT);
+    }
+
+    // DETECTION IS UNMOVED — the load-bearing claim. Belt: signatures are built over def::profiles
+    // (the BASE tables) and never see a view. Braces: even resolved, the page mask is identical,
+    // because the rule cannot set a bit that was not already set. Assert the braces, since the belt
+    // is the one a refactor would remove.
+    for (const auto& p : def::profiles) {
+        uint32_t base_mask = 0, view_mask = 0;
+        for (size_t i = 0; i < p.count; i++) base_mask |= daik::page_mask_bit(p.values[i].reg);
+        const auto v = def::resolved(p);
+        for (size_t i = 0; i < v.count(); i++) view_mask |= daik::page_mask_bit(v[i].reg);
+        CHECK(base_mask == view_mask);
+    }
+
+    // The supplement transcribes docs/REGISTERS.md §5 register 0x10: 11 rows over offsets 10-12,
+    // four packed fields per byte minus the one Daikin labels "Not in use". Every row dimensionless
+    // and 1 byte — pinned by a static_assert too, because hp_poll hands the BASE table (not the
+    // view) to profile_refrigerant() and reading_plausible().
+    CHECK(def::RETRY_ROW_COUNT == 11);
+    int c310 = 0, c311 = 0, c307 = 0, c303 = 0;
+    for (size_t i = 0; i < def::RETRY_ROW_COUNT; i++) {
+        const ValueDef& d = def::retry_rows[i];
+        CHECK(d.reg == 0x10 && d.offset >= 10 && d.offset <= 12);
+        CHECK(d.size == 1 && d.type == -1 && !d.no_publish);
+        CHECK(d.conv != 405);
+        if (d.conv == 310) c310++;
+        if (d.conv == 311) c311++;
+        if (d.conv == 307) c307++;
+        if (d.conv == 303) c303++;
+    }
+    CHECK(c310 == 3);   // Discharge Temp. / HP / Fin Temp. retry counters — UC5's signal
+    CHECK(c311 == 2);   // Comp. INV Current / LP retry counters ("Not in use" omitted)
+    CHECK(c307 == 3 && c303 == 3);   // the drop-control flags sharing those bytes
+
+    // The rows DECODE, end to end, through the real converter — the half PR #111 could not reach
+    // because no row used conv 310. 0x95 on offset 10 is 1 discharge retry with the drop flag set
+    // and 5 INV-current retries, NOT 149.
+    const uint8_t word[] = {0x95};
+    int seen = 0;
+    for (size_t i = 0; i < def::RETRY_ROW_COUNT; i++) {
+        if (def::retry_rows[i].offset != 10) continue;
+        const auto r = convert(def::retry_rows[i], word);
+        CHECK(r.ok);
+        switch (def::retry_rows[i].conv) {
+            case 310: CHECK(approx(r.value, 1.0)); seen++; break;
+            case 311: CHECK(approx(r.value, 5.0)); seen++; break;
+            case 307: CHECK(r.text == std::string("ON"));  seen++; break;   // bit 7 set
+            case 303: CHECK(r.text == std::string("OFF")); seen++; break;   // bit 3 clear
+            default: CHECK(false); break;
+        }
+    }
+    CHECK(seen == 4);
+
+    // A bit-flag row publishes as an HA binary_sensor and a COUNTER as a number — they share a byte,
+    // so a split that keyed on the label instead of the converter would type all four alike.
+    CHECK(conv_is_binary(307) && conv_is_binary(303));
+    CHECK(!conv_is_binary(310) && !conv_is_binary(311));
+    for (size_t i = 0; i < def::RETRY_ROW_COUNT; i++) {
+        const ValueDef& d = def::retry_rows[i];
+        CHECK(!object_id(d.label).empty());   // an empty object_id is a row publish_discovery drops
+        CHECK(std::string(ha_component(d)) == (conv_is_binary(d.conv) ? "binary_sensor" : "sensor"));
+    }
+
+    // The supplement must not introduce a DUPLICATE object_id: entities are keyed by it, so two rows
+    // sharing one would collapse into a single HA entity and the second row would silently never
+    // arrive. (The catalog already contains pre-existing duplicates — e.g. "Error Code" on both
+    // 0x10/5 and 0x60/3 — so the assertion is the DELTA, not an absolute: no id the supplement adds
+    // may already be taken by the profile it is applied to.)
+    for (const auto& p : def::profiles) {
+        for (size_t i = 0; i < def::RETRY_ROW_COUNT; i++) {
+            const std::string oid = object_id(def::retry_rows[i].label);
+            for (size_t k = 0; k < p.count; k++) CHECK(object_id(p.values[k].label) != oid);
+        }
+    }
+}
+
+// ── logic/feature_gate.hpp — what may honestly run on the detected profile (#110 Part C) ─────────
+static void test_feature_gate() {
+    using namespace daik::logic;
+
+    // `generic` is the case #69 names: detection failed, so the fallback carries the universal
+    // register core and nothing else. Measured, not assumed — it has no leaving-water MEASUREMENT
+    // (only "LW setpoint (main)", which the lwt_select rule correctly rejects), no INV frequency, no
+    // expansion valve and no pressure row. The decision is DISABLE, so both gates are false.
+    const auto gen = feature_coverage(def::lookup_view("generic"));
+    CHECK(!gen.leaving_water);
+    CHECK(!gen.run_state);
+    CHECK(!gen.expansion_valve);
+    CHECK(!gen.refrigerant_pressure);
+    CHECK(gen.retry_counters);              // the supplement reaches `generic` too — it reads 0x10
+    CHECK(!uc5_supported(gen));             // counters with no run-state to interpret them against
+    CHECK(!inference_supported(gen));
+
+    // A fully-equipped detected model is the opposite end: everything on, both gates open.
+    const auto full = feature_coverage(def::lookup_view("altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw"));
+    CHECK(full.leaving_water && full.run_state && full.retry_counters);
+    CHECK(full.expansion_valve && full.refrigerant_pressure);
+    CHECK(uc5_supported(full));
+    CHECK(inference_supported(full));
+
+    // WHY THIS IS NOT AN `id == "generic"` CHECK, pinned as a measurement: the starvation is not
+    // unique to the fallback. Across the DETECTABLE catalog a substantial minority carry no page
+    // 0x30, hence no INV frequency and no expansion valve — an id check would have let inference run
+    // without a run-state input on every one of them.
+    int detectable = 0, no_run_state = 0;
+    for (const auto& p : def::profiles) {
+        if (!def::is_detection_model(p.id)) continue;
+        detectable++;
+        const auto c = feature_coverage(def::resolved(p));
+        // Universal across the catalog: a leaving-water measurement (so lwt_select always resolves —
+        // the #121 guarantee) and, now, the retry counters.
+        CHECK(c.leaving_water);
+        CHECK(c.retry_counters);
+        if (!c.run_state) {
+            no_run_state++;
+            CHECK(!uc5_supported(c));        // disabled, never degraded
+            CHECK(!inference_supported(c));
+            CHECK(!c.expansion_valve);       // both live on page 0x30 — they go together
+        } else {
+            CHECK(uc5_supported(c));
+        }
+    }
+    CHECK(detectable >= 39);
+    CHECK(no_run_state >= 10);               // a real minority, not a rounding error
+    CHECK(no_run_state < detectable);        // ...and not the whole catalog, or the gate says nothing
+
+    // inference_supported() is strictly stronger than uc5_supported(): anything that can run a
+    // trained model can run the rule. A hand-built coverage that has the counters + run-state but
+    // lacks the hydronic/refrigerant signals must open exactly one of the two gates.
+    FeatureCoverage partial;
+    partial.retry_counters = true;
+    partial.run_state      = true;
+    CHECK(uc5_supported(partial));
+    CHECK(!inference_supported(partial));
+
+    // A detect-only placeholder is not coverage: the row exists to hold a page in the detection
+    // signature, and the value is an absent feature. Counting it would be the "pretend full
+    // features" outcome #69 rules out by name.
+    ValueDef ghost[] = {{0x10, 10, 310, 1, -1, "Discharge Temp. Protection Retry Qty", true}};
+    const auto ghost_cov = feature_coverage(profile_view(ghost, 1, nullptr, 0, 0x10));
+    CHECK(!ghost_cov.retry_counters);
+    CHECK(!uc5_supported(ghost_cov));
+}
+
 int main() {
     test_crc();
     test_registers();
@@ -3509,6 +3696,8 @@ int main() {
     test_version_cmp();
     test_ota_manifest();
     test_ota_channel();
+    test_profile_view();
+    test_feature_gate();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }
     std::printf("%d logic test(s) FAILED\n", g_failures);
     return 1;
