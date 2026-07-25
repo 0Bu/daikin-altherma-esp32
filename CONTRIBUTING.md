@@ -149,14 +149,25 @@ Code skills in this repo's `.claude/` directory and are not something an outside
 Leave them unchecked; the maintainer runs them before merge. Your equivalents are the two scripts
 above plus an honest note about hardware.
 
-`main` is kept **strictly linear** and every commit **signed**, so PRs land as **squash merges** —
-enforced by a branch ruleset on `main` (require a pull request, require linear history, require
-signed commits, and the `gates` / `build` checks green), not left to convention. Nobody is exempt: the ruleset carries no bypass actors, so this
+`main` is kept **strictly linear**, so PRs land as **squash merges** — enforced by a branch ruleset
+on `main` (require a pull request, require linear history, and the `gates` / `build` checks green),
+not left to convention. Nobody is exempt: the ruleset carries no bypass actors, so this
 holds for the maintainer too — `main` takes no direct pushes at all. Practical consequences:
 
 - Everything lands through a PR, including a one-line docs fix. There is no push-to-`main` path.
 - Rebase onto `main` rather than merging `main` into your branch. Merge commits can't be accepted.
-- Sign your commits (`git commit -S`, or let GitHub sign a web merge).
+- Sign your commits (`git commit -S`, or let GitHub sign a web merge). Signing is **asked for, not
+  enforced**: the ruleset used to carry *require signed commits*, and it was dropped because the
+  self-hosted Renovate bot cannot satisfy it. Renovate authenticates with a **PAT**, and GitHub
+  signs a bot's commits only when the bot is a **GitHub App** — neither of Renovate's two commit
+  paths helps, since the `git` one is unsigned by construction and the API one is signed by GitHub
+  for an App only. That was measured rather than inferred: a dispatch with the API path on
+  (run `30169946598`) produced `verified: false, reason: unsigned`. So every dependency PR carried
+  unsigned commits and the rule blocked them all — green checks, zero required approvals,
+  `mergeable_state: blocked`. A squash merge performed by GitHub is still signed by its web-flow key
+  either way; what is gone is the guarantee that each *incoming* commit was. Restoring the rule
+  means first moving Renovate onto a GitHub App (or giving it a `gitPrivateKey`) — see
+  [`.github/workflows/renovate.yaml`](.github/workflows/renovate.yaml).
 - `main` moves under open PRs — expect to rebase before merge.
 - A red CI job blocks the merge, including on a docs-only PR — the fast gates are cheap and
   hardware-free precisely so this is never a burden.

@@ -1,6 +1,6 @@
 name: Renovate
 
-# main is kept strictly LINEAR and every commit GPG-signed (see .github/renovate.json).
+# main is kept strictly LINEAR (see .github/renovate.json).
 # Automerge squashes (linear + GitHub-signed) — never a merge commit. Do NOT re-linearize main
 # with `git rebase --root` + force-push while PRs are open: it rewrites every SHA, leaving open
 # PRs with a disjoint history, and GitHub then auto-closes them (Renovate marks the update ignored).
@@ -24,12 +24,43 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      # COMMIT SIGNING: this bot CANNOT sign, and that is why the main ruleset no longer requires it.
+      # MEASURED, not reasoned: run 30169946598 dispatched this workflow with the API commit path on
+      # and the rebased commit came back `verified: false, reason: unsigned` (PR #174, 95e3a3ae).
+      #
+      # RENOVATE_TOKEN is a PAT. `platformCommit` decides whether Renovate commits over plain `git`
+      # or through GitHub's API, and only the API path can be signed — GitHub auto-signs API commits
+      # for a GitHub APP, never for a PAT (the path posts to `/git/commits` with no `signature`
+      # field). So neither setting can produce a signed commit here, which is what left every
+      # dependency PR at `mergeable_state: blocked` with both required checks green and zero required
+      # approvals: the signature rule was the only thing left, and nothing about the PR could satisfy
+      # it. Renovate's own docs say as much — "does not apply when you use a Personal Access Token".
+      #
+      # This file used to carry `RENOVATE_PLATFORM_COMMIT: true`. That is NOT a dead value, however
+      # much it looks like one next to the `auto|disabled|enabled` enum: the env parser rewrites it
+      # ("env config platformCommit property has been changed to enabled", parse/env.ts). The API
+      # path was therefore always on, and that had a second consequence nobody asked for — GitHub
+      # stamps an API commit with the TOKEN OWNER as git author, which does not match Renovate's own
+      # `gitAuthor`, so Renovate stops recognising its own branches:
+      #
+      #   Edited/Blocked Notification — Renovate will not automatically rebase this PR, because it
+      #   does not recognize the last commit author and assumes somebody else may have edited the PR.
+      #
+      # That is why an open dependency PR sat behind `main` unrebased. `disabled` puts the commits
+      # back under Renovate's `gitAuthor`, so it maintains its own PRs again (rebase when behind,
+      # automerge when green) — and costs nothing, because the API path's one advantage, signing,
+      # was never available to a PAT. An EXISTING branch still carries an owner-stamped commit and
+      # stays unrecognised until someone ticks its rebase/retry box once.
+      #
+      # To get signing back, the token has to change: an App identity
+      # (actions/create-github-app-token -> `x-access-token:`, after which the `auto` default signs
+      # by itself) or a `gitPrivateKey`. Re-adding the ruleset rule alone just re-blocks every PR.
       - uses: renovatebot/github-action@3064367f740a1a91cca218698a63902689cce200 # v46.1.20
         with:
           token: ${{ secrets.RENOVATE_TOKEN }}
         env:
           RENOVATE_PLATFORM: github
-          RENOVATE_PLATFORM_COMMIT: true
+          RENOVATE_PLATFORM_COMMIT: disabled
           RENOVATE_EXTENDS: config:best-practices,helpers:pinGitHubActionDigests
           RENOVATE_AUTODISCOVER: true
           RENOVATE_AUTODISCOVER_FILTER: ${{ github.repository }}
