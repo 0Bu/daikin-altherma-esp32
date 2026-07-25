@@ -139,6 +139,8 @@ jobs:
         run: ./scripts/run-pages-publish-tests.sh
       - name: Test the NVS-preserving Web Serial plan gate
         run: ./scripts/run-web-installer-plan-tests.sh
+      - name: Test the publish-version gate
+        run: ./scripts/run-publish-version-tests.sh
 
       # Does this change reach anything the FIRMWARE BUILD or the PUBLISHED SITE is made of? If
       # not, the ~5-minute build job below is skipped entirely — on a pull request as much as on a
@@ -157,7 +159,7 @@ jobs:
           BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          relevant='^(main/|CMakeLists\.txt$|sdkconfig\.defaults$|partitions\.csv$|version\.txt$|docs/index\.html$|\.github/workflows/build\.yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed)\.sh$|scripts/check-web-installer-plan\.py$)'
+          relevant='^(main/|CMakeLists\.txt$|sdkconfig\.defaults$|partitions\.csv$|version\.txt$|docs/index\.html$|\.github/workflows/build\.yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version)\.sh$|scripts/check-web-installer-plan\.py$|tools/version/)'
           case "${{ github.event_name }}" in
             pull_request)
               # HEAD is the PR's merge ref, so HEAD^1 is the base tip: the diff is exactly what
@@ -241,6 +243,19 @@ jobs:
           echo "$disp" > version.txt
           echo "disp=$disp" >> "$GITHUB_OUTPUT"
           echo "stamping $disp"
+
+      # Would a device on the currently-published build accept the one this run would publish? The
+      # version above is DERIVED (from the v* tag list, floored by version.txt), so it can silently
+      # be the wrong number — and it has been: on 2026-07-24 the tags were deleted, next-version.sh
+      # fell back to the 1.0.0 floor, and the next merge republished dev/ as 1.0.0-dev.168 over the
+      # 1.0.14-dev.2 it had just served. CI went green; the feed had simply stopped being able to
+      # move anyone forward. The check asks the DEVICE's own question (ota_is_upgrade, the predicate
+      # ota_update.cpp installs by) against the feed this run writes, so "CI published it" and "a
+      # board will take it" cannot diverge. Here rather than next to the publish steps: it needs
+      # only the stamped version, so it costs seconds and fails before the ~5-minute build, before
+      # the tag and before the GitHub Release.
+      - name: Check the version moves its feed forward
+        run: ./scripts/check-publish-version.sh '${{ steps.mode.outputs.mode }}' '${{ steps.stamp.outputs.disp }}'
 
       # Materialize the offline OTA signing key from the OTA_SIGNING_KEY secret (RSA-3072 PEM).
       # Main publish w/o secret -> hard error (never publish unsigned to OTA). Fork PR w/o secret
