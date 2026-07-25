@@ -351,7 +351,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vrow .pin-sel, .vrow .chan-sel { width: auto; padding: 6px 8px; border-radius: 9px; appearance: auto; font-size: 14px; }
 .vrow .pin-sel { min-width: 76px; }
 .vrow .chan-sel { min-width: 124px; max-width: 60%; }
-/* tappable value row (ESP32 card's Firmware row → check for OTA update) */
+/* tappable value row (ESP32 card: Firmware → check for an OTA update, Hardware → the board modal) */
 .vrow-btn { width: 100%; font: inherit; background: none; border: 0; border-top: 1px solid var(--line); cursor: pointer; text-align: left; }
 .vrow-btn:hover .vrow-label, .vrow-btn:hover .vrow-val { color: var(--brand-strong); }
 .empty { color: var(--muted); font-size: 14px; padding: 8px 0; }

@@ -382,9 +382,10 @@ Derived sensors (COP etc.) and a sample dashboard: [HOME_ASSISTANT.md](HOME_ASSI
 Pull-based: the device fetches `manifest.json` from `CONFIG_DAIKIN_OTA_MANIFEST_URL` (default GitHub
 Pages), compares its `version` to the running firmware, and on confirmation downloads its image
 `daikin-altherma-esp32.bin` via `esp_https_ota` into the inactive OTA slot, then reboots. Tap the
-firmware **version** in the header (next to the IP address) to check; the UI then shows the download
-progress inline beside that version, waits for the board to come back up and reloads itself onto the
-new UI. Both the check and the download run on their own task, never on the HTTP worker.
+firmware **version** to check — either the one in the header (next to the IP address) or the
+*Version* row on gear → **ESP32**, which does the same thing. The UI then shows the download
+progress inline beside the header version, waits for the board to come back up and reloads itself
+onto the new UI. Both the check and the download run on their own task, never on the HTTP worker.
 
 > **Which feed it checks:** the device follows one channel at a time — gear → **ESP32** → *Update
 > channel* (`POST /set_ota`, applied live). `release` reads the Pages root, `dev` reads `…/dev/`;
