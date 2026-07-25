@@ -3380,7 +3380,7 @@ static void test_ou_stale() {
     // Every detectable profile: the readings the UI blanks must sit on a held-over page, and the
     // compressor witness must NOT. A future generated profile that moves "INV frequency (rps)" onto
     // 0x20/0x21 would make the run state stale-derived and must fail loudly here.
-    int rps_rows = 0, out_rows = 0, disch_rows = 0, inv_rows = 0, ct_rows = 0, checked = 0;
+    int rps_rows = 0, out_rows = 0, disch_rows = 0, inv_rows = 0, ct_rows = 0, rp_rows = 0, checked = 0;
     for (const auto& p : def::profiles) {
         if (!def::is_detection_model(p.id)) continue;
         for (size_t i = 0; i < p.count; i++) {
@@ -3413,6 +3413,14 @@ static void test_ou_stale() {
                 CHECK(!ou_page_holds_over(reg));   // live -> a non-zero CT reading is real standby draw
                 ct_rows++;
             }
+            // The high-side pill's AT-REST source. The compressor's own HP transducer is a 0x20 row
+            // and freezes with that page, so the browser falls back to this one — and the inspector
+            // now names it as the source line beside the number. That only holds while it is LIVE:
+            // on a held-over page it would be the same stale bar under a more trustworthy name.
+            if (logic::lwt_ci_contains(l, "refrigerant pressure sensor")) {
+                CHECK(!ou_page_holds_over(reg));   // 0x62, the hydronic side — resampled at rest
+                rp_rows++;
+            }
         }
         checked++;
     }
@@ -3424,6 +3432,7 @@ static void test_ou_stale() {
     // stale fallback was not an edge case, it was the default path on the majority of installs.
     CHECK(inv_rows >= checked);
     CHECK(ct_rows > 0);
+    CHECK(rp_rows > 0);          // the at-rest high-side fallback exists in the catalog
 }
 
 // ── ValueDef::no_publish — the detect-only row flag ───────────────────────────────────────────

@@ -545,7 +545,21 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 what. A value the unit is no longer measuring is not reported. What the pill cannot
                 say, the INSPECTOR does (the outdoor unit's idle explanation names the reason), which
                 is where the "reads as a lost link" complaint is answered instead.
-                ΔT blanks too — with no flow it is not a stale working point but none at all.
+                The inspector BLANKS what the pill blanks, or it undoes the pill: it read every row
+                straight off /values, so tapping a blanked pill printed the held-over number back as
+                a 19px headline (25.0 °C outdoor on a stopped unit), plus in the member-reading list
+                and in any sentence quoting it — a value the drawing had just refused to state,
+                restated one line below it and looking like the correction. Its gate is the ROW's
+                register page (/values now carries `reg`), never its label: the catalog spells these
+                rows ~50 ways across 43 profiles, so a pattern list in JS would be a second copy of
+                ou_page_holds_over() that silently stops covering rows. A held headline replaces the
+                entry's `now` sentence with the REASON it is blank, and a pill drawn from a FALLBACK
+                source (the high side falls back from the frozen HP transducer to the live
+                refrigerant sensor) resolves headline + source line through the same picked ROW —
+                naming High Pressure while showing the other sensor's bar is its own small lie.
+                ΔT blanks too — with no flow it is not a stale working point but none at all
+                (`d.dtStale`, decided in liveData beside `d.ouHeldOver` so the drawing and the
+                explainer cannot disagree about it either).
                 Deliberately NOT
                 page 0x10 — it carries Defrost Operation, which FEEDS the run-state decision, and no
                 measurement could prove whether it freezes (its Target Cond. Temp. reads 0.0 even
@@ -909,7 +923,11 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   and the dashboard's model card.
                   RX/TX are auto-detected: read-only on the card while the bus answers, a pins_avail
                   dropdown (re-runs detection) when it doesn't.
-GET  /values      decoded readings [{label,value,unit}]
+GET  /values      decoded readings [{label,value,unit,reg}]. `reg` is the X10A register PAGE the row
+                  came from, and it is what lets the BROWSER apply logic/ou_stale.hpp's page rule
+                  (0x20/0x21 stop being refreshed while the compressor rests) to any row it shows —
+                  structurally, instead of by a label list that would be a second, drifting copy of a
+                  rule CI gates in C++ (the catalog spells those rows ~50 ways across 43 profiles)
 GET  /events      WebSocket live push (is_websocket). Client sends "sub" -> gets a status+values
                   snapshot, then the poll task pushes {"type":"status"|"values",...} frames on change
                   (status ~4s, values ~1s). The ONLY live UI transport — there is no HTTP polling; a
