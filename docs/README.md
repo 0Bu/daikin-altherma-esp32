@@ -270,7 +270,8 @@ GET  /status                       # { version, platform, uptime_s, app_elf_sha2
                                    #        task,pc,backtrace[],corrupted,elf_sha256},
                                    #   detect:{proto,valid,capacity_kw,ou_eeprom,candidates[],
                                    #        families[],ambiguous,model:{name,family,marketing}} }
-GET  /values                       # decoded readings [{label,value,unit}] (last poll cycle)
+GET  /values                       # decoded readings [{label,value,unit,reg}] (last poll cycle);
+                                   #   reg = the X10A register page the row was decoded from
 GET  /events                       # WebSocket live push (the only live UI transport). Send "sub" →
                                    #   status+values snapshot, then {"type":"status"|"values",...} on
                                    #   change. No HTTP polling; no-WebSocket browsers load once and

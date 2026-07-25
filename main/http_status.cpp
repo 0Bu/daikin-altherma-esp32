@@ -311,21 +311,38 @@ static esp_err_t h_status(httpd_req_t* req) {
     return http_send_json(req, j.c_str());
 }
 
-// The decoded-values JSON array "[{label,value,unit},…]" — the ONE builder behind GET /values, the
-// WS "values" broadcast and the WS subscription snapshot, which all constructed the identical body
-// (same snapshot call, same null-for-empty rule, same escaping). Callers wrap it in their own
+// The decoded-values JSON array "[{label,value,unit,reg},…]" — the ONE builder behind GET /values,
+// the WS "values" broadcast and the WS subscription snapshot, which all constructed the identical
+// body (same snapshot call, same null-for-empty rule, same escaping). Callers wrap it in their own
 // envelope ({"values":…} for HTTP, {"type":"values","values":…} for WS). Can throw std::bad_alloc —
 // every caller already guards (handle_all, or the WS try/catch), so this stays unguarded.
+//
+// `reg` is the X10A register PAGE the row was decoded from, and it is what makes the browser's
+// held-over rule STRUCTURAL: logic/ou_stale.hpp's ou_page_holds_over() keys on the page (0x20/0x21
+// stop being refreshed while the compressor rests), and www/app.js must apply the same rule to the
+// rows it shows. Matching those rows by LABEL instead would be a second, drifting copy of the rule —
+// the catalog spells them ~50 different ways across the 43 profiles ("Outdoor air temp.",
+// "R1T-Outdoor air temp.", "Outdoor Air Temp (R1T)", …), so a pattern list would silently stop
+// covering a row the C++ test still gates.
 static std::string build_values_array() {
     const size_t cap = def::lookup_view(config().profile.c_str()).count();
     std::vector<CachedValue> v(cap ? cap : 1);
     size_t n = hp_values_snapshot(v.data(), v.size());
     std::string j = "[";
+    // Successive += rather than one a + b + c + … chain: a chain materialises every intermediate
+    // std::string in the same frame, and this runs on the httpd task (see CLAUDE.md "Memory
+    // constraints" — the v1.0.12 stack overflow).
     for (size_t i = 0; i < n; i++) {
         if (i) j += ",";
-        j += "{\"label\":" + jstr(v[i].label) +
-             ",\"value\":" + (v[i].value.empty() ? "null" : jstr(v[i].value)) +
-             ",\"unit\":" + jstr(v[i].unit) + "}";
+        j += "{\"label\":";
+        j += jstr(v[i].label);
+        j += ",\"value\":";
+        j += v[i].value.empty() ? "null" : jstr(v[i].value);
+        j += ",\"unit\":";
+        j += jstr(v[i].unit);
+        j += ",\"reg\":";
+        j += std::to_string(v[i].reg);
+        j += "}";
     }
     j += "]";
     return j;

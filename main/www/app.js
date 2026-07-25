@@ -1251,6 +1251,17 @@ const vNum = (re) => { const r = vRow(re); if (!r) return null; const n = parseF
 // Bit-flag values arrive as "ON"/"OFF" text (logic/convert.hpp conv 300-307). null = row absent.
 const vOn = (re) => { const r = vRow(re); return r ? /^on$/i.test(String(r.value).trim()) : null; };
 
+// The outdoor unit's OWN register pages — logic/ou_stale.hpp's ou_page_holds_over(), transcribed:
+// 0x20 (outdoor sensors) and 0x21 (inverter) are only refreshed while the compressor runs, so with
+// it stopped every row on them is the LAST RUN's value. Keyed on the row's REGISTER, which /values
+// now carries, and never on its label: the catalog spells these rows ~50 different ways across the
+// 43 profiles, so a pattern list would be a second copy of a rule that CI gates in C++ — and would
+// stop covering a row the moment a profile spelled it differently.
+const OU_HELD_PAGES = [0x20, 0x21];
+// Is this /values row still a CURRENT reading? Takes the snapshot rather than reading S.live, so
+// every consumer answers from the same poll the rest of its render came from.
+const rowHeldOver = (r, d) => !!(d && d.ouHeldOver && r && OU_HELD_PAGES.includes(r.reg));
+
 // Leaving-water MEASUREMENT for ΔT / heat output / COP — NOT a plain vNum, because a measurement
 // regex that can also match a setpoint row poisons all three (issue #121, the #35-#39 failure
 // shape). Host-tested twin: main/logic/lwt_select.hpp + test/test_logic.cpp test_lwt_select() —
@@ -1335,7 +1346,20 @@ function liveData() {
   // discharge pressure and wins. Neither present (17 profiles carry no pressure row) → null → "—".
   // Gated on ouHeldOver too: this unit reads 0 bar at rest so the fallback already fires, but a unit
   // whose 0x20 freezes at a NON-zero pressure would otherwise show that stale bar as the live one.
+  // The chosen ROW is kept, not just its number: the inspector names it as the source line beside the
+  // headline, so picking the pill's number here and the pill's source there would let the two drift
+  // into naming High Pressure while showing the refrigerant sensor's bar.
+  d.circPRow = (!d.ouHeldOver && d.hp != null && d.hp > 0 ? vRow(/^high pressure$/i)
+                                                          : vRow(/^refrigerant pressure sensor$/i)) || null;
   d.circP = !d.ouHeldOver && d.hp != null && d.hp > 0 ? d.hp : d.rp;
+  // ΔT is a WORKING POINT across the exchanger — it needs water moving to mean anything. With the
+  // pump off, R1T and R4T are two stagnant sensors cooling at different rates, and their difference
+  // (measured: 14.6 K on a plant idle for an hour) is not a small ΔT, it is no ΔT at all. Decided
+  // HERE rather than in renderLive so the drawing and the explainer cannot disagree about it — the
+  // pill blanked while the inspector went on quoting the number was the same split that let a
+  // held-over outdoor temperature survive in the explainer after the pill stopped showing it.
+  // Unknown flow AND unknown pump (no rows) still prints: that is not evidence of no flow.
+  d.dtStale = d.pumpOn === false && d.flow != null && d.flow <= 0;
   // Derived figures, marked "est." in the UI — the bus has no energy registers. Thermal output from
   // flow × ΔT (water ≈ 4.186 kJ/kg·K); electrical from the CT phase currents at an assumed 230 V,
   // falling back to the inverter primary current when the profile has no CT rows.
@@ -1417,13 +1441,9 @@ function renderLive() {
   setTxt("svLp", !d.ouHeldOver && d.lp != null && d.lp > 0 ? fmt1(d.lp) : "—");
   setTxt("svDisch", d.ouHeldOver ? "—" : fmt0(d.disch)); setTxt("svEev", fmt0(d.eev));
   setTxt("svLwt", fmt1(d.lwt)); setTxt("svRwt", fmt1(d.ret));
-  // ΔT is a WORKING POINT across the exchanger — it needs water moving to mean anything. With the
-  // pump off, R1T and R4T are two stagnant sensors cooling at different rates, and their difference
-  // (measured: 14.6 K on a plant that had been idle for an hour) reads as a live working point
-  // directly beside a "not running" headline. Unknown flow AND unknown pump (no rows) still prints:
-  // that is not evidence of no flow. Same reasoning as the derived kW/COP, which already gate.
-  const stagnant = d.pumpOn === false && d.flow != null && d.flow <= 0;
-  setTxt("svDt", stagnant ? "—" : fmt1(d.dt)); setTxt("svFlow", fmt1(d.flow));
+  // ΔT only means something with water moving (d.dtStale, decided in liveData so the explainer
+  // gates on the very same fact). Same reasoning as the derived kW/COP, which already gate.
+  setTxt("svDt", d.dtStale ? "—" : fmt1(d.dt)); setTxt("svFlow", fmt1(d.flow));
   setTxt("svWp", fmt1(d.wp)); setTxt("svPump", fmt0(d.pump));
   setTxt("svTank", fmt1(d.tank)); setTxt("svTankSet", fmt1(d.tankSet));
   setTxt("svRoom", fmt1(d.room)); setTxt("svRoomSet", fmt1(d.roomSet));
@@ -1521,8 +1541,13 @@ const INSPECT = {
   },
   out: { t: { en: "Outdoor air", de: "Außentemperatur" }, re: /outdoor air/i, sample: "Outdoor Air Temp. (R1T)" },
   disch: {
+    // The pill draws d.circP — the compressor's own HP transducer while it runs, the always-live
+    // refrigerant sensor at rest — so the headline must resolve THE SAME row, not the HP row on
+    // principle. Reading the HP row here showed the idle unit's stale/zero bar next to a pill
+    // reading the real equalised pressure, and named a source the number had not come from.
+    pick: () => (S.live ? S.live.circPRow : null),
     t: { en: "High side (discharge)", de: "Hochdruckseite" },
-    re: /^high pressure$/i, sample: "High pressure",
+    sample: "High pressure",
     rows: [/^high pressure$/i, /discharge pipe temp/i, /^refrigerant pressure sensor$/i],
   },
   // Both readings on this pill belong to the OUTDOOR unit, not to the liquid line they are drawn on:
@@ -1544,7 +1569,13 @@ const INSPECT = {
       en: "Where the refrigerant hands its heat over to the heating water. The two never mix — they flow through alternating thin plates. Everything to its left is refrigerant, everything to its right is water; the heat crossing it is flow × ΔT, which is the estimate shown here.",
       de: "Hier gibt das Kältemittel seine Wärme an das Heizwasser ab. Beide vermischen sich nie — sie strömen durch abwechselnde dünne Platten. Links davon ist Kältemittel, rechts Wasser; die übertragene Wärme ist Durchfluss × ΔT, also die hier gezeigte Schätzung.",
     },
-    now: (d) => d.pth == null
+    // With the pump stopped the ΔT is not a small working point, it is none at all (d.dtStale) — so
+    // this says nothing is crossing, rather than quoting the two stagnant sensors' difference as if
+    // it were driving a heat flow.
+    now: (d) => d.dtStale
+      ? { en: "Nothing crossing — the pump is stopped, so no water is carrying heat away from the plates.",
+          de: "Kein Übergang — die Pumpe steht, es trägt kein Wasser Wärme von den Platten ab." }
+      : d.pth == null
       ? { en: "No estimate — flow rate or ΔT is missing on this model.",
           de: "Keine Schätzung — Durchfluss oder ΔT fehlt bei diesem Modell." }
       : { en: `About ${fmt1(d.pth)} kW crossing into the water (${fmt1(d.flow)} l/min at ΔT ${fmt1(d.dt)} K).`,
@@ -1563,8 +1594,13 @@ const INSPECT = {
       en: "Leaving water minus return water — how much heat the house actually pulled out of the circuit. Not a register: it is computed from the two temperatures. The controller varies pump speed to hold its target ΔT.",
       de: "Vorlauf minus Rücklauf — wie viel Wärme das Haus dem Kreis tatsächlich entzogen hat. Kein Registerwert, sondern aus den beiden Temperaturen berechnet. Der Regler variiert die Pumpendrehzahl, um sein Ziel-ΔT zu halten.",
     },
-    head: (d) => (d.dt == null ? "—" : fmt1(d.dt) + " K"),
-    now: (d) => d.dt == null ? null
+    // Blanks with the pill (d.dtStale) instead of restating the number the pill withheld, and says
+    // why — the pill can only blank, the explainer is where the reason belongs.
+    head: (d) => (d.dtStale || d.dt == null ? "—" : fmt1(d.dt) + " K"),
+    now: (d) => d.dtStale
+      ? { en: "No ΔT right now — the pump is stopped. With no water moving, the two sensors just drift apart as they cool, and their difference is not a working point.",
+          de: "Derzeit kein ΔT — die Pumpe steht. Ohne Wasserbewegung driften die beiden Fühler beim Auskühlen nur auseinander; ihre Differenz ist kein Arbeitspunkt." }
+      : d.dt == null ? null
       : { en: `${fmt1(d.dt)} K${d.dtSet != null ? ` against a ${fmt1(d.dtSet)} K heating target` : ""}. Around 5 K is a healthy heating ΔT; a negative value means heat is flowing back out (a defrost).`,
           de: `${fmt1(d.dt)} K${d.dtSet != null ? ` bei ${fmt1(d.dtSet)} K Heiz-Ziel` : ""}. Rund 5 K sind ein gesundes Heiz-ΔT; ein negativer Wert heißt, dass Wärme zurückfließt (Abtauung).` },
     rows: [lwtRow, /inlet water/i, /target delta t heating/i],
@@ -1773,8 +1809,28 @@ const INSPECT = {
 const pickRow = (sel) => (typeof sel === "function" ? sel() : vRow(sel));
 const inspRow = (e) => (e.pick ? e.pick() : e.re ? vRow(e.re) : null);
 
-// The reading of a /values row as one string ("42.8 °C"); "—" for an absent row.
-const inspVal = (r) => (r == null ? "—" : String(r.value) + (r.unit ? " " + r.unit : ""));
+// The reading of a /values row as one string ("42.8 °C"); "—" for an absent row — and "—" for a row
+// the outdoor unit has stopped refreshing (rowHeldOver / logic/ou_stale.hpp), which is the SAME
+// answer the pill gives. The panel used to read every row straight off /values, so tapping a pill
+// the drawing had blanked produced its held-over number back in 19px — the explainer contradicting
+// the picture, and asserting as current exactly the last-run value the blanking exists to withhold.
+const inspVal = (r, d) => (r == null || rowHeldOver(r, d) ? "—" : String(r.value) + (r.unit ? " " + r.unit : ""));
+
+// Said instead of the entry's own `now` when its headline reading is held over: the pill can only
+// blank, so the reason it is blank has to be stated here (the same division of labour the outdoor
+// unit's idle sentence and the electrical estimate's already follow).
+const HELD_OVER_NOW = {
+  en: "No current reading — the compressor is stopped, and the outdoor unit only refreshes its own sensors while it runs. The last run's value is withheld rather than shown as if it were being measured now.",
+  de: "Kein aktueller Messwert — der Verdichter steht, und die Außeneinheit aktualisiert ihre eigenen Fühler nur im Betrieb. Der Wert des letzten Laufs wird zurückgehalten statt als gerade gemessen dargestellt.",
+};
+
+// The live sentence above the timeless description: the held-over explanation wins over the entry's
+// own `now`, since a sentence about what a reading is doing is void when there is no reading.
+const inspNowText = (e, d) => {
+  if (!d) return null;
+  if (rowHeldOver(inspRow(e), d)) return tx(HELD_OVER_NOW);
+  return e.now ? tx(e.now(d)) : null;
+};
 
 // Everything the panel would draw, as one string — the change key for the render guard above. It
 // covers the selection, the headline, the live sentence and every member reading, so a value moving
@@ -1783,8 +1839,8 @@ function inspectSig(e) {
   if (!e) return "";
   const d = S.live;
   const row = d ? inspRow(e) : null;
-  const rows = (d && e.rows ? e.rows.map((sel) => inspVal(pickRow(sel))) : []).join(",");
-  return [S.insp, inspVal(row), d && e.head ? e.head(d) : "", d && e.now ? tx(e.now(d)) : "", rows].join("|");
+  const rows = (d && e.rows ? e.rows.map((sel) => inspVal(pickRow(sel), d)) : []).join(",");
+  return [S.insp, inspVal(row, d), d && e.head ? e.head(d) : "", inspNowText(e, d) || "", rows].join("|");
 }
 
 function renderInspect() {
@@ -1810,18 +1866,18 @@ function renderInspect() {
   // at all rather than a "—" that would read as a missing value.
   const hasHead = !!(e.re || e.pick || e.head);
   $("inspNow").hidden = !hasHead;
-  if (hasHead) setTxt("inspNow", row ? inspVal(row) : (d && e.head ? e.head(d) : "—"));
+  if (hasHead) setTxt("inspNow", row ? inspVal(row, d) : (d && e.head ? e.head(d) : "—"));
   // `now` is always prose — the live "what is it doing" sentence — so it opens the body in bold,
   // ahead of the timeless explainer. Never the headline: a sentence in a 19px number slot reads as
   // a broken value.
-  const sentence = d && e.now ? tx(e.now(d)) : null;
+  const sentence = inspNowText(e, d);
   const desc = e.sample ? descFor(e.sample) : null;
   const what = e.what ? esc(tx(e.what)) : (desc ? descBodyHtml(desc) : "");
   $("inspBody").innerHTML = (sentence ? `<b>${esc(sentence)}</b> ` : "") + what;
   $("inspRows").innerHTML = !d || !e.rows ? "" : e.rows
     .map((sel) => pickRow(sel))
     .filter((r, i, a) => r && a.indexOf(r) === i)     // a regex may hit a row an earlier one took
-    .map((r) => `<div class="inspect-row"><span>${esc(r.label)}</span><span>${esc(inspVal(r))}</span></div>`)
+    .map((r) => `<div class="inspect-row"><span>${esc(r.label)}</span><span>${esc(inspVal(r, d))}</span></div>`)
     .join("");
 }
 

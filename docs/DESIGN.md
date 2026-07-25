@@ -412,6 +412,20 @@ Body, ordered:
    drift onto a neighbouring entry. Component copy (outdoor unit, PHE, ΔT, heat output, heating
    circuit) has no equivalent in `DESCRIPTIONS` — nothing there describes an assembly or a derived
    figure — and lives in the inspector's own table, bilingual in the same `{en, de}` shape.
+   **The inspector blanks whatever the drawing blanks, and says why.** A reading the pill withheld —
+   a held-over outdoor-unit row while the compressor rests (`logic/ou_stale.hpp`), a ΔT with no water
+   moving — must not come back as the headline, as a member reading, or inside a state sentence: the
+   panel is *below the pill it explains*, so a number the picture just refused to state reads as a
+   correction of the picture, and it is precisely the last-run value the blanking exists to withhold.
+   The gate is **structural**, on the row's `/values` register page rather than its label, so it
+   covers every row and every profile's spelling of one; and because a blank pill cannot explain
+   itself, the panel replaces its state sentence with the *reason* it is blank (the compressor is
+   stopped and the unit only refreshes its own sensors while it runs). That division of labour is the
+   whole justification for blanking in the first place (§ the outdoor-unit rule above) — the drawing
+   keeps one vocabulary for "no reading right now", the inspector carries the explanation.
+   For the same reason a pill drawn from a *fallback* source names that source: the high-side pill
+   falls back from the frozen HP transducer to the always-live refrigerant sensor, so the headline and
+   the mono source line resolve the same row the pill did, never the register the concept is named for.
    The panel re-renders every poll so an open explainer follows the live values, but only when what
    it draws actually changed — an unconditional rebuild would collapse a text selection mid-read.
    Nothing in this section hides when the X10A link drops (§8): the schematic and its inspector stay,
