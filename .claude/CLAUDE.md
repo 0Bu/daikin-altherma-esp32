@@ -560,10 +560,11 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 the house style but the only defensible answer: a stopped compressor is not drawing
                 1.4 kW, it is drawing ~0, so the held figure is not a stale value of the quantity but
                 a wrong one. The CT path is unaffected: those clamps are on a live page, so a non-zero
-                reading at rest is genuine standby draw and is still shown. Both the sub-label and the
-                inspector then distinguish "compressor off · no live reading" from the pre-existing
-                "no current sensor" — suppressing one wrong claim must not substitute another (the
-                profile HAS a current row; it is the reading that is not current)
+                reading at rest is genuine standby draw and is still shown. The held pill carries NO
+                sub-label — a blank pill is the drawing's one vocabulary for "no reading right now",
+                and the INSPECTOR is where the reason is stated — but it must not fall through to the
+                pre-existing "no current sensor" caption either: suppressing one wrong claim must not
+                substitute another (the profile HAS a current row; it is the reading that is not current)
                 profile_view.hpp = the active model's rows AS EVERY CONSUMER MUST SEE THEM: the
                 generated table plus the def/overlay.hpp supplement, as ONE indexable sequence (two
                 spans, no allocation — the poll path reads it every second). One view rather than four

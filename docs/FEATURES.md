@@ -782,9 +782,10 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   carries the INV row and only about half carry CT clamps, and an idle plant reads a CT sum of 0 — so
   an ungated fallback drew the last run's amps as a live kW figure on most installs most of the time,
   and a stopped compressor draws ~0, not the 1.4 kW the frozen current implies.
-  The catalog test pins which page each of the two sources sits on, and both the sub-label and the
-  inspector distinguish "compressor off · no live reading" from "no current sensor": suppressing one
-  wrong claim must not substitute another), and the **raw-page hex rendering** (`hexdump.hpp` — the wire bytes of pages
+  The catalog test pins which page each of the two sources sits on; the pill then blanks with no
+  sub-label (the drawing's one vocabulary for "no reading right now") and the inspector explains
+  which of the two states it is — never the "no current sensor" caption, since suppressing one wrong
+  claim must not substitute another), and the **raw-page hex rendering** (`hexdump.hpp` — the wire bytes of pages
   `0x00`/`0x10`/`0x20`/`0xA0`/`0xA1` on `/diag`; truncation stops after the last *complete* byte, since a trailing
   nibble would read as a different value, and degenerate inputs still terminate the buffer the caller
   hands to a `diag_printf` `%s`).
