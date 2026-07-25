@@ -887,7 +887,10 @@ Structure:
     (always `false` until the boot-loop safe-mode feature lands). These answer "why did it reboot?"
     and "is the heap leaking?" from the LAN / `/events` WebSocket **on every boot** and **without a
     broker** — the MQTT heartbeat carries the same heap figures, but only when MQTT is configured. The
-    Settings ESP32 card shows the reset reason (fault-coloured) and free heap.
+    web UI reads only `safe_mode` (the recovery banner): the heap and reset figures were rows on the
+    Settings ESP32 card through v1.0.14 and were removed — Settings states what the board is *set to*,
+    and a diagnosis is made from `/status`, `/diag` and the heartbeat, not from four read-only numbers
+    above the settings a user came to change (DESIGN.md §5.6).
   - **How a user hands a crash over.** `GET /status.last_crash` is `null` on a clean boot, else the
     boot-time cached reason/summary — with `coredump` re-read live from flash on every request
     (`diag_crash_info_live()`), so a dump cleared via `/coredump?clear=1` can't leave a stale banner or
@@ -1092,8 +1095,8 @@ config endpoints in place:
   A download already running on the device is adopted on page load (`resumeOta`), so a reload
   mid-update keeps showing the progress.
 
-The board/platform is reported by `/status.platform` — the chip name
-shows on the Settings ESP32 card.
+The board/platform is reported by `/status.platform` — read by `/status` consumers and the web UI's
+paste-ready crash bundle, no longer a row on the Settings ESP32 card.
 
 ## Memory constraints
 

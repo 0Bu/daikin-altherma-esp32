@@ -49,8 +49,7 @@ const I18N = {
     "conn.synced": "Synced", "conn.syncing": "Syncing…",
     "conn.error": (e) => "Error: " + e, "conn.connected_to": (s) => "Connected to " + s,
     "conn.aria": (label, state) => `${label}: ${state}. Tap to edit.`,
-    "card.model": "Model", "card.uptime": "Uptime", "card.lastreset": "Last reset",
-    "card.freeheap": "Free heap", "card.hplink": "Heat-pump link", "card.online": "Online",
+    "card.model": "Model", "card.hplink": "Heat-pump link", "card.online": "Online",
     "card.offline": "Offline", "card.protocol": "Protocol", "card.rxpin": "RX pin",
     "card.txpin": "TX pin", "card.capacity": "Capacity",
     "values.waiting": "Waiting for the first poll…",
@@ -148,8 +147,7 @@ const I18N = {
     "conn.synced": "Synchronisiert", "conn.syncing": "Synchronisiere…",
     "conn.error": (e) => "Fehler: " + e, "conn.connected_to": (s) => "Verbunden mit " + s,
     "conn.aria": (label, state) => `${label}: ${state}. Zum Bearbeiten tippen.`,
-    "card.model": "Modell", "card.uptime": "Laufzeit", "card.lastreset": "Letzter Reset",
-    "card.freeheap": "Freier Heap", "card.hplink": "Wärmepumpen-Verbindung", "card.online": "Online",
+    "card.model": "Modell", "card.hplink": "Wärmepumpen-Verbindung", "card.online": "Online",
     "card.offline": "Offline", "card.protocol": "Protokoll", "card.rxpin": "RX-Pin",
     "card.txpin": "TX-Pin", "card.capacity": "Leistung",
     "values.waiting": "Warte auf die erste Abfrage…",
@@ -606,26 +604,6 @@ const vcard = (label, rows) => `<div class="vgroup"><div class="card">` +
   `<div class="section-label">${esc(label)}</div>${rows}</div></div>`;
 const editIcon = `<svg class="vcard-edit-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
 
-// Human-readable uptime from a seconds count (/status.uptime_s).
-function fmtUptime(s) {
-  if (s == null) return "—";
-  s = Math.floor(s);
-  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
-  if (d) return `${d}d ${h}h`;
-  if (h) return `${h}h ${m}m`;
-  return m ? `${m}m ${s % 60}s` : `${s}s`;
-}
-// Compact byte figure for the heap row (/status.sys.free_heap), e.g. 148512 -> "145 KB".
-function fmtBytes(b) {
-  if (b == null) return "—";
-  return `${Math.round(b / 1024)} KB`;
-}
-// Reset reasons (logic/reset_reason.hpp slugs) that mean the device FAULTED rather than rebooted
-// cleanly — the "Last reset" row is warn-coloured for these, neutral otherwise. Mirrors the
-// crash_reason_is_fault() set in logic/crashinfo.hpp (panic / any watchdog / brown-out / power
-// glitch / CPU lockup); a clean poweron / software reboot / deep-sleep wake is neutral.
-const FAULT_RESETS = ["panic", "int_wdt", "task_wdt", "wdt", "brownout", "pwr_glitch", "cpu_lockup"];
-
 // RX/TX pin dropdown row — shown only when auto-detection hasn't locked a working pin pair, so the
 // user picks from the chip's safe GPIOs (logic/board_pins.hpp → /status.pins_avail).
 // The current pin is always an option even if it's off-list (e.g. a stale/custom value).
@@ -666,32 +644,25 @@ function firmwareRow(version) {
     `<span class="otastat" id="otaStatSet" role="status" aria-live="polite"></span></span></button>`;
 }
 
-// ESP32 board status card (on the Settings screen — renderSettings): chip / uptime, the X10A link +
-// protocol, the RX/TX pins, and the firmware version + its update channel. (Tapping the version —
-// here or in the dashboard header — runs the OTA check, DESIGN.md §5.4; the channel row below it is
-// the SETTING that decides which feed that check reads, not a second copy of the flow.) Pins are
+// ESP32 board status card (on the Settings screen — renderSettings): the X10A link + protocol, the
+// RX/TX pins, and the firmware version + its update channel. Deliberately NO board telemetry (chip,
+// uptime, last reset, free heap): Settings is what the board is SET TO, and those four are
+// read-only diagnostics that belong to /status, /diag and the MQTT heartbeat's diagnostic entities.
+// (Tapping the version — here or in the dashboard header — runs the OTA check, DESIGN.md §5.4; the
+// channel row below it is the SETTING that decides which feed that check reads, not a second copy
+// of the flow.) Pins are
 // auto-detected: once the bus answers on a pair they show read-only; until then a dropdown of the
 // board's wire-able GPIOs lets the user point the firmware at their wiring. A brief timeout doesn't
 // flip back to the dropdown (last_ok_s grace).
 function esp32CardHtml() {
-  const s = S.status || {}, hp = s.hp || {}, sys = s.sys || {};
+  const s = S.status || {}, hp = s.hp || {};
   const proto = hp.proto === "I" ? "X10A-I" : hp.proto === "S" ? "X10A-S" : "—";
   const pinsLocked = hp.connected || (typeof hp.last_ok_s === "number" && hp.last_ok_s >= 0 && hp.last_ok_s <= 30);
   const avail = Array.isArray(s.pins_avail) ? s.pins_avail : [];
   const pinRow = (label, id, val, other) => pinsLocked
     ? vrow(label, val != null ? String(val) : "—", { cls: "mono num" })
     : pinSelRow(label, id, val, avail.filter((p) => p !== other));
-  // Last reset is warn-coloured on a fault reason (panic / watchdog / brown-out …) and neutral on a
-  // clean boot; Free heap surfaces the current heap so a leak is visible without a serial console.
-  const resetRow = sys.reset_reason
-    ? vrow(t("card.lastreset"), sys.reset_reason, { cls: FAULT_RESETS.includes(sys.reset_reason) ? "warn" : "" })
-    : "";
-  const heapRow = sys.free_heap != null ? vrow(t("card.freeheap"), fmtBytes(sys.free_heap)) : "";
   const rows =
-    vrow("Chip", s.platform || "—", { cls: "mono" }) +
-    vrow(t("card.uptime"), fmtUptime(s.uptime_s)) +
-    resetRow +
-    heapRow +
     vrow(t("card.hplink"), hp.connected ? t("card.online") : t("card.offline"), { cls: hp.connected ? "ok" : "err" }) +
     vrow(t("card.protocol"), hp.connected ? proto : "—") +
     pinRow(t("card.rxpin"), "e32Rx", hp.rx, hp.tx) +
@@ -816,7 +787,7 @@ const connDown = () => connLinks().filter((l) => l.cls === "err");
 // The whole configuration on one screen, no menu level in between: the Connections tile and the
 // ESP32 board card, rendered by the same builders that used to place them on the dashboard.
 function renderSettings() {
-  // Both containers are rebuilt on every poll (uptime alone changes each second). The ESP32 card's
+  // Both containers are rebuilt on every poll (link state, pins and the OTA row all change). The ESP32 card's
   // RX/TX pin dropdown is interactive, so skip the rebuild while it is focused/open — otherwise the
   // poll would collapse it mid-pick. It resumes once focus leaves (onPinPick blurs it after
   // applying). setHtml keeps the rest from thrashing rows the user is tapping.
@@ -829,7 +800,7 @@ function renderSettings() {
   // reason, and this slot needs the same protection by a different means. So the card freezes while
   // the readout has anything to say — S.otaShown covers the terminal messages too, which are
   // written after the flow released and would otherwise be wiped a fraction of a second into their
-  // linger. What freezes is a card of static facts plus an uptime counter, for the seconds an
+  // linger. What freezes is a card of static facts, for the seconds an
   // update takes; the one state that can meaningfully change under it (a new version) arrives with
   // the page reload the install ends in. It freezes that card ALONE — the Connections tile carries
   // no part of the readout, and a WiFi or broker link going down during a download is exactly the
