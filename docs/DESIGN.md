@@ -17,7 +17,7 @@ page lives outside the firmware and cannot include `main/www/style.css`, so its 
 1. **Two screens: the plant, and the box.** After provisioning the app opens on the **dashboard**,
    which is the heat pump — the live schematic, the detected model, every reading. The header
    **gear** opens **Settings**, which is the ESP32 and what it talks to: the Connections tile
-   (WiFi/MQTT/Syslog/NTP) and the ESP32 board card (firmware/OTA, uptime, heap, X10A link, RX/TX
+   (WiFi/MQTT/Syslog/NTP) and the ESP32 board card (firmware/OTA, X10A link, RX/TX
    pins, board hardware). Nothing sits between the gear and those cards — Settings is **flat**, no
    menu of entries to tap through, because there is little enough of it that a menu would exist only
    to hide a card behind a second tap. Settings still reports forward: a link that is **down** marks
@@ -148,7 +148,9 @@ undone by the credential rollback — sticky until the next one; drives the roll
 checkbox),
 `hp{proto,rx,tx,connected,last_ok_s,…}`, `profile{id}`,
 `sys{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode}` (heap headroom + last boot reason,
-always present — feeds the Settings ESP32 card's Last-reset and Free-heap rows),
+always present; of these the UI reads only `safe_mode`, for the recovery banner — the heap and reset
+figures are diagnostics served to `/status` readers, the MQTT heartbeat's diagnostic entities and
+`/diag`, and are no longer rows on the ESP32 card),
 `ota{channel}` (`"release"` | `"dev"` — which published feed the next update check reads; the
 SETTING, not the running build, since a device can be set to a channel it has not installed from
 yet — drives the ESP32 card's Update-channel select, §5.4),
@@ -491,7 +493,7 @@ Because that slot is painted straight into the DOM rather than rebuilt from stat
 **freezes while the readout has anything to say** (`S.otaShown`, which covers the terminal messages'
 linger too). Otherwise the once-a-second rebuild would blink the percentage out and restart the
 spinner's animation on every frame — the same hazard the header's `#otaStat` is exempt from
-re-render for. What holds still is a card of static facts plus an uptime counter, for the seconds
+re-render for. What holds still is a card of static facts, for the seconds
 an update takes; the Connections tile beside it keeps updating, since a link dropping mid-download
 is exactly what a user would want to see move.
 
@@ -660,15 +662,18 @@ dashboard — the move changed where the configuration lives, not how it looks:
      from `ntp{server,synced}`. The synced wall clock (`ntp.time`) is **not** shown on this row (no
      room in a one-line tile); it remains available via the MQTT heartbeat's `device_time` sensor and
      `/status.ntp.time`.
-2. **ESP32 card** — the board itself, styled exactly like the value groups (§6): chip (`platform`),
-   uptime (`uptime_s`),
-   **Last reset** (`sys.reset_reason` — warn-coloured on a fault reason: panic / any watchdog /
-   brown-out, neutral on a clean boot) and **Free heap** (`sys.free_heap`, compact e.g. "145 KB"),
+2. **ESP32 card** — the board itself, styled exactly like the value groups (§6):
    the heat-pump link (Online/Offline) and X10A protocol, the **RX/TX pins** — read-only when
    detected, else a usable-GPIO dropdown (§5.2) — and the **Hardware** row (status indicator +
-   recovery-button pins), which opens the board-hardware modal. From `platform`,
-   `uptime_s`, `sys{reset_reason,free_heap}`, `pins_avail`, `hp{proto,rx,tx,connected,last_ok_s}`,
-   `board{…}`. Then the **Version** (`version`) and the **Update channel** select
+   recovery-button pins), which opens the board-hardware modal. From
+   `pins_avail`, `hp{proto,rx,tx,connected,last_ok_s}`,
+   `board{…}`. It carries **no board telemetry** — chip (`platform`), uptime (`uptime_s`),
+   **Last reset** (`sys.reset_reason`) and **Free heap** (`sys.free_heap`) were rows here through
+   v1.0.14 and are gone: Settings states what the board is **set to**, and four read-only numbers
+   nobody acts on from this screen only pushed the settings that ARE actionable further down it.
+   None of it is lost — the running version stays on the card and in the header, and the chip, reset
+   reason, heap headroom and uptime are on `/status`, `/diag` and the MQTT heartbeat's diagnostic
+   entities, which is where a diagnosis is actually made. Then the **Version** (`version`) and the **Update channel** select
    (`ota.channel` → `POST /set_ota`, §5.4). The version being here *as well as* in the dashboard
    header serves two different needs, and each row answers the one its screen asks: the header keeps
    board identity where a user quotes it from, while this row exists so the channel selector under
@@ -689,8 +694,8 @@ marked and the mark would stop meaning anything. A **disabled** link is a choice
 raises nothing. The dot is never the only carrier: the button's `aria-label` states the count in
 words (§9).
 
-**Rebuild rule.** Both cards are rebuilt from `/status` on every push (uptime alone changes each
-second), so the write goes through the same change-guard the rest of the app uses — and the rebuild
+**Rebuild rule.** Both cards are rebuilt from `/status` on every push, so the write goes through the
+same change-guard the rest of the app uses — and the rebuild
 is skipped entirely while an RX/TX dropdown **or the update-channel select** has focus, or the poll
 would collapse it mid-pick. (Any future select on these cards has to join that guard — an open
 native dropdown is destroyed by an `innerHTML` write, and the poll is ~1×/s.)
@@ -708,9 +713,10 @@ the value's register/label (the generator can also stamp a `group` tag per row).
    refrigerant liquid temp, compressor speed, fan step.
 5. **Electrical** — INV primary current, INV compressor current, CT L1/L2/L3, backup-heater
    capacity + stages.
-6. **Device** — WiFi/MQTT/HP link, poll counters, uptime, firmware (WiFi/MQTT and HP
-   link/protocol/uptime in Settings, §5.6 — the Connections tile and the ESP32 card; firmware
-   version in the dashboard's header meta line §5.4; model name in the Model card, §5.3 item 4).
+6. **Device** — WiFi/MQTT/HP link, poll counters, firmware (WiFi/MQTT and HP link/protocol in
+   Settings, §5.6 — the Connections tile and the ESP32 card; firmware version in the dashboard's
+   header meta line §5.4; model name in the Model card, §5.3 item 4). Uptime and the heap/reset
+   diagnostics are not a UI row anywhere — `/status`, `/diag` and the MQTT heartbeat carry them.
 
 Within a group: setpoints next to their measured value; temperatures before pressures before
 currents. Units and `device_class` come from the value `dataType` (1=°C, 2=bar, 3=A). Groups with no
@@ -845,7 +851,9 @@ The design needs these additions to the firmware (all small, tracked as follow-u
 - `POST /set_hp`: **every field is optional** — an omitted key keeps its current value, so the
   Settings ESP32 card posts just `{profile:"auto",rx,tx}` on a pin change. `poll_s` is **not**
   accepted (fixed at 1 s); `proto` is auto-detected and not accepted; there is no value mask.
-- `GET /status`: `uptime_s` (seconds since boot) feeds the Settings ESP32 card's Uptime row.
+- `GET /status`: `uptime_s` (seconds since boot) is no longer a UI row; the app reads it only to
+  detect that the device rebooted under it (§5.4 — an OTA install is confirmed by `uptime_s` going
+  backwards as much as by a new `version`).
 - Optional `group` field on `ValueDef` (or generator-stamped) to drive §6 grouping; until then the
   UI groups by register-id ranges + label keywords.
 - `/models`: returns model lists, `profile_map`, `pin_hint`, per-profile value menu — still served

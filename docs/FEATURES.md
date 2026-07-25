@@ -576,8 +576,9 @@ the fact*, from the field, without a serial cable:
   present on **every** boot, and unlike the heartbeat it needs **no broker**, so "why did it reboot?"
   and "is the heap leaking?" are answerable from the LAN alone. `reset_reason_name()` reuses the
   crash slug vocabulary (one naming for the sys block, the `last_crash`/crash payload and the
-  heartbeat's "Reset Reason" sensor). The
-  Settings ESP32 card renders the reset reason (fault-coloured) and free heap.
+  heartbeat's "Reset Reason" sensor). Of the block the web UI reads only `safe_mode` (the recovery
+  banner) — the reset reason and free heap were rows on the Settings ESP32 card through v1.0.14 and
+  were removed; they are read from `/status`, `/diag` and the heartbeat instead.
 - **✅ Build identity** — `/status.app_elf_sha256` ties a running device to the exact firmware that
   produced any dump, and the syslog boot line (below) puts the same hash in the **log stream**, so a
   captured stream stays attributable to a binary after the device has moved on.
