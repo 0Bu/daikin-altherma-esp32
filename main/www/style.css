@@ -354,6 +354,16 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 /* tappable value row (ESP32 card: Firmware → check for an OTA update, Hardware → the board modal) */
 .vrow-btn { width: 100%; font: inherit; background: none; border: 0; border-top: 1px solid var(--line); cursor: pointer; text-align: left; }
 .vrow-btn:hover .vrow-label, .vrow-btn:hover .vrow-val { color: var(--brand-strong); }
+/* The Firmware row carries the OTA readout (#otaStatSet) beside its version, so the check reports
+   where it was started instead of sending the user to the dashboard for it. Two adjustments to the
+   ordinary value cell, both about a message being longer than a value: it may WRAP to a second line
+   (a value cell is nowrap, and "update failed" would otherwise push the card wider than the screen),
+   staying right-aligned as it does; and the readout drops the cell's mono/600 weight, since it is a
+   sentence in the muted register of the header's copy, not a figure. `.otastat:empty` (line 92)
+   hides it whole whenever no update is in flight, so the row is just "Firmware  v1.2.3" at rest. */
+.vrow-fw .vrow-val { white-space: normal; text-align: right; }
+.vrow-fw .otastat { font-family: var(--font-sans); font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.vrow-fw .otastat.err { color: var(--err); }
 .empty { color: var(--muted); font-size: 14px; padding: 8px 0; }
 
 /* ── Expandable value description (tap a heat-pump value row → its explainer slides down) ─────

@@ -261,6 +261,10 @@ const S = {
   // OTA flow also takes, otaBusy is what keeps a second tap from starting a parallel check.
   otaAvail: null,
   otaBusy: false,
+  // Whether the inline readout currently has something on screen (a ring, a percentage, a terminal
+  // message inside its linger window). It is what freezes the Settings rebuild — see renderSettings.
+  // Not the same thing as otaBusy: the terminal messages are written after the flow has released.
+  otaShown: false,
 };
 
 // ── Navigation (dashboard ⇄ Settings) ────────────────────────────────────
@@ -655,16 +659,19 @@ function channelRow(cur) {
 
 // The firmware row (ESP32 card): the running version, and the SAME OTA trigger the dashboard
 // header's version is — one gesture with one meaning wherever the version is printed. Not a second
-// copy of the flow: the tap runs checkFirmwareUpdate() itself, which reports inline in the header
-// (#otaStat), so the handler navigates there first exactly like onChannelPick does. A version
-// printed beside a channel selector reads as the thing you act on to change it; leaving it inert
-// here while the identical text is tappable one screen away is the inconsistency, not the fix.
+// copy of the flow: the tap runs checkFirmwareUpdate() itself. It does NOT leave the screen. An
+// update is started from here *while reading this card* — the version, the channel it follows, the
+// build it is about to become are all on it — and yanking the user to the dashboard mid-thought to
+// show them a progress ring is the app deciding where they should be looking. So the readout comes
+// to them instead: `#otaStatSet` is the second slot otaInline paints, right after the version, the
+// same place the header keeps its own (`#otaStat`).
 function firmwareRow(version) {
   const title = S.otaAvail ? t("ota.title_avail", S.otaAvail) : t("ota.title_check");
-  return `<button class="vrow vrow-btn" type="button" data-act="ota" ` +
+  return `<button class="vrow vrow-btn vrow-fw" type="button" data-act="ota" ` +
     `aria-label="${esc(t("aria.ota"))}" title="${esc(title)}">` +
     `<span class="vrow-label">${esc(t("card.firmware"))}</span>` +
-    `<span class="vrow-val mono">v${esc(version || "?")}</span></button>`;
+    `<span class="vrow-val mono">v${esc(version || "?")}` +
+    `<span class="otastat" id="otaStatSet" role="status" aria-live="polite"></span></span></button>`;
 }
 
 // ESP32 board status card (on the Settings screen — renderSettings): chip / uptime, the X10A link +
@@ -821,11 +828,24 @@ function renderSettings() {
   // RX/TX pin dropdown is interactive, so skip the rebuild while it is focused/open — otherwise the
   // poll would collapse it mid-pick. It resumes once focus leaves (onPinPick blurs it after
   // applying). setHtml keeps the rest from thrashing rows the user is tapping.
+  //
+  // The OTA readout in the Firmware row is the second reason to hold still, and it is not a
+  // cosmetic one: that readout is painted straight into the DOM by otaInline (it is not built from
+  // S, so a rebuild does not re-emit it), and a download reports for tens of seconds. Rebuilt once
+  // a second, the percentage would blink out and the checking spinner would restart its animation
+  // from zero on every frame — the header's own #otaStat is exempt from re-render for exactly this
+  // reason, and this slot needs the same protection by a different means. So the card freezes while
+  // the readout has anything to say — S.otaShown covers the terminal messages too, which are
+  // written after the flow released and would otherwise be wiped a fraction of a second into their
+  // linger. What freezes is a card of static facts plus an uptime counter, for the seconds an
+  // update takes; the one state that can meaningfully change under it (a new version) arrives with
+  // the page reload the install ends in. It freezes that card ALONE — the Connections tile carries
+  // no part of the readout, and a WiFi or broker link going down during a download is exactly the
+  // thing a user would want to see move.
   const a = document.activeElement;
-  if (!(a && a.classList && (a.classList.contains("pin-sel") || a.classList.contains("chan-sel")))) {
-    setHtml("connTile", connectionsHtml());
-    setHtml("settingsCards", esp32CardHtml());
-  }
+  const picking = !!(a && a.classList && (a.classList.contains("pin-sel") || a.classList.contains("chan-sel")));
+  if (!picking) setHtml("connTile", connectionsHtml());
+  if (!picking && !S.otaShown) setHtml("settingsCards", esp32CardHtml());
   $("settingsVer").textContent = "daikin-altherma-esp32 · v" + (S.status?.version || "?");
   renderSettingsDot();
 }
@@ -2067,9 +2087,11 @@ async function onPinPick() {
 // Picking an update channel saves it (POST /set_ota — live, no reboot) and then immediately runs
 // the normal OTA flow against the newly-selected feed. Doing the check straight away is the point
 // of the pick: nobody switches channel for the setting itself, they switch to get that channel's
-// build, and leaving them to find the version in the header afterwards would make a two-step job
-// out of one. The flow REPORTS in the dashboard header (#otaStat, where a download's percentage
-// ticks in place), so go() there first rather than run it under a screen that cannot show it.
+// build, and leaving them to find the version afterwards would make a two-step job out of one.
+// It stays on this screen. It used to go("dashboard") first, because the readout lived only in that
+// header — a real constraint, but the fix for it was to move the user, and being moved off the card
+// you are configuring is worse than the problem. The Firmware row directly above carries the
+// readout now, so the check reports next to the very version the channel decides.
 async function onChannelPick() {
   const sel = $("e32Chan");
   const channel = sel.value;
@@ -2080,7 +2102,6 @@ async function onChannelPick() {
   } catch { toast(t("toast.unreachable"), "err"); return; }
   toast(t("chan.saved", t(channel === "dev" ? "chan.dev" : "chan.release")), "ok");
   await refreshStatus();
-  go("dashboard");
   checkFirmwareUpdate();
 }
 
@@ -2121,17 +2142,29 @@ function otaRing(pct, indet) {
 // Write the inline readout. `text` is always plain text set via textContent — the only innerHTML is
 // our own ring markup, so a device-supplied /ota/status.message can never reach the DOM as markup.
 // Every write bumps otaSeq, which is what makes the delayed clear below safe.
+//
+// There are TWO slots and both get the same content: the dashboard header's (#otaStat) and the one
+// in the Settings ESP32 card's Firmware row (#otaStatSet). Either screen can start the flow, so
+// either screen has to be able to report it — and painting both unconditionally means a user who
+// switches screens mid-download finds the progress already there rather than gone. Only one is on
+// screen at a time (the other screen's DOM is hidden), so this is not two readouts competing; it is
+// one readout, present wherever the version it belongs to is. A missing slot is skipped, not an
+// error: the Settings one exists only while that card is rendered.
 let otaSeq = 0;
+const OTA_SLOTS = ["otaStat", "otaStatSet"];
 function otaInline(text, { ring = false, pct = null, cls = "" } = {}) {
-  const el = $("otaStat");
-  if (!el) return;
   otaSeq++;
-  el.className = "otastat" + (cls ? " " + cls : "");
-  el.innerHTML = ring ? otaRing(pct, pct == null) : "";
-  if (text) {
-    const span = document.createElement("span");
-    span.textContent = text;
-    el.appendChild(span);
+  S.otaShown = !!(text || ring);          // freezes the Settings rebuild — see renderSettings
+  for (const id of OTA_SLOTS) {
+    const el = $(id);
+    if (!el) continue;
+    el.className = "otastat" + (cls ? " " + cls : "");
+    el.innerHTML = ring ? otaRing(pct, pct == null) : "";
+    if (text) {
+      const span = document.createElement("span");
+      span.textContent = text;
+      el.appendChild(span);
+    }
   }
 }
 // Clear the readout after a terminal message has had time to be read — but ONLY if nothing has been
@@ -2446,14 +2479,14 @@ function wire() {
 
   // The ESP32 card (#settingsCards) is rebuilt every poll too, so its controls are delegated as
   // well: the Hardware row opens the board modal, the Firmware row runs the OTA check, and the
-  // RX/TX dropdowns re-run pin auto-detection on change. The OTA check REPORTS in the dashboard
-  // header (#otaStat — a download ticks its percentage there for tens of seconds), so go() there
-  // first rather than start a flow under a screen that cannot show it, same as onChannelPick.
+  // RX/TX dropdowns re-run pin auto-detection on change. The check stays on this screen — it
+  // reports into the Firmware row's own slot (otaInline paints both slots), so nothing has to
+  // navigate to make the flow visible.
   $("settingsCards").addEventListener("click", (e) => {
     const act = e.target.closest("[data-act]");
     if (!act) return;
     if (act.dataset.act === "board") openBoard();
-    else if (act.dataset.act === "ota") { go("dashboard"); checkFirmwareUpdate(); }
+    else if (act.dataset.act === "ota") checkFirmwareUpdate();
   });
   $("settingsCards").addEventListener("change", (e) => {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();

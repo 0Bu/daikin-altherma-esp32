@@ -452,11 +452,27 @@ progress in that same line, where the page underneath stays readable.
 
 **Tapping the version does the same thing wherever the version is printed as a row of its own** —
 so the **Version** row on the Settings ESP32 card (§5.6) runs the identical check. It is one
-gesture with one meaning, not a second flow: the row calls the same `checkFirmwareUpdate()`, and
-since that reports into the header readout, the tap **returns to the dashboard first** exactly as
-the channel picker below it does. The alternative was worse than a duplicate affordance — a version
-printed directly above a channel selector reads as the thing you act on, and having the identical
-text be tappable one screen away and inert here is the inconsistency a user has to learn.
+gesture with one meaning, not a second flow: the row calls the same `checkFirmwareUpdate()`.
+
+**And it stays on the screen it was tapped on.** The readout has **two slots**, not one — `#otaStat`
+in the header line, `#otaStatSet` in the Firmware row — and `otaInline` paints both with the same
+content, so whichever screen is open is the one reporting. Only one is ever visible (the other
+screen is `display:none`), so this is one readout following the version, not two competing. The
+first version of this row went to the dashboard before starting the check, because the readout
+lived only in the header; that is a constraint being paid for by the user. An update is started
+while *reading this card* — the version, the channel it follows, the build it is about to become
+are all on it — and being thrown to another screen mid-thought, to watch a ring, is the app
+deciding where you should be looking. Moving the readout costs a second `<span>`; moving the user
+costs them their place. **Nothing in the OTA flow navigates** — the only screen change is the page
+**reload** after a successful install, which is a new page, not a jump.
+
+Because that slot is painted straight into the DOM rather than rebuilt from state, the ESP32 card
+**freezes while the readout has anything to say** (`S.otaShown`, which covers the terminal messages'
+linger too). Otherwise the once-a-second rebuild would blink the percentage out and restart the
+spinner's animation on every frame — the same hazard the header's `#otaStat` is exempt from
+re-render for. What holds still is a card of static facts plus an uptime counter, for the seconds
+an update takes; the Connections tile beside it keeps updating, since a link dropping mid-download
+is exactly what a user would want to see move.
 
 - **The status reports inline, in that same line** — a small progress ring plus a short label,
   immediately after the version (`#otaStat`): `192.0.2.159 · v1.2.3 ◔ 78%`. It is deliberately
@@ -480,11 +496,12 @@ text be tappable one screen away and inert here is the inconsistency a user has 
   the ESP32 card (§5.6), a two-option select: *Release* (cut by hand) or *Development* (every merge
   to `main`). It sits directly under the **Version** row, because a channel picker with no
   version beside it asks the user to hold "what am I running" in their head while choosing what to
-  run. Picking one is a live write (`POST /set_ota`, no reboot), and it then **returns to the
-  dashboard and starts the check** — nobody switches channel for the setting itself, they switch to
-  get that channel's build, and the check has to report where the inline readout is. This is the
-  one navigation an ordinary control performs, and it performs it *towards* the screen that can show
-  the result rather than leaving a flow running under one that cannot.
+  run. Picking one is a live write (`POST /set_ota`, no reboot), and it then **starts the check
+  immediately, without leaving the card** — nobody switches channel for the setting itself, they
+  switch to get that channel's build, so making them go and find the version afterwards would be a
+  two-step job. It reports into the Version row directly above, next to the very number the channel
+  decides. (This too used to bounce to the dashboard to reach the readout; that is what the second
+  slot removed. No ordinary control on this screen navigates.)
 - **A backwards switch is stated as one** — Development → Release means installing an **older**
   build, which the device refuses unless the request explicitly asks (`?downgrade=1`). So that
   confirmation is not a courtesy like the ordinary one above: it *is* the permission, and its text
@@ -635,7 +652,8 @@ dashboard — the move changed where the configuration lives, not how it looks:
    header serves two different needs, and each row answers the one its screen asks: the header keeps
    board identity where a user quotes it from, while this row exists so the channel selector under
    it is legible — "which feed do I follow" is unanswerable without "what am I running". What they
-   no longer differ in is **behaviour**: both are the OTA trigger (§5.4). This row was read-only
+   no longer differ in is **behaviour**: both are the OTA trigger, and both carry a readout slot, so
+   the check runs and reports **here**, without leaving Settings (§5.4). This row was read-only
    through v1.0.13 on the reasoning that the header owned the affordance; in use that only made the
    version look inert precisely where a user is already deciding which build to run.
 
