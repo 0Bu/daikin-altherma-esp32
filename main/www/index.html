@@ -25,7 +25,9 @@
       <!-- Identity + firmware meta line: IP (or the mDNS hostname) · running version. The version is
            a BUTTON — tapping it checks for an OTA update — and the whole check/download reports back
            INLINE right here (#otaStat: a small progress ring + "78%"), never as a stack of toasts
-           that hides the page it is talking about (DESIGN.md §5.4). -->
+           that hides the page it is talking about (DESIGN.md §5.4). This is one of TWO readout
+           slots: the Settings ESP32 card's Firmware row carries the other (#otaStatSet, built in
+           app.js), so a check started there reports there instead of dragging the user here. -->
       <div class="hdr-meta">
         <span class="hdr-ip mono num" id="hdrIp"></span>
         <span class="hdr-sep" aria-hidden="true">·</span>

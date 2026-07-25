@@ -1031,9 +1031,12 @@ config endpoints in place:
   `lang`). `/set_hp` accepts only `{profile, rx, tx}`.
 - **Firmware / OTA** — tapping the version runs the real update flow. Both places the version is
   printed as a control are the same trigger (`checkFirmwareUpdate`): the header meta line beside the
-  IP, and the **Version** row on the Settings ESP32 card, which returns to the dashboard first
-  because that is where the flow reports — the same navigation the update-channel picker beside it
-  performs, and for the same reason. The flow itself:
+  IP, and the **Version** row on the Settings ESP32 card. Neither one navigates — the readout has a
+  slot in each (`#otaStat`, `#otaStatSet`) and `otaInline` paints both, so the flow reports on
+  whichever screen started it (only one is ever visible; the other screen is `display:none`). The
+  Settings slot is painted into the DOM rather than rebuilt from state, so `renderSettings` freezes
+  the ESP32 card while `S.otaShown` — otherwise the once-a-second rebuild would blink the percentage
+  out and restart the spinner animation every frame. The flow itself:
   `GET /ota/check`, poll `GET /ota/status` until the check finishes, confirm, `POST
   /ota/update`, then poll again rendering the download progress **inline next to that version**
   (a small ring + "n%", not a toast). On `done` it does **not** use the shared reboot-reconnect poll
