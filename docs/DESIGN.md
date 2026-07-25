@@ -335,10 +335,12 @@ Body, ordered:
    between two *stagnant* sensors is not a stale working point, it is not a working point at all.
    The **electrical input** is the same whenever it is falling back to the
    inverter current (a `0x21` row that freezes too): a stopped compressor is not drawing the 1.4 kW
-   the held current implies, it is drawing ~0. Its sub-label then reads "compressor off · no live
-   reading" rather
-   than the "no current sensor" it shows when the profile genuinely has no such row — the profile has
-   one, it is the *reading* that is not current. The CT-clamp path is unaffected: those sit on a live
+   the held current implies, it is drawing ~0. It blanks with **no sub-label**, like every other held
+   pill — the one vocabulary above applies here too, and the inspector names the reason when the pill
+   is tapped. What it must not do is fall back to the "no current sensor" caption it shows when the
+   profile genuinely has no such row: the profile has one, it is the *reading* that is not current,
+   so that caption would stand a second wrong claim in front of the one just suppressed.
+   The CT-clamp path is unaffected: those sit on a live
    hydronic page, so a non-zero reading at rest is genuine standby draw and is shown normally.
    The run state itself is never affected — the compressor witness (`INV frequency`) sits on a page
    that stays live in every profile, which is what makes "Standby — not running" trustworthy beside
@@ -368,9 +370,12 @@ Body, ordered:
    held-over rule below on its INV source only: the CT clamps sit on a page the unit keeps
    refreshing (a non-zero reading at rest is genuine standby draw and is shown), while the inverter
    current freezes with the rest of the outdoor unit's pages — so with the compressor off the INV
-   fallback is suppressed and the sub-label reads **"compressor off · no live reading"** rather than
-   the "no current sensor" it shows when the profile genuinely has no such row — suppressing one
-   wrong claim must not stand a *second* one in front of it. **The pipes animate in flow
+   fallback is suppressed and the pill simply blanks, with **no sub-label at all**: the drawing has
+   one vocabulary for "no reading right now" and the *reason* is the explainer's job, not a caption
+   in the schematic (tapping the pill says the compressor is off and the inverter current is left
+   over from the last run). What it must not do is fall through to the "no current sensor" it shows
+   when the profile genuinely has no such row — suppressing one wrong claim must not stand a
+   *second* one in front of it, and that one is a claim about the hardware. **The pipes animate in flow
    direction** while the pump runs — supply in `--flow-hot`, return in `--flow-cold`; the 3-way
    valve state switches the animated branch (heating circuit ↔ tank coil), a defrost cycle reverses
    the refrigerant-loop animation and shows a `--flow-cold` "❄ defrost" pill, and an active BUH
@@ -389,8 +394,10 @@ Body, ordered:
    therefore a labelled `role="group"`, never `aria-hidden` — a hidden subtree must not hold focusable
    elements. Tapping the same target again, ✕, or Escape closes the panel.
 3. **Inspector** — the panel directly under the drawing, in the same card, so the explanation and the
-   thing it explains are on screen together. Idle it shows one muted hint line ("Tap a value or
-   component…") — the affordance that the picture is clickable. Selected it shows:
+   thing it explains are on screen together. Idle it shows **nothing** and collapses — the picture's
+   clickability is carried by the hit targets themselves (hover/press feedback, `role="button"`,
+   the SVG's own `aria-label`), and a standing line of instructional copy under an otherwise quiet
+   dashboard is exactly the decorative copy §1.4 rules out. Selected it shows:
    a **title** (the concept in the UI language, e.g. "Leaving water"), the **headline reading** for
    that target (its `/values` row, or the derived figure for ΔT / heat output — an assembly like the
    outdoor unit has no single number and gets no headline rather than a "—" that would read as a

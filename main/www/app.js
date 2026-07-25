@@ -88,17 +88,11 @@ const I18N = {
     // static index.html markup (data-i18n)
     "schem.outdoor_unit": "OUTDOOR UNIT", "schem.defrost_pill": "❄ defrost", "schem.outdoor": "Outdoor",
     "schem.est": "estimated",
-    "insp.hint": "Tap a value or component in the diagram for an explanation.",
     "insp.close": "Close",
     "schem.leaving_water": "leaving water · pre-BUH", "schem.dhw_tank": "DHW TANK", "schem.set": "set",
     "schem.heating": "HEATING", "schem.pump": "PUMP", "schem.return": "return", "schem.room": "Room",
     "kpi.target": "target",
     "schem.est_src": (s) => "estimated · " + s, "schem.no_ct": "no current sensor",
-    // A THIRD state, distinct from "no current sensor": the sensor exists, but it is the outdoor
-    // unit's inverter current on a page that stops refreshing while the compressor is off (see
-    // d.pel / logic/ou_stale.hpp). Saying "no current sensor" there would be a second wrong claim
-    // standing in for the first one we just suppressed.
-    "schem.pel_held": "compressor off · no live reading",
     "wifi.title": "WiFi configuration", "wifi.ssid": "WiFi network (SSID)", "wifi.pass": "WiFi password",
     "wifi.err_ssid": "SSID must be 32 characters or less",
     "wifi.err_pass": "Password must be empty (open network) or between 8 and 63 characters",
@@ -190,13 +184,11 @@ const I18N = {
     // static index.html markup (data-i18n)
     "schem.outdoor_unit": "AUSSENEINHEIT", "schem.defrost_pill": "❄ Abtauen", "schem.outdoor": "Außen",
     "schem.est": "geschätzt",
-    "insp.hint": "Tippe im Schema auf einen Wert oder ein Bauteil für eine Erklärung.",
     "insp.close": "Schließen",
     "schem.leaving_water": "Vorlauf · vor BUH", "schem.dhw_tank": "WW-SPEICHER", "schem.set": "Soll",
     "schem.heating": "HEIZUNG", "schem.pump": "PUMPE", "schem.return": "Rücklauf", "schem.room": "Raum",
     "kpi.target": "Ziel",
     "schem.est_src": (s) => "gesch. · " + s, "schem.no_ct": "kein Stromsensor",
-    "schem.pel_held": "Verdichter aus · kein aktueller Messwert",
     "wifi.title": "WLAN-Konfiguration", "wifi.ssid": "WLAN-Netzwerk (SSID)", "wifi.pass": "WLAN-Passwort",
     "wifi.err_ssid": "SSID darf höchstens 32 Zeichen haben",
     "wifi.err_pass": "Passwort muss leer (offenes Netz) oder 8–63 Zeichen lang sein",
@@ -1364,7 +1356,8 @@ function liveData() {
   d.pel = cts.length && ct > 0 ? ct * 230 / 1000 : invLive ? inv * 230 / 1000 : null;
   d.pelSrc = cts.length && ct > 0 ? "CT" : "INV";
   // Why the pill is blank, when it is: the INV source EXISTS but is frozen, which is a different
-  // statement from "this profile has no current sensor" (the sub-label's other empty case).
+  // statement from "this profile has no current sensor" (the sub-label's other empty case) — so the
+  // sub-label stays silent here and the explainer says which of the two it is.
   d.pelHeld = d.pel == null && d.ouHeldOver && inv != null;
   const running = (d.rps ?? 0) > 5 && (d.dt ?? 0) > 0.5;
   d.cop = running && d.pth != null && d.pel != null && d.pel > 0.2 ? d.pth / d.pel : null;
@@ -1470,8 +1463,13 @@ function renderLive() {
   setTxt("svPel", fmt1(d.pel));
   // The source is part of the reading, not trivia: CT clamps measure the whole unit, the inverter
   // current only the compressor — so an INV-based estimate misses the backup heater entirely.
+  // The HELD-OVER case gets NO sub-label: a blanked pill is the drawing's whole vocabulary for "no
+  // reading right now" (d.ouHeldOver, logic/ou_stale.hpp), and a caption explaining WHY belongs in
+  // the explainer, not in the schematic — the pel inspector entry carries that sentence. It must
+  // still not fall through to "no current sensor", which is a claim about the HARDWARE and false
+  // here: the profile has the row, only the reading is stale.
   setTxt("svPelSrc", d.pel != null ? t("schem.est_src", d.pelSrc)
-                   : d.pelHeld ? t("schem.pel_held") : t("schem.no_ct"));
+                   : d.pelHeld ? "" : t("schem.no_ct"));
 
   renderInspect();     // keep an open explainer's reading/state sentence current
 }
@@ -1797,7 +1795,6 @@ function renderInspect() {
   const sig = inspectSig(e);
   if (sig === S.inspSig) return;
   S.inspSig = sig;
-  $("inspHint").hidden = !!e;
   $("inspCard").hidden = !e;
   document.querySelectorAll("#schem .sc-hit").forEach((el) => el.classList.toggle("sel", el.dataset.insp === S.insp));
   if (!e) return;

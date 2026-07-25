@@ -294,11 +294,12 @@
             </div>
             <!-- Inspector: filled by renderInspect() when a schematic hit target is tapped. Sits in
                  the same card, directly under the drawing, so the explanation and the thing it
-                 explains are visible together. With nothing selected it shows the discovery hint —
-                 the affordance for "this picture is clickable". Its live half (reading, state
-                 sentence, row values) re-renders every poll while it is open. -->
+                 explains are visible together. With nothing selected it collapses to nothing — the
+                 "tap something" affordance lives in the drawing's own aria-label (and in the hit
+                 targets' hover/press feedback), not as a line of copy under every idle dashboard.
+                 Its live half (reading, state sentence, row values) re-renders every poll while it
+                 is open. -->
             <div class="inspect" id="inspect">
-              <div class="inspect-hint" id="inspHint" data-i18n="insp.hint">Tap a value or component in the diagram for an explanation.</div>
               <div class="inspect-card" id="inspCard" hidden>
                 <div class="inspect-head">
                   <div class="inspect-id">

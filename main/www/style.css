@@ -229,8 +229,9 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 /* ── Inspector panel (under the schematic, same card) ────────────────────────────────────────
    Reuses the value-row explainer copy (DESCRIPTIONS) so "what is this / what's normal" has ONE
    source; the live half (reading, state sentence, member rows) is rebuilt from the poll cache. */
+/* Empty until something is tapped: the container carries margin only, so an unselected inspector
+   collapses to nothing rather than reserving a slot for a placeholder line. */
 .inspect { margin: 4px 6px 6px; }
-.inspect-hint { font-size: 12.5px; color: var(--muted); padding: 6px 2px; }
 .inspect-card {
   background: var(--brand-tint); border: 1px solid var(--line); border-radius: var(--r-tile);
   padding: 12px 14px;
@@ -514,7 +515,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   .vdesc-body { font-size: 15px; }
   .conn-row { padding: 14px 0; }
   .vrow, .vname { padding-top: 11px; padding-bottom: 11px; }
-  .inspect-hint, .inspect-src { font-size: 13.5px; }
+  .inspect-src { font-size: 13.5px; }
   .inspect-title { font-size: 13.5px; }
   .inspect-now { font-size: 21px; }
   .inspect-body { font-size: 15px; }
