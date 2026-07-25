@@ -46,15 +46,18 @@ If you touch the audit itself, also run `tools/domain/selftest.sh` — it re-int
 the audit was built for into a throwaway copy and asserts all four are still caught. A checker that
 has stopped checking turns "clean" from evidence into a lie.
 
-Two more fast gates guard the **published artifacts** rather than the firmware, so most PRs never
+Three more fast gates guard the **published artifacts** rather than the firmware, so most PRs never
 need them locally — run them if you touch
 [`scripts/publish-pages-branch.sh`](scripts/publish-pages-branch.sh),
-[`scripts/build-pages.sh`](scripts/build-pages.sh) or
-[`scripts/check-web-installer-plan.py`](scripts/check-web-installer-plan.py):
+[`scripts/build-pages.sh`](scripts/build-pages.sh),
+[`scripts/check-web-installer-plan.py`](scripts/check-web-installer-plan.py),
+[`scripts/check-publish-version.sh`](scripts/check-publish-version.sh) or
+[`scripts/next-version.sh`](scripts/next-version.sh):
 
 ```bash
 scripts/run-pages-publish-tests.sh         # CI gates step 3 — needs only git, no toolchain
 scripts/run-web-installer-plan-tests.sh    # CI gates step 4 — needs only python3
+scripts/run-publish-version-tests.sh       # CI gates step 5 — git + python3 + a C++17 compiler
 ```
 
 The first races two publishers against a throwaway bare repo, because `gh-pages` has two concurrent
@@ -70,9 +73,22 @@ tests prove it still *rejects* a part that erases `nvs`, a path outside the mani
 directory in place of an image and malformed JSON. A checker that only sees valid input is not
 evidence.
 
-All four are **steps of one `gates` job**, not a job each. Actions bills every job rounded up to
-the next whole minute, so four ~15-second jobs cost four minutes for under a minute of work; a
-step boundary names the failure just as precisely.
+The third covers [`check-publish-version.sh`](scripts/check-publish-version.sh), which the build job
+runs right after it stamps the version: **would a device on the currently-published build accept the
+one this run would publish?** The published version is read out of the `gh-pages` branch (per feed —
+root for a release, `dev/` for a merge) and the comparison is the device's own `ota_is_upgrade()`
+([`logic/version_cmp.hpp`](main/logic/version_cmp.hpp), via
+[`tools/version/publish_gate.cpp`](tools/version/publish_gate.cpp)), so CI cannot publish something
+no board would install. It exists because the version is *derived*: `next-version.sh` reads the `v*`
+tag list and falls back to the `version.txt` floor when it is empty, so a deleted tag silently
+resets the numbering — on 2026-07-24 that republished the dev feed as `1.0.0-dev.168` over the
+`1.0.14-dev.2` it had served minutes earlier, with a green build. If this gate fires, fix the floor
+(a tag, or `version.txt`) — not the gate.
+
+All five are **steps of one `gates` job**, not a job each (the version gate above runs in `build`,
+where the stamped version exists; only its tests are a `gates` step). Actions bills every job
+rounded up to the next whole minute, so five ~15-second jobs cost five minutes for under a minute
+of work; a step boundary names the failure just as precisely.
 
 ## Building the firmware
 

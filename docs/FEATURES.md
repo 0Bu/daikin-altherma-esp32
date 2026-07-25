@@ -214,6 +214,21 @@ See [`ARCHITECTURE.md` → OTA, signing, partitions](ARCHITECTURE.md) and
   image's app descriptor and **fails the build** if the two disagree, so the running image, the
   release tag and the manifest can't drift apart: OTA compares the manifest against the version the
   running app reports, making a mismatch a permanent re-download loop rather than a cosmetic slip.
+- **✅ Publish-version gate — the feed may not move backwards**
+  ([`check-publish-version.sh`](../scripts/check-publish-version.sh),
+  [`publish_gate.cpp`](../tools/version/publish_gate.cpp)). The check above pins the version to *this
+  build's* image; this one pins it to what the feed **already serves**. Right after stamping, the
+  build job reads the published version out of the `gh-pages` branch — root for a release, `dev/`
+  for a merge — and asks the device's own `ota_is_upgrade()` whether a board on that build would
+  accept the new one; a release additionally has to be a plain version, since ordering alone would
+  happily put a `-dev.N` build on the hand-cut feed. Necessary because the stamped version is
+  *derived*: `next-version.sh` reads the `v*` tag list and falls back to the `version.txt` floor when
+  it is empty, so a deleted tag resets the numbering with nothing failing. That is not hypothetical
+  — on 2026-07-24 the repository's tags were deleted and the next merge republished `dev/` as
+  `1.0.0-dev.168` over the `1.0.14-dev.2` it had served minutes earlier, green build, every device
+  correctly refusing an "update" that went backwards. Tested by
+  [`run-publish-version-tests.sh`](../scripts/run-publish-version-tests.sh) (a CI `gates` step),
+  including that exact regression.
 - **✅ 🧪 Boot-loop safe mode (config recovery)** ([`safe_mode.cpp`](../main/safe_mode.cpp),
   [`logic/boot_guard.hpp`](../main/logic/boot_guard.hpp)): a **different** failure class from the image
   rollback above — both OTA slots share the same `daik_cfg` NVS, so rolling back the *image* can't fix

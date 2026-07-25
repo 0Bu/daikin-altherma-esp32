@@ -52,15 +52,23 @@ scripts/run-mock-tests.sh    # compile + run host logic tests in seconds (cmake 
 scripts/run-domain-audit.sh  # is the value catalog physically RIGHT? (the domain-correctness gate)
 ```
 
-(Two more fast gates guard the PUBLISHED ARTIFACTS rather than the firmware —
+(Three more fast gates guard the PUBLISHED ARTIFACTS rather than the firmware —
 `scripts/run-pages-publish-tests.sh`, git-only, relevant when `scripts/publish-pages-branch.sh` or
-`scripts/build-pages.sh` changes, and `scripts/run-web-installer-plan-tests.sh`, python-only, the
-NEGATIVE half of the NVS-preservation gate: CI already ran `check-web-installer-plan.py` on the
-real manifest, which only ever proved a good plan passes. See CONTRIBUTING.md.)
+`scripts/build-pages.sh` changes; `scripts/run-web-installer-plan-tests.sh`, python-only, the
+NEGATIVE half of the NVS-preservation gate (CI already ran `check-web-installer-plan.py` on the
+real manifest, which only ever proved a good plan passes); and
+`scripts/run-publish-version-tests.sh`, which covers `scripts/check-publish-version.sh` — the
+build job's answer to "would a device on the PUBLISHED build accept the one we are about to
+publish?", asked with the device's own `ota_is_upgrade()` against the gh-pages manifest of the feed
+being written. That one exists because the version is DERIVED: `next-version.sh` reads the `v*` tag
+list and falls back to the `version.txt` floor when it is empty, so a deleted tag silently resets
+the numbering — on 2026-07-24 it republished dev/ as 1.0.0-dev.168 over 1.0.14-dev.2, green. See
+CONTRIBUTING.md.)
 
-All four are STEPS of CI's single `gates` job, which the firmware `build` job `needs` — not a job
-each. Actions bills every JOB rounded up to a whole minute, so four ~15 s jobs cost 4 billed
-minutes for well under one minute of work. The same budget rule shapes the rest of
+All five are STEPS of CI's single `gates` job, which the firmware `build` job `needs` — not a job
+each (the version gate itself runs inside `build`, where the stamped version exists; only its tests
+are a `gates` step). Actions bills every JOB rounded up to a whole minute, so five ~15 s jobs cost
+5 billed minutes for well under one minute of work. The same budget rule shapes the rest of
 `.github/workflows/build.yml`, and it is worth knowing before editing it: the ~5-minute firmware
 build is SKIPPED (not failed — a skipped job still reports its check, which is why the gate is a
 per-job `if:` and never a workflow-level `paths-ignore:`) when the diff touches nothing the image
