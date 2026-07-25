@@ -704,10 +704,18 @@ static void test_config_model() {
 
     // "altherma3_r_erga" is >15 chars: past libstdc++'s SSO buffer, so this is the case that would
     // heap-allocate if apply_model copied instead of swapping (config.cpp calls it under the mutex).
-    apply_model(live, "altherma3_r_erga", 0x5u, 80, "1234");
+    apply_model(live, "altherma3_r_erga", 0x5u, -1, 80, "1234");
     CHECK(live.profile == "altherma3_r_erga");
-    CHECK(live.fp_pages == 0x5u && live.fp_kw_tenths == 80 && live.fp_eeprom == "1234");
+    CHECK(live.fp_pages == 0x5u && live.fp_eeprom == "1234");
     CHECK(live.fp_valid);                              // a committed model is always valid
+    // The two capacities are carried SEPARATELY and neither stands in for the other. This is the real
+    // shape of a unit with a short 0x00 descriptor (no O/U capacity at all) beside an indoor unit
+    // that does report 8.0 kW. Folding the I/U code into fp_kw_tenths would publish the indoor unit's
+    // size as the outdoor unit's — wrong for any plant whose halves differ, e.g. a 6 kW outdoor unit
+    // under an 8 kW indoor unit, which is an ordinary pairing.
+    CHECK(live.fp_kw_tenths == -1 && live.fp_iu_kw_tenths == 80);
+    apply_model(live, "altherma3_r_erga", 0x5u, 60, 80, "1234");
+    CHECK(live.fp_kw_tenths == 60 && live.fp_iu_kw_tenths == 80);   // both kept, both distinct
     CHECK(live.rx_pin == 16 && live.tx_pin == 17);     // model patch leaves the link alone
     CHECK(live.wifi_ssid == "new-net");                // ...and the credentials
     CHECK(live.mqtt_uri == "mqtts://broker.lan");

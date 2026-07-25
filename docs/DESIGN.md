@@ -156,8 +156,10 @@ SETTING, not the running build, since a device can be set to a channel it has no
 yet — drives the ESP32 card's Update-channel select, §5.4),
 `last_crash` (`null` on a clean boot, else `{reason,reason_code,fault,coredump,task,pc,backtrace[],
 corrupted,elf_sha256}` — drives the crash banner),
-`detect{proto,valid,capacity_kw,ou_eeprom,candidates[],families[],ambiguous,model{name,family,
-marketing}}` (drives the dashboard ESP32 board card + the read-only model card).
+`detect{proto,valid,capacity_kw,capacity_kw_iu,ou_eeprom,candidates[],families[],ambiguous,
+model{name,family,marketing}}` (drives the dashboard ESP32 board card + the read-only model card;
+the two capacities are the outdoor unit's own report and the indoor unit's rated code — separate
+figures for separate halves of the plant, never one with a silent fallback).
 
 ## 5. View specs
 
@@ -437,9 +439,26 @@ Body, ordered:
    has — long-term analysis belongs to Home Assistant/Grafana, which hold the real series.
 4. **Model card** — styled exactly like the value groups (§6), full-width below the live section:
    the model name (full-width heading) + detected capacity, from `detect{capacity_kw,
-   model}`. Both are bus-derived, so they show **only while the link is live** (`hp.connected`):
-   offline the name degrades to the brand "Daikin Altherma" and the capacity is hidden — never a
-   cached fingerprint read as live. There is **no** "Detection: auto/manual" row (fully automatic).
+   capacity_kw_iu, model}`. Both are bus-derived, so they show **only while the link is live**
+   (`hp.connected`): offline the name degrades to the brand "Daikin Altherma" and the capacity is
+   hidden — never a cached fingerprint read as live. There is **no** "Detection: auto/manual" row
+   (fully automatic).
+   **Capacity names its unit.** Many units never report an outdoor capacity at all (a short `0x00`
+   descriptor), and the card then showed *no* capacity while the device knew the indoor unit's rated
+   code the whole time. So the row falls back to `capacity_kw_iu` under its own label — "Capacity
+   (indoor unit)" — rather than filling the same row silently: the two halves of a plant are
+   routinely different sizes (a 6 kW outdoor unit under an 8 kW indoor unit is an ordinary pairing),
+   so an unlabelled fallback would state a figure for the wrong unit. Same rule as §8's blanking —
+   a reading is shown with what it actually is, or not at all.
+   **The brand heading explains itself.** "Daikin Altherma" is shown whenever detection cannot name
+   one model, and on its own that reads like a *failure* — the complaint it produced was "why is my
+   model not recognised?" when detection had in fact succeeded as far as the bus permits. So when the
+   name is withheld (`families.length > 1`) the card names the families still in play — "3 M · 3 H ·
+   3 R · LT / older", the shared "Altherma " prefix dropped so four fit one row — and, whenever the
+   fingerprint is valid, the **outdoor unit ID** (`ou_eeprom`) verbatim in mono. Those digits are the
+   one identifier that can settle it, and only a person holding the nameplate can: the firmware has
+   no digit→name table and must not invent one. A *unique* identification shows neither row — it
+   needs no list of what it isn't.
    The **ESP32** card that used to sit above it is in Settings now (§5.6): this card is the *unit*,
    that one is the *board*.
 5. **Value groups** (§6) as cards, each a label→value·unit table, tabular numbers; every value of the

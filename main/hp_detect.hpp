@@ -17,6 +17,10 @@ struct DetectResult {
     int         tx        = -1;
     uint32_t    page_mask = 0;           // pages that answered (logic/detect.hpp page_bit)
     int         kw_tenths = -1;          // O/U capacity in 0.1 kW; -1 = unknown
+    // I/U capacity code (reg 0x60/6, same 0.1 kW units); -1 = unknown. Detection uses it only to RANK
+    // the representative, but it is reported out so /status can show a capacity for the units whose
+    // short 0x00 descriptor never carries the O/U one (logic/config_model.hpp fp_iu_kw_tenths).
+    int         iu_kw_tenths = -1;
     std::string eeprom;                  // rendered O/U EEPROM digits ("" if page 0x11 absent)
     std::vector<std::string> candidates; // register-equivalent model ids (empty = none → generic)
     std::string best;                    // single best-fit id to READ with ("" = none → generic)

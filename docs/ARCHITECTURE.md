@@ -604,6 +604,13 @@ just-wired unit is still identified promptly. A pass does:
    smaller unit returns a short reply that omits offset 12 (see [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md)),
    leaving the O/U capacity unknown. When it is absent, the **I/U capacity code** (page `0x60` offset 6,
    same 0.1 kW units) is captured as a fallback so the model can still be classed.
+   Both capacities are carried into the fingerprint (`fp_kw_tenths` / `fp_iu_kw_tenths`) and reported
+   **separately** on `/status.detect` (`capacity_kw` / `capacity_kw_iu`). The I/U code was previously
+   consumed inside the ranking and then dropped, which left the Model card with no capacity at all on
+   every unit with a short descriptor. They are kept apart rather than merged because they measure
+   different halves of the plant and are routinely different sizes — a 6 kW outdoor unit under an
+   8 kW indoor unit is an ordinary pairing — so a merged field would report one unit's size under
+   the other's name. The UI labels which one it shows.
 4. **Raw dump** — the wire bytes of pages `0x00`, `0x10`, `0x20`, `0xA0` and `0xA1` go to `/diag`, one
    line each (`logic/hexdump.hpp`), only on a detect pass. Every other surface the device offers is
    *decoded*, so an impossible reading cannot be attributed to a wrong converter vs. a wrong byte
@@ -648,13 +655,16 @@ which own the credential fields and are serialized on the single httpd task.
   flag bits (e.g. an ERGA split vs an EBLA monobloc differ by one bit with identical labels), so the
   exact model **cannot** be determined from bus data. The UI reports this honestly — the distinct
   candidate **families** plus the O/U EEPROM digits to match the nameplate — rather than asserting a
-  guessed name. The EEPROM is **not** decoded to a model name (no digit→name table; the one real path
-  to exact ID would need an external EEPROM-code table).
+  guessed name. Both are on the dashboard's Model card, beneath the brand heading
+  ([`DESIGN.md`](DESIGN.md) §5.3 item 4), for a concrete reason: the brand alone reads as a *failed*
+  detection, and was reported as one. The EEPROM is **not** decoded to a model name (no digit→name
+  table; the one real path to exact ID would need an external EEPROM-code table).
 - **none, bus answered** → the **generic Altherma profile** (`def/registry.hpp` `generic[]` = the ≥95%
   universal register core), so an unrecognized or S-protocol unit still reports every essential value.
 - **no bus** → stays `auto` and retries; the UI reports the unit isn't responding (check X10A wiring).
 
-The resolved `profile` and fingerprint (`fp_pages`/`fp_kw`/`fp_eeprom`) live only in the in-RAM config
+The resolved `profile` and fingerprint (`fp_pages`/`fp_kw_tenths`/`fp_iu_kw_tenths`/`fp_eeprom`) live
+only in the in-RAM config
 — **the model is never persisted**, so it is re-identified on **every boot** (a unit moved to another
 pump is always re-detected; no stale model survives a reset). The `proto`/`rx_pin`/`tx_pin` link cache
 *is* persisted (see above). Within the session, `/status.detect` recomputes the candidates, their

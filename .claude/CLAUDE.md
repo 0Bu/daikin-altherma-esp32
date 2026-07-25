@@ -917,10 +917,22 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   reason/summary from the boot-time cache, `coredump` re-read from flash per request
                   so a cleared dump can't strand the banner; drives the crash banner, whose title keys
                   on `fault` — an orphan dump alone is NOT "restarted after a crash"),
-                  detect{proto,valid,capacity_kw,ou_eeprom,candidates[],families[],ambiguous,
+                  detect{proto,valid,capacity_kw,capacity_kw_iu,ou_eeprom,candidates[],families[],
+                  ambiguous,
                   model{name,family,marketing}} — drives the SETTINGS ESP32 board card (behind the
                   header gear, with the Connections tile; the dashboard keeps the model card + values)
-                  and the dashboard's model card.
+                  and the dashboard's model card. TWO capacities, separate fields, never merged:
+                  capacity_kw is the OUTDOOR unit's own report (page 0x00/12) and is null whenever the
+                  variable-length descriptor is too short to carry offset 12; capacity_kw_iu is the
+                  INDOOR unit's rated code (0x60/6, same units), which detection already reads as its
+                  ranking fallback and which is now carried through the fingerprint
+                  (config fp_iu_kw_tenths) so the card can show a capacity for the many units that
+                  never report the O/U one. They are NOT interchangeable — a 6 kW outdoor unit under
+                  an 8 kW indoor unit is an ordinary pairing — so the UI labels which unit it is
+                  showing rather than substituting one figure for the other. All three unit facts
+                  (both capacities + ou_eeprom) are gated on fp_valid, like candidates[]: POST /detect
+                  clears the fingerprint, and reporting the PREVIOUS unit's figures through that
+                  window is the stale-fingerprint-as-live-reading case DESIGN.md rules out.
                   RX/TX are auto-detected: read-only on the card while the bus answers, a pins_avail
                   dropdown (re-runs detection) when it doesn't.
 GET  /values      decoded readings [{label,value,unit,reg}]. `reg` is the X10A register PAGE the row

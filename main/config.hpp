@@ -32,7 +32,8 @@ bool config_save_link(int rx_pin, int tx_pin, Protocol proto);
 
 // Commit ONLY the detected model (profile + fingerprint) to the live config. RAM-only and
 // unfailable: the model is session-only and re-derived on every boot, so it is never persisted.
-void config_set_model(std::string profile, uint32_t fp_pages, int fp_kw_tenths, std::string fp_eeprom);
+void config_set_model(std::string profile, uint32_t fp_pages, int fp_kw_tenths, int fp_iu_kw_tenths,
+                      std::string fp_eeprom);
 
 // Publish a whole config to the in-RAM singleton WITHOUT touching NVS. Used by POST /detect to reset
 // the session-only model back to the "auto" sentinel; the detection path itself commits through the

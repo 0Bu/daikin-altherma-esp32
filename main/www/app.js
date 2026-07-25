@@ -52,6 +52,10 @@ const I18N = {
     "card.model": "Model", "card.hplink": "Heat-pump link", "card.online": "Online",
     "card.offline": "Offline", "card.protocol": "Protocol", "card.rxpin": "RX pin",
     "card.txpin": "TX pin", "card.capacity": "Capacity",
+    // Named for the unit it came from: the indoor unit's rated code stands in only when the outdoor
+    // unit reports no capacity, and the two are routinely different sizes.
+    "card.capacity_iu": "Capacity (indoor unit)",
+    "card.candidates": "Possible models", "card.oueeprom": "Outdoor unit ID",
     "values.waiting": "Waiting for the first poll…",
     "group.Operation": "Operation", "group.Domestic hot water": "Domestic hot water",
     "group.Water circuit": "Water circuit", "group.Refrigerant / outdoor": "Refrigerant / outdoor",
@@ -150,6 +154,8 @@ const I18N = {
     "card.model": "Modell", "card.hplink": "Wärmepumpen-Verbindung", "card.online": "Online",
     "card.offline": "Offline", "card.protocol": "Protokoll", "card.rxpin": "RX-Pin",
     "card.txpin": "TX-Pin", "card.capacity": "Leistung",
+    "card.capacity_iu": "Leistung (Inneneinheit)",
+    "card.candidates": "Mögliche Modelle", "card.oueeprom": "Kennung Außeneinheit",
     "values.waiting": "Warte auf die erste Abfrage…",
     "group.Operation": "Betrieb", "group.Domestic hot water": "Warmwasser",
     "group.Water circuit": "Wasserkreis", "group.Refrigerant / outdoor": "Kältemittel / Außen",
@@ -688,6 +694,11 @@ function boardRow() {
     `<span class="vrow-val mono">${esc(led)} · ${esc(btn)}</span></button>`;
 }
 
+// Every family name in def/model_names.hpp starts with "Altherma ", and the Model card's own heading
+// already says the brand — dropping the prefix is what lets four families share one row ("3 M · 3 H ·
+// 3 R · LT / older") instead of wrapping into three lines of repeated words.
+const shortFamily = (f) => String(f).replace(/^Altherma\s+/, "");
+
 // The dashboard's Model card, from /status.detect (the detected unit). The ESP32 card that used to
 // sit above it is on the Settings screen now (renderSettings), as are the WiFi/MQTT/Syslog/NTP rows
 // (connectionsHtml) — what the plant IS stays on the dashboard, what the board is SET TO moved.
@@ -699,7 +710,29 @@ function statusCardsHtml() {
   // (from the cached fingerprint) is shown ONLY while connected — never a stale value read as live.
   // No "Detection: auto/manual" row: detection is fully automatic, an internal detail.
   let model = `<div class="vname">${esc(hpModelName())}</div>`;
-  if (hp.connected && d.capacity_kw != null) model += vrow(t("card.capacity"), String(d.capacity_kw), { unit: "kW" });
+  // Capacity: the OUTDOOR unit's own report when it makes one, else the INDOOR unit's rated code
+  // under its OWN label. Never merged into one row and never silently substituted — the two halves
+  // of a plant are routinely different sizes (a 6 kW outdoor unit under an 8 kW indoor unit is an
+  // ordinary pairing), so an unlabelled fallback would state a figure for the wrong unit. The
+  // fallback matters because a unit whose 0x00 descriptor is too short to carry offset 12 never
+  // reports an O/U capacity at all, and this card then showed no capacity whatsoever.
+  if (hp.connected && d.capacity_kw != null)
+    model += vrow(t("card.capacity"), String(d.capacity_kw), { unit: "kW" });
+  else if (hp.connected && d.capacity_kw_iu != null)
+    model += vrow(t("card.capacity_iu"), String(d.capacity_kw_iu), { unit: "kW" });
+  // Why the heading says only "Daikin Altherma": several register-identical profiles from DIFFERENT
+  // marketing families fit this unit equally well, so no single name can honestly be asserted
+  // (hpModelName). Naming the families that remain turns a card reading like a FAILED detection into
+  // what it actually is — one that succeeded as far as the bus permits. Shown only while the name is
+  // withheld; a unique identification needs no list of what it isn't.
+  const fams = d.families || [];
+  if (hp.connected && d.valid && fams.length > 1)
+    model += vrow(t("card.candidates"), fams.map(shortFamily).join(" · "));
+  // The O/U EEPROM digits are the one identifier that CAN settle it — against the nameplate, by a
+  // person. Deliberately not decoded to a name (no digit→name table exists anywhere in the repo), so
+  // they are shown verbatim, monospaced, to be compared character by character.
+  if (hp.connected && d.valid && d.ou_eeprom)
+    model += vrow(t("card.oueeprom"), d.ou_eeprom, { cls: "mono" });
 
   // Model identity is only meaningful while the bus answers — hide the card entirely when the
   // heat-pump link is down instead of naming a unit (or showing a stale capacity) that isn't live.
@@ -2075,6 +2108,7 @@ function signalBars(rssi) {
 }
 
 // ── Heat pump (model identity + wiring) ──────────────────────────────────
+
 // Dashboard header / Model-card name: the auto-detected model, asserted ONLY when detection is
 // unambiguous. Several register-identical families (ambiguous) or a generic fallback read as the
 // brand — matching the honest Model card, never claiming e.g. an EBLA monobloc for a register-
