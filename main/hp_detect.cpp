@@ -190,9 +190,10 @@ DetectResult hp_detect_run() {
         eeprom_render(fp.eeprom, 6, ee, static_cast<int>(sizeof(ee)));
     }
 
-    r.page_mask = fp.page_mask;
-    r.kw_tenths = fp.kw_tenths;
-    r.eeprom    = ee;
+    r.page_mask    = fp.page_mask;
+    r.kw_tenths    = fp.kw_tenths;
+    r.iu_kw_tenths = fp.iu_kw_tenths;
+    r.eeprom       = ee;
 
     // 5. Narrow to the best-fitting candidate profiles.
     int nsig = 0;

@@ -186,10 +186,11 @@ void config_load() {
     }
     c.proto        = parse_protocol(nvs_get_str("proto", CONFIG_DAIKIN_PROTOCOL));
     c.profile      = "auto";
-    c.fp_pages     = 0;
-    c.fp_kw_tenths = -1;
-    c.fp_eeprom    = "";
-    c.fp_valid     = false;
+    c.fp_pages        = 0;
+    c.fp_kw_tenths    = -1;
+    c.fp_iu_kw_tenths = -1;
+    c.fp_eeprom       = "";
+    c.fp_valid        = false;
     publish(c);
 }
 
@@ -291,9 +292,11 @@ bool config_save_link(int rx_pin, int tx_pin, Protocol proto) {
 
 // RAM-only by design: the model is re-detected every boot, so there is nothing to persist and no
 // failure to report. Allocation happens at the call site, not under the lock (apply_model swaps).
-void config_set_model(std::string profile, uint32_t fp_pages, int fp_kw_tenths, std::string fp_eeprom) {
+void config_set_model(std::string profile, uint32_t fp_pages, int fp_kw_tenths, int fp_iu_kw_tenths,
+                      std::string fp_eeprom) {
     Lock lk(g_mtx);
-    apply_model(g_cfg, std::move(profile), fp_pages, fp_kw_tenths, std::move(fp_eeprom));
+    apply_model(g_cfg, std::move(profile), fp_pages, fp_kw_tenths, fp_iu_kw_tenths,
+                std::move(fp_eeprom));
 }
 
 // Whole-struct RAM publish (no NVS). Sole caller is POST /detect (http_config.cpp), which resets

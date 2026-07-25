@@ -259,11 +259,32 @@ static std::string build_status_json_string() {
     j += "\"detect\":{\"proto\":" + jstr(std::string(1, static_cast<char>(c.proto)));
     j += ",\"rx\":" + std::to_string(c.rx_pin) + ",\"tx\":" + std::to_string(c.tx_pin);
     j += ",\"valid\":" + std::string(c.fp_valid ? "true" : "false");
-    if (c.fp_kw_tenths >= 0)
-        j += ",\"capacity_kw\":" + std::to_string(c.fp_kw_tenths / 10) + "." + std::to_string(c.fp_kw_tenths % 10);
-    else
-        j += ",\"capacity_kw\":null";
-    j += ",\"ou_eeprom\":" + jstr(c.fp_eeprom);
+    // TWO capacities, reported as separate fields and never merged. `capacity_kw` is the OUTDOOR
+    // unit's own report (page 0x00 offset 12), null whenever its variable-length descriptor is too
+    // short to carry offset 12. `capacity_kw_iu` is the INDOOR unit's rated code (0x60 offset 6) —
+    // the same 0.1 kW units, and what detection already falls back to for RANKING. They are NOT
+    // interchangeable: a 6 kW outdoor unit is routinely paired with an 8 kW indoor unit, so
+    // substituting one for the other under a single name would publish a figure for the wrong half
+    // of the plant. Reported side by side, the UI can say which unit a shown capacity came from.
+    // Successive += with bare literals (never one + chain) — see CLAUDE.md "Memory constraints":
+    // this runs on the httpd task AND the poll task's WS broadcaster, whose stacks are the tight ones.
+    auto kw_field = [&j](const char* name, int tenths) {
+        j += ",\"";
+        j += name;
+        j += "\":";
+        if (tenths < 0) { j += "null"; return; }
+        j += std::to_string(tenths / 10);
+        j += ".";
+        j += std::to_string(tenths % 10);
+    };
+    // All three unit FACTS are gated on fp_valid, like candidates[] already is. POST /detect clears
+    // the fingerprint to force a fresh pass, and until that pass lands there is nothing measured to
+    // report — emitting the previous unit's capacity/EEPROM through that window is exactly the
+    // "cached fingerprint presented as a live reading" docs/DESIGN.md §5.3 rules out, and it is the
+    // window in which a SWAPPED unit is most likely to be misreported.
+    kw_field("capacity_kw", c.fp_valid ? c.fp_kw_tenths : -1);
+    kw_field("capacity_kw_iu", c.fp_valid ? c.fp_iu_kw_tenths : -1);
+    j += ",\"ou_eeprom\":" + jstr(c.fp_valid ? c.fp_eeprom : std::string());
     // Candidate ids + the DISTINCT model families among them. Detection is coarse — models that share
     // a page_mask+capacity are register-identical on X10A — so the UI shows a single family only when
     // all candidates agree; a mixed set is reported honestly as "not uniquely identifiable" rather
@@ -274,6 +295,11 @@ static std::string build_status_json_string() {
         Fingerprint fp{};
         fp.page_mask = c.fp_pages;
         fp.kw_tenths = c.fp_kw_tenths;
+        // Carried so this recomputed fingerprint stays a faithful copy of the one detection used.
+        // detect_candidates deliberately ignores it (the I/U capacity only ever RANKS, never
+        // excludes — logic/detect.hpp), so this changes no candidate set today; a copy that silently
+        // omits a field is the kind of drift that makes /status disagree with the device later.
+        fp.iu_kw_tenths = c.fp_iu_kw_tenths;
         int nsig = 0;
         const Signature* sigs = def::signatures(nsig);
         const char* out[64];

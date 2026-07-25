@@ -268,8 +268,14 @@ GET  /status                       # { version, platform, uptime_s, app_elf_sha2
                                    #   sys:{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode},
                                    #   last_crash: null | {reason,reason_code,fault,coredump,
                                    #        task,pc,backtrace[],corrupted,elf_sha256},
-                                   #   detect:{proto,valid,capacity_kw,ou_eeprom,candidates[],
-                                   #        families[],ambiguous,model:{name,family,marketing}} }
+                                   #   detect:{proto,valid,capacity_kw,capacity_kw_iu,ou_eeprom,
+                                   #        candidates[],families[],ambiguous,
+                                   #        model:{name,family,marketing}} }
+                                   #   capacity_kw = the outdoor unit's own report (null when its
+                                   #        0x00 descriptor is too short to carry it);
+                                   #        capacity_kw_iu = the indoor unit's rated code. Different
+                                   #        halves of the plant, routinely different sizes — read
+                                   #        them as two figures, never as one with a fallback.
 GET  /values                       # decoded readings [{label,value,unit,reg}] (last poll cycle);
                                    #   reg = the X10A register page the row was decoded from
 GET  /events                       # WebSocket live push (the only live UI transport). Send "sub" →

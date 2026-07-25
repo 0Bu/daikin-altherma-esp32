@@ -78,6 +78,14 @@ struct Config {
     // reset to "auto"; the poll task uses the field-owned config_set_model so it never reverts creds.)
     uint32_t    fp_pages     = 0;   // page mask that answered (logic/detect.hpp page_bit)
     int         fp_kw_tenths = -1;  // O/U capacity in 0.1 kW; -1 = unknown
+    // I/U capacity code (reg 0x60 offset 6, same 0.1 kW units); -1 = unknown. Kept BESIDE the O/U
+    // capacity rather than folded into it: the two are different measurements of the plant and only
+    // one of them is the outdoor unit's own report. It is carried here — not just consumed inside
+    // detection's ranking — because a unit whose 0x00 descriptor is too short to hold offset 12
+    // leaves fp_kw_tenths at -1 forever, and the Model card then showed NO capacity at all while the
+    // device knew the indoor unit's rated code the whole time. /status reports it as its own field
+    // so the UI can say which unit the figure came from instead of implying an O/U reading.
+    int         fp_iu_kw_tenths = -1;
     std::string fp_eeprom;          // rendered O/U EEPROM digits (display only)
     bool        fp_valid     = false;
 };
@@ -125,12 +133,13 @@ inline void apply_link(Config& c, int rx_pin, int tx_pin, Protocol proto) {
 // Apply the detected model + fingerprint. Takes its strings BY VALUE and swaps them in (both
 // noexcept), so this too allocates nothing while the caller holds the mutex.
 inline void apply_model(Config& c, std::string profile, uint32_t fp_pages, int fp_kw_tenths,
-                        std::string fp_eeprom) {
+                        int fp_iu_kw_tenths, std::string fp_eeprom) {
     c.profile.swap(profile);
     c.fp_eeprom.swap(fp_eeprom);
-    c.fp_pages     = fp_pages;
-    c.fp_kw_tenths = fp_kw_tenths;
-    c.fp_valid     = true;
+    c.fp_pages        = fp_pages;
+    c.fp_kw_tenths    = fp_kw_tenths;
+    c.fp_iu_kw_tenths = fp_iu_kw_tenths;
+    c.fp_valid        = true;
 }
 
 // Coarse GPIO upper-bound guard. `max_gpio` is the target's highest GPIO number; the device caller

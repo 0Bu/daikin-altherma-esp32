@@ -203,7 +203,8 @@ static bool poll_detect() {                                    // returns true i
     // Read with the best-fit representative (deterministic ranking, not registry order). Every
     // candidate in the set is register-equivalent, so this picks correct VALUES regardless of which
     // marketing variant it names; nothing matched but bus answered → generic Altherma profile.
-    config_set_model(d.best.empty() ? "generic" : d.best, d.page_mask, d.kw_tenths, d.eeprom);
+    config_set_model(d.best.empty() ? "generic" : d.best, d.page_mask, d.kw_tenths, d.iu_kw_tenths,
+                     d.eeprom);
     return true;
 }
 
