@@ -134,7 +134,8 @@ The heat pump is otherwise **fully automatic** (auto-detected).
   (§5.1, with automatic rollback to the last working network if the new
   credentials fail), the MQTT broker from the same tile's MQTT row (§5.1), the heat pump
   needs no setup (auto-detected; RX/TX pins on the ESP32 card in Settings, §5.6), and firmware
-  updates are checked by tapping the version in the header meta line (§5.4).
+  updates are checked by tapping the version — the header meta line, or the Version row on the
+  Settings ESP32 card, which does the same thing (§5.4).
 - MQTT is optional — an empty broker disables it.
 
 `GET /status` exposes the fields the dashboard keys off:
@@ -443,11 +444,19 @@ block, and every card — system card, Model card and value groups — is the sa
 stacked in one column (§9). The dashboard carries **no setup control at all**; it is operation-only,
 and the gear is its only affordance that isn't a reading.
 
-### 5.4 Firmware / OTA  (tap the version in the header)
+### 5.4 Firmware / OTA  (tap the version — either place it is printed)
 The one write that is **not** behind the gear: the **version** in the dashboard's header meta line
 (§5.3 header) is a button that checks for an OTA update. It stays on the dashboard because it is
 board *identity* — the number a user quotes in a bug report — and because the check reports its
 progress in that same line, where the page underneath stays readable.
+
+**Tapping the version does the same thing wherever the version is printed as a row of its own** —
+so the **Version** row on the Settings ESP32 card (§5.6) runs the identical check. It is one
+gesture with one meaning, not a second flow: the row calls the same `checkFirmwareUpdate()`, and
+since that reports into the header readout, the tap **returns to the dashboard first** exactly as
+the channel picker below it does. The alternative was worse than a duplicate affordance — a version
+printed directly above a channel selector reads as the thing you act on, and having the identical
+text be tappable one screen away and inert here is the inconsistency a user has to learn.
 
 - **The status reports inline, in that same line** — a small progress ring plus a short label,
   immediately after the version (`#otaStat`): `192.0.2.159 · v1.2.3 ◔ 78%`. It is deliberately
@@ -469,7 +478,7 @@ progress in that same line, where the page underneath stays readable.
   `--err` and linger longer than a success before clearing.
 - **Which feed it checks is a setting, and it lives in Settings** — the **Update channel** row on
   the ESP32 card (§5.6), a two-option select: *Release* (cut by hand) or *Development* (every merge
-  to `main`). It sits directly under a read-only **Version** row, because a channel picker with no
+  to `main`). It sits directly under the **Version** row, because a channel picker with no
   version beside it asks the user to hold "what am I running" in their head while choosing what to
   run. Picking one is a live write (`POST /set_ota`, no reboot), and it then **returns to the
   dashboard and starts the check** — nobody switches channel for the setting itself, they switch to
@@ -621,13 +630,14 @@ dashboard — the move changed where the configuration lives, not how it looks:
    detected, else a usable-GPIO dropdown (§5.2) — and the **Hardware** row (status indicator +
    recovery-button pins), which opens the board-hardware modal. From `platform`,
    `uptime_s`, `sys{reset_reason,free_heap}`, `pins_avail`, `hp{proto,rx,tx,connected,last_ok_s}`,
-   `board{…}`. Then the **Version** (`version`, read-only) and the **Update channel** select
+   `board{…}`. Then the **Version** (`version`) and the **Update channel** select
    (`ota.channel` → `POST /set_ota`, §5.4). The version being here *as well as* in the dashboard
-   header is not a duplicated readout and the two are not interchangeable: the header line is the
-   **affordance** — tap it to check, and the progress reports into that same line — while this row
-   exists so the channel selector above/below it is legible, since "which feed do I follow" is
-   unanswerable without "what am I running". The header keeps board identity where a user quotes it
-   from; Settings keeps the setting where every other setting is.
+   header serves two different needs, and each row answers the one its screen asks: the header keeps
+   board identity where a user quotes it from, while this row exists so the channel selector under
+   it is legible — "which feed do I follow" is unanswerable without "what am I running". What they
+   no longer differ in is **behaviour**: both are the OTA trigger (§5.4). This row was read-only
+   through v1.0.13 on the reasoning that the header owned the affordance; in use that only made the
+   version look inert precisely where a user is already deciding which build to run.
 
 Under both, a `--muted` monospace footer line naming the product and running version.
 

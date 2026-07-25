@@ -653,10 +653,24 @@ function channelRow(cur) {
     opt("release", t("chan.release")) + opt("dev", t("chan.dev")) + `</select></div>`;
 }
 
+// The firmware row (ESP32 card): the running version, and the SAME OTA trigger the dashboard
+// header's version is — one gesture with one meaning wherever the version is printed. Not a second
+// copy of the flow: the tap runs checkFirmwareUpdate() itself, which reports inline in the header
+// (#otaStat), so the handler navigates there first exactly like onChannelPick does. A version
+// printed beside a channel selector reads as the thing you act on to change it; leaving it inert
+// here while the identical text is tappable one screen away is the inconsistency, not the fix.
+function firmwareRow(version) {
+  const title = S.otaAvail ? t("ota.title_avail", S.otaAvail) : t("ota.title_check");
+  return `<button class="vrow vrow-btn" type="button" data-act="ota" ` +
+    `aria-label="${esc(t("aria.ota"))}" title="${esc(title)}">` +
+    `<span class="vrow-label">${esc(t("card.firmware"))}</span>` +
+    `<span class="vrow-val mono">v${esc(version || "?")}</span></button>`;
+}
+
 // ESP32 board status card (on the Settings screen — renderSettings): chip / uptime, the X10A link +
-// protocol, the RX/TX pins, and the firmware version + its update channel. (Tapping the version in
-// the dashboard header still runs the OTA check — DESIGN.md §5.4; what lives here is the SETTING
-// that decides which feed that check reads, not a second copy of the flow.) Pins are
+// protocol, the RX/TX pins, and the firmware version + its update channel. (Tapping the version —
+// here or in the dashboard header — runs the OTA check, DESIGN.md §5.4; the channel row below it is
+// the SETTING that decides which feed that check reads, not a second copy of the flow.) Pins are
 // auto-detected: once the bus answers on a pair they show read-only; until then a dropdown of the
 // board's wire-able GPIOs lets the user point the firmware at their wiring. A brief timeout doesn't
 // flip back to the dropdown (last_ok_s grace).
@@ -683,7 +697,7 @@ function esp32CardHtml() {
     vrow(t("card.protocol"), hp.connected ? proto : "—") +
     pinRow(t("card.rxpin"), "e32Rx", hp.rx, hp.tx) +
     pinRow(t("card.txpin"), "e32Tx", hp.tx, hp.rx) +
-    vrow(t("card.firmware"), "v" + (s.version || "?"), { cls: "mono" }) +
+    firmwareRow(s.version) +
     channelRow(s.ota?.channel === "dev" ? "dev" : "release") +
     boardRow();
   return vcard("ESP32", rows);
@@ -2431,11 +2445,15 @@ function wire() {
   $("inspClose").onclick = () => { S.insp = null; renderInspect(); };
 
   // The ESP32 card (#settingsCards) is rebuilt every poll too, so its controls are delegated as
-  // well: the Hardware row opens the board modal, and the RX/TX dropdowns re-run pin auto-detection
-  // on change. (The OTA check is not here — it hangs off the version in the dashboard header.)
+  // well: the Hardware row opens the board modal, the Firmware row runs the OTA check, and the
+  // RX/TX dropdowns re-run pin auto-detection on change. The OTA check REPORTS in the dashboard
+  // header (#otaStat — a download ticks its percentage there for tens of seconds), so go() there
+  // first rather than start a flow under a screen that cannot show it, same as onChannelPick.
   $("settingsCards").addEventListener("click", (e) => {
     const act = e.target.closest("[data-act]");
-    if (act && act.dataset.act === "board") openBoard();
+    if (!act) return;
+    if (act.dataset.act === "board") openBoard();
+    else if (act.dataset.act === "ota") { go("dashboard"); checkFirmwareUpdate(); }
   });
   $("settingsCards").addEventListener("change", (e) => {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();

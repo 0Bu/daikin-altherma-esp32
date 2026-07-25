@@ -1029,8 +1029,12 @@ config endpoints in place:
   RX/TX pins are **persisted** (a manual pick survives reboot); the model is session-only. Protocol is auto-detected
   (no UI control), the poll interval is fixed at 1 s (not sent), and labels are English-only (no
   `lang`). `/set_hp` accepts only `{profile, rx, tx}`.
-- **Firmware / OTA** — tapping the version in the header meta line (beside the IP) runs the real
-  update flow: `GET /ota/check`, poll `GET /ota/status` until the check finishes, confirm, `POST
+- **Firmware / OTA** — tapping the version runs the real update flow. Both places the version is
+  printed as a control are the same trigger (`checkFirmwareUpdate`): the header meta line beside the
+  IP, and the **Version** row on the Settings ESP32 card, which returns to the dashboard first
+  because that is where the flow reports — the same navigation the update-channel picker beside it
+  performs, and for the same reason. The flow itself:
+  `GET /ota/check`, poll `GET /ota/status` until the check finishes, confirm, `POST
   /ota/update`, then poll again rendering the download progress **inline next to that version**
   (a small ring + "n%", not a toast). On `done` it does **not** use the shared reboot-reconnect poll
   the config saves use — an OTA replaces the served UI itself, so `otaWaitReboot` waits for the board
