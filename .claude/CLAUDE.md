@@ -378,15 +378,23 @@ history.cpp     the 24-hour trend rings: one fixed-cadence buffer per logic/hist
                 the poll task (history_record, called from poll_once BEFORE the cache commit and
                 OUTSIDE the cache mutex — this file has its own) and read by GET /history. STATIC
                 (.bss), never heap: the binding limit on this board is the largest CONTIGUOUS block,
-                and a static array does not compete for it — two trends cost 1152 B of ring plus
-                labels/units/counters (1317 B measured). RAM only ON PURPOSE: a 576 B blob rewritten every
+                and a static array does not compete for it — eleven trends cost 6336 B of ring plus
+                ~78 B of labels/units/counters each. RAM only ON PURPOSE: a 576 B blob rewritten every
                 5 minutes is ~100k NVS writes a year in the partition holding the WiFi credentials,
                 so a reboot empties the rings and the UI draws the span it actually has rather than
                 padding a 24 h axis with absence. The mechanics (bucket folding, wrap-around,
                 skipped-bucket filling) live in logic/history.hpp where they are host-tested; this
                 file is storage + mutex + the parse of the cache's FORMATTED value back to tenths
                 (the converters stay the one source of what a value means, so the domain audit still
-                sees them unchanged). Two absences are distinguished, because conflating them
+                sees them unchanged). The rows are found by (reg, off, unit) straight off the poll
+                cache — CachedValue carries `off` for exactly this, and for nothing else — so no
+                label matching happens on the poll path at all. TWO trends are not rows at all: the
+                BOARD's own free heap and largest contiguous block, sampled here (before the lock —
+                heap_caps takes its own) in tenths of a KiB. They ride the same ring, route and
+                browser as the catalog trends; what they answer is the one question a single /status
+                number never could — whether the heap is DRIFTING (a leak is a slope, fragmentation
+                is the two lines separating). That is why they are back on the ESP32 card after #186
+                dropped the spot figures Two absences are distinguished, because conflating them
                 misattributes one to the other: NO_READING (register timed out / reading_plausible
                 refused) vs HELD_OVER (the outdoor unit was asleep — ou_stale.hpp). A model change
                 (POST /detect) DISCARDS a ring: the same trend on a different profile is a different
@@ -647,11 +655,30 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 DROPS the pin rather than clamping to the nearest edge, which would keep a readout on
                 screen while silently changing which moment it describes. Adding a trend is
                 ONE row in TRENDS — the ring, the route and the browser are already generic over it
-                (the id is the CONCEPT, the label is the profile's spelling). A trend states a page
-                CLASS, not just a label token, because "(R1T)" names TWO unrelated sensors in this
-                catalog: the outdoor unit's air inlet on 0x20 AND the indoor leaving-water sensor
-                that lwt_select.hpp keys on by that very tag — a token-only match would let one
-                resolve to the other, the #35-#39 shape drawn as a 24-hour chart. Two absences are
+                (the id is the CONCEPT, the label is the profile's spelling). A trend ADDRESSES its
+                row by (register page, byte OFFSET, unit) and never by its label, because the catalog
+                neither names one quantity consistently nor names different quantities differently:
+                "(R1T)" is BOTH the outdoor unit's air inlet on 0x20 and the indoor leaving-water
+                sensor lwt_select.hpp keys on by that very tag; leaving water comes in four spellings
+                (one with a DOUBLE space); the suction pressure is called just "Pressure" on 13
+                profiles, a name page 0xA0 reuses for another quantity; and 0x20/12 carries a bar
+                reading AND its saturation-°C twin in the same byte window, which is why the unit is
+                half the locator. Any of those resolved wrongly is the #35-#39 shape drawn as a
+                24-hour chart. Measured over the 39 detection profiles the locator resolves to
+                EXACTLY ONE row on every one, and the catalog test asserts that (plus coverage, one
+                type code and one width per trend) rather than assuming it. Two rules are now
+                CONSEQUENCES of addressing a row this way rather than conditions on it, asserted over
+                the catalog instead of re-checked per sample: a trend cannot reach a SETPOINT (a
+                target sits at its own offset), and the held-over page class IS the locator's reg, so
+                no second page field can drift from it. NINE of the eleven are the plant's working set —
+                leaving/return water, DHW tank, water pressure, flow, pump signal, refrigerant
+                pressure (0x62/15, the one that stays LIVE — the 0x20 transducers read 0.0 bar even
+                at 42 rps on the measured unit, so a ring on them would be a permanently empty
+                chart), compressor rps, outdoor air. The other TWO are not rows at all — a TrendKind
+                tag splits "addressed by (reg, off, unit)" from "sampled from the board", and the
+                board pair (free_heap/max_alloc, KiB) carries its own fixed label because no profile
+                has one to give; trend_row_matches refuses them against a row even when the row is
+                crafted to look like their (0,0) locator. Two absences are
                 distinguished (NO_READING vs HELD_OVER) and history_store COMPOSES
                 ou_reading_held_over rather than restating it, so a change to which pages freeze
                 reaches the trends automatically. That is the load-bearing half for outdoor air:
@@ -1103,12 +1130,15 @@ GET  /values      decoded readings [{label,value,unit,reg}]. `reg` is the X10A r
                   rule CI gates in C++ (the catalog spells those rows ~50 ways across 43 profiles)
 GET  /history?row=<trend id>   one trended row's 24-hour series, oldest sample first:
                   {id,label,dt,unit,t0,v[],held[[from,count],…]}. `unit` is the ROW's own unit, read
-                  from the cached value — never a hardcoded "°C": both shipped trends are
-                  temperatures, but the TRENDS table exists to be extended and the browser prints
-                  this string into the range readout and the crosshair, so a bar row labelled °C
-                  would be the #35-#39 shape. A catalog test pins that each trend resolves to ONE
-                  type code (and one width, which is what makes the tenths exact) across all
-                  profiles. `v` is TENTHS of that unit (the
+                  from the cached value — never a hardcoded "°C": the eleven trends mix °C, bar, KiB
+                  and unitless rows, and the browser prints this string into the range readout and the
+                  crosshair, so a bar row labelled °C would be the #35-#39 shape. A catalog test pins
+                  that each trend resolves to EXACTLY ONE row per profile, of one type code and one
+                  width (which is what makes the tenths exact), across all profiles. Ids:
+                  dhw_tank, leaving_water, return_water, water_pressure, flow, pump_signal,
+                  circuit_pressure, comp_rps, outdoor_air, plus the two BOARD trends free_heap and
+                  max_alloc (the ESP32's own memory in KiB — no register, fixed English labels, and
+                  they resolve no catalog row by construction). `v` is TENTHS of that unit (the
                   resolution the converters produce, so a sample is exact rather than rounded on the
                   way in — the browser scales by 10) or null. `held` run-length-marks WHICH nulls
                   were the outdoor unit RESTING rather than a failure to measure: `v` stays a plain

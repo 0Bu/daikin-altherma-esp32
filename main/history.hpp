@@ -3,8 +3,9 @@
 // the poll task and read by GET /history.
 //
 // The buffers are STATIC (.bss), never heap: on this board the binding limit is the largest
-// CONTIGUOUS free block, not free heap, and a static array does not compete for it. Two trends cost
-// 1152 bytes total — see logic/history.hpp's HISTORY_BYTES_PER_TREND.
+// CONTIGUOUS free block, not free heap, and a static array does not compete for it. Eleven trends
+// cost 6336 bytes of ring plus ~78 bytes of label/unit each — see logic/history.hpp's
+// HISTORY_BYTES_PER_TREND and the ceiling assert beside TRENDS.
 //
 // RAM only, and deliberately not persisted: a 576-byte blob rewritten every 5 minutes is ~100k NVS
 // writes a year in the partition that holds the WiFi credentials, to save a history that is only
@@ -41,9 +42,9 @@ int32_t history_newest_age_s();
 size_t history_label(size_t t, char* out, size_t max);
 
 // The row's OWN unit ("°C", "bar", "A", … — whatever `unit_for_datatype` gave the cached value), or
-// empty when the profile carries no such row. Reported rather than assumed: both shipped trends are
-// temperatures, but the TRENDS table exists to be extended, and a pressure charted as °C is the
-// #35-#39 failure shape — a plausible, well-formed, wrongly-labelled value.
+// empty when the profile carries no such row. Reported rather than assumed: the trends mix °C, bar
+// and unitless rows, and a pressure charted as °C is the #35-#39 failure shape — a plausible,
+// well-formed, wrongly-labelled value.
 size_t history_unit(size_t t, char* out, size_t max);
 
 } // namespace daik

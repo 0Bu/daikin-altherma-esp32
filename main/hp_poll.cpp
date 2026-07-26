@@ -139,6 +139,7 @@ static void poll_once() {
             cv.label = view[k].label;
             cv.unit  = unit_for_datatype(view[k].type);
             cv.reg   = view[k].reg;
+            cv.off   = view[k].offset;
             cv.conv  = view[k].conv;
             std::string val;
             // The whole table goes along: reading_plausible needs it to tell a refrigerant pressure

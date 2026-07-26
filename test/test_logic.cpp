@@ -3621,38 +3621,55 @@ static void test_ou_stale() {
 
 // ── logic/history.hpp — the 24-hour trend buffers ─────────────────────────────────────────────
 // Two things are gated here, and the second is why the outdoor-air trend is not just "the DHW one
-// with another label": (a) a trend resolves to a real MEASUREMENT on the right page across the whole
-// catalog, and (b) a sample taken while the outdoor unit is asleep is stored as HELD_OVER, not as
-// the number the bus returned. Without (b) a summer day's outdoor-air trend is a staircase of
-// last-run values that reads exactly like weather.
+// on another page": (a) a trend resolves to exactly one real MEASUREMENT across the whole catalog,
+// and (b) a sample taken while the outdoor unit is asleep is stored as HELD_OVER, not as the number
+// the bus returned. Without (b) a summer day's outdoor-air trend is a staircase of last-run values
+// that reads exactly like weather.
 static void test_history() {
     using namespace logic;
 
-    // --- the R1T collision, which is the whole reason a trend states a PAGE ---------------------
+    // --- the locator, and the two collisions a label token could not survive --------------------
     // "(R1T)" names the outdoor air sensor on page 0x20 AND the leaving-water sensor on the indoor
-    // side (lwt_select keys on that very tag). A token-only match would let one resolve to the
-    // other; the page class is what keeps them apart.
+    // side (lwt_select keys on that very tag), so the outdoor-air trend must never resolve to a
+    // hydronic row however it is spelled — and the byte window is what keeps them apart.
     {
-        const char* labels[] = { "Leaving water temp. before BUH (R1T)", "R1T-Outdoor air temp." };
-        const unsigned regs[] = { 0x61,                                   0x20 };
+        const uint8_t regs[]  = { 0x61, 0x20 };
+        const uint8_t offs[]  = { 2,    0    };
+        const char*    units[] = { "°C", "°C" };
         const TrendDef* oa = trend_by_id("outdoor_air");
         CHECK(oa != nullptr);
-        CHECK(trend_select(*oa, labels, regs, 2) == 1);          // the 0x20 row, never the 0x61 one
-        // …and the same row on a hydronic page is refused outright rather than trended as outdoor air.
-        const unsigned wrong[] = { 0x61, 0x61 };
-        CHECK(trend_select(*oa, labels, wrong, 2) == -1);
+        CHECK(trend_select(*oa, regs, offs, units, 2) == 1);      // the 0x20 row, never the 0x61 one
+        // …and the same offset on the wrong page is refused outright, not trended as outdoor air.
+        const uint8_t wrong[] = { 0x61, 0x61 };
+        CHECK(trend_select(*oa, wrong, offs, units, 2) == -1);
+    }
+    // The second collision is INSIDE one byte window: 0x20/12 carries "High Pressure" (bar) and
+    // "High Pressure(T)" (its saturation temperature, °C). Only the unit tells them apart, which is
+    // why it is half the locator — a bar chart drawing °C is the #35-#39 shape with a history in
+    // front of it. (Neither 0x20 pressure is trended today; the rule is what is asserted.)
+    {
+        const TrendDef probe{ "probe", TrendKind::Row, 0x20, 12, "bar", "" };
+        const uint8_t regs[]  = { 0x20,  0x20 };
+        const uint8_t offs[]  = { 12,    12   };
+        const char*    units[] = { "°C",  "bar" };
+        CHECK(trend_select(probe, regs, offs, units, 2) == 1);    // the bar row, never its °C twin
+        const TrendDef sat{ "probe", TrendKind::Row, 0x20, 12, "°C", "" };
+        CHECK(trend_select(sat, regs, offs, units, 2) == 0);
     }
 
     // --- a trend is a measurement, never a target (issue #121's rule) ---------------------------
+    // Now structural rather than checked per label: a setpoint lives at its own offset (the tank's
+    // is 0x60/7), so addressing the measurement's byte window cannot reach it. The catalog test
+    // below asserts the consequence over every profile — that no resolved label says "setpoint".
     {
         const TrendDef* dhw = trend_by_id("dhw_tank");
         CHECK(dhw != nullptr);
-        const char* only_sp[] = { "DHW tank setpoint" };
-        const unsigned r_sp[]  = { 0x61 };
-        CHECK(trend_select(*dhw, only_sp, r_sp, 1) == -1);       // a flat 48 °C line would look healthy
-        const char* both[] = { "DHW tank setpoint", "DHW tank temp. (R5T)" };
-        const unsigned r_b[] = { 0x61, 0x61 };
-        CHECK(trend_select(*dhw, both, r_b, 2) == 1);            // the setpoint sorts first and loses
+        CHECK(dhw->reg == 0x61 && dhw->off == 10);
+        const uint8_t regs[]  = { 0x60, 0x61 };                  // DHW setpoint, DHW tank temp.
+        const uint8_t offs[]  = { 7,    10   };
+        const char*    units[] = { "°C", "°C" };
+        CHECK(trend_select(*dhw, regs, offs, units, 2) == 1);     // the setpoint sorts first and loses
+        CHECK(trend_select(*dhw, regs, offs, units, 1) == -1);    // …and on its own resolves nothing
     }
 
     CHECK(trend_by_id("nope") == nullptr);                       // unknown id -> 404, never a default
@@ -3676,14 +3693,14 @@ static void test_history() {
     // --- the compressor witness ----------------------------------------------------------------
     {
         const char* rows[] = { "R1T-Outdoor air temp.", "INV frequency (rps)" };
-        const unsigned regs[] = { 0x20,                  0x30 };
+        const uint8_t regs[] = { 0x20,                  0x30 };
         CHECK(trend_rps_row(rows, regs, 2) == 1);
         // A witness on a FROZEN page is no witness: it would qualify the very readings it is read
         // from. Refused rather than trusted (belt to ou_stale's catalog braces).
-        const unsigned bad[] = { 0x20, 0x21 };
+        const uint8_t bad[] = { 0x20, 0x21 };
         CHECK(trend_rps_row(rows, bad, 2) == -1);
         const char* none[] = { "Leaving water temp." };
-        const unsigned r1[] = { 0x61 };
+        const uint8_t r1[] = { 0x61 };
         CHECK(trend_rps_row(none, r1, 1) == -1);          // absent -> UNKNOWN, and unknown keeps storing
     }
 
@@ -3878,61 +3895,177 @@ static void test_history() {
     }
 
     // --- catalog conformance ------------------------------------------------------------------
-    // Every detectable profile must resolve each trend to a row whose page matches its class, and
-    // the two trends must never land on the same row. A generated profile that renamed the tank row
-    // or moved outdoor air off 0x20 has to fail here, not on someone's dashboard.
-    int checked = 0, dhw_found = 0, oa_found = 0;
+    // The locator is only worth anything if it addresses ONE row, on EVERY profile that carries the
+    // quantity — so both halves are measured here rather than assumed. `min_profiles` is the count
+    // measured over today's catalog: a generated profile that moved a row, or a generator run that
+    // dropped one, has to fail here and not on someone's dashboard. `unit_type` is the catalog's
+    // own type code (convert.hpp: 1 = °C, 2 = bar, -1 = none) and must agree with the unit string
+    // the TRENDS entry addresses the row by — GET /history prints that string into the chart's range
+    // readout and its crosshair.
+    struct TrendExpect { const char* id; int min_profiles; int unit_type; int size; };
+    static const TrendExpect kExpect[] = {
+        { "dhw_tank",         39, 1,  2 },
+        { "leaving_water",    39, 1,  2 },
+        { "return_water",     39, 1,  2 },
+        { "water_pressure",   39, 2,  1 },   // the one bar row that is WATER, not refrigerant
+        { "flow",             39, -1, 2 },   // unit lives in the label ("Flow sensor (l/min)")
+        { "pump_signal",      39, -1, 1 },
+        { "circuit_pressure", 24, 2,  2 },   // refrigerant, on the hydronic page — stays live
+        { "comp_rps",         26, -1, 1 },   // 13 detection profiles carry no 0x30 page at all
+        { "outdoor_air",      39, 1,  2 },
+        // The board trends resolve no catalog row at all — every expectation below is skipped for
+        // them, and what they must satisfy instead is asserted in its own block further down. They
+        // are listed so the static_assert keeps forcing a decision for every TRENDS entry.
+        { "free_heap",        0,  0,  0 },
+        { "max_alloc",        0,  0,  0 },
+    };
+    static_assert(sizeof(kExpect) / sizeof(kExpect[0]) == TREND_COUNT,
+                  "every TRENDS entry needs its measured catalog expectation here");
+
+    // Positions of the three trends whose pick is cross-checked against another rule below, by id
+    // rather than by counting rows in the table.
+    size_t i_lwt = TREND_COUNT, i_rps = TREND_COUNT, i_oa = TREND_COUNT;
+    for (size_t t = 0; t < TREND_COUNT; t++) {
+        if (trend_cstr_eq(TRENDS[t].id, "leaving_water")) i_lwt = t;
+        if (trend_cstr_eq(TRENDS[t].id, "comp_rps"))      i_rps = t;
+        if (trend_cstr_eq(TRENDS[t].id, "outdoor_air"))   i_oa  = t;
+    }
+    CHECK(i_lwt < TREND_COUNT && i_rps < TREND_COUNT && i_oa < TREND_COUNT);
+
+    int checked = 0;
+    int found[TREND_COUNT] = {0};
     for (const auto& p : def::profiles) {
         if (!def::is_detection_model(p.id)) continue;
         const char* labels[512];
-        unsigned    regs[512];
+        const char* units[512];
+        uint8_t     regs[512];
+        uint8_t     offs[512];
         size_t n = p.count < 512 ? p.count : 512;
-        for (size_t i = 0; i < n; i++) { labels[i] = p.values[i].label; regs[i] = p.values[i].reg; }
+        for (size_t i = 0; i < n; i++) {
+            labels[i] = p.values[i].label;
+            units[i]  = unit_for_datatype(p.values[i].type);
+            regs[i]   = p.values[i].reg;
+            offs[i]   = p.values[i].offset;
+        }
 
-        const int dhw = trend_select(*trend_by_id("dhw_tank"), labels, regs, n);
-        const int oa  = trend_select(*trend_by_id("outdoor_air"), labels, regs, n);
-        CHECK(dhw < 0 || oa < 0 || dhw != oa);                   // never the same row
-        if (dhw >= 0) {
-            dhw_found++;
-            CHECK(!ou_page_holds_over(regs[dhw]));               // the tank is resampled every cycle
-            CHECK(!lwt_ci_contains(labels[dhw], "setpoint"));
+        int picked[TREND_COUNT];
+        for (size_t t = 0; t < TREND_COUNT; t++) {
+            const TrendDef* d = trend_by_id(kExpect[t].id);
+            CHECK(d != nullptr);
+            CHECK(d == &TRENDS[t]);                  // kExpect is in TRENDS order — keep it that way
+            picked[t] = trend_select(*d, regs, offs, units, n);
+            if (picked[t] < 0) continue;
+            found[t]++;
+
+            // ONE row, not merely a first one. Ambiguity is what a label token had and a locator is
+            // supposed to remove; if a profile ever carries two rows in the same byte window with
+            // the same unit, the pick becomes table order — which is not a rule anyone stated.
+            int hits = 0;
+            for (size_t i = 0; i < n; i++)
+                if (trend_row_matches(*d, regs[i], offs[i], units[i])) hits++;
+            CHECK(hits == 1);
+
+            CHECK(p.values[picked[t]].type == kExpect[t].unit_type);
+            CHECK(trend_cstr_eq(d->unit, unit_for_datatype(kExpect[t].unit_type)));
+            // One width per trend, so the tenths the ring stores are exact rather than rounded.
+            CHECK(p.values[picked[t]].size == kExpect[t].size);
+            // The #121 rule, now a consequence of the locator rather than a filter: a target lives
+            // at its own offset, so no trend can reach one. Asserted over the whole catalog because
+            // a generated rename is exactly how it would come back.
+            CHECK(!lwt_ci_contains(labels[picked[t]], "setpoint"));
+            CHECK(!lwt_ci_contains(labels[picked[t]], "set point"));
+            // A row on a frozen page is gated; one on a live page is not. Derived from the row's own
+            // reg, so the two can never disagree (there is no second page field to drift).
+            const bool frozen = ou_page_holds_over(regs[picked[t]]);
+            CHECK(history_store(true, 190, regs[picked[t]], true, false) ==
+                  (frozen ? HISTORY_HELD_OVER : 190));
         }
-        if (oa >= 0) {
-            oa_found++;
-            CHECK(ou_page_holds_over(regs[oa]));                 // …and outdoor air is not
-            // The load-bearing consequence: because it sits on a frozen page, EVERY sample of this
-            // trend has to pass through the held-over gate. Asserted as the rule, not as a habit.
-            CHECK(history_store(true, 190, regs[oa], true, false) == HISTORY_HELD_OVER);
-            // It must never be the row lwt_select would pick for leaving water.
-            CHECK(!lwt_is_measurement(labels[oa]));
-        }
+
+        // No two trends may buffer the same row — 576 bytes spent twice on one sensor, under two
+        // names, in a UI that would then offer the same chart from two places.
+        for (size_t a = 0; a < TREND_COUNT; a++)
+            for (size_t b = a + 1; b < TREND_COUNT; b++)
+                CHECK(picked[a] < 0 || picked[b] < 0 || picked[a] != picked[b]);
+
+        // The leaving-water trend must be the row lwt_select picks — not "a leaving-water row".
+        // #121 is what happens when a second, looser rule answers this question: a setpoint or a
+        // mixed-zone row substituted for the pre-BUH measurement. The locator is the tighter rule of
+        // the two, so binding them here is what keeps it from becoming an independent second one.
+        CHECK(picked[i_lwt] == lwt_select(labels, n));
+        // …and the compressor trend is the very row the held-over gate reads as its witness.
+        CHECK(picked[i_rps] == trend_rps_row(labels, regs, n));
+        // Outdoor air must never be a row lwt_select would take for leaving water (the "(R1T)"
+        // collision, asserted from the catalog side).
+        if (picked[i_oa] >= 0) CHECK(!lwt_is_measurement(labels[picked[i_oa]]));
         checked++;
     }
     CHECK(checked >= 39);        // the detectable Altherma catalog (mirrors test_lwt_select/ou_stale)
-    // Every trend must resolve to ONE unit across the whole catalog. The route reports the row's own
-    // unit rather than a hardcoded "°C" (it prints straight into the chart's range readout and the
-    // crosshair), so a trend whose rows disagree about their `type` code would label some models'
-    // charts wrongly — the #35-#39 shape, and invisible because every number would still look fine.
-    // Measured today: both trends are conv 105 / size 2 / type 1 on every profile.
+
+    // Coverage, measured — not a token non-zero. A trend that silently stopped resolving on half the
+    // catalog would still be "working" on the author's own unit.
+    for (size_t t = 0; t < TREND_COUNT; t++) CHECK(found[t] >= kExpect[t].min_profiles);
+
+    // --- the BOARD trends: no row, no page, no profile ------------------------------------------
+    // They share the table, the ring and the route with the catalog trends and must not share their
+    // failure modes. Two things are asserted: a board trend carries its own label (nothing else can
+    // give it one — the /status.history entry would otherwise be dropped as "profile lacks the row"),
+    // and it resolves NO catalog row, on any profile, ever.
+    int board_trends = 0;
     for (size_t t = 0; t < TREND_COUNT; t++) {
-        int unit_type = -1;
-        for (const auto& p : def::profiles) {
-            if (!def::is_detection_model(p.id)) continue;
-            for (size_t i = 0; i < p.count; i++) {
-                if (!trend_row_matches(TRENDS[t], p.values[i].label, p.values[i].reg)) continue;
-                if (unit_type < 0) unit_type = p.values[i].type;
-                CHECK(p.values[i].type == unit_type);       // one trend, one unit
-                CHECK(p.values[i].size == 2);               // …and one width, so the tenths are exact
-            }
+        if (TRENDS[t].kind == TrendKind::Row) {
+            CHECK(TRENDS[t].label[0] == '\0');   // a row's label is the PROFILE's, discovered at runtime
+            continue;
         }
-        CHECK(unit_type == 1);      // both shipped trends are °C; a new one may differ, but say so here
+        board_trends++;
+        CHECK(TRENDS[t].label[0] != '\0');
+        CHECK(trend_cstr_eq(TRENDS[t].unit, "KiB"));
+        CHECK(found[t] == 0);
+    }
+    CHECK(board_trends == 2);
+    {
+        // The locator of a board trend is (0, 0) — which is a REAL byte window. Nothing may make it
+        // match: the kind is checked first, so even a row crafted to look exactly like it is refused.
+        const TrendDef* fh = trend_by_id("free_heap");
+        CHECK(fh != nullptr && fh->kind == TrendKind::FreeHeap);
+        const uint8_t regs[] = { 0 };
+        const uint8_t offs[] = { 0 };
+        const char*   units[] = { "KiB" };
+        CHECK(trend_select(*fh, regs, offs, units, 1) == -1);
+        CHECK(!trend_row_matches(*fh, 0, 0, "KiB"));
     }
 
-    // Measured over the current catalog: BOTH rows resolve on every one of the 44 profile tables,
-    // so these bounds are real coverage rather than a token non-zero. A trend that silently stopped
-    // resolving on half the catalog would still be "working" on the author's own unit.
-    CHECK(oa_found >= checked);
-    CHECK(dhw_found >= checked);
+    // Bytes → tenths of a KiB, the board trends' storage unit. The clamp is the point: the ring is
+    // int16, and a wrapped heap figure would be a plausible small number on a chart about running
+    // out of memory. Unsigned input, so no sample can ever land on an absence sentinel.
+    CHECK(history_bytes_tenths_kib(0) == 0);
+    CHECK(history_bytes_tenths_kib(1024) == 10);            // 1.0 KiB
+    CHECK(history_bytes_tenths_kib(1536) == 15);            // 1.5 KiB
+    CHECK(history_bytes_tenths_kib(150000) == 1465);        // 146.5 KiB — a realistic free heap
+    CHECK(history_bytes_tenths_kib(4u * 1024 * 1024) == INT16_MAX);      // clamped, not wrapped
+    CHECK(history_bytes_tenths_kib(0xFFFFFFFFu) == INT16_MAX);           // …at any size
+    CHECK(!history_is_absent(history_bytes_tenths_kib(0xFFFFFFFFu)));    // and never an "absence"
+    CHECK(!history_is_absent(history_bytes_tenths_kib(0)));
+
+    // The two trends that shipped first must be UNCHANGED by the move from label tokens to
+    // locators: same concept, same rows. Cheapest possible proof — the labels still say so.
+    for (const auto& p : def::profiles) {
+        if (!def::is_detection_model(p.id)) continue;
+        const char* labels[512];
+        const char* units[512];
+        uint8_t     regs[512];
+        uint8_t     offs[512];
+        size_t n = p.count < 512 ? p.count : 512;
+        for (size_t i = 0; i < n; i++) {
+            labels[i] = p.values[i].label;
+            units[i]  = unit_for_datatype(p.values[i].type);
+            regs[i]   = p.values[i].reg;
+            offs[i]   = p.values[i].offset;
+        }
+        const int dhw = trend_select(*trend_by_id("dhw_tank"), regs, offs, units, n);
+        const int oa  = trend_select(*trend_by_id("outdoor_air"), regs, offs, units, n);
+        CHECK(dhw >= 0 && lwt_ci_contains(labels[dhw], "dhw tank"));
+        CHECK(oa >= 0 && lwt_ci_contains(labels[oa], "outdoor air"));
+    }
 }
 
 // ── ValueDef::no_publish — the detect-only row flag ───────────────────────────────────────────

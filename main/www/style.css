@@ -534,6 +534,10 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    a circle inside it would render as an ellipse (app.js maps its % position onto the same scale). */
 .vhist-now { position: absolute; right: 0; width: 7px; height: 7px; border-radius: 50%;
   background: var(--brand); box-shadow: 0 0 0 2.5px var(--card); transform: translate(50%, -50%); }
+/* The same plot inside the schematic inspector — one chart, one vocabulary; only what it sits on
+   differs. The card is --brand-tint rather than --card, and the "now" dot separates itself from the
+   line with a ring of the BACKGROUND colour, so without this it draws a white halo on a tinted card. */
+.inspect-card .vhist-now { box-shadow: 0 0 0 2.5px var(--brand-tint); }
 .vhist-axis { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px;
   font-size: 11.5px; color: var(--muted); }
 /* Gaps are named in words, not drawn as a shaded band: the count belongs with the axis, and a band

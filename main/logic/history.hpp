@@ -10,13 +10,31 @@
 // own. Adding a trend is one row in TRENDS below — the ring, the route and the browser are already
 // generic over it.
 //
-// ── Why a trend needs a PAGE, not just a label ──────────────────────────────────────────────────
-// "(R1T)" names two unrelated sensors in this catalog: the OUTDOOR unit's air-inlet sensor
-// ("R1T-Outdoor air temp.", page 0x20) and the INDOOR unit's leaving-water sensor, which
-// lwt_select.hpp keys on by that very tag. A label token alone would let an outdoor-air trend
-// resolve to leaving water on a profile that spells the row differently — the #35-#39 shape, drawn
-// as a 24-hour chart. Each trend therefore states the page CLASS its row must sit on, and the
-// catalog test asserts the two never cross.
+// ── Why a trend is a LOCATOR and not a label ────────────────────────────────────────────────────
+// A trend names the row it buffers by (register page, byte offset, unit) — never by its text. The
+// catalog spells one quantity many ways and the same way for many quantities, so a label token
+// cannot address a row:
+//
+//   * "(R1T)" names two unrelated sensors — the OUTDOOR unit's air inlet ("R1T-Outdoor air temp.",
+//     page 0x20) and the INDOOR leaving-water sensor lwt_select.hpp keys on by that very tag.
+//   * The leaving-water row itself comes in four spellings, one of them with a DOUBLE space
+//     ("[HPSU] Tv inflow Temp  (R1T)").
+//   * The suction-side pressure is called just "Pressure" on 13 profiles — and "Pressure" on page
+//     0xA0 is a different quantity on a second outdoor unit.
+//   * At 0x20/12 the SAME offset carries "High Pressure" (bar, conv 105) and "High Pressure(T)"
+//     (the saturation temperature, conv 405). A token match takes whichever sorts first, so half
+//     the catalog would draw °C into a chart whose axis says bar — the #35-#39 shape, with a
+//     24-hour history in front of it to make it look verified.
+//
+// The unit is the second half of the locator precisely because of that last case: (reg, offset)
+// alone is ambiguous where a value and its derived twin share a byte window. Measured over the 39
+// detection profiles, (reg, offset, unit) resolves to exactly ONE row on every one of them, and the
+// catalog test asserts that rather than assuming it.
+//
+// Two rules that used to be conditions are now consequences of addressing a row this way, and are
+// asserted in the catalog test instead of re-checked per sample: a trend can no longer resolve to a
+// SETPOINT (targets live at other offsets — 0x60/7, 0x62/5 — never at a measurement's), and the
+// held-over page class is the locator's own `reg`, not a separate field that could disagree with it.
 //
 // ── Why a stored sample can be absent ───────────────────────────────────────────────────────────
 // Two different things make a slot empty, and conflating them would misattribute one to the other:
@@ -30,14 +48,14 @@
 //               Measured on a live unit: outdoor air read exactly 19.0 °C for five hours, then
 //               stepped 19.0 → 25.5 the instant the compressor started.
 //
-// This is the ONE place the outdoor-air trend differs in kind from the DHW-tank trend, and it is
-// why the second trend is not simply "the same thing with another label": the tank sits on a
-// hydronic page that is resampled every cycle, so its buffer fills continuously.
+// This is the ONE way the outdoor-air trend differs in kind from the hydronic ones, and it is why
+// it is not simply "the same thing on another page": the hydronic rows are resampled every cycle,
+// so their buffers fill continuously, while every outdoor sample has to pass the gate above.
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 
-#include "logic/lwt_select.hpp"   // lwt_ci_contains — one substring matcher for both pickers
+#include "logic/lwt_select.hpp"   // lwt_ci_contains — the compressor witness still matches by label
 #include "logic/ou_stale.hpp"     // ou_reading_held_over — the held-over rule, composed not copied
 
 namespace daik::logic {
@@ -66,54 +84,121 @@ constexpr bool history_is_absent(HistorySample s) {
 constexpr size_t HISTORY_BYTES_PER_TREND = HISTORY_SAMPLES * sizeof(HistorySample);
 static_assert(HISTORY_BYTES_PER_TREND == 576, "trend cost changed — re-check the memory budget");
 
-// ── Which page class a trended row must sit on ──────────────────────────────────────────────────
-enum class TrendPage : unsigned char {
-    Hydronic,   // resampled every cycle — the buffer fills continuously
-    Outdoor,    // 0x20/0x21: frozen while the compressor rests, so samples are gated (see below)
-};
-
-constexpr bool trend_page_matches(TrendPage want, unsigned reg) {
-    return want == TrendPage::Outdoor ? ou_page_holds_over(reg) : !ou_page_holds_over(reg);
+// Byte-for-byte C-string equality, constexpr and dependency-free (this header is IDF-free and the
+// host tests build it standalone). Both the id lookup and the unit half of the locator use it.
+constexpr bool trend_cstr_eq(const char* a, const char* b) {
+    if (!a || !b) return false;
+    while (*a && *a == *b) { ++a; ++b; }
+    return *a == *b;
 }
 
 // ── The trend catalog ───────────────────────────────────────────────────────────────────────────
 // `id` is the stable wire name (GET /history?row=<id>, and the /status.history entry). It is NOT the
 // display label: labels differ per profile and would make a bookmarked/scripted request model-
 // specific, while the id is the concept.
+//
+// Two kinds of trend, in one table and one id space so the ring array, the route and the browser
+// stay generic over all of them. A Row trend is a decoded X10A reading found by the locator; a BOARD
+// trend is the ESP32's own memory, which has no register, no profile and no held-over state — it is
+// sampled directly by the recorder on the same cadence.
+enum class TrendKind : uint8_t {
+    Row,        // a decoded value from the poll cache, addressed by (reg, off, unit)
+    FreeHeap,   // esp_get_free_heap_size()
+    MaxAlloc,   // largest CONTIGUOUS free block — the real OOM ceiling on this board
+};
+
+// `reg`/`off`/`unit` are the LOCATOR for a Row (see the header note). `unit` is the string the poll
+// cache carries for the row — convert.hpp's unit_for_datatype(): "°C", "bar", "A", or "" for a row
+// whose unit lives in its label ("Flow sensor (l/min)"). It is spelled out here rather than taken as
+// a type code so this header stays free of convert.hpp; the catalog test checks the two agree.
+//
+// `label` is EMPTY for a Row — which profile row it resolved to is discovered at runtime, and its
+// label is how the browser attaches the series to the value row it is already drawing. A board trend
+// has no profile to ask, so it carries its own fixed English label (like every catalog label, and
+// for the same reason: /status and /history are read by scripts as well as by this UI).
 struct TrendDef {
     const char* id;
-    const char* token;      // lowercase label token identifying the concept (with `page`, uniquely)
-    TrendPage   page;
+    TrendKind   kind;
+    uint8_t     reg;
+    uint8_t     off;
+    const char* unit;
+    const char* label;
 };
 
-// Adding a trend is one row here. Keep every entry's row on a page the catalog test can confirm,
-// and never trend a SETPOINT — a target is not a measurement (issue #121's rule, applied to trends).
+// Adding a trend is one row here — the ring, the route and the browser are already generic over it.
+// Take the (reg, offset, unit) from docs/REGISTERS.md §5 / the generated def/ tables, and add the
+// row's measured coverage to the catalog test: a locator that resolves on no profile is a trend
+// nobody will ever see, and the test is where that becomes a failure rather than a mystery.
 inline constexpr TrendDef TRENDS[] = {
-    { "dhw_tank",    "dhw tank",    TrendPage::Hydronic },
-    { "outdoor_air", "outdoor air", TrendPage::Outdoor  },
+    // Pages that are resampled every cycle, so these buffers fill continuously. Grouped by that,
+    // not by circuit: 0x62/15 is a REFRIGERANT reading that happens to live on a hydronic page.
+    { "dhw_tank",         TrendKind::Row, 0x61, 10, "°C",  "" },  // DHW tank temp. (R5T)
+    { "leaving_water",    TrendKind::Row, 0x61,  2, "°C",  "" },  // pre-BUH outlet — lwt_select's row
+    { "return_water",     TrendKind::Row, 0x61,  8, "°C",  "" },  // Inlet water temp. (R4T)
+    { "water_pressure",   TrendKind::Row, 0x62, 11, "bar", "" },  // the WATER circuit, not refrigerant
+    { "flow",             TrendKind::Row, 0x62,  9, "",    "" },  // Flow sensor (l/min) — unit in label
+    { "pump_signal",      TrendKind::Row, 0x62, 12, "",    "" },  // INVERTED (0 = max, 100 = stop)
+    // The high-side refrigerant pressure the UI actually draws. NOT the 0x20/12+14 transducers: the
+    // pill already falls back off them (they freeze with their page), and on the measured unit they
+    // read exactly 0.0 bar at rest AND at 42 rps — which reading_plausible() refuses as impossible
+    // for a sealed circuit — while this sensor read a correct 15.3 bar. A ring on them would be a
+    // permanently empty chart bought with 576 bytes.
+    { "circuit_pressure", TrendKind::Row, 0x62, 15, "bar", "" },
+    { "comp_rps",         TrendKind::Row, 0x30,  0, "",    "" },  // INV frequency (rps) — run/idle
+    // Outdoor — 0x20/0x21 freeze while the compressor rests, so every sample passes the held-over
+    // gate below and the chart shows gaps rather than a staircase of the last run's numbers.
+    { "outdoor_air",      TrendKind::Row, 0x20,  0, "°C",  "" },  // R1T-Outdoor air temp.
+    // The BOARD's own memory. Not a plant reading, and here for the reason the single numbers on
+    // /status could never answer: whether the heap is DRIFTING. A leak or a creeping fragmentation
+    // shows as a slope over hours and is invisible in any one sample, which is why the spot figures
+    // were dropped from the UI once (#186) — a diagnosis nobody could make from what was shown.
+    // Both are in KiB: bytes would overflow the int16 ring at 32.8 kB of heap.
+    { "free_heap",        TrendKind::FreeHeap, 0, 0, "KiB", "Free heap" },
+    { "max_alloc",        TrendKind::MaxAlloc, 0, 0, "KiB", "Largest free block" },
 };
 constexpr size_t TREND_COUNT = sizeof(TRENDS) / sizeof(TRENDS[0]);
-static_assert(TREND_COUNT * HISTORY_BYTES_PER_TREND <= 4096,
+// 11 trends = 6336 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
+// ceiling is a deliberate stop sign, not a hardware limit: .bss does not compete for the largest
+// CONTIGUOUS free block, which is what actually binds on this board, so the cost of a trend is a
+// few per cent of free heap and nothing at all of the fragmentation budget. Raise it only with the
+// same arithmetic in hand, and measure /status.sys (free_heap, max_alloc) on a real board after —
+// which is now a thing the device itself will draw you a curve of.
+static_assert(TREND_COUNT * HISTORY_BYTES_PER_TREND <= 7168,
               "trend buffers are .bss on a heap-tight board — justify the growth before raising this");
 
-// A trended row is a MEASUREMENT: a setpoint that happens to carry the token must never win. The
-// tank's own target ("DHW setpoint") does not contain "dhw tank", but a future generated label like
-// "DHW tank setpoint" would — and would draw a flat 48 °C line that looks exactly like a healthy,
-// perfectly-held tank.
-inline bool trend_is_measurement(const char* label) {
-    return label && !lwt_ci_contains(label, "setpoint") && !lwt_ci_contains(label, "set point");
+// A board metric in bytes, as the ring stores it: tenths of a KiB (~102-byte resolution, finer than
+// anything worth reading off a 24-hour chart). CLAMPED, never wrapped: the ring is int16, so this
+// tops out at 3276.7 KiB — above every internal-RAM figure this chip can report (512 KiB of SRAM),
+// but NOT above a PSRAM build's heap. A clamped sample is a ceiling and reads as one (a flat line at
+// the top); a wrapped one would be a plausible small number, which is the failure this whole file is
+// written against. If CONFIG_SPIRAM is ever enabled, revisit the unit here rather than the clamp.
+constexpr HistorySample history_bytes_tenths_kib(uint32_t bytes) {
+    const uint64_t tenths = (static_cast<uint64_t>(bytes) * 10u + 512u) / 1024u;   // 64-bit: *10 of
+    return tenths > static_cast<uint64_t>(INT16_MAX) ? INT16_MAX                   // a uint32 wraps
+                                                     : static_cast<HistorySample>(tenths);
 }
 
-inline bool trend_row_matches(const TrendDef& d, const char* label, unsigned reg) {
-    return trend_is_measurement(label) && lwt_ci_contains(label, d.token) &&
-           trend_page_matches(d.page, reg);
+// Does this cached row carry the value a trend addresses? Three exact comparisons, no matching and
+// no heuristics: whatever the profile calls the row, the byte window and the unit are the value's
+// identity. A profile that does not carry the row yields no match at all (see trend_select).
+// A BOARD trend matches nothing here — it is not looking for a row, and a locator of (0, 0) must
+// never be allowed to collide with one.
+constexpr bool trend_row_matches(const TrendDef& d, unsigned reg, unsigned off, const char* unit) {
+    return d.kind == TrendKind::Row && reg == d.reg && off == d.off && trend_cstr_eq(unit, d.unit);
 }
 
 // Index of the row a trend should buffer, or -1 when this profile carries no such row (the UI then
 // offers no trend for it — an absent feature, stated by omission rather than an empty chart).
-inline int trend_select(const TrendDef& d, const char* const* labels, const unsigned* regs, size_t n) {
+//
+// The page/offset views are uint8_t because that is what they ARE (ValueDef and CachedValue both
+// store them as one byte), and because the caller builds these views on the POLL TASK's 8 KB stack:
+// as `unsigned` the two arrays alone would cost 2 KB of it per cycle, a quarter of the task, for
+// two values that never exceed 255. The stack is the budget that fails silently here (CLAUDE.md →
+// Memory constraints, the v1.0.12 overflow), so it is spent by the byte.
+inline int trend_select(const TrendDef& d, const uint8_t* regs, const uint8_t* offs,
+                        const char* const* units, size_t n) {
     for (size_t i = 0; i < n; ++i)
-        if (trend_row_matches(d, labels[i], regs[i])) return static_cast<int>(i);
+        if (trend_row_matches(d, regs[i], offs[i], units[i])) return static_cast<int>(i);
     return -1;
 }
 
@@ -121,12 +206,8 @@ inline int trend_select(const TrendDef& d, const char* const* labels, const unsi
 // route answers 404 rather than defaulting to a trend the caller did not ask for.
 inline const TrendDef* trend_by_id(const char* id) {
     if (!id) return nullptr;
-    for (const auto& d : TRENDS) {
-        const char* a = d.id;
-        const char* b = id;
-        while (*a && *a == *b) { ++a; ++b; }
-        if (!*a && !*b) return &d;
-    }
+    for (const auto& d : TRENDS)
+        if (trend_cstr_eq(d.id, id)) return &d;
     return nullptr;
 }
 
@@ -136,7 +217,7 @@ inline const TrendDef* trend_by_id(const char* id) {
 // catalog, and the page condition here is the belt to that braces. -1 means the profile carries no
 // witness, which is UNKNOWN and NOT stopped — history_store then keeps storing readings, because a
 // unit we cannot ask about is not a unit we may declare asleep.
-inline int trend_rps_row(const char* const* labels, const unsigned* regs, size_t n) {
+inline int trend_rps_row(const char* const* labels, const uint8_t* regs, size_t n) {
     for (size_t i = 0; i < n; ++i)
         if (labels[i] && lwt_ci_contains(labels[i], "inv frequency") && !ou_page_holds_over(regs[i]))
             return static_cast<int>(i);
