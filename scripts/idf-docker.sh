@@ -13,12 +13,10 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ci_yml="$repo_root/.github/workflows/build.yml"
-[ -f "$ci_yml" ] || { echo "idf-docker: $ci_yml not found" >&2; exit 1; }
 
-idf_version="$(grep -oE 'esp_idf_version:[[:space:]]*v[0-9]+\.[0-9]+(\.[0-9]+)?' "$ci_yml" \
-  | grep -oE 'v[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)"
-[ -n "${idf_version:-}" ] || { echo "idf-docker: could not read esp_idf_version from $ci_yml" >&2; exit 1; }
+# Read the pin through the shared reader — CI derives its ccache key from the SAME script, so the
+# image this builds in and the cache that build is served cannot key on different versions.
+idf_version="$("$repo_root/scripts/idf-version.sh")"
 image="espressif/idf:${idf_version}"
 echo "idf-docker: using ${image} (from .github/workflows/build.yml)" >&2
 

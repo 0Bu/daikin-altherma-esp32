@@ -88,7 +88,10 @@ are a `gates` step). Actions bills every JOB rounded up to a whole minute, so si
 build is SKIPPED (not failed — a skipped job still reports its check, which is why the gate is a
 per-job `if:` and never a workflow-level `paths-ignore:`) when the diff touches nothing the image
 or the published site is made of, on pull requests as much as on pushes; ccache is carried across
-runs; a PR publishes NOTHING (the per-PR preview installer at gh-pages `PR/<N>/` is retired —
+runs, KEYED ON THE TOOLCHAIN + `sdkconfig.defaults` (via `scripts/idf-version.sh`, the one shell
+reader of the `esp_idf_version:` pin — `idf-docker.sh` uses it too) and deliberately NOT on a hash
+of `build.yml`, so editing this file no longer discards a cache nothing in it invalidated;
+a PR publishes NOTHING (the per-PR preview installer at gh-pages `PR/<N>/` is retired —
 each preview was a `gh-pages` push and every `gh-pages` push starts GitHub's own three-job "pages
 build and deployment" run, while the dev channel answers the same question per merge); Renovate
 runs daily + on demand, not once per merge. A new always-on job, an
