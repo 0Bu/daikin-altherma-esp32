@@ -902,11 +902,23 @@ enabled/available values are hidden.
 - **Input / select** — `--line` border, `--brand` focus ring; inline error text `--err` under field.
 - **Value table** — two columns (label `--muted` left, value+unit right, tabular). Missing = "—".
   A recognised value row is also an expander: a full-width button with a trailing chevron that
-  rotates on open, revealing the description in its **own inset `--brand-tint` info box** — held in
-  from the row edges with a gap above/below, so the rows read as parting to make room for it rather
-  than the row growing taller. Bold `--fg` "Normal:" lead-in on `--muted` body; slides down via a
-  `grid-template-rows: 0fr→1fr` transition (§5.3 item 5). Unrecognised labels render as a plain,
-  non-interactive row.
+  rotates on open, revealing the description in a **`--brand-tint` info box pushed out from UNDER
+  the row** — flush against it, held in from the row edges, square at the top and rounded at the
+  **bottom** corners only, so it reads as continuing behind the row rather than starting below it.
+  An open row keeps a divider under it — the same full-width `--line` the next row draws when
+  nothing is expanded — so the panel appears **between two list lines** instead of replacing one:
+  the line belongs to the LIST and runs the full row width, while the panel stays inset. That is
+  what makes the panel read as sliding out from beneath it. The line is drawn as an inset
+  box-shadow, not a `border-bottom`, so opening adds no pixel to the row's height. The panel carries
+  no top border of its own (a `--line` hairline is invisible against `--brand-tint` — 1.15:1 in
+  light, 1.23:1 in dark — so it would be an edge that is drawn and cannot be seen), and an inset
+  top shadow (`--shadow-tongue`, per-scheme like `--shadow-card`) is the shadow the row casts onto
+  it. Bold `--fg` "Normal:" lead-in on `--muted` body. It opens with the `grid-template-rows: 0fr→1fr`
+  height transition (§5.3 item 5) **plus** a `translateY(-7px)→0` slide on the same `.22s` timing, so
+  height and content land together; both honour `prefers-reduced-motion` — which has to be said
+  explicitly, since the global reduced-motion rule kills `animation` only, not `transition`.
+  The ROW itself is untouched: no radius, no border of its own. Unrecognised labels render as a
+  plain, non-interactive row.
 - **Card** — `--card`, 1px `--line`, radius 12; section title small-caps `--muted`.
 - **Toast** — bottom-centre, transient, for Save outcomes ("Saved", "Rebooting…", "Failed"). Note it
   is *not* used for OTA: see the inline readout below.
@@ -938,8 +950,11 @@ enabled/available values are hidden.
   never colour alone.
 - **Inspector** — `--brand-tint` panel under the schematic (§5.3 item 3), bordered like a card: an
   uppercase `--muted` title + mono source label on the left, the headline reading on the right, then
-  the explainer paragraph and a `--line`-divided list of that component's readings. Idle it collapses
-  to a single muted hint line.
+  the explainer paragraph and a `--line`-divided list of that component's readings. Idle it shows
+  **nothing** and collapses — see §5.3 item 3 for why a standing hint line is not offered. It keeps
+  the CARD shape and does **not** take the value table's pushed-out form above: it is not opened out
+  of a row, so there is nothing for it to emerge from underneath, and a top edge with no line above
+  it would be an edge without a seam.
 - **Value pill** — the schematic's unit of reading (§5.3 item 2): `--card` fill, `--line` border,
   tabular value, optional `--muted` sub-label under it — the measurement's NAME, never a note about
   it: annotations belong in the inspector. Holds ONE reading (§5.3 item 2) — a second figure only
