@@ -298,7 +298,7 @@ jobs:
       # (The two cache actions carry a version tag, not a digest, unlike every other action here —
       # Renovate's helpers:pinGitHubActionDigests preset pins them on its next run.)
       - name: Restore ccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: .ccache
           # Keyed on the workflow (which pins esp_idf_version) + the sdkconfig defaults, so a
@@ -335,7 +335,7 @@ jobs:
 
       - name: Save ccache
         if: github.ref == 'refs/heads/main' && success()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: .ccache
           key: ccache-esp32s3-${{ hashFiles('.github/workflows/build.yml', 'sdkconfig.defaults') }}-${{ github.run_id }}
