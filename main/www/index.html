@@ -204,15 +204,21 @@
                 </g>
                 <!-- Refrigerant circuit (outdoor unit ↔ PHE). Each run pairs its drawn pipe with a
                      fat transparent sc-hitline: a 3.5–5 px stroke is not a tappable target on a
-                     phone, so the hit area is widened without widening the drawing. -->
+                     phone, so the hit area is widened without widening the drawing.
+                     The hit line is DELIBERATELY SHORTER than the pipe it doubles, here and at every
+                     other fitting in this file — it is `stroke-linecap: round`, so it also reaches
+                     half a stroke (9 px) PAST each endpoint. Ending it on the outdoor unit's edge
+                     would put its cap 9 px inside the box and take those taps off the component that
+                     visibly highlights. Matching the two `d` attributes is therefore a REGRESSION,
+                     not a tidy-up; G011 measures every cap and fails the build on the overhang. -->
                 <g class="sc-hit" data-insp="rhot" role="button" tabindex="0">
                   <path class="sc-rpipe" d="M204 180 H 290"/>
-                  <path class="sc-hitline" d="M204 180 H 290"/>
+                  <path class="sc-hitline" d="M213 180 H 290"/>
                 </g>
                 <path class="sc-rflow hot" id="rfHot" d="M204 180 H 290"/>
                 <g class="sc-hit" data-insp="rcold" role="button" tabindex="0">
                   <path class="sc-rpipe" d="M290 420 H 204"/>
-                  <path class="sc-hitline" d="M290 420 H 204"/>
+                  <path class="sc-hitline" d="M290 420 H 213"/>
                 </g>
                 <path class="sc-rflow cold" id="rfCold" d="M290 420 H 204"/>
                 <!-- ONE PILL, ONE READING. Both sides of the refrigerant circuit used to pack two
@@ -316,7 +322,7 @@
                   <path class="sc-pipe" d="M378 180 H 458"/>
                   <path class="sc-pipe" d="M502 180 H 532"/>
                   <path class="sc-pipe" d="M566 180 H 596"/>
-                  <path class="sc-hitline" d="M378 180 H 458"/>
+                  <path class="sc-hitline" d="M387 180 H 458"/>
                   <path class="sc-hitline" d="M502 180 H 532"/>
                   <path class="sc-hitline" d="M566 180 H 596"/>
                 </g>
@@ -414,7 +420,7 @@
                   <g class="sc-hit" data-insp="wtank" role="button" tabindex="0">
                     <path class="sc-pipe" d="M610 180 V 248"/>
                     <path class="sc-pipe" d="M610 358 V 420"/>
-                    <path class="sc-hitline" d="M610 194 V 248"/>
+                    <path class="sc-hitline" d="M610 203 V 248"/>
                     <path class="sc-hitline" d="M610 358 V 412"/>
                   </g>
                   <path class="sc-flow hot" id="fTank" d="M610 180 V 248"/>
@@ -442,7 +448,7 @@
                 <g class="sc-hit" data-insp="wheat" role="button" tabindex="0">
                   <path class="sc-pipe" d="M610 180 H 720 V 248"/>
                   <path class="sc-pipe" d="M720 358 V 420 H 610"/>
-                  <path class="sc-hitline" d="M630 180 H 720 V 248"/>
+                  <path class="sc-hitline" d="M633 180 H 720 V 248"/>
                   <path class="sc-hitline" d="M720 358 V 420 H 620"/>
                 </g>
                 <path class="sc-flow hot" id="fHeat" d="M610 180 H 720 V 248"/>
@@ -482,7 +488,7 @@
                      (the audit's G010 compares them), and it is the same split the hit targets use. -->
                 <g class="sc-hit" data-insp="wret" role="button" tabindex="0">
                   <path class="sc-pipe" d="M610 420 H 378"/>
-                  <path class="sc-hitline" d="M600 420 H 378"/>
+                  <path class="sc-hitline" d="M600 420 H 387"/>
                 </g>
                 <!-- The return's two overlays are split at the tank JUNCTION (x=610), not at an
                      arbitrary point on the drop: right of it the pipe carries the heating circuit

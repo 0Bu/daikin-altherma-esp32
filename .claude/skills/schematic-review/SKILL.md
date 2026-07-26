@@ -48,6 +48,7 @@ read (a renamed class, a missing marker), so nothing was checked.
 | `G007` | A rotor whose bounding box is not centred on its hub; the CSS pivots on the **bbox**, so it orbits. |
 | `G008` / `G009` | A run off the two-level grid, or a box whose margins no longer match it. |
 | `G010` | An animated flow overlay tracing no drawn pipe — the two copies of one path have drifted. |
+| `G011` | A run's *invisible* tap area reaching into a fitting drawn earlier. The hit lines are `stroke-linecap: round`, so each covers half a stroke past its declared endpoint; every trim had been computed as if the cap were flat, and the 3-way valve outlined itself on hover and then opened the DHW branch. Says nothing about two hit lines meeting — that place is genuinely shared, and `E004` decides whose it is. |
 | `E001` | A pill whose unit repeats in the drawing and which carries no name. |
 | `E002` | A reading drawn past a junction, on a branch its sensor does not read. **Not adjudicable.** |
 | `E003` / `E004` | A flow overlay, or a hit target, spanning a junction — one animation (or one highlight) asserting two branches' states at once. |

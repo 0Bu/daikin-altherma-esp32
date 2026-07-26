@@ -407,6 +407,31 @@ open(p, 'w').write(s.replace('x="654" y="248" width="132"', 'x="654" y="248" wid
 PY
 run_case "drawing past the viewBox is caught" 1 "G001"
 
+# 15 — the shipped defect: a pipe's tap area reaching into the fitting it meets. The tank riser's hit
+# line was trimmed to y=194, the 3-way valve's own bottom edge — correct if the cap were flat, but
+# `stroke-linecap: round` puts it back at y=185 and 18 % of the valve answered "DHW branch" instead.
+# Nothing visible changes, which is the whole point: only a pointer at the valve's rim can tell.
+reset
+patch_file "$WORK/main/www/index.html" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+if 'd="M610 203 V 248"' not in s: sys.exit(1)
+open(p, 'w').write(s.replace('d="M610 203 V 248"', 'd="M610 194 V 248"', 1))
+PY
+run_case "a hit line reaching into a fitting is caught" 1 "G011 wtank|valve"
+
+# 15b — the same rule against a RECTANGULAR component. G011 measures a circle and a box by different
+# geometry, so one case would leave half the rule free to rot: the supply run's hit line trimmed to
+# the plate's own edge, where the cap puts it 9 px inside the exchanger.
+reset
+patch_file "$WORK/main/www/index.html" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+if 'd="M387 180 H 458"' not in s: sys.exit(1)
+open(p, 'w').write(s.replace('d="M387 180 H 458"', 'd="M378 180 H 458"', 1))
+PY
+run_case "…and it measures boxes, not just discs" 1 "G011 wsup|phe"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "schematic audit selftest: all $pass cases caught"
