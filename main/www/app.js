@@ -60,6 +60,7 @@ const I18N = {
     "group.Operation": "Operation", "group.Domestic hot water": "Domestic hot water",
     "group.Water circuit": "Water circuit", "group.Refrigerant / outdoor": "Refrigerant / outdoor",
     "group.Electrical": "Electrical", "group.Device": "Device", "group.Other values": "Other values",
+    "group.Protection": "Protection", "protect.limiting": "limiting now",
     "group.Values": "Values",
     "chip.thermo_on": "Thermostat ON", "chip.thermo_off": "Thermostat off", "chip.quiet": "Quiet",
     "schem.to_dhw": "3WV → DHW", "schem.to_heat": "3WV → heating",
@@ -168,6 +169,7 @@ const I18N = {
     "group.Operation": "Betrieb", "group.Domestic hot water": "Warmwasser",
     "group.Water circuit": "Wasserkreis", "group.Refrigerant / outdoor": "Kältemittel / Außen",
     "group.Electrical": "Elektrik", "group.Device": "Gerät", "group.Other values": "Weitere Werte",
+    "group.Protection": "Schutz", "protect.limiting": "regelt zurück",
     "group.Values": "Werte",
     "chip.thermo_on": "Thermostat EIN", "chip.thermo_off": "Thermostat aus", "chip.quiet": "Leise",
     "schem.to_dhw": "3WV → WW", "schem.to_heat": "3WV → Heizung",
@@ -627,6 +629,29 @@ const GROUPS = [
   ["Domestic hot water", ["tank", "dhw", "hot water"]],
   ["Water circuit", ["leaving water", "return water", "flow", "water pressure", "heating-flow", "heating flow", "target", "delta", "pump", "valve", "3-way"]],
   ["Refrigerant / outdoor", ["outdoor", "heat-exchanger", "heat exchanger", "high pressure", "low pressure", "refrigerant", "compressor", "fan"]],
+  // The page-0x10 protection words (def/overlay.hpp): five retry counters + six drop-control flags.
+  // They are the "silent protection retries" signal — a unit meeting demand while quietly backing
+  // off degrades in a way no temperature row shows — and before this group nine of the eleven fell
+  // into the "Other values" catch-all at the bottom, which is where a signal goes to not be read.
+  //
+  // MUST stay ABOVE "Electrical": groupOf takes the FIRST match, and "Comp. INV Current Drop"/
+  // "…Current Protection Retry Qty" contain "current", so below it those two would split off into
+  // Electrical and the group would silently show 9 of its 11 rows.
+  //
+  // Keys are "drop" + "retry", NOT "protection", and that is MEASURED rather than assumed. Over the
+  // published catalog labels, "drop" matches exactly the 6 flags and "retry" exactly the 5 counters,
+  // while "protection" ALSO matches "Freeze Protection" and "Freeze Protection for water piping" —
+  // two default_on hydronic flags (page 0x60, conv 302/300) that are normally ON. They would have
+  // landed here reading permanently "limiting", the opposite of what this group says.
+  //
+  // Re-derive rather than trust that sentence (the catalog is machine-generated and grows without
+  // touching this file), and re-run it at the def/overlay.hpp -> gen_profiles.py handover, which is
+  // when these 11 labels can change out from under the patterns:
+  //   grep -rhoE '\{0x[0-9A-Fa-f]{2}, *[0-9]+, *[0-9]+, *[0-9]+, *-?[0-9]+, *"[^"]+"' main/def/ \
+  //     | sed -E 's/.*"([^"]+)"$/\1/' | sort -u | grep -icE 'drop|retry'      # must be 11
+  // NOT yet a mechanical gate: a lost row would just go quiet in "Other values", the same silent
+  // shape tools/descriptions/ exists to catch one layer over. Worth one there.
+  ["Protection", ["drop", "retry"]],
   ["Electrical", ["current", "ct l", "inv ", "backup-heater", "backup heater", "stage", "capacity"]],
   ["Device", ["wi-fi", "wifi", "mqtt", "hp link", "link", "poll", "uptime", "firmware", "rssi"]],
 ];
@@ -689,8 +714,13 @@ function vrow(k, v, opt = {}) {
   return `<div class="vrow"><span class="vrow-label">${esc(k)}</span>` +
     `<span class="vrow-val ${opt.cls || ""}">${val}</span></div>`;
 }
-const vcard = (label, rows) => `<div class="vgroup"><div class="card">` +
-  `<div class="section-label">${esc(label)}</div>${rows}</div></div>`;
+// `badge` is an optional short status word rendered beside the heading. It carries TEXT, never a
+// bare colour: DESIGN.md §9 forbids conveying status by colour alone, and this one has to survive a
+// reader who cannot tell --warn from --muted.
+const vcard = (label, rows, badge) => `<div class="vgroup"><div class="card">` +
+  `<div class="section-label">${esc(label)}` +
+  (badge ? `<span class="section-badge">${esc(badge)}</span>` : "") +
+  `</div>${rows}</div></div>`;
 const editIcon = `<svg class="vcard-edit-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
 
 // RX/TX pin dropdown row — shown only when auto-detection hasn't locked a working pin pair, so the
@@ -1774,7 +1804,23 @@ function valueGroupsHtml(vals, connected) {
   // own name. Bucket KEYS stay the English group name (groupOf) — only the display label is localised.
   const groupLabel = (name) => (I18N.en["group." + name] != null ? t("group." + name) : name);
   let html = ""; const done = new Set();
-  const emit = (name, rows) => { html += vcard(grouped ? groupLabel(name) : t("group.Values"), rowsOf(rows)); };
+  // A Protection row reading ON is the unit backing off RIGHT NOW (the "Drop"/"Drop Control" flags);
+  // the "Retry Qty" counters beside them are cumulative and are deliberately NOT highlighted — 3
+  // retries is history, not a working point, and marking both alike would merge "it is happening"
+  // into "it has happened", which is the one distinction these eleven rows exist to draw.
+  //
+  // Scoped to THIS group on purpose. Plenty of rows elsewhere read ON in normal operation ("Water
+  // pump operation", "Thermostat ON/OFF", and the default_on freeze-protection flags the group keys
+  // deliberately exclude); highlighting ON globally would tint a healthy plant amber. Keyed on the
+  // decoded ON text rather than a label pattern, so it needs no second copy of the row list — inside
+  // this group the ON/OFF rows ARE the drop flags.
+  const isLimiting = (v) => /^on$/i.test(String(v.value ?? "").trim());
+  const emit = (name, rows) => {
+    const prot   = name === "Protection";
+    const shown  = prot ? rows.map((v) => (isLimiting(v) ? { ...v, state: "warn" } : v)) : rows;
+    const badge  = prot && rows.some(isLimiting) ? t("protect.limiting") : "";
+    html += vcard(grouped ? groupLabel(name) : t("group.Values"), rowsOf(shown), badge);
+  };
   for (const name of order) if (buckets.has(name)) { emit(name, buckets.get(name)); done.add(name); }
   for (const [name, rows] of buckets) if (!done.has(name)) emit(name, rows); // firmware-supplied custom groups
   return html;

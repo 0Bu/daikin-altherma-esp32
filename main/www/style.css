@@ -369,6 +369,24 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 #valueGroups { margin-top: 14px; }
 .vgroup + .vgroup { margin-top: 12px; }
 .vgroup .section-label { display: block; margin-bottom: 2px; }
+/* Protection group heading marker: shown only while a drop-control flag reads ON. Carries its own
+   word ("limiting now" / "regelt zurück") because DESIGN.md §9 forbids status by colour alone —
+   --warn is the emphasis, the text is the statement. Not --err: backing off is the unit protecting
+   itself, which is correct behaviour worth seeing, not a fault.
+
+   The word is --fg, not --warn, and the colour rides a DOT beside it — the same split §9 already
+   uses for the gear's attention dot. --warn as small text is ~3.5:1 on the card in both themes,
+   under the 4.5:1 AA floor for anything this size, so tinting the words would trade the legibility
+   of the statement for emphasis it does not need: the dot carries the emphasis, and the dot is
+   decoration, which AA does not gate. */
+.section-badge {
+  margin-left: 8px; color: var(--fg);
+  font-size: 11px; font-weight: 700; letter-spacing: .3px; text-transform: none;
+}
+.section-badge::before {
+  content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--warn); margin-right: 5px;
+}
 .vrow {
   display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
   padding: 9px 0; border-top: 1px solid var(--line);

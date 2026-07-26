@@ -858,14 +858,26 @@ Values are grouped by domain and ordered from "what is it doing" → detail. Gro
 the value's register/label (the generator can also stamp a `group` tag per row). Order of groups:
 
 1. **Operation** — operation mode, thermostat/space-heating/DHW on-off, fault code, defrost.
-2. **Water circuit** — leaving water temp (after PHE / after BUH), return water temp, flow (l/min),
+2. **Domestic hot water** — tank temp (R5T), DHW setpoint, DHW mode, extra DHW sensor.
+3. **Water circuit** — leaving water temp (after PHE / after BUH), return water temp, flow (l/min),
    water pressure, heating-flow setpoint, target ΔT, pump speed, 3-way valve.
-3. **Domestic hot water** — tank temp (R5T), DHW setpoint, DHW mode, extra DHW sensor.
 4. **Refrigerant / outdoor** — outdoor air temp, O/U heat-exchanger temp, high/low pressure (°C),
    refrigerant liquid temp, compressor speed, fan step.
-5. **Electrical** — INV primary current, INV compressor current, CT L1/L2/L3, backup-heater
+5. **Protection** — the page-`0x10` protection words: five retry counters + six drop-control flags.
+   Ahead of **Electrical** by necessity, not taste — grouping takes the first matching key and two of
+   the eleven carry "current" in their label, so below it they would split off into Electrical and
+   the group would quietly show 9 of its 11 rows. Matched on "drop"/"retry" and deliberately **not**
+   on "protection", which would also collect the two `default_on` *Freeze Protection* flags and
+   present a normally-ON row as a unit in trouble.
+   A flag reading ON means the unit is limiting itself **right now**, so the heading carries a
+   `--warn` dot plus the words *"limiting now" / "regelt zurück"* while any is ON, and those rows'
+   values go `--warn`. The **counters are not** highlighted: they are cumulative, and marking both
+   alike would merge *"is happening"* into *"has happened"* — the one distinction these rows exist
+   to draw. Nothing shows when nothing is limiting. Scoped to this group, since ON is the normal
+   resting state of plenty of rows elsewhere (pump running, thermostat, freeze protection).
+6. **Electrical** — INV primary current, INV compressor current, CT L1/L2/L3, backup-heater
    capacity + stages.
-6. **Device** — WiFi/MQTT/HP link, poll counters, firmware (WiFi/MQTT and HP link/protocol in
+7. **Device** — WiFi/MQTT/HP link, poll counters, firmware (WiFi/MQTT and HP link/protocol in
    Settings, §5.6 — the Connections tile and the ESP32 card; firmware version in the dashboard's
    header meta line §5.4; model name in the Model card, §5.3 item 4). Uptime and the heap/reset
    diagnostics are not a UI row anywhere — `/status`, `/diag` and the MQTT heartbeat carry them.
