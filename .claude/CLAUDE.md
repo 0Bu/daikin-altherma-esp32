@@ -908,6 +908,14 @@ def/            embedded per-model value profiles + registry (incl. the generic 
                 row, and the page-0x10 catalog guard in test_logic.cpp (armed vacuous in #111) is live
                 on them. DELETE overlay.hpp + its plumbing when gen_profiles.py emits the rows: a
                 supplement that outlives its generator run is a second source of truth for the catalog.
+                WHEN YOU DO, the 11 labels must come back BYTE-IDENTICAL. VictoriaMetrics has
+                ingested these rows since 2026-07-26 as daikin_altherma_<group>_<object_id>, so the
+                label-derived slugs are identifiers the store is keyed on, not presentation. A rename
+                forks the series silently — the old one stops receiving samples and the new one
+                starts at zero, and a retry counter resetting to zero is the exact event these rows
+                exist to report, so it reads as the plant going quiet rather than as a rename (#180).
+                test_logic.cpp pins all 11 plus the 0x10 group key against the live store, so this is
+                a test failure rather than something the deleter has to remember.
 www/            web UI sources (index.html + style.css + app.js -> one gzipped page) + setup.html.
                 The dashboard SCHEMATIC (the inline SVG in index.html, its sc-* CSS and its
                 INSPECT/I18N bindings) has its own gate — scripts/run-schematic-audit.sh + the

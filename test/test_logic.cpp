@@ -3960,6 +3960,65 @@ static void test_profile_view() {
             for (size_t k = 0; k < p.count; k++) CHECK(object_id(p.values[k].label) != oid);
         }
     }
+
+    // ── The metric IDs these rows have already become in VictoriaMetrics (#180) ──────────────────
+    // Verified 2026-07-26: these 11 rows are INGESTED. Telegraf reads the grouped state topic and
+    // the store carries one series per row, named `daikin_altherma_<group>_<object_id>`. That
+    // promotes BOTH halves of that name from presentation to load-bearing identifier — the group
+    // key and each row's label-derived slug. #180's schema-coupling note asks whether an "ingest
+    // schema freeze" covers them; no such mechanism exists in this repo, so this block IS the freeze.
+    //
+    // Two edits break it silently and identically: renaming a label above, and — the one that note
+    // singles out — gen_profiles.py emitting these rows with different label text on the day
+    // def/overlay.hpp is deleted. Neither is an error anywhere downstream, which is the whole
+    // problem: the old series simply stops receiving samples and a new one starts at zero, and a
+    // counter that resets to zero is exactly what UC5 is watching for. A rename would therefore not
+    // read as a rename — it would read as the plant going quiet. The #35-#39 shape, one layer out
+    // from the device.
+    //
+    // The expected strings are TRANSCRIBED FROM THE LIVE STORE, never recomputed from the labels:
+    // a slug derived from the same label it is checked against asserts ha_slug() against itself and
+    // would follow a rename straight through the rename it exists to catch.
+    //
+    // Deliberately a SECOND assertion of a string test_mqtt_group already pins — not a duplicate.
+    // There it is one entry in a catalog of friendly display names, a class of thing that may be
+    // reworded; here it is half of eleven metric IDs the store is already keyed on. Someone
+    // rewording the catalog would update that CHECK and reasonably believe they were done.
+    CHECK(std::string(group_for_page(0x10)) == "outdoor_state");
+
+    static const struct { const char* label; const char* metric; } vm_ids[] = {
+        {"Discharge Temp. Drop",                   "discharge_temp_drop"},
+        {"Discharge Temp. Protection Retry Qty",   "discharge_temp_protection_retry_qty"},
+        {"Comp. INV Current Drop",                 "comp_inv_current_drop"},
+        {"Comp. INV Current Protection Retry Qty", "comp_inv_current_protection_retry_qty"},
+        {"HP Drop Control",                        "hp_drop_control"},
+        {"HP Protection Retry Qty",                "hp_protection_retry_qty"},
+        {"LP Drop Control",                        "lp_drop_control"},
+        {"LP Protection Retry Qty",                "lp_protection_retry_qty"},
+        {"Fin Temp. Drop Control",                 "fin_temp_drop_control"},
+        {"Fin Temp. Protection Retry Qty",         "fin_temp_protection_retry_qty"},
+        {"Other Drop Control",                     "other_drop_control"},
+    };
+    CHECK(sizeof(vm_ids) / sizeof(vm_ids[0]) == def::RETRY_ROW_COUNT);
+
+    // Matched by VALUE, not by index: reordering the rows moves no series, so it must not fail here
+    // — a rename or a dropped row is what must. Both halves are asserted because they fail
+    // differently: the LABEL catches an edit to the table above (and is what HA shows as the entity
+    // name), the SLUG catches ha_slug() itself changing, which would fork all 11 series with no
+    // label touched at all.
+    for (size_t i = 0; i < def::RETRY_ROW_COUNT; i++) {
+        const std::string label = def::retry_rows[i].label;
+        const std::string oid   = object_id(def::retry_rows[i].label);
+        int hits = 0;
+        for (const auto& e : vm_ids) if (label == e.label && oid == e.metric) hits++;
+        CHECK(hits == 1);        // this row still lands on the id the store already carries
+    }
+    for (const auto& e : vm_ids) {
+        int hits = 0;
+        for (size_t i = 0; i < def::RETRY_ROW_COUNT; i++)
+            if (std::string(def::retry_rows[i].label) == e.label) hits++;
+        CHECK(hits == 1);        // ...and no pinned series lost the row that feeds it
+    }
 }
 
 // ── logic/feature_gate.hpp — what may honestly run on the detected profile (#110 Part C) ─────────
