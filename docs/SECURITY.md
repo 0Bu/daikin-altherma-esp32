@@ -246,6 +246,16 @@ Found a security issue?
 - **Anything non-sensitive** — a hardening suggestion, a question about the trust boundary, a doc
   correction — is fine as a normal [GitHub issue](https://github.com/0Bu/daikin-altherma-esp32/issues).
 
+**One non-security thing is also sent here: a core dump.** An ordinary bug report is filed as a
+public issue and carries its device data with it, because the device redacts that data before it
+leaves the board (`GET /status?redact=1` / `GET /diag?redact=1`, `main/logic/redact.hpp` — see
+[REPORTING.md](REPORTING.md)). A **core dump is the exception the redaction cannot cover**: it is raw
+task-stack and TCB memory, and although `CONFIG_ESP_COREDUMP_CAPTURE_DRAM` is off, a password of 15
+characters or fewer lives *inside* its `std::string` object by small-string optimisation rather than
+on the heap — so a stack frame holding a config snapshot can carry one. Dumps are therefore never
+requested up front (`/status.last_crash` already gives reason, task, PC and backtrace) and, when one
+is genuinely needed, it is sent through this private form and never attached to an issue.
+
 Please include the firmware version (`GET /status` → `version`, or the version shown in the web UI)
 and, where relevant, the `app_elf_sha256` from the same response — it pins the exact build.
 

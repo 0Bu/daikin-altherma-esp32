@@ -314,6 +314,23 @@ host-testable core is unusually large and valuable, because the risky parts are 
   inference run without run-state on more than a third of the detected catalog. No firmware caller
   yet (#69 Phase 3 has not landed); pure and host-tested so the policy is asserted rather than
   re-litigated at the future call site.
+- `logic/redact.hpp` — what a diagnostic snapshot must **not** carry when it leaves the device, for
+  `GET /status?redact=1` and `GET /diag?redact=1`. A bug report is filed as a *public* GitHub issue
+  carrying the device's own status, readings and log ([`REPORTING.md`](REPORTING.md)), which is only
+  defensible because the board scrubs first — so this is the single implementation of that rule,
+  shared by the web UI's "Report a bug" action and the manual `curl` fallback, rather than a copy in
+  `www/app.js` that would drift. Two shapes, because the routes leak differently: `/status` leaks by
+  **field** (seven named values, substituted where each is *written* — a post-processing pass over
+  the finished JSON is what the httpd stack budget has no room for), `/diag` leaks by **line**,
+  which is the non-trivial half the `CHECK`s cover. It **fails closed**: a rule whose end token is
+  missing — a line the ring truncated mid-value, precisely when a value sits unterminated at the
+  end — redacts to end of line rather than giving up, while the trailing newline survives so the
+  ring's line structure does. The **value** is replaced and the **key** kept: a dropped field is
+  indistinguishable from an older build, and forging that signal would mislead the very triage the
+  report exists to feed. Its `/diag` half is an allowlist, so
+  [`scripts/run-redaction-audit.sh`](../scripts/run-redaction-audit.sh) gates it — a new
+  `diag_printf` interpolating a hostname is otherwise uncovered with no symptom but a correct-looking
+  log line containing a real value.
 - `logic/json.hpp` — the RFC 8259 string encoder every JSON payload goes through: `/status`,
   `/values` and `/scan` (`http_status.cpp`'s `jstr`), `/ota/status` (`json_quote`), as well as the
   MQTT state, heartbeat and crash topics. It escapes `"`, `\` and **every** control byte below 0x20 (`\b\f\n\r\t`, else `\u00XX`),

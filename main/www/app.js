@@ -41,6 +41,22 @@ const I18N = {
     "crash.download": "Download crash report", "crash.copy": "Copy diagnostics", "crash.dismiss": "Dismiss",
     "crash.copied": "Diagnostics copied — paste into a bug report",
     "crash.copy_fail": "Copy failed — open /coredump and /diag manually",
+    "bug.row": "Report a bug", "bug.row_val": "GitHub",
+    "bug.title": "Report a bug",
+    "bug.intro": "Describe what goes wrong. The device adds its own status, readings and log — with your network name, addresses and server names removed first.",
+    "bug.what": "What happens",
+    "bug.what_ph": "The tank temperature has read 12800 °C in Home Assistant since this morning.",
+    "bug.need_text": "Describe what happens first — one or two sentences are enough.",
+    "bug.continue": "Prepare the report",
+    "bug.step2_title": "Check the report",
+    "bug.step2": "This is what the device has to say about itself. Read it over, then use the button below: it copies the report and opens the issue form, with your description already filled in. Paste the report into the form's “Device report” field, answer the remaining questions, and submit.",
+    "bug.collecting": "Collecting device data…",
+    "bug.collect_fail": "Could not read the device — the report below says which parts are missing.",
+    "bug.copy": "Copy & open GitHub", "bug.download": "Download .md",
+    "bug.md_hint": "Prefer a file, or the copy did not work? Download .md saves the same report, and you can drag that file straight into the form's “Device report” field instead of pasting.",
+    "bug.copied": "Report copied — paste it into the “Device report” field",
+    "bug.copy_fail": "Copy failed — select the text below and copy it by hand",
+    "bug.redacted": "Your network name, addresses, broker and server names have already been removed.",
     "nav.settings": "Settings", "nav.back": "Back",
     "nav.settings_alert": (n) => `Settings — ${n} connection${n === 1 ? "" : "s"} down`,
     "conn.title": "Connections", "conn.offline": "Offline", "conn.disabled": "Disabled",
@@ -98,7 +114,7 @@ const I18N = {
     "ota.title_avail": (v) => `Update v${v} available — tap to install`,
     "mq.err_format": "Enter host:port — e.g. 192.168.1.10:1883 — or mqtts://host:8883 for TLS",
     "sl.err_port": "Port must be a whole number 1–65535 (e.g. logs.example.com:514).",
-    "btn.saving": "Saving…", "btn.save": "Save", "btn.cancel": "Cancel",
+    "btn.saving": "Saving…", "btn.save": "Save", "btn.cancel": "Cancel", "btn.close": "Close",
     // static index.html markup (data-i18n)
     "schem.outdoor_unit": "OUTDOOR UNIT", "schem.defrost_pill": "❄ defrost", "schem.outdoor": "Outdoor",
     "insp.close": "Close",
@@ -152,6 +168,22 @@ const I18N = {
     "crash.download": "Absturzbericht herunterladen", "crash.copy": "Diagnose kopieren", "crash.dismiss": "Ausblenden",
     "crash.copied": "Diagnose kopiert — in einen Fehlerbericht einfügen",
     "crash.copy_fail": "Kopieren fehlgeschlagen — /coredump und /diag manuell öffnen",
+    "bug.row": "Fehler melden", "bug.row_val": "GitHub",
+    "bug.title": "Fehler melden",
+    "bug.intro": "Beschreibe, was schiefgeht. Das Gerät legt seinen Zustand, seine Messwerte und sein Protokoll dazu — Netzwerkname, Adressen und Servernamen vorher entfernt.",
+    "bug.what": "Was passiert",
+    "bug.what_ph": "Die Speichertemperatur zeigt seit heute Morgen 12800 °C in Home Assistant.",
+    "bug.need_text": "Beschreibe zuerst, was passiert — ein bis zwei Sätze genügen.",
+    "bug.continue": "Bericht erstellen",
+    "bug.step2_title": "Bericht prüfen",
+    "bug.step2": "Das sagt das Gerät über sich selbst. Lies es durch und nimm dann den Knopf unten: er kopiert den Bericht und öffnet das Formular, deine Beschreibung steht schon drin. Füge den Bericht dort im Feld „Device report“ ein, beantworte die restlichen Fragen und schick es ab.",
+    "bug.collecting": "Sammle Gerätedaten…",
+    "bug.collect_fail": "Das Gerät war nicht vollständig lesbar — im Bericht unten steht, was fehlt.",
+    "bug.copy": "Kopieren & GitHub öffnen", "bug.download": ".md herunterladen",
+    "bug.md_hint": "Lieber eine Datei, oder das Kopieren hat nicht geklappt? „.md herunterladen“ speichert denselben Bericht — die Datei kannst du im Formular einfach ins Feld „Device report“ ziehen statt einzufügen.",
+    "bug.copied": "Bericht kopiert — im Feld „Device report“ einfügen",
+    "bug.copy_fail": "Kopieren fehlgeschlagen — Text unten markieren und von Hand kopieren",
+    "bug.redacted": "Netzwerkname, Adressen, Broker und Servernamen sind bereits entfernt.",
     "nav.settings": "Einstellungen", "nav.back": "Zurück",
     "nav.settings_alert": (n) => `Einstellungen — ${n} Verbindung${n === 1 ? "" : "en"} gestört`,
     "conn.title": "Verbindungen", "conn.offline": "Offline", "conn.disabled": "Deaktiviert",
@@ -204,7 +236,7 @@ const I18N = {
     "ota.title_avail": (v) => `Update v${v} verfügbar — tippen zum Installieren`,
     "mq.err_format": "Host:Port eingeben — z. B. 192.168.1.10:1883 — oder mqtts://host:8883 für TLS",
     "sl.err_port": "Port muss eine ganze Zahl 1–65535 sein (z. B. logs.example.com:514).",
-    "btn.saving": "Speichere…", "btn.save": "Speichern", "btn.cancel": "Abbrechen",
+    "btn.saving": "Speichere…", "btn.save": "Speichern", "btn.cancel": "Abbrechen", "btn.close": "Schließen",
     // static index.html markup (data-i18n)
     "schem.outdoor_unit": "AUSSENEINHEIT", "schem.defrost_pill": "❄ Abtauen", "schem.outdoor": "Außen",
     "insp.close": "Schließen",
@@ -314,7 +346,7 @@ const VIEW = { dashboard: "viewDash", settings: "viewSettings" };
 const PARENT = { settings: "dashboard" };
 const TITLE = { settings: () => t("nav.settings") };
 // Every overlay that owns the Esc key; the navigation Esc stands down while one of them is open.
-const MODALS = ["wifiModal", "mqttModal", "syslogModal", "ntpModal", "boardModal"];
+const MODALS = ["wifiModal", "mqttModal", "syslogModal", "ntpModal", "boardModal", "bugModal"];
 
 function go(stage) {
   S.stage = stage;
@@ -623,6 +655,154 @@ async function copyDiagnostics() {
   else toast(t("crash.copy_fail"), "err");
 }
 
+// ── Bug report ───────────────────────────────────────────────────────────
+// The repository bug reports go to. ONE place: the issue URL and the reporting guide are both
+// derived from it, so a fork edits a single line.
+const REPO = "0Bu/daikin-altherma-esp32";
+
+// Collect the device half of a report: the four read endpoints, /status and /diag in their REDACTED
+// form (logic/redact.hpp — the DEVICE scrubs, so this page, the manual fallback in
+// docs/REPORTING.md and anything else all get the same answer).
+//
+// That redaction is why this goes straight into the public issue instead of down a private channel:
+// what is left describes the firmware, not the reporter. The one thing that stays private is a core
+// dump, which is raw stack memory and can hold a short password inline in a std::string — it is not
+// collected here, and /status.last_crash already carries the reason, task, PC and backtrace.
+//
+// A failed fetch is WRITTEN INTO the report, never dropped: a section that is silently absent reads
+// as "the device had nothing to say", which is a different and much more misleading claim than "this
+// could not be read". Same reason the /diag truncation below announces itself.
+async function collectBugReport() {
+  const s = S.status || {};
+  const parts = [
+    ["Device report (/status)", "/status?redact=1", "json"],
+    ["Readings (/values)", "/values", "json"],
+    ["Update status (/ota/status)", "/ota/status", "json"],
+    ["Device log (/diag)", "/diag?verbose=1&redact=1", "text"],
+  ];
+  const fetched = [];
+  let failed = false;
+  for (const [title, url, kind] of parts) {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      fetched.push([title, kind, (await r.text()).trim()]);
+    } catch (e) {
+      failed = true;
+      fetched.push([title, kind, null, String(e && e.message ? e.message : e)]);
+    }
+  }
+  const head = [
+    "# daikin-altherma-esp32 bug report",
+    "",
+    `firmware: ${s.version || "?"} (${s.platform || "?"})`,
+    `app_elf_sha256: ${s.app_elf_sha256 || "?"}`,
+    `generated: ${s.ntp?.time || "unknown — the device clock has not synced this boot"}`,
+    "redacted: wifi.ssid, wifi.ip, wifi.bssid, wifi.mac, mqtt.broker, syslog.host, ntp.server",
+    "",
+    "",
+  ].join("\n");
+  let body = "";
+  for (const [title, kind, text, err] of fetched) {
+    body += `## ${title}\n\n`;
+    body += err != null
+      ? `_Could not be read from the device: ${err}_\n\n`
+      : "```" + kind + "\n" + text + "\n```\n\n";
+  }
+  // A GitHub issue body holds 65,536 characters, and this is pasted into one field of a form that
+  // has other fields — so the cap is real rather than cosmetic. /diag is both the longest section
+  // and the only one whose oldest end is the expendable end, so it is what gets trimmed —
+  // announced, because a report that looks complete and is not is the failure this flow exists to
+  // prevent.
+  const LIMIT = 60000;
+  if (head.length + body.length > LIMIT) {
+    const over = head.length + body.length - LIMIT;
+    const at = body.indexOf("## Device log (/diag)");
+    if (at >= 0) {
+      const before = body.slice(0, at), diag = body.slice(at);
+      const lines = diag.split("\n");
+      let cut = 0, dropped = 0;
+      while (dropped < over + 80 && cut < lines.length - 2) { dropped += lines[cut].length + 1; cut++; }
+      body = before + lines[0] + "\n\n```text\n" + `[truncated: the oldest ${cut} lines were dropped to fit]\n` +
+             lines.slice(cut).join("\n").replace(/^```text\n/, "");
+    }
+  }
+  return { text: head + body, failed };
+}
+
+function bugFilename(s) { return `daikin-report-${(s && s.version) || "unknown"}.md`; }
+
+// Offer the report as a file too. The clipboard is the fast path, but it is one Ctrl-V away from
+// being lost, and this page is served over plain http where the async Clipboard API does not exist
+// at all (copyText's execCommand fallback is what actually runs).
+function downloadText(name, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: "text/markdown" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function openBug() {
+  $("bugWhat").value = "";
+  $("bugError").hidden = true;
+  $("bugStep1").hidden = false;
+  $("bugStep2").hidden = true;
+  $("bugModal").hidden = false;
+  $("bugWhat").focus();
+}
+function closeBug() { $("bugModal").hidden = true; }
+
+// Step 2: build the report and show it. GitHub is NOT opened here — the tab opens on the copy
+// button below, so that the moment the user arrives at the form the clipboard already holds what
+// the form asks them to paste. Opening it earlier put them in front of an empty field with the
+// report still being fetched behind them.
+//
+// The device report is deliberately not put in the issue URL either — it is a few kB, and an
+// over-long URL is a 414, not a truncation anyone would notice. The clipboard carries it.
+//
+// What IS prefilled is narrow. `hp_model` is not — the form asks for the nameplate, and the device
+// only has its own detection GUESS; prefilling it would invite the user to confirm the very guess
+// the field exists to catch when it is wrong. `symptom`, `board` and `onset` are not prefilled
+// either: their option lists live in the issue form, and a copy of them here would be a second list
+// to drift (a mismatched value just silently selects nothing).
+async function bugPrepare() {
+  const what = $("bugWhat").value.trim();
+  if (!what) {
+    $("bugError").textContent = t("bug.need_text");
+    $("bugError").hidden = false;
+    $("bugWhat").focus();
+    return;
+  }
+  const s = S.status || {};
+  const q = new URLSearchParams({
+    template: "bug_report.yml",
+    summary: what,
+    fw_version: `${s.version || "?"} (${s.platform || "?"})`,
+  });
+  const issueUrl = `https://github.com/${REPO}/issues/new?${q}`;
+
+  $("bugStep1").hidden = true;
+  $("bugStep2").hidden = false;
+  $("bugStep2Text").textContent = t("bug.step2");
+  $("bugText").value = t("bug.collecting");
+  $("bugCopy").disabled = true;
+  const { text, failed } = await collectBugReport();
+  $("bugText").value = text;
+  $("bugCopy").disabled = false;
+  // Copy AND open, in that order in the user's head but this order in code: window.open runs first
+  // and synchronously, because a pop-up blocker only honours it while the click that caused it is
+  // still the current task, and copyText is an async function — even its execCommand path (the one
+  // that actually runs, since the device serves plain http) resumes a microtask later.
+  $("bugCopy").onclick = async () => {
+    window.open(issueUrl, "_blank", "noopener");
+    if (await copyText(text)) toast(t("bug.copied"), "ok");
+    else toast(t("bug.copy_fail"), "err");
+  };
+  $("bugDownload").onclick = () => downloadText(bugFilename(s), text);
+  if (failed) toast(t("bug.collect_fail"), "err");
+}
+
 // ── Values (dashboard) ───────────────────────────────────────────────────
 const GROUPS = [
   ["Operation", ["operation mode", "thermostat", "space heat", "domestic hot water", "fault", "defrost"]],
@@ -788,7 +968,8 @@ function esp32CardHtml() {
     pinRow(t("card.txpin"), "e32Tx", hp.tx, hp.rx) +
     firmwareRow(s.version) +
     channelRow(s.ota?.channel === "dev" ? "dev" : "release") +
-    boardRow();
+    boardRow() +
+    bugRow();
   return vcard("ESP32", rows);
 }
 
@@ -805,6 +986,17 @@ function boardRow() {
   return `<button class="vrow vrow-btn" type="button" data-act="board" aria-label="${esc(t("board.title"))}">` +
     `<span class="vrow-label">${esc(t("card.hardware"))}</span>` +
     `<span class="vrow-val mono">${esc(led)} · ${esc(btn)}</span></button>`;
+}
+
+// Reporting a bug is a board-level action, so it sits on the board's own card — and it is a ROW
+// rather than a link because only the device can produce the half of a report that matters (its
+// own status, readings and log, scrubbed). Unconditional on purpose: the one copy affordance this
+// UI had before lived in the crash banner, which never renders unless the device actually crashed,
+// so the two commonest reports — a wrong reading and an MQTT dropout — had no way in at all.
+function bugRow() {
+  return `<button class="vrow vrow-btn" type="button" data-act="bugreport" aria-label="${esc(t("bug.title"))}">` +
+    `<span class="vrow-label">${esc(t("bug.row"))}</span>` +
+    `<span class="vrow-val">${esc(t("bug.row_val"))}</span></button>`;
 }
 
 // Every family name in def/model_names.hpp starts with "Altherma ", and the Model card's own heading
@@ -3277,6 +3469,7 @@ function wire() {
     if (!act) return;
     if (act.dataset.act === "board") openBoard();
     else if (act.dataset.act === "ota") checkFirmwareUpdate();
+    else if (act.dataset.act === "bugreport") openBug();
   });
   $("settingsCards").addEventListener("change", (e) => {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();
@@ -3466,6 +3659,12 @@ function wire() {
   $("bdCancel").onclick = closeBoard;
   $("boardBackdrop").onclick = closeBoard;
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("boardModal").hidden) closeBoard(); });
+
+  $("bugCancel").onclick = closeBug;
+  $("bugClose").onclick = closeBug;
+  $("bugBackdrop").onclick = closeBug;
+  $("bugGo").onclick = bugPrepare;
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("bugModal").hidden) closeBug(); });
   $("bdPreset").addEventListener("change", applyPreset);
   // Every field the presets cover re-decides which preset (if any) the form now describes — see
   // syncPresetSelection. The two that also change the form's SHAPE keep doing that first.

@@ -570,6 +570,13 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 }
 .input.invalid { border-color: var(--err); }
 .input::placeholder { color: var(--muted); opacity: .8; }
+/* The bug-report modal's two multi-line fields. `appearance: none` above already flattens them;
+   these add what a <textarea> needs and an <input> does not — a readable line height, vertical-only
+   resize (horizontal would break out of the modal card) and, for the generated report, a monospace
+   block the user can scroll and select before sending it anywhere. */
+textarea.input { line-height: 1.45; resize: vertical; min-height: 84px; }
+textarea.input[readonly] { font-size: 12px; color: var(--muted); white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+#bugText { margin-bottom: 4px; }
 /* Inline checkbox + label on one row (MQTT "remove stored credentials"). */
 .field.check { display: flex; align-items: center; gap: 9px; cursor: pointer; }
 .field.check input { width: 16px; height: 16px; accent-color: var(--brand); margin: 0; flex: none; }
@@ -622,7 +629,25 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   box-shadow: var(--shadow-card); padding: 20px; animation: tin .22s cubic-bezier(.2,.7,.3,1);
 }
 .modal-actions { display: flex; gap: 10px; margin-top: 18px; }
-.modal-actions .btn { flex: 1; }
+/* nowrap: a label broken mid-phrase inside a button reads as a layout fault rather than a choice.
+   When three of them stop fitting, the row becomes a column (below) — that is the honest answer,
+   not three narrow buttons each stacking their own words. */
+.modal-actions .btn { flex: 1; white-space: nowrap; }
+
+/* The bug-report dialog is the one modal whose content is a CODE BLOCK, not label→field rows. The
+   settings modals read better narrow; a device report at 420px wraps every JSON line into noise the
+   user is being asked to check before posting it in public. */
+#bugModal .modal-card { max-width: 680px; }
+
+/* Phone: three actions cannot share one row at this width without wrapping their labels, so they
+   become one full-width column. Order is reversed so the primary sits at the TOP and Close at the
+   bottom — the iOS stacked-alert convention, and the opposite of what a plain `column` would give.
+   `flex: none` because `flex: 1` in a column divides HEIGHT, which would stretch three buttons to
+   fill whatever space is left. */
+@media (max-width: 480px) {
+  .modal-actions { flex-direction: column-reverse; }
+  .modal-actions .btn { flex: none; width: 100%; }
+}
 
 /* ── Toasts ─────────────────────────────────────────────────────────────── */
 .toasts {

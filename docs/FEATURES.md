@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1370 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1392 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -73,6 +73,9 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 43 | **Value-description coverage gate** — every catalog label the web UI can show must have a plain-language explainer, asserted in CI. Which rows are tappable is decided by a pattern sweep at render time, so a label nothing matches is a silently plain row: no error, no log, just an absent chevron — how `def/overlay.hpp`'s 11 protection rows shipped unexplained (2 of them matching the *wrong* entry, a protection flag read as a heat-sink temperature). The profiles are machine-generated, so the gap re-opens without touching the UI. The real table is **evaluated in a JS engine** rather than re-implemented, and row extraction is cross-checked per file so a changed catalog format fails loudly instead of reporting full coverage of nothing. Gates coverage, not correctness — a wrong explainer is still a match | ✅ | [`check_descriptions.mjs`](../tools/descriptions/check_descriptions.mjs), [`run-description-audit.sh`](../scripts/run-description-audit.sh), [`selftest.sh`](../tools/descriptions/selftest.sh), [`www/app.js`](../main/www/app.js) |
 | 44 | **Digest-pinned CI supply chain** — every third-party GitHub Action this repo runs is pinned to a full commit SHA, not a tag. A tag is a *movable pointer*: whoever owns the action can repoint `v4` at new code, and every workflow that names the tag runs it on the next push, with the OTA signing key in scope. The readable version rides along as a trailing `# vN` comment, and Renovate is configured to keep the pin *and* bump the digest, so pinning does not decay into pinned-and-forgotten | ✅ | [`build.yml`](../.github/workflows/build.yml), [`renovate.yaml`](../.github/workflows/renovate.yaml), [`renovate.json`](../.github/renovate.json) |
 | 45 | **Dashboard-schematic audit** — the drawing itself is gated, because the two audits above can both be clean while the picture is false: a pill can carry a physically correct value, have copy for it, and still be drawn on the wrong pipe. This one shipped a rotor spinning around a point beside its own axle (the CSS pivots on the *bounding box*), the leaving-water pill floating 40 px off the run it names, the return temperature on the heating-only section, and "HEIZUNG" struck through by a riser so it rendered "HEIZUNC" — the #35–#39 shape drawn in SVG. It **parses the real SVG** (coordinates, transforms, path geometry, text metrics) and **evaluates the real binding tables**, so there is no second copy of either to drift, and reports in three layers: structure (hit target ↔ inspector entry ↔ id ↔ translation), geometry (viewBox, overlaps, struck-through labels, axis-aligned runs, a pill's tie to its own pipe, rotor symmetry, and a run's **invisible** tap area not reaching into the fitting it meets — the hit lines are `stroke-linecap: round` and so cover half a stroke past each declared endpoint, while every trim in the drawing had been computed as if the cap were flat: the 3-way valve outlined itself on hover and opened the DHW branch, and measured on the real engine it was answering only 78.9 % of the taps on its own disc) and domain — a repeated unit needs a name, and at a **branch junction** every claim stops: no reading, no flow overlay and no hit target may span it, and no pipe may sit in no hit target at all. The selftest re-seeds every historical defect into a throwaway copy (one `run_case` each, so `grep -c run_case` is the count — never restate it here). Gates placement and reachability, not truth — whether the drawing is still true of the plant is the [`schematic-review`](../.claude/skills/schematic-review/SKILL.md) skill's half, itself a PR-merge gate ([`require-schematic-review.sh`](../.claude/hooks/require-schematic-review.sh)) that fires conditionally, on a diff reaching the drawing, its contract or the tools that judge it — that hook's regex is the one definition of the set, never restated elsewhere | ✅ | [`check_schematic.mjs`](../tools/schematic/check_schematic.mjs), [`run-schematic-audit.sh`](../scripts/run-schematic-audit.sh), [`selftest.sh`](../tools/schematic/selftest.sh), [`www/index.html`](../main/www/index.html) |
+| 46 | **On-device redaction of a diagnostic snapshot** (`GET /status?redact=1`, `GET /diag?redact=1`) — the seven reporter-identifying values read `<redacted>` and the log lines that interpolate a host/IP/SSID are scrubbed, so a bug report can be filed as a *public* issue carrying the device's own status, readings and log. In the firmware rather than in the browser, so the web UI's collector and the manual `curl` fallback cannot drift into two privacy rules. The **value** is replaced and the **key** kept — a dropped field is indistinguishable from an older build, and triage reads that as evidence. Substituted where each value is *written*, never as a pass over the finished JSON (the httpd stack budget v1.0.12 overflowed); `/diag` streams chunked, because a replacement is longer than most values it replaces | ✅ 🧪 | [`logic/redact.hpp`](../main/logic/redact.hpp), [`http_status.cpp`](../main/http_status.cpp), [`REPORTING.md`](REPORTING.md) |
+| 47 | **Redaction-coverage gate** — the `/diag` half of #46 is an *allowlist* of named log statements, and an allowlist falls behind in silence: a new `diag_printf` interpolating a hostname is simply uncovered, and the only symptom is a correct-looking log line containing a real value. The one gate here whose subject is the **user's data** rather than the firmware's correctness. Flags any diag line whose *arguments* carry a config or board-identity value with no matching rule — a heuristic on identifier names, not a proof, so it catches the line someone adds while debugging and not a value laundered through an unrelated local first. Found on its first run: `mqtt: retired legacy HA device %s` printing the unique half of the MAC that `/status` was redacting three sections above it | ✅ | [`check_diag_coverage.py`](../tools/redact/check_diag_coverage.py), [`run-redaction-audit.sh`](../scripts/run-redaction-audit.sh), [`selftest.sh`](../tools/redact/selftest.sh) |
+| 48 | **Device-assembled bug report** (web UI → Settings → ESP32 → *Report a bug*) — the board collects its own `/status`, `/values`, `/ota/status` and `/diag`, redacted, into one pasteable report and opens the prefilled issue form. Unconditional, unlike the crash banner that used to hold the only copy affordance in the whole UI — so a wrong reading or an MQTT dropout, the two commonest reports, finally have a way in. A failed fetch is written *into* the report and an over-long `/diag` is truncated with the count said out loud, because a report that looks complete and is not is the failure the whole flow exists to prevent | ✅ | [`www/app.js`](../main/www/app.js), [`bug_report.yml`](../.github/ISSUE_TEMPLATE/bug_report.yml), [`REPORTING.md`](REPORTING.md) |
 
 ---
 
@@ -606,6 +609,25 @@ the fact*, from the field, without a serial cable:
 - **✅ Build identity** — `/status.app_elf_sha256` ties a running device to the exact firmware that
   produced any dump, and the syslog boot line (below) puts the same hash in the **log stream**, so a
   captured stream stays attributable to a binary after the device has moved on.
+- **✅ 🧪 Getting the evidence off the board — and what must not come with it.** Everything above is
+  useless if a user cannot produce it, and until now the only copy affordance in the whole web UI sat
+  inside the crash banner, which never renders unless the device actually crashed: a wrong reading or
+  an MQTT dropout, the two commonest reports, had no way in at all. **Settings → ESP32 → *Report a
+  bug*** collects `/status`, `/values`, `/ota/status` and `/diag` into one pasteable report and opens
+  the prefilled issue form ([`REPORTING.md`](REPORTING.md)). It is filed as a *public* issue, which is
+  defensible only because the board **redacts first**: [`logic/redact.hpp`](../main/logic/redact.hpp)
+  behind `?redact=1` replaces the seven reporter-identifying values (`wifi.ssid`/`ip`/`bssid`/`mac`,
+  `mqtt.broker`, `syslog.host`, `ntp.server`) and scrubs the log lines that interpolate a host, an IP
+  or an SSID. In the *firmware*, not in `www/app.js`, so the collector and the manual `curl` fallback
+  cannot become two privacy rules; the value is replaced and the **key kept**, since a dropped field
+  is indistinguishable from an older build and triage reads that as a version signal. It **fails
+  closed** — a rule whose end token is missing redacts to end of line — and the `CHECK`s pin that a
+  **decode witness survives it**: the raw page bytes above are on the same `/diag`, so a future rule
+  with a loose marker would clip the evidence and the only symptom would be a witness that quietly
+  stopped being one. The one artifact that stays private is a **core dump**: `CAPTURE_DRAM` is off,
+  but a password of ≤15 characters lives *inside* its `std::string` by small-string optimisation
+  rather than on the heap, so a stack frame holding a config snapshot can carry it — it is never in
+  the report, and `/status.last_crash` already gives reason, task, PC and backtrace.
 - **✅ In-RAM diag ring** (`GET /diag`) and a **status indicator** ([`status_led.cpp`](../main/status_led.cpp))
   encoding setup-portal / WiFi-connecting / all-healthy / X10A-error / MQTT-error / no-WiFi-mode as
   six distinct blink patterns (X10A-error outranks MQTT-error — the bus is the point of the device),
@@ -861,7 +883,11 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   `0x00`/`0x10`/`0x20`/`0xA0`/`0xA1` on `/diag`; truncation stops after the last *complete* byte, since a trailing
   nibble would read as a different value, and degenerate inputs still terminate the buffer the caller
   hands to a `diag_printf` `%s`).
-  **1370 `CHECK`s** in
+  the **diagnostic-snapshot redaction** (`redact.hpp` — which log lines leak a host/IP/SSID and how
+  the substitution fails *closed* when a truncated line never reaches its end token; the same tests
+  pin that a raw-page hex line passes through untouched, so the privacy rule cannot silently clip the
+  decode witness the rule above exists to deliver),
+  **1392 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -1092,7 +1118,7 @@ and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 19-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1370 checks),
+on the host** (1392 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

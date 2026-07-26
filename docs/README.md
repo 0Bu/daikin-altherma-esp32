@@ -247,7 +247,17 @@ LAN only, see [SECURITY.md](SECURITY.md).
 
 ```
 GET  /  (alias /index.html)        # embedded web UI (gzipped into the app binary)
-GET  /status                       # { version, platform, uptime_s, app_elf_sha256, pins_avail:[..],
+GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this payload: the seven
+                                   #   reporter-identifying values (wifi.ssid/ip/bssid/mac,
+                                   #   mqtt.broker, syslog.host, ntp.server) read "<redacted>"
+                                   #   (logic/redact.hpp). The KEY is always emitted — an omitted
+                                   #   field is indistinguishable from an older build, and "which
+                                   #   build produced this?" is the first question a frozen report
+                                   #   has to answer. Substituted where each value is WRITTEN, never
+                                   #   as a pass over the finished string (the httpd stack budget
+                                   #   v1.0.12 overflowed). The WS broadcast is never redacted — it
+                                   #   feeds the dashboard, which legitimately shows the SSID.
+                                   # { version, platform, uptime_s, app_elf_sha256, pins_avail:[..],
                                    #   board:{led_gpio,led_type,led_inverted,btn_gpio,
                                    #        btn_active_low,pins_local:[..],presets:[..]},
                                    #     (pins_local = the LED/button-eligible GPIOs — WIDER than
@@ -300,7 +310,14 @@ GET  /events                       # WebSocket live push (the only live UI trans
                                    #   connection (it can't be read into the command buffer, and its
                                    #   unread body would desync every frame after it).
 GET  /models                       # profile catalog + pin hint (detection is automatic; no manual picker)
-GET  /diag[?verbose=0|1][?clear=1] # plain-text in-memory diag log (raw RX frames when verbose)
+GET  /diag[?verbose=0|1][?clear=1][?redact=1]
+                                   # plain-text in-memory diag log (raw RX frames when verbose).
+                                   #   ?redact=1 scrubs the handful of lines that interpolate a
+                                   #   host, an IP or an SSID (logic/redact.hpp) and switches the
+                                   #   response to CHUNKED: a replacement is longer than most values
+                                   #   it replaces, so the redacted text can grow past the static
+                                   #   dump buffer, and the alternatives were a second ~8 KB .bss
+                                   #   buffer or a ~6 KB contiguous heap allocation
 GET  /scan                         # WiFi scan → {"networks":[{ssid,rssi}]} (name + signal only, no
                                    #   auth field). Trusted-LAN only, and read by no shipped client:
                                    #   the setup portal takes a TYPED SSID and never scans. A

@@ -42,6 +42,7 @@
 #include "logic/mqtt_uri.hpp"
 #include "logic/modbus.hpp"
 #include "logic/query_flag.hpp"
+#include "logic/redact.hpp"
 #include "logic/config_store.hpp"
 #include "logic/mcp_jsonrpc.hpp"
 #include "logic/http_surface.hpp"
@@ -3136,6 +3137,85 @@ static void test_query_flag() {
     CHECK(!query_flag_on("2"));
 }
 
+static void test_redact() {
+    // Field substitution keeps the KEY and replaces the VALUE. The caller writes the result into the
+    // JSON where the value would have gone, so "off" must be an exact passthrough — a redaction that
+    // normalised the untouched case would change /status for every ordinary request.
+    CHECK(redact_or("MyHomeNetwork", true) == REDACTED);
+    CHECK(redact_or("MyHomeNetwork", false) == "MyHomeNetwork");
+    CHECK(redact_or("", true) == REDACTED);   // an empty value still redacts: absence is not privacy
+
+    // One CHECK per shipped log statement. If a diag_printf() is reworded, the matching line here is
+    // what fails — the leak itself is invisible (a correct-looking log line with a real hostname).
+    CHECK(redact_diag_line("[   12.345] syslog: target set to logs.example.lan:514") ==
+          "[   12.345] syslog: target set to <redacted>");
+    CHECK(redact_diag_line("syslog: forwarding to logs.example.lan (192.168.1.9), reachable=yes") ==
+          "syslog: forwarding to <redacted>, reachable=yes");
+    CHECK(redact_diag_line("syslog: DNS lookup failed for logs.example.lan (error 202)") ==
+          "syslog: DNS lookup failed for <redacted> (error 202)");
+    CHECK(redact_diag_line("wifi: rollback restore to 'MyHomeNetwork' was not persisted — opening") ==
+          "wifi: rollback restore to '<redacted>' was not persisted — opening");
+    CHECK(redact_diag_line("wifi: could not clear the rollback backup ('MyHomeNetwork') — a later") ==
+          "wifi: could not clear the rollback backup ('<redacted>') — a later");
+    CHECK(redact_diag_line("sntp: time synced (pool.ntp.org)") == "sntp: time synced (<redacted>)");
+    CHECK(redact_diag_line("sntp: init failed (pool.ntp.org): ESP_ERR_INVALID_STATE") ==
+          "sntp: init failed (<redacted>): ESP_ERR_INVALID_STATE");
+    // The MAC-derived legacy HA device id. /status redacts wifi.mac, so printing its unique half
+    // here would leave the redaction incoherent — scrubbed in the JSON, spelled out in the log.
+    CHECK(redact_diag_line("mqtt: retired legacy HA device daikin_a1b2c3 (now daikin-altherma-esp32)") ==
+          "mqtt: retired legacy HA device <redacted> (now daikin-altherma-esp32)");
+
+    // What must SURVIVE. Redacting the identifier is only useful if the rest still diagnoses: the
+    // errno says why DNS failed, reachable= says whether the collector answers, and the esp_err
+    // name says why SNTP would not start. A rule that swallowed the line would trade a leak for a
+    // blind spot.
+    CHECK(redact_diag_line("syslog: DNS lookup failed for h (error 202)").find("(error 202)") !=
+          std::string::npos);
+    CHECK(redact_diag_line("syslog: forwarding to h (1.2.3.4), reachable=no-ping-reply")
+              .find("reachable=no-ping-reply") != std::string::npos);
+
+    // FAIL CLOSED. The ring truncates, and a value cut off mid-write sits unterminated at the end of
+    // the line — precisely when the end token is missing. Redact to the end rather than give up.
+    CHECK(redact_diag_line("sntp: time synced (pool.ntp.o") == "sntp: time synced (<redacted>");
+    CHECK(redact_diag_line("wifi: rollback restore to 'MyHome") == "wifi: rollback restore to '<redacted>");
+
+    // The newline is not part of the value — a fail-closed span must not eat it, or the whole ring
+    // collapses into one line and the redacted /diag is unreadable.
+    CHECK(redact_diag_line("sntp: time synced (pool.ntp.o\n") == "sntp: time synced (<redacted>\n");
+    CHECK(redact_diag_line("syslog: target set to logs.example.lan:514\n") ==
+          "syslog: target set to <redacted>\n");
+
+    // A line matching no rule is untouched — most of the ring is poll/detect chatter that names
+    // nothing, and rewriting it would be noise in a diff a human reads.
+    const char* plain = "[  123.456] HP timeout on register 0x60";
+    CHECK(redact_diag_line(plain) == plain);
+    CHECK(redact_diag_line("") == "");
+
+    // THE DECODE WITNESS MUST SURVIVE. /diag is where the raw page bytes surface (hexdump.hpp, one
+    // line per detect pass) and where a wrong value is PROVEN — issue #194 is that argument in full.
+    // A future rule with a loose marker ("detect: ", or a bare "0x") would clip those bytes, and the
+    // only symptom would be a witness that quietly stopped being evidence: the #35-#39 shape aimed
+    // at the very tool built to catch it. So the privacy rule is pinned against the diagnostic one.
+    for (const char* w : {
+             "[  123.456] detect: raw 0x10 32B 00 1E 32 00 07 CF 00 00 12 34 AB CD EF 01 02 03",
+             "[  123.456] detect: raw 0x20 32B FF FF 00 00 0C 80 00 00 00 00 00 00 00 00 00 00",
+             "[  123.456] detect: proto=I rx=1 tx=2 pages=0x1e7f kw=60 iu_kw=80 eeprom=[1234] -> 3 candidate(s), best=x",
+             // A payload whose BYTES spell a marker prefix in ASCII ("syslog: target"): safe only
+             // because every marker is an English phrase a hex rendering cannot produce. Asserted
+             // rather than assumed, since it is the one shape that could collide by accident.
+             "[  123.456] detect: raw 0xA1 32B 73 79 73 6C 6F 67 3A 20 74 61 72 67 65 74",
+         })
+        CHECK(redact_diag_line(w) == w);
+
+    // A value that itself contains the marker text: the span starts at the FIRST occurrence, so the
+    // whole thing is covered — a rule that re-anchored on the last one would redact the decoy and
+    // print the real host. The leftover delimiter is cosmetic; what matters is that nothing of the
+    // value survives, so both halves are asserted.
+    const std::string nested = redact_diag_line("sntp: time synced (sntp: time synced (evil.host))");
+    CHECK(nested.find("evil.host") == std::string::npos);
+    CHECK(nested == "sntp: time synced (<redacted>))");
+}
+
 static void test_config_store() {
     // CRC-32 golden vector (the check byte itself is what makes the blob all-or-nothing on load).
     CHECK(config_crc32(reinterpret_cast<const uint8_t*>("123456789"), 9) == 0xCBF43926u);
@@ -4142,6 +4222,7 @@ int main() {
     test_registers();
     test_convert();
     test_query_flag();
+    test_redact();
     test_config_store();
     test_mcp_jsonrpc();
     test_http_surface();

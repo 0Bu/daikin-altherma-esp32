@@ -743,6 +743,49 @@
     </form>
   </div>
 
+  <!-- Bug report. A modal rather than a plain link because the device is the only thing that can
+       produce the evidence half of a report, and until now the only copy affordance in the whole UI
+       lived inside the crash banner — so a wrong reading or an MQTT dropout, the two commonest
+       reports, had no way to produce anything at all. It all goes into the one public issue: the
+       device redacts the identifying values first (logic/redact.hpp), so a second private channel
+       would buy nothing and cost a step where reports go to die half-finished. -->
+  <div class="modal" id="bugModal" hidden>
+    <div class="modal-backdrop" id="bugBackdrop"></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="bugModalTitle">
+      <div class="section-label card-title" id="bugModalTitle" data-i18n="bug.title">Report a bug</div>
+      <div id="bugStep1">
+        <p class="hint" data-i18n="bug.intro"></p>
+        <label class="field">
+          <span class="field-label plain" data-i18n="bug.what">What happens</span>
+          <textarea class="input" id="bugWhat" rows="4"></textarea>
+        </label>
+        <p class="hint err" id="bugError" hidden></p>
+        <div class="modal-actions">
+          <button class="btn secondary" type="button" id="bugCancel" data-i18n="btn.cancel">Cancel</button>
+          <button class="btn primary" type="button" id="bugGo" data-i18n="bug.continue">Prepare the report</button>
+        </div>
+      </div>
+      <!-- The report is shown in full rather than handed over blind: it is about to be posted in
+           public, so it has to be readable first — and GitHub only opens on the copy button below,
+           so the user arrives at the form with the clipboard already holding what it asks for. -->
+      <div id="bugStep2" hidden>
+        <div class="section-label" data-i18n="bug.step2_title">Check the report</div>
+        <p class="hint" id="bugStep2Text"></p>
+        <p class="hint" data-i18n="bug.redacted"></p>
+        <textarea class="input mono" id="bugText" rows="10" readonly></textarea>
+        <div class="modal-actions">
+          <button class="btn secondary" type="button" id="bugClose" data-i18n="btn.close">Close</button>
+          <button class="btn secondary" type="button" id="bugDownload" data-i18n="bug.download">Download .md</button>
+          <button class="btn primary" type="button" id="bugCopy" data-i18n="bug.copy">Copy &amp; open GitHub</button>
+        </div>
+        <!-- What the .md is FOR. Without this the download is an orphan: a file appears, the form
+             asks you to paste, and nothing connects the two. It matters most exactly when the
+             clipboard fails, which is the case this button exists to cover. -->
+        <p class="hint" data-i18n="bug.md_hint"></p>
+      </div>
+    </div>
+  </div>
+
   <div class="toasts" id="toasts"></div>
 </div>
 
