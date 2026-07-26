@@ -339,11 +339,13 @@ Body, ordered:
    between two *stagnant* sensors is not a stale working point, it is not a working point at all.
    The **electrical input** is the same whenever it is falling back to the
    inverter current (a `0x21` row that freezes too): a stopped compressor is not drawing the 1.4 kW
-   the held current implies, it is drawing ~0. It blanks with **no sub-label**, like every other held
-   pill — the one vocabulary above applies here too, and the inspector names the reason when the pill
-   is tapped. What it must not do is fall back to the "no current sensor" caption it shows when the
-   profile genuinely has no such row: the profile has one, it is the *reading* that is not current,
-   so that caption would stand a second wrong claim in front of the one just suppressed.
+   the held current implies, it is drawing ~0. It simply blanks, like every other held pill — the one
+   vocabulary above applies here too, and the inspector names the reason when the pill is tapped.
+   The pill carries no caption in either case (§5.3 item 3: the drawing states no annotations at
+   all), but the *distinction* still has to be drawn where it is stated: the pel explainer answers
+   "held over from the last run" and "this profile has no current row" with two different sentences,
+   because collapsing the first into the second would stand a second wrong claim — one about the
+   hardware — in front of the one just suppressed.
    The CT-clamp path is unaffected: those sit on a live
    hydronic page, so a non-zero reading at rest is genuine standby draw and is shown normally.
    The run state itself is never affected — the compressor witness (`INV frequency`) sits on a page
@@ -354,32 +356,68 @@ Body, ordered:
    lower one is the **liquid** line, not a suction line: the expansion valve sits in the outdoor unit
    at its far end), plate heat exchanger, supply line through the backup heater **and then the
    circulation pump** to the 3-way valve, DHW tank with coil, heating circuit, and the return line.
+   The two ROTATING parts — the outdoor fan and the pump's impeller — turn only while their part
+   runs, and that is all they claim. Neither carries a direction mark: a triangle in a pump circle
+   IS the direction symbol, so the rotating one the drawing used to have pointed against the flow for
+   half of every turn. Direction is the **pipes'** job — the flow dashes animate in the flow
+   direction, everywhere, and only while there is flow. Both rotors are drawn so their bounding box
+   is centred on the hub (an even blade count, or the ring drawn inside the rotating group), because
+   the CSS pivots on that box and anything else orbits its own axle.
    The component **order is the manufacturer's** (installer reference §16.2: exchanger → R1T →
    backup heater → pump → R2T → outlet, then the field-supplied 3-way valve), not a drawing
    convenience — the pump is on the **supply** side, and drawing it in the return misplaced a real
-   part. Value pills sit at their physical measuring
-   points (outdoor temp, high/low pressure + discharge, EEV pulses, leaving/return water, ΔT, the
+   part. For the same reason the **tank and the heating circuit are on one level**, side by side
+   below the 3-way valve, in the same box: they are not two stages of a flow but the two loads that
+   valve alternates between, and drawing one of them above the supply line put a choice on two
+   levels for no physical reason. Each box carries **its own reading and setpoint inside it** — tank
+   temp for the one, room temp for the other, since the room is the controlled variable of that
+   circuit — with the reading's own name kept on it ("Raum 20.0 °C", never a bare "20.0 °C" under a
+   HEATING label, which would read as a water temperature). What stays *outside* the box is the
+   **thermostat demand**, on the riser above it: it is not a reading of the emitter but the request
+   that decides whether water reaches it at all. Value pills sit at their physical measuring
+   points (outdoor temp, high/low pressure, discharge temp, EEV pulses, leaving/return water, ΔT, the
    estimated **heat output and COP** at the PHE, the estimated **electrical input** on the outdoor
-   unit where the power goes in, flow + water pressure, pump %, tank temp/setpoint, room
-   temp/setpoint). **There is no tile row under the diagram**: the working point belongs at the
-   parts it describes, so ΔT carries its target setpoint, heat output carries the COP derived from
-   it, and the electrical figure carries its own provenance ("est. · CT" vs "est. · INV" — the
-   clamps see the whole unit, the inverter current only the compressor, so an INV-based COP is
-   flattering whenever the backup heater is firing).
-   Those three are *derived*, never measured — thermal from flow × ΔT (≈4.186 kJ/kg·K), electrical
-   from current at an assumed 230 V — so each is drawn with "≈" under an **"estimated"** sub-label:
-   the bus has no energy registers, and a derived number must never read as a measured one. COP
+   unit where the power goes in, flow, water pressure, pump %, tank temp/setpoint, room
+   temp/setpoint).
+   **One pill, one reading.** Two readings sharing a pill ("28.4 bar · 71.2 °C") made one tap target
+   out of two sensors, and left a "·" carrying the claim that they are separate quantities. Split
+   pills sit stacked in one column on the run they describe — still visibly a pair, but each with its
+   own explainer, whose headline and source line resolve from its own row: a shared entry answered a
+   tap on the temperature with a pressure and named the wrong sensor under it, in the panel whose
+   whole job is to say where a number came from. A pill therefore holds a second figure only when
+   that figure is the SAME quantity (a reading and its setpoint).
+   A pill's name sub-label is **required wherever its unit repeats** across the drawing: three pills
+   read "bar" and only one of them is water, so position alone would have to carry the difference
+   between a sealed heating circuit at 1.8 bar and a refrigerant circuit at 28.4 — and position is a
+   weak tell for readings whose same-unit neighbours sit two components away. Naming those is
+   attribution, not the commentary §5.3 keeps out of the picture.
+   **There is no tile row under the diagram**: the working point belongs at the
+   parts it describes — the three figures that exist *across the exchanger* (ΔT, the flow × ΔT heat
+   output, and the COP from it) are drawn **on the plate itself**, which is widened to hold them, rather
+   than floating beside it, with the COP beside the heat output it is computed from, and the
+   electrical figure on the outdoor unit where the power actually goes in.
+   **The drawing carries readings, not annotations.** Nothing in it explains, qualifies or sources a
+   value: the ΔT's target setpoint, the word "estimated", and which current the electrical figure
+   came from (CT clamps see the whole unit, the inverter current only the compressor — which is why
+   an INV-based COP flatters whenever the backup heater is firing) are all in the **inspector**, one
+   tap away, where a sentence fits and a caption never did. A sub-label under a pill is therefore
+   only ever the measurement's own NAME ("leaving water · pre-BUH", "return") — that is attribution,
+   without which the number above it is unowned, not commentary on it.
+   The one exception is the **"≈"** on the two derived pills: it is part of the reading rather than a
+   note about it, and without it a bare "4.6 kW" reads as measured whenever the inspector is closed.
+   Both are *derived*, never measured — thermal from flow × ΔT (≈4.186 kJ/kg·K), electrical
+   from current at an assumed 230 V — the bus has no energy registers, so their inspector entries are
+   titled "(estimated)" and open on saying so; a derived number must never read as a measured one. COP
    shows "—" unless the compressor is actually running, and the heat-output pill hides entirely
    when flow or ΔT is missing rather than printing a confident 0.0. The electrical pill obeys the
    held-over rule below on its INV source only: the CT clamps sit on a page the unit keeps
    refreshing (a non-zero reading at rest is genuine standby draw and is shown), while the inverter
    current freezes with the rest of the outdoor unit's pages — so with the compressor off the INV
-   fallback is suppressed and the pill simply blanks, with **no sub-label at all**: the drawing has
-   one vocabulary for "no reading right now" and the *reason* is the explainer's job, not a caption
-   in the schematic (tapping the pill says the compressor is off and the inverter current is left
-   over from the last run). What it must not do is fall through to the "no current sensor" it shows
-   when the profile genuinely has no such row — suppressing one wrong claim must not stand a
-   *second* one in front of it, and that one is a claim about the hardware. **The pipes animate in flow
+   fallback is suppressed and the pill simply blanks: the drawing has one vocabulary for "no reading
+   right now" and the *reason* is the explainer's job (tapping the pill says the compressor is off
+   and the inverter current is left over from the last run). That reason must stay distinct from
+   "this profile has no current row" — suppressing one wrong claim must not stand a *second* one in
+   front of it, and that one is a claim about the hardware. **The pipes animate in flow
    direction** while the pump runs — supply in `--flow-hot`, return in `--flow-cold`; the 3-way
    valve state switches the animated branch (heating circuit ↔ tank coil), a defrost cycle reverses
    the refrigerant-loop animation and shows a `--flow-cold` "❄ defrost" pill, and an active BUH
@@ -397,6 +435,16 @@ Body, ordered:
    SVG `<title>` (native tooltip *and* accessible name, from the one copy source); the SVG is
    therefore a labelled `role="group"`, never `aria-hidden` — a hidden subtree must not hold focusable
    elements. Tapping the same target again, ✕, or Escape closes the panel.
+   **A junction ends every claim.** Where a shared run parts into branches, all three ways the
+   drawing speaks about a pipe stop at the same point: the animated flow overlay, the hit target that
+   highlights and opens it, and the readings drawn beside it. One overlay across the junction
+   animates a branch nothing is flowing through; one hit target across it selects a branch its
+   inspector does not describe, and silently leaves the other one out; a reading past it names the
+   wrong circuit. Consequently **every branch owns both its legs** and the shared group owns only
+   what is shared — and every drawn pipe belongs to some hit target, since a stretch that belongs to
+   none cannot be hovered at all and reads as the neighbouring selection simply stopping. The gate
+   checks all four (`E002`/`E003`/`E004`/`S011`); which pipe is a branch and which is shared it
+   cannot know, and that is the judgement half's question.
 3. **Inspector** — the panel directly under the drawing, in the same card, so the explanation and the
    thing it explains are on screen together. Idle it shows **nothing** and collapses — the picture's
    clickability is carried by the hit targets themselves (hover/press feedback, `role="button"`,
@@ -853,6 +901,16 @@ enabled/available values are hidden.
   neutral pipe skeleton with animated `--flow-hot`/`--flow-cold` dash overlays, `--card` value
   pills with `--line` borders, `--muted` small-caps part labels. Scrolls horizontally inside the
   card below 640px content width.
+- **Leader tie** — the dotted `--line` hairline from a pill to the run it reads. Only pills drawn
+  BESIDE a pipe carry one; a reading inside its component is attached by containment already. It
+  ends half the pipe's stroke short of the centre line — it points at the run, it never draws on it
+  — and it tints with its pill on hover/select, which is how the pairing stays legible on a phone,
+  where there is no hover but there is a tap.
+- **Bare reading** — a value drawn INSIDE the component that owns it (tank temperature, room
+  temperature, the outdoor air) carries **no pill**: the component's own outline is the frame, and a
+  second one around the number reads as a second thing. Where such a reading is still its own hit
+  target (the room's is, the tank's is not), it carries a transparent `.sc-hitarea` for the tap and
+  tints its **value** on hover/select in place of a border.
 - **State pill** — a value pill carrying a flag rather than a number, sitting on the component it
   belongs to (§5.3 item 1): `--card` fill, text+border tinted `--ok`/`--warn`/`--flow-cold`/`--brand`
   while the state is active, `--muted` otherwise. The text always names the state ("Thermostat off"),
@@ -862,9 +920,10 @@ enabled/available values are hidden.
   the explainer paragraph and a `--line`-divided list of that component's readings. Idle it collapses
   to a single muted hint line.
 - **Value pill** — the schematic's unit of reading (§5.3 item 2): `--card` fill, `--line` border,
-  tabular value, optional `--muted` sub-label under it (the measurement's name, or "estimated" for a
-  derived one). Widened to carry a second related figure where the two belong together (ΔT + target,
-  heat output + COP), and hidden outright when its model has no such reading.
+  tabular value, optional `--muted` sub-label under it — the measurement's NAME, never a note about
+  it: annotations belong in the inspector. Holds ONE reading (§5.3 item 2) — a second figure only
+  when it is the same quantity, i.e. that reading's setpoint (tank, room), stacked on its own line
+  rather than run on after the first — and is hidden outright when its model has no such reading.
 - **Connections tile** — `--card` bordered like the value-group cards, full width like every other
   card (§9) — one row per link (WiFi/MQTT/Syslog/NTP), each a label + a single colour-coded value +
   a trailing pencil (§5.6).

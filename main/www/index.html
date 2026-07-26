@@ -89,8 +89,32 @@
                  is also why the <svg> is a labelled group and no longer aria-hidden — a hidden
                  subtree must not contain focusable elements. -->
             <div class="schem-scroll">
-              <svg viewBox="0 0 760 470" role="group"
+              <svg viewBox="0 0 790 451" role="group"
                    aria-label="Live system schematic — tap a value or component for an explanation">
+                <!-- The DIAGRAM proper hangs 48 px above where its own coordinates put it, and
+                     that offset is the whole reason this group exists: the status headline is text
+                     with its own leading, so the gap under it was 74 px of nothing while the bottom
+                     of the card had 17 — the drawing sat low in its own frame. One translate here
+                     (rather than 100 edited y values) makes both margins 26 px, and the viewBox
+                     loses the dead band with it. NOTE for anything that reads these coordinates
+                     mechanically: every drawn element is inside this one group, so all RELATIVE
+                     geometry (overlap, a pill's distance to its pipe, containment) is unaffected;
+                     only a check against the viewBox itself has to add the offset. -->
+                <!-- GEOMETRY: TWO horizontal runs, and everything that flows sits on one of them.
+                     y=180 is the whole hot side (hot gas out of the compressor, then the water
+                     supply through BUH, pump and 3-way valve); y=420 is the whole cold side (the
+                     water return from both loads, straight into the plate, and the liquid line out
+                     of it back to the outdoor unit). The circuit is then one flat loop — out along
+                     the top, back along the bottom — instead of a return that stepped up 120 px to
+                     meet a refrigerant line drawn on a level of its own, which put two returns of
+                     the same loop on two heights and made the step read as a component.
+                     The two boxes those runs pass THROUGH span exactly the same band with the same
+                     30 px margins (both 150..450): the plate is the boundary between the two fluids,
+                     so it and the unit it faces are the same height by construction. Moving a run
+                     therefore means moving both boxes' edges with it, not nudging one.
+                     Each refrigerant run carries its two pills SPLIT across it — pressure above,
+                     temperature (hot side) / valve position (liquid side) below — so both runs read
+                     the same way round and the corridor between unit and plate stays open. -->
                 <!-- Status block — the plant's own title: state dot + operation mode + one status
                      line (status word / fault / "waiting" / "unreachable" / last-poll age). Written
                      by sysSet(). It lives INSIDE the drawing on purpose: there is no status band
@@ -101,80 +125,186 @@
                   <text class="sc-mode" id="svMode" x="50" y="34">—</text>
                   <text class="sc-status" id="svStatus" x="50" y="56"></text>
                 </g>
+                <g transform="translate(0 -48)">
                 <!-- Outdoor unit. The box is drawn first so the parts sitting on it (compressor,
                      pills) are later in paint order and win the hit test inside its area. -->
                 <g class="sc-hit" data-insp="ou" role="button" tabindex="0">
-                  <rect class="sc-box" x="24" y="120" width="180" height="230" rx="10"/>
-                  <text class="sc-lbl" x="40" y="142" data-i18n="schem.outdoor_unit">OUTDOOR UNIT</text>
-                  <circle cx="80" cy="205" r="34" fill="none" stroke="var(--line)" stroke-width="2"/>
-                  <g id="scFan">
-                    <path d="M80 205 m0 -26 a10 10 0 0 1 6 18 l-6 -18z M80 205 m22 13 a10 10 0 0 1 -19 3 l19 -3z M80 205 m-22 13 a10 10 0 0 1 13 -21 l-13 21z" fill="var(--brand)" opacity=".85"/>
-                    <circle cx="80" cy="205" r="5" fill="var(--brand-strong)"/>
+                  <rect class="sc-box" x="24" y="150" width="180" height="300" rx="10"/>
+                  <text class="sc-lbl" x="40" y="172" data-i18n="schem.outdoor_unit">OUTDOOR UNIT</text>
+                  <!-- ROTOR. Four swept blades in a ring, drawn to a reference the user picked —
+                       each blade is one path from hub root to rim tip and back, <use>d three times
+                       at 90° so the four cannot drift apart and the artwork carries no absolute
+                       coordinate (the wrapper's translate places it).
+                       The outer edge is a CUBIC, not an arc on the rim: an arc meets its two edges
+                       at an angle, which put a point on the leading shoulder and a corner where the
+                       trailing edge left the rim — the blade read as cut, not cast. Every junction
+                       now continues the previous tangent, so the outline is round the whole way and
+                       only the two gaps between blades stay sharp, which is where the eye reads
+                       them as separate blades.
+                       The RING IS INSIDE the rotating group on purpose: the spin resolves its pivot
+                       from `transform-box: fill-box; transform-origin: center`, i.e. the bounding-box
+                       centre of whatever rotates, and a circle centred on the hub is invisible under
+                       rotation while dominating that box — so the pivot is the hub for any blade
+                       shape drawn inside it. Measured, not assumed: the earlier three-blade rotor
+                       (ring outside) put the bbox centre 3.60 px off the hub, which is the wobble
+                       that got reported; this measures 0.000. Four-fold symmetry would carry the
+                       same guarantee on its own, so this rotor is safe twice over — but keep the
+                       ring in the group and the next redesign is free too.
+                       The hub is a --card disc over the blade roots with a --brand-strong centre:
+                       the blades converge behind it, so the light ring is the drawing, not a gap. -->
+                  <g transform="translate(114 228)">
+                    <g id="scFan">
+                      <circle r="42" fill="none" stroke="var(--line)" stroke-width="2"/>
+                      <g fill="var(--brand)">
+                        <path id="fanBlade" d="M-1.2 -8.4 C -2.6 -18.7 13.1 -36.2 21.7 -29.9 C 30.4 -23.7 29.5 -24.8 33.8 -15 C 37.3 -7.3 8 -17.9 3.5 -7.8 A 8.5 8.5 0 0 0 -1.2 -8.4 Z"/>
+                        <use href="#fanBlade" transform="rotate(90)"/>
+                        <use href="#fanBlade" transform="rotate(180)"/>
+                        <use href="#fanBlade" transform="rotate(270)"/>
+                      </g>
+                      <circle r="8" fill="var(--card)"/>
+                      <circle r="4" fill="var(--brand-strong)"/>
+                    </g>
                   </g>
                 </g>
+                <!-- The outdoor air reading sits INSIDE the unit, because that is where its sensor
+                     is: R1T on page 0x20 is the outdoor unit's own air-inlet sensor, not a weather
+                     station. Floating above the box it read as ambient context; inside — down with
+                     the unit's other readings rather than under its title — it is one
+                     more reading of the component that owns it — and it explains itself when it
+                     blanks, since it freezes with the rest of page 0x20 while the unit rests
+                     (logic/ou_stale.hpp). "Außen"/"Outdoor" stays ON the value for the reason the
+                     room reading keeps "Raum": under a box labelled OUTDOOR UNIT, a bare 12.5 °C
+                     could be any of the unit's temperatures. -->
+                <g class="sc-hit" data-insp="out" role="button" tabindex="0">
+                  <rect class="sc-pill" x="62" y="376" width="104" height="22" rx="11"/>
+                  <text class="sc-val" x="114" y="391" text-anchor="middle"><tspan data-i18n="schem.outdoor">Outdoor</tspan> <tspan id="svOut">—</tspan> °C</text>
+                </g>
                 <g class="sc-hit" data-insp="comp" role="button" tabindex="0">
-                  <circle class="sc-comp" cx="152" cy="300" r="25"/>
-                  <text class="sc-state" x="152" y="297" text-anchor="middle" style="font-size:9px">COMP</text>
-                  <text class="sc-val" x="152" y="310" text-anchor="middle"><tspan id="svRps">—</tspan> rps</text>
+                  <circle class="sc-comp" cx="114" cy="340" r="26"/>
+                  <text class="sc-state" x="114" y="337" text-anchor="middle" style="font-size:9px">COMP</text>
+                  <text class="sc-val" x="114" y="350" text-anchor="middle"><tspan id="svRps">—</tspan> rps</text>
                 </g>
                 <g class="sc-snow sc-hit" data-insp="defrost" role="button" tabindex="0">
-                  <rect class="sc-pill" x="96" y="252" width="70" height="20" rx="10" style="stroke:var(--flow-cold)"/>
-                  <text class="sc-val" x="131" y="266" text-anchor="middle" style="fill:var(--flow-cold)" data-i18n="schem.defrost_pill">❄ defrost</text>
+                  <rect class="sc-pill" x="110" y="282" width="70" height="20" rx="10" style="stroke:var(--flow-cold)"/>
+                  <text class="sc-val" x="145" y="296" text-anchor="middle" style="fill:var(--flow-cold)" data-i18n="schem.defrost_pill">❄ defrost</text>
                 </g>
                 <!-- Low-noise mode: a state OF the outdoor unit (fan/compressor capped), so it sits
                      on the outdoor unit like the defrost pill. Shown only while active (.quiet-on). -->
                 <g class="sc-quiet sc-hit" data-insp="quiet" role="button" tabindex="0">
-                  <rect class="sc-pill" x="126" y="224" width="64" height="20" rx="10" style="stroke:var(--brand)"/>
-                  <text class="sc-val" x="158" y="238" text-anchor="middle" style="fill:var(--brand)" data-i18n="chip.quiet">Quiet</text>
+                  <rect class="sc-pill" x="36" y="282" width="64" height="20" rx="10" style="stroke:var(--brand)"/>
+                  <text class="sc-val" x="68" y="296" text-anchor="middle" style="fill:var(--brand)" data-i18n="chip.quiet">Quiet</text>
                 </g>
+                <!-- The "≈" is the whole of what the DRAWING says about this being derived; which
+                     current it came from (CT clamps = whole unit vs inverter = compressor only, and
+                     why that changes how the COP reads), and the two ways it can be absent, are the
+                     inspector's job — see the note on the estimate sub-labels at #gPth. -->
                 <g class="sc-hit" data-insp="pel" role="button" tabindex="0">
-                  <rect class="sc-pill" x="30" y="300" width="88" height="20" rx="10"/>
-                  <text class="sc-val" x="74" y="314" text-anchor="middle">≈ <tspan id="svPel">—</tspan> kW el.</text>
-                  <text class="sc-sub" x="74" y="332" text-anchor="middle" id="svPelSrc"></text>
-                </g>
-                <g class="sc-hit" data-insp="out" role="button" tabindex="0">
-                  <rect class="sc-pill" x="30" y="88" width="112" height="22" rx="11"/>
-                  <text class="sc-val" x="86" y="103" text-anchor="middle"><tspan data-i18n="schem.outdoor">Outdoor</tspan> <tspan id="svOut">—</tspan> °C</text>
+                  <rect class="sc-pill" x="70" y="408" width="88" height="20" rx="10"/>
+                  <text class="sc-val" x="114" y="422" text-anchor="middle">≈ <tspan id="svPel">—</tspan> kW el.</text>
                 </g>
                 <!-- Refrigerant circuit (outdoor unit ↔ PHE). Each run pairs its drawn pipe with a
                      fat transparent sc-hitline: a 3.5–5 px stroke is not a tappable target on a
                      phone, so the hit area is widened without widening the drawing. -->
                 <g class="sc-hit" data-insp="rhot" role="button" tabindex="0">
-                  <path class="sc-rpipe" d="M204 180 H 330"/>
-                  <path class="sc-hitline" d="M204 180 H 330"/>
+                  <path class="sc-rpipe" d="M204 180 H 290"/>
+                  <path class="sc-hitline" d="M204 180 H 290"/>
                 </g>
-                <path class="sc-rflow hot" id="rfHot" d="M204 180 H 330"/>
+                <path class="sc-rflow hot" id="rfHot" d="M204 180 H 290"/>
                 <g class="sc-hit" data-insp="rcold" role="button" tabindex="0">
-                  <path class="sc-rpipe" d="M330 300 H 204"/>
-                  <path class="sc-hitline" d="M330 300 H 204"/>
+                  <path class="sc-rpipe" d="M290 420 H 204"/>
+                  <path class="sc-hitline" d="M290 420 H 204"/>
                 </g>
-                <path class="sc-rflow cold" id="rfCold" d="M330 300 H 204"/>
+                <path class="sc-rflow cold" id="rfCold" d="M290 420 H 204"/>
+                <!-- ONE PILL, ONE READING. Both sides of the refrigerant circuit used to pack two
+                     readings into one wide pill ("28.4 bar · 71.2 °C"): that made a single tap
+                     target out of two different sensors, and a "·" carry the work of saying they
+                     are separate quantities. Stacked, each gets its own hit target and its own
+                     inspector entry — the panel's headline and source line resolve from the entry's
+                     own row, so tapping the temperature can no longer answer with a pressure — and
+                     the pills drop from 112 px wide to 66, which is where the air between the
+                     outdoor unit and the plate comes from. They stay a PAIR by position (same
+                     column, on the run they describe), which is what the shared member-row lists in
+                     the two entries also say.
+                     They also straddle their run to a RULE, the same one on both: the PRESSURE sits
+                     above the pipe, the other reading below it. So "everything above a refrigerant
+                     line is a bar figure" holds across the drawing, and the two pressures — the only
+                     pair a reader has to tell apart at a glance, since neither carries a name — are
+                     found in the same place relative to their own pipe rather than by counting which
+                     of two stacked pills came first. -->
+                <g class="sc-hit" data-insp="hp" role="button" tabindex="0">
+                  <rect class="sc-pill" x="214" y="146" width="66" height="22" rx="11"/>
+                  <text class="sc-val" x="247" y="161" text-anchor="middle"><tspan id="svHp">—</tspan> bar</text>
+                  <path class="sc-tie" d="M247 168 V 177"/>
+                </g>
                 <g class="sc-hit" data-insp="disch" role="button" tabindex="0">
-                  <rect class="sc-pill" x="212" y="146" width="112" height="22" rx="11"/>
-                  <text class="sc-val" x="268" y="161" text-anchor="middle"><tspan id="svHp">—</tspan> bar · <tspan id="svDisch">—</tspan> °C</text>
+                  <rect class="sc-pill" x="214" y="192" width="66" height="22" rx="11"/>
+                  <text class="sc-val" x="247" y="207" text-anchor="middle"><tspan id="svDisch">—</tspan> °C</text>
+                  <path class="sc-tie" d="M247 192 V 183"/>
                 </g>
-                <g class="sc-hit" data-insp="suction" role="button" tabindex="0">
-                  <rect class="sc-pill" x="212" y="316" width="112" height="22" rx="11"/>
-                  <text class="sc-val" x="268" y="331" text-anchor="middle"><tspan id="svLp">—</tspan> bar · EEV <tspan id="svEev">—</tspan></text>
+                <g class="sc-hit" data-insp="lp" role="button" tabindex="0">
+                  <rect class="sc-pill" x="214" y="386" width="66" height="22" rx="11"/>
+                  <text class="sc-val" x="247" y="401" text-anchor="middle"><tspan id="svLp">—</tspan> bar</text>
+                  <path class="sc-tie" d="M247 408 V 417"/>
                 </g>
-                <!-- Plate heat exchanger -->
+                <g class="sc-hit" data-insp="eev" role="button" tabindex="0">
+                  <rect class="sc-pill" x="214" y="432" width="66" height="22" rx="11"/>
+                  <text class="sc-val" x="247" y="447" text-anchor="middle">EEV <tspan id="svEev">—</tspan></text>
+                  <path class="sc-tie" d="M247 432 V 423"/>
+                </g>
+                <!-- Plate heat exchanger. WIDER than the pipe fittings it sits between (88 px, not
+                     the original 48) because the three DERIVED figures are drawn INSIDE it — see
+                     the note on ΔT below.
+                     It also sits 40 px LEFT of where the pipe run alone would put it, and that is
+                     what buys the R1T pill an 80 px run of its own before the backup heater. R1T is
+                     at the plate's water outlet, so its pill has to sit over THAT pipe; on the 20 px
+                     stub it had, a 66 px pill under a 110 px name overhung the plate and read as
+                     belonging to nothing. The room comes from the LEFT because the right has none:
+                     the load boxes end 4 px from the viewBox edge, so moving them right means a
+                     wider viewBox, and the SVG scales to fit the card — every reading in the drawing
+                     would shrink to fix one label. The refrigerant corridor gives it up instead
+                     (126 -> 86 px), which it can afford now that its pills are 66 px wide, not 112.
+                     BUH and pump slide right into the freed run; the 3-way valve and everything
+                     beyond it (tank, heating, both returns) do not move. -->
                 <g class="sc-hit" data-insp="phe" role="button" tabindex="0">
-                  <rect class="sc-plate" x="330" y="150" width="48" height="170" rx="6"/>
-                  <path d="M340 158 v154 M349 158 v154 M358 158 v154 M367 158 v154" stroke="var(--line)" stroke-width="1.5" fill="none"/>
-                  <text class="sc-lbl" x="354" y="340" text-anchor="middle">PHE</text>
+                  <rect class="sc-plate" x="290" y="150" width="88" height="300" rx="6"/>
+                  <path d="M300 158 v284 M309 158 v284 M318 158 v284 M327 158 v284 M336 158 v284 M345 158 v284 M354 158 v284 M363 158 v284 M372 158 v284" stroke="var(--line)" stroke-width="1.5" fill="none"/>
+                  <text class="sc-lbl" x="334" y="470" text-anchor="middle">PHE</text>
                 </g>
+                <!-- ΔT and the heat/COP estimate sit ON the plate, not beside it: both are measured
+                     ACROSS this exchanger (leaving water minus return water, and flow × that ΔT), so
+                     the component they describe is the one they are drawn on. The pills keep the
+                     solid .sc-pill fill, so they read over the plate's corrugation lines; they are
+                     later in paint order than the plate group, so each still wins its own hit test.
+                     The drawing shows the ΔT and nothing else about it — the target it is being held
+                     against is the inspector's, like every other annotation (see #gPth). -->
                 <g class="sc-hit" data-insp="dt" role="button" tabindex="0">
-                  <rect class="sc-pill" x="390" y="220" width="120" height="22" rx="11"/>
-                  <text class="sc-val" x="450" y="235" text-anchor="middle">ΔT <tspan id="svDt">—</tspan> K<tspan id="svDtSet"></tspan></text>
+                  <rect class="sc-pill" x="298" y="258" width="72" height="22" rx="11"/>
+                  <text class="sc-val" x="334" y="273" text-anchor="middle">ΔT <tspan id="svDt">—</tspan> K</text>
                 </g>
                 <!-- Heat actually crossing the PHE into the water — flow × ΔT, so it belongs at the
-                     PHE and nowhere else. DERIVED, never measured: the "≈" and the "est." sub-label
-                     are load-bearing (DESIGN.md §5.3 item 3). Hidden via .no-pth when flow or ΔT is
-                     missing, rather than drawing a confident "0.0 kW" from an absent row. -->
-                <g id="gPth" class="sc-hit" data-insp="pth" role="button" tabindex="0">
-                  <rect class="sc-pill" x="390" y="250" width="120" height="22" rx="11"/>
-                  <text class="sc-val" x="450" y="265" text-anchor="middle">≈ <tspan id="svPth">—</tspan> kW · COP <tspan id="svCop">—</tspan></text>
-                  <text class="sc-sub" x="450" y="284" text-anchor="middle" data-i18n="schem.est">estimated</text>
+                     PHE and nowhere else. DERIVED, never measured, and the "≈" carries that in the
+                     drawing — but the WORD "estimated" no longer does: annotations (this, the ΔT
+                     target, the electrical figure's current source) are the INSPECTOR's half of the
+                     card, reached by tapping the pill, so the picture stays readings only. Nothing is
+                     lost: the pth/pel entries are titled "(estimated)", their `what` opens on "an
+                     ESTIMATE, not a measurement", and pel's `now` names which current it came from
+                     (DESIGN.md §5.3 item 3). The "≈" is what must never go — a bare "4.6 kW" would
+                     read as measured wherever the inspector is not open.
+                     The heat output and the COP are TWO pills, not one card with two lines: they are
+                     two figures (one a rate, one a ratio), so each carries its own tap target and
+                     its own explainer — the COP's is the only one with no catalog row behind it at
+                     all, which is exactly the thing worth being able to tap. #gPth stays the wrapper
+                     around both, so .no-pth still hides them together: without flow or ΔT there is
+                     no heat estimate, and a COP without one is not a figure either. -->
+                <g id="gPth">
+                  <g class="sc-hit" data-insp="pth" role="button" tabindex="0">
+                    <rect class="sc-pill" x="298" y="290" width="72" height="22" rx="11"/>
+                    <text class="sc-val" x="334" y="305" text-anchor="middle">≈ <tspan id="svPth">—</tspan> kW</text>
+                  </g>
+                  <g class="sc-hit" data-insp="cop" role="button" tabindex="0">
+                    <rect class="sc-pill" x="298" y="322" width="72" height="22" rx="11"/>
+                    <text class="sc-val" x="334" y="337" text-anchor="middle">COP <tspan id="svCop">—</tspan></text>
+                  </g>
                 </g>
                 <!-- Water circuit: supply. The component ORDER is the manufacturer's, not a drawing
                      convenience — installer reference §16.2 (indoor-unit piping) and the system
@@ -183,16 +313,16 @@
                      here, on the supply side as the last part before the water leaves the unit —
                      NOT in the return line, where this drawing used to put it. -->
                 <g class="sc-hit" data-insp="wsup" role="button" tabindex="0">
-                  <path class="sc-pipe" d="M378 180 H 398"/>
-                  <path class="sc-pipe" d="M442 180 H 470"/>
-                  <path class="sc-pipe" d="M504 180 H 526"/>
-                  <path class="sc-hitline" d="M378 180 H 398"/>
-                  <path class="sc-hitline" d="M442 180 H 470"/>
-                  <path class="sc-hitline" d="M504 180 H 526"/>
+                  <path class="sc-pipe" d="M378 180 H 458"/>
+                  <path class="sc-pipe" d="M502 180 H 532"/>
+                  <path class="sc-pipe" d="M566 180 H 596"/>
+                  <path class="sc-hitline" d="M378 180 H 458"/>
+                  <path class="sc-hitline" d="M502 180 H 532"/>
+                  <path class="sc-hitline" d="M566 180 H 596"/>
                 </g>
-                <path class="sc-flow hot" id="fSup1" d="M378 180 H 398"/>
-                <path class="sc-flow hot" id="fSup2" d="M442 180 H 470"/>
-                <path class="sc-flow hot" id="fSup3" d="M504 180 H 526"/>
+                <path class="sc-flow hot" id="fSup1" d="M378 180 H 458"/>
+                <path class="sc-flow hot" id="fSup2" d="M502 180 H 532"/>
+                <path class="sc-flow hot" id="fSup3" d="M566 180 H 596"/>
                 <!-- R1T, at the exchanger's water outlet and BEFORE the backup heater — which is
                      exactly where it is drawn. The sub-label says "pre-BUH" because the pill is NOT
                      the system supply temperature: that is R2T, after the heater and the pump. The
@@ -200,95 +330,217 @@
                      it fires, so an unqualified "leaving water" would over-claim precisely when it
                      matters. R1T is what ΔT / heat output / COP must be built on (lwt_select.hpp). -->
                 <g class="sc-hit" data-insp="lwt" role="button" tabindex="0">
-                  <rect class="sc-pill" x="352" y="118" width="66" height="22" rx="11"/>
-                  <text class="sc-val" x="385" y="133" text-anchor="middle"><tspan id="svLwt">—</tspan> °C</text>
-                  <text class="sc-sub" x="385" y="112" text-anchor="middle" data-i18n="schem.leaving_water">leaving water · pre-BUH</text>
+                  <rect class="sc-pill" x="385" y="146" width="66" height="22" rx="11"/>
+                  <text class="sc-val" x="418" y="161" text-anchor="middle"><tspan id="svLwt">—</tspan> °C</text>
+                  <text class="sc-sub" x="418" y="140" text-anchor="middle" data-i18n="schem.leaving_water">leaving water · pre-BUH</text>
+                  <path class="sc-tie" d="M418 168 V 176"/>
                 </g>
                 <!-- Backup heater -->
                 <g class="sc-hit" data-insp="buh" role="button" tabindex="0">
-                  <rect class="sc-buh" x="398" y="164" width="44" height="32" rx="6"/>
-                  <path class="sc-bolt" d="M422 168 l-8 12 h6 l-4 12 10 -14 h-6 l6 -10z"/>
+                  <rect class="sc-buh" x="458" y="164" width="44" height="32" rx="6"/>
+                  <path class="sc-bolt" d="M482 168 l-8 12 h6 l-4 12 10 -14 h-6 l6 -10z"/>
                 <!-- The active STEP is part of the label ("BUH 1"/"BUH 2"), not just the warn tint:
                      the tint says "on", the digit says how much resistive heat is being paid for. -->
-                  <text class="sc-lbl" x="420" y="212" text-anchor="middle">BUH<tspan id="svBuh"></tspan></text>
+                  <text class="sc-lbl" x="480" y="212" text-anchor="middle">BUH<tspan id="svBuh"></tspan></text>
                 </g>
                 <!-- Circulation pump — last component on the supply side (see the order note above).
-                     Label sits ABOVE the pipe: below it is the ΔT / heat-output pill column. -->
+                     Label sits ABOVE the pipe, clear of the branch band below. -->
+                <!-- IMPELLER, not a triangle. The old symbol was a filled triangle that ROTATED
+                     with the pump — but a triangle in a pump circle is the direction mark, so a
+                     spinning one pointed against the flow for half of every turn: a moving part
+                     stating something false about the plant, which is worse than stating nothing.
+                     It also span off-axis, the same bbox-pivot bug the fan had.
+                     What replaces it says only what is true: four blades at 90° that TURN while the
+                     pump runs. Direction is not restated here — the pipe's own flow dashes animate
+                     in the flow direction, everywhere, and only while there IS flow, which is the
+                     stronger claim. Freezing the triangle AND adding the rotor was tried first and
+                     does not survive 34 px: at this size the two symbols read as one smudge.
+                     Four-fold symmetry is load-bearing here for the same reason as on the fan —
+                     see the rotor note in the outdoor unit. -->
                 <g class="sc-hit" data-insp="pump" role="button" tabindex="0">
-                  <circle class="sc-valve" cx="487" cy="180" r="17"/>
-                  <g id="scPump"><path d="M487 180 l-8 -9 h16 z" fill="var(--brand)"/></g>
-                  <text class="sc-lbl" x="487" y="152" text-anchor="middle"><tspan data-i18n="schem.pump">PUMP</tspan> <tspan class="sc-val" id="svPump">—</tspan>%</text>
+                  <g transform="translate(549 180)">
+                    <circle class="sc-valve" r="17"/>
+                    <g id="scPump">
+                      <!-- A centrifugal impeller — eight curved vanes round a solid hub — not the
+                           fan's four-blade rotor at small scale. The two machines move water and air
+                           for different reasons and a pump reads as a pump by its vane count; the
+                           fan's blade shrunk to 34 % just looked like a smaller fan.
+                           EIGHT is also what keeps the pivot honest: any EVEN vane count is
+                           invariant under 180°, which is what forces the bounding box (and so
+                           `transform-origin: center`) onto the hub. Seven would spin off-axis.
+                           The vane ends BLUNT — a straight edge between the two outer corners, not
+                           a point — and the corners are taken off by .sc-vane's same-colour stroke
+                           with a round join rather than by modelling a fillet into the path. That is
+                           what keeps the tip square-but-softened at 30 px, where a hand-drawn radius
+                           would just read as a point again. -->
+                      <g class="sc-vane">
+                        <path id="pumpVane" d="M-1.05 -3.44 C -1.19 -7.97 0.95 -11.57 2.58 -13.25 L 6.54 -11.81 C 6.51 -8.61 1.35 -6.43 1.05 -3.44 A 3.6 3.6 0 0 0 -1.05 -3.44 Z"/>
+                        <use href="#pumpVane" transform="rotate(45)"/>
+                        <use href="#pumpVane" transform="rotate(90)"/>
+                        <use href="#pumpVane" transform="rotate(135)"/>
+                        <use href="#pumpVane" transform="rotate(180)"/>
+                        <use href="#pumpVane" transform="rotate(225)"/>
+                        <use href="#pumpVane" transform="rotate(270)"/>
+                        <use href="#pumpVane" transform="rotate(315)"/>
+                      </g>
+                      <circle r="3.6" fill="var(--muted)"/>
+                    </g>
+                  </g>
+                  <text class="sc-lbl" x="549" y="152" text-anchor="middle"><tspan data-i18n="schem.pump">PUMP</tspan> <tspan class="sc-val" id="svPump">—</tspan>%</text>
                 </g>
-                <!-- 3-way valve — field-supplied, downstream of the whole indoor unit -->
+                <!-- 3-way valve — field-supplied, downstream of the whole indoor unit. Its two
+                     outlets are now the two things it chooses between, drawn as such: DOWN to the
+                     tank, RIGHT to the heating. The position label therefore moves off the space
+                     under the valve (the tank riser runs there) to the free band above the heating
+                     run, still touching the valve it belongs to. -->
                 <g class="sc-hit" data-insp="valve" role="button" tabindex="0">
-                  <circle class="sc-valve" cx="540" cy="180" r="14"/>
-                  <path d="M528 180 h24 M540 168 v12" stroke="var(--muted)" stroke-width="2" fill="none"/>
-                  <text class="sc-state" x="540" y="216" text-anchor="middle" id="svValve">3WV</text>
+                  <circle class="sc-valve" cx="610" cy="180" r="14"/>
+                  <path d="M598 180 h24 M610 168 v12" stroke="var(--muted)" stroke-width="2" fill="none"/>
+                  <text class="sc-state" x="630" y="166" id="svValve">3WV</text>
                 </g>
-                <!-- DHW tank branch (hidden via .no-dhw when the model has no tank values) -->
+                <!-- DHW tank branch (hidden via .no-dhw when the model has no tank values).
+                     The tank sits in the SAME horizontal band as the heating circuit, because it is
+                     the same kind of thing: one of the two loads the 3-way valve alternates between.
+                     Drawn above the supply line it read as a stage of the flow rather than an
+                     alternative to the heating, and put the drawing's two loads on two different
+                     levels for no physical reason. Supply drops from the valve into the top; the
+                     return leaves the bottom and joins the shared return line at y=400, exactly like
+                     the heating circuit's does. Both risers sit on ONE axis (x=580, the valve's own
+                     outlet), like the heating branch's do on x=690: in and out of a coil is one
+                     vertical run through the box, and offsetting the return by a few px read as a
+                     kink in a straight pipe. They cannot be confused for one pipe — the box and its
+                     coil sit between them, and they carry opposite flow colours. -->
                 <g class="g-dhw">
                   <g class="sc-hit" data-insp="wtank" role="button" tabindex="0">
-                    <path class="sc-pipe" d="M540 180 V 70 H 585"/>
-                    <path class="sc-hitline" d="M540 166 V 70 H 585"/>
-                    <path class="sc-hitline" d="M600 190 V 400"/>
+                    <path class="sc-pipe" d="M610 180 V 248"/>
+                    <path class="sc-pipe" d="M610 358 V 420"/>
+                    <path class="sc-hitline" d="M610 194 V 248"/>
+                    <path class="sc-hitline" d="M610 358 V 412"/>
                   </g>
-                  <path class="sc-flow hot" id="fTank" d="M540 180 V 70 H 585"/>
+                  <path class="sc-flow hot" id="fTank" d="M610 180 V 248"/>
                   <g class="sc-hit" data-insp="tank" role="button" tabindex="0">
-                    <rect class="sc-box" x="585" y="34" width="120" height="140" rx="14"/>
-                    <text class="sc-lbl" x="600" y="54" data-i18n="schem.dhw_tank">DHW TANK</text>
-                    <path d="M600 150 q10 -12 20 0 t20 0 t20 0 t20 0" fill="none" stroke="var(--pipe)" stroke-width="4" stroke-linecap="round"/>
-                    <path class="sc-flow hot" id="fCoil" style="stroke-width:4" d="M600 150 q10 -12 20 0 t20 0 t20 0 t20 0"/>
-                    <text class="sc-val" x="645" y="102" text-anchor="middle" style="font-size:17px"><tspan id="svTank">—</tspan> °C</text>
-                    <text class="sc-sub" x="645" y="120" text-anchor="middle"><tspan data-i18n="schem.set">set</tspan> <tspan id="svTankSet">—</tspan> °C</text>
+                    <rect class="sc-box" x="514" y="248" width="124" height="110" rx="14"/>
+                    <text class="sc-lbl" x="526" y="268" data-i18n="schem.dhw_tank">DHW TANK</text>
+                    <path d="M534 342 q10 -12 20 0 t20 0 t20 0 t20 0" fill="none" stroke="var(--pipe)" stroke-width="4" stroke-linecap="round"/>
+                    <path class="sc-flow hot" id="fCoil" style="stroke-width:4" d="M534 342 q10 -12 20 0 t20 0 t20 0 t20 0"/>
+                    <text class="sc-val" x="576" y="306" text-anchor="middle" style="font-size:17px"><tspan id="svTank">—</tspan> °C</text>
+                    <text class="sc-sub" x="576" y="324" text-anchor="middle"><tspan data-i18n="schem.set">set</tspan> <tspan id="svTankSet">—</tspan> °C</text>
                   </g>
-                  <!-- tank return joins the return line at y=400 -->
-                  <path class="sc-pipe" d="M600 174 V 400"/>
-                  <path class="sc-flow cold" id="fTankRet" d="M600 174 V 400"/>
+                  <!-- The tank return joins the shared run at y=420. Its PIPE moved up into the
+                       branch group, where the highlight needs it — only the animated overlay stays
+                       here, after the box, so it paints over the box's edge rather than under it. -->
+                  <path class="sc-flow cold" id="fTankRet" d="M610 358 V 420"/>
                 </g>
                 <!-- Heating circuit -->
+                <!-- The heating branch owns BOTH its legs — the flow down from the valve and the
+                     return back to the junction — exactly as the tank branch owns both of its own.
+                     They were split before: the heating's return sat in the return group while the
+                     tank's sat in its branch, so hovering the return lit up one circuit's return and
+                     not the other's, and the shared run could not be highlighted for what it is.
+                     The hit grouping now matches the flow grouping: everything right of the junction
+                     belongs to a branch, everything left of it is shared. -->
                 <g class="sc-hit" data-insp="wheat" role="button" tabindex="0">
-                  <path class="sc-pipe" d="M540 180 H 690 V 268"/>
-                  <path class="sc-hitline" d="M560 180 H 690 V 268"/>
+                  <path class="sc-pipe" d="M610 180 H 720 V 248"/>
+                  <path class="sc-pipe" d="M720 358 V 420 H 610"/>
+                  <path class="sc-hitline" d="M630 180 H 720 V 248"/>
+                  <path class="sc-hitline" d="M720 358 V 420 H 620"/>
                 </g>
-                <path class="sc-flow hot" id="fHeat" d="M540 180 H 690 V 268"/>
-                <!-- Room-thermostat demand: it gates THIS branch, so it sits on the heating riser
-                     above the emitter rather than in a chip row. Hidden (.no-thermo) on a profile
-                     that reports no thermostat flag, and while the link is down. -->
+                <path class="sc-flow hot" id="fHeat" d="M610 180 H 720 V 248"/>
+                <!-- Room-thermostat demand: it gates THIS branch, so it stays on the heating riser
+                     above the emitter — it is not a reading OF the emitter but the request that
+                     decides whether water reaches it at all, which is also the one thing that
+                     explains an idle heating circuit. Hidden (.no-thermo) on a profile that reports
+                     no thermostat flag, and while the link is down. -->
                 <g id="gThermo" class="sc-hit" data-insp="thermo" role="button" tabindex="0">
-                  <rect class="sc-pill" x="634" y="232" width="112" height="20" rx="10"/>
-                  <text class="sc-val" x="690" y="246" text-anchor="middle" style="font-size:10px" id="svThermo">—</text>
+                  <rect class="sc-pill" x="664" y="212" width="112" height="20" rx="10"/>
+                  <text class="sc-val" x="720" y="226" text-anchor="middle" style="font-size:10px" id="svThermo">—</text>
                 </g>
+                <!-- The heating circuit gets the same box as the tank — same band, same height —
+                     because the valve alternates between exactly these two, and it carries its own
+                     reading inside it for the same reason the tank does: the room temperature is the
+                     controlled variable OF this circuit (its setpoint is what drives the branch),
+                     measured in the space these emitters serve. The word "Raum" stays ON the value:
+                     the box is labelled HEIZUNG, and an unattributed "20.0 °C" under that label
+                     would read as a water temperature. -->
                 <g class="sc-hit" data-insp="heat" role="button" tabindex="0">
-                  <rect class="sc-box" x="640" y="268" width="100" height="56" rx="8"/>
-                  <path d="M654 276 v40 M672 276 v40 M690 276 v40 M708 276 v40 M726 276 v40" stroke="var(--line)" stroke-width="3" fill="none"/>
-                  <text class="sc-lbl" x="636" y="346" data-i18n="schem.heating">HEATING</text>
+                  <rect class="sc-box" x="654" y="248" width="132" height="110" rx="14"/>
+                  <text class="sc-lbl" x="666" y="268" data-i18n="schem.heating">HEATING</text>
+                  <path d="M680 278 v34 M700 278 v34 M720 278 v34 M740 278 v34 M760 278 v34" stroke="var(--line)" stroke-width="3" fill="none"/>
                 </g>
                 <!-- Return line -->
+                <!-- The SHARED run only: from the merge at x=610 to the plate. Each drawn pipe
+                     carries exactly one flow overlay and the split has to be the same on both
+                     (the audit's G010 compares them), and it is the same split the hit targets use. -->
                 <g class="sc-hit" data-insp="wret" role="button" tabindex="0">
-                  <path class="sc-pipe" d="M690 386 V 400 H 400 V 300 H 378"/>
-                  <path class="sc-pipe" d="M690 324 V 386"/>
-                  <path class="sc-hitline" d="M690 324 V 400 H 400 V 300 H 378"/>
+                  <path class="sc-pipe" d="M610 420 H 378"/>
+                  <path class="sc-hitline" d="M600 420 H 378"/>
                 </g>
-                <path class="sc-flow cold" id="fRet" d="M690 386 V 400 H 400 V 300 H 378"/>
-                <path class="sc-flow cold" id="fHeatRet" d="M690 324 V 386"/>
+                <!-- The return's two overlays are split at the tank JUNCTION (x=610), not at an
+                     arbitrary point on the drop: right of it the pipe carries the heating circuit
+                     ALONE, left of it both branches share one run. Split anywhere else and a DHW
+                     cycle animates a stretch of heating pipe that nothing is flowing through —
+                     which is what the drawing did, and it is the same class of error as a reading
+                     on the wrong branch: the picture asserting a flow the plant does not have. -->
+                <path class="sc-flow cold" id="fHeatRet" d="M720 358 V 420 H 610"/>
+                <path class="sc-flow cold" id="fRet" d="M610 420 H 378"/>
                 <!-- Return line carries no pump (it is on the supply side — see the order note at
                      the supply run). What it does carry, in the manufacturer's order seen from the
                      house: R4T at the inlet, then the dirt filter, the pressure sensor and the flow
                      sensor, then the exchanger — so the return pill sits right of the flow/pressure
                      pill, which is upstream-first along a right-to-left flow. -->
                 <g class="sc-hit" data-insp="rwt" role="button" tabindex="0">
-                  <rect class="sc-pill" x="510" y="411" width="66" height="22" rx="11"/>
-                  <text class="sc-val" x="543" y="426" text-anchor="middle"><tspan id="svRwt">—</tspan> °C</text>
-                  <text class="sc-sub" x="543" y="447" text-anchor="middle" data-i18n="schem.return">return</text>
+                  <rect class="sc-pill" x="490" y="431" width="66" height="22" rx="11"/>
+                  <text class="sc-val" x="523" y="446" text-anchor="middle"><tspan id="svRwt">—</tspan> °C</text>
+                  <text class="sc-sub" x="523" y="467" text-anchor="middle" data-i18n="schem.return">return</text>
+                  <path class="sc-tie" d="M523 431 V 424"/>
                 </g>
+                <!-- The three return sensors sit on the run's COMMON section — left of x=580, where
+                     the tank branch joins the heating branch. That is not decoration: R4T is at the
+                     indoor unit's water INLET, downstream of the merge, so it reads whichever branch
+                     is flowing (the tank's during a DHW cycle, the heating's otherwise) and belongs
+                     to NEITHER. Drawn between the tank junction and the heating drop, as it was, the
+                     picture answered "which return is this?" with "the heating's" — the wrong one of
+                     the two, and a claim no sensor there makes. Same for the flow and pressure
+                     sensors: one set, on the common pipe.
+                     Order is the manufacturer's, upstream-first along a right-to-left flow (§16.2):
+                     inlet R4T, then the dirt filter, the pressure sensor, the flow sensor, then the
+                     exchanger. The PRESSURE sits above the pipe and the other two below it — the
+                     same rule as on the two refrigerant runs, so "above the line is a bar figure"
+                     holds on all three; its name sub-label goes above the pill for the same reason
+                     the leaving-water one does, keeping the pipe itself clear. -->
                 <g class="sc-hit" data-insp="flow" role="button" tabindex="0">
-                  <rect class="sc-pill" x="286" y="411" width="150" height="22" rx="11"/>
-                  <text class="sc-val" x="361" y="426" text-anchor="middle"><tspan id="svFlow">—</tspan> l/min · <tspan id="svWp">—</tspan> bar</text>
+                  <rect class="sc-pill" x="386" y="431" width="82" height="22" rx="11"/>
+                  <text class="sc-val" x="427" y="446" text-anchor="middle"><tspan id="svFlow">—</tspan> l/min</text>
+                  <text class="sc-sub" x="427" y="467" text-anchor="middle" data-i18n="schem.flow_rate">flow</text>
+                  <path class="sc-tie" d="M427 431 V 424"/>
                 </g>
-                <!-- Room pill drawn last so it sits above the return pipes crossing beneath it -->
-                <g class="g-room sc-hit" data-insp="room" role="button" tabindex="0">
-                  <rect class="sc-pill" x="622" y="356" width="136" height="22" rx="11"/>
-                  <text class="sc-val" x="690" y="371" text-anchor="middle"><tspan data-i18n="schem.room">Room</tspan> <tspan id="svRoom">—</tspan> / <tspan id="svRoomSet">—</tspan> °C</text>
+                <!-- NAMED, unlike the two refrigerant pressures: "bar" appears three times in this
+                     drawing and only ONE of them is water. Position alone is a weak tell for a
+                     reading whose neighbours-in-unit sit two boxes away, and mistaking the sealed
+                     circuit's 1.8 bar for a refrigerant pressure (or the reverse) is the wrong-
+                     quantity error the pills exist to prevent. A sub-label that is the measurement's
+                     NAME is exactly what §5.3 allows a pill to carry — it is attribution, not the
+                     commentary that was taken out of the drawing earlier. -->
+                <g class="sc-hit" data-insp="wp" role="button" tabindex="0">
+                  <rect class="sc-pill" x="449" y="386" width="60" height="22" rx="11"/>
+                  <text class="sc-val" x="479" y="401" text-anchor="middle"><tspan id="svWp">—</tspan> bar</text>
+                  <text class="sc-sub" x="479" y="380" text-anchor="middle" data-i18n="schem.water_press">water pressure</text>
+                  <path class="sc-tie" d="M479 408 V 416"/>
+                </g>
+                <!-- Room reading: BARE text inside the heating box, like the tank's value in its
+                     own box — a reading inside the component that owns it does not need a second
+                     frame around it, and two nested outlines read as two things.
+                     It is still its OWN hit target, unlike the tank's (where the box is the target):
+                     the room is a different quantity from the emitter it is drawn on, so it keeps
+                     the `room` explainer. A target with no shape has nothing to outline and nothing
+                     to tap, so it carries a transparent .sc-hitarea for the tap and tints its VALUE
+                     on hover/select (.sc-hit-bare) in place of a border. .no-room still hides the
+                     reading alone, leaving an emitter box that claims nothing. Drawn last. -->
+                <g class="g-room sc-hit sc-hit-bare" data-insp="room" role="button" tabindex="0">
+                  <rect class="sc-hitarea" x="662" y="316" width="116" height="34" rx="11"/>
+                  <text class="sc-val" x="720" y="331" text-anchor="middle"><tspan data-i18n="schem.room">Room</tspan> <tspan id="svRoom">—</tspan> °C</text>
+                  <text class="sc-sub" x="720" y="345" text-anchor="middle"><tspan data-i18n="schem.set">set</tspan> <tspan id="svRoomSet">—</tspan> °C</text>
+                </g>
                 </g>
               </svg>
             </div>
