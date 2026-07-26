@@ -262,6 +262,10 @@ const S = {
   // row survives the rebuild; the click handler only toggles the live element (so the CSS slide
   // animates) and updates this set for the next rebuild to honour.
   descOpen: new Set(),
+  // Set while a click is in flight in #valueGroups; suspends the per-poll rebuild so it cannot
+  // detach the node the pointer went down on (renderCards explains why that loses the click
+  // outright). Released only by a timer, so it can never latch.
+  clickHold: false,
   // 24-hour trend per historied row: label -> {at, dt, unit, v[]} (or {err:true}). Cached in app
   // state for the same reason descOpen is — #valueGroups is rebuilt on every poll, and re-fetching
   // (or re-deriving) the sparkline 1×/s would both hammer the device and restart the panel's slide.
@@ -311,13 +315,23 @@ function go(stage) {
   window.scrollTo(0, 0);
 }
 function goBack() { go(PARENT[S.stage] || "dashboard"); }
-// Write innerHTML only when the markup actually changed. Both containers this guards hold buttons
-// the user taps, and a push arrives ~1×/s: a rebuild landing between mousedown and mouseup destroys
-// the element under the finger and the click never fires. (The banners guard the same way with
-// their own render keys; the cache is kept here rather than in a data- attribute so the markup
-// isn't held twice.)
+// The ONE innerHTML write path for every per-poll container, guarded twice against the same failure:
+// a push arrives ~1×/s, and a rebuild landing between mousedown and mouseup destroys the element
+// under the finger, so the browser fires NO click at all — the tap is lost with nothing logged.
+//
+//   1. Markup unchanged → don't write. Enough on its own for #connTile and #settingsCards, whose
+//      rows are stable between pushes (the ESP32 card's uptime/heap/reset rows were dropped, so
+//      nothing on it ticks per second).
+//   2. A click is in flight → don't write. Needed because #valueGroups carries LIVE readings: its
+//      markup differs on almost every push, so check 1 degrades to a plain write there and cannot
+//      help. Without this the value rows lost 3–60 % of taps depending on how long the button was
+//      held (DESIGN.md §6 carries the measurements).
+//
+// The cache is deliberately NOT updated when a write is skipped for reason 2 — recording markup that
+// was never written would make the next identical push skip a write the DOM still needs.
 const _html = {};
 function setHtml(id, html) {
+  if (S.clickHold) return;
   if (_html[id] === html) return;
   _html[id] = html;
   $(id).innerHTML = html;
@@ -631,7 +645,37 @@ function renderCards() {
   // stop updating for the few seconds the finger is down and catch up on release — the same
   // deliberate stall renderSettings takes for the OTA readout.
   if (S.scrub) return;
-  $("valueGroups").innerHTML = statusCardsHtml() + valueGroupsHtml(S._values || [], S.status?.hp?.connected);
+  // Through setHtml like the other two per-poll containers, rather than writing innerHTML directly:
+  // that is where the click-in-flight and unchanged-markup guards live, and this grid was the one
+  // container bypassing both. The unchanged-markup half earns its keep here too — an idle plant or a
+  // dropped X10A link produces identical markup, so those pushes stop writing at all.
+  setHtml("valueGroups", statusCardsHtml() + valueGroupsHtml(S._values || [], S.status?.hp?.connected));
+}
+
+// Hold the rebuild for the duration of one click, and make it IMPOSSIBLE to leave held — the same
+// obligation the scrub freeze carries (DESIGN.md §6): a pointerdown whose click never arrives would
+// otherwise stop every value row from updating, which reads as a dead device with no error anywhere.
+// A pointerdown that ends outside the row, a cancelled gesture and a browser that swallows the
+// sequence entirely are all covered — the last one by the watchdog alone.
+// The hold is released ONLY by its timer, never by an event. Two reasons, and the second is why an
+// event-based release would have been wrong rather than merely redundant:
+//
+//   * Nothing can leave it held. Every path ends in a timeout that always fires — there is no
+//     "pointerup that never came" to strand it (the failure mode the scrub guard needed two
+//     mechanisms to cover).
+//   * The window that must be covered extends PAST the click. Opening a trended row starts a fetch
+//     whose completion calls renderApp(), which landed ~80 ms after the click and replaced the panel
+//     mid-slide — the 220 ms open animation was cut a third of the way through, so even a click that
+//     DID register looked like one that had not. Releasing on `click` would leave that uncovered.
+//
+// Deliberately not a rebuild-on-release either: the next poll frame (≤1 s) redraws anyway.
+const CLICK_HOLD_DOWN_MS = 1200;   // press → covers a long press, the click, and the fetch behind it
+const CLICK_HOLD_UP_MS   = 600;    // release → covers the click, the slide and that same fetch
+let clickHoldTimer = 0;
+function clickHold(ms) {
+  S.clickHold = true;
+  clearTimeout(clickHoldTimer);
+  clickHoldTimer = setTimeout(() => { S.clickHold = false; }, ms);
 }
 // One label→value row; `v` is escaped unless opt.html (e.g. signal-bar markup).
 function vrow(k, v, opt = {}) {
@@ -2949,6 +2993,21 @@ function wire() {
     if (S.scrub) scrubArm(plot);              // a live drag keeps re-arming the watchdog
     scrubMove(plot, scrubIndex(plot, e.clientX));
   });
+  // EVERY pointerdown in the grid holds the rebuild until its click resolves — see renderCards.
+  // Registered before the plot-specific handler below and deliberately unfiltered: the row headers
+  // are the rows people actually tap, and they are not plots.
+  // Arm the click-in-flight hold from EVERY per-poll container that setHtml guards, not just this
+  // one: #settingsCards and #connTile rely on the unchanged-markup check alone, which protects them
+  // only while their markup is stable — a real state change landing on the exact tap that opens a
+  // config modal would still be lost. Same guard, same three containers, one rule.
+  for (const id of ["valueGroups", "settingsCards", "connTile"]) {
+    const el = $(id);
+    el.addEventListener("pointerdown", () => clickHold(CLICK_HOLD_DOWN_MS));
+    // pointerup RE-ARMS a shorter hold rather than releasing: the click, the open animation and the
+    // trend fetch all happen after the finger is up.
+    for (const ev of ["pointerup", "pointercancel"]) el.addEventListener(ev, () => clickHold(CLICK_HOLD_UP_MS));
+  }
+
   gv.addEventListener("pointerdown", (e) => {
     const plot = e.target.closest("[data-hist]");
     if (!plot) return;
