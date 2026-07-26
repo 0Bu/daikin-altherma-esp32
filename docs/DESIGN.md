@@ -520,6 +520,25 @@ Body, ordered:
      (`S.descOpen`), not the DOM, so the per-poll rebuild of `#valueGroups` re-emits an expanded row
      open instead of collapsing it every second; the click toggles the live element so the slide
      animates, and updates the set for the next rebuild.
+     Re-emitting an open state is not enough on its own, though, because **a click is not one
+     event**: the browser fires it only if the node the pointer went *down* on is still in the tree
+     when it comes *up*. A per-poll `innerHTML` write replaces that node, so a rebuild landing inside
+     a click detaches it and **no click is fired at all** — the tap is lost silently and the row does
+     not open. This is the failure the shared `setHtml()` write path already existed to prevent, by
+     skipping the write when the markup is byte-identical; that check carries `#connTile` and
+     `#settingsCards` on its own, because their rows are stable between pushes. It **cannot** carry
+     the value grid: those rows are live readings, so the markup differs on almost every push and the
+     check degrades to a plain write. Measured loss, sweeping every phase position against the ~1 s
+     period: **~3 %** of taps at a 30 ms trackpad tap, **~12 %** at 120 ms, **~25 %** at 250 ms,
+     **~60 %** at 600 ms — so a deliberate press reads as "the first click does nothing, the second or
+     third works", while a fast tapper would barely see it.
+     `setHtml()` therefore has a **second** guard: a `pointerdown` in any of the three containers
+     suspends writing (`S.clickHold`), released by a timer alone and never by an event. Not by event,
+     for two reasons — nothing can then leave it held, and the window extends *past* the click, since
+     opening a trended row starts a fetch whose completion redraws ~80 ms later and would cut the
+     220 ms open animation a third of the way through: a click that did register, looking like one
+     that had not. Both halves of the race are older than the trends; §6's explainers made every
+     reading tappable, which turned a latent race into the normal experience.
      A row's **24-hour trend** (§5.3 item 3) lives in the same panel, below the explainer text and
      separated by a rule — text first, then evidence. Scrubbing it is the one interaction that
      **suspends** the per-poll rebuild outright (`S.scrub`), because re-emitting the panel under an
