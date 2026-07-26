@@ -29,6 +29,11 @@ void history_record(const CachedValue* v, size_t n);
 // the lock — a plain copy of int16s, per CLAUDE.md's "never allocate while holding a mutex".
 size_t history_snapshot(size_t t, logic::HistorySample* out, size_t max);
 
+// Seconds since the newest sample was committed, or -1 when nothing has been committed yet. The
+// route needs it to state the series' t0 independently of when the request arrived — see
+// logic/history_t0 for what went wrong without it.
+int32_t history_newest_age_s();
+
 // Copy the label this profile spells trend `t` with into `out` (empty when it carries no such row);
 // returns the length written. A COPY rather than a pointer: the poll task rewrites the stored label
 // when the model changes, so a returned pointer could be read mid-write. The web UI matches its

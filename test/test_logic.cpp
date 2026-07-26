@@ -3527,6 +3527,61 @@ static void test_history() {
     CHECK(history_skipped(5, 5) == 0);
     CHECK(history_skipped(6, 5) == 0);            // never 0xFFFFFFFF
 
+    // --- t0 must not depend on WHEN the request arrived --------------------------------------------
+    // The load-bearing property. Measured on a live unit before this was fixed: two fetches 70 s
+    // apart with an unchanged sample count reported t0 values 70 s apart, because t0 was `now -
+    // (n-1)*dt` and assumed the newest sample was taken *now*. That drift is what let a pinned
+    // readout round onto the neighbouring slot and describe a different measurement than the one
+    // tapped.
+    {
+        // Same newest sample, three different request times → one answer.
+        const int64_t t_a = history_t0(1'000'000, 0,   2, HISTORY_DT_S);
+        const int64_t t_b = history_t0(1'000'070, 70,  2, HISTORY_DT_S);
+        const int64_t t_c = history_t0(1'000'299, 299, 2, HISTORY_DT_S);
+        CHECK(t_a == t_b);
+        CHECK(t_b == t_c);
+        CHECK(t_a == 1'000'000 - 300);            // sample 0 is one bucket before the newest
+        // A closed bucket moves it by exactly one bucket, never by the request delay.
+        CHECK(history_t0(1'000'300, 0, 3, HISTORY_DT_S) == t_a);
+        // Degenerate counts must not underflow into a bogus instant.
+        CHECK(history_t0(1'000'000, 0, 0, HISTORY_DT_S) == 1'000'000);
+        CHECK(history_t0(1'000'000, 0, 1, HISTORY_DT_S) == 1'000'000);
+        // A full ring: sample 0 is 287 buckets back, still independent of the request time.
+        CHECK(history_t0(2'000'000, 0, HISTORY_SAMPLES, HISTORY_DT_S) ==
+              history_t0(2'000'123, 123, HISTORY_SAMPLES, HISTORY_DT_S));
+    }
+
+    // --- pinning a readout to an instant, not a slot ---------------------------------------------
+    // A tap pins the crosshair so the value stays readable. Anchored to the sample's wall-clock
+    // instant: the ring shifts a slot every 5 min, so an index anchor would keep pointing at slot 42
+    // while slot 42 became a different measurement.
+    {
+        const int64_t t0 = 1'700'000'000;
+        const uint32_t dt = HISTORY_DT_S;
+        CHECK(history_pin_index(t0, dt, 288, t0) == 0);                     // the oldest sample
+        CHECK(history_pin_index(t0, dt, 288, t0 + 42 * dt) == 42);
+        CHECK(history_pin_index(t0, dt, 288, t0 + 287 * dt) == 287);        // the newest
+        // Aged out / not yet: the pin is DROPPED, never clamped to an edge — clamping would keep the
+        // readout up while silently changing which moment it describes.
+        CHECK(history_pin_index(t0, dt, 288, t0 - dt) == -1);
+        CHECK(history_pin_index(t0, dt, 288, t0 + 288 * dt) == -1);
+        // The roll: same pinned instant, and t0 has advanced by one bucket -> one slot lower.
+        CHECK(history_pin_index(t0 + dt, dt, 288, t0 + 42 * dt) == 41);
+        // …and after 43 rolls that same instant has fallen off the back entirely.
+        CHECK(history_pin_index(t0 + 43 * dt, dt, 288, t0 + 42 * dt) == -1);
+        // Nearest-bucket rounding, so a small clock adjustment between pin and re-anchor cannot
+        // shift the answer by a whole slot.
+        CHECK(history_pin_index(t0, dt, 288, t0 + 42 * dt + 2) == 42);
+        CHECK(history_pin_index(t0, dt, 288, t0 + 42 * dt - 2) == 42);
+        CHECK(history_pin_index(t0, dt, 288, t0 + 42 * dt + dt / 2 + 1) == 43);   // past halfway
+        // Degenerate inputs cannot produce a bogus slot.
+        CHECK(history_pin_index(t0, 0, 288, t0) == -1);
+        CHECK(history_pin_index(t0, dt, 0, t0) == -1);
+        // A single-sample series: only that one instant resolves.
+        CHECK(history_pin_index(t0, dt, 1, t0) == 0);
+        CHECK(history_pin_index(t0, dt, 1, t0 + dt) == -1);
+    }
+
     // --- held-run encoding ---------------------------------------------------------------------
     {
         uint16_t runs[8][2];

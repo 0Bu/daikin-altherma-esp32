@@ -560,7 +560,15 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 header exists to prevent (it matched the bizone kit's MIXED leaving-water row), and
                 being a copy, the CI gate on this rule no longer covers it.
                 history.hpp = the 24-hour trends: WHICH rows get one, WHEN a stored sample is a
-                measurement rather than a repeat of one, and the ring mechanics. Adding a trend is
+                measurement rather than a repeat of one, the ring mechanics, and WHICH SAMPLE a
+                PINNED readout still refers to (history_pin_index — a tap in the web UI pins the
+                crosshair so the value stays readable without holding a finger down). That pin is
+                anchored to the sample's wall-clock INSTANT, never its index: the ring shifts a slot
+                every HISTORY_DT_S, so an index anchor would keep the bubble on slot 42 while slot 42
+                became a different measurement — the #35-#39 substitution shape with a timestamp in
+                front of it making it look verified. Out of the window it returns -1 and the caller
+                DROPS the pin rather than clamping to the nearest edge, which would keep a readout on
+                screen while silently changing which moment it describes. Adding a trend is
                 ONE row in TRENDS — the ring, the route and the browser are already generic over it
                 (the id is the CONCEPT, the label is the profile's spelling). A trend states a page
                 CLASS, not just a label token, because "(R1T)" names TWO unrelated sensors in this

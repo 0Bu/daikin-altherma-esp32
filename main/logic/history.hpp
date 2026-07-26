@@ -162,6 +162,57 @@ constexpr uint32_t history_skipped(uint32_t prev, uint32_t now) {
     return now > prev ? now - prev - 1 : 0;
 }
 
+// The wall-clock instant of sample 0, and the one property that matters about it: it must be
+// INVARIANT to when the request arrived.
+//
+// The route first derived it as `now - (n-1)*dt`, which silently assumes the newest sample was taken
+// *now*. It was not: the ring commits a bucket every HISTORY_DT_S, so between two commits the newest
+// sample ages while `now` keeps moving — measured on a live unit, two fetches 70 s apart with an
+// unchanged sample count reported t0 values exactly 70 s apart. Two consequences, and the second is
+// the one that corrupts a reading rather than merely mislabelling it:
+//
+//   * Every timestamp shown was up to one bucket (5 min) late.
+//   * A PINNED readout is anchored to an instant and re-resolved against a fresh t0. Once the drift
+//     passes half a bucket, history_pin_index rounds to the NEIGHBOURING slot — so the bubble goes on
+//     standing there while describing a different measurement than the one the user tapped. The
+//     anchor was defeated by its own reference point.
+//
+// So the caller passes the AGE of the newest sample, measured on the monotonic clock (seconds since
+// the last bucket commit), and the answer stops depending on request timing. Monotonic on purpose:
+// the commit may well have happened before SNTP ever synced, so its wall-clock instant is not
+// knowable — its age always is.
+constexpr int64_t history_t0(int64_t now_unix, uint32_t newest_age_s, size_t n, uint32_t dt) {
+    return now_unix - static_cast<int64_t>(newest_age_s)
+                    - static_cast<int64_t>(n ? n - 1 : 0) * static_cast<int64_t>(dt);
+}
+
+// Which sample a PINNED readout refers to, after the ring may have rolled under it.
+//
+// The web UI lets a tap pin the crosshair so the value stays readable without holding a finger down.
+// That pin must be anchored to the sample's WALL-CLOCK INSTANT, never to its index: the ring shifts
+// one slot every HISTORY_DT_S, so an index-anchored pin would go on pointing at slot 42 while slot 42
+// became a different measurement — a label silently re-pointed at another reading, which is the
+// #35-#39 shape with a timestamp attached to make it look verified.
+//
+// Returns -1 when the pinned instant is no longer in the window: aged off the back as the day rolled,
+// or ahead of the newest sample. The caller then DROPS the pin rather than clamping it to the nearest
+// edge — clamping would keep a readout on screen while quietly changing which moment it describes,
+// and "the value you pinned has scrolled out of the day" is honestly expressed by it going away.
+//
+// Pure here, with no firmware caller, for the same reason lwt_select.hpp and ou_stale.hpp are: the
+// rule runs in the browser, but CI can only gate it as C++.
+inline int history_pin_index(int64_t t0, uint32_t dt, size_t n, int64_t pinned) {
+    if (!dt || !n) return -1;
+    // Round to the nearest bucket rather than truncating: the pin was made FROM a rendered sample, so
+    // it lands exactly on a boundary in the normal case, and a ±1 s clock adjustment between the pin
+    // and the re-anchor must not shift the answer by a whole 5-minute slot.
+    const int64_t rel = pinned - t0;
+    const int64_t half = static_cast<int64_t>(dt) / 2;
+    const int64_t i = (rel >= 0 ? (rel + half) : (rel - half)) / static_cast<int64_t>(dt);
+    if (i < 0 || i >= static_cast<int64_t>(n)) return -1;
+    return static_cast<int>(i);
+}
+
 // Run-length encode the HELD_OVER stretches of a snapshot into {from, count} pairs. The wire format
 // keeps `v` a plain number-or-null array (any JSON consumer can read it) and carries the reason for
 // the nulls alongside — a mixed-type array would make the common case harder to parse for the sake

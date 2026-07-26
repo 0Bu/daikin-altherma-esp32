@@ -427,6 +427,18 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-mark { position: absolute; width: 7px; height: 7px; border-radius: 50%;
   background: var(--brand-strong); box-shadow: 0 0 0 2.5px var(--card);
   transform: translate(-50%, -50%); pointer-events: none; }
+/* A PINNED readout: the same crosshair and bubble, but it stays after the finger lifts. Marked as
+   persistent rather than transient — the line is solid instead of translucent and the bubble carries
+   the brand border — so a reading that is being held on screen is never mistaken for the live one.
+   `pointer-events: none` throughout: the pin must not shadow the plot underneath it, or re-pinning
+   somewhere else would need two taps.
+   Clamped with margins rather than measured pixels, because this is emitted at render time (before
+   layout) so the bubble's own width isn't known yet — the transient one measures instead. */
+.vhist-cross.vhist-pinned { opacity: 1; background: var(--brand-strong); }
+.vhist-mark.vhist-pinned { background: var(--brand-strong); }
+.vhist-tip.vhist-pinned { border-color: var(--brand); color: var(--fg); font-weight: 600;
+  max-width: calc(100% - 8px); }
+.vhist-graph.has-pin .vhist-tip.vhist-pinned { margin: 0 4px; }
 .vhist-tip { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap;
   pointer-events: none; font-size: 12px; color: var(--fg); background: var(--card);
   border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px;

@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1329 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1350 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -468,11 +468,17 @@ entered exactly like a visible one.
   converters produce, so a stored sample is exact rather than rounded on the way in, and the body is
   a third shorter than formatted decimals. The nulls carry their reason **alongside** rather than
   inside: `v` stays a number-or-null array any consumer can read, and `held` run-length-marks which
-  nulls were the outdoor unit resting. And `t0` — the wall-clock instant of sample 0 — is derived at
-  **serve** time from the current clock and the sample count, because the ring advances on the
-  *monotonic* clock and so survives SNTP setting the time mid-boot; it is **omitted** when the clock
-  has never synced, so the UI reads out an age instead of a fabricated timestamp. An unknown trend id
-  is a 404, never a defaulted series.
+  nulls were the outdoor unit resting. And `t0` — the wall-clock instant of sample 0 — is derived from
+  the **age of the newest sample**, measured on the monotonic clock since its bucket was committed, so
+  the answer does not depend on when the request arrived. The obvious `now - (n-1)*dt` form is wrong
+  and was measured wrong on a live unit: the ring commits a bucket every 5 minutes, so between commits
+  the newest sample ages while `now` moves on, and two fetches 70 s apart with an unchanged sample
+  count reported t0 values 70 s apart. That made every timestamp up to a bucket late, and let a
+  **pinned** readout round onto the neighbouring sample and describe a different measurement than the
+  one tapped. Monotonic rather than a stored wall-clock instant because a commit may predate the first
+  SNTP sync — its instant is then unknowable, its age never is; `t0` is **omitted** entirely while the
+  clock has never synced or nothing has been committed, so the UI reads out an age instead of a
+  fabricated timestamp. An unknown trend id is a 404, never a defaulted series.
 
 ---
 
@@ -843,11 +849,17 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   the whole curve, and that count is an off-by-one with no visible symptom. The
   value parse is here for the same reason: a bit-flag row publishes `"ON"`, and a bare `strtof` would
   read that as 0 and draw a confident 0.0 °C line — its exactness is pinned by a round-trip over every
-  0.1 step across `reading_plausible()`'s own ±200 °C window), and the **raw-page hex rendering** (`hexdump.hpp` — the wire bytes of pages
+  0.1 step across `reading_plausible()`'s own ±200 °C window. And `history_pin_index()`, which
+  re-resolves a **pinned** readout after the ring has rolled: anchored to the sample's instant, never
+  its index, and DROPPED rather than clamped once that instant leaves the day — clamping would keep a
+  bubble on screen while silently changing which moment it describes. Its reference point is
+  `history_t0()`, whose asserted property is INVARIANCE rather than a formula: the same newest sample
+  must yield the same `t0` however long after the last bucket commit the request arrives, because the
+  drift in the obvious form is what let that pinned bubble slide onto its neighbour), and the **raw-page hex rendering** (`hexdump.hpp` — the wire bytes of pages
   `0x00`/`0x10`/`0x20`/`0xA0`/`0xA1` on `/diag`; truncation stops after the last *complete* byte, since a trailing
   nibble would read as a different value, and degenerate inputs still terminate the buffer the caller
   hands to a `diag_printf` `%s`).
-  **1329 `CHECK`s** in
+  **1350 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -1059,7 +1071,7 @@ and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 19-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1329 checks),
+on the host** (1350 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

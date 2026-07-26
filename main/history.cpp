@@ -47,6 +47,12 @@ struct Trend {
 Trend             s_ring[TREND_COUNT];
 uint32_t          s_bucket = 0;                    // the bucket s_ring[*].pending belongs to
 bool              s_have_bucket = false;
+// When the newest sample was committed, on the MONOTONIC clock. The route turns this into the
+// series' t0 (logic/history_t0): without it t0 was derived from `now` and drifted by up to a full
+// bucket between commits, which mislabelled every timestamp and let a PINNED readout round onto
+// the neighbouring sample. Monotonic because the commit may predate the first SNTP sync — its
+// wall-clock instant is then unknowable, but its age never is. -1 = nothing committed yet.
+int64_t           s_last_commit_us = -1;
 SemaphoreHandle_t s_mtx = nullptr;
 
 // RAII lock, same idiom as hp_poll.cpp/config.cpp. Everything inside a critical section here is a
@@ -105,6 +111,7 @@ void history_record(const CachedValue* v, size_t n) {
     if (s_have_bucket && bucket != s_bucket) {
         const uint32_t skipped = logic::history_skipped(s_bucket, bucket);
         for (auto& tr : s_ring) tr.ring.commit(skipped);
+        s_last_commit_us = esp_timer_get_time();
     }
     s_bucket = bucket;
     s_have_bucket = true;
@@ -142,6 +149,14 @@ static size_t copy_under_lock(const char* src, char* out, size_t max) {
     std::strncpy(out, src, max - 1);
     out[max - 1] = '\0';
     return std::strlen(out);
+}
+
+int32_t history_newest_age_s() {
+    if (!s_mtx || s_last_commit_us < 0) return -1;
+    Lock lk(s_mtx);
+    if (!lk.held || s_last_commit_us < 0) return -1;
+    const int64_t age_us = esp_timer_get_time() - s_last_commit_us;
+    return age_us < 0 ? 0 : static_cast<int32_t>(age_us / 1000000);
 }
 
 size_t history_label(size_t t, char* out, size_t max) {

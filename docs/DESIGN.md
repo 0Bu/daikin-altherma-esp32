@@ -453,6 +453,20 @@ Body, ordered:
      rests is stored as *held over*, not as the number the bus keeps returning, and the readout says
      "Außeneinheit ruht" rather than "nicht gemessen". Without that, a mild day's outdoor-air trend
      is a staircase of last-run values that reads exactly like weather.
+   - **A tap PINS the readout; hover only previews it.** Reading a value must not require holding a
+     finger on the glass — a tap fixes the crosshair and its bubble at that sample and they stay
+     there, marked as persistent (solid line, `--brand` bubble border) so a held reading is never
+     mistaken for the live one. Tapping elsewhere moves the pin, tapping the same sample clears it,
+     `Esc` clears it, and collapsing the panel clears it. A mouse hover still previews transiently and
+     leaves the pin untouched — the two cursors share their look and their geometry but *not* their
+     element lookup, because they coexist in the DOM.
+     The pin lives in app state and is anchored to the sample's **instant**, never its index: the ring
+     shifts a slot every 5 minutes, so an index anchor would keep the bubble on slot 42 while slot 42
+     became a different measurement — the §5.3-item-3 substitution failure with a timestamp attached
+     to make it look verified. When the pinned instant rolls off the back of the day the pin is
+     **dropped, not clamped** to the oldest sample: clamping would keep a readout on screen while
+     silently changing which moment it describes. The resolution rule is host-tested
+     (`logic/history.hpp`'s `history_pin_index`) for the same reason the other browser rules are.
 4. **Model card** — styled exactly like the value groups (§6), full-width below the live section:
    the model name (full-width heading) + detected capacity, from `detect{capacity_kw,
    capacity_kw_iu, model}`. Both are bus-derived, so they show **only while the link is live**
