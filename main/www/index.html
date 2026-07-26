@@ -600,7 +600,18 @@
       <div class="pad">
         <div class="conn-tile" id="connTile"></div>
         <div id="settingsCards"></div>
-        <p class="footer-ver" id="settingsVer">daikin-altherma-esp32</p>
+        <!-- Product · version · the report action. "Report a bug" was the ESP32 card's last ROW
+             until v1.0.0-dev.199, carrying a live reading's weight directly under "Largest free
+             block 86 KiB"; it is a rare escape hatch, not a board fact, so it reads at the weight of
+             this line instead. Still the MODAL, not an outbound link — only the device can produce
+             the evidence half of a report (see #bugModal below). .verlink is the header version
+             button's affordance: nothing until hover/focus, then the brand tint (DESIGN.md §5.6).
+             THE VERSION KEEPS ITS OWN SPAN because renderSettings() rewrites its textContent every
+             poll — a button inside it would be destroyed and rebuilt ~1x/s, losing focus and any
+             click in flight. Here it is static markup that is never re-rendered. -->
+        <p class="footer-ver">
+          <span id="settingsVer">daikin-altherma-esp32</span><span class="foot-act"><span aria-hidden="true"> · </span><button class="verlink mono" type="button" id="footBug" data-i18n="bug.row">Report a bug</button></span>
+        </p>
       </div>
     </section>
 

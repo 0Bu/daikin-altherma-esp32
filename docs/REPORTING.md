@@ -9,7 +9,8 @@ see that report**, so there is nothing left in it that needs hiding — see
 
 ## The short way
 
-1. Open your device's web page → **Settings** (the gear) → **ESP32** card → **Report a bug**.
+1. Open your device's web page → **Settings** (the gear) → scroll to the bottom → **Report a bug**,
+   in the small grey line under the last card, after the version number.
 2. Type what happens, then **Prepare the report**. The device collects its status, readings and log
    and shows you the result — read it over, it is about to be posted in public.
 3. **Copy & open GitHub**. That copies the report *and* opens the issue form in a new tab with your

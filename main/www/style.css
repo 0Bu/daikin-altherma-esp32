@@ -320,6 +320,12 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   font-size: 12.5px; color: var(--muted); text-align: center; margin: 20px 0 0;
   font-family: var(--font-mono);
 }
+/* The report action and its separator wrap as ONE unit. The line is long enough to break on a phone,
+   and a "·" left stranded at the end of the first line reads as a dropped word rather than as the
+   join it is. The link itself carries no styling of its own — it is .verlink (the header version
+   button), which inherits size, weight and colour from this line and shows the brand tint only on
+   hover/focus, so at rest it is exactly the footer's own text. */
+.footer-ver .foot-act { white-space: nowrap; }
 
 /* ── Connections tile (Settings, WiFi · MQTT · Syslog · NTP combined) ──────────────────────── */
 .conn-tile {
