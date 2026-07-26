@@ -1,0 +1,25 @@
+# Value-description adjudication ledger — tools/descriptions/check_descriptions.mjs
+#
+# One finding KEY per line suppresses that ONE finding. Suppressed findings stay printed (as
+# "suppressed by …") — an entry here is an adjudication ON RECORD, not a delete. Copy the `key:`
+# line the audit prints for the finding you are adjudicating. A line that stops suppressing
+# anything is itself a finding (D005): the condition it adjudicated is gone, so the line would only
+# hide the condition coming back.
+#
+# The one kind of entry that legitimately belongs here:
+#
+#   FORWARD-ARMED   A D002 (an entry matching no catalog label) whose copy is CORRECT and waiting
+#                   for rows docs/REGISTERS.md documents but the offline profile generator does not
+#                   emit yet. Deleting the copy instead would mean re-writing it when the rows land.
+#                   Delete the line when they do — D005 will remind you.
+#
+# NEVER adjudicate a D001 away. A published reading with no explainer is the exact defect this gate
+# was built for (def/overlay.hpp shipped 11 such rows); the fix is copy in DESCRIPTIONS, not a line
+# here. D003/D004 are malformed entries and have no legitimate adjudication either.
+
+# FORWARD-ARMED — docs/REGISTERS.md §5 register 0x64 offsets 14/15 document "Target delta T
+# heating" / "… cooling" (conv 152, °C), but no generated profile carries either row: `grep -in
+# delta main/def/*.hpp` is empty across all 43 tables. That is the SAME generator narrowness that
+# left the page-0x10 protection words undecoded until def/overlay.hpp supplied them (issue #110) —
+# not stale copy. The explainer was written for the documented rows and stays ready for them.
+D002 /target delta t/i
