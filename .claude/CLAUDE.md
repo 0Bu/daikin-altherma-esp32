@@ -296,6 +296,23 @@ hp_poll.cpp     poll engine task: (auto-detect if profile=="auto") profile regis
                 detection-latency choice, not a wdt constraint). Reset to fast cadence on a bus answer
                 or via hp_poll_reconfigure() (POST /detect, POST /set_hp — atomic httpd->poll one-shot).
                 poll_once reserves the value vector up front (one sized alloc, not log2(n) regrows)
+history.cpp     the 24-hour trend rings: one fixed-cadence buffer per logic/history.hpp TREND, fed by
+                the poll task (history_record, called from poll_once BEFORE the cache commit and
+                OUTSIDE the cache mutex — this file has its own) and read by GET /history. STATIC
+                (.bss), never heap: the binding limit on this board is the largest CONTIGUOUS block,
+                and a static array does not compete for it — two trends cost 1152 B of ring plus
+                labels/units/counters (1317 B measured). RAM only ON PURPOSE: a 576 B blob rewritten every
+                5 minutes is ~100k NVS writes a year in the partition holding the WiFi credentials,
+                so a reboot empties the rings and the UI draws the span it actually has rather than
+                padding a 24 h axis with absence. The mechanics (bucket folding, wrap-around,
+                skipped-bucket filling) live in logic/history.hpp where they are host-tested; this
+                file is storage + mutex + the parse of the cache's FORMATTED value back to tenths
+                (the converters stay the one source of what a value means, so the domain audit still
+                sees them unchanged). Two absences are distinguished, because conflating them
+                misattributes one to the other: NO_READING (register timed out / reading_plausible
+                refused) vs HELD_OVER (the outdoor unit was asleep — ou_stale.hpp). A model change
+                (POST /detect) DISCARDS a ring: the same trend on a different profile is a different
+                sensor, and continuing the line would splice two units' data into one curve
 http_server.cpp esp_http_server :80; concerns register their own routes (http_handlers.hpp). Picks
                 the trust surface from the WiFi mode (esp_wifi_get_mode): the OPEN setup AP registers
                 ONLY the provisioning routes (GET / /index.html, POST /set_wifi + captive) and
@@ -307,7 +324,7 @@ http_common.cpp shared HTTP helpers + the ONE OOM guard every route runs under: 
                 it inside try/catch — std::bad_alloc -> 503, any other throw -> 500, instead of
                 unwinding through esp_http_server's C frames to std::terminate -> reboot. /events is
                 the deliberate exception (raw registration needed for the WebSocket; it self-guards)
-http_status.cpp GET / (setup.html in AP mode, else gzip UI) /status /values /models /diag /scan
+http_status.cpp GET / (setup.html in AP mode, else gzip UI) /status /values /history /models /diag /scan
                 /coredump + /events (WebSocket live push; shared-payload, refcounted completion and
                 bounded one-in-flight backpressure per values/status stream) + captive catch-all
 http_config.cpp POST /set_wifi /set_mqtt /set_syslog /set_ntp /set_hp /set_board /set_ota /detect
@@ -477,7 +494,7 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 download that 404s. mqtt_ha republishes the retained crash topic when the flag changes
 logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, registers, value_def,
                 config_model,
-                config_store, discovery, ha_device, detect, json, mqtt_group, mqtt_uri, heartbeat, crashinfo,
+                config_store, discovery, ha_device, detect, history, json, mqtt_group, mqtt_uri, heartbeat, crashinfo,
                 bootlog, reset_reason, boot_guard, board_pins, board_presets, modbus, syslog_policy, link_watch,
                 wifi_rollback, health_gate, version_cmp, ota_manifest, ota_channel, ws_policy, ws_tx_gate,
                 http_body, http_surface, query_flag, mcp_jsonrpc, timestamp, uart_plan, detect_backoff,
@@ -527,6 +544,25 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 pattern is the failure mode to watch for: it re-opens exactly the substitution this
                 header exists to prevent (it matched the bizone kit's MIXED leaving-water row), and
                 being a copy, the CI gate on this rule no longer covers it.
+                history.hpp = the 24-hour trends: WHICH rows get one, WHEN a stored sample is a
+                measurement rather than a repeat of one, and the ring mechanics. Adding a trend is
+                ONE row in TRENDS — the ring, the route and the browser are already generic over it
+                (the id is the CONCEPT, the label is the profile's spelling). A trend states a page
+                CLASS, not just a label token, because "(R1T)" names TWO unrelated sensors in this
+                catalog: the outdoor unit's air inlet on 0x20 AND the indoor leaving-water sensor
+                that lwt_select.hpp keys on by that very tag — a token-only match would let one
+                resolve to the other, the #35-#39 shape drawn as a 24-hour chart. Two absences are
+                distinguished (NO_READING vs HELD_OVER) and history_store COMPOSES
+                ou_reading_held_over rather than restating it, so a change to which pages freeze
+                reaches the trends automatically. That is the load-bearing half for outdoor air:
+                page 0x20 keeps ANSWERING with the last run's numbers while the compressor rests, so
+                an ungated ring fills a mild day with a staircase that reads exactly like weather.
+                The RING is here rather than in history.cpp because bucket folding, wrap-around and
+                skipped-bucket filling are exactly the off-by-one that surfaces as a subtly wrong
+                chart weeks later — a rule in a .cpp can only be verified on the device. Skipped
+                buckets are FILLED, never compressed: compressing them slides every earlier sample
+                forward in time and mislabels the whole curve. HISTORY_BYTES_PER_TREND carries a
+                static_assert so a future trend addition meets the memory budget where it is stated
                 ou_stale.hpp = which readings stop being CURRENT while the compressor is off. The
                 outdoor unit refreshes its OWN pages (0x20 sensors, 0x21 inverter) only while it
                 RUNS; stopped, it answers with the LAST RUN's values. Measured on a live unit:
@@ -917,6 +953,11 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   reason/summary from the boot-time cache, `coredump` re-read from flash per request
                   so a cleared dump can't strand the banner; drives the crash banner, whose title keys
                   on `fault` — an orphan dump alone is NOT "restarted after a crash"),
+                  history{dt,rows[{id,label}]} — which rows carry a 24-hour trend and at what
+                  cadence. The ID is the CONCEPT (logic/history.hpp's TRENDS — what GET /history
+                  takes, so a request is model-independent); the LABEL is how the DETECTED profile
+                  spells that row, which is what lets the UI attach a trend to the value row it is
+                  already rendering. Rows this profile does not carry are omitted entirely,
                   detect{proto,valid,capacity_kw,capacity_kw_iu,ou_eeprom,candidates[],families[],
                   ambiguous,
                   model{name,family,marketing}} — drives the SETTINGS ESP32 board card (behind the
@@ -940,6 +981,27 @@ GET  /values      decoded readings [{label,value,unit,reg}]. `reg` is the X10A r
                   (0x20/0x21 stop being refreshed while the compressor rests) to any row it shows —
                   structurally, instead of by a label list that would be a second, drifting copy of a
                   rule CI gates in C++ (the catalog spells those rows ~50 ways across 43 profiles)
+GET  /history?row=<trend id>   one trended row's 24-hour series, oldest sample first:
+                  {id,label,dt,unit,t0,v[],held[[from,count],…]}. `unit` is the ROW's own unit, read
+                  from the cached value — never a hardcoded "°C": both shipped trends are
+                  temperatures, but the TRENDS table exists to be extended and the browser prints
+                  this string into the range readout and the crosshair, so a bar row labelled °C
+                  would be the #35-#39 shape. A catalog test pins that each trend resolves to ONE
+                  type code (and one width, which is what makes the tenths exact) across all
+                  profiles. `v` is TENTHS of that unit (the
+                  resolution the converters produce, so a sample is exact rather than rounded on the
+                  way in — the browser scales by 10) or null. `held` run-length-marks WHICH nulls
+                  were the outdoor unit RESTING rather than a failure to measure: `v` stays a plain
+                  number-or-null array any consumer can read, and the reason rides alongside instead
+                  of inside it. `t0` is the wall-clock instant of sample 0, derived at SERVE time
+                  from the current clock and the sample count (the ring advances on the MONOTONIC
+                  clock, so it survives SNTP setting the time mid-boot) and OMITTED when the clock
+                  has never synced — the UI then reads out an age rather than a fabricated time,
+                  the same refusal logic/timestamp.hpp makes. An unknown id is 404, never a
+                  defaulted trend. Sent in CHUNKS (~1.1 kB body): smaller than /values' ~6 kB, but
+                  still a new allocation on a heap whose largest contiguous block is the real
+                  ceiling. Which rows HAVE a trend is /status.history — a row the profile does not
+                  carry is omitted, an absent feature stated by absence rather than an empty chart
 GET  /events      WebSocket live push (is_websocket). Client sends "sub" -> gets a status+values
                   snapshot, then the poll task pushes {"type":"status"|"values",...} frames on change
                   (status ~4s, values ~1s). The ONLY live UI transport — there is no HTTP polling; a

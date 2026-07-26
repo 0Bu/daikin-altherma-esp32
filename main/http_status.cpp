@@ -11,7 +11,9 @@
 #include "def/signatures.hpp"
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
+#include "history.hpp"
 #include "hp_poll.hpp"
+#include "logic/history.hpp"
 #include "logic/crashinfo.hpp"
 #include "logic/detect.hpp"
 #include "logic/json.hpp"
@@ -207,6 +209,28 @@ static std::string build_status_json_string() {
          ",\"timeout_err\":" + std::to_string(hp.timeout_err) + "},";
     j += "\"profile\":{\"id\":" + jstr(c.profile) + "},";
 
+    // Which rows carry a 24-hour trend, and at what cadence. The ID is the CONCEPT (GET /history
+    // takes it); the LABEL is how the detected profile spells that row, which is what lets the UI
+    // attach a trend to the value row it is already rendering. Rows the profile does not carry are
+    // omitted entirely — an absent feature is stated by its absence, not by an empty chart. Built
+    // with successive += like everything else here: this runs on the httpd task AND the WS
+    // broadcaster, and a `a + b + c` chain materialises every intermediate at once (CLAUDE.md →
+    // Memory constraints, the v1.0.12 stack overflow).
+    j += "\"history\":{\"dt\":" + std::to_string(logic::HISTORY_DT_S) + ",\"rows\":[";
+    bool first_trend = true;
+    for (size_t t = 0; t < logic::TREND_COUNT; t++) {
+        char lbl[80];
+        if (!history_label(t, lbl, sizeof(lbl))) continue;
+        if (!first_trend) j += ",";
+        first_trend = false;
+        j += "{\"id\":";
+        j += jstr(logic::TRENDS[t].id);
+        j += ",\"label\":";
+        j += jstr(lbl);
+        j += "}";
+    }
+    j += "]},";
+
     // System health: heap headroom + why the device last booted, so both are visible from the LAN /
     // WebSocket without a serial console (and without a broker — unlike the MQTT heartbeat). free_heap
     // is the current free, min_free_heap the since-boot low-water mark (the leak indicator), max_alloc
@@ -387,6 +411,101 @@ static esp_err_t h_values(httpd_req_t* req) {
 // inspection endpoint for humans and scripts.
 static esp_err_t h_models(httpd_req_t* req) {
     return http_send_json(req, def::MODELS_JSON);
+}
+
+// GET /history?row=<trend id> — one trend's 24-hour series, oldest sample first.
+//
+//   {"id":"outdoor_air","label":"R1T-Outdoor air temp.","dt":300,"unit":"°C",
+//    "t0":1784926349,"v":[131,null,…],"held":[[0,42],[55,180]]}
+//
+// `v` holds tenths of the unit (the resolution the converters produce, so a sample is exact rather
+// than rounded on the way in) or null. `held` run-length-marks WHICH of those nulls were the outdoor
+// unit resting rather than a failure to measure — a plain number-or-null array stays readable by any
+// consumer, and the reason for the nulls rides alongside instead of inside it (logic/history.hpp).
+//
+// `t0` is the wall-clock instant of sample 0, derived HERE from the current time and the sample
+// count — the ring itself advances on the monotonic clock, so it survives SNTP setting the time
+// mid-boot. Omitted entirely when the clock has never synced: the UI then reads out an AGE, which
+// is the same refusal-to-fabricate logic/timestamp.hpp already makes for the syslog timestamp.
+//
+// Sent in CHUNKS. The body is ~1.5 KB — smaller than /values' ~6 KB — but it is a new allocation on
+// a heap where the largest contiguous block is the binding limit, and chunking costs nothing here.
+static esp_err_t h_history(httpd_req_t* req) {
+    char q[64] = {0};
+    char id[32] = {0};
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) != ESP_OK ||
+        httpd_query_key_value(q, "row", id, sizeof(id)) != ESP_OK) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"row required\"}");
+    }
+    const logic::TrendDef* def_ = logic::trend_by_id(id);
+    // An unknown id is a 404, never a defaulted trend: answering with SOME series would look like a
+    // working request and quietly attach the wrong sensor's history to whatever asked.
+    size_t t = 0;
+    if (def_) { while (t < logic::TREND_COUNT && &logic::TRENDS[t] != def_) t++; }
+    if (!def_ || t >= logic::TREND_COUNT) {
+        httpd_resp_set_status(req, "404 Not Found");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"unknown trend\"}");
+    }
+
+    // Both are function-static rather than stack: this handler runs on the httpd task, whose stack
+    // is the one that overflowed in v1.0.12, and 576 + 576 bytes of locals is not worth the risk.
+    // Safe because esp_http_server dispatches requests one at a time on that single task.
+    static logic::HistorySample samples[logic::HISTORY_SAMPLES];
+    static uint16_t             runs[logic::HISTORY_MAX_RUNS][2];
+    const size_t n = history_snapshot(t, samples, logic::HISTORY_SAMPLES);
+    const size_t nruns = logic::history_held_runs(samples, n, runs, logic::HISTORY_MAX_RUNS);
+
+    char lbl[80], unit[8];
+    history_label(t, lbl, sizeof(lbl));
+    history_unit(t, unit, sizeof(unit));
+
+    std::string j = "{\"id\":";
+    j += jstr(def_->id);
+    j += ",\"label\":";
+    j += jstr(lbl);
+    j += ",\"dt\":";
+    j += std::to_string(logic::HISTORY_DT_S);
+    // The ROW's unit, never a hardcoded "°C": both trends are temperatures today, but the TRENDS
+    // table exists to be extended and the browser prints this string straight into the range readout
+    // and the crosshair. A bar row labelled °C is exactly the #35-#39 shape.
+    j += ",\"unit\":";
+    j += jstr(unit);
+    const TimeStatus ts = time_status();
+    if (ts.synced && n) {
+        // Sample n-1 is the bucket that just closed, i.e. ~now; sample 0 is (n-1) buckets earlier.
+        j += ",\"t0\":";
+        j += std::to_string(ts.unix_time - static_cast<int64_t>(n - 1) * logic::HISTORY_DT_S);
+    }
+    j += ",\"v\":[";
+    httpd_resp_set_type(req, "application/json");
+    for (size_t i = 0; i < n; i++) {
+        if (i) j += ",";
+        // TENTHS on the wire, as plain integers — the browser scales by 10. Integers rather than
+        // "41.6": shorter (a 288-sample body is ~1.1 KB instead of ~1.5 KB), exactly representable,
+        // and no formatting code to get the sign or a trailing zero wrong. The `unit` field says
+        // what they are tenths OF, and app.js's histHtml documents the same contract on its side.
+        if (logic::history_is_absent(samples[i])) j += "null";
+        else j += std::to_string(static_cast<int>(samples[i]));
+        // Flush every 64 samples so the peak string stays a few hundred bytes rather than the whole
+        // body — the point of chunking here.
+        if ((i & 63) == 63) {
+            if (httpd_resp_send_chunk(req, j.c_str(), j.size()) != ESP_OK) return ESP_FAIL;
+            j.clear();
+        }
+    }
+    j += "],\"held\":[";
+    for (size_t i = 0; i < nruns; i++) {
+        if (i) j += ",";
+        j += "[";
+        j += std::to_string(runs[i][0]);
+        j += ",";
+        j += std::to_string(runs[i][1]);
+        j += "]";
+    }
+    j += "]}";
+    if (httpd_resp_send_chunk(req, j.c_str(), j.size()) != ESP_OK) return ESP_FAIL;
+    return httpd_resp_send_chunk(req, nullptr, 0);      // terminate the chunked response
 }
 
 static esp_err_t h_diag(httpd_req_t* req) {
@@ -720,6 +839,7 @@ void http_register_status(httpd_handle_t s, HttpSurface surface) {
 
     http_register(s, "/status", HTTP_GET, h_status);
     http_register(s, "/values", HTTP_GET, h_values);
+    http_register(s, "/history", HTTP_GET, h_history);
     http_register(s, "/scan", HTTP_GET, h_scan);
 
     httpd_uri_t ws_uri = {};

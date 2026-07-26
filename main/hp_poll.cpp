@@ -8,6 +8,7 @@
 #include "hp_comm.hpp"
 #include "hp_convert.hpp"
 #include "hp_detect.hpp"
+#include "history.hpp"
 #include "logic/convert.hpp"
 #include "logic/crc.hpp"
 #include "logic/detect_backoff.hpp"
@@ -148,6 +149,11 @@ static void poll_once() {
             fresh.push_back(std::move(cv));
         }
     }
+
+    // Feed the trend rings BEFORE the commit and OUTSIDE the cache mutex: history.cpp takes its own
+    // lock, and holding both would create a two-mutex order this file has no other reason to have.
+    // `fresh` is still ours here — after the move below it is empty.
+    history_record(fresh.data(), fresh.size());
 
     // One commit, one lock site, and deliberately non-allocating: the vector move-assign steals
     // fresh's buffer and last_error is swapped (noexcept) rather than assigned, so the critical
