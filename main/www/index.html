@@ -446,14 +446,23 @@
                   <path class="sc-hitline" d="M720 358 V 420 H 620"/>
                 </g>
                 <path class="sc-flow hot" id="fHeat" d="M610 180 H 720 V 248"/>
-                <!-- Room-thermostat demand: it gates THIS branch, so it stays on the heating riser
+                <!-- Space-heating demand: it gates THIS branch, so it stays on the heating riser
                      above the emitter — it is not a reading OF the emitter but the request that
                      decides whether water reaches it at all, which is also the one thing that
-                     explains an idle heating circuit. Hidden (.no-thermo) on a profile that reports
-                     no thermostat flag, and while the link is down. -->
-                <g id="gThermo" class="sc-hit" data-insp="thermo" role="button" tabindex="0">
+                     explains an idle heating circuit. Hidden (.no-spaceh) on a profile that reports
+                     no space-heating flag, and while the link is down.
+                     The row behind it is "Space heating Operation ON/OFF" (0x62/2 bit 3) — the
+                     BRANCH's own request. It is deliberately NOT "Thermostat ON/OFF", which this
+                     pill drew until #199: that row is 0x60/2 bit 3, a bit in the INDOOR UNIT's
+                     status byte beside I/U operation mode and freeze protection, i.e. "the hydro
+                     module is asking for the compressor" with no statement about WHICH branch.
+                     Measured on a live unit over three days: it was ON 128/119/91 min per day and
+                     ZERO of those minutes had the 3-way valve pointing at space heating — every
+                     one of them was a DHW charge, drawn here as a room calling for heat while the
+                     room sat exactly on its setpoint. A correct value on the wrong component. -->
+                <g id="gSpaceH" class="sc-hit" data-insp="spaceh" role="button" tabindex="0">
                   <rect class="sc-pill" x="664" y="212" width="112" height="20" rx="10"/>
-                  <text class="sc-val" x="720" y="226" text-anchor="middle" style="font-size:10px" id="svThermo">—</text>
+                  <text class="sc-val" x="720" y="226" text-anchor="middle" style="font-size:10px" id="svSpaceH">—</text>
                 </g>
                 <!-- The heating circuit gets the same box as the tank — same band, same height —
                      because the valve alternates between exactly these two, and it carries its own
