@@ -171,8 +171,18 @@ means a healthy plant or a byte this model never writes. It covered only a handf
 compressor cycles in July — no defrost, no cold-weather stress — so the counters never left `0`, and
 the clamp-vs-wrap question above is still unobserved. Deferred deliberately in
 [#180](https://github.com/0Bu/daikin-altherma-esp32/issues/180) until a loaded season has
-accumulated; the numbers above are the known-good baseline to compare that verification against, and
-in particular to compare the labels against once the generator handover below happens.
+accumulated; the numbers above are the known-good baseline to compare that verification against.
+
+**The metric IDs are frozen.** Now that these rows are ingested, each one is carried in
+VictoriaMetrics as `daikin_altherma_<group>_<object_id>` — so the group key (`outdoor_state`) and
+every row's label-derived slug have stopped being presentation and become identifiers the store is
+keyed on. A rename does not announce itself: the old series stops receiving samples and a new one
+starts at zero, and *a counter resetting to zero is precisely the event these entities exist to
+report*. All eleven IDs are therefore pinned byte-for-byte by a `CHECK` in `test/test_logic.cpp`,
+transcribed from the live store rather than recomputed from the labels. This matters most at the
+generator handover described below: when `gen_profiles.py` emits these rows and `def/overlay.hpp` is
+deleted, the labels must come back byte-identical, and that is now a test failure rather than
+something a reviewer has to notice.
 
 They arrive from `def/overlay.hpp` rather than from a model profile, because the offline profile
 generator does not emit these rows yet; see [ARCHITECTURE.md](ARCHITECTURE.md) *Value-definition
