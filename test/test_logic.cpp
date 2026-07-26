@@ -287,6 +287,53 @@ static void test_convert() {
     const uint8_t cop3000[] = {0xB8, 0x0B};            // LE 3000 -> 300.0, must NOT be clipped (not °C)
     CHECK(reading_plausible(cop, convert(cop, cop3000)) && approx(convert(cop, cop3000).value, 300.0));
 
+    // ── KNOWN DEFECT WITNESS — Target Evap. Temp. on page 0x10/6 (issue #194) ─────────────────────
+    // The envelope above has a measured hole, and this pins it so neither side can drift silently.
+    //
+    // MEASURED on a live 4-8 kW unit (profile altherma_ebla_edla_d_series_4_8kw_monobloc, firmware
+    // 1.0.0-dev.188, 2026-07-26): this row tracks the compressor cycle rather than sitting on a
+    // placeholder. At rest it decodes to 240.6 °C and IS dropped (>200, the `evap2316` case above is
+    // the same shape). During a DHW run it dips to 145.9 °C and climbs back to 199.6 °C — all of
+    // which land INSIDE [-60, 200] and reach Home Assistant as real target temperatures. Three
+    // separate runs in an 18-hour window showed the identical shape.
+    //
+    // The decode is NOT the drift: the catalog row is conv 114 / size 2 / type 1 at 0x10 offset 6 in
+    // 44 of 45 profiles, docs/REGISTERS.md §5 says exactly that, and conv 114 is implemented exactly
+    // as §3.1 specifies. Offset shift, endianness and width are all ruled out in #194 (a one-byte
+    // shift yields 2611.2 °C or 0.9 °C at rest). What is left is a SCALE mismatch — ×0.1 is 10x too
+    // coarse for this row on this family. Under ×0.01 the same raw bytes read 24.06 °C at rest
+    // (ambient measured 22.5-23.0 °C, i.e. an idle coil at air temperature) and 14.59 °C running,
+    // 6-8 K below ambient: a textbook air-source evaporator approach.
+    //
+    // Left UNFIXED on purpose. conv 114 carries rows across the whole catalog and REGISTERS.md is the
+    // domain audit's own authority, so "resolving" this by rewriting either would pass every gate
+    // while making the firmware more wrong (/domain-review §2.3). Two scalings still fit the physics
+    // (x0.01 and ÷128) and they cannot be separated here, because every OTHER conv-114 row on this
+    // unit reads raw 0 — there is no second populated row to calibrate against. #194 names the
+    // decisive experiment: the raw page-0x10 bytes captured WHILE the compressor runs.
+    //
+    // So this asserts the CONTRADICTION rather than a value anyone believes: the decode is faithful
+    // to the spec, and the result is still physically impossible for an evaporating temperature. When
+    // #194 lands a real scale, this test is what proves it — and until then it stops the hole being
+    // forgotten again (it was noted in .claude/CLAUDE.md and sat undiagnosed).
+    const uint8_t evap1996[] = {0xCC, 0x07};           // LE 0x07CC = 1996 -> 199.6 °C, MEASURED
+    const uint8_t evap1459[] = {0xB3, 0x05};           // LE 0x05B3 = 1459 -> 145.9 °C, MEASURED (run min)
+    const uint8_t evap2406[] = {0x66, 0x09};           // LE 0x0966 = 2406 -> 240.6 °C, MEASURED (at rest)
+    CHECK(approx(convert(evap, evap1996).value, 199.6));   // spec-conformant decode of the real bytes
+    CHECK(approx(convert(evap, evap1459).value, 145.9));
+    CHECK(approx(convert(evap, evap2406).value, 240.6));
+    // The two run-time readings are impossible as an evaporating temperature — a coil that absorbs
+    // heat from 22.5 °C air cannot itself be at 145-200 °C — yet the envelope admits both. THIS is
+    // the defect; when it is fixed these two flip to !reading_plausible (or the row decodes to a
+    // sane value) and this block must be revisited, not deleted wholesale.
+    CHECK(reading_plausible(evap, convert(evap, evap1996)));   // <- WRONG, and reaching HA today
+    CHECK(reading_plausible(evap, convert(evap, evap1459)));   // <- WRONG, and reaching HA today
+    CHECK(!reading_plausible(evap, convert(evap, evap2406)));  // the at-rest value IS caught (>200)
+    // The scale hypothesis, recorded as arithmetic so #194's candidates stay concrete: the same raw
+    // bytes under x0.01 are ordinary temperatures either side of the measured 22.5-23.0 °C ambient.
+    CHECK(approx(convert(evap, evap2406).value * 0.1, 24.06));   // at rest  ~= ambient
+    CHECK(approx(convert(evap, evap1459).value * 0.1, 14.59));   // running  ~= 8 K below ambient
+
     // A REFRIGERANT pressure of 0 bar is an unreported transducer, not a reading: these are ABSOLUTE
     // pressures and a sealed circuit is never at vacuum. Measured on a live 4-8 kW unit, High/Low
     // Pressure (0x20/12+14) read exactly 0.0 bar both at rest and at 42 rps, while the 0x62/15
