@@ -79,6 +79,10 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-domain-review.sh\"",
             "statusMessage": "Checking domain-correctness gate\u2026"
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-schematic-review.sh\""
           }
         ]
       },
@@ -99,6 +103,10 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-domain-review.sh\"",
             "statusMessage": "Checking domain-correctness gate\u2026"
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-schematic-review.sh\""
           }
         ]
       }
