@@ -275,6 +275,28 @@ the I/U capacity code (`0x60` offset 6).
 | 12 | 1 | 303 | 3 |  | Other Drop Control |
 | 12 | 1 | 311 | s0-2 |  | Not in use |
 
+> **Measured anomaly — `Target Evap. Temp.` (offset 6) reads 10× high on at least one family**
+> ([#194](https://github.com/0Bu/daikin-altherma-esp32/issues/194)). On a live 4-8 kW unit
+> (`altherma_ebla_edla_d_series_4_8kw_monobloc`, 2026-07-26) this row decodes to **240.6 °C at rest**
+> and **145.9 → 199.6 °C while the compressor runs** — impossible for an evaporating temperature, and
+> the run-time values land *inside* `reading_plausible()`'s ±200 °C envelope, so they reach Home
+> Assistant. The row is not a placeholder: it tracks the compressor cycle, dipping during a run and
+> returning at rest.
+>
+> The conv above is **deliberately left as `114`.** The catalog agrees with it in 44 of 45 profiles,
+> `convert()` implements it exactly as §3.1 specifies, and offset shift / endianness / width are all
+> ruled out in #194. What remains is a scale mismatch, and the two candidates that still fit the
+> physics (`×0.01` → 24.06 °C at rest against a measured 22.5–23.0 °C ambient; `÷128` → 18.80 °C)
+> cannot be separated from this unit, because every other conv-114 row on it reads raw `0`. Editing
+> this table to match a hypothesis would change what the domain audit believes and pass every gate
+> while making the firmware more wrong, so the discrepancy is recorded here instead and pinned by a
+> witness `CHECK` in `test/test_logic.cpp`. Resolving it needs the raw page-`0x10` bytes captured
+> while the compressor runs.
+>
+> Same page, same converter, separate suspicion: `Target Cond. Temp.` (offset 8) publishes a flat
+> `0.0 °C` on that unit while it condenses at 43.5 °C. Raw is `0x0000`, which conv 114's `0x8000`
+> no-data marker does not cover, so an unpopulated field is published as a real target.
+
 #### Register `0x11`
 
 | Off | Len | Conv | Bit | Type | Value |

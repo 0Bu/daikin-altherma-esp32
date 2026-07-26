@@ -846,7 +846,13 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 0x10/0x20 carry readings measured IMPOSSIBLE on a live unit yet inside
                 reading_plausible()'s ±200 °C window, so nothing masks them: Target Evap. Temp.
                 (0x10/6) hit 199.6 °C, and the outdoor pressures (0x20/12+14) read 0.0 bar with the
-                compressor at 42 rps). HTTP exposes
+                compressor at 42 rps). The Target Evap. case is DIAGNOSED in #194: a scale mismatch,
+                not an offset — the row tracks the compressor cycle (240.6 °C at rest, dipping to
+                145.9 °C running) and conv 114/size/offset all match REGISTERS.md §5 and 44 of 45
+                profiles, so it is left alone and pinned by a witness CHECK rather than "fixed" by
+                bending the spec the audit reads. Its LIMITATION is now the blocker: the dump fires
+                only on a detect pass, which never coincides with a compressor run, so the bytes
+                behind the wrong value have never been captured at the instant it is wrong. HTTP exposes
                 only DECODED values, so a physically impossible reading cannot be attributed to a
                 wrong converter vs. a wrong byte offset vs. a per-unit layout difference without the
                 wire bytes — and they otherwise never leave the device. Truncation is by WHOLE bytes:
