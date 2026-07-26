@@ -20,13 +20,14 @@ likely to be declined — the comment density and the "why" notes in this codeba
 
 ## The local loop — no board or ESP-IDF required
 
-Two scripts run on a plain system toolchain (cmake + g++/clang++) in seconds. **Run both before
-opening a PR.** They are also the first two steps of CI's `gates` job, so a failure here fails the
-build anyway.
+Three scripts run on a plain system toolchain (cmake + g++/clang++, plus node for the third) in
+seconds. **Run all three before opening a PR.** They are also the first steps of CI's `gates` job,
+so a failure here fails the build anyway.
 
 ```bash
-scripts/run-mock-tests.sh     # CI gates step 1 — host-side pure-logic tests
-scripts/run-domain-audit.sh   # CI gates step 2 — is the value catalog physically RIGHT?
+scripts/run-mock-tests.sh          # CI gates step 1 — host-side pure-logic tests
+scripts/run-domain-audit.sh        # CI gates step 2 — is the value catalog physically RIGHT?
+scripts/run-description-audit.sh   # CI gates step 3 — can a user find out what each value IS?
 ```
 
 `run-mock-tests.sh` compiles the IDF-free headers in [`main/logic/`](main/logic/) against
@@ -46,6 +47,25 @@ If you touch the audit itself, also run `tools/domain/selftest.sh` — it re-int
 the audit was built for into a throwaway copy and asserts all four are still caught. A checker that
 has stopped checking turns "clean" from evidence into a lie.
 
+`run-description-audit.sh` asks the same kind of question one layer up. Every reading reaches the
+web UI's value list as a row keyed by its catalog **label**, and tapping that row is meant to open a
+plain-language explainer — decided at render time by a first-match-wins regex sweep over the
+`DESCRIPTIONS` table in [`main/www/app.js`](main/www/app.js). A label nothing matches renders as a
+plain, un-tappable row: no error, no log, just a missing chevron among a hundred rows.
+[`main/def/overlay.hpp`](main/def/overlay.hpp) shipped 11 rows exactly so — nine with no explainer,
+and two that matched the *fin temp* heatsink-**temperature** entry, describing a protection flag and
+a retry counter as a °C reading. Since the profiles are machine-generated, the gap re-opens whenever
+the generator emits a label the copy has never seen, without anyone touching this repo's JS.
+
+It evaluates the real table in a JS engine rather than re-implementing its regexes elsewhere (a
+looser second copy of a rule is not a test of that rule), so it needs **node ≥ 18** — the only gate
+that does. Findings: `D001` a visible reading with no copy, `D002` an entry matching nothing,
+`D003/D004` a malformed entry or missing German, `D005` a stale ledger line. If a finding is correct
+as it stands, record it in [`tools/descriptions/audit_exceptions.txt`](tools/descriptions/audit_exceptions.txt)
+with a reason — except `D001`, which the ledger refuses outright: a published reading the user
+cannot look up is the defect the gate exists for, and the fix is copy, not a suppression. Touching
+the audit means also running `tools/descriptions/selftest.sh`, same argument as the domain one.
+
 Three more fast gates guard the **published artifacts** rather than the firmware, so most PRs never
 need them locally — run them if you touch
 [`scripts/publish-pages-branch.sh`](scripts/publish-pages-branch.sh),
@@ -55,9 +75,9 @@ need them locally — run them if you touch
 [`scripts/next-version.sh`](scripts/next-version.sh):
 
 ```bash
-scripts/run-pages-publish-tests.sh         # CI gates step 3 — needs only git, no toolchain
-scripts/run-web-installer-plan-tests.sh    # CI gates step 4 — needs only python3
-scripts/run-publish-version-tests.sh       # CI gates step 5 — git + python3 + a C++17 compiler
+scripts/run-pages-publish-tests.sh         # CI gates step 4 — needs only git, no toolchain
+scripts/run-web-installer-plan-tests.sh    # CI gates step 5 — needs only python3
+scripts/run-publish-version-tests.sh       # CI gates step 6 — git + python3 + a C++17 compiler
 ```
 
 The first races two publishers against a throwaway bare repo, because `gh-pages` has two concurrent
@@ -85,9 +105,9 @@ resets the numbering — on 2026-07-24 that republished the dev feed as `1.0.0-d
 `1.0.14-dev.2` it had served minutes earlier, with a green build. If this gate fires, fix the floor
 (a tag, or `version.txt`) — not the gate.
 
-All five are **steps of one `gates` job**, not a job each (the version gate above runs in `build`,
+All six are **steps of one `gates` job**, not a job each (the version gate above runs in `build`,
 where the stamped version exists; only its tests are a `gates` step). Actions bills every job
-rounded up to the next whole minute, so five ~15-second jobs cost five minutes for under a minute
+rounded up to the next whole minute, so six ~15-second jobs cost six minutes for under a minute
 of work; a step boundary names the failure just as precisely.
 
 ## Building the firmware

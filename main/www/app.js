@@ -750,22 +750,26 @@ function statusCardsHtml() {
   // fallback matters because a unit whose 0x00 descriptor is too short to carry offset 12 never
   // reports an O/U capacity at all, and this card then showed no capacity whatsoever.
   if (hp.connected && d.capacity_kw != null)
-    model += vrow(t("card.capacity"), String(d.capacity_kw), { unit: "kW" });
+    model += modelDescRow("capacity", t("card.capacity"), String(d.capacity_kw), { unit: "kW" });
   else if (hp.connected && d.capacity_kw_iu != null)
-    model += vrow(t("card.capacity_iu"), String(d.capacity_kw_iu), { unit: "kW" });
+    model += modelDescRow("capacity_iu", t("card.capacity_iu"), String(d.capacity_kw_iu), { unit: "kW" });
   // Why the heading says only "Daikin Altherma": several register-identical profiles from DIFFERENT
   // marketing families fit this unit equally well, so no single name can honestly be asserted
   // (hpModelName). Naming the families that remain turns a card reading like a FAILED detection into
   // what it actually is — one that succeeded as far as the bus permits. Shown only while the name is
   // withheld; a unique identification needs no list of what it isn't.
   const fams = d.families || [];
+  // Which explainer is TRUE here depends on capacity_kw: it is null exactly when the outdoor unit's
+  // 0x00 descriptor carried no capacity (http_status kw_field), which is exactly the case in which
+  // logic/detect.hpp says the candidate set spans kW classes and the pick DOES affect the values.
   if (hp.connected && d.valid && fams.length > 1)
-    model += vrow(t("card.candidates"), fams.map(shortFamily).join(" · "));
+    model += modelDescRow(d.capacity_kw != null ? "candidates" : "candidates_nocap",
+                          t("card.candidates"), fams.map(shortFamily).join(" · "));
   // The O/U EEPROM digits are the one identifier that CAN settle it — against the nameplate, by a
   // person. Deliberately not decoded to a name (no digit→name table exists anywhere in the repo), so
   // they are shown verbatim, monospaced, to be compared character by character.
   if (hp.connected && d.valid && d.ou_eeprom)
-    model += vrow(t("card.oueeprom"), d.ou_eeprom, { cls: "mono" });
+    model += modelDescRow("oueeprom", t("card.oueeprom"), d.ou_eeprom, { cls: "mono" });
 
   // Model identity is only meaningful while the bus answers — hide the card entirely when the
   // heat-pump link is down instead of naming a unit (or showing a stale capacity) that isn't live.
@@ -1051,6 +1055,49 @@ const DESCRIPTIONS = [
     normal: "sits near the room setpoint once the zone is satisfied.",
     de: { what: "Die vom eingebauten oder verdrahteten Raumfühler des Geräts gemessene Raumtemperatur.",
           normal: "liegt nahe am Raum-Sollwert, sobald die Zone zufrieden ist." } },
+
+  // ── Protection retries & drop control (page 0x10 offsets 10-12, def/overlay.hpp) ──
+  // These 11 rows are the ONLY catalog labels that reached the UI with no explainer — and two of
+  // them ("Fin Temp. Drop Control", "Fin Temp. Protection Retry Qty") had something worse: they fell
+  // through to the "fin temp" heatsink-TEMPERATURE entry below, so a protection FLAG and a retry
+  // COUNT were both explained as a temperature reading. That is the #35-#39 shape in explainer copy —
+  // well-formed, plausible, and false — so this section MUST stay ahead of the outdoor/refrigerant
+  // and electrical sections that contain the entries it out-ranks (first match wins).
+  // One entry per PROTECTION rather than per row: the flag and the counter for the same quantity are
+  // adjacent rows off the same byte (docs/REGISTERS.md §5), and what a reader actually needs is what
+  // the unit is protecting and why — so each entry names both readings and stays honest about which
+  // is which. Counters are a 3-BIT field (conv 310/311), hence 0-7 and read as a rate, never a
+  // lifetime total (docs/HOME_ASSISTANT.md "Protection retries & drop control").
+  { re: /discharge temp\.? ?(drop|protection retry)/i,
+    what: "Discharge-temperature protection: the gas leaving the compressor is nearing its safe limit, so the unit throttles the compressor back rather than trip out. The \"Drop\" row is ON while it is doing that right now; the \"Retry Qty\" row counts how often it has had to.",
+    normal: "OFF / 0. Occasional retries at high flow temperatures are normal; repeated ones point at low refrigerant charge or a flow temperature set higher than the unit likes.",
+    de: { what: "Schutz der Druckgastemperatur: Das den Verdichter verlassende Gas nähert sich seiner Grenze, deshalb regelt das Gerät den Verdichter zurück, statt zu stören. Die Zeile „Drop“ ist EIN, solange das gerade passiert; die Zeile „Retry Qty“ zählt, wie oft es nötig war.",
+          normal: "AUS / 0. Vereinzelte Rückregelungen bei hohen Vorlauftemperaturen sind normal; häufige deuten auf zu wenig Kältemittel oder eine zu hoch eingestellte Vorlauftemperatur hin." } },
+  { re: /comp\.? inv current (drop|protection retry)/i,
+    what: "Compressor-inverter current protection: the current the inverter feeds the compressor is nearing its ceiling, so the unit reduces compressor speed. The \"Drop\" row is ON while that limiting is active; the \"Retry Qty\" row counts how often it has happened.",
+    normal: "OFF / 0. Expected occasionally under heavy load in cold weather; frequent counts on mild days are worth a look.",
+    de: { what: "Stromschutz des Verdichter-Inverters: Der Strom, den der Inverter dem Verdichter liefert, nähert sich seiner Obergrenze, deshalb senkt das Gerät die Verdichterdrehzahl. Die Zeile „Drop“ ist EIN, solange diese Begrenzung aktiv ist; die Zeile „Retry Qty“ zählt, wie oft das vorkam.",
+          normal: "AUS / 0. Bei hoher Last im Kalten gelegentlich erwartbar; häufige Zählungen an milden Tagen sind einen Blick wert." } },
+  { re: /^hp (drop|protection retry)/i,
+    what: "High-pressure protection: condensing pressure on the hot side is climbing toward the cut-out, so the unit backs off before the pressure switch stops it. The \"Drop Control\" row is ON while it is limiting; the \"Retry Qty\" row counts the occurrences.",
+    normal: "OFF / 0. When heating, repeated counts usually mean the water side cannot take the heat away — a high flow-temperature target, a slow pump, air or a dirty filter.",
+    de: { what: "Hochdruckschutz: Der Kondensationsdruck auf der heißen Seite steigt Richtung Abschaltpunkt, deshalb regelt das Gerät zurück, bevor der Druckschalter es stoppt. Die Zeile „Drop Control“ ist EIN, solange begrenzt wird; die Zeile „Retry Qty“ zählt die Vorfälle.",
+          normal: "AUS / 0. Im Heizbetrieb heißt häufiges Zählen meist, dass die Wasserseite die Wärme nicht abführt — zu hohes Vorlaufziel, langsame Pumpe, Luft oder ein verschmutzter Filter." } },
+  { re: /^lp (drop|protection retry)/i,
+    what: "Low-pressure protection: evaporating pressure on the cold side is falling toward the cut-out, so the unit backs off. The \"Drop Control\" row is ON while it is limiting; the \"Retry Qty\" row counts the occurrences.",
+    normal: "OFF / 0. When heating, counts cluster around hard frost and defrosts; persistent ones suggest a frosted or blocked outdoor coil, or low refrigerant charge.",
+    de: { what: "Niederdruckschutz: Der Verdampfungsdruck auf der kalten Seite fällt Richtung Abschaltpunkt, deshalb regelt das Gerät zurück. Die Zeile „Drop Control“ ist EIN, solange begrenzt wird; die Zeile „Retry Qty“ zählt die Vorfälle.",
+          normal: "AUS / 0. Im Heizbetrieb häufen sich Zählungen bei strengem Frost und um Abtauvorgänge; dauerhafte deuten auf einen vereisten oder verlegten Außenwärmetauscher oder zu wenig Kältemittel hin." } },
+  { re: /fin temp\.? ?(drop|protection retry)/i,
+    what: "Inverter-heatsink protection: the power electronics' cooling fins are getting too hot, so the unit reduces output to cool them. The \"Drop Control\" row is ON while it is limiting; the \"Retry Qty\" row counts how often it has had to. (This is the protection — the heatsink's own temperature is the separate \"INV fin temp.\" reading.)",
+    normal: "OFF / 0. Expected at most in hot weather at full output; regular counts point at restricted airflow around the outdoor unit.",
+    de: { what: "Schutz des Inverter-Kühlkörpers: Die Kühlrippen der Leistungselektronik werden zu heiß, deshalb senkt das Gerät die Leistung, um sie abzukühlen. Die Zeile „Drop Control“ ist EIN, solange begrenzt wird; die Zeile „Retry Qty“ zählt, wie oft es nötig war. (Dies ist der Schutz — die Temperatur des Kühlkörpers selbst ist der eigene Wert „INV fin temp.“.)",
+          normal: "AUS / 0. Allenfalls bei heißem Wetter unter Volllast erwartbar; regelmäßige Zählungen deuten auf behinderten Luftstrom rund um die Außeneinheit hin." } },
+  { re: /other drop control/i,
+    what: "A catch-all flag: some protection other than discharge temperature, inverter current, high/low pressure or heatsink temperature is limiting the unit right now. The unit does not report which one.",
+    normal: "OFF. If it sits ON, read it together with the fault code and the other protection rows.",
+    de: { what: "Ein Sammel-Flag: Irgendein Schutz außer Druckgastemperatur, Inverterstrom, Hoch-/Niederdruck oder Kühlkörpertemperatur begrenzt das Gerät gerade. Welcher, meldet das Gerät nicht.",
+          normal: "AUS. Bleibt es EIN, zusammen mit dem Fehlercode und den anderen Schutz-Zeilen lesen." } },
 
   // ── Outdoor / refrigerant circuit ──
   { re: /outdoor air|outdoor ambient|r1t-outdoor|^outdoor/i,
@@ -1480,9 +1527,23 @@ function scrubEnd(plot) {
 
 const chevIcon = `<svg class="vrow-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>`;
 
-// One value row. If a description matches the label, render an expandable accordion (a <button>
-// header + a collapsible panel that slides down beneath it); otherwise a plain, unchanged row.
-// The open state is read from S.descOpen so it survives the per-poll rebuild of #valueGroups.
+// The expandable row itself — a <button> header plus the collapsible panel beneath it. Shared by
+// the value list (vDescRow) and the Model card (modelDescRow) so the two cannot drift into two
+// slightly different accordions; `key` is what S.descOpen remembers across the per-poll rebuild, and
+// `valHtml` is pre-built markup (it carries the unit <span>), so it is NOT escaped here.
+function descAccordion(key, label, valHtml, cls, bodyHtml) {
+  const open = S.descOpen.has(key);
+  return `<div class="vitem${open ? " open" : ""}">` +
+    `<button class="vrow vrow-desc" type="button" data-desc="${esc(key)}" aria-expanded="${open ? "true" : "false"}">` +
+    `<span class="vrow-label">${esc(label)}</span>` +
+    `<span class="vrow-end"><span class="vrow-val ${cls}">${valHtml}</span>${chevIcon}</span>` +
+    `</button>` +
+    `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body">${bodyHtml}</div></div></div>` +
+    `</div>`;
+}
+
+// One value row. If a description matches the label, render the accordion; otherwise a plain,
+// unchanged row. The key IS the label here — catalog labels are unique within a render.
 function vDescRow(v) {
   const label = v.label || "";
   const cls = v.state || v.class || "";
@@ -1496,17 +1557,70 @@ function vDescRow(v) {
     return `<div class="vrow"><span class="vrow-label">${esc(label)}</span>` +
       `<span class="vrow-val ${cls}">${val}</span></div>`;
   }
-  const open = S.descOpen.has(label);
-  return `<div class="vitem${open ? " open" : ""}">` +
-    `<button class="vrow vrow-desc" type="button" data-desc="${esc(label)}" aria-expanded="${open ? "true" : "false"}">` +
-    `<span class="vrow-label">${esc(label)}</span>` +
-    `<span class="vrow-end"><span class="vrow-val ${cls}">${val}</span>${chevIcon}</span>` +
-    `</button>` +
-    `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body">` +
-      (d ? descBodyHtml(d) : "") + histHtml(label, v.unit) +
-    `</div></div></div>` +
-    `</div>`;
+  // Body = the explainer (when the label has one) followed by the trend (when the firmware keeps a
+  // series for it). Either half may be absent, which is why the builder takes finished body markup
+  // rather than a description: a trend-only row has no `d` at all.
+  return descAccordion(label, label, val, cls, (d ? descBodyHtml(d) : "") + histHtml(label, v.unit));
 }
+// ── Model-card descriptions ──────────────────────────────────────────────────────────────────────
+// The Model card's rows are the ones that most need explaining and were the last with no explainer:
+// they answer questions the reader did not ask ("possible models" — why more than one? "outdoor unit
+// ID" — for what?) in vocabulary taken from the bus. #184 added the two rows precisely so an
+// ambiguous detection reads as a detection that succeeded as far as the wire permits — but the card
+// states the FACT and never the reason, so it still reads as a failure to anyone who does not
+// already know why a heat pump cannot name itself.
+//
+// A SEPARATE table from DESCRIPTIONS, keyed by a stable row id rather than by the label, for two
+// reasons: these labels are TRANSLATED (`t("card.capacity_iu")` is "Leistung (Inneneinheit)" on a
+// German page), so a regex over English label text would silently stop matching; and they are not
+// catalog labels, so entries here would read as dead to the coverage gate's D002 check
+// (tools/descriptions/check_descriptions.mjs), which is exactly right — it audits the catalog, and
+// these rows have no catalog to audit against.
+const MODEL_DESCRIPTIONS = {
+  capacity: {
+    what: "The outdoor unit's rated capacity, read from its own identification page. It is a size class of the hardware — what the unit is built for, not what it is producing right now.",
+    de: { what: "Die Nennleistung der Außeneinheit, aus ihrer eigenen Kennungsseite gelesen. Eine Größenklasse der Hardware — wofür das Gerät gebaut ist, nicht was es gerade liefert." } },
+  capacity_iu: {
+    what: "The INDOOR unit's rated capacity. It is shown instead of the outdoor unit's because this outdoor unit's identification page is too short to carry one — the firmware labels the half of the plant it actually read rather than presenting it as the system's size.",
+    normal: "the two halves are routinely different sizes: an 8 kW indoor unit over a 6 kW outdoor unit is an ordinary pairing, so this figure is not necessarily the outdoor unit's.",
+    de: { what: "Die Nennleistung der INNENEINHEIT. Sie steht hier anstelle der Außeneinheit, weil deren Kennungsseite zu kurz ist, um eine zu enthalten — die Firmware benennt die Hälfte der Anlage, die sie tatsächlich gelesen hat, statt sie als Größe des Gesamtsystems auszugeben.",
+          normal: "beide Hälften sind regelmäßig unterschiedlich groß: eine 8-kW-Inneneinheit über einer 6-kW-Außeneinheit ist eine ganz normale Paarung — diese Zahl ist also nicht zwangsläufig die der Außeneinheit." } },
+  // TWO variants, and which one is true depends on whether the outdoor unit reported its capacity.
+  // logic/detect.hpp is explicit: candidates that share a page mask AND a kW class are
+  // register-identical, so the pick cannot change a reading — but when the O/U capacity is unknown
+  // "the candidate set spans DIFFERENT kW classes, so it is NOT register-identical and the
+  // representative choice does affect the values". Asserting the reassuring version in both states
+  // would put a false claim on screen in exactly the state that produces this row most often (a
+  // short 0x00 descriptor), which is the #35-#39 shape in copy rather than in a converter.
+  candidates: {
+    what: "Several Daikin model families answer this bus identically — same registers, same layout, same values — so the exact marketing name cannot be read off the wire. These are the families that still fit; the heading stays \"Daikin Altherma\" rather than picking one of them and being wrong.",
+    normal: "this does not affect any reading: the outdoor unit reported its capacity, so the remaining candidates all share one rated class and decode identically — which is why they cannot be told apart in the first place. To pin the exact model, compare the outdoor unit ID below against the nameplate.",
+    de: { what: "Mehrere Daikin-Modellfamilien antworten auf diesem Bus identisch — gleiche Register, gleiches Layout, gleiche Werte —, deshalb lässt sich der genaue Handelsname nicht von der Leitung ablesen. Dies sind die Familien, die noch passen; die Überschrift bleibt „Daikin Altherma“, statt eine davon zu raten.",
+          normal: "das beeinflusst keinen Messwert: Die Außeneinheit hat ihre Leistung gemeldet, deshalb teilen sich alle verbliebenen Kandidaten eine Leistungsklasse und dekodieren identisch — genau deshalb sind sie nicht unterscheidbar. Um das genaue Modell festzulegen, die Kennung der Außeneinheit unten mit dem Typenschild vergleichen." } },
+  candidates_nocap: {
+    what: "Several Daikin model families answer this bus with the same registers, so the exact marketing name cannot be read off the wire. These are the families that still fit; the heading stays \"Daikin Altherma\" rather than picking one of them and being wrong.",
+    normal: "this outdoor unit does not report its own rated capacity, so the candidates can differ in size class. The readings are decoded with the closest fit the firmware could pick — using the indoor unit's rated capacity — rather than with a certainty. The outdoor unit ID below is what settles it against the nameplate.",
+    de: { what: "Mehrere Daikin-Modellfamilien antworten auf diesem Bus mit denselben Registern, deshalb lässt sich der genaue Handelsname nicht von der Leitung ablesen. Dies sind die Familien, die noch passen; die Überschrift bleibt „Daikin Altherma“, statt eine davon zu raten.",
+          normal: "diese Außeneinheit meldet ihre eigene Nennleistung nicht, deshalb können sich die Kandidaten in der Leistungsklasse unterscheiden. Die Werte werden mit der nächstliegenden Übereinstimmung dekodiert, die die Firmware wählen konnte — anhand der Nennleistung der Inneneinheit —, nicht mit einer Gewissheit. Die Kennung der Außeneinheit unten entscheidet es gegen das Typenschild." } },
+  oueeprom: {
+    what: "The outdoor unit's identification bytes, shown exactly as they arrive from the bus. No public table maps them to a model name, so the firmware shows the digits rather than guessing a name from them.",
+    normal: "the one identifier that can settle an ambiguous detection — compare it character by character with the sticker on the outdoor unit.",
+    de: { what: "Die Kennungsbytes der Außeneinheit, exakt so angezeigt, wie sie vom Bus kommen. Es gibt keine öffentliche Tabelle, die sie einem Modellnamen zuordnet, deshalb zeigt die Firmware die Ziffern, statt einen Namen daraus zu raten.",
+          normal: "die einzige Kennung, die eine mehrdeutige Erkennung entscheiden kann — Zeichen für Zeichen mit dem Aufkleber auf der Außeneinheit vergleichen." } },
+};
+
+// A Model-card row: the same accordion as a value row when copy exists for it, else the plain row
+// vrow() would have produced. The key is prefixed so it can never collide with a catalog label in
+// S.descOpen — "Capacity" is both a card row and a plausible label.
+function modelDescRow(id, label, value, opt = {}) {
+  const d = MODEL_DESCRIPTIONS[id];
+  if (!d) return vrow(label, value, opt);
+  const val = esc(value) + (opt.unit ? `<span class="vrow-unit">${esc(opt.unit)}</span>` : "");
+  // No trend half here: the firmware keeps series for catalog readings, and these rows are model
+  // identity — a nameplate fact, not something that moves.
+  return descAccordion(`model:${id}`, label, val, opt.cls || "", descBodyHtml(d));
+}
+
 // Toggle a value row's description accordion. Only the LIVE element is flipped here (so the CSS
 // height transition actually runs); S.descOpen carries the state into the next per-poll rebuild,
 // which re-emits the row already-open (no re-animation). A <button> header means Enter/Space work

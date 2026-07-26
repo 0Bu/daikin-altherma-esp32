@@ -50,7 +50,22 @@ changes can be *verified*, not just reasoned about, even in a cloud session:
 ```bash
 scripts/run-mock-tests.sh    # compile + run host logic tests in seconds (cmake + g++/clang++)
 scripts/run-domain-audit.sh  # is the value catalog physically RIGHT? (the domain-correctness gate)
+scripts/run-description-audit.sh  # can the user find out what each value IS? (node-only)
 ```
+
+The third is the same question one layer up from the second: the domain audit asks whether a
+published value is physically true, the description audit asks whether the web UI has anything to
+SAY about it. A catalog label the `DESCRIPTIONS` table in `main/www/app.js` doesn't match renders as
+a plain, un-tappable row — no error, no log, just a missing chevron among a hundred rows — and the
+catalog is machine-generated, so the gap re-opens without anyone touching this repo's JS.
+`def/overlay.hpp` shipped 11 rows that way (9 with no explainer, 2 matching the "fin temp"
+HEATSINK-TEMPERATURE entry, so a protection flag and a retry counter were described as a °C
+reading). It evaluates the REAL table in a JS engine rather than re-implementing 70-odd regexes in
+python, for the reason `logic/lwt_select.hpp` and `logic/ou_stale.hpp` both state: a looser second
+copy of a rule is not a test of the rule. `tools/descriptions/audit_exceptions.txt` is its
+adjudication ledger (same contract as the domain one; a D001 "no copy for a visible reading" is
+refused as a ledger entry outright), and `tools/descriptions/selftest.sh` proves it still catches
+the defects it was built for.
 
 (Three more fast gates guard the PUBLISHED ARTIFACTS rather than the firmware —
 `scripts/run-pages-publish-tests.sh`, git-only, relevant when `scripts/publish-pages-branch.sh` or
@@ -65,10 +80,10 @@ list and falls back to the `version.txt` floor when it is empty, so a deleted ta
 the numbering — on 2026-07-24 it republished dev/ as 1.0.0-dev.168 over 1.0.14-dev.2, green. See
 CONTRIBUTING.md.)
 
-All five are STEPS of CI's single `gates` job, which the firmware `build` job `needs` — not a job
+All six are STEPS of CI's single `gates` job, which the firmware `build` job `needs` — not a job
 each (the version gate itself runs inside `build`, where the stamped version exists; only its tests
-are a `gates` step). Actions bills every JOB rounded up to a whole minute, so five ~15 s jobs cost
-5 billed minutes for well under one minute of work. The same budget rule shapes the rest of
+are a `gates` step). Actions bills every JOB rounded up to a whole minute, so six ~15 s jobs cost
+6 billed minutes for well under one minute of work. The same budget rule shapes the rest of
 `.github/workflows/build.yml`, and it is worth knowing before editing it: the ~5-minute firmware
 build is SKIPPED (not failed — a skipped job still reports its check, which is why the gate is a
 per-job `if:` and never a workflow-level `paths-ignore:`) when the diff touches nothing the image

@@ -129,6 +129,17 @@ jobs:
       - name: Verify the audit still has teeth
         run: ./tools/domain/selftest.sh
 
+      # Value-description coverage: the domain audit above asks whether a published value is
+      # physically right; this asks whether the user can find out what it IS. A catalog label the
+      # web UI's DESCRIPTIONS table doesn't match renders as a plain, un-tappable row — no error and
+      # no log, so it ships unnoticed (def/overlay.hpp did exactly that with 11 rows). The catalog
+      # is machine-generated and grows without touching this repo's JS, so the gap re-opens on its
+      # own. Needs only node, which this runner already has.
+      - name: Audit the value-description coverage
+        run: ./scripts/run-description-audit.sh
+      - name: Verify the description audit still has teeth
+        run: ./tools/descriptions/selftest.sh
+
       # The gh-pages publish is the LAST step of the build job below, after ~5 minutes of firmware
       # work — so when it breaks, it breaks expensively and at the worst moment. It is also the one
       # step with a concurrency hazard: two publishers (the release root and every merge's dev

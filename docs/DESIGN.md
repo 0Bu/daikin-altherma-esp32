@@ -475,6 +475,15 @@ Body, ordered:
    one identifier that can settle it, and only a person holding the nameplate can: the firmware has
    no digit→name table and must not invent one. A *unique* identification shows neither row — it
    needs no list of what it isn't.
+   **And every row on this card explains itself** (same expander as item 5). The two rows above exist
+   *because* an ambiguous detection needs explaining, but on their own they state the fact and never
+   the reason — a generic brand name over a list of models it might be is also exactly what a failed
+   detection would look like. So tapping a row says why the indoor unit's figure is labelled as such,
+   why no single model name can be asserted (several families are register-identical, so it affects
+   no reading), and what the ID digits are for. The copy is a **separate table** (`MODEL_DESCRIPTIONS`,
+   keyed by row id) rather than `DESCRIPTIONS`: these labels are *translated*, so an English label
+   pattern would silently stop matching on a German page, and they are not catalog labels — see
+   item 5.
    The **ESP32** card that used to sit above it is in Settings now (§5.6): this card is the *unit*,
    that one is the *board*.
 5. **Value groups** (§6) as cards, each a label→value·unit table, tabular numbers; every value of the
@@ -486,10 +495,26 @@ Body, ordered:
      beneath the row — what the reading means and, where useful, what is normal vs worth a look. The
      text is keyed to the value **label** by a first-match-wins pattern table (`DESCRIPTIONS` in
      `app.js`), the same label-pattern technique the schematic/grouping already use, so one entry serves
-     every profile's spelling of a quantity; a label that matches nothing stays a plain, non-expandable
-     row. **The schematic inspector (§5.3 item 3) reads this same table**, so a quantity is explained
+     every profile's spelling of a quantity; a label that matches nothing stays a plain row — unless
+     the firmware keeps a **trend** for it, which opens the same panel on its own (below).
+     **The schematic inspector (§5.3 item 3) reads this same table**, so a quantity is explained
      identically whether the user arrives from the picture or from the value list — add a concept
-     once, here. Each entry carries an English `what`/`normal` plus a German `de` copy; the browser language
+     once, here.
+     **A missing explainer is a CI failure, not a quiet plain row.** Which rows are tappable is
+     decided at render time, so a label nothing matches — and that the firmware keeps no trend for —
+     produces no error and no log, just an absent chevron among a hundred rows, which is how
+     `def/overlay.hpp` shipped eleven such rows. Since the
+     profiles are machine-generated, the gap re-opens whenever the generator emits a label this table
+     has never seen, so a gate asserts the two sides still line up
+     (`scripts/run-description-audit.sh`, CONTRIBUTING.md). It gates *coverage*, not correctness: a
+     wrong explainer is still a match, and two of those eleven rows had one — a protection flag read
+     as a heat-sink temperature.
+     **The Model card (item 4) uses the same expander but its own table** (`MODEL_DESCRIPTIONS`, keyed
+     by row id). Those labels are translated and are not catalog labels, so they cannot be keyed by an
+     English label pattern, and entries for them in `DESCRIPTIONS` would correctly read as *dead* to
+     the coverage gate. The accordion markup itself is one shared builder, so the two row kinds cannot
+     drift into two slightly different expanders, and Model-card keys are prefixed (`model:`) so they
+     can never collide with a catalog label in the open-state set. Each entry carries an English `what`/`normal` plus a German `de` copy; the browser language
      (§1) picks which is shown (English fallback). The value label above the box stays the English
      register name in both languages. The open state lives in app state
      (`S.descOpen`), not the DOM, so the per-poll rebuild of `#valueGroups` re-emits an expanded row
@@ -877,9 +902,9 @@ page under near-identical cards). Specific:
   block so the ramp stays coherent; it never changes the single-column layout, only its size.
 - Wide content (long value tables) never causes horizontal page scroll; the table scrolls in its card.
 - Keyboard: logical tab order, visible focus ring, Enter submits the view's primary action. The
-  value-description expanders (§5.3 item 5) are real `<button>`s carrying `aria-expanded`, so they
-  are focusable and toggle on Enter/Space with no extra key handling; the slide honours
-  `prefers-reduced-motion`.
+  value-description expanders (§5.3 items 4 and 5 — value rows and Model-card rows share one
+  builder) are real `<button>`s carrying `aria-expanded`, so they are focusable and toggle on
+  Enter/Space with no extra key handling; the slide honours `prefers-reduced-motion`.
 - Contrast AA for text; status never conveyed by colour alone (pills carry text: "Connected",
   "CRC 3", "off"). The Connections rows (§5.6) are the one deliberate exception to *visible*
   text — a row shows only a colour-tinted address/name — so the status word that would otherwise
