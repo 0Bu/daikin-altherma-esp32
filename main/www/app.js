@@ -64,6 +64,14 @@ const I18N = {
     "chip.thermo_on": "Thermostat ON", "chip.thermo_off": "Thermostat off", "chip.quiet": "Quiet",
     "schem.to_dhw": "3WV → DHW", "schem.to_heat": "3WV → heating",
     "normal.label": "Normal:",
+    "hist.title": "Last 24 hours", "hist.since": (h) => `Since restart · ${h} h`,
+    "hist.now": "now", "hist.ago": (h) => `${h} h ago`,
+    "hist.loading": "Loading trend…", "hist.none": "No readings recorded yet.",
+    "hist.err": "Trend unavailable.",
+    "hist.gaps": (n) => `${n} gap${n === 1 ? "" : "s"} — not measured`,
+    "hist.nm": "not measured", "hist.rel": (h) => `${h} h ago`,
+    "hist.held": "outdoor unit resting", "hist.heldnote": (h) => `${h} h resting — not measured`,
+    "hist.aria": (l) => `${l} — 24-hour trend. Arrow keys read out individual samples.`,
     "toast.saved": "Saved", "toast.no_changes": "No changes",
     "toast.reboot": "Rebooting — reconnecting…", "toast.rebooted": "Rebooted — reconnect to the device",
     "toast.busy_retry": "Device busy — retry in a moment", "toast.unreachable": "Couldn't reach the device",
@@ -164,6 +172,14 @@ const I18N = {
     "chip.thermo_on": "Thermostat EIN", "chip.thermo_off": "Thermostat aus", "chip.quiet": "Leise",
     "schem.to_dhw": "3WV → WW", "schem.to_heat": "3WV → Heizung",
     "normal.label": "Normal:",
+    "hist.title": "Letzte 24 Stunden", "hist.since": (h) => `Seit Neustart · ${h} h`,
+    "hist.now": "jetzt", "hist.ago": (h) => `vor ${h} h`,
+    "hist.loading": "Verlauf wird geladen…", "hist.none": "Noch keine Messwerte aufgezeichnet.",
+    "hist.err": "Verlauf nicht verfügbar.",
+    "hist.gaps": (n) => `${n} Lücke${n === 1 ? "" : "n"} — nicht gemessen`,
+    "hist.nm": "nicht gemessen", "hist.rel": (h) => `vor ${h} h`,
+    "hist.held": "Außeneinheit ruht", "hist.heldnote": (h) => `${h} h Stillstand — nicht gemessen`,
+    "hist.aria": (l) => `${l} — 24-Stunden-Verlauf. Mit den Pfeiltasten einzelne Messpunkte ablesen.`,
     "toast.saved": "Gespeichert", "toast.no_changes": "Keine Änderungen",
     "toast.reboot": "Neustart — verbinde neu…", "toast.rebooted": "Neu gestartet — bitte neu mit dem Gerät verbinden",
     "toast.busy_retry": "Gerät ausgelastet — gleich erneut versuchen", "toast.unreachable": "Gerät nicht erreichbar",
@@ -246,6 +262,18 @@ const S = {
   // row survives the rebuild; the click handler only toggles the live element (so the CSS slide
   // animates) and updates this set for the next rebuild to honour.
   descOpen: new Set(),
+  // 24-hour trend per historied row: label -> {at, dt, unit, v[]} (or {err:true}). Cached in app
+  // state for the same reason descOpen is — #valueGroups is rebuilt on every poll, and re-fetching
+  // (or re-deriving) the sparkline 1×/s would both hammer the device and restart the panel's slide.
+  // A missing entry means "not fetched yet", which is what makes the panel show its loading line.
+  hist: new Map(),
+  histBusy: new Set(),
+  // The label of the row whose trend is being scrubbed right now (mouse hover or finger down), or
+  // null. It FREEZES the #valueGroups rebuild — see renderCards. Without that the innerHTML is
+  // replaced ~1×/s under the pointer: the captured element dies mid-drag and the readout flickers.
+  // Same trade the OTA readout takes with the Settings rebuild (S.otaShown), and for the same
+  // reason: a live-updating grid must not fight an interaction the user is in the middle of.
+  scrub: null,
   // Schematic inspector: which hit target (INSPECT key) is selected, and the last liveData() the
   // poll produced. The panel re-renders from S.live on every poll, so an open explainer keeps
   // showing the CURRENT reading rather than the one that was on screen when it was tapped.
@@ -598,6 +626,11 @@ async function refreshValues() {
 // continuous card grid, each block styled like OPERATION. The board (ESP32) card and the
 // WiFi/MQTT/Syslog/NTP rows are NOT here: both moved behind the gear onto Settings (renderSettings).
 function renderCards() {
+  // Frozen while a trend is being scrubbed (S.scrub): rebuilding innerHTML under an active pointer
+  // drops pointer capture and restarts the accordion, so the gesture would break ~1×/s. The rows
+  // stop updating for the few seconds the finger is down and catch up on release — the same
+  // deliberate stall renderSettings takes for the OTA readout.
+  if (S.scrub) return;
   $("valueGroups").innerHTML = statusCardsHtml() + valueGroupsHtml(S._values || [], S.status?.hp?.connected);
 }
 // One label→value row; `v` is escaped unless opt.html (e.g. signal-bar markup).
@@ -1185,6 +1218,266 @@ function descBodyHtml(d) {
   if (b.normal) h += ` <span class="vdesc-n">${esc(t("normal.label"))}</span> ${esc(b.normal)}`;
   return h;
 }
+// ── 24-hour trend (a historied value row's explainer carries a sparkline under the text) ──────
+// WHICH rows have a trend is the FIRMWARE's answer, read from /status.history.rows: the device keeps
+// a fixed-cadence ring buffer for a small, structurally-picked set of rows (by register page/offset,
+// not by label — the catalog spells the same concept ~50 ways across 43 profiles) and reports the
+// labels it resolved. The browser never pattern-matches its own candidates: offering a trend for a
+// row the device isn't buffering would be a chart that can only ever be empty.
+// Each entry is {id, label}: the ID is the concept (logic/history.hpp's TRENDS — "dhw_tank",
+// "outdoor_air", …) and is what GET /history takes, while the LABEL is how this profile spells the
+// row. Requesting by id keeps the route model-independent; matching by label is how a rendered row
+// finds its own trend. Adding a trend is a row in TRENDS — nothing here changes.
+function histSpec() { const h = S.status && S.status.history; return h && Array.isArray(h.rows) ? h : null; }
+function histFor(label) {
+  const h = histSpec();
+  return h ? h.rows.find((r) => r && r.label === label) || null : null;
+}
+function hasHist(label) { return !!histFor(label); }
+
+// Was sample `i` absent because the outdoor unit was ASLEEP rather than because something failed to
+// measure? The firmware decides it (logic/history.hpp — pages 0x20/0x21 keep answering with the last
+// run's numbers while the compressor rests) and sends the run-length ranges; the browser only reads
+// them. Deriving it here from the row's register would be a second copy of a rule CI already gates.
+function histHeld(h, i) {
+  const runs = h && h.held;
+  if (!Array.isArray(runs)) return false;
+  for (const r of runs) if (i >= r[0] && i < r[0] + r[1]) return true;
+  return false;
+}
+
+// Fetch a row's series at most once a minute. The buffer moves one sample per `dt` (300 s), so a
+// per-poll refetch would send ~300 identical responses per new data point — and each response is a
+// ~1 KB contiguous string on the single httpd task (CLAUDE.md → Memory constraints).
+async function ensureHist(label) {
+  if (!hasHist(label) || S.histBusy.has(label)) return;
+  const c = S.hist.get(label);
+  if (c && Date.now() - c.at < 60000) return;
+  S.histBusy.add(label);
+  try {
+    const r = await fetch("/history?row=" + encodeURIComponent(histFor(label).id));
+    const j = await r.json();
+    // t0 = the unix instant of sample 0, present only when the device's SNTP clock is synced. Null
+    // means the scrub readout falls back to an AGE ("vor 6.3 h") — never a fabricated wall-clock
+    // time, the same rule logic/timestamp.hpp applies to an unsynced clock on the firmware side.
+    S.hist.set(label, { at: Date.now(), dt: +j.dt || 300, unit: j.unit || "",
+                        t0: typeof j.t0 === "number" ? j.t0 : null,
+                        held: Array.isArray(j.held) ? j.held : [],
+                        v: Array.isArray(j.v) ? j.v : [] });
+  } catch (e) {
+    S.hist.set(label, { at: Date.now(), err: true, v: [] });
+  } finally {
+    S.histBusy.delete(label); renderApp();
+  }
+}
+
+// The plot's own coordinate system. The SVG stretches to the panel width (preserveAspectRatio
+// "none"), so the path is drawn in these units and the stroke is kept honest with
+// vector-effect="non-scaling-stroke" — otherwise a wide panel would smear the line horizontally.
+// No internal padding: the geometry uses the full box and the container lets the stroke overflow,
+// which keeps the "now" marker's percentage mapping (below) exactly the plot's own scale.
+const HIST_W = 320, HIST_H = 72;
+
+// One historied row's trend, as the markup appended under its explainer text. Every state is a
+// SENTENCE rather than an empty box: not fetched, no readings yet, fetch failed. `null` samples are
+// GAPS (a timed-out register, or a reading reading_plausible() refused) and must break the line —
+// interpolating across them would draw a measurement that was never taken, which is exactly the
+// failure the blanked pills elsewhere in this UI exist to prevent.
+function histHtml(label, unit) {
+  if (!hasHist(label)) return "";
+  const h = S.hist.get(label);
+  const wrap = (body, cls) => `<div class="vhist${cls ? " " + cls : ""}">${body}</div>`;
+  if (!h) return wrap(`<div class="vhist-note">${esc(t("hist.loading"))}</div>`, "vhist-flat");
+  if (h.err) return wrap(`<div class="vhist-note">${esc(t("hist.err"))}</div>`, "vhist-flat");
+
+  const raw = h.v;
+  const pts = raw.map((x) => (x == null ? null : x / 10));   // deci-°C on the wire, one decimal here
+  const real = pts.filter((x) => x != null);
+  if (!real.length) return wrap(`<div class="vhist-note">${esc(t("hist.none"))}</div>`, "vhist-flat");
+
+  const n = pts.length;
+  const spanH = Math.max(1, Math.round((n * h.dt) / 3600));
+  // The axis states the span the device ACTUALLY holds, never a padded 24 h: the buffer lives in RAM
+  // and every /set_* and OTA reboots the board, so a fresh device has minutes of history, not a day.
+  // Stretching the axis to 24 h would draw that absence as if it were flat measured data.
+  const full  = n * h.dt >= 23.5 * 3600;
+  const lo = Math.min(...real), hi = Math.max(...real);
+  const pad = (hi - lo) < 1 ? 1 : (hi - lo) * 0.12;          // a flat series gets a band, not a divide-by-zero
+  const y0 = lo - pad, y1 = hi + pad;
+  const X = (i) => (n === 1 ? HIST_W : (i * HIST_W) / (n - 1));
+  const Y = (v) => HIST_H - ((v - y0) / (y1 - y0)) * HIST_H;
+
+  // Contiguous runs only: each becomes its own line path (and its own area under it), so a gap is
+  // drawn as a gap. A run of ONE sample gets a dot — a lone reading between two gaps is still a
+  // measurement and dropping it would understate what the device saw.
+  // The area under the curve is dropped once the series is mostly absent. A filled area reads as
+  // "this quantity was at this level throughout", and for a sparse trend — the outdoor-air one on a
+  // mild day is measured for ~3 of 24 h — the isolated runs render as columns that look like bars of
+  // a different chart entirely. The line alone makes no continuity claim it cannot support.
+  const dense = real.length >= pts.length * 0.6;
+  let line = "", area = "", dots = "", gaps = 0, held = 0, run = [];
+  const flush = () => {
+    if (!run.length) { return; }
+    if (run.length === 1) {
+      dots += `<circle class="vhist-pt" cx="${X(run[0]).toFixed(1)}" cy="${Y(pts[run[0]]).toFixed(1)}" r="1.6"/>`;
+    } else {
+      const d = run.map((i, k) => `${k ? "L" : "M"}${X(i).toFixed(1)} ${Y(pts[i]).toFixed(1)}`).join("");
+      line += `<path class="vhist-line" d="${d}" vector-effect="non-scaling-stroke"/>`;
+      if (dense) area += `<path class="vhist-area" d="${d}L${X(run[run.length - 1]).toFixed(1)} ${HIST_H}L${X(run[0]).toFixed(1)} ${HIST_H}Z"/>`;
+    }
+    run = [];
+  };
+  // Absence is counted in TWO buckets, because they mean different things and the axis says which:
+  // a HELD sample is the outdoor unit resting (nothing failed — see histHeld), a GAP is a register
+  // that didn't answer or a value reading_plausible() refused. Blaming an idle compressor on the bus
+  // is the same class of wrong as drawing its last-run value as live.
+  // `gaps` counts contiguous RUNS (one dropout is one gap, however many samples it spans); `held`
+  // counts SAMPLES, because what matters there is how much of the day the unit spent asleep, not
+  // how many naps it took. prevGap tracks run boundaries so a held stretch between two dropouts
+  // doesn't merge them into one.
+  let prevGap = false;
+  for (let i = 0; i < n; i++) {
+    if (pts[i] == null) {
+      if (histHeld(h, i)) { held++; prevGap = false; }
+      else { if (!prevGap) gaps++; prevGap = true; }
+      flush();
+    } else { prevGap = false; run.push(i); }
+  }
+  flush();
+
+  // The "now" marker is an HTML element, not an SVG circle: the SVG is stretched non-uniformly, so
+  // a circle in it would render as an ellipse. Percentage positioning maps onto the same 0..HIST_H
+  // scale exactly, and stays right whatever width the panel ends up at.
+  const last = pts[n - 1];
+  const dot = last == null ? ""
+    : `<span class="vhist-now" style="top:${((Y(last) / HIST_H) * 100).toFixed(2)}%"></span>`;
+  const u = unit ? ` ${unit}` : "";
+  const rng = `${lo.toFixed(1)} – ${hi.toFixed(1)}${u}`;
+
+  // The scrub layer: a tooltip band ABOVE the plot (its own reserved strip, so the bubble follows
+  // the cursor Grafana-style without ever covering the curve it is reading — on a phone the finger
+  // already hides part of the plot, and a bubble under it would hide the rest), plus the crosshair
+  // and the marker dot inside the plot. All three start hidden and are moved by scrubMove() writing
+  // styles directly — never by re-rendering this HTML, which would fight the pointer.
+  // `data-hist` is what the delegated pointer handlers match on, and it carries the sample count so
+  // the geometry the handler needs comes from the same render that drew the path.
+  return wrap(
+    `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.since", spanH))}</span>` +
+    `<span class="vhist-range mono num">${esc(rng)}</span></div>` +
+    `<div class="vhist-graph">` +
+      `<div class="vhist-tip mono num" hidden></div>` +
+      `<div class="vhist-plot" data-hist="${esc(label)}" data-n="${n}" tabindex="0" role="img"` +
+        ` aria-label="${esc(t("hist.aria", label))}">` +
+        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${area}${line}${dots}</svg>` +
+        dot +
+        `<span class="vhist-cross" hidden></span><span class="vhist-mark" hidden></span>` +
+      `</div>` +
+    `</div>` +
+    `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
+      // Idle time is reported ahead of dropouts: on an outdoor-air trend it is normally the larger
+      // share of the day and the one that explains the shape of the chart.
+      (held ? `<span class="vhist-idle">${esc(t("hist.heldnote", ((held * h.dt) / 3600).toFixed(1)))}</span>` : "") +
+      (gaps ? `<span class="vhist-gap">${esc(t("hist.gaps", gaps))}</span>` : "") +
+      `<span>${esc(t("hist.now"))}</span></div>`
+  );
+}
+
+// ── Scrubbing a trend (hover with a mouse, drag with a finger — one code path) ─────────────────
+// Pointer Events rather than mouse+touch pairs: one set of handlers covers mouse, touch and pen,
+// and pointer capture keeps a drag tracking after it leaves the plot. The plot is `touch-action:
+// pan-y` (CSS), which is the load-bearing half on a phone — it hands VERTICAL gestures back to the
+// page so the user can still scroll past the chart, while horizontal movement becomes a scrub.
+// Claiming both axes would trap the page scroll inside a 72 px box.
+
+// Where a sample sits, as a fraction 0..1 of the plot width. Mirrors X() in histHtml — a lone
+// sample is drawn at the right edge, which is also where "now" is.
+function scrubFrac(i, n) { return n <= 1 ? 1 : i / (n - 1); }
+
+// The label under the cursor: the sample's wall-clock time when the device had a synced clock
+// (history carries t0, the unix instant of sample 0), else its age. A gap says so rather than
+// showing the neighbouring reading, which would attribute a measurement to a minute that has none.
+function scrubText(h, i) {
+  const v = h.v[i];
+  // A held sample says the UNIT was resting, not that the reading failed — the same distinction the
+  // schematic's blanked outdoor pills make, carried into the trend readout.
+  const val = v != null ? (v / 10).toFixed(1) + (h.unit ? " " + h.unit : "")
+            : histHeld(h, i) ? t("hist.held") : t("hist.nm");
+  let when;
+  if (h.t0) {
+    when = new Date((h.t0 + i * h.dt) * 1000)
+      .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
+  } else {
+    const ageH = ((h.v.length - 1 - i) * h.dt) / 3600;
+    when = ageH < 0.05 ? t("hist.now") : t("hist.rel", ageH.toFixed(1));
+  }
+  return when + " · " + val;
+}
+
+// Paint the crosshair for sample `i`. Pure DOM writes on the existing nodes — no innerHTML, so a
+// drag never rebuilds what it is holding on to.
+function scrubMove(plot, i) {
+  const h = S.hist.get(plot.dataset.hist);
+  const n = +plot.dataset.n;
+  if (!h || !n) return;
+  i = Math.max(0, Math.min(n - 1, i));
+  const graph = plot.parentElement;
+  const tip = graph.querySelector(".vhist-tip");
+  const cross = plot.querySelector(".vhist-cross");
+  const mark = plot.querySelector(".vhist-mark");
+  const w = plot.clientWidth;
+  const x = scrubFrac(i, n) * w;
+
+  cross.hidden = false;
+  cross.style.left = x.toFixed(1) + "px";
+  // The marker only exists where a reading does; on a gap the crosshair stands alone, which is the
+  // same "no value here" vocabulary the broken line already speaks.
+  const v = h.v[i];
+  if (v == null) { mark.hidden = true; } else {
+    const real = h.v.filter((z) => z != null).map((z) => z / 10);
+    const lo = Math.min(...real), hi = Math.max(...real);
+    const pad = (hi - lo) < 1 ? 1 : (hi - lo) * 0.12;
+    const y0 = lo - pad, y1 = hi + pad;
+    mark.hidden = false;
+    mark.style.left = x.toFixed(1) + "px";
+    mark.style.top = ((1 - ((v / 10 - y0) / (y1 - y0))) * 100).toFixed(2) + "%";
+  }
+  tip.hidden = false;
+  tip.textContent = scrubText(h, i);
+  // Clamp inside the plot so the bubble never hangs off the card edge; measured after the text is
+  // written, since its width depends on it.
+  const half = tip.offsetWidth / 2;
+  tip.style.left = Math.max(half, Math.min(w - half, x)).toFixed(1) + "px";
+}
+
+function scrubIndex(plot, clientX) {
+  const r = plot.getBoundingClientRect();
+  const n = +plot.dataset.n;
+  return Math.round(((clientX - r.left) / (r.width || 1)) * (n - 1));
+}
+
+// A scrub freezes the whole value grid, so it MUST be impossible to leave one hanging: a pointerdown
+// whose pointerup never arrives (the browser steals the gesture, the tab is backgrounded mid-drag, a
+// capture call that silently failed) would otherwise latch S.scrub forever and stop every row from
+// updating — a dashboard that looks like a dead device, with no error anywhere. lostpointercapture
+// covers the normal exits including DOM removal; this watchdog covers the rest. Generous, because it
+// only ever fires on a gesture that has already gone wrong: a real drag re-arms it on every move.
+const SCRUB_MAX_MS = 20000;
+let scrubWatchdog = 0;
+function scrubArm(plot) {
+  clearTimeout(scrubWatchdog);
+  scrubWatchdog = setTimeout(() => scrubEnd(plot), SCRUB_MAX_MS);
+}
+
+function scrubEnd(plot) {
+  clearTimeout(scrubWatchdog);
+  if (plot) {
+    plot.querySelector(".vhist-cross").hidden = true;
+    plot.querySelector(".vhist-mark").hidden = true;
+    plot.parentElement.querySelector(".vhist-tip").hidden = true;
+  }
+  if (S.scrub) { S.scrub = null; renderCards(); }   // resume the frozen per-poll rebuild
+}
+
 const chevIcon = `<svg class="vrow-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>`;
 
 // One value row. If a description matches the label, render an expandable accordion (a <button>
@@ -1196,7 +1489,10 @@ function vDescRow(v) {
   const val = esc(v.value == null ? "—" : String(v.value)) +
     (v.unit ? `<span class="vrow-unit">${esc(v.unit)}</span>` : "");
   const d = descFor(label);
-  if (!d) {
+  // A row is expandable if it has an explainer OR a trend — the two are independent (the firmware
+  // picks historied rows structurally, the explainer table matches labels), so keying the accordion
+  // on the description alone would hide a series the device is keeping.
+  if (!d && !hasHist(label)) {
     return `<div class="vrow"><span class="vrow-label">${esc(label)}</span>` +
       `<span class="vrow-val ${cls}">${val}</span></div>`;
   }
@@ -1206,7 +1502,9 @@ function vDescRow(v) {
     `<span class="vrow-label">${esc(label)}</span>` +
     `<span class="vrow-end"><span class="vrow-val ${cls}">${val}</span>${chevIcon}</span>` +
     `</button>` +
-    `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body">${descBodyHtml(d)}</div></div></div>` +
+    `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body">` +
+      (d ? descBodyHtml(d) : "") + histHtml(label, v.unit) +
+    `</div></div></div>` +
     `</div>`;
 }
 // Toggle a value row's description accordion. Only the LIVE element is flipped here (so the CSS
@@ -1221,6 +1519,9 @@ function toggleDesc(btn) {
   item.classList.toggle("open", open);
   btn.setAttribute("aria-expanded", open ? "true" : "false");
   if (open) S.descOpen.add(label); else S.descOpen.delete(label);
+  // Fetch the trend only once the panel is actually opened — a device that buffers several rows
+  // would otherwise answer a request per row on every page load, for panels nobody looked at.
+  if (open) ensureHist(label);
 }
 
 // Heat-pump value groups (grouped by domain, §6) as card markup. Hidden entirely while the
@@ -2517,8 +2818,71 @@ function wire() {
   // is wired by delegation: tapping a value row (that has a description) expands/collapses its
   // explainer accordion.
   $("valueGroups").addEventListener("click", (e) => {
+    // A scrub that ended on the plot must not fall through to the accordion header and collapse the
+    // very panel the user was reading.
+    if (e.target.closest("[data-hist]")) return;
     const desc = e.target.closest("[data-desc]");
     if (desc) toggleDesc(desc);
+  });
+  // Trend scrubbing, delegated for the same reason (the grid is rebuilt every poll). Hover reads
+  // out without claiming anything; a press claims the pointer so the readout survives leaving the
+  // plot mid-drag, and freezes the rebuild until release.
+  const gv = $("valueGroups");
+  gv.addEventListener("pointermove", (e) => {
+    const plot = e.target.closest("[data-hist]");
+    if (!plot) return;
+    if (S.scrub && S.scrub !== plot.dataset.hist) return;
+    if (S.scrub) scrubArm(plot);              // a live drag keeps re-arming the watchdog
+    scrubMove(plot, scrubIndex(plot, e.clientX));
+  });
+  gv.addEventListener("pointerdown", (e) => {
+    const plot = e.target.closest("[data-hist]");
+    if (!plot) return;
+    S.scrub = plot.dataset.hist;
+    scrubArm(plot);
+    try { plot.setPointerCapture(e.pointerId); } catch { /* capture is an optimisation, not a requirement */ }
+    scrubMove(plot, scrubIndex(plot, e.clientX));
+  });
+  // The authoritative end of a captured drag: fires on pointerup, on pointercancel AND when the
+  // element is removed from the DOM — the one exit the explicit handlers below cannot see.
+  gv.addEventListener("lostpointercapture", (e) => {
+    const plot = e.target.closest("[data-hist]");
+    if (plot) scrubEnd(plot);
+  });
+  // A mouse leaving clears the readout; a touch ends on pointerup/cancel. pointerout covers the
+  // former without also firing for every child element (pointerleave doesn't bubble to this
+  // delegate, so the related-target check does that job here).
+  gv.addEventListener("pointerout", (e) => {
+    const plot = e.target.closest("[data-hist]");
+    if (!plot || S.scrub) return;
+    if (e.relatedTarget && plot.contains(e.relatedTarget)) return;
+    scrubEnd(plot);
+  });
+  for (const ev of ["pointerup", "pointercancel"]) {
+    gv.addEventListener(ev, (e) => {
+      const plot = e.target.closest("[data-hist]");
+      if (plot) scrubEnd(plot);
+    });
+  }
+  // Keyboard: the plot is focusable, so arrow keys step through samples and the tooltip is the
+  // readout. Without this the trend would be mouse/touch-only — the one control on the dashboard
+  // that a keyboard couldn't reach.
+  gv.addEventListener("keydown", (e) => {
+    const plot = e.target.closest("[data-hist]");
+    if (!plot) return;
+    const n = +plot.dataset.n;
+    const step = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
+    if (!step && e.key !== "Home" && e.key !== "End" && e.key !== "Escape") return;
+    e.preventDefault();                       // arrows would otherwise scroll the page
+    if (e.key === "Escape") return scrubEnd(plot);
+    const cur = plot.dataset.cur == null ? n - 1 : +plot.dataset.cur;
+    const next = e.key === "Home" ? 0 : e.key === "End" ? n - 1 : cur + step;
+    plot.dataset.cur = Math.max(0, Math.min(n - 1, next));
+    scrubMove(plot, +plot.dataset.cur);
+  });
+  gv.addEventListener("focusout", (e) => {
+    const plot = e.target.closest("[data-hist]");
+    if (plot) { delete plot.dataset.cur; scrubEnd(plot); }
   });
   // Schematic inspector: the SVG hit targets are <g> elements, so Enter/Space need handling by hand
   // (a <g role="button"> gets no native activation). Delegated, because the SVG is static DOM.

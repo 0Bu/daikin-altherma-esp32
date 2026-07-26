@@ -265,6 +265,9 @@ GET  /status                       # { version, platform, uptime_s, app_elf_sha2
                                    #   hp:{proto,rx,tx,connected,last_ok_s,
                                    #        registers,values,crc_err,timeout_err},
                                    #   profile:{id},
+                                   #   history:{dt,rows:[{id,label}]},   # rows with a 24 h trend;
+                                   #        id = the concept (what /history takes), label = how the
+                                   #        detected profile spells it. Absent rows are omitted.
                                    #   sys:{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode},
                                    #   last_crash: null | {reason,reason_code,fault,coredump,
                                    #        task,pc,backtrace[],corrupted,elf_sha256},
@@ -278,6 +281,17 @@ GET  /status                       # { version, platform, uptime_s, app_elf_sha2
                                    #        them as two figures, never as one with a fallback.
 GET  /values                       # decoded readings [{label,value,unit,reg}] (last poll cycle);
                                    #   reg = the X10A register page the row was decoded from
+GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sample first:
+                                   #   {id,label,dt,unit,t0,v[],held[[from,count],…]}
+                                   #   unit = the ROW's own unit (never a hardcoded °C).
+                                   #   v = TENTHS of that unit (the browser scales by 10) or null.
+                                   #   held run-length-marks WHICH nulls were the outdoor unit
+                                   #   RESTING rather than a failure to measure — pages 0x20/0x21
+                                   #   keep answering with the last run's numbers while the
+                                   #   compressor is off, so those samples are not recorded as
+                                   #   readings. t0 = wall-clock instant of sample 0, omitted when
+                                   #   the clock has never synced (the UI then shows an age).
+                                   #   Unknown id → 404. Trends are RAM: a reboot empties them.
 GET  /events                       # WebSocket live push (the only live UI transport). Send "sub" →
                                    #   status+values snapshot, then {"type":"status"|"values",...} on
                                    #   change. No HTTP polling; no-WebSocket browsers load once and

@@ -395,6 +395,58 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   font-size: 13.5px; color: var(--muted); line-height: 1.55;
 }
 .vdesc-n { color: var(--fg); font-weight: 600; }
+/* ── 24-hour trend inside the explainer panel ───────────────────────────────
+   A sparkline for the rows the firmware buffers (/status.history.rows). It sits BELOW the explainer
+   text and is separated by a rule, so the panel reads text-then-evidence rather than as a chart with
+   a caption. --brand-sky is the chart/line token (DESIGN.md §2); the plot never uses a semantic
+   colour — a trend is not a state. */
+.vhist { margin-top: 11px; padding-top: 11px; border-top: 1px solid var(--line); }
+.vhist.vhist-flat { display: flex; align-items: center; min-height: 20px; }
+.vhist-note { color: var(--muted); font-size: 12.5px; }
+.vhist-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  font-size: 12px; margin-bottom: 7px; }
+.vhist-t { color: var(--fg); font-weight: 600; }
+.vhist-range { color: var(--muted); }
+/* The SVG stretches to the panel width; overflow stays visible so the stroke isn't clipped at the
+   extremes (the geometry deliberately uses the full viewBox height — see HIST_H in app.js). */
+/* The tooltip gets its OWN strip above the plot: it follows the cursor horizontally (Grafana-style)
+   but can never cover the curve it is reading — which matters most on a phone, where the finger
+   already hides part of the plot. */
+.vhist-graph { position: relative; padding-top: 24px; }
+.vhist-plot { position: relative; height: 72px; }
+/* pan-y hands VERTICAL gestures back to the page (the user must still be able to scroll past the
+   chart) while horizontal movement becomes a scrub. Claiming both axes would trap page scrolling
+   inside a 72 px box. */
+.vhist-plot { touch-action: pan-y; -webkit-tap-highlight-color: transparent; }
+.vhist-plot:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; border-radius: 3px; }
+.vhist-plot svg { display: block; width: 100%; height: 100%; overflow: visible; }
+/* Crosshair + marker. The vertical line is deliberately quieter than the series (a --muted hairline,
+   not a brand colour): it points at the data, it is not data. */
+.vhist-cross { position: absolute; top: -4px; bottom: -4px; width: 1px; background: var(--muted);
+  opacity: .55; transform: translateX(-50%); pointer-events: none; }
+.vhist-mark { position: absolute; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--brand-strong); box-shadow: 0 0 0 2.5px var(--card);
+  transform: translate(-50%, -50%); pointer-events: none; }
+.vhist-tip { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap;
+  pointer-events: none; font-size: 12px; color: var(--fg); background: var(--card);
+  border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.10); }
+.vhist-line { fill: none; stroke: var(--brand-sky); stroke-width: 1.6px; stroke-linejoin: round; stroke-linecap: round; }
+.vhist-area { fill: var(--brand-sky); opacity: .13; stroke: none; }
+.vhist-pt { fill: var(--brand-sky); stroke: none; }
+/* The live end of the series. An HTML dot, not an SVG circle: the plot is scaled non-uniformly, so
+   a circle inside it would render as an ellipse (app.js maps its % position onto the same scale). */
+.vhist-now { position: absolute; right: 0; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--brand); box-shadow: 0 0 0 2.5px var(--card); transform: translate(50%, -50%); }
+.vhist-axis { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px;
+  font-size: 11.5px; color: var(--muted); }
+/* Gaps are named in words, not drawn as a shaded band: the count belongs with the axis, and a band
+   would read as a measured region. */
+.vhist-gap { color: var(--warn); }
+/* Idle time is NOT a warning — the compressor resting is the normal state of a heat pump for most
+   of a mild day. It stays --muted so the axis doesn't cry fault over a healthy unit; only a real
+   dropout (.vhist-gap) earns the attention colour. */
+.vhist-idle { color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .vdesc, .vrow-chev { transition: none; } }
 
 /* ── Forms ──────────────────────────────────────────────────────────────── */

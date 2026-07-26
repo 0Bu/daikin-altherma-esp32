@@ -434,9 +434,25 @@ Body, ordered:
    it draws actually changed — an unconditional rebuild would collapse a text selection mid-read.
    Nothing in this section hides when the X10A link drops (§8): the schematic and its inspector stay,
    blanked to "—" (item 1), because they carry the status block that says why.
-   **There is no trend/history card.** The firmware stores no history and a browser-side ring buffer
-   is lost on every reload, so a 30-minute sparkline could never answer a question a person actually
-   has — long-term analysis belongs to Home Assistant/Grafana, which hold the real series.
+   **There is no trend/history CARD** — but selected value rows carry a 24-hour trend inside their
+   explainer (§6). The original rule here refused history outright, on the premise that "the firmware
+   stores no history and a browser-side ring buffer is lost on every reload". The first half of that
+   premise no longer holds: the firmware keeps a fixed-cadence ring per trended row
+   (`logic/history.hpp`, served by `GET /history`), so the series survives a page reload and a second
+   browser. The second half still decides the *shape* of the feature — long-term analysis belongs to
+   Home Assistant/Grafana, which hold the real series across reboots and years. So: no card, no
+   dashboard-level charting, no range picker. One sparkline, in the panel of the row it belongs to,
+   for a day at a 5-minute raster. Three rules it inherits from the rest of this document:
+   - **The axis states the span actually held.** The rings are RAM (persisting them would be ~100k
+     NVS writes a year in the partition holding the WiFi credentials), so every `/set_*` and every
+     OTA empties them. A fresh device reads "Seit Neustart · 1 h", never a 24-hour axis padded with
+     absence.
+   - **A gap breaks the line.** A timed-out register or a value `reading_plausible()` refused is
+     drawn as a gap, never interpolated across — the same refusal the blanked pills make (item 3).
+   - **Idle is not a gap.** On the outdoor pages (0x20/0x21) a sample taken while the compressor
+     rests is stored as *held over*, not as the number the bus keeps returning, and the readout says
+     "Außeneinheit ruht" rather than "nicht gemessen". Without that, a mild day's outdoor-air trend
+     is a staircase of last-run values that reads exactly like weather.
 4. **Model card** — styled exactly like the value groups (§6), full-width below the live section:
    the model name (full-width heading) + detected capacity, from `detect{capacity_kw,
    capacity_kw_iu, model}`. Both are bus-derived, so they show **only while the link is live**
@@ -479,6 +495,17 @@ Body, ordered:
      (`S.descOpen`), not the DOM, so the per-poll rebuild of `#valueGroups` re-emits an expanded row
      open instead of collapsing it every second; the click toggles the live element so the slide
      animates, and updates the set for the next rebuild.
+     A row's **24-hour trend** (§5.3 item 3) lives in the same panel, below the explainer text and
+     separated by a rule — text first, then evidence. Scrubbing it is the one interaction that
+     **suspends** the per-poll rebuild outright (`S.scrub`), because re-emitting the panel under an
+     active pointer drops pointer capture and kills the gesture mid-drag. Re-emitting an open state
+     is enough for the accordion; it is not enough for a drag. This is the dashboard's counterpart to
+     the Settings cards' dropdown-focus guard (§5.6) and carries the same obligation: a suspended
+     rebuild must be **impossible to leave suspended** — a `pointerdown` whose `pointerup` never
+     arrives would otherwise freeze every value row indefinitely, which reads as a dead device with
+     no error anywhere. `lostpointercapture` covers the normal exits including DOM removal, and a
+     watchdog covers the rest. The row's own value stalls for the seconds the finger is down and
+     catches up on release; that is the accepted cost, and the only one.
 
 There is **no** health/badge strip: connectivity and board identity live in Settings behind the gear
 (§5.6, which marks the gear when a link is down), operation/fault in the schematic's own status

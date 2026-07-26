@@ -35,6 +35,7 @@
 #include "logic/mqtt_group.hpp"
 #include "logic/link_watch.hpp"
 #include "logic/feature_gate.hpp"
+#include "logic/history.hpp"
 #include "logic/lwt_select.hpp"
 #include "logic/profile_view.hpp"
 #include "logic/ou_stale.hpp"
@@ -3443,6 +3444,267 @@ static void test_ou_stale() {
     CHECK(rp_rows > 0);          // the at-rest high-side fallback exists in the catalog
 }
 
+// ── logic/history.hpp — the 24-hour trend buffers ─────────────────────────────────────────────
+// Two things are gated here, and the second is why the outdoor-air trend is not just "the DHW one
+// with another label": (a) a trend resolves to a real MEASUREMENT on the right page across the whole
+// catalog, and (b) a sample taken while the outdoor unit is asleep is stored as HELD_OVER, not as
+// the number the bus returned. Without (b) a summer day's outdoor-air trend is a staircase of
+// last-run values that reads exactly like weather.
+static void test_history() {
+    using namespace logic;
+
+    // --- the R1T collision, which is the whole reason a trend states a PAGE ---------------------
+    // "(R1T)" names the outdoor air sensor on page 0x20 AND the leaving-water sensor on the indoor
+    // side (lwt_select keys on that very tag). A token-only match would let one resolve to the
+    // other; the page class is what keeps them apart.
+    {
+        const char* labels[] = { "Leaving water temp. before BUH (R1T)", "R1T-Outdoor air temp." };
+        const unsigned regs[] = { 0x61,                                   0x20 };
+        const TrendDef* oa = trend_by_id("outdoor_air");
+        CHECK(oa != nullptr);
+        CHECK(trend_select(*oa, labels, regs, 2) == 1);          // the 0x20 row, never the 0x61 one
+        // …and the same row on a hydronic page is refused outright rather than trended as outdoor air.
+        const unsigned wrong[] = { 0x61, 0x61 };
+        CHECK(trend_select(*oa, labels, wrong, 2) == -1);
+    }
+
+    // --- a trend is a measurement, never a target (issue #121's rule) ---------------------------
+    {
+        const TrendDef* dhw = trend_by_id("dhw_tank");
+        CHECK(dhw != nullptr);
+        const char* only_sp[] = { "DHW tank setpoint" };
+        const unsigned r_sp[]  = { 0x61 };
+        CHECK(trend_select(*dhw, only_sp, r_sp, 1) == -1);       // a flat 48 °C line would look healthy
+        const char* both[] = { "DHW tank setpoint", "DHW tank temp. (R5T)" };
+        const unsigned r_b[] = { 0x61, 0x61 };
+        CHECK(trend_select(*dhw, both, r_b, 2) == 1);            // the setpoint sorts first and loses
+    }
+
+    CHECK(trend_by_id("nope") == nullptr);                       // unknown id -> 404, never a default
+    CHECK(trend_by_id(nullptr) == nullptr);
+    CHECK(trend_by_id("dhw_tan") == nullptr);                    // prefix is not a match
+    CHECK(trend_by_id("dhw_tank_x") == nullptr);
+
+    // --- what gets STORED --------------------------------------------------------------------
+    // The held-over test wins over everything: the bus DID answer, and hp_format DID produce a
+    // plausible value — that is exactly what makes this failure invisible without the page rule.
+    CHECK(history_store(true, 235, 0x20, /*known=*/true, /*running=*/false) == HISTORY_HELD_OVER);
+    CHECK(history_store(true, 235, 0x20, /*known=*/true, /*running=*/true)  == 235);
+    CHECK(history_store(true, 235, 0x20, /*known=*/false, /*running=*/false) == 235);  // unknown != stopped
+    CHECK(history_store(true, 416, 0x61, /*known=*/true, /*running=*/false) == 416);   // hydronic stays live
+    CHECK(history_store(false, 0, 0x61, true, true) == HISTORY_NO_READING);
+    CHECK(history_is_absent(HISTORY_NO_READING));
+    CHECK(history_is_absent(HISTORY_HELD_OVER));
+    CHECK(!history_is_absent(0));                 // 0.0 °C is a READING, not an absence
+    CHECK(!history_is_absent(-400));              // and so is -40.0 °C
+
+    // --- the compressor witness ----------------------------------------------------------------
+    {
+        const char* rows[] = { "R1T-Outdoor air temp.", "INV frequency (rps)" };
+        const unsigned regs[] = { 0x20,                  0x30 };
+        CHECK(trend_rps_row(rows, regs, 2) == 1);
+        // A witness on a FROZEN page is no witness: it would qualify the very readings it is read
+        // from. Refused rather than trusted (belt to ou_stale's catalog braces).
+        const unsigned bad[] = { 0x20, 0x21 };
+        CHECK(trend_rps_row(rows, bad, 2) == -1);
+        const char* none[] = { "Leaving water temp." };
+        const unsigned r1[] = { 0x61 };
+        CHECK(trend_rps_row(none, r1, 1) == -1);          // absent -> UNKNOWN, and unknown keeps storing
+    }
+
+    // --- bucket math ---------------------------------------------------------------------------
+    // The ring advances on the MONOTONIC clock; a wall-clock bucket would leap on the first SNTP
+    // sync of every boot.
+    CHECK(history_bucket(0) == 0);
+    CHECK(history_bucket(299'999'999LL) == 0);
+    CHECK(history_bucket(300'000'000LL) == 1);
+    CHECK(history_bucket(24LL * 3600 * 1000000) == HISTORY_SAMPLES);   // a full day later
+    // Skipped-bucket arithmetic: adjacent buckets skip NOTHING (the once-per-5-min common case), and
+    // a non-advancing clock yields 0 rather than an unsigned wrap-around that would blank the ring.
+    CHECK(history_skipped(5, 6) == 0);
+    CHECK(history_skipped(5, 7) == 1);
+    CHECK(history_skipped(0, 10) == 9);
+    CHECK(history_skipped(5, 5) == 0);
+    CHECK(history_skipped(6, 5) == 0);            // never 0xFFFFFFFF
+
+    // --- held-run encoding ---------------------------------------------------------------------
+    {
+        uint16_t runs[8][2];
+        const HistorySample a[] = { 100, HISTORY_HELD_OVER, HISTORY_HELD_OVER, 120,
+                                    HISTORY_NO_READING, HISTORY_HELD_OVER };
+        size_t n = history_held_runs(a, 6, runs, 8);
+        CHECK(n == 2);
+        CHECK(runs[0][0] == 1 && runs[0][1] == 2);
+        CHECK(runs[1][0] == 5 && runs[1][1] == 1);        // a NO_READING breaks a held run, not joins it
+        // Boundaries: a run that starts at 0 and one that runs to the end.
+        const HistorySample b[] = { HISTORY_HELD_OVER, HISTORY_HELD_OVER };
+        CHECK(history_held_runs(b, 2, runs, 8) == 1);
+        CHECK(runs[0][0] == 0 && runs[0][1] == 2);
+        const HistorySample c[] = { 10, 20 };
+        CHECK(history_held_runs(c, 2, runs, 8) == 0);     // nothing held -> no runs, not one empty run
+        // A full alternating series must fit — HISTORY_MAX_RUNS is sized for exactly this.
+        static HistorySample alt[HISTORY_SAMPLES];
+        static uint16_t big[HISTORY_MAX_RUNS][2];
+        for (size_t i = 0; i < HISTORY_SAMPLES; i++) alt[i] = (i % 2) ? HISTORY_HELD_OVER : 200;
+        CHECK(history_held_runs(alt, HISTORY_SAMPLES, big, HISTORY_MAX_RUNS) == HISTORY_SAMPLES / 2);
+    }
+
+    // --- parsing the cache's formatted value back to tenths --------------------------------------
+    {
+        int v = -1;
+        CHECK(history_parse_tenths("41.6", v) && v == 416);
+        CHECK(history_parse_tenths("-7.5", v) && v == -75);
+        CHECK(history_parse_tenths("0.0", v) && v == 0);
+        CHECK(history_parse_tenths("23", v) && v == 230);        // no decimal point is still a number
+        // The one that matters: a bit-flag row publishes ON/OFF, and a bare strtof would read "ON"
+        // as 0 and draw a confident 0.0 °C line through the trend.
+        CHECK(!history_parse_tenths("ON", v));
+        CHECK(!history_parse_tenths("OFF", v));
+        CHECK(!history_parse_tenths("U4", v));                   // a fault code
+        CHECK(!history_parse_tenths("", v));                     // nothing decoded this cycle
+        CHECK(!history_parse_tenths(nullptr, v));
+        // Must not collide with the absence sentinels, which sit at the very bottom of int16:
+        // -32768 is NO_READING and -32767 is HELD_OVER, so -3276.6 is the first real reading below
+        // them. (These are also the ±3276.x "no data" sentinels the X10A units themselves emit —
+        // issue #35-#39 — which reading_plausible() already refuses upstream; this is the belt.)
+        CHECK(!history_parse_tenths("-3276.8", v));              // == HISTORY_NO_READING
+        CHECK(!history_parse_tenths("-3276.7", v));              // == HISTORY_HELD_OVER
+        CHECK(history_parse_tenths("-3276.6", v) && v == -32766); // …the first one that is a reading
+        CHECK(!history_parse_tenths("nan", v));
+        CHECK(!history_parse_tenths("inf", v));
+
+        // ROUND-TRIP EXACTNESS, asserted rather than assumed. The stored sample must equal the value
+        // the device published, for every 0.1 step across the plausible range — hp_convert writes
+        // "%.1f" and this reads it back, and a float that landed one ULP low would truncate to the
+        // wrong tenth and shift a whole chart by 0.1 °C with nothing to show it. ±200 °C is
+        // reading_plausible()'s own window, so this covers everything that can reach a trend.
+        int mismatches = 0;
+        for (int tenths = -2000; tenths <= 2000; tenths++) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%.1f", tenths / 10.0);
+            int back = INT32_MIN;
+            if (!history_parse_tenths(buf, back) || back != tenths) mismatches++;
+        }
+        CHECK(mismatches == 0);
+    }
+
+    // --- the ring ------------------------------------------------------------------------------
+    {
+        TrendRing r;
+        CHECK(r.snapshot(nullptr, 0) == 0);            // empty ring reads out nothing
+        static HistorySample out[HISTORY_SAMPLES + 4];
+
+        // Folding: a real reading beats absence whenever it arrives in the bucket, a later reading
+        // beats an earlier one, and absence keeps the LAST reason.
+        r.fold(HISTORY_NO_READING);
+        r.fold(250);
+        r.fold(HISTORY_HELD_OVER);                     // absence must NOT overwrite a measurement
+        CHECK(r.pending == 250);
+        r.fold(260);
+        CHECK(r.pending == 260);
+        r.commit(0);
+        CHECK(r.snapshot(out, 4) == 1 && out[0] == 260);
+        CHECK(r.pending == HISTORY_NO_READING);        // the next bucket starts empty
+
+        r.fold(HISTORY_NO_READING);
+        r.fold(HISTORY_HELD_OVER);                     // last reason wins when nothing was measured
+        r.commit(0);
+        CHECK(r.snapshot(out, 4) == 2 && out[1] == HISTORY_HELD_OVER);
+
+        // Skipped buckets are FILLED, not compressed: a dead bus must not slide the earlier samples
+        // forward in time. Three skipped -> three NO_READING between the commits.
+        r.fold(300);
+        r.commit(3);
+        CHECK(r.snapshot(out, 8) == 6);
+        CHECK(out[2] == 300);
+        CHECK(out[3] == HISTORY_NO_READING && out[4] == HISTORY_NO_READING && out[5] == HISTORY_NO_READING);
+    }
+    {
+        // Wrap-around: fill past capacity and the readout must still be oldest-first, dropping only
+        // the samples that actually fell off the back.
+        TrendRing r;
+        for (int i = 0; i < static_cast<int>(HISTORY_SAMPLES) + 5; i++) { r.fold(static_cast<HistorySample>(i)); r.commit(0); }
+        static HistorySample out[HISTORY_SAMPLES];
+        CHECK(r.snapshot(out, HISTORY_SAMPLES) == HISTORY_SAMPLES);
+        CHECK(out[0] == 5);                                   // 0..4 aged out
+        CHECK(out[HISTORY_SAMPLES - 1] == static_cast<HistorySample>(HISTORY_SAMPLES + 4));
+        for (size_t i = 1; i < HISTORY_SAMPLES; i++) CHECK(out[i] == out[i - 1] + 1);   // monotonic, no seam
+        // A snapshot smaller than the ring takes the OLDEST n, which is what keeps the caller's
+        // time axis anchored at t0 rather than silently shifting it.
+        static HistorySample few[10];
+        CHECK(r.snapshot(few, 10) == 10 && few[0] == 5);
+        // reset() really empties it — a model change must not leave the previous unit's tail behind.
+        r.reset();
+        CHECK(r.snapshot(out, HISTORY_SAMPLES) == 0);
+    }
+    {
+        // A skip larger than the whole ring must not run away: it fills at most one full ring.
+        TrendRing r;
+        r.fold(100);
+        r.commit(100000);
+        static HistorySample out[HISTORY_SAMPLES];
+        CHECK(r.snapshot(out, HISTORY_SAMPLES) == HISTORY_SAMPLES);
+        for (size_t i = 0; i < HISTORY_SAMPLES; i++) CHECK(out[i] == HISTORY_NO_READING);  // 100 aged out
+    }
+
+    // --- catalog conformance ------------------------------------------------------------------
+    // Every detectable profile must resolve each trend to a row whose page matches its class, and
+    // the two trends must never land on the same row. A generated profile that renamed the tank row
+    // or moved outdoor air off 0x20 has to fail here, not on someone's dashboard.
+    int checked = 0, dhw_found = 0, oa_found = 0;
+    for (const auto& p : def::profiles) {
+        if (!def::is_detection_model(p.id)) continue;
+        const char* labels[512];
+        unsigned    regs[512];
+        size_t n = p.count < 512 ? p.count : 512;
+        for (size_t i = 0; i < n; i++) { labels[i] = p.values[i].label; regs[i] = p.values[i].reg; }
+
+        const int dhw = trend_select(*trend_by_id("dhw_tank"), labels, regs, n);
+        const int oa  = trend_select(*trend_by_id("outdoor_air"), labels, regs, n);
+        CHECK(dhw < 0 || oa < 0 || dhw != oa);                   // never the same row
+        if (dhw >= 0) {
+            dhw_found++;
+            CHECK(!ou_page_holds_over(regs[dhw]));               // the tank is resampled every cycle
+            CHECK(!lwt_ci_contains(labels[dhw], "setpoint"));
+        }
+        if (oa >= 0) {
+            oa_found++;
+            CHECK(ou_page_holds_over(regs[oa]));                 // …and outdoor air is not
+            // The load-bearing consequence: because it sits on a frozen page, EVERY sample of this
+            // trend has to pass through the held-over gate. Asserted as the rule, not as a habit.
+            CHECK(history_store(true, 190, regs[oa], true, false) == HISTORY_HELD_OVER);
+            // It must never be the row lwt_select would pick for leaving water.
+            CHECK(!lwt_is_measurement(labels[oa]));
+        }
+        checked++;
+    }
+    CHECK(checked >= 39);        // the detectable Altherma catalog (mirrors test_lwt_select/ou_stale)
+    // Every trend must resolve to ONE unit across the whole catalog. The route reports the row's own
+    // unit rather than a hardcoded "°C" (it prints straight into the chart's range readout and the
+    // crosshair), so a trend whose rows disagree about their `type` code would label some models'
+    // charts wrongly — the #35-#39 shape, and invisible because every number would still look fine.
+    // Measured today: both trends are conv 105 / size 2 / type 1 on every profile.
+    for (size_t t = 0; t < TREND_COUNT; t++) {
+        int unit_type = -1;
+        for (const auto& p : def::profiles) {
+            if (!def::is_detection_model(p.id)) continue;
+            for (size_t i = 0; i < p.count; i++) {
+                if (!trend_row_matches(TRENDS[t], p.values[i].label, p.values[i].reg)) continue;
+                if (unit_type < 0) unit_type = p.values[i].type;
+                CHECK(p.values[i].type == unit_type);       // one trend, one unit
+                CHECK(p.values[i].size == 2);               // …and one width, so the tenths are exact
+            }
+        }
+        CHECK(unit_type == 1);      // both shipped trends are °C; a new one may differ, but say so here
+    }
+
+    // Measured over the current catalog: BOTH rows resolve on every one of the 44 profile tables,
+    // so these bounds are real coverage rather than a token non-zero. A trend that silently stopped
+    // resolving on half the catalog would still be "working" on the author's own unit.
+    CHECK(oa_found >= checked);
+    CHECK(dhw_found >= checked);
+}
+
 // ── ValueDef::no_publish — the detect-only row flag ───────────────────────────────────────────
 // The 0x64 hybrid/boiler page is absent-feature on a non-hybrid monobloc/hydrobox: the unit ANSWERS
 // the page, but every value on it is a placeholder (2nd DHW -40.4 °C, "Boiler only", Mixed water
@@ -3676,6 +3938,7 @@ int main() {
     test_http_surface();
     test_lwt_select();
     test_ou_stale();
+    test_history();
     test_no_publish();
     test_config_model();
     test_board_pins();

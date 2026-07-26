@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1247 checks) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1329 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -69,6 +69,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 39 | **Stack-overflow watchpoint** — a hardware watchpoint on every task's stack limit, so the *first* write past it panics at the offending instruction instead of corrupting a neighbour silently. IDF's default canary is only compared at a context switch and a sparsely-writing frame can step over it — which is how a v1.0.12 `httpd` overflow overwrote its own TCB and died 44 s later in unrelated lwip code. Shipped with the `httpd` stack raised to 12 KB and the `/status` and `/values` JSON built by `+=` rather than long `+` chains | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults), [`http_server.cpp`](../main/http_server.cpp), [`http_status.cpp`](../main/http_status.cpp) |
 | 40 | **Cost-shaped CI** — Actions bills per job rounded up to the whole minute, so the three fast gates are one job, the firmware build is *skipped* (not failed) when nothing the image or the site is made of changed, ccache is carried across runs, the per-PR preview installer is retired in favour of the dev channel, and every job has a timeout | ✅ | [`build.yml`](../.github/workflows/build.yml), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 41 | **Protection-retry telemetry** — the outdoor unit's page-`0x10` protection words (5 retry counters + 6 drop-control flags) reach MQTT/Home Assistant as 11 entities. The signal a unit is quietly backing off to protect itself while still meeting demand — degradation with no temperature tell. Converter 310 shipped earlier with no catalog row to decode; the rows now come from a **temporary** hand-written supplement applied only to a page the detected model already reads, so it cannot move model detection or add a bus round-trip, and they are cross-checked against [`REGISTERS.md`](REGISTERS.md) §5 by the domain audit like generated rows | ✅ 🧪 | [`def/overlay.hpp`](../main/def/overlay.hpp), [`logic/profile_view.hpp`](../main/logic/profile_view.hpp), [`logic/convert.hpp`](../main/logic/convert.hpp) |
+| 42 | **24-hour trend rings** — a fixed-cadence (5 min × 288) `int16` ring per trended row, in `.bss` rather than the heap (the binding limit here is the largest *contiguous* block, and a static array does not compete for it: 1152 B of ring for two trends, **1317 B measured** with their labels, units and counters). Served by chunked `GET /history` and drawn as a sparkline inside the value row's own explainer. Two absences are **distinguished**, because conflating them misattributes one to the other: a register that did not answer vs. the outdoor unit **resting** — pages `0x20`/`0x21` keep answering with the last run's numbers, so an ungated ring fills a mild day's outdoor-air trend with a staircase that reads exactly like weather. Adding a trend is one row in `TRENDS`; a trend states a page *class*, not just a label token, because `(R1T)` names both the outdoor air inlet and the indoor leaving-water sensor. The route reports each row's **own unit** rather than a hardcoded `°C`, and a catalog guard pins that a trend resolves to one `type` code (and one width, which is what makes the tenths exact) across every profile — a bar row charted as °C would be the #35–#39 shape | ✅ 🧪 | [`logic/history.hpp`](../main/logic/history.hpp), [`history.cpp`](../main/history.cpp), [`http_status.cpp`](../main/http_status.cpp) |
 
 ---
 
@@ -457,6 +458,20 @@ entered exactly like a visible one.
   [`config.cpp`](../main/config.cpp) — take it through an RAII `Lock` that releases on unwind.
 - **✅ Chunked core-dump streaming** (`GET /coredump`): the flash core-dump image is streamed in 512-byte
   chunks, never buffered whole.
+- **✅ Chunked trend series** (`GET /history?row=<trend id>`): one trended row's 24-hour ring, flushed
+  every 64 samples so the peak string stays a few hundred bytes rather than the whole ~1.1 kB body.
+  Four decisions are worth naming. The `unit` is the **row's own**, read from the cached value rather
+  than hardcoded — both shipped trends are temperatures, but the `TRENDS` table exists to be extended
+  and the browser prints this string into the range readout and the crosshair.
+  The samples are **tenths as plain integers** — the resolution the
+  converters produce, so a stored sample is exact rather than rounded on the way in, and the body is
+  a third shorter than formatted decimals. The nulls carry their reason **alongside** rather than
+  inside: `v` stays a number-or-null array any consumer can read, and `held` run-length-marks which
+  nulls were the outdoor unit resting. And `t0` — the wall-clock instant of sample 0 — is derived at
+  **serve** time from the current clock and the sample count, because the ring advances on the
+  *monotonic* clock and so survives SNTP setting the time mid-boot; it is **omitted** when the clock
+  has never synced, so the UI reads out an age instead of a fabricated timestamp. An unknown trend id
+  is a 404, never a defaulted series.
 
 ---
 
@@ -812,11 +827,26 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   had just refused it. Its gate is the row's **register page**, which `/values` carries as `reg`, so
   it applies `ou_page_holds_over()` itself instead of a label list that would be a second, drifting
   copy of a rule gated here in C++; a held headline replaces the entry's state sentence with the
-  reason it is blank), and the **raw-page hex rendering** (`hexdump.hpp` — the wire bytes of pages
+  reason it is blank), the **24-hour trend rules** (`history.hpp` — which rows carry a trend, when a
+  stored sample is a measurement rather than a repeat of one, and the ring itself. A trend states a
+  page *class* and not just a label token, because `(R1T)` names two unrelated sensors in this
+  catalog — the outdoor unit's air inlet on `0x20` and the indoor leaving-water sensor `lwt_select`
+  keys on by that very tag — so a token-only match would resolve one to the other and draw the
+  #35–#39 shape as a 24-hour chart. `history_store` **composes** `ou_reading_held_over` rather than
+  restating it, so a change to which pages freeze reaches the trends automatically; that is what
+  keeps a mild day's outdoor-air trend from filling with a staircase of last-run values. The **ring**
+  lives here rather than in `history.cpp` because bucket folding, wrap-around and skipped-bucket
+  filling are exactly the off-by-one that surfaces as a subtly wrong chart weeks later, and a rule in
+  a `.cpp` can only be verified on the device — skipped buckets are *filled* (`history_skipped()`),
+  never compressed, since compressing them slides every earlier sample forward in time and mislabels
+  the whole curve, and that count is an off-by-one with no visible symptom. The
+  value parse is here for the same reason: a bit-flag row publishes `"ON"`, and a bare `strtof` would
+  read that as 0 and draw a confident 0.0 °C line — its exactness is pinned by a round-trip over every
+  0.1 step across `reading_plausible()`'s own ±200 °C window), and the **raw-page hex rendering** (`hexdump.hpp` — the wire bytes of pages
   `0x00`/`0x10`/`0x20`/`0xA0`/`0xA1` on `/diag`; truncation stops after the last *complete* byte, since a trailing
   nibble would read as a different value, and degenerate inputs still terminate the buffer the caller
   hands to a `diag_printf` `%s`).
-  **1247 `CHECK`s** in
+  **1329 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -1025,7 +1055,7 @@ and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 19-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1247 checks),
+on the host** (1329 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

@@ -88,7 +88,7 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
                       unwinding through esp_http_server's C frames to std::terminate → reboot.
                       /events is the deliberate exception (raw registration for the WebSocket; it
                       self-guards its own JSON build instead)
-http_status.cpp     → GET / (web UI), /status, /values, /models, /diag, /scan, /coredump, and the
+http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /diag, /scan, /coredump, and the
                       /events WebSocket (live status/values push with shared-payload, bounded
                       in-flight backpressure via logic/ws_tx_gate.hpp)
 http_config.cpp     → POST /set_wifi, /set_mqtt, /set_syslog, /set_ntp, /set_hp, /detect
@@ -541,8 +541,17 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    itself never touches shared state: the readers (`hp_stats()`) copy `s_stats` under the same
    mutex, so an unlocked mid-sweep write to `last_error` would free a `std::string` buffer under a
    reader. See *Memory constraints* for why the commit must also stay non-allocating.
-4. Sleep `POLL_INTERVAL_S` (fixed 1 s — see `config.cpp`). The MQTT bridge and HTTP `/values` read
-   the cache; they never touch the UART.
+4. Feed the **24-hour trend rings** (`history_record()`, `history.cpp`) — *before* that commit and
+   *outside* the cache mutex, while this cycle's values are still the task's own. `history.cpp` takes
+   its own lock; holding both would create a two-mutex order this file has no other reason to have.
+   Cheap by construction: it resolves the trended rows, folds one sample into each open 5-minute
+   bucket, and only writes a ring when a bucket boundary is crossed. The fold is where the
+   held-over rule earns its place — a sample taken while the compressor rests is stored as *held
+   over*, not as the number the frozen outdoor page keeps returning (`logic/history.hpp`,
+   composing `logic/ou_stale.hpp`).
+5. Sleep `POLL_INTERVAL_S` (fixed 1 s — see `config.cpp`). The MQTT bridge and HTTP `/values` read
+   the cache; they never touch the UART. The trends are **not** published to MQTT — they exist for
+   the web UI, and Home Assistant already records its own history for every entity.
 
 Config changes from the web UI (`/set_hp`) apply live: the task rereads `config` at the top of the
 next cycle (pins/protocol changes re-init the UART). No reboot needed for model/pins — only
