@@ -306,8 +306,6 @@ jobs:
       # Restored on every run, SAVED only from main: a PR can read the base branch's cache but its
       # own write would be scoped to that PR's ref and thrown away when it closes — spending upload
       # time per PR push to warm a cache nothing else can read.
-      # (The two cache actions carry a version tag, not a digest, unlike every other action here —
-      # Renovate's helpers:pinGitHubActionDigests preset pins them on its next run.)
       - name: Restore ccache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
