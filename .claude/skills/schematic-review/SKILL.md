@@ -132,3 +132,31 @@ local gates; if the audit itself grew a rule, say so where the gate is described
 Report findings grouped by the sections above, then **apply the fixes**. Block the merge on: any
 live audit finding, a reading attributed to a part that does not measure it, a new pill that cannot
 blank when its page goes stale, or a ledger entry added to quiet a finding this change created.
+
+## Recording the pass (merge gate — no file marker)
+
+`require-schematic-review.sh` refuses a PR merge (`gh pr merge` **and**
+`mcp__github__merge_pull_request`) until this review is recorded in the PR body as a ticked,
+SHA-stamped checkbox whose stamp still matches the PR head. It is **conditional**, like
+`/feature-docs` and unlike `/project-review` and `/domain-review`: it fires when the PR reaches the
+drawing, its contract, or the tools that judge it — **including this file**, so changing what the
+review asks means putting the new questions to the current drawing before it lands. The regex in
+`.claude/hooks/require-schematic-review.sh` is the one definition of that set; this page deliberately
+does not repeat it.
+
+That filter is defensible here in a way it deliberately is **not** for `/domain-review`, and the
+difference is the point: a value's meaning can change from almost anywhere — #35–#39 reached Home
+Assistant through the ordinary discovery path — while the drawing is one inline SVG, one stylesheet
+and one binding table. If that ever stops being true, the regex must grow with it, or it will quietly
+opt exactly the risky PRs out.
+
+When the review passes with **no blocking findings**, tick + stamp it with the reviewed commit:
+
+```
+- [x] `/schematic-review` clean — merge gate @ <short-sha>    # <short-sha> = git rev-parse --short=12 HEAD
+```
+
+Edit the PR body with `gh pr edit <pr> --body-file <file>` (or the GitHub MCP update tool in
+web/remote). Any later commit re-stales the stamp, forcing a fresh review. Don't tick it if findings
+block the merge — fix first. The gate fails **closed**: if GitHub can't be read, the merge is
+blocked with guidance.

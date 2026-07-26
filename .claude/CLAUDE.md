@@ -93,7 +93,13 @@ read) are refused outright — and `tools/schematic/selftest.sh` re-seeds every 
 them. The judgement half is the `/schematic-review`
 skill: whether the drawing is still TRUE of the plant, whether a new part is in the right place and
 whether the copy is right in both languages is not mechanically decidable, and the audit stays quiet
-about it rather than guessing.
+about it rather than guessing. That half is now a **PR-merge gate** too — CONDITIONAL like
+`/feature-docs`, firing on a diff that reaches the drawing, its contract, or the tools that judge it
+(including the review's own checklist, so the gate is self-gating). The regex in
+`.claude/hooks/require-schematic-review.sh` is the ONLY definition of that set; read it there rather
+than trusting a list here, and grow it there if a schematic fragment ever moves. The filter is safe
+here for the reason it is NOT safe on `/domain-review`: a value's meaning can change from almost
+anywhere, but the drawing is one inline SVG, one stylesheet and one binding table.
 
 (Three more fast gates guard the PUBLISHED ARTIFACTS rather than the firmware —
 `scripts/run-pages-publish-tests.sh`, git-only, relevant when `scripts/publish-pages-branch.sh` or

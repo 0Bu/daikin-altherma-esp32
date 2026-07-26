@@ -88,10 +88,13 @@ return-run reading stays left of the junction). Findings that are correct as the
 (citing the decision — `docs/DESIGN.md` §5.3, a measurement) or a `KNOWN-DEFECT` (naming what is
 wrong, and deleted by its fix); `S001` (a tap target that opens nothing) and `E002` (a pill on a
 branch its sensor does not read) are refused outright. Touching the audit means running
-`tools/schematic/selftest.sh`, which re-seeds all six of those historical defects and asserts each is
-still caught. What it *cannot* decide — is the drawing still true of the plant, is a new part in the
-right place, is the German copy right — it stays quiet about; that half is the maintainer's
-`/schematic-review`.
+`tools/schematic/selftest.sh`, which re-seeds every one of those historical defects (one `run_case`
+each, so `grep -c run_case` is the count) and asserts each is still caught. What it *cannot* decide
+— is the drawing still true of the plant, is a new part in the right place, is the German copy right
+— it stays quiet about; that half is the maintainer's `/schematic-review`, which is a **merge gate**
+on any PR that reaches the drawing, its contract or the tools that judge it (the regex in
+`.claude/hooks/require-schematic-review.sh` is the one definition — it is maintainer tooling, so as
+an outside contributor you never run it; assume any change under `main/www/` needs it).
 
 Three more fast gates guard the **published artifacts** rather than the firmware, so most PRs never
 need them locally — run them if you touch
