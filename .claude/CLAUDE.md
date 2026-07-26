@@ -23,9 +23,17 @@ Builds for the **esp32s3** target only.
 > the (planned) read-only MCP surface is [`docs/MCP.md`](../docs/MCP.md). User-facing docs:
 > [`README.md`](../README.md), [`docs/README.md`](../docs/README.md),
 > [`docs/SECURITY.md`](../docs/SECURITY.md), [`docs/DESIGN.md`](../docs/DESIGN.md) (web-UI design
-> contract), [`docs/WIRING.md`](../docs/WIRING.md) (X10A wiring + picking RX/TX on other boards) and
+> contract), [`docs/WIRING.md`](../docs/WIRING.md) (X10A wiring + picking RX/TX on other boards),
 > [`docs/BOARDS.md`](../docs/BOARDS.md) (per-board hardware inventory + which parts the firmware
-> uses — the place a newly-supported board's LED/button/pin facts belong).
+> uses — the place a newly-supported board's LED/button/pin facts belong) and
+> [`docs/REPORTING.md`](../docs/REPORTING.md) (how an end user files a bug: ONE public issue
+> carrying both the story and the device's own report, because the DEVICE redacts the identifying
+> values first — `logic/redact.hpp` — so a second private channel would buy nothing and cost the
+> step where half-finished reports die. The single exception is a CORE DUMP: raw stack memory, where
+> a password of <=15 chars sits inline in its std::string by SSO, so it is never in the report and
+> is requested through the private advisory form only when the `last_crash` backtrace is not enough.
+> Plus the redaction table and the go-public checklist. The web UI's Settings→ESP32 "Report a bug"
+> action produces the report; `.claude/skills/bug-triage` consumes it).
 > Contributor-facing: [`CONTRIBUTING.md`](../CONTRIBUTING.md) (what the local gates
 > are, where logic goes, how PRs land on a strictly-linear `main`) and
 > [`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) — CONTRIBUTING states the outside-contributor half of
@@ -52,6 +60,7 @@ scripts/run-mock-tests.sh    # compile + run host logic tests in seconds (cmake 
 scripts/run-domain-audit.sh  # is the value catalog physically RIGHT? (the domain-correctness gate)
 scripts/run-description-audit.sh  # can the user find out what each value IS? (node-only)
 scripts/run-schematic-audit.sh    # does the DRAWING still say what it means? (node-only)
+scripts/run-redaction-audit.sh    # can a bug report still leak the USER's data? (python-only)
 ```
 
 The third is the same question one layer up from the second: the domain audit asks whether a
@@ -101,6 +110,21 @@ than trusting a list here, and grow it there if a schematic fragment ever moves.
 here for the reason it is NOT safe on `/domain-review`: a value's meaning can change from almost
 anywhere, but the drawing is one inline SVG, one stylesheet and one binding table.
 
+The FIFTH is the only gate here whose subject is the USER's data rather than the firmware's
+correctness. A bug report is filed as a PUBLIC GitHub issue carrying the device's own `/status`,
+`/values` and `/diag` (`docs/REPORTING.md`), which is defensible only because the device redacts
+first (`logic/redact.hpp`) — there is no private channel behind it and nobody reviews a report
+before it is posted. The `/diag` half of that redaction is an ALLOWLIST of named log statements, and
+an allowlist falls behind in silence: a new `diag_printf` interpolating a hostname or an SSID is
+simply not covered, and the symptom is a correct-looking log line with a real value in it. Nothing
+else here can see that — the firmware builds, every value is true, the drawing is right, and the
+report leaks. It flags a diag line whose ARGUMENTS carry a config or board-identity value with no
+matching rule (a heuristic on identifier names, not a proof — it catches the log line someone adds
+while debugging, not a value laundered through an unrelated local first), and on its first run it
+found `mqtt: retired legacy HA device %s` printing the unique half of the MAC that `/status` was
+redacting three sections above it. `tools/redact/audit_exceptions.txt` is its ledger and
+`tools/redact/selftest.sh` re-seeds both defects it was built for.
+
 (Three more fast gates guard the PUBLISHED ARTIFACTS rather than the firmware —
 `scripts/run-pages-publish-tests.sh`, git-only, relevant when `scripts/publish-pages-branch.sh` or
 `scripts/build-pages.sh` changes; `scripts/run-web-installer-plan-tests.sh`, python-only, the
@@ -114,10 +138,12 @@ list and falls back to the `version.txt` floor when it is empty, so a deleted ta
 the numbering — on 2026-07-24 it republished dev/ as 1.0.0-dev.168 over 1.0.14-dev.2, green. See
 CONTRIBUTING.md.)
 
-All seven are STEPS of CI's single `gates` job, which the firmware `build` job `needs` — not a job
-each (the version gate itself runs inside `build`, where the stamped version exists; only its tests
-are a `gates` step). Actions bills every JOB rounded up to a whole minute, so seven ~15 s jobs cost
-7 billed minutes for well under one minute of work. The same budget rule shapes the rest of
+Every one of them is a STEP of CI's single `gates` job, which the firmware `build` job `needs` — not
+a job each (the version gate itself runs inside `build`, where the stamped version exists; only its
+tests are a `gates` step). Count them with
+`grep -c 'run: \./\(scripts\|tools\)/' .github/workflows/build.yml` rather than trusting a number
+written here, which drifts the moment one is added. Actions bills every JOB rounded up to a whole
+minute, so N ~15 s jobs cost N billed minutes for well under one minute of work. The same budget rule shapes the rest of
 `.github/workflows/build.yml`, and it is worth knowing before editing it: the ~5-minute firmware
 build is SKIPPED (not failed — a skipped job still reports its check, which is why the gate is a
 per-job `if:` and never a workflow-level `paths-ignore:`) when the diff touches nothing the image
@@ -549,7 +575,7 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 config_store, discovery, ha_device, detect, history, json, mqtt_group, mqtt_uri, heartbeat, crashinfo,
                 bootlog, reset_reason, boot_guard, board_pins, board_presets, modbus, syslog_policy, link_watch,
                 wifi_rollback, health_gate, version_cmp, ota_manifest, ota_channel, ws_policy, ws_tx_gate,
-                http_body, http_surface, query_flag, mcp_jsonrpc, timestamp, uart_plan, detect_backoff,
+                http_body, http_surface, query_flag, redact, mcp_jsonrpc, timestamp, uart_plan, detect_backoff,
                 hexdump, led_pattern, button, captive,
                 lwt_select, ou_stale, profile_view, feature_gate).
                 error_codes.hpp = the optional code -> short-English-description lookup layered on
@@ -558,6 +584,20 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 so the domain audit still sees the converter's intrinsic semantics, and an unknown
                 code falls through to the bare code rather than inventing a description
                 (docs/REGISTERS.md §"error codes", docs/HOME_ASSISTANT.md).
+                redact.hpp = what a diagnostic snapshot must NOT carry when it leaves the device,
+                for GET /status?redact=1 + GET /diag?redact=1 (the web UI's "Report a bug" action,
+                docs/REPORTING.md). In the DEVICE rather than in www/app.js because the browser
+                button, the curl fallback in the guide and anything later all need one answer, and
+                the copy that silently stops covering a newly-added field is the one that leaks it.
+                Two shapes, because the routes leak differently: /status leaks by FIELD (seven named
+                values, substituted where each is WRITTEN — a post-processing pass over the finished
+                JSON is what the httpd stack budget has no room for), /diag leaks by LINE, which is
+                the non-trivial half the CHECKs are about. It FAILS CLOSED: a rule whose end token is
+                missing (a line the ring truncated mid-value — exactly when a value sits
+                unterminated at the end) redacts to the end of the line rather than giving up,
+                while the trailing newline is preserved so the ring's line structure survives. The
+                VALUE is replaced and the KEY kept, since a dropped field forges an "older build"
+                signal that bug-triage reads as evidence
                 captive.hpp = the captive-portal reply policy for the ONE catch-all route ("/*"):
                 in SETUP mode an unmatched GET is a 302 to CAPTIVE_PORTAL_URI, in STA mode it is the
                 dashboard's SPA shell. The portal only auto-pops if the joining OS's connectivity
@@ -1102,7 +1142,19 @@ GET  /models      pin hint + catalog metadata (def/models_catalog.hpp). Detectio
                   web UI never fetches it, and the RX/TX dropdown takes its GPIOs from
                   /status.pins_avail (logic/board_pins.hpp), NOT from this pin_hint. Legacy metadata
                   behind a read-only inspection endpoint for humans/scripts
-GET  /diag[?verbose=0|1][?clear=1]   in-memory diag log
+GET  /diag[?verbose=0|1][?clear=1][?redact=1]   in-memory diag log. ?redact=1 scrubs the handful of
+                  lines that interpolate a host/IP/SSID (logic/redact.hpp) and switches the response
+                  to CHUNKED: a replacement is longer than most values it replaces, so the redacted
+                  text can GROW past the static dump buffer, and the alternatives are a second ~8 KB
+                  .bss buffer or a ~6 KB contiguous heap allocation
+GET  /status?redact=1   the bug-report form of /status: the seven reporter-identifying values
+                  (wifi.ssid/ip/bssid/mac, mqtt.broker, syslog.host, ntp.server) read "<redacted>".
+                  The KEY is always emitted — an omitted field is indistinguishable from an older
+                  build that never had it, and "which build produced this?" is the first question a
+                  frozen report must answer. Substituted where each value is WRITTEN, never as a
+                  pass over the finished string (the httpd stack budget that v1.0.12 overflowed).
+                  The WS broadcast + subscription snapshot are never redacted — they feed the
+                  dashboard, which legitimately shows the SSID and the broker
 GET  /scan        WiFi scan {"networks":[{ssid,rssi}]} — TRUSTED-LAN ONLY and read by NO shipped
                   client: the setup portal takes a TYPED SSID (no dropdown, no fetch), so this is a
                   humans/scripts diagnostic like /models, not part of the provisioning surface

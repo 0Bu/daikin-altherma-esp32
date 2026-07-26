@@ -1,11 +1,14 @@
 blank_issues_enabled: true
 contact_links:
-  - name: Contributing guide
-    url: https://github.com/0Bu/daikin-altherma-esp32/blob/main/CONTRIBUTING.md
-    about: What's most useful to report, the two local verification scripts, and how PRs land (squash onto a strictly-linear main).
+  - name: How to report a bug (read this first)
+    url: https://github.com/0Bu/daikin-altherma-esp32/blob/main/docs/REPORTING.md
+    about: The two steps — a public issue for what goes wrong, and a private report for the device data. Your device prepares both.
   - name: Report a security vulnerability (private)
     url: https://github.com/0Bu/daikin-altherma-esp32/security/advisories/new
-    about: Anything exploitable goes here, not in a public issue. Non-sensitive hardening ideas are fine as normal issues.
+    about: Anything exploitable goes here, not in a public issue. Non-sensitive hardening ideas are fine as normal issues. Also where a core dump is sent, if one is ever asked for.
+  - name: Contributing guide
+    url: https://github.com/0Bu/daikin-altherma-esp32/blob/main/CONTRIBUTING.md
+    about: What's most useful to report, the local verification scripts, and how PRs land (squash onto a strictly-linear main).
   - name: Architecture & internals
     url: https://github.com/0Bu/daikin-altherma-esp32/blob/main/docs/ARCHITECTURE.md
     about: Poll engine, value profiles, MQTT/HA bridge, WiFi reconnect, OTA — read before filing a "how does X work?" issue.

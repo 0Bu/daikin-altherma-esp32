@@ -154,6 +154,18 @@ jobs:
       - name: Verify the schematic audit still has teeth
         run: ./tools/schematic/selftest.sh
 
+      # Redaction coverage. A bug report is a PUBLIC issue carrying the device's own /status and
+      # /diag (docs/REPORTING.md), which is only defensible because the device scrubs them first —
+      # and the /diag half of that scrubbing is an ALLOWLIST of named log statements. A new
+      # diag_printf interpolating a hostname or an SSID is simply not covered, and the symptom is a
+      # correct-looking log line with a real value in it: no error, no failing test, nothing to
+      # notice. This is the only gate here whose subject is the USER's data rather than the
+      # firmware's correctness. python3 only, seconds long.
+      - name: Audit the diag redaction coverage
+        run: ./scripts/run-redaction-audit.sh
+      - name: Verify the redaction audit still has teeth
+        run: ./tools/redact/selftest.sh
+
       # The gh-pages publish is the LAST step of the build job below, after ~5 minutes of firmware
       # work — so when it breaks, it breaks expensively and at the worst moment. It is also the one
       # step with a concurrency hazard: two publishers (the release root and every merge's dev

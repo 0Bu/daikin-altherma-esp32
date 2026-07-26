@@ -1,96 +1,216 @@
+# A whole bug report, in one public issue. The device data goes in here too, because the device
+# REDACTS it first (logic/redact.hpp — the network name, addresses, broker and server names are
+# replaced before it ever leaves the board), so there is nothing left that needs a private channel
+# and a second step is a second place for a report to die half-finished.
+#
+# The ONE exception is a core dump: it is raw task-stack memory, and a short password can sit in a
+# std::string's inline buffer there, which no field-level redaction can reach. It is never asked for
+# up front — /status.last_crash already carries reason, task, PC and backtrace — and when it is
+# genuinely needed it is requested privately. See docs/REPORTING.md.
+#
+# The field LABELS below are a parsing contract: GitHub renders each answer under "### <label>" and
+# the `id` never reaches the issue body, so .claude/skills/bug-triage keys on the label text.
+# Renaming a label is a breaking change — bump the form-vN label in `labels:` when you do.
+#
+# Prefilled by the device: the web UI's Settings -> ESP32 -> "Report a bug" opens this form with
+# summary and fw_version already filled (?template=bug_report.yml&<id>=<value>), and puts the device
+# report on the clipboard ready to paste into the "Device report" field.
 name: Bug report
-description: Something in the firmware misbehaves. Give enough for Claude Code (or a human) to reproduce and fix.
-labels: ["bug"]
+description: Something the firmware gets wrong. One pass, everything needed to diagnose it.
+title: "[bug] "
+labels: ["bug", "needs-triage", "form-v2"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for filing a bug. The more concrete the repro, the faster it gets fixed.
-        Note: a cloud Claude Code session can edit/review code and rely on CI, but **cannot build or USB-flash** (no Docker daemon / no USB). Real builds/flashes run on a host with the board or in CI.
+        **Start on the device, not here.** Open its web page → **Settings** → **ESP32** → **Report a bug**.
+        It fills most of this form in for you and puts the device report on your clipboard, ready to
+        paste in below. Your network name, addresses, broker and server names are removed by the
+        device before you ever see it. Full instructions, including what to do if your firmware is
+        too old to have that button:
+        **[docs/REPORTING.md](https://github.com/0Bu/daikin-altherma-esp32/blob/main/docs/REPORTING.md)**.
+
+        Found a security problem? Use the
+        [private advisory form](https://github.com/0Bu/daikin-altherma-esp32/security/advisories/new)
+        instead — never a public issue.
+
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: What kind of problem is it?
+      description: Pick the closest one. This decides what evidence the report needs.
+      options:
+        - A reading is wrong, impossible or missing (a bad number in Home Assistant or on the dashboard)
+        - The wrong heat pump model was detected, or the detection keeps changing
+        - No readings at all — the connection to the heat pump never comes up
+        - Home Assistant — entities missing, unavailable, duplicated, or of the wrong kind
+        - MQTT — the broker will not connect, or the device keeps dropping off
+        - WiFi or the setup portal — cannot join, the portal will not open, the device is unreachable
+        - A firmware update (OTA) fails, or the device will not take one
+        - The device crashes, restarts, or is stuck restarting
+        - The web dashboard — a wrong drawing, wrong text, or a control that does nothing
+        - Something else, or I am not sure
+    validations:
+      required: true
+
   - type: textarea
     id: summary
     attributes:
-      label: Summary
-      description: What's wrong, in a sentence or two.
+      label: What happens
+      description: One or two sentences, in your own words.
+      placeholder: The tank temperature has read 12800 °C in Home Assistant since this morning.
     validations:
       required: true
-  - type: dropdown
-    id: area
-    attributes:
-      label: Affected area
-      description: Which component (from the architecture map in .claude/CLAUDE.md)?
-      options:
-        - X10A comm / CRC / protocol (hp_comm)
-        - Poll engine (hp_poll)
-        - Value converters / model profiles (logic/convert, def/)
-        - HTTP server / API
-        - Web UI (www/) / configuration
-        - MQTT / Home Assistant bridge
-        - WiFi / provisioning (setup portal)
-        - OTA / self-update
-        - Control relays (thermostat / SG-Ready)
-        - MCP server (/mcp)
-        - Build / CI / logic tests
-        - Docs
-        - Other / not sure
-    validations:
-      required: true
-  - type: dropdown
-    id: targets
-    attributes:
-      label: Target chip(s) affected
-      options:
-        - esp32s3 (incl. XIAO ESP32-S3)
-        - Unknown
-    validations:
-      required: true
-  - type: input
-    id: model
-    attributes:
-      label: Heat pump model / profile
-      description: Indoor / outdoor / tank models, the selected profile, and protocol (I/S).
-      placeholder: "ETBH12E / ERGA04-08E / EKHWSP — profile altherma3_r_erga — proto I"
-    validations:
-      required: false
-  - type: textarea
-    id: repro
-    attributes:
-      label: Steps to reproduce
-      description: Exact steps, curl commands, or UI actions.
-      placeholder: |
-        1. ...
-        2. curl http://daikin-altherma-esp32.local/values | jq
-        3. ...
-    validations:
-      required: true
+
   - type: textarea
     id: expected_actual
     attributes:
-      label: Expected vs actual
+      label: What you expected instead
+      description: >-
+        For a wrong reading, say what the number **should** be **and how you know** — the unit's own
+        wall controller, a thermometer, the installer manual. That is what makes it a fact rather
+        than an impression, and it is often the whole diagnosis.
       placeholder: |
-        Expected: ...
-        Actual: ...
+        Expected: around 48 °C — that is what the Daikin wall controller shows.
+        Actual:   12800 °C
     validations:
       required: true
-  - type: input
-    id: version
-    attributes:
-      label: Firmware version / platform
-      description: From GET /api/proxy/1/version (e.g. "1.0.0 / esp32s3").
-    validations:
-      required: false
+
   - type: textarea
-    id: diag
+    id: steps
     attributes:
-      label: Relevant /diag or serial log
-      description: Paste an excerpt from GET /diag (or the serial monitor). Redact your SSID.
-      render: text
+      label: How to see it
+      description: What you did, step by step. "It is always like this" is a perfectly good answer — then say that.
+      placeholder: |
+        1. Open the device's web page
+        2. Look at the "Tank" row
+        3. It reads 12800 °C — always, also right after a restart
     validations:
-      required: false
-  - type: checkboxes
-    id: checks
+      required: true
+
+  - type: dropdown
+    id: onset
     attributes:
-      label: Before submitting
+      label: Did it ever work?
+      description: >-
+        The single most useful question in this form — it separates "never supported on your unit"
+        from "a change broke it", and those are investigated in completely different places.
       options:
-        - label: I searched existing issues and this isn't a duplicate.
+        - It never worked — it has been like this since I installed the firmware
+        - It worked, then broke after a firmware update
+        - It worked, then broke after I changed a setting or the wiring
+        - It worked, then broke on its own — nothing changed
+        - It comes and goes
+        - I do not know
+    validations:
+      required: true
+
+  - type: input
+    id: fw_version
+    attributes:
+      label: Firmware version
+      description: >-
+        Shown at the top of the device's web page, and prefilled if you came from the "Report a bug"
+        button. If an update caused or fixed this, give both versions.
+      placeholder: "1.0.14 (esp32s3) — was 1.0.12 before the update"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: board
+    attributes:
+      label: ESP32 board
+      description: The little board running this firmware — not the heat pump.
+      options:
+        - Seeed XIAO ESP32-S3
+        - M5Stack AtomS3 Lite
+        - Another ESP32-S3 board
+        - I do not know
+    validations:
+      required: true
+
+  - type: input
+    id: hp_model
+    attributes:
+      label: Heat pump model, from the sticker on the unit
+      description: >-
+        Indoor unit / outdoor unit / tank, copied as printed. **Please read it off the hardware
+        rather than off this firmware** — the firmware only *guesses* the model from the bus, and a
+        wrong guess is itself one of the commonest bugs, so its answer cannot confirm itself. Put
+        `unknown` if you genuinely cannot reach the sticker.
+      placeholder: "EBLA09D3V3 / ERGA06EVH / EKHWS200D3V3"
+    validations:
+      required: true
+
+  - type: textarea
+    id: device_report
+    attributes:
+      label: Device report
+      description: >-
+        **Two ways, either is fine.** Paste the report the **Report a bug** button put on your
+        clipboard — all of it, unchanged. Or, if you used **Download .md** instead, drag that
+        `daikin-report-….md` file straight into this box; GitHub attaches it and that works just as
+        well. Almost nothing can be diagnosed without one or the other.
+
+
+        Your network name, addresses, broker and server names have already been removed by the
+        device. If you collected it by hand instead, check docs/REPORTING.md for what to take out
+        first. If the device is unreachable, say so here instead — that is a useful answer, not a
+        missing one.
+      placeholder: |
+        # daikin-altherma-esp32 bug report
+
+        firmware: 1.0.14 (esp32s3)
+        …
+    validations:
+      required: true
+
+  - type: dropdown
+    id: user_syslog
+    attributes:
+      label: Do you forward the device's log to a syslog server?
+      description: >-
+        Only you can answer this, and it decides what is knowable. The device's own log is a small
+        buffer in RAM that a noisy fault overwrites within a minute, and a restart empties it — so
+        **without syslog there is no history at all**, and "when did this start" and "how often does
+        it restart" simply cannot be answered. If your problem is a restart, a dropout or something
+        that comes and goes, it is worth switching syslog on (Settings → Connections → Syslog),
+        waiting for it to happen again, and reporting then.
+      options:
+        - "No — not configured"
+        - "Yes — I have pasted the relevant lines under \"Anything else\""
+        - "Yes, but there was nothing logged around the failure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: >-
+        Screenshots, a photo of the wiring, a Home Assistant history graph, syslog lines from around
+        the failure — drag them in or paste them here. Syslog comes from **your** server, so unlike
+        the device report it has not been scrubbed for you: check it for your network name and your
+        server addresses first.
+
+  - type: checkboxes
+    id: attest
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the open and closed issues and this is not a duplicate.
           required: true
+        - label: Anything I added myself (screenshots, syslog lines) does not name my network, my MAC/BSSID addresses, my broker or my syslog/NTP server.
+          required: true
+        - label: This is not a security vulnerability (those go to the private advisory form, not here).
+          required: true
+        - label: I can run a command or read a value off the device if I am asked to.
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        This project is free to use and maintained in spare time. If you would like to support it,
+        the **Sponsor** button at the top of the repository is there. It supports the project as a
+        whole — there is no way to pay for a particular issue, and none is planned. Entirely
+        optional: every report is read and answered the same way.

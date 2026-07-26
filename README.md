@@ -96,6 +96,7 @@ it on its own. Per-board hardware inventory: [docs/BOARDS.md](docs/BOARDS.md); w
 | [docs/FEATURES.md](docs/FEATURES.md) | Catalog of platform features (Secure Boot, OTA, WebSocket, diagnostics, …) |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model + OTA signing/key lifecycle |
 | [docs/MCP.md](docs/MCP.md) | Planned read-only MCP surface (not yet implemented) |
+| [docs/REPORTING.md](docs/REPORTING.md) | Reporting a bug: the public issue, the private device report, what gets redacted |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | What's useful to report, the two local verification gates, how PRs land |
 
 ## Notes

@@ -18,6 +18,7 @@
 #include "logic/detect.hpp"
 #include "logic/json.hpp"
 #include "logic/query_flag.hpp"
+#include "logic/redact.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/timestamp.hpp"
 #include "logic/ws_policy.hpp"
@@ -47,6 +48,7 @@
 #include <atomic>
 #include <new>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -61,6 +63,14 @@ namespace daik {
 // payloads use. Not a local escaper: /scan echoes SSIDs, i.e. arbitrary bytes chosen by any AP in
 // radio range, and a control char in one used to emit unparseable JSON.
 static std::string jstr(const std::string& s) { return json_quote(s); }
+
+// The same, for the seven values `GET /status?redact=1` withholds (logic/redact.hpp). Applied where
+// the value is WRITTEN, never as a pass over the finished JSON: this builder runs on the httpd task
+// whose stack overflow killed v1.0.12, so a second full-size buffer is exactly what the budget has
+// no room for. The KEY is always emitted — an omitted field is indistinguishable from an older
+// build that never had it, and "which build produced this?" is the first question a frozen bug
+// report has to answer.
+static std::string jstr_r(const std::string& s, bool redact) { return json_quote(redact_or(s, redact)); }
 
 // Is a SoftAP live, i.e. are we the provisioning portal rather than the dashboard? The setup portal
 // runs AP-only (provisioning.cpp); APSTA is matched too because it is never the normal operating
@@ -95,7 +105,11 @@ static esp_err_t h_captive(httpd_req_t* req) {
     return httpd_resp_send(req, nullptr, 0);   // empty body — nothing to gzip, nothing to render
 }
 
-static std::string build_status_json_string() {
+// `redact` withholds the seven reporter-identifying values (logic/redact.hpp) so a snapshot can be
+// pasted into a bug report. Defaulted OFF: the WebSocket broadcast and the subscription snapshot
+// feed the dashboard, which legitimately shows the SSID and the broker — only GET /status?redact=1
+// asks for the scrubbed form.
+static std::string build_status_json_string(bool redact = false) {
     const Config& c = config();
     HpStats     hp  = hp_stats();
     MqttStatus  m   = mqtt_status();
@@ -171,11 +185,11 @@ static std::string build_status_json_string() {
     }
     snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
              wi.mac[0], wi.mac[1], wi.mac[2], wi.mac[3], wi.mac[4], wi.mac[5]);
-    j += "\"wifi\":{\"ssid\":" + jstr(c.wifi_ssid) + ",\"ip\":" + jstr(wi.ip) +
+    j += "\"wifi\":{\"ssid\":" + jstr_r(c.wifi_ssid, redact) + ",\"ip\":" + jstr_r(wi.ip, redact) +
          ",\"rssi\":" + (wi.connected ? std::to_string(wi.rssi) : "null") +
          ",\"connected\":" + (wi.connected ? "true" : "false") +
-         ",\"bssid\":" + (wi.connected ? jstr(bssid_str) : "null") +
-         ",\"mac\":" + jstr(mac_str) +
+         ",\"bssid\":" + (wi.connected ? jstr_r(bssid_str, redact) : "null") +
+         ",\"mac\":" + jstr_r(mac_str, redact) +
          ",\"std\":" + (wi.connected ? jstr(wi.std) : "null") +
          // The last credential change was undone (wifi.cpp restored the previous network). Sticky
          // until the next POST /set_wifi, because a rollback leaves no other trace: the reboot it
@@ -191,12 +205,12 @@ static std::string build_status_json_string() {
          ",\"connected\":" + (m.connected ? "true" : "false") +
          ",\"tls\":" + (m.tls ? "true" : "false") +
          ",\"has_creds\":" + ((!c.mqtt_user.empty() || !c.mqtt_pass.empty()) ? "true" : "false") +
-         ",\"broker\":" + jstr(m.broker) + (m.error.empty() ? "" : ",\"error\":" + jstr(m.error)) + "},";
+         ",\"broker\":" + jstr_r(m.broker, redact) + (m.error.empty() ? "" : ",\"error\":" + jstr(m.error)) + "},";
     SyslogStatus sy = syslog_status();
     j += "\"syslog\":{\"configured\":" + std::string(sy.configured ? "true" : "false") +
          ",\"resolved\":" + (sy.resolved ? "true" : "false") +
          ",\"reachable\":" + (sy.reachable ? "true" : "false") +
-         ",\"host\":" + jstr(sy.host) +
+         ",\"host\":" + jstr_r(sy.host, redact) +
          ",\"port\":" + std::to_string(sy.port) +
          (sy.error.empty() ? "" : ",\"error\":" + jstr(sy.error)) + "},";
     j += "\"hp\":{\"proto\":" + jstr(std::string(1, static_cast<char>(c.proto))) +
@@ -252,7 +266,7 @@ static std::string build_status_json_string() {
     // not necessarily who actually answered. synced/time are null/false until the first SNTP reply of
     // this boot lands.
     const TimeStatus ts = time_status();
-    j += "\"ntp\":{\"server\":" + jstr(ts.server) +
+    j += "\"ntp\":{\"server\":" + jstr_r(ts.server, redact) +
          ",\"synced\":" + (ts.synced ? "true" : "false") +
          ",\"time\":" + (ts.synced ? jstr(rfc3339_utc(ts.unix_time)) : "null") + "},";
 
@@ -357,7 +371,16 @@ static std::string build_status_json_string() {
 }
 
 static esp_err_t h_status(httpd_req_t* req) {
-    std::string j = build_status_json_string();
+    // ?redact=1 -> the bug-report form of this payload (logic/redact.hpp). Same flag policy as
+    // ?clear / ?verbose / ?downgrade: fires on exactly "1", so ?redact=0 is not a near-miss that
+    // silently ships the unscrubbed body under a name that promised otherwise.
+    bool redact = false;
+    char q[48];
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
+        char v[4];
+        if (httpd_query_key_value(q, "redact", v, sizeof(v)) == ESP_OK) redact = query_flag_on(v);
+    }
+    std::string j = build_status_json_string(redact);
     return http_send_json(req, j.c_str());
 }
 
@@ -516,7 +539,8 @@ static esp_err_t h_history(httpd_req_t* req) {
 }
 
 static esp_err_t h_diag(httpd_req_t* req) {
-    char q[32];
+    bool redact = false;
+    char q[64];
     if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
         char v[4];
         // clear is DESTRUCTIVE, so it fires only on ?clear=1 (the documented value) — not on mere
@@ -524,11 +548,34 @@ static esp_err_t h_diag(httpd_req_t* req) {
         // policy: verbose=1 -> on, anything else (incl. verbose=0) -> off.
         if (httpd_query_key_value(q, "clear", v, sizeof(v)) == ESP_OK && query_flag_on(v)) diag_clear();
         if (httpd_query_key_value(q, "verbose", v, sizeof(v)) == ESP_OK) diag_set_verbose(query_flag_on(v));
+        if (httpd_query_key_value(q, "redact", v, sizeof(v)) == ESP_OK) redact = query_flag_on(v);
     }
     static char buf[6144];
     size_t n = diag_dump(buf, sizeof(buf));
     httpd_resp_set_type(req, "text/plain");
-    return httpd_resp_send(req, buf, n);
+    if (!redact) return httpd_resp_send(req, buf, n);
+
+    // Redacted: a handful of log statements interpolate a host, an IP or an SSID (logic/redact.hpp).
+    // Rewritten line by line and flushed in ~1 KB chunks, rather than as one redacted copy of the
+    // whole ring: a replacement is longer than most values it replaces, so the result can GROW, and
+    // the two answers to that are a second ~8 KB .bss buffer or a ~6 KB contiguous heap allocation
+    // on a heap whose real ceiling is its largest contiguous block. The chunk costs neither, and
+    // batching keeps it to a handful of sends instead of one per line.
+    std::string chunk;
+    chunk.reserve(1280);
+    for (size_t start = 0; start < n; ) {
+        size_t eol = start;
+        while (eol < n && buf[eol] != '\n') eol++;
+        if (eol < n) eol++;                                   // keep the newline with its line
+        chunk += redact_diag_line(std::string_view(buf + start, eol - start));
+        start = eol;
+        if (chunk.size() >= 1024) {
+            if (httpd_resp_send_chunk(req, chunk.c_str(), chunk.size()) != ESP_OK) return ESP_FAIL;
+            chunk.clear();
+        }
+    }
+    if (!chunk.empty() && httpd_resp_send_chunk(req, chunk.c_str(), chunk.size()) != ESP_OK) return ESP_FAIL;
+    return httpd_resp_send_chunk(req, nullptr, 0);            // terminate the chunked response
 }
 
 static esp_err_t h_coredump(httpd_req_t* req) {

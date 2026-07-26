@@ -1,0 +1,11 @@
+# Adjudicated diag lines: they mention a config/identity identifier, but the value that actually
+# reaches /diag is not identifying. One entry per line, exactly as check_diag_coverage.py prints it:
+#
+#   main/<file>.cpp:<first line of the format string>
+#
+# An entry is a DECISION, not a snooze. Write down why, next to it. If the honest answer is "it does
+# print the value but nobody will look", that is not an exception — add a rule to
+# main/logic/redact.hpp instead. This ledger only records lines the heuristic flags for the shape of
+# their arguments while the value itself is safe.
+#
+# Empty right now: all eight flagged lines carry a real redaction rule.

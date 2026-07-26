@@ -1,0 +1,25 @@
+# Puts a "Sponsor" button on the repository. Referenced from the bug-report form and
+# docs/REPORTING.md as an entirely optional way to support the project.
+#
+# DECIDED: support for the PROJECT only. Per-issue funding (the `polar` and `issuehunt` keys, which
+# attach money to one issue) is deliberately NOT used — reports are worked on by what is wrong and
+# how well they are evidenced, not by who paid, and a visible price tag on an issue quietly changes
+# that whether or not anyone means it to. docs/REPORTING.md and the bug-report form both say so out
+# loud, so this is a decision on record rather than an omission to be tidied up later.
+#
+# NOTHING IS ENABLED YET — every key below is commented out, because each one needs an account that
+# has to exist first, and a FUNDING.yml naming an account that does not resolve renders a button
+# leading nowhere. Uncomment the ones you have set up:
+#
+#   github            GitHub Sponsors. Requires the account to be onboarded to Sponsors first
+#                     (Settings -> Sponsors).
+#   ko_fi             One-off tip jar, no account needed by the payer.
+#   custom            Up to four arbitrary URLs (a payment page of your own). Quote any URL
+#                     containing a colon.
+#
+# GitHub only renders the button on PUBLIC repositories, so this file is inert until the repository
+# is switched over (see docs/REPORTING.md, "The day this repository goes public").
+
+# github: [0Bu]
+# ko_fi: 0Bu
+# custom: ["https://example.org/support"]
