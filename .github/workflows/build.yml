@@ -53,7 +53,9 @@ name: build
 #     on pull requests as well as on pushes — a docs-only PR used to pay a full build to prove
 #     that prose still compiles
 #   • ccache across runs (restored everywhere, saved from main) — the compile is ~3 of the build
-#     job's ~5 minutes and starts cold every time, since `idf.py set-target` wipes the build dir
+#     job's ~5 minutes and starts cold every time, since `idf.py set-target` wipes the build dir.
+#     Keyed on the TOOLCHAIN + sdkconfig, never on this file's hash: editing the workflow (a
+#     comment included) must not throw away a cache nothing in it invalidated
 #   • NO per-PR preview installer. Publishing one per PR commit meant a gh-pages push per commit,
 #     and every gh-pages push starts GitHub's own three-job "pages build and deployment" run on
 #     top of this one. The DEV CHANNEL covers the same need — flash what is on main from a
@@ -170,7 +172,7 @@ jobs:
           BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          relevant='^(main/|CMakeLists\.txt$|sdkconfig\.defaults$|partitions\.csv$|version\.txt$|docs/index\.html$|\.github/workflows/build\.yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version)\.sh$|scripts/check-web-installer-plan\.py$|tools/version/)'
+          relevant='^(main/|CMakeLists\.txt$|sdkconfig\.defaults$|partitions\.csv$|version\.txt$|docs/index\.html$|\.github/workflows/build\.yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version)\.sh$|scripts/check-web-installer-plan\.py$|tools/version/)'
           case "${{ github.event_name }}" in
             pull_request)
               # HEAD is the PR's merge ref, so HEAD^1 is the base tip: the diff is exactly what
@@ -306,15 +308,37 @@ jobs:
       # Restored on every run, SAVED only from main: a PR can read the base branch's cache but its
       # own write would be scoped to that PR's ref and thrown away when it closes — spending upload
       # time per PR push to warm a cache nothing else can read.
+      # The cache key must change when the cached objects go stale — and NOT otherwise. It used to
+      # be hashFiles('.github/workflows/build.yml', 'sdkconfig.defaults'), i.e. the hash of this
+      # WHOLE FILE, so every edit to this workflow threw the cache away. Most edits to it change no
+      # build input at all: PR #189 deleted a two-line comment and paid a full cold compile (~3 of
+      # the build job's ~5 minutes) for it, and this file is edited often.
+      #
+      # What actually invalidates the objects is the TOOLCHAIN (esp_idf_version, which decides the
+      # compiler) and the BUILD CONFIG (sdkconfig.defaults), so key on exactly those two. The pin is
+      # read through scripts/idf-version.sh — the same reader scripts/idf-docker.sh uses — so the
+      # cache key and the image the build runs in cannot key on different versions.
+      #
+      # Narrowing the key is safe in the direction that matters: ccache is content-addressed, so a
+      # stale object is never *served* for a changed input (the hash simply misses). The old wide
+      # key was only ever about not carrying dead objects along, and the two real producers of dead
+      # objects are still covered.
+      - name: Derive the ccache key
+        id: cckey
+        run: |
+          set -euo pipefail
+          idf="$(./scripts/idf-version.sh)"
+          h="$( { printf 'idf=%s\n' "$idf"; cat sdkconfig.defaults; } | sha256sum | cut -c1-16 )"
+          echo "hash=$h" >> "$GITHUB_OUTPUT"
+          echo "ccache key: target esp32s3 / IDF $idf / sdkconfig.defaults -> $h"
+
       - name: Restore ccache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: .ccache
-          # Keyed on the workflow (which pins esp_idf_version) + the sdkconfig defaults, so a
-          # toolchain or config bump starts a fresh cache instead of dragging dead objects along.
-          key: ccache-esp32s3-${{ hashFiles('.github/workflows/build.yml', 'sdkconfig.defaults') }}-${{ github.run_id }}
+          key: ccache-esp32s3-${{ steps.cckey.outputs.hash }}-${{ github.run_id }}
           restore-keys: |
-            ccache-esp32s3-${{ hashFiles('.github/workflows/build.yml', 'sdkconfig.defaults') }}-
+            ccache-esp32s3-${{ steps.cckey.outputs.hash }}-
 
       - name: Build firmware
         uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5 # v1.2.0
@@ -347,7 +371,7 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: .ccache
-          key: ccache-esp32s3-${{ hashFiles('.github/workflows/build.yml', 'sdkconfig.defaults') }}-${{ github.run_id }}
+          key: ccache-esp32s3-${{ steps.cckey.outputs.hash }}-${{ github.run_id }}
 
       # Upload the bins AND the unstripped .elf (+ checksum): the .elf is the only artifact that can
       # symbolize a core dump from this build (scripts/decode-coredump.sh), so retaining it per
