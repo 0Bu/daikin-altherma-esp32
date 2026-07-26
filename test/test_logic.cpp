@@ -948,6 +948,54 @@ static void test_refrigerant_pressure_catalog() {
     CHECK(refrig  >= 90);    // outdoor + the 0x62 rows a 405 twin reaches
 }
 
+// The two DEMAND flags, and the one property the web UI's row selection rests on: each of the two
+// labels resolves to exactly ONE register page across the whole shipped catalog.
+//
+// This exists because of a defect the other gates could not see (#199). The dashboard's heating
+// riser drew a pill from "Thermostat ON/OFF" and called it the room thermostat — placement, title
+// and explainer all said "the room is calling for heat". But that row is 0x60/2 bit 3, a bit in the
+// INDOOR UNIT's status byte, beside I/U operation mode and freeze protection: it is Daikin's
+// thermo-ON, ON for a hot-water charge exactly as readily as for the house. Measured on a live unit
+// over three days, it was ON 128/119/91 minutes per day and NOT ONE of those minutes had the 3-way
+// valve pointing at space heating — every one was a DHW charge, drawn as a room demanding heat while
+// the room sat exactly on its setpoint. A physically true reading attributed to the wrong component:
+// the #35-#39 shape, which no converter, unit or spec check can catch because nothing about the
+// VALUE is wrong. The branch's own request is "Space heating Operation ON/OFF" (0x62/2 bit 3), and
+// that is what the pill draws now.
+//
+// The browser picks both rows by LABEL (www/app.js liveData). That is only sound while a label means
+// one thing, and docs/REGISTERS.md §5 documents a SECOND "Thermostat ON/OFF" — page 0x10 offset 1
+// bit 7, the outdoor unit's own — which no generated profile currently carries. def/overlay.hpp says
+// in as many words that the generator's page-0x10 input is narrower than the spec and that the
+// missing rows are expected to arrive. On the day they do, this test fails, and whoever runs the
+// generator learns that the browser's selection has to become structural (keyed on `reg`, the way
+// the ou_stale page rule already is) before the catalog can ship. Failing here is the point.
+static void test_demand_flag_catalog() {
+    int thermostat = 0, space_heating = 0;
+    for (const auto& p : def::profiles) {
+        const auto v = def::resolved(p);            // the rows a consumer actually sees
+        for (size_t i = 0; i < v.count(); i++) {
+            const ValueDef& d = v[i];
+            std::string lbl;
+            for (const char* c = d.label; c && *c; c++) lbl += static_cast<char>(std::tolower(*c));
+            if (lbl.rfind("thermostat on", 0) == 0) {           // the JS matches /thermostat on/i
+                CHECK(d.reg == 0x60); CHECK(d.offset == 2); CHECK(d.conv == 303);
+                thermostat++;
+            }
+            // Anchored, like the JS: "Space H Operation output" (0x62/8) is the OUTPUT terminal's
+            // state, a different row, and must not be mistaken for the request.
+            if (lbl.rfind("space heating operation", 0) == 0) {
+                CHECK(d.reg == 0x62); CHECK(d.offset == 2); CHECK(d.conv == 303);
+                space_heating++;
+            }
+        }
+    }
+    // Traversal proof: both rows are near-universal, so a selection that silently stops finding
+    // either (a renamed label, a dropped row) fails here rather than blanking a pill in the field.
+    CHECK(thermostat    >= 35);
+    CHECK(space_heating >= 40);
+}
+
 static void test_registry() {
     CHECK(std::string(def::lookup("altherma3_r_erga").id) == "altherma3_r_erga");
     CHECK(def::lookup("altherma3_r_erga").count > 10);
@@ -4111,6 +4159,7 @@ int main() {
     test_discovery();
     test_binary_catalog();
     test_refrigerant_pressure_catalog();
+    test_demand_flag_catalog();
     test_registry();
     test_detect();
     test_json();

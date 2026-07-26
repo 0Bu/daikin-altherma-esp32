@@ -314,15 +314,15 @@ Body, ordered:
    valve beside it said "→ heating". The headline names the mode; only the status line claims
    activity. **Standby mutes the dot but not the text**, which is what separates it from "no data"
    (both muted) — and the words say which it is regardless of colour (§9).
-   **State flags are drawn at their component**, never as a chip row: the room thermostat is a pill
-   on the **heating riser** above the emitter (`--ok` while calling), the BUH step is part of the
+   **State flags are drawn at their component**, never as a chip row: the space-heating demand is a
+   pill on the **heating riser** above the emitter (`--ok` while calling), the BUH step is part of the
    **BUH label** ("BUH 1"/"BUH 2", over the existing `--warn` tint — the tint says *on*, the digit
    says how much resistive heat is being paid for), low-noise mode is a pill **on the outdoor unit**
    beside the defrost pill. Pump and defrost were already drawn (rotation + "PUMP n%", the ❄ pill +
    the reversed refrigerant loop).
    **The schematic never hides.** When the X10A link drops it is the only thing left that can say
    why, so instead every value pill blanks to "—", every animation stops, the 3-way-valve label falls
-   back to a bare "3WV" (no branch claimed) and the thermostat pill disappears — an idle plant with no
+   back to a bare "3WV" (no branch claimed) and the demand pill disappears — an idle plant with no
    readings, not a stale one — nothing on this screen is hidden by a dead bus.
    **A sleeping outdoor unit is a related case, and it is resolved the SAME way.** The
    outdoor unit refreshes its own register pages only while it *runs*; stopped, it keeps answering
@@ -373,8 +373,17 @@ Body, ordered:
    temp for the one, room temp for the other, since the room is the controlled variable of that
    circuit — with the reading's own name kept on it ("Raum 20.0 °C", never a bare "20.0 °C" under a
    HEATING label, which would read as a water temperature). What stays *outside* the box is the
-   **thermostat demand**, on the riser above it: it is not a reading of the emitter but the request
-   that decides whether water reaches it at all. Value pills sit at their physical measuring
+   **space-heating demand**, on the riser above it: it is not a reading of the emitter but the request
+   that decides whether water reaches it at all. It is drawn from *"Space heating Operation ON/OFF"*
+   (`0x62/2` bit 3) — the branch's own request — and deliberately **not** from *"Thermostat ON/OFF"*,
+   which it drew until #199. That row is `0x60/2` bit 3, a bit in the **indoor unit's** status byte
+   beside the I/U operation mode: Daikin's thermo-ON, which a hot-water charge raises exactly as
+   readily as a call for heat. Measured on a live unit over three days it was ON 128/119/91 min per
+   day and *none* of those minutes had the 3-way valve on space heating. Nothing about the value was
+   wrong — only what the drawing said it meant, which is the one defect class §5.3 exists to prevent
+   and the reason the pill's row is pinned to its page by a catalog test. It is still published, and
+   the inspector now carries it under **Operating mode**, where that status byte belongs.
+   Value pills sit at their physical measuring
    points (outdoor temp, high/low pressure, discharge temp, EEV pulses, leaving/return water, ΔT, the
    estimated **heat output and COP** at the PHE, the estimated **electrical input** on the outdoor
    unit where the power goes in, flow, water pressure, pump %, tank temp/setpoint, room
@@ -925,7 +934,7 @@ enabled/available values are hidden.
   tints its **value** on hover/select in place of a border.
 - **State pill** — a value pill carrying a flag rather than a number, sitting on the component it
   belongs to (§5.3 item 1): `--card` fill, text+border tinted `--ok`/`--warn`/`--flow-cold`/`--brand`
-  while the state is active, `--muted` otherwise. The text always names the state ("Thermostat off"),
+  while the state is active, `--muted` otherwise. The text always names the state ("Demand off"),
   never colour alone.
 - **Inspector** — `--brand-tint` panel under the schematic (§5.3 item 3), bordered like a card: an
   uppercase `--muted` title + mono source label on the left, the headline reading on the right, then

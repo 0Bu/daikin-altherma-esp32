@@ -62,7 +62,7 @@ const I18N = {
     "group.Electrical": "Electrical", "group.Device": "Device", "group.Other values": "Other values",
     "group.Protection": "Protection", "protect.limiting": "limiting now",
     "group.Values": "Values",
-    "chip.thermo_on": "Thermostat ON", "chip.thermo_off": "Thermostat off", "chip.quiet": "Quiet",
+    "chip.demand_on": "Demand ON", "chip.demand_off": "Demand off", "chip.quiet": "Quiet",
     "schem.to_dhw": "3WV → DHW", "schem.to_heat": "3WV → heating",
     "normal.label": "Normal:",
     "hist.title": "Last 24 hours", "hist.since": (h) => `Since restart · ${h} h`,
@@ -171,7 +171,7 @@ const I18N = {
     "group.Electrical": "Elektrik", "group.Device": "Gerät", "group.Other values": "Weitere Werte",
     "group.Protection": "Schutz", "protect.limiting": "regelt zurück",
     "group.Values": "Werte",
-    "chip.thermo_on": "Thermostat EIN", "chip.thermo_off": "Thermostat aus", "chip.quiet": "Leise",
+    "chip.demand_on": "Anforderung EIN", "chip.demand_off": "Anforderung aus", "chip.quiet": "Leise",
     "schem.to_dhw": "3WV → WW", "schem.to_heat": "3WV → Heizung",
     "normal.label": "Normal:",
     "hist.title": "Letzte 24 Stunden", "hist.since": (h) => `Seit Neustart · ${h} h`,
@@ -1119,14 +1119,21 @@ const DESCRIPTIONS = [
     de: { what: "Das Alarmrelais des Geräts — schaltet EIN, um eine Störung an eine angeschlossene externe Alarm-/Überwachungseinrichtung zu melden." } },
 
   // ── Room / thermostat ──
+  // This is the INDOOR UNIT's thermo-on bit (0x60/2 bit 3), not a room thermostat: it sits in the
+  // same status byte as the I/U operation mode and it says the hydro module wants the compressor,
+  // whichever load that is for. Measured over three days on a live unit, every single ON minute was
+  // a DHW charge and none had the 3-way valve on space heating — so copy that promised "the room is
+  // calling for heat" described the wrong thing entirely (#199).
   { re: /thermostat/i,
-    what: "Whether the room or zone is currently calling for heat. ON = there is demand and the unit may run; OFF = the room is up to temperature.",
-    normal: "cycles ON and OFF as the room drifts around its target.",
-    de: { what: "Ob der Raum bzw. die Zone gerade Wärme anfordert. EIN = Bedarf vorhanden, das Gerät darf laufen; AUS = der Raum ist auf Temperatur.",
-          normal: "schaltet EIN und AUS, während der Raum um sein Ziel pendelt." } },
+    what: "Whether the indoor unit is currently asking the outdoor unit to run — Daikin's \"thermo ON\". It does not say what the heat is for: a hot-water charge turns it ON exactly like a call for space heating. For the heating circuit alone, read \"Space heating Operation\".",
+    normal: "ON while the unit runs, OFF while it is satisfied — for either load.",
+    de: { what: "Ob die Inneneinheit gerade Betrieb der Außeneinheit anfordert — Daikins „Thermo EIN\". Wofür die Wärme gebraucht wird, sagt das Bit nicht: Eine Warmwasserladung schaltet es genauso ein wie eine Heizungsanforderung. Für den Heizkreis allein ist „Space heating Operation\" der richtige Wert.",
+          normal: "EIN, solange das Gerät läuft, AUS, wenn der Bedarf gedeckt ist — für beide Lasten." } },
   { re: /space heating operation|space h operation/i,
-    what: "Whether space heating (as opposed to hot-water production) is currently active or being called for.",
-    de: { what: "Ob die Raumheizung (im Unterschied zur Warmwasserbereitung) gerade aktiv ist oder angefordert wird." } },
+    what: "Whether space heating (as opposed to hot-water production) is currently active or being called for. This is the branch-specific one: it stays OFF through a hot-water charge, which the unit-wide \"Thermostat ON/OFF\" does not.",
+    normal: "OFF all summer, and OFF while the 3-way valve is diverted to the tank.",
+    de: { what: "Ob die Raumheizung (im Unterschied zur Warmwasserbereitung) gerade aktiv ist oder angefordert wird. Das ist der zweigspezifische Wert: Er bleibt während einer Warmwasserladung AUS — anders als das geräteweite „Thermostat ON/OFF\".",
+          normal: "den ganzen Sommer AUS, und auch AUS, solange das 3-Wege-Ventil auf den Speicher geschaltet ist." } },
   { re: /rt set ?point/i,
     what: "The target room temperature you've set for the zone the unit's own room sensor controls.",
     de: { what: "Die von dir eingestellte Ziel-Raumtemperatur für die Zone, die der eigene Raumfühler des Geräts regelt." } },
@@ -1908,7 +1915,17 @@ function liveData() {
     buh1: vOn(/buh step ?1/i),
     buh2: vOn(/buh step ?2/i),
     defrost: vOn(/defrost operation/i),
-    thermo: vOn(/thermostat on/i),
+    // The SPACE-HEATING branch's own demand — "Space heating Operation ON/OFF", 0x62/2 bit 3, the
+    // hydronic page. Anchored so it cannot also take "Space H Operation output" (0x62/8), which is
+    // the OUTPUT terminal's state, not the request. Emphatically NOT "Thermostat ON/OFF": that row
+    // is 0x60/2 bit 3, a bit in the INDOOR UNIT's status byte, and it is ON for a DHW charge just
+    // as readily (measured: every ON minute over three days was one) — drawing it on the heating
+    // riser attributed a true reading to the wrong branch. It is still published and still in the
+    // value list; it is just no longer claimed to be a room's request for heat. A catalog CHECK in
+    // test/test_logic.cpp pins each of the two labels to its one page, which is what makes matching
+    // by label here unambiguous — if the generator ever emits page 0x10's own "Thermostat ON/OFF"
+    // bit, that test fails and this selection has to become structural (keyed on reg, like ouPage).
+    spaceH: vOn(/^space heating operation/i),
     quiet: vOn(/low noise control|silent mode/i),
   };
   // Pump % — the wire value is inverted ("Water pump signal (0:max-100:stop)").
@@ -1987,7 +2004,7 @@ function clearSchematic() {
   setTxt("svValve", "3WV");            // valve position unknown — don't claim a branch
   const sc = $("schem");
   ["fan-on", "pump-on", "buh-on", "defrost-on", "quiet-on"].forEach((c) => sc.classList.remove(c));
-  sc.classList.add("no-thermo");       // no flag to show; the pill would otherwise sit stale
+  sc.classList.add("no-spaceh");       // no flag to show; the pill would otherwise sit stale
   $("schem").querySelectorAll(".sc-flow, .sc-rflow").forEach((el) => el.classList.remove("on", "rev"));
 }
 
@@ -2002,12 +2019,12 @@ function renderLive() {
   // animation stops instead, so the drawing shows an idle plant with no readings, not a stale one.
   if (!d) { clearSchematic(); renderInspect(); return; }
 
-  // Bit-flag states, each drawn at the component it belongs to: the room thermostat on the heating
-  // riser, the BUH step in the BUH label, low-noise mode on the outdoor unit. (Pump and defrost were
-  // already drawn — rotation + "PUMP n%", the ❄ pill + the reversed refrigerant loop.)
+  // Bit-flag states, each drawn at the component it belongs to: the space-heating demand on the
+  // heating riser, the BUH step in the BUH label, low-noise mode on the outdoor unit. (Pump and
+  // defrost were already drawn — rotation + "PUMP n%", the ❄ pill + the reversed refrigerant loop.)
   const pumping = d.pumpOn ?? (d.flow != null ? d.flow > 1 : null);
-  setTxt("svThermo", t(d.thermo ? "chip.thermo_on" : "chip.thermo_off"));
-  $("gThermo").classList.toggle("on", d.thermo === true);
+  setTxt("svSpaceH", t(d.spaceH ? "chip.demand_on" : "chip.demand_off"));
+  $("gSpaceH").classList.toggle("on", d.spaceH === true);
   // A non-breaking space: SVG collapses ordinary leading whitespace in a tspan, which would render
   // the step glued to the label ("BUH2").
   setTxt("svBuh", d.buh2 ? "\u00A02" : d.buh1 ? "\u00A01" : "");
@@ -2046,7 +2063,7 @@ function renderLive() {
   sc.classList.toggle("no-dhw", d.tank == null);
   sc.classList.toggle("no-room", d.room == null);
   sc.classList.toggle("no-pth", d.pth == null);
-  sc.classList.toggle("no-thermo", d.thermo == null);
+  sc.classList.toggle("no-spaceh", d.spaceH == null);
   const onCls = (id, on) => $(id).classList.toggle("on", !!on);
   onCls("fSup1", pumping); onCls("fSup2", pumping); onCls("fSup3", pumping); onCls("fRet", pumping);
   onCls("fTank", pumping && toDhw); onCls("fCoil", pumping && toDhw); onCls("fTankRet", pumping && toDhw);
@@ -2091,7 +2108,10 @@ const INSPECT = {
   status: {
     t: { en: "Operating mode", de: "Betriebsart" },
     re: /i\/u operation mode/i, sample: "I/U Operation Mode",
-    rows: [/i\/u operation mode/i, /(error|fault) code/i],
+    // "Thermostat ON/OFF" belongs HERE, not on the heating riser it used to be drawn on: it is a bit
+    // in the very same status byte as the operating mode above it (0x60/2), and it says the indoor
+    // unit is asking for the compressor — for hot water just as much as for the house.
+    rows: [/i\/u operation mode/i, /thermostat on/i, /(error|fault) code/i],
   },
   ou: {
     t: { en: "Outdoor unit", de: "Außeneinheit" },
@@ -2262,12 +2282,19 @@ const INSPECT = {
       ? { en: "Paused — the valve is feeding the hot-water tank right now.",
           de: "Pausiert — das Ventil versorgt gerade den Warmwasserspeicher." }
       : (d.pumpOn ?? (d.flow != null && d.flow > 1))
-        ? { en: `Being fed at ${degC(d.lwt)} flow${d.thermo === false ? ", though the thermostat is satisfied" : ""}.`,
-            de: `Wird mit ${degC(d.lwt)} Vorlauf versorgt${d.thermo === false ? ", obwohl der Thermostat zufrieden ist" : ""}.` }
+        ? { en: `Being fed at ${degC(d.lwt)} flow${d.spaceH === false ? ", though space heating is not being called for" : ""}.`,
+            de: `Wird mit ${degC(d.lwt)} Vorlauf versorgt${d.spaceH === false ? ", obwohl keine Heizungsanforderung ansteht" : ""}.` }
         : { en: "No circulation — the pump is stopped.", de: "Keine Zirkulation — die Pumpe steht." },
-    rows: [/^indoor ambient temp/i, /^rt setpoint/i, /thermostat on/i],
+    rows: [/^indoor ambient temp/i, /^rt setpoint/i, /^space heating operation/i],
   },
-  thermo: { t: { en: "Room thermostat", de: "Raumthermostat" }, re: /thermostat on/i, sample: "Thermostat ON/OFF" },
+  // The heating riser's demand pill. Its member rows are the room's controlled variable and its
+  // target — what a demand for THIS branch is derived from — and NOT "Thermostat ON/OFF", which
+  // belongs to the indoor unit as a whole and now sits under `status` where that byte lives.
+  spaceh: {
+    t: { en: "Space-heating demand", de: "Heizungsanforderung" },
+    re: /^space heating operation/i, sample: "Space heating Operation ON/OFF",
+    rows: [/^space heating operation/i, /^indoor ambient temp/i, /^rt setpoint/i],
+  },
   room: {
     t: { en: "Room temperature", de: "Raumtemperatur" },
     re: /^indoor ambient temp/i, sample: "Indoor Ambient Temp. (R1T)",
@@ -2393,7 +2420,7 @@ const INSPECT = {
         ? { en: `${degC(d.lwt)} out, ${degC(d.ret)} back — ΔT ${fmt1(d.dt)} K.`,
             de: `${degC(d.lwt)} hin, ${degC(d.ret)} zurück — ΔT ${fmt1(d.dt)} K.` }
         : { en: "No circulation — the pump is stopped.", de: "Keine Zirkulation — die Pumpe steht." },
-    rows: [lwtRow, /inlet water/i, /thermostat on/i],
+    rows: [lwtRow, /inlet water/i, /^space heating operation/i],
   },
   wret: {
     t: { en: "Return pipe", de: "Rücklaufleitung" },
