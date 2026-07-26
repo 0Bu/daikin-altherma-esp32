@@ -17,6 +17,10 @@ struct CachedValue {
     std::string value;   // formatted; empty = not available this cycle
     std::string unit;
     uint8_t     reg = 0; // X10A register page it came from (MQTT groups values by page)
+    uint8_t     off = 0; // byte offset within that page's reply. With `reg` and `unit` it is the
+                         // row's IDENTITY — how logic/history.hpp addresses a trended row, since
+                         // the catalog's labels neither name one quantity consistently nor name
+                         // different quantities differently (see that header). Never displayed.
     int         conv = 0; // converter id that produced `value` — the MQTT bridge re-encodes a binary
                           // row (conv_is_binary) as 1/0, and must key on the same fact that types it
                           // as an HA binary_sensor rather than re-deriving it from the text

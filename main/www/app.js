@@ -66,6 +66,7 @@ const I18N = {
     "conn.error": (e) => "Error: " + e, "conn.connected_to": (s) => "Connected to " + s,
     "conn.aria": (label, state) => `${label}: ${state}. Tap to edit.`,
     "card.model": "Model", "card.hplink": "Heat-pump link", "card.online": "Online",
+    "card.freeheap": "Free memory", "card.maxalloc": "Largest free block",
     "card.offline": "Offline", "card.protocol": "Protocol", "card.rxpin": "RX pin",
     "card.txpin": "TX pin", "card.capacity": "Capacity",
     // Named for the unit it came from: the indoor unit's rated code stands in only when the outdoor
@@ -193,6 +194,7 @@ const I18N = {
     "conn.error": (e) => "Fehler: " + e, "conn.connected_to": (s) => "Verbunden mit " + s,
     "conn.aria": (label, state) => `${label}: ${state}. Zum Bearbeiten tippen.`,
     "card.model": "Modell", "card.hplink": "Wärmepumpen-Verbindung", "card.online": "Online",
+    "card.freeheap": "Freier Speicher", "card.maxalloc": "Größter freier Block",
     "card.offline": "Offline", "card.protocol": "Protokoll", "card.rxpin": "RX-Pin",
     "card.txpin": "TX-Pin", "card.capacity": "Leistung",
     "card.capacity_iu": "Leistung (Inneneinheit)",
@@ -324,6 +326,9 @@ const S = {
   insp: null,
   live: null,
   inspSig: "",
+  // The inspector's trend is diffed separately from the rest of the card: it changes on a fetch or a
+  // pin, not on a live value, and re-emitting a plot every second would fight the cursor on it.
+  inspHistSig: "",
   // OTA: the version a check found (drives the header version's tooltip), and whether a check or
   // download is running. Separate from S.busy — S.busy is the "a config write is landing" lock the
   // OTA flow also takes, otaBusy is what keeps a second tap from starting a parallel check.
@@ -359,9 +364,11 @@ function goBack() { go(PARENT[S.stage] || "dashboard"); }
 // a push arrives ~1×/s, and a rebuild landing between mousedown and mouseup destroys the element
 // under the finger, so the browser fires NO click at all — the tap is lost with nothing logged.
 //
-//   1. Markup unchanged → don't write. Enough on its own for #connTile and #settingsCards, whose
-//      rows are stable between pushes (the ESP32 card's uptime/heap/reset rows were dropped, so
-//      nothing on it ticks per second).
+//   1. Markup unchanged → don't write. Enough on its own for #connTile, whose rows are stable
+//      between pushes. NOT enough for #settingsCards any more: the ESP32 card carries the two
+//      board-memory rows again, and free heap moves every second, so this check degrades to a plain
+//      write there exactly as it does for the value grid — which is why guard 2 below is armed on
+//      all three containers and not only on the one that obviously needed it.
 //   2. A click is in flight → don't write. Needed because #valueGroups carries LIVE readings: its
 //      markup differs on almost every push, so check 1 degrades to a plain write there and cannot
 //      help. Without this the value rows lost 3–60 % of taps depending on how long the button was
@@ -969,8 +976,44 @@ function esp32CardHtml() {
     firmwareRow(s.version) +
     channelRow(s.ota?.channel === "dev" ? "dev" : "release") +
     boardRow() +
+    // Link facts, then the settings, then the board's own health, then the one ACTION. The memory
+    // rows land here rather than after the bug row because "Report a bug" is the escape hatch for
+    // everything above it — including these two curves, which are exactly what a report about a
+    // failed update or a dropped broker wants to carry.
+    memoryRows(s.sys || {}) +
     bugRow();
   return vcard("ESP32", rows);
+}
+
+// Bytes as whole KiB — the same unit the firmware's own trend stores (logic/history.hpp), so the row
+// and the chart under it cannot disagree about what the number is. Whole KiB rather than a decimal:
+// the row is rebuilt on every poll, and a tenth of a KiB ticking once a second is noise, not news.
+const fmtKiB = (b) => (b == null ? "—" : `${Math.round(b / 1024)} KiB`);
+
+// The board's own memory: free heap and the largest CONTIGUOUS free block. These two are back on the
+// card after #186 dropped them, and the reason they are worth their space now is the reason they
+// were not then: each carries a 24-HOUR TREND. As spot numbers they were a diagnosis nobody could
+// make — "148 KiB" says nothing without the last day of it — and a diagnosis is what the /status
+// endpoint and the MQTT heartbeat are for. As curves they answer the one memory question this
+// firmware actually has: is it DRIFTING? A leak shows as a slope; fragmentation shows as the two
+// lines separating, free heap holding while the largest block sinks. Nothing else in the UI can say
+// that, and it is the failure mode the whole "Memory constraints" section of CLAUDE.md is about.
+//
+// Both rows are expandable exactly like a value row — same accordion, same chart, same scrub and pin
+// — and attach their series by TREND ID, since the row labels here are translated and there is no
+// catalog label to match on.
+function memoryRows(sys) {
+  const row = (id, labelKey, bytes) => {
+    const label = t(labelKey);
+    const d = MODEL_DESCRIPTIONS[id];
+    const hid = hasHist(id) ? id : "";      // absent on firmware that predates the trend
+    const val = esc(fmtKiB(bytes));
+    if (!hid && !d) return vrow(label, fmtKiB(bytes), { cls: "mono num" });
+    return descAccordion(`board:${id}`, label, val, "mono num",
+                         (d ? descBodyHtml(d) : "") + histHtml(hid, "KiB", label), hid);
+  };
+  return row("free_heap", "card.freeheap", sys.free_heap) +
+         row("max_alloc", "card.maxalloc", sys.max_alloc);
 }
 
 // The board's own onboard parts — status indicator + recovery button — as ONE summary row that
@@ -1147,6 +1190,9 @@ function renderSettings() {
   // the page reload the install ends in. It freezes that card ALONE — the Connections tile carries
   // no part of the readout, and a WiFi or broker link going down during a download is exactly the
   // thing a user would want to see move.
+  // …and the third reason, since the ESP32 card carries charts again: a rebuild under an active
+  // pointer drops its capture and kills the scrub mid-drag (renderCards has the same guard).
+  if (S.scrub) return;
   const a = document.activeElement;
   const picking = !!(a && a.classList && (a.classList.contains("pin-sel") || a.classList.contains("chan-sel")));
   if (!picking) setHtml("connTile", connectionsHtml());
@@ -1551,15 +1597,26 @@ function descBodyHtml(d) {
 // labels it resolved. The browser never pattern-matches its own candidates: offering a trend for a
 // row the device isn't buffering would be a chart that can only ever be empty.
 // Each entry is {id, label}: the ID is the concept (logic/history.hpp's TRENDS — "dhw_tank",
-// "outdoor_air", …) and is what GET /history takes, while the LABEL is how this profile spells the
-// row. Requesting by id keeps the route model-independent; matching by label is how a rendered row
-// finds its own trend. Adding a trend is a row in TRENDS — nothing here changes.
+// "outdoor_air", "free_heap", …) and is what GET /history takes, while the LABEL is how this profile
+// spells the row. Requesting by id keeps the route model-independent; matching by label is how a
+// rendered VALUE row finds its own trend. Adding a trend is a row in TRENDS — nothing here changes.
+//
+// Everything below is keyed by the ID, never by the label. Two reasons, and the second is why this
+// was changed: a label is per-profile, so a cache keyed by it would be re-keyed by a model change
+// mid-session — and not every trended thing IS a catalog row. The board's own memory (free_heap,
+// max_alloc) is drawn on the Settings ESP32 card, whose row labels are TRANSLATED, so there is no
+// label to match on at all; it attaches by id like the firmware always intended.
 function histSpec() { const h = S.status && S.status.history; return h && Array.isArray(h.rows) ? h : null; }
 function histFor(label) {
   const h = histSpec();
   return h ? h.rows.find((r) => r && r.label === label) || null : null;
 }
-function hasHist(label) { return !!histFor(label); }
+// The trend id for a rendered value-row label, or "" when the device buffers no series for it.
+function histIdFor(label) { const r = histFor(label); return r ? r.id : ""; }
+// Is the device keeping this series? Asked by ID — a board row has no catalog label to look up, and
+// a firmware that predates a trend simply reports fewer rows, so its card draws no chart at all
+// rather than an empty one.
+function hasHist(id) { return !!id && !!histSpec() && histSpec().rows.some((r) => r && r.id === id); }
 
 // Was sample `i` absent because the outdoor unit was ASLEEP rather than because something failed to
 // measure? The firmware decides it (logic/history.hpp — pages 0x20/0x21 keep answering with the last
@@ -1575,13 +1632,13 @@ function histHeld(h, i) {
 // Fetch a row's series at most once a minute. The buffer moves one sample per `dt` (300 s), so a
 // per-poll refetch would send ~300 identical responses per new data point — and each response is a
 // ~1 KB contiguous string on the single httpd task (CLAUDE.md → Memory constraints).
-async function ensureHist(label) {
-  if (!hasHist(label) || S.histBusy.has(label)) return;
-  const c = S.hist.get(label);
+async function ensureHist(id) {
+  if (!hasHist(id) || S.histBusy.has(id)) return;
+  const c = S.hist.get(id);
   if (c && Date.now() - c.at < 60000) return;
-  S.histBusy.add(label);
+  S.histBusy.add(id);
   try {
-    const r = await fetch("/history?row=" + encodeURIComponent(histFor(label).id));
+    const r = await fetch("/history?row=" + encodeURIComponent(id));
     const j = await r.json();
     // t0 = the unix instant of sample 0, present only when the device's SNTP clock is synced. Null
     // means the scrub readout falls back to an AGE ("vor 6.3 h") — never a fabricated wall-clock
@@ -1589,15 +1646,15 @@ async function ensureHist(label) {
     // `gen` counts fetches. It is what makes an index-anchored pin (no wall clock on the device)
     // honest: such a pin is only valid for the exact series it was made on, and a refetch may have
     // rolled the ring — so it is dropped rather than re-pointed at a different sample.
-    const gen = ((S.hist.get(label) || {}).gen || 0) + 1;
-    S.hist.set(label, { at: Date.now(), gen, dt: +j.dt || 300, unit: j.unit || "",
+    const gen = ((S.hist.get(id) || {}).gen || 0) + 1;
+    S.hist.set(id, { at: Date.now(), gen, dt: +j.dt || 300, unit: j.unit || "",
                         t0: typeof j.t0 === "number" ? j.t0 : null,
                         held: Array.isArray(j.held) ? j.held : [],
                         v: Array.isArray(j.v) ? j.v : [] });
   } catch (e) {
-    S.hist.set(label, { at: Date.now(), err: true, v: [] });
+    S.hist.set(id, { at: Date.now(), err: true, v: [] });
   } finally {
-    S.histBusy.delete(label); renderApp();
+    S.histBusy.delete(id); renderApp();
   }
 }
 
@@ -1631,9 +1688,9 @@ function histScale(pts) {
 // GAPS (a timed-out register, or a reading reading_plausible() refused) and must break the line —
 // interpolating across them would draw a measurement that was never taken, which is exactly the
 // failure the blanked pills elsewhere in this UI exist to prevent.
-function histHtml(label, unit) {
-  if (!hasHist(label)) return "";
-  const h = S.hist.get(label);
+function histHtml(id, unit, name) {
+  if (!hasHist(id)) return "";
+  const h = S.hist.get(id);
   const wrap = (body, cls) => `<div class="vhist${cls ? " " + cls : ""}">${body}</div>`;
   if (!h) return wrap(`<div class="vhist-note">${esc(t("hist.loading"))}</div>`, "vhist-flat");
   if (h.err) return wrap(`<div class="vhist-note">${esc(t("hist.err"))}</div>`, "vhist-flat");
@@ -1709,7 +1766,7 @@ function histHtml(label, unit) {
   // the whole reason it survives the ~1×/s rebuild that made the old hold-to-read behaviour necessary.
   // Its instant is re-resolved here on every render, so the pin follows its measurement as the ring
   // rolls and disappears once that measurement has left the day.
-  const pi = histPinIndex(label, h);
+  const pi = histPinIndex(id, h);
   let pinTip = "", pinCross = "", pinMark = "";
   if (pi >= 0) {
     const px = (scrubFrac(pi, n) * 100).toFixed(3);
@@ -1724,8 +1781,8 @@ function histHtml(label, unit) {
     `<span class="vhist-range mono num">${esc(rng)}</span></div>` +
     `<div class="vhist-graph${pi >= 0 ? " has-pin" : ""}">` +
       `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +
-      `<div class="vhist-plot" data-hist="${esc(label)}" data-n="${n}" tabindex="0" role="img"` +
-        ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", label, pi >= 0 ? scrubText(h, pi) : ""))}">` +
+      `<div class="vhist-plot" data-hist="${esc(id)}" data-n="${n}" tabindex="0" role="img"` +
+        ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", name || id, pi >= 0 ? scrubText(h, pi) : ""))}">` +
         `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${area}${line}${dots}</svg>` +
         dot + pinCross + pinMark +
         `<span class="vhist-cross vhist-live" hidden></span><span class="vhist-mark vhist-live" hidden></span>` +
@@ -1759,8 +1816,8 @@ function scrubFrac(i, n) { return n <= 1 ? 1 : i / (n - 1); }
 // history_pin_index() rule (logic/history.hpp). A pin whose instant has rolled off the back of the
 // day resolves to -1 and is dropped, rather than clamped to the oldest sample: clamping would leave
 // a readout on screen while silently changing which moment it describes.
-function histPinIndex(label, h) {
-  const p = S.histPin.get(label);
+function histPinIndex(id, h) {
+  const p = S.histPin.get(id);
   if (!p || !h || !h.v.length) return -1;
   if (p.t != null) {
     if (h.t0 == null) return -1;                 // pinned with a clock, re-resolving without one
@@ -1772,20 +1829,20 @@ function histPinIndex(label, h) {
 }
 // Pin sample `i` of `label`, or UNPIN when that same sample is already pinned — tapping the readout
 // you just made is the obvious way to dismiss it, and needs no extra affordance on a 72 px plot.
-function histPinToggle(label, i) {
-  const h = S.hist.get(label);
+function histPinToggle(id, i) {
+  const h = S.hist.get(id);
   if (!h || !h.v.length) return;
   i = Math.max(0, Math.min(h.v.length - 1, i));
-  if (histPinIndex(label, h) === i) S.histPin.delete(label);
-  else if (h.t0 != null) S.histPin.set(label, { t: h.t0 + i * h.dt });
-  else S.histPin.set(label, { i, gen: h.gen });
+  if (histPinIndex(id, h) === i) S.histPin.delete(id);
+  else if (h.t0 != null) S.histPin.set(id, { t: h.t0 + i * h.dt });
+  else S.histPin.set(id, { i, gen: h.gen });
   // Render PAST the click guard. That guard exists to stop a POLL from replacing the DOM in the
   // middle of a click; it must not delay the very update the click just asked for — a pin that
   // appeared 600 ms after the finger lifted would read as the same "it didn't take" the pin was
   // added to fix. The scrub guard is left alone: a drag still in progress owns the DOM.
   if (S.scrub) return;
   S.clickHold = false;
-  renderCards();
+  renderTrendHosts();
 }
 
 // The label under the cursor: the sample's wall-clock time when the device had a synced clock
@@ -1871,8 +1928,14 @@ function scrubEnd(plot) {
     plot.querySelector(".vhist-mark.vhist-live").hidden = true;
     plot.parentElement.querySelector(".vhist-tip.vhist-live").hidden = true;
   }
-  if (S.scrub) { S.scrub = null; renderCards(); }   // resume the frozen per-poll rebuild
+  if (S.scrub) { S.scrub = null; renderTrendHosts(); }   // resume the frozen per-poll rebuild
 }
+
+// The three places a trend is drawn — the value row's explainer, the schematic inspector and the
+// ESP32 card's memory rows — resume together. They are frozen by the same S.scrub and two of them
+// can hold the SAME series at once, so a resume that refreshed only one would leave another showing
+// a pin the user has since moved.
+function renderTrendHosts() { renderCards(); renderInspect(); renderSettings(); }
 
 const chevIcon = `<svg class="vrow-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>`;
 
@@ -1880,10 +1943,14 @@ const chevIcon = `<svg class="vrow-chev" width="13" height="13" viewBox="0 0 24 
 // the value list (vDescRow) and the Model card (modelDescRow) so the two cannot drift into two
 // slightly different accordions; `key` is what S.descOpen remembers across the per-poll rebuild, and
 // `valHtml` is pre-built markup (it carries the unit <span>), so it is NOT escaped here.
-function descAccordion(key, label, valHtml, cls, bodyHtml) {
+// `trendId` is the series the panel carries, if any: the toggle fetches and un-pins by it, so the
+// id is derived ONCE (here, where the body was built) instead of again from the key — which for a
+// board row is not a catalog label and could not be looked up at all.
+function descAccordion(key, label, valHtml, cls, bodyHtml, trendId) {
   const open = S.descOpen.has(key);
   return `<div class="vitem${open ? " open" : ""}">` +
-    `<button class="vrow vrow-desc" type="button" data-desc="${esc(key)}" aria-expanded="${open ? "true" : "false"}">` +
+    `<button class="vrow vrow-desc" type="button" data-desc="${esc(key)}"` +
+    (trendId ? ` data-trend="${esc(trendId)}"` : "") + ` aria-expanded="${open ? "true" : "false"}">` +
     `<span class="vrow-label">${esc(label)}</span>` +
     `<span class="vrow-end"><span class="vrow-val ${cls}">${valHtml}</span>${chevIcon}</span>` +
     `</button>` +
@@ -1899,19 +1966,25 @@ function vDescRow(v) {
   const val = esc(v.value == null ? "—" : String(v.value)) +
     (v.unit ? `<span class="vrow-unit">${esc(v.unit)}</span>` : "");
   const d = descFor(label);
+  const hid = histIdFor(label);          // this profile's spelling -> the concept the device buffers
   // A row is expandable if it has an explainer OR a trend — the two are independent (the firmware
   // picks historied rows structurally, the explainer table matches labels), so keying the accordion
   // on the description alone would hide a series the device is keeping.
-  if (!d && !hasHist(label)) {
+  if (!d && !hid) {
     return `<div class="vrow"><span class="vrow-label">${esc(label)}</span>` +
       `<span class="vrow-val ${cls}">${val}</span></div>`;
   }
   // Body = the explainer (when the label has one) followed by the trend (when the firmware keeps a
   // series for it). Either half may be absent, which is why the builder takes finished body markup
   // rather than a description: a trend-only row has no `d` at all.
-  return descAccordion(label, label, val, cls, (d ? descBodyHtml(d) : "") + histHtml(label, v.unit));
+  return descAccordion(label, label, val, cls,
+                       (d ? descBodyHtml(d) : "") + histHtml(hid, v.unit, label), hid);
 }
-// ── Model-card descriptions ──────────────────────────────────────────────────────────────────────
+// ── Explainers for rows that are NOT catalog readings ────────────────────────────────────────────
+// The Model card's rows and the ESP32 card's two memory rows. Keeps the MODEL_DESCRIPTIONS name the
+// description gate parses (tools/descriptions/check_descriptions.mjs) — what it enforces here is the
+// German copy, and that applies to every entry regardless of which card shows it.
+//
 // The Model card's rows are the ones that most need explaining and were the last with no explainer:
 // they answer questions the reader did not ask ("possible models" — why more than one? "outdoor unit
 // ID" — for what?) in vocabulary taken from the bus. #184 added the two rows precisely so an
@@ -1926,6 +1999,19 @@ function vDescRow(v) {
 // (tools/descriptions/check_descriptions.mjs), which is exactly right — it audits the catalog, and
 // these rows have no catalog to audit against.
 const MODEL_DESCRIPTIONS = {
+  // The two board-memory rows on the ESP32 card. The copy has one job beyond naming the number: to
+  // say what the SHAPE of the curve means, because that is the whole reason these rows exist rather
+  // than living on /status alone.
+  free_heap: {
+    what: "How much RAM the firmware still has free right now. It moves constantly — every WiFi packet, MQTT publish and web request borrows some — so the number itself matters far less than the 24-hour line under it.",
+    normal: "a flat or gently breathing line. A steady downward slope over hours is a leak; a sudden drop that never recovers happened at whatever the device was doing at that moment. A reboot resets the line, because the buffer lives in RAM too.",
+    de: { what: "Wie viel RAM der Firmware gerade noch frei ist. Der Wert schwankt ständig — jedes WLAN-Paket, jede MQTT-Veröffentlichung und jeder Web-Aufruf leiht sich etwas —, deshalb zählt die 24-Stunden-Linie darunter weit mehr als die Zahl selbst.",
+          normal: "eine flache oder leicht atmende Linie. Ein stetiges Absinken über Stunden ist ein Leck; ein plötzlicher Absturz, der sich nicht erholt, geschah bei dem, was das Gerät in diesem Moment gerade tat. Ein Neustart setzt die Linie zurück, denn auch dieser Speicher liegt im RAM." } },
+  max_alloc: {
+    what: "The largest single block that is still free in one piece. This — not the total — is what actually limits this board: a TLS handshake or an OTA download needs one contiguous block, and a heap that is half free but finely shredded will refuse it.",
+    normal: "it tracks below free heap and should keep a comfortable distance above zero. The telling shape is the two lines SEPARATING over hours: free memory holding while this one sinks is fragmentation, and it ends in a failed update or a dropped broker connection long before the device runs out of RAM.",
+    de: { what: "Der größte noch am Stück freie Block. Er — nicht die Summe — ist die eigentliche Grenze dieses Boards: Ein TLS-Handshake oder ein OTA-Download braucht einen zusammenhängenden Block, und ein zur Hälfte freier, aber fein zerstückelter Speicher verweigert ihn.",
+          normal: "er verläuft unterhalb des freien Speichers und sollte deutlichen Abstand zu null halten. Aussagekräftig ist, wenn sich die beiden Linien über Stunden AUSEINANDER bewegen: bleibt der freie Speicher stehen, während dieser sinkt, ist das Fragmentierung — sie endet in einem fehlgeschlagenen Update oder einer abgebrochenen Broker-Verbindung, lange bevor der Speicher wirklich ausgeht." } },
   capacity: {
     what: "The outdoor unit's rated capacity, read from its own identification page. It is a size class of the hardware — what the unit is built for, not what it is producing right now.",
     de: { what: "Die Nennleistung der Außeneinheit, aus ihrer eigenen Kennungsseite gelesen. Eine Größenklasse der Hardware — wofür das Gerät gebaut ist, nicht was es gerade liefert." } },
@@ -1977,15 +2063,16 @@ function modelDescRow(id, label, value, opt = {}) {
 function toggleDesc(btn) {
   const item = btn.closest(".vitem");
   if (!item) return;
-  const label = btn.dataset.desc || "";
+  const key = btn.dataset.desc || "";
+  const trend = btn.dataset.trend || "";
   const open = !item.classList.contains("open");
   item.classList.toggle("open", open);
   btn.setAttribute("aria-expanded", open ? "true" : "false");
-  if (open) S.descOpen.add(label);
-  else { S.descOpen.delete(label); S.histPin.delete(label); }
-  // Fetch the trend only once the panel is actually opened — a device that buffers several rows
+  if (open) S.descOpen.add(key);
+  else { S.descOpen.delete(key); if (trend) S.histPin.delete(trend); }
+  // Fetch the trend only once the panel is actually opened — a device that buffers eleven series
   // would otherwise answer a request per row on every page load, for panels nobody looked at.
-  if (open) ensureHist(label);
+  if (open && trend) ensureHist(trend);
 }
 
 // Heat-pump value groups (grouped by domain, §6) as card markup. Hidden entirely while the
@@ -2679,8 +2766,38 @@ function inspectSig(e) {
   return [S.insp, inspVal(row, d), d && e.head ? e.head(d) : "", inspNowText(e, d) || "", rows].join("|");
 }
 
+// The trend under the inspector: the same sparkline the value list draws (histHtml), for the row
+// this target is ACTUALLY drawn from — `inspRow`, not the concept. That is what makes it right on a
+// pill with a fallback source: while the high side reads the refrigerant sensor instead of the
+// frozen HP transducer, the headline, the mono source line and this chart all resolve the one row.
+// A target with no row (ΔT, COP, the estimated kW — derived numbers) gets no chart at all rather
+// than the chart of one of its inputs.
+//
+// Written on its OWN signature, not the inspector's: the card re-renders whenever a live value
+// changes (~1×/s), and re-emitting the plot that often would tear down a crosshair mid-read and
+// restart the CSS transition. Only a new series (`gen`) or a moved pin actually changes the markup.
+function renderInspectHist(row) {
+  const id = row ? histIdFor(row.label) : "";
+  if (id) ensureHist(id);                  // throttled to once a minute inside; no-op once cached
+  const h = id ? S.hist.get(id) : null;
+  const pin = id ? S.histPin.get(id) : null;
+  const sig = [id, h ? (h.err ? "e" : h.gen) : "", pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
+  if (sig === S.inspHistSig) return;
+  S.inspHistSig = sig;
+  const el = $("inspHist");
+  el.hidden = !id;
+  el.innerHTML = id ? histHtml(id, row.unit, row.label) : "";
+}
+
 function renderInspect() {
   const e = S.insp ? INSPECT[S.insp] : null;
+  // Frozen while a trend is being scrubbed, for the reason renderCards is: a rebuild under an active
+  // pointer drops the capture and kills the gesture. The inspector's chart is one of the two places
+  // a scrub can start, so the freeze has to cover this card too — scrubEnd resumes both.
+  if (S.scrub) return;
+  // The chart is decided ahead of the early return below, because its own state moves independently
+  // of the card's: the series arrives from an async fetch that changes no live value.
+  renderInspectHist(S.live && e ? inspRow(e) : null);
   // This runs on EVERY poll so an open explainer tracks the live values — but writing innerHTML each
   // second would collapse a text selection the user is mid-read of. Diff the rendered result first
   // and touch the DOM only when something actually changed.
@@ -3358,21 +3475,20 @@ function wire() {
   // Trend scrubbing, delegated for the same reason (the grid is rebuilt every poll). Hover reads
   // out without claiming anything; a press claims the pointer so the readout survives leaving the
   // plot mid-drag, and freezes the rebuild until release.
-  const gv = $("valueGroups");
-  gv.addEventListener("pointermove", (e) => {
-    const plot = e.target.closest("[data-hist]");
-    if (!plot) return;
-    if (S.scrub && S.scrub !== plot.dataset.hist) return;
-    if (S.scrub) scrubArm(plot);              // a live drag keeps re-arming the watchdog
-    scrubMove(plot, scrubIndex(plot, e.clientX));
-  });
-  // EVERY pointerdown in the grid holds the rebuild until its click resolves — see renderCards.
-  // Registered before the plot-specific handler below and deliberately unfiltered: the row headers
+  //
+  // Wired on BOTH containers that can hold a plot — the value grid and the schematic inspector —
+  // from one function, so the two can never drift into two slightly different scrub behaviours.
+  // Every lookup inside is scoped to the plot the event came from (`closest`, then the plot's own
+  // children), never a document-wide id: the same row's chart can be on screen twice at once, and a
+  // global lookup would move the cursor on whichever copy happened to be first in the DOM.
+  //
+  // EVERY pointerdown in a per-poll container holds the rebuild until its click resolves — see
+  // renderCards. Registered before the plot handlers and deliberately unfiltered: the row headers
   // are the rows people actually tap, and they are not plots.
-  // Arm the click-in-flight hold from EVERY per-poll container that setHtml guards, not just this
-  // one: #settingsCards and #connTile rely on the unchanged-markup check alone, which protects them
-  // only while their markup is stable — a real state change landing on the exact tap that opens a
-  // config modal would still be lost. Same guard, same three containers, one rule.
+  // Arm the click-in-flight hold from EVERY per-poll container that setHtml guards, not just the
+  // value grid: #settingsCards and #connTile rely on the unchanged-markup check alone, which
+  // protects them only while their markup is stable — a real state change landing on the exact tap
+  // that opens a config modal would still be lost. Same guard, same three containers, one rule.
   for (const id of ["valueGroups", "settingsCards", "connTile"]) {
     const el = $(id);
     el.addEventListener("pointerdown", () => clickHold(CLICK_HOLD_DOWN_MS));
@@ -3380,7 +3496,34 @@ function wire() {
     // trend fetch all happen after the finger is up.
     for (const ev of ["pointerup", "pointercancel"]) el.addEventListener(ev, () => clickHold(CLICK_HOLD_UP_MS));
   }
+  for (const host of ["valueGroups", "inspCard", "settingsCards"]) wireTrendScrub($(host));
 
+  // Schematic inspector: the SVG hit targets are <g> elements, so Enter/Space need handling by hand
+  // (a <g role="button"> gets no native activation). Delegated, because the SVG is static DOM.
+  $("schem").addEventListener("click", (e) => {
+    const hit = e.target.closest("[data-insp]");
+    if (hit) inspectPick(hit.dataset.insp);
+  });
+  $("schem").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const hit = e.target.closest("[data-insp]");
+    if (!hit) return;
+    e.preventDefault();          // Space would otherwise scroll the page
+    inspectPick(hit.dataset.insp);
+  });
+  $("inspClose").onclick = () => { S.insp = null; renderInspect(); };
+  wireRestOfApp();
+}
+
+// Pointer + keyboard scrubbing for every trend plot inside `gv`.
+function wireTrendScrub(gv) {
+  gv.addEventListener("pointermove", (e) => {
+    const plot = e.target.closest("[data-hist]");
+    if (!plot) return;
+    if (S.scrub && S.scrub !== plot.dataset.hist) return;
+    if (S.scrub) scrubArm(plot);              // a live drag keeps re-arming the watchdog
+    scrubMove(plot, scrubIndex(plot, e.clientX));
+  });
   gv.addEventListener("pointerdown", (e) => {
     const plot = e.target.closest("[data-hist]");
     if (!plot) return;
@@ -3430,7 +3573,7 @@ function wire() {
     const step = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
     if (!step && !["Home", "End", "Escape", "Enter", " "].includes(e.key)) return;
     e.preventDefault();                       // arrows would otherwise scroll the page
-    if (e.key === "Escape") { S.histPin.delete(plot.dataset.hist); scrubEnd(plot); return renderCards(); }
+    if (e.key === "Escape") { S.histPin.delete(plot.dataset.hist); scrubEnd(plot); return renderTrendHosts(); }
     if (e.key === "Enter" || e.key === " ") {   // pin what the arrow keys are reading out
       const cur = plot.dataset.cur == null ? n - 1 : +plot.dataset.cur;
       return histPinToggle(plot.dataset.hist, cur);
@@ -3444,27 +3587,22 @@ function wire() {
     const plot = e.target.closest("[data-hist]");
     if (plot) { delete plot.dataset.cur; scrubEnd(plot); }
   });
-  // Schematic inspector: the SVG hit targets are <g> elements, so Enter/Space need handling by hand
-  // (a <g role="button"> gets no native activation). Delegated, because the SVG is static DOM.
-  $("schem").addEventListener("click", (e) => {
-    const hit = e.target.closest("[data-insp]");
-    if (hit) inspectPick(hit.dataset.insp);
-  });
-  $("schem").addEventListener("keydown", (e) => {
-    if (e.key !== "Enter" && e.key !== " ") return;
-    const hit = e.target.closest("[data-insp]");
-    if (!hit) return;
-    e.preventDefault();          // Space would otherwise scroll the page
-    inspectPick(hit.dataset.insp);
-  });
-  $("inspClose").onclick = () => { S.insp = null; renderInspect(); };
+}
 
+// The remaining delegated wiring, split out only so the scrub handlers above can be a function of
+// their container — same one-time setup, same order as before.
+function wireRestOfApp() {
   // The ESP32 card (#settingsCards) is rebuilt every poll too, so its controls are delegated as
   // well: the Hardware row opens the board modal, the Firmware row runs the OTA check, and the
   // RX/TX dropdowns re-run pin auto-detection on change. The check stays on this screen — it
   // reports into the Firmware row's own slot (otaInline paints both slots), so nothing has to
   // navigate to make the flow visible.
   $("settingsCards").addEventListener("click", (e) => {
+    // A scrub that ended on a memory row's chart must not fall through to the accordion header and
+    // collapse the panel the user was reading — the same guard #valueGroups carries.
+    if (e.target.closest("[data-hist]")) return;
+    const desc = e.target.closest("[data-desc]");
+    if (desc) return toggleDesc(desc);        // the two memory rows expand like any value row
     const act = e.target.closest("[data-act]");
     if (!act) return;
     if (act.dataset.act === "board") openBoard();

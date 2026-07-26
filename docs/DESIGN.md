@@ -148,9 +148,9 @@ undone by the credential rollback — sticky until the next one; drives the roll
 checkbox),
 `hp{proto,rx,tx,connected,last_ok_s,…}`, `profile{id}`,
 `sys{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode}` (heap headroom + last boot reason,
-always present; of these the UI reads only `safe_mode`, for the recovery banner — the heap and reset
-figures are diagnostics served to `/status` readers, the MQTT heartbeat's diagnostic entities and
-`/diag`, and are no longer rows on the ESP32 card),
+always present; the UI reads `safe_mode` for the recovery banner and `free_heap`/`max_alloc` for the
+ESP32 card's two trended memory rows (§5.6) — `min_free_heap` and the reset reason stay diagnostics
+served to `/status` readers, the MQTT heartbeat's diagnostic entities and `/diag`),
 `ota{channel}` (`"release"` | `"dev"` — which published feed the next update check reads; the
 SETTING, not the running build, since a device can be set to a channel it has not installed from
 yet — drives the ESP32 card's Update-channel select, §5.4),
@@ -502,15 +502,35 @@ Body, ordered:
    it draws actually changed — an unconditional rebuild would collapse a text selection mid-read.
    Nothing in this section hides when the X10A link drops (§8): the schematic and its inspector stay,
    blanked to "—" (item 1), because they carry the status block that says why.
-   **There is no trend/history CARD** — but selected value rows carry a 24-hour trend inside their
-   explainer (§6). The original rule here refused history outright, on the premise that "the firmware
-   stores no history and a browser-side ring buffer is lost on every reload". The first half of that
-   premise no longer holds: the firmware keeps a fixed-cadence ring per trended row
-   (`logic/history.hpp`, served by `GET /history`), so the series survives a page reload and a second
-   browser. The second half still decides the *shape* of the feature — long-term analysis belongs to
-   Home Assistant/Grafana, which hold the real series across reboots and years. So: no card, no
-   dashboard-level charting, no range picker. One sparkline, in the panel of the row it belongs to,
-   for a day at a 5-minute raster. Three rules it inherits from the rest of this document:
+   **There is no trend/history CARD** — but a trended row carries a 24-hour sparkline in its value-row
+   explainer (§6) *and* here, under this inspector's explainer text. The original rule refused history
+   outright, on the premise that "the firmware stores no history and a browser-side ring buffer is
+   lost on every reload". The first half of that premise no longer holds: the firmware keeps a
+   fixed-cadence ring per trended row (`logic/history.hpp`, served by `GET /history`), so the series
+   survives a page reload and a second browser. The second half still decides the *shape* of the
+   feature — long-term analysis belongs to Home Assistant/Grafana, which hold the real series across
+   reboots and years. So: no card, no dashboard-level charting, no range picker. One sparkline, in the
+   panel of the row it belongs to, for a day at a 5-minute raster.
+   **In the inspector it is the same sparkline, for the row the pill RESOLVED** — `inspRow`, not the
+   concept the target is named for. That is what keeps it right on a pill with a fallback source: while
+   the high side reads the refrigerant sensor instead of the frozen HP transducer, the headline, the
+   mono source line and the chart are one row. A target with no row of its own — ΔT, COP, the
+   estimated kW, an assembly like the outdoor unit — gets **no** chart, for the same reason it gets no
+   headline: charting one of its inputs under its name would attribute a series to a quantity nobody
+   measured.
+   **A chart under a BLANKED pill is not a way to get the number back.** The outdoor pills blank
+   while the unit rests, and their series is held-over for exactly those samples — so the curve draws
+   a gap there, the "now" marker is absent (it only exists where the newest sample is a reading), and
+   scrubbing that stretch reads "Außeneinheit ruht", never a value. The chart says what the day held;
+   it never states a present reading the pill above it has just refused. Anything that would draw the
+   last *known* sample as the live end — a clamped marker, an interpolated tail — breaks that and is
+   the §5.3-item-3 substitution failure with a 24-hour axis in front of it. The nine trended rows are the plant's own working set (leaving/return water, tank, water
+   pressure, flow, pump signal, refrigerant pressure, compressor rps, outdoor air), so most pills that
+   name a measurement now open onto one. A pill whose row the firmware does not buffer simply has no
+   chart — including the high-side pill on the *other* leg of its fallback, when a running compressor
+   hands it the `0x20` HP transducer instead of the always-live refrigerant sensor. That is the honest
+   answer and not a gap to paper over: the transducer freezes with its page, and on the measured unit
+   it reads 0.0 bar even at 42 rps, so a ring on it would be a chart that is empty or false. Four rules the chart inherits from the rest of this document:
    - **The axis states the span actually held.** The rings are RAM (persisting them would be ~100k
      NVS writes a year in the partition holding the WiFi credentials), so every `/set_*` and every
      OTA empties them. A fresh device reads "Seit Neustart · 1 h", never a 24-hour axis padded with
@@ -535,6 +555,13 @@ Body, ordered:
      **dropped, not clamped** to the oldest sample: clamping would keep a readout on screen while
      silently changing which moment it describes. The resolution rule is host-tested
      (`logic/history.hpp`'s `history_pin_index`) for the same reason the other browser rules are.
+     The pin is keyed by the ROW, not by the chart, so the same row open in both places (a pill in the
+     picture and its line in the value list) shows one pinned moment in both — two copies of a chart
+     disagreeing about which sample is pinned would be the same substitution failure the anchor rule
+     exists to prevent. Both charts are frozen while either is being scrubbed, and both resume
+     together: a resume that refreshed only one would leave the other showing a pin the user has since
+     moved. Closing the *inspector* therefore leaves the pin alone — it belongs to the row, which may
+     still be open in the value list — while collapsing a value row's own panel clears it, as before.
 4. **Model card** — styled exactly like the value groups (§6), full-width below the live section:
    the model name (full-width heading) + detected capacity, from `detect{capacity_kw,
    capacity_kw_iu, model}`. Both are bus-derived, so they show **only while the link is live**
@@ -839,13 +866,28 @@ dashboard — the move changed where the configuration lives, not how it looks:
    detected, else a usable-GPIO dropdown (§5.2) — and the **Hardware** row (status indicator +
    recovery-button pins), which opens the board-hardware modal. From
    `pins_avail`, `hp{proto,rx,tx,connected,last_ok_s}`,
-   `board{…}`. It carries **no board telemetry** — chip (`platform`), uptime (`uptime_s`),
-   **Last reset** (`sys.reset_reason`) and **Free heap** (`sys.free_heap`) were rows here through
-   v1.0.14 and are gone: Settings states what the board is **set to**, and four read-only numbers
-   nobody acts on from this screen only pushed the settings that ARE actionable further down it.
-   None of it is lost — the running version stays on the card and in the header, and the chip, reset
-   reason, heap headroom and uptime are on `/status`, `/diag` and the MQTT heartbeat's diagnostic
-   entities, which is where a diagnosis is actually made. Then the **Version** (`version`) and the **Update channel** select
+   `board{…}`. It carries **almost no board telemetry** — chip (`platform`), uptime (`uptime_s`) and
+   **Last reset** (`sys.reset_reason`) were rows here through v1.0.14 and are gone: Settings states
+   what the board is **set to**, and read-only numbers nobody acts on from this screen only pushed
+   the settings that ARE actionable further down it. None of it is lost — the running version stays
+   on the card and in the header, and the chip, reset reason and uptime are on `/status`, `/diag` and
+   the MQTT heartbeat's diagnostic entities, which is where a diagnosis is actually made.
+   **Two came back, and only because they stopped being spot numbers**: **Free memory**
+   (`sys.free_heap`) and **Largest free block** (`sys.max_alloc`), each an expandable row carrying a
+   24-hour trend (§5.3 item 3's chart, same accordion as a value row). The original objection stands
+   against the *number* — "148 KiB" is a diagnosis nobody can make — and is answered by the *curve*:
+   a leak is a slope, and fragmentation is the two lines separating while the total holds. That is
+   the one memory question this firmware has, no other surface answers it (the heartbeat gives Home
+   Assistant the same series, but only if a broker is configured), and it is a question the user is
+   already on this screen for whenever an OTA has just failed. Not `min_free_heap`: the 24-hour
+   minimum is on the chart, and a since-boot scalar beside it would be a second, coarser answer to
+   the same question.
+   **The card's order encodes what the rows are**: link facts (link, protocol, RX/TX) → settings
+   (Version, Update channel, Hardware) → the board's own health (the two memory rows) → the single
+   **action**, *Report a bug*, last. The report row sits after the memory rows on purpose: it is the
+   escape hatch for everything above it, and those two curves are exactly what a report about a
+   failed update or a dropped broker wants to carry.
+   Then the **Version** (`version`) and the **Update channel** select
    (`ota.channel` → `POST /set_ota`, §5.4). The version being here *as well as* in the dashboard
    header serves two different needs, and each row answers the one its screen asks: the header keeps
    board identity where a user quotes it from, while this row exists so the channel selector under

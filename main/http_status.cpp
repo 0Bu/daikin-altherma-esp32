@@ -489,9 +489,9 @@ static esp_err_t h_history(httpd_req_t* req) {
     j += jstr(lbl);
     j += ",\"dt\":";
     j += std::to_string(logic::HISTORY_DT_S);
-    // The ROW's unit, never a hardcoded "°C": both trends are temperatures today, but the TRENDS
-    // table exists to be extended and the browser prints this string straight into the range readout
-    // and the crosshair. A bar row labelled °C is exactly the #35-#39 shape.
+    // The ROW's unit, never a hardcoded "°C": the trends mix °C, bar and unitless rows, and the
+    // browser prints this string straight into the range readout and the crosshair. A bar row
+    // labelled °C is exactly the #35-#39 shape.
     j += ",\"unit\":";
     j += jstr(unit);
     const TimeStatus ts = time_status();

@@ -5,6 +5,8 @@
 #include "diag_log.hpp"
 #include "logic/history.hpp"
 
+#include "esp_heap_caps.h"      // heap_caps_get_largest_free_block — the max_alloc trend
+#include "esp_system.h"         // esp_get_free_heap_size — the free_heap trend
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -36,11 +38,10 @@ constexpr size_t kLabelMax = 64;
 struct Trend {
     logic::TrendRing ring;
     char             label[kLabelMax] = {0};
-    // The row's OWN unit, captured with the label. Not derived and NOT assumed to be °C: both
-    // trends happen to be temperatures today (every matching row in all 45 profiles is conv 105 /
-    // type 1), but the whole promise of the TRENDS table is that adding a trend is one row — and the
-    // first pressure or current trend would otherwise be charted, and range-labelled, as °C. That is
-    // the #35-#39 shape: well-formed, plausible, wrongly labelled.
+    // The row's OWN unit, captured with the label — never assumed to be °C. The catalog mixes them
+    // freely (bar for the two pressures, none at all for flow/rps/pump, where the unit lives in the
+    // label text), and a chart whose range readout and crosshair print "°C" over a bar series is the
+    // #35-#39 shape: well-formed, plausible, wrongly labelled.
     char             unit[8] = {0};
 };
 
@@ -72,6 +73,12 @@ inline bool value_tenths(const std::string& s, int& out) {
     return logic::history_parse_tenths(s.c_str(), out);
 }
 
+// Copy a fixed string into one of the Trend's own buffers, always NUL-terminated.
+inline void copy_field(char* dst, size_t max, const char* src) {
+    std::strncpy(dst, src, max - 1);
+    dst[max - 1] = '\0';
+}
+
 } // namespace
 
 void history_record(const CachedValue* v, size_t n) {
@@ -84,13 +91,25 @@ void history_record(const CachedValue* v, size_t n) {
     }
     if (!v || !n) return;
 
-    // Label/reg views for the pure pickers. Bounded by the profile row count; the poll cache holds
-    // at most one entry per ValueDef row (logic/profile_view.hpp sizes both).
+    // Views for the pure pickers. Bounded by the profile row count; the poll cache holds at most one
+    // entry per ValueDef row (logic/profile_view.hpp sizes both). A trend addresses its row by
+    // (reg, off, unit) — the label rides along only to be reported and to detect a model change.
+    //
+    // These four live on the POLL TASK's 8 KB stack, so their width is not a detail: as `unsigned`
+    // the page and offset views would cost 2 KB between them instead of 512 B, for two values that
+    // are a byte each everywhere else in the firmware. 2.5 KB total, per cycle.
     constexpr size_t kMaxRows = 256;
     const size_t rows = n < kMaxRows ? n : kMaxRows;
     const char* labels[kMaxRows];
-    unsigned    regs[kMaxRows];
-    for (size_t i = 0; i < rows; i++) { labels[i] = v[i].label.c_str(); regs[i] = v[i].reg; }
+    const char* units[kMaxRows];
+    uint8_t     regs[kMaxRows];
+    uint8_t     offs[kMaxRows];
+    for (size_t i = 0; i < rows; i++) {
+        labels[i] = v[i].label.c_str();
+        units[i]  = v[i].unit.c_str();
+        regs[i]   = v[i].reg;
+        offs[i]   = v[i].off;
+    }
 
     // The compressor witness decides whether the outdoor pages are still being refreshed. ABSENT is
     // unknown, not stopped (logic/history.hpp) — a profile without the row keeps recording.
@@ -102,6 +121,17 @@ void history_record(const CachedValue* v, size_t n) {
     }
 
     const uint32_t bucket = logic::history_bucket(esp_timer_get_time());
+
+    // The board's own memory, read BEFORE the lock: heap_caps_get_largest_free_block takes the
+    // heap's internal lock, and taking that under ours would invent a lock order this file has no
+    // reason to have (CLAUDE.md → never allocate while holding a mutex; the same argument applies to
+    // taking a second, unrelated lock). Both are plain reads of a counter — nothing allocates.
+    // A SPOT sample, folded like any other: the 5-minute bucket keeps the last one, so a transient
+    // dip between samples is not captured. That is the right shape for the question these answer —
+    // is the heap DRIFTING — and /status.sys.min_free_heap still carries the since-boot floor.
+    const HistorySample free_heap = logic::history_bytes_tenths_kib(esp_get_free_heap_size());
+    const HistorySample max_alloc =
+        logic::history_bytes_tenths_kib(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
 
     Lock lk(s_mtx);
     if (!lk.held) return;
@@ -118,7 +148,18 @@ void history_record(const CachedValue* v, size_t n) {
 
     for (size_t t = 0; t < TREND_COUNT; t++) {
         Trend& tr = s_ring[t];
-        const int idx = logic::trend_select(logic::TRENDS[t], labels, regs, rows);
+        const logic::TrendDef& d = logic::TRENDS[t];
+
+        // A BOARD trend has no row to resolve: its label and unit are fixed, it is never absent, and
+        // no page can hold it over. Sampled above, outside the lock, like everything else here.
+        if (d.kind != logic::TrendKind::Row) {
+            copy_field(tr.label, sizeof(tr.label), d.label);
+            copy_field(tr.unit, sizeof(tr.unit), d.unit);
+            tr.ring.fold(d.kind == logic::TrendKind::FreeHeap ? free_heap : max_alloc);
+            continue;
+        }
+
+        const int idx = logic::trend_select(d, regs, offs, units, rows);
         const char* label = idx >= 0 ? labels[idx] : "";
 
         if (std::strncmp(label, tr.label, kLabelMax - 1) != 0) {    // different row -> different sensor

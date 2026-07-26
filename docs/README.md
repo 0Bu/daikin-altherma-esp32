@@ -302,6 +302,12 @@ GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sampl
                                    #   readings. t0 = wall-clock instant of sample 0, omitted when
                                    #   the clock has never synced (the UI then shows an age).
                                    #   Unknown id → 404. Trends are RAM: a reboot empties them.
+                                   #   ids: dhw_tank, leaving_water, return_water, water_pressure,
+                                   #   flow, pump_signal, circuit_pressure, comp_rps, outdoor_air,
+                                   #   plus free_heap and max_alloc — the BOARD's own memory in KiB,
+                                   #   which have no register and are always present.
+                                   #   (a row the detected profile lacks is simply absent from
+                                   #   /status.history.rows — ask that, don't guess).
 GET  /events                       # WebSocket live push (the only live UI transport). Send "sub" →
                                    #   status+values snapshot, then {"type":"status"|"values",...} on
                                    #   change. No HTTP polling; no-WebSocket browsers load once and
