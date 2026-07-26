@@ -472,10 +472,17 @@ static esp_err_t h_history(httpd_req_t* req) {
     j += ",\"unit\":";
     j += jstr(unit);
     const TimeStatus ts = time_status();
-    if (ts.synced && n) {
-        // Sample n-1 is the bucket that just closed, i.e. ~now; sample 0 is (n-1) buckets earlier.
+    const int32_t newest_age = history_newest_age_s();
+    if (ts.synced && n && newest_age >= 0) {
+        // Derived from the AGE of the newest sample, not from `now`: the ring commits a bucket every
+        // HISTORY_DT_S, so between commits the newest sample ages while `now` moves on. Measured on a
+        // live unit, the old `now - (n-1)*dt` form reported t0 values 70 s apart for two fetches 70 s
+        // apart with an unchanged sample count — every timestamp up to a bucket late, and a PINNED
+        // readout eventually rounding onto the neighbouring sample and describing a different
+        // measurement than the one tapped. logic/history_t0 carries the rule and the invariance test.
         j += ",\"t0\":";
-        j += std::to_string(ts.unix_time - static_cast<int64_t>(n - 1) * logic::HISTORY_DT_S);
+        j += std::to_string(logic::history_t0(ts.unix_time, static_cast<uint32_t>(newest_age),
+                                              n, logic::HISTORY_DT_S));
     }
     j += ",\"v\":[";
     httpd_resp_set_type(req, "application/json");

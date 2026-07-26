@@ -72,6 +72,8 @@ const I18N = {
     "hist.nm": "not measured", "hist.rel": (h) => `${h} h ago`,
     "hist.held": "outdoor unit resting", "hist.heldnote": (h) => `${h} h resting — not measured`,
     "hist.aria": (l) => `${l} — 24-hour trend. Arrow keys read out individual samples.`,
+    "hist.aria_pinned": (l, r) => `${l} — 24-hour trend. Pinned readout: ${r}. Tap it again to clear.`,
+    "hist.pin_hint": "tap to pin",
     "toast.saved": "Saved", "toast.no_changes": "No changes",
     "toast.reboot": "Rebooting — reconnecting…", "toast.rebooted": "Rebooted — reconnect to the device",
     "toast.busy_retry": "Device busy — retry in a moment", "toast.unreachable": "Couldn't reach the device",
@@ -180,6 +182,8 @@ const I18N = {
     "hist.nm": "nicht gemessen", "hist.rel": (h) => `vor ${h} h`,
     "hist.held": "Außeneinheit ruht", "hist.heldnote": (h) => `${h} h Stillstand — nicht gemessen`,
     "hist.aria": (l) => `${l} — 24-Stunden-Verlauf. Mit den Pfeiltasten einzelne Messpunkte ablesen.`,
+    "hist.aria_pinned": (l, r) => `${l} — 24-Stunden-Verlauf. Angehefteter Wert: ${r}. Nochmal antippen zum Entfernen.`,
+    "hist.pin_hint": "antippen zum Anheften",
     "toast.saved": "Gespeichert", "toast.no_changes": "Keine Änderungen",
     "toast.reboot": "Neustart — verbinde neu…", "toast.rebooted": "Neu gestartet — bitte neu mit dem Gerät verbinden",
     "toast.busy_retry": "Gerät ausgelastet — gleich erneut versuchen", "toast.unreachable": "Gerät nicht erreichbar",
@@ -272,6 +276,12 @@ const S = {
   // A missing entry means "not fetched yet", which is what makes the panel show its loading line.
   hist: new Map(),
   histBusy: new Set(),
+  // A PINNED trend readout per row: label -> {t} (the pinned sample's unix instant) or {i, gen} when
+  // the device has no wall clock to anchor to. In app state, not the DOM, for the same reason
+  // descOpen is: the panel is re-emitted on every poll, and a crosshair written imperatively would
+  // vanish ~1×/s. Anchored to the INSTANT so the ring rolling under it re-resolves to the same
+  // measurement instead of to whatever now occupies that slot (logic/history.hpp's history_pin_index).
+  histPin: new Map(),
   // The label of the row whose trend is being scrubbed right now (mouse hover or finger down), or
   // null. It FREEZES the #valueGroups rebuild — see renderCards. Without that the innerHTML is
   // replaced ~1×/s under the pointer: the captured element dies mid-drag and the readout flickers.
@@ -1351,7 +1361,11 @@ async function ensureHist(label) {
     // t0 = the unix instant of sample 0, present only when the device's SNTP clock is synced. Null
     // means the scrub readout falls back to an AGE ("vor 6.3 h") — never a fabricated wall-clock
     // time, the same rule logic/timestamp.hpp applies to an unsynced clock on the firmware side.
-    S.hist.set(label, { at: Date.now(), dt: +j.dt || 300, unit: j.unit || "",
+    // `gen` counts fetches. It is what makes an index-anchored pin (no wall clock on the device)
+    // honest: such a pin is only valid for the exact series it was made on, and a refetch may have
+    // rolled the ring — so it is dropped rather than re-pointed at a different sample.
+    const gen = ((S.hist.get(label) || {}).gen || 0) + 1;
+    S.hist.set(label, { at: Date.now(), gen, dt: +j.dt || 300, unit: j.unit || "",
                         t0: typeof j.t0 === "number" ? j.t0 : null,
                         held: Array.isArray(j.held) ? j.held : [],
                         v: Array.isArray(j.v) ? j.v : [] });
@@ -1368,6 +1382,24 @@ async function ensureHist(label) {
 // No internal padding: the geometry uses the full box and the container lets the stroke overflow,
 // which keeps the "now" marker's percentage mapping (below) exactly the plot's own scale.
 const HIST_W = 320, HIST_H = 72;
+
+// The plot's vertical scale, derived once and shared by the renderer AND the cursor. It used to be
+// computed in both places, which is a two-copy invariant of the worst kind: a change to the padding
+// in one would leave the crosshair marker sitting off the line it is pointing at, and the drawing
+// would still look perfectly plausible. Returns the mapping, not the numbers, so no caller can
+// re-derive it slightly differently.
+function histScale(pts) {
+  const real = pts.filter((x) => x != null);
+  const lo = Math.min(...real), hi = Math.max(...real);
+  const pad = (hi - lo) < 1 ? 1 : (hi - lo) * 0.12;   // a flat series gets a band, not a divide-by-zero
+  const y0 = lo - pad, y1 = hi + pad;
+  const n = pts.length;
+  return {
+    lo, hi,
+    X: (i) => (n === 1 ? HIST_W : (i * HIST_W) / (n - 1)),
+    Y: (v) => HIST_H - ((v - y0) / (y1 - y0)) * HIST_H,
+  };
+}
 
 // One historied row's trend, as the markup appended under its explainer text. Every state is a
 // SENTENCE rather than an empty box: not fetched, no readings yet, fetch failed. `null` samples are
@@ -1392,11 +1424,7 @@ function histHtml(label, unit) {
   // and every /set_* and OTA reboots the board, so a fresh device has minutes of history, not a day.
   // Stretching the axis to 24 h would draw that absence as if it were flat measured data.
   const full  = n * h.dt >= 23.5 * 3600;
-  const lo = Math.min(...real), hi = Math.max(...real);
-  const pad = (hi - lo) < 1 ? 1 : (hi - lo) * 0.12;          // a flat series gets a band, not a divide-by-zero
-  const y0 = lo - pad, y1 = hi + pad;
-  const X = (i) => (n === 1 ? HIST_W : (i * HIST_W) / (n - 1));
-  const Y = (v) => HIST_H - ((v - y0) / (y1 - y0)) * HIST_H;
+  const { lo, hi, X, Y } = histScale(pts);
 
   // Contiguous runs only: each becomes its own line path (and its own area under it), so a gap is
   // drawn as a gap. A run of ONE sample gets a dot — a lone reading between two gaps is still a
@@ -1452,16 +1480,30 @@ function histHtml(label, unit) {
   // styles directly — never by re-rendering this HTML, which would fight the pointer.
   // `data-hist` is what the delegated pointer handlers match on, and it carries the sample count so
   // the geometry the handler needs comes from the same render that drew the path.
+  // A PINNED readout is emitted as part of the markup, not written onto the DOM afterwards — that is
+  // the whole reason it survives the ~1×/s rebuild that made the old hold-to-read behaviour necessary.
+  // Its instant is re-resolved here on every render, so the pin follows its measurement as the ring
+  // rolls and disappears once that measurement has left the day.
+  const pi = histPinIndex(label, h);
+  let pinTip = "", pinCross = "", pinMark = "";
+  if (pi >= 0) {
+    const px = (scrubFrac(pi, n) * 100).toFixed(3);
+    pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
+    if (pts[pi] != null) pinMark = `<span class="vhist-mark vhist-pinned" style="left:${px}%;top:${((Y(pts[pi]) / HIST_H) * 100).toFixed(2)}%"></span>`;
+    // The bubble is clamped by CSS translate + margins rather than measured pixels: this runs at
+    // render time, before layout, so offsetWidth is not available the way it is during a scrub.
+    pinTip = `<div class="vhist-tip vhist-pinned mono num" style="left:${px}%">${esc(scrubText(h, pi))}</div>`;
+  }
   return wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.since", spanH))}</span>` +
     `<span class="vhist-range mono num">${esc(rng)}</span></div>` +
-    `<div class="vhist-graph">` +
-      `<div class="vhist-tip mono num" hidden></div>` +
+    `<div class="vhist-graph${pi >= 0 ? " has-pin" : ""}">` +
+      `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +
       `<div class="vhist-plot" data-hist="${esc(label)}" data-n="${n}" tabindex="0" role="img"` +
-        ` aria-label="${esc(t("hist.aria", label))}">` +
+        ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", label, pi >= 0 ? scrubText(h, pi) : ""))}">` +
         `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${area}${line}${dots}</svg>` +
-        dot +
-        `<span class="vhist-cross" hidden></span><span class="vhist-mark" hidden></span>` +
+        dot + pinCross + pinMark +
+        `<span class="vhist-cross vhist-live" hidden></span><span class="vhist-mark vhist-live" hidden></span>` +
       `</div>` +
     `</div>` +
     `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
@@ -1483,6 +1525,43 @@ function histHtml(label, unit) {
 // Where a sample sits, as a fraction 0..1 of the plot width. Mirrors X() in histHtml — a lone
 // sample is drawn at the right edge, which is also where "now" is.
 function scrubFrac(i, n) { return n <= 1 ? 1 : i / (n - 1); }
+
+// ── Pinning ─────────────────────────────────────────────────────────────────────────────────────
+// A tap PINS the readout so the value stays legible after the finger lifts; holding is no longer
+// required. Hover remains transient and simply previews over the pin without disturbing it.
+//
+// The pin is stored as the sample's INSTANT and re-resolved on every render — the host-tested
+// history_pin_index() rule (logic/history.hpp). A pin whose instant has rolled off the back of the
+// day resolves to -1 and is dropped, rather than clamped to the oldest sample: clamping would leave
+// a readout on screen while silently changing which moment it describes.
+function histPinIndex(label, h) {
+  const p = S.histPin.get(label);
+  if (!p || !h || !h.v.length) return -1;
+  if (p.t != null) {
+    if (h.t0 == null) return -1;                 // pinned with a clock, re-resolving without one
+    const rel = p.t - h.t0, half = h.dt / 2;
+    const i = Math.trunc((rel >= 0 ? rel + half : rel - half) / h.dt);
+    return (i < 0 || i >= h.v.length) ? -1 : i;
+  }
+  return p.gen === h.gen ? p.i : -1;             // index pin: valid only for the series it was made on
+}
+// Pin sample `i` of `label`, or UNPIN when that same sample is already pinned — tapping the readout
+// you just made is the obvious way to dismiss it, and needs no extra affordance on a 72 px plot.
+function histPinToggle(label, i) {
+  const h = S.hist.get(label);
+  if (!h || !h.v.length) return;
+  i = Math.max(0, Math.min(h.v.length - 1, i));
+  if (histPinIndex(label, h) === i) S.histPin.delete(label);
+  else if (h.t0 != null) S.histPin.set(label, { t: h.t0 + i * h.dt });
+  else S.histPin.set(label, { i, gen: h.gen });
+  // Render PAST the click guard. That guard exists to stop a POLL from replacing the DOM in the
+  // middle of a click; it must not delay the very update the click just asked for — a pin that
+  // appeared 600 ms after the finger lifted would read as the same "it didn't take" the pin was
+  // added to fix. The scrub guard is left alone: a drag still in progress owns the DOM.
+  if (S.scrub) return;
+  S.clickHold = false;
+  renderCards();
+}
 
 // The label under the cursor: the sample's wall-clock time when the device had a synced clock
 // (history carries t0, the unix instant of sample 0), else its age. A gap says so rather than
@@ -1512,9 +1591,12 @@ function scrubMove(plot, i) {
   if (!h || !n) return;
   i = Math.max(0, Math.min(n - 1, i));
   const graph = plot.parentElement;
-  const tip = graph.querySelector(".vhist-tip");
-  const cross = plot.querySelector(".vhist-cross");
-  const mark = plot.querySelector(".vhist-mark");
+  // .vhist-live, never the bare class: a PINNED crosshair carries the same visual classes and sits
+  // EARLIER in the DOM, so a bare querySelector returned the pin — the hover then wrote into it and
+  // scrubEnd hid it, silently deleting the readout the user had just pinned.
+  const tip = graph.querySelector(".vhist-tip.vhist-live");
+  const cross = plot.querySelector(".vhist-cross.vhist-live");
+  const mark = plot.querySelector(".vhist-mark.vhist-live");
   const w = plot.clientWidth;
   const x = scrubFrac(i, n) * w;
 
@@ -1524,13 +1606,11 @@ function scrubMove(plot, i) {
   // same "no value here" vocabulary the broken line already speaks.
   const v = h.v[i];
   if (v == null) { mark.hidden = true; } else {
-    const real = h.v.filter((z) => z != null).map((z) => z / 10);
-    const lo = Math.min(...real), hi = Math.max(...real);
-    const pad = (hi - lo) < 1 ? 1 : (hi - lo) * 0.12;
-    const y0 = lo - pad, y1 = hi + pad;
+    // Same scale the path was drawn with (histScale) — never a second copy of the padding rule.
+    const { Y } = histScale(h.v.map((z) => (z == null ? null : z / 10)));
     mark.hidden = false;
     mark.style.left = x.toFixed(1) + "px";
-    mark.style.top = ((1 - ((v / 10 - y0) / (y1 - y0))) * 100).toFixed(2) + "%";
+    mark.style.top = ((Y(v / 10) / HIST_H) * 100).toFixed(2) + "%";
   }
   tip.hidden = false;
   tip.textContent = scrubText(h, i);
@@ -1562,9 +1642,9 @@ function scrubArm(plot) {
 function scrubEnd(plot) {
   clearTimeout(scrubWatchdog);
   if (plot) {
-    plot.querySelector(".vhist-cross").hidden = true;
-    plot.querySelector(".vhist-mark").hidden = true;
-    plot.parentElement.querySelector(".vhist-tip").hidden = true;
+    plot.querySelector(".vhist-cross.vhist-live").hidden = true;
+    plot.querySelector(".vhist-mark.vhist-live").hidden = true;
+    plot.parentElement.querySelector(".vhist-tip.vhist-live").hidden = true;
   }
   if (S.scrub) { S.scrub = null; renderCards(); }   // resume the frozen per-poll rebuild
 }
@@ -1676,7 +1756,8 @@ function toggleDesc(btn) {
   const open = !item.classList.contains("open");
   item.classList.toggle("open", open);
   btn.setAttribute("aria-expanded", open ? "true" : "false");
-  if (open) S.descOpen.add(label); else S.descOpen.delete(label);
+  if (open) S.descOpen.add(label);
+  else { S.descOpen.delete(label); S.histPin.delete(label); }
   // Fetch the trend only once the panel is actually opened — a device that buffers several rows
   // would otherwise answer a request per row on every page load, for panels nobody looked at.
   if (open) ensureHist(label);
@@ -3034,7 +3115,17 @@ function wire() {
   for (const ev of ["pointerup", "pointercancel"]) {
     gv.addEventListener(ev, (e) => {
       const plot = e.target.closest("[data-hist]");
-      if (plot) scrubEnd(plot);
+      if (!plot) return;
+      // A release ON the plot PINS the sample under it (pointercancel does not — a gesture the
+      // browser took away is not a choice the user made). The transient crosshair is torn down
+      // either way; the pin is re-emitted by the render that follows, so what the user let go of is
+      // exactly what stays on screen.
+      // Read the geometry BEFORE tearing anything down: scrubEnd may rebuild, and `plot` is then a
+      // detached node whose bounding box is all zeroes.
+      const label = plot.dataset.hist;
+      const i = e.type === "pointerup" ? scrubIndex(plot, e.clientX) : -1;
+      scrubEnd(plot);
+      if (i >= 0) histPinToggle(label, i);
     });
   }
   // Keyboard: the plot is focusable, so arrow keys step through samples and the tooltip is the
@@ -3045,9 +3136,13 @@ function wire() {
     if (!plot) return;
     const n = +plot.dataset.n;
     const step = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
-    if (!step && e.key !== "Home" && e.key !== "End" && e.key !== "Escape") return;
+    if (!step && !["Home", "End", "Escape", "Enter", " "].includes(e.key)) return;
     e.preventDefault();                       // arrows would otherwise scroll the page
-    if (e.key === "Escape") return scrubEnd(plot);
+    if (e.key === "Escape") { S.histPin.delete(plot.dataset.hist); scrubEnd(plot); return renderCards(); }
+    if (e.key === "Enter" || e.key === " ") {   // pin what the arrow keys are reading out
+      const cur = plot.dataset.cur == null ? n - 1 : +plot.dataset.cur;
+      return histPinToggle(plot.dataset.hist, cur);
+    }
     const cur = plot.dataset.cur == null ? n - 1 : +plot.dataset.cur;
     const next = e.key === "Home" ? 0 : e.key === "End" ? n - 1 : cur + step;
     plot.dataset.cur = Math.max(0, Math.min(n - 1, next));
