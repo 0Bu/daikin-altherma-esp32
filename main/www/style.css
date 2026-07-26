@@ -15,6 +15,10 @@
   --shadow-logo:0 2px 8px rgba(0,151,224,.35);
   --shadow-cta:0 3px 12px rgba(0,151,224,.30);
   --shadow-card:0 1px 2px rgba(16,20,28,.05),0 6px 20px rgba(16,20,28,.07);
+  /* The shadow a value row casts onto the explainer that slides out from under it — an INSET
+     top edge, so the panel reads as passing beneath the row rather than starting below it.
+     Per-scheme like --shadow-card: a black wash is invisible on the dark --brand-tint. */
+  --shadow-tongue:inset 0 6px 7px -7px rgba(20,40,58,.30);
   --r-card:18px; --r-tile:14px; --r-input:12px; --r-pill:999px; --r-logo:11px;
   --font-sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --font-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
@@ -27,6 +31,7 @@
     --flow-hot:#E06A40; --flow-cold:#5A97DE;
     --pipe:#3A414D; --hatch:#232935;
     --shadow-card:0 1px 2px rgba(0,0,0,.5),0 10px 28px rgba(0,0,0,.45);
+    --shadow-tongue:inset 0 6px 7px -7px rgba(0,0,0,.55);
   }
 }
 
@@ -438,14 +443,34 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vdesc { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .22s ease; }
 .vitem.open .vdesc { grid-template-rows: 1fr; }
 .vdesc-inner { overflow: hidden; }
-/* The explainer sits in its OWN inset box that appears to wedge between the value rows — a faint
-   --brand-tint info block (DESIGN.md §2) held slightly in from the row edges, with a gap above and
-   below so the rows read as parting to make room for it (not the row simply growing taller). */
+/* The explainer is pushed out from UNDER the row that opened it, not wedged between two rows: a
+   faint --brand-tint info block (DESIGN.md §2) sitting FLUSH against the row, held in from the row
+   edges and rounded at the BOTTOM corners only — so it reads as continuing behind the row rather
+   than starting below it, and belongs visibly to that one row.
+   Its own top edge carries NO border. The line above it belongs to the LIST (see
+   .vitem.open .vrow-desc below), so the panel emerges BETWEEN two dividers instead of bringing an
+   edge of its own — and a --line hairline could not be seen here anyway: --line #E2E5EA against
+   the #E9F6FD fill is 1.15:1, and 1.23:1 in dark, so it would be an edge that is drawn and
+   invisible from both sides.
+   --shadow-tongue is the shadow the row casts onto it, and the transform slides the panel down as
+   the height grows, which is what makes it read as pulled out rather than grown in place — same
+   .22s as the height transition above, so both land together (and the 220 ms quoted in
+   DESIGN.md §5.3 item 5 stays true). The row keeps no radius of its own. */
 .vdesc-body {
-  margin: 6px 2px 12px; padding: 12px 14px;
-  background: var(--brand-tint); border: 1px solid var(--line); border-radius: var(--r-tile);
+  margin: 0 10px 12px; padding: 13px 14px 12px;
+  background: var(--brand-tint); border: 1px solid var(--line); border-top: 0;
+  border-radius: 0 0 var(--r-tile) var(--r-tile); box-shadow: var(--shadow-tongue);
   font-size: 13.5px; color: var(--muted); line-height: 1.55;
+  transform: translateY(-7px); transition: transform .22s ease;
 }
+.vitem.open .vdesc-body { transform: none; }
+/* An OPEN row keeps a divider under it — the same full-width --line the next .vitem draws when
+   nothing is expanded — so the panel appears BETWEEN two list lines instead of replacing one. The
+   line is the LIST's, not the panel's: it therefore runs the full row width while the panel stays
+   inset, which is what makes the panel read as sliding out from underneath it.
+   An inset box-shadow rather than a border-bottom: a border would add a pixel to the row's height
+   on open and shift every row below by one. */
+.vitem.open .vrow-desc { box-shadow: inset 0 -1px 0 var(--line); }
 .vdesc-n { color: var(--fg); font-weight: 600; }
 /* ── 24-hour trend inside the explainer panel ───────────────────────────────
    A sparkline for the rows the firmware buffers (/status.history.rows). It sits BELOW the explainer
@@ -511,7 +536,9 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    of a mild day. It stays --muted so the axis doesn't cry fault over a healthy unit; only a real
    dropout (.vhist-gap) earns the attention colour. */
 .vhist-idle { color: var(--muted); }
-@media (prefers-reduced-motion: reduce) { .vdesc, .vrow-chev { transition: none; } }
+/* The global reduced-motion rule (line ~127) kills `animation` only — a transition needs saying
+   here, and .vdesc-body's slide is one (DESIGN.md §9). */
+@media (prefers-reduced-motion: reduce) { .vdesc, .vdesc-body, .vrow-chev { transition: none; } }
 
 /* ── Forms ──────────────────────────────────────────────────────────────── */
 .field { display: block; margin-bottom: 14px; }
