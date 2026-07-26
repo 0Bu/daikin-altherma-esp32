@@ -158,6 +158,22 @@ published value is always 0–7** — treat it as a rate (deltas over time), not
 Whether the unit *clamps* at 7 or *wraps* to 0 is not documented and has not been observed on a live
 unit; until it has been, a delta of exactly −7 should be read as "unknown", not as a reset.
 
+**Verified so far** — a dated baseline, not a closed question (2026-07-26, live 4-8 kW monobloc
+detected as `altherma_ebla_edla_d_series_4_8kw_monobloc`, firmware `1.0.0-dev.188`). All 11 entities
+reach Home Assistant *and* survive the Telegraf → VictoriaMetrics path as numbers rather than being
+dropped as strings: 11 of 11 series present and continuous over an 18-hour window, 28 390–28 394
+samples each. Every counter sample was `0` and every flag `0` — and the raw page dump on `/diag`
+(`logic/hexdump.hpp`) shows page `0x10` offsets 10–12 reading `00 00 00` on the wire, so those zeros
+are the unit's own bytes, not a bit-masking or byte-offset defect.
+
+What that window could **not** settle is the one thing that matters most: whether a zero counter
+means a healthy plant or a byte this model never writes. It covered only a handful of brief DHW
+compressor cycles in July — no defrost, no cold-weather stress — so the counters never left `0`, and
+the clamp-vs-wrap question above is still unobserved. Deferred deliberately in
+[#180](https://github.com/0Bu/daikin-altherma-esp32/issues/180) until a loaded season has
+accumulated; the numbers above are the known-good baseline to compare that verification against, and
+in particular to compare the labels against once the generator handover below happens.
+
 They arrive from `def/overlay.hpp` rather than from a model profile, because the offline profile
 generator does not emit these rows yet; see [ARCHITECTURE.md](ARCHITECTURE.md) *Value-definition
 profiles*. Nothing about the entity contract depends on that — when the generator catches up, the
