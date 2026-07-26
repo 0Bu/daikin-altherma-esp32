@@ -79,8 +79,11 @@ It parses the real SVG (coordinates, transforms, path geometry, text metrics) an
 binding tables, so no second copy of either can drift, and reports in three layers: **structure**
 (`S…` — hit target ↔ inspector entry ↔ element id ↔ translation), **geometry** (`G…` — viewBox,
 overlaps, labels struck through, axis-aligned runs, a pill's distance to its own pipe, rotor
-symmetry) and **domain** (`E…` — a repeated unit needs a name; a return-run reading stays left of
-the junction). Findings that are correct as they stand go in
+symmetry, and a run's *invisible* tap area not reaching into the fitting it meets: the hit lines are
+`stroke-linecap: round`, so each one also covers half a stroke past its declared endpoint, and every
+trim in the drawing had been computed as if the cap were flat — the 3-way valve outlined itself on
+hover and then opened the DHW branch) and **domain** (`E…` — a repeated unit needs a name; a
+return-run reading stays left of the junction). Findings that are correct as they stand go in
 [`tools/schematic/audit_exceptions.txt`](tools/schematic/audit_exceptions.txt) as an `ADJUDICATION`
 (citing the decision — `docs/DESIGN.md` §5.3, a measurement) or a `KNOWN-DEFECT` (naming what is
 wrong, and deleted by its fix); `S001` (a tap target that opens nothing) and `E002` (a pill on a

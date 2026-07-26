@@ -192,7 +192,14 @@ svg .sc-rflow { fill: none; stroke-width: 3.5; stroke-linecap: round; stroke-das
    order than the fitting it meets, so its own 5 px stroke would steal the clicks of the 3-way valve
    and the pump it passes through. Hit areas come from sc-hitline alone, whose geometry is trimmed
    back at exactly those junctions — one place that decides what is clickable, and it is visible in
-   the markup. */
+   the markup.
+   VISIBLE, but not literal: sc-hitline is `stroke-linecap: round`, so the hit area reaches HALF A
+   STROKE (9 px) PAST each declared endpoint. Every trim below allows for that half, which is why
+   they stop short of the fitting they meet rather than on it. Reading the coordinates as the edge
+   of the hit area is what shipped the defect: the tank riser was trimmed to y=194, the valve's own
+   bottom, and the cap put it back at y=185 — 18 % of the valve's disc answered "DHW branch", and
+   the same arithmetic bit the outdoor-unit box and the plate. G011 now re-derives every cap from
+   this very rule and fails the build if one reaches into an earlier component. */
 svg .sc-flow, svg .sc-rflow, svg .sc-pipe, svg .sc-rpipe { pointer-events: none; }
 svg .hot  { stroke: var(--flow-hot); }
 svg .cold { stroke: var(--flow-cold); }

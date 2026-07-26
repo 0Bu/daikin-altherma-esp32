@@ -81,12 +81,16 @@ plausible, attributing a real number to the wrong thing. It PARSES the real SVG 
 transforms, path geometry, text metrics) and EVALUATES the real binding tables, so there is no second
 copy of either to drift, and reports in three layers: structure (hit target ↔ inspector entry ↔ id ↔
 translation), geometry (viewBox, overlaps, struck-through labels, axis-aligned runs, a pill's tie to
-its own pipe, rotor symmetry) and domain (a repeated unit needs a name; a return-run reading stays
+its own pipe, rotor symmetry, a run's INVISIBLE tap area not reaching into the fitting it meets —
+`stroke-linecap: round` adds half a stroke past every endpoint and each trim in the drawing had been
+computed as if the cap were flat, so the 3-way valve outlined itself on hover and then opened the DHW
+branch) and domain (a repeated unit needs a name; a return-run reading stays
 left of the junction it derives from the drawing). `tools/schematic/audit_exceptions.txt` is its
 ledger — the two refrigerant pressures carrying no name is an ADJUDICATION citing DESIGN.md §5.3,
 while `S001` (a hit target that opens nothing) and `E002` (a pill on a branch its sensor does not
-read) are refused outright — and `tools/schematic/selftest.sh` re-seeds all six historical defects
-into a throwaway copy to prove it still catches them. The judgement half is the `/schematic-review`
+read) are refused outright — and `tools/schematic/selftest.sh` re-seeds every historical defect (one
+`run_case` each, so `grep -c run_case` is the count) into a throwaway copy to prove it still catches
+them. The judgement half is the `/schematic-review`
 skill: whether the drawing is still TRUE of the plant, whether a new part is in the right place and
 whether the copy is right in both languages is not mechanically decidable, and the audit stays quiet
 about it rather than guessing.

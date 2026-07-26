@@ -454,6 +454,17 @@ Body, ordered:
    none cannot be hovered at all and reads as the neighbouring selection simply stopping. The gate
    checks all four (`E002`/`E003`/`E004`/`S011`); which pipe is a branch and which is shared it
    cannot know, and that is the judgement half's question.
+   **And a run's tap area ends where the fitting begins.** A 5 px pipe is not tappable, so each run
+   carries an invisible fat hit line — which means the clickable drawing is *wider* than the drawn
+   one, in geometry that exists only in the stylesheet. Wherever that widening covers a component
+   drawn earlier, the component keeps its outline on hover and loses the tap: the picture highlights
+   the 3-way valve and opens the DHW branch. It shipped exactly so, because `stroke-linecap: round`
+   adds half a stroke *past* every endpoint and each trim had been computed as if the cap were flat —
+   the valve lost a fifth of its disc, and the same 9 px came out of the outdoor unit and the plate.
+   **A component owns every tap inside its own shape**, and the pipe owns everything past its edge,
+   with no dead strip between; `G011` re-derives each cap from the real CSS and fails the build on an
+   overhang. It says nothing about two *pipes* meeting at a junction — that place is genuinely
+   shared, and `E004` is what decides whose it is.
 3. **Inspector** — the panel directly under the drawing, in the same card, so the explanation and the
    thing it explains are on screen together. Idle it shows **nothing** and collapses — the picture's
    clickability is carried by the hit targets themselves (hover/press feedback, `role="button"`,

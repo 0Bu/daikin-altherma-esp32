@@ -230,6 +230,20 @@ for (const r of cssRules) {
   }
 }
 
+// Line CAP per class, same source — the half-stroke a `round`/`square` cap adds PAST the declared
+// endpoint is a hit area nobody can see in the markup, and G011 exists because that half was left
+// out of every trim in the drawing. Read, never assumed: switching sc-hitline to `butt` must make
+// the coordinates literal again, and this map is what notices.
+const capFor = new Map();
+for (const r of cssRules) {
+  const c = /stroke-linecap\s*:\s*(round|butt|square)/.exec(r.body);
+  if (!c) continue;
+  for (const s of r.sel.split(',')) {
+    const k = /\.(sc-[\w-]+)\s*$/.exec(s.trim());
+    if (k) capFor.set(k[1], c[1]);
+  }
+}
+
 // Which element ids spin about their own BOUNDING BOX, and are actually animated with a rotation.
 // Both halves matter: `transform-box: fill-box; transform-origin: center` is what makes the pivot
 // the bbox centre rather than a coordinate, and the animation is what makes a wrong pivot visible.
@@ -620,6 +634,9 @@ function transformBox(target, m) {
 const has = (n, c) => n.cls.includes(c);
 const pills = nodes.filter((n) => n.kind === 'rect' && has(n, 'sc-pill'));
 const boxes = nodes.filter((n) => n.kind === 'rect' && (has(n, 'sc-box') || has(n, 'sc-plate') || has(n, 'sc-buh')));
+// The round fittings — the 3-way valve, the pump body (also .sc-valve) and the compressor. Filled,
+// so they answer pointer events over their whole disc; G011 is what keeps that true.
+const discs = nodes.filter((n) => n.kind === 'circle' && (has(n, 'sc-valve') || has(n, 'sc-comp')));
 const pipePaths = nodes.filter((n) => n.kind === 'path' && (has(n, 'sc-pipe') || has(n, 'sc-rpipe')));
 const hitLines = nodes.filter((n) => n.kind === 'path' && has(n, 'sc-hitline'));
 const flowPaths = nodes.filter((n) => n.kind === 'path' && (has(n, 'sc-flow') || has(n, 'sc-rflow')));
@@ -637,6 +654,10 @@ for (const p of pipePaths) for (const s of p.segs) pipeSegs.push({ ...s, node: p
 function strokeWidth(n) {
   for (const c of n.cls) if (strokeFor.has(c)) return strokeFor.get(c);
   return parseFloat(n.el.attrs['stroke-width'] || '1');
+}
+function lineCap(n) {
+  for (const c of n.cls) if (capFor.has(c)) return capFor.get(c);
+  return n.el.attrs['stroke-linecap'] || 'butt';                   // the SVG default
 }
 const isH = (s) => Math.abs(s.a[1] - s.b[1]) < 0.01;
 const isV = (s) => Math.abs(s.a[0] - s.b[0]) < 0.01;
@@ -989,6 +1010,74 @@ for (const f of flowPaths) {
   add('G010', f.id || hitKey(f), `flow overlay ${f.id ? '#' + f.id : ''} traces no drawn pipe (${at(f)})`,
     `d="${d}" matches no sc-pipe/sc-rpipe path — the animation and the pipe have drifted apart`);
 }
+// G011: a pipe's TAP AREA must stop at the edge of the fitting it meets. sc-hitline is a fat
+// invisible stroke (a 5 px pipe is not tappable), and with `stroke-linecap: round` it reaches half a
+// stroke PAST its declared endpoint — geometry that exists only in the stylesheet. SVG hit testing
+// is topmost-wins, so where that overhang covers a component drawn EARLIER, the component silently
+// loses the clicks it visibly offers: the drawing outlines the 3-way valve on hover and then opens
+// the DHW branch. It shipped exactly so — every trim in the drawing was computed as if the cap were
+// flat, and the valve lost 21 % of its disc (18 % to the tank riser trimmed to y=194, its own bottom
+// edge, whose cap put it back at y=185; 4 % to the heating run), with the same 9 px bitten out of
+// the outdoor-unit box and the plate. Nothing else could see it: the pixels are transparent, the
+// markup coordinates read correct, and only a pointer at the rim tells you.
+// Hit line vs hit line is deliberately NOT checked. Two runs overlapping at a real junction share a
+// physical place, and which branch owns it is E004's question, not a geometry error.
+const HIT_INTRUDE_TOL = 0.5;
+function distPointSeg(p, a, b) {
+  const vx = b[0] - a[0], vy = b[1] - a[1];
+  const len2 = vx * vx + vy * vy;
+  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / len2));
+  return Math.hypot(p[0] - (a[0] + t * vx), p[1] - (a[1] + t * vy));
+}
+// Segment → axis-aligned rect, as the distance to the rect's FILLED area (0 once they touch).
+// Exact, not sampled: between two convex shapes the closest pair always involves a VERTEX of one, so
+// the four rect corners and the two segment ends exhaust the candidates — plus a slab test, because
+// a run passing clean THROUGH a component (a worse defect than an overhang) has every vertex
+// distance positive. The `rx` corner rounding is ignored, which over-states the rect at its corners
+// only: conservative in the safe direction, and the real cases are all mid-edge.
+function distSegRect(a, b, r) {
+  const clampD = (p) => Math.hypot(p[0] - Math.min(Math.max(p[0], r.x0), r.x1),
+                                   p[1] - Math.min(Math.max(p[1], r.y0), r.y1));
+  if (clampD(a) === 0 || clampD(b) === 0) return 0;                // an end sits inside
+  let t0 = 0, t1 = 1;                                              // slab test: does it cross?
+  for (const [p, q, lo, hi] of [[a[0], b[0], r.x0, r.x1], [a[1], b[1], r.y0, r.y1]]) {
+    const d = q - p;
+    if (Math.abs(d) < 1e-9) { if (p < lo || p > hi) { t0 = 1; t1 = 0; break; } continue; }
+    const ta = (lo - p) / d, tb = (hi - p) / d;
+    t0 = Math.max(t0, Math.min(ta, tb));
+    t1 = Math.min(t1, Math.max(ta, tb));
+  }
+  if (t0 <= t1) return 0;
+  const corners = [[r.x0, r.y0], [r.x1, r.y0], [r.x0, r.y1], [r.x1, r.y1]];
+  return Math.min(clampD(a), clampD(b), ...corners.map((c) => distPointSeg(c, a, b)));
+}
+const shapes = [...pills, ...boxes, ...discs];
+for (const h of hitLines) {
+  const cap = lineCap(h);
+  if (cap === 'butt') continue;                                    // the coordinates ARE the edge
+  const reach = strokeWidth(h) / 2;                                // round and square both add this
+  for (const sh of shapes) {
+    if (h.el.off < sh.el.off) continue;                            // the shape paints later and wins
+    if (hitKey(h) === hitKey(sh)) continue;                        // same target — no click changes hands
+    let worst = 0, where = null;
+    for (const s of h.segs) {
+      const gap = sh.kind === 'circle'
+        ? Math.max(0, distPointSeg(sh.centre, s.a, s.b) - sh.r)
+        : distSegRect(s.a, s.b, sh.bbox);
+      if (reach - gap > worst) { worst = reach - gap; where = s; }
+    }
+    if (worst <= HIT_INTRUDE_TOL) continue;
+    const c = sh.kind === 'circle' ? sh.centre : centre(sh.bbox);  // report the END that overhangs
+    const end = Math.hypot(where.a[0] - c[0], where.a[1] - c[1]) <
+                Math.hypot(where.b[0] - c[0], where.b[1] - c[1]) ? where.a : where.b;
+    add('G011', `${hitKey(h)}|${hitKey(sh)}`,
+      `the "${hitKey(h)}" hit line reaches ${fx(worst)} px into the "${hitKey(sh)}" component (${at(h)})`,
+      `stroke-linecap: ${cap} adds ${fx(reach)} px past its endpoint nearest the fitting ` +
+      `(viewBox ${fx(end[0])},${fx(end[1])} — the markup is offset by the drawing's translate), so the run's ` +
+      `tap area covers part of a fitting drawn earlier (${at(sh)}) — a tap on that rim opens "${hitKey(h)}" ` +
+      `while the drawing outlines "${hitKey(sh)}". Trim the hit line back by the missing ${fx(worst)} px.`);
+  }
+}
 
 // ── LAYER 3 — domain / editorial ─────────────────────────────────────────────────────────────────
 // E001: a pill whose UNIT repeats across the drawing must carry a name, because position alone is a
@@ -1184,7 +1273,9 @@ console.error(
   '  G003 label crossed by a pipe             G004 text overflows its pill (estimate — see the slack)\n' +
   '  G005 pipe not axis-aligned               G006 pill too far from / not over its run\n' +
   '  G007 rotor not centred on its hub        G008 run off the two-level grid   G009 unequal run margins\n' +
-  '  G010 flow overlay traces no pipe         E001 repeated unit with no name   E002 pill on the wrong branch\n' +
+  '  G010 flow overlay traces no pipe\n' +
+  '  G011 a pipe\'s tap area reaches into a fitting drawn earlier (the round line cap overhangs)\n' +
+  '  E001 repeated unit with no name          E002 pill on the wrong branch\n' +
   '  E003 flow overlay spans a junction — one animation cannot state two branches\' flow states\n' +
   '  E004 hit target spans a junction — one highlight cannot select two branches as one pipe\n' +
   `  A finding that is CORRECT as it stands goes in ${EXC} — copy its key: line, with a reason.\n` +

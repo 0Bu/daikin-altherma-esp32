@@ -13,7 +13,8 @@
 # DESCRIPTIONS tables are evaluated — there is no second copy of the coordinates or the rules to
 # drift): structure (hit targets ↔ inspector entries ↔ ids ↔ translations), geometry (inside the
 # viewBox, no overlaps, no struck-through labels, axis-aligned runs, pills tied to their own pipe,
-# rotors centred on their hub) and domain (a repeated unit needs a name; a return-run reading stays
+# rotors centred on their hub, no run's invisible tap area reaching into the fitting it meets) and
+# domain (a repeated unit needs a name; a return-run reading stays
 # on the common section). What it cannot decide — is the picture still TRUE, is a new part in the
 # right place, is the German copy right — is the /schematic-review skill's half.
 #
