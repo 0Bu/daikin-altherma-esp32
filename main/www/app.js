@@ -41,7 +41,7 @@ const I18N = {
     "crash.download": "Download crash report", "crash.copy": "Copy diagnostics", "crash.dismiss": "Dismiss",
     "crash.copied": "Diagnostics copied — paste into a bug report",
     "crash.copy_fail": "Copy failed — open /coredump and /diag manually",
-    "bug.row": "Report a bug", "bug.row_val": "GitHub",
+    "bug.row": "Report a bug",
     "bug.title": "Report a bug",
     "bug.intro": "Describe what goes wrong. The device adds its own status, readings and log — with your network name, addresses and server names removed first.",
     "bug.what": "What happens",
@@ -169,7 +169,7 @@ const I18N = {
     "crash.download": "Absturzbericht herunterladen", "crash.copy": "Diagnose kopieren", "crash.dismiss": "Ausblenden",
     "crash.copied": "Diagnose kopiert — in einen Fehlerbericht einfügen",
     "crash.copy_fail": "Kopieren fehlgeschlagen — /coredump und /diag manuell öffnen",
-    "bug.row": "Fehler melden", "bug.row_val": "GitHub",
+    "bug.row": "Fehler melden",
     "bug.title": "Fehler melden",
     "bug.intro": "Beschreibe, was schiefgeht. Das Gerät legt seinen Zustand, seine Messwerte und sein Protokoll dazu — Netzwerkname, Adressen und Servernamen vorher entfernt.",
     "bug.what": "Was passiert",
@@ -976,12 +976,11 @@ function esp32CardHtml() {
     firmwareRow(s.version) +
     channelRow(s.ota?.channel === "dev" ? "dev" : "release") +
     boardRow() +
-    // Link facts, then the settings, then the board's own health, then the one ACTION. The memory
-    // rows land here rather than after the bug row because "Report a bug" is the escape hatch for
-    // everything above it — including these two curves, which are exactly what a report about a
-    // failed update or a dropped broker wants to carry.
-    memoryRows(s.sys || {}) +
-    bugRow();
+    // Link facts, then the settings, then the board's own health — and nothing else. The card is
+    // READINGS AND SETTINGS ONLY; the one action it used to carry ("Report a bug", last row) is in
+    // the Settings footer line now (index.html #footBug), because a rare escape hatch drawn at a
+    // live reading's weight reads as one more board fact directly under "Largest free block".
+    memoryRows(s.sys || {});
   return vcard("ESP32", rows);
 }
 
@@ -1029,17 +1028,6 @@ function boardRow() {
   return `<button class="vrow vrow-btn" type="button" data-act="board" aria-label="${esc(t("board.title"))}">` +
     `<span class="vrow-label">${esc(t("card.hardware"))}</span>` +
     `<span class="vrow-val mono">${esc(led)} · ${esc(btn)}</span></button>`;
-}
-
-// Reporting a bug is a board-level action, so it sits on the board's own card — and it is a ROW
-// rather than a link because only the device can produce the half of a report that matters (its
-// own status, readings and log, scrubbed). Unconditional on purpose: the one copy affordance this
-// UI had before lived in the crash banner, which never renders unless the device actually crashed,
-// so the two commonest reports — a wrong reading and an MQTT dropout — had no way in at all.
-function bugRow() {
-  return `<button class="vrow vrow-btn" type="button" data-act="bugreport" aria-label="${esc(t("bug.title"))}">` +
-    `<span class="vrow-label">${esc(t("bug.row"))}</span>` +
-    `<span class="vrow-val">${esc(t("bug.row_val"))}</span></button>`;
 }
 
 // Every family name in def/model_names.hpp starts with "Altherma ", and the Model card's own heading
@@ -3607,7 +3595,6 @@ function wireRestOfApp() {
     if (!act) return;
     if (act.dataset.act === "board") openBoard();
     else if (act.dataset.act === "ota") checkFirmwareUpdate();
-    else if (act.dataset.act === "bugreport") openBug();
   });
   $("settingsCards").addEventListener("change", (e) => {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();
@@ -3798,6 +3785,10 @@ function wireRestOfApp() {
   $("boardBackdrop").onclick = closeBoard;
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("boardModal").hidden) closeBoard(); });
 
+  // Bound DIRECTLY, not delegated like the card rows above: the footer link is static markup in
+  // index.html that no render path rebuilds, so there is no container to delegate through — and the
+  // handler outlives every poll, which is the point of keeping it out of #settingsCards.
+  $("footBug").onclick = openBug;
   $("bugCancel").onclick = closeBug;
   $("bugClose").onclick = closeBug;
   $("bugBackdrop").onclick = closeBug;

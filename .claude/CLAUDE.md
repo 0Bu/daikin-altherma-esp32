@@ -32,8 +32,10 @@ Builds for the **esp32s3** target only.
 > step where half-finished reports die. The single exception is a CORE DUMP: raw stack memory, where
 > a password of <=15 chars sits inline in its std::string by SSO, so it is never in the report and
 > is requested through the private advisory form only when the `last_crash` backtrace is not enough.
-> Plus the redaction table and the go-public checklist. The web UI's Settings→ESP32 "Report a bug"
-> action produces the report; `.claude/skills/bug-triage` consumes it).
+> Plus the redaction table and the go-public checklist. The web UI's Settings-FOOTER "Report a bug"
+> action produces the report (the muted mono line under the cards, beside the version — it was the
+> ESP32 card's last ROW through v1.0.0-dev.199, where a rare escape hatch carried a live reading's
+> weight); `.claude/skills/bug-triage` consumes it).
 > Contributor-facing: [`CONTRIBUTING.md`](../CONTRIBUTING.md) (what the local gates
 > are, where logic goes, how PRs land on a strictly-linear `main`) and
 > [`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) — CONTRIBUTING states the outside-contributor half of

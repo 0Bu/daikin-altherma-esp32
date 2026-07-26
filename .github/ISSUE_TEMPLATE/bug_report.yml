@@ -12,7 +12,8 @@
 # the `id` never reaches the issue body, so .claude/skills/bug-triage keys on the label text.
 # Renaming a label is a breaking change — bump the form-vN label in `labels:` when you do.
 #
-# Prefilled by the device: the web UI's Settings -> ESP32 -> "Report a bug" opens this form with
+# Prefilled by the device: the web UI's Settings -> the footer line -> "Report a bug" opens this
+# form with
 # summary and fw_version already filled (?template=bug_report.yml&<id>=<value>), and puts the device
 # report on the clipboard ready to paste into the "Device report" field.
 name: Bug report
@@ -23,7 +24,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Start on the device, not here.** Open its web page → **Settings** → **ESP32** → **Report a bug**.
+        **Start on the device, not here.** Open its web page → **Settings**, scroll to the bottom, and
+        press **Report a bug** in the small grey line under the last card.
         It fills most of this form in for you and puts the device report on your clipboard, ready to
         paste in below. Your network name, addresses, broker and server names are removed by the
         device before you ever see it. Full instructions, including what to do if your firmware is

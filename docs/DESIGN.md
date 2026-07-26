@@ -883,10 +883,11 @@ dashboard — the move changed where the configuration lives, not how it looks:
    minimum is on the chart, and a since-boot scalar beside it would be a second, coarser answer to
    the same question.
    **The card's order encodes what the rows are**: link facts (link, protocol, RX/TX) → settings
-   (Version, Update channel, Hardware) → the board's own health (the two memory rows) → the single
-   **action**, *Report a bug*, last. The report row sits after the memory rows on purpose: it is the
-   escape hatch for everything above it, and those two curves are exactly what a report about a
-   failed update or a dropped broker wants to carry.
+   (Version, Update channel, Hardware) → the board's own health (the two memory rows). **Readings and
+   settings only** — the card carries no action. *Report a bug* was its last row through
+   v1.0.0-dev.199 and is in the footer line below now: a rare escape hatch drawn at a live reading's
+   weight, immediately under *Largest free block*, reads as one more board fact, and the card's whole
+   claim is that each row is one.
    Then the **Version** (`version`) and the **Update channel** select
    (`ota.channel` → `POST /set_ota`, §5.4). The version being here *as well as* in the dashboard
    header serves two different needs, and each row answers the one its screen asks: the header keeps
@@ -897,7 +898,19 @@ dashboard — the move changed where the configuration lives, not how it looks:
    through v1.0.13 on the reasoning that the header owned the affordance; in use that only made the
    version look inert precisely where a user is already deciding which build to run.
 
-Under both, a `--muted` monospace footer line naming the product and running version.
+Under both, a `--muted` monospace footer line naming the product and running version — and, after
+them, **Report a bug**, the screen's one action. It is the `.verlink` affordance the header's version
+button uses (§5.3 header): size, weight and colour all inherited, so at rest it is indistinguishable
+from the text beside it, with the brand tint + underline arriving only on hover/`:focus-visible`. It
+sits here rather than on the ESP32 card because a report is a rare escape hatch, not a board fact,
+and the weight of a card row said the opposite. The separator and the link **wrap as one unit** — a
+stranded `·` at a line break reads as a dropped word.
+
+Two things keep that from contradicting rules stated elsewhere. It opens the **modal**, not an
+outbound link: only the device can produce the evidence half of a report, which is the whole reason
+the flow exists (§5.6 bug report). And the version printed in this line stays **non-tappable**, as it
+always was — §5.4's "tapping the version checks for an update" is about the version printed *as a
+row of its own*, and a control landing next to it here does not make this line a second OTA trigger.
 
 **The gear's attention dot** — an `--err` dot on the gear whenever a connection is **down**, since
 the Connections rows are no longer on the dashboard and a broker that stopped answering would
