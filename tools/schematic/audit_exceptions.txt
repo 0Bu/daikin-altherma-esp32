@@ -1,0 +1,54 @@
+# Schematic adjudication ledger — tools/schematic/check_schematic.mjs
+#
+# One finding KEY per line suppresses that ONE finding. Suppressed findings stay printed (as
+# "suppressed by …") — an entry here is an adjudication ON RECORD, not a delete. Copy the `key:`
+# line the audit prints for the finding you are adjudicating. A line that stops suppressing
+# anything is itself a finding (S000): the condition it adjudicated is gone, so the line would only
+# hide that condition coming back.
+#
+# Two kinds of entry, and they are not the same thing (same contract as tools/domain/):
+#
+#   ADJUDICATION   The drawing is RIGHT and the rule is a generalisation it deliberately departs
+#                  from. Cite the decision — DESIGN.md, the markup's own comment, a measurement.
+#                  These stay until the drawing changes.
+#   KNOWN-DEFECT   The drawing is WRONG, the fix is not in this change, and the line is here so the
+#                  gate stays usable meanwhile. It names what is wrong and is DELETED BY ITS FIX —
+#                  a KNOWN-DEFECT that outlives its fix silences the guard against the fix
+#                  regressing, which is exactly what the ledger must not become.
+#
+# S001 (a hit target that opens nothing) and E002 (a reading drawn on a branch its sensor does not
+# read) are REFUSED here — the audit exits 2 on either. They are the defects this gate exists for:
+# a dead tap target breaks the drawing's whole premise that it is explorable, and a pill on the
+# wrong branch is the #35-#39 wrong-attribution shape drawn in SVG. The fix is the drawing.
+
+# ── ADJUDICATION — the two refrigerant pressures carry no name ON PURPOSE ────────────────────────
+# DESIGN.md §5.3 states the rule this fires on ("a pill's name sub-label is required wherever its
+# unit repeats"), and states the exception in the same breath: the two pressures are "the only pair
+# a reader has to tell apart at a glance, since neither carries a name", and they are told apart by
+# POSITION to a rule the drawing applies on all three of its runs — the pressure sits ABOVE its pipe
+# and the other reading below it, so "above a refrigerant line is a bar figure" holds everywhere.
+# The water pressure, whose same-unit neighbours sit two components away, IS named (see index.html
+# at #wp) — that is the case the rule was written for. Naming these two would also re-widen the
+# pills that were narrowed 112 -> 66 px to open the corridor between the outdoor unit and the plate.
+# If the above/below rule is ever dropped, these two lines go with it.
+E001 hp
+E001 lp
+
+# ── ADJUDICATION — the discharge temperature is named by its position, like the pressures ────────
+# Same rule, same drawing convention, on the other half of the same split pair: the hot run carries
+# its pressure above the pipe and its TEMPERATURE below it. The "°C" pills a reader could confuse it
+# with are all on the water side of the plate (leaving water, return, room) or inside the outdoor
+# unit's box (outdoor air) and every one of them IS named; the discharge pill is the only unnamed °C
+# in the drawing, and it sits on the one pipe that carries no water at all.
+E001 disch
+
+# ── ADJUDICATION — "Low noise control" is documented but not generated ───────────────────────────
+# FORWARD-ARMED, exactly like the D002 line in tools/descriptions/audit_exceptions.txt.
+# docs/REGISTERS.md documents the register; no generated profile in main/def/ carries a row for it
+# yet (the generator's input is narrower than the spec — the same narrowness that left the page-0x10
+# protection words undecoded until def/overlay.hpp supplied them, issue #110). The quiet-mode pill
+# and its inspector copy are written for the documented register and stay ready for it. Delete this
+# line when the generator emits the row — S000 will remind you.
+S003 quiet
+
+# ── KNOWN-DEFECT — the status-block comment lost its "<!--" ──────────────────────────────────────

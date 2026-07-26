@@ -100,12 +100,10 @@ const I18N = {
     "btn.saving": "Saving…", "btn.save": "Save", "btn.cancel": "Cancel",
     // static index.html markup (data-i18n)
     "schem.outdoor_unit": "OUTDOOR UNIT", "schem.defrost_pill": "❄ defrost", "schem.outdoor": "Outdoor",
-    "schem.est": "estimated",
     "insp.close": "Close",
     "schem.leaving_water": "leaving water · pre-BUH", "schem.dhw_tank": "DHW TANK", "schem.set": "set",
     "schem.heating": "HEATING", "schem.pump": "PUMP", "schem.return": "return", "schem.room": "Room",
-    "kpi.target": "target",
-    "schem.est_src": (s) => "estimated · " + s, "schem.no_ct": "no current sensor",
+    "schem.flow_rate": "flow", "schem.water_press": "water pressure",
     "wifi.title": "WiFi configuration", "wifi.ssid": "WiFi network (SSID)", "wifi.pass": "WiFi password",
     "wifi.err_ssid": "SSID must be 32 characters or less",
     "wifi.err_pass": "Password must be empty (open network) or between 8 and 63 characters",
@@ -207,12 +205,10 @@ const I18N = {
     "btn.saving": "Speichere…", "btn.save": "Speichern", "btn.cancel": "Abbrechen",
     // static index.html markup (data-i18n)
     "schem.outdoor_unit": "AUSSENEINHEIT", "schem.defrost_pill": "❄ Abtauen", "schem.outdoor": "Außen",
-    "schem.est": "geschätzt",
     "insp.close": "Schließen",
     "schem.leaving_water": "Vorlauf · vor BUH", "schem.dhw_tank": "WW-SPEICHER", "schem.set": "Soll",
     "schem.heating": "HEIZUNG", "schem.pump": "PUMPE", "schem.return": "Rücklauf", "schem.room": "Raum",
-    "kpi.target": "Ziel",
-    "schem.est_src": (s) => "gesch. · " + s, "schem.no_ct": "kein Stromsensor",
+    "schem.flow_rate": "Durchfluss", "schem.water_press": "Wasserdruck",
     "wifi.title": "WLAN-Konfiguration", "wifi.ssid": "WLAN-Netzwerk (SSID)", "wifi.pass": "WLAN-Passwort",
     "wifi.err_ssid": "SSID darf höchstens 32 Zeichen haben",
     "wifi.err_pass": "Passwort muss leer (offenes Netz) oder 8–63 Zeichen lang sein",
@@ -1941,8 +1937,6 @@ const SCHEM_PILL_IDS = [
 ];
 function clearSchematic() {
   SCHEM_PILL_IDS.forEach((id) => setTxt(id, "—"));
-  setTxt("svPelSrc", "");
-  setTxt("svDtSet", "");     // an optional trailing segment, not a value — blanks to nothing, not "—"
   setTxt("svBuh", "");                 // no BUH step to report
   setTxt("svValve", "3WV");            // valve position unknown — don't claim a branch
   const sc = $("schem");
@@ -2016,24 +2010,18 @@ function renderLive() {
   $("rfCold").classList.toggle("rev", d.defrost === true);
 
   // The derived figures that used to live in KPI tiles below the drawing, now at their place in it:
-  // the target ΔT beside the measured one, COP beside the heat output it is computed from, and the
-  // electrical input on the outdoor unit where the power actually goes in.
-  // The target ΔT is a HEATING setpoint (the spec lists a separate cooling one), and no shipped
-  // profile currently carries either — so it is an optional trailing segment, not a fixed half of
-  // the pill: absent, or not heating, and it simply is not claimed.
-  const heating = /heat/i.test(pickValue(/i\/u operation mode/i) || "");
-  setTxt("svDtSet", d.dtSet != null && heating ? ` · ${t("kpi.target")} ${fmt1(d.dtSet)} K` : "");
+  // COP beside the heat output it is computed from, and the electrical input on the outdoor unit
+  // where the power actually goes in.
+  // What is NOT drawn: their annotations. The ΔT's target, the "estimated" word and the electrical
+  // figure's current source (CT clamps = whole unit vs inverter = compressor only) are all in the
+  // INSPECTOR — the drawing carries readings, the explainer carries what to make of them, and the
+  // pel entry's `now` already distinguishes all three of its cases (a source, a held-over inverter
+  // reading, a profile with no current row at all) in a full sentence rather than a caption. The
+  // "≈" stays on both derived pills: it is part of the reading, not an annotation, and without it a
+  // bare "4.6 kW" reads as measured with the inspector closed. d.dtSet / d.pelSrc are still
+  // computed in liveData — the explainer is their only consumer now.
   setTxt("svCop", d.cop == null ? "—" : d.cop.toFixed(1));
   setTxt("svPel", fmt1(d.pel));
-  // The source is part of the reading, not trivia: CT clamps measure the whole unit, the inverter
-  // current only the compressor — so an INV-based estimate misses the backup heater entirely.
-  // The HELD-OVER case gets NO sub-label: a blanked pill is the drawing's whole vocabulary for "no
-  // reading right now" (d.ouHeldOver, logic/ou_stale.hpp), and a caption explaining WHY belongs in
-  // the explainer, not in the schematic — the pel inspector entry carries that sentence. It must
-  // still not fall through to "no current sensor", which is a claim about the HARDWARE and false
-  // here: the profile has the row, only the reading is stale.
-  setTxt("svPelSrc", d.pel != null ? t("schem.est_src", d.pelSrc)
-                   : d.pelHeld ? "" : t("schem.no_ct"));
 
   renderInspect();     // keep an open explainer's reading/state sentence current
 }
@@ -2084,28 +2072,46 @@ const INSPECT = {
     rows: [/inv frequency/i, /inv primary current/i, /discharge pipe temp/i],
   },
   out: { t: { en: "Outdoor air", de: "Außentemperatur" }, re: /outdoor air/i, sample: "Outdoor Air Temp. (R1T)" },
-  disch: {
+  // ── One pill, one reading, one entry ──────────────────────────────────────────────────────────
+  // The high side and the low side used to be ONE pill each carrying two readings ("28.4 bar ·
+  // 71.2 °C"), and one entry explaining the pair. Split into separate pills, each needs its own
+  // entry: the headline, the source line and the DESCRIPTIONS copy all resolve from the entry's own
+  // row, so a shared entry would answer a tap on the temperature pill with a bar headline and the
+  // pressure row's name under it — a number attributed to the wrong sensor, in the panel whose job
+  // is to say which sensor it came from. Each still lists the other as a member row, since they do
+  // describe one point in the circuit.
+  hp: {
     // The pill draws d.circP — the compressor's own HP transducer while it runs, the always-live
     // refrigerant sensor at rest — so the headline must resolve THE SAME row, not the HP row on
     // principle. Reading the HP row here showed the idle unit's stale/zero bar next to a pill
     // reading the real equalised pressure, and named a source the number had not come from.
     pick: () => (S.live ? S.live.circPRow : null),
-    t: { en: "High side (discharge)", de: "Hochdruckseite" },
+    t: { en: "High pressure", de: "Hochdruck" },
     sample: "High pressure",
-    rows: [/^high pressure$/i, /discharge pipe temp/i, /^refrigerant pressure sensor$/i],
+    rows: [/^high pressure$/i, /^refrigerant pressure sensor$/i, /discharge pipe temp/i],
   },
-  // Both readings on this pill belong to the OUTDOOR unit, not to the liquid line they are drawn on:
-  // the expansion valve is fitted there, and the low pressure is what exists downstream of it. The
-  // pill sits at this end of the pipe because that is where the valve is — naming it "suction side"
-  // implied the pipe itself was the suction leg, which it is not (see rcold).
-  suction: {
-    t: { en: "Low side & expansion valve", de: "Niederdruck & Expansionsventil" },
+  disch: {
+    t: { en: "Discharge temperature", de: "Heißgastemperatur" },
+    re: /discharge pipe temp/i, sample: "Discharge pipe temp.",
+    rows: [/discharge pipe temp/i, /^high pressure$/i],
+  },
+  // Both readings belong to the OUTDOOR unit, not to the liquid line they are drawn on: the
+  // expansion valve is fitted there, and the low pressure is what exists downstream of it. They sit
+  // at this end of the pipe because that is where the valve is — naming it "suction side" implied
+  // the pipe itself was the suction leg, which it is not (see rcold).
+  lp: {
+    t: { en: "Low pressure", de: "Niederdruck" },
     what: {
-      en: "Both belong to the outdoor unit at the far end of this pipe: the electronic expansion valve meters how much refrigerant is let through, and the low pressure is what the circuit drops to once past it. A low-pressure reading is not available on every model — the outdoor unit here has a high-pressure switch but no low-pressure transducer, so this half often stays \"—\".",
-      de: "Beides gehört zum Außengerät am fernen Ende dieser Leitung: Das elektronische Expansionsventil dosiert, wie viel Kältemittel durchgelassen wird, und der Niederdruck ist der Druck, auf den der Kreis dahinter abfällt. Nicht jedes Modell liefert einen Niederdruckwert — das Außengerät hier hat einen Hochdruckschalter, aber keinen Niederdruckgeber, daher bleibt diese Hälfte oft \"—\".",
+      en: "What the circuit drops to once past the expansion valve, measured at the outdoor unit at the far end of this pipe. Not available on every model — the outdoor unit here has a high-pressure switch but no low-pressure transducer, so this pill often stays \"—\".",
+      de: "Der Druck, auf den der Kreis hinter dem Expansionsventil abfällt, gemessen am Außengerät am fernen Ende dieser Leitung. Nicht jedes Modell liefert ihn — das Außengerät hier hat einen Hochdruckschalter, aber keinen Niederdruckgeber, daher bleibt diese Pille oft \"—\".",
     },
     re: /^low pressure$/i, sample: "Low pressure",
     rows: [/^low pressure$/i, /expansion valve ?1/i],
+  },
+  eev: {
+    t: { en: "Expansion valve", de: "Expansionsventil" },
+    re: /expansion valve ?1/i, sample: "Expansion valve 1 (pls)",
+    rows: [/expansion valve ?1/i, /^low pressure$/i],
   },
   phe: {
     t: { en: "Plate heat exchanger", de: "Plattenwärmetauscher" },
@@ -2160,6 +2166,20 @@ const INSPECT = {
       : { en: `≈ ${fmt1(d.pth)} kW${d.cop != null ? `, about ${d.cop.toFixed(1)} kW of heat per kW of electricity (COP)` : ""}.`,
           de: `≈ ${fmt1(d.pth)} kW${d.cop != null ? `, etwa ${d.cop.toFixed(1)} kW Wärme je kW Strom (COP)` : ""}.` },
     rows: [/flow sensor/i, /target delta t heating/i, /current measured by ct/i, /inv primary current/i],
+  },
+  // Its own pill next to the heat output, so its own entry — and the one derived figure with no
+  // catalog row behind it at all, hence copy written here rather than pulled from DESCRIPTIONS.
+  cop: {
+    t: { en: "COP (estimated)", de: "COP (geschätzt)" },
+    what: {
+      en: "Heat out divided by electricity in — how many kW of heat the plant delivered per kW it drew. It is a quotient of the two ESTIMATES either side of it, so it inherits every assumption both of them make, and it is only as honest as the current it divides by: an inverter-current input sees the compressor alone, so the COP flatters whenever the backup heater is firing. It means nothing with the compressor stopped and shows \"—\" then.",
+      de: "Wärme raus geteilt durch Strom rein — wie viele kW Wärme die Anlage je aufgenommenem kW geliefert hat. Ein Quotient der beiden SCHÄTZUNGEN daneben, er erbt also sämtliche Annahmen von beiden, und er ist nur so ehrlich wie der Strom, durch den geteilt wird: Ein Inverterstrom erfasst nur den Verdichter, der COP fällt also zu schön aus, sobald der Zusatzheizer heizt. Bei stehendem Verdichter bedeutet er nichts und zeigt dann „—\".",
+    },
+    head: (d) => (d.cop == null ? "—" : d.cop.toFixed(1)),
+    now: (d) => d.cop == null ? null
+      : { en: `${d.cop.toFixed(1)} kW of heat per kW of electricity — ≈ ${fmt1(d.pth)} kW out for ≈ ${fmt1(d.pel)} kW in.`,
+          de: `${d.cop.toFixed(1)} kW Wärme je kW Strom — ≈ ${fmt1(d.pth)} kW raus für ≈ ${fmt1(d.pel)} kW rein.` },
+    rows: [/flow sensor/i, /current measured by ct/i, /inv primary current/i],
   },
   buh: {
     t: { en: "Backup heater (BUH)", de: "Zusatzheizer (BUH)" },
@@ -2313,7 +2333,9 @@ const INSPECT = {
     rows: [/dhw tank temp/i, /dhw setpoint/i, /3.?way valve/i],
   },
   wheat: {
-    t: { en: "Heating flow branch", de: "Heizungs-Vorlauf" },
+    // Titled for the CIRCUIT, not one leg of it: this target is both the flow down from the valve
+    // and the return back to the merge, like the tank branch's, and the copy already read that way.
+    t: { en: "Heating branch", de: "Heizkreis" },
     what: {
       en: "The branch that feeds the radiators or underfloor loops. What comes back down the return line is cooler by exactly the heat the house took — that difference is the ΔT shown at the exchanger.",
       de: "Der Abzweig, der die Heizkörper bzw. Fußbodenkreise versorgt. Was über die Rücklaufleitung zurückkommt, ist genau um die vom Haus entnommene Wärme kühler — dieser Unterschied ist das am Wärmetauscher gezeigte ΔT.",
@@ -2340,9 +2362,14 @@ const INSPECT = {
     rows: [/inlet water/i, /flow sensor/i, /^water pressure$/i],
   },
   flow: {
-    t: { en: "Flow & water pressure", de: "Durchfluss & Wasserdruck" },
+    t: { en: "Flow rate", de: "Durchfluss" },
     re: /flow sensor/i, sample: "Flow sensor",
     rows: [/flow sensor/i, /^water pressure$/i, /water pump signal/i],
+  },
+  wp: {
+    t: { en: "Water pressure", de: "Wasserdruck" },
+    re: /^water pressure$/i, sample: "Water pressure",
+    rows: [/^water pressure$/i, /flow sensor/i],
   },
 };
 

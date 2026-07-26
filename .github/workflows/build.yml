@@ -142,6 +142,18 @@ jobs:
       - name: Verify the description audit still has teeth
         run: ./tools/descriptions/selftest.sh
 
+      # The dashboard schematic: the two audits above can BOTH be clean while the picture is false.
+      # A pill can name a physically correct value, have copy for it, and still be drawn on the
+      # wrong pipe — this drawing shipped a fan spinning around a point beside its own axle, the
+      # leaving-water pill floating 40 px off its run, the return temperature on the heating-only
+      # section, and "HEIZUNG" struck through by the heating riser. Parses the real SVG and
+      # evaluates the real INSPECT/I18N/DESCRIPTIONS tables, so there is no second copy of the
+      # coordinates or the rules to drift. Same runtime as the step above (node), seconds long.
+      - name: Audit the dashboard schematic
+        run: ./scripts/run-schematic-audit.sh
+      - name: Verify the schematic audit still has teeth
+        run: ./tools/schematic/selftest.sh
+
       # The gh-pages publish is the LAST step of the build job below, after ~5 minutes of firmware
       # work — so when it breaks, it breaks expensively and at the worst moment. It is also the one
       # step with a concurrency hazard: two publishers (the release root and every merge's dev

@@ -20,14 +20,15 @@ likely to be declined — the comment density and the "why" notes in this codeba
 
 ## The local loop — no board or ESP-IDF required
 
-Three scripts run on a plain system toolchain (cmake + g++/clang++, plus node for the third) in
-seconds. **Run all three before opening a PR.** They are also the first steps of CI's `gates` job,
+Four scripts run on a plain system toolchain (cmake + g++/clang++, plus node for the last two) in
+seconds. **Run all four before opening a PR.** They are also the first steps of CI's `gates` job,
 so a failure here fails the build anyway.
 
 ```bash
 scripts/run-mock-tests.sh          # CI gates step 1 — host-side pure-logic tests
 scripts/run-domain-audit.sh        # CI gates step 2 — is the value catalog physically RIGHT?
 scripts/run-description-audit.sh   # CI gates step 3 — can a user find out what each value IS?
+scripts/run-schematic-audit.sh     # CI gates step 4 — does the DRAWING still say what it means?
 ```
 
 `run-mock-tests.sh` compiles the IDF-free headers in [`main/logic/`](main/logic/) against
@@ -66,6 +67,29 @@ with a reason — except `D001`, which the ledger refuses outright: a published 
 cannot look up is the defect the gate exists for, and the fix is copy, not a suppression. Touching
 the audit means also running `tools/descriptions/selftest.sh`, same argument as the domain one.
 
+`run-schematic-audit.sh` asks it one layer up again, of the **dashboard schematic** — the inline SVG
+in [`main/www/index.html`](main/www/index.html) with its CSS and its `INSPECT` / `I18N` bindings. All
+three gates above can be green while the picture is false, and that is not hypothetical: this drawing
+has shipped a fan spinning around a point beside its own axle, the leaving-water pill floating 40 px
+off the run it names, the return temperature drawn on the heating-only section (claiming a branch
+R4T does not read), and "HEIZUNG" struck through by the heating riser so it rendered "HEIZUNC". Each
+one is a physically correct value attached to the wrong thing — the `#35`–`#39` shape, drawn.
+
+It parses the real SVG (coordinates, transforms, path geometry, text metrics) and evaluates the real
+binding tables, so no second copy of either can drift, and reports in three layers: **structure**
+(`S…` — hit target ↔ inspector entry ↔ element id ↔ translation), **geometry** (`G…` — viewBox,
+overlaps, labels struck through, axis-aligned runs, a pill's distance to its own pipe, rotor
+symmetry) and **domain** (`E…` — a repeated unit needs a name; a return-run reading stays left of
+the junction). Findings that are correct as they stand go in
+[`tools/schematic/audit_exceptions.txt`](tools/schematic/audit_exceptions.txt) as an `ADJUDICATION`
+(citing the decision — `docs/DESIGN.md` §5.3, a measurement) or a `KNOWN-DEFECT` (naming what is
+wrong, and deleted by its fix); `S001` (a tap target that opens nothing) and `E002` (a pill on a
+branch its sensor does not read) are refused outright. Touching the audit means running
+`tools/schematic/selftest.sh`, which re-seeds all six of those historical defects and asserts each is
+still caught. What it *cannot* decide — is the drawing still true of the plant, is a new part in the
+right place, is the German copy right — it stays quiet about; that half is the maintainer's
+`/schematic-review`.
+
 Three more fast gates guard the **published artifacts** rather than the firmware, so most PRs never
 need them locally — run them if you touch
 [`scripts/publish-pages-branch.sh`](scripts/publish-pages-branch.sh),
@@ -75,9 +99,9 @@ need them locally — run them if you touch
 [`scripts/next-version.sh`](scripts/next-version.sh):
 
 ```bash
-scripts/run-pages-publish-tests.sh         # CI gates step 4 — needs only git, no toolchain
-scripts/run-web-installer-plan-tests.sh    # CI gates step 5 — needs only python3
-scripts/run-publish-version-tests.sh       # CI gates step 6 — git + python3 + a C++17 compiler
+scripts/run-pages-publish-tests.sh         # CI gates step 5 — needs only git, no toolchain
+scripts/run-web-installer-plan-tests.sh    # CI gates step 6 — needs only python3
+scripts/run-publish-version-tests.sh       # CI gates step 7 — git + python3 + a C++17 compiler
 ```
 
 The first races two publishers against a throwaway bare repo, because `gh-pages` has two concurrent
@@ -105,9 +129,9 @@ resets the numbering — on 2026-07-24 that republished the dev feed as `1.0.0-d
 `1.0.14-dev.2` it had served minutes earlier, with a green build. If this gate fires, fix the floor
 (a tag, or `version.txt`) — not the gate.
 
-All six are **steps of one `gates` job**, not a job each (the version gate above runs in `build`,
+All seven are **steps of one `gates` job**, not a job each (the version gate above runs in `build`,
 where the stamped version exists; only its tests are a `gates` step). Actions bills every job
-rounded up to the next whole minute, so six ~15-second jobs cost six minutes for under a minute
+rounded up to the next whole minute, so seven ~15-second jobs cost seven minutes for under a minute
 of work; a step boundary names the failure just as precisely.
 
 ## Building the firmware
@@ -163,11 +187,11 @@ silence a *new* finding on code your PR touches — that is the gate working.
 
 ## Pull requests
 
-Fill in [the template](.github/pull_request_template.md). Three checkboxes on it
-(`/project-review`, `/feature-docs`, `/domain-review`) are **maintainer-only** — they invoke Claude
-Code skills in this repo's `.claude/` directory and are not something an outside contributor can run.
-Leave them unchecked; the maintainer runs them before merge. Your equivalents are the two scripts
-above plus an honest note about hardware.
+Fill in [the template](.github/pull_request_template.md). Four checkboxes on it
+(`/project-review`, `/feature-docs`, `/domain-review`, `/schematic-review`) are **maintainer-only** —
+they invoke Claude Code skills in this repo's `.claude/` directory and are not something an outside
+contributor can run. Leave them unchecked; the maintainer runs them before merge. Your equivalents
+are the four scripts above plus an honest note about hardware.
 
 `main` is kept **strictly linear**, so PRs land as **squash merges** — enforced by a branch ruleset
 on `main` (require a pull request, require linear history, and the `gates` / `build` checks green),

@@ -147,6 +147,19 @@ svg .sc-box { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
 svg .sc-plate { fill: var(--hatch); stroke: var(--line); }
 svg .sc-lbl { fill: var(--muted); font: 700 10px var(--font-sans); letter-spacing: .08em; }
 svg .sc-pill { fill: var(--card); stroke: var(--line); }
+/* Leader tie: the hairline from a pill to the pipe it reads. Dotted and --line, so it joins the
+   drawing's quietest layer — it answers "which pipe is this number from?" without competing with
+   the pipe itself. Only pills drawn BESIDE a run carry one; a reading inside its component (tank,
+   room, outdoor air, the plate's three) is already attached by containment. It tints with its pill
+   on hover/select, which is what makes the pairing legible on a phone, where hover does not exist
+   but the tap does. */
+svg .sc-tie { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 2 3;
+  stroke-linecap: round; pointer-events: none; }
+/* A tie ENDS SHORT of its pipe — it points at the run, it does not draw on it. Each path stops
+   half the pipe's stroke (5 water, 3.5 refrigerant) plus its own round cap before the centre line,
+   so the last dot sits beside the pipe rather than inside it. Running a --line hairline through a
+   --pipe stroke put a pale notch in the pipe at every tie, which reads as a fitting that is not
+   there. Move a pipe's stroke-width and the ties' end coordinates move with it. */
 svg .sc-val { fill: var(--fg); font: 600 11px var(--font-sans); font-variant-numeric: tabular-nums; }
 svg .sc-sub { fill: var(--muted); font: 500 9.5px var(--font-sans); }
 svg .sc-state { fill: var(--muted); font: 600 10px var(--font-sans); }
@@ -184,15 +197,29 @@ svg .cold { stroke: var(--flow-cold); }
 svg .sc-flow.on { opacity: 1; animation: dashfwd 1.1s linear infinite; }
 svg .sc-rflow.on { opacity: 1; animation: rdashfwd 1.1s linear infinite; }
 svg .sc-rflow.on.rev { animation-name: rdashrev; }
+/* Both spin about their own BOUNDING-BOX centre (no coordinates repeated here, so moving the
+   part in index.html cannot leave a stale pivot behind). That only lands on the real axle if the
+   rotating group's bounding box is centred on the hub, which each achieves differently: the fan
+   keeps its RING inside the rotating group (a centred circle is invisible under rotation and
+   dominates the bbox, so any blade shape pivots true), the pump's impeller is four blades at 90 deg
+   (symmetric by itself). See the notes in index.html — both are load-bearing, not styling. The
+   pump's 1.2 s became 1.6 s because four-fold symmetry makes a blade pass the same point every
+   quarter turn, which strobed; the fan's four swept blades run 2.6 s for the same reason. */
 #scFan, #scPump { transform-box: fill-box; transform-origin: center; }
-.fan-on #scFan { animation: spin 1.6s linear infinite; }
-.pump-on #scPump { animation: spin 1.2s linear infinite; }
+.fan-on #scFan { animation: spin 2.6s linear infinite; }
+.pump-on #scPump { animation: spin 1.6s linear infinite; }
 svg .sc-valve { fill: var(--card); stroke: var(--muted); stroke-width: 1.5; }
 svg .sc-comp { fill: var(--brand-tint); stroke: var(--brand-strong); stroke-width: 1.5; }
 svg .sc-buh { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
 .buh-on .sc-buh { fill: var(--brand-tint); stroke: var(--warn); }
 .buh-on .sc-bolt { fill: var(--warn); }
 svg .sc-bolt { fill: var(--muted); }
+/* Pump impeller vanes. The same-colour stroke is not decoration: it rounds the OUTLINE's corners
+   (stroke-linejoin: round) so the blunt vane ends read as square-but-softened instead of sharp,
+   which at ~30 px is the difference between an impeller and a starburst. It also grows the vane by
+   half the stroke, which is why the path itself is drawn a touch narrow. */
+svg .sc-vane { fill: var(--muted); stroke: var(--muted); stroke-width: 1.3;
+  stroke-linejoin: round; stroke-linecap: round; }
 /* Both are hidden by opacity alone, which stops NEITHER hit testing NOR tab focus — and since they
    are now hit targets, an invisible pill would both answer clicks and sit in the keyboard tab order
    showing nothing. `visibility` fixes both at once; the delayed transition on it lets the opacity
@@ -212,12 +239,19 @@ svg .sc-snow, svg .sc-quiet {
    picture reads as explorable without adding a single visual element to the drawing. Selected is
    thicker, not a different colour — one accent, two weights. */
 svg .sc-hit { cursor: pointer; }
-svg .sc-hit:hover :is(.sc-pill, .sc-box, .sc-plate, .sc-buh, .sc-comp, .sc-valve) { stroke: var(--brand); }
+svg .sc-hit:hover :is(.sc-pill, .sc-box, .sc-plate, .sc-buh, .sc-comp, .sc-valve, .sc-tie) { stroke: var(--brand); }
 svg .sc-hit.sel :is(.sc-pill, .sc-box, .sc-plate, .sc-buh, .sc-comp, .sc-valve) { stroke: var(--brand); stroke-width: 2.5; }
+svg .sc-hit.sel .sc-tie { stroke: var(--brand); }
 /* Pipes: a 3.5–5 px stroke is far too thin to tap, so each run carries an invisible fat hit line.
    `pointer-events: stroke` is deliberate — it hit-tests the stroke area regardless of the paint
    being transparent, which `visibleStroke`/`visiblePainted` do not agree on across engines. */
 svg .sc-hitline { fill: none; stroke: transparent; stroke-width: 18; stroke-linecap: round; stroke-linejoin: round; pointer-events: stroke; }
+/* The same idea for a reading drawn WITHOUT a pill (bare text inside its component, as the tank's
+   value and the room's are): the glyphs alone are not a tap target, so an invisible rect carries the
+   hit, and the value tints where a border would have been outlined. `fill: transparent` rather than
+   `fill: none` is load-bearing — `none` is not painted and takes no pointer events. */
+svg .sc-hitarea { fill: transparent; pointer-events: all; }
+svg .sc-hit-bare:hover .sc-val, svg .sc-hit-bare.sel .sc-val { fill: var(--brand-strong); }
 svg .sc-hit:hover :is(.sc-pipe, .sc-rpipe) { stroke: var(--brand); }
 svg .sc-hit.sel :is(.sc-pipe, .sc-rpipe) { stroke: var(--brand); }
 svg .sc-hit:hover .sc-lbl, svg .sc-hit.sel .sc-lbl, svg .sc-hit.sel .sc-state { fill: var(--brand-strong); }

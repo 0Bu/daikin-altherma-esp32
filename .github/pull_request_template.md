@@ -3,7 +3,7 @@ Fill in each section. Delete checklist lines that don't apply. This template is 
 authors and by Claude Code — keep it honest: say what was actually verified, and note anything
 that couldn't be (a cloud session cannot build or USB-flash — see .claude/CLAUDE.md).
 
-FIRST-TIME CONTRIBUTOR? Read CONTRIBUTING.md. Short version: run the two scripts under
+FIRST-TIME CONTRIBUTOR? Read CONTRIBUTING.md. Short version: run the scripts under
 "Verification", say honestly what you could not test, and leave the "Maintainer gates" section
 alone — those are Claude Code skills in this repo's .claude/ directory and are not yours to run.
 -->
@@ -20,6 +20,8 @@ alone — those are Claude Code skills in this repo's .claude/ directory and are
 
 - [ ] `scripts/run-mock-tests.sh` passes (host-side logic tests — CI's `gates` job, step 1)
 - [ ] `scripts/run-domain-audit.sh` clean (value-catalog domain correctness — CI's `gates` job, step 2)
+- [ ] `scripts/run-description-audit.sh` clean (every visible reading has an explainer — CI's `gates` job, step 3)
+- [ ] `scripts/run-schematic-audit.sh` clean (the dashboard drawing — CI's `gates` job, step 4; only if the web UI changed)
 - [ ] Firmware built (`scripts/idf-docker.sh idf.py build`, or relied on CI) — N/A in a cloud session (no Docker daemon / no USB)
 - [ ] Exercised against a real heat pump / device where relevant (or noted why not)
 
@@ -38,3 +40,4 @@ alone — those are Claude Code skills in this repo's .claude/ directory and are
 - [ ] `/project-review` run clean (doc drift, memory, tests, multi-target)
 - [ ] `/feature-docs` run if a technical feature changed — `docs/FEATURES.md` catalog synced
 - [ ] `/domain-review` run — required on EVERY merge: values verified physically right, sensible and authentic (a PR that cannot reach a value clears in seconds, but say what you checked)
+- [ ] `/schematic-review` run if the dashboard schematic changed — the drawing still tells the truth about the plant, and every reading is on the part that measures it

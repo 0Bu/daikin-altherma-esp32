@@ -51,6 +51,7 @@ changes can be *verified*, not just reasoned about, even in a cloud session:
 scripts/run-mock-tests.sh    # compile + run host logic tests in seconds (cmake + g++/clang++)
 scripts/run-domain-audit.sh  # is the value catalog physically RIGHT? (the domain-correctness gate)
 scripts/run-description-audit.sh  # can the user find out what each value IS? (node-only)
+scripts/run-schematic-audit.sh    # does the DRAWING still say what it means? (node-only)
 ```
 
 The third is the same question one layer up from the second: the domain audit asks whether a
@@ -67,6 +68,29 @@ adjudication ledger (same contract as the domain one; a D001 "no copy for a visi
 refused as a ledger entry outright), and `tools/descriptions/selftest.sh` proves it still catches
 the defects it was built for.
 
+The FOURTH asks the same question one layer up again, of the DASHBOARD SCHEMATIC — the inline SVG in
+`main/www/index.html` plus its CSS and its `INSPECT`/`I18N` bindings. The domain audit asks whether a
+published value is true, the description audit whether there is anything to say about it, this one
+whether the PICTURE says it correctly: every defect the drawing has shipped passed all three of the
+gates above and still put a correct reading on the wrong pipe. A fan spun about a point beside its
+own axle (the CSS pivots on `transform-box: fill-box`, i.e. the BOUNDING BOX, so a rotor that is not
+rotationally symmetric orbits); the leaving-water pill floated 40 px off the run it names; the return
+temperature sat on the heating-only section, claiming a branch R4T does not read; the heating riser
+struck "HEIZUNG" through so it rendered "HEIZUNC". The #35-#39 shape drawn in SVG — well-formed,
+plausible, attributing a real number to the wrong thing. It PARSES the real SVG (coordinates,
+transforms, path geometry, text metrics) and EVALUATES the real binding tables, so there is no second
+copy of either to drift, and reports in three layers: structure (hit target ↔ inspector entry ↔ id ↔
+translation), geometry (viewBox, overlaps, struck-through labels, axis-aligned runs, a pill's tie to
+its own pipe, rotor symmetry) and domain (a repeated unit needs a name; a return-run reading stays
+left of the junction it derives from the drawing). `tools/schematic/audit_exceptions.txt` is its
+ledger — the two refrigerant pressures carrying no name is an ADJUDICATION citing DESIGN.md §5.3,
+while `S001` (a hit target that opens nothing) and `E002` (a pill on a branch its sensor does not
+read) are refused outright — and `tools/schematic/selftest.sh` re-seeds all six historical defects
+into a throwaway copy to prove it still catches them. The judgement half is the `/schematic-review`
+skill: whether the drawing is still TRUE of the plant, whether a new part is in the right place and
+whether the copy is right in both languages is not mechanically decidable, and the audit stays quiet
+about it rather than guessing.
+
 (Three more fast gates guard the PUBLISHED ARTIFACTS rather than the firmware —
 `scripts/run-pages-publish-tests.sh`, git-only, relevant when `scripts/publish-pages-branch.sh` or
 `scripts/build-pages.sh` changes; `scripts/run-web-installer-plan-tests.sh`, python-only, the
@@ -80,10 +104,10 @@ list and falls back to the `version.txt` floor when it is empty, so a deleted ta
 the numbering — on 2026-07-24 it republished dev/ as 1.0.0-dev.168 over 1.0.14-dev.2, green. See
 CONTRIBUTING.md.)
 
-All six are STEPS of CI's single `gates` job, which the firmware `build` job `needs` — not a job
+All seven are STEPS of CI's single `gates` job, which the firmware `build` job `needs` — not a job
 each (the version gate itself runs inside `build`, where the stamped version exists; only its tests
-are a `gates` step). Actions bills every JOB rounded up to a whole minute, so six ~15 s jobs cost
-6 billed minutes for well under one minute of work. The same budget rule shapes the rest of
+are a `gates` step). Actions bills every JOB rounded up to a whole minute, so seven ~15 s jobs cost
+7 billed minutes for well under one minute of work. The same budget rule shapes the rest of
 `.github/workflows/build.yml`, and it is worth knowing before editing it: the ~5-minute firmware
 build is SKIPPED (not failed — a skipped job still reports its check, which is why the gate is a
 per-job `if:` and never a workflow-level `paths-ignore:`) when the diff touches nothing the image
@@ -644,11 +668,13 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 the house style but the only defensible answer: a stopped compressor is not drawing
                 1.4 kW, it is drawing ~0, so the held figure is not a stale value of the quantity but
                 a wrong one. The CT path is unaffected: those clamps are on a live page, so a non-zero
-                reading at rest is genuine standby draw and is still shown. The held pill carries NO
-                sub-label — a blank pill is the drawing's one vocabulary for "no reading right now",
-                and the INSPECTOR is where the reason is stated — but it must not fall through to the
-                pre-existing "no current sensor" caption either: suppressing one wrong claim must not
-                substitute another (the profile HAS a current row; it is the reading that is not current)
+                reading at rest is genuine standby draw and is still shown. The held pill carries no
+                caption — no pill does any more (DESIGN.md §5.3 item 3: the drawing states readings,
+                the INSPECTOR states everything about them) — but the DISTINCTION still has to be
+                drawn where it is stated: the pel explainer answers "held over from the last run"
+                and "this profile has no current row" with two different sentences, since suppressing
+                one wrong claim must not substitute another (the profile HAS a current row; it is
+                the reading that is not current)
                 profile_view.hpp = the active model's rows AS EVERY CONSUMER MUST SEE THEM: the
                 generated table plus the def/overlay.hpp supplement, as ONE indexable sequence (two
                 spans, no allocation — the poll path reads it every second). One view rather than four
@@ -882,7 +908,11 @@ def/            embedded per-model value profiles + registry (incl. the generic 
                 row, and the page-0x10 catalog guard in test_logic.cpp (armed vacuous in #111) is live
                 on them. DELETE overlay.hpp + its plumbing when gen_profiles.py emits the rows: a
                 supplement that outlives its generator run is a second source of truth for the catalog.
-www/            web UI sources (index.html + style.css + app.js -> one gzipped page) + setup.html
+www/            web UI sources (index.html + style.css + app.js -> one gzipped page) + setup.html.
+                The dashboard SCHEMATIC (the inline SVG in index.html, its sc-* CSS and its
+                INSPECT/I18N bindings) has its own gate — scripts/run-schematic-audit.sh + the
+                /schematic-review skill: a pill can name a physically correct value and still be
+                drawn on the wrong pipe, which nothing else here can see
 ```
 
 ## NVS namespaces
@@ -1202,6 +1232,7 @@ which runs on esp-mqtt's own unguarded event task where the rule above is unavai
 ```bash
 scripts/run-mock-tests.sh                              # host logic tests (the fast loop)
 scripts/run-domain-audit.sh                            # are the catalog's values physically right?
+scripts/run-schematic-audit.sh                         # does the dashboard drawing still say what it means?
 screen /dev/cu.usbmodemXXXX 115200                     # serial monitor (native USB on s3)
 curl http://daikin-altherma-esp32.local/status | jq          # device status (incl. last_crash)
 curl http://daikin-altherma-esp32.local/values | jq          # decoded values
