@@ -1011,6 +1011,35 @@ static void test_demand_flag_catalog() {
     CHECK(space_heating >= 40);
 }
 
+// The dashboard selects the tank's electric immersion heater with /^bsh$/i. Keep that label pinned
+// to the X10A BSH run flag and separate from "Thermal protector BSH": confusing the two would either
+// hide a real electric DHW boost or announce heater operation from a protection input.
+static void test_bsh_flag_catalog() {
+    int bsh = 0, protector = 0;
+    for (const auto& p : def::profiles) {
+        const auto v = def::resolved(p);
+        for (size_t i = 0; i < v.count(); i++) {
+            const ValueDef& d = v[i];
+            std::string lbl;
+            for (const char* c = d.label; c && *c; c++) lbl += static_cast<char>(std::tolower(*c));
+            if (lbl == "bsh") {
+                CHECK(d.reg == 0x60);
+                CHECK(d.offset == 12);
+                CHECK(d.conv == 305);
+                bsh++;
+            }
+            if (lbl == "thermal protector bsh") {
+                CHECK(d.reg == 0x60);
+                CHECK(d.offset == 11);
+                CHECK(d.conv == 305);
+                protector++;
+            }
+        }
+    }
+    CHECK(bsh >= 40);
+    CHECK(protector >= 40);
+}
+
 static void test_registry() {
     CHECK(std::string(def::lookup("altherma3_r_erga").id) == "altherma3_r_erga");
     CHECK(def::lookup("altherma3_r_erga").count > 10);
@@ -4381,6 +4410,7 @@ int main() {
     test_binary_catalog();
     test_refrigerant_pressure_catalog();
     test_demand_flag_catalog();
+    test_bsh_flag_catalog();
     test_registry();
     test_detect();
     test_json();

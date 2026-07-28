@@ -21,6 +21,9 @@ struct CachedValue {
                          // row's IDENTITY — how logic/history.hpp addresses a trended row, since
                          // the catalog's labels neither name one quantity consistently nor name
                          // different quantities differently (see that header). Never displayed.
+    bool        binary = false; // converter 300-307: value stays numeric 0/1 on every wire surface;
+                                // /values exposes this metadata so the browser can localise it
+                                // without guessing from a label or from the number itself.
 };
 
 // Health/status counters for /status.hp.

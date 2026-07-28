@@ -28,6 +28,7 @@ const I18N = {
     "sys.waiting": "Waiting for the heat pump…", "sys.operating": "Operating",
     "sys.standby": "Standby — not running", "sys.defrosting": "Defrosting",
     "sys.circulating": "Circulating — compressor off",
+    "sys.bsh_active": "Electric tank heater active",
     "sys.online": "Online", "sys.fault": "Fault",
     "sys.fault_line": (c) => "Fault · " + c + " — check the outdoor unit.",
     "sys.polled": (s) => `Polled ${s}s ago`,
@@ -79,7 +80,8 @@ const I18N = {
     "group.Electrical": "Electrical", "group.Device": "Device", "group.Other values": "Other values",
     "group.Protection": "Protection", "protect.limiting": "limiting now",
     "group.Values": "Values",
-    "chip.demand_on": "Demand ON", "chip.demand_off": "Demand off", "chip.quiet": "Quiet",
+    "state.on": "ON", "state.off": "OFF",
+    "chip.demand_on": "Demand ON", "chip.demand_off": "Demand OFF", "chip.quiet": "Quiet",
     "schem.to_dhw": "3WV → DHW", "schem.to_heat": "3WV → heating",
     "normal.label": "Normal:",
     "hist.title": "Last 24 hours", "hist.since": (h) => `Since restart · ${h} h`,
@@ -120,6 +122,7 @@ const I18N = {
     "schem.outdoor_unit": "OUTDOOR UNIT", "schem.defrost_pill": "❄ defrost", "schem.outdoor": "Outdoor",
     "insp.close": "Close",
     "schem.leaving_water": "leaving water · pre-BUH", "schem.dhw_tank": "DHW TANK", "schem.set": "set",
+    "schem.bsh_badge": "E-heater active",
     "schem.heating": "HEATING", "schem.pump": "PUMP", "schem.return": "return", "schem.room": "Room",
     "schem.flow_rate": "flow", "schem.water_press": "water pressure",
     "wifi.title": "WiFi configuration", "wifi.ssid": "WiFi network (SSID)", "wifi.pass": "WiFi password",
@@ -156,6 +159,7 @@ const I18N = {
     "sys.waiting": "Warte auf die Wärmepumpe…", "sys.operating": "In Betrieb",
     "sys.standby": "Bereitschaft — läuft nicht", "sys.defrosting": "Abtauen",
     "sys.circulating": "Umwälzung — Verdichter aus",
+    "sys.bsh_active": "Heizstab aktiv",
     "sys.online": "Online", "sys.fault": "Störung",
     "sys.fault_line": (c) => "Störung · " + c + " — Außeneinheit prüfen.",
     "sys.polled": (s) => `vor ${s}s abgefragt`,
@@ -205,7 +209,11 @@ const I18N = {
     "group.Electrical": "Elektrik", "group.Device": "Gerät", "group.Other values": "Weitere Werte",
     "group.Protection": "Schutz", "protect.limiting": "regelt zurück",
     "group.Values": "Werte",
-    "chip.demand_on": "Anforderung EIN", "chip.demand_off": "Anforderung aus", "chip.quiet": "Leise",
+    // Register-state tokens stay ON/OFF in both languages. The X10A labels are English technical
+    // names ("Reheat ON/OFF", "Storage comfort ON/OFF"), so mixing them with EIN/AUS reads as one
+    // broken label rather than as a translation.
+    "state.on": "ON", "state.off": "OFF",
+    "chip.demand_on": "Anforderung ON", "chip.demand_off": "Anforderung OFF", "chip.quiet": "Leise",
     "schem.to_dhw": "3WV → WW", "schem.to_heat": "3WV → Heizung",
     "normal.label": "Normal:",
     "hist.title": "Letzte 24 Stunden", "hist.since": (h) => `Seit Neustart · ${h} h`,
@@ -243,6 +251,7 @@ const I18N = {
     "schem.outdoor_unit": "AUSSENEINHEIT", "schem.defrost_pill": "❄ Abtauen", "schem.outdoor": "Außen",
     "insp.close": "Schließen",
     "schem.leaving_water": "Vorlauf · vor BUH", "schem.dhw_tank": "WW-SPEICHER", "schem.set": "Soll",
+    "schem.bsh_badge": "Heizstab aktiv",
     "schem.heating": "HEIZUNG", "schem.pump": "PUMPE", "schem.return": "Rücklauf", "schem.room": "Raum",
     "schem.flow_rate": "Durchfluss", "schem.water_press": "Wasserdruck",
     "wifi.title": "WLAN-Konfiguration", "wifi.ssid": "WLAN-Netzwerk (SSID)", "wifi.pass": "WLAN-Passwort",
@@ -487,10 +496,15 @@ const TONE_FILL = { err: "var(--err)", dim: "var(--muted)", idle: "var(--muted)"
 const PLANT_RUNNING = { key: "sys.operating", tone: "" };
 const PLANT_DEFROST = { key: "sys.defrosting", tone: "" };
 const PLANT_CIRC = { key: "sys.circulating", tone: "" };
+const PLANT_BSH = { key: "sys.bsh_active", tone: "" };
 const PLANT_STANDBY = { key: "sys.standby", tone: "idle" };
 function plantState(d) {
   if (!d) return PLANT_STANDBY;
   if (d.defrost === true) return PLANT_DEFROST;
+  // The tank's electric immersion heater can run with compressor, water pump and flow all at zero.
+  // It is still active plant operation — and expensive resistive heat — so the exact X10A BSH flag
+  // takes precedence over the generic compressor/pump states below.
+  if (d.bsh === true) return PLANT_BSH;
   if ((d.rps ?? 0) > 0) return PLANT_RUNNING;
   // Compressor off but water still moving: pump overrun, or the backup heater carrying the load on
   // its own. Something IS happening — it just isn't the heat pump, which is the point of saying so.
@@ -1226,17 +1240,17 @@ const DESCRIPTIONS = [
     what: "A one-off boost that heats the tank to the setpoint as fast as possible, calling in the backup heater if needed.",
     normal: "OFF in day-to-day use; ON only while you've triggered a manual boost.",
     de: { what: "Eine einmalige Schnellaufheizung, die den Speicher so schnell wie möglich auf den Sollwert bringt und bei Bedarf den Zusatzheizer zuschaltet.",
-          normal: "im Alltag AUS; nur EIN, während du eine manuelle Aufheizung ausgelöst hast." } },
+          normal: "im Alltag OFF; nur ON, während du eine manuelle Aufheizung ausgelöst hast." } },
   { re: /tank preheat/i,
     what: "The tank is being warmed ahead of an expected draw (from the schedule or weather forecast) so hot water is ready in time.",
     normal: "briefly ON around scheduled/anticipated demand, OFF otherwise.",
     de: { what: "Der Speicher wird vor einer erwarteten Entnahme (nach Zeitplan oder Wetterprognose) vorgewärmt, damit rechtzeitig Warmwasser bereitsteht.",
-          normal: "kurz EIN rund um geplanten/erwarteten Bedarf, sonst AUS." } },
+          normal: "kurz ON rund um geplanten/erwarteten Bedarf, sonst OFF." } },
   { re: /reheat on/i,
     what: "The tank is being topped back up to its comfort temperature between scheduled heating slots.",
     normal: "ON in short bursts to hold the tank warm; OFF most of the time.",
     de: { what: "Der Speicher wird zwischen geplanten Heizzeiten wieder auf seine Komforttemperatur nachgeladen.",
-          normal: "EIN in kurzen Schüben, um den Speicher warm zu halten; die meiste Zeit AUS." } },
+          normal: "ON in kurzen Schüben, um den Speicher warm zu halten; die meiste Zeit OFF." } },
   { re: /storage (eco|comfort)/i,
     what: "Which stored-hot-water target is active: Comfort keeps the tank fuller/hotter, ECO holds a lower reserve to save energy.",
     de: { what: "Welches Warmwasser-Speicherziel aktiv ist: Komfort hält den Speicher voller/heißer, ECO hält eine niedrigere Reserve, um Energie zu sparen." } },
@@ -1244,17 +1258,17 @@ const DESCRIPTIONS = [
     what: "On a hybrid (heat-pump + gas boiler) system: the boiler has been asked to make the hot water instead of the heat pump.",
     normal: "OFF on a heat-pump-only system; on a hybrid it comes ON when the boiler is cheaper/faster than the heat pump for DHW.",
     de: { what: "Bei einem Hybridsystem (Wärmepumpe + Gaskessel): Der Kessel wurde angefordert, das Warmwasser statt der Wärmepumpe zu erzeugen.",
-          normal: "AUS bei reinem Wärmepumpenbetrieb; im Hybridsystem EIN, wenn der Kessel für Warmwasser günstiger/schneller ist als die Wärmepumpe." } },
+          normal: "OFF bei reinem Wärmepumpenbetrieb; im Hybridsystem ON, wenn der Kessel für Warmwasser günstiger/schneller ist als die Wärmepumpe." } },
 
   // ── Valves ──
   { re: /3.?way valve/i,
     what: "The diverter valve that sends heated water either to the DHW tank (ON = DHW) or to the space-heating circuit (OFF = heating). It can only feed one at a time.",
     normal: "ON only during a hot-water cycle; OFF (feeding heating) the rest of the time.",
-    de: { what: "Das Umschaltventil, das erwärmtes Wasser entweder zum Warmwasserspeicher (EIN = WW) oder in den Heizkreis (AUS = Heizung) leitet. Es kann immer nur eines versorgen.",
-          normal: "nur während eines Warmwasser-Zyklus EIN; sonst AUS (versorgt die Heizung)." } },
+    de: { what: "Das Umschaltventil, das erwärmtes Wasser entweder zum Warmwasserspeicher (ON = WW) oder in den Heizkreis (OFF = Heizung) leitet. Es kann immer nur eines versorgen.",
+          normal: "nur während eines Warmwasser-Zyklus ON; sonst OFF (versorgt die Heizung)." } },
   { re: /2.?way valve/i,
     what: "Selects the water path for the current mode — ON in heating, OFF in cooling (per the label).",
-    de: { what: "Wählt den Wasserweg für den aktuellen Modus — EIN im Heizbetrieb, AUS im Kühlbetrieb (laut Bezeichnung)." } },
+    de: { what: "Wählt den Wasserweg für den aktuellen Modus — ON im Heizbetrieb, OFF im Kühlbetrieb (laut Bezeichnung)." } },
   { re: /mix valve position|bizone kit mix valve/i,
     what: "Opening of the bizone mixing valve, blending hot flow with cooler return to hold a lower temperature for a second (e.g. underfloor) zone.",
     normal: "modulates between fully closed and fully open to hold that zone's target.",
@@ -1311,7 +1325,7 @@ const DESCRIPTIONS = [
     what: "A safety switch that confirms water is genuinely flowing before the compressor or backup heater are allowed to run — protecting the heat exchanger from running dry.",
     normal: "ON (flow proven) whenever the pump is running.",
     de: { what: "Ein Sicherheitsschalter, der bestätigt, dass tatsächlich Wasser fließt, bevor Verdichter oder Zusatzheizer laufen dürfen — schützt den Wärmetauscher vor Trockenlauf.",
-          normal: "EIN (Durchfluss bestätigt), sobald die Pumpe läuft." } },
+          normal: "ON (Durchfluss bestätigt), sobald die Pumpe läuft." } },
 
   // ── Operation / mode / fault ──
   { re: /i\/u operation mode/i,
@@ -1342,7 +1356,7 @@ const DESCRIPTIONS = [
     de: { what: "Notbetrieb: Die Anlage läuft nach einer Störung in einem Ersatzbetrieb (oft nur Zusatzheizer), um bis zur Wartung etwas Wärme/Warmwasser zu liefern." } },
   { re: /alarm output/i,
     what: "The unit's alarm relay — switched ON to signal a fault to any external alarm/monitoring wired to it.",
-    de: { what: "Das Alarmrelais des Geräts — schaltet EIN, um eine Störung an eine angeschlossene externe Alarm-/Überwachungseinrichtung zu melden." } },
+    de: { what: "Das Alarmrelais des Geräts — steht auf ON, um eine Störung an eine angeschlossene externe Alarm-/Überwachungseinrichtung zu melden." } },
 
   // ── Room / thermostat ──
   // This is the INDOOR UNIT's thermo-on bit (0x60/2 bit 3), not a room thermostat: it sits in the
@@ -1353,13 +1367,13 @@ const DESCRIPTIONS = [
   { re: /thermostat/i,
     what: "Whether the indoor unit is currently asking the outdoor unit to run — Daikin's \"thermo ON\". It does not say what the heat is for: a hot-water charge turns it ON exactly like a call for space heating. For the heating circuit alone, read \"Space heating Operation\".",
     normal: "ON while the unit runs, OFF while it is satisfied — for either load.",
-    de: { what: "Ob die Inneneinheit gerade Betrieb der Außeneinheit anfordert — Daikins „Thermo EIN\". Wofür die Wärme gebraucht wird, sagt das Bit nicht: Eine Warmwasserladung schaltet es genauso ein wie eine Heizungsanforderung. Für den Heizkreis allein ist „Space heating Operation\" der richtige Wert.",
-          normal: "EIN, solange das Gerät läuft, AUS, wenn der Bedarf gedeckt ist — für beide Lasten." } },
+    de: { what: "Ob die Inneneinheit gerade Betrieb der Außeneinheit anfordert — Daikins „Thermo ON\". Wofür die Wärme gebraucht wird, sagt das Bit nicht: Eine Warmwasserladung schaltet es genauso ein wie eine Heizungsanforderung. Für den Heizkreis allein ist „Space heating Operation\" der richtige Wert.",
+          normal: "ON, solange das Gerät läuft, OFF, wenn der Bedarf gedeckt ist — für beide Lasten." } },
   { re: /space heating operation|space h operation/i,
     what: "Whether space heating (as opposed to hot-water production) is currently active or being called for. This is the branch-specific one: it stays OFF through a hot-water charge, which the unit-wide \"Thermostat ON/OFF\" does not.",
     normal: "OFF all summer, and OFF while the 3-way valve is diverted to the tank.",
-    de: { what: "Ob die Raumheizung (im Unterschied zur Warmwasserbereitung) gerade aktiv ist oder angefordert wird. Das ist der zweigspezifische Wert: Er bleibt während einer Warmwasserladung AUS — anders als das geräteweite „Thermostat ON/OFF\".",
-          normal: "den ganzen Sommer AUS, und auch AUS, solange das 3-Wege-Ventil auf den Speicher geschaltet ist." } },
+    de: { what: "Ob die Raumheizung (im Unterschied zur Warmwasserbereitung) gerade aktiv ist oder angefordert wird. Das ist der zweigspezifische Wert: Er bleibt während einer Warmwasserladung OFF — anders als das geräteweite „Thermostat ON/OFF\".",
+          normal: "den ganzen Sommer OFF, und auch OFF, solange das 3-Wege-Ventil auf den Speicher geschaltet ist." } },
   { re: /rt set ?point/i,
     what: "The target room temperature you've set for the zone the unit's own room sensor controls.",
     de: { what: "Die von dir eingestellte Ziel-Raumtemperatur für die Zone, die der eigene Raumfühler des Geräts regelt." } },
@@ -1384,33 +1398,33 @@ const DESCRIPTIONS = [
   { re: /discharge temp\.? ?(drop|protection retry)/i,
     what: "Discharge-temperature protection: the gas leaving the compressor is nearing its safe limit, so the unit throttles the compressor back rather than trip out. The \"Drop\" row is ON while it is doing that right now; the \"Retry Qty\" row counts how often it has had to.",
     normal: "OFF / 0. Occasional retries at high flow temperatures are normal; repeated ones point at low refrigerant charge or a flow temperature set higher than the unit likes.",
-    de: { what: "Schutz der Druckgastemperatur: Das den Verdichter verlassende Gas nähert sich seiner Grenze, deshalb regelt das Gerät den Verdichter zurück, statt zu stören. Die Zeile „Drop“ ist EIN, solange das gerade passiert; die Zeile „Retry Qty“ zählt, wie oft es nötig war.",
-          normal: "AUS / 0. Vereinzelte Rückregelungen bei hohen Vorlauftemperaturen sind normal; häufige deuten auf zu wenig Kältemittel oder eine zu hoch eingestellte Vorlauftemperatur hin." } },
+    de: { what: "Schutz der Druckgastemperatur: Das den Verdichter verlassende Gas nähert sich seiner Grenze, deshalb regelt das Gerät den Verdichter zurück, statt zu stören. Die Zeile „Drop“ ist ON, solange das gerade passiert; die Zeile „Retry Qty“ zählt, wie oft es nötig war.",
+          normal: "OFF / 0. Vereinzelte Rückregelungen bei hohen Vorlauftemperaturen sind normal; häufige deuten auf zu wenig Kältemittel oder eine zu hoch eingestellte Vorlauftemperatur hin." } },
   { re: /comp\.? inv current (drop|protection retry)/i,
     what: "Compressor-inverter current protection: the current the inverter feeds the compressor is nearing its ceiling, so the unit reduces compressor speed. The \"Drop\" row is ON while that limiting is active; the \"Retry Qty\" row counts how often it has happened.",
     normal: "OFF / 0. Expected occasionally under heavy load in cold weather; frequent counts on mild days are worth a look.",
-    de: { what: "Stromschutz des Verdichter-Inverters: Der Strom, den der Inverter dem Verdichter liefert, nähert sich seiner Obergrenze, deshalb senkt das Gerät die Verdichterdrehzahl. Die Zeile „Drop“ ist EIN, solange diese Begrenzung aktiv ist; die Zeile „Retry Qty“ zählt, wie oft das vorkam.",
-          normal: "AUS / 0. Bei hoher Last im Kalten gelegentlich erwartbar; häufige Zählungen an milden Tagen sind einen Blick wert." } },
+    de: { what: "Stromschutz des Verdichter-Inverters: Der Strom, den der Inverter dem Verdichter liefert, nähert sich seiner Obergrenze, deshalb senkt das Gerät die Verdichterdrehzahl. Die Zeile „Drop“ ist ON, solange diese Begrenzung aktiv ist; die Zeile „Retry Qty“ zählt, wie oft das vorkam.",
+          normal: "OFF / 0. Bei hoher Last im Kalten gelegentlich erwartbar; häufige Zählungen an milden Tagen sind einen Blick wert." } },
   { re: /^hp (drop|protection retry)/i,
     what: "High-pressure protection: condensing pressure on the hot side is climbing toward the cut-out, so the unit backs off before the pressure switch stops it. The \"Drop Control\" row is ON while it is limiting; the \"Retry Qty\" row counts the occurrences.",
     normal: "OFF / 0. When heating, repeated counts usually mean the water side cannot take the heat away — a high flow-temperature target, a slow pump, air or a dirty filter.",
-    de: { what: "Hochdruckschutz: Der Kondensationsdruck auf der heißen Seite steigt Richtung Abschaltpunkt, deshalb regelt das Gerät zurück, bevor der Druckschalter es stoppt. Die Zeile „Drop Control“ ist EIN, solange begrenzt wird; die Zeile „Retry Qty“ zählt die Vorfälle.",
-          normal: "AUS / 0. Im Heizbetrieb heißt häufiges Zählen meist, dass die Wasserseite die Wärme nicht abführt — zu hohes Vorlaufziel, langsame Pumpe, Luft oder ein verschmutzter Filter." } },
+    de: { what: "Hochdruckschutz: Der Kondensationsdruck auf der heißen Seite steigt Richtung Abschaltpunkt, deshalb regelt das Gerät zurück, bevor der Druckschalter es stoppt. Die Zeile „Drop Control“ ist ON, solange begrenzt wird; die Zeile „Retry Qty“ zählt die Vorfälle.",
+          normal: "OFF / 0. Im Heizbetrieb heißt häufiges Zählen meist, dass die Wasserseite die Wärme nicht abführt — zu hohes Vorlaufziel, langsame Pumpe, Luft oder ein verschmutzter Filter." } },
   { re: /^lp (drop|protection retry)/i,
     what: "Low-pressure protection: evaporating pressure on the cold side is falling toward the cut-out, so the unit backs off. The \"Drop Control\" row is ON while it is limiting; the \"Retry Qty\" row counts the occurrences.",
     normal: "OFF / 0. When heating, counts cluster around hard frost and defrosts; persistent ones suggest a frosted or blocked outdoor coil, or low refrigerant charge.",
-    de: { what: "Niederdruckschutz: Der Verdampfungsdruck auf der kalten Seite fällt Richtung Abschaltpunkt, deshalb regelt das Gerät zurück. Die Zeile „Drop Control“ ist EIN, solange begrenzt wird; die Zeile „Retry Qty“ zählt die Vorfälle.",
-          normal: "AUS / 0. Im Heizbetrieb häufen sich Zählungen bei strengem Frost und um Abtauvorgänge; dauerhafte deuten auf einen vereisten oder verlegten Außenwärmetauscher oder zu wenig Kältemittel hin." } },
+    de: { what: "Niederdruckschutz: Der Verdampfungsdruck auf der kalten Seite fällt Richtung Abschaltpunkt, deshalb regelt das Gerät zurück. Die Zeile „Drop Control“ ist ON, solange begrenzt wird; die Zeile „Retry Qty“ zählt die Vorfälle.",
+          normal: "OFF / 0. Im Heizbetrieb häufen sich Zählungen bei strengem Frost und um Abtauvorgänge; dauerhafte deuten auf einen vereisten oder verlegten Außenwärmetauscher oder zu wenig Kältemittel hin." } },
   { re: /fin temp\.? ?(drop|protection retry)/i,
     what: "Inverter-heatsink protection: the power electronics' cooling fins are getting too hot, so the unit reduces output to cool them. The \"Drop Control\" row is ON while it is limiting; the \"Retry Qty\" row counts how often it has had to. (This is the protection — the heatsink's own temperature is the separate \"INV fin temp.\" reading.)",
     normal: "OFF / 0. Expected at most in hot weather at full output; regular counts point at restricted airflow around the outdoor unit.",
-    de: { what: "Schutz des Inverter-Kühlkörpers: Die Kühlrippen der Leistungselektronik werden zu heiß, deshalb senkt das Gerät die Leistung, um sie abzukühlen. Die Zeile „Drop Control“ ist EIN, solange begrenzt wird; die Zeile „Retry Qty“ zählt, wie oft es nötig war. (Dies ist der Schutz — die Temperatur des Kühlkörpers selbst ist der eigene Wert „INV fin temp.“.)",
-          normal: "AUS / 0. Allenfalls bei heißem Wetter unter Volllast erwartbar; regelmäßige Zählungen deuten auf behinderten Luftstrom rund um die Außeneinheit hin." } },
+    de: { what: "Schutz des Inverter-Kühlkörpers: Die Kühlrippen der Leistungselektronik werden zu heiß, deshalb senkt das Gerät die Leistung, um sie abzukühlen. Die Zeile „Drop Control“ ist ON, solange begrenzt wird; die Zeile „Retry Qty“ zählt, wie oft es nötig war. (Dies ist der Schutz — die Temperatur des Kühlkörpers selbst ist der eigene Wert „INV fin temp.“.)",
+          normal: "OFF / 0. Allenfalls bei heißem Wetter unter Volllast erwartbar; regelmäßige Zählungen deuten auf behinderten Luftstrom rund um die Außeneinheit hin." } },
   { re: /other drop control/i,
     what: "A catch-all flag: some protection other than discharge temperature, inverter current, high/low pressure or heatsink temperature is limiting the unit right now. The unit does not report which one.",
     normal: "OFF. If it sits ON, read it together with the fault code and the other protection rows.",
     de: { what: "Ein Sammel-Flag: Irgendein Schutz außer Druckgastemperatur, Inverterstrom, Hoch-/Niederdruck oder Kühlkörpertemperatur begrenzt das Gerät gerade. Welcher, meldet das Gerät nicht.",
-          normal: "AUS. Bleibt es EIN, zusammen mit dem Fehlercode und den anderen Schutz-Zeilen lesen." } },
+          normal: "OFF. Bleibt es ON, zusammen mit dem Fehlercode und den anderen Schutz-Zeilen lesen." } },
 
   // ── Outdoor / refrigerant circuit ──
   { re: /outdoor air|outdoor ambient|r1t-outdoor|^outdoor/i,
@@ -1515,17 +1529,22 @@ const DESCRIPTIONS = [
     what: "An electric backup-heater stage. These use resistive electricity (efficiency ≈ 1, unlike the heat pump), so they add heat when the heat pump can't keep up.",
     normal: "OFF most of the time. Frequent use noticeably raises running cost — expected only in a cold snap or during a boost.",
     de: { what: "Eine Stufe des elektrischen Zusatzheizers. Diese nutzen Widerstandsstrom (Wirkungsgrad ≈ 1, anders als die Wärmepumpe) und ergänzen Wärme, wenn die Wärmepumpe nicht nachkommt.",
-          normal: "die meiste Zeit AUS. Häufiger Einsatz erhöht die Betriebskosten spürbar — erwartbar nur bei Kälteeinbruch oder während einer Aufheizung." } },
-  { re: /\bbsh\b|thermal protector/i,
-    what: "The booster/backup heater for the hot-water tank, or its thermal cut-out protection.",
-    normal: "the thermal protector should read normal/closed; it trips only on an over-temperature fault.",
-    de: { what: "Der Zusatz-/Boosterheizer für den Warmwasserspeicher bzw. dessen thermische Schutzabschaltung.",
-          normal: "der Thermoschutz sollte normal/geschlossen anzeigen; er löst nur bei Übertemperatur aus." } },
+          normal: "die meiste Zeit OFF. Häufiger Einsatz erhöht die Betriebskosten spürbar — erwartbar nur bei Kälteeinbruch oder während einer Aufheizung." } },
+  { re: /^bsh$/i,
+    what: "The electric immersion heater in the domestic-hot-water tank. It can heat the tank without the compressor or water circulation pump running. X10A reports this BSH register only as ON/OFF; it carries no dedicated heater-power reading.",
+    normal: "OFF in normal heat-pump operation; ON during an electric DHW boost or when the controller calls for resistive assistance.",
+    de: { what: "Der elektrische Tauchheizer im Warmwasserspeicher. Er kann den Speicher erwärmen, ohne dass Verdichter oder Wasserpumpe laufen. X10A meldet dieses BSH-Register nur als ON/OFF; eine eigene Heizstableistung enthält es nicht.",
+          normal: "im normalen Wärmepumpenbetrieb OFF; ON bei elektrischer Warmwasser-Aufheizung oder wenn der Regler Widerstandswärme anfordert." } },
+  { re: /thermal protector/i,
+    what: "The thermal cut-out that protects an electric heater from overheating.",
+    normal: "normal/closed in regular operation; it trips only on an over-temperature fault.",
+    de: { what: "Die thermische Schutzabschaltung, die einen elektrischen Heizer vor Übertemperatur schützt.",
+          normal: "im regulären Betrieb normal/geschlossen; sie löst nur bei Übertemperatur aus." } },
   { re: /freeze protection/i,
     what: "Anti-freeze protection: the unit runs the pump (and if needed the heater) to stop water in the pipes freezing while it's otherwise idle in the cold.",
     normal: "ON only in freezing conditions when the system is idle.",
     de: { what: "Frostschutz: Das Gerät lässt die Pumpe (und bei Bedarf den Heizer) laufen, damit das Wasser in den Leitungen im Kalten nicht einfriert, während sonst Ruhe herrscht.",
-          normal: "nur bei Frost und ruhender Anlage EIN." } },
+          normal: "nur bei Frost und ruhender Anlage ON." } },
 
   // ── Geothermal / brine ──
   { re: /brine (inlet|outlet|temp|pump)|entering brine|leaving brine/i,
@@ -1550,7 +1569,7 @@ const DESCRIPTIONS = [
     what: "An external utility/smart-grid or solar signal input — e.g. a cheap-tariff or surplus-PV window telling the unit it's a good time to store extra heat.",
     normal: "ON only while that external signal is active.",
     de: { what: "Ein externes Versorger-/Smart-Grid- oder Solar-Signal — z. B. ein Niedrigtarif- oder PV-Überschuss-Fenster, das dem Gerät signalisiert, dass es günstig ist, zusätzliche Wärme zu speichern.",
-          normal: "nur EIN, solange dieses externe Signal aktiv ist." } },
+          normal: "nur ON, solange dieses externe Signal aktiv ist." } },
 
   // ── Capacity / identity (put after BUH-capacity above) ──
   { re: /capacity/i,
@@ -1560,7 +1579,7 @@ const DESCRIPTIONS = [
     what: "Low-noise / quiet mode: caps fan and compressor speed to run more quietly, at the cost of some heating output.",
     normal: "ON during any scheduled quiet hours you've set; OFF otherwise.",
     de: { what: "Geräuscharm-/Leise-Modus: begrenzt Lüfter- und Verdichterdrehzahl für leiseren Betrieb, auf Kosten etwas Heizleistung.",
-          normal: "EIN während eingestellter Ruhezeiten; sonst AUS." } },
+          normal: "ON während eingestellter Ruhezeiten; sonst OFF." } },
 ];
 
 // First matching description for a value label, or null (→ a plain, non-expandable row).
@@ -1927,6 +1946,35 @@ function renderTrendHosts() { renderCards(); renderInspect(); renderSettings(); 
 
 const chevIcon = `<svg class="vrow-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>`;
 
+// /values keeps the firmware-wide numeric 0/1 contract and marks converter-300..307 rows with
+// binary:true. Render only those rows as ON/OFF at the last, visual boundary: a plain numeric 0 or 1 can
+// also be a real count/stage, and labels are neither complete nor stable enough to infer a type.
+// Unexpected binary payloads stay visible verbatim instead of being silently misreported as OFF.
+function displayValue(v) {
+  if (!v || v.value == null) return "—";
+  const raw = String(v.value);
+  if (v.binary === true) {
+    const state = raw.trim();
+    if (state === "1") return t("state.on");
+    if (state === "0") return t("state.off");
+  }
+  return raw;
+}
+
+// The generated X10A catalog sometimes appends the register's value legend to its technical name
+// ("Reheat ON/OFF", "3way valve(On:DHW_Off:Space)") and sometimes does not ("Defrost Operation").
+// The value column already shows ON/OFF, so carrying the legend in the row name is redundant and
+// inconsistent. Clean it only at the visual boundary: matching descriptions, history identities,
+// selectors and every API/MQTT payload continue to use the exact catalog label.
+function displayReadingLabel(label) {
+  const raw = String(label ?? "").trim();
+  const cleaned = raw
+    .replace(/\s*\([^)]*On\s*:[^)]*Off\s*:[^)]*\)\s*$/i, "")
+    .replace(/[\s.]+ON\/OFF\s*$/i, "")
+    .trim();
+  return cleaned || raw;
+}
+
 // The expandable row itself — a <button> header plus the collapsible panel beneath it. Shared by
 // the value list (vDescRow) and the Model card (modelDescRow) so the two cannot drift into two
 // slightly different accordions; `key` is what S.descOpen remembers across the per-poll rebuild, and
@@ -1950,8 +1998,9 @@ function descAccordion(key, label, valHtml, cls, bodyHtml, trendId) {
 // unchanged row. The key IS the label here — catalog labels are unique within a render.
 function vDescRow(v) {
   const label = v.label || "";
+  const shownLabel = displayReadingLabel(label);
   const cls = v.state || v.class || "";
-  const val = esc(v.value == null ? "—" : String(v.value)) +
+  const val = esc(displayValue(v)) +
     (v.unit ? `<span class="vrow-unit">${esc(v.unit)}</span>` : "");
   const d = descFor(label);
   const hid = histIdFor(label);          // this profile's spelling -> the concept the device buffers
@@ -1959,14 +2008,14 @@ function vDescRow(v) {
   // picks historied rows structurally, the explainer table matches labels), so keying the accordion
   // on the description alone would hide a series the device is keeping.
   if (!d && !hid) {
-    return `<div class="vrow"><span class="vrow-label">${esc(label)}</span>` +
+    return `<div class="vrow"><span class="vrow-label">${esc(shownLabel)}</span>` +
       `<span class="vrow-val ${cls}">${val}</span></div>`;
   }
   // Body = the explainer (when the label has one) followed by the trend (when the firmware keeps a
   // series for it). Either half may be absent, which is why the builder takes finished body markup
   // rather than a description: a trend-only row has no `d` at all.
-  return descAccordion(label, label, val, cls,
-                       (d ? descBodyHtml(d) : "") + histHtml(hid, v.unit, label), hid);
+  return descAccordion(label, shownLabel, val, cls,
+                       (d ? descBodyHtml(d) : "") + histHtml(hid, v.unit, shownLabel), hid);
 }
 // ── Explainers for rows that are NOT catalog readings ────────────────────────────────────────────
 // The Model card's rows and the ESP32 card's two memory rows. Keeps the MODEL_DESCRIPTIONS name the
@@ -2181,6 +2230,9 @@ function liveData() {
     valveDhw: vOn(/3.?way valve/i),          // label documents On:DHW / Off:Space
     buh1: vOn(/buh step ?1/i),
     buh2: vOn(/buh step ?2/i),
+    // Exact anchor is intentional: "Thermal protector BSH" is a different flag. BSH is the tank's
+    // electric immersion heater and can be the only active component during an SG-Ready boost.
+    bsh: vOn(/^bsh$/i),
     defrost: vOn(/defrost operation/i),
     // The SPACE-HEATING branch's own demand — "Space heating Operation ON/OFF", 0x62/2 bit 3, the
     // hydronic page. Anchored so it cannot also take "Space H Operation output" (0x62/8), which is
@@ -2270,7 +2322,7 @@ function clearSchematic() {
   setTxt("svBuh", "");                 // no BUH step to report
   setTxt("svValve", "3WV");            // valve position unknown — don't claim a branch
   const sc = $("schem");
-  ["fan-on", "pump-on", "buh-on", "defrost-on", "quiet-on"].forEach((c) => sc.classList.remove(c));
+  ["fan-on", "pump-on", "buh-on", "bsh-on", "defrost-on", "quiet-on"].forEach((c) => sc.classList.remove(c));
   sc.classList.add("no-spaceh");       // no flag to show; the pill would otherwise sit stale
   $("schem").querySelectorAll(".sc-flow, .sc-rflow").forEach((el) => el.classList.remove("on", "rev"));
 }
@@ -2325,9 +2377,12 @@ function renderLive() {
   sc.classList.toggle("fan-on", rpsOn && d.defrost !== true);
   sc.classList.toggle("pump-on", pumping === true);
   sc.classList.toggle("buh-on", !!(d.buh1 || d.buh2));
+  sc.classList.toggle("bsh-on", d.bsh === true);
   sc.classList.toggle("defrost-on", d.defrost === true);
   sc.classList.toggle("quiet-on", d.quiet === true);
-  sc.classList.toggle("no-dhw", d.tank == null);
+  // A BSH row is itself evidence that this profile has a DHW tank, even if its temperature did not
+  // answer in this snapshot. Keep the branch visible so the active heater cannot disappear with it.
+  sc.classList.toggle("no-dhw", d.tank == null && d.bsh == null);
   sc.classList.toggle("no-room", d.room == null);
   sc.classList.toggle("no-pth", d.pth == null);
   sc.classList.toggle("no-spaceh", d.spaceH == null);
@@ -2370,6 +2425,23 @@ function renderLive() {
 // Copy is bilingual like DESCRIPTIONS ({en, de}); `now` returns the same shape.
 const tx = (o) => (o == null ? "" : typeof o === "string" ? o : (LANG === "de" && o.de) ? o.de : o.en);
 const degC = (n) => (n == null ? "—" : fmt1(n) + " °C");
+
+// X10A has no dedicated BSH-power register. Some profiles do expose the unit's CT clamp currents;
+// liveData turns those into an estimated WHOLE-UNIT input at assumed 230 V. Show that useful context
+// only while BSH is active and CT is the source — never substitute the inverter current (compressor
+// only), and never label the total as heater power because pumps/electronics may be part of it too.
+const bshInputRow = () => {
+  const d = S.live;
+  if (!d || d.bsh !== true || d.pel == null || d.pelSrc !== "CT") return null;
+  return {
+    label: tx({
+      en: "Whole-unit electrical input (from CT, estimated)",
+      de: "Elektrische Gesamtaufnahme (aus CT, geschätzt)",
+    }),
+    value: "≈ " + fmt1(d.pel),
+    unit: "kW",
+  };
+};
 
 const INSPECT = {
   status: {
@@ -2522,6 +2594,19 @@ const INSPECT = {
       : d.buh1 ? { en: "Step 1 — one stage firing.", de: "Stufe 1 — eine Stufe heizt." }
       : { en: "Off — the heat pump is covering the load on its own.", de: "Aus — die Wärmepumpe deckt die Last allein." },
     rows: [/buh step ?1/i, /buh step ?2/i, /buh output capacity/i],
+  },
+  bsh: {
+    t: { en: "Electric tank heater", de: "Heizstab" },
+    re: /^bsh$/i, sample: "BSH",
+    // Replace the raw bit (1/0) in the headline with its actual meaning. The source line remains
+    // "BSH", so the friendly state is still traceable to the exact X10A register.
+    head: (d) => d.bsh == null ? "—" : t(d.bsh ? "state.on" : "state.off"),
+    now: (d) => d.bsh == null ? null
+      : d.bsh
+        ? { en: "Electric tank heater active.", de: "Heizstab aktiv." }
+        : { en: "Off — the tank is not using its electric immersion heater.",
+            de: "OFF — der Heizstab im Speicher ist nicht aktiv." },
+    rows: [() => bshInputRow()],
   },
   valve: {
     t: { en: "3-way valve", de: "3-Wege-Ventil" },
@@ -2725,7 +2810,7 @@ const inspRow = (e) => (e.pick ? e.pick() : e.re ? vRow(e.re) : null);
 // answer the pill gives. The panel used to read every row straight off /values, so tapping a pill
 // the drawing had blanked produced its held-over number back in 19px — the explainer contradicting
 // the picture, and asserting as current exactly the last-run value the blanking exists to withhold.
-const inspVal = (r, d) => (r == null || rowHeldOver(r, d) ? "—" : String(r.value) + (r.unit ? " " + r.unit : ""));
+const inspVal = (r, d) => (r == null || rowHeldOver(r, d) ? "—" : displayValue(r) + (r.unit ? " " + r.unit : ""));
 
 // Said instead of the entry's own `now` when its headline reading is held over: the pill can only
 // blank, so the reason it is blank has to be stated here (the same division of labour the outdoor
@@ -2774,7 +2859,7 @@ function renderInspectHist(row) {
   S.inspHistSig = sig;
   const el = $("inspHist");
   el.hidden = !id;
-  el.innerHTML = id ? histHtml(id, row.unit, row.label) : "";
+  el.innerHTML = id ? histHtml(id, row.unit, displayReadingLabel(row.label)) : "";
 }
 
 function renderInspect() {
@@ -2800,14 +2885,16 @@ function renderInspect() {
   setTxt("inspTitle", tx(e.t));
   // The source line names the /values row this pill is drawn from, so a number in the picture can be
   // traced to the register list below. Falls back to the canonical label when the row is absent.
-  setTxt("inspSrc", row ? row.label : (e.sample || ""));
+  setTxt("inspSrc", displayReadingLabel(row ? row.label : (e.sample || "")));
   $("inspSrc").hidden = !(row || e.sample);
   // Headline = the ONE compact reading this target stands for (its row, or a derived `head` for the
   // computed pills). An assembly like the outdoor unit has no single number, so it gets no headline
   // at all rather than a "—" that would read as a missing value.
   const hasHead = !!(e.re || e.pick || e.head);
   $("inspNow").hidden = !hasHead;
-  if (hasHead) setTxt("inspNow", row ? inspVal(row, d) : (d && e.head ? e.head(d) : "—"));
+  // An explicit formatter wins over the raw row value. Binary component states use this to say
+  // ON/OFF instead of exposing an unexplained 1/0, while the row still names the source.
+  if (hasHead) setTxt("inspNow", d && e.head ? e.head(d) : (row ? inspVal(row, d) : "—"));
   // `now` is always prose — the live "what is it doing" sentence — so it opens the body in bold,
   // ahead of the timeless explainer. Never the headline: a sentence in a 19px number slot reads as
   // a broken value.
@@ -2818,7 +2905,7 @@ function renderInspect() {
   $("inspRows").innerHTML = !d || !e.rows ? "" : e.rows
     .map((sel) => pickRow(sel))
     .filter((r, i, a) => r && a.indexOf(r) === i)     // a regex may hit a row an earlier one took
-    .map((r) => `<div class="inspect-row"><span>${esc(r.label)}</span><span>${esc(inspVal(r, d))}</span></div>`)
+    .map((r) => `<div class="inspect-row"><span>${esc(displayReadingLabel(r.label))}</span><span>${esc(inspVal(r, d))}</span></div>`)
     .join("");
 }
 
