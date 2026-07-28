@@ -505,10 +505,11 @@ IDF v6.0 extracted it from core — [`idf_component.yml`](../main/idf_component.
   entry HA merges on, and the configs published under it are retracted once per boot).
   A **bit-flag** value (converter family 300-307, `conv_is_binary`) is typed as a `binary_sensor` with
   an explicit `pl_on:"1"`/`pl_off:"0"` and published as the JSON **number** `1`/`0`
-  (`binary_state_number`) — HA gets a real on/off entity, and a metrics consumer (which drops strings
-  *and* bools) finally gets the ~30 binary rows per profile that used to be invisible to it. The
-  device's own `/values`, web UI and WebSocket keep showing `ON`/`OFF`. The pre-split `sensor`
-  discovery config is actively deleted on upgrade (`retired_sensor_discovery_topic`).
+  — HA gets a real on/off entity, and a metrics consumer (which drops strings *and* bools) finally
+  gets the ~30 binary rows per profile that used to be invisible to it. The poll cache, `/values`,
+  web UI, WebSocket, history and MQTT all use `1`/`0`; no value surface emits text `ON`/`OFF`. The
+  pre-split `sensor` discovery config is actively deleted on upgrade
+  (`retired_sensor_discovery_topic`).
 - **✅ 🧪 Detect-only rows are never announced — and are actively retracted.** A profile row flagged
   `ValueDef::no_publish` ([`logic/value_def.hpp`](../main/logic/value_def.hpp)) is skipped by the poll
   cache, and `publish_discovery` publishes a **zero-length retained** payload to its discovery topic
@@ -876,9 +877,9 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   a `.cpp` can only be verified on the device — skipped buckets are *filled* (`history_skipped()`),
   never compressed, since compressing them slides every earlier sample forward in time and mislabels
   the whole curve, and that count is an off-by-one with no visible symptom. The
-  value parse is here for the same reason: a bit-flag row publishes `"ON"`, and a bare `strtof` would
-  read that as 0 and draw a confident 0.0 °C line — its exactness is pinned by a round-trip over every
-  0.1 step across `reading_plausible()`'s own ±200 °C window. And `history_pin_index()`, which
+  value parse is here for the same reason: legacy/corrupt nonnumeric text must not be accepted as
+  zero by `strtof` and drawn as a confident 0.0 line — its exactness is pinned by a round-trip over
+  every 0.1 step across `reading_plausible()`'s own ±200 °C window. And `history_pin_index()`, which
   re-resolves a **pinned** readout after the ring has rolled: anchored to the sample's instant, never
   its index, and DROPPED rather than clamped once that instant leaves the day — clamping would keep a
   bubble on screen while silently changing which moment it describes. Its reference point is

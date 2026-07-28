@@ -6,7 +6,7 @@
 // Semantics (cross-checked against two independent X10A implementations): convs 101-111 read a
 // SIGNED 16-bit field, 151-165 an UNSIGNED one; within a group the id's parity selects endianness
 // (flag 0 = little-endian, flag 1 = big-endian). A 1-byte field is read from data[0]. The large set
-// of enum/label converters (operating-mode, on/off, fan-step, error codes) is generated alongside
+// of enum/label converters (operating-mode, fan-step, error codes) is generated alongside
 // the def profiles by the offline generator (gen_profiles.py, maintained outside this repo);
 // convert() returns Reading{unimpl=true} for a conv id not yet ported, so the value is simply
 // skipped rather than reported wrong.
@@ -66,6 +66,16 @@ inline void set_text(Reading& r, const char* s) {
     r.ok = true;
 }
 
+// Publication boundary guard: no value may leave the firmware as the exact text ON/OFF. Current
+// bit/fan converters are numeric below, but keeping this normalizer beside the converter prevents a
+// future enum from silently reintroducing the old wire values through hp_format().
+inline const char* on_off_number(const char* text) {
+    if (!text) return nullptr;
+    if (text[0] == 'O' && text[1] == 'N' && text[2] == '\0') return "1";
+    if (text[0] == 'O' && text[1] == 'F' && text[2] == 'F' && text[3] == '\0') return "0";
+    return nullptr;
+}
+
 // Convert one value. `data` points at the value's bytes inside the reply payload.
 inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802) {
     Reading r;
@@ -104,13 +114,14 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802
             break;
         }
 
-        // ── Bit flags: conv 300+b -> bit b (0=LSB) of data[0] -> ON/OFF ──
-        // Stays TEXT here (see conv_is_binary below): "ON"/"OFF" is what /values, the web UI and the
-        // WebSocket show. The MQTT bridge re-encodes it as 1/0 at publish time; the converter's own
-        // semantics are unchanged so the domain audit still reads this as one bit of data[0].
+        // ── Bit flags: conv 300+b -> bit b (0=LSB) of data[0] -> numeric 1/0 ──
+        // Numeric at the source so every consumer — /values, WebSocket, history and MQTT — observes
+        // the same contract. Text ON/OFF must never enter the publish cache.
         case 300: case 301: case 302: case 303:
         case 304: case 305: case 306: case 307:
-            set_text(r, (data[0] & (1 << (def.conv - 300))) ? "ON" : "OFF"); break;
+            r.value = (data[0] & (1 << (def.conv - 300))) ? 1.0 : 0.0;
+            r.ok = true;
+            break;
 
         // ── Enum labels ──
         case 217: { int v = data[0];                                          // operation mode
@@ -121,8 +132,7 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802
                     set_text(r, v < 4 ? ERR_TYPE[v] : "?"); break; }
         case 316: { int v = data[0];                                          // hybrid mode
                     set_text(r, v < 3 ? HYBRID[v] : "?"); break; }
-        case 211: if (data[0] == 0) set_text(r, "OFF");                       // fan step
-                  else { r.value = data[0]; r.ok = true; } break;
+        case 211: r.value = data[0]; r.ok = true; break;                     // fan step (0 = stopped)
         case 204: { char t[3] = {ERR_C1[(data[0] >> 4) & 0xF], ERR_C2[data[0] & 0xF], 0};
                     set_text(r, t[0] == ' ' ? t + 1 : t); break; }            // error code (2 chars)
         case 219: r.value = data[0]; r.ok = true; break;                      // I/U capacity code
@@ -173,15 +183,12 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802
     return r;
 }
 
-// Is this converter's reading a BOOLEAN — one bit of data[0], decoded to "ON"/"OFF" above? The
+// Is this converter's reading a BOOLEAN — one bit of data[0], decoded to numeric 1/0 above? The
 // bit-flag family 300-307 is the whole set; every row using it is size 1 / dataType -1 (no unit, no
 // device class), which is why a binary row needs no unit handling anywhere downstream.
 //
-// Two consumers key on this and MUST agree, which is why it lives here as one predicate rather than
-// as a text comparison at each site: logic/discovery.hpp types the row as an HA `binary_sensor`, and
-// the MQTT bridge encodes its state as 1/0 (logic/mqtt_group.hpp binary_state_number). Sniffing for
-// the literal "ON" instead would let the two drift apart the moment any other converter emits that
-// text — a binary_sensor pointed at a string state, or a number published for a text sensor.
+// Discovery keys on this predicate rather than the numeric value: zero is also a legitimate reading
+// for non-binary converters, so value sniffing would type unrelated sensors as binary_sensors.
 inline bool conv_is_binary(int conv) { return conv >= 300 && conv <= 307; }
 
 // Physical envelope for a °C reading (dataType 1). A decoded temperature outside this range is a

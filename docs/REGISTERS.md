@@ -104,10 +104,10 @@ sentinel); it is keyed on the °C `type`, so the non-temperature rows sharing th
 
 ### 3.2 Bit-flag converters (300–307)
 
-A single bit of a one-byte field, rendered **ON / OFF**:
+A single bit of a one-byte field, published as numeric **1 / 0**:
 
 ```
-conv (300 + n)  →  (byte & (1 << n)) ? ON : OFF        // n = 0 (LSB) … 7 (MSB)
+conv (300 + n)  →  (byte & (1 << n)) ? 1 : 0           // n = 0 (LSB) … 7 (MSB)
 ```
 
 So `conv 307` = bit 7, `conv 300` = bit 0. Multiple rows at the same `offset` with `conv`
@@ -120,7 +120,7 @@ Startup / Defrost / … / Low-noise).
 |-----:|---------|-----|
 | 310 | `(byte & 0x70) >> 4` | 3-bit protection-retry counter (bits 4–6) |
 | 311 | `byte & 0x07` | 3-bit counter / BUH output-capacity step (bits 0–2) |
-| 211 | `0 → "OFF"`, else the number | fan step |
+| 211 | raw numeric byte (`0` = stopped) | fan step |
 | 212 / 213 | byte as hex | MPU / option code |
 | 214 / 215 | raw byte (no name table) | model/software EEPROM identification digits — 215 a digit pair, 214 a single digit. Exposed as the raw byte; page `0x11` is rendered as space-separated hex for display (`logic/detect.hpp` `eeprom_render`) and used only as an auto-detection hint, never decoded to a model name. |
 
@@ -546,7 +546,7 @@ the I/U capacity code (`0x60` offset 6).
   `3 → A / current`, else generic. See `unit_for_datatype()` / `device_class_for_datatype()` in
   [`logic/convert.hpp`](../main/logic/convert.hpp).
 - **Enum values** (operation mode, indoor mode, error class) are best exposed as text sensors.
-- **Bit flags** (`conv 300–307`) map naturally to `binary_sensor`s (ON/OFF).
+- **Bit flags** (`conv 300–307`) map naturally to `binary_sensor`s and publish numeric `1`/`0`.
 - A value whose converter is not implemented returns `unimpl` and is simply skipped — never reported
   wrong. Prefer skipping to guessing a scale.
 

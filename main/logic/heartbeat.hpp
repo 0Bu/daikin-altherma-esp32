@@ -116,7 +116,7 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     // install's Telegraf → VictoriaMetrics pipeline: wifi_connected/mqtt_connected/bus_connected were
     // the only heartbeat fields that never became series — the json parser drops a bool exactly like
     // it drops a string, and a metrics store has nowhere to put either. Same reasoning and same
-    // encoding as the state topic's bit-flag rows (logic/mqtt_group.hpp binary_state_number); HA is
+    // encoding as the state topic's bit-flag rows (logic/convert.hpp); HA is
     // served by the matching pl_on "1" / pl_off "0" below.
     // (The crash topic keeps its true/false + `| lower` template: it is an event payload, published
     // empty on a normal boot and deliberately not subscribed by the metrics pipeline, so it has no

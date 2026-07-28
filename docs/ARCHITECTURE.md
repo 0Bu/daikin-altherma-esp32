@@ -808,13 +808,14 @@ The Home Assistant bridge:
   in `logic/convert.hpp`), so temperatures get `°C` + `temperature`, currents `A` + `current`, etc.,
   and HA renders them correctly with history.
 - **Binary values are `binary_sensor`s carrying 1/0.** A bit-flag row (converter family 300-307 —
-  `conv_is_binary` in `logic/convert.hpp`) decodes to the text `"ON"`/`"OFF"`, which is what
-  `/values`, the web UI and the WebSocket show. On the wire it is re-encoded as the JSON **number**
-  `1`/`0` (`binary_state_number`, `logic/mqtt_group.hpp`) and typed as an HA `binary_sensor`
+  `conv_is_binary` in `logic/convert.hpp`) decodes directly to numeric `1`/`0`. The poll cache,
+  `/values`, web UI, WebSocket, history and MQTT therefore all share that representation; no value
+  surface emits the text `"ON"`/`"OFF"`. MQTT serializes it as a JSON **number** and discovery types
+  the row as an HA `binary_sensor`
   (`ha_component`, `logic/discovery.hpp`) whose config spells out `"pl_on":"1"` / `"pl_off":"0"` —
-  HA's defaults are `"ON"`/`"OFF"`, and a mismatch leaves the entity silently at `unknown`. Both
-  sites key on the one `conv_is_binary` predicate rather than on the decoded text, so the payload
-  encoding and the entity type cannot drift apart. Every such row is `size 1`/`dataType -1`, so
+  HA's defaults are `"ON"`/`"OFF"`, and a mismatch leaves the entity silently at `unknown`.
+  Discovery keys on `conv_is_binary`, not the numeric value (many ordinary sensors can also read
+  zero). Every such row is `size 1`/`dataType -1`, so
   there is no unit or `device_class` to reconcile; a *meaningful* device class (`running`, `problem`,
   `heat`) is a per-label domain judgement and is deliberately **not** inferred.
 
