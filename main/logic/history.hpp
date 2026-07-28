@@ -334,10 +334,11 @@ constexpr HistorySample history_store(bool has_value, int value_tenths, unsigned
 // never disagree with the number shown next to it. Locale is not a concern — hp_format writes a
 // plain "%.1f" with '.' and the firmware runs the C locale.
 //
-// Returns false for an empty value (the cycle produced nothing) and for a non-numeric one. That
-// second case is load-bearing: a bit-flag row publishes "ON"/"OFF", and strtof would read "ON" as
-// 0 and quietly draw a 0.0 °C line. Values that would collide with the two absence sentinels are
-// refused too — a real -3276.7 would otherwise be stored as "no reading".
+// Returns false for an empty value (the cycle produced nothing) and for a non-numeric one. The
+// second case rejects legacy/corrupt textual states that strtof would otherwise read as 0 and draw
+// as a confident 0.0 line; current bit flags are numeric 1/0 upstream. Values that would collide
+// with the two absence sentinels are refused too — a real -3276.7 would otherwise be stored as
+// "no reading".
 inline bool history_parse_tenths(const char* s, int& out) {
     if (!s || !*s) return false;
     char* end = nullptr;

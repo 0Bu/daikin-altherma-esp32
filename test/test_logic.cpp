@@ -179,12 +179,13 @@ static void test_convert() {
     const uint8_t mwb[] = {0x0D, 0xDA};                // BE 0x0DDA = 3546 -> 35.46
     CHECK(approx(convert(mw, mwb).value, 35.46));
 
-    // conv 300..307 = bit b (0 = LSB) of data[0] -> ON/OFF.
+    // conv 300..307 = bit b (0 = LSB) of data[0] -> numeric 1/0.
     const uint8_t bits[] = {0x80};                     // only bit 7 set
     ValueDef b7{0x10, 1, 307, 1, -1, "b7"};
     ValueDef b0{0x10, 1, 300, 1, -1, "b0"};
-    CHECK(std::string(convert(b7, bits).text) == "ON");
-    CHECK(std::string(convert(b0, bits).text) == "OFF");
+    CHECK(convert(b7, bits).ok && approx(convert(b7, bits).value, 1.0));
+    CHECK(convert(b0, bits).ok && approx(convert(b0, bits).value, 0.0));
+    CHECK(convert(b7, bits).text[0] == '\0' && convert(b0, bits).text[0] == '\0');
 
     // conv 217 = operation mode; conv 315 = indoor mode from the HIGH nibble.
     ValueDef om{0x10, 0, 217, 1, -1, "om"};
@@ -216,11 +217,12 @@ static void test_convert() {
     CHECK(std::string(format_error_code("U4")) == "U4: Indoor/outdoor unit communication problem");
     CHECK(std::string(format_error_code("ZZ")) == "ZZ");       // unknown code -> bare code, unchanged
 
-    // conv 211 = fan step (0 -> OFF, else the number); conv 316 = hybrid mode.
+    // conv 211 = numeric fan step (including 0); conv 316 = hybrid mode.
     ValueDef fs{0x30, 1, 211, 1, -1, "fs"};
     const uint8_t f0[] = {0x00};
     const uint8_t f5[] = {0x05};
-    CHECK(std::string(convert(fs, f0).text) == "OFF");
+    CHECK(convert(fs, f0).ok && approx(convert(fs, f0).value, 0.0));
+    CHECK(convert(fs, f0).text[0] == '\0');
     CHECK(convert(fs, f5).ok && approx(convert(fs, f5).value, 5.0));
     ValueDef hy{0x64, 2, 316, 1, -1, "hy"};
     const uint8_t h1[] = {0x01};
@@ -880,11 +882,11 @@ static void test_discovery() {
     for (int c = 300; c <= 307; c++) CHECK(conv_is_binary(c));
 }
 
-// Every bit-flag row in the SHIPPED catalog must survive the whole binary path: convert() has to
-// decode both bit states to text binary_state_number() recognises, or the bridge silently falls back
-// to publishing "ON"/"OFF" as a string into an entity HA has typed as a binary_sensor — a value that
-// would read `unknown` in HA and never reach a metrics store. Also pins the layout the discovery
-// branch assumes (size 1, dataType -1 -> no unit/device_class to reconcile).
+// Every bit-flag row in the SHIPPED catalog must decode both states directly to numeric 1/0 AND be
+// announced to Home Assistant as a binary_sensor whose payload contract matches those numbers.
+// This prevents any firmware consumer from seeing text ON/OFF or HA displaying a plain numeric
+// sensor, and pins the layout the discovery branch assumes (size 1, dataType -1 -> no unit/device
+// class to reconcile).
 static void test_binary_catalog() {
     int checked = 0;
     for (const auto& p : def::profiles) {
@@ -897,19 +899,31 @@ static void test_binary_catalog() {
             const uint8_t set_byte = bit, clear_byte = static_cast<uint8_t>(~bit);
             Reading on  = convert(d, &set_byte);
             Reading off = convert(d, &clear_byte);
-            CHECK(std::string(on.text)  == "ON");
-            CHECK(std::string(off.text) == "OFF");
-            const char* n_on  = binary_state_number(on.text);
-            const char* n_off = binary_state_number(off.text);
-            CHECK(n_on  != nullptr); CHECK(std::string(n_on  ? n_on  : "") == "1");
-            CHECK(n_off != nullptr); CHECK(std::string(n_off ? n_off : "") == "0");
+            CHECK(on.ok && off.ok);
+            CHECK(on.text[0] == '\0' && off.text[0] == '\0');
+            CHECK(approx(on.value, 1.0));
+            CHECK(approx(off.value, 0.0));
             // ...and 1/0 must land in the state JSON UNQUOTED, or a metrics consumer drops it again.
-            CHECK(is_json_number(n_on ? n_on : ""));
-            CHECK(is_json_number(n_off ? n_off : ""));
+            CHECK(build_grouped_json({{"test", "flag", on.value ? "1" : "0"}})
+                  == "{\"test\":{\"flag\":1}}");
+            CHECK(build_grouped_json({{"test", "flag", off.value ? "1" : "0"}})
+                  == "{\"test\":{\"flag\":0}}");
+            CHECK(std::string(ha_component(d)) == "binary_sensor");
+            const std::string cfg =
+                discovery_config("daikin_test", "daikin_board", "daikin/state", "daikin/status", d);
+            CHECK(cfg.find("\"pl_on\":\"1\",\"pl_off\":\"0\"") != std::string::npos);
+            CHECK(discovery_topic("homeassistant", "daikin_test", d)
+                      .rfind("homeassistant/binary_sensor/daikin_test/", 0) == 0);
             checked++;
         }
     }
     CHECK(checked > 500);   // ~30 binary rows x 44 profiles — the catalog really was traversed
+    // Publication guard for a future enum that might decode to these exact words.
+    CHECK(std::string(on_off_number("ON")) == "1");
+    CHECK(std::string(on_off_number("OFF")) == "0");
+    CHECK(on_off_number("Heating") == nullptr);
+    CHECK(on_off_number("on") == nullptr);
+    CHECK(on_off_number(nullptr) == nullptr);
 }
 
 // is_refrigerant_pressure() across the SHIPPED catalog. The production rule is STRUCTURAL (outdoor
@@ -1201,16 +1215,9 @@ static void test_mqtt_group() {
     CHECK(!is_json_number("") && !is_json_number("-") && !is_json_number("3."));
     CHECK(!is_json_number("1.2.3") && !is_json_number("A1") && !is_json_number("ON"));
 
-    // Bit-flag rows go on the wire as the NUMBERS 1/0 — a JSON string OR a JSON bool is dropped by a
-    // metrics consumer (measured: Telegraf's json parser drops both), and HA reads them back via
-    // pl_on "1" / pl_off "0". Anything that is not the expected ON/OFF text returns nullptr so the
-    // caller publishes the decoded text rather than inventing a 0.
-    CHECK(std::string(binary_state_number("ON")) == "1");
-    CHECK(std::string(binary_state_number("OFF")) == "0");
-    CHECK(binary_state_number("Heating") == nullptr);
-    CHECK(binary_state_number("") == nullptr);
-    CHECK(binary_state_number("on") == nullptr);      // decoded text is upper-case; no fuzzy matching
-    CHECK(is_json_number("1") && is_json_number("0"));   // ...so they land unquoted in the payload
+    // Bit-flag rows arrive from hp_format as numeric text and therefore land on the wire as bare
+    // JSON numbers. A JSON string or bool would be dropped by the metrics consumer.
+    CHECK(is_json_number("1") && is_json_number("0"));
 
     // Grouped JSON: max depth 1, groups+keys in first-seen order, numeric vs string typing.
     std::vector<GroupedValue> vals = {
@@ -1224,8 +1231,8 @@ static void test_mqtt_group() {
                "\"hydronic\":{\"dhw_setpoint\":48,\"lw_setpoint\":35.4}}");
     CHECK(build_grouped_json({}) == "{}");
 
-    // A binary row arrives here already re-encoded (mqtt_ha's current_grouped), so it must serialize
-    // as a bare 1/0 next to the text values — not as "1", which would put it back out of reach.
+    // A binary row arrives here already formatted as numeric 1/0, so it must serialize as a bare
+    // number next to the text values — not as "1", which would put it back out of reach.
     CHECK(build_grouped_json({{"hydronic", "thermostat_on_off", "1"},
                               {"hydronic", "silent_mode",       "0"}})
           == "{\"hydronic\":{\"thermostat_on_off\":1,\"silent_mode\":0}}");
@@ -3803,8 +3810,8 @@ static void test_history() {
         CHECK(history_parse_tenths("-7.5", v) && v == -75);
         CHECK(history_parse_tenths("0.0", v) && v == 0);
         CHECK(history_parse_tenths("23", v) && v == 230);        // no decimal point is still a number
-        // The one that matters: a bit-flag row publishes ON/OFF, and a bare strtof would read "ON"
-        // as 0 and draw a confident 0.0 °C line through the trend.
+        // Reject legacy/corrupt nonnumeric states rather than letting strtof turn them into a
+        // confident 0.0 line. Current binary values reach history as numeric 1/0.
         CHECK(!history_parse_tenths("ON", v));
         CHECK(!history_parse_tenths("OFF", v));
         CHECK(!history_parse_tenths("U4", v));                   // a fault code
@@ -4193,8 +4200,8 @@ static void test_profile_view() {
         switch (def::retry_rows[i].conv) {
             case 310: CHECK(approx(r.value, 1.0)); seen++; break;
             case 311: CHECK(approx(r.value, 5.0)); seen++; break;
-            case 307: CHECK(r.text == std::string("ON"));  seen++; break;   // bit 7 set
-            case 303: CHECK(r.text == std::string("OFF")); seen++; break;   // bit 3 clear
+            case 307: CHECK(approx(r.value, 1.0)); seen++; break;   // bit 7 set
+            case 303: CHECK(approx(r.value, 0.0)); seen++; break;   // bit 3 clear
             default: CHECK(false); break;
         }
     }

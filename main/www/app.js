@@ -2078,17 +2078,17 @@ function valueGroupsHtml(vals, connected) {
   // own name. Bucket KEYS stay the English group name (groupOf) — only the display label is localised.
   const groupLabel = (name) => (I18N.en["group." + name] != null ? t("group." + name) : name);
   let html = ""; const done = new Set();
-  // A Protection row reading ON is the unit backing off RIGHT NOW (the "Drop"/"Drop Control" flags);
+  // A Protection row reading 1 is the unit backing off RIGHT NOW (the "Drop"/"Drop Control" flags);
   // the "Retry Qty" counters beside them are cumulative and are deliberately NOT highlighted — 3
   // retries is history, not a working point, and marking both alike would merge "it is happening"
   // into "it has happened", which is the one distinction these eleven rows exist to draw.
   //
-  // Scoped to THIS group on purpose. Plenty of rows elsewhere read ON in normal operation ("Water
+  // Scoped to THIS group on purpose. Plenty of rows elsewhere read 1 in normal operation ("Water
   // pump operation", "Thermostat ON/OFF", and the default_on freeze-protection flags the group keys
-  // deliberately exclude); highlighting ON globally would tint a healthy plant amber. Keyed on the
-  // decoded ON text rather than a label pattern, so it needs no second copy of the row list — inside
-  // this group the ON/OFF rows ARE the drop flags.
-  const isLimiting = (v) => /^on$/i.test(String(v.value ?? "").trim());
+  // deliberately exclude); highlighting 1 globally would tint a healthy plant amber. Keyed on the
+  // numeric state rather than a label pattern, so it needs no second copy of the row list — inside
+  // this group the binary rows ARE the drop flags.
+  const isLimiting = (v) => String(v.value ?? "").trim() === "1";
   const emit = (name, rows) => {
     const prot   = name === "Protection";
     const shown  = prot ? rows.map((v) => (isLimiting(v) ? { ...v, state: "warn" } : v)) : rows;
@@ -2108,8 +2108,8 @@ function valueGroupsHtml(vals, connected) {
 // the CSS flow animations on every poll.
 const vRow = (re) => (S._values || []).find((x) => re.test(x.label || "") && x.value != null);
 const vNum = (re) => { const r = vRow(re); if (!r) return null; const n = parseFloat(r.value); return Number.isFinite(n) ? n : null; };
-// Bit-flag values arrive as "ON"/"OFF" text (logic/convert.hpp conv 300-307). null = row absent.
-const vOn = (re) => { const r = vRow(re); return r ? /^on$/i.test(String(r.value).trim()) : null; };
+// Bit-flag values arrive as numeric 1/0 (logic/convert.hpp conv 300-307). null = row absent.
+const vOn = (re) => { const r = vRow(re); return r ? String(r.value).trim() === "1" : null; };
 
 // The outdoor unit's OWN register pages — logic/ou_stale.hpp's ou_page_holds_over(), transcribed:
 // 0x20 (outdoor sensors) and 0x21 (inverter) are only refreshed while the compressor runs, so with

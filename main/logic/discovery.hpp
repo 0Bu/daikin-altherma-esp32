@@ -70,8 +70,8 @@ inline std::string discovery_config(const std::string& node, const std::string& 
     j += "\"stat_t\":\"";     j += state_topic; j += "\",";
     j += "\"val_tpl\":\"{{ value_json['"; j += group; j += "']['"; j += obj; j += "'] }}\",";
     j += "\"avty_t\":\"";     j += avail_topic; j += "\",";
-    // A binary row's state is the number 1/0 (logic/mqtt_group.hpp binary_state_number), which the
-    // template renders as "1"/"0" — so pl_on/pl_off must be spelled out; HA's defaults are "ON"/"OFF"
+    // A binary row's state is the number 1/0 (logic/convert.hpp), which the template renders as
+    // "1"/"0" — so pl_on/pl_off must be spelled out; HA's defaults are "ON"/"OFF"
     // and would leave every one of these entities stuck at `unknown`. No unit / device_class /
     // state_class: every 300-307 row is dataType -1, so unit and dc are empty here anyway, and a
     // meaningful HA device_class (running / problem / heat) is a per-LABEL domain judgement — exactly

@@ -67,8 +67,8 @@ struct Lock {
     Lock& operator=(const Lock&) = delete;
 };
 
-// The value parse lives in logic/history.hpp (history_parse_tenths) so "ON" -> refused and the
-// sentinel clamp are host-tested rather than discovered on a device.
+// The value parse lives in logic/history.hpp (history_parse_tenths) so nonnumeric legacy/corrupt
+// values and sentinel collisions are refused in host-tested code rather than on-device surprises.
 inline bool value_tenths(const std::string& s, int& out) {
     return logic::history_parse_tenths(s.c_str(), out);
 }

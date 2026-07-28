@@ -171,12 +171,8 @@ static std::vector<GroupedValue> current_grouped() {
     out.reserve(n);
     for (size_t i = 0; i < n; i++) {
         if (cache[i].value.empty()) continue;
-        // A binary row's decoded text ("ON"/"OFF") is re-encoded as the JSON number 1/0 for the wire.
-        // /values, the web UI and the WebSocket keep reading the cache directly, so they still show
-        // ON/OFF — only the MQTT payload changes, and only for the rows HA types as binary_sensor.
-        const char* bin = conv_is_binary(cache[i].conv) ? binary_state_number(cache[i].value) : nullptr;
         out.push_back({group_for_page(cache[i].reg), object_id(cache[i].label.c_str()),
-                       bin ? bin : cache[i].value});
+                       cache[i].value});
     }
     return out;
 }

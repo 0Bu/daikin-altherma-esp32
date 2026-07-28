@@ -21,9 +21,6 @@ struct CachedValue {
                          // row's IDENTITY — how logic/history.hpp addresses a trended row, since
                          // the catalog's labels neither name one quantity consistently nor name
                          // different quantities differently (see that header). Never displayed.
-    int         conv = 0; // converter id that produced `value` — the MQTT bridge re-encodes a binary
-                          // row (conv_is_binary) as 1/0, and must key on the same fact that types it
-                          // as an HA binary_sensor rather than re-deriving it from the text
 };
 
 // Health/status counters for /status.hp.

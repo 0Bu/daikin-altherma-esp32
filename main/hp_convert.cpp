@@ -16,9 +16,14 @@ bool hp_format(const ValueDef& def, const uint8_t* payload, int payload_len, int
     // refrigerant pressure at 0 bar (an unreported transducer — a sealed circuit is never at vacuum).
     if (!reading_plausible(def, r, profile, count)) return false;
     if (!r.ok && r.text[0] == '\0') return false;
-    // conv 204 (fault code) gets an English description appended when the table covers it;
-    // every other text converter (enum labels, ON/OFF) publishes its decoded text verbatim.
-    if (r.text[0]) { out = (def.conv == 204) ? format_error_code(r.text) : r.text; return true; }
+    // conv 204 (fault code) gets an English description appended when the table covers it. Exact
+    // ON/OFF text is normalized defensively even though all current binary/fan converters are
+    // numeric already: no future text converter may reintroduce those wire values.
+    if (r.text[0]) {
+        if (const char* binary = on_off_number(r.text)) out = binary;
+        else out = (def.conv == 204) ? format_error_code(r.text) : r.text;
+        return true;
+    }
     char b[32];
     // Per-converter decimal precision (logic/convert.hpp): 2 for ×0.01, 1 for scaled, 0 for integers.
     snprintf(b, sizeof(b), "%.*f", display_decimals(def.conv), r.value);
