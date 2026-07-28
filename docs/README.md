@@ -289,8 +289,13 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #        capacity_kw_iu = the indoor unit's rated code. Different
                                    #        halves of the plant, routinely different sizes — read
                                    #        them as two figures, never as one with a fallback.
-GET  /values                       # decoded readings [{label,value,unit,reg}] (last poll cycle);
-                                   #   reg = the X10A register page the row was decoded from
+GET  /values                       # decoded readings [{label,value,unit,reg,binary?}] (last poll);
+                                   #   reg = the X10A register page the row was decoded from;
+                                   #   binary:true marks converter-300..307 bit flags. Their value
+                                   #   remains numeric text "1"/"0"; the web UI alone presents
+                                   #   ON/OFF in every UI language and omits redundant trailing
+                                   #   ON/OFF / On:…_Off:… legends from visible labels. Raw labels
+                                   #   remain unchanged in this response.
 GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sample first:
                                    #   {id,label,dt,unit,t0,v[],held[[from,count],…]}
                                    #   unit = the ROW's own unit (never a hardcoded °C).

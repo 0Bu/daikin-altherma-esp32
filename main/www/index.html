@@ -425,13 +425,26 @@
                   </g>
                   <path class="sc-flow hot" id="fTank" d="M610 180 V 248"/>
                   <g class="sc-hit" data-insp="tank" role="button" tabindex="0">
-                    <rect class="sc-box" x="514" y="248" width="124" height="110" rx="14"/>
+                    <rect class="sc-box sc-tank" x="514" y="248" width="124" height="110" rx="14"/>
                     <text class="sc-lbl" x="526" y="268" data-i18n="schem.dhw_tank">DHW TANK</text>
                     <path d="M534 342 q10 -12 20 0 t20 0 t20 0 t20 0" fill="none" stroke="var(--pipe)" stroke-width="4" stroke-linecap="round"/>
                     <path class="sc-flow hot" id="fCoil" style="stroke-width:4" d="M534 342 q10 -12 20 0 t20 0 t20 0 t20 0"/>
                     <text class="sc-val" x="576" y="306" text-anchor="middle" style="font-size:17px"><tspan id="svTank">—</tspan> °C</text>
                     <text class="sc-sub" x="576" y="324" text-anchor="middle"><tspan data-i18n="schem.set">set</tspan> <tspan id="svTankSet">—</tspan> °C</text>
                   </g>
+                  <!-- X10A BSH is the tank's electric immersion heater, not BUH step 1/2 in the
+                       hydronic supply. It can run while compressor, circulation pump and flow are
+                       all zero, so it gets its own state and animated heater overlay rather than
+                       turning on fCoil (which would falsely claim hydronic flow). The transparent
+                       rect keeps the label comfortably tappable without drawing a badge outline.
+                       Hidden with visibility (not opacity alone) while off so it cannot retain an
+                       invisible pointer or keyboard target. -->
+                  <g class="sc-bsh-state sc-hit" data-insp="bsh" role="button" tabindex="0">
+                    <rect class="sc-hitarea" x="518" y="272" width="116" height="22" rx="9"/>
+                    <text class="sc-state" x="576" y="286" text-anchor="middle"
+                          style="font-size:9px" data-i18n="schem.bsh_badge">E-heater active</text>
+                  </g>
+                  <path class="sc-bsh-wave" d="M534 342 q10 -12 20 0 t20 0 t20 0 t20 0"/>
                   <!-- The tank return joins the shared run at y=420. Its PIPE moved up into the
                        branch group, where the highlight needs it — only the animated overlay stays
                        here, after the box, so it paints over the box's edge rather than under it. -->

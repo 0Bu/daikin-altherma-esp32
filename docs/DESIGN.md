@@ -317,9 +317,27 @@ Body, ordered:
    **State flags are drawn at their component**, never as a chip row: the space-heating demand is a
    pill on the **heating riser** above the emitter (`--ok` while calling), the BUH step is part of the
    **BUH label** ("BUH 1"/"BUH 2", over the existing `--warn` tint — the tint says *on*, the digit
-   says how much resistive heat is being paid for), low-noise mode is a pill **on the outdoor unit**
-   beside the defrost pill. Pump and defrost were already drawn (rotation + "PUMP n%", the ❄ pill +
-   the reversed refrigerant loop).
+   says how much resistive heat is being paid for), X10A's exact **BSH** flag puts the unbordered
+   `--warn` text "E-heater active" **inside the DHW tank** and animates an independent hot-colour
+   overlay on the heater wave (not the hydronic `fCoil` flow overlay), and
+   low-noise mode is a pill **on the outdoor unit** beside the defrost pill. BSH is deliberately not
+   inferred from BUH, Smart Grid or Powerful DHW: the electric immersion heater can run while the
+   compressor, hydronic pump and flow all read zero, so it also replaces the generic standby line
+   with the unabbreviated "Electric tank heater active". Its inspector renders the raw BSH bit as
+   **ON/OFF**, not the ambiguous `1`/`0`. X10A carries no dedicated BSH-power register; while BSH is
+   active, the inspector adds an estimated **whole-unit** electrical input only if live CT-clamp
+   currents are available, and labels it as a total rather than claiming it as heater power. Pump
+   and defrost were already drawn (rotation + "PUMP n%", the ❄ pill + the reversed refrigerant loop).
+   This presentation applies to every converter-300..307 bit flag in both the value cards and
+   schematic inspector: `/values` retains the shared numeric `1`/`0` value and adds the structural
+   marker `binary:true`; only the browser's final display boundary renders it as **ON/OFF**,
+   independently of the selected UI language. Labels and numeric magnitude are deliberately not
+   used for type inference — several binary rows do not say "ON/OFF", while ordinary counters and
+   stages can legitimately read zero or one. At that same display boundary, the browser removes
+   trailing catalog value legends such as `ON/OFF` and `On:…_Off:…` from visible reading names:
+   `Space heating Operation ON/OFF` therefore reads `Space heating Operation` beside its **ON/OFF**
+   value. The exact catalog label remains the identity used by `/values`, WebSocket, MQTT, history,
+   selectors and description matching.
    **The schematic never hides.** When the X10A link drops it is the only thing left that can say
    why, so instead every value pill blanks to "—", every animation stops, the 3-way-valve label falls
    back to a bare "3WV" (no branch claimed) and the demand pill disappears — an idle plant with no

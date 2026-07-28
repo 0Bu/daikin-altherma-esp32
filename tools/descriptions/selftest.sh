@@ -164,6 +164,16 @@ open(p, 'w').write(s.replace('const DESCRIPTIONS = [', 'const DESCRIPTIONS_RENAM
 PY
 run_case "missing table is caught" 2 "must appear exactly once"
 
+echo "== 10. a raw ON/OFF catalog suffix must not return to the visible label =="
+reset
+python3 - "$WORK/main/www/app.js" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+s = s.replace('  return cleaned || raw;', '  return raw;', 1)
+open(p, 'w').write(s)
+PY
+run_case "raw ON/OFF label suffix is caught" 1 "D006"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "description audit selftest: all $pass cases caught"

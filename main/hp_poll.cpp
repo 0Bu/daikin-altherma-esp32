@@ -140,6 +140,7 @@ static void poll_once() {
             cv.unit  = unit_for_datatype(view[k].type);
             cv.reg   = view[k].reg;
             cv.off   = view[k].offset;
+            cv.binary = conv_is_binary(view[k].conv);
             std::string val;
             // The whole table goes along: reading_plausible needs it to tell a refrigerant pressure
             // (0 bar impossible) from the water one (0 bar = a drained system, and real). The BASE

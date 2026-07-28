@@ -415,6 +415,11 @@ static std::string build_values_array() {
         j += jstr(v[i].unit);
         j += ",\"reg\":";
         j += std::to_string(v[i].reg);
+        // Keep the value itself at the firmware-wide numeric 0/1 boundary. The structural marker
+        // is intentionally emitted only for binary rows: it lets the browser render ON/OFF without
+        // treating every numeric zero/one as a switch, while adding no payload bytes to the many
+        // non-binary readings.
+        if (v[i].binary) j += ",\"binary\":true";
         j += "}";
     }
     j += "]";

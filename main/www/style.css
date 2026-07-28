@@ -225,6 +225,15 @@ svg .sc-comp { fill: var(--brand-tint); stroke: var(--brand-strong); stroke-widt
 svg .sc-buh { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
 .buh-on .sc-buh { fill: var(--brand-tint); stroke: var(--warn); }
 .buh-on .sc-bolt { fill: var(--warn); }
+.bsh-on .sc-bsh-state .sc-state { fill: var(--warn); }
+/* BSH heats the tank electrically: animate the heater wave, but never fCoil, because that overlay
+   specifically means hydronic flow and the pump may be stopped. The label's surrounding rect is
+   only a transparent tap area; the requested visible state is the orange text without a border. */
+svg .sc-bsh-wave {
+  fill: none; stroke: var(--flow-hot); stroke-width: 4; stroke-linecap: round;
+  stroke-dasharray: 9 15; opacity: 0; transition: opacity .3s; pointer-events: none;
+}
+.bsh-on .sc-bsh-wave { opacity: 1; animation: dashfwd 1.1s linear infinite; }
 svg .sc-bolt { fill: var(--muted); }
 /* Pump impeller vanes. The same-colour stroke is not decoration: it rounds the OUTLINE's corners
    (stroke-linejoin: round) so the blunt vane ends read as square-but-softened instead of sharp,
@@ -236,10 +245,10 @@ svg .sc-vane { fill: var(--muted); stroke: var(--muted); stroke-width: 1.3;
    are now hit targets, an invisible pill would both answer clicks and sit in the keyboard tab order
    showing nothing. `visibility` fixes both at once; the delayed transition on it lets the opacity
    fade finish before the element goes away (and applies instantly on the way in). */
-svg .sc-snow, svg .sc-quiet {
+svg .sc-snow, svg .sc-quiet, svg .sc-bsh-state {
   opacity: 0; visibility: hidden; transition: opacity .3s, visibility 0s .3s;
 }
-.defrost-on .sc-snow, .quiet-on .sc-quiet {
+.defrost-on .sc-snow, .quiet-on .sc-quiet, .bsh-on .sc-bsh-state {
   opacity: 1; visibility: visible; transition: opacity .3s, visibility 0s;
 }
 /* Space-heating demand pill on the heating riser: --ok while the branch is being called for,
