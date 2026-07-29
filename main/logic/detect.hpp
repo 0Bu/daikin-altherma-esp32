@@ -114,11 +114,55 @@ inline bool signature_consistent(const Signature& sig, const Fingerprint& fp) {
     return true;
 }
 
+// The capacity the detect_* rules narrow and rank by: the O/U figure when the unit reported it,
+// else the I/U capacity code as an approximate fallback. ONE accessor because detect_candidates
+// (which set) and detect_best (which representative) must answer from the same number — they did
+// not, and that is #225: the fallback ranked the pick while the SET ignored it, so /status reported
+// 8 candidates across 4 families — including 14-16 kW models — on an 8 kW unit whose representative
+// had long since been constrained to the 4-8 kW class. Narrowed, that live set is 5 across 3.
+inline int detect_capacity(const Fingerprint& fp) {
+    return (fp.kw_tenths >= 0) ? fp.kw_tenths : fp.iu_kw_tenths;
+}
+
+// Does this profile's kW class contain that capacity? False when either side is unknown, which is
+// NOT the same as excluded: a class-less profile is never "matched" (detect_best ranks it below one
+// that is), but neither does it contradict anything, so detect_candidates always keeps it.
+inline bool signature_kw_contains(const Signature& sig, int cap) {
+    return cap >= 0 && sig.kw_min_tenths >= 0 &&
+           cap >= sig.kw_min_tenths && cap <= sig.kw_max_tenths;
+}
+
 // Narrow the profiles to the best-fitting candidates for a fingerprint. Consistent profiles are
 // those whose pages are present and whose kW class contains the unit's capacity; among them we keep
 // only the ones with MAXIMAL page overlap (largest page_mask), which drops feature-poor profiles
 // that merely happen to be a subset of a feature-rich unit. Fills out[] with up to `max` candidate
 // ids (in signature order) and returns the total candidate count (which may exceed `max`).
+//
+// Then a THIRD filter, for the case this function used to answer too broadly (#225): when the O/U
+// capacity is unknown, signature_consistent applies no kW filter at all, so the set spans kW
+// classes — and the header's own contract ("register-equivalent only when the capacity is known")
+// is voided exactly there. The I/U capacity code is available in that state and detect_best already
+// RANKS by it; here it EXCLUDES, under exactly the rule signature_consistent applies to the O/U
+// figure: drop a candidate whose kW class exists and does NOT contain the capacity.
+//
+// The asymmetry is deliberate and is the whole correctness argument. A profile whose id carries no
+// kW class at all is NOT dropped — nothing about it contradicts the capacity, and "some better-
+// evidenced alternative exists" is a RANKING criterion, which has no business deciding membership.
+// (Written the other way round — keep only candidates that positively match — this silently dropped
+// `altherma_gshp2`, which has no class in its id, from a set where it belongs.) So the set answers
+// "consistent with the unit" and detect_best alone answers "best fit".
+//
+// It cannot move the representative: detect_best prefers a capacity match above everything except
+// page overlap, which this filter holds fixed, so every candidate it removes is one detect_best had
+// already ranked below the survivors. Asserted catalog-wide in test_logic.cpp rather than left as
+// an argument.
+//
+// The corroboration guard runs first, and matters in the other direction: the fallback is applied
+// only when SOME surviving candidate's class contains it. An I/U code contained in no class at all
+// (an unusual indoor/outdoor pairing, a misread byte) is not evidence about this unit, and acting on
+// it would drop every classed candidate at once and leave only the class-less ones — a set that is
+// not merely broad but wrong. Unfiltered is the safe failure here: an over-broad set displays
+// honestly as uncertain, while a set narrowed onto the wrong models does not.
 inline int detect_candidates(const Signature* sigs, int nsig, const Fingerprint& fp,
                              const char** out, int max) {
     int best_pop = -1;
@@ -129,10 +173,23 @@ inline int detect_candidates(const Signature* sigs, int nsig, const Fingerprint&
     }
     if (best_pop < 0) return 0;
 
+    // Only ever narrows when the O/U capacity was ABSENT: with it known, signature_consistent has
+    // already excluded every contradicting class, so this pass can find nothing left to remove.
+    const int cap = detect_capacity(fp);
+    bool corroborated = false;
+    for (int i = 0; i < nsig; i++) {
+        if (!signature_consistent(sigs[i], fp)) continue;
+        if (__builtin_popcount(sigs[i].page_mask) != best_pop) continue;
+        if (signature_kw_contains(sigs[i], cap)) { corroborated = true; break; }
+    }
+
     int n = 0;
     for (int i = 0; i < nsig; i++) {
         if (!signature_consistent(sigs[i], fp)) continue;
         if (__builtin_popcount(sigs[i].page_mask) != best_pop) continue;
+        // Excluded only by a class that CONTRADICTS; a class-less profile always survives.
+        if (corroborated && sigs[i].kw_min_tenths >= 0 && !signature_kw_contains(sigs[i], cap))
+            continue;
         if (n < max && out) out[n] = sigs[i].id;
         n++;
     }
@@ -159,16 +216,18 @@ inline int detect_candidates(const Signature* sigs, int nsig, const Fingerprint&
 // contains the derived capacity. This is scoped — when the O/U capacity IS known, signature_consistent
 // has already filtered to matching classes, so every survivor scores match=1 and criterion (2) is a
 // no-op; the fallback only ever moves the pick for units that don't report O/U capacity.
+//
+// detect_candidates now applies that SAME fallback as a filter (#225), through the same two helpers
+// rather than a second copy of the arithmetic — so the reported set and this pick are constrained by
+// one rule, and this function's answer is unchanged by that filter (see its comment).
 inline const char* detect_best(const Signature* sigs, int nsig, const Fingerprint& fp) {
-    // O/U capacity if the unit reported it, else the I/U capacity code as an approximate fallback.
-    const int cap = (fp.kw_tenths >= 0) ? fp.kw_tenths : fp.iu_kw_tenths;
+    const int cap = detect_capacity(fp);
     const char* best = nullptr;
     int best_pop = -1, best_match = -1, best_span = 0;
     for (int i = 0; i < nsig; i++) {
         if (!signature_consistent(sigs[i], fp)) continue;
         const int pop   = __builtin_popcount(sigs[i].page_mask);
-        const int match = (cap >= 0 && sigs[i].kw_min_tenths >= 0 &&
-                           cap >= sigs[i].kw_min_tenths && cap <= sigs[i].kw_max_tenths) ? 1 : 0;
+        const int match = signature_kw_contains(sigs[i], cap) ? 1 : 0;
         const int span  = (sigs[i].kw_min_tenths >= 0)
                               ? (sigs[i].kw_max_tenths - sigs[i].kw_min_tenths) : 1000;
         // Rank, best first: (1) maximal page overlap, (2) kW class contains the known/derived

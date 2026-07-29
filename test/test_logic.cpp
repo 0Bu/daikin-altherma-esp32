@@ -202,6 +202,23 @@ static void test_convert() {
     const uint8_t m6[] = {0x06};
     CHECK(std::string(convert(om, m5).text) == "Auto Cool");   // mode index 5 = Auto Cool
     CHECK(std::string(convert(om, m6).text) == "Auto Heat");   // mode index 6 = Auto Heat
+
+    // Index 0 is the IDLE state and reads "Stop" — NOT the split-air-conditioner table's "Fan
+    // Only", a mode a hydronic Altherma does not have (#216). Pinned as a PAIR against the wire
+    // bytes logic/raw_capture.hpp took across one stopped->running edge on a live Altherma 3 R W,
+    // because a single sample cannot tell a wrong LABEL from a table shifted by one: index 0 was
+    // observed only at rest and index 1 only during the run, and index 1 was already correct.
+    // Nothing else can catch this — reading_plausible() returns early on text (no enum value is
+    // ever bounded), the domain audit judges converter ids and byte layout rather than whether a
+    // label is true of the product, and a metrics consumer drops strings entirely, so the row has
+    // no VictoriaMetrics series in which a wrong mode could be noticed.
+    const uint8_t m0[] = {0x00};                        // raw 0x10 [00 04 …] — compressor at rest
+    CHECK(std::string(convert(om, m0).text) == "Stop");
+    CHECK(std::string(convert(om, m0).text) != "Fan Only");
+    CHECK(std::string(convert(om, m1).text) == "Heating");   // raw 0x10 [01 …] — same run, running
+    // The idle label agrees with the INDOOR table's own index 0 (conv 315, §4.2), which had it
+    // right all along — the two now answer "the plant is not running" with one word, not two.
+    CHECK(std::string(convert(om, m0).text) == std::string(IU_MODE[0]));
     ValueDef im{0x60, 2, 315, 1, -1, "im"};
     const uint8_t im10[] = {0x10};                     // hi nibble 1 -> Heating
     CHECK(std::string(convert(im, im10).text) == "Heating");
@@ -1205,6 +1222,93 @@ static void test_detect() {
     int olo = -1, ohi = -1;
     CHECK(ou && parse_kw_class(ou, olo, ohi) && olo <= 160 && 160 <= ohi);
 
+    // ── #225: the candidate SET must narrow by the same I/U capacity the representative ranks by ──
+    // detect_best applied the fallback while detect_candidates ignored it, so on the live unit
+    // /status reported 8 candidates across 4 marketing families while the ranking had already been
+    // constrained to the 4-8 kW class. That is not cosmetic: the header's contract is that the set
+    // is register-equivalent ONLY when the capacity is known, and this is precisely the state where
+    // it is not — an over-broad set is a claim the code cannot back. It has already done damage on
+    // paper (#213 recorded one unit as two independent families, corrected in #219).
+    Fingerprint live{};                                  // the live board's fingerprint, verbatim
+    live.page_mask = mask_of({0x00, 0x10, 0x20, 0x21, 0x30, 0x60, 0x61, 0x62, 0x63, 0x64, 0xA0, 0xA1});
+    CHECK(live.page_mask == 0x1bff);                     // as printed by the device's detect diag line
+    live.kw_tenths    = -1;                              // short 0x00 descriptor -> O/U capacity absent
+    live.iu_kw_tenths = 80;                              // I/U capacity code 0x60/6 = 8.0 kW
+    int lcount = detect_candidates(sigs, nsig, live, out, 64);
+    CHECK(lcount == 5);                                  // was 8 before the narrowing
+    // No survivor's class CONTRADICTS 8.0 kW. The 14-16 kW and 9-16 kW candidates are gone; the
+    // remaining spread is 4-8 kW plus profiles that state no class at all.
+    for (int i = 0; i < lcount; i++) {
+        int clo = -1, chi = -1;
+        if (parse_kw_class(out[i], clo, chi)) CHECK(clo <= 80 && 80 <= chi);
+    }
+    // The unit really installed is an Altherma 3 R W (ERGA04-08E / EHBH-E). It must survive the
+    // narrowing — a filter that dropped the true model would be far worse than the broad set.
+    CHECK(has_candidate(out, lcount, "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw"));
+    // A class-less profile SURVIVES: nothing about it contradicts 8.0 kW, and dropping it would be
+    // ranking ("a better-evidenced candidate exists") deciding membership ("consistent with the
+    // unit"). Written the other way round — keep only positive matches — this filter silently
+    // dropped altherma_gshp2 from a set it belongs in, which is what the case above catches.
+    CHECK(has_candidate(out, lcount, "altherma_top_grade"));          // id carries no kW class
+    CHECK(!parse_kw_class("altherma_top_grade", lo, hi));             // ...as this states outright
+    // What it DOES exclude: a class that cannot hold 8.0 kW.
+    CHECK(!has_candidate(out, lcount, "altherma_epra_d_etv16_etb16_etvz16_d_series_14_16kw"));
+    CHECK(!has_candidate(out, lcount, "altherma_ebla_edla_ewaa_ewya_d_series_9_16kw"));
+    // Still ambiguous, and still honestly so: no bus datum separates the survivors. Narrowing a set
+    // is not resolving it, and /status must keep saying it cannot name one model.
+    CHECK(lcount > 1);
+
+    // The narrowing may not move the representative. It cannot, by construction — detect_best ranks
+    // a capacity match above everything except page overlap, which the filter holds fixed — but that
+    // is the kind of argument that stops being true after an edit, so it is asserted.
+    CHECK(detect_best(sigs, nsig, live) && has_candidate(out, lcount, detect_best(sigs, nsig, live)));
+
+    // The corroboration guard, in the direction that matters more: an I/U capacity contained in NO
+    // surviving class (an unusual pairing, a misread byte) is not evidence about this unit. Acting
+    // on it would exclude every CLASSED candidate at once and leave only the class-less ones — not
+    // merely a broad set but a wrong one, and a set narrowed onto the wrong models does not read as
+    // uncertain the way a broad one does. So the fallback is simply not applied.
+    Fingerprint odd = live;
+    odd.iu_kw_tenths = 999;                              // 99.9 kW: in no class in the catalog
+    const int ocount = detect_candidates(sigs, nsig, odd, out, 64);
+    CHECK(ocount == 8);                                  // unfiltered, exactly as before #225
+    CHECK(has_candidate(out, ocount, "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw"));
+    CHECK(detect_best(sigs, nsig, odd) != nullptr);
+    // And it is a strict no-op when there is no fallback to apply at all.
+    Fingerprint nofbk = live;
+    nofbk.iu_kw_tenths = -1;
+    CHECK(detect_candidates(sigs, nsig, nofbk, out, 64) == 8);
+    // ...or when the O/U capacity IS known: signature_consistent has already filtered to matching
+    // classes, so every survivor matches and the filter can remove nothing.
+    Fingerprint known = live;
+    known.kw_tenths = 60; known.iu_kw_tenths = 160;      // contradictory hint, deliberately
+    int kcount = detect_candidates(sigs, nsig, known, out, 64);
+    CHECK(kcount > 0);
+    for (int i = 0; i < kcount; i++) {                   // the O/U figure decides, not the I/U one
+        int clo = -1, chi = -1;                          // (class-less profiles survive here too)
+        if (parse_kw_class(out[i], clo, chi)) CHECK(clo <= 60 && 60 <= chi);
+    }
+    // Specifically: nothing in the 16 kW class the I/U hint pointed at slipped through.
+    CHECK(!has_candidate(out, kcount, "altherma_epra_d_etv16_etb16_etvz16_d_series_14_16kw"));
+
+    // Catalog-wide: the representative is ALWAYS a member of the reported set. This is the property
+    // the narrowing could most easily have broken (filter the set on one rule, rank on another, and
+    // /status names a model it does not list), so it is swept over every profile's own page set at
+    // several capacities rather than checked on the one fingerprint that motivated the change.
+    for (int i = 0; i < nsig; i++) {
+        for (const int iu : {-1, 30, 80, 160, 999}) {
+            Fingerprint s{};
+            s.page_mask = sigs[i].page_mask;
+            s.kw_tenths = -1;
+            s.iu_kw_tenths = iu;
+            const char* b = detect_best(sigs, nsig, s);
+            const char* sout[64];
+            const int sn = detect_candidates(sigs, nsig, s, sout, 64);
+            CHECK((b == nullptr) == (sn == 0));          // both find something, or neither does
+            if (b) CHECK(has_candidate(sout, sn, b));
+        }
+    }
+
     // Generic Altherma fallback = the universal register core (not the old 3-row stub); an unknown id
     // resolves to it — this is what an unrecognized / S-protocol unit reads with.
     CHECK(def::lookup("generic").count > 40);
@@ -1216,10 +1320,8 @@ static void test_detect() {
     // here against the real signatures rather than asserted in prose, because the number is the whole
     // argument for retrying the probe: on the live 0x1bff fingerprint, MOST single-page losses leave
     // no candidate at all, and the caller then reads with `generic`.
-    Fingerprint live{};
-    live.page_mask    = mask_of({0x00, 0x10, 0x20, 0x21, 0x30, 0x60, 0x61, 0x62, 0x63, 0x64, 0xA0, 0xA1});
-    live.kw_tenths    = -1;                             // as measured: short 0x00 descriptor
-    live.iu_kw_tenths = 80;
+    // Reuses the `live` fingerprint built for #225 above — one definition of what the real board
+    // put on the bus, so the two blocks cannot come to describe different units.
     const char* live_best = detect_best(sigs, nsig, live);
     CHECK(live_best != nullptr);
     int collapses = 0, changes = 0;

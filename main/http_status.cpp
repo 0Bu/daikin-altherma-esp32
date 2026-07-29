@@ -334,10 +334,11 @@ static std::string build_status_json_string(bool redact = false) {
         Fingerprint fp{};
         fp.page_mask = c.fp_pages;
         fp.kw_tenths = c.fp_kw_tenths;
-        // Carried so this recomputed fingerprint stays a faithful copy of the one detection used.
-        // detect_candidates deliberately ignores it (the I/U capacity only ever RANKS, never
-        // excludes — logic/detect.hpp), so this changes no candidate set today; a copy that silently
-        // omits a field is the kind of drift that makes /status disagree with the device later.
+        // Carried so this recomputed fingerprint stays a faithful copy of the one detection used —
+        // and since #225 it is LOAD-BEARING here, not merely faithful: detect_candidates narrows by
+        // the I/U capacity when the O/U figure is absent, so omitting this field would make /status
+        // report a set the device never considered (the live unit: 8 candidates across 4 families
+        // instead of 3 across 2, which is the over-broad reading that put a wrong family into #213).
         fp.iu_kw_tenths = c.fp_iu_kw_tenths;
         int nsig = 0;
         const Signature* sigs = def::signatures(nsig);

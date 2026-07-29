@@ -292,6 +292,11 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #        capacity_kw_iu = the indoor unit's rated code. Different
                                    #        halves of the plant, routinely different sizes — read
                                    #        them as two figures, never as one with a fallback.
+                                   #   candidates[] = models consistent with the unit, never one
+                                   #        asserted. When capacity_kw is null they are narrowed by
+                                   #        capacity_kw_iu — dropping only classes that contradict
+                                   #        it — so the set matches the evidence the pick used.
+                                   #        Narrowing is not resolving: ambiguous can stay true.
 GET  /values                       # decoded readings [{label,value,unit,reg,binary?,held?}] (last poll);
                                    #   reg = the X10A register page the row was decoded from;
                                    #   binary:true marks converter-300..307 bit flags. Their value

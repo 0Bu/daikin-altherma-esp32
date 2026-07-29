@@ -17,12 +17,16 @@ struct DetectResult {
     int         tx        = -1;
     uint32_t    page_mask = 0;           // pages that answered (logic/detect.hpp page_bit)
     int         kw_tenths = -1;          // O/U capacity in 0.1 kW; -1 = unknown
-    // I/U capacity code (reg 0x60/6, same 0.1 kW units); -1 = unknown. Detection uses it only to RANK
-    // the representative, but it is reported out so /status can show a capacity for the units whose
+    // I/U capacity code (reg 0x60/6, same 0.1 kW units); -1 = unknown. Detection RANKS the
+    // representative by it and — since #225 — also NARROWS the candidate set by it, dropping only
+    // classes that contradict it. Reported out so /status can show a capacity for the units whose
     // short 0x00 descriptor never carries the O/U one (logic/config_model.hpp fp_iu_kw_tenths).
     int         iu_kw_tenths = -1;
     std::string eeprom;                  // rendered O/U EEPROM digits ("" if page 0x11 absent)
-    std::vector<std::string> candidates; // register-equivalent model ids (empty = none → generic)
+    // Model ids consistent with the unit — DISPLAY ONLY; nothing reads this to choose a table.
+    // Register-equivalent when the capacity is known; when it is absent they need not be, which is
+    // why #225 narrows the set by the I/U fallback instead of leaving it spanning kW classes.
+    std::vector<std::string> candidates; // (empty = none → generic)
     std::string best;                    // single best-fit id to READ with ("" = none → generic)
 };
 

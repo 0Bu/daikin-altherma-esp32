@@ -164,12 +164,29 @@ It selects the pressure→saturation-temperature curve for `conv 405/406`.
 
 | Val | Mode | Val | Mode |
 |----:|------|----:|------|
-| 0 | Fan Only | 6 | Auto Heat |
+| 0 | Stop | 6 | Auto Heat |
 | 1 | Heating | 7 | Dry |
 | 2 | Cooling | 8 | Aux. |
 | 3 | Auto | 9 | Cooling Storage |
 | 4 | Ventilation | 10 | Heating Storage |
 | 5 | Auto Cool | 11–18 | Use-stored-thermostat (cool 1–4 / heat 1–4) |
+
+Indices **0 and 1 are measured**; the rest are the recovered split-air-conditioner vocabulary and are
+**unverified on a hydronic unit**. Index 0 read `Fan Only` until #216 — a mode an Altherma does not
+have, and the value an idle outdoor unit reports, so it was the entry a user saw most of the day.
+Corrected against a live Altherma 3 R W (`1.0.0-dev.211`), page `0x10` captured across the
+stopped→running edge by `logic/raw_capture.hpp`:
+
+| Plant state | raw `0x10` | byte 0 | Decodes as |
+|-------------|-----------|:------:|------------|
+| at rest | `[00 04 00 …]` | `0x00` | **Stop** |
+| running (3 captures, one run) | `[01 00 00 …]`, `[01 20 00 …]` ×2 | `0x01` | Heating |
+
+Byte 0 steps `0x00`→`0x01` exactly at the transition, and index 1 was already correct — which is what
+makes this a relabel of one entry rather than a table shifted by one. Several remaining entries
+(`Ventilation`, `Dry`, the storage modes) cannot occur on a hydronic unit either, but none is
+reachable to measure, so they are left as recovered rather than guessed at. Keep this table and
+`OP_MODE` in `main/logic/convert.hpp` in step — this section is the domain audit's authority.
 
 ### 4.2 Indoor/hydronic operation mode (conv 315)
 

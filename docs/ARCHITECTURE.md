@@ -802,13 +802,26 @@ in `logic/config_model.hpp`, host-tested); whole-struct `config_save` remains fo
 which own the credential fields and are serialized on the single httpd task.
 
 - **exactly one candidate** → applied; the UI shows "Detected: <family> · ~kW".
-- **several candidates** → the best-fit representative is read with — **every candidate is
-  register-equivalent, so the decoded VALUES are identical regardless of which is named**. The 41
-  Altherma models collapse to a few page-mask classes; within a class they differ only by untestable
-  flag bits (e.g. an ERGA split vs an EBLA monobloc differ by one bit with identical labels), so the
-  exact model **cannot** be determined from bus data. The UI reports this honestly — the distinct
-  candidate **families** plus the O/U EEPROM digits to match the nameplate — rather than asserting a
-  guessed name. Both are on the dashboard's Model card, beneath the brand heading
+- **several candidates** → the best-fit representative is read with. When the capacity is **known**,
+  every candidate is register-equivalent, so the decoded VALUES are identical regardless of which is
+  named. The 41 Altherma models collapse to a few page-mask classes; within a class they differ only
+  by untestable flag bits (e.g. an ERGA split vs an EBLA monobloc differ by one bit with identical
+  labels), so the exact model **cannot** be determined from bus data. The UI reports this honestly —
+  the distinct candidate **families** plus the O/U EEPROM digits to match the nameplate — rather than
+  asserting a guessed name.
+
+  When the O/U capacity is **absent**, that equivalence does not hold and the set is narrowed by the
+  I/U capacity code instead (#225): a candidate is dropped when its kW class **contradicts** the
+  derived capacity, never merely for stating no class — the latter would let ranking decide
+  membership, and a profile with no class in its id contradicts nothing. The narrowing is applied
+  only when at least one surviving candidate's class **corroborates** the fallback; an I/U code that
+  fits no class at all is not evidence about this unit, and acting on it would exclude every classed
+  candidate at once. Before this, the set ignored a fallback the *ranking* already used, so the live
+  8 kW unit reported 8 candidates across 4 marketing families — including 14–16 kW models — while
+  the representative had long been constrained to the 4–8 kW class. That over-broad report is not
+  inert: it put one unit into the record as two independent families (#213, corrected in #219).
+  Narrowing is **not** resolving — the survivors stay genuinely indistinguishable on the bus, and
+  `ambiguous` stays true. Both are on the dashboard's Model card, beneath the brand heading
   ([`DESIGN.md`](DESIGN.md) §5.3 item 4), for a concrete reason: the brand alone reads as a *failed*
   detection, and was reported as one. The EEPROM is **not** decoded to a model name (no digit→name
   table; the one real path to exact ID would need an external EEPROM-code table).
