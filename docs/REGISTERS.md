@@ -275,13 +275,23 @@ the I/U capacity code (`0x60` offset 6).
 | 12 | 1 | 303 | 3 |  | Other Drop Control |
 | 12 | 1 | 311 | s0-2 |  | Not in use |
 
-> **Measured anomaly — `Target Evap. Temp.` (offset 6) reads 10× high on at least one family**
-> ([#194](https://github.com/0Bu/daikin-altherma-esp32/issues/194)). On a live 4-8 kW unit
+> **Measured anomaly — `Target Evap. Temp.` (offset 6) reads 10× high on at least TWO families**
+> ([#194](https://github.com/0Bu/daikin-altherma-esp32/issues/194),
+> [#209](https://github.com/0Bu/daikin-altherma-esp32/issues/209)). On a live 4-8 kW unit
 > (`altherma_ebla_edla_d_series_4_8kw_monobloc`, 2026-07-26) this row decodes to **240.6 °C at rest**
 > and **145.9 → 199.6 °C while the compressor runs** — impossible for an evaporating temperature, and
-> the run-time values land *inside* `reading_plausible()`'s ±200 °C envelope, so they reach Home
-> Assistant. The row is not a placeholder: it tracks the compressor cycle, dipping during a run and
-> returning at rest.
+> the run-time values land *inside* `reading_plausible()`'s ±200 °C envelope, so nothing masked them.
+> #209 reproduced the same shape on an independent family
+> (`altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw`, ERGA/EHB split, 2026-07-27) against a
+> manufacturer-documented EKRHH HomeHub reference: max **199.6 °C**, last stored **193.2 °C**. Wrong
+> on both, correct on nothing anyone has measured. The row is not a placeholder: it tracks the
+> compressor cycle, dipping during a run and returning at rest.
+>
+> **The row is now QUARANTINED** — `logic/availability.hpp` gives it `AvailabilityPolicy::Unproven`,
+> so it reaches no publish surface (`/values`, the WebSocket, the MQTT state topic) and its retained
+> HA discovery config is retracted on upgrade. The register keeps its row here and in every profile:
+> a profile's detection signature *is* the set of pages its rows reference, so deleting it would move
+> detection. Quarantine stops the false value; it does not decide the scale.
 >
 > The conv above is **deliberately left as `114`.** The catalog agrees with it in 44 of 45 profiles,
 > `convert()` implements it exactly as §3.1 specifies, and offset shift / endianness / width are all
@@ -291,11 +301,20 @@ the I/U capacity code (`0x60` offset 6).
 > this table to match a hypothesis would change what the domain audit believes and pass every gate
 > while making the firmware more wrong, so the discrepancy is recorded here instead and pinned by a
 > witness `CHECK` in `test/test_logic.cpp`. Resolving it needs the raw page-`0x10` bytes captured
-> while the compressor runs.
+> while the compressor runs — which the firmware now does: `logic/raw_capture.hpp` dumps the raw
+> `0x10`/`0x20` payloads to `/diag` on the stopped→running edge and every 5 min during a run, up to 8
+> times per boot. Until then the label difference in `altherma_lt_d7_e_bml` (which calls this same
+> register `Target Discharge Temp.`) changes nothing: a discharge target of 145–200 °C is no more
+> real than an evaporating one.
 >
-> Same page, same converter, separate suspicion: `Target Cond. Temp.` (offset 8) publishes a flat
-> `0.0 °C` on that unit while it condenses at 43.5 °C. Raw is `0x0000`, which conv 114's `0x8000`
-> no-data marker does not cover, so an unpopulated field is published as a real target.
+> Same page, same converter, separate verdict: `Target Cond. Temp.` (offset 8) publishes a flat
+> `0.0 °C` on **both** families — one distinct value across a full #209 audit window while the
+> inverter reached 32 rps and the discharge pipe passed 100 °C, and "reads 0.0 even mid-run" on the
+> #194 unit, where `logic/ou_stale.hpp` already records it as a useless witness for that reason. Raw
+> is `0x0000`, which conv 114's `0x8000` no-data marker does not cover. The row is **not**
+> quarantined — the field can legitimately be populated — but an exact decoded zero from it is
+> adjudicated `AvailabilityPolicy::ZeroMeansAbsent` and withheld. Deliberately per-row: a global
+> "0 °C means unavailable" rule would destroy every real thermistor reading that crosses zero.
 
 #### Register `0x11`
 

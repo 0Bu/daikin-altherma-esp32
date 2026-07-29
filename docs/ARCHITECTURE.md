@@ -319,6 +319,36 @@ host-testable core is unusually large and valuable, because the risky parts are 
   row's **page**, never its label alone: `(R2T)` names the leaving-water outlet on `0x61/4` *and*
   `Discharge pipe temp.(R2T)` on `0x20/4`, same offset and converter. Like `lwt_select` and
   `ou_stale` there is no firmware caller — it exists so CI gates the rule against the whole catalog.
+- `logic/availability.hpp` — the **availability ledger** (#209): is a row's decoded number a
+  *measurement*, or is the firmware merely able to decode something from those bytes? Everything
+  else answers a narrower question — `convert()` handles the wire format's own `0x8000` no-data
+  marker, `reading_plausible()` catches a number that is *impossible*, `ValueDef::no_publish` carries
+  what the generator knew. What is left is a field that decodes to an entirely ordinary number which
+  is not a measurement of anything, and only per-row evidence can identify it. Two verdicts, each
+  adjudicated with a live capture recorded beside the rule: `Unproven` (the decode is faithful and
+  the result is still physically false — `Target Evap. Temp.`, #194/#209 on two independent
+  families) withholds the row from every publish surface and retracts its retained HA config;
+  `ZeroMeansAbsent` (`Target Cond. Temp.`'s raw `0x0000`, flat through a full compressor cycle on
+  both families) withholds only that exact value, because a global "0 °C is unavailable" rule would
+  destroy every thermistor reading that crosses zero. Rules are keyed on `(page, offset, converter)`
+  — the row's structural identity, never its label, and deliberately not scoped to a profile id: the
+  catalog test proves both rules select the adjudicated quantity across all 45 profiles, including
+  the one family that spells the quarantined register differently. Adding a rule is an adjudication
+  with the same evidentiary bar as `tools/domain/audit_exceptions.txt`, not a way to make an
+  inconvenient number disappear.
+- `logic/fault_state.hpp` — the **numeric** fault flags that ride beside the **textual** Daikin
+  diagnostic code (#209 defect 4). `error_active`/`warning_active` are derived from the conv-203
+  error class through the inverse of that converter's own `ERR_TYPE` lookup, so there is no second
+  opinion about what the labels mean; an unreadable class publishes neither rather than asserting
+  "no fault". Warning and Caution fold into one flag on purpose — the textual class is right beside
+  them for anyone who needs the distinction.
+- `logic/raw_capture.hpp` — **when** the poll path may put raw page bytes on `/diag`, the missing half
+  of `logic/hexdump.hpp`. Edge-triggered on stopped→running, then one per 5 min during the run, at
+  most 8 per boot and never refilled: enough to make the run-time bytes behind `Target Evap. Temp.` a
+  *series* rather than a point, bounded so it cannot evict the rest of the boot's evidence from the
+  6 KB diag ring. Pure because it is a three-input state machine whose failure modes — a silently
+  exhausted budget, or a dump that repeats every cycle — are invisible on a board until the log is
+  already ruined.
 - `logic/feature_gate.hpp` — which derived features may **honestly** run on the detected model, and
   the answer when they cannot: **disable, never degrade** (issue #69 step 0.2 / #110 Part C). It is
   the same rule the UI already applies three times — `lwt_select` blanks ΔT/heat/COP rather than
@@ -367,9 +397,12 @@ host-testable core is unusually large and valuable, because the risky parts are 
   body that fails `JSON.parse` never reaches those DOM nodes at all. Pure, so each control char is
   asserted host-side, including the signed-`char` trap that would otherwise mangle a non-ASCII SSID.
 - `logic/mqtt_group.hpp` — register page → friendly group name, plus the grouped state JSON for the
-  one shared state topic (depth 1, groups/keys in first-seen order). Numeric-vs-string typing is
-  asserted host-side, so a reading can't reach HA quoted and land as a string sensor. Text values are
-  escaped through `logic/json.hpp`.
+  one shared state topic (depth 1, groups/keys in first-seen order). Each value carries its
+  `PublishedKind` (from its converter), so the JSON type is a property of the **field** and cannot
+  change between states — the #209 fan-step failure, where one key alternated between a number and a
+  string and the metrics consumer silently kept the stale number. A `Number` whose formatted value is
+  not a number publishes `null`, never a quoted string. Text values are escaped through
+  `logic/json.hpp`.
 - `logic/mqtt_uri.hpp` — broker URI → host/port/TLS split behind `mqtt_ha`'s scheme policy: scheme
   defaults (`mqtt://` 1883, `mqtts://` 8883, `ws://` 80, `wss://` 443 — the WebSocket transports take
   the HTTP(S) ports **esp-mqtt itself** defaults to, so the save-time pre-flight probes the port the
@@ -379,8 +412,13 @@ host-testable core is unusually large and valuable, because the risky parts are 
   outside 1–65535 — caught at parse time because the probe's `htons()` would truncate `:65537` to
   `:1` and call a wrong port reachable).
 - `logic/heartbeat.hpp` — the board/link diagnostics JSON (a flat object, each field prefixed by its
-  block name: `wifi_rssi`, `wifi_mac`, `bus_rx_received`, …) + its 19 diagnostic HA discovery configs,
-  with the dBm → signal-quality curve and uptime formatting pinned to known-good samples. Includes
+  block name: `wifi_rssi`, `wifi_mac`, `bus_rx_received`, …) + its 20 diagnostic HA discovery configs,
+  with the dBm → signal-quality curve and uptime formatting pinned to known-good samples. Carries
+  `bus_ou_held_over` — **source** freshness, which is a different fact from `bus_connected`: the link
+  is up and the device is publishing while the outdoor unit simply is not measuring, and a consumer
+  that only had bus health would read the vanished outdoor keys as a broken link. Deliberately not
+  typed as a fault: a resting outdoor unit is the normal state of a heat pump for most of the day.
+  Includes
   the SNTP wall clock (`sntp_time.cpp`) as a `device_class: "timestamp"` sensor — HA's native
   "last updated N ago" entity, rendering `null` (unsynced) as its normal "unknown" state rather than
   a fabricated epoch date.
@@ -587,6 +625,26 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    held-over rule earns its place — a sample taken while the compressor rests is stored as *held
    over*, not as the number the frozen outdoor page keeps returning (`logic/history.hpp`,
    composing `logic/ou_stale.hpp`).
+4a. **Mark source freshness.** Before step 4, the cycle locates the compressor witness
+   (`logic::ou_is_rps_witness` — "INV frequency (rps)", which must sit on a page that stays live) and
+   marks every cached reading whose page the outdoor unit is no longer refreshing
+   (`ou_reading_held_over`). The value is *kept* — the trend ring needs it to tell **held over** from
+   **no reading** — but `CachedValue::held` travels with it, `/values` emits `"held":true`, and the
+   MQTT bridge withholds the row entirely. Before this the browser applied the rule and the firmware
+   did not, so the state topic kept republishing the last run's outdoor air in a freshly-timestamped
+   payload; measured against a HomeHub reference in
+   [#209](https://github.com/0Bu/daikin-altherma-esp32/issues/209), that was exact agreement at every
+   point while the compressor ran and a mean 1.19 K (max 2.0 K) error across the 195 points while it
+   rested. The heartbeat's `bus_ou_held_over` says *why* the keys went away, so a consumer reads a
+   resting unit rather than a broken link.
+4b. **Raw page capture while the unit RUNS** (`logic/raw_capture.hpp`). The detect-pass dump in
+   *Auto-detection* below captures pages `0x10`/`0x20` at rest, which is the state in which the rows
+   under investigation are *not* wrong — the limitation that left
+   [#194](https://github.com/0Bu/daikin-altherma-esp32/issues/194) undiagnosable. This one fires on
+   the stopped→running edge, then every `RAW_CAPTURE_PERIOD_S` (5 min) during the run, at most
+   `RAW_CAPTURE_MAX` (8) times **per boot, never refilled** — a series rather than a point, because
+   two candidate scales that both fit one sample may not fit a curve, and a budget because one line
+   per second would evict the rest of the boot's evidence from the 6 KB diag ring within a minute.
 5. Sleep `POLL_INTERVAL_S` (fixed 1 s — see `config.cpp`). The MQTT bridge and HTTP `/values` read
    the cache; they never touch the UART. The trends are **not** published to MQTT — they exist for
    the web UI, and Home Assistant already records its own history for every entity.
@@ -819,10 +877,37 @@ The Home Assistant bridge:
   and its `<prefix>/<component>/<node>/…` discovery topic. Each cycle the task
   builds a single JSON object of every value, grouped one level deep by X10A register page
   (`logic/mqtt_group.hpp`, host-tested): `{ "<group>": { "<object_id>": value, … }, … }` (max
-  nesting depth 1, e.g. `hydronic`, `outdoor_state`, `inverter`). Numbers are emitted unquoted,
-  enum/text quoted. Every sensor's discovery config points at this one topic and subscripts its
-  value out with a `value_template` (`value_json['<group>']['<object_id>']` — bracket notation, so a
-  digit-leading slug like `2way_valve…` stays valid).
+  nesting depth 1, e.g. `hydronic`, `outdoor_state`, `inverter`). Every sensor's discovery config
+  points at this one topic and subscripts its value out with a `value_template`
+  (`value_json['<group>']['<object_id>']` — bracket notation, so a digit-leading slug like
+  `2way_valve…` stays valid).
+- **A field's JSON type comes from its DEFINITION, never from its current value.** `GroupedValue`
+  carries a `PublishedKind` (`logic/convert.hpp` `published_kind`, keyed on the converter id):
+  `Number` is emitted unquoted, `Text` quoted — in **every** state of that field. The publisher used
+  to sniff the formatted string instead, and
+  [#209](https://github.com/0Bu/daikin-altherma-esp32/issues/209) measured the cost: fan step
+  published the number `30` while the fan ran and the string `"OFF"` when it stopped, so one MQTT key
+  changed JSON type during normal operation, Telegraf's numeric parser dropped the string, no zero
+  ever reached VictoriaMetrics, and the last running step stayed on the chart as if the fan were
+  still turning. The converter itself is numeric since #210; the *kind* is what makes the guarantee
+  structural — a catalog-wide test walks every implemented converter over every input byte and fails
+  if any one of them produces text in one state and a number in another. A `Number` handed a
+  non-numeric string publishes `null`, never a quoted string: fail closed rather than flip the type.
+- **A textual fault code also publishes permanently-numeric flags.** Converters 203/204 stay text
+  (`"Normal"`, `"U4"`, `"7H"`) — that is what a human and HA want, and inventing a numeric enum for
+  Daikin's alphanumeric code space would be a guess with no authority. But a metrics consumer cannot
+  store `"U4"` at all, so an alert on `error_code != 0` never fires for exactly the faults it exists
+  to catch. Every conv-203 error-class row therefore publishes two **derived companions** in its own
+  group: `error_active` and `warning_active`, always `1`/`0` (`logic/fault_state.hpp`), each with its
+  own `binary_sensor` discovery config (`<group>_<key>`, since HA entity ids share one flat namespace
+  while the JSON keys are already group-scoped). An unreadable class publishes *neither* — reporting
+  `0/0` would assert "no fault" on a byte nobody could decode.
+- **Availability is separate from value.** A row the availability ledger (`logic/availability.hpp`)
+  quarantines is not announced at all and its retained config is retracted; a value it adjudicates
+  absent (`Target Cond. Temp.`'s raw `0x0000`) is simply missing from the payload; and a **held-over**
+  reading — the outdoor unit resting and answering with its last run's numbers — is withheld with the
+  heartbeat's `bus_ou_held_over` explaining why. In all three cases absence is stated by absence,
+  which is what `/values` and the plausibility envelope already did for a value that failed to read.
 - **Units + device_class** are derived from each value's `dataType` field (the def's HA unit hint —
   1 = °C/temperature, 2 = bar/pressure, 3 = A/current; `unit_for_datatype`/`device_class_for_datatype`
   in `logic/convert.hpp`), so temperatures get `°C` + `temperature`, currents `A` + `current`, etc.,

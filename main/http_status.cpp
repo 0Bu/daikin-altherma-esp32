@@ -14,6 +14,7 @@
 #include "history.hpp"
 #include "hp_poll.hpp"
 #include "logic/history.hpp"
+#include "logic/convert.hpp"   // conv_is_binary — /values marks a bit-flag row from its converter id
 #include "logic/crashinfo.hpp"
 #include "logic/detect.hpp"
 #include "logic/json.hpp"
@@ -419,7 +420,14 @@ static std::string build_values_array() {
         // is intentionally emitted only for binary rows: it lets the browser render ON/OFF without
         // treating every numeric zero/one as a switch, while adding no payload bytes to the many
         // non-binary readings.
-        if (v[i].binary) j += ",\"binary\":true";
+        if (conv_is_binary(v[i].conv)) j += ",\"binary\":true";
+        // The DEVICE's own answer to "is this reading still current?" — logic/ou_stale.hpp applied on
+        // the poll task (#209 defect 5), emitted only when true so the many live rows cost no bytes.
+        // The browser still derives the same fact from `reg` + the compressor row, and the catalog
+        // test gates both against every profile; this is here so a non-browser consumer of /values
+        // (a script, the MCP surface) gets the answer without reimplementing the rule, and so the
+        // marker travels with the row rather than being recomputed from a snapshot taken elsewhere.
+        if (v[i].held) j += ",\"held\":true";
         j += "}";
     }
     j += "]";

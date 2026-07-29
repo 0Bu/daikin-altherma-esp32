@@ -342,7 +342,9 @@ hp_comm.cpp     X10A UART (9600 8E1) + register query. hp_uart_init installs the
 hp_convert.cpp  device value formatting over logic/convert.hpp; applies its reading_plausible() at
                 PUBLISH time — an impossible °C reading (idle-unit 576 °C, a ±3276.x sentinel), a
                 0-bar saturation temp, or a 0-bar REFRIGERANT pressure reaches HA as unavailable, not
-                a false value. The pressure rule needs the whole profile table (passed down from
+                a false value. Then value_available() (logic/availability.hpp), which catches the
+                case the envelope structurally cannot: a value that is wrong because it is entirely
+                ORDINARY — a condensing target of exactly 0 °C on a row this unit does not populate. The pressure rule needs the whole profile table (passed down from
                 hp_poll), because 0 bar is impossible for refrigerant — these are ABSOLUTE pressures
                 and a sealed circuit is never at vacuum — but ordinary for WATER (a drained system).
                 is_refrigerant_pressure() takes that split STRUCTURALLY, never from the label (an
@@ -375,7 +377,16 @@ hp_poll.cpp     poll engine task: (auto-detect if profile=="auto") profile regis
                 top-of-loop wdt reset still fires, so any ceiling is wdt-safe; the ceiling is a
                 detection-latency choice, not a wdt constraint). Reset to fast cadence on a bus answer
                 or via hp_poll_reconfigure() (POST /detect, POST /set_hp — atomic httpd->poll one-shot).
-                poll_once reserves the value vector up front (one sized alloc, not log2(n) regrows)
+                poll_once reserves the value vector up front (one sized alloc, not log2(n) regrows).
+                It skips a row row_publishable() refuses (logic/availability.hpp composed with
+                no_publish — so an Unproven row costs no decode and, where a whole page is
+                unpublishable, no bus round-trip), MARKS each cached row the outdoor unit is no
+                longer refreshing (logic::ou_is_rps_witness -> ou_reading_held_over: CachedValue.held,
+                /values "held":true, and the MQTT bridge WITHHOLDS it — #209 defect 5. The value is
+                marked, NOT dropped: history.cpp needs it to tell HELD_OVER from NO_READING), and
+                DUMPS the raw 0x10/0x20 payloads to /diag while the compressor RUNS
+                (logic/raw_capture.hpp — #194's decisive experiment, which the detect-pass dump
+                structurally cannot take, since a detect pass is always a unit at rest)
 history.cpp     the 24-hour trend rings: one fixed-cadence buffer per logic/history.hpp TREND, fed by
                 the poll task (history_record, called from poll_once BEFORE the cache commit and
                 OUTSIDE the cache mutex — this file has its own) and read by GET /history. STATIC
@@ -420,7 +431,22 @@ http_ota.cpp    /ota/check|update|status
 mcp_server.cpp  /mcp (read-only MCP tools; TODO)
 mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE shared grouped-JSON
                 state topic <base>/state (logic/mqtt_group.hpp), republished on change; LWT
-                availability, mqtts+CA on creds. Message topics sit DIRECTLY under <base> (no node
+                availability, mqtts+CA on creds. A field's JSON TYPE comes from its CONVERTER
+                (PublishedKind, logic/convert.hpp) and is carried on GroupedValue — never re-inferred
+                from the formatted string, which is how ONE key came to alternate between the number
+                30 and the string "OFF" as a fan stopped, so Telegraf dropped the string, VM never got
+                a zero, and the last running step stayed on the chart as if the fan were turning
+                (#209 defect 3; the converter itself is numeric since #210 — the kind is what makes
+                the property structural, and a catalog test walks every implemented converter over
+                every input byte to prove no other one can do it). A Number handed a non-numeric
+                string publishes null, never a quoted string: fail closed rather than flip the type.
+                A conv-203 row also publishes error_active/warning_active in its own group
+                (logic/fault_state.hpp) with their own binary_sensor configs — a metrics store cannot
+                hold "U4" at all, so an alert on error_code != 0 never fired for exactly the faults it
+                exists to catch. current_grouped() WITHHOLDS a held-over row (CachedValue.held —
+                the outdoor unit resting, #209 defect 5) and publish_discovery() retracts rather than
+                skips a row row_publishable() refuses, since a QUARANTINED row's retained config
+                would otherwise keep the last false value HA was ever sent as that entity's state. Message topics sit DIRECTLY under <base> (no node
                 segment — one board per base topic); the node id identifies the
                 DEVICE only in each discovery config's uniq_id/dev.ids + the <prefix>/<component>/<node>/…
                 discovery topic, and is the SLUGIFIED BASE TOPIC (logic/ha_device.hpp), NOT the
@@ -457,8 +483,13 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 heap(free/min-free/largest-block)/uptime/reset_reason/the SNTP wall clock (sntp_time.cpp,
                 "time" — HA device_class "timestamp", null until synced)/wifi(rssi+reconnects+MAC+BSSID,
                 mac always present, bssid null offline)/mqtt(pub count+fails+reconnects)/X10A bus
-                (rx_received/rx_fails) stats, 19 diagnostic HA entities streamed independently of profile
-                detection. Also RETAINS the boot-time crash summary
+                (rx_received/rx_fails/bus_ou_held_over) stats, 20 diagnostic HA entities streamed
+                independently of profile detection. bus_ou_held_over is SOURCE freshness, a different
+                fact from bus_connected: the link is up and the device is publishing while the
+                outdoor unit is simply not measuring, and a consumer that only had bus health would
+                read the withheld outdoor keys as a broken link. Deliberately NOT device_class
+                problem/connectivity — a resting outdoor unit is the normal state of a heat pump for
+                most of the day. Also RETAINS the boot-time crash summary
                 on <base>/crash (logic/crashinfo.hpp) once per (re)connect — but ONLY when the boot is
                 NOTABLE (a real fault or a core-dump still in flash, crash_is_notable). A normal boot
                 (USB re-enumeration, config-save/OTA reboot, clean power-on) publishes a zero-length
@@ -587,7 +618,66 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 wifi_rollback, health_gate, version_cmp, ota_manifest, ota_channel, ws_policy, ws_tx_gate,
                 http_body, http_surface, query_flag, redact, mcp_jsonrpc, timestamp, uart_plan, detect_backoff,
                 hexdump, led_pattern, button, captive,
-                lwt_select, ou_stale, cop_scope, profile_view, feature_gate).
+                lwt_select, ou_stale, cop_scope, profile_view, feature_gate, availability,
+                fault_state,
+                raw_capture).
+                availability.hpp = the ADJUDICATED per-row answer to "is this decoded number a
+                MEASUREMENT, or merely something the firmware could decode?" (#209). Every other gate
+                answers something narrower: convert() handles the wire format's own 0x8000 no-data
+                marker, reading_plausible() catches a number that is IMPOSSIBLE, ValueDef::no_publish
+                carries what the GENERATOR knew. What is left is a field that decodes to an entirely
+                ordinary number which measures nothing, and only per-row evidence can name it. Two
+                verdicts, each carrying its live capture beside the rule: Unproven (Target Evap. Temp.
+                0x10/6 — a faithful conv-114 decode yielding 145.9-199.6 C mid-run, measured on the
+                EBLA/EDLA monobloc in #194 and reproduced on the ERGA/EHB split in #209 against a
+                manufacturer-documented HomeHub reference: wrong on both, right on nothing measured)
+                withholds the ROW from every publish surface and retracts its retained HA config;
+                ZeroMeansAbsent (Target Cond. Temp. 0x10/8 — raw 0x0000 through a full compressor
+                cycle on both families, which is also why ou_stale.hpp already calls it a useless
+                witness) withholds only that exact value. Keyed on (page, offset, converter) — the
+                row's STRUCTURAL identity, never its label (the lwt_select lesson) and deliberately
+                NOT scoped to a profile id, since both rows sit at byte-identical coordinates in
+                every generated table and a per-id list would claim a per-model fact nobody
+                established. The catalog test is the load-bearing half: it proves each rule selects
+                the adjudicated quantity across all 45 profiles — INCLUDING altherma_lt_d7_e_bml,
+                which spells the quarantined register "Target Discharge Temp." while the other 43 and
+                REGISTERS.md §5 call it "Target Evap. Temp." (same page, offset, conv, width and
+                type: one family's source catalog simply names it differently, and a discharge target
+                of 145-200 C is no more real than an evaporating one) — that no 0x60-0x62 hydronic
+                row is ever touched, and that page 0x10 is still QUERIED after the quarantine. In
+                logic/ and not in def/ because the generated tables are machine output while these
+                verdicts are OURS: a generator re-run must not lose one. Adding a rule is an
+                ADJUDICATION with the same evidentiary bar as tools/domain/audit_exceptions.txt.
+                row_publishable() composes it with no_publish so hp_poll (what to decode) and
+                mqtt_ha (what to ANNOUNCE) cannot see different row sets; value_available() is
+                applied by hp_format beside reading_plausible, for the same reason — convert() keeps
+                its intrinsic per-converter semantics so the domain audit still sees them
+                fault_state.hpp = the NUMERIC fault flags that ride beside the TEXTUAL Daikin code
+                (#209 defect 4). Convs 203/204 stay text — "Normal"/"U4"/"7H" is what a human and HA
+                want, and inventing a numeric enum over Daikin's alphanumeric code space would be a
+                guess with no authority — but the grouped state topic is ALSO consumed as metrics
+                JSON, where "00" may land as a numeric 0 while "U4" is simply DROPPED: the series
+                sits at its last no-error value and an alert on error_code != 0 never fires for the
+                faults it exists to catch. So every conv-203 row also publishes error_active /
+                warning_active in its own group, always 1/0, each with its own binary_sensor config
+                (object id <group>_<key>, since HA entity ids share one flat namespace while the JSON
+                keys are already group-scoped). Derived through the INVERSE of conv 203's own
+                ERR_TYPE lookup rather than a second opinion about what the labels mean. Warning and
+                Caution fold into one flag on purpose (the textual class is right beside them); an
+                UNKNOWN class publishes NEITHER, because reporting 0/0 would assert "no fault" on a
+                byte nobody could decode — the one direction a fault flag must never fail in
+                raw_capture.hpp = WHEN the poll path may put raw page bytes on /diag — the missing
+                half of hexdump.hpp, which names its own limitation and is why #194 stayed open: the
+                detect-pass dump fires at boot or on POST /detect, which is always a unit AT REST, the
+                state in which Target Evap. Temp. is NOT wrong (240.6 C there, already caught by the
+                envelope). Edge-triggered on stopped->running, then one per RAW_CAPTURE_PERIOD_S
+                (5 min) during the run, at most RAW_CAPTURE_MAX (8) per BOOT and never refilled: a
+                SERIES rather than a point, because two candidate scales that both fit one sample may
+                not fit a curve, and budgeted because one line per second would evict the rest of the
+                boot's evidence from the 6 KB diag ring within a minute — exactly how the crash
+                records used to be lost. Pure because it is a three-input state machine whose failure
+                modes (a silently exhausted budget, a dump repeating every cycle) are invisible on a
+                board until the log is already ruined
                 error_codes.hpp = the optional code -> short-English-description lookup layered on
                 conv 204's raw fault code (hp_convert.cpp), e.g. "U4: Indoor/outdoor unit
                 communication problem". Presentation only: it never changes what conv 204 DECODES,
@@ -1174,11 +1264,17 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   window is the stale-fingerprint-as-live-reading case DESIGN.md rules out.
                   RX/TX are auto-detected: read-only on the card while the bus answers, a pins_avail
                   dropdown (re-runs detection) when it doesn't.
-GET  /values      decoded readings [{label,value,unit,reg}]. `reg` is the X10A register PAGE the row
-                  came from, and it is what lets the BROWSER apply logic/ou_stale.hpp's page rule
-                  (0x20/0x21 stop being refreshed while the compressor rests) to any row it shows —
-                  structurally, instead of by a label list that would be a second, drifting copy of a
-                  rule CI gates in C++ (the catalog spells those rows ~50 ways across 43 profiles)
+GET  /values      decoded readings [{label,value,unit,reg}], plus "binary":true / "held":true where
+                  they apply (emitted only when true — the many live rows cost no bytes). `reg` is the
+                  X10A register PAGE the row came from, and it is what lets the BROWSER apply
+                  logic/ou_stale.hpp's page rule (0x20/0x21 stop being refreshed while the compressor
+                  rests) to any row it shows — structurally, instead of by a label list that would be
+                  a second, drifting copy of a rule CI gates in C++ (the catalog spells those rows
+                  ~50 ways across 43 profiles). `held` is the DEVICE's own answer to the same
+                  question, now that the poll engine applies the rule too (#209 defect 5): the
+                  browser still derives it, but a non-browser consumer gets it without
+                  reimplementing the rule, and the marker travels WITH the row rather than being
+                  recomputed from a snapshot taken elsewhere
 GET  /history?row=<trend id>   one trended row's 24-hour series, oldest sample first:
                   {id,label,dt,unit,t0,v[],held[[from,count],…]}. `unit` is the ROW's own unit, read
                   from the cached value — never a hardcoded "°C": the eleven trends mix °C, bar, KiB

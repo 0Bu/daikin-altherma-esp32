@@ -289,13 +289,19 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #        capacity_kw_iu = the indoor unit's rated code. Different
                                    #        halves of the plant, routinely different sizes — read
                                    #        them as two figures, never as one with a fallback.
-GET  /values                       # decoded readings [{label,value,unit,reg,binary?}] (last poll);
+GET  /values                       # decoded readings [{label,value,unit,reg,binary?,held?}] (last poll);
                                    #   reg = the X10A register page the row was decoded from;
                                    #   binary:true marks converter-300..307 bit flags. Their value
                                    #   remains numeric text "1"/"0"; the web UI alone presents
                                    #   ON/OFF in every UI language and omits redundant trailing
                                    #   ON/OFF / On:…_Off:… legends from visible labels. Raw labels
                                    #   remain unchanged in this response.
+                                   #   held:true marks a reading the outdoor unit is no longer
+                                   #   refreshing — it answers pages 0x20/0x21 with its last run's
+                                   #   numbers while the compressor rests. The value is still
+                                   #   reported (the trend rings need it to tell "held over" from
+                                   #   "no reading"), but it is not a current measurement, and the
+                                   #   MQTT state topic withholds it entirely.
 GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sample first:
                                    #   {id,label,dt,unit,t0,v[],held[[from,count],…]}
                                    #   unit = the ROW's own unit (never a hardcoded °C).
@@ -413,9 +419,20 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   metrics store as well as in HA, and `sensor` for everything else.
   Availability/LWT `<base>/status`. `<base>` defaults `daikin-altherma-esp32`,
   `<prefix>` `homeassistant`.
+- **Type-stable, and honest about absence.** Whether a key is a JSON number or a JSON string is
+  decided by the value's converter, so **no key ever changes type** between states — a stopped fan
+  publishes `0`, never `"OFF"`. Textual Daikin fault fields keep their text and gain permanently
+  numeric `error_active` / `warning_active` companions, since a metrics store can hold neither
+  `"U4"` nor a bool. A value the firmware cannot honestly claim — a quarantined row, an unpopulated
+  field, or a reading the outdoor unit is no longer refreshing — is **omitted**, so Home Assistant
+  shows *unknown* rather than a plausible number nobody measured. See
+  [HOME_ASSISTANT.md](HOME_ASSISTANT.md#a-fields-json-type-never-changes).
 - **Diagnostics topics.** `<base>/heartbeat` (board/link health on a fixed 10 s cadence — a **flat**
   JSON of heap, uptime, WiFi/MQTT/bus counters, each field prefixed by its block name: `wifi_rssi`,
-  `wifi_mac`, `wifi_bssid`, `mqtt_count`, `bus_rx_received`, …) and `<base>/crash` (retained;
+  `wifi_mac`, `wifi_bssid`, `mqtt_count`, `bus_rx_received`, …, plus `bus_ou_held_over`, which is
+  *source* freshness rather than link health: it says the outdoor unit stopped refreshing its own
+  pages, so its readings are missing from the state topic while the bus itself is fine) and
+  `<base>/crash` (retained;
   **crash-only** — a "dump waiting" flag, published once per (re)connect but ONLY when the boot is
   *notable*: a real fault or a dump still in flash. A normal boot clears the topic with a zero-length
   retained message, so no crash message lingers once the problem is resolved. The reset reason is not

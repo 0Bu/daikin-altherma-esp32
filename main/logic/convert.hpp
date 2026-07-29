@@ -183,6 +183,37 @@ inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 802
     return r;
 }
 
+// ── The published TYPE of a row, decided by its DEFINITION ───────────────────────────────────────
+// A field's JSON type must come from the converter, never from sniffing the value that happens to
+// be in it this second. Issue #209 measured what the second one costs: conv 211 (fan step) used to
+// emit the number 30 while the fan ran and the string "OFF" when it stopped, so the same MQTT key
+// changed JSON type during normal operation — Telegraf's numeric parser dropped the string, no zero
+// ever reached VictoriaMetrics, and the last running step stayed on the chart as if the fan were
+// still turning. (That converter is numeric since #210; this predicate is what makes the property
+// structural instead of a fact about the current implementation.)
+//
+// Two kinds only. Number covers every scaled/unsigned/counter/bit-flag converter — the bit flags
+// are 1/0 NUMBERS at the source (see the 300-307 case above), so "binary" is not a third wire type.
+// Text is the closed set of enum/label converters, each of which calls set_text() unconditionally:
+// there is deliberately no converter that returns text for one state and a number for another, and
+// the catalog-wide test asserts that over every implemented id rather than trusting this list.
+enum class PublishedKind : uint8_t { Number, Text };
+
+inline constexpr PublishedKind published_kind(int conv) {
+    switch (conv) {
+        case 203:                       // error class ("Normal"/"Error"/"Warning"/"Caution")
+        case 204:                       // Daikin error code ("00", "U4", "7H")
+        case 217:                       // operation mode
+        case 315:                       // indoor operation mode
+        case 316:                       // hybrid mode
+        case 801: case 802: case 803:   // refrigerant type — encoded by the converter id itself
+        case 804: case 805:
+            return PublishedKind::Text;
+        default:
+            return PublishedKind::Number;
+    }
+}
+
 // Is this converter's reading a BOOLEAN — one bit of data[0], decoded to numeric 1/0 above? The
 // bit-flag family 300-307 is the whole set; every row using it is size 1 / dataType -1 (no unit, no
 // device class), which is why a binary row needs no unit handling anywhere downstream.

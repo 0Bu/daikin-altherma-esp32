@@ -6,6 +6,7 @@
 #include <string>
 #include "value_def.hpp"
 #include "convert.hpp"
+#include "fault_state.hpp"
 #include "ha_device.hpp"
 #include "mqtt_group.hpp"
 
@@ -79,6 +80,47 @@ inline std::string discovery_config(const std::string& node, const std::string& 
     if (conv_is_binary(def.conv)) { j += "\"pl_on\":\"1\",\"pl_off\":\"0\","; }
     if (!unit.empty()) { j += "\"unit_of_meas\":\""; j += unit; j += "\","; }
     if (!dc.empty())   { j += "\"dev_cla\":\"";      j += dc;   j += "\","; j += "\"stat_cla\":\"measurement\","; }
+    j += device_json(node, board_id);
+    j += "}";
+    return j;
+}
+
+// ── DERIVED companion entities ───────────────────────────────────────────────────────────────────
+// A companion is a field the bridge PUBLISHES but the catalog does not contain: today, the numeric
+// error_active/warning_active pair beside a textual conv-203 error class (logic/fault_state.hpp,
+// #209 defect 4). It lives in the same group object as the row it is derived from, so its JSON key
+// needs no prefix — but HA entity ids share one flat namespace across groups, and a profile carries
+// an error class on BOTH the outdoor and the hydronic page, so the entity id and name are scoped by
+// the group. `<group>_<key>` and "<Group> <Name>": outdoor_state_error_active, "Outdoor State Error
+// Active".
+//
+// Always a binary_sensor with an explicit pl_on "1" / pl_off "0" — the state is the NUMBER 1/0, and
+// HA's defaults are "ON"/"OFF", which is what parked every bit-flag entity at `unknown` before the
+// split. device_class "problem" is HA's own semantics for "on means something is wrong" and says
+// nothing about the plant, so it is not the kind of per-label domain guess ha_component deliberately
+// declines to make for the catalog rows.
+inline std::string companion_object_id(const std::string& group, const char* key) {
+    return group + "_" + key;
+}
+
+inline std::string companion_discovery_topic(const std::string& prefix, const std::string& node,
+                                             const std::string& group, const char* key) {
+    return prefix + "/binary_sensor/" + node + "/" + companion_object_id(group, key) + "/config";
+}
+
+inline std::string companion_discovery_config(const std::string& node, const std::string& board_id,
+                                              const std::string& state_topic,
+                                              const std::string& avail_topic,
+                                              const std::string& group, const FaultCompanion& c) {
+    const std::string obj = companion_object_id(group, c.key);
+    std::string j = "{";
+    j += "\"name\":\"";    j += group_display_name(group); j += ' '; j += c.name; j += "\",";
+    j += "\"uniq_id\":\""; j += node; j += "_"; j += obj; j += "\",";
+    j += "\"stat_t\":\"";  j += state_topic; j += "\",";
+    j += "\"val_tpl\":\"{{ value_json['"; j += group; j += "']['"; j += c.key; j += "'] }}\",";
+    j += "\"avty_t\":\"";  j += avail_topic; j += "\",";
+    j += "\"pl_on\":\"1\",\"pl_off\":\"0\",";
+    j += "\"dev_cla\":\"problem\",";
     j += device_json(node, board_id);
     j += "}";
     return j;

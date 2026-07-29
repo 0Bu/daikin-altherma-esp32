@@ -21,9 +21,30 @@ struct CachedValue {
                          // row's IDENTITY — how logic/history.hpp addresses a trended row, since
                          // the catalog's labels neither name one quantity consistently nor name
                          // different quantities differently (see that header). Never displayed.
-    bool        binary = false; // converter 300-307: value stays numeric 0/1 on every wire surface;
-                                // /values exposes this metadata so the browser can localise it
-                                // without guessing from a label or from the number itself.
+    bool        held = false;   // the source PAGE was not refreshed this cycle: the outdoor unit is
+                                // resting and is answering with its last run's numbers
+                                // (logic/ou_stale.hpp). The value is kept — the trend ring needs to
+                                // tell "held over" from "no reading" — but it is not a measurement,
+                                // so the MQTT bridge withholds it (#209 defect 5).
+                                //
+                                // ORDER MATTERS HERE, which is why the one-byte fields are grouped:
+                                // `conv` is 4-byte aligned, so putting it between `off` and `held`
+                                // pads twice and costs 4 bytes MORE per row than putting it last.
+                                // Two snapshot buffers hold ~116 of these as one CONTIGUOUS block
+                                // each (build_values_array on the httpd task, current_grouped on the
+                                // publish task), and the binding limit on this board is the largest
+                                // contiguous block — so a field-ordering slip is a real ~460 B of
+                                // extra peak, not a style point.
+    int         conv = 0;       // the row's converter id — the one piece of metadata every consumer
+                                // needs, and the reason none of the DERIVED facts are cached beside
+                                // it: `conv_is_binary(conv)` says whether /values should mark the
+                                // row as a 1/0 flag for the browser, `published_kind(conv)` says
+                                // what JSON type the MQTT bridge must give it, and conv 203 is what
+                                // earns a derived numeric fault companion (logic/fault_state.hpp).
+                                // Re-deriving any of those from the formatted TEXT instead is how a
+                                // field ends up changing type between states (#209 defect 3), and
+                                // caching each as its own flag would grow the struct once per
+                                // question asked.
 };
 
 // Health/status counters for /status.hp.
@@ -39,6 +60,10 @@ struct HpStats {
     // rx_fail_total = crc_err+timeout_err+other reply errors (e.g. the 0x15 0xEA bus-busy reply).
     uint32_t rx_ok         = 0;
     uint32_t rx_fail_total = 0;
+    // SOURCE freshness of the outdoor unit's own pages this cycle (logic/ou_stale.hpp) — the
+    // heartbeat's bus_ou_held_over. Bus health and source freshness are different facts, and a
+    // consumer that only has the first one reads a resting unit as a broken link.
+    bool     ou_held_over  = false;
     std::string last_error;
 };
 
