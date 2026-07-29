@@ -365,7 +365,9 @@ hp_detect.cpp   auto-detect glue: protocol sweep + page probe -> fingerprint -> 
                 O/U capacity is read from a VARIABLE-LENGTH page 0x00 (a smaller unit's short reply
                 omits offset 12); when absent, the I/U capacity code (0x60/6, same kW×10 units) is a
                 fallback that only RANKS detect_best (never excludes a candidate; no-op when the O/U
-                capacity is known). The detect diag line prints iu_kw= and retries=.
+                capacity is known). The detect diag line prints iu_kw= and retries= (retries that RECOVERED a
+                page, so 0 is the healthy reading — attempts on a page the unit simply lacks, e.g.
+                0x65, are not counted; a baseline of 3 trained the reader to ignore the number).
                 The page probe RETRIES each page (DETECT_PAGE_TRIES=3, read_page_retry) because it
                 gathers the unit's IDENTITY, not its values: signature_consistent matches on page
                 SUBSET, so one dropped frame clears one page bit and can make EVERY profile
