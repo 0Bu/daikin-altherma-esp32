@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1417 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1473 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -864,7 +864,41 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   had just refused it. Its gate is the row's **register page**, which `/values` carries as `reg`, so
   it applies `ou_page_holds_over()` itself instead of a label list that would be a second, drifting
   copy of a rule gated here in C++; a held headline replaces the entry's state sentence with the
-  reason it is blank), the **24-hour trend rules** (`history.hpp` — which rows carry a trend, when a
+  reason it is blank), the **COP boundary rule** (`cop_scope.hpp` — *which* COP the dashboard's
+  quotient describes, and when it is none. The pill divides a heat figure by an electrical one and
+  the two picks need not describe the same **system**: a quotient of two correct numbers taken across
+  two boundaries is not a worse COP, it is a different quantity under the same name. The CT clamps
+  (`0x63`) see the whole unit including the backup heater; `INV primary current` (`0x21`) sees the
+  compressor alone; the heat side is `lwt_select`'s pre-BUH outlet, i.e. heat-pump heat with the
+  resistive heater deliberately uncredited. INV therefore pairs correctly — the heater sits outside
+  *both* sides and cannot unbalance them — while CT does not: the heater's kilowatts land in the
+  divisor while its heat never reaches the dividend, so the quotient collapses exactly when the heater
+  runs and reads as a failing heat pump while nothing is wrong. The fix moves the **numerator**, not
+  the denominator: a whole-unit divisor takes the post-BUH (R2T) outlet, the same pairing
+  [`HOME_ASSISTANT.md`](HOME_ASSISTANT.md#both-sides-must-describe-the-same-system)'s heat-meter
+  recipe makes for an external meter. Where no honest pairing exists — whole-unit current, heater
+  firing, no post-BUH row — it publishes nothing, `feature_gate.hpp`'s rule. The plant has **two**
+  resistive heaters and they are not the same problem, hence two block codes: the **BUH** sits in the
+  space-heating flow between R1T and R2T, so its heat crosses the water circuit and moving the
+  numerator downstream re-pairs the boundaries — while the **BSH**, the immersion heater inside the
+  DHW tank, heats tank water directly, downstream of the flow sensor and of *both* leaving-water
+  sensors. Its kilowatts enter a whole-unit divisor while its heat crosses neither, so no row in the
+  profile would re-pair them: unfixable rather than merely unfixed, blocked whatever the R2T row says,
+  and named in the UI as the different fact it is (the profile is not missing a reading — the bus has
+  none that would serve). It bites exactly where the rule is aimed: all 21 CT-clamp profiles carry a
+  BSH row, the heater can run with compressor, pump and flow at zero, and the catalog test asserts
+  that CT implies BSH so the block can never depend on an input a profile cannot supply. **Unknown** heater state
+  is not *off*: off is the permissive branch here, so guessing it is precisely what would ship the
+  collapsed quotient, the mirror of `ou_stale`'s "unknown rps is not stopped" — and measured, the
+  strictness costs nothing, since 43 of the 44 profile tables carry `BUH Step1/2`, all 44 carry a
+  post-BUH row, and the BUH rows sit on page `0x60`, which stays live while the outdoor unit sleeps.
+  The post-BUH picker takes the row's **page**, not its label alone, because the catalog reuses the
+  tag: `(R2T)` names the leaving-water outlet on `0x61/4` *and* `Discharge pipe temp.(R2T)` on
+  `0x20/4` — same offset, same converter 105, 14 profiles. The water tokens happen to separate those
+  two today, but that is how one row was spelled, not a property of the data; the page carries the
+  guarantee the tokens cannot, since a row on a page the outdoor unit stops refreshing is a held-over
+  reading whatever it is called. Gated catalog-wide: exactly one post-BUH row per profile, always on a
+  live page, never the row `lwt_select` already picked), the **24-hour trend rules** (`history.hpp` — which rows carry a trend, when a
   stored sample is a measurement rather than a repeat of one, and the ring itself. A trend addresses
   its row by **(page, offset, unit)** and never by a label token, because the catalog neither names
   one quantity consistently nor names different quantities differently: `(R1T)` is both the outdoor
@@ -898,7 +932,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   the substitution fails *closed* when a truncated line never reaches its end token; the same tests
   pin that a raw-page hex line passes through untouched, so the privacy rule cannot silently clip the
   decode witness the rule above exists to deliver),
-  **1417 `CHECK`s** in
+  **1473 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -940,9 +974,10 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   round-trip. The supplement's rows are audited by the domain gate exactly like generated ones.
 - **🚦 Disable, never degrade** ([`logic/feature_gate.hpp`](../main/logic/feature_gate.hpp)). Which derived features may honestly run on the
   detected model, decided from the **rows** rather than from the profile id, and the answer when the
-  signals are missing: off. It is the third instance of a rule the UI already applies twice —
+  signals are missing: off. It is the fourth instance of a rule the UI already applies three times —
   `lwt_select` blanks ΔT/heat/COP rather than substituting a setpoint, `ou_stale` blanks a held-over
-  reading rather than showing a dimmer register of half-valid numbers. Reading coverage off the rows
+  reading rather than showing a dimmer register of half-valid numbers, `cop_scope` blanks the
+  quotient rather than pairing two boundaries that do not match. Reading coverage off the rows
   is what makes it correct: the `generic` fallback is the obvious starved case, but sixteen of the 43
   *detectable* profiles also lack register page `0x30` and with it the compressor run-state input, so
   an id check on `"generic"` would have let a decision layer run without run-state on more than a
@@ -1129,7 +1164,7 @@ and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 19-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1417 checks),
+on the host** (1473 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

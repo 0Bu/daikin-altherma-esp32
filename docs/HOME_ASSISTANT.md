@@ -242,15 +242,36 @@ template:
         device_class: power
         unit_of_measurement: "kW"
         state_class: measurement
+        # A missing input must make this sensor UNAVAILABLE, never zero. See the two notes below.
+        availability: >
+          {{ states('sensor.daikin_altherma_flow_rate_lmin') | is_number
+             and states('sensor.daikin_altherma_leaving_water_temp_after_buh_r2t') | is_number
+             and states('sensor.daikin_altherma_return_water_temp_before_phe_r4t') | is_number }}
         state: >
-          {% set flow  = states('sensor.daikin_altherma_flow_rate_lmin') | float(0) %}
-          {% set t_out = states('sensor.daikin_altherma_leaving_water_temp_after_buh_r2t') | float(0) %}
-          {% set t_in  = states('sensor.daikin_altherma_return_water_temp_before_phe_r4t') | float(0) %}
+          {% set flow  = states('sensor.daikin_altherma_flow_rate_lmin') | float %}
+          {% set t_out = states('sensor.daikin_altherma_leaving_water_temp_after_buh_r2t') | float %}
+          {% set t_in  = states('sensor.daikin_altherma_return_water_temp_before_phe_r4t') | float %}
           {% set cf    = 0.070 %}   {# 0.070 water · ~0.063 for 30% propylene glycol — set to your loop #}
-          {{ [flow * cf * (t_out - t_in), 0] | max | round(3) }}
+          {{ (flow * cf * (t_out - t_in)) | round(3) }}
 ```
 
-The `max(…, 0)` clamp stops idle/defrost reverse-ΔT from registering as negative "production".
+**The value is SIGNED, and that is deliberate.** Earlier revisions of this recipe wrapped it in
+`[…, 0] | max` to keep idle/defrost reverse-ΔT out of the figure. That clamp is wrong, and it is
+wrong in the direction that flatters you: during a **defrost** the unit deliberately pulls heat back
+*out* of the heating water — several kW, for minutes — and clamping records that as `0.0 kW` of
+production instead of as the withdrawal it is. In a live gauge that is a misleading instant; in the
+**integral** below it is a systematic error that never cancels, so produced heat and with it the JAZ
+come out too high — worst in winter, when defrosts are frequent and the number matters most. The
+firmware refuses the same clamp in its own dashboard for the same reason (`main/www/app.js`,
+`d.pth`). The Riemann integrator handles negative stretches correctly; let the sign through.
+
+**Do not default a missing input to `0`.** `| float(0)` turns an `unavailable` sensor — a reboot, a
+quiet bus, a reading the firmware's `reading_plausible()` refused — into a real-looking 0 °C. With
+`t_out = 0` that becomes a large negative ΔT, which the old clamp then flattened to zero, so the two
+defects hid each other and production simply stopped being counted with nothing to show for it. The
+`availability` template above makes the gap a gap, which is what the statistics engine needs in
+order to not treat it as a measurement. Same refusal the firmware makes in `logic/timestamp.hpp`:
+better empty than a plausible-looking wrong value.
 
 ### 2. Instantaneous COP (live gauge)
 
@@ -259,11 +280,41 @@ Prefer the **measured** electrical power from your meter (a Shelly EM reports li
 ```yaml
       - name: "Altherma COP (live)"
         unique_id: altherma_cop_live
+        availability: >
+          {{ states('sensor.altherma_thermal_power') | is_number
+             and states('sensor.heatpump_power') | is_number }}
         state: >
-          {% set p_th = states('sensor.altherma_thermal_power') | float(0) %}
-          {% set p_el = states('sensor.heatpump_power') | float(0) %}   {# external meter, kW #}
+          {% set p_th = states('sensor.altherma_thermal_power') | float %}
+          {% set p_el = states('sensor.heatpump_power') | float %}   {# external meter, kW #}
           {{ (p_th / p_el) | round(2) if p_el > 0.05 else 'unknown' }}
 ```
+
+#### Both sides must describe the same system
+
+This is the one thing that makes a COP a COP rather than a ratio of two unrelated numbers, and it is
+why step 1 reads the leaving water **after** the backup heater (R2T) rather than before it (R1T).
+
+Your meter sits on the heat pump's supply and therefore counts **everything** behind it — outdoor
+unit, indoor unit, backup heater, circulation pump. That is the right boundary: it is what you pay
+for, and it is the boundary a seasonal figure has to be built on. But it obliges the numerator to
+match. Take the heat **before** the backup heater and divide by electricity that **includes** it,
+and every kilowatt the heater draws lands in the divisor while its heat never reaches the dividend
+— the COP collapses whenever the heater fires, and reads as a failing heat pump while nothing is
+wrong. R2T is downstream of the heater, so both sides count it and the pairing holds.
+
+**If your profile has no R2T row**, the recipe is valid only while the backup heater is off. All 44
+shipped profile tables carry one, under four different spellings — check
+`http://daikin-altherma-esp32.local/values` for yours. The device's own dashboard applies exactly
+this rule and blanks its COP pill rather than showing the collapsed quotient
+(`main/logic/cop_scope.hpp`); it also names which COP it is showing, since the two are different
+numbers and look identical on screen.
+
+**With a Shelly Pro 3EM specifically:** use the device's *total* active power (the sum across all
+three channels) as `sensor.heatpump_power` — correct whether the unit is three-phase or single-phase,
+since unused channels simply read 0 — and its accumulated energy counter as `sensor.heatpump_energy`
+for the JAZ denominator in step 3. The meter's ~1 % accuracy removes the electrical side as a source
+of error; the **heat** side then dominates, so see the accuracy notes below before reading much into
+any single instant.
 
 ### 3. Integrate to energy → SCOP / JAZ
 
@@ -306,9 +357,11 @@ range. Metric names follow your Telegraf field naming:
 
 ```promql
 # instantaneous thermal power [kW]  (reuse as $P below)
-clamp_min(daikin_flow_rate_lmin
+# NO clamp_min here — a defrost withdraws heat from the water and that has to be subtracted,
+# not floored to zero, or the integral below overstates production. See step 1.
+daikin_flow_rate_lmin
   * (daikin_leaving_water_temp_after_buh_r2t - daikin_return_water_temp_before_phe_r4t)
-  * 0.070, 0)
+  * 0.070
 
 # produced heat [kWh] over $__range  — MetricsQL integrate() returns value·seconds, so ÷3600
 integrate($P[$__range]) / 3600
@@ -336,9 +389,17 @@ integrate($P[$__range]) / 3600 / increase(heatpump_energy_kwh[$__range])
   flow sensor (`0x62/9`) plus both leaving (`0x61/2|4`) and return (`0x61/8`) water temps, so the
   heat meter is available across the whole catalog — but if a specific unit variant physically lacks
   the flow sensor its reading is no-data and `P_thermal` can't be formed.
+- **A metered electrical side does not make the live COP accurate.** A 1 %-class meter (Shelly Pro
+  3EM and the like) removes the divisor as a source of error, but the divided quantity still comes
+  from two uncalibrated factory temperature sensors: ±0.5–1 K each across a heating ΔT of ~5 K puts
+  the instantaneous figure within roughly ±15–25 %, and no meter improves that. What the meter *does*
+  fix is the **seasonal** number, because its kWh counter is exact and the ΔT scatter largely averages
+  out over months — the systematic part (a wrong `Cf` for a glycol loop) does not, so set that. Read
+  the live gauge as a working indication and the JAZ as the result.
 - A live COP that is wildly off usually means the **wrong model profile** (mismatched flow/temperature
   registers) — check the detected model on the dashboard **Model** card, or `POST /detect` to re-run
-  auto-detection.
+  auto-detection. A COP that looks fine but **collapses whenever the backup heater runs** is the
+  boundary mismatch instead — see [step 2](#both-sides-must-describe-the-same-system).
 
 ### Why not the obvious shortcuts
 

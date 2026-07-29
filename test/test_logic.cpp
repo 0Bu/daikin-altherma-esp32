@@ -39,6 +39,7 @@
 #include "logic/lwt_select.hpp"
 #include "logic/profile_view.hpp"
 #include "logic/ou_stale.hpp"
+#include "logic/cop_scope.hpp"
 #include "logic/mqtt_uri.hpp"
 #include "logic/modbus.hpp"
 #include "logic/query_flag.hpp"
@@ -3655,6 +3656,179 @@ static void test_ou_stale() {
     CHECK(rp_rows > 0);          // the at-rest high-side fallback exists in the catalog
 }
 
+// ── logic/cop_scope.hpp — WHICH COP the dashboard's quotient describes ────────────────────────
+// Two halves, and the first is the one with a real trap behind it: the post-BUH row must be found
+// by (label, PAGE) because the catalog gives the SAME "(R2T)" tag, at the SAME offset, with the
+// SAME converter, to the leaving-water outlet on 0x61 and to the compressor's discharge pipe on
+// 0x20. The second half asserts the pairing rule itself — that a whole-unit denominator is never
+// divided into a heat-pump-only numerator while the backup heater is firing.
+static void test_cop_scope() {
+    using logic::CopBlock;
+    using logic::CopScope;
+    using logic::PelSource;
+    using logic::cop_is_post_buh;
+    using logic::cop_plan;
+    using logic::cop_post_buh_select;
+
+    // --- the picker, and the collision it exists for ---------------------------------------------
+    CHECK(cop_is_post_buh("Leaving water temp. after BUH (R2T)", 0x61));
+    CHECK(cop_is_post_buh("Leaving Water Temp after BUH (R2T)", 0x61));
+    CHECK(cop_is_post_buh("Outlet Water BUH Temp. (R2T)", 0x61));
+    CHECK(cop_is_post_buh("[HPSU] Tvbh inflow Temp after Buffer/BUH (R2T)", 0x61));
+    // The SAME tag on an outdoor page is the compressor's discharge pipe, not water. Identical
+    // offset (4) and converter (105) — the page is the only thing that separates them, so a
+    // label-only rule would feed a ~90 °C pipe temperature to the heat meter.
+    CHECK(!cop_is_post_buh("Discharge pipe temp.(R2T)", 0x20));
+    CHECK(!cop_is_post_buh("R2T-INV discharge pipe temp.", 0x20));
+    // …and the gate is the PAGE, not the word "discharge": the same water label on a frozen page is
+    // refused too, because a held-over reading is not a measurement whatever it is called.
+    CHECK(!cop_is_post_buh("Leaving water temp. after BUH (R2T)", 0x20));
+    CHECK(!cop_is_post_buh("Leaving water temp. after BUH (R2T)", 0x21));
+    // Targets and the bizone kit's mixed circuit are not the main circuit's measurement. NEITHER
+    // form is in the catalog today — every shipped setpoint and mixed row carries R1T/R7T or no tag
+    // at all, so the "r2t" requirement alone already excludes them. These are the shapes the two
+    // guards exist for, built by grafting the post-BUH tag onto the REAL labels "Leaving Water
+    // Setpoint (main)" and "[EKMIK] Bizone kit mixed leaving water temperature R1T": a bizone kit
+    // legitimately has a second circuit, and a generator run that gave it a post-BUH sensor would
+    // otherwise let a mixed-zone or target row into the heat meter. Written water-token-bearing on
+    // purpose — a label that is not water-ish is refused one test earlier and would assert nothing.
+    CHECK(!cop_is_post_buh("Leaving Water Setpoint after BUH (R2T)", 0x61));
+    CHECK(!cop_is_post_buh("[EKMIK] Bizone kit mixed leaving water temp after BUH (R2T)", 0x61));
+    // The pre-BUH sensor must never satisfy the post-BUH picker — that swap is issue #121 inverted.
+    CHECK(!cop_is_post_buh("Leaving water temp. before BUH (R1T)", 0x61));
+    {
+        const char*    labels[] = {"Discharge pipe temp.(R2T)", "Leaving water temp. after BUH (R2T)"};
+        const unsigned regs[]   = {0x20, 0x61};
+        CHECK(cop_post_buh_select(labels, regs, 2) == 1);   // the water row, never the pipe
+        const char*    only_pipe[] = {"Discharge pipe temp.(R2T)"};
+        const unsigned pipe_reg[]  = {0x20};
+        CHECK(cop_post_buh_select(only_pipe, pipe_reg, 1) == -1);   // blank beats wrong
+    }
+
+    // --- the pairing rule -----------------------------------------------------------------------
+    // Shorthand: the tank heater known-off, which is the branch the BUH cases are about.
+    const bool BSH_OFF_K = true, BSH_OFF = false;
+
+    // No current at all (or the only row frozen with the outdoor unit): nothing to divide by.
+    CHECK(cop_plan(PelSource::None, true, false, BSH_OFF_K, BSH_OFF, true).block == CopBlock::NoPelSource);
+    CHECK(!cop_plan(PelSource::None, true, false, BSH_OFF_K, BSH_OFF, true).showable());
+
+    // Compressor-only current + pre-BUH heat = a HEAT-PUMP COP. BOTH resistive heaters sit outside
+    // both sides of the fraction, so neither can unbalance them — this holds with either firing.
+    for (bool buh : {false, true})
+        for (bool bsh : {false, true}) {
+            const auto p = cop_plan(PelSource::Inv, true, buh, true, bsh, true);
+            CHECK(p.scope == CopScope::HeatPump);
+            CHECK(p.showable());
+            CHECK(!p.use_post_buh);      // the usual lwt_select numerator
+        }
+
+    // Whole-unit current: the numerator moves to the post-BUH row so the boundaries agree, and it
+    // does so regardless of the backup heater's state — otherwise the figure would silently change
+    // meaning every time the heater cycled.
+    for (bool on : {false, true}) {
+        const auto p = cop_plan(PelSource::Ct, true, on, BSH_OFF_K, BSH_OFF, /*has_post_buh=*/true);
+        CHECK(p.scope == CopScope::Plant);
+        CHECK(p.showable());
+        CHECK(p.use_post_buh);
+    }
+
+    // Whole-unit current with NO post-BUH row: the pre-BUH outlet stands in only while the heater is
+    // provably off. Firing -> blocked, and blocked with its OWN reason, since the UI answers each
+    // block with a different sentence.
+    CHECK(cop_plan(PelSource::Ct, true, false, BSH_OFF_K, BSH_OFF, false).showable());
+    CHECK(cop_plan(PelSource::Ct, true, false, BSH_OFF_K, BSH_OFF, false).scope == CopScope::Plant);
+    CHECK(cop_plan(PelSource::Ct, true, true, BSH_OFF_K, BSH_OFF, false).block == CopBlock::BuhNoPostBuh);
+    // UNKNOWN is not OFF. Off is the permissive branch here, so guessing it is exactly what would
+    // ship the collapsed quotient — the mirror of ou_stale's "unknown rps is not stopped".
+    CHECK(cop_plan(PelSource::Ct, /*buh_known=*/false, false, BSH_OFF_K, BSH_OFF, false).block == CopBlock::BuhNoPostBuh);
+    CHECK(cop_plan(PelSource::Ct, /*buh_known=*/false, false, BSH_OFF_K, BSH_OFF, true).showable());
+
+    // --- the TANK heater, which no numerator can answer -----------------------------------------
+    // BSH heats the DHW tank directly, downstream of the flow sensor and of both leaving-water
+    // sensors. Its kilowatts enter a whole-unit divisor while its heat crosses neither R1T nor R2T,
+    // so unlike the BUH case there is no row anywhere in the profile that would re-pair them.
+    // Blocked even WITH a post-BUH row — that is the whole distinction from BuhNoPostBuh.
+    for (bool post : {false, true}) {
+        const auto p = cop_plan(PelSource::Ct, true, false, /*bsh_known=*/true, /*bsh_on=*/true, post);
+        CHECK(p.block == CopBlock::TankHeater);
+        CHECK(!p.showable());
+        CHECK(!p.use_post_buh);      // no row is claimed — implying a pairing would be the lie
+    }
+    // Unknown tank-heater state is not "off" either, same reason as the BUH flag.
+    CHECK(cop_plan(PelSource::Ct, true, false, /*bsh_known=*/false, false, true).block == CopBlock::TankHeater);
+    // The compressor-only divisor is unaffected: BSH is outside it, so a DHW boost does not block.
+    CHECK(cop_plan(PelSource::Inv, true, false, true, /*bsh_on=*/true, true).showable());
+    // And the tank heater is checked BEFORE the numerator is picked — a plan that blocks must not
+    // also claim a row, or the UI would show a source line for a figure it refuses to state.
+    CHECK(!cop_plan(PelSource::Ct, false, true, true, true, true).use_post_buh);
+
+    // --- catalog conformance --------------------------------------------------------------------
+    // Every detectable profile resolves EXACTLY ONE post-BUH row, and the BUH state that gates the
+    // rule sits on a page that stays live. If the run-state input froze with the outdoor unit the
+    // block would be decided from last run's heater state — the failure ou_stale.hpp closes for pel.
+    int checked = 0, with_post = 0, with_buh = 0, with_bsh = 0, with_ct = 0;
+    for (const auto& p : def::profiles) {
+        if (!def::is_detection_model(p.id)) continue;
+        const char* labels[192];
+        unsigned    regs[192];
+        size_t      n = 0;
+        for (size_t i = 0; i < p.count && n < 192; i++) {
+            labels[n] = p.values[i].label;
+            regs[n]   = p.values[i].reg;
+            n++;
+        }
+        int matches = 0;
+        for (size_t i = 0; i < n; i++)
+            if (cop_is_post_buh(labels[i], regs[i])) matches++;
+        CHECK(matches <= 1);                     // never ambiguous — two would make the pick arbitrary
+        const int idx = cop_post_buh_select(labels, regs, n);
+        if (idx >= 0) {
+            with_post++;
+            CHECK(!logic::ou_page_holds_over(regs[idx]));                  // a live page, always
+            CHECK(logic::lwt_ci_contains(labels[idx], "r2t"));
+            CHECK(!logic::lwt_ci_contains(labels[idx], "discharge"));      // never the pipe twin
+            // The two pickers must never land on the same row: one is the heat pump's own outlet,
+            // the other the outlet after the resistive heater. Collapsing them would make the
+            // plant COP and the heat-pump COP the same number and hide the whole distinction.
+            const int pre = logic::lwt_select(labels, n);
+            CHECK(pre != idx);
+        }
+        bool has_ct = false, has_bsh = false;
+        for (size_t i = 0; i < n; i++) {
+            if (logic::lwt_ci_contains(labels[i], "buh step")) {
+                CHECK(!logic::ou_page_holds_over(regs[i]));   // 0x60 — live while the O/U sleeps
+                with_buh++;
+            }
+            // The tank heater's own flag. Anchored exactly, like the browser's /^bsh$/ — "Thermal
+            // protector BSH" is a different row (a cut-out, not the heater) and must not gate a COP;
+            // all 44 tables carry both labels, so an unanchored match would gate on the wrong one.
+            // Case-SENSITIVE where the browser's regex is not, and deliberately so: the catalog
+            // spells it "BSH" in every table, and if a generator run ever emitted "Bsh" this
+            // assertion fails loudly instead of the two twins quietly disagreeing about which
+            // profiles can form a plant COP. Strict here is the fail-closed direction.
+            const bool is_bsh = labels[i] && (std::strcmp(labels[i], "BSH") == 0);
+            if (is_bsh) {
+                CHECK(!logic::ou_page_holds_over(regs[i]));   // 0x60 too — the block can't be stale
+                has_bsh = true;
+                with_bsh++;
+            }
+            if (logic::lwt_ci_contains(labels[i], "measured by ct")) { has_ct = true; with_ct++; }
+        }
+        // The load-bearing one. A whole-unit divisor is exactly where the tank heater unbalances the
+        // fraction, so every profile that HAS CT clamps must also expose the flag that detects it —
+        // otherwise the block would depend on an input that profile cannot supply, and the collapsed
+        // quotient would ship on precisely the profiles this rule was written for.
+        if (has_ct) CHECK(has_bsh);
+        checked++;
+    }
+    CHECK(checked >= 39);         // the detectable Altherma catalog (mirrors test_lwt_select)
+    CHECK(with_post >= checked);  // every detectable profile carries a post-BUH row -> Plant is formable
+    CHECK(with_buh > 0);          // the backup-heater state exists across the catalog, not on one profile
+    CHECK(with_bsh > 0);          // and so does the tank heater's
+    CHECK(with_ct > 0);           // and so does the whole-unit current that makes the scope Plant
+}
+
 // ── logic/history.hpp — the 24-hour trend buffers ─────────────────────────────────────────────
 // Two things are gated here, and the second is why the outdoor-air trend is not just "the DHW one
 // on another page": (a) a trend resolves to exactly one real MEASUREMENT across the whole catalog,
@@ -4397,6 +4571,7 @@ int main() {
     test_http_surface();
     test_lwt_select();
     test_ou_stale();
+    test_cop_scope();
     test_history();
     test_no_publish();
     test_config_model();
