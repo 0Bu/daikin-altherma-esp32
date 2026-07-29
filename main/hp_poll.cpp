@@ -12,6 +12,7 @@
 #include "logic/availability.hpp"
 #include "logic/convert.hpp"
 #include "logic/crc.hpp"
+#include "logic/detect.hpp"    // detect_commit_no_match — the rule poll_detect applies to an empty match
 #include "logic/detect_backoff.hpp"
 #include "logic/hexdump.hpp"
 #include "logic/history.hpp"   // history_parse_tenths — the SAME parse history.cpp applies to the witness
@@ -43,6 +44,11 @@ static int64_t               s_last_ok_us = -1;
 static DetectBackoff         s_backoff;
 static int64_t               s_next_detect_us = 0;
 static std::atomic<bool>     s_detect_reset{false};
+
+// Consecutive bus-answering sweeps that matched no profile. Poll-task-owned, RAM only, like the
+// backoff above. Falling back to `generic` costs ~46 rows including every derived figure, so it
+// waits for corroboration rather than acting on one sweep (detect_commit_no_match, #214).
+static int                   s_no_match = 0;
 
 // Raw page-dump budget for the RUNNING compressor (logic/raw_capture.hpp) — poll-task-owned, RAM
 // only, never refilled within a boot. The detect-pass dump in hp_detect.cpp captures the same pages
@@ -287,7 +293,26 @@ static bool poll_detect() {                                    // returns true i
                     d.rx, d.tx);
     // Read with the best-fit representative (deterministic ranking, not registry order). Every
     // candidate in the set is register-equivalent, so this picks correct VALUES regardless of which
-    // marketing variant it names; nothing matched but bus answered → generic Altherma profile.
+    // marketing variant it names.
+    //
+    // Nothing matched, but the bus answered: that is either a unit this catalog does not know, or a
+    // fingerprint with a page bit missing. The two are indistinguishable in a single sweep and cost
+    // wildly different amounts — `generic` drops ~99 rows to 53 and loses leaving water, compressor
+    // speed and every pressure — so it is not acted on until a SECOND sweep agrees
+    // (detect_commit_no_match, logic/detect.hpp). Keeping "auto" means the next cycle simply
+    // re-detects; the model is RAM-only either way, so nothing is persisted by waiting.
+    if (d.best.empty()) {
+        s_no_match++;
+        if (!detect_commit_no_match(s_no_match)) {
+            diag_printf("detect: no profile matched (pass %d/%d) — re-detecting before falling back to generic\n",
+                        s_no_match, DETECT_NO_MATCH_CONFIRMATIONS);
+            return true;                               // bus answered; keep "auto" and sweep again
+        }
+        diag_printf("detect: no profile matched on %d consecutive sweeps — reading with generic\n",
+                    s_no_match);
+    } else {
+        s_no_match = 0;
+    }
     config_set_model(d.best.empty() ? "generic" : d.best, d.page_mask, d.kw_tenths, d.iu_kw_tenths,
                      d.eeprom);
     return true;
@@ -312,7 +337,12 @@ static void poll_task(void*) {
                 // sweep ticks — the top-of-loop esp_task_wdt_reset() above still fires every second, so
                 // any ceiling is watchdog-safe. A resolved profile leaves "auto" and is polled below the
                 // same cycle, exactly as before; a skipped cycle leaves the UART untouched (no churn).
-                if (s_detect_reset.exchange(false)) { s_backoff.silent = 0; s_next_detect_us = 0; }
+                // A user-forced re-detect starts from a clean slate: the no-match tally is evidence
+                // about the PREVIOUS sweeps, and carrying it over would let a fresh request inherit
+                // a confirmation it never earned.
+                if (s_detect_reset.exchange(false)) {
+                    s_backoff.silent = 0; s_next_detect_us = 0; s_no_match = 0;
+                }
                 const int64_t now = esp_timer_get_time();
                 if (now >= s_next_detect_us) {
                     const bool answered = poll_detect();

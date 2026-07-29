@@ -196,4 +196,30 @@ inline void eeprom_render(const uint8_t* b, int n, char* out, int outsz) {
     if (outsz > 0) out[o < outsz ? o : outsz - 1] = '\0';
 }
 
+// ── Committing a fingerprint: when is "no candidate matched" real, and when is it a lost reply? ──
+//
+// signature_consistent() requires a profile's pages to be a SUBSET of the pages that answered, so a
+// single page bit missing from the fingerprint can make EVERY profile inconsistent — and the caller
+// then reads with `generic`, which carries 53 rows instead of ~99 and has no leaving-water
+// measurement, no compressor speed and no pressures at all. Measured against the shipped signatures,
+// that is the outcome for 8 of the 12 fingerprint pages (#214).
+//
+// The page probe already retries, so a page that is genuinely there almost never goes missing. What
+// this rule adds is the second line: an empty candidate set is not acted on until a SEPARATE sweep
+// says the same thing. A transient cannot survive two independent passes; a genuinely unrecognised
+// unit says it twice and is then read with `generic`, which is the honest answer for it.
+//
+// Deliberately a COUNT and not a timer: the caller's sweep cadence backs off on a silent bus
+// (logic/detect_backoff.hpp), so "two passes" stays two pieces of evidence at any cadence, while a
+// wall-clock window would silently become one.
+//
+// Nothing here is persisted — the model stays RAM-only and re-derived every boot.
+inline constexpr int DETECT_NO_MATCH_CONFIRMATIONS = 2;
+
+// Should a sweep that matched no profile be committed as `generic`? `consecutive_no_match` counts
+// sweeps that answered on the bus and matched nothing, INCLUDING the one being decided.
+inline constexpr bool detect_commit_no_match(int consecutive_no_match) {
+    return consecutive_no_match >= DETECT_NO_MATCH_CONFIRMATIONS;
+}
+
 } // namespace daik

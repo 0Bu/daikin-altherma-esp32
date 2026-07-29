@@ -201,9 +201,12 @@ them. This project keeps that data but makes it **runtime-selectable**:
   NVS); the **link** (RX/TX pins + protocol) is a persisted cache, tried first by the sweep. Both
   drive the poll engine (`main/hp_poll.*`). See the Configuration model below.
 
-If the unit can't be uniquely identified, detection falls back to the **Generic** Altherma profile
+If the unit can't be identified at all, detection falls back to the **Generic** Altherma profile
 (the universal register core) — a value whose converter is not yet implemented reads blank rather
-than wrong (documented behaviour).
+than wrong (documented behaviour). That fallback needs **two** consecutive sweeps to agree before it
+is applied: a bus that dropped one reply and a unit this catalog does not know look the same in a
+single sweep, and Generic carries far fewer rows (no leaving-water measurement, no compressor speed,
+no pressures), so the cheaper explanation has to be confirmed rather than assumed.
 
 > **Deep reference.** The full wire protocol (framing, checksum, register pages, detection, a
 > worked capture) is in [X10A_PROTOCOL.md](X10A_PROTOCOL.md); the complete converter/enum tables and

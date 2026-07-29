@@ -365,7 +365,16 @@ hp_detect.cpp   auto-detect glue: protocol sweep + page probe -> fingerprint -> 
                 O/U capacity is read from a VARIABLE-LENGTH page 0x00 (a smaller unit's short reply
                 omits offset 12); when absent, the I/U capacity code (0x60/6, same kW×10 units) is a
                 fallback that only RANKS detect_best (never excludes a candidate; no-op when the O/U
-                capacity is known). The detect diag line prints iu_kw=
+                capacity is known). The detect diag line prints iu_kw= and retries=.
+                The page probe RETRIES each page (DETECT_PAGE_TRIES=3, read_page_retry) because it
+                gathers the unit's IDENTITY, not its values: signature_consistent matches on page
+                SUBSET, so one dropped frame clears one page bit and can make EVERY profile
+                inconsistent at once. Measured over the shipped signatures on the live 0x1bff
+                fingerprint, all 12 single-page losses change the answer and 8 of them leave NO
+                candidate — the caller then reads with `generic` (53 rows vs ~99, no leaving-water
+                measurement, no compressor speed, no pressures), so there is no page it is safe to
+                drop. The retry is paid only on failure; a page that answers costs one query as
+                before, and the protocol/pins are already proven by the time step 2 runs (#214)
 hp_poll.cpp     poll engine task: (auto-detect if profile=="auto") profile registers -> query ->
                 decode -> thread-safe cache; also drives the /events WebSocket push
                 (ws_broadcast_values every cycle, ws_broadcast_status every 4th), with one
@@ -1031,7 +1040,15 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 I/U-code fallback) to a candidate set + a best-fit representative (detect_best; ranks by
                 maximal page overlap -> kW class containing the capacity -> tightest class). The set is
                 register-equivalent only when the capacity is KNOWN; when it is absent the set spans kW
-                classes, so the I/U-capacity fallback that ranks the representative does affect values;
+                classes, so the I/U-capacity fallback that ranks the representative does affect values.
+                It also carries detect_commit_no_match, the rule for the OTHER outcome: a sweep that
+                answered on the bus and matched NOTHING is not committed as `generic` until a second,
+                separate sweep agrees (DETECT_NO_MATCH_CONFIRMATIONS=2). An unknown unit and a
+                fingerprint with a lost page bit are indistinguishable in one sweep and cost wildly
+                different amounts, so the cheap answer waits for corroboration; a transient cannot
+                survive two independent passes, and the model is RAM-only either way so waiting
+                persists nothing. A COUNT rather than a timer, because the sweep cadence itself backs
+                off (detect_backoff.hpp) — "two passes" stays two pieces of evidence at any cadence;
                 mqtt_group.hpp maps a register page to a friendly group name, builds the grouped
                 state JSON, and encodes a BINARY reading for the wire (binary_state_number: "ON"->1,
                 "OFF"->0, anything else -> nullptr so the caller publishes the text rather than

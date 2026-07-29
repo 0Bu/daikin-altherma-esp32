@@ -46,8 +46,8 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 16 | Captive-portal provisioning (AP-only SoftAP, typed SSID, UDP:53 DNS catch-all, 302 probe redirect + RFC 8910 option 114) | ✅ 🧪 | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp), [`logic/captive.hpp`](../main/logic/captive.hpp) |
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
-| 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1583 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte, **retried page probe + a second-sweep confirmation** before falling back to `generic`) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
+| 20 | **IDF-free host-tested logic core** (1594 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -736,6 +736,16 @@ Deep dives: [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md), [`REGISTERS.md`](REGISTERS.m
   with a short `0x00` descriptor reports no outdoor capacity at all and the two halves of a plant are
   routinely different sizes. When the candidate set spans several marketing families the UI names the
   families and shows the O/U EEPROM digits instead of asserting one model.
+  The probe gathers the unit's **identity**, not its values, so it is hardened against a single lost
+  frame: each page is retried up to `DETECT_PAGE_TRIES` (3) times before its bit is cleared, and a
+  sweep that answered but matched *nothing* waits for a second sweep to agree
+  (`detect_commit_no_match`) before the unit is read with `generic`. Both matter because
+  `signature_consistent` matches on page **subset** — measured over the shipped signatures, all 12
+  single-page losses on a live fingerprint change the answer and 8 leave no candidate at all, and
+  `generic` carries 53 rows against ~99 with no leaving-water measurement, no compressor speed and
+  no pressures. An all-zero payload still sets its page bit on purpose: zeros mean the *feature* is
+  absent, not the *page*, and that is [`logic/availability.hpp`](../main/logic/availability.hpp)'s
+  question. Nothing here is persisted — the model is still re-derived every boot.
 - **✅ 🧪 Value converters** ([`logic/convert.hpp`](../main/logic/convert.hpp) + 44 generated
   [`def/`](../main/def) profiles): the converter-id decides how each raw register field becomes a typed,
   unit-carrying value — the riskiest part of the port, and the most heavily host-tested.
@@ -949,7 +959,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   the substitution fails *closed* when a truncated line never reaches its end token; the same tests
   pin that a raw-page hex line passes through untouched, so the privacy rule cannot silently clip the
   decode witness the rule above exists to deliver),
-  **1583 `CHECK`s** in
+  **1594 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -1181,7 +1191,7 @@ and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 20-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1583 checks),
+on the host** (1594 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 
