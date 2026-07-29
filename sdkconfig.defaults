@@ -77,6 +77,15 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
 # WebSockets support
 CONFIG_HTTPD_WS_SUPPORT=y
+# httpd_queue_work() sends ONE UDP DATAGRAM to the server's control socket, whose receive mailbox
+# holds LWIP_UDP_RECVMBOX_SIZE messages (6). Past that the datagram is dropped SILENTLY — sendto()
+# succeeds, the caller is told ESP_OK, and the work simply never runs. For an async WS send that
+# means IDF's async_transfer_t leaks, the completion callback never fires, and anything waiting on
+# that callback waits forever: it wedged the /events live push and panicked the board (#238).
+# Blocking makes an overflow apply back-pressure instead of vanishing. It cannot stall us in
+# practice — http_status.cpp queues at most ONE item per broadcast and the two gates allow one
+# batch each, so at most two of the six slots are ever in use.
+CONFIG_HTTPD_QUEUE_WORK_BLOCKING=y
 
 # ── Firmware size reduction (zero-risk / no behaviour change) ──
 # Drop code paths this firmware never uses.

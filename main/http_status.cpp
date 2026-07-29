@@ -790,30 +790,55 @@ void http_unregister_ws_client(int fd) {
     xSemaphoreGive(s_ws_mtx);
 }
 
-struct WsBroadcastContext {
+// ONE queued work item per broadcast, owning its payload and its snapshot of the client list.
+//
+// It used to be one item PER CLIENT (httpd_ws_send_data_async per fd, a refcount over the shared
+// payload, the gate released by the last IDF completion callback). That fan-out is what wedged the
+// live push, and the mechanism is worth stating because nothing about the call site looks lossy:
+// every httpd_ws_send_data_async() is one httpd_queue_work(), and httpd_queue_work() is ONE UDP
+// DATAGRAM to the server's control socket (httpd_main.c: socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)).
+// That socket's receive mailbox holds LWIP_UDP_RECVMBOX_SIZE messages — 6 by default. Past that the
+// datagram is dropped SILENTLY: sendto() still succeeds, so httpd_queue_work() returns ESP_OK and
+// httpd_ws_send_data_async() reports success, while the work never runs. IDF's async_transfer_t
+// leaks, the completion callback never fires, the payload is stranded — and because the gate was
+// released ONLY from that callback, try_begin() answered false forever and the stream was dead
+// until reboot (#238). IDF names the hazard itself in the Kconfig help for
+// HTTPD_QUEUE_WORK_BLOCKING; sdkconfig.defaults now sets it, so an overflow applies back-pressure
+// instead of vanishing.
+//
+// One item per broadcast keeps at most two in flight across both streams (the gates allow one
+// each), so a 6-deep mailbox is never approached — the send loop moved to where IDF does it anyway
+// (httpd_ws_send_cb sends on the HTTP task), and the gate now has exactly ONE release point that no
+// dropped message can skip. The refcount went with the fan-out: with a single owner there is
+// nothing to count.
+struct WsBroadcast {
     std::string payload;
+    int         fds[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+    int         fd_count = 0;
+    WsTxGate&   gate;
 
-    explicit WsBroadcastContext(std::string&& data, WsTxGate& tx_gate)
+    WsBroadcast(std::string&& data, WsTxGate& tx_gate)
         : payload(std::move(data)), gate(tx_gate) {}
-
-    void retain() { refs.fetch_add(1, std::memory_order_relaxed); }
-
-    void release() {
-        if (refs.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-            gate.complete();
-            delete this;
-        }
-    }
-
-private:
-    // The initial reference protects construction while callbacks may already run on the HTTP task.
-    std::atomic<unsigned> refs{1};
-    WsTxGate& gate;
 };
 
-static void ws_transfer_complete(esp_err_t err, int socket, void *arg) {
-    auto* ctx = static_cast<WsBroadcastContext*>(arg);
-    ctx->release();
+// Runs on the HTTP task. Sends the one shared payload to each fd still handshaken as a WebSocket,
+// then releases the gate and frees the batch — on EVERY path, including a server that went away
+// mid-flight, since a gate left occupied is the defect this replaced.
+static void ws_send_batch(void* arg) {
+    auto* b = static_cast<WsBroadcast*>(arg);
+    if (httpd_handle_t server = http_server_handle()) {
+        httpd_ws_frame_t frame = {};
+        frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(b->payload.c_str()));
+        frame.len     = b->payload.size();
+        frame.type    = HTTPD_WS_TYPE_TEXT;
+        frame.final   = true;
+        for (int i = 0; i < b->fd_count; i++) {
+            if (httpd_ws_get_fd_info(server, b->fds[i]) != HTTPD_WS_CLIENT_WEBSOCKET) continue;
+            httpd_ws_send_frame_async(server, b->fds[i], &frame);
+        }
+    }
+    b->gate.complete();
+    delete b;
 }
 
 static bool ws_any_clients() {
@@ -826,9 +851,9 @@ static bool ws_any_clients() {
     return any;
 }
 
-// Queue one shared immutable payload to a snapshot of the registered WS clients. The caller has
-// already acquired `gate`; it remains occupied until every IDF completion callback has run. This is
-// deliberate backpressure: if the HTTP task stops draining its async-work queue, later poll ticks
+// Hand one shared immutable payload to the HTTP task for delivery to a snapshot of the registered
+// WS clients. The caller has already acquired `gate`; it stays occupied until ws_send_batch has run.
+// This is deliberate backpressure: if the HTTP task stops draining its work queue, later poll ticks
 // are dropped and retained heap stays bounded to one values batch plus one status batch.
 //
 // Never hold s_ws_mtx while entering the IDF queue. Its completion/close paths run on another task
@@ -841,38 +866,30 @@ static void ws_send_to_all(std::string&& j, WsTxGate& gate) {
         return;
     }
 
-    auto* ctx = new (std::nothrow) WsBroadcastContext(std::move(j), gate);
-    if (!ctx) {
+    auto* b = new (std::nothrow) WsBroadcast(std::move(j), gate);
+    if (!b) {
         gate.complete();
         return;
     }
 
-    int fds[8];
-    int fd_count = 0;
     xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
     for (int i = 0; i < 8; i++) {
-        if (s_ws_fds[i] != -1) fds[fd_count++] = s_ws_fds[i];
+        if (s_ws_fds[i] != -1) b->fds[b->fd_count++] = s_ws_fds[i];
     }
     xSemaphoreGive(s_ws_mtx);
 
-    httpd_ws_frame_t frame = {};
-    frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(ctx->payload.c_str()));
-    frame.len = ctx->payload.size();
-    frame.type = HTTPD_WS_TYPE_TEXT;
-    frame.final = true;
-
-    for (int i = 0; i < fd_count; i++) {
-        if (httpd_ws_get_fd_info(server, fds[i]) != HTTPD_WS_CLIENT_WEBSOCKET) continue;
-
-        // Retain before queueing: the HTTP task may run the callback before this loop advances.
-        ctx->retain();
-        esp_err_t err = httpd_ws_send_data_async(server, fds[i], &frame,
-                                                  ws_transfer_complete, ctx);
-        if (err != ESP_OK) ctx->release();
+    // Nobody left to send to (the last client closed between ws_any_clients() and here): release the
+    // gate rather than queue an empty batch.
+    if (b->fd_count == 0) {
+        gate.complete();
+        delete b;
+        return;
     }
 
-    // Drop the construction reference. The final queued transfer releases the gate and payload.
-    ctx->release();
+    if (httpd_queue_work(server, ws_send_batch, b) != ESP_OK) {
+        gate.complete();
+        delete b;
+    }
 }
 
 void ws_broadcast_values() {

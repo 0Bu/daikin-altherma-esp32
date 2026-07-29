@@ -426,14 +426,19 @@ entered exactly like a visible one.
   own guard, below, is only their backstop).
 - **🧪 Async sends have bounded backpressure**
   ([`logic/ws_tx_gate.hpp`](../main/logic/ws_tx_gate.hpp)). ESP-IDF queues each cross-task send and
-  owns only a shallow frame copy until its completion callback runs. A congested HTTP control queue
-  can therefore retain a payload after `httpd_ws_send_data_async()` has returned success. One
-  independent gate for values and one for status admits at most one outstanding broadcast of each
-  kind; while a callback is pending, newer ticks are dropped instead of consuming heap every second.
-  Every client in a batch shares one immutable payload through a completion refcount, and the client
-  list is snapshotted under its mutex before any IDF queue call. Thus a delayed or lost callback can
-  hold at most two application payloads, not drain the whole device heap or couple the queue to the
-  socket-close path.
+  owns only a shallow frame copy until the queued work runs, so a congested HTTP control queue can
+  retain a payload after the send call has returned success. One independent gate for values and one
+  for status admits at most one outstanding broadcast of each kind; while one is pending, newer
+  ticks are dropped instead of consuming heap every second. A batch is **one** queued work item that
+  owns the payload and a snapshot of the client list (taken under its mutex before any IDF queue
+  call) and sends to every client from the HTTP task. It is deliberately not one item per client:
+  `httpd_queue_work()` is a single UDP datagram to a control socket with a 6-deep mailbox
+  (`LWIP_UDP_RECVMBOX_SIZE`), an overflow is dropped **silently** while still reporting `ESP_OK`,
+  and the release that used to hang off the per-client completion callback then never happened —
+  wedging `/events` until reboot (#238). With one item per broadcast at most two slots are ever in
+  use, and `CONFIG_HTTPD_QUEUE_WORK_BLOCKING=y` makes a residual overflow block rather than vanish.
+  Thus a delayed delivery can hold at most two application payloads, not drain the whole device heap
+  or couple the queue to the socket-close path.
 - **🧪 Frame handling is a policy, not an `if`** ([`logic/ws_policy.hpp`](../main/logic/ws_policy.hpp)).
   Two rules, both host-tested. **Only a `sub` text frame takes a broadcast slot** — registering on any
   frame at all meant a client that never subscribed was still pushed a frame a second, and held one of
@@ -1248,7 +1253,7 @@ Every ESP-IDF component this firmware links, and what it powers (from
 | `nvs_flash` | runtime config + X10A link cache (`daik_cfg` namespace) |
 | `esp_wifi` | STA (strongest-AP scan, SAE) + SoftAP setup portal |
 | `esp_event` / `esp_netif` | event loop + network interfaces, DHCP hostname, SNTP client (`esp_netif_sntp`) |
-| `esp_http_server` | `:80` UI/API server + **WebSocket** (`CONFIG_HTTPD_WS_SUPPORT`) |
+| `esp_http_server` | `:80` UI/API server + **WebSocket** (`CONFIG_HTTPD_WS_SUPPORT`). Also `CONFIG_HTTPD_QUEUE_WORK_BLOCKING=y`: `httpd_queue_work()` is one UDP datagram to a control socket with a 6-deep mailbox, and the default drops an overflow **silently** while still answering `ESP_OK` — which wedged `/events` and panicked the board (#238) |
 | `esp_https_ota` / `app_update` / `esp_app_format` | OTA slot writes, rollback, app descriptor (version, ELF sha) |
 | `esp_http_client` / `esp-tls` | OTA fetch + TLS transport |
 | `bootloader_support` | Secure Boot v2 signature verification on the update path |

@@ -510,8 +510,9 @@ http_common.cpp shared HTTP helpers + the ONE OOM guard every route runs under: 
                 unwinding through esp_http_server's C frames to std::terminate -> reboot. /events is
                 the deliberate exception (raw registration needed for the WebSocket; it self-guards)
 http_status.cpp GET / (setup.html in AP mode, else gzip UI) /status /values /history /models /diag /scan
-                /coredump + /events (WebSocket live push; shared-payload, refcounted completion and
-                bounded one-in-flight backpressure per values/status stream) + captive catch-all
+                /coredump + /events (WebSocket live push; ONE queued work item per broadcast, owning
+                the shared payload, plus bounded one-in-flight backpressure per values/status stream)
+                + captive catch-all
 http_config.cpp POST /set_wifi /set_mqtt /set_syslog /set_ntp /set_hp /set_board /set_ota /detect
 http_ota.cpp    /ota/check|update|status
 mcp_server.cpp  /mcp (read-only MCP tools; TODO)
@@ -1209,9 +1210,15 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 esp_http_server cannot skip a frame body and its unread payload would be parsed as
                 the next frame's header. ws_tx_gate.hpp = the async-broadcast backpressure rule:
                 one values and one status batch may be outstanding; a busy stream drops newer ticks
-                instead of retaining another payload while IDF completion work is delayed. Clients
-                in a batch share one refcounted immutable payload, and the fd-list mutex is released
-                before any IDF queue call. http_body.hpp = the request-body recv loop
+                instead of retaining another payload while IDF delivery is delayed. The batch is ONE
+                queued work item owning the payload and an fd snapshot — never one item per CLIENT,
+                which is what wedged the push: httpd_queue_work() is one UDP datagram to a control
+                socket whose mailbox holds 6 (LWIP_UDP_RECVMBOX_SIZE), and an overflow drops it
+                SILENTLY while still answering ESP_OK, so the completion callback the gate was
+                released from never ran and /events died until reboot (#238). The gate now has one
+                release point no dropped message can skip, sdkconfig sets
+                CONFIG_HTTPD_QUEUE_WORK_BLOCKING so an overflow blocks instead of vanishing, and the
+                fd-list mutex is still released before any IDF queue call. http_body.hpp = the request-body recv loop
                 (http_body_read), templated over a classified recv so segment-by-segment
                 reassembly, a mid-body close and a stalled peer are host-tested; the IDF return-code
                 mapping stays in http_common.cpp. A timeout is retried at most BODY_MAX_IDLE times —
@@ -1607,7 +1614,7 @@ GET  /events      WebSocket live push (is_websocket). Client sends "sub" -> gets
                   read it into a smaller one (ESP_ERR_INVALID_SIZE, buffer untouched — the old code
                   memcmp'd that uninitialised stack) nor skip past it. Background sends use
                   logic/ws_tx_gate.hpp: at most one values and one status batch remain in flight;
-                  newer ticks are dropped until all completion callbacks release the shared payload.
+                  newer ticks are dropped until the batch's single queued work item has run.
 GET  /models      pin hint + catalog metadata (def/models_catalog.hpp). Detection is fully automatic;
                   the UI no longer offers a manual model picker. NO shipped client reads this — the
                   web UI never fetches it, and the RX/TX dropdown takes its GPIOs from
