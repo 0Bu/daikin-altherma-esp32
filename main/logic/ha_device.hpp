@@ -43,6 +43,21 @@ inline std::string device_node_id(const std::string& base) {
     return id.empty() ? std::string("daikin") : id;
 }
 
+// An HA entity this firmware ONCE published and no longer does. Its retained discovery config must
+// be actively DELETED (a zero-length retained publish to the old topic), or an install upgraded from
+// an older build keeps a stale, permanently-"unavailable" entity forever — the broker replays the
+// config to HA on every restart, and nothing else will ever contradict it.
+//
+// Here rather than beside either list because BOTH diagnostic surfaces retire entities under the
+// same rule and the same failure mode: crashinfo.hpp's RETIRED_CRASH_SENSORS ("Last Reset Reason",
+// an exact duplicate of the heartbeat's own) and heartbeat.hpp's RETIRED_HEARTBEAT_SENSORS. A
+// retired id is also permanently BURNED — test_entity_identity() refuses to let a live entity claim
+// one back, since it would inherit the corpse instead of getting a fresh registry entry.
+struct RetiredHaSensor {
+    const char* component;   // discovery-topic <component> segment ("sensor" | "binary_sensor")
+    const char* object_id;
+};
+
 // The `dev` object of a discovery config: the stable installation id first, this board's own id
 // second (omitted when empty, or when it IS the stable id — HA rejects a duplicated identifier).
 inline std::string device_json(const std::string& node, const std::string& board_id) {

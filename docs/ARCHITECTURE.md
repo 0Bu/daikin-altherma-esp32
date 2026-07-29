@@ -490,8 +490,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
   outside 1–65535 — caught at parse time because the probe's `htons()` would truncate `:65537` to
   `:1` and call a wrong port reachable).
 - `logic/heartbeat.hpp` — the board/link diagnostics JSON (a flat object, each field prefixed by its
-  block name: `wifi_rssi`, `wifi_mac`, `bus_rx_received`, …) + its 20 diagnostic HA discovery configs,
-  with the dBm → signal-quality curve and uptime formatting pinned to known-good samples. Carries
+  block name: `wifi_rssi`, `wifi_mac`, `bus_rx_received`, …) + its 18 diagnostic HA discovery configs
+  and the two RETIRED ones whose retained configs must still be deleted, with uptime formatting
+  pinned to known-good samples. Carries
   `bus_ou_held_over` — **source** freshness, which is a different fact from `bus_connected`: the link
   is up and the device is publishing while the outdoor unit simply is not measuring, and a consumer
   that only had bus health would read the vanished outdoor keys as a broken link. Deliberately not
@@ -1108,8 +1109,7 @@ The Home Assistant bridge:
     7 days — 5 of them panics — unattributable in the store, reconstructible only from syslog (#215).
     Neither is a new HA entity; the existing "Reset Reason" text sensor already answers a human, and a
     numeric twin beside it is the duplicate that got the crash topic's "Last Reset Reason" retired.
-  - **`wifi_*`**: `wifi_connected`, `wifi_rssi`, `wifi_quality_pct` (0-100%, `wifi_signal_quality_pct`
-    — the standard dBm→% mapping, -50 dBm=100%/-100 dBm=0%), `wifi_reconnects` (cumulative RE-connects
+  - **`wifi_*`**: `wifi_connected`, `wifi_rssi`, `wifi_reconnects` (cumulative RE-connects
     since boot, `wifi_reconnect_count()` in `wifi.cpp`, excludes the first-ever connect), `wifi_mac`
     (this STA's own MAC, always present) and `wifi_bssid` (the associated AP's MAC, null while offline)
     — the `/status.wifi.mac`/`.bssid` pair, now on the diagnostics stream too.
@@ -1127,15 +1127,34 @@ The Home Assistant bridge:
 
   Published on a fixed `HEARTBEAT_INTERVAL_S` (10 s) cadence — unlike the state topic, this is
   diagnostics rather than real-time telemetry, so it always sends the latest snapshot rather than
-  only on change. 19 diagnostic HA entities (WiFi signal/quality/reconnects/MAC/BSSID, heap
-  free/min-free/largest-block, uptime, last reset reason, the SNTP wall clock as a
-  `device_class:"timestamp"` sensor, X10A bus status/CRC/timeout/rx errors/rx received, MQTT
+  only on change. 18 diagnostic HA entities (WiFi signal/reconnects/MAC/BSSID, heap
+  free/min-free/largest-block, uptime, last reset reason, X10A bus status/held-over/CRC/timeout/rx
+  errors/rx received, MQTT
   publish count/fails/reconnects — tagged `"ent_cat":"diagnostic"`) point at this topic via their own
   discovery configs, streamed once per
   connection independently of heat-pump profile detection — so they show up even while the model is
   still "auto". Cumulative since-boot counters get `"stat_cla":"total_increasing"` (not
   `"measurement"`) so HA's long-term statistics handle a reboot's reset to 0 correctly. Mirrors the
   "device diagnostics" pattern of other ESP32 HA bridges and their own `heartbeat` topic.
+
+  **Two are retired** (`RETIRED_HEARTBEAT_SENSORS`), under the rule that already retired the crash
+  topic's "Last Reset Reason": an entity repeating what another entity on the same device says is
+  not a second reading, it is a second thing to rule out. **"Device Time"** published the SNTP wall
+  clock as a `device_class:"timestamp"` sensor — re-sent every 10 s, so HA rendered it as "N seconds
+  ago", which is what HA's own `last_updated` on any other entity here already says without a clock,
+  at the cost of one recorder row every 10 s forever. The failure it was meant to catch (a drifted or
+  never-synced clock) is reported by `/status.ntp` `{server,synced,time}` and by every syslog RFC 5424
+  TIMESTAMP. **"WiFi Quality"** published `2*(rssi+100)` beside the "WiFi Signal" sensor carrying that
+  rssi: a deterministic function of another entity cannot disagree with it, fail independently of it,
+  or show anything it doesn't — a reader who wants percent templates it in HA. The `time` and
+  `wifi_quality_pct` **payload fields went with them**; each existed only to feed its entity, and
+  keeping a field whose only consumer is gone leaves the duplicate in every heartbeat while hiding it
+  from the one place it was visible. Both retained discovery configs are **actively deleted** on
+  every (re)connect (a zero-length retained publish), under the current node id *and* the legacy
+  MAC-derived one — otherwise the broker replays them to HA forever and the entities linger as
+  permanently-`unavailable` duplicates. Their uniq_ids are **burned**: `test_entity_identity()`
+  refuses to let a live entity claim one back, since it would inherit the corpse rather than get a
+  fresh registry entry.
 - **TLS default-on with credentials** (mqtts, CA-verified via the mbedTLS certificate bundle). If
   credentials are set but the URI is not `mqtts://`, the bridge **refuses to connect** and reports
   the reason in `/status.mqtt` rather than sending them in cleartext — no silent plaintext fallback.
@@ -1393,8 +1412,9 @@ config endpoints in place:
   disabled state, since unlike Syslog/MQTT, SNTP has no "off" to preserve. The row shows the
   configured server, coloured `--ok` once synced and `--warn` while syncing; the device's own wall
   clock (`status.ntp.time`, previously rendered inline in the browser's timezone on the old per-link
-  NTP card) is no longer shown on the row — it remains available via the MQTT heartbeat's
-  `device_time` sensor and the raw API.
+  NTP card) is no longer shown on the row — it remains available from the raw API, and from every
+  syslog TIMESTAMP. It is deliberately **not** an HA entity (see the retired "Device Time" under
+  *The MQTT bridge*).
 - **Heat pump** → `/set_hp`: fully automatic. The model is **auto-detected** (see Auto-detection) and
   shown read-only on the dashboard **Model** card. The dashboard **ESP32** card shows the X10A link +
   protocol and the **RX/TX pins**, which are also auto-detected: **read-only** while the bus answers,

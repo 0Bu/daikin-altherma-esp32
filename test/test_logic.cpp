@@ -1653,13 +1653,6 @@ static void test_heartbeat() {
                       board = "daikin_abc123";   // installation id + this board's own id
     CHECK(heartbeat_topic(base) == "daikin-altherma-esp32/heartbeat");   // node NOT in the message topic
 
-    // wifi_signal_quality_pct: matches the observed EMS-ESP-style dBm->% samples exactly
-    // (-76 dBm -> 48%, -78 dBm -> 44%), clamped at the -50/-100 dBm ends.
-    CHECK(wifi_signal_quality_pct(-76) == 48);
-    CHECK(wifi_signal_quality_pct(-78) == 44);
-    CHECK(wifi_signal_quality_pct(-50) == 100 && wifi_signal_quality_pct(-40) == 100);
-    CHECK(wifi_signal_quality_pct(-100) == 0 && wifi_signal_quality_pct(-110) == 0);
-
     // format_uptime: "Ddd+HH:MM:SS.mmm" — 7 days, 21:05:31.860 (a real EMS-ESP heartbeat sample).
     const uint64_t sample_ms = ((7ULL * 24 + 21) * 3600 + 5 * 60 + 31) * 1000 + 860;
     CHECK(format_uptime(sample_ms) == "007+21:05:31.860");
@@ -1700,8 +1693,7 @@ static void test_heartbeat() {
                "\"uptime_s\":680731,\"uptime\":\"007+21:05:31.860\","
                "\"free_heap\":170000,\"min_free_heap\":150000,\"max_alloc\":87000,"
                "\"reset_reason\":\"panic\",\"reset_reason_code\":4,\"reset_fault\":1,"
-               "\"time\":null,"
-               "\"wifi_connected\":1,\"wifi_rssi\":-76,\"wifi_quality_pct\":48,\"wifi_reconnects\":3,"
+               "\"wifi_connected\":1,\"wifi_rssi\":-76,\"wifi_reconnects\":3,"
                "\"wifi_mac\":\"A1:B2:C3:D4:E5:F6\",\"wifi_bssid\":\"00:11:22:33:44:55\","
                "\"mqtt_connected\":1,\"mqtt_count\":89282,\"mqtt_fails\":0,\"mqtt_reconnects\":1,"
                "\"bus_connected\":1,\"bus_proto\":\"I\",\"bus_registers\":10,\"bus_values\":48,"
@@ -1745,23 +1737,26 @@ static void test_heartbeat() {
     CHECK(build_heartbeat_json(f).find("\"bus_ou_held_over\":1,") != std::string::npos);
     f.ou_held_over = false;
 
-    // Synced: "time" carries the RFC 3339 instant verbatim (the caller — mqtt_ha.cpp — already
-    // rendered it via logic/timestamp.hpp; this header only decides null-vs-quoted).
-    f.time = "2026-07-17T21:15:00.000Z";
-    CHECK(build_heartbeat_json(f).find("\"time\":\"2026-07-17T21:15:00.000Z\",")
-          != std::string::npos);
+    // The SNTP wall clock and the dBm->% remap are gone from the payload with the two entities they
+    // fed (RETIRED_HEARTBEAT_SENSORS). `time` said what HA's own last_updated already said, at one
+    // recorder row per heartbeat; `wifi_quality_pct` was 2*(rssi+100) beside the rssi it was computed
+    // from. Pinned as ABSENT, since either one lingering in the payload is the duplicate surviving
+    // where nobody looks at it any more.
+    CHECK(j.find("\"time\"") == std::string::npos);
+    CHECK(j.find("wifi_quality") == std::string::npos);
+    // ...and the facts themselves are still reported, one place each: the clock on /status.ntp
+    // (+ every syslog TIMESTAMP), the signal as the dBm it was always derived from.
+    CHECK(j.find("\"wifi_rssi\":-76,") != std::string::npos);
 
-    // WiFi down -> rssi/quality/bssid reported null, not a stale/garbage reading; mac still present.
+    // WiFi down -> rssi/bssid reported null, not a stale/garbage reading; mac still present.
     HeartbeatFields down;
     down.wifi_connected = false;
     down.wifi_rssi       = -50;    // stale value must not leak into the JSON
     down.wifi_mac        = "A1:B2:C3:D4:E5:F6";   // this STA's own MAC — known even while offline
     const std::string dj = build_heartbeat_json(down);
     CHECK(dj.find("\"wifi_rssi\":null") != std::string::npos);
-    CHECK(dj.find("\"wifi_quality_pct\":null") != std::string::npos);
     CHECK(dj.find("\"wifi_mac\":\"A1:B2:C3:D4:E5:F6\"") != std::string::npos);
     CHECK(dj.find("\"wifi_bssid\":null") != std::string::npos);   // no AP while offline
-    CHECK(dj.find("\"time\":null") != std::string::npos);   // never synced -> null, not 1970-01-01
     // The connectivity flags are 1/0 NUMBERS in both directions — never JSON bools, which a metrics
     // consumer drops exactly like it drops a string (these three were the only heartbeat fields
     // missing from VictoriaMetrics before this).
@@ -1775,7 +1770,7 @@ static void test_heartbeat() {
     // value_template points at the heartbeat topic (not the heat-pump state topic).
     const std::string hb = heartbeat_topic(base);
     const std::string av = availability_topic(base);
-    CHECK(HEARTBEAT_SENSOR_COUNT == 20);   // +2: wifi_mac, wifi_bssid; +1: ou_held_over
+    CHECK(HEARTBEAT_SENSOR_COUNT == 18);   // -2: device_time, wifi_quality (RETIRED_HEARTBEAT_SENSORS)
     const HeartbeatSensor& rssi = HEARTBEAT_SENSORS[0];
     CHECK(std::string(rssi.object_id) == "wifi_signal");
     std::string dt = heartbeat_discovery_topic("homeassistant", node, rssi);
@@ -1817,7 +1812,7 @@ static void test_heartbeat() {
 
     // The three device-health entities added alongside /status.sys (issue #5): reset_reason is a
     // plain text sensor (no unit / device_class / state_class), min_free_heap + max_alloc are byte
-    // measurements. All diagnostic, all sourced from the heartbeat topic. Count is 19, not 13.
+    // measurements. All diagnostic, all sourced from the heartbeat topic.
     auto find_hb = [](const char* oid) -> const HeartbeatSensor* {
         for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++)
             if (std::string(HEARTBEAT_SENSORS[i].object_id) == oid) return &HEARTBEAT_SENSORS[i];
@@ -1844,15 +1839,23 @@ static void test_heartbeat() {
     CHECK(rrc.find("\"dev_cla\"") == std::string::npos);        // ...no device_class
     CHECK(rrc.find("\"stat_cla\"") == std::string::npos);       // ...no state_class
 
-    // device_time: HA's native "timestamp" device_class (renders as "N minutes ago", the one
-    // HA-idiomatic use of the SNTP wall clock) — no unit, no state_class (not a numeric measurement).
-    const HeartbeatSensor* dtm = find_hb("device_time");
-    CHECK(dtm != nullptr);
-    const std::string dtc = heartbeat_discovery_config(node, board, hb, av, *dtm);
-    CHECK(dtc.find("\"val_tpl\":\"{{ value_json.time }}\"") != std::string::npos);
-    CHECK(dtc.find("\"dev_cla\":\"timestamp\"") != std::string::npos);
-    CHECK(dtc.find("\"unit_of_meas\"") == std::string::npos);
-    CHECK(dtc.find("\"stat_cla\"") == std::string::npos);
+    // ── Retired diagnostics: "Device Time" + "WiFi Quality" (RETIRED_HEARTBEAT_SENSORS) ──
+    // Both said what another entity on the same device already said — the wall clock repeating HA's
+    // own last_updated at one recorder row every 10 s, the quality percentage being 2*(rssi+100)
+    // beside its own rssi. Gone from the live table...
+    CHECK(RETIRED_HEARTBEAT_SENSOR_COUNT == 2);
+    for (int i = 0; i < RETIRED_HEARTBEAT_SENSOR_COUNT; i++) {
+        const RetiredHaSensor& r = RETIRED_HEARTBEAT_SENSORS[i];
+        CHECK(find_hb(r.object_id) == nullptr);
+        // ...and the topic the retraction targets is the one the entity was PUBLISHED on, byte for
+        // byte. A zero-length retained message anywhere else deletes nothing and the stale entity
+        // simply stays — silently, since a retraction gets no acknowledgement to check.
+        CHECK(heartbeat_discovery_topic("homeassistant", r.component, node, r.object_id)
+              == std::string("homeassistant/") + r.component + "/" + node + "/" + r.object_id + "/config");
+    }
+    // The two surviving WiFi entities are the ones that carry their own reading: dBm from the radio,
+    // and the reconnect counter. Neither is derivable from the other.
+    CHECK(find_hb("wifi_signal") != nullptr && find_hb("wifi_reconnects") != nullptr);
 
     // Heap low-water mark + largest free block: bytes, "measurement" (a fluctuating gauge, NOT a
     // since-boot counter), diagnostic, sourced from the flat payload fields (not a nested object).
@@ -5896,14 +5899,17 @@ static void test_entity_identity() {
         // A RETIRED id is not published any more, but it must never be RE-USED either: the whole
         // point of retiring it is that a broker somewhere still holds its retained config, and a new
         // entity claiming that id would inherit the corpse instead of getting a fresh registry entry.
-        for (int i = 0; i < RETIRED_CRASH_SENSOR_COUNT; i++) {
-            const auto& r = RETIRED_CRASH_SENSORS[i];
+        // Both surfaces retire entities (crash: "Last Reset Reason"; heartbeat: "Device Time",
+        // "WiFi Quality") and uniq_id is ONE flat namespace across them, so both lists are burned.
+        auto burned = [&](const RetiredHaSensor& r) {
             const std::string uid = node + "_" + r.object_id;
             auto it = owner.find(uid);
             if (it != owner.end() && colliding.insert(uid).second)
                 std::printf("  live entity re-uses the RETIRED id %s on %s (claimed by %s)\n",
                             uid.c_str(), p.id, it->second.c_str());
-        }
+        };
+        for (int i = 0; i < RETIRED_CRASH_SENSOR_COUNT; i++)     burned(RETIRED_CRASH_SENSORS[i]);
+        for (int i = 0; i < RETIRED_HEARTBEAT_SENSOR_COUNT; i++) burned(RETIRED_HEARTBEAT_SENSORS[i]);
     }
 
     CHECK(checked > 4000);        // every profile x every family, not a sampled subset

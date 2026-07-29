@@ -72,27 +72,12 @@ struct HeartbeatFields {
     // healthy, and the outdoor unit is simply not measuring right now" is otherwise indistinguishable
     // from a broken link on the consumer's side.
     bool        ou_held_over   = false;
-    // SNTP wall clock (main/sntp_time.cpp) at publish time, pre-rendered by the caller
-    // (logic/timestamp.hpp's rfc3339_utc) so this header stays IDF-free — "" until the first sync of
-    // this boot lands, matching the /status.ntp / syslog TIMESTAMP precedent of never emitting a
-    // plausible-looking pre-epoch date. Lets an HA automation (or a human) compare the device's own
-    // clock against HA's own "last seen" for this message and catch a drifted/never-synced device —
-    // the one thing neither `uptime` nor HA's own message-receipt time can tell you.
-    std::string time;
 };
 
 // Heartbeat topic: <base>/heartbeat — separate from the shared state topic so a Telegraf/HA consumer
 // can subscribe to device health independently of heat-pump values.
 inline std::string heartbeat_topic(const std::string& base) {
     return base + "/heartbeat";
-}
-
-// WiFi signal quality 0-100%, the same dBm->% mapping other ESP32 firmware (and most consumer WiFi
-// stacks) use: -50 dBm or better is 100%, -100 dBm or worse is 0%, linear between (2% per dBm).
-inline int wifi_signal_quality_pct(int8_t rssi) {
-    if (rssi <= -100) return 0;
-    if (rssi >= -50)  return 100;
-    return 2 * (static_cast<int>(rssi) + 100);
 }
 
 // "Ddd+HH:MM:SS.mmm" uptime display string, e.g. "007+21:05:31.860" — the form other ESP32 HA
@@ -133,10 +118,6 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     // Numeric twin of the slug above — see HeartbeatFields. A string never reaches a metrics store.
     j += "\"reset_reason_code\":" + std::to_string(f.reset_reason_code) + ",";
     j += "\"reset_fault\":"; j += f.reset_fault ? "1" : "0"; j += ",";
-    // "" (never synced this boot) renders as JSON null, not a fabricated pre-epoch date — same
-    // contract as /status.ntp.time and the syslog RFC 5424 TIMESTAMP field.
-    j += "\"time\":"; j += f.time.empty() ? "null" : ("\"" + f.time + "\"");
-    j += ",";
     // The three connectivity flags ride as the NUMBERS 1/0, not JSON bools. Measured on this
     // install's Telegraf → VictoriaMetrics pipeline: wifi_connected/mqtt_connected/bus_connected were
     // the only heartbeat fields that never became series — the json parser drops a bool exactly like
@@ -146,11 +127,10 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     // (The crash topic keeps its true/false + `| lower` template: it is an event payload, published
     // empty on a normal boot and deliberately not subscribed by the metrics pipeline, so it has no
     // consumer that a bool costs anything — and its binary_sensor already reads correctly in HA.)
-    // wifi_* — rssi/quality null while offline (a stale reading must not leak); mac always present;
+    // wifi_* — rssi null while offline (a stale reading must not leak); mac always present;
     // bssid null while offline (no AP).
     j += "\"wifi_connected\":"; j += f.wifi_connected ? "1" : "0";
     j += ",\"wifi_rssi\":"; j += f.wifi_connected ? std::to_string(f.wifi_rssi) : "null";
-    j += ",\"wifi_quality_pct\":"; j += f.wifi_connected ? std::to_string(wifi_signal_quality_pct(f.wifi_rssi)) : "null";
     j += ",\"wifi_reconnects\":" + std::to_string(f.wifi_reconnects);
     j += ",\"wifi_mac\":"; j += f.wifi_mac.empty() ? "null" : ("\"" + f.wifi_mac + "\"");
     j += ",\"wifi_bssid\":"; j += f.wifi_bssid.empty() ? "null" : ("\"" + f.wifi_bssid + "\"");
@@ -199,7 +179,6 @@ struct HeartbeatSensor {
 
 inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
     {"sensor",        "wifi_signal",      "WiFi Signal",         "wifi_rssi",        "dBm", "signal_strength", "measurement"},
-    {"sensor",        "wifi_quality",     "WiFi Quality",        "wifi_quality_pct", "%",   "",                 "measurement"},
     {"sensor",        "wifi_reconnects",  "WiFi Reconnects",     "wifi_reconnects",  "",    "",                 "total_increasing"},
     // MAC (this STA) + BSSID (the associated AP) as text diagnostics — which physical board, and which
     // AP it roamed onto. No unit/device_class/state_class; bssid reads HA-"unknown" while offline (null).
@@ -213,11 +192,6 @@ inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
     {"sensor",        "max_alloc",        "Largest Free Block",  "max_alloc",        "B",   "",                 "measurement"},
     {"sensor",        "uptime",           "Uptime",              "uptime_s",         "s",   "duration",         "measurement"},
     {"sensor",        "reset_reason",     "Reset Reason",        "reset_reason",     "",    "",                 ""},
-    // device_class "timestamp" is HA's native "when did this last update" class (renders as "N
-    // minutes ago", supports drift/staleness automations) — the one HA-idiomatic use of the SNTP wall
-    // clock (main/sntp_time.cpp) this firmware now has. Null (unsynced) reads as HA's normal
-    // "unknown" state for the class, same as every other nullable field in this payload.
-    {"sensor",        "device_time",      "Device Time",         "time",             "",    "timestamp",        ""},
     {"binary_sensor", "bus_status",       "X10A Bus",            "bus_connected",    "",    "connectivity",     ""},
     // Source freshness, not link health — deliberately NOT device_class "connectivity"/"problem":
     // an outdoor unit resting is the normal state of a heat pump for most of the day, and typing it
@@ -234,9 +208,42 @@ inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
 inline constexpr int HEARTBEAT_SENSOR_COUNT =
     sizeof(HEARTBEAT_SENSORS) / sizeof(HEARTBEAT_SENSORS[0]);
 
+// HA entities this firmware ONCE published on the heartbeat topic and no longer does (RetiredHaSensor
+// + why a retraction is mandatory, logic/ha_device.hpp). Both were dropped under the rule that
+// already retired the crash topic's "Last Reset Reason": an entity that repeats what another one on
+// the same device already says is not a second reading, it is a second thing to rule out.
+//
+// `device_time` published the SNTP wall clock as a device_class "timestamp" sensor. Its stated
+// purpose was catching a drifted or never-synced clock, and every part of that failed in practice:
+// the value is re-sent every HEARTBEAT_INTERVAL_S, so HA renders it as "N seconds ago" — which is
+// what HA's own last_updated on any of the other entities here already says, for free and without a
+// clock. What it did do is change on EVERY heartbeat, i.e. one recorder row every 10 s, permanently,
+// for a fact no dashboard can read and no automation asked for. The two questions it was supposed to
+// answer are both still answered, and better: /status.ntp reports {server, synced, time} directly
+// (with `synced` false being the failure this actually catches), and syslog carries the same clock in
+// every RFC 5424 TIMESTAMP. A wall clock is worth REPORTING; it is not worth an entity.
+//
+// `wifi_quality` published wifi_signal_quality_pct(rssi) — 2*(rssi+100), clamped — beside the
+// "WiFi Signal" sensor carrying that very rssi. A deterministic function of another entity on the
+// same device carries no information of its own: it cannot disagree, cannot fail independently, and
+// cannot show anything dBm does not already show. A reader who prefers percent can template it in HA
+// from the dBm entity; the firmware should not publish the same measurement twice. The
+// `wifi_quality_pct` payload field went with it — it existed only to feed this entity, so keeping it
+// would leave the duplicate in every heartbeat while hiding it from the one consumer that showed it.
+inline const RetiredHaSensor RETIRED_HEARTBEAT_SENSORS[] = {
+    {"sensor", "device_time"},    // the wall clock: /status.ntp + syslog say it, an entity need not
+    {"sensor", "wifi_quality"},   // a pure function of "WiFi Signal" (rssi)
+};
+inline constexpr int RETIRED_HEARTBEAT_SENSOR_COUNT =
+    sizeof(RETIRED_HEARTBEAT_SENSORS) / sizeof(RETIRED_HEARTBEAT_SENSORS[0]);
+
+inline std::string heartbeat_discovery_topic(const std::string& prefix, const std::string& component,
+                                             const std::string& node, const std::string& object_id) {
+    return prefix + "/" + component + "/" + node + "/" + object_id + "/config";
+}
 inline std::string heartbeat_discovery_topic(const std::string& prefix, const std::string& node,
                                              const HeartbeatSensor& s) {
-    return prefix + "/" + s.component + "/" + node + "/" + s.object_id + "/config";
+    return heartbeat_discovery_topic(prefix, s.component, node, s.object_id);
 }
 
 inline std::string heartbeat_discovery_config(const std::string& node, const std::string& board_id,

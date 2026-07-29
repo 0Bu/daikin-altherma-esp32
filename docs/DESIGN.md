@@ -959,8 +959,9 @@ dashboard — the move changed where the configuration lives, not how it looks:
    - **NTP** — the configured **server**, coloured `--ok` once the first SNTP reply of this boot has
      landed, else `--warn` (there is no "Disabled" state — SNTP always has a configured server) —
      from `ntp{server,synced}`. The synced wall clock (`ntp.time`) is **not** shown on this row (no
-     room in a one-line tile); it remains available via the MQTT heartbeat's `device_time` sensor and
-     `/status.ntp.time`.
+     room in a one-line tile); it remains available from `/status.ntp.time` and every syslog
+     TIMESTAMP — and from no HA entity (the "Device Time" sensor is retired, ARCHITECTURE.md → *The
+     MQTT bridge*).
 2. **ESP32 card** — the board itself, styled exactly like the value groups (§6):
    the heat-pump link (Online/Offline) and X10A protocol, the **RX/TX pins** — read-only when
    detected, else a usable-GPIO dropdown (§5.2) — and the **Hardware** row (status indicator +
