@@ -52,13 +52,23 @@ static bool proto_answers(Protocol p) {
 // (DETECT_PAGE_TRIES - 1) extra 300 ms timeouts per genuinely-absent page, once per detect pass.
 static constexpr int DETECT_PAGE_TRIES = 3;
 
-static int read_page_retry(uint8_t reg, Protocol proto, uint8_t* out, int outmax, int& retries_used) {
+// `recovered` counts only the retries that SAVED a page — attempts beyond the first on a page that
+// then answered. Attempts spent on a page the unit simply does not have are NOT counted: every probe
+// sweep tries pages no single model carries (0x65 answers on none of the measured units), so counting
+// them made `retries=` read 3 on a perfectly healthy boot and an operator reading it would reasonably
+// conclude the bus was dropping frames. A diagnostic whose healthy baseline is non-zero trains its
+// reader to ignore it. Now 0 is healthy and any non-zero is a real dropped reply that the retry
+// caught — which is the number worth watching, since that is the failure #214 is about. A page that
+// never answered needs no counter: its bit is already absent from the page mask on the same line.
+static int read_page_retry(uint8_t reg, Protocol proto, uint8_t* out, int outmax, int& recovered) {
     for (int attempt = 0; attempt < DETECT_PAGE_TRIES; attempt++) {
         const int n = read_page(reg, proto, out, outmax);
-        if (n >= 0) return n;
-        retries_used++;
+        if (n >= 0) {
+            recovered += attempt;                    // 0 on a first-try answer
+            return n;
+        }
     }
-    return -1;
+    return -1;                                       // absent, not dropped — nothing to report
 }
 
 DetectResult hp_detect_run() {
@@ -137,7 +147,7 @@ DetectResult hp_detect_run() {
     uint8_t page20[32]; int len20 = -1;              // dump-only (below): O/U sensors + pressures
     uint8_t pageA0[32]; int lenA0 = -1;              // O/U-II rows — raw, for the diag dump below
     uint8_t pageA1[32]; int lenA1 = -1;
-    int probe_retries = 0;                           // dropped replies re-tried across the whole sweep
+    int probe_retries = 0;                           // dropped replies the retry RECOVERED (0 = healthy)
     for (uint8_t reg : PROBE_PAGES) {
         uint8_t pay[32];
         const int paylen = read_page_retry(reg, r.proto, pay, static_cast<int>(sizeof(pay)), probe_retries);
@@ -236,7 +246,8 @@ DetectResult hp_detect_run() {
 
     // `retries` is on this line rather than its own: a rising count is the early warning that the
     // page probe is working harder to hold the fingerprint together, which is the condition that
-    // used to change the model silently (#214).
+    // used to change the model silently (#214). It counts only retries that RECOVERED a page, so 0
+    // is the healthy reading and any non-zero is a reply that was actually dropped.
     diag_printf("detect: proto=%c rx=%d tx=%d pages=0x%04x kw=%d iu_kw=%d eeprom=[%s] retries=%d -> %d candidate(s), best=%s\n",
                 static_cast<char>(r.proto), r.rx, r.tx, static_cast<unsigned>(fp.page_mask),
                 fp.kw_tenths, fp.iu_kw_tenths, ee, probe_retries, n,

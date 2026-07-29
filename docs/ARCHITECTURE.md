@@ -711,9 +711,12 @@ just-wired unit is still identified promptly. A pass does:
    answer and **8 of them leave no candidate at all**, which lands the unit on `generic` (53 rows
    against ~99, with no leaving-water measurement, no compressor speed and no pressures). There is
    no page it is safe to drop, so the probe does not drop one lightly. The retry costs nothing on a
-   page that answers, and by this step the pins and framing are already proven (#214). The sweep's
-   retry count is reported on the `/diag` detect line as `retries=`, so a bus that is working harder
-   to hold its fingerprint together is visible before it changes the answer.
+   page that answers, and by this step the pins and framing are already proven (#214). The sweep
+   reports on the `/diag` detect line how many retries **recovered** a page, as `retries=` — so a bus
+   working harder to hold its fingerprint together is visible before it changes the answer. Only
+   recovered retries count: every sweep probes pages no single model carries (`0x65` answers on none
+   of the measured units), and counting those made a healthy boot read `retries=3`, which trains the
+   reader to ignore the number. `0` is healthy; any non-zero is a reply that was actually dropped.
 
    A page that answers with an **all-zero payload still sets its bit**, deliberately. Zeros mean the
    *feature* is absent, not the *page* — and the subset rule needs page presence. Suppressing such a
