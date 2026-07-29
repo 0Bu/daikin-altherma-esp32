@@ -300,11 +300,31 @@ host-testable core is unusually large and valuable, because the risky parts are 
   doing what hand-editing a generated table would do — move detection — or adding a per-cycle bus
   round-trip that, on a model which does not answer the page, reads on `/diag` exactly like a wiring
   fault.
+- `logic/cop_scope.hpp` — **which** COP the dashboard's quotient describes, and when it is none. The
+  pill divides a heat figure by an electrical one, and the two picks need not describe the same
+  *system*: a quotient of two correct numbers taken across two boundaries is not a worse COP, it is a
+  different quantity under the same name. The CT clamps (`0x63`) see the whole unit including both
+  resistive heaters; `INV primary current` (`0x21`) sees the compressor alone; the heat side is
+  `lwt_select`'s pre-BUH outlet, heat-pump heat with the heaters deliberately uncredited. INV
+  therefore pairs correctly — the heaters sit outside *both* sides and cannot unbalance them — while
+  CT does not, and the fix moves the **numerator** rather than the denominator: a whole-unit divisor
+  takes the post-BUH (R2T) outlet, the pairing [HOME_ASSISTANT.md](HOME_ASSISTANT.md) already
+  prescribes for an external meter. The two heaters are **not** the same problem, hence two block
+  codes: the BUH sits *in* the space-heating flow between R1T and R2T, so a downstream numerator
+  re-pairs it, while the BSH — the immersion heater inside the DHW tank — heats tank water directly,
+  downstream of the flow sensor and of both leaving-water sensors, so its kilowatts enter the divisor
+  while its heat crosses neither and *no* row would re-pair them. Unfixable rather than unfixed, so
+  it blocks whatever the R2T row says. Unknown heater state is not *off* — off is the permissive
+  branch here, the mirror of `ou_stale`'s "unknown rps is not stopped". The post-BUH picker takes the
+  row's **page**, never its label alone: `(R2T)` names the leaving-water outlet on `0x61/4` *and*
+  `Discharge pipe temp.(R2T)` on `0x20/4`, same offset and converter. Like `lwt_select` and
+  `ou_stale` there is no firmware caller — it exists so CI gates the rule against the whole catalog.
 - `logic/feature_gate.hpp` — which derived features may **honestly** run on the detected model, and
   the answer when they cannot: **disable, never degrade** (issue #69 step 0.2 / #110 Part C). It is
-  the same rule the UI already applies twice — `lwt_select` blanks ΔT/heat/COP rather than
+  the same rule the UI already applies three times — `lwt_select` blanks ΔT/heat/COP rather than
   substituting a setpoint (#121), `ou_stale` blanks a held-over pill rather than showing a dimmer
-  register of half-valid numbers — because a reduced feature set is that already-rejected second
+  register of half-valid numbers, `cop_scope` blanks the quotient rather than pairing two boundaries
+  that do not match — because a reduced feature set is that already-rejected second
   vocabulary wearing a new name, and because a model fit on a feature vector does not degrade
   gracefully when columns disappear, it just becomes confident about a distribution it never saw.
   Coverage is read off the **rows**, not off `profile == "generic"`: `generic` is the extreme case

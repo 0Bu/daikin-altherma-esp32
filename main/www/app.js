@@ -2195,6 +2195,23 @@ const vLwt = () => {
   const n = parseFloat(r.value);
   return Number.isFinite(n) ? n : null;
 };
+// The POST-BUH (R2T) leaving-water measurement — the COP numerator when the electrical figure is a
+// WHOLE-UNIT one. Host-tested twin: main/logic/cop_scope.hpp cop_is_post_buh / cop_post_buh_select
+// (test/test_logic.cpp test_cop_scope), gated against the whole catalog; keep the tokens below
+// byte-for-byte in sync with it and with lwtWater/lwtReject above.
+// The PAGE is half the address, not defensive style: "(R2T)" also names the compressor's discharge
+// pipe on 0x20/4 — same offset, same converter as the water row on 0x61/4. The water tokens happen
+// to separate those two today, but that is how one row was spelled, not a property of the data; a
+// row on a page the outdoor unit stops refreshing is a held-over reading whatever it is called, and
+// a held-over temperature must never reach a heat figure presented as current.
+const postBuhRow = () => {
+  const vals = (S._values || []).filter((x) => x.value != null);
+  return vals.find((x) => {
+    const l = (x.label || "").toLowerCase();
+    return !OU_HELD_PAGES.includes(x.reg) && l.includes("r2t") &&
+           !l.includes("setpoint") && !l.includes("mixed") && lwtWater(l);
+  }) || null;
+};
 const fmt1 = (n) => (n == null ? "—" : n.toFixed(1));
 const fmt0 = (n) => (n == null ? "—" : String(Math.round(n)));
 const setTxt = (id, s) => { const el = $(id); if (el && el.textContent !== s) el.textContent = s; };
@@ -2299,14 +2316,57 @@ function liveData() {
   // — the #35-#39 shape, and the same reason d.circP already gates. Asserted against the whole
   // catalog by logic/ou_stale.hpp's test (which page each of these two rows lives on).
   const invLive = !d.ouHeldOver && inv != null;
-  d.pel = cts.length && ct > 0 ? ct * 230 / 1000 : invLive ? inv * 230 / 1000 : null;
-  d.pelSrc = cts.length && ct > 0 ? "CT" : "INV";
+  const ctLive  = cts.length > 0 && ct > 0;
+  d.pel = ctLive ? ct * 230 / 1000 : invLive ? inv * 230 / 1000 : null;
+  // NULL when neither source is usable — the third state the old two-way expression could not say.
+  // It is what decides the COP's SCOPE below, so "no source" must not read as "the inverter".
+  d.pelSrc = ctLive ? "CT" : invLive ? "INV" : null;
   // Why the pill is blank, when it is: the INV source EXISTS but is frozen, which is a different
   // statement from "this profile has no current sensor" (the sub-label's other empty case) — so the
   // sub-label stays silent here and the explainer says which of the two it is.
   d.pelHeld = d.pel == null && d.ouHeldOver && inv != null;
+  // ── WHICH COP this quotient is, and when it is none ─────────────────────────────────────────
+  // Transcribed from logic/cop_scope.hpp's cop_plan() — same branches, same order, so a change
+  // there is visibly a change here (test_cop_scope gates the rule against the whole catalog).
+  //
+  // The two electrical sources sit on different SYSTEM BOUNDARIES: the CT clamps see the whole unit
+  // including both resistive heaters, "INV primary current" only the compressor. The heat side above
+  // is the PRE-BUH outlet (lwtRow) — heat from the heat pump's own exchanger, with the heaters
+  // deliberately not credited to it. Divide a whole-unit denominator into that numerator and a
+  // heater's kilowatts land in the divisor while its heat never reaches the dividend: the quotient
+  // collapses, and reads as a failing heat pump while nothing at all is wrong.
+  //
+  // The two heaters are NOT the same problem. The BUH sits in the space-heating flow between R1T and
+  // R2T, so moving the NUMERATOR downstream of it re-pairs the boundaries. The BSH is the immersion
+  // heater inside the DHW tank: it heats tank water directly, downstream of the flow sensor and of
+  // both leaving-water sensors, so no row in the profile would re-pair them and the only honest
+  // answer is to state nothing. d.pth itself is untouched throughout — its own pill states the heat
+  // pump's output and that is what it must keep saying.
+  const pbRow  = postBuhRow();
+  const pbT    = pbRow ? parseFloat(pbRow.value) : NaN;
+  // The row must also have a usable number and a return temperature to pair with, or it cannot
+  // carry the boundary — fall through to the no-row branch, which blocks while the heater fires.
+  const pbOk   = pbRow != null && Number.isFinite(pbT) && d.ret != null;
+  const buhKnown = d.buh1 != null || d.buh2 != null;
+  const buhOn    = d.buh1 === true || d.buh2 === true;
+  // UNKNOWN is not OFF, for either heater. Off is the permissive branch, so guessing it is exactly
+  // what would ship the collapsed quotient — the mirror of ou_stale's "unknown rps is not stopped".
+  const heaterQuiet = buhKnown && !buhOn;
+  const tankQuiet   = d.bsh != null && d.bsh !== true;
+  if (d.pelSrc == null)      { d.copScope = null;    d.copBlock = "no_pel";     d.copPostBuh = false; }
+  else if (d.pelSrc === "INV") { d.copScope = "hp";  d.copBlock = null;         d.copPostBuh = false; }
+  // Checked before the numerator is picked: no choice of row answers the tank heater, so claiming
+  // one would imply a pairing that does not exist.
+  else if (!tankQuiet)       { d.copScope = "plant"; d.copBlock = "tank_heater"; d.copPostBuh = false; }
+  else if (pbOk)             { d.copScope = "plant"; d.copBlock = null;         d.copPostBuh = true;  }
+  else                       { d.copScope = "plant"; d.copBlock = heaterQuiet ? null : "buh_no_r2t";
+                               d.copPostBuh = false; }
+  // The COP's own heat figure: the same formula as d.pth, across whichever outlet the scope needs.
+  const copDt = d.copPostBuh ? pbT - d.ret : d.dt;
+  d.copPth = d.flow != null && copDt != null ? d.flow / 60 * 4.186 * copDt : null;
   const running = (d.rps ?? 0) > 5 && (d.dt ?? 0) > 0.5;
-  d.cop = running && d.pth != null && d.pel != null && d.pel > 0.2 ? d.pth / d.pel : null;
+  d.cop = running && d.copBlock == null && d.copPth != null && d.pel != null && d.pel > 0.2
+    ? d.copPth / d.pel : null;
   return d;
 }
 
@@ -2567,24 +2627,57 @@ const INSPECT = {
       de: "Eine SCHÄTZUNG, keine Messung — auf dem Bus gibt es kein Energieregister. Berechnet aus Durchflussmenge und ΔT über die Wärmekapazität von Wasser (4,186 kJ/kg·K), also nur so genau wie der Durchflusssensor und die beiden Wassertemperaturen; gezählt wird nur die Wärme aus dem Wärmetauscher der Wärmepumpe (der Zusatzheizer sitzt dahinter). Beim Abtauen wird der Wert negativ — das ist echt: dem Wasser wird Wärme entzogen.",
     },
     head: (d) => (d.pth == null ? "—" : "≈ " + fmt1(d.pth) + " kW"),
+    // The COP is quoted here only while it is built on THIS figure. With a whole-unit electrical
+    // input the quotient moves to the post-BUH outlet (logic/cop_scope.hpp), so it is no longer
+    // this pill's number divided by anything — printing it beside this one would attach a plant
+    // ratio to a heat-pump-only heat output and invite exactly the boundary mix-up the split
+    // exists to prevent. The COP pill states it, with its own scope named.
     now: (d) => d.pth == null ? null
-      : { en: `≈ ${fmt1(d.pth)} kW${d.cop != null ? `, about ${d.cop.toFixed(1)} kW of heat per kW of electricity (COP)` : ""}.`,
-          de: `≈ ${fmt1(d.pth)} kW${d.cop != null ? `, etwa ${d.cop.toFixed(1)} kW Wärme je kW Strom (COP)` : ""}.` },
+      : { en: `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, about ${d.cop.toFixed(1)} kW of heat per kW of electricity (COP)` : ""}.`,
+          de: `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, etwa ${d.cop.toFixed(1)} kW Wärme je kW Strom (COP)` : ""}.` },
     rows: [/flow sensor/i, /target delta t heating/i, /current measured by ct/i, /inv primary current/i],
   },
   // Its own pill next to the heat output, so its own entry — and the one derived figure with no
   // catalog row behind it at all, hence copy written here rather than pulled from DESCRIPTIONS.
+  //
+  // The TITLE is live (see inspTitleText), because a COP is not one quantity. Which system the
+  // quotient describes follows the electrical source — whole-unit CT clamps give a PLANT COP, the
+  // inverter current a HEAT-PUMP one — and the two are different numbers whenever the backup heater
+  // runs. They look identical on the pill, so naming which one this is has to happen here or
+  // nowhere. The rule and the matching numerator are logic/cop_scope.hpp, gated over the catalog.
   cop: {
-    t: { en: "COP (estimated)", de: "COP (geschätzt)" },
+    t: (d) => (d && d.copScope === "plant"
+      ? { en: "COP of the plant (estimated)", de: "COP der Anlage (geschätzt)" }
+      : { en: "COP of the heat pump (estimated)", de: "COP der Wärmepumpe (geschätzt)" }),
+    // The hit target's accessible name — stable, because it is applied once at startup (see
+    // labelSchematicHits). Which COP it turns out to be is the panel's to say, not the label's.
+    aria: { en: "COP (estimated)", de: "COP (geschätzt)" },
     what: {
-      en: "Heat out divided by electricity in — how many kW of heat the plant delivered per kW it drew. It is a quotient of the two ESTIMATES either side of it, so it inherits every assumption both of them make, and it is only as honest as the current it divides by: an inverter-current input sees the compressor alone, so the COP flatters whenever the backup heater is firing. It means nothing with the compressor stopped and shows \"—\" then.",
-      de: "Wärme raus geteilt durch Strom rein — wie viele kW Wärme die Anlage je aufgenommenem kW geliefert hat. Ein Quotient der beiden SCHÄTZUNGEN daneben, er erbt also sämtliche Annahmen von beiden, und er ist nur so ehrlich wie der Strom, durch den geteilt wird: Ein Inverterstrom erfasst nur den Verdichter, der COP fällt also zu schön aus, sobald der Zusatzheizer heizt. Bei stehendem Verdichter bedeutet er nichts und zeigt dann „—\".",
+      en: "Heat out divided by electricity in — how many kW of heat came out per kW that went in. Both sides must describe the SAME system or the quotient is not a COP at all: with whole-unit CT clamps the heat is measured after the backup heater, with the inverter current it is measured before it, so this reads as the plant's efficiency in one case and the heat pump's own in the other. It is a quotient of two ESTIMATES and inherits every assumption both make — and the accuracy is set by the heat side, not the electrical one: two uncalibrated factory sensors ±0.5–1 K across a ΔT of about 5 K already put the live figure within roughly ±15–25 %. Treat it as a working indication; the trustworthy number is the seasonal one (SCOP/JAZ), integrated from metered energy outside this device. It means nothing with the compressor stopped and shows \"—\" then.",
+      de: "Wärme raus geteilt durch Strom rein — wie viele kW Wärme je aufgenommenem kW herauskamen. Beide Seiten müssen dasselbe System beschreiben, sonst ist der Quotient gar kein COP: Mit Stromwandlern am ganzen Gerät wird die Wärme nach dem Zusatzheizer gemessen, mit dem Inverterstrom davor — einmal ist das die Effizienz der Anlage, einmal die der Wärmepumpe selbst. Ein Quotient zweier SCHÄTZUNGEN, der sämtliche Annahmen von beiden erbt — und die Genauigkeit bestimmt die Wärmeseite, nicht die elektrische: zwei unkalibrierte Werksfühler mit ±0,5–1 K über ein ΔT von rund 5 K legen den Live-Wert bereits auf etwa ±15–25 % fest. Als Arbeitsanhalt lesen; belastbar ist die Jahreszahl (SCOP/JAZ), integriert aus gemessener Energie außerhalb dieses Geräts. Bei stehendem Verdichter bedeutet er nichts und zeigt dann „—\".",
     },
     head: (d) => (d.cop == null ? "—" : d.cop.toFixed(1)),
-    now: (d) => d.cop == null ? null
-      : { en: `${d.cop.toFixed(1)} kW of heat per kW of electricity — ≈ ${fmt1(d.pth)} kW out for ≈ ${fmt1(d.pel)} kW in.`,
-          de: `${d.cop.toFixed(1)} kW Wärme je kW Strom — ≈ ${fmt1(d.pth)} kW raus für ≈ ${fmt1(d.pel)} kW rein.` },
-    rows: [/flow sensor/i, /current measured by ct/i, /inv primary current/i],
+    // Four outcomes, four sentences. A suppressed wrong claim must not be replaced by another one,
+    // so "the heater is firing and this profile has no post-BUH sensor" and "there is no current
+    // reading at all" cannot share a sentence — they are different facts about the hardware.
+    now: (d) => d.copBlock === "tank_heater"
+      ? { en: "No COP right now — the tank's electric heater is on. Its power is inside the whole-unit current this COP would divide by, but its heat goes straight into the tank and crosses neither leaving-water sensor, so no measurement here can balance the two. This is not a gap in the profile: there is no reading anywhere on the bus that would.",
+          de: "Derzeit kein COP — der Heizstab im Speicher läuft. Seine Leistung steckt im Gesamtstrom, durch den hier geteilt würde, seine Wärme geht aber direkt in den Speicher und passiert keinen der Vorlauffühler; kein Messwert kann die beiden also ausgleichen. Das ist keine Lücke des Profils: auf dem Bus gibt es keinen Wert, der es könnte." }
+      : d.copBlock === "buh_no_r2t"
+      ? { en: "No COP right now — the backup heater is firing, and the electrical figure covers the whole unit while this profile has no leaving-water sensor after the heater to match it. Dividing the two would compare the heat pump's heat against the whole plant's electricity and understate the result.",
+          de: "Derzeit kein COP — der Zusatzheizer heizt, und der Strommesswert erfasst das ganze Gerät, während dieses Profil keinen Vorlauffühler hinter dem Heizer hat, der dazu passt. Beides zu teilen, hielte die Wärme der Wärmepumpe gegen den Strom der ganzen Anlage und fiele zu niedrig aus." }
+      : d.cop == null ? null
+      : d.copScope === "plant"
+      ? { en: `${d.cop.toFixed(1)} kW of heat per kW of electricity for the whole plant — ≈ ${fmt1(d.copPth)} kW out for ≈ ${fmt1(d.pel)} kW in, both counted after the backup heater.`,
+          de: `${d.cop.toFixed(1)} kW Wärme je kW Strom für die ganze Anlage — ≈ ${fmt1(d.copPth)} kW raus für ≈ ${fmt1(d.pel)} kW rein, beides hinter dem Zusatzheizer gezählt.` }
+      : { en: `${d.cop.toFixed(1)} kW of heat per kW of electricity for the heat pump itself — ≈ ${fmt1(d.copPth)} kW out for ≈ ${fmt1(d.pel)} kW in. The backup heater is outside both figures, so this does not fall when it fires; what the plant as a whole draws is higher.`,
+          de: `${d.cop.toFixed(1)} kW Wärme je kW Strom für die Wärmepumpe selbst — ≈ ${fmt1(d.copPth)} kW raus für ≈ ${fmt1(d.pel)} kW rein. Der Zusatzheizer steht außerhalb beider Werte, der COP sinkt also nicht, wenn er heizt; die Anlage insgesamt zieht mehr.` },
+    // The numerator's own row, but ONLY while the plan actually uses it (d.copPostBuh) — listing it
+    // under a heat-pump COP would name an input that figure never touched. Resolved through the one
+    // postBuhRow(), never a second pattern: a looser copy here is exactly how the (R2T) tag would
+    // start matching the discharge pipe again. pickRow already takes a function (see its definition).
+    rows: [/flow sensor/i, () => (S.live && S.live.copPostBuh ? postBuhRow() : null),
+           /current measured by ct/i, /inv primary current/i, /buh step ?1/i, /^bsh$/i],
   },
   buh: {
     t: { en: "Backup heater (BUH)", de: "Zusatzheizer (BUH)" },
@@ -2671,8 +2764,8 @@ const INSPECT = {
   pel: {
     t: { en: "Electrical input (estimated)", de: "Stromaufnahme (geschätzt)" },
     what: {
-      en: "What the unit is drawing from the mains, and the divisor of the COP. Also an ESTIMATE: it is measured current × an assumed 230 V, so it ignores power factor. Which current matters — CT clamps see the whole unit including the backup heater, the inverter current sees only the compressor, so an INV-based figure understates consumption whenever the backup heater is firing (and the COP shown is then too flattering).",
-      de: "Was das Gerät aus dem Netz zieht, und der Nenner des COP. Ebenfalls eine SCHÄTZUNG: gemessener Strom × angenommene 230 V, der Leistungsfaktor bleibt also unberücksichtigt. Welcher Strom, ist entscheidend — Stromwandler (CT) erfassen das ganze Gerät inklusive Zusatzheizer, der Inverterstrom nur den Verdichter; ein INV-Wert unterschätzt den Verbrauch also, sobald der Zusatzheizer heizt (und der gezeigte COP ist dann zu schön).",
+      en: "What the unit is drawing from the mains, and the divisor of the COP. Also an ESTIMATE: it is measured current × an assumed 230 V, so it ignores power factor. Which current it is decides what the COP above describes — CT clamps see the whole unit including the backup heater, the inverter current sees only the compressor. An inverter-based figure is not the plant's consumption and does not rise when the backup heater fires; the COP beside it is then the heat pump's own and says so.",
+      de: "Was das Gerät aus dem Netz zieht, und der Nenner des COP. Ebenfalls eine SCHÄTZUNG: gemessener Strom × angenommene 230 V, der Leistungsfaktor bleibt also unberücksichtigt. Welcher Strom es ist, entscheidet, was der COP darüber beschreibt — Stromwandler (CT) erfassen das ganze Gerät inklusive Zusatzheizer, der Inverterstrom nur den Verdichter. Ein Inverterwert ist nicht der Verbrauch der Anlage und steigt nicht, wenn der Zusatzheizer heizt; der COP daneben ist dann der der Wärmepumpe selbst und sagt das auch.",
     },
     head: (d) => (d.pel == null ? "—" : "≈ " + fmt1(d.pel) + " kW"),
     // Three cases, not two: the profile has no current row at all, or it has one but it is the
@@ -2828,6 +2921,14 @@ const inspNowText = (e, d) => {
   return e.now ? tx(e.now(d)) : null;
 };
 
+// An entry's title, which may DEPEND on the live values — `t` takes the same {en,de}-or-function
+// shape `head` and `now` already do. Only the COP uses it: which system its quotient describes is
+// decided per poll (logic/cop_scope.hpp), and the title is where that has to be said, since the
+// number itself looks identical either way. Resolved through one helper so renderInspect and
+// inspectSig cannot disagree about it — a dynamic title left out of the signature would simply
+// stop repainting when the scope flipped.
+const inspTitleText = (e, d) => tx(typeof e.t === "function" ? e.t(d) : e.t);
+
 // Everything the panel would draw, as one string — the change key for the render guard above. It
 // covers the selection, the headline, the live sentence and every member reading, so a value moving
 // still repaints while an idle second does not.
@@ -2836,7 +2937,8 @@ function inspectSig(e) {
   const d = S.live;
   const row = d ? inspRow(e) : null;
   const rows = (d && e.rows ? e.rows.map((sel) => inspVal(pickRow(sel), d)) : []).join(",");
-  return [S.insp, inspVal(row, d), d && e.head ? e.head(d) : "", inspNowText(e, d) || "", rows].join("|");
+  return [S.insp, inspTitleText(e, d), inspVal(row, d), d && e.head ? e.head(d) : "",
+          inspNowText(e, d) || "", rows].join("|");
 }
 
 // The trend under the inspector: the same sparkline the value list draws (histHtml), for the row
@@ -2882,7 +2984,7 @@ function renderInspect() {
   if (!e) return;
   const d = S.live;                       // null while the X10A link is down → readings show "—"
   const row = d ? inspRow(e) : null;
-  setTxt("inspTitle", tx(e.t));
+  setTxt("inspTitle", inspTitleText(e, d));
   // The source line names the /values row this pill is drawn from, so a number in the picture can be
   // traced to the register list below. Falls back to the canonical label when the row is absent.
   setTxt("inspSrc", displayReadingLabel(row ? row.label : (e.sample || "")));
@@ -2917,7 +3019,14 @@ function labelSchematicHits() {
   document.querySelectorAll("#schem [data-insp]").forEach((el) => {
     const e = INSPECT[el.dataset.insp];
     if (!e) return;
-    const name = tx(e.t);
+    // An entry whose TITLE is live (the COP names the system it describes, and that follows the
+    // electrical source) cannot supply the accessible name: this runs ONCE at startup, before any
+    // reading exists, and is never re-applied — so a live title would be frozen at whatever it
+    // happened to say then. `aria` is the stable concept the target opens; the live distinction
+    // belongs in the panel, which is where a screen reader meets it too. Falling back through
+    // inspTitleText rather than tx() keeps a future function-form title a real string instead of
+    // the literal "undefined" that tx() returns for a function.
+    const name = e.aria ? tx(e.aria) : inspTitleText(e, null);
     el.setAttribute("aria-label", name);
     const ttl = document.createElementNS(SVGNS, "title");
     ttl.textContent = name;

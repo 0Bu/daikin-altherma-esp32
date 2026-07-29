@@ -587,7 +587,7 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 wifi_rollback, health_gate, version_cmp, ota_manifest, ota_channel, ws_policy, ws_tx_gate,
                 http_body, http_surface, query_flag, redact, mcp_jsonrpc, timestamp, uart_plan, detect_backoff,
                 hexdump, led_pattern, button, captive,
-                lwt_select, ou_stale, profile_view, feature_gate).
+                lwt_select, ou_stale, cop_scope, profile_view, feature_gate).
                 error_codes.hpp = the optional code -> short-English-description lookup layered on
                 conv 204's raw fault code (hp_convert.cpp), e.g. "U4: Indoor/outdoor unit
                 communication problem". Presentation only: it never changes what conv 204 DECODES,
@@ -754,6 +754,54 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 and "this profile has no current row" with two different sentences, since suppressing
                 one wrong claim must not substitute another (the profile HAS a current row; it is
                 the reading that is not current)
+                cop_scope.hpp = WHICH COP the dashboard's quotient describes, and when it is none.
+                The COP pill divides a heat figure by an electrical one, and the two picks need not
+                describe the same SYSTEM — a quotient of two correct numbers across two boundaries is
+                not a worse COP, it is a different quantity under the same name. The CT clamps (0x63)
+                see the WHOLE unit including the backup heater; "INV primary current" (0x21) sees the
+                compressor alone; the heat side is lwt_select's PRE-BUH outlet, i.e. heat-pump heat
+                with the resistive heater deliberately uncredited. So INV pairs correctly (the heater
+                is outside BOTH sides and cannot unbalance them — a HEAT-PUMP COP, valid with the
+                heater firing), while CT does NOT: the heater's kilowatts land in the divisor while
+                its heat never reaches the dividend, and the quotient COLLAPSES exactly when the
+                heater runs — a number that reads as a failing heat pump while nothing is wrong. The
+                fix is to move the NUMERATOR, not the denominator: a whole-unit divisor takes the
+                POST-BUH (R2T) outlet, which is what docs/HOME_ASSISTANT.md's heat-meter recipe
+                already does for an external meter. d.pth itself is untouched — its own pill states
+                the heat pump's output and must keep saying so. Where no honest pairing exists (CT +
+                heater firing + no R2T row) the answer is feature_gate.hpp's rule: publish NOTHING.
+                There are TWO resistive heaters and they are NOT the same problem — hence two block
+                codes. The BUH sits in the space-heating flow BETWEEN R1T and R2T, so its heat does
+                cross the water circuit and moving the numerator downstream re-pairs the boundaries.
+                The BSH is the immersion heater INSIDE the DHW tank: it heats tank water directly,
+                downstream of the flow sensor and of BOTH leaving-water sensors, so its kilowatts
+                enter a whole-unit divisor while its heat crosses neither R1T nor R2T and NO row in
+                the profile would re-pair them. Unfixable, not merely unfixed — so CT + BSH is a
+                block whatever the R2T row says, and the UI names it as the different fact it is
+                (the profile is not lacking a reading; the bus has none that would). It bites exactly
+                where the rule is aimed: all 21 CT-clamp profiles carry a BSH row, the heater can run
+                with compressor, pump and flow at zero, and the test asserts that CT implies BSH so
+                the block can never depend on an input a profile cannot supply.
+                UNKNOWN heater state is NOT off — off is the PERMISSIVE branch here, so guessing it
+                is precisely what would ship the collapsed quotient (the mirror of ou_stale's
+                "unknown rps is not stopped"); measured, this costs nothing, since 43 of the 44
+                profile tables carry BUH Step1/2, all 44 carry a post-BUH row, and the BUH rows sit
+                on page 0x60, which stays LIVE while the outdoor unit sleeps — the one input that
+                could have been stale is not. The post-BUH picker takes the row's PAGE, not its label
+                alone, because the catalog REUSES the tag: "(R2T)" names the leaving-water outlet on
+                0x61/4 AND "Discharge pipe temp.(R2T)" on 0x20/4 — same offset, same converter 105,
+                14 profiles. The water-token test happens to separate those two today, but that is
+                how one row was spelled, not a property of the data (the accident history.hpp refuses
+                to rely on for "(R1T)"); the page carries the guarantee the tokens cannot — a row on
+                a page the outdoor unit stops refreshing is a HELD-OVER reading whatever it is
+                called, and a held-over temperature must never reach a heat figure presented as
+                current. Like lwt_select and ou_stale there is no firmware caller: it exists so the
+                CI logic-test gates the rule against the whole catalog (exactly one post-BUH row per
+                profile, always on a live page, never the same row lwt_select picked). The UI half is
+                a LIVE inspector title — "COP of the plant" vs "COP of the heat pump", since the two
+                are different numbers and look identical on the pill — plus a distinct sentence per
+                block reason, the same "suppressing one wrong claim must not substitute another" rule
+                the pel explainer already follows
                 profile_view.hpp = the active model's rows AS EVERY CONSUMER MUST SEE THEM: the
                 generated table plus the def/overlay.hpp supplement, as ONE indexable sequence (two
                 spans, no allocation — the poll path reads it every second). One view rather than four
@@ -774,9 +822,10 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 is what a refactor would remove
                 feature_gate.hpp = which derived features may HONESTLY run on the detected model, and
                 the answer when they cannot: DISABLE, NEVER DEGRADE (#69 step 0.2 / #110 Part C). The
-                same rule the UI already applies twice — lwt_select blanks ΔT/heat/COP rather than
-                substituting a setpoint (#121), ou_stale blanks a held-over pill rather than showing a
-                dimmer register of half-valid numbers — so a "reduced feature set" is that
+                same rule the UI already applies three times — lwt_select blanks ΔT/heat/COP rather
+                than substituting a setpoint (#121), ou_stale blanks a held-over pill rather than
+                showing a dimmer register of half-valid numbers, cop_scope blanks the quotient rather
+                than pairing two boundaries that do not match — so a "reduced feature set" is that
                 already-rejected second vocabulary under a new name; and a rule (or model) fit on a
                 feature vector does not degrade gracefully when columns vanish, it just gets confident
                 about a distribution it never saw, which is the "pretend full features" outcome #69
