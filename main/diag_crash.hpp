@@ -27,4 +27,16 @@ bool             diag_crash_coredump_present();
 // cache in place would race the WS broadcaster / HTTP / MQTT tasks that read it concurrently.
 CrashInfo        diag_crash_info_live();
 
+// Acknowledge + DELETE this boot's crash report (POST /crash/dismiss). Erases the core-dump image
+// from flash and then marks the cached CrashInfo dismissed, so crash_is_notable() is false
+// everywhere at once: /status.last_crash goes null, the retained MQTT crash topic is cleared on the
+// next heartbeat tick, and the web UI's banner stays gone across reloads and browsers.
+//
+// Ordering is the contract: the erase happens FIRST and a failure returns false WITHOUT marking
+// anything — a dismissal that survived a failed erase would report "no crash" while the dump was
+// still sitting in flash, which is the one direction this must not fail in. Erasing an already-empty
+// partition is success (nothing to delete is the state being asked for), so a fault reset with no
+// dump dismisses fine.
+bool             diag_crash_dismiss();
+
 } // namespace daik

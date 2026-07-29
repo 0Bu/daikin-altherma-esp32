@@ -26,6 +26,7 @@ by the object id alone — see below for why.
 <base>/state                                       {<group>: {<object_id>: value, …}, …}  (retained JSON)
 <base>/heartbeat                                   board/link diagnostics (flat JSON, 10 s cadence)
 <base>/crash                                       crash report, retained — ONLY on a fault/dump boot; cleared otherwise
+                                                   (also cleared when the report is deleted in the web UI, POST /crash/dismiss)
 <prefix>/<component>/<node>/<group>_<object_id>/config    discovery config per PUBLISHED value (retained)
 ```
 

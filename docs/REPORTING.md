@@ -129,7 +129,7 @@ form](https://github.com/0Bu/daikin-altherma-esp32/security/advisories/new) inst
 | The wrong model was detected | The model names from the sticker on **both** units, and a report collected after a re-detect. |
 | No readings at all | How the two wires are connected to X10A. |
 | Home Assistant / MQTT | The affected entity ids and what Home Assistant shows for them (`unavailable`, `unknown`, a duplicate device). |
-| Crashes or restarts | Whether the web page showed a crash banner — but not the dump itself (see above). |
+| Crashes or restarts | Whether the web page showed a crash banner — but not the dump itself (see above). Collect the report **before** you press *Delete report* on that banner: deleting it erases the dump and the crash record on the device, and nothing can bring either back. |
 | Anything that comes and goes | Syslog. See below. |
 
 ### About syslog

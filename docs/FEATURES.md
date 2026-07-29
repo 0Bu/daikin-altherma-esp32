@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte — it both ranks the representative and **narrows the candidate set**, dropping only classes that contradict it, **retried page probe + a second-sweep confirmation** before falling back to `generic`) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1826 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1832 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -85,6 +85,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 55 | **24-hour plant checkup** — the third question the dashboard answers, after *what is it doing now* (the schematic) and *what did this one reading do today* (the trends): **is anything worth reporting?** Counted events and window minima — compressor starts and mean run length, defrost count and share of runtime, the lowest water pressure and flow, backup-heater minutes, the unit's fault class, the protection-retry counters — judged on the device and served as `/status.health`, rendered as the dashboard's Checkup card. It is deliberately **not** a view over the trend rings (row 42): `TrendRing::fold` keeps only the *last* reading of each 5-minute bucket, so a compressor cycle shorter than five minutes leaves no trace — the short cycling the check exists to find is exactly what that raster cannot see, so events are counted on the 1 Hz poll path instead. A row is addressed by **(page, offset, converter)**, one key wider than a trend's locator, because `2way valve`, `3way valve`, `BSH`, `BUH Step1`, `BUH Step2`, `Water pump operation` and `Solar pump operation` — **seven** rows — share one dimensionless byte (`0x60/12`) and differ only in the bit their converter masks, so a (page, offset, unit) locator would resolve "backup-heater minutes" onto the 2-way valve's position. Five verdicts, and the two that are not judgements are the design: `unavailable` (this profile cannot supply the inputs — only **27 of 44** carry the compressor witness) and `collecting` (the inputs exist, the window does not hold enough of them yet). `collecting` outranks `ok` in the aggregation and `unavailable` does not, so a board that rebooted an hour ago can never show a green verdict it has no evidence for. Three of the six checks [#208](https://github.com/0Bu/daikin-altherma-esp32/issues/208) proposed are **not** built, each because the bus cannot support the claim — valve leakage from the DHW cooling rate (a healthy plant with a circulation loop loses ~1.2 K/h against ~0.3 K/h without one, and the sensors sit upstream of the diverter anyway), an absolute minimum-flow threshold (per model across a 3–18 kW catalog; the flow minimum is reported with **no** verdict), and a flat daily start count (the mean run length is what knows the load) | ✅ 🧪 | [`logic/checkup.hpp`](../main/logic/checkup.hpp), [`checkup.cpp`](../main/checkup.cpp), [`http_status.cpp`](../main/http_status.cpp), [`www/app.js`](../main/www/app.js) |
 | 56 | **Group-scoped HA entity identity** — a value's `uniq_id` *and* the last segment of its discovery topic are `<group>_<object_id>`, not the label slug alone. Both are **flat** namespaces while a label is unique only within its register page, and the catalog carries *"Error Code"* on the outdoor page and on the hydronic one — so the second discovery config landed on the first one's retained topic under the first one's id, HA created **one** entity, and a unit reporting two faults showed one of them. Measured: 44 of 45 profiles collided, over five label slugs; on the live unit the surviving `error_code` entity read the *hydronic* fault, leaving the outdoor unit's — the row an automation alerts on — with no entity at all. Nothing errored, because the state payload was correct throughout (it nests by group), which is why this was invisible outside Home Assistant. The state key and the VictoriaMetrics series are deliberately **unchanged** ([#217](https://github.com/0Bu/daikin-altherma-esp32/issues/217)); the five reused labels are also *named* by their group, since HA derives the default `entity_id` from the name and two identically-named entities land as `…_2` | ✅ 🧪 | [`logic/discovery.hpp`](../main/logic/discovery.hpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`HOME_ASSISTANT.md`](HOME_ASSISTANT.md) |
 | 57 | **Doc entity-id gate** — the docs hand a reader copy-pasteable YAML naming Home Assistant entity ids, each derived from a catalog **label**, so an id is only as stable as the label — and the catalog spells one quantity several ways across models. A wrong id errors *nowhere*: HA builds the template sensor, its `availability` guard never becomes true, the entity sits at `unavailable`, and that reads as "my heat pump doesn't support this" rather than as a typo in the docs. Every other gate is green while it happens. Resolves each quoted id through the real `ha_slug` over the real catalog, and only against **detectable** profiles — the heat-meter recipe had named a row existing solely in the host-test fixture `altherma3_r_erga` since #206, which a whole-registry check would have passed. Deliberately not a demand that an id be right on *every* profile | ✅ | [`entity_id_audit.cpp`](../tools/docs/entity_id_audit.cpp), [`run-doc-entity-audit.sh`](../scripts/run-doc-entity-audit.sh), [`selftest.sh`](../tools/docs/selftest.sh) |
+| 58 | **Deleting a crash report** (`POST /crash/dismiss`) — the crash banner's dismiss was *page state*, so the first reload brought the same crash straight back and a second browser (or Home Assistant's retained crash entity) never saw the dismissal at all. It is now a device action: erase the dump image, **then** mark the cached `CrashInfo` dismissed, so `crash_is_notable()` is false everywhere at once — `/status.last_crash` goes `null`, the retained crash topic clears on the next heartbeat tick, and the banner is gone across reloads and browsers. Erase first, mark second: a failed erase answers `500` and marks nothing, since a dismissal that outlived it would report "no crash" with the dump still downloadable. RAM-only on purpose — after any reboot the reason is no longer a fault and the dump is gone, while a *new* crash must show, which a persisted dismissal could suppress. The reset **reason** is untouched, so the heartbeat's own sensor still says how the board rebooted. `POST`, not a `GET` beside `/coredump`: it destroys the one artifact a bug report needs, so no link or prefetch may reach it | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp), [`http_status.cpp`](../main/http_status.cpp), [`www/app.js`](../main/www/app.js) |
 
 ---
 
@@ -614,10 +615,24 @@ the fact*, from the field, without a serial cable:
   (and HA) as soon as the device reboots cleanly, i.e. once the problem is resolved. Clearing loses no
   information — the reset reason is carried unconditionally by the heartbeat's own "Reset Reason"
   sensor (`reset_reason_name` == `crash_reason_slug`, host-asserted). Published per (re)connect and
-  republished on the heartbeat cadence when the "dump waiting" flag changes, so it can't latch ON after
-  the dump is cleared (and an orphan-dump-only boot is then re-decided not-notable and cleared).
+  republished on the heartbeat cadence when the "dump waiting" flag **or the notability** changes, so
+  it can't latch ON after the dump is cleared (and an orphan-dump-only boot is then re-decided
+  not-notable and cleared).
   `static_assert`s pin the IDF reset-enum values so a renumbering fails the build rather than
   mislabeling every crash.
+- **✅ 🧪 Deleting a crash report (`POST /crash/dismiss`)** ([`diag_crash.cpp`](../main/diag_crash.cpp),
+  `CrashInfo::dismissed`): the crash banner's third action, and a *device* action rather than a
+  per-page hide — `diag_crash_dismiss()` erases the dump image and then marks the cached `CrashInfo`
+  dismissed, so `crash_is_notable()` is false everywhere at once: `/status.last_crash` goes `null`,
+  the retained MQTT crash topic clears on the next heartbeat tick, and the banner is gone across
+  reloads, browsers and Home Assistant. The old dismiss lived in page state alone and survived exactly
+  until the next reload. **Erase first, mark second** — a failed erase answers `500` and marks
+  nothing, since a dismissal outliving it would report "no crash" with the dump still downloadable.
+  RAM-only by design: after any reboot the reason is no longer a fault and the dump is gone, while a
+  *new* crash must show, which a persisted dismissal could suppress. The reset **reason** is
+  untouched, so the heartbeat's "Reset Reason" sensor and `/status.sys.reset_reason` still say how the
+  board rebooted. Because it destroys the one artifact a bug report needs, the UI asks first (a second
+  tap inside the banner) and the route is `POST`, unreachable by a link or a prefetch.
 - **✅ 🧪 20-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): on a fixed
   10 s cadence, `<base>/heartbeat` streams a **flat** JSON (each field prefixed by its block name —
   `wifi_rssi`, `wifi_mac`, `bus_rx_received`, … — no nested `wifi`/`mqtt`/`bus` sub-objects) of heap
@@ -1016,7 +1031,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   catalog sweep proving each `(page, offset, converter)` locator resolves to **exactly one** row
   **and to the right one**, asserted on the resolved row's own label, because six other rows share
   the `0x60/12` byte and every one of them would satisfy a page+offset match),
-  **1826 `CHECK`s** in
+  **1832 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -1261,7 +1276,7 @@ and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 20-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1826 checks),
+on the host** (1832 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

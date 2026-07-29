@@ -717,6 +717,27 @@ static esp_err_t h_coredump(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// POST /crash/dismiss — acknowledge + DELETE this boot's crash report: erase the core-dump image and
+// mark the cached CrashInfo dismissed (diag_crash_dismiss()), so /status.last_crash goes null, the
+// retained MQTT crash topic clears on the next heartbeat tick, and the UI banner is gone for good
+// rather than for one page view.
+//
+// Separate from /coredump?clear=1 rather than folded into it, because they answer different
+// questions: clearing frees the flash slot for the NEXT dump and deliberately leaves the fault reset
+// on record, while this says the crash itself has been dealt with. A fault reset carries no dump at
+// all in the common case (a stack overflow overruns the dump too), and there ?clear=1 changes
+// nothing the banner keys on.
+//
+// POST, unlike the GET it sits beside: this destroys the one piece of evidence a bug report needs
+// (docs/REPORTING.md), so it must not be reachable by a link, a prefetch or a crawler.
+static esp_err_t h_crash_dismiss(httpd_req_t* req) {
+    if (!diag_crash_dismiss()) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"coredump erase failed\"}");
+    }
+    return http_send_json(req, "{\"ok\":true}");
+}
+
 static esp_err_t h_scan(httpd_req_t* req) {
     WifiScanEntry e[20];
     int n = wifi_scan(e, 20);
@@ -990,6 +1011,7 @@ void http_register_status(httpd_handle_t s, HttpSurface surface) {
     http_register(s, "/models", HTTP_GET, h_models);
     http_register(s, "/diag", HTTP_GET, h_diag);
     http_register(s, "/coredump", HTTP_GET, h_coredump);
+    http_register(s, "/crash/dismiss", HTTP_POST, h_crash_dismiss);
 }
 
 // Captive-portal / SPA catch-all — registered LAST (after every specific route) so it only handles

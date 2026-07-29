@@ -39,9 +39,14 @@ const I18N = {
     "crash.title_fault": "Device restarted after a crash",
     "crash.title_orphan": "Crash report waiting from an earlier restart",
     "crash.reset": "Reset", "crash.task": "task", "crash.fw": "fw", "crash.elf": "elf", "crash.corrupted": "corrupted",
-    "crash.download": "Download crash report", "crash.copy": "Copy diagnostics", "crash.dismiss": "Dismiss",
+    "crash.download": "Download crash report", "crash.copy": "Copy diagnostics", "crash.dismiss": "Delete report",
     "crash.copied": "Diagnostics copied — paste into a bug report",
     "crash.copy_fail": "Copy failed — open /coredump and /diag manually",
+    "crash.ask_dump": "Delete on the device? The core dump goes with it — download it first for a bug report.",
+    "crash.ask": "Delete this report on the device?",
+    "crash.ask_yes": "Delete", "crash.ask_no": "Keep",
+    "crash.deleted": "Crash report deleted",
+    "crash.delete_fail": "The device could not delete it — the report is still there",
     "bug.row": "Report a bug",
     "bug.title": "Report a bug",
     "bug.intro": "Describe what goes wrong. The device adds its own status, readings and log — with your network name, addresses and server names removed first.",
@@ -194,9 +199,14 @@ const I18N = {
     "crash.title_fault": "Gerät ist nach einem Absturz neu gestartet",
     "crash.title_orphan": "Absturzbericht von einem früheren Neustart",
     "crash.reset": "Reset", "crash.task": "Task", "crash.fw": "FW", "crash.elf": "elf", "crash.corrupted": "beschädigt",
-    "crash.download": "Absturzbericht herunterladen", "crash.copy": "Diagnose kopieren", "crash.dismiss": "Ausblenden",
+    "crash.download": "Absturzbericht herunterladen", "crash.copy": "Diagnose kopieren", "crash.dismiss": "Bericht löschen",
     "crash.copied": "Diagnose kopiert — in einen Fehlerbericht einfügen",
     "crash.copy_fail": "Kopieren fehlgeschlagen — /coredump und /diag manuell öffnen",
+    "crash.ask_dump": "Auf dem Gerät löschen? Der Core-Dump geht mit — lade ihn vorher für einen Fehlerbericht herunter.",
+    "crash.ask": "Diesen Bericht auf dem Gerät löschen?",
+    "crash.ask_yes": "Löschen", "crash.ask_no": "Behalten",
+    "crash.deleted": "Absturzbericht gelöscht",
+    "crash.delete_fail": "Das Gerät konnte ihn nicht löschen — der Bericht ist noch da",
     "bug.row": "Fehler melden",
     "bug.title": "Fehler melden",
     "bug.intro": "Beschreibe, was schiefgeht. Das Gerät legt seinen Zustand, seine Messwerte und sein Protokoll dazu — Netzwerkname, Adressen und Servernamen vorher entfernt.",
@@ -380,6 +390,14 @@ const S = {
   insp: null,
   live: null,
   inspSig: "",
+  // Crash banner. `crashAsk` is the signature of the crash whose delete is awaiting its second tap
+  // (the confirm step lives INSIDE the banner — DESIGN.md §5.4 keeps the OTA confirm() the only
+  // native dialog). `crashDismissed` is the signature the device has just been told to delete: the
+  // banner is hidden on it immediately so a status frame already in flight — carrying the crash the
+  // device has since dropped — cannot flash it back for a second. The device's own answer
+  // (/status.last_crash going null) is what keeps it gone from then on, across reloads and browsers.
+  crashAsk: "",
+  crashDismissed: "",
   // The inspector's trend is diffed separately from the rest of the card: it changes on a fetch or a
   // pin, not on a live value, and re-emitting a plot every second would fight the cursor on it.
   inspHistSig: "",
@@ -638,8 +656,15 @@ function renderRollbackBanner() {
 // Shown when /status.last_crash is set — a fault reset (panic / watchdog / brown-out) or a core dump
 // still waiting in flash. Offers the raw dump download (symbolized offline against the matching .elf
 // — scripts/decode-coredump.sh) and a copy-paste diagnostics bundle for a bug report. Lives outside
-// #valueGroups (rebuilt every poll), so its dismissed state survives re-renders; dismissal is keyed
-// to the crash signature, so a NEW crash re-shows the banner.
+// #valueGroups (rebuilt every poll), so its state survives re-renders.
+//
+// "Delete report" is a DEVICE action (POST /crash/dismiss), not a per-page hide: the banner used to
+// be suppressed in page state alone, so a reload — the first thing anyone does — brought the same
+// crash straight back. The device erases the dump and stops reporting the crash, so it is gone from
+// every browser and from Home Assistant's retained crash entity at once. Deleting is irreversible
+// and takes the one artifact a bug report needs with it (docs/REPORTING.md), so it asks first — a
+// second tap INSIDE the banner, not a native confirm(): DESIGN.md §5.4 keeps the OTA update dialog
+// the only one of those, and this needs no fields.
 //
 // Those two cases need DIFFERENT wording: last_crash is notable when `fault` OR `coredump` is set,
 // so an orphan dump left in flash from an earlier crash raises the banner on every later boot — even
@@ -649,18 +674,21 @@ function renderRollbackBanner() {
 function renderCrashBanner() {
   const el = $("crashBanner"), c = S.status?.last_crash;
   if (!c) { el.hidden = true; return; }
-  // Two different identities. `sig` is WHICH crash this is — the dismissal key, so pulling the dump
-  // doesn't resurrect a banner the user dismissed. `rsig` is what the banner currently DRAWS, which
-  // also depends on c.coredump (it gates the download button, and /status now reports it live, so it
-  // flips to false the moment the dump is cleared). Keying the re-render on `sig` alone would leave a
-  // stale "Download crash report" button pointing at a dump that is gone — a 404 — until a reload.
-  // They must stay SEPARATE attributes: the dismiss click handler reads dataset.sig, so folding the
-  // dump state into it would compare "usb::true" against sig "usb::" here and silently break Dismiss.
+  // Two different identities. `sig` is WHICH crash this is — the key the delete flow works on, so an
+  // answer that arrives about a DIFFERENT crash can't be acted on. `rsig` is what the banner
+  // currently DRAWS, which also depends on c.coredump (it gates the download button, and /status
+  // reports it live, so it flips to false the moment the dump is cleared) and on whether the confirm
+  // step is showing. Keying the re-render on `sig` alone would leave a stale "Download crash report"
+  // button pointing at a dump that is gone — a 404 — until a reload, and would freeze the confirm
+  // step out of the DOM. They must stay SEPARATE attributes: the click handler reads dataset.sig, so
+  // folding the draw state into it would compare "usb::true:" against sig "usb::" and silently break
+  // the button.
   const sig  = `${c.reason}:${c.pc || ""}:${c.task || ""}`;
-  const rsig = `${sig}:${!!c.coredump}`;
+  const ask  = S.crashAsk === sig;
+  const rsig = `${sig}:${!!c.coredump}:${ask}`;
   if (S.crashDismissed === sig) { el.hidden = true; return; }
   if (el.dataset.rsig === rsig && !el.hidden) return;   // already rendered this — don't thrash the DOM
-  el.dataset.sig  = sig;    // dismissal key (read by the Dismiss handler)
+  el.dataset.sig  = sig;    // crash key (read by the delete handler)
   el.dataset.rsig = rsig;   // render key
 
   const s = S.status || {}, bt = Array.isArray(c.backtrace) ? c.backtrace : [];
@@ -673,13 +701,23 @@ function renderCrashBanner() {
   const dl = c.coredump
     ? `<a class="btn secondary sm" href="/coredump" download="coredump.bin">${esc(t("crash.download"))}</a>` : "";
   const title = c.fault ? t("crash.title_fault") : t("crash.title_orphan");
+  // The confirm step REPLACES the actions row rather than appearing under it: what it asks about is
+  // the two buttons beside it (the dump download most of all), and leaving them live next to their
+  // own deletion prompt invites the tap that makes the question moot. The question names the dump
+  // only when one exists — on a fault reset that overran its own dump there is nothing to lose but
+  // the record, and saying otherwise would talk someone out of a harmless delete.
+  const actions = ask
+    ? `<div class="crash-ask">${esc(t(c.coredump ? "crash.ask_dump" : "crash.ask"))}</div>` +
+      `<div class="crash-actions">` +
+      `<button class="btn danger sm" type="button" data-cact="del">${esc(t("crash.ask_yes"))}</button>` +
+      `<button class="btn ghost sm" type="button" data-cact="keep">${esc(t("crash.ask_no"))}</button></div>`
+    : `<div class="crash-actions">${dl}` +
+      `<button class="btn secondary sm" type="button" data-cact="copy">${esc(t("crash.copy"))}</button>` +
+      `<button class="btn ghost sm" type="button" data-cact="ask">${esc(t("crash.dismiss"))}</button></div>`;
   el.innerHTML =
     `<div class="crash-head"><span class="crash-ico">!</span>` +
     `<div class="crash-txt"><div class="crash-title">${esc(title)}</div>` +
-    `<div class="crash-meta">${bits.join(" · ")}</div>${btHtml}</div></div>` +
-    `<div class="crash-actions">${dl}` +
-    `<button class="btn secondary sm" type="button" data-cact="copy">${esc(t("crash.copy"))}</button>` +
-    `<button class="btn ghost sm" type="button" data-cact="dismiss">${esc(t("crash.dismiss"))}</button></div>`;
+    `<div class="crash-meta">${bits.join(" · ")}</div>${btHtml}</div></div>` + actions;
   el.hidden = false;
 }
 
@@ -719,6 +757,27 @@ async function copyDiagnostics() {
   lines.push("", "--- /diag ---", diag.trim());
   if (await copyText(lines.join("\n"))) toast(t("crash.copied"), "ok");
   else toast(t("crash.copy_fail"), "err");
+}
+
+// Delete this boot's crash report ON THE DEVICE (POST /crash/dismiss): the dump is erased and the
+// device stops reporting the crash, so /status.last_crash goes null and the banner is gone for every
+// browser and for Home Assistant's retained crash entity — which is the whole point of the button
+// over the page-local hide it replaced.
+//
+// The banner is hidden on the local signature the moment the device confirms, because the live status
+// push builds its frames ~1×/4 s and one composed before the delete landed would draw the crash again
+// for a beat. A FAILED delete restores the banner instead: the report is still on the device, and a
+// page that hid it anyway would be lying about flash — the same fail-closed direction the firmware
+// takes when it refuses to mark a crash dismissed after a failed erase.
+async function deleteCrashReport(sig) {
+  S.crashAsk = "";
+  let ok = false;
+  try { ok = (await fetch("/crash/dismiss", { method: "POST" })).ok; } catch { ok = false; }
+  if (!ok) { toast(t("crash.delete_fail"), "err"); renderCrashBanner(); return; }
+  S.crashDismissed = sig;
+  if (S.status) S.status.last_crash = null;
+  $("crashBanner").hidden = true;
+  toast(t("crash.deleted"), "ok");
 }
 
 // ── Bug report ───────────────────────────────────────────────────────────
@@ -4221,11 +4280,16 @@ function wireRestOfApp() {
     else if (edit.dataset.edit === "syslog") openSyslog();
     else if (edit.dataset.edit === "ntp") openNtp();
   });
-  // Crash banner: Copy diagnostics / Dismiss. The download link is a plain <a download> (no handler).
+  // Crash banner: Copy diagnostics / Delete report (ask → del | keep). The download link is a plain
+  // <a download> (no handler). The delete is keyed on the SIGNATURE the banner was drawn with, so a
+  // new crash landing between the two taps can't be deleted by a question asked about the old one.
   $("crashBanner").addEventListener("click", (e) => {
     const act = e.target.closest("[data-cact]");
     if (!act) return;
-    if (act.dataset.cact === "dismiss") { S.crashDismissed = $("crashBanner").dataset.sig; $("crashBanner").hidden = true; }
+    const sig = $("crashBanner").dataset.sig;
+    if (act.dataset.cact === "ask")       { S.crashAsk = sig; renderCrashBanner(); }
+    else if (act.dataset.cact === "keep") { S.crashAsk = "";  renderCrashBanner(); }
+    else if (act.dataset.cact === "del")  deleteCrashReport(sig);
     else if (act.dataset.cact === "copy") copyDiagnostics();
   });
   $("wfCancel").onclick = closeWifi;

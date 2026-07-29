@@ -380,6 +380,11 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   background: var(--soft); border-radius: 9px; overflow-x: auto; white-space: nowrap;
 }
 .crash-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
+/* The delete confirmation, shown INSIDE the banner in place of the actions row (the OTA confirm() is
+   the only native dialog — DESIGN.md §5.4). Reads as a question, not as another alert: the banner
+   already carries the red border and the icon. */
+.crash-ask { font-size: 13.5px; color: var(--fg); margin-top: 13px; line-height: 1.5; }
+.crash-ask + .crash-actions { margin-top: 9px; }
 /* Recovery (safe) mode + WiFi-rollback banners — warn-accented twins of the crash banner (they reuse
    .crash-head/-txt/-title/-meta for layout). Shown for /status.sys.safe_mode and
    /status.wifi.rolled_back respectively. */
@@ -391,6 +396,10 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .btn.sm { padding: 8px 13px; font-size: 13.5px; }
 .btn.ghost { background: none; color: var(--muted); border-color: transparent; }
 .btn.ghost:hover { color: var(--fg); border-color: var(--line); }
+/* Irreversible action (the crash-report delete). Solid --err, so the button that destroys the dump
+   never looks like the two beside it that only read it. */
+.btn.danger { background: var(--err); color: #fff; border-color: var(--err); }
+.btn.danger:hover { filter: brightness(1.08); }
 
 /* ── Value groups (dashboard) ───────────────────────────────────────────── */
 #valueGroups { margin-top: 14px; }

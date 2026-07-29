@@ -154,8 +154,9 @@ served to `/status` readers, the MQTT heartbeat's diagnostic entities and `/diag
 `ota{channel}` (`"release"` | `"dev"` — which published feed the next update check reads; the
 SETTING, not the running build, since a device can be set to a channel it has not installed from
 yet — drives the ESP32 card's Update-channel select, §5.4),
-`last_crash` (`null` on a clean boot, else `{reason,reason_code,fault,coredump,task,pc,backtrace[],
-corrupted,elf_sha256}` — drives the crash banner),
+`last_crash` (`null` on a clean boot **or once the report is deleted** via `POST /crash/dismiss`,
+else `{reason,reason_code,fault,coredump,task,pc,backtrace[],corrupted,elf_sha256}` — drives the
+crash banner),
 `detect{proto,valid,capacity_kw,capacity_kw_iu,ou_eeprom,candidates[],families[],ambiguous,
 model{name,family,marketing}}` (drives the dashboard ESP32 board card + the read-only model card;
 the two capacities are the outdoor unit's own report and the indoor unit's rated code — separate
@@ -293,9 +294,17 @@ Body, ordered:
    raw hex backtrace, and actions — **Download crash report** (`GET /coredump`, shown only while a
    dump actually exists — `/status` reports that live, so the button disappears once the dump is
    cleared), **Copy diagnostics** (`/status` + `/diag` + summary to the clipboard for a bug report),
-   and **Dismiss**. Dismissal is keyed to the crash signature (reason/PC/task — *not* the dump state,
-   so pulling the dump can't resurrect a dismissed banner), so a *new* crash re-shows it. Lives
-   outside the poll-rebuilt card grid, so its dismissed state survives re-renders.
+   and **Delete report**. The delete is a **device** action (`POST /crash/dismiss`), not a per-page
+   hide: the device erases the dump and stops reporting the crash, so the banner is gone from every
+   browser and from Home Assistant's retained crash entity at once. It used to hide the banner in
+   page state alone, which a reload — the first thing anyone does — undid. Because the delete is
+   irreversible and takes the one artifact a bug report needs with it, it **asks first**: a second
+   tap *inside the banner*, replacing the actions row (not a native `confirm()` — §5.4 keeps the OTA
+   dialog the only one of those; this needs no fields), and the question names the dump only when one
+   exists. A failed delete restores the banner rather than hiding it, because the report is still on
+   the device. The banner stays keyed to the crash signature (reason/PC/task — *not* the dump state),
+   so a *new* crash arriving between the two taps is not what gets deleted. Lives outside the
+   poll-rebuilt card grid, so its state survives re-renders.
 1. **System card — the first thing on the dashboard, and the whole "Now" answer.** Nothing sits
    above it but the banners. There is **no status hero and no header band**: everything the old hero
    said now lives *inside the drawing*, each fact at the component it describes, so one look at the
@@ -1137,8 +1146,10 @@ enabled/available values are hidden.
   `--brand-strong` on hover, `--focus-ring` on `:focus-visible`. The gear carries an optional `--err`
   dot (§5.6) marking a connection that is down.
 - **Crash banner** — `--err`-accented card above the system card (§5.3 item 0), shown only when
-  `last_crash` is set: title + meta + hex backtrace, with Download / Copy-diagnostics / Dismiss
-  actions. Small `.sm` buttons + a quiet `.ghost` Dismiss.
+  `last_crash` is set: title + meta + hex backtrace, with Download / Copy-diagnostics / Delete-report
+  actions. Small `.sm` buttons + a quiet `.ghost` Delete report. Its confirm step replaces that row
+  with one question line (`.crash-ask`) and a solid `--err` `.btn.danger` Delete beside a `.ghost`
+  Keep — the only `danger` button in the UI, because it is the only irreversible action in it.
 - **Recovery banner** — `--warn`-accented twin of the crash banner (reuses its layout classes), above
   the system card, shown only when `sys.safe_mode` is true: title + one explanatory line, **no actions and no
   dismiss** (it mirrors a live state, clearing itself on a healthy reboot).
@@ -1172,10 +1183,12 @@ page under near-identical cards). Specific:
   MQTT and ESP32 (RX/TX) config controls behind the gear remain usable so the bad setting can be
   corrected, then a reboot returns to normal.
 - **Post-crash**: if the last reset was a fault (or a core dump is waiting), the crash banner (§5.3
-  item 0) appears above the system card until dismissed — with the title distinguishing the two triggers, so
+  item 0) appears above the system card until the report is deleted on the device (or the next clean
+  reboot makes the boot un-notable) — with the title distinguishing the two triggers, so
   a leftover dump alone doesn't report a crash that didn't happen this boot. "Copy diagnostics" toasts
   "Diagnostics copied — paste into a bug report" on success, or "Copy failed — open /coredump and
-  /diag manually" if the clipboard is unavailable.
+  /diag manually" if the clipboard is unavailable; "Delete report" toasts "Crash report deleted", or
+  "The device could not delete it — the report is still there" and puts the banner back.
 - **Errors**: a write that answers must be **read** before any "saved"/"rebooting" feedback. `fetch`
   rejects only on transport errors, never on status, so a refused save otherwise reads as a
   *successful* one — the device is still up, so `/status` answers immediately and the UI would confirm

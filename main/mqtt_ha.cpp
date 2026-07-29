@@ -112,6 +112,7 @@ static std::string s_stale_values_profile;             // value entities: the pr
 static std::atomic<bool> s_heartbeat_announced{false}; // diagnostic discovery streamed this connection?
 static bool         s_mqtt_ever_connected = false;     // event-task-only: first connect vs. a RE-connect
 static bool         s_crash_dump_pub      = false;     // mqtt_task-only: `coredump` flag last published on s_crash
+static bool         s_crash_notable_pub   = false;     // mqtt_task-only: was that publish a crash record, or the clear?
 
 // Cumulative publish counters for the heartbeat's mqtt_{count,fails,reconnects} — see mqtt_publish().
 // pub_ok/pub_fail are touched only on the publish task (mqtt_publish + publish_heartbeat both run
@@ -398,7 +399,8 @@ static void publish_crash() {
     const CrashInfo   ci = diag_crash_info_live();
     const std::string js = build_crash_mqtt_payload(ci);   // "" when not notable -> clears the topic
     mqtt_publish(s_crash, js.c_str(), static_cast<int>(js.size()), 0, 1);   // retained (zero-len clears)
-    s_crash_dump_pub = ci.coredump;
+    s_crash_dump_pub    = ci.coredump;
+    s_crash_notable_pub = !js.empty();
 }
 
 // Snapshot board/link diagnostics from the IDF heap/timer APIs + the poll/WiFi/MQTT state, and
@@ -543,7 +545,15 @@ static void mqtt_task(void*) {
                     // topic if the boot is no longer notable.
                     // Done HERE, not in the /coredump handler: mqtt_publish() feeds the Task Watchdog
                     // and is only valid from this (subscribed) task.
-                    if (diag_crash_coredump_present() != s_crash_dump_pub) publish_crash();
+                    //
+                    // NOTABILITY is checked beside the dump flag, not derived from it: dismissing a
+                    // crash (POST /crash/dismiss) on a FAULT boot that left no dump — a stack
+                    // overflow overruns the dump too, which is how the crashes here actually look —
+                    // changes no flash byte, so a dump-only test would leave the retained crash
+                    // record standing in HA after the user deleted it on the device.
+                    const CrashInfo cnow = diag_crash_info_live();
+                    if (cnow.coredump != s_crash_dump_pub ||
+                        crash_is_notable(cnow) != s_crash_notable_pub) publish_crash();
                     heartbeat_elapsed_s = 0;
                 }
             }

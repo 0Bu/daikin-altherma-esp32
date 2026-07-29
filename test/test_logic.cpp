@@ -2405,6 +2405,23 @@ static void test_crashinfo() {
     CHECK(build_crash_mqtt_payload(orphan) == build_crash_json(orphan));            // dump waiting -> report
     CHECK(build_crash_mqtt_payload(fault_cleared) == build_crash_json(fault_cleared)); // fault sans dump -> report
 
+    // DISMISSED (POST /crash/dismiss -> diag_crash_dismiss): the user deleted the report on the
+    // device. Nothing about the reset changes — the reason is still reported, and the heartbeat's own
+    // "Reset Reason" sensor is untouched — but the crash stops being notable, which is what takes the
+    // banner down for every browser at once and clears the retained MQTT crash topic. Asserted on
+    // BOTH shapes: a fault reset that left no dump (a stack overflow overruns its own dump, so this is
+    // the common case here) is the one where no flash byte changes, so `dismissed` is the only thing
+    // that can carry it.
+    CrashInfo dismissed_fault = fault_cleared;
+    dismissed_fault.dismissed = true;
+    CHECK(!crash_is_notable(dismissed_fault));
+    CHECK(build_crash_mqtt_payload(dismissed_fault).empty());   // -> zero-length retained = topic cleared
+    CHECK(build_crash_json(dismissed_fault) == build_crash_json(fault_cleared));   // the reset itself is untouched
+    CrashInfo dismissed_orphan = orphan;
+    dismissed_orphan.dismissed = true;
+    CHECK(!crash_is_notable(dismissed_orphan));                 // outranks a dump the erase somehow left
+    CHECK(build_crash_mqtt_payload(dismissed_orphan).empty());
+
     // Panic with a parsed summary: exact JSON + text, backtrace as raw PC hex.
     CrashInfo panic;
     panic.reason       = 4;   // ESP_RST_PANIC
@@ -3766,8 +3783,8 @@ static void test_http_surface() {
 
     // Trusted LAN exposes the full API — every route, either method.
     for (const char* p : {"/", "/index.html", "/scan", "/status", "/values", "/diag", "/coredump",
-                          "/models", "/set_wifi", "/set_mqtt", "/set_ntp", "/set_hp", "/detect",
-                          "/ota/check", "/ota/update", "/mcp"}) {
+                          "/crash/dismiss", "/models", "/set_wifi", "/set_mqtt", "/set_ntp",
+                          "/set_hp", "/detect", "/ota/check", "/ota/update", "/mcp"}) {
         CHECK(http_surface_serves(lan, p, false));
         CHECK(http_surface_serves(lan, p, true));
     }
@@ -3784,6 +3801,9 @@ static void test_http_surface() {
     CHECK(!http_surface_serves(ap, "/values", false));
     CHECK(!http_surface_serves(ap, "/diag", false));
     CHECK(!http_surface_serves(ap, "/coredump", false));
+    // …and /crash/dismiss least of all: it DESTROYS the dump and the crash record, so an
+    // unauthenticated radio client could erase the evidence of a crash it never saw.
+    CHECK(!http_surface_serves(ap, "/crash/dismiss", true));
     CHECK(!http_surface_serves(ap, "/models", false));
     // …including /scan: the portal takes a TYPED SSID (main/www/setup.html has no dropdown and issues
     // no fetch), so an open radio has no reason to be handed a list of every AP in range.

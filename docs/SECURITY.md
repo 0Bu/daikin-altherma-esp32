@@ -30,7 +30,10 @@ and the OTA-signing / key lifecycle.
   secrets** (the WiFi/MQTT passwords and TLS session material that pass through RAM). On the trusted
   LAN this is acceptable; anywhere less trusted it is a remote credential-disclosure vector with no
   physical access needed. A dump is written only when the firmware actually crashes; erase it with
-  `GET /coredump?clear=1` once retrieved so a stale image isn't left readable.
+  `GET /coredump?clear=1` once retrieved so a stale image isn't left readable — or with the crash
+  banner's **Delete report** (`POST /crash/dismiss`), which erases the same image *and* stops the
+  device reporting the crash. Both are trusted-LAN only, and the delete is a `POST` for that reason:
+  it destroys evidence, so it must not be triggerable by a link a browser follows on its own.
   - **The crash *summary* is deliberately not sensitive.** What the firmware surfaces automatically —
     `/status.last_crash`, the web-UI banner, and the retained `<base>/crash` MQTT topic — is
     only the reset reason, the crashed task name, and raw program-counter/backtrace **addresses**.
