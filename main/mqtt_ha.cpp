@@ -144,9 +144,8 @@ static std::string board_id() {
     return b;
 }
 
-// Every outbound publish funnels through here so the heartbeat's mqtt_count/mqtt_fails (the
-// EMS-ESP-style "mqttcount"/"mqttfails" pair) reflect every discovery/state/heartbeat/availability
-// message, not just one of them. esp_mqtt_client_publish() returns the message id (>=0) on success
+// Every outbound publish funnels through here so the heartbeat's mqtt_count/mqtt_fails reflect
+// every discovery/state/heartbeat/availability message, not just one of them. esp_mqtt_client_publish() returns the message id (>=0) on success
 // or -1 if it couldn't even be queued (e.g. dropped mid-disconnect).
 static void mqtt_publish(const std::string& topic, const char* payload, int len, int qos, int retain) {
     const int rc = esp_mqtt_client_publish(s_client, topic.c_str(), payload, len, qos, retain);
@@ -400,7 +399,13 @@ static void publish_heartbeat() {
     f.free_heap       = esp_get_free_heap_size();
     f.min_free_heap   = esp_get_minimum_free_heap_size();
     f.max_alloc       = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
-    f.reset_reason    = reset_reason_name(diag_crash_info().reason);   // cached boot reason (diag_crash.cpp)
+    // One cached boot reason (diag_crash.cpp), three renderings: the slug a human reads, the raw
+    // code a metrics store can keep, and the fault flag an alert fires on. Bound once so all three
+    // are demonstrably the same reading rather than three lookups that only look identical.
+    const CrashInfo& boot = diag_crash_info();
+    f.reset_reason      = reset_reason_name(boot.reason);
+    f.reset_reason_code = boot.reason;
+    f.reset_fault       = crash_reason_is_fault(boot.reason);
     if (time_synced()) {
         int64_t unix_s; int32_t ms;
         time_now(unix_s, ms);

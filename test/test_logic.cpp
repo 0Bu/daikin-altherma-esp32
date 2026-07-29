@@ -1516,7 +1516,9 @@ static void test_heartbeat() {
     f.free_heap       = 170000;
     f.min_free_heap   = 150000;
     f.max_alloc       = 87000;
-    f.reset_reason    = "panic";
+    f.reset_reason      = "panic";
+    f.reset_reason_code = 4;        // CrashReason::PANIC — the numeric twin a metrics store can keep
+    f.reset_fault       = true;
     f.wifi_connected  = true;
     f.wifi_rssi       = -76;
     f.wifi_reconnects = 3;
@@ -1541,14 +1543,43 @@ static void test_heartbeat() {
     CHECK(j == "{\"version\":\"1.2.3\",\"platform\":\"esp32s3\","
                "\"uptime_s\":680731,\"uptime\":\"007+21:05:31.860\","
                "\"free_heap\":170000,\"min_free_heap\":150000,\"max_alloc\":87000,"
-               "\"reset_reason\":\"panic\",\"time\":null,"
+               "\"reset_reason\":\"panic\",\"reset_reason_code\":4,\"reset_fault\":1,"
+               "\"time\":null,"
                "\"wifi_connected\":1,\"wifi_rssi\":-76,\"wifi_quality_pct\":48,\"wifi_reconnects\":3,"
                "\"wifi_mac\":\"A1:B2:C3:D4:E5:F6\",\"wifi_bssid\":\"00:11:22:33:44:55\","
                "\"mqtt_connected\":1,\"mqtt_count\":89282,\"mqtt_fails\":0,\"mqtt_reconnects\":1,"
                "\"bus_connected\":1,\"bus_proto\":\"I\",\"bus_registers\":10,\"bus_values\":48,"
                "\"bus_last_ok_s\":1,\"bus_rx_received\":763732,\"bus_rx_fails\":2,"
                "\"bus_crc_err\":0,\"bus_timeout_err\":2,\"bus_ou_held_over\":0,"
-               "\"bus_tx_reads\":763734,\"bus_tx_writes\":0,\"bus_tx_fails\":0}");
+               "\"bus_tx_reads\":763734}");
+
+    // ── #215: the reset reason has to survive a NUMERIC-ONLY consumer ──
+    // Telegraf's json parser keeps numeric fields and drops everything else, so the `reset_reason`
+    // slug never became a VictoriaMetrics series — and a board restarting 55x in 7 days, 5 of them
+    // panics, was unattributable in the store. The slug stays for humans; these two carry the same
+    // answer as numbers. Pin that they are UNQUOTED, since a quoted "4" would be dropped exactly
+    // like the slug and the fix would look done while changing nothing.
+    CHECK(j.find("\"reset_reason_code\":4,") != std::string::npos);
+    CHECK(j.find("\"reset_reason_code\":\"") == std::string::npos);
+    CHECK(j.find("\"reset_fault\":1,") != std::string::npos);
+    CHECK(j.find("\"reset_fault\":true") == std::string::npos);   // a bool is dropped like a string
+    // The code is the SAME vocabulary /status.last_crash publishes as `reason_code`, so a consumer
+    // that learned one table can read both — and reset_fault agrees with crash_reason_is_fault over
+    // the whole enum, rather than being a second opinion about what counts as a fault.
+    for (uint32_t code = 0; code <= 20; code++) {
+        HeartbeatFields rf;
+        rf.reset_reason_code = code;
+        rf.reset_fault       = crash_reason_is_fault(code);
+        const std::string rj = build_heartbeat_json(rf);
+        CHECK(rj.find("\"reset_reason_code\":" + std::to_string(code) + ",") != std::string::npos);
+        CHECK(rj.find(std::string("\"reset_fault\":") + (crash_reason_is_fault(code) ? "1" : "0") + ",")
+              != std::string::npos);
+    }
+    // The two always-zero bus counters are gone: the X10A protocol has no write command, so they
+    // could never be anything but 0. Neither was ever an HA entity, so nothing is orphaned.
+    CHECK(j.find("bus_tx_writes") == std::string::npos);
+    CHECK(j.find("bus_tx_fails") == std::string::npos);
+    CHECK(j.find("\"bus_tx_reads\":") != std::string::npos);      // the real one stays
 
     // SOURCE freshness is its own field, and it is independent of bus health (#209 defect 5): the
     // link is up, the device is publishing, and the outdoor unit is simply not measuring. A consumer
@@ -1561,7 +1592,7 @@ static void test_heartbeat() {
     // Synced: "time" carries the RFC 3339 instant verbatim (the caller — mqtt_ha.cpp — already
     // rendered it via logic/timestamp.hpp; this header only decides null-vs-quoted).
     f.time = "2026-07-17T21:15:00.000Z";
-    CHECK(build_heartbeat_json(f).find("\"reset_reason\":\"panic\",\"time\":\"2026-07-17T21:15:00.000Z\",")
+    CHECK(build_heartbeat_json(f).find("\"time\":\"2026-07-17T21:15:00.000Z\",")
           != std::string::npos);
 
     // WiFi down -> rssi/quality/bssid reported null, not a stale/garbage reading; mac still present.

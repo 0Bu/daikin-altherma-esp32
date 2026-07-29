@@ -982,6 +982,13 @@ The Home Assistant bridge:
   - **Board**: `version`, `platform`, `uptime_s` + a `"Ddd+HH:MM:SS.mmm"` `uptime` display string
     (`format_uptime`), `free_heap` / `min_free_heap` / `max_alloc` (largest free block — the
     binding OOM limit on this firmware), `reset_reason`, `time` (SNTP wall clock, null until synced).
+    `reset_reason` is joined by **`reset_reason_code`** (the raw `CrashReason` value — the same number
+    `/status.last_crash` publishes as `reason_code`, so there is one vocabulary) and **`reset_fault`**
+    (`crash_reason_is_fault` as `1`/`0`). Both exist because a metrics pipeline keeps numeric fields
+    and drops strings: the slug alone never became a series, which left a board restarting 55 times in
+    7 days — 5 of them panics — unattributable in the store, reconstructible only from syslog (#215).
+    Neither is a new HA entity; the existing "Reset Reason" text sensor already answers a human, and a
+    numeric twin beside it is the duplicate that got the crash topic's "Last Reset Reason" retired.
   - **`wifi_*`**: `wifi_connected`, `wifi_rssi`, `wifi_quality_pct` (0-100%, `wifi_signal_quality_pct`
     — the standard dBm→% mapping, -50 dBm=100%/-100 dBm=0%), `wifi_reconnects` (cumulative RE-connects
     since boot, `wifi_reconnect_count()` in `wifi.cpp`, excludes the first-ever connect), `wifi_mac`
@@ -995,8 +1002,9 @@ The Home Assistant bridge:
     `bus_registers`, `bus_values`, `bus_last_ok_s`, `bus_rx_received` / `bus_rx_fails` (cumulative
     successful/failed register reads, `HpStats.rx_ok`/`rx_fail_total`), `bus_crc_err` /
     `bus_timeout_err` (breakdown), and `bus_tx_reads` (= `rx_received + rx_fails`, every register-read
-    request sent) with `bus_tx_writes`/`bus_tx_fails` always `0` (reported for schema parity since the
-    X10A bridge is read-only).
+    request sent). There is no `bus_tx_writes`/`bus_tx_fails` companion: the X10A bridge is read-only,
+    so both were hardcoded `0` and could never vary. They were dropped in #215 — a metric that cannot
+    change is a dashboard line that always reads zero. Neither was ever an HA entity.
 
   Published on a fixed `HEARTBEAT_INTERVAL_S` (10 s) cadence — unlike the state topic, this is
   diagnostics rather than real-time telemetry, so it always sends the latest snapshot rather than
@@ -1008,7 +1016,7 @@ The Home Assistant bridge:
   connection independently of heat-pump profile detection — so they show up even while the model is
   still "auto". Cumulative since-boot counters get `"stat_cla":"total_increasing"` (not
   `"measurement"`) so HA's long-term statistics handle a reboot's reset to 0 correctly. Mirrors the
-  "device diagnostics" pattern of other ESP32 HA bridges (e.g. EMS-ESP's `heartbeat` topic).
+  "device diagnostics" pattern of other ESP32 HA bridges and their own `heartbeat` topic.
 - **TLS default-on with credentials** (mqtts, CA-verified via the mbedTLS certificate bundle). If
   credentials are set but the URI is not `mqtts://`, the bridge **refuses to connect** and reports
   the reason in `/status.mqtt` rather than sending them in cleartext — no silent plaintext fallback.

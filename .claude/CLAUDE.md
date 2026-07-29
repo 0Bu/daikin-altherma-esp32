@@ -485,7 +485,10 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 these does not carry over. Board/link diagnostics on <base>/heartbeat (logic/heartbeat.hpp),
                 published on a fixed 10s cadence (HEARTBEAT_INTERVAL_S) — a FLAT JSON (each field
                 prefixed by its block name: wifi_connected, wifi_rssi, wifi_mac, wifi_bssid, mqtt_count,
-                bus_rx_received, … — no nested wifi/mqtt/bus objects; the three connectivity flags are
+                bus_rx_received, reset_reason_code, reset_fault, … — no nested wifi/mqtt/bus objects; the reset
+                reason rides as BOTH the readable slug and a NUMBER, because a metrics consumer keeps
+                numeric fields and drops strings, so the slug alone was invisible in VictoriaMetrics
+                exactly when 55 reboots a week needed attributing (#215); the three connectivity flags are
                 1/0 NUMBERS, not bools, for the same metrics-consumer reason as the bit-flag rows, and
                 bus_status carries the matching pl_on/pl_off — the crash topic keeps true/false + `| lower`
                 since it is an event payload, not a metrics stream) of

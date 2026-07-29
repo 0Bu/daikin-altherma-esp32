@@ -3,7 +3,7 @@
 // publish stats, X10A bus counters) published periodically to a separate MQTT topic, distinct from
 // the heat-pump state JSON (logic/mqtt_group.hpp). Pure string building, IDF-free, host-tested
 // (test/test_logic.cpp). Mirrors the "device diagnostics" pattern other ESP32 HA bridges expose
-// (e.g. EMS-ESP's `<base>/heartbeat` topic: bus_status, freemem, rssi, rx/txfails, uptime).
+// on their own `<base>/heartbeat` topic: link status, free memory, RSSI, rx failures, uptime.
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -24,6 +24,20 @@ struct HeartbeatFields {
     uint32_t    min_free_heap = 0;   // esp_get_minimum_free_heap_size() — worst-case low-water mark
     uint32_t    max_alloc     = 0;   // heap_caps_get_largest_free_block() — the binding OOM limit
     std::string reset_reason;         // reset_reason_name() slug — why the device last booted
+    // The SAME answer as a NUMBER. The slug above is the readable one and stays, but a metrics
+    // consumer never sees it: Telegraf's json parser takes numeric fields only, so `reset_reason` is
+    // dropped on the way to VictoriaMetrics exactly like a bool is (the reason the three connectivity
+    // flags below are 1/0). Measured on this install: a board restarting 55x in 7 days, 5 of them
+    // panics, and not one restart was attributable in the store — the distribution had to be
+    // reconstructed from syslog (#215). `reset_reason_code` is the raw CrashReason value, the same
+    // number /status.last_crash already publishes as `reason_code`, so there is one vocabulary and no
+    // second table; `reset_fault` is crash_reason_is_fault() as 1/0, because "was the last boot a
+    // FAULT" is the question an alert actually asks and it must not require the consumer to carry a
+    // copy of the code list. Deliberately NOT a new HA entity: the "Reset Reason" text sensor already
+    // says this to a human, and a numeric twin beside it is the duplicate that got the crash topic's
+    // "Last Reset Reason" retired.
+    uint32_t    reset_reason_code = 0;
+    bool        reset_fault       = false;
 
     bool        wifi_connected  = false;
     int8_t      wifi_rssi       = 0;   // valid only if wifi_connected
@@ -81,8 +95,8 @@ inline int wifi_signal_quality_pct(int8_t rssi) {
     return 2 * (static_cast<int>(rssi) + 100);
 }
 
-// "Ddd+HH:MM:SS.mmm" uptime display string (matches the format other ESP32 HA bridges show, e.g.
-// EMS-ESP's heartbeat.uptime "007+21:05:31.860"). uptime_s/uptime_ms are also emitted as plain
+// "Ddd+HH:MM:SS.mmm" uptime display string, e.g. "007+21:05:31.860" — the form other ESP32 HA
+// bridges show. uptime_s/uptime_ms are also emitted as plain
 // numbers for anything that wants to graph or alert on them without parsing this string.
 inline std::string format_uptime(uint64_t uptime_ms) {
     const uint64_t ms      = uptime_ms % 1000;
@@ -116,6 +130,9 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += "\"min_free_heap\":" + std::to_string(f.min_free_heap) + ",";
     j += "\"max_alloc\":" + std::to_string(f.max_alloc) + ",";
     j += "\"reset_reason\":\""; json_append_escaped(j, f.reset_reason); j += "\",";
+    // Numeric twin of the slug above — see HeartbeatFields. A string never reaches a metrics store.
+    j += "\"reset_reason_code\":" + std::to_string(f.reset_reason_code) + ",";
+    j += "\"reset_fault\":"; j += f.reset_fault ? "1" : "0"; j += ",";
     // "" (never synced this boot) renders as JSON null, not a fabricated pre-epoch date — same
     // contract as /status.ntp.time and the syslog RFC 5424 TIMESTAMP field.
     j += "\"time\":"; j += f.time.empty() ? "null" : ("\"" + f.time + "\"");
@@ -154,11 +171,13 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += ",\"bus_timeout_err\":" + std::to_string(f.timeout_err);
     // 1/0 NUMBER like the three connectivity flags above, and for the same measured reason.
     j += ",\"bus_ou_held_over\":"; j += f.ou_held_over ? "1" : "0";
-    // The X10A protocol has no write command (docs/ARCHITECTURE.md → MQTT bridge is read-only), so
-    // bus_tx_writes/fails are always 0 — reported for parity with the EMS-ESP-style field set rather
-    // than because this firmware could ever be busy writing.
+    // Read commands actually sent. There is no bus_tx_writes/bus_tx_fails companion: the X10A
+    // protocol has no write command (docs/ARCHITECTURE.md → the MQTT bridge is read-only), so both
+    // were hardcoded 0 and could never become anything else. They were carried for parity with the
+    // field set of another ESP32 HA bridge, which is not a reason this project keeps a field — a
+    // metric that cannot vary is a line on a dashboard that always reads zero and an entity a reader
+    // has to rule out. Dropped in #215; neither was ever an HA entity, so nothing is orphaned.
     j += ",\"bus_tx_reads\":" + std::to_string(f.rx_received + f.rx_fails);
-    j += ",\"bus_tx_writes\":0,\"bus_tx_fails\":0";
     j += "}";
     return j;
 }

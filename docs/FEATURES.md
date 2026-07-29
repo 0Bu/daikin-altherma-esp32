@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte, **retried page probe + a second-sweep confirmation** before falling back to `generic`) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1594 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1603 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -609,6 +609,14 @@ the fact*, from the field, without a serial cable:
   vanished from the state topic while the bus is up and the device is publishing. Published
   independently of heat-pump profile detection, so board health is visible even while the model is
   still `auto`.
+  The last-boot reason rides as **three** renderings of one cached answer: the `reset_reason` slug a
+  human reads, `reset_reason_code` (the raw `CrashReason` value — the same number
+  `/status.last_crash` publishes as `reason_code`) and `reset_fault` (`1`/`0`). The numbers exist
+  because a metrics pipeline keeps numeric fields and drops strings, so the slug alone never became a
+  series — a board restarting 55 times in 7 days, 5 of them panics, was unattributable in the store
+  and had to be reconstructed from syslog (#215). They are deliberately **not** new HA entities: the
+  "Reset Reason" text sensor already answers a human, and a numeric twin beside it is exactly the
+  duplicate that got the crash topic's "Last Reset Reason" retired.
 - **✅ 🧪 Always-on system health** ([`logic/reset_reason.hpp`](../main/logic/reset_reason.hpp)): the
   `/status` document (and the `/events` status frame) carries a compact `sys` block — `free_heap`,
   `min_free_heap` (since-boot low-water, the leak indicator), `max_alloc` (largest contiguous block,
@@ -959,7 +967,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   the substitution fails *closed* when a truncated line never reaches its end token; the same tests
   pin that a raw-page hex line passes through untouched, so the privacy rule cannot silently clip the
   decode witness the rule above exists to deliver),
-  **1594 `CHECK`s** in
+  **1603 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -1191,7 +1199,7 @@ and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 20-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1594 checks),
+on the host** (1603 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 
