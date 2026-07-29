@@ -182,15 +182,17 @@ Three things can make a catalog row absent from `<base>/state`, and all three st
 absence — the key is simply not in the payload and HA shows *unknown*, rather than a plausible number
 nobody measured:
 
-- **The row is quarantined.** `Target Evap. Temp.` decodes faithfully from the catalog and still
-  yields 145–200 °C while the compressor runs, on two independent unit families measured against a
-  manufacturer-documented reference. Until the scale is settled it is announced to nobody, and any
-  retained discovery config an older build published for it is deleted on upgrade
-  ([#194](https://github.com/0Bu/daikin-altherma-esp32/issues/194) /
+- **The row was decoded with the wrong converter.** `Target Evap. Temp.` matched the catalog
+  faithfully and still yielded 145–200 °C while the compressor ran, so it was withheld entirely for
+  one release. It is now decoded as the `÷128` register it actually is and reads 10.4–15.6 °C running
+  / 17.2–19.0 °C at rest ([#194](https://github.com/0Bu/daikin-altherma-esp32/issues/194) /
   [#209](https://github.com/0Bu/daikin-altherma-esp32/issues/209)). **Upgrading:** the *Target Evap.
-  Temp.* entity disappears on the next connect.
+  Temp.* entity — removed on the release that quarantined it — comes back on the next connect. Its
+  history is not continuous: samples recorded before the quarantine are the old ×10 values, so a
+  long-range graph shows a step from ~200 °C down to ~15 °C. The entity keeps its id on purpose
+  (renaming it would fork the statistics); the pre-quarantine range is simply wrong data.
 - **The field is not populated on this unit.** `Target Cond. Temp.` reads raw `0x0000` through an
-  entire compressor cycle on both families. The entity stays (the field *can* be populated) but an
+  entire compressor cycle. The entity stays (the field *can* be populated) but an
   exact zero from that row is withheld. This is adjudicated per row, never globally: a real
   thermistor crosses 0 °C every winter and must keep saying so.
 - **The outdoor unit is resting.** The outdoor unit refreshes its own register pages (`0x20`

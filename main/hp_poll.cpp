@@ -10,6 +10,7 @@
 #include "hp_detect.hpp"
 #include "history.hpp"
 #include "logic/availability.hpp"
+#include "logic/conv_override.hpp"
 #include "logic/convert.hpp"
 #include "logic/crc.hpp"
 #include "logic/detect.hpp"    // detect_commit_no_match — the rule poll_detect applies to an empty match
@@ -170,17 +171,22 @@ static void poll_once() {
         for (size_t k = 0; k < view.count(); k++) {
             if (view[k].reg != reg) continue;
             if (!row_publishable(view[k])) continue;   // decoded for nobody (see the loop above)
+            // The row as it is actually encoded on the wire, not as the generator labelled it
+            // (logic/conv_override.hpp). Applied HERE, at the point the row enters the pipeline, so
+            // the decode, the cached converter id and everything downstream that keys on it —
+            // published_kind, conv_is_binary, display_decimals — cannot disagree about one row.
+            const ValueDef def = logic::adjudicated(view[k]);
             CachedValue cv;
-            cv.label = view[k].label;
-            cv.unit  = unit_for_datatype(view[k].type);
-            cv.reg   = view[k].reg;
-            cv.off   = view[k].offset;
-            cv.conv  = view[k].conv;
+            cv.label = def.label;
+            cv.unit  = unit_for_datatype(def.type);
+            cv.reg   = def.reg;
+            cv.off   = def.offset;
+            cv.conv  = def.conv;
             std::string val;
             // The whole table goes along: reading_plausible needs it to tell a refrigerant pressure
             // (0 bar impossible) from the water one (0 bar = a drained system, and real). The BASE
             // table is the right argument here — see the profile_refrigerant note above.
-            if (hp_format(view[k], payload, paylen, rtype, val, prof.values, prof.count))
+            if (hp_format(def, payload, paylen, rtype, val, prof.values, prof.count))
                 cv.value = val;
             fresh.push_back(std::move(cv));
         }

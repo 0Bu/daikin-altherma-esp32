@@ -324,18 +324,34 @@ host-testable core is unusually large and valuable, because the risky parts are 
   else answers a narrower question — `convert()` handles the wire format's own `0x8000` no-data
   marker, `reading_plausible()` catches a number that is *impossible*, `ValueDef::no_publish` carries
   what the generator knew. What is left is a field that decodes to an entirely ordinary number which
-  is not a measurement of anything, and only per-row evidence can identify it. Two verdicts, each
-  adjudicated with a live capture recorded beside the rule: `Unproven` (the decode is faithful and
-  the result is still physically false — `Target Evap. Temp.`, #194/#209 on two independent
-  families) withholds the row from every publish surface and retracts its retained HA config;
-  `ZeroMeansAbsent` (`Target Cond. Temp.`'s raw `0x0000`, flat through a full compressor cycle on
-  both families) withholds only that exact value, because a global "0 °C is unavailable" rule would
-  destroy every thermistor reading that crosses zero. Rules are keyed on `(page, offset, converter)`
+  is not a measurement of anything, and only per-row evidence can identify it. Two verdicts exist;
+  one is in force. `ZeroMeansAbsent` (`Target Cond. Temp.`'s raw `0x0000`, flat through a full
+  compressor cycle) withholds only that exact value, because a global "0 °C is unavailable" rule
+  would destroy every thermistor reading that crosses zero. `Unproven` — withhold the row from every
+  publish surface and retract its retained HA config — is implemented with **no live entry**: it held
+  `Target Evap. Temp.` while that row's scale was unknown, and [#194](https://github.com/0Bu/daikin-altherma-esp32/issues/194) then showed the row was
+  mis-*decoded* rather than unmeasurable, so the verdict moved to `logic/conv_override.hpp`. A
+  quarantine and a mis-decode are different findings; recording them as one would make the fix read
+  as a suppression quietly lifted. Rules are keyed on `(page, offset, converter)`
   — the row's structural identity, never its label, and deliberately not scoped to a profile id: the
-  catalog test proves both rules select the adjudicated quantity across all 45 profiles, including
-  the one family that spells the quarantined register differently. Adding a rule is an adjudication
+  catalog test proves the rule selects the adjudicated quantity across all 45 profiles. Adding a rule is an adjudication
   with the same evidentiary bar as `tools/domain/audit_exceptions.txt`, not a way to make an
   inconvenient number disappear.
+- `logic/conv_override.hpp` — the **converter adjudication** (#194): which converter a generated row
+  is actually *encoded* with, when the id the offline generator emitted is demonstrably the wrong
+  one. Sibling of the availability ledger, separate on purpose — that one asks "is this a
+  measurement?" and answers by withholding, this one asks "is it decoded right?" and answers by
+  asserting a **different** value. That is the stronger claim, so the bar is higher: a rule needs
+  evidence that is *structural* (a property of the wire integers themselves), never a range that
+  merely looks more plausible, because fitting a scale to make a number look right is how #35–#39
+  shipped. One entry: `Target Evap. Temp.` (`0x10/6`) conv `114` → `109` (`÷128`). All 54 distinct
+  integers the row has been observed to carry satisfy `raw == floor(128 × T)` on an exact 0.1 K grid
+  — p ≈ 1.6e-60 against any other scale — and the reading becomes 10.4–15.6 °C running / 17.2–19.0 °C
+  at rest. conv `109` already existed, so this is a wrong converter **id** on a right register, not a
+  wrong converter: `114` keeps its `×0.1` semantics and its three other rows, which are left alone
+  because they read raw `0` on the only unit measured and `0` decodes identically under both scales.
+  Applied where a row *enters* the pipeline (decode, cache, HA discovery), so the decoded value, the
+  cached converter id, the published JSON type and the HA component cannot disagree about one row.
 - `logic/fault_state.hpp` — the **numeric** fault flags that ride beside the **textual** Daikin
   diagnostic code (#209 defect 4). `error_active`/`warning_active` are derived from the conv-203
   error class through the inverse of that converter's own `ERR_TYPE` lookup, so there is no second
@@ -344,9 +360,10 @@ host-testable core is unusually large and valuable, because the risky parts are 
   them for anyone who needs the distinction.
 - `logic/raw_capture.hpp` — **when** the poll path may put raw page bytes on `/diag`, the missing half
   of `logic/hexdump.hpp`. Edge-triggered on stopped→running, then one per 5 min during the run, at
-  most 8 per boot and never refilled: enough to make the run-time bytes behind `Target Evap. Temp.` a
-  *series* rather than a point, bounded so it cannot evict the rest of the boot's evidence from the
-  6 KB diag ring. Pure because it is a three-input state machine whose failure modes — a silently
+  most 8 per boot and never refilled: a *series* rather than a point, bounded so it cannot evict the
+  rest of the boot's evidence from the 6 KB diag ring. Built for #194, which was in the end settled
+  from the wire integers the published series already carried losslessly — the capture remains the
+  general answer for the next row whose bytes are only wrong while the unit runs. Pure because it is a three-input state machine whose failure modes — a silently
   exhausted budget, or a dump that repeats every cycle — are invisible on a board until the log is
   already ruined.
 - `logic/feature_gate.hpp` — which derived features may **honestly** run on the detected model, and
@@ -744,7 +761,8 @@ just-wired unit is still identified promptly. A pass does:
    expected ≥13). `0x10` and `0x20` are there for a sharper reason: a reading can be physically
    impossible and still sit *inside* `reading_plausible()`'s ±200 °C window, where nothing masks it —
    measured on a live unit, `Target Evap. Temp.` (`0x10` offset 6) reached **199.6 °C**, 0.4 °C under
-   the ceiling, and the two outdoor pressures (`0x20` offsets 12/14) held **0.0 bar** through every
+   the ceiling — since resolved as a `÷128` register mis-assigned to conv `114`
+   (`logic/conv_override.hpp`) — and the two outdoor pressures (`0x20` offsets 12/14) held **0.0 bar** through every
    sample taken while the compressor ran at 42 rps with 104.5 °C discharge, where an R32 high side
    runs 25–40 bar. Whether that is an absent sensor or a wrong offset is a question only the bytes
    can answer.
@@ -933,7 +951,8 @@ The Home Assistant bridge:
   while the JSON keys are already group-scoped). An unreadable class publishes *neither* — reporting
   `0/0` would assert "no fault" on a byte nobody could decode.
 - **Availability is separate from value.** A row the availability ledger (`logic/availability.hpp`)
-  quarantines is not announced at all and its retained config is retracted; a value it adjudicates
+  quarantines is not announced at all and its retained config is retracted (no row is quarantined
+  today); a value it adjudicates
   absent (`Target Cond. Temp.`'s raw `0x0000`) is simply missing from the payload; and a **held-over**
   reading — the outdoor unit resting and answering with its last run's numbers — is withheld with the
   heartbeat's `bus_ou_held_over` explaining why. In all three cases absence is stated by absence,

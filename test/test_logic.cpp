@@ -13,6 +13,7 @@
 #include <string>
 
 #include "logic/availability.hpp"
+#include "logic/conv_override.hpp"
 #include "logic/board_pins.hpp"
 #include "logic/board_presets.hpp"
 #include "logic/fault_state.hpp"
@@ -314,17 +315,21 @@ static void test_convert() {
     // (ambient measured 22.5-23.0 °C, i.e. an idle coil at air temperature) and 14.59 °C running,
     // 6-8 K below ambient: a textbook air-source evaporator approach.
     //
-    // Left UNFIXED on purpose. conv 114 carries rows across the whole catalog and REGISTERS.md is the
-    // domain audit's own authority, so "resolving" this by rewriting either would pass every gate
-    // while making the firmware more wrong (/domain-review §2.3). Two scalings still fit the physics
-    // (x0.01 and ÷128) and they cannot be separated here, because every OTHER conv-114 row on this
-    // unit reads raw 0 — there is no second populated row to calibrate against. #194 names the
-    // decisive experiment: the raw page-0x10 bytes captured WHILE the compressor runs.
+    // RESOLVED in #194 — the scale is ÷128, i.e. the row is encoded with conv 109 and the generated
+    // tables point it at conv 114. See logic/conv_override.hpp for the full argument; the decisive
+    // evidence is STRUCTURAL rather than physical, which is what makes it safe to act on where a
+    // range that merely "looks nicer" would not be. conv 114 publishes raw × 0.1 at one decimal, so
+    // every value this row has ever published carries its 16-bit register exactly — and all 54
+    // distinct integers ever observed (46 run-time from the stored series, 8 at rest from the
+    // boot-time page dumps) satisfy raw == floor(128 × T) for T on an exact 0.1 K grid. The set
+    // {floor(12.8k)} has density 1/12.8 among the integers, so that is p ~ 1.6e-60 against any other
+    // scale. ×0.01 — #194's own preferred candidate, picked because 24.06 °C at rest "looked like
+    // ambient" — has no such grid, and its ambient cross-check was against the X10A outdoor reading,
+    // which #209 later proved is HELD OVER at rest (logic/ou_stale.hpp): it was comparing a stale
+    // number. Against the independent HomeHub sensor the row does not track ambient at all.
     //
-    // So this asserts the CONTRADICTION rather than a value anyone believes: the decode is faithful
-    // to the spec, and the result is still physically impossible for an evaporating temperature. When
-    // #194 lands a real scale, this test is what proves it — and until then it stops the hole being
-    // forgotten again (it was noted in .claude/CLAUDE.md and sat undiagnosed).
+    // conv 114 itself is NOT touched: it is a correct ×0.1 converter and three other rows use it.
+    // This is the #35-#39 shape — a wrong converter ID on a right register — not a wrong converter.
     const uint8_t evap1996[] = {0xCC, 0x07};           // LE 0x07CC = 1996 -> 199.6 °C, MEASURED
     const uint8_t evap1459[] = {0xB3, 0x05};           // LE 0x05B3 = 1459 -> 145.9 °C, MEASURED (run min)
     const uint8_t evap2406[] = {0x66, 0x09};           // LE 0x0966 = 2406 -> 240.6 °C, MEASURED (at rest)
@@ -337,15 +342,26 @@ static void test_convert() {
     CHECK(reading_plausible(evap, convert(evap, evap1996)));   // <- still WRONG, still inside ±200
     CHECK(reading_plausible(evap, convert(evap, evap1459)));   // <- still WRONG, still inside ±200
     CHECK(!reading_plausible(evap, convert(evap, evap2406)));  // the at-rest value IS caught (>200)
-    // What HAS changed is that the value no longer LEAVES the device. #209 confirmed the same defect
-    // on a second, independent family (ERGA/EHB 04-08 kW split, against a manufacturer-documented
-    // HomeHub reference) — wrong on both, correct on nothing measured — so the row is quarantined by
-    // the availability ledger (logic/availability.hpp) until the run-time wire bytes settle the
-    // scale. The envelope test above and the ledger are DIFFERENT gates and both belong here: the
-    // ledger is the decision, the envelope is the reason it had to be made.
-    CHECK(!row_publishable(evap));
-    CHECK(!value_available(evap, true, convert(evap, evap1996).value));
-    CHECK(!value_available(evap, true, convert(evap, evap1459).value));
+    // Decoded as the wire actually encodes it, the SAME bytes read as a textbook evaporating
+    // temperature — and now inside the envelope for the right reason rather than by luck.
+    const ValueDef evap_fix = logic::adjudicated(evap);
+    CHECK(evap_fix.conv == 109);                                    // 114 -> 109 (÷128)
+    CHECK(approx(convert(evap_fix, evap1996).value, 1996 / 128.0));   // 15.59 -> 15.6 °C; was 199.6
+    CHECK(approx(convert(evap_fix, evap1459).value, 1459 / 128.0));   // 11.40 °C; was 145.9 (run min)
+    CHECK(approx(convert(evap_fix, evap2406).value, 2406 / 128.0));   // 18.80 °C; was 240.6 (dropped)
+    CHECK(reading_plausible(evap_fix, convert(evap_fix, evap1996)));
+    CHECK(reading_plausible(evap_fix, convert(evap_fix, evap1459)));
+    CHECK(reading_plausible(evap_fix, convert(evap_fix, evap2406))); // the at-rest value now SURVIVES
+    // The quarantine is lifted BECAUSE the row is decoded correctly, not because anyone stopped
+    // worrying: the ledger entry moved from availability.hpp to conv_override.hpp, and this asserts
+    // that the row publishes again on the corrected converter.
+    CHECK(row_publishable(evap_fix));
+    CHECK(value_available(evap_fix, true, convert(evap_fix, evap1996).value));
+    CHECK(value_available(evap_fix, true, convert(evap_fix, evap1459).value));
+    // Precision comes along for free: 109 is in the ×0.1/÷256 scaled family, so it still prints one
+    // decimal. A silent drop to 0 decimals would round 15.6 °C to 16 and lose the 0.1 K grid that is
+    // the whole evidence base.
+    CHECK(display_decimals(109) == 1);
     // Its neighbour is NOT quarantined — the row publishes, and only its unpopulated raw 0x0000 is
     // withheld (#209 defect 2). Two rows, two different verdicts, one ledger.
     const ValueDef cond{0x10, 8, 114, 2, 1, "Target Cond. Temp."};
@@ -5014,6 +5030,62 @@ static void test_feature_gate() {
     CHECK(!uc5_supported(ghost_cov));
 }
 
+// ── The converter adjudication (logic/conv_override.hpp) — #194 ──────────────────────────────────
+// The ledger asserts a DIFFERENT value, not merely a withheld one, so what is pinned here is the
+// evidence itself: the wire integers. If a future generator run, a REGISTERS.md edit or a converter
+// change ever makes the ÷128 reading stop reproducing them, this fails rather than quietly shipping
+// a second wrong scale.
+static void test_conv_override() {
+    // Identity for everything the ledger is silent about — which is all of the catalog but one row.
+    CHECK(logic::effective_conv(0x10, 8, 114) == 114);    // Target Cond. Temp.: same page, same converter
+    CHECK(logic::effective_conv(0xA1, 5, 114) == 114);    // Target Discharge Temp.
+    CHECK(logic::effective_conv(0xA1, 7, 114) == 114);    // Target port temperature
+    CHECK(logic::effective_conv(0x61, 2, 105) == 105);    // leaving water — the row that must never move
+    CHECK(logic::effective_conv(0x10, 6, 105) == 105);    // right coordinates, WRONG converter: no match
+    CHECK(logic::effective_conv(0x11, 6, 114) == 114);    // right converter, wrong page
+    CHECK(logic::effective_conv(0x10, 7, 114) == 114);    // right page, wrong offset
+    CHECK(logic::effective_conv(0x10, 6, 114) == 109);    // the one entry
+
+    // THE EVIDENCE. Every distinct 16-bit value this row has ever been observed to carry — 46
+    // run-time (recovered exactly from the published series, since conv 114 prints raw × 0.1 at one
+    // decimal) and 8 at rest (from the boot-time page dumps replayed to syslog). Under ÷128 each is
+    // floor(128 × T) for T on an exact 0.1 K grid; the set {floor(12.8k)} has density 1/12.8, so
+    // 54/54 is p ~ 1.6e-60 against any other scale. THIS is why the row could be re-decoded on one
+    // unit's data where a merely-plausible range could not have justified it.
+    static const int OBSERVED[] = {
+        1331, 1344, 1369, 1382, 1395, 1408, 1420, 1433, 1446, 1459, 1472, 1484, 1510, 1536,
+        1548, 1561, 1574, 1587, 1600, 1612, 1625, 1651, 1664, 1689, 1702, 1728, 1740, 1753,
+        1766, 1779, 1792, 1804, 1817, 1830, 1856, 1868, 1881, 1894, 1907, 1920, 1932, 1945,
+        1958, 1971, 1984, 1996,                                            // compressor running
+        2201, 2214, 2240, 2304, 2342, 2393, 2406, 2432,                    // at rest
+    };
+    const ValueDef row = logic::adjudicated(ValueDef{0x10, 6, 114, 2, 1, "Target Evap. Temp."});
+    for (size_t i = 0; i < sizeof(OBSERVED) / sizeof(OBSERVED[0]); i++) {
+        const int raw = OBSERVED[i];
+        const uint8_t bytes[2] = {static_cast<uint8_t>(raw & 0xFF),
+                                  static_cast<uint8_t>((raw >> 8) & 0xFF)};   // s16 LE, as on the wire
+        const Reading r = convert(row, bytes);
+        CHECK(r.ok);
+        // Lands on the 0.1 K grid. The register holds floor(128 x T), so the decoded value sits up
+        // to 1/128 K BELOW the grid point — that truncation is itself part of the evidence, and the
+        // assertion is that rounding to one decimal recovers T and re-encodes to the very integer
+        // that came off the bus. (An exact-equality check here would be wrong, and wrong in the
+        // direction that hides the finding.)
+        const double t10 = r.value * 10.0;
+        const int    k   = static_cast<int>(t10 < 0 ? t10 - 0.5 : t10 + 0.5);
+        CHECK(r.value <= k / 10.0 + 1e-9 && r.value > k / 10.0 - 1.0 / 128.0 - 1e-9);
+        CHECK(static_cast<int>(128.0 * (k / 10.0) + 1e-9) == raw);
+        // And it is a temperature a heat pump can actually have, which x0.1 (133-243 °C) was not.
+        CHECK(r.value > 5.0 && r.value < 25.0);
+        CHECK(reading_plausible(row, r));
+        CHECK(value_available(row, r.ok, r.value));
+    }
+    // The row publishes again, as an ordinary °C sensor.
+    CHECK(row_publishable(row));
+    CHECK(!conv_is_binary(row.conv));
+    CHECK(display_decimals(row.conv) == 1);
+}
+
 // ── The availability ledger (logic/availability.hpp) — #209 defects 1, 2 and 6 ────────────────────
 // Two things are asserted, and the second is the one that matters. The first is that each rule does
 // what it says on a hand-built row. The second is what it does to the REAL CATALOG: a rule keyed on
@@ -5021,15 +5093,12 @@ static void test_feature_gate() {
 // proves it selects the quantity that was adjudicated and nothing else — the failure mode being a
 // rule that silently starts suppressing a real hydronic reading on some other model.
 static void test_availability() {
-    // Target Evap. Temp. — quarantined outright. The row still exists (detection needs the page);
-    // it simply never reaches a publish surface.
+    // Target Evap. Temp. is NO LONGER here — #194 identified it as a mis-assigned converter rather
+    // than an unmeasurable row, so its verdict lives in logic/conv_override.hpp. The ledger must be
+    // silent about it, or a reader would think the quarantine is still load-bearing.
     const ValueDef evap{0x10, 6, 114, 2, 1, "Target Evap. Temp."};
-    CHECK(availability_policy(evap) == AvailabilityPolicy::Unproven);
-    CHECK(!row_publishable(evap));
-    CHECK(!value_available(evap, true, 199.6));   // the measured mid-run value
-    CHECK(!value_available(evap, true, 24.06));   // and a value that WOULD be plausible: the row is
-                                                  // withheld because the SCALE is unknown, not
-                                                  // because this number is out of range
+    CHECK(availability_policy(evap) == AvailabilityPolicy::Always);
+    CHECK(row_publishable(evap));
 
     // Target Cond. Temp. — the row is published; an exact zero from it is not.
     const ValueDef cond{0x10, 8, 114, 2, 1, "Target Cond. Temp."};
@@ -5067,9 +5136,11 @@ static void test_availability() {
         for (size_t i = 0; i < view.count(); i++) {
             const ValueDef& d = view[i];
             const AvailabilityPolicy pol = availability_policy(d);
-            if (pol == AvailabilityPolicy::Unproven) {
+            if (logic::effective_conv(d.reg, d.offset, d.conv) != d.conv) {
                 suppressed++;
                 evap_rows++;
+                CHECK(d.reg == 0x10 && d.offset == 6 && d.conv == 114);
+                CHECK(logic::adjudicated(d).conv == 109);
                 // A quarantine must land on the quantity it was adjudicated for, on EVERY profile.
                 // The structural key is what makes that true, and this is what proves it — including
                 // the one place the catalog disagrees with ITSELF: altherma_lt_d7_e_bml labels this
@@ -5107,7 +5178,7 @@ static void test_availability() {
     CHECK(profiles_total == 45);
     CHECK(evap_rows == 44 && cond_rows == 44);
     CHECK(evap_rows == suppressed);
-    CHECK(odd_label == 1);   // exactly one family spells the quarantined register differently
+    CHECK(odd_label == 1);   // exactly one family spells the re-decoded register differently
 }
 
 // ── Numeric fault state beside the textual code (logic/fault_state.hpp) — #209 defect 4 ──────────
@@ -5256,6 +5327,7 @@ int main() {
     test_lwt_select();
     test_ou_stale();
     test_cop_scope();
+    test_conv_override();
     test_availability();
     test_fault_state();
     test_raw_capture();

@@ -67,24 +67,28 @@ struct AvailabilityRule {
 };
 
 inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
-    // Target Evap. Temp. — decodes to 145.9-199.6 °C WHILE THE COMPRESSOR RUNS, i.e. inside
-    // reading_plausible()'s +200 °C ceiling, so it reached Home Assistant and VictoriaMetrics as a
-    // real evaporating temperature. A coil absorbing heat from 22.5 °C air cannot be at 150-200 °C.
-    // The decode is faithful (conv 114 / size 2 / type 1 at 0x10/6 in 44 of 45 profiles, exactly as
-    // docs/REGISTERS.md §5 says), so the defect is a SCALE mismatch and two candidates (×0.01, ÷128)
-    // still fit — see the witness block in test/test_logic.cpp. Measured independently on the
-    // EBLA/EDLA 4-8 kW monobloc (#194) and the ERGA/EHB 04-08 kW split (#209): wrong on both, and
-    // correct on nothing anyone has measured. Withheld until the run-time wire bytes decide it.
-    {0x10, 6, 114, AvailabilityPolicy::Unproven,
-     "#194/#209: conv 114 x0.1 yields 145.9-199.6 C mid-run on two unit families"},
-    // Target Cond. Temp. — raw 0x0000 all day on the same two families: exactly one distinct value
-    // across a full audit window on the ERGA/EHB unit while the inverter reached 32 rps and the
-    // discharge pipe passed 100 °C (#209), and "reads 0.0 even mid-run" on the EBLA/EDLA unit, where
-    // logic/ou_stale.hpp already records it as a useless witness for that very reason. A condensing
-    // TARGET of exactly 0 °C during a heat-up is not a target; the field is unpopulated. The 0x8000
-    // sentinel cannot see this, and it is the one row where an exact zero is adjudicated absent.
+    // Target Evap. Temp. (0x10/6) USED TO BE HERE, as Unproven — "withheld until the run-time wire
+    // bytes decide it". They have. The row was never unproven in the sense of measuring nothing: it
+    // was pointed at the wrong CONVERTER. conv 114 (×0.1) is why it read 145.9-199.6 °C mid-run;
+    // decoded with conv 109 (÷128, already in logic/convert.hpp) the same wire integers read
+    // 10.4-15.6 °C running and 17.2-19.0 °C at rest, and all 54 distinct integers ever observed
+    // satisfy raw == floor(128 × T) on an exact 0.1 K grid. The verdict therefore moved to
+    // logic/conv_override.hpp, which carries the evidence — a quarantine and a mis-decode are
+    // different findings and must not be recorded as the same one, or the fix looks like a
+    // suppression that was quietly lifted. #194.
+    //
+    // Target Cond. Temp. — raw 0x0000 all day: exactly one distinct value across a full audit window
+    // while the inverter reached 32 rps and the discharge pipe passed 100 °C (#209), and "reads 0.0
+    // even mid-run", which is why logic/ou_stale.hpp already records it as a useless witness. A
+    // condensing TARGET of exactly 0 °C during a heat-up is not a target; the field is unpopulated.
+    // The 0x8000 sentinel cannot see this, and it is the one row where an exact zero is adjudicated
+    // absent. NOTE the evidence is ONE unit: #209's audit and #194's both ran against the same
+    // board, which detection has always resolved to altherma_ebla_edla_d_series_4_8kw_monobloc (the
+    // syslog detect line says so at every boot on record) — #213's "two unit families" read the
+    // hardware identification in #209's scope section as if it were the running profile. The verdict
+    // stands on the raw 0x0000 through full cycles; the second family does not exist yet.
     {0x10, 8, 114, AvailabilityPolicy::ZeroMeansAbsent,
-     "#209: raw 0x0000 through a full compressor cycle on two unit families"},
+     "#209: raw 0x0000 through a full compressor cycle (one unit, two audits)"},
 };
 
 inline constexpr size_t AVAILABILITY_RULE_COUNT =
