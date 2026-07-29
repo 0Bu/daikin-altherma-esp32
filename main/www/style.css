@@ -414,6 +414,12 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   background: var(--warn); margin-right: 5px;
 }
+/* The Checkup card's badge reports one of five states, so its dot needs more than the one --warn
+   above. Only the DOT changes — the word stays --fg in every state, for the reason given at the top
+   of this block: the dot is decoration and carries the emphasis, the word carries the statement. */
+.section-badge.ok::before  { background: var(--ok); }
+.section-badge.err::before { background: var(--err); }
+.section-badge.dim::before { background: var(--muted); }
 .vrow {
   display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
   padding: 9px 0; border-top: 1px solid var(--line);

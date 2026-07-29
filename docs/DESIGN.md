@@ -496,7 +496,7 @@ Body, ordered:
    components ("Running — compressor at 62 rps.", "Paused — the valve is feeding the hot-water tank
    right now."), the **explainer** (what it is, and `Normal:` guidance where useful), and the
    **member readings** of that component as a compact label→value list.
-   The explainer copy comes from the **same `DESCRIPTIONS` table** the value rows use (§5.3 item 5) —
+   The explainer copy comes from the **same `DESCRIPTIONS` table** the value rows use (§5.3 item 6) —
    one source for "what does this mean", never a second parallel one. A value target resolves it
    through a canonical register label rather than the live one, so a profile's own spelling cannot
    drift onto a neighbouring entry. Component copy (outdoor unit, PHE, ΔT, heat output, heating
@@ -602,7 +602,7 @@ Body, ordered:
    one identifier that can settle it, and only a person holding the nameplate can: the firmware has
    no digit→name table and must not invent one. A *unique* identification shows neither row — it
    needs no list of what it isn't.
-   **And every row on this card explains itself** (same expander as item 5). The two rows above exist
+   **And every row on this card explains itself** (same expander as item 6). The two rows above exist
    *because* an ambiguous detection needs explaining, but on their own they state the fact and never
    the reason — a generic brand name over a list of models it might be is also exactly what a failed
    detection would look like. So tapping a row says why the indoor unit's figure is labelled as such,
@@ -610,10 +610,44 @@ Body, ordered:
    no reading), and what the ID digits are for. The copy is a **separate table** (`MODEL_DESCRIPTIONS`,
    keyed by row id) rather than `DESCRIPTIONS`: these labels are *translated*, so an English label
    pattern would silently stop matching on a German page, and they are not catalog labels — see
-   item 5.
+   item 6.
    The **ESP32** card that used to sit above it is in Settings now (§5.6): this card is the *unit*,
    that one is the *board*.
-5. **Value groups** (§6) as cards, each a label→value·unit table, tabular numbers; every value of the
+5. **Checkup card** — "Checkup · 24 h", styled exactly like the Model card, directly below it and
+   above the value groups. It answers the third question the dashboard has, after *what is it doing
+   now* (the system card) and *what did this one reading do today* (a value row's trend): **is
+   anything worth reporting?** Seven rows from `/status.health`, in the order the firmware sends them
+   (`logic/checkup.hpp` declares the checks in reading order, so there is no second opinion here
+   about which matters most): unit fault, compressor starts, defrost cycles, lowest water pressure,
+   lowest flow rate, backup heater, protection retries.
+   **Every verdict is the device's.** The firmware judges; the browser renders words and colour. A
+   threshold decided in `app.js` would be a second, ungated definition of the same judgement, and the
+   rules here are gated in CI against the whole profile catalog — the failure mode `lwt_select`
+   already demonstrated when a looser copy of its rule re-opened #121.
+   **A badge states the whole card in one word**, beside the heading, with a coloured dot: "All
+   clear" / "Worth a look" / "Needs attention" / "Collecting · 4 h of 24 h" / "Not available". The
+   word carries the statement and the dot only tints it (§9) — the badge is legible with no colour
+   perception at all.
+   **The window is stated, not implied.** The rings are RAM-only and this board reboots often, so a
+   partial window is the *normal* case, not an edge one. A check whose window is too short reports
+   "collecting…" and the badge names how much has been observed. A device that has been up ten
+   minutes must never show a green "All clear" it has no evidence for — the same refusal §8 makes
+   about a dead bus ("an idle plant with no readings, not a stale one"), applied to a count.
+   **A check the model cannot run says "—"**, and unlike "collecting" it does not hold the badge
+   back: only 27 of 44 profiles carry a compressor-speed row, so on the rest the cycling and retry
+   rows are simply off. Disable, never degrade (`logic/feature_gate.hpp`).
+   **Every row explains itself** (same expander and the same `MODEL_DESCRIPTIONS` table as item 4).
+   These rows need it more than any others on the dashboard, and for a different reason: a value row
+   states a *measurement* the reader can look up, while "31 starts, 6 min avg" states a *judgement* —
+   without the copy a reader cannot tell whether that is bad, why the firmware thinks so, or what
+   they would do about it. Each explainer therefore answers three things: what was counted, what
+   normal looks like, and what to do when it is not. It also states what the row does **not** claim:
+   the flow minimum deliberately carries no verdict (the required minimum is per model across a
+   3–18 kW catalog, and the unit raises 7H itself), and a defrost above the frost line is odd rather
+   than wrong (air humidity is not on the X10A bus).
+   Hidden entirely while the X10A link is down, like the Model card: a summary of the last 24 hours
+   presented beside a bus that is not answering reads as current when it is not.
+6. **Value groups** (§6) as cards, each a label→value·unit table, tabular numbers; every value of the
    detected profile is shown. A value that timed out this cycle shows "—" (not 0). The schematic
    answers "what is happening"; these tables stay as the exact-value reference — both read the same
    `/values` dataset.
@@ -998,7 +1032,7 @@ enabled/available values are hidden.
   light, 1.23:1 in dark — so it would be an edge that is drawn and cannot be seen), and an inset
   top shadow (`--shadow-tongue`, per-scheme like `--shadow-card`) is the shadow the row casts onto
   it. Bold `--fg` "Normal:" lead-in on `--muted` body. It opens with the `grid-template-rows: 0fr→1fr`
-  height transition (§5.3 item 5) **plus** a `translateY(-7px)→0` slide on the same `.22s` timing, so
+  height transition (§5.3 item 6) **plus** a `translateY(-7px)→0` slide on the same `.22s` timing, so
   height and content land together; both honour `prefers-reduced-motion` — which has to be said
   explicitly, since the global reduced-motion rule kills `animation` only, not `transition`.
   The ROW itself is untouched: no radius, no border of its own. Unrecognised labels render as a

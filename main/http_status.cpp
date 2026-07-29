@@ -1,5 +1,6 @@
 // GET routes: the web UI (embedded gzip), /status, /values, /models, /diag, /scan.
 #include "http_handlers.hpp"
+#include "checkup.hpp"
 #include "config.hpp"
 #include "logic/board_pins.hpp"
 #include "logic/board_presets.hpp"
@@ -245,6 +246,74 @@ static std::string build_status_json_string(bool redact = false) {
         j += "}";
     }
     j += "]},";
+
+    // ── The 24-hour plant checkup (logic/checkup.hpp) ───────────────────────────────────────────
+    // Counted EVENTS and window MINIMA — the questions no single reading can answer and the trend
+    // rings structurally cannot either (a compressor cycle shorter than one 5-minute trend bucket
+    // leaves no trace in it). Named `health` and not `diag`: GET /diag is the log ring the bug-report
+    // button pulls, and two unrelated things under one word is how a reader ends up looking in the
+    // wrong place.
+    //
+    // `covered_s` is how much of the 24 hours was actually OBSERVED, and it is reported in SECONDS
+    // rather than as whole hours so the first hour after a reboot reads as the small number it is
+    // instead of rounding to "0 h". Every check states its own verdict against it: `collecting`
+    // until it has enough, never a green `ok` bought with no evidence.
+    //
+    // A field a check has not established is emitted as `null`, never omitted — an absent key is
+    // indistinguishable from an older build that never had it, the same rule logic/redact.hpp
+    // states for the bug-report payload. Successive `+=` with bare literals throughout (never one
+    // `a + b + c` chain): this function also runs in the poll task's WS broadcaster, and its stack
+    // is the budget that killed v1.0.12.
+    {
+        const logic::CheckupReport hr = checkup_report();
+        j += "\"health\":{\"covered_s\":";
+        j += std::to_string(hr.covered_s);
+        j += ",\"status\":";
+        j += jstr(logic::checkup_verdict_name(hr.overall));
+        j += ",\"checks\":[";
+        // An integer field, or null when the check did not establish it.
+        auto num = [&j](const char* name, int v) {
+            j += ",\"";
+            j += name;
+            j += "\":";
+            if (v < 0) { j += "null"; return; }
+            j += std::to_string(v);
+        };
+        // The same, for a value the converters produce in TENTHS of its unit (bar, l/min) — printed
+        // with its one decimal so the browser never has to know the scale. Mirrors kw_field below.
+        auto tenths = [&j](const char* name, int v) {
+            j += ",\"";
+            j += name;
+            j += "\":";
+            if (v < 0) { j += "null"; return; }
+            j += std::to_string(v / 10);
+            j += ".";
+            j += std::to_string(v % 10);
+        };
+        for (size_t i = 0; i < logic::CHECKUP_CHECK_COUNT; i++) {
+            const auto  id = static_cast<logic::CheckupCheck>(i);
+            const auto& ck = hr.checks[i];
+            if (i) j += ",";
+            j += "{\"id\":";
+            j += jstr(logic::checkup_check_id(id));
+            j += ",\"verdict\":";
+            j += jstr(logic::checkup_verdict_name(ck.verdict));
+            // Named per check rather than a generic pair: the browser must not have to carry a table
+            // that says what `a` means for which id — that table would be a second definition of the
+            // check, free to drift from this one.
+            switch (id) {
+                case logic::CheckupCheck::Cycling:  num("starts", ck.a);   num("mean_run_s", ck.b); break;
+                case logic::CheckupCheck::Defrost:  num("count", ck.a);    num("share_pct", ck.b);  break;
+                case logic::CheckupCheck::Pressure: tenths("min_bar", ck.a);                        break;
+                case logic::CheckupCheck::Flow:     tenths("min_l_min", ck.a);                      break;
+                case logic::CheckupCheck::Heater:   num("buh_min", ck.a);  num("bsh_min", ck.b);    break;
+                case logic::CheckupCheck::Fault:    num("active", ck.a);                            break;
+                case logic::CheckupCheck::Retries:  num("seen", ck.a);                              break;
+            }
+            j += "}";
+        }
+        j += "]},";
+    }
 
     // System health: heap headroom + why the device last booted, so both are visible from the LAN /
     // WebSocket without a serial console (and without a broker — unlike the MQTT heartbeat). free_heap

@@ -281,6 +281,27 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #   history:{dt,rows:[{id,label}]},   # rows with a 24 h trend;
                                    #        id = the concept (what /history takes), label = how the
                                    #        detected profile spells it. Absent rows are omitted.
+                                   #   health:{covered_s,status,checks:[{id,verdict,…}]},
+                                   #        # the 24 h plant CHECKUP (logic/checkup.hpp), judged on
+                                   #        the device. status = the worst verdict across the
+                                   #        checks; covered_s = how much of the day was actually
+                                   #        OBSERVED, in seconds (the ring is RAM, so a reboot
+                                   #        restarts it — reported rather than rounded to hours, so
+                                   #        the first hour reads as the small number it is).
+                                   #        Seven checks in READING order, fault first, each
+                                   #        verdict "unavailable" (this profile lacks the rows —
+                                   #        only 27 of 44 carry the compressor witness) |
+                                   #        "collecting" (window too short to judge yet — it
+                                   #        outranks "ok" in the aggregation, so a freshly booted
+                                   #        board can never report green) | "ok" | "info" | "warn",
+                                   #        plus its own named numbers:
+                                   #          fault:{active}   cycling:{starts,mean_run_s}
+                                   #          defrost:{count,share_pct}   pressure:{min_bar}
+                                   #          flow:{min_l_min}   heater:{buh_min,bsh_min}
+                                   #          retries:{seen}
+                                   #        A number the check did not establish is null, never an
+                                   #        omitted key. NOT the same thing as GET /diag, which is
+                                   #        the log ring.
                                    #   sys:{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode},
                                    #   last_crash: null | {reason,reason_code,fault,coredump,
                                    #        task,pc,backtrace[],corrupted,elf_sha256},

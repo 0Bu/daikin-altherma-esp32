@@ -9,6 +9,7 @@ idf_component_register(
         "hp_detect.cpp"
         "hp_poll.cpp"
         "history.cpp"
+        "checkup.cpp"
         "http_server.cpp"
         "http_common.cpp"
         "http_status.cpp"
