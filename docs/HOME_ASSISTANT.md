@@ -174,6 +174,30 @@ the rest in, so an install created by an older, MAC-identified build keeps its e
 > were already group-nested and were never affected by the defect; forking them is what
 > [#217](https://github.com/0Bu/daikin-altherma-esp32/issues/217) exists to prevent.
 
+### Two diagnostic entities are retired
+
+**Device Time** and **WiFi Quality** disappear on upgrade. Both were removed because they only
+repeated something the same device already published, which is the rule that retired *Last Reset
+Reason* before them — an entity that cannot say anything new is not a second reading, it is a second
+thing to rule out when something looks wrong.
+
+- **Device Time** carried the device's SNTP wall clock as a `timestamp` sensor. Because the heartbeat
+  re-sends it every 10 s, HA rendered it as *"N seconds ago"* — the same thing HA's own *last
+  updated* shows for every other entity on this device, without needing a clock at all — while
+  writing a recorder row every 10 s forever. What it was *supposed* to catch, a device whose clock
+  never synced or drifted, is on `/status.ntp` (`{server, synced, time}`, and `synced: false` is that
+  failure stated outright) and on every syslog message's RFC 5424 timestamp.
+- **WiFi Quality** (%) was `2 × (rssi + 100)`, computed from the *WiFi Signal* (dBm) sensor sitting
+  next to it. If you prefer percent, a template sensor over the dBm entity reproduces it exactly:
+  `{{ [[2 * (states('sensor.<…>_wifi_signal') | int + 100), 0] | max, 100] | min }}`.
+
+The `time` and `wifi_quality_pct` fields are gone from the heartbeat JSON too, so a Telegraf/
+VictoriaMetrics consumer loses the `…_wifi_quality_pct` series (`…_wifi_rssi` is unaffected and is
+what it was derived from). Nothing has to be cleaned up by hand: the firmware **deletes** both
+retained discovery configs on its next connect, so HA drops the entities on its own. Their long-term
+statistics go with them — that is the cost of the removal, and it is why nothing else in the
+diagnostic set was touched.
+
 ### Binary values are numbers, not "ON"/"OFF"
 
 A bit-flag value (converter family 300-307 — *"Water pump operation"*, *"3way valve"*, *"Thermostat

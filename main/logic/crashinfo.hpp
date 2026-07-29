@@ -186,15 +186,10 @@ inline const CrashSensor CRASH_SENSORS[] = {
 };
 inline constexpr int CRASH_SENSOR_COUNT = sizeof(CRASH_SENSORS) / sizeof(CRASH_SENSORS[0]);
 
-// HA entities this firmware ONCE published on the crash topic but no longer does. Their retained
-// discovery configs must be actively DELETED (a zero-length retained publish to the discovery topic),
-// or an install upgraded from an older build keeps a stale, permanently-"unavailable" entity forever.
+// HA entities this firmware ONCE published on the crash topic but no longer does (RetiredHaSensor +
+// the why, logic/ha_device.hpp — the type is shared with heartbeat.hpp's own retired list).
 // "last_reset" (the "Last Reset Reason" sensor) was dropped once it became an exact duplicate of the
 // heartbeat's own "Reset Reason" sensor (reset_reason_name == crash_reason_slug, host-asserted).
-struct RetiredHaSensor {
-    const char* component;   // discovery-topic <component> segment
-    const char* object_id;
-};
 inline const RetiredHaSensor RETIRED_CRASH_SENSORS[] = {
     {"sensor", "last_reset"},   // superseded by the heartbeat "Reset Reason" sensor
 };

@@ -595,11 +595,28 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 1/0 NUMBERS, not bools, for the same metrics-consumer reason as the bit-flag rows, and
                 bus_status carries the matching pl_on/pl_off — the crash topic keeps true/false + `| lower`
                 since it is an event payload, not a metrics stream) of
-                heap(free/min-free/largest-block)/uptime/reset_reason/the SNTP wall clock (sntp_time.cpp,
-                "time" — HA device_class "timestamp", null until synced)/wifi(rssi+reconnects+MAC+BSSID,
+                heap(free/min-free/largest-block)/uptime/reset_reason/wifi(rssi+reconnects+MAC+BSSID,
                 mac always present, bssid null offline)/mqtt(pub count+fails+reconnects)/X10A bus
-                (rx_received/rx_fails/bus_ou_held_over) stats, 20 diagnostic HA entities streamed
-                independently of profile detection. bus_ou_held_over is SOURCE freshness, a different
+                (rx_received/rx_fails/bus_ou_held_over) stats, 18 diagnostic HA entities streamed
+                independently of profile detection. TWO are RETIRED (RETIRED_HEARTBEAT_SENSORS), under
+                the rule that already retired the crash topic's "Last Reset Reason": an entity
+                repeating what another entity on the same device says is not a second reading, it is a
+                second thing to rule out. "Device Time" published the SNTP wall clock as a
+                device_class "timestamp" sensor — re-sent every 10 s, so HA rendered it as "N seconds
+                ago", which is what HA's own last_updated on any other entity here already says
+                without a clock, at one recorder row every 10 s forever; the drifted/never-synced
+                clock it was meant to catch is reported by /status.ntp {server,synced,time} and every
+                syslog TIMESTAMP. "WiFi Quality" published 2*(rssi+100) beside the WiFi Signal sensor
+                carrying that rssi — a deterministic function of another entity cannot disagree with
+                it, fail independently of it, or show anything it does not. The "time" and
+                "wifi_quality_pct" PAYLOAD FIELDS went with them: each fed only its entity, and a
+                field whose one consumer is gone leaves the duplicate in every heartbeat while hiding
+                it from the place it was visible. Both retained configs are actively DELETED per
+                (re)connect under the current AND the legacy MAC node id, and their uniq_ids are
+                BURNED (test_entity_identity refuses a live entity claiming one back — it would
+                inherit the corpse instead of a fresh registry entry). RetiredHaSensor itself lives in
+                ha_device.hpp, shared with crashinfo.hpp: both diagnostic surfaces retire under one
+                rule and one failure mode. bus_ou_held_over is SOURCE freshness, a different
                 fact from bus_connected: the link is up and the device is publishing while the
                 outdoor unit is simply not measuring, and a consumer that only had bus health would
                 read the withheld outdoor keys as a broken link. Deliberately NOT device_class
@@ -1165,6 +1182,10 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 and this board's MAC id second (dropped when empty or equal; a duplicated identifier
                 is malformed for HA). A dev block that drifted between the three builders would split
                 the board across two HA devices again, so the test asserts all three carry the same one.
+                Also RetiredHaSensor, the {component, object_id} of an entity this firmware ONCE
+                published: shared by crashinfo.hpp and heartbeat.hpp because both retire under one
+                rule and one failure mode — a retained discovery config nobody deletes is replayed to
+                HA forever, so the entity lingers as a permanently-unavailable duplicate
                 json.hpp = the ONE RFC 8259 string encoder every JSON payload goes through (/status,
                 /values, /scan via http_status.cpp's jstr; the MQTT state/heartbeat/crash topics).
                 Escapes " and \ AND every control byte < 0x20 (\b\f\n\r\t, else \u00XX) — the strings

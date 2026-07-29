@@ -484,6 +484,10 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   each expose their own `entity_category: diagnostic` HA sensors. The crash topic carries only the
   reason + a hex backtrace — never a secret or the raw dump; pull the full dump from `GET /coredump`
   and decode it with `scripts/decode-coredump.sh`.
+  Two heartbeat entities — *Device Time* and *WiFi Quality* — were retired under the same rule as
+  *Last Reset Reason* above: each only repeated what another entity on the same device already said.
+  Their retained discovery configs are actively deleted, so they disappear on upgrade without manual
+  cleanup ([HOME_ASSISTANT.md](HOME_ASSISTANT.md#two-diagnostic-entities-are-retired)).
 - **Autodiscovery streaming.** A full Altherma value set can exceed 10 KB of discovery JSON;
   discovery is emitted incrementally (chunked) so it never needs one large contiguous heap block.
 

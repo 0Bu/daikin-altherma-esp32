@@ -44,8 +44,6 @@
 #include "logic/heartbeat.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/reset_reason.hpp"
-#include "logic/timestamp.hpp"
-#include "sntp_time.hpp"
 #include "wifi.hpp"
 
 #include "esp_app_desc.h"
@@ -236,6 +234,10 @@ static void retract_legacy_fixed() {   // heartbeat + crash entities (no profile
     if (s_board == s_node) return;     // ids coincide -> there is no separate legacy identity
     for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++)
         mqtt_publish(heartbeat_discovery_topic(s_prefix, s_board, HEARTBEAT_SENSORS[i]), "", 0, 0, 1);
+    for (int i = 0; i < RETIRED_HEARTBEAT_SENSOR_COUNT; i++)
+        mqtt_publish(heartbeat_discovery_topic(s_prefix, RETIRED_HEARTBEAT_SENSORS[i].component,
+                                               s_board, RETIRED_HEARTBEAT_SENSORS[i].object_id),
+                     "", 0, 0, 1);
     for (int i = 0; i < CRASH_SENSOR_COUNT; i++)
         mqtt_publish(crash_discovery_topic(s_prefix, s_board, CRASH_SENSORS[i]), "", 0, 0, 1);
     for (int i = 0; i < RETIRED_CRASH_SENSOR_COUNT; i++)
@@ -356,6 +358,14 @@ static bool publish_state(bool force) {
 // profile == "auto".
 static void publish_heartbeat_discovery() {
     if (!s_legacy_fixed_retracted) retract_legacy_fixed();   // delete the old ids FIRST
+    // Delete any entity we USED to publish here but no longer do — a zero-length retained message to
+    // its old discovery topic removes it from HA, so an install upgraded from an older build doesn't
+    // keep a stale, permanently-unavailable "Device Time" / "WiFi Quality". Same contract as the
+    // crash topic's RETIRED_CRASH_SENSORS; cheap + retained, so once per (re)connect is fine.
+    for (int i = 0; i < RETIRED_HEARTBEAT_SENSOR_COUNT; i++) {
+        const RetiredHaSensor& r = RETIRED_HEARTBEAT_SENSORS[i];
+        mqtt_publish(heartbeat_discovery_topic(s_prefix, r.component, s_node, r.object_id), "", 0, 0, 1);
+    }
     for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++) {
         const HeartbeatSensor& s = HEARTBEAT_SENSORS[i];
         const std::string ct  = heartbeat_discovery_topic(s_prefix, s_node, s);
@@ -424,11 +434,6 @@ static void publish_heartbeat() {
     f.reset_reason      = reset_reason_name(boot.reason);
     f.reset_reason_code = boot.reason;
     f.reset_fault       = crash_reason_is_fault(boot.reason);
-    if (time_synced()) {
-        int64_t unix_s; int32_t ms;
-        time_now(unix_s, ms);
-        f.time = rfc3339_utc(unix_s, ms);
-    }
     f.wifi_connected  = wi.connected;
     f.wifi_rssi       = wi.rssi;
     f.wifi_reconnects = wifi_reconnect_count();

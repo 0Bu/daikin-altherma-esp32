@@ -40,14 +40,14 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 10 | **MQTTS + CA-bundle** TLS; credentials never sent in cleartext | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 11 | Core-dump-to-flash + summary capture + offline symbolication | ✅ | [`diag_crash.cpp`](../main/diag_crash.cpp), [`decode-coredump.sh`](../scripts/decode-coredump.sh) |
 | 12 | Reset-reason + crash classification, retained to MQTT | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp) |
-| 13 | 20-entity device **heartbeat** diagnostics stream (heap trend + reset reason + SNTP wall clock + WiFi MAC/BSSID + outdoor-page source freshness incl.) | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
+| 13 | 18-entity device **heartbeat** diagnostics stream (heap trend + reset reason + WiFi MAC/BSSID + outdoor-page source freshness incl.; two retired entities are actively retracted) | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
 | 14 | Strongest-AP scan + SAE tuning + **endless reconnect** | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 15 | **ICMP gateway watchdog** (ghost-association recovery) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 16 | Captive-portal provisioning (AP-only SoftAP, typed SSID, UDP:53 DNS catch-all, 302 probe redirect + RFC 8910 option 114) | ✅ 🧪 | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp), [`logic/captive.hpp`](../main/logic/captive.hpp) |
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte — it both ranks the representative and **narrows the candidate set**, dropping only classes that contradict it, **retried page probe + a second-sweep confirmation** before falling back to `generic`) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1832 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1827 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -633,13 +633,11 @@ the fact*, from the field, without a serial cable:
   untouched, so the heartbeat's "Reset Reason" sensor and `/status.sys.reset_reason` still say how the
   board rebooted. Because it destroys the one artifact a bug report needs, the UI asks first (a second
   tap inside the banner) and the route is `POST`, unreachable by a link or a prefetch.
-- **✅ 🧪 20-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): on a fixed
+- **✅ 🧪 18-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): on a fixed
   10 s cadence, `<base>/heartbeat` streams a **flat** JSON (each field prefixed by its block name —
   `wifi_rssi`, `wifi_mac`, `bus_rx_received`, … — no nested `wifi`/`mqtt`/`bus` sub-objects) of heap
   (free / min-free / **largest-free-block**, the true OOM limit — all three now their own HA entities),
-  uptime, the **last reset reason**, the **SNTP wall clock** (`sntp_time.cpp`,
-  `device_class:"timestamp"` — HA's native "N ago" entity, the one HA-idiomatic use of the device's
-  own clock; `null` until synced, never a fabricated epoch date), WiFi RSSI + reconnect count + the
+  uptime, the **last reset reason**, WiFi RSSI + reconnect count + the
   STA **MAC** and associated-AP **BSSID**, MQTT publish/fail/reconnect counters, and X10A bus
   rx/fail/crc/timeout stats, and `bus_ou_held_over` — **source** freshness rather than link health:
   the outdoor unit refreshes its own pages only while it runs, so this says *why* the outdoor keys
@@ -654,6 +652,26 @@ the fact*, from the field, without a serial cable:
   and had to be reconstructed from syslog (#215). They are deliberately **not** new HA entities: the
   "Reset Reason" text sensor already answers a human, and a numeric twin beside it is exactly the
   duplicate that got the crash topic's "Last Reset Reason" retired.
+- **✅ 🧪 Retiring a diagnostic entity is an operation, not a deletion**
+  ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) `RETIRED_HEARTBEAT_SENSORS`,
+  [`logic/ha_device.hpp`](../main/logic/ha_device.hpp) `RetiredHaSensor`): a discovery config is
+  **retained**, so dropping a row from the sensor table only stops refreshing it — the broker replays
+  the old config to Home Assistant forever and the entity lingers as a permanently-`unavailable`
+  duplicate. A retired entity is therefore listed, and its config **actively deleted** (zero-length
+  retained publish) on every reconnect under the current node id **and** the legacy MAC-derived one.
+  Its `uniq_id` is then **burned**: `test_entity_identity()` walks both retired lists and refuses to
+  let any live entity claim one back, since it would inherit the dead registry entry instead of
+  getting a fresh one. Two heartbeat entities are retired under one rule — an entity that repeats
+  what another entity on the same device already says is not a second reading, it is a second thing
+  to rule out. **"Device Time"** published the SNTP wall clock every 10 s, which HA renders as "N
+  seconds ago" — what its own `last_updated` shows for every entity here without needing a clock —
+  at one recorder row every 10 s forever; the never-synced/drifted clock it was meant to catch is
+  stated by `/status.ntp` `{server,synced,time}` and by every syslog TIMESTAMP. **"WiFi Quality"**
+  published `2*(rssi+100)` beside the "WiFi Signal" sensor carrying that rssi: a deterministic
+  function of another entity cannot disagree with it or fail independently of it. Both payload
+  fields went with them — a field whose only consumer is gone leaves the duplicate in every
+  heartbeat while hiding it from the one place it was visible. The same mechanism retired the crash
+  topic's "Last Reset Reason" (`RETIRED_CRASH_SENSORS`), which is why the type is shared.
 - **✅ 🧪 Always-on system health** ([`logic/reset_reason.hpp`](../main/logic/reset_reason.hpp)): the
   `/status` document (and the `/events` status frame) carries a compact `sys` block — `free_heap`,
   `min_free_heap` (since-boot low-water, the leak indicator), `max_alloc` (largest contiguous block,
@@ -733,7 +751,8 @@ the fact*, from the field, without a serial cable:
   the configured server, coloured `--ok` once synced and `--warn` while syncing (DESIGN.md §5.6,
   the Connections tile) — the synced wall clock itself isn't shown on the row (no room in a
   one-line tile), but remains
-  available via the MQTT heartbeat's `device_time` sensor and `/status.ntp.time`. An empty
+  available from `/status.ntp.time` and every syslog TIMESTAMP — and deliberately from no HA entity
+  (the "Device Time" sensor is retired: `RETIRED_HEARTBEAT_SENSORS`). An empty
   `/set_ntp` save is read on the next boot as "reset to the compile-time
   default" — unlike Syslog/MQTT, SNTP has no disabled state to preserve, so empty can't mean "off"
   here. The diag ring's uptime prefix is unchanged — it's what `device-triage` keys on to reconstruct
@@ -892,8 +911,8 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   requested address + value/quantity), `Temp16`/`Pow16`/`Int16`/`Text16` decode/encode,
   the `homehub-*` mDNS filter; the host-tested core for the *planned* firmware-exclusive HomeHub
   Modbus link (issue #32), **not yet wired into the firmware**), and the SNTP wall-clock RFC 3339
-  formatter (`timestamp.hpp` — the one place the syslog TIMESTAMP field, `/status.ntp.time` and the
-  MQTT heartbeat's `time` field render through; a negative/never-synced input renders `""`, never a
+  formatter (`timestamp.hpp` — the one place the syslog TIMESTAMP field and `/status.ntp.time`
+  render through; a negative/never-synced input renders `""`, never a
   fabricated `1970-01-01`), the **OTA downgrade gate** (`version_cmp.hpp` — numeric dotted-version
   ordering plus `ota_is_upgrade()`, which fails closed on anything it can't parse, and exact
   manifest↔image artifact binding) and the **OTA manifest parser** (`ota_manifest.hpp` — the one
@@ -1031,7 +1050,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   catalog sweep proving each `(page, offset, converter)` locator resolves to **exactly one** row
   **and to the right one**, asserted on the resolved row's own label, because six other rows share
   the `0x60/12` byte and every one of them would satisfy a page+offset match),
-  **1832 `CHECK`s** in
+  **1827 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -1274,9 +1293,9 @@ security of signed firmware with none of the brick risk. It refuses to roll a ba
 **connectivity-proving health gate** (not a naive uptime timer). It ships a **live WebSocket UI embedded
 and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-associations no event
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
-sha-matched ELF, retained MQTT crash + 20-entity heartbeat diagnostics). And the risky parts — decode,
+sha-matched ELF, retained MQTT crash + 18-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1832 checks),
+on the host** (1827 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 
