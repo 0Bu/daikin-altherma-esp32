@@ -26,6 +26,12 @@
 //                     false. The row is withheld from every publish surface until the wire evidence
 //                     settles the scale; the raw page dump (logic/raw_capture.hpp) is what preserves
 //                     the evidence in the meantime.
+//   AboveRangeIsAbsent  the row is a real measurement almost always, and occasionally carries a
+//                     single fixed out-of-band integer that no position/count could be. Unlike the
+//                     two above this is a VALUE test — but it cannot live in reading_plausible(),
+//                     whose envelopes are keyed on the dataType (1 = °C, 2 = bar) and so cannot see
+//                     a dataType -1 row at all. The only thing that identifies such a row is its
+//                     (page, offset, converter) coordinate, which is exactly this ledger's key.
 //
 // WHY A LEDGER IN logic/ AND NOT A FLAG IN def/ — the generated per-model tables are machine output
 // (.claude/CLAUDE.md: never hand-edit one), and these verdicts are OURS, derived from live captures
@@ -53,9 +59,10 @@ namespace daik {
 
 // What the firmware is willing to claim about a row.
 enum class AvailabilityPolicy : uint8_t {
-    Always,           // the default for every row in the catalog: publish whatever decoded
-    ZeroMeansAbsent,  // an exact decoded zero is an unpopulated field on THIS row, not a reading
-    Unproven,         // the decode itself is not trusted here — publish nothing, keep the evidence
+    Always,             // the default for every row in the catalog: publish whatever decoded
+    ZeroMeansAbsent,    // an exact decoded zero is an unpopulated field on THIS row, not a reading
+    Unproven,           // the decode itself is not trusted here — publish nothing, keep the evidence
+    AboveRangeIsAbsent, // a decoded value above this row's physical ceiling is not a reading
 };
 
 struct AvailabilityRule {
@@ -63,8 +70,17 @@ struct AvailabilityRule {
     uint8_t            offset;
     int                conv;
     AvailabilityPolicy policy;
+    double             ceiling;  // AboveRangeIsAbsent only; ignored (and 0) for every other policy
     const char*        why;      // the evidence, on record beside the rule
 };
+
+// The ceiling for an electronic-expansion-valve PULSE POSITION (conv 151, see the rules below).
+// Chosen to be impossible rather than tight: the widest position ever observed on the reference
+// unit is 474 pulses over 30 days, so 2000 is roughly four times the full-open travel of the
+// actuator and cannot clip a real position on a larger model — while the value it exists to refuse
+// sits 33x above it. Fitting a bound to the observed maximum would be the mistake
+// logic/conv_override.hpp names: a threshold picked to make a number look nicer is not evidence.
+inline constexpr double EEV_PULSE_CEILING = 2000.0;
 
 inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // Target Evap. Temp. (0x10/6) USED TO BE HERE, as Unproven — "withheld until the run-time wire
@@ -87,20 +103,64 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // syslog detect line says so at every boot on record) — #213's "two unit families" read the
     // hardware identification in #209's scope section as if it were the running profile. The verdict
     // stands on the raw 0x0000 through full cycles; the second family does not exist yet.
-    {0x10, 8, 114, AvailabilityPolicy::ZeroMeansAbsent,
+    {0x10, 8, 114, AvailabilityPolicy::ZeroMeansAbsent, 0.0,
      "#209: raw 0x0000 through a full compressor cycle (one unit, two audits)"},
+
+    // ── Expansion valve pulse positions (conv 151) — raw 0xFFF8 is not a position ─────────────────
+    // MEASURED on the reference unit's published series (VictoriaMetrics, 30 days, 30 s samples of
+    // "Expansion valve 1 (pls)" = 0x30/3): the working range is 0-474 pulses, and then SIX samples
+    // of exactly 65528. Nothing whatever lies in between — not one sample in (500, 60000) in the
+    // whole window — so this is a discrete out-of-band integer, not the tail of a distribution.
+    //
+    // 65528 is 0xFFF8: 65528 read unsigned, -8 read signed. THE SIGNED READING IS REFUTED, which
+    // matters because "conv 151 should have been signed" is the obvious first diagnosis and it is
+    // wrong twice over. (a) A valve driven briefly past its mechanical zero would report a SPREAD of
+    // small negatives (0xFFFF, 0xFFFE, …) and would be reached from positions near 0; all six
+    // occurrences are the identical integer and each sits between neighbouring samples of ~450, and
+    // no valve travels 450 -> -8 -> 450 inside 30 s. (b) conv 151 is documented as u16 (REGISTERS.md
+    // §3.1) and the firmware implements it that way, so re-reading it signed would change every one
+    // of the catalog's 113 conv-151 rows on the strength of a number that is not a position under
+    // EITHER reading. Withholding the value is the one answer both readings agree on.
+    //
+    // WHY NOT IN convert(): folding an envelope into a converter blinds the domain audit's
+    // converters_equivalent(), the exact gate that catches a wrong converter id (tools/domain,
+    // and the note in reading_plausible() spells this out). WHY NOT IN reading_plausible(): these
+    // rows are dataType -1, so neither of its envelopes (°C, bar) can reach them, and the only other
+    // handle is the "(pls)" in the label — the one thing this project does not key on.
+    //
+    // ALL FIVE COORDINATES, not just the one with the capture. conv 151 has exactly one use in the
+    // whole catalog — 113 rows, every one an expansion-valve pulse position, at these five (page,
+    // offset) pairs — so the ceiling is a fact about the ACTUATOR, not about the row that happened
+    // to be observed. Covering only 0x30/3 would let the identical wire value publish as a real
+    // position on valve 2 of the same unit. The catalog test pins that reach.
+    {0x30, 3, 151, AvailabilityPolicy::AboveRangeIsAbsent, EEV_PULSE_CEILING,
+     "30 d of published samples: range 0-474, then 6x exactly 0xFFF8 and nothing between"},
+    {0x30, 5, 151, AvailabilityPolicy::AboveRangeIsAbsent, EEV_PULSE_CEILING,
+     "same actuator, same converter — conv 151 is EEV pulses and nothing else"},
+    {0x30, 7, 151, AvailabilityPolicy::AboveRangeIsAbsent, EEV_PULSE_CEILING,
+     "same actuator, same converter — conv 151 is EEV pulses and nothing else"},
+    {0x30, 9, 151, AvailabilityPolicy::AboveRangeIsAbsent, EEV_PULSE_CEILING,
+     "same actuator, same converter — conv 151 is EEV pulses and nothing else"},
+    {0xA0, 8, 151, AvailabilityPolicy::AboveRangeIsAbsent, EEV_PULSE_CEILING,
+     "same actuator, same converter — conv 151 is EEV pulses and nothing else"},
 };
 
 inline constexpr size_t AVAILABILITY_RULE_COUNT =
     sizeof(AVAILABILITY_RULES) / sizeof(AVAILABILITY_RULES[0]);
 
-// The adjudicated policy for one row, or Always when the ledger says nothing about it.
-inline constexpr AvailabilityPolicy availability_policy(const ValueDef& d) {
+// The ledger entry for one row, or nullptr when it says nothing about it.
+inline constexpr const AvailabilityRule* availability_rule(const ValueDef& d) {
     for (size_t i = 0; i < AVAILABILITY_RULE_COUNT; i++) {
         const AvailabilityRule& r = AVAILABILITY_RULES[i];
-        if (r.reg == d.reg && r.offset == d.offset && r.conv == d.conv) return r.policy;
+        if (r.reg == d.reg && r.offset == d.offset && r.conv == d.conv) return &r;
     }
-    return AvailabilityPolicy::Always;
+    return nullptr;
+}
+
+// The adjudicated policy for one row, or Always when the ledger says nothing about it.
+inline constexpr AvailabilityPolicy availability_policy(const ValueDef& d) {
+    const AvailabilityRule* r = availability_rule(d);
+    return r ? r->policy : AvailabilityPolicy::Always;
 }
 
 // May this ROW reach a publish surface at all? Composes the generated detect-only flag with the
@@ -119,11 +179,18 @@ inline constexpr bool row_publishable(const ValueDef& d) {
 // `ok` is Reading::ok — a text/enum row (ok=false, text set) has no number to judge and passes
 // through. The zero test is an EXACT compare on purpose: conv 114's raw 0x0000 decodes to exactly
 // 0.0, and widening it to a tolerance would start eating the real sub-0.1 °C readings the rule is
-// explicitly not allowed to touch.
+// explicitly not allowed to touch. The ceiling test is one-sided for the same reason it is generous:
+// it refuses an impossible integer, it does not police the quantity's working range.
+//
+// Unproven is decided BEFORE the `ok` check — it is a verdict on the row, not on the number, so a
+// quarantined row publishes nothing whatever it decoded to.
 inline constexpr bool value_available(const ValueDef& d, bool ok, double value) {
-    const AvailabilityPolicy p = availability_policy(d);
-    if (p == AvailabilityPolicy::Unproven) return false;
-    if (p == AvailabilityPolicy::ZeroMeansAbsent && ok && value == 0.0) return false;
+    const AvailabilityRule* r = availability_rule(d);
+    if (!r) return true;
+    if (r->policy == AvailabilityPolicy::Unproven) return false;
+    if (!ok) return true;
+    if (r->policy == AvailabilityPolicy::ZeroMeansAbsent && value == 0.0) return false;
+    if (r->policy == AvailabilityPolicy::AboveRangeIsAbsent && value > r->ceiling) return false;
     return true;
 }
 

@@ -324,10 +324,26 @@ host-testable core is unusually large and valuable, because the risky parts are 
   else answers a narrower question — `convert()` handles the wire format's own `0x8000` no-data
   marker, `reading_plausible()` catches a number that is *impossible*, `ValueDef::no_publish` carries
   what the generator knew. What is left is a field that decodes to an entirely ordinary number which
-  is not a measurement of anything, and only per-row evidence can identify it. Two verdicts exist;
-  one is in force. `ZeroMeansAbsent` (`Target Cond. Temp.`'s raw `0x0000`, flat through a full
+  is not a measurement of anything, and only per-row evidence can identify it. Three verdicts exist;
+  two are in force. `ZeroMeansAbsent` (`Target Cond. Temp.`'s raw `0x0000`, flat through a full
   compressor cycle) withholds only that exact value, because a global "0 °C is unavailable" rule
-  would destroy every thermistor reading that crosses zero. `Unproven` — withhold the row from every
+  would destroy every thermistor reading that crosses zero. `AboveRangeIsAbsent` is the **expansion
+  valve** pulse rows (conv 151): 30 days of published samples run 0-474 pulses and then carry six
+  samples of exactly `0xFFF8`, with **nothing in between** — a discrete out-of-band integer rather
+  than a distribution's tail. The obvious diagnosis, "conv 151 should have been signed", is *refuted*
+  and not merely unproven: a valve nudged past its mechanical zero would report a spread of small
+  negatives reached from positions near 0, while every occurrence is the identical integer sitting
+  between neighbouring samples of ~450 — and no valve travels 450 → −8 → 450 inside 30 s. Since
+  65528 and −8 are both impossible positions, withholding the value is the one answer both readings
+  agree on, and the `u16` decode [`REGISTERS.md` §3.1](REGISTERS.md#31-numeric-converters) documents
+  stays untouched. It is a *value* test that still cannot live in `reading_plausible()`, whose
+  envelopes are keyed on the dataType and so cannot reach a dataType `-1` row at all; the only other
+  handle is the `(pls)` in the label, which is exactly what this project does not key on. The ceiling
+  (2000) is deliberately about four times the widest observed opening — an impossibility filter, not
+  a threshold fitted to the data. All five coordinates carry the rule from a capture on **one** of
+  them, because conv 151 has exactly one use in the whole catalog (113 rows, every one an EEV pulse
+  position), so the bound is a fact about the actuator rather than about the row that happened to be
+  observed; the catalog test pins that set in both directions. `Unproven` — withhold the row from every
   publish surface and retract its retained HA config — is implemented with **no live entry**: it held
   `Target Evap. Temp.` while that row's scale was unknown, and [#194](https://github.com/0Bu/daikin-altherma-esp32/issues/194) then showed the row was
   mis-*decoded* rather than unmeasurable, so the verdict moved to `logic/conv_override.hpp`. A
