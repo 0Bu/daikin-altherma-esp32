@@ -35,14 +35,9 @@ void http_register_ota(httpd_handle_t s, HttpSurface surface);      // http_ota.
 void http_register_mcp(httpd_handle_t s, HttpSurface surface);      // mcp_server.cpp
 void http_register_captive(httpd_handle_t s);  // http_status.cpp — MUST be registered last (both surfaces)
 
-// Add fd to the /events broadcast list (idempotent). Register ONLY a socket that has actually
-// subscribed — every registered fd is pushed a frame every poll cycle. Returns false when all 8
-// slots are taken: httpd's own max_open_sockets (7) keeps that out of reach today, so the caller
-// only diag-logs it — but a subscriber that is silently never served looks exactly like a dead
-// link from the browser, so it must not be dropped without a trace.
-bool http_register_ws_client(int fd);
-void http_unregister_ws_client(int fd);
-void ws_broadcast_values();
-void ws_broadcast_status();
+// There is deliberately NO live-push surface here. The dashboard polls /status and /values; the
+// /events WebSocket and its broadcast registry were removed — see docs/ARCHITECTURE.md
+// "Push vs. poll" for the measured case (#238 wedged a stream silently, #241 put the /status
+// builder on the task that owns the X10A UART).
 
 } // namespace daik

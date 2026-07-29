@@ -60,8 +60,8 @@ static logic::RawCaptureState s_raw_capture;
 // RAII guard around s_mtx (same idiom as config.cpp), used by every take in this file. It matters
 // most for the readers: they copy std::strings OUT of s_stats/s_cache under the lock, so they can
 // throw std::bad_alloc mid-critical-section. Releasing on unwind makes that a skipped read (every
-// caller guards — the HTTP handlers via handle_all, ws_broadcast_* and status_led_task/mqtt_task via
-// their own) instead of a mutex left held, which would block the poll task on its next commit and
+// caller guards — the HTTP handlers via handle_all, status_led_task/mqtt_task via their own)
+// instead of a mutex left held, which would block the poll task on its next commit and
 // wedge the device into a watchdog reboot — defeating poll_task's guard. The writers' commits are
 // non-allocating and cannot throw, but they take it through Lock as well: it costs nothing, and it
 // keeps a later edit that adds an allocating field to a commit from silently reintroducing the bug.
@@ -112,7 +112,7 @@ static void poll_once() {
 
     // Stat deltas are staged in locals and folded into s_stats under s_mtx at the end of the cycle.
     // NOTHING in the sweep may touch s_stats directly: hp_stats() readers (MQTT heartbeat, /status,
-    // the WS status broadcast) copy it under the mutex, and an unlocked last_error assignment would
+    // the status LED) copy it under the mutex, and an unlocked last_error assignment would
     // free the old std::string buffer while a reader is copying it — use-after-free on a flaky bus,
     // where this path runs every second.
     uint32_t    d_rx_ok = 0, d_rx_fail = 0, d_timeout = 0, d_crc = 0;
@@ -337,14 +337,15 @@ static bool poll_detect() {                                    // returns true i
 // every second, hp_detect_run grows more — so the whole body is guarded like mqtt_task's: an OOM in a
 // fragmented moment (concurrent MQTT TLS reconnect, /set_mqtt's probe client) must skip the cycle and
 // keep the last good cache, not throw through this FreeRTOS task into std::terminate() and reboot.
-// The ws_broadcast_* self-guards stay: they recover finer-grained (skip one client/frame, not the
-// cycle), and this handler is only their backstop.
+//
+// This task no longer PUBLISHES to the browser at all. It used to end each cycle in
+// ws_broadcast_values() and every fourth in ws_broadcast_status(), which is how the /status builder
+// came to run here (#241) — the dashboard now polls /status and /values on the httpd task instead
+// (docs/ARCHITECTURE.md "Push vs. poll"). What this task does is read the bus and commit the cache.
 static void poll_task(void*) {
     esp_task_wdt_add(NULL);                                    // this task owns the X10A UART — watch it
-    int ticks = 0;
     for (;;) {
         esp_task_wdt_reset();                                  // top of cycle; poll_once also resets per register
-        ticks++;
         try {
             if (config().profile == "auto") {
                 // Silent-bus detect backoff: sweep at the poll floor at first, then stretch toward the
@@ -366,11 +367,6 @@ static void poll_task(void*) {
                 }
             }
             if (config().profile != "auto") poll_once();       // then poll it (same cycle if resolved)
-            ws_broadcast_values();
-            if (ticks >= 4) {
-                ticks = 0;
-                ws_broadcast_status();
-            }
         } catch (const std::exception& e) {
             diag_printf("poll: cycle skipped (%s)\n", e.what());
         } catch (...) {
@@ -386,24 +382,25 @@ void hp_poll_start() {
     // The poll engine is the core of the device; if its task can't be created there is no heat-pump
     // polling at all. Report it loudly — the web UI + OTA still come up, so the board stays fixable.
     //
-    // 12288, not 8192, and the extra 4 KB is not a guess (#241). This task does not merely poll: its
-    // WebSocket broadcaster calls build_status_json_string(), the SAME builder the httpd task runs.
-    // v1.0.12 already hit that ceiling once and raised HTTPD's stack 8192 -> 12288
-    // (http_server.cpp); this task was left at 8192 and #229 (`health`) + #231 (`history`) then grew
-    // /status from ~2.2 KB to ~3.5 KB until it no longer fitted. The core dump is unambiguous —
-    // hp_poll 7664 USED / 520 FREE, dying on the stack watchpoint inside a malloc() under
-    // Config::Config (config() returns a whole Config BY VALUE, ~10 std::string copies) beneath
-    // syslog_status() <- build_status_json_string() <- ws_broadcast_status():
+    // 8192 again, because the reason for 12288 is gone — not because 8192 was ever proven. #241
+    // raised this task to 12288 after it died with 520 bytes of 8192 free:
     //
     //     TCB             NAME PRIO C/B  STACK USED/FREE
-    //     0x3fcc84cc   hp_poll      5/5      7664/520
+    //     0x3fcc84cc   hp_poll      5/5      7664/520          <- died on the stack watchpoint
     //     0x3fcbf3b4     httpd      5/5     1456/10820
     //
-    // 12288 is the size the OTHER runner of this builder already survives on — 4376 concurrent
-    // GET /status never brought httpd near its limit. Anything that grows /status grows BOTH stacks;
-    // read the task table in any core dump (CLAUDE.md → Memory constraints) rather than trusting
-    // that this still fits.
-    if (xTaskCreate(poll_task, "hp_poll", 12288, nullptr, 5, nullptr) != pdPASS)
+    // That 7664 was spent in ws_broadcast_status() -> build_status_json_string() -> syslog_status()
+    // -> config() (a whole Config BY VALUE, ~10 std::string copies) — the ~3.5 KB /status builder,
+    // reached from this task ONLY because the WebSocket broadcaster lived here. With the push gone
+    // that chain is unreachable from this task: what remains is poll_once + hp_detect_run, i.e.
+    // strictly less than the 8192 this ran on for months before /status grew. The extra 4 KB is
+    // returned to the heap, where the largest CONTIGUOUS block is the real ceiling on this chip.
+    //
+    // Nothing on /status reports stack headroom, so the only way to check this is the task table's
+    // USED/FREE column in the next core dump (CLAUDE.md -> Memory constraints). If a future change
+    // gives this task a large builder again, raise it in the SAME commit — and note that a builder
+    // shared by two tasks is only ever as safe as its smallest stack.
+    if (xTaskCreate(poll_task, "hp_poll", 8192, nullptr, 5, nullptr) != pdPASS)
         diag_printf("hp_poll: poll task alloc failed — X10A polling disabled this boot\n");
 }
 

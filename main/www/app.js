@@ -433,11 +433,11 @@ function go(stage) {
 }
 function goBack() { go(PARENT[S.stage] || "dashboard"); }
 // The ONE innerHTML write path for every per-poll container, guarded twice against the same failure:
-// a push arrives ~1×/s, and a rebuild landing between mousedown and mouseup destroys the element
+// a poll lands every 2 s, and a rebuild landing between mousedown and mouseup destroys the element
 // under the finger, so the browser fires NO click at all — the tap is lost with nothing logged.
 //
 //   1. Markup unchanged → don't write. Enough on its own for #connTile, whose rows are stable
-//      between pushes. NOT enough for #settingsCards any more: the ESP32 card carries the two
+//      between polls. NOT enough for #settingsCards any more: the ESP32 card carries the two
 //      board-memory rows again, and free heap moves every second, so this check degrades to a plain
 //      write there exactly as it does for the value grid — which is why guard 2 below is armed on
 //      all three containers and not only on the one that obviously needed it.
@@ -478,19 +478,23 @@ function toast(msg, type = "info") {
 }
 
 // ── Status (drives every screen) ─────────────────────────────────────────
+// Returns whether the fetch landed, so the poll loop can back off on a device that stopped
+// answering. Its failure path IS the unreachable banner — every caller wants that, and a second
+// copy of the decision in the loop could disagree with this one.
 async function refreshStatus() {
   let s;
-  try { s = await j("/status"); } catch { markUnreachable(); return; }
+  try { s = await j("/status", { signal: pollSignal() }); } catch { markUnreachable(); return false; }
   S.status = s;
   renderApp();
+  return true;
 }
 function markUnreachable() {
   sysSet(t("sys.unreachable"), t("sys.unreachable_sub"), "err");
 }
 
 // Re-render EVERY screen from the current /status + /values, not just the visible one: the screens
-// are all in the DOM (only .active shows), a push arrives ~1×/s regardless of where the user is, and
-// rendering the hidden ones costs a few string builds — far cheaper than a per-screen refresh
+// are all in the DOM (only .active shows), a poll lands every 2 s regardless of where the user is,
+// and rendering the hidden ones costs a few string builds — far cheaper than a per-screen refresh
 // scheme that has to remember to run when a view is switched to.
 function renderApp() {
   renderRecoveryBanner();
@@ -966,11 +970,15 @@ function groupOf(v) {
   for (const [name, keys] of GROUPS) if (keys.some((k) => l.includes(k))) return name;
   return "Other values";
 }
+// Deliberately does NOT call markUnreachable(): /status is the reachability probe (it runs on the
+// same loop and says so on failure), and a values fetch that lost a race with a reboot must not
+// overwrite a banner the status fetch is about to set correctly either way.
 async function refreshValues() {
   let r;
-  try { r = await j("/values"); } catch { return; }
+  try { r = await j("/values", { signal: pollSignal() }); } catch { return false; }
   S._values = r.values || r || [];
   renderApp();
+  return true;
 }
 // Dashboard cards: the detected unit (Model) first, then the heat-pump value groups — all one
 // continuous card grid, each block styled like OPERATION. The board (ESP32) card and the
@@ -4522,6 +4530,108 @@ function wireRestOfApp() {
   });
 }
 
+// ── Live data: POLLING, and deliberately not a push ─────────────────────────────────────────────
+// This used to be a /events WebSocket. It was removed, and the reasoning is worth having here
+// because the pull to "make it live again" will come back (docs/ARCHITECTURE.md "Push vs. poll"):
+// a push fails SILENTLY and GLOBALLY — one queue message dropped by IDF froze the status stream
+// until the next reboot with nothing logged and values still flowing (#238), and running the push
+// from the poll task put the ~3.5 kB /status builder on the task that owns the X10A UART, which
+// overflowed its stack (#241). A poll fails LOUDLY and LOCALLY: one request, one visible error,
+// retried on the next tick. Nothing about the dashboard needed the socket.
+//
+// Two cadences, ONE chain. /values (~6 kB) every 2 s feeds the drawing and the value rows; /status
+// (~3.5 kB) every 8 s carries the slow half — model, health, heap, uptime, OTA, the banners. Both
+// numbers are the transport's, not the plant's: the poll engine still reads the bus at 1 Hz and the
+// schematic's motion is CSS, so this is how fast the SCREEN catches up, not how fast we measure.
+//
+// The chain is a recursive setTimeout and never setInterval: a slow answer has to delay the next
+// request, not queue a second one behind it on a device with a single HTTP worker.
+const POLL_VALUES_MS      = 2000;
+const POLL_STATUS_MS      = 8000;
+const POLL_BACKOFF_MAX_MS = 30000;
+// Each poll fetch is BOUNDED, and that is not a nicety. `j()` sets no timeout, so a link that drops
+// SILENTLY — no RST, no FIN: the ghost association wifi.cpp's ICMP watchdog exists for — leaves
+// fetch waiting on the browser's own default, tens of seconds. For all of it the chain is held by
+// _pollBusy, markUnreachable() never runs, and the drawing keeps presenting the last poll as the
+// plant's current state. That is the one thing DESIGN.md §5.3 forbids, and it fails by ABSENCE:
+// nothing on screen looks wrong. 6 s is 3x the values cadence; a device on a LAN answers /values in
+// well under one. Deliberately NOT inside j() — /set_mqtt's pre-flight legitimately blocks ~8 s.
+const POLL_TIMEOUT_MS     = 6000;
+let _pollTimer = null;
+let _pollFails = 0;
+let _pollBusy  = false;
+let _statusDue = 0;        // performance.now() instant the next /status is due (0 = right now)
+
+// An abort signal that fires after POLL_TIMEOUT_MS, or undefined where AbortController is missing
+// (then the browser's default bound applies — the same fallback the OTA reboot-watcher takes).
+function pollSignal() {
+  if (!("AbortController" in window)) return undefined;
+  const c = new AbortController();
+  setTimeout(() => c.abort(), POLL_TIMEOUT_MS);   // a settled request aborts to nothing
+  return c.signal;
+}
+
+// Every scheduling path goes through here, and it CLEARS first. That is what makes "one chain" true
+// rather than hopeful: pollNow() and a tick finishing can both schedule, and the last one to run
+// leaves exactly one timer standing.
+function pollSchedule(ms) {
+  clearTimeout(_pollTimer);
+  _pollTimer = setTimeout(pollTick, ms);
+}
+
+async function pollTick() {
+  _pollTimer = null;
+  // Nobody is looking. Skip the requests and re-check at the normal cadence — the tick itself is
+  // kept alive (a few clamped, empty timer wake-ups) rather than stopping the chain, because a
+  // chain that only restarts on an event is dead for good if that event never arrives.
+  if (document.hidden) { pollSchedule(POLL_VALUES_MS); return; }
+  // A tick already in flight: never two /values builds queued on one HTTP worker.
+  if (_pollBusy) { pollSchedule(POLL_VALUES_MS); return; }
+
+  _pollBusy = true;
+  let ok = true;
+  try {
+    const now = performance.now();
+    if (now >= _statusDue) {
+      ok = await refreshStatus();                  // its own failure path shows the banner
+      if (ok) _statusDue = now + POLL_STATUS_MS;
+    }
+    // /status just failed => the device is unreachable; a second doomed request per tick only
+    // doubles the wait for the timeout that decides the backoff.
+    if (ok) ok = await refreshValues();
+  } finally {
+    _pollBusy = false;
+  }
+
+  _pollFails = ok ? 0 : Math.min(_pollFails + 1, 4);
+  pollSchedule(_pollFails ? Math.min(POLL_VALUES_MS * 2 ** _pollFails, POLL_BACKOFF_MAX_MS)
+                          : POLL_VALUES_MS);
+}
+
+// Poll right now, status included, and let the chain carry on from there. Used on the first tick
+// and whenever the tab becomes visible: coming back must not leave the numbers from whenever the
+// tab was last on screen sitting there looking current. It also drops the backoff — a reboot the
+// user waited out should not be answered with a 30 s wait.
+function pollNow() {
+  _statusDue = 0;
+  _pollFails = 0;
+  pollSchedule(0);
+}
+
+function pollStart() {
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) pollNow(); });
+  pollNow();
+}
+
+// Stop the chain. The one caller is the GIF recorder (tools/uigif/scenes.js), which needs a STILL
+// page: it pauses every CSS animation at a deterministic instant, and a poll landing after that
+// could rebuild an element and hand it a fresh, unpaused one — a frame at a random animation phase,
+// which is exactly the defect the recorder's whole-cycle arithmetic exists to avoid.
+function pollStop() {
+  clearTimeout(_pollTimer);
+  _pollTimer = null;
+}
+
 async function boot() {
   applyStaticI18n();       // localise the static index.html markup (data-i18n) before the first render
   labelSchematicHits();    // name the clickable schematic parts from the INSPECT table
@@ -4529,49 +4639,6 @@ async function boot() {
   go("dashboard");         // the app always opens on the dashboard (and this syncs the header to it)
   resumeOta();             // adopt a download already running (reload mid-update / second tab)
 
-  if (window.WebSocket) {
-    const connect = () => {
-      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const url = `${proto}//${window.location.host}/events`;
-      const ws = new WebSocket(url);
-      ws.onopen = () => {
-        ws.send("sub");
-      };
-      ws.onmessage = (e) => {
-        try {
-          const r = JSON.parse(e.data);
-          if (r.type === "status") {
-            S.status = r.status;
-            renderApp();
-          } else if (r.type === "values") {
-            S._values = r.values;
-            renderApp();
-          } else if (Array.isArray(r.values)) {
-            // Defensive only: every frame the firmware sends today is typed (http_status.cpp sends
-            // "status"/"values" for both the live pushes and the "sub" snapshot), so this branch is
-            // for a future/renamed frame that still carries a values array. The old fallback was
-            // `r.values || r || []`, which assigned the frame OBJECT itself for anything without a
-            // values key — every later pickValue()/faultValue() then ran .find/.filter on a non-array
-            // and threw. Accept only an actual values array; drop unknown frames and keep the last
-            // good values on screen.
-            S._values = r.values;
-            renderApp();
-          }
-        } catch (err) {
-          console.error("WS parse error", err);
-        }
-      };
-      ws.onclose = () => {
-        markUnreachable();            // show "Unreachable — retrying…" until the socket re-opens
-        setTimeout(connect, 5000);
-      };
-    };
-    connect();
-  } else {
-    // No WebSocket in this browser: load a one-time snapshot and stop. There is no polling —
-    // the live UI is WebSocket-only, so the user refreshes by reloading the page manually.
-    await refreshStatus();
-    refreshValues();
-  }
+  pollStart();             // the live data: /status + /values on a timer (there is no push)
 }
 boot();

@@ -7,14 +7,14 @@
 #
 # tools/uigif/check_ui_gif.mjs fails when the UI has moved on and the recording has not. The fix
 # is to RE-RECORD (that is what the stamp is for), never to edit this file.
-ui=d0425923a61dce714226e99d883c8de2cfbe87a9b0eb8d94c8688fc64ee13a64
+ui=b0b30830e01edb8ad1de2bc767cad15c9c603cba5d834494802820e10b84dae3
 part.schematic_markup=35c7e8a07aced59b1e48508cbfca9ec824941ec3b601302055a57f900fef0d94
 part.schematic_css=8d6e8f4826857a22a8e6b7bc101b106c2b21d5a7e5bda5acf01d7f0ae703f087
 part.painting_code=0740490f501c0dd022c7e93c8626f80ec3d8ddea8cb5f071fd771d1263ceff6d
 part.drawing_strings=2d53c59b5ca8100582ed4bbe86c0893339fb10bc56cfd50c0a6e9c1158ca6063
-part.scenes=2af35afc0cc00b002d3b18ff01eabbb920c0b70654a799bfe4b4ef87711543e0
+part.scenes=d90e80d7a7e949342e42df7e16ac018ad6fb63f2b5572ed6cb203efc14981467
 part.framing=d11b4eac392cead35f13b12e720399679c8c0e60cae6994e7b4ae77801d1c128
-gif=759df322cca658259971acf9bd4d6ee14092ce0b95c7ad84deb99f3621eda578
+gif=6642bf8b7a59a82b4b863baf7978f86febb9ea14d2e671aa4f2d68bceccedc15
 frames=112
 size=900x530
 recorded=2026-07-29

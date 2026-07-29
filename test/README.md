@@ -129,15 +129,6 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   must not close its own string and inject a second key, an oversized value is **refused rather than
   truncated** (a truncated `1.10.0` → `1.1` is well-formed and ordered wrong), and the parser must
   respect the caller's length on a response cut short mid-value.
-- `logic/ws_policy.hpp` — the `/events` frame decision: that a frame one byte past the command
-  buffer is *rejected* rather than clamped-and-read (the boundary where the handler used to `memcmp`
-  stack a failed read never wrote), that an announced length up to `SIZE_MAX` reaches a decision and
-  never an allocation, and that only a **text** frame opening with `sub` subscribes — a prefix still
-  does, so clients that work today keep working.
-- `logic/ws_tx_gate.hpp` — `/events` async-send backpressure: a stream accepts one outstanding
-  broadcast, rejects another while its completion is pending, becomes available again on completion,
-  and the independent values/status gates do not block each other. This pins the bound that prevents
-  a congested ESP-IDF HTTP work queue from retaining a new payload every poll tick until OOM.
 - `logic/http_body.hpp` — request-body reassembly: a body delivered one byte per `recv` arrives
   whole (the fragmented POST that used to 400 as "bad json"), a timeout is retried while progress
   resets the idle count, a peer that stalls forever is dropped after a **bounded** wait rather than

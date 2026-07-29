@@ -124,7 +124,7 @@ the IP and use it verbatim. Put the host in `H` for the commands below: `H=daiki
   snapshot from a device you cannot reach, so steps 3 and 4 above (the VictoriaLogs boot
   reconstruction, the `/coredump` 200-vs-404 check) have no counterpart there and must not be
   imitated from the numbers a report happens to contain.
-- The device pushes live over the `/events` WebSocket; this skill takes a one-shot HTTP snapshot,
+- The device has no live push; the web UI polls `/status` + `/values`, and this skill takes the same one-shot HTTP snapshot,
   which is the right tool for triage. For a live watch, open the web UI.
 - `/coredump?clear=1` erases the dump partition — only after the user has the decoded backtrace and
   explicitly asks to clear it.

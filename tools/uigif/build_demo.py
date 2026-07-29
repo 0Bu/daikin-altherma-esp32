@@ -3,7 +3,7 @@
 
 The splice is the one the firmware build does (main/www/inline_assets.cmake) — style.css and app.js
 back into index.html — plus tools/uigif/scenes.js ahead of app.js, so the app boots against a fake
-/status + /events instead of a board. Nothing about the UI is re-implemented here: what the GIF
+/status + /values instead of a board. Nothing about the UI is re-implemented here: what the GIF
 shows is what renderLive() actually drew.
 
   tools/uigif/build_demo.py <repo-root> <out.html>

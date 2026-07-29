@@ -75,17 +75,14 @@ CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y
 # Logging
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
-# WebSockets support
-CONFIG_HTTPD_WS_SUPPORT=y
-# httpd_queue_work() sends ONE UDP DATAGRAM to the server's control socket, whose receive mailbox
-# holds LWIP_UDP_RECVMBOX_SIZE messages (6). Past that the datagram is dropped SILENTLY — sendto()
-# succeeds, the caller is told ESP_OK, and the work simply never runs. For an async WS send that
-# means IDF's async_transfer_t leaks, the completion callback never fires, and anything waiting on
-# that callback waits forever: it wedged the /events live push and panicked the board (#238).
-# Blocking makes an overflow apply back-pressure instead of vanishing. It cannot stall us in
-# practice — http_status.cpp queues at most ONE item per broadcast and the two gates allow one
-# batch each, so at most two of the six slots are ever in use.
-CONFIG_HTTPD_QUEUE_WORK_BLOCKING=y
+# WebSockets support: OFF, and stated explicitly rather than left to the Kconfig default, because
+# this firmware DELIBERATELY has no live-push surface. The web UI polls /status and /values; the
+# /events WebSocket was removed after a lost queue message wedged a stream silently (#238) and its
+# broadcaster put the /status builder on the task that owns the X10A UART (#241). See
+# docs/ARCHITECTURE.md "Push vs. poll". Nothing calls httpd_queue_work() any more either, so
+# CONFIG_HTTPD_QUEUE_WORK_BLOCKING (added as the #238 backstop) is gone with it — an inert setting
+# reads as a live safeguard.
+CONFIG_HTTPD_WS_SUPPORT=n
 
 # ── Firmware size reduction (zero-risk / no behaviour change) ──
 # Drop code paths this firmware never uses.
