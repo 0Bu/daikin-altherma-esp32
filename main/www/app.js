@@ -67,6 +67,7 @@ const I18N = {
     "conn.error": (e) => "Error: " + e, "conn.connected_to": (s) => "Connected to " + s,
     "conn.aria": (label, state) => `${label}: ${state}. Tap to edit.`,
     "card.model": "Model", "card.hplink": "Heat-pump link", "card.online": "Online",
+    "card.uptime": "Uptime",
     "card.freeheap": "Free memory", "card.maxalloc": "Largest free block",
     "card.offline": "Offline", "card.protocol": "Protocol", "card.rxpin": "RX pin",
     "card.txpin": "TX pin", "card.capacity": "Capacity",
@@ -221,6 +222,7 @@ const I18N = {
     "conn.error": (e) => "Fehler: " + e, "conn.connected_to": (s) => "Verbunden mit " + s,
     "conn.aria": (label, state) => `${label}: ${state}. Zum Bearbeiten tippen.`,
     "card.model": "Modell", "card.hplink": "Wärmepumpen-Verbindung", "card.online": "Online",
+    "card.uptime": "Laufzeit",
     "card.freeheap": "Freier Speicher", "card.maxalloc": "Größter freier Block",
     "card.offline": "Offline", "card.protocol": "Protokoll", "card.rxpin": "RX-Pin",
     "card.txpin": "TX-Pin", "card.capacity": "Leistung",
@@ -1011,9 +1013,13 @@ function firmwareRow(version) {
 }
 
 // ESP32 board status card (on the Settings screen — renderSettings): the X10A link + protocol, the
-// RX/TX pins, and the firmware version + its update channel. Deliberately NO board telemetry (chip,
-// uptime, last reset, free heap): Settings is what the board is SET TO, and those four are
-// read-only diagnostics that belong to /status, /diag and the MQTT heartbeat's diagnostic entities.
+// RX/TX pins, the firmware version + its update channel, and — at the bottom, after the settings —
+// the board's own health: how long it has been up and how much memory it has. Those last three are
+// the ONLY telemetry here, and each earns its place by answering a question no other screen does:
+// uptime says whether the board restarted (the crash banner only fires on a FAULT), and the two
+// memory rows carry 24-hour curves that show DRIFT. The chip id and the last reset reason stay off
+// the card — they are static or one-shot facts that /status, /diag and the MQTT heartbeat's
+// diagnostic entities already carry, and Settings is otherwise what the board is SET TO.
 // (Tapping the version — here or in the dashboard header — runs the OTA check, DESIGN.md §5.4; the
 // channel row below it is the SETTING that decides which feed that check reads, not a second copy
 // of the flow.) Pins are
@@ -1040,9 +1046,36 @@ function esp32CardHtml() {
     // READINGS AND SETTINGS ONLY; the one action it used to carry ("Report a bug", last row) is in
     // the Settings footer line now (index.html #footBug), because a rare escape hatch drawn at a
     // live reading's weight reads as one more board fact directly under "Largest free block".
+    uptimeRow(s.uptime_s) +
     memoryRows(s.sys || {});
   return vcard("ESP32", rows);
 }
+
+// How long the board has been up (/status.uptime_s — seconds since boot, esp_timer). TWO units at
+// most, coarsest first: at three days nobody is reading the minutes, and a figure that reshuffles
+// every second is a clock, not a diagnostic. The unit symbols are SI and identical in both
+// languages, so this needs no translation table of its own — checkupWindow() already prints "min"
+// and "h" untranslated for the same reason. Deliberately NOT the heartbeat's own uptime string
+// (logic/heartbeat.hpp's format_uptime, "Ddd+HH:MM:SS.mmm"): that one is read by Home Assistant and
+// sorts/parses as a fixed field, this one is read by a person standing in front of the board.
+//
+// It sits directly ABOVE the two memory rows because it is what makes them readable: both curves
+// live in RAM and start over at a reboot, so a heap line that begins mid-chart is explained by the
+// row above it rather than looking like data loss. And it is the one board fact that answers "did
+// this thing restart while I wasn't looking" without opening /diag — the crash banner only appears
+// when the reboot was a FAULT, and a config save, an OTA or a power cut leave no banner at all.
+function fmtUptime(s) {
+  if (typeof s !== "number" || !(s >= 0)) return "—";
+  if (s < 60) return `${Math.floor(s)} s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return m % 60 ? `${h} h ${m % 60} min` : `${h} h`;
+  const d = Math.floor(h / 24);
+  return h % 24 ? `${d} d ${h % 24} h` : `${d} d`;
+}
+
+const uptimeRow = (s) => vrow(t("card.uptime"), fmtUptime(s), { cls: "mono num" });
 
 // Bytes as whole KiB — the same unit the firmware's own trend stores (logic/history.hpp), so the row
 // and the chart under it cannot disagree about what the number is. Whole KiB rather than a decimal:

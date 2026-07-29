@@ -1179,10 +1179,14 @@ Structure:
     (always `false` until the boot-loop safe-mode feature lands). These answer "why did it reboot?"
     and "is the heap leaking?" from the LAN / `/events` WebSocket **on every boot** and **without a
     broker** — the MQTT heartbeat carries the same heap figures, but only when MQTT is configured. The
-    web UI reads only `safe_mode` (the recovery banner): the heap and reset figures were rows on the
-    Settings ESP32 card through v1.0.14 and were removed — Settings states what the board is *set to*,
-    and a diagnosis is made from `/status`, `/diag` and the heartbeat, not from four read-only numbers
-    above the settings a user came to change (DESIGN.md §5.6).
+    web UI reads `safe_mode` (the recovery banner) plus `free_heap` and `max_alloc`, the two trended
+    rows at the foot of the Settings ESP32 card — removed as spot figures in v1.0.14 and back only
+    once each carried a 24-hour curve, the form in which they answer whether the heap is *drifting*.
+    `min_free_heap` and `reset_reason` stayed out: the day's minimum is already on the chart, and a
+    reboot's cause is diagnosed from `/status`, `/diag` and the heartbeat rather than read at a
+    glance. Above them the card states the top-level `uptime_s` — not a `sys` field, and the only
+    thing on that screen that says the board restarted at all, since the crash banner renders solely
+    on a `fault` (DESIGN.md §5.6).
   - **How a user hands a crash over.** `GET /status.last_crash` is `null` on a clean boot, else the
     boot-time cached reason/summary — with `coredump` re-read live from flash on every request
     (`diag_crash_info_live()`), so a dump cleared via `/coredump?clear=1` can't leave a stale banner or
