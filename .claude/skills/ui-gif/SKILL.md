@@ -19,9 +19,9 @@ only ever prove the recording is *current* — never that it is *right*. The sec
 skill's.
 
 **Conditional, like `/schematic-review`** — it is for changes that reach the drawing:
-`main/www/index.html`'s schematic figure or dashboard header, the `sc-*` half of
+`main/www/index.html`'s schematic figure, the `sc-*` half of
 `main/www/style.css`, the painting functions in `main/www/app.js` (`renderLive`, `liveData`,
-`clearSchematic`, `plantState`, `sysSet`, `vLwt`, `renderHeaderMeta`), the scene definitions in
+`clearSchematic`, `plantState`, `sysSet`, `vLwt`), the scene definitions in
 `tools/uigif/scenes.js`, or the recorder's framing in `scripts/record-dashboard-gif.sh`. Those are
 exactly the sources the gate fingerprints, so **the gate tells you whether it applies** — run it
 first. **You re-record and apply the fixes**, you do not just report them.
@@ -100,9 +100,12 @@ Look at the finished GIF. Then ask:
 5. **Is it in English?** The harness forces `navigator.language` to English because the README is;
    the UI otherwise follows the browser (`docs/DESIGN.md` §2). A German GIF in an English README is
    the usual accident on a German machine.
-6. **Is the crop still right?** It is the dashboard header plus the schematic card, and nothing
-   below it. A UI change that alters the card's height leaves a sliver of the next card in frame —
-   adjust `CROP` in the recorder rather than living with it.
+6. **Is the crop still right?** It is the schematic card alone — deliberately not the dashboard
+   header above it, which prints the running version, and a version frozen into a recording is
+   wrong from the next release onwards with nothing able to see it. A UI change that alters the
+   card's height leaves it clipped, or leaves a sliver of the header or the next card in frame —
+   adjust `CROP` in the recorder rather than living with it. Measure, don't guess: the recorder's
+   comment carries the CSS box the current numbers came from.
 7. **Is it still a reasonable size?** ~750 kB for 112 frames. GitHub serves it on every README
    view; if a change pushes it past a couple of megabytes, drop `WIDTH` or `PER_SCENE_MS` before
    dropping the frame rate — motion is the thing being paid for.

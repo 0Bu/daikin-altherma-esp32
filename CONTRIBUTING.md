@@ -103,11 +103,14 @@ before anything else. It is the one artefact here that rots *invisibly*: a recor
 perfectly forever, whatever the UI has since become, so every gate above stays green while the
 README shows a drawing that no longer exists. A screenshot cannot fail a test; it can only be out of
 date, and it looks exactly as good either way. CI has no browser, so the check is a **stamp**, not a
-re-render: it fingerprints the sources the recording was made from — the schematic markup and the
-dashboard header, the CSS that draws and animates them, the `app.js` functions that paint them, the
-strings they print, the scenes in [`tools/uigif/scenes.js`](tools/uigif/scenes.js) and the
+re-render: it fingerprints the sources the recording was made from — the schematic markup, the CSS
+that draws and animates it, the `app.js` functions that paint it, the
+strings it prints, the scenes in [`tools/uigif/scenes.js`](tools/uigif/scenes.js) and the
 recorder's own framing — and fails when they no longer match
-[`tools/uigif/gif_stamp.txt`](tools/uigif/gif_stamp.txt). It also reads the GIF itself: a single
+[`tools/uigif/gif_stamp.txt`](tools/uigif/gif_stamp.txt). The frame is the schematic card **alone** —
+the dashboard header above it is deliberately cropped out, because it prints the running version and
+no recording can keep that current — so a header change needs no re-record, and does not fingerprint.
+It also reads the GIF itself: a single
 frame, or frames held over 200 ms, fails the thing a recording is *for*, which is showing the flow
 moving. The fix is always to re-record — never to edit the stamp:
 
