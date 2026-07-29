@@ -10,8 +10,11 @@
 #include <initializer_list>
 #include <string>
 
+#include "logic/availability.hpp"
 #include "logic/board_pins.hpp"
 #include "logic/board_presets.hpp"
+#include "logic/fault_state.hpp"
+#include "logic/raw_capture.hpp"
 #include "logic/captive.hpp"
 #include "logic/boot_guard.hpp"
 #include "logic/button.hpp"
@@ -327,12 +330,27 @@ static void test_convert() {
     CHECK(approx(convert(evap, evap1459).value, 145.9));
     CHECK(approx(convert(evap, evap2406).value, 240.6));
     // The two run-time readings are impossible as an evaporating temperature — a coil that absorbs
-    // heat from 22.5 °C air cannot itself be at 145-200 °C — yet the envelope admits both. THIS is
-    // the defect; when it is fixed these two flip to !reading_plausible (or the row decodes to a
-    // sane value) and this block must be revisited, not deleted wholesale.
-    CHECK(reading_plausible(evap, convert(evap, evap1996)));   // <- WRONG, and reaching HA today
-    CHECK(reading_plausible(evap, convert(evap, evap1459)));   // <- WRONG, and reaching HA today
+    // heat from 22.5 °C air cannot itself be at 145-200 °C — yet the ENVELOPE admits both. That hole
+    // is unchanged and is asserted here as the standing contradiction it is.
+    CHECK(reading_plausible(evap, convert(evap, evap1996)));   // <- still WRONG, still inside ±200
+    CHECK(reading_plausible(evap, convert(evap, evap1459)));   // <- still WRONG, still inside ±200
     CHECK(!reading_plausible(evap, convert(evap, evap2406)));  // the at-rest value IS caught (>200)
+    // What HAS changed is that the value no longer LEAVES the device. #209 confirmed the same defect
+    // on a second, independent family (ERGA/EHB 04-08 kW split, against a manufacturer-documented
+    // HomeHub reference) — wrong on both, correct on nothing measured — so the row is quarantined by
+    // the availability ledger (logic/availability.hpp) until the run-time wire bytes settle the
+    // scale. The envelope test above and the ledger are DIFFERENT gates and both belong here: the
+    // ledger is the decision, the envelope is the reason it had to be made.
+    CHECK(!row_publishable(evap));
+    CHECK(!value_available(evap, true, convert(evap, evap1996).value));
+    CHECK(!value_available(evap, true, convert(evap, evap1459).value));
+    // Its neighbour is NOT quarantined — the row publishes, and only its unpopulated raw 0x0000 is
+    // withheld (#209 defect 2). Two rows, two different verdicts, one ledger.
+    const ValueDef cond{0x10, 8, 114, 2, 1, "Target Cond. Temp."};
+    CHECK(row_publishable(cond));
+    const uint8_t cond_zero[] = {0x00, 0x00};
+    CHECK(convert(cond, cond_zero).ok && approx(convert(cond, cond_zero).value, 0.0));
+    CHECK(!value_available(cond, true, convert(cond, cond_zero).value));
     // The scale hypothesis, recorded as arithmetic so #194's candidates stay concrete: the same raw
     // bytes under x0.01 are ordinary temperatures either side of the measured 22.5-23.0 °C ambient.
     CHECK(approx(convert(evap, evap2406).value * 0.1, 24.06));   // at rest  ~= ambient
@@ -1249,12 +1267,13 @@ static void test_mqtt_group() {
     // JSON numbers. A JSON string or bool would be dropped by the metrics consumer.
     CHECK(is_json_number("1") && is_json_number("0"));
 
-    // Grouped JSON: max depth 1, groups+keys in first-seen order, numeric vs string typing.
+    // Grouped JSON: max depth 1, groups+keys in first-seen order, numeric vs string typing. The
+    // TYPE comes from the row's kind (its converter), never from the value — see test_published_kind.
     std::vector<GroupedValue> vals = {
-        {"outdoor_state", "operation_mode", "Heating"},
-        {"hydronic",      "dhw_setpoint",   "48"},
-        {"hydronic",      "lw_setpoint",    "35.4"},
-        {"outdoor_state", "error_type",     "Normal"},   // back to an earlier group -> same bucket
+        {"outdoor_state", "operation_mode", "Heating", PublishedKind::Text},
+        {"hydronic",      "dhw_setpoint",   "48",      PublishedKind::Number},
+        {"hydronic",      "lw_setpoint",    "35.4",    PublishedKind::Number},
+        {"outdoor_state", "error_type",     "Normal",  PublishedKind::Text},   // earlier group -> same bucket
     };
     const std::string j = build_grouped_json(vals);
     CHECK(j == "{\"outdoor_state\":{\"operation_mode\":\"Heating\",\"error_type\":\"Normal\"},"
@@ -1269,7 +1288,88 @@ static void test_mqtt_group() {
 
     // A text value routes through the shared logic/json.hpp encoder, so a control char in one can't
     // break the state topic's JSON either (test_json covers the escaping itself).
-    CHECK(build_grouped_json({{"other", "raw", "a\nb"}}) == "{\"other\":{\"raw\":\"a\\nb\"}}");
+    CHECK(build_grouped_json({{"other", "raw", "a\nb", PublishedKind::Text}})
+          == "{\"other\":{\"raw\":\"a\\nb\"}}");
+
+    // ── THE TYPE IS THE FIELD'S, NOT THE VALUE'S (#209 defect 3 / the telemetry-contract section) ──
+    // A Text field stays quoted even when its value LOOKS numeric, and a Number field stays unquoted
+    // even at zero. The measured failure was the other way round — one key alternating between the
+    // number 30 and the string "OFF" — and the reason it survived review is that both payloads are
+    // individually well-formed. Only asserting the SAME key across BOTH states catches it.
+    CHECK(build_grouped_json({{"outdoor_state", "error_code", "00", PublishedKind::Text}})
+          == "{\"outdoor_state\":{\"error_code\":\"00\"}}");   // "00" is not a number here
+    CHECK(build_grouped_json({{"outdoor_state", "error_code", "U4", PublishedKind::Text}})
+          == "{\"outdoor_state\":{\"error_code\":\"U4\"}}");   // …and the type did not move
+    CHECK(build_grouped_json({{"actuators", "fan_1_step", "30", PublishedKind::Number}})
+          == "{\"actuators\":{\"fan_1_step\":30}}");
+    CHECK(build_grouped_json({{"actuators", "fan_1_step", "0", PublishedKind::Number}})
+          == "{\"actuators\":{\"fan_1_step\":0}}");            // stopped: numeric zero, never "OFF"
+
+    // FAIL-CLOSED: a Number field handed a non-numeric string is a broken contract. It must not be
+    // quoted (that IS the type flip) — the key stays, the type stays, the value is null.
+    CHECK(build_grouped_json({{"actuators", "fan_1_step", "OFF", PublishedKind::Number}})
+          == "{\"actuators\":{\"fan_1_step\":null}}");
+
+    // The group key doubles as an HA entity-name fragment for the DERIVED companions, which have no
+    // catalog label of their own (logic/fault_state.hpp).
+    CHECK(group_display_name("outdoor_state") == "Outdoor State");
+    CHECK(group_display_name("hydronic") == "Hydronic");
+    CHECK(group_display_name("water_hx") == "Water Hx");
+    CHECK(group_display_name("") == "");
+}
+
+// ── The published JSON TYPE of every converter (#209 defect 3, the telemetry-contract section) ────
+// The defect this closes is not "conv 211 is wrong today" (it was fixed in #210) but "nothing stops
+// the next converter doing it again". So this walks EVERY implemented converter id over a sweep of
+// raw input bytes and asserts that what convert() produces agrees with published_kind() in EVERY
+// state — a converter that returns text for one byte and a number for another fails here, whichever
+// way published_kind classifies it.
+static void test_published_kind() {
+    // The full set of ids convert() implements, taken from the switch rather than guessed: anything
+    // else returns unimpl and never reaches a publish surface.
+    static const int IMPLEMENTED[] = {
+        101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111,
+        114, 118, 119, 151, 152, 161, 203, 204, 211, 214, 215, 217, 219,
+        300, 301, 302, 303, 304, 305, 306, 307, 310, 311, 315, 316, 405,
+        801, 802, 803, 804, 805,
+    };
+    for (int conv : IMPLEMENTED) {
+        const PublishedKind want = published_kind(conv);
+        bool saw_number = false, saw_text = false;
+        // A sweep wide enough to hit every branch of the enum converters: 0 and 1 (the OFF/first-label
+        // cases), the nibble boundaries conv 204 indexes with, and the out-of-range values that make
+        // 203/217/315/316 fall through to "?".
+        for (int b0 = 0; b0 <= 255; b0++) {
+            const uint8_t bytes[2] = {static_cast<uint8_t>(b0), 0x00};
+            ValueDef d{0x30, 0, conv, 2, -1, "probe"};
+            const Reading r = convert(d, bytes);
+            if (r.unimpl) continue;
+            if (r.text[0] != '\0') saw_text = true;
+            else if (r.ok)         saw_number = true;
+            // A row that decodes to NOTHING (conv 405's absent transducer, conv 114's 0x8000) is an
+            // absence, not a type — absence is stated by omitting the key, so it constrains nothing.
+        }
+        // The load-bearing assertion: never both. One field, one type, in every state.
+        CHECK(!(saw_number && saw_text));
+        if (want == PublishedKind::Text)  CHECK(!saw_number);
+        if (want == PublishedKind::Number) CHECK(!saw_text);
+    }
+
+    // Spot-check the classification itself, so a wholesale sign error in published_kind (everything
+    // Text, say) cannot satisfy the loop above by making both halves vacuous.
+    CHECK(published_kind(211) == PublishedKind::Number);   // fan step — the #209 defect-3 row
+    CHECK(published_kind(105) == PublishedKind::Number);
+    CHECK(published_kind(300) == PublishedKind::Number);   // bit flags are 1/0 NUMBERS, not a 3rd type
+    CHECK(published_kind(307) == PublishedKind::Number);
+    CHECK(published_kind(203) == PublishedKind::Text);
+    CHECK(published_kind(204) == PublishedKind::Text);
+    CHECK(published_kind(217) == PublishedKind::Text);
+    CHECK(published_kind(315) == PublishedKind::Text);
+    CHECK(published_kind(316) == PublishedKind::Text);
+    CHECK(published_kind(802) == PublishedKind::Text);
+    // An unimplemented id never publishes, so its kind is arbitrary — but it must still be a KIND,
+    // not a crash or a third value.
+    CHECK(published_kind(999) == PublishedKind::Number);
 }
 
 static void test_mqtt_uri() {
@@ -1399,8 +1499,16 @@ static void test_heartbeat() {
                "\"mqtt_connected\":1,\"mqtt_count\":89282,\"mqtt_fails\":0,\"mqtt_reconnects\":1,"
                "\"bus_connected\":1,\"bus_proto\":\"I\",\"bus_registers\":10,\"bus_values\":48,"
                "\"bus_last_ok_s\":1,\"bus_rx_received\":763732,\"bus_rx_fails\":2,"
-               "\"bus_crc_err\":0,\"bus_timeout_err\":2,"
+               "\"bus_crc_err\":0,\"bus_timeout_err\":2,\"bus_ou_held_over\":0,"
                "\"bus_tx_reads\":763734,\"bus_tx_writes\":0,\"bus_tx_fails\":0}");
+
+    // SOURCE freshness is its own field, and it is independent of bus health (#209 defect 5): the
+    // link is up, the device is publishing, and the outdoor unit is simply not measuring. A consumer
+    // that only had bus_connected would read the vanished outdoor keys as a broken link.
+    f.ou_held_over = true;
+    CHECK(build_heartbeat_json(f).find("\"bus_connected\":1,") != std::string::npos);
+    CHECK(build_heartbeat_json(f).find("\"bus_ou_held_over\":1,") != std::string::npos);
+    f.ou_held_over = false;
 
     // Synced: "time" carries the RFC 3339 instant verbatim (the caller — mqtt_ha.cpp — already
     // rendered it via logic/timestamp.hpp; this header only decides null-vs-quoted).
@@ -1432,7 +1540,7 @@ static void test_heartbeat() {
     // value_template points at the heartbeat topic (not the heat-pump state topic).
     const std::string hb = heartbeat_topic(base);
     const std::string av = availability_topic(base);
-    CHECK(HEARTBEAT_SENSOR_COUNT == 19);   // +2: wifi_mac, wifi_bssid
+    CHECK(HEARTBEAT_SENSOR_COUNT == 20);   // +2: wifi_mac, wifi_bssid; +1: ou_held_over
     const HeartbeatSensor& rssi = HEARTBEAT_SENSORS[0];
     CHECK(std::string(rssi.object_id) == "wifi_signal");
     std::string dt = heartbeat_discovery_topic("homeassistant", node, rssi);
@@ -3597,6 +3705,18 @@ static void test_ou_stale() {
     CHECK(!ou_reading_held_over(0x20, /*known=*/false, /*running=*/false));   // unknown -> current
     CHECK(!ou_reading_held_over(0x61, /*known=*/true, /*running=*/false));    // hydronic stays live
 
+    // The compressor WITNESS, now a shared predicate: the poll engine marks its cache with it
+    // (main/hp_poll.cpp, so the MQTT bridge can withhold a held-over reading — #209 defect 5) and the
+    // trend ring's trend_rps_row() finds its row with it. Two callers, one rule; a second copy of the
+    // pattern is what would let one of them quietly stop covering a row.
+    CHECK(logic::ou_is_rps_witness("INV frequency (rps)", 0x30));
+    CHECK(!logic::ou_is_rps_witness("INV frequency (rps)", 0x21));  // must sit on a page that is LIVE,
+                                                                    // or the run state comes from the
+                                                                    // same frozen bytes it qualifies
+    CHECK(!logic::ou_is_rps_witness("INV primary current (A)", 0x21));
+    CHECK(!logic::ou_is_rps_witness("Fan 1 (step)", 0x30));
+    CHECK(!logic::ou_is_rps_witness(nullptr, 0x30));
+
     // --- catalog conformance -------------------------------------------------------------------
     // Every detectable profile: the readings the UI blanks must sit on a held-over page, and the
     // compressor witness must NOT. A future generated profile that moves "INV frequency (rps)" onto
@@ -4560,6 +4680,236 @@ static void test_feature_gate() {
     CHECK(!uc5_supported(ghost_cov));
 }
 
+// ── The availability ledger (logic/availability.hpp) — #209 defects 1, 2 and 6 ────────────────────
+// Two things are asserted, and the second is the one that matters. The first is that each rule does
+// what it says on a hand-built row. The second is what it does to the REAL CATALOG: a rule keyed on
+// (page, offset, converter) is a claim about every profile at once, so the catalog loop is what
+// proves it selects the quantity that was adjudicated and nothing else — the failure mode being a
+// rule that silently starts suppressing a real hydronic reading on some other model.
+static void test_availability() {
+    // Target Evap. Temp. — quarantined outright. The row still exists (detection needs the page);
+    // it simply never reaches a publish surface.
+    const ValueDef evap{0x10, 6, 114, 2, 1, "Target Evap. Temp."};
+    CHECK(availability_policy(evap) == AvailabilityPolicy::Unproven);
+    CHECK(!row_publishable(evap));
+    CHECK(!value_available(evap, true, 199.6));   // the measured mid-run value
+    CHECK(!value_available(evap, true, 24.06));   // and a value that WOULD be plausible: the row is
+                                                  // withheld because the SCALE is unknown, not
+                                                  // because this number is out of range
+
+    // Target Cond. Temp. — the row is published; an exact zero from it is not.
+    const ValueDef cond{0x10, 8, 114, 2, 1, "Target Cond. Temp."};
+    CHECK(availability_policy(cond) == AvailabilityPolicy::ZeroMeansAbsent);
+    CHECK(row_publishable(cond));                 // the ENTITY stays — this field can be populated
+    CHECK(!value_available(cond, true, 0.0));     // raw 0x0000: unpopulated, not a 0 °C target
+    CHECK(value_available(cond, true, 35.0));     // a real target still publishes
+    CHECK(value_available(cond, true, -0.1));     // and the rule is an EXACT zero, not a band
+
+    // A text/enum row has no number to judge and passes through untouched.
+    CHECK(value_available(cond, false, 0.0));
+
+    // Everything the ledger says nothing about is unaffected — including the OTHER conv-114 rows and
+    // a legitimate 0 °C reading, which is the one thing a global "zero means unavailable" rule would
+    // have destroyed (a real thermistor crosses zero every winter).
+    const ValueDef r1t{0x61, 8, 105, 2, 1, "Inlet water temp.(R4T)"};
+    CHECK(availability_policy(r1t) == AvailabilityPolicy::Always);
+    CHECK(row_publishable(r1t) && value_available(r1t, true, 0.0));
+    const ValueDef tdis{0xA1, 5, 114, 2, 1, "Target Discharge Temp."};
+    CHECK(availability_policy(tdis) == AvailabilityPolicy::Always);
+    CHECK(value_available(tdis, true, 0.0));
+
+    // The generated detect-only flag composes with the ledger rather than competing with it: both
+    // reach the same predicate, so hp_poll and mqtt_ha's discovery cannot see different row sets.
+    ValueDef hybrid{0x64, 2, 316, 1, -1, "Hybrid Op. Mode", true};
+    CHECK(!row_publishable(hybrid));
+    CHECK(availability_policy(hybrid) == AvailabilityPolicy::Always);   // orthogonal reasons
+
+    // ── Against the real catalog ──────────────────────────────────────────────────────────────────
+    int profiles_total = 0, evap_rows = 0, cond_rows = 0, suppressed = 0, odd_label = 0;
+    for (const auto& p : def::profiles) {
+        profiles_total++;
+        const auto view = def::resolved(p);
+        int publishable_on_0x10 = 0;
+        for (size_t i = 0; i < view.count(); i++) {
+            const ValueDef& d = view[i];
+            const AvailabilityPolicy pol = availability_policy(d);
+            if (pol == AvailabilityPolicy::Unproven) {
+                suppressed++;
+                evap_rows++;
+                // A quarantine must land on the quantity it was adjudicated for, on EVERY profile.
+                // The structural key is what makes that true, and this is what proves it — including
+                // the one place the catalog disagrees with ITSELF: altherma_lt_d7_e_bml labels this
+                // exact register "Target Discharge Temp." while the other 43 and docs/REGISTERS.md §5
+                // call it "Target Evap. Temp.". Same page, same offset, same converter, same width,
+                // same dataType — one family's source catalog simply spells it differently, which is
+                // the argument for keying on the register rather than the name in miniature. Under
+                // either reading the ×0.1 decode is impossible (a discharge TARGET of 145-200 °C is
+                // no more real than an evaporating one), so the adjudication covers both.
+                if (logic::lwt_ci_contains(d.label, "target discharge")) odd_label++;
+                else CHECK(logic::lwt_ci_contains(d.label, "target evap"));
+            }
+            if (pol == AvailabilityPolicy::ZeroMeansAbsent) {
+                CHECK(logic::lwt_ci_contains(d.label, "target cond"));
+                cond_rows++;
+            }
+            // NO CORE HYDRONIC ROW MAY BE TOUCHED. The audit in #209 is explicit that the hydronic
+            // decode is excellent and must not be collaterally damaged: leaving/return water, tank,
+            // flow, pressure and the setpoints all live on 0x60-0x62, and not one of them may fall
+            // under a rule.
+            if (d.reg >= 0x60 && d.reg <= 0x62)
+                CHECK(pol == AvailabilityPolicy::Always);
+            if (d.reg == 0x10 && row_publishable(d)) publishable_on_0x10++;
+        }
+        // Page 0x10 must still be QUERIED on every profile after the quarantine — the error class,
+        // the error code and the protection words live there, and so does the raw dump that is meant
+        // to settle #194. A page whose rows are all unpublishable is not read at all (hp_poll).
+        CHECK(publishable_on_0x10 > 0);
+    }
+    // The exact reach of the two rules, pinned. 44 of the 45 profiles carry both rows; the one that
+    // does not is `altherma3_r_erga`, whose page-0x10 row set stops at offset 5 — it has no target
+    // temperatures at all, so there is nothing to adjudicate there. Hardcoded on purpose: a changed
+    // count means a profile was added or the generator's page-0x10 input moved, and either is a
+    // reason to re-read the adjudication rather than let it silently re-scope itself.
+    CHECK(profiles_total == 45);
+    CHECK(evap_rows == 44 && cond_rows == 44);
+    CHECK(evap_rows == suppressed);
+    CHECK(odd_label == 1);   // exactly one family spells the quarantined register differently
+}
+
+// ── Numeric fault state beside the textual code (logic/fault_state.hpp) — #209 defect 4 ──────────
+static void test_fault_state() {
+    // The inverse of conv 203, taken from the same ERR_TYPE table it renders from.
+    CHECK(fault_class_from_text("Normal")  == FaultClass::Normal);
+    CHECK(fault_class_from_text("Error")   == FaultClass::Error);
+    CHECK(fault_class_from_text("Warning") == FaultClass::Warning);
+    CHECK(fault_class_from_text("Caution") == FaultClass::Caution);
+    CHECK(fault_class_from_text("?")       == FaultClass::Unknown);   // conv 203's out-of-range render
+    CHECK(fault_class_from_text("")        == FaultClass::Unknown);
+    CHECK(fault_class_from_text(nullptr)   == FaultClass::Unknown);
+    CHECK(fault_class_from_text("Norma")   == FaultClass::Unknown);   // a prefix is not a match
+    CHECK(fault_class_from_text("Normal2") == FaultClass::Unknown);   // nor is an extension
+
+    // Round-trip against the real converter: whatever conv 203 emits for a byte, this reads back.
+    const ValueDef etype{0x10, 4, 203, 1, -1, "Error type"};
+    for (int b = 0; b < 4; b++) {
+        const uint8_t raw = static_cast<uint8_t>(b);
+        CHECK(fault_class_from_text(convert(etype, &raw).text) == static_cast<FaultClass>(b));
+    }
+    const uint8_t bogus = 9;
+    CHECK(fault_class_from_text(convert(etype, &bogus).text) == FaultClass::Unknown);
+
+    // The flags. Error is a stop; Warning and Caution are both "running and complaining".
+    CHECK(!fault_error_active(FaultClass::Normal)  && !fault_warning_active(FaultClass::Normal));
+    CHECK( fault_error_active(FaultClass::Error)   && !fault_warning_active(FaultClass::Error));
+    CHECK(!fault_error_active(FaultClass::Warning) &&  fault_warning_active(FaultClass::Warning));
+    CHECK(!fault_error_active(FaultClass::Caution) &&  fault_warning_active(FaultClass::Caution));
+
+    // An unreadable class publishes NEITHER flag. Reporting 0/0 would assert "no fault" on a byte
+    // nobody could decode — the one direction a fault flag must never fail in.
+    CHECK(!fault_companions_publishable(FaultClass::Unknown));
+    CHECK(fault_companions_publishable(FaultClass::Normal));
+
+    // The wire form is always "1"/"0" — a permanently numeric field, which is the entire point.
+    CHECK(FAULT_COMPANION_COUNT == 2);
+    CHECK(std::string(fault_companion_state(0, FaultClass::Error))   == "1");
+    CHECK(std::string(fault_companion_state(1, FaultClass::Error))   == "0");
+    CHECK(std::string(fault_companion_state(0, FaultClass::Normal))  == "0");
+    CHECK(std::string(fault_companion_state(1, FaultClass::Caution)) == "1");
+
+    // ── The scenario #209 asks to be replayed: 00 -> U4 -> 00 ─────────────────────────────────────
+    // The textual code keeps its type through the whole sequence (an alphanumeric code cannot become
+    // a number), and the numeric flag moves 0 -> 1 -> 0 beside it, so an alert on the flag fires
+    // where an alert on the code could not.
+    const ValueDef ecode{0x10, 5, 204, 1, -1, "Error Code"};
+    const uint8_t no_err = 0x00, u4 = 0x94, seven_h = 0xCB;   // ERR_C1/ERR_C2 nibble pairs
+    CHECK(std::string(convert(ecode, &no_err).text)  == "0");   // conv 204 trims the leading space
+    CHECK(std::string(convert(ecode, &u4).text)      == "U4");
+    CHECK(std::string(convert(ecode, &seven_h).text) == "7H");
+    const uint8_t cls_normal = 0, cls_error = 1;
+    std::string seq;
+    for (uint8_t c : {cls_normal, cls_error, cls_normal}) {
+        const FaultClass fc = fault_class_from_text(convert(etype, &c).text);
+        std::vector<GroupedValue> vals = {
+            {"outdoor_state", "error_code",   "U4", PublishedKind::Text},
+            {"outdoor_state", "error_active", fault_companion_state(0, fc), PublishedKind::Number},
+        };
+        seq += build_grouped_json(vals);
+    }
+    CHECK(seq == "{\"outdoor_state\":{\"error_code\":\"U4\",\"error_active\":0}}"
+                 "{\"outdoor_state\":{\"error_code\":\"U4\",\"error_active\":1}}"
+                 "{\"outdoor_state\":{\"error_code\":\"U4\",\"error_active\":0}}");
+
+    // Discovery for the derived pair: group-scoped ids (a profile carries an error class on the
+    // outdoor page AND on the hydronic one, and HA entity ids share one flat namespace), numeric
+    // payloads spelled out, and a value_template that subscripts the row's own group.
+    CHECK(companion_object_id("outdoor_state", "error_active") == "outdoor_state_error_active");
+    CHECK(companion_object_id("hydronic", "error_active") == "hydronic_error_active");
+    CHECK(companion_discovery_topic("homeassistant", "daikin_test", "hydronic", "warning_active")
+          == "homeassistant/binary_sensor/daikin_test/hydronic_warning_active/config");
+    const std::string ccfg = companion_discovery_config(
+        "daikin_test", "daikin_board", "daikin/state", "daikin/status", "outdoor_state",
+        FAULT_COMPANIONS[0]);
+    CHECK(ccfg.find("\"name\":\"Outdoor State Error Active\"") != std::string::npos);
+    CHECK(ccfg.find("\"uniq_id\":\"daikin_test_outdoor_state_error_active\"") != std::string::npos);
+    CHECK(ccfg.find("\"val_tpl\":\"{{ value_json['outdoor_state']['error_active'] }}\"")
+          != std::string::npos);
+    CHECK(ccfg.find("\"pl_on\":\"1\",\"pl_off\":\"0\"") != std::string::npos);
+    CHECK(ccfg.find("\"dev_cla\":\"problem\"") != std::string::npos);
+
+    // Every profile that carries an error class gets the pair, and the two rows land in DIFFERENT
+    // groups — which is what keeps the short JSON keys unambiguous.
+    for (const auto& p : def::profiles) {
+        int classes = 0;
+        for (size_t i = 0; i < p.count; i++) {
+            if (p.values[i].conv != 203) continue;
+            classes++;
+            const std::string g = group_for_page(p.values[i].reg);
+            CHECK(!g.empty() && g != "other");
+        }
+        CHECK(classes >= 1);   // no profile is left without a numeric fault state
+    }
+}
+
+// ── The run-time raw-page capture cadence (logic/raw_capture.hpp) — #194's decisive experiment ────
+static void test_raw_capture() {
+    logic::RawCaptureState s;
+    const int64_t sec = 1000000;
+
+    // Nothing while the compressor is stopped: that is the state hp_detect.cpp already dumps, and
+    // the state in which the value under investigation is NOT wrong.
+    CHECK(!logic::raw_capture_due(s, false, 0));
+    CHECK(!logic::raw_capture_due(s, false, 100 * sec));
+    CHECK(s.emitted == 0);
+
+    // The stopped -> running EDGE fires immediately; the next cycle does not.
+    CHECK(logic::raw_capture_due(s, true, 200 * sec));
+    CHECK(!logic::raw_capture_due(s, true, 201 * sec));
+    CHECK(!logic::raw_capture_due(s, true, (200 + logic::RAW_CAPTURE_PERIOD_S - 1) * sec));
+    // …and then once per period, so a long run yields a short SERIES. Two candidate scales that both
+    // fit one sample may not fit a curve, which is the whole reason for more than one point.
+    CHECK(logic::raw_capture_due(s, true, (200 + logic::RAW_CAPTURE_PERIOD_S) * sec));
+    CHECK(s.emitted == 2);
+
+    // A stop re-arms the edge but NOT the budget: the next start dumps again, and the count keeps
+    // climbing toward the per-boot ceiling.
+    CHECK(!logic::raw_capture_due(s, false, 900 * sec));
+    CHECK(logic::raw_capture_due(s, true, 901 * sec));
+    CHECK(s.emitted == 3);
+
+    // The ceiling holds. A unit that cycles all day cannot evict the rest of the boot's evidence
+    // from the 6 KB diag ring — which is exactly how the crash records used to be lost.
+    logic::RawCaptureState b;
+    int fired = 0;
+    for (int i = 0; i < 500; i++) {
+        if (logic::raw_capture_due(b, false, i * 2000 * sec)) fired++;         // stop
+        if (logic::raw_capture_due(b, true, (i * 2000 + 1) * sec)) fired++;    // start -> edge
+    }
+    CHECK(fired == logic::RAW_CAPTURE_MAX);
+    CHECK(b.emitted == logic::RAW_CAPTURE_MAX);
+    // Once exhausted it stays exhausted for the rest of the boot, in both phases.
+    CHECK(!logic::raw_capture_due(b, true, 9999999 * sec));
+}
+
 int main() {
     test_crc();
     test_registers();
@@ -4572,6 +4922,10 @@ int main() {
     test_lwt_select();
     test_ou_stale();
     test_cop_scope();
+    test_availability();
+    test_fault_state();
+    test_raw_capture();
+    test_published_kind();
     test_history();
     test_no_publish();
     test_config_model();

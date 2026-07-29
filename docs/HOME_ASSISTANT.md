@@ -139,6 +139,69 @@ value is the raw 2-char code (e.g. `U4`), enriched with an English description w
 `logic/error_codes.hpp` covers it (`"U4: Indoor/outdoor unit communication problem"`); a code
 outside that table's coverage still publishes as the bare code.
 
+### A field's JSON type never changes
+
+Whether a key is published as a JSON number or a JSON string is decided by the value's **converter**,
+not by what happens to be in it right now. Every key is one type in every state, for the whole life
+of the installation.
+
+This is not theoretical. Before it was enforced, `actuators.fan_1_step` published the number `30`
+while the fan ran and the string `"OFF"` when it stopped. Both payloads are perfectly well-formed;
+the damage is downstream. Telegraf's numeric parser dropped the string, VictoriaMetrics never
+received a zero, and the last running step stayed on the chart as though the fan were still turning
+— and any schema inferred from the first payload was wrong from the second onwards. A fan that has
+stopped now publishes `0`; render it as "OFF" in the presentation layer if you want the word.
+
+### `error_active` / `warning_active` — a numeric fault state
+
+The Daikin diagnostic fields stay textual, because that is what they are: `error_type` reads
+`"Normal"`/`"Error"`/`"Warning"`/`"Caution"` and `error_code` reads `"00"`, `"U4"`, `"7H"`. A metrics
+consumer can store neither. `"00"` may become a numeric `0` on the way in, but `"U4"` is simply
+dropped — so the series sits at its last no-error value and an alert on `error_code != 0` never fires
+for the alphanumeric faults it exists to catch.
+
+Every group that carries an error class therefore also carries two permanently numeric companions,
+derived from that class:
+
+```json
+{ "outdoor_state": { "error_type": "Error", "error_code": "U4", "error_active": 1, "warning_active": 0 } }
+```
+
+`error_active` is `1` for the *Error* class; `warning_active` is `1` for *Warning* or *Caution* (the
+textual class is right beside them if you need the three-way distinction). Both clear back to `0`
+when the fault does. An unreadable class publishes **neither** — reporting `0/0` would assert "no
+fault" on a byte the firmware could not decode.
+
+Each is its own `binary_sensor` (`device_class: problem`), named and id'd by its group — *Outdoor
+State Error Active*, *Hydronic Error Active* — since a profile carries an error class on both the
+outdoor and the hydronic page while HA entity ids share one flat namespace.
+
+### Values the firmware refuses to publish
+
+Three things can make a catalog row absent from `<base>/state`, and all three state absence *by*
+absence — the key is simply not in the payload and HA shows *unknown*, rather than a plausible number
+nobody measured:
+
+- **The row is quarantined.** `Target Evap. Temp.` decodes faithfully from the catalog and still
+  yields 145–200 °C while the compressor runs, on two independent unit families measured against a
+  manufacturer-documented reference. Until the scale is settled it is announced to nobody, and any
+  retained discovery config an older build published for it is deleted on upgrade
+  ([#194](https://github.com/0Bu/daikin-altherma-esp32/issues/194) /
+  [#209](https://github.com/0Bu/daikin-altherma-esp32/issues/209)). **Upgrading:** the *Target Evap.
+  Temp.* entity disappears on the next connect.
+- **The field is not populated on this unit.** `Target Cond. Temp.` reads raw `0x0000` through an
+  entire compressor cycle on both families. The entity stays (the field *can* be populated) but an
+  exact zero from that row is withheld. This is adjudicated per row, never globally: a real
+  thermistor crosses 0 °C every winter and must keep saying so.
+- **The outdoor unit is resting.** The outdoor unit refreshes its own register pages (`0x20`
+  sensors, `0x21` inverter) only while it runs; stopped, it keeps answering with the last run's
+  numbers. Measured against a HomeHub reference: exact agreement at every point while the compressor
+  ran, a mean 1.19 K (max 2.0 K) error across the points while it rested. Those readings are
+  withheld while the compressor is stopped, and the heartbeat's `bus_ou_held_over` (`1`/`0`, entity
+  *Outdoor Data Held Over*) says why — the link is fine, the device is publishing, the unit is just
+  not measuring. Distinguishing this from a broken link is what a "time since last MQTT message"
+  check cannot do, because the payload itself is fresh every second.
+
 ### Protection retries & drop control (new entities)
 
 Every install gains **11 entities** from the outdoor unit's page-`0x10` protection words: five

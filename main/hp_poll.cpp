@@ -9,9 +9,14 @@
 #include "hp_convert.hpp"
 #include "hp_detect.hpp"
 #include "history.hpp"
+#include "logic/availability.hpp"
 #include "logic/convert.hpp"
 #include "logic/crc.hpp"
 #include "logic/detect_backoff.hpp"
+#include "logic/hexdump.hpp"
+#include "logic/history.hpp"   // history_parse_tenths — the SAME parse history.cpp applies to the witness
+#include "logic/ou_stale.hpp"
+#include "logic/raw_capture.hpp"
 #include "http_handlers.hpp"
 
 #include "esp_task_wdt.h"
@@ -38,6 +43,11 @@ static int64_t               s_last_ok_us = -1;
 static DetectBackoff         s_backoff;
 static int64_t               s_next_detect_us = 0;
 static std::atomic<bool>     s_detect_reset{false};
+
+// Raw page-dump budget for the RUNNING compressor (logic/raw_capture.hpp) — poll-task-owned, RAM
+// only, never refilled within a boot. The detect-pass dump in hp_detect.cpp captures the same pages
+// at REST; this one exists because the values #194 is about are only wrong while the unit runs.
+static logic::RawCaptureState s_raw_capture;
 
 // RAII guard around s_mtx (same idiom as config.cpp), used by every take in this file. It matters
 // most for the readers: they copy std::strings OUT of s_stats/s_cache under the lock, so they can
@@ -100,12 +110,21 @@ static void poll_once() {
     uint32_t    d_rx_ok = 0, d_rx_fail = 0, d_timeout = 0, d_crc = 0;
     std::string err;                                                   // last error text, if any
 
+    // Raw payloads of the two pages whose LAYOUT is still an open question, kept for the run-time
+    // dump below (see logic/raw_capture.hpp). Stack-resident and tiny; only written when the page
+    // answers this cycle, so a page that went silent yields no dump rather than a stale one.
+    uint8_t raw10[32]; int raw10_len = -1;
+    uint8_t raw20[32]; int raw20_len = -1;
+
     for (size_t i = 0; i < view.count(); i++) {
-        // Detect-only rows (ValueDef::no_publish) never contribute a queryable register: a page whose
-        // rows are ALL flagged is not read at all, saving one bus round-trip per cycle. The page still
+        // Unpublishable rows never contribute a queryable register: a page whose rows are ALL
+        // unpublishable is not read at all, saving one bus round-trip per cycle. The page still
         // counts toward the profile's DETECTION signature (def/signatures.hpp reads every row), which
-        // is exactly why the row is kept rather than deleted.
-        if (view[i].no_publish) continue;
+        // is exactly why such a row is kept rather than deleted. Two reasons a row lands here — the
+        // generator's detect-only flag and the availability ledger's Unproven verdict — and
+        // row_publishable() is the one predicate that composes them, so this loop, the decode loop
+        // below and mqtt_ha's discovery cannot disagree about the row set.
+        if (!row_publishable(view[i])) continue;
         uint8_t reg = view[i].reg;
         if (seen[reg]) continue;
         seen[reg] = 1;
@@ -131,16 +150,26 @@ static void poll_once() {
         const int      poff    = payload_offset(c.proto);
         const int      paylen  = n - poff - 1;                 // minus header, minus CRC byte
         const uint8_t* payload = buf + poff;
+        // Stash the raw bytes of the two pages the run-time dump is about. Copied rather than
+        // re-queried later: a second read would be a different instant, and the whole point is the
+        // bytes BEHIND the decoded values this same cycle produced.
+        if (reg == 0x10 || reg == 0x20) {
+            uint8_t*   dst = (reg == 0x10) ? raw10 : raw20;
+            int&       len = (reg == 0x10) ? raw10_len : raw20_len;
+            const int  cap = paylen < 32 ? paylen : 32;
+            for (int b = 0; b < cap; b++) dst[b] = payload[b];
+            len = paylen;
+        }
 
         for (size_t k = 0; k < view.count(); k++) {
             if (view[k].reg != reg) continue;
-            if (view[k].no_publish) continue;   // detect-only: decoded for nobody (MIXED page)
+            if (!row_publishable(view[k])) continue;   // decoded for nobody (see the loop above)
             CachedValue cv;
             cv.label = view[k].label;
             cv.unit  = unit_for_datatype(view[k].type);
             cv.reg   = view[k].reg;
             cv.off   = view[k].offset;
-            cv.binary = conv_is_binary(view[k].conv);
+            cv.conv  = view[k].conv;
             std::string val;
             // The whole table goes along: reading_plausible needs it to tell a refrigerant pressure
             // (0 bar impossible) from the water one (0 bar = a drained system, and real). The BASE
@@ -148,6 +177,54 @@ static void poll_once() {
             if (hp_format(view[k], payload, paylen, rtype, val, prof.values, prof.count))
                 cv.value = val;
             fresh.push_back(std::move(cv));
+        }
+    }
+
+    // ── SOURCE freshness: which of these readings is the outdoor unit still measuring? ────────────
+    // The outdoor unit refreshes its OWN pages (0x20 sensors, 0x21 inverter) only while it RUNS;
+    // stopped, it answers with the last run's numbers (logic/ou_stale.hpp, measured). The web UI has
+    // applied that rule since v1.0.13 — the FIRMWARE had not, so the MQTT state topic kept
+    // republishing the last run's outdoor air in a freshly-timestamped payload, and #209 measured the
+    // consequence against a HomeHub reference: exact agreement at every point while the compressor
+    // ran, a mean 1.19 K (max 2.0 K) error over the 195 points while it rested.
+    //
+    // The value is MARKED, not dropped. history.cpp needs the number to distinguish HELD_OVER from
+    // NO_READING (a gap in the chart for the right reason), and the browser already renders "—" on
+    // its own. What the mark buys is the MQTT bridge withholding it — a consumer that has no
+    // compressor state cannot make that call for itself.
+    // The parse is logic/history.hpp's own history_parse_tenths, not a local strtod: history.cpp
+    // asks the same question of the same string one call later (its trends distinguish HELD_OVER
+    // from NO_READING), and two parses that disagree about, say, a nonnumeric witness value would
+    // make the trend ring and the MQTT bridge blank different rows. One function, one answer.
+    bool rps_known = false, rps_running = false;
+    for (const auto& cv : fresh) {
+        if (!logic::ou_is_rps_witness(cv.label.c_str(), cv.reg)) continue;
+        int rps_tenths = 0;
+        if (logic::history_parse_tenths(cv.value.c_str(), rps_tenths)) {
+            rps_known   = true;                        // absent/unreadable stays UNKNOWN, not stopped
+            rps_running = rps_tenths > 0;
+        }
+        break;
+    }
+    for (auto& cv : fresh)
+        cv.held = logic::ou_reading_held_over(cv.reg, rps_known, rps_running);
+    const bool ou_held = rps_known && !rps_running;
+
+    // ── RAW page bytes WHILE THE COMPRESSOR RUNS (#194's decisive experiment, #209 root cause) ────
+    // The only evidence that can separate a wrong converter scale from a wrong offset for
+    // Target Evap. Temp., and it has never been captured: hp_detect.cpp dumps the same pages, but
+    // only on a detect pass, which is always a unit at rest — the state where the value is not wrong.
+    // Budgeted and edge-triggered so this cannot flood the 6 KB diag ring (logic/raw_capture.hpp).
+    if (logic::raw_capture_due(s_raw_capture, rps_running, esp_timer_get_time())) {
+        const struct { uint8_t reg; const uint8_t* buf; int len; } run_raw[] = {
+            {0x10, raw10, raw10_len}, {0x20, raw20, raw20_len},
+        };
+        for (const auto& pg : run_raw) {
+            if (pg.len < 0) continue;                  // page not read this cycle — nothing to say
+            char hex[104];                             // 32 B -> 95 chars + NUL; see logic/hexdump.hpp
+            const int capped = pg.len < 32 ? pg.len : 32;
+            hex_render(pg.buf, capped, hex, static_cast<int>(sizeof(hex)));
+            diag_printf("poll: raw 0x%02X len=%d [%s] (running)\n", pg.reg, pg.len, hex);
         }
     }
 
@@ -167,6 +244,7 @@ static void poll_once() {
         s_stats.connected  = any_ok;
         s_stats.registers  = regs;
         s_stats.values     = static_cast<int>(s_cache.size());
+        s_stats.ou_held_over = ou_held;
         s_stats.rx_ok         += d_rx_ok;
         s_stats.rx_fail_total += d_rx_fail;
         s_stats.timeout_err   += d_timeout;

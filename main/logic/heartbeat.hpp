@@ -50,6 +50,14 @@ struct HeartbeatFields {
     int32_t     last_ok_s      = -1;      // seconds since last fully-good X10A cycle (-1 = never)
     uint32_t    rx_received    = 0;       // cumulative successful register reads (HpStats.rx_ok)
     uint32_t    rx_fails       = 0;       // cumulative failed reads (HpStats.rx_fail_total)
+    // SOURCE freshness, which is a different question from publish freshness (#209 defect 5). The
+    // outdoor unit refreshes its OWN pages only while it runs (logic/ou_stale.hpp); stopped, it keeps
+    // answering with the last run's numbers. The bridge withholds those readings from the state
+    // topic, so a consumer sees the field disappear — and this flag is what tells it WHY, without a
+    // per-field timestamp in a payload published every second. "The device is publishing, the bus is
+    // healthy, and the outdoor unit is simply not measuring right now" is otherwise indistinguishable
+    // from a broken link on the consumer's side.
+    bool        ou_held_over   = false;
     // SNTP wall clock (main/sntp_time.cpp) at publish time, pre-rendered by the caller
     // (logic/timestamp.hpp's rfc3339_utc) so this header stays IDF-free — "" until the first sync of
     // this boot lands, matching the /status.ntp / syslog TIMESTAMP precedent of never emitting a
@@ -144,6 +152,8 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += ",\"bus_rx_fails\":" + std::to_string(f.rx_fails);
     j += ",\"bus_crc_err\":" + std::to_string(f.crc_err);
     j += ",\"bus_timeout_err\":" + std::to_string(f.timeout_err);
+    // 1/0 NUMBER like the three connectivity flags above, and for the same measured reason.
+    j += ",\"bus_ou_held_over\":"; j += f.ou_held_over ? "1" : "0";
     // The X10A protocol has no write command (docs/ARCHITECTURE.md → MQTT bridge is read-only), so
     // bus_tx_writes/fails are always 0 — reported for parity with the EMS-ESP-style field set rather
     // than because this firmware could ever be busy writing.
@@ -190,6 +200,10 @@ inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
     // "unknown" state for the class, same as every other nullable field in this payload.
     {"sensor",        "device_time",      "Device Time",         "time",             "",    "timestamp",        ""},
     {"binary_sensor", "bus_status",       "X10A Bus",            "bus_connected",    "",    "connectivity",     ""},
+    // Source freshness, not link health — deliberately NOT device_class "connectivity"/"problem":
+    // an outdoor unit resting is the normal state of a heat pump for most of the day, and typing it
+    // as a fault would turn every quiet afternoon into an alert.
+    {"binary_sensor", "ou_held_over",     "Outdoor Data Held Over", "bus_ou_held_over", "", "",         ""},
     {"sensor",        "bus_crc_err",      "X10A CRC Errors",     "bus_crc_err",      "",    "",                 "total_increasing"},
     {"sensor",        "bus_timeout_err",  "X10A Timeout Errors", "bus_timeout_err",  "",    "",                 "total_increasing"},
     {"sensor",        "bus_rx_received",  "X10A RX Received",    "bus_rx_received",  "",    "",                 "total_increasing"},

@@ -219,8 +219,7 @@ inline const TrendDef* trend_by_id(const char* id) {
 // unit we cannot ask about is not a unit we may declare asleep.
 inline int trend_rps_row(const char* const* labels, const uint8_t* regs, size_t n) {
     for (size_t i = 0; i < n; ++i)
-        if (labels[i] && lwt_ci_contains(labels[i], "inv frequency") && !ou_page_holds_over(regs[i]))
-            return static_cast<int>(i);
+        if (ou_is_rps_witness(labels[i], regs[i])) return static_cast<int>(i);
     return -1;
 }
 

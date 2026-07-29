@@ -30,6 +30,8 @@
 // class of number. This header is unaffected either way — it answers "is this reading still current",
 // not "how should it be drawn" — which is exactly why the rule lives here and the presentation does not.
 
+#include "lwt_select.hpp"   // lwt_ci_contains — the compressor witness still matches by label
+
 namespace daik::logic {
 
 // The outdoor unit's own pages: 0x20 (outdoor sensors — air, discharge, suction, coil, HP/LP) and
@@ -48,6 +50,24 @@ constexpr bool ou_page_holds_over(unsigned reg) { return reg == 0x20u || reg == 
 // compressor is evidence that the outdoor pages have gone stale.
 constexpr bool ou_reading_held_over(unsigned reg, bool rps_known, bool rps_running) {
     return rps_known && !rps_running && ou_page_holds_over(reg);
+}
+
+// Is THIS row the compressor witness — "INV frequency (rps)" — that makes the rule above decidable
+// at all? It MUST sit on a page that stays live, or the run state would be derived from the same
+// frozen bytes it is meant to qualify; the catalog test pins that across every profile, and the page
+// condition here is the belt to those braces.
+//
+// The witness is matched by LABEL, which is the one place this file departs from the structural rule
+// it otherwise insists on — and it is safe here for a reason the catalog test states: the rps row is
+// spelled "INV frequency (rps)" in all 27 profiles that carry one, on page 0x30 in every one of
+// them. There is nothing to alias.
+//
+// A per-row predicate rather than a search, because there are now TWO callers with different row
+// containers — the poll engine's cache (main/hp_poll.cpp, which blanks the held-over readings before
+// they reach MQTT) and the trend ring's parallel arrays (history.hpp's trend_rps_row below it). One
+// predicate, two loops; a second copy of the pattern is what would re-open #209 defect 5.
+inline bool ou_is_rps_witness(const char* label, unsigned reg) {
+    return label && lwt_ci_contains(label, "inv frequency") && !ou_page_holds_over(reg);
 }
 
 }  // namespace daik::logic

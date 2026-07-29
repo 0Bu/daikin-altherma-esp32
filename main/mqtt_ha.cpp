@@ -32,8 +32,11 @@
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
 #include "hp_poll.hpp"
+#include "logic/availability.hpp"
+#include "logic/convert.hpp"   // conv_is_binary, published_kind — a row's wire type and entity domain
 #include "logic/crashinfo.hpp"
 #include "logic/discovery.hpp"
+#include "logic/fault_state.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/reset_reason.hpp"
@@ -160,19 +163,53 @@ static void mqtt_publish(const std::string& topic, const char* payload, int len,
 // Layout-marker / grid converters carry no measured value (docs/REGISTERS.md §3.6) — no sensor.
 static bool is_publishable(int conv) { return !(conv == 0 || (conv >= 995 && conv <= 999)); }
 
-// Current publishable values from the poll cache, grouped by register page (skip "no data"). The
-// scratch buffer is sized to the active profile's row count — an exact upper bound on the cached
-// value count, so nothing is truncated out of the JSON without over-allocating a fixed worst case.
+// Current publishable values from the poll cache, grouped by register page. The scratch buffer is
+// sized to the active profile's row count — an exact upper bound on the cached value count, so
+// nothing is truncated out of the JSON without over-allocating a fixed worst case.
+//
+// `out` is reserved to that count PLUS the derived companions, counted in a first pass rather than
+// assumed. The companions are not cached rows, so reserving the snapshot count alone leaves the
+// vector one entry short on every profile that carries an error class — and this runs on the publish
+// task once a SECOND for the life of the device, so the shortfall is a grow/copy/free of a vector of
+// three-std::string elements every cycle, forever. That is precisely the incremental-realloc churn
+// hp_poll's own `fresh.reserve(view.count())` exists to avoid, on a heap whose binding limit is the
+// largest contiguous block. Counting conv-203 rows is ~116 integer compares; the allocation it
+// avoids is not.
+//
+// Two rows are dropped here rather than published:
+//   • no value this cycle (the register timed out, or the reading was refused by the plausibility
+//     envelope / the availability ledger) — absence, stated by absence;
+//   • a HELD-OVER reading (#209 defect 5): the outdoor unit is resting and answering with its last
+//     run's numbers. Republishing those in a fresh payload is what made an hours-old outdoor
+//     temperature look freshly observed to every consumer downstream. The heartbeat's
+//     bus_ou_held_over says WHY the field went away, so this reads as a resting unit and not as a
+//     broken link.
 static std::vector<GroupedValue> current_grouped() {
     const size_t cap = def::lookup_view(config().profile.c_str()).count();
     std::vector<CachedValue> cache(cap ? cap : 1);
     const size_t n = hp_values_snapshot(cache.data(), cache.size());
     std::vector<GroupedValue> out;
-    out.reserve(n);
+    size_t cap_out = n;                                    // + the companions each error class adds
+    for (size_t i = 0; i < n; i++)
+        if (cache[i].conv == 203) cap_out += FAULT_COMPANION_COUNT;
+    out.reserve(cap_out);
     for (size_t i = 0; i < n; i++) {
         if (cache[i].value.empty()) continue;
-        out.push_back({group_for_page(cache[i].reg), object_id(cache[i].label.c_str()),
-                       cache[i].value});
+        if (cache[i].held) continue;
+        const char* group = group_for_page(cache[i].reg);
+        out.push_back({group, object_id(cache[i].label.c_str()), cache[i].value,
+                       published_kind(cache[i].conv)});
+        // A textual error class also publishes its permanently-numeric companions, so a metrics
+        // consumer that cannot store "U4" still sees the fault go active (#209 defect 4). Derived
+        // from the class, in the class's own group; an unreadable class publishes neither rather than
+        // asserting "no fault" on a byte nobody could decode.
+        if (cache[i].conv == 203) {
+            const FaultClass fc = fault_class_from_text(cache[i].value.c_str());
+            if (fault_companions_publishable(fc))
+                for (size_t k = 0; k < FAULT_COMPANION_COUNT; k++)
+                    out.push_back({group, FAULT_COMPANIONS[k].key, fault_companion_state(k, fc),
+                                   PublishedKind::Number});
+        }
     }
     return out;
 }
@@ -235,13 +272,15 @@ static void publish_discovery() {
     if (s_legacy_values_profile != profile_id) retract_legacy_values(prof, profile_id);
     for (size_t i = 0; i < prof.count(); i++) {
         const ValueDef& d = prof[i];
-        // Detect-only rows carry no state (hp_poll never caches them). RETRACT rather than merely
-        // skip: an install upgrading from a build that DID publish this row already has a RETAINED
-        // discovery config in the broker, which would survive forever as a permanently-unavailable HA
-        // entity — the exact orphan this flag exists to remove. A zero-length retained payload deletes
-        // it (same mechanism as RETIRED_CRASH_SENSORS), and is harmless on a fresh install where the
-        // topic never existed.
-        if (d.no_publish) {
+        // A row the firmware does not publish — the generator's detect-only flag, or the availability
+        // ledger's Unproven verdict (logic/availability.hpp). RETRACT rather than merely skip: an
+        // install upgrading from a build that DID publish this row already has a RETAINED discovery
+        // config in the broker, which would survive forever as a permanently-unavailable HA entity —
+        // and for a QUARANTINED row it is worse than an orphan, since HA would keep the last false
+        // value it was ever sent (145-200 °C for Target Evap. Temp.) as that entity's state until
+        // something replaced it. A zero-length retained payload deletes it, and is harmless on a
+        // fresh install where the topic never existed.
+        if (!row_publishable(d)) {
             if (!object_id(d.label).empty()) {
                 mqtt_publish(discovery_topic(s_prefix, s_node, d), "", 0, 0, 1);
                 // A BINARY row's pre-split config lived under .../sensor/... — retract that too, for
@@ -268,6 +307,20 @@ static void publish_discovery() {
         const std::string ct  = discovery_topic(s_prefix, s_node, d);
         const std::string cfg = discovery_config(s_node, s_board, s_state, s_avail, d);
         mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained
+        // The DERIVED numeric fault flags that ride beside a textual error class (#209 defect 4).
+        // Announced here, from the same row loop that publishes the class itself, so the entity set
+        // and the payload cannot drift apart — current_grouped() emits these keys for exactly the
+        // rows this branch announces.
+        if (d.conv == 203) {
+            const std::string group = group_for_page(d.reg);
+            for (size_t k = 0; k < FAULT_COMPANION_COUNT; k++) {
+                const FaultCompanion& c = FAULT_COMPANIONS[k];
+                mqtt_publish(companion_discovery_topic(s_prefix, s_node, group, c.key),
+                             companion_discovery_config(s_node, s_board, s_state, s_avail, group, c)
+                                 .c_str(),
+                             0, 0, 1);            // retained
+            }
+        }
     }
 }
 
@@ -381,6 +434,7 @@ static void publish_heartbeat() {
     f.rx_received     = hp.rx_ok;
     f.rx_fails        = hp.rx_fail_total;
     f.last_ok_s       = hp.last_ok_s;
+    f.ou_held_over    = hp.ou_held_over;
 
     const std::string js = build_heartbeat_json(f);
     mqtt_publish(s_heartbeat, js.c_str(), static_cast<int>(js.size()), 0, 0);   // not retained
