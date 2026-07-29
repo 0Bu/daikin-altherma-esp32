@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte — it both ranks the representative and **narrows the candidate set**, dropping only classes that contradict it, **retried page probe + a second-sweep confirmation** before falling back to `generic`) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1812 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1826 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -83,6 +83,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 53 | **Numeric fault state beside the textual code** — converters 203/204 stay text (`"Normal"`, `"U4"`, `"7H"`), which is what a human and HA want and what Daikin's alphanumeric code space actually is. A metrics consumer can store neither: `"00"` may become a numeric `0` but `"U4"` is simply dropped, so the series sits at its last no-error value and an alert on `error_code != 0` never fires for the very faults it exists to catch. Every error-class row therefore publishes two permanently-numeric companions in its own group — `error_active` / `warning_active`, each its own `binary_sensor` — derived through the inverse of conv 203's own `ERR_TYPE` lookup rather than a second opinion about the labels. An unreadable class publishes **neither**: reporting `0/0` would assert "no fault" on a byte nobody could decode | ✅ 🧪 | [`logic/fault_state.hpp`](../main/logic/fault_state.hpp), [`logic/discovery.hpp`](../main/logic/discovery.hpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 54 | **README-recording gate** — the animated dashboard in the README ([`dashboard.gif`](media/dashboard.gif)) is the first thing a new reader sees and the one artefact here that rots *invisibly*: a recording renders perfectly forever, whatever the UI has since become, so #43/#45 and the domain audit all stay green while the page shows a drawing that no longer exists. A screenshot cannot fail a test; it can only be out of date, and it looks exactly as good either way. CI has no browser, so this cannot re-render and diff pixels — it **fingerprints the sources the recording was made from** (the schematic markup, the CSS that draws and animates it, the `app.js` functions that paint it — each *required* to exist, or it exits 2 rather than fingerprint nothing — the strings it prints, the scenes, and the recorder's own framing) and fails when they no longer match the per-source hashes stamped beside the GIF, so a failure names what moved. The frame is the schematic card **alone**: the dashboard header above it was cropped out because it prints the running version, which a recording cannot keep current (nothing re-renders a GIF when `version.txt` moves), and its markup, CSS and `renderHeaderMeta` left the fingerprint with it — a source that cannot change a pixel must not be able to fail a stamp-based gate. It also parses the GIF itself: a single frame, or frames held over 200 ms, fails the one thing a recording is for. Deliberately narrower than all of `main/www` — a settings-modal edit cannot change a frame, and a gate that fires on changes it knows are irrelevant is one people learn to re-stamp without looking. **No exceptions ledger**, unlike #31/#43/#45: their findings are questions about intent, this one has a single answer — re-record. Gates currency, not quality; whether the four scenes still show honestly what the firmware does is the [`ui-gif`](../.claude/skills/ui-gif/SKILL.md) skill's half | ✅ | [`check_ui_gif.mjs`](../tools/uigif/check_ui_gif.mjs), [`run-ui-gif-audit.sh`](../scripts/run-ui-gif-audit.sh), [`record-dashboard-gif.sh`](../scripts/record-dashboard-gif.sh), [`selftest.sh`](../tools/uigif/selftest.sh) |
 | 55 | **24-hour plant checkup** — the third question the dashboard answers, after *what is it doing now* (the schematic) and *what did this one reading do today* (the trends): **is anything worth reporting?** Counted events and window minima — compressor starts and mean run length, defrost count and share of runtime, the lowest water pressure and flow, backup-heater minutes, the unit's fault class, the protection-retry counters — judged on the device and served as `/status.health`, rendered as the dashboard's Checkup card. It is deliberately **not** a view over the trend rings (row 42): `TrendRing::fold` keeps only the *last* reading of each 5-minute bucket, so a compressor cycle shorter than five minutes leaves no trace — the short cycling the check exists to find is exactly what that raster cannot see, so events are counted on the 1 Hz poll path instead. A row is addressed by **(page, offset, converter)**, one key wider than a trend's locator, because `2way valve`, `3way valve`, `BSH`, `BUH Step1`, `BUH Step2`, `Water pump operation` and `Solar pump operation` — **seven** rows — share one dimensionless byte (`0x60/12`) and differ only in the bit their converter masks, so a (page, offset, unit) locator would resolve "backup-heater minutes" onto the 2-way valve's position. Five verdicts, and the two that are not judgements are the design: `unavailable` (this profile cannot supply the inputs — only **27 of 44** carry the compressor witness) and `collecting` (the inputs exist, the window does not hold enough of them yet). `collecting` outranks `ok` in the aggregation and `unavailable` does not, so a board that rebooted an hour ago can never show a green verdict it has no evidence for. Three of the six checks [#208](https://github.com/0Bu/daikin-altherma-esp32/issues/208) proposed are **not** built, each because the bus cannot support the claim — valve leakage from the DHW cooling rate (a healthy plant with a circulation loop loses ~1.2 K/h against ~0.3 K/h without one, and the sensors sit upstream of the diverter anyway), an absolute minimum-flow threshold (per model across a 3–18 kW catalog; the flow minimum is reported with **no** verdict), and a flat daily start count (the mean run length is what knows the load) | ✅ 🧪 | [`logic/checkup.hpp`](../main/logic/checkup.hpp), [`checkup.cpp`](../main/checkup.cpp), [`http_status.cpp`](../main/http_status.cpp), [`www/app.js`](../main/www/app.js) |
+| 56 | **Group-scoped HA entity identity** — a value's `uniq_id` *and* the last segment of its discovery topic are `<group>_<object_id>`, not the label slug alone. Both are **flat** namespaces while a label is unique only within its register page, and the catalog carries *"Error Code"* on the outdoor page and on the hydronic one — so the second discovery config landed on the first one's retained topic under the first one's id, HA created **one** entity, and a unit reporting two faults showed one of them. Measured: 44 of 45 profiles collided, over five label slugs; on the live unit the surviving `error_code` entity read the *hydronic* fault, leaving the outdoor unit's — the row an automation alerts on — with no entity at all. Nothing errored, because the state payload was correct throughout (it nests by group), which is why this was invisible outside Home Assistant. The state key and the VictoriaMetrics series are deliberately **unchanged** ([#217](https://github.com/0Bu/daikin-altherma-esp32/issues/217)); the five reused labels are also *named* by their group, since HA derives the default `entity_id` from the name and two identically-named entities land as `…_2` | ✅ 🧪 | [`logic/discovery.hpp`](../main/logic/discovery.hpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`HOME_ASSISTANT.md`](HOME_ASSISTANT.md) |
 
 ---
 
@@ -509,7 +510,9 @@ IDF v6.0 extracted it from core — [`idf_component.yml`](../main/idf_component.
   config's `uniq_id`/`dev.ids`, not the payload path — and it is the slugified **base topic**, not
   the board's MAC, so replacing the ESP32 keeps one HA device with its entities and statistics
   instead of creating a second one (the MAC id stays on as the MQTT client id + a second `dev.ids`
-  entry HA merges on, and the configs published under it are retracted once per boot).
+  entry HA merges on, and the configs published under it are retracted — the diagnostics once per
+  boot, the value entities once per detected profile, in the same pass that clears the pre-#221
+  un-grouped ids).
   A **bit-flag** value (converter family 300-307, `conv_is_binary`) is typed as a `binary_sensor` with
   an explicit `pl_on:"1"`/`pl_off:"0"` and published as the JSON **number** `1`/`0`
   — HA gets a real on/off entity, and a metrics consumer (which drops strings *and* bools) finally
@@ -521,7 +524,22 @@ IDF v6.0 extracted it from core — [`idf_component.yml`](../main/idf_component.
   `ON/OFF` and `On:…_Off:…` from visible reading names; raw labels remain unchanged in APIs, MQTT,
   history identities, selectors and description matching. The
   pre-split `sensor` discovery config is actively deleted on upgrade
-  (`retired_sensor_discovery_topic`).
+  (`ungrouped_discovery_topic`).
+- **✅ 🧪 The entity id carries the register group.** A value's `uniq_id` and the last segment of its
+  discovery topic are `<group>_<object_id>`, not the label slug alone
+  ([`logic/discovery.hpp`](../main/logic/discovery.hpp) `row_object_id`). Both are **flat**
+  namespaces, while a label is unique only within its register page: the catalog carries *"Error
+  Code"* on the outdoor page and on the hydronic one, so before #221 the second discovery config
+  landed on the first one's topic under the first one's id — HA created **one** entity and a unit
+  reporting two faults showed one, with no error anywhere. Measured: 44 of 45 profiles carried at
+  least one collision, over five label slugs. The five reused labels are also **named** by their
+  group (`AMBIGUOUS_LABEL_SLUGS`), since HA derives the default `entity_id` from the name and two
+  identically-named entities land as `…_2`; every other name is untouched, so ~154 entities reclaim
+  their `entity_id` — and their recorder history — across the upgrade. The state payload and the
+  VictoriaMetrics series are **unchanged**: they were already group-nested (#217).
+  `test_entity_identity()` asserts `uniq_id` injectivity catalog-wide across all four entity families
+  (values, fault companions, heartbeat, crash), reading the id out of the real discovery config
+  rather than re-deriving it.
 - **✅ 🧪 Detect-only rows are never announced — and are actively retracted.** A profile row flagged
   `ValueDef::no_publish` ([`logic/value_def.hpp`](../main/logic/value_def.hpp)) is skipped by the poll
   cache, and `publish_discovery` publishes a **zero-length retained** payload to its discovery topic
@@ -988,7 +1006,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   catalog sweep proving each `(page, offset, converter)` locator resolves to **exactly one** row
   **and to the right one**, asserted on the resolved row's own label, because six other rows share
   the `0x60/12` byte and every one of them would satisfy a page+offset match),
-  **1812 `CHECK`s** in
+  **1826 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -1003,8 +1021,11 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   dropped row or a change to `ha_slug()` itself fails the suite and prints which identifier moved.
   Built because the hazard already fired: `f1a5e69` (#139) renamed *"Expansion valve 3 (pls)"* to
   *"… [OU-II]"* across 19 profiles, and the store shows the old series stopping 5.8 days before the
-  new one starts. Regenerating the list is the **decision**, not the fix (#217). The same block pins
-  the five known HA `uniq_id` collisions so a sixth cannot appear unnoticed (#221).
+  new one starts. Regenerating the list is the **decision**, not the fix (#217). Since #221 the same
+  block also ties the two surfaces together — every published row's HA entity id must be in that
+  frozen list, so a label edit moves the entity and the series together or neither — and pins
+  `AMBIGUOUS_LABEL_SLUGS` as exactly the set of labels the catalog reuses across pages, so a sixth
+  cannot appear unnoticed.
 - **The rule** — new decode/config/discovery logic goes in `main/logic/` with a `CHECK`, never buried in
   a device-only `.cpp`. The [`add-logic-test`](../.claude/skills/add-logic-test/SKILL.md) skill and the
   [`x10a-decode-reviewer`](../.claude/agents/x10a-decode-reviewer.md) agent enforce it.
@@ -1230,7 +1251,7 @@ and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 20-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1812 checks),
+on the host** (1826 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

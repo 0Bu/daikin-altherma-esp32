@@ -446,8 +446,9 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   [HOME_ASSISTANT.md → Device identity](HOME_ASSISTANT.md#device-identity).
 - **Topics:** `<base>/state` (one retained JSON of all values, grouped by register page —
   `{ "<group>": { "<object>": value } }`, max depth 1), plus per-value discovery configs under
-  `<prefix>/<component>/<node>/<object>/config` (retained) whose `value_template` reads the
-  group+object out of that JSON. `<component>` is `binary_sensor` for a bit-flag value (pump running,
+  `<prefix>/<component>/<node>/<group>_<object>/config` (retained) whose `value_template` reads the
+  group+object out of that JSON. The entity id carries the group because a label is unique only
+  within its register page while HA's id namespace is flat (#221); the JSON key does not. `<component>` is `binary_sensor` for a bit-flag value (pump running,
   3-way valve, thermostat ON/OFF), whose state rides as the number `1`/`0` so it is usable in a
   metrics store as well as in HA, and `sensor` for everything else.
   Availability/LWT `<base>/status`. `<base>` defaults `daikin-altherma-esp32`,
