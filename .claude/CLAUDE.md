@@ -1776,6 +1776,17 @@ limit panic at the offending instruction. IDF's default canary is only compared 
 and a sparsely-writing frame can skip over it — which is exactly what happened here (TLS[1], the
 neighbour it would have had to cross, was left intact).
 
+**It happened AGAIN, on the other task, and that is the lesson (#241).** `build_status_json_string()`
+runs on TWO tasks — the httpd task *and* `hp_poll`'s WebSocket broadcaster — so raising one stack
+fixed half the problem and left the other half to be re-discovered. v1.0.12 raised httpd 8192 ->
+12288; `hp_poll` stayed at 8192 until #229 (`health`) and #231 (`history`) grew /status from ~2.2 KB
+to ~3.5 KB, and it died with `hp_poll 7664/520` — this time caught *at* the offending instruction by
+the watchpoint above (`exccause 0x41 DebugException`), inside a `malloc()` under `Config::Config`,
+because `config()` returns a whole `Config` **by value** (~10 `std::string` copies) on the stack of
+whoever builds /status. Both stacks are now 12288. So: **anything that grows /status grows BOTH
+budgets**, and a builder shared by two tasks is only as safe as its *smallest* stack — check every
+runner, not the one that crashed.
+
 **Every allocating FreeRTOS task loop must self-guard.** A task is a C frame boundary like a
 handler is: an escaping `std::bad_alloc` → `std::terminate` → reboot. Wrap the loop *body* in
 `try/catch (const std::exception&)` + `catch (...)`, `diag_printf` once, skip the cycle keeping the
