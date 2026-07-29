@@ -2869,7 +2869,14 @@ function renderLive() {
   setTxt("svWp", fmt1(d.wp)); setTxt("svPump", fmt0(d.pump));
   setTxt("svTank", fmt1(d.tank)); setTxt("svTankSet", fmt1(d.tankSet));
   setTxt("svRoom", fmt1(d.room)); setTxt("svRoomSet", fmt1(d.roomSet));
-  setTxt("svPth", fmt1(d.pth));   // derived — the pill carries "≈" + an "est." sub-label
+  // Blanks with the ΔT it is computed from (d.dtStale) — the pill two places to its left already
+  // refuses to state that difference, and a product of a refused figure is the same split the ΔT
+  // comment above warns about. The zero is arithmetically true (flow 0 carries nothing) and reads
+  // as a measured plant output anyway: with the tank heater firing, "≈ 0.0 kW" sat beside a tank
+  // climbing at ~2.7 kW. No working point is not an output of zero. Note this gates the LIVE pill
+  // only, not the 24-hour curve (DERIVED.pth): there a flat zero is the honest shape of a day that
+  // delivered nothing, and a gap would be indistinguishable from missing data.
+  setTxt("svPth", d.dtStale ? "—" : fmt1(d.pth));   // derived — the pill carries "≈" + an "est." sub-label
   const toDhw = d.valveDhw === true;
   setTxt("svValve", t(toDhw ? "schem.to_dhw" : "schem.to_heat"));
 
@@ -3070,13 +3077,27 @@ const INSPECT = {
       en: "An ESTIMATE, not a measurement — the bus carries no energy register. It is computed from flow rate and ΔT with the heat capacity of water (4.186 kJ/kg·K), so it is only as good as the flow sensor and the two water temperatures, and it counts only heat from the heat pump's own exchanger (the backup heater sits after it). During a defrost it goes negative, which is real: heat is being taken back out of the water.",
       de: "Eine SCHÄTZUNG, keine Messung — auf dem Bus gibt es kein Energieregister. Berechnet aus Durchflussmenge und ΔT über die Wärmekapazität von Wasser (4,186 kJ/kg·K), also nur so genau wie der Durchflusssensor und die beiden Wassertemperaturen; gezählt wird nur die Wärme aus dem Wärmetauscher der Wärmepumpe (der Zusatzheizer sitzt dahinter). Beim Abtauen wird der Wert negativ — das ist echt: dem Wasser wird Wärme entzogen.",
     },
-    head: (d) => (d.pth == null ? "—" : "≈ " + fmt1(d.pth) + " kW"),
+    head: (d) => (d.dtStale || d.pth == null ? "—" : "≈ " + fmt1(d.pth) + " kW"),
     // The COP is quoted here only while it is built on THIS figure. With a whole-unit electrical
     // input the quotient moves to the post-BUH outlet (logic/cop_scope.hpp), so it is no longer
     // this pill's number divided by anything — printing it beside this one would attach a plant
     // ratio to a heat-pump-only heat output and invite exactly the boundary mix-up the split
     // exists to prevent. The COP pill states it, with its own scope named.
-    now: (d) => d.pth == null ? null
+    //
+    // Blanks with the pill (d.dtStale), and — like the pel entry's three cases — says WHICH silence
+    // this is. A stopped pump alone is one sentence; a stopped pump while the tank heater fires is
+    // a different fact and the one that reads as a broken gauge, because the tank IS being heated
+    // while every figure the drawing can reach says nothing is happening. The heater sits inside
+    // the tank, past the flow sensor and past both water sensors, so no row on this bus states its
+    // power — the same "suppressing one wrong claim must not substitute another" rule the pel and
+    // COP explainers follow.
+    now: (d) => d.dtStale
+      ? (d.bsh === true
+          ? { en: "Nothing is crossing the exchanger — the pump is stopped. The tank is still being heated, but by the electric heater inside it, which sits past the flow sensor and both water sensors: no reading on this bus can state its power.",
+              de: "Am Wärmetauscher geht nichts über — die Pumpe steht. Der Speicher wird trotzdem beheizt, aber vom Heizstab in ihm; der sitzt hinter dem Durchflusssensor und beiden Wasserfühlern, kein Wert auf diesem Bus kann seine Leistung angeben." }
+          : { en: "No heat output right now — the pump is stopped, so no water is carrying heat away from the plates. That is no working point at all rather than an output of zero.",
+              de: "Derzeit keine Wärmeleistung — die Pumpe steht, es trägt kein Wasser Wärme von den Platten ab. Das ist gar kein Arbeitspunkt und keine Leistung von null." })
+      : d.pth == null ? null
       : { en: `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, about ${d.cop.toFixed(1)} kW of heat per kW of electricity (COP)` : ""}.`,
           de: `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, etwa ${d.cop.toFixed(1)} kW Wärme je kW Strom (COP)` : ""}.` },
     rows: [/flow sensor/i, /target delta t heating/i, /current measured by ct/i, /inv primary current/i],

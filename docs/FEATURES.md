@@ -956,7 +956,14 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   trustworthy beside the held ones. **How** they stop being drawn as live is one rule for every
   quantity: the pill blanks to "—", the same answer the drawing gives on a dead bus, so nothing on
   screen has to be read as half-valid. That covers held *measurements* (outdoor air, discharge) and
-  held *working points* alike — ΔT with no flow, and the **electrical estimate**, which prefers the CT clamps on the live
+  held *working points* alike — ΔT with no flow **and the heat output computed from it**, which is
+  the one case where the number being replaced was arithmetically *true* (flow × ΔT at zero flow
+  really is 0.0 kW) and so read as a measured plant output rather than as the absence of one:
+  measured beside a DHW tank climbing at ~2.7 kW on its immersion heater, which sits inside the tank
+  past the flow sensor and both leaving-water sensors, so no row on this bus can state its power.
+  Only the live pill is gated; the 24-hour curve keeps its flat zero, where that is the honest shape
+  of a day that delivered nothing and a gap would be indistinguishable from missing data. Then the
+  **electrical estimate**, which prefers the CT clamps on the live
   hydronic page `0x63` and falls back to
   `INV primary current`, a `0x21` row that freezes with the rest of that page. Every catalog profile
   carries the INV row and only about half carry CT clamps, and an idle plant reads a CT sum of 0 — so

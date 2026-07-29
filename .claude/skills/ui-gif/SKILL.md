@@ -73,6 +73,14 @@ Three things about it that are easy to break and hard to notice:
 - **Chrome writes the PNG and then lingers** instead of exiting, and parallel headless instances
   wedge. The recorder waits on the *artefact* (file present, size settled) and runs sequentially.
   Both are load-bearing; "obvious" simplifications here cost 15 s per frame or hang the run.
+- **It checks that the page being served is the page it just built**, not merely that something
+  answers on the port. Its port is also the UI prototype's, so a server left running from an
+  earlier session keeps the bind, our `http.server` exits `Address already in use`, and every frame
+  is filmed off *that* page — while the stamp is written from the current sources, i.e. a green
+  gate over a recording of the old UI. Observed 2026-07-29: a five-hour-old page filmed into a
+  byte-for-byte copy of the GIF being replaced. Do not reduce that back to a plain reachability
+  check. And whatever the script says: after a re-record, confirm the GIF **changed** (`git status`)
+  and pull out a frame your edit should have moved — the audit only proves the stamp matches.
 
 ## 3. Judge what the gate cannot (the half that needs a brain)
 

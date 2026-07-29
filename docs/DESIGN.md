@@ -364,6 +364,18 @@ Body, ordered:
    idle explanation names the reason.
    ΔT blanks for a related but distinct reason: with the pump off and flow zero, the difference
    between two *stagnant* sensors is not a stale working point, it is not a working point at all.
+   The **heat output blanks with it**, being computed from that same ΔT — and this is the one
+   blanking rule where the number it replaces was *arithmetically true*, which is exactly why it had
+   to go: flow × ΔT with flow at zero really is 0.0 kW, so the pill read as a measured plant output
+   rather than as the absence of one. Measured: during an app-started DHW boost the tank climbed at
+   ~2.7 kW on its immersion heater while the pill beside it said the plant was producing nothing.
+   Stating a product of a figure the drawing one pill over has just refused to state is the same
+   split this section already forbids. The inspector then says *which* silence it is — a stopped pump
+   alone, or a stopped pump while the tank heater fires, which is the case that reads as a broken
+   gauge, since the heater sits inside the tank past the flow sensor and past both leaving-water
+   sensors and no row on this bus can state its power. The **24-hour curve is deliberately not
+   gated**: there a flat zero is the honest shape of a day that delivered nothing, while a gap would
+   be indistinguishable from missing data — the live pill and the curve answer different questions.
    The **electrical input** is the same whenever it is falling back to the
    inverter current (a `0x21` row that freezes too): a stopped compressor is not drawing the 1.4 kW
    the held current implies, it is drawing ~0. It simply blanks, like every other held pill — the one
