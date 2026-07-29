@@ -1,6 +1,7 @@
 // Heat-pump poll engine. One task owns the X10A UART; each cycle it queries the active
 // profile's registers, decodes the values, and publishes them to a thread-safe cache.
 #include "hp_poll.hpp"
+#include "checkup.hpp"
 #include "config.hpp"
 #include "def/overlay.hpp"
 #include "def/registry.hpp"
@@ -244,6 +245,14 @@ static void poll_once() {
     // lock, and holding both would create a two-mutex order this file has no other reason to have.
     // `fresh` is still ours here — after the move below it is empty.
     history_record(fresh.data(), fresh.size());
+
+    // The 24-hour checkup, on the same terms and for the same reason it is here rather than derived
+    // later: compressor starts, defrosts and backup-heater minutes are EVENTS, and an event that
+    // happens between two samples of a 5-minute trend ring leaves no trace in it at all — which is
+    // precisely the short cycling the checkup exists to find (logic/checkup.hpp). The compressor
+    // state is handed over rather than re-derived, so the checkup and the held-over marking above
+    // can never disagree about whether the unit was running.
+    checkup_record(fresh.data(), fresh.size(), rps_known, rps_running);
 
     // One commit, one lock site, and deliberately non-allocating: the vector move-assign steals
     // fresh's buffer and last_error is swapped (noexcept) rather than assigned, so the critical

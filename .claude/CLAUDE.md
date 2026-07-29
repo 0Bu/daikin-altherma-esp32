@@ -456,6 +456,22 @@ history.cpp     the 24-hour trend rings: one fixed-cadence buffer per logic/hist
                 refused) vs HELD_OVER (the outdoor unit was asleep — ou_stale.hpp). A model change
                 (POST /detect) DISCARDS a ring: the same trend on a different profile is a different
                 sensor, and continuing the line would splice two units' data into one curve
+checkup.cpp     the 24-hour PLANT CHECKUP behind /status.health and the dashboard's Checkup card
+                (#208): counted EVENTS and window MINIMA — compressor starts + mean run length,
+                defrost count + share of runtime, the lowest water pressure and flow, backup-heater
+                minutes (BUH and the DHW booster kept apart), the unit's own fault class, and the
+                protection-retry counters. Storage + mutex only; every rule is the host-tested
+                logic/checkup.hpp. Fed by the poll task at 1 Hz beside history_record, with the
+                compressor state HANDED OVER rather than re-derived (one answer to "is it running",
+                so the checkup and the held-over marking cannot disagree). 24 one-hour buckets in
+                .bss, RAM-only for history.cpp's reason — the difference is that here the
+                consequence is STATED rather than absorbed: covered_s reports how much of the day was
+                actually observed and every check answers `collecting` until it has enough, so a
+                board that rebooted an hour ago cannot show a green verdict it has no evidence for.
+                NOT derived from the trend rings, which is the one thing that looks obvious and is
+                wrong: TrendRing::fold keeps the LAST reading of each 5-minute bucket, so a
+                compressor cycle shorter than five minutes leaves no trace in it — the short cycling
+                the checkup exists to find is exactly what that raster cannot see
 http_server.cpp esp_http_server :80; concerns register their own routes (http_handlers.hpp). Picks
                 the trust surface from the WiFi mode (esp_wifi_get_mode): the OPEN setup AP registers
                 ONLY the provisioning routes (GET / /index.html, POST /set_wifi + captive) and
@@ -670,7 +686,41 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 hexdump, led_pattern, button, captive,
                 lwt_select, ou_stale, cop_scope, profile_view, feature_gate, availability,
                 fault_state,
-                raw_capture, conv_override).
+                raw_capture, conv_override, checkup).
+                checkup.hpp = the 24-HOUR PLANT CHECKUP (#208) — the third question the dashboard
+                asks, after "what is it doing now" (the schematic) and "what did this reading do
+                today" (history.hpp): IS ANYTHING WORTH REPORTING. Counted events and window minima,
+                which is why it cannot be a view over the trend rings — TrendRing::fold keeps the
+                LAST reading of a 5-minute bucket, so a compressor cycle shorter than that leaves no
+                trace, and the short cycling this exists to find is precisely what the raster cannot
+                see. Events are therefore counted where they happen, on the 1 Hz poll path.
+                A row is addressed by (reg, offset, CONVERTER), one key wider than history.hpp's
+                locator, and the extra field is load-bearing rather than defensive: `3way valve`,
+                `2way valve`, `BSH`, `BUH Step1`, `BUH Step2` and `Water pump operation` all live in
+                ONE dimensionless byte (0x60/12) and differ only in which bit their converter masks,
+                so a (reg, offset, unit) locator would resolve "backup-heater minutes" onto the
+                3-way valve's position — the #35-#39 shape with a day's statistics in front of it.
+                The catalog test asserts uniqueness AND identity (the resolved row's LABEL) per
+                locator across every shipped profile. Two inputs are matched by CONVERTER ALONE
+                (conv 203, and the 310/311 retry counters): a profile carries a fault class on the
+                outdoor page AND the hydronic one, and a locator would pick one unit and miss the
+                other's fault. The compressor witness is ou_is_rps_witness(), called not restated.
+                FIVE verdicts, and the two that are not judgements are the design: Unavailable (this
+                profile cannot supply the inputs — feature_gate.hpp's DISABLE-NEVER-DEGRADE, and it
+                really bites, since only 27 of 44 profiles carry the compressor witness) and
+                Collecting (the inputs exist, the 24 h window does not hold enough of them yet).
+                Collecting outranks Ok in the aggregation and Unavailable does not, which is the
+                whole honesty property: a board that has been up ten minutes has not established
+                that the plant is fine, while a check the model cannot run says nothing either way.
+                THREE of #208's six checks are deliberately NOT built, each because the bus cannot
+                support the claim: 3-way-valve leakage from the DHW cooling rate (measured on the
+                reference installation, a healthy plant loses 0.30 K/h without DHW circulation and
+                1.20 K/h with it, so the verdict would fire daily on a normal install — and the
+                sensors sit UPSTREAM of the diverter anyway); an absolute minimum-flow threshold (per
+                model over a 3-18 kW catalog, and the unit raises 7H itself, so the flow minimum is
+                REPORTED with no verdict attached); and a flat daily start count (24 starts is one an
+                hour in January and a control problem in April — the MEAN RUN LENGTH is what knows
+                the load, so cycling warns only on >=12 starts AND a mean under 10 min).
                 availability.hpp = the ADJUDICATED per-row answer to "is this decoded number a
                 MEASUREMENT, or merely something the firmware could decode?" (#209). Every other gate
                 answers something narrower: convert() handles the wire format's own 0x8000 no-data
@@ -1360,6 +1410,21 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   takes, so a request is model-independent); the LABEL is how the DETECTED profile
                   spells that row, which is what lets the UI attach a trend to the value row it is
                   already rendering. Rows this profile does not carry are omitted entirely,
+                  health{covered_s,status,checks[{id,verdict,…}]} — the 24-hour plant CHECKUP
+                  (logic/checkup.hpp, checkup.cpp), judged on the DEVICE: `status` is the worst
+                  verdict across the checks and `covered_s` how much of the day was actually
+                  OBSERVED (seconds, not whole hours — the first hour after a reboot must read as the
+                  small number it is rather than rounding to "0 h"). Seven checks in READING order,
+                  fault first, each `unavailable` | `collecting` | `ok` | `info` | `warn` plus its
+                  own named numbers: fault{active}, cycling{starts,mean_run_s},
+                  defrost{count,share_pct}, pressure{min_bar}, flow{min_l_min},
+                  heater{buh_min,bsh_min}, retries{seen}. Named per check rather than a generic pair,
+                  so the browser needs no table saying what field N means for which id — that table
+                  would be a second definition of the check, free to drift. A number the check did
+                  not establish is `null`, never an omitted key (redact.hpp's rule: an absent field
+                  is indistinguishable from an older build that never had it). Not `diag` — GET /diag
+                  is the log ring the bug-report button pulls, and two unrelated things under one word
+                  is how a reader ends up looking in the wrong place,
                   detect{proto,valid,capacity_kw,capacity_kw_iu,ou_eeprom,candidates[],families[],
                   ambiguous,
                   model{name,family,marketing}} — drives the SETTINGS ESP32 board card (behind the
