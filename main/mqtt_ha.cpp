@@ -9,11 +9,14 @@
 //     shared topic <base>/state — but only when the payload actually changed, so a quiet pump doesn't
 //     spam the broker. Message topics sit directly under <base> — one board per base topic; the node
 //     id identifies the DEVICE only in each discovery config's uniq_id/dev.ids + the
-//     <prefix>/<component>/<node>/… discovery topic. That node id is derived from the BASE TOPIC
-//     (logic/ha_device.hpp), not from the board's MAC, so replacing the ESP32 keeps ONE HA device
-//     and its entities; this board's MAC-derived id stays on as the MQTT client id and a second
-//     dev.ids entry (HA merges on it, so an install upgrading from a MAC-identified build keeps its
-//     device). The configs an older build published under the MAC id are retracted once per boot.
+//     <prefix>/<component>/<node>/<group>_<object_id> discovery topic. That node id is derived from
+//     the BASE TOPIC (logic/ha_device.hpp), not from the board's MAC, so replacing the ESP32 keeps
+//     ONE HA device and its entities; this board's MAC-derived id stays on as the MQTT client id and
+//     a second dev.ids entry (HA merges on it, so an install upgrading from a MAC-identified build
+//     keeps its device). The entity id carries the REGISTER GROUP because uniq_id and the discovery
+//     topic are flat namespaces while a label is unique only within its page (#221). The configs an
+//     older build published under a superseded identity — the MAC node id, and the un-grouped entity
+//     ids — are retracted in one pass before any replacement goes out.
 //   • Every HEARTBEAT_INTERVAL_S (10 s): rebuild + publish the board/link diagnostics JSON
 //     (logic/heartbeat.hpp) to <base>/heartbeat — diagnostics, not real-time telemetry, so unlike the
 //     state topic it's a fixed cadence, not publish-on-change.
@@ -97,9 +100,9 @@ static std::string s_uri, s_user, s_pass, s_node, s_board, s_base, s_prefix, s_a
                    s_heartbeat, s_crash;
 static std::string s_announced_profile;               // profile we last published discovery for (mqtt_task only)
 static std::string s_last_json;                       // last state JSON published (dedup guard; mqtt_task only)
-// Legacy-identity migration (mqtt_task only) — see retract_legacy_* below.
+// Stale-identity migration (mqtt_task only) — see retract_legacy_fixed / retract_stale_values below.
 static bool        s_legacy_fixed_retracted = false;   // heartbeat + crash entities: once per boot
-static std::string s_legacy_values_profile;            // value entities: the profile they were
+static std::string s_stale_values_profile;             // value entities: the profile they were
                                                        // retracted for ("" = not yet). Keyed on the
                                                        // profile, not a bool, because the row set IS
                                                        // the profile: a re-detect (POST /detect, or
@@ -159,9 +162,6 @@ static void mqtt_publish(const std::string& topic, const char* payload, int len,
     // subscribed, so a genuinely wedged write still trips the timeout — a progressing one never does.
     esp_task_wdt_reset();
 }
-
-// Layout-marker / grid converters carry no measured value (docs/REGISTERS.md §3.6) — no sensor.
-static bool is_publishable(int conv) { return !(conv == 0 || (conv >= 995 && conv <= 999)); }
 
 // Current publishable values from the poll cache, grouped by register page. The scratch buffer is
 // sized to the active profile's row count — an exact upper bound on the cached value count, so
@@ -243,18 +243,45 @@ static void retract_legacy_fixed() {   // heartbeat + crash entities (no profile
     diag_printf("mqtt: retired legacy HA device %s (now %s)\n", s_board.c_str(), s_node.c_str());
 }
 
-static void retract_legacy_values(const logic::ProfileView& prof, const std::string& profile_id) {
-    s_legacy_values_profile = profile_id;
-    if (s_board == s_node) return;
+// ── Ungrouped (pre-#221) value discovery configs ─────────────────────────────────────────────────
+// Builds up to this one put only the LABEL SLUG in a value's entity id and discovery topic, leaving
+// out the register group. Two rows sharing a label on different pages therefore landed on ONE topic
+// under ONE uniq_id, and HA created one entity where the device publishes two — a unit reporting an
+// outdoor fault and a hydronic one showed a single "Error Code" (#221). Both are now group-scoped.
+//
+// So every row has up to TWO stale retained configs per node id — the `sensor` form every build ever
+// wrote, plus the `binary_sensor` form post-split builds wrote for a bit-flag row — and they are
+// retained, so they outlive the upgrade as permanently-unavailable duplicates unless deleted.
+static void retract_ungrouped_values(const logic::ProfileView& prof, const std::string& node) {
     for (size_t i = 0; i < prof.count(); i++) {
         const ValueDef  d = logic::adjudicated(prof[i]);   // wire truth, not the generator label
         // Every row an older build published — including a row that is detect-only (no_publish)
         // TODAY: it was a plain sensor before the flag existed, and that config is still retained.
-        if (!is_publishable(d.conv) || object_id(d.label).empty()) continue;
-        mqtt_publish(retired_sensor_discovery_topic(s_prefix, s_board, d), "", 0, 0, 1);   // `sensor` form
-        if (conv_is_binary(d.conv))                                                        // + the post-split
-            mqtt_publish(discovery_topic(s_prefix, s_board, d), "", 0, 0, 1);              // `binary_sensor` one
+        if (!conv_publishable(d.conv) || object_id(d.label).empty()) continue;
+        mqtt_publish(ungrouped_discovery_topic(s_prefix, node, "sensor", d), "", 0, 0, 1);
+        if (conv_is_binary(d.conv))
+            mqtt_publish(ungrouped_discovery_topic(s_prefix, node, "binary_sensor", d), "", 0, 0, 1);
     }
+}
+
+// Both migrations at once, as ONE pass that completes before any replacement config is published.
+// That ordering is the whole mechanism: HA frees a deleted entity's entity_id, and the replacement
+// reclaims it — carrying recorder history and long-term statistics, which are keyed on entity_id.
+// Doing the deletes in bulk rather than one-immediately-before-each-row also puts ~130 messages of
+// separation between a removal and the add that wants its id back, instead of one.
+//
+// The MAC-era half must use the FROZEN topic shape too, not discovery_topic(): that helper now emits
+// the grouped form, so building a legacy delete from it would delete a topic no build ever wrote and
+// leave the real ones behind.
+// The "done" guard is latched AFTER the passes, not before: an allocation failure part-way through
+// throws out to the mqtt_task try/catch, and a guard already set would mean the remaining stale
+// topics are never retried — every one of them a permanently-unavailable orphan entity, with no
+// error visible anywhere. Retrying is free and idempotent (a zero-length retained publish to a topic
+// already cleared is a no-op), so the failure mode should be "does it again", not "silently stops".
+static void retract_stale_values(const logic::ProfileView& prof, const std::string& profile_id) {
+    retract_ungrouped_values(prof, s_node);                          // #221: the un-grouped ids
+    if (s_board != s_node) retract_ungrouped_values(prof, s_board);  // ...and the MAC-era device
+    s_stale_values_profile = profile_id;
 }
 
 // Stream one retained discovery config per value of the active profile. Every entity points at the
@@ -266,10 +293,11 @@ static void publish_discovery() {
     // page-0x10 supplement (def/overlay.hpp) is part of that row set. Announcing fewer rows than the
     // state topic carries would leave the extra values in MQTT with no HA entity to land in.
     const auto prof = def::resolved(def::lookup(profile_id.c_str()));
-    // Delete the configs published under the old identity FIRST — the freed entity_id is what the
-    // replacement below reclaims. Runs once per profile, not once per (re)connect: a broker restart
-    // must not re-send ~100 deletes for entities that no longer exist under that id.
-    if (s_legacy_values_profile != profile_id) retract_legacy_values(prof, profile_id);
+    // Delete every config published under a superseded identity FIRST — the un-grouped ids (#221)
+    // and, on a board that predates the base-topic device id, the MAC-era ones. The freed entity_id
+    // is what the replacements below reclaim. Runs once per profile, not once per (re)connect: a
+    // broker restart must not re-send ~200 deletes for entities that no longer exist under those ids.
+    if (s_stale_values_profile != profile_id) retract_stale_values(prof, profile_id);
     for (size_t i = 0; i < prof.count(); i++) {
         const ValueDef  d = logic::adjudicated(prof[i]);   // wire truth, not the generator label
         // A row the firmware does not publish — the generator's detect-only flag, or the availability
@@ -279,31 +307,18 @@ static void publish_discovery() {
         // and for a QUARANTINED row it is worse than an orphan, since HA would keep the last false
         // value it was ever sent (145-200 °C for Target Evap. Temp.) as that entity's state until
         // something replaced it. A zero-length retained payload deletes it, and is harmless on a
-        // fresh install where the topic never existed.
+        // fresh install where the topic never existed. Only the CURRENT (grouped) topic is retracted
+        // here: this is a live rule about a row THIS build stopped publishing, not a migration, and
+        // the row's pre-#221 shapes are the bulk pass's job above — which covers it, since that pass
+        // deliberately ignores row_publishable (an older build announced it as an ordinary sensor).
         if (!row_publishable(d)) {
-            if (!object_id(d.label).empty()) {
+            if (!object_id(d.label).empty())
                 mqtt_publish(discovery_topic(s_prefix, s_node, d), "", 0, 0, 1);
-                // A BINARY row's pre-split config lived under .../sensor/... — retract that too, for
-                // exactly the reason the publishing path below does it: the device cannot know which
-                // builds this broker has already seen, and deleting a config that was never published
-                // is a no-op. Without this, a detect-only bit-flag row (e.g. "Boiler Operation
-                // Demand") would strand its legacy sensor entity as a permanent orphan.
-                if (conv_is_binary(d.conv))
-                    mqtt_publish(retired_sensor_discovery_topic(s_prefix, s_node, d), "", 0, 0, 1);
-            }
             continue;
         }
-        if (!is_publishable(d.conv)) continue;
+        if (!conv_publishable(d.conv)) continue;
         const std::string obj = object_id(d.label);
         if (obj.empty()) continue;
-        // Builds before the binary_sensor split published EVERY row as a `sensor`. For a binary row
-        // that retained config is now stale: HA would keep a second, permanently-unavailable text
-        // entity beside the new binary_sensor, so delete it first (zero-length retained). Deliberately
-        // unconditional — the device cannot know whether this broker ever saw an older build, and a
-        // delete for a config that was never published is a no-op. Same intent as
-        // RETIRED_CRASH_SENSORS, minus the hand-maintained table: the old topic is derivable.
-        if (conv_is_binary(d.conv))
-            mqtt_publish(retired_sensor_discovery_topic(s_prefix, s_node, d), "", 0, 0, 1);
         const std::string ct  = discovery_topic(s_prefix, s_node, d);
         const std::string cfg = discovery_config(s_node, s_board, s_state, s_avail, d);
         mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained

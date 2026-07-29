@@ -890,8 +890,16 @@ static void test_discovery() {
     // The node id identifies the DEVICE in uniq_id/dev.ids — just not in the message topic. It is
     // the BASE-TOPIC id, so a replacement board publishes the same unique_ids and HA keeps the
     // entities (and their statistics) instead of starting a second device from scratch.
-    CHECK(cfg.find("\"uniq_id\":\"daikin_altherma_esp32_dhw_tank_temp_r5t\"") != std::string::npos);
+    //
+    // The entity id also carries the row's register GROUP (#221) — unlike the val_tpl KEY above,
+    // which must not change (it is the state contract and the VictoriaMetrics series suffix, #217).
+    CHECK(cfg.find("\"uniq_id\":\"daikin_altherma_esp32_hydronic_temps_dhw_tank_temp_r5t\"")
+          != std::string::npos);
     CHECK(cfg.find("\"uniq_id\":\"daikin_abc123") == std::string::npos);
+    // An UNAMBIGUOUS label is not renamed. Load-bearing: HA derives the default entity_id from the
+    // name, so rewriting every name would strand every entity's recorder history — only the handful
+    // of labels the catalog reuses across pages are group-qualified (AMBIGUOUS_LABEL_SLUGS).
+    CHECK(cfg.find("\"name\":\"DHW Tank Temp (R5T)\"") != std::string::npos);
     // …and the board id rides along as a SECOND device identifier: HA matches a device by any of
     // them, so an install set up under the old MAC-only identity is merged, not duplicated.
     CHECK(cfg.find("\"dev\":{\"ids\":[\"daikin_altherma_esp32\",\"daikin_abc123\"]") != std::string::npos);
@@ -899,11 +907,11 @@ static void test_discovery() {
     // A non-binary row keeps the sensor component and carries no binary payload contract.
     CHECK(std::string(ha_component(def)) == "sensor");
     CHECK(discovery_topic("homeassistant", node, def)
-          == "homeassistant/sensor/daikin_altherma_esp32/dhw_tank_temp_r5t/config");
-    // The same builder with the BOARD id yields the legacy topic the bridge retracts on the first
+          == "homeassistant/sensor/daikin_altherma_esp32/hydronic_temps_dhw_tank_temp_r5t/config");
+    // The same builder with the BOARD id yields the MAC-era topic the bridge retracts on the first
     // announce after an upgrade — the only configs a board can clean up are the ones it published.
     CHECK(discovery_topic("homeassistant", board, def)
-          == "homeassistant/sensor/daikin_abc123/dhw_tank_temp_r5t/config");
+          == "homeassistant/sensor/daikin_abc123/hydronic_temps_dhw_tank_temp_r5t/config");
     CHECK(cfg.find("\"pl_on\"") == std::string::npos);
 
     // --- Bit-flag rows are binary_sensors reading 1/0, not text sensors reading "ON"/"OFF" ---
@@ -914,7 +922,8 @@ static void test_discovery() {
 
     CHECK(std::string(ha_component(way)) == "binary_sensor");
     CHECK(discovery_topic("homeassistant", node, way)
-          == "homeassistant/binary_sensor/daikin_altherma_esp32/2way_valve_on_heat_off_cool/config");
+          == "homeassistant/binary_sensor/daikin_altherma_esp32/"
+             "hydronic_2way_valve_on_heat_off_cool/config");
     // pl_on/pl_off must be SPELLED OUT: the state is the number 1/0, HA's defaults are "ON"/"OFF",
     // and a mismatch leaves the entity stuck at `unknown` rather than failing loudly.
     CHECK(wc.find("\"pl_on\":\"1\",\"pl_off\":\"0\"") != std::string::npos);
@@ -922,15 +931,41 @@ static void test_discovery() {
     CHECK(wc.find("\"unit_of_meas\"") == std::string::npos);
     CHECK(wc.find("\"dev_cla\"") == std::string::npos);
     CHECK(wc.find("\"stat_cla\"") == std::string::npos);
-    // The pre-split `sensor` config for the SAME row is what the bridge deletes on announce, so it
-    // must keep pointing at the old topic (only the component segment differs).
-    CHECK(retired_sensor_discovery_topic("homeassistant", node, way)
+    // The two PRE-#221 shapes the bridge deletes on the first announce after an upgrade: the bare
+    // label slug, no register group, under each component. Frozen literals — a delete built from
+    // today's helpers would target today's topic and remove nothing.
+    CHECK(ungrouped_discovery_topic("homeassistant", node, "sensor", way)
           == "homeassistant/sensor/daikin_altherma_esp32/2way_valve_on_heat_off_cool/config");
-    CHECK(retired_sensor_discovery_topic("homeassistant", node, way)
-          != discovery_topic("homeassistant", node, way));
-    // For a non-binary row nothing is retired — the "old" topic IS the current one.
-    CHECK(retired_sensor_discovery_topic("homeassistant", node, def)
-          == discovery_topic("homeassistant", node, def));
+    CHECK(ungrouped_discovery_topic("homeassistant", node, "binary_sensor", way)
+          == "homeassistant/binary_sensor/daikin_altherma_esp32/2way_valve_on_heat_off_cool/config");
+    // …and now a NON-binary row has a stale shape to retract too. Before #221 it did not — the "old"
+    // topic WAS the current one, which is precisely why the two Error Code rows shared it. This one
+    // line is the fix.
+    CHECK(ungrouped_discovery_topic("homeassistant", node, "sensor", def)
+          != discovery_topic("homeassistant", node, def));
+
+    // --- #221: two rows, one label, two register pages -> two entities, not one ------------------
+    // The real colliding pair, on the profile the live unit detects as. Before the fix these were
+    // announced under ONE uniq_id on ONE topic, so HA created a single "Error Code" entity and a
+    // unit reporting both an outdoor and a hydronic fault showed one of them — with no error
+    // anywhere, since the state payload was correct throughout.
+    ValueDef ou_err{0x10, 5, 204, 1, -1, "Error Code"};
+    ValueDef hy_err{0x60, 3, 204, 1, -1, "Error Code"};
+    CHECK(object_id(ou_err.label) == object_id(hy_err.label));         // the labels DO collide...
+    CHECK(discovery_topic("homeassistant", node, ou_err)               // ...the entities do not
+          != discovery_topic("homeassistant", node, hy_err));
+    const std::string oc = discovery_config(node, board, st, availability_topic(base), ou_err);
+    const std::string hc = discovery_config(node, board, st, availability_topic(base), hy_err);
+    CHECK(oc.find("\"uniq_id\":\"daikin_altherma_esp32_outdoor_state_error_code\"")
+          != std::string::npos);
+    CHECK(hc.find("\"uniq_id\":\"daikin_altherma_esp32_hydronic_error_code\"") != std::string::npos);
+    // Distinct NAMES too, or HA derives one entity_id from both and the second lands as `..._2` —
+    // the outcome this issue exists to avoid. This label is on AMBIGUOUS_LABEL_SLUGS for that reason.
+    CHECK(oc.find("\"name\":\"Outdoor State Error Code\"") != std::string::npos);
+    CHECK(hc.find("\"name\":\"Hydronic Error Code\"") != std::string::npos);
+    // The STATE contract is untouched: same key, each already in its own group object (#217).
+    CHECK(oc.find("value_json['outdoor_state']['error_code']") != std::string::npos);
+    CHECK(hc.find("value_json['hydronic']['error_code']") != std::string::npos);
 
     // The binary family is exactly 300-307 (one bit of data[0]); neighbours are not binary.
     CHECK(!conv_is_binary(299) && !conv_is_binary(308) && !conv_is_binary(105));
@@ -968,7 +1003,7 @@ static void test_binary_catalog() {
                 discovery_config("daikin_test", "daikin_board", "daikin/state", "daikin/status", d);
             CHECK(cfg.find("\"pl_on\":\"1\",\"pl_off\":\"0\"") != std::string::npos);
             CHECK(discovery_topic("homeassistant", "daikin_test", d)
-                      .rfind("homeassistant/binary_sensor/daikin_test/", 0) == 0);
+                  == "homeassistant/binary_sensor/daikin_test/" + row_object_id(d) + "/config");
             checked++;
         }
     }
@@ -5402,15 +5437,19 @@ static void test_profile_view() {
         CHECK(std::string(ha_component(d)) == (conv_is_binary(d.conv) ? "binary_sensor" : "sensor"));
     }
 
-    // The supplement must not introduce a DUPLICATE object_id: entities are keyed by it, so two rows
-    // sharing one would collapse into a single HA entity and the second row would silently never
-    // arrive. (The catalog already contains pre-existing duplicates — e.g. "Error Code" on both
-    // 0x10/5 and 0x60/3 — so the assertion is the DELTA, not an absolute: no id the supplement adds
-    // may already be taken by the profile it is applied to.)
+    // The supplement must not introduce a DUPLICATE STATE KEY: mqtt_group.hpp nests the payload by
+    // group, so two rows sharing a (group, object_id) would write one key and the second row would
+    // silently never arrive — in the state topic AND in VictoriaMetrics, which is keyed on that pair.
+    //
+    // Scoped by group rather than global since #221. The old global form was an assertion about the
+    // DELTA only, because the catalog itself carried label collisions ("Error Code" on both 0x10/5
+    // and 0x60/3); those are no longer collisions at all — they are two rows in two groups, which is
+    // what they always were on the wire. The supplement is page-0x10-only, so in practice this reads
+    // "no supplement row may take a state key an outdoor_state row already holds".
     for (const auto& p : def::profiles) {
         for (size_t i = 0; i < def::RETRY_ROW_COUNT; i++) {
-            const std::string oid = object_id(def::retry_rows[i].label);
-            for (size_t k = 0; k < p.count; k++) CHECK(object_id(p.values[k].label) != oid);
+            const std::string key = row_object_id(def::retry_rows[i]);
+            for (size_t k = 0; k < p.count; k++) CHECK(row_object_id(p.values[k]) != key);
         }
     }
 
@@ -5696,35 +5735,159 @@ static void test_metric_identity() {
     CHECK(object_id("Flow sensor (l/min)") == object_id("Flow Sensor (L/MIN)"));
     CHECK(object_id("Expansion valve 3 (pls)") != object_id("Expansion valve 3 (pls) [OU-II]"));
 
-    // ── KNOWN DEFECT (#221): the HA uniq_id drops the group, so some rows collide ────────────────
-    // discovery_config builds `uniq_id` as <node>_<object_id> while `val_tpl` subscripts
-    // ['<group>']['<object_id>'] — so two rows sharing a label on different pages are announced as
-    // ONE Home Assistant entity and the later config overwrites the earlier. The state topic and the
-    // series names are unaffected (they nest by group), which is why this is invisible everywhere
-    // except HA.
-    //
-    // Pinned rather than fixed here: correcting uniq_id is an entity migration (#221). What this
-    // guards is that the damage cannot GROW — a sixth colliding id, or a new profile with a
-    // collision, fails until #221 lands and this block is deleted with it.
-    static const char* const KNOWN_COLLISIONS[] = {
-        "error_code", "error_type", "mixed_water_temp", "pressure_sensor_t", "target_discharge_temp",
-    };
-    static const size_t KNOWN_COLLISION_N = sizeof(KNOWN_COLLISIONS) / sizeof(KNOWN_COLLISIONS[0]);
-    std::set<std::string> known(KNOWN_COLLISIONS, KNOWN_COLLISIONS + KNOWN_COLLISION_N);
-    std::set<std::string> colliding;
-    for (const auto& p : def::profiles) {
-        std::map<std::string, std::set<std::string>> by_obj;   // object_id -> distinct (reg,offset)
+    // ONE identifier, two surfaces (#221): a published row's HA ENTITY id is exactly its
+    // VictoriaMetrics series suffix, so the frozen list above now gates both. A label edit moves the
+    // HA entity and the series together or neither — they can no longer drift apart.
+    for (const auto& p : def::profiles)
         for (size_t i = 0; i < p.count; i++) {
             const auto& v = p.values[i];
             if (v.no_publish) continue;
-            by_obj[object_id(v.label)].insert(std::to_string(v.reg) + ":" + std::to_string(v.offset));
+            CHECK(expected.count(row_object_id(v)) == 1);
+        }
+
+    // ── The ambiguity ledger: which labels the catalog places on more than one page (#221) ───────
+    // What stood here until #221 landed was the same computation pinned as a KNOWN DEFECT — the set
+    // of label slugs whose rows collapsed into a single HA entity. The entity id now carries the
+    // group, so a shared label no longer costs an entity; what it still costs is a NAME, since HA
+    // derives the default entity_id from that and two "Error Code"s land as `..._error_code` and
+    // `..._error_code_2`. discovery.hpp's AMBIGUOUS_LABEL_SLUGS is the ledger of rows named by their
+    // group for that reason, and it is hand-maintained on purpose (a name computed from the detected
+    // profile's rows would differ per model, so a re-detect would rename a live entity).
+    //
+    // So: same computation, opposite verdict. It must be EXACTLY the ledger — a sixth reused label
+    // that nobody added to the ledger would ship two identically-named entities and a `_2`.
+    //
+    // Keyed on distinct PAGES, not distinct (reg, offset): the group is what disambiguates, so a
+    // label reused twice on ONE page would not be fixable by scoping at all. That case is
+    // test_entity_identity()'s — it asserts the property directly, on the published payload.
+    std::set<std::string> ledger(AMBIGUOUS_LABEL_SLUGS,
+                                 AMBIGUOUS_LABEL_SLUGS + AMBIGUOUS_LABEL_SLUG_COUNT);
+    std::set<std::string> reused;
+    for (const auto& p : def::profiles) {
+        std::map<std::string, std::set<int>> by_obj;   // object_id -> distinct register pages
+        for (size_t i = 0; i < p.count; i++) {
+            const auto& v = p.values[i];
+            if (v.no_publish) continue;
+            by_obj[object_id(v.label)].insert(v.reg);
         }
         for (const auto& kv : by_obj)
-            if (kv.second.size() > 1) colliding.insert(kv.first);
+            if (kv.second.size() > 1) reused.insert(kv.first);
     }
-    for (const auto& c : colliding)
-        if (!known.count(c)) std::printf("  NEW HA uniq_id collision: %s (see #221)\n", c.c_str());
-    CHECK(colliding == known);
+    for (const auto& r : reused)
+        if (!ledger.count(r))
+            std::printf("  label reused across pages, not in AMBIGUOUS_LABEL_SLUGS: %s\n", r.c_str());
+    for (const auto& l : ledger)
+        if (!reused.count(l))
+            std::printf("  AMBIGUOUS_LABEL_SLUGS entry no longer reused: %s\n", l.c_str());
+    CHECK(reused == ledger);
+}
+
+// ── Entity identity: no two announced entities may share a uniq_id (#221) ───────────────────────
+// Home Assistant keys its entity registry on `uniq_id` and its discovery on the retained config
+// TOPIC. Both are FLAT namespaces — while a catalog row's label is only unique within its register
+// page. The catalog carries "Error Code" on the outdoor page AND on the hydronic one, so before
+// #221 the two rows were announced under one id on one topic: the broker kept one payload, HA
+// created one entity, and the second sensor silently did not exist. Nothing errored — in HA it
+// reads as "my model doesn't have that sensor" — and the state topic was fine throughout (it nests
+// by group), which is why this was invisible everywhere except Home Assistant.
+//
+// Measured before the fix: 44 of 45 profiles carried at least one collision, over five label slugs.
+// One of them was `error_code`, the row an automation alerts on.
+//
+// This asserts the property directly, and over ALL FOUR entity families — catalog rows, the
+// conv-203 companions, the heartbeat diagnostics and the crash diagnostics — because they share the
+// one namespace and nothing else checks across them. A future label slugging to "uptime" would
+// otherwise overwrite the heartbeat's own sensor.
+//
+// It reads the uniq_id out of the REAL discovery_config() and the object segment out of the REAL
+// discovery_topic(), rather than re-deriving either from a helper. That is deliberate: the property
+// belongs to what is PUBLISHED, so a future refactor that changes how an id is built cannot make
+// this test agree with itself while the broker sees something else.
+static std::string uniq_id_of(const std::string& cfg) {
+    const std::string key = "\"uniq_id\":\"";
+    const size_t b = cfg.find(key);
+    if (b == std::string::npos) return "";
+    const size_t s = b + key.size();
+    const size_t e = cfg.find('"', s);
+    return e == std::string::npos ? "" : cfg.substr(s, e - s);
+}
+
+// <prefix>/<component>/<node>/<OBJECT>/config -> OBJECT
+static std::string topic_object_of(const std::string& topic) {
+    const std::string tail = "/config";
+    if (topic.size() < tail.size() || topic.compare(topic.size() - tail.size(), tail.size(), tail))
+        return "";
+    const size_t e = topic.size() - tail.size();
+    const size_t b = topic.rfind('/', e - 1);
+    return b == std::string::npos ? "" : topic.substr(b + 1, e - b - 1);
+}
+
+static void test_entity_identity() {
+    const std::string node = "daikin_test", brd = "daikin_board", pfx = "homeassistant";
+    const std::string st = "base/state", av = "base/status", hb = "base/heartbeat", cr = "base/crash";
+
+    std::set<std::string> colliding;                 // reported once, not once per profile
+    int checked = 0;
+
+    for (const auto& p : def::profiles) {
+        const logic::ProfileView view = def::resolved(p);   // the rows mqtt_ha really announces
+        std::map<std::string, std::string> owner;           // uniq_id -> who claimed it first
+
+        auto claim = [&](const std::string& uid, const std::string& who, const std::string& topic) {
+            CHECK(!uid.empty());
+            // The invariant that makes this a TOPIC assertion too: an entity's uniq_id is its node
+            // plus the object segment of its own discovery topic, for every family. Two entities
+            // therefore cannot collide on the retained config topic without colliding here.
+            CHECK(uid == node + "_" + topic_object_of(topic));
+            checked++;
+            auto it = owner.find(uid);
+            if (it != owner.end() && it->second != who) {
+                if (colliding.insert(uid).second)
+                    std::printf("  HA uniq_id collision on %s: %s claims %s, already held by %s\n",
+                                p.id, who.c_str(), uid.c_str(), it->second.c_str());
+                return;
+            }
+            owner.emplace(uid, who);
+        };
+
+        for (size_t i = 0; i < view.count(); i++) {
+            const ValueDef d = logic::adjudicated(view[i]);
+            if (!row_publishable(d) || !conv_publishable(d.conv) || object_id(d.label).empty())
+                continue;
+            char loc[32];
+            std::snprintf(loc, sizeof(loc), "0x%02X/%d", d.reg, (int)d.offset);
+            claim(uniq_id_of(discovery_config(node, brd, st, av, d)), loc,
+                  discovery_topic(pfx, node, d));
+            if (d.conv == 203) {
+                const std::string g = group_for_page(d.reg);
+                for (size_t k = 0; k < FAULT_COMPANION_COUNT; k++)
+                    claim(uniq_id_of(companion_discovery_config(node, brd, st, av, g,
+                                                                FAULT_COMPANIONS[k])),
+                          std::string(loc) + " companion",
+                          companion_discovery_topic(pfx, node, g, FAULT_COMPANIONS[k].key));
+            }
+        }
+        for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++)
+            claim(uniq_id_of(heartbeat_discovery_config(node, brd, hb, av, HEARTBEAT_SENSORS[i])),
+                  "heartbeat", heartbeat_discovery_topic(pfx, node, HEARTBEAT_SENSORS[i]));
+        for (int i = 0; i < CRASH_SENSOR_COUNT; i++)
+            claim(uniq_id_of(crash_discovery_config(node, brd, cr, av, CRASH_SENSORS[i])),
+                  "crash", crash_discovery_topic(pfx, node, CRASH_SENSORS[i]));
+        // A RETIRED id is not published any more, but it must never be RE-USED either: the whole
+        // point of retiring it is that a broker somewhere still holds its retained config, and a new
+        // entity claiming that id would inherit the corpse instead of getting a fresh registry entry.
+        for (int i = 0; i < RETIRED_CRASH_SENSOR_COUNT; i++) {
+            const auto& r = RETIRED_CRASH_SENSORS[i];
+            const std::string uid = node + "_" + r.object_id;
+            auto it = owner.find(uid);
+            if (it != owner.end() && colliding.insert(uid).second)
+                std::printf("  live entity re-uses the RETIRED id %s on %s (claimed by %s)\n",
+                            uid.c_str(), p.id, it->second.c_str());
+        }
+    }
+
+    CHECK(checked > 4000);        // every profile x every family, not a sampled subset
+    CHECK(colliding.empty());
 }
 
 // ── logic/feature_gate.hpp — what may honestly run on the detected profile (#110 Part C) ─────────
@@ -6197,6 +6360,7 @@ int main() {
     test_ota_channel();
     test_profile_view();
     test_metric_identity();
+    test_entity_identity();
     test_feature_gate();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }
     std::printf("%d logic test(s) FAILED\n", g_failures);

@@ -510,21 +510,43 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 skips a row row_publishable() refuses, since a QUARANTINED row's retained config
                 would otherwise keep the last false value HA was ever sent as that entity's state. Message topics sit DIRECTLY under <base> (no node
                 segment — one board per base topic); the node id identifies the
-                DEVICE only in each discovery config's uniq_id/dev.ids + the <prefix>/<component>/<node>/…
-                discovery topic, and is the SLUGIFIED BASE TOPIC (logic/ha_device.hpp), NOT the
+                DEVICE only in each discovery config's uniq_id/dev.ids + the
+                <prefix>/<component>/<node>/<group>_<object_id> discovery topic, and is the
+                SLUGIFIED BASE TOPIC (logic/ha_device.hpp), NOT the
                 board's MAC: the HA device is the INSTALLATION, so swapping the ESP32 keeps one
                 device with its entities, history and statistics instead of creating a second one and
                 restarting every statistic. The MAC-derived daikin_<mac3> lives on as (a) the MQTT
                 CLIENT id — unique per connection, so two boards briefly online during a swap don't
                 kick each other off — and (b) a SECOND dev.ids entry: HA matches a device by any
                 identifier and merges the rest in, so an install created by a MAC-identified build is
-                adopted, not duplicated. The retained configs an older build published under the MAC
-                id are RETRACTED once per boot (retract_legacy_{fixed,values}) immediately BEFORE the
-                replacement config for the same entity — HA drops the old registry entry, freeing its
-                entity_id, and the new entity takes it back; history/statistics key on entity_id and
-                carry over, per-entity UI customisations key on unique_id and do not. Only THIS
+                adopted, not duplicated. The ENTITY id inside that node is <group>_<object_id>
+                (row_object_id), never the label slug alone: uniq_id and the discovery TOPIC are both
+                FLAT namespaces while a label is unique only within its register page, so "Error Code"
+                on the outdoor page and on the hydronic one were announced under ONE id on ONE topic —
+                the broker kept one payload, HA created one entity, and a unit reporting two faults
+                showed one, with no error anywhere (#221; 44 of 45 profiles, five label slugs).
+                The STATE key stays un-grouped (mqtt_group.hpp nests by group and VictoriaMetrics is
+                keyed on the pair), which is why the defect was invisible outside HA and why fixing it
+                must not touch object_id (#217). Structural — every row, not just today's collisions:
+                a rule scoped to the colliding ids would make an entity's identity depend on which
+                OTHER rows the detected profile carries, so a re-detect could rename a live entity.
+                The five reused labels are also NAMED by their group (AMBIGUOUS_LABEL_SLUGS, a
+                hand-maintained ledger asserted against the catalog), because HA derives the default
+                entity_id from the NAME and two identically-named entities land as `…_2`; the other
+                ~154 names are untouched so those entities reclaim their entity_id and their recorder
+                history. The retained configs an older build published under a superseded identity —
+                the MAC node id, AND the un-grouped entity ids, each in both the `sensor` and
+                `binary_sensor` shape — are RETRACTED in ONE pass (retract_stale_values ->
+                retract_ungrouped_values, plus retract_legacy_fixed for the diagnostics) that
+                completes BEFORE any replacement config goes out: HA drops the old registry entry,
+                freeing its entity_id, and the new entity takes it back; history/statistics key on
+                entity_id and carry over, per-entity UI customisations key on unique_id and do not.
+                The legacy shapes come from ungrouped_discovery_topic, a FROZEN literal — a delete
+                built from discovery_topic() would target today's topic and remove nothing. Only THIS
                 board's own legacy topics can be retracted (a swapped-out board is gone —
-                docs/HOME_ASSISTANT.md "Device identity" has the broker-side cleanup). A BIT-FLAG row (conv 300-307, conv_is_binary) is published as the JSON
+                docs/HOME_ASSISTANT.md "Device identity" has the broker-side cleanup; its
+                retained-sweep one-liner is NOT valid for the #221 migration, where the stale and new
+                configs share a node segment). A BIT-FLAG row (conv 300-307, conv_is_binary) is published as the JSON
                 NUMBER 1/0 (binary_state_number) and typed as an HA binary_sensor (ha_component) with an
                 explicit pl_on:"1"/pl_off:"0" — HA's defaults are "ON"/"OFF" and a mismatch parks the
                 entity at `unknown`. The NUMBER is the point: a metrics consumer (Telegraf →
@@ -536,7 +558,8 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 still expecting "ON" reads every flag as false, silently). Both call sites
                 key on conv_is_binary, never on the text, so the encoding and the entity type can't drift
                 apart. Builds before the split published these as `sensor`; that stale retained config is
-                DELETED per binary row on each announce (retired_sensor_discovery_topic) so no duplicate
+                DELETED per binary row on the first announce per profile (ungrouped_discovery_topic,
+                the same pass that retracts the un-grouped ids) so no duplicate
                 unavailable entity survives an upgrade — the entity DOMAIN changes, so HA history for
                 these does not carry over. Board/link diagnostics on <base>/heartbeat (logic/heartbeat.hpp),
                 published on a fixed 10s cadence (HEARTBEAT_INTERVAL_S) — a FLAT JSON (each field
@@ -1213,8 +1236,10 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 mqtt_group.hpp maps a register page to a friendly group name, builds the grouped
                 state JSON, and encodes a BINARY reading for the wire (binary_state_number: "ON"->1,
                 "OFF"->0, anything else -> nullptr so the caller publishes the text rather than
-                inventing a 0); discovery.hpp's ha_component types the same rows as binary_sensor and
-                retired_sensor_discovery_topic yields the pre-split `sensor` topic to delete;
+                inventing a 0); discovery.hpp's ha_component types the same rows as binary_sensor,
+                row_object_id builds the group-scoped ENTITY id (distinct from the un-grouped STATE
+                key object_id — #221) and ungrouped_discovery_topic yields a frozen pre-#221 topic to
+                delete;
                 heartbeat.hpp builds the board/link diagnostics JSON (FLAT — each field
                 prefixed by its block name, e.g. wifi_rssi/wifi_mac/bus_rx_received, not nested) + its
                 diagnostic HA discovery configs; crashinfo.hpp turns a captured CrashInfo (reset reason + core-dump
@@ -1320,8 +1345,14 @@ def/            embedded per-model value profiles + registry (incl. the generic 
                 f1a5e69 (#139) renamed "Expansion valve 3 (pls)" to "… [OU-II]" across 19 profiles
                 and the store shows the old series simply stopping. Regenerating the frozen list is
                 the DECISION, not the fix: an addition is routine, a removal or a change strands a
-                history and belongs in the commit message with its reason. The same block pins the
-                five known HA uniq_id collisions (#221) so a sixth cannot appear unnoticed.
+                history and belongs in the commit message with its reason. Since #221 the same block
+                also TIES the two surfaces: every published row's HA entity id must be in that frozen
+                list, so a label edit moves the entity and the series together or neither — and it
+                pins AMBIGUOUS_LABEL_SLUGS as exactly the set of labels the catalog reuses across
+                pages, so a sixth cannot appear unnoticed. The uniq_id INJECTIVITY itself is
+                test_entity_identity(), which reads the id out of the real discovery config (never
+                re-deriving it) across all four entity families — catalog rows, fault companions,
+                heartbeat, crash — since HA's unique_id namespace is flat across them too.
 www/            web UI sources (index.html + style.css + app.js -> one gzipped page) + setup.html.
                 The dashboard SCHEMATIC (the inline SVG in index.html, its sc-* CSS and its
                 INSPECT/I18N bindings) has its own gate — scripts/run-schematic-audit.sh + the

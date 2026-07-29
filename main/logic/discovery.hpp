@@ -13,8 +13,16 @@
 namespace daik {
 
 // HA object_id: lowercase, alnum-only, spaces/others -> '_' (logic/ha_device.hpp ha_slug — the same
-// rules the device node id is built with).
+// rules the device node id is built with). This is the STATE-payload key and the VictoriaMetrics
+// series suffix; the ENTITY id is row_object_id() below, which scopes it by the register group.
 inline std::string object_id(const char* label) { return ha_slug(label); }
+
+// Layout-marker / grid converters carry no measured value (docs/REGISTERS.md §3.6) — no entity, no
+// series. Here rather than in mqtt_ha.cpp (where it was a file-static) because the catalog-wide
+// identity tests have to enumerate EXACTLY the rows the bridge announces, and a second copy of this
+// rule in the test would be a test of the copy — the reason lwt_select.hpp and ou_stale.hpp both
+// exist as shared headers rather than as a rule restated per consumer.
+inline constexpr bool conv_publishable(int conv) { return !(conv == 0 || (conv >= 995 && conv <= 999)); }
 
 // HA component (the discovery topic's <component> segment + the entity domain) for one value: a
 // bit-flag row is a `binary_sensor`, everything else a `sensor`. Keyed on the converter id via
@@ -23,20 +31,95 @@ inline const char* ha_component(const ValueDef& def) {
     return conv_is_binary(def.conv) ? "binary_sensor" : "sensor";
 }
 
-inline std::string discovery_topic(const std::string& prefix, const std::string& node,
-                                   const ValueDef& def) {
-    return prefix + "/" + ha_component(def) + "/" + node + "/" + object_id(def.label) + "/config";
+// An ENTITY id: the register group and the key, joined. The one place that rule is written — the
+// catalog rows below and the derived companions at the bottom of this file both route through it,
+// so the two can never disagree about the shape of an id.
+inline std::string scoped_object_id(const std::string& group, const std::string& key) {
+    std::string o;
+    o.reserve(group.size() + 1 + key.size());
+    o += group;
+    o += '_';
+    o += key;
+    return o;
 }
 
-// The topic a value's discovery config was published on by builds BEFORE the binary_sensor split,
-// when EVERY row was a `sensor`. For a binary row this is now a stale retained config that HA would
-// keep as a second, permanently-unavailable text entity, so the bridge deletes it (zero-length
-// retained publish) alongside publishing the new one — the RETIRED_CRASH_SENSORS pattern, except the
-// old topic is derivable from the row instead of needing a hand-maintained table. Returns the same
-// string as discovery_topic() for a non-binary row, where there is nothing to retire.
-inline std::string retired_sensor_discovery_topic(const std::string& prefix, const std::string& node,
-                                                  const ValueDef& def) {
-    return prefix + "/sensor/" + node + "/" + object_id(def.label) + "/config";
+// A catalog row's HA entity id. The label alone is NOT enough (#221): it is unique only within its
+// register page, while `uniq_id` and the discovery TOPIC are both flat namespaces. The catalog
+// carries "Error Code" on the outdoor page AND on the hydronic one, and before this the second
+// discovery config landed on the first one's topic under the first one's id — so the broker kept one
+// payload, HA created one entity, and a unit reporting two faults showed one. Nothing errored; in HA
+// it reads as a sensor the model does not have.
+//
+// The state payload never had this problem (it nests by group), which is exactly why the defect was
+// invisible outside Home Assistant — and why object_id() above must NOT change with this: it is the
+// state key and the VictoriaMetrics series suffix, and forking those is #217's whole subject.
+//
+// Structural — every row, not just the ones that happen to collide today. A rule that scoped only
+// the collisions would make an entity's identity depend on which OTHER rows the detected profile
+// carries, so a re-detect onto a neighbouring model could rename a live entity and strand its
+// history: the #217 series fork, moved into HA.
+inline std::string row_object_id(const ValueDef& def) {
+    return scoped_object_id(group_for_page(def.reg), object_id(def.label));
+}
+
+// Labels the catalog places on MORE THAN ONE register page. The id is group-scoped for every row
+// now, so a shared label no longer collapses two rows into one entity — but the NAME is what HA
+// turns into the default entity_id, and two entities both called "Error Code" land as
+// sensor.…_error_code and sensor.…_error_code_2, which tells nobody which unit each one reads. So a
+// row whose label is on this list is NAMED by its group too — "Outdoor State Error Code" /
+// "Hydronic Error Code" — the rule the derived companions below have always followed.
+//
+// Only these. Group-scoping every name would give every one of the ~164 entities a new entity_id,
+// and recorder history plus long-term statistics are keyed on entity_id: the other ~154 keep their
+// name, so they delete-and-reclaim their own id and their history carries over.
+//
+// A hand-maintained ledger and deliberately NOT a scan of the detected profile: "Target Discharge
+// Temp." collides on exactly one profile, so a name computed from the live row set would differ per
+// model and a re-detect would rename a running entity — the damage this issue is about. The cost is
+// that a profile carrying only one side of a pair still gets the qualified name; the gain is a name
+// that is identical on every model forever. test_metric_identity() asserts this list is EXACTLY the
+// set of label slugs the shipped catalog reuses across pages, so a sixth cannot appear unnoticed.
+inline constexpr const char* AMBIGUOUS_LABEL_SLUGS[] = {
+    "error_code", "error_type", "mixed_water_temp", "pressure_sensor_t", "target_discharge_temp",
+};
+inline constexpr size_t AMBIGUOUS_LABEL_SLUG_COUNT =
+    sizeof(AMBIGUOUS_LABEL_SLUGS) / sizeof(AMBIGUOUS_LABEL_SLUGS[0]);
+
+inline bool label_slug_is_ambiguous(const std::string& obj) {
+    for (size_t i = 0; i < AMBIGUOUS_LABEL_SLUG_COUNT; i++)
+        if (obj == AMBIGUOUS_LABEL_SLUGS[i]) return true;
+    return false;
+}
+
+// The HA friendly name: the catalog label, group-qualified only when that label is reused across
+// pages (see the ledger above).
+inline std::string entity_name(const ValueDef& def) {
+    if (!label_slug_is_ambiguous(object_id(def.label))) return def.label;
+    std::string n = group_display_name(group_for_page(def.reg));
+    n += ' ';
+    n += def.label;
+    return n;
+}
+
+inline std::string discovery_topic(const std::string& prefix, const std::string& node,
+                                   const ValueDef& def) {
+    return prefix + "/" + ha_component(def) + "/" + node + "/" + row_object_id(def) + "/config";
+}
+
+// The topic shapes a value's discovery config was published on by builds BEFORE #221, when the
+// object segment was the bare label slug with no register group. TWO exist per row: every build ever
+// wrote the `sensor` form, and builds after the binary_sensor split wrote the `binary_sensor` form
+// for a bit-flag row. Both are RETAINED, so both outlive an upgrade as permanently-unavailable
+// duplicate entities unless the bridge deletes them (zero-length retained publish) — the
+// RETIRED_CRASH_SENSORS pattern, except the old topic is derivable from the row instead of needing a
+// hand-maintained table.
+//
+// A FROZEN literal shape, never built from today's helpers: a migration that derives what the
+// previous build wrote from the current code deletes whatever the current code would write, i.e.
+// nothing. `component` is the caller's choice precisely so both shapes are reachable.
+inline std::string ungrouped_discovery_topic(const std::string& prefix, const std::string& node,
+                                             const char* component, const ValueDef& def) {
+    return prefix + "/" + component + "/" + node + "/" + object_id(def.label) + "/config";
 }
 
 // Shared retained state topic: <base>/state. ALL sensors read from this one topic — the bridge
@@ -66,8 +149,10 @@ inline std::string discovery_config(const std::string& node, const std::string& 
     const std::string unit  = unit_for_datatype(def.type);
     const std::string dc    = device_class_for_datatype(def.type);
     std::string j = "{";
-    j += "\"name\":\"";       j += def.label; j += "\",";
-    j += "\"uniq_id\":\"";    j += node; j += "_"; j += obj; j += "\",";
+    // name/uniq_id are the ENTITY identity and carry the group (#221); `obj` below is the STATE key
+    // and must not — it is what mqtt_group.hpp nests and what VictoriaMetrics is keyed on (#217).
+    j += "\"name\":\"";       j += entity_name(def); j += "\",";
+    j += "\"uniq_id\":\"";    j += node; j += "_"; j += row_object_id(def); j += "\",";
     j += "\"stat_t\":\"";     j += state_topic; j += "\",";
     j += "\"val_tpl\":\"{{ value_json['"; j += group; j += "']['"; j += obj; j += "'] }}\",";
     j += "\"avty_t\":\"";     j += avail_topic; j += "\",";
@@ -100,7 +185,7 @@ inline std::string discovery_config(const std::string& node, const std::string& 
 // nothing about the plant, so it is not the kind of per-label domain guess ha_component deliberately
 // declines to make for the catalog rows.
 inline std::string companion_object_id(const std::string& group, const char* key) {
-    return group + "_" + key;
+    return scoped_object_id(group, key);   // same rule as a catalog row's id — see row_object_id
 }
 
 inline std::string companion_discovery_topic(const std::string& prefix, const std::string& node,

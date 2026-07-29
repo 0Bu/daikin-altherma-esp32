@@ -17,14 +17,16 @@ appear on their own. Clear the broker to disable.
 topics sit **directly under `<base>`** — one board per base topic, so there is no `<node>` segment in
 the payload paths. The node id identifies the device to Home Assistant only inside each discovery
 config's `uniq_id`/`dev.ids` and in the discovery topic path, and it is the **slugified base topic**
-(`daikin-altherma-esp32` → `daikin_altherma_esp32`) — see [Device identity](#device-identity).
+(`daikin-altherma-esp32` → `daikin_altherma_esp32`) — see [Device identity](#device-identity). Within
+that, each entity is identified by its **register group and object id** (`hydronic_error_code`), not
+by the object id alone — see below for why.
 
 ```
 <base>/status                                      online | offline   (LWT, retained)
 <base>/state                                       {<group>: {<object_id>: value, …}, …}  (retained JSON)
 <base>/heartbeat                                   board/link diagnostics (flat JSON, 10 s cadence)
 <base>/crash                                       crash report, retained — ONLY on a fault/dump boot; cleared otherwise
-<prefix>/<component>/<node>/<object_id>/config    discovery config per PUBLISHED value (retained)
+<prefix>/<component>/<node>/<group>_<object_id>/config    discovery config per PUBLISHED value (retained)
 ```
 
 `<component>` is `binary_sensor` for a bit-flag value (pump running, 3-way valve, thermostat
@@ -62,7 +64,19 @@ it roamed onto.
 
 Each value's `object_id` is a lowercase, alnum-only slug of its label (e.g. *"DHW Tank Temp
 (R5T)"* → `dhw_tank_temp_r5t`). The template uses bracket subscripts, so a slug that starts with a
-digit (*"2way valve…"* → `2way_valve_…`) stays valid. Units and `device_class` are derived from each
+digit (*"2way valve…"* → `2way_valve_…`) stays valid.
+
+**The state key and the entity id are not the same string.** The `object_id` above is the **state
+key** — what the payload nests inside its group object, and what VictoriaMetrics is keyed on. The
+**entity id** (the `uniq_id` and the discovery topic's last segment) is `<group>_<object_id>`,
+because a label is unique only within its register page while HA's `unique_id` namespace is flat.
+The catalog carries *"Error Code"* on the outdoor page **and** on the hydronic one: as a state key
+that is two distinct entries in two group objects, but as a bare entity id it was one id on one
+retained topic — so HA created a single entity and a unit reporting both faults showed one of them
+(#221). Hence `outdoor_state_error_code` and `hydronic_error_code` as entities, while the payload
+still reads `{"outdoor_state": {"error_code": …}, "hydronic": {"error_code": …}}`.
+
+Units and `device_class` are derived from each
 value's `dataType` field (the def's HA unit hint: 1 = °C/temperature, 2 = bar/pressure, 3 = A/current;
 see `unit_for_datatype`/`device_class_for_datatype` in `logic/convert.hpp`), so temperatures render
 as °C with history, currents as A, and so on. This grouped JSON
@@ -72,7 +86,8 @@ is also directly consumable by a Telegraf MQTT `json_v2` parser (→ VictoriaMet
 
 Every entity — heat-pump values, board diagnostics, the crash flag — belongs to **one** Home
 Assistant device, identified by the **slugified MQTT base topic** (`daikin-altherma-esp32` →
-`daikin_altherma_esp32`) in `dev.ids` and as the prefix of every `uniq_id`. The id therefore names
+`daikin_altherma_esp32`) in `dev.ids` and as the prefix of every `uniq_id` (whose remainder is the
+entity's `<group>_<object_id>`). The id therefore names
 the **installation, not the board**: replace the ESP32 (or erase its flash and set it up again) and
 the replacement publishes exactly the same unique ids, so HA keeps the same device, the same
 entities, and their whole history and long-term statistics. Two boards on one broker means two base
@@ -110,6 +125,53 @@ the rest in, so an install created by an older, MAC-identified build keeps its e
 > (`-r -n` publishes an empty retained message, which deletes the config and with it the entity; the
 > device disappears once its last entity is gone.) Recent Home Assistant versions also offer
 > **⋮ → Delete** on an MQTT device's page, which clears the same configs for you.
+
+> **Upgrading from a build before the entity ids carried the register group (#221):** every entity's
+> `unique_id` and discovery topic gain a `<group>_` prefix. This is a **bug fix, not a rename for its
+> own sake** — five labels that the catalog places on two different register pages were being
+> announced under one id on one topic, so the second discovery config overwrote the first and one of
+> the two sensors did not exist in HA at all. On the reference installation that meant **one "Error
+> Code" entity on a unit that reports two**, with nothing to indicate which unit it came from.
+>
+> On its first connect after the upgrade the firmware **deletes every pre-#221 retained config** —
+> both the `sensor` and the `binary_sensor` shape, under the current node id *and* under the MAC-era
+> one — in a single pass that completes **before** any replacement is published. Friendly names are
+> unchanged except for the ten entities in the table below, so the other ~154 entities reclaim their
+> own `entity_id`, and with it their recorder history and long-term statistics. Per-entity
+> customisations, keyed on `unique_id`, do not carry over.
+>
+> Home Assistant should be **connected to the broker while this happens**, for the same reason as
+> the migration above: the deletions are zero-length retained messages, and a subscriber that was
+> offline never sees them, leaving the replacements to land as `…_2`.
+>
+> ⚠️ **Do not use the `homeassistant/+/<node>/#` retained-sweep from the previous section to clean
+> this up.** That one works only because a swapped-out board's node segment is *different*; here the
+> stale and the new configs share the same node id, so the sweep would delete the entities you just
+> gained. Use HA's **⋮ → Delete** on the MQTT device instead and reboot the board, which republishes
+> everything from scratch.
+>
+> The ten entities that gain a group-qualified **name** (and therefore a new `entity_id`) are the
+> ones whose label the catalog reuses — without this they would be two identically-named entities
+> and a `…_2`:
+>
+> | Label | Entities after the upgrade |
+> |---|---|
+> | Error Code | Outdoor State Error Code · Hydronic Error Code |
+> | Error type | Outdoor State Error Type · Hydronic Error Type |
+> | Mixed water temp. | Hybrid Mixed Water Temp. · Mixing Mixed Water Temp. |
+> | Pressure sensor(T) | Outdoor Sensors Pressure Sensor(T) · Hydronic State Pressure Sensor(T) |
+> | Target Discharge Temp. | Outdoor State Target Discharge Temp. · Water Hx Target Discharge Temp. |
+>
+> Which of these a given install sees depends on its detected model — most profiles carry only some
+> of the pairs. The name is qualified on **every** model regardless, so it cannot change under a
+> re-detect. Worked example, measured on `altherma_ebla_edla_d_series_4_8kw_monobloc`: **100 value
+> entities before, 102 after** (the two *Error Code* / *Error type* pairs), with six names qualified —
+> the other four labels appear only once on that profile, so they gain a qualified name but no
+> sibling.
+>
+> **The MQTT state topic and the VictoriaMetrics series names are untouched by all of this.** They
+> were already group-nested and were never affected by the defect; forking them is what
+> [#217](https://github.com/0Bu/daikin-altherma-esp32/issues/217) exists to prevent.
 
 ### Binary values are numbers, not "ON"/"OFF"
 
@@ -174,7 +236,9 @@ fault" on a byte the firmware could not decode.
 
 Each is its own `binary_sensor` (`device_class: problem`), named and id'd by its group — *Outdoor
 State Error Active*, *Hydronic Error Active* — since a profile carries an error class on both the
-outdoor and the hydronic page while HA entity ids share one flat namespace.
+outdoor and the hydronic page while HA entity ids share one flat namespace. The companions were the
+first entities built this way; since #221 it is the general rule, and the catalog rows follow it too
+(see [Topics](#topics)).
 
 ### Values the firmware refuses to publish
 

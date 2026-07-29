@@ -998,8 +998,11 @@ The Home Assistant bridge:
   `daikin_<mac3>` produced a second device and restarted every statistic. The board's MAC id lives
   on as the **MQTT client id** (unique per connection) and a **second `dev.ids` entry** (HA matches a
   device by any identifier and merges, so a MAC-identified install is adopted rather than
-  duplicated); the configs an older build published under it are retracted once per boot, right
-  before each replacement is published, so the freed `entity_id` is reclaimed by the new entity.
+  duplicated); the configs an older build published under a superseded identity — that MAC node id,
+  and the pre-#221 un-grouped entity ids — are retracted in **one bulk pass that completes before any
+  replacement is published** (the diagnostics once per boot, the value entities once per detected
+  profile), so the freed `entity_id` is reclaimed by the new entity and its recorder history and
+  long-term statistics carry over.
 - **Own publish task + esp-mqtt client.** The event handler only flips status flags; all publishing
   happens in the task, so the mqtt event loop is never blocked by string building.
 - **Discovery is streamed.** A full Altherma value set can be 30–40+ entities; the bridge emits one
@@ -1009,7 +1012,9 @@ The Home Assistant bridge:
 - **One shared grouped-JSON state topic** `<base>/state` (retained). The message topics sit directly
   under `<base>` — one board per base topic, so there is no `<node>` segment in the payload paths; the
   node id identifies the *device* only in each discovery config's `uniq_id`/`dev.ids`
-  and its `<prefix>/<component>/<node>/…` discovery topic. Each cycle the task
+  and its `<prefix>/<component>/<node>/<group>_<object_id>/…` discovery topic (the entity id carries
+  the register group because `uniq_id` and the topic are flat namespaces while a label is unique only
+  within its page — #221). Each cycle the task
   builds a single JSON object of every value, grouped one level deep by X10A register page
   (`logic/mqtt_group.hpp`, host-tested): `{ "<group>": { "<object_id>": value, … }, … }` (max
   nesting depth 1, e.g. `hydronic`, `outdoor_state`, `inverter`). Every sensor's discovery config
@@ -1064,8 +1069,8 @@ The Home Assistant bridge:
   and drops both strings and bools, so all ~30 binary rows of a profile reached HA but never a graph.
   Measured on a live install before the change: of ~99 published values only the 58 numeric ones
   became VictoriaMetrics series. Builds before this published every row as a `sensor`; that stale
-  retained discovery config is actively deleted for binary rows on each announce
-  (`retired_sensor_discovery_topic`), so an upgraded install doesn't keep a duplicate,
+  retained discovery config is actively deleted for binary rows on the first announce per profile
+  (`ungrouped_discovery_topic`), so an upgraded install doesn't keep a duplicate,
   permanently-unavailable text entity. The entity domain changes, so HA history for these does not
   carry over.
 - **Publish-on-change.** The heat pump is polled at a fixed 1 s interval for near-real-time readings,
