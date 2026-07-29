@@ -343,9 +343,13 @@ GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sampl
                                    #   the clock has never synced (the UI then shows an age).
                                    #   Unknown id → 404. Trends are RAM: a reboot empties them.
                                    #   ids: dhw_tank, leaving_water, return_water, water_pressure,
-                                   #   flow, pump_signal, circuit_pressure, comp_rps, outdoor_air,
-                                   #   plus free_heap and max_alloc — the BOARD's own memory in KiB,
-                                   #   which have no register and are always present.
+                                   #   flow, pump_signal, circuit_pressure, comp_rps, eev,
+                                   #   outdoor_air, discharge, room_temp, inv_current, ct_l1,
+                                   #   ct_l2, ct_l3 — one per numeric value the dashboard drawing
+                                   #   shows, plus the electrical rows its estimated-kW pill is
+                                   #   computed from — and free_heap plus max_alloc, the BOARD's
+                                   #   own memory in KiB, which have no register and are always
+                                   #   present.
                                    #   (a row the detected profile lacks is simply absent from
                                    #   /status.history.rows — ask that, don't guess).
 GET  /events                       # WebSocket live push (the only live UI transport). Send "sub" →

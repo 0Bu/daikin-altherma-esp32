@@ -499,6 +499,19 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    An inset box-shadow rather than a border-bottom: a border would add a pixel to the row's height
    on open and shift every row below by one. */
 .vitem.open .vrow-desc { box-shadow: inset 0 -1px 0 var(--line); }
+/* A labelled note inside an explainer — "Normal: …", "No current reading: …" (app.js descNoteHtml).
+   Its own paragraph rather than a run-on sentence: the note answers a different question from the
+   "what is it" line above it, and set solid the two read as one paragraph that changes subject
+   halfway. The gap has to beat the 1.55 LINE spacing to read as a break at all — 8px did not, and
+   an unlabelled live sentence then ran straight on from the description — while staying under the
+   panel's own padding, so the note still reads as belonging to the text above rather than as a
+   second block. Shared by the value list (.vdesc-body) and the schematic
+   inspector (.inspect-body), which is why it carries no panel-specific spacing of its own. The
+   inspector's LIVE state sentence uses it unlabelled — same paragraph, no lead-in, since its copy
+   opens with its own state word ("Idle — …", "Standby — …"). :first-child covers the entry that has
+   no description at all, where the paragraph IS the body and a leading gap would be a stray inset. */
+.vdesc-p { margin-top: 11px; }
+.vdesc-p:first-child { margin-top: 0; }
 .vdesc-n { color: var(--fg); font-weight: 600; }
 /* ── 24-hour trend inside the explainer panel ───────────────────────────────
    A sparkline for the rows the firmware buffers (/status.history.rows). It sits BELOW the explainer

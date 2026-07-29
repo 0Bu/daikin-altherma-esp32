@@ -4442,7 +4442,14 @@ static void test_history() {
         { "pump_signal",      39, -1, 1 },
         { "circuit_pressure", 24, 2,  2 },   // refrigerant, on the hydronic page — stays live
         { "comp_rps",         26, -1, 1 },   // 13 detection profiles carry no 0x30 page at all
+        { "eev",              26, -1, 2 },   // same 0x30 page as comp_rps — the same 26 profiles
         { "outdoor_air",      39, 1,  2 },
+        { "discharge",        39, 1,  2 },
+        { "room_temp",        39, 1,  2 },   // "Indoor ambient temp. (R1T)" / "RT Temp." — one locator
+        { "inv_current",      39, -1, 2 },   // every profile has it; only ~half have CT clamps
+        { "ct_l1",            20, -1, 1 },
+        { "ct_l2",            20, -1, 1 },
+        { "ct_l3",            20, -1, 1 },
         // The board trends resolve no catalog row at all — every expectation below is skipped for
         // them, and what they must satisfy instead is asserted in its own block further down. They
         // are listed so the static_assert keeps forcing a decision for every TRENDS entry.

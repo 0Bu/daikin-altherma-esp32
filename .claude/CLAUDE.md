@@ -435,8 +435,10 @@ history.cpp     the 24-hour trend rings: one fixed-cadence buffer per logic/hist
                 the poll task (history_record, called from poll_once BEFORE the cache commit and
                 OUTSIDE the cache mutex — this file has its own) and read by GET /history. STATIC
                 (.bss), never heap: the binding limit on this board is the largest CONTIGUOUS block,
-                and a static array does not compete for it — eleven trends cost 6336 B of ring plus
-                ~78 B of labels/units/counters each. RAM only ON PURPOSE: a 576 B blob rewritten every
+                and a static array does not compete for it — eighteen trends cost 10368 B of ring plus
+                ~78 B of labels/units/counters each (the ceiling assert moved 7168 -> 11520 with that
+                arithmetic; the rule that keeps it this low is that a trend follows the SCHEMATIC's
+                ~16 numeric pills, not the ~66 numeric rows a profile publishes, which would be ~38 KB). RAM only ON PURPOSE: a 576 B blob rewritten every
                 5 minutes is ~100k NVS writes a year in the partition holding the WiFi credentials,
                 so a reboot empties the rings and the UI draws the span it actually has rather than
                 padding a 24 h axis with absence. The mechanics (bucket folding, wrap-around,
@@ -892,11 +894,20 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 CONSEQUENCES of addressing a row this way rather than conditions on it, asserted over
                 the catalog instead of re-checked per sample: a trend cannot reach a SETPOINT (a
                 target sits at its own offset), and the held-over page class IS the locator's reg, so
-                no second page field can drift from it. NINE of the eleven are the plant's working set —
-                leaving/return water, DHW tank, water pressure, flow, pump signal, refrigerant
-                pressure (0x62/15, the one that stays LIVE — the 0x20 transducers read 0.0 bar even
-                at 42 rps on the measured unit, so a ring on them would be a permanently empty
-                chart), compressor rps, outdoor air. The other TWO are not rows at all — a TrendKind
+                no second page field can drift from it. SIXTEEN of the eighteen are catalog rows, and WHICH rows is a rule
+                rather than a taste: every numeric value the SCHEMATIC draws gets a curve, because
+                those are the readings someone is actually looking at — leaving/return water, DHW
+                tank, water pressure, flow, pump signal, refrigerant pressure (0x62/15, the one that
+                stays LIVE — the 0x20 transducers read 0.0 bar even at 42 rps on the measured unit,
+                and 30 days of the reference install's published series show a flat 0.0 from BOTH,
+                so a ring on them would be a permanently empty chart, which is why the drawing's
+                LOW-pressure pill is the one numeric pill with no trend), compressor rps, expansion
+                valve, outdoor air, discharge temp, room temp — plus the ELECTRICAL inputs
+                (inv_current, ct_l1..3), which are inputs first and rows second: the drawing's
+                computed pills (ΔT, heat output, electrical input, COP) have no register to buffer,
+                so www/app.js's DERIVED assembles their curve from these rings with the same
+                expressions liveData() uses for the live number — one definition per figure instead
+                of a firmware copy and a browser copy free to drift. The other TWO are not rows at all — a TrendKind
                 tag splits "addressed by (reg, off, unit)" from "sampled from the board", and the
                 board pair (free_heap/max_alloc, KiB) carries its own fixed label because no profile
                 has one to give; trend_row_matches refuses them against a row even when the row is
@@ -1457,13 +1468,14 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus "binary":true 
                   recomputed from a snapshot taken elsewhere
 GET  /history?row=<trend id>   one trended row's 24-hour series, oldest sample first:
                   {id,label,dt,unit,t0,v[],held[[from,count],…]}. `unit` is the ROW's own unit, read
-                  from the cached value — never a hardcoded "°C": the eleven trends mix °C, bar, KiB
+                  from the cached value — never a hardcoded "°C": the eighteen trends mix °C, bar, KiB
                   and unitless rows, and the browser prints this string into the range readout and the
                   crosshair, so a bar row labelled °C would be the #35-#39 shape. A catalog test pins
                   that each trend resolves to EXACTLY ONE row per profile, of one type code and one
                   width (which is what makes the tenths exact), across all profiles. Ids:
                   dhw_tank, leaving_water, return_water, water_pressure, flow, pump_signal,
-                  circuit_pressure, comp_rps, outdoor_air, plus the two BOARD trends free_heap and
+                  circuit_pressure, comp_rps, eev, outdoor_air, discharge, room_temp, inv_current,
+                  ct_l1, ct_l2, ct_l3, plus the two BOARD trends free_heap and
                   max_alloc (the ESP32's own memory in KiB — no register, fixed English labels, and
                   they resolve no catalog row by construction). `v` is TENTHS of that unit (the
                   resolution the converters produce, so a sample is exact rather than rounded on the

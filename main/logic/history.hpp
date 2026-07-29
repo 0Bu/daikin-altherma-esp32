@@ -142,12 +142,36 @@ inline constexpr TrendDef TRENDS[] = {
     // pill already falls back off them (they freeze with their page), and on the measured unit they
     // read exactly 0.0 bar at rest AND at 42 rps — which reading_plausible() refuses as impossible
     // for a sealed circuit — while this sensor read a correct 15.3 bar. A ring on them would be a
-    // permanently empty chart bought with 576 bytes.
+    // permanently empty chart bought with 576 bytes. That is why the schematic's LOW-pressure pill
+    // has no trend while every other numeric pill now does: it is the SAME 0x20 transducer pair, and
+    // the reference install has published a flat 0.0 bar from both for 30 days. There is no low-side
+    // equivalent of the 0x62/15 fallback, so the honest answer is no chart rather than an empty one
+    // — the absent-feature rule (feature_gate.hpp), applied to a sensor that reports nothing.
     { "circuit_pressure", TrendKind::Row, 0x62, 15, "bar", "" },
     { "comp_rps",         TrendKind::Row, 0x30,  0, "",    "" },  // INV frequency (rps) — run/idle
+    { "eev",              TrendKind::Row, 0x30,  3, "",    "" },  // Expansion valve 1 (pls) — live page
     // Outdoor — 0x20/0x21 freeze while the compressor rests, so every sample passes the held-over
     // gate below and the chart shows gaps rather than a staircase of the last run's numbers.
     { "outdoor_air",      TrendKind::Row, 0x20,  0, "°C",  "" },  // R1T-Outdoor air temp.
+    { "discharge",        TrendKind::Row, 0x20,  4, "°C",  "" },  // Discharge pipe temp. — the hot side
+    { "room_temp",        TrendKind::Row, 0x61, 12, "°C",  "" },  // Indoor ambient temp. (R1T)
+    // The ELECTRICAL inputs. They are here as INPUTS, not as charts of their own: the dashboard's
+    // "electrical input (est.)" pill is derived in the browser (amps x an assumed 230 V, CT clamps
+    // preferred over the inverter current, the fallback gated on the held-over rule), and the only
+    // way to draw a 24-hour curve of it without a second, looser copy of that rule somewhere is to
+    // buffer what it is computed FROM and run the same expression over the samples. The held-over
+    // marking the INV ring already carries IS the gate — 0x21 is a frozen page, so a sample the
+    // outdoor unit was not measuring is stored as HeldOver rather than as last run's amps, which is
+    // precisely the distinction the live pill makes.
+    { "inv_current",      TrendKind::Row, 0x21,  0, "",    "" },  // INV primary current (A) — 39/39
+    // The CT clamps are fitted on 20 of the 39 detection profiles and read a flat 0 A on an install
+    // without them (measured here over 30 days), which is exactly why the live rule prefers them
+    // only when their sum is non-zero. Three rings for one figure because the sum is the browser's
+    // to make: a "total current" trend would be a derived quantity computed in the firmware and
+    // then again in app.js, and the two would be free to disagree.
+    { "ct_l1",            TrendKind::Row, 0x63, 14, "",    "" },
+    { "ct_l2",            TrendKind::Row, 0x63, 15, "",    "" },
+    { "ct_l3",            TrendKind::Row, 0x63, 16, "",    "" },
     // The BOARD's own memory. Not a plant reading, and here for the reason the single numbers on
     // /status could never answer: whether the heap is DRIFTING. A leak or a creeping fragmentation
     // shows as a slope over hours and is invisible in any one sample, which is why the spot figures
@@ -157,13 +181,29 @@ inline constexpr TrendDef TRENDS[] = {
     { "max_alloc",        TrendKind::MaxAlloc, 0, 0, "KiB", "Largest free block" },
 };
 constexpr size_t TREND_COUNT = sizeof(TRENDS) / sizeof(TRENDS[0]);
-// 11 trends = 6336 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
+// 18 trends = 10368 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
 // ceiling is a deliberate stop sign, not a hardware limit: .bss does not compete for the largest
 // CONTIGUOUS free block, which is what actually binds on this board, so the cost of a trend is a
 // few per cent of free heap and nothing at all of the fragmentation budget. Raise it only with the
 // same arithmetic in hand, and measure /status.sys (free_heap, max_alloc) on a real board after —
 // which is now a thing the device itself will draw you a curve of.
-static_assert(TREND_COUNT * HISTORY_BYTES_PER_TREND <= 7168,
+//
+// It was raised from 7168 (11 trends) once the rule became "every numeric reading the SCHEMATIC
+// draws has a 24-hour curve" rather than a hand-picked working set. That rule is also the reason
+// the ceiling can stay this low: the drawing holds ~16 numeric pills, not the ~66 numeric rows a
+// profile publishes, and ringing all of those would cost ~38 KB — about a third of the low-water
+// free heap measured on the reference board (101 KB), spent on curves nobody opened. The pills are
+// the values someone is looking at; the value LIST reaches the rest through the same explainer and
+// gets a chart only where a trend already exists.
+//
+// MEASURED, not derived: `idf.py size` across that change moved the image by +4576 bytes, which is
+// the 7 x 576 of ring plus 7 x ~78 of per-trend label/unit/counters this comment predicts. It moved
+// `.data`, though, NOT `.bss` — Trend's `pending` member initialises to HISTORY_NO_READING, a
+// non-zero value, so the whole array is initialised data. Same DIRAM at runtime and the same
+// non-competition with the largest contiguous block, which is what the paragraph above is actually
+// about; the difference is that each ring also costs its own size AGAIN in the flash image. Worth
+// knowing before anyone adds trends by the dozen.
+static_assert(TREND_COUNT * HISTORY_BYTES_PER_TREND <= 11520,
               "trend buffers are .bss on a heap-tight board — justify the growth before raising this");
 
 // A board metric in bytes, as the ring stores it: tenths of a KiB (~102-byte resolution, finer than

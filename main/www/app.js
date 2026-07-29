@@ -1727,14 +1727,27 @@ function descFor(label) {
   for (const d of DESCRIPTIONS) if (d.re.test(l)) return d;
   return null;
 }
-// Description body: the plain "what is it" sentence, plus an optional "Normal:" note in stronger ink.
-// All text is our own static English (labels come from the firmware's own def/ tables), but escape
+// EVERY paragraph of an explainer body goes through descParaHtml — the "what is it" sentence as
+// much as the notes after it. Not just the notes: .vdesc-p's first-child rule (which suppresses the
+// leading gap) can only see ELEMENTS, so a description left as a bare text node made the note that
+// followed it the first child, and the paragraph break silently collapsed to nothing.
+const descParaHtml = (html) => `<div class="vdesc-p">${html}</div>`;
+
+// A labelled note under the "what is it" sentence, opened by a lead-in in stronger ink. Both notes
+// an explainer can carry take this shape — the timeless "Normal:" one below and the live held-over
+// one (HELD_OVER_NOW) the inspector appends — so one helper renders both and they cannot drift into
+// two different-looking kinds of note. A paragraph rather than a run-on sentence because the two
+// halves answer different questions ("what IS this" vs "what should it read"), and set solid they
+// read as one paragraph that changes subject mid-way.
+// All text is our own static copy (labels come from the firmware's own def/ tables), but escape
 // anyway — cheap and keeps the one-encoder rule.
+const descNoteHtml = (lead, text) =>
+  descParaHtml(`<span class="vdesc-n">${esc(lead)}</span> ${esc(text)}`);
+
+// Description body: the plain "what is it" sentence, plus an optional "Normal:" note.
 function descBodyHtml(d) {
   const b = (LANG === "de" && d.de) ? d.de : d;   // German copy when present, else the English row
-  let h = esc(b.what);
-  if (b.normal) h += ` <span class="vdesc-n">${esc(t("normal.label"))}</span> ${esc(b.normal)}`;
-  return h;
+  return descParaHtml(esc(b.what)) + (b.normal ? descNoteHtml(t("normal.label"), b.normal) : "");
 }
 // ── 24-hour trend (a historied value row's explainer carries a sparkline under the text) ──────
 // WHICH rows have a trend is the FIRMWARE's answer, read from /status.history.rows: the device keeps
@@ -1762,7 +1775,91 @@ function histIdFor(label) { const r = histFor(label); return r ? r.id : ""; }
 // Is the device keeping this series? Asked by ID — a board row has no catalog label to look up, and
 // a firmware that predates a trend simply reports fewer rows, so its card draws no chart at all
 // rather than an empty one.
-function hasHist(id) { return !!id && !!histSpec() && histSpec().rows.some((r) => r && r.id === id); }
+function hasDeviceHist(id) { return !!id && !!histSpec() && histSpec().rows.some((r) => r && r.id === id); }
+function hasHist(id) {
+  const D = DERIVED[id];
+  return D ? D.ready(Object.fromEntries(D.ins.map((k) => [k, hasDeviceHist(k)]))) : hasDeviceHist(id);
+}
+
+// ── Derived trends: the schematic pills that are COMPUTED, not read ────────────────────────────
+// ΔT, heat output, electrical input and COP have no register, so the device has nothing to buffer
+// for them. Their 24-hour curve is assembled HERE, out of the rings of what each is computed FROM,
+// by the same expressions liveData() uses for the live number — one definition of each figure
+// rather than a firmware copy and a browser copy free to drift apart. `inv_current` and `ct_l1..3`
+// are in logic/history.hpp's TRENDS for exactly this; they are inputs first and rows second.
+//
+// Every input arrives on ONE raster: history.cpp commits every ring on the same bucket boundary, so
+// sample i is the same five minutes in all of them, and a row the profile lacks is simply not
+// offered (/status.history omits it) instead of silently shifting the axis under a curve.
+//
+// A sample is null wherever a required input is null, and the gap is drawn as a gap. That also
+// carries the held-over rule through for free: a reading the outdoor unit was not taking is null in
+// its own ring, so the figure derived from it is null too — never last run's amps drawn as a live
+// kilowatt, which is the exact failure the live pill's gate exists to prevent (logic/ou_stale.hpp).
+//
+// `ins` = every series to fetch. `ready(has)` = may this figure be offered at all on this profile
+// (feature_gate.hpp's DISABLE-NEVER-DEGRADE: no honest inputs, no curve — never a substitute one).
+// `fn(s)` = one sample from one bucket's values, null for a gap.
+const DERIVED = {
+  dt: {
+    unit: "K", ins: ["leaving_water", "return_water"],
+    ready: (h) => h.leaving_water && h.return_water,
+    fn: (s) => (s.leaving_water == null || s.return_water == null ? null
+                                                                  : s.leaving_water - s.return_water),
+  },
+  // Water ≈ 4.186 kJ/kg·K, flow in l/min — d.pth's formula, and SIGNED for its reason: during a
+  // defrost the unit pulls heat back out of the water and the curve must show that, not a floor.
+  pth: {
+    unit: "kW", ins: ["flow", "leaving_water", "return_water"],
+    ready: (h) => h.flow && h.leaving_water && h.return_water,
+    fn: (s) => (s.flow == null || s.leaving_water == null || s.return_water == null
+                  ? null : (s.flow / 60) * 4.186 * (s.leaving_water - s.return_water)),
+  },
+  // Amps × an assumed 230 V, CT clamps preferred over the inverter current — liveData()'s rule, one
+  // sample at a time. The live version needs `d.ouHeldOver` to gate the INV fallback because
+  // /values still carries last run's number; here the ring has already withheld it, so a null is
+  // simply a null. `ctLive` keeps the "sum > 0" test: an idle plant reads 0 A on clamps that are
+  // fitted, and the fallback is what makes that a compressor figure rather than a flat zero.
+  pel: {
+    unit: "kW", ins: ["ct_l1", "ct_l2", "ct_l3", "inv_current"],
+    ready: (h) => h.inv_current || h.ct_l1 || h.ct_l2 || h.ct_l3,
+    fn: (s) => {
+      const parts = [s.ct_l1, s.ct_l2, s.ct_l3].filter((x) => x != null);
+      const ct = parts.reduce((a, x) => a + x, 0);
+      if (parts.length && ct > 0) return (ct * 230) / 1000;
+      return s.inv_current == null ? null : (s.inv_current * 230) / 1000;
+    },
+  },
+  // The quotient, and it is deliberately drawn on FEWER samples than its two inputs. Two gates:
+  //   running — the live pill's own (rps > 5, ΔT > 0.5); a COP of a stopped plant is not a small
+  //             COP, it is not one at all.
+  //   scope   — cop_scope.hpp: the CT clamps see the whole unit INCLUDING both resistive heaters
+  //             while the heat side is the pre-BUH outlet, so a CT-sourced quotient is only honest
+  //             once the heaters are known quiet — and their history is not buffered (three more
+  //             rings, for a gate rather than a curve). So a CT-sourced sample draws NOTHING here.
+  //             That is the same refusal the live pill makes when it cannot pair the boundaries,
+  //             not a rounding of it: an INV-sourced sample has the heaters outside both sides and
+  //             needs no such evidence, which is why it is the branch that survives.
+  cop: {
+    unit: "", ins: ["flow", "leaving_water", "return_water", "comp_rps", "inv_current",
+                    "ct_l1", "ct_l2", "ct_l3"],
+    none: {
+      en: "No curve while the electrical figure comes from the CT clamps — pairing it with the heat side across a whole day would need the backup heaters' own history, which is not buffered.",
+      de: "Kein Verlauf, solange der Stromwert von den Stromwandlern kommt — ihn über einen ganzen Tag mit der Wärmeseite zu paaren, bräuchte die Historie der Zusatzheizer, die nicht gepuffert wird.",
+    },
+    ready: (h) => h.flow && h.leaving_water && h.return_water && h.comp_rps && h.inv_current,
+    fn: (s) => {
+      const ct = [s.ct_l1, s.ct_l2, s.ct_l3].filter((x) => x != null).reduce((a, x) => a + x, 0);
+      if (ct > 0) return null;                         // whole-unit divisor — see the note above
+      if (s.inv_current == null || s.flow == null) return null;
+      if (s.leaving_water == null || s.return_water == null || s.comp_rps == null) return null;
+      const dt = s.leaving_water - s.return_water;
+      const pel = (s.inv_current * 230) / 1000;
+      if (!(s.comp_rps > 5) || !(dt > 0.5) || !(pel > 0.2)) return null;
+      return ((s.flow / 60) * 4.186 * dt) / pel;
+    },
+  },
+};
 
 // Was sample `i` absent because the outdoor unit was ASLEEP rather than because something failed to
 // measure? The firmware decides it (logic/history.hpp — pages 0x20/0x21 keep answering with the last
@@ -1782,6 +1879,7 @@ async function ensureHist(id) {
   if (!hasHist(id) || S.histBusy.has(id)) return;
   const c = S.hist.get(id);
   if (c && Date.now() - c.at < 60000) return;
+  if (DERIVED[id]) { await ensureDerived(id); return; }
   S.histBusy.add(id);
   try {
     const r = await fetch("/history?row=" + encodeURIComponent(id));
@@ -1797,6 +1895,63 @@ async function ensureHist(id) {
                         t0: typeof j.t0 === "number" ? j.t0 : null,
                         held: Array.isArray(j.held) ? j.held : [],
                         v: Array.isArray(j.v) ? j.v : [] });
+  } catch (e) {
+    S.hist.set(id, { at: Date.now(), err: true, v: [] });
+  } finally {
+    S.histBusy.delete(id); renderApp();
+  }
+}
+
+// A derived series: fetch every input (each through ensureHist above, so each is cached and
+// throttled exactly once however many figures read it — ΔT, heat output and COP all want the same
+// three rings), then run the figure's own expression down the samples.
+//
+// The result is written into S.hist under the derived id in the SAME shape a fetched series has, so
+// the renderer, the crosshair, the pin and the range readout need to know nothing about where a
+// series came from. `gen` still counts assemblies, which keeps an index-anchored pin as honest here
+// as it is there.
+//
+// Samples are aligned by INDEX, which the firmware makes exact: history.cpp commits every ring on
+// the one bucket boundary, so equal lengths mean equal instants. Unequal lengths can still happen —
+// an input fetched a bucket earlier than another, or a ring reset by a model change — and the
+// answer is to align on the NEWEST sample (both series end at "now") and take the overlap. Padding
+// the short one instead would slide a whole curve along the axis, which is the mislabelling
+// history.hpp refuses when it fills skipped buckets rather than compressing them.
+async function ensureDerived(id) {
+  const D = DERIVED[id];
+  if (S.histBusy.has(id)) return;
+  S.histBusy.add(id);
+  try {
+    const use = D.ins.filter((k) => hasDeviceHist(k));
+    await Promise.all(use.map((k) => ensureHist(k)));
+    const src = use.map((k) => [k, S.hist.get(k)]).filter(([, h]) => h && !h.err && h.v.length);
+    if (!src.length) { S.hist.set(id, { at: Date.now(), err: true, v: [] }); return; }
+    const n = Math.min(...src.map(([, h]) => h.v.length));
+    const base = src[0][1];
+    const v = [], heldRuns = [];
+    for (let i = 0; i < n; i++) {
+      const s = {}; let missing = 0, heldMissing = 0;
+      for (const [k, h] of src) {
+        const j = h.v.length - n + i;                     // tail-aligned: both series end at "now"
+        const raw = h.v[j];
+        s[k] = raw == null ? null : raw / 10;             // tenths on the wire, units in the formula
+        if (raw == null) { missing++; if (histHeld(h, j)) heldMissing++; }
+      }
+      const out = D.fn(s);
+      v.push(out == null || !Number.isFinite(out) ? null : Math.round(out * 10));
+      // A gap inherits its REASON, and only when EVERY missing input carries it: "the outdoor unit
+      // was resting" is a statement that nothing failed, so one input that genuinely failed to
+      // measure has to outrank it. Blaming an idle compressor for a real dropout is the same class
+      // of wrong here as it is on the pill — and the chart's axis prints the two differently.
+      if (out == null && missing > 0 && heldMissing === missing) {
+        const last = heldRuns[heldRuns.length - 1];
+        if (last && last[0] + last[1] === i) last[1]++; else heldRuns.push([i, 1]);
+      }
+    }
+    const gen = ((S.hist.get(id) || {}).gen || 0) + 1;
+    S.hist.set(id, { at: Date.now(), gen, dt: base.dt, unit: D.unit,
+                     t0: typeof base.t0 === "number" ? base.t0 + (base.v.length - n) * base.dt : null,
+                     held: heldRuns, v });
   } catch (e) {
     S.hist.set(id, { at: Date.now(), err: true, v: [] });
   } finally {
@@ -1844,7 +1999,15 @@ function histHtml(id, unit, name) {
   const raw = h.v;
   const pts = raw.map((x) => (x == null ? null : x / 10));   // deci-°C on the wire, one decimal here
   const real = pts.filter((x) => x != null);
-  if (!real.length) return wrap(`<div class="vhist-note">${esc(t("hist.none"))}</div>`, "vhist-flat");
+  // "No readings yet" is the RIGHT sentence for a ring the device has not filled, and the WRONG one
+  // for a derived figure that is being withheld on purpose — the COP on a CT-clamp install has a
+  // full set of inputs and still draws nothing, so the generic note would call a deliberate refusal
+  // an empty buffer, one line under a pill that is showing the very number. A derived series may
+  // therefore name its own empty case.
+  if (!real.length) {
+    const D = DERIVED[id];
+    return wrap(`<div class="vhist-note">${esc(D && D.none ? tx(D.none) : t("hist.none"))}</div>`, "vhist-flat");
+  }
 
   const n = pts.length;
   const spanH = Math.max(1, Math.round((n * h.dt) / 3600));
@@ -2792,6 +2955,7 @@ const INSPECT = {
   rwt: { t: { en: "Return water", de: "Rücklauf" }, re: /inlet water/i, sample: "Inlet Water Temp. (R4T)" },
   dt: {
     t: { en: "ΔT across the system", de: "ΔT über die Anlage" },
+    trend: "dt",   // computed series — see DERIVED
     what: {
       en: "Leaving water minus return water — how much heat the house actually pulled out of the circuit. Not a register: it is computed from the two temperatures. The controller varies pump speed to hold its target ΔT.",
       de: "Vorlauf minus Rücklauf — wie viel Wärme das Haus dem Kreis tatsächlich entzogen hat. Kein Registerwert, sondern aus den beiden Temperaturen berechnet. Der Regler variiert die Pumpendrehzahl, um sein Ziel-ΔT zu halten.",
@@ -2809,6 +2973,7 @@ const INSPECT = {
   },
   pth: {
     t: { en: "Heat output (estimated)", de: "Wärmeleistung (geschätzt)" },
+    trend: "pth",
     what: {
       en: "An ESTIMATE, not a measurement — the bus carries no energy register. It is computed from flow rate and ΔT with the heat capacity of water (4.186 kJ/kg·K), so it is only as good as the flow sensor and the two water temperatures, and it counts only heat from the heat pump's own exchanger (the backup heater sits after it). During a defrost it goes negative, which is real: heat is being taken back out of the water.",
       de: "Eine SCHÄTZUNG, keine Messung — auf dem Bus gibt es kein Energieregister. Berechnet aus Durchflussmenge und ΔT über die Wärmekapazität von Wasser (4,186 kJ/kg·K), also nur so genau wie der Durchflusssensor und die beiden Wassertemperaturen; gezählt wird nur die Wärme aus dem Wärmetauscher der Wärmepumpe (der Zusatzheizer sitzt dahinter). Beim Abtauen wird der Wert negativ — das ist echt: dem Wasser wird Wärme entzogen.",
@@ -2839,6 +3004,7 @@ const INSPECT = {
     // The hit target's accessible name — stable, because it is applied once at startup (see
     // labelSchematicHits). Which COP it turns out to be is the panel's to say, not the label's.
     aria: { en: "COP (estimated)", de: "COP (geschätzt)" },
+    trend: "cop",
     what: {
       en: "Heat out divided by electricity in — how many kW of heat came out per kW that went in. Both sides must describe the SAME system or the quotient is not a COP at all: with whole-unit CT clamps the heat is measured after the backup heater, with the inverter current it is measured before it, so this reads as the plant's efficiency in one case and the heat pump's own in the other. It is a quotient of two ESTIMATES and inherits every assumption both make — and the accuracy is set by the heat side, not the electrical one: two uncalibrated factory sensors ±0.5–1 K across a ΔT of about 5 K already put the live figure within roughly ±15–25 %. Treat it as a working indication; the trustworthy number is the seasonal one (SCOP/JAZ), integrated from metered energy outside this device. It means nothing with the compressor stopped and shows \"—\" then.",
       de: "Wärme raus geteilt durch Strom rein — wie viele kW Wärme je aufgenommenem kW herauskamen. Beide Seiten müssen dasselbe System beschreiben, sonst ist der Quotient gar kein COP: Mit Stromwandlern am ganzen Gerät wird die Wärme nach dem Zusatzheizer gemessen, mit dem Inverterstrom davor — einmal ist das die Effizienz der Anlage, einmal die der Wärmepumpe selbst. Ein Quotient zweier SCHÄTZUNGEN, der sämtliche Annahmen von beiden erbt — und die Genauigkeit bestimmt die Wärmeseite, nicht die elektrische: zwei unkalibrierte Werksfühler mit ±0,5–1 K über ein ΔT von rund 5 K legen den Live-Wert bereits auf etwa ±15–25 % fest. Als Arbeitsanhalt lesen; belastbar ist die Jahreszahl (SCOP/JAZ), integriert aus gemessener Energie außerhalb dieses Geräts. Bei stehendem Verdichter bedeutet er nichts und zeigt dann „—\".",
@@ -2950,6 +3116,7 @@ const INSPECT = {
   },
   pel: {
     t: { en: "Electrical input (estimated)", de: "Stromaufnahme (geschätzt)" },
+    trend: "pel",
     what: {
       en: "What the unit is drawing from the mains, and the divisor of the COP. Also an ESTIMATE: it is measured current × an assumed 230 V, so it ignores power factor. Which current it is decides what the COP above describes — CT clamps see the whole unit including the backup heater, the inverter current sees only the compressor. An inverter-based figure is not the plant's consumption and does not rise when the backup heater fires; the COP beside it is then the heat pump's own and says so.",
       de: "Was das Gerät aus dem Netz zieht, und der Nenner des COP. Ebenfalls eine SCHÄTZUNG: gemessener Strom × angenommene 230 V, der Leistungsfaktor bleibt also unberücksichtigt. Welcher Strom es ist, entscheidet, was der COP darüber beschreibt — Stromwandler (CT) erfassen das ganze Gerät inklusive Zusatzheizer, der Inverterstrom nur den Verdichter. Ein Inverterwert ist nicht der Verbrauch der Anlage und steigt nicht, wenn der Zusatzheizer heizt; der COP daneben ist dann der der Wärmepumpe selbst und sagt das auch.",
@@ -3092,19 +3259,30 @@ const inspRow = (e) => (e.pick ? e.pick() : e.re ? vRow(e.re) : null);
 // the picture, and asserting as current exactly the last-run value the blanking exists to withhold.
 const inspVal = (r, d) => (r == null || rowHeldOver(r, d) ? "—" : displayValue(r) + (r.unit ? " " + r.unit : ""));
 
-// Said instead of the entry's own `now` when its headline reading is held over: the pill can only
-// blank, so the reason it is blank has to be stated here (the same division of labour the outdoor
-// unit's idle sentence and the electrical estimate's already follow).
+// Said when the entry's headline reading is held over: the pill can only blank, so the reason it is
+// blank has to be stated here (the same division of labour the outdoor unit's idle sentence and the
+// electrical estimate's already follow). It reads as a NOTE at the END of the explainer, in the
+// "Normal:" shape — its own paragraph, a lead-in in stronger ink, the reason in the body's own ink,
+// rendered by the same descNoteHtml — and not as the
+// bold block ahead of the description that it used to be: the panel exists to say what the value IS,
+// and three bold lines about a sensor that is merely resting had come to outweigh the answer. Still
+// SUPPRESSES the entry's own `now` (inspNowText), since a sentence about what a reading is doing is
+// void when there is no reading.
 const HELD_OVER_NOW = {
-  en: "No current reading — the compressor is stopped, and the outdoor unit only refreshes its own sensors while it runs. The last run's value is withheld rather than shown as if it were being measured now.",
-  de: "Kein aktueller Messwert — der Verdichter steht, und die Außeneinheit aktualisiert ihre eigenen Fühler nur im Betrieb. Der Wert des letzten Laufs wird zurückgehalten statt als gerade gemessen dargestellt.",
+  lead: { en: "No current reading:", de: "Kein aktueller Messwert:" },
+  why: {
+    en: "the compressor is stopped, and the outdoor unit only refreshes its own sensors while it runs. The last run's value is withheld rather than shown as if it were being measured now.",
+    de: "der Verdichter steht, und die Außeneinheit aktualisiert ihre eigenen Fühler nur im Betrieb. Der Wert des letzten Laufs wird zurückgehalten statt als gerade gemessen dargestellt.",
+  },
 };
+const inspHeld = (e, d) => !!d && rowHeldOver(inspRow(e), d);
+const inspHeldHtml = (e, d) =>
+  (inspHeld(e, d) ? descNoteHtml(tx(HELD_OVER_NOW.lead), tx(HELD_OVER_NOW.why)) : "");
 
-// The live sentence above the timeless description: the held-over explanation wins over the entry's
-// own `now`, since a sentence about what a reading is doing is void when there is no reading.
+// The live sentence above the timeless description — dropped entirely while the reading is held
+// over, where the note below the description answers instead.
 const inspNowText = (e, d) => {
-  if (!d) return null;
-  if (rowHeldOver(inspRow(e), d)) return tx(HELD_OVER_NOW);
+  if (!d || inspHeld(e, d)) return null;
   return e.now ? tx(e.now(d)) : null;
 };
 
@@ -3125,7 +3303,7 @@ function inspectSig(e) {
   const row = d ? inspRow(e) : null;
   const rows = (d && e.rows ? e.rows.map((sel) => inspVal(pickRow(sel), d)) : []).join(",");
   return [S.insp, inspTitleText(e, d), inspVal(row, d), d && e.head ? e.head(d) : "",
-          inspNowText(e, d) || "", rows].join("|");
+          inspNowText(e, d) || "", inspHeld(e, d) ? "held" : "", rows].join("|");
 }
 
 // The trend under the inspector: the same sparkline the value list draws (histHtml), for the row
@@ -3138,8 +3316,12 @@ function inspectSig(e) {
 // Written on its OWN signature, not the inspector's: the card re-renders whenever a live value
 // changes (~1×/s), and re-emitting the plot that often would tear down a crosshair mid-read and
 // restart the CSS transition. Only a new series (`gen`) or a moved pin actually changes the markup.
-function renderInspectHist(row) {
-  const id = row ? histIdFor(row.label) : "";
+function renderInspectHist(e, row) {
+  // A pill drawn from a ROW charts that row; a COMPUTED pill (ΔT, heat output, electrical input,
+  // COP) charts its own derived series, named by the entry's `trend`. Never one of its inputs: a
+  // curve of the flow rate under a heat-output headline is the substitution this file spends most
+  // of its comments preventing.
+  const id = row ? histIdFor(row.label) : (e && e.trend && hasHist(e.trend) ? e.trend : "");
   if (id) ensureHist(id);                  // throttled to once a minute inside; no-op once cached
   const h = id ? S.hist.get(id) : null;
   const pin = id ? S.histPin.get(id) : null;
@@ -3148,7 +3330,15 @@ function renderInspectHist(row) {
   S.inspHistSig = sig;
   const el = $("inspHist");
   el.hidden = !id;
-  el.innerHTML = id ? histHtml(id, row.unit, displayReadingLabel(row.label)) : "";
+  // The chart's name is the entry's STABLE concept, never its live title — the same rule
+  // labelSchematicHits follows, for the same reason. The COP is the one that would break: its title
+  // states which SYSTEM the present quotient describes (plant vs heat pump, logic/cop_scope.hpp),
+  // and a 24-hour curve cannot be named after the state of one second. It would have read "COP of
+  // the plant" over a series that is, by construction, the heat pump's own — a scope mismatch under
+  // a chart, which is the failure cop_scope exists to prevent.
+  el.innerHTML = !id ? ""
+    : row ? histHtml(id, row.unit, displayReadingLabel(row.label))
+          : histHtml(id, DERIVED[id].unit, e.aria ? tx(e.aria) : inspTitleText(e, null));
 }
 
 function renderInspect() {
@@ -3159,7 +3349,7 @@ function renderInspect() {
   if (S.scrub) return;
   // The chart is decided ahead of the early return below, because its own state moves independently
   // of the card's: the series arrives from an async fetch that changes no live value.
-  renderInspectHist(S.live && e ? inspRow(e) : null);
+  renderInspectHist(e, S.live && e ? inspRow(e) : null);
   // This runs on EVERY poll so an open explainer tracks the live values — but writing innerHTML each
   // second would collapse a text selection the user is mid-read of. Diff the rendered result first
   // and touch the DOM only when something actually changed.
@@ -3184,13 +3374,18 @@ function renderInspect() {
   // An explicit formatter wins over the raw row value. Binary component states use this to say
   // ON/OFF instead of exposing an unexplained 1/0, while the row still names the source.
   if (hasHead) setTxt("inspNow", d && e.head ? e.head(d) : (row ? inspVal(row, d) : "—"));
-  // `now` is always prose — the live "what is it doing" sentence — so it opens the body in bold,
-  // ahead of the timeless explainer. Never the headline: a sentence in a 19px number slot reads as
-  // a broken value.
+  // `now` is always prose — the live "what is it doing" sentence — and it CLOSES the body, as its
+  // own paragraph after the timeless explainer and its "Normal:" note, in the body's own ink. It
+  // used to open the body in bold, which inverted the panel: a reader opens an explainer BECAUSE
+  // they do not know what the quantity is, and three bold lines about a transient state stood in
+  // front of the answer they came for. The held-over note (inspHeldHtml) takes the same slot in the
+  // same shape — the two are mutually exclusive, since a sentence about what a reading is doing is
+  // void when there is no reading. Never the headline either: a sentence in a 19px number slot
+  // reads as a broken value.
   const sentence = inspNowText(e, d);
   const desc = e.sample ? descFor(e.sample) : null;
-  const what = e.what ? esc(tx(e.what)) : (desc ? descBodyHtml(desc) : "");
-  $("inspBody").innerHTML = (sentence ? `<b>${esc(sentence)}</b> ` : "") + what;
+  const what = e.what ? descParaHtml(esc(tx(e.what))) : (desc ? descBodyHtml(desc) : "");
+  $("inspBody").innerHTML = what + (sentence ? descParaHtml(esc(sentence)) : "") + inspHeldHtml(e, d);
   $("inspRows").innerHTML = !d || !e.rows ? "" : e.rows
     .map((sel) => pickRow(sel))
     .filter((r, i, a) => r && a.indexOf(r) === i)     // a regex may hit a row an earlier one took
