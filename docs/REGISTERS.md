@@ -275,42 +275,59 @@ the I/U capacity code (`0x60` offset 6).
 | 12 | 1 | 303 | 3 |  | Other Drop Control |
 | 12 | 1 | 311 | s0-2 |  | Not in use |
 
-> **Measured anomaly — `Target Evap. Temp.` (offset 6) reads 10× high on at least TWO families**
-> ([#194](https://github.com/0Bu/daikin-altherma-esp32/issues/194),
-> [#209](https://github.com/0Bu/daikin-altherma-esp32/issues/209)). On a live 4-8 kW unit
-> (`altherma_ebla_edla_d_series_4_8kw_monobloc`, 2026-07-26) this row decodes to **240.6 °C at rest**
-> and **145.9 → 199.6 °C while the compressor runs** — impossible for an evaporating temperature, and
-> the run-time values land *inside* `reading_plausible()`'s ±200 °C envelope, so nothing masked them.
-> #209 reproduced the same shape on an independent family
-> (`altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw`, ERGA/EHB split, 2026-07-27) against a
-> manufacturer-documented EKRHH HomeHub reference: max **199.6 °C**, last stored **193.2 °C**. Wrong
-> on both, correct on nothing anyone has measured. The row is not a placeholder: it tracks the
-> compressor cycle, dipping during a run and returning at rest.
+> **RESOLVED — `Target Evap. Temp.` (offset 6) is encoded `÷128`, not `×0.1`; the row is decoded
+> with conv `109`** ([#194](https://github.com/0Bu/daikin-altherma-esp32/issues/194),
+> [#209](https://github.com/0Bu/daikin-altherma-esp32/issues/209)). With conv `114` this row read
+> **240.6 °C at rest** and **145.9 → 199.6 °C while the compressor runs** — impossible for an
+> evaporating temperature, and the run-time values land *inside* `reading_plausible()`'s ±200 °C
+> envelope, so nothing masked them. #194 ruled out offset shift, endianness, width and catalog drift
+> and stopped at two surviving scales, `×0.01` and `÷128`, calling for run-time wire bytes to decide.
 >
-> **The row is now QUARANTINED** — `logic/availability.hpp` gives it `AvailabilityPolicy::Unproven`,
-> so it reaches no publish surface (`/values`, the WebSocket, the MQTT state topic) and its retained
-> HA discovery config is retracted on upgrade. The register keeps its row here and in every profile:
-> a profile's detection signature *is* the set of pages its rows reference, so deleting it would move
-> detection. Quarantine stops the false value; it does not decide the scale.
+> They were decidable without new capture. conv 114 publishes `raw × 0.1` at one decimal, so every
+> value this row has ever published carries its 16-bit register **exactly** (`raw = published × 10`)
+> — #194's assumption that the published figures were lossily rounded is what kept it open. Taking
+> the 46 distinct run-time integers from the stored series together with the 8 distinct at-rest
+> integers from the boot-time page dumps gives 54 samples, and **all 54 satisfy
+> `raw == floor(128 × T)` for `T` on an exact 0.1 K grid**. The set `{floor(12.8k)}` has density
+> 1/12.8 among the integers, so that is p ≈ 1.6 × 10⁻⁶⁰ against any other scale. `×0.01` produces no
+> such grid (22.01, 22.14, 22.40, 23.04 …), and the physical argument that favoured it — 24.06 °C at
+> rest against "a measured 22.5–23.0 °C ambient" — compared against the X10A outdoor reading, which
+> #209 later proved is **held over** while the unit rests (`logic/ou_stale.hpp`). Against the
+> independent HomeHub sensor the row does not track ambient at all.
 >
-> The conv above is **deliberately left as `114`.** The catalog agrees with it in 44 of 45 profiles,
-> `convert()` implements it exactly as §3.1 specifies, and offset shift / endianness / width are all
-> ruled out in #194. What remains is a scale mismatch, and the two candidates that still fit the
-> physics (`×0.01` → 24.06 °C at rest against a measured 22.5–23.0 °C ambient; `÷128` → 18.80 °C)
-> cannot be separated from this unit, because every other conv-114 row on it reads raw `0`. Editing
-> this table to match a hypothesis would change what the domain audit believes and pass every gate
-> while making the firmware more wrong, so the discrepancy is recorded here instead and pinned by a
-> witness `CHECK` in `test/test_logic.cpp`. Resolving it needs the raw page-`0x10` bytes captured
-> while the compressor runs — which the firmware now does: `logic/raw_capture.hpp` dumps the raw
-> `0x10`/`0x20` payloads to `/diag` on the stopped→running edge and every 5 min during a run, up to 8
-> times per boot. Until then the label difference in `altherma_lt_d7_e_bml` (which calls this same
-> register `Target Discharge Temp.`) changes nothing: a discharge target of 145–200 °C is no more
-> real than an evaporating one.
+> | | conv 114 (`×0.1`) | conv 109 (`÷128`) |
+> |---|---|---|
+> | compressor running | 133.1 – 199.6 °C | **10.4 – 15.6 °C** |
+> | at rest | 220.1 – 243.2 °C | **17.2 – 19.0 °C** |
 >
+> **The conv in the table above is deliberately still `114`** — it records what the generated `def/`
+> tables carry, and those are machine output from an offline generator that lives outside this repo
+> (`.claude/CLAUDE.md`: never hand-edit one). The correction is applied by
+> `logic/conv_override.hpp`, which maps `(0x10, 6, 114) → 109` at every point a row enters the
+> pipeline, carries the evidence beside the rule, and is asserted against all 54 wire integers and
+> the whole 45-profile catalog in `test/test_logic.cpp`. conv `114` itself is untouched — it is a
+> correct `×0.1` converter and three other rows use it.
+>
+> Because this table and the generated rows still agree on `114`, the **domain audit sees no
+> mismatch and cannot see the adjudication at all** — it compares the tables against this spec, and
+> the override sits outside both. That gap is covered deliberately from the other side: the catalog
+> test asserts that exactly **44** profiles still carry `(0x10, 6, conv 114)`, so the day
+> `gen_profiles.py` emits conv `109` — at which point the override becomes a correct no-op, since it
+> is keyed `from: 114` — the count changes and the test fails, forcing this adjudication to be
+> re-read rather than left as silent dead code.
+>
+> The row is **no longer quarantined**: `logic/availability.hpp` had it as
+> `AvailabilityPolicy::Unproven` while the scale was unknown, and that verdict is retired. It was
+> never unmeasurable — it was pointed at the wrong converter. The label difference in
+> `altherma_lt_d7_e_bml` (which calls this same register `Target Discharge Temp.`) changes nothing:
+> the correction is keyed on the register, not the name.
+
 > Same page, same converter, separate verdict: `Target Cond. Temp.` (offset 8) publishes a flat
-> `0.0 °C` on **both** families — one distinct value across a full #209 audit window while the
-> inverter reached 32 rps and the discharge pipe passed 100 °C, and "reads 0.0 even mid-run" on the
-> #194 unit, where `logic/ou_stale.hpp` already records it as a useless witness for that reason. Raw
+> `0.0 °C` — one distinct value across a full #209 audit window while the
+> inverter reached 32 rps and the discharge pipe passed 100 °C, and "reads 0.0 even mid-run" in #194.
+> (Both audits ran against the SAME board, which detection has always resolved to
+> `altherma_ebla_edla_d_series_4_8kw_monobloc`; the "two families" reading of #209 took the hardware
+> identification in its scope section for the running profile.) There, `logic/ou_stale.hpp` already records it as a useless witness for that reason. Raw
 > is `0x0000`, which conv 114's `0x8000` no-data marker does not cover. The row is **not**
 > quarantined — the field can legitimately be populated — but an exact decoded zero from it is
 > adjudicated `AvailabilityPolicy::ZeroMeansAbsent` and withheld. Deliberately per-row: a global

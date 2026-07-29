@@ -634,27 +634,28 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 hexdump, led_pattern, button, captive,
                 lwt_select, ou_stale, cop_scope, profile_view, feature_gate, availability,
                 fault_state,
-                raw_capture).
+                raw_capture, conv_override).
                 availability.hpp = the ADJUDICATED per-row answer to "is this decoded number a
                 MEASUREMENT, or merely something the firmware could decode?" (#209). Every other gate
                 answers something narrower: convert() handles the wire format's own 0x8000 no-data
                 marker, reading_plausible() catches a number that is IMPOSSIBLE, ValueDef::no_publish
                 carries what the GENERATOR knew. What is left is a field that decodes to an entirely
                 ordinary number which measures nothing, and only per-row evidence can name it. Two
-                verdicts, each carrying its live capture beside the rule: Unproven (Target Evap. Temp.
-                0x10/6 — a faithful conv-114 decode yielding 145.9-199.6 C mid-run, measured on the
-                EBLA/EDLA monobloc in #194 and reproduced on the ERGA/EHB split in #209 against a
-                manufacturer-documented HomeHub reference: wrong on both, right on nothing measured)
-                withholds the ROW from every publish surface and retracts its retained HA config;
-                ZeroMeansAbsent (Target Cond. Temp. 0x10/8 — raw 0x0000 through a full compressor
-                cycle on both families, which is also why ou_stale.hpp already calls it a useless
-                witness) withholds only that exact value. Keyed on (page, offset, converter) — the
+                verdicts exist; ONE is currently in force. ZeroMeansAbsent (Target Cond. Temp. 0x10/8
+                — raw 0x0000 through a full compressor cycle, which is also why ou_stale.hpp already
+                calls it a useless witness) withholds only that exact value. Unproven — withhold the
+                ROW from every publish surface and retract its retained HA config — is implemented
+                and has NO live entry: it held Target Evap. Temp. (0x10/6) while the scale was
+                unknown, and #194 then showed that row was not unmeasurable but mis-decoded, so the
+                verdict moved to logic/conv_override.hpp. A quarantine and a mis-decode are
+                different findings; recording them as one makes the fix look like a suppression
+                quietly lifted. Keyed on (page, offset, converter) — the
                 row's STRUCTURAL identity, never its label (the lwt_select lesson) and deliberately
                 NOT scoped to a profile id, since both rows sit at byte-identical coordinates in
                 every generated table and a per-id list would claim a per-model fact nobody
                 established. The catalog test is the load-bearing half: it proves each rule selects
                 the adjudicated quantity across all 45 profiles — INCLUDING altherma_lt_d7_e_bml,
-                which spells the quarantined register "Target Discharge Temp." while the other 43 and
+                which spells the re-decoded register "Target Discharge Temp." while the other 43 and
                 REGISTERS.md §5 call it "Target Evap. Temp." (same page, offset, conv, width and
                 type: one family's source catalog simply names it differently, and a discharge target
                 of 145-200 C is no more real than an evaporating one) — that no 0x60-0x62 hydronic
@@ -666,6 +667,35 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 mqtt_ha (what to ANNOUNCE) cannot see different row sets; value_available() is
                 applied by hp_format beside reading_plausible, for the same reason — convert() keeps
                 its intrinsic per-converter semantics so the domain audit still sees them
+                conv_override.hpp = which CONVERTER a generated row is actually encoded with, when
+                the id the generator emitted is the wrong one. Sibling of availability.hpp and
+                separate on purpose: that one asks "is this a measurement?" and answers by
+                WITHHOLDING, this one asks "is it being decoded right?" and answers by asserting a
+                DIFFERENT value — a stronger claim, so the bar is higher. A rule needs STRUCTURAL
+                evidence (a property of the wire integers), never a range that merely looks nicer;
+                fitting a scale to make a number plausible is how #35-#39 shipped. ONE entry:
+                Target Evap. Temp. (0x10/6) conv 114 -> 109. #194 called x0.1's 145.9-199.6 C mid-run
+                impossible, ruled out offset/endianness/width/drift, and stalled on two surviving
+                scales (x0.01, /128) awaiting run-time wire bytes. Those bytes were already in hand:
+                conv 114 publishes raw x 0.1 at ONE decimal, so raw = published x 10 EXACTLY — the
+                "already rounded to one decimal" assumption is what kept the issue open. All 54
+                distinct integers ever observed (46 run-time from the stored series, 8 at rest from
+                the boot-time page dumps) satisfy raw == floor(128 x T) on an exact 0.1 K grid;
+                {floor(12.8k)} has density 1/12.8, so p ~ 1.6e-60 against any other scale. x0.01 has
+                no such grid, and the ambient cross-check that favoured it compared against the X10A
+                outdoor reading — which ou_stale.hpp says is HELD OVER at rest. Reads 10.4-15.6 C
+                running / 17.2-19.0 C at rest. conv 109 already existed (/256*2 = /128), so nothing
+                in the decode path is invented: this is the #35-#39 shape, a wrong converter ID on a
+                right register, NOT a wrong converter — 114 keeps its x0.1 semantics and its three
+                other rows. Those three (0x10/8, 0xA1/5, 0xA1/7) are deliberately NOT touched: they
+                read raw 0 on the only unit measured and 0 decodes to 0.0 under both scales, so there
+                is no evidence either way and "probably the same bug" is the guess this project
+                refuses. Keyed on (reg, offset, conv) like availability.hpp, applied where a row
+                ENTERS the pipeline (hp_poll decode + cache, mqtt_ha discovery) so published_kind,
+                conv_is_binary and display_decimals cannot disagree about one row. The catalog test
+                pins that exactly 44 profiles still carry (0x10, 6, 114) — the day the generator
+                emits 109 the override becomes a no-op (it is keyed from:114) and that count trips,
+                forcing a re-read instead of leaving silent dead code
                 fault_state.hpp = the NUMERIC fault flags that ride beside the TEXTUAL Daikin code
                 (#209 defect 4). Convs 203/204 stay text — "Normal"/"U4"/"7H" is what a human and HA
                 want, and inventing a numeric enum over Daikin's alphanumeric code space would be a
@@ -1114,11 +1144,12 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 (0x10/6) hit 199.6 °C, and the outdoor pressures (0x20/12+14) read 0.0 bar with the
                 compressor at 42 rps). The Target Evap. case is DIAGNOSED in #194: a scale mismatch,
                 not an offset — the row tracks the compressor cycle (240.6 °C at rest, dipping to
-                145.9 °C running) and conv 114/size/offset all match REGISTERS.md §5 and 44 of 45
-                profiles, so it is left alone and pinned by a witness CHECK rather than "fixed" by
-                bending the spec the audit reads. Its LIMITATION is now the blocker: the dump fires
-                only on a detect pass, which never coincides with a compressor run, so the bytes
-                behind the wrong value have never been captured at the instant it is wrong. HTTP exposes
+                145.9 °C running). #194 is now RESOLVED — the scale is /128 and the row is decoded
+                with conv 109 (logic/conv_override.hpp); it was settled from the wire integers the
+                published series already carried losslessly, not from this dump. The dump's own
+                LIMITATION is why it could not settle it: it fires only on a detect pass, which never
+                coincides with a compressor run, so the bytes behind the wrong value were never
+                captured at the instant it was wrong (raw_capture.hpp closes that half). HTTP exposes
                 only DECODED values, so a physically impossible reading cannot be attributed to a
                 wrong converter vs. a wrong byte offset vs. a per-unit layout difference without the
                 wire bytes — and they otherwise never leave the device. Truncation is by WHOLE bytes:

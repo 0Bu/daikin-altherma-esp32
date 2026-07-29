@@ -35,6 +35,7 @@
 #include "logic/availability.hpp"
 #include "logic/convert.hpp"   // conv_is_binary, published_kind — a row's wire type and entity domain
 #include "logic/crashinfo.hpp"
+#include "logic/conv_override.hpp"
 #include "logic/discovery.hpp"
 #include "logic/fault_state.hpp"
 #include "logic/heartbeat.hpp"
@@ -246,7 +247,7 @@ static void retract_legacy_values(const logic::ProfileView& prof, const std::str
     s_legacy_values_profile = profile_id;
     if (s_board == s_node) return;
     for (size_t i = 0; i < prof.count(); i++) {
-        const ValueDef& d = prof[i];
+        const ValueDef  d = logic::adjudicated(prof[i]);   // wire truth, not the generator label
         // Every row an older build published — including a row that is detect-only (no_publish)
         // TODAY: it was a plain sensor before the flag existed, and that config is still retained.
         if (!is_publishable(d.conv) || object_id(d.label).empty()) continue;
@@ -270,7 +271,7 @@ static void publish_discovery() {
     // must not re-send ~100 deletes for entities that no longer exist under that id.
     if (s_legacy_values_profile != profile_id) retract_legacy_values(prof, profile_id);
     for (size_t i = 0; i < prof.count(); i++) {
-        const ValueDef& d = prof[i];
+        const ValueDef  d = logic::adjudicated(prof[i]);   // wire truth, not the generator label
         // A row the firmware does not publish — the generator's detect-only flag, or the availability
         // ledger's Unproven verdict (logic/availability.hpp). RETRACT rather than merely skip: an
         // install upgrading from a build that DID publish this row already has a RETAINED discovery
