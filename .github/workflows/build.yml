@@ -165,6 +165,18 @@ jobs:
         run: ./scripts/run-redaction-audit.sh
       - name: Verify the redaction audit still has teeth
         run: ./tools/redact/selftest.sh
+      # The docs hand the reader copy-pasteable YAML naming Home Assistant entity ids, each derived
+      # from a catalog LABEL — so an id is only as stable as the label, and the catalog spells the
+      # same quantity several ways across models. A wrong id errors NOWHERE: HA builds the template
+      # sensor, its availability guard never becomes true, and it sits at `unavailable`, which reads
+      # as "my heat pump doesn't support this" rather than as a typo in the docs. Shipped that way
+      # since #206 — the heat-meter recipe named one id that was never a valid slug and one that
+      # exists only on the host-test FIXTURE profile detection can never assign. C++ host compiler
+      # only, seconds long.
+      - name: Audit the entity ids quoted in the docs
+        run: ./scripts/run-doc-entity-audit.sh
+      - name: Verify the doc entity-id audit still has teeth
+        run: ./tools/docs/selftest.sh
       # The README's dashboard recording (docs/media/dashboard.gif) is the first thing a new user
       # sees, and the one artefact here that rots INVISIBLY: a recording renders perfectly forever,
       # whatever the UI has since become, so every gate above stays green while the README shows

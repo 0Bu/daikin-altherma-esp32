@@ -64,6 +64,7 @@ scripts/run-description-audit.sh  # can the user find out what each value IS? (n
 scripts/run-schematic-audit.sh    # does the DRAWING still say what it means? (node-only)
 scripts/run-redaction-audit.sh    # can a bug report still leak the USER's data? (python-only)
 scripts/run-ui-gif-audit.sh       # is the README's RECORDING still of this UI? (node-only)
+scripts/run-doc-entity-audit.sh   # do the docs' copy-paste ENTITY IDS exist? (c++ host compiler)
 ```
 
 The third is the same question one layer up from the second: the domain audit asks whether a
@@ -128,7 +129,7 @@ found `mqtt: retired legacy HA device %s` printing the unique half of the MAC th
 redacting three sections above it. `tools/redact/audit_exceptions.txt` is its ledger and
 `tools/redact/selftest.sh` re-seeds both defects it was built for.
 
-The FIFTH guards the README's RECORDING of that drawing — `docs/media/dashboard.gif`, the animated
+The SIXTH guards the README's RECORDING of that drawing — `docs/media/dashboard.gif`, the animated
 dashboard a new user sees before anything else. It is the one artefact here that rots INVISIBLY: a
 recording renders perfectly forever, whatever the UI has since become, so all four gates above stay
 green while the README shows last month's pipes or a component that no longer exists. A screenshot
@@ -159,6 +160,24 @@ catches each way the recording can go stale. The judgement half is the `/ui-gif`
 four scenes are still the right ones, whether the invented numbers are still physically coherent,
 and whether the standby scene still shows the honest blanking that is the point of showing it at
 all.
+
+The SEVENTH asks whether the DOCS' copy-pasteable recipes still name entities that EXIST. The docs
+hand a reader YAML naming ids like `sensor.daikin_altherma_inlet_water_temp_r4t`; each is derived
+from a catalog LABEL (`ha_slug`), so it is only as stable as that label — and the catalog spells one
+quantity several ways across models, which no reader of the doc can see. A wrong id errors NOWHERE:
+HA builds the template sensor, its `availability` guard never becomes true, the entity sits at
+`unavailable`, and that reads as "my heat pump doesn't support this" rather than as a typo in the
+documentation. Every other gate here is green while it happens — the firmware is right, the values
+are true, the drawing is right, and the recipe cannot work. It resolves each quoted id through the
+REAL `ha_slug` over the REAL catalog (no second copy of the id rule) and — the load-bearing part —
+only against **detectable** profiles: `is_detection_model()` refuses `generic` and the hand-written
+fixture `altherma3_r_erga`, and the heat-meter recipe had been naming a row that exists ONLY in that
+fixture since #206, so a check resolving against the whole registry would have called it clean. It
+is deliberately NOT a demand that an id be right on EVERY profile — the catalog genuinely disagrees
+across models, and the docs should state a majority id and name the alternatives beside it; the
+question here is the decidable one, does this id exist anywhere a real device could produce it.
+There is NO exceptions ledger: an id either resolves or it does not. `tools/docs/selftest.sh`
+re-seeds the two defects it was built for plus an ordinary typo.
 
 (Three more fast gates guard the PUBLISHED ARTIFACTS rather than the firmware —
 `scripts/run-pages-publish-tests.sh`, git-only, relevant when `scripts/publish-pages-branch.sh` or
