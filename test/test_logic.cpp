@@ -8,6 +8,8 @@
 #include <cstdio>
 #include <cstring>
 #include <initializer_list>
+#include <map>
+#include <set>
 #include <string>
 
 #include "logic/availability.hpp"
@@ -4691,6 +4693,259 @@ static void test_profile_view() {
     }
 }
 
+// ── Metric identity: a label is an IDENTIFIER, and a rename forks the series (#217) ─────────────
+// The block above freezes eleven metric ids that were verified in the live store (#180). This one
+// answers the question that leaves open: the OTHER ~150.
+//
+// A published row reaches VictoriaMetrics as `daikin_altherma_<group>_<object_id>` and Home
+// Assistant as an entity keyed on the same slug. Both halves are derived from the row's LABEL, so
+// editing a label is not a cosmetic act — it retires one series and starts another at zero, with no
+// error anywhere. It has already happened: f1a5e69 (#139) renamed
+//   "Expansion valve 3 (pls)" -> "Expansion valve 3 (pls) [OU-II]"
+// across 19 profiles, and in the store `daikin_altherma_outdoor_aux_expansion_valve_3_pls` simply
+// stops 5.8 days before `..._expansion_valve_3_pls_ou_ii` begins. The rename was correct; going
+// unnoticed was not.
+//
+// So: freeze the whole published identifier set. This is deliberately the set of DISTINCT
+// (group, object_id) pairs over every profile — not per-profile rows — because that is exactly what
+// the store is keyed on: two profiles carrying the same row contribute one series, and reordering
+// or adding a profile moves nothing.
+//
+// WHEN THIS TEST FAILS, that is the gate working. Regenerating the list is not the fix; it is the
+// decision. Adding an entry is routine (a new row = a new series). REMOVING or CHANGING one means a
+// series stops and its history is stranded, so it belongs in the commit message with the reason —
+// and if the row still exists under a new name, mqtt_ha.cpp's retraction machinery
+// (retract_legacy_*) is what keeps Home Assistant from stranding the old entity beside the new one.
+//
+// Unlike #180's eleven, these are computed from the catalog rather than transcribed from the store,
+// so they do not independently witness what VictoriaMetrics holds. What they do witness is CHANGE:
+// the strings below are frozen literals, so a rename, a dropped row or an edit to ha_slug() itself
+// all fail here — which is the property that was missing.
+static void test_metric_identity() {
+    // Every distinct <group>_<object_id> a published catalog row currently produces.
+    static const char* const EXPECTED[] = {
+    "actuators_brine_pump_feedback",
+    "actuators_compressor_speed_rps",
+    "actuators_expansion_valve_1_pls",
+    "actuators_expansion_valve_2_pls",
+    "actuators_expansion_valve_3_pls",
+    "actuators_expansion_valve_4_pls",
+    "actuators_fan_1_10_rpm",
+    "actuators_fan_1_step",
+    "actuators_fan_2_step",
+    "actuators_inv_frequency_rps",
+    "hybrid_2nd_domestic_hot_water_temperature",
+    "hybrid_be_cop",
+    "hybrid_boiler_dhw_demand",
+    "hybrid_boiler_heating_target_temp",
+    "hybrid_boiler_operation_demand",
+    "hybrid_hybrid_heating_target_temp",
+    "hybrid_hybrid_op_mode",
+    "hybrid_mixed_water_temp",
+    "hybrid_mixed_water_temp_r7t",
+    "hydronic_2way_valve_on_heat_off_cool",
+    "hydronic_3way_valve_on_dhw_off_space",
+    "hydronic_benefit_kwh_rate_power_supply",
+    "hydronic_bivalent_operation",
+    "hydronic_bsh",
+    "hydronic_buh_step1",
+    "hydronic_buh_step2",
+    "hydronic_dhw_setpoint",
+    "hydronic_error_code",
+    "hydronic_error_type",
+    "hydronic_freeze_protection",
+    "hydronic_freeze_protection_for_water_piping",
+    "hydronic_i_u_capacity_code",
+    "hydronic_i_u_operation_mode",
+    "hydronic_indoor_unit_capacity",
+    "hydronic_leaving_water_setpoint_main",
+    "hydronic_lw_setpoint_main",
+    "hydronic_silent_mode",
+    "hydronic_smartgridcontact1",
+    "hydronic_smartgridcontact2",
+    "hydronic_solar_pump_operation",
+    "hydronic_state_alarm_output",
+    "hydronic_state_circulation_pump_operation",
+    "hydronic_state_emergency_indoor_active_not_active",
+    "hydronic_state_flow_rate_l_min",
+    "hydronic_state_flow_sensor_l_min",
+    "hydronic_state_lw_setpoint_add",
+    "hydronic_state_powerful_dhw_operation_on_off",
+    "hydronic_state_pressure_sensor",
+    "hydronic_state_pressure_sensor_t",
+    "hydronic_state_pump_speed",
+    "hydronic_state_refrigerant_pressure_sensor",
+    "hydronic_state_reheat_on_off",
+    "hydronic_state_rt_setpoint",
+    "hydronic_state_space_h_operation_output",
+    "hydronic_state_space_heating_operation_on_off",
+    "hydronic_state_storage_comfort_on_off",
+    "hydronic_state_storage_eco_on_off",
+    "hydronic_state_tank_preheat_on_off",
+    "hydronic_state_water_pressure",
+    "hydronic_state_water_pump_signal_0_max_100_stop",
+    "hydronic_temps_dhw_tank_temp_r5t",
+    "hydronic_temps_ext_indoor_ambient_sensor_r6t",
+    "hydronic_temps_hpsu_tr_return_temp_r4t",
+    "hydronic_temps_hpsu_tv_inflow_temp_r1t",
+    "hydronic_temps_hpsu_tvbh_inflow_temp_after_buffer_buh_r2t",
+    "hydronic_temps_indoor_ambient_temp_r1t",
+    "hydronic_temps_inlet_water_temp_r4t",
+    "hydronic_temps_leaving_water_temp_after_buh_r2t",
+    "hydronic_temps_leaving_water_temp_after_phe_r1t",
+    "hydronic_temps_leaving_water_temp_before_buh_r1t",
+    "hydronic_temps_outdoor_ambient_or_ext_sensor",
+    "hydronic_temps_outlet_water_buh_temp_r2t",
+    "hydronic_temps_outlet_water_heat_exch_temp_r1t",
+    "hydronic_temps_refrig_temp_liquid_side_r3t",
+    "hydronic_temps_return_water_temp_before_phe_r4t",
+    "hydronic_temps_rt_temp",
+    "hydronic_thermal_protector_bsh",
+    "hydronic_thermostat_on_off",
+    "hydronic_water_flow_switch",
+    "hydronic_water_pump_operation",
+    "inverter_brine_inlet_temp",
+    "inverter_brine_outlet_temp",
+    "inverter_compressor_outlet_temperature",
+    "inverter_fan1_fin_temp",
+    "inverter_fan2_fin_temp",
+    "inverter_injection_tube_temperature",
+    "inverter_inv_compressor_current_a",
+    "inverter_inv_fin_temp",
+    "inverter_inv_primary_current_a",
+    "inverter_inv_secondary_current_a",
+    "inverter_refrig_temp_evap_in",
+    "inverter_refrig_temp_evap_out",
+    "mains_current_buh_output_capacity",
+    "mains_current_ct_sensor_l1",
+    "mains_current_ct_sensor_l2",
+    "mains_current_ct_sensor_l3",
+    "mains_current_current_measured_by_ct_sensor_of_l1",
+    "mains_current_current_measured_by_ct_sensor_of_l2",
+    "mains_current_current_measured_by_ct_sensor_of_l3",
+    "mains_current_hpsu_mixed_leaving_water_temperature_after_the_tank_r7t_dlwa2",
+    "mains_current_mixed_water_temp_r7t",
+    "mixing_ekmik_bizone_kit_mix_valve_position_m1s",
+    "mixing_ekmik_bizone_kit_mixed_leaving_water_temperature_r1t",
+    "mixing_mixed_water_temp",
+    "mixing_outlet_water_heat_exchanger_temp_hydro_split_model_dlwb2",
+    "outdoor_aux_compressor_port_temperature",
+    "outdoor_aux_expansion_valve_3_pls_ou_ii",
+    "outdoor_aux_liquid_pipe_temp",
+    "outdoor_aux_outdoor_heat_exchanger_temp",
+    "outdoor_aux_pressure",
+    "outdoor_aux_suction_temp",
+    "outdoor_identity_o_u_capacity_kw",
+    "outdoor_identity_refrigerant_type",
+    "outdoor_sensors_2_phase_thermistor_r4t",
+    "outdoor_sensors_discharge_pipe_temp",
+    "outdoor_sensors_discharge_pipe_temp_r2t",
+    "outdoor_sensors_entering_brine_temp_r5t",
+    "outdoor_sensors_fin_temp",
+    "outdoor_sensors_heat_exchanger_mid_temp",
+    "outdoor_sensors_heat_exchanger_mid_temp_r5t",
+    "outdoor_sensors_heat_sink_temp",
+    "outdoor_sensors_heat_sink_temp_r10t",
+    "outdoor_sensors_high_pressure",
+    "outdoor_sensors_high_pressure_sat_c",
+    "outdoor_sensors_high_pressure_t",
+    "outdoor_sensors_inv_fin_temp",
+    "outdoor_sensors_leaving_brine_temp_r6t",
+    "outdoor_sensors_liquid_pipe_temp",
+    "outdoor_sensors_liquid_pipe_temp_r6t",
+    "outdoor_sensors_liquid_temperature_r3t",
+    "outdoor_sensors_low_pressure",
+    "outdoor_sensors_low_pressure_sat_c",
+    "outdoor_sensors_low_pressure_t",
+    "outdoor_sensors_o_u_heat_exch_mid_temp",
+    "outdoor_sensors_o_u_heat_exch_temp",
+    "outdoor_sensors_o_u_heat_exch_temp_r4t",
+    "outdoor_sensors_o_u_heat_exchanger_temp",
+    "outdoor_sensors_outdoor_air_temp",
+    "outdoor_sensors_outdoor_air_temp_r1t",
+    "outdoor_sensors_outdoor_heat_exchanger_mid_temp",
+    "outdoor_sensors_outdoor_heat_exchanger_temp",
+    "outdoor_sensors_pressure",
+    "outdoor_sensors_pressure_sensor",
+    "outdoor_sensors_pressure_sensor_t",
+    "outdoor_sensors_pressure_t",
+    "outdoor_sensors_r1t_outdoor_air_temp",
+    "outdoor_sensors_r2t_inv_discharge_pipe_temp",
+    "outdoor_sensors_r4t_deicer_temp",
+    "outdoor_sensors_suction_pipe_temp",
+    "outdoor_sensors_suction_pipe_temp_r3t",
+    "outdoor_sensors_suction_pipe_temperature",
+    "outdoor_state_defrost_operation",
+    "outdoor_state_error_code",
+    "outdoor_state_error_type",
+    "outdoor_state_fault_code",
+    "outdoor_state_operation_fault",
+    "outdoor_state_operation_mode",
+    "outdoor_state_target_cond_temp",
+    "outdoor_state_target_discharge_temp",
+    "outdoor_state_target_evap_temp",
+    "water_hx_raw_data_water_heat_exchanger_inlet_temp",
+    "water_hx_raw_data_water_heat_exchanger_outlet_temp",
+    "water_hx_target_discharge_temp",
+    "water_hx_target_port_temperature",
+    };
+    static const size_t EXPECTED_N = sizeof(EXPECTED) / sizeof(EXPECTED[0]);
+
+    std::set<std::string> actual;
+    for (const auto& p : def::profiles)
+        for (size_t i = 0; i < p.count; i++) {
+            const auto& v = p.values[i];
+            if (v.no_publish) continue;              // detect-only: never announced, never a series
+            actual.insert(std::string(group_for_page(v.reg)) + "_" + object_id(v.label));
+        }
+
+    std::set<std::string> expected(EXPECTED, EXPECTED + EXPECTED_N);
+    CHECK(expected.size() == EXPECTED_N);            // no duplicate literal above
+    // Report the DIFFERENCE before asserting: a bare "sets differ" on 164 strings tells the next
+    // person nothing, and this test's whole purpose is to make a rename legible at the moment it is
+    // made.
+    for (const auto& a : actual)
+        if (!expected.count(a)) std::printf("  metric identity ADDED:   %s\n", a.c_str());
+    for (const auto& e : expected)
+        if (!actual.count(e)) std::printf("  metric identity REMOVED: %s\n", e.c_str());
+    CHECK(actual == expected);
+
+    // The rule is about the IDENTIFIER, not the prose: a reword that leaves the slug alone forks no
+    // series and must not fail here, while a reword that changes it must.
+    CHECK(object_id("Flow sensor (l/min)") == object_id("Flow Sensor (L/MIN)"));
+    CHECK(object_id("Expansion valve 3 (pls)") != object_id("Expansion valve 3 (pls) [OU-II]"));
+
+    // ── KNOWN DEFECT (#221): the HA uniq_id drops the group, so some rows collide ────────────────
+    // discovery_config builds `uniq_id` as <node>_<object_id> while `val_tpl` subscripts
+    // ['<group>']['<object_id>'] — so two rows sharing a label on different pages are announced as
+    // ONE Home Assistant entity and the later config overwrites the earlier. The state topic and the
+    // series names are unaffected (they nest by group), which is why this is invisible everywhere
+    // except HA.
+    //
+    // Pinned rather than fixed here: correcting uniq_id is an entity migration (#221). What this
+    // guards is that the damage cannot GROW — a sixth colliding id, or a new profile with a
+    // collision, fails until #221 lands and this block is deleted with it.
+    static const char* const KNOWN_COLLISIONS[] = {
+        "error_code", "error_type", "mixed_water_temp", "pressure_sensor_t", "target_discharge_temp",
+    };
+    static const size_t KNOWN_COLLISION_N = sizeof(KNOWN_COLLISIONS) / sizeof(KNOWN_COLLISIONS[0]);
+    std::set<std::string> known(KNOWN_COLLISIONS, KNOWN_COLLISIONS + KNOWN_COLLISION_N);
+    std::set<std::string> colliding;
+    for (const auto& p : def::profiles) {
+        std::map<std::string, std::set<std::string>> by_obj;   // object_id -> distinct (reg,offset)
+        for (size_t i = 0; i < p.count; i++) {
+            const auto& v = p.values[i];
+            if (v.no_publish) continue;
+            by_obj[object_id(v.label)].insert(std::to_string(v.reg) + ":" + std::to_string(v.offset));
+        }
+        for (const auto& kv : by_obj)
+            if (kv.second.size() > 1) colliding.insert(kv.first);
+    }
+    for (const auto& c : colliding)
+        if (!known.count(c)) std::printf("  NEW HA uniq_id collision: %s (see #221)\n", c.c_str());
+    CHECK(colliding == known);
+}
+
 // ── logic/feature_gate.hpp — what may honestly run on the detected profile (#110 Part C) ─────────
 static void test_feature_gate() {
     using namespace daik::logic;
@@ -5046,6 +5301,7 @@ int main() {
     test_ota_manifest();
     test_ota_channel();
     test_profile_view();
+    test_metric_identity();
     test_feature_gate();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }
     std::printf("%d logic test(s) FAILED\n", g_failures);
