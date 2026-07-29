@@ -9,7 +9,7 @@ parts the firmware actually uses**. Wiring the X10A service port itself is
 > choice — it would fork the binary, its OTA manifest and the web installer per board. Everything
 > below that differs between boards is therefore a **runtime setting** in NVS: the X10A RX/TX pins
 > (auto-detected, `POST /set_hp`) and the status indicator + recovery button (`POST /set_board`,
-> dashboard → **ESP32 → Hardware**). Kconfig only seeds a device that has never been configured.
+> **⚙ Settings → ESP32 → Hardware**). Kconfig only seeds a device that has never been configured.
 
 ## What the firmware requires
 
@@ -29,8 +29,8 @@ SD slot. None of them are used.
 ## M5Stack AtomS3 Lite — the board the wiring guide is written for
 
 A 24 × 24 mm cased board. Its two onboard parts are exactly the two the firmware can drive, and its
-Grove port reaches X10A with no soldering — which is why [WIRING.md](WIRING.md) and the README's pin
-table are written for it.
+Grove port reaches X10A with no soldering — which is why [WIRING.md](WIRING.md) is written for it
+(the README stays generic across ESP32-S3 boards).
 
 | | |
 |---|---|
@@ -45,10 +45,10 @@ table are written for it.
 **The pins are not automatic on this board.** The shipped `CONFIG_DAIKIN_RX_PIN`/`_TX_PIN` defaults
 are the XIAO's 44/43, and detection only ever probes the cached pair, the default pair and each of
 them swapped — none of which the AtomS3 Lite breaks out. So the bus stays silent until the pins are
-picked once in the dashboard (**ESP32** card → RX/TX dropdown, `POST /set_hp`); after that they are
+picked once under **⚙ Settings → ESP32** (RX/TX dropdown, `POST /set_hp`); after that they are
 cached in NVS and re-used every boot. Their order does not matter: the swap is probed too.
 
-**Firmware mapping.** Set in the dashboard under **ESP32 → Hardware** (a save reboots). Pick
+**Firmware mapping.** Set under **⚙ Settings → ESP32 → Hardware** (a save reboots). Pick
 **M5Stack AtomS3 Lite** from the *Board* dropdown at the top of that dialog and all five fields below
 fill in — the dropdown is this table, served by the firmware (`logic/board_presets.hpp`), so it
 cannot drift from what follows. Nothing is written until you press Save, and editing any field
@@ -63,8 +63,8 @@ afterwards switches the dropdown back to *Custom*.
   into the setup portal.
 
 **The Grove port is the tidy way in.** HY2.0-4P carries **GND, 5 V, G2, G1** — the same four wires
-X10A needs — so one Grove → Dupont cable reaches the service port. Without one, the female header on
-the case carries `5V`, `GND` and G5–G8/G38 for plain Dupont wires. The 5 V level-shifter advice and
+X10A needs — so one Grove breakout cable reaches the service port. Without one, the female header on
+the case carries `5V`, `GND` and G5–G8/G38 for plain jumper wires. The 5 V level-shifter advice and
 "power the board from USB, not off X10A's 50 mA" still apply exactly as in [WIRING.md](WIRING.md).
 
 **Watch out:**
@@ -102,7 +102,7 @@ so a freshly flashed XIAO finds the bus on its own.
 (the shipped first-boot default, so a XIAO needs no configuration). Recovery button: none — a XIAO
 has no free momentary switch, so a factory reset stays a web-UI or USB job unless you wire your own
 button to one of the free pins. Available as **Seeed XIAO ESP32-S3** in the *Board* dropdown under
-**ESP32 → Hardware**, should the settings ever need restoring.
+**⚙ Settings → ESP32 → Hardware**, should the settings ever need restoring.
 
 **Watch out:** GPIO3 (D2) is broken out as an ordinary pad but is the chip's JTAG-source-select
 **strapping** pin, so the firmware never offers it for X10A. GPIO16/17 do not exist on the XIAO's
@@ -120,8 +120,8 @@ against your board's pinout; [WIRING.md](WIRING.md) has that cross-reference alr
 boards that have come up, including the Waveshare ESP32-S3-DevKitC-1.
 
 For the indicator and the button, read your board's schematic for the onboard LED pin, its polarity
-(or whether it is a WS2812), and any free momentary switch, then enter them under **ESP32 →
-Hardware** — leaving the *Board* dropdown on *Custom*, since the presets cover only the two boards
+(or whether it is a WS2812), and any free momentary switch, then enter them under
+**⚙ Settings → ESP32 → Hardware** — leaving the *Board* dropdown on *Custom*, since the presets cover only the two boards
 above. If your board has no LED the firmware can drive, leave the indicator on *None* — every state
 it shows is also on `/status` and in the dashboard.
 

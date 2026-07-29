@@ -165,6 +165,19 @@ jobs:
         run: ./scripts/run-redaction-audit.sh
       - name: Verify the redaction audit still has teeth
         run: ./tools/redact/selftest.sh
+      # The README's dashboard recording (docs/media/dashboard.gif) is the first thing a new user
+      # sees, and the one artefact here that rots INVISIBLY: a recording renders perfectly forever,
+      # whatever the UI has since become, so every gate above stays green while the README shows
+      # last month's drawing. No browser on this runner, so this cannot re-render and diff pixels —
+      # it fingerprints the sources the recording was made FROM (the schematic markup and header,
+      # the CSS that draws and animates them, the app.js functions that paint them, the strings,
+      # the scenes, the recorder's framing) and fails when they no longer match the stamp beside
+      # the GIF. Also reads the GIF: a still, or 2-second frames, fails the one thing it is for.
+      # Node only, seconds long. Re-recording is a local job (scripts/record-dashboard-gif.sh).
+      - name: Audit the README dashboard recording
+        run: ./scripts/run-ui-gif-audit.sh
+      - name: Verify the recording gate still has teeth
+        run: ./tools/uigif/selftest.sh
 
       # The gh-pages publish is the LAST step of the build job below, after ~5 minutes of firmware
       # work — so when it breaks, it breaks expensively and at the worst moment. It is also the one
