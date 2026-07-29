@@ -58,7 +58,7 @@ hp_convert.cpp/.hpp → converter functions: raw bytes →
 hp_poll.cpp/.hpp    → poll engine task: builds the active register set from the profile,
                        polls each interval, fills the thread-safe value cache, drives errors, and
                        pushes the /events WebSocket (values each cycle, status every 4th; each
-                       stream admits only one async batch until its completion callbacks finish)
+                       stream admits only one async batch until its queued work has run)
 def/*.hpp           → embedded per-model value profiles (machine-generated in the ValueDef row
                        format); def/registry.hpp maps profile id→table, models_catalog.hpp = /models
 config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi rollback backup + link
@@ -574,12 +574,19 @@ host-testable core is unusually large and valuable, because the risky parts are 
   original defect — one byte past the buffer, where the old handler `memcmp`'d stack the failed read
   had never written — is asserted without a hand-built WebSocket client.
 - `logic/ws_tx_gate.hpp` — bounded backpressure for `/events` broadcasts. ESP-IDF's cross-task
-  helper shallow-copies the frame into a queued work item, so the payload must remain alive until a
-  completion callback. Each values/status stream admits one batch at a time; a busy gate drops a
+  helper shallow-copies the frame into a queued work item, so the payload must remain alive until
+  that item has run. Each values/status stream admits one batch at a time; a busy gate drops a
   newer tick rather than retaining payloads without limit when the HTTP task cannot drain its work
   queue. The streams are independent so one slow values frame does not suppress every status update.
-  The firmware shares one immutable payload across the batch and releases it only after the last
-  callback; the pure gate transition is host-tested without ESP-IDF.
+  A batch is **one** queued work item owning the payload and an fd snapshot, never one item per
+  client. That distinction is the whole defect of #238: `httpd_queue_work()` is a single UDP
+  datagram to a control socket whose mailbox holds `LWIP_UDP_RECVMBOX_SIZE` (6) messages, and an
+  overflow drops it **silently** while `httpd_ws_send_data_async()` still answers `ESP_OK` — so the
+  completion callback that used to release the gate never ran, and `/events` stayed dead until
+  reboot. One item per broadcast keeps at most two of those six slots in use, the gate has a single
+  release point no dropped message can skip, and `CONFIG_HTTPD_QUEUE_WORK_BLOCKING=y`
+  (`sdkconfig.defaults`) turns any residual overflow into back-pressure rather than a silent loss.
+  The pure gate transition is host-tested without ESP-IDF.
 - `logic/http_body.hpp` — request-body reassembly for `http_read_body`. A POST body is a TCP stream:
   `httpd_req_recv` returns what has arrived, and the IDF's own docs note a large body "may" take
   several calls. Reading once and calling it the whole body truncated any body split across segments,
@@ -1464,7 +1471,7 @@ to HTTP handlers:
    copies ~10 `std::string`s) all do this; `ws_broadcast_values`/`ws_broadcast_status`
    (`http_status.cpp`) keep their own finer-grained guards inside it — they skip a frame rather than
    the whole cycle, and the task guard is only their backstop. Their async queue is also bounded to
-   one values and one status batch, so a missing completion callback cannot turn skipped work into an
+   one values and one status batch, so a delayed delivery cannot turn skipped work into an
    unbounded payload leak.
 2. **Nothing allocates while a mutex is held.** Rule 1 only makes an OOM survivable if the throw
    doesn't strand a lock: `xSemaphoreTake` is not released by stack unwinding, so a throw inside a

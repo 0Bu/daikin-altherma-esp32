@@ -427,7 +427,7 @@ POST /mcp                          # MCP server for AI agents — PLANNED (route
 Every handler runs under an OOM try/catch rather than crashing (memory is the binding constraint on
 these chips): the JSON routes return `503`; the `/events` WebSocket handler is registered raw (needs
 `is_websocket`), so it self-guards its JSON build, drops the frame under OOM, and bounds queued
-broadcasts to one values plus one status batch while ESP-IDF completion callbacks are pending. `/diag` and
+broadcasts to one values plus one status batch while ESP-IDF queued work is pending. `/diag` and
 `/coredump` stream instead of building one big buffer.
 
 ---
