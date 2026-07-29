@@ -513,6 +513,16 @@ Body, ordered:
    stopped and the unit only refreshes its own sensors while it runs). That division of labour is the
    whole justification for blanking in the first place (§ the outdoor-unit rule above) — the drawing
    keeps one vocabulary for "no reading right now", the inspector carries the explanation.
+   **An explainer reads permanent-first: what the value IS, then what it is doing.** Every paragraph
+   of the body is its own block (`.vdesc-p`), in this order — the "what is it" sentence, the timeless
+   "Normal:" note, then the LIVE sentence: either the entry's own state prose or, when the reading is
+   held over, the reason it is blank ("No current reading: …", in the "Normal:" shape with a lead-in
+   in stronger ink). All of it in the body's own ink. The live sentence used to open the card in
+   **bold**, which inverted the panel: a reader taps an explainer *because* they do not know what the
+   quantity means, and three bold lines about a transient state stood in front of the answer they
+   came for. Prominence follows how long a fact stays true, not how recently it changed — the pill
+   above already carries the live number, and the state sentence is the caption the drawing refuses
+   to print (item 3), not the headline of the explanation.
    For the same reason a pill drawn from a *fallback* source names that source: the high-side pill
    falls back from the frozen HP transducer to the always-live refrigerant sensor, so the headline and
    the mono source line resolve the same row the pill did, never the register the concept is named for.
@@ -532,23 +542,52 @@ Body, ordered:
    **In the inspector it is the same sparkline, for the row the pill RESOLVED** — `inspRow`, not the
    concept the target is named for. That is what keeps it right on a pill with a fallback source: while
    the high side reads the refrigerant sensor instead of the frozen HP transducer, the headline, the
-   mono source line and the chart are one row. A target with no row of its own — ΔT, COP, the
-   estimated kW, an assembly like the outdoor unit — gets **no** chart, for the same reason it gets no
-   headline: charting one of its inputs under its name would attribute a series to a quantity nobody
-   measured.
+   mono source line and the chart are one row. An ASSEMBLY (the outdoor unit, the PHE) still gets
+   **no** chart, for the same reason it gets no headline — there is no one reading it stands for.
+   **A COMPUTED pill charts its own figure, never one of its inputs.** ΔT, heat output, electrical
+   input and COP have no register, so the firmware buffers what each is computed FROM and the curve
+   is assembled in the browser (`DERIVED` in `www/app.js`) by the same expressions `liveData()` uses
+   for the live number — one definition of each figure, rather than a firmware copy and a browser
+   copy free to drift. Drawing the flow rate under a heat-output headline would be the §5.3-item-3
+   substitution with a 24-hour axis in front of it, and that is precisely what is not done here: the
+   series carries the figure's own unit and its own gaps. Two properties fall out of composing rings
+   rather than re-deriving from `/values`: a sample is null wherever any input is, so a gap stays a
+   gap; and it is marked *resting* only when EVERY missing input was — one input that genuinely
+   failed to measure outranks "nothing failed", since that is the stronger claim.
+   The COP is the one that is deliberately drawn on fewer samples than its own inputs. A CT-sourced
+   sample is left out entirely: `cop_scope.hpp`'s boundaries only pair once the resistive heaters are
+   known quiet, and their history is not buffered — three more rings for a gate rather than a curve.
+   An inverter-sourced sample needs no such evidence (both heaters sit outside both sides), which is
+   why that is the branch that survives. Refusing the other is the same answer the live pill gives
+   when it cannot pair the boundaries, not a relaxation of it.
+   Two consequences are stated rather than left to be discovered. **A chart is named by the target's
+   stable concept, never by its live title**: the COP's title says which *system* the present
+   quotient describes, and a 24-hour curve cannot be named after the state of one second — it would
+   have read "COP of the plant" over a series that is, by construction, the heat pump's own. And **a
+   figure withheld on purpose says so in its own words**: on a CT-clamp install every COP sample is
+   refused, so the generic "no readings recorded yet" would call a deliberate refusal an empty
+   buffer — one line under a pill that is showing the very number. A derived series may therefore
+   name its own empty case, and the COP does.
    **A chart under a BLANKED pill is not a way to get the number back.** The outdoor pills blank
    while the unit rests, and their series is held-over for exactly those samples — so the curve draws
    a gap there, the "now" marker is absent (it only exists where the newest sample is a reading), and
    scrubbing that stretch reads "Außeneinheit ruht", never a value. The chart says what the day held;
    it never states a present reading the pill above it has just refused. Anything that would draw the
    last *known* sample as the live end — a clamped marker, an interpolated tail — breaks that and is
-   the §5.3-item-3 substitution failure with a 24-hour axis in front of it. The nine trended rows are the plant's own working set (leaving/return water, tank, water
-   pressure, flow, pump signal, refrigerant pressure, compressor rps, outdoor air), so most pills that
-   name a measurement now open onto one. A pill whose row the firmware does not buffer simply has no
-   chart — including the high-side pill on the *other* leg of its fallback, when a running compressor
-   hands it the `0x20` HP transducer instead of the always-live refrigerant sensor. That is the honest
-   answer and not a gap to paper over: the transducer freezes with its page, and on the measured unit
-   it reads 0.0 bar even at 42 rps, so a ring on it would be a chart that is empty or false. Four rules the chart inherits from the rest of this document:
+   the §5.3-item-3 substitution failure with a 24-hour axis in front of it.
+   **Which rows are trended is decided by this drawing.** Every numeric value the schematic shows has
+   a curve — leaving/return water, tank, water pressure, flow, pump signal, refrigerant pressure,
+   compressor rps, expansion valve, outdoor air, discharge temp, room temp, and the four computed
+   pills above — because those are the readings someone is actually looking at. That rule is also
+   what keeps the cost small: the drawing holds ~16 numeric pills, while a profile publishes ~66
+   numeric rows, and ringing all of them would cost ~38 KB of `.bss` — about a third of the low-water
+   free heap measured on the reference board — for curves nobody opened. A value row reached through
+   the LIST (§6) gets a chart where a trend already exists and none where it does not.
+   The one numeric pill with no chart is the **low-pressure** one, and it is the same honest answer
+   as the high-side pill on the *other* leg of its fallback: both are the `0x20` transducer pair,
+   which freezes with its page and, on the reference install, has published a flat 0.0 bar from both
+   sensors for 30 days. There is no low-side equivalent of the `0x62/15` fallback, so the choice is
+   an empty chart or none, and none is the one that does not look like a broken sensor. Four rules the chart inherits from the rest of this document:
    - **The axis states the span actually held.** The rings are RAM (persisting them would be ~100k
      NVS writes a year in the partition holding the WiFi credentials), so every `/set_*` and every
      OTA empties them. A fresh device reads "Seit Neustart · 1 h", never a 24-hour axis padded with

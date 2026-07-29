@@ -678,7 +678,10 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    its own lock; holding both would create a two-mutex order this file has no other reason to have.
    Cheap by construction: it resolves the trended rows — three scalar comparisons per row, since a
    trend addresses its row by (page, offset, unit) rather than by matching its label — folds one
-   sample into each open 5-minute bucket, and only writes a ring when a bucket boundary is crossed. The fold is where the
+   sample into each open 5-minute bucket, and only writes a ring when a bucket boundary is crossed.
+   The resolve is `TREND_COUNT` × the profile's row count of those comparisons, once per second, so
+   it stays cheap as trends are added — but it is the one cost here that scales with the table, and
+   the reason the table follows the dashboard's pills rather than every numeric row (`history.hpp`). The fold is where the
    held-over rule earns its place — a sample taken while the compressor rests is stored as *held
    over*, not as the number the frozen outdoor page keeps returning (`logic/history.hpp`,
    composing `logic/ou_stale.hpp`).
