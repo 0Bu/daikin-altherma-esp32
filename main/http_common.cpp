@@ -6,7 +6,9 @@
 // esp_http_server's C frames to std::terminate -> abort() -> reboot. Handlers should still stream
 // large output (e.g. /diag) instead of one big std::string. (See docs/ARCHITECTURE.md → Memory constraints.)
 #include "http_handlers.hpp"
+#include "diag_log.hpp"   // diag_printf — a route that failed to register must not do so silently
 #include "logic/http_body.hpp"
+#include "esp_err.h"
 #include <new>          // std::bad_alloc
 
 namespace daik {
@@ -38,7 +40,12 @@ void http_register(httpd_handle_t s, const char* uri, httpd_method_t method,
     u.method   = method;
     u.handler  = handle_all;
     u.user_ctx = reinterpret_cast<void*>(fn);
-    httpd_register_uri_handler(s, &u);
+    // SAY SO when a route doesn't get in. The only realistic failure is ESP_ERR_HTTPD_HANDLERS_FULL
+    // (cfg.max_uri_handlers is sized exactly to the route count in http_server.cpp), and discarding it
+    // made the symptom appear somewhere else entirely: the casualty is whatever registers LAST — the
+    // captive/SPA catch-all — so adding a route would break deep links while the new route worked.
+    const esp_err_t err = httpd_register_uri_handler(s, &u);
+    if (err != ESP_OK) diag_printf("http: route %s not registered: %s\n", uri, esp_err_to_name(err));
 }
 
 void http_register_on(httpd_handle_t s, HttpSurface surface, const char* uri, httpd_method_t method,

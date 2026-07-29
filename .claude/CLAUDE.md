@@ -493,7 +493,12 @@ checkup.cpp     the 24-hour PLANT CHECKUP behind /status.health and the dashboar
                 wrong: TrendRing::fold keeps the LAST reading of each 5-minute bucket, so a
                 compressor cycle shorter than five minutes leaves no trace in it — the short cycling
                 the checkup exists to find is exactly what that raster cannot see
-http_server.cpp esp_http_server :80; concerns register their own routes (http_handlers.hpp). Picks
+http_server.cpp esp_http_server :80; concerns register their own routes (http_handlers.hpp).
+                cfg.max_uri_handlers is sized EXACTLY to the trusted-LAN route count — raise it in
+                the SAME commit that adds a route: an overflow is silent and lands on the WRONG
+                route, since the casualty is whatever registers LAST (the captive/SPA catch-all), so
+                the symptom is deep links breaking rather than the new route 404ing. http_register()
+                logs a failed registration rather than discarding the return. Picks
                 the trust surface from the WiFi mode (esp_wifi_get_mode): the OPEN setup AP registers
                 ONLY the provisioning routes (GET / /index.html, POST /set_wifi + captive) and
                 withholds /scan /coredump /diag + the config/OTA/MCP surface from an unauthenticated
@@ -721,6 +726,14 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 — a 4-byte size-word read, NOT the summary parse), because /coredump?clear=1 can erase
                 the image mid-session; a cached flag would strand an uncleanable crash banner + a
                 download that 404s. mqtt_ha republishes the retained crash topic when the flag changes
+                — or when NOTABILITY does, which is the other write to this cache:
+                diag_crash_dismiss() (POST /crash/dismiss) erases the dump and then sets
+                CrashInfo::dismissed, the user DELETING the report rather than hiding it in one
+                browser. Erase first, mark second (a dismissal surviving a failed erase would say
+                "no crash" with the dump still in flash); the `dismissed` byte is the one field
+                written after boot, a single monotonic false->true store no reader needs a lock for.
+                A dump-only republish test would have left HA's retained crash record standing after
+                a dismissal on a fault boot that never wrote a dump — which is most of them
 logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, registers, value_def,
                 config_model,
                 config_store, discovery, ha_device, detect, history, json, mqtt_group, mqtt_uri, heartbeat, crashinfo,
@@ -1478,7 +1491,8 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   broker); reset_reason via logic/reset_reason.hpp, safe_mode = the latched boot-loop
                   recovery flag (safe_mode.cpp; true once too many crash boots accumulated -> poll +
                   MQTT skipped),
-                  last_crash (null unless this boot was a FAULT or a dump is still in flash, else
+                  last_crash (null unless this boot was a FAULT or a dump is still in flash — and
+                  null again once POST /crash/dismiss DELETES the report, else
                   {reason,reason_code,fault,coredump,task,pc,backtrace[],corrupted,elf_sha256} — the
                   reason/summary from the boot-time cache, `coredump` re-read from flash per request
                   so a cleared dump can't strand the banner; drives the crash banner, whose title keys
@@ -1598,6 +1612,24 @@ GET  /coredump[?clear=1]   stream the flash core-dump image (chunked octet-strea
                   ?clear=1 erases the coredump partition. Decode offline against the matching-version
                   .elf: scripts/decode-coredump.sh coredump.bin (CI archives the .elf per build). The
                   UI surfaces a crash banner + one-click download when /status.last_crash is set.
+POST /crash/dismiss   ACKNOWLEDGE + DELETE this boot's crash report: erase the core-dump image and
+                  mark the cached CrashInfo dismissed (diag_crash_dismiss), so crash_is_notable() is
+                  false everywhere at once — /status.last_crash goes null, the retained MQTT crash
+                  topic clears on the next heartbeat tick, and the web UI's banner is gone across
+                  reloads and browsers. That is the point: the banner's "dismiss" was page state
+                  alone, so a reload brought the same crash back. Separate from /coredump?clear=1
+                  because they answer different questions — clearing frees the flash slot for the
+                  NEXT dump and deliberately leaves the fault reset on record, while this says the
+                  crash has been dealt with; and a fault reset commonly carries no dump at all (a
+                  stack overflow overruns it), where ?clear=1 changes nothing the banner keys on.
+                  ERASE FIRST, mark second: a failed erase answers 500 {ok:false,error} and marks
+                  NOTHING, since a dismissal surviving it would report "no crash" while the dump was
+                  still downloadable. RAM-only and needs no NVS — after any reboot the reset reason
+                  is no longer a fault and the dump is gone, while a NEW crash must show. POST, not
+                  a GET beside /coredump: it destroys the one artifact a bug report needs, so it must
+                  not be reachable by a link or a prefetch. The reset REASON survives untouched
+                  (/status.sys.reset_reason + the heartbeat's own "Reset Reason" sensor) — what was
+                  deleted is the crash report, not the fact that the board rebooted the way it did
 POST /set_wifi    {ssid,pass} -> validate (ssid 1-32 chars; pass empty[open] or 8-63) -> persist +
                   reboot. A rejection is 400 {ok:false,error} like every other write endpoint (the
                   shared send_err) — it used to be bare text, which the setup portal couldn't tell

@@ -81,7 +81,12 @@ http_server.cpp     → esp_http_server :80, wildcard dispatch; concerns registe
                       AP registers ONLY the provisioning routes (GET / , /index.html, POST
                       /set_wifi + captive), withholding /scan, /coredump, /diag, config/OTA/MCP from
                       an unauthenticated radio client; the STA (trusted LAN) registers the full API.
-                      Boundary = host-tested logic/http_surface.hpp (F01)
+                      Boundary = host-tested logic/http_surface.hpp (F01). `cfg.max_uri_handlers` is
+                      sized EXACTLY to the trusted-LAN route count, so adding a route means raising
+                      it in the same commit: overflowing is silent and hits the WRONG route (the
+                      casualty is whatever registers last, deliberately the captive/SPA catch-all, so
+                      the symptom would be deep links breaking rather than the new route 404ing).
+                      http_register() now logs a failed registration instead of discarding it
 http_common.cpp     → shared HTTP helpers + the single OOM guard: http_register() stashes the real
                       handler in user_ctx and installs the handle_all trampoline, which calls it
                       inside try/catch — std::bad_alloc → 503, any other throw → 500, instead of
@@ -1160,6 +1165,9 @@ Structure:
   - A dedicated `coredump` partition of size `0xc000` (48 KB) is placed at offset `0x12000` (in the unused gap between `phy_init` and `ota_0`), leaving the start offsets of `nvs`, `otadata`, `phy_init`, `ota_0`, and `ota_1` completely untouched for backward compatibility and OTA safety.
   - Exposed via a chunked HTTP GET endpoint `/coredump` (implemented in `http_status.cpp`) that streams the binary crash dump in 512-byte blocks to prevent OOM errors on the tight ESP32 heap.
   - Supports erasing the partition via `GET /coredump?clear=1` (invokes `esp_core_dump_image_erase()`).
+  - `POST /crash/dismiss` is the other side of that: it erases the image **and** marks the cached
+    `CrashInfo` dismissed (`diag_crash_dismiss()`), i.e. the user *deleting the crash report* rather
+    than freeing the flash slot. See "How a user hands a crash over" below.
   - **Boot-time capture + surfacing (so a crash isn't a silent blob in flash).** `diag_crash.cpp`
     runs once early in `app_main`: it reads `esp_reset_reason()` and, if a valid dump exists, parses
     its **summary** (`esp_core_dump_get_summary()` — crashed task, exception PC, backtrace PCs, and
@@ -1171,7 +1179,10 @@ Structure:
     (`diag_crash_info_live()` — a 4-byte size-word read, not the summary reparse), because the image
     can be erased mid-session via `/coredump?clear=1` and a cached flag would then advertise a dump
     that flash no longer holds. A *fault* reset (panic / watchdog / brown-out / CPU lockup) or an
-    orphan dump is "notable"; a clean power-on / software reboot is not.
+    orphan dump is "notable"; a clean power-on / software reboot is not — and neither is a report the
+    user has **deleted** (`CrashInfo::dismissed`, below), which is the one other field written after
+    boot: a single monotonic `false → true` store, so the readers that copy the struct concurrently
+    (WS broadcaster, HTTP, MQTT) need no lock for it.
   - **Always-on system health (no fault required).** `build_status_json_string()` also carries a
     compact `sys` block — `free_heap` / `min_free_heap` (since-boot low-water, the leak indicator) /
     `max_alloc` (largest contiguous block, the true OOM ceiling), the `reset_reason` slug (via
@@ -1193,7 +1204,23 @@ Structure:
     a dead download link. The running app's `app_elf_sha256` is also on `/status`. The web UI shows a
     crash **banner** (`renderCrashBanner()`) — titled on `fault`, so an orphan dump doesn't claim this
     boot crashed — with the reset reason + hex backtrace, a one-click `coredump.bin` download, and a
-    "copy diagnostics" bundle (`/status` + `/diag` + summary) for a bug report. The MQTT bridge
+    "copy diagnostics" bundle (`/status` + `/diag` + summary) for a bug report.
+  - **Deleting the report (`POST /crash/dismiss`).** The banner's third action. It is a *device*
+    action, not a per-page hide: `diag_crash_dismiss()` erases the dump image and then sets
+    `CrashInfo::dismissed`, so `crash_is_notable()` is false everywhere at once — `/status.last_crash`
+    goes `null`, the retained MQTT crash topic is cleared on the next heartbeat tick, and the banner
+    is gone across reloads, browsers and Home Assistant. Hiding it in page state alone (what this
+    replaced) survived exactly until the next reload. **Erase first, mark second**: a failed erase
+    answers `500 {"ok":false,…}` and marks nothing, because a dismissal that outlived a failed erase
+    would report "no crash" with the dump still downloadable — the one direction this must not fail
+    in. The flag is **RAM-only on purpose** and needs no NVS: after any reboot the reset reason is no
+    longer a fault and the dump is gone, while a *new* crash captures a fresh `CrashInfo` and must
+    show — which persisting a dismissal could suppress. The reset **reason** survives untouched
+    (`/status.sys.reset_reason` and the heartbeat's own "Reset Reason" sensor): what was deleted is
+    the crash report, not the fact that the board rebooted the way it did. `POST`, unlike the `GET`
+    it sits beside, because it destroys the one artifact a bug report needs
+    ([REPORTING.md](REPORTING.md)) and must not be reachable by a link or a prefetch; trusted-LAN
+    only like every other write (`logic/http_surface.hpp`). The MQTT bridge
     additionally **retains** the summary on `<base>/crash` as **one** diagnostic HA entity — a "dump
     waiting" flag (reason/backtrace only, never secrets or the raw dump), so Home Assistant (or
     Telegraf → VictoriaLogs) sees crashes over time. The reset reason is *not* a crash entity: it is
@@ -1206,9 +1233,13 @@ Structure:
     power-on) publishes a **zero-length retained** message that **clears** the topic, so no crash
     message lingers once the problem is resolved — the reset reason stays visible on the heartbeat's
     own "Reset Reason" sensor regardless. Published once per (re)connect **and** republished on the
-    heartbeat cadence whenever the `coredump` flag changes, so a retained "Crash Dump Waiting" can't
-    stay latched ON after the dump is pulled and cleared (and an orphan-dump-only boot is then
-    re-decided not-notable and the topic cleared).
+    heartbeat cadence whenever the `coredump` flag **or the notability** changes, so a retained "Crash
+    Dump Waiting" can't stay latched ON after the dump is pulled and cleared (and an orphan-dump-only
+    boot is then re-decided not-notable and the topic cleared). Notability is checked beside the dump
+    flag rather than derived from it: dismissing a crash on a fault boot that left **no** dump — a
+    stack overflow overruns its own dump, which is what the crashes here look like — changes no flash
+    byte, so a dump-only test would leave the retained crash record standing in Home Assistant after
+    the user deleted it on the device.
   - **Decoding (maintainer side).** A raw dump is useless without the *matching-version* unstripped
     `.elf` (the shipped `.bin` has no symbols), so CI archives `daikin-altherma-esp32.elf` + its
     sha256 per build (artifact + Release asset, `scripts/ci-build-all.sh`). `scripts/decode-coredump.sh

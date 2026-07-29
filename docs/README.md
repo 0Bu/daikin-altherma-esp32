@@ -376,6 +376,13 @@ GET  /scan                         # WiFi scan → {"networks":[{ssid,rssi}]} (n
 GET  /coredump[?clear=1]           # stream the flash core-dump image (chunked; 404 if none);
                                    #   ?clear=1 erases the coredump partition. Decode offline with
                                    #   scripts/decode-coredump.sh coredump.bin (matching-version .elf).
+POST /crash/dismiss                # DELETE this boot's crash report: erase the dump AND stop
+                                   #   reporting the crash, so /status.last_crash goes null, the
+                                   #   retained MQTT crash topic clears and the web UI banner is gone
+                                   #   for good (it used to hide in page state, which a reload undid).
+                                   #   Irreversible — download the dump first if you plan to file a
+                                   #   bug report. A failed erase answers 500 and deletes nothing.
+                                   #   The reset REASON is unaffected (/status.sys.reset_reason).
 POST /set_wifi                     # { ssid, pass } → validate (ssid 1-32; pass ""|8-63) → persist +
                                    #   reboot; on failure 400 {ok:false,error} (nothing saved). Backs up
                                    #   the old creds + auto-rolls-back if the new network fails to
@@ -472,7 +479,8 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   retained message, so no crash message lingers once the problem is resolved. The reset reason is not
   a crash entity — it lives on the heartbeat's own "Reset Reason" sensor (the old duplicate "Last
   Reset Reason" crash entity was dropped). Republished on the heartbeat cadence if the "dump waiting"
-  flag changes, so clearing a dump can't leave it latched ON)
+  flag *or the notability* changes, so neither clearing a dump nor deleting the report in the web UI
+  (`POST /crash/dismiss`) can leave it latched ON)
   each expose their own `entity_category: diagnostic` HA sensors. The crash topic carries only the
   reason + a hex backtrace — never a secret or the raw dump; pull the full dump from `GET /coredump`
   and decode it with `scripts/decode-coredump.sh`.

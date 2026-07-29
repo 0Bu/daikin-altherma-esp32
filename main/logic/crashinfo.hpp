@@ -72,6 +72,7 @@ inline bool crash_reason_is_fault(uint32_t reason) {
 struct CrashInfo {
     uint32_t reason       = 0;      // raw esp_reset_reason_t value
     bool     coredump     = false;  // a downloadable core-dump image exists in flash (GET /coredump)
+    bool     dismissed    = false;  // the user ACKNOWLEDGED this crash (POST /crash/dismiss) — see below
     bool     have_summary = false;  // the summary fields below were parsed from that image
     char     task[16]     = {0};    // crashed task name (summary)
     uint32_t pc           = 0;      // exception program counter (summary)
@@ -83,7 +84,22 @@ struct CrashInfo {
 
 // A last_crash worth surfacing = a fault reset OR an orphan core-dump still sitting in flash. A
 // clean power-on / software reboot is not notable (no banner), but its reason is still reported.
+//
+// ...unless the user DISMISSED it (POST /crash/dismiss -> diag_crash_dismiss()). That is a real
+// deletion, not a per-browser "hide": the dump is erased from flash first and only then is this flag
+// set, so `dismissed` never claims a crash is dealt with while its evidence is still downloadable.
+// It lives HERE rather than in the browser because there is nowhere else it could live and stay
+// true: the banner was previously suppressed in page state alone, so a reload — or a second browser,
+// or Home Assistant's retained crash entity — showed the same crash again, which is exactly the
+// complaint. The flag is RAM-only ON PURPOSE and needs no NVS: after any reboot the reset reason is
+// no longer a fault and the dump is gone, so nothing raises the banner again — while a NEW crash
+// captures a fresh CrashInfo and must show, which persisting a dismissal could suppress.
+//
+// The reset reason itself survives dismissal untouched (/status.sys.reset_reason and the heartbeat's
+// own "Reset Reason" sensor): what the user dismissed is the crash REPORT, not the fact that the
+// board rebooted the way it did.
 inline bool crash_is_notable(const CrashInfo& c) {
+    if (c.dismissed) return false;
     return c.coredump || crash_reason_is_fault(c.reason);
 }
 

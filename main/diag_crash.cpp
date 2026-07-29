@@ -5,6 +5,7 @@
 #include "diag_log.hpp"
 
 #include "esp_core_dump.h"
+#include "esp_err.h"
 #include "esp_system.h"
 
 #include <cstdlib>
@@ -22,7 +23,9 @@ static_assert(static_cast<uint32_t>(CrashReason::INT_WDT)    == ESP_RST_INT_WDT,
 static_assert(static_cast<uint32_t>(CrashReason::TASK_WDT)   == ESP_RST_TASK_WDT,   "reset enum drift");
 static_assert(static_cast<uint32_t>(CrashReason::BROWNOUT)   == ESP_RST_BROWNOUT,   "reset enum drift");
 
-static CrashInfo s_ci;   // filled once by diag_crash_capture(); read-only thereafter
+// Filled once by diag_crash_capture(). Read-only thereafter EXCEPT for the `dismissed` byte, which
+// diag_crash_dismiss() sets once (see there for why that needs no lock).
+static CrashInfo s_ci;
 
 // A dump is "downloadable" on EXACTLY the terms GET /coredump uses: h_coredump streams the image iff
 // esp_core_dump_image_get() returns ESP_OK, so this predicate is that same call and nothing more —
@@ -76,5 +79,30 @@ void diag_crash_capture() {
 }
 
 const CrashInfo& diag_crash_info() { return s_ci; }
+
+// Acknowledge + delete this boot's crash report (see diag_crash.hpp). Erase FIRST, mark second: on a
+// failed erase nothing is marked, so the banner comes back rather than the device claiming a crash
+// is gone while its dump is still in flash.
+//
+// The erase is unconditional, not gated on diag_crash_coredump_present(): esp_core_dump_image_erase()
+// succeeds on an already-blank partition (it erases and writes the blank size word), and gating it on
+// the presence check would leave behind exactly the images that check REJECTS — a truncated or
+// checksum-broken dump, which is stale crash residue like any other. ESP_ERR_NOT_FOUND here means the
+// PARTITION is missing, not the image.
+//
+// `dismissed` is written from the httpd task while the poll task's WS broadcaster and the MQTT task
+// read s_ci concurrently. That is a single byte store which only ever goes false -> true, so a
+// concurrent reader sees one state or the other and both are self-consistent renderings of the same
+// CrashInfo — no lock, and none of the paths involved may take one anyway (see CLAUDE.md).
+bool diag_crash_dismiss() {
+    esp_err_t err = esp_core_dump_image_erase();
+    if (err != ESP_OK) {
+        diag_printf("crash: dismiss failed — coredump erase: %s\n", esp_err_to_name(err));
+        return false;
+    }
+    s_ci.dismissed = true;
+    diag_printf("crash: report dismissed (reset=%s, dump erased)\n", crash_reason_slug(s_ci.reason));
+    return true;
+}
 
 } // namespace daik

@@ -20,7 +20,14 @@ static void ws_close_fn(httpd_handle_t hd, int sockfd) {
 void http_start() {
     httpd_config_t cfg   = HTTPD_DEFAULT_CONFIG();
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
-    cfg.max_uri_handlers = 24;
+    // EXACTLY the number of routes registered below on the trusted-LAN surface — count them with
+    //   grep -c 'http_register(s\|http_register_on(s\|httpd_register_uri_handler(s' main/http_*.cpp main/mcp_server.cpp
+    // (minus http_common.cpp's own two definitions) — and raise it in the same commit that adds one.
+    // Overflowing is SILENT and hits the WRONG route: httpd_register_uri_handler returns
+    // ESP_ERR_HTTPD_HANDLERS_FULL, and the casualty is whatever registers LAST, which is deliberately
+    // the captive/SPA catch-all — so the symptom of a missing 25th route would be deep links breaking,
+    // not the new route 404ing. http_register() now logs a failed registration for that reason.
+    cfg.max_uri_handlers = 25;
     cfg.lru_purge_enable = true;
     // 12 KB, not the 8 KB this ran on through v1.0.12 — MEASURED, not padded. v1.0.12 panicked and
     // the core dump's task table read `httpd 7728/460`: the task had been 7732 bytes deep at its last
