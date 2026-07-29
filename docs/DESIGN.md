@@ -715,7 +715,7 @@ an update takes; the Connections tile beside it keeps updating, since a link dro
 is exactly what a user would want to see move.
 
 - **The status reports inline, in that same line** — a small progress ring plus a short label,
-  immediately after the version (`#otaStat`): `192.0.2.159 · v1.2.3 ◔ 78%`. It is deliberately
+  immediately after the version (`#otaStat`): `192.168.1.42 · v1.2.3 ◔ 78%`. It is deliberately
   **not** a toast. A download runs for tens of seconds and ticks a percentage the whole time, which
   as toasts stacked up into a column of near-identical "Downloading… 78%" cards covering the very
   dashboard they were reporting on, each one outliving the number it carried. Inline, the reading
