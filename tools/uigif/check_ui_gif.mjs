@@ -51,7 +51,11 @@ const read = (rel) => { try { return readFileSync(P(rel), "utf8"); } catch { die
 // Deliberately NOT "all of main/www": a settings-modal edit cannot change a frame, and a gate that
 // fires on changes it knows are irrelevant is a gate people learn to re-stamp without looking.
 
-// The GIF's crop is the dashboard header line + the schematic card, so both blocks count.
+// The GIF's crop is the schematic card and nothing else. The dashboard header used to be in frame
+// and was fingerprinted with it; it was cropped out because it prints the running VERSION, which a
+// recording cannot keep current. Its markup, its CSS and renderHeaderMeta() left this file with it —
+// a source that cannot change a pixel must not be able to fail this gate, or re-stamping becomes a
+// reflex (which is the one failure mode a stamp-based gate has).
 function block(html, openRe, tag, what) {
   const m = openRe.exec(html);
   if (!m) die(`${what}: ${openRe} matches nothing in main/www/index.html — the recording's frame has moved`);
@@ -92,8 +96,7 @@ function* cssRules(css, prefix = "") {
 const SEL_VISIBLE = [
   /(^|[\s,>~+(])#schem\b/, /\.sc-/, /#sc[A-Z]/,
   /^@keyframes\s+(dashfwd|rdashfwd|rdashrev|spin)\b/,
-  /(^|[\s,])(:root|body|header|\.card|\.pad|\.view)\b/,
-  /(^|[\s,])(#hdrIp|#verLink|\.hdr|\.brand|\.logo)/,
+  /(^|[\s,])(:root|body|\.card|\.pad|\.view)\b/,
 ];
 // If any of these stops matching, the extractor has gone blind rather than the CSS gone quiet —
 // the "clean" that follows would be a lie, so it is exit 2, not a pass.
@@ -112,7 +115,7 @@ function schematicCss(css) {
 // The app.js functions that PAINT the frames. A rename must stop the gate loudly: silently
 // fingerprinting nothing is how a checker starts passing everything.
 const FNS = ["renderApp", "renderLive", "clearSchematic", "liveData", "plantState", "sysSet",
-             "vLwt", "renderHeaderMeta", "fmt0", "fmt1"];
+             "vLwt", "fmt0", "fmt1"];
 
 function fnSource(js, name) {
   const re = new RegExp(`^(?:function\\s+${name}\\s*\\(|const\\s+${name}\\s*=)`, "m");
@@ -149,11 +152,9 @@ const css = read("main/www/style.css");
 const js = read("main/www/app.js");
 
 const figure = block(html, /<figure\b[^>]*\bid="schem"/, "figure", "schematic card");
-const header = block(html, /<header\b[^>]*\bid="hdrDash"/, "header", "dashboard header");
 
 const parts = {
   "schematic markup": figure,
-  "header markup": header,
   "schematic css": schematicCss(css),
   "painting code": FNS.map((n) => fnSource(js, n)).join("\n"),
   "drawing strings": i18nForFigure(figure, js),
@@ -235,8 +236,8 @@ if (WRITE) {
     "# Recorded by scripts/record-dashboard-gif.sh — do not hand-edit.",
     "#",
     "# ui = a fingerprint of the sources docs/media/dashboard.gif was recorded FROM (the schematic",
-    "#      markup and header, the CSS that draws and animates them, the app.js functions that paint",
-    "#      them, the strings they print, the scenes, and this recorder's own framing).",
+    "#      markup, the CSS that draws and animates it, the app.js functions that paint it, the",
+    "#      strings it prints, the scenes, and this recorder's own framing).",
     "# gif = the sha256 of the recording itself, so a hand-edited or re-compressed GIF is caught too.",
     "#",
     "# tools/uigif/check_ui_gif.mjs fails when the UI has moved on and the recording has not. The fix",

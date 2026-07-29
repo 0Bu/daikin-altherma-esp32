@@ -34,7 +34,14 @@ PER_SCENE_MS=2240          # 28 frames of 80 ms — a whole number of frames per
 STEP_MS=80                 # 12.5 fps
 VIEWPORT="1000,760"
 SCALE=2                    # device pixel ratio; the crop below is in DEVICE pixels
-CROP="1616:1112:192:16"    # the header line + the schematic card, nothing below it
+# The schematic card alone — NOT the header line above it. The header carries the running version,
+# and a version frozen into a recording is wrong from the next release onwards, with no gate able to
+# see it (this one fingerprints sources, and nothing re-renders a GIF when version.txt moves). The
+# IP and the product name leave with it; the README says the name three lines up anyway.
+# Measured, not guessed: #schem's box is CSS 108,96 784x463 in this viewport, so the crop is that
+# card with a 12 px side margin, 8 px above and 5 px below (x 96…904, y 88…564), x SCALE.
+CROP="1616:952:192:176"    # the schematic card, nothing above or below it
+
 WIDTH=900                  # final GIF width
 WATCHDOG_TICKS=200         # 0.1 s each — a ceiling per frame, not the normal path
 

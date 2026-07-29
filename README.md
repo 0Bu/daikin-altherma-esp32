@@ -18,9 +18,11 @@ embedded web UI. ESP32-S3 only.
    (captive portal / `192.168.4.1`).
 3. Configure at `http://daikin-altherma-esp32.local`.
 
-## Wiring — X10A (breaker OFF)
+## Wiring X10A
 
-Three wires reach the heat pump: the two signals and ground.
+Breaker OFF. Three wires reach the heat pump: the two signals and ground.
+
+![The X10A header on the indoor unit's PCB: pin 1 (+5 V) at the right, pin 5 (GND) at the left. The TX/RX labels name the ESP32's side of each signal.](docs/media/x10a-header.jpg)
 
 | X10A | Signal | X10A wire | ESP32-S3 | Note |
 | :---: | :--- | :--- | :--- | :--- |
@@ -44,19 +46,12 @@ both orders are tried automatically; mixing up 5 V and GND is not.
 Visual diagram, the full cable chain, and the wiring worked through on specific boards:
 [docs/WIRING.md](docs/WIRING.md).
 
-## Web UI
+## UI
 
-The dashboard is one screen: a schematic of the plant, drawn from the values on the bus and updated
-live. It states what the unit is doing right now — standby, domestic hot water, space heating, or
-both — with the flow, the 3-way valve position, ΔT across the heat exchanger and the derived heat
-output and COP. A reading it cannot currently stand behind is shown as `—` rather than as a number:
-while the compressor rests, the outdoor unit stops refreshing its own sensors, so those pills go
-blank instead of repeating the last run's values.
+One screen, live from the bus: what the unit is doing right now, with any reading the firmware
+cannot currently stand behind shown as `—` rather than as a number.
 
 ![The dashboard through four operating states: standby, domestic hot water, space heating, and heating + DHW](docs/media/dashboard.gif)
-
-Everything configurable sits behind the gear — connections, board hardware, update channel — so the
-dashboard stays a readout.
 
 ## Reference
 

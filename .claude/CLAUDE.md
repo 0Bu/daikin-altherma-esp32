@@ -134,15 +134,20 @@ recording renders perfectly forever, whatever the UI has since become, so all fo
 green while the README shows last month's pipes or a component that no longer exists. A screenshot
 cannot fail a test; it can only be out of date, and it looks exactly as good either way. CI has no
 browser, so this cannot re-render and diff pixels — it FINGERPRINTS the sources the recording was
-made from (the schematic markup + dashboard header, the CSS that draws and animates them, the
-app.js functions that paint them — `renderLive`/`liveData`/`clearSchematic`/… , each REQUIRED to
+made from (the schematic markup, the CSS that draws and animates it, the
+app.js functions that paint it — `renderLive`/`liveData`/`clearSchematic`/… , each REQUIRED to
 exist or the check exits 2 rather than fingerprint nothing — the strings the drawing prints, the
 scenes, and the recorder's own framing) and fails when they no longer match the stamp beside the
 GIF (`tools/uigif/gif_stamp.txt`, per-source hashes so a failure NAMES what moved). It also parses
 the GIF: a single frame, or frames held over 200 ms, fails the one thing a recording is for —
 showing the flow, the fan and the pump MOVING. Deliberately narrower than "all of `main/www`": a
 settings-modal edit cannot change a frame, and a gate that fires on changes it knows are irrelevant
-is one people learn to re-stamp without looking. There is NO exceptions ledger, unlike the other
+is one people learn to re-stamp without looking. The CROP is the schematic card ALONE, and the
+dashboard header it used to include is the worked example of that rule pointing the other way: the
+header prints the running VERSION, which a recording cannot keep current (nothing re-renders a GIF
+when `version.txt` moves, and the fix "stamp the current version in" is only current on the day it
+is recorded), so the header left the frame — and its markup, its CSS and `renderHeaderMeta` left
+the fingerprint with it, since a source that cannot change a pixel must not be able to fail this. There is NO exceptions ledger, unlike the other
 audits — their findings are questions about intent, this one has a single answer (re-record), and a
 "this cannot alter a frame" entry would be a guess about pixels when the machine that settles it is
 on the desk. Re-recording is `scripts/record-dashboard-gif.sh` (Chrome + ffmpeg, LOCAL only; one
