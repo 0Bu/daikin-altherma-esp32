@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte, **retried page probe + a second-sweep confirmation** before falling back to `generic`) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1603 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1608 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -967,13 +967,23 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   the substitution fails *closed* when a truncated line never reaches its end token; the same tests
   pin that a raw-page hex line passes through untouched, so the privacy rule cannot silently clip the
   decode witness the rule above exists to deliver),
-  **1603 `CHECK`s** in
+  **1608 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
   suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
   real "run it and see" loop even in an environment that can't build firmware or USB-flash.
+- **🧪 Metric identity is frozen** — a published row reaches VictoriaMetrics as
+  `daikin_altherma_<group>_<object_id>` and Home Assistant as an entity keyed on the same slug, both
+  derived from the row's **label**. Editing a label is therefore not cosmetic: it retires one series
+  and starts another at zero, with no error anywhere. `test_metric_identity()` freezes the complete
+  set of **164** distinct `<group>_<object_id>` identifiers the catalog produces, so a rename, a
+  dropped row or a change to `ha_slug()` itself fails the suite and prints which identifier moved.
+  Built because the hazard already fired: `f1a5e69` (#139) renamed *"Expansion valve 3 (pls)"* to
+  *"… [OU-II]"* across 19 profiles, and the store shows the old series stopping 5.8 days before the
+  new one starts. Regenerating the list is the **decision**, not the fix (#217). The same block pins
+  the five known HA `uniq_id` collisions so a sixth cannot appear unnoticed (#221).
 - **The rule** — new decode/config/discovery logic goes in `main/logic/` with a `CHECK`, never buried in
   a device-only `.cpp`. The [`add-logic-test`](../.claude/skills/add-logic-test/SKILL.md) skill and the
   [`x10a-decode-reviewer`](../.claude/agents/x10a-decode-reviewer.md) agent enforce it.
@@ -1199,7 +1209,7 @@ and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 20-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1603 checks),
+on the host** (1608 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

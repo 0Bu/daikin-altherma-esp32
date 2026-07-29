@@ -1153,7 +1153,16 @@ def/            embedded per-model value profiles + registry (incl. the generic 
                 starts at zero, and a retry counter resetting to zero is the exact event these rows
                 exist to report, so it reads as the plant going quiet rather than as a rename (#180).
                 test_logic.cpp pins all 11 plus the 0x10 group key against the live store, so this is
-                a test failure rather than something the deleter has to remember.
+                a test failure rather than something the deleter has to remember. Since #217 the
+                OTHER ~150 are pinned too: test_metric_identity() freezes the whole set of distinct
+                <group>_<object_id> identifiers the published catalog produces (164 of them), so any
+                rename, dropped row or change to ha_slug() fails the suite and prints which
+                identifier moved. That gate was built because the hazard is not hypothetical —
+                f1a5e69 (#139) renamed "Expansion valve 3 (pls)" to "… [OU-II]" across 19 profiles
+                and the store shows the old series simply stopping. Regenerating the frozen list is
+                the DECISION, not the fix: an addition is routine, a removal or a change strands a
+                history and belongs in the commit message with its reason. The same block pins the
+                five known HA uniq_id collisions (#221) so a sixth cannot appear unnoticed.
 www/            web UI sources (index.html + style.css + app.js -> one gzipped page) + setup.html.
                 The dashboard SCHEMATIC (the inline SVG in index.html, its sc-* CSS and its
                 INSPECT/I18N bindings) has its own gate — scripts/run-schematic-audit.sh + the
