@@ -1146,7 +1146,7 @@ static void test_detect() {
     // No bus → no best-fit.
     CHECK(detect_best(sigs, nsig, none) == nullptr);
 
-    // ── detect_best I/U-capacity fallback (.159's real case): the full 0x1bff page set but the O/U
+    // ── detect_best I/U-capacity fallback (a real unit's case): the full 0x1bff page set but the O/U
     //    capacity ABSENT (a short 0x00 descriptor -> kw_tenths=-1). Without a capacity hint the
     //    tightest-span rule lands on a 14-16 kW class; the I/U capacity code (reg 0x60/6 = 80 ->
     //    8.0 kW) must steer the representative to a class that CONTAINS 8.0 kW instead. ──
