@@ -1,0 +1,21 @@
+# Recorded by scripts/record-dashboard-gif.sh — do not hand-edit.
+#
+# ui = a fingerprint of the sources docs/media/dashboard.gif was recorded FROM (the schematic
+#      markup and header, the CSS that draws and animates them, the app.js functions that paint
+#      them, the strings they print, the scenes, and this recorder's own framing).
+# gif = the sha256 of the recording itself, so a hand-edited or re-compressed GIF is caught too.
+#
+# tools/uigif/check_ui_gif.mjs fails when the UI has moved on and the recording has not. The fix
+# is to RE-RECORD (that is what the stamp is for), never to edit this file.
+ui=36bd91097246d28131beb649c95aae9232cf4e1635000e20e38bedb33b568409
+part.schematic_markup=35c7e8a07aced59b1e48508cbfca9ec824941ec3b601302055a57f900fef0d94
+part.header_markup=adeeb4580a07ef4d0a5875963e1050ddf4cbd2862ed8e124564cea9a67ace484
+part.schematic_css=868508752ceedc6e838539d587c927754983b859a8e89bfa0af0527ea7cb875d
+part.painting_code=80571923695faedd1dab603d3cc57996799bacf951da2ca35cf462de437ac051
+part.drawing_strings=2d53c59b5ca8100582ed4bbe86c0893339fb10bc56cfd50c0a6e9c1158ca6063
+part.scenes=2af35afc0cc00b002d3b18ff01eabbb920c0b70654a799bfe4b4ef87711543e0
+part.framing=d9085c51d55bdec4157701dae99eed55a0f71e661f7793f98cfcbcdf8192d93f
+gif=189fcce333270280fb777e108ce0a40182aa95f2d835b426ad5287ec584ae83f
+frames=112
+size=900x619
+recorded=2026-07-29

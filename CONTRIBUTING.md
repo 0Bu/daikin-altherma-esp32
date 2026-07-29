@@ -20,15 +20,16 @@ likely to be declined — the comment density and the "why" notes in this codeba
 
 ## The local loop — no board or ESP-IDF required
 
-Four scripts run on a plain system toolchain (cmake + g++/clang++, plus node for the last two) in
-seconds. **Run all four before opening a PR.** They are also the first steps of CI's `gates` job,
+These run on a plain system toolchain (cmake + g++/clang++ for the first, node for the rest) in
+seconds. **Run them all before opening a PR.** They are also the first steps of CI's `gates` job,
 so a failure here fails the build anyway.
 
 ```bash
-scripts/run-mock-tests.sh          # CI gates step 1 — host-side pure-logic tests
-scripts/run-domain-audit.sh        # CI gates step 2 — is the value catalog physically RIGHT?
-scripts/run-description-audit.sh   # CI gates step 3 — can a user find out what each value IS?
-scripts/run-schematic-audit.sh     # CI gates step 4 — does the DRAWING still say what it means?
+scripts/run-mock-tests.sh          # host-side pure-logic tests
+scripts/run-domain-audit.sh        # is the value catalog physically RIGHT?
+scripts/run-description-audit.sh   # can a user find out what each value IS?
+scripts/run-schematic-audit.sh     # does the DRAWING still say what it means?
+scripts/run-ui-gif-audit.sh        # is the README's RECORDING still of this UI?
 ```
 
 `run-mock-tests.sh` compiles the IDF-free headers in [`main/logic/`](main/logic/) against
@@ -96,6 +97,29 @@ on any PR that reaches the drawing, its contract or the tools that judge it (the
 `.claude/hooks/require-schematic-review.sh` is the one definition — it is maintainer tooling, so as
 an outside contributor you never run it; assume any change under `main/www/` needs it).
 
+`run-ui-gif-audit.sh` guards the README's **recording** of that drawing,
+[`docs/media/dashboard.gif`](docs/media/dashboard.gif) — the animated dashboard a new reader sees
+before anything else. It is the one artefact here that rots *invisibly*: a recording renders
+perfectly forever, whatever the UI has since become, so every gate above stays green while the
+README shows a drawing that no longer exists. A screenshot cannot fail a test; it can only be out of
+date, and it looks exactly as good either way. CI has no browser, so the check is a **stamp**, not a
+re-render: it fingerprints the sources the recording was made from — the schematic markup and the
+dashboard header, the CSS that draws and animates them, the `app.js` functions that paint them, the
+strings they print, the scenes in [`tools/uigif/scenes.js`](tools/uigif/scenes.js) and the
+recorder's own framing — and fails when they no longer match
+[`tools/uigif/gif_stamp.txt`](tools/uigif/gif_stamp.txt). It also reads the GIF itself: a single
+frame, or frames held over 200 ms, fails the thing a recording is *for*, which is showing the flow
+moving. The fix is always to re-record — never to edit the stamp:
+
+```bash
+scripts/record-dashboard-gif.sh    # ~5 min; needs Chrome + ffmpeg, so LOCAL only
+```
+
+It films the real UI (`index.html` + `style.css` + `app.js`, spliced the way the firmware build
+splices them) with only the *device* stubbed, so what the GIF shows is what `renderLive()` drew.
+Look at the result before committing: the gate proves the recording is current, never that it is a
+good picture. `tools/uigif/selftest.sh` proves the gate still catches each way it can go stale.
+
 Three more fast gates guard the **published artifacts** rather than the firmware, so most PRs never
 need them locally — run them if you touch
 [`scripts/publish-pages-branch.sh`](scripts/publish-pages-branch.sh),
@@ -105,9 +129,9 @@ need them locally — run them if you touch
 [`scripts/next-version.sh`](scripts/next-version.sh):
 
 ```bash
-scripts/run-pages-publish-tests.sh         # CI gates step 5 — needs only git, no toolchain
-scripts/run-web-installer-plan-tests.sh    # CI gates step 6 — needs only python3
-scripts/run-publish-version-tests.sh       # CI gates step 7 — git + python3 + a C++17 compiler
+scripts/run-pages-publish-tests.sh         # needs only git, no toolchain
+scripts/run-web-installer-plan-tests.sh    # needs only python3
+scripts/run-publish-version-tests.sh       # git + python3 + a C++17 compiler
 ```
 
 The first races two publishers against a throwaway bare repo, because `gh-pages` has two concurrent
@@ -135,10 +159,11 @@ resets the numbering — on 2026-07-24 that republished the dev feed as `1.0.0-d
 `1.0.14-dev.2` it had served minutes earlier, with a green build. If this gate fires, fix the floor
 (a tag, or `version.txt`) — not the gate.
 
-All seven are **steps of one `gates` job**, not a job each (the version gate above runs in `build`,
-where the stamped version exists; only its tests are a `gates` step). Actions bills every job
-rounded up to the next whole minute, so seven ~15-second jobs cost seven minutes for under a minute
-of work; a step boundary names the failure just as precisely.
+Every one of them is a **step of one `gates` job**, not a job each (the version gate above runs in
+`build`, where the stamped version exists; only its tests are a `gates` step). Actions bills every
+job rounded up to the next whole minute, so a fleet of ~15-second jobs costs a billed minute each
+for under a minute of work; a step boundary names the failure just as precisely. For the current
+list, read the `gates` job in `.github/workflows/build.yml` rather than a count written here.
 
 ## Building the firmware
 

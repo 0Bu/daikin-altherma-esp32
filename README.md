@@ -7,79 +7,56 @@ embedded web UI. ESP32-S3 only.
 ## Requirements
 
 - A Daikin Altherma with an **X10A** header.
-- An ESP32-S3 with ≥4 MB flash — the wiring below is written for an **M5Stack AtomS3 Lite**; any
-  ESP32-S3 works ([docs/BOARDS.md](docs/BOARDS.md)).
-- JST-EH 2.5 mm 5-pin or Dupont wires, plus a **Grove → Dupont** cable for the AtomS3 Lite's Grove
-  port (or plain Dupont wires into the female header on its case).
+- Any ESP32-S3 board with ≥4 MB flash ([docs/BOARDS.md](docs/BOARDS.md)).
+- A JST-EH 2.5 mm 5-pin connector to reach the X10A header.
 - A browser with Web Serial to flash.
 
 ## Setup
 
-1. Flash: [web installer](https://0bu.github.io/daikin-altherma-esp32/). An update without
-   **Erase** preserves the existing configuration — but **not yet on the release feed**: the
-   published `1.0.13` manifest predates that and still flashes one merged image over `nvs`. Until
-   the next release is cut, use the [dev installer](https://0bu.github.io/daikin-altherma-esp32/dev/)
-   (or OTA) when the configuration must survive.
+1. Flash: [web installer](https://0bu.github.io/daikin-altherma-esp32/).
 2. On a first install or after **Erase**, join AP `daikin-altherma-esp32-setup`
    (captive portal / `192.168.4.1`).
-3. Configure at `http://daikin-altherma-esp32.local`:
-   - Set the MQTT `host:port`.
-   - Model and X10A protocol are **auto-detected**. So are the RX/TX pins on a XIAO ESP32-S3, whose
-     pads are the shipped defaults; on any other board — the AtomS3 Lite included — pick them once
-     (see *Wiring* below), after which they too are remembered and re-detected.
-   - The UI follows your browser language (**German** for a `de*` browser, else English). Heat-pump
-     value labels stay English — they are the X10A register names.
+3. Configure at `http://daikin-altherma-esp32.local`.
 
 ## Wiring — X10A (breaker OFF)
 
-Written for the **M5Stack AtomS3 Lite**: its Grove HY2.0-4P port carries exactly the four wires X10A
-needs, so one Grove → Dupont cable reaches the service port with nothing to solder.
+Three wires reach the heat pump: the two signals and ground.
 
-| X10A | Signal | X10A wire | AtomS3 Lite | Grove wire | Note |
-| :---: | :--- | :--- | :--- | :--- | :--- |
-| 1 | +5 V | Red | `5V` | Red | Optional — out of spec, prefer USB power |
-| 2 | HP-TX | Brown | RX `GPIO1` (G1) | Yellow | Heat pump sends → ESP32 receives |
-| 3 | HP-RX | Green | TX `GPIO2` (G2) | White | ESP32 sends → heat pump receives |
-| 4 | NC | — | — | — | Not connected |
-| 5 | GND | Black | `GND` | Black | Mandatory |
+| X10A | Signal | X10A wire | ESP32-S3 | Note |
+| :---: | :--- | :--- | :--- | :--- |
+| 1 | +5 V | Red | — | Optional — out of spec, prefer USB power |
+| 2 | HP-TX | Brown | RX GPIO | Heat pump sends → ESP32 receives |
+| 3 | HP-RX | Green | TX GPIO | ESP32 sends → heat pump receives |
+| 4 | NC | — | — | Not connected |
+| 5 | GND | Black | `GND` | Mandatory |
 
-**Pick the two pins once.** The firmware ships with the XIAO's defaults (`RX 44` / `TX 43`), which
-the AtomS3 Lite does not break out — so the bus stays silent until you set them: dashboard →
-**ESP32** card → RX/TX dropdown → `1` and `2`. They are cached in NVS from then on and re-used every
-boot. G1 and G2 are interchangeable: detection probes the pair both ways round, so a crossed signal
-wire corrects itself. A crossed 5 V/GND does not — check those two twice.
+**Tell the firmware which two pins you used.** The signals can go to any two free GPIOs, so the
+firmware cannot know them:
 
-**No Grove cable?** The female header on the case carries `5V`, `GND` and `G5`–`G8`/`G38`. Wire GND
-plus the two signals to any two of those (e.g. RX `G5`, TX `G6`) and pick that pair in the dropdown
-instead.
+1. Wire HP-TX and HP-RX to two free GPIOs on your board.
+2. Select those two in the RX/TX dropdown under **⚙ Settings → ESP32**. It lists only the GPIOs
+   this chip allows. The choice is saved and reused on every boot.
 
-Grove wire colours above are the standard cable's (black GND, red 5 V, yellow G1, white G2); if your
-adapter is coloured differently, go by the port, not the colour.
+Until that setting matches your wiring, no values arrive: the firmware tries the saved pins and its
+built-in defaults (`RX 44` / `TX 43`) — it does not scan every pin. Mixing up RX and TX is harmless,
+both orders are tried automatically; mixing up 5 V and GND is not.
 
-Visual diagram, the full cable chain (X10A → JST-EH pigtail → Dupont joint → Grove), the same wiring
-on a XIAO ESP32-S3, and picking pins on any other board: [docs/WIRING.md](docs/WIRING.md).
-
-## Board hardware — status LED and recovery button
-
-One firmware image serves every ESP32-S3 board, so the parts that differ *between* boards are
-runtime settings, configured in the web UI under **⚙ Settings → ESP32 → Hardware**:
-
-| Board | Status LED | Recovery button |
-| :--- | :--- | :--- |
-| M5Stack AtomS3 Lite | `GPIO35`, WS2812 (addressable RGB) | `GPIO41`, active low |
-| Seeed XIAO ESP32-S3 | `GPIO21`, plain LED, active low | none broken out |
-
-The LED shows link and bus state at a glance — blue = setup portal, yellow = connecting, green =
-healthy, red double-flash = X10A link down, orange = MQTT down (a plain single-colour LED shows the
-same states as distinct blink patterns).
-
-A configured **recovery button held for 5 seconds erases every stored setting** — WiFi, MQTT,
-Syslog/NTP, the X10A pin cache — and reboots into the setup portal. It is the way back in when the
-device has joined a network you can no longer reach, which is otherwise a USB-and-`erase_flash` job.
-The LED flashes red once the reset is armed (let go to abort) and turns solid white while erasing.
-Leave it set to **None** unless a button is actually wired: an unconnected pin can float and trigger
-it on its own. Per-board hardware inventory: [docs/BOARDS.md](docs/BOARDS.md); wiring:
+Visual diagram, the full cable chain, and the wiring worked through on specific boards:
 [docs/WIRING.md](docs/WIRING.md).
+
+## Web UI
+
+The dashboard is one screen: a schematic of the plant, drawn from the values on the bus and updated
+live. It states what the unit is doing right now — standby, domestic hot water, space heating, or
+both — with the flow, the 3-way valve position, ΔT across the heat exchanger and the derived heat
+output and COP. A reading it cannot currently stand behind is shown as `—` rather than as a number:
+while the compressor rests, the outdoor unit stops refreshing its own sensors, so those pills go
+blank instead of repeating the last run's values.
+
+![The dashboard through four operating states: standby, domestic hot water, space heating, and heating + DHW](docs/media/dashboard.gif)
+
+Everything configurable sits behind the gear — connections, board hardware, update channel — so the
+dashboard stays a readout.
 
 ## Reference
 
@@ -97,19 +74,10 @@ it on its own. Per-board hardware inventory: [docs/BOARDS.md](docs/BOARDS.md); w
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model + OTA signing/key lifecycle |
 | [docs/MCP.md](docs/MCP.md) | Planned read-only MCP surface (not yet implemented) |
 | [docs/REPORTING.md](docs/REPORTING.md) | Reporting a bug: the public issue, the private device report, what gets redacted |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | What's useful to report, the two local verification gates, how PRs land |
-
-## Notes
-
-- OTA from the web UI is the normal update path (config preserved). The Web installer also supports
-  a manual NVS-preserving update when **Erase** stays off; use **Erase** only for a deliberate reset.
-- Two update feeds: **Release** (cut by hand) and **Development** (every merge to `main`). Pick one
-  per device under the gear → **ESP32** → *Update channel*; the [dev
-  installer](https://0bu.github.io/daikin-altherma-esp32/dev/) flashes the latest merge.
-- Read-only monitor: it polls X10A and never actuates the heat pump (X10A has no write command).
-- HA templates / COP: [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md).
+| [CONTRIBUTING.md](CONTRIBUTING.md) | What's useful to report, the local verification loop, how PRs land |
 
 ## Scope & credits
 
+Read-only monitor: it polls X10A and never actuates the heat pump (X10A has no write command).
 Trusted LAN only; no API auth/TLS. MIT ([LICENSE](LICENSE)); protocol / value definitions derived
 from [ESPAltherma](https://github.com/raomin/ESPAltherma) (MIT). No warranty; not affiliated with Daikin.

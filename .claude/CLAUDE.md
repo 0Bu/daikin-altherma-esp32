@@ -63,6 +63,7 @@ scripts/run-domain-audit.sh  # is the value catalog physically RIGHT? (the domai
 scripts/run-description-audit.sh  # can the user find out what each value IS? (node-only)
 scripts/run-schematic-audit.sh    # does the DRAWING still say what it means? (node-only)
 scripts/run-redaction-audit.sh    # can a bug report still leak the USER's data? (python-only)
+scripts/run-ui-gif-audit.sh       # is the README's RECORDING still of this UI? (node-only)
 ```
 
 The third is the same question one layer up from the second: the domain audit asks whether a
@@ -126,6 +127,33 @@ while debugging, not a value laundered through an unrelated local first), and on
 found `mqtt: retired legacy HA device %s` printing the unique half of the MAC that `/status` was
 redacting three sections above it. `tools/redact/audit_exceptions.txt` is its ledger and
 `tools/redact/selftest.sh` re-seeds both defects it was built for.
+
+The FIFTH guards the README's RECORDING of that drawing — `docs/media/dashboard.gif`, the animated
+dashboard a new user sees before anything else. It is the one artefact here that rots INVISIBLY: a
+recording renders perfectly forever, whatever the UI has since become, so all four gates above stay
+green while the README shows last month's pipes or a component that no longer exists. A screenshot
+cannot fail a test; it can only be out of date, and it looks exactly as good either way. CI has no
+browser, so this cannot re-render and diff pixels — it FINGERPRINTS the sources the recording was
+made from (the schematic markup + dashboard header, the CSS that draws and animates them, the
+app.js functions that paint them — `renderLive`/`liveData`/`clearSchematic`/… , each REQUIRED to
+exist or the check exits 2 rather than fingerprint nothing — the strings the drawing prints, the
+scenes, and the recorder's own framing) and fails when they no longer match the stamp beside the
+GIF (`tools/uigif/gif_stamp.txt`, per-source hashes so a failure NAMES what moved). It also parses
+the GIF: a single frame, or frames held over 200 ms, fails the one thing a recording is for —
+showing the flow, the fan and the pump MOVING. Deliberately narrower than "all of `main/www`": a
+settings-modal edit cannot change a frame, and a gate that fires on changes it knows are irrelevant
+is one people learn to re-stamp without looking. There is NO exceptions ledger, unlike the other
+audits — their findings are questions about intent, this one has a single answer (re-record), and a
+"this cannot alter a frame" entry would be a guess about pixels when the machine that settles it is
+on the desk. Re-recording is `scripts/record-dashboard-gif.sh` (Chrome + ffmpeg, LOCAL only; one
+headless page load per frame, each POSED at a deterministic animation instant by `window.__pose` in
+`tools/uigif/scenes.js`, since wall-clock time cannot survive a fresh page load — and each
+animation given a whole number of cycles across the total so the loop closes: the real periods
+1.1/1.6/2.6 s share no practical common multiple). `tools/uigif/selftest.sh` proves the gate still
+catches each way the recording can go stale. The judgement half is the `/ui-gif` skill: whether the
+four scenes are still the right ones, whether the invented numbers are still physically coherent,
+and whether the standby scene still shows the honest blanking that is the point of showing it at
+all.
 
 (Three more fast gates guard the PUBLISHED ARTIFACTS rather than the firmware —
 `scripts/run-pages-publish-tests.sh`, git-only, relevant when `scripts/publish-pages-branch.sh` or
@@ -478,8 +506,11 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 explicit pl_on:"1"/pl_off:"0" — HA's defaults are "ON"/"OFF" and a mismatch parks the
                 entity at `unknown`. The NUMBER is the point: a metrics consumer (Telegraf →
                 VictoriaMetrics) drops strings AND bools, so ~30 of a profile's ~99 values reached HA but
-                never a graph (measured: 58 of ~99 became series). /values, the web UI and the WebSocket
-                read the poll cache and still show ON/OFF — only the wire format changed. Both call sites
+                never a graph (measured: 58 of ~99 became series). Since #210 the NUMBER is the
+                firmware-wide boundary, /values and the WebSocket included: a bit-flag row carries the
+                value "1"/"0" plus a structural `"binary":true` marker, and the BROWSER renders ON/OFF
+                from that marker (www/app.js's vOn tests the value === "1", never the text — a consumer
+                still expecting "ON" reads every flag as false, silently). Both call sites
                 key on conv_is_binary, never on the text, so the encoding and the entity type can't drift
                 apart. Builds before the split published these as `sensor`; that stale retained config is
                 DELETED per binary row on each announce (retired_sensor_discovery_topic) so no duplicate
@@ -1200,7 +1231,11 @@ www/            web UI sources (index.html + style.css + app.js -> one gzipped p
                 The dashboard SCHEMATIC (the inline SVG in index.html, its sc-* CSS and its
                 INSPECT/I18N bindings) has its own gate — scripts/run-schematic-audit.sh + the
                 /schematic-review skill: a pill can name a physically correct value and still be
-                drawn on the wrong pipe, which nothing else here can see
+                drawn on the wrong pipe, which nothing else here can see. A change here also ages
+                the README's RECORDING of the dashboard (docs/media/dashboard.gif) — a second gate,
+                scripts/run-ui-gif-audit.sh + the /ui-gif skill, since a recording renders perfectly
+                forever whatever the UI became; re-record with scripts/record-dashboard-gif.sh
+                (tools/uigif/ holds the scenes + the checker)
 ```
 
 ## NVS namespaces

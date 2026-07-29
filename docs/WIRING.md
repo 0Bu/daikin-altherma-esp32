@@ -7,10 +7,10 @@ the wiring guide is written for.
 ## Visual Wiring Diagram — M5Stack AtomS3 Lite (Grove)
 
 The Grove HY2.0-4P port carries **GND, 5 V, G2, G1** — the same four wires X10A needs — so a
-Grove → Dupont cable reaches the service port with nothing to solder:
+Grove breakout cable reaches the service port with nothing to solder:
 
 ```text
-   Daikin X10A (5-pin)                Grove -> Dupont            M5Stack AtomS3 Lite
+   Daikin X10A (5-pin)                Grove breakout             M5Stack AtomS3 Lite
    +---------------------+
    | 1  +5 V    (Red)    | ----------- Red    -------------->  5V    (optional, see below)
    | 2  HP-TX   (Brown)  | ----------- Yellow -------------->  G1 = GPIO1  (RX)
@@ -24,7 +24,7 @@ Grove colours are the standard cable's; if your adapter differs, go by the port,
 **Without a Grove cable**, the female header on the case carries `5V`, `GND` and `G5`–`G8`/`G38` —
 use any two of those for the signals (e.g. RX `G5`, TX `G6`).
 
-Either way the two pins must be **picked once** in the dashboard (**ESP32** card → RX/TX dropdown):
+Either way the two pins must be **picked once** under **⚙ Settings → ESP32** (RX/TX dropdown):
 the shipped defaults are the XIAO's `44`/`43`, which this board does not break out, so nothing
 answers until you set them. Their order does not matter — detection probes the pair both ways round.
 
@@ -36,13 +36,13 @@ classic-ESP32 default — are absent on both boards, which is why the pins are c
 ### The cable chain, connector by connector
 
 Two ready-made cables meet in the middle, so nothing is soldered and nothing is cut: a **JST-EH
-2.5 mm 5-pin pigtail** plugs into the unit's X10A header and ends in **female Dupont** sockets; a
-**Grove → male Dupont** adapter plugs into the AtomS3 Lite and ends in **male Dupont** pins. The
-male pins push straight into the female sockets.
+2.5 mm 5-pin pigtail** plugs into the unit's X10A header and ends in **female 2.54 mm jumper**
+sockets; a **Grove breakout** cable plugs into the AtomS3 Lite and ends in **male 2.54 mm** pins.
+The male pins push straight into the female sockets.
 
 ```text
-   Daikin X10A      JST-EH 2.5 mm 5-pin       Dupont joint      Grove -> Dupont      M5Stack AtomS3 Lite
-   (unit header)    pigtail                   [F] <- [M]        adapter cable        Grove HY2.0-4P
+   Daikin X10A      JST-EH 2.5 mm 5-pin       jumper joint      Grove breakout       M5Stack AtomS3 Lite
+   (unit header)    pigtail                   [F] <- [M]        breakout cable       Grove HY2.0-4P
    +------------+
    | 1  +5 V    |--- pigtail wire --------->  [F] <- [M]  ----- Red ------------->  5V   (optional)
    | 2  HP-TX   |--- pigtail wire --------->  [F] <- [M]  ----- Yellow ---------->  G1 = GPIO1  (RX)
@@ -51,8 +51,8 @@ male pins push straight into the female sockets.
    | 5  GND     |--- pigtail wire --------->  [F] <- [M]  ----- Black ----------->  GND  (mandatory)
    +------------+
 
-   [F] = female Dupont socket, on the JST-EH pigtail
-   [M] = male Dupont pin, on the Grove adapter (4 pins for 5 sockets — pin 4 stays free)
+   [F] = female 2.54 mm jumper socket, on the JST-EH pigtail
+   [M] = male 2.54 mm pin, on the Grove breakout (4 pins for 5 sockets — pin 4 stays free)
 ```
 
 **The two connectors are not in the same order**, so the joint has to be made wire by wire — you
@@ -112,7 +112,7 @@ own pinout diagram — here's that cross-reference already done for the boards t
 | Waveshare ESP32-S3-DevKitC-1 | ESP32-S3 | 1, 2, 4–18, 35, 36, 37, 38, 43, 44, 47, 48 | GPIO0/3/45/46 (strapping), 19/20 (USB-JTAG, already the console), 39–42 (dedicated JTAG), 21 (status LED) |
 
 Pick any two distinct pins from a board's "safe pins" column for RX/TX, wire them to X10A, then set
-them in the dashboard's dropdown (`POST /set_hp`) — see the pin table in
+them in the RX/TX dropdown under **⚙ Settings → ESP32** (`POST /set_hp`) — see the pin table in
 [README.md § Wiring — X10A](../README.md#wiring--x10a-breaker-off) for why the firmware won't find
 them on its own until you do.
 
@@ -120,7 +120,7 @@ them on its own until you do.
 
 These are the board's own onboard parts, and they are **runtime settings**, not build options: CI
 publishes one `esp32s3` image, and the boards it runs on disagree about what they have. Set them in
-the dashboard under **ESP32 → Hardware** (`POST /set_board`); a save reboots.
+**⚙ Settings → ESP32 → Hardware** (`POST /set_board`); a save reboots.
 
 | Board | Status LED | Recovery button |
 | :--- | :--- | :--- |
