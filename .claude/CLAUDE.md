@@ -728,10 +728,27 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 answers something narrower: convert() handles the wire format's own 0x8000 no-data
                 marker, reading_plausible() catches a number that is IMPOSSIBLE, ValueDef::no_publish
                 carries what the GENERATOR knew. What is left is a field that decodes to an entirely
-                ordinary number which measures nothing, and only per-row evidence can name it. Two
-                verdicts exist; ONE is currently in force. ZeroMeansAbsent (Target Cond. Temp. 0x10/8
+                ordinary number which measures nothing, and only per-row evidence can name it. THREE
+                verdicts exist; TWO are currently in force. ZeroMeansAbsent (Target Cond. Temp. 0x10/8
                 — raw 0x0000 through a full compressor cycle, which is also why ou_stale.hpp already
-                calls it a useless witness) withholds only that exact value. Unproven — withhold the
+                calls it a useless witness) withholds only that exact value. AboveRangeIsAbsent is
+                the EXPANSION VALVE pulse rows (conv 151, all five coordinates): 30 d of published
+                samples run 0-474 pulses and then carry six samples of exactly 0xFFF8, with NOTHING
+                in between — a discrete out-of-band integer, not a distribution's tail. The obvious
+                diagnosis, "conv 151 should be signed", is refuted rather than merely unproven: a
+                valve nudged past its zero would report a SPREAD of small negatives reached from
+                positions near 0, while every occurrence is the identical integer sitting between
+                neighbouring samples of ~450, and no valve travels 450 -> -8 -> 450 in 30 s. Since
+                65528 and -8 are both impossible positions, WITHHOLDING is the answer both readings
+                agree on, and the u16 decode REGISTERS.md §3.1 documents stays untouched. It is a
+                value test that cannot live in reading_plausible(), whose envelopes are keyed on
+                dataType and so cannot reach a dataType -1 row at all; the only other handle is the
+                "(pls)" in the label, which is the one thing this project does not key on. The
+                ceiling (2000) is deliberately ~4x the widest observed opening — an impossibility
+                filter, never a threshold fitted to make a number look nicer. All five coordinates
+                carry it from a capture on ONE, because conv 151 has exactly one use in the whole
+                catalog (113 rows, every one an EEV pulse position), so the bound is a fact about the
+                ACTUATOR; the catalog test pins that set in BOTH directions. Unproven — withhold the
                 ROW from every publish surface and retract its retained HA config — is implemented
                 and has NO live entry: it held Target Evap. Temp. (0x10/6) while the scale was
                 unknown, and #194 then showed that row was not unmeasurable but mis-decoded, so the

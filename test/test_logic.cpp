@@ -5876,6 +5876,38 @@ static void test_availability() {
     // A text/enum row has no number to judge and passes through untouched.
     CHECK(value_available(cond, false, 0.0));
 
+    // ── Expansion valve pulses: raw 0xFFF8 is not a position ─────────────────────────────────────
+    // BYTE LEVEL, because the whole finding is about which integer arrives on the wire. conv 151 is
+    // u16 little-endian, so the field is {low, high}.
+    const ValueDef ev1{0x30, 3, 151, 2, -1, "Expansion valve 1 (pls)"};
+    const uint8_t ev_parked[]  = {0xC2, 0x01};   // 450 — the position it rests at between cycles
+    const uint8_t ev_widest[]  = {0xDA, 0x01};   // 474 — the widest opening in 30 d of samples
+    const uint8_t ev_shut[]    = {0x00, 0x00};   // 0 — a closed valve is a real reading, not absence
+    const uint8_t ev_glitch[]  = {0xF8, 0xFF};   // 0xFFF8 — 65528 unsigned / -8 signed; neither is a
+                                                 // valve position, which is why the fix is a
+                                                 // withholding and not a re-read of the sign.
+    CHECK(availability_policy(ev1) == AvailabilityPolicy::AboveRangeIsAbsent);
+    CHECK(row_publishable(ev1));                 // the ENTITY stays — the valve is real
+
+    // The CONVERTER is untouched: it still decodes exactly what REGISTERS.md §3.1 says it does, so
+    // the domain audit's converters_equivalent() can still tell conv 151 from anything else. The
+    // envelope is applied one layer up, by hp_format, exactly as it is for reading_plausible().
+    CHECK(convert(ev1, ev_parked).value == 450.0);
+    CHECK(convert(ev1, ev_widest).value == 474.0);
+    CHECK(convert(ev1, ev_glitch).value == 65528.0);
+    CHECK(convert(ev1, ev_glitch).ok);
+
+    CHECK(value_available(ev1, true, convert(ev1, ev_parked).value));
+    CHECK(value_available(ev1, true, convert(ev1, ev_widest).value));
+    CHECK(value_available(ev1, true, convert(ev1, ev_shut).value));    // 0 pulses = shut, published
+    CHECK(!value_available(ev1, true, convert(ev1, ev_glitch).value)); // 65528 = withheld
+
+    // The bound is an impossibility filter, not a working-range check: a position well past anything
+    // this unit reaches still publishes, because a larger model's valve legitimately might.
+    CHECK(value_available(ev1, true, 1999.0));
+    CHECK(value_available(ev1, true, EEV_PULSE_CEILING));   // one-sided, so the ceiling itself passes
+    CHECK(!value_available(ev1, true, EEV_PULSE_CEILING + 1.0));
+
     // Everything the ledger says nothing about is unaffected — including the OTHER conv-114 rows and
     // a legitimate 0 °C reading, which is the one thing a global "zero means unavailable" rule would
     // have destroyed (a real thermistor crosses zero every winter).
@@ -5894,6 +5926,7 @@ static void test_availability() {
 
     // ── Against the real catalog ──────────────────────────────────────────────────────────────────
     int profiles_total = 0, evap_rows = 0, cond_rows = 0, suppressed = 0, odd_label = 0;
+    int eev_rows = 0, conv151_rows = 0;
     for (const auto& p : def::profiles) {
         profiles_total++;
         const auto view = def::resolved(p);
@@ -5922,6 +5955,24 @@ static void test_availability() {
                 CHECK(logic::lwt_ci_contains(d.label, "target cond"));
                 cond_rows++;
             }
+            // The pulse ceiling and conv 151 must be the SAME set, in both directions. Left to
+            // right: nothing but an expansion valve may acquire a ceiling meant for one. Right to
+            // left: every conv-151 row is covered, since a coordinate the ledger missed would
+            // publish the identical 0xFFF8 as a real position on some other model's valve.
+            if (d.conv == 151) {
+                conv151_rows++;
+                CHECK(logic::lwt_ci_contains(d.label, "expansion valve"));
+                CHECK(pol == AvailabilityPolicy::AboveRangeIsAbsent);
+                CHECK(availability_rule(d)->ceiling == EEV_PULSE_CEILING);
+            }
+            if (pol == AvailabilityPolicy::AboveRangeIsAbsent) {
+                eev_rows++;
+                CHECK(d.conv == 151);
+                CHECK((d.reg == 0x30 && (d.offset == 3 || d.offset == 5 || d.offset == 7 ||
+                                         d.offset == 9)) ||
+                      (d.reg == 0xA0 && d.offset == 8));
+                CHECK(row_publishable(d));   // the valve is real — only the bad integer is withheld
+            }
             // NO CORE HYDRONIC ROW MAY BE TOUCHED. The audit in #209 is explicit that the hydronic
             // decode is excellent and must not be collaterally damaged: leaving/return water, tank,
             // flow, pressure and the setpoints all live on 0x60-0x62, and not one of them may fall
@@ -5944,6 +5995,12 @@ static void test_availability() {
     CHECK(evap_rows == 44 && cond_rows == 44);
     CHECK(evap_rows == suppressed);
     CHECK(odd_label == 1);   // exactly one family spells the re-decoded register differently
+    // conv 151 has exactly ONE use in the catalog, which is the argument for covering all five of
+    // its coordinates from a capture on one of them. If this count moves, the generator has started
+    // emitting conv 151 somewhere new and the "it is always an expansion valve" premise needs
+    // re-reading before the ceiling is allowed to follow it there.
+    CHECK(conv151_rows == 113);
+    CHECK(eev_rows == conv151_rows);
 }
 
 // ── Numeric fault state beside the textual code (logic/fault_state.hpp) — #209 defect 4 ──────────

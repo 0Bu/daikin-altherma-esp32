@@ -102,6 +102,19 @@ catalog audit still distinguishes the intrinsic converters (`conv 105` vs `114` 
 sentinel); it is keyed on the °C `type`, so the non-temperature rows sharing those converter ids
 (kW / COP at `type = -1`) pass through unchanged.
 
+**Per-row ceiling (`logic/availability.hpp`).** Being keyed on the `type`, the envelope above cannot
+reach a `type = -1` row at all — and the **expansion-valve pulse** rows (`conv 151`, at `0x30/3`,
+`0x30/5`, `0x30/7`, `0x30/9` and `0xA0/8`) need one. Measured over 30 days of published samples on
+the reference unit, `Expansion valve 1 (pls)` runs **0–474** pulses and then carries six samples of
+**exactly `0xFFF8`**, with not one sample in between. `conv 151` is **`u16`** as this table says and
+the firmware decodes it that way; re-reading it *signed* on the strength of that value is refuted,
+not merely unsupported — a valve nudged past its mechanical zero would report a spread of small
+negatives reached from positions near 0, whereas every occurrence is the identical integer sitting
+between neighbouring samples of ~450, and no valve travels 450 → −8 → 450 inside 30 s. Neither 65528
+nor −8 is a position, so the **value** is withheld at publish (`hp_format` → `value_available`) while
+the converter keeps its documented semantics. The ceiling is `2000` — about four times the widest
+opening ever observed, so it clips nothing real on a larger unit.
+
 ### 3.2 Bit-flag converters (300–307)
 
 A single bit of a one-byte field, published as numeric **1 / 0**:
