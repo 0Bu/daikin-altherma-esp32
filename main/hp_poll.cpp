@@ -385,7 +385,25 @@ void hp_poll_start() {
     if (!s_mtx) diag_printf("hp_poll: cache mutex alloc failed — value snapshots return empty\n");
     // The poll engine is the core of the device; if its task can't be created there is no heat-pump
     // polling at all. Report it loudly — the web UI + OTA still come up, so the board stays fixable.
-    if (xTaskCreate(poll_task, "hp_poll", 8192, nullptr, 5, nullptr) != pdPASS)
+    //
+    // 12288, not 8192, and the extra 4 KB is not a guess (#241). This task does not merely poll: its
+    // WebSocket broadcaster calls build_status_json_string(), the SAME builder the httpd task runs.
+    // v1.0.12 already hit that ceiling once and raised HTTPD's stack 8192 -> 12288
+    // (http_server.cpp); this task was left at 8192 and #229 (`health`) + #231 (`history`) then grew
+    // /status from ~2.2 KB to ~3.5 KB until it no longer fitted. The core dump is unambiguous —
+    // hp_poll 7664 USED / 520 FREE, dying on the stack watchpoint inside a malloc() under
+    // Config::Config (config() returns a whole Config BY VALUE, ~10 std::string copies) beneath
+    // syslog_status() <- build_status_json_string() <- ws_broadcast_status():
+    //
+    //     TCB             NAME PRIO C/B  STACK USED/FREE
+    //     0x3fcc84cc   hp_poll      5/5      7664/520
+    //     0x3fcbf3b4     httpd      5/5     1456/10820
+    //
+    // 12288 is the size the OTHER runner of this builder already survives on — 4376 concurrent
+    // GET /status never brought httpd near its limit. Anything that grows /status grows BOTH stacks;
+    // read the task table in any core dump (CLAUDE.md → Memory constraints) rather than trusting
+    // that this still fits.
+    if (xTaskCreate(poll_task, "hp_poll", 12288, nullptr, 5, nullptr) != pdPASS)
         diag_printf("hp_poll: poll task alloc failed — X10A polling disabled this boot\n");
 }
 
