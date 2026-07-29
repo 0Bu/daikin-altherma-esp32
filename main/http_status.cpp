@@ -23,8 +23,6 @@
 #include "logic/redact.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/timestamp.hpp"
-#include "logic/ws_policy.hpp"
-#include "logic/ws_tx_gate.hpp"
 #include "mqtt_ha.hpp"
 #include "ota_update.hpp"
 #include "safe_mode.hpp"
@@ -41,14 +39,8 @@
 #include "esp_heap_caps.h"
 #include "esp_partition.h"
 #include "esp_core_dump.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/semphr.h"
-#include "http_server.hpp"
 #include "diag_log.hpp"
 #include <algorithm>
-#include <atomic>
-#include <new>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -108,9 +100,13 @@ static esp_err_t h_captive(httpd_req_t* req) {
 }
 
 // `redact` withholds the seven reporter-identifying values (logic/redact.hpp) so a snapshot can be
-// pasted into a bug report. Defaulted OFF: the WebSocket broadcast and the subscription snapshot
-// feed the dashboard, which legitimately shows the SSID and the broker — only GET /status?redact=1
-// asks for the scrubbed form.
+// pasted into a bug report. Defaulted OFF: the dashboard polls this same route and legitimately
+// shows the SSID and the broker — only GET /status?redact=1 asks for the scrubbed form.
+//
+// Runs on ONE task: the httpd worker. It used to run on the poll task too (the /events WebSocket
+// broadcaster), and that second runner is what overflowed hp_poll's stack (#241) — a ~3.5 KB JSON
+// builder is the largest thing either task does, so putting it on the task that owns the X10A UART
+// funded a reboot where a 503 would have done. Keep it that way: this is a request-path builder.
 static std::string build_status_json_string(bool redact = false) {
     const Config& c = config();
     HpStats     hp  = hp_stats();
@@ -229,9 +225,9 @@ static std::string build_status_json_string(bool redact = false) {
     // takes it); the LABEL is how the detected profile spells that row, which is what lets the UI
     // attach a trend to the value row it is already rendering. Rows the profile does not carry are
     // omitted entirely — an absent feature is stated by its absence, not by an empty chart. Built
-    // with successive += like everything else here: this runs on the httpd task AND the WS
-    // broadcaster, and a `a + b + c` chain materialises every intermediate at once (CLAUDE.md →
-    // Memory constraints, the v1.0.12 stack overflow).
+    // with successive += like everything else here: a `a + b + c` chain materialises every
+    // intermediate at once, all live in one frame on the httpd task's stack (CLAUDE.md → Memory
+    // constraints, the v1.0.12 stack overflow — which happened on THIS task).
     j += "\"history\":{\"dt\":" + std::to_string(logic::HISTORY_DT_S) + ",\"rows\":[";
     bool first_trend = true;
     for (size_t t = 0; t < logic::TREND_COUNT; t++) {
@@ -262,8 +258,8 @@ static std::string build_status_json_string(bool redact = false) {
     // A field a check has not established is emitted as `null`, never omitted — an absent key is
     // indistinguishable from an older build that never had it, the same rule logic/redact.hpp
     // states for the bug-report payload. Successive `+=` with bare literals throughout (never one
-    // `a + b + c` chain): this function also runs in the poll task's WS broadcaster, and its stack
-    // is the budget that killed v1.0.12.
+    // `a + b + c` chain): the httpd stack is the budget that killed v1.0.12, and every intermediate
+    // of a chain is live in this frame at once.
     {
         const logic::CheckupReport hr = checkup_report();
         j += "\"health\":{\"covered_s\":";
@@ -315,14 +311,14 @@ static std::string build_status_json_string(bool redact = false) {
         j += "]},";
     }
 
-    // System health: heap headroom + why the device last booted, so both are visible from the LAN /
-    // WebSocket without a serial console (and without a broker — unlike the MQTT heartbeat). free_heap
+    // System health: heap headroom + why the device last booted, so both are visible from the LAN
+    // without a serial console (and without a broker — unlike the MQTT heartbeat). free_heap
     // is the current free, min_free_heap the since-boot low-water mark (the leak indicator), max_alloc
     // the largest CONTIGUOUS block (the true OOM ceiling on this heap-tight chip). reset_reason reuses
     // the boot-time cached reason (diag_crash.cpp) mapped via logic/reset_reason.hpp; safe_mode is the
     // latched boot-loop recovery flag (safe_mode.cpp — true once too many crash boots accumulated, so
     // poll + MQTT were skipped). Small numbers + a short slug appended to the existing builder — no
-    // large contiguous allocation (this also runs in the WS broadcaster).
+    // large contiguous allocation, and nothing here is a `+` chain.
     j += "\"sys\":{\"free_heap\":" + std::to_string(esp_get_free_heap_size()) +
          ",\"min_free_heap\":" + std::to_string(esp_get_minimum_free_heap_size()) +
          ",\"max_alloc\":" + std::to_string(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)) +
@@ -351,8 +347,8 @@ static std::string build_status_json_string(bool redact = false) {
 
     // Last reset: null on a clean boot, else the crash summary (reset reason + core-dump backtrace).
     // The reason/backtrace come from the boot-time CACHE (diag_crash.cpp) — never re-parsed from
-    // flash here, since build_status_json_string() also runs in the poll task's WS broadcaster, which
-    // only self-guards std::bad_alloc by dropping the frame; keep this path cheap (no flash PARSE).
+    // flash here: this builder answers a REQUEST, now up to once every 8 s per open dashboard, so
+    // keep the path cheap (no flash PARSE).
     // `coredump` is the exception: it must reflect flash NOW, not at boot, or a dump erased via
     // /coredump?clear=1 leaves a banner that can't be cleared and a download that 404s. Refreshing it
     // costs one 4-byte flash read — the same read GET /coredump already does per request.
@@ -375,7 +371,7 @@ static std::string build_status_json_string(bool redact = false) {
     // substituting one for the other under a single name would publish a figure for the wrong half
     // of the plant. Reported side by side, the UI can say which unit a shown capacity came from.
     // Successive += with bare literals (never one + chain) — see CLAUDE.md "Memory constraints":
-    // this runs on the httpd task AND the poll task's WS broadcaster, whose stacks are the tight ones.
+    // the httpd task's stack is the tight one, and a chain holds every intermediate at once.
     auto kw_field = [&j](const char* name, int tenths) {
         j += ",\"";
         j += name;
@@ -455,11 +451,10 @@ static esp_err_t h_status(httpd_req_t* req) {
     return http_send_json(req, j.c_str());
 }
 
-// The decoded-values JSON array "[{label,value,unit,reg},…]" — the ONE builder behind GET /values,
-// the WS "values" broadcast and the WS subscription snapshot, which all constructed the identical
-// body (same snapshot call, same null-for-empty rule, same escaping). Callers wrap it in their own
-// envelope ({"values":…} for HTTP, {"type":"values","values":…} for WS). Can throw std::bad_alloc —
-// every caller already guards (handle_all, or the WS try/catch), so this stays unguarded.
+// The decoded-values JSON array "[{label,value,unit,reg},…]" behind GET /values — the route the
+// dashboard polls every 2 s. The caller wraps it in the {"values":…} envelope. Can throw
+// std::bad_alloc — handle_all guards every route, so this stays unguarded (it had a second caller,
+// the WS broadcast, with its own try/catch; there is one caller and one guard now).
 //
 // `reg` is the X10A register PAGE the row was decoded from, and it is what makes the browser's
 // held-over rule STRUCTURAL: logic/ou_stale.hpp's ou_page_holds_over() keys on the page (0x20/0x21
@@ -750,280 +745,20 @@ static esp_err_t h_scan(httpd_req_t* req) {
     return http_send_json(req, j.c_str());
 }
 
-static SemaphoreHandle_t s_ws_mtx = nullptr;
-static int s_ws_fds[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
-static WsTxGate s_ws_values_gate;
-static WsTxGate s_ws_status_gate;
-
-bool http_register_ws_client(int fd) {
-    // s_ws_mtx is created once in http_register_status() (single main task, at startup). It is NOT
-    // lazily created here: the old lazy path handed a null xSemaphoreCreateMutex() return (OOM)
-    // straight to xSemaphoreTake() — a null-deref. If it's missing, refuse the registration.
-    if (!s_ws_mtx) return false;
-    xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
-    bool registered = false;
-    for (int i = 0; i < 8; i++) {
-        if (s_ws_fds[i] == fd) { registered = true; break; }
-    }
-    if (!registered) {
-        for (int i = 0; i < 8; i++) {
-            if (s_ws_fds[i] == -1) {
-                s_ws_fds[i] = fd;
-                registered = true;
-                break;
-            }
-        }
-    }
-    xSemaphoreGive(s_ws_mtx);
-    return registered;
-}
-
-void http_unregister_ws_client(int fd) {
-    if (!s_ws_mtx) return;
-    xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
-    for (int i = 0; i < 8; i++) {
-        if (s_ws_fds[i] == fd) {
-            s_ws_fds[i] = -1;
-            break;
-        }
-    }
-    xSemaphoreGive(s_ws_mtx);
-}
-
-// ONE queued work item per broadcast, owning its payload and its snapshot of the client list.
-//
-// It used to be one item PER CLIENT (httpd_ws_send_data_async per fd, a refcount over the shared
-// payload, the gate released by the last IDF completion callback). That fan-out is what wedged the
-// live push, and the mechanism is worth stating because nothing about the call site looks lossy:
-// every httpd_ws_send_data_async() is one httpd_queue_work(), and httpd_queue_work() is ONE UDP
-// DATAGRAM to the server's control socket (httpd_main.c: socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)).
-// That socket's receive mailbox holds LWIP_UDP_RECVMBOX_SIZE messages — 6 by default. Past that the
-// datagram is dropped SILENTLY: sendto() still succeeds, so httpd_queue_work() returns ESP_OK and
-// httpd_ws_send_data_async() reports success, while the work never runs. IDF's async_transfer_t
-// leaks, the completion callback never fires, the payload is stranded — and because the gate was
-// released ONLY from that callback, try_begin() answered false forever and the stream was dead
-// until reboot (#238). IDF names the hazard itself in the Kconfig help for
-// HTTPD_QUEUE_WORK_BLOCKING; sdkconfig.defaults now sets it, so an overflow applies back-pressure
-// instead of vanishing.
-//
-// One item per broadcast keeps at most two in flight across both streams (the gates allow one
-// each), so a 6-deep mailbox is never approached — the send loop moved to where IDF does it anyway
-// (httpd_ws_send_cb sends on the HTTP task), and the gate now has exactly ONE release point that no
-// dropped message can skip. The refcount went with the fan-out: with a single owner there is
-// nothing to count.
-struct WsBroadcast {
-    std::string payload;
-    int         fds[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
-    int         fd_count = 0;
-    WsTxGate&   gate;
-
-    WsBroadcast(std::string&& data, WsTxGate& tx_gate)
-        : payload(std::move(data)), gate(tx_gate) {}
-};
-
-// Runs on the HTTP task. Sends the one shared payload to each fd still handshaken as a WebSocket,
-// then releases the gate and frees the batch — on EVERY path, including a server that went away
-// mid-flight, since a gate left occupied is the defect this replaced.
-static void ws_send_batch(void* arg) {
-    auto* b = static_cast<WsBroadcast*>(arg);
-    if (httpd_handle_t server = http_server_handle()) {
-        httpd_ws_frame_t frame = {};
-        frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(b->payload.c_str()));
-        frame.len     = b->payload.size();
-        frame.type    = HTTPD_WS_TYPE_TEXT;
-        frame.final   = true;
-        for (int i = 0; i < b->fd_count; i++) {
-            if (httpd_ws_get_fd_info(server, b->fds[i]) != HTTPD_WS_CLIENT_WEBSOCKET) continue;
-            httpd_ws_send_frame_async(server, b->fds[i], &frame);
-        }
-    }
-    b->gate.complete();
-    delete b;
-}
-
-static bool ws_any_clients() {
-    bool any = false;
-    xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
-    for (int i = 0; i < 8; i++) {
-        if (s_ws_fds[i] != -1) { any = true; break; }
-    }
-    xSemaphoreGive(s_ws_mtx);
-    return any;
-}
-
-// Hand one shared immutable payload to the HTTP task for delivery to a snapshot of the registered
-// WS clients. The caller has already acquired `gate`; it stays occupied until ws_send_batch has run.
-// This is deliberate backpressure: if the HTTP task stops draining its work queue, later poll ticks
-// are dropped and retained heap stays bounded to one values batch plus one status batch.
-//
-// Never hold s_ws_mtx while entering the IDF queue. Its completion/close paths run on another task
-// and may unregister a client; keeping the registry lock around queue_work would couple those paths
-// and can amplify a stalled HTTP task.
-static void ws_send_to_all(std::string&& j, WsTxGate& gate) {
-    httpd_handle_t server = http_server_handle();
-    if (!server || !s_ws_mtx) {
-        gate.complete();
-        return;
-    }
-
-    auto* b = new (std::nothrow) WsBroadcast(std::move(j), gate);
-    if (!b) {
-        gate.complete();
-        return;
-    }
-
-    xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
-    for (int i = 0; i < 8; i++) {
-        if (s_ws_fds[i] != -1) b->fds[b->fd_count++] = s_ws_fds[i];
-    }
-    xSemaphoreGive(s_ws_mtx);
-
-    // Nobody left to send to (the last client closed between ws_any_clients() and here): release the
-    // gate rather than queue an empty batch.
-    if (b->fd_count == 0) {
-        gate.complete();
-        delete b;
-        return;
-    }
-
-    if (httpd_queue_work(server, ws_send_batch, b) != ESP_OK) {
-        gate.complete();
-        delete b;
-    }
-}
-
-void ws_broadcast_values() {
-    if (!http_server_handle() || !s_ws_mtx || !ws_any_clients()) return;
-    if (!s_ws_values_gate.try_begin()) return;
-
-    std::string j;
-    try {
-        j = "{\"type\":\"values\",\"values\":" + build_values_array() + "}";
-    } catch (const std::bad_alloc&) {
-        s_ws_values_gate.complete();
-        return;   // skip this tick under memory pressure rather than abort the poll task
-    }
-    ws_send_to_all(std::move(j), s_ws_values_gate);
-}
-
-void ws_broadcast_status() {
-    if (!http_server_handle() || !s_ws_mtx || !ws_any_clients()) return;
-    if (!s_ws_status_gate.try_begin()) return;
-
-    std::string j;
-    try {
-        j = "{\"type\":\"status\",\"status\":" + build_status_json_string() + "}";
-    } catch (const std::bad_alloc&) {
-        s_ws_status_gate.complete();
-        return;   // skip this tick under memory pressure rather than abort the poll task
-    }
-    ws_send_to_all(std::move(j), s_ws_status_gate);
-}
-
-// The /events protocol is one command: a "sub" text frame earns a status+values snapshot and a
-// slot in the broadcast list. Every decision about the frame is in logic/ws_policy.hpp, host-tested
-// — the cases that matter here (a frame too long to read, a read that failed) are precisely the
-// ones a browser never produces and a test can.
-//
-// Returning ESP_FAIL makes esp_http_server close and clean up the socket, which is the intended
-// response to a frame we could neither read nor skip past: its unread body would otherwise be
-// parsed as the next frame's header. close_fn (http_server.cpp) unregisters the fd on the way out.
-static esp_err_t h_ws_events(httpd_req_t* req) {
-    if (req->method == HTTP_GET) {
-        return ESP_OK;   // handshake — no frame to read yet
-    }
-
-    // max_len = 0 reads the header only, filling in the frame's type and its ANNOUNCED length.
-    httpd_ws_frame_t ws_pkt = {};
-    if (httpd_ws_recv_frame(req, &ws_pkt, 0) != ESP_OK) return ESP_FAIL;
-
-    switch (ws_frame_plan(ws_pkt.len)) {
-        case WsPlan::Skip:
-            return ESP_OK;
-        case WsPlan::Reject:
-            diag_printf("ws: frame of %llu B exceeds the %u B command buffer — closing\n",
-                        static_cast<unsigned long long>(ws_pkt.len),
-                        static_cast<unsigned>(WS_CMD_MAX));
-            return ESP_FAIL;
-        case WsPlan::Read:
-            break;
-    }
-
-    uint8_t buf[WS_CMD_MAX] = {};
-    ws_pkt.payload = buf;
-    if (httpd_ws_recv_frame(req, &ws_pkt, sizeof(buf)) != ESP_OK) return ESP_FAIL;
-
-    if (ws_frame_action(ws_pkt.type == HTTPD_WS_TYPE_TEXT,
-                        reinterpret_cast<const char*>(buf), ws_pkt.len) != WsAction::Subscribe) {
-        return ESP_OK;   // not a command we know — no snapshot, and no broadcast slot
-    }
-
-    // Subscribe only now: registering on any frame at all meant a client that never asked was still
-    // pushed a frame a second, and kept a slot from one that had.
-    if (!http_register_ws_client(httpd_req_to_sockfd(req))) {
-        diag_printf("ws: broadcast list full — /events subscriber not registered\n");
-        return ESP_OK;
-    }
-
-    // This WS route is registered with httpd_register_uri_handler (is_websocket needs the
-    // raw registration), so it does NOT run under http_register's handle_all try/catch.
-    // Guard the JSON build here so a std::bad_alloc under memory pressure drops the send
-    // instead of unwinding through esp_http_server's C dispatch -> std::terminate -> reboot.
-    try {
-        // Send status
-        std::string stat = build_status_json_string();
-        std::string j_stat = "{\"type\":\"status\",\"status\":" + stat + "}";
-        httpd_ws_frame_t f_stat = {};
-        f_stat.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_stat.c_str()));
-        f_stat.len = j_stat.size();
-        f_stat.type = HTTPD_WS_TYPE_TEXT;
-        f_stat.final = true;
-        httpd_ws_send_frame(req, &f_stat);
-
-        // Send values
-        std::string j_val = "{\"type\":\"values\",\"values\":" + build_values_array() + "}";
-        httpd_ws_frame_t f_val = {};
-        f_val.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(j_val.c_str()));
-        f_val.len = j_val.size();
-        f_val.type = HTTPD_WS_TYPE_TEXT;
-        f_val.final = true;
-        httpd_ws_send_frame(req, &f_val);
-    } catch (const std::bad_alloc&) {
-        return ESP_OK;   // drop the subscription snapshot under OOM; client can retry
-    }
-    return ESP_OK;
-}
-
 void http_register_status(httpd_handle_t s, HttpSurface surface) {
-    // Create the WS broadcast mutex ONCE, here, on the single main task — not lazily on the first
-    // /events subscribe, where a null creation result was fed straight to xSemaphoreTake(). If it
-    // can't be allocated, the live-push list stays disabled (register + broadcast all guard on it)
-    // rather than crashing the device.
-    if (!s_ws_mtx) {
-        s_ws_mtx = xSemaphoreCreateMutex();
-        if (!s_ws_mtx) ESP_LOGE("http", "WS broadcast mutex alloc failed — /events live push disabled");
-    }
     // Provisioning surface (served on the open setup AP too): the setup page, nothing else. The
     // portal takes a TYPED SSID, so /scan is NOT part of it (see logic/http_surface.hpp).
     http_register_on(s, surface, "/", HTTP_GET, h_index);
     http_register_on(s, surface, "/index.html", HTTP_GET, h_index);
 
     // Everything below is trusted-LAN only — withheld from the open setup AP (F01). /diag and
-    // /coredump can carry WiFi/MQTT secrets; /status/values/events/models expose live device state.
+    // /coredump can carry WiFi/MQTT secrets; /status/values/models expose live device state.
     if (!http_surface_serves(surface, "/status", /*is_post=*/false)) return;
 
     http_register(s, "/status", HTTP_GET, h_status);
     http_register(s, "/values", HTTP_GET, h_values);
     http_register(s, "/history", HTTP_GET, h_history);
     http_register(s, "/scan", HTTP_GET, h_scan);
-
-    httpd_uri_t ws_uri = {};
-    ws_uri.uri          = "/events";
-    ws_uri.method       = HTTP_GET;
-    ws_uri.handler      = h_ws_events;
-    ws_uri.user_ctx     = nullptr;
-    ws_uri.is_websocket = true;
-    httpd_register_uri_handler(s, &ws_uri);
 
     http_register(s, "/models", HTTP_GET, h_models);
     http_register(s, "/diag", HTTP_GET, h_diag);

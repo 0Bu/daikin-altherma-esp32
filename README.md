@@ -65,7 +65,7 @@ cannot currently stand behind shown as `—` rather than as a number.
 | [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md) | MQTT topics, entities and derived (COP) sensors |
 | [docs/WIRING.md](docs/WIRING.md) | Visual wiring diagram + picking RX/TX pins on other boards |
 | [docs/BOARDS.md](docs/BOARDS.md) | Supported boards: what hardware each has and which parts the firmware uses |
-| [docs/FEATURES.md](docs/FEATURES.md) | Catalog of platform features (Secure Boot, OTA, WebSocket, diagnostics, …) |
+| [docs/FEATURES.md](docs/FEATURES.md) | Catalog of platform features (Secure Boot, OTA, diagnostics, …) |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model + OTA signing/key lifecycle |
 | [docs/MCP.md](docs/MCP.md) | Planned read-only MCP surface (not yet implemented) |
 | [docs/REPORTING.md](docs/REPORTING.md) | Reporting a bug: the public issue, the private device report, what gets redacted |

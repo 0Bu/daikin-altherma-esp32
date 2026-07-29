@@ -56,9 +56,9 @@ hp_detect.cpp/.hpp  → auto-detect glue: protocol sweep + page probe → bus fi
 hp_convert.cpp/.hpp → converter functions: raw bytes →
                        typed reading (temp, int, fixed-point, enum/label, on/off, pressure)
 hp_poll.cpp/.hpp    → poll engine task: builds the active register set from the profile,
-                       polls each interval, fills the thread-safe value cache, drives errors, and
-                       pushes the /events WebSocket (values each cycle, status every 4th; each
-                       stream admits only one async batch until its queued work has run)
+                       polls each interval, fills the thread-safe value cache, drives errors. It
+                       PUBLISHES nothing to the browser — that was the /events broadcaster, and
+                       removing it took the /status builder off this task with it (#241)
 def/*.hpp           → embedded per-model value profiles (machine-generated in the ValueDef row
                        format); def/registry.hpp maps profile id→table, models_catalog.hpp = /models
 config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi rollback backup + link
@@ -91,11 +91,11 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
                       handler in user_ctx and installs the handle_all trampoline, which calls it
                       inside try/catch — std::bad_alloc → 503, any other throw → 500, instead of
                       unwinding through esp_http_server's C frames to std::terminate → reboot.
-                      /events is the deliberate exception (raw registration for the WebSocket; it
-                      self-guards its own JSON build instead)
-http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /diag, /scan, /coredump, and the
-                      /events WebSocket (live status/values push with shared-payload, bounded
-                      in-flight backpressure via logic/ws_tx_gate.hpp)
+                      No route is exempt any more: the one that was (/events, raw-registered
+                      because is_websocket bypasses the trampoline) no longer exists
+http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /diag, /scan, /coredump,
+                      POST /crash/dismiss. build_status_json_string() runs on the httpd task ALONE —
+                      see "Push vs. poll" below for why that sentence is load-bearing
 http_config.cpp     → POST /set_wifi, /set_mqtt, /set_syslog, /set_ntp, /set_hp, /detect
 http_ota.cpp        → /ota/check|update|status
 mcp_server.cpp      → /mcp — read-only MCP tools (get_status, get_hp_values) for AI agents — PLANNED
@@ -562,31 +562,6 @@ host-testable core is unusually large and valuable, because the risky parts are 
 - `logic/modbus.hpp` — Modbus TCP framing (MBAP, no CRC; FC03/04/06/16 build + response/exception
   parse) and the HomeHub `Temp16`/`Pow16`/`Int16`/`Text16` codecs + `homehub-*` mDNS filter. Host-
   tested core for the **planned** firmware-exclusive HomeHub link (issue #32) — not yet wired in.
-- `logic/ws_policy.hpp` — what an `/events` frame means, split across the two moments the handler has
-  to decide. `ws_frame_plan()` judges the **announced** length alone — the value `httpd_ws_recv_frame`
-  reports from the header before a single payload byte is read, which RFC 6455 lets a client set to
-  any 64-bit number. On a chip whose binding limit is the largest contiguous free block, that number
-  may reach a decision but never an allocation, so a frame is measured against a fixed 16-byte command
-  buffer and refused if it does not fit. Refusing has to mean *closing*: the IDF fails an oversized
-  read with `ESP_ERR_INVALID_SIZE` and leaves the body in the socket, and offers no way to skip it, so
-  the alternative is a stream in which the unread payload becomes the next frame's header. `ws_frame_action()`
-  then classifies only bytes a successful read delivered. Pure, so the boundary that caused the
-  original defect — one byte past the buffer, where the old handler `memcmp`'d stack the failed read
-  had never written — is asserted without a hand-built WebSocket client.
-- `logic/ws_tx_gate.hpp` — bounded backpressure for `/events` broadcasts. ESP-IDF's cross-task
-  helper shallow-copies the frame into a queued work item, so the payload must remain alive until
-  that item has run. Each values/status stream admits one batch at a time; a busy gate drops a
-  newer tick rather than retaining payloads without limit when the HTTP task cannot drain its work
-  queue. The streams are independent so one slow values frame does not suppress every status update.
-  A batch is **one** queued work item owning the payload and an fd snapshot, never one item per
-  client. That distinction is the whole defect of #238: `httpd_queue_work()` is a single UDP
-  datagram to a control socket whose mailbox holds `LWIP_UDP_RECVMBOX_SIZE` (6) messages, and an
-  overflow drops it **silently** while `httpd_ws_send_data_async()` still answers `ESP_OK` — so the
-  completion callback that used to release the gate never ran, and `/events` stayed dead until
-  reboot. One item per broadcast keeps at most two of those six slots in use, the gate has a single
-  release point no dropped message can skip, and `CONFIG_HTTPD_QUEUE_WORK_BLOCKING=y`
-  (`sdkconfig.defaults`) turns any residual overflow into back-pressure rather than a silent loss.
-  The pure gate transition is host-tested without ESP-IDF.
 - `logic/http_body.hpp` — request-body reassembly for `http_read_body`. A POST body is a TCP stream:
   `httpd_req_recv` returns what has arrived, and the IDF's own docs note a large body "may" take
   several calls. Reading once and calling it the whole body truncated any body split across segments,
@@ -934,12 +909,53 @@ The X10A service port is a **strict request/response bus** — the ESP is always
 unit only ever answers a query (see [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md) §1). There is no
 opcode, register or framing for the unit to send unsolicited/push frames, so **the firmware must
 poll**; a "the pump pushes values to us" mode is not possible at the wire level. The pushes in the
-system are all firmware → client: firmware → MQTT (the bridge publishes state on its own cadence)
-and firmware → browser over the `/events` WebSocket (the poll task broadcasts values/status on
-change). The WebSocket path applies one-in-flight backpressure independently to values and status:
-if the HTTP task has not completed the previous batch, the next tick is dropped rather than queued
-and retained on the ESP32 heap. Both transports are downstream of — and independent of — the polled
+system are all firmware → client, and there is now exactly **one** of them: firmware → MQTT, where
+the bridge publishes state on its own cadence. It is downstream of — and independent of — the polled
 HP link.
+
+### The browser polls too, and that is a decision, not an omission
+
+The web UI used to be pushed over an `/events` WebSocket (the poll task broadcast values every cycle
+and status every fourth). It was **removed**. The dashboard now polls `GET /values` every 2 s and
+`GET /status` every 8 s on one chain, backing off to 30 s when the device stops answering and
+suspending entirely while the tab is hidden.
+
+The case is empirical. Measured on the live board while investigating #238:
+
+| test | result |
+|---|---|
+| **4376 concurrent `GET /status`** (the poll path) | **no crash**, heap steady |
+| 1 `/events` subscriber, 200 s (33 status + 132 values broadcasts) | no crash, heap flat ~159 KB |
+| **3 `/events` subscribers** | **crash in < 20 s** (`wdt`) |
+| **3 `/events` subscribers**, again | **crash in seconds** (`panic`) |
+| 3 subscribers, 240 s | no crash, but `ws_status` **frozen at 3** while `ws_values` reached 471 |
+
+Two defects came out of it, and neither was bad luck — both are properties of pushing from this
+firmware:
+
+* **The stream could die silently and stay dead** (#238/#239). `httpd_queue_work()` is one UDP
+  datagram to the server's control socket, whose mailbox holds `LWIP_UDP_RECVMBOX_SIZE` (6)
+  messages. An overflow is dropped **silently** — `sendto()` succeeds, IDF answers `ESP_OK` — so the
+  completion callback never ran, the backpressure gate was never released, and `try_begin()` said no
+  forever. The common symptom was not the crash: values kept flowing while model, health, heap and
+  uptime froze on screen, with **nothing** logged.
+* **The push put the `/status` builder on the wrong task** (#241/#242). `build_status_json_string()`
+  ran on the httpd task *and* on the poll task, because the broadcaster lived there. That is a
+  ~3.5 KB JSON build (including `config()` **by value**, ~10 `std::string` copies) on the task that
+  owns the X10A UART: `hp_poll 7664/520` — 520 bytes of 8192 left, killed by the stack watchpoint.
+
+The generalisation is the reason not to try again with a better socket. A **push** fails silently and
+globally: one lost message strands every client until reboot, and the delivery machinery runs on
+whichever task happens to own it. A **poll** fails loudly and locally: one request, one `503` or one
+timeout, on the client's side of the wire, retried on the next tick — and every route already runs
+under the `handle_all` OOM guard that returns that `503`. It is also cheaper to reason about than to
+keep: `/status` and `/values` exist anyway, so removing the push deleted a transport, a broadcast
+registry, two backpressure gates, a frame policy, an sdkconfig backstop and a route, and added a
+`setTimeout` chain.
+
+What it costs is stated plainly: the screen is up to one cadence behind (~1 s on average for
+values), and each tick is an HTTP request rather than a frame. On a dashboard for a heat pump whose
+poll engine reads the bus at 1 Hz and whose motion is CSS, neither is perceptible.
 
 ## WiFi / LAN connectivity (reconnect + watchdog)
 
@@ -1068,7 +1084,7 @@ The Home Assistant bridge:
   and HA renders them correctly with history.
 - **Binary values are `binary_sensor`s carrying 1/0.** A bit-flag row (converter family 300-307 —
   `conv_is_binary` in `logic/convert.hpp`) decodes directly to numeric `1`/`0`. The poll cache,
-  `/values`, web UI, WebSocket, history and MQTT therefore all share that representation; no value
+  `/values`, web UI, history and MQTT therefore all share that representation; no value
   surface emits the text `"ON"`/`"OFF"`. MQTT serializes it as a JSON **number** and discovery types
   the row as an HA `binary_sensor`
   (`ha_component`, `logic/discovery.hpp`) whose config spells out `"pl_on":"1"` / `"pl_off":"0"` —
@@ -1199,8 +1215,8 @@ Structure:
     its **summary** (`esp_core_dump_get_summary()` — crashed task, exception PC, backtrace PCs, and
     the crashed build's `app_elf_sha256`) into a cached `CrashInfo`. The pure formatting is
     `logic/crashinfo.hpp` (host-tested); the summary is parsed **once** and cached — never re-read
-    from flash on a request path, since `build_status_json_string()` also runs in the poll task's
-    WebSocket broadcaster (which only self-guards `std::bad_alloc` by dropping the frame). The
+    from flash on a request path, which is where `build_status_json_string()` runs (and, until the
+    WebSocket push was removed, also on the poll task — see "Push vs. poll"). The
     `coredump` **presence flag** is the one exception: it IS re-checked from flash per request
     (`diag_crash_info_live()` — a 4-byte size-word read, not the summary reparse), because the image
     can be erased mid-session via `/coredump?clear=1` and a cached flag would then advertise a dump
@@ -1208,13 +1224,13 @@ Structure:
     orphan dump is "notable"; a clean power-on / software reboot is not — and neither is a report the
     user has **deleted** (`CrashInfo::dismissed`, below), which is the one other field written after
     boot: a single monotonic `false → true` store, so the readers that copy the struct concurrently
-    (WS broadcaster, HTTP, MQTT) need no lock for it.
+    (HTTP, MQTT) need no lock for it.
   - **Always-on system health (no fault required).** `build_status_json_string()` also carries a
     compact `sys` block — `free_heap` / `min_free_heap` (since-boot low-water, the leak indicator) /
     `max_alloc` (largest contiguous block, the true OOM ceiling), the `reset_reason` slug (via
     `logic/reset_reason.hpp`, reusing the same vocabulary as `last_crash`) and a `safe_mode` flag
     (always `false` until the boot-loop safe-mode feature lands). These answer "why did it reboot?"
-    and "is the heap leaking?" from the LAN / `/events` WebSocket **on every boot** and **without a
+    and "is the heap leaking?" from the LAN **on every boot** and **without a
     broker** — the MQTT heartbeat carries the same heap figures, but only when MQTT is configured. The
     web UI reads `safe_mode` (the recovery banner) plus `free_heap` and `max_alloc`, the two trended
     rows at the foot of the Settings ESP32 card — removed as spot figures in v1.0.14 and back only
@@ -1407,7 +1423,7 @@ config endpoints in place:
   Save only validates the port range (no request-path network block); an empty host disables
   forwarding. An **unchanged** host/port short-circuits to `{"ok":true,"reboot":false}` — no NVS
   write, no reboot — the same shape as `/set_mqtt` and `/set_ntp`, since persisting identical values
-  and rebooting would drop the poll cycle, MQTT availability and every open WebSocket for nothing.
+  and rebooting would drop the poll cycle and MQTT availability for nothing.
   (`/set_wifi` is deliberately *not* short-circuited: a re-save there re-arms the credential-rollback
   trial.) DNS resolution and the advisory reachability probe run in the syslog task and surface
   on that row via `/status.syslog` (`resolved`/`reachable`/`error`) — coloured `--ok`, `--warn`
@@ -1468,11 +1484,9 @@ to HTTP handlers:
    `try/catch (const std::exception&)` + `catch (...)`, `diag_printf` once, skip the cycle keeping
    the last good state, and continue after the normal delay. `mqtt_task` (`mqtt_ha.cpp`),
    `poll_task` (`hp_poll.cpp`) and `syslog_task` (`syslog.cpp` — its per-cycle `config()` snapshot
-   copies ~10 `std::string`s) all do this; `ws_broadcast_values`/`ws_broadcast_status`
-   (`http_status.cpp`) keep their own finer-grained guards inside it — they skip a frame rather than
-   the whole cycle, and the task guard is only their backstop. Their async queue is also bounded to
-   one values and one status batch, so a delayed delivery cannot turn skipped work into an
-   unbounded payload leak.
+   copies ~10 `std::string`s) all do this. `status_led_task` too: its tick copies `std::string`s out
+   of `wifi_info()`/`mqtt_status()`/`hp_stats()`, so it can throw under memory pressure, and an
+   escape would reboot the board over a cosmetic LED.
 2. **Nothing allocates while a mutex is held.** Rule 1 only makes an OOM survivable if the throw
    doesn't strand a lock: `xSemaphoreTake` is not released by stack unwinding, so a throw inside a
    critical section leaves the mutex taken forever, every reader blocks on `portMAX_DELAY`, and the

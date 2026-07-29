@@ -61,8 +61,6 @@
 #include "logic/timestamp.hpp"
 #include "logic/uart_plan.hpp"
 #include "logic/wifi_rollback.hpp"
-#include "logic/ws_policy.hpp"
-#include "logic/ws_tx_gate.hpp"
 #include "def/overlay.hpp"
 #include "def/registry.hpp"
 #include "def/signatures.hpp"
@@ -3090,72 +3088,6 @@ static void test_captive() {
     CHECK(std::to_string(CAPTIVE_PORTAL_OCTETS[0]) + "." + std::to_string(CAPTIVE_PORTAL_OCTETS[1]) +
           "." + std::to_string(CAPTIVE_PORTAL_OCTETS[2]) + "." + std::to_string(CAPTIVE_PORTAL_OCTETS[3])
           == std::string(CAPTIVE_PORTAL_IP));
-}
-
-// ── /events WebSocket command policy (logic/ws_policy.hpp) ───────────────────────────────────
-static void test_ws_policy() {
-    // An empty frame carries no command and leaves no body in the stream: ignore it, keep the
-    // connection. Anything that fits the command buffer is safe to read.
-    CHECK(ws_frame_plan(0) == WsPlan::Skip);
-    CHECK(ws_frame_plan(3) == WsPlan::Read);
-
-    // The boundary that is the whole bug. A frame of exactly WS_CMD_MAX still fits; ONE byte more
-    // used to be clamped to the buffer size, fail the read with ESP_ERR_INVALID_SIZE, and then get
-    // memcmp'd anyway — comparing against stack the failed read had never written.
-    CHECK(ws_frame_plan(WS_CMD_MAX)     == WsPlan::Read);
-    CHECK(ws_frame_plan(WS_CMD_MAX + 1) == WsPlan::Reject);
-
-    // The announced length is a 64-bit number the client asserts before anything is read. It must
-    // reach a decision, never an allocation: sizing a buffer from it would make one frame an OOM on
-    // a chip whose binding limit is the largest contiguous free block.
-    CHECK(ws_frame_plan(1u << 20)            == WsPlan::Reject);
-    CHECK(ws_frame_plan(SIZE_MAX)            == WsPlan::Reject);
-
-    // The one command we speak.
-    CHECK(ws_frame_action(true, "sub", 3) == WsAction::Subscribe);
-
-    // A prefix still subscribes — that is what the handler has always accepted, and this change is
-    // about frames that were never read, not about narrowing the grammar on working clients.
-    CHECK(ws_frame_action(true, "sub\n", 4)     == WsAction::Subscribe);
-    CHECK(ws_frame_action(true, "subscribe", 9) == WsAction::Subscribe);
-
-    // Everything else earns nothing: no snapshot, and no slot in the broadcast list.
-    CHECK(ws_frame_action(true, "nope", 4) == WsAction::Ignore);
-    CHECK(ws_frame_action(true, "su",   2) == WsAction::Ignore);   // too short to be the command
-    CHECK(ws_frame_action(true, "",     0) == WsAction::Ignore);
-
-    // A binary frame is not the text protocol, whatever bytes it carries.
-    CHECK(ws_frame_action(false, "sub", 3) == WsAction::Ignore);
-
-    // A caller that passes a buffer no read filled must not be taken at its word.
-    CHECK(ws_frame_action(true, nullptr, 3) == WsAction::Ignore);
-}
-
-// ── /events async-send backpressure (logic/ws_tx_gate.hpp) ──────────────────────────────────
-static void test_ws_tx_gate() {
-    WsTxGate values;
-    WsTxGate status;
-
-    CHECK(!values.in_flight());
-    CHECK(values.try_begin());
-    CHECK(values.in_flight());
-
-    // A stalled completion callback cannot admit another payload on the same stream.
-    CHECK(!values.try_begin());
-    CHECK(values.in_flight());
-
-    // Values and status use independent gates: a slow values frame must not suppress every status
-    // update, while each stream still retains at most one payload batch.
-    CHECK(status.try_begin());
-    CHECK(status.in_flight());
-
-    values.complete();
-    CHECK(!values.in_flight());
-    CHECK(values.try_begin());
-    values.complete();
-    status.complete();
-    CHECK(!values.in_flight());
-    CHECK(!status.in_flight());
 }
 
 // ── request-body reassembly (logic/http_body.hpp) ────────────────────────────────────────────
@@ -6376,8 +6308,6 @@ int main() {
     test_boot_guard();
     test_health_gate();
     test_captive();
-    test_ws_policy();
-    test_ws_tx_gate();
     test_http_body();
     test_uart_plan();
     test_detect_backoff();

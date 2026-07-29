@@ -6,7 +6,7 @@ at runtime from a web UI — WiFi, MQTT and the RX/TX pins (the unit model is au
 interval is fixed at 1 s) — and updated over the air. User guide: [../README.md](../README.md).
 
 For a cross-cutting catalog of the **platform features** this firmware implements — Secure Boot v2
-signing, OTA + rollback health gate, the WebSocket live UI, the ESP-IDF component inventory,
+signing, OTA + rollback health gate, the polled live UI, the ESP-IDF component inventory,
 diagnostics, WiFi resilience — see [**FEATURES.md**](FEATURES.md).
 
 ---
@@ -352,13 +352,6 @@ GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sampl
                                    #   present.
                                    #   (a row the detected profile lacks is simply absent from
                                    #   /status.history.rows — ask that, don't guess).
-GET  /events                       # WebSocket live push (the only live UI transport). Send "sub" →
-                                   #   status+values snapshot, then {"type":"status"|"values",...} on
-                                   #   change. No HTTP polling; no-WebSocket browsers load once and
-                                   #   the user reloads to refresh. "sub" is what subscribes: any
-                                   #   other frame is ignored, and one longer than 16 B closes the
-                                   #   connection (it can't be read into the command buffer, and its
-                                   #   unread body would desync every frame after it).
 GET  /models                       # profile catalog + pin hint (detection is automatic; no manual picker)
 GET  /diag[?verbose=0|1][?clear=1][?redact=1]
                                    # plain-text in-memory diag log (raw RX frames when verbose).
@@ -424,11 +417,10 @@ POST /mcp                          # MCP server for AI agents — PLANNED (route
                                    #   are the intended tools.
 ```
 
-Every handler runs under an OOM try/catch rather than crashing (memory is the binding constraint on
-these chips): the JSON routes return `503`; the `/events` WebSocket handler is registered raw (needs
-`is_websocket`), so it self-guards its JSON build, drops the frame under OOM, and bounds queued
-broadcasts to one values plus one status batch while ESP-IDF queued work is pending. `/diag` and
-`/coredump` stream instead of building one big buffer.
+**Every** handler runs under the OOM try/catch rather than crashing (memory is the binding
+constraint on these chips) and returns `503` — with no exceptions now that the raw-registered
+`/events` WebSocket handler, which had to self-guard because `is_websocket` bypasses the trampoline,
+is gone. `/diag` and `/coredump` stream instead of building one big buffer.
 
 ---
 

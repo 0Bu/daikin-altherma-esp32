@@ -27,7 +27,7 @@ struct ValueDef {
     // page — that is why the placeholder is there — so a profile that drops the row loses a page and
     // is beaten by a feature-richer, WRONG profile that kept it: the model mis-detects and the same
     // garbage returns through the wrong table. Keeping the row preserves detection; the flag stops
-    // only the publish (poll cache -> /values, /events, MQTT state, HA discovery).
+    // only the publish (poll cache -> /values, MQTT state, HA discovery).
     bool        no_publish = false;
 };
 

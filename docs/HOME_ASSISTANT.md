@@ -211,7 +211,7 @@ booleans**, so roughly 30 of an ERGA profile's ~99 values — every binary one �
 Assistant but never a graph. The same reasoning applies to `wifi_connected` / `mqtt_connected` /
 `bus_connected` on the heartbeat topic, which are `1`/`0` for the same reason.
 
-The device's own web UI, `GET /values` and the `/events` WebSocket read the same poll cache and also
+The device's own web UI and `GET /values` read the same poll cache and also
 report `1`/`0`. No published value surface uses the text `ON`/`OFF`.
 
 > **Upgrading:** these entities change domain (`sensor.…` → `binary_sensor.…`), so their recorder

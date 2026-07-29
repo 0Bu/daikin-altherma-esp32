@@ -98,9 +98,13 @@ Theme follows `prefers-color-scheme`; both light and dark are first-class (token
 
 ## 4. Information architecture (the state machine)
 
-The SPA subscribes to the `/events` WebSocket (sends `"sub"`, then receives pushed `status`/`values`
-frames) — this is the **only** live transport, there is no HTTP polling. A browser without WebSocket
-loads a one-time `GET /status`/`GET /values` snapshot and the user reloads the page to refresh. Once
+The SPA **polls** `GET /values` every 2 s and `GET /status` every 8 s — one chain, backing off to
+30 s on a device that stopped answering and suspended entirely while the tab is hidden (nobody is
+looking, so nobody is served). There is no push transport: the `/events` WebSocket this replaced
+failed in two ways a request cannot — silently (a dropped queue message froze one stream until
+reboot, #238) and globally (its broadcaster ran the `/status` builder on the task that owns the X10A
+UART, #241). Every browser now gets the same live UI instead of one class getting a manual reload.
+Both cadences are the SCREEN's, not the plant's: the poll engine still reads the bus at 1 Hz. Once
 the device is on the network the app opens on the **dashboard** and stays there unless the user asks
 for **Settings** (the header gear, §5.6). That is the whole navigation tree — two screens, one way
 back (the header chevron, or `Esc`):
@@ -345,7 +349,7 @@ Body, ordered:
    stages can legitimately read zero or one. At that same display boundary, the browser removes
    trailing catalog value legends such as `ON/OFF` and `On:…_Off:…` from visible reading names:
    `Space heating Operation ON/OFF` therefore reads `Space heating Operation` beside its **ON/OFF**
-   value. The exact catalog label remains the identity used by `/values`, WebSocket, MQTT, history,
+   value. The exact catalog label remains the identity used by `/values`, MQTT, history,
    selectors and description matching.
    **The schematic never hides.** When the X10A link drops it is the only thing left that can say
    why, so instead every value pill blanks to "—", every animation stops, the 3-way-valve label falls
@@ -1181,14 +1185,19 @@ page under near-identical cards). Specific:
   try and would report a phantom "Saved". (A WiFi change that can't reach the new network rolls back to
   the previous credentials and reboots again — see §5.1; the outcome surfaces on the rollback banner,
   §5.3 item 0, since it lands long after this poll gives up.)
-- **Live writes** (heat pump): "Applied", stay on view; the `/events` WebSocket pushes the new
-  values on the next poll cycle (a pin-pick also refreshes `/status` a few times to catch the connect).
+- **Live writes** (heat pump): "Applied", stay on view; the next `/values` poll (≤2 s) brings the new
+  values (a pin-pick also refreshes `/status` a few times to catch the connect).
 - **Connection loss**: the system card's status header greys to "No data"; the Connections tile's WiFi row shows "Offline" if WiFi dropped (and the gear is marked, §5.6), and
   the **Heat-pump card collapses to a bare "Offline"** if the X10A link is down — model, protocol and
   capacity vanish rather than showing stale cached values. The schematic blanks every pill to "—"
   and stops every animation — an animated pipe over a silent bus would assert a flow nobody measured,
-  and a held-over reading would assert a value nobody is still measuring. The `/events` WebSocket reconnects every
-  5 s (the schematic's status block shows "Unreachable — retrying…"), no hard error page.
+  and a held-over reading would assert a value nobody is still measuring. The poll keeps retrying on
+  its own cadence, backing off to at most 30 s (the schematic's status block shows "Unreachable —
+  retrying…"), no hard error page; returning to the tab retries at once rather than waiting out the
+  backoff. Each poll fetch is bounded at **6 s** so that state is reached on a link that drops
+  *silently* too: without a timeout the request waits on the browser's default for tens of seconds,
+  and for all of it the drawing would present the last poll as the plant's current state — the
+  failure this section exists to rule out, in the one form that looks like nothing is wrong.
 - **Empty**: pre-first-poll dashboard shows "Waiting for first poll…"; unknown model shows the
   *Generic* hint.
 - **Recovery mode**: if `sys.safe_mode` is true (too many crash boots), the recovery banner (§5.3

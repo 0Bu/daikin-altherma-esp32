@@ -6,16 +6,10 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_wifi.h"   // esp_wifi_get_mode — pick the HTTP trust surface (F01)
-#include <unistd.h>
 
 namespace daik {
 
 static httpd_handle_t s_server = nullptr;
-
-static void ws_close_fn(httpd_handle_t hd, int sockfd) {
-    http_unregister_ws_client(sockfd);
-    close(sockfd);
-}
 
 void http_start() {
     httpd_config_t cfg   = HTTPD_DEFAULT_CONFIG();
@@ -25,22 +19,24 @@ void http_start() {
     // (minus http_common.cpp's own two definitions) — and raise it in the same commit that adds one.
     // Overflowing is SILENT and hits the WRONG route: httpd_register_uri_handler returns
     // ESP_ERR_HTTPD_HANDLERS_FULL, and the casualty is whatever registers LAST, which is deliberately
-    // the captive/SPA catch-all — so the symptom of a missing 25th route would be deep links breaking,
+    // the captive/SPA catch-all — so the symptom of a missing route would be deep links breaking,
     // not the new route 404ing. http_register() now logs a failed registration for that reason.
-    cfg.max_uri_handlers = 25;
+    // 24 since /events went away with the WebSocket push (docs/ARCHITECTURE.md "Push vs. poll").
+    cfg.max_uri_handlers = 24;
     cfg.lru_purge_enable = true;
     // 12 KB, not the 8 KB this ran on through v1.0.12 — MEASURED, not padded. v1.0.12 panicked and
     // the core dump's task table read `httpd 7728/460`: the task had been 7732 bytes deep at its last
     // context switch, 460 bytes off its floor. Since a switch happens at an arbitrary point, the true
     // peak is at least that and unbounded above it; it went past the floor and wrote 0x4 over the
     // TCB's pvThreadLocalStoragePointers[0], which sits just below `pxStack`. The task then died ~44 s
-    // later in lwip (`pthread_getspecific` → LoadProhibited on 0x4) with a backtrace pointing at the
-    // /events WebSocket send — nowhere near the code that actually corrupted it. Every other task in
-    // that dump had >= 1.8 KB free; httpd was the sole outlier, because build_status_json_string()
-    // runs here and is by far the largest thing this task does. 460 bytes of margin was the bug and
-    // #163's extra JSON was only the straw. The peak is separately cut in http_status.cpp.
+    // later in lwip (`pthread_getspecific` → LoadProhibited on 0x4) with a backtrace pointing at a
+    // WebSocket send (a transport that no longer exists) — nowhere near the code that actually
+    // corrupted it. Every other task in that dump had >= 1.8 KB free; httpd was the sole outlier,
+    // because build_status_json_string() runs here and is by far the largest thing this task does.
+    // 460 bytes of margin was the bug and #163's extra JSON was only the straw. The peak is
+    // separately cut in http_status.cpp. This is now the ONLY task that builds /status (#241), and
+    // 4376 concurrent GET /status left it at 1456 used of 12288.
     cfg.stack_size       = 12288;
-    cfg.close_fn         = ws_close_fn;
     if (httpd_start(&s_server, &cfg) != ESP_OK) {
         ESP_LOGE("http", "server start failed");
         return;

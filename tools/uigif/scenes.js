@@ -143,12 +143,15 @@ try {
   Object.defineProperty(navigator, "languages", { value: ["en-GB", "en"], configurable: true });
 } catch { /* leave the browser's own language */ }
 
-// ── Stub the device: no fetch, no WebSocket, no board ────────────────────────────────────────
+// ── Stub the device: no fetch, no board ──────────────────────────────────────────────────────
+// There is no WebSocket stub any more: the app has no push transport, it polls /status and /values
+// (app.js "Live data: POLLING"), so the fetch stub below is the whole device. __scene() therefore
+// drives the app through its OWN refresh functions instead of synthesising a socket message —
+// the recorder feeds the app the way a real browser is fed, which is the point of a stub.
 (() => {
   // ?scene=N pins one scene, so a headless screenshot run can address them one URL at a time.
   const q = parseInt((location.search.match(/scene=(\d+)/) || [])[1], 10);
   let idx = Number.isFinite(q) ? Math.min(Math.max(q, 0), DEMO.scenes.length - 1) : 0;
-  let sock = null;
 
   const json = (o) => ({ ok: true, status: 200, json: async () => o, text: async () => JSON.stringify(o) });
   window.fetch = async (url) => {
@@ -160,20 +163,16 @@ try {
     return json({});
   };
 
-  window.WebSocket = class {
-    constructor() { sock = this; window.__sock = this; setTimeout(() => this.onopen && this.onopen(), 0); }
-    send() { push(); }
-    close() {}
-  };
-
-  function push() {
-    if (!sock || !sock.onmessage) return;
-    sock.onmessage({ data: JSON.stringify({ type: "status", status: DEMO.status(idx) }) });
-    sock.onmessage({ data: JSON.stringify({ type: "values", values: DEMO.scenes[idx].v }) });
-  }
+  // Pull the scene through the app's own two fetches. Returns a promise — the screenshot driver
+  // awaits __scene() before posing, since a render that lands after the capture is a frame of the
+  // PREVIOUS scene, which no test could tell from a correct one.
+  const push = () => Promise.all([
+    window.refreshStatus ? window.refreshStatus() : null,
+    window.refreshValues ? window.refreshValues() : null,
+  ]);
 
   // Driver hooks for the screenshot loop.
-  window.__scene = (i) => { idx = i; push(); return DEMO.scenes[i].name; };
+  window.__scene = async (i) => { idx = i; await push(); return DEMO.scenes[i].name; };
   window.__sceneCount = DEMO.scenes.length;
   window.__sceneName = (i) => DEMO.scenes[i].name;
 
@@ -201,9 +200,18 @@ try {
   };
 
   // Frame capture: ?scene=N&t=MS&T=TOTAL poses the page for one headless screenshot.
+  //
+  // The poll chain is STOPPED first. Chrome runs these frames under --virtual-time-budget=2500, so
+  // virtual time reaches the 2 s poll tick before the screenshot is taken; a render landing after
+  // the pose could hand a rebuilt element a fresh, unpaused animation and put that one frame at a
+  // random phase. The data is already on screen by then — boot()'s first poll is synchronous
+  // against the stub above — so nothing is lost by freezing here.
   const p = new URLSearchParams(location.search);
   if (p.has("t")) {
     const t = parseFloat(p.get("t")), T = parseFloat(p.get("T")) || 8800;
-    addEventListener("load", () => setTimeout(() => window.__pose(t, T), 150));
+    addEventListener("load", () => setTimeout(() => {
+      if (window.pollStop) window.pollStop();
+      window.__pose(t, T);
+    }, 150));
   }
 })();

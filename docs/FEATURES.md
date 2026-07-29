@@ -33,7 +33,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 3 | Dual-OTA layout + **NVS-preserving OTA and no-Erase Web Serial updates** | ✅ 🧪 | [`partitions.csv`](../partitions.csv), [`ci-build-all.sh`](../scripts/ci-build-all.sh), [`check-web-installer-plan.py`](../scripts/check-web-installer-plan.py), [`test_web_installer_plan.py`](../test/test_web_installer_plan.py) |
 | 4 | OTA rollback + **connectivity-proving health gate** | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/health_gate.hpp`](../main/logic/health_gate.hpp) |
 | 5 | OTA manifest check + signed download + **two-point downgrade gate** | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp) |
-| 6 | WebSocket live push (`/events`) — bounded async backpressure, the only live transport | ✅ 🧪 | [`http_status.cpp`](../main/http_status.cpp), [`logic/ws_tx_gate.hpp`](../main/logic/ws_tx_gate.hpp) |
+| 6 | Live UI by **polling** `/status` + `/values` — no push transport, on purpose (#238/#241) | ✅ | [`www/app.js`](../main/www/app.js), [`http_status.cpp`](../main/http_status.cpp) |
 | 7 | Gzipped web UI **embedded in the app image**, assembled at build time | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt) |
 | 8 | HTTP handlers under an **OOM `try/catch` → 503** discipline | ✅ | [`http_common.cpp`](../main/http_common.cpp), [`http_status.cpp`](../main/http_status.cpp) |
 | 9 | Home Assistant MQTT auto-discovery, grouped state, LWT | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/discovery.hpp`](../main/logic/discovery.hpp) |
@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte — it both ranks the representative and **narrows the candidate set**, dropping only classes that contradict it, **retried page probe + a second-sweep confirmation** before falling back to `generic`) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1827 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1802 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -358,11 +358,14 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   later inside lwip's `pthread_getspecific` with a backtrace pointing at a WebSocket send that had
   nothing to do with it. A sparsely-writing frame can step over the canary words entirely (the
   neighbouring TLS[1] survived, which is how we know it did). It then earned its keep on the OTHER
-  runner of that same builder: `hp_poll` (whose WebSocket broadcaster also calls
+  runner of that same builder: `hp_poll` (whose WebSocket broadcaster also called
   `build_status_json_string()`) was still at 8192 when #229 and #231 grew `/status` to ~3.5 KB, and
   the watchpoint caught it **at** the offending instruction — `exccause 0x41`, `hp_poll 7664/520`,
-  inside a `malloc()` under `Config::Config` — instead of months later somewhere unrelated. Both
-  stacks are now 12 KB (#241). Costs one of the two ESP32-S3 debug
+  inside a `malloc()` under `Config::Config` — instead of months later somewhere unrelated (#241).
+  That second runner is now **gone** with the WebSocket push: `/status` is built on the httpd task
+  alone (12 KB, 1456 used under 4376 concurrent requests) and `hp_poll` is back to 8 KB, since the
+  builder is what it could not fit. The watchpoint stays — it is the only thing that reports a stack
+  overflow *where it happens*. Costs one of the two ESP32-S3 debug
   watchpoints — unused here, since this firmware is debugged from core dumps rather than JTAG. The
   same fix raised `httpd` to 12 KB ([`http_server.cpp`](../main/http_server.cpp)) and cut the peak by
   building the `/status` JSON with `+=` instead of long `+` chains
@@ -419,41 +422,24 @@ entered exactly like a visible one.
 
 ---
 
-## 4. Web server & the WebSocket live transport
+## 4. Web server & the live transport
 
-- **`esp_http_server` on `:80`** with `CONFIG_HTTPD_WS_SUPPORT=y`. The full HTTP surface is in
+- **`esp_http_server` on `:80`**, with `CONFIG_HTTPD_WS_SUPPORT=n` — stated explicitly because this
+  firmware deliberately has **no** push transport (below). The full HTTP surface is in
   [`.claude/CLAUDE.md` → HTTP API](../.claude/CLAUDE.md) and [`docs/README.md`](README.md).
-- **✅ WebSocket push is the only live transport.** `GET /events` ([`http_status.cpp`](../main/http_status.cpp)):
-  a client sends `sub`, gets a status+values snapshot, then the poll task pushes
-  `{"type":"status"|"values",…}` frames on change (values ~1 s, status ~4 s). There is **no HTTP
-  polling** — a browser without WebSocket falls back to a one-time snapshot. Broadcasts run in the poll
-  task and self-guard `std::bad_alloc`, dropping a frame rather than the whole poll cycle (the task's
-  own guard, below, is only their backstop).
-- **🧪 Async sends have bounded backpressure**
-  ([`logic/ws_tx_gate.hpp`](../main/logic/ws_tx_gate.hpp)). ESP-IDF queues each cross-task send and
-  owns only a shallow frame copy until the queued work runs, so a congested HTTP control queue can
-  retain a payload after the send call has returned success. One independent gate for values and one
-  for status admits at most one outstanding broadcast of each kind; while one is pending, newer
-  ticks are dropped instead of consuming heap every second. A batch is **one** queued work item that
-  owns the payload and a snapshot of the client list (taken under its mutex before any IDF queue
-  call) and sends to every client from the HTTP task. It is deliberately not one item per client:
-  `httpd_queue_work()` is a single UDP datagram to a control socket with a 6-deep mailbox
-  (`LWIP_UDP_RECVMBOX_SIZE`), an overflow is dropped **silently** while still reporting `ESP_OK`,
-  and the release that used to hang off the per-client completion callback then never happened —
-  wedging `/events` until reboot (#238). With one item per broadcast at most two slots are ever in
-  use, and `CONFIG_HTTPD_QUEUE_WORK_BLOCKING=y` makes a residual overflow block rather than vanish.
-  Thus a delayed delivery can hold at most two application payloads, not drain the whole device heap
-  or couple the queue to the socket-close path.
-- **🧪 Frame handling is a policy, not an `if`** ([`logic/ws_policy.hpp`](../main/logic/ws_policy.hpp)).
-  Two rules, both host-tested. **Only a `sub` text frame takes a broadcast slot** — registering on any
-  frame at all meant a client that never subscribed was still pushed a frame a second, and held one of
-  the 8 slots from a client that had. And **a frame that does not fit the 16-byte command buffer is
-  refused, not clamped**: the length known at that point is one `httpd_ws_recv_frame` read out of the
-  header, which RFC 6455 lets a client set to any 64-bit value with nothing read to back it up — on a
-  chip bounded by its largest contiguous free block it may decide, never allocate. Refusing means
-  closing the connection, because the IDF fails an oversized read with `ESP_ERR_INVALID_SIZE`, leaves
-  the body in the socket, and offers no way to skip it — so the unread payload would otherwise be
-  parsed as the next frame's header.
+- **✅ The live UI is a POLL, and the absence of a push is the feature.** `www/app.js` fetches
+  `GET /values` every 2 s and `GET /status` every 8 s on one recursive-`setTimeout` chain (never
+  `setInterval`: a slow answer must delay the next request, not stack a second behind it), backs off
+  to 30 s while the device is unreachable, suspends entirely while the tab is hidden, and refetches
+  at once when it becomes visible. `GET /events` — a WebSocket push with a broadcast registry, a
+  frame policy (`ws_policy.hpp`) and two one-in-flight backpressure gates (`ws_tx_gate.hpp`) — was
+  **removed**, and the reasoning is in [`ARCHITECTURE.md` → "Push vs. poll"](ARCHITECTURE.md):
+  4376 concurrent `GET /status` never crashed the board, while 3 WebSocket subscribers crashed it in
+  seconds; one silently-dropped IDF queue message froze a stream until reboot with nothing logged
+  (#238); and running the push from the poll task put the ~3.5 KB `/status` builder on the task that
+  owns the X10A UART until it overflowed its stack (#241). A push fails silently and globally; a
+  request fails loudly and locally, under a `503` this server already returns. The cost is one
+  cadence of latency on a dashboard whose motion is CSS.
 - **🧪 Request bodies are reassembled, not assumed**
   ([`logic/http_body.hpp`](../main/logic/http_body.hpp)). A POST body is a TCP stream and
   `httpd_req_recv` returns only what has arrived — the IDF's own docs say a large body may take several
@@ -529,7 +515,7 @@ IDF v6.0 extracted it from core — [`idf_component.yml`](../main/idf_component.
   an explicit `pl_on:"1"`/`pl_off:"0"` and published as the JSON **number** `1`/`0`
   — HA gets a real on/off entity, and a metrics consumer (which drops strings *and* bools) finally
   gets the ~30 binary rows per profile that used to be invisible to it. The poll cache, `/values`
-  and WebSocket payloads, history and MQTT keep the common `1`/`0` representation; `/values` adds
+  and its payloads, history and MQTT keep the common `1`/`0` representation; `/values` adds
   `binary:true` so the web UI can present those exact rows as **ON/OFF** in every UI language
   without guessing from a label or misreading an ordinary numeric zero/one as a switch. For a
   consistent value list, the same UI boundary removes redundant trailing catalog legends such as
@@ -683,7 +669,7 @@ the fact*, from the field, without a serial cable:
   heartbeat while hiding it from the one place it was visible. The same mechanism retired the crash
   topic's "Last Reset Reason" (`RETIRED_CRASH_SENSORS`), which is why the type is shared.
 - **✅ 🧪 Always-on system health** ([`logic/reset_reason.hpp`](../main/logic/reset_reason.hpp)): the
-  `/status` document (and the `/events` status frame) carries a compact `sys` block — `free_heap`,
+  `/status` document carries a compact `sys` block — `free_heap`,
   `min_free_heap` (since-boot low-water, the leak indicator), `max_alloc` (largest contiguous block,
   the real OOM ceiling), the `reset_reason` slug and a `safe_mode` flag. Unlike `last_crash` it is
   present on **every** boot, and unlike the heartbeat it needs **no broker**, so "why did it reboot?"
@@ -801,7 +787,8 @@ Deep dives: [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md), [`REGISTERS.md`](REGISTERS.m
   unrelated allocation ([`hp_poll.cpp`](../main/hp_poll.cpp)'s value `vector`) threw a `std::bad_alloc`
   too starved to unwind → `std::terminate` → `abort`, **confirmed by a symbolized coredump**.
 - **✅ 🧪 Poll engine** ([`hp_poll.cpp`](../main/hp_poll.cpp)): profile registers → query → decode →
-  thread-safe value cache the web UI and MQTT read; also drives the WebSocket broadcast each cycle.
+  thread-safe value cache the web UI (by polling) and MQTT read. It publishes to no client itself —
+  that was the WebSocket broadcaster, and its removal took the `/status` builder off this task.
   The value vector is `reserve`d to its exact upper bound (one sized allocation, not `log2(n)` regrows).
 - **✅ 🧪 Silent-bus detect backoff** ([`logic/detect_backoff.hpp`](../main/logic/detect_backoff.hpp)):
   while no unit answers, the auto-detect sweep stretches from the 1 s poll cadence toward a 60 s
@@ -895,10 +882,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   the recovery button's press classifier (`button.hpp` — the tested half is the **abort** path: the
   action it gates erases the user's whole configuration, so "held 4.9 s then let go" must destroy
   nothing and one bounced sample must not read as a release),
-  the `/events` frame policy (`ws_policy.hpp` — an announced frame length is
-  a client-asserted 64-bit number, so it decides and never allocates; only a `sub` **text** frame
-  earns a broadcast slot), its async-send backpressure (`ws_tx_gate.hpp` — at most one values and one
-  status batch are retained while the HTTP task is busy), request-body reassembly
+  request-body reassembly
   (`http_body.hpp` — a body arrives across as many TCP segments as the network chooses, and a peer
   that stalls forever must lose *bounded*),
   the captive-portal reply policy (`captive.hpp` — whether the `/*` catch-all answers an unmatched
@@ -1067,7 +1051,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   catalog sweep proving each `(page, offset, converter)` locator resolves to **exactly one** row
   **and to the right one**, asserted on the resolved row's own label, because six other rows share
   the `0x60/12` byte and every one of them would satisfy a page+offset match),
-  **1827 `CHECK`s** in
+  **1802 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -1265,7 +1249,7 @@ Every ESP-IDF component this firmware links, and what it powers (from
 | `nvs_flash` | runtime config + X10A link cache (`daik_cfg` namespace) |
 | `esp_wifi` | STA (strongest-AP scan, SAE) + SoftAP setup portal |
 | `esp_event` / `esp_netif` | event loop + network interfaces, DHCP hostname, SNTP client (`esp_netif_sntp`) |
-| `esp_http_server` | `:80` UI/API server + **WebSocket** (`CONFIG_HTTPD_WS_SUPPORT`). Also `CONFIG_HTTPD_QUEUE_WORK_BLOCKING=y`: `httpd_queue_work()` is one UDP datagram to a control socket with a 6-deep mailbox, and the default drops an overflow **silently** while still answering `ESP_OK` — which wedged `/events` and panicked the board (#238) |
+| `esp_http_server` | `:80` UI/API server. `CONFIG_HTTPD_WS_SUPPORT=n` — the WebSocket push is gone (#238/#241), so the `CONFIG_HTTPD_QUEUE_WORK_BLOCKING=y` backstop it needed went with it: `httpd_queue_work()` has no caller left, and an inert setting reads as a live safeguard |
 | `esp_https_ota` / `app_update` / `esp_app_format` | OTA slot writes, rollback, app descriptor (version, ELF sha) |
 | `esp_http_client` / `esp-tls` | OTA fetch + TLS transport |
 | `bootloader_support` | Secure Boot v2 signature verification on the update path |
@@ -1307,12 +1291,12 @@ in RAM only — there is no manual picker and no NVS key (see [`ARCHITECTURE.md`
 
 It signs and verifies its own OTA updates with **Secure Boot v2 keys but no burned eFuses** — the
 security of signed firmware with none of the brick risk. It refuses to roll a bad update forward with a
-**connectivity-proving health gate** (not a naive uptime timer). It ships a **live WebSocket UI embedded
-and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-associations no event
+**connectivity-proving health gate** (not a naive uptime timer). It ships a **live UI embedded
+and gzipped into the app image** (polled, after a WebSocket push proved it could die silently), an **ICMP watchdog** that recovers WiFi ghost-associations no event
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 18-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1827 checks),
+on the host** (1802 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 
