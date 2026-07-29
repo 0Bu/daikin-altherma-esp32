@@ -240,8 +240,11 @@ DetectResult hp_detect_run() {
         r.candidates.emplace_back(out[i]);
     // Best-fit representative to actually read with (deterministic, not registry order). When the
     // capacity is known the candidates share a kW class and are register-equivalent, so this only
-    // names the displayed model; when the O/U capacity is absent (short 0x00) the set spans classes,
-    // so detect_best leans on the I/U capacity fallback to pick the right-class reading profile.
+    // names the displayed model; when the O/U capacity is absent (short 0x00) the set can still span
+    // classes, so detect_best leans on the I/U capacity fallback to pick the right-class reading
+    // profile. Since #225 detect_candidates narrows by that same fallback, so `out` above no longer
+    // reports models the ranking had already excluded — but the profile READ is still this line's
+    // alone: the set above is a display list, and nothing consumes it to choose a table.
     if (const char* b = detect_best(sigs, nsig, fp)) r.best = b;
 
     // `retries` is on this line rather than its own: a rising count is the early warning that the

@@ -1110,8 +1110,20 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 Altherma-only model profiles from a bus fingerprint (page mask + capacity, O/U or the
                 I/U-code fallback) to a candidate set + a best-fit representative (detect_best; ranks by
                 maximal page overlap -> kW class containing the capacity -> tightest class). The set is
-                register-equivalent only when the capacity is KNOWN; when it is absent the set spans kW
-                classes, so the I/U-capacity fallback that ranks the representative does affect values.
+                register-equivalent only when the capacity is KNOWN; when it is absent the I/U-capacity
+                fallback that ranks the representative also affects values, so detect_candidates NARROWS
+                by it too (#225) — through the same detect_capacity/signature_kw_contains helpers, since
+                a set constrained by one rule and a pick ranked by another is how /status came to report
+                8 candidates across 4 families while the ranking was already down to the 4-8 kW class
+                (and how #213 recorded one unit as two). Two asymmetries carry the correctness: a
+                candidate is dropped only when its class CONTRADICTS the capacity, never for stating no
+                class (that would let RANKING decide MEMBERSHIP — written the other way round it
+                silently dropped class-less altherma_gshp2 from a set it belongs in, which an existing
+                CHECK caught), and the fallback is applied only when some surviving class CORROBORATES
+                it (an I/U code fitting no class would otherwise exclude every classed candidate at
+                once — unfiltered is the safe failure, since a broad set reads as uncertain and a set
+                narrowed onto the wrong models does not). Narrowing is not RESOLVING: `ambiguous` stays
+                true and the UI still refuses to name one model.
                 It also carries detect_commit_no_match, the rule for the OTHER outcome: a sweep that
                 answered on the bus and matched NOTHING is not committed as `generic` until a second,
                 separate sweep agrees (DETECT_NO_MATCH_CONFIRMATIONS=2). An unknown unit and a
@@ -1355,8 +1367,9 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   and the dashboard's model card. TWO capacities, separate fields, never merged:
                   capacity_kw is the OUTDOOR unit's own report (page 0x00/12) and is null whenever the
                   variable-length descriptor is too short to carry offset 12; capacity_kw_iu is the
-                  INDOOR unit's rated code (0x60/6, same units), which detection already reads as its
-                  ranking fallback and which is now carried through the fingerprint
+                  INDOOR unit's rated code (0x60/6, same units), which detection reads as its ranking
+                  fallback AND (since #225) as the filter that narrows candidates[] when the O/U
+                  figure is absent, and which is carried through the fingerprint
                   (config fp_iu_kw_tenths) so the card can show a capacity for the many units that
                   never report the O/U one. They are NOT interchangeable — a 6 kW outdoor unit under
                   an 8 kW indoor unit is an ordinary pairing — so the UI labels which unit it is

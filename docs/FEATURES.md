@@ -46,8 +46,8 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 16 | Captive-portal provisioning (AP-only SoftAP, typed SSID, UDP:53 DNS catch-all, 302 probe redirect + RFC 8910 option 114) | ✅ 🧪 | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp), [`logic/captive.hpp`](../main/logic/captive.hpp) |
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
-| 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte, **retried page probe + a second-sweep confirmation** before falling back to `generic`) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1633 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte — it both ranks the representative and **narrows the candidate set**, dropping only classes that contradict it, **retried page probe + a second-sweep confirmation** before falling back to `generic`) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
+| 20 | **IDF-free host-tested logic core** (1656 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -739,13 +739,20 @@ Deep dives: [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md), [`REGISTERS.md`](REGISTERS.m
 - **✅ 🧪 Auto-detection every boot** ([`hp_detect.cpp`](../main/hp_detect.cpp),
   [`logic/detect.hpp`](../main/logic/detect.hpp)): a protocol sweep + page probe builds a bus
   *fingerprint* (page mask + capacity + OU EEPROM) that narrows the Altherma-only signatures to a
-  register-equivalent candidate set. The physical **link** (pins/proto) is cached in NVS; the **model**
+  candidate set — **register-equivalent when the capacity is known**, which is the qualifier that
+  matters: with the O/U figure absent the set spans kW classes and the members are *not*
+  interchangeable. The physical **link** (pins/proto) is cached in NVS; the **model**
   is re-detected in RAM every boot, so a swapped unit is re-identified with no reconfiguration.
   The fingerprint carries **both** capacities — the outdoor unit's own report and the indoor unit's
   rated code — reported separately (`/status.detect.capacity_kw` / `capacity_kw_iu`), since a unit
   with a short `0x00` descriptor reports no outdoor capacity at all and the two halves of a plant are
-  routinely different sizes. When the candidate set spans several marketing families the UI names the
-  families and shows the O/U EEPROM digits instead of asserting one model.
+  routinely different sizes. The indoor code is not only a tie-breaker: when the outdoor figure is
+  missing it also **narrows the candidate set** ([#225](https://github.com/0Bu/daikin-altherma-esp32/issues/225)),
+  dropping a profile whose kW class *contradicts* it while keeping one that states no class at all —
+  so the set reflects the same evidence the representative was ranked by, instead of listing 14–16 kW
+  models beside an 8 kW unit. Narrowing is **not** resolving: when the set still spans several
+  marketing families the UI names the families and shows the O/U EEPROM digits instead of asserting
+  one model.
   The probe gathers the unit's **identity**, not its values, so it is hardened against a single lost
   frame: each page is retried up to `DETECT_PAGE_TRIES` (3) times before its bit is cleared, and a
   sweep that answered but matched *nothing* waits for a second sweep to agree
@@ -974,7 +981,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   the substitution fails *closed* when a truncated line never reaches its end token; the same tests
   pin that a raw-page hex line passes through untouched, so the privacy rule cannot silently clip the
   decode witness the rule above exists to deliver),
-  **1633 `CHECK`s** in
+  **1656 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -1216,7 +1223,7 @@ and gzipped into the app image**, an **ICMP watchdog** that recovers WiFi ghost-
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 20-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1633 checks),
+on the host** (1656 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

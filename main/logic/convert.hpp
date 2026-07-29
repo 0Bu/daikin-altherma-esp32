@@ -45,8 +45,22 @@ inline double press2temp(double d, int rtype = 802) {
 }
 
 // ── Enum / flag label tables (recovered from the X10A value definitions) ──────────────────────
+// OP_MODE index 0 is "Stop", not the split-air-conditioner vocabulary's "Fan Only" (#216). A
+// hydronic Altherma has no fan-only mode, and index 0 is the value an idle outdoor unit reports —
+// so the one entry every user sees most of the day was the one that was false. MEASURED on a live
+// Altherma 3 R W (1.0.0-dev.211) via logic/raw_capture.hpp, which dumps page 0x10 across the
+// stopped->running edge that a detect-pass dump structurally cannot reach:
+//     at rest   raw 0x10 [00 04 ...]   -> byte 0 = 0x00
+//     running   raw 0x10 [01 00 ...], [01 20 ...] x2 (three captures, one run)
+// Byte 0 steps 0x00 -> 0x01 exactly at the transition and index 1 already decoded correctly as
+// "Heating", which is what makes this a relabel of ONE entry rather than a shifted table: the
+// evidence bounds indices 0 and 1 and says nothing about the rest. The remaining entries stay as
+// the recovered split vocabulary spells them — several ("Ventilation", "Dry", the storage modes)
+// cannot occur on a hydronic unit either, but "probably also wrong" is the guess this project
+// refuses, and none of them is reachable to measure. docs/REGISTERS.md §4.1 carries the same table
+// and moves with this one: it is the domain audit's authority, so the two may never disagree.
 inline constexpr const char* OP_MODE[] = {                          // conv 217 (data[0])
-    "Fan Only", "Heating", "Cooling", "Auto", "Ventilation", "Auto Cool", "Auto Heat", "Dry",
+    "Stop", "Heating", "Cooling", "Auto", "Ventilation", "Auto Cool", "Auto Heat", "Dry",
     "Aux.", "Cooling Storage", "Heating Storage", "UseStrdThrm(cl)1", "UseStrdThrm(cl)2",
     "UseStrdThrm(cl)3", "UseStrdThrm(cl)4", "UseStrdThrm(ht)1", "UseStrdThrm(ht)2",
     "UseStrdThrm(ht)3", "UseStrdThrm(ht)4", "Aux."};
