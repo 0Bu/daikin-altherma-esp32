@@ -30,6 +30,7 @@ scripts/run-domain-audit.sh        # is the value catalog physically RIGHT?
 scripts/run-description-audit.sh   # can a user find out what each value IS?
 scripts/run-schematic-audit.sh     # does the DRAWING still say what it means?
 scripts/run-ui-gif-audit.sh        # is the README's RECORDING still of this UI?
+scripts/run-doc-entity-audit.sh    # do the docs' copy-paste ENTITY IDS exist?
 ```
 
 `run-mock-tests.sh` compiles the IDF-free headers in [`main/logic/`](main/logic/) against
@@ -122,6 +123,19 @@ It films the real UI (`index.html` + `style.css` + `app.js`, spliced the way the
 splices them) with only the *device* stubbed, so what the GIF shows is what `renderLive()` drew.
 Look at the result before committing: the gate proves the recording is current, never that it is a
 good picture. `tools/uigif/selftest.sh` proves the gate still catches each way it can go stale.
+
+`run-doc-entity-audit.sh` asks whether the **copy-pasteable recipes in the docs still name entities
+that exist**. [`docs/HOME_ASSISTANT.md`](docs/HOME_ASSISTANT.md) hands a reader YAML naming ids like
+`sensor.daikin_altherma_inlet_water_temp_r4t`; each is derived from a catalog **label**, so it is
+only as stable as that label — and the catalog spells one quantity several ways across models. A
+wrong id errors *nowhere*: Home Assistant builds the template sensor, its `availability` guard never
+becomes true, the entity sits at `unavailable`, and the reader concludes their heat pump lacks the
+feature. It resolves each id through the real `ha_slug` over the real catalog, and only against
+**detectable** profiles — the heat-meter recipe had been naming a row that exists only in the
+hand-written host-test fixture `altherma3_r_erga`, which detection can never assign, so a check that
+looked at every table would have called it clean. It does **not** require an id to be right on every
+profile: the catalog genuinely disagrees across models, and the docs should state a majority id and
+name the alternatives beside it. `tools/docs/selftest.sh` re-seeds the defects it was built for.
 
 Three more fast gates guard the **published artifacts** rather than the firmware, so most PRs never
 need them locally — run them if you touch

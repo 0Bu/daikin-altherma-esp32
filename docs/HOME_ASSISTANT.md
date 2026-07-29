@@ -373,16 +373,39 @@ template:
         state_class: measurement
         # A missing input must make this sensor UNAVAILABLE, never zero. See the two notes below.
         availability: >
-          {{ states('sensor.daikin_altherma_flow_rate_lmin') | is_number
+          {{ states('sensor.daikin_altherma_flow_sensor_l_min') | is_number
              and states('sensor.daikin_altherma_leaving_water_temp_after_buh_r2t') | is_number
-             and states('sensor.daikin_altherma_return_water_temp_before_phe_r4t') | is_number }}
+             and states('sensor.daikin_altherma_inlet_water_temp_r4t') | is_number }}
         state: >
-          {% set flow  = states('sensor.daikin_altherma_flow_rate_lmin') | float %}
+          {% set flow  = states('sensor.daikin_altherma_flow_sensor_l_min') | float %}
           {% set t_out = states('sensor.daikin_altherma_leaving_water_temp_after_buh_r2t') | float %}
-          {% set t_in  = states('sensor.daikin_altherma_return_water_temp_before_phe_r4t') | float %}
+          {% set t_in  = states('sensor.daikin_altherma_inlet_water_temp_r4t') | float %}
           {% set cf    = 0.070 %}   {# 0.070 water · ~0.063 for 30% propylene glycol — set to your loop #}
           {{ (flow * cf * (t_out - t_in)) | round(3) }}
 ```
+
+> **Check these three entity ids against your own unit before copying.** An entity id is derived from
+> its **label**, and the catalog does not spell the same quantity the same way on every model — so an
+> id that is right on most units is still wrong on some. The counts below are over the **39
+> detectable** profiles:
+>
+> | Input | Entity id on most units | Carries it | Known alternatives |
+> |---|---|---|---|
+> | `flow` | `sensor.daikin_altherma_flow_sensor_l_min` | **39 / 39** | — |
+> | `t_out` | `sensor.daikin_altherma_leaving_water_temp_after_buh_r2t` | 35 / 39 | `…_outlet_water_buh_temp_r2t` (hybrid, HPSU Ultra) · `…_hpsu_tvbh_inflow_temp_after_buffer_buh_r2t` (ECH2O) |
+> | `t_in` | `sensor.daikin_altherma_inlet_water_temp_r4t` | 38 / 39 | `…_hpsu_tr_return_temp_r4t` (ECH2O 4-8 kW) |
+>
+> To find yours, open `http://daikin-altherma-esp32.local/values` and read the `label` fields, or look
+> the entity up in Home Assistant under the *daikin-altherma-esp32* device. The id is the label
+> lowercased with every run of non-alphanumeric characters collapsed to one `_`
+> (`logic/ha_device.hpp` `ha_slug`), prefixed by the device name — so *"Inlet water temp.(R4T)"*
+> becomes `sensor.daikin_altherma_inlet_water_temp_r4t`.
+>
+> ⚠️ **Do not pick `t_in` by searching for `R4T`.** The catalog reuses that sensor tag: on **13**
+> profiles `O/U Heat Exch. Temp.(R4T)` is the *outdoor* heat exchanger, and there are also
+> `2 phase thermistor (R4T)` and `R4T-Deicer temp.` rows. None of them is the water inlet, and
+> substituting one produces a ΔT — and therefore a heat output and a COP — that is plausible and
+> wrong. Match the whole label, not the tag.
 
 **The value is SIGNED, and that is deliberate.** Earlier revisions of this recipe wrapped it in
 `[…, 0] | max` to keep idle/defrost reverse-ΔT out of the figure. That clamp is wrong, and it is
