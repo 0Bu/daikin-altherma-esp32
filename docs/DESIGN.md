@@ -957,13 +957,14 @@ dashboard — the move changed where the configuration lives, not how it looks:
    detected, else a usable-GPIO dropdown (§5.2) — and the **Hardware** row (status indicator +
    recovery-button pins), which opens the board-hardware modal. From
    `pins_avail`, `hp{proto,rx,tx,connected,last_ok_s}`,
-   `board{…}`. It carries **almost no board telemetry** — chip (`platform`), uptime (`uptime_s`) and
-   **Last reset** (`sys.reset_reason`) were rows here through v1.0.14 and are gone: Settings states
+   `board{…}`. It carries **almost no board telemetry** — chip (`platform`) and **Last reset**
+   (`sys.reset_reason`) were rows here through v1.0.14 and are gone: Settings states
    what the board is **set to**, and read-only numbers nobody acts on from this screen only pushed
-   the settings that ARE actionable further down it. None of it is lost — the running version stays
-   on the card and in the header, and the chip, reset reason and uptime are on `/status`, `/diag` and
-   the MQTT heartbeat's diagnostic entities, which is where a diagnosis is actually made.
-   **Two came back, and only because they stopped being spot numbers**: **Free memory**
+   the settings that ARE actionable further down it. Neither is lost — the chip is a static fact of
+   an image that only runs on one target, and the reset reason is on `/status`, `/diag` and the MQTT
+   heartbeat's diagnostic entities, which is where a diagnosis is actually made.
+   **Three came back**, and the two memory rows only because they stopped being spot numbers:
+   **Free memory**
    (`sys.free_heap`) and **Largest free block** (`sys.max_alloc`), each an expandable row carrying a
    24-hour trend (§5.3 item 3's chart, same accordion as a value row). The original objection stands
    against the *number* — "148 KiB" is a diagnosis nobody can make — and is answered by the *curve*:
@@ -973,8 +974,20 @@ dashboard — the move changed where the configuration lives, not how it looks:
    already on this screen for whenever an OTA has just failed. Not `min_free_heap`: the 24-hour
    minimum is on the chart, and a since-boot scalar beside it would be a second, coarser answer to
    the same question.
+   The third is **Uptime** (`uptime_s`), a plain row directly above them, and it comes back for a
+   different reason than they do: it is not a quantity anyone reads for its value, it is the answer
+   to *did this board restart while I wasn't looking* — which no other part of this screen gives.
+   The crash banner (§5.5) fires only when the reboot was a **fault**; a config save, an OTA install,
+   a brownout or a pulled plug leave the UI looking exactly as it did before. It is also what makes
+   the two rows under it legible: both curves live in RAM and start over at a reboot, so a heap line
+   that begins mid-chart is explained by the row above it instead of reading as lost data. Rendered
+   at **two units at most, coarsest first** (`3 d 2 h`, `5 h 12 min`, `47 min`, `38 s`) — at three
+   days nobody is reading the minutes, and a figure that reshuffles every second is a clock, not a
+   diagnostic. The unit symbols are SI and identical in both languages, so the row needs no
+   translated unit strings (the Checkup window already prints `min`/`h` untranslated).
    **The card's order encodes what the rows are**: link facts (link, protocol, RX/TX) → settings
-   (Version, Update channel, Hardware) → the board's own health (the two memory rows). **Readings and
+   (Version, Update channel, Hardware) → the board's own health (uptime, then the two memory rows).
+   **Readings and
    settings only** — the card carries no action. *Report a bug* was its last row through
    v1.0.0-dev.199 and is in the footer line below now: a rare escape hatch drawn at a live reading's
    weight, immediately under *Largest free block*, reads as one more board fact, and the card's whole
@@ -1207,9 +1220,10 @@ The design needs these additions to the firmware (all small, tracked as follow-u
 - `POST /set_hp`: **every field is optional** — an omitted key keeps its current value, so the
   Settings ESP32 card posts just `{profile:"auto",rx,tx}` on a pin change. `poll_s` is **not**
   accepted (fixed at 1 s); `proto` is auto-detected and not accepted; there is no value mask.
-- `GET /status`: `uptime_s` (seconds since boot) is no longer a UI row; the app reads it only to
-  detect that the device rebooted under it (§5.4 — an OTA install is confirmed by `uptime_s` going
-  backwards as much as by a new `version`).
+- `GET /status`: `uptime_s` (seconds since boot) has **two** consumers, and they read it for
+  different things: the **Uptime** row on the Settings ESP32 card (§5.6 item 2) states it, while
+  §5.4's OTA flow watches it go *backwards* to detect that the device rebooted under the app (an
+  install is confirmed by that as much as by a new `version`).
 - Optional `group` field on `ValueDef` (or generator-stamped) to drive §6 grouping; until then the
   UI groups by register-id ranges + label keywords.
 - `/models`: returns model lists, `profile_map`, `pin_hint`, per-profile value menu — still served

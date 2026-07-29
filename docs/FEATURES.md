@@ -646,9 +646,18 @@ the fact*, from the field, without a serial cable:
   present on **every** boot, and unlike the heartbeat it needs **no broker**, so "why did it reboot?"
   and "is the heap leaking?" are answerable from the LAN alone. `reset_reason_name()` reuses the
   crash slug vocabulary (one naming for the sys block, the `last_crash`/crash payload and the
-  heartbeat's "Reset Reason" sensor). Of the block the web UI reads only `safe_mode` (the recovery
-  banner) — the reset reason and free heap were rows on the Settings ESP32 card through v1.0.14 and
-  were removed; they are read from `/status`, `/diag` and the heartbeat instead.
+  heartbeat's "Reset Reason" sensor). The web UI reads three of the block's five fields: `safe_mode`
+  (the recovery banner) and — as the two trended rows at the bottom of the Settings ESP32 card
+  (entry 42) — `free_heap` and `max_alloc`. Both were removed as **spot numbers** in v1.0.14 and
+  came back only once each carried a 24-hour curve, which is the form in which they answer
+  something ("is it drifting?") that one figure cannot. `min_free_heap` and `reset_reason` stayed
+  out and are read from `/status`, `/diag` and the heartbeat instead — the 24-hour minimum is
+  already on the chart, and a reboot's cause is a diagnosis rather than a screen-glance. What the
+  card does state beside them is the top-level `uptime_s`, which is not a `sys` field and answers
+  the one question this screen otherwise cannot: whether the board restarted at all (the crash
+  banner appears only when the reboot was a **fault**, so an OTA, a config save or a power cut
+  leave no trace in the UI) — and it is what explains a heap curve that starts mid-chart, since
+  both rings are RAM and begin again at a boot.
 - **✅ Build identity** — `/status.app_elf_sha256` ties a running device to the exact firmware that
   produced any dump, and the syslog boot line (below) puts the same hash in the **log stream**, so a
   captured stream stays attributable to a binary after the device has moved on.
