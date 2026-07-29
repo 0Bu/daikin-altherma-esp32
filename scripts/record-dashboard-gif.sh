@@ -76,6 +76,23 @@ done
 curl -fsS -o /dev/null "http://127.0.0.1:$PORT/demo.html" || {
     echo "record-dashboard-gif: local server did not come up on :$PORT" >&2; exit 2; }
 
+# ...and prove it is OUR server. A health check on the URL alone answers "something is listening",
+# which is a different question: $PORT is also build-ui-prototype.sh's port, so a prototype server
+# left running from an earlier session keeps the bind, our http.server exits "Address already in
+# use", and every frame is then filmed off SOMEONE ELSE'S page — silently, because the stale page is
+# a perfectly good dashboard. That is worse than a crash: the run finishes, the stamp is written
+# from the CURRENT sources, and the gate goes green over a recording of the old UI — the exact
+# false-current state this whole gate exists to make impossible. Observed on 2026-07-29: a server
+# from 15:29 served a five-hour-old page to a 20:41 recording, byte-for-byte reproducing the GIF it
+# was meant to replace. Compare the bytes rather than trusting the port.
+if [ "$(curl -fsS "http://127.0.0.1:$PORT/demo.html" | shasum -a 256 | cut -d' ' -f1)" \
+     != "$(shasum -a 256 < "$WORK/demo.html" | cut -d' ' -f1)" ]; then
+    echo "record-dashboard-gif: :$PORT is serving a DIFFERENT page than the one just built —" >&2
+    echo "  something else holds the port (build-ui-prototype.sh uses it too). Free it, or" >&2
+    echo "  re-run with PORT=<other>. Recording now would film that page, not this tree." >&2
+    exit 2
+fi
+
 shoot() {                  # shoot <frame-index> <scene> <t-ms>
     local n=$1 scene=$2 t=$3 pid i out sz prev
     out="$WORK/frames/f$(printf '%04d' "$n").png"
