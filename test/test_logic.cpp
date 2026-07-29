@@ -1192,6 +1192,54 @@ static void test_detect() {
     CHECK(def::lookup("generic").count > 40);
     CHECK(std::string(def::lookup("no_such_profile").id) == "generic");
 
+    // ── #214: what ONE lost page reply costs, and the rule that stops it being acted on ──
+    // The page probe gathers the unit's IDENTITY, not its values, and signature_consistent() matches
+    // on page SUBSET — so clearing a single bit can make every profile inconsistent at once. Measured
+    // here against the real signatures rather than asserted in prose, because the number is the whole
+    // argument for retrying the probe: on the live 0x1bff fingerprint, MOST single-page losses leave
+    // no candidate at all, and the caller then reads with `generic`.
+    Fingerprint live{};
+    live.page_mask    = mask_of({0x00, 0x10, 0x20, 0x21, 0x30, 0x60, 0x61, 0x62, 0x63, 0x64, 0xA0, 0xA1});
+    live.kw_tenths    = -1;                             // as measured: short 0x00 descriptor
+    live.iu_kw_tenths = 80;
+    const char* live_best = detect_best(sigs, nsig, live);
+    CHECK(live_best != nullptr);
+    int collapses = 0, changes = 0;
+    for (int b = 0; b < 13; b++) {
+        if (!(live.page_mask & (1u << b))) continue;
+        Fingerprint lost = live;
+        lost.page_mask &= ~(1u << b);
+        const char* lb = detect_best(sigs, nsig, lost);
+        if (lb == nullptr) collapses++;                 // -> caller falls back to `generic`
+        else if (std::string(lb) != live_best) changes++;
+    }
+    // Every single-page loss is consequential — none is harmless. That is the point: there is no
+    // "safe" page to drop, so the probe must not drop one.
+    CHECK(collapses + changes == 12);
+    CHECK(collapses >= 8);                              // measured 8 of 12 fall through to `generic`
+
+    // `generic` is not a near-miss of the real profile — it is a different instrument. Pin the gap
+    // so a future catalog edit cannot quietly make the fallback look acceptable.
+    CHECK(def::lookup("generic").count < def::lookup("altherma_ebla_edla_d_series_4_8kw_monobloc").count);
+    {
+        bool generic_has_leaving_water = false, generic_has_rps = false;
+        const auto& gp = def::lookup("generic");
+        for (size_t i = 0; i < gp.count; i++) {
+            if (gp.values[i].reg == 0x30) generic_has_rps = true;
+            if (logic::lwt_ci_contains(gp.values[i].label, "leaving water")) generic_has_leaving_water = true;
+        }
+        CHECK(!generic_has_leaving_water);              // no ΔT, no heat output, no COP
+        CHECK(!generic_has_rps);                        // no compressor witness for ou_stale either
+    }
+
+    // The rule itself: one no-match sweep is not evidence, two are. A transient cannot survive two
+    // independent passes; a genuinely unrecognised unit says it twice and is then read with generic.
+    CHECK(DETECT_NO_MATCH_CONFIRMATIONS == 2);
+    CHECK(!detect_commit_no_match(0));
+    CHECK(!detect_commit_no_match(1));                  // the case that used to pin `generic` at once
+    CHECK(detect_commit_no_match(2));
+    CHECK(detect_commit_no_match(3));                   // saturates — never un-commits
+
     // ── EEPROM render: raw hex pairs for display ──
     const uint8_t ee[] = {0x0B, 0x02, 0x00, 0x01, 0x03, 0x02};
     char buf[32];

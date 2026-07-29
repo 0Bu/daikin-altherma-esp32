@@ -703,7 +703,24 @@ just-wired unit is still identified promptly. A pass does:
    winning pins/protocol are re-persisted only when they changed (a UI pin override survives reboot);
    an unchanged link is confirmed with no NVS write.
 2. **Page probe** — query every page any profile can reference (`0x00,0x10,0x20,0x21,0x30,0x60–0x65,
-   0xA0,0xA1`) plus `0x11`; set a bit in a **page mask** for each page that answers.
+   0xA0,0xA1`) plus `0x11`; set a bit in a **page mask** for each page that answers. Each page is
+   **retried up to `DETECT_PAGE_TRIES` (3) times** before its bit is cleared. This probe gathers the
+   unit's *identity*, not its values, and `signature_consistent` matches on page **subset** — so one
+   dropped frame clears one bit and can make *every* profile inconsistent at once. Measured against
+   the shipped signatures on a live `0x1bff` fingerprint, all 12 single-page losses change the
+   answer and **8 of them leave no candidate at all**, which lands the unit on `generic` (53 rows
+   against ~99, with no leaving-water measurement, no compressor speed and no pressures). There is
+   no page it is safe to drop, so the probe does not drop one lightly. The retry costs nothing on a
+   page that answers, and by this step the pins and framing are already proven (#214). The sweep's
+   retry count is reported on the `/diag` detect line as `retries=`, so a bus that is working harder
+   to hold its fingerprint together is visible before it changes the answer.
+
+   A page that answers with an **all-zero payload still sets its bit**, deliberately. Zeros mean the
+   *feature* is absent, not the *page* — and the subset rule needs page presence. Suppressing such a
+   page was tried and is wrong in exactly the expensive direction: on the measured unit page `0xA1`
+   answers with 16 zero bytes, and dropping its bit moves the pick from a register-identical
+   Altherma to a **ground-source** profile. Absent features are the availability layer's problem
+   (`logic/availability.hpp`), not detection's.
 3. **Capacity + EEPROM** — read the O/U capacity from page `0x00` offset 12 (0.1 kW units) and the
    O/U EEPROM identification digits from page `0x11`. The `0x00` descriptor is **variable-length**: a
    smaller unit returns a short reply that omits offset 12 (see [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md)),
@@ -743,7 +760,17 @@ capacity is known, so it only ever moves the pick for a unit that doesn't report
 the candidate set spans kW classes and is therefore not register-identical.
 
 The result is applied only when the bus actually answered (a not-yet-wired unit retries on the
-backoff cadence instead of pinning `generic`); the model goes to the in-RAM config
+backoff cadence instead of pinning `generic`). When the bus *did* answer but **nothing matched**,
+that is still not committed on the strength of one sweep: `detect_commit_no_match` requires
+`DETECT_NO_MATCH_CONFIRMATIONS` (2) consecutive bus-answering sweeps to agree before the unit is
+read with `generic`. A catalog this does not know and a fingerprint with a lost page bit look
+identical in a single pass and cost very different amounts, so the expensive interpretation waits
+for corroboration — a transient cannot survive two independent passes, while a genuinely
+unrecognised unit says it twice and is then read with `generic`, which is the honest answer for it.
+It is a **count**, not a timer, because the sweep cadence itself backs off: two passes stay two
+pieces of evidence at any cadence, where a wall-clock window would quietly become one. Waiting
+persists nothing — the model is RAM-only either way — and `POST /detect` clears the tally so a
+forced re-detect cannot inherit a confirmation it never earned. The model goes to the in-RAM config
 (`config_set_model`), while a
 changed link cache (pins/proto) is persisted (`config_save_link`). Both are **narrow, field-owned**
 setters rather than a whole-`Config` save: detection reads its snapshot before a sweep that takes

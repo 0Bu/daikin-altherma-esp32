@@ -36,6 +36,31 @@ static bool proto_answers(Protocol p) {
     return read_page(0x00, p, tmp, sizeof(tmp)) >= 0;
 }
 
+// Same read, but RETRIED — used only for the page probe (step 2), where the protocol and pins are
+// already known to answer, so a non-reply is far more likely to be a dropped frame than a page the
+// unit does not have.
+//
+// This matters more than a lost reading would: the page probe does not gather VALUES, it gathers
+// the unit's IDENTITY. One dropped frame clears one page bit for the whole boot, and because
+// signature_consistent() matches on page SUBSET, clearing a bit that every profile references makes
+// them all inconsistent — the unit is then read with `generic` (53 rows, no leaving water, no
+// compressor speed, no pressures). Measured: that is what 8 of the 12 fingerprint pages do (#214).
+// The board this was found on reboots often enough to roll those dice weekly.
+//
+// Cost is bounded and paid only on failure: a page that answers costs one query as before, and the
+// bus was already proven to answer before this loop is reached. Worst case is
+// (DETECT_PAGE_TRIES - 1) extra 300 ms timeouts per genuinely-absent page, once per detect pass.
+static constexpr int DETECT_PAGE_TRIES = 3;
+
+static int read_page_retry(uint8_t reg, Protocol proto, uint8_t* out, int outmax, int& retries_used) {
+    for (int attempt = 0; attempt < DETECT_PAGE_TRIES; attempt++) {
+        const int n = read_page(reg, proto, out, outmax);
+        if (n >= 0) return n;
+        retries_used++;
+    }
+    return -1;
+}
+
 DetectResult hp_detect_run() {
     const Config& c = config();
 
@@ -112,9 +137,10 @@ DetectResult hp_detect_run() {
     uint8_t page20[32]; int len20 = -1;              // dump-only (below): O/U sensors + pressures
     uint8_t pageA0[32]; int lenA0 = -1;              // O/U-II rows — raw, for the diag dump below
     uint8_t pageA1[32]; int lenA1 = -1;
+    int probe_retries = 0;                           // dropped replies re-tried across the whole sweep
     for (uint8_t reg : PROBE_PAGES) {
         uint8_t pay[32];
-        const int paylen = read_page(reg, r.proto, pay, static_cast<int>(sizeof(pay)));
+        const int paylen = read_page_retry(reg, r.proto, pay, static_cast<int>(sizeof(pay)), probe_retries);
         if (paylen < 0) continue;
         if (reg == 0x11) {
             len11 = paylen;
@@ -208,9 +234,13 @@ DetectResult hp_detect_run() {
     // so detect_best leans on the I/U capacity fallback to pick the right-class reading profile.
     if (const char* b = detect_best(sigs, nsig, fp)) r.best = b;
 
-    diag_printf("detect: proto=%c rx=%d tx=%d pages=0x%04x kw=%d iu_kw=%d eeprom=[%s] -> %d candidate(s), best=%s\n",
+    // `retries` is on this line rather than its own: a rising count is the early warning that the
+    // page probe is working harder to hold the fingerprint together, which is the condition that
+    // used to change the model silently (#214).
+    diag_printf("detect: proto=%c rx=%d tx=%d pages=0x%04x kw=%d iu_kw=%d eeprom=[%s] retries=%d -> %d candidate(s), best=%s\n",
                 static_cast<char>(r.proto), r.rx, r.tx, static_cast<unsigned>(fp.page_mask),
-                fp.kw_tenths, fp.iu_kw_tenths, ee, n, r.best.empty() ? "(none)" : r.best.c_str());
+                fp.kw_tenths, fp.iu_kw_tenths, ee, probe_retries, n,
+                r.best.empty() ? "(none)" : r.best.c_str());
     return r;
 }
 
