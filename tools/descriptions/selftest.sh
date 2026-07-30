@@ -174,6 +174,19 @@ open(p, 'w').write(s)
 PY
 run_case "raw ON/OFF label suffix is caught" 1 "D006"
 
+echo "== 11. an exact semantic entry must not be shadowed by broader copy =="
+reset
+python3 - "$WORK/main/www/app.js" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+s = s.replace('const DESCRIPTIONS = [',
+              'const DESCRIPTIONS = [\n'
+              '  { re: /smart.*operation mode/i, what: "wrong register", '
+              'de: { what: "falsches Register" } },', 1)
+open(p, 'w').write(s)
+PY
+run_case "shadowed exact description is caught" 1 "D008"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "description audit selftest: all $pass cases caught"

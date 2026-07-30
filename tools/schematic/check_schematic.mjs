@@ -280,7 +280,17 @@ function evalTable(open, close, brace, what, extraGlobals = {}) {
   catch (e) { die(2, `${what} does not evaluate: ${e.message}`); }
 }
 const noop = () => null;
-const INSPECT = evalTable('const INSPECT = {', '\n};', '{', 'INSPECT', { lwtRow: noop, vRow: noop, pickValue: noop });
+// Electrical input has a source-aware entry factored out of INSPECT so the production renderer and
+// the source-matrix test consume the same measured-vs-estimated wording. Evaluate that real object
+// first; the helpers are needed only as closure globals and are not executed by this structural
+// audit. Supplying a hand-written stand-in here would make the audit blind to the real entry.
+const PEL_INSPECT = evalTable('const PEL_INSPECT = {', '\n};', '{', 'PEL_INSPECT', {
+  pelMeasured: noop, pelApproxText: noop, fmt1: noop,
+  PEL_MEASURED_WHAT: {}, PEL_ESTIMATED_WHAT: {},
+});
+const INSPECT = evalTable('const INSPECT = {', '\n};', '{', 'INSPECT', {
+  lwtRow: noop, vRow: noop, pickValue: noop, PEL_INSPECT,
+});
 const I18N = evalTable('const I18N = {', '\n};', '{', 'I18N');
 // The same table the value rows use — an INSPECT `sample` is a key into it (renderInspect →
 // descFor), so a sample nothing matches leaves the panel's explainer blank.

@@ -1755,6 +1755,14 @@ const DESCRIPTIONS = [
     normal: "reflects the current job. During a hot-water cycle it reads DHW even though the outdoor unit still shows Heating.",
     de: { what: "Was die Wasserseite (Inneneinheit) gerade tut: Stopp, Heizen, Kühlen, Warmwasser oder eine Kombination aus Heizen+Warmwasser.",
           normal: "spiegelt die aktuelle Aufgabe wider. Während eines Warmwasser-Zyklus steht hier WW, obwohl die Außeneinheit weiterhin Heizen anzeigt." } },
+  // `exact` is enforced by the description audit: this HomeHub enum must win before the broad X10A
+  // "operation mode" entry below. Without that ordering the Modbus card described values 0–3 as the
+  // outdoor unit's Heating/Cooling thermodynamic state, which is a different register and meaning.
+  { exact: true, re: /^smart[- ]grid operation mode$/i,
+    what: "The HomeHub's Smart-Grid request: 0 Free running, 1 Forced off, 2 Recommended on, 3 Forced on. It is an energy-management command, not the outdoor unit's Heating/Cooling mode.",
+    normal: "0 during ordinary autonomous operation. Values 1–3 should appear only while an external energy manager deliberately blocks, recommends or forces operation.",
+    de: { what: "Die Smart-Grid-Anforderung des HomeHub: 0 Freier Betrieb, 1 Erzwungen aus, 2 Empfohlen ein, 3 Erzwungen ein. Das ist ein Energiemanagement-Befehl, nicht der Heiz-/Kühlmodus der Außeneinheit.",
+          normal: "0 im normalen autonomen Betrieb. Die Werte 1–3 sollten nur erscheinen, wenn ein externes Energiemanagement den Betrieb bewusst sperrt, empfiehlt oder erzwingt." } },
   { re: /operation mode|operation \/ fault|^operation$/i,
     what: "The outdoor unit's thermodynamic mode (Heating, Cooling, …). While it heats the tank it still reports Heating — it is heating, just the water in the tank rather than the house.",
     de: { what: "Der thermodynamische Modus der Außeneinheit (Heizen, Kühlen, …). Während sie den Speicher aufheizt, meldet sie weiterhin Heizen — sie heizt ja, nur das Wasser im Speicher statt das Haus." } },
@@ -2168,6 +2176,10 @@ const MB_PAIRS = [
 // what the pill blanks is the rule (ou_stale.hpp); the converse has to hold too.
 const mbForInspect = (key) => {
   if (!x10aDown() || !mbLive()) return null;
+  // Electrical input has no X10A concept twin. It still becomes the schematic pill's source when
+  // X10A is down, so the inspector needs the real register row for its label and Modbus badge rather
+  // than treating the measured headline as an untraceable derived value.
+  if (key === "pel") return mbPower();
   const p = MB_PAIRS.find((q) => q.insp === key);
   return p ? mbByConcept(p.cid) : null;
 };
@@ -3558,15 +3570,11 @@ function renderLive() {
   // The derived figures that used to live in KPI tiles below the drawing, now at their place in it:
   // COP beside the heat output it is computed from, and the electrical input on the outdoor unit
   // where the power actually goes in.
-  // What is NOT drawn: their annotations. The ΔT's target, the "estimated" word and the electrical
-  // figure's current source (CT clamps = whole unit vs inverter = compressor only) are all in the
-  // INSPECTOR — the drawing carries readings, the explainer carries what to make of them, and the
-  // pel entry's `now` already distinguishes all three of its cases (a source, a held-over inverter
-  // reading, a profile with no current row at all) in a full sentence rather than a caption. The
-  // "≈" stays on both derived pills: it is part of the reading, not an annotation, and without it a
-  // bare "4.6 kW" reads as measured with the inspector closed. d.dtSet / d.pelSrc are still
-  // computed in liveData — the explainer is their only consumer now.
+  // What is NOT drawn: their longer annotations. The ΔT's target and the electrical figure's source
+  // are in the inspector. The compact "≈" still matters in the closed drawing, but only for X10A's
+  // current×230 V estimate; the HomeHub register is a measurement and pelApproxText removes it.
   setTxt("svCop", d.cop == null ? "—" : d.cop.toFixed(1));
+  setTxt("pelApprox", pelApproxText(d));
   setTxt("svPel", fmt1(d.pel));
 
   renderInspect();     // keep an open explainer's reading/state sentence current
@@ -3602,6 +3610,42 @@ const bshInputRow = () => {
     value: "≈ " + fmt1(d.pel),
     unit: "kW",
   };
+};
+
+const PEL_ESTIMATED_WHAT = {
+  en: "What the unit is drawing from the mains, and the divisor of the COP. An ESTIMATE: measured current × an assumed 230 V, so it ignores power factor. Which current it is decides what the COP above describes — CT clamps see the whole unit including the backup heater, the inverter current sees only the compressor. An inverter-based figure is not the plant's consumption and does not rise when the backup heater fires; the COP beside it is then the heat pump's own and says so.",
+  de: "Was das Gerät aus dem Netz zieht, und der Nenner des COP. Eine SCHÄTZUNG: gemessener Strom × angenommene 230 V, der Leistungsfaktor bleibt also unberücksichtigt. Welcher Strom es ist, entscheidet, was der COP darüber beschreibt — Stromwandler (CT) erfassen das ganze Gerät inklusive Zusatzheizer, der Inverterstrom nur den Verdichter. Ein Inverterwert ist nicht der Verbrauch der Anlage und steigt nicht, wenn der Zusatzheizer heizt; der COP daneben ist dann der der Wärmepumpe selbst und sagt das auch.",
+};
+const PEL_MEASURED_WHAT = {
+  en: "The unit's electrical input, MEASURED by the HomeHub. Unlike X10A's current×230 V estimate, this value needs no assumed voltage or power-factor approximation. It covers the whole unit, including an active backup or tank heater; the dashboard therefore does not derive a COP from it because the available heat measurement covers only the heat-pump exchanger.",
+  de: "Die elektrische Leistungsaufnahme der Anlage, vom HomeHub GEMESSEN. Anders als die X10A-Schätzung aus Strom×230 V benötigt dieser Wert keine angenommene Spannung oder Leistungsfaktor-Näherung. Er umfasst die ganze Anlage einschließlich eines aktiven Zusatz- oder Speicherheizstabs; das Dashboard berechnet daraus deshalb keinen COP, weil die verfügbare Wärmemessung nur den Wärmepumpen-Wärmetauscher umfasst.",
+};
+const pelMeasured = (d) => !!d && d.pelSrc === "MB";
+const pelApproxText = (d) => d && d.pel != null && !pelMeasured(d) ? "≈ " : "";
+const PEL_INSPECT = {
+  t: (d) => pelMeasured(d)
+    ? { en: "Electrical input (measured)", de: "Stromaufnahme (gemessen)" }
+    : { en: "Electrical input (estimated)", de: "Stromaufnahme (geschätzt)" },
+  aria: { en: "Electrical input", de: "Stromaufnahme" },
+  trend: "pel",
+  what: (d) => pelMeasured(d) ? PEL_MEASURED_WHAT : PEL_ESTIMATED_WHAT,
+  head: (d) => (d.pel == null ? "—" : pelApproxText(d) + fmt1(d.pel) + " kW"),
+  // Four cases: the measured gateway row, either X10A current source, a held-over inverter row, or
+  // no usable electrical source. Keeping this source-aware prevents a HomeHub measurement from
+  // being explained as compressor current merely because it is not a CT estimate.
+  now: (d) => d.pelHeld
+    ? { en: "The compressor is off, so the inverter current this profile reads is left over from the last run rather than measured now — no input power and no COP can be stated.",
+        de: "Der Verdichter steht, daher stammt der Inverterstrom dieses Profils vom letzten Lauf und ist kein aktueller Messwert — Leistungsaufnahme und COP lassen sich nicht angeben." }
+    : d.pel == null
+    ? { en: "No current reading on this profile, so no COP can be derived either.",
+        de: "Dieses Profil liefert keinen Strommesswert, daher lässt sich auch kein COP ableiten." }
+    : d.pelSrc === "MB"
+    ? { en: "Measured at the HomeHub electrical input (whole unit).",
+        de: "Am elektrischen Eingang des HomeHub gemessen (gesamte Anlage)." }
+    : d.pelSrc === "CT"
+    ? { en: "From the CT clamps (whole unit).", de: "Aus den Stromwandlern (gesamte Anlage)." }
+    : { en: "From the inverter current (compressor only).", de: "Aus dem Inverterstrom (nur Verdichter)." },
+  rows: [/current measured by ct/i, /inv primary current/i],
 };
 
 const INSPECT = {
@@ -3879,29 +3923,7 @@ const INSPECT = {
         : { en: "Stopped — no water is circulating.", de: "Steht — es zirkuliert kein Wasser." },
     rows: [/water pump signal/i, /flow sensor/i, /^water pressure$/i],
   },
-  pel: {
-    t: { en: "Electrical input (estimated)", de: "Stromaufnahme (geschätzt)" },
-    trend: "pel",
-    what: {
-      en: "What the unit is drawing from the mains, and the divisor of the COP. Also an ESTIMATE: it is measured current × an assumed 230 V, so it ignores power factor. Which current it is decides what the COP above describes — CT clamps see the whole unit including the backup heater, the inverter current sees only the compressor. An inverter-based figure is not the plant's consumption and does not rise when the backup heater fires; the COP beside it is then the heat pump's own and says so.",
-      de: "Was das Gerät aus dem Netz zieht, und der Nenner des COP. Ebenfalls eine SCHÄTZUNG: gemessener Strom × angenommene 230 V, der Leistungsfaktor bleibt also unberücksichtigt. Welcher Strom es ist, entscheidet, was der COP darüber beschreibt — Stromwandler (CT) erfassen das ganze Gerät inklusive Zusatzheizer, der Inverterstrom nur den Verdichter. Ein Inverterwert ist nicht der Verbrauch der Anlage und steigt nicht, wenn der Zusatzheizer heizt; der COP daneben ist dann der der Wärmepumpe selbst und sagt das auch.",
-    },
-    head: (d) => (d.pel == null ? "—" : "≈ " + fmt1(d.pel) + " kW"),
-    // Three cases, not two: the profile has no current row at all, or it has one but it is the
-    // inverter current on a page the stopped outdoor unit is no longer refreshing (d.pelHeld — see
-    // liveData / logic/ou_stale.hpp). Collapsing the second into "no current reading on this
-    // profile" would state something false about the hardware, which is the same mistake as
-    // drawing the frozen figure in the first place.
-    now: (d) => d.pelHeld
-      ? { en: "The compressor is off, so the inverter current this profile reads is left over from the last run rather than measured now — no input power and no COP can be stated.",
-          de: "Der Verdichter steht, daher stammt der Inverterstrom dieses Profils vom letzten Lauf und ist kein aktueller Messwert — Leistungsaufnahme und COP lassen sich nicht angeben." }
-      : d.pel == null
-      ? { en: "No current reading on this profile, so no COP can be derived either.",
-          de: "Dieses Profil liefert keinen Strommesswert, daher lässt sich auch kein COP ableiten." }
-      : { en: `From ${d.pelSrc === "CT" ? "the CT clamps (whole unit)" : "the inverter current (compressor only)"}.`,
-          de: `Aus ${d.pelSrc === "CT" ? "den Stromwandlern (ganzes Gerät)" : "dem Inverterstrom (nur Verdichter)"}.` },
-    rows: [/current measured by ct/i, /inv primary current/i],
-  },
+  pel: PEL_INSPECT,
   defrost: {
     t: { en: "Defrost", de: "Abtauen" },
     re: /defrost operation/i, sample: "Defrost Operation",
@@ -4198,7 +4220,7 @@ function renderInspect() {
                                : row ? inspVal(row, d)
                                : fb ? displayValue(fb) + (fb.unit ? " " + fb.unit : "")
                                : "—");
-  $("inspNow").classList.toggle("src-val-mb", !!fb && !(d && e.head));
+  $("inspNow").classList.toggle("src-val-mb", !!fb);
   // `now` is always prose — the live "what is it doing" sentence — and it CLOSES the body, as its
   // own paragraph after the timeless explainer and its "Normal:" note, in the body's own ink. It
   // used to open the body in bold, which inverted the panel: a reader opens an explainer BECAUSE
@@ -4209,7 +4231,8 @@ function renderInspect() {
   // reads as a broken value.
   const sentence = inspNowText(e, d);
   const desc = e.sample ? descFor(e.sample) : null;
-  const what = e.what ? descParaHtml(esc(tx(e.what))) : (desc ? descBodyHtml(desc) : "");
+  const ownWhat = typeof e.what === "function" ? e.what(d) : e.what;
+  const what = ownWhat ? descParaHtml(esc(tx(ownWhat))) : (desc ? descBodyHtml(desc) : "");
   // The SECOND source, after the description — the same line the value list draws, through the same
   // mbNoteHtml, because a tap on the drawing and a tap on the row are the same question about the
   // same reading and must not answer it in two different shapes. The DRAWING itself stays X10A while

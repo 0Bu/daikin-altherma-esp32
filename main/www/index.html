@@ -197,13 +197,12 @@
                   <rect class="sc-pill" x="36" y="282" width="64" height="20" rx="10" style="stroke:var(--brand)"/>
                   <text class="sc-val" x="68" y="296" text-anchor="middle" style="fill:var(--brand)" data-i18n="chip.quiet">Quiet</text>
                 </g>
-                <!-- The "≈" is the whole of what the DRAWING says about this being derived; which
-                     current it came from (CT clamps = whole unit vs inverter = compressor only, and
-                     why that changes how the COP reads), and the two ways it can be absent, are the
-                     inspector's job — see the note on the estimate sub-labels at #gPth. -->
+                <!-- X10A derives this figure from a phase current, so the drawing prefixes it with
+                     "≈". A Modbus fallback is the HomeHub's measured input register 51 and removes
+                     the prefix; the inspector names and explains the active source in both cases. -->
                 <g class="sc-hit" data-insp="pel" role="button" tabindex="0">
                   <rect class="sc-pill" x="70" y="408" width="88" height="20" rx="10"/>
-                  <text class="sc-val" x="114" y="422" text-anchor="middle">≈ <tspan id="svPel">—</tspan> kW el.</text>
+                  <text class="sc-val" x="114" y="422" text-anchor="middle"><tspan id="pelApprox">≈ </tspan><tspan id="svPel">—</tspan> kW el.</text>
                 </g>
                 <!-- Refrigerant circuit (outdoor unit ↔ PHE). Each run pairs its drawn pipe with a
                      fat transparent sc-hitline: a 3.5–5 px stroke is not a tappable target on a
