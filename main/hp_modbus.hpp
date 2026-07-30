@@ -28,7 +28,7 @@ namespace daik {
 // nothing at all for the first and a state for the second.
 struct ModbusStatus {
     bool        enabled     = false;   // is this stack running at all? (a gateway address is known)
-    bool        connected   = false;   // a socket is open AND the last read cycle succeeded
+    bool        connected   = false;   // current socket has committed at least one fresh poll cycle
     bool        discovering = false;   // mDNS browse in progress, nothing resolved yet
     std::string host;                  // the RESOLVED / discovered host ("" = none yet)
     int         port    = 0;
@@ -56,11 +56,12 @@ ModbusStatus mb_status();
 // `reg` is the synthetic def::HOMEHUB_GROUP_REG and `off` the EKRHH offset, which is what
 // logic/homehub_map.hpp pairs on.
 //
-// `live` reports whether the LINK was still up once the copy had been taken, and a caller that
-// publishes these rows must honour it: false means the rows may predate a disconnect and the
-// snapshot must not be served. It is an out-param rather than a separate mb_status() call because
-// that separate call is exactly the race — the cache and the link state are behind two mutexes, so
-// only the accessor can tie them into one answer.
+// `live` reports whether the LINK was still up once the copy had been taken AND whether the cache
+// was committed by that same TCP session. A caller that publishes these rows must honour it: false
+// means the rows may predate a disconnect/reconnect and the snapshot must not be served. It is an
+// out-param rather than a separate mb_status() call because that separate call is exactly the race
+// — the cache and link state are behind two mutexes, so only the accessor can tie them into one
+// generation-checked answer.
 size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live);
 
 // The cache's upper bound (def::HOMEHUB_REG_COUNT) — callers size their snapshot buffer from this.

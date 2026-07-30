@@ -51,6 +51,7 @@
 #include "logic/cop_scope.hpp"
 #include "logic/mqtt_uri.hpp"
 #include "logic/modbus.hpp"
+#include "logic/modbus_snapshot.hpp"
 #include "logic/query_flag.hpp"
 #include "logic/redact.hpp"
 #include "logic/config_store.hpp"
@@ -2828,6 +2829,19 @@ static void test_modbus() {
     CHECK(mb_first_homehub(names, 3) == 2);
     const char* none[] = {"daikin-altherma-esp32", "nas"};
     CHECK(mb_first_homehub(none, 2) == -1);
+}
+
+static void test_modbus_snapshot() {
+    using daik::logic::modbus_cache_is_live;
+    // A disconnected link never publishes, even if the cache and last session happen to match.
+    CHECK(!modbus_cache_is_live(false, 7, 7));
+    // The load-bearing reconnect case: /values copied session 7's cache, then session 8 connected
+    // before it sampled status. A boolean-only post-check says "live"; the generation check refuses
+    // the previous session's rows until session 8 has committed its own poll.
+    CHECK(!modbus_cache_is_live(true, 8, 7));
+    CHECK(modbus_cache_is_live(true, 8, 8));
+    // Generation zero is the pre-first-commit sentinel, not a coincidentally matching session.
+    CHECK(!modbus_cache_is_live(true, 0, 0));
 }
 
 // The HomeHub Modbus register profile (def/homehub.hpp) — the DECODE MECHANICS (scaling, special
@@ -7239,6 +7253,7 @@ int main() {
     test_mqtt_group();
     test_mqtt_uri();
     test_modbus();
+    test_modbus_snapshot();
     test_homehub();
     test_homehub_map();
     test_heartbeat();

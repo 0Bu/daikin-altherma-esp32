@@ -16,6 +16,7 @@
 #include "diag_log.hpp"
 #include "logic/detect_backoff.hpp"   // the SAME backoff the X10A sweep uses on a silent bus
 #include "logic/homehub_map.hpp"      // the concept a register pairs on
+#include "logic/modbus_snapshot.hpp"  // a cache is live only for the TCP session that committed it
 
 #include "esp_netif.h"
 #include "esp_task_wdt.h"
@@ -44,6 +45,7 @@ static constexpr int MB_READ_TIMEOUT_MS = 1500;
 // ── Link state (read by /status + heartbeat) ──────────────────────────────────────────────────────
 static SemaphoreHandle_t s_mtx = nullptr;   // guards s_status; created in mb_init()
 static ModbusStatus      s_status;          // guarded by s_mtx
+static uint32_t          s_link_generation = 0; // guarded by s_mtx; zero = no connected session yet
 
 // ── Poll-task-owned socket state (no lock — single owner, exactly like hp_comm.cpp's s_rx/s_tx) ─────
 static int         s_sock     = -1;   // open socket, or -1
@@ -58,6 +60,7 @@ static bool        s_have_req = false;// whether s_req_* describe the current so
 // readings on its next commit, which is precisely the coupling this design exists to avoid.
 static SemaphoreHandle_t s_cache_mtx = nullptr;
 static std::vector<CachedValue> s_cache;
+static uint32_t s_cache_generation = 0;      // guarded by s_cache_mtx; session that committed s_cache
 
 // Task handle + the connect backoff. A failed connect with no host configured is a ~3 s blocking
 // mDNS browse, so retrying every cycle would leave this task permanently blocked and the LAN
@@ -99,19 +102,17 @@ static void status_error(std::string msg) {
     s_status.discovering = false;
     s_status.last_error.swap(msg);
 }
-static void status_connected(std::string host, int port, int unit) {
+// A successful TCP connect starts a new SESSION, but does not make the old cache live. The link only
+// becomes `connected` after this session has committed its first poll below. Reserving generation
+// zero makes a pre-first-poll cache impossible to mistake for current even on the first connection.
+static void status_socket_open(std::string host, int port, int unit) {
     Lock lk(s_mtx);
     s_status.host.swap(host);
     s_status.port        = port;
     s_status.unit_id     = unit;
-    s_status.connected   = true;
+    s_status.connected   = false;
     s_status.discovering = false;
-    // CLEAR the last failure. It is not history, it is the REASON the link is down, and a live link
-    // has no reason. Measured on hardware: after a failed browse and a successful reconnect, /status
-    // reported connected:true beside error:"no HomeHub found (mDNS)" — evidence, in every bug report
-    // built from it, of a fault that had already resolved. clear() cannot allocate, so it is safe
-    // under the lock (the reason every writer here takes its string by value and swaps).
-    s_status.last_error.clear();
+    if (++s_link_generation == 0) ++s_link_generation;  // zero stays the "no session" sentinel
 }
 
 // ── Address resolution ──────────────────────────────────────────────────────────────────────────
@@ -272,7 +273,7 @@ static bool mb_ensure_connected(const std::string& host, int port, int unit_id) 
     }
     s_sock     = sock;
     s_have_req = true;
-    status_connected(std::move(resolved), port, unit_id);
+    status_socket_open(std::move(resolved), port, unit_id);
     return true;
 }
 
@@ -329,7 +330,6 @@ static bool mb_read(MbFunc space, uint16_t addr, uint16_t qty, MbResponse& out) 
     if (p == MbParse::Ok) {
         Lock lk(s_mtx);
         s_status.rx_ok++;
-        s_status.connected = true;
         return true;
     }
     // An Exception is a VALID reply (the register is simply unreadable now) — count it but keep the
@@ -364,6 +364,7 @@ static void mb_poll_once() {
         {
             Lock lk(s_cache_mtx);
             s_cache.clear();
+            s_cache_generation = 0;
         }
         { Lock lk(s_mtx); s_status.values = 0; }
         // Back off before retrying — see s_backoff. Applied by SKIPPING cycles, never by lengthening
@@ -373,6 +374,14 @@ static void mb_poll_once() {
         return;                                    // mb_ensure_connected already set the status
     }
     detect_backoff_step(s_backoff, true);          // connected — back to full cadence
+
+    // Owned by this poll task. A reconnect cannot happen again until this cycle returns, while the
+    // mutex makes the generation visible to concurrent /values snapshots without a data race.
+    uint32_t cycle_generation = 0;
+    {
+        Lock lk(s_mtx);
+        cycle_generation = s_link_generation;
+    }
 
     std::vector<CachedValue> fresh;
     fresh.reserve(def::HOMEHUB_REG_COUNT);
@@ -419,6 +428,7 @@ static void mb_poll_once() {
     {
         Lock lk(s_cache_mtx);
         s_cache = std::move(fresh);                // move-assign: steals the buffer, cannot throw
+        s_cache_generation = cycle_generation;
     }
     {
         Lock lk(s_mtx);
@@ -433,12 +443,18 @@ static void mb_poll_once() {
         // rather than a count of successful reads: a read can succeed and still yield no row (a
         // reply whose register word does not extract), so a read count over-reports by exactly the
         // rows nobody can see. Same quantity hp_stats().values reports for the X10A cache.
-        s_status.values = committed;
-        // A cycle that read everything CLEARS the last error. It used to latch, so a link that had
-        // recovered still reported "no HomeHub found (mDNS)" beside connected:true — evidence of a
-        // fault that had already resolved, carried into every bug report from then on.
-        if (!err.empty()) s_status.last_error.swap(err);
-        else              s_status.last_error.clear();
+        // Only a poll that still owns the current open socket can publish this session as live. A
+        // framing/transport failure closes it in mb_read and keeps connected=false; Modbus exception
+        // replies leave the socket open and commit the rows that really answered.
+        const bool current_session = s_sock >= 0 && s_link_generation == cycle_generation;
+        s_status.values = current_session ? committed : 0;
+        if (current_session) {
+            s_status.connected = true;
+            // CLEAR a recovered failure. It is not history, it is the reason the link is down; a
+            // committed live cycle has no stale reason. A per-register exception remains useful.
+            if (!err.empty()) s_status.last_error.swap(err);
+            else              s_status.last_error.clear();
+        }
     }
 }
 
@@ -495,7 +511,11 @@ static void mb_task(void*) {
         s_status.enabled = false;
         s_status.values  = 0;
     }
-    { Lock lk(s_cache_mtx); s_cache.clear(); }
+    {
+        Lock lk(s_cache_mtx);
+        s_cache.clear();
+        s_cache_generation = 0;
+    }
     diag_printf("modbus: no gateway address — stack stopped\n");
     esp_task_wdt_delete(NULL);
     s_task = nullptr;
@@ -554,10 +574,12 @@ size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live) {
     live = false;
     if (!s_cache_mtx) return 0;
     size_t n = 0;
+    uint32_t cache_generation = 0;
     {
         Lock lk(s_cache_mtx);
         n = s_cache.size() < max ? s_cache.size() : max;
         for (size_t i = 0; i < n; i++) out[i] = s_cache[i];
+        cache_generation = s_cache_generation;
     }
     // The link is re-read AFTER the copy, and that order is what makes the payload invariant TRUE
     // rather than merely intended. The cache and the link state sit behind two different mutexes,
@@ -565,16 +587,14 @@ size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live) {
     // down in between and the response still carries the previous session's rows under a guarantee
     // that they were read this cycle.
     //
-    // Reading it afterwards closes that window without nesting the two locks (which would create a
-    // lock order this file otherwise has none of). The argument is the write order on the task side:
-    // `connected = false` is always set BEFORE the cache is cleared — the clear happens on the next
-    // cycle's failed mb_ensure_connected — and the cache is only ever repopulated by a commit while
-    // reads are succeeding. So if the link still reads connected here, no clear can have preceded
-    // our copy, and the rows we hold belong to the session that is up now. If it does not, we say so
-    // and the caller omits the array entirely.
+    // Reading it afterwards closes the disconnect window without nesting the two locks. Comparing
+    // generations closes the opposite RECONNECT window as well: if this copy came from session N
+    // and session N+1 commits between the copy and this status read, connected may already be true
+    // again, but the generations differ and the caller still omits these old rows.
     {
         Lock lk(s_mtx);
-        live = s_status.connected;
+        live = logic::modbus_cache_is_live(
+            s_status.connected, s_link_generation, cache_generation);
     }
     return n;
 }

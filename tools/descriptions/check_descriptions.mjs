@@ -280,6 +280,20 @@ for (const [i, d] of table.entries()) {
   if (!matches) add('D002', String(d.re), `entry #${i} ${d.re} matches no catalog label`, String(d.what || '').slice(0, 80) + '…');
 }
 
+// D008 — some labels are semantic collisions, not missing copy: a broad earlier regex matches them,
+// but explains a DIFFERENT register. Marking their intended entry `exact:true` makes its precedence
+// enforceable instead of leaving the first-match rule as a comment the next table edit can violate.
+for (const [i, d] of table.entries()) {
+  if (d.exact !== true || !isRegExp(d.re)) continue;
+  for (const label of [...cat.labels.keys()].filter((l) => d.re.test(l))) {
+    const winner = firstMatch(label);
+    if (winner !== i) {
+      add('D008', label, `"${label}" is captured by entry #${winner} before exact entry #${i}`,
+          `move ${d.re} before ${table[winner]?.re || 'the broader match'}`);
+    }
+  }
+}
+
 // D003/D004 — entry shape. The UI renders `de` when the page is German and falls back to the
 // English row when it is absent, so a missing translation is not a crash: it is a German page that
 // silently prints English for one reading. Assert the shape instead of discovering it in the field.
@@ -349,6 +363,7 @@ console.error(
   '  D002 = an entry matches nothing any more (a renamed label left its regex behind).\n' +
   '  D003 = malformed entry.  D004 = missing/partial German copy.  D005 = stale ledger line.\n' +
   '  D006 = visible label still contains its value legend.  D007 = an unrelated label was changed.\n' +
+  '  D008 = an exact semantic description is shadowed by an earlier, broader regex.\n' +
   '  Order matters: a new entry must sit BEFORE any more general one it should out-rank (first match wins).\n' +
   `  A finding that is CORRECT as it stands goes in ${EXC} — copy its key: line, with a reason.`);
 process.exit(1);

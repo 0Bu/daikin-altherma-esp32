@@ -23,6 +23,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 
 const app = fs.readFileSync(new URL("../main/www/app.js", import.meta.url), "utf8");
+const index = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 
 // The arbitration helpers are one contiguous block. Extracting the REAL source rather than
 // re-implementing the rule is the whole point: a second copy of it would be a second thing to drift.
@@ -43,7 +44,8 @@ function span(start, end) {
 const SOURCE =
   span("const mbByConcept = (cid) =>", "// First matching description for a value label") +
   span("function mbNoteHtml(row, mb)", "// Description body: the plain") +
-  span("// The X10A row this target may present as a CURRENT reading", "// The reading of a /values row as one string");
+  span("// The X10A row this target may present as a CURRENT reading", "// The reading of a /values row as one string") +
+  span("const PEL_ESTIMATED_WHAT =", "\nconst INSPECT = {");
 
 // ── Fixtures ───────────────────────────────────────────────────────────────────────────────────
 // A /values X10A row and a HomeHub row, exactly as http_status.cpp serves them.
@@ -102,7 +104,8 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [] }) {
   // explicitly — the same trick test_ui_live_i18n.mjs uses for its production function.
   vm.runInContext(
     SOURCE + "\nthis.__api = { mbByConcept, mbTwin, mbFallbackFor, mbLive, mbBool, mbVal, stateOf," +
-    " MB_PAIRS, MB_OFF_POWER, mbPower, mbNoteHtml, inspCurRow, inspMember };",
+    " MB_PAIRS, MB_OFF_POWER, mbPower, mbForInspect, mbNoteHtml, inspCurRow, inspMember," +
+    " pelMeasured, pelApproxText, PEL_INSPECT };",
     context, { filename: "main/www/app.js" });
   return context.__api;
 }
@@ -320,6 +323,26 @@ const LWT_M = M(40, "Leaving water temp. (PHE)", "38.1", "leaving_water");
                               P(58, "Power limit (general)", "7.00")] });
   assert.equal(both.MB_OFF_POWER, 51, "the measured power is EKRHH input register 51");
   assert.equal(both.mbPower()?.value, "1.42", "the measurement is what is read");
+  assert.equal(both.mbForInspect("pel")?.label, "Power consumption",
+    "the measured schematic headline remains traceable to its Modbus register");
+
+  const measured = { pel: 1.42, pelSrc: "MB", pelHeld: false };
+  assert.equal(both.pelApproxText(measured), "", "a measured gateway value has no approximation mark");
+  assert.equal(both.PEL_INSPECT.t(measured).en, "Electrical input (measured)");
+  assert.equal(both.PEL_INSPECT.head(measured), "1.4 kW");
+  assert.match(both.PEL_INSPECT.what(measured).en, /MEASURED by the HomeHub/);
+  assert.match(both.PEL_INSPECT.now(measured).en, /Measured at the HomeHub/);
+
+  const estimated = { pel: 1.42, pelSrc: "INV", pelHeld: false };
+  assert.equal(both.pelApproxText(estimated), "≈ ", "an X10A current-derived value stays approximate");
+  assert.equal(both.PEL_INSPECT.t(estimated).en, "Electrical input (estimated)");
+  assert.equal(both.PEL_INSPECT.head(estimated), "≈ 1.4 kW");
+  assert.match(both.PEL_INSPECT.what(estimated).en, /ESTIMATE/);
+  // The actual SVG and renderer must consume the same source-aware prefix helper the assertions
+  // above exercise; otherwise a correct inspector could still leave the closed pill lying.
+  assert.match(index, /id="pelApprox"/);
+  assert.match(app, /setTxt\("pelApprox", pelApproxText\(d\)\)/);
+  assert.match(app, /pel:\s*PEL_INSPECT/);
 
   // 51 absent (sentinel / unread) with both limits valid — the case that produced the wrong number.
   const gone = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],

@@ -1,14 +1,16 @@
 # Modbus TCP — the Daikin HomeHub link
 
 > **Status: READ-ONLY, and that is a design stance, not a phase.** This firmware speaks Modbus TCP to
-> a **Daikin HomeHub (EKRHH)** as an *alternative* to the X10A service-port tap. It **reads**; it does
-> not write. There is no write function in `main/hp_modbus.cpp`, no command topic, no writable HA
-> entity and no HTTP endpoint that can set a pump register — verifiable by `grep`. An in-firmware
-> actuation path is planned separately (issue #32 P3) and is gated by the persisted
+> a **Daikin HomeHub (EKRHH)** as a second, independent source beside the X10A service-port tap. It
+> **reads**; it does not write. There is no write function in `main/hp_modbus.cpp`, no command topic,
+> no writable HA entity and no HTTP endpoint that can set a pump register — verifiable by `grep`.
+> An in-firmware actuation path is planned separately (issue #32 P3) and is gated by the persisted
 > `actuation_enabled` flag, which today gates nothing because nothing writes.
 >
-> **X10A remains the default.** A device only speaks Modbus if someone selects it in the web UI, and
-> switching back is one pick. See [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md) for the default link.
+> **X10A remains primary.** There is no selector between the sources: once a HomeHub address is
+> configured, both stacks run independently. X10A leads wherever both provide the same quantity;
+> Modbus stays visible as the labelled second reading and carries the fallback when X10A is offline.
+> See [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md) for the primary link.
 
 ## Why a second SOURCE at all
 
@@ -129,7 +131,7 @@ What that buys, concretely:
 
 | | X10A | Modbus (HomeHub) |
 |---|---|---|
-| Task | `hp_poll` (8192) | `hp_modbus` (6144, only when enabled) |
+| Task | `hp_poll` (8192) | `hp_modbus` (6144, only when an address is known or discovery is pending) |
 | Cache | `hp_values_snapshot()` | `mb_values_snapshot()` |
 | State | `/status.hp` | `/status.modbus` |
 | Rows | ~100 | ~23 |
@@ -175,11 +177,13 @@ arrived. That is a payload invariant worth stating, because it is the whole diff
 reading and a memory: **if the array is present, every row in it was read this cycle.** A consumer
 cannot tell a stale row from a fresh one by looking at it, so the guarantee has to live in the
 payload rather than in a check each client remembers to make. Liveness and the cache sit behind two
-different mutexes, so `mb_values_snapshot()` reports the link state *after* copying the cache — the
-only place the two can be tied into one answer. When it is not live the **key is omitted entirely**
-rather than emitted empty: an absent array and an empty one are different claims, and only absence
-says "no current reading". A device without a HomeHub therefore sees exactly the payload it saw
-before this feature existed.
+different mutexes, so every successful TCP connect gets a generation and every cache commit records
+the generation that produced it. `mb_values_snapshot()` reports live only when the post-copy link
+state is connected **and** its generation matches the copied cache. That closes both directions of
+the race: a disconnect after the copy, and a reconnect that becomes live after an old cache was
+copied. When it is not live the **key is omitted entirely** rather than emitted empty: an absent
+array and an empty one are different claims, and only absence says "no current reading". A device
+without a HomeHub therefore sees exactly the payload it saw before this feature existed.
 
 In the **web UI** (see [`DESIGN.md`](DESIGN.md)), X10A stays the prominent source everywhere and
 Modbus is marked in its own colour — a petrol token (`--src-mb`) that is neither a state colour
@@ -247,9 +251,9 @@ their credentials on the upgrade.
 > later number. A second, different "v4" would have decoded that language byte as a HomeHub setting
 > and switched a board onto a link it does not have, silently, on upgrade.
 
-**Applied live.** `POST /set_hp` persists and calls `mb_reconfigure()`, which starts the task if the
-HomeHub was just enabled and re-resolves the address if it changed. Disabling is handled *by* the task
-(it retires itself at the top of its next cycle), so the socket keeps exactly one owner.
+**Applied live.** `POST /set_hp` persists and calls `mb_reconfigure()`, which starts the task when a
+HomeHub address becomes known and re-resolves it if it changed. Clearing the address is handled *by*
+the task (it retires itself at the top of its next cycle), so the socket keeps exactly one owner.
 
 **Web UI:** the HomeHub appears as its own row in Settings → Connections — never folded into a
 combined link state with X10A, since either can be down alone and one merged "connected" would hide
