@@ -129,6 +129,11 @@ void config_load() {
         c.ntp_server = nvs_get_str("ntp_server", CONFIG_DAIKIN_NTP_SERVER);
         seed_board_defaults(c);   // the legacy layout never held these — Kconfig is all there is
     }
+    // Has the user STATED this hardware? (Config::board_user_set — the UI's licence to name the
+    // board.) A separate self-healing key rather than a blob field, for the reason given there; its
+    // absence is the honest answer for every device that predates it, since none of them recorded a
+    // statement. Read BEFORE the validation below, which can revoke it.
+    c.board_user_set = nvs_get_i32("board_set", 0) != 0;
     // Re-check the board-local pins on the way IN, for the same reason the X10A pair is re-checked
     // below: NVS holds whatever an older build, a different board's blob or a hand-crafted POST put
     // there, and both of these pins are DRIVEN (an output, or an input with a pull). A bad one is
@@ -144,6 +149,10 @@ void config_load() {
             diag_printf("config: persisted board hardware rejected (%s; led=%d type=%d btn=%d) "
                         "— using build defaults\n", why.c_str(), c.led_gpio, c.led_type, c.btn_gpio);
             seed_board_defaults(c);
+            // The statement is revoked WITH the values it was about: what is live now is the build's
+            // guess, not the user's. Leaving the flag set would let the modal name a board out of
+            // pins the device just refused to drive.
+            c.board_user_set = false;
             probe = c;
             probe.rx_pin = probe.tx_pin = -1;
             // A build whose OWN defaults don't validate is a misconfigured Kconfig, not user input.
@@ -263,6 +272,12 @@ bool config_save(const Config& c, bool require_link) {
     if (!link_ok)
         diag_printf("config: link-cache key write failed after the atomic blob save "
                     "(self-heals on the next detect; re-validated on load)\n");
+    // The "user stated the board hardware" flag (Config::board_user_set). Its own key, and its own
+    // failure handling: it changes nothing the device DOES, so a failed write must not turn an
+    // already-committed save into a 500. The UI simply falls back to naming the board "Custom".
+    if (!put_i32("board_set", c.board_user_set ? 1 : 0))
+        diag_printf("config: NVS write failed key=board_set "
+                    "(harmless — the Hardware modal falls back to \"Custom\")\n");
     if (!config_save_succeeded(/*blob_ok=*/true, link_ok, require_link)) {
         // /set_hp owns the link and cannot call this a save when its cache did not land. Do not
         // publish its requested pins to RAM or wake the poll task. (The atomic blob also landed, but

@@ -75,6 +75,25 @@ struct Config {
     bool        led_inverted   = false;   // true = active-low (drive LOW to light); GPIO type only
     int         btn_gpio       = -1;
     bool        btn_active_low = true;    // the usual wiring: pin to GND through the switch
+    // Did the USER state this hardware, or are these merely the build's defaults? The five values
+    // above cannot answer it: a fresh device is seeded from Kconfig, and those happen to EQUAL the
+    // XIAO preset — so "GPIO21, plain, active-low" is both what a XIAO owner deliberately saved and
+    // what nobody has said anything about. The web UI needs the difference to name the board in its
+    // preset dropdown without CLAIMING one nobody chose (#256), and without the opposite failure
+    // (#257): a modal that opens on "Custom" although the values are exactly the preset the user
+    // just saved, so re-picking their own board submits an unchanged form.
+    //
+    // NOT in the atomic config blob, unlike the five values it describes, and that is a decision
+    // rather than an oversight. The flag never NAMES a board — the UI derives the name from the live
+    // field values (syncPresetSelection) and this only decides whether a name may be shown at all —
+    // so a flag that drifted from the values cannot produce a WRONG board name, only the "Custom"
+    // the UI already falls back to. That removes the all-or-nothing argument that puts one-writer
+    // fields in the blob, and it avoids a blob version bump, which is not free here: two other
+    // branches already carry a v5 and a v6 blob, and a version a build does not know reads on the
+    // device as a wiped configuration (config_blob_deserialize refuses it, the legacy per-key
+    // fallback is empty, and the board comes up in the setup portal with its credentials intact but
+    // unread).
+    bool        board_user_set = false;
 
     // ── Auto-detected MODEL (not the link). Set by hp_detect.cpp; see logic/detect.hpp. ──
     // SESSION-ONLY: applied to the in-RAM config via config_set_model (apply_model, below) and NEVER
@@ -214,6 +233,29 @@ inline bool board_hw_valid(const Config& c, std::string& reason, int max_gpio = 
         if (c.btn_gpio == c.led_gpio)                      { reason = "btn_gpio and led_gpio must differ"; return false; }
     }
     return true;
+}
+
+// ── What POST /set_board actually has to DO ─────────────────────────────────────────────────────
+// TWO independent facts can move, and conflating them is what produced #257. The five HARDWARE
+// values decide whether a REBOOT is needed (both are claimed once at task start — the WS2812 opens
+// an RMT channel, the button installs a pull). Whether the user has STATED this hardware
+// (board_user_set) decides only what the modal may call the board next time, and needs no reboot at
+// all. Pure so the four combinations are asserted rather than re-derived at the route.
+//
+// The case that matters is `values same, not yet stated`: a XIAO owner picking "Seeed XIAO" on a
+// device still carrying the Kconfig defaults changes no value, so the old route answered
+// {"reboot":false} and saved NOTHING — the statement was dropped, the modal re-opened on "Custom",
+// and the user re-picked their board forever. It is a SAVE (persist the statement) with NO reboot.
+inline bool board_hw_same(const Config& a, const Config& b) {
+    return a.led_gpio == b.led_gpio && a.led_type == b.led_type && a.led_inverted == b.led_inverted &&
+           a.btn_gpio == b.btn_gpio && a.btn_active_low == b.btn_active_low;
+}
+// A reboot is owed to a HARDWARE change alone: recording the statement changes nothing a driver holds.
+inline bool board_reboot_needed(const Config& want, const Config& cur) { return !board_hw_same(want, cur); }
+// ...but a save is owed to either. `want.board_user_set` is true for every /set_board request (the
+// submit IS the statement), so this reduces to "the values moved, or we had not recorded it yet".
+inline bool board_save_needed(const Config& want, const Config& cur) {
+    return !board_hw_same(want, cur) || (want.board_user_set && !cur.board_user_set);
 }
 
 // Validate a config coming from the web UI. Returns false + a reason on the first problem. Pass the

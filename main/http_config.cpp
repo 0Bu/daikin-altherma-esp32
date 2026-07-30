@@ -476,6 +476,9 @@ static esp_err_t set_board(httpd_req_t* req) {
     c.btn_gpio       = ji(j, "btn_gpio", c.btn_gpio);
     c.btn_active_low = jb(j, "btn_active_low", c.btn_active_low);
     cJSON_Delete(j);
+    // Submitting this form IS the user stating their hardware — that is the whole content of the
+    // flag, so it is set for every accepted request rather than only when a value moved.
+    c.board_user_set = true;
 
     std::string reason;
     // Checks the pins against the chip AND against the X10A link in the same snapshot, so neither
@@ -483,13 +486,22 @@ static esp_err_t set_board(httpd_req_t* req) {
     if (!board_hw_valid(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi()))
         return send_err(req, "400 Bad Request", reason.c_str());
 
+    // Two independent questions, and answering them with ONE comparison is what made a XIAO owner's
+    // save vanish (#257): picking the preset your device already carries moves no VALUE, but it is
+    // still the first time anyone stated what this board is. board_save_needed/board_reboot_needed
+    // (logic/config_model.hpp, host-tested) keep them apart — persist the statement, but claim no
+    // reboot for it, since no driver's pin changed.
     const Config& cur = config();
-    if (c.led_gpio == cur.led_gpio && c.led_type == cur.led_type &&
-        c.led_inverted == cur.led_inverted && c.btn_gpio == cur.btn_gpio &&
-        c.btn_active_low == cur.btn_active_low)
-        return http_send_json(req, "{\"ok\":true,\"reboot\":false}");   // no change, no reboot
+    if (!board_save_needed(c, cur))
+        return http_send_json(req, "{\"ok\":true,\"reboot\":false}");   // nothing to write, no reboot
 
     if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    // Only the statement moved: persisted, but no driver's pin changed, so no reboot. `saved` is
+    // what keeps the ANSWER honest — {"reboot":false} alone makes the UI say "no changes", which
+    // would report a write to NVS as nothing having happened. Additive, so the four routes that
+    // never send it keep their exact contract.
+    if (!board_reboot_needed(c, cur))
+        return http_send_json(req, "{\"ok\":true,\"reboot\":false,\"saved\":true}");
     http_send_json(req, "{\"ok\":true,\"reboot\":true}");
     reboot_soon();
     return ESP_OK;
