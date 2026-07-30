@@ -1,7 +1,7 @@
 // Host logic tests for the IDF-free pure headers in main/logic/. One translation unit; run via
-// scripts/run-mock-tests.sh (cmake+ctest, or a direct g++/clang++ compile). CI's logic-test job
-// gates the firmware build on this. Add a CHECK here whenever you touch a converter / CRC / the
-// config model / a discovery payload — the riskiest, silently-wrong parts of the port.
+// scripts/run-mock-tests.sh (cmake+ctest, or a direct g++/clang++ compile). CI's gates job runs it
+// with coverage and gates the firmware build on this. Add a CHECK here whenever you touch a
+// converter / CRC / the config model / a discovery payload — the riskiest, silently-wrong parts.
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -3236,18 +3236,30 @@ static void test_http_body() {
 }
 
 static void test_uart_plan() {
-    CHECK(uart_plan(false, -1, -1, 44, 43) == UartAction::Install);   // cold start
+    // Volatile copies keep constexpr from folding every constant call away: the coverage gate must
+    // observe the production branches at runtime, not merely the CHECK expressions that name them.
+    const auto plan = [](bool inited, int cur_rx, int cur_tx, int new_rx, int new_tx) {
+        volatile bool runtime_inited = inited;
+        volatile int  runtime_cur_rx = cur_rx;
+        volatile int  runtime_cur_tx = cur_tx;
+        volatile int  runtime_new_rx = new_rx;
+        volatile int  runtime_new_tx = new_tx;
+        return uart_plan(
+            runtime_inited, runtime_cur_rx, runtime_cur_tx, runtime_new_rx, runtime_new_tx);
+    };
+
+    CHECK(plan(false, -1, -1, 44, 43) == UartAction::Install);   // cold start
     // Re-probing the SAME pins is a Noop — no delete, no reinstall, no heap.
-    CHECK(uart_plan(true, 44, 43, 44, 43) == UartAction::Noop);
+    CHECK(plan(true, 44, 43, 44, 43) == UartAction::Noop);
     // THE fix: the sweep's {44,43}<->{43,44} alternation is a genuine change -> Remap (uart_set_pin
     // only), NOT Install. This turns ~2 reinstalls/second into zero heap allocations.
-    CHECK(uart_plan(true, 44, 43, 43, 44) == UartAction::Remap);
-    CHECK(uart_plan(true, 43, 44, 44, 43) == UartAction::Remap);
+    CHECK(plan(true, 44, 43, 43, 44) == UartAction::Remap);
+    CHECK(plan(true, 43, 44, 44, 43) == UartAction::Remap);
     // A one-sided change (only rx, or only tx) is a Remap, never a false Noop.
-    CHECK(uart_plan(true, 44, 43, 44, 40) == UartAction::Remap);
-    CHECK(uart_plan(true, 44, 43, 40, 43) == UartAction::Remap);
+    CHECK(plan(true, 44, 43, 44, 40) == UartAction::Remap);
+    CHECK(plan(true, 44, 43, 40, 43) == UartAction::Remap);
     // Not-inited always installs, regardless of stale pin memory from a prior session.
-    CHECK(uart_plan(false, 44, 43, 44, 43) == UartAction::Install);
+    CHECK(plan(false, 44, 43, 44, 43) == UartAction::Install);
 }
 
 static void test_detect_backoff() {

@@ -1084,8 +1084,11 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
 - **The fast loop** — [`scripts/run-mock-tests.sh`](../scripts/run-mock-tests.sh) compiles + runs the
-  suite with the plain system toolchain (`cmake` + `g++`/`clang++`, one translation unit). This is the
-  real "run it and see" loop even in an environment that can't build firmware or USB-flash.
+  suite with the plain system toolchain (`g++`/`clang++`, one translation unit). CI additionally
+  enables gcov instrumentation and enforces at least 95% aggregate executable-line coverage over
+  `main/logic/` itself — never the test driver or generated profiles — with a selftest that proves
+  an empty report and a below-floor report fail closed. This is the real "run it and see" loop even
+  in an environment that can't build firmware or USB-flash.
 - **🧪 Metric identity is frozen** — a published row reaches VictoriaMetrics as
   `daikin_altherma_<group>_<object_id>` and Home Assistant as an entity keyed on the same slug, both
   derived from the row's **label**. Editing a label is therefore not cosmetic: it retires one series
@@ -1248,12 +1251,13 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   bumps are *not* in the never-auto-merge list ([`renovate.json`](../.github/renovate.json)), because
   unlike an ESP-IDF or esp-web-tools bump, a green build is genuine evidence for them.
 - **✅ CI gate order** ([`build.yml`](../.github/workflows/build.yml)): one fast, hardware-free
-  `gates` job runs first and the firmware build `needs` it — the host logic suite, the value-catalog
-  audit (§8), the value-description coverage audit, each audit's selftest, and the publish-side
-  checks (Pages publish, the Web Serial NVS plan, the publish-version gate); only then the esp32s3
-  firmware build → sign → merge → artifact upload. A decode/config/discovery regression, a value that
-  is well-formed but physically false, or a reading the UI can no longer explain fails in seconds,
-  not minutes. They are **steps of one job, never a job each** — Actions bills every **job** rounded
+  `gates` job runs first and the firmware build `needs` it — the host logic suite with its 95% line
+  floor, the value-catalog audit (§8), the value-description coverage audit, each audit's selftest,
+  and the publish-side checks (Pages publish, the Web Serial NVS plan, the publish-version gate);
+  only then the esp32s3 firmware build → sign → merge → artifact upload. A
+  decode/config/discovery regression, a value that is well-formed but physically false, or a reading
+  the UI can no longer explain fails in seconds, not minutes. They are **steps of one job, never a
+  job each** — Actions bills every **job** rounded
   up to a whole minute, so a handful of ~15-second checks cost one billed minute as steps and one
   minute *each* as jobs, while a step boundary names the failure just as precisely. (The list is
   deliberately not counted here: it grows, and a restated count is what goes stale — read the job.)
