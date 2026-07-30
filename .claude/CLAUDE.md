@@ -782,7 +782,22 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 (esp_core_dump_get_summary: crashed task/PC/backtrace/app-elf-sha) into a cached
                 CrashInfo (logic/crashinfo.hpp); read by /status.last_crash + the MQTT crash topic —
                 the summary is NEVER re-parsed on a request path (build_status_json is a request-path
-                builder; until the WebSocket push was removed it also ran on the poll task).
+                builder; until the WebSocket push was removed it also ran on the poll task). An ORPHAN
+                dump — one whose parsed app-elf-sha does not match the RUNNING build
+                (logic::coredump_is_foreign, host-tested) — is ERASED at capture and its summary
+                cleared: the coredump partition survives an OTA, and a panic that cannot write its own
+                dump leaves the previous build's in place, a valid image of another binary that passes
+                esp_core_dump_image_check() so `coredump` reads true and /status offers a download
+                espcoredump rejects on a SHA-256 mismatch (#215). Erasing it makes `coredump` mean "a
+                dump for THIS firmware is downloadable" and clears the slot for the next real panic;
+                the erase is conservative — foreign is declared only on PROOF (two present shas, a
+                meaningful common prefix, a mismatch), since erasing a dump that IS ours destroys the
+                one artifact a panic left. EXCEPTION: the `coredump` flag is re-read from flash per request (diag_crash_info_live()
+                — a 4-byte size-word read, NOT the summary parse), because /coredump?clear=1 can erase
+                the image mid-session; a cached flag would strand an uncleanable crash banner + a
+                download that 404s. mqtt_ha republishes the retained crash topic when the flag changes
+                — or when NOTABILITY does, which is the other write to this cache:
+                diag_crash_dismiss() (POST /crash/dismiss) erases the dump and then sets
                 EXCEPTION: the `coredump` flag is re-read from flash per request (diag_crash_info_live()
                 — a 4-byte size-word read, NOT the summary parse), because /coredump?clear=1 can erase
                 the image mid-session; a cached flag would strand an uncleanable crash banner + a
@@ -1343,7 +1358,11 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 prefixed by its block name, e.g. wifi_rssi/wifi_mac/bus_rx_received, not nested) + its
                 diagnostic HA discovery configs; crashinfo.hpp turns a captured CrashInfo (reset reason + core-dump
                 summary) into the last_crash JSON / MQTT crash payload + a paste-friendly text bundle,
-                and classifies which reset reasons are faults; board_pins.hpp = the ESP32-S3 CHIP-safe
+                classifies which reset reasons are faults, and carries coredump_is_foreign() — the rule
+                diag_crash.cpp uses to spot a dump left behind by another build (its app-elf-sha does
+                not match the running one) and erase it, so `coredump` never advertises a download
+                espcoredump rejects on a version mismatch (#215; declared foreign only on PROOF, since
+                the erase is destructive); board_pins.hpp = the ESP32-S3 CHIP-safe
                 X10A GPIOs (the RX/TX pin-picker dropdown when detection hasn't locked the pins) —
                 minus flash/strapping/USB-JTAG/JTAG always, minus GPIO33-37 when the build runs Octal
                 flash/PSRAM, and minus the pins the firmware itself drives (ReservedPins: the status
