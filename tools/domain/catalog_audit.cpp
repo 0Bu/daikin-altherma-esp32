@@ -18,6 +18,7 @@
 //   SPEC-CONV    a row whose label the spec knows must decode the way the spec says.
 //   SPEC-LAYOUT  a row on a SHARED page must match some spec entry at its (reg, offset).
 //   CONSENSUS    a row that contradicts the same-named row in the rest of the catalog.
+//   LABEL-UNIT   one wire field described by two different physical UNITS across the catalog.
 //   SEMANTICS    a non-temperature quantity published as a temperature (HA device_class).
 //   OVERLAP      two rows in one register whose byte windows partially collide.
 //
@@ -43,6 +44,7 @@
 #include "def/overlay.hpp"
 #include "def/registry.hpp"
 #include "logic/convert.hpp"
+#include "logic/discovery.hpp"   // object_id / group_for_page — a label IS an identifier (#217)
 
 using namespace daik;
 
@@ -141,6 +143,48 @@ std::vector<std::string> split_row(const std::string& line) {
 bool all_digits(const std::string& s) {
     return !s.empty() && std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isdigit(c); });
 }
+
+// ── The unit word inside a label ───────────────────────────────────────────────────────────────
+// A parenthesised token naming a physical unit — what check_label_unit compares. Everything else a
+// label puts in brackets is deliberately NOT here: a sensor tag ("(R1T)"), a circuit selector
+// ("(main)", "(add)"), an accessory code ("(DLWA2)"), the saturation-temperature marker "(T)" and an
+// encoding note ("(0:max-100:stop)") all say WHICH instance or HOW it is encoded, never what is
+// measured. A vocabulary rather than a pattern, because the finding asserts a physical claim: an
+// unrecognised bracket is left alone instead of guessed at.
+struct UnitTok {
+    bool        found = false;
+    std::string raw, unit;
+};
+
+UnitTok unit_token(const std::string& label) {
+    static const std::set<std::string> UNITS = {
+        "step", "pls", "pulse", "rpm", "rps", "hz", "a", "ma", "v", "w", "kw", "kwh",
+        "bar", "kpa", "mpa", "l/min", "l/h", "m3/h", "%", "°c", "k", "min", "s", "h",
+    };
+    UnitTok out;
+    for (size_t p = 0; (p = label.find('(', p)) != std::string::npos;) {
+        size_t e = label.find(')', p + 1);
+        if (e == std::string::npos) break;
+        std::string raw = label.substr(p + 1, e - p - 1);
+        p               = e + 1;
+        std::string n;
+        for (unsigned char c : raw) n += static_cast<char>(std::tolower(c));
+        size_t a = n.find_first_not_of(" \t");
+        size_t b = n.find_last_not_of(" \t");
+        if (a == std::string::npos) continue;
+        n = n.substr(a, b - a + 1);
+        // A SCALED unit is the same quantity: "10 rpm" is rpm, and the disagreement worth reporting
+        // is rpm-vs-step, never 10 rpm-vs-rpm (which would be a resolution difference, not a
+        // different measurand).
+        size_t sp = n.find(' ');
+        if (sp != std::string::npos && all_digits(n.substr(0, sp))) n = n.substr(sp + 1);
+        if (!UNITS.count(n)) continue;
+        out = {true, raw, n};
+        return out;
+    }
+    return out;
+}
+
 
 // Parse docs/REGISTERS.md §5: "#### Register `0xNN`" sections of
 // "| Off | Len | Conv | Bit | Type | Value |" tables. Only §5 is read; earlier sections hold
@@ -493,7 +537,114 @@ void check_consensus(const std::vector<Row>& rows, std::vector<Finding>& out) {
     }
 }
 
-// ── Check 4: SEMANTICS — what Home Assistant is told this value IS ────────────────────────────
+// ── Check 4: LABEL-UNIT — one wire field described by two different physical units ─────────────
+// The label is not prose. ha_slug() turns it into the Home Assistant entity id AND the
+// VictoriaMetrics series suffix (logic/discovery.hpp; test_metric_identity pins the whole set), so
+// the UNIT WORD inside a label is a published claim about what the field measures.
+//
+// Page 0x30 offset 1 (conv 211) is spelled "Fan 1 (step)" on 22 profiles and "Fan 1 (10 rpm)" on
+// four (#230) — same converter, same width, same type code, and three of the four call the
+// NEIGHBOURING byte "Fan 2 (step)". Two fans on one outdoor unit are not measured in different
+// quantities by the same converter, so at most one spelling is true; the false one publishes
+// `actuators_fan_1_10_rpm`, where a reader takes a 30 for 300 rpm rather than step 30. That is the
+// #35-#39 shape (well-formed, spec-conformant byte layout, audit-clean, and false) carried by a
+// label instead of a converter.
+//
+// No other check here can see it. SPEC-CONV matches BY label, so a divergent label simply misses the
+// spec entry and stays silent; SPEC-LAYOUT is satisfied (conv + width do match the spec at that
+// offset); CONSENSUS groups BY label, so the two spellings never meet. #217's identity gate freezes
+// the identifier SET, and both spellings are already in it.
+//
+// Decided on the UNIT alone, never on the rest of the label. The catalog legitimately spells one
+// quantity several ways per family (docs/REGISTERS.md:196-200) — "[HPSU] Tv inflow Temp  (R1T)" and
+// "Leaving water temp. before BUH (R1T)" are the same sensor named by two product families — so a
+// check on label TEXT would demand uniform prose the source data does not have. A physical unit is
+// different: it names the QUANTITY, and one field cannot carry two.
+void check_label_unit(const std::vector<Row>& rows, const std::vector<SpecRow>& spec,
+                      std::vector<Finding>& out) {
+    struct Variant {
+        std::string             unit, raw;
+        std::vector<const Row*> rows;
+    };
+    std::map<std::string, std::vector<Variant>> groups;         // wire field -> unit variants
+
+    // Oracle: the spec's own label at this (reg, offset), where §5 names a unit there.
+    std::map<std::string, const SpecRow*> spec_at;
+    for (const auto& s : spec)
+        if (unit_token(s.label).found) spec_at.emplace(hex2(s.reg) + "+" + std::to_string(s.off), &s);
+
+    // Grouped by the WHOLE wire field: two rows that decode differently are a different question,
+    // and SPEC-CONV / CONSENSUS already ask it.
+    for (const auto& r : rows) {
+        UnitTok u = unit_token(r.def.label);
+        if (!u.found) continue;
+        std::string k = hex2(r.def.reg) + "+" + std::to_string(r.def.offset) + ":" +
+                        std::to_string(r.def.conv) + "/" + std::to_string(r.def.size) + "/" +
+                        std::to_string(r.def.type);
+        auto& vs = groups[k];
+        auto  it = std::find_if(vs.begin(), vs.end(),
+                                [&](const Variant& v) { return v.unit == u.unit; });
+        if (it == vs.end()) vs.push_back({u.unit, u.raw, {&r}});
+        else                it->rows.push_back(&r);
+    }
+
+    for (auto& [k, vs] : groups) {
+        (void)k;
+        if (vs.size() < 2) continue;
+        std::sort(vs.begin(), vs.end(),
+                  [](const Variant& a, const Variant& b) { return a.rows.size() > b.rows.size(); });
+
+        const ValueDef& field = vs[0].rows.front()->def;
+        std::string     want, why;
+        auto            sit = spec_at.find(hex2(field.reg) + "+" + std::to_string(field.offset));
+        if (sit != spec_at.end()) {
+            const std::string su = unit_token(sit->second->label).unit;
+            // Only when the spec agrees with SOME spelling. A spec unit matching neither would make
+            // every row here a finding on the strength of one table entry — and a whole field
+            // contradicting the spec is SPEC-CONV / SPEC-LAYOUT's question, not this one.
+            bool present = std::any_of(vs.begin(), vs.end(),
+                                       [&](const Variant& v) { return v.unit == su; });
+            if (present) {
+                want = su;
+                why  = "docs/REGISTERS.md:" + std::to_string(sit->second->line) + "  \"" +
+                      sit->second->label + "\"";
+            }
+        }
+        if (want.empty()) {
+            // A tie is a genuine split, not a minority — there is no majority to appeal to.
+            if (vs[0].rows.size() == vs[1].rows.size()) continue;
+            want = vs[0].unit;
+            why  = std::to_string(vs[0].rows.size()) + " profile(s) spell this field \"" +
+                  vs[0].raw + "\"";
+        }
+
+        for (const auto& v : vs) {
+            if (v.unit == want) continue;
+            for (const Row* r : v.rows) {
+                Finding f;
+                f.code = "LABEL-UNIT";
+                f.sev  = "HIGH";
+                f.key  = finding_key(f.code, r->profile, r->def.reg, r->def.offset, r->nlabel);
+                f.head = r->profile + "  " + hex2(r->def.reg) + "+" +
+                         std::to_string(r->def.offset) + "  \"" + r->def.label + "\"";
+                f.detail.push_back("this row: unit \"" + v.raw + "\"   (conv " +
+                                   std::to_string(r->def.conv) + " size " +
+                                   std::to_string(r->def.size) + " type " + type_name(r->def.type) +
+                                   ")");
+                f.detail.push_back("expected: unit \"" + want + "\"   — " + why);
+                f.detail.push_back("one field cannot be two quantities: same converter, same width,");
+                f.detail.push_back("same type code, so at most one of these spellings is true.");
+                // The consequence, spelled out — the label IS the identifier (#217/#221).
+                f.detail.push_back("publishes: " + std::string(group_for_page(r->def.reg)) + "_" +
+                                   object_id(r->def.label) + "   (HA entity id + VictoriaMetrics" +
+                                   " series suffix)");
+                out.push_back(f);
+            }
+        }
+    }
+}
+
+// ── Check 5: SEMANTICS — what Home Assistant is told this value IS ────────────────────────────
 // type 1 makes discovery.hpp stamp device_class:temperature + unit °C on the entity. A valve
 // position, a step count or a pulse counter carrying type 1 becomes a phantom temperature sensor.
 // Deliberately conservative: it fires only on POSITIVE evidence of a non-temperature quantity —
@@ -529,7 +680,7 @@ void check_semantics(const std::vector<Row>& rows, std::vector<Finding>& out) {
     }
 }
 
-// ── Check 5: OVERLAP — two rows fighting over the same wire bytes ─────────────────────────────
+// ── Check 6: OVERLAP — two rows fighting over the same wire bytes ─────────────────────────────
 // Two rows may share a field ON PURPOSE, and both legitimate shapes start at the SAME offset:
 //   • identical window — one field, two views (raw pressure + its saturation temperature);
 //   • nested window — mutually exclusive per-accessory variants of one field. The spec itself
@@ -628,6 +779,7 @@ int main(int argc, char** argv) {
     check_spec_conv(rows, spec, f);
     check_spec_layout(rows, spec, f);
     check_consensus(rows, f);
+    check_label_unit(rows, spec, f);
     check_semantics(rows, f);
     check_overlap(rows, f);
 

@@ -46,9 +46,12 @@ extraction, the config model and the Home Assistant discovery payloads. Details 
 > valve *position* reached Home Assistant as a 12800 °C temperature sensor. The audit runs the real
 > converters over the real catalog and cross-checks [`docs/REGISTERS.md`](docs/REGISTERS.md).
 
-If you touch the audit itself, also run `tools/domain/selftest.sh` — it re-introduces the four bugs
-the audit was built for into a throwaway copy and asserts all four are still caught. A checker that
-has stopped checking turns "clean" from evidence into a lie.
+If you touch the audit itself, also run `tools/domain/selftest.sh` — it re-introduces every defect
+the audit was built for into a throwaway copy and asserts each is still caught (the four shipped
+decode bugs, plus a fan **step** mislabelled as a **rate**: the label becomes the Home Assistant
+entity id and the VictoriaMetrics series name, so a wrong unit word publishes a wrong quantity while
+the decode itself is correct). A checker that has stopped checking turns "clean" from evidence into
+a lie.
 
 `run-description-audit.sh` asks the same kind of question one layer up. Every reading reaches the
 web UI's value list as a row keyed by its catalog **label**, and tapping that row is meant to open a

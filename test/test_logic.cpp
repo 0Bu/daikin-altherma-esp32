@@ -2,6 +2,7 @@
 // scripts/run-mock-tests.sh (cmake+ctest, or a direct g++/clang++ compile). CI's logic-test job
 // gates the firmware build on this. Add a CHECK here whenever you touch a converter / CRC / the
 // config model / a discovery payload — the riskiest, silently-wrong parts of the port.
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -5737,6 +5738,165 @@ static void test_metric_identity() {
     CHECK(reused == ledger);
 }
 
+// ── Which identifiers a TIE-BREAK decides (#230 B) ───────────────────────────────────────────────
+// test_metric_identity() above freezes the identifier set the WHOLE catalog produces. This asks the
+// question that leaves open, and it is the one a device owner has: does THIS unit still publish the
+// identifiers it published yesterday?
+//
+// Detection resolves a fingerprint to a candidate SET and then picks one representative
+// (detect_best: page overlap -> kW class -> tightest class -> first in signature order, i.e. in
+// REGISTRY ORDER). On the live 8 kW unit three of the five survivors are REGISTER-EQUIVALENT —
+// byte-identical (reg, offset, conv, size, type) rows — so which one wins changes not one decoded
+// value. It changes the LABELS, and a label is the HA entity id plus the VictoriaMetrics series
+// suffix. `altherma_ebla_edla_d_series_4_8kw_monobloc` and
+// `altherma_erga_d_ehv_ehb_ehvz_dj_series_04_08_kw` differ in exactly one row — the fan step of
+// #230 A — so the unit publishes `actuators_fan_1_step` or `actuators_fan_1_10_rpm` depending on
+// nothing but the order profiles happen to sit in the registry. Add, remove or reorder a profile —
+// none of which is a suspicious act — and the old series stops receiving samples while a new one
+// starts at zero. That is #217's silent fork, and a counter resetting to zero is exactly the event
+// these rows exist to report, so it reads as the plant going quiet rather than as a rename.
+//
+// #217's gate cannot catch it BY CONSTRUCTION: both spellings are already in its frozen set, so a
+// tie-break flip introduces no new identifier and the suite stays green while the device's own
+// series changes underneath it. It answers "does the catalog still produce this identifier set?",
+// never "can a tie-break move which identifier a unit publishes?".
+//
+// The property actually wanted is that register-equivalent profiles agree on what they publish —
+// then a tie-break can never move an identifier. Measured over the detectable catalog: TWELVE
+// equivalence classes exist and SIX violate it, so this is a class of hazard, not one instance. They
+// are not all defects, and the difference is a judgement rather than something a test can settle:
+//   • #230 A's fan step — one spelling is simply false (`actuators_fan_1_step` vs `…_fan_1_10_rpm`);
+//   • one sensor named by two product FAMILIES — the ECH2O tank models call leaving water
+//     "[HPSU] Tv inflow Temp  (R1T)", the standard ones "Leaving water temp. before BUH (R1T)".
+//     Both are true of their own product, and docs/REGISTERS.md:196-200 says to expect exactly this;
+//   • and the sharpest one, which is not a rename at all: the non-hybrid
+//     `altherma_erga_d_ehv_ehb_ehvz_da_series_04_08kw` marks the page-0x64 boiler rows `no_publish`
+//     (value_def.hpp's detect-only rows) while its two register-equivalent neighbours publish them.
+//     A tie-break there decides whether EIGHT `hybrid_*` entities exist on that unit at all — an
+//     appearing or disappearing entity, not a moved one. Which is why `no_publish` is deliberately
+//     NOT part of the equivalence key: it is not a wire fact, and folding it in would split that
+//     class and hide the strongest case this test has.
+// Whether a given divergence is a defect or a family spelling stays a judgement; whether a NEW one
+// appeared is not, and that is what this freezes.
+//
+// Keyed on the SORTED multiset of wire fields, not the row order: two profiles listing the same
+// fields in a different order are register-equivalent too, and a tie-break between them moves an
+// identifier just the same.
+static void test_tie_break_identity() {
+    // Every identifier whose publication depends on WHICH register-equivalent profile detection
+    // happens to pick. Adding an entry means a new tie-break-decided series — say why in the commit
+    // message. Removing one means the divergence is gone: either the generator now agrees (#230 A,
+    // and the audit ledger entry goes with it) or a profile left the class.
+    static const char* const TIE_BREAK_DECIDED[] = {
+    "actuators_fan_1_10_rpm",
+    "actuators_fan_1_step",
+    "hybrid_2nd_domestic_hot_water_temperature",
+    "hybrid_be_cop",
+    "hybrid_boiler_dhw_demand",
+    "hybrid_boiler_heating_target_temp",
+    "hybrid_boiler_operation_demand",
+    "hybrid_hybrid_heating_target_temp",
+    "hybrid_hybrid_op_mode",
+    "hybrid_mixed_water_temp",
+    "hydronic_temps_hpsu_tr_return_temp_r4t",
+    "hydronic_temps_hpsu_tv_inflow_temp_r1t",
+    "hydronic_temps_hpsu_tvbh_inflow_temp_after_buffer_buh_r2t",
+    "hydronic_temps_inlet_water_temp_r4t",
+    "hydronic_temps_leaving_water_temp_after_buh_r2t",
+    "hydronic_temps_leaving_water_temp_before_buh_r1t",
+    "mains_current_hpsu_mixed_leaving_water_temperature_after_the_tank_r7t_dlwa2",
+    "mains_current_mixed_water_temp_r7t",
+    "mixing_ekmik_bizone_kit_mixed_leaving_water_temperature_r1t",
+    "mixing_mixed_water_temp",
+    "outdoor_sensors_discharge_pipe_temp",
+    "outdoor_sensors_discharge_pipe_temp_r2t",
+    "outdoor_sensors_heat_exchanger_mid_temp",
+    "outdoor_sensors_heat_exchanger_mid_temp_r5t",
+    "outdoor_sensors_liquid_pipe_temp_r6t",
+    "outdoor_sensors_liquid_temperature_r3t",
+    "outdoor_sensors_low_pressure",
+    "outdoor_sensors_low_pressure_t",
+    "outdoor_sensors_o_u_heat_exch_temp",
+    "outdoor_sensors_o_u_heat_exch_temp_r4t",
+    "outdoor_sensors_pressure",
+    "outdoor_sensors_pressure_t",
+    "outdoor_sensors_suction_pipe_temp",
+    "outdoor_sensors_suction_pipe_temp_r3t",
+    "outdoor_state_target_discharge_temp",
+    "outdoor_state_target_evap_temp",
+    };
+    static const size_t TIE_BREAK_DECIDED_N = sizeof(TIE_BREAK_DECIDED) / sizeof(TIE_BREAK_DECIDED[0]);
+
+    // profile -> the identifiers it publishes; keyed by its wire-field multiset.
+    std::map<std::vector<std::string>, std::map<std::string, std::set<std::string>>> classes;
+    for (const auto& p : def::profiles) {
+        if (!def::is_detection_model(p.id)) continue;      // `generic` + the fixture are never picked
+        const logic::ProfileView view = def::resolved(p);
+        std::vector<std::string>  field;                   // the WIRE, label-free
+        std::set<std::string>     ids;                     // what it publishes
+        for (size_t i = 0; i < view.count(); i++) {
+            const ValueDef d = logic::adjudicated(view[i]);
+            char           f[48];
+            std::snprintf(f, sizeof(f), "%02X/%d/%d/%d/%d", d.reg, (int)d.offset, d.conv, (int)d.size,
+                          d.type);
+            field.push_back(f);
+            if (!row_publishable(d) || !conv_publishable(d.conv) || object_id(d.label).empty())
+                continue;
+            ids.insert(row_object_id(d));
+        }
+        std::sort(field.begin(), field.end());
+        classes[field][p.id] = ids;
+    }
+
+    std::set<std::string>              decided;            // ids a tie-break can move
+    std::map<std::string, std::string> carried_by;          // ...and which class member carries each
+    int                                equiv_classes = 0, divergent_classes = 0;
+    for (const auto& [field, members] : classes) {
+        (void)field;
+        if (members.size() < 2) continue;                  // nothing to tie-break between
+        equiv_classes++;
+        std::set<std::string> all, common = members.begin()->second;
+        for (const auto& [id, ids] : members) {
+            (void)id;
+            all.insert(ids.begin(), ids.end());
+            std::set<std::string> keep;
+            std::set_intersection(common.begin(), common.end(), ids.begin(), ids.end(),
+                                  std::inserter(keep, keep.end()));
+            common = keep;
+        }
+        std::set<std::string> diff;
+        std::set_difference(all.begin(), all.end(), common.begin(), common.end(),
+                            std::inserter(diff, diff.end()));
+        if (diff.empty()) continue;                        // identifier-equivalent: the safe shape
+        divergent_classes++;
+        decided.insert(diff.begin(), diff.end());
+        // A bare identifier tells the next person nothing: the whole point is to make the tie-break
+        // legible, so record WHICH register-equivalent profiles it hangs on.
+        for (const auto& d : diff) {
+            std::string on, off;
+            for (const auto& [id, ids] : members) (ids.count(d) ? on : off) += " " + id;
+            carried_by[d] = "on" + on + "   |   absent on" + off;
+        }
+    }
+
+    std::set<std::string> expected(TIE_BREAK_DECIDED, TIE_BREAK_DECIDED + TIE_BREAK_DECIDED_N);
+    CHECK(expected.size() == TIE_BREAK_DECIDED_N);          // no duplicate literal above
+    for (const auto& d : decided)
+        if (!expected.count(d))
+            std::printf("  tie-break can now move: %s\n      %s\n", d.c_str(),
+                        carried_by[d].c_str());
+    for (const auto& e : expected)
+        if (!decided.count(e)) std::printf("  no longer tie-break-decided: %s\n", e.c_str());
+    CHECK(decided == expected);
+
+    // Non-vacuity: the catalog really does carry register-equivalent profiles, so a future refactor
+    // that made every class a singleton (or stopped resolving labels) would fail here rather than
+    // report a clean sweep of nothing.
+    CHECK(equiv_classes >= 8);
+    CHECK(divergent_classes >= 1);
+    CHECK(divergent_classes < equiv_classes);              // ...and most classes ARE safe today
+}
+
 // ── Entity identity: no two announced entities may share a uniq_id (#221) ───────────────────────
 // Home Assistant keys its entity registry on `uniq_id` and its discovery on the retained config
 // TOPIC. Both are FLAT namespaces — while a catalog row's label is only unique within its register
@@ -6316,6 +6476,7 @@ int main() {
     test_ota_channel();
     test_profile_view();
     test_metric_identity();
+    test_tie_break_identity();
     test_entity_identity();
     test_feature_gate();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }

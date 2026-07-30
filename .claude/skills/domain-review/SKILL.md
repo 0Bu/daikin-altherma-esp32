@@ -59,6 +59,7 @@ what the value *should* read, and what this row makes of it.
 | `SPEC-CONV` | The spec names this value; this row decodes it differently. |
 | `SPEC-LAYOUT` | On a shared outdoor page, the spec says a different field lives at this offset. |
 | `CONSENSUS` | The rest of the catalog decodes this same value differently. |
+| `LABEL-UNIT` | One wire field, two different physical units in its label across the catalog — the label is the HA entity id and the VictoriaMetrics series suffix, so a false unit word publishes a false quantity (#230). Compared on the UNIT alone: per-family *naming* differences are expected and never reported. |
 | `SEMANTICS` | A non-temperature (valve position, step, pulse count) is typed °C — HA gets a phantom temperature entity. |
 | `OVERLAP` | Two rows straddle each other's bytes: one value is fabricated, the other lost. |
 

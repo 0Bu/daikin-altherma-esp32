@@ -3,9 +3,10 @@
 #
 # A checker that has quietly stopped checking is worse than no checker — it converts "the audit is
 # clean" from evidence into a lie, and this gate exists precisely because plausible-but-wrong
-# passes unnoticed. So the four decode defects that actually shipped on main (issues #35-#38) are
-# re-introduced here, one at a time, into a THROWAWAY COPY of the catalog. Each must be caught.
-# The working tree is never touched.
+# passes unnoticed. So every defect this gate was built to catch — the four decode bugs that actually
+# shipped on main (issues #35-#38) and the mislabelled fan step of #230 — is re-introduced here, one
+# at a time, into a THROWAWAY COPY of the catalog. Each must be caught. The working tree is never
+# touched.
 #
 # This is the audit's own regression test — the same argument test/test_logic.cpp makes for the
 # converters, applied to the checker itself. Run it whenever a check in catalog_audit.cpp changes:
@@ -64,7 +65,7 @@ run_case() {
     pass=$((pass + 1))
 }
 
-echo "domain-audit selftest — re-introducing the four shipped decode bugs"
+echo "domain-audit selftest — re-introducing the defects this gate was built to catch"
 
 # #35 — "Mixed water temp." decoded signed-LE x0.1 (conv 105) instead of signed-BE x0.01 (118).
 #       Shipped in 8 profiles; published -971.5 °C for a real 35.46 °C.
@@ -109,6 +110,20 @@ p=os.environ["FILE"]; s=open(p).read()
 old="{0x10, 6, 114, 2, 1, \"Target Evap. Temp.\"}"
 assert old in s, "row not found"
 open(p,"w").write(s.replace(old,"{0x10, 6, 105, 2, 1, \"Target Evap. Temp.\"}"))
+'
+
+# #230 — a fan STEP spelled as a RATE. The row decodes correctly and sits at the documented offset
+#        with the documented converter, so every other check is satisfied; what is false is the
+#        UNIT inside the label, which ha_slug() turns into the published identifier. Seeded on
+#        offset 2 (Fan 2) rather than the four live "Fan 1 (10 rpm)" rows, because those are on
+#        record in audit_exceptions.txt and a self-test must not depend on a suppressed finding.
+run_case "#230 fan step spelled as a rate" "altherma_ebla_edla_d_series_9_16kw_monobloc.hpp" \
+    "LABEL-UNIT" "Fan 2 (rps)" '
+import os
+p=os.environ["FILE"]; s=open(p).read()
+old="{0x30, 2, 211, 1, -1, \"Fan 2 (step)\"}"
+assert old in s, "row not found"
+open(p,"w").write(s.replace(old,"{0x30, 2, 211, 1, -1, \"Fan 2 (rps)\"}"))
 '
 
 echo
