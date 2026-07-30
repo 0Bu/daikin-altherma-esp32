@@ -54,7 +54,7 @@ bool hp_uart_init(int rx, int tx) {
         return true;
     }
     }
-    return false;   // unreachable — satisfies -Werror=return-type (main/ builds -Werror)
+    return false;   // unreachable — satisfies -Werror=return-type (pinned in main/CMakeLists.txt)
 }
 
 void hp_uart_deinit() {
@@ -62,12 +62,29 @@ void hp_uart_deinit() {
 }
 
 int hp_query(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen) {
+    // The buffer has to hold the reply we are about to ASK FOR. Checked before the request goes out
+    // rather than while parsing it: there is no point putting a query on the bus whose answer we
+    // would have to abandon, and the answer is knowable here.
+    //
+    // This cannot fire today — reply_len() maxes at 18 and both call sites pass 64 bytes — and that
+    // is exactly why it is worth stating. It was an invariant held across three files by agreement,
+    // and the loop below is not self-protecting the way it looks: the write is guarded per byte, but
+    // `len` counts every byte RECEIVED whether or not it was stored, so a replyLen past buflen ends
+    // in crc_ok(buf, len) reading past the end of the buffer. An out-of-bounds READ that the
+    // per-byte write guard cannot prevent, and that no static analyser finds either, since it needs
+    // the caller's buffer size and the register table at once. One local check retires it.
+    int replyLen = reply_len(reg, proto);
+    if (!reply_len_fits(replyLen, buflen)) {
+        diag_printf("HP reply buffer too small for reg 0x%02x: need %d, have %u (rx=%d tx=%d)\n",
+                    reg, replyLen, static_cast<unsigned>(buflen), s_rx, s_tx);
+        return -1;
+    }
+
     uint8_t req[4];
     int qlen = build_request(reg, proto, req);
     uart_flush_input(PORT);
     uart_write_bytes(PORT, reinterpret_cast<const char*>(req), qlen);
 
-    int replyLen = reply_len(reg, proto);
     int len = 0;
     const int64_t start = esp_timer_get_time();
     const int64_t TIMEOUT_US = 300000;   // serial reply timeout (300 ms)
@@ -79,9 +96,9 @@ int hp_query(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen) {
             len++;
             if (proto == Protocol::I && len == 3) {
                 replyLen = reply_len_dynamic(buf);
-                if (!is_valid_dynamic_len(replyLen, buflen)) {
+                if (!reply_len_fits(replyLen, buflen)) {
                     diag_printf("HP invalid dynamic reply len %d (max %u) on reg 0x%02x (rx=%d tx=%d)\n",
-                                replyLen, buflen, reg, s_rx, s_tx);
+                                replyLen, static_cast<unsigned>(buflen), reg, s_rx, s_tx);
                     return -1;
                 }
             }

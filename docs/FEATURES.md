@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte — it both ranks the representative and **narrows the candidate set**, dropping only classes that contradict it, **retried page probe + a second-sweep confirmation** before falling back to `generic`) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1807 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1809 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -86,6 +86,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 56 | **Group-scoped HA entity identity** — a value's `uniq_id` *and* the last segment of its discovery topic are `<group>_<object_id>`, not the label slug alone. Both are **flat** namespaces while a label is unique only within its register page, and the catalog carries *"Error Code"* on the outdoor page and on the hydronic one — so the second discovery config landed on the first one's retained topic under the first one's id, HA created **one** entity, and a unit reporting two faults showed one of them. Measured: 44 of 45 profiles collided, over five label slugs; on the live unit the surviving `error_code` entity read the *hydronic* fault, leaving the outdoor unit's — the row an automation alerts on — with no entity at all. Nothing errored, because the state payload was correct throughout (it nests by group), which is why this was invisible outside Home Assistant. The state key and the VictoriaMetrics series are deliberately **unchanged** ([#217](https://github.com/0Bu/daikin-altherma-esp32/issues/217)); the five reused labels are also *named* by their group, since HA derives the default `entity_id` from the name and two identically-named entities land as `…_2` | ✅ 🧪 | [`logic/discovery.hpp`](../main/logic/discovery.hpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`HOME_ASSISTANT.md`](HOME_ASSISTANT.md) |
 | 57 | **Doc entity-id gate** — the docs hand a reader copy-pasteable YAML naming Home Assistant entity ids, each derived from a catalog **label**, so an id is only as stable as the label — and the catalog spells one quantity several ways across models. A wrong id errors *nowhere*: HA builds the template sensor, its `availability` guard never becomes true, the entity sits at `unavailable`, and that reads as "my heat pump doesn't support this" rather than as a typo in the docs. Every other gate is green while it happens. Resolves each quoted id through the real `ha_slug` over the real catalog, and only against **detectable** profiles — the heat-meter recipe had named a row existing solely in the host-test fixture `altherma3_r_erga` since #206, which a whole-registry check would have passed. Deliberately not a demand that an id be right on *every* profile | ✅ | [`entity_id_audit.cpp`](../tools/docs/entity_id_audit.cpp), [`run-doc-entity-audit.sh`](../scripts/run-doc-entity-audit.sh), [`selftest.sh`](../tools/docs/selftest.sh) |
 | 58 | **Deleting a crash report** (`POST /crash/dismiss`) — the crash banner's dismiss was *page state*, so the first reload brought the same crash straight back and a second browser (or Home Assistant's retained crash entity) never saw the dismissal at all. It is now a device action: erase the dump image, **then** mark the cached `CrashInfo` dismissed, so `crash_is_notable()` is false everywhere at once — `/status.last_crash` goes `null`, the retained crash topic clears on the next heartbeat tick, and the banner is gone across reloads and browsers. Erase first, mark second: a failed erase answers `500` and marks nothing, since a dismissal that outlived it would report "no crash" with the dump still downloadable. RAM-only on purpose — after any reboot the reason is no longer a fault and the dump is gone, while a *new* crash must show, which a persisted dismissal could suppress. The reset **reason** is untouched, so the heartbeat's own sensor still says how the board rebooted. `POST`, not a `GET` beside `/coredump`: it destroys the one artifact a bug report needs, so no link or prefetch may reach it | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp), [`http_status.cpp`](../main/http_status.cpp), [`www/app.js`](../main/www/app.js) |
+| 59 | **Pinned warning contract on `main/`** — three places in that component are written the way they are *because* a warning class is fatal there (the `[[nodiscard]]` on the NVS setters, an unreachable `return false`, a `static_cast<int>` onto a `%d`), and nothing in the repo made that true: `main/` carried no warning policy of its own, so all three held only while ESP-IDF's defaults happened to make them fatal — and IDF's `-Werror` handling is version- *and* Kconfig-dependent, so a bump could have retired them silently. `-Werror=return-type`, `-Werror=format` and `-Werror=unused-result` are now pinned on that component alone. The `unused-result` one is the sharpest: a dropped NVS write is silent, and exactly one left safe mode unable to latch its crash counter. Scoped rather than global for two independent reasons — a `CONFIG_COMPILER_*` key would hold ESP-IDF and the managed components to a contract that is not ours to demand, and `sdkconfig.defaults` is hashed into CI's ccache key, so a diagnostic-only change there would discard every cached object it cannot invalidate. Costs no CI minute: the firmware `build` job is already the only compile of `main/*.cpp`, which is also why `run-mock-tests.sh` cannot see the format case (`int32_t` is `long int` on xtensa, plain `int` on the host). Deliberately **not** accompanied by a clang-tidy/cppcheck gate — measured at ~7000 findings blanket and ~50 curated with **zero** real defects, since the bug classes here are typed out rather than linted out (§9) | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`nvs_storage.hpp`](../main/nvs_storage.hpp), [`logic/timestamp.hpp`](../main/logic/timestamp.hpp) |
 
 ---
 
@@ -1051,7 +1052,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   catalog sweep proving each `(page, offset, converter)` locator resolves to **exactly one** row
   **and to the right one**, asserted on the resolved row's own label, because six other rows share
   the `0x60/12` byte and every one of them would satisfy a page+offset match),
-  **1807 `CHECK`s** in
+  **1809 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -1156,6 +1157,50 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   non-zero rather than printing an empty version — a second copy of the grep is how one of them
   quietly stops matching after the field moves, and this one would fail *silently in the worst
   direction* (a toolchain bump served the previous toolchain's cached objects).
+- **✅ A pinned warning contract on `main/`.** Three places in that component are written the way they
+  are *because* a warning class is fatal there — the `[[nodiscard]]` on the NVS setters
+  ([`nvs_storage.hpp`](../main/nvs_storage.hpp)), an unreachable `return false`
+  ([`hp_comm.cpp`](../main/hp_comm.cpp)), and the `static_cast<int>(ms)` on a `%d` argument
+  ([`logic/timestamp.hpp`](../main/logic/timestamp.hpp)) — and until now nothing in the repo made that
+  true. [`main/CMakeLists.txt`](../main/CMakeLists.txt) pins `-Werror=return-type`, `-Werror=format`
+  and `-Werror=unused-result` via `target_compile_options(… PRIVATE)`. The `unused-result` one is the
+  sharpest: a dropped NVS write is *silent* (a full partition, a worn flash), and exactly one of them
+  left safe mode unable to latch its crash counter — an attribute only bites if the ignored result is
+  an **error**, not a warning scrolling past in a 5-minute build log. The `format` one covers the 124
+  `diag_printf` call sites in the component (the function carries
+  `__attribute__((format(printf, 1, 2)))`) and is the *only* thing that can catch the timestamp case:
+  `int32_t` is `long int` on the xtensa toolchain and plain `int` on the host, so the mismatch is
+  invisible to [`run-mock-tests.sh`](../scripts/run-mock-tests.sh). All three were **inherited** before
+  this — they held only while ESP-IDF's own defaults made them fatal, and IDF's `-Werror` handling is
+  version- *and* Kconfig-dependent (`COMPILER_DISABLE_DEFAULT_ERRORS` rewrites `-Werror` to
+  `-Werror=all`), so a toolchain bump could have retired them with nothing here to notice. Scoped to
+  this component rather than set as a `CONFIG_COMPILER_*` key for two independent reasons: a Kconfig
+  key is global, so it would hold ESP-IDF itself and the managed components to a contract that is not
+  ours to demand; and `sdkconfig.defaults` is hashed into CI's ccache key, so a diagnostic-only change
+  there would discard every cached object it cannot possibly invalidate. Costs no CI minute — the
+  firmware `build` job is already the only compile of `main/*.cpp`. `-Wall` is left out because IDF
+  already passes it and restating it would read as ownership while changing nothing; `-Wextra` because
+  IDF suppresses `-Wunused-parameter` globally and this component's mandated-signature IDF callbacks
+  would fill the log with warnings nobody can act on.
+- **🔭 No generic static-analyser gate — measured, not assumed.** Deliberately absent, and recorded
+  here so it is not re-litigated from scratch. clang-tidy over [`main/logic/`](../main/logic) +
+  [`main/def/`](../main/def): a blanket config reports **~7000** findings, **3622** of them this
+  project's own `CHECK` macro (1802 `cppcoreguidelines-avoid-do-while` + 1820 `pro-type-vararg`).
+  Curated to bug-finding checks only it reports **~50 with zero real defects** — the three plausible
+  ones flag deliberate, documented code: [`logic/history.hpp`](../main/logic/history.hpp)'s explicit
+  `int16` clamp (whose comment explains why it clamps rather than wraps),
+  [`logic/mqtt_group.hpp`](../main/logic/mqtt_group.hpp)'s `if (s[i] == '-' && ++i == s.size())` (well
+  defined — `&&` sequences), and a [`logic/profile_view.hpp`](../main/logic/profile_view.hpp) reference
+  return reachable only by violating the documented `count()` bound. `clang-analyzer-*`: 2, both false.
+  `performance-unnecessary-value-param`: **0**. `-Wconversion`: 3, all
+  [`logic/config_store.hpp`](../main/logic/config_store.hpp) byte-packing that already masks with
+  `& 0xFF`. `-Wshadow`: 3, all in the test file. The yield is that low for a structural reason visible
+  in the code — the bug classes are **typed** out rather than linted out (wire bytes are `uint8_t*`
+  everywhere so char-signedness cannot occur, every enum subscript is bounds-checked, structs carry
+  NSDMIs) — and the defects this project actually ships fixes for are **domain** and resource-budget
+  defects, which §8's audits already cover. There is no `.clang-tidy` file either: an inert config
+  reads like a guarantee while doing nothing. The gap that survey *did* find was the warning contract
+  above, on the other half of the firmware.
 - **✅ Digest-pinned actions — the CI supply chain.** Every third-party GitHub Action in
   [`build.yml`](../.github/workflows/build.yml) and [`renovate.yaml`](../.github/workflows/renovate.yaml)
   is referenced by **full commit SHA**, with the readable version as a trailing `# vN` comment. A tag
@@ -1323,7 +1368,7 @@ and gzipped into the app image** (polled, after a WebSocket push proved it could
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 18-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1807 checks),
+on the host** (1809 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

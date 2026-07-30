@@ -19,7 +19,8 @@ namespace daik {
 // is otherwise silent (NVS can be full or the flash worn), and only the caller knows what the
 // failure costs — safe_mode.cpp cannot latch without its counter. `bool ok = nvs_set_i32(...)` still
 // compiles and still lies; [[nodiscard]] at least makes the *ignored* result a build error rather
-// than a review catch. main/ builds with -Werror, so this bites.
+// than a review catch. main/CMakeLists.txt pins -Werror=unused-result on this component, so this
+// bites — it used to depend on whatever ESP-IDF's defaults made fatal, which is not a guarantee.
 std::string nvs_get_str(const char* key, const std::string& def = "");
 [[nodiscard]] esp_err_t nvs_set_str(const char* key, const std::string& val);
 int32_t     nvs_get_i32(const char* key, int32_t def);   // used for the persisted RX/TX pin cache

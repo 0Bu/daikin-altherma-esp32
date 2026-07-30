@@ -220,6 +220,23 @@ attaches the artifacts. Say in the PR what you did and didn't verify.
   [`.claude/CLAUDE.md`](.claude/CLAUDE.md) → "Memory constraints".
 - C/C++ formatting is [`.clang-format`](.clang-format). Match the surrounding comment density —
   explaining *why*, not *what*, is the house style.
+- **Warnings are part of the contract in `main/`.** [`main/CMakeLists.txt`](main/CMakeLists.txt) pins
+  `-Werror=return-type`, `-Werror=format` and `-Werror=unused-result` on that component alone, so the
+  `[[nodiscard]]` on the NVS setters and the `format(printf, …)` on `diag_printf` are build *errors*,
+  not review catches — a dropped NVS write is silent, and one of them once left safe mode unable to
+  latch its crash counter. They are pinned rather than inherited because ESP-IDF's own `-Werror`
+  handling is version- and Kconfig-dependent, so it could change under a bump with nothing here to
+  notice. The firmware build is the only compile of `main/*.cpp`, so these fire in CI, not in
+  `run-mock-tests.sh`. Don't relax a flag to get green: each hit is the defect class it was pinned
+  for.
+- **There is deliberately no clang-tidy or cppcheck gate**, and that was measured rather than
+  assumed. Over `main/logic/` + `main/def/`, a blanket config reports ~7000 findings — over half of
+  them this project's own `CHECK` macro — and a curated bug-finding set reports ~50 with **zero** real
+  defects; the three plausible ones flag deliberate, documented code (an explicit int16 clamp, a
+  well-defined `&&` sequence, a bounds-guarded reference return). The bug classes a linter looks for
+  are typed out here rather than linted out, and the defects this project ships fixes for are domain
+  and resource-budget defects, which the audits above already cover. A gate whose findings are noise
+  is one people learn to suppress without reading.
 
 ## Value correctness
 
