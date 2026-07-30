@@ -278,10 +278,17 @@ deviations live in `tools/domain/audit_exceptions.txt`; it distinguishes an on-r
 (a real per-model difference) from a temporary KNOWN-DEFECT (tracked + deleted by its fix). The four
 *pre-existing* defects the audit opened with (#35–#39) are fixed (PR #82) and their entries removed —
 a KNOWN-DEFECT that outlives its fix would silence the guard against the fix regressing — and each is
-now pinned by a catalog `CHECK` instead. The live entries are the FOUR `LABEL-UNIT` rows of #230 A,
-KNOWN-DEFECT: the fix belongs in the offline generator (never a hand-edit of a generated table) and
-the rename retires a live series, so it needs #221's migration answer. Delete all four when the
-generator emits "Fan 1 (step)".
+now pinned by a catalog `CHECK` instead. The FOUR `LABEL-UNIT` rows of #230 A are likewise fixed and
+their ledger entries removed: `logic/label_override.hpp` republishes page 0x30/1 as the spec-correct
+"Fan 1 (step)" on every profile — the sibling of `conv_override.hpp`, since the generated tables are
+still wrong and the offline generator is out-of-repo — so the audit now resolves the PUBLISHED
+(adjudicated) label at row collection and `LABEL-UNIT` no longer fires. The rename is a #221
+MIGRATION (`mqtt_ha.cpp`'s `retract_relabeled_values` deletes the stale `actuators_fan_1_10_rpm` HA
+entity on upgrade; the VictoriaMetrics series forks — unavoidable — only for a unit on one of the
+four profiles, the reference install already publishing the majority `_step`). The still-wrong
+source is guarded by `test_label_override()`'s raw-count pin (== 4): the day the generator emits
+"Fan 1 (step)" it trips, forcing the override's deletion. So `audit_exceptions.txt` currently carries
+**no** live entries.
 
 ## Build & Flash
 
@@ -603,10 +610,12 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 entity_id from the NAME and two identically-named entities land as `…_2`; the other
                 ~154 names are untouched so those entities reclaim their entity_id and their recorder
                 history. The retained configs an older build published under a superseded identity —
-                the MAC node id, AND the un-grouped entity ids, each in both the `sensor` and
-                `binary_sensor` shape — are RETRACTED in ONE pass (retract_stale_values ->
-                retract_ungrouped_values, plus retract_legacy_fixed for the diagnostics) that
-                completes BEFORE any replacement config goes out: HA drops the old registry entry,
+                the MAC node id, the un-grouped entity ids (each in both the `sensor` and
+                `binary_sensor` shape), AND (#230 A) the OLD id of a row whose label
+                logic/label_override.hpp moved — are RETRACTED in ONE pass (retract_stale_values ->
+                retract_ungrouped_values + retract_relabeled_values, plus retract_legacy_fixed for
+                the diagnostics) that completes BEFORE any replacement config goes out: HA drops the
+                old registry entry,
                 freeing its entity_id, and the new entity takes it back; history/statistics key on
                 entity_id and carry over, per-entity UI customisations key on unique_id and do not.
                 The legacy shapes come from ungrouped_discovery_topic, a FROZEN literal — a delete
@@ -819,7 +828,7 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 hexdump, led_pattern, button, captive,
                 lwt_select, ou_stale, cop_scope, profile_view, feature_gate, availability,
                 fault_state,
-                raw_capture, conv_override, checkup).
+                raw_capture, conv_override, label_override, checkup).
                 checkup.hpp = the 24-HOUR PLANT CHECKUP (#208) — the third question the dashboard
                 asks, after "what is it doing now" (the schematic) and "what did this reading do
                 today" (history.hpp): IS ANYTHING WORTH REPORTING. Counted events and window minima,
@@ -932,6 +941,24 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 pins that exactly 44 profiles still carry (0x10, 6, 114) — the day the generator
                 emits 109 the override becomes a no-op (it is keyed from:114) and that count trips,
                 forcing a re-read instead of leaving silent dead code
+                label_override.hpp = which LABEL a generated row is published under, when the id the
+                generator emitted is the wrong one. The sibling of conv_override.hpp, separate for the
+                same reason conv is separate from availability: that one re-DECODES a value, this one
+                corrects the row's IDENTITY WORD — the label is the HA entity id AND the
+                VictoriaMetrics series suffix (ha_slug), so it is a published CLAIM, and changing it is
+                a MIGRATION (mqtt_ha's retract_relabeled_values deletes the stale HA entity on
+                upgrade; a VM series cannot be carried across a rename by any firmware action). ONE
+                entry: page 0x30/1 conv 211 "Fan 1 (10 rpm)" -> "Fan 1 (step)" (#230 A) — conv 211 is
+                a step index (REGISTERS.md §3.3, 0=stopped) and 22 profiles already spell it "(step)"
+                while four spell a rate, so actuators_fan_1_10_rpm invited a reader to take a 30 for
+                300 rpm (the #35-#39 shape in a label). The oracle is the spec, never a nicer-looking
+                word. Composed by adjudicated() beside the converter verdict, so every consumer sees
+                the corrected label (hp_poll decode + cache, mqtt_ha discovery, AND the domain audit's
+                LABEL-UNIT, whose subject is the PUBLISHED label — conv stays raw there). Keyed on
+                (reg, offset, conv, from-label) so it fixes exactly the four wrong rows and is a no-op
+                on the 22 right ones; the catalog test pins that exactly 4 profiles still carry the raw
+                "Fan 1 (10 rpm)", so the day the generator emits "Fan 1 (step)" the override is dead
+                code, that count trips, and it is deleted (entry + pin + retract_relabeled_values)
                 fault_state.hpp = the NUMERIC fault flags that ride beside the TEXTUAL Daikin code
                 (#209 defect 4). Convs 203/204 stay text — "Normal"/"U4"/"7H" is what a human and HA
                 want, and inventing a numeric enum over Daikin's alphanumeric code space would be a
@@ -1457,7 +1484,8 @@ def/            embedded per-model value profiles + registry (incl. the generic 
                 test_logic.cpp pins all 11 plus the 0x10 group key against the live store, so this is
                 a test failure rather than something the deleter has to remember. Since #217 the
                 OTHER ~150 are pinned too: test_metric_identity() freezes the whole set of distinct
-                <group>_<object_id> identifiers the published catalog produces (164 of them), so any
+                <group>_<object_id> identifiers the published catalog produces (163 of them, resolved
+                through adjudicated() so a label override moves the frozen id with the series), so any
                 rename, dropped row or change to ha_slug() fails the suite and prints which
                 identifier moved. That gate was built because the hazard is not hypothetical —
                 f1a5e69 (#139) renamed "Expansion valve 3 (pls)" to "… [OU-II]" across 19 profiles
@@ -1478,16 +1506,18 @@ def/            embedded per-model value profiles + registry (incl. the generic 
                 rows) the pick changes no decoded value — only the LABELS, hence the entity ids and
                 the series. #217's gate cannot fail on that BY CONSTRUCTION: both spellings are
                 already in its frozen set, so a flip adds no identifier. Measured over the
-                detectable catalog, TWELVE equivalence classes exist and SIX disagree about what
-                they publish, so test_tie_break_identity() freezes exactly the 36 identifiers a
-                tie-break can move. They are not all defects — three classes are one sensor named by
-                two product FAMILIES ("[HPSU] Tv inflow Temp  (R1T)" vs "Leaving water temp. before
-                BUH (R1T)"), which REGISTERS.md:196-200 says to expect — and the sharpest one is not
-                a rename at all: the non-hybrid altherma_erga_d_ehv_ehb_ehvz_da_series_04_08kw marks
-                the page-0x64 boiler rows `no_publish` while its two register-equivalent neighbours
-                publish them, so the tie-break decides whether EIGHT hybrid_* entities exist on that
-                unit. That is why `no_publish` is deliberately NOT in the equivalence key: it is not
-                a wire fact, and folding it in would split that class and hide the strongest case.
+                detectable catalog, TWELVE equivalence classes exist and — since #230 A's fan step
+                was closed by logic/label_override.hpp — FIVE still disagree about what they publish,
+                so test_tie_break_identity() freezes exactly the 34 identifiers a tie-break can move
+                (the fan class is now identifier-equivalent, so neither fan id is among them). They
+                are not all defects — three classes are one sensor named by two product FAMILIES
+                ("[HPSU] Tv inflow Temp  (R1T)" vs "Leaving water temp. before BUH (R1T)"), which
+                REGISTERS.md:196-200 says to expect — and the sharpest one is not a rename at all: the
+                non-hybrid altherma_erga_d_ehv_ehb_ehvz_da_series_04_08kw marks the page-0x64 boiler
+                rows `no_publish` while its two register-equivalent neighbours publish them, so the
+                tie-break decides whether EIGHT hybrid_* entities exist on that unit. That is why
+                `no_publish` is deliberately NOT in the equivalence key: it is not a wire fact, and
+                folding it in would split that class and hide the strongest case.
 www/            web UI sources (index.html + style.css + app.js -> one gzipped page) + setup.html.
                 The dashboard SCHEMATIC (the inline SVG in index.html, its sc-* CSS and its
                 INSPECT/I18N bindings) has its own gate — scripts/run-schematic-audit.sh + the

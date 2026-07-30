@@ -44,7 +44,8 @@
 #include "def/overlay.hpp"
 #include "def/registry.hpp"
 #include "logic/convert.hpp"
-#include "logic/discovery.hpp"   // object_id / group_for_page — a label IS an identifier (#217)
+#include "logic/discovery.hpp"        // object_id / group_for_page — a label IS an identifier (#217)
+#include "logic/label_override.hpp"   // the PUBLISHED label, when the generator's is wrong (#230 A)
 
 using namespace daik;
 
@@ -770,7 +771,15 @@ int main(int argc, char** argv) {
         rtype_map()[p.id] = profile_refrigerant(p.values, p.count);
         const auto v = def::resolved(p);
         for (size_t i = 0; i < v.count(); i++) {
-            const ValueDef& d = v[i];
+            ValueDef d = v[i];
+            // Resolve the LABEL through logic/label_override.hpp — but NOT the converter. LABEL-UNIT's
+            // subject is the PUBLISHED identifier (it prints the HA entity id / VM series suffix), and
+            // the pipeline announces the adjudicated label, so the audit must judge that word, not the
+            // generator's. The converter checks (SPEC-CONV/LAYOUT/CONSENSUS) deliberately stay on the
+            // raw conv: conv_override is a decode decision they must see the intrinsic semantics of,
+            // exactly as they always have. Each check thus resolves through the override that governs
+            // its own subject.
+            d.label = logic::effective_label(d.reg, d.offset, d.conv, d.label);
             rows.push_back({p.id, d, norm_label(d.label)});
         }
     }

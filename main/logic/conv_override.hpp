@@ -79,6 +79,7 @@
 // reading it correctly today. (That bound is the argument, and it is why the same reasoning does not
 // license touching the three rows above, where the current decode yields a perfectly ordinary 0.0.)
 #include "value_def.hpp"
+#include "label_override.hpp"   // the sibling ledger adjudicated() also composes (the row's LABEL)
 
 #include <cstddef>
 
@@ -109,13 +110,17 @@ inline constexpr int effective_conv(uint8_t reg, uint8_t offset, int conv) {
     return conv;
 }
 
-// The row as every consumer must see it. Returned BY VALUE and applied at each point a row enters
-// the pipeline (decode, cache, HA discovery) rather than inside convert(), so that the converter
-// keeps its intrinsic per-converter semantics and the domain audit still sees the generated table
-// and this adjudication as two separate, separately-reviewable things.
+// The row as every consumer must see it — it COMPOSES the two row-rewriting ledgers: the converter
+// (this file) and the label (logic/label_override.hpp). Returned BY VALUE and applied at each point
+// a row enters the pipeline (decode, cache, HA discovery) rather than inside convert(), so that the
+// converter keeps its intrinsic per-converter semantics and the domain audit still sees the
+// generated table and this adjudication as two separate, separately-reviewable things. (Both keys
+// read the ORIGINAL d.conv, so the two verdicts compose independently and order-free.)
+// availability.hpp stays separate: it WITHHOLDS a value, it does not rewrite the row.
 inline constexpr ValueDef adjudicated(const ValueDef& d) {
     ValueDef out = d;
-    out.conv = effective_conv(d.reg, d.offset, d.conv);
+    out.conv  = effective_conv(d.reg, d.offset, d.conv);
+    out.label = effective_label(d.reg, d.offset, d.conv, d.label);
     return out;
 }
 

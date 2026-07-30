@@ -5544,7 +5544,6 @@ static void test_metric_identity() {
     "actuators_expansion_valve_2_pls",
     "actuators_expansion_valve_3_pls",
     "actuators_expansion_valve_4_pls",
-    "actuators_fan_1_10_rpm",
     "actuators_fan_1_step",
     "actuators_fan_2_step",
     "actuators_inv_frequency_rps",
@@ -5710,7 +5709,10 @@ static void test_metric_identity() {
         for (size_t i = 0; i < p.count; i++) {
             const auto& v = p.values[i];
             if (v.no_publish) continue;              // detect-only: never announced, never a series
-            actual.insert(std::string(group_for_page(v.reg)) + "_" + object_id(v.label));
+            // Through adjudicated(): the store is keyed on what the bridge PUBLISHES, and a label
+            // override (logic/label_override.hpp, #230 A) changes that word — so a row's series suffix
+            // is its adjudicated label's slug, not the generator's.
+            actual.insert(std::string(group_for_page(v.reg)) + "_" + object_id(logic::adjudicated(v).label));
         }
 
     std::set<std::string> expected(EXPECTED, EXPECTED + EXPECTED_N);
@@ -5736,7 +5738,7 @@ static void test_metric_identity() {
         for (size_t i = 0; i < p.count; i++) {
             const auto& v = p.values[i];
             if (v.no_publish) continue;
-            CHECK(expected.count(row_object_id(v)) == 1);
+            CHECK(expected.count(row_object_id(logic::adjudicated(v))) == 1);
         }
 
     // ── The ambiguity ledger: which labels the catalog places on more than one page (#221) ───────
@@ -5786,13 +5788,16 @@ static void test_metric_identity() {
 // REGISTRY ORDER). On the live 8 kW unit three of the five survivors are REGISTER-EQUIVALENT —
 // byte-identical (reg, offset, conv, size, type) rows — so which one wins changes not one decoded
 // value. It changes the LABELS, and a label is the HA entity id plus the VictoriaMetrics series
-// suffix. `altherma_ebla_edla_d_series_4_8kw_monobloc` and
-// `altherma_erga_d_ehv_ehb_ehvz_dj_series_04_08_kw` differ in exactly one row — the fan step of
-// #230 A — so the unit publishes `actuators_fan_1_step` or `actuators_fan_1_10_rpm` depending on
-// nothing but the order profiles happen to sit in the registry. Add, remove or reorder a profile —
-// none of which is a suspicious act — and the old series stops receiving samples while a new one
-// starts at zero. That is #217's silent fork, and a counter resetting to zero is exactly the event
-// these rows exist to report, so it reads as the plant going quiet rather than as a rename.
+// suffix. This is exactly the shape of #230 A's fan step: `altherma_ebla_edla_d_series_4_8kw_monobloc`
+// and `altherma_erga_d_ehv_ehb_ehvz_dj_series_04_08_kw` were register-equivalent yet published
+// `actuators_fan_1_step` vs `actuators_fan_1_10_rpm` depending on nothing but registry order. Add,
+// remove or reorder a profile — none of which is a suspicious act — and the old series stops
+// receiving samples while a new one starts at zero: #217's silent fork, a counter resetting to zero
+// reading as the plant going quiet rather than as a rename. The fan case is now CLOSED —
+// logic/label_override.hpp republishes every profile as `actuators_fan_1_step`, so that class is
+// identifier-equivalent and neither fan id is tie-break-decided any more (which is why they are gone
+// from the frozen set below) — but the mechanism is general and the remaining classes below still
+// have it.
 //
 // #217's gate cannot catch it BY CONSTRUCTION: both spellings are already in its frozen set, so a
 // tie-break flip introduces no new identifier and the suite stays green while the device's own
@@ -5801,9 +5806,11 @@ static void test_metric_identity() {
 //
 // The property actually wanted is that register-equivalent profiles agree on what they publish —
 // then a tie-break can never move an identifier. Measured over the detectable catalog: TWELVE
-// equivalence classes exist and SIX violate it, so this is a class of hazard, not one instance. They
-// are not all defects, and the difference is a judgement rather than something a test can settle:
-//   • #230 A's fan step — one spelling is simply false (`actuators_fan_1_step` vs `…_fan_1_10_rpm`);
+// equivalence classes exist and, since #230 A's fan step was closed by logic/label_override.hpp,
+// FIVE still violate it — so this is a class of hazard, not one instance. They are not all defects,
+// and the difference is a judgement rather than something a test can settle:
+//   • #230 A's fan step was the "simply false" kind — one spelling asserted a rate, the other a
+//     step — now FIXED by logic/label_override.hpp, so it is no longer in the frozen set;
 //   • one sensor named by two product FAMILIES — the ECH2O tank models call leaving water
 //     "[HPSU] Tv inflow Temp  (R1T)", the standard ones "Leaving water temp. before BUH (R1T)".
 //     Both are true of their own product, and docs/REGISTERS.md:196-200 says to expect exactly this;
@@ -5823,11 +5830,10 @@ static void test_metric_identity() {
 static void test_tie_break_identity() {
     // Every identifier whose publication depends on WHICH register-equivalent profile detection
     // happens to pick. Adding an entry means a new tie-break-decided series — say why in the commit
-    // message. Removing one means the divergence is gone: either the generator now agrees (#230 A,
-    // and the audit ledger entry goes with it) or a profile left the class.
+    // message. Removing one means the divergence is gone: a label override now makes the class agree
+    // (#230 A — logic/label_override.hpp, and its audit ledger entries went with it), the generator
+    // itself agrees, or a profile left the class.
     static const char* const TIE_BREAK_DECIDED[] = {
-    "actuators_fan_1_10_rpm",
-    "actuators_fan_1_step",
     "hybrid_2nd_domestic_hot_water_temperature",
     "hybrid_be_cop",
     "hybrid_boiler_dhw_demand",
@@ -6170,6 +6176,41 @@ static void test_conv_override() {
     CHECK(display_decimals(row.conv) == 1);
 }
 
+// ── The label ledger (logic/label_override.hpp) — #230 A ──────────────────────────────────────────
+// The sibling of test_conv_override(): the same "generated table is wrong, corrected in logic/,
+// pinned against the real catalog" shape — but for the row's LABEL, which is the HA entity id and the
+// VictoriaMetrics series suffix (logic/discovery.hpp), so the correction moves what the device
+// publishes, not how a value decodes.
+static void test_label_override() {
+    // Identity for the rows the ledger is silent about, and the exact structural key it fires on.
+    CHECK(logic::label_str_eq(logic::effective_label(0x30, 2, 211, "Fan 2 (step)"), "Fan 2 (step)"));    // neighbour: untouched
+    CHECK(logic::label_str_eq(logic::effective_label(0x30, 1, 211, "Fan 1 (step)"), "Fan 1 (step)"));    // already correct: no `from` match
+    CHECK(logic::label_str_eq(logic::effective_label(0x30, 1, 210, "Fan 1 (10 rpm)"), "Fan 1 (10 rpm)")); // wrong converter: no match
+    CHECK(logic::label_str_eq(logic::effective_label(0x31, 1, 211, "Fan 1 (10 rpm)"), "Fan 1 (10 rpm)")); // wrong page: no match
+    CHECK(logic::label_str_eq(logic::effective_label(0x30, 1, 211, "Fan 1 (10 rpm)"), "Fan 1 (step)"));   // THE entry
+
+    // The corrected row publishes as actuators_fan_1_step — one identifier, two surfaces (#221): the
+    // group-scoped HA entity id AND the un-grouped state key / VictoriaMetrics series suffix both move.
+    const ValueDef row = logic::adjudicated(ValueDef{0x30, 1, 211, 1, -1, "Fan 1 (10 rpm)"});
+    CHECK(logic::label_str_eq(row.label, "Fan 1 (step)"));
+    CHECK(row_object_id(row) == "actuators_fan_1_step");
+    CHECK(object_id(row.label) == "fan_1_step");
+
+    // SELF-RETIRE PIN, exactly as test_conv_override() pins conv 114's 44 rows. The GENERATED tables
+    // still carry the wrong label on precisely FOUR profiles; the day gen_profiles.py emits
+    // "Fan 1 (step)" this count hits 0, the override matches nothing and is dead code, and this CHECK
+    // trips — the signal to delete the label_override entry, this pin, and retract_relabeled_values.
+    int raw_wrong = 0;
+    for (const auto& p : def::profiles)
+        for (size_t i = 0; i < p.count; i++) {
+            const auto& v = p.values[i];
+            if (v.reg == 0x30 && v.offset == 1 && v.conv == 211 &&
+                logic::label_str_eq(v.label, "Fan 1 (10 rpm)"))
+                raw_wrong++;
+        }
+    CHECK(raw_wrong == 4);
+}
+
 // ── The availability ledger (logic/availability.hpp) — #209 defects 1, 2 and 6 ────────────────────
 // Two things are asserted, and the second is the one that matters. The first is that each rule does
 // what it says on a hand-built row. The second is what it does to the REAL CATALOG: a rule keyed on
@@ -6469,6 +6510,7 @@ int main() {
     test_ou_stale();
     test_cop_scope();
     test_conv_override();
+    test_label_override();
     test_availability();
     test_fault_state();
     test_raw_capture();

@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte — it both ranks the representative and **narrows the candidate set**, dropping only classes that contradict it, **retried page probe + a second-sweep confirmation** before falling back to `generic`) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1820 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1829 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -1041,6 +1041,12 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   0.1 K grid and re-encode to the very byte pair that came off the bus; plus the catalog tripwire
   that exactly 44 profiles still carry `(0x10, 6, 114)`, so the day the generator emits `109` the
   override becomes a keyed no-op and the count fails rather than leaving dead code),
+  the **label adjudication** (`label_override.hpp` — #230 A's `0x30/1` conv 211
+  *"Fan 1 (10 rpm)"* → *"Fan 1 (step)"*, the sibling of the converter adjudication for the row's
+  identity word: `effective_label` keyed match, the corrected row publishing as
+  `actuators_fan_1_step`, and the same tripwire — exactly **4** profiles still carry the raw
+  *"Fan 1 (10 rpm)"*, so the day the generator emits *"Fan 1 (step)"* the count fails rather than
+  leaving dead code),
   the **published-type contract** (`convert.hpp`'s `published_kind` — every implemented converter
   swept over every input byte, failing if any produces text in one state and a number in another),
   the **numeric fault flags** (`fault_state.hpp` — round-tripped against conv 203's own output, plus
@@ -1057,7 +1063,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   catalog sweep proving each `(page, offset, converter)` locator resolves to **exactly one** row
   **and to the right one**, asserted on the resolved row's own label, because six other rows share
   the `0x60/12` byte and every one of them would satisfy a page+offset match),
-  **1820 `CHECK`s** in
+  **1829 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -1068,7 +1074,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   `daikin_altherma_<group>_<object_id>` and Home Assistant as an entity keyed on the same slug, both
   derived from the row's **label**. Editing a label is therefore not cosmetic: it retires one series
   and starts another at zero, with no error anywhere. `test_metric_identity()` freezes the complete
-  set of **164** distinct `<group>_<object_id>` identifiers the catalog produces, so a rename, a
+  set of **163** distinct `<group>_<object_id>` identifiers the catalog produces, so a rename, a
   dropped row or a change to `ha_slug()` itself fails the suite and prints which identifier moved.
   Built because the hazard already fired: `f1a5e69` (#139) renamed *"Expansion valve 3 (pls)"* to
   *"… [OU-II]"* across 19 profiles, and the store shows the old series stopping 5.8 days before the
@@ -1076,7 +1082,8 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   block also ties the two surfaces together — every published row's HA entity id must be in that
   frozen list, so a label edit moves the entity and the series together or neither — and pins
   `AMBIGUOUS_LABEL_SLUGS` as exactly the set of labels the catalog reuses across pages, so a sixth
-  cannot appear unnoticed.
+  cannot appear unnoticed. Both the frozen set and its assertion resolve through `adjudicated()`, so
+  a label override (above) moves the frozen id together with the series it names.
 - **🧪 …and which identifiers a detection TIE-BREAK can move** — the question the frozen set above
   leaves open, and the one a device owner actually has: does *this* unit still publish the identifiers
   it published yesterday? `detect_best`'s last tie-break is **registry order**, so where two profiles
@@ -1084,9 +1091,11 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   not one decoded value — only the labels, hence the entity ids and the series. The gate above cannot
   fail on that *by construction*: both spellings are already in its frozen set, so a flip introduces
   no new identifier and the suite stays green while the device's own series changes underneath it.
-  Measured over the detectable catalog: **12** equivalence classes exist and **6** disagree about what
-  they publish, so `test_tie_break_identity()` freezes exactly the **36** identifiers a tie-break can
-  move. Not all are defects — three classes are one sensor named by two product *families*
+  Measured over the detectable catalog: **12** equivalence classes exist and — since #230 A's fan
+  step was closed by `label_override.hpp` — **5** still disagree about what they publish, so
+  `test_tie_break_identity()` freezes exactly the **34** identifiers a tie-break can move (the fan
+  class is now identifier-equivalent, so neither fan id is among them). Not all are defects — three
+  classes are one sensor named by two product *families*
   (`[HPSU] Tv inflow Temp  (R1T)` vs `Leaving water temp. before BUH (R1T)`), which
   [`REGISTERS.md`](REGISTERS.md) says to expect — and the sharpest case is not a rename at all: the
   non-hybrid `altherma_erga_d_ehv_ehb_ehvz_da_series_04_08kw` marks the page-`0x64` boiler rows
@@ -1114,7 +1123,11 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   profiles and *"Fan 1 (10 rpm)"* on four, at the same offset with the same converter and width, so a
   reader of `actuators_fan_1_10_rpm` takes a `30` for 300 rpm rather than step 30 — while `SPEC-CONV`
   matches *by* label and misses it, `SPEC-LAYOUT` sees a conforming layout, `CONSENSUS` groups *by*
-  label so the two spellings never meet, and the frozen identifier set already contains both. It
+  label so the two spellings never meet, and the frozen identifier set already contains both. #230 A
+  is now **fixed** by `label_override.hpp`, which republishes those four rows as *"Fan 1 (step)"*; the
+  audit resolves the **published** (adjudicated) label at row collection, so `LABEL-UNIT` judges what
+  the device actually announces and no longer fires on them (the converter checks stay on the raw
+  generated `conv`, whose intrinsic semantics are their subject). It
   compares the **unit alone**, never the rest of the label: the catalog legitimately spells one
   quantity several ways per family, so a text check would demand prose the source data does not have.
   [`tools/domain/selftest.sh`](../tools/domain/selftest.sh) re-introduces every defect the gate was
@@ -1373,7 +1386,7 @@ and gzipped into the app image** (polled, after a WebSocket push proved it could
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 18-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1820 checks),
+on the host** (1829 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

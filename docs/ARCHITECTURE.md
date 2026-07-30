@@ -373,6 +373,16 @@ host-testable core is unusually large and valuable, because the risky parts are 
   because they read raw `0` on the only unit measured and `0` decodes identically under both scales.
   Applied where a row *enters* the pipeline (decode, cache, HA discovery), so the decoded value, the
   cached converter id, the published JSON type and the HA component cannot disagree about one row.
+- `logic/label_override.hpp` — the **label adjudication** ([#230](https://github.com/0Bu/daikin-altherma-esp32/issues/230) A): which
+  *label* a generated row is published under, when the generator's is wrong. Sibling of the converter
+  adjudication, composed by the same `adjudicated()`, but for the row's **identity word** rather than
+  its decoded value — the label is the HA entity id and the VictoriaMetrics series suffix, so this is
+  a published claim and a change to it is a #221 migration. One entry: `0x30/1` conv 211
+  *"Fan 1 (10 rpm)"* → *"Fan 1 (step)"* — conv 211 is a step index (`REGISTERS.md` §3.3), so the four
+  profiles spelling a rate published `actuators_fan_1_10_rpm`, inviting a reader to take a `30` for
+  300 rpm. Keyed on `(reg, offset, conv, from-label)`, so it corrects exactly those four and is a
+  no-op the moment the generator emits *"Fan 1 (step)"*; `mqtt_ha.cpp`'s `retract_relabeled_values`
+  deletes the superseded HA entity on upgrade. The oracle is the spec, never a nicer word.
 - `logic/fault_state.hpp` — the **numeric** fault flags that ride beside the **textual** Daikin
   diagnostic code (#209 defect 4). `error_active`/`warning_active` are derived from the conv-203
   error class through the inverse of that converter's own `ERR_TYPE` lookup, so there is no second
