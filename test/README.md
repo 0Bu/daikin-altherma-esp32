@@ -13,12 +13,20 @@ USB-flash, but it *can* run these in seconds and know a decode/config change is 
 
 ```bash
 scripts/run-mock-tests.sh
+scripts/run-mock-tests.sh --coverage
 ```
 
 Uses `cmake` + `ctest` when present, else a direct `g++`/`clang++` compile of the single
 translation unit ([`test_logic.cpp`](test_logic.cpp)) with `-std=c++17 -Wall -Wextra -Werror`.
-CI runs the same thing as the first step of the `gates` job, gating the esp32s3 firmware build — a logic
-regression fails in seconds instead of after a full ESP-IDF build.
+`--coverage` uses the compiler's gcov instrumentation and enforces at least 95% aggregate executable
+line coverage across `main/logic/`. It intentionally excludes this test driver, generated profiles
+and system headers: none of those can prove that another production branch ran. GCC uses `gcov`;
+Clang uses `llvm-cov gcov` (via `xcrun` on macOS).
+
+CI runs the coverage form as the first step of the `gates` job, gating the esp32s3 firmware build — a
+logic regression or an untested production path fails in seconds instead of after a full ESP-IDF
+build. `tools/coverage/selftest.sh` separately proves that an empty report and coverage below the
+floor fail closed.
 
 The same `gates` job runs `node test/test_ui_live_i18n.mjs` separately. That browser-free regression
 test executes the production banner/inspector render functions from `main/www/app.js` and verifies

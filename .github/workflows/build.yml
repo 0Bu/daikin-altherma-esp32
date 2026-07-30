@@ -113,9 +113,13 @@ jobs:
         with:
           fetch-depth: 0   # the change detection below diffs against the base commit
 
-      # Host-side pure-logic tests (main/logic/). See test/README.md.
-      - name: Run host-side logic tests
-        run: ./scripts/run-mock-tests.sh
+      # Host-side pure-logic tests (main/logic/) plus an aggregate executable-line floor. This is
+      # deliberately coverage of the production headers only: counting the 6k-line test driver
+      # would let new assertions make the percentage greener without exercising another branch.
+      - name: Run host-side logic tests with coverage
+        run: ./scripts/run-mock-tests.sh --coverage
+      - name: Verify the logic coverage gate still has teeth
+        run: ./tools/coverage/selftest.sh
 
       # The device language override applies LIVE, including to persistent banners and an open
       # schematic inspector. Their DOM-write guards key on status/data signatures; this executes the

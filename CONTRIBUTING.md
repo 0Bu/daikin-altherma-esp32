@@ -25,7 +25,7 @@ seconds. **Run them all before opening a PR.** They are also the first steps of 
 so a failure here fails the build anyway.
 
 ```bash
-scripts/run-mock-tests.sh          # host-side pure-logic tests
+scripts/run-mock-tests.sh --coverage # host logic tests + 95% production-line floor
 scripts/run-domain-audit.sh        # is the value catalog physically RIGHT?
 scripts/run-description-audit.sh   # can a user find out what each value IS?
 scripts/run-schematic-audit.sh     # does the DRAWING still say what it means?
@@ -33,10 +33,11 @@ scripts/run-ui-gif-audit.sh        # is the README's RECORDING still of this UI?
 scripts/run-doc-entity-audit.sh    # do the docs' copy-paste ENTITY IDS exist?
 ```
 
-`run-mock-tests.sh` compiles the IDF-free headers in [`main/logic/`](main/logic/) against
+`run-mock-tests.sh --coverage` compiles the IDF-free headers in [`main/logic/`](main/logic/) against
 [`test/test_logic.cpp`](test/test_logic.cpp) — the CRC and framing, the value converters, register
-extraction, the config model and the Home Assistant discovery payloads. Details in
-[`test/README.md`](test/README.md).
+extraction, the config model and the Home Assistant discovery payloads — and requires at least 95%
+aggregate executable-line coverage in those production headers. The test driver and generated
+profiles do not count toward the percentage. Details in [`test/README.md`](test/README.md).
 
 `run-domain-audit.sh` is separate on purpose, and the distinction matters:
 
