@@ -345,6 +345,12 @@ static std::string build_status_json_string(bool redact = false) {
     // setting is reported on its own rather than inferred from the version string.
     j += "\"ota\":{\"channel\":" + jstr(ota_channel_name(c.ota_channel)) + "},";
 
+    // The web UI's manual language override (logic/ui_lang.hpp; POST /set_lang). "auto" (the default)
+    // means the browser keeps detecting the language on its own; "de"/"en" force one on every client.
+    // Reported here for the same reason as the channel: the ESP32 card's language selector renders
+    // from /status, and the browser applies "de"/"en" over its own navigator.language guess.
+    j += "\"ui\":{\"lang\":" + jstr(ui_lang_name(c.ui_lang)) + "},";
+
     // Last reset: null on a clean boot, else the crash summary (reset reason + core-dump backtrace).
     // The reason/backtrace come from the boot-time CACHE (diag_crash.cpp) — never re-parsed from
     // flash here: this builder answers a REQUEST, now up to once every 8 s per open dashboard, so

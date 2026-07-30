@@ -17,8 +17,9 @@ page lives outside the firmware and cannot include `main/www/style.css`, so its 
 1. **Two screens: the plant, and the box.** After provisioning the app opens on the **dashboard**,
    which is the heat pump — the live schematic, the detected model, every reading. The header
    **gear** opens **Settings**, which is the ESP32 and what it talks to: the Connections tile
-   (WiFi/MQTT/Syslog/NTP) and the ESP32 board card (firmware/OTA, X10A link, RX/TX
-   pins, board hardware). Nothing sits between the gear and those cards — Settings is **flat**, no
+   (WiFi/MQTT/Syslog/NTP) and the ESP32 board card, split into three — ESP32 (board hardware,
+   uptime, memory), Protokoll (X10A link, RX/TX pins) and Firmware (version, OTA channel,
+   language). Nothing sits between the gear and those cards — Settings is **flat**, no
    menu of entries to tap through, because there is little enough of it that a menu would exist only
    to hide a card behind a second tap. Settings still reports forward: a link that is **down** marks
    the gear (§5.6), so putting a card behind it hides the controls, never the failures.
@@ -30,19 +31,25 @@ page lives outside the firmware and cannot include `main/www/style.css`, so its 
    (WiFi credentials, MQTT broker, Syslog server, NTP server, RX/TX pins, board hardware, OTA update
    channel) are explicit and report their outcome.
 4. **Terse, dense, technical.** Tabular numbers, short labels, no decorative copy.
-5. **Browser-detected language (de / en), no selector.** This principle scopes to the **device UI**
-   (`main/www/`) — the GitHub Pages installer of §5.5 is English-only by decision, and `setup.html`
-   is served before `app.js` exists. The UI **chrome** (system status block, card
+5. **Browser-detected language (de / en) by default, with a manual override.** This principle scopes
+   to the **device UI** (`main/www/`) — the GitHub Pages installer of §5.5 is English-only by decision,
+   and `setup.html` is served before `app.js` exists. The UI **chrome** (system status block, card
    titles, connection rows, schematic labels, the inspector, modals, banners, toasts) and the tap-to-expand
    value **descriptions** (§6) are rendered in German for a `de*` browser (`navigator.language`) and
-   English otherwise — English is the fallback for every string. There is **no manual language
-   selector** and no server round-trip: the choice is made client-side at load (`LANG` in `app.js`,
-   which also stamps `<html lang>`). The **firmware is still English-only** — the heat-pump **value
-   labels** arrive over `/values` as English X10A register names (`docs/REGISTERS.md`) and are shown
-   verbatim in **both** languages (the German descriptions explain them); the firmware ships no
-   localized strings. All UI copy lives in one `I18N` dictionary; dynamic strings go through `t()`,
-   static `main/www/index.html` markup through `data-i18n` + `applyStaticI18n()` (spelled in full
-   now that this contract also covers a second `index.html`, the installer of §5.5).
+   English otherwise — English is the fallback for every string. That browser guess is the **default**;
+   on top of it the device carries an optional **manual override** — the Firmware settings card's
+   **Sprache** picker (Browser / English / Deutsch — "Browser" because that option IS the browser's
+   own guess, not a separate automatic mode) `POST`s `/set_lang`, which persists the choice in **NVS**
+   (`config ui_lang`, `logic/ui_lang.hpp`) and reports it back on `/status.ui.lang`. Once the user
+   picks a language it wins over the browser guess on **every** client that opens the dashboard, until
+   they set it back to Browser; the browser applies it live (`setLang()` in
+   `app.js` re-runs `applyStaticI18n()`), no reload. The **firmware is still English-only** — the
+   heat-pump **value labels** arrive over `/values` as English X10A register names
+   (`docs/REGISTERS.md`) and are shown verbatim in **both** languages (the German descriptions explain
+   them); the firmware ships no localized strings. All UI copy lives in one `I18N` dictionary; dynamic
+   strings go through `t()`, static `main/www/index.html` markup through `data-i18n` +
+   `applyStaticI18n()` (spelled in full now that this contract also covers a second `index.html`, the
+   installer of §5.5).
 
 ## 2. Brand & colour tokens
 
@@ -121,6 +128,10 @@ back (the header chevron, or `Esc`):
                                                                               └─ row ─▶ modal (§5.1)
                                                                            · ESP32 card
                                                                               └─ Hardware ─▶ modal
+                                                                           · Protokoll card
+                                                                              └─ RX/TX ─▶ dropdown
+                                                                           · Firmware card
+                                                                              └─ Channel/Language ─▶ select
 ```
 
 There is **no routing and no history integration**: the screen is app state, not a URL. The page is
@@ -129,7 +140,7 @@ did not ask to be on.
 
 The **dashboard** carries no config at all. Every write lives on **Settings** (§5.6): the WiFi
 credentials, MQTT broker, Syslog and NTP servers are a **modal** off their row on the Connections
-tile, and the RX/TX pins + board hardware are on the ESP32 card there. The one dashboard control
+tile, and the RX/TX pins are on the Protokoll card there, board hardware on the ESP32 card. The one dashboard control
 that isn't a reading is the **firmware version** in the header, which triggers the OTA check (§5.4).
 The heat pump is otherwise **fully automatic** (auto-detected).
 
@@ -137,9 +148,9 @@ The heat pump is otherwise **fully automatic** (auto-detected).
   captive `setup.html` (§5.0) and thereafter re-editable from the gear → Connections → WiFi
   (§5.1, with automatic rollback to the last working network if the new
   credentials fail), the MQTT broker from the same tile's MQTT row (§5.1), the heat pump
-  needs no setup (auto-detected; RX/TX pins on the ESP32 card in Settings, §5.6), and firmware
+  needs no setup (auto-detected; RX/TX pins on the Protokoll card in Settings, §5.6), and firmware
   updates are checked by tapping the version — the header meta line, or the Version row on the
-  Settings ESP32 card, which does the same thing (§5.4).
+  Settings Firmware card, which does the same thing (§5.4).
 - MQTT is optional — an empty broker disables it.
 
 `GET /status` exposes the fields the dashboard keys off:
@@ -157,7 +168,7 @@ ESP32 card's two trended memory rows (§5.6) — `min_free_heap` and the reset r
 served to `/status` readers, the MQTT heartbeat's diagnostic entities and `/diag`),
 `ota{channel}` (`"release"` | `"dev"` — which published feed the next update check reads; the
 SETTING, not the running build, since a device can be set to a channel it has not installed from
-yet — drives the ESP32 card's Update-channel select, §5.4),
+yet — drives the Firmware card's Update-channel select, §5.4),
 `last_crash` (`null` on a clean boot **or once the report is deleted** via `POST /crash/dismiss`,
 else `{reason,reason_code,fault,coredump,task,pc,backtrace[],corrupted,elf_sha256}` — drives the
 crash banner),
@@ -239,7 +250,7 @@ no poll-interval control (poll is fixed at 1 s). What there is to see or touch i
 everything else is — what the *unit* is on the dashboard, what the *board* is in Settings:
 - **Model** name (the brand while offline) and detected capacity (shown only while the link is live)
   → the dashboard **Model** card (§5.3). There is no "auto-vs-manual detection" indicator.
-- **X10A link** (Online/Offline), **protocol** (X10A-I/S) and the **RX/TX pins** → the **ESP32**
+- **X10A link** (Online/Offline), **protocol** (X10A-I/S) and the **RX/TX pins** → the **Protokoll**
   card in Settings (§5.6). The RX/TX pins are the physical X10A link, so they are **persisted** (a
   manual pick survives reboot) and the detection sweep tries the cached pair first (defaults as
   fallback, so a stale cache self-heals). RX/TX are **auto-detected**: while the bus answers they show
@@ -277,7 +288,7 @@ Body, ordered:
 0. **Recovery-mode banner** (only when `sys.safe_mode` is true). A `--warn`-accented card **above the
    system card**: title "Recovery mode", explaining that the device restarted too many times and came up
    minimally (heat-pump polling and MQTT paused), and to correct the configuration (e.g. the RX/TX
-   pins on the ESP32 card in Settings) and reboot. **Not dismissible** — it reflects a live state and clears
+   pins on the Protokoll card in Settings) and reboot. **Not dismissible** — it reflects a live state and clears
    itself once a healthy reboot leaves safe mode. Lives outside the poll-rebuilt card grid.
 0. **WiFi-rollback banner** (only when `wifi.rolled_back` is true). A `--warn`-accented card **above
    the system card**: title "WiFi change failed — rolled back", explaining that the new credentials couldn't
@@ -789,7 +800,7 @@ board *identity* — the number a user quotes in a bug report — and because th
 progress in that same line, where the page underneath stays readable.
 
 **Tapping the version does the same thing wherever the version is printed as a row of its own** —
-so the **Version** row on the Settings ESP32 card (§5.6) runs the identical check. It is one
+so the **Version** row on the Settings Firmware card (§5.6) runs the identical check. It is one
 gesture with one meaning, not a second flow: the row calls the same `checkFirmwareUpdate()`.
 
 **And it stays on the screen it was tapped on.** The readout has **two slots**, not one — `#otaStat`
@@ -804,11 +815,12 @@ deciding where you should be looking. Moving the readout costs a second `<span>`
 costs them their place. **Nothing in the OTA flow navigates** — the only screen change is the page
 **reload** after a successful install, which is a new page, not a jump.
 
-Because that slot is painted straight into the DOM rather than rebuilt from state, the ESP32 card
-**freezes while the readout has anything to say** (`S.otaShown`, which covers the terminal messages'
-linger too). Otherwise the once-a-second rebuild would blink the percentage out and restart the
-spinner's animation on every frame — the same hazard the header's `#otaStat` is exempt from
-re-render for. What holds still is a card of static facts, for the seconds
+Because that slot is painted straight into the DOM rather than rebuilt from state, **all three
+ESP32-family cards freeze together** while the readout has anything to say (`S.otaShown`, which
+covers the terminal messages' linger too) — they are one `esp32CardHtml()` string, so there is no
+freezing the Firmware card alone. Otherwise the once-a-second rebuild would blink the percentage out
+and restart the spinner's animation on every frame — the same hazard the header's `#otaStat` is exempt
+from re-render for. What holds still is three cards of static facts, for the seconds
 an update takes; the Connections tile beside it keeps updating, since a link dropping mid-download
 is exactly what a user would want to see move.
 
@@ -831,7 +843,7 @@ is exactly what a user would want to see move.
   shared OOM guard is reported as a retryable "device busy", never as a timeout. Errors show in
   `--err` and linger longer than a success before clearing.
 - **Which feed it checks is a setting, and it lives in Settings** — the **Update channel** row on
-  the ESP32 card (§5.6), a two-option select: *Release* (cut by hand) or *Development* (every merge
+  the Firmware card (§5.6), a two-option select: *Release* (cut by hand) or *Development* (every merge
   to `main`). It sits directly under the **Version** row, because a channel picker with no
   version beside it asks the user to hold "what am I running" in their head while choosing what to
   run. Picking one is a live write (`POST /set_ota`, no reboot), and it then **starts the check
@@ -878,10 +890,11 @@ is exactly what a user would want to see move.
   finds nothing and says so. The UI does not distinguish "no newer version" from "no feed configured";
   both are honestly "up to date" from the device's point of view.
 - The **device log** is not surfaced in the UI (an early Diagnostics screen was dropped). It remains
-  available out-of-band at `GET /diag` (verbose/clear via query); a third card on Settings is where
+  available out-of-band at `GET /diag` (verbose/clear via query); another card on Settings is where
   it would go if it ever comes back.
-- There is **no manual language selector** — the UI language follows the browser (de / en), and the
-  firmware itself ships no localized strings (§1).
+- The UI language follows the **browser** (de / en) by default, with an optional **manual override**
+  on the Firmware card (Sprache → `/set_lang`, persisted in NVS as `ui_lang`; §1). The firmware itself
+  ships no localized strings.
 
 ### 5.5 Installer landing page (`docs/index.html`, GitHub Pages)
 The page a user meets **first** — before the device runs any of the firmware's own UI — so it opens
@@ -943,9 +956,12 @@ opens **Settings**, which swaps the dashboard header for a **back header** — a
 screen title. `Esc` leaves the same way, but only when no modal is open: a modal owns `Esc` first, so
 one key press never both closes a dialog and leaves the screen behind it.
 
-**Settings is flat.** No menu of entries, no sub-screens: the gear lands directly on the two cards,
-stacked in the same single column as everything else (§9). Both are the *same* cards they were on the
-dashboard — the move changed where the configuration lives, not how it looks:
+**Settings is flat.** No menu of entries, no sub-screens: the gear lands directly on the four cards,
+stacked in the same single column as everything else (§9). The Connections tile is the *same* card it
+was on the dashboard — the move changed where the configuration lives, not how it looks. The board
+card is the same story split three ways: **ESP32** / **Protokoll** / **Firmware** answer three
+different questions (the board itself, the X10A link, the running software) that one card used to
+answer at once, all three built and rebuilt together by one `esp32CardHtml()`:
 
 1. **Connections tile** — one full-width card, `--card` bordered like the value groups, titled
    "Connections". Combines **WiFi**, **MQTT**, **Syslog** and **NTP** into one row each: a label on
@@ -978,11 +994,8 @@ dashboard — the move changed where the configuration lives, not how it looks:
      room in a one-line tile); it remains available from `/status.ntp.time` and every syslog
      TIMESTAMP — and from no HA entity (the "Device Time" sensor is retired, ARCHITECTURE.md → *The
      MQTT bridge*).
-2. **ESP32 card** — the board itself, styled exactly like the value groups (§6):
-   the heat-pump link (Online/Offline) and X10A protocol, the **RX/TX pins** — read-only when
-   detected, else a usable-GPIO dropdown (§5.2) — and the **Hardware** row (status indicator +
-   recovery-button pins), which opens the board-hardware modal. From
-   `pins_avail`, `hp{proto,rx,tx,connected,last_ok_s}`,
+2. **ESP32 card** — the board itself, styled exactly like the value groups (§6): the **Hardware**
+   row (status indicator + recovery-button pins), which opens the board-hardware modal, from
    `board{…}`. It carries **almost no board telemetry** — chip (`platform`) and **Last reset**
    (`sys.reset_reason`) were rows here through v1.0.14 and are gone: Settings states
    what the board is **set to**, and read-only numbers nobody acts on from this screen only pushed
@@ -1011,15 +1024,22 @@ dashboard — the move changed where the configuration lives, not how it looks:
    days nobody is reading the minutes, and a figure that reshuffles every second is a clock, not a
    diagnostic. The unit symbols are SI and identical in both languages, so the row needs no
    translated unit strings (the Checkup window already prints `min`/`h` untranslated).
-   **The card's order encodes what the rows are**: link facts (link, protocol, RX/TX) → settings
-   (Version, Update channel, Hardware) → the board's own health (uptime, then the two memory rows).
-   **Readings and
-   settings only** — the card carries no action. *Report a bug* was its last row through
-   v1.0.0-dev.199 and is in the footer line below now: a rare escape hatch drawn at a live reading's
-   weight, immediately under *Largest free block*, reads as one more board fact, and the card's whole
-   claim is that each row is one.
-   Then the **Version** (`version`) and the **Update channel** select
-   (`ota.channel` → `POST /set_ota`, §5.4). The version being here *as well as* in the dashboard
+   **The card's order encodes what the rows are**: the board's own setting (Hardware) → its own
+   health (uptime, then the two memory rows).
+3. **Protokoll card** — the X10A link, split out because it answers a different question than the
+   board's own health does (*is the bus alive*, not *is the board healthy*): the heat-pump link
+   (Online/Offline) and X10A protocol, then the **RX/TX pins** — read-only when detected, else a
+   usable-GPIO dropdown (§5.2). From `pins_avail`, `hp{proto,rx,tx,connected,last_ok_s}`. **Link
+   facts, top to bottom** (link, protocol, RX, TX) — there is no setting on this card, only what the
+   bus is currently doing and which pins it is doing it on.
+4. **Firmware card** — the running software: the **Version** (`version`) and the **Update channel**
+   select (`ota.channel` → `POST /set_ota`, §5.4), then **Language** (`ui.lang` → `POST /set_lang`,
+   §1) — a three-option select, **Browser** / English / Deutsch, "Browser" because that option *is*
+   the browser's own guess (`navigator.language`), not a separate automatic mode. Picking one is a
+   live write like the channel beside it: no reboot, and the browser re-localises immediately
+   (`setLang()` re-runs `applyStaticI18n()` + the schematic's hit-target labels) rather than waiting
+   for the next poll to *notice* the change — the request that sets it is the same request that
+   proves it. The version being here *as well as* in the dashboard
    header serves two different needs, and each row answers the one its screen asks: the header keeps
    board identity where a user quotes it from, while this row exists so the channel selector under
    it is legible — "which feed do I follow" is unanswerable without "what am I running". What they
@@ -1028,7 +1048,12 @@ dashboard — the move changed where the configuration lives, not how it looks:
    through v1.0.13 on the reasoning that the header owned the affordance; in use that only made the
    version look inert precisely where a user is already deciding which build to run.
 
-Under both, a `--muted` monospace footer line naming the product and running version — and, after
+**Readings and settings only** — none of the three cards carries an action. *Report a bug* was the
+(then single) card's last row through v1.0.0-dev.199 and is in the footer line below all of them now:
+a rare escape hatch drawn at a live reading's weight, immediately under *Largest free block*, read as
+one more board fact, and each card's whole claim is that every row on it is one.
+
+Under all four, a `--muted` monospace footer line naming the product and running version — and, after
 them, **Report a bug**, the screen's one action. It is the `.verlink` affordance the header's version
 button uses (§5.3 header): size, weight and colour all inherited, so at rest it is indistinguishable
 from the text beside it, with the brand tint + underline arriving only on hover/`:focus-visible`. It
@@ -1051,9 +1076,10 @@ marked and the mark would stop meaning anything. A **disabled** link is a choice
 raises nothing. The dot is never the only carrier: the button's `aria-label` states the count in
 words (§9).
 
-**Rebuild rule.** Both cards are rebuilt from `/status` on every push, so the write goes through the
-same change-guard the rest of the app uses — and the rebuild
-is skipped entirely while an RX/TX dropdown **or the update-channel select** has focus, or the poll
+**Rebuild rule.** All four cards are rebuilt from `/status` on every push (the Connections tile and
+the three ESP32-family cards, the latter as one string from one `esp32CardHtml()` call), so the write
+goes through the same change-guard the rest of the app uses — and the rebuild is skipped entirely
+while an RX/TX dropdown, the update-channel select **or the language select** has focus, or the poll
 would collapse it mid-pick. (Any future select on these cards has to join that guard — an open
 native dropdown is destroyed by an `innerHTML` write, and the poll is ~1×/s.)
 
@@ -1083,7 +1109,7 @@ the value's register/label (the generator can also stamp a `group` tag per row).
 6. **Electrical** — INV primary current, INV compressor current, CT L1/L2/L3, backup-heater
    capacity + stages.
 7. **Device** — WiFi/MQTT/HP link, poll counters, firmware (WiFi/MQTT and HP link/protocol in
-   Settings, §5.6 — the Connections tile and the ESP32 card; firmware version in the dashboard's
+   Settings, §5.6 — the Connections tile and the Protokoll card; firmware version in the dashboard's
    header meta line §5.4; model name in the Model card, §5.3 item 4). Uptime and the heap/reset
    diagnostics are not a UI row anywhere — `/status`, `/diag` and the MQTT heartbeat carry them.
 
@@ -1202,7 +1228,7 @@ page under near-identical cards). Specific:
   *Generic* hint.
 - **Recovery mode**: if `sys.safe_mode` is true (too many crash boots), the recovery banner (§5.3
   item 0) shows above the system card and the heat-pump cards stay collapsed (polling is paused); the WiFi,
-  MQTT and ESP32 (RX/TX) config controls behind the gear remain usable so the bad setting can be
+  MQTT and Protocol (RX/TX) config controls behind the gear remain usable so the bad setting can be
   corrected, then a reboot returns to normal.
 - **Post-crash**: if the last reset was a fault (or a core dump is waiting), the crash banner (§5.3
   item 0) appears above the system card until the report is deleted on the device (or the next clean
@@ -1225,7 +1251,7 @@ page under near-identical cards). Specific:
 ## 9. Responsive & accessibility
 
 - **Single column at every width.** Every card — system card, Model card, value groups and the
-  Connections/ESP32 cards behind the gear — is the same full container width, centred, stacked top-down. Unlike the earlier ≥560px
+  Connections tile and the three ESP32-family cards behind the gear — is the same full container width, centred, stacked top-down. Unlike the earlier ≥560px
   two-column multicol, this never leaves an empty second column (with a stray card shadow at the column
   gap) when only one card is present — e.g. just the value groups while the heat-pump link is down.
 - **Type scales up on larger viewports.** Mobile is the base ramp (15px body, `max-width: 720px`);
@@ -1253,7 +1279,7 @@ The design needs these additions to the firmware (all small, tracked as follow-u
   Connections tile's WiFi row consumes `rssi`/`connected` (§5.6) and the dashboard header
   identity line consumes `ip` (§5.3 body). See `main/http_status.cpp`.
 - `POST /set_hp`: **every field is optional** — an omitted key keeps its current value, so the
-  Settings ESP32 card posts just `{profile:"auto",rx,tx}` on a pin change. `poll_s` is **not**
+  Settings Protokoll card posts just `{profile:"auto",rx,tx}` on a pin change. `poll_s` is **not**
   accepted (fixed at 1 s); `proto` is auto-detected and not accepted; there is no value mask.
 - `GET /status`: `uptime_s` (seconds since boot) has **two** consumers, and they read it for
   different things: the **Uptime** row on the Settings ESP32 card (§5.6 item 2) states it, while

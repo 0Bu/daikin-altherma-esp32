@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte — it both ranks the representative and **narrows the candidate set**, dropping only classes that contradict it, **retried page probe + a second-sweep confirmation** before falling back to `generic`) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1829 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1849 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -87,6 +87,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 57 | **Doc entity-id gate** — the docs hand a reader copy-pasteable YAML naming Home Assistant entity ids, each derived from a catalog **label**, so an id is only as stable as the label — and the catalog spells one quantity several ways across models. A wrong id errors *nowhere*: HA builds the template sensor, its `availability` guard never becomes true, the entity sits at `unavailable`, and that reads as "my heat pump doesn't support this" rather than as a typo in the docs. Every other gate is green while it happens. Resolves each quoted id through the real `ha_slug` over the real catalog, and only against **detectable** profiles — the heat-meter recipe had named a row existing solely in the host-test fixture `altherma3_r_erga` since #206, which a whole-registry check would have passed. Deliberately not a demand that an id be right on *every* profile | ✅ | [`entity_id_audit.cpp`](../tools/docs/entity_id_audit.cpp), [`run-doc-entity-audit.sh`](../scripts/run-doc-entity-audit.sh), [`selftest.sh`](../tools/docs/selftest.sh) |
 | 58 | **Deleting a crash report** (`POST /crash/dismiss`) — the crash banner's dismiss was *page state*, so the first reload brought the same crash straight back and a second browser (or Home Assistant's retained crash entity) never saw the dismissal at all. It is now a device action: erase the dump image, **then** mark the cached `CrashInfo` dismissed, so `crash_is_notable()` is false everywhere at once — `/status.last_crash` goes `null`, the retained crash topic clears on the next heartbeat tick, and the banner is gone across reloads and browsers. Erase first, mark second: a failed erase answers `500` and marks nothing, since a dismissal that outlived it would report "no crash" with the dump still downloadable. RAM-only on purpose — after any reboot the reason is no longer a fault and the dump is gone, while a *new* crash must show, which a persisted dismissal could suppress. The reset **reason** is untouched, so the heartbeat's own sensor still says how the board rebooted. `POST`, not a `GET` beside `/coredump`: it destroys the one artifact a bug report needs, so no link or prefetch may reach it | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp), [`http_status.cpp`](../main/http_status.cpp), [`www/app.js`](../main/www/app.js) |
 | 59 | **Pinned warning contract on `main/`** — three places in that component are written the way they are *because* a warning class is fatal there (the `[[nodiscard]]` on the NVS setters, an unreachable `return false`, a `static_cast<int>` onto a `%d`), and nothing in the repo made that true: `main/` carried no warning policy of its own, so all three held only while ESP-IDF's defaults happened to make them fatal — and IDF's `-Werror` handling is version- *and* Kconfig-dependent, so a bump could have retired them silently. `-Werror=return-type`, `-Werror=format` and `-Werror=unused-result` are now pinned on that component alone. The `unused-result` one is the sharpest: a dropped NVS write is silent, and exactly one left safe mode unable to latch its crash counter. Scoped rather than global for two independent reasons — a `CONFIG_COMPILER_*` key would hold ESP-IDF and the managed components to a contract that is not ours to demand, and `sdkconfig.defaults` is hashed into CI's ccache key, so a diagnostic-only change there would discard every cached object it cannot invalidate. Costs no CI minute: the firmware `build` job is already the only compile of `main/*.cpp`, which is also why `run-mock-tests.sh` cannot see the format case (`int32_t` is `long int` on xtensa, plain `int` on the host). Deliberately **not** accompanied by a clang-tidy/cppcheck gate — measured at ~7000 findings blanket and ~50 curated with **zero** real defects, since the bug classes here are typed out rather than linted out (§9) | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`nvs_storage.hpp`](../main/nvs_storage.hpp), [`logic/timestamp.hpp`](../main/logic/timestamp.hpp) |
+| 60 | **Manual UI-language override** — the bilingual (de/en) web UI is browser-detected by default; a persistent **Sprache** picker (Browser / English / Deutsch) on the Firmware settings card now overrides that per installation, winning over the browser guess on every client. Stored in the atomic config blob (**v4**, one writer, `auto` decoded defensively so a pre-v4 OTA keeps the browser default instead of dropping credentials) and applied **live** — the browser reads `/status.ui.lang` and re-localises the chrome + schematic with no reload. Landed alongside a split of the single ESP32 settings card into three (ESP32 / Protokoll / Firmware) | ✅ 🧪 | [`logic/ui_lang.hpp`](../main/logic/ui_lang.hpp), [`http_config.cpp`](../main/http_config.cpp), [`http_status.cpp`](../main/http_status.cpp), [`www/app.js`](../main/www/app.js) |
 
 ---
 
@@ -491,6 +492,21 @@ entered exactly like a visible one.
   SNTP sync — its instant is then unknowable, its age never is; `t0` is **omitted** entirely while the
   clock has never synced or nothing has been committed, so the UI reads out an age instead of a
   fabricated timestamp. An unknown trend id is a 404, never a defaulted series.
+- **✅ 🧪 Manual UI-language override** ([`logic/ui_lang.hpp`](../main/logic/ui_lang.hpp),
+  `POST /set_lang`, `/status.ui.lang`). The web UI is bilingual (de/en) and picks its language
+  client-side from `navigator.language` by default; on top of that the device now carries a persistent
+  **manual override** — the Firmware settings card's **Sprache** picker (Browser / English / Deutsch;
+  "Browser" rather than "Automatic" because that option IS the browser's own `navigator.language`
+  guess). `auto` is a first-class value (browser-detected); `de`/`en` force a language on **every**
+  client that opens the dashboard. It rides the atomic config blob (**v4**, one writer, decoded
+  defensively — an unknown byte reads as `auto`, and a pre-v4 blob decodes as `auto` so the OTA that
+  introduces the field keeps the browser default rather than dropping credentials), and applies
+  **live**: the browser reads `/status.ui.lang` on its next poll and `setLang()` re-runs
+  `applyStaticI18n()` + `labelSchematicHits()` with no reload. The contract is
+  [`DESIGN.md` §1](DESIGN.md); the heat-pump **value labels** stay English in both languages (they are
+  X10A register names) — only the UI chrome and descriptions translate. This landed alongside a split
+  of the single ESP32 settings card into **three** — ESP32 / Protokoll / Firmware — with the language
+  picker in the Firmware card.
 
 ---
 
@@ -699,8 +715,8 @@ the fact*, from the field, without a serial cable:
 - **✅ 🧪 Getting the evidence off the board — and what must not come with it.** Everything above is
   useless if a user cannot produce it, and until now the only copy affordance in the whole web UI sat
   inside the crash banner, which never renders unless the device actually crashed: a wrong reading or
-  an MQTT dropout, the two commonest reports, had no way in at all. **Settings → ESP32 → *Report a
-  bug*** collects `/status`, `/values`, `/ota/status` and `/diag` into one pasteable report and opens
+  an MQTT dropout, the two commonest reports, had no way in at all. **Settings → *Report a bug***
+  collects `/status`, `/values`, `/ota/status` and `/diag` into one pasteable report and opens
   the prefilled issue form ([`REPORTING.md`](REPORTING.md)). It is filed as a *public* issue, which is
   defensible only because the board **redacts first**: [`logic/redact.hpp`](../main/logic/redact.hpp)
   behind `?redact=1` replaces the seven reporter-identifying values (`wifi.ssid`/`ip`/`bssid`/`mac`,
@@ -1063,7 +1079,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   catalog sweep proving each `(page, offset, converter)` locator resolves to **exactly one** row
   **and to the right one**, asserted on the resolved row's own label, because six other rows share
   the `0x60/12` byte and every one of them would satisfy a page+offset match),
-  **1829 `CHECK`s** in
+  **1849 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -1386,7 +1402,7 @@ and gzipped into the app image** (polled, after a WebSocket push proved it could
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 18-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1829 checks),
+on the host** (1849 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

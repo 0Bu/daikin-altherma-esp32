@@ -563,7 +563,7 @@ http_status.cpp GET / (setup.html in AP mode, else gzip UI) /status /values /his
                 /coredump + POST /crash/dismiss + captive catch-all. build_status_json_string() runs
                 on the httpd task ALONE — it used to run on the poll task too, which is what
                 overflowed that task's stack (#241)
-http_config.cpp POST /set_wifi /set_mqtt /set_syslog /set_ntp /set_hp /set_board /set_ota /detect
+http_config.cpp POST /set_wifi /set_mqtt /set_syslog /set_ntp /set_hp /set_board /set_ota /set_lang /detect
 http_ota.cpp    /ota/check|update|status
 mcp_server.cpp  /mcp (read-only MCP tools; TODO)
 mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE shared grouped-JSON
@@ -823,7 +823,7 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 config_model,
                 config_store, discovery, ha_device, detect, history, json, mqtt_group, mqtt_uri, heartbeat, crashinfo,
                 bootlog, reset_reason, boot_guard, board_pins, board_presets, modbus, syslog_policy, link_watch,
-                wifi_rollback, health_gate, version_cmp, ota_manifest, ota_channel,
+                wifi_rollback, health_gate, version_cmp, ota_manifest, ota_channel, ui_lang,
                 http_body, http_surface, query_flag, redact, mcp_jsonrpc, timestamp, uart_plan, detect_backoff,
                 hexdump, led_pattern, button, captive,
                 lwt_select, ou_stale, cop_scope, profile_view, feature_gate, availability,
@@ -1327,6 +1327,18 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 without its trailing slash yields the same URL, and an EMPTY base yields "" (the
                 caller says "no update URL configured") rather than a relative path that would be
                 fetched against nothing and reported as an unreachable server
+                ui_lang.hpp = which language the web UI renders in, when the browser default is
+                OVERRIDDEN. The UI is bilingual (de/en) and picks its language client-side from
+                navigator.language by default (main/www/app.js, DESIGN.md §1); this is the persistent
+                MANUAL override on top of that — enum {Auto,De,En}, one writer (POST /set_lang), in
+                the config blob (v4) beside ota_channel for the same one-owner reason. Auto is a
+                first-class value, NOT the absence of one: a fresh or pre-v4 device reports "auto" and
+                the browser keeps auto-detecting; only De/En states a language, which then wins over
+                every client's guess. Pure so the enum<->string/int maps are asserted host-side, and
+                decoded DEFENSIVELY (an unknown stored byte reads as Auto — a garbled byte must fall
+                back to the browser default, never force a language the user never chose). Same
+                five-function shape as ota_channel.hpp (name/valid/parse/to_int/from_int), minus the
+                OTA-specific URL joins
                 bootlog.hpp = the records syslog.cpp replays once per boot: build_boot_line (version/
                 elf_sha256/reset/safe_mode — the only way to tell WHICH firmware produced a log
                 stream) + build_crash_log_lines (the crash as single-line, datagram-sized records;
@@ -1533,7 +1545,7 @@ www/            web UI sources (index.html + style.css + app.js -> one gzipped p
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi creds + the one-shot rollback backup + flags (`wifi_rolledbk` outcome marker included), MQTT (`uri`/`user`/`pass`), syslog (empty host = off), `ntp_server` (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` compile-time default on next boot), (blob **v2**) the **board-local hardware** `led_gpio`/`led_type`/`led_inverted`/`btn_gpio`/`btn_active_low` and (blob **v3**) the **OTA update channel** (`ota_channel`, 0 = release / 1 = dev) — in the blob because, like the credentials and unlike the link cache, each has exactly ONE writer (httpd, `POST /set_board` / `POST /set_ota`). An OLDER blob is still ACCEPTED: **v1** (pre-board OTA) reports `has_board=false`, so `config_load` seeds the board fields from Kconfig instead of reading "absent" as "indicator off"; **v2** (pre-channel OTA) reports `has_ota=false`, which needs no Kconfig fallback — the pre-v3 world had exactly ONE feed, and that is the release channel the struct already defaults to. Rejecting either would drop that user's WiFi/MQTT creds on the upgrade. One CRC-checked entry written all-or-nothing, so the whole credential/service state survives a write failure or power cut together — no per-key write-ordering. The X10A **link cache** `rx_pin`/`tx_pin`/`proto` stays as SEPARATE self-healing keys (two owners: `config_save` for a manual override, `config_save_link` for a detected pin; re-validated on load). Legacy per-key credential keys (`wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/…/`ntp_server`) are still READ as the fallback when `cfg` is absent (fresh device / pre-blob OTA). Plus the boot-loop **crash counter** `boot_fails` (safe_mode.cpp; here so a factory reset wipes it too). (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
+| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi creds + the one-shot rollback backup + flags (`wifi_rolledbk` outcome marker included), MQTT (`uri`/`user`/`pass`), syslog (empty host = off), `ntp_server` (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` compile-time default on next boot), (blob **v2**) the **board-local hardware** `led_gpio`/`led_type`/`led_inverted`/`btn_gpio`/`btn_active_low`, (blob **v3**) the **OTA update channel** (`ota_channel`, 0 = release / 1 = dev) and (blob **v4**) the **UI language override** (`ui_lang`, 0 = auto / 1 = de / 2 = en) — in the blob because, like the credentials and unlike the link cache, each has exactly ONE writer (httpd, `POST /set_board` / `POST /set_ota` / `POST /set_lang`). An OLDER blob is still ACCEPTED: **v1** (pre-board OTA) reports `has_board=false`, so `config_load` seeds the board fields from Kconfig instead of reading "absent" as "indicator off"; **v2** (pre-channel OTA) reports `has_ota=false` and **v3** (pre-language OTA) reports `has_lang=false`, neither needing a Kconfig fallback — the pre-v3 world had exactly ONE feed (the release channel the struct defaults to) and the pre-v4 world had no override (auto = keep letting the browser detect the language). Rejecting any would drop that user's WiFi/MQTT creds on the upgrade. One CRC-checked entry written all-or-nothing, so the whole credential/service state survives a write failure or power cut together — no per-key write-ordering. The X10A **link cache** `rx_pin`/`tx_pin`/`proto` stays as SEPARATE self-healing keys (two owners: `config_save` for a manual override, `config_save_link` for a detected pin; re-validated on load). Legacy per-key credential keys (`wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/…/`ntp_server`) are still READ as the fallback when `cfg` is absent (fresh device / pre-blob OTA). Plus the boot-loop **crash counter** `boot_fails` (safe_mode.cpp; here so a factory reset wipes it too). (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -1606,10 +1618,15 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   /set_mqtt's clear_creds),
                   syslog{configured,resolved,reachable,host,port,error},
                   ota{channel} — "release"|"dev", the FEED the next OTA check reads (POST /set_ota).
-                  On /status and not only /ota/status because the Settings ESP32 card renders its
+                  On /status and not only /ota/status because the Settings Firmware card renders its
                   selector from /status like every other setting; a device can be SET to a channel it
                   is not yet running a build from, so it is reported rather than inferred from the
                   running version's "-dev.N" suffix,
+                  ui{lang} — "auto"|"de"|"en", the web UI's MANUAL language override (POST /set_lang,
+                  logic/ui_lang.hpp). "auto" (the default) = browser-detected; "de"/"en" force a
+                  language on every client. Reported here so the Firmware card's Sprache selector
+                  renders from /status like the channel, and the browser applies it over its own
+                  navigator.language guess,
                   ntp{server,synced,time} — server is the CONFIGURED address (config().ntp_server:
                   NVS "ntp_server" override of CONFIG_DAIKIN_NTP_SERVER, runtime-editable via
                   POST /set_ntp exactly like syslog_host/POST /set_syslog), not necessarily who
@@ -1652,9 +1669,8 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   is how a reader ends up looking in the wrong place,
                   detect{proto,valid,capacity_kw,capacity_kw_iu,ou_eeprom,candidates[],families[],
                   ambiguous,
-                  model{name,family,marketing}} — drives the SETTINGS ESP32 board card (behind the
-                  header gear, with the Connections tile; the dashboard keeps the model card + values)
-                  and the dashboard's model card. TWO capacities, separate fields, never merged:
+                  model{name,family,marketing}} — drives the dashboard's Model card. TWO capacities,
+                  separate fields, never merged:
                   capacity_kw is the OUTDOOR unit's own report (page 0x00/12) and is null whenever the
                   variable-length descriptor is too short to carry offset 12; capacity_kw_iu is the
                   INDOOR unit's rated code (0x60/6, same units), which detection reads as its ranking
@@ -1801,9 +1817,10 @@ POST /set_hp      {profile,rx,tx} -> validate + apply live (no reboot). rx/tx PE
                   pin cache — a manual override survives reboot); profile is session-only. The UI
                   always sends profile="auto" (fully automatic — no manual model pick); a concrete id
                   is still accepted (pins the model for this session) but never offered in the UI.
-                  proto is NOT accepted (auto-detected); poll_s fixed at 1 s and lang removed
-                  (English-only) — neither accepted. RX/TX are auto-detected; when the bus is silent
-                  the ESP32 card's pin dropdown posts {profile:"auto",rx,tx} to re-run detection.
+                  proto is NOT accepted (auto-detected); poll_s fixed at 1 s and lang is NOT accepted
+                  here — the UI language is its own setting now (POST /set_lang), no longer a /set_hp
+                  field. RX/TX are auto-detected; when the bus is silent the Protocol card's pin dropdown
+                  posts {profile:"auto",rx,tx} to re-run detection.
 POST /set_board   {led_gpio,led_type,led_inverted,btn_gpio,btn_active_low} -> validate + persist +
                   REBOOT. The board's own onboard parts: which pin the status indicator is on, whether
                   it is a plain LED (led_type 0) or a WS2812 (1), and which pin (if any) carries the
@@ -1818,7 +1835,7 @@ POST /set_board   {led_gpio,led_type,led_inverted,btn_gpio,btn_active_low} -> va
                   sits there (AtomS3 Lite: GPIO41) — plus the collision rules, in BOTH directions: no
                   pin may be claimed by the indicator, the button and the X10A link at once, whichever
                   endpoint is called second
-   (all seven /set_*) a failed route-owned NVS write answers 500
+   (all eight /set_*) a failed route-owned NVS write answers 500
                   {ok:false,error:"config write failed"} and does NOT reboot/apply; unrelated
                   self-healing link-cache maintenance failures are logged without rejecting a
                   committed service blob, while /set_hp requires those keys (the failing key is on /diag)
@@ -1826,6 +1843,13 @@ POST /set_ota     {channel:"release"|"dev"} -> validate + persist, applied LIVE 
                   /set_board: nothing claims the channel at task start — ota_update.cpp reads it when
                   it fetches, so the very next check uses the new feed). An unknown name is REJECTED,
                   not defaulted — answering ok to a typo would look like a saved setting. Unchanged
+                  -> {"ok":true,"reboot":false} like the other /set_* routes
+POST /set_lang    {lang:"auto"|"de"|"en"} -> validate + persist, applied LIVE (no reboot, like
+                  /set_ota: nothing claims the language at task start — the UI reads /status.ui.lang,
+                  so the next poll applies it). The web UI's MANUAL language override on top of the
+                  browser default (logic/ui_lang.hpp): "auto" hands the choice back to the browser
+                  (navigator.language), "de"/"en" force one on every client that opens the dashboard.
+                  An unknown name is REJECTED, not defaulted (a typo would look saved). Unchanged
                   -> {"ok":true,"reboot":false} like the other /set_* routes
 POST /detect      re-run auto-detection now (no reboot): reset profile to "auto" + invalidate the
                   fingerprint (RAM only) -> the next poll cycle sweeps protocol + re-fingerprints

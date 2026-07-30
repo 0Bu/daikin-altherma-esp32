@@ -21,8 +21,9 @@ void http_start() {
     // ESP_ERR_HTTPD_HANDLERS_FULL, and the casualty is whatever registers LAST, which is deliberately
     // the captive/SPA catch-all — so the symptom of a missing route would be deep links breaking,
     // not the new route 404ing. http_register() now logs a failed registration for that reason.
-    // 24 since /events went away with the WebSocket push (docs/ARCHITECTURE.md "Push vs. poll").
-    cfg.max_uri_handlers = 24;
+    // 24 since /events went away with the WebSocket push (docs/ARCHITECTURE.md "Push vs. poll"),
+    // then 25 when POST /set_lang (the UI language override) was added.
+    cfg.max_uri_handlers = 25;
     cfg.lru_purge_enable = true;
     // 12 KB, not the 8 KB this ran on through v1.0.12 — MEASURED, not padded. v1.0.12 panicked and
     // the core dump's task table read `httpd 7728/460`: the task had been 7732 bytes deep at its last

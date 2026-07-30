@@ -8,6 +8,7 @@
 #include "board_pins.hpp"   // board_pin_offerable — the chip-reserved-pin rule validate() enforces
 #include "led_pattern.hpp"  // LedType — the indicator back-end, now a runtime choice not a Kconfig one
 #include "ota_channel.hpp"  // OtaChannel — which published feed this device follows
+#include "ui_lang.hpp"      // UiLang — the web UI's manual language override (else browser-detected)
 
 namespace daik {
 
@@ -36,6 +37,11 @@ struct Config {
     // accident. Applied LIVE (no reboot) — ota_update.cpp reads it when it fetches, nothing claims
     // it at task start the way the LED driver does.
     OtaChannel  ota_channel = OtaChannel::Release;
+    // Manual web-UI language override (logic/ui_lang.hpp) — PERSISTED, one writer (POST /set_lang).
+    // Auto by default: the browser keeps auto-detecting the language until the user picks one, and
+    // only then does the device state a language that overrides every client's browser guess.
+    // Applied LIVE (no reboot) — the UI reads it from /status; nothing claims it at task start.
+    UiLang      ui_lang = UiLang::Auto;
     // One-shot WiFi credential rollback (POST /set_wifi -> wifi.cpp). The working credentials are
     // stashed here and `wifi_rollback_active` armed before the new ones are tried; the boot that
     // tries them either commits (clears both) or restores the backup. See logic/wifi_rollback.hpp.

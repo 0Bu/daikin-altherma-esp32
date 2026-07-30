@@ -65,7 +65,7 @@ by hand:**
 | Release | `…/` | `…/manifest.json` | a **manual** workflow run (Actions → *build* → *Run workflow* → `release: true`) — the only thing that creates a `v*` tag + a [GitHub release](https://github.com/0Bu/daikin-altherma-esp32/releases/latest) |
 | Development | `…/dev/` | `…/dev/manifest.json` | every firmware-relevant push to `main`; no tag, no release |
 
-A device follows one feed at a time — gear → **ESP32** → *Update channel* (`POST /set_ota`). Dev
+A device follows one feed at a time — gear → **Firmware** → *Update channel* (`POST /set_ota`). Dev
 builds are versioned `<next release>-dev.<n>`, a semver pre-release, so a dev board upgrades itself
 to the next release when one is cut. Going the other way (dev → the last release) means installing
 an *older* build, which the downgrade gate refuses unless the request explicitly asks for it — the
@@ -196,7 +196,8 @@ them. This project keeps that data but makes it **runtime-selectable**:
   back to a dropdown of the chip's safe GPIOs when it doesn't (`logic/board_pins.hpp` — the ESP32-S3
   pins not reserved for flash/PSRAM, strapping, USB-JTAG or JTAG, minus the status LED's own pin;
   which of them a given board breaks out to a header is the user's to know, see the board table in
-  the top-level README). Labels are English-only and the poll interval is fixed at 1 s.
+  the top-level README). The heat-pump value labels stay English-only (a separate concept from the
+  UI's own language — see Configuration model below); the poll interval is fixed at 1 s.
 - The **model** (active profile + fingerprint) is **re-detected on every boot** (never written to
   NVS); the **link** (RX/TX pins + protocol) is a persisted cache, tried first by the sweep. Both
   drive the poll engine (`main/hp_poll.*`). See the Configuration model below.
@@ -224,7 +225,7 @@ User credentials + the X10A link cache are persisted; the model is re-detected o
 
 | NVS key | Meaning |
 |---------|---------|
-| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + the one-shot rollback backup + flags, MQTT (`uri`/`user`/`pass`), syslog (host/port; empty host = off), the SNTP server (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` default on next boot), and — from blob **v2** — the **board-local hardware** (`led_gpio`/`led_type`/`led_inverted`/`btn_gpio`/`btn_active_low`, written by `/set_board`). One CRC-checked entry written with a single `nvs_set_blob`, so a save is **all-or-nothing** across a write failure *and* a power cut. A **v1** blob (written before the board fields existed) is still accepted on read and the board fields fall back to their Kconfig defaults — rejecting it would drop the user's WiFi/MQTT credentials on that upgrade, and treating "absent" as "indicator off" would darken a working LED. WiFi rollback: the previous credentials are backed up here by `/set_wifi` and restored automatically if the new network fails to connect (reason-aware deadline, `logic/wifi_rollback.hpp`); `/status.wifi.rolled_back` reports it after the reboot. |
+| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + the one-shot rollback backup + flags, MQTT (`uri`/`user`/`pass`), syslog (host/port; empty host = off), the SNTP server (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` default on next boot), from blob **v2** the **board-local hardware** (`led_gpio`/`led_type`/`led_inverted`/`btn_gpio`/`btn_active_low`, written by `/set_board`), from blob **v3** the **OTA update channel** (`ota_channel`, `POST /set_ota`) and from blob **v4** the **UI-language override** (`ui_lang`, `POST /set_lang` — the UI is browser-detected by default and this field is absent/"auto" until the user picks one). One CRC-checked entry written with a single `nvs_set_blob`, so a save is **all-or-nothing** across a write failure *and* a power cut. An OLDER blob is still accepted on read: fields a newer version added simply fall back to their default (Kconfig for the board block, since it was compile-time before v2; "release"/"auto" for the channel/language, since those states were the only ones that existed before v3/v4) — rejecting an older blob would drop the user's WiFi/MQTT credentials on that OTA. WiFi rollback: the previous credentials are backed up here by `/set_wifi` and restored automatically if the new network fails to connect (reason-aware deadline, `logic/wifi_rollback.hpp`); `/status.wifi.rolled_back` reports it after the reboot. |
 | *(legacy per-key)* | `wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback`/`wifi_rolledbk`/`mqtt_*`/`syslog_*`/`ntp_server` — the pre-blob layout, still **read** as a fallback when `cfg` is absent (fresh device / OTA from an older build); superseded on the next save. |
 | `rx_pin` / `tx_pin` / `proto` | X10A link cache (physical wiring + framing) — kept as separate self-healing keys, tried first by the sweep, re-saved on change, re-validated on load. |
 | `boot_fails` | Boot-loop crash counter (`safe_mode.cpp`); increments on a crash-only boot, latches recovery mode past the threshold, cleared after a healthy uptime. Lives here so a factory reset wipes it too. |
@@ -234,10 +235,12 @@ hold the configured button for 5 s and the device drops every stored setting and
 setup portal. It is the only config reset that does not require reaching the device over the
 network — the way back in when it has joined a network you can no longer get onto.
 
-Not persisted: the **hostname** is fixed at `daikin-altherma-esp32`, the **poll cadence** at 1 s,
-labels are **English-only**; and the **model** (`profile` + the detection fingerprint) is re-detected
-fresh on every boot and kept in RAM (a swapped unit is re-identified). See
-[ARCHITECTURE.md](ARCHITECTURE.md) → Auto-detection.
+Not persisted: the **hostname** is fixed at `daikin-altherma-esp32`, the **poll cadence** at 1 s, and
+the **value-catalog labels** (the heat-pump register names) stay **English-only**; the **model**
+(`profile` + the detection fingerprint) is re-detected fresh on every boot and kept in RAM (a swapped
+unit is re-identified). The **UI's own language** is browser-detected the same way by default, but —
+unlike the labels above — a manual pick *is* persisted (the `ui_lang` field in the `cfg` row above).
+See [ARCHITECTURE.md](ARCHITECTURE.md) → Auto-detection.
 
 `nvs` offset/size must not change across versions, or old data is stranded on OTA.
 
@@ -392,7 +395,7 @@ POST /set_ntp                      # { server } → persist + reboot, no request
                                    #   SNTP has no disabled state, unlike syslog's empty-means-off.
 POST /set_hp                       # { profile?, rx?, tx? } → apply live (no reboot); rx/tx PERSIST
                                    #   (pin cache), profile session-only; proto auto-detected, not accepted.
-                                   #   The Settings ESP32 card's pin dropdown posts {profile:"auto",rx,tx} to re-detect.
+                                   #   The Settings Protocol card's pin dropdown posts {profile:"auto",rx,tx} to re-detect.
 POST /set_board                    # { led_gpio, led_type, led_inverted, btn_gpio, btn_active_low }
                                    #   → validate + persist + REBOOT (both are claimed once at task
                                    #   start, so they are not hot-swapped). The board's own onboard
@@ -493,11 +496,11 @@ Pull-based: the device fetches `manifest.json` from `CONFIG_DAIKIN_OTA_MANIFEST_
 Pages), compares its `version` to the running firmware, and on confirmation downloads its image
 `daikin-altherma-esp32.bin` via `esp_https_ota` into the inactive OTA slot, then reboots. Tap the
 firmware **version** to check — either the one in the header (next to the IP address) or the
-*Version* row on gear → **ESP32**, which does the same thing and stays where you are. The UI shows
+*Version* row on gear → **Firmware**, which does the same thing and stays where you are. The UI shows
 the download progress inline beside whichever version you tapped, waits for the board to come back
 up and reloads itself onto the new UI. Both the check and the download run on their own task, never on the HTTP worker.
 
-> **Which feed it checks:** the device follows one channel at a time — gear → **ESP32** → *Update
+> **Which feed it checks:** the device follows one channel at a time — gear → **Firmware** → *Update
 > channel* (`POST /set_ota`, applied live). `release` reads the Pages root, `dev` reads `…/dev/`;
 > both are published by CI (see "Flash prebuilt artifacts" above), and the dev URL is derived from
 > `CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL`, so one setting moves both. Publishing does **not** require

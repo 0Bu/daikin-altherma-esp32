@@ -109,6 +109,10 @@ void config_load() {
         // So absent and "release" mean the same thing here (unlike the board block above, where
         // absent had to fall back to Kconfig); the struct default already says so.
         if (b.has_ota) c.ota_channel = ota_channel_from_int(b.ota_channel);
+        // The UI language (blob v4). has_lang == false is a blob written before the override existed;
+        // absent means "auto" (keep letting the browser decide), which the struct default already
+        // says — like the channel above, and unlike the board block, there is no Kconfig fallback.
+        if (b.has_lang) c.ui_lang = ui_lang_from_int(b.ui_lang);
     } else {
         // Legacy / first-boot fallback (per-key + Kconfig defaults).
         c.wifi_ssid = nvs_get_str("wifi_ssid", CONFIG_DAIKIN_WIFI_SSID);
@@ -235,6 +239,8 @@ bool config_save(const Config& c, bool require_link) {
     b.btn_gpio = c.btn_gpio; b.btn_active_low = c.btn_active_low;
     // The OTA channel rides the same blob for the same reason: one writer (POST /set_ota, httpd).
     b.ota_channel = ota_channel_to_int(c.ota_channel);
+    // The UI language likewise: one writer (POST /set_lang, httpd), one persistent user choice.
+    b.ui_lang = ui_lang_to_int(c.ui_lang);
     const std::vector<uint8_t> blob = config_blob_serialize(b);
 
     const esp_err_t e = nvs_set_blob("cfg", blob.data(), blob.size());

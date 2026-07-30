@@ -20,6 +20,11 @@ translation unit ([`test_logic.cpp`](test_logic.cpp)) with `-std=c++17 -Wall -We
 CI runs the same thing as the first step of the `gates` job, gating the esp32s3 firmware build — a logic
 regression fails in seconds instead of after a full ESP-IDF build.
 
+The same `gates` job runs `node test/test_ui_live_i18n.mjs` separately. That browser-free regression
+test executes the production banner/inspector render functions from `main/www/app.js` and verifies
+that their DOM-write signatures invalidate when the persisted UI language changes while device state
+stays identical.
+
 ## Covered
 
 One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `main()` runs them.

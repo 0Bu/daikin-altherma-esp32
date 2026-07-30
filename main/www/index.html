@@ -26,7 +26,7 @@
            a BUTTON — tapping it checks for an OTA update — and the whole check/download reports back
            INLINE right here (#otaStat: a small progress ring + "78%"), never as a stack of toasts
            that hides the page it is talking about (DESIGN.md §5.4). This is one of TWO readout
-           slots: the Settings ESP32 card's Firmware row carries the other (#otaStatSet, built in
+           slots: the Settings Firmware card's Version row carries the other (#otaStatSet, built in
            app.js), so a check started there reports there instead of dragging the user here. -->
       <div class="hdr-meta">
         <span class="hdr-ip mono num" id="hdrIp"></span>
@@ -606,9 +606,9 @@
 
     <!-- ═══ SETTINGS (reached from the header gear) ═══
          The device's configuration, on ONE screen — no menu level in between: the Connections tile
-         (populated by connectionsHtml()) and the ESP32 board card (esp32CardHtml(), which carries
-         the firmware/OTA row, the RX/TX pin picker and the board-hardware row). Both are the exact
-         cards they were on the dashboard; only where they live changed. -->
+         (populated by connectionsHtml()) and the three ESP32 board cards (esp32CardHtml() emits them
+         as one string — ESP32 board health, the Protokoll/X10A link + pin picker, and the Firmware
+         card with the version/OTA row, update channel and UI-language picker). -->
     <section class="view" id="viewSettings">
       <div class="pad">
         <div class="conn-tile" id="connTile"></div>
