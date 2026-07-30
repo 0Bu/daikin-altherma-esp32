@@ -8,6 +8,7 @@
 // (scripts/decode-coredump.sh). Mirrors the heartbeat.hpp diagnostics pattern.
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include "ha_device.hpp"   // device_json — one HA device across values/diagnostics/crash
 #include "json.hpp"        // json_append_escaped
@@ -81,6 +82,31 @@ struct CrashInfo {
     bool     bt_corrupted = false;  // the unwinder flagged the backtrace as unreliable
     char     elf_sha[65]  = {0};    // crashed build's app_elf_sha256 (hex; "" if unknown)
 };
+
+// Minimum hex-char overlap two app-ELF SHA-256 strings must share before a DIFFERENCE between them is
+// trusted as "different build". Both sides come from esp_app_get_elf_sha256 / the core-dump summary's
+// app_elf_sha256, each truncated to CONFIG_APP_RETRIEVE_LEN_ELF_SHA256 hex chars (default 9); 8 chars
+// = 32 bits, below that default, so the normal equal-length case is compared in full while a
+// pathologically short config can never make two good shas look different by accident.
+inline constexpr size_t ELF_SHA_MIN_COMPARE = 8;
+
+// Does a core dump carrying app-ELF sha `dump_sha` belong to a DIFFERENT firmware than the running
+// build `run_sha`? The coredump partition survives an OTA, and a panic that fails to write its own
+// dump (a stack overflow can overrun the writer) leaves the PREVIOUS build's dump in place — a valid
+// image that still passes esp_core_dump_image_check() but describes another binary, so a download of
+// it fails espcoredump with a SHA-256 mismatch (#215). This answers true ONLY on proof — both shas
+// present, a meaningful common prefix, and a mismatch within it — because the caller ERASES on true
+// and erasing a dump that really IS ours (a false positive) destroys the one artifact a panic left.
+// A missing sha (a dump with no parsable summary, a build that could not report its own) is NOT proof
+// of foreign origin, so it returns false and the dump is left alone. Truncation to different lengths
+// is fine: two renderings of the same hash agree on their common prefix.
+inline bool coredump_is_foreign(const char* dump_sha, const char* run_sha) {
+    if (!dump_sha || !run_sha || !*dump_sha || !*run_sha) return false;
+    size_t nd = std::strlen(dump_sha), nr = std::strlen(run_sha);
+    size_t n  = nd < nr ? nd : nr;
+    if (n < ELF_SHA_MIN_COMPARE) return false;
+    return std::strncmp(dump_sha, run_sha, n) != 0;
+}
 
 // A last_crash worth surfacing = a fault reset OR an orphan core-dump still sitting in flash. A
 // clean power-on / software reboot is not notable (no banner), but its reason is still reported.

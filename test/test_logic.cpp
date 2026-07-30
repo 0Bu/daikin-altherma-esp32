@@ -2470,6 +2470,29 @@ static void test_crashinfo() {
     while ((at = oj.find("0x", at)) != std::string::npos) { cnt++; at += 2; }
     CHECK(cnt == 1 /*pc*/ + 16 /*bt[16]*/);
 
+    // ORPHAN core dump (#215): a dump survives an OTA, and a panic that fails to write its own leaves
+    // the PREVIOUS build's dump in place — a valid image of another binary, which diag_crash_capture
+    // erases so `coredump` never offers a download espcoredump rejects on a version mismatch. The rule
+    // (coredump_is_foreign) gates that ERASE, so it fires ONLY on proof: two present shas, a
+    // meaningful common prefix, and a mismatch. The costly error is the false positive — erasing a
+    // dump that really is ours — so every ambiguous case answers "not foreign" and the dump is kept.
+    CHECK(coredump_is_foreign("ce0adc15a", "f8814d6d5"));            // #215's exact case — different builds
+    CHECK(coredump_is_foreign("deadbeef00", "deadbeef11"));         // agree on a prefix, differ past it
+    CHECK(!coredump_is_foreign("f8814d6d5", "f8814d6d5"));          // same build — keep the dump
+    CHECK(!coredump_is_foreign("abc123", "abc123"));                // same, shorter than the compare floor -> keep
+    CHECK(!coredump_is_foreign("f8814d6d", "f8814d6d5"));           // one truncated: common prefix agrees -> keep
+    // A missing sha is NOT proof of foreign origin — a dump with no parsable summary, or a build that
+    // could not report its own — so the dump is left alone rather than erased on absence of evidence.
+    CHECK(!coredump_is_foreign("", "f8814d6d5"));
+    CHECK(!coredump_is_foreign("f8814d6d5", ""));
+    CHECK(!coredump_is_foreign(nullptr, "f8814d6d5"));
+    CHECK(!coredump_is_foreign("f8814d6d5", nullptr));
+    // Two DIFFERENT shas that happen to agree only on a prefix SHORTER than the compare floor are not
+    // trusted as different — the 32-bit floor is what keeps a pathologically short config from
+    // erasing good dumps by accident (the 8-char agreement below reads as "same build", keep).
+    CHECK(!coredump_is_foreign("abcdef01", "abcdef01"));
+    CHECK(coredump_is_foreign("abcdef012", "abcdef019"));          // 9 chars: floor cleared, differ at char 9
+
     // Crash topic + its ONE diagnostic HA entity (the coredump "problem" binary_sensor). The reset
     // reason is NOT a crash entity — it is the heartbeat's own "Reset Reason" sensor, so a crash entity
     // for it would be an exact duplicate; it was dropped and is now actively retired (below).

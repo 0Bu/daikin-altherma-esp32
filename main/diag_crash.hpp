@@ -1,7 +1,10 @@
 #pragma once
 // One-shot crash/reset capture. diag_crash_capture() runs ONCE at boot: it reads the reset reason
 // (esp_reset_reason) and, if a core-dump image is in flash, parses its SUMMARY
-// (esp_core_dump_get_summary — crashed task, PC, backtrace, app ELF sha) into a cached CrashInfo.
+// (esp_core_dump_get_summary — crashed task, PC, backtrace, app ELF sha) into a cached CrashInfo. A
+// dump whose app ELF sha does not match the RUNNING build is an ORPHAN (it survived an OTA, or a
+// panic that could not write its own dump left the previous one behind) — it is ERASED here so
+// `coredump` never advertises a download espcoredump would reject on a version mismatch (#215).
 // The reason + summary are boot-time FACTS and stay cached — the summary is never re-parsed from
 // flash on a request path (build_status_json_string also runs in the poll task's WS broadcaster,
 // which only self-guards std::bad_alloc by dropping the frame).

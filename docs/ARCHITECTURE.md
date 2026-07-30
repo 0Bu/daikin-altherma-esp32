@@ -1216,7 +1216,14 @@ Structure:
     the crashed build's `app_elf_sha256`) into a cached `CrashInfo`. The pure formatting is
     `logic/crashinfo.hpp` (host-tested); the summary is parsed **once** and cached — never re-read
     from flash on a request path, which is where `build_status_json_string()` runs (and, until the
-    WebSocket push was removed, also on the poll task — see "Push vs. poll"). The
+    WebSocket push was removed, also on the poll task — see "Push vs. poll"). A dump whose parsed
+    `app_elf_sha256` does **not** match the running build (`coredump_is_foreign()`, host-tested) is an
+    **orphan** — it survived an OTA, or a panic that could not write its own dump left the previous
+    build's dump in place — and is **erased** at capture, with the reason logged to `/diag`. Without
+    this an orphan passes `esp_core_dump_image_check()` (it is a valid image, just of another binary),
+    so `coredump` reads true and `/status` offers a download that `espcoredump` then rejects on a
+    SHA-256 mismatch (#215). Erasing it makes `coredump` mean "a dump for **this** firmware is
+    downloadable" and clears the partition for the next real panic. The
     `coredump` **presence flag** is the one exception: it IS re-checked from flash per request
     (`diag_crash_info_live()` — a 4-byte size-word read, not the summary reparse), because the image
     can be erased mid-session via `/coredump?clear=1` and a cached flag would then advertise a dump
