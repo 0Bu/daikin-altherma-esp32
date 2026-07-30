@@ -3813,9 +3813,6 @@ function fillBoard() {
   $("bdPresetRow").hidden = presets.length === 0;
   $("bdPreset").innerHTML = `<option value="-1">${esc(t("board.preset_custom"))}</option>` +
     presets.map((p, i) => `<option value="${i}">${esc(p.name)}</option>`).join("");
-  // Presets are fill shortcuts, not persisted board identities. Never infer a board merely because
-  // its values equal the stored values — that would label every freshly flashed device as a XIAO.
-  $("bdPreset").value = "-1";
   const hasLed = b.led_gpio != null && b.led_gpio >= 0;
   $("bdLedType").value = hasLed ? String(b.led_type ?? 0) : "-1";
   boardPinOptions($("bdLedPin"), hasLed ? b.led_gpio : -1, false);
@@ -3823,6 +3820,21 @@ function fillBoard() {
   boardPinOptions($("bdBtnPin"), b.btn_gpio, true);
   $("bdBtnInv").checked = b.btn_active_low !== false;
   syncBoardFields();
+  // Name the board only once the USER has stated it (/status.board.user_set). The values alone
+  // cannot decide: a device that never saved hardware carries the build's defaults, which happen to
+  // EQUAL the XIAO preset, so naming it would label every freshly flashed board a XIAO — including
+  // an AtomS3 Lite, where that is an actively wrong claim (#256). Once the user HAS saved, the
+  // opposite failure applies and it is the one that got reported: the modal opened on "Custom"
+  // although the fields are exactly the AtomS3 preset just saved, so re-picking your own board
+  // submitted an unchanged form — no reboot, one grey "no changes" toast, and it reads as a save
+  // that did nothing (#257).
+  //
+  // The selection is DERIVED from the fields either way — syncPresetSelection is the single rule,
+  // the same one every field's change handler runs — so user_set decides only WHETHER a name is
+  // shown, never WHICH. That is also why forcing "Custom" here was not merely cautious but
+  // inconsistent: the same five values read "Custom" until you touched anything and "M5Stack AtomS3
+  // Lite" immediately after, one dataset described two ways.
+  if (b.user_set) syncPresetSelection(); else $("bdPreset").value = "-1";
 }
 function openBoard() {
   fillBoard();
@@ -4184,20 +4196,41 @@ async function errorOf(r, fallback) {
 // Poll /status until the rebooted device answers again, then hand back to `then`.
 // A WiFi rollback deliberately outruns this window (wifi.cpp takes 60–180 s to decide), so the
 // rollback outcome is NOT reported here — renderRollbackBanner() surfaces it off /status instead.
+//
+// A recursive setTimeout, NEVER setInterval, and the reason is the same one the OTA reboot-watcher
+// states one screen up: a rebooting board does not REFUSE a connection, it stops answering SYNs, so
+// a request issued mid-reboot HANGS for the browser's own (much longer) timeout instead of failing.
+// A fixed cadence therefore stacks a fresh request on top of every hung one — and when the board
+// came back they ALL completed within a millisecond of each other, each running this success path:
+// one save produced four "Saved" toasts and four renders (a ~6 s reboot at 1.5 s = 4 in flight).
+// One request at a time makes that structural rather than guarded against.
+//
+// Bounded per request too, for the same reason `j()` is bounded on the poll chain: without it a
+// single hung probe eats the whole give-up window, and the toast that says the device did not come
+// back would arrive long after it did.
 function rebootPoll(then) {
-  let tries = 0;
-  const poll = setInterval(async () => {
-    tries++;
-    try {
-      S.status = await j("/status");
-      clearInterval(poll); S.busy = false;
+  const deadline = Date.now() + REBOOT_POLL_WAIT_MS;
+  const probe = async () => {
+    let s = null;
+    try { s = await j("/status", { signal: pollSignal(REBOOT_PROBE_TIMEOUT_MS) }); }
+    catch { /* unreachable or mid-reboot: expected here, not a failure */ }
+    if (s) {
+      S.status = s; S.busy = false;
       toast(t("toast.saved"), "ok");
       then();
-    } catch {
-      if (tries > 14) { clearInterval(poll); S.busy = false; toast(t("toast.rebooted"), "info"); }
+      return;
     }
-  }, 1500);
+    if (Date.now() < deadline) { setTimeout(probe, REBOOT_POLL_EVERY_MS); return; }
+    S.busy = false;
+    toast(t("toast.rebooted"), "info");
+  };
+  setTimeout(probe, REBOOT_POLL_EVERY_MS);
 }
+const REBOOT_POLL_EVERY_MS    = 1500;
+const REBOOT_PROBE_TIMEOUT_MS = 3000;   // a probe at a board that is still down, not a live request
+// WALL CLOCK, not an attempt count: with probes that hang the two are different numbers, and ~21 s
+// is what the user — and saveReboot's own comment about how long the card stays busy — is promised.
+const REBOOT_POLL_WAIT_MS     = 21000;
 
 // One flow for all three modal saves. The endpoints share a contract: {"ok":true,"reboot":true} →
 // persisted, device restarts; {"ok":true,"reboot":false} → nothing changed, no restart; a 4xx →
@@ -4234,7 +4267,16 @@ async function saveReboot(url, body, { btn, showError, close, then, busyMsg }) {
   const res = await r.json().catch(() => ({}));
   setBusy(btn, false);
   close();
-  if (res.reboot === false) { S.busy = false; toast(t("toast.no_changes"), "info"); return; }   // /set_mqtt: unchanged
+  // No reboot. Two different things wear that answer, and they must not share a message: nothing was
+  // written (the /set_mqtt-style unchanged save), or something WAS written and simply needs no
+  // restart — /set_board recording that the user has stated their hardware. Saying "no changes" to
+  // the second reports an NVS write as nothing having happened, which is the failure this whole
+  // flow exists to close. `saved` is opt-in, so the routes that never send it are unaffected.
+  if (res.reboot === false) {
+    S.busy = false;
+    toast(t(res.saved ? "toast.saved" : "toast.no_changes"), res.saved ? "ok" : "info");
+    return;
+  }
   toast(t("toast.reboot"), "info");
   rebootPoll(then);   // stays busy until the device answers again (or the poll gives up)
 }
@@ -4674,12 +4716,14 @@ let _pollFails = 0;
 let _pollBusy  = false;
 let _statusDue = 0;        // performance.now() instant the next /status is due (0 = right now)
 
-// An abort signal that fires after POLL_TIMEOUT_MS, or undefined where AbortController is missing
-// (then the browser's default bound applies — the same fallback the OTA reboot-watcher takes).
-function pollSignal() {
+// An abort signal that fires after `ms`, or undefined where AbortController is missing (then the
+// browser's default bound applies — the same fallback the OTA reboot-watcher takes). The bound is a
+// parameter because rebootPoll wants a SHORTER one: its probes are aimed at a board that is still
+// down, where a long wait is the normal case rather than the pathological one.
+function pollSignal(ms = POLL_TIMEOUT_MS) {
   if (!("AbortController" in window)) return undefined;
   const c = new AbortController();
-  setTimeout(() => c.abort(), POLL_TIMEOUT_MS);   // a settled request aborts to nothing
+  setTimeout(() => c.abort(), ms);   // a settled request aborts to nothing
   return c.signal;
 }
 

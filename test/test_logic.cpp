@@ -783,6 +783,49 @@ static void test_config_model() {
     none.tx_pin = 43;
     CHECK(validate(none, why, 48, false, config_reserved_pins(none)));    // 35 is fine on a Quad build
 
+    // ── What POST /set_board owes a request (#257) ──────────────────────────────────────────────
+    // Two facts move independently, so all four combinations are asserted. The one that shipped
+    // broken is `values same, statement new`: it is a SAVE with NO reboot, and collapsing it into
+    // "nothing changed" dropped the statement — the modal then re-opened on "Custom" and the user
+    // re-picked their own board forever, each time getting no reboot and one grey toast.
+    Config stored;                       // a device still carrying the build defaults
+    stored.led_gpio = 21; stored.led_type = static_cast<int>(LedType::Gpio); stored.led_inverted = true;
+    stored.btn_gpio = -1; stored.btn_active_low = true; stored.board_user_set = false;
+    Config want = stored;                // the user picks the preset the device already carries
+    want.board_user_set = true;          // ...which the submit itself states
+    CHECK(board_hw_same(want, stored));
+    CHECK(board_save_needed(want, stored));      // the statement is new -> persist it
+    CHECK(!board_reboot_needed(want, stored));   // ...but no driver's pin moved -> no reboot
+    // Once recorded, the same submit really is a no-op: neither a save nor a reboot.
+    Config recorded = stored; recorded.board_user_set = true;
+    CHECK(!board_save_needed(want, recorded));
+    CHECK(!board_reboot_needed(want, recorded));
+    // A hardware change is both, whether or not the statement was already on record.
+    Config atom = want;
+    atom.led_gpio = 35; atom.led_type = static_cast<int>(LedType::Ws2812); atom.led_inverted = false;
+    atom.btn_gpio = 41;
+    CHECK(!board_hw_same(atom, recorded));
+    CHECK(board_save_needed(atom, recorded) && board_reboot_needed(atom, recorded));
+    CHECK(board_save_needed(atom, stored)   && board_reboot_needed(atom, stored));
+    // Each of the five values on its own counts as a hardware change — a polarity flip is a real
+    // rewiring of the drive level, not cosmetics, and an unnoticed one leaves a dark board.
+    for (int f = 0; f < 5; f++) {
+        Config one = recorded;
+        if (f == 0) one.led_gpio = 33;
+        if (f == 1) one.led_type = static_cast<int>(LedType::Ws2812);
+        if (f == 2) one.led_inverted = !one.led_inverted;
+        if (f == 3) one.btn_gpio = 41;
+        if (f == 4) one.btn_active_low = !one.btn_active_low;
+        CHECK(!board_hw_same(one, recorded));
+        CHECK(board_reboot_needed(one, recorded) && board_save_needed(one, recorded));
+    }
+    // The statement is never RETRACTED by a request: /set_board only ever sets it, so a stored
+    // `true` against a would-be `false` is not a reason to write (only the values could be).
+    Config unstated = recorded; unstated.board_user_set = false;
+    CHECK(!board_save_needed(unstated, recorded));
+    // A fresh Config has made no claim — that is what keeps a newly flashed board unnamed.
+    CHECK(!Config{}.board_user_set);
+
     CHECK(parse_protocol("S") == Protocol::S);
     CHECK(parse_protocol("I") == Protocol::I);
     CHECK(parse_protocol("") == Protocol::I);

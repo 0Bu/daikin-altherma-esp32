@@ -294,7 +294,20 @@ host-testable core is unusually large and valuable, because the risky parts are 
   reserves — the AtomS3 Lite's GPIO35 is free on this project's Quad-flash build and is SPIIO4 on an
   Octal one — the same "a pick that cannot work is not a pick" rule the X10A dropdown follows. It
   asserts nothing about which board this *is* (still unknowable): picking a preset is the **user**
-  telling the firmware what the hardware is.
+  telling the firmware what the hardware is. That telling is now *recorded* — `Config::board_user_set`,
+  NVS key `board_set`, served as `/status.board.user_set` — because the stored values cannot stand in
+  for it: a device that never saved hardware carries the Kconfig defaults, which happen to **equal**
+  the XIAO preset, so "these values are the XIAO preset" is true both of a XIAO owner's deliberate
+  save and of a board nobody has configured. Naming the board off the values alone labels every
+  freshly flashed device a XIAO; refusing to name it at all leaves the Hardware modal opening on
+  "Custom" beside the preset just saved, so the user re-picks their own board and submits an
+  unchanged form. The flag is what separates the two, and it also splits what `POST /set_board` owes
+  a request: the five values decide the **reboot** (a driver's pin moved), the statement decides only
+  a **save** — `board_save_needed()` / `board_reboot_needed()` in `logic/config_model.hpp`,
+  host-tested over all four combinations. It stays **outside** the atomic config blob despite having
+  one writer, because it never *names* a board — the UI derives the name from the live field values,
+  so this only licenses showing one, and a flag out of step with the values can produce no wrong
+  name, only the "Custom" that is already the fallback.
 - `logic/profile_view.hpp` — the active model's rows **as every consumer must see them**: the
   generated table plus the hand-written `def/overlay.hpp` supplement, as one indexable sequence. Four
   call sites read the row set and they are not independent — `hp_poll` decodes them, `mqtt_ha`

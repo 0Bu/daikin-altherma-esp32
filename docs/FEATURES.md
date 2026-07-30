@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte — it both ranks the representative and **narrows the candidate set**, dropping only classes that contradict it, **retried page probe + a second-sweep confirmation** before falling back to `generic`, and an **order-independent** representative pick so a reordered registry cannot move a published entity id or series) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1860 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1872 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -897,7 +897,15 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   preset this **build** reserves (an Octal build over the AtomS3 Lite's GPIO35) or this **config**
   reserves (a link moved onto that preset's LED or button pin) is withheld instead of offered as a
   pick `POST /set_board` would refuse — it asserts nothing about which board this *is*, which stays
-  unknowable),
+  unknowable), and whether the user has **stated** that hardware at all (`Config::board_user_set`,
+  NVS key `board_set`, served as `/status.board.user_set`) — which is a different question from the
+  unknowable one above and the only one a device can answer: the five stored values cannot
+  distinguish a XIAO owner's deliberate save from a board nobody has configured, because the Kconfig
+  defaults *equal* the XIAO preset, so the Hardware modal names the board only once someone has said
+  so. It is also what splits the route's two obligations — the five values decide the **reboot**
+  (both parts are claimed once at task start), the statement decides only a **save**, so picking the
+  preset a device already carries persists something while restarting nothing
+  (`board_save_needed()` / `board_reboot_needed()`, both host-tested),
   the status indicator's state→pattern rule and the button override's priority
   (`led_pattern.hpp` — shared by the GPIO and WS2812 back-ends so they cannot drift apart; *shape*,
   not colour, carries the state, since a monochrome LED sees no colour at all),
@@ -1079,7 +1087,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   catalog sweep proving each `(page, offset, converter)` locator resolves to **exactly one** row
   **and to the right one**, asserted on the resolved row's own label, because six other rows share
   the `0x60/12` byte and every one of them would satisfy a page+offset match),
-  **1860 `CHECK`s** in
+  **1872 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -1425,7 +1433,7 @@ and gzipped into the app image** (polled, after a WebSocket push proved it could
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 18-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1860 checks),
+on the host** (1872 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

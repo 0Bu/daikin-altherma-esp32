@@ -152,6 +152,11 @@ static std::string build_status_json_string(bool redact = false) {
     j += ",\"led_inverted\":";        j += c.led_inverted ? "true" : "false";
     j += ",\"btn_gpio\":";            j += std::to_string(c.btn_gpio);
     j += ",\"btn_active_low\":";      j += c.btn_active_low ? "true" : "false";
+    // Whether the five values above were STATED by the user or are merely this build's defaults
+    // (Config::board_user_set). The UI needs it to name the board in the Hardware modal's dropdown
+    // without claiming one nobody chose — the values alone cannot say, since the Kconfig defaults
+    // happen to equal the XIAO preset.
+    j += ",\"user_set\":";            j += c.board_user_set ? "true" : "false";
     j += ",\"pins_local\":[";
     for (int i = 0; i < nlpins; i++) { if (i) j += ","; j += std::to_string(lpins[i]); }
     // ...and the ready-made settings for the boards this project documents (logic/board_presets.hpp),
