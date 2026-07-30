@@ -36,6 +36,7 @@
 #include "logic/health_gate.hpp"
 #include "logic/version_cmp.hpp"
 #include "logic/ota_channel.hpp"
+#include "logic/ui_lang.hpp"
 #include "logic/ota_manifest.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/http_body.hpp"
@@ -3431,6 +3432,27 @@ static void test_ota_channel() {
     CHECK(!ota_version_is_dev("1.0.8-PR-42"));      // a PR preview build is its own thing
 }
 
+// ── UI language override (logic/ui_lang.hpp) ─────────────────────────────────────────────────
+static void test_ui_lang() {
+    CHECK(std::string(ui_lang_name(UiLang::Auto)) == "auto");
+    CHECK(std::string(ui_lang_name(UiLang::De)) == "de");
+    CHECK(std::string(ui_lang_name(UiLang::En)) == "en");
+    CHECK(ui_lang_valid("auto") && ui_lang_valid("de") && ui_lang_valid("en"));
+    // A typo is REFUSED, not defaulted: /set_lang answering ok to "german" would look like a save.
+    CHECK(!ui_lang_valid("") && !ui_lang_valid("De") && !ui_lang_valid("german") && !ui_lang_valid("EN"));
+    CHECK(ui_lang_parse("auto") == UiLang::Auto);
+    CHECK(ui_lang_parse("de") == UiLang::De);
+    CHECK(ui_lang_parse("en") == UiLang::En);
+    CHECK(ui_lang_parse("nonsense") == UiLang::Auto);                 // load-path fallback
+    CHECK(ui_lang_parse("nonsense", UiLang::En) == UiLang::En);
+    // The on-flash byte. An unknown value decodes to Auto — a garbled NVS byte must fall back to the
+    // browser default, never force a language the user never chose. Auto is what every pre-v4 device
+    // is already in.
+    CHECK(ui_lang_to_int(UiLang::Auto) == 0 && ui_lang_to_int(UiLang::De) == 1 && ui_lang_to_int(UiLang::En) == 2);
+    CHECK(ui_lang_from_int(0) == UiLang::Auto && ui_lang_from_int(1) == UiLang::De && ui_lang_from_int(2) == UiLang::En);
+    CHECK(ui_lang_from_int(3) == UiLang::Auto && ui_lang_from_int(-1) == UiLang::Auto);
+}
+
 // ── OTA manifest parsing (logic/ota_manifest.hpp) ────────────────────────────────────────────
 static void test_ota_manifest() {
     char v[32];
@@ -3653,7 +3675,7 @@ static void test_config_store() {
     board.led_gpio = 35; board.led_type = 1; board.led_inverted = false;
     board.btn_gpio = 41; board.btn_active_low = true;
     std::vector<uint8_t> bb = config_blob_serialize(board);
-    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 3);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 4);
     ConfigBlob rt;
     CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
     CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
@@ -3675,11 +3697,11 @@ static void test_config_store() {
     // user's WiFi and MQTT credentials on the upgrade. It must decode, and it must report
     // has_board == false so the caller seeds the Kconfig defaults instead of reading "absent" as
     // "indicator disabled" (which would silently darken every XIAO's LED).
-    std::vector<uint8_t> v1 = buf;                       // `buf` was serialized... as v3 by this build,
-    // so build a genuine v1 body: header + the v1 fields only, taken from the v3 encoding by
-    // dropping the 13-byte board block (3x u32 + 1 flag byte) AND the 1-byte v3 channel that
-    // precede the CRC.
-    v1.erase(v1.end() - 4 - 14, v1.end() - 4);
+    std::vector<uint8_t> v1 = buf;                       // `buf` was serialized as v4 by this build,
+    // so build a genuine v1 body: header + the v1 fields only, taken from the v4 encoding by dropping
+    // the 13-byte board block (3x u32 + 1 flag byte), the 1-byte v3 channel AND the 1-byte v4 language
+    // that precede the CRC.
+    v1.erase(v1.end() - 4 - 15, v1.end() - 4);
     v1[4] = 1;
     restamp(v1);
     ConfigBlob legacy;
@@ -3688,10 +3710,10 @@ static void test_config_store() {
     CHECK(!legacy.has_board);
     CHECK(legacy.wifi_ssid == a.wifi_ssid && legacy.mqtt_uri == a.mqtt_uri);   // v1 payload intact
     CHECK(legacy.led_gpio == -1);                        // the struct default, not the 999 sentinel
-    // A TRUNCATED v3 must not decode as a valid v2/v1 with silently-default pins: the version byte
-    // still says 3, so the missing blocks are caught by the length rule, not papered over.
+    // A TRUNCATED v4 must not decode as a valid v3/v2/v1 with silently-default fields: the version
+    // byte still says 4, so the missing blocks are caught by the length rule, not papered over.
     std::vector<uint8_t> trunc = bb;
-    trunc.erase(trunc.end() - 4 - 14, trunc.end() - 4);
+    trunc.erase(trunc.end() - 4 - 15, trunc.end() - 4);
     restamp(trunc);
     CHECK(!config_blob_deserialize(trunc.data(), trunc.size(), out));
 
@@ -3709,14 +3731,37 @@ static void test_config_store() {
     // would be a spectacularly bad trade. has_ota == false is how the caller tells "no channel
     // stored" from "explicitly release"; both mean release, only the diag line differs.
     std::vector<uint8_t> v2 = bb;
-    v2.erase(v2.end() - 4 - 1, v2.end() - 4);            // drop the v3 channel byte
+    v2.erase(v2.end() - 4 - 2, v2.end() - 4);            // drop the v3 channel + v4 language bytes
     v2[4] = 2;
     restamp(v2);
     ConfigBlob pre;
-    pre.ota_channel = 7;                                 // sentinel: must be left untouched
+    pre.ota_channel = 7; pre.ui_lang = 7;               // sentinels: must be left untouched
     CHECK(config_blob_deserialize(v2.data(), v2.size(), pre));
     CHECK(!pre.has_ota && pre.ota_channel == 0);         // the struct default, not the 7 sentinel
+    CHECK(!pre.has_lang && pre.ui_lang == 0);            // v2 predates the language byte too
     CHECK(pre.has_board && pre.led_gpio == -1 && pre.wifi_ssid == "net");   // v2 payload intact
+
+    // ── v4: the UI language override ──────────────────────────────────────────────────────────────
+    ConfigBlob lang; lang.wifi_ssid = "net"; lang.ota_channel = 1; lang.ui_lang = 2;   // 1 = dev, 2 = en
+    std::vector<uint8_t> lbv = config_blob_serialize(lang);
+    ConfigBlob lrt;
+    CHECK(config_blob_deserialize(lbv.data(), lbv.size(), lrt));
+    CHECK(lrt.has_lang && lrt.ui_lang == 2 && lrt.has_ota && lrt.ota_channel == 1 && lrt.wifi_ssid == "net");
+    lang.ui_lang = 0;                                     // auto round-trips as 0 WITH has_lang set
+    lbv = config_blob_serialize(lang);
+    CHECK(config_blob_deserialize(lbv.data(), lbv.size(), lrt) && lrt.ui_lang == 0 && lrt.has_lang);
+    // The upgrade guarantee, one version on: a device written by a pre-language (v3) build carries a
+    // v3 blob and must still decode — the channel survives, and the absent language reads as auto
+    // (has_lang == false, ui_lang == 0), so the browser keeps auto-detecting exactly as before.
+    std::vector<uint8_t> v3 = lbv;
+    v3.erase(v3.end() - 4 - 1, v3.end() - 4);            // drop the v4 language byte
+    v3[4] = 3;
+    restamp(v3);
+    ConfigBlob prel;
+    prel.ui_lang = 7;                                    // sentinel: must be left untouched
+    CHECK(config_blob_deserialize(v3.data(), v3.size(), prel));
+    CHECK(!prel.has_lang && prel.ui_lang == 0);          // the struct default, not the 7 sentinel
+    CHECK(prel.has_ota && prel.ota_channel == 1 && prel.wifi_ssid == "net");   // v3 payload intact
 }
 
 static void test_mcp_jsonrpc() {
@@ -6554,6 +6599,7 @@ int main() {
     test_version_cmp();
     test_ota_manifest();
     test_ota_channel();
+    test_ui_lang();
     test_profile_view();
     test_metric_identity();
     test_tie_break_identity();

@@ -45,7 +45,7 @@ Grove port reaches X10A with no soldering — which is why [WIRING.md](WIRING.md
 **The pins are not automatic on this board.** The shipped `CONFIG_DAIKIN_RX_PIN`/`_TX_PIN` defaults
 are the XIAO's 44/43, and detection only ever probes the cached pair, the default pair and each of
 them swapped — none of which the AtomS3 Lite breaks out. So the bus stays silent until the pins are
-picked once under **⚙ Settings → ESP32** (RX/TX dropdown, `POST /set_hp`); after that they are
+picked once under **⚙ Settings → Protocol** (RX/TX dropdown, `POST /set_hp`); after that they are
 cached in NVS and re-used every boot. Their order does not matter: the swap is probed too.
 
 **Firmware mapping.** Set under **⚙ Settings → ESP32 → Hardware** (a save reboots). Pick

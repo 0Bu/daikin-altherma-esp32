@@ -1,7 +1,8 @@
 // POST config routes: /set_wifi, /set_mqtt, /set_syslog, /set_ntp, /set_hp, /set_board, /set_ota,
-// /detect. Parse JSON, validate, then apply: WiFi/MQTT/syslog/NTP/board persist to NVS + reboot;
-// /set_hp persists the RX/TX pin cache (no reboot) but keeps the model session-only; /set_ota
-// persists the OTA update channel and applies it live; /detect re-runs detection in RAM.
+// /set_lang, /detect. Parse JSON, validate, then apply: WiFi/MQTT/syslog/NTP/board persist to NVS +
+// reboot; /set_hp persists the RX/TX pin cache (no reboot) but keeps the model session-only;
+// /set_ota and /set_lang persist their UI settings and apply them live; /detect re-runs detection in
+// RAM.
 #include "http_handlers.hpp"
 #include "config.hpp"
 #include "hp_poll.hpp"
@@ -522,6 +523,31 @@ static esp_err_t set_ota(httpd_req_t* req) {
     return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
 }
 
+// The web UI's manual language override. "auto" hands the choice back to the browser (the default);
+// "de"/"en" force a language on every client that opens the dashboard. See logic/ui_lang.hpp.
+//
+// No reboot, like /set_ota: nothing claims the language at task start — the UI reads it from /status,
+// so the next poll already applies it. An unknown name is REJECTED rather than defaulted: answering
+// {"ok":true} to a typo would look like a saved setting.
+static esp_err_t set_lang(httpd_req_t* req) {
+    char body[128];
+    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
+    cJSON* j = cJSON_Parse(body);
+    if (!j) return send_err(req, "400 Bad Request", "bad json");
+    std::string lang = js(j, "lang");
+    cJSON_Delete(j);
+
+    if (!ui_lang_valid(lang)) return send_err(req, "400 Bad Request", "unknown language");
+
+    Config c = config();
+    const UiLang want = ui_lang_parse(lang);
+    if (want == c.ui_lang) return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
+    c.ui_lang = want;
+    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    diag_printf("ui: language set to %s\n", ui_lang_name(want));
+    return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
+}
+
 // Re-run auto-detection now (without waiting for a reboot): drop back to the "auto" sentinel +
 // invalidate the fingerprint, so the next poll cycle sweeps protocol + re-fingerprints the unit
 // (hp_poll.cpp poll_detect). Detection state is session-only, so this is a RAM-only reset.
@@ -545,6 +571,7 @@ void http_register_config(httpd_handle_t s, HttpSurface surface) {
     http_register_on(s, surface, "/set_hp", HTTP_POST, set_hp);
     http_register_on(s, surface, "/set_board", HTTP_POST, set_board);
     http_register_on(s, surface, "/set_ota", HTTP_POST, set_ota);
+    http_register_on(s, surface, "/set_lang", HTTP_POST, set_lang);
     http_register_on(s, surface, "/detect", HTTP_POST, do_detect);
 }
 

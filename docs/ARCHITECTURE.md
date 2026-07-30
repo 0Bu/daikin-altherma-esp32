@@ -96,7 +96,8 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
 http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /diag, /scan, /coredump,
                       POST /crash/dismiss. build_status_json_string() runs on the httpd task ALONE —
                       see "Push vs. poll" below for why that sentence is load-bearing
-http_config.cpp     → POST /set_wifi, /set_mqtt, /set_syslog, /set_ntp, /set_hp, /detect
+http_config.cpp     → POST /set_wifi, /set_mqtt, /set_syslog, /set_ntp, /set_hp, /set_board,
+                      /set_ota, /set_lang, /detect
 http_ota.cpp        → /ota/check|update|status
 mcp_server.cpp      → /mcp — read-only MCP tools (get_status, get_hp_values) for AI agents — PLANNED
                       (route exists; returns a JSON-RPC "not implemented" error for now)
@@ -1390,8 +1391,10 @@ This is distinct from the image anti-brick recovery above; both are covered in
 `www/` is split for edit locality (index.html markup + style.css + app.js) and spliced into ONE
 self-contained, pre-gzipped page at build time (`inline_assets.cmake`). The UI is **two screens**:
 the dashboard (the plant — schematic, model, values, no config at all) and **Settings** behind the
-header gear (the Connections tile + the ESP32 board card, flat, no sub-screens). Settings drives the
-config endpoints in place:
+header gear (the Connections tile + the three ESP32 board cards — ESP32 board health, Protokoll
+[X10A link + pins] and Firmware [version/OTA + language] — flat, no sub-screens, all three built by
+one `esp32CardHtml()` and rebuilt together on every poll). Settings drives the config endpoints in
+place:
 
 - **WiFi** → `/set_wifi`, provisioned first from the captive `setup.html` and thereafter **re-editable
   from a modal** off the Connections tile's WiFi row in Settings. Save validates SSID (1–32) +
@@ -1456,7 +1459,7 @@ config endpoints in place:
   syslog TIMESTAMP. It is deliberately **not** an HA entity (see the retired "Device Time" under
   *The MQTT bridge*).
 - **Heat pump** → `/set_hp`: fully automatic. The model is **auto-detected** (see Auto-detection) and
-  shown read-only on the dashboard **Model** card. The dashboard **ESP32** card shows the X10A link +
+  shown read-only on the dashboard **Model** card. The Settings **Protokoll** card shows the X10A link +
   protocol and the **RX/TX pins**, which are also auto-detected: **read-only** while the bus answers,
   and a **dropdown** of the chip's safe GPIOs (`/status.pins_avail`) when it doesn't — picking a
   pin posts `{profile:"auto", rx, tx}` to re-run detection on that pair. That dropdown is a filter,
@@ -1464,16 +1467,29 @@ config endpoints in place:
   per pin, with the octal-SPI and status-LED facts from Kconfig), so a raw `curl POST` cannot route the UART onto a
   flash/strapping/JTAG pad, and `config_load()` re-applies the same test to the persisted cache. The
   RX/TX pins are **persisted** (a manual pick survives reboot); the model is session-only. Protocol is auto-detected
-  (no UI control), the poll interval is fixed at 1 s (not sent), and labels are English-only (no
-  `lang`). `/set_hp` accepts only `{profile, rx, tx}`.
+  (no UI control), the poll interval is fixed at 1 s (not sent). `/set_hp` still accepts only
+  `{profile, rx, tx}` — the UI language is its own setting now (see the **Language** bullet below),
+  never a `/set_hp` field.
+- **Language** → `/set_lang` (Settings **Firmware** card). The UI is bilingual (de/en) and picks its
+  language client-side from `navigator.language` by default — a browser fact, not device state — but
+  the card's picker (**Browser** / English / Deutsch) can force one, which then **persists** in the
+  config blob (v4, `logic/ui_lang.hpp`) and wins over every client's own browser guess. `auto`
+  (labelled "Browser" — it *is* the browser's own guess, not a separate mode) is the struct default,
+  so a fresh device or one OTA-upgraded from a pre-v4 blob keeps auto-detecting exactly as before.
+  Applied **live**, like the update channel: nothing claims the language at task start, the browser
+  re-reads `/status.ui.lang` on its next poll and re-localises (`setLang()` re-runs
+  `applyStaticI18n()` + `labelSchematicHits()`), no reload. The heat-pump **value labels** are
+  untouched by any of this — they arrive over `/values` as English X10A register names and stay
+  verbatim in both languages (see DESIGN.md §1).
 - **Firmware / OTA** — tapping the version runs the real update flow. Both places the version is
   printed as a control are the same trigger (`checkFirmwareUpdate`): the header meta line beside the
-  IP, and the **Version** row on the Settings ESP32 card. Neither one navigates — the readout has a
-  slot in each (`#otaStat`, `#otaStatSet`) and `otaInline` paints both, so the flow reports on
+  IP, and the **Version** row on the Settings **Firmware** card. Neither one navigates — the readout
+  has a slot in each (`#otaStat`, `#otaStatSet`) and `otaInline` paints both, so the flow reports on
   whichever screen started it (only one is ever visible; the other screen is `display:none`). The
   Settings slot is painted into the DOM rather than rebuilt from state, so `renderSettings` freezes
-  the ESP32 card while `S.otaShown` — otherwise the once-a-second rebuild would blink the percentage
-  out and restart the spinner animation every frame. The flow itself:
+  **all three ESP32 board cards** together while `S.otaShown` (they are built and painted as one
+  string, `esp32CardHtml()`) — otherwise the once-a-second rebuild would blink the percentage out and
+  restart the spinner animation every frame. The flow itself:
   `GET /ota/check`, poll `GET /ota/status` until the check finishes, confirm, `POST
   /ota/update`, then poll again rendering the download progress **inline next to that version**
   (a small ring + "n%", not a toast). On `done` it does **not** use the shared reboot-reconnect poll
@@ -1483,7 +1499,7 @@ config endpoints in place:
   mid-update keeps showing the progress.
 
 The board/platform is reported by `/status.platform` — read by `/status` consumers and the web UI's
-paste-ready crash bundle, no longer a row on the Settings ESP32 card.
+paste-ready crash bundle, no longer a row on any Settings card.
 
 ## Memory constraints
 

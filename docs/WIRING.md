@@ -24,7 +24,7 @@ Grove colours are the standard cable's; if your adapter differs, go by the port,
 **Without a Grove cable**, the female header on the case carries `5V`, `GND` and `G5`–`G8`/`G38` —
 use any two of those for the signals (e.g. RX `G5`, TX `G6`).
 
-Either way the two pins must be **picked once** under **⚙ Settings → ESP32** (RX/TX dropdown):
+Either way the two pins must be **picked once** under **⚙ Settings → Protocol** (RX/TX dropdown):
 the shipped defaults are the XIAO's `44`/`43`, which this board does not break out, so nothing
 answers until you set them. Their order does not matter — detection probes the pair both ways round.
 
@@ -112,7 +112,7 @@ own pinout diagram — here's that cross-reference already done for the boards t
 | Waveshare ESP32-S3-DevKitC-1 | ESP32-S3 | 1, 2, 4–18, 35, 36, 37, 38, 43, 44, 47, 48 | GPIO0/3/45/46 (strapping), 19/20 (USB-JTAG, already the console), 39–42 (dedicated JTAG), 21 (status LED) |
 
 Pick any two distinct pins from a board's "safe pins" column for RX/TX, wire them to X10A, then set
-them in the RX/TX dropdown under **⚙ Settings → ESP32** (`POST /set_hp`) — see the pin table in
+them in the RX/TX dropdown under **⚙ Settings → Protocol** (`POST /set_hp`) — see the pin table in
 [README.md § Wiring — X10A](../README.md#wiring--x10a-breaker-off) for why the firmware won't find
 them on its own until you do.
 

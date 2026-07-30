@@ -11,15 +11,27 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 const j = async (url, opts) => { const r = await fetch(url, opts); if (!r.ok) throw new Error(r.status); return r.json(); };
 const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
-// ── i18n: browser-detected UI language (de | en) ─────────────────────────────
-// The device serves ONE page; the language is chosen client-side from the browser, no selector and
-// no server round-trip (DESIGN.md §1). German for a `de*` browser, English otherwise — English is
-// the fallback for every key. The heat-pump VALUE LABELS are NOT translated here: they arrive from
-// the firmware over /values as English X10A register names (docs/REGISTERS.md) and stay verbatim;
-// the tap-to-expand descriptions carry the German explanation instead. Dynamic strings built in this
-// file go through t(); the static markup in index.html is localised by applyStaticI18n() reading
-// data-i18n attributes. Keep this the single source of UI copy so both paths agree.
-const LANG = /^de\b/i.test(navigator.language || "") ? "de" : "en";
+// ── i18n: UI language (de | en) ──────────────────────────────────────────────
+// The default is BROWSER-detected — German for a `de*` browser, English otherwise (English is the
+// fallback for every key). On top of that the device can carry a MANUAL override (config ui_lang,
+// POST /set_lang, /status.ui.lang): once the user picks a language it is stored in NVS and wins over
+// the browser guess on every client that opens the dashboard, until they set it back to "Browser"
+// (DESIGN.md §1). The heat-pump VALUE LABELS are NOT translated here: they arrive from the firmware
+// over /values as English X10A register names (docs/REGISTERS.md) and stay verbatim; the
+// tap-to-expand descriptions carry the German explanation instead. Dynamic strings built in this file
+// go through t(); the static markup in index.html is localised by applyStaticI18n() reading data-i18n
+// attributes, re-run by setLang() when the language changes live. Keep this the single source of UI
+// copy so both paths agree.
+const autoLang = () => (/^de\b/i.test(navigator.language || "") ? "de" : "en");
+// localStorage, GUARDED: Safari private mode throws on access, and the UI must not die over a
+// language cache. A failure just means no first-paint fast-path — the device's /status is the source
+// of truth for the language anyway, so the only cost is one frame in the browser default.
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode / quota */ } };
+// Mutable, because the device's stored override can switch it at runtime. Seeded from a localStorage
+// cache of the last effective language so the FIRST paint doesn't flash the browser default before
+// the async /status lands, then reconciled with the device on every poll (setLangFromStatus).
+let LANG = (() => { const c = lsGet("uiLang"); return c === "de" || c === "en" ? c : autoLang(); })();
 // Each key is a string, or a function for the parameterised ones (same arity in both languages).
 const I18N = {
   en: {
@@ -33,7 +45,7 @@ const I18N = {
     "sys.fault_line": (c) => "Fault · " + c + " — check the outdoor unit.",
     "sys.polled": (s) => `Polled ${s}s ago`,
     "recovery.title": "Recovery mode",
-    "recovery.meta": "The device restarted too many times and came up in recovery mode. Heat-pump polling and MQTT are paused. Correct the configuration (for example the RX/TX pins on the ESP32 card in Settings), then reboot to resume normal operation.",
+    "recovery.meta": "The device restarted too many times and came up in recovery mode. Heat-pump polling and MQTT are paused. Correct the configuration (for example the RX/TX pins on the Protocol card in Settings), then reboot to resume normal operation.",
     "rollback.title": "WiFi change failed — rolled back",
     "rollback.meta": (back) => `The new WiFi credentials couldn't connect, so the device restored the previous network${back} and restarted. Open Settings and check the WiFi name and password on the Connections tile, then try again.`,
     "crash.title_fault": "Device restarted after a crash",
@@ -180,6 +192,14 @@ const I18N = {
     "card.firmware": "Version", "card.channel": "Update channel",
     "chan.release": "Release", "chan.dev": "Development",
     "chan.saved": (c) => `Update channel: ${c}`,
+    // Settings card titles (the old ESP32 card split into ESP32 / Protocol / Firmware) + the UI
+    // language override. "auto" is labelled "Browser" — it IS the browser's own navigator.language,
+    // not a separate automatic mode; de/en are named in their OWN tongue, the convention for a
+    // language picker.
+    "card.proto_title": "Protocol", "card.fw_title": "Firmware",
+    "card.language": "Language",
+    "lang.auto": "Browser", "lang.de": "Deutsch", "lang.en": "English",
+    "lang.saved": "Language saved",
     "ota.downgrade_confirm": (cur, avail) => `Switch back to v${avail}?\n\nThe device is running v${cur}, which is NEWER. Installing an older build is only offered because you picked a different update channel; the signed image is verified exactly as an update is, and the device rolls back automatically if it can't get online.`,
   },
   de: {
@@ -193,7 +213,7 @@ const I18N = {
     "sys.fault_line": (c) => "Störung · " + c + " — Außeneinheit prüfen.",
     "sys.polled": (s) => `vor ${s}s abgefragt`,
     "recovery.title": "Wiederherstellungsmodus",
-    "recovery.meta": "Das Gerät ist zu oft neu gestartet und im Wiederherstellungsmodus hochgefahren. Wärmepumpen-Abfrage und MQTT sind pausiert. Korrigiere die Konfiguration (z. B. die RX/TX-Pins auf der ESP32-Karte in den Einstellungen) und starte neu, um den Normalbetrieb fortzusetzen.",
+    "recovery.meta": "Das Gerät ist zu oft neu gestartet und im Wiederherstellungsmodus hochgefahren. Wärmepumpen-Abfrage und MQTT sind pausiert. Korrigiere die Konfiguration (z. B. die RX/TX-Pins auf der Protokoll-Karte in den Einstellungen) und starte neu, um den Normalbetrieb fortzusetzen.",
     "rollback.title": "WLAN-Änderung fehlgeschlagen — zurückgesetzt",
     "rollback.meta": (back) => `Die neuen WLAN-Zugangsdaten konnten sich nicht verbinden, daher hat das Gerät das vorherige Netzwerk${back} wiederhergestellt und neu gestartet. Öffne die Einstellungen und prüfe in der Kachel „Verbindungen“ WLAN-Name und Passwort, dann versuche es erneut.`,
     "crash.title_fault": "Gerät ist nach einem Absturz neu gestartet",
@@ -332,6 +352,14 @@ const I18N = {
     "card.firmware": "Version", "card.channel": "Update-Kanal",
     "chan.release": "Release", "chan.dev": "Development",
     "chan.saved": (c) => `Update-Kanal: ${c}`,
+    // Karten-Titel (die alte ESP32-Karte in ESP32 / Protokoll / Firmware unterteilt) + die
+    // UI-Sprache. "auto" hei\u00dft "Browser" \u2014 es IST die eigene navigator.language des Browsers, kein
+    // separater Automatik-Modus; de/en sind in ihrer EIGENEN Sprache benannt, wie bei einer
+    // Sprachauswahl \u00fcblich.
+    "card.proto_title": "Protokoll", "card.fw_title": "Firmware",
+    "card.language": "Sprache",
+    "lang.auto": "Browser", "lang.de": "Deutsch", "lang.en": "English",
+    "lang.saved": "Sprache gespeichert",
     "ota.downgrade_confirm": (cur, avail) => `Zur\u00fcck auf v${avail} wechseln?\n\nDas Ger\u00e4t l\u00e4uft auf v${cur} \u2014 also NEUER. Ein \u00e4lterer Stand wird nur angeboten, weil du einen anderen Update-Kanal gew\u00e4hlt hast; das signierte Abbild wird genauso gepr\u00fcft wie bei einem Update, und das Ger\u00e4t setzt automatisch zur\u00fcck, wenn es nicht online kommt.`,
   },
 };
@@ -347,6 +375,27 @@ function t(k, ...a) {
 function applyStaticI18n() {
   document.documentElement.lang = LANG;
   document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
+}
+// Switch the live language: swap LANG, cache it for the next first paint, and re-localise the parts
+// that are NOT rebuilt on a poll — the static HTML + inline SVG (applyStaticI18n) and the schematic's
+// hit-target labels (labelSchematicHits, whose copy is bilingual). Dynamic strings repaint through
+// t()/tx() on the caller's next render. A no-op (returns false) when the language is unchanged, so a
+// poll that reports the same language costs nothing.
+function setLang(next) {
+  if (next !== "de" && next !== "en") next = autoLang();
+  if (next === LANG) return false;
+  LANG = next;
+  lsSet("uiLang", next);
+  applyStaticI18n();
+  labelSchematicHits();
+  return true;
+}
+// Reconcile the language with the device's stored override (/status.ui.lang): "de"/"en" force that
+// language on this client, "auto" (or a pre-override device that omits the field) hands the choice
+// back to the browser. Called from refreshStatus before the frame is painted.
+function setLangFromStatus(s) {
+  const stored = s && s.ui && s.ui.lang;
+  return setLang(stored === "de" || stored === "en" ? stored : autoLang());
 }
 
 // ── App state ────────────────────────────────────────────────────────────
@@ -485,6 +534,7 @@ async function refreshStatus() {
   let s;
   try { s = await j("/status", { signal: pollSignal() }); } catch { markUnreachable(); return false; }
   S.status = s;
+  setLangFromStatus(s);   // apply the device's language override (if any) before painting this frame
   renderApp();
   return true;
 }
@@ -608,13 +658,17 @@ function faultValue() {
 // Shown when /status.sys.safe_mode is true — the device crash-looped on a bad config and came up
 // minimally (network + web UI + OTA only; the X10A poll engine and MQTT bridge are paused). It is not
 // dismissible: it reflects a LIVE state and clears itself once a healthy reboot leaves safe mode. The
-// recovery controls (behind the gear: the RX/TX pins on the ESP32 card, the WiFi/MQTT modals) stay fully usable.
+// recovery controls (behind the gear: the RX/TX pins on the Protocol card, the WiFi/MQTT modals)
+// stay fully usable.
 function renderRecoveryBanner() {
   const el = $("recoveryBanner");
   if (!el) return;
   if (!(S.status?.sys?.safe_mode)) { el.hidden = true; return; }
-  if (!el.hidden && el.dataset.on === "1") return;   // already shown — don't thrash the DOM
-  el.dataset.on = "1";
+  // LANG is part of the draw signature: changing the device override must repaint a banner that is
+  // already visible, while identical status polls in the same language still avoid DOM churn.
+  const rsig = `1:${LANG}`;
+  if (!el.hidden && el.dataset.on === rsig) return;   // already shown in this language
+  el.dataset.on = rsig;
   el.innerHTML =
     `<div class="crash-head"><span class="crash-ico">!</span>` +
     `<div class="crash-txt"><div class="crash-title">${esc(t("recovery.title"))}</div>` +
@@ -643,7 +697,9 @@ function renderRollbackBanner() {
   // Key the re-render on what the banner DRAWS (the fallback SSID), not just on "is it shown" — the
   // same rule renderCrashBanner's `rsig` follows. A boolean key would leave a stale SSID on screen if
   // the name ever changed under a held marker.
-  const rsig = `1:${w.ssid || ""}`;
+  // The fallback network can stay identical while the device language changes from another client.
+  // Include LANG so the persistent banner follows that live override instead of retaining old copy.
+  const rsig = `${LANG}:1:${w.ssid || ""}`;
   if (el.dataset.on === rsig && !el.hidden) return;   // already rendered this — don't thrash the DOM
   el.dataset.on = rsig;
   // After the rollback the device is back on the OLD network, so /status.wifi.ssid names exactly the
@@ -689,7 +745,9 @@ function renderCrashBanner() {
   // the button.
   const sig  = `${c.reason}:${c.pc || ""}:${c.task || ""}`;
   const ask  = S.crashAsk === sig;
-  const rsig = `${sig}:${!!c.coredump}:${ask}`;
+  // The crash identity stays language-neutral (`sig`, used by the delete flow), while the DRAW
+  // signature includes LANG because every visible label/action in the banner is localised.
+  const rsig = `${LANG}:${sig}:${!!c.coredump}:${ask}`;
   if (S.crashDismissed === sig) { el.hidden = true; return; }
   if (el.dataset.rsig === rsig && !el.hidden) return;   // already rendered this — don't thrash the DOM
   el.dataset.sig  = sig;    // crash key (read by the delete handler)
@@ -1049,7 +1107,7 @@ function pinSelRow(label, id, val, pins) {
     `<select class="input mono num pin-sel" id="${id}" aria-label="${esc(label)}">${opts}</select></div>`;
 }
 
-// The update-channel row (ESP32 card): which published feed the next OTA check reads. Two feeds
+// The update-channel row (Firmware card): which published feed the next OTA check reads. Two feeds
 // exist because a merge to main no longer cuts a release — "Release" is the manually-cut, tagged
 // build, "Development" is the last merge. Rendered from /status.ota.channel (the SETTING) rather
 // than from the running version's "-dev" suffix (what is INSTALLED): the two differ for exactly as
@@ -1062,7 +1120,21 @@ function channelRow(cur) {
     opt("release", t("chan.release")) + opt("dev", t("chan.dev")) + `</select></div>`;
 }
 
-// The firmware row (ESP32 card): the running version, and the SAME OTA trigger the dashboard
+// The language row (Firmware card): the web UI's manual language override. "Browser" hands the
+// choice back to the browser (navigator.language, the default); picking a language forces it on every
+// client that opens the dashboard and persists it in NVS (POST /set_lang). Rendered from
+// /status.ui.lang like every other setting; "auto" reads as "Browser" (it IS what the browser
+// reports, not a separate automatic mode), and de/en are named in their OWN tongue (Deutsch /
+// English), the convention for a language picker.
+function langRow(cur) {
+  const opt = (v, label) =>
+    `<option value="${v}"${v === cur ? " selected" : ""}>${esc(label)}</option>`;
+  return `<div class="vrow"><span class="vrow-label">${esc(t("card.language"))}</span>` +
+    `<select class="input lang-sel" id="e32Lang" aria-label="${esc(t("card.language"))}">` +
+    opt("auto", t("lang.auto")) + opt("en", t("lang.en")) + opt("de", t("lang.de")) + `</select></div>`;
+}
+
+// The version row (Firmware card): the running version, and the SAME OTA trigger the dashboard
 // header's version is — one gesture with one meaning wherever the version is printed. Not a second
 // copy of the flow: the tap runs checkFirmwareUpdate() itself. It does NOT leave the screen. An
 // update is started from here *while reading this card* — the version, the channel it follows, the
@@ -1079,20 +1151,23 @@ function firmwareRow(version) {
     `<span class="otastat" id="otaStatSet" role="status" aria-live="polite"></span></span></button>`;
 }
 
-// ESP32 board status card (on the Settings screen — renderSettings): the X10A link + protocol, the
-// RX/TX pins, the firmware version + its update channel, and — at the bottom, after the settings —
-// the board's own health: how long it has been up and how much memory it has. Those last three are
-// the ONLY telemetry here, and each earns its place by answering a question no other screen does:
-// uptime says whether the board restarted (the crash banner only fires on a FAULT), and the two
-// memory rows carry 24-hour curves that show DRIFT. The chip id and the last reset reason stay off
-// the card — they are static or one-shot facts that /status, /diag and the MQTT heartbeat's
-// diagnostic entities already carry, and Settings is otherwise what the board is SET TO.
+// ESP32 board settings (on the Settings screen — renderSettings): THREE cards, split from what was
+// one, so each answers one question. ESP32 = the board itself (its onboard hardware and its own
+// health — uptime + the two memory curves). Protokoll = the X10A link (whether the bus answers, the
+// framing it speaks, and the RX/TX pins). Firmware = the running version, the update feed it follows,
+// and the UI language. All three render into one container (#settingsCards) as concatenated vcards,
+// so the delegated click/change listeners bound there keep working across the split.
+//
+// The board-health rows are the ONLY telemetry here, and each earns its place by answering a question
+// no other screen does: uptime says whether the board restarted (the crash banner only fires on a
+// FAULT), and the two memory rows carry 24-hour curves that show DRIFT. The chip id and the last
+// reset reason stay off the cards — static or one-shot facts that /status, /diag and the MQTT
+// heartbeat's diagnostic entities already carry, and Settings is otherwise what the board is SET TO.
 // (Tapping the version — here or in the dashboard header — runs the OTA check, DESIGN.md §5.4; the
-// channel row below it is the SETTING that decides which feed that check reads, not a second copy
-// of the flow.) Pins are
-// auto-detected: once the bus answers on a pair they show read-only; until then a dropdown of the
-// board's wire-able GPIOs lets the user point the firmware at their wiring. A brief timeout doesn't
-// flip back to the dropdown (last_ok_s grace).
+// channel row below it is the SETTING that decides which feed that check reads, not a second copy of
+// the flow.) Pins are auto-detected: once the bus answers on a pair they show read-only; until then a
+// dropdown of the board's wire-able GPIOs lets the user point the firmware at their wiring. A brief
+// timeout doesn't flip back to the dropdown (last_ok_s grace).
 function esp32CardHtml() {
   const s = S.status || {}, hp = s.hp || {};
   const proto = hp.proto === "I" ? "X10A-I" : hp.proto === "S" ? "X10A-S" : "—";
@@ -1101,21 +1176,25 @@ function esp32CardHtml() {
   const pinRow = (label, id, val, other) => pinsLocked
     ? vrow(label, val != null ? String(val) : "—", { cls: "mono num" })
     : pinSelRow(label, id, val, avail.filter((p) => p !== other));
-  const rows =
+  // ESP32 — the board's onboard hardware and its own health. READINGS AND SETTINGS ONLY; the one
+  // action this card family used to carry ("Report a bug") is in the Settings footer line now
+  // (index.html #footBug), a rare escape hatch that read as one more board fact under "Largest free block".
+  const esp32Rows =
+    boardRow() +
+    uptimeRow(s.uptime_s) +
+    memoryRows(s.sys || {});
+  // Protokoll — the X10A link: connection state, framing, and the RX/TX pins it is wired on.
+  const protoRows =
     vrow(t("card.hplink"), hp.connected ? t("card.online") : t("card.offline"), { cls: hp.connected ? "ok" : "err" }) +
     vrow(t("card.protocol"), hp.connected ? proto : "—") +
     pinRow(t("card.rxpin"), "e32Rx", hp.rx, hp.tx) +
-    pinRow(t("card.txpin"), "e32Tx", hp.tx, hp.rx) +
+    pinRow(t("card.txpin"), "e32Tx", hp.tx, hp.rx);
+  // Firmware — the running version (tap = OTA check), the feed it follows, and the UI language.
+  const fwRows =
     firmwareRow(s.version) +
     channelRow(s.ota?.channel === "dev" ? "dev" : "release") +
-    boardRow() +
-    // Link facts, then the settings, then the board's own health — and nothing else. The card is
-    // READINGS AND SETTINGS ONLY; the one action it used to carry ("Report a bug", last row) is in
-    // the Settings footer line now (index.html #footBug), because a rare escape hatch drawn at a
-    // live reading's weight reads as one more board fact directly under "Largest free block".
-    uptimeRow(s.uptime_s) +
-    memoryRows(s.sys || {});
-  return vcard("ESP32", rows);
+    langRow(s.ui?.lang === "de" || s.ui?.lang === "en" ? s.ui.lang : "auto");
+  return vcard("ESP32", esp32Rows) + vcard(t("card.proto_title"), protoRows) + vcard(t("card.fw_title"), fwRows);
 }
 
 // How long the board has been up (/status.uptime_s — seconds since boot, esp_timer). TWO units at
@@ -1201,7 +1280,7 @@ const shortFamily = (f) => String(f).replace(/^Altherma\s+/, "");
 function statusCardsHtml() {
   const hp = S.status?.hp || {}, d = S.status?.detect || {};
   // Outdoor unit as a full-width heading — model names are long and don't fit a label→value row.
-  // The X10A link + protocol live on the ESP32 card (they're about the board's bus), not here.
+  // The X10A link + protocol live on the Protocol card (they're about the board's bus), not here.
   // Identity is bus-derived: the model name degrades to the brand offline (hpModelName), and capacity
   // (from the cached fingerprint) is shown ONLY while connected — never a stale value read as live.
   // No "Detection: auto/manual" row: detection is fully automatic, an internal detail.
@@ -1411,10 +1490,10 @@ const connDown = () => connLinks().filter((l) => l.cls === "err");
 
 // ── Settings screen (behind the header gear) ─────────────────────────────────────────────────
 // The whole configuration on one screen, no menu level in between: the Connections tile and the
-// ESP32 board card, rendered by the same builders that used to place them on the dashboard.
+// ESP32 / Protocol / Firmware cards rendered together by esp32CardHtml().
 function renderSettings() {
-  // Both containers are rebuilt on every poll (link state, pins and the OTA row all change). The ESP32 card's
-  // RX/TX pin dropdown is interactive, so skip the rebuild while it is focused/open — otherwise the
+  // Both containers are rebuilt on every poll (link state, pins and the OTA row all change). The
+  // Protocol card's RX/TX pin dropdown is interactive, so skip the rebuild while it is focused/open — otherwise the
   // poll would collapse it mid-pick. It resumes once focus leaves (onPinPick blurs it after
   // applying). setHtml keeps the rest from thrashing rows the user is tapping.
   //
@@ -1435,7 +1514,7 @@ function renderSettings() {
   // pointer drops its capture and kills the scrub mid-drag (renderCards has the same guard).
   if (S.scrub) return;
   const a = document.activeElement;
-  const picking = !!(a && a.classList && (a.classList.contains("pin-sel") || a.classList.contains("chan-sel")));
+  const picking = !!(a && a.classList && (a.classList.contains("pin-sel") || a.classList.contains("chan-sel") || a.classList.contains("lang-sel")));
   if (!picking) setHtml("connTile", connectionsHtml());
   if (!picking && !S.otaShown) setHtml("settingsCards", esp32CardHtml());
   $("settingsVer").textContent = "daikin-altherma-esp32 · v" + (S.status?.version || "?");
@@ -3423,7 +3502,9 @@ function inspectSig(e) {
   const d = S.live;
   const row = d ? inspRow(e) : null;
   const rows = (d && e.rows ? e.rows.map((sel) => inspVal(pickRow(sel), d)) : []).join(",");
-  return [S.insp, inspTitleText(e, d), inspVal(row, d), d && e.head ? e.head(d) : "",
+  // LANG guarantees the full body is redrawn even when this particular entry's title/live sentence
+  // happens to be spelled identically in both dictionaries.
+  return [LANG, S.insp, inspTitleText(e, d), inspVal(row, d), d && e.head ? e.head(d) : "",
           inspNowText(e, d) || "", inspHeld(e, d) ? "held" : "", rows].join("|");
 }
 
@@ -3446,7 +3527,9 @@ function renderInspectHist(e, row) {
   if (id) ensureHist(id);                  // throttled to once a minute inside; no-op once cached
   const h = id ? S.hist.get(id) : null;
   const pin = id ? S.histPin.get(id) : null;
-  const sig = [id, h ? (h.err ? "e" : h.gen) : "", pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
+  // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
+  // inspector chart even when the series generation and pinned sample are unchanged.
+  const sig = [LANG, id, h ? (h.err ? "e" : h.gen) : "", pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
   if (sig === S.inspHistSig) return;
   S.inspHistSig = sig;
   const el = $("inspHist");
@@ -3523,17 +3606,24 @@ function labelSchematicHits() {
     const e = INSPECT[el.dataset.insp];
     if (!e) return;
     // An entry whose TITLE is live (the COP names the system it describes, and that follows the
-    // electrical source) cannot supply the accessible name: this runs ONCE at startup, before any
-    // reading exists, and is never re-applied — so a live title would be frozen at whatever it
-    // happened to say then. `aria` is the stable concept the target opens; the live distinction
-    // belongs in the panel, which is where a screen reader meets it too. Falling back through
-    // inspTitleText rather than tx() keeps a future function-form title a real string instead of
-    // the literal "undefined" that tx() returns for a function.
+    // electrical source) cannot supply the accessible name: this runs at BOOT, before any reading
+    // exists — and again on a live language switch (setLang), never on a poll — so a live title
+    // would be frozen at whatever it happened to say on the run that last touched the language.
+    // `aria` is the stable concept the target opens; the live distinction belongs in the panel,
+    // which is where a screen reader meets it too. Falling back through inspTitleText rather than
+    // tx() keeps a future function-form title a real string instead of the literal "undefined"
+    // that tx() returns for a function.
     const name = e.aria ? tx(e.aria) : inspTitleText(e, null);
     el.setAttribute("aria-label", name);
-    const ttl = document.createElementNS(SVGNS, "title");
+    // Re-entrant: a language switch re-runs this on the SAME nodes, so reuse the existing <title>
+    // rather than inserting a second one — an unconditional insert here left one stale, un-removed
+    // <title> child behind every switch, growing without bound over a long-lived tab.
+    let ttl = el.querySelector(":scope > title");
+    if (!ttl) {
+      ttl = document.createElementNS(SVGNS, "title");
+      el.insertBefore(ttl, el.firstChild);
+    }
     ttl.textContent = name;
-    el.insertBefore(ttl, el.firstChild);
   });
   $("inspClose").setAttribute("aria-label", t("insp.close"));
 }
@@ -3799,6 +3889,23 @@ async function onChannelPick() {
   checkFirmwareUpdate();
 }
 
+// The UI language picker (Firmware card). Persisted on the device (POST /set_lang) so the choice
+// holds across reboots and every client; applied LIVE here — refreshStatus re-reads /status.ui.lang
+// and setLangFromStatus swaps the language and re-localises — rather than reloading the page. "auto"
+// hands the choice back to the browser. The success toast comes AFTER the swap so it already reads in
+// the newly chosen language.
+async function onLangPick() {
+  const sel = $("e32Lang");
+  const lang = sel.value;
+  sel.blur();
+  try {
+    const r = await post("/set_lang", { lang });
+    if (!r.ok) { toast(await errorOf(r, t("toast.rejected")), "err"); await refreshStatus(); return; }
+  } catch { toast(t("toast.unreachable"), "err"); return; }
+  await refreshStatus();
+  toast(t("lang.saved"), "ok");
+}
+
 // ── Firmware / OTA ───────────────────────────────────────────────────────
 // Tapping the version in the header meta line checks for an OTA update, and offers to install one:
 // the full /ota/check -> /ota/status -> /ota/update flow is wired below against the device-side
@@ -3838,7 +3945,7 @@ function otaRing(pct, indet) {
 // Every write bumps otaSeq, which is what makes the delayed clear below safe.
 //
 // There are TWO slots and both get the same content: the dashboard header's (#otaStat) and the one
-// in the Settings ESP32 card's Firmware row (#otaStatSet). Either screen can start the flow, so
+// in the Settings Firmware card's Version row (#otaStatSet). Either screen can start the flow, so
 // either screen has to be able to report it — and painting both unconditionally means a user who
 // switches screens mid-download finds the progress already there rather than gone. Only one is on
 // screen at a time (the other screen's DOM is hidden), so this is not two readouts competing; it is
@@ -4279,9 +4386,9 @@ function wireTrendScrub(gv) {
 // The remaining delegated wiring, split out only so the scrub handlers above can be a function of
 // their container — same one-time setup, same order as before.
 function wireRestOfApp() {
-  // The ESP32 card (#settingsCards) is rebuilt every poll too, so its controls are delegated as
-  // well: the Hardware row opens the board modal, the Firmware row runs the OTA check, and the
-  // RX/TX dropdowns re-run pin auto-detection on change. The check stays on this screen — it
+  // The three-card ESP32 group (#settingsCards) is rebuilt every poll too, so its controls are
+  // delegated as well: the Hardware row opens the board modal, the Firmware row runs the OTA check,
+  // and the Protocol card's RX/TX dropdowns re-run pin auto-detection on change. The check stays on this screen — it
   // reports into the Firmware row's own slot (otaInline paints both slots), so nothing has to
   // navigate to make the flow visible.
   $("settingsCards").addEventListener("click", (e) => {
@@ -4298,6 +4405,7 @@ function wireRestOfApp() {
   $("settingsCards").addEventListener("change", (e) => {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();
     else if (e.target.id === "e32Chan") onChannelPick();
+    else if (e.target.id === "e32Lang") onLangPick();
   });
   // The Connections tile (#connTile) is rebuilt every poll too — each row's pencil opens its own
   // edit modal (WiFi/MQTT/Syslog/NTP), delegated the same way.
