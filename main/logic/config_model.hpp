@@ -8,6 +8,7 @@
 #include "board_pins.hpp"   // board_pin_offerable — the chip-reserved-pin rule validate() enforces
 #include "led_pattern.hpp"  // LedType — the indicator back-end, now a runtime choice not a Kconfig one
 #include "ota_channel.hpp"  // OtaChannel — which published feed this device follows
+#include "modbus.hpp"       // MODBUS_TCP_PORT / MODBUS_DEFAULT_UNIT — the mb_* field defaults
 #include "ui_lang.hpp"      // UiLang — the web UI's manual language override (else browser-detected)
 
 namespace daik {
@@ -58,6 +59,44 @@ struct Config {
     Protocol    proto    = Protocol::I;  // last detected framing (I/S); tried first, then the other
     int         rx_pin   = 44;
     int         tx_pin   = 43;
+
+    // ── The HomeHub Modbus stack — PERSISTED (issue #32) ─────────────────────────────────────────
+    // A SECOND, INDEPENDENT source, not an alternative to the X10A link above. The two share no
+    // wire, no framing, no register model and no failure mode, so they run as separate tasks with
+    // separate caches and separate link states (docs/MODBUS_PROTOCOL.md): X10A keeps working when
+    // the LAN is down, and the HomeHub keeps reporting when the service cable is out. There is
+    // deliberately NO "which transport" selector — that would model an exclusivity the hardware
+    // does not have, and it is what an earlier revision of this got wrong.
+    //
+    // THE ADDRESS IS THE SWITCH. There is no separate enable flag: the stack runs when — and only
+    // when — a gateway address is known, so a board with none costs no task, no socket and no mDNS
+    // traffic, which is the property a flag was there to guarantee. A flag beside the address would
+    // be a second way to say the same thing, and the two can disagree.
+    //
+    // mb_host is the MANUALLY entered address ("" = none entered). It is not the whole answer: the
+    // address actually used is manual-else-discovered (config_modbus_host), because the one-shot
+    // search below writes its result to its own key.
+    std::string mb_host;
+    int         mb_port     = MODBUS_TCP_PORT;      // Modbus TCP port (502; the plaintext HomeHub default)
+    int         mb_unit_id  = MODBUS_DEFAULT_UNIT;  // Modbus unit/slave id (1..247, default 1)
+    // ── The one-shot mDNS search result — PERSISTED, and written by the MODBUS task alone ────────
+    // The search is SUPPORTING, not continuous: the firmware browses ONCE, on the first boot that
+    // has no address at all, and then records what it learned. Found -> mb_dhost holds the hostname
+    // and the stack runs from then on. Not found -> mb_searched latches true and NO LATER BOOT
+    // BROWSES AGAIN; adding a HomeHub afterwards is a manual mb_host entry, which is a deliberate act
+    // and needs no search. That is why these two are not in the atomic credential blob: mb_host has
+    // exactly ONE writer (httpd, POST /set_hp) while these have exactly one OTHER writer (the Modbus
+    // task), and a task that saves a whole Config saves whatever it snapshotted — the same two-owner
+    // problem the rx/tx link cache is split out for. Self-healing like that cache: a hostname that
+    // stops resolving simply fails to connect and is reported on /status.
+    std::string mb_dhost;                 // hostname the mDNS search found ("" = none)
+    bool        mb_searched  = false;     // true once the one-shot search has run (found or not)
+
+    // SAFETY FLAG for the future in-firmware actuation path (#32 P3), default OFF. P1/P2 build only
+    // the READ stack — nothing writes a pump register — so this flag currently gates nothing; it is
+    // persisted here so P3 lands without another blob-version bump, and so the UI/API can already
+    // report it. There is no external writer by design.
+    bool        actuation_enabled = false;
 
     // ── Board-local hardware: the status indicator + the recovery button — PERSISTED ─────────────
     // RUNTIME, not Kconfig, and that is the whole point. CI publishes ONE esp32s3 image
@@ -149,6 +188,30 @@ inline bool config_save_succeeded(bool blob_ok, bool link_ok, bool require_link)
 }
 
 // Apply the detected X10A link. Non-allocating, so it cannot throw inside the config mutex.
+// The address the Modbus stack should dial, and — because the address is the switch — whether that
+// stack exists at all. Manual entry WINS over the discovered hostname, and does not erase it: a user
+// who types an address is correcting what the search found, and clearing the field again must fall
+// back to the search result rather than to nothing. Pure so the precedence is asserted once instead
+// of re-derived at each call site (the task's gate, its connect, /status and the UI).
+inline const std::string& config_modbus_host(const Config& c) {
+    return c.mb_host.empty() ? c.mb_dhost : c.mb_host;
+}
+
+// Should the one-shot mDNS search run on this boot? Only when NOTHING is known: no manual address,
+// no recorded discovery, and the search has never completed. Latching on mb_searched rather than on
+// "mb_dhost is empty" is the whole point — a search that found nothing must be remembered as HAVING
+// RUN, or every boot browses the LAN again for a gateway that is not there.
+inline bool config_modbus_should_search(const Config& c) {
+    return c.mb_host.empty() && c.mb_dhost.empty() && !c.mb_searched;
+}
+
+// Record the one-shot search's outcome in the live config. `host` is empty when nothing answered —
+// mb_searched latches either way, which is what makes the search one-shot.
+inline void apply_modbus_found(Config& c, std::string host) {
+    c.mb_dhost    = std::move(host);
+    c.mb_searched = true;
+}
+
 inline void apply_link(Config& c, int rx_pin, int tx_pin, Protocol proto) {
     c.rx_pin = rx_pin;
     c.tx_pin = tx_pin;
@@ -276,6 +339,11 @@ inline bool validate(const Config& c, std::string& reason, int max_gpio = 48,
     if (!board_pin_offerable(c.tx_pin, octal_spi, reserved)) { reason = "tx_pin is a reserved GPIO"; return false; }
     if (c.proto != Protocol::I && c.proto != Protocol::S) { reason = "protocol must be I or S"; return false; }
     if (!c.syslog_host.empty() && (c.syslog_port < 1 || c.syslog_port > 65535)) { reason = "syslog_port out of range"; return false; }
+    // Modbus TCP link params. Checked UNCONDITIONALLY (not gated on transport): the struct defaults
+    // 502/1 pass for every X10A config, so this only bites a bad Modbus setting. mb_host is free text
+    // like syslog_host — empty means mDNS auto-discovery, never invalid.
+    if (c.mb_port < 1 || c.mb_port > 65535)   { reason = "mb_port out of range"; return false; }
+    if (c.mb_unit_id < 1 || c.mb_unit_id > 247) { reason = "mb_unit_id out of range"; return false; }
     return true;
 }
 

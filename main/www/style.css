@@ -744,3 +744,67 @@ textarea.input[readonly] { font-size: 12px; color: var(--muted); white-space: pr
   .inspect-body { font-size: 15px; }
   .inspect-row { font-size: 14px; }
 }
+
+/* ── SOURCE PROVENANCE: which stack a reading came from ─────────────────────────────────────────
+   A THIRD meaning axis, and it needs its own token for that reason: --ok/--warn/--err encode STATE
+   and --flow-hot/--flow-cold encode TEMPERATURE, so borrowing either would say something untrue
+   about the value. --brand is out too — it means "interactive" everywhere else in this UI, and a
+   value is not tappable. Petrol is far enough from the brand cyan to read as a different thing at a
+   glance while staying quiet, which matters because X10A remains the prominent source: Modbus only
+   ever appears as a second opinion inside an explainer, as a marked stand-in while X10A is down, or
+   in its own group at the very end of the list. */
+:root { --src-mb:#0E8A8A; --src-mb-soft:rgba(14,138,138,.10); }
+@media (prefers-color-scheme: dark) { :root { --src-mb:#3FB6B6; --src-mb-soft:rgba(63,182,182,.15); } }
+
+/* The second source, as one plain line at the end of an explainer — the same paragraph as the
+   "Normal:" note above it, only in petrol. No border, no card, no second value column: the row's own
+   reading is already stated in the header the reader just tapped, so this line is the OTHER
+   instrument and nothing else. (An earlier revision boxed the two sources together with their
+   difference; it repeated the header's own number in a heavier shape and pushed the description
+   below the fold.) */
+/* The source badge. Outlined, lowercase and MONOSPACE — the type this UI already reserves for
+   machine identity (the inspector's source line naming the /values row is mono for the same
+   reason), so the marker reads as metadata about the reading rather than as another word in the
+   sentence. Set beside a value, where the VALUE is what the eye should land on, so it carries its
+   weight in the outline instead of in ink. One badge wherever a gateway reading appears — the
+   explainer line and the inspector's member row — so a reader learns it once. */
+.mb-tag {
+  display: inline-block; vertical-align: 1px;
+  padding: 1px 7px 2px; border-radius: var(--r-pill);
+  border: 1px solid currentColor; background: var(--src-mb-soft); color: var(--src-mb);
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: lowercase;
+  line-height: 1.4; white-space: nowrap;
+}
+/* The gateway's reading as a FULL row inside an explainer — its own label on the left, the value on
+   the right, the same shape as the X10A row the explainer hangs under, so the two line up and read
+   as two instruments answering one question. */
+.mb-line {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  margin: 10px 0 0; color: var(--src-mb); font-size: 14px;
+}
+.mb-line span:last-child { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* The difference between the two sources, and why it is there. Muted, one size down: it is a note
+   ABOUT the two readings above it, not a third reading. Never coloured as a fault — the two sensors
+   legitimately sit at different points in the circuit, so a wide gap is information. */
+.mb-delta {
+  margin: 3px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--muted);
+}
+/* The same reading from the gateway, as its OWN row in the inspector's member list — label and
+   value both petrol, so the row reads as one statement from one instrument. Needs to beat
+   .inspect-row span:first-child/:last-child, which set the two-tone label/value ink; equal
+   specificity, won on order, which is why this block stays BELOW them in the file. */
+.inspect-row.mb-row span { color: var(--src-mb); }
+/* A value the Modbus stack supplied: the fallback stand-in, and every row of the Modbus-only group. */
+.vrow-val.src-val-mb, .src-val-mb { color: var(--src-mb); }
+.src-val-mb .vrow-unit { color: var(--src-mb); opacity: .75; }
+.conn-val.mb { color: var(--src-mb); }
+/* A schematic pill drawn from the Modbus stack (only while X10A is down — see renderLive). Placed
+   after the base .sc-val rule so it wins on fill without needing an !important. */
+svg .sc-val.sc-mb { fill: var(--src-mb); }
+svg .sc-val.sc-mb .vrow-unit { fill: var(--src-mb); }
+
+/* (There is no fallback BANNER. An earlier revision had one; the schematic's own status headline now
+   names the mode from the gateway's flags and says the readings are Modbus, which is the same
+   statement one line higher and in the place a reader is already looking. Its rules are deleted
+   rather than left dormant: unreferenced CSS reads as a feature that is merely switched off.) */

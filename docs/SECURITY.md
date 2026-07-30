@@ -44,9 +44,22 @@ and the OTA-signing / key lifecycle.
     an open-source firmware — but contains **no** runtime secrets (WiFi/MQTT credentials live only in
     device NVS, never in the image). Signing still uses the offline OTA key, which is never built into
     or derivable from the ELF.
-- **The heat-pump link is read-only.** The firmware only polls X10A registers; the X10A protocol
-  has no write command, so the firmware cannot change the heat pump's settings or actuate it in any
-  way. There are no control outputs.
+- **The heat-pump link is read-only.** The firmware only polls registers; it cannot change the heat
+  pump's settings or actuate it in any way, and there are no control outputs. On the default **X10A**
+  link that is the protocol's own doing — it has no write command. On the optional **Modbus TCP link
+  to a Daikin HomeHub** the wire *would* allow a write, and the link is still read-only **by design**:
+  the client has no write function, and there is no MQTT command topic, writable HA entity or HTTP
+  route that can set a pump register. (A persisted `actuation_enabled` flag exists, defaults to
+  **false**, and today gates nothing, because nothing writes.) So the unauthenticated
+  `HA → MQTT → firmware → Modbus → pump` chain a generic Modbus-control bridge would create does not
+  exist here.
+  - **The HomeHub's own `:502` is the residual surface, and it is not ours to fix.** Modbus TCP on
+    port 502 is unencrypted and carries **no Modbus-level credential** — no user, password or token
+    (the guide's SKI/QR trust mechanism is EEBUS-only). On a shared LAN any host can in principle
+    write to the hub, whatever this firmware does. **Segment or firewall the HomeHub's `:502`** so
+    only this device reaches it; TLS `:802` is the hub's only on-wire protection and is out of scope.
+    Discovery trusts LAN multicast, so the target is confirmed by its `homehub-*` hostname before a
+    connection is made. See [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md).
 - **Home Assistant integration is read-only** — the MQTT bridge subscribes to no command topics.
 - **MQTT credentials are never sent in cleartext.** If an MQTT username/password is configured, the
   bridge requires an `mqtts://` broker URI and verifies the broker against the mbedTLS certificate

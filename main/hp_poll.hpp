@@ -67,6 +67,10 @@ struct HpStats {
     std::string last_error;
 };
 
+// The max cache row count for the ACTIVE transport (X10A profile rows, or the HomeHub map on Modbus
+// TCP) — /values and the MQTT bridge size their snapshot buffers from this so no row is truncated.
+size_t   hp_values_capacity();
+
 // Thread-safe snapshot copy of the current value cache. Returns count written.
 size_t   hp_values_snapshot(CachedValue* out, size_t max);
 HpStats  hp_stats();

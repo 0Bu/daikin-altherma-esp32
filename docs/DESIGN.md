@@ -126,6 +126,8 @@ back (the header chevron, or `Esc`):
         otherwise ..................... VIEW: Dashboard  ──── gear ────▶  Settings (§5.6)
                                                           ◀── chevron ──   · Connections tile
                                                                               └─ row ─▶ modal (§5.1)
+                                                                           · HomeHub card
+                                                                              └─ HomeHub ─▶ modal
                                                                            · ESP32 card
                                                                               └─ Hardware ─▶ modal
                                                                            · Protokoll card
@@ -246,8 +248,13 @@ Actions row at the bottom: Cancel (secondary) + Save (brand).
 ### 5.2 Heat pump — no settings screen (fully automatic)
 The heat pump has **no configuration screen**. The model is **auto-detected** from the X10A bus
 (`/status.detect`) — there is no manual model picker, no protocol control, no value checklist, and
-no poll-interval control (poll is fixed at 1 s). What there is to see or touch is split the way
-everything else is — what the *unit* is on the dashboard, what the *board* is in Settings:
+no poll-interval control (poll is fixed at 1 s). The one thing that *is* a choice is **which link**
+reaches the pump — the X10A service port (the default) or a HomeHub over Modbus TCP — and that is a
+connection, not a heat-pump setting, so it lives on its own card in Settings beside the other
+connections (§5.6 item 2). Even there the HomeHub is **auto-discovered** by default: the address is an
+override, not a required entry. Nothing on that card controls the pump. What there is to see or touch
+is otherwise split the way everything else is — what the *unit* is on the dashboard, what the *board*
+is in Settings:
 - **Model** name (the brand while offline) and detected capacity (shown only while the link is live)
   → the dashboard **Model** card (§5.3). There is no "auto-vs-manual detection" indicator.
 - **X10A link** (Online/Offline), **protocol** (X10A-I/S) and the **RX/TX pins** → the **Protokoll**
@@ -950,18 +957,19 @@ block butted against the round CTA and steps cards below.
   beyond the PR-banner check. The divergence from the dashboard is **not** a gap to close — do not
   add a translation layer here to make the two consistent.
 
-### 5.6 Settings — the screen behind the gear (Connections + ESP32)
+### 5.6 Settings — the screen behind the gear (Connections + HomeHub + ESP32)
 The dashboard header's **gear** (right, `.iconbtn.bordered`) is the only way off the dashboard. It
 opens **Settings**, which swaps the dashboard header for a **back header** — a chevron plus the
 screen title. `Esc` leaves the same way, but only when no modal is open: a modal owns `Esc` first, so
 one key press never both closes a dialog and leaves the screen behind it.
 
-**Settings is flat.** No menu of entries, no sub-screens: the gear lands directly on the four cards,
+**Settings is flat.** No menu of entries, no sub-screens: the gear lands directly on the five cards,
 stacked in the same single column as everything else (§9). The Connections tile is the *same* card it
 was on the dashboard — the move changed where the configuration lives, not how it looks. The board
 card is the same story split three ways: **ESP32** / **Protokoll** / **Firmware** answer three
 different questions (the board itself, the X10A link, the running software) that one card used to
-answer at once, all three built and rebuilt together by one `esp32CardHtml()`:
+answer at once, all three built and rebuilt together by one `esp32CardHtml()`. The HomeHub card sits between
+the Connections tile and those three and follows the same row vocabulary exactly:
 
 1. **Connections tile** — one full-width card, `--card` bordered like the value groups, titled
    "Connections". Combines **WiFi**, **MQTT**, **Syslog** and **NTP** into one row each: a label on
@@ -994,7 +1002,24 @@ answer at once, all three built and rebuilt together by one `esp32CardHtml()`:
      room in a one-line tile); it remains available from `/status.ntp.time` and every syslog
      TIMESTAMP — and from no HA entity (the "Device Time" sensor is retired, ARCHITECTURE.md → *The
      MQTT bridge*).
-2. **ESP32 card** — the board itself, styled exactly like the value groups (§6): the **Hardware**
+2. **HomeHub card** — *which link reaches the pump*, and it is the only card here that can change
+   that. A **Verbindung** select (X10A ↔ HomeHub/Modbus TCP) written live (`POST /set_hp`, no
+   reboot), then the hub's **Adresse** as a tappable summary row opening a modal for host, port and
+   unit id. Below them the link's own read-only state: **Status** (Verbunden / Suche… / Getrennt,
+   `--ok` / `--muted` / `--err` by the same rule the Connections rows use) and, once it has read
+   anything, **Register** as `rx · fails`.
+   Two things it deliberately does NOT do. It shows **no pump control** — no setpoint, no mode, no
+   switch — because the Modbus link is read-only by design and a control widget would advertise a
+   capability the firmware refuses to have (`docs/SECURITY.md`). And when the address is left empty
+   it says so as a *state*, not a blank: the device discovers the hub over mDNS and the row prints
+   what it **found** (`modbus.host`), never the empty string it was asked with — the same
+   "state what is, not what was requested" rule the pins follow (§5.2).
+   The row hides itself entirely when no HomeHub is configured, so an install without one never sees
+   a setting it cannot use. It is a row of its OWN and never folded into a combined link state with
+   X10A: the two sources fail for unrelated reasons and either can be down alone, so one merged
+   "connected" would hide exactly the case worth seeing.
+
+3. **ESP32 card** — the board itself, styled exactly like the value groups (§6): the **Hardware**
    row (status indicator + recovery-button pins), which opens the board-hardware modal, from
    `board{…}`. It carries **almost no board telemetry** — chip (`platform`) and **Last reset**
    (`sys.reset_reason`) were rows here through v1.0.14 and are gone: Settings states
@@ -1026,13 +1051,13 @@ answer at once, all three built and rebuilt together by one `esp32CardHtml()`:
    translated unit strings (the Checkup window already prints `min`/`h` untranslated).
    **The card's order encodes what the rows are**: the board's own setting (Hardware) → its own
    health (uptime, then the two memory rows).
-3. **Protokoll card** — the X10A link, split out because it answers a different question than the
+4. **Protokoll card** — the X10A link, split out because it answers a different question than the
    board's own health does (*is the bus alive*, not *is the board healthy*): the heat-pump link
    (Online/Offline) and X10A protocol, then the **RX/TX pins** — read-only when detected, else a
    usable-GPIO dropdown (§5.2). From `pins_avail`, `hp{proto,rx,tx,connected,last_ok_s}`. **Link
    facts, top to bottom** (link, protocol, RX, TX) — there is no setting on this card, only what the
    bus is currently doing and which pins it is doing it on.
-4. **Firmware card** — the running software: the **Version** (`version`) and the **Update channel**
+5. **Firmware card** — the running software: the **Version** (`version`) and the **Update channel**
    select (`ota.channel` → `POST /set_ota`, §5.4), then **Language** (`ui.lang` → `POST /set_lang`,
    §1) — a three-option select, **Browser** / English / Deutsch, "Browser" because that option *is*
    the browser's own guess (`navigator.language`), not a separate automatic mode. Picking one is a

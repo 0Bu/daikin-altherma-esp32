@@ -9,7 +9,7 @@
 // copies of a rule the CI gate can only see in one place.
 //
 // TWO SHAPES, because the two routes leak differently:
-//   * /status leaks by FIELD — seven named values in a JSON object built field by field, so the
+//   * /status leaks by FIELD — eight named values in a JSON object built field by field, so the
 //     substitution happens where the value is written (http_status.cpp calls redact_or) and never as
 //     a post-processing pass over the finished string. That matters: build_status_json_string() runs
 //     on the httpd task whose stack overflow killed v1.0.12, and a second full-size buffer is
@@ -36,11 +36,14 @@ namespace daik {
 // nothing, e.g. bssid while offline) and from an absent key (an older build).
 inline constexpr const char* REDACTED = "<redacted>";
 
-// The seven /status values http_status.cpp passes through redact_or. Listed here rather than only at
+// The eight /status values http_status.cpp passes through redact_or. Listed here rather than only at
 // the call sites so the set is reviewable in one place; the header cannot enforce that every call
 // site uses it (that stays a review point — see .claude/CLAUDE.md), but it can at least state it.
-//   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker  syslog.host  ntp.server
-inline constexpr std::size_t REDACTED_STATUS_FIELDS = 7;
+//   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker  syslog.host  ntp.server  modbus.host
+// modbus.host joined the set with the HomeHub transport (#32): it is a LAN address, and — when the
+// hub was auto-discovered — the hub's own serial-derived hostname (homehub-524288-<serial>), which
+// identifies the reporter's hardware as surely as an SSID does.
+inline constexpr std::size_t REDACTED_STATUS_FIELDS = 8;
 
 // Field-level substitution for the /status builder. Returns by value because every caller feeds it
 // straight into json_quote(), which copies anyway.
@@ -81,6 +84,19 @@ inline constexpr DiagRedaction DIAG_REDACTIONS[] = {
     // incoherent: scrubbed in the JSON, printed in the log two sections below it. The second id is
     // the slugified base topic (a fixed compile-time name) and stays.
     {"mqtt: retired legacy HA device ", " (now "},
+    // hp_modbus.cpp "modbus: one-shot mDNS search found gateway %s" — the DISCOVERED HomeHub
+    // hostname, which is homehub-524288-<serial>: the hub's serial number, and so the reporter's
+    // hardware, exactly as identifying as an SSID. /status?redact=1 already withholds it as
+    // modbus.host, and without this rule the same string was printed in /diag a few sections below
+    // it in the very same bug report — the incoherence the mqtt rule above exists to prevent, in a
+    // second place. The FAILURE line ("… found no gateway — not searching again") is a separate
+    // statement on purpose and matches nothing here, so it survives whole.
+    {"modbus: one-shot mDNS search found gateway ", ""},
+    // hp_modbus.cpp "modbus: %d HomeHubs discovered via mDNS — using %s" — the same hostname on the
+    // several-hubs path. The marker starts AFTER the count, because a rule matches the RENDERED
+    // line and "%d" never appears in one; the count therefore survives, which is the diagnostic
+    // half — that more than one gateway answered is what explains an unexpected pick.
+    {" HomeHubs discovered via mDNS — using ", ""},
 };
 inline constexpr std::size_t DIAG_REDACTION_COUNT = sizeof(DIAG_REDACTIONS) / sizeof(DIAG_REDACTIONS[0]);
 

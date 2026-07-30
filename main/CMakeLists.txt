@@ -7,6 +7,7 @@ idf_component_register(
         "hp_comm.cpp"
         "hp_convert.cpp"
         "hp_detect.cpp"
+        "hp_modbus.cpp"
         "hp_poll.cpp"
         "history.cpp"
         "checkup.cpp"
@@ -82,7 +83,7 @@ idf_component_register(
 # components (led_strip, mdns, mqtt) to a contract that is not ours to demand and that breaks on any
 # bump; and sdkconfig.defaults is hashed into CI's ccache key (scripts/idf-version.sh), so a
 # diagnostic-only change there would discard every cached object it cannot possibly invalidate.
-# Scoped this way, the command line changes for these 27 objects and nothing else.
+# Scoped this way, the command line changes for these 28 objects and nothing else.
 #
 # Only the ERROR-ness of three named classes is set here. -Wall is already passed to every component
 # by ESP-IDF, so restating it would read as "this line is what turns it on" while changing nothing;

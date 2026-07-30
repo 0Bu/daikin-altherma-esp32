@@ -113,6 +113,15 @@ void config_load() {
         // absent means "auto" (keep letting the browser decide), which the struct default already
         // says — like the channel above, and unlike the board block, there is no Kconfig fallback.
         if (b.has_lang) c.ui_lang = ui_lang_from_int(b.ui_lang);
+        // The HomeHub Modbus stack (blob v5). has_modbus == false is a pre-v5 device, from the era
+        // with no HomeHub stack at all — the struct defaults already say so (like has_ota and
+        // has_lang, no Kconfig fallback needed).
+        if (b.has_modbus) {
+            c.mb_host           = b.mb_host;
+            c.mb_port           = b.mb_port;
+            c.mb_unit_id        = b.mb_unit_id;
+            c.actuation_enabled = b.actuation_enabled;
+        }
     } else {
         // Legacy / first-boot fallback (per-key + Kconfig defaults).
         c.wifi_ssid = nvs_get_str("wifi_ssid", CONFIG_DAIKIN_WIFI_SSID);
@@ -198,6 +207,12 @@ void config_load() {
         c.tx_pin = CONFIG_DAIKIN_TX_PIN;
     }
     c.proto        = parse_protocol(nvs_get_str("proto", CONFIG_DAIKIN_PROTOCOL));
+    // The one-shot mDNS search result — separate self-healing keys beside the link cache above, and
+    // for the same reason: their writer is the MODBUS task, while the credential blob's is httpd.
+    // mb_searched is what makes the search one-shot ACROSS REBOOTS; without persisting it, a LAN with
+    // no gateway would be browsed again on every single boot forever.
+    c.mb_dhost    = nvs_get_str("mb_dhost", "");
+    c.mb_searched = nvs_get_i32("mb_seen", 0) != 0;
     c.profile      = "auto";
     c.fp_pages        = 0;
     c.fp_kw_tenths    = -1;
@@ -250,6 +265,12 @@ bool config_save(const Config& c, bool require_link) {
     b.ota_channel = ota_channel_to_int(c.ota_channel);
     // The UI language likewise: one writer (POST /set_lang, httpd), one persistent user choice.
     b.ui_lang = ui_lang_to_int(c.ui_lang);
+    // The HomeHub Modbus stack rides the same blob: one writer (POST /set_hp, httpd), like the
+    // channel, the language and the board block. See logic/config_store.hpp (blob v5).
+    b.mb_host           = c.mb_host;
+    b.mb_port           = c.mb_port;
+    b.mb_unit_id        = c.mb_unit_id;
+    b.actuation_enabled = c.actuation_enabled;
     const std::vector<uint8_t> blob = config_blob_serialize(b);
 
     const esp_err_t e = nvs_set_blob("cfg", blob.data(), blob.size());
@@ -307,6 +328,24 @@ bool config_save_link(int rx_pin, int tx_pin, Protocol proto) {
     {
         Lock lk(g_mtx);
         apply_link(g_cfg, rx_pin, tx_pin, proto);
+    }
+    return ok;
+}
+
+// Record the one-shot mDNS search's outcome. MODBUS-TASK ONLY, and narrow for the same reason
+// config_save_link is: that task must never write a whole Config back, or it would revert a
+// /set_wifi or /set_mqtt that landed while it was off-lock on the network.
+//
+// `host` is empty when nothing answered — and that case is the one worth persisting, because it is
+// what stops the next boot from searching again. RAM is patched even if the NVS write fails: the
+// result is true either way for THIS boot, and a lost write only costs one more search next time.
+bool config_save_modbus_found(const std::string& host) {
+    bool ok = true;
+    ok &= put_str("mb_dhost", host);
+    ok &= put_i32("mb_seen", 1);
+    {
+        Lock lk(g_mtx);
+        apply_modbus_found(g_cfg, host);
     }
     return ok;
 }

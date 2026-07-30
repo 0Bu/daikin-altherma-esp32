@@ -3,7 +3,7 @@
 
 WHY THIS EXISTS. `GET /diag?redact=1` is the ONLY thing standing between a user's log and a public
 bug report (docs/REPORTING.md — the whole report is posted to a public issue precisely because the
-device scrubs it first). That scrubbing is an ALLOWLIST: `logic/redact.hpp` names seven specific log
+device scrubs it first). That scrubbing is an ALLOWLIST: `logic/redact.hpp` names specific log
 statements. A new `diag_printf` that interpolates a hostname or an SSID is simply not covered, and
 the only symptom is a correct-looking log line with a real value in it — nobody sees a leak that
 takes the form of a working feature. This check is the guard against the list silently falling
@@ -32,16 +32,25 @@ HEADER = ROOT / "main" / "logic" / "redact.hpp"
 LEDGER = Path(__file__).with_name("audit_exceptions.txt")
 
 # Identifiers whose VALUE originates with the user or identifies this specific installation. Keep in
-# step with the seven /status fields redact.hpp lists; anything here reaching a log line needs a rule.
+# step with the eight /status fields redact.hpp lists; anything here reaching a log line needs a rule.
 SENSITIVE = re.compile(
     r"\b("
     r"wifi_ssid|wifi_pass|ssid|"
     r"syslog_host|mqtt_uri|mqtt_user|mqtt_pass|broker|"
     r"ntp_server|s_server|last_host|"
     r"ip_str|board_id|s_board|"
+    r"mb_host|mb_dhost|s_host|"
     # A config value copied into a blandly-named local still leaks. `stale_backup` (wifi.cpp) is the
     # worked example and the reason this list is not just the /status field names.
-    r"\w*backup\w*"
+    r"\w*backup\w*|"
+    # …and `found` is the second worked example, from the other direction: not a config value copied
+    # into a local, but a value DISCOVERED at runtime that becomes one. hp_modbus.cpp's one-shot mDNS
+    # search writes the HomeHub's serial-derived hostname into a local called `found` and logged it
+    # with no rule, while /status was redacting the very same string as modbus.host three sections
+    # above. The heuristic could not see it because the name says nothing about what it holds — which
+    # is the whole reason this list exists rather than a scan for the /status field names alone. Any
+    # local that RECEIVES a discovered identity belongs here under whatever bland word it was given.
+    r"found|discovered|hostname"
     r")\b"
 )
 

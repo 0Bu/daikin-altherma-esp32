@@ -144,6 +144,11 @@ assertPersistentBannerRepaints(
     inspTitleText: () => "same",
     inspNowText: () => "",
     inspHeld: () => false,
+    // The second source. Null is the shape a device with no HomeHub sees, which is the right
+    // baseline here: this asserts that LANG ALONE still moves the signature, so every other input
+    // has to be held constant — including the one that now feeds the panel's comparison block.
+    mbTwin: () => null,
+    mbForInspect: () => null,
   };
   const signature = productionFunction(
     "inspectSig",
