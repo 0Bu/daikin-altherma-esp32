@@ -68,7 +68,13 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 - `logic/discovery.hpp` — object-id slugging + the discovery config JSON.
 - `def/registry.hpp` — profile lookup + generic fallback.
 - `logic/detect.hpp` — capacity class parsed out of a profile id, page-mask fingerprint → candidate
-  narrowing + the deterministic `detect_best` pick (Altherma-only), EEPROM hex render.
+  narrowing + the deterministic `detect_best` pick (Altherma-only), EEPROM hex render. Deterministic
+  now means **order-independent** (#230 B): the last tie-break is the lowest profile id rather than
+  registry order, so `test_tie_break_order_independence()` permutes the signature array and requires
+  the same pick — a label is an entity id and a series name, so a reordered table must not be able to
+  move one. `test_tie_break_reach()` freezes the identifiers a tie-break can still decide on a
+  fingerprint a real unit can present, beside `test_tie_break_identity()`'s register-equivalent
+  divergences; the three ask different questions and none subsumes another.
 - `logic/json.hpp` — RFC 8259 string escaping: the `"`/`\` pair, the five shorthand control escapes,
   every remaining byte under 0x20 as `\u00XX` (exhaustively — no control byte may reach the output
   raw), and the reachable case, an SSID like `Free<LF>WiFi` that made `GET /scan` unparseable. Also

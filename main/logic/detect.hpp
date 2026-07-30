@@ -200,15 +200,40 @@ inline int detect_candidates(const Signature* sigs, int nsig, const Fingerprint&
 // best first: (1) most pages in common with the unit (maximal page_mask overlap — drops feature-poor
 // profiles, so this never returns a profile outside detect_candidates()' set); (2) tightest kW class
 // that still contains the capacity (a narrow rated class beats a broad one, and a classed profile
-// beats a class-less one); (3) first in signature order, a stable deterministic tie-break — NOT
-// registry order chosen blindly, which was the old candidates.front() bug that applied an EBLA
-// monobloc to an ERGA split.
+// beats a class-less one); (3) the LOWEST PROFILE ID, lexicographically.
 //
-// NOTE: models that share a page_mask AND kW class are register-identical on X10A (they differ only
-// by untestable flag bits / labels), so among them the tie-break is arbitrary — every such candidate
-// reads the SAME values, so any is an equally-correct working profile. The exact marketing variant
-// is not knowable from bus data; the caller surfaces the candidate set (and the O/U EEPROM code) for
-// display instead of asserting one. See docs/ARCHITECTURE.md ("Auto-detection").
+// WHY THE LAST ONE IS AN ID AND NOT "FIRST IN SIGNATURE ORDER" (#230 B). Signature order is registry
+// order, which is the order the tables happen to sit in def/registry.hpp — an incidental fact about a
+// file, not a fact about heat pumps. A label is an identifier (ha_slug -> the HA entity id + the
+// VictoriaMetrics series suffix, logic/discovery.hpp), so when the tie-break moves, a live series
+// STOPS and a new one starts at zero — read downstream as the plant going quiet rather than as a
+// rename (#180/#217). Keying that on file order means adding, removing or REORDERING a profile —
+// none of them a suspicious act — silently reassigns identifiers. Measured over the 39 detectable
+// profiles across every (page mask x capacity x capacity-source) fingerprint a real unit can present:
+// permuting the registry moves the published identity on 11275 of 200x336 trials, over 64 distinct
+// identifiers. The id is intrinsic to the profile, so the same tie resolves the same way whatever
+// order the registry is written in — and the permutation test asserts exactly that
+// (test_tie_break_order_independence). It also costs nothing to adopt: on all 336 fingerprints the
+// pick is UNCHANGED (0 identifiers move), so no installed device re-labels anything.
+//
+// This is deliberately NOT a better GUESS. Which of two bus-identical models a unit really is cannot
+// be known from bus data, and preferring (say) the majority spelling would assert a model on no
+// evidence — the mistake #230 names by name. It only makes the arbitrary choice STABLE. Two rules
+// that were measured and rejected: preferring the profile that publishes FEWEST identifiers moves 13
+// identifiers on 8 fingerprints (it switches product families for no evidentiary gain), and
+// preferring an EXACT page-mask match changes nothing at all on any of the 336 (an inert rule that
+// would read like a guarantee while doing nothing).
+//
+// WHAT A TIE ACTUALLY MEANS — and this is NOT the "register-identical, so it cannot matter" that
+// stood here before. The tie is on the page COUNT and the class SPAN, both coarser than the row
+// tables: two profiles can tie while their (reg, offset, conv, size, type) multisets DIFFER, so the
+// pick can change which values are decoded and not merely how they are spelled. Measured: of 152
+// ties, 98 are between profiles that are NOT register-equivalent (row multisets differing by up to 8
+// rows), and on 108 the pick decides at least one published identifier. The exact marketing variant
+// is not knowable from bus data either way, so the caller still surfaces the candidate set (and the
+// O/U EEPROM code) rather than asserting one — but "any candidate reads the SAME values" is not a
+// guarantee this function can offer. test_tie_break_identity() and test_tie_break_reach() bound the
+// exposure from the two directions. See docs/ARCHITECTURE.md ("Auto-detection").
 //
 // When the O/U capacity is UNKNOWN (a short 0x00 descriptor -> kw_tenths<0) the candidate set spans
 // DIFFERENT kW classes, so it is NOT register-identical and the representative choice does affect the
@@ -231,10 +256,13 @@ inline const char* detect_best(const Signature* sigs, int nsig, const Fingerprin
         const int span  = (sigs[i].kw_min_tenths >= 0)
                               ? (sigs[i].kw_max_tenths - sigs[i].kw_min_tenths) : 1000;
         // Rank, best first: (1) maximal page overlap, (2) kW class contains the known/derived
-        // capacity, (3) tightest kW class, (4) signature order (stable deterministic tie-break).
+        // capacity, (3) tightest kW class, (4) lowest id — intrinsic to the profile, so the answer
+        // does not depend on the order the registry is written in (see the note above).
         if (best == nullptr || pop > best_pop ||
             (pop == best_pop && match > best_match) ||
-            (pop == best_pop && match == best_match && span < best_span)) {
+            (pop == best_pop && match == best_match && span < best_span) ||
+            (pop == best_pop && match == best_match && span == best_span &&
+             std::strcmp(sigs[i].id, best) < 0)) {
             best = sigs[i].id; best_pop = pop; best_match = match; best_span = span;
         }
     }

@@ -875,16 +875,42 @@ in `logic/config_model.hpp`, host-tested); whole-struct `config_save` remains fo
 which own the credential fields and are serialized on the single httpd task.
 
 - **exactly one candidate** → applied; the UI shows "Detected: <family> · ~kW".
-- **several candidates** → the best-fit representative is read with. When the capacity is **known**,
-  every candidate is register-equivalent, so the decoded VALUES are identical regardless of which is
-  named. The 41 Altherma models collapse to a few page-mask classes; within a class they differ only
-  by untestable flag bits (e.g. an ERGA split vs an EBLA monobloc differ by one bit with identical
-  labels), so the exact model **cannot** be determined from bus data. The UI reports this honestly —
-  the distinct candidate **families** plus the O/U EEPROM digits to match the nameplate — rather than
-  asserting a guessed name.
+- **several candidates** → the best-fit representative is read with. The 41 Altherma models collapse
+  to a few page-mask classes, and within a class they often differ only by untestable flag bits (e.g.
+  an ERGA split vs an EBLA monobloc differ by one bit with identical labels), so the exact model
+  **cannot** be determined from bus data. The UI reports this honestly — the distinct candidate
+  **families** plus the O/U EEPROM digits to match the nameplate — rather than asserting a guessed
+  name.
 
-  When the O/U capacity is **absent**, that equivalence does not hold and the set is narrowed by the
-  I/U capacity code instead (#225): a candidate is dropped when its kW class **contradicts** the
+  What this used to claim, and what is measurably true, differ (#230 B). The claim was that a
+  representative choice is free because "every candidate is register-equivalent, so the decoded VALUES
+  are identical". It is not: the tie `detect_best` resolves is on the page **count** and the kW-class
+  **span**, both coarser than the row tables, so tied candidates need not be register-equivalent at
+  all. Measured over every fingerprint a real unit can present (each catalog page mask × capacity ×
+  both capacity sources, 336 in all): **152** reach the final tie-break, **98** of those are between
+  profiles whose `(reg, offset, conv, size, type)` multisets differ — by up to **8** rows — and on
+  **108** the choice decides at least one published identifier. So the pick can change which values are
+  decoded, not merely how they are spelled, and a label is an identifier
+  ([`ha_slug`](../main/logic/ha_device.hpp) → the HA entity id **and** the VictoriaMetrics series
+  suffix).
+  That is why criterion (4) is the **lowest profile id** rather than "first in signature order":
+  registry order is an incidental property of a *file*, so adding, removing or merely **reordering** a
+  profile silently reassigned identifiers — measured at **11275** moved publications over 200
+  registry permutations × 336 fingerprints, across **64** distinct identifiers. Keying the tie on the
+  id makes the (still arbitrary) choice **stable**, and `test_tie_break_order_independence()` asserts
+  it by permuting the registry and requiring the same pick. Adopting it moved **nothing**: 0 of the
+  336 fingerprints re-label anything, the live reference unit included, so no installed device needed
+  a #221-style migration. It is deliberately **not** a better guess — preferring the majority spelling
+  would assert a model the bus cannot evidence, and two alternatives were measured and rejected
+  (fewest-identifiers moves 13 ids on 8 fingerprints for no evidentiary gain; exact-page-mask changes
+  nothing at all, an inert rule that would read like a guarantee). What remains is bounded rather than
+  solved: `test_tie_break_reach()` freezes the **64** identifiers a tie-break can still decide, beside
+  `test_tie_break_identity()`'s **34** register-equivalent divergences — neither set contains the
+  other (2 ids are equivalence-only, 32 reachable-only).
+
+  When the O/U capacity is **absent**, the candidates additionally span different kW classes — so they
+  are not even close to interchangeable — and the set is narrowed by the I/U capacity code instead
+  (#225): a candidate is dropped when its kW class **contradicts** the
   derived capacity, never merely for stating no class — the latter would let ranking decide
   membership, and a profile with no class in its id contradicts nothing. The narrowing is applied
   only when at least one surviving candidate's class **corroborates** the fallback; an I/U code that
