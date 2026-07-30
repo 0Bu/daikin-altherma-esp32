@@ -33,6 +33,11 @@ test executes the production banner/inspector render functions from `main/www/ap
 that their DOM-write signatures invalidate when the persisted UI language changes while device state
 stays identical.
 
+`node test/test_ui_board_preset.mjs` executes the production Board Hardware modal functions. It
+pins the first-boot case where the build defaults equal the Seeed XIAO values but the board selector
+must still open on **Custom**, then verifies that choosing and editing presets within the open modal
+continues to keep the selector in sync with the five hardware fields.
+
 ## Covered
 
 One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `main()` runs them.

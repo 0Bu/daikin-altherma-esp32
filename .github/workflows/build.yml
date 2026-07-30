@@ -128,6 +128,12 @@ jobs:
       - name: Test live UI language switching
         run: node test/test_ui_live_i18n.mjs
 
+      # Board presets are value-fill shortcuts, not persisted physical identities. The shipped
+      # first-boot values happen to equal the XIAO preset, so execute the real modal functions and
+      # prove a fresh device still opens on Custom while explicit preset picks keep working.
+      - name: Test Board Hardware preset default
+        run: node test/test_ui_board_preset.mjs
+
       # Domain-correctness gate: are the published values physically RIGHT? The logic tests above
       # verify the logic they are handed; they cannot see a well-formed value that is simply
       # false — a wrong converter compiles, passes them all, and publishes -971.5 °C to Home

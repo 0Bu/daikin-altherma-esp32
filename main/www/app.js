@@ -3767,9 +3767,11 @@ function syncBoardFields() {
 // board_presets.hpp — one table, host-tested against the same validator POST /set_board applies, so
 // the browser never carries a second copy of the board facts that could drift from it).
 //
-// A pick only FILLS the five fields; nothing is written until Save. The reverse direction matters
-// just as much: any hand-edit that leaves a preset's values snaps the select back to "Custom", so
-// the dropdown can never claim a board the fields below no longer describe.
+// A pick only FILLS the five fields; nothing is written until Save. The stored values do not carry
+// a board identity: in particular, the first-boot build defaults happen to equal the XIAO preset,
+// but that does not prove the board is a XIAO. Therefore each newly opened modal starts at "Custom".
+// While it stays open, editing the five fields still updates the selection so it never claims a
+// board the fields below no longer describe.
 function boardPresets() {
   return Array.isArray(S.status?.board?.presets) ? S.status.board.presets : [];
 }
@@ -3811,6 +3813,9 @@ function fillBoard() {
   $("bdPresetRow").hidden = presets.length === 0;
   $("bdPreset").innerHTML = `<option value="-1">${esc(t("board.preset_custom"))}</option>` +
     presets.map((p, i) => `<option value="${i}">${esc(p.name)}</option>`).join("");
+  // Presets are fill shortcuts, not persisted board identities. Never infer a board merely because
+  // its values equal the stored values — that would label every freshly flashed device as a XIAO.
+  $("bdPreset").value = "-1";
   const hasLed = b.led_gpio != null && b.led_gpio >= 0;
   $("bdLedType").value = hasLed ? String(b.led_type ?? 0) : "-1";
   boardPinOptions($("bdLedPin"), hasLed ? b.led_gpio : -1, false);
@@ -3818,7 +3823,6 @@ function fillBoard() {
   boardPinOptions($("bdBtnPin"), b.btn_gpio, true);
   $("bdBtnInv").checked = b.btn_active_low !== false;
   syncBoardFields();
-  syncPresetSelection();   // name the board if what is stored happens to BE one of the presets
 }
 function openBoard() {
   fillBoard();
