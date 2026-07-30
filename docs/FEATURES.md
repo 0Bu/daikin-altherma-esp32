@@ -47,7 +47,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte — it both ranks the representative and **narrows the candidate set**, dropping only classes that contradict it, **retried page probe + a second-sweep confirmation** before falling back to `generic`) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1802 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (1807 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -1051,7 +1051,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   catalog sweep proving each `(page, offset, converter)` locator resolves to **exactly one** row
   **and to the right one**, asserted on the resolved row's own label, because six other rows share
   the `0x60/12` byte and every one of them would satisfy a page+offset match),
-  **1802 `CHECK`s** in
+  **1807 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -1071,6 +1071,24 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   frozen list, so a label edit moves the entity and the series together or neither — and pins
   `AMBIGUOUS_LABEL_SLUGS` as exactly the set of labels the catalog reuses across pages, so a sixth
   cannot appear unnoticed.
+- **🧪 …and which identifiers a detection TIE-BREAK can move** — the question the frozen set above
+  leaves open, and the one a device owner actually has: does *this* unit still publish the identifiers
+  it published yesterday? `detect_best`'s last tie-break is **registry order**, so where two profiles
+  are **register-equivalent** (byte-identical `(reg, offset, conv, size, type)` rows) the pick changes
+  not one decoded value — only the labels, hence the entity ids and the series. The gate above cannot
+  fail on that *by construction*: both spellings are already in its frozen set, so a flip introduces
+  no new identifier and the suite stays green while the device's own series changes underneath it.
+  Measured over the detectable catalog: **12** equivalence classes exist and **6** disagree about what
+  they publish, so `test_tie_break_identity()` freezes exactly the **36** identifiers a tie-break can
+  move. Not all are defects — three classes are one sensor named by two product *families*
+  (`[HPSU] Tv inflow Temp  (R1T)` vs `Leaving water temp. before BUH (R1T)`), which
+  [`REGISTERS.md`](REGISTERS.md) says to expect — and the sharpest case is not a rename at all: the
+  non-hybrid `altherma_erga_d_ehv_ehb_ehvz_da_series_04_08kw` marks the page-`0x64` boiler rows
+  `no_publish` while its two register-equivalent neighbours publish them, so the tie-break decides
+  whether **eight** `hybrid_*` entities exist on that unit. `no_publish` is therefore deliberately
+  *not* part of the equivalence key: it is not a wire fact, and folding it in would split that class
+  and hide the strongest case the test has
+  ([#230](https://github.com/0Bu/daikin-altherma-esp32/issues/230)).
 - **The rule** — new decode/config/discovery logic goes in `main/logic/` with a `CHECK`, never buried in
   a device-only `.cpp`. The [`add-logic-test`](../.claude/skills/add-logic-test/SKILL.md) skill and the
   [`x10a-decode-reviewer`](../.claude/agents/x10a-decode-reviewer.md) agent enforce it.
@@ -1083,9 +1101,18 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   [`scripts/run-domain-audit.sh`](../scripts/run-domain-audit.sh) runs the **real** converters over the
   **real** `def/*` catalog and cross-checks both against [`REGISTERS.md` §5](REGISTERS.md) — one source
   of truth, nothing to drift. It reports wrong converters, spec/layout drift, cross-profile outliers,
-  non-temperatures typed °C, and straddling byte windows, each with a decode witness (wire bytes → what
-  the value should read → what the row makes of it).
-  [`tools/domain/selftest.sh`](../tools/domain/selftest.sh) re-introduces all four shipped bugs into a
+  non-temperatures typed °C, straddling byte windows, and — since #230 — **one wire field described by
+  two different physical units** (`LABEL-UNIT`), each with a decode witness (wire bytes → what
+  the value should read → what the row makes of it). That last check is the only one whose subject is
+  the **label**, because a label is an identifier: page `0x30`/1 (conv 211) reads *"Fan 1 (step)"* on 22
+  profiles and *"Fan 1 (10 rpm)"* on four, at the same offset with the same converter and width, so a
+  reader of `actuators_fan_1_10_rpm` takes a `30` for 300 rpm rather than step 30 — while `SPEC-CONV`
+  matches *by* label and misses it, `SPEC-LAYOUT` sees a conforming layout, `CONSENSUS` groups *by*
+  label so the two spellings never meet, and the frozen identifier set already contains both. It
+  compares the **unit alone**, never the rest of the label: the catalog legitimately spells one
+  quantity several ways per family, so a text check would demand prose the source data does not have.
+  [`tools/domain/selftest.sh`](../tools/domain/selftest.sh) re-introduces every defect the gate was
+  built for — the four shipped decode bugs plus #230's mislabelled fan step — into a
   throwaway copy and requires the audit to catch each, so a checker that has quietly stopped checking
   cannot pass as "clean". Adjudicated deviations live in
   [`audit_exceptions.txt`](../tools/domain/audit_exceptions.txt) and stay visible in the audit's
@@ -1296,7 +1323,7 @@ and gzipped into the app image** (polled, after a WebSocket push proved it could
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 18-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1802 checks),
+on the host** (1807 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

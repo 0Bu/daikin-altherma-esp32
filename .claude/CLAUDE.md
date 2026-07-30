@@ -228,12 +228,22 @@ value catalog has its own gate, separate from the technical ones:
 
 ```bash
 scripts/run-domain-audit.sh   # real converters x real catalog, cross-checked vs docs/REGISTERS.md §5
-tools/domain/selftest.sh      # does the audit still catch the four bugs it was built for?
+tools/domain/selftest.sh      # does the audit still catch the defects it was built for?
 ```
 
 It reports wrong converters, spec/layout drift, cross-profile outliers, non-temperatures typed °C,
-and straddling byte windows — each with a decode witness (wire bytes → what it should read → what it
-does). CI gates the build on it (a `gates` step); the judgement half is the `/domain-review`
+straddling byte windows, and — since #230 — ONE WIRE FIELD DESCRIBED BY TWO DIFFERENT PHYSICAL UNITS
+(`LABEL-UNIT`), each with a decode witness (wire bytes → what it should read → what it does). That
+last one is the only check whose subject is the LABEL, and it is there because a label is an
+identifier: `ha_slug()` turns it into the HA entity id and the VictoriaMetrics series suffix, so the
+unit word inside it is a published claim about the quantity. Page 0x30/1 (conv 211) is "Fan 1 (step)"
+on 22 profiles and "Fan 1 (10 rpm)" on four, at the same offset with the same converter and width —
+so a reader of `actuators_fan_1_10_rpm` takes a 30 for 300 rpm rather than step 30, and every other
+check is satisfied (SPEC-CONV matches BY label and misses it, SPEC-LAYOUT sees a conforming layout,
+CONSENSUS groups BY label so the spellings never meet, and #217's frozen identifier set already
+contains both). It compares the UNIT ALONE, never the rest of the label: the catalog legitimately
+spells one quantity several ways per family, so a text check would demand prose the source data does
+not have. CI gates the build on it (a `gates` step); the judgement half is the `/domain-review`
 skill, a **PR-merge gate** required on **every** merge — like `/project-review`, and unlike the
 conditional `/feature-docs`. Unconditional because deciding up front which files can change a
 value's meaning is a guess, and it is the guess that let #35–#39 ship; a PR that cannot reach a
@@ -241,8 +251,11 @@ value clears in seconds, but a person states that rather than a regex assuming i
 deviations live in `tools/domain/audit_exceptions.txt`; it distinguishes an on-record ADJUDICATION
 (a real per-model difference) from a temporary KNOWN-DEFECT (tracked + deleted by its fix). The four
 *pre-existing* defects the audit opened with (#35–#39) are fixed (PR #82) and their entries removed —
-a KNOWN-DEFECT that outlives its fix would silence the guard against the fix regressing — so the
-ledger currently carries no live entries; each defect is now pinned by a catalog `CHECK` instead.
+a KNOWN-DEFECT that outlives its fix would silence the guard against the fix regressing — and each is
+now pinned by a catalog `CHECK` instead. The live entries are the FOUR `LABEL-UNIT` rows of #230 A,
+KNOWN-DEFECT: the fix belongs in the offline generator (never a hand-edit of a generated table) and
+the rename retires a live series, so it needs #221's migration answer. Delete all four when the
+generator emits "Fan 1 (step)".
 
 ## Build & Flash
 
@@ -1411,6 +1424,23 @@ def/            embedded per-model value profiles + registry (incl. the generic 
                 test_entity_identity(), which reads the id out of the real discovery config (never
                 re-deriving it) across all four entity families — catalog rows, fault companions,
                 heartbeat, crash — since HA's unique_id namespace is flat across them too.
+                What NEITHER of those can see is the question a device OWNER has (#230 B): does THIS
+                unit still publish the identifiers it published yesterday? Detection picks ONE
+                representative and detect_best's last tie-break is REGISTRY ORDER, so where two
+                profiles are REGISTER-EQUIVALENT (byte-identical (reg, offset, conv, size, type)
+                rows) the pick changes no decoded value — only the LABELS, hence the entity ids and
+                the series. #217's gate cannot fail on that BY CONSTRUCTION: both spellings are
+                already in its frozen set, so a flip adds no identifier. Measured over the
+                detectable catalog, TWELVE equivalence classes exist and SIX disagree about what
+                they publish, so test_tie_break_identity() freezes exactly the 36 identifiers a
+                tie-break can move. They are not all defects — three classes are one sensor named by
+                two product FAMILIES ("[HPSU] Tv inflow Temp  (R1T)" vs "Leaving water temp. before
+                BUH (R1T)"), which REGISTERS.md:196-200 says to expect — and the sharpest one is not
+                a rename at all: the non-hybrid altherma_erga_d_ehv_ehb_ehvz_da_series_04_08kw marks
+                the page-0x64 boiler rows `no_publish` while its two register-equivalent neighbours
+                publish them, so the tie-break decides whether EIGHT hybrid_* entities exist on that
+                unit. That is why `no_publish` is deliberately NOT in the equivalence key: it is not
+                a wire fact, and folding it in would split that class and hide the strongest case.
 www/            web UI sources (index.html + style.css + app.js -> one gzipped page) + setup.html.
                 The dashboard SCHEMATIC (the inline SVG in index.html, its sc-* CSS and its
                 INSPECT/I18N bindings) has its own gate — scripts/run-schematic-audit.sh + the

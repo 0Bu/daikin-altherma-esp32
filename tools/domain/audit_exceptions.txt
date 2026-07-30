@@ -22,9 +22,37 @@
 # 1-byte field — are already proven equivalent by execution and never reach this file.)
 #
 
-# ── No live entries. ──────────────────────────────────────────────────────────────────────────
+# ── Historical note ───────────────────────────────────────────────────────────────────────────
 # The four defects this ledger opened with (R6T reading a byte early, BUH capacity publishing a
 # whole byte, Low Pressure(T) missing its °C type, and lt_da_pair_bml's 1-byte water temps) are
 # FIXED in PR #82, so their entries are gone with them — a KNOWN-DEFECT that outlives its fix
 # silences the guard against the fix regressing. Each is now pinned by a catalog CHECK in
 # test/test_logic.cpp instead.
+
+# ── KNOWN-DEFECT — issue #230 A: a fan STEP labelled as a RATE on four profiles ────────────────
+# Page 0x30 offset 1, conv 211: "Fan 1 (10 rpm)" on these four profiles, "Fan 1 (step)" on the
+# other 22 — and three of the four call the neighbouring byte "Fan 2 (step)", contradicting
+# themselves inside their own table. docs/REGISTERS.md §5 (page 0x30) and §3.3 both say step: conv
+# 211 is a raw numeric byte, 0 = stopped. So the four assert a rate for a field the spec defines as
+# a step index, and `actuators_fan_1_10_rpm` invites a reader to take a 30 for 300 rpm.
+#
+# REAL and not adjudicated. Two reasons it is entered here rather than fixed in this PR, both of
+# them about WHERE the fix lives, never about whether it is one:
+#
+#   1. These are GENERATED tables (def/*.hpp). The fix belongs in the offline profile generator
+#      (gen_profiles.py, maintained outside this repo) — hand-editing a generated table would be a
+#      second source of truth for the catalog, and the next generator run would silently revert it.
+#   2. The label IS an identifier (test_metric_identity, #217/#221). Renaming these rows retires
+#      `actuators_fan_1_10_rpm` and starts `actuators_fan_1_step` at zero for anyone running one of
+#      the four, so it needs the same migration answer #221 gave — a decision, not a rename.
+#
+# The check is added in the same PR as these entries on purpose: LABEL-UNIT is what makes this
+# mechanically visible at all (SPEC-CONV matches by label and so misses it, SPEC-LAYOUT is
+# satisfied, CONSENSUS groups by label, and #217's frozen set already contains both spellings).
+# Entering a NEW finding as KNOWN-DEFECT is exactly the case this kind exists for — the finding is
+# on record, printed under "suppressed by", and tracked. DELETE all four when the generator emits
+# "Fan 1 (step)": the guard against the fix regressing is what these entries would otherwise mute.
+LABEL-UNIT:altherma_erga_d_ehv_ehb_ehvz_dj_series_04_08_kw:0x30:1:fan110rpm
+LABEL-UNIT:altherma_hpsu6_ultra:0x30:1:fan110rpm
+LABEL-UNIT:altherma_lt_11_16kw_hydrosplit_hydro_unit:0x30:1:fan110rpm
+LABEL-UNIT:altherma_lt_da_pair_bml:0x30:1:fan110rpm
