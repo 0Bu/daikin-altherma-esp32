@@ -306,9 +306,13 @@ static bool poll_detect() {                                    // returns true i
     if (link_changed && !config_save_link(d.rx, d.tx, d.proto))
         diag_printf("detect: link cache write failed — pins %d/%d active this session, re-detect next boot\n",
                     d.rx, d.tx);
-    // Read with the best-fit representative (deterministic ranking, not registry order). Every
-    // candidate in the set is register-equivalent, so this picks correct VALUES regardless of which
-    // marketing variant it names.
+    // Read with the best-fit representative. The ranking is deterministic and — since #230 B —
+    // independent of the order the registry is written in (the last tie-break is the lowest profile
+    // id), so a reordered table cannot move the entity ids and series this unit publishes. Where the
+    // ranking genuinely ties, the survivors are NOT guaranteed to decode alike: that tie is on the
+    // page count and the kW-class span, coarser than the row tables (logic/detect.hpp carries the
+    // measurement), and the exact variant is not knowable from bus data — which is why /status reports
+    // the candidate set and `ambiguous` rather than asserting one model.
     //
     // Nothing matched, but the bus answered: that is either a unit this catalog does not know, or a
     // fingerprint with a page bit missing. The two are indistinguishable in a single sweep and cost

@@ -5841,8 +5841,11 @@ static void test_metric_identity() {
 // identifiers it published yesterday?
 //
 // Detection resolves a fingerprint to a candidate SET and then picks one representative
-// (detect_best: page overlap -> kW class -> tightest class -> first in signature order, i.e. in
-// REGISTRY ORDER). On the live 8 kW unit three of the five survivors are REGISTER-EQUIVALENT —
+// (detect_best: page overlap -> kW class -> tightest class -> the lowest profile id. That last
+// criterion was REGISTRY ORDER until #230 B, which is what made a mere reorder able to move a
+// published series; test_tie_break_order_independence() below now forbids that, but the tie itself
+// still decides an identifier and this test is what bounds WHICH.) On the live 8 kW unit three of the
+// five survivors are REGISTER-EQUIVALENT —
 // byte-identical (reg, offset, conv, size, type) rows — so which one wins changes not one decoded
 // value. It changes the LABELS, and a label is the HA entity id plus the VictoriaMetrics series
 // suffix. This is exactly the shape of #230 A's fan step: `altherma_ebla_edla_d_series_4_8kw_monobloc`
@@ -5996,6 +5999,290 @@ static void test_tie_break_identity() {
     CHECK(equiv_classes >= 8);
     CHECK(divergent_classes >= 1);
     CHECK(divergent_classes < equiv_classes);              // ...and most classes ARE safe today
+}
+
+// ── What the tie-break decides on a REAL fingerprint, and what cannot move it (#230 B) ───────────
+// test_tie_break_identity() above asks a CATALOG question: which identifiers do REGISTER-EQUIVALENT
+// profiles disagree about? The two tests below ask the two OPERATIONAL ones, and all three are kept
+// because none subsumes another — measured, not assumed:
+//
+//   • the tie detect_best actually resolves is on the page COUNT and the kW-class SPAN, both coarser
+//     than the row tables. So a tie can hold between profiles that are NOT register-equivalent (98 of
+//     152 measured ties, row multisets up to 8 rows apart), and the register-equivalence set misses
+//     32 of the identifiers a tie-break can really move;
+//   • and conversely 2 identifiers (`outdoor_sensors_low_pressure{,_t}`) diverge between
+//     register-equivalent profiles yet are NOT reachable, because a tighter kW class always wins on
+//     criterion (3) before the tie-break is consulted. A gate that only measured reachability would
+//     call that pair safe while a catalog edit could still expose it.
+//
+// The sweep below is every fingerprint a real unit can present: each distinct page mask the catalog
+// carries (plus the live reference unit's 0x1bff), crossed with the capacity in 0.5 kW steps, in BOTH
+// states a unit can report it — the O/U descriptor's own figure, and the I/U code that stands in when
+// that descriptor is too short (detect_capacity). 336 fingerprints.
+static std::vector<Fingerprint> tie_break_sweep() {
+    std::set<uint32_t> masks{0x1bff};                       // + the live reference unit
+    for (const auto& p : def::profiles) {
+        if (!def::is_detection_model(p.id)) continue;
+        uint32_t m = 0;
+        const logic::ProfileView v = def::resolved(p);
+        for (size_t i = 0; i < v.count(); i++) m |= page_mask_bit(v[i].reg);
+        masks.insert(m);
+    }
+    std::vector<Fingerprint> fps;
+    for (uint32_t m : masks)
+        for (int ou = 0; ou < 2; ou++)
+            for (int cap = -1; cap <= 160; cap += (cap < 0 ? 31 : 5)) {
+                if (cap >= 0 && cap < 30) continue;         // below the smallest rated class
+                Fingerprint fp;
+                fp.page_mask    = m;
+                fp.kw_tenths    = (ou == 0) ? cap : -1;
+                fp.iu_kw_tenths = (ou == 0) ? -1 : cap;
+                fps.push_back(fp);
+            }
+    return fps;
+}
+
+// The PROPERTY, asserted directly rather than frozen as a list: reordering the registry cannot change
+// what a unit publishes. detect_best's last criterion used to be "first in signature order", i.e. the
+// order the tables happen to sit in def/registry.hpp — an incidental fact about a FILE. A label is an
+// identifier (ha_slug -> HA entity id + VictoriaMetrics series suffix), so a moved tie-break stops one
+// series and starts another at zero, which reads downstream as the plant going quiet rather than as a
+// rename (#180/#217). Measured before the fix: permuting the registry moved the published identity on
+// 11275 of 200x336 trials over 64 distinct identifiers. Criterion (4) is now the lowest profile id,
+// which is intrinsic to the profile, so the same tie resolves the same way in any order.
+//
+// Permutation is hand-rolled Fisher-Yates on an LCG, NOT std::shuffle: how std::shuffle consumes its
+// URBG is implementation-defined, so libstdc++ and libc++ would permute differently and a failure
+// would not reproduce. This is a test about determinism; it must be deterministic itself.
+static void test_tie_break_order_independence() {
+    int nsig = 0;
+    const Signature*       raw  = def::signatures(nsig);
+    std::vector<Signature> base(raw, raw + nsig);
+    const std::vector<Fingerprint> fps = tie_break_sweep();
+
+    uint32_t s = 0x1234567u;
+    auto     next = [&s]() { s = s * 1664525u + 1013904223u; return s >> 16; };
+
+    int moved = 0;
+    for (int trial = 0; trial < 50; trial++) {
+        std::vector<Signature> perm = base;
+        for (size_t i = perm.size(); i > 1; i--) std::swap(perm[i - 1], perm[next() % i]);
+        for (const auto& fp : fps) {
+            const char* a = detect_best(base.data(), (int)base.size(), fp);
+            const char* b = detect_best(perm.data(), (int)perm.size(), fp);
+            if ((a == nullptr) != (b == nullptr)) { moved++; continue; }
+            if (a && b && std::strcmp(a, b) != 0) {
+                if (moved++ < 5)
+                    std::printf("  registry order moved the pick: %s -> %s\n", a, b);
+            }
+        }
+    }
+    CHECK(moved == 0);
+
+    // Non-vacuity, both halves: the sweep must actually reach the tie-break, and the permutations must
+    // actually permute — otherwise this passes by testing nothing.
+    int with_tie = 0;
+    for (const auto& fp : fps) {
+        int bp = -1, bm = -1, bs = 0, n = 0;
+        bool have = false;
+        for (const auto& sig : base) {
+            if (!signature_consistent(sig, fp)) continue;
+            const int pop   = __builtin_popcount(sig.page_mask);
+            const int match = signature_kw_contains(sig, detect_capacity(fp)) ? 1 : 0;
+            const int span =
+                (sig.kw_min_tenths >= 0) ? (sig.kw_max_tenths - sig.kw_min_tenths) : 1000;
+            if (!have || pop > bp || (pop == bp && match > bm) ||
+                (pop == bp && match == bm && span < bs)) { bp = pop; bm = match; bs = span; have = true; }
+        }
+        if (!have) continue;
+        for (const auto& sig : base) {
+            if (!signature_consistent(sig, fp)) continue;
+            const int pop   = __builtin_popcount(sig.page_mask);
+            const int match = signature_kw_contains(sig, detect_capacity(fp)) ? 1 : 0;
+            const int span =
+                (sig.kw_min_tenths >= 0) ? (sig.kw_max_tenths - sig.kw_min_tenths) : 1000;
+            if (pop == bp && match == bm && span == bs) n++;
+        }
+        if (n >= 2) with_tie++;
+    }
+    CHECK(fps.size() >= 300);
+    CHECK(with_tie >= 100);                                 // measured 152
+
+    std::vector<Signature> perm = base;
+    for (size_t i = perm.size(); i > 1; i--) std::swap(perm[i - 1], perm[next() % i]);
+    int same_slot = 0;
+    for (size_t i = 0; i < base.size(); i++)
+        if (std::strcmp(base[i].id, perm[i].id) == 0) same_slot++;
+    CHECK(same_slot < (int)base.size() / 2);                // the shuffle really shuffles
+
+    // And the live reference unit is unmoved by the whole change — the reason this needed no #221
+    // migration: 0 of the 336 fingerprints re-label anything, this one included.
+    Fingerprint live;
+    live.page_mask    = 0x1bff;
+    live.iu_kw_tenths = 80;
+    CHECK(std::strcmp(detect_best(base.data(), (int)base.size(), live),
+                      "altherma_ebla_edla_d_series_4_8kw_monobloc") == 0);
+}
+
+// ...and the RESIDUE the property above does not remove: order-independence stops a REORDER from
+// moving an identifier, but adding or removing a profile still can (a new lexicographic sibling wins
+// the tie). So freeze the identifiers a tie-break can decide on a fingerprint a real unit can
+// present — the question a device OWNER has, which the catalog-wide set above cannot answer.
+//
+// Adding an entry means a new series is tie-break-decided: say why in the commit message. Removing one
+// means a divergence is gone (a label override made the class agree, the generator agrees, or a
+// profile left the tie).
+static void test_tie_break_reach() {
+    static const char* const REACHABLE[] = {
+    "actuators_expansion_valve_2_pls",
+    "actuators_fan_2_step",
+    "hybrid_2nd_domestic_hot_water_temperature",
+    "hybrid_be_cop",
+    "hybrid_boiler_dhw_demand",
+    "hybrid_boiler_heating_target_temp",
+    "hybrid_boiler_operation_demand",
+    "hybrid_hybrid_heating_target_temp",
+    "hybrid_hybrid_op_mode",
+    "hybrid_mixed_water_temp",
+    "hybrid_mixed_water_temp_r7t",
+    "hydronic_error_type",
+    "hydronic_state_pressure_sensor",
+    "hydronic_state_pressure_sensor_t",
+    "hydronic_state_refrigerant_pressure_sensor",
+    "hydronic_state_space_h_operation_output",
+    "hydronic_state_tank_preheat_on_off",
+    "hydronic_temps_ext_indoor_ambient_sensor_r6t",
+    "hydronic_temps_hpsu_tr_return_temp_r4t",
+    "hydronic_temps_hpsu_tv_inflow_temp_r1t",
+    "hydronic_temps_hpsu_tvbh_inflow_temp_after_buffer_buh_r2t",
+    "hydronic_temps_indoor_ambient_temp_r1t",
+    "hydronic_temps_inlet_water_temp_r4t",
+    "hydronic_temps_leaving_water_temp_after_buh_r2t",
+    "hydronic_temps_leaving_water_temp_before_buh_r1t",
+    "hydronic_temps_outdoor_ambient_or_ext_sensor",
+    "hydronic_temps_outlet_water_buh_temp_r2t",
+    "hydronic_temps_outlet_water_heat_exch_temp_r1t",
+    "hydronic_temps_rt_temp",
+    "inverter_injection_tube_temperature",
+    "mains_current_buh_output_capacity",
+    "mains_current_hpsu_mixed_leaving_water_temperature_after_the_tank_r7t_dlwa2",
+    "mains_current_mixed_water_temp_r7t",
+    "mixing_ekmik_bizone_kit_mix_valve_position_m1s",
+    "mixing_ekmik_bizone_kit_mixed_leaving_water_temperature_r1t",
+    "mixing_mixed_water_temp",
+    "outdoor_sensors_2_phase_thermistor_r4t",
+    "outdoor_sensors_discharge_pipe_temp",
+    "outdoor_sensors_discharge_pipe_temp_r2t",
+    "outdoor_sensors_entering_brine_temp_r5t",
+    "outdoor_sensors_heat_exchanger_mid_temp",
+    "outdoor_sensors_heat_exchanger_mid_temp_r5t",
+    "outdoor_sensors_heat_sink_temp",
+    "outdoor_sensors_heat_sink_temp_r10t",
+    "outdoor_sensors_inv_fin_temp",
+    "outdoor_sensors_leaving_brine_temp_r6t",
+    "outdoor_sensors_liquid_pipe_temp",
+    "outdoor_sensors_liquid_pipe_temp_r6t",
+    "outdoor_sensors_liquid_temperature_r3t",
+    "outdoor_sensors_o_u_heat_exch_mid_temp",
+    "outdoor_sensors_o_u_heat_exch_temp",
+    "outdoor_sensors_o_u_heat_exch_temp_r4t",
+    "outdoor_sensors_outdoor_air_temp",
+    "outdoor_sensors_pressure",
+    "outdoor_sensors_pressure_sensor",
+    "outdoor_sensors_pressure_sensor_t",
+    "outdoor_sensors_pressure_t",
+    "outdoor_sensors_r1t_outdoor_air_temp",
+    "outdoor_sensors_r2t_inv_discharge_pipe_temp",
+    "outdoor_sensors_r4t_deicer_temp",
+    "outdoor_sensors_suction_pipe_temp",
+    "outdoor_sensors_suction_pipe_temp_r3t",
+    "outdoor_state_target_discharge_temp",
+    "outdoor_state_target_evap_temp",
+    };
+    static const size_t REACHABLE_N = sizeof(REACHABLE) / sizeof(REACHABLE[0]);
+
+    // what each detectable profile publishes, resolved exactly as the bridge does
+    std::map<std::string, std::set<std::string>> pub;
+    for (const auto& p : def::profiles) {
+        if (!def::is_detection_model(p.id)) continue;
+        std::set<std::string>    ids;
+        const logic::ProfileView v = def::resolved(p);
+        for (size_t i = 0; i < v.count(); i++) {
+            const ValueDef d = logic::adjudicated(v[i]);
+            if (!row_publishable(d) || !conv_publishable(d.conv) || object_id(d.label).empty())
+                continue;
+            ids.insert(row_object_id(d));
+        }
+        pub[p.id] = std::move(ids);
+    }
+
+    int nsig = 0;
+    const Signature*       raw = def::signatures(nsig);
+    std::vector<Signature> base(raw, raw + nsig);
+
+    std::set<std::string> reachable;
+    int                   ties = 0, deciding = 0, not_equiv = 0;
+    for (const auto& fp : tie_break_sweep()) {
+        int bp = -1, bm = -1, bs = 0;
+        bool have = false;
+        for (const auto& sig : base) {
+            if (!signature_consistent(sig, fp)) continue;
+            const int pop   = __builtin_popcount(sig.page_mask);
+            const int match = signature_kw_contains(sig, detect_capacity(fp)) ? 1 : 0;
+            const int span =
+                (sig.kw_min_tenths >= 0) ? (sig.kw_max_tenths - sig.kw_min_tenths) : 1000;
+            if (!have || pop > bp || (pop == bp && match > bm) ||
+                (pop == bp && match == bm && span < bs)) { bp = pop; bm = match; bs = span; have = true; }
+        }
+        if (!have) continue;
+        std::vector<std::string> tied;
+        for (const auto& sig : base) {
+            if (!signature_consistent(sig, fp)) continue;
+            const int pop   = __builtin_popcount(sig.page_mask);
+            const int match = signature_kw_contains(sig, detect_capacity(fp)) ? 1 : 0;
+            const int span =
+                (sig.kw_min_tenths >= 0) ? (sig.kw_max_tenths - sig.kw_min_tenths) : 1000;
+            if (pop == bp && match == bm && span == bs) tied.push_back(sig.id);
+        }
+        if (tied.size() < 2) continue;
+        ties++;
+        std::set<std::string> all, common = pub[tied.front()];
+        for (const auto& t : tied) {
+            const auto& s = pub[t];
+            all.insert(s.begin(), s.end());
+            std::set<std::string> keep;
+            std::set_intersection(common.begin(), common.end(), s.begin(), s.end(),
+                                  std::inserter(keep, keep.end()));
+            common = keep;
+        }
+        std::set<std::string> diff;
+        std::set_difference(all.begin(), all.end(), common.begin(), common.end(),
+                            std::inserter(diff, diff.end()));
+        if (!diff.empty()) { deciding++; reachable.insert(diff.begin(), diff.end()); }
+        // ...and the claim detect.hpp used to make: are the tied candidates register-equivalent?
+        for (const auto& t : tied)
+            if (pub[t].size() != pub[tied.front()].size()) { not_equiv++; break; }
+    }
+
+    std::set<std::string> expected(REACHABLE, REACHABLE + REACHABLE_N);
+    CHECK(expected.size() == REACHABLE_N);                  // no duplicate literal above
+    for (const auto& r : reachable)
+        if (!expected.count(r)) std::printf("  tie-break can NOW decide: %s\n", r.c_str());
+    for (const auto& e : expected)
+        if (!reachable.count(e)) std::printf("  no longer tie-break-reachable: %s\n", e.c_str());
+    CHECK(reachable == expected);
+
+    // Non-vacuity + the measured shape of the hazard.
+    CHECK(ties >= 100);                                     // measured 152
+    CHECK(deciding >= 50);                                  // measured 108
+    CHECK(not_equiv >= 1);                                  // tied != register-equivalent (see above)
+    // Every reachable identifier is one the catalog really publishes, so a typo in the list above
+    // fails here rather than silently widening the freeze.
+    for (const auto& e : expected) {
+        bool found = false;
+        for (const auto& [id, ids] : pub) { (void)id; if (ids.count(e)) { found = true; break; } }
+        CHECK(found);
+    }
 }
 
 // ── Entity identity: no two announced entities may share a uniq_id (#221) ───────────────────────
@@ -6615,6 +6902,8 @@ int main() {
     test_profile_view();
     test_metric_identity();
     test_tie_break_identity();
+    test_tie_break_order_independence();
+    test_tie_break_reach();
     test_entity_identity();
     test_feature_gate();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }

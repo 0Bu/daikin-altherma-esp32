@@ -1363,7 +1363,23 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 detect.hpp narrows the
                 Altherma-only model profiles from a bus fingerprint (page mask + capacity, O/U or the
                 I/U-code fallback) to a candidate set + a best-fit representative (detect_best; ranks by
-                maximal page overlap -> kW class containing the capacity -> tightest class). The set is
+                maximal page overlap -> kW class containing the capacity -> tightest class -> the
+                LOWEST PROFILE ID). That last criterion was "first in signature order" until #230 B,
+                i.e. the order the tables happen to sit in def/registry.hpp — an incidental fact about
+                a FILE deciding which identifiers a device publishes, since a label is the HA entity id
+                and the VictoriaMetrics series suffix. Measured: permuting the registry moved the
+                published identity on 11275 of 200x336 trials over 64 distinct identifiers; the id is
+                intrinsic to the profile, so the same tie now resolves the same way in any order, and
+                test_tie_break_order_independence() asserts that by permuting the registry. Adopting it
+                moved NOTHING (0 of 336 fingerprints re-label, the live unit included), so it needed no
+                #221 migration — and it is deliberately not a better GUESS: preferring the majority
+                spelling would assert a model the bus cannot evidence, fewest-identifiers moves 13 ids
+                on 8 fingerprints for no gain, and exact-page-mask changes nothing at all (an inert
+                rule reading like a guarantee). A tie is ALSO not the "register-identical, so it cannot
+                matter" this file used to claim: the tie is on the page COUNT and the class SPAN, both
+                coarser than the row tables, so 98 of 152 measured ties are between profiles whose
+                (reg, offset, conv, size, type) multisets differ — by up to 8 rows — and on 108 the
+                pick decides a published identifier. The set is
                 register-equivalent only when the capacity is KNOWN; when it is absent the I/U-capacity
                 fallback that ranks the representative also affects values, so detect_candidates NARROWS
                 by it too (#225) — through the same detect_capacity/signature_kw_contains helpers, since
@@ -1513,23 +1529,33 @@ def/            embedded per-model value profiles + registry (incl. the generic 
                 heartbeat, crash — since HA's unique_id namespace is flat across them too.
                 What NEITHER of those can see is the question a device OWNER has (#230 B): does THIS
                 unit still publish the identifiers it published yesterday? Detection picks ONE
-                representative and detect_best's last tie-break is REGISTRY ORDER, so where two
-                profiles are REGISTER-EQUIVALENT (byte-identical (reg, offset, conv, size, type)
-                rows) the pick changes no decoded value — only the LABELS, hence the entity ids and
-                the series. #217's gate cannot fail on that BY CONSTRUCTION: both spellings are
-                already in its frozen set, so a flip adds no identifier. Measured over the
-                detectable catalog, TWELVE equivalence classes exist and — since #230 A's fan step
-                was closed by logic/label_override.hpp — FIVE still disagree about what they publish,
-                so test_tie_break_identity() freezes exactly the 34 identifiers a tie-break can move
-                (the fan class is now identifier-equivalent, so neither fan id is among them). They
-                are not all defects — three classes are one sensor named by two product FAMILIES
-                ("[HPSU] Tv inflow Temp  (R1T)" vs "Leaving water temp. before BUH (R1T)"), which
-                REGISTERS.md:196-200 says to expect — and the sharpest one is not a rename at all: the
-                non-hybrid altherma_erga_d_ehv_ehb_ehvz_da_series_04_08kw marks the page-0x64 boiler
-                rows `no_publish` while its two register-equivalent neighbours publish them, so the
-                tie-break decides whether EIGHT hybrid_* entities exist on that unit. That is why
-                `no_publish` is deliberately NOT in the equivalence key: it is not a wire fact, and
-                folding it in would split that class and hide the strongest case.
+                representative, so where the ranking TIES the pick decides the LABELS — hence the
+                entity ids and the series. #217's gate cannot fail on that BY CONSTRUCTION: both
+                spellings are already in its frozen set, so a flip adds no identifier. THREE tests
+                bound this, and none subsumes another (measured, not assumed):
+                test_tie_break_identity() asks the CATALOG question — which identifiers do
+                REGISTER-EQUIVALENT profiles (byte-identical (reg, offset, conv, size, type) rows)
+                disagree about? Over the detectable catalog TWELVE equivalence classes exist and —
+                since #230 A's fan step was closed by logic/label_override.hpp — FIVE still disagree,
+                so it freezes exactly 34 identifiers (the fan class is now identifier-equivalent, so
+                neither fan id is among them). They are not all defects — three classes are one sensor
+                named by two product FAMILIES ("[HPSU] Tv inflow Temp  (R1T)" vs "Leaving water temp.
+                before BUH (R1T)"), which REGISTERS.md:196-200 says to expect — and the sharpest is not
+                a rename at all: the non-hybrid altherma_erga_d_ehv_ehb_ehvz_da_series_04_08kw marks
+                the page-0x64 boiler rows `no_publish` while its two register-equivalent neighbours
+                publish them, so a tie-break decides whether EIGHT hybrid_* entities exist on that
+                unit. That is why `no_publish` is deliberately NOT in the equivalence key: it is not a
+                wire fact, and folding it in would split that class and hide the strongest case.
+                test_tie_break_reach() asks the OPERATIONAL one — which identifiers can the tie-break
+                decide on a fingerprint a real unit can present (every catalog page mask x capacity x
+                both capacity sources, 336)? That is 64, and the two sets are genuinely different: the
+                tie is on the page COUNT and the class SPAN, both coarser than register-equivalence, so
+                32 reachable ids are outside the equivalence set — while 2
+                (outdoor_sensors_low_pressure{,_t}) diverge between equivalent profiles yet are
+                unreachable, a tighter kW class always winning on criterion (3) first.
+                test_tie_break_order_independence() asserts the PROPERTY that removes the trigger the
+                issue named: permuting the registry cannot change the pick, now that criterion (4) is
+                the lowest profile id rather than file order (see detect.hpp above).
 www/            web UI sources (index.html + style.css + app.js -> one gzipped page) + setup.html.
                 The dashboard SCHEMATIC (the inline SVG in index.html, its sc-* CSS and its
                 INSPECT/I18N bindings) has its own gate — scripts/run-schematic-audit.sh + the

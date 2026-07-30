@@ -46,8 +46,8 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 16 | Captive-portal provisioning (AP-only SoftAP, typed SSID, UDP:53 DNS catch-all, 302 probe redirect + RFC 8910 option 114) | ✅ 🧪 | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp), [`logic/captive.hpp`](../main/logic/captive.hpp) |
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
-| 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte — it both ranks the representative and **narrows the candidate set**, dropping only classes that contradict it, **retried page probe + a second-sweep confirmation** before falling back to `generic`) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1849 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte — it both ranks the representative and **narrows the candidate set**, dropping only classes that contradict it, **retried page probe + a second-sweep confirmation** before falling back to `generic`, and an **order-independent** representative pick so a reordered registry cannot move a published entity id or series) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
+| 20 | **IDF-free host-tested logic core** (1860 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -1079,7 +1079,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   catalog sweep proving each `(page, offset, converter)` locator resolves to **exactly one** row
   **and to the right one**, asserted on the resolved row's own label, because six other rows share
   the `0x60/12` byte and every one of them would satisfy a page+offset match),
-  **1849 `CHECK`s** in
+  **1860 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -1105,9 +1105,8 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   a label override (above) moves the frozen id together with the series it names.
 - **🧪 …and which identifiers a detection TIE-BREAK can move** — the question the frozen set above
   leaves open, and the one a device owner actually has: does *this* unit still publish the identifiers
-  it published yesterday? `detect_best`'s last tie-break is **registry order**, so where two profiles
-  are **register-equivalent** (byte-identical `(reg, offset, conv, size, type)` rows) the pick changes
-  not one decoded value — only the labels, hence the entity ids and the series. The gate above cannot
+  it published yesterday? Detection picks one representative, so where the ranking **ties** the pick
+  decides the labels, hence the entity ids and the series. The gate above cannot
   fail on that *by construction*: both spellings are already in its frozen set, so a flip introduces
   no new identifier and the suite stays green while the device's own series changes underneath it.
   Measured over the detectable catalog: **12** equivalence classes exist and — since #230 A's fan
@@ -1123,6 +1122,26 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   *not* part of the equivalence key: it is not a wire fact, and folding it in would split that class
   and hide the strongest case the test has
   ([#230](https://github.com/0Bu/daikin-altherma-esp32/issues/230)).
+- **🧪 …and the tie-break can no longer be moved by the order of a file** (#230 B) — the criterion was
+  *"first in signature order"*, i.e. the order the tables happen to sit in `def/registry.hpp`. A label
+  is an identifier, so that let adding, removing or merely **reordering** a profile silently reassign
+  published series: measured at **11275** moved publications over 200 registry permutations × 336
+  fingerprints, across **64** distinct identifiers. Criterion (4) is now the **lowest profile id**,
+  which is intrinsic to the profile, and `test_tie_break_order_independence()` asserts the property by
+  permuting the registry and requiring the same pick. Adopting it moved **nothing** — 0 of the 336
+  fingerprints re-label anything, the live reference unit included — so unlike #230 A it needed no
+  series migration. It is deliberately **not** a better guess: preferring the majority spelling would
+  assert a model the bus cannot evidence, and two alternatives were measured and rejected
+  (fewest-identifiers moves 13 ids on 8 fingerprints for no evidentiary gain; exact-page-mask changes
+  nothing at all, an inert rule that would read like a guarantee). The residue is **bounded, not
+  solved**: `test_tie_break_reach()` freezes the **64** identifiers a tie-break can still decide on a
+  fingerprint a real unit can present, and neither that set nor the **34** above contains the other —
+  the tie is on the page *count* and the class *span*, both coarser than register-equivalence, so 32
+  reachable ids sit outside the equivalence set while 2 equivalence-only ids are unreachable because a
+  tighter kW class always wins first. The same measurement retired a claim this catalog and
+  [`ARCHITECTURE.md`](ARCHITECTURE.md) both used to make — that tied candidates are register-identical
+  so *"the decoded VALUES are identical"*: **98** of **152** ties are between profiles whose row
+  multisets differ, by up to **8** rows.
 - **The rule** — new decode/config/discovery logic goes in `main/logic/` with a `CHECK`, never buried in
   a device-only `.cpp`. The [`add-logic-test`](../.claude/skills/add-logic-test/SKILL.md) skill and the
   [`x10a-decode-reviewer`](../.claude/agents/x10a-decode-reviewer.md) agent enforce it.
@@ -1406,7 +1425,7 @@ and gzipped into the app image** (polled, after a WebSocket push proved it could
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 18-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1849 checks),
+on the host** (1860 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

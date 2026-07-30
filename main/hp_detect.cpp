@@ -238,11 +238,14 @@ DetectResult hp_detect_run() {
     const int n = detect_candidates(sigs, nsig, fp, out, static_cast<int>(sizeof(out) / sizeof(out[0])));
     for (int i = 0; i < n && i < static_cast<int>(sizeof(out) / sizeof(out[0])); i++)
         r.candidates.emplace_back(out[i]);
-    // Best-fit representative to actually read with (deterministic, not registry order). When the
-    // capacity is known the candidates share a kW class and are register-equivalent, so this only
-    // names the displayed model; when the O/U capacity is absent (short 0x00) the set can still span
-    // classes, so detect_best leans on the I/U capacity fallback to pick the right-class reading
-    // profile. Since #225 detect_candidates narrows by that same fallback, so `out` above no longer
+    // Best-fit representative to actually read with. Deterministic AND order-independent: the final
+    // tie-break is the lowest profile id, not the order the tables sit in the registry, so a reorder
+    // cannot silently reassign the entity ids / series this unit publishes (#230 B, measured — see
+    // logic/detect.hpp). It does NOT follow that the choice is free where the ranking ties: the tie is
+    // on the page count and the kW-class span, both coarser than the row tables, so tied candidates
+    // need not decode identically (98 of 152 measured ties do not). When the O/U capacity is absent
+    // (short 0x00) the set can still span classes, so detect_best leans on the I/U capacity fallback
+    // to pick the right-class reading profile. Since #225 detect_candidates narrows by that same fallback, so `out` above no longer
     // reports models the ranking had already excluded — but the profile READ is still this line's
     // alone: the set above is a display list, and nothing consumes it to choose a table.
     if (const char* b = detect_best(sigs, nsig, fp)) r.best = b;
