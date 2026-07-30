@@ -36,6 +36,9 @@ let LANG = (() => { const c = lsGet("uiLang"); return c === "de" || c === "en" ?
 const I18N = {
   en: {
     "sys.nodata": "No data", "sys.unreachable": "Unreachable",
+    "sys.x10a_down": "X10A offline", "sys.mb_carrying": "Operating mode unknown — readings from Modbus",
+    "sys.mb_only": "X10A offline — readings from Modbus",
+    "mode.dhw": "DHW", "mode.heat": "Heating", "mode.standby": "Standby",
     "sys.unreachable_sub": "Can't reach the device — retrying…",
     "sys.waiting": "Waiting for the heat pump…", "sys.operating": "Operating",
     "sys.standby": "Standby — not running", "sys.defrosting": "Defrosting",
@@ -77,6 +80,14 @@ const I18N = {
     "bug.redacted": "Your network name, addresses, broker and server names have already been removed.",
     "nav.settings": "Settings", "nav.back": "Back",
     "nav.settings_alert": (n) => `Settings — ${n} connection${n === 1 ? "" : "s"} down`,
+    // ── The two sources (X10A + the HomeHub Modbus stack) ──
+    "src.modbus_tag": "modbus",
+    "src.agree": "Both sources agree",
+    "src.delta": (d, u) => `Difference ${d}${u ? " " + u : ""}`,
+    "src.disagree": "The two sources disagree about this state",
+    "conn.modbus": "Modbus", "conn.searching": "Searching…",
+    "conn.notfound": "None found — tap to enter one",
+    "group.Modbus": "Modbus",
     "conn.title": "Connections", "conn.offline": "Offline", "conn.disabled": "Disabled",
     "conn.connecting": "Connecting…", "conn.connected": "Connected", "conn.resolving": "Resolving…",
     "conn.enabled": "Enabled", "conn.enabled_noping": "Enabled, host not answering ping",
@@ -177,6 +188,14 @@ const I18N = {
     "syslog.hint": "IP address or hostname and port of the Syslog server. Empty host disables Syslog.",
     "ntp.title": "NTP server", "ntp.server": "Server",
     "ntp.hint": "Hostname or IP of the NTP server the device syncs its clock from. Empty resets to the firmware default.",
+    // HomeHub / transport card + its edit modal (issue #32). The link is READ-ONLY — the copy must
+    // never imply the firmware controls the pump from here (docs/SECURITY.md).
+    "homehub.title": "Modbus", "homehub.host": "Host · IP or .local name",
+    "homehub.port": "Port", "homehub.unit": "Unit id",
+    "homehub.hint": "The gateway is searched for ONCE, on the first start with no address. Leave the host empty to use what that search found; enter an address by hand for a gateway added later. Port defaults to 502, unit id to 1. Read-only — the firmware never controls the heat pump from here.",
+    "hh.searching": "Searching…", "hh.saved": "Modbus settings saved",
+    "hh.err_port": "Port must be between 1 and 65535",
+    "hh.err_unit": "Unit id must be between 1 and 247",
     "board.title": "Board hardware", "board.ledtype": "Status LED", "board.none": "None",
     "board.preset": "Board", "board.preset_custom": "Custom",
     "board.led_gpio": "Plain LED (GPIO)", "board.led_ws2812": "Addressable RGB (WS2812)",
@@ -204,6 +223,9 @@ const I18N = {
   },
   de: {
     "sys.nodata": "Keine Daten", "sys.unreachable": "Nicht erreichbar",
+    "sys.x10a_down": "X10A offline", "sys.mb_carrying": "Betriebsart unbekannt — Werte aus dem Modbus",
+    "sys.mb_only": "X10A offline — Werte aus dem Modbus",
+    "mode.dhw": "Warmwasser", "mode.heat": "Heizung", "mode.standby": "Bereitschaft",
     "sys.unreachable_sub": "Gerät nicht erreichbar — erneuter Versuch…",
     "sys.waiting": "Warte auf die Wärmepumpe…", "sys.operating": "In Betrieb",
     "sys.standby": "Bereitschaft — läuft nicht", "sys.defrosting": "Abtauen",
@@ -245,6 +267,14 @@ const I18N = {
     "bug.redacted": "Netzwerkname, Adressen, Broker und Servernamen sind bereits entfernt.",
     "nav.settings": "Einstellungen", "nav.back": "Zurück",
     "nav.settings_alert": (n) => `Einstellungen — ${n} Verbindung${n === 1 ? "" : "en"} gestört`,
+    // ── Die beiden Quellen (X10A + der HomeHub-Modbus-Stack) ──
+    "src.modbus_tag": "modbus",
+    "src.agree": "Beide Quellen einig",
+    "src.delta": (d, u) => `Abweichung ${d}${u ? " " + u : ""}`,
+    "src.disagree": "Die beiden Quellen widersprechen sich bei diesem Zustand",
+    "conn.modbus": "Modbus", "conn.searching": "Suche…",
+    "conn.notfound": "Keiner gefunden — zum Eintragen tippen",
+    "group.Modbus": "Modbus",
     "conn.title": "Verbindungen", "conn.offline": "Offline", "conn.disabled": "Deaktiviert",
     "conn.connecting": "Verbinde…", "conn.connected": "Verbunden", "conn.resolving": "Löse auf…",
     "conn.enabled": "Aktiv", "conn.enabled_noping": "Aktiv, Host antwortet nicht auf Ping",
@@ -340,6 +370,12 @@ const I18N = {
     "syslog.hint": "IP-Adresse oder Hostname und Port des Syslog-Servers. Leerer Host deaktiviert Syslog.",
     "ntp.title": "NTP-Server", "ntp.server": "Server",
     "ntp.hint": "Hostname oder IP des NTP-Servers, mit dem das Gerät seine Uhr synchronisiert. Leer setzt auf den Firmware-Standard zurück.",
+    "homehub.title": "Modbus", "homehub.host": "Host · IP oder .local-Name",
+    "homehub.port": "Port", "homehub.unit": "Unit-ID",
+    "homehub.hint": "Das Gateway wird EINMALIG gesucht, beim ersten Start ohne Adresse. Host leer lassen, um das Gefundene zu verwenden; ein später hinzugefügtes Gateway hier von Hand eintragen. Port ist standardmäßig 502, die Unit-ID 1. Nur lesend — die Firmware steuert die Wärmepumpe von hier aus nie.",
+    "hh.searching": "Suche läuft…", "hh.saved": "Modbus-Einstellungen gespeichert",
+    "hh.err_port": "Port muss zwischen 1 und 65535 liegen",
+    "hh.err_unit": "Unit-ID muss zwischen 1 und 247 liegen",
     "board.title": "Board-Hardware", "board.ledtype": "Status-LED", "board.none": "Keine",
     "board.preset": "Board", "board.preset_custom": "Benutzerdefiniert",
     "board.led_gpio": "Einfache LED (GPIO)", "board.led_ws2812": "Adressierbare RGB-LED (WS2812)",
@@ -472,7 +508,7 @@ const VIEW = { dashboard: "viewDash", settings: "viewSettings" };
 const PARENT = { settings: "dashboard" };
 const TITLE = { settings: () => t("nav.settings") };
 // Every overlay that owns the Esc key; the navigation Esc stands down while one of them is open.
-const MODALS = ["wifiModal", "mqttModal", "syslogModal", "ntpModal", "boardModal", "bugModal"];
+const MODALS = ["wifiModal", "mqttModal", "syslogModal", "ntpModal", "homehubModal", "boardModal", "bugModal"];
 
 function go(stage) {
   S.stage = stage;
@@ -564,9 +600,45 @@ function renderApp() {
   // Decode the readings ONCE, here: the status block and the drawing must not disagree about what
   // the plant is doing, and they did — the headline was written from the link state alone while the
   // pills beneath it were written from the values.
-  S.live = hp.connected && (S._values || []).length > 0 ? liveData() : null;
+  // The drawing is built from a snapshot that may come from EITHER stack. Normally X10A: it carries
+  // ~100 rows against the HomeHub's dozen, so it leads everywhere. When the X10A bus is silent but
+  // the HomeHub is live, the snapshot is still built — liveData() fills what the second source can
+  // supply and blanks the rest (mbFallbackFor), so the drawing degrades to the handful of readings
+  // that ARE being measured instead of going blank while data is arriving.
+  S.live = (hp.connected && (S._values || []).length > 0) || (x10aDown() && mbLive() && (S._modbus || []).length)
+    ? liveData() : null;
   if (!hp.connected) {
-    sysSet(t("sys.nodata"), t("sys.waiting"), "dim");
+    // "No data" would contradict a drawing full of Modbus readings. What is genuinely unknown here is
+    // the heat pump's own STATE — the operating mode and the fault class are X10A-only, the HomeHub
+    // carries no equivalent — so the headline says that the X10A link is down and stops short of
+    // claiming a mode it cannot read, while the readings below speak for themselves.
+    // The gateway KNOWS what the plant is doing, so the headline says it instead of "unknown": DHW
+    // operation and space operation are separate flags there (def/homehub.hpp). The X10A fact moves
+    // to the sub-line — it is still stated, it is just no longer the most useful thing on the card.
+    // Deliberately NOT the gateway's "operation mode" register: that one is the heat/cool SEASON and
+    // reads "heat" right through a DHW run, so a headline built from it would contradict the valve
+    // drawn beside it.
+    if (mbLive()) {
+      const dhw = mbBool(52), spc = mbBool(53);
+      const mbMode = dhw === true ? t("mode.dhw")
+                   : spc === true ? t("mode.heat")
+                   : (dhw === false && spc === false) ? t("mode.standby") : null;
+      // A FAULT THE GATEWAY IS REPORTING OUTRANKS THE MODE. The unit's fault CLASS (Daikin's
+      // error/warning/caution split) is X10A-only and stays unknown here — but "is something
+      // wrong", and the code for it, are EKRHH offsets 21/22, and withholding a fault the device
+      // is actively reporting is the one direction a status headline must never fail in. Without
+      // this the card read a calm green "Warmwasser" over a live error.
+      const errOn = mbBool(21);
+      const code = mbVal(22);
+      if (errOn === true) {
+        sysSet(t("sys.fault"), code && !/^-*$/.test(code.trim())
+                                 ? t("sys.fault_line", code) : t("sys.mb_only"), "err");
+      } else {
+        sysSet(mbMode || t("sys.x10a_down"),
+               mbMode ? t("sys.mb_only") : t("sys.mb_carrying"), mbMode ? "" : "warn");
+      }
+    }
+    else          sysSet(t("sys.nodata"), t("sys.waiting"), "dim");
   } else if (faulted) {
     sysSet(mode || t("sys.fault"), t("sys.fault_line", fault), "err");
   } else {
@@ -1035,6 +1107,11 @@ async function refreshValues() {
   let r;
   try { r = await j("/values", { signal: pollSignal() }); } catch { return false; }
   S._values = r.values || r || [];
+  // The SECOND source, from the independent HomeHub stack (docs/MODBUS_PROTOCOL.md). Absent entirely
+  // when that stack is off, which is exactly how a device without a HomeHub behaves — no Modbus row,
+  // no comparison, no fallback. Never merged into S._values: the two have separate liveness, and
+  // merging would make "is this reading current?" unanswerable per row.
+  S._modbus = Array.isArray(r.modbus) ? r.modbus : [];
   renderApp();
   return true;
 }
@@ -1467,6 +1544,31 @@ function connLinks() {
   links.push({ edit: "ntp", label: "NTP", cls: nt.synced ? "ok" : "warn",
     value: esc(nt.server || "—"), state: nt.synced ? t("conn.synced") : t("conn.syncing") });
 
+  // The HomeHub, as its OWN row — never folded into a combined link state with X10A. The two stacks
+  // fail for unrelated reasons and either can be down alone, so one merged "connected" would hide
+  // exactly the case worth seeing. Absent entirely when no HomeHub is configured: a setting for
+  // hardware that is not there is noise.
+  // ALWAYS present, even with no address and no hub found. It used to appear only while the stack
+  // was `enabled` — i.e. only once an address existed — which stranded the exact user this setting
+  // is for: the one-shot mDNS search finds nothing, the stack never starts, the row is never drawn,
+  // and there is no longer anywhere in the UI to type the address in. The standalone HomeHub card
+  // was removed at the same time, so on a board with no X10A and no discovered hub the feature had
+  // no reachable entry point at all. A configuration row is not a status readout; it has to exist
+  // before the thing it configures does.
+  const mbs = S.status?.modbus;
+  if (mbs) {
+    const cls = mbs.connected ? "mb" : mbs.enabled ? "err" : mbs.discovering ? "" : "";
+    const state = mbs.connected ? t("conn.connected")
+                : mbs.discovering ? t("conn.searching")
+                : mbs.enabled ? t("conn.offline")
+                // No address: say whether the one-shot search has already run and come back empty,
+                // because "we will not look again" and "about to look" are different facts and only
+                // the first one means the user has to act.
+                : mbs.searched ? t("conn.notfound") : t("conn.disabled");
+    links.push({ edit: "homehub", label: t("conn.modbus"), cls,
+      value: esc(mbs.host || (mbs.discovering ? t("conn.searching") : "—")), state });
+  }
+
   return links;
 }
 // The row conveys state by colour alone (the value IS the address/name, just tinted) — DESIGN.md
@@ -1516,6 +1618,8 @@ function renderSettings() {
   const a = document.activeElement;
   const picking = !!(a && a.classList && (a.classList.contains("pin-sel") || a.classList.contains("chan-sel") || a.classList.contains("lang-sel")));
   if (!picking) setHtml("connTile", connectionsHtml());
+  // The HomeHub card carries an interactive <select> too (the transport picker), so it is held by
+  // the same `picking` guard — its select uses .chan-sel for exactly that reason.
   if (!picking && !S.otaShown) setHtml("settingsCards", esp32CardHtml());
   $("settingsVer").textContent = "daikin-altherma-esp32 · v" + (S.status?.version || "?");
   renderSettingsDot();
@@ -1898,7 +2002,220 @@ const DESCRIPTIONS = [
     normal: "ON during any scheduled quiet hours you've set; OFF otherwise.",
     de: { what: "Geräuscharm-/Leise-Modus: begrenzt Lüfter- und Verdichterdrehzahl für leiseren Betrieb, auf Kosten etwas Heizleistung.",
           normal: "ON während eingestellter Ruhezeiten; sonst OFF." } },
+  // ── HomeHub (Modbus) rows that no X10A entry above already covers ─────────────────────────────
+  // Appended LAST on purpose: descFor takes the FIRST match, so nothing here can hijack copy an
+  // X10A catalog label already resolves to — measured, 11 of the 27 gateway labels are answered by
+  // the entries above and are deliberately left to them. These sixteen are the remainder, and they
+  // exist because a reading with no explainer is a naked number: the description audit guards the
+  // X10A catalog against exactly that, and it never saw these labels, so it stayed green while the
+  // Modbus card shipped 25 unexplained rows.
+  { re: /^unit error active$/i,
+    what: "The unit's own fault flag, as the gateway reports it: 0 none, 1 fault, 2 warning. This is the authoritative one — the error code beside it is the label for a fault, not the statement that there is one.",
+    normal: "0. Anything else pairs with a code in the row above and belongs in the installer's hands.",
+    de: { what: "Die Störungsmeldung der Anlage selbst, wie das Gateway sie liefert: 0 keine, 1 Störung, 2 Warnung. Das ist die maßgebliche Angabe — der Fehlercode daneben benennt eine Störung, er stellt sie nicht fest.",
+          normal: "0. Alles andere gehört zusammen mit dem Code darüber in Fachhände." } },
+  { re: /^error sub ?code$/i,
+    what: "The second half of a Daikin fault code — the digits after the letter, which narrow a fault class down to the specific case.",
+    normal: "no value while nothing is wrong. It only becomes a number alongside an active fault.",
+    de: { what: "Die zweite Hälfte eines Daikin-Fehlercodes — die Ziffern hinter dem Buchstaben, die eine Fehlerklasse auf den konkreten Fall eingrenzen.",
+          normal: "ohne Störung kein Wert. Eine Zahl steht hier nur neben einer aktiven Störung." } },
+  { re: /^dhw operation$/i,
+    what: "Whether the unit is heating the hot-water tank RIGHT NOW. Together with the space-operation row beside it, this is what the dashboard's headline reads when the X10A service port is silent.",
+    normal: "1 during a tank charge, 0 the rest of the day. Both rows at 0 is standby, and normal for most hours.",
+    de: { what: "Ob die Anlage GERADE den Warmwasserspeicher lädt. Zusammen mit der Zeile „Space operation\" daneben ist das die Quelle für die Betriebsart im Kopf des Schemas, wenn der X10A-Serviceanschluss stumm ist.",
+          normal: "1 während einer Speicherladung, sonst 0. Beide Zeilen auf 0 heißt Bereitschaft — und das ist über den Tag der Normalfall." } },
+  { re: /^space operation$/i,
+    what: "Whether the unit is serving the heating (or cooling) circuit right now — the counterpart of the DHW-operation row above it.",
+    normal: "1 while the circuit is being fed, 0 otherwise. It cannot be 1 at the same time as DHW operation: one diverter, one branch at a time.",
+    de: { what: "Ob die Anlage gerade den Heiz- (oder Kühl-)Kreis bedient — das Gegenstück zur Zeile „DHW operation\" darüber.",
+          normal: "1 solange der Kreis versorgt wird, sonst 0. Gleichzeitig mit „DHW operation\" kann sie nicht 1 sein: ein Umschaltventil, immer nur ein Zweig." } },
+  { re: /^leaving water temp\. \(phe\)$/i,
+    what: "The water leaving the heat pump's plate heat exchanger, BEFORE the electric backup heater. This is the heat pump's own output — the figure the ΔT and the COP on the drawing are computed from.",
+    normal: "runs above the return temperature while the pump is circulating; the gap between the two IS the ΔT. Equal to the row below it whenever the backup heater is off.",
+    de: { what: "Das Wasser, das den Plattenwärmetauscher verlässt — VOR dem elektrischen Zusatzheizer. Das ist die Leistung der Wärmepumpe selbst und die Grundlage für ΔT und COP in der Zeichnung.",
+          normal: "liegt über dem Rücklauf, solange die Pumpe fördert; der Abstand zwischen beiden IST das ΔT. Bei ausgeschaltetem Zusatzheizer gleich der Zeile darunter." } },
+  { re: /^leaving water temp\. \(buh\)$/i,
+    what: "The same water AFTER the electric backup heater — what the house actually receives. The difference to the row above is the heater's contribution.",
+    normal: "identical to the pre-heater reading whenever the backup heater is off, which is most of the time. A persistent gap means it is running, and that is resistance heat at a COP of 1.",
+    de: { what: "Dasselbe Wasser NACH dem elektrischen Zusatzheizer — das, was im Haus ankommt. Die Differenz zur Zeile darüber ist der Beitrag des Heizstabs.",
+          normal: "bei ausgeschaltetem Zusatzheizer identisch mit dem Wert davor, und das ist der Normalfall. Ein dauerhafter Abstand heißt: er läuft — Widerstandswärme mit COP 1." } },
+  { re: /^liquid refrigerant temp\.$/i,
+    what: "The refrigerant temperature in the liquid line between the outdoor unit and the exchanger — after it has given up its heat and condensed.",
+    normal: "a few kelvin above the leaving water in heating, and it tracks the water rather than the weather. Far below outdoor air while idle simply means the circuit is at rest.",
+    de: { what: "Die Kältemitteltemperatur in der Flüssigkeitsleitung zwischen Außeneinheit und Wärmetauscher — nachdem es seine Wärme abgegeben hat und kondensiert ist.",
+          normal: "im Heizbetrieb einige Kelvin über dem Vorlauf, und sie folgt dem Wasser, nicht dem Wetter. Im Stillstand deutlich unter der Außentemperatur heißt schlicht: der Kreis ruht." } },
+  { re: /^room temp\.$/i,
+    what: "The room temperature the remote controller measures, as the gateway passes it on.",
+    normal: "no value on installations whose controller is not mounted in a reference room or has no room sensor configured — measured here, this unit reports exactly that.",
+    de: { what: "Die Raumtemperatur, die das Bedienteil misst, so wie das Gateway sie weiterreicht.",
+          normal: "kein Wert bei Anlagen, deren Bedienteil nicht im Referenzraum sitzt oder keinen Raumfühler konfiguriert hat — hier gemessen meldet diese Anlage genau das." } },
+  { re: /^power consumption$/i,
+    what: "The unit's electrical input, MEASURED by the gateway. The X10A service port has no equivalent at all — everything the dashboard shows from that side is estimated from phase currents at an assumed 230 V, so this is the honest figure of the two.",
+    normal: "a few hundred watts in standby, one to three kilowatts under load. A high value with the compressor stopped is the backup heater or the tank's immersion heater, not the heat pump.",
+    de: { what: "Die elektrische Leistungsaufnahme, vom Gateway GEMESSEN. Der X10A-Serviceanschluss hat dafür überhaupt keine Entsprechung — was das Dashboard von dort zeigt, ist aus Phasenströmen bei angenommenen 230 V geschätzt. Von beiden ist das hier der ehrliche Wert.",
+          normal: "einige hundert Watt in Bereitschaft, ein bis drei Kilowatt unter Last. Ein hoher Wert bei stehendem Verdichter ist der Zusatz- oder der Speicherheizstab, nicht die Wärmepumpe." } },
+  { re: /^lwt main heating setpoint$/i,
+    what: "The target leaving-water temperature for the main heating circuit, read back from the gateway. Read-only here — this firmware never writes a pump register.",
+    normal: "follows the weather curve if one is configured, so it moves with the outdoor temperature rather than staying put. Lower is cheaper: every kelvin less costs the compressor real work.",
+    de: { what: "Die Soll-Vorlauftemperatur für den Haupt-Heizkreis, vom Gateway zurückgelesen. Hier nur lesend — diese Firmware schreibt kein Anlagenregister.",
+          normal: "folgt der Heizkurve, sofern eine eingestellt ist, wandert also mit der Außentemperatur statt still zu stehen. Niedriger ist günstiger: jedes Kelvin weniger spart dem Verdichter echte Arbeit." } },
+  { re: /^lwt main cooling setpoint$/i,
+    what: "The same target for cooling mode. Only meaningful on installations that actually cool.",
+    normal: "unused on a heating-only system, where it simply holds whatever value it was configured with.",
+    de: { what: "Derselbe Sollwert für den Kühlbetrieb. Nur bei Anlagen von Bedeutung, die tatsächlich kühlen.",
+          normal: "auf einer reinen Heizungsanlage ungenutzt — der Wert steht dann einfach auf dem, was konfiguriert wurde." } },
+  { re: /^space heating\/cooling on\/off$/i,
+    what: "Whether the space circuit is ENABLED at all — the switch, not the current activity. The space-operation row above says whether it is being served right now.",
+    normal: "on through the heating season, off in summer. Off here means no amount of demand will start the circuit.",
+    de: { what: "Ob der Heiz-/Kühlkreis überhaupt FREIGEGEBEN ist — der Schalter, nicht die aktuelle Tätigkeit. Ob er gerade bedient wird, sagt die Zeile „Space operation\" weiter oben.",
+          normal: "in der Heizperiode ein, im Sommer aus. Steht er hier auf aus, startet den Kreis auch keine Anforderung." } },
+  { re: /^quiet mode$/i,
+    what: "Low-noise operation: the outdoor unit caps its fan and compressor speed, which costs capacity.",
+    normal: "off by default, or on to a schedule at night. On during a cold snap is worth knowing — it is a reason for a plant that cannot keep up.",
+    de: { what: "Geräuscharmer Betrieb: die Außeneinheit begrenzt Lüfter- und Verdichterdrehzahl, was Leistung kostet.",
+          normal: "standardmäßig aus, oder nachts per Zeitprogramm ein. Bei Frost eingeschaltet ist eine Erklärung wert — es ist ein Grund dafür, dass eine Anlage nicht nachkommt." } },
+  { re: /^dhw reheat setpoint$/i,
+    what: "The tank temperature at which the unit starts a reheat, rather than waiting for the full DHW setpoint to be called for.",
+    normal: "a few kelvin under the DHW setpoint. Set close to it and the unit reheats constantly; set far below and hot water runs out before it reacts.",
+    de: { what: "Die Speichertemperatur, ab der die Anlage nachheizt, statt auf eine volle Warmwasser-Anforderung zu warten.",
+          normal: "einige Kelvin unter dem Warmwasser-Sollwert. Zu dicht daran heizt die Anlage ständig nach; zu weit darunter ist das warme Wasser alle, bevor sie reagiert." } },
+  { re: /^power limit \(buffering\)$/i,
+    what: "The electrical cap the unit holds while a Smart-Grid buffering signal is active — the ceiling it may draw when it is being asked to soak up surplus power.",
+    normal: "set by whatever drives the Smart-Grid input. Only meaningful while the Smart-Grid mode row is in a buffering state.",
+    de: { what: "Die elektrische Obergrenze, die die Anlage bei aktivem Smart-Grid-Puffersignal einhält — wie viel sie ziehen darf, wenn sie Überschuss aufnehmen soll.",
+          normal: "wird von dem gesetzt, was das Smart-Grid-Signal steuert. Nur von Bedeutung, solange die Zeile „Smart-Grid operation mode\" auf Puffern steht." } },
+  { re: /^power limit \(general\)$/i,
+    what: "The general electrical cap for the unit, independent of any Smart-Grid signal.",
+    normal: "at or near the unit's own maximum unless someone has deliberately limited it — a low value here silently limits capacity in every mode.",
+    de: { what: "Die allgemeine elektrische Obergrenze der Anlage, unabhängig von jedem Smart-Grid-Signal.",
+          normal: "liegt am Maximum der Anlage, sofern niemand sie bewusst begrenzt hat — ein niedriger Wert hier deckelt still die Leistung in jeder Betriebsart." } },
 ];
+
+// ── The two sources ─────────────────────────────────────────────────────────────────────────────
+// X10A and the HomeHub are INDEPENDENT stacks on the device: separate tasks, separate caches,
+// separate link states, and either can be down while the other reports (docs/MODBUS_PROTOCOL.md).
+// The UI keeps them apart everywhere except one place — a value row, where showing the same quantity
+// from both is the entire point of having two sources.
+//
+// They are paired on the `concept` the DEVICE puts on each row (logic/homehub_map.hpp), never on the
+// label: the catalog spells one quantity many ways across the 43 profiles and reuses tags across
+// different quantities, so a label match here would be both incomplete and wrong. The browser does
+// no matching of its own — it looks up a string the firmware already resolved structurally.
+// A gateway reading, or null. Gated on mbLive() as well as on the row existing: the firmware now
+// omits the whole array while the link is down, but this is the helper every consumer goes through
+// and it must be correct ON ITS OWN — /status carries the link state on an 8 s cadence while
+// /values runs at 2 s, so "the payload will be empty" is a guarantee about another request. It was
+// not gated at all, and the last good cache went on being drawn as the live second opinion, with a
+// computed difference against it.
+const mbByConcept = (cid) =>
+  cid && mbLive()
+    ? (S._modbus || []).find((m) => m && m.concept === cid && m.value != null) || null
+    : null;
+
+// Is the X10A stack currently delivering? Keyed on the LINK, not on individual rows: a bus that has
+// stopped answering leaves the last cache in place, so per-row emptiness would lag behind the truth.
+const x10aDown = () => !!(S.status && S.status.hp && S.status.hp.connected === false);
+// Is the HomeHub stack running AND connected? Both matter: `enabled` false means this installation
+// has no HomeHub at all, and then nothing Modbus is shown anywhere.
+const mbLive = () => !!(S.status && S.status.modbus && S.status.modbus.enabled && S.status.modbus.connected);
+
+// The Modbus row that STANDS IN for an X10A row — only while X10A is down and the HomeHub is live.
+// Returns null in normal operation: with both sources up, X10A leads everywhere and Modbus appears
+// only as the second opinion inside the explainer.
+const mbFallbackFor = (cid) => (x10aDown() && mbLive() ? mbByConcept(cid) : null);
+// The Modbus reading of the SAME quantity as an X10A row — its second opinion, for the explainer.
+// Takes the row rather than a concept id so every caller resolves it the one way: `concept` is put
+// on the row by the FIRMWARE (logic/homehub_map.hpp, structurally by reg/offset/unit), and a browser
+// that started matching labels here would re-open exactly the substitution that header exists to
+// prevent. Null for an absent row, a row the firmware paired with nothing, and every device without
+// a HomeHub — so each caller's "no second source" branch is the same one.
+//
+// AND null while the X10A link is down, which is the load-bearing half. A SECOND opinion requires a
+// FIRST one: with the bus silent the X10A row handed in here is whatever the retained cache still
+// holds (kept on purpose — the trend rings need it), so every consumer went on comparing it against
+// the live gateway. The row header had already switched to the gateway value while the explainer
+// beneath it printed that same gateway row again as the "second source" and a difference against a
+// minutes-old X10A number — the comparison of two INSTANTS presented as a comparison of two
+// INSTRUMENTS, which is the exact defect the cache-dropping in hp_modbus.cpp removed from the other
+// direction. Gated HERE rather than at the call sites because it was already spelled out at three
+// of them and they had drifted; this is the same argument stateOf() makes for plant states, applied
+// to readings.
+const mbTwin = (row) => (row && !x10aDown() ? mbByConcept(row.concept) : null);
+
+// The six quantities BOTH sources measure, in ONE table. Each row names the same thing three ways:
+// the field liveData fills, the schematic pill that draws it, the INSPECT target that pill opens —
+// against the CONCEPT the firmware paired them on (logic/homehub_map.hpp, resolved structurally by
+// register/offset/unit, never by label).
+//
+// One table because these were three separate lists of the same six things, and they had already
+// drifted: liveData's field is `ret` where the INSPECT target is `rwt`. Three lists are three
+// chances to disagree, and the disagreement is SILENT in the worst direction — a name that matches
+// nothing means the second source simply never appears, which looks exactly like a HomeHub that
+// does not carry the register. The concept strings are the firmware's own trend ids; a typo here
+// cannot show a wrong value, only no value.
+const MB_PAIRS = [
+  { fld: "lwt",  pill: "svLwt",  insp: "lwt",  cid: "leaving_water" },
+  { fld: "ret",  pill: "svRwt",  insp: "rwt",  cid: "return_water"  },
+  { fld: "tank", pill: "svTank", insp: "tank", cid: "dhw_tank"      },
+  { fld: "out",  pill: "svOut",  insp: "out",  cid: "outdoor_air"   },
+  { fld: "flow", pill: "svFlow", insp: "flow", cid: "flow"          },
+  { fld: "room", pill: "svRoom", insp: "room", cid: "room_temp"     },
+];
+// The Modbus reading an INSPECT target stands for, while the drawing is running on the second
+// source. This is what stops the explainer from CONTRADICTING the picture: with X10A down the pill
+// states the gateway's number, and the panel behind it resolved its headline from /values — which is
+// empty — so tapping a pill that read "54.3 °C" opened a panel headlined "—". The inspector blanking
+// what the pill blanks is the rule (ou_stale.hpp); the converse has to hold too.
+const mbForInspect = (key) => {
+  if (!x10aDown() || !mbLive()) return null;
+  const p = MB_PAIRS.find((q) => q.insp === key);
+  return p ? mbByConcept(p.cid) : null;
+};
+// A HomeHub STATE register by its EKRHH offset, as a tri-state boolean (null = the gateway did not
+// answer it either). State is not a reading: it carries no unit and no trend, so it rides the offset
+// rather than the concept vocabulary logic/homehub_map.hpp reserves for paired MEASUREMENTS.
+const mbBool = (off) => {
+  const r = mbRow(off);
+  return r ? String(r.value).trim() === "1" : null;
+};
+// The same register as raw TEXT — the error code is a Text16, not a flag.
+const mbVal = (off) => { const r = mbRow(off); return r ? String(r.value) : null; };
+// The MEASURED power consumption (EKRHH input register 51, def/homehub.hpp). Named because the map
+// carries three "kW" rows and the other two are the power-LIMIT setpoints (holding 57/58): anything
+// selecting this reading by its UNIT will sooner or later select an installer's ceiling instead.
+const MB_OFF_POWER = 51;
+// …and the lookup itself is a named helper for the same reason every other resolution here is one:
+// it gives the rule ONE definition to be gated on, instead of a lookup spelled out at the call site
+// where the next reader sees a `find()` and a unit and has no way to know which of the three kW rows
+// was meant. Null when the gateway did not answer 51 — a missing measurement, never the nearest
+// number that shares its unit.
+const mbPower = () => mbRow(MB_OFF_POWER);
+// One lookup both go through. Gated on mbLive() for mbByConcept's reason: correct on its own.
+const mbRow = (off) =>
+  mbLive() ? (S._modbus || []).find((m) => m && m.off === off && m.value != null) || null : null;
+
+// ── WHICH SOURCE ANSWERS A PLANT STATE ─────────────────────────────────────────────────────────
+// One rule, one place. X10A leads while its link is LIVE and carries the row; otherwise a LIVE
+// gateway answers; otherwise nobody does and the caller blanks.
+//
+// This exists because the rule was written out three times — for the valve, the pump and the
+// space-heating demand — and the three had already drifted into three different behaviours. The
+// valve read `X10A ?? Modbus` and was never cleared when the X10A link dropped, so the STALE X10A
+// position beat a live gateway one: measured, the header said "DHW · readings from Modbus" while
+// the drawing routed water through the radiators and left the tank branch idle. The pump and the
+// demand had the opposite bug — cleared on link loss and never restored from the gateway, so they
+// simply went blank next to readings that were arriving.
+//
+// The X10A cache is deliberately KEPT when its link drops (the trend rings need it), so "the row
+// exists" is not the same question as "the row is current". Every consumer has to ask the second
+// one, and asking it once is the only way they cannot disagree.
+const stateOf = (re, mbOffset) => {
+  const x = x10aDown() ? null : vOn(re);
+  if (x != null) return x;
+  // Not gated on x10aDown: a profile can lack the X10A row while the bus is perfectly healthy, and
+  // the gateway knowing something X10A never carried is not a fallback, it is just the answer.
+  return mbBool(mbOffset);
+};
 
 // First matching description for a value label, or null (→ a plain, non-expandable row).
 function descFor(label) {
@@ -1922,6 +2239,88 @@ const descParaHtml = (html) => `<div class="vdesc-p">${html}</div>`;
 // anyway — cheap and keeps the one-encoder rule.
 const descNoteHtml = (lead, text) =>
   descParaHtml(`<span class="vdesc-n">${esc(lead)}</span> ${esc(text)}`);
+
+// The SECOND source, as one plain line at the END of the explainer — after the "Normal:" note, in
+// the same paragraph shape as everything else in the body, in the Modbus petrol.
+//
+// It used to be a bordered card at the TOP, listing X10A and Modbus as two labelled rows with the
+// difference under them. That inverted the panel: the row's OWN value is already stated an inch
+// above, in the row header the reader just tapped, so the card repeated it in a heavier shape than
+// the original and pushed the description — the thing a reader opens an explainer FOR — below the
+// fold. One line naming the other instrument is the whole content; the comparison the reader wants
+// is between this line and the value at the top, which is where their eye already is.
+//
+// The unit is the MODBUS row's own, not the X10A row's: this states what the gateway reads, and
+// borrowing the other source's unit word would quietly assert the two are identically scaled (they
+// are spelled "L/min" and "l/min" for the flow, which is exactly the kind of difference worth
+// keeping visible). Returns "" with no twin, with no X10A value to complement, and on every device
+// without a HomeHub — so an unpaired row keeps precisely the explainer it had before.
+function mbNoteHtml(row, mb) {
+  if (!mb || mb.value == null || !row || row.value == null) return "";
+  return mbRowHtml(mb) + mbDeltaHtml(row, mb);
+}
+
+// One gateway reading as a FULL row: its own label, the badge, and the value on the right — the
+// same shape the X10A row above it has, so the two line up and read as two instruments answering
+// one question rather than a reading and a footnote about it.
+//
+// The label is the MODBUS register's own (`Return water temp.`), never the X10A row's. Under an
+// X10A row called "3way valve" the gateway's line reads "3-way valve to DHW", which NAMES the
+// register the number came from — and naming it is the point: this line is what someone verifying
+// the pairing on real hardware reads to check that the two rows are the same quantity. Reusing the
+// X10A label would show them their own assumption back.
+function mbRowHtml(mb) {
+  return `<div class="mb-line">` +
+    `<span>${esc(displayReadingLabel(mb.label || ""))} ` +
+      `<span class="mb-tag">${esc(t("src.modbus_tag"))}</span></span>` +
+    `<span>${esc(displayValue(mb))}${mb.unit ? " " + esc(mb.unit) : ""}</span></div>`;
+}
+
+// WHY two correct instruments read differently, per pairing. Only three of the nine have a
+// structural answer, and the other six deliberately have none: they read the same sensor of the
+// same circuit, so a gap there is instrument tolerance and inventing a reason for it would teach a
+// reader to explain away a discrepancy that might be a real defect. The point of stating the reason
+// where one EXISTS is the opposite — without it, the leaving-water pair's steady offset reads as one
+// of the two being wrong, and the outdoor pair's several-Kelvin gap at rest reads as a broken sensor
+// when it is the documented behaviour of a sleeping outdoor unit (logic/ou_stale.hpp).
+const MB_DELTA_WHY = {
+  leaving_water: {
+    en: "the HomeHub measures at the plate heat exchanger, X10A before the backup heater",
+    de: "der HomeHub misst am Plattentauscher, X10A vor dem Reserveheizer",
+  },
+  outdoor_air: {
+    en: "while the compressor rests X10A holds the last run's value — the HomeHub keeps measuring",
+    de: "bei stehendem Verdichter hält X10A den Wert des letzten Laufs — der HomeHub misst weiter",
+  },
+  room_temp: {
+    en: "the two read the room from different controllers",
+    de: "die beiden lesen den Raum von unterschiedlichen Reglern",
+  },
+};
+
+// The difference, stated in the row's own unit, with the reason after it where there is one.
+// A WIDE gap is deliberately NOT coloured as an error: two sensors legitimately sit at different
+// points in the circuit, so a gap is information. What it must never do is stay silent — a reader
+// comparing two numbers wants to know whether they agree, and "1.7 K apart, and here is why" is a
+// different statement from two numbers left side by side to be squinted at.
+function mbDeltaHtml(row, mb) {
+  const why = MB_DELTA_WHY[row.concept] ? tx(MB_DELTA_WHY[row.concept]) : "";
+  // A bit flag has no difference to state. Agreement on a flag is unremarkable and says nothing;
+  // a MISMATCH is worth a line, since the two sources are then contradicting each other about a
+  // discrete fact rather than differing by a tolerance.
+  if (row.binary || mb.binary) {
+    // Compared on the raw "1"/"0" the firmware serves (#210's structural encoding), never on the
+    // rendered ON/OFF text — the two sources format independently and a text compare would call
+    // them different because one spelled it another way.
+    const on = (v) => String(v.value).trim() === "1";
+    return on(row) === on(mb) ? "" : `<div class="mb-delta">${esc(t("src.disagree"))}</div>`;
+  }
+  const a = parseFloat(row.value), b = parseFloat(mb.value);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return why ? `<div class="mb-delta">${esc(why)}</div>` : "";
+  const dv = Math.abs(a - b);
+  const head = dv < 0.05 ? t("src.agree") : t("src.delta", fmt1(dv), row.unit || "");
+  return `<div class="mb-delta">${esc(head)}${why ? " — " + esc(why) : ""}</div>`;
+}
 
 // Description body: the plain "what is it" sentence, plus an optional "Normal:" note.
 function descBodyHtml(d) {
@@ -2480,24 +2879,37 @@ function descAccordion(key, label, valHtml, cls, bodyHtml, trendId) {
 function vDescRow(v) {
   const label = v.label || "";
   const shownLabel = displayReadingLabel(label);
-  const cls = v.state || v.class || "";
-  const val = esc(displayValue(v)) +
-    (v.unit ? `<span class="vrow-unit">${esc(v.unit)}</span>` : "");
+  let cls = v.state || v.class || "";
   const d = descFor(label);
   const hid = histIdFor(label);          // this profile's spelling -> the concept the device buffers
-  // A row is expandable if it has an explainer OR a trend — the two are independent (the firmware
-  // picks historied rows structurally, the explainer table matches labels), so keying the accordion
-  // on the description alone would hide a series the device is keeping.
-  if (!d && !hid) {
+  // The SECOND source for this row, if the HomeHub carries the same quantity (paired on the concept
+  // the firmware resolved — see mbByConcept). Two distinct uses, and they must not be confused:
+  //   `mb`  — the comparison shown inside the explainer while BOTH sources are up.
+  //   `fb`  — the stand-in shown IN PLACE of the X10A value while the X10A bus is down.
+  const mb = mbByConcept(v.concept);
+  const fb = mbFallbackFor(v.concept);
+  // While X10A is down: a row the HomeHub can supply shows the Modbus reading, marked as such; a row
+  // it cannot shows nothing at all. Blanking is the right answer there, not a stale X10A number —
+  // the same refusal the held-over outdoor pills already make (logic/ou_stale.hpp).
+  const src = fb || v;
+  if (fb) cls = (cls ? cls + " " : "") + "src-val-mb";
+  const val = (x10aDown() && !fb)
+    ? "—"
+    : esc(displayValue(src)) + (v.unit ? `<span class="vrow-unit">${esc(v.unit)}</span>` : "");
+  if (!d && !hid && !mb) {
     return `<div class="vrow"><span class="vrow-label">${esc(shownLabel)}</span>` +
       `<span class="vrow-val ${cls}">${val}</span></div>`;
   }
-  // Body = the explainer (when the label has one) followed by the trend (when the firmware keeps a
-  // series for it). Either half may be absent, which is why the builder takes finished body markup
-  // rather than a description: a trend-only row has no `d` at all.
+  // Body = the explainer, then the second source's reading, then the trend. Any part may be absent,
+  // which is why the builder takes finished markup rather than a description.
   return descAccordion(label, shownLabel, val, cls,
-                       (d ? descBodyHtml(d) : "") + histHtml(hid, v.unit, shownLabel), hid);
+                       (d ? descBodyHtml(d) : "") + mbNoteHtml(v, mb) +
+                       histHtml(hid, v.unit, shownLabel), hid);
 }
+
+// A Model-card row: the same accordion as a value row when copy exists for it, else the plain row
+// vrow() would have produced. The key is prefixed so it can never collide with a catalog label in
+// S.descOpen — "Capacity" is both a card row and a plausible label.
 // ── Explainers for rows that are NOT catalog readings ────────────────────────────────────────────
 // The Model card's rows and the ESP32 card's two memory rows. Keeps the MODEL_DESCRIPTIONS name the
 // description gate parses (tools/descriptions/check_descriptions.mjs) — what it enforces here is the
@@ -2645,8 +3057,20 @@ function toggleDesc(btn) {
 // heat-pump link is down — there's nothing to poll, so "Waiting for the first poll…" would be
 // misleading (implies data is imminent) rather than "not connected".
 function valueGroupsHtml(vals, connected) {
-  if (!connected) return "";
-  if (!vals.length) return `<div class="vgroup"><div class="card"><span class="empty">${esc(t("values.waiting"))}</span></div></div>`;
+  // The list also renders while X10A is down IF the HomeHub is still delivering — that is the whole
+  // point of two independent stacks. Each row then shows the Modbus reading (marked) or blanks
+  // (vDescRow); hiding the list wholesale would throw away readings that ARE being measured.
+  if (!connected && !mbLive()) return "";
+  if (!vals.length) {
+    // X10A has nothing to show yet. If the HomeHub is delivering, ITS readings are all there is —
+    // show them rather than "waiting for the heat pump" over live data. This was the gap: the guard
+    // above already let the Modbus case through, and then this line sent it straight back, so the
+    // whole list collapsed to the waiting card. Every PAIRED row (leaving water, return, flow, tank,
+    // outdoor) normally rides inside its X10A row, so with no X10A rows they had nowhere to be drawn
+    // at all and only the handful of unpaired ones would have survived, in the card below.
+    if (mbLive() && (S._modbus || []).some((m) => m && m.value != null)) return modbusOnlyGroupHtml(true);
+    return `<div class="vgroup"><div class="card"><span class="empty">${esc(t("values.waiting"))}</span></div></div>`;
+  }
   const order = [...GROUPS.map((g) => g[0]), "Other values"];
   const buckets = new Map();
   for (const v of vals) { const g = groupOf(v); (buckets.get(g) || buckets.set(g, []).get(g)).push(v); }
@@ -2675,7 +3099,59 @@ function valueGroupsHtml(vals, connected) {
   };
   for (const name of order) if (buckets.has(name)) { emit(name, buckets.get(name)); done.add(name); }
   for (const [name, rows] of buckets) if (!done.has(name)) emit(name, rows); // firmware-supplied custom groups
+  html += modbusOnlyGroupHtml();
   return html;
+}
+
+// The HomeHub registers with NO X10A counterpart — the real power measurement, the Smart-Grid mode,
+// the setpoint limits. They have no row to sit inside, so they get a group of their own, LAST: visible
+// (the power reading in particular is worth having — X10A has no equivalent and the dashboard has to
+// estimate it from CT clamps at an assumed 230 V) but after everything X10A carries, because X10A
+// stays the prominent source. Empty and therefore absent on a device with no HomeHub.
+function modbusOnlyGroupHtml(all) {
+  // `all` = X10A carried no rows at all, so the paired ones have no row to sit inside and belong here
+  // too — otherwise they are simply not on screen while being actively measured.
+  //
+  // "Paired" is decided at RUNTIME, against the rows this device is actually showing — not from the
+  // row merely CARRYING a concept. The map deliberately allows a profile to lack a concept (a
+  // monobloc has no room sensor), and a `concept` on the gateway row only says the firmware KNOWS
+  // an X10A equivalent exists somewhere in the catalog. Filtering on the tag alone dropped those
+  // readings twice over: no X10A row to ride inside, and excluded from this card for having a twin
+  // that does not exist here.
+  const twinShown = (m) => !!m.concept &&
+    (S._values || []).some((v) => v && v.concept === m.concept && v.value != null);
+  const rows = (S._modbus || []).filter((m) => m && (all || !twinShown(m)) && m.value != null);
+  if (!rows.length) return "";
+  // Through the SAME accordion the X10A rows use, not a bare row of its own. A reading with no
+  // explainer is a naked number, and these were 25 of them: "3-way valve to DHW  1" tells a reader
+  // nothing about what 1 means or what it should be. The description audit guards the X10A catalog
+  // against exactly this and never saw these labels, so it stayed green while the card shipped.
+  // Copy comes from the one DESCRIPTIONS table (descFor), where 11 of the 27 gateway labels are
+  // already answered by the entries written for their X10A twins — the same words for the same
+  // quantity, which is the point of one table.
+  //
+  // No trend and no source comparison here: a trend is keyed on an X10A (reg, offset, unit) locator
+  // and these rows have none, and the comparison exists to put two sources side by side, which is
+  // meaningless on a row only one source carries. Where copy is missing the row degrades to the same
+  // plain line it was before, rather than an empty panel that opens onto nothing.
+  const html = rows.map((m) => {
+    const label = m.label || "", shown = displayReadingLabel(label);
+    const val = esc(displayValue(m)) +
+      (m.unit ? `<span class="vrow-unit">${esc(m.unit)}</span>` : "");
+    const d = descFor(label);
+    if (!d) {
+      return `<div class="vrow"><span class="vrow-label">${esc(shown)}</span>` +
+        `<span class="vrow-val src-val-mb">${val}</span></div>`;
+    }
+    return descAccordion(label, shown, val, "src-val-mb", descBodyHtml(d), null);
+  }).join("");
+  // The heading has to match what is IN the card: "Modbus only" is true of the unpaired handful and
+  // false the moment `all` folds the paired rows in beside them.
+  // Always just "Modbus" — the card is named after its SOURCE, not after how much of the
+  // catalog happens to be in it this cycle. "Modbus only" tried to say the second thing and
+  // was wrong half the time: with X10A down the paired rows fold in here too, so the card was
+  // titled "only" over readings that are anything but.
+  return vcard(t("group.Modbus"), html);
 }
 
 // ── Live system section (the interactive schematic) ──────────────────────────────────────────
@@ -2772,8 +3248,12 @@ function liveData() {
     roomSet: vNum(/^rt setpoint/i),
     dtSet: vNum(/target delta t heating/i),
     pumpSig: vNum(/water pump signal/i),
-    pumpOn: vOn(/water pump operation/i),
-    valveDhw: vOn(/3.?way valve/i),          // label documents On:DHW / Off:Space
+    pumpOn: stateOf(/water pump operation/i, 30),
+    // Through stateOf, like every other plant state: X10A while its link is live, else a live
+    // gateway, else nothing. Keyed on the EKRHH OFFSET, not a label — those offsets are the
+    // documented data model (§9.2.2) and are the one thing about a HomeHub row that cannot be
+    // re-spelled.
+    valveDhw: stateOf(/3.?way valve/i, 37),        // label documents On:DHW / Off:Space
     buh1: vOn(/buh step ?1/i),
     buh2: vOn(/buh step ?2/i),
     // Exact anchor is intentional: "Thermal protector BSH" is a different flag. BSH is the tank's
@@ -2790,7 +3270,7 @@ function liveData() {
     // test/test_logic.cpp pins each of the two labels to its one page, which is what makes matching
     // by label here unambiguous — if the generator ever emits page 0x10's own "Thermostat ON/OFF"
     // bit, that test fails and this selection has to become structural (keyed on reg, like ouPage).
-    spaceH: vOn(/^space heating operation/i),
+    spaceH: stateOf(/^space heating operation/i, 53),
     quiet: vOn(/low noise control|silent mode/i),
   };
   // Pump % — the wire value is inverted ("Water pump signal (0:max-100:stop)").
@@ -2896,6 +3376,71 @@ function liveData() {
   const running = (d.rps ?? 0) > 5 && (d.dt ?? 0) > 0.5;
   d.cop = running && d.copBlock == null && d.copPth != null && d.pel != null && d.pel > 0.2
     ? d.copPth / d.pel : null;
+
+  // ── X10A down: let the SECOND stack carry what it can ────────────────────────────────────────
+  // Only the quantities the HomeHub actually measures, resolved through the concept the firmware
+  // paired them on — never a guess, and never a stale X10A number left standing. Everything else
+  // stays null and blanks, which is the honest shape of this state: the HomeHub knows about a dozen
+  // registers where X10A knows a hundred, so the drawing becomes visibly sparse. `mbFields` records
+  // which pills are Modbus-sourced so renderLive can mark them.
+  if (x10aDown() && mbLive()) {
+    const num = (cid) => { const r = mbByConcept(cid); if (!r) return null;
+                           const n = parseFloat(r.value); return Number.isFinite(n) ? n : null; };
+    d.mbFields = new Set();
+    const take = (key, cid) => { const n = num(cid); if (n != null) { d[key] = n; d.mbFields.add(key); } };
+    // EVERY field this snapshot took from X10A is dropped, and it is a KEEP list rather than a drop
+    // list — that direction is the point. A drop list is a hand-maintained enumeration of things to
+    // forget, and it had already fallen behind the snapshot it was written against: `bsh`, `defrost`
+    // and `quiet` stayed exactly as the last X10A cycle left them, so a cable pulled mid-defrost
+    // latched the reversing animation and the heater glow onto a drawing whose data was minutes old
+    // — and `buh1`/`buh2` were set to `false`, which asserts "the backup heater is OFF" about a
+    // state nobody can currently read, where the honest value is "unknown". The paired MEASUREMENTS
+    // had the same hole from the other side: `take()` only assigns when the gateway answered, so a
+    // register it failed to read left the retained X10A number in place, live-looking.
+    //
+    // Written this way a field added to liveData() is dropped by DEFAULT, so the failure mode is a
+    // missing reading rather than a stale one presented as current.
+    //
+    // The three plant STATES survive, because they are no longer X10A values: stateOf() already
+    // refused the retained X10A bit and returned the gateway's (or nothing). Clearing them here is
+    // what used to blank the pump and the demand next to readings that were arriving.
+    const KEEP = new Set(["pumpOn", "valveDhw", "spaceH", "mbFields"]);
+    Object.keys(d).forEach((k) => { if (!KEEP.has(k)) d[k] = null; });
+    d.ouHeldOver = false;         // nothing to hold over: the whole bus is silent, not one unit
+    MB_PAIRS.forEach((p) => take(p.fld, p.cid));
+    // The HomeHub MEASURES the electrical input; X10A has no such row and the dashboard estimates it
+    // from CT clamps at an assumed 230 V. So on this path the figure is better than usual, and it is
+    // marked as measured rather than estimated.
+    //
+    // Addressed by its EKRHH OFFSET, never by its unit. THREE rows in the map carry "kW" — the
+    // measured consumption at input 51 and the two power-LIMIT setpoints at holding 57/58 — so a
+    // first-match on the unit promoted a configured ceiling to the plant's measured draw the moment
+    // 51 was unavailable or answered a sentinel. A limit is a number the installer typed; drawing it
+    // as a measurement is the #35-#39 shape wearing a plausible value, and the Modbus card would go
+    // on labelling it correctly one card below.
+    const pw = mbPower();
+    if (pw) { const n = parseFloat(pw.value);
+              if (Number.isFinite(n)) { d.pel = n; d.pelSrc = "MB"; d.mbFields.add("pel"); } }
+    // ΔT and heat output survive: both sides of each come from the gateway's own hydronic readings,
+    // so nothing is mixed across two boundaries.
+    d.dt = (d.lwt != null && d.ret != null) ? d.lwt - d.ret : null;
+    d.dtStale = !(d.flow != null && d.flow > 1);
+    d.pth = (!d.dtStale && d.flow != null && d.dt != null) ? d.flow / 60 * 4.186 * d.dt : null;
+    // THE COP DOES NOT. It looks like the same arithmetic and is not: the gateway's power is the
+    // WHOLE UNIT's, backup heater and immersion heater included, while d.pth is heat across the
+    // plate exchanger alone. That is precisely the boundary mismatch logic/cop_scope.hpp exists to
+    // refuse — a quotient of two correct numbers describing two different systems, which collapses
+    // exactly when a heater fires and reads as a failing heat pump while nothing is wrong. On the
+    // X10A path cop_scope decides it from the BUH/BSH states and the post-BUH row; the gateway map
+    // carries neither, so there is nothing to decide it WITH, and the honest answer is the one this
+    // firmware gives everywhere else: publish nothing (feature_gate.hpp — disable, never degrade).
+    // A circulation-only quotient would be the other half of the same problem.
+    d.cop = null;
+    d.copScope = null;
+    d.copBlock = "mb_scope";      // named, so the explainer says WHY rather than showing a bare "—"
+    d.copPostBuh = false;
+    ["dt", "pth"].forEach((k) => { if (d[k] != null) d.mbFields.add(k); });
+  }
   return d;
 }
 
@@ -2922,6 +3467,18 @@ function renderLive() {
   // snapshot and cannot disagree about whether the plant is running. The inspector reads it too, so
   // an open explainer follows the live values.
   const d = S.live;
+  // Mark every pill this cycle drew from the Modbus stack, and unmark the rest. Done in ONE pass over
+  // the known pill set rather than per setTxt, so a pill that stops being Modbus-sourced cannot keep
+  // the colour from a previous cycle.
+  const mbf = (d && d.mbFields) || new Set();
+  // The six paired pills come from MB_PAIRS; the four DERIVED ones have no register and so no
+  // concept — they are marked because their inputs were (liveData adds them to mbFields).
+  const MB_PILL = { ...Object.fromEntries(MB_PAIRS.map((p) => [p.fld, p.pill])),
+                    pel: "svPel", dt: "svDt", pth: "svPth", cop: "svCop" };
+  Object.keys(MB_PILL).forEach((k) => {
+    const el = $(MB_PILL[k]);
+    if (el && el.closest("text")) el.closest("text").classList.toggle("sc-mb", mbf.has(k));
+  });
   // Nothing hides when the link drops: the schematic carries the status block (mode / fault /
   // "no data"), which is exactly what must survive a dead bus. Every pill blanks to "—" and every
   // animation stops instead, so the drawing shows an idle plant with no readings, not a stale one.
@@ -2964,8 +3521,13 @@ function renderLive() {
   // only, not the 24-hour curve (DERIVED.pth): there a flat zero is the honest shape of a day that
   // delivered nothing, and a gap would be indistinguishable from missing data.
   setTxt("svPth", d.dtStale ? "—" : fmt1(d.pth));   // derived — the pill carries "≈" + an "est." sub-label
-  const toDhw = d.valveDhw === true;
-  setTxt("svValve", t(toDhw ? "schem.to_dhw" : "schem.to_heat"));
+  // THREE-VALUED, and that is the whole fix. `d.valveDhw === true` collapsed "I cannot read the
+  // valve" into "heating", which is a positive claim: with X10A silent during a DHW run the drawing
+  // routed the water round the radiators while the plant was charging the tank (compared against the
+  // live X10A board, which showed the diverter on the tank in the same minute). Unknown now prints
+  // the bare "3WV" that clearSchematic() already uses and animates NEITHER branch.
+  const toDhw = d.valveDhw;                       // true | false | null(unknown)
+  setTxt("svValve", toDhw == null ? "3WV" : t(toDhw ? "schem.to_dhw" : "schem.to_heat"));
 
   // Schematic state classes drive the CSS animations (flows, fan, pump, BUH glow, defrost)
   const sc = $("schem");
@@ -2984,8 +3546,11 @@ function renderLive() {
   sc.classList.toggle("no-spaceh", d.spaceH == null);
   const onCls = (id, on) => $(id).classList.toggle("on", !!on);
   onCls("fSup1", pumping); onCls("fSup2", pumping); onCls("fSup3", pumping); onCls("fRet", pumping);
-  onCls("fTank", pumping && toDhw); onCls("fCoil", pumping && toDhw); onCls("fTankRet", pumping && toDhw);
-  onCls("fHeat", pumping && !toDhw); onCls("fHeatRet", pumping && !toDhw);
+  // Each branch needs the valve to SAY so — `!toDhw` was true for an unknown valve, which is how the
+  // heating branch came to animate on no evidence at all.
+  const dhwPath = pumping && toDhw === true, heatPath = pumping && toDhw === false;
+  onCls("fTank", dhwPath); onCls("fCoil", dhwPath); onCls("fTankRet", dhwPath);
+  onCls("fHeat", heatPath); onCls("fHeatRet", heatPath);
   onCls("rfHot", rpsOn); onCls("rfCold", rpsOn);
   $("rfHot").classList.toggle("rev", d.defrost === true);   // defrost reverses the refrigerant loop
   $("rfCold").classList.toggle("rev", d.defrost === true);
@@ -3452,6 +4017,29 @@ const INSPECT = {
 const pickRow = (sel) => (typeof sel === "function" ? sel() : vRow(sel));
 const inspRow = (e) => (e.pick ? e.pick() : e.re ? vRow(e.re) : null);
 
+// The X10A row this target may present as a CURRENT reading: the row while the bus answers, null
+// once it does not. The cache is deliberately KEPT when the link drops, so `inspRow` finding a row
+// says nothing about whether that row is still being measured — and the panel treated "a row
+// exists" as "the drawing is on X10A", which is how tapping a pill that had already switched to the
+// gateway opened a headline carrying the old X10A number under the X10A label, with X10A history
+// beneath it. The pill and the panel must answer with the same instrument; this is the question
+// that decides which one.
+const inspCurRow = (e) => (x10aDown() ? null : inspRow(e));
+
+// One member reading, resolved for BOTH the body and the change signature. Returns the pair the
+// panel draws: the X10A row where it is current, and the gateway's row beside it (its second
+// opinion) or in its place (while X10A is silent). Written once because the signature is what
+// decides whether the body repaints — a body that renders something the signature cannot see stops
+// updating and shows a value from whenever something else last moved, looking perfectly current.
+function inspMember(sel) {
+  const r = pickRow(sel);
+  // X10A down: the retained row is not a reading any more. The gateway stands in where it carries
+  // the same quantity (mbFallbackFor — the helper whose whole job is that substitution) and the
+  // member simply disappears where it does not, rather than printing a stale number under its label.
+  if (x10aDown()) return { x10a: null, mb: r ? mbFallbackFor(r.concept) : null };
+  return { x10a: r, mb: mbTwin(r) };
+}
+
 // The reading of a /values row as one string ("42.8 °C"); "—" for an absent row — and "—" for a row
 // the outdoor unit has stopped refreshing (rowHeldOver / logic/ou_stale.hpp), which is the SAME
 // answer the pill gives. The panel used to read every row straight off /values, so tapping a pill
@@ -3500,11 +4088,22 @@ const inspTitleText = (e, d) => tx(typeof e.t === "function" ? e.t(d) : e.t);
 function inspectSig(e) {
   if (!e) return "";
   const d = S.live;
-  const row = d ? inspRow(e) : null;
-  const rows = (d && e.rows ? e.rows.map((sel) => inspVal(pickRow(sel), d)) : []).join(",");
+  const row = d ? inspCurRow(e) : null;
+  // Each member reading AND its Modbus twin: the panel now draws both, so both have to be in the
+  // key. A value the body renders but the signature omits simply stops repainting — the mirror of
+  // putting a side effect IN here, and the quieter of the two failures: the panel keeps showing the
+  // gateway's reading from whenever something else last changed, looking perfectly current.
+  const rows = (d && e.rows ? e.rows.map((sel) => {
+    const m = inspMember(sel);
+    return inspVal(m.x10a, d) + (m.mb ? "/" + m.mb.value : "");
+  }) : []).join(",");
+  const twin = mbTwin(row);
+  // The fallback headline is a value like any other and moves like any other, so it is in the key.
+  const fb = row ? null : mbForInspect(S.insp);
   // LANG guarantees the full body is redrawn even when this particular entry's title/live sentence
   // happens to be spelled identically in both dictionaries.
-  return [LANG, S.insp, inspTitleText(e, d), inspVal(row, d), d && e.head ? e.head(d) : "",
+  return [LANG, S.insp, inspTitleText(e, d), inspVal(row, d), twin ? twin.value : "",
+          fb ? fb.value : "", d && e.head ? e.head(d) : "",
           inspNowText(e, d) || "", inspHeld(e, d) ? "held" : "", rows].join("|");
 }
 
@@ -3563,21 +4162,43 @@ function renderInspect() {
   $("inspCard").hidden = !e;
   document.querySelectorAll("#schem .sc-hit").forEach((el) => el.classList.toggle("sel", el.dataset.insp === S.insp));
   if (!e) return;
-  const d = S.live;                       // null while the X10A link is down → readings show "—"
-  const row = d ? inspRow(e) : null;
+  // `d` is the drawing's snapshot and is NOT null merely because X10A is silent — liveData() still
+  // builds one from the gateway when it is delivering, which is what makes the fallback a drawing
+  // rather than a blank card. So "is there a snapshot" and "is the X10A row current" are two
+  // questions, and inspCurRow asks the second one.
+  const d = S.live;
+  const row = d ? inspCurRow(e) : null;
+  // The gateway's reading of this target while X10A is silent — null in normal operation, so
+  // everything below is the panel it always was unless the drawing itself has switched source.
+  const fb = row ? null : mbForInspect(S.insp);
   setTxt("inspTitle", inspTitleText(e, d));
-  // The source line names the /values row this pill is drawn from, so a number in the picture can be
-  // traced to the register list below. Falls back to the canonical label when the row is absent.
-  setTxt("inspSrc", displayReadingLabel(row ? row.label : (e.sample || "")));
-  $("inspSrc").hidden = !(row || e.sample);
+  // The source line names the reading's origin, so a number in the picture can be traced to the row
+  // it came from. On the fallback it names the MODBUS row — the X10A label would credit the wrong
+  // instrument for the number shown above it, which is the one thing this line exists to prevent.
+  // On the fallback the line carries the BADGE as well as the petrol ink. Colour alone was the only
+  // thing saying "this came from the gateway" in the whole panel, which is both weaker than a word
+  // and invisible to anyone who cannot separate the two hues — DESIGN.md's own rule is that colour
+  // never carries a fact by itself. Everywhere else the badge already appears beside a gateway
+  // reading; this was the one place it did not.
+  const srcName = displayReadingLabel(row ? row.label : fb ? fb.label : (e.sample || ""));
+  $("inspSrc").innerHTML = esc(srcName) +
+    (fb ? ` <span class="mb-tag">${esc(t("src.modbus_tag"))}</span>` : "");
+  $("inspSrc").hidden = !(row || fb || e.sample);
+  $("inspSrc").classList.toggle("src-val-mb", !!fb);
   // Headline = the ONE compact reading this target stands for (its row, or a derived `head` for the
   // computed pills). An assembly like the outdoor unit has no single number, so it gets no headline
   // at all rather than a "—" that would read as a missing value.
-  const hasHead = !!(e.re || e.pick || e.head);
+  const hasHead = !!(e.re || e.pick || e.head || fb);
   $("inspNow").hidden = !hasHead;
   // An explicit formatter wins over the raw row value. Binary component states use this to say
-  // ON/OFF instead of exposing an unexplained 1/0, while the row still names the source.
-  if (hasHead) setTxt("inspNow", d && e.head ? e.head(d) : (row ? inspVal(row, d) : "—"));
+  // ON/OFF instead of exposing an unexplained 1/0, while the row still names the source. With no
+  // X10A row but a gateway reading, the headline is THAT reading, petrol — the pill above is
+  // showing it, and a panel answering "—" underneath would deny the number the user just tapped.
+  if (hasHead) setTxt("inspNow", d && e.head ? e.head(d)
+                               : row ? inspVal(row, d)
+                               : fb ? displayValue(fb) + (fb.unit ? " " + fb.unit : "")
+                               : "—");
+  $("inspNow").classList.toggle("src-val-mb", !!fb && !(d && e.head));
   // `now` is always prose — the live "what is it doing" sentence — and it CLOSES the body, as its
   // own paragraph after the timeless explainer and its "Normal:" note, in the body's own ink. It
   // used to open the body in bold, which inverted the panel: a reader opens an explainer BECAUSE
@@ -3589,11 +4210,40 @@ function renderInspect() {
   const sentence = inspNowText(e, d);
   const desc = e.sample ? descFor(e.sample) : null;
   const what = e.what ? descParaHtml(esc(tx(e.what))) : (desc ? descBodyHtml(desc) : "");
-  $("inspBody").innerHTML = what + (sentence ? descParaHtml(esc(sentence)) : "") + inspHeldHtml(e, d);
+  // The SECOND source, after the description — the same line the value list draws, through the same
+  // mbNoteHtml, because a tap on the drawing and a tap on the row are the same question about the
+  // same reading and must not answer it in two different shapes. The DRAWING itself stays X10A while
+  // X10A answers (renderLive marks a pill petrol only in the fallback); what the picture cannot show
+  // — that a second instrument is measuring this quantity too, and what it reads — is the
+  // explainer's job. Absent twin, or a device with no HomeHub: "" and the panel is what it was.
+  $("inspBody").innerHTML = what + mbNoteHtml(row, mbTwin(row))
+    + (sentence ? descParaHtml(esc(sentence)) : "") + inspHeldHtml(e, d);
   $("inspRows").innerHTML = !d || !e.rows ? "" : e.rows
-    .map((sel) => pickRow(sel))
-    .filter((r, i, a) => r && a.indexOf(r) === i)     // a regex may hit a row an earlier one took
-    .map((r) => `<div class="inspect-row"><span>${esc(displayReadingLabel(r.label))}</span><span>${esc(inspVal(r, d))}</span></div>`)
+    .map((sel) => inspMember(sel))
+    // A regex may hit a row an earlier selector already took. De-duplicated on whichever side is
+    // present, so the fallback (where every `x10a` is null by construction) still collapses its own
+    // repeats instead of listing one gateway reading several times.
+    .filter((m, i, a) => (m.x10a || m.mb) &&
+                         a.findIndex((o) => (m.x10a ? o.x10a === m.x10a : o.x10a == null && o.mb === m.mb)) === i)
+    // A member reading with a twin gets the gateway's value as its OWN row, labelled "(Modbus)" and
+    // petrol throughout — never appended to the X10A value in the same cell, which is what this did
+    // first and which rendered as "46.2 °C 46.0 °C": two numbers of equal weight, jammed together,
+    // with nothing saying that they come from different instruments or which is which. A reading is
+    // a label and a value; a second reading needs both, not a second number in the first one's slot.
+    .map((m) => {
+      const row = m.x10a
+        ? `<div class="inspect-row"><span>${esc(displayReadingLabel(m.x10a.label))}</span>` +
+          `<span>${esc(inspVal(m.x10a, d))}</span></div>`
+        : "";
+      if (!m.mb) return row;
+      // The gateway's OWN label, like the explainer line — it names the register the number came
+      // from, which is what someone checking the pairing against real hardware needs to read.
+      return row +
+        `<div class="inspect-row mb-row">` +
+          `<span>${esc(displayReadingLabel(m.mb.label || ""))} ` +
+            `<span class="mb-tag">${esc(t("src.modbus_tag"))}</span></span>` +
+          `<span>${esc(displayValue(m.mb))}${m.mb.unit ? " " + esc(m.mb.unit) : ""}</span></div>`;
+    })
     .join("");
 }
 
@@ -3731,6 +4381,25 @@ function openNtp() {
   $("ntpServer").focus();
 }
 function closeNtp() { $("ntpModal").hidden = true; }
+
+// ── HomeHub / Modbus TCP (edit modal) ──────────────────────────────────────
+// Host, port and unit id of the Daikin HomeHub. The host field is prefilled from what the device is
+// ACTUALLY using (/status.modbus.host — the configured host, or the one mDNS discovered), so leaving
+// it as-is re-saves what is on screen. Clearing it hands the hub back to auto-discovery.
+function fillHomehub() {
+  const mb = S.status?.modbus || {};
+  $("hhHost").value = mb.host || "";
+  $("hhPort").value = mb.port || 502;
+  $("hhUnit").value = mb.unit_id || 1;
+}
+function openHomehub() {
+  fillHomehub();
+  for (const id of ["hhHost", "hhPort", "hhUnit"]) $(id).classList.remove("invalid");
+  $("hhError").hidden = true;
+  $("homehubModal").hidden = false;
+  $("hhHost").focus();
+}
+function closeHomehub() { $("homehubModal").hidden = true; }
 
 // ── Board hardware (dashboard edit modal) ───────────────────────────────────
 // Fills the two pin dropdowns from /status.board.pins_local — a WIDER list than the RX/TX picker's
@@ -4462,6 +5131,10 @@ function wireRestOfApp() {
     else if (edit.dataset.edit === "mqtt") openMqtt();
     else if (edit.dataset.edit === "syslog") openSyslog();
     else if (edit.dataset.edit === "ntp") openNtp();
+    // The Modbus row. It had no branch here at all: the row posts data-edit (like every other row in
+    // this tile) while the only "homehub" handler listened for data-act on the separate card, so the
+    // pencil opened nothing and the address could not be edited from the tile the row lives in.
+    else if (edit.dataset.edit === "homehub") openHomehub();
   });
   // Crash banner: Copy diagnostics / Delete report (ask → del | keep). The download link is a plain
   // <a download> (no handler). The delete is keyed on the SIGNATURE the banner was drawn with, so a
@@ -4637,6 +5310,36 @@ function wireRestOfApp() {
       then: renderApp,
       busyMsg: t("toast.saving_ntp"),
     });
+  });
+
+  // HomeHub modal. Saves LIVE via /set_hp (no reboot) rather than through saveReboot(): switching the
+  // pump link is the one config change the poll engine picks up at the top of its next cycle, exactly
+  // like the RX/TX pin picker it sits beside. Port/unit are range-checked here so a typo is an inline
+  // field error instead of a round-trip; the device validates them again (logic/config_model.hpp).
+  for (const id of ["hhHost", "hhPort", "hhUnit"])
+    $(id).addEventListener("input", () => { $(id).classList.remove("invalid"); $("hhError").hidden = true; });
+  $("hhCancel").onclick = closeHomehub;
+  $("homehubBackdrop").onclick = closeHomehub;
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("homehubModal").hidden) closeHomehub(); });
+  $("homehubForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const bad = (id, msg) => {
+      $(id).classList.add("invalid");
+      $("hhError").textContent = msg;
+      $("hhError").hidden = false;
+      toast(msg, "err");
+    };
+    const host = $("hhHost").value.trim();          // empty = hand it back to mDNS auto-discovery
+    const port = +($("hhPort").value.trim() || 502);
+    const unit = +($("hhUnit").value.trim() || 1);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return bad("hhPort", t("hh.err_port"));
+    if (!Number.isInteger(unit) || unit < 1 || unit > 247)   return bad("hhUnit", t("hh.err_unit"));
+    setBusy("hhBtn", true);
+    const ok = await applyLive({ mb_host: host, mb_port: port, mb_unit_id: unit }, t("hh.saved"));
+    setBusy("hhBtn", false);
+    if (!ok) return;
+    closeHomehub();
+    await refreshStatus();
   });
 
   $("bdCancel").onclick = closeBoard;

@@ -225,7 +225,7 @@ User credentials + the X10A link cache are persisted; the model is re-detected o
 
 | NVS key | Meaning |
 |---------|---------|
-| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + the one-shot rollback backup + flags, MQTT (`uri`/`user`/`pass`), syslog (host/port; empty host = off), the SNTP server (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` default on next boot), from blob **v2** the **board-local hardware** (`led_gpio`/`led_type`/`led_inverted`/`btn_gpio`/`btn_active_low`, written by `/set_board`), from blob **v3** the **OTA update channel** (`ota_channel`, `POST /set_ota`) and from blob **v4** the **UI-language override** (`ui_lang`, `POST /set_lang` — the UI is browser-detected by default and this field is absent/"auto" until the user picks one). One CRC-checked entry written with a single `nvs_set_blob`, so a save is **all-or-nothing** across a write failure *and* a power cut. An OLDER blob is still accepted on read: fields a newer version added simply fall back to their default (Kconfig for the board block, since it was compile-time before v2; "release"/"auto" for the channel/language, since those states were the only ones that existed before v3/v4) — rejecting an older blob would drop the user's WiFi/MQTT credentials on that OTA. WiFi rollback: the previous credentials are backed up here by `/set_wifi` and restored automatically if the new network fails to connect (reason-aware deadline, `logic/wifi_rollback.hpp`); `/status.wifi.rolled_back` reports it after the reboot. |
+| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + the one-shot rollback backup + flags, MQTT (`uri`/`user`/`pass`), syslog (host/port; empty host = off), the SNTP server (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` default on next boot), from blob **v2** the **board-local hardware** (`led_gpio`/`led_type`/`led_inverted`/`btn_gpio`/`btn_active_low`, written by `/set_board`), from blob **v3** the **OTA update channel** (`ota_channel`, `POST /set_ota`) from blob **v4** the **UI-language override** (`ui_lang`, `POST /set_lang` — the UI is browser-detected by default and this field is absent/"auto" until the user picks one) and from blob **v5** the **HomeHub Modbus stack** (`mb_host` — empty = none entered — `mb_port`, `mb_unit_id`, `actuation_enabled`, `POST /set_hp`; there is NO enable flag, the ADDRESS is the switch; a SECOND source, not an alternative transport — see [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)). One CRC-checked entry written with a single `nvs_set_blob`, so a save is **all-or-nothing** across a write failure *and* a power cut. An OLDER blob is still accepted on read: fields a newer version added simply fall back to their default (Kconfig for the board block, since it was compile-time before v2; "release"/"auto"/no-HomeHub for the channel, language and Modbus stack, since those states were the only ones that existed before v3/v4/v5) — rejecting an older blob would drop the user's WiFi/MQTT credentials on that OTA. WiFi rollback: the previous credentials are backed up here by `/set_wifi` and restored automatically if the new network fails to connect (reason-aware deadline, `logic/wifi_rollback.hpp`); `/status.wifi.rolled_back` reports it after the reboot. |
 | *(legacy per-key)* | `wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback`/`wifi_rolledbk`/`mqtt_*`/`syslog_*`/`ntp_server` — the pre-blob layout, still **read** as a fallback when `cfg` is absent (fresh device / OTA from an older build); superseded on the next save. |
 | `rx_pin` / `tx_pin` / `proto` | X10A link cache (physical wiring + framing) — kept as separate self-healing keys, tried first by the sweep, re-saved on change, re-validated on load. |
 | `board_set` | Has the user **stated** the board hardware, or are the five values in `cfg` merely this build's defaults? They cannot say on their own — the Kconfig defaults *equal* the XIAO preset — and the web UI needs the difference to name the board in its Hardware modal instead of opening on "Custom" beside the very preset that was just saved. Set by `POST /set_board` (the submit *is* the statement), revoked with the values if `config_load` rejects them, and reported as `/status.board.user_set`. Outside the blob although it has one writer: the flag never *names* a board — the UI derives that from the live values — so a drifted flag cannot produce a wrong name, only the "Custom" it already falls back to, and a blob version bump would have to be read by every older build. |
@@ -254,9 +254,11 @@ LAN only, see [SECURITY.md](SECURITY.md).
 
 ```
 GET  /  (alias /index.html)        # embedded web UI (gzipped into the app binary)
-GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this payload: the seven
+GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this payload: the eight
                                    #   reporter-identifying values (wifi.ssid/ip/bssid/mac,
-                                   #   mqtt.broker, syslog.host, ntp.server) read "<redacted>"
+                                   #   mqtt.broker, syslog.host, ntp.server, modbus.host — the last
+                                   #   a LAN address and, on an auto-discovered HomeHub, its
+                                   #   serial-derived name) read "<redacted>"
                                    #   (logic/redact.hpp). The KEY is always emitted — an omitted
                                    #   field is indistinguishable from an older build, and "which
                                    #   build produced this?" is the first question a frozen report
@@ -282,6 +284,14 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #   hp:{proto,rx,tx,connected,last_ok_s,
                                    #        registers,values,crc_err,timeout_err},
                                    #   profile:{id},
+                                   #   modbus:{enabled,connected,discovering,host,port,unit_id,rx,
+                                   #           fails,values,actuation_enabled,error?},
+                                   #        # the HomeHub link's READ-ONLY diagnostics. host is the
+                                   #        RESOLVED / mDNS-discovered host, not the requested one —
+                                   #        with mb_host empty the device finds the hub itself, and
+                                   #        the UI must show what it FOUND. No write counters: the
+                                   #        link has none. actuation_enabled is reported straight
+                                   #        from config and gates nothing today (P3).
                                    #   history:{dt,rows:[{id,label}]},   # rows with a 24 h trend;
                                    #        id = the concept (what /history takes), label = how the
                                    #        detected profile spells it. Absent rows are omitted.
@@ -394,9 +404,15 @@ POST /set_ntp                      # { server } → persist + reboot, no request
                                    #   SNTP client resolves + retries after reboot, same as syslog); an
                                    #   empty server resets to the compile-time default on next boot —
                                    #   SNTP has no disabled state, unlike syslog's empty-means-off.
-POST /set_hp                       # { profile?, rx?, tx? } → apply live (no reboot); rx/tx PERSIST
-                                   #   (pin cache), profile session-only; proto auto-detected, not accepted.
+POST /set_hp                       # { profile?, rx?, tx?, mb_host?, mb_port?,
+                                   #     mb_unit_id?, actuation_enabled? } → apply live (no reboot).
+                                   #   Every key optional; an omitted one keeps its stored value.
+                                   #   rx/tx PERSIST (pin cache), profile session-only; proto auto-detected.
                                    #   The Settings Protocol card's pin dropdown posts {profile:"auto",rx,tx} to re-detect.
+                                   #   the address starts/stops the SECOND, independent Modbus
+                                   #   stack — it does NOT stop the X10A poll. mb_host "" = mDNS
+                                   #   auto-discovery; mb_port 1..65535, mb_unit_id 1..247. All persist
+                                   #   in the atomic blob (v5) and apply live — docs/MODBUS_PROTOCOL.md.
 POST /set_board                    # { led_gpio, led_type, led_inverted, btn_gpio, btn_active_low }
                                    #   → validate + persist + REBOOT (both are claimed once at task
                                    #   start, so they are not hot-swapped). The board's own onboard
@@ -550,8 +566,12 @@ Full threat model + Flash Encryption / Secure Boot notes: [SECURITY.md](SECURITY
 - The API has **no auth / TLS** by design (trusted LAN only) — never expose it to the internet.
 - WiFi/MQTT credentials live in NVS **unencrypted** by default; enable Flash + NVS Encryption
   (irreversible) if physical access is a concern.
-- The heat-pump link is **read-only** — the firmware polls the X10A bus and never actuates the
-  unit, so there are no control outputs at all.
+- The heat-pump link is **read-only** — the firmware polls and never actuates the unit, so there are
+  no control outputs at all. On X10A that is the protocol's own doing (it has no write command); on
+  the optional HomeHub **Modbus TCP** link the wire *would* allow a write and it is read-only **by
+  design** — no write function, no MQTT command topic, no writable entity, no HTTP write route
+  ([MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md), [SECURITY.md](SECURITY.md)). That link's own `:502` is
+  unencrypted and has no Modbus-level credential, so segment or firewall the HomeHub to this device.
 
 ---
 

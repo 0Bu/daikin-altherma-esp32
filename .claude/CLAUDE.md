@@ -15,7 +15,11 @@ Builds for the **esp32s3** target only.
 > [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) — read it on demand. The X10A wire protocol
 > (framing, checksum, register pages, detection) is in
 > [`docs/X10A_PROTOCOL.md`](../docs/X10A_PROTOCOL.md), and the converter-id/enum tables plus a full
-> register map in [`docs/REGISTERS.md`](../docs/REGISTERS.md). A cross-cutting catalog of the
+> register map in [`docs/REGISTERS.md`](../docs/REGISTERS.md). The OPTIONAL second SOURCE — the
+> READ-ONLY Modbus TCP link to a Daikin HomeHub (EKRHH), its mDNS discovery and its register map — is
+> [`docs/MODBUS_PROTOCOL.md`](../docs/MODBUS_PROTOCOL.md). It is a SECOND SOURCE, not an alternative
+> transport: both stacks run at once, independently, and a device without a HomeHub runs no Modbus
+> task at all. A cross-cutting catalog of the
 > platform features this firmware implements (Secure Boot v2 signing, OTA + health gate,
 > ESP-IDF component inventory, diagnostics) is [`docs/FEATURES.md`](../docs/FEATURES.md) — keep it
 > current with the `feature-docs` skill when a technical feature lands or changes. The MQTT/HA entity
@@ -130,7 +134,15 @@ redacting three sections above it. `tools/redact/audit_exceptions.txt` is its le
 `tools/redact/selftest.sh` re-seeds both defects it was built for.
 
 The SIXTH guards the README's RECORDING of that drawing — `docs/media/dashboard.gif`, the animated
-dashboard a new user sees before anything else. It is the one artefact here that rots INVISIBLY: a
+dashboard a new user sees before anything else. It is the ONLY one of these that is NOT a CI step
+and NOT a merge condition, and the reason is a property of its remedy rather than of its subject:
+the only fix it can ever ask for is a LOCAL re-record (Chrome + ffmpeg, ~5 min), which no runner and
+no cloud session can perform. A gate whose fix is unavailable where it fires does not get the
+recording re-made — it gets the STAMP re-written to clear the red, which is strictly worse than not
+checking at all, because the GIF then carries a stamp asserting it is current. So it is run ON
+DEMAND by the `/ui-gif` skill, which audits, re-records and re-stamps in one place on a machine that
+can do all three. Everything below describes what the check still DOES when that skill runs it. It
+is the one artefact here that rots INVISIBLY: a
 recording renders perfectly forever, whatever the UI has since become, so all four gates above stay
 green while the README shows last month's pipes or a component that no longer exists. A screenshot
 cannot fail a test; it can only be out of date, and it looks exactly as good either way. CI has no
@@ -208,7 +220,7 @@ subscript is bounds-checked; structs carry NSDMIs) — and the defects this proj
 fixes for are domain and resource-budget defects, which are not in a linter's language. So there is
 deliberately no `.clang-tidy` file either: an inert config reads like a guarantee while doing nothing.
 What that survey DID find was the opposite gap. `main/logic/` was never the exposed half — it has
-`-Wall -Wextra -Werror`, 6300+ lines of host tests and seven audits. `main/*.cpp` was: 27 files where
+`-Wall -Wextra -Werror`, 6300+ lines of host tests and seven audits. `main/*.cpp` was: 28 files where
 every shipped crash happened, carrying no warning policy of its own while THREE comments in it
 (`nvs_storage.hpp`'s `[[nodiscard]]`, `hp_comm.cpp`'s unreachable return, `logic/timestamp.hpp`'s
 `%d` cast) were written as though a warning class were fatal. What that half lacked was not an
@@ -218,9 +230,12 @@ costs no CI minute: the firmware `build` job is the only compile of `main/*.cpp`
 `scripts/run-mock-tests.sh` cannot see the format case (`int32_t` is `long int` on xtensa, plain
 `int` on the host).
 
-Every one of them is a STEP of CI's single `gates` job, which the firmware `build` job `needs` — not
+Every one of them EXCEPT the recording check is a STEP of CI's single `gates` job, which the firmware
+`build` job `needs` — not
 a job each (the version gate itself runs inside `build`, where the stamped version exists; only its
-tests are a `gates` step). Count them with
+tests are a `gates` step). The recording is the stated exception: `run-ui-gif-audit.sh` and
+`tools/uigif/selftest.sh` are NOT steps, because their only remedy is a local re-record CI cannot
+perform, so enforcing them would buy re-stamping rather than re-recording. Count them with
 `grep -c 'run: \./\(scripts\|tools\)/' .github/workflows/build.yml` rather than trusting a number
 written here, which drifts the moment one is added. Actions bills every JOB rounded up to a whole
 minute, so N ~15 s jobs cost N billed minutes for well under one minute of work. The same budget rule shapes the rest of
@@ -477,11 +492,41 @@ hp_detect.cpp   auto-detect glue: protocol sweep + page probe -> fingerprint -> 
                 measurement, no compressor speed, no pressures), so there is no page it is safe to
                 drop. The retry is paid only on failure; a page that answers costs one query as
                 before, and the protocol/pins are already proven by the time step 2 runs (#214)
-hp_poll.cpp     poll engine task: (auto-detect if profile=="auto") profile registers -> query ->
-                decode -> thread-safe cache. It PUBLISHES to no client — the /events WebSocket
-                broadcaster that used to end each cycle here is GONE, and with it the /status builder
-                it ran on this task (#241; docs/ARCHITECTURE.md "Push vs. poll"). The browser polls
-                /status + /values instead. Subscribed to the
+hp_modbus.cpp   THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT source of readings beside the X10A
+                one (issue #32): its OWN task, cache and link state, sharing nothing with hp_poll.cpp
+                but the heat pump it describes. There is no "which transport" selector and never was
+                one that survived review: the two links fail for unrelated reasons (X10A at the cable,
+                the pin or the framing; Modbus at the LAN, mDNS or the hub), so coupling them lets
+                either failure mask the other. Pull the service cable and the HomeHub keeps reporting;
+                lose the LAN and X10A keeps polling.
+                Gated on the configured ADDRESS alone (manual mb_host, else the one-shot discovery's mb_dhost),
+                and the gate is literal: no address means no
+                task, no socket, no mDNS traffic and no stack — which is what let hp_poll give back
+                the 4 KB an earlier revision took from it (the getaddrinfo/mDNS/socket call chain now
+                lives on the task that makes those calls; syslog.cpp measured that same chain at 6144,
+                which is this task's size). Disabling it live retires the task: it checks the flag at
+                the top of its cycle and deletes itself, so the socket keeps exactly one owner.
+                A lwIP socket around the pure logic/modbus.hpp framing: MBAP send/recv, request-BOUND
+                parse (txn/unit/qty), a whole-reply deadline (a per-call SO_RCVTIMEO does not bound a
+                peer trickling one byte per timeout, and this task is watchdog-subscribed) and a socket
+                DROPPED on any framing/desync error so the next cycle reconnects. mDNS auto-discovery
+                when mb_host is empty: browse _http._tcp (what the hub advertises, EKRHH §2.5), filter
+                is_homehub_hostname — MANDATORY, since this firmware answers that same browse — then
+                connect :502. A failed connect BACKS OFF through the X10A sweep's own host-tested
+                logic/detect_backoff.hpp: a browse with no hub on the LAN blocks ~3 s, so a 1 Hz retry
+                would leave the task permanently blocked and the LAN permanently browsed.
+                READ-ONLY BY DESIGN and that is the whole stance of #32: no write function, no MQTT
+                command topic, no writable HA entity, no HTTP route that can set a pump register
+                (grep-verifiable). The wire WOULD allow a write (unlike X10A, which has no write
+                command) — the restraint is the firmware's. config actuation_enabled is persisted,
+                defaults false, and gates nothing today because nothing writes. docs/MODBUS_PROTOCOL.md
+hp_poll.cpp     poll engine task: X10A ONLY — the HomeHub is a separate stack in hp_modbus.cpp with
+                its own task and cache, so nothing here branches on a transport and this task's 8192
+                stack is the one it ran on for months. (auto-detect if profile=="auto") profile
+                registers -> query -> decode -> thread-safe cache. It PUBLISHES to no client — the
+                /events WebSocket broadcaster that used to end each cycle here is GONE, and with it
+                the /status builder it ran on this task (#241; docs/ARCHITECTURE.md "Push vs. poll").
+                The browser polls /status + /values instead. Subscribed to the
                 Task Watchdog (esp_task_wdt_add): reset per cycle + once per register in the sweep, so
                 a wedged X10A read reboots cleanly (reset reason task_wdt) instead of hanging silently.
                 On a SILENT bus the auto-detect sweep BACKS OFF (logic/detect_backoff.hpp): full 1s
@@ -821,7 +866,7 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 a dismissal on a fault boot that never wrote a dump — which is most of them
 logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, registers, value_def,
                 config_model,
-                config_store, discovery, ha_device, detect, history, json, mqtt_group, mqtt_uri, heartbeat, crashinfo,
+                config_store, discovery, ha_device, detect, history, json, mqtt_group, mqtt_uri, homehub_map, heartbeat, crashinfo,
                 bootlog, reset_reason, boot_guard, board_pins, board_presets, modbus, syslog_policy, link_watch,
                 wifi_rollback, health_gate, version_cmp, ota_manifest, ota_channel, ui_lang,
                 http_body, http_surface, query_flag, redact, mcp_jsonrpc, timestamp, uart_plan, detect_backoff,
@@ -996,7 +1041,7 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 docs/REPORTING.md). In the DEVICE rather than in www/app.js because the browser
                 button, the curl fallback in the guide and anything later all need one answer, and
                 the copy that silently stops covering a newly-added field is the one that leaks it.
-                Two shapes, because the routes leak differently: /status leaks by FIELD (seven named
+                Two shapes, because the routes leak differently: /status leaks by FIELD (eight named
                 values, substituted where each is WRITTEN — a post-processing pass over the finished
                 JSON is what the httpd stack budget has no room for), /diag leaks by LINE, which is
                 the non-trivial half the CHECKs are about. It FAILS CLOSED: a rule whose end token is
@@ -1453,8 +1498,32 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 axes, that the two pin dropdowns now apply. Says nothing about which board
                 this IS (unknowable); picking one is the USER stating the hardware;
                 modbus.hpp = Modbus TCP framing (MBAP, no CRC) + HomeHub register codecs
-                (Temp16/Pow16/Int16/Text16 decode+encode) + the homehub-* mDNS filter — host-tested
-                core for the PLANNED firmware-exclusive HomeHub Modbus link (issue #32), not yet wired.
+                (Temp16/Pow16/Int16/Text16 decode+encode) + the homehub-* mDNS filter — the
+                host-tested core of the firmware-exclusive HomeHub Modbus link (issue #32). WIRED as
+                of P1/P2: hp_modbus.cpp is the socket around it and def/homehub.hpp the register map.
+                Its FC06/FC16 WRITE builders are still called by NOTHING — the link reads only, and
+                the actuation path (P3) is not built.
+                homehub_map.hpp = WHICH X10A ROW A HOMEHUB REGISTER IS THE SAME QUANTITY AS — the
+                ENTIRETY of the sharing between the two otherwise-independent stacks, and the reason
+                the web UI can print a Modbus reading beside its X10A twin and let it stand in when
+                the X10A bus is silent. The pairing may NEVER be made on the LABEL: the catalog spells
+                one quantity many ways across the 43 profiles (four spellings of leaving water, one
+                with a DOUBLE space) and REUSES tags across different quantities ("(R1T)" is both the
+                outdoor air sensor on 0x20 and the indoor leaving-water sensor), so a label match is
+                both incomplete and wrong — the lwt_select/ou_stale mistake. It is worst in the
+                FALLBACK case, where the Modbus value stands alone under the X10A row's name with
+                nothing beside it to look implausible against. The vocabulary is logic/history.hpp's
+                TREND IDS, reused rather than reinvented: a trend is already "one physical quantity
+                addressed structurally by (reg, offset, unit)", and its catalog test already proves
+                each locator resolves to exactly one row per profile. A static_assert pins every
+                pairing to a real trend id, so a renamed trend is a BUILD ERROR rather than a pairing
+                that silently stops happening. SIX registers pair and — measured — all six resolve on
+                all 39 detectable profiles. The rest are unpaired on purpose, each with a stated
+                reason: the post-BUH outlet is a DIFFERENT measurement point (pairing it would be the
+                substitution lwt_select refuses); the real power measurement has no X10A equivalent at
+                all (X10A ESTIMATES it from CT clamps at an assumed 230 V, so pairing a measurement
+                with an estimate would hide which is which); setpoints, modes and faults are not
+                readings and no trend addresses them
                 timestamp.hpp = rfc3339_utc(unix_s, ms) — the ONE UTC formatter the SNTP wall clock
                 (sntp_time.cpp) renders through, for syslog.cpp's RFC 5424 TIMESTAMP field,
                 /status.ntp.time, and mqtt_ha.cpp's heartbeat "time" field. A negative unix_s
@@ -1479,6 +1548,14 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 wire bytes — and they otherwise never leave the device. Truncation is by WHOLE bytes:
                 a trailing nibble would read as a different value, and a hex dump exists to be read
                 literally. A 32-byte payload renders to 95 chars, well inside diag's 256-byte line.
+def/homehub.hpp the HomeHub (EKRHH) Modbus register map — the counterpart of the X10A profiles below,
+                for Transport::ModbusTcp. Rows are {1-based EKRHH offset, FC04 input / FC03 holding,
+                MbType, extra scale, unit, label}, decoded through logic/modbus.hpp's codecs with the
+                32765/66/67 sentinels refused before any scaling. HOLDING registers are read BACK
+                read-only (the hub splits its telemetry across both spaces); nothing writes. The host
+                test covers the DECODE MECHANICS (scaling, sentinels, Text16, offset->PDU, a negative
+                temperature keeping its sign) — physical correctness per row is an on-hardware check,
+                the same "passing the tests is not being RIGHT" rule the domain audit exists for
 def/            embedded per-model value profiles + registry (incl. the generic Altherma fallback =
                 universal register core) + models_catalog.hpp (GET /models) + model_names.hpp
                 (id→display/family/marketing name for /status) + signatures.hpp (Altherma-only
@@ -1571,7 +1648,7 @@ www/            web UI sources (index.html + style.css + app.js -> one gzipped p
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi creds + the one-shot rollback backup + flags (`wifi_rolledbk` outcome marker included), MQTT (`uri`/`user`/`pass`), syslog (empty host = off), `ntp_server` (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` compile-time default on next boot), (blob **v2**) the **board-local hardware** `led_gpio`/`led_type`/`led_inverted`/`btn_gpio`/`btn_active_low`, (blob **v3**) the **OTA update channel** (`ota_channel`, 0 = release / 1 = dev) and (blob **v4**) the **UI language override** (`ui_lang`, 0 = auto / 1 = de / 2 = en) — in the blob because, like the credentials and unlike the link cache, each has exactly ONE writer (httpd, `POST /set_board` / `POST /set_ota` / `POST /set_lang`). An OLDER blob is still ACCEPTED: **v1** (pre-board OTA) reports `has_board=false`, so `config_load` seeds the board fields from Kconfig instead of reading "absent" as "indicator off"; **v2** (pre-channel OTA) reports `has_ota=false` and **v3** (pre-language OTA) reports `has_lang=false`, neither needing a Kconfig fallback — the pre-v3 world had exactly ONE feed (the release channel the struct defaults to) and the pre-v4 world had no override (auto = keep letting the browser detect the language). Rejecting any would drop that user's WiFi/MQTT creds on the upgrade. One CRC-checked entry written all-or-nothing, so the whole credential/service state survives a write failure or power cut together — no per-key write-ordering. The X10A **link cache** `rx_pin`/`tx_pin`/`proto` stays as SEPARATE self-healing keys (two owners: `config_save` for a manual override, `config_save_link` for a detected pin; re-validated on load). So does `board_set` — did the USER STATE the board hardware, or are those five values merely this build's defaults? The values cannot say (the Kconfig defaults happen to EQUAL the XIAO preset), and the web UI needs the difference to name the board in its Hardware modal without claiming one nobody chose (#256) — or, the other way, opening on "Custom" beside the very preset the user just saved, so that re-picking their own board submits an unchanged form (#257). Outside the blob even though it has one writer, because the flag never NAMES a board: the UI derives the name from the live field values (`syncPresetSelection`) and this only licenses showing one, so a flag that drifted cannot produce a WRONG name, only the "Custom" the UI already falls back to. That, and a blob version bump is not free — two other branches already carry a v5 and a v6 blob, and a version a build does not know reads on the device as a WIPED configuration (the blob is refused, the legacy per-key fallback is empty, and the board comes up in the setup portal with its credentials intact but unread). Legacy per-key credential keys (`wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/…/`ntp_server`) are still READ as the fallback when `cfg` is absent (fresh device / pre-blob OTA). Plus the boot-loop **crash counter** `boot_fails` (safe_mode.cpp; here so a factory reset wipes it too). (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
+| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi creds + the one-shot rollback backup + flags (`wifi_rolledbk` outcome marker included), MQTT (`uri`/`user`/`pass`), syslog (empty host = off), `ntp_server` (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` compile-time default on next boot), (blob **v2**) the **board-local hardware** `led_gpio`/`led_type`/`led_inverted`/`btn_gpio`/`btn_active_low`, (blob **v3**) the **OTA update channel** (`ota_channel`, 0 = release / 1 = dev) (blob **v4**) the **UI language override** (`ui_lang`, 0 = auto / 1 = de / 2 = en) and (blob **v5**) the **HomeHub Modbus link** (`mb_host` — empty = none entered — `mb_port` 502, `mb_unit_id` 1, `actuation_enabled` false; there is NO enable flag and NO transport field — the ADDRESS is the switch, and the HomeHub is a SECOND source, not an alternative to X10A) — in the blob because, like the credentials and unlike the link cache, each has exactly ONE writer (httpd, `POST /set_board` / `POST /set_ota` / `POST /set_lang` / `POST /set_hp`). An OLDER blob is still ACCEPTED: **v1** (pre-board OTA) reports `has_board=false`, so `config_load` seeds the board fields from Kconfig instead of reading "absent" as "indicator off"; **v2** (pre-channel OTA) reports `has_ota=false` and **v3** (pre-language OTA) reports `has_lang=false`, neither needing a Kconfig fallback — the pre-v3 world had exactly ONE feed (the release channel the struct defaults to) the pre-v4 world had no override (auto = keep letting the browser detect the language), and **v4** (pre-HomeHub OTA) reports `has_modbus=false` because the pre-v5 world had no HomeHub link at all, which the struct already defaults to. Rejecting any would drop that user's WiFi/MQTT creds on the upgrade. One CRC-checked entry written all-or-nothing, so the whole credential/service state survives a write failure or power cut together — no per-key write-ordering. The X10A **link cache** `rx_pin`/`tx_pin`/`proto` stays as SEPARATE self-healing keys (two owners: `config_save` for a manual override, `config_save_link` for a detected pin; re-validated on load). So do the one-shot discovery keys `mb_dhost`/`mb_searched` — their writer is the Modbus task while the blob's is httpd, and a whole-struct writer reverts the other's field from a stale snapshot. So does `board_set` — did the USER STATE the board hardware, or are those five values merely this build's defaults? The values cannot say (the Kconfig defaults happen to EQUAL the XIAO preset), and the web UI needs the difference to name the board in its Hardware modal without claiming one nobody chose (#256) — or, the other way, opening on "Custom" beside the very preset the user just saved, so that re-picking their own board submits an unchanged form (#257). Outside the blob even though it has one writer, because the flag never NAMES a board: the UI derives the name from the live field values (`syncPresetSelection`) and this only licenses showing one, so a flag that drifted cannot produce a WRONG name, only the "Custom" the UI already falls back to. That, and a blob version bump is not free — two other branches already carry a v5 and a v6 blob, and a version a build does not know reads on the device as a WIPED configuration (the blob is refused, the legacy per-key fallback is empty, and the board comes up in the setup portal with its credentials intact but unread). Legacy per-key credential keys (`wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/…/`ntp_server`) are still READ as the fallback when `cfg` is absent (fresh device / pre-blob OTA). Plus the boot-loop **crash counter** `boot_fails` (safe_mode.cpp; here so a factory reset wipes it too). (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -1665,6 +1742,14 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   since it is a runtime-configurable network service too, not a static board fact,
                   hp{proto,rx,tx,connected,
                   last_ok_s,registers,values,crc_err,timeout_err}, profile{id},
+                  plus
+                  modbus{connected,discovering,host,port,unit_id,rx,fails,actuation_enabled[,error]}
+                  — the HomeHub link's READ-ONLY diagnostics. `host` is the RESOLVED / mDNS-discovered
+                  host, not the requested one: with mb_host empty the device discovers the hub itself,
+                  and the card must show what it FOUND rather than the empty string it was asked with
+                  (redacted like the other reporter-identifying values). `discovering` = a browse is
+                  running with nothing resolved yet. There are no write counters — the link has none,
+                  and actuation_enabled is reported straight from config (it gates nothing today),
                   sys{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode} — heap
                   headroom (free / since-boot low-water / largest-contiguous) + why the device last
                   booted, ALWAYS present (unlike last_crash, and unlike the MQTT heartbeat needs no
@@ -1725,7 +1810,25 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus "binary":true 
                   question, now that the poll engine applies the rule too (#209 defect 5): the
                   browser still derives it, but a non-browser consumer gets it without
                   reimplementing the rule, and the marker travels WITH the row rather than being
-                  recomputed from a snapshot taken elsewhere
+                  recomputed from a snapshot taken elsewhere.
+                  X10A rows also carry `concept` where logic/homehub_map.hpp pairs them with a
+                  HomeHub register — the browser matches on that string and does NO matching of its
+                  own, since a label match here is the substitution lwt_select/ou_stale exist to
+                  prevent. The HomeHub's own readings ride a SECOND array, `modbus`
+                  [{label,value,unit,off[,binary][,concept]}] — two arrays, never merged, mirroring
+                  the two stacks: the sources have separate liveness, and merging would make "is this
+                  reading current?" a per-row question no consumer could answer. `off` is the EKRHH
+                  data-model offset (def/homehub.hpp), which is what the pairing keys on.
+                  THE ARRAY IS EMITTED ONLY WHILE THE LINK IS LIVE AT THE MOMENT THE SNAPSHOT IS
+                  TAKEN — so if it is present, every row in it was read this cycle. That guarantee
+                  belongs in the payload because a consumer cannot tell a stale row from a fresh one
+                  by looking at it, and the browser is not the only consumer. Liveness and the cache
+                  sit behind two DIFFERENT mutexes, so mb_values_snapshot() reports the link state
+                  AFTER copying the cache (the only place the two can be tied into one answer);
+                  checking mb_status() and then copying left a window in which one response carried
+                  the previous session's rows under that guarantee. Not live -> the KEY IS OMITTED,
+                  never emitted empty: an absent array and an empty one are different claims, and
+                  only absence says "no current reading"
 GET  /history?row=<trend id>   one trended row's 24-hour series, oldest sample first:
                   {id,label,dt,unit,t0,v[],held[[from,count],…]}. `unit` is the ROW's own unit, read
                   from the cached value — never a hardcoded "°C": the eighteen trends mix °C, bar, KiB
@@ -1770,8 +1873,10 @@ GET  /diag[?verbose=0|1][?clear=1][?redact=1]   in-memory diag log. ?redact=1 sc
                   to CHUNKED: a replacement is longer than most values it replaces, so the redacted
                   text can GROW past the static dump buffer, and the alternatives are a second ~8 KB
                   .bss buffer or a ~6 KB contiguous heap allocation
-GET  /status?redact=1   the bug-report form of /status: the seven reporter-identifying values
-                  (wifi.ssid/ip/bssid/mac, mqtt.broker, syslog.host, ntp.server) read "<redacted>".
+GET  /status?redact=1   the bug-report form of /status: the eight reporter-identifying values
+                  (wifi.ssid/ip/bssid/mac, mqtt.broker, syslog.host, ntp.server, modbus.host — the
+                  last a LAN address and, on an auto-discovered HomeHub, its serial-derived
+                  hostname homehub-524288-<serial>) read "<redacted>".
                   The KEY is always emitted — an omitted field is indistinguishable from an older
                   build that never had it, and "which build produced this?" is the first question a
                   frozen report must answer. Substituted where each value is WRITTEN, never as a
@@ -1843,7 +1948,16 @@ POST /set_ntp     {server} -> persist + reboot. No request-path network probe (t
                   CONFIG_DAIKIN_NTP_SERVER compile-time default" (SNTP has no disabled state, unlike
                   syslog_host's empty-means-off). Unchanged settings short-circuit to
                   {ok:true,reboot:false}, same as /set_mqtt.
-POST /set_hp      {profile,rx,tx} -> validate + apply live (no reboot). rx/tx PERSIST (the physical
+POST /set_hp      {profile,rx,tx,mb_host,mb_port,mb_unit_id,actuation_enabled}
+                  -> validate + apply live (no reboot). Every key is OPTIONAL and an omitted one keeps
+                  its stored value, which is what lets the pin picker POST {profile,rx,tx} without
+                  flipping anyone onto Modbus — and lets the HomeHub modal POST only its three fields.
+                  `mb_host` starts/stops the SECOND stack — the ADDRESS is the switch, there is no enable flag — and it never stops the X10A poll. "" = no address entered, which after the one-shot search has run means the stack does not start; mb_port 1..65535
+                  and mb_unit_id 1..247 are range-checked by validate(). All five PERSIST in the
+                  atomic blob (v4) and apply live — the poll engine re-reads config() each cycle and
+                  starts or stops the HomeHub task via mb_reconfigure(), so it needs no reboot.
+                  `actuation_enabled` is stored and gates NOTHING (there is no write path). rx/tx
+                  PERSIST (the physical
                   pin cache — a manual override survives reboot); profile is session-only. The UI
                   always sends profile="auto" (fully automatic — no manual model pick); a concrete id
                   is still accepted (pins the model for this session) but never offered in the UI.

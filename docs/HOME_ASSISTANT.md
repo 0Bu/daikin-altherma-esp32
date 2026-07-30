@@ -346,10 +346,18 @@ same rows arrive by the normal route and the entities are unchanged.
 > **Upgrading:** these entities are new, not renamed — nothing pre-existing changes domain or
 > entity id, so no history is affected. They appear on the next connect after the update.
 
-> **Read-only bridge — no command topics.** The firmware only mirrors X10A telemetry; it never
+> **Read-only bridge — no command topics.** The firmware only mirrors telemetry; it never
 > actuates the heat pump. To *control* the unit (e.g. SG-Ready boost on PV surplus), drive the
 > heat pump's own SG-Ready / thermostat contacts or a Modbus/EKRHH interface from your energy
 > manager — that is out of scope for this firmware.
+>
+> That holds for **both** transports. The firmware can also be pointed at a **Daikin HomeHub (EKRHH)
+> over Modbus TCP** instead of X10A ([MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)) — and where X10A simply
+> *has* no write command, the HomeHub link is read-only **by design**: no MQTT subscribe, no command
+> topic, no writable entity. Using the HomeHub as this firmware's source does not turn it into a
+> control path. Note that on that transport the HomeHub map has **no per-value HA auto-discovery yet**:
+> those readings reach the shared state topic under a `homehub` group (readable by a metrics
+> pipeline / a manual template sensor), and the board + link heartbeat diagnostics are unaffected.
 
 ## Derived power, energy & COP / SCOP / JAZ
 

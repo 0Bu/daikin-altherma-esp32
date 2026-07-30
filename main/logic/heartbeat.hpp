@@ -72,6 +72,19 @@ struct HeartbeatFields {
     // healthy, and the outdoor unit is simply not measuring right now" is otherwise indistinguishable
     // from a broken link on the consumer's side.
     bool        ou_held_over   = false;
+
+    // The HomeHub Modbus stack (issue #32) — a SECOND, INDEPENDENT source, so these are its OWN
+    // counters and say nothing about the X10A bus above (that is the point: the two fail separately).
+    // All zero on a device without a HomeHub, which is a real fleet/config distinction rather than
+    // the always-constant kind that got bus_tx_writes dropped. Read-only: no write counter, because
+    // the stack has no write path. Carried on the heartbeat PAYLOAD for the metrics pipeline; the
+    // user-facing view is /status.modbus + the web UI. Deliberately NO HA entity — a stack most
+    // devices never run would be an always-off diagnostic to rule out, the exact noise this file
+    // retires elsewhere.
+    bool        modbus_enabled   = false;  // is the second stack running at all on this device?
+    bool        modbus_connected = false;
+    uint32_t    modbus_rx        = 0;   // successful HomeHub register reads since boot
+    uint32_t    modbus_fails     = 0;   // failed reads since boot
 };
 
 // Heartbeat topic: <base>/heartbeat — separate from the shared state topic so a Telegraf/HA consumer
@@ -158,6 +171,12 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     // metric that cannot vary is a line on a dashboard that always reads zero and an entity a reader
     // has to rule out. Dropped in #215; neither was ever an HA entity, so nothing is orphaned.
     j += ",\"bus_tx_reads\":" + std::to_string(f.rx_received + f.rx_fails);
+    // Modbus TCP (HomeHub) link — payload-only (no HA entity; see HeartbeatFields). The connectivity
+    // flag rides as a 1/0 NUMBER like the others, for the same metrics-consumer reason.
+    j += ",\"modbus_enabled\":"; j += f.modbus_enabled ? "1" : "0";
+    j += ",\"modbus_connected\":"; j += f.modbus_connected ? "1" : "0";
+    j += ",\"modbus_rx\":" + std::to_string(f.modbus_rx);
+    j += ",\"modbus_fails\":" + std::to_string(f.modbus_fails);
     j += "}";
     return j;
 }

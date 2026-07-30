@@ -347,7 +347,7 @@ static bool poll_detect() {                                    // returns true i
 // came to run here (#241) — the dashboard now polls /status and /values on the httpd task instead
 // (docs/ARCHITECTURE.md "Push vs. poll"). What this task does is read the bus and commit the cache.
 static void poll_task(void*) {
-    esp_task_wdt_add(NULL);                                    // this task owns the X10A UART — watch it
+    esp_task_wdt_add(NULL);                                    // this task owns the link — watch it
     for (;;) {
         esp_task_wdt_reset();                                  // top of cycle; poll_once also resets per register
         try {
@@ -386,27 +386,36 @@ void hp_poll_start() {
     // The poll engine is the core of the device; if its task can't be created there is no heat-pump
     // polling at all. Report it loudly — the web UI + OTA still come up, so the board stays fixable.
     //
-    // 8192 again, because the reason for 12288 is gone — not because 8192 was ever proven. #241
-    // raised this task to 12288 after it died with 520 bytes of 8192 free:
+    // 8192, and it STAYS 8192 because the HomeHub link is a separate task with its own stack.
+    //
+    // That is worth stating, because a previous revision of the Modbus work had this at 12288: it
+    // polled both links from THIS task, which added getaddrinfo()/mdns_query_*()/socket calls to a
+    // stack sized without them. syslog.cpp has measured that same chain at 6144 ("4096 is too thin
+    // for that call chain"), so the raise was correct — but it charged 4 KB of heap to EVERY device,
+    // including the majority with no HomeHub at all. Splitting the two sources into independent
+    // stacks moved that call chain to hp_modbus.cpp's own task, which exists only when a HomeHub is
+    // configured. The devices that do not have one pay nothing.
+    //
+    // What remains on this task is what it ran on for months: poll_once + hp_detect_run. #241's
+    // overflow was build_status_json_string() reached from the WebSocket broadcaster that used to
+    // live here, and that is gone (docs/ARCHITECTURE.md "Push vs. poll"):
     //
     //     TCB             NAME PRIO C/B  STACK USED/FREE
     //     0x3fcc84cc   hp_poll      5/5      7664/520          <- died on the stack watchpoint
     //     0x3fcbf3b4     httpd      5/5     1456/10820
     //
-    // That 7664 was spent in ws_broadcast_status() -> build_status_json_string() -> syslog_status()
-    // -> config() (a whole Config BY VALUE, ~10 std::string copies) — the ~3.5 KB /status builder,
-    // reached from this task ONLY because the WebSocket broadcaster lived here. With the push gone
-    // that chain is unreachable from this task: what remains is poll_once + hp_detect_run, i.e.
-    // strictly less than the 8192 this ran on for months before /status grew. The extra 4 KB is
-    // returned to the heap, where the largest CONTIGUOUS block is the real ceiling on this chip.
-    //
-    // Nothing on /status reports stack headroom, so the only way to check this is the task table's
-    // USED/FREE column in the next core dump (CLAUDE.md -> Memory constraints). If a future change
-    // gives this task a large builder again, raise it in the SAME commit — and note that a builder
-    // shared by two tasks is only ever as safe as its smallest stack.
+    // Nothing on /status reports stack headroom, so the task table's USED/FREE column in the next
+    // core dump is the only place to check this (CLAUDE.md -> Memory constraints). If a future change
+    // gives this task a large builder or a deep call chain again, raise it in the SAME commit — and
+    // note that a builder shared by two tasks is only ever as safe as its smallest stack.
     if (xTaskCreate(poll_task, "hp_poll", 8192, nullptr, 5, nullptr) != pdPASS)
         diag_printf("hp_poll: poll task alloc failed — X10A polling disabled this boot\n");
 }
+
+// The MAXIMUM number of rows THIS cache can hold, so /values and the MQTT bridge size their snapshot
+// buffers correctly. Under-sizing silently TRUNCATES rows out of a snapshot — the #35-#39
+// absent-value shape. The HomeHub is a separate stack with its own mb_values_capacity().
+size_t hp_values_capacity() { return def::lookup_view(config().profile.c_str()).count(); }
 
 size_t hp_values_snapshot(CachedValue* out, size_t max) {
     if (!s_mtx) return 0;

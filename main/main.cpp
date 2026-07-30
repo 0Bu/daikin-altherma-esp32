@@ -21,6 +21,7 @@
 #include "diag_log.hpp"
 #include "syslog.hpp"
 #include "hp_poll.hpp"
+#include "hp_modbus.hpp"
 #include "http_server.hpp"
 #include "mqtt_ha.hpp"
 #include "ota_update.hpp"
@@ -99,8 +100,15 @@ extern "C" void app_main() {
     if (!daik::safe_mode_active()) {
         daik::mqtt_ha_start();           // HA MQTT-Discovery bridge (no-op if mqtt_uri empty)
         daik::hp_poll_start();           // X10A poll engine
+        // The HomeHub Modbus stack — a SECOND, INDEPENDENT source (docs/MODBUS_PROTOCOL.md), not an
+        // alternative to the line above: both run, and neither notices the other failing. The
+        // ADDRESS is the switch: with none entered and none discovered, mb_start creates no task at
+        // all, so a device without a HomeHub pays nothing here.
+        // Skipped in safe mode for the same reason the two above are: a boot-looping board is being
+        // recovered through the web UI, and every optional consumer stays out of the way.
+        daik::mb_start();
     } else {
-        ESP_LOGW(TAG, "SAFE MODE: X10A poll engine + MQTT bridge skipped — recover the config via the web UI");
+        ESP_LOGW(TAG, "SAFE MODE: X10A poll engine + HomeHub stack + MQTT bridge skipped — recover the config via the web UI");
     }
     daik::ota_health_gate_arm();         // keep rollback armed until this image proves healthy
     daik::safe_mode_arm_healthy();       // clear the crash counter after BOOT_HEALTHY_S of continuous uptime

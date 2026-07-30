@@ -35,6 +35,7 @@
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
 #include "hp_poll.hpp"
+#include "hp_modbus.hpp"
 #include "logic/availability.hpp"
 #include "logic/convert.hpp"   // conv_is_binary, published_kind — a row's wire type and entity domain
 #include "logic/crashinfo.hpp"
@@ -184,7 +185,12 @@ static void mqtt_publish(const std::string& topic, const char* payload, int len,
 //     bus_ou_held_over says WHY the field went away, so this reads as a resting unit and not as a
 //     broken link.
 static std::vector<GroupedValue> current_grouped() {
-    const size_t cap = def::lookup_view(config().profile.c_str()).count();
+    // The X10A cache only. The HomeHub is a separate stack with its own cache, and it is deliberately
+    // NOT published here: it would put a second HA entity on every quantity both sources carry (two
+    // "DHW tank temp" sensors that disagree slightly), which is a worse answer than one. Its readings
+    // reach the web UI beside their X10A twins (docs/MODBUS_PROTOCOL.md), and its LINK health rides
+    // the heartbeat below.
+    const size_t cap = hp_values_capacity();
     std::vector<CachedValue> cache(cap ? cap : 1);
     const size_t n = hp_values_snapshot(cache.data(), cache.size());
     std::vector<GroupedValue> out;
@@ -492,6 +498,11 @@ static void publish_heartbeat() {
     f.rx_fails        = hp.rx_fail_total;
     f.last_ok_s       = hp.last_ok_s;
     f.ou_held_over    = hp.ou_held_over;
+    const ModbusStatus mbs = mb_status();
+    f.modbus_enabled   = mbs.enabled;
+    f.modbus_connected = mbs.connected;
+    f.modbus_rx        = mbs.rx_ok;
+    f.modbus_fails     = mbs.rx_fail;
 
     const std::string js = build_heartbeat_json(f);
     mqtt_publish(s_heartbeat, js.c_str(), static_cast<int>(js.size()), 0, 0);   // not retained

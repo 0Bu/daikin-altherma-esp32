@@ -68,6 +68,9 @@
         <!-- Crash banner: shown when /status.last_crash is set (a fault reset or a core dump waiting).
              Rendered by renderCrashBanner() from app.js; dismissible per crash signature. -->
         <div class="crash-banner" id="crashBanner" hidden></div>
+        <!-- X10A silent while the HomeHub still reports. Not an error card: the plant is running and
+             a source IS delivering — what failed is one of two independent links. Says where the
+             readings now come from, and that the drawing is sparse on purpose. -->
 
         <!-- ═══ Live system section: the interactive schematic (DESIGN.md §5.3) ═══
              The FIRST thing on the dashboard — the diagram is the answer to "what is the plant doing
@@ -717,6 +720,35 @@
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="ntpCancel" data-i18n="btn.cancel">Cancel</button>
         <button class="btn primary" type="submit" id="ntpBtn" data-i18n="btn.save">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ═══ HomeHub edit modal (opened from the HomeHub card's address row) ═══
+       Edits the Modbus TCP link to the Daikin HomeHub. Host is an IP or a .local hostname; LEFT EMPTY
+       it auto-discovers the hub over mDNS. Applied live (POST /set_hp, no reboot). Read-only: this is
+       config + diagnostics only, never a pump control (issue #32 / docs/SECURITY.md). -->
+  <div class="modal" id="homehubModal" hidden>
+    <div class="modal-backdrop" id="homehubBackdrop"></div>
+    <form class="modal-card" id="homehubForm" role="dialog" aria-modal="true" aria-labelledby="homehubModalTitle">
+      <div class="section-label card-title" id="homehubModalTitle" data-i18n="homehub.title">Modbus</div>
+      <label class="field">
+        <span class="field-label plain" data-i18n="homehub.host">Host · IP or .local name</span>
+        <input class="input" name="host" id="hhHost" placeholder="homehub-524288-9.local" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label plain" data-i18n="homehub.port">Port</span>
+        <input class="input num" name="port" id="hhPort" placeholder="502" inputmode="numeric" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label plain" data-i18n="homehub.unit">Unit id</span>
+        <input class="input num" name="unit" id="hhUnit" placeholder="1" inputmode="numeric" autocomplete="off">
+      </label>
+      <p class="hint err" id="hhError" hidden></p>
+      <p class="hint" data-i18n="homehub.hint">The gateway is searched for ONCE, on the first start with no address. Leave the host empty to use what that search found; enter an address by hand for a gateway added later. Port defaults to 502, unit id to 1. Read-only — the firmware never controls the heat pump from here.</p>
+      <div class="modal-actions">
+        <button class="btn secondary" type="button" id="hhCancel" data-i18n="btn.cancel">Cancel</button>
+        <button class="btn primary" type="submit" id="hhBtn" data-i18n="btn.save">Save</button>
       </div>
     </form>
   </div>

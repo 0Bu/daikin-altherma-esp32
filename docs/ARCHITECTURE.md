@@ -97,7 +97,18 @@ http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /di
                       POST /crash/dismiss. build_status_json_string() runs on the httpd task ALONE —
                       see "Push vs. poll" below for why that sentence is load-bearing
 http_config.cpp     → POST /set_wifi, /set_mqtt, /set_syslog, /set_ntp, /set_hp, /set_board,
-                      /set_ota, /set_lang, /detect
+                      /set_ota, /set_lang, /detect. /set_hp also carries the TRANSPORT + the
+                      HomeHub Modbus params (mb_host/mb_port/mb_unit_id,
+                      actuation_enabled), applied live
+hp_modbus.cpp/.hpp  → THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT source beside X10A, not an
+                      alternative to it: its own task, cache and link state, gated on
+                      config().a configured address. The two fail for unrelated reasons, so either can be
+                      down while the other reports; a device with no HomeHub runs no task at all.
+                      A lwIP socket around the pure logic/modbus.hpp framing + mDNS discovery
+                      (browse _http._tcp, filter the homehub-* hostname — this firmware answers that
+                      same browse). READ-ONLY: no write function, by design (docs/MODBUS_PROTOCOL.md)
+def/homehub.hpp     → the HomeHub register map (input + holding), the Modbus counterpart of the X10A
+                      def/ profiles; decoded via logic/modbus.hpp's Temp16/Pow16/Int16/Text16 codecs
 http_ota.cpp        → /ota/check|update|status
 mcp_server.cpp      → /mcp — read-only MCP tools (get_status, get_hp_values) for AI agents — PLANNED
                       (route exists; returns a JSON-RPC "not implemented" error for now)
@@ -472,7 +483,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   defensible because the board scrubs first — so this is the single implementation of that rule,
   shared by the web UI's "Report a bug" action and the manual `curl` fallback, rather than a copy in
   `www/app.js` that would drift. Two shapes, because the routes leak differently: `/status` leaks by
-  **field** (seven named values, substituted where each is *written* — a post-processing pass over
+  **field** (eight named values, substituted where each is *written* — a post-processing pass over
   the finished JSON is what the httpd stack budget has no room for), `/diag` leaks by **line**,
   which is the non-trivial half the `CHECK`s cover. It **fails closed**: a rule whose end token is
   missing — a line the ring truncated mid-value, precisely when a value sits unterminated at the
@@ -1069,8 +1080,13 @@ Three layers keep the WiFi station link up:
 
 The Home Assistant bridge:
 
-- **Read-only** — no command topics. The firmware only mirrors X10A telemetry; it never actuates
-  the heat pump (the X10A protocol has no write command), so there is nothing to subscribe to.
+- **Read-only** — no command topics. The firmware only mirrors telemetry; it never actuates
+  the heat pump, so there is nothing to subscribe to. On X10A that is the protocol's own doing (it has
+  no write command). On the **optional Modbus TCP link to a Daikin HomeHub** the wire *would* allow a
+  write, and it is still read-only **by design**: the firmware reads registers and publishes them, and
+  no MQTT subscribe, command topic, writable HA entity or HTTP write route exists to reach the pump
+  (see [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md); per-value HA discovery of the HomeHub map is not
+  published yet, so those readings reach the shared state topic under the `homehub` group only).
 - **Node id = the installation, not the board.** The HA device id is the slugified MQTT base topic
   (`daikin-altherma-esp32` → `daikin_altherma_esp32`, `logic/ha_device.hpp`), so replacing the ESP32
   keeps ONE device with its entities, history and long-term statistics — where the old MAC-derived
@@ -1197,6 +1213,13 @@ The Home Assistant bridge:
     request sent). There is no `bus_tx_writes`/`bus_tx_fails` companion: the X10A bridge is read-only,
     so both were hardcoded `0` and could never vary. They were dropped in #215 — a metric that cannot
     change is a dashboard line that always reads zero. Neither was ever an HA entity.
+  - **`modbus_*`**: `modbus_connected` (a 1/0 number like the other link flags), `modbus_rx` /
+    `modbus_fails` — the optional HomeHub Modbus TCP link's own counters
+    ([MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)), 0/off on a device using X10A. There is no write
+    counter here either, and for a stronger reason than the `bus_tx_*` case above: that link has no
+    write path at all. **Payload-only — deliberately no HA entity**, since a link most devices never
+    use would be an always-off diagnostic to rule out, which is exactly what got `device_time` and
+    `wifi_quality` retired.
 
   Published on a fixed `HEARTBEAT_INTERVAL_S` (10 s) cadence — unlike the state topic, this is
   diagnostics rather than real-time telemetry, so it always sends the latest snapshot rather than

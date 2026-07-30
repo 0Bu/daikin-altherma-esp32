@@ -22,7 +22,8 @@ likely to be declined — the comment density and the "why" notes in this codeba
 
 These run on a plain system toolchain (cmake + g++/clang++ for the first, node for the rest) in
 seconds. **Run them all before opening a PR.** They are also the first steps of CI's `gates` job,
-so a failure here fails the build anyway.
+so a failure here fails the build anyway — with one deliberate exception, `run-ui-gif-audit.sh`,
+which CI does **not** run (see below).
 
 ```bash
 scripts/run-mock-tests.sh --coverage # host logic tests + 95% production-line floor
@@ -104,7 +105,13 @@ an outside contributor you never run it; assume any change under `main/www/` nee
 
 `run-ui-gif-audit.sh` guards the README's **recording** of that drawing,
 [`docs/media/dashboard.gif`](docs/media/dashboard.gif) — the animated dashboard a new reader sees
-before anything else. It is the one artefact here that rots *invisibly*: a recording renders
+before anything else. **It is not a CI step and not a merge condition**, unlike everything else on
+this page, and the reason is its remedy rather than its subject: the only fix it can ask for is a
+local re-record (Chrome + ffmpeg, ~5 min), which no runner can perform. A gate whose fix is
+unavailable where it fires gets the *stamp* rewritten rather than the recording re-made — a GIF then
+carrying a stamp that asserts it is current. As an outside contributor you are welcome to run it and
+say what it reported; keeping the recording current is the maintainer's `/ui-gif` skill, on its own
+schedule. It is the one artefact here that rots *invisibly*: a recording renders
 perfectly forever, whatever the UI has since become, so every gate above stays green while the
 README shows a drawing that no longer exists. A screenshot cannot fail a test; it can only be out of
 date, and it looks exactly as good either way. CI has no browser, so the check is a **stamp**, not a

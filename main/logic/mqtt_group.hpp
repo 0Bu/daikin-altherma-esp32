@@ -34,6 +34,9 @@ inline const char* group_for_page(uint8_t reg) {
         case 0x63: return "mains_current";
         case 0x64: return "hybrid";
         case 0x65: return "mixing";
+        // The synthetic page every HomeHub (Modbus TCP) row is tagged with (def/homehub.hpp
+        // HOMEHUB_GROUP_REG = 0xEE), so the whole HomeHub map groups under one key on the state topic.
+        case 0xEE: return "homehub";
         default:   return "other";
     }
 }

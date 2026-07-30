@@ -66,6 +66,8 @@
 #include "def/overlay.hpp"
 #include "def/registry.hpp"
 #include "def/signatures.hpp"
+#include "def/homehub.hpp"
+#include "logic/homehub_map.hpp"
 
 static int g_failures = 0;
 #define CHECK(cond)                                                                       \
@@ -668,6 +670,50 @@ static void test_config_model() {
     c.syslog_port = 514;                               // valid syslog port
     CHECK(validate(c, why));
     c.syslog_host = "";                                // reset to default
+
+    // The HomeHub Modbus stack (issue #32). Checked unconditionally, so the defaults must still pass
+    // on a device with no HomeHub and only a bad value trips. mb_host is free text — empty is valid
+    // (that IS the auto-discovery case).
+    CHECK(c.mb_port == 502 && c.mb_unit_id == 1);      // the defaults from MODBUS_TCP_PORT/UNIT
+    CHECK(validate(c, why));                            // default (no address at all) is valid
+    c.mb_host = "";
+    CHECK(validate(c, why));                            // empty host = no manual address, valid
+    c.mb_host = "homehub-524288-abc.local";
+    CHECK(validate(c, why));                            // an explicit .local host is fine
+    c.mb_port = 0;   CHECK(!validate(c, why));          // port out of range
+    c.mb_port = 65536; CHECK(!validate(c, why));
+    c.mb_port = 502; CHECK(validate(c, why));
+    c.mb_unit_id = 0;   CHECK(!validate(c, why));       // unit id out of the Modbus 1..247 range
+    c.mb_unit_id = 248; CHECK(!validate(c, why));
+    c.mb_unit_id = 1; CHECK(validate(c, why));
+    c.mb_host = "";                                     // reset to default for the checks below
+
+    // THE ADDRESS IS THE SWITCH — there is no enable flag to disagree with it. Manual entry wins
+    // over what the one-shot search found, and does NOT erase it: clearing the field must fall back
+    // to the search result rather than to nothing.
+    Config m;
+    CHECK(config_modbus_host(m).empty());               // nothing known
+    CHECK(config_modbus_should_search(m));              // ... so the one-shot search is armed
+    apply_modbus_found(m, "homehub-524288-abc");
+    CHECK(config_modbus_host(m) == "homehub-524288-abc");
+    CHECK(!config_modbus_should_search(m));             // and disarms itself
+    m.mb_host = "203.0.113.131";
+    CHECK(config_modbus_host(m) == "203.0.113.131");    // manual wins
+    m.mb_host.clear();
+    CHECK(config_modbus_host(m) == "homehub-524288-abc");   // ... without erasing the discovery
+    // A search that finds NOTHING must disarm just as firmly. This is the case the latch exists for:
+    // without it, a LAN with no gateway is browsed again on every boot, forever, and "one-shot" is
+    // only true when the search succeeds.
+    Config mb_none;
+    apply_modbus_found(mb_none, "");
+    CHECK(config_modbus_host(mb_none).empty() && mb_none.mb_searched);
+    CHECK(!config_modbus_should_search(mb_none));
+    // A typed address is enough on its own, and must NOT arm the search: typing one is a deliberate
+    // act, and browsing the LAN to second-guess it would be the opposite of one-shot.
+    Config mb_manual;
+    mb_manual.mb_host = "10.0.0.9";
+    CHECK(config_modbus_host(mb_manual) == "10.0.0.9");
+    CHECK(!config_modbus_should_search(mb_manual));
 
     // Target-aware GPIO range: the ESP32-S3 default 44/43 is valid on a 48-GPIO target but must be
     // rejected on an ESP32-C3 (max GPIO 21), where those pins physically don't exist.
@@ -1757,7 +1803,8 @@ static void test_heartbeat() {
                "\"bus_connected\":1,\"bus_proto\":\"I\",\"bus_registers\":10,\"bus_values\":48,"
                "\"bus_last_ok_s\":1,\"bus_rx_received\":763732,\"bus_rx_fails\":2,"
                "\"bus_crc_err\":0,\"bus_timeout_err\":2,\"bus_ou_held_over\":0,"
-               "\"bus_tx_reads\":763734}");
+               "\"bus_tx_reads\":763734,"
+               "\"modbus_enabled\":0,\"modbus_connected\":0,\"modbus_rx\":0,\"modbus_fails\":0}");
 
     // ── #215: the reset reason has to survive a NUMERIC-ONLY consumer ──
     // Telegraf's json parser keeps numeric fields and drops everything else, so the `reset_reason`
@@ -1786,6 +1833,18 @@ static void test_heartbeat() {
     CHECK(j.find("bus_tx_writes") == std::string::npos);
     CHECK(j.find("bus_tx_fails") == std::string::npos);
     CHECK(j.find("\"bus_tx_reads\":") != std::string::npos);      // the real one stays
+
+    // Modbus TCP (HomeHub) link — payload-only fields (issue #32), 0/off on this X10A snapshot. The
+    // connectivity flag is a 1/0 NUMBER like the other links so a metrics consumer keeps it; there is
+    // no write counter (the link is read-only).
+    CHECK(j.find("\"modbus_connected\":0,") != std::string::npos);
+    CHECK(j.find("\"modbus_connected\":false") == std::string::npos);   // number, not a dropped bool
+    HeartbeatFields mf; mf.modbus_enabled = true; mf.modbus_connected = true; mf.modbus_rx = 12; mf.modbus_fails = 3;
+    const std::string mj = build_heartbeat_json(mf);
+    CHECK(mj.find("\"modbus_enabled\":1,") != std::string::npos);
+    CHECK(mj.find("\"modbus_connected\":1,") != std::string::npos);
+    CHECK(mj.find("\"modbus_rx\":12,") != std::string::npos);
+    CHECK(mj.find("\"modbus_fails\":3}") != std::string::npos);
 
     // SOURCE freshness is its own field, and it is independent of bus health (#209 defect 5): the
     // link is up, the device is publishing, and the outdoor unit is simply not measuring. A consumer
@@ -2771,8 +2830,205 @@ static void test_modbus() {
     CHECK(mb_first_homehub(none, 2) == -1);
 }
 
+// The HomeHub Modbus register profile (def/homehub.hpp) — the DECODE MECHANICS (scaling, special
+// values, text, offset -> PDU). Physical correctness of each row is an on-hardware check; what is
+// host-testable is that the codecs + the extra `scale` divisor produce the right number and that a
+// 32765/66/67 special is refused rather than published as a large value.
+static void test_homehub() {
+    using namespace daik::def;
+    CHECK(HOMEHUB_REG_COUNT > 0);
+    auto find = [](uint16_t off) -> const HomeHubReg* {
+        for (int i = 0; i < HOMEHUB_REG_COUNT; i++)
+            if (HOMEHUB_REGS[i].offset == off) return &HOMEHUB_REGS[i];
+        return nullptr;
+    };
+    char buf[16];
+    MbValue v;
+    // Temperature (Temp16 = signed /100 °C) — return water at offset 42, read from an input register.
+    const HomeHubReg* t = find(42);
+    CHECK(t && t->type == MbType::Temp16 && t->space == MbFunc::ReadInput);
+    CHECK(homehub_decode(*t, 3550, v) && approx(v.value, 35.5));
+    CHECK(homehub_format(*t, 3550, buf, sizeof(buf)) && std::string(buf) == "35.5");
+    // A negative temperature keeps its sign — the exact class of bug the X10A port shipped (#35-#39).
+    CHECK(homehub_format(*t, static_cast<uint16_t>(-500), buf, sizeof(buf)) && std::string(buf) == "-5.0");
+    // Flow is a plain Int16 carrying L/min x100, so the `scale` field divides the decode by 100.
+    const HomeHubReg* f = find(49);
+    CHECK(f && f->type == MbType::Int16 && f->scale == 100);
+    CHECK(homehub_decode(*f, 1500, v) && approx(v.value, 15.0));
+    CHECK(homehub_format(*f, 1500, buf, sizeof(buf)) && std::string(buf) == "15.0");
+    // A special value (32765 wait / 32766 unavailable / 32767 unsupported) is NOT data: both refuse.
+    CHECK(!homehub_decode(*t, MB_UNAVAILABLE, v));
+    CHECK(!homehub_format(*t, MB_UNSUPPORTED, buf, sizeof(buf)));
+    CHECK(!homehub_format(*f, MB_WAIT, buf, sizeof(buf)));
+    // Text16 error code: 0x5538 -> "U8" (the guide's own worked example).
+    const HomeHubReg* ec = find(22);
+    CHECK(ec && ec->type == MbType::Text16);
+    CHECK(homehub_format(*ec, 0x5538, buf, sizeof(buf)) && std::string(buf) == "U8");
+    // An Int16 mode (no extra scale) prints as a bare integer, read back from a HOLDING register.
+    const HomeHubReg* om = find(3);
+    CHECK(om && om->type == MbType::Int16 && om->scale == 1 && om->space == MbFunc::ReadHolding);
+    CHECK(homehub_format(*om, 1, buf, sizeof(buf)) && std::string(buf) == "1");
+    // The 1-based EKRHH offset maps to the 0-based wire PDU address.
+    uint16_t pdu = 0xFFFF;
+    CHECK(mb_pdu_address(t->offset, pdu) && pdu == static_cast<uint16_t>(t->offset - 1));
+    // The synthetic MQTT group page resolves to "homehub" (the poll branch tags every HomeHub cache
+    // row with HOMEHUB_GROUP_REG so the bridge groups them together — this pins the two in step).
+    CHECK(std::string(group_for_page(HOMEHUB_GROUP_REG)) == "homehub");
+}
+
 // The syslog replay records (logic/bootlog.hpp): the build-identity boot line + the crash rendered as
 // datagram-sized single-line records. syslog.cpp sends these once, after DNS resolves.
+// The X10A ↔ HomeHub concept pairing (logic/homehub_map.hpp) — the ONE place the two independent
+// stacks meet. The pairing must be STRUCTURAL: a label match would be both incomplete (four
+// spellings of leaving water across the catalog) and wrong (the "(R1T)" tag names two different
+// sensors), and a wrong pairing is worst in the FALLBACK case, where the Modbus value stands alone
+// under the X10A row's name with nothing beside it to look implausible against.
+static void test_homehub_map() {
+    using namespace daik::logic;
+    // Every paired offset is a real HomeHub register, and every concept a real trend id (the latter
+    // is also a static_assert in the header — asserted here too so the failure names itself).
+    for (size_t i = 0; i < HOMEHUB_CONCEPT_COUNT; i++) {
+        const auto& c = HOMEHUB_CONCEPTS[i];
+        bool reg_exists = false;
+        for (int k = 0; k < daik::def::HOMEHUB_REG_COUNT; k++)
+            if (daik::def::HOMEHUB_REGS[k].offset == c.offset) { reg_exists = true; break; }
+        CHECK(reg_exists);
+        CHECK(trend_by_id(c.concept_id) != nullptr);
+    }
+    // Lookup both ways.
+    CHECK(std::string(homehub_concept_for(43)) == "dhw_tank");
+    CHECK(std::string(homehub_concept_for(40)) == "leaving_water");
+    CHECK(homehub_concept_for(51) == nullptr);   // power: X10A has no equivalent, deliberately unpaired
+    CHECK(homehub_concept_for(41) == nullptr);   // post-BUH: a DIFFERENT measurement point, not leaving_water
+    CHECK(homehub_concept_for(999) == nullptr);
+
+    // The X10A side resolves through trend_row_matches, so it agrees with the trend rings by
+    // construction. Spot-check the locators the pairings above depend on.
+    CHECK(std::string(x10a_concept_for(0x61, 10, "°C", 0)) == "dhw_tank");
+    CHECK(std::string(x10a_concept_for(0x61,  2, "°C", 0)) == "leaving_water");
+    CHECK(std::string(x10a_concept_for(0x61,  8, "°C", 0)) == "return_water");
+    CHECK(x10a_concept_for(0x61, 10, "bar", 0) == nullptr);   // unit is part of the locator
+    CHECK(x10a_concept_for(0x99,  0, "°C", 0)  == nullptr);
+
+    // THE LOAD-BEARING ASSERTION: on every DETECTABLE profile, each paired concept must resolve to
+    // exactly ONE row — otherwise the UI would either pair nothing (a Modbus value with no X10A row
+    // to sit beside) or pair ambiguously. Measured across the shipped catalog rather than assumed.
+    int nsig = 0;
+    daik::def::signatures(nsig);
+    size_t profiles_checked = 0;
+    for (const auto& prof : daik::def::profiles) {
+        if (!daik::def::is_detection_model(prof.id)) continue;
+        const auto view = daik::def::resolved(prof);
+        profiles_checked++;
+        for (size_t i = 0; i < HOMEHUB_CONCEPT_COUNT; i++) {
+            const char* want = HOMEHUB_CONCEPTS[i].concept_id;
+            int hits = 0;
+            for (size_t k = 0; k < view.count(); k++) {
+                const ValueDef d = adjudicated(view[k]);
+                const char* got = x10a_concept_for(d.reg, d.offset, unit_for_datatype(d.type), d.conv);
+                if (got && trend_cstr_eq(got, want)) hits++;
+            }
+            // 0 is legitimate — a profile need not carry every quantity (a monobloc has no room
+            // sensor). 2+ is not: it would make the pairing depend on row order.
+            CHECK(hits <= 1);
+        }
+    }
+    CHECK(profiles_checked > 20);   // the assertion above must have actually run over the catalog
+
+    // Each paired concept must resolve on at least ONE profile, or it is a pairing nobody can ever
+    // see — the same "a locator that resolves nowhere is a trend nobody will see" rule history.hpp
+    // states for its own coverage.
+    for (size_t i = 0; i < HOMEHUB_CONCEPT_COUNT; i++) {
+        int total = 0;
+        for (const auto& prof : daik::def::profiles) {
+            if (!daik::def::is_detection_model(prof.id)) continue;
+            const auto view = daik::def::resolved(prof);
+            for (size_t k = 0; k < view.count(); k++) {
+                const ValueDef d = adjudicated(view[k]);
+                const char* got = x10a_concept_for(d.reg, d.offset, unit_for_datatype(d.type), d.conv);
+                if (got && trend_cstr_eq(got, HOMEHUB_CONCEPTS[i].concept_id)) total++;
+            }
+        }
+        CHECK(total > 0);
+    }
+
+    // ── STATES ────────────────────────────────────────────────────────────────────────────────
+    // Same claim, one field wider. The wider key is the whole point: `3way valve`, `2way valve`,
+    // `BSH`, `BUH Step1`, `BUH Step2` and `Water pump operation` all sit at 0x60/12 and differ ONLY
+    // by converter, so a (reg, offset, unit) locator answers "the pump" when asked for the diverter.
+    CHECK(std::string(homehub_concept_for(37)) == "valve_dhw");
+    CHECK(std::string(homehub_concept_for(30)) == "pump_running");
+    CHECK(std::string(homehub_concept_for(53)) == "space_op");
+    // The refusal that matters: X10A's nearest DHW flag is the BOOST ("Powerful DHW Operation"),
+    // which reads OFF through an ordinary hot-water cycle. Pairing it would put "off" beside a tank
+    // being charged.
+    CHECK(homehub_concept_for(52) == nullptr);
+
+    // THE TRAP, asserted directly: same page, same offset, different converter → different concept.
+    CHECK(std::string(x10a_concept_for(0x60, 12, "", 306)) == "valve_dhw");
+    CHECK(std::string(x10a_concept_for(0x60, 12, "", 301)) == "pump_running");
+    CHECK(x10a_concept_for(0x60, 12, "", 302) == nullptr);   // BSH etc. share the byte, pair nothing
+    CHECK(x10a_concept_for(0x62,  2, "", 304) == nullptr);   // the DHW BOOST is deliberately unpaired
+
+    // Over the catalog: each state locator resolves to EXACTLY ONE row per detectable profile, and
+    // that row is the one the pairing names. Identity, not just count — a locator that resolves
+    // uniquely onto the wrong row is the failure this whole header exists to prevent.
+    for (size_t i = 0; i < HOMEHUB_STATE_COUNT; i++) {
+        const auto& st = HOMEHUB_STATES[i];
+        int profiles_with = 0;
+        for (const auto& prof : daik::def::profiles) {
+            if (!daik::def::is_detection_model(prof.id)) continue;
+            const auto view = daik::def::resolved(prof);
+            int hits = 0;
+            for (size_t k = 0; k < view.count(); k++) {
+                const ValueDef d = adjudicated(view[k]);
+                const char* got = x10a_concept_for(d.reg, d.offset, unit_for_datatype(d.type), d.conv);
+                if (got && trend_cstr_eq(got, st.concept_id)) {
+                    hits++;
+                    // A state is a BIT FLAG — if this ever resolved a numeric row, the UI would put
+                    // "ON" beside a temperature.
+                    CHECK(conv_is_binary(d.conv));
+                }
+            }
+            CHECK(hits <= 1);
+            if (hits == 1) profiles_with++;
+        }
+        CHECK(profiles_with > 20);   // a pairing carried by a handful of profiles is not a pairing
+    }
+
+    // ── COVERAGE, PINNED ──────────────────────────────────────────────────────────────────────
+    // The assertions above are "at most one per profile" and "carried by enough of them" — neither
+    // says how MANY profiles actually resolve each pairing, so the docs' claim that they all do was
+    // an unguarded statement about the catalog. Measured: every one of the nine resolves on every
+    // detectable profile. Pinned as a NUMBER rather than a >= so a regeneration that drops a row
+    // from one family is a decision someone makes on purpose: a pairing that stops resolving does
+    // not fail anywhere else — the second source simply, silently, stops appearing beside that row.
+    {
+        int detectable = 0;
+        for (const auto& prof : daik::def::profiles)
+            if (daik::def::is_detection_model(prof.id)) detectable++;
+        CHECK(detectable == 39);
+
+        auto resolves_everywhere = [&](const char* cid) {
+            int n = 0;
+            for (const auto& prof : daik::def::profiles) {
+                if (!daik::def::is_detection_model(prof.id)) continue;
+                const auto view = daik::def::resolved(prof);
+                for (size_t k = 0; k < view.count(); k++) {
+                    const ValueDef d = adjudicated(view[k]);
+                    const char* got = x10a_concept_for(d.reg, d.offset, unit_for_datatype(d.type), d.conv);
+                    if (got && trend_cstr_eq(got, cid)) { n++; break; }
+                }
+            }
+            return n;
+        };
+        for (size_t i = 0; i < HOMEHUB_CONCEPT_COUNT; i++)
+            CHECK(resolves_everywhere(HOMEHUB_CONCEPTS[i].concept_id) == detectable);
+        for (size_t i = 0; i < HOMEHUB_STATE_COUNT; i++)
+            CHECK(resolves_everywhere(HOMEHUB_STATES[i].concept_id) == detectable);
+    }
+}
+
 static void test_bootlog() {
     // ── Build identity: emitted on EVERY boot, clean or not — it is what ties a log stream to a binary.
     BootIdent id;
@@ -3612,6 +3868,26 @@ static void test_redact() {
     // here would leave the redaction incoherent — scrubbed in the JSON, spelled out in the log.
     CHECK(redact_diag_line("mqtt: retired legacy HA device daikin_a1b2c3 (now daikin-altherma-esp32)") ==
           "mqtt: retired legacy HA device <redacted> (now daikin-altherma-esp32)");
+    // The DISCOVERED HomeHub hostname. `homehub-524288-<serial>` carries the hub's serial number, so
+    // it identifies the reporter's hardware exactly as an SSID does — and /status?redact=1 already
+    // withholds the same string as modbus.host, so an unruled log line put it back a few sections
+    // below in the very same bug report.
+    CHECK(redact_diag_line("modbus: one-shot mDNS search found gateway homehub-524288-15702.local") ==
+          "modbus: one-shot mDNS search found gateway <redacted>");
+    CHECK(redact_diag_line("modbus: 2 HomeHubs discovered via mDNS — using homehub-524288-15702") ==
+          "modbus: 2 HomeHubs discovered via mDNS — using <redacted>");
+    // The count SURVIVES on the several-hubs line: that more than one gateway answered is what
+    // explains an unexpected pick, and it sits before the marker precisely so it can be kept.
+    CHECK(redact_diag_line("modbus: 2 HomeHubs discovered via mDNS — using homehub-524288-15702")
+              .find("modbus: 2 ") == 0);
+    // The FAILURE half of the one-shot search is a SEPARATE diag_printf so it matches no rule and
+    // survives whole. Written as one statement with a substituted tail, the two outcomes shared the
+    // prefix "search found " and the only rule covering the hostname also blanked the one fact a
+    // reader needs — why no hub was ever contacted.
+    {
+        const std::string none = "modbus: one-shot mDNS search found no gateway — not searching again";
+        CHECK(redact_diag_line(none) == none);
+    }
 
     // What must SURVIVE. Redacting the identifier is only useful if the rest still diagnoses: the
     // errno says why DNS failed, reachable= says whether the collector answers, and the esp_err
@@ -3730,7 +4006,7 @@ static void test_config_store() {
     board.led_gpio = 35; board.led_type = 1; board.led_inverted = false;
     board.btn_gpio = 41; board.btn_active_low = true;
     std::vector<uint8_t> bb = config_blob_serialize(board);
-    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 4);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 5);
     ConfigBlob rt;
     CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
     CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
@@ -3752,11 +4028,12 @@ static void test_config_store() {
     // user's WiFi and MQTT credentials on the upgrade. It must decode, and it must report
     // has_board == false so the caller seeds the Kconfig defaults instead of reading "absent" as
     // "indicator disabled" (which would silently darken every XIAO's LED).
-    std::vector<uint8_t> v1 = buf;                       // `buf` was serialized as v4 by this build,
-    // so build a genuine v1 body: header + the v1 fields only, taken from the v4 encoding by dropping
-    // the 13-byte board block (3x u32 + 1 flag byte), the 1-byte v3 channel AND the 1-byte v4 language
-    // that precede the CRC.
-    v1.erase(v1.end() - 4 - 15, v1.end() - 4);
+    std::vector<uint8_t> v1 = buf;                       // `buf` is serialized as v5 by this build,
+    // so build a genuine v1 body: header + the v1 fields only, by dropping every trailing block that
+    // precedes the CRC — the 13-byte v2 board block (3x u32 + 1 flag byte), the 1-byte v3 channel,
+    // the 1-byte v4 language and the 11-byte v5 HomeHub block (empty mb_host [2] + mb_port u32 +
+    // mb_unit_id u32 + 1 flag byte) = 26 bytes.
+    v1.erase(v1.end() - 4 - 26, v1.end() - 4);
     v1[4] = 1;
     restamp(v1);
     ConfigBlob legacy;
@@ -3765,10 +4042,10 @@ static void test_config_store() {
     CHECK(!legacy.has_board);
     CHECK(legacy.wifi_ssid == a.wifi_ssid && legacy.mqtt_uri == a.mqtt_uri);   // v1 payload intact
     CHECK(legacy.led_gpio == -1);                        // the struct default, not the 999 sentinel
-    // A TRUNCATED v4 must not decode as a valid v3/v2/v1 with silently-default fields: the version
-    // byte still says 4, so the missing blocks are caught by the length rule, not papered over.
+    // A TRUNCATED v5 must not decode as a valid v4/v3/v2/v1 with silently-default values: the version
+    // byte still says 5, so the missing v5 block is caught by the length rule, not papered over.
     std::vector<uint8_t> trunc = bb;
-    trunc.erase(trunc.end() - 4 - 15, trunc.end() - 4);
+    trunc.erase(trunc.end() - 4 - 11, trunc.end() - 4);   // drop the 11-byte v5 HomeHub block
     restamp(trunc);
     CHECK(!config_blob_deserialize(trunc.data(), trunc.size(), out));
 
@@ -3786,7 +4063,7 @@ static void test_config_store() {
     // would be a spectacularly bad trade. has_ota == false is how the caller tells "no channel
     // stored" from "explicitly release"; both mean release, only the diag line differs.
     std::vector<uint8_t> v2 = bb;
-    v2.erase(v2.end() - 4 - 2, v2.end() - 4);            // drop the v3 channel + v4 language bytes
+    v2.erase(v2.end() - 4 - 13, v2.end() - 4);           // drop the v3 channel + v4 language + v5 block
     v2[4] = 2;
     restamp(v2);
     ConfigBlob pre;
@@ -3794,6 +4071,7 @@ static void test_config_store() {
     CHECK(config_blob_deserialize(v2.data(), v2.size(), pre));
     CHECK(!pre.has_ota && pre.ota_channel == 0);         // the struct default, not the 7 sentinel
     CHECK(!pre.has_lang && pre.ui_lang == 0);            // v2 predates the language byte too
+    CHECK(!pre.has_modbus && pre.mb_port == 502 && pre.mb_unit_id == 1);
     CHECK(pre.has_board && pre.led_gpio == -1 && pre.wifi_ssid == "net");   // v2 payload intact
 
     // ── v4: the UI language override ──────────────────────────────────────────────────────────────
@@ -3809,7 +4087,7 @@ static void test_config_store() {
     // v3 blob and must still decode — the channel survives, and the absent language reads as auto
     // (has_lang == false, ui_lang == 0), so the browser keeps auto-detecting exactly as before.
     std::vector<uint8_t> v3 = lbv;
-    v3.erase(v3.end() - 4 - 1, v3.end() - 4);            // drop the v4 language byte
+    v3.erase(v3.end() - 4 - 12, v3.end() - 4);           // drop the v4 language + the v5 HomeHub block
     v3[4] = 3;
     restamp(v3);
     ConfigBlob prel;
@@ -3817,6 +4095,44 @@ static void test_config_store() {
     CHECK(config_blob_deserialize(v3.data(), v3.size(), prel));
     CHECK(!prel.has_lang && prel.ui_lang == 0);          // the struct default, not the 7 sentinel
     CHECK(prel.has_ota && prel.ota_channel == 1 && prel.wifi_ssid == "net");   // v3 payload intact
+
+    // ── v5: the HomeHub Modbus stack ────────────────────────────────────────────────────────────
+    // v5 and not v4: the language byte and this block were written in parallel and both claimed v4.
+    // main's language byte landed first and is already on published builds, so this took the later
+    // number — a second, different "v4" would decode that byte as a HomeHub setting.
+    ConfigBlob mb; mb.wifi_ssid = "net";
+    mb.mb_host = "homehub-524288-abc.local";
+    mb.mb_port = 502; mb.mb_unit_id = 3; mb.actuation_enabled = true;
+    std::vector<uint8_t> mbb = config_blob_serialize(mb);
+    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 5);
+    ConfigBlob mrt;
+    CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
+    CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-abc.local");
+    CHECK(mrt.mb_port == 502 && mrt.mb_unit_id == 3 && mrt.actuation_enabled);
+    CHECK(mrt.wifi_ssid == "net");                       // the earlier-version fields round-trip too
+    // An EMPTY mb_host (= mDNS auto-discovery) must survive the string encoding, and the two booleans
+    // share ONE flag byte — so they must not bleed into each other, nor from the board/ota/language
+    // bytes that precede them.
+    mb.mb_host = ""; mb.actuation_enabled = false;
+    mbb = config_blob_serialize(mb);
+    CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
+    CHECK(mrt.mb_host.empty() && !mrt.actuation_enabled);
+    mb.actuation_enabled = true;
+    mbb = config_blob_serialize(mb);
+    CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
+    CHECK(mrt.actuation_enabled);
+    // BACKWARD COMPATIBILITY: a v4 blob (a device from before the transport existed, but WITH the
+    // language byte) must decode, report has_modbus == false and leave the mb_* struct defaults
+    // (X10A / 502 / 1) — the same trade v1/v2/v3 already refuse to make.
+    std::vector<uint8_t> v4 = mbb;
+    v4.erase(v4.end() - 4 - 11, v4.end() - 4);           // drop the 11-byte v5 block (empty host)
+    v4[4] = 4;
+    restamp(v4);
+    ConfigBlob v4rt;
+    v4rt.mb_port = 9; v4rt.mb_unit_id = 9;               // sentinels: must reset
+    CHECK(config_blob_deserialize(v4.data(), v4.size(), v4rt));
+    CHECK(!v4rt.has_modbus && v4rt.mb_port == 502 && v4rt.mb_unit_id == 1);
+    CHECK(v4rt.has_lang && v4rt.has_ota && v4rt.wifi_ssid == "net");   // the v4 payload is intact
 }
 
 static void test_mcp_jsonrpc() {
@@ -6923,6 +7239,8 @@ int main() {
     test_mqtt_group();
     test_mqtt_uri();
     test_modbus();
+    test_homehub();
+    test_homehub_map();
     test_heartbeat();
     test_crashinfo();
     test_bootlog();

@@ -61,4 +61,23 @@ open(p, "w").write(s)
 PY
 expect_red "a new diag line printing a config value with no rule"
 
+cp -R "$ROOT/main/syslog.cpp" "$TMP/main/syslog.cpp"
+
+# 3. The DISCOVERED-identity shape, which is the one that got through. hp_modbus.cpp's one-shot mDNS
+#    search puts the HomeHub's serial-derived hostname (homehub-524288-<serial>) into a local called
+#    `found` and logs it. That is not a config value copied into a local — it is a value the device
+#    LEARNS at runtime and then treats as one, and /status?redact=1 withholds the very same string as
+#    modbus.host. The heuristic missed it because the identifier says nothing about what it holds,
+#    which is exactly why SENSITIVE lists bland names rather than the /status field names alone.
+#    Seeded by deleting the RULE, so what is under test is the heuristic's ability to see the line.
+python3 - "$TMP/main/logic/redact.hpp" <<'PY'
+import sys, re
+p = sys.argv[1]
+s = open(p).read()
+s2 = re.sub(r'\n\s*\{"modbus: one-shot mDNS search found gateway ", ""\},', '', s, count=1)
+assert s2 != s, "seed 3 did not apply — the rule text moved"
+open(p, "w").write(s2)
+PY
+expect_red "an unruled diag line printing a DISCOVERED HomeHub hostname"
+
 exit "$fail"

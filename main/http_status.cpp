@@ -14,6 +14,8 @@
 #include "diag_log.hpp"
 #include "history.hpp"
 #include "hp_poll.hpp"
+#include "hp_modbus.hpp"
+#include "logic/homehub_map.hpp"
 #include "logic/history.hpp"
 #include "logic/convert.hpp"   // conv_is_binary — /values marks a bit-flag row from its converter id
 #include "logic/crashinfo.hpp"
@@ -58,7 +60,7 @@ namespace daik {
 // radio range, and a control char in one used to emit unparseable JSON.
 static std::string jstr(const std::string& s) { return json_quote(s); }
 
-// The same, for the seven values `GET /status?redact=1` withholds (logic/redact.hpp). Applied where
+// The same, for the eight values `GET /status?redact=1` withholds (logic/redact.hpp). Applied where
 // the value is WRITTEN, never as a pass over the finished JSON: this builder runs on the httpd task
 // whose stack overflow killed v1.0.12, so a second full-size buffer is exactly what the budget has
 // no room for. The KEY is always emitted — an omitted field is indistinguishable from an older
@@ -99,7 +101,7 @@ static esp_err_t h_captive(httpd_req_t* req) {
     return httpd_resp_send(req, nullptr, 0);   // empty body — nothing to gzip, nothing to render
 }
 
-// `redact` withholds the seven reporter-identifying values (logic/redact.hpp) so a snapshot can be
+// `redact` withholds the eight reporter-identifying values (logic/redact.hpp) so a snapshot can be
 // pasted into a bug report. Defaulted OFF: the dashboard polls this same route and legitimately
 // shows the SSID and the broker — only GET /status?redact=1 asks for the scrubbed form.
 //
@@ -225,6 +227,34 @@ static std::string build_status_json_string(bool redact = false) {
          ",\"crc_err\":" + std::to_string(hp.crc_err) +
          ",\"timeout_err\":" + std::to_string(hp.timeout_err) + "},";
     j += "\"profile\":{\"id\":" + jstr(c.profile) + "},";
+
+    // The HomeHub Modbus stack — a SECOND, INDEPENDENT source, never an alternative to the X10A link
+    // reported above (docs/MODBUS_PROTOCOL.md). `enabled` distinguishes "no HomeHub on this
+    // installation" from "configured but not connected": the UI shows nothing at all for the first
+    // and a state for the second. `host` is the RESOLVED / mDNS-discovered host, so the card shows
+    // what discovery FOUND rather than the empty string it was asked with — redacted like the other
+    // reporter-identifying values. No write counters: the stack has no write path.
+    // Successive += with bare literals — the httpd-stack rule the rest of this builder follows.
+    const ModbusStatus mb = mb_status();
+    j += "\"modbus\":{\"enabled\":";  j += mb.enabled ? "true" : "false";
+    j += ",\"connected\":";            j += mb.connected ? "true" : "false";
+    j += ",\"discovering\":";          j += mb.discovering ? "true" : "false";
+    // `searched` = the one-shot mDNS search has RUN. With no address that is the whole difference
+    // between "no gateway on this LAN, and we will not look again" and "about to look".
+    j += ",\"searched\":";             j += c.mb_searched ? "true" : "false";
+    // The ADDRESS comes from the CONFIG (manual else discovered), the STATE from the live link.
+    // Reading the address off the link status was wrong before the first connect ever succeeded:
+    // ModbusStatus is zero-initialised, so a device that had never dialled reported port 0 and unit
+    // id 0 — settings it would itself REJECT — which the UI then prefilled into its editor.
+    j += ",\"host\":";                 j += jstr_r(config_modbus_host(c), redact);
+    j += ",\"port\":";                 j += std::to_string(c.mb_port);
+    j += ",\"unit_id\":";              j += std::to_string(c.mb_unit_id);
+    j += ",\"rx\":";                   j += std::to_string(mb.rx_ok);
+    j += ",\"fails\":";                j += std::to_string(mb.rx_fail);
+    j += ",\"values\":";               j += std::to_string(mb.values);
+    j += ",\"actuation_enabled\":";    j += c.actuation_enabled ? "true" : "false";
+    if (!mb.last_error.empty()) { j += ",\"error\":"; j += jstr(mb.last_error); }
+    j += "},";
 
     // Which rows carry a 24-hour trend, and at what cadence. The ID is the CONCEPT (GET /history
     // takes it); the LABEL is how the detected profile spells that row, which is what lets the UI
@@ -475,7 +505,7 @@ static esp_err_t h_status(httpd_req_t* req) {
 // "R1T-Outdoor air temp.", "Outdoor Air Temp (R1T)", …), so a pattern list would silently stop
 // covering a row the C++ test still gates.
 static std::string build_values_array() {
-    const size_t cap = def::lookup_view(config().profile.c_str()).count();
+    const size_t cap = hp_values_capacity();
     std::vector<CachedValue> v(cap ? cap : 1);
     size_t n = hp_values_snapshot(v.data(), v.size());
     std::string j = "[";
@@ -504,14 +534,81 @@ static std::string build_values_array() {
         // (a script, the MCP surface) gets the answer without reimplementing the rule, and so the
         // marker travels with the row rather than being recomputed from a snapshot taken elsewhere.
         if (v[i].held) j += ",\"held\":true";
+        // The row's CONCEPT — the structural id logic/homehub_map.hpp pairs the two independent
+        // sources on (logic/history.hpp's trend vocabulary, resolved through the same
+        // trend_row_matches() the rings use). It is what lets the browser put a Modbus reading beside
+        // this one, and stand in for it when the X10A bus is silent, WITHOUT matching on the label —
+        // which would be both incomplete and wrong (the catalog spells one quantity many ways and
+        // reuses tags across quantities). Emitted only where a concept exists, so the many unpaired
+        // rows cost no bytes.
+        // `conv` is part of the key because the STATE pairings need it: six flags share the single
+        // byte 0x60/12 and differ only in which bit their converter masks, so without it the diverter
+        // and the circulation pump are one row.
+        if (const char* cid = logic::x10a_concept_for(v[i].reg, v[i].off, v[i].unit.c_str(), v[i].conv))
+            { j += ",\"concept\":"; j += jstr(cid); }
         j += "}";
     }
     j += "]";
     return j;
 }
 
+// The HomeHub rows, from the OTHER stack's cache (hp_modbus.cpp). A separate array rather than mixed
+// into the one above, because they are a separate source with its own liveness: merging them would
+// make "is this reading current?" a per-row question the consumer cannot answer. Each row carries the
+// concept it pairs on, or none when the HomeHub has no X10A counterpart for it (the real power
+// measurement, the Smart-Grid mode) — those are simply Modbus-only readings.
+static std::string build_modbus_values_array(bool& live) {
+    const size_t cap = mb_values_capacity();
+    std::vector<CachedValue> v(cap ? cap : 1);
+    const size_t n = mb_values_snapshot(v.data(), v.size(), live);
+    std::string j = "[";
+    for (size_t i = 0; i < n; i++) {
+        if (i) j += ",";
+        j += "{\"label\":";
+        j += jstr(v[i].label);
+        j += ",\"value\":";
+        j += v[i].value.empty() ? "null" : jstr(v[i].value);
+        j += ",\"unit\":";
+        j += jstr(v[i].unit);
+        j += ",\"off\":";
+        j += std::to_string(v[i].off);
+        if (conv_is_binary(v[i].conv)) j += ",\"binary\":true";
+        if (const char* cid = logic::homehub_concept_for(v[i].off))
+            { j += ",\"concept\":"; j += jstr(cid); }
+        j += "}";
+    }
+    j += "]";
+    return j;
+}
+
+// The two sources ride ONE response but stay two arrays, mirroring the two stacks behind them:
+// `values` is X10A, `modbus` is the HomeHub. `modbus` is emitted only when that stack is enabled, so
+// a device without one sees exactly the payload it saw before this feature existed.
 static esp_err_t h_values(httpd_req_t* req) {
-    std::string j = "{\"values\":" + build_values_array() + "}";
+    std::string j = "{\"values\":";
+    j += build_values_array();
+    // Emitted only while the link is CONNECTED, not merely enabled. That is a payload invariant
+    // worth having: if the `modbus` array is present, every row in it was read this cycle. Gating on
+    // `enabled` alone served the last good cache after the link dropped, and a consumer has no way
+    // to tell — the rows look identical. The browser is not the only consumer, so the guarantee
+    // belongs here rather than in a check each client has to remember to make.
+    //
+    // TWO checks, and the second is the one that makes the invariant true. The first is only a cheap
+    // skip so a device without a HomeHub builds nothing; asking it and THEN copying the cache leaves
+    // a window in which the link drops in between, and the response would carry the previous
+    // session's rows under a guarantee that they were read this cycle. `live` comes back from the
+    // snapshot itself, which is the only place the cache and the link state can be tied into one
+    // answer (they sit behind two mutexes). Not live → the key is not written at all: an ABSENT
+    // array and an empty one are different claims, and only absence says "no current reading".
+    if (mb_status().connected) {
+        bool live = false;
+        const std::string arr = build_modbus_values_array(live);
+        if (live) {
+            j += ",\"modbus\":";
+            j += arr;
+        }
+    }
+    j += "}";
     return http_send_json(req, j.c_str());
 }
 

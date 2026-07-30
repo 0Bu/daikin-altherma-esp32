@@ -30,6 +30,12 @@ bool config_save(const Config& c, bool require_link = false);
 // poll engine must keep using it this session — a lost cache just means re-detecting next boot).
 bool config_save_link(int rx_pin, int tx_pin, Protocol proto);
 
+// Commit ONLY the one-shot mDNS search result (the discovered gateway hostname, or "" when nothing
+// answered) + the "search has run" latch. MODBUS-TASK ONLY, narrow for the same field-ownership
+// reason as config_save_link. Returns false if the NVS write failed; the RAM patch is applied either
+// way, so this boot behaves correctly and only the one-shot promise costs a repeat next boot.
+bool config_save_modbus_found(const std::string& host);
+
 // Commit ONLY the detected model (profile + fingerprint) to the live config. RAM-only and
 // unfailable: the model is session-only and re-derived on every boot, so it is never persisted.
 void config_set_model(std::string profile, uint32_t fp_pages, int fp_kw_tenths, int fp_iu_kw_tenths,

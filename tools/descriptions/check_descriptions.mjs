@@ -136,6 +136,19 @@ function loadDescriptions(file) {
 // cross-check is derived from the file itself, so it never needs updating when the catalog grows.
 const ROW_RE = /\{\s*0x[0-9A-Fa-f]+\s*,[^}]*?"((?:[^"\\]|\\.)*)"\s*(,\s*true\s*)?\}/g;
 const ROW_OPEN_RE = /^\s*\{\s*0x[0-9A-Fa-f]+\s*,/gm;
+// The HomeHub (Modbus) map is a SECOND row format in this same directory, and it was invisible here:
+// its rows open with a decimal EKRHH offset rather than an 0x page, so ROW_OPEN_RE matched nothing,
+// hits === opens held vacuously at 0 === 0, and def/homehub.hpp passed as a file with no readings in
+// it. Twenty-five gateway readings therefore shipped to the web UI with no explainer at all while
+// this audit — the one guard whose whole subject is "can the user find out what this value IS" —
+// stayed green. A scraper that matches nothing reports full coverage of nothing, which is the exact
+// failure the note above ROW_RE warns about, arriving through a format it did not know existed.
+// The label is the last STRING in the row; an optional trailing `, true` marks a two-state register
+// (def/homehub.hpp `bin`) and must not stop the match — when that field was added this regex matched
+// 20 of 27 rows and the parsed-vs-opens cross-check below correctly refused to run rather than
+// reporting coverage of a catalog it had only partly read.
+const HH_ROW_RE = /\{\s*\d+\s*,\s*MbFunc::[^}]*?"((?:[^"\\]|\\.)*)"\s*(?:,\s*\w+\s*)?\}/g;
+const HH_OPEN_RE = /^\s*\{\s*\d+\s*,\s*MbFunc::/gm;
 
 function loadLabels(dir) {
   let files;
@@ -153,10 +166,24 @@ function loadLabels(dir) {
       die(2, `${f}: row extraction is unreliable (${hits.length} parsed vs ${opens} row starts) — ` +
              'the catalog row format changed; fix ROW_RE before trusting this audit');
     }
-    if (opens > 0) profiles++;
+    // The HomeHub map, same directory and same question, different row shape. Cross-checked the same
+    // way — a format change must stop this audit rather than quietly empty it.
+    const hhOpens = (txt.match(HH_OPEN_RE) || []).length;
+    const hhHits = [...txt.matchAll(HH_ROW_RE)];
+    if (hhHits.length !== hhOpens) {
+      die(2, `${f}: HomeHub row extraction is unreliable (${hhHits.length} parsed vs ${hhOpens} ` +
+             'row starts) — the map row format changed; fix HH_ROW_RE before trusting this audit');
+    }
+    if (opens > 0 || hhOpens > 0) profiles++;
     for (const m of hits) {
       rows++;
       if (m[2]) { skipped++; continue; }                       // no_publish: never reaches /values
+      const lab = m[1].replace(/\\(["\\])/g, '$1');
+      if (!labels.has(lab)) labels.set(lab, new Set());
+      labels.get(lab).add(f);
+    }
+    for (const m of hhHits) {
+      rows++;
       const lab = m[1].replace(/\\(["\\])/g, '$1');
       if (!labels.has(lab)) labels.set(lab, new Set());
       labels.get(lab).add(f);

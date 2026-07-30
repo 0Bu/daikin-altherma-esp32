@@ -8,6 +8,7 @@
 #include "hp_poll.hpp"
 #include "logic/config_model.hpp"
 #include "logic/mqtt_uri.hpp"   // parse_mqtt_uri — host/port/TLS split, host-tested
+#include "hp_modbus.hpp"        // mb_reconfigure — start/stop the second, independent stack
 
 #include "cJSON.h"
 #include "esp_http_server.h"
@@ -373,6 +374,17 @@ static esp_err_t set_hp(httpd_req_t* req) {
     // proto is auto-detected (hp_detect.cpp), not set from the UI.
     c.rx_pin    = ji(j, "rx", c.rx_pin);
     c.tx_pin    = ji(j, "tx", c.tx_pin);
+    // The HomeHub Modbus stack (issue #32). All optional — an omitted key keeps its stored value, so
+    // a wiring-only patch (rx/tx) leaves the HomeHub untouched and the pin picker's
+    // {profile:"auto",rx,tx} POST cannot switch anything on. This is a SECOND source, not an
+    // alternative to X10A: enabling it starts a separate task, it does not stop the X10A poll.
+    // mb_host is updated only when the key is present, so an unrelated patch cannot clobber the
+    // empty string that means auto-discovery. Ranges are enforced by validate() below.
+    cJSON* hostItem = cJSON_GetObjectItem(j, "mb_host");
+    if (cJSON_IsString(hostItem)) c.mb_host = hostItem->valuestring;   // "" = fall back to the search
+    c.mb_port           = ji(j, "mb_port", c.mb_port);
+    c.mb_unit_id        = ji(j, "mb_unit_id", c.mb_unit_id);
+    c.actuation_enabled = jb(j, "actuation_enabled", c.actuation_enabled);
     cJSON_Delete(j);
 
     std::string reason;
@@ -387,6 +399,9 @@ static esp_err_t set_hp(httpd_req_t* req) {
     if (!config_save(c, /*require_link=*/true))
         return send_err(req, "500 Internal Server Error", "config write failed");
     hp_poll_reconfigure();
+    // The HomeHub stack is told separately, because it IS separate: this starts or stops its task
+    // and re-resolves its address without touching the X10A poll engine above.
+    mb_reconfigure();
     return http_send_json(req, "{\"ok\":true}");
 }
 
@@ -569,6 +584,9 @@ static esp_err_t do_detect(httpd_req_t* req) {
     c.fp_valid = false;
     config_set_runtime(c);
     hp_poll_reconfigure();
+    // The HomeHub stack is told separately, because it IS separate: this starts or stops its task
+    // and re-resolves its address without touching the X10A poll engine above.
+    mb_reconfigure();
     return http_send_json(req, "{\"ok\":true}");
 }
 

@@ -1,0 +1,283 @@
+# Modbus TCP — the Daikin HomeHub link
+
+> **Status: READ-ONLY, and that is a design stance, not a phase.** This firmware speaks Modbus TCP to
+> a **Daikin HomeHub (EKRHH)** as an *alternative* to the X10A service-port tap. It **reads**; it does
+> not write. There is no write function in `main/hp_modbus.cpp`, no command topic, no writable HA
+> entity and no HTTP endpoint that can set a pump register — verifiable by `grep`. An in-firmware
+> actuation path is planned separately (issue #32 P3) and is gated by the persisted
+> `actuation_enabled` flag, which today gates nothing because nothing writes.
+>
+> **X10A remains the default.** A device only speaks Modbus if someone selects it in the web UI, and
+> switching back is one pick. See [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md) for the default link.
+
+## Why a second SOURCE at all
+
+The X10A service port is read-only *by the protocol* — it has no write command, which is why this
+firmware has always been a one-way telemetry bridge ([`ARCHITECTURE.md`](ARCHITECTURE.md)). The
+**HomeHub** is a separate, paid Daikin accessory wired to the indoor unit's **P1/P2** bus (connector
+X6A — *not* X10A) that exposes a Modbus server on the LAN. It is the officially supported writable
+path, and it publishes a smaller but more curated telemetry map than the raw X10A pages.
+
+This phase builds the **second source and its read path** only: discovery, connection, register decode,
+telemetry into the same cache every other surface reads, and link diagnostics.
+
+## Wire facts
+
+Source: *EKRHH Daikin HomeHub — Installer reference guide 4P744838-1E*, §2.5, §9, §13.
+
+| | |
+|---|---|
+| Transport | Modbus **TCP/IP** over the LAN (no extra hardware — the ESP32's WiFi reaches it) |
+| Port | **502**, plaintext. The hub also offers Modbus-over-TLS on `:802`; **out of scope** — this client uses `:502` by choice, the same trusted-LAN posture as the rest of the API |
+| Unit id | 1–247, default **1** (set on the hub) |
+| Framing | MBAP header `[txn(2), proto=0(2), len(2), unit(1)]` + PDU. **No CRC** — unlike Modbus RTU, integrity is the MBAP length + the TCP checksum |
+| Byte order | Big-endian on the wire |
+| Addressing | The HomeHub tables print **1-based** data-model offsets; the wire PDU address is **offset − 1** |
+| Function codes | FC03 read-holding, FC04 read-input (both used). FC06/FC16 write are implemented in the pure framing header but **called by nothing** |
+
+**Data formats** (16-bit, one register each):
+
+| Type | Decode |
+|---|---|
+| `Temp16` | signed ÷100 → °C |
+| `Pow16` | signed ÷100 → kW |
+| `Int16` | signed, as-is (the flow register carries L/min ×100, so the profile applies a further ÷100) |
+| `Text16` | unsigned = 2 ASCII chars, hi/lo byte — e.g. `0x5538` → `"U8"` |
+
+**Special return values** (§9.2.3) — these are *not data* and are never published as a reading:
+
+| Value | Meaning |
+|---|---|
+| `32765` | "wait for value" — the hub is still syncing |
+| `32766` | unavailable in this configuration |
+| `32767` | unsupported by this device |
+
+`mb_is_special()` catches all three before any scaling, so a sentinel can never leak out as a large
+number — the `#35–#39` failure shape this project exists to avoid.
+
+**Compatibility is not unconditional.** The Modbus register set requires Unified MMI2 firmware
+≥ 7.8.0 on the audited ERGA-EV / EHBH / X-E family, and individual registers can be inoperative per
+model (holding registers 59 and 61 are documented as not operational on Micon 20002203: a read
+returns the `32766` sentinel and a write is rejected by the hub).
+
+## Discovery — mDNS, with a manual fallback
+
+§2.5, verbatim: *"Multicast DNS (mDNS) is needed for the discovery of the Daikin HomeHub, which
+advertises on the `_http._tcp.local.` service."* Three consequences shape the implementation:
+
+1. **The advert is the hub's HTTP server on port 80, not a Modbus SRV record.** mDNS yields the
+   host/IP only; the client then connects Modbus on the well-known port **502**.
+2. **`_http._tcp` is noisy — and this firmware is one of the responders** (`main/wifi.cpp` registers
+   its own `_http._tcp` advert). A browse is therefore filtered by the hub's stable hostname prefix
+   `homehub-*` (`is_homehub_hostname()`, `logic/modbus.hpp`); without that filter the device could
+   try to talk Modbus to itself or to an unrelated HTTP device.
+3. **mDNS needs a single subnet and multicast/IGMP.** A manual host is therefore mandatory as a
+   fallback, not a nicety.
+
+**How it behaves:** leave the host **empty** and the device discovers the hub itself on every
+connection attempt and uses what it finds — no button to press, and `/status.modbus.host` reports the
+host it actually resolved so the UI shows what was found rather than what was asked for. Set a host
+(an IP, or a `.local` name resolved over mDNS, or an ordinary DNS name) and that address is used
+verbatim. If several `homehub-*` responders answer, the first is used and the count is logged to
+`/diag` rather than silently guessed at.
+
+## The register map
+
+`main/def/homehub.hpp` — the Modbus counterpart of the X10A `def/` profiles, and the only place a
+HomeHub register's meaning is written down in this repo. Each row is
+`{offset, space (FC04/FC03), MbType, scale, unit, label}`.
+
+Read today (UC3 Daikin Altherma):
+
+* **Faults** (input): unit error active `21`, error code `22` (`Text16`), sub-code `23`
+* **Temperatures** (input, `Temp16`): leaving water PHE `40` / BUH `41`, return `42`, DHW tank `43`,
+  outdoor air `44`, liquid refrigerant `45`, room `50`
+* **Flow + power** (input): flow `49` (`Int16`, L/min ×100), power `51` (`Pow16`, kW)
+* **Setpoints and modes** (holding, read back **read-only**): LWT main heating `1` / cooling `2`,
+  operation mode `3`, space heating ON/OFF `4`, room thermostat heating `6` / cooling `7`, quiet mode
+  `9`, DHW reheat setpoint `10`, Smart-Grid mode `56`, power limits `57`/`58` (`Pow16`)
+
+Reading a holding register is not a step toward writing it — the hub's own telemetry is split across
+both spaces, and a setpoint the plant is currently running to is a reading like any other.
+
+> **Physical correctness is confirmed on hardware.** The host tests (`test_homehub()` in
+> `test/test_logic.cpp`) verify the *decode mechanics* — scaling, the special-value guard, `Text16`,
+> the offset→PDU mapping, and that a negative temperature keeps its sign. Whether a given offset means
+> what the guide says it means on *your* unit is a hardware check, the same rule the X10A domain audit
+> exists to enforce ("passing the tests is not the same as being RIGHT", `.claude/CLAUDE.md`).
+
+## Two independent stacks
+
+**The HomeHub is a second SOURCE, not an alternative transport, and there is no selector between
+them.** X10A and Modbus run at the same time, as separate FreeRTOS tasks with separate caches and
+separate link states. Neither notices the other failing.
+
+That is a deliberate correction of an earlier design in which `transport` chose one *or* the other.
+Modelling them as interchangeable was wrong about the hardware: a UART tap on the pump's service port
+and a TCP client to a LAN accessory share no wire, no framing, no register model and — the part that
+matters — **no failure mode**. X10A dies at the cable, a pin or the framing; Modbus dies at the LAN,
+mDNS or the hub. Coupling them lets either failure mask the other.
+
+What that buys, concretely:
+
+* Pull the service cable and the HomeHub keeps reporting. Lose the LAN and X10A keeps polling.
+* **A device with no HomeHub pays nothing.** The task is created only while the configured address, so
+  there is no task, no socket, no mDNS traffic and no stack — which is also why `hp_poll` could give
+  back the 4 KB an earlier revision had taken from it (its stack is 8192 again; the
+  `getaddrinfo`/mDNS/socket call chain now lives on the task that actually makes those calls).
+* Disabling it live retires the task: it checks the flag at the top of its cycle and deletes itself.
+
+| | X10A | Modbus (HomeHub) |
+|---|---|---|
+| Task | `hp_poll` (8192) | `hp_modbus` (6144, only when enabled) |
+| Cache | `hp_values_snapshot()` | `mb_values_snapshot()` |
+| State | `/status.hp` | `/status.modbus` |
+| Rows | ~100 | ~23 |
+| Fails on | cable · pin · framing | LAN · mDNS · hub |
+
+## How the two sources meet
+
+In exactly one place: [`main/logic/homehub_map.hpp`](../main/logic/homehub_map.hpp), which says which
+HomeHub register is the **same physical quantity** as which X10A row. Nothing else in the firmware
+pairs them.
+
+**The pairing may never be made on the label.** The catalog spells one quantity many ways across the
+43 detectable profiles (four spellings of leaving water, one with a double space) and *reuses* tags
+across different quantities — `(R1T)` is both the outdoor air sensor on `0x20` and the indoor
+leaving-water sensor. A label match would be incomplete and wrong, which is the mistake
+`lwt_select.hpp` and `ou_stale.hpp` exist to prevent. A wrong pairing is worst in the fallback case
+below, where the Modbus value stands alone under the X10A row's name with nothing beside it to look
+implausible against.
+
+The vocabulary is therefore **`logic/history.hpp`'s trend ids**, reused rather than reinvented: a
+trend is already "one physical quantity, addressed structurally by (register page, byte offset,
+unit)", and the catalog test already proves each locator resolves to exactly one row per profile. A
+`static_assert` pins every pairing to a real trend id, so a renamed trend is a build error rather than
+a pairing that silently stops happening.
+
+Six registers pair, and — measured across the catalog — **all six resolve on all 39 detectable
+profiles**: leaving water, return water, DHW tank, outdoor air, flow, room temperature. The rest carry
+no pairing on purpose, each for a stated reason: the post-BUH outlet is a *different measurement
+point* (pairing it would be the substitution `lwt_select.hpp` refuses); the real power measurement has
+no X10A equivalent at all (X10A estimates it from CT clamps at an assumed 230 V, so pairing a
+measurement with an estimate would hide which is which); setpoints, modes and faults are not readings.
+
+## Where the readings go
+
+`/values` carries the two sources as **two arrays** — `values` (X10A) and `modbus` — mirroring the two
+stacks. They are not merged: the two have separate liveness, and merging would make "is this reading
+current?" a per-row question no consumer could answer. Each row on both sides carries its `concept`
+where one exists.
+
+The `modbus` array is emitted **only while the link is live at the moment the snapshot is taken** —
+not merely while the stack is configured, and not merely while it was connected when the request
+arrived. That is a payload invariant worth stating, because it is the whole difference between a
+reading and a memory: **if the array is present, every row in it was read this cycle.** A consumer
+cannot tell a stale row from a fresh one by looking at it, so the guarantee has to live in the
+payload rather than in a check each client remembers to make. Liveness and the cache sit behind two
+different mutexes, so `mb_values_snapshot()` reports the link state *after* copying the cache — the
+only place the two can be tied into one answer. When it is not live the **key is omitted entirely**
+rather than emitted empty: an absent array and an empty one are different claims, and only absence
+says "no current reading". A device without a HomeHub therefore sees exactly the payload it saw
+before this feature existed.
+
+In the **web UI** (see [`DESIGN.md`](DESIGN.md)), X10A stays the prominent source everywhere and
+Modbus is marked in its own colour — a petrol token (`--src-mb`) that is neither a state colour
+(`--ok`/`--warn`/`--err`) nor a temperature one (`--flow-*`), because provenance is a third thing:
+
+* **Both up** — the row shows the X10A value, unmarked. Tapping it opens the explainer, and the
+  gateway's reading appears at the **end** of the body, after the "Normal:" note: a full row carrying
+  the *Modbus register's own label*, the badge and the value, then the **difference** between the two.
+  It sits last, not first, because a reader opens an explainer to find out what the quantity *is* —
+  the row's own value is already stated an inch above, in the header they just tapped. The label is
+  the gateway's rather than the X10A row's on purpose: this line is what someone verifying a pairing
+  on real hardware reads, and reusing the X10A label would show them their own assumption back.
+  A wide gap is left to speak for itself rather than coloured as an error — the two sensors
+  legitimately sit at different points in the circuit.
+* **X10A down, HomeHub up** — a banner says so, and each row it can supply shows the **Modbus** value
+  in petrol. A row it cannot shows `—`; a stale X10A number is never left standing. The schematic
+  follows the same rule, which makes it visibly sparse — about a dozen registers against a hundred —
+  and that is the honest shape of the state. **No comparison is shown here at all**: a *second*
+  opinion presupposes a first one, and the only X10A number still in memory is one the bus stopped
+  refreshing, so a "difference" against it would be a statement about two *instants* wearing the
+  shape of a statement about two *instruments*.
+  ΔT and heat output survive, because both sides of each come from the one source and nothing is
+  mixed across boundaries. **The COP does not.** It looks like the same arithmetic and is not: the
+  gateway measures the *whole unit's* electrical input, backup and immersion heater included, while
+  the heat figure is across the plate exchanger alone — precisely the boundary mismatch
+  [`cop_scope.hpp`](../main/logic/cop_scope.hpp) refuses, and one that collapses exactly when a
+  heater fires, reading as a failing heat pump while nothing is wrong. The gateway map carries
+  neither the compressor state nor the heater states, so there is nothing to decide it *with*, and
+  the answer is the one this firmware gives everywhere else: publish nothing, and name the reason
+  (`feature_gate.hpp` — disable, never degrade).
+  The electrical input itself *is* better here, since the HomeHub measures what X10A only estimates
+  from CT clamps at an assumed 230 V — read from input register **51** by its offset, never by its
+  unit, because the map carries three `kW` rows and the other two are the power *limit* setpoints.
+* **No HomeHub** — nothing Modbus appears anywhere: no row, no group, no comparison, no banner.
+
+Registers with no X10A counterpart get their own group at the very end of the value list, after
+everything X10A carries.
+
+**MQTT publishes the X10A cache only.** Publishing both would put a second HA entity on every quantity
+they share — two "DHW tank temp" sensors that disagree slightly — which is a worse answer than one.
+The HomeHub's *link health* still rides the heartbeat (`modbus_enabled`/`modbus_connected`/`modbus_rx`/
+`modbus_fails`, payload-only: no HA entity, since a stack most devices never run would be an always-off
+diagnostic to rule out).
+
+## Configuration
+
+Everything is runtime — no reflash, and no reboot.
+
+| Field | Meaning |
+|---|---|
+| `mb_dhost`/`mb_searched` | The one-shot discovery result — hostname found ("" = none) and whether the search has run. Outside the blob: their writer is the Modbus task while the blob's is httpd |
+| `mb_host` | HomeHub IP or `.local`/DNS hostname. **Empty = mDNS auto-discovery** |
+| `mb_port` | Modbus TCP port, default `502` (validated 1–65535) |
+| `mb_unit_id` | Modbus unit id, default `1` (validated 1–247) |
+| `actuation_enabled` | P3 safety flag, default **false**. Persisted; gates nothing today |
+
+All five are persisted in the atomic CRC-checked NVS config blob (**v5**,
+`main/logic/config_store.hpp`) and written by exactly one task (httpd, `POST /set_hp`). An older blob
+(v1–v4) still decodes and reports `has_modbus == false`, whose meaning is simply "this device predates
+the HomeHub stack" — the struct defaults already say so, so no fallback is needed and no user loses
+their credentials on the upgrade.
+
+> **Why v5 and not v4.** This block and the UI-language byte were developed in parallel and both
+> claimed v4. main's language byte landed first and is already on published builds, so this took the
+> later number. A second, different "v4" would have decoded that language byte as a HomeHub setting
+> and switched a board onto a link it does not have, silently, on upgrade.
+
+**Applied live.** `POST /set_hp` persists and calls `mb_reconfigure()`, which starts the task if the
+HomeHub was just enabled and re-resolves the address if it changed. Disabling is handled *by* the task
+(it retires itself at the top of its next cycle), so the socket keeps exactly one owner.
+
+**Web UI:** the HomeHub appears as its own row in Settings → Connections — never folded into a
+combined link state with X10A, since either can be down alone and one merged "connected" would hide
+exactly the case worth seeing. Config and diagnostics only; there are no pump controls, by design.
+
+**API:** `/status` carries a `modbus{enabled,connected,discovering,host,port,unit_id,rx,fails,values,
+actuation_enabled,error}` block. `host` is the **resolved** host, so the UI shows what discovery found
+rather than the empty string it was asked with (and it is redacted in a bug report — it is a LAN
+address and, on an auto-discovered hub, a serial-derived hostname). See [`../README.md`](../README.md)
+and `.claude/CLAUDE.md` for the full HTTP surface.
+
+## Security
+
+The threat model is in [`SECURITY.md`](SECURITY.md); the parts specific to this link:
+
+* **`:502` is unencrypted and has no Modbus-level credential.** There is no user, password or token —
+  the SKI/QR trust mechanism in the guide is EEBUS-only, not Modbus. On a shared LAN *any* host can in
+  principle write to the hub. That is a property of Modbus/TCP, not something this firmware can fix:
+  **segment or firewall the HomeHub's `:502`** so only this device reaches it. TLS `:802` is the hub's
+  only on-wire protection and is out of scope here.
+* **This firmware is not part of that attack surface**, because it never writes. The unauthenticated
+  `HA → MQTT → firmware → Modbus → pump` chain a generic Modbus-control bridge would create does not
+  exist: no MQTT subscribe, no command topic, no writable entity, no HTTP write route.
+* **mDNS discovery trusts LAN multicast**, so the target is confirmed by its `homehub-*` hostname
+  before a connection is made rather than connecting to whatever answers first.
+
+## Out of scope
+
+Modbus **RTU / RS-485** (needs a transceiver + DE/RE, absent on the reference boards), Modbus **TLS
+`:802`**, **UC4** air-to-air, **UC5** EEBUS, and the in-firmware actuation path (issue #32 P3) with
+the on-device `esp-dl` decision engine that would drive it.

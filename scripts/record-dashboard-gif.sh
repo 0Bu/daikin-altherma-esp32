@@ -26,6 +26,13 @@ GIF="docs/media/dashboard.gif"
 STAMP="tools/uigif/gif_stamp.txt"
 CHROME="${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 PORT="${PORT:-8731}"
+# Extra flags for the headless Chrome, empty by default. The case this exists for is running as ROOT
+# (a container), where Chrome refuses to start at all without --no-sandbox and every frame comes back
+# missing — which this script then correctly reports as "captured 0 of N frames" without saying why.
+# Deliberately NOT defaulted to --no-sandbox: on a normal desktop run the sandbox should stay on, and
+# a flag that silently disables it for everyone is the wrong trade for one environment's convenience.
+#   CHROME_FLAGS=--no-sandbox scripts/record-dashboard-gif.sh
+CHROME_FLAGS="${CHROME_FLAGS:-}"
 
 # ── Recording parameters. These are part of the artefact, so the stamp covers this file: change a
 # ── crop or a frame rate and the GIF on disk no longer matches the one this script would make.
@@ -96,7 +103,7 @@ fi
 shoot() {                  # shoot <frame-index> <scene> <t-ms>
     local n=$1 scene=$2 t=$3 pid i out sz prev
     out="$WORK/frames/f$(printf '%04d' "$n").png"
-    "$CHROME" --headless=new --disable-gpu --hide-scrollbars \
+    "$CHROME" --headless=new --disable-gpu --hide-scrollbars ${CHROME_FLAGS:+$CHROME_FLAGS} \
         --force-device-scale-factor="$SCALE" --window-size="$VIEWPORT" \
         --virtual-time-budget=2500 --user-data-dir="$WORK/profile" \
         --no-first-run --no-default-browser-check --disable-extensions \
