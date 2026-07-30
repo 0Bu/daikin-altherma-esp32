@@ -267,7 +267,34 @@ static void retract_ungrouped_values(const logic::ProfileView& prof, const std::
     }
 }
 
-// Both migrations at once, as ONE pass that completes before any replacement config is published.
+// ── Relabelled (pre-label-override) value discovery configs (#230 A) ───────────────────────────────
+// logic/label_override.hpp republishes a row under a spec-correct label when the generator's was
+// wrong — today the four "Fan 1 (10 rpm)" fan-step rows, now announced as "Fan 1 (step)". The label
+// is the entity id, so a build before the override published each such row under a DIFFERENT grouped
+// id (actuators_fan_1_10_rpm), whose retained config would otherwise survive the upgrade as a
+// permanently-unavailable duplicate. Delete it — built from the RAW (pre-override) label, which is
+// exactly the "frozen literal" the migration needs: it is NOT what this build writes (that is now the
+// adjudicated label), so discovery_topic(raw) targets the superseded config and nothing live.
+// General over any future label override; fires only on a row a label override actually changed.
+// (Unlike a rename, a VictoriaMetrics series cannot be carried across by any firmware action —
+// actuators_fan_1_10_rpm simply stops and actuators_fan_1_step starts at zero for a unit on one of
+// the four profiles; the reference install already published the majority _step spelling.)
+static void retract_relabeled_values(const logic::ProfileView& prof, const std::string& node) {
+    for (size_t i = 0; i < prof.count(); i++) {
+        const ValueDef raw = prof[i];
+        if (logic::label_str_eq(raw.label, logic::adjudicated(raw).label)) continue;  // no override here
+        if (!conv_publishable(raw.conv) || object_id(raw.label).empty()) continue;
+        // Every superseded shape the OLD label was ever published under: the #221 GROUPED id
+        // (actuators_fan_1_10_rpm — every build since #232), and the pre-#221 UNGROUPED bare slug
+        // (fan_1_10_rpm — for a device upgrading straight from before #221, skipping the grouped era).
+        mqtt_publish(discovery_topic(s_prefix, node, raw), "", 0, 0, 1);
+        mqtt_publish(ungrouped_discovery_topic(s_prefix, node, "sensor", raw), "", 0, 0, 1);
+        if (conv_is_binary(raw.conv))
+            mqtt_publish(ungrouped_discovery_topic(s_prefix, node, "binary_sensor", raw), "", 0, 0, 1);
+    }
+}
+
+// All migrations at once, as ONE pass that completes before any replacement config is published.
 // That ordering is the whole mechanism: HA frees a deleted entity's entity_id, and the replacement
 // reclaims it — carrying recorder history and long-term statistics, which are keyed on entity_id.
 // Doing the deletes in bulk rather than one-immediately-before-each-row also puts ~130 messages of
@@ -284,6 +311,8 @@ static void retract_ungrouped_values(const logic::ProfileView& prof, const std::
 static void retract_stale_values(const logic::ProfileView& prof, const std::string& profile_id) {
     retract_ungrouped_values(prof, s_node);                          // #221: the un-grouped ids
     if (s_board != s_node) retract_ungrouped_values(prof, s_board);  // ...and the MAC-era device
+    retract_relabeled_values(prof, s_node);                          // #230 A: superseded label ids
+    if (s_board != s_node) retract_relabeled_values(prof, s_board);
     s_stale_values_profile = profile_id;
 }
 
