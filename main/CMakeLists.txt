@@ -55,6 +55,47 @@ idf_component_register(
         espcoredump
 )
 
+# THE WARNING CONTRACT for main/. Three places in this component are written the way they are
+# BECAUSE a class of warning is fatal here — and until now nothing in this repo made that true:
+#
+#   -Werror=unused-result   nvs_storage.hpp's [[nodiscard]] setters. A dropped NVS write is SILENT
+#                           (a full partition, a worn flash), and safe_mode.cpp could not latch its
+#                           crash counter because of exactly one. `bool ok = nvs_set_i32(...)` still
+#                           compiles and still lies; what [[nodiscard]] buys is that the IGNORED
+#                           result is a build error — which it only is if this class is fatal.
+#   -Werror=format          diag_printf carries __attribute__((format(printf, 1, 2))) and has 124
+#                           call sites in this component, so this checks every one of them.
+#                           logic/timestamp.hpp documents the case NOTHING ELSE can catch: int32_t
+#                           is `long int` on the xtensa toolchain but plain `int` on the host, so a
+#                           %d mismatch is invisible to scripts/run-mock-tests.sh. GCC spells this
+#                           diagnostic [-Werror=format=], which is what that comment cites.
+#   -Werror=return-type     hp_comm.cpp's `return false;  // unreachable` says so by name.
+#
+# All three were INHERITED, never pinned: they held only if ESP-IDF's own defaults happened to make
+# them fatal, and IDF's -Werror handling is version- AND Kconfig-dependent
+# (COMPILER_DISABLE_DEFAULT_ERRORS rewrites -Werror to -Werror=all). An inherited guarantee is not
+# one — it can change under an IDF bump with nothing here to notice, and the symptom is a warning
+# scrolling past in a 5-minute build log while the check stays green.
+#
+# PRIVATE on ${COMPONENT_LIB}, deliberately NOT a CONFIG_COMPILER_* key in sdkconfig.defaults, for
+# two independent reasons: a Kconfig key is global, so it would hold ESP-IDF itself and the managed
+# components (led_strip, mdns, mqtt) to a contract that is not ours to demand and that breaks on any
+# bump; and sdkconfig.defaults is hashed into CI's ccache key (scripts/idf-version.sh), so a
+# diagnostic-only change there would discard every cached object it cannot possibly invalidate.
+# Scoped this way, the command line changes for these 27 objects and nothing else.
+#
+# Only the ERROR-ness of three named classes is set here. -Wall is already passed to every component
+# by ESP-IDF, so restating it would read as "this line is what turns it on" while changing nothing;
+# -Wextra is left off because IDF suppresses -Wunused-parameter globally and the mandated-signature
+# IDF callbacks in this component would fill the log with warnings nobody can act on. A gate with
+# noise in it is one people learn to stop reading. See CONTRIBUTING.md for why there is no
+# clang-tidy/cppcheck gate either — that was measured, not assumed.
+target_compile_options(${COMPONENT_LIB} PRIVATE
+    -Werror=return-type
+    -Werror=format
+    -Werror=unused-result
+)
+
 # Assemble + pre-compress the web UI at build time. The sources are split for edit locality —
 # www/index.html (markup with inline markers), www/style.css, www/app.js — and
 # inline_assets.cmake splices them back into the ONE self-contained page the device serves.

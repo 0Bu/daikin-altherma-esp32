@@ -25,8 +25,8 @@ inline std::string rfc3339_utc(int64_t unix_s, int32_t ms = 0) {
     char buf[32];
     // ms cast to int for %d: int32_t is `long int` on the xtensa-esp32s3 toolchain (though plain
     // `int` on the host), so passing it through unchanged is a real type mismatch there even though
-    // it's a no-op on the platforms where int32_t already IS int — caught by -Werror=format= in CI,
-    // not by scripts/run-mock-tests.sh's host build.
+    // it's a no-op on the platforms where int32_t already IS int — caught by -Werror=format= in CI
+    // (pinned on main/ in main/CMakeLists.txt), not by scripts/run-mock-tests.sh's host build.
     int n = std::snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
                           tm_utc.tm_year + 1900, tm_utc.tm_mon + 1, tm_utc.tm_mday,
                           tm_utc.tm_hour, tm_utc.tm_min, tm_utc.tm_sec, static_cast<int>(ms));

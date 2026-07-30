@@ -111,20 +111,35 @@ static void test_crc() {
     uint8_t d_buf[] = {0x40, 0x00, 10}; // buf[2] = 10 -> reply length should be 12
     CHECK(reply_len_dynamic(d_buf) == 12);
 
-    // Test the safety boundary check (is_valid_dynamic_len) with a 64-byte buffer:
+    // Test the safety boundary check (reply_len_fits) with a 64-byte buffer:
     const size_t test_buflen = 64;
     // 1. Valid cases: length within buffer capacity
-    CHECK(is_valid_dynamic_len(12, test_buflen) == true);
-    CHECK(is_valid_dynamic_len(64, test_buflen) == true);
-    CHECK(is_valid_dynamic_len(0, test_buflen) == true);
+    CHECK(reply_len_fits(12, test_buflen) == true);
+    CHECK(reply_len_fits(64, test_buflen) == true);
+    CHECK(reply_len_fits(0, test_buflen) == true);
 
     // 2. Provoke and test out-of-bounds cases:
     // Length exactly 1 byte over capacity (should be rejected)
-    CHECK(is_valid_dynamic_len(65, test_buflen) == false);
+    CHECK(reply_len_fits(65, test_buflen) == false);
     // Extreme overrun case, e.g. 257 bytes due to a 0xFF corrupt length byte (should be rejected)
-    CHECK(is_valid_dynamic_len(257, test_buflen) == false);
+    CHECK(reply_len_fits(257, test_buflen) == false);
     // Negative length case (should be rejected)
-    CHECK(is_valid_dynamic_len(-1, test_buflen) == false);
+    CHECK(reply_len_fits(-1, test_buflen) == false);
+
+    // The STATIC length is now bound-checked too (hp_comm.cpp's hp_query, before the request goes
+    // out) — the dynamic override was checked from the start while reply_len()'s own answer was
+    // trusted. Pin the property that made that safe in practice, over EVERY register a query can
+    // name rather than the four spot-checked above, so a new S-protocol entry returning something
+    // larger than the 64 bytes both call sites pass fails here instead of on the bus. Also pins
+    // that no reply length is negative, which is the other half of what reply_len_fits refuses.
+    for (int r = 0; r <= 0xFF; r++) {
+        const uint8_t reg = static_cast<uint8_t>(r);
+        for (Protocol p : {Protocol::I, Protocol::S}) {
+            const int n = reply_len(reg, p);
+            CHECK(n > 0);
+            CHECK(reply_len_fits(n, 64));
+        }
+    }
 }
 
 static void test_registers() {

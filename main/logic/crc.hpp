@@ -42,8 +42,15 @@ inline int reply_len(uint8_t reg, Protocol proto) {
 // Protocol-I dynamic override applied after 3 bytes are read.
 inline int reply_len_dynamic(const uint8_t* buf) { return buf[2] + 2; }
 
-// Validate that the dynamic reply length is within safe bounds (i.e., does not exceed the buffer capacity).
-inline bool is_valid_dynamic_len(int reply_len, size_t buflen) {
+// Can a reply of this length be READ INTO a buffer of this size? Applied to BOTH lengths a query
+// can expect — reply_len()'s static one before the request goes out, and reply_len_dynamic()'s
+// protocol-I override once byte 2 arrives — so the bound is one rule with one definition rather
+// than a per-call-site comparison. (It was named is_valid_dynamic_len while the static length went
+// unchecked; the name would now be a lie, and hp_comm.cpp's read loop counts every byte it
+// receives whether or not it stored it, so an unchecked length is an out-of-bounds READ in
+// crc_ok(buf, len) that the loop's own per-byte write guard cannot prevent.)
+// `<=` and not `<`: a reply of exactly buflen bytes occupies indices 0..buflen-1 and fits.
+inline bool reply_len_fits(int reply_len, size_t buflen) {
     return reply_len >= 0 && static_cast<size_t>(reply_len) <= buflen;
 }
 

@@ -192,6 +192,32 @@ list and falls back to the `version.txt` floor when it is empty, so a deleted ta
 the numbering — on 2026-07-24 it republished dev/ as 1.0.0-dev.168 over 1.0.14-dev.2, green. See
 CONTRIBUTING.md.)
 
+None of the gates above is a STATIC ANALYSER, and that is measured rather than assumed — read this
+before proposing one. clang-tidy over `main/logic/` + `main/def/` reports ~7000 findings on a blanket
+config, 3622 of them this project's OWN `CHECK` macro (1802 `cppcoreguidelines-avoid-do-while` +
+1820 `pro-type-vararg`). Curated to bug-finding checks only it reports ~50 with ZERO real defects:
+the three plausible ones flag `logic/history.hpp`'s deliberate int16 CLAMP (whose six-line comment
+explains why it clamps rather than wraps), `logic/mqtt_group.hpp`'s `if (s[i] == '-' && ++i ==
+s.size())` (well-defined — `&&` sequences), and a `logic/profile_view.hpp` reference return reachable
+only by violating the documented `count()` bound. `clang-analyzer-*`: 2 findings, both false.
+`performance-unnecessary-value-param`: zero. `-Wconversion`: 3 hits, all `logic/config_store.hpp`
+byte-packing that already masks with `& 0xFF`. `-Wshadow`: 3 hits, all in the test file. The reason
+the yield is this low is structural and visible in the code — the bug classes are TYPED out rather
+than linted out (wire bytes are `uint8_t*` everywhere, so char-signedness cannot occur; every enum
+subscript is bounds-checked; structs carry NSDMIs) — and the defects this project actually ships
+fixes for are domain and resource-budget defects, which are not in a linter's language. So there is
+deliberately no `.clang-tidy` file either: an inert config reads like a guarantee while doing nothing.
+What that survey DID find was the opposite gap. `main/logic/` was never the exposed half — it has
+`-Wall -Wextra -Werror`, 6300+ lines of host tests and seven audits. `main/*.cpp` was: 27 files where
+every shipped crash happened, carrying no warning policy of its own while THREE comments in it
+(`nvs_storage.hpp`'s `[[nodiscard]]`, `hp_comm.cpp`'s unreachable return, `logic/timestamp.hpp`'s
+`%d` cast) were written as though a warning class were fatal. What that half lacked was not an
+analyser but a PINNED contract, so `main/CMakeLists.txt` now sets `-Werror=return-type`,
+`-Werror=format` and `-Werror=unused-result` on that component alone. It is not a `gates` step and
+costs no CI minute: the firmware `build` job is the only compile of `main/*.cpp`, which is also why
+`scripts/run-mock-tests.sh` cannot see the format case (`int32_t` is `long int` on xtensa, plain
+`int` on the host).
+
 Every one of them is a STEP of CI's single `gates` job, which the firmware `build` job `needs` — not
 a job each (the version gate itself runs inside `build`, where the stamped version exists; only its
 tests are a `gates` step). Count them with
@@ -333,7 +359,9 @@ config.cpp      runtime Config (logic/config_model.hpp): WiFi/MQTT + one-shot Wi
                 rejected — a failure named on /diag is not a pair fixed on flash
 nvs_storage.cpp thin NVS helpers (IDF nvs_* called with :: to avoid the daik::nvs_* collision);
                 the setters return esp_err_t so config.cpp can name the failing key + error on /diag,
-                and are [[nodiscard]] (main/ builds -Werror) — safe_mode.cpp silently dropped its
+                and are [[nodiscard]] (main/CMakeLists.txt pins -Werror=unused-result on the
+                component, so an ignored result is a build error rather than a review catch —
+                before that it depended on IDF's own defaults) — safe_mode.cpp silently dropped its
                 crash-counter write, which left safe mode unable to latch on the wedged flash that is
                 itself a plausible crash-loop cause. Compare to ESP_OK, never coerce to bool
 wifi.cpp        STA bring-up (all-channel scan -> strongest AP by RSSI) + endless reconnect
