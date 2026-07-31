@@ -170,8 +170,8 @@ const I18N = {
     "group.Protection": "Protection", "protect.limiting": "limiting now",
     "group.Values": "Values",
     "state.on": "ON", "state.off": "OFF",
-    // Canonical HomeHub enum values from EKRHH 4P744838-1E §9.2. The API keeps these stable
-    // English names; the browser translates them only at the visual boundary.
+    // HomeHub enum names from EKRHH 4P744838-1E §9.2. APIs/MQTT keep the raw numeric constants;
+    // the browser applies these names only at the visual boundary.
     "enum.auto": "Auto", "enum.heating": "Heating", "enum.cooling": "Cooling",
     "enum.no_error": "No error", "enum.fault": "Fault", "enum.warning": "Warning",
     "enum.space_heating": "Space heating", "enum.dhw": "DHW",

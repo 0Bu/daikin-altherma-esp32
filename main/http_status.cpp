@@ -7,6 +7,7 @@
 #include "logic/captive.hpp"
 #include "def/model_names.hpp"
 #include "def/models_catalog.hpp"
+#include "def/homehub.hpp"
 #include "def/overlay.hpp"
 #include "def/registry.hpp"
 #include "def/signatures.hpp"
@@ -19,6 +20,7 @@
 #include "logic/homehub_map.hpp"
 #include "logic/history.hpp"
 #include "logic/convert.hpp"   // conv_is_binary — /values marks a bit-flag row from its converter id
+#include "logic/mqtt_group.hpp" // is_json_number — keep numeric HomeHub values numeric in /values
 #include "logic/crashinfo.hpp"
 #include "logic/detect.hpp"
 #include "logic/json.hpp"
@@ -624,16 +626,25 @@ static std::string build_modbus_values_array(bool& live) {
     const size_t n = mb_values_snapshot(v.data(), v.size(), live);
     std::string j = "[";
     for (size_t i = 0; i < n; i++) {
+        const def::HomeHubReg* reg = def::homehub_find(v[i].off);
         if (i) j += ",";
         j += "{\"label\":";
         j += jstr(v[i].label);
         j += ",\"value\":";
-        j += v[i].value.empty() ? "null" : jstr(v[i].value);
+        if (v[i].value.empty() || !reg) j += "null";
+        else if (def::homehub_is_text(*reg)) j += jstr(v[i].value);
+        else if (is_json_number(v[i].value)) j += v[i].value;
+        else j += "null";  // fail closed: never repair a broken numeric contract by quoting it
         j += ",\"unit\":";
         j += jstr(v[i].unit);
         j += ",\"off\":";
         j += std::to_string(v[i].off);
         if (conv_is_binary(v[i].conv)) j += ",\"binary\":true";
+        // Keep the value raw and transport-friendly. The semantic id is metadata for the browser's
+        // last-mile rendering, so mode 2 can display as "Recommended on" without being sent as text.
+        if (reg)
+            if (const char* eid = def::homehub_enum_id(reg->kind))
+                { j += ",\"enum\":"; j += jstr(eid); }
         if (const char* cid = logic::homehub_concept_for(v[i].off))
             { j += ",\"concept\":"; j += jstr(cid); }
         j += "}";

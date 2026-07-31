@@ -505,6 +505,18 @@ const ENUM_VALUE_I18N = Object.freeze({
   "Recommended on": "enum.recommended_on", "Forced on": "enum.forced_on",
 });
 
+// HomeHub enum values stay numeric in /values, MQTT and Home Assistant. /values carries this
+// separate semantic id so only the visual browser boundary turns e.g. smart_grid_mode=2 into the
+// manufacturer's readable state. Unknown numbers remain visible as Unknown (N), never coerced.
+const HOMEHUB_ENUM_VALUE_I18N = Object.freeze({
+  unit_abnormality: Object.freeze(["enum.no_error", "enum.fault", "enum.warning"]),
+  operation_mode: Object.freeze(["enum.auto", "enum.heating", "enum.cooling"]),
+  three_way_valve: Object.freeze(["enum.space_heating", "enum.dhw"]),
+  smart_grid_mode: Object.freeze([
+    "enum.free_running", "enum.forced_off", "enum.recommended_on", "enum.forced_on",
+  ]),
+});
+
 // Most converter-300..307 rows are genuine flags and remain ON/OFF. These two structural ids are
 // selectors: their bit chooses a path/mode, so name that selected state instead of displaying the
 // electrical bit. The public value itself remains 0/1.
@@ -516,8 +528,8 @@ const BINARY_VALUE_I18N = Object.freeze({
 // /values keeps the firmware-wide numeric 0/1 contract and marks true flags with binary:true.
 // Render ordinary flags as ON/OFF and structurally identified selectors as their named states at
 // the last, visual boundary: a plain numeric 0 or 1 can also be a real count/stage. Named HomeHub
-// enums arrive as stable English manufacturer terms and are translated here; an undocumented value
-// remains visible with its raw number.
+// enums arrive as raw numeric constants plus a semantic id and are named here; an undocumented
+// value remains visible with its raw number.
 function displayValue(v) {
   if (!v || v.value == null) return "—";
   const raw = String(v.value);
@@ -529,6 +541,11 @@ function displayValue(v) {
     if (state === "0") return t("state.off");
   }
   const state = raw.trim();
+  if (v.enum && /^-?\d+$/.test(state)) {
+    const n = Number(state);
+    const key = Number.isSafeInteger(n) ? HOMEHUB_ENUM_VALUE_I18N[v.enum]?.[n] : null;
+    return key ? t(key) : t("enum.unknown", state);
+  }
   const enumKey = ENUM_VALUE_I18N[state];
   if (enumKey) return t(enumKey);
   const unknown = /^Unknown \((-?\d+)\)$/.exec(state);

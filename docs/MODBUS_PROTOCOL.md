@@ -116,24 +116,27 @@ Read today (UC3 Daikin Altherma):
 Reading a holding register is not a step toward writing it — the hub's own telemetry is split across
 both spaces, and a setpoint the plant is currently running to is a reading like any other.
 
-Dimensionless status registers are classified centrally and rendered as follows (names are from the
-manufacturer's §9.2 register tables):
+Dimensionless status registers are classified centrally. Their public values remain the numeric
+Modbus constants; the names below are applied only by the visual UI and come from the manufacturer's
+§9.2 register tables:
 
-| Space / offset | Meaning | Published status |
+| Space / offset | Meaning | Published value / visual state |
 |---|---|---|
-| input `21` | Unit abnormality | `No error` / `Fault` / `Warning` |
+| input `21` | Unit abnormality | `0` / `1` / `2` → No error / Fault / Warning |
 | input `30` | Circulation pump running | binary `0`/`1`, displayed `OFF`/`ON` |
-| input `37` | 3-way valve | `Space heating` / `DHW` |
+| input `37` | 3-way valve | `0` / `1` → Space heating / DHW |
 | input `52` / `53` | DHW / space operation | binary `0`/`1`, displayed `OFF`/`ON` |
-| holding `3` | Operation mode | `Auto` / `Heating` / `Cooling` |
+| holding `3` | Operation mode | `0` / `1` / `2` → Auto / Heating / Cooling |
 | holding `4` / `9` | Space heating/cooling / quiet mode | binary `0`/`1`, displayed `OFF`/`ON` |
-| holding `56` | Smart Grid operation mode | `Free running` / `Forced off` / `Recommended on` / `Forced on` |
+| holding `56` | Smart Grid operation mode | `0` / `1` / `2` / `3` → Free running / Forced off / Recommended on / Forced on |
 
-The four enums are decoded once in `homehub_format()`, before the value reaches `/values`, MCP or
-the browser. Their stable API form is the guide's English term; the browser translates it to the
-selected UI language. An undocumented value remains visible as `Unknown (N)` instead of being
-silently coerced to a known mode. The five true flags retain the firmware-wide numeric `0`/`1`
-contract plus the structural `binary:true` marker, and only the visual boundary prints `OFF`/`ON`.
+The four enums retain their raw integer in `homehub_format()`, `/values`, MCP, MQTT and Home
+Assistant. `/values` carries a separate structural `enum` id so the browser can localise a known
+state; an undocumented number remains visible as `Unknown (N)` instead of being silently coerced.
+The flat MQTT payload therefore contains, for example,
+`"smart_grid_operation_mode":2`, never `"smart_grid_operation_mode":"Recommended on"`. The five
+true flags retain the same numeric `0`/`1` contract plus the structural `binary:true` marker, and
+only the visual boundary prints `OFF`/`ON`.
 
 > **Physical correctness is confirmed on hardware.** The host tests (`test_homehub()` in
 > `test/test_logic.cpp`) verify the *decode mechanics* — scaling, the special-value guard, `Text16`,

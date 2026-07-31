@@ -484,9 +484,9 @@ is gone. `/diag` and `/coredump` stream instead of building one big buffer.
 ## Home Assistant (MQTT)
 
 `main/mqtt_ha.cpp` mirrors every decoded value to MQTT using Home Assistant
-[MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery), so separate
-**Daikin Altherma X10A** and (when enabled) **Daikin Altherma Modbus** groups appear automatically —
-no YAML. **Read-only:** no
+[MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery), so X10A metrics,
+optional Modbus metrics and diagnostics appear under one **Daikin Altherma** device — no YAML.
+**Read-only:** no
 command topics are subscribed. The bridge runs in its own task, independent of the poll engine.
 
 - **Enable:** set the broker in the web UI (gear → Connections → MQTT). Stored in NVS `mqtt_uri`.
@@ -511,8 +511,10 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   An enabled HomeHub publishes its live, flat register map independently on `<base>/modbus` and
   receives its own Modbus HA device/discovery group. A disconnected link publishes `{}`; disabling
   it retracts the topic and discovery configs. HA combines the board LWT with retained
-  `<base>/modbus/status` using `availability_mode: all`. A short migration probe deletes an old
-  retained `<base>/state` value if present; an already-clean broker receives no `/state` publish.
+  `<base>/modbus/status` using `availability_mode: all`. HomeHub enums stay numeric constants (for
+  example `smart_grid_operation_mode: 2`); only the web UI maps them to readable names. A short
+  migration probe deletes an old retained `<base>/state` value if present; an already-clean broker
+  receives no `/state` publish.
   Availability/LWT `<base>/status`. `<base>` defaults `daikin-altherma-esp32`,
   `<prefix>` `homeassistant`.
 - **Type-stable, and honest about absence.** Whether a key is a JSON number or a JSON string is

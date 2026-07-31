@@ -1,6 +1,6 @@
 // Execute the production HomeHub enum display boundary in a DOM-free VM. The EKRHH guide encodes
-// modes, flags and numbers alike as Int16; this pins the distinction that keeps "Operation mode 1"
-// from returning while true binary rows continue to use the firmware-wide 0/1 -> ON/OFF contract.
+// modes, flags and numbers alike as Int16; public values must retain those raw numeric constants,
+// while structural enum metadata keeps the visual UI readable and true flags remain 0/1 -> ON/OFF.
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { readAppFragments } from "../tools/ui/read_app_source.mjs";
@@ -28,24 +28,27 @@ const en = renderer("en");
 const de = renderer("de");
 
 const modes = [
-  ["Auto", "Auto"],
-  ["Heating", "Heizen"],
-  ["Cooling", "Kühlen"],
-  ["No error", "Kein Fehler"],
-  ["Fault", "Fehler"],
-  ["Warning", "Warnung"],
-  ["Space heating", "Raumheizung"],
-  ["DHW", "Brauchwarmwasser"],
-  ["Free running", "Freier Betrieb"],
-  ["Forced off", "Zwangsabschaltung"],
-  ["Recommended on", "Empfehlung ein"],
-  ["Forced on", "Erzwungen ein"],
+  ["operation_mode", 0, "Auto", "Auto"],
+  ["operation_mode", 1, "Heating", "Heizen"],
+  ["operation_mode", 2, "Cooling", "Kühlen"],
+  ["unit_abnormality", 0, "No error", "Kein Fehler"],
+  ["unit_abnormality", 1, "Fault", "Fehler"],
+  ["unit_abnormality", 2, "Warning", "Warnung"],
+  ["three_way_valve", 0, "Space heating", "Raumheizung"],
+  ["three_way_valve", 1, "DHW", "Brauchwarmwasser"],
+  ["smart_grid_mode", 0, "Free running", "Freier Betrieb"],
+  ["smart_grid_mode", 1, "Forced off", "Zwangsabschaltung"],
+  ["smart_grid_mode", 2, "Recommended on", "Empfehlung ein"],
+  ["smart_grid_mode", 3, "Forced on", "Erzwungen ein"],
 ];
 
-for (const [canonical, german] of modes) {
-  assert.equal(en.displayValue({ value: canonical }), canonical, `English enum: ${canonical}`);
-  assert.equal(de.displayValue({ value: canonical }), german, `German enum: ${canonical}`);
+for (const [semantic, value, english, german] of modes) {
+  const row = { value, enum: semantic };
+  assert.equal(en.displayValue(row), english, `${semantic}=${value} English named state`);
+  assert.equal(de.displayValue(row), german, `${semantic}=${value} German named state`);
 }
+assert.equal(en.displayValue({ value: "Recommended on" }), "Recommended on",
+  "the derived X10A Smart-Grid row may still use its local canonical display text");
 
 assert.deepEqual([0, 1, 2, 3].map(en.sgModeText),
   ["Free running", "Forced off", "Recommended on", "Forced on"]);
@@ -72,8 +75,9 @@ assert.equal(de.displayValue({ value: "1", binary: true, binary_semantic: "smart
 assert.equal(en.displayValue({ value: "0", binary: true, binary_semantic: "unknown_future" }),
   "OFF", "an unknown semantic id fails back to the ordinary flag contract");
 assert.equal(de.displayValue({ value: "1" }), "1", "an untyped numeric one is never guessed to be a switch");
-assert.equal(en.displayValue({ value: "Unknown (7)" }), "Unknown (7)");
-assert.equal(de.displayValue({ value: "Unknown (7)" }), "Unbekannt (7)");
+assert.equal(en.displayValue({ value: 7, enum: "operation_mode" }), "Unknown (7)");
+assert.equal(de.displayValue({ value: 7, enum: "operation_mode" }), "Unbekannt (7)");
+assert.equal(en.displayValue({ value: -1, enum: "unknown_future" }), "Unknown (-1)");
 assert.equal(de.displayValue({ value: "17" }), "17", "ordinary numeric values remain numeric");
 
 const operationModes = [

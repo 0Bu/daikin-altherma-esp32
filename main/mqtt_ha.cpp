@@ -3,7 +3,8 @@
 //   • TLS policy: credentials present ⇒ mqtts:// + CA-verified (esp_crt_bundle); NEVER send
 //     credentials over plaintext (no silent fallback — refuse with an error in /status.mqtt).
 //   • On (re)connect: mark availability "online", stream retained discovery configs for the active
-//     X10A profile and, when configured, the HomeHub register map. They form two HA device groups.
+//     X10A profile and, when configured, the HomeHub register map. Both sources plus diagnostics
+//     share one HA installation device; Modbus retains its own entity namespace and stays read-only.
 //   • Each cycle: publish X10A's grouped JSON to <base>/x10a and the generation-checked, flat
 //     HomeHub JSON to <base>/modbus — each only when changed. A disconnected HomeHub publishes `{}`
 //     rather than carrying an old TCP session's readings forward. Message topics sit directly under
@@ -229,8 +230,8 @@ static std::vector<GroupedValue> current_x10a_values() {
 }
 
 // Current HomeHub values, but only when the accessor proves the copied cache belongs to the TCP
-// session that is still connected. The register definition supplies the permanent JSON type; a
-// formatted enum that happens to contain a digit never gets mistaken for a number.
+// session that is still connected. The register definition supplies the permanent JSON type. Only
+// Text16 is text; flags, enums and ordinary values retain their numeric Modbus constants.
 static std::vector<GroupedValue> current_modbus_values(bool& live) {
     const size_t cap = mb_values_capacity();
     std::vector<CachedValue> cache(cap ? cap : 1);
@@ -411,7 +412,7 @@ static void publish_modbus_discovery() {
         const def::HomeHubReg& reg = def::HOMEHUB_REGS[i];
         const std::string topic = modbus_discovery_topic(s_prefix, s_node, reg);
         const std::string cfg =
-            modbus_discovery_config(s_node, s_modbus, s_avail, s_modbus_avail, reg);
+            modbus_discovery_config(s_node, s_board, s_modbus, s_avail, s_modbus_avail, reg);
         mqtt_publish(topic, cfg.c_str(), 0, 0, 1);
     }
 }

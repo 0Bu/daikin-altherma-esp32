@@ -35,8 +35,8 @@ const M = (off, label, value, concept, extra = {}) => ({ label, value, unit: "°
 // The 3-way valve as each side reports it: X10A bit-flag row, HomeHub offset 37.
 const X_VALVE = (on) => ({ label: "3way valve(On:DHW_Off:Space)", value: on ? "1" : "0",
                            unit: "", reg: 0x60, binary: true, concept: "valve_dhw" });
-const M_VALVE = (on) => ({ label: "3-way valve", value: on ? "DHW" : "Space heating",
-                           unit: "", off: 37, concept: "valve_dhw" });
+const M_VALVE = (on) => ({ label: "3-way valve", value: on ? 1 : 0,
+                           unit: "", off: 37, enum: "three_way_valve", concept: "valve_dhw" });
 
 function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [] }) {
   const context = {
@@ -71,7 +71,8 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [] }) {
   // explicitly — the same trick test_ui_live_i18n.mjs uses for its production function.
   vm.runInContext(
     SOURCE + "\nthis.__api = { mbByConcept, mbTwin, mbFallbackFor, mbLive, mbBool, mbVal, stateOf," +
-    " MB_PAIRS, MB_OFF_POWER, MB_OFF_SMART_GRID, mbPower, mbSmartGridMode, mbForInspect," +
+    " MB_PAIRS, MB_OFF_POWER, MB_OFF_SMART_GRID, mbPower, modbusEnumNumber, mbSmartGridMode, mbForInspect," +
+    " mbUnitAbnormality," +
     " SMART_GRID_MODE_VALUE, x10aSmartGridModeFrom, x10aSmartGridMode, x10aSmartGridRow," +
     " sgModeText, sgRequestText, mbNoteHtml, inspCurRow, inspMember," +
     " inspMembers, pelMeasured, pelApproxText, PEL_INSPECT };",
@@ -81,15 +82,17 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [] }) {
 
 const LWT_X = X("Leaving water temp. before BUH (R1T)", "38.6", "leaving_water");
 const LWT_M = M(40, "Leaving water temperature PHE", "38.1", "leaving_water");
-const SG = (value) => M(56, "Smart Grid operation mode", String(value), null, { unit: "" });
+const SG = (value) => M(56, "Smart Grid operation mode", value, null,
+  { unit: "", enum: "smart_grid_mode" });
+const ABNORMALITY = (value) => M(21, "Unit abnormality", value, null,
+  { unit: "", enum: "unit_abnormality" });
 const X_SG = (contact, on) => ({
   label: `SmartGridContact${contact}`, value: on ? "1" : "0", unit: "", reg: 0x60,
   binary: true, binary_semantic: `smart_grid_contact_${contact}`,
 });
 
 // The README recording drives the same production parser. Keep its fake HomeHub on the real API
-// boundary (named enums), or the visual regression artefact will omit boost while these helper
-// assertions remain green.
+// boundary (raw numeric enum plus semantic metadata), or a regression to text could stay hidden.
 {
   const end = demo.indexOf("\n})();");
   assert.notEqual(end, -1, "demo harness must expose a closed DEMO fixture");
@@ -97,8 +100,9 @@ const X_SG = (contact, on) => ({
   vm.runInNewContext(demo.slice(0, end + "\n})();".length) +
     "\nthis.__smartGrid = DEMO.smartGrid;", demoContext,
   { filename: "tools/uigif/scenes.js" });
-  assert.equal(demoContext.__smartGrid(0).value, "Free running");
-  assert.equal(demoContext.__smartGrid(2).value, "Recommended on");
+  assert.equal(demoContext.__smartGrid(0).value, 0);
+  assert.equal(demoContext.__smartGrid(0).enum, "smart_grid_mode");
+  assert.equal(demoContext.__smartGrid(2).value, 2);
 }
 
 // The two X10A contact bits are not two user-facing modes. Pin the documented truth table and the
@@ -135,6 +139,22 @@ const X_SG = (contact, on) => ({
   assert.equal(stale.x10aSmartGridRow(), null, "stale contacts add no derived row");
 }
 
+// Diagnostic state follows the same numeric-enum contract. Unknown values remain visible in the
+// value list but cannot become a plausible Fault/Warning state in the status header.
+{
+  for (const value of [0, 1, 2]) {
+    const c = ctx({ x10a: false, mbEnabled: true, mbConnected: true,
+                    modbus: [ABNORMALITY(value)] });
+    assert.equal(c.mbUnitAbnormality(), value, `unit abnormality constant ${value}`);
+  }
+  const unknown = ctx({ x10a: false, mbEnabled: true, mbConnected: true,
+                        modbus: [ABNORMALITY(3)] });
+  assert.equal(unknown.mbUnitAbnormality(), null, "unknown diagnostic enum fails closed");
+  const stale = ctx({ x10a: false, mbEnabled: true, mbConnected: false,
+                      modbus: [ABNORMALITY(1)] });
+  assert.equal(stale.mbUnitAbnormality(), null, "disconnected diagnostic enum is not current");
+}
+
 // ── 1. Both live, numeric — the gateway is reachable as the second opinion ─────────────────────
 {
   const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: [LWT_X], modbus: [LWT_M] });
@@ -150,10 +170,10 @@ const X_SG = (contact, on) => ({
 // is exactly where the dashboard must prove that evcc's mode-2 boost reached the controller.
 {
   const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
-                  values: [LWT_X], modbus: [LWT_M, SG("Recommended on")] });
+                  values: [LWT_X], modbus: [LWT_M, SG(2)] });
   assert.equal(c.MB_OFF_SMART_GRID, 56, "UI uses the EKRHH data-model offset, not PDU address 55");
   assert.equal(c.mbSmartGridMode(), 2, "mode 2 must reach the live schematic");
-  assert.equal(c.mbForInspect("sgrequest")?.value, "Recommended on",
+  assert.equal(c.mbForInspect("sgrequest")?.value, 2,
     "the inspector must remain traceable to the Modbus row while X10A is live");
   assert.equal(c.sgModeText(2), "sg.mode2");
   assert.equal(c.sgRequestText(2), "schem.sg_boost");
@@ -169,12 +189,12 @@ const X_SG = (contact, on) => ({
 // A stale HomeHub cache is not an active request, and invalid enum values are not guessed into one.
 {
   const down = ctx({ x10a: true, mbEnabled: true, mbConnected: false,
-                     modbus: [SG("Recommended on")] });
+                     modbus: [SG(2)] });
   assert.equal(down.mbSmartGridMode(), null, "disconnected HomeHub: cached boost must disappear");
   assert.equal(down.mbForInspect("sgrequest"), null, "disconnected HomeHub: no stale inspector row");
 
   const invalid = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
-                        modbus: [SG("Unknown (4)")] });
+                        modbus: [SG(4)] });
   assert.equal(invalid.mbSmartGridMode(), null, "unknown Smart-Grid enum must fail closed");
 }
 
