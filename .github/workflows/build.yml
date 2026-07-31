@@ -500,6 +500,7 @@ jobs:
             dist/*.bin
             dist/*.elf
             dist/*.elf.sha256
+            dist/manifest.json
 
       # A PR PUBLISHES NOTHING. It used to assemble and push a preview installer to gh-pages
       # PR/<N>/ on every commit, with a pr-preview-cleanup workflow to remove it on close — a

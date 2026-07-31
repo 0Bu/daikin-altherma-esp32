@@ -108,8 +108,8 @@ const enumStates = {
   UnitAbnormality: [["No error", "Kein Fehler"], ["Fault", "Fehler"], ["Warning", "Warnung"]],
   OperationMode: [["Auto", "Auto"], ["Heating", "Heizen"], ["Cooling", "Kühlen"]],
   ThreeWayValve: [["Space heating", "Raumheizung"], ["DHW", "Brauchwarmwasser"]],
-  SmartGridMode: [["Free running", "Freier Betrieb"], ["Forced off", "Erzwungen OFF"],
-                  ["Recommended on", "Empfohlen ON"], ["Forced on", "Erzwungen ON"]],
+  SmartGridMode: [["Free running", "Freier Betrieb"], ["Forced off", "Zwangsabschaltung"],
+                  ["Recommended on", "Empfehlung ein"], ["Forced on", "Erzwungen ein"]],
 };
 for (const row of rows.filter((r) => enumStates[r.kind])) {
   const d = firstDescription(row.label);

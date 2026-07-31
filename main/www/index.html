@@ -128,15 +128,14 @@
                   <text class="sc-mode" id="svMode" x="50" y="34">—</text>
                   <text class="sc-status" id="svStatus" x="50" y="56"></text>
                 </g>
-                <!-- System-wide HomeHub request, separate from both hydronic branches. In
-                     particular, evcc boost arrives as Smart Grid mode 2 (Recommended on): that is
-                     evidence of the REQUEST, not evidence that the tank is already being charged.
-                     Hidden for mode 0 / no live HomeHub value so ordinary autonomous operation does
-                     not add a permanent chip to the drawing. -->
+                <!-- System-wide boost marker, separate from both hydronic branches. evcc boost
+                     arrives as Smart Grid mode 2 (Recommended on): that is evidence of the REQUEST,
+                     not evidence that the tank is already being charged. Hidden for every other
+                     mode and for no live HomeHub value, so only an actual boost adds a label. -->
                 <g id="gSgRequest" class="sc-sg-request sc-hit" data-insp="sgrequest"
                    role="button" tabindex="0">
-                  <rect class="sc-sg-request-box" x="610" y="16" width="156" height="24" rx="12"/>
-                  <text class="sc-val" x="688" y="32" text-anchor="middle"
+                  <rect class="sc-sg-request-box" x="706" y="16" width="60" height="24" rx="12"/>
+                  <text class="sc-val" x="736" y="32" text-anchor="middle"
                         style="font-size:9.5px" id="svSgRequest"></text>
                 </g>
                 <g transform="translate(0 -48)">

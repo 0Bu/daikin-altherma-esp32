@@ -176,8 +176,7 @@ const I18N = {
     "enum.recommended_on": "Recommended on", "enum.forced_on": "Forced on",
     "enum.unknown": (n) => `Unknown (${n})`,
     "chip.demand_on": "Demand ON", "chip.demand_off": "Demand OFF", "chip.quiet": "Quiet",
-    "schem.sg_forced_off": "MODBUS · FORCED OFF", "schem.sg_boost": "MODBUS · BOOST ACTIVE",
-    "schem.sg_forced_on": "MODBUS · FORCED ON",
+    "schem.sg_boost": "BOOST",
     "sg.mode0": "Free running", "sg.mode1": "Forced off",
     "sg.mode2": "Recommended on", "sg.mode3": "Forced on",
     "schem.to_dhw": "3WV → DHW", "schem.to_heat": "3WV → heating",
@@ -402,14 +401,13 @@ const I18N = {
     "enum.auto": "Auto", "enum.heating": "Heizen", "enum.cooling": "Kühlen",
     "enum.no_error": "Kein Fehler", "enum.fault": "Fehler", "enum.warning": "Warnung",
     "enum.space_heating": "Raumheizung", "enum.dhw": "Brauchwarmwasser",
-    "enum.free_running": "Freier Betrieb", "enum.forced_off": "Erzwungen OFF",
-    "enum.recommended_on": "Empfohlen ON", "enum.forced_on": "Erzwungen ON",
+    "enum.free_running": "Freier Betrieb", "enum.forced_off": "Zwangsabschaltung",
+    "enum.recommended_on": "Empfehlung ein", "enum.forced_on": "Erzwungen ein",
     "enum.unknown": (n) => `Unbekannt (${n})`,
     "chip.demand_on": "Anforderung ON", "chip.demand_off": "Anforderung OFF", "chip.quiet": "Leise",
-    "schem.sg_forced_off": "MODBUS · ERZWUNGEN OFF", "schem.sg_boost": "MODBUS · BOOST AKTIV",
-    "schem.sg_forced_on": "MODBUS · ERZWUNGEN ON",
-    "sg.mode0": "Freier Betrieb", "sg.mode1": "Erzwungen OFF",
-    "sg.mode2": "Empfohlen ON", "sg.mode3": "Erzwungen ON",
+    "schem.sg_boost": "BOOST",
+    "sg.mode0": "Freier Betrieb", "sg.mode1": "Zwangsabschaltung",
+    "sg.mode2": "Empfehlung ein", "sg.mode3": "Erzwungen ein",
     "schem.to_dhw": "3WV → WW", "schem.to_heat": "3WV → Heizung",
     "normal.label": "Normal:",
     "hist.title": "Letzte 24 Stunden", "hist.since": (h) => `Seit Neustart · ${h} h`,
@@ -2017,7 +2015,7 @@ const DESCRIPTIONS = [
   { exact: true, re: /^smart[- ]grid operation mode$/i,
     what: "The HomeHub's Smart-Grid request: Free running, Forced off, Recommended on or Forced on. It is an energy-management command, not the outdoor unit's Heating/Cooling mode.",
     normal: "Free running during ordinary autonomous operation. The other modes should appear only while an external energy manager deliberately blocks, recommends or forces operation.",
-    de: { what: "Die Smart-Grid-Anforderung des HomeHub: Freier Betrieb, Erzwungen OFF, Empfohlen ON oder Erzwungen ON. Das ist ein Energiemanagement-Befehl, nicht der Heiz-/Kühlmodus der Außeneinheit.",
+    de: { what: "Die Smart-Grid-Anforderung des HomeHub: Freier Betrieb, Zwangsabschaltung, Empfehlung ein oder Erzwungen ein. Das ist ein Energiemanagement-Befehl, nicht der Heiz-/Kühlmodus der Außeneinheit.",
           normal: "Freier Betrieb im normalen autonomen Betrieb. Die anderen Modi sollten nur erscheinen, wenn ein externes Energiemanagement den Betrieb bewusst sperrt, empfiehlt oder erzwingt." } },
   { re: /operation mode|operation \/ fault|^operation$/i,
     what: "The configured heat/cool mode: Auto, Heating or Cooling. It is a mode selection, not a statement that the compressor or space circuit is running right now.",
@@ -2355,8 +2353,8 @@ const DESCRIPTIONS = [
   { exact: true, re: /^power limit during recommended on \/ buffering$/i,
     what: "The electrical power limit used during Smart-Grid Recommended on buffering.",
     normal: "During buffering in Recommended on, the effective limit is the lower of this value and General power limit. It is a configured ceiling, not the unit's current consumption.",
-    de: { what: "Die elektrische Leistungsgrenze während der Smart-Grid-Pufferung im Modus Empfohlen ON.",
-          normal: "Bei Pufferung mit Empfohlen ON gilt der niedrigere Wert aus dieser Grenze und der allgemeinen Leistungsgrenze. Das ist eine konfigurierte Obergrenze und nicht die aktuelle Leistungsaufnahme." } },
+    de: { what: "Die elektrische Leistungsgrenze während der Smart-Grid-Pufferung im Modus Empfehlung ein.",
+          normal: "Bei Pufferung mit Empfehlung ein gilt der niedrigere Wert aus dieser Grenze und der allgemeinen Leistungsgrenze. Das ist eine konfigurierte Obergrenze und nicht die aktuelle Leistungsaufnahme." } },
   { exact: true, re: /^general power limit$/i,
     what: "The general electrical power limit applied by the HomeHub, including during Free running.",
     normal: "It is a configured ceiling, not measured consumption. A lower value intentionally restricts the power available to the unit across the Smart-Grid operating modes.",
@@ -2522,13 +2520,11 @@ const mbSmartGridMode = () => {
 const mbRow = (off) =>
   mbLive() ? (S._modbus || []).find((m) => m && m.off === off && m.value != null) || null : null;
 
-// Closed-drawing and inspector wording for the same four-value enum. Mode 0 has no badge — ordinary
-// autonomous operation is the absence of an external request — but it remains readable in the
-// inspector if a request ends while the panel is still open.
+// Closed-drawing and inspector wording for the same four-value enum. Only mode 2 gets the compact
+// boost marker; every other state stays readable in the HomeHub row and in an already-open
+// inspector without adding a permanent status label to the drawing.
 const sgModeText = (mode) => mode == null ? "—" : t(`sg.mode${mode}`);
-const sgRequestText = (mode) => mode === 1 ? t("schem.sg_forced_off")
-                                  : mode === 2 ? t("schem.sg_boost")
-                                  : mode === 3 ? t("schem.sg_forced_on") : "";
+const sgRequestText = (mode) => mode === 2 ? t("schem.sg_boost") : "";
 
 // ── WHICH SOURCE ANSWERS A PLANT STATE ─────────────────────────────────────────────────────────
 // One rule, one place. X10A leads while its link is LIVE and carries the row; otherwise a LIVE
@@ -3871,7 +3867,7 @@ function clearSchematic() {
   setTxt("svBuh", "");                 // no BUH step to report
   setTxt("svValve", "3WV");            // valve position unknown — don't claim a branch
   const sc = $("schem");
-  ["fan-on", "pump-on", "buh-on", "bsh-on", "defrost-on", "quiet-on", "sg-request-on"].forEach((c) => sc.classList.remove(c));
+  ["fan-on", "pump-on", "buh-on", "bsh-on", "defrost-on", "quiet-on", "sg-boost-on"].forEach((c) => sc.classList.remove(c));
   setTxt("svSgRequest", "");
   sc.classList.add("no-spaceh");       // no flag to show; the pill would otherwise sit stale
   $("schem").querySelectorAll(".sc-flow, .sc-rflow").forEach((el) => el.classList.remove("on", "rev"));
@@ -3954,11 +3950,11 @@ function renderLive() {
   sc.classList.toggle("bsh-on", d.bsh === true);
   sc.classList.toggle("defrost-on", d.defrost === true);
   sc.classList.toggle("quiet-on", d.quiet === true);
-  // Non-zero means an EXTERNAL request is present. Mode 2 is evcc's boost / Daikin's Recommended
-  // on; the badge says exactly that without implying that DHW is already running. Modes 1 and 3
-  // use the same system-wide slot instead of being misattached to either hydronic branch.
+  // Mode 2 is evcc's boost / Daikin's Recommended on. The compact marker says only that, without
+  // repeating the Modbus source or implying that DHW is already running. Every non-boost state has
+  // no drawing label; its exact manufacturer name remains available in the HomeHub row.
   setTxt("svSgRequest", sgRequestText(d.sgMode));
-  sc.classList.toggle("sg-request-on", d.sgMode != null && d.sgMode !== 0);
+  sc.classList.toggle("sg-boost-on", d.sgMode === 2);
   // A BSH row is itself evidence that this profile has a DHW tank, even if its temperature did not
   // answer in this snapshot. Keep the branch visible so the active heater cannot disappear with it.
   sc.classList.toggle("no-dhw", d.tank == null && d.bsh == null);
@@ -4069,24 +4065,24 @@ const INSPECT = {
   sgrequest: {
     t: { en: "Smart-Grid request via Modbus", de: "Smart-Grid-Anforderung über Modbus" },
     what: {
-      en: "The external Smart-Grid request read back from the HomeHub: 0 Free running, 1 Forced off, 2 Recommended on, 3 Forced on. It is an energy-management command, not the outdoor unit's heating/cooling mode and not proof that a requested tank charge has started.",
-      de: "Die vom HomeHub zurückgelesene externe Smart-Grid-Anforderung: 0 Freier Betrieb, 1 Erzwungen OFF, 2 Empfohlen ON, 3 Erzwungen ON. Das ist ein Energiemanagement-Befehl, nicht der Heiz-/Kühlmodus der Außeneinheit und kein Beleg dafür, dass eine angeforderte Speicherladung bereits begonnen hat.",
+      en: "The external Smart-Grid request read back from the HomeHub: Free running, Forced off, Recommended on or Forced on. It is an energy-management command, not the outdoor unit's heating/cooling mode and not proof that a requested tank charge has started.",
+      de: "Die vom HomeHub zurückgelesene externe Smart-Grid-Anforderung: Freier Betrieb, Zwangsabschaltung, Empfehlung ein oder Erzwungen ein. Das ist ein Energiemanagement-Befehl, nicht der Heiz-/Kühlmodus der Außeneinheit und kein Beleg dafür, dass eine angeforderte Speicherladung bereits begonnen hat.",
     },
     head: (d) => sgModeText(d && d.sgMode),
     now: (d) => !d || d.sgMode == null
       ? { en: "No current Smart-Grid value is available from the HomeHub.",
           de: "Vom HomeHub ist gerade kein aktueller Smart-Grid-Wert verfügbar." }
       : d.sgMode === 2
-      ? { en: "Active: the HomeHub reports Recommended on. This is the Smart-Grid state energy managers such as evcc use for boost. It requests extra buffering; DHW mode, the 3-way valve and flow separately show whether the unit is actually charging the tank.",
-          de: "Aktiv: Der HomeHub meldet Empfohlen ON. Diesen Smart-Grid-Zustand verwenden Energiemanager wie evcc als Boost. Er fordert zusätzliches Puffern an; Warmwasser-Betriebsart, 3-Wege-Ventil und Durchfluss zeigen separat, ob die Anlage den Speicher tatsächlich lädt." }
+      ? { en: "The HomeHub reports Recommended on. This is the Smart-Grid state energy managers such as evcc use for boost. It requests extra buffering; DHW mode, the 3-way valve and flow separately show whether the unit is actually charging the tank.",
+          de: "Der HomeHub meldet Empfehlung ein. Diesen Smart-Grid-Zustand verwenden Energiemanager wie evcc als Boost. Er fordert zusätzliches Puffern an; Warmwasser-Betriebsart, 3-Wege-Ventil und Durchfluss zeigen separat, ob die Anlage den Speicher tatsächlich lädt." }
       : d.sgMode === 1
-      ? { en: "Active: the external energy manager is forcing operation off.",
-          de: "Aktiv: Das externe Energiemanagement erzwingt Betrieb OFF." }
+      ? { en: "The external energy manager reports Forced off.",
+          de: "Das externe Energiemanagement meldet Zwangsabschaltung." }
       : d.sgMode === 3
-      ? { en: "Active: the external energy manager is forcing operation on.",
-          de: "Aktiv: Das externe Energiemanagement erzwingt Betrieb ON." }
-      : { en: "No external Smart-Grid request is active; the unit is running autonomously.",
-          de: "Keine externe Smart-Grid-Anforderung ist aktiv; die Anlage arbeitet selbstständig." },
+      ? { en: "The external energy manager reports Forced on.",
+          de: "Das externe Energiemanagement meldet Erzwungen ein." }
+      : { en: "No external Smart-Grid request is present; the unit is running autonomously.",
+          de: "Es liegt keine externe Smart-Grid-Anforderung vor; die Anlage arbeitet selbstständig." },
   },
   ou: {
     t: { en: "Outdoor unit", de: "Außeneinheit" },
