@@ -1177,8 +1177,9 @@ The Home Assistant bridge:
   Modbus HA device. A disconnected HomeHub publishes `{}` rather than preserving a previous TCP
   session's values. Its entities combine `<base>/status` (board LWT) and
   `<base>/modbus/status` (link state) with `availability_mode: all`; disabling the stack retracts
-  both Modbus topics and its discovery configs. On upgrade the publisher deletes the obsolete
-  retained `<base>/state` topic.
+  both Modbus topics and its discovery configs. On upgrade a bounded exact-topic subscription probes
+  for an obsolete retained `<base>/state` value; only a non-empty retained response triggers its
+  tombstone, so later reconnects do not publish an empty legacy topic.
 - **A field's JSON type comes from its DEFINITION, never from its current value.** `GroupedValue`
   carries a `PublishedKind` (`logic/convert.hpp` `published_kind`, keyed on the converter id):
   `Number` is emitted unquoted, `Text` quoted — in **every** state of that field. The publisher used

@@ -1005,6 +1005,19 @@ static void test_discovery() {
     CHECK(modbus_topic(base) == "daikin-altherma-esp32/modbus");
     CHECK(modbus_availability_topic(base) == "daikin-altherma-esp32/modbus/status");
     CHECK(legacy_state_topic(base) == "daikin-altherma-esp32/state");
+    const std::string legacy = legacy_state_topic(base);
+    CHECK(legacy_state_cleanup_candidate(legacy, legacy.data(), static_cast<int>(legacy.size()),
+                                         true, 123, 0));
+    CHECK(!legacy_state_cleanup_candidate(legacy, legacy.data(), static_cast<int>(legacy.size()),
+                                          false, 123, 0));  // live message, not retained
+    CHECK(!legacy_state_cleanup_candidate(legacy, legacy.data(), static_cast<int>(legacy.size()),
+                                          true, 0, 0));     // tombstone echo
+    CHECK(!legacy_state_cleanup_candidate(legacy, legacy.data(), static_cast<int>(legacy.size()),
+                                          true, 123, 64));  // later payload fragment
+    const std::string legacy_child = legacy + "/child";
+    CHECK(!legacy_state_cleanup_candidate(legacy, legacy_child.data(),
+                                          static_cast<int>(legacy_child.size()), true, 123, 0));
+    CHECK(!legacy_state_cleanup_candidate(legacy, nullptr, 0, true, 123, 0));
     CHECK(availability_topic(base) == "daikin-altherma-esp32/status");
     std::string cfg = discovery_config(node, board, st, availability_topic(base), def);
     CHECK(cfg.find("\"dev_cla\":\"temperature\"") != std::string::npos);

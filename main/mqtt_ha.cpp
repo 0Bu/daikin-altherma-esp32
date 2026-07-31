@@ -26,8 +26,10 @@
 //     crash IS reported it drives one diagnostic HA entity — a "dump waiting" flag (the reset reason
 //     is the heartbeat's own "Reset Reason" sensor, so a crash entity for it would be a duplicate).
 //     Reason/backtrace only; never the raw dump or any secret.
-// Read-only: no command subscriptions. No-op if mqtt_uri is empty. Memory-safe: discovery is one
-// small publish per value; the state JSON is a single few-KB build, guarded against OOM.
+// Read-only: no command subscriptions. The sole subscription is a bounded migration probe for an
+// actually-retained legacy <base>/state payload; a clean broker receives no publish on that topic.
+// No-op if mqtt_uri is empty. Memory-safe: discovery is one small publish per value; the state JSON
+// is a single few-KB build, guarded against OOM.
 #include "mqtt_ha.hpp"
 #include "config.hpp"
 #include "def/overlay.hpp"
@@ -103,6 +105,13 @@ static std::string s_last_modbus_json;
 static int         s_last_modbus_live = -1;             // -1 unknown, 0 offline, 1 online
 static bool        s_modbus_discovery_announced = false;
 static bool        s_modbus_disabled_cleaned    = false;
+// Source-topic split migration: probe the retired retained topic without unconditionally publishing
+// an empty payload on every reconnect. The event task only raises `seen`; subscribe/delete/unsubscribe
+// remain on mqtt_task, preserving the single-publisher rule. The bounded probe repeats on reconnect
+// until a legacy value is found and deleted; once the broker is clean it is read-only and silent.
+static std::atomic<bool> s_legacy_state_seen{false};
+static bool              s_legacy_probe_active = false;       // mqtt_task only
+static int64_t           s_legacy_probe_deadline_us = 0;      // mqtt_task only
 // Stale-identity migration (mqtt_task only) — see retract_legacy_fixed / retract_stale_values below.
 static bool        s_legacy_fixed_retracted = false;   // heartbeat + crash entities: once per boot
 static std::string s_stale_values_profile;             // value entities: the profile they were
@@ -128,6 +137,7 @@ static std::atomic<uint32_t> s_mqtt_reconnects{0};
 // Heartbeat is diagnostics, not real-time telemetry — publish on a fixed cadence rather than on
 // every poll cycle.
 static constexpr int HEARTBEAT_INTERVAL_S = 10;
+static constexpr int64_t LEGACY_PROBE_US = 5LL * 1000 * 1000;
 
 // Non-allocating under the lock: `err` is always a string literal, stored as a bare pointer. Runs on
 // esp-mqtt's event task with no exception guard, so an allocating std::string assignment that threw
@@ -583,6 +593,14 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
         set_status(false, why);
         diag_printf("mqtt: %s\n", why);
         break; }
+    case MQTT_EVENT_DATA: {
+        auto* e = static_cast<esp_mqtt_event_handle_t>(data);
+        if (e && legacy_state_cleanup_candidate(s_legacy_state, e->topic, e->topic_len,
+                                                e->retain, e->total_data_len,
+                                                e->current_data_offset)) {
+            s_legacy_state_seen = true;
+        }
+        break; }
     default: break;
     }
 }
@@ -621,9 +639,30 @@ static void mqtt_task(void*) {
                     // not briefly revive stale HomeHub values while this cycle checks cache liveness.
                     mqtt_publish(s_modbus_avail, "offline", 0, 0, 1);
                     s_last_modbus_live = 0;
-                    // Delete the retained pre-split X10A payload. Nothing in this build consumes
-                    // <base>/state, so leaving it behind would expose a permanently frozen duplicate.
-                    mqtt_publish(s_legacy_state, "", 0, 0, 1);
+                    // Probe before deleting the pre-split X10A payload. Publishing a tombstone
+                    // unconditionally here used to recreate a visible empty <base>/state message
+                    // on every reconnect even after the broker was clean. The DATA event raises the
+                    // atomic flag only for a non-empty retained value on this exact topic.
+                    s_legacy_state_seen = false;
+                    const int sub_id = esp_mqtt_client_subscribe(s_client,
+                                                                 s_legacy_state.c_str(), 0);
+                    s_legacy_probe_active = sub_id >= 0;
+                    s_legacy_probe_deadline_us = esp_timer_get_time() + LEGACY_PROBE_US;
+                    if (sub_id < 0)
+                        diag_printf("mqtt: legacy state cleanup probe could not be queued\n");
+                }
+                if (s_legacy_probe_active) {
+                    const bool legacy_seen = s_legacy_state_seen.exchange(false);
+                    const bool probe_done = esp_timer_get_time() >= s_legacy_probe_deadline_us;
+                    if (legacy_seen) {
+                        // QoS 1 makes the one required delete durable at the broker; after this,
+                        // later reconnect probes receive nothing and therefore publish nothing.
+                        mqtt_publish(s_legacy_state, "", 0, 1, 1);
+                    }
+                    if (legacy_seen || probe_done) {
+                        esp_mqtt_client_unsubscribe(s_client, s_legacy_state.c_str());
+                        s_legacy_probe_active = false;
+                    }
                 }
                 if (!s_heartbeat_announced) {                  // board/link diagnostics — independent
                     publish_heartbeat_discovery();              // of heat-pump profile detection

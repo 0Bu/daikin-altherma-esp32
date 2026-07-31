@@ -532,7 +532,8 @@ IDF v6.0 extracted it from core — [`idf_component.yml`](../main/idf_component.
   An enabled HomeHub publishes its live register map as flat JSON on `<base>/modbus`, with its own
   **Daikin Altherma Modbus** HA device/discovery group. A dead link yields `{}` and a disabled stack
   retracts the value/link-status topics and discovery configs. HA requires both the board LWT and
-  `<base>/modbus/status` online. The legacy retained `<base>/state` is deleted.
+  `<base>/modbus/status` online. A bounded read-only migration probe deletes a legacy retained
+  `<base>/state` value when one exists; clean brokers receive no empty `/state` publish on reconnect.
   A **bit-flag** value (converter family 300-307, `conv_is_binary`) is typed as a `binary_sensor` with
   an explicit `pl_on:"1"`/`pl_off:"0"` and published as the JSON **number** `1`/`0`
   — HA gets a real on/off entity, and a metrics consumer (which drops strings *and* bools) finally

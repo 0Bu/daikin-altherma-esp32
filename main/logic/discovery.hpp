@@ -135,10 +135,25 @@ inline std::string modbus_availability_topic(const std::string& base) {
     return base + "/modbus/status";
 }
 
-// Builds before the source split published X10A values here. mqtt_ha.cpp deletes this retained topic
-// on every connect so an upgraded broker cannot keep presenting a frozen legacy payload.
+// Builds before the source split published X10A values here. mqtt_ha.cpp briefly subscribes to this
+// exact topic after connecting and deletes it only when the broker actually returns a non-empty
+// retained legacy payload. An unconditional tombstone would itself publish <base>/state on every
+// reconnect, which leaves a visible empty topic in live MQTT clients after the old value is gone.
 inline std::string legacy_state_topic(const std::string& base) {
     return base + "/state";
+}
+
+// MQTT_EVENT_DATA predicate for that migration probe. Only the first fragment of a non-empty,
+// RETAINED value on the exact legacy topic is evidence that the broker still holds the old payload.
+// A live non-retained publisher, a tombstone echo, a later fragment (whose topic metadata is not
+// guaranteed by every client version), or a sibling topic must never trigger another write.
+inline bool legacy_state_cleanup_candidate(const std::string& legacy_topic,
+                                           const char* topic, int topic_len, bool retained,
+                                           int total_data_len, int current_data_offset) {
+    return retained && total_data_len > 0 && current_data_offset == 0 && topic && topic_len >= 0 &&
+           legacy_topic.size() == static_cast<size_t>(topic_len) &&
+           legacy_topic.compare(0, legacy_topic.size(), topic,
+                                static_cast<size_t>(topic_len)) == 0;
 }
 
 // Device availability topic (LWT): <base>/status -> "online"/"offline".
