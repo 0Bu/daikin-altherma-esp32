@@ -556,8 +556,8 @@ host-testable core is unusually large and valuable, because the risky parts are 
   only guarantees the bytes **parse** — an SSID of `"><script>` is already valid JSON here, and a
   body that fails `JSON.parse` never reaches those DOM nodes at all. Pure, so each control char is
   asserted host-side, including the signed-`char` trap that would otherwise mangle a non-ASCII SSID.
-- `logic/mqtt_group.hpp` — register page → friendly group name, plus the grouped state JSON for the
-  one shared state topic (depth 1, groups/keys in first-seen order). Each value carries its
+- `logic/mqtt_group.hpp` — register page → friendly group name, the grouped X10A JSON (depth 1,
+  groups/keys in first-seen order), and the flat Modbus JSON. Each value carries its
   `PublishedKind` (from its converter), so the JSON type is a property of the **field** and cannot
   change between states — the #209 fan-step failure, where one key alternated between a number and a
   string and the metrics consumer silently kept the stale number. A `Number` whose formatted value is
@@ -1140,11 +1140,10 @@ The Home Assistant bridge:
   no write command). On the **optional Modbus TCP link to a Daikin HomeHub** the wire *would* allow a
   write, and it is still read-only **by design**: the firmware reads registers and publishes them, and
   no MQTT subscribe, command topic, writable HA entity or HTTP write route exists to reach the pump
-  (see [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md); per-value HA discovery of the HomeHub map is not
-  published yet, so those readings reach the shared state topic under the `homehub` group only).
-- **Node id = the installation, not the board.** The HA device id is the slugified MQTT base topic
+  (see [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)).
+- **Two HA source groups.** The X10A device id is the slugified MQTT base topic
   (`daikin-altherma-esp32` → `daikin_altherma_esp32`, `logic/ha_device.hpp`), so replacing the ESP32
-  keeps ONE device with its entities, history and long-term statistics — where the old MAC-derived
+  keeps the X10A device with its entities, history and long-term statistics — where the old MAC-derived
   `daikin_<mac3>` produced a second device and restarted every statistic. The board's MAC id lives
   on as the **MQTT client id** (unique per connection) and a **second `dev.ids` entry** (HA matches a
   device by any identifier and merges, so a MAC-identified install is adopted rather than
@@ -1152,14 +1151,16 @@ The Home Assistant bridge:
   and the pre-#221 un-grouped entity ids — are retracted in **one bulk pass that completes before any
   replacement is published** (the diagnostics once per boot, the value entities once per detected
   profile), so the freed `entity_id` is reclaimed by the new entity and its recorder history and
-  long-term statistics carry over.
+  long-term statistics carry over. HomeHub register entities use the separate stable id
+  `<node>_modbus` and the name **Daikin Altherma Modbus**. That device omits the board id, because HA
+  would merge the two source groups if they shared any identifier.
 - **Own publish task + esp-mqtt client.** The event handler only flips status flags; all publishing
   happens in the task, so the mqtt event loop is never blocked by string building.
 - **Discovery is streamed.** A full Altherma value set can be 30–40+ entities; the bridge emits one
   entity's discovery config at a time (retained) on (re)connect, so it never needs one large
   contiguous heap block — the same memory discipline as the rest of the firmware. Layout-marker
   converters (docs/REGISTERS.md §3.6) get no sensor.
-- **One shared grouped-JSON state topic** `<base>/state` (retained). The message topics sit directly
+- **Independent source topics.** `<base>/x10a` is a retained grouped JSON document. The message topics sit directly
   under `<base>` — one board per base topic, so there is no `<node>` segment in the payload paths; the
   node id identifies the *device* only in each discovery config's `uniq_id`/`dev.ids`
   and its `<prefix>/<component>/<node>/<group>_<object_id>/…` discovery topic (the entity id carries
@@ -1168,9 +1169,15 @@ The Home Assistant bridge:
   builds a single JSON object of every value, grouped one level deep by X10A register page
   (`logic/mqtt_group.hpp`, host-tested): `{ "<group>": { "<object_id>": value, … }, … }` (max
   nesting depth 1, e.g. `hydronic`, `outdoor_state`, `inverter`). Every sensor's discovery config
-  points at this one topic and subscripts its value out with a `value_template`
+  points at the X10A topic and subscripts its value out with a `value_template`
   (`value_json['<group>']['<object_id>']` — bracket notation, so a digit-leading slug like
-  `2way_valve…` stays valid).
+  `2way_valve…` stays valid). `<base>/modbus` is a separate flat retained JSON object, published only
+  for an enabled HomeHub stack. Its discovery configs read a plain object key and belong to the
+  Modbus HA device. A disconnected HomeHub publishes `{}` rather than preserving a previous TCP
+  session's values. Its entities combine `<base>/status` (board LWT) and
+  `<base>/modbus/status` (link state) with `availability_mode: all`; disabling the stack retracts
+  both Modbus topics and its discovery configs. On upgrade the publisher deletes the obsolete
+  retained `<base>/state` topic.
 - **A field's JSON type comes from its DEFINITION, never from its current value.** `GroupedValue`
   carries a `PublishedKind` (`logic/convert.hpp` `published_kind`, keyed on the converter id):
   `Number` is emitted unquoted, `Text` quoted — in **every** state of that field. The publisher used
@@ -1237,7 +1244,7 @@ The Home Assistant bridge:
   — each field carried under its block name as a prefix rather than nested `wifi`/`mqtt`/`bus`
   sub-objects, so a Telegraf/InfluxDB line-protocol consumer and an HA `value_template` both read a
   plain snake_case key. The three connectivity flags (`wifi_connected`, `mqtt_connected`,
-  `bus_connected`) are the numbers `1`/`0`, not JSON bools, for the same reason the state topic's
+  `bus_connected`) are the numbers `1`/`0`, not JSON bools, for the same reason the X10A topic's
   bit-flag rows are — a metrics consumer drops a bool exactly as it drops a string, and these three
   were the only heartbeat fields that never became series. The `bus_status` `binary_sensor` declares
   the matching `"pl_on":"1"`/`"pl_off":"0"`; without it the entity inherits HA's `"ON"`/`"OFF"`
@@ -1276,7 +1283,7 @@ The Home Assistant bridge:
     use would be an always-off diagnostic to rule out, which is exactly what got `device_time` and
     `wifi_quality` retired.
 
-  Published on a fixed `HEARTBEAT_INTERVAL_S` (10 s) cadence — unlike the state topic, this is
+  Published on a fixed `HEARTBEAT_INTERVAL_S` (10 s) cadence — unlike the source value topics, this is
   diagnostics rather than real-time telemetry, so it always sends the latest snapshot rather than
   only on change. 18 diagnostic HA entities (WiFi signal/reconnects/MAC/BSSID, heap
   free/min-free/largest-block, uptime, last reset reason, X10A bus status/held-over/CRC/timeout/rx

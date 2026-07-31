@@ -10,7 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
-#include "ha_device.hpp"   // device_json — one HA device across values/diagnostics/crash
+#include "ha_device.hpp"   // device_json — one X10A HA device across values/diagnostics/crash
 #include "json.hpp"        // json_append_escaped
 
 namespace daik {

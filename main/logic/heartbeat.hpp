@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
-#include "ha_device.hpp"   // device_json — one HA device across values/diagnostics/crash
+#include "ha_device.hpp"   // device_json — one X10A HA device across values/diagnostics/crash
 #include "json.hpp"        // json_append_escaped
 
 namespace daik {
@@ -87,7 +87,7 @@ struct HeartbeatFields {
     uint32_t    modbus_fails     = 0;   // failed reads since boot
 };
 
-// Heartbeat topic: <base>/heartbeat — separate from the shared state topic so a Telegraf/HA consumer
+// Heartbeat topic: <base>/heartbeat — separate from the source value topics so a Telegraf/HA consumer
 // can subscribe to device health independently of heat-pump values.
 inline std::string heartbeat_topic(const std::string& base) {
     return base + "/heartbeat";
@@ -135,7 +135,7 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     // install's Telegraf → VictoriaMetrics pipeline: wifi_connected/mqtt_connected/bus_connected were
     // the only heartbeat fields that never became series — the json parser drops a bool exactly like
     // it drops a string, and a metrics store has nowhere to put either. Same reasoning and same
-    // encoding as the state topic's bit-flag rows (logic/convert.hpp); HA is
+    // encoding as the X10A topic's bit-flag rows (logic/convert.hpp); HA is
     // served by the matching pl_on "1" / pl_off "0" below.
     // (The crash topic keeps its true/false + `| lower` template: it is an event payload, published
     // empty on a normal boot and deliberately not subscribed by the metrics pipeline, so it has no

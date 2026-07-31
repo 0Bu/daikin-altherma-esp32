@@ -518,17 +518,21 @@ entered exactly like a visible one.
 IDF v6.0 extracted it from core — [`idf_component.yml`](../main/idf_component.yml)):
 
 - **✅ 🧪 HA MQTT auto-discovery.** One retained discovery config per value of the active profile
-  ([`logic/discovery.hpp`](../main/logic/discovery.hpp)); every sensor points at **one shared grouped
-  state topic** `<base>/state` ([`logic/mqtt_group.hpp`](../main/logic/mqtt_group.hpp)),
+  ([`logic/discovery.hpp`](../main/logic/discovery.hpp)); X10A sensors point at the shared grouped
+  source topic `<base>/x10a` ([`logic/mqtt_group.hpp`](../main/logic/mqtt_group.hpp)),
   republished only when the payload changes so a quiet pump doesn't spam the broker. The message
   topics sit directly under `<base>` (one board per base topic); the node id
   ([`logic/ha_device.hpp`](../main/logic/ha_device.hpp)) identifies the device only in each discovery
   config's `uniq_id`/`dev.ids`, not the payload path — and it is the slugified **base topic**, not
-  the board's MAC, so replacing the ESP32 keeps one HA device with its entities and statistics
+  the board's MAC, so replacing the ESP32 keeps the X10A HA device with its entities and statistics
   instead of creating a second one (the MAC id stays on as the MQTT client id + a second `dev.ids`
   entry HA merges on, and the configs published under it are retracted — the diagnostics once per
   boot, the value entities once per detected profile, in the same pass that clears the pre-#221
   un-grouped ids).
+  An enabled HomeHub publishes its live register map as flat JSON on `<base>/modbus`, with its own
+  **Daikin Altherma Modbus** HA device/discovery group. A dead link yields `{}` and a disabled stack
+  retracts the value/link-status topics and discovery configs. HA requires both the board LWT and
+  `<base>/modbus/status` online. The legacy retained `<base>/state` is deleted.
   A **bit-flag** value (converter family 300-307, `conv_is_binary`) is typed as a `binary_sensor` with
   an explicit `pl_on:"1"`/`pl_off:"0"` and published as the JSON **number** `1`/`0`
   — HA gets a real on/off entity, and a metrics consumer (which drops strings *and* bools) finally
@@ -660,7 +664,7 @@ the fact*, from the field, without a serial cable:
   STA **MAC** and associated-AP **BSSID**, MQTT publish/fail/reconnect counters, and X10A bus
   rx/fail/crc/timeout stats, and `bus_ou_held_over` — **source** freshness rather than link health:
   the outdoor unit refreshes its own pages only while it runs, so this says *why* the outdoor keys
-  vanished from the state topic while the bus is up and the device is publishing. Published
+  vanished from the X10A topic while the bus is up and the device is publishing. Published
   independently of heat-pump profile detection, so board health is visible even while the model is
   still `auto`.
   The last-boot reason rides as **three** renderings of one cached answer: the `reset_reason` slug a
@@ -894,9 +898,9 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   written in (`value_def.hpp`), the config model/validation + the field-owned detection patches
   (`config_model.hpp` — `apply_link`/`apply_model` touch only the link / model, so a detection commit
   cannot revert a concurrent `/set_wifi`), HA-discovery payloads
-  (`discovery.hpp`) and the HA **device identity** every one of them shares (`ha_device.hpp` — the
-  node id is the slugified MQTT base topic, so replacing the board keeps one device in Home
-  Assistant instead of duplicating it), detection (`detect.hpp`), the OTA health gate (`health_gate.hpp`), heartbeat &
+  (`discovery.hpp`) and the HA **source-device identities** (`ha_device.hpp` — X10A uses the slugified
+  MQTT base topic and Modbus its `_modbus` derivative, so replacing the board keeps both groups
+  instead of duplicating them), detection (`detect.hpp`), the OTA health gate (`health_gate.hpp`), heartbeat &
   crash formatting (`heartbeat.hpp`, `crashinfo.hpp`), the syslog boot/crash replay records
   (`bootlog.hpp`), the syslog hard-vs-transient send-error policy (`syslog_policy.hpp`), the
   gateway-watchdog policy (`link_watch.hpp`), the WiFi credential-rollback policy

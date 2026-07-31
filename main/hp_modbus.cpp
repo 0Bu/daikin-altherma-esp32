@@ -664,8 +664,8 @@ static void mb_poll_once() {
         // Named enums have already been formatted to the EKRHH status text at the common HomeHub
         // boundary and deliberately carry no binary marker. Without this distinction the panel
         // showed X10A "OFF" beside Modbus "1", and Operation mode as an unexplained integer.
-        // Safe to borrow: these rows never reach the MQTT bridge (current_grouped reads the X10A
-        // cache alone), so the id types the JSON and nothing else.
+        // The MQTT bridge looks the register definition up by `off` and does not use this borrowed
+        // converter to type Modbus JSON; this marker therefore remains limited to generic row/UI use.
         cv.conv = (r.type == MbType::Text16) ? 204 : def::homehub_is_binary(r) ? 300 : 0;
         cv.held = false;                           // no held-over concept on this link
         char buf[24];

@@ -1,6 +1,6 @@
 #pragma once
 // RFC 8259 JSON string encoding — the ONE encoder every JSON payload this firmware emits goes
-// through: /status, /values and /scan (http_status.cpp's jstr), the grouped MQTT state topic
+// through: /status, /values and /scan (http_status.cpp's jstr), the MQTT source-value topics
 // (mqtt_group.hpp), the heartbeat (heartbeat.hpp) and the crash topic (crashinfo.hpp). IDF-free
 // and host-tested, because the strings it encodes are NOT all ours — an SSID is arbitrary
 // attacker-chosen bytes (any AP in radio range), and a device string carries whatever the bus or

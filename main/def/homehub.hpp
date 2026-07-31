@@ -24,11 +24,11 @@
 
 namespace daik::def {
 
-// Synthetic X10A "register page" every HomeHub cache row is tagged with, so the MQTT bridge groups
-// them all under ONE key (logic/mqtt_group.hpp group_for_page maps this byte to "homehub"). It is
+// Synthetic X10A "register page" every HomeHub cache row is tagged with, so generic CachedValue
+// consumers can identify the source (logic/mqtt_group.hpp maps this byte to "modbus"). It is
 // deliberately NOT the EKRHH offset: those overlap real X10A page numbers (offset 16 == page 0x10),
 // so tagging a row by its offset would file it under an unrelated X10A group. 0xEE is outside the
-// X10A page catalog. test_homehub() pins that group_for_page(HOMEHUB_GROUP_REG) == "homehub".
+// X10A page catalog. test_homehub() pins that group_for_page(HOMEHUB_GROUP_REG) == "modbus".
 inline constexpr uint8_t HOMEHUB_GROUP_REG = 0xEE;
 
 // A dimensionless Int16 can still be a NUMBER, a two-state FLAG or a named ENUM. The wire type
@@ -117,6 +117,18 @@ inline constexpr bool homehub_is_binary(const HomeHubReg& r) {
 inline constexpr bool homehub_is_enum(HomeHubValueKind kind) {
     return kind == HomeHubValueKind::UnitAbnormality || kind == HomeHubValueKind::OperationMode ||
            kind == HomeHubValueKind::ThreeWayValve || kind == HomeHubValueKind::SmartGridMode;
+}
+
+// JSON/HA wire type is a property of the register definition, never of the formatted value. Text16
+// and the named manufacturer enums are text in every state; ordinary and binary values are numeric.
+inline constexpr bool homehub_is_text(const HomeHubReg& r) {
+    return r.type == MbType::Text16 || homehub_is_enum(r.kind);
+}
+
+inline constexpr const HomeHubReg* homehub_find(uint16_t offset) {
+    for (int i = 0; i < HOMEHUB_REG_COUNT; i++)
+        if (HOMEHUB_REGS[i].offset == offset) return &HOMEHUB_REGS[i];
+    return nullptr;
 }
 
 // Canonical English values are the manufacturer's own §9.2 names. The browser localises these at

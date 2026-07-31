@@ -1,8 +1,8 @@
 #pragma once
-// The Home Assistant DEVICE identity every discovery config this firmware publishes shares — values
-// (logic/discovery.hpp), board/link diagnostics (logic/heartbeat.hpp) and the crash report
-// (logic/crashinfo.hpp) all describe ONE device in HA, so the `dev` block is built here once instead
-// of being spelled out three times.
+// The Home Assistant DEVICE identities published by this firmware. X10A values, board/link
+// diagnostics and the crash report describe the ESP32/X10A bridge; HomeHub register values describe
+// a second, read-only Modbus source. They deliberately use different identifiers so Home Assistant
+// presents two device groups instead of merging both transports into one entity list.
 //
 // The id is derived from the MQTT BASE TOPIC — the INSTALLATION — and NOT from the board's MAC.
 // It used to be `daikin_<mac3>`, which made the HA device an identity of the *hardware*: replacing
@@ -64,8 +64,22 @@ inline std::string device_json(const std::string& node, const std::string& board
     std::string j = "\"dev\":{\"ids\":[\"";
     j += node; j += "\"";
     if (!board_id.empty() && board_id != node) { j += ",\""; j += board_id; j += "\""; }
-    j += "],\"name\":\"Daikin Altherma\",\"mf\":\"Daikin\",\"mdl\":\"Altherma\"}";
+    j += "],\"name\":\"Daikin Altherma X10A\",\"mf\":\"Daikin\",\"mdl\":\"Altherma X10A\"}";
     return j;
+}
+
+// The Modbus group must not carry the board id: Home Assistant matches a device by ANY identifier,
+// so sharing the X10A board id would merge the two groups again. Its stable id still derives from
+// the installation/base topic and therefore survives an ESP32 replacement.
+inline std::string modbus_device_node_id(const std::string& x10a_node) {
+    return x10a_node + "_modbus";
+}
+
+inline std::string modbus_device_json(const std::string& x10a_node) {
+    const std::string node = modbus_device_node_id(x10a_node);
+    return "\"dev\":{\"ids\":[\"" + node +
+           "\"],\"name\":\"Daikin Altherma Modbus\",\"mf\":\"Daikin\","
+           "\"mdl\":\"Altherma HomeHub Modbus\"}";
 }
 
 } // namespace daik

@@ -9,7 +9,7 @@
 //
 // WHY EVERY CONSUMER AND NOT JUST THE DECODER — four call sites read the row set, and they are not
 // independent: hp_poll decodes them into the cache, mqtt_ha announces one HA discovery config per
-// row, and BOTH http_status (`/values`, the WS broadcast) and mqtt_ha (the grouped state topic) size
+// row, and BOTH http_status (`/values`, the WS broadcast) and mqtt_ha (the grouped X10A topic) size
 // their snapshot buffer from the row COUNT, which is the exact upper bound on cached values. Grow
 // the cache without growing the count and the extra values are silently TRUNCATED out of `/values`
 // and out of MQTT — an absent-value bug with no error anywhere, the #35-#39 shape. So the view is
