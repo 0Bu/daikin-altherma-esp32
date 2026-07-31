@@ -4062,6 +4062,25 @@ function inspMember(sel) {
   return { x10a: r, mb: mbTwin(r) };
 }
 
+// The component rows that still add information below the explainer. A VALUE entry often includes
+// its own selector in `rows` so the same table can also describe an ASSEMBLY — but on the value entry
+// that reading is already the headline, and its gateway twin is already the comparison line in the
+// explainer. Repeating both in the member list made the tank panel print the X10A temperature twice
+// and the Modbus temperature twice. Remove the headline pair by object identity on whichever source
+// is currently leading, then collapse overlapping selectors exactly as before. Components have no
+// headline row/fallback, so their complete member list is unchanged.
+function inspMembers(e, row, fb) {
+  if (!e || !e.rows) return [];
+  return e.rows
+    .map((sel) => inspMember(sel))
+    .filter((m, i, a) => {
+      if (!(m.x10a || m.mb)) return false;
+      if ((row && m.x10a === row) || (fb && m.mb === fb)) return false;
+      return a.findIndex((o) =>
+        (m.x10a ? o.x10a === m.x10a : o.x10a == null && o.mb === m.mb)) === i;
+    });
+}
+
 // The reading of a /values row as one string ("42.8 °C"); "—" for an absent row — and "—" for a row
 // the outdoor unit has stopped refreshing (rowHeldOver / logic/ou_stale.hpp), which is the SAME
 // answer the pill gives. The panel used to read every row straight off /values, so tapping a pill
@@ -4111,17 +4130,18 @@ function inspectSig(e) {
   if (!e) return "";
   const d = S.live;
   const row = d ? inspCurRow(e) : null;
+  // The fallback headline is a value like any other and moves like any other, so it is in the key.
+  const fb = row ? null : mbForInspect(S.insp);
   // Each member reading AND its Modbus twin: the panel now draws both, so both have to be in the
-  // key. A value the body renders but the signature omits simply stops repainting — the mirror of
-  // putting a side effect IN here, and the quieter of the two failures: the panel keeps showing the
-  // gateway's reading from whenever something else last changed, looking perfectly current.
-  const rows = (d && e.rows ? e.rows.map((sel) => {
-    const m = inspMember(sel);
+  // key. Use the same filtered set as the renderer: the headline and comparison already have their
+  // own signature fields below, and a hidden duplicate must not become an extra repaint dependency.
+  // A value the body renders but the signature omits simply stops repainting — the mirror of putting
+  // a side effect IN here, and the quieter of the two failures: the panel keeps showing the gateway's
+  // reading from whenever something else last changed, looking perfectly current.
+  const rows = (d ? inspMembers(e, row, fb).map((m) => {
     return inspVal(m.x10a, d) + (m.mb ? "/" + m.mb.value : "");
   }) : []).join(",");
   const twin = mbTwin(row);
-  // The fallback headline is a value like any other and moves like any other, so it is in the key.
-  const fb = row ? null : mbForInspect(S.insp);
   // LANG guarantees the full body is redrawn even when this particular entry's title/live sentence
   // happens to be spelled identically in both dictionaries.
   return [LANG, S.insp, inspTitleText(e, d), inspVal(row, d), twin ? twin.value : "",
@@ -4241,13 +4261,7 @@ function renderInspect() {
   // explainer's job. Absent twin, or a device with no HomeHub: "" and the panel is what it was.
   $("inspBody").innerHTML = what + mbNoteHtml(row, mbTwin(row))
     + (sentence ? descParaHtml(esc(sentence)) : "") + inspHeldHtml(e, d);
-  $("inspRows").innerHTML = !d || !e.rows ? "" : e.rows
-    .map((sel) => inspMember(sel))
-    // A regex may hit a row an earlier selector already took. De-duplicated on whichever side is
-    // present, so the fallback (where every `x10a` is null by construction) still collapses its own
-    // repeats instead of listing one gateway reading several times.
-    .filter((m, i, a) => (m.x10a || m.mb) &&
-                         a.findIndex((o) => (m.x10a ? o.x10a === m.x10a : o.x10a == null && o.mb === m.mb)) === i)
+  $("inspRows").innerHTML = !d ? "" : inspMembers(e, row, fb)
     // A member reading with a twin gets the gateway's value as its OWN row, labelled "(Modbus)" and
     // petrol throughout — never appended to the X10A value in the same cell, which is what this did
     // first and which rendered as "46.2 °C 46.0 °C": two numbers of equal weight, jammed together,

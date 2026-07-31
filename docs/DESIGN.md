@@ -539,6 +539,9 @@ Body, ordered:
    components ("Running — compressor at 62 rps.", "Paused — the valve is feeding the hot-water tank
    right now."), the **explainer** (what it is, and `Normal:` guidance where useful), and the
    **member readings** of that component as a compact label→value list.
+   For a value target, that list omits the target's own reading: it is already the headline, and an
+   available Modbus twin is already shown as the explainer's comparison line. Component targets have
+   no headline reading and keep their complete member list.
    The explainer copy comes from the **same `DESCRIPTIONS` table** the value rows use (§5.3 item 6) —
    one source for "what does this mean", never a second parallel one. A value target resolves it
    through a canonical register label rather than the live one, so a profile's own spelling cannot
