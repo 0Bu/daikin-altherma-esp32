@@ -435,12 +435,12 @@ POST /detect                       # re-run auto-detection (reset profile to "au
 GET  /ota/check[?ms=<epoch>]       # start a background update check (poll /ota/status)
 POST /ota/update                   # start the background self-update (downloads, then reboots)
 GET  /ota/status                   # { state, progress, message, available, update_available, current }
-POST /mcp                          # MCP server for AI agents — PLANNED (route exists; no tools yet).
-                                   #   Today it returns a spec-compliant JSON-RPC 2.0 error (policy in
-                                   #   logic/mcp_jsonrpc.hpp): bad JSON → -32700, invalid request →
-                                   #   -32600, a notification (no id) → 204, a well-formed call →
-                                   #   -32601 with its id echoed. read-only; get_status / get_hp_values
-                                   #   are the intended tools.
+POST /mcp                          # stateless, read-only Streamable-HTTP MCP server:
+                                   #   initialize / tools/list / tools/call; exactly get_status and
+                                   #   get_hp_values, mirroring GET /status and GET /values.
+                                   #   JSON-RPC errors -32700/-32600/-32601/-32602; notifications →
+                                   #   202 with no body; GET /mcp → 405 (no SSE/session).
+                                   #   Bounded parser/dispatcher: logic/mcp.hpp; see docs/MCP.md.
 ```
 
 **Every** handler runs under the OOM try/catch rather than crashing (memory is the binding

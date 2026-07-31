@@ -109,12 +109,12 @@ static esp_err_t h_captive(httpd_req_t* req) {
 // broadcaster), and that second runner is what overflowed hp_poll's stack (#241) — a ~3.5 KB JSON
 // builder is the largest thing either task does, so putting it on the task that owns the X10A UART
 // funded a reboot where a 503 would have done. Keep it that way: this is a request-path builder.
-static std::string build_status_json_string(bool redact = false) {
+void http_append_status_json(std::string& j, bool redact) {
     const Config& c = config();
     HpStats     hp  = hp_stats();
     MqttStatus  m   = mqtt_status();
     WifiInfo    wi  = wifi_info();
-    std::string j = "{";
+    j += "{";
     j += "\"version\":" + jstr(esp_app_get_description()->version) + ",";
     j += "\"platform\":" + jstr(CONFIG_IDF_TARGET) + ",";
     j += "\"uptime_s\":" + std::to_string(esp_timer_get_time() / 1000000) + ",";
@@ -475,7 +475,6 @@ static std::string build_status_json_string(bool redact = false) {
             : "null";
     j += "}";
     j += "}";
-    return j;
 }
 
 static esp_err_t h_status(httpd_req_t* req) {
@@ -488,7 +487,8 @@ static esp_err_t h_status(httpd_req_t* req) {
         char v[4];
         if (httpd_query_key_value(q, "redact", v, sizeof(v)) == ESP_OK) redact = query_flag_on(v);
     }
-    std::string j = build_status_json_string(redact);
+    std::string j;
+    http_append_status_json(j, redact);
     return http_send_json(req, j.c_str());
 }
 
@@ -504,11 +504,11 @@ static esp_err_t h_status(httpd_req_t* req) {
 // the catalog spells them ~50 different ways across the 43 profiles ("Outdoor air temp.",
 // "R1T-Outdoor air temp.", "Outdoor Air Temp (R1T)", …), so a pattern list would silently stop
 // covering a row the C++ test still gates.
-static std::string build_values_array() {
+static void append_values_array(std::string& j) {
     const size_t cap = hp_values_capacity();
     std::vector<CachedValue> v(cap ? cap : 1);
     size_t n = hp_values_snapshot(v.data(), v.size());
-    std::string j = "[";
+    j += "[";
     // Successive += rather than one a + b + c + … chain: a chain materialises every intermediate
     // std::string in the same frame, and this runs on the httpd task (see CLAUDE.md "Memory
     // constraints" — the v1.0.12 stack overflow).
@@ -549,7 +549,6 @@ static std::string build_values_array() {
         j += "}";
     }
     j += "]";
-    return j;
 }
 
 // The HomeHub rows, from the OTHER stack's cache (hp_modbus.cpp). A separate array rather than mixed
@@ -584,9 +583,9 @@ static std::string build_modbus_values_array(bool& live) {
 // The two sources ride ONE response but stay two arrays, mirroring the two stacks behind them:
 // `values` is X10A, `modbus` is the HomeHub. `modbus` is emitted only when that stack is enabled, so
 // a device without one sees exactly the payload it saw before this feature existed.
-static esp_err_t h_values(httpd_req_t* req) {
-    std::string j = "{\"values\":";
-    j += build_values_array();
+void http_append_values_json(std::string& j) {
+    j += "{\"values\":";
+    append_values_array(j);
     // Emitted only while the link is CONNECTED, not merely enabled. That is a payload invariant
     // worth having: if the `modbus` array is present, every row in it was read this cycle. Gating on
     // `enabled` alone served the last good cache after the link dropped, and a consumer has no way
@@ -609,6 +608,11 @@ static esp_err_t h_values(httpd_req_t* req) {
         }
     }
     j += "}";
+}
+
+static esp_err_t h_values(httpd_req_t* req) {
+    std::string j;
+    http_append_values_json(j);
     return http_send_json(req, j.c_str());
 }
 

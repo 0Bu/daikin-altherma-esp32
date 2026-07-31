@@ -6,7 +6,7 @@
 // panic that could not write its own dump left the previous one behind) — it is ERASED here so
 // `coredump` never advertises a download espcoredump would reject on a version mismatch (#215).
 // The reason + summary are boot-time FACTS and stay cached — the summary is never re-parsed from
-// flash on a request path (build_status_json_string also runs in the poll task's WS broadcaster,
+// flash on a request path (http_append_status_json also runs in the poll task's WS broadcaster,
 // which only self-guards std::bad_alloc by dropping the frame).
 //
 // The `coredump` flag is the ONE field that is NOT a boot-time fact: the image it describes can be

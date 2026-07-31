@@ -91,7 +91,7 @@ inline BoardPins board_pins(const char* /*target*/ = nullptr, bool octal_spi = t
 // the button dead. The dropdown must not recommend a pin the firmware itself is using.
 //
 // Writes into a CALLER-owned buffer and returns the count, rather than returning a shared static
-// list: build_status_json_string() runs on the httpd task AND on the poll task's WS broadcaster, so
+// list: http_append_status_json() runs on the httpd task AND on the poll task's WS broadcaster, so
 // a filtered static would be a data race between them. Returns pins strictly ascending, like
 // board_pins(). Size `out` with BOARD_PINS_MAX.
 inline int board_pins_offerable(int* out, int cap, bool octal_spi, ReservedPins rsv = {}) {

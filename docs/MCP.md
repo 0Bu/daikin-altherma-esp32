@@ -1,30 +1,44 @@
 # MCP integration
 
-> **Status: PLANNED — not yet implemented.** The `POST /mcp` route exists, but it does not yet
-> serve any tools. Today it only returns a **spec-compliant JSON-RPC 2.0 error** (policy host-tested in
-> `main/logic/mcp_jsonrpc.hpp`): a body that isn't valid JSON → `-32700` *Parse error* (`id:null`); a
-> structurally-invalid request → `-32600` *Invalid Request* (`id:null`); a well-formed **notification**
-> (no `id`) → **no response** (`204`); a well-formed call → `-32601` *Method not found* with the
-> request's own `id` echoed (a number/string/null id only — array/object/boolean ids are never
-> mirrored). The tools, client config and wire example below describe the **intended** surface once the
-> read-only tools land (`main/mcp_server.cpp`) — a design target, not shipped behaviour.
-
-The device is planned to expose a small **Model Context Protocol** server at `POST /mcp` so AI agents
-(Claude Code/Desktop, VS Code, the Python SDK, …) can read heat-pump state directly. It will be
-**read-only** — the tools only *read* cached values, mirroring the read-only nature of the whole
-device (it never changes heat-pump settings).
+The device exposes a small **Model Context Protocol** server at `POST /mcp` so AI agents and other
+MCP clients can read heat-pump state directly. It is **strictly read-only**: the two tools reuse the
+same cached snapshots as `GET /status` and `GET /values`; no tool writes configuration, commands the
+heat pump, or reaches a separate data source.
 
 > Transport: **Streamable HTTP**, stateless JSON-RPC 2.0. `GET /mcp` → `405` (no SSE). Same
 > trusted-LAN-only caveat as the rest of the API — no auth/TLS, keep it on your LAN.
 
-## Tools (planned)
+The implemented subset follows the date-versioned MCP specification:
+
+- `initialize` negotiates `2025-03-26`, `2025-06-18`, or `2025-11-25`; an unsupported/missing
+  revision receives the server's latest supported revision (`2025-11-25`).
+- `tools/list` returns exactly the two no-argument tools below, including read-only annotations.
+- `tools/call` accepts only those tool names and an omitted or empty `arguments` object.
+- A valid notification (for example `notifications/initialized`) is accepted with HTTP `202` and no
+  body. There is no session id and no state is retained between requests.
+- Native clients may omit `Origin`; a present browser `Origin` must name the device's configured mDNS
+  hostname or current IP (with optional `:80`), otherwise the request is rejected with HTTP `403`.
+  A present `MCP-Protocol-Version` header must name one of the three supported revisions; when it is
+  absent the Streamable-HTTP compatibility default applies.
+- Parse/Request/Method/Params errors use JSON-RPC `-32700`, `-32600`, `-32601`, and `-32602`;
+  a valid string, number, or null request id is echoed exactly. Unknown tool names use `-32601`.
+
+The request body is bounded to 1 KiB and parsed by the IDF-free, host-tested
+[`logic/mcp.hpp`](../main/logic/mcp.hpp) core. Every route invocation still runs under the shared
+HTTP OOM guard.
+
+## Tools
 
 | Tool | Args | Returns |
 |------|------|---------|
-| `get_status` | — | device/WiFi/MQTT/heat-pump health (same shape as `GET /status`) |
-| `get_hp_values` | — | the latest decoded readings (same shape as `GET /values`) |
+| `get_status` | none | `structuredContent` with the complete device/WiFi/MQTT/heat-pump status (same shape as `GET /status`) |
+| `get_hp_values` | none | `structuredContent` with the complete current X10A and, when live, HomeHub snapshot (same shape as `GET /values`) |
 
-## Client config (once implemented)
+Each call result also contains a short `TextContent` summary. The full snapshot is emitted once as
+`structuredContent`: serialising and JSON-escaping the same multi-kilobyte value array a second time
+would create avoidable contiguous-heap pressure on the ESP32-S3.
+
+## Client config
 
 Claude Desktop / Code (`mcpServers`):
 
@@ -42,9 +56,28 @@ Claude Desktop / Code (`mcpServers`):
 ## Wire example
 
 ```bash
-curl -s http://daikin-altherma-esp32.local/mcp \
+BASE=http://daikin-altherma-esp32.local
+
+curl -s "$BASE/mcp" \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}' | jq
+
+curl -s "$BASE/mcp" \
+  -H 'Content-Type: application/json' \
+  -H 'MCP-Protocol-Version: 2025-11-25' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | jq '.result.tools[].name'
+
+curl -s "$BASE/mcp" \
+  -H 'Content-Type: application/json' \
+  -H 'MCP-Protocol-Version: 2025-11-25' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_status","arguments":{}}}' \
+  | jq '.result.structuredContent'
+
+curl -s "$BASE/mcp" \
+  -H 'Content-Type: application/json' \
+  -H 'MCP-Protocol-Version: 2025-11-25' \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_hp_values"}}' \
+  | jq '.result.structuredContent'
 ```
 
 ---

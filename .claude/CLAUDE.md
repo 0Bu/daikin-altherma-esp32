@@ -24,7 +24,7 @@ Builds for the **esp32s3** target only.
 > ESP-IDF component inventory, diagnostics) is [`docs/FEATURES.md`](../docs/FEATURES.md) — keep it
 > current with the `feature-docs` skill when a technical feature lands or changes. The MQTT/HA entity
 > contract as seen from Home Assistant is [`docs/HOME_ASSISTANT.md`](../docs/HOME_ASSISTANT.md), and
-> the (planned) read-only MCP surface is [`docs/MCP.md`](../docs/MCP.md). User-facing docs:
+> the implemented read-only MCP surface is [`docs/MCP.md`](../docs/MCP.md). User-facing docs:
 > [`README.md`](../README.md), [`docs/README.md`](../docs/README.md),
 > [`docs/SECURITY.md`](../docs/SECURITY.md), [`docs/DESIGN.md`](../docs/DESIGN.md) (web-UI design
 > contract), [`docs/WIRING.md`](../docs/WIRING.md) (X10A wiring + picking RX/TX on other boards),
@@ -605,12 +605,13 @@ http_common.cpp shared HTTP helpers + the ONE OOM guard every route runs under: 
                 is under it now — the one exception (/events, raw-registered because is_websocket
                 bypasses the trampoline, so it had to self-guard) no longer exists
 http_status.cpp GET / (setup.html in AP mode, else gzip UI) /status /values /history /models /diag /scan
-                /coredump + POST /crash/dismiss + captive catch-all. build_status_json_string() runs
+                /coredump + POST /crash/dismiss + captive catch-all. http_append_status_json() runs
                 on the httpd task ALONE — it used to run on the poll task too, which is what
                 overflowed that task's stack (#241)
 http_config.cpp POST /set_wifi /set_mqtt /set_syslog /set_ntp /set_hp /set_board /set_ota /set_lang /detect
 http_ota.cpp    /ota/check|update|status
-mcp_server.cpp  /mcp (read-only MCP tools; TODO)
+mcp_server.cpp  /mcp device glue (stateless read-only MCP: initialize/tools/list/tools/call;
+                get_status + get_hp_values reuse the exact HTTP snapshot builders; GET 405/no SSE)
 mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE shared grouped-JSON
                 state topic <base>/state (logic/mqtt_group.hpp), republished on change; LWT
                 availability, mqtts+CA on creds. A field's JSON TYPE comes from its CONVERTER
@@ -869,7 +870,7 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 config_store, discovery, ha_device, detect, history, json, mqtt_group, mqtt_uri, homehub_map, heartbeat, crashinfo,
                 bootlog, reset_reason, boot_guard, board_pins, board_presets, modbus, syslog_policy, link_watch,
                 wifi_rollback, health_gate, version_cmp, ota_manifest, ota_channel, ui_lang,
-                http_body, http_surface, query_flag, redact, mcp_jsonrpc, timestamp, uart_plan, detect_backoff,
+                http_body, http_surface, query_flag, redact, mcp, timestamp, uart_plan, detect_backoff,
                 hexdump, led_pattern, button, captive,
                 lwt_select, ou_stale, cop_scope, profile_view, feature_gate, availability,
                 fault_state,
@@ -2019,7 +2020,8 @@ GET  /ota/status  {state:idle|checking|updating|done|error, progress, message, u
                   json_quote. `downgrade` = the offered build is installable but OLDER (the
                   dev -> release direction); the UI needs BOTH flags, since update_available alone
                   makes a release-channel check on a dev board read "up to date" forever
-POST /mcp         MCP server (read-only; planned — route returns a JSON-RPC "not implemented" error)
+POST /mcp         stateless read-only MCP: initialize / tools/list / tools/call; get_status +
+                  get_hp_values mirror /status + /values. Notifications → 202; GET → 405 (no SSE)
 ```
 
 No HTTP auth / TLS by design — trusted LAN only. See docs/SECURITY.md.
@@ -2034,7 +2036,7 @@ also stops the poll cycle and drops MQTT availability.
 
 **The STACK is a second, separate budget — and it fails silently.** Everything above is about the
 heap; the crash that took v1.0.12 down was a *stack* overflow, and none of the heap rules could see
-it. `build_status_json_string()` runs on the httpd task, which had 8 KB; the core dump's task table
+it. `http_append_status_json()` runs on the httpd task, which had 8 KB; the core dump's task table
 read `httpd 7728/460` — 460 bytes off its floor — so it wrote past `pxStack` into its own TCB,
 clobbering `pvThreadLocalStoragePointers[0]` with `0x4`, and died ~44 s later inside lwip's
 `pthread_getspecific` with a backtrace pointing at an innocent WebSocket send (a transport this
@@ -2052,7 +2054,7 @@ limit panic at the offending instruction. IDF's default canary is only compared 
 and a sparsely-writing frame can skip over it — which is exactly what happened here (TLS[1], the
 neighbour it would have had to cross, was left intact).
 
-**It happened AGAIN, on the other task, and that is the lesson (#241).** `build_status_json_string()`
+**It happened AGAIN, on the other task, and that is the lesson (#241).** `http_append_status_json()`
 ran on TWO tasks — the httpd task *and* `hp_poll`'s WebSocket broadcaster — so raising one stack
 fixed half the problem and left the other half to be re-discovered. v1.0.12 raised httpd 8192 ->
 12288; `hp_poll` stayed at 8192 until #229 (`health`) and #231 (`history`) grew /status from ~2.2 KB

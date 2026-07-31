@@ -94,7 +94,7 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
                       No route is exempt any more: the one that was (/events, raw-registered
                       because is_websocket bypasses the trampoline) no longer exists
 http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /diag, /scan, /coredump,
-                      POST /crash/dismiss. build_status_json_string() runs on the httpd task ALONE —
+                      POST /crash/dismiss. http_append_status_json() runs on the httpd task ALONE —
                       see "Push vs. poll" below for why that sentence is load-bearing
 http_config.cpp     → POST /set_wifi, /set_mqtt, /set_syslog, /set_ntp, /set_hp, /set_board,
                       /set_ota, /set_lang, /detect. /set_hp also carries the TRANSPORT + the
@@ -110,8 +110,10 @@ hp_modbus.cpp/.hpp  → THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT sourc
 def/homehub.hpp     → the HomeHub register map (input + holding), the Modbus counterpart of the X10A
                       def/ profiles; decoded via logic/modbus.hpp's Temp16/Pow16/Int16/Text16 codecs
 http_ota.cpp        → /ota/check|update|status
-mcp_server.cpp      → /mcp — read-only MCP tools (get_status, get_hp_values) for AI agents — PLANNED
-                      (route exists; returns a JSON-RPC "not implemented" error for now)
+mcp_server.cpp      → /mcp — implemented stateless Streamable-HTTP MCP device glue. Dispatches only
+                      read-only get_status/get_hp_values and reuses http_status.cpp's exact JSON
+                      builders; GET is 405 (no SSE/session). Parsing/catalog/envelopes live in
+                      host-tested logic/mcp.hpp
 provisioning.cpp    → captive setup portal (SoftAP daikin-altherma-esp32-setup) when no WiFi.
                       Runs AP-only: the portal takes the SSID as free text and never scans, so it
                       needs no station interface (esp_wifi_scan_start() would — an earlier version
@@ -629,12 +631,12 @@ host-testable core is unusually large and valuable, because the risky parts are 
   out-param untouched) on any corruption, so a fresh device / a pre-blob OTA falls back to the legacy
   per-key load. Host-tested: CRC golden vector, round-trip, and every corruption path (bad
   CRC/magic/version, truncation, trailing garbage).
-- `logic/mcp_jsonrpc.hpp` — the JSON-RPC 2.0 response policy for the planned `/mcp` route (F14):
-  `mcp_jsonrpc_decide()` maps a request's shape (valid JSON? object? `"jsonrpc":"2.0"`? string
-  `method`? id kind) to the interim response — `-32700` parse / `-32600` invalid-request / **no
-  response** for a notification / `-32601` method-not-found — plus which id may be echoed (only a
-  number/string/null, never an array/object/bool). Host-tested; `mcp_server.cpp` only extracts the
-  shape with cJSON and renders the decision.
+- `logic/mcp.hpp` — the complete IDF-free core for `/mcp` (F14): a bounded, depth-aware JSON scanner;
+  JSON-RPC structure/id validation and exact id echo; `initialize`, `tools/list`, and `tools/call`
+  dispatch; MCP revision negotiation; the fixed two-tool no-argument catalog; and result/error
+  envelope builders. It maps malformed/invalid/missing-method-or-tool/invalid-params requests to
+  `-32700/-32600/-32601/-32602` and identifies notifications for the transport's empty HTTP 202.
+  `mcp_server.cpp` supplies only the app version and the existing `/status`/`values` snapshots.
 
 `hp_convert.cpp`, `hp_comm.cpp`, `config.cpp`, `mqtt_ha.cpp` are thin device wrappers that call
 these headers. Add new decode/format logic to `main/logic/` and a `CHECK` in
@@ -1000,7 +1002,7 @@ firmware:
   completion callback never ran, the backpressure gate was never released, and `try_begin()` said no
   forever. The common symptom was not the crash: values kept flowing while model, health, heap and
   uptime froze on screen, with **nothing** logged.
-* **The push put the `/status` builder on the wrong task** (#241/#242). `build_status_json_string()`
+* **The push put the `/status` builder on the wrong task** (#241/#242). `http_append_status_json()`
   ran on the httpd task *and* on the poll task, because the broadcaster lived there. That is a
   ~3.5 KB JSON build (including `config()` **by value**, ~10 `std::string` copies) on the task that
   owns the X10A UART: `hp_poll 7664/520` — 520 bytes of 8192 left, killed by the stack watchpoint.
@@ -1288,7 +1290,7 @@ Structure:
     its **summary** (`esp_core_dump_get_summary()` — crashed task, exception PC, backtrace PCs, and
     the crashed build's `app_elf_sha256`) into a cached `CrashInfo`. The pure formatting is
     `logic/crashinfo.hpp` (host-tested); the summary is parsed **once** and cached — never re-read
-    from flash on a request path, which is where `build_status_json_string()` runs (and, until the
+    from flash on a request path, which is where `http_append_status_json()` runs (and, until the
     WebSocket push was removed, also on the poll task — see "Push vs. poll"). A dump whose parsed
     `app_elf_sha256` does **not** match the running build (`coredump_is_foreign()`, host-tested) is an
     **orphan** — it survived an OTA, or a panic that could not write its own dump left the previous
@@ -1305,7 +1307,7 @@ Structure:
     user has **deleted** (`CrashInfo::dismissed`, below), which is the one other field written after
     boot: a single monotonic `false → true` store, so the readers that copy the struct concurrently
     (HTTP, MQTT) need no lock for it.
-  - **Always-on system health (no fault required).** `build_status_json_string()` also carries a
+  - **Always-on system health (no fault required).** `http_append_status_json()` also carries a
     compact `sys` block — `free_heap` / `min_free_heap` (since-boot low-water, the leak indicator) /
     `max_alloc` (largest contiguous block, the true OOM ceiling), the `reset_reason` slug (via
     `logic/reset_reason.hpp`, reusing the same vocabulary as `last_crash`) and a `safe_mode` flag
