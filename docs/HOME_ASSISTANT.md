@@ -69,8 +69,10 @@ the link status `<base>/modbus/status` to be online (`availability_mode: all`), 
 makes it unavailable. All Modbus entities are read-only `sensor`/`binary_sensor` entities; there is
 no command topic or writable HA component.
 
-On the first connection after upgrading, the firmware deletes the legacy retained `<base>/state`
-payload. X10A consumers must subscribe to `<base>/x10a`; `<base>/state` is no longer published.
+After upgrading, the firmware briefly probes for the legacy retained `<base>/state` payload and
+deletes it only when the broker actually returns one. Once it is absent, reconnects do not publish
+even an empty payload on that topic. X10A consumers must subscribe to `<base>/x10a`;
+`<base>/state` is no longer a published topic.
 
 The board/link diagnostics on `<base>/heartbeat` are a **flat** JSON object — each field carried under
 its block name as a prefix (`wifi_connected`, `wifi_rssi`, `wifi_mac`, `wifi_bssid`, `mqtt_count`,
