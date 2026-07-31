@@ -78,8 +78,8 @@ menu "Daikin Altherma Configuration"
             Base topic for this installation: the x10a/modbus/heartbeat/crash topics sit directly
             under it, e.g. "daikin-altherma-esp32/x10a". It is also the HA installation identity — the
             slugified base topic ("daikin_altherma_esp32") is the discovery node id, so replacing
-            the board keeps one combined X10A/Modbus/diagnostics device in Home Assistant. Two
-            boards on one broker therefore need two base topics.
+            the board keeps one X10A/diagnostics device in Home Assistant. The Modbus topic remains
+            MQTT-only. Two boards on one broker therefore need two base topics.
 
     # ── OTA ───────────────────────────────────────────────────────────────────
     config DAIKIN_OTA_MANIFEST_URL

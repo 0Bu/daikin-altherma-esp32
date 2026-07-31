@@ -1140,7 +1140,7 @@ The Home Assistant bridge:
   the heat pump, so there is nothing to subscribe to. On X10A that is the protocol's own doing (it has
   no write command). On the **optional Modbus TCP link to a Daikin HomeHub** the wire *would* allow a
   write, and it is still read-only **by design**: the firmware reads registers and publishes them, and
-  no MQTT subscribe, command topic, writable HA entity or HTTP write route exists to reach the pump
+  no MQTT subscribe, command topic, HA value entity or HTTP write route exists to reach the pump
   (see [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)).
 - **One HA installation device.** Its id is the slugified MQTT base topic
   (`daikin-altherma-esp32` → `daikin_altherma_esp32`, `logic/ha_device.hpp`), so replacing the ESP32
@@ -1152,10 +1152,8 @@ The Home Assistant bridge:
   and the pre-#221 un-grouped entity ids — are retracted in **one bulk pass that completes before any
   replacement is published** (the diagnostics once per boot, the value entities once per detected
   profile), so the freed `entity_id` is reclaimed by the new entity and its recorder history and
-  long-term statistics carry over. HomeHub register entities retain `<node>_modbus` only as their
-  discovery-topic and unique-id namespace; their `dev.ids` are identical to X10A and diagnostics,
-  so Home Assistant presents one **Daikin Altherma** device while same-named source entities cannot
-  collide.
+  long-term statistics carry over. The device contains X10A values plus board/link diagnostics;
+  HomeHub register values remain MQTT-only.
 - **Own publish task + esp-mqtt client.** The event handler only flips status flags; all publishing
   happens in the task, so the mqtt event loop is never blocked by string building.
 - **Discovery is streamed.** A full Altherma value set can be 30–40+ entities; the bridge emits one
@@ -1174,15 +1172,15 @@ The Home Assistant bridge:
   points at the X10A topic and subscripts its value out with a `value_template`
   (`value_json['<group>']['<object_id>']` — bracket notation, so a digit-leading slug like
   `2way_valve…` stays valid). `<base>/modbus` is a separate flat retained JSON object, published only
-  for an enabled HomeHub stack. Its discovery configs read a plain object key and belong to the
-  common X10A/Modbus/diagnostics HA device. Existing separate Modbus-device entities are migrated
-  once by deleting their retained configs, waiting three seconds, and re-announcing the same
-  topics/unique ids. Int16 enum values retain the raw numeric Modbus constant; `/values` carries
-  separate semantic metadata so the browser can name them without putting prose on MQTT/HA. A
-  disconnected HomeHub publishes `{}` rather than preserving a previous TCP
-  session's values. Its entities combine `<base>/status` (board LWT) and
-  `<base>/modbus/status` (link state) with `availability_mode: all`; disabling the stack retracts
-  both Modbus topics and its discovery configs. On upgrade a bounded exact-topic subscription probes
+  for an enabled HomeHub stack and intentionally not referenced by HA discovery. Int16 enum values
+  retain the raw numeric Modbus constant; `/values` carries separate semantic metadata so the browser
+  can name them without putting prose on MQTT. A disconnected HomeHub publishes `{}` rather than
+  preserving a previous TCP session's values; disabling the stack retracts the Modbus data topic.
+  The former retained `<base>/modbus/status` duplicate is tombstoned on connect because link state,
+  receive count and failures already live in `<base>/heartbeat`. The
+  27 discovery configs emitted by builds through `v1.0.0-dev.257` are permanent cleanup targets:
+  connect-time and five-minute retirement passes tombstone them and no replacement config exists. On upgrade a bounded
+  exact-topic subscription probes
   for an obsolete retained `<base>/state` value; only a non-empty retained response triggers its
   tombstone, so later reconnects do not publish an empty legacy topic.
 - **A field's JSON type comes from its DEFINITION, never from its current value.** `GroupedValue`

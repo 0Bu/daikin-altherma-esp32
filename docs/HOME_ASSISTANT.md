@@ -1,9 +1,9 @@
 # Home Assistant integration
 
-The device publishes every decoded value to MQTT using Home Assistant
-[MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery). X10A metrics,
-optional read-only Modbus metrics and diagnostics appear under one **Daikin Altherma** device with
-no YAML. Topics, entities and derived (COP) sensors below.
+The device publishes every decoded value to MQTT and uses Home Assistant
+[MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery) for X10A metrics
+and diagnostics under one **Daikin Altherma** device with no YAML. HomeHub Modbus data remains on
+MQTT but is not exposed as HA value entities. Topics, entities and derived (COP) sensors below.
 
 ## Enabling
 
@@ -25,7 +25,6 @@ by the object id alone — see below for why.
 <base>/status                                      online | offline   (LWT, retained)
 <base>/x10a                                        {<group>: {<object_id>: value, …}, …}  (retained JSON)
 <base>/modbus                                      {<object_id>: value, …}  (retained JSON; enabled HomeHub only)
-<base>/modbus/status                               online | offline   (retained Modbus-link availability)
 <base>/heartbeat                                   board/link diagnostics (flat JSON, 10 s cadence)
 <base>/crash                                       crash report, retained — ONLY on a fault/dump boot; cleared otherwise
                                                    (also cleared when the report is deleted in the web UI, POST /crash/dismiss)
@@ -60,16 +59,15 @@ shared topic and pulls its value out with a `value_template`:
 ```
 
 When the HomeHub stack is enabled, its available register values are published independently as a
-flat retained object on `<base>/modbus`. Its discovery configs belong to the same **Daikin
-Altherma** installation device and read keys directly, for example
-`value_json['return_water_temperature']`. A disconnected HomeHub produces `{}` so HA does not keep
-showing a previous TCP session's readings. Disabling Modbus removes both the retained value topic and
-its retained discovery configs. Each Modbus entity requires both the board LWT `<base>/status` and
-the link status `<base>/modbus/status` to be online (`availability_mode: all`), so either failure
-makes it unavailable. All Modbus entities are read-only `sensor`/`binary_sensor` entities; there is
-no command topic or writable HA component. Named HomeHub selectors also keep their raw numeric
-constants in the state topic (`smart_grid_operation_mode: 2`); readable names are a web-UI concern,
-not a replacement for the Modbus value on MQTT or in Home Assistant.
+flat retained object on `<base>/modbus`; a disconnected HomeHub produces `{}` and disabling the
+source removes that data topic. This stream intentionally has **no Home
+Assistant discovery configs**: HA exposes only X10A values plus board/link diagnostics. Builds up to
+`v1.0.0-dev.257` did announce 27 Modbus entities; connect-time and five-minute retained tombstones
+to those exact retired discovery topics remove them from existing HA installations
+without affecting `<base>/modbus`. Named HomeHub selectors keep their raw numeric constants in that
+MQTT state topic (`smart_grid_operation_mode: 2`); readable names remain a web-UI concern. The
+redundant retained `<base>/modbus/status` emitted by those builds is deleted too; current link state,
+receive count and failures are already carried by `<base>/heartbeat`.
 
 After upgrading, the firmware briefly probes for the legacy retained `<base>/state` payload and
 deletes it only when the broker actually returns one. Once it is absent, reconnects do not publish
@@ -104,25 +102,17 @@ is also directly consumable by a Telegraf MQTT `json_v2` parser (→ VictoriaMet
 
 ### Device identity
 
-X10A values, read-only HomeHub values, board diagnostics and the crash flag belong to one **Daikin
-Altherma** Home Assistant device, identified by the **slugified MQTT base topic** (`daikin-altherma-esp32` →
+X10A values, board diagnostics and the crash flag belong to one **Daikin Altherma** Home Assistant
+device, identified by the **slugified MQTT base topic** (`daikin-altherma-esp32` →
 `daikin_altherma_esp32`) in `dev.ids` and as the prefix of every `uniq_id` (whose remainder is the
 entity's `<group>_<object_id>`). The id therefore names
 the **installation, not the board**: replace the ESP32 (or erase its flash and set it up again) and
 the replacement publishes exactly the same unique ids, so HA keeps the same device, the same
 entities, and their whole history and long-term statistics. Two boards on one broker therefore need
 two base topics (`CONFIG_DAIKIN_MQTT_BASE_TOPIC`, compile-time), keeping installations distinct.
-Modbus discovery topics and unique ids retain a `_modbus` namespace solely to prevent entity-name
-collisions; their `dev.ids` are the same installation and board identifiers as X10A and diagnostics,
-so Home Assistant joins all three surfaces into that one device.
-
-> **Upgrading from the earlier split X10A/Modbus device layout:** Home Assistant does not move an
-> existing MQTT entity to another device merely because a retained discovery payload's `dev.ids`
-> changes. The firmware therefore performs one persisted migration: it deletes the 27 retained
-> Modbus discovery configs, waits three seconds for HA to process those removals, and republishes the
-> same topics and `unique_id`s under the common **Daikin Altherma** device. Entity ids, recorder
-> history, statistics and per-entity customisations are preserved. The migration marker is written
-> only after replacement discovery is queued; a failed NVS write retries on a later reconnect.
+The retired Modbus discovery topics keep their `_modbus` namespace only as cleanup targets. They are
+deleted on every broker connection and never republished, while `<base>/modbus` remains available to
+ordinary MQTT consumers.
 
 The board's own id `daikin_<mac3>` (low three bytes of the WiFi STA MAC) still exists, but only
 where the *hardware* is what's being identified: as the **MQTT client id** — which has to be unique
@@ -388,10 +378,9 @@ same rows arrive by the normal route and the entities are unchanged.
 > That holds for **both** transports. The firmware can also read a **Daikin HomeHub (EKRHH)
 > over Modbus TCP** beside X10A ([MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)) — and where X10A simply
 > *has* no write command, the HomeHub link is read-only **by design**: no MQTT subscribe, no command
-> topic, no writable entity. Using the HomeHub as this firmware's source does not turn it into a
-> control path. Its per-value HA auto-discovery uses a separate Modbus entity namespace inside the
-> shared Daikin Altherma device, and its
-> readings are published only on `<base>/modbus`; board + link heartbeat diagnostics are unaffected.
+> topic or writable entity. Using the HomeHub as this firmware's source does not turn it into a
+> control path. Its readings are published on `<base>/modbus` without per-value HA discovery;
+> board + link heartbeat diagnostics are unaffected.
 
 ## Derived power, energy & COP / SCOP / JAZ
 
