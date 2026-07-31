@@ -39,9 +39,11 @@ that their DOM-write signatures invalidate when the persisted UI language change
 stays identical.
 
 `node test/test_ui_modbus_status.mjs` executes the production Connections-row helpers and pins the
-HomeHub contract: the discovered IPv4 remains the main value, a structured Modbus failure is rendered
-as localised subtle text underneath it and in the accessible name, and unknown future codes fall back
-to escaped human-readable API prose.
+HomeHub contract: the row names the configured peer rather than its Modbus protocol, the discovered
+IPv4 and configured port remain the main value, link health uses the same state colours as the other
+connection rows, a structured Modbus failure is rendered as localised
+subtle text underneath it and in the accessible name, and unknown future codes fall back to escaped
+human-readable API prose.
 
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named
 HomeHub status in the EKRHH register map and the schematic renderer against every X10A operation

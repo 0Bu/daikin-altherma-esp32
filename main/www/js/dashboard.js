@@ -586,7 +586,9 @@ function connLinks() {
   const mbs = S.status?.modbus;
   if (mbs) {
     const detail = mbs.enabled ? modbusErrorText(mbs) : "";
-    const cls = mbs.connected ? "mb" : mbs.enabled ? "err" : mbs.discovering ? "" : "";
+    // This row reports LINK HEALTH, so it uses the shared status palette. Petrol remains reserved
+    // for Modbus READING provenance in the value tables, schematic and inspector.
+    const cls = mbs.connected ? "ok" : mbs.enabled ? "err" : mbs.discovering ? "" : "";
     const state = mbs.connected ? t("conn.connected")
                 : mbs.discovering ? t("conn.searching")
                 : mbs.enabled ? t("conn.offline")
@@ -594,8 +596,10 @@ function connLinks() {
                 // because "we will not look again" and "about to look" are different facts and only
                 // the first one means the user has to act.
                 : mbs.searched ? t("conn.notfound") : t("conn.disabled");
-    links.push({ edit: "homehub", label: t("conn.modbus"), cls,
-      value: esc(mbs.host || (mbs.discovering ? t("conn.searching") : "—")),
+    const endpoint = mbs.host ? `${mbs.host}:${mbs.port || 502}`
+                              : mbs.discovering ? t("conn.searching") : "—";
+    links.push({ edit: "homehub", label: t("conn.homehub"), cls,
+      value: esc(endpoint),
       detail, state: detail ? t("conn.error", detail) : state });
   }
 

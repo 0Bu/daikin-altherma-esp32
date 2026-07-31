@@ -833,7 +833,6 @@ textarea.input[readonly] { font-size: 12px; color: var(--muted); white-space: pr
 /* A value the Modbus stack supplied: the fallback stand-in, and every row of the Modbus-only group. */
 .vrow-val.src-val-mb, .src-val-mb { color: var(--src-mb); }
 .src-val-mb .vrow-unit { color: var(--src-mb); opacity: .75; }
-.conn-val.mb { color: var(--src-mb); }
 /* A schematic pill drawn from the Modbus stack (only while X10A is down — see renderLive). Placed
    after the base .sc-val rule so it wins on fill without needing an !important. */
 svg .sc-val.sc-mb { fill: var(--src-mb); }

@@ -133,9 +133,9 @@ jobs:
       - name: Test live UI language switching
         run: node test/test_ui_live_i18n.mjs
 
-      # A red HomeHub address without a cause is not actionable. Execute the production connection
-      # row and pin its structured-error localisation, accessible state and quiet second line.
-      - name: Test Modbus connection error status
+      # Execute the production HomeHub connection row and pin its host:port value, shared state
+      # palette, structured-error localisation, accessible state and quiet second line.
+      - name: Test HomeHub connection row
         run: node test/test_ui_modbus_status.mjs
 
       # HomeHub uses Int16 for both numbers and selectors; X10A exposes stable English tokens for

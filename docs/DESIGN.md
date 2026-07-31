@@ -1045,14 +1045,15 @@ fifth row in the Connections tile and follows the same row vocabulary exactly:
      room in a one-line tile); it remains available from `/status.ntp.time` and every syslog
      TIMESTAMP — and from no HA entity (the "Device Time" sensor is retired, ARCHITECTURE.md → *The
      MQTT bridge*).
-   - **Modbus / HomeHub** — always present so a failed one-shot discovery cannot remove the only entry
-     point for manual configuration. The value is the configured host or the IPv4 selected by mDNS;
+   - **HomeHub** — always present so a failed one-shot discovery cannot remove the only entry
+     point for manual configuration. The value is the configured host or the IPv4 selected by mDNS,
+     followed by the configured port as `host:port`;
      tapping opens the live (`POST /set_hp`, no reboot) host/port/unit-id modal. Connected uses the
-     Modbus source colour, a configured-but-down host uses `--err`, and the current structured failure
-     is localised as a smaller `--err` line directly below the address and included in the accessible
-     name. Discovery filters on `homehub-*` but persists the responder's numeric IPv4, so the initial
-     Host field contains an address rather than the serial-derived mDNS label. Failures are also sent
-     to `/diag` and Syslog once per state transition. No setpoint, mode or switch appears here: this
+     shared `--ok` connection colour, a configured-but-down host uses `--err`, and the current
+     structured failure is localised as a smaller `--err` line directly below the address and included
+     in the accessible name. Discovery filters on `homehub-*` but persists the responder's numeric
+     IPv4, so the initial Host field contains an address rather than the serial-derived mDNS label.
+     Failures are also sent to `/diag` and Syslog once per state transition. No setpoint, mode or switch appears here: this
      link remains read-only by design (`docs/SECURITY.md`). It stays a row of its own and is never
      folded into X10A state because the two sources fail independently.
 
