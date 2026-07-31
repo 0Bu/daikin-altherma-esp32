@@ -15,17 +15,17 @@ const checkupSource = fs.readFileSync(new URL("../main/checkup.cpp", import.meta
 const pollSource = fs.readFileSync(new URL("../main/hp_poll.cpp", import.meta.url), "utf8");
 const configSource = fs.readFileSync(new URL("../main/http_config.cpp", import.meta.url), "utf8");
 
-// The checkup is the dashboard's first observation card: after the nameplate, before the live
-// "Operation" values. Its bounded 24-hour verdict is therefore visible before the reader scans
+// The checkup is the dashboard's first card after the live diagram, before the Model and live
+// "Operation" cards. Its bounded 24-hour verdict is therefore visible before the reader scans
 // current operating state, and a future card reshuffle cannot silently bury it below that group.
 assert.match(dashboardSource, /const GROUPS = \[\s*\["Operation"/s,
              "Operation must remain the first live-value group");
 assert.match(dashboardSource,
-             /setHtml\("valueGroups",\s*statusCardsHtml\(\)\s*\+\s*valueGroupsHtml\(/s,
-             "status cards, including the X10A check, must precede live-value groups");
+             /const checkup = S\.status\?\.hp\?\.connected \? checkupCardHtml\(\) : "";\s*setHtml\("valueGroups",\s*checkup\s*\+\s*statusCardsHtml\(\)\s*\+\s*valueGroupsHtml\(/s,
+             "X10A check must render first in the post-diagram card stream");
 assert.match(dashboardSource,
-             /return hp\.connected \? vcard\(t\("card\.model"\), model\) \+ checkupCardHtml\(\) : "";/,
-             "X10A check must follow the Model card and precede Operation");
+             /return hp\.connected \? vcard\(t\("card\.model"\), model\) : "";/,
+             "Model card must follow the X10A check and precede Operation");
 
 // Pin the existing /status.health surface plus its additive evidence fields at the actual serializer.
 // The UI payloads below are synthetic by design; without this half, a C++ key drift could leave every
@@ -46,6 +46,8 @@ assert.match(style, /\.vrow-val\.checkup-val\s*\{[^}]*white-space:\s*normal;[^}]
              "checkup readings and verdicts must wrap inside narrow cards");
 assert.match(style, /\.vrow-val\.dim\s*\{[^}]*color:\s*var\(--muted\)/s,
              "CHECKING/observation-only rows need a distinct neutral visual state");
+assert.match(style, /\.mb-tag\s*\{[^}]*opacity:\s*\.5;/s,
+             "Modbus source badge must stay visually subordinate to the reading");
 assert.match(checkupSource, /if \(apply_reset_locked\(\)\) return;/,
              "record must discard the sample that consumes an identity reset");
 assert.match(checkupSource, /if \(s_reset_requested\.load\(\)\) return logic::CheckupReport\{\};/,
