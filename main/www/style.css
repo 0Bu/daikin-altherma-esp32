@@ -828,7 +828,7 @@ textarea.input[readonly] { font-size: 12px; color: var(--muted); white-space: pr
   border: 1px solid currentColor; background: var(--src-mb-soft); color: var(--src-mb);
   font-family: var(--font-mono);
   font-size: 10px; font-weight: 600; letter-spacing: .05em; text-transform: lowercase;
-  line-height: 1.4; white-space: nowrap; opacity: .3;
+  line-height: 1.4; white-space: nowrap; opacity: .5;
 }
 /* The gateway's reading as a FULL row inside an explainer — its own label on the left, the value on
    the right, the same shape as the X10A row the explainer hangs under, so the two line up and read

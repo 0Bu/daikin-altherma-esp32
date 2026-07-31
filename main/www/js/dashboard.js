@@ -52,8 +52,9 @@ async function refreshValues() {
   renderApp();
   return true;
 }
-// Dashboard cards: the detected unit (Model) first, then the heat-pump value groups — all one
-// continuous card grid, each block styled like OPERATION. The board (ESP32) card and the
+// Dashboard cards: the X10A checkup first, directly below the live diagram, followed by the
+// detected unit (Model) and the heat-pump value groups — all one continuous card grid, each block
+// styled like OPERATION. The board (ESP32) card and the
 // WiFi/MQTT/Syslog/NTP rows are NOT here: both moved behind the gear onto Settings (renderSettings).
 function renderCards() {
   // Frozen while a trend is being scrubbed (S.scrub): rebuilding innerHTML under an active pointer
@@ -65,7 +66,11 @@ function renderCards() {
   // that is where the click-in-flight and unchanged-markup guards live, and this grid was the one
   // container bypassing both. The unchanged-markup half earns its keep here too — an idle plant or a
   // dropped X10A link produces identical markup, so those pushes stop writing at all.
-  setHtml("valueGroups", statusCardsHtml() + valueGroupsHtml(S._values || [], S.status?.hp?.connected));
+  // Keep the observation first in the card stream: #valueGroups immediately follows #hpLive in the
+  // document, so this places the X10A check directly after the diagram before every other card.
+  // It remains linked to X10A liveness, as it was when statusCardsHtml() owned the card.
+  const checkup = S.status?.hp?.connected ? checkupCardHtml() : "";
+  setHtml("valueGroups", checkup + statusCardsHtml() + valueGroupsHtml(S._values || [], S.status?.hp?.connected));
 }
 
 // Hold the rebuild for the duration of one click, and make it IMPOSSIBLE to leave held — the same
@@ -329,7 +334,7 @@ function statusCardsHtml() {
 
   // Model identity is only meaningful while the bus answers — hide the card entirely when the
   // heat-pump link is down instead of naming a unit (or showing a stale capacity) that isn't live.
-  return hp.connected ? vcard(t("card.model"), model) + checkupCardHtml() : "";
+  return hp.connected ? vcard(t("card.model"), model) : "";
 }
 
 // ── The Checkup card — "is anything worth reporting?" (logic/checkup.hpp, issue #208) ─────────
