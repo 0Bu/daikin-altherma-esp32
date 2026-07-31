@@ -110,10 +110,11 @@ hp_modbus.cpp/.hpp  → THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT sourc
 def/homehub.hpp     → the HomeHub register map (input + holding), the Modbus counterpart of the X10A
                       def/ profiles; decoded via logic/modbus.hpp's Temp16/Pow16/Int16/Text16 codecs
 http_ota.cpp        → /ota/check|update|status
-mcp_server.cpp      → /mcp — implemented stateless Streamable-HTTP MCP device glue. Dispatches only
-                      read-only get_status/get_hp_values and reuses http_status.cpp's exact JSON
-                      builders; GET is 405 (no SSE/session). Parsing/catalog/envelopes live in
-                      host-tested logic/mcp.hpp
+mcp_server.cpp      → /mcp — POST is the stateless Streamable-HTTP MCP device glue. It dispatches
+                      only read-only get_status/get_hp_values and reuses http_status.cpp's exact
+                      JSON builders. GET serves one embedded/gzipped, static setup and information
+                      page (no network activity/SSE/session/external assets). Parsing/catalog/
+                      envelopes live in host-tested logic/mcp.hpp
 provisioning.cpp    → captive setup portal (SoftAP daikin-altherma-esp32-setup) when no WiFi.
                       Runs AP-only: the portal takes the SSID as free text and never scans, so it
                       needs no station interface (esp_wifi_scan_start() would — an earlier version
@@ -681,6 +682,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
   envelope builders. It maps malformed/invalid/missing-method-or-tool/invalid-params requests to
   `-32700/-32600/-32601/-32602` and identifies notifications for the transport's empty HTTP 202.
   `mcp_server.cpp` supplies only the app version and the existing `/status`/`values` snapshots.
+  Its GET handler is method-selected documentation rather than another transport: an embedded,
+  dependency-free page explains MCP and provides client configuration, wire examples, and the
+  fixed tool catalog. It makes no network requests and ships with `connect-src 'none'`.
 
 `hp_convert.cpp`, `hp_comm.cpp`, `config.cpp`, `mqtt_ha.cpp` are thin device wrappers that call
 these headers. Add new decode/format logic to `main/logic/` and a `CHECK` in

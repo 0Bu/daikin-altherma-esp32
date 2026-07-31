@@ -68,7 +68,7 @@ cannot currently stand behind shown as `—` rather than as a number.
 | [docs/BOARDS.md](docs/BOARDS.md) | Supported boards: what hardware each has and which parts the firmware uses |
 | [docs/FEATURES.md](docs/FEATURES.md) | Catalog of platform features (Secure Boot, OTA, diagnostics, …) |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model + OTA signing/key lifecycle |
-| [docs/MCP.md](docs/MCP.md) | Planned read-only MCP surface (not yet implemented) |
+| [docs/MCP.md](docs/MCP.md) | Read-only MCP server plus a local self-documenting setup page |
 | [docs/REPORTING.md](docs/REPORTING.md) | Reporting a bug: the public issue, the private device report, what gets redacted |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | What's useful to report, the local verification loop, how PRs land |
 

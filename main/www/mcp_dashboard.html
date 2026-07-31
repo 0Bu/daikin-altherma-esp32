@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Daikin Altherma MCP Server</title>
+<style>
+/*@@INLINE:style.css@@*/
+</style>
+</head>
+<body>
+<header class="site-header">
+  <div class="shell header-inner">
+    <div class="identity">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 48 48">
+          <rect x="5" y="9" width="38" height="30" rx="7"/>
+          <circle cx="18" cy="24" r="9"/>
+          <path d="M18 24c-2-5-1-9 1-11 3 2 4 6-1 11Zm0 0c5-2 9-1 11 1-2 3-6 4-11-1Zm0 0c2 5 1 9-1 11-3-2-4-6 1-11Zm0 0c-5 2-9 1-11-1 2-3 6-4 11 1Z"/>
+          <path d="M32 17h6M32 22h6M32 27h6M32 32h6"/>
+        </svg>
+      </span>
+      <div>
+        <div class="title-line">
+          <h1>Daikin Altherma MCP Server</h1>
+          <span class="pill success">Read-only</span>
+        </div>
+        <p>Model Context Protocol access to your heat-pump data</p>
+      </div>
+    </div>
+    <a class="back-link" href="/">Device dashboard <span aria-hidden="true">↗</span></a>
+  </div>
+</header>
+
+<main class="shell">
+  <section class="intro">
+    <span class="eyebrow">About this endpoint</span>
+    <h2>Connect an AI client to your heat pump</h2>
+    <p>
+      MCP is an open protocol that lets compatible AI assistants and automation tools discover
+      structured capabilities. This device exposes two local tools for reading its current status
+      and decoded heat-pump values. It cannot change settings or control the heat pump.
+    </p>
+  </section>
+
+  <article class="card endpoint-card">
+    <div>
+      <h3>Server URL</h3>
+      <p>Use this exact URL in a Streamable HTTP MCP client. Browsers use GET; MCP clients use POST.</p>
+    </div>
+    <div class="copy-row">
+      <code id="endpoint-url">Loading…</code>
+      <button class="copy-button" type="button" data-copy="endpoint-url">Copy</button>
+    </div>
+  </article>
+
+  <section class="section-heading">
+    <span class="eyebrow">How to connect</span>
+    <h2>Add the server to your client</h2>
+  </section>
+
+  <div class="config-grid">
+    <article class="card config-card">
+      <div class="card-title">
+        <span class="client-icon">{ }</span>
+        <div>
+          <h3>MCP client configuration</h3>
+          <p>Add this entry to a client that supports Streamable HTTP.</p>
+        </div>
+      </div>
+      <pre><code id="client-json"></code></pre>
+      <button class="copy-button block" type="button" data-copy="client-json">Copy configuration</button>
+    </article>
+
+    <article class="card config-card">
+      <div class="card-title">
+        <span class="client-icon terminal">&gt;_</span>
+        <div>
+          <h3>Test with curl</h3>
+          <p>Send an MCP initialize request and inspect the response.</p>
+        </div>
+      </div>
+      <pre><code id="curl-example"></code></pre>
+      <button class="copy-button block" type="button" data-copy="curl-example">Copy command</button>
+    </article>
+  </div>
+
+  <section class="section-heading">
+    <span class="eyebrow">Available capabilities</span>
+    <h2>Two tools, both read-only</h2>
+  </section>
+
+  <div class="tool-grid">
+    <article class="card tool-card">
+      <div class="tool-icon" aria-hidden="true">●</div>
+      <div>
+        <h3><code>get_status</code></h3>
+        <p>Firmware version, uptime, WiFi, MQTT, bus health, detected model and runtime diagnostics.</p>
+        <span class="pill success">No arguments</span>
+      </div>
+    </article>
+    <article class="card tool-card">
+      <div class="tool-icon values" aria-hidden="true">≋</div>
+      <div>
+        <h3><code>get_hp_values</code></h3>
+        <p>Current X10A snapshot plus live HomeHub Modbus readings when they are available.</p>
+        <span class="pill success">No arguments</span>
+      </div>
+    </article>
+  </div>
+
+  <article class="card contract-card">
+    <div class="contract-heading">
+      <span class="shield" aria-hidden="true">◇</span>
+      <div>
+        <h3>Local by design</h3>
+        <p>There is no authentication or TLS. Keep this endpoint on a trusted LAN.</p>
+      </div>
+    </div>
+    <dl class="contract-grid">
+      <div><dt>Transport</dt><dd>Streamable HTTP</dd></div>
+      <div><dt>Protocol</dt><dd>2025-11-25</dd></div>
+      <div><dt>Session</dt><dd>Stateless</dd></div>
+      <div><dt>Control tools</dt><dd>None</dd></div>
+    </dl>
+  </article>
+</main>
+
+<footer>
+  <div class="shell">
+    <span>daikin-altherma-esp32</span>
+    <span>GET documentation · POST JSON-RPC 2.0 · no SSE</span>
+  </div>
+</footer>
+
+<script>
+//@@INLINE:app.js@@
+</script>
+</body>
+</html>

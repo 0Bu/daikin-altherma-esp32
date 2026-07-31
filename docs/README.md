@@ -457,11 +457,13 @@ POST /detect                       # re-run auto-detection (reset profile to "au
 GET  /ota/check[?ms=<epoch>]       # start a background update check (poll /ota/status)
 POST /ota/update                   # start the background self-update (downloads, then reboots)
 GET  /ota/status                   # { state, progress, message, available, update_available, current }
+GET  /mcp                          # static, self-contained MCP information + setup page;
+                                   #   same trusted-LAN-only URL as the protocol, never SSE
 POST /mcp                          # stateless, read-only Streamable-HTTP MCP server:
                                    #   initialize / tools/list / tools/call; exactly get_status and
                                    #   get_hp_values, mirroring GET /status and GET /values.
                                    #   JSON-RPC errors -32700/-32600/-32601/-32602; notifications →
-                                   #   202 with no body; GET /mcp → 405 (no SSE/session).
+                                   #   202 with no body; no SSE/session.
                                    #   Bounded parser/dispatcher: logic/mcp.hpp; see docs/MCP.md.
 ```
 

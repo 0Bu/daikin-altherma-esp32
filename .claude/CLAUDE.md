@@ -611,7 +611,8 @@ http_status.cpp GET / (setup.html in AP mode, else gzip UI) /status /values /his
 http_config.cpp POST /set_wifi /set_mqtt /set_syslog /set_ntp /set_hp /set_board /set_ota /set_lang /detect
 http_ota.cpp    /ota/check|update|status
 mcp_server.cpp  /mcp device glue (stateless read-only MCP: initialize/tools/list/tools/call;
-                get_status + get_hp_values reuse the exact HTTP snapshot builders; GET 405/no SSE)
+                get_status + get_hp_values reuse the exact HTTP snapshot builders; GET serves an
+                embedded dependency-free static information + setup page, never SSE)
 mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE shared grouped-JSON
                 state topic <base>/state (logic/mqtt_group.hpp), republished on change; LWT
                 availability, mqtts+CA on creds. A field's JSON TYPE comes from its CONVERTER
@@ -2020,8 +2021,10 @@ GET  /ota/status  {state:idle|checking|updating|done|error, progress, message, u
                   json_quote. `downgrade` = the offered build is installable but OLDER (the
                   dev -> release direction); the UI needs BOTH flags, since update_available alone
                   makes a release-channel check on a dev board read "up to date" forever
+GET  /mcp         embedded/gzipped static MCP information + setup page; no external assets or
+                  network requests, CSP connect-src 'none', never SSE
 POST /mcp         stateless read-only MCP: initialize / tools/list / tools/call; get_status +
-                  get_hp_values mirror /status + /values. Notifications → 202; GET → 405 (no SSE)
+                  get_hp_values mirror /status + /values. Notifications → 202; no SSE/session
 ```
 
 No HTTP auth / TLS by design — trusted LAN only. See docs/SECURITY.md.

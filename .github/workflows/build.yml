@@ -134,6 +134,11 @@ jobs:
       - name: Test Board Hardware preset default
         run: node test/test_ui_board_preset.mjs
 
+      # GET /mcp is a dependency-free, static setup page while POST /mcp remains the protocol.
+      # Keep the embedded asset local and prohibit the documentation page from making requests.
+      - name: Test MCP setup page
+        run: node test/test_mcp_dashboard.mjs
+
       # WHICH of the two stacks answers a given fact, in every state the pair can be in. The rule
       # ("X10A leads, Modbus supports, stale is never live") is invisible to every other gate here —
       # no value is wrong, no converter is wrong, no payload schema is wrong — and it shipped broken

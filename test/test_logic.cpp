@@ -4368,6 +4368,7 @@ static void test_http_surface() {
     CHECK(!http_surface_serves(ap, "/detect", true));
     CHECK(!http_surface_serves(ap, "/ota/check", false));
     CHECK(!http_surface_serves(ap, "/ota/update", true));
+    CHECK(!http_surface_serves(ap, "/mcp", false));  // GET dashboard is LAN-only too
     CHECK(!http_surface_serves(ap, "/mcp", true));
 
     // Method matters on the AP: /set_wifi is POST-only and the page routes are GET-only — the

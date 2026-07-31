@@ -65,9 +65,11 @@ and the OTA-signing / key lifecycle.
   `get_status` and `get_hp_values`, which mirror the existing `GET /status` and `GET /values`
   snapshots. There is no config-write, heat-pump command, session, SSE stream, or hidden third data
   path behind it; every other tool name is rejected. It inherits the API's deliberate no-auth/no-TLS
-  boundary and is withheld entirely on the open setup AP. A browser-supplied `Origin` is accepted
-  only for the device's configured mDNS hostname or current IP (never merely because it matches `Host`),
-  closing the Streamable-HTTP DNS-rebinding path. Never publish the endpoint outside the trusted LAN.
+  boundary and is withheld entirely on the open setup AP. `GET /mcp` serves only the embedded,
+  dependency-free setup page. It makes no network requests and is limited by CSP to
+  `connect-src 'none'`. A browser-supplied `Origin` is accepted only for the device's configured
+  mDNS hostname or current IP (never merely because it matches `Host`), closing the Streamable-HTTP
+  DNS-rebinding path. Never publish the endpoint outside the trusted LAN.
 - **MQTT credentials are never sent in cleartext.** If an MQTT username/password is configured, the
   bridge requires an `mqtts://` broker URI and verifies the broker against the mbedTLS certificate
   bundle; a non-TLS URI with credentials is **refused** (the reason shows in `/status.mqtt`) rather
