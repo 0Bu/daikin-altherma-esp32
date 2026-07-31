@@ -695,13 +695,14 @@ static void test_config_model() {
     Config m;
     CHECK(config_modbus_host(m).empty());               // nothing known
     CHECK(config_modbus_should_search(m));              // ... so the one-shot search is armed
-    apply_modbus_found(m, "homehub-524288-abc");
-    CHECK(config_modbus_host(m) == "homehub-524288-abc");
+    apply_modbus_found(m, "203.0.113.137");
+    CHECK(config_modbus_host(m) == "203.0.113.137");
     CHECK(!config_modbus_should_search(m));             // and disarms itself
+    CHECK(!config_modbus_discovery_needs_ipv4(m));      // new discoveries already persist the A record
     m.mb_host = "203.0.113.131";
     CHECK(config_modbus_host(m) == "203.0.113.131");    // manual wins
     m.mb_host.clear();
-    CHECK(config_modbus_host(m) == "homehub-524288-abc");   // ... without erasing the discovery
+    CHECK(config_modbus_host(m) == "203.0.113.137");        // ... without erasing the discovery
     // A search that finds NOTHING must disarm just as firmly. This is the case the latch exists for:
     // without it, a LAN with no gateway is browsed again on every boot, forever, and "one-shot" is
     // only true when the search succeeds.
@@ -715,6 +716,12 @@ static void test_config_model() {
     mb_manual.mb_host = "10.0.0.9";
     CHECK(config_modbus_host(mb_manual) == "10.0.0.9");
     CHECK(!config_modbus_should_search(mb_manual));
+    CHECK(!config_modbus_discovery_needs_ipv4(mb_manual));
+    Config mb_legacy;
+    apply_modbus_found(mb_legacy, "homehub-524288-15702.local");
+    CHECK(config_modbus_discovery_needs_ipv4(mb_legacy));
+    mb_legacy.mb_host = "homehub-524288-manual.local";
+    CHECK(!config_modbus_discovery_needs_ipv4(mb_legacy));  // a manual override is never migrated
 
     // Target-aware GPIO range: the ESP32-S3 default 44/43 is valid on a 48-GPIO target but must be
     // rejected on an ESP32-C3 (max GPIO 21), where those pins physically don't exist.
@@ -2739,6 +2746,9 @@ static void test_modbus() {
     uint8_t exc[] = {0x00,0x07, 0x00,0x00, 0x00,0x03, 0x01, 0x83, 0x02};
     CHECK(mb_parse_response(exc, sizeof(exc), 7, 1, MbFunc::ReadHolding, /*addr*/0, /*qty*/1, r) == MbParse::Exception);
     CHECK(!r.ok && r.exception && r.exc_code == 0x02 && r.fc == 0x03);
+    CHECK(std::string(mb_exception_reason(r.exc_code)) == "illegal data address");
+    CHECK(std::string(mb_exception_reason(11)) == "gateway target failed to respond");
+    CHECK(std::string(mb_exception_reason(0x7f)) == "unknown exception");
     // An exception PDU with a TRAILING byte (len bumped to 4, an extra 0x00) must be Malformed — the
     // old `pdu_len < 2` check accepted [fc|0x80, code, <junk>] as a clean exception.
     uint8_t exctrail[] = {0x00,0x07, 0x00,0x00, 0x00,0x04, 0x01, 0x83, 0x02, 0x00};
@@ -2753,6 +2763,8 @@ static void test_modbus() {
     CHECK(mb_parse_response(resp, sizeof(resp), 8, 1, MbFunc::ReadHolding, 40, 3, r) == MbParse::TxnMismatch);
     CHECK(mb_parse_response(resp, sizeof(resp), 7, 2, MbFunc::ReadHolding, 40, 3, r) == MbParse::UnitMismatch);
     CHECK(mb_parse_response(resp, sizeof(resp), 7, 1, MbFunc::ReadInput, 40, 3, r) == MbParse::FcMismatch);
+    CHECK(std::string(mb_parse_reason(MbParse::BadProtocol)) == "invalid protocol id");
+    CHECK(std::string(mb_parse_reason(MbParse::TxnMismatch)) == "transaction id mismatch");
     // Consistent MBAP length (6 = unit + 5-byte PDU) but an odd register byte count (3) -> Malformed.
     uint8_t oddbc[] = {0x00,0x07, 0x00,0x00, 0x00,0x06, 0x01, 0x03, 0x03, 0x01,0x02,0x03};
     CHECK(mb_parse_response(oddbc, sizeof(oddbc), 7, 1, MbFunc::ReadHolding, 40, 3, r) == MbParse::Malformed);
@@ -2832,6 +2844,10 @@ static void test_modbus() {
     CHECK(mb_first_homehub(names, 3) == 2);
     const char* none[] = {"daikin-altherma-esp32", "nas"};
     CHECK(mb_first_homehub(none, 2) == -1);
+    // Discovery persists and displays the selected A record, never the serial-derived mDNS label.
+    CHECK(mb_ipv4_string(192, 168, 1, 137) == "203.0.113.137");
+    CHECK(mb_ipv4_string(255, 0, 10, 1) == "255.0.10.1");
+    CHECK(mb_ipv4_string(256, 0, 0, 1).empty());
 }
 
 static void test_modbus_snapshot() {
@@ -3885,24 +3901,19 @@ static void test_redact() {
     // here would leave the redaction incoherent — scrubbed in the JSON, spelled out in the log.
     CHECK(redact_diag_line("mqtt: retired legacy HA device daikin_a1b2c3 (now daikin-altherma-esp32)") ==
           "mqtt: retired legacy HA device <redacted> (now daikin-altherma-esp32)");
-    // The DISCOVERED HomeHub hostname. `homehub-524288-<serial>` carries the hub's serial number, so
-    // it identifies the reporter's hardware exactly as an SSID does — and /status?redact=1 already
-    // withholds the same string as modbus.host, so an unruled log line put it back a few sections
-    // below in the very same bug report.
-    CHECK(redact_diag_line("modbus: one-shot mDNS search found gateway homehub-524288-15702.local") ==
+    // The DISCOVERED HomeHub IPv4 identifies the reporter's LAN just like a manually entered
+    // address, so /status withholds it as modbus.host and /diag must not put it back.
+    CHECK(redact_diag_line("modbus: one-shot mDNS search found gateway 203.0.113.137") ==
           "modbus: one-shot mDNS search found gateway <redacted>");
-    CHECK(redact_diag_line("modbus: 2 HomeHubs discovered via mDNS — using homehub-524288-15702") ==
+    CHECK(redact_diag_line("modbus: 2 HomeHubs discovered via mDNS — using 203.0.113.137") ==
           "modbus: 2 HomeHubs discovered via mDNS — using <redacted>");
     // The count SURVIVES on the several-hubs line: that more than one gateway answered is what
     // explains an unexpected pick, and it sits before the marker precisely so it can be kept.
-    CHECK(redact_diag_line("modbus: 2 HomeHubs discovered via mDNS — using homehub-524288-15702")
+    CHECK(redact_diag_line("modbus: 2 HomeHubs discovered via mDNS — using 203.0.113.137")
               .find("modbus: 2 ") == 0);
-    // The FAILURE half of the one-shot search is a SEPARATE diag_printf so it matches no rule and
-    // survives whole. Written as one statement with a substituted tail, the two outcomes shared the
-    // prefix "search found " and the only rule covering the hostname also blanked the one fact a
-    // reader needs — why no hub was ever contacted.
+    // The failure contains no address, matches no rule and survives whole.
     {
-        const std::string none = "modbus: one-shot mDNS search found no gateway — not searching again";
+        const std::string none = "modbus: no HomeHub found via mDNS — not searching again";
         CHECK(redact_diag_line(none) == none);
     }
 

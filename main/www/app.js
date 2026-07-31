@@ -94,6 +94,28 @@ const I18N = {
     "conn.synced": "Synced", "conn.syncing": "Syncing…",
     "conn.error": (e) => "Error: " + e, "conn.connected_to": (s) => "Connected to " + s,
     "conn.aria": (label, state) => `${label}: ${state}. Tap to edit.`,
+    "modbus.err.mdns_not_found": "No HomeHub found via mDNS.",
+    "modbus.err.no_address": "No HomeHub address is configured.",
+    "modbus.err.resolve_failed": "The HomeHub address could not be resolved.",
+    "modbus.err.connect_timeout": "Connection timed out — the HomeHub is not reachable.",
+    "modbus.err.connection_refused": "HomeHub reachable, but the Modbus TCP port is closed.",
+    "modbus.err.network_unreachable": "No network route to the HomeHub.",
+    "modbus.err.host_unreachable": "The HomeHub is not reachable on the network.",
+    "modbus.err.connect_failed": "The connection to the HomeHub failed.",
+    "modbus.err.request_failed": (r) => `Could not build the Modbus request${r ? ` for register ${r}` : ""}.`,
+    "modbus.err.send_timeout": (r) => `Sending the Modbus request timed out${r ? ` at register ${r}` : ""}.`,
+    "modbus.err.send_failed": (r) => `The Modbus request could not be sent${r ? ` at register ${r}` : ""}.`,
+    "modbus.err.response_timeout": (r) => `The HomeHub response timed out${r ? ` at register ${r}` : ""}.`,
+    "modbus.err.connection_closed": (r) => `The HomeHub closed the connection${r ? ` at register ${r}` : ""}.`,
+    "modbus.err.receive_failed": (r) => `The HomeHub response could not be read${r ? ` at register ${r}` : ""}.`,
+    "modbus.err.invalid_response": (r) => `Invalid Modbus response${r ? ` at register ${r}` : ""}.`,
+    "modbus.err.internal_error": "The Modbus polling cycle failed internally.",
+    "modbus.err.exception": (r, n, why) => `HomeHub rejected register ${r || "?"} (exception ${n}: ${why}).`,
+    "modbus.exc.1": "illegal function", "modbus.exc.2": "illegal data address",
+    "modbus.exc.3": "illegal data value", "modbus.exc.4": "device failure",
+    "modbus.exc.5": "request acknowledged", "modbus.exc.6": "device busy",
+    "modbus.exc.8": "memory parity error", "modbus.exc.10": "gateway path unavailable",
+    "modbus.exc.11": "target did not respond", "modbus.exc.unknown": "unknown reason",
     "card.model": "Model", "card.hplink": "Heat-pump link", "card.online": "Online",
     "card.uptime": "Uptime",
     "card.freeheap": "Free memory", "card.maxalloc": "Largest free block",
@@ -207,7 +229,7 @@ const I18N = {
     // never imply the firmware controls the pump from here (docs/SECURITY.md).
     "homehub.title": "Modbus", "homehub.host": "Host · IP or .local name",
     "homehub.port": "Port", "homehub.unit": "Unit id",
-    "homehub.hint": "The gateway is searched for ONCE, on the first start with no address. Leave the host empty to use what that search found; enter an address by hand for a gateway added later. Port defaults to 502, unit id to 1. Read-only — the firmware never controls the heat pump from here.",
+    "homehub.hint": "The gateway is searched for ONCE, on the first start with no address. When found, its IPv4 address is entered here automatically; enter an address by hand for a gateway added later. Port defaults to 502, unit id to 1. Read-only — the firmware never controls the heat pump from here.",
     "hh.searching": "Searching…", "hh.saved": "Modbus settings saved",
     "hh.err_port": "Port must be between 1 and 65535",
     "hh.err_unit": "Unit id must be between 1 and 247",
@@ -296,6 +318,28 @@ const I18N = {
     "conn.synced": "Synchronisiert", "conn.syncing": "Synchronisiere…",
     "conn.error": (e) => "Fehler: " + e, "conn.connected_to": (s) => "Verbunden mit " + s,
     "conn.aria": (label, state) => `${label}: ${state}. Zum Bearbeiten tippen.`,
+    "modbus.err.mdns_not_found": "Kein HomeHub per mDNS gefunden.",
+    "modbus.err.no_address": "Keine HomeHub-Adresse eingetragen.",
+    "modbus.err.resolve_failed": "Die HomeHub-Adresse konnte nicht aufgelöst werden.",
+    "modbus.err.connect_timeout": "Zeitüberschreitung — der HomeHub ist nicht erreichbar.",
+    "modbus.err.connection_refused": "HomeHub erreichbar, aber der Modbus-TCP-Port ist geschlossen.",
+    "modbus.err.network_unreachable": "Keine Netzwerkroute zum HomeHub.",
+    "modbus.err.host_unreachable": "Der HomeHub ist im Netzwerk nicht erreichbar.",
+    "modbus.err.connect_failed": "Die Verbindung zum HomeHub ist fehlgeschlagen.",
+    "modbus.err.request_failed": (r) => `Modbus-Anfrage konnte${r ? ` für Register ${r}` : ""} nicht erstellt werden.`,
+    "modbus.err.send_timeout": (r) => `Zeitüberschreitung beim Senden der Modbus-Anfrage${r ? ` an Register ${r}` : ""}.`,
+    "modbus.err.send_failed": (r) => `Modbus-Anfrage konnte${r ? ` an Register ${r}` : ""} nicht gesendet werden.`,
+    "modbus.err.response_timeout": (r) => `Zeitüberschreitung bei der HomeHub-Antwort${r ? ` an Register ${r}` : ""}.`,
+    "modbus.err.connection_closed": (r) => `Der HomeHub hat die Verbindung${r ? ` an Register ${r}` : ""} geschlossen.`,
+    "modbus.err.receive_failed": (r) => `HomeHub-Antwort konnte${r ? ` an Register ${r}` : ""} nicht gelesen werden.`,
+    "modbus.err.invalid_response": (r) => `Ungültige Modbus-Antwort${r ? ` an Register ${r}` : ""}.`,
+    "modbus.err.internal_error": "Der Modbus-Abfragezyklus ist intern fehlgeschlagen.",
+    "modbus.err.exception": (r, n, why) => `HomeHub lehnt Register ${r || "?"} ab (Ausnahme ${n}: ${why}).`,
+    "modbus.exc.1": "unzulässige Funktion", "modbus.exc.2": "unzulässige Registeradresse",
+    "modbus.exc.3": "unzulässiger Wert", "modbus.exc.4": "Gerätefehler",
+    "modbus.exc.5": "Anfrage bestätigt", "modbus.exc.6": "Gerät beschäftigt",
+    "modbus.exc.8": "Speicher-Paritätsfehler", "modbus.exc.10": "Gateway-Pfad nicht verfügbar",
+    "modbus.exc.11": "Ziel antwortet nicht", "modbus.exc.unknown": "unbekannter Grund",
     "card.model": "Modell", "card.hplink": "Wärmepumpen-Verbindung", "card.online": "Online",
     "card.uptime": "Laufzeit",
     "card.freeheap": "Freier Speicher", "card.maxalloc": "Größter freier Block",
@@ -402,7 +446,7 @@ const I18N = {
     "ntp.hint": "Hostname oder IP des NTP-Servers, mit dem das Gerät seine Uhr synchronisiert. Leer setzt auf den Firmware-Standard zurück.",
     "homehub.title": "Modbus", "homehub.host": "Host · IP oder .local-Name",
     "homehub.port": "Port", "homehub.unit": "Unit-ID",
-    "homehub.hint": "Das Gateway wird EINMALIG gesucht, beim ersten Start ohne Adresse. Host leer lassen, um das Gefundene zu verwenden; ein später hinzugefügtes Gateway hier von Hand eintragen. Port ist standardmäßig 502, die Unit-ID 1. Nur lesend — die Firmware steuert die Wärmepumpe von hier aus nie.",
+    "homehub.hint": "Das Gateway wird EINMALIG gesucht, beim ersten Start ohne Adresse. Nach dem Fund wird seine IPv4-Adresse hier automatisch eingetragen; ein später hinzugefügtes Gateway von Hand eintragen. Port ist standardmäßig 502, die Unit-ID 1. Nur lesend — die Firmware steuert die Wärmepumpe von hier aus nie.",
     "hh.searching": "Suche läuft…", "hh.saved": "Modbus-Einstellungen gespeichert",
     "hh.err_port": "Port muss zwischen 1 und 65535 liegen",
     "hh.err_unit": "Unit-ID muss zwischen 1 und 247 liegen",
@@ -1594,17 +1638,33 @@ function checkupCardHtml() {
   return vcard(t("card.checkup"), rows, badge, badgeCls);
 }
 
-// ── Connections tile (Settings — WiFi · MQTT · Syslog · NTP) ─────────────────────────────────
+// ── Connections tile (Settings — WiFi · MQTT · Syslog · NTP · Modbus) ─────────────────────────
 // One tappable row per link: label, colour-coded value (green connected/synced, yellow reconnecting/
 // syncing, red down — the same ok/warn/err semantics the rest of the app uses), a trailing
 // pencil that opens that link's existing edit modal (§5.1 in docs/DESIGN.md). MAC/BSSID are dropped
 // entirely (bus-level detail nobody edits from here) and the IP address lives in the dashboard
 // header (renderHeaderMeta) — it is board identity, not a per-row WiFi fact.
 //
-// connLinks() derives the four rows' state ONCE and both consumers read it: the rows themselves and
+// connLinks() derives the five rows' state ONCE and both consumers read it: the rows themselves and
 // the Settings menu entry + header dot that summarise them a level up. Re-deriving "is this link
 // healthy" for the summary is exactly how a menu ends up claiming everything is fine while the row
 // behind it is red.
+function modbusErrorText(mb) {
+  if (!mb || !mb.error) return "";
+  const code = String(mb.error_code || "");
+  const reg = Number.isFinite(mb.error_register) ? mb.error_register : 0;
+  const detail = Number.isFinite(mb.error_detail) ? mb.error_detail : -1;
+  if (code === "modbus_exception") {
+    const why = t(`modbus.exc.${detail}`);
+    return t("modbus.err.exception", reg, detail, why.startsWith("modbus.exc.") ? t("modbus.exc.unknown") : why);
+  }
+  const key = `modbus.err.${code}`;
+  const text = t(key, reg);
+  // Forward compatibility: a newer firmware can introduce a structured code before this browser
+  // asset knows it. In that case show the complete human-readable API message, never the key name.
+  return code && text !== key ? text : String(mb.error);
+}
+
 function connLinks() {
   const w = S.status?.wifi || {}, m = S.status?.mqtt || {}, sy = S.status?.syslog || {}, nt = S.status?.ntp || {};
   const links = [];
@@ -1652,9 +1712,8 @@ function connLinks() {
 
   // The HomeHub, as its OWN row — never folded into a combined link state with X10A. The two stacks
   // fail for unrelated reasons and either can be down alone, so one merged "connected" would hide
-  // exactly the case worth seeing. Absent entirely when no HomeHub is configured: a setting for
-  // hardware that is not there is noise.
-  // ALWAYS present, even with no address and no hub found. It used to appear only while the stack
+  // exactly the case worth seeing. ALWAYS present, even with no address and no hub found. It used to
+  // appear only while the stack
   // was `enabled` — i.e. only once an address existed — which stranded the exact user this setting
   // is for: the one-shot mDNS search finds nothing, the stack never starts, the row is never drawn,
   // and there is no longer anywhere in the UI to type the address in. The standalone HomeHub card
@@ -1663,6 +1722,7 @@ function connLinks() {
   // before the thing it configures does.
   const mbs = S.status?.modbus;
   if (mbs) {
+    const detail = mbs.enabled ? modbusErrorText(mbs) : "";
     const cls = mbs.connected ? "mb" : mbs.enabled ? "err" : mbs.discovering ? "" : "";
     const state = mbs.connected ? t("conn.connected")
                 : mbs.discovering ? t("conn.searching")
@@ -1672,7 +1732,8 @@ function connLinks() {
                 // the first one means the user has to act.
                 : mbs.searched ? t("conn.notfound") : t("conn.disabled");
     links.push({ edit: "homehub", label: t("conn.modbus"), cls,
-      value: esc(mbs.host || (mbs.discovering ? t("conn.searching") : "—")), state });
+      value: esc(mbs.host || (mbs.discovering ? t("conn.searching") : "—")),
+      detail, state: detail ? t("conn.error", detail) : state });
   }
 
   return links;
@@ -1684,7 +1745,8 @@ function connLinks() {
 function connRow(l) {
   return `<button class="conn-row" type="button" data-edit="${esc(l.edit)}" aria-label="${esc(t("conn.aria", l.label, l.state))}">` +
     `<span class="conn-label">${esc(l.label)}</span>` +
-    `<span class="conn-val ${l.cls || ""}">${l.value}</span>` +
+    `<span class="conn-value"><span class="conn-val ${l.cls || ""}">${l.value}</span>` +
+    `${l.detail ? `<span class="conn-detail">${esc(l.detail)}</span>` : ""}</span>` +
     `${editIcon}</button>`;
 }
 function connectionsHtml() {
@@ -1724,8 +1786,6 @@ function renderSettings() {
   const a = document.activeElement;
   const picking = !!(a && a.classList && (a.classList.contains("pin-sel") || a.classList.contains("chan-sel") || a.classList.contains("lang-sel")));
   if (!picking) setHtml("connTile", connectionsHtml());
-  // The HomeHub card carries an interactive <select> too (the transport picker), so it is held by
-  // the same `picking` guard — its select uses .chan-sel for exactly that reason.
   if (!picking && !S.otaShown) setHtml("settingsCards", esp32CardHtml());
   $("settingsVer").textContent = "daikin-altherma-esp32 · v" + (S.status?.version || "?");
   renderSettingsDot();
@@ -4585,7 +4645,7 @@ function closeNtp() { $("ntpModal").hidden = true; }
 
 // ── HomeHub / Modbus TCP (edit modal) ──────────────────────────────────────
 // Host, port and unit id of the Daikin HomeHub. The host field is prefilled from what the device is
-// ACTUALLY using (/status.modbus.host — the configured host, or the one mDNS discovered), so leaving
+// ACTUALLY using (/status.modbus.host — the configured host, or the IPv4 mDNS discovered), so leaving
 // it as-is re-saves what is on screen. Clearing it hands the hub back to auto-discovery.
 function fillHomehub() {
   const mb = S.status?.modbus || {};

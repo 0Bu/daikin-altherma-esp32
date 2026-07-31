@@ -126,7 +126,6 @@ back (the header chevron, or `Esc`):
         otherwise ..................... VIEW: Dashboard  ──── gear ────▶  Settings (§5.6)
                                                           ◀── chevron ──   · Connections tile
                                                                               └─ row ─▶ modal (§5.1)
-                                                                           · HomeHub card
                                                                               └─ HomeHub ─▶ modal
                                                                            · ESP32 card
                                                                               └─ Hardware ─▶ modal
@@ -202,9 +201,9 @@ than concatenated into `innerHTML`. Every network-derived string on this page mu
 DOM/`textContent` path — it is served standalone in AP mode and has no `esc()` helper.
 
 ### 5.1 WiFi / MQTT / Syslog / NTP edit  (modal, from the Connections tile)
-The **Connections tile** on Settings (§5.6) combines WiFi, MQTT, Syslog and NTP into one row each;
-every row carries a trailing **pencil** and the whole row is tappable, opening a centred **modal**
-over the dimmed screen. These are the four rows edited this way, and they share the identical
+The **Connections tile** on Settings (§5.6) combines WiFi, MQTT, Syslog, NTP and Modbus into one row
+each; every row carries a trailing **pencil** and the whole row is tappable, opening a centred
+**modal** over the dimmed screen. The first four rows share the identical
 overlay pattern (Cancel / backdrop / `Esc` dismiss without writing; Save reboots to apply, then closes
 back to Settings — `Esc` closes the modal only, never also the screen behind it). The forms:
 - **WiFi**: SSID (required, 1–32 chars) + password (empty for an open network, else 8–63 chars),
@@ -250,9 +249,9 @@ The heat pump has **no configuration screen**. The model is **auto-detected** fr
 (`/status.detect`) — there is no manual model picker, no protocol control, no value checklist, and
 no poll-interval control (poll is fixed at 1 s). The one thing that *is* a choice is **which link**
 reaches the pump — the X10A service port (the default) or a HomeHub over Modbus TCP — and that is a
-connection, not a heat-pump setting, so it lives on its own card in Settings beside the other
-connections (§5.6 item 2). Even there the HomeHub is **auto-discovered** by default: the address is an
-override, not a required entry. Nothing on that card controls the pump. What there is to see or touch
+   connection, not a heat-pump setting, so it lives on its own row in the Settings Connections tile
+   (§5.6 item 1). Even there the HomeHub is **auto-discovered** by default: the resolved IPv4 is filled
+   in after discovery. Nothing on that row controls the pump. What there is to see or touch
 is otherwise split the way everything else is — what the *unit* is on the dashboard, what the *board*
 is in Settings:
 - **Model** name (the brand while offline) and detected capacity (shown only while the link is live)
@@ -1002,16 +1001,16 @@ opens **Settings**, which swaps the dashboard header for a **back header** — a
 screen title. `Esc` leaves the same way, but only when no modal is open: a modal owns `Esc` first, so
 one key press never both closes a dialog and leaves the screen behind it.
 
-**Settings is flat.** No menu of entries, no sub-screens: the gear lands directly on the five cards,
+**Settings is flat.** No menu of entries, no sub-screens: the gear lands directly on the four cards,
 stacked in the same single column as everything else (§9). The Connections tile is the *same* card it
 was on the dashboard — the move changed where the configuration lives, not how it looks. The board
 card is the same story split three ways: **ESP32** / **Protokoll** / **Firmware** answer three
 different questions (the board itself, the X10A link, the running software) that one card used to
-answer at once, all three built and rebuilt together by one `esp32CardHtml()`. The HomeHub card sits between
-the Connections tile and those three and follows the same row vocabulary exactly:
+answer at once, all three built and rebuilt together by one `esp32CardHtml()`. HomeHub/Modbus is a
+fifth row in the Connections tile and follows the same row vocabulary exactly:
 
 1. **Connections tile** — one full-width card, `--card` bordered like the value groups, titled
-   "Connections". Combines **WiFi**, **MQTT**, **Syslog** and **NTP** into one row each: a label on
+   "Connections". Combines **WiFi**, **MQTT**, **Syslog**, **NTP** and **Modbus** into one row each: a label on
    the left, a single colour-coded value on the right (`--ok` connected/synced/enabled, `--warn`
    connecting/syncing/unreachable-but-forwarding, `--err` down/disabled-by-error), and a trailing
    **pencil** — the whole row is tappable and opens that link's edit modal (§5.1). The value itself
@@ -1041,24 +1040,18 @@ the Connections tile and those three and follows the same row vocabulary exactly
      room in a one-line tile); it remains available from `/status.ntp.time` and every syslog
      TIMESTAMP — and from no HA entity (the "Device Time" sensor is retired, ARCHITECTURE.md → *The
      MQTT bridge*).
-2. **HomeHub card** — *which link reaches the pump*, and it is the only card here that can change
-   that. A **Verbindung** select (X10A ↔ HomeHub/Modbus TCP) written live (`POST /set_hp`, no
-   reboot), then the hub's **Adresse** as a tappable summary row opening a modal for host, port and
-   unit id. Below them the link's own read-only state: **Status** (Verbunden / Suche… / Getrennt,
-   `--ok` / `--muted` / `--err` by the same rule the Connections rows use) and, once it has read
-   anything, **Register** as `rx · fails`.
-   Two things it deliberately does NOT do. It shows **no pump control** — no setpoint, no mode, no
-   switch — because the Modbus link is read-only by design and a control widget would advertise a
-   capability the firmware refuses to have (`docs/SECURITY.md`). And when the address is left empty
-   it says so as a *state*, not a blank: the device discovers the hub over mDNS and the row prints
-   what it **found** (`modbus.host`), never the empty string it was asked with — the same
-   "state what is, not what was requested" rule the pins follow (§5.2).
-   The row hides itself entirely when no HomeHub is configured, so an install without one never sees
-   a setting it cannot use. It is a row of its OWN and never folded into a combined link state with
-   X10A: the two sources fail for unrelated reasons and either can be down alone, so one merged
-   "connected" would hide exactly the case worth seeing.
+   - **Modbus / HomeHub** — always present so a failed one-shot discovery cannot remove the only entry
+     point for manual configuration. The value is the configured host or the IPv4 selected by mDNS;
+     tapping opens the live (`POST /set_hp`, no reboot) host/port/unit-id modal. Connected uses the
+     Modbus source colour, a configured-but-down host uses `--err`, and the current structured failure
+     is localised as a smaller `--err` line directly below the address and included in the accessible
+     name. Discovery filters on `homehub-*` but persists the responder's numeric IPv4, so the initial
+     Host field contains an address rather than the serial-derived mDNS label. Failures are also sent
+     to `/diag` and Syslog once per state transition. No setpoint, mode or switch appears here: this
+     link remains read-only by design (`docs/SECURITY.md`). It stays a row of its own and is never
+     folded into X10A state because the two sources fail independently.
 
-3. **ESP32 card** — the board itself, styled exactly like the value groups (§6): the **Hardware**
+2. **ESP32 card** — the board itself, styled exactly like the value groups (§6): the **Hardware**
    row (status indicator + recovery-button pins), which opens the board-hardware modal, from
    `board{…}`. It carries **almost no board telemetry** — chip (`platform`) and **Last reset**
    (`sys.reset_reason`) were rows here through v1.0.14 and are gone: Settings states

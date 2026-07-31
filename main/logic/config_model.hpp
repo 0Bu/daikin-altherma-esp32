@@ -81,15 +81,16 @@ struct Config {
     int         mb_unit_id  = MODBUS_DEFAULT_UNIT;  // Modbus unit/slave id (1..247, default 1)
     // ── The one-shot mDNS search result — PERSISTED, and written by the MODBUS task alone ────────
     // The search is SUPPORTING, not continuous: the firmware browses ONCE, on the first boot that
-    // has no address at all, and then records what it learned. Found -> mb_dhost holds the hostname
+    // has no address at all, and then records what it learned. Found -> mb_dhost holds the resolved IPv4
     // and the stack runs from then on. Not found -> mb_searched latches true and NO LATER BOOT
     // BROWSES AGAIN; adding a HomeHub afterwards is a manual mb_host entry, which is a deliberate act
     // and needs no search. That is why these two are not in the atomic credential blob: mb_host has
     // exactly ONE writer (httpd, POST /set_hp) while these have exactly one OTHER writer (the Modbus
     // task), and a task that saves a whole Config saves whatever it snapshotted — the same two-owner
-    // problem the rx/tx link cache is split out for. Self-healing like that cache: a hostname that
-    // stops resolving simply fails to connect and is reported on /status.
-    std::string mb_dhost;                 // hostname the mDNS search found ("" = none)
+    // problem the rx/tx link cache is split out for. The IP is deliberately visible/editable in the
+    // Host field; if DHCP later changes it, the resulting reachability error says exactly what failed
+    // and the user can clear/re-enter the address.
+    std::string mb_dhost;                 // IPv4 address the mDNS search resolved ("" = none)
     bool        mb_searched  = false;     // true once the one-shot search has run (found or not)
 
     // SAFETY FLAG for the future in-firmware actuation path (#32 P3), default OFF. P1/P2 build only
@@ -189,7 +190,7 @@ inline bool config_save_succeeded(bool blob_ok, bool link_ok, bool require_link)
 
 // Apply the detected X10A link. Non-allocating, so it cannot throw inside the config mutex.
 // The address the Modbus stack should dial, and — because the address is the switch — whether that
-// stack exists at all. Manual entry WINS over the discovered hostname, and does not erase it: a user
+// stack exists at all. Manual entry WINS over the discovered IPv4 address, and does not erase it: a user
 // who types an address is correcting what the search found, and clearing the field again must fall
 // back to the search result rather than to nothing. Pure so the precedence is asserted once instead
 // of re-derived at each call site (the task's gate, its connect, /status and the UI).
@@ -203,6 +204,13 @@ inline const std::string& config_modbus_host(const Config& c) {
 // RUN, or every boot browses the LAN again for a gateway that is not there.
 inline bool config_modbus_should_search(const Config& c) {
     return c.mb_host.empty() && c.mb_dhost.empty() && !c.mb_searched;
+}
+
+// Upgrade migration for devices that persisted the serial-derived mDNS label before discovery was
+// changed to store its A record. Never rewrite a manually entered host, even if the user chose a
+// homehub-* name deliberately; only the Modbus task-owned discovery field is eligible.
+inline bool config_modbus_discovery_needs_ipv4(const Config& c) {
+    return c.mb_host.empty() && !c.mb_dhost.empty() && is_homehub_hostname(c.mb_dhost.c_str());
 }
 
 // Record the one-shot search's outcome in the live config. `host` is empty when nothing answered —

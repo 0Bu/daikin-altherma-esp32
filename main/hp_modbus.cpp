@@ -19,6 +19,7 @@
 #include "logic/modbus_snapshot.hpp"  // a cache is live only for the TCP session that committed it
 
 #include "esp_netif.h"
+#include "esp_netif_ip_addr.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "mdns.h"
@@ -69,6 +70,26 @@ static TaskHandle_t  s_task = nullptr;
 static DetectBackoff s_backoff;
 static int64_t       s_next_try_us = 0;
 
+enum class MbFailureType {
+    None,
+    RequestBuild,
+    SendTimeout,
+    SendFailed,
+    ResponseTimeout,
+    ConnectionClosed,
+    ReceiveFailed,
+    InvalidResponse,
+    Exception,
+};
+
+// One failed register read. Fixed-size facts only: the poll loop can preserve the FIRST real cause
+// without allocating or letting every later "socket already closed" attempt overwrite it.
+struct MbFailure {
+    MbFailureType type   = MbFailureType::None;
+    int           detail = -1;    // errno, Modbus exception code, or MbParse ordinal
+    uint16_t      reg    = 0;     // 1-based HomeHub data-model offset
+};
+
 // RAII guard around s_mtx (same idiom as hp_poll.cpp/config.cpp): releases on unwind so a
 // std::bad_alloc thrown while copying strings out never strands the mutex.
 namespace {
@@ -96,11 +117,40 @@ static void status_target(std::string host, int port, int unit, bool discovering
     s_status.discovering = discovering;
     s_status.connected   = false;
 }
-static void status_error(std::string msg) {
-    Lock lk(s_mtx);
-    s_status.connected   = false;
-    s_status.discovering = false;
-    s_status.last_error.swap(msg);
+static void status_error(std::string code, std::string msg, int detail = -1, int reg = 0,
+                         bool link_down = true) {
+    // `msg` is swapped under the mutex, so preserve the line to be logged in a fixed buffer first.
+    // Logging while holding s_mtx would invert the status/diag mutex order and invite a deadlock.
+    char log_line[192];
+    std::snprintf(log_line, sizeof(log_line), "%s", msg.c_str());
+    bool changed = false;
+    {
+        Lock lk(s_mtx);
+        changed = s_status.last_error_code != code || s_status.last_error != msg ||
+                  s_status.last_error_detail != detail || s_status.last_error_register != reg;
+        if (link_down) s_status.connected = false;
+        s_status.discovering        = false;
+        s_status.last_error_detail  = detail;
+        s_status.last_error_register = reg;
+        s_status.last_error_code.swap(code);
+        s_status.last_error.swap(msg);
+    }
+    // One line per transition, not one per one-second retry. A clean poll clears the current error,
+    // so the same fault is logged again if it genuinely returns after recovery.
+    if (changed) diag_printf("modbus: %s\n", log_line);
+}
+
+static void status_recovered() {
+    bool recovered = false;
+    {
+        Lock lk(s_mtx);
+        recovered = !s_status.last_error_code.empty() || !s_status.last_error.empty();
+        s_status.last_error_code.clear();
+        s_status.last_error.clear();
+        s_status.last_error_detail   = -1;
+        s_status.last_error_register = 0;
+    }
+    if (recovered) diag_printf("modbus: communication recovered\n");
 }
 // A successful TCP connect starts a new SESSION, but does not make the old cache live. The link only
 // becomes `connected` after this session has committed its first poll below. Reserving generation
@@ -148,7 +198,8 @@ static bool resolve_host(const std::string& host, int port, sockaddr_in& out) {
 // mDNS-discover a HomeHub: browse _http._tcp (the service EKRHH advertises, guide §2.5), keep the
 // first responder whose hostname is "homehub-*" (logic/modbus.hpp is_homehub_hostname — this browse
 // also hears OUR OWN _http advert and unrelated HTTP devices, so the filter is mandatory), and take
-// its first IPv4. `found` returns the hostname for display in /status.
+// its first IPv4. `found` returns that numeric address for persistence and /status — discovery uses
+// the mDNS name to IDENTIFY the HomeHub, but the editable Host field must show the resolved IP.
 static bool discover_homehub(std::string& found) {
     mdns_result_t* results = nullptr;
     if (mdns_query_ptr("_http", "_tcp", 3000, 20, &results) != ESP_OK) return false;
@@ -159,37 +210,47 @@ static bool discover_homehub(std::string& found) {
         if (name == nullptr || !is_homehub_hostname(name)) continue;
         matches++;
         if (ok) continue;   // keep counting (to warn on multiples) but commit to the first match
-        // Take the NAME, not the address: what gets PERSISTED is a hostname, which survives the
-        // gateway taking a new DHCP lease. A responder carrying no A record yet still counts — the
-        // connect step resolves it exactly as it resolves a manually typed name.
+        // Take the A RECORD, not the serial-derived hostname. The request that started discovery had
+        // an empty Host field; once discovery succeeds that field must contain the concrete IP the
+        // user can see, copy and diagnose. A result without an embedded A record gets one explicit
+        // query before it is rejected.
         for (mdns_ip_addr_t* a = r->addr; a != nullptr; a = a->next) {
             if (a->addr.type == ESP_IPADDR_TYPE_V4 && a->addr.u_addr.ip4.addr != 0) {
-                found = name;
-                ok    = true;
+                found = mb_ipv4_string(IP2STR(&a->addr.u_addr.ip4));
+                ok    = !found.empty();
                 break;
             }
         }
         if (!ok) {
             esp_ip4_addr_t a4{};
-            if (mdns_query_a(name, 2000, &a4) == ESP_OK) { found = name; ok = true; }
+            if (mdns_query_a(name, 2000, &a4) == ESP_OK && a4.addr != 0) {
+                found = mb_ipv4_string(IP2STR(&a4));
+                ok = !found.empty();
+            }
         }
     }
     mdns_query_results_free(results);
     // Several hubs on one LAN is unusual; the user chose auto-discovery, so use the first one that
     // RESOLVED and say so, rather than silently picking among them. Gated on `ok` — with nothing
-    // resolved there is no name to print, and "using " followed by nothing reads like a bug.
+    // resolved there is no address to print, and "using " followed by nothing reads like a bug.
     if (ok && matches > 1) diag_printf("modbus: %d HomeHubs discovered via mDNS — using %s\n",
                                        matches, found.c_str());
     return ok;
 }
 
 // Non-blocking connect with a select() timeout (the tcp_port_probe idiom from http_config.cpp), then
-// return to blocking with a per-read SO_RCVTIMEO for mb_read's recv loop. Returns the socket or -1.
-static int connect_socket(const sockaddr_in& addr, int timeout_ms) {
+// return to blocking with a per-read SO_RCVTIMEO for mb_read's recv loop. Returns the socket or -1;
+// `out_err` preserves the error from the call that ACTUALLY failed (close() may change errno).
+static int connect_socket(const sockaddr_in& addr, int timeout_ms, int& out_err) {
+    out_err = 0;
     int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (sock < 0) return -1;
+    if (sock < 0) { out_err = errno; return -1; }
     const int flags = fcntl(sock, F_GETFL, 0);
-    fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+    if (flags < 0 || fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0) {
+        out_err = errno;
+        close(sock);
+        return -1;
+    }
     int r = connect(sock, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
     if (r < 0 && errno == EINPROGRESS) {
         fd_set w;
@@ -200,20 +261,61 @@ static int connect_socket(const sockaddr_in& addr, int timeout_ms) {
         if (r > 0) {
             int so_err = 0;
             socklen_t l = sizeof(so_err);
-            r = (getsockopt(sock, SOL_SOCKET, SO_ERROR, &so_err, &l) == 0 && so_err == 0) ? 0 : -1;
+            if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &so_err, &l) != 0) {
+                out_err = errno;
+                r = -1;
+            } else if (so_err != 0) {
+                out_err = so_err;
+                r = -1;
+            } else {
+                r = 0;
+            }
+        } else if (r == 0) {
+            out_err = ETIMEDOUT;
+            r = -1;
         } else {
+            out_err = errno;
             r = -1;
         }
     } else if (r < 0) {
+        out_err = errno;
         r = -1;
     }
     if (r != 0) { close(sock); return -1; }
-    fcntl(sock, F_SETFL, flags);                       // back to blocking
+    if (fcntl(sock, F_SETFL, flags) < 0) {             // back to blocking
+        out_err = errno;
+        close(sock);
+        return -1;
+    }
     // Per-CALL recv timeout. recv_adu additionally bounds the WHOLE reply with MB_READ_TIMEOUT_MS —
     // this alone would not, since a peer trickling a byte per call keeps every call successful.
     timeval rt{ MB_READ_TIMEOUT_MS / 1000, (MB_READ_TIMEOUT_MS % 1000) * 1000 };
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &rt, sizeof(rt));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &rt, sizeof(rt));
     return sock;
+}
+
+static const char* connect_error_code(int err) {
+    if (err == ETIMEDOUT)    return "connect_timeout";
+    if (err == ECONNREFUSED) return "connection_refused";
+    if (err == ENETUNREACH)  return "network_unreachable";
+    if (err == EHOSTUNREACH) return "host_unreachable";
+    return "connect_failed";
+}
+
+static std::string connect_error_message(int err) {
+    switch (err) {
+        case ETIMEDOUT:    return "connection timed out";
+        case ECONNREFUSED: return "connection refused (Modbus TCP port closed)";
+        case ENETUNREACH:  return "network unreachable";
+        case EHOSTUNREACH: return "HomeHub unreachable";
+        default: {
+            char msg[128];
+            std::snprintf(msg, sizeof(msg), "connection failed (errno %d: %s)", err,
+                          std::strerror(err));
+            return msg;
+        }
+    }
 }
 
 static void close_sock() {
@@ -235,14 +337,16 @@ static bool mb_discover_once(std::string& found) {
     status_target(std::string(), 0, 0, /*discovering=*/true);
     const bool ok = discover_homehub(found);
     esp_task_wdt_reset();                      // the browse blocks for up to ~3 s
-    if (!ok) status_error(std::string("no Modbus gateway found (mDNS)"));
+    if (!ok) status_error(std::string("mdns_not_found"),
+                          std::string("no HomeHub found via mDNS — not searching again"));
     return ok;
 }
 
-static bool mb_ensure_connected(const std::string& host, int port, int unit_id) {
+static bool mb_ensure_connected(const std::string& host, int port, int unit_id,
+                                bool migrate_discovered_name) {
     // No address, nothing to dial. There is no browse here — see mb_discover_once.
     if (host.empty()) {
-        status_error(std::string("no gateway address"));
+        status_error(std::string("no_address"), std::string("no HomeHub address configured"));
         return false;
     }
     // Reuse a healthy socket for the same target — a read failure will have close_sock()'d it, so
@@ -250,10 +354,6 @@ static bool mb_ensure_connected(const std::string& host, int port, int unit_id) 
     if (s_sock >= 0 && s_have_req && host == s_req_host && port == s_req_port && unit_id == s_unit)
         return true;
     close_sock();
-    s_req_host = host;
-    s_req_port = port;
-    s_unit     = unit_id;
-
     // Announce the target before the blocking resolve, so /status shows what the device is
     // attempting rather than going silent for seconds.
     status_target(host, port, unit_id, /*discovering=*/false);
@@ -262,16 +362,35 @@ static bool mb_ensure_connected(const std::string& host, int port, int unit_id) 
     std::string resolved = host;
     esp_task_wdt_reset();   // DNS/mDNS resolution can take a couple of seconds
     if (!resolve_host(host, port, addr)) {
-        status_error(std::string("cannot resolve host"));
+        status_error(std::string("resolve_failed"),
+                     std::string("HomeHub address could not be resolved"));
         return false;
     }
-    const int sock = connect_socket(addr, 2000);
+    if (migrate_discovered_name) {
+        // Pre-change firmware persisted homehub-<serial>.local in mb_dhost. Resolve it once, then
+        // replace ONLY that task-owned discovery value with the same numeric contract new searches
+        // use. A manual mb_host never sets migrate_discovered_name and is left byte-for-byte intact.
+        esp_ip4_addr_t ip{};
+        ip.addr = addr.sin_addr.s_addr;
+        std::string ipv4 = mb_ipv4_string(IP2STR(&ip));
+        if (!ipv4.empty()) {
+            resolved.swap(ipv4);
+            config_save_modbus_found(resolved);
+            diag_printf("modbus: migrated discovered gateway hostname to IPv4\n");
+        }
+    }
+    int connect_err = 0;
+    const int sock = connect_socket(addr, 2000, connect_err);
     esp_task_wdt_reset();
     if (sock < 0) {
-        status_error(std::string("connect failed"));
+        status_error(std::string(connect_error_code(connect_err)),
+                     connect_error_message(connect_err), connect_err);
         return false;
     }
     s_sock     = sock;
+    s_req_host = resolved;
+    s_req_port = port;
+    s_unit     = unit_id;
     s_have_req = true;
     status_socket_open(std::move(resolved), port, unit_id);
     return true;
@@ -283,12 +402,31 @@ static bool mb_ensure_connected(const std::string& host, int port, int unit_id) 
 // one byte per timeout keeps every call "successful" and the loop runs as long as it likes. This task
 // is Task-Watchdog-subscribed with a 20 s budget and resets once per register, so an unbounded read
 // here is a reboot waiting for a slow or hostile peer. The deadline bounds the whole reassembly.
-static bool recv_all(int sock, uint8_t* buf, int n, int64_t deadline_us) {
+static bool recv_all(int sock, uint8_t* buf, int n, int64_t deadline_us, MbFailure& failure) {
     int got = 0;
     while (got < n) {
-        if (esp_timer_get_time() >= deadline_us) return false;
+        if (esp_timer_get_time() >= deadline_us) {
+            failure.type = MbFailureType::ResponseTimeout;
+            failure.detail = ETIMEDOUT;
+            return false;
+        }
         const int r = recv(sock, buf + got, n - got, 0);
-        if (r <= 0) return false;   // 0 = peer closed, <0 = error/timeout
+        if (r == 0) {
+            failure.type = MbFailureType::ConnectionClosed;
+            failure.detail = 0;
+            return false;
+        }
+        if (r < 0) {
+            const int err = errno;   // capture before close() or another libc call can overwrite it
+            failure.detail = err;
+            if (err == EAGAIN || err == EWOULDBLOCK || err == ETIMEDOUT)
+                failure.type = MbFailureType::ResponseTimeout;
+            else if (err == ECONNRESET || err == ENOTCONN || err == EPIPE)
+                failure.type = MbFailureType::ConnectionClosed;
+            else
+                failure.type = MbFailureType::ReceiveFailed;
+            return false;
+        }
         got += r;
     }
     return true;
@@ -297,30 +435,52 @@ static bool recv_all(int sock, uint8_t* buf, int n, int64_t deadline_us) {
 // Read one Modbus TCP ADU: the 6-byte MBAP prefix (txn, proto, length), then `length` more bytes
 // (unit + PDU). Returns the total ADU length, or -1 on timeout / short read / an implausible length.
 // The whole reply must land within MB_READ_TIMEOUT_MS of the request — see recv_all.
-static int recv_adu(int sock, uint8_t* buf, int buflen) {
-    if (buflen < MBAP_LEN) return -1;
+static int recv_adu(int sock, uint8_t* buf, int buflen, MbFailure& failure) {
+    if (buflen < MBAP_LEN) { failure.type = MbFailureType::InvalidResponse; return -1; }
     const int64_t deadline = esp_timer_get_time() + MB_READ_TIMEOUT_MS * 1000;
-    if (!recv_all(sock, buf, 6, deadline)) return -1;
+    if (!recv_all(sock, buf, 6, deadline, failure)) return -1;
     const int len = (buf[4] << 8) | buf[5];            // bytes after the length field (unit + PDU)
-    if (len < 2 || 6 + len > buflen) return -1;        // >=2: at least unit + a 1-byte PDU
-    if (!recv_all(sock, buf + 6, len, deadline)) return -1;
+    if (len < 2 || 6 + len > buflen) {                 // >=2: at least unit + a 1-byte PDU
+        failure.type = MbFailureType::InvalidResponse;
+        return -1;
+    }
+    if (!recv_all(sock, buf + 6, len, deadline, failure)) return -1;
     return 6 + len;
 }
 
-static bool mb_read(MbFunc space, uint16_t addr, uint16_t qty, MbResponse& out) {
-    if (s_sock < 0) return false;
+static bool mb_read(MbFunc space, uint16_t addr, uint16_t qty, MbResponse& out,
+                    MbFailure& failure) {
+    failure = MbFailure{};
+    if (s_sock < 0) {
+        failure.type = MbFailureType::ConnectionClosed;
+        failure.detail = ENOTCONN;
+        return false;
+    }
     uint8_t req[16];
     const uint16_t txn  = ++s_txn;
     const uint8_t  unit = static_cast<uint8_t>(s_unit);
     const int n = mb_build_read(req, sizeof(req), txn, unit, space, addr, qty);
-    if (n < 0) { Lock lk(s_mtx); s_status.rx_fail++; return false; }
-    if (send(s_sock, req, n, 0) != n) {
+    if (n < 0) {
+        failure.type = MbFailureType::RequestBuild;
+        { Lock lk(s_mtx); s_status.rx_fail++; }
+        return false;
+    }
+    const int sent = send(s_sock, req, n, 0);
+    if (sent != n) {
+        const int err = sent < 0 ? errno : EIO;
+        failure.detail = err;
+        if (err == EAGAIN || err == EWOULDBLOCK || err == ETIMEDOUT)
+            failure.type = MbFailureType::SendTimeout;
+        else if (err == ECONNRESET || err == ENOTCONN || err == EPIPE)
+            failure.type = MbFailureType::ConnectionClosed;
+        else
+            failure.type = MbFailureType::SendFailed;
         close_sock();
         { Lock lk(s_mtx); s_status.rx_fail++; s_status.connected = false; }
         return false;
     }
     uint8_t adu[260];                                  // max Modbus TCP ADU = 7 + 253
-    const int got = recv_adu(s_sock, adu, sizeof(adu));
+    const int got = recv_adu(s_sock, adu, sizeof(adu), failure);
     if (got < 0) {
         close_sock();
         { Lock lk(s_mtx); s_status.rx_fail++; s_status.connected = false; }
@@ -339,7 +499,12 @@ static bool mb_read(MbFunc space, uint16_t addr, uint16_t qty, MbResponse& out) 
         Lock lk(s_mtx);
         s_status.rx_fail++;
     }
-    if (p != MbParse::Exception) {
+    if (p == MbParse::Exception) {
+        failure.type = MbFailureType::Exception;
+        failure.detail = out.exc_code;
+    } else {
+        failure.type = MbFailureType::InvalidResponse;
+        failure.detail = static_cast<int>(p);
         close_sock();
         Lock lk(s_mtx);
         s_status.connected = false;
@@ -347,12 +512,76 @@ static bool mb_read(MbFunc space, uint16_t addr, uint16_t qty, MbResponse& out) 
     return false;
 }
 
+static const char* failure_code(MbFailureType type) {
+    switch (type) {
+        case MbFailureType::RequestBuild:     return "request_failed";
+        case MbFailureType::SendTimeout:      return "send_timeout";
+        case MbFailureType::SendFailed:       return "send_failed";
+        case MbFailureType::ResponseTimeout:  return "response_timeout";
+        case MbFailureType::ConnectionClosed: return "connection_closed";
+        case MbFailureType::ReceiveFailed:    return "receive_failed";
+        case MbFailureType::InvalidResponse:  return "invalid_response";
+        case MbFailureType::Exception:        return "modbus_exception";
+        case MbFailureType::None:             return "";
+    }
+    return "read_failed";
+}
+
+static std::string failure_message(const MbFailure& f) {
+    char msg[176];
+    switch (f.type) {
+        case MbFailureType::RequestBuild:
+            std::snprintf(msg, sizeof(msg), "could not build Modbus request for register %u",
+                          static_cast<unsigned>(f.reg));
+            break;
+        case MbFailureType::SendTimeout:
+            std::snprintf(msg, sizeof(msg), "Modbus request send timed out at register %u",
+                          static_cast<unsigned>(f.reg));
+            break;
+        case MbFailureType::SendFailed:
+            std::snprintf(msg, sizeof(msg), "Modbus request send failed at register %u (errno %d: %s)",
+                          static_cast<unsigned>(f.reg), f.detail, std::strerror(f.detail));
+            break;
+        case MbFailureType::ResponseTimeout:
+            std::snprintf(msg, sizeof(msg), "HomeHub response timed out at register %u",
+                          static_cast<unsigned>(f.reg));
+            break;
+        case MbFailureType::ConnectionClosed:
+            std::snprintf(msg, sizeof(msg), "HomeHub closed the connection at register %u",
+                          static_cast<unsigned>(f.reg));
+            break;
+        case MbFailureType::ReceiveFailed:
+            std::snprintf(msg, sizeof(msg), "HomeHub receive failed at register %u (errno %d: %s)",
+                          static_cast<unsigned>(f.reg), f.detail, std::strerror(f.detail));
+            break;
+        case MbFailureType::InvalidResponse: {
+            const char* reason = f.detail >= static_cast<int>(MbParse::TooShort) &&
+                                 f.detail <= static_cast<int>(MbParse::EchoMismatch)
+                               ? mb_parse_reason(static_cast<MbParse>(f.detail))
+                               : "invalid MBAP length";
+            std::snprintf(msg, sizeof(msg), "invalid Modbus response at register %u (%s)",
+                          static_cast<unsigned>(f.reg), reason);
+            break;
+        }
+        case MbFailureType::Exception:
+            std::snprintf(msg, sizeof(msg), "HomeHub rejected register %u (Modbus exception %d: %s)",
+                          static_cast<unsigned>(f.reg), f.detail,
+                          mb_exception_reason(static_cast<uint8_t>(f.detail)));
+            break;
+        case MbFailureType::None:
+            msg[0] = '\0';
+            break;
+    }
+    return msg;
+}
+
 // ── One poll cycle ───────────────────────────────────────────────────────────────────────────────
 // Reads the whole HomeHub map into this stack's own cache. Structurally the twin of hp_poll's
 // poll_once(): sized reserve up front, everything staged in locals, one non-allocating commit.
 static void mb_poll_once() {
     const Config& c = config();
-    if (!mb_ensure_connected(config_modbus_host(c), c.mb_port, c.mb_unit_id)) {
+    if (!mb_ensure_connected(config_modbus_host(c), c.mb_port, c.mb_unit_id,
+                             config_modbus_discovery_needs_ipv4(c))) {
         // THE CACHE GOES WITH THE LINK. Keeping it was a real defect: /values kept serving the last
         // good readings, the browser had no way to tell they were minutes old, and it went on
         // printing them as the live second opinion — complete with a computed "difference" against a
@@ -385,7 +614,7 @@ static void mb_poll_once() {
 
     std::vector<CachedValue> fresh;
     fresh.reserve(def::HOMEHUB_REG_COUNT);
-    std::string err;
+    MbFailure first_failure;
 
     for (int i = 0; i < def::HOMEHUB_REG_COUNT; i++) {
         esp_task_wdt_reset();                      // each read is a bounded LAN round-trip
@@ -393,14 +622,32 @@ static void mb_poll_once() {
         uint16_t pdu = 0;
         if (!mb_pdu_address(r.offset, pdu)) continue;
         MbResponse resp;
-        if (!mb_read(r.space, pdu, 1, resp)) {
-            char eb[40];
-            snprintf(eb, sizeof(eb), "HomeHub reg %u read error", static_cast<unsigned>(r.offset));
-            err = eb;
+        MbFailure failure;
+        if (!mb_read(r.space, pdu, 1, resp, failure)) {
+            failure.reg = r.offset;
+            // Preserve the first exception while the link itself remains healthy. If a later
+            // transport/protocol failure actually drops the link, that becomes the displayed cause:
+            // otherwise a harmless unsupported register would hide the timeout that turned the row
+            // red.
+            if (first_failure.type == MbFailureType::None ||
+                (first_failure.type == MbFailureType::Exception &&
+                 failure.type != MbFailureType::Exception)) {
+                first_failure = failure;
+            }
+            // A valid Modbus exception applies to this register only, so continue and publish every
+            // row that did answer. Every other failure closed (or invalidated) the stream: trying the
+            // remaining registers would only overwrite the original cause with "not connected".
+            if (failure.type != MbFailureType::Exception) break;
             continue;
         }
         uint16_t raw = 0;
-        if (!mb_reg_at(resp, 0, raw)) continue;
+        if (!mb_reg_at(resp, 0, raw)) {
+            first_failure = MbFailure{MbFailureType::InvalidResponse,
+                                      static_cast<int>(MbParse::Malformed), r.offset};
+            close_sock();
+            { Lock lk(s_mtx); s_status.connected = false; }
+            break;
+        }
         CachedValue cv;
         cv.label = r.label;
         cv.unit  = r.unit;
@@ -430,6 +677,7 @@ static void mb_poll_once() {
         s_cache = std::move(fresh);                // move-assign: steals the buffer, cannot throw
         s_cache_generation = cycle_generation;
     }
+    bool current_session = false;
     {
         Lock lk(s_mtx);
         // rx_ok/rx_fail are NOT touched here: mb_read already counts every read as it happens, and
@@ -446,15 +694,18 @@ static void mb_poll_once() {
         // Only a poll that still owns the current open socket can publish this session as live. A
         // framing/transport failure closes it in mb_read and keeps connected=false; Modbus exception
         // replies leave the socket open and commit the rows that really answered.
-        const bool current_session = s_sock >= 0 && s_link_generation == cycle_generation;
+        current_session = s_sock >= 0 && s_link_generation == cycle_generation;
         s_status.values = current_session ? committed : 0;
-        if (current_session) {
-            s_status.connected = true;
-            // CLEAR a recovered failure. It is not history, it is the reason the link is down; a
-            // committed live cycle has no stale reason. A per-register exception remains useful.
-            if (!err.empty()) s_status.last_error.swap(err);
-            else              s_status.last_error.clear();
-        }
+        s_status.connected = current_session;
+    }
+    if (first_failure.type != MbFailureType::None) {
+        status_error(std::string(failure_code(first_failure.type)),
+                     failure_message(first_failure), first_failure.detail, first_failure.reg,
+                     /*link_down=*/!current_session);
+    } else if (current_session) {
+        // The error is CURRENT state, not history. A complete clean cycle clears it and records the
+        // recovery once in /diag + Syslog.
+        status_recovered();
     }
 }
 
@@ -477,15 +728,11 @@ static void mb_task(void*) {
             std::string found;
             const bool ok = mb_discover_once(found);
             // TWO statements, not one with a substituted tail, and the split is a REDACTION
-            // requirement rather than a style choice. `found` is the hub's own serial-derived
-            // hostname (homehub-524288-<serial>) — the same value /status?redact=1 withholds as
-            // modbus.host — so this line needs a rule in logic/redact.hpp, and a rule is a MARKER
-            // plus an end token. Written as one statement the two outcomes share the prefix
-            // "search found ", so the only rule that covers the hostname also blanks the words
-            // "no gateway — not searching again" — deleting the one fact a reader needs to know why
-            // no hub was ever contacted. Distinct markers let the failure line stay whole.
+            // requirement rather than a style choice. `found` is the hub's LAN IP — the same value
+            // /status?redact=1 withholds as modbus.host — so this success line needs a rule in
+            // logic/redact.hpp. The failure is already emitted by status_error() without an address,
+            // and therefore needs no redaction rule or duplicate line here.
             if (ok) diag_printf("modbus: one-shot mDNS search found gateway %s\n", found.c_str());
-            else    diag_printf("modbus: one-shot mDNS search found no gateway — not searching again\n");
             config_save_modbus_found(ok ? found : std::string());
         }
     } catch (...) {
@@ -499,6 +746,9 @@ static void mb_task(void*) {
             if (config_modbus_host(config()).empty()) break;
             if (esp_timer_get_time() >= s_next_try_us) mb_poll_once();
         } catch (const std::exception& e) {
+            // Keep the allocation guard allocation-free: constructing the UI error itself can throw
+            // when the exception was std::bad_alloc. Transport/protocol failures take the structured
+            // status_error() path before reaching this last-resort guard.
             diag_printf("modbus: cycle skipped (%s)\n", e.what());
         } catch (...) {
             diag_printf("modbus: cycle skipped (oom?)\n");
@@ -561,8 +811,17 @@ void mb_reconfigure() {
         // from here — the reset below makes the next cycle re-evaluate and reconnect on its own.
         s_backoff.silent = 0;
         s_next_try_us    = 0;
-        mb_task_start_if_enabled();
     }
+    {
+        // A saved address is a new attempt. Do not show the previous target's failure under it while
+        // the task is resolving/connecting; the next clean poll or concrete failure owns this state.
+        Lock lk(s_mtx);
+        s_status.last_error_code.clear();
+        s_status.last_error.clear();
+        s_status.last_error_detail   = -1;
+        s_status.last_error_register = 0;
+    }
+    mb_task_start_if_enabled();
     // Clearing the address is handled BY the task (it re-reads it at the top of each cycle and
     // retires itself), so nothing is torn down from the httpd task here — the socket has exactly one
     // owner and it stays that way.

@@ -336,7 +336,8 @@ bool config_save_link(int rx_pin, int tx_pin, Protocol proto) {
 // config_save_link is: that task must never write a whole Config back, or it would revert a
 // /set_wifi or /set_mqtt that landed while it was off-lock on the network.
 //
-// `host` is empty when nothing answered — and that case is the one worth persisting, because it is
+// `host` is the resolved IPv4 address, or empty when nothing answered — and that empty case is worth
+// persisting, because it is
 // what stops the next boot from searching again. RAM is patched even if the NVS write fails: the
 // result is true either way for THIS boot, and a lost write only costs one more search next time.
 bool config_save_modbus_found(const std::string& host) {

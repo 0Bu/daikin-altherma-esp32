@@ -350,7 +350,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    hover/focus, so at rest it is exactly the footer's own text. */
 .footer-ver .foot-act { white-space: nowrap; }
 
-/* ── Connections tile (Settings, WiFi · MQTT · Syslog · NTP combined) ──────────────────────── */
+/* ── Connections tile (Settings, WiFi · MQTT · Syslog · NTP · Modbus combined) ───────────── */
 .conn-tile {
   background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card);
   box-shadow: var(--shadow-card); padding: 18px;
@@ -368,11 +368,18 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   font-size: 12px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase;
   color: var(--muted); flex: none;
 }
+.conn-value {
+  flex: 1; min-width: 0; margin-left: 12px; display: flex; flex-direction: column; align-items: flex-end;
+}
 .conn-val {
-  flex: 1; min-width: 0; margin-left: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--fg); text-align: right;
 }
 .conn-val.ok { color: var(--ok); } .conn-val.warn { color: var(--warn); } .conn-val.err { color: var(--err); }
+.conn-detail {
+  width: 100%; margin-top: 3px; color: var(--err); font-size: 12px; font-weight: 500;
+  line-height: 1.3; text-align: right;
+}
 .conn-dbm { font-weight: 500; font-size: 14.5px; color: var(--muted); }
 .conn-name { font-weight: 600; }
 
