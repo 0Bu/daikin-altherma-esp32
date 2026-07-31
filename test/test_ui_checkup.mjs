@@ -415,7 +415,8 @@ for (const id of ["fault", "cycling", "defrost", "pressure", "flow", "heater", "
 }
 
 // Technical binary states stay ON/OFF in German explainers instead of switching between translated
-// prose forms. Ordinary grammatical uses of "ein"/"aus" are intentionally outside this contract.
+// prose forms. Named manufacturer enums such as Smart Grid "Empfehlung ein" are intentionally
+// outside this binary-state contract.
 const cyclingCopy = span("  health_cycling: {", "  health_defrost: {");
 const defrostCopy = span("  health_defrost: {", "  health_pressure: {");
 assert.match(cyclingCopy, /von OFF zu ON/);
@@ -429,7 +430,6 @@ for (const [name, pattern] of [
   ["Aus-zu-Ein transition", /von Aus zu Ein/i],
   ["translated switched-off state", /\bausgeschaltet(?:e[rmns]?)?\b/i],
   ["translated switched-on state", /\beingeschaltet(?:e[rmns]?)?\b/i],
-  ["translated Smart-Grid state", /\b(?:Erzwungen|Empfohlen) (?:aus|ein)\b/i],
   ["translated compressor state", /\bVerdichter ist aus\b/i],
   ["translated backup-heater state", /\bZusatzheizer (?:ist )?aus\b/i],
 ]) assert.doesNotMatch(explanationCopy, pattern, `${name} must use ON/OFF`);

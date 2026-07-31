@@ -24,6 +24,7 @@ import vm from "node:vm";
 
 const app = fs.readFileSync(new URL("../main/www/app.js", import.meta.url), "utf8");
 const index = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
+const demo = fs.readFileSync(new URL("../tools/uigif/scenes.js", import.meta.url), "utf8");
 
 // The arbitration helpers are one contiguous block. Extracting the REAL source rather than
 // re-implementing the rule is the whole point: a second copy of it would be a second thing to drift.
@@ -116,6 +117,20 @@ const LWT_X = X("Leaving water temp. before BUH (R1T)", "38.6", "leaving_water")
 const LWT_M = M(40, "Leaving water temperature PHE", "38.1", "leaving_water");
 const SG = (value) => M(56, "Smart Grid operation mode", String(value), null, { unit: "" });
 
+// The README recording drives the same production parser. Keep its fake HomeHub on the real API
+// boundary (named enums), or the visual regression artefact will omit boost while these helper
+// assertions remain green.
+{
+  const end = demo.indexOf("\n})();");
+  assert.notEqual(end, -1, "demo harness must expose a closed DEMO fixture");
+  const demoContext = {};
+  vm.runInNewContext(demo.slice(0, end + "\n})();".length) +
+    "\nthis.__smartGrid = DEMO.smartGrid;", demoContext,
+  { filename: "tools/uigif/scenes.js" });
+  assert.equal(demoContext.__smartGrid(0).value, "Free running");
+  assert.equal(demoContext.__smartGrid(2).value, "Recommended on");
+}
+
 // ── 1. Both live, numeric — the gateway is reachable as the second opinion ─────────────────────
 {
   const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: [LWT_X], modbus: [LWT_M] });
@@ -138,6 +153,13 @@ const SG = (value) => M(56, "Smart Grid operation mode", String(value), null, { 
     "the inspector must remain traceable to the Modbus row while X10A is live");
   assert.equal(c.sgModeText(2), "sg.mode2");
   assert.equal(c.sgRequestText(2), "schem.sg_boost");
+  assert.equal(c.sgRequestText(0), "", "free running has no schematic label");
+  assert.equal(c.sgRequestText(1), "", "forced off has no schematic label");
+  assert.equal(c.sgRequestText(3), "", "forced on has no schematic label");
+  assert.match(app, /classList\.toggle\("sg-boost-on", d\.sgMode === 2\)/,
+    "only mode 2 may reveal the schematic boost marker");
+  assert.doesNotMatch(app, /sg-request-on/,
+    "the former all-nonzero request visibility rule must stay removed");
 }
 
 // A stale HomeHub cache is not an active request, and invalid enum values are not guessed into one.

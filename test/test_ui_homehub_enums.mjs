@@ -22,9 +22,11 @@ const SOURCE =
 function renderer(lang) {
   const context = { LANG: lang };
   vm.createContext(context);
-  vm.runInContext(SOURCE + "\nthis.__displayValue = displayValue;", context,
+  vm.runInContext(SOURCE + "\nthis.__ui = { displayValue," +
+    " sgModeText: (mode) => t(`sg.mode${mode}`)," +
+    " sgBoostText: () => t(\"schem.sg_boost\") };", context,
     { filename: "main/www/app.js" });
-  return context.__displayValue;
+  return context.__ui;
 }
 
 const en = renderer("en");
@@ -40,21 +42,28 @@ const modes = [
   ["Space heating", "Raumheizung"],
   ["DHW", "Brauchwarmwasser"],
   ["Free running", "Freier Betrieb"],
-  ["Forced off", "Erzwungen OFF"],
-  ["Recommended on", "Empfohlen ON"],
-  ["Forced on", "Erzwungen ON"],
+  ["Forced off", "Zwangsabschaltung"],
+  ["Recommended on", "Empfehlung ein"],
+  ["Forced on", "Erzwungen ein"],
 ];
 
 for (const [canonical, german] of modes) {
-  assert.equal(en({ value: canonical }), canonical, `English enum: ${canonical}`);
-  assert.equal(de({ value: canonical }), german, `German enum: ${canonical}`);
+  assert.equal(en.displayValue({ value: canonical }), canonical, `English enum: ${canonical}`);
+  assert.equal(de.displayValue({ value: canonical }), german, `German enum: ${canonical}`);
 }
 
-assert.equal(en({ value: "1", binary: true }), "ON", "a real binary 1 remains ON");
-assert.equal(de({ value: "0", binary: true }), "OFF", "a real binary 0 remains OFF");
-assert.equal(de({ value: "1" }), "1", "an untyped numeric one is never guessed to be a switch");
-assert.equal(en({ value: "Unknown (7)" }), "Unknown (7)");
-assert.equal(de({ value: "Unknown (7)" }), "Unbekannt (7)");
-assert.equal(de({ value: "17" }), "17", "ordinary numeric values remain numeric");
+assert.deepEqual([0, 1, 2, 3].map(en.sgModeText),
+  ["Free running", "Forced off", "Recommended on", "Forced on"]);
+assert.deepEqual([0, 1, 2, 3].map(de.sgModeText),
+  ["Freier Betrieb", "Zwangsabschaltung", "Empfehlung ein", "Erzwungen ein"]);
+assert.equal(en.sgBoostText(), "BOOST", "English boost marker is compact and source-free");
+assert.equal(de.sgBoostText(), "BOOST", "German boost marker is compact and source-free");
+
+assert.equal(en.displayValue({ value: "1", binary: true }), "ON", "a real binary 1 remains ON");
+assert.equal(de.displayValue({ value: "0", binary: true }), "OFF", "a real binary 0 remains OFF");
+assert.equal(de.displayValue({ value: "1" }), "1", "an untyped numeric one is never guessed to be a switch");
+assert.equal(en.displayValue({ value: "Unknown (7)" }), "Unknown (7)");
+assert.equal(de.displayValue({ value: "Unknown (7)" }), "Unbekannt (7)");
+assert.equal(de.displayValue({ value: "17" }), "17", "ordinary numeric values remain numeric");
 
 console.log("HomeHub enum UI: all manufacturer states named in English and German");

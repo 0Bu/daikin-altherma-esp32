@@ -179,14 +179,14 @@ svg .sc-status.dim { fill: var(--muted); }
    text keeps its normal colour, which is what separates it from .dim (no data at all, both muted).
    The words say which it is either way, so neither reading depends on the colour. */
 svg .sc-status.idle { fill: var(--brand-strong); }
-/* A non-zero HomeHub Smart-Grid request. Petrol carries SOURCE here, as it does on every other
-   Modbus reading; the words carry the state, so colour is never the only evidence. It is hidden by
-   visibility as well as opacity because the group is focusable/tappable (same rule as the defrost,
-   quiet and BSH badges below). */
+/* HomeHub Smart-Grid mode 2, shown only as the compact petrol "BOOST" marker. The colour is enough
+   source context here; the HomeHub row and inspector retain the full manufacturer state. It is
+   hidden by visibility as well as opacity because the group is focusable/tappable (same rule as the
+   defrost, quiet and BSH badges below). */
 svg .sc-sg-request {
   opacity: 0; visibility: hidden; transition: opacity .3s, visibility 0s .3s;
 }
-.sg-request-on .sc-sg-request {
+.sg-boost-on .sc-sg-request {
   opacity: 1; visibility: visible; transition: opacity .3s, visibility 0s;
 }
 svg .sc-sg-request-box { fill: var(--src-mb-soft); stroke: var(--src-mb); }

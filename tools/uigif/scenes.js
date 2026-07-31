@@ -9,7 +9,11 @@ const DEMO = (() => {
   // HomeHub telemetry has its own array and addresses registers by their EKRHH data-model offset.
   // The DHW scene below reports mode 2 (Recommended on), which is what evcc's boost writes; every
   // other scene reports mode 0 so the badge proves both its appearance and disappearance.
-  const SG = (value) => ({ label: "Smart-Grid operation mode", value: String(value), unit: "",
+  // The API exposes manufacturer enum NAMES, not their wire numbers; feeding 2 here would make the
+  // production parser correctly reject the demo's value and silently omit the very marker this
+  // recording is supposed to exercise.
+  const SG_NAMES = ["Free running", "Forced off", "Recommended on", "Forced on"];
+  const SG = (mode) => ({ label: "Smart-Grid operation mode", value: SG_NAMES[mode], unit: "",
                            off: 56, binary: false });
   // A BIT-FLAG row exactly as the firmware serves it since #210: the value is the NUMBER 1/0, and
   // `binary: true` is the structural marker that lets the browser render it as ON/OFF without
