@@ -70,6 +70,15 @@ inline constexpr HomeHubConcept HOMEHUB_CONCEPTS[] = {
 inline constexpr size_t HOMEHUB_CONCEPT_COUNT =
     sizeof(HOMEHUB_CONCEPTS) / sizeof(HOMEHUB_CONCEPTS[0]);
 
+// Stable ring index for one paired measurement concept. The Modbus history recorder and
+// GET /history?source=modbus both use this, so a concept can never be written into one slot and read
+// back from another. Unknown and state-only concepts deliberately resolve to -1.
+inline constexpr int homehub_concept_index(const char* concept_id) {
+    for (size_t i = 0; i < HOMEHUB_CONCEPT_COUNT; i++)
+        if (trend_cstr_eq(HOMEHUB_CONCEPTS[i].concept_id, concept_id)) return static_cast<int>(i);
+    return -1;
+}
+
 // ── STATES: the same pairing for rows that are not MEASUREMENTS ────────────────────────────────
 // The table above can only name quantities a TREND addresses, and trends buffer measured numbers.
 // That left the plant's STATES — is the pump running, which way is the diverter pointing — unpaired

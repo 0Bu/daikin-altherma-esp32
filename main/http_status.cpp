@@ -46,6 +46,8 @@
 #include "esp_core_dump.h"
 #include "diag_log.hpp"
 #include <algorithm>
+#include <cstdio>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -307,6 +309,26 @@ void http_append_status_json(std::string& j, bool redact) {
         j += ",\"label\":";
         j += jstr(lbl);
         j += "}";
+    }
+    j += "],\"modbus_rows\":[";
+    // Only the HomeHub measurements that are structurally paired to schematic readings get a
+    // second ring. States, setpoints and Modbus-only values remain live rows without a chart. Keep
+    // the list empty when this installation has no HomeHub stack, so old/no-gateway devices do not
+    // offer six permanently empty series in the browser.
+    bool first_mb_trend = true;
+    if (mb.enabled) {
+        for (size_t mt = 0; mt < logic::HOMEHUB_CONCEPT_COUNT; mt++) {
+            const auto& hc = logic::HOMEHUB_CONCEPTS[mt];
+            const def::HomeHubReg* r = def::homehub_find(hc.offset);
+            if (!r) continue;                         // compile-time table tests make this defensive
+            if (!first_mb_trend) j += ",";
+            first_mb_trend = false;
+            j += "{\"id\":";
+            j += jstr(hc.concept_id);
+            j += ",\"label\":";
+            j += jstr(r->label);
+            j += "}";
+        }
     }
     j += "]},";
 
@@ -707,37 +729,49 @@ static esp_err_t h_models(httpd_req_t* req) {
     return http_send_json(req, def::MODELS_JSON);
 }
 
-// GET /history?row=<trend id> — one trend's 24-hour series, oldest sample first.
+// GET /history?row=<trend id>[&source=modbus] — one 24-hour series, oldest sample first. X10A is the
+// backwards-compatible default; Modbus is available only for the six structurally paired schematic
+// measurements in logic/homehub_map.hpp.
 //
-//   {"id":"outdoor_air","label":"R1T-Outdoor air temp.","dt":300,"unit":"°C",
-//    "t0":1784926349,"v":[131,null,…],"held":[[0,42],[55,180]]}
+//   {"id":"outdoor_air","source":"x10a","label":"R1T-Outdoor air temp.","dt":300,
+//    "unit":"°C","t0":1784926349,"b0":5931421,"v":[131,null,…],
+//    "held":[[0,42],[55,180]]}
 //
 // `v` holds tenths of the unit (the resolution the converters produce, so a sample is exact rather
 // than rounded on the way in) or null. `held` run-length-marks WHICH of those nulls were the outdoor
 // unit resting rather than a failure to measure — a plain number-or-null array stays readable by any
 // consumer, and the reason for the nulls rides alongside instead of inside it (logic/history.hpp).
 //
-// `t0` is the wall-clock instant of sample 0, derived HERE from the current time and the sample
-// count — the ring itself advances on the monotonic clock, so it survives SNTP setting the time
-// mid-boot. Omitted entirely when the clock has never synced: the UI then reads out an AGE, which
-// is the same refusal-to-fabricate logic/timestamp.hpp already makes for the syslog timestamp.
+// `t0` is the wall-clock instant of sample 0, derived HERE from the newest committed sample's
+// monotonic age — the ring itself advances on the monotonic clock, so it survives SNTP setting the
+// time mid-boot. Omitted entirely when the clock has never synced: the UI then reads out an AGE,
+// which is the same refusal-to-fabricate logic/timestamp.hpp already makes for syslog timestamps.
+// `b0` is sample zero's monotonic bucket and aligns X10A and Modbus exactly even without wall time.
 //
 // Sent in CHUNKS. The body is ~1.5 KB — smaller than /values' ~6 KB — but it is a new allocation on
 // a heap where the largest contiguous block is the binding limit, and chunking costs nothing here.
 static esp_err_t h_history(httpd_req_t* req) {
-    char q[64] = {0};
+    char q[96] = {0};
     char id[32] = {0};
     if (httpd_req_get_url_query_str(req, q, sizeof(q)) != ESP_OK ||
         httpd_query_key_value(q, "row", id, sizeof(id)) != ESP_OK) {
         httpd_resp_set_status(req, "400 Bad Request");
         return http_send_json(req, "{\"ok\":false,\"error\":\"row required\"}");
     }
+    char source[12] = {0};
+    const bool has_source = httpd_query_key_value(q, "source", source, sizeof(source)) == ESP_OK;
+    const bool modbus = has_source && std::strcmp(source, "modbus") == 0;
+    if (has_source && !modbus && std::strcmp(source, "x10a") != 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"unknown source\"}");
+    }
     const logic::TrendDef* def_ = logic::trend_by_id(id);
     // An unknown id is a 404, never a defaulted trend: answering with SOME series would look like a
     // working request and quietly attach the wrong sensor's history to whatever asked.
     size_t t = 0;
     if (def_) { while (t < logic::TREND_COUNT && &logic::TRENDS[t] != def_) t++; }
-    if (!def_ || t >= logic::TREND_COUNT) {
+    const int mb_t = modbus ? logic::homehub_concept_index(id) : -1;
+    if (!def_ || t >= logic::TREND_COUNT || (modbus && mb_t < 0)) {
         httpd_resp_set_status(req, "404 Not Found");
         return http_send_json(req, "{\"ok\":false,\"error\":\"unknown trend\"}");
     }
@@ -747,15 +781,26 @@ static esp_err_t h_history(httpd_req_t* req) {
     // Safe because esp_http_server dispatches requests one at a time on that single task.
     static logic::HistorySample samples[logic::HISTORY_SAMPLES];
     static uint16_t             runs[logic::HISTORY_MAX_RUNS][2];
-    const size_t n = history_snapshot(t, samples, logic::HISTORY_SAMPLES);
-    const size_t nruns = logic::history_held_runs(samples, n, runs, logic::HISTORY_MAX_RUNS);
+    const size_t n = modbus
+        ? history_modbus_snapshot(static_cast<size_t>(mb_t), samples, logic::HISTORY_SAMPLES)
+        : history_snapshot(t, samples, logic::HISTORY_SAMPLES);
+    const size_t nruns = modbus ? 0
+        : logic::history_held_runs(samples, n, runs, logic::HISTORY_MAX_RUNS);
 
     char lbl[80], unit[8];
-    history_label(t, lbl, sizeof(lbl));
-    history_unit(t, unit, sizeof(unit));
+    if (modbus) {
+        const def::HomeHubReg* r = def::homehub_find(logic::HOMEHUB_CONCEPTS[mb_t].offset);
+        std::snprintf(lbl, sizeof(lbl), "%s", r ? r->label : "");
+        std::snprintf(unit, sizeof(unit), "%s", r ? r->unit : "");
+    } else {
+        history_label(t, lbl, sizeof(lbl));
+        history_unit(t, unit, sizeof(unit));
+    }
 
     std::string j = "{\"id\":";
     j += jstr(def_->id);
+    j += ",\"source\":";
+    j += jstr(modbus ? "modbus" : "x10a");
     j += ",\"label\":";
     j += jstr(lbl);
     j += ",\"dt\":";
@@ -766,7 +811,7 @@ static esp_err_t h_history(httpd_req_t* req) {
     j += ",\"unit\":";
     j += jstr(unit);
     const TimeStatus ts = time_status();
-    const int32_t newest_age = history_newest_age_s();
+    const int32_t newest_age = modbus ? history_modbus_newest_age_s() : history_newest_age_s();
     if (ts.synced && n && newest_age >= 0) {
         // Derived from the AGE of the newest sample, not from `now`: the ring commits a bucket every
         // HISTORY_DT_S, so between commits the newest sample ages while `now` moves on. Measured on a
@@ -777,6 +822,13 @@ static esp_err_t h_history(httpd_req_t* req) {
         j += ",\"t0\":";
         j += std::to_string(logic::history_t0(ts.unix_time, static_cast<uint32_t>(newest_age),
                                               n, logic::HISTORY_DT_S));
+    }
+    const int64_t b0 = modbus ? history_modbus_oldest_bucket(n) : history_oldest_bucket(n);
+    if (b0 >= 0) {
+        // Exact source alignment even before SNTP: both recorders derive this monotonic bucket from
+        // the same esp_timer clock, so a Modbus line cannot slide onto the neighbouring X10A sample.
+        j += ",\"b0\":";
+        j += std::to_string(b0);
     }
     j += ",\"v\":[";
     httpd_resp_set_type(req, "application/json");

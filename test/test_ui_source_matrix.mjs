@@ -25,6 +25,7 @@ import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
 const SOURCE = readAppFragments(["descriptions.js", "schematic.js"]);
 const index = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
+const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 const demo = fs.readFileSync(new URL("../tools/uigif/scenes.js", import.meta.url), "utf8");
 
 // ── Fixtures ───────────────────────────────────────────────────────────────────────────────────
@@ -38,7 +39,7 @@ const X_VALVE = (on) => ({ label: "3way valve(On:DHW_Off:Space)", value: on ? "1
 const M_VALVE = (on) => ({ label: "3-way valve", value: on ? 1 : 0,
                            unit: "", off: 37, enum: "three_way_valve", concept: "valve_dhw" });
 
-function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [] }) {
+function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements = {} }) {
   const context = {
     S: {
       status: { hp: { connected: x10a }, modbus: { enabled: mbEnabled, connected: mbConnected } },
@@ -65,6 +66,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [] }) {
                    : k === "src.modbus_tag" ? "modbus" : k),
     tx: (o) => (o == null ? "" : typeof o === "string" ? o : o.en),
     LANG: "en",
+    $: (id) => elements[id] || null,
   };
   vm.createContext(context);
   // `const` is lexical and never becomes a property of the context, so the helpers are handed out
@@ -75,13 +77,45 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [] }) {
     " mbUnitAbnormality," +
     " SMART_GRID_MODE_VALUE, x10aSmartGridModeFrom, x10aSmartGridMode, x10aSmartGridRow," +
     " sgModeText, sgRequestText, mbNoteHtml, inspCurRow, inspMember," +
-    " inspMembers, pelMeasured, pelApproxText, PEL_INSPECT };",
+    " inspMembers, inspSourceNoteHtml, inspHeld, liveData, ouReadingText, INSPECT," +
+    " pelMeasured, pelApproxText, PEL_INSPECT, setSchematicHitAvailable };",
     context, { filename: "main/www/app.sources" });
+  context.__api.S = context.S;
   return context.__api;
+}
+
+// A hidden conditional badge is absent from pointer, keyboard and accessibility interaction. The
+// BSH badge contains a transparent `.sc-hitarea` with `pointer-events:all`; SVG permits that child
+// to receive clicks through ancestor visibility, which is why the invisible heater link survived.
+{
+  const attrs = new Map();
+  const hit = {
+    setAttribute: (k, v) => attrs.set(k, String(v)),
+    removeAttribute: (k) => attrs.delete(k),
+    getAttribute: (k) => attrs.get(k) ?? null,
+  };
+  const c = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
+                  elements: { gBshState: hit } });
+  c.setSchematicHitAvailable("gBshState", false);
+  assert.equal(hit.getAttribute("tabindex"), "-1", "hidden BSH badge leaves the keyboard order");
+  assert.equal(hit.getAttribute("aria-hidden"), "true", "hidden BSH badge leaves the accessibility tree");
+  c.setSchematicHitAvailable("gBshState", true);
+  assert.equal(hit.getAttribute("tabindex"), "0", "active BSH badge becomes keyboard reachable");
+  assert.equal(hit.getAttribute("aria-hidden"), null, "active BSH badge becomes accessible");
+
+  assert.match(index, /id="gBshState"[\s\S]*?tabindex="-1" aria-hidden="true"/,
+    "the badge must start unavailable before the first live render");
+  assert.match(style,
+    /\.sc-hit\[aria-hidden="true"\]\s*\*\s*\{\s*pointer-events:\s*none;/,
+    "hidden hit-target descendants must override sc-hitarea pointer-events:all");
 }
 
 const LWT_X = X("Leaving water temp. before BUH (R1T)", "38.6", "leaving_water");
 const LWT_M = M(40, "Leaving water temperature PHE", "38.1", "leaving_water");
+const OUT_X = X("R1T-Outdoor air temp.", "19.0", "outdoor_air", { reg: 0x20 });
+const RPS_STOP = { label: "INV frequency (rps)", value: "0", unit: "rps", reg: 0x30 };
+const DISCH_X = X("Discharge pipe temp.", "72.0", null, { reg: 0x20 });
+const OUT_M = M(44, "Outdoor air temperature", "28.5", "outdoor_air");
 const SG = (value) => M(56, "Smart Grid operation mode", value, null,
   { unit: "", enum: "smart_grid_mode" });
 const ABNORMALITY = (value) => M(21, "Unit abnormality", value, null,
@@ -98,11 +132,16 @@ const X_SG = (contact, on) => ({
   assert.notEqual(end, -1, "demo harness must expose a closed DEMO fixture");
   const demoContext = {};
   vm.runInNewContext(demo.slice(0, end + "\n})();".length) +
-    "\nthis.__smartGrid = DEMO.smartGrid;", demoContext,
+    "\nthis.__smartGrid = DEMO.smartGrid; this.__outdoorAir = DEMO.outdoorAir;" +
+    " this.__standbyMbOut = DEMO.scenes[0].mbOut;", demoContext,
   { filename: "tools/uigif/scenes.js" });
   assert.equal(demoContext.__smartGrid(0).value, 0);
   assert.equal(demoContext.__smartGrid(0).enum, "smart_grid_mode");
   assert.equal(demoContext.__smartGrid(2).value, 2);
+  const demoOut = demoContext.__outdoorAir(demoContext.__standbyMbOut);
+  assert.equal(demoOut.off, 44);
+  assert.equal(demoOut.concept, "outdoor_air");
+  assert.equal(demoOut.value, "6.8", "the standby recording exercises the live Modbus fallback");
 }
 
 // The two X10A contact bits are not two user-facing modes. Pin the documented truth table and the
@@ -163,6 +202,51 @@ const X_SG = (contact, on) => ({
   assert.equal(c.mbTwin(LWT_X)?.value, "38.1", "both live: mbTwin must resolve off the row");
   // X10A leads: the fallback picker must NOT hand the gateway value over while X10A answers.
   assert.equal(c.mbFallbackFor("leaving_water"), null, "both live: no fallback while X10A answers");
+}
+
+// ── Both links live, but the outdoor unit is resting ────────────────────────────────────────────
+// X10A remains connected and its cache remains filled; only page 0x20/0x21 is held over. Outdoor
+// air has an independently current HomeHub twin and should therefore become a per-reading petrol
+// fallback. Discharge has no pair and must remain blank. This is distinct from the all-X10A-down
+// branch exercised below and is the standby case that used to leave the schematic at "Outdoor —".
+{
+  const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+                  values: [OUT_X, RPS_STOP, DISCH_X], modbus: [OUT_M] });
+  const d = c.liveData();
+  c.S.live = d;
+
+  assert.equal(d.ouHeldOver, true, "stopped compressor makes the outdoor-unit page held over");
+  assert.equal(d.out, 28.5, "the current HomeHub outdoor temperature replaces retained X10A");
+  assert.equal(d.mbFields.has("out"), true, "the replacement carries Modbus provenance");
+  assert.equal(c.ouReadingText(d, "out", d.out, (n) => n.toFixed(1)), "28.5",
+    "the schematic shows the current replacement instead of a dash");
+  assert.equal(c.ouReadingText(d, "disch", d.disch, String), "—",
+    "an unpaired held-over outdoor-unit reading remains blank");
+
+  c.S.insp = "out";
+  assert.equal(c.inspCurRow(c.INSPECT.out), null,
+    "the retained X10A outdoor row must not headline the petrol pill");
+  assert.equal(c.mbForInspect("out"), OUT_M,
+    "the outdoor inspector resolves the exact HomeHub row used by the pill");
+  assert.equal(c.inspHeld(c.INSPECT.out, d), false,
+    "a live Modbus headline must not be followed by a no-current-reading note");
+  assert.match(c.INSPECT.ou.now(d).de, /aktuellen HomeHub-Messung/,
+    "the German outdoor-unit explanation names the standby substitution");
+
+  c.S.insp = "disch";
+  assert.equal(c.mbForInspect("disch"), null, "unpaired discharge has no invented fallback");
+  assert.equal(c.inspHeld(c.INSPECT.disch, d), true,
+    "the unpaired held-over reading still explains why it is blank");
+}
+
+// Zero degrees is a valid outdoor measurement, not a missing-value sentinel.
+{
+  const zero = M(44, "Outdoor air temperature", 0, "outdoor_air");
+  const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+                  values: [OUT_X, RPS_STOP], modbus: [zero] });
+  const d = c.liveData();
+  assert.equal(d.out, 0);
+  assert.equal(d.mbFields.has("out"), true);
 }
 
 // ── The Modbus-only Smart-Grid request is visible while BOTH stacks are live ───────────────────
@@ -385,34 +469,43 @@ const X_SG = (contact, on) => ({
   assert.equal(m3.mb, null, "…and has no gateway row to stand in for it");
 }
 
-// ── 17. A headline reading is not repeated in the inspector's member list ─────────────────────
-// Value entries share the `rows` mechanism with components, and commonly include their own row in
-// that list. The headline already prints the X10A value and the explainer already prints its Modbus
-// twin; the member list must contain only the additional context rows. This is the exact shape that
-// duplicated both DHW tank temperatures in the panel.
+// ── 17. Leaf values stay compact; grouped targets list every value in one place ─────────────────
+// A leaf value does not repeat its headline in the member table. The tank, however, is a GROUP:
+// temperature, target and valve all belong in the table below the chart, including both sources for
+// paired readings. None of those readings gets a special line inside the explanatory prose.
 {
   const TANK_X = X("DHW tank temp. (R5T)", "45.2", "dhw_tank");
   const TANK_M = M(43, "Domestic Hot Water temperature", "45.4", "dhw_tank");
   const SETPOINT = X("DHW setpoint", "48.0", null);
-  const E = { re: /dhw tank temp/i, rows: [/dhw tank temp/i, /dhw setpoint/i] };
+  const LEAF = { re: /dhw tank temp/i, rows: [/dhw tank temp/i, /dhw setpoint/i] };
   const live = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
                      values: [TANK_X, SETPOINT], modbus: [TANK_M] });
-  const row = live.inspCurRow(E);
-  const members = live.inspMembers(E, row, null);
-  assert.equal(members.length, 1, "the member list keeps only the additional context row");
-  assert.equal(members[0].x10a, SETPOINT, "the DHW setpoint remains");
-  assert.equal(members.some((m) => m.x10a === TANK_X), false,
-    "the X10A headline is not repeated as a member");
-  assert.equal(members.some((m) => m.mb === TANK_M), false,
-    "the Modbus comparison is not repeated as a member");
+  const row = live.inspCurRow(LEAF);
+  assert.deepEqual(live.inspMembers(LEAF, row, null).map((m) => m.x10a), [SETPOINT],
+    "a leaf value keeps only its additional context row");
+  assert.match(live.inspSourceNoteHtml(LEAF, row), /Domestic Hot Water temperature/,
+    "a leaf value retains the compact Modbus comparison in its explainer");
 
-  // With X10A down, the gateway becomes the headline. It must still be removed from the list.
+  const GROUP = { ...LEAF, listAllValues: true };
+  const members = live.inspMembers(GROUP, row, null);
+  assert.equal(members.length, 2, "the grouped target keeps its full value list");
+  assert.equal(members[0].x10a, TANK_X, "the X10A tank temperature is the first group row");
+  assert.equal(members[0].mb, TANK_M, "its Modbus twin stays on the same group member");
+  assert.equal(members[1].x10a, SETPOINT, "the DHW setpoint follows in the same group");
+  assert.equal(live.inspSourceNoteHtml(GROUP, row), "",
+    "a grouped target puts no value line inside its explanatory prose");
+  assert.equal(live.INSPECT.tank.listAllValues, true,
+    "the production tank inspector opts into the complete group table");
+  assert.equal(live.INSPECT.tank.now, undefined,
+    "the production tank inspector does not repeat temperature and target as prose");
+
+  // With X10A down, the gateway becomes the headline but remains part of the complete group table.
   const down = ctx({ x10a: false, mbEnabled: true, mbConnected: true,
                      values: [TANK_X], modbus: [TANK_M] });
   const fallback = down.mbForInspect("tank");
   assert.equal(fallback, TANK_M, "the tank target resolves the exact Modbus fallback row");
-  assert.deepEqual(down.inspMembers(E, null, fallback), [],
-    "the Modbus fallback headline is not repeated as a member");
+  assert.equal(down.inspMembers(GROUP, null, fallback)[0].mb, TANK_M,
+    "the Modbus fallback remains visible in the complete group table");
 
   // An assembly has no headline and therefore retains the full list, including the paired reading.
   const assembly = { rows: [/dhw tank temp/i, /dhw setpoint/i] };

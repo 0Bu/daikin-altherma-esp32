@@ -14,6 +14,47 @@ const DEMO = (() => {
   // human-readable text on the public wire.
   const SG = (mode) => ({ label: "Smart-Grid operation mode", value: mode, unit: "",
                            off: 56, enum: "smart_grid_mode" });
+  // The independent HomeHub outdoor-air sensor keeps measuring while X10A's page 0x20 is held over
+  // at rest. Its structural concept is what lets the standby scene exercise the real per-reading
+  // fallback instead of painting the retained X10A number or a hard-coded demo value.
+  const MB_OUT = (value) => ({ label: "Outdoor air temperature", value: String(value), unit: "°C",
+                               off: 44, concept: "outdoor_air" });
+  const histRows = [
+    ["leaving_water", "Leaving water temp. before BUH (R1T)"],
+    ["return_water", "Inlet water temp.(R4T)"],
+    ["dhw_tank", "DHW tank temp. (R5T)"],
+    ["outdoor_air", "R1T-Outdoor air temp."],
+    ["flow", "Flow sensor (l/min)"],
+    ["room_temp", "Indoor ambient temp. (R1T)"],
+  ].map(([id, label]) => ({ id, label }));
+  const mbHistRows = [
+    ["leaving_water", "Leaving water temperature"],
+    ["return_water", "Return water temperature"],
+    ["dhw_tank", "Domestic Hot Water temperature"],
+    ["outdoor_air", "Outdoor air temperature"],
+    ["flow", "Flow rate"],
+    ["room_temp", "Room temperature"],
+  ].map(([id, label]) => ({ id, label }));
+  const histBase = {
+    leaving_water: [381, 383, 384, 386, 385, 387, 388, 386, 384, 382, 381, 380],
+    return_water:  [337, 338, 339, 340, 341, 342, 341, 340, 339, 338, 337, 336],
+    dhw_tank:      [461, 459, 457, 455, 454, 456, 459, 461, 460, 458, 456, 453],
+    outdoor_air:   [ 52,  51,  50, null, null,  49,  50,  52,  54,  55,  56,  57],
+    flow:          [208, 211, 210, 214, 212, 209, 207, 205, 203, 202, 200, 198],
+    room_temp:     [214, 214, 213, 213, 212, 212, 213, 213, 214, 214, 214, 214],
+  };
+  const hist = (id, source) => {
+    const x = histBase[id];
+    if (!x) return null;
+    // Keep both instruments recognisably close but not identical. Modbus continues through the
+    // deliberate X10A outdoor-air gap, which makes the dual-source contract visible in an inspector.
+    const v = source === "modbus"
+      ? x.map((n, i) => n == null ? 53 + i : n + (i % 3 === 0 ? 1 : 0))
+      : x;
+    const unit = id === "flow" ? "l/min" : "°C";
+    return { id, source, label: id, dt: 300, unit, t0: 1768720920, b0: 5895736,
+             v, held: source === "x10a" && id === "outdoor_air" ? [[3, 2]] : [] };
+  };
   // A BIT-FLAG row exactly as the firmware serves it since #210: the value is the NUMBER 1/0, and
   // `binary: true` is the structural marker that lets the browser render it as ON/OFF without
   // treating every numeric 0/1 as a switch (http_status.cpp, conv_is_binary). Emitting the old
@@ -71,7 +112,7 @@ const DEMO = (() => {
   ];
 
   // ── The four scenes ─────────────────────────────────────────────────────────────────────────
-  // 1) Standby      compressor off, no flow → the outdoor pages are held over and blank out
+  // 1) Standby      compressor off, no flow → held X10A outdoor pages; HomeHub outdoor air stands in
   // 2) DHW          tank charge: valve to DHW, ~55 °C leaving water, COP ≈ 2.7
   // 3) Heating      space heating at 38 °C leaving water, demand on the branch, COP ≈ 4.8
   // 4) Heating+DHW  both demands active (conv 315 mode 5); the unit is on the tank right now
@@ -86,28 +127,28 @@ const DEMO = (() => {
   //   low side  evaporating ~10 K under the outdoor air
   //   standby   rp 14.2 bar = the equalised circuit near room temperature, not a fault
   const scenes = [
-    { name: "Standby", caption: "Bereitschaft · Standby",
+    { name: "Standby", caption: "Bereitschaft · Standby", mbOut: "6.8",
       v: base({ mode: "Stop", ouMode: "Heating", out: "19.0", rps: "0", disch: "24.5", hp: "0.0",
                 lp: "0.0", eev: "0", inv: "0.0", fan: "0", lwt: "28.4", ret: "28.0", tank: "48.2",
                 tankSet: "50.0", lwSet: "35.0", room: "21.4", roomSet: "21.0", flow: "0.0",
                 wp: "1.8", rp: "14.2", pumpSig: "100", pumpOn: false, valveDhw: false,
                 thermo: false, spaceOn: false, defrost: false, quiet: true, ct: "0.1" }) },
 
-    { name: "DHW", caption: "Warmwasser · Domestic hot water",
+    { name: "DHW", caption: "Warmwasser · Domestic hot water", mbOut: "8.8",
       v: base({ mode: "DHW", ouMode: "Heating", out: "8.5", rps: "62", disch: "78.4", hp: "36.8",
                 lp: "7.1", eev: "320", inv: "7.9", fan: "6", lwt: "54.8", ret: "49.8", tank: "44.0",
                 tankSet: "50.0", lwSet: "35.0", room: "21.2", roomSet: "21.0", flow: "14.0",
                 wp: "1.8", rp: "36.8", pumpSig: "22", pumpOn: true, valveDhw: true,
                 thermo: false, spaceOn: false, defrost: false, quiet: false, ct: "8.0" }) },
 
-    { name: "Heating", caption: "Heizen · Heating",
+    { name: "Heating", caption: "Heizen · Heating", mbOut: "5.4",
       v: base({ mode: "Heating", ouMode: "Heating", out: "5.2", rps: "45", disch: "68.1", hp: "26.2",
                 lp: "6.4", eev: "280", inv: "6.1", fan: "4", lwt: "38.4", ret: "33.9", tank: "49.5",
                 tankSet: "50.0", lwSet: "38.0", room: "21.4", roomSet: "21.5", flow: "21.0",
                 wp: "1.8", rp: "26.2", pumpSig: "12", pumpOn: true, valveDhw: false,
                 thermo: true, spaceOn: true, defrost: false, quiet: false, ct: "6.0" }) },
 
-    { name: "Heating + DHW", caption: "Heizen + Warmwasser · Heating + hot water",
+    { name: "Heating + DHW", caption: "Heizen + Warmwasser · Heating + hot water", mbOut: "5.2",
       v: base({ mode: "Heating + DHW", ouMode: "Heating", out: "5.0", rps: "58", disch: "74.6",
                 hp: "34.6", lp: "6.8", eev: "305", inv: "7.4", fan: "5", lwt: "51.6", ret: "46.9",
                 tank: "46.8", tankSet: "50.0", lwSet: "38.0", room: "21.1", roomSet: "21.5",
@@ -135,14 +176,14 @@ const DEMO = (() => {
     sys: { free_heap: 118432, min_free_heap: 96120, max_alloc: 61440,
            reset_reason: "power_on", safe_mode: false },
     last_crash: null,
-    history: { dt: 300, rows: [] },
+    history: { dt: 300, rows: histRows, modbus_rows: mbHistRows },
     detect: { proto: "S", valid: true, capacity_kw: 6.0, capacity_kw_iu: 8.0, ou_eeprom: "1A2B3C",
               candidates: ["altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw"],
               families: ["Altherma 3 R"], ambiguous: false,
               model: { name: "EHVH/EHVX 04-08 kW", family: "Altherma 3 R", marketing: "Altherma 3 R W" } },
   });
 
-  return { scenes, status, smartGrid: SG };
+  return { scenes, status, smartGrid: SG, outdoorAir: MB_OUT, history: hist };
 })();
 
 // The README is English, so the demo page is too — the app picks its language from
@@ -168,9 +209,13 @@ try {
     if (u.startsWith("/status")) return json(DEMO.status(idx));
     if (u.startsWith("/values")) return json({
       values: DEMO.scenes[idx].v,
-      modbus: [DEMO.smartGrid(idx === 1 ? 2 : 0)],
+      modbus: [DEMO.smartGrid(idx === 1 ? 2 : 0), DEMO.outdoorAir(DEMO.scenes[idx].mbOut)],
     });
-    if (u.startsWith("/history")) return { ok: false, status: 404, json: async () => ({}), text: async () => "" };
+    if (u.startsWith("/history")) {
+      const p = new URL(u, location.origin).searchParams;
+      const h = DEMO.history(p.get("row"), p.get("source") === "modbus" ? "modbus" : "x10a");
+      return h ? json(h) : { ok: false, status: 404, json: async () => ({}), text: async () => "" };
+    }
     if (u.startsWith("/diag")) return { ok: true, status: 200, text: async () => "[uptime 48213] demo", json: async () => ({}) };
     return json({});
   };

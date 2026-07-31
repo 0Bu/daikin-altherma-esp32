@@ -1,20 +1,23 @@
 // ── 24-hour trend (a historied value row's explainer carries a sparkline under the text) ──────
-// WHICH rows have a trend is the FIRMWARE's answer, read from /status.history.rows: the device keeps
-// a fixed-cadence ring buffer for a small, structurally-picked set of rows (by register page/offset,
-// not by label — the catalog spells the same concept ~50 ways across 43 profiles) and reports the
-// labels it resolved. The browser never pattern-matches its own candidates: offering a trend for a
-// row the device isn't buffering would be a chart that can only ever be empty.
+// WHICH rows have a trend is the FIRMWARE's answer. /status.history.rows names X10A rings;
+// modbus_rows names the six structurally paired HomeHub schematic readings. The device keeps both at
+// one fixed cadence and reports the labels each source owns. The browser never pattern-matches its
+// own candidates: offering a trend the device isn't buffering would be an empty chart by design.
 // Each entry is {id, label}: the ID is the concept (logic/history.hpp's TRENDS — "dhw_tank",
 // "outdoor_air", "free_heap", …) and is what GET /history takes, while the LABEL is how this profile
 // spells the row. Requesting by id keeps the route model-independent; matching by label is how a
 // rendered VALUE row finds its own trend. Adding a trend is a row in TRENDS — nothing here changes.
 //
-// Everything below is keyed by the ID, never by the label. Two reasons, and the second is why this
-// was changed: a label is per-profile, so a cache keyed by it would be re-keyed by a model change
-// mid-session — and not every trended thing IS a catalog row. The board's own memory (free_heap,
-// max_alloc) is drawn on the Settings ESP32 card, whose row labels are TRANSLATED, so there is no
-// label to match on at all; it attaches by id like the firmware always intended.
+// Everything below is keyed by the ID, never by the label; the second instrument uses the explicit
+// `modbus:<id>` namespace. A label is per-profile, so a cache keyed by it would be re-keyed by a
+// model change mid-session — and not every trended thing IS a catalog row. The board's own memory
+// (free_heap, max_alloc) is drawn on the Settings ESP32 card, whose row labels are TRANSLATED, so
+// there is no label to match on at all; it attaches by id like the firmware always intended.
 function histSpec() { const h = S.status && S.status.history; return h && Array.isArray(h.rows) ? h : null; }
+function modbusHistRows() {
+  const h = histSpec();
+  return h && Array.isArray(h.modbus_rows) ? h.modbus_rows : [];
+}
 function histFor(label) {
   const h = histSpec();
   return h ? h.rows.find((r) => r && r.label === label) || null : null;
@@ -25,6 +28,7 @@ function histIdFor(label) { const r = histFor(label); return r ? r.id : ""; }
 // a firmware that predates a trend simply reports fewer rows, so its card draws no chart at all
 // rather than an empty one.
 function hasDeviceHist(id) { return !!id && !!histSpec() && histSpec().rows.some((r) => r && r.id === id); }
+function hasModbusHist(id) { return !!id && modbusHistRows().some((r) => r && r.id === id); }
 function hasHist(id) {
   const D = DERIVED[id];
   return D ? D.ready(Object.fromEntries(D.ins.map((k) => [k, hasDeviceHist(k)]))) : hasDeviceHist(id);
@@ -124,14 +128,18 @@ function histHeld(h, i) {
 // Fetch a row's series at most once a minute. The buffer moves one sample per `dt` (300 s), so a
 // per-poll refetch would send ~300 identical responses per new data point — and each response is a
 // ~1 KB contiguous string on the single httpd task (CLAUDE.md → Memory constraints).
-async function ensureHist(id) {
-  if (!hasHist(id) || S.histBusy.has(id)) return;
-  const c = S.hist.get(id);
+const histCacheKey = (id, source) => source === "modbus" ? `modbus:${id}` : id;
+async function ensureHist(id, source = "x10a") {
+  const key = histCacheKey(id, source);
+  const offered = source === "modbus" ? hasModbusHist(id) : hasHist(id);
+  if (!offered || S.histBusy.has(key)) return;
+  const c = S.hist.get(key);
   if (c && Date.now() - c.at < 60000) return;
-  if (DERIVED[id]) { await ensureDerived(id); return; }
-  S.histBusy.add(id);
+  if (source === "x10a" && DERIVED[id]) { await ensureDerived(id); return; }
+  S.histBusy.add(key);
   try {
-    const r = await fetch("/history?row=" + encodeURIComponent(id));
+    const r = await fetch("/history?row=" + encodeURIComponent(id) +
+                          (source === "modbus" ? "&source=modbus" : ""));
     const j = await r.json();
     // t0 = the unix instant of sample 0, present only when the device's SNTP clock is synced. Null
     // means the scrub readout falls back to an AGE ("vor 6.3 h") — never a fabricated wall-clock
@@ -139,16 +147,23 @@ async function ensureHist(id) {
     // `gen` counts fetches. It is what makes an index-anchored pin (no wall clock on the device)
     // honest: such a pin is only valid for the exact series it was made on, and a refetch may have
     // rolled the ring — so it is dropped rather than re-pointed at a different sample.
-    const gen = ((S.hist.get(id) || {}).gen || 0) + 1;
-    S.hist.set(id, { at: Date.now(), gen, dt: +j.dt || 300, unit: j.unit || "",
+    const gen = ((S.hist.get(key) || {}).gen || 0) + 1;
+    S.hist.set(key, { at: Date.now(), gen, source, dt: +j.dt || 300, unit: j.unit || "",
                         t0: typeof j.t0 === "number" ? j.t0 : null,
+                        b0: Number.isInteger(j.b0) ? j.b0 : null,
                         held: Array.isArray(j.held) ? j.held : [],
                         v: Array.isArray(j.v) ? j.v : [] });
   } catch (e) {
-    S.hist.set(id, { at: Date.now(), err: true, v: [] });
+    S.hist.set(key, { at: Date.now(), source, err: true, v: [] });
   } finally {
-    S.histBusy.delete(id); renderApp();
+    S.histBusy.delete(key); renderApp();
   }
+}
+
+// Direct schematic measurements may have two independent rings. Fetch both together only for a
+// chart the user actually opened; derived figures continue to fetch their X10A inputs alone.
+async function ensureHistPair(id) {
+  await Promise.all([ensureHist(id), hasModbusHist(id) ? ensureHist(id, "modbus") : null]);
 }
 
 // A derived series: fetch every input (each through ensureHist above, so each is cached and
@@ -200,6 +215,7 @@ async function ensureDerived(id) {
     const gen = ((S.hist.get(id) || {}).gen || 0) + 1;
     S.hist.set(id, { at: Date.now(), gen, dt: base.dt, unit: D.unit,
                      t0: typeof base.t0 === "number" ? base.t0 + (base.v.length - n) * base.dt : null,
+                     b0: Number.isInteger(base.b0) ? base.b0 + (base.v.length - n) : null,
                      held: heldRuns, v });
   } catch (e) {
     S.hist.set(id, { at: Date.now(), err: true, v: [] });
@@ -220,17 +236,83 @@ const HIST_W = 320, HIST_H = 72;
 // in one would leave the crosshair marker sitting off the line it is pointing at, and the drawing
 // would still look perfectly plausible. Returns the mapping, not the numbers, so no caller can
 // re-derive it slightly differently.
-function histScale(pts) {
+function histScale(pts, sampleCount) {
   const real = pts.filter((x) => x != null);
   const lo = Math.min(...real), hi = Math.max(...real);
   const pad = (hi - lo) < 1 ? 1 : (hi - lo) * 0.12;   // a flat series gets a band, not a divide-by-zero
   const y0 = lo - pad, y1 = hi + pad;
-  const n = pts.length;
+  const n = sampleCount || pts.length;
   return {
     lo, hi,
     X: (i) => (n === 1 ? HIST_W : (i * HIST_W) / (n - 1)),
     Y: (v) => HIST_H - ((v - y0) / (y1 - y0)) * HIST_H,
   };
+}
+
+// One timeline carrying one or two independent instruments. `b0` is the firmware's monotonic
+// 5-minute bucket and therefore the authoritative alignment even before SNTP; wall time is the next
+// choice, and tail alignment is the backwards-compatible fallback for an older response. A missing
+// sample stays null in its own series — the other instrument may still draw at that instant.
+function historyView(id) {
+  const raw = [
+    { source: "x10a", name: "X10A", h: S.hist.get(id) },
+    { source: "modbus", name: "HomeHub · Modbus", h: S.hist.get(histCacheKey(id, "modbus")) },
+  ].filter((s) => s.h && !s.h.err && Array.isArray(s.h.v) && s.h.v.length);
+  if (!raw.length) return null;
+
+  const dt = raw[0].h.dt || 300;
+  let start = 0, end = 0, mode = "tail";
+  if (raw.every((s) => Number.isInteger(s.h.b0))) {
+    mode = "bucket";
+    start = Math.min(...raw.map((s) => s.h.b0));
+    end = Math.max(...raw.map((s) => s.h.b0 + s.h.v.length - 1));
+  } else if (raw.every((s) => typeof s.h.t0 === "number" && s.h.dt === dt)) {
+    mode = "time";
+    start = Math.min(...raw.map((s) => s.h.t0));
+    end = Math.max(...raw.map((s) => s.h.t0 + (s.h.v.length - 1) * dt));
+  } else {
+    end = Math.max(...raw.map((s) => s.h.v.length)) - 1;
+  }
+  const n = mode === "tail" ? end + 1 : Math.round((end - start) / (mode === "time" ? dt : 1)) + 1;
+  const toRuns = (flags) => {
+    const out = [];
+    for (let i = 0; i < flags.length; i++) {
+      if (!flags[i]) continue;
+      const from = i;
+      while (i + 1 < flags.length && flags[i + 1]) i++;
+      out.push([from, i - from + 1]);
+    }
+    return out;
+  };
+  const series = raw.map((s) => {
+    const off = mode === "bucket" ? s.h.b0 - start
+              : mode === "time" ? Math.round((s.h.t0 - start) / dt)
+              : n - s.h.v.length;
+    const v = Array(n).fill(null), heldFlags = Array(n).fill(false);
+    for (let i = 0; i < s.h.v.length; i++) {
+      v[off + i] = s.h.v[i];
+      heldFlags[off + i] = histHeld(s.h, i);
+    }
+    return { source: s.source, name: s.name, unit: s.h.unit || "", v,
+             held: toRuns(heldFlags), raw: s.h };
+  });
+  const primary = series.find((s) => s.source === "x10a") || series[0];
+  const wall = raw.find((s) => typeof s.h.t0 === "number");
+  const t0 = mode === "time" ? start
+           : mode === "bucket" && wall ? wall.h.t0 - (wall.h.b0 - start) * dt
+           : primary.raw.t0;
+  const union = Array.from({ length: n }, (_, i) => {
+    const found = series.find((s) => s.v[i] != null);
+    return found ? found.v[i] : null;
+  });
+  // Some X10A rows spell their unit inside the label (notably flow) while HomeHub carries it as a
+  // field. Prefer the primary source's unit, but do not throw away the paired source's honest unit
+  // merely because X10A's field is empty.
+  const sharedUnit = primary.unit || series.find((s) => s.unit)?.unit || "";
+  return { dt, unit: sharedUnit, t0: typeof t0 === "number" ? t0 : null,
+           b0: mode === "bucket" ? start : null,
+           gen: series.map((s) => `${s.source}:${s.raw.gen || 0}`).join("/"),
+           v: union, series };
 }
 
 // One historied row's trend, as the markup appended under its explainer text. Every state is a
@@ -239,15 +321,23 @@ function histScale(pts) {
 // interpolating across them would draw a measurement that was never taken, which is exactly the
 // failure the blanked pills elsewhere in this UI exist to prevent.
 function histHtml(id, unit, name) {
-  if (!hasHist(id)) return "";
-  const h = S.hist.get(id);
+  const offeredX = hasHist(id), offeredM = hasModbusHist(id);
+  if (!offeredX && !offeredM) return "";
+  const hx = offeredX ? S.hist.get(id) : null;
+  const hm = offeredM ? S.hist.get(histCacheKey(id, "modbus")) : null;
   const wrap = (body, cls) => `<div class="vhist${cls ? " " + cls : ""}">${body}</div>`;
-  if (!h) return wrap(`<div class="vhist-note">${esc(t("hist.loading"))}</div>`, "vhist-flat");
-  if (h.err) return wrap(`<div class="vhist-note">${esc(t("hist.err"))}</div>`, "vhist-flat");
+  const view = historyView(id);
+  if (!view && ((offeredX && !hx) || (offeredM && !hm)))
+    return wrap(`<div class="vhist-note">${esc(t("hist.loading"))}</div>`, "vhist-flat");
+  if (!view && [hx, hm].filter(Boolean).every((h) => h.err))
+    return wrap(`<div class="vhist-note">${esc(t("hist.err"))}</div>`, "vhist-flat");
+  if (!view) {
+    const D = DERIVED[id];
+    return wrap(`<div class="vhist-note">${esc(D && D.none ? tx(D.none) : t("hist.none"))}</div>`, "vhist-flat");
+  }
 
-  const raw = h.v;
-  const pts = raw.map((x) => (x == null ? null : x / 10));   // deci-°C on the wire, one decimal here
-  const real = pts.filter((x) => x != null);
+  const allPts = view.series.flatMap((s) => s.v.map((x) => x == null ? null : x / 10));
+  const real = allPts.filter((x) => x != null);
   // "No readings yet" is the RIGHT sentence for a ring the device has not filled, and the WRONG one
   // for a derived figure that is being withheld on purpose — the COP on a CT-clamp install has a
   // full set of inputs and still draws nothing, so the generic note would call a deliberate refusal
@@ -258,13 +348,13 @@ function histHtml(id, unit, name) {
     return wrap(`<div class="vhist-note">${esc(D && D.none ? tx(D.none) : t("hist.none"))}</div>`, "vhist-flat");
   }
 
-  const n = pts.length;
-  const spanH = Math.max(1, Math.round((n * h.dt) / 3600));
+  const n = view.v.length;
+  const spanH = Math.max(1, Math.round((n * view.dt) / 3600));
   // The axis states the span the device ACTUALLY holds, never a padded 24 h: the buffer lives in RAM
   // and every /set_* and OTA reboots the board, so a fresh device has minutes of history, not a day.
   // Stretching the axis to 24 h would draw that absence as if it were flat measured data.
-  const full  = n * h.dt >= 23.5 * 3600;
-  const { lo, hi, X, Y } = histScale(pts);
+  const full  = n * view.dt >= 23.5 * 3600;
+  const { lo, hi, X, Y } = histScale(allPts, n);
 
   // Contiguous runs only: each becomes its own line path (and its own area under it), so a gap is
   // drawn as a gap. A run of ONE sample gets a dot — a lone reading between two gaps is still a
@@ -273,19 +363,37 @@ function histHtml(id, unit, name) {
   // "this quantity was at this level throughout", and for a sparse trend — the outdoor-air one on a
   // mild day is measured for ~3 of 24 h — the isolated runs render as columns that look like bars of
   // a different chart entirely. The line alone makes no continuity claim it cannot support.
-  const dense = real.length >= pts.length * 0.6;
-  let line = "", area = "", dots = "", gaps = 0, held = 0, run = [];
-  const flush = () => {
-    if (!run.length) { return; }
-    if (run.length === 1) {
-      dots += `<circle class="vhist-pt" cx="${X(run[0]).toFixed(1)}" cy="${Y(pts[run[0]]).toFixed(1)}" r="1.6"/>`;
-    } else {
-      const d = run.map((i, k) => `${k ? "L" : "M"}${X(i).toFixed(1)} ${Y(pts[i]).toFixed(1)}`).join("");
-      line += `<path class="vhist-line" d="${d}" vector-effect="non-scaling-stroke"/>`;
-      if (dense) area += `<path class="vhist-area" d="${d}L${X(run[run.length - 1]).toFixed(1)} ${HIST_H}L${X(run[0]).toFixed(1)} ${HIST_H}Z"/>`;
+  let line = "", area = "", dots = "", gaps = 0, held = 0;
+  for (const s of view.series) {
+    const pts = s.v.map((x) => x == null ? null : x / 10);
+    const sourceCls = s.source === "modbus" ? " mb" : "";
+    const dense = view.series.length === 1 && real.length >= pts.length * 0.6;
+    let run = [];
+    const flush = () => {
+      if (!run.length) return;
+      if (run.length === 1) {
+        dots += `<circle class="vhist-pt${sourceCls}" cx="${X(run[0]).toFixed(1)}" cy="${Y(pts[run[0]]).toFixed(1)}" r="1.6"/>`;
+      } else {
+        const d = run.map((i, k) => `${k ? "L" : "M"}${X(i).toFixed(1)} ${Y(pts[i]).toFixed(1)}`).join("");
+        line += `<path class="vhist-line${sourceCls}" d="${d}" vector-effect="non-scaling-stroke"/>`;
+        if (dense) area += `<path class="vhist-area${sourceCls}" d="${d}L${X(run[run.length - 1]).toFixed(1)} ${HIST_H}L${X(run[0]).toFixed(1)} ${HIST_H}Z"/>`;
+      }
+      run = [];
+    };
+    let prevGap = false;
+    for (let i = 0; i < n; i++) {
+      if (pts[i] == null) {
+        // The compact axis summary remains about X10A: held-over is an X10A fact. Modbus dropouts
+        // are visible as breaks in its petrol line without borrowing X10A's reason vocabulary.
+        if (s.source === "x10a") {
+          if (histHeld(s, i)) { held++; prevGap = false; }
+          else { if (!prevGap) gaps++; prevGap = true; }
+        }
+        flush();
+      } else { prevGap = false; run.push(i); }
     }
-    run = [];
-  };
+    flush();
+  }
   // Absence is counted in TWO buckets, because they mean different things and the axis says which:
   // a HELD sample is the outdoor unit resting (nothing failed — see histHeld), a GAP is a register
   // that didn't answer or a value reading_plausible() refused. Blaming an idle compressor on the bus
@@ -294,23 +402,16 @@ function histHtml(id, unit, name) {
   // counts SAMPLES, because what matters there is how much of the day the unit spent asleep, not
   // how many naps it took. prevGap tracks run boundaries so a held stretch between two dropouts
   // doesn't merge them into one.
-  let prevGap = false;
-  for (let i = 0; i < n; i++) {
-    if (pts[i] == null) {
-      if (histHeld(h, i)) { held++; prevGap = false; }
-      else { if (!prevGap) gaps++; prevGap = true; }
-      flush();
-    } else { prevGap = false; run.push(i); }
-  }
-  flush();
-
   // The "now" marker is an HTML element, not an SVG circle: the SVG is stretched non-uniformly, so
   // a circle in it would render as an ellipse. Percentage positioning maps onto the same 0..HIST_H
   // scale exactly, and stays right whatever width the panel ends up at.
-  const last = pts[n - 1];
-  const dot = last == null ? ""
-    : `<span class="vhist-now" style="top:${((Y(last) / HIST_H) * 100).toFixed(2)}%"></span>`;
-  const u = unit ? ` ${unit}` : "";
+  const nowDots = view.series.map((s) => {
+    const last = s.v[n - 1];
+    return last == null ? "" : `<span class="vhist-now${s.source === "modbus" ? " mb" : ""}"` +
+      ` style="top:${((Y(last / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
+  }).join("");
+  const shownUnit = view.unit || unit;
+  const u = shownUnit ? ` ${shownUnit}` : "";
   const rng = `${lo.toFixed(1)} – ${hi.toFixed(1)}${u}`;
 
   // The scrub layer: a tooltip band ABOVE the plot (its own reserved strip, so the bubble follows
@@ -324,32 +425,39 @@ function histHtml(id, unit, name) {
   // the whole reason it survives the ~1×/s rebuild that made the old hold-to-read behaviour necessary.
   // Its instant is re-resolved here on every render, so the pin follows its measurement as the ring
   // rolls and disappears once that measurement has left the day.
-  const pi = histPinIndex(id, h);
-  let pinTip = "", pinCross = "", pinMark = "";
+  const pi = histPinIndex(id, view);
+  let pinTip = "", pinCross = "", pinMarks = "";
   if (pi >= 0) {
     const px = (scrubFrac(pi, n) * 100).toFixed(3);
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
-    if (pts[pi] != null) pinMark = `<span class="vhist-mark vhist-pinned" style="left:${px}%;top:${((Y(pts[pi]) / HIST_H) * 100).toFixed(2)}%"></span>`;
+    pinMarks = view.series.map((s) => s.v[pi] == null ? ""
+      : `<span class="vhist-mark vhist-pinned${s.source === "modbus" ? " mb" : ""}"` +
+        ` style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`).join("");
     // The bubble is clamped by CSS translate + margins rather than measured pixels: this runs at
     // render time, before layout, so offsetWidth is not available the way it is during a scrub.
-    pinTip = `<div class="vhist-tip vhist-pinned mono num" style="left:${px}%">${esc(scrubText(h, pi))}</div>`;
+    pinTip = `<div class="vhist-tip vhist-pinned mono num" style="left:${px}%">${esc(scrubText(view, pi))}</div>`;
   }
+  const legend = view.series.length > 1 || view.series[0].source === "modbus"
+    ? `<div class="vhist-legend">${view.series.map((s) =>
+        `<span class="vhist-source${s.source === "modbus" ? " mb" : ""}"><i></i>${esc(s.name)}</span>`).join("")}</div>`
+    : "";
   return wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.since", spanH))}</span>` +
-    `<span class="vhist-range mono num">${esc(rng)}</span></div>` +
+    `<span class="vhist-range mono num">${esc(rng)}</span></div>` + legend +
     `<div class="vhist-graph${pi >= 0 ? " has-pin" : ""}">` +
       `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +
       `<div class="vhist-plot" data-hist="${esc(id)}" data-n="${n}" tabindex="0" role="img"` +
-        ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", name || id, pi >= 0 ? scrubText(h, pi) : ""))}">` +
+        ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", name || id, pi >= 0 ? scrubText(view, pi) : ""))}">` +
         `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${area}${line}${dots}</svg>` +
-        dot + pinCross + pinMark +
-        `<span class="vhist-cross vhist-live" hidden></span><span class="vhist-mark vhist-live" hidden></span>` +
+        nowDots + pinCross + pinMarks +
+        `<span class="vhist-cross vhist-live" hidden></span>` +
+        view.series.map((s) => `<span class="vhist-mark vhist-live${s.source === "modbus" ? " mb" : ""}" data-source="${s.source}" hidden></span>`).join("") +
       `</div>` +
     `</div>` +
     `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
       // Idle time is reported ahead of dropouts: on an outdoor-air trend it is normally the larger
       // share of the day and the one that explains the shape of the chart.
-      (held ? `<span class="vhist-idle">${esc(t("hist.heldnote", ((held * h.dt) / 3600).toFixed(1)))}</span>` : "") +
+      (held ? `<span class="vhist-idle">${esc(t("hist.heldnote", ((held * view.dt) / 3600).toFixed(1)))}</span>` : "") +
       (gaps ? `<span class="vhist-gap">${esc(t("hist.gaps", gaps))}</span>` : "") +
       `<span>${esc(t("hist.now"))}</span></div>`
   );
@@ -388,7 +496,7 @@ function histPinIndex(id, h) {
 // Pin sample `i` of `label`, or UNPIN when that same sample is already pinned — tapping the readout
 // you just made is the obvious way to dismiss it, and needs no extra affordance on a 72 px plot.
 function histPinToggle(id, i) {
-  const h = S.hist.get(id);
+  const h = historyView(id);
   if (!h || !h.v.length) return;
   i = Math.max(0, Math.min(h.v.length - 1, i));
   if (histPinIndex(id, h) === i) S.histPin.delete(id);
@@ -407,13 +515,18 @@ function histPinToggle(id, i) {
 // (history carries t0, the unix instant of sample 0), else its age. A gap says so rather than
 // showing the neighbouring reading, which would attribute a measurement to a minute that has none.
 function scrubText(h, i) {
-  const v = h.v[i];
-  // A held sample says the UNIT was resting, not that the reading failed — the same distinction the
-  // schematic's blanked outdoor pills make, carried into the trend readout.
-  const val = v != null ? (v / 10).toFixed(1) + (h.unit ? " " + h.unit : "")
-            : histHeld(h, i) ? t("hist.held") : t("hist.nm");
+  const valueText = (s) => {
+    const v = s.v[i];
+    return v != null ? (v / 10).toFixed(1) + (s.unit ? " " + s.unit : "")
+         : histHeld(s, i) ? t("hist.held") : t("hist.nm");
+  };
+  // With two lines the readout names both instruments at the SAME instant. A gap in either remains
+  // visible as words rather than borrowing its neighbour's value.
+  const val = h.series && (h.series.length > 1 || h.series[0].source === "modbus")
+    ? h.series.map((s) => `${s.source === "modbus" ? "Modbus" : "X10A"} ${valueText(s)}`).join(" · ")
+    : valueText(h.series ? h.series[0] : h);
   let when;
-  if (h.t0) {
+  if (h.t0 != null) {
     when = new Date((h.t0 + i * h.dt) * 1000)
       .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
   } else {
@@ -426,7 +539,7 @@ function scrubText(h, i) {
 // Paint the crosshair for sample `i`. Pure DOM writes on the existing nodes — no innerHTML, so a
 // drag never rebuilds what it is holding on to.
 function scrubMove(plot, i) {
-  const h = S.hist.get(plot.dataset.hist);
+  const h = historyView(plot.dataset.hist);
   const n = +plot.dataset.n;
   if (!h || !n) return;
   i = Math.max(0, Math.min(n - 1, i));
@@ -436,18 +549,20 @@ function scrubMove(plot, i) {
   // scrubEnd hid it, silently deleting the readout the user had just pinned.
   const tip = graph.querySelector(".vhist-tip.vhist-live");
   const cross = plot.querySelector(".vhist-cross.vhist-live");
-  const mark = plot.querySelector(".vhist-mark.vhist-live");
+  const marks = [...plot.querySelectorAll(".vhist-mark.vhist-live")];
   const w = plot.clientWidth;
   const x = scrubFrac(i, n) * w;
 
   cross.hidden = false;
   cross.style.left = x.toFixed(1) + "px";
-  // The marker only exists where a reading does; on a gap the crosshair stands alone, which is the
-  // same "no value here" vocabulary the broken line already speaks.
-  const v = h.v[i];
-  if (v == null) { mark.hidden = true; } else {
-    // Same scale the path was drawn with (histScale) — never a second copy of the padding rule.
-    const { Y } = histScale(h.v.map((z) => (z == null ? null : z / 10)));
+  // One marker per instrument. Both share the crosshair and scale; a gap hides only that source's
+  // marker, never the other one.
+  const allPts = h.series.flatMap((s) => s.v.map((z) => z == null ? null : z / 10));
+  const { Y } = histScale(allPts, n);
+  for (const mark of marks) {
+    const s = h.series.find((q) => q.source === mark.dataset.source);
+    const v = s ? s.v[i] : null;
+    if (v == null) { mark.hidden = true; continue; }
     mark.hidden = false;
     mark.style.left = x.toFixed(1) + "px";
     mark.style.top = ((Y(v / 10) / HIST_H) * 100).toFixed(2) + "%";
@@ -483,7 +598,7 @@ function scrubEnd(plot) {
   clearTimeout(scrubWatchdog);
   if (plot) {
     plot.querySelector(".vhist-cross.vhist-live").hidden = true;
-    plot.querySelector(".vhist-mark.vhist-live").hidden = true;
+    plot.querySelectorAll(".vhist-mark.vhist-live").forEach((m) => { m.hidden = true; });
     plot.parentElement.querySelector(".vhist-tip.vhist-live").hidden = true;
   }
   if (S.scrub) { S.scrub = null; renderTrendHosts(); }   // resume the frozen per-poll rebuild
@@ -803,7 +918,7 @@ function toggleDesc(btn) {
   else { S.descOpen.delete(key); if (trend) S.histPin.delete(trend); }
   // Fetch the trend only once the panel is actually opened — a device that buffers eleven series
   // would otherwise answer a request per row on every page load, for panels nobody looked at.
-  if (open && trend) ensureHist(trend);
+  if (open && trend) ensureHistPair(trend);
 }
 
 // Heat-pump value groups (grouped by domain, §6) as card markup. Hidden entirely while the
@@ -886,20 +1001,21 @@ function modbusOnlyGroupHtml(all) {
   // already answered by the entries written for their X10A twins — the same words for the same
   // quantity, which is the point of one table.
   //
-  // No trend and no source comparison here: a trend is keyed on an X10A (reg, offset, unit) locator
-  // and these rows have none, and the comparison exists to put two sources side by side, which is
-  // meaningless on a row only one source carries. Where copy is missing the row degrades to the same
+  // A paired schematic measurement keeps its OWN Modbus ring even when this profile has no X10A row
+  // to host it. Unpaired rows still have no chart. Where copy is missing the row degrades to the same
   // plain line it was before, rather than an empty panel that opens onto nothing.
   const html = rows.map((m) => {
     const label = m.label || "", shown = displayHomeHubLabel(m);
     const val = esc(displayValue(m)) +
       (m.unit ? `<span class="vrow-unit">${esc(m.unit)}</span>` : "");
     const d = descFor(label);
-    if (!d) {
+    const hid = m.concept && hasModbusHist(m.concept) ? m.concept : "";
+    if (!d && !hid) {
       return `<div class="vrow"><span class="vrow-label">${esc(shown)}</span>` +
         `<span class="vrow-val src-val-mb">${val}</span></div>`;
     }
-    return descAccordion(label, shown, val, "src-val-mb", descBodyHtml(d, m.value), null);
+    return descAccordion(label, shown, val, "src-val-mb",
+                         (d ? descBodyHtml(d, m.value) : "") + histHtml(hid, m.unit, shown), hid);
   }).join("");
   // The heading has to match what is IN the card: "Modbus only" is true of the unpaired handful and
   // false the moment `all` folds the paired rows in beside them.

@@ -183,6 +183,12 @@ jobs:
       - name: Test X10A/Modbus source arbitration
         run: node test/test_ui_source_matrix.mjs
 
+      # The six paired schematic measurements keep independent X10A and HomeHub rings. Execute the
+      # production combiner and SVG renderer: bucket alignment, source labels, shared scaling and an
+      # X10A gap with a continuing petrol Modbus line are invisible to the bundle syntax gate.
+      - name: Test X10A/Modbus trend overlay
+        run: node test/test_ui_history_sources.mjs
+
       # The X10A observation card must preserve nulls, per-signal evidence and bounded wording in
       # both languages. Execute its production renderer so a future copy or fallback change cannot
       # turn partial telemetry back into a whole-plant "healthy" claim.

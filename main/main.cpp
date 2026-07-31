@@ -19,6 +19,7 @@
 #include "config.hpp"
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
+#include "history.hpp"
 #include "syslog.hpp"
 #include "hp_poll.hpp"
 #include "hp_modbus.hpp"
@@ -96,6 +97,9 @@ extern "C" void app_main() {
     // The web UI + OTA are ALWAYS started (they are the recovery surface). In safe mode the two
     // background subsystems a bad config could crash on — the X10A poll engine and the MQTT bridge —
     // are skipped, so a wrong-pin config-loop stays fixable from the browser instead of over USB.
+    // History has two independent producer tasks. Create their shared lock before either starts —
+    // and before HTTP can ask for a snapshot — rather than racing two lazy creators on first boot.
+    daik::history_start();
     daik::http_start();                  // esp_http_server on :80 (web UI + config + OTA + MCP)
     if (!daik::safe_mode_active()) {
         daik::mqtt_ha_start();           // HA MQTT-Discovery bridge (no-op if mqtt_uri empty)

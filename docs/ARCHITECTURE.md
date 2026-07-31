@@ -775,6 +775,11 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    held-over rule earns its place — a sample taken while the compressor rests is stored as *held
    over*, not as the number the frozen outdoor page keeps returning (`logic/history.hpp`,
    composing `logic/ou_stale.hpp`).
+   The independent HomeHub task feeds six additional rings through `history_record_modbus()` — only
+   the measurement concepts in `logic/homehub_map.hpp` that the schematic draws. Both recorders use
+   the same monotonic 5-minute bucket id, returned as `b0` by `/history`, so the browser can overlay
+   them exactly even before SNTP. An X10A absence stays a gap in the blue line while a HomeHub sample
+   at that bucket remains a petrol point; the sources are never merged into one synthetic series.
 4a. **Mark source freshness.** Before step 4, the cycle locates the compressor witness
    (`logic::ou_is_rps_witness` — "INV frequency (rps)", which must sit on a page that stays live) and
    marks every cached reading whose page the outdoor unit is no longer refreshing
@@ -816,7 +821,7 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    an accidental 25th open hour. See *The host-tested logic core* for why a
    row is addressed by (page, offset, **converter**) here and by (page, offset, unit) in the trends.
 5. Sleep `POLL_INTERVAL_S` (fixed 1 s — see `config.cpp`). The MQTT bridge and HTTP `/values` read
-   the cache; they never touch the UART. The trends are **not** published to MQTT — they exist for
+   the cache; they never touch the UART. Neither source's trends are published to MQTT — they exist for
    the web UI, and Home Assistant already records its own history for every entity.
 
 Config changes from the web UI (`/set_hp`) apply live: the task rereads `config` at the top of the

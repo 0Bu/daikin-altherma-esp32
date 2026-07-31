@@ -121,6 +121,10 @@ function liveData() {
     // of the plant's operating mode: mode 2 proves that evcc's boost reached the controller, while
     // the DHW flag / valve / flow separately prove whether the controller acted on it.
     sgMode: mbSmartGridMode(),
+    // Source provenance for schematic fields. Normally empty: X10A leads. A field is added only
+    // when liveData replaces an unavailable X10A reading with the independent HomeHub measurement;
+    // renderLive then gives that pill the petrol source colour and the inspector names the register.
+    mbFields: new Set(),
   };
   // Pump % — the wire value is inverted ("Water pump signal (0:max-100:stop)").
   d.pump = d.pumpSig == null ? null : Math.min(100, Math.max(0, 100 - d.pumpSig));
@@ -135,6 +139,18 @@ function liveData() {
   // UNKNOWN rps (a profile with no such row) reads as CURRENT, never as held over: that is absence
   // of evidence, and blanking on a guess would cost a reading that may well be live.
   d.ouHeldOver = d.rps != null && d.rps === 0;
+  // X10A's outdoor-air row is held over at rest, but the HomeHub's independent sensor keeps
+  // measuring. Prefer that CURRENT reading to a blank pill, while retaining ouHeldOver so every
+  // other page-0x20/0x21 value (notably discharge temperature) is still withheld. The pairing is the
+  // firmware's structural concept, never a browser label guess; a missing/disconnected HomeHub still
+  // leaves the ordinary "—" behaviour intact.
+  const takeMb = (key, cid) => {
+    const r = mbByConcept(cid);
+    if (!r) return;
+    const n = parseFloat(r.value);
+    if (Number.isFinite(n)) { d[key] = n; d.mbFields.add(key); }
+  };
+  if (d.ouHeldOver) takeMb("out", "outdoor_air");
   // Circuit refrigerant pressure for the schematic's high-side badge. The outdoor unit's own High
   // Pressure transducer (reg 0x20) reads 0 bar while the compressor is off — but a sealed R32 circuit
   // is never at 0 bar, so "0.0 bar" paints a live-looking fault on an idle unit. Fall back to the
@@ -233,10 +249,6 @@ function liveData() {
   // registers where X10A knows a hundred, so the drawing becomes visibly sparse. `mbFields` records
   // which pills are Modbus-sourced so renderLive can mark them.
   if (x10aDown() && mbLive()) {
-    const num = (cid) => { const r = mbByConcept(cid); if (!r) return null;
-                           const n = parseFloat(r.value); return Number.isFinite(n) ? n : null; };
-    d.mbFields = new Set();
-    const take = (key, cid) => { const n = num(cid); if (n != null) { d[key] = n; d.mbFields.add(key); } };
     // EVERY field this snapshot took from X10A is dropped, and it is a KEEP list rather than a drop
     // list — that direction is the point. A drop list is a hand-maintained enumeration of things to
     // forget, and it had already fallen behind the snapshot it was written against: `bsh`, `defrost`
@@ -256,7 +268,7 @@ function liveData() {
     const KEEP = new Set(["pumpOn", "valveDhw", "spaceH", "sgMode", "mbFields"]);
     Object.keys(d).forEach((k) => { if (!KEEP.has(k)) d[k] = null; });
     d.ouHeldOver = false;         // nothing to hold over: the whole bus is silent, not one unit
-    MB_PAIRS.forEach((p) => take(p.fld, p.cid));
+    MB_PAIRS.forEach((p) => takeMb(p.fld, p.cid));
     // The HomeHub MEASURES the electrical input; X10A has no such row and the dashboard estimates it
     // from CT clamps at an assumed 230 V. So on this path the figure is better than usual, and it is
     // marked as measured rather than estimated.
@@ -300,12 +312,31 @@ const SCHEM_PILL_IDS = [
   "svOut", "svRps", "svHp", "svLp", "svDisch", "svEev", "svLwt", "svRwt", "svDt",
   "svFlow", "svWp", "svPump", "svTank", "svTankSet", "svRoom", "svRoomSet", "svPth", "svCop", "svPel",
 ];
+// A held outdoor-unit row has no current X10A value. It may still have a current replacement from
+// the independent Modbus stack; mbFields is the proof that `n` is that replacement, not the retained
+// X10A cache. Shared by outdoor air and discharge so they cannot drift into two held-over policies.
+const ouReadingText = (d, key, n, fmt) =>
+  d.ouHeldOver && !(d.mbFields && d.mbFields.has(key)) ? "—" : fmt(n);
+
+// A conditional SVG badge is either an interactive control or absent — never an invisible link.
+// CSS visibility alone is insufficient because an SVG descendant with `pointer-events:all` may
+// still receive a click. Keep pointer suppression (CSS), keyboard order and the accessibility tree
+// on one explicit state. The markup starts unavailable so there is no clickable boot-time window.
+function setSchematicHitAvailable(id, available) {
+  const hit = $(id);
+  if (!hit) return;
+  hit.setAttribute("tabindex", available ? "0" : "-1");
+  if (available) hit.removeAttribute("aria-hidden");
+  else hit.setAttribute("aria-hidden", "true");
+}
+
 function clearSchematic() {
   SCHEM_PILL_IDS.forEach((id) => setTxt(id, "—"));
   setTxt("svBuh", "");                 // no BUH step to report
   setTxt("svValve", "3WV");            // valve position unknown — don't claim a branch
   const sc = $("schem");
   ["fan-on", "pump-on", "buh-on", "bsh-on", "defrost-on", "quiet-on", "sg-boost-on"].forEach((c) => sc.classList.remove(c));
+  setSchematicHitAvailable("gBshState", false);
   setTxt("svSgRequest", "");
   sc.classList.add("no-spaceh");       // no flag to show; the pill would otherwise sit stale
   $("schem").querySelectorAll(".sc-flow, .sc-rflow").forEach((el) => el.classList.remove("on", "rev"));
@@ -346,16 +377,16 @@ function renderLive() {
 
   // Schematic badges
   // Outdoor air + discharge come off the pages the outdoor unit stops refreshing when it stops
-  // running (d.ouHeldOver): blank them rather than assert a reading from the last cycle as current.
-  // A held-over number is shown as no number at all — the same answer the drawing gives for every
-  // other reading it cannot state right now, so nothing on screen has to be read as half-valid.
-  setTxt("svOut", d.ouHeldOver ? "—" : fmt1(d.out)); setTxt("svRps", fmt0(d.rps));
+  // running (d.ouHeldOver): never assert the retained X10A number as current. Outdoor air may instead
+  // carry the independent HomeHub measurement (`mbFields.out`); discharge has no such pairing and
+  // keeps the ordinary "—". Petrol makes the replacement source visible without adding a caption.
+  setTxt("svOut", ouReadingText(d, "out", d.out, fmt1)); setTxt("svRps", fmt0(d.rps));
   // High-side badge shows the circuit pressure (real refrigerant sensor when the compressor's own HP
   // transducer is idle-zero — see d.circP). Low/suction side has no equivalent at-rest gauge, so show
   // "—" rather than a misleading 0.0 bar when the compressor is off.
   setTxt("svHp", fmt1(d.circP));
   setTxt("svLp", !d.ouHeldOver && d.lp != null && d.lp > 0 ? fmt1(d.lp) : "—");
-  setTxt("svDisch", d.ouHeldOver ? "—" : fmt0(d.disch)); setTxt("svEev", fmt0(d.eev));
+  setTxt("svDisch", ouReadingText(d, "disch", d.disch, fmt0)); setTxt("svEev", fmt0(d.eev));
   setTxt("svLwt", fmt1(d.lwt)); setTxt("svRwt", fmt1(d.ret));
   // ΔT only means something with water moving (d.dtStale, decided in liveData so the explainer
   // gates on the very same fact). Same reasoning as the derived kW/COP, which already gate.
@@ -385,7 +416,9 @@ function renderLive() {
   sc.classList.toggle("fan-on", rpsOn && d.defrost !== true);
   sc.classList.toggle("pump-on", pumping === true);
   sc.classList.toggle("buh-on", !!(d.buh1 || d.buh2));
-  sc.classList.toggle("bsh-on", d.bsh === true);
+  const bshActive = d.bsh === true;
+  sc.classList.toggle("bsh-on", bshActive);
+  setSchematicHitAvailable("gBshState", bshActive);
   sc.classList.toggle("defrost-on", d.defrost === true);
   sc.classList.toggle("quiet-on", d.quiet === true);
   // Mode 2 is evcc's boost / Daikin's Recommended on. The compact marker says only that, without
@@ -538,11 +571,13 @@ const INSPECT = {
       : (d.rps ?? 0) > 0
         ? { en: `Running — compressor at ${fmt0(d.rps)} rps${d.quiet ? ", capped by quiet mode" : ""}.`,
             de: `Läuft — Verdichter mit ${fmt0(d.rps)} rps${d.quiet ? ", durch den Leise-Modus begrenzt" : ""}.` }
-        // Says why the outdoor pills read "—" at rest: the unit stops refreshing its own registers
-        // when it stops, so those readings would be the LAST run's (logic/ou_stale.hpp). This is the
-        // discoverable half of the fix — the pill can only blank, it cannot explain itself.
-        : { en: "Idle — the compressor is stopped, so no heat is being produced. The outdoor unit also stops refreshing its own sensors while it rests, so outdoor air and discharge temperature read \"—\" rather than repeat the last run's values.",
-            de: "Standby — der Verdichter steht, es wird gerade keine Wärme erzeugt. Die Außeneinheit aktualisiert im Stillstand auch ihre eigenen Sensoren nicht mehr; Außenluft und Heißgastemperatur zeigen daher „—\" statt die Werte des letzten Laufs zu wiederholen." },
+        // Says why held X10A readings are not repeated at rest (logic/ou_stale.hpp). A structurally
+        // paired live HomeHub outdoor reading may replace the held value; unpaired fields stay "—".
+        : d.ouHeldOver && d.mbFields && d.mbFields.has("out")
+          ? { en: "Idle — the compressor is stopped, so no heat is being produced. X10A stops refreshing the outdoor unit's own sensors while it rests; outdoor air is therefore shown from the live HomeHub measurement, while discharge temperature remains \"—\".",
+              de: "Standby — der Verdichter steht, es wird gerade keine Wärme erzeugt. X10A aktualisiert die eigenen Sensoren der Außeneinheit im Stillstand nicht mehr; die Außentemperatur stammt deshalb aus der aktuellen HomeHub-Messung, die Heißgastemperatur bleibt „—“." }
+          : { en: "Idle — the compressor is stopped, so no heat is being produced. The outdoor unit also stops refreshing its own sensors while it rests, so outdoor air and discharge temperature read \"—\" rather than repeat the last run's values.",
+              de: "Standby — der Verdichter steht, es wird gerade keine Wärme erzeugt. Die Außeneinheit aktualisiert im Stillstand auch ihre eigenen Sensoren nicht mehr; Außenluft und Heißgastemperatur zeigen daher „—“ statt die Werte des letzten Laufs zu wiederholen." },
     rows: [/outdoor air/i, /inv frequency/i, /^high pressure$/i, /discharge pipe temp/i, /expansion valve ?1/i, /defrost operation/i],
   },
   comp: {
@@ -743,9 +778,10 @@ const INSPECT = {
   tank: {
     t: { en: "DHW tank", de: "Warmwasserspeicher" },
     re: /dhw tank temp/i, sample: "DHW Tank Temp. (R5T)",
-    now: (d) => d.tank == null ? null
-      : { en: `${degC(d.tank)} in the tank${d.tankSet != null ? `, target ${degC(d.tankSet)}` : ""}.`,
-          de: `${degC(d.tank)} im Speicher${d.tankSet != null ? `, Ziel ${degC(d.tankSet)}` : ""}.` },
+    // The tank box represents a GROUP even though its temperature is also the compact headline.
+    // Keep every member in the one table below the chart; neither the Modbus twin nor a sentence
+    // repeating tank + setpoint belongs inside the explanatory prose above it.
+    listAllValues: true,
     rows: [/dhw tank temp/i, /dhw setpoint/i, /3.?way valve/i],
   },
   heat: {
@@ -915,7 +951,10 @@ const inspRow = (e) => (e.pick ? e.pick() : e.re ? vRow(e.re) : null);
 // gateway opened a headline carrying the old X10A number under the X10A label, with X10A history
 // beneath it. The pill and the panel must answer with the same instrument; this is the question
 // that decides which one.
-const inspCurRow = (e) => (x10aDown() ? null : inspRow(e));
+const inspCurRow = (e) => {
+  const r = inspRow(e);
+  return x10aDown() || rowHeldOver(r, S.live) ? null : r;
+};
 
 // One member reading, resolved for BOTH the body and the change signature. Returns the pair the
 // panel draws: the X10A row where it is current, and the gateway's row beside it (its second
@@ -931,24 +970,28 @@ function inspMember(sel) {
   return { x10a: r, mb: mbTwin(r) };
 }
 
-// The component rows that still add information below the explainer. A VALUE entry often includes
-// its own selector in `rows` so the same table can also describe an ASSEMBLY — but on the value entry
-// that reading is already the headline, and its gateway twin is already the comparison line in the
-// explainer. Repeating both in the member list made the tank panel print the X10A temperature twice
-// and the Modbus temperature twice. Remove the headline pair by object identity on whichever source
-// is currently leading, then collapse overlapping selectors exactly as before. Components have no
-// headline row/fallback, so their complete member list is unchanged.
+// The component rows shown below the chart. A leaf VALUE entry often includes its own selector in
+// `rows` so the same table can also describe an ASSEMBLY; omit its already-prominent headline pair
+// by default. A grouped target can explicitly choose `listAllValues`: the DHW tank is both a value
+// headline and a box containing temperature, target and valve state, and the group table must be
+// complete rather than moving its first pair into the prose above the chart.
 function inspMembers(e, row, fb) {
   if (!e || !e.rows) return [];
   return e.rows
     .map((sel) => inspMember(sel))
     .filter((m, i, a) => {
       if (!(m.x10a || m.mb)) return false;
-      if ((row && m.x10a === row) || (fb && m.mb === fb)) return false;
+      if (!e.listAllValues && ((row && m.x10a === row) || (fb && m.mb === fb))) return false;
       return a.findIndex((o) =>
         (m.x10a ? o.x10a === m.x10a : o.x10a == null && o.mb === m.mb)) === i;
     });
 }
+
+// A paired headline normally uses the compact comparison line in the explainer body. Grouped
+// targets put both readings in their complete member table instead, leaving the body as explanation
+// rather than a second, exceptional place for values.
+const inspSourceNoteHtml = (e, row) =>
+  e && e.listAllValues ? "" : mbNoteHtml(row, mbTwin(row));
 
 // The reading of a /values row as one string ("42.8 °C"); "—" for an absent row — and "—" for a row
 // the outdoor unit has stopped refreshing (rowHeldOver / logic/ou_stale.hpp), which is the SAME
@@ -973,7 +1016,10 @@ const HELD_OVER_NOW = {
     de: "der Verdichter steht, und die Außeneinheit aktualisiert ihre eigenen Fühler nur im Betrieb. Der Wert des letzten Laufs wird zurückgehalten statt als gerade gemessen dargestellt.",
   },
 };
-const inspHeld = (e, d) => !!d && rowHeldOver(inspRow(e), d);
+// A held X10A row is still unavailable, but it is no longer a blank headline when the drawing has
+// substituted a live HomeHub reading for this target. In that case the inspector names the Modbus
+// row and must not append a contradictory "No current reading" note.
+const inspHeld = (e, d) => !!d && rowHeldOver(inspRow(e), d) && !mbForInspect(S.insp);
 const inspHeldHtml = (e, d) =>
   (inspHeld(e, d) ? descNoteHtml(tx(HELD_OVER_NOW.lead), tx(HELD_OVER_NOW.why)) : "");
 
@@ -1001,9 +1047,9 @@ function inspectSig(e) {
   const row = d ? inspCurRow(e) : null;
   // The fallback headline is a value like any other and moves like any other, so it is in the key.
   const fb = row ? null : mbForInspect(S.insp);
-  // Each member reading AND its Modbus twin: the panel now draws both, so both have to be in the
-  // key. Use the same filtered set as the renderer: the headline and comparison already have their
-  // own signature fields below, and a hidden duplicate must not become an extra repaint dependency.
+  // Each member reading AND its Modbus twin: the panel draws both, so both have to be in the key.
+  // Use the same filtered set as the renderer; grouped targets deliberately include their headline
+  // pair here, while leaf targets keep that pair in the dedicated signature fields below.
   // A value the body renders but the signature omits simply stops repainting — the mirror of putting
   // a side effect IN here, and the quieter of the two failures: the panel keeps showing the gateway's
   // reading from whenever something else last changed, looking perfectly current.
@@ -1018,12 +1064,10 @@ function inspectSig(e) {
           inspNowText(e, d) || "", inspHeld(e, d) ? "held" : "", rows].join("|");
 }
 
-// The trend under the inspector: the same sparkline the value list draws (histHtml), for the row
-// this target is ACTUALLY drawn from — `inspRow`, not the concept. That is what makes it right on a
-// pill with a fallback source: while the high side reads the refrigerant sensor instead of the
-// frozen HP transducer, the headline, the mono source line and this chart all resolve the one row.
-// A target with no row (ΔT, COP, the estimated kW — derived numbers) gets no chart at all rather
-// than the chart of one of its inputs.
+// The trend under the inspector: the same chart the value list draws. A resolved X10A row chooses
+// its structural trend; one of the six paired schematic measurements also brings its independent
+// HomeHub ring, and may therefore keep a petrol curve when X10A has no current row. Computed pills
+// still chart only their own derived series — never one of their inputs.
 //
 // Written on its OWN signature, not the inspector's: the card re-renders whenever a live value
 // changes (~1×/s), and re-emitting the plot that often would tear down a crosshair mid-read and
@@ -1033,13 +1077,18 @@ function renderInspectHist(e, row) {
   // COP) charts its own derived series, named by the entry's `trend`. Never one of its inputs: a
   // curve of the flow rate under a heat-output headline is the substitution this file spends most
   // of its comments preventing.
-  const id = row ? histIdFor(row.label) : (e && e.trend && hasHist(e.trend) ? e.trend : "");
-  if (id) ensureHist(id);                  // throttled to once a minute inside; no-op once cached
+  const pair = MB_PAIRS.find((p) => p.insp === S.insp);
+  const pairedId = pair && hasModbusHist(pair.cid) ? pair.cid : "";
+  const id = row ? histIdFor(row.label)
+           : pairedId || (e && e.trend && hasHist(e.trend) ? e.trend : "");
+  if (id) ensureHistPair(id);              // throttled to once a minute inside; no-op once cached
   const h = id ? S.hist.get(id) : null;
+  const mh = id ? S.hist.get(histCacheKey(id, "modbus")) : null;
   const pin = id ? S.histPin.get(id) : null;
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
   // inspector chart even when the series generation and pinned sample are unchanged.
-  const sig = [LANG, id, h ? (h.err ? "e" : h.gen) : "", pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
+  const sig = [LANG, id, h ? (h.err ? "e" : h.gen) : "", mh ? (mh.err ? "e" : mh.gen) : "",
+               pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
   if (sig === S.inspHistSig) return;
   S.inspHistSig = sig;
   const el = $("inspHist");
@@ -1050,9 +1099,11 @@ function renderInspectHist(e, row) {
   // and a 24-hour curve cannot be named after the state of one second. It would have read "COP of
   // the plant" over a series that is, by construction, the heat pump's own — a scope mismatch under
   // a chart, which is the failure cop_scope exists to prevent.
+  const mb = pairedId ? mbByConcept(pairedId) : null;
   el.innerHTML = !id ? ""
     : row ? histHtml(id, row.unit, displayReadingLabel(row.label))
-          : histHtml(id, DERIVED[id].unit, e.aria ? tx(e.aria) : inspTitleText(e, null));
+    : pairedId ? histHtml(id, mb ? mb.unit : "", mb ? displayHomeHubLabel(mb) : inspTitleText(e, null))
+               : histHtml(id, DERIVED[id].unit, e.aria ? tx(e.aria) : inspTitleText(e, null));
 }
 
 function renderInspect() {
@@ -1063,7 +1114,9 @@ function renderInspect() {
   if (S.scrub) return;
   // The chart is decided ahead of the early return below, because its own state moves independently
   // of the card's: the series arrives from an async fetch that changes no live value.
-  renderInspectHist(e, S.live && e ? inspRow(e) : null);
+  // inspCurRow refuses a retained X10A row. renderInspectHist may still resolve this target's paired
+  // Modbus ring, so a petrol headline gets petrol history without reviving stale X10A samples.
+  renderInspectHist(e, S.live && e ? inspCurRow(e) : null);
   // This runs on EVERY poll so an open explainer tracks the live values — but writing innerHTML each
   // second would collapse a text selection the user is mid-read of. Diff the rendered result first
   // and touch the DOM only when something actually changed.
@@ -1127,13 +1180,9 @@ function renderInspect() {
   const ownWhat = typeof e.what === "function" ? e.what(d) : e.what;
   const what = ownWhat ? descParaHtml(esc(tx(ownWhat)))
                        : (desc ? descBodyHtml(desc, (row || fb)?.value) : "");
-  // The SECOND source, after the description — the same line the value list draws, through the same
-  // mbNoteHtml, because a tap on the drawing and a tap on the row are the same question about the
-  // same reading and must not answer it in two different shapes. The DRAWING itself stays X10A while
-  // X10A answers (renderLive marks a pill petrol only in the fallback); what the picture cannot show
-  // — that a second instrument is measuring this quantity too, and what it reads — is the
-  // explainer's job. Absent twin, or a device with no HomeHub: "" and the panel is what it was.
-  $("inspBody").innerHTML = what + mbNoteHtml(row, mbTwin(row))
+  // A leaf reading puts its SECOND source after the description. A grouped target keeps prose and
+  // values separate: all of its sources live together in the member table below the chart.
+  $("inspBody").innerHTML = what + inspSourceNoteHtml(e, row)
     + (sentence ? descParaHtml(esc(sentence)) : "") + inspHeldHtml(e, d);
   $("inspRows").innerHTML = !d ? "" : inspMembers(e, row, fb)
     // A member reading with a twin gets the gateway's value as its OWN row, labelled "(Modbus)" and

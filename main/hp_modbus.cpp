@@ -14,6 +14,7 @@
 #include "config.hpp"
 #include "def/homehub.hpp"
 #include "diag_log.hpp"
+#include "history.hpp"
 #include "logic/detect_backoff.hpp"   // the SAME backoff the X10A sweep uses on a silent bus
 #include "logic/homehub_map.hpp"      // the concept a register pairs on
 #include "logic/modbus_snapshot.hpp"  // a cache is live only for the TCP session that committed it
@@ -587,15 +588,16 @@ static void mb_poll_once() {
         // printing them as the live second opinion — complete with a computed "difference" against a
         // live X10A value, which is a number about two instants presented as a number about two
         // instruments. Everything else in this firmware refuses exactly that (a held-over outdoor
-        // reading blanks rather than being shown dimmer), and this link has no equivalent of the
-        // trend rings that make hp_poll keep its own cache. Dropped, so "a modbus row exists" means
-        // "it was read this cycle" everywhere at once.
+        // reading blanks rather than being shown dimmer). The LIVE cache is therefore dropped; the
+        // separate trend rings retain only timestamped past samples and receive an explicit gap for
+        // this failed cycle. Thus "a modbus row exists" still means "read this cycle" everywhere.
         {
             Lock lk(s_cache_mtx);
             s_cache.clear();
             s_cache_generation = 0;
         }
         { Lock lk(s_mtx); s_status.values = 0; }
+        history_record_modbus(nullptr, 0);            // advance its independent raster with a gap
         // Back off before retrying — see s_backoff. Applied by SKIPPING cycles, never by lengthening
         // the delay, so the top-of-loop watchdog reset keeps its cadence.
         s_next_try_us = esp_timer_get_time() +
@@ -673,13 +675,22 @@ static void mb_poll_once() {
         fresh.push_back(std::move(cv));
     }
 
+    bool current_session = false;
+    {
+        Lock lk(s_mtx);
+        // The task owns the socket and generation, so this answer cannot change before the cache
+        // commit below. Resolve it while `fresh` is still available to the history recorder.
+        current_session = s_sock >= 0 && s_link_generation == cycle_generation;
+    }
+    history_record_modbus(current_session ? fresh.data() : nullptr,
+                           current_session ? fresh.size() : 0);
+
     const int committed = static_cast<int>(fresh.size());
     {
         Lock lk(s_cache_mtx);
         s_cache = std::move(fresh);                // move-assign: steals the buffer, cannot throw
         s_cache_generation = cycle_generation;
     }
-    bool current_session = false;
     {
         Lock lk(s_mtx);
         // rx_ok/rx_fail are NOT touched here: mb_read already counts every read as it happens, and
@@ -696,7 +707,6 @@ static void mb_poll_once() {
         // Only a poll that still owns the current open socket can publish this session as live. A
         // framing/transport failure closes it in mb_read and keeps connected=false; Modbus exception
         // replies leave the socket open and commit the rows that really answered.
-        current_session = s_sock >= 0 && s_link_generation == cycle_generation;
         s_status.values = current_session ? committed : 0;
         s_status.connected = current_session;
     }

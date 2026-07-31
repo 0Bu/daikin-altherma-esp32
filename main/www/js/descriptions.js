@@ -615,21 +615,26 @@ const MB_PAIRS = [
   { fld: "room", pill: "svRoom", insp: "room", cid: "room_temp"     },
 ];
 // The Modbus reading an INSPECT target stands for, while the drawing is running on the second
-// source. This is what stops the explainer from CONTRADICTING the picture: with X10A down the pill
-// states the gateway's number, and the panel behind it resolved its headline from /values — which is
-// empty — so tapping a pill that read "54.3 °C" opened a panel headlined "—". The inspector blanking
-// what the pill blanks is the rule (ou_stale.hpp); the converse has to hold too.
+// source. This is what stops the explainer from CONTRADICTING the picture: with X10A down — or with
+// one X10A row held over while the rest of its link remains live — the pill states the gateway's
+// number, so tapping it must open the same number under the gateway's own register name. The
+// inspector blanking what the pill blanks is the rule (ou_stale.hpp); the converse has to hold too.
 const mbForInspect = (key) => {
   // Smart Grid is a Modbus-ONLY fact, not a fallback for an X10A reading. It therefore remains the
   // inspector's source while both stacks are live — precisely the normal case in which the drawing
   // needs to prove that an external energy manager's request reached the HomeHub.
   if (key === "sgrequest") return mbRow(MB_OFF_SMART_GRID);
-  if (!x10aDown() || !mbLive()) return null;
+  if (!mbLive()) return null;
+  const p = MB_PAIRS.find((q) => q.insp === key);
+  // Normally only a silent X10A link makes the gateway lead. `mbFields` is the per-reading exception:
+  // liveData marks outdoor air there while X10A is connected but its sleeping outdoor-unit row is
+  // retained from the last run. No marker means X10A still leads and Modbus remains a second opinion.
+  const leads = x10aDown() || !!(p && S.live && S.live.mbFields && S.live.mbFields.has(p.fld));
+  if (!leads) return null;
   // Electrical input has no X10A concept twin. It still becomes the schematic pill's source when
   // X10A is down, so the inspector needs the real register row for its label and Modbus badge rather
   // than treating the measured headline as an untraceable derived value.
   if (key === "pel") return mbPower();
-  const p = MB_PAIRS.find((q) => q.insp === key);
   return p ? mbByConcept(p.cid) : null;
 };
 // A true binary row as a tri-state boolean (null = absent or malformed). A plain numeric 0/1 can be

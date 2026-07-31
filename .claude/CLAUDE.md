@@ -545,10 +545,13 @@ hp_poll.cpp     poll engine task: X10A ONLY — the HomeHub is a separate stack 
                 (logic/raw_capture.hpp — #194's decisive experiment, which the detect-pass dump
                 structurally cannot take, since a detect pass is always a unit at rest)
 history.cpp     the 24-hour trend rings: one fixed-cadence buffer per logic/history.hpp TREND, fed by
-                the poll task (history_record, called from poll_once BEFORE the cache commit and
-                OUTSIDE the cache mutex — this file has its own) and read by GET /history. STATIC
+                the X10A poll task (history_record), plus six HomeHub rings fed by the independent
+                Modbus task (history_record_modbus). Both calls happen BEFORE their cache commit and
+                OUTSIDE the cache mutex; this file has its own lock, created before either task starts.
+                GET /history defaults to X10A and takes source=modbus for the second ring. STATIC
                 (.bss), never heap: the binding limit on this board is the largest CONTIGUOUS block,
-                and a static array does not compete for it — eighteen trends cost 10368 B of ring plus
+                and a static array does not compete for it — eighteen X10A/board trends cost 10368 B
+                and the six label-free HomeHub rings another 3456 B, for 13824 B of ring total, plus
                 ~78 B of labels/units/counters each (the ceiling assert moved 7168 -> 11520 with that
                 arithmetic; the rule that keeps it this low is that a trend follows the SCHEMATIC's
                 ~16 numeric pills, not the ~66 numeric rows a profile publishes, which would be ~38 KB). RAM only ON PURPOSE: a 576 B blob rewritten every
@@ -570,7 +573,9 @@ history.cpp     the 24-hour trend rings: one fixed-cadence buffer per logic/hist
                 misattributes one to the other: NO_READING (register timed out / reading_plausible
                 refused) vs HELD_OVER (the outdoor unit was asleep — ou_stale.hpp). A model change
                 (POST /detect) DISCARDS a ring: the same trend on a different profile is a different
-                sensor, and continuing the line would splice two units' data into one curve
+                sensor, and continuing the line would splice two units' data into one curve. Both
+                routes return the monotonic bucket of sample zero (`b0`), which aligns the two
+                instruments exactly before SNTP as well as after it
 checkup.cpp     the 24-hour PLANT CHECKUP behind /status.health and the dashboard's Checkup card
                 (#208): counted EVENTS and window MINIMA — compressor starts + mean run length,
                 defrost count + share of runtime, the lowest water pressure and flow, backup-heater
@@ -1156,13 +1161,15 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 temperature, the #35-#39 shape with no numeric tell. Only the PAGE plus the
                 compressor state can tell, so DESIGN.md's dead-bus rule ("an idle plant with no
                 readings, not a stale one") is applied to one sleeping UNIT instead of one silent
-                BUS, and resolved the SAME way: www/js/schematic.js's `d.ouHeldOver` BLANKS the outdoor pills
-                to "—". v1.0.13 showed them greyed with a `#heldNote` legend instead; that is
-                reverted — the drawing has ONE vocabulary for "no reading right now", and a second
-                dimmer register of half-valid numbers asks the reader to remember which pills mean
-                what. A value the unit is no longer measuring is not reported. What the pill cannot
-                say, the INSPECTOR does (the outdoor unit's idle explanation names the reason), which
-                is where the "reads as a lost link" complaint is answered instead.
+                BUS: www/js/schematic.js's `d.ouHeldOver` refuses the outdoor unit's retained rows.
+                Discharge therefore blanks to "—"; outdoor air also blanks without a second source,
+                but a live HomeHub outdoor-air measurement may stand in because that independent
+                sensor keeps measuring. `mbFields` records the substitution, renderLive paints the
+                pill petrol, and the inspector resolves headline + source to the Modbus row rather
+                than putting the stale X10A number back. v1.0.13 showed held X10A values greyed with a
+                `#heldNote` legend instead; that remains reverted — a value the unit is no longer
+                measuring is never reported. The only visible number is a current measurement from
+                the other stack, not a dimmer register of half-valid values.
                 The inspector BLANKS what the pill blanks, or it undoes the pill: it read every row
                 straight off /values, so tapping a blanked pill printed the held-over number back as
                 a 19px headline (25.0 °C outdoor on a stopped unit), plus in the member-reading list
@@ -1508,7 +1515,8 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 homehub_map.hpp = WHICH X10A ROW A HOMEHUB REGISTER IS THE SAME QUANTITY AS — the
                 ENTIRETY of the sharing between the two otherwise-independent stacks, and the reason
                 the web UI can print a Modbus reading beside its X10A twin and let it stand in when
-                the X10A bus is silent. The pairing may NEVER be made on the LABEL: the catalog spells
+                the X10A bus is silent or that particular X10A row is held over at rest. The pairing
+                may NEVER be made on the LABEL: the catalog spells
                 one quantity many ways across the 43 profiles (four spellings of leaving water, one
                 with a DOUBLE space) and REUSES tags across different quantities ("(R1T)" is both the
                 outdoor air sensor on 0x20 and the indoor leaving-water sensor), so a label match is
@@ -1765,7 +1773,9 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   reason/summary from the boot-time cache, `coredump` re-read from flash per request
                   so a cleared dump can't strand the banner; drives the crash banner, whose title keys
                   on `fault` — an orphan dump alone is NOT "restarted after a crash"),
-                  history{dt,rows[{id,label}]} — which rows carry a 24-hour trend and at what
+                  history{dt,rows[{id,label}],modbus_rows[{id,label}]} — which X10A/board rows and
+                  which structurally paired HomeHub schematic measurements carry a 24-hour trend,
+                  and at what
                   cadence. The ID is the CONCEPT (logic/history.hpp's TRENDS — what GET /history
                   takes, so a request is model-independent); the LABEL is how the DETECTED profile
                   spells that row, which is what lets the UI attach a trend to the value row it is
@@ -1832,8 +1842,10 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus "binary":true 
                   the previous session's rows under that guarantee. Not live -> the KEY IS OMITTED,
                   never emitted empty: an absent array and an empty one are different claims, and
                   only absence says "no current reading"
-GET  /history?row=<trend id>   one trended row's 24-hour series, oldest sample first:
-                  {id,label,dt,unit,t0,v[],held[[from,count],…]}. `unit` is the ROW's own unit, read
+GET  /history?row=<trend id>[&source=modbus]   one source's 24-hour series, oldest sample first;
+                  X10A is the backwards-compatible default and Modbus is accepted only for the six
+                  paired schematic measurements. Payload:
+                  {id,source,label,dt,unit,t0,b0,v[],held[[from,count],…]}. `unit` is the ROW's own unit, read
                   from the cached value — never a hardcoded "°C": the eighteen trends mix °C, bar, KiB
                   and unitless rows, and the browser prints this string into the range readout and the
                   crosshair, so a bar row labelled °C would be the #35-#39 shape. A catalog test pins
@@ -1848,7 +1860,9 @@ GET  /history?row=<trend id>   one trended row's 24-hour series, oldest sample f
                   way in — the browser scales by 10) or null. `held` run-length-marks WHICH nulls
                   were the outdoor unit RESTING rather than a failure to measure: `v` stays a plain
                   number-or-null array any consumer can read, and the reason rides alongside instead
-                  of inside it. `t0` is the wall-clock instant of sample 0, derived at SERVE time
+                  of inside it (Modbus has no held-over state, so its array is empty). `b0` is the
+                  monotonic 5-minute bucket of sample zero and aligns the two instruments exactly;
+                  `t0` is the wall-clock instant of sample 0, derived at SERVE time
                   from the current clock and the sample count (the ring advances on the MONOTONIC
                   clock, so it survives SNTP setting the time mid-boot) and OMITTED when the clock
                   has never synced — the UI then reads out an age rather than a fabricated time,

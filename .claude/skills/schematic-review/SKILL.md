@@ -81,9 +81,13 @@ it, and this is where the review earns its keep.
    principle. A number under the wrong name is the failure this whole card is built to avoid.
 
 3. **Does it blank when it must?** `logic/ou_stale.hpp`: the outdoor unit stops refreshing its own
-   pages while it rests, so outdoor air, discharge and the INV-based electrical estimate **blank**
-   rather than repeat the last run's values — and the inspector says why. ΔT blanks with the pump
-   stopped. A new pill on page `0x20`/`0x21` needs the same treatment, and the gate cannot see that
+   pages while it rests, so held X10A values never repeat the last run as current. Discharge and the
+   INV-based electrical estimate **blank**; outdoor air may instead show the live, structurally
+   paired HomeHub measurement in petrol. Its inspector must then name that Modbus row rather than
+   restore the stale X10A one or claim there is no current reading. Its trend may overlay the blue
+   X10A gap with the independent petrol HomeHub ring, but must label both sources and align the same
+   5-minute bucket — never splice them into one repaired line. ΔT blanks with the pump stopped.
+   A new pill on page `0x20`/`0x21` needs the same held-over treatment, and the gate cannot see that
    the value it draws is stale.
 
 4. **Does the drawing still carry readings only?** No annotations, no captions, no "estimated" in
