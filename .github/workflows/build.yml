@@ -133,6 +133,24 @@ jobs:
       - name: Test Modbus connection error status
         run: node test/test_ui_modbus_status.mjs
 
+      # HomeHub uses Int16 for both numbers and selectors. Execute the production display boundary
+      # and pin every manufacturer enum in English and German so a named mode cannot regress to an
+      # unexplained integer while true binary flags continue to render as ON/OFF.
+      - name: Test HomeHub enum rendering
+        run: node test/test_ui_homehub_enums.mjs
+
+      # Coverage cannot detect a semantically wrong first-match description. Pin every curated
+      # HomeHub register to its manufacturer label, German visual label and bilingual explanation,
+      # including ON/OFF spelling and the room-temperature setpoint-vs-thermo-demand distinction.
+      - name: Test HomeHub labels and explanations
+        run: node test/test_ui_homehub_copy.mjs
+
+      # The Error code accordion resolves only the currently reported two-character code. Keep its
+      # internal 63-code lookup aligned with the source-backed C++ table, require a German meaning
+      # for every entry and prove that unrelated codes never become a visible catalogue.
+      - name: Test current bilingual error-code explanation
+        run: node test/test_ui_error_codes.mjs
+
       # Board presets are value-fill shortcuts, not persisted physical identities. The shipped
       # first-boot values happen to equal the XIAO preset, so execute the real modal functions and
       # prove a fresh device still opens on Custom while explicit preset picks keep working.

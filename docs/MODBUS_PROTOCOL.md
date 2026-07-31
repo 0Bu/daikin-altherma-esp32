@@ -99,7 +99,9 @@ that is already closed.
 
 `main/def/homehub.hpp` — the Modbus counterpart of the X10A `def/` profiles, and the only place a
 HomeHub register's meaning is written down in this repo. Each row is
-`{offset, space (FC04/FC03), MbType, scale, unit, label}`.
+`{offset, space (FC04/FC03), MbType, scale, unit, label, value kind}`. The value kind is essential:
+the guide encodes ordinary numbers, binary flags and multi-state selectors alike as `Int16`, so the
+wire type alone cannot tell a UI whether `1` means one, ON, Heating, Fault or DHW.
 
 Read today (UC3 Daikin Altherma):
 
@@ -113,6 +115,25 @@ Read today (UC3 Daikin Altherma):
 
 Reading a holding register is not a step toward writing it — the hub's own telemetry is split across
 both spaces, and a setpoint the plant is currently running to is a reading like any other.
+
+Dimensionless status registers are classified centrally and rendered as follows (names are from the
+manufacturer's §9.2 register tables):
+
+| Space / offset | Meaning | Published status |
+|---|---|---|
+| input `21` | Unit abnormality | `No error` / `Fault` / `Warning` |
+| input `30` | Circulation pump running | binary `0`/`1`, displayed `OFF`/`ON` |
+| input `37` | 3-way valve | `Space heating` / `DHW` |
+| input `52` / `53` | DHW / space operation | binary `0`/`1`, displayed `OFF`/`ON` |
+| holding `3` | Operation mode | `Auto` / `Heating` / `Cooling` |
+| holding `4` / `9` | Space heating/cooling / quiet mode | binary `0`/`1`, displayed `OFF`/`ON` |
+| holding `56` | Smart Grid operation mode | `Free running` / `Forced off` / `Recommended on` / `Forced on` |
+
+The four enums are decoded once in `homehub_format()`, before the value reaches `/values`, MCP or
+the browser. Their stable API form is the guide's English term; the browser translates it to the
+selected UI language. An undocumented value remains visible as `Unknown (N)` instead of being
+silently coerced to a known mode. The five true flags retain the firmware-wide numeric `0`/`1`
+contract plus the structural `binary:true` marker, and only the visual boundary prints `OFF`/`ON`.
 
 > **Physical correctness is confirmed on hardware.** The host tests (`test_homehub()` in
 > `test/test_logic.cpp`) verify the *decode mechanics* — scaling, the special-value guard, `Text16`,

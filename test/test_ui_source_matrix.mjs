@@ -55,8 +55,8 @@ const M = (off, label, value, concept, extra = {}) => ({ label, value, unit: "°
 // The 3-way valve as each side reports it: X10A bit-flag row, HomeHub offset 37.
 const X_VALVE = (on) => ({ label: "3way valve(On:DHW_Off:Space)", value: on ? "1" : "0",
                            unit: "", reg: 0x60, binary: true, concept: "valve_dhw" });
-const M_VALVE = (on) => ({ label: "3-way valve to DHW", value: on ? "1" : "0",
-                           unit: "", off: 37, binary: true, concept: "valve_dhw" });
+const M_VALVE = (on) => ({ label: "3-way valve", value: on ? "DHW" : "Space heating",
+                           unit: "", off: 37, concept: "valve_dhw" });
 
 function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [] }) {
   const context = {
@@ -91,6 +91,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [] }) {
     },
     displayReadingLabel: (l) => String(l ?? "").trim()
       .replace(/\s*\([^)]*On\s*:[^)]*Off\s*:[^)]*\)\s*$/i, "").trim(),
+    displayHomeHubLabel: (r) => String(r?.label ?? "").trim(),
     t: (k, a, b) => (k === "src.disagree" ? "sources disagree"
                    : k === "src.agree" ? "agree"
                    : k === "src.delta" ? `Difference ${a} ${b}`
@@ -112,8 +113,8 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [] }) {
 }
 
 const LWT_X = X("Leaving water temp. before BUH (R1T)", "38.6", "leaving_water");
-const LWT_M = M(40, "Leaving water temp. (PHE)", "38.1", "leaving_water");
-const SG = (value) => M(56, "Smart-Grid operation mode", String(value), null, { unit: "" });
+const LWT_M = M(40, "Leaving water temperature PHE", "38.1", "leaving_water");
+const SG = (value) => M(56, "Smart Grid operation mode", String(value), null, { unit: "" });
 
 // ── 1. Both live, numeric — the gateway is reachable as the second opinion ─────────────────────
 {
@@ -130,10 +131,10 @@ const SG = (value) => M(56, "Smart-Grid operation mode", String(value), null, { 
 // is exactly where the dashboard must prove that evcc's mode-2 boost reached the controller.
 {
   const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
-                  values: [LWT_X], modbus: [LWT_M, SG(2)] });
+                  values: [LWT_X], modbus: [LWT_M, SG("Recommended on")] });
   assert.equal(c.MB_OFF_SMART_GRID, 56, "UI uses the EKRHH data-model offset, not PDU address 55");
   assert.equal(c.mbSmartGridMode(), 2, "mode 2 must reach the live schematic");
-  assert.equal(c.mbForInspect("sgrequest")?.value, "2",
+  assert.equal(c.mbForInspect("sgrequest")?.value, "Recommended on",
     "the inspector must remain traceable to the Modbus row while X10A is live");
   assert.equal(c.sgModeText(2), "sg.mode2");
   assert.equal(c.sgRequestText(2), "schem.sg_boost");
@@ -141,11 +142,13 @@ const SG = (value) => M(56, "Smart-Grid operation mode", String(value), null, { 
 
 // A stale HomeHub cache is not an active request, and invalid enum values are not guessed into one.
 {
-  const down = ctx({ x10a: true, mbEnabled: true, mbConnected: false, modbus: [SG(2)] });
+  const down = ctx({ x10a: true, mbEnabled: true, mbConnected: false,
+                     modbus: [SG("Recommended on")] });
   assert.equal(down.mbSmartGridMode(), null, "disconnected HomeHub: cached boost must disappear");
   assert.equal(down.mbForInspect("sgrequest"), null, "disconnected HomeHub: no stale inspector row");
 
-  const invalid = ctx({ x10a: true, mbEnabled: true, mbConnected: true, modbus: [SG(4)] });
+  const invalid = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+                        modbus: [SG("Unknown (4)")] });
   assert.equal(invalid.mbSmartGridMode(), null, "unknown Smart-Grid enum must fail closed");
 }
 
@@ -233,7 +236,7 @@ const SG = (value) => M(56, "Smart-Grid operation mode", String(value), null, { 
 // second opinion and a difference against nothing.
 {
   const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
-                  values: [LWT_X], modbus: [M(40, "Leaving water temp. (PHE)", null, "leaving_water")] });
+                  values: [LWT_X], modbus: [M(40, "Leaving water temperature PHE", null, "leaving_water")] });
   assert.equal(c.mbByConcept("leaving_water"), null, "an unanswered gateway row is not a reading");
   assert.equal(c.mbTwin(LWT_X), null);
 }
@@ -281,7 +284,7 @@ const SG = (value) => M(56, "Smart-Grid operation mode", String(value), null, { 
   const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
                   values: [LWT_X], modbus: [LWT_M] });
   const html = c.mbNoteHtml(LWT_X, c.mbTwin(LWT_X));
-  assert.ok(html.includes("Leaving water temp. (PHE)"),
+  assert.ok(html.includes("Leaving water temperature PHE"),
     "both live: the line names the MODBUS register, not the X10A row");
   assert.ok(html.includes("Difference 0.5"), "both live: the difference is stated");
   assert.ok(html.includes("plate heat exchanger"),
@@ -343,7 +346,7 @@ const SG = (value) => M(56, "Smart-Grid operation mode", String(value), null, { 
 // duplicated both DHW tank temperatures in the panel.
 {
   const TANK_X = X("DHW tank temp. (R5T)", "45.2", "dhw_tank");
-  const TANK_M = M(43, "DHW tank temp.", "45.4", "dhw_tank");
+  const TANK_M = M(43, "Domestic Hot Water temperature", "45.4", "dhw_tank");
   const SETPOINT = X("DHW setpoint", "48.0", null);
   const E = { re: /dhw tank temp/i, rows: [/dhw tank temp/i, /dhw setpoint/i] };
   const live = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
@@ -379,12 +382,12 @@ const SG = (value) => M(56, "Smart-Grid operation mode", String(value), null, { 
 {
   const P = (off, label, value) => ({ label, value, unit: "kW", off, concept: null });
   const both = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],
-                     modbus: [P(51, "Power consumption", "1.42"),
-                              P(57, "Power limit (buffering)", "5.00"),
-                              P(58, "Power limit (general)", "7.00")] });
+                     modbus: [P(51, "Heat pump power consumption", "1.42"),
+                              P(57, "Power limit during Recommended on / buffering", "5.00"),
+                              P(58, "General power limit", "7.00")] });
   assert.equal(both.MB_OFF_POWER, 51, "the measured power is EKRHH input register 51");
   assert.equal(both.mbPower()?.value, "1.42", "the measurement is what is read");
-  assert.equal(both.mbForInspect("pel")?.label, "Power consumption",
+  assert.equal(both.mbForInspect("pel")?.label, "Heat pump power consumption",
     "the measured schematic headline remains traceable to its Modbus register");
 
   const measured = { pel: 1.42, pelSrc: "MB", pelHeld: false };
@@ -407,13 +410,14 @@ const SG = (value) => M(56, "Smart-Grid operation mode", String(value), null, { 
 
   // 51 absent (sentinel / unread) with both limits valid — the case that produced the wrong number.
   const gone = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],
-                     modbus: [P(51, "Power consumption", null),
-                              P(57, "Power limit (buffering)", "5.00"),
-                              P(58, "Power limit (general)", "7.00")] });
+                     modbus: [P(51, "Heat pump power consumption", null),
+                              P(57, "Power limit during Recommended on / buffering", "5.00"),
+                              P(58, "General power limit", "7.00")] });
   assert.equal(gone.mbPower(), null,
     "no measured power: the answer is nothing, never a power LIMIT that happens to share the unit");
   // Prove the trap is really set — a unit-keyed lookup over this very fixture picks a limit.
-  const byUnit = [P(51, "Power consumption", null), P(57, "Power limit (buffering)", "5.00")]
+  const byUnit = [P(51, "Heat pump power consumption", null),
+                  P(57, "Power limit during Recommended on / buffering", "5.00")]
     .find((m) => m.unit === "kW" && m.value != null);
   assert.equal(byUnit.off, 57, "the unit-keyed lookup this replaced would have taken the limit");
 }

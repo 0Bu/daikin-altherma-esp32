@@ -44,8 +44,9 @@ const I18N = {
     "sys.standby": "Standby — not running", "sys.defrosting": "Defrosting",
     "sys.circulating": "Circulating — compressor off",
     "sys.bsh_active": "Electric tank heater active",
-    "sys.online": "Online", "sys.fault": "Fault",
+    "sys.online": "Online", "sys.fault": "Fault", "sys.warning": "Warning",
     "sys.fault_line": (c) => "Fault · " + c + " — check the outdoor unit.",
+    "sys.warning_line": (c) => "Warning · " + c + " — check the heat pump.",
     "sys.polled": (s) => `Polled ${s}s ago`,
     "recovery.title": "Recovery mode",
     "recovery.meta": "The device restarted too many times and came up in recovery mode. Heat-pump polling and MQTT are paused. Correct the configuration (for example the RX/TX pins on the Protocol card in Settings), then reboot to resume normal operation.",
@@ -166,11 +167,19 @@ const I18N = {
     "group.Protection": "Protection", "protect.limiting": "limiting now",
     "group.Values": "Values",
     "state.on": "ON", "state.off": "OFF",
+    // Canonical HomeHub enum values from EKRHH 4P744838-1E §9.2. The API keeps these stable
+    // English names; the browser translates them only at the visual boundary.
+    "enum.auto": "Auto", "enum.heating": "Heating", "enum.cooling": "Cooling",
+    "enum.no_error": "No error", "enum.fault": "Fault", "enum.warning": "Warning",
+    "enum.space_heating": "Space heating", "enum.dhw": "DHW",
+    "enum.free_running": "Free running", "enum.forced_off": "Forced off",
+    "enum.recommended_on": "Recommended on", "enum.forced_on": "Forced on",
+    "enum.unknown": (n) => `Unknown (${n})`,
     "chip.demand_on": "Demand ON", "chip.demand_off": "Demand OFF", "chip.quiet": "Quiet",
     "schem.sg_forced_off": "MODBUS · FORCED OFF", "schem.sg_boost": "MODBUS · BOOST ACTIVE",
     "schem.sg_forced_on": "MODBUS · FORCED ON",
-    "sg.mode0": "0 · Free running", "sg.mode1": "1 · Forced off",
-    "sg.mode2": "2 · Recommended on", "sg.mode3": "3 · Forced on",
+    "sg.mode0": "Free running", "sg.mode1": "Forced off",
+    "sg.mode2": "Recommended on", "sg.mode3": "Forced on",
     "schem.to_dhw": "3WV → DHW", "schem.to_heat": "3WV → heating",
     "normal.label": "Normal:",
     "hist.title": "Last 24 hours", "hist.since": (h) => `Since restart · ${h} h`,
@@ -268,8 +277,9 @@ const I18N = {
     "sys.standby": "Bereitschaft — läuft nicht", "sys.defrosting": "Abtauen",
     "sys.circulating": "Umwälzung — Verdichter aus",
     "sys.bsh_active": "Heizstab aktiv",
-    "sys.online": "Online", "sys.fault": "Störung",
+    "sys.online": "Online", "sys.fault": "Störung", "sys.warning": "Warnung",
     "sys.fault_line": (c) => "Störung · " + c + " — Außeneinheit prüfen.",
+    "sys.warning_line": (c) => "Warnung · " + c + " — Wärmepumpe prüfen.",
     "sys.polled": (s) => `vor ${s}s abgefragt`,
     "recovery.title": "Wiederherstellungsmodus",
     "recovery.meta": "Das Gerät ist zu oft neu gestartet und im Wiederherstellungsmodus hochgefahren. Wärmepumpen-Abfrage und MQTT sind pausiert. Korrigiere die Konfiguration (z. B. die RX/TX-Pins auf der Protokoll-Karte in den Einstellungen) und starte neu, um den Normalbetrieb fortzusetzen.",
@@ -388,11 +398,18 @@ const I18N = {
     // names ("Reheat ON/OFF", "Storage comfort ON/OFF"), so mixing them with EIN/AUS reads as one
     // broken label rather than as a translation.
     "state.on": "ON", "state.off": "OFF",
+    // Deutsche Herstellerbegriffe aus EKRHH 4P744838-1E §9.2.
+    "enum.auto": "Auto", "enum.heating": "Heizen", "enum.cooling": "Kühlen",
+    "enum.no_error": "Kein Fehler", "enum.fault": "Fehler", "enum.warning": "Warnung",
+    "enum.space_heating": "Raumheizung", "enum.dhw": "Brauchwarmwasser",
+    "enum.free_running": "Freier Betrieb", "enum.forced_off": "Erzwungen OFF",
+    "enum.recommended_on": "Empfohlen ON", "enum.forced_on": "Erzwungen ON",
+    "enum.unknown": (n) => `Unbekannt (${n})`,
     "chip.demand_on": "Anforderung ON", "chip.demand_off": "Anforderung OFF", "chip.quiet": "Leise",
     "schem.sg_forced_off": "MODBUS · ERZWUNGEN OFF", "schem.sg_boost": "MODBUS · BOOST AKTIV",
     "schem.sg_forced_on": "MODBUS · ERZWUNGEN ON",
-    "sg.mode0": "0 · Freier Betrieb", "sg.mode1": "1 · Erzwungen OFF",
-    "sg.mode2": "2 · Empfohlen ON", "sg.mode3": "3 · Erzwungen ON",
+    "sg.mode0": "Freier Betrieb", "sg.mode1": "Erzwungen OFF",
+    "sg.mode2": "Empfohlen ON", "sg.mode3": "Erzwungen ON",
     "schem.to_dhw": "3WV → WW", "schem.to_heat": "3WV → Heizung",
     "normal.label": "Normal:",
     "hist.title": "Letzte 24 Stunden", "hist.since": (h) => `Seit Neustart · ${h} h`,
@@ -697,16 +714,18 @@ function renderApp() {
       const mbMode = dhw === true ? t("mode.dhw")
                    : spc === true ? t("mode.heat")
                    : (dhw === false && spc === false) ? t("mode.standby") : null;
-      // A FAULT THE GATEWAY IS REPORTING OUTRANKS THE MODE. The unit's fault CLASS (Daikin's
-      // error/warning/caution split) is X10A-only and stays unknown here — but "is something
-      // wrong", and the code for it, are EKRHH offsets 21/22, and withholding a fault the device
-      // is actively reporting is the one direction a status headline must never fail in. Without
-      // this the card read a calm green "Warmwasser" over a live error.
-      const errOn = mbBool(21);
+      // A FAULT OR WARNING THE GATEWAY IS REPORTING OUTRANKS THE MODE. The diagnostic state and its
+      // code are EKRHH offsets 21/22. Withholding either state while the device reports it is the
+      // one direction a status headline must never fail in. Without this the card read a calm green
+      // "Warmwasser" over a live error.
+      const abnormality = mbUnitAbnormality();
       const code = mbVal(22);
-      if (errOn === true) {
+      if (abnormality === "Fault") {
         sysSet(t("sys.fault"), code && !/^-*$/.test(code.trim())
                                  ? t("sys.fault_line", code) : t("sys.mb_only"), "err");
+      } else if (abnormality === "Warning") {
+        sysSet(t("sys.warning"), code && !/^-*$/.test(code.trim())
+                                   ? t("sys.warning_line", code) : t("sys.mb_only"), "warn");
       } else {
         sysSet(mbMode || t("sys.x10a_down"),
                mbMode ? t("sys.mb_only") : t("sys.mb_carrying"), mbMode ? "" : "warn");
@@ -1809,6 +1828,77 @@ function renderSettingsDot() {
 // bare "capacity" catch). A row whose label matches nothing here stays a plain, non-expandable row.
 // `normal` is optional guidance on typical vs worth-a-look values — deliberately hedged; the exact
 // figures are model- and install-specific.
+// Keep the English column byte-for-byte aligned with logic/error_codes.hpp. That header enriches
+// live X10A values; this browser lookup explains ONLY the currently reported code when either X10A
+// or HomeHub exposes the error-code row. The 63-entry vocabulary is never printed as a catalogue in
+// the UI. The HomeHub's separate numeric sub-code is intentionally not folded into this lookup: it
+// narrows a main code but is not another main-code vocabulary.
+const DAIKIN_FAULT_CODES = Object.freeze([
+  { code: "7H", en: "Water flow problem", de: "Problem mit dem Wasserdurchfluss" },
+  { code: "80", en: "Return water temperature sensor fault", de: "Fehler am Rücklauftemperaturfühler" },
+  { code: "81", en: "Leaving water temperature sensor fault", de: "Fehler am Vorlauftemperaturfühler" },
+  { code: "89", en: "Heat exchanger frost protection activated", de: "Frostschutz des Wärmetauschers ausgelöst" },
+  { code: "8F", en: "Abnormal DHW outlet water temperature rise", de: "Ungewöhnlicher Temperaturanstieg am Warmwasseraustritt" },
+  { code: "8H", en: "Abnormal leaving water temperature rise", de: "Ungewöhnlicher Anstieg der Vorlauftemperatur" },
+  { code: "A1", en: "Zero-crossing detection failure", de: "Fehler der Nulldurchgangserkennung" },
+  { code: "A5", en: "High-pressure peak-cut / frost protection problem", de: "Problem mit Hochdruckbegrenzung oder Frostschutz" },
+  { code: "AA", en: "Backup heater overheated or not connected", de: "Zusatzheizer überhitzt oder nicht angeschlossen" },
+  { code: "AC", en: "Booster heater overheated", de: "Speicherheizstab überhitzt" },
+  { code: "AH", en: "Tank disinfection (anti-legionella) not completed", de: "Speicherdesinfektion (Legionellenschutz) nicht abgeschlossen" },
+  { code: "AJ", en: "DHW heat-up time exceeded", de: "Aufheizzeit für Warmwasser überschritten" },
+  { code: "C0", en: "Flow sensor fault", de: "Fehler am Volumenstromsensor" },
+  { code: "C4", en: "Heat exchanger temperature sensor fault", de: "Fehler am Temperaturfühler des Wärmetauschers" },
+  { code: "C5", en: "Heat exchanger sensor fault", de: "Fehler an einem Wärmetauscherfühler" },
+  { code: "CJ", en: "Room temperature sensor fault", de: "Fehler am Raumtemperaturfühler" },
+  { code: "E1", en: "Outdoor unit PCB defect", de: "Platine der Außeneinheit defekt" },
+  { code: "E2", en: "Leakage current detection fault", de: "Fehler der Fehlerstromerkennung" },
+  { code: "E3", en: "Outdoor unit high-pressure switch activated", de: "Hochdruckschalter der Außeneinheit ausgelöst" },
+  { code: "E4", en: "Suction pressure fault", de: "Fehler beim Kältemittel-Saugdruck" },
+  { code: "E5", en: "Outdoor unit inverter compressor motor overheat", de: "Inverter-Verdichtermotor der Außeneinheit überhitzt" },
+  { code: "E6", en: "Outdoor unit compressor startup failure", de: "Verdichter der Außeneinheit startet nicht" },
+  { code: "E7", en: "Outdoor unit fan motor fault", de: "Fehler am Lüftermotor der Außeneinheit" },
+  { code: "E8", en: "Outdoor unit input overvoltage", de: "Überspannung am Eingang der Außeneinheit" },
+  { code: "E9", en: "Electronic expansion valve fault", de: "Fehler am elektronischen Expansionsventil" },
+  { code: "EA", en: "Outdoor unit cooling/heating switchover problem", de: "Umschaltproblem zwischen Kühlen und Heizen an der Außeneinheit" },
+  { code: "EC", en: "Abnormal tank temperature rise", de: "Ungewöhnlicher Temperaturanstieg im Speicher" },
+  { code: "F3", en: "Outdoor unit discharge pipe temperature fault", de: "Temperaturfehler an der Heißgasleitung der Außeneinheit" },
+  { code: "F6", en: "Outdoor unit abnormally high pressure during cooling", de: "Ungewöhnlich hoher Druck der Außeneinheit beim Kühlen" },
+  { code: "FA", en: "Outdoor unit abnormally high pressure, high-pressure switch activated", de: "Ungewöhnlich hoher Druck der Außeneinheit; Hochdruckschalter ausgelöst" },
+  { code: "H0", en: "Outdoor unit voltage/current sensor fault", de: "Fehler am Spannungs- oder Stromsensor der Außeneinheit" },
+  { code: "H1", en: "External temperature sensor fault", de: "Fehler an einem externen Temperaturfühler" },
+  { code: "H3", en: "Outdoor unit high-pressure switch fault", de: "Fehler am Hochdruckschalter der Außeneinheit" },
+  { code: "H5", en: "Compressor overload protection fault", de: "Fehler am Überlastschutz des Verdichters" },
+  { code: "H6", en: "Outdoor unit position-detection sensor fault", de: "Fehler am Positionserkennungssensor der Außeneinheit" },
+  { code: "H8", en: "Outdoor unit compressor input (CT) system fault", de: "Fehler am Strommesssystem (CT) des Außeneinheit-Verdichters" },
+  { code: "H9", en: "Outdoor unit outside air temperature sensor fault", de: "Fehler am Außentemperaturfühler der Außeneinheit" },
+  { code: "HC", en: "Tank temperature sensor fault", de: "Fehler am Speichertemperaturfühler" },
+  { code: "HJ", en: "Water pressure sensor fault", de: "Fehler am Wasserdrucksensor" },
+  { code: "J3", en: "Outdoor unit discharge pipe sensor fault", de: "Fehler am Heißgasleitungsfühler der Außeneinheit" },
+  { code: "J6", en: "Outdoor unit heat exchanger sensor fault", de: "Fehler am Wärmetauscherfühler der Außeneinheit" },
+  { code: "JA", en: "Outdoor unit high-pressure sensor fault", de: "Fehler am Hochdrucksensor der Außeneinheit" },
+  { code: "L1", en: "Inverter PCB fault", de: "Fehler an der Inverterplatine" },
+  { code: "L3", en: "Outdoor unit control box temperature rise fault", de: "Unzulässiger Temperaturanstieg im Schaltkasten der Außeneinheit" },
+  { code: "L4", en: "Outdoor unit inverter heat sink temperature rise fault", de: "Unzulässiger Temperaturanstieg am Inverter-Kühlkörper der Außeneinheit" },
+  { code: "L5", en: "Outdoor unit inverter overcurrent (DC) detected", de: "Gleichstrom-Überstrom am Inverter der Außeneinheit erkannt" },
+  { code: "L8", en: "Inverter PCB thermal protection tripped", de: "Thermoschutz der Inverterplatine ausgelöst" },
+  { code: "L9", en: "Compressor lock protection", de: "Blockierschutz des Verdichters ausgelöst" },
+  { code: "LC", en: "Outdoor unit communication system fault", de: "Fehler im Kommunikationssystem der Außeneinheit" },
+  { code: "P1", en: "Power supply phase imbalance / open phase", de: "Phasenunsymmetrie oder Phasenausfall der Stromversorgung" },
+  { code: "P3", en: "Abnormal DC detected", de: "Ungewöhnliche Gleichspannung erkannt" },
+  { code: "P4", en: "Outdoor unit heat sink temperature sensor fault", de: "Fehler am Kühlkörper-Temperaturfühler der Außeneinheit" },
+  { code: "PJ", en: "Capacity setting mismatch", de: "Leistungseinstellung passt nicht zur Anlage" },
+  { code: "U0", en: "Outdoor unit refrigerant shortage", de: "Kältemittelmangel an der Außeneinheit" },
+  { code: "U1", en: "Reverse phase / open phase malfunction", de: "Phasenfolgefehler oder Phasenausfall" },
+  { code: "U2", en: "Outdoor unit mains voltage fault", de: "Netzspannungsfehler der Außeneinheit" },
+  { code: "U3", en: "Underfloor heating screed-drying function not completed correctly", de: "Estrichtrocknungsprogramm der Fußbodenheizung nicht korrekt abgeschlossen" },
+  { code: "U4", en: "Indoor/outdoor unit communication problem", de: "Kommunikationsproblem zwischen Innen- und Außeneinheit" },
+  { code: "U5", en: "User interface communication problem", de: "Kommunikationsproblem mit der Bedieneinheit" },
+  { code: "U7", en: "Outdoor unit main CPU / inverter CPU transmission fault", de: "Übertragungsfehler zwischen Haupt-CPU und Inverter-CPU der Außeneinheit" },
+  { code: "U8", en: "External device (LAN adapter / room thermostat / USB) communication problem", de: "Kommunikationsproblem mit externem Gerät (LAN-Adapter, Raumthermostat oder USB)" },
+  { code: "UA", en: "Indoor/outdoor unit combination or compatibility problem", de: "Innen- und Außeneinheit sind falsch kombiniert oder nicht kompatibel" },
+  { code: "UF", en: "Reversed piping or faulty communication wiring detected", de: "Vertauschte Rohrleitungen oder fehlerhafte Kommunikationsverdrahtung erkannt" },
+]);
+
 const DESCRIPTIONS = [
   // ── Domestic hot water ──
   { re: /dhw setpoint|dhw set ?point/i,
@@ -1821,9 +1911,9 @@ const DESCRIPTIONS = [
     de: { what: "Ein zweiter Temperaturfühler im Warmwasserspeicher (bei Speichern mit zwei Fühlern, z. B. oben und unten)." } },
   { re: /dhw tank temp|dhw tank/i,
     what: "The water temperature actually measured inside the hot-water tank (sensor R5T).",
-    normal: "sits below the DHW setpoint and climbs during a DHW cycle. Staying far below setpoint with the tank idle means it's simply been used up, or a sensor/heating fault.",
+    normal: "Below the DHW setpoint is expected after hot water has been used. During an active DHW cycle the temperature should rise; if it does not, compare the operation, flow and fault rows before drawing a conclusion.",
     de: { what: "Die tatsächlich im Warmwasserspeicher gemessene Wassertemperatur (Fühler R5T).",
-          normal: "liegt unter dem Warmwasser-Sollwert und steigt während eines Warmwasser-Zyklus. Bleibt sie im Ruhezustand weit unter dem Sollwert, ist der Speicher schlicht verbraucht — oder es liegt ein Fühler-/Heizfehler vor." } },
+          normal: "Nach einer Warmwasserentnahme liegt sie erwartbar unter dem Sollwert. Während eines aktiven Warmwasser-Zyklus sollte sie steigen; tut sie das nicht, zuerst Betriebs-, Durchfluss- und Fehlerzeilen gemeinsam prüfen." } },
   { re: /powerful dhw/i,
     what: "A one-off boost that heats the tank to the setpoint as fast as possible, calling in the backup heater if needed.",
     normal: "OFF in day-to-day use; ON only while you've triggered a manual boost.",
@@ -1850,10 +1940,10 @@ const DESCRIPTIONS = [
 
   // ── Valves ──
   { re: /3.?way valve/i,
-    what: "The diverter valve that sends heated water either to the DHW tank (ON = DHW) or to the space-heating circuit (OFF = heating). It can only feed one at a time.",
-    normal: "ON only during a hot-water cycle; OFF (feeding heating) the rest of the time.",
-    de: { what: "Das Umschaltventil, das erwärmtes Wasser entweder zum Warmwasserspeicher (ON = WW) oder in den Heizkreis (OFF = Heizung) leitet. Es kann immer nur eines versorgen.",
-          normal: "nur während eines Warmwasser-Zyklus ON; sonst OFF (versorgt die Heizung)." } },
+    what: "The diverter valve routes water either to the DHW tank or to the space circuit. The HomeHub reports the named positions DHW and Space heating; the X10A equivalent uses ON = DHW and OFF = space circuit.",
+    normal: "DHW is the tank route; Space heating is the space-circuit route. The position alone does not prove that either circuit is currently operating.",
+    de: { what: "Das Umschaltventil leitet Wasser entweder zum Warmwasserspeicher oder in den Raumheiz-/Kühlkreis. Der HomeHub meldet die benannten Positionen Brauchwarmwasser und Raumheizung; das X10A-Gegenstück verwendet ON = Warmwasser und OFF = Raumkreis.",
+          normal: "Brauchwarmwasser ist der Speicherweg, Raumheizung der Weg zum Raumkreis. Die Ventilposition allein beweist nicht, dass der jeweilige Kreis gerade in Betrieb ist." } },
   { re: /2.?way valve/i,
     what: "Selects the water path for the current mode — ON in heating, OFF in cooling (per the label).",
     de: { what: "Wählt den Wasserweg für den aktuellen Modus — ON im Heizbetrieb, OFF im Kühlbetrieb (laut Bezeichnung)." } },
@@ -1884,16 +1974,16 @@ const DESCRIPTIONS = [
           normal: "Raumheizung ~30–45 °C (Fußboden niedriger, Heizkörper höher); bis ~55 °C bei einem Warmwasser-Lauf. Deutlich über dem Ziel heißt meist, dass der Zusatzheizer mitwirkt." } },
   { re: /inlet water|return water|tr return/i,
     what: "Water returning from the house back into the unit (sensor R4T). Leaving-water minus this is the ΔT across the system.",
-    normal: "a few degrees below the leaving-water temperature; a healthy heating ΔT is around 5 K.",
+    normal: "During heat delivery it is normally below the leaving-water temperature. The resulting ΔT depends on load and flow, so assess it only with the pump running and the operating mode known.",
     de: { what: "Wasser, das aus dem Haus zurück ins Gerät strömt (Fühler R4T). Vorlauf minus dieser Wert ergibt das ΔT über die Anlage.",
-          normal: "einige Grad unter der Vorlauftemperatur; ein gesundes Heiz-ΔT liegt bei etwa 5 K." } },
+          normal: "Bei Wärmeabgabe liegt sie normalerweise unter der Vorlauftemperatur. Das daraus entstehende ΔT hängt von Last und Volumenstrom ab und ist nur bei laufender Pumpe und bekannter Betriebsart sinnvoll zu bewerten." } },
 
   // ── Flow / pressure / pump ──
   { re: /flow (sensor|rate)|flow rate/i,
     what: "How fast water is circulating through the heating/DHW circuit.",
-    normal: "typically ~10–30 l/min depending on unit size and pump speed. Too low can trip a flow fault and stop the compressor — suspect air, a closed valve or a dirty filter.",
+    normal: "Above zero while water is circulating; the expected rate is specific to the unit and hydraulic system. Judge a low value together with pump state and any reported flow fault.",
     de: { what: "Wie schnell das Wasser durch den Heiz-/Warmwasserkreis zirkuliert.",
-          normal: "typisch ~10–30 l/min je nach Gerätegröße und Pumpendrehzahl. Zu wenig kann einen Durchfluss-Fehler auslösen und den Verdichter stoppen — Verdacht: Luft, ein geschlossenes Ventil oder ein verschmutzter Filter." } },
+          normal: "Bei Wasserumlauf größer als null; der erwartbare Wert hängt von Gerät und Hydraulik ab. Einen niedrigen Wert zusammen mit Pumpenstatus und einer gegebenenfalls gemeldeten Durchflussstörung bewerten." } },
   { re: /water pressure/i,
     what: "Water pressure in the sealed heating circuit.",
     normal: "roughly 1.0–2.0 bar when cold. Below ~0.5 bar needs topping up; a persistent low reading can stop the pump.",
@@ -1906,9 +1996,9 @@ const DESCRIPTIONS = [
           normal: "eine niedrige Zahl (schnelle Pumpe) beim Heizen oder Warmwasserbereiten; 100 (gestoppt) im Leerlauf." } },
   { re: /water pump operation|circulation pump|solar pump|main pump|add pump|pump speed/i,
     what: "The circulation pump that moves water between the unit and the tank/emitters — whether it's running (or how hard, for a speed reading).",
-    normal: "running while heating, cooling or making hot water; may keep going briefly afterwards or periodically to anti-seize.",
+    normal: "For an ON/OFF state, ON means the pump is running and OFF means it is stopped. Overrun and protective functions can keep it ON even when the compressor is not running.",
     de: { what: "Die Umwälzpumpe, die Wasser zwischen Gerät und Speicher/Heizflächen bewegt — ob sie läuft (oder wie stark, bei einem Drehzahlwert).",
-          normal: "läuft beim Heizen, Kühlen oder Warmwasserbereiten; läuft evtl. kurz nach oder periodisch zum Schutz vor Festsitzen." } },
+          normal: "Bei einem ON/OFF-Status bedeutet ON, dass die Pumpe läuft, und OFF, dass sie steht. Nachlauf und Schutzfunktionen können sie auch bei stehendem Verdichter auf ON halten." } },
   { re: /water flow switch/i,
     what: "A safety switch that confirms water is genuinely flowing before the compressor or backup heater are allowed to run — protecting the heat exchanger from running dry.",
     normal: "ON (flow proven) whenever the pump is running.",
@@ -1922,16 +2012,16 @@ const DESCRIPTIONS = [
     de: { what: "Was die Wasserseite (Inneneinheit) gerade tut: Stopp, Heizen, Kühlen, Warmwasser oder eine Kombination aus Heizen+Warmwasser.",
           normal: "spiegelt die aktuelle Aufgabe wider. Während eines Warmwasser-Zyklus steht hier WW, obwohl die Außeneinheit weiterhin Heizen anzeigt." } },
   // `exact` is enforced by the description audit: this HomeHub enum must win before the broad X10A
-  // "operation mode" entry below. Without that ordering the Modbus card described values 0–3 as the
+  // "operation mode" entry below. Without that ordering the Modbus card described the SG modes as the
   // outdoor unit's Heating/Cooling thermodynamic state, which is a different register and meaning.
   { exact: true, re: /^smart[- ]grid operation mode$/i,
-    what: "The HomeHub's Smart-Grid request: 0 Free running, 1 Forced off, 2 Recommended on, 3 Forced on. It is an energy-management command, not the outdoor unit's Heating/Cooling mode.",
-    normal: "0 during ordinary autonomous operation. Values 1–3 should appear only while an external energy manager deliberately blocks, recommends or forces operation.",
-    de: { what: "Die Smart-Grid-Anforderung des HomeHub: 0 Freier Betrieb, 1 Erzwungen OFF, 2 Empfohlen ON, 3 Erzwungen ON. Das ist ein Energiemanagement-Befehl, nicht der Heiz-/Kühlmodus der Außeneinheit.",
-          normal: "0 im normalen autonomen Betrieb. Die Werte 1–3 sollten nur erscheinen, wenn ein externes Energiemanagement den Betrieb bewusst sperrt, empfiehlt oder erzwingt." } },
+    what: "The HomeHub's Smart-Grid request: Free running, Forced off, Recommended on or Forced on. It is an energy-management command, not the outdoor unit's Heating/Cooling mode.",
+    normal: "Free running during ordinary autonomous operation. The other modes should appear only while an external energy manager deliberately blocks, recommends or forces operation.",
+    de: { what: "Die Smart-Grid-Anforderung des HomeHub: Freier Betrieb, Erzwungen OFF, Empfohlen ON oder Erzwungen ON. Das ist ein Energiemanagement-Befehl, nicht der Heiz-/Kühlmodus der Außeneinheit.",
+          normal: "Freier Betrieb im normalen autonomen Betrieb. Die anderen Modi sollten nur erscheinen, wenn ein externes Energiemanagement den Betrieb bewusst sperrt, empfiehlt oder erzwingt." } },
   { re: /operation mode|operation \/ fault|^operation$/i,
-    what: "The outdoor unit's thermodynamic mode (Heating, Cooling, …). While it heats the tank it still reports Heating — it is heating, just the water in the tank rather than the house.",
-    de: { what: "Der thermodynamische Modus der Außeneinheit (Heizen, Kühlen, …). Während sie den Speicher aufheizt, meldet sie weiterhin Heizen — sie heizt ja, nur das Wasser im Speicher statt das Haus." } },
+    what: "The configured heat/cool mode: Auto, Heating or Cooling. It is a mode selection, not a statement that the compressor or space circuit is running right now.",
+    de: { what: "Der eingestellte Heiz-/Kühlmodus: Auto, Heizen oder Kühlen. Das ist eine Moduswahl und keine Aussage darüber, ob Verdichter oder Raumkreis gerade laufen." } },
   { re: /defrost/i,
     what: "The unit is melting frost off the outdoor coil by briefly running its cycle in reverse. Heating output pauses and steam may rise from the outdoor unit.",
     normal: "normal and self-clearing in cold, damp weather; a few minutes every so often. Constant defrosting suggests low refrigerant or poor airflow.",
@@ -1942,11 +2032,9 @@ const DESCRIPTIONS = [
     normal: "Normal. Anything else points to an active fault or advisory — check the fault code.",
     de: { what: "Die Schwereklasse einer aktiven Störung: Normal, Fehler, Warnung oder Hinweis.",
           normal: "Normal. Alles andere weist auf eine aktive Störung oder einen Hinweis hin — den Fehlercode prüfen." } },
-  { re: /error code|fault code/i,
-    what: "The Daikin fault code (e.g. U4, H3). Blank or 0 means no fault. If the unit stops, note this code — it identifies the problem for a service tech.",
-    normal: "blank / no fault. A code present with the unit stopped means it has shut down on that fault.",
-    de: { what: "Der Daikin-Fehlercode (z. B. U4, H3). Leer oder 0 bedeutet keine Störung. Stoppt das Gerät, notiere diesen Code — er benennt das Problem für den Servicetechniker.",
-          normal: "leer / keine Störung. Ein vorhandener Code bei gestopptem Gerät bedeutet, dass es sich wegen dieser Störung abgeschaltet hat." } },
+  { re: /error code|fault code/i, faultCode: true,
+    what: "Meaning of the currently reported fault code",
+    de: { what: "Bedeutung des aktuell gemeldeten Fehlercodes" } },
   { re: /emergency/i,
     what: "Emergency operation: the system is running in a fallback mode (often backup-heater only) after a fault, to keep some heat/hot water until it's serviced.",
     de: { what: "Notbetrieb: Die Anlage läuft nach einer Störung in einem Ersatzbetrieb (oft nur Zusatzheizer), um bis zur Wartung etwas Wärme/Warmwasser zu liefern." } },
@@ -1960,6 +2048,11 @@ const DESCRIPTIONS = [
   // whichever load that is for. Measured over three days on a live unit, every single ON minute was
   // a DHW charge and none had the 3-way valve on space heating — so copy that promised "the room is
   // calling for heat" described the wrong thing entirely (#199).
+  { exact: true, re: /^room thermostat control (heating|cooling) setpoint main$/i,
+    what: "The target room temperature for the main zone in Heating or Cooling mode. This is a temperature setpoint, not the unit's ON/OFF thermo-demand signal.",
+    normal: "Use the configured comfort target for the selected mode. Whether the unit starts also depends on the measured room temperature and controller logic.",
+    de: { what: "Die Raum-Solltemperatur der Hauptzone für den Heiz- oder Kühlbetrieb. Das ist ein Temperatur-Sollwert und nicht das ON/OFF-Thermo-Anforderungssignal der Anlage.",
+          normal: "Maßgeblich ist der konfigurierte Komfort-Sollwert der gewählten Betriebsart. Ob die Anlage startet, hängt zusätzlich von gemessener Raumtemperatur und Reglerlogik ab." } },
   { re: /thermostat/i,
     what: "Whether the indoor unit is currently asking the outdoor unit to run — Daikin's \"thermo ON\". It does not say what the heat is for: a hot-water charge turns it ON exactly like a call for space heating. For the heating circuit alone, read \"Space heating Operation\".",
     normal: "ON while the unit runs, OFF while it is satisfied — for either load.",
@@ -2023,11 +2116,11 @@ const DESCRIPTIONS = [
           normal: "OFF. Bleibt es ON, zusammen mit dem Fehlercode und den anderen Schutz-Zeilen lesen." } },
 
   // ── Outdoor / refrigerant circuit ──
-  { re: /outdoor air|outdoor ambient|r1t-outdoor|^outdoor/i,
-    what: "The outside air temperature measured at the unit — the source it draws heat from.",
-    normal: "the colder it is outside, the lower the efficiency (COP) and the more the backup heater may help out.",
-    de: { what: "Die am Gerät gemessene Außenlufttemperatur — die Quelle, aus der es Wärme bezieht.",
-          normal: "je kälter es draußen ist, desto geringer die Effizienz (COP) und desto eher hilft der Zusatzheizer mit." } },
+  { re: /outside air|outdoor air|outdoor ambient|r1t-outdoor|^outdoor/i,
+    what: "The outside air temperature measured at the unit. The controller uses it for weather-dependent control and operating decisions.",
+    normal: "Compare it with local outdoor conditions; placement, sun and airflow can make it differ from a nearby weather station.",
+    de: { what: "Die am Gerät gemessene Außenlufttemperatur. Der Regler nutzt sie für die witterungsabhängige Regelung und Betriebsentscheidungen.",
+          normal: "Mit den lokalen Außenbedingungen vergleichen; Aufstellort, Sonne und Luftstrom können Abweichungen zu einer nahen Wetterstation verursachen." } },
   { re: /water heat exchanger (inlet|outlet)/i,
     what: "Raw water temperatures at the inlet/outlet of the plate heat exchanger that transfers heat between the refrigerant and the water.",
     de: { what: "Rohe Wassertemperaturen am Ein-/Austritt des Plattenwärmetauschers, der Wärme zwischen Kältemittel und Wasser überträgt." } },
@@ -2178,91 +2271,97 @@ const DESCRIPTIONS = [
           normal: "ON während eingestellter Ruhezeiten; sonst OFF." } },
   // ── HomeHub (Modbus) rows that no X10A entry above already covers ─────────────────────────────
   // Appended LAST on purpose: descFor takes the FIRST match, so nothing here can hijack copy an
-  // X10A catalog label already resolves to — measured, 11 of the 27 gateway labels are answered by
-  // the entries above and are deliberately left to them. These sixteen are the remainder, and they
-  // exist because a reading with no explainer is a naked number: the description audit guards the
-  // X10A catalog against exactly that, and it never saw these labels, so it stayed green while the
-  // Modbus card shipped 25 unexplained rows.
-  { re: /^unit error active$/i,
-    what: "The unit's own fault flag, as the gateway reports it: 0 none, 1 fault, 2 warning. This is the authoritative one — the error code beside it is the label for a fault, not the statement that there is one.",
-    normal: "0. Anything else pairs with a code in the row above and belongs in the installer's hands.",
-    de: { what: "Die Störungsmeldung der Anlage selbst, wie das Gateway sie liefert: 0 keine, 1 Störung, 2 Warnung. Das ist die maßgebliche Angabe — der Fehlercode daneben benennt eine Störung, er stellt sie nicht fest.",
-          normal: "0. Alles andere gehört zusammen mit dem Code darüber in Fachhände." } },
-  { re: /^error sub ?code$/i,
-    what: "The second half of a Daikin fault code — the digits after the letter, which narrow a fault class down to the specific case.",
-    normal: "no value while nothing is wrong. It only becomes a number alongside an active fault.",
-    de: { what: "Die zweite Hälfte eines Daikin-Fehlercodes — die Ziffern hinter dem Buchstaben, die eine Fehlerklasse auf den konkreten Fall eingrenzen.",
-          normal: "ohne Störung kein Wert. Eine Zahl steht hier nur neben einer aktiven Störung." } },
-  { re: /^dhw operation$/i,
-    what: "Whether the unit is heating the hot-water tank RIGHT NOW. Together with the space-operation row beside it, this is what the dashboard's headline reads when the X10A service port is silent.",
-    normal: "1 during a tank charge, 0 the rest of the day. Both rows at 0 is standby, and normal for most hours.",
-    de: { what: "Ob die Anlage GERADE den Warmwasserspeicher lädt. Zusammen mit der Zeile „Space operation\" daneben ist das die Quelle für die Betriebsart im Kopf des Schemas, wenn der X10A-Serviceanschluss stumm ist.",
-          normal: "1 während einer Speicherladung, sonst 0. Beide Zeilen auf 0 heißt Bereitschaft — und das ist über den Tag der Normalfall." } },
-  { re: /^space operation$/i,
-    what: "Whether the unit is serving the heating (or cooling) circuit right now — the counterpart of the DHW-operation row above it.",
-    normal: "1 while the circuit is being fed, 0 otherwise. It cannot be 1 at the same time as DHW operation: one diverter, one branch at a time.",
-    de: { what: "Ob die Anlage gerade den Heiz- (oder Kühl-)Kreis bedient — das Gegenstück zur Zeile „DHW operation\" darüber.",
-          normal: "1 solange der Kreis versorgt wird, sonst 0. Gleichzeitig mit „DHW operation\" kann sie nicht 1 sein: ein Umschaltventil, immer nur ein Zweig." } },
-  { re: /^leaving water temp\. \(phe\)$/i,
-    what: "The water leaving the heat pump's plate heat exchanger, BEFORE the electric backup heater. This is the heat pump's own output — the figure the ΔT and the COP on the drawing are computed from.",
-    normal: "runs above the return temperature while the pump is circulating; the gap between the two IS the ΔT. Equal to the row below it whenever the backup heater is off.",
-    de: { what: "Das Wasser, das den Plattenwärmetauscher verlässt — VOR dem elektrischen Zusatzheizer. Das ist die Leistung der Wärmepumpe selbst und die Grundlage für ΔT und COP in der Zeichnung.",
-          normal: "liegt über dem Rücklauf, solange die Pumpe fördert; der Abstand zwischen beiden IST das ΔT. Bei Zusatzheizer OFF gleich der Zeile darunter." } },
-  { re: /^leaving water temp\. \(buh\)$/i,
-    what: "The same water AFTER the electric backup heater — what the house actually receives. The difference to the row above is the heater's contribution.",
-    normal: "identical to the pre-heater reading whenever the backup heater is off, which is most of the time. A persistent gap means it is running, and that is resistance heat at a COP of 1.",
-    de: { what: "Dasselbe Wasser NACH dem elektrischen Zusatzheizer — das, was im Haus ankommt. Die Differenz zur Zeile darüber ist der Beitrag des Heizstabs.",
-          normal: "bei Zusatzheizer OFF identisch mit dem Wert davor, und das ist der Normalfall. Ein dauerhafter Abstand heißt: er läuft — Widerstandswärme mit COP 1." } },
-  { re: /^liquid refrigerant temp\.$/i,
-    what: "The refrigerant temperature in the liquid line between the outdoor unit and the exchanger — after it has given up its heat and condensed.",
-    normal: "a few kelvin above the leaving water in heating, and it tracks the water rather than the weather. Far below outdoor air while idle simply means the circuit is at rest.",
-    de: { what: "Die Kältemitteltemperatur in der Flüssigkeitsleitung zwischen Außeneinheit und Wärmetauscher — nachdem es seine Wärme abgegeben hat und kondensiert ist.",
-          normal: "im Heizbetrieb einige Kelvin über dem Vorlauf, und sie folgt dem Wasser, nicht dem Wetter. Im Stillstand deutlich unter der Außentemperatur heißt schlicht: der Kreis ruht." } },
-  { re: /^room temp\.$/i,
-    what: "The room temperature the remote controller measures, as the gateway passes it on.",
-    normal: "no value on installations whose controller is not mounted in a reference room or has no room sensor configured — measured here, this unit reports exactly that.",
-    de: { what: "Die Raumtemperatur, die das Bedienteil misst, so wie das Gateway sie weiterreicht.",
-          normal: "kein Wert bei Anlagen, deren Bedienteil nicht im Referenzraum sitzt oder keinen Raumfühler konfiguriert hat — hier gemessen meldet diese Anlage genau das." } },
-  { re: /^power consumption$/i,
-    what: "The unit's electrical input, MEASURED by the gateway. The X10A service port has no equivalent at all — everything the dashboard shows from that side is estimated from phase currents at an assumed 230 V, so this is the honest figure of the two.",
-    normal: "a few hundred watts in standby, one to three kilowatts under load. A high value with the compressor stopped is the backup heater or the tank's immersion heater, not the heat pump.",
-    de: { what: "Die elektrische Leistungsaufnahme, vom Gateway GEMESSEN. Der X10A-Serviceanschluss hat dafür überhaupt keine Entsprechung — was das Dashboard von dort zeigt, ist aus Phasenströmen bei angenommenen 230 V geschätzt. Von beiden ist das hier der ehrliche Wert.",
-          normal: "einige hundert Watt in Bereitschaft, ein bis drei Kilowatt unter Last. Ein hoher Wert bei stehendem Verdichter ist der Zusatz- oder der Speicherheizstab, nicht die Wärmepumpe." } },
-  { re: /^lwt main heating setpoint$/i,
-    what: "The target leaving-water temperature for the main heating circuit, read back from the gateway. Read-only here — this firmware never writes a pump register.",
-    normal: "follows the weather curve if one is configured, so it moves with the outdoor temperature rather than staying put. Lower is cheaper: every kelvin less costs the compressor real work.",
-    de: { what: "Die Soll-Vorlauftemperatur für den Haupt-Heizkreis, vom Gateway zurückgelesen. Hier nur lesend — diese Firmware schreibt kein Anlagenregister.",
-          normal: "folgt der Heizkurve, sofern eine eingestellt ist, wandert also mit der Außentemperatur statt still zu stehen. Niedriger ist günstiger: jedes Kelvin weniger spart dem Verdichter echte Arbeit." } },
-  { re: /^lwt main cooling setpoint$/i,
-    what: "The same target for cooling mode. Only meaningful on installations that actually cool.",
-    normal: "unused on a heating-only system, where it simply holds whatever value it was configured with.",
-    de: { what: "Derselbe Sollwert für den Kühlbetrieb. Nur bei Anlagen von Bedeutung, die tatsächlich kühlen.",
-          normal: "auf einer reinen Heizungsanlage ungenutzt — der Wert steht dann einfach auf dem, was konfiguriert wurde." } },
+  // X10A catalog label already resolves to. The entries below are the HomeHub-specific remainder;
+  // coverage alone is not semantic correctness (a setpoint must not inherit an ON/OFF explanation
+  // merely because its label contains "thermostat").
+  { exact: true, re: /^unit abnormality$/i,
+    what: "The unit's current diagnostic state reported by the HomeHub: No error, Fault or Warning.",
+    normal: "No error means that this register reports neither a current Fault nor Warning. For Fault or Warning, read the neighbouring code and sub-code; this state alone does not identify the cause.",
+    de: { what: "Der vom HomeHub gemeldete aktuelle Diagnosezustand der Anlage: Kein Fehler, Fehler oder Warnung.",
+          normal: "Kein Fehler bedeutet, dass dieses Register aktuell weder Fehler noch Warnung meldet. Bei Fehler oder Warnung den benachbarten Code und Subcode mitlesen; der Zustand allein benennt keine Ursache." } },
+  { exact: true, re: /^unit abnormality code$/i, faultCode: true,
+    what: "Meaning of the currently reported fault code",
+    de: { what: "Bedeutung des aktuell gemeldeten Fehlercodes" } },
+  { exact: true, re: /^unit abnormality sub code$/i,
+    what: "The numeric sub-code that narrows the neighbouring Daikin diagnostic code to a specific case.",
+    normal: "It is supplemental information, not a status by itself. Read it only together with Unit abnormality and its code; unavailable values are deliberately not displayed.",
+    de: { what: "Der numerische Subcode, der den benachbarten Daikin-Diagnosecode auf einen konkreten Fall eingrenzt.",
+          normal: "Er ist eine Zusatzinformation und allein kein Status. Nur zusammen mit Anlagenstatus und Code auswerten; nicht verfügbare Werte werden bewusst nicht angezeigt." } },
+  { exact: true, re: /^dhw normal operation$/i,
+    what: "Whether normal domestic-hot-water operation is active. The UI renders the HomeHub states Operating and Idle/buffering as ON and OFF.",
+    normal: "ON = Operating; OFF = Idle/buffering. This flag says that DHW operation is active, but not why it started.",
+    de: { what: "Ob der normale Warmwasserbetrieb aktiv ist. Die HomeHub-Zustände In Betrieb und Leerlauf/Pufferung werden in der UI als ON und OFF dargestellt.",
+          normal: "ON = In Betrieb; OFF = Leerlauf/Pufferung. Das Flag zeigt einen aktiven Warmwasserbetrieb, aber nicht dessen Auslöser." } },
+  { exact: true, re: /^space heating\/cooling normal operation$/i,
+    what: "Whether normal space heating or cooling operation is active. The UI renders the HomeHub states Operating and Idle/buffering as ON and OFF.",
+    normal: "ON = Operating; OFF = Idle/buffering. Use Operation mode to distinguish Heating from Cooling and the valve position to see the selected water route.",
+    de: { what: "Ob der normale Raumheiz- oder Kühlbetrieb aktiv ist. Die HomeHub-Zustände In Betrieb und Leerlauf/Pufferung werden in der UI als ON und OFF dargestellt.",
+          normal: "ON = In Betrieb; OFF = Leerlauf/Pufferung. Heizen oder Kühlen unterscheidet die Betriebsart; den gewählten Wasserweg zeigt die Ventilposition." } },
+  { exact: true, re: /^leaving water temperature phe$/i,
+    what: "The water temperature leaving the plate heat exchanger, before the electric backup heater.",
+    normal: "Compare it with return temperature only while water is circulating: it is normally higher during heating and lower during cooling. Their difference is the water-side ΔT.",
+    de: { what: "Die Wassertemperatur am Austritt des Plattenwärmetauschers, vor dem elektrischen Zusatzheizer.",
+          normal: "Nur bei Wasserumlauf mit der Rücklauftemperatur vergleichen: beim Heizen normalerweise höher, beim Kühlen niedriger. Die Differenz ist das wasserseitige ΔT." } },
+  { exact: true, re: /^leaving water temperature buh$/i,
+    what: "The leaving-water temperature after the electric backup heater.",
+    normal: "With the backup heater OFF it should be close to the PHE value. A rise across the two sensors can indicate heater contribution, but confirm it with the BUH state rather than temperature alone.",
+    de: { what: "Die Vorlauftemperatur nach dem elektrischen Zusatzheizer.",
+          normal: "Bei Zusatzheizer OFF sollte sie nahe am PHE-Wert liegen. Ein Anstieg zwischen beiden Fühlern kann einen Heizbeitrag zeigen, sollte aber mit dem BUH-Status bestätigt werden." } },
+  { exact: true, re: /^domestic hot water temperature$/i,
+    what: "The water temperature measured in the domestic-hot-water tank.",
+    normal: "Below the DHW target is expected after hot water has been used. During DHW operation ON it should rise; if it does not, compare operation, flow and diagnostic rows before drawing a conclusion.",
+    de: { what: "Die im Warmwasserspeicher gemessene Wassertemperatur.",
+          normal: "Nach einer Warmwasserentnahme liegt sie erwartbar unter dem Sollwert. Bei Warmwasserbetrieb ON sollte sie steigen; tut sie das nicht, Betriebs-, Durchfluss- und Diagnosezeilen gemeinsam prüfen." } },
+  { exact: true, re: /^liquid refrigerant temperature$/i,
+    what: "The refrigerant temperature in the liquid line between the outdoor unit and the indoor heat exchanger.",
+    normal: "Its expected relationship to water and outdoor temperature changes with Heating, Cooling and idle operation. A single value without operating context is not a fault diagnosis.",
+    de: { what: "Die Kältemitteltemperatur in der Flüssigkeitsleitung zwischen Außeneinheit und Innenwärmetauscher.",
+          normal: "Ihr Verhältnis zu Wasser- und Außentemperatur ändert sich mit Heizen, Kühlen und Stillstand. Ein Einzelwert ohne Betriebskontext ist keine Störungsdiagnose." } },
+  { exact: true, re: /^remote controller room temperature main$/i,
+    what: "The main-zone room temperature reported by the remote controller.",
+    normal: "No value is expected when that room sensor is not available or configured. When present, compare it with the controller display and consider where the controller is mounted.",
+    de: { what: "Die vom Bedienteil gemeldete Raumtemperatur der Hauptzone.",
+          normal: "Kein Wert ist erwartbar, wenn dieser Raumfühler nicht verfügbar oder konfiguriert ist. Bei vorhandenem Wert mit der Anzeige des Bedienteils vergleichen und dessen Montageort berücksichtigen." } },
+  { exact: true, re: /^heat pump power consumption$/i,
+    what: "The electrical power consumption reported by the heat-pump system through the HomeHub. The X10A side only provides an estimate derived from phase currents.",
+    normal: "The expected value depends on mode, load and model. Correlate it with compressor and electric-heater states; do not attribute the whole value to the compressor alone.",
+    de: { what: "Die vom Wärmepumpensystem über den HomeHub gemeldete elektrische Leistungsaufnahme. Die X10A-Seite liefert dafür nur eine aus Phasenströmen abgeleitete Schätzung.",
+          normal: "Der erwartbare Wert hängt von Betriebsart, Last und Modell ab. Mit Verdichter- und Elektroheizerstatus abgleichen und nicht den gesamten Wert allein dem Verdichter zuschreiben." } },
+  { exact: true, re: /^leaving water main heating setpoint$/i,
+    what: "The target leaving-water temperature for the main heating zone, read back from the HomeHub. It is read-only in this firmware.",
+    normal: "It can be fixed or weather-dependent according to the controller settings. Lower targets can improve efficiency if the building still reaches its room-temperature target.",
+    de: { what: "Die vom HomeHub zurückgelesene Soll-Vorlauftemperatur der Haupt-Heizzone. In dieser Firmware ist sie nur lesbar.",
+          normal: "Je nach Reglereinstellung kann sie fest oder witterungsabhängig sein. Niedrigere Sollwerte können die Effizienz verbessern, sofern das Gebäude sein Raumtemperaturziel weiterhin erreicht." } },
+  { exact: true, re: /^leaving water main cooling setpoint$/i,
+    what: "The target leaving-water temperature for the main cooling zone, read back from the HomeHub. It is read-only in this firmware.",
+    normal: "It is relevant only when cooling is supported and enabled; otherwise a configured value may remain visible without active cooling.",
+    de: { what: "Die vom HomeHub zurückgelesene Soll-Vorlauftemperatur der Haupt-Kühlzone. In dieser Firmware ist sie nur lesbar.",
+          normal: "Sie ist nur bei unterstützter und freigegebener Kühlung relevant; andernfalls kann ein konfigurierter Wert auch ohne aktiven Kühlbetrieb sichtbar bleiben." } },
   { re: /^space heating\/cooling on\/off$/i,
     what: "Whether the space circuit is ENABLED at all — the switch, not the current activity. The space-operation row above says whether it is being served right now.",
-    normal: "on through the heating season, off in summer. Off here means no amount of demand will start the circuit.",
-    de: { what: "Ob der Heiz-/Kühlkreis überhaupt FREIGEGEBEN ist — der Schalter, nicht die aktuelle Tätigkeit. Ob er gerade bedient wird, sagt die Zeile „Space operation\" weiter oben.",
-          normal: "in der Heizperiode ON, im Sommer OFF. Steht er hier auf OFF, startet den Kreis auch keine Anforderung." } },
-  { re: /^quiet mode$/i,
+    normal: "ON = space heating/cooling enabled; OFF = disabled. OFF prevents normal space operation regardless of demand; seasonal scheduling depends on the installation's settings.",
+    de: { what: "Ob der Raumheiz-/Kühlkreis überhaupt FREIGEGEBEN ist — der Schalter, nicht die aktuelle Tätigkeit. Ob er gerade bedient wird, sagt die Zeile zum normalen Raumheiz-/Kühlbetrieb.",
+          normal: "ON = Raumheizung/-kühlung freigegeben; OFF = gesperrt. OFF verhindert den normalen Raumbetrieb unabhängig von einer Anforderung; die saisonale Schaltung hängt von der Anlagenkonfiguration ab." } },
+  { exact: true, re: /^quiet mode operation$/i,
     what: "Low-noise operation: the outdoor unit caps its fan and compressor speed, which costs capacity.",
-    normal: "off by default, or on to a schedule at night. On during a cold snap is worth knowing — it is a reason for a plant that cannot keep up.",
+    normal: "ON = quiet mode active; OFF = inactive. Whether a schedule enables it is installation-specific. If heat demand is not met while it is ON, the reduced output limit is relevant context.",
     de: { what: "Geräuscharmer Betrieb: die Außeneinheit begrenzt Lüfter- und Verdichterdrehzahl, was Leistung kostet.",
-          normal: "standardmäßig OFF oder nachts per Zeitprogramm ON. Bei Frost ON ist eine Erklärung wert — es ist ein Grund dafür, dass eine Anlage nicht nachkommt." } },
+          normal: "ON = Leisebetrieb aktiv; OFF = inaktiv. Ob ein Zeitprogramm ihn einschaltet, ist anlagenspezifisch. Wird der Wärmebedarf bei ON nicht erreicht, ist die reduzierte Leistungsgrenze ein relevanter Zusammenhang." } },
   { re: /^dhw reheat setpoint$/i,
-    what: "The tank temperature at which the unit starts a reheat, rather than waiting for the full DHW setpoint to be called for.",
-    normal: "a few kelvin under the DHW setpoint. Set close to it and the unit reheats constantly; set far below and hot water runs out before it reacts.",
-    de: { what: "Die Speichertemperatur, ab der die Anlage nachheizt, statt auf eine volle Warmwasser-Anforderung zu warten.",
-          normal: "einige Kelvin unter dem Warmwasser-Sollwert. Zu dicht daran heizt die Anlage ständig nach; zu weit darunter ist das warme Wasser alle, bevor sie reagiert." } },
-  { re: /^power limit \(buffering\)$/i,
-    what: "The electrical cap the unit holds while a Smart-Grid buffering signal is active — the ceiling it may draw when it is being asked to soak up surplus power.",
-    normal: "set by whatever drives the Smart-Grid input. Only meaningful while the Smart-Grid mode row is in a buffering state.",
-    de: { what: "Die elektrische Obergrenze, die die Anlage bei aktivem Smart-Grid-Puffersignal einhält — wie viel sie ziehen darf, wenn sie Überschuss aufnehmen soll.",
-          normal: "wird von dem gesetzt, was das Smart-Grid-Signal steuert. Nur von Bedeutung, solange die Zeile „Smart-Grid operation mode\" auf Puffern steht." } },
-  { re: /^power limit \(general\)$/i,
-    what: "The general electrical cap for the unit, independent of any Smart-Grid signal.",
-    normal: "at or near the unit's own maximum unless someone has deliberately limited it — a low value here silently limits capacity in every mode.",
-    de: { what: "Die allgemeine elektrische Obergrenze der Anlage, unabhängig von jedem Smart-Grid-Signal.",
-          normal: "liegt am Maximum der Anlage, sofern niemand sie bewusst begrenzt hat — ein niedriger Wert hier deckelt still die Leistung in jeder Betriebsart." } },
+    what: "The target tank temperature used for DHW reheat operation. It is not, by itself, the temperature at which reheat starts.",
+    normal: "The start threshold also depends on the configured reheat hysteresis and operating schedule. Interpret this target together with those settings and the current tank temperature.",
+    de: { what: "Die Zieltemperatur des Warmwasserspeichers für den Nachheizbetrieb. Sie ist für sich allein nicht die Temperatur, bei der das Nachheizen startet.",
+          normal: "Die Startschwelle hängt zusätzlich von der eingestellten Nachheiz-Hysterese und dem Betriebszeitplan ab. Diesen Sollwert zusammen mit diesen Einstellungen und der aktuellen Speichertemperatur bewerten." } },
+  { exact: true, re: /^power limit during recommended on \/ buffering$/i,
+    what: "The electrical power limit used during Smart-Grid Recommended on buffering.",
+    normal: "During buffering in Recommended on, the effective limit is the lower of this value and General power limit. It is a configured ceiling, not the unit's current consumption.",
+    de: { what: "Die elektrische Leistungsgrenze während der Smart-Grid-Pufferung im Modus Empfohlen ON.",
+          normal: "Bei Pufferung mit Empfohlen ON gilt der niedrigere Wert aus dieser Grenze und der allgemeinen Leistungsgrenze. Das ist eine konfigurierte Obergrenze und nicht die aktuelle Leistungsaufnahme." } },
+  { exact: true, re: /^general power limit$/i,
+    what: "The general electrical power limit applied by the HomeHub, including during Free running.",
+    normal: "It is a configured ceiling, not measured consumption. A lower value intentionally restricts the power available to the unit across the Smart-Grid operating modes.",
+    de: { what: "Die allgemeine elektrische Leistungsgrenze des HomeHub, die auch bei Freier Betrieb gilt.",
+          normal: "Sie ist eine konfigurierte Obergrenze und keine gemessene Leistungsaufnahme. Ein niedrigerer Wert begrenzt die für die Anlage verfügbare Leistung über die Smart-Grid-Betriebsarten hinweg." } },
 ];
 
 // ── The two sources ─────────────────────────────────────────────────────────────────────────────
@@ -2353,12 +2452,40 @@ const mbForInspect = (key) => {
   const p = MB_PAIRS.find((q) => q.insp === key);
   return p ? mbByConcept(p.cid) : null;
 };
+// A true binary row as a tri-state boolean (null = absent or malformed). A plain numeric 0/1 can be
+// a count or a setpoint, so the structural marker is mandatory.
+const binaryValue = (r) => {
+  if (!r || r.value == null || r.binary !== true) return null;
+  const value = String(r.value).trim();
+  if (value === "1") return true;
+  if (value === "0") return false;
+  return null;
+};
+// Most gateway states retain the firmware-wide numeric 1/0 contract. The 3-way valve is different:
+// EKRHH §9.2 defines its values as the named destinations "Space heating" and "DHW", so it is an
+// enum rather than an ON/OFF flag. Preserve that meaning while still giving the schematic a boolean
+// direction to route on.
+const mbBinaryValue = (r) => {
+  const binary = binaryValue(r);
+  if (binary != null) return binary;
+  if (r && r.off === 37) {
+    const value = String(r.value).trim();
+    if (value === "DHW") return true;
+    if (value === "Space heating") return false;
+  }
+  return null;
+};
 // A HomeHub STATE register by its EKRHH offset, as a tri-state boolean (null = the gateway did not
 // answer it either). State is not a reading: it carries no unit and no trend, so it rides the offset
 // rather than the concept vocabulary logic/homehub_map.hpp reserves for paired MEASUREMENTS.
-const mbBool = (off) => {
-  const r = mbRow(off);
-  return r ? String(r.value).trim() === "1" : null;
+const mbBool = (off) => mbBinaryValue(mbRow(off));
+// EKRHH input 21 is a three-state enum, not a flag: Warning must neither remain numeric "2" nor be
+// collapsed into Fault. Return only the manufacturer's canonical states used by the status header.
+const mbUnitAbnormality = () => {
+  const r = mbRow(21);
+  if (!r) return null;
+  const value = String(r.value).trim();
+  return value === "No error" || value === "Fault" || value === "Warning" ? value : null;
 };
 // The same register as raw TEXT — the error code is a Text16, not a flag.
 const mbVal = (off) => { const r = mbRow(off); return r ? String(r.value) : null; };
@@ -2376,14 +2503,20 @@ const MB_OFF_SMART_GRID = 56;
 // was meant. Null when the gateway did not answer 51 — a missing measurement, never the nearest
 // number that shares its unit.
 const mbPower = () => mbRow(MB_OFF_POWER);
-// Smart-Grid operation mode is an enum, not a flag: 0 free, 1 forced off, 2 recommended on,
-// 3 forced on. Refuse anything else rather than turning an unknown future/corrupt value into a
-// plausible-looking request in the schematic.
+// The HomeHub boundary exposes canonical enum text instead of opaque register numbers. Translate
+// those four names back to the drawing's compact internal index in one deliberately closed map;
+// unknown future/corrupt values must not become a plausible-looking Smart-Grid request.
+const SMART_GRID_MODE_NUMBER = Object.freeze({
+  "Free running": 0,
+  "Forced off": 1,
+  "Recommended on": 2,
+  "Forced on": 3,
+});
 const mbSmartGridMode = () => {
   const r = mbRow(MB_OFF_SMART_GRID);
   if (!r) return null;
-  const n = Number(String(r.value).trim());
-  return Number.isInteger(n) && n >= 0 && n <= 3 ? n : null;
+  const n = SMART_GRID_MODE_NUMBER[String(r.value).trim()];
+  return Number.isInteger(n) ? n : null;
 };
 // One lookup both go through. Gated on mbLive() for mbByConcept's reason: correct on its own.
 const mbRow = (off) =>
@@ -2467,14 +2600,14 @@ function mbNoteHtml(row, mb) {
 // same shape the X10A row above it has, so the two line up and read as two instruments answering
 // one question rather than a reading and a footnote about it.
 //
-// The label is the MODBUS register's own (`Return water temp.`), never the X10A row's. Under an
-// X10A row called "3way valve" the gateway's line reads "3-way valve to DHW", which NAMES the
-// register the number came from — and naming it is the point: this line is what someone verifying
+// The label is the MODBUS register's own (`Return water temperature`), never the X10A row's. Under
+// an X10A row called "3way valve" the gateway's line reads "3-way valve", which NAMES the
+// register the status came from — and naming it is the point: this line is what someone verifying
 // the pairing on real hardware reads to check that the two rows are the same quantity. Reusing the
 // X10A label would show them their own assumption back.
 function mbRowHtml(mb) {
   return `<div class="mb-line">` +
-    `<span>${esc(displayReadingLabel(mb.label || ""))} ` +
+    `<span>${esc(displayHomeHubLabel(mb))} ` +
       `<span class="mb-tag">${esc(t("src.modbus_tag"))}</span></span>` +
     `<span>${esc(displayValue(mb))}${mb.unit ? " " + esc(mb.unit) : ""}</span></div>`;
 }
@@ -2511,12 +2644,12 @@ function mbDeltaHtml(row, mb) {
   // A bit flag has no difference to state. Agreement on a flag is unremarkable and says nothing;
   // a MISMATCH is worth a line, since the two sources are then contradicting each other about a
   // discrete fact rather than differing by a tolerance.
-  if (row.binary || mb.binary) {
-    // Compared on the raw "1"/"0" the firmware serves (#210's structural encoding), never on the
-    // rendered ON/OFF text — the two sources format independently and a text compare would call
-    // them different because one spelled it another way.
-    const on = (v) => String(v.value).trim() === "1";
-    return on(row) === on(mb) ? "" : `<div class="mb-delta">${esc(t("src.disagree"))}</div>`;
+  const x10aState = binaryValue(row), mbState = mbBinaryValue(mb);
+  if (x10aState != null || mbState != null) {
+    // X10A serves binary flags as 1/0; the gateway's valve serves its named destination. Compare
+    // their structural meanings, never their different wire spellings.
+    return x10aState != null && mbState != null && x10aState === mbState
+      ? "" : `<div class="mb-delta">${esc(t("src.disagree"))}</div>`;
   }
   const a = parseFloat(row.value), b = parseFloat(mb.value);
   if (!Number.isFinite(a) || !Number.isFinite(b)) return why ? `<div class="mb-delta">${esc(why)}</div>` : "";
@@ -2525,10 +2658,33 @@ function mbDeltaHtml(row, mb) {
   return `<div class="mb-delta">${esc(head)}${why ? " — " + esc(why) : ""}</div>`;
 }
 
-// Description body: the plain "what is it" sentence, plus an optional "Normal:" note.
-function descBodyHtml(d) {
+// Explain only the code the row reports NOW. Keeping all 63 meanings as a lookup is useful; printing
+// all 63 every time the row opens is not. An unavailable HomeHub value (`--`) must not be translated
+// into "no fault" because the neighbouring diagnostic-state register is the authority for that.
+function faultCodeDetailHtml(currentValue) {
+  const raw = String(currentValue == null ? "" : currentValue).trim();
+  const match = raw.match(/^([0-9A-Z]{2})(?=$|[:\s-])/i);
+  if (!match) {
+    return descParaHtml(esc(LANG === "de"
+      ? "Aktuell wird kein Fehlercode übertragen."
+      : "No fault code is currently being transmitted."));
+  }
+  const code = match[1].toUpperCase();
+  const entry = DAIKIN_FAULT_CODES.find((candidate) => candidate.code === code);
+  const meaning = entry
+    ? (LANG === "de" ? entry.de : entry.en)
+    : (LANG === "de" ? "Keine Kurzbeschreibung für diesen Code hinterlegt."
+                     : "No short explanation is stored for this code.");
+  return `<div class="fault-code-current"><code>${esc(code)}</code><span>${esc(meaning)}</span></div>`;
+}
+
+// Description body: the plain "what is it" sentence, plus an optional "Normal:" note or the current
+// fault-code meaning. `currentValue` is optional because most explainers do not need their row value.
+function descBodyHtml(d, currentValue) {
   const b = (LANG === "de" && d.de) ? d.de : d;   // German copy when present, else the English row
-  return descParaHtml(esc(b.what)) + (b.normal ? descNoteHtml(t("normal.label"), b.normal) : "");
+  if (d.faultCode) return faultCodeDetailHtml(currentValue);
+  const intro = descParaHtml(esc(b.what));
+  return intro + (b.normal ? descNoteHtml(t("normal.label"), b.normal) : "");
 }
 // ── 24-hour trend (a historied value row's explainer carries a sparkline under the text) ──────
 // WHICH rows have a trend is the FIRMWARE's answer, read from /status.history.rows: the device keeps
@@ -3029,10 +3185,18 @@ function renderTrendHosts() { renderCards(); renderInspect(); renderSettings(); 
 
 const chevIcon = `<svg class="vrow-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>`;
 
-// /values keeps the firmware-wide numeric 0/1 contract and marks converter-300..307 rows with
-// binary:true. Render only those rows as ON/OFF at the last, visual boundary: a plain numeric 0 or 1 can
-// also be a real count/stage, and labels are neither complete nor stable enough to infer a type.
-// Unexpected binary payloads stay visible verbatim instead of being silently misreported as OFF.
+const ENUM_VALUE_I18N = Object.freeze({
+  "Auto": "enum.auto", "Heating": "enum.heating", "Cooling": "enum.cooling",
+  "No error": "enum.no_error", "Fault": "enum.fault", "Warning": "enum.warning",
+  "Space heating": "enum.space_heating", "DHW": "enum.dhw",
+  "Free running": "enum.free_running", "Forced off": "enum.forced_off",
+  "Recommended on": "enum.recommended_on", "Forced on": "enum.forced_on",
+});
+
+// /values keeps the firmware-wide numeric 0/1 contract and marks true flags with binary:true.
+// Render only those rows as ON/OFF at the last, visual boundary: a plain numeric 0 or 1 can also be
+// a real count/stage. Named HomeHub enums arrive as stable English manufacturer terms and are
+// translated here; an undocumented value remains visible with its raw number.
 function displayValue(v) {
   if (!v || v.value == null) return "—";
   const raw = String(v.value);
@@ -3041,6 +3205,11 @@ function displayValue(v) {
     if (state === "1") return t("state.on");
     if (state === "0") return t("state.off");
   }
+  const state = raw.trim();
+  const enumKey = ENUM_VALUE_I18N[state];
+  if (enumKey) return t(enumKey);
+  const unknown = /^Unknown \((-?\d+)\)$/.exec(state);
+  if (unknown) return t("enum.unknown", unknown[1]);
   return raw;
 }
 
@@ -3056,6 +3225,44 @@ function displayReadingLabel(label) {
     .replace(/[\s.]+ON\/OFF\s*$/i, "")
     .trim();
   return cleaned || raw;
+}
+
+// HomeHub API labels remain the manufacturer's stable English register names. The German UI names
+// the same rows at the visual boundary, keyed by the documented offset rather than by prose, so a
+// label edit cannot silently attach the wrong translation to another register.
+const HOMEHUB_LABEL_DE = Object.freeze({
+  21: "Diagnosezustand der Anlage",
+  22: "Fehlercode der Anlage",
+  23: "Fehler-Subcode der Anlage",
+  30: "Umwälzpumpe aktiv",
+  37: "Position des 3-Wege-Ventils",
+  52: "Warmwasserbetrieb",
+  53: "Raumheiz-/Kühlbetrieb",
+  40: "Vorlauftemperatur (Plattenwärmetauscher)",
+  41: "Vorlauftemperatur (Zusatzheizer)",
+  42: "Rücklauftemperatur",
+  43: "Warmwasserspeichertemperatur",
+  44: "Außentemperatur",
+  45: "Kältemitteltemperatur (Flüssigkeitsleitung)",
+  49: "Volumenstrom",
+  50: "Raumtemperatur (Hauptzone)",
+  51: "Elektrische Leistungsaufnahme",
+  1: "Vorlauf-Sollwert Heizen (Hauptzone)",
+  2: "Vorlauf-Sollwert Kühlen (Hauptzone)",
+  3: "Heiz-/Kühlmodus",
+  4: "Raumheizung/-kühlung freigegeben",
+  6: "Raum-Solltemperatur Heizen (Hauptzone)",
+  7: "Raum-Solltemperatur Kühlen (Hauptzone)",
+  9: "Leisebetrieb",
+  10: "Warmwasser-Nachheiz-Sollwert",
+  56: "Smart-Grid-Betriebsart",
+  57: "Leistungsgrenze (Pufferung)",
+  58: "Leistungsgrenze (allgemein)",
+});
+function displayHomeHubLabel(row) {
+  const fallback = displayReadingLabel(row && row.label);
+  if (LANG !== "de" || !row || row.off == null) return fallback;
+  return HOMEHUB_LABEL_DE[row.off] || fallback;
 }
 
 // The expandable row itself — a <button> header plus the collapsible panel beneath it. Shared by
@@ -3106,7 +3313,7 @@ function vDescRow(v) {
   // Body = the explainer, then the second source's reading, then the trend. Any part may be absent,
   // which is why the builder takes finished markup rather than a description.
   return descAccordion(label, shownLabel, val, cls,
-                       (d ? descBodyHtml(d) : "") + mbNoteHtml(v, mb) +
+                       (d ? descBodyHtml(d, src.value) : "") + mbNoteHtml(v, mb) +
                        histHtml(hid, v.unit, shownLabel), hid);
 }
 
@@ -3327,9 +3534,9 @@ function modbusOnlyGroupHtml(all) {
   const rows = (S._modbus || []).filter((m) => m && (all || !twinShown(m)) && m.value != null);
   if (!rows.length) return "";
   // Through the SAME accordion the X10A rows use, not a bare row of its own. A reading with no
-  // explainer is a naked number, and these were 25 of them: "3-way valve to DHW  1" tells a reader
-  // nothing about what 1 means or what it should be. The description audit guards the X10A catalog
-  // against exactly this and never saw these labels, so it stayed green while the card shipped.
+  // explainer is a naked value, and these were 25 of them: a valve destination without context tells
+  // a reader nothing about what it controls or what is normal. The description audit guards the
+  // X10A catalog against exactly this and never saw these labels, so it stayed green while the card shipped.
   // Copy comes from the one DESCRIPTIONS table (descFor), where 11 of the 27 gateway labels are
   // already answered by the entries written for their X10A twins — the same words for the same
   // quantity, which is the point of one table.
@@ -3339,7 +3546,7 @@ function modbusOnlyGroupHtml(all) {
   // meaningless on a row only one source carries. Where copy is missing the row degrades to the same
   // plain line it was before, rather than an empty panel that opens onto nothing.
   const html = rows.map((m) => {
-    const label = m.label || "", shown = displayReadingLabel(label);
+    const label = m.label || "", shown = displayHomeHubLabel(m);
     const val = esc(displayValue(m)) +
       (m.unit ? `<span class="vrow-unit">${esc(m.unit)}</span>` : "");
     const d = descFor(label);
@@ -3347,7 +3554,7 @@ function modbusOnlyGroupHtml(all) {
       return `<div class="vrow"><span class="vrow-label">${esc(shown)}</span>` +
         `<span class="vrow-val src-val-mb">${val}</span></div>`;
     }
-    return descAccordion(label, shown, val, "src-val-mb", descBodyHtml(d), null);
+    return descAccordion(label, shown, val, "src-val-mb", descBodyHtml(d, m.value), null);
   }).join("");
   // The heading has to match what is IN the card: "Modbus only" is true of the unpaired handful and
   // false the moment `all` folds the paired rows in beside them.
@@ -4446,7 +4653,8 @@ function renderInspect() {
   // and invisible to anyone who cannot separate the two hues — DESIGN.md's own rule is that colour
   // never carries a fact by itself. Everywhere else the badge already appears beside a gateway
   // reading; this was the one place it did not.
-  const srcName = displayReadingLabel(row ? row.label : fb ? fb.label : (e.sample || ""));
+  const srcName = fb ? displayHomeHubLabel(fb)
+                     : displayReadingLabel(row ? row.label : (e.sample || ""));
   $("inspSrc").innerHTML = esc(srcName) +
     (fb ? ` <span class="mb-tag">${esc(t("src.modbus_tag"))}</span>` : "");
   $("inspSrc").hidden = !(row || fb || e.sample);
@@ -4476,7 +4684,8 @@ function renderInspect() {
   const sentence = inspNowText(e, d);
   const desc = e.sample ? descFor(e.sample) : null;
   const ownWhat = typeof e.what === "function" ? e.what(d) : e.what;
-  const what = ownWhat ? descParaHtml(esc(tx(ownWhat))) : (desc ? descBodyHtml(desc) : "");
+  const what = ownWhat ? descParaHtml(esc(tx(ownWhat)))
+                       : (desc ? descBodyHtml(desc, (row || fb)?.value) : "");
   // The SECOND source, after the description — the same line the value list draws, through the same
   // mbNoteHtml, because a tap on the drawing and a tap on the row are the same question about the
   // same reading and must not answer it in two different shapes. The DRAWING itself stays X10A while
@@ -4501,7 +4710,7 @@ function renderInspect() {
       // from, which is what someone checking the pairing against real hardware needs to read.
       return row +
         `<div class="inspect-row mb-row">` +
-          `<span>${esc(displayReadingLabel(m.mb.label || ""))} ` +
+          `<span>${esc(displayHomeHubLabel(m.mb))} ` +
             `<span class="mb-tag">${esc(t("src.modbus_tag"))}</span></span>` +
           `<span>${esc(displayValue(m.mb))}${m.mb.unit ? " " + esc(m.mb.unit) : ""}</span></div>`;
     })

@@ -38,6 +38,21 @@ HomeHub contract: the discovered IPv4 remains the main value, a structured Modbu
 as localised subtle text underneath it and in the accessible name, and unknown future codes fall back
 to escaped human-readable API prose.
 
+`node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named
+HomeHub status in the EKRHH register map. It pins the manufacturer terms in English and German,
+unknown-value visibility, and the boundary between named enums, structural binary ON/OFF flags and
+ordinary numeric `0`/`1` values.
+
+`node test/test_ui_homehub_copy.mjs` audits all 27 curated HomeHub rows as one semantic contract:
+the register guide's English name, the German visual label, the matching bilingual explanation and
+the visible status vocabulary. It also pins exact matches where a broad catalog regex would be
+misleading, notably room-temperature setpoints versus the unrelated `Thermo ON` demand flag.
+
+`node test/test_ui_error_codes.mjs` keeps the Error code row concise and source-aligned. It compares
+the internal 63-code lookup with `main/logic/error_codes.hpp`, requires a short German meaning for
+each code and executes the production renderer in both languages. Only the currently reported code
+and its meaning may appear; unavailable and unknown values have explicit, non-invented fallbacks.
+
 `node test/test_ui_board_preset.mjs` executes the production Board Hardware modal functions. It
 pins the first-boot case where the build defaults equal the Seeed XIAO values but the board selector
 must still open on **Custom**, then verifies that choosing and editing presets within the open modal
