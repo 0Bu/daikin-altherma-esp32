@@ -1,18 +1,20 @@
 #pragma once
-// The 24-hour plant health checkup — storage and plumbing. Everything decidable (the row locators,
+// The rolling X10A plant observation — storage and plumbing. Everything decidable (row locators,
 // the edge rules, the ring mechanics, the thresholds and the verdicts) lives in logic/checkup.hpp and
 // is host-tested; this file is the static ring, one mutex, and the fold from a poll cycle's cached
 // values into the open hour.
 //
-// STATIC (.bss), never heap — the same argument history.hpp makes: the binding limit on this board
-// is the largest CONTIGUOUS free block, and a static array does not compete for it. 24 one-hour
-// buckets cost logic/checkup.hpp's CHECKUP_BYTES.
+// STATIC (.data), never heap — the same argument history.hpp makes: the binding limit on this board
+// is the largest CONTIGUOUS free block, and a static array does not compete for it. The non-zero
+// absence sentinels make this initialized data rather than .bss. 24 one-hour buckets cost
+// logic/checkup.hpp's CHECKUP_BYTES.
 //
 // RAM only, and deliberately not persisted. Hourly buckets in NVS would be ~24 writes a day into the
 // partition that holds the WiFi credentials, for a convenience — the same trade history.hpp already
-// refused for the trends. The consequence is STATED rather than hidden: a reboot empties the window,
-// and every check reports the coverage it actually has (logic/checkup.hpp's Collecting verdict)
-// instead of a green light bought with no evidence.
+// refused for the trends. The consequence is STATED rather than hidden: a reboot or an explicit X10A
+// re-detection/profile/pin identity change empties the window, and every check reports the coverage
+// it actually has (logic/checkup.hpp's Collecting verdict) instead of a green light bought with no
+// evidence. A HomeHub-only edit is a separate source and deliberately does not reset X10A history.
 #include "hp_poll.hpp"          // CachedValue
 #include "logic/checkup.hpp"
 
@@ -28,7 +30,14 @@ namespace daik {
 // held-over marking (logic/ou_stale.hpp). Passed in rather than re-derived: two answers to "is the
 // compressor running" is how the trend ring and the MQTT bridge would come to blank different rows,
 // and here it would be how a compressor start gets counted by one rule and not the other.
-void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running);
+void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
+                    const logic::CheckupCoverage& coverage);
+
+// Start a new observation identity after explicit X10A re-detection, link rewiring or profile
+// selection. Cross-task safe: only record consumes it under the checkup mutex and discards that
+// in-flight sample; report stays empty while the request is pending.
+// HomeHub-only reconfiguration must not call this; it is an independent source.
+void checkup_reset();
 
 // The judged 24-hour window. Read by GET /status (httpd task) and by the WebSocket status broadcast
 // (poll task), so it copies out under the lock — the report is a plain POD, so nothing allocates

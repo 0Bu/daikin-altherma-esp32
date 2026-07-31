@@ -80,6 +80,12 @@ static void poll_once() {
     // iterates the VIEW; `prof` survives only for the two calls that need a flat contiguous array
     // (see the profile_refrigerant comment below).
     const auto    view = def::resolved(prof);
+    logic::CheckupCoverage checkup_coverage;
+    for (size_t i = 0; i < view.count(); i++) {
+        if (!row_publishable(view[i])) continue;
+        const ValueDef row = logic::adjudicated(view[i]);
+        logic::checkup_cover_row(checkup_coverage, row.reg, row.offset, row.conv, row.label);
+    }
     // If the UART can't be brought up on these pins, do NOT sweep: every hp_query would then read an
     // uninstalled driver and emit a misleading "HP timeout — check X10A cable / GND" per register.
     // Name the real cause once and keep the last good cache. (validate()/config_load now reject
@@ -93,6 +99,7 @@ static void poll_once() {
             s_stats.connected = false;
             s_stats.last_error.swap(err);                  // noexcept — see the commit below
         }
+        checkup_record(nullptr, 0, false, false, checkup_coverage);
         return;
     }
 
@@ -246,13 +253,13 @@ static void poll_once() {
     // `fresh` is still ours here — after the move below it is empty.
     history_record(fresh.data(), fresh.size());
 
-    // The 24-hour checkup, on the same terms and for the same reason it is here rather than derived
+    // The rolling X10A observation, on the same terms and for the same reason it is here rather than derived
     // later: compressor starts, defrosts and backup-heater minutes are EVENTS, and an event that
     // happens between two samples of a 5-minute trend ring leaves no trace in it at all — which is
-    // precisely the short cycling the checkup exists to find (logic/checkup.hpp). The compressor
+    // precisely the short-run evidence the observation exists to preserve (logic/checkup.hpp). The compressor
     // state is handed over rather than re-derived, so the checkup and the held-over marking above
     // can never disagree about whether the unit was running.
-    checkup_record(fresh.data(), fresh.size(), rps_known, rps_running);
+    checkup_record(fresh.data(), fresh.size(), rps_known, rps_running, checkup_coverage);
 
     // One commit, one lock site, and deliberately non-allocating: the vector move-assign steals
     // fresh's buffer and last_error is swapped (noexcept) rather than assigned, so the critical
@@ -332,6 +339,10 @@ static bool poll_detect() {                                    // returns true i
     } else {
         s_no_match = 0;
     }
+    // The profile/link now names a new observation identity. This is deliberately before the
+    // same-cycle poll: checkup_record consumes the reset and discards that in-flight boundary sample;
+    // the following sweep seeds only the resolved unit.
+    checkup_reset();
     config_set_model(d.best.empty() ? "generic" : d.best, d.page_mask, d.kw_tenths, d.iu_kw_tenths,
                      d.eeprom);
     return true;

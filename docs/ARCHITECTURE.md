@@ -439,46 +439,90 @@ host-testable core is unusually large and valuable, because the risky parts are 
   inference run without run-state on more than a third of the detected catalog. No firmware caller
   yet (#69 Phase 3 has not landed); pure and host-tested so the policy is asserted rather than
   re-litigated at the future call site.
-- `logic/checkup.hpp` — the **24-hour plant checkup** ([#208](https://github.com/0Bu/daikin-altherma-esp32/issues/208)):
+- `logic/checkup.hpp` — the **rolling X10A plant observation** ([#208](https://github.com/0Bu/daikin-altherma-esp32/issues/208)):
   the third question the dashboard answers, after *what is it doing now* (the schematic) and *what did
-  this one reading do today* (the trends). Counted events and window minima — compressor starts and
-  mean run length, defrost count and share of runtime, the lowest water pressure and flow,
-  backup-heater minutes, the unit's fault class, the protection-retry counters — judged on the device
-  and served as `/status.health` (`checkup.cpp` is the ring and the mutex; nothing is re-decided in
-  the browser, because a browser-side threshold would be a second, ungated definition of the same
-  judgement).
+  this one reading do today* (the trends). It reports counted events, durations and window minima —
+  compressor starts and observed runtime per detected start, defrost count and (where compressor
+  state exists) share of paired runtime, water pressure and steady-flow minima, observed BUH/BSH
+  seconds, the
+  unit's fault class and protection-retry counter changes — through `/status.health`. It does **not**
+  issue a plant-health certificate: X10A does not establish refrigerant charge, sensor calibration,
+  hydraulic cleanliness, air path, mechanical condition or seasonal efficiency. `checkup.cpp` owns
+  the ring and mutex; the browser renders the firmware's evidence classification without inventing
+  another threshold.
 
-  Three properties are worth stating, because each is a defect avoided rather than a feature added:
+  Four properties are worth stating, because each is a defect avoided rather than a feature added:
 
   1. **It is not a view over the trend rings.** `TrendRing::fold` keeps the *last* reading of each
      5-minute bucket, so a compressor cycle shorter than five minutes leaves no trace — and short
-     cycling is what the check exists to find. Events are counted on the 1 Hz poll path instead.
+     cycling is what the check exists to find. Events are therefore counted once per completed poll
+     sweep. The sweep plus the fixed one-second delay is not a true 1 Hz sampler; a pulse that begins
+     and ends between sweeps can still be missed, and neither firmware nor UI claims otherwise.
   2. **A row is addressed by (page, offset, converter)** — one key wider than a trend's locator, and
      the extra field is load-bearing. `3way valve`, `2way valve`, `BSH`, `BUH Step1`, `BUH Step2` and
      `Water pump operation` all sit in **one** dimensionless byte (`0x60/12`) and differ only in which
      bit their converter masks, so a (page, offset, unit) locator would resolve "backup-heater
      minutes" onto the 3-way valve's position — the #35–#39 shape with a day's statistics in front of
      it. The catalog test asserts uniqueness **and** identity (the resolved row's label) per locator
-     across every shipped profile. The fault class and the retry counters are matched by **converter
-     alone** (203, and 310/311): a profile carries a fault class on the outdoor page *and* the
-     hydronic one, and a locator would pick one unit and miss the other's fault. The compressor
-     witness composes `ou_is_rps_witness()` rather than naming a locator of its own.
-  3. **Five verdicts, and the two that are not judgements are the design.** `Unavailable` means this
-     profile cannot supply the inputs — `feature_gate.hpp`'s *disable, never degrade*, and it bites:
-     only 27 of 44 profiles carry the compressor witness. `Collecting` means the inputs exist and the
-     24-hour window does not hold enough of them yet. `Collecting` outranks `Ok` in the aggregation
-     and `Unavailable` does not, which is the whole honesty property — the ring is RAM-only and this
-     board reboots in bursts, so a half-observed window is the *normal* case, and a device that has
-     been up ten minutes has not established that the plant is fine.
+     across every shipped profile. Fault classes are matched by converter 203 so both the outdoor and
+     hydronic rows participate. Retry counters are **not** matched by converter alone: converter 311
+     also names BUH output capacity on page `0x63`. The five counters therefore have exact identities
+     on page `0x10`, offsets 10–12 and converters 310/311. The compressor witness composes
+     `ou_is_rps_witness()` rather than naming a locator of its own.
+  3. **Capability, elapsed span and evidence are separate.** Capability is derived from the active,
+     converter-adjudicated profile before the bus sweep; a timed-out page reduces evidence rather than
+     pretending the feature disappeared, and a profile change cannot leave an “ever seen” capability
+     latched. A reboot, explicit detection run, selected-profile change or RX/TX-pin change starts a
+     new X10A observation identity; a HomeHub-only edit does not. The reset request is consumed by the
+     recorder under its mutex, and that in-flight sample is discarded so an old-link sweep cannot seed
+     the new identity. The ring retains 23 completed one-hour buckets plus the pending hour, so its
+     represented span is never more than 24 hours. `full_span` is anchored to the first and latest
+     monotonic samples, not to phase-shifted bucket boundaries, and records that a real 24-hour
+     lifecycle has elapsed. Signal clocks derive whole seconds from the difference of absolute
+     timestamps, so the serial sweep's sub-second fractions telescope instead of being lost on every
+     interval; the 15-second continuity cutoff still compares exact microseconds. A check that
+     concludes absence of a pattern additionally needs at least 90% valid evidence from its own
+     signal. Direct current state and observation-only flow use their stated shorter eligibility
+     targets instead of pretending to be 24-hour absence claims. Each result therefore carries
+     `observed_s` and `required_s`; the report also carries `available`, `assessable` and `evaluated`.
+     `available` counts supported/reportable rows, including pure observations. `assessable` is the
+     narrower denominator of checks with a bounded judgement, and `evaluated` counts those that have
+     enough evidence. `Unavailable` means the profile lacks the required row, whereas `Collecting`
+     means it supports the check but has not established enough evidence.
+  4. **The evidence class limits the claim.** The unit's current fault class is direct `device`
+     evidence. Water pressure is `manufacturer` evidence: representative official manuals for
+     [Altherma 3 M 04–08](https://www.daikin.ie/content/dam/document-library/user%20reference%20guide/heat/Air%20to%20water%20heat%20pump%20low%20temperature/EBLA04-08EV3.EBLA04-08E3V3.EDLA04-08EV3.EDLA04-08E3V3_User%20reference%20guide_4PEN685231-1A_English.pdf),
+     [Altherma 3 R W](https://my.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/EHBH-D6V%2C%20EHBH-D9W%2C%20EHBX-D6V%2C%20EHBX-D9W%2C%20ERGA04-08DV%2C%20ERGA04-08DVA_4PEN496758-1B_2019_10_Installer%20reference%20guide_English.pdf),
+     [Altherma 3 H](https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-low-temperature/EPGA011-016DV7_EAVH-UD6V7_Installer%20reference%20guide_4PEN606487-1A_English.pdf),
+     [older low-temperature split](https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-low-temperature/erhq-bw17/ERHQ-BAW17_4PEN384974-1B_Installer%20Reference%20Guide_English.pdf),
+     [geothermal](https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/EGSQH-A9W_4PEN351748-1F_2018_02_Installer%20Reference%20Guide_English.pdf)
+     and [hybrid](https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/EVLQ05-08CAV3%2BEHYHB%2CX-AAV3%2CAAV2_4PEN355634-1C_2018_04_Installer%20reference%20guide_English.pdf)
+     all state circuit/pump-inlet pressure **above 1 bar**. The raw minimum always remains the lowest
+     valid sample. A value at or below 1.0 bar surfaces immediately as `Info`; only 60 continuous
+     seconds promote it to `Warn`, so debounce controls claim strength without rewriting the
+     statistic. Cycling
+     and defrost are `heuristic` and can raise `Info`, never a manufacturer/fault `Warn`: the runtime
+     divided by detected starts is not a mean of completed same-mode cycles, and X10A lacks humidity
+     and evaporator-surface temperature. Defrost count remains available without a compressor-speed
+     row; only its runtime share becomes unknown. The raw `count` stays visible, while `paired_count`
+     counts only transitions with compressor witnesses at both endpoints and is the three-cycle guard
+     for the ratio; unpaired edges cannot lend a partial ratio a larger sample basis. A defrost count
+     without a positive paired compressor-runtime denominator remains an `observation` (not
+     `heuristic`) and cannot support the aggregate no-finding badge.
+     Flow and BUH/BSH runtime are `observation` only.
+     Flow excludes the first 60 seconds of continuous pump operation, and no generic flow limit is
+     imposed across the 3–18 kW catalog. BUH and BSH keep separate capability/evidence clocks, so a
+     missing heater row cannot become zero minutes; observed seconds are carried to the API so a
+     1–59-second activation cannot collapse into `0 min`. Protection retries are `experimental`: only a
+     strict increase of one individually tracked 3-bit counter between continuous, fully comparable
+     samples is an event, including an update visible at a compressor-state boundary. Absolute
+     non-zero values are baselines; decreases and possible wrap/reset transitions are unknown and do
+     not count as no-event evidence. Pure observations and stable experimental counters do not enter
+     `evaluated` or support an overall `Ok`; an actual retry increase can still raise aggregate `Info`.
 
-  Three of #208's six proposed checks are deliberately **not** built, each because the bus cannot
-  support the claim: 3-way-valve leakage inferred from the DHW tank's cooling rate (a healthy plant
-  with a DHW circulation loop loses ~1.2 K/h against ~0.3 K/h without one, so the verdict would fire
-  daily on a normal installation — and R1T/R2T/R4T sit *upstream* of the diverter anyway); an
-  absolute minimum-flow threshold (per model across a 3–18 kW catalog, and the unit raises 7H itself,
-  so the flow minimum is reported with no verdict attached); and a flat daily start count (24 starts
-  is one an hour in January and a control problem in April — the *mean run length* is what knows the
-  load).
+  The card also deliberately omits claims the bus cannot support: 3-way-valve leakage inferred from
+  DHW cooling (a circulation loop dominates that slope and the sensors sit upstream of the diverter),
+  a universal minimum-flow threshold, a flat daily-start alarm, and any overall “healthy” verdict.
 - `logic/redact.hpp` — what a diagnostic snapshot must **not** carry when it leaves the device, for
   `GET /status?redact=1` and `GET /diag?redact=1`. A bug report is filed as a *public* GitHub issue
   carrying the device's own status, readings and log ([`REPORTING.md`](REPORTING.md)), which is only
@@ -746,21 +790,26 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    `RAW_CAPTURE_MAX` (8) times **per boot, never refilled** — a series rather than a point, because
    two candidate scales that both fit one sample may not fit a curve, and a budget because one line
    per second would evict the rest of the boot's evidence from the 6 KB diag ring within a minute.
-4c. **Fold the cycle into the 24-hour checkup** (`checkup_record()`, `checkup.cpp`), beside the trend
+4c. **Fold the cycle into the rolling X10A observation** (`checkup_record()`, `checkup.cpp`), beside the trend
    rings and on the same terms — before the commit, outside the cache mutex, with this cycle's values
-   still the task's own. It counts **events** and tracks **window minima**: compressor starts and how
-   long each run lasted, defrost transitions and their share of runtime, backup-heater seconds, the
-   lowest water pressure and the lowest flow while the pump was actually running, plus the unit's own
-   fault class and the protection-retry counters. That is why it is here and not derived from the
+   still the task's own. It counts **events**, signal-specific observed seconds and **window minima**:
+   compressor start edges and observed runtime, defrost transitions, separate observed BUH/BSH
+   seconds, raw water-pressure minima plus a separately confirmed low-pressure fact, steady flow
+   after a 60-second pump run-up, the unit's fault class and
+   strict per-counter protection-retry increases. That is why it is here and not derived from the
    trend rings afterwards: `TrendRing::fold` keeps only the **last** reading of each 5-minute bucket,
    so a compressor cycle shorter than five minutes leaves no trace in the ring at all — the short
-   cycling the checkup exists to find is exactly what that raster cannot see. Events have to be
-   counted where they happen, at 1 Hz. The compressor state from step 4a is **handed over** rather
+   runs this observation exists to preserve are exactly what that raster cannot see. Events are folded
+   once per completed sweep; pulses entirely between sweeps remain unobservable. The compressor state
+   from step 4a is **handed over** rather
    than re-derived, so the checkup and the held-over marking cannot disagree about whether the unit
-   was running. Every rule — the row locators, the edge handling, the thresholds and the verdicts —
-   lives in the host-tested `logic/checkup.hpp`; this step is 24 one-hour buckets in `.bss` and a
-   mutex. See *The host-tested logic core* for why a row is addressed by (page, offset, **converter**)
-   here and by (page, offset, unit) in the trends.
+   was running. The active profile supplies capability independently of this cycle's successful reads,
+   so page loss becomes missing evidence rather than either “unsupported” or zero. Every rule — row
+   identity, edge handling, evidence clocks and verdict/evidence class — lives in the host-tested
+   `logic/checkup.hpp`; storage is 23 completed one-hour buckets plus the pending hour in static
+   initialized RAM (`.data`, because absence sentinels are non-zero), never 24 completed buckets plus
+   an accidental 25th open hour. See *The host-tested logic core* for why a
+   row is addressed by (page, offset, **converter**) here and by (page, offset, unit) in the trends.
 5. Sleep `POLL_INTERVAL_S` (fixed 1 s — see `config.cpp`). The MQTT bridge and HTTP `/values` read
    the cache; they never touch the UART. The trends are **not** published to MQTT — they exist for
    the web UI, and Home Assistant already records its own history for every entity.

@@ -38,6 +38,14 @@ pins the first-boot case where the build defaults equal the Seeed XIAO values bu
 must still open on **Custom**, then verifies that choosing and editing presets within the open modal
 continues to keep the selector in sync with the five hardware fields.
 
+`node test/test_ui_checkup.mjs` executes the production X10A observation-card renderer without a
+browser. It pins the evidence-bounded English/German wording, visible evidence classes, conservative
+duration rounding, raw defrost-ratio and sub-minute BUH/BSH fields, independent fault/defrost null
+handling, `available`/`assessable`/`evaluated`, the actual `/status.health` serializer keys, mobile
+evidence wrapping, old-payload fallbacks, per-row observation clocks, the two-stage pressure copy,
+safe handling of future unknown checks and the source-level reset contract (a pending identity reset hides
+the report and drops the in-flight sample).
+
 ## Covered
 
 One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `main()` runs them.
@@ -47,7 +55,8 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 - `logic/convert.hpp` — numeric converters + the refrigerant pressure→temperature curve + the
   HA unit/device_class hints.
 - `logic/config_model.hpp` — pin/interval/protocol validation, RX/TX collision, WiFi credential
-  rules, the `/set_hp` fingerprint rule, and the field-owned detection patches (`apply_link` /
+  rules, the `/set_hp` fingerprint and X10A-observation reset scopes (profile/RX/TX reset it;
+  HomeHub-only changes do not), and the field-owned detection patches (`apply_link` /
   `apply_model` touch only the link / model — a link commit must not revert a concurrent
   `/set_wifi`).
 - `logic/lwt_select.hpp` — the web UI's leaving-water MEASUREMENT picker (twin of `www/app.js`
@@ -172,6 +181,12 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   window (so a bus that answers early is never delayed), then geometric growth **clamped** to the
   60 s ceiling, monotonic and overflow-safe under saturation, with a bus answer resetting to the
   floor at once (a swapped-in unit is swept the next cycle, not up to a minute later).
+- `logic/checkup.hpp` — the rolling X10A observation's structural locators, completed-sweep edges,
+  sub-second telescoping evidence clocks, gap/bucket/window boundaries, real monotonic `full_span`,
+  raw pressure minimum plus independently confirmed low-pressure fact, flow run-up, BUH/BSH observed
+  seconds, raw/paired defrost edge counts, exact retry-counter deltas and the evidence-bounded aggregate. Pure observations,
+  count-only/zero-denominator defrost and stable experimental counters are reportable but cannot
+  support aggregate `ok`; catalog-wide uniqueness pins every locator to the intended row.
 
 `logic/value_def.hpp` has no `test_*()` of its own — it is the profile row type, exercised through
 `def/registry.hpp` and the converter tests.
