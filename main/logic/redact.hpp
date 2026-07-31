@@ -40,9 +40,8 @@ inline constexpr const char* REDACTED = "<redacted>";
 // the call sites so the set is reviewable in one place; the header cannot enforce that every call
 // site uses it (that stays a review point — see .claude/CLAUDE.md), but it can at least state it.
 //   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker  syslog.host  ntp.server  modbus.host
-// modbus.host joined the set with the HomeHub transport (#32): it is a LAN address, and — when the
-// hub was auto-discovered — its LAN IPv4 address, which identifies the reporter's network just as
-// surely as a manually entered address does.
+// modbus.host joined the set with the HomeHub transport (#32): it is a LAN address, whether typed
+// manually or filled by the explicit discovery button.
 inline constexpr std::size_t REDACTED_STATUS_FIELDS = 8;
 
 // Field-level substitution for the /status builder. Returns by value because every caller feeds it
@@ -84,12 +83,12 @@ inline constexpr DiagRedaction DIAG_REDACTIONS[] = {
     // incoherent: scrubbed in the JSON, printed in the log two sections below it. The second id is
     // the slugified base topic (a fixed compile-time name) and stays.
     {"mqtt: retired legacy HA device ", " (now "},
-    // hp_modbus.cpp "modbus: bounded mDNS search found gateway %s" — the DISCOVERED HomeHub IPv4.
+    // hp_modbus.cpp "modbus: manual mDNS search found gateway %s" — the DISCOVERED HomeHub IPv4.
     // /status?redact=1 already withholds it as
     // modbus.host, and without this rule the same string was printed in /diag a few sections below
     // it in the very same bug report — the incoherence the mqtt rule above exists to prevent, in a
     // second place. The failure line contains no address and therefore survives whole.
-    {"modbus: bounded mDNS search found gateway ", ""},
+    {"modbus: manual mDNS search found gateway ", ""},
     // hp_modbus.cpp "modbus: %d HomeHubs discovered via mDNS — using %s" — the same IPv4 on the
     // several-hubs path. The marker starts AFTER the count, because a rule matches the RENDERED
     // line and "%d" never appears in one; the count therefore survives, which is the diagnostic

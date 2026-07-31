@@ -130,30 +130,57 @@ function openNtp() {
 function closeNtp() { $("ntpModal").hidden = true; }
 
 // ── HomeHub / Modbus TCP (edit modal) ──────────────────────────────────────
-// Auto / Manual / Off is user intent, distinct from whether this boot's bounded search succeeded.
-// The host field still shows the endpoint actually in use; in Auto that makes the discovered IPv4
-// visible and a switch to Manual can retain it, but only Manual makes the field editable.
+// The address is the entire persistent contract: non-empty polls it; empty disables HomeHub. mDNS
+// discovery is an explicit button action that fills this same field without saving behind the
+// dialog's Cancel/Save boundary.
 function fillHomehub() {
   const mb = S.status?.modbus || {};
-  $("hhMode").value = mb.mode || (mb.host ? "manual" : "auto");
   $("hhHost").value = mb.host || "";
   $("hhPort").value = mb.port || 502;
   $("hhUnit").value = mb.unit_id || 1;
-  syncHomehubMode();
-}
-function syncHomehubMode() {
-  const manual = $("hhMode").value === "manual";
-  $("hhHost").disabled = !manual;
-  $("hhHostField").classList.toggle("field-disabled", !manual);
 }
 function openHomehub() {
   fillHomehub();
   for (const id of ["hhHost", "hhPort", "hhUnit"]) $(id).classList.remove("invalid");
   $("hhError").hidden = true;
   $("homehubModal").hidden = false;
-  ($("hhMode").value === "manual" ? $("hhHost") : $("hhMode")).focus();
+  $("hhHost").focus();
 }
 function closeHomehub() { $("homehubModal").hidden = true; }
+
+async function searchHomehub() {
+  const button = $("hhSearch"), error = $("hhError"), host = $("hhHost");
+  host.classList.remove("invalid");
+  error.hidden = true;
+  button.disabled = true;
+  button.innerHTML = `<span class="spin"></span>${esc(t("hh.searching"))}`;
+  try {
+    const response = await post("/discover_homehub", {});
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || !body.host) {
+      const message = response.status === 404 ? t("hh.not_found")
+                    : body.error || t("toast.rejected");
+      error.textContent = message;
+      error.hidden = false;
+      toast(message, "err");
+      host.focus();
+      return false;
+    }
+    host.value = body.host;
+    toast(t("hh.found", body.host), "ok");
+    host.focus();
+    return true;
+  } catch {
+    const message = t("toast.unreachable");
+    error.textContent = message;
+    error.hidden = false;
+    toast(message, "err");
+    return false;
+  } finally {
+    button.disabled = false;
+    button.textContent = t("hh.search");
+  }
+}
 
 // ── Board hardware (dashboard edit modal) ───────────────────────────────────
 // Fills the two pin dropdowns from /status.board.pins_local — a WIDER list than the RX/TX picker's

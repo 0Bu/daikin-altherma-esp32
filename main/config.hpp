@@ -21,9 +21,7 @@ void config_load();
 // keys landed. The model (profile + fingerprint) is NOT written. For the whole-struct writers only:
 // the /set_* handlers, serialized on the single httpd task. The poll task must NOT use this — see
 // config_save_link / config_set_model below.
-// `reset_modbus_runtime` is reserved for /set_hp Auto/Off transitions; ordinary saves preserve a
-// discovery result that may have landed after their snapshot was taken.
-bool config_save(const Config& c, bool require_link = false, bool reset_modbus_runtime = false);
+bool config_save(const Config& c, bool require_link = false);
 
 // Commit ONLY the X10A link (rx/tx/proto), patched into the live config under the mutex — the
 // caller's other fields are left alone, so a detection commit can never revert a concurrent
@@ -31,10 +29,6 @@ bool config_save(const Config& c, bool require_link = false, bool reset_modbus_r
 // cache write failed; the RAM patch is applied either way (the detected link is proven-good and the
 // poll engine must keep using it this session — a lost cache just means re-detecting next boot).
 bool config_save_link(int rx_pin, int tx_pin, Protocol proto);
-
-// Record ONLY this boot's bounded mDNS outcome (discovered IPv4 or "" plus completed-search latch).
-// MODBUS-TASK ONLY and RAM-only: network absence is not the user's persistent Off choice.
-void config_set_modbus_found(const std::string& host);
 
 // Commit ONLY the detected model (profile + fingerprint) to the live config. RAM-only and
 // unfailable: the model is session-only and re-derived on every boot, so it is never persisted.

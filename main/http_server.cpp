@@ -22,9 +22,10 @@ void http_start() {
     // the captive/SPA catch-all — so the symptom of a missing route would be deep links breaking,
     // not the new route 404ing. http_register() now logs a failed registration for that reason.
     // 24 since /events went away with the WebSocket push (docs/ARCHITECTURE.md "Push vs. poll"),
-    // 25 when POST /set_lang (the UI language override) was added, 26 for /favicon.ico, and 27
-    // for the dashboard's dedicated 96 px heat-pump brand icon, and 28 for POST /set_ref_temp.
-    cfg.max_uri_handlers = 28;
+    // 25 when POST /set_lang (the UI language override) was added, 26 for /favicon.ico, 27 for the
+    // dashboard's dedicated 96 px heat-pump brand icon, 28 for POST /set_ref_temp, and 29 for
+    // explicit HomeHub discovery.
+    cfg.max_uri_handlers = 29;
     cfg.lru_purge_enable = true;
     // 12 KB, not the 8 KB this ran on through v1.0.12 — MEASURED, not padded. v1.0.12 panicked and
     // the core dump's task table read `httpd 7728/460`: the task had been 7732 bytes deep at its last

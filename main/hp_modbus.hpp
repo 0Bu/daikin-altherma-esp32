@@ -8,8 +8,8 @@
 // so coupling them would let either failure mask the other. Pulled service cable: the HomeHub keeps
 // reporting. LAN down: X10A keeps polling. Neither notices the other.
 //
-// It has no STEADY-STATE cost when absent: the task exists while a gateway address is active or Auto
-// still owes this boot its bounded search set. A miss retires it; Off skips it entirely.
+// It has no STEADY-STATE cost when absent: an empty saved address creates no task and performs no
+// discovery. mDNS discovery runs only when the user presses Search in the HomeHub dialog.
 //
 // READ-ONLY, and here that is a choice rather than a limitation of the wire: unlike X10A — which has
 // no write command at all — Modbus would allow one. There is no write function in this header, no
@@ -23,13 +23,12 @@
 namespace daik {
 
 // Link diagnostics for /status.modbus + the MQTT heartbeat. Read-only: no write counters, because
-// there is no write path. `enabled` is runtime task existence; persistent Auto/Manual/Off intent is
-// reported separately from Config by /status.
+// there is no write path. `enabled` is runtime task existence and therefore requires a saved host.
 struct ModbusStatus {
-    bool        enabled     = false;   // task active (bounded Auto search or an address being polled)
+    bool        enabled     = false;   // task active (a configured address is being polled)
     bool        connected   = false;   // current socket has committed at least one fresh poll cycle
-    bool        discovering = false;   // mDNS browse in progress, nothing resolved yet
-    std::string host;                  // configured or discovered IPv4 address ("" = none yet)
+    bool        discovering = false;   // compatibility field; explicit UI search is request-local
+    std::string host;                  // configured address ("" = disabled)
     int         port    = 0;
     int         unit_id = 0;
     uint32_t    rx_ok   = 0;           // successful register reads since boot
@@ -52,6 +51,12 @@ void mb_start();
 // enabled, stops it if just disabled, and drops a cached socket when the address changed. Safe to
 // call from the httpd task.
 void mb_reconfigure();
+
+// Run the bounded mDNS search used by the HomeHub dialog's explicit Search button. This does not
+// modify configuration or the running Modbus link: success returns a numeric IPv4 for the form,
+// and only a later POST /set_hp save makes it persistent. Failure returns false after the bounded
+// attempts, leaving an existing/manual entry untouched.
+bool mb_discover_homehub(std::string& found);
 
 // Thread-safe snapshot of the link state.
 ModbusStatus mb_status();

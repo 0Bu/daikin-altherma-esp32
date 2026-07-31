@@ -24,14 +24,19 @@ assert.match(app, /\nboot\(\);\s*$/);
 assert.doesNotThrow(() => new vm.Script(app, { filename: "main/www/app.sources" }),
   "the ordered source fragments must parse as one classic script");
 
-// HomeHub intent must be explicit in both halves of the browser contract. Without these checks the
-// status renderer could understand Auto/Manual/Off while the modal silently fell back to the old
-// ambiguous empty-host form, or the form could show the selector but omit mb_mode from its POST.
+// HomeHub discovery is an explicit dialog action, never a boot mode. The same editable field accepts
+// a discovered or manual address, and saving it empty is the deliberate disabled state.
 const html = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
-assert.match(html, /<select class="input" id="hhMode">[\s\S]*value="auto"[\s\S]*value="manual"[\s\S]*value="off"[\s\S]*<\/select>/,
-  "the HomeHub modal must expose Auto, Manual, and Off as explicit choices");
-assert.match(app, /applyLive\(\{ mb_mode: mode, mb_host:/,
-  "the HomeHub save must carry the selected mode to the firmware");
+assert.match(html, /id="hhHost"[\s\S]*id="hhSearch"[\s\S]*data-i18n="hh.search"/,
+  "the HomeHub modal must expose one editable host and an explicit Search button");
+assert.doesNotMatch(html, /id="hhMode"|value="auto"[\s\S]*value="manual"/,
+  "the HomeHub dialog must not reintroduce an automatic boot mode");
+assert.match(app, /post\("\/discover_homehub", \{\}\)/,
+  "Search must call the dedicated request-local discovery endpoint");
+assert.match(app, /applyLive\(\{ mb_host: host, mb_port: port, mb_unit_id: unit \}/,
+  "Save must persist the field directly, including the empty disabled value");
+assert.doesNotMatch(app, /mb_mode|config_modbus_should_search/,
+  "the browser bundle must carry no hidden Auto-mode contract");
 
 // Dynamic LWT owns one permanent Settings card from the first capture slice onward. Only its room
 // source is editable today; forecast, strategy and output have explicit non-active/read-only homes.

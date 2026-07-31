@@ -93,7 +93,7 @@ The device replaces these eight values with `<redacted>` and **keeps the field i
 | `mqtt.broker` | may contain a username and password if you typed them into the URL |
 | `syslog.host` | an internal hostname |
 | `ntp.server` | often an internal hostname too |
-| `modbus.host` | your HomeHub's address — and, if it was found automatically, its serial-derived name (`homehub-524288-…`), which identifies your hardware |
+| `modbus.host` | your saved HomeHub address, whether typed manually or filled by the explicit Search button |
 
 The `/diag` log is scrubbed line by line for the same things.
 

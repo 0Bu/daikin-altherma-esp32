@@ -676,7 +676,7 @@ static void test_config_model() {
 
     // The HomeHub Modbus stack (issue #32). Checked unconditionally, so the defaults must still pass
     // on a device with no HomeHub and only a bad value trips. mb_host is free text — empty is valid
-    // (that IS the auto-discovery case).
+    // (that IS the disabled case).
     CHECK(c.mb_port == 502 && c.mb_unit_id == 1);      // the defaults from MODBUS_TCP_PORT/UNIT
     CHECK(validate(c, why));                            // default (no address at all) is valid
     c.mb_host = "";
@@ -691,38 +691,19 @@ static void test_config_model() {
     c.mb_unit_id = 1; CHECK(validate(c, why));
     c.mb_host = "";                                     // reset to default for the checks below
 
-    // USER INTENT is separate from this boot's discovery outcome. A fresh config is Auto, a typed
-    // host is Manual, and only the explicit enable bit selects Off.
+    // The saved address is the complete HomeHub switch. Empty is disabled and can never arm an
+    // implicit boot search; a non-empty manual or discovered address is the exact polling target.
     Config m;
-    CHECK(homehub_mode(m) == HomeHubMode::Auto && std::string(homehub_mode_name(m)) == "auto");
-    CHECK(config_modbus_host(m).empty());               // nothing known
-    CHECK(config_modbus_should_search(m));              // ... so this boot's bounded search is armed
-    apply_modbus_found(m, "203.0.113.137");
+    CHECK(config_modbus_host(m).empty());
+    CHECK(!config_modbus_enabled(m));
+    m.mb_host = "203.0.113.137";
     CHECK(config_modbus_host(m) == "203.0.113.137");
-    CHECK(!config_modbus_should_search(m));             // and disarms itself
+    CHECK(config_modbus_enabled(m));
     m.mb_host = "203.0.113.131";
-    CHECK(homehub_mode(m) == HomeHubMode::Manual && std::string(homehub_mode_name(m)) == "manual");
-    CHECK(config_modbus_host(m) == "203.0.113.131");    // manual wins
+    CHECK(config_modbus_host(m) == "203.0.113.131");
     m.mb_host.clear();
-    CHECK(config_modbus_host(m) == "203.0.113.137");    // Auto returns to this session's result
-    m.homehub_enabled = false;
-    CHECK(homehub_mode(m) == HomeHubMode::Off && std::string(homehub_mode_name(m)) == "off");
-    CHECK(config_modbus_host(m).empty());                // Off suppresses even cached/session hosts
-    CHECK(!config_modbus_should_search(m));
-
-    // A bounded search that finds NOTHING stops for this boot, but a fresh boot Config starts in
-    // Auto again. The negative result is not persistent user intent.
-    Config mb_none;
-    apply_modbus_found(mb_none, "");
-    CHECK(config_modbus_host(mb_none).empty() && mb_none.mb_searched);
-    CHECK(!config_modbus_should_search(mb_none));
-    Config next_boot;
-    CHECK(config_modbus_should_search(next_boot));
-    // A typed address selects Manual and must not arm Auto discovery.
-    Config mb_manual;
-    mb_manual.mb_host = "10.0.0.9";
-    CHECK(config_modbus_host(mb_manual) == "10.0.0.9");
-    CHECK(!config_modbus_should_search(mb_manual));
+    CHECK(config_modbus_host(m).empty());
+    CHECK(!config_modbus_enabled(m));
 
     // Target-aware GPIO range: the ESP32-S3 default 44/43 is valid on a 48-GPIO target but must be
     // rejected on an ESP32-C3 (max GPIO 21), where those pins physically don't exist.
@@ -4089,8 +4070,8 @@ static void test_redact() {
           "mqtt: retired legacy HA device <redacted> (now daikin-altherma-esp32)");
     // The DISCOVERED HomeHub IPv4 identifies the reporter's LAN just like a manually entered
     // address, so /status withholds it as modbus.host and /diag must not put it back.
-    CHECK(redact_diag_line("modbus: bounded mDNS search found gateway 203.0.113.137") ==
-          "modbus: bounded mDNS search found gateway <redacted>");
+    CHECK(redact_diag_line("modbus: manual mDNS search found gateway 203.0.113.137") ==
+          "modbus: manual mDNS search found gateway <redacted>");
     CHECK(redact_diag_line("modbus: 2 HomeHubs discovered via mDNS — using 203.0.113.137") ==
           "modbus: 2 HomeHubs discovered via mDNS — using <redacted>");
     // The count SURVIVES on the several-hubs line: that more than one gateway answered is what
@@ -4100,7 +4081,7 @@ static void test_redact() {
     // The failure contains no address, matches no rule and survives whole.
     {
         const std::string none =
-            "modbus: no HomeHub found via mDNS after 3 attempts — Auto search stopped for this boot";
+            "modbus: no HomeHub found via manual mDNS search after 3 attempts";
         CHECK(redact_diag_line(none) == none);
     }
 
@@ -4320,7 +4301,7 @@ static void test_config_store() {
     // number — a second, different "v4" would decode that byte as a HomeHub setting.
     ConfigBlob mb; mb.wifi_ssid = "net";
     mb.mb_host = "homehub-524288-abc.local";
-    mb.mb_port = 502; mb.mb_unit_id = 3; mb.actuation_enabled = true; mb.homehub_enabled = true;
+    mb.mb_port = 502; mb.mb_unit_id = 3; mb.actuation_enabled = true; mb.homehub_enabled = false;
     std::vector<uint8_t> mbb = config_blob_serialize(mb);
     CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 8);
     ConfigBlob mrt;
@@ -4328,19 +4309,26 @@ static void test_config_store() {
     CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-abc.local");
     CHECK(mrt.mb_port == 502 && mrt.mb_unit_id == 3 && mrt.actuation_enabled && mrt.homehub_enabled);
     CHECK(mrt.wifi_ssid == "net");                       // the earlier-version fields round-trip too
-    // An EMPTY mb_host (= mDNS auto-discovery) must survive the string encoding, and the two booleans
-    // share ONE flag byte — so they must not bleed into each other, nor from the board/ota/language
-    // bytes that precede them.
+    // An EMPTY mb_host (= disabled) must survive the string encoding, and the compatibility/actuation
+    // bits must not bleed into each other or the board/ota/language bytes that precede them.
     mb.mb_host = ""; mb.actuation_enabled = false; mb.homehub_enabled = false;
     mbb = config_blob_serialize(mb);
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
     CHECK(mrt.mb_host.empty() && !mrt.actuation_enabled && !mrt.homehub_enabled);
-    mb.actuation_enabled = true; mb.homehub_enabled = true;
+    mb.actuation_enabled = true; mb.homehub_enabled = true; // ignored: empty host always serializes disabled
     mbb = config_blob_serialize(mb);
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
-    CHECK(mrt.actuation_enabled && mrt.homehub_enabled);
-    // Current v5 firmware wrote the old enable bit as zero. Upgrading that blob must select Auto,
-    // not Off: only v6 can prove the user deliberately disabled discovery.
+    CHECK(mrt.actuation_enabled && !mrt.homehub_enabled);
+    // The immediately preceding v6 build could persist enabled+empty as Auto. Preserve its wire
+    // shape as an upgrade fixture: current firmware must ignore that bit and decode empty as Off.
+    std::vector<uint8_t> legacy_v6_auto = mbb;
+    legacy_v6_auto[legacy_v6_auto.size() - 5] |= 2u;
+    restamp(legacy_v6_auto);
+    ConfigBlob legacy_v6_rt;
+    CHECK(config_blob_deserialize(legacy_v6_auto.data(), legacy_v6_auto.size(), legacy_v6_rt));
+    CHECK(legacy_v6_rt.mb_host.empty() && !legacy_v6_rt.homehub_enabled);
+    // A v5 empty-host blob also decodes disabled. Its historical flag was ambiguous, so it cannot
+    // arm discovery in the current explicit-search contract.
     std::vector<uint8_t> v5 = mbb;
     v5.erase(v5.end() - 4 - 12, v5.end() - 4);           // v5 predates the v7 + v8 blocks
     v5[4] = 5;
@@ -4348,7 +4336,7 @@ static void test_config_store() {
     restamp(v5);
     ConfigBlob v5rt;
     CHECK(config_blob_deserialize(v5.data(), v5.size(), v5rt));
-    CHECK(v5rt.has_modbus && v5rt.homehub_enabled && v5rt.actuation_enabled);
+    CHECK(v5rt.has_modbus && !v5rt.homehub_enabled && v5rt.actuation_enabled);
     // BACKWARD COMPATIBILITY: a v4 blob (a device from before the transport existed, but WITH the
     // language byte) must decode, report has_modbus == false and leave the mb_* struct defaults
     // (X10A / 502 / 1) — the same trade v1/v2/v3 already refuse to make.

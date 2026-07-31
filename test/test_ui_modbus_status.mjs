@@ -10,7 +10,7 @@ const dashboardSource = readAppFragments(["dashboard.js"]);
 const translated = {
   "conn.homehub": "HomeHub",
   "conn.disabled": "Deaktiviert",
-  "conn.notfound": "Bei diesem Start nicht gefunden",
+  "conn.offline": "Offline",
   "modbus.err.response_timeout": (r) => `Zeitüberschreitung bei Register ${r}`,
   "modbus.err.exception": (r, n, why) => `Register ${r}: Ausnahme ${n} (${why})`,
   "modbus.exc.2": "unzulässige Registeradresse",
@@ -41,7 +41,7 @@ function baseModbus(patch) {
     mqtt: { configured: false },
     syslog: { configured: false },
     ntp: { synced: true, server: "pool.ntp.org" },
-    modbus: { mode: "manual", enabled: true, connected: false,
+    modbus: { enabled: true, connected: false,
       host: "203.0.113.137", port: 502, ...patch },
   };
   return sandbox.__connLinks().find((row) => row.edit === "homehub");
@@ -56,7 +56,7 @@ function baseModbus(patch) {
   });
   assert.equal(row.cls, "err", "a disconnected HomeHub remains visibly down");
   assert.equal(row.label, "HomeHub", "the connection row names the configured peer, not its protocol");
-  assert.equal(row.value, "203.0.113.137:502", "the discovered IPv4 and port stay the primary value");
+  assert.equal(row.value, "203.0.113.137:502", "the configured IPv4 and port stay the primary value");
   assert.equal(row.detail, "Zeitüberschreitung bei Register 42", "the structured cause is localised");
   assert.match(row.state, /Zeitüberschreitung/, "the accessible state includes the same cause");
 
@@ -90,23 +90,17 @@ function baseModbus(patch) {
 }
 
 {
-  const row = baseModbus({ mode: "auto", enabled: false, searched: true, host: "" });
-  assert.equal(row.cls, "", "a completed Auto miss is neutral, not an explicit broken address");
+  const row = baseModbus({ enabled: false, host: "" });
+  assert.equal(row.cls, "", "an empty address is the neutral disabled state");
   assert.equal(row.value, "—");
-  assert.equal(row.state, "Bei diesem Start nicht gefunden");
+  assert.equal(row.state, "Deaktiviert");
 }
 
 {
-  const row = baseModbus({ mode: "auto", enabled: true, discovering: true, host: "" });
-  assert.equal(row.cls, "", "an in-flight Auto search is neutral rather than a failed connection");
-  assert.equal(row.value, "conn.searching");
-}
-
-{
-  const row = baseModbus({ mode: "off", enabled: false, searched: false, host: "" });
-  assert.equal(row.cls, "", "an intentional Off choice is neutral");
-  assert.equal(row.value, "—");
-  assert.equal(row.state, "Deaktiviert", "Off stays distinct from this boot's Auto miss");
+  const row = baseModbus({ enabled: false, host: "homehub.local" });
+  assert.equal(row.cls, "err", "a saved address without a running link is visibly offline");
+  assert.equal(row.value, "homehub.local:502");
+  assert.equal(row.state, "Offline");
 }
 
 console.log("Modbus connection status: endpoint + shared state colours + localised inline error contract passed");

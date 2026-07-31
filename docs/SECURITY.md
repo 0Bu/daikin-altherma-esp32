@@ -58,8 +58,9 @@ and the OTA-signing / key lifecycle.
     (the guide's SKI/QR trust mechanism is EEBUS-only). On a shared LAN any host can in principle
     write to the hub, whatever this firmware does. **Segment or firewall the HomeHub's `:502`** so
     only this device reaches it; TLS `:802` is the hub's only on-wire protection and is out of scope.
-    Discovery trusts LAN multicast, so the target is confirmed by its `homehub-*` hostname before a
-    connection is made. See [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md).
+    The dialog's explicit discovery trusts LAN multicast, so it offers only responders whose mDNS
+    hostname matches `homehub-*`; a manually entered address is the user's trusted-LAN choice. See
+    [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md).
 - **Home Assistant integration is read-only** — the MQTT bridge subscribes to no command topics.
 - **The MCP endpoint is read-only and trusted-LAN-only.** `POST /mcp` exposes exactly
   `get_status` and `get_hp_values`, which mirror the existing `GET /status` and `GET /values`

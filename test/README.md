@@ -43,12 +43,17 @@ that their DOM-write signatures invalidate when the persisted UI language change
 stays identical.
 
 `node test/test_ui_modbus_status.mjs` executes the production Connections-row helpers and pins the
-HomeHub contract: the row names the configured peer rather than its Modbus protocol, the discovered
+HomeHub contract: the row names the configured peer rather than its Modbus protocol, the configured
 IPv4 and configured port remain the main value, link health uses the same state colours as the other
 connection rows, a structured Modbus failure is rendered as localised
 subtle text underneath it and in the accessible name, and unknown future codes fall back to escaped
-human-readable API prose. It also pins the user-intent boundary: an Auto miss is "not found this
-boot", while an explicit Off choice remains "disabled"; neither is inferred from the other.
+human-readable API prose. It also pins the user-intent boundary: an empty address is disabled, while
+a non-empty address whose task/link is down is visibly offline. Discovery does not create a boot mode.
+
+`node test/test_homehub_discovery_contract.mjs` pins the IDF-facing lifecycle that the pure C++ host
+suite cannot link: boot and the Modbus poll task never browse mDNS, an empty address creates no task,
+and only the dialog's explicit discovery endpoint runs the bounded search. The endpoint returns the
+found address to the form but cannot persist it behind the normal Save/Cancel boundary.
 
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named
 HomeHub status in the EKRHH register map and the schematic renderer against every X10A operation
