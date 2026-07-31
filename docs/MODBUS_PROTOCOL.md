@@ -219,8 +219,10 @@ array and an empty one are different claims, and only absence says "no current r
 without a HomeHub therefore sees exactly the payload it saw before this feature existed.
 
 In the **web UI** (see [`DESIGN.md`](DESIGN.md)), X10A stays the prominent source everywhere and
-Modbus is marked in its own colour — a petrol token (`--src-mb`) that is neither a state colour
-(`--ok`/`--warn`/`--err`) nor a temperature one (`--flow-*`), because provenance is a third thing:
+Modbus readings are marked in their own colour — a petrol token (`--src-mb`) that is neither a state
+colour (`--ok`/`--warn`/`--err`) nor a temperature one (`--flow-*`), because provenance is a third
+thing. The Settings connection row is link state rather than reading provenance, so it uses the same
+green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
 
 * **Both up** — the row shows the X10A value, unmarked. Tapping it opens the explainer, and the
   gateway's reading appears at the **end** of the body, after the "Normal:" note: a full row carrying
@@ -290,7 +292,8 @@ the task (it retires itself at the top of its next cycle), so the socket keeps e
 
 **Web UI:** the HomeHub appears as its own row in Settings → Connections — never folded into a
 combined link state with X10A, since either can be down alone and one merged "connected" would hide
-exactly the case worth seeing. Config and diagnostics only; there are no pump controls, by design.
+exactly the case worth seeing. Its value is the active `host:port`, and its colour follows the shared
+connection-state vocabulary. Config and diagnostics only; there are no pump controls, by design.
 
 **API:** `/status` carries a `modbus{enabled,connected,discovering,host,port,unit_id,rx,fails,values,
 actuation_enabled,error,error_code,error_detail,error_register}` block (the error fields are omitted

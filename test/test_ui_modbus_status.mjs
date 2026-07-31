@@ -1,5 +1,6 @@
 // Regression test for the HomeHub connection row. Executes the production connLinks()/connRow()
-// functions so a backend error cannot turn the hostname red again without explaining why below it.
+// functions so the endpoint and shared status palette cannot drift from the other connections, and
+// a backend error cannot replace the address without explaining the failure below it.
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { readAppFragments } from "../tools/ui/read_app_source.mjs";
@@ -7,6 +8,7 @@ import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 const dashboardSource = readAppFragments(["dashboard.js"]);
 
 const translated = {
+  "conn.homehub": "HomeHub",
   "modbus.err.response_timeout": (r) => `Zeitüberschreitung bei Register ${r}`,
   "modbus.err.exception": (r, n, why) => `Register ${r}: Ausnahme ${n} (${why})`,
   "modbus.exc.2": "unzulässige Registeradresse",
@@ -37,7 +39,7 @@ function baseModbus(patch) {
     mqtt: { configured: false },
     syslog: { configured: false },
     ntp: { synced: true, server: "pool.ntp.org" },
-    modbus: { enabled: true, connected: false, host: "203.0.113.137", ...patch },
+    modbus: { enabled: true, connected: false, host: "203.0.113.137", port: 502, ...patch },
   };
   return sandbox.__connLinks().find((row) => row.edit === "homehub");
 }
@@ -50,26 +52,30 @@ function baseModbus(patch) {
     error_register: 42,
   });
   assert.equal(row.cls, "err", "a disconnected HomeHub remains visibly down");
-  assert.equal(row.value, "203.0.113.137", "the discovered IPv4 stays the primary value");
+  assert.equal(row.label, "HomeHub", "the connection row names the configured peer, not its protocol");
+  assert.equal(row.value, "203.0.113.137:502", "the discovered IPv4 and port stay the primary value");
   assert.equal(row.detail, "Zeitüberschreitung bei Register 42", "the structured cause is localised");
   assert.match(row.state, /Zeitüberschreitung/, "the accessible state includes the same cause");
 
   const html = sandbox.__connRow(row);
+  assert.match(html, /aria-label="HomeHub: Fehler:/, "the accessible label uses the same HomeHub name");
   assert.match(html, /class="conn-detail">Zeitüberschreitung bei Register 42<\/span>/);
-  assert.ok(html.lastIndexOf("203.0.113.137") < html.lastIndexOf("Zeitüberschreitung"),
-    "the subtle error line is rendered under/after the host");
+  assert.ok(html.lastIndexOf("203.0.113.137:502") < html.lastIndexOf("Zeitüberschreitung"),
+    "the subtle error line is rendered under/after the endpoint");
   assert.doesNotMatch(html, /HomeHub response timed out/, "raw backend prose does not replace localisation");
 }
 
 {
   const row = baseModbus({
     connected: true,
+    port: 1502,
     error: "HomeHub rejected register 56 (Modbus exception 2: illegal data address)",
     error_code: "modbus_exception",
     error_detail: 2,
     error_register: 56,
   });
-  assert.equal(row.cls, "mb", "one rejected register does not claim the TCP link is down");
+  assert.equal(row.cls, "ok", "a connected Modbus endpoint uses the shared healthy-link colour");
+  assert.equal(row.value, "203.0.113.137:1502", "the configured non-default port is shown");
   assert.equal(row.detail, "Register 56: Ausnahme 2 (unzulässige Registeradresse)");
 }
 
@@ -80,4 +86,4 @@ function baseModbus(patch) {
     "unknown future codes fall back to escaped human-readable API prose");
 }
 
-console.log("Modbus connection status: IPv4 + localised inline error contract passed");
+console.log("Modbus connection status: endpoint + shared state colours + localised inline error contract passed");
