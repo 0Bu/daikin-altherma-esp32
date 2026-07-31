@@ -1,67 +1,97 @@
-// /mcp — Model Context Protocol server for AI agents (Streamable HTTP, stateless JSON-RPC 2.0;
-// GET -> 405, no SSE). PLANNED (docs/MCP.md): the read-only tools (get_status, get_hp_values) are
-// not implemented yet. What runs today is only the JSON-RPC ERROR envelope, made spec-compliant: the
-// decision (parse error / invalid request / notification-no-response / method-not-found + which id to
-// echo) is the host-tested pure policy in logic/mcp_jsonrpc.hpp; this file only extracts the request
-// shape with cJSON and renders the chosen response.
+// /mcp — read-only Model Context Protocol server for AI agents. Streamable HTTP, one stateless
+// JSON-RPC 2.0 message per POST, GET -> 405 (no SSE). logic/mcp.hpp owns all parsing, dispatch and
+// fixed result envelopes; this device glue only supplies the same snapshots as /status and /values.
 #include "http_handlers.hpp"
-#include "logic/json.hpp"          // json_quote — the shared RFC 8259 string encoder
-#include "logic/mcp_jsonrpc.hpp"   // the host-tested JSON-RPC 2.0 response policy
-#include "cJSON.h"
+#include "logic/mcp.hpp"
+#include "wifi.hpp"
+#include "esp_app_desc.h"
 #include "esp_http_server.h"
 #include <string>
 
 namespace daik {
 
+static esp_err_t mcp_transport_error(httpd_req_t* req, const char* status, const char* message) {
+    httpd_resp_set_status(req, status);
+    const std::string response = mcp_error("null", -32600, message);
+    return http_send_json(req, response.c_str());
+}
+
 static esp_err_t mcp_post(httpd_req_t* req) {
-    char body[1024];
-    const bool body_read = http_read_body(req, body, sizeof(body)) >= 0;   // false: empty/oversized/stalled
-    cJSON* j = body_read ? cJSON_Parse(body) : nullptr;
-
-    // Extract only the shape facts the policy needs — never trust any single field beyond its type.
-    JrRequest r;
-    r.valid_json = (j != nullptr);
-    std::string id_json = "null";   // the request's own id, rendered as JSON (for the -32601 echo)
-    if (j) {
-        r.is_object = cJSON_IsObject(j);
-        const cJSON* ver = cJSON_GetObjectItem(j, "jsonrpc");
-        r.jsonrpc_ok = ver && cJSON_IsString(ver) && ver->valuestring &&
-                       std::string(ver->valuestring) == "2.0";
-        const cJSON* method = cJSON_GetObjectItem(j, "method");
-        r.has_method = method && cJSON_IsString(method);
-        const cJSON* id = cJSON_GetObjectItem(j, "id");
-        if (!id)                     r.id_kind = JrIdKind::None;      // absent -> notification
-        else if (cJSON_IsNull(id))   r.id_kind = JrIdKind::Null;
-        else if (cJSON_IsNumber(id)) r.id_kind = JrIdKind::Number;
-        else if (cJSON_IsString(id)) r.id_kind = JrIdKind::String;
-        else                         r.id_kind = JrIdKind::Invalid;  // array/object/bool -> not a valid id
-        if (r.id_kind == JrIdKind::Number || r.id_kind == JrIdKind::String) {
-            char* printed = cJSON_PrintUnformatted(id);   // echo a number/string id verbatim
-            if (printed) { id_json = printed; cJSON_free(printed); }
-        }
+    // Streamable HTTP requires Origin validation against DNS rebinding. Native MCP clients omit the
+    // header; browser-originated calls must name the device's fixed mDNS host or its current IP.
+    const size_t origin_len = httpd_req_get_hdr_value_len(req, "Origin");
+    if (origin_len) {
+        char origin[96];
+        if (origin_len >= sizeof(origin) ||
+            httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) != ESP_OK ||
+            !mcp_origin_allowed(origin, CONFIG_DAIKIN_HOSTNAME, wifi_info().ip))
+            return mcp_transport_error(req, "403 Forbidden", "Origin not allowed");
     }
-    if (j) cJSON_Delete(j);
 
-    const JrDecision d = mcp_jsonrpc_decide(r);
+    // Stateless operation still honours the per-request negotiated-version header. Its absence is
+    // the specification's 2025-03-26 compatibility default; a present unknown revision fails closed.
+    const size_t version_len = httpd_req_get_hdr_value_len(req, "MCP-Protocol-Version");
+    if (version_len) {
+        char version[24];
+        if (version_len >= sizeof(version) ||
+            httpd_req_get_hdr_value_str(req, "MCP-Protocol-Version",
+                                        version, sizeof(version)) != ESP_OK ||
+            !mcp_protocol_supported(version))
+            return mcp_transport_error(req, "400 Bad Request",
+                                       "Unsupported MCP-Protocol-Version");
+    }
 
-    // A JSON-RPC notification (well-formed request with no id) gets NO response body (spec §4.1).
-    if (d.action == JrAction::NoResponse) {
-        httpd_resp_set_status(req, "204 No Content");
+    char body[1024];
+    const int n = http_read_body(req, body, sizeof(body));
+    McpRequest r = mcp_parse(n >= 0 ? body : nullptr, n);
+
+    // Streamable HTTP accepts notifications with 202 and no body. There is deliberately no session
+    // state to mutate; notifications/initialized is accepted in the same way as any valid notice.
+    if (r.notification) {
+        httpd_resp_set_status(req, "202 Accepted");
         return httpd_resp_send(req, nullptr, 0);
     }
 
-    const std::string echoed = mcp_jsonrpc_echo_id(d) ? id_json : std::string("null");
-    const std::string resp = "{\"jsonrpc\":\"2.0\",\"id\":" + echoed +
-                             ",\"error\":{\"code\":" + std::to_string(d.code) +
-                             ",\"message\":" + json_quote(mcp_jsonrpc_message(d.code)) + "}}";
-    // -32601 is a well-formed CALL whose method isn't implemented -> the error rides in a 200 body;
-    // -32700 / -32600 are bad input -> 400.
-    httpd_resp_set_status(req, d.code == -32601 ? "200 OK" : "400 Bad Request");
-    return http_send_json(req, resp.c_str());
+    if (r.error) {
+        // Parse/Request failures are malformed HTTP inputs. Method/param/tool errors are valid
+        // JSON-RPC calls and therefore ride in a normal application/json response.
+        if (r.error == -32700 || r.error == -32600)
+            httpd_resp_set_status(req, "400 Bad Request");
+        const std::string response = mcp_error(r.id_raw, r.error, mcp_error_message(r));
+        return http_send_json(req, response.c_str());
+    }
+
+    std::string response;
+    mcp_result_begin(response, r.id_raw);
+    switch (r.method) {
+        case McpMethod::Initialize:
+            response += mcp_initialize_result(r.protocol_version,
+                                              esp_app_get_description()->version);
+            break;
+        case McpMethod::ToolsList:
+            response += mcp_tools_list_result();
+            break;
+        case McpMethod::ToolsCall:
+            if (r.tool == "get_status") {
+                mcp_tool_result_begin(response, "Current device and heat-pump status.");
+                http_append_status_json(response, false);
+            } else {
+                mcp_tool_result_begin(response, "Current decoded heat-pump readings.");
+                http_append_values_json(response);
+            }
+            mcp_tool_result_end(response);
+            break;
+        default:
+            response += "{}";  // unreachable: mcp_parse maps an unknown method to -32601
+            break;
+    }
+    mcp_result_end(response);
+    return http_send_json(req, response.c_str());
 }
 
 static esp_err_t mcp_get(httpd_req_t* req) {
     httpd_resp_set_status(req, "405 Method Not Allowed");
+    httpd_resp_set_hdr(req, "Allow", "POST");
     return httpd_resp_sendstr(req, "POST only");
 }
 

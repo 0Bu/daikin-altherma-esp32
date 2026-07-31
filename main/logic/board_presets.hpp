@@ -76,7 +76,7 @@ inline const BoardPreset* board_presets_all(int& count) {
 //                build serves a user who has moved the link onto the pad a preset wants.
 //
 // Writes borrowed pointers into a CALLER-owned buffer (size it with BOARD_PRESETS_MAX) and returns
-// the count, like board_pins_offerable(): build_status_json_string() runs on the httpd task AND on
+// the count, like board_pins_offerable(): http_append_status_json() runs on the httpd task AND on
 // the poll task's WS broadcaster, so a filtered shared static would be a data race between them. The
 // pointed-to table is immutable and has static storage duration, so the pointers stay valid.
 inline int board_presets_offerable(const BoardPreset** out, int cap, bool octal_spi,

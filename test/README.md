@@ -85,6 +85,12 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   raw), and the reachable case, an SSID like `Free<LF>WiFi` that made `GET /scan` unparseable. Also
   asserts what must *not* change: raw UTF-8 and 0x7F survive verbatim, since `char` is signed and a
   naive `c < 0x20` would mangle every non-ASCII SSID.
+- `logic/mcp.hpp` — the actual bounded MCP/JSON-RPC request scanner and read-only dispatcher:
+  malformed vs. structurally-invalid requests, string/number/null id echo and invalid-id rejection,
+  notifications, revision negotiation, `initialize` / `tools/list` / `tools/call`, empty-argument
+  enforcement, browser-Origin/DNS-rebinding policy, unknown-method/tool and invalid-params errors,
+  the exact two-tool catalog, and the `structuredContent` result envelopes. This is the same parser
+  the device uses, not a test-only re-derivation of cJSON output.
 - `logic/mqtt_group.hpp` — register page → group name, number-vs-string JSON typing, the grouped
   state JSON (depth 1, first-seen order), and that a text value routes through the shared
   `logic/json.hpp` encoder.

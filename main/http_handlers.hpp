@@ -4,6 +4,7 @@
 // sharing one server + one OOM guard.
 #include "esp_http_server.h"
 #include "logic/http_surface.hpp"   // HttpSurface — which routes each trust surface exposes (F01)
+#include <string>
 
 namespace daik {
 
@@ -13,6 +14,12 @@ esp_err_t http_send_gzip(httpd_req_t* req, const char* content_type,
                          const unsigned char* start, const unsigned char* end);
 // Read a JSON request body into a bounded buffer; returns bytes or <0.
 int       http_read_body(httpd_req_t* req, char* buf, size_t max);
+
+// Append the read-only snapshots shared by their HTTP routes and MCP tools. Appending matters: MCP
+// can write its envelope first and then the snapshot into that SAME response buffer, avoiding a
+// second multi-kilobyte contiguous allocation while preserving one source of truth per wire shape.
+void http_append_status_json(std::string& out, bool redact = false);
+void http_append_values_json(std::string& out);
 
 // Register a route whose handler runs under the shared handle_all try/catch OOM guard: an uncaught
 // std::bad_alloc (tight heap: WiFi+MQTT+TLS) becomes a 503 instead of unwinding through

@@ -55,7 +55,7 @@
 #include "logic/query_flag.hpp"
 #include "logic/redact.hpp"
 #include "logic/config_store.hpp"
-#include "logic/mcp_jsonrpc.hpp"
+#include "logic/mcp.hpp"
 #include "logic/http_surface.hpp"
 #include "logic/registers.hpp"
 #include "logic/reset_reason.hpp"
@@ -4149,36 +4149,182 @@ static void test_config_store() {
     CHECK(v4rt.has_lang && v4rt.has_ota && v4rt.wifi_ssid == "net");   // the v4 payload is intact
 }
 
-static void test_mcp_jsonrpc() {
-    auto make = [](bool vj, bool obj, bool jr, bool m, JrIdKind id) {
-        JrRequest r; r.valid_json = vj; r.is_object = obj; r.jsonrpc_ok = jr; r.has_method = m; r.id_kind = id;
-        return r;
+static void test_mcp() {
+    auto parse = [](const std::string& json) {
+        return mcp_parse(json.data(), static_cast<int>(json.size()));
     };
-    // Not JSON at all -> Parse error, id null.
-    JrDecision d = mcp_jsonrpc_decide(make(false, false, false, false, JrIdKind::None));
-    CHECK(d.action == JrAction::Error && d.code == -32700 && !mcp_jsonrpc_echo_id(d));
 
-    // Valid JSON but not a conforming Request object -> Invalid Request (-32600), id null. Each of the
-    // structural faults on its own must trip it: not an object, wrong jsonrpc, missing method, or an
-    // id of a disallowed type (array/object/bool) — which must never be mirrored back.
-    CHECK(mcp_jsonrpc_decide(make(true, false, true,  true,  JrIdKind::Number)).code == -32600);  // not object
-    CHECK(mcp_jsonrpc_decide(make(true, true,  false, true,  JrIdKind::Number)).code == -32600);  // jsonrpc != 2.0
-    CHECK(mcp_jsonrpc_decide(make(true, true,  true,  false, JrIdKind::Number)).code == -32600);  // no method
-    d = mcp_jsonrpc_decide(make(true, true, true, true, JrIdKind::Invalid));                      // bad id type
-    CHECK(d.code == -32600 && !mcp_jsonrpc_echo_id(d));
+    // The scanner classifies actual wire bytes, not pre-digested shape flags. Invalid JSON is a
+    // parse error; a valid JSON value that is not a Request object is an invalid request.
+    CHECK(mcp_parse(nullptr, 0).error == -32700);
+    CHECK(parse("").error == -32700);
+    CHECK(parse("not json").error == -32700);
+    CHECK(parse("{").error == -32700);
+    CHECK(parse("{\"jsonrpc\":\"2.0\",}").error == -32700);
+    CHECK(parse("[1,true,null,\"ok\",{\"x\":2}]").error == -32600);
+    CHECK(parse("1.25e+2").error == -32600);
+    CHECK(parse("01").error == -32700);
 
-    // Well-formed NOTIFICATION (no id) -> NO response, even for an unknown method.
-    d = mcp_jsonrpc_decide(make(true, true, true, true, JrIdKind::None));
-    CHECK(d.action == JrAction::NoResponse);
-
-    // Well-formed request with a valid id -> Method not found (-32601), and the request's id IS echoed.
-    for (JrIdKind k : {JrIdKind::Number, JrIdKind::String, JrIdKind::Null}) {
-        d = mcp_jsonrpc_decide(make(true, true, true, true, k));
-        CHECK(d.action == JrAction::Error && d.code == -32601 && mcp_jsonrpc_echo_id(d));
+    // Every structural JSON-RPC fault maps to -32600 and must discard an untrusted id.
+    CHECK(parse("{}").error == -32600);
+    CHECK(parse("{\"jsonrpc\":\"1.0\",\"id\":1,\"method\":\"tools/list\"}").error == -32600);
+    CHECK(parse("{\"jsonrpc\":2,\"id\":1,\"method\":\"tools/list\"}").error == -32600);
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":1}").error == -32600);
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":7}").error == -32600);
+    for (const char* id : {"true", "false", "[]", "{}"}) {
+        McpRequest r = parse(std::string("{\"jsonrpc\":\"2.0\",\"id\":") + id +
+                             ",\"method\":\"tools/list\"}");
+        CHECK(r.error == -32600 && r.id_raw == "null");
     }
-    CHECK(std::string(mcp_jsonrpc_message(-32700)) == "Parse error");
-    CHECK(std::string(mcp_jsonrpc_message(-32600)) == "Invalid Request");
-    CHECK(std::string(mcp_jsonrpc_message(-32601)) == "Method not found");
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"jsonrpc\":\"2.0\",\"id\":1,"
+                "\"method\":\"tools/list\"}").error == -32600);
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":1,\"id\":2,"
+                "\"method\":\"tools/list\"}").error == -32600);
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\","
+                "\"method\":\"tools/list\"}").error == -32600);
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\","
+                "\"params\":{},\"params\":{}}").error == -32600);
+
+    // A valid notification has no JSON-RPC response. Its method/params do not change that rule.
+    McpRequest r = parse("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");
+    CHECK(!r.error && r.notification && r.id_kind == McpIdKind::None);
+    r = parse("{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":7}");
+    CHECK(!r.error && r.notification);
+
+    // initialize negotiates a supported revision verbatim and otherwise offers this server's newest
+    // supported revision. The issue's intentionally-minimal params:{} example remains accepted.
+    r = parse("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\","
+              "\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},"
+              "\"clientInfo\":{\"name\":\"test\",\"version\":\"1\"}}}");
+    CHECK(!r.error && r.method == McpMethod::Initialize &&
+          r.protocol_version == "2025-06-18" && r.id_raw == "1");
+    for (const char* version : {"2025-03-26", "2025-06-18", "2025-11-25"}) {
+        CHECK(mcp_protocol_supported(version));
+    }
+    CHECK(!mcp_protocol_supported("2024-11-05"));
+    CHECK(mcp_origin_allowed("", "daikin-altherma-esp32", "203.0.113.170"));
+    CHECK(mcp_origin_allowed("http://daikin-altherma-esp32.local",
+                             "daikin-altherma-esp32", "203.0.113.170"));
+    CHECK(mcp_origin_allowed("http://daikin-altherma-esp32.local:80",
+                             "daikin-altherma-esp32", "203.0.113.170"));
+    CHECK(mcp_origin_allowed("http://203.0.113.170",
+                             "daikin-altherma-esp32", "203.0.113.170"));
+    CHECK(mcp_origin_allowed("http://203.0.113.170:80",
+                             "daikin-altherma-esp32", "203.0.113.170"));
+    CHECK(!mcp_origin_allowed("https://daikin-altherma-esp32.local",
+                              "daikin-altherma-esp32", "203.0.113.170"));
+    CHECK(!mcp_origin_allowed("http://evil.example",
+                              "daikin-altherma-esp32", "203.0.113.170"));
+    CHECK(!mcp_origin_allowed("http://203.0.113.170", "", ""));
+    r = parse("{\"jsonrpc\":\"2.0\",\"id\":\"init\",\"method\":\"initialize\","
+              "\"params\":{\"protocolVersion\":\"2099-01-01\"}}");
+    CHECK(!r.error && r.protocol_version == MCP_PROTOCOL_LATEST && r.id_raw == "\"init\"");
+    r = parse("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\",\"params\":{}}");
+    CHECK(!r.error && r.protocol_version == MCP_PROTOCOL_LATEST);
+    r = parse("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\"}");
+    CHECK(!r.error && r.protocol_version == MCP_PROTOCOL_LATEST);
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\",\"params\":[]}")
+              .error == -32602);
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\","
+                "\"params\":{\"protocolVersion\":7}}").error == -32602);
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\","
+                "\"params\":{\"protocolVersion\":\"2025-11-25\","
+                "\"protocolVersion\":\"2025-11-25\"}}").error == -32602);
+
+    // tools/list has no required params. A supplied params value must still be an object.
+    r = parse("{\"extra\":[1,{\"nested\":true}],\"jsonrpc\":\"2.0\",\"id\":3,"
+              "\"method\":\"tools/list\"}");
+    CHECK(!r.error && r.method == McpMethod::ToolsList && r.id_raw == "3");
+    CHECK(!parse("{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/list\",\"params\":{}}").error);
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/list\",\"params\":null}")
+              .error == -32602);
+
+    // Both tools accept an omitted or empty arguments object and nothing else. Escaped ASCII in a
+    // JSON key/value is decoded before dispatch, so a standards-compliant encoder cannot miss tools.
+    r = parse("{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\","
+              "\"params\":{\"name\":\"get_status\"}}");
+    CHECK(!r.error && r.method == McpMethod::ToolsCall && r.tool == "get_status");
+    r = parse("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\","
+              "\"params\":{\"arguments\":{},\"name\":\"get_hp_\\u0076alues\"}}");
+    CHECK(!r.error && r.tool == "get_hp_values");
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\"}").error == -32602);
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{}}")
+              .error == -32602);
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\","
+                "\"params\":{\"name\":7}}").error == -32602);
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\","
+                "\"params\":{\"name\":\"get_status\",\"arguments\":{\"unexpected\":1}}}")
+              .error == -32602);
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\","
+                "\"params\":{\"name\":\"get_status\",\"arguments\":[]}}").error == -32602);
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\","
+                "\"params\":{\"name\":\"get_status\",\"name\":\"get_status\"}}").error == -32602);
+    r = parse("{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"tools/call\","
+              "\"params\":{\"name\":\"set_hp\"}}");
+    CHECK(r.error == -32601 && std::string(mcp_error_message(r)) == "Tool not found");
+    r = parse("{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"unknown\"}");
+    CHECK(r.error == -32601 && std::string(mcp_error_message(r)) == "Method not found");
+
+    // IDs are echoed as exact JSON tokens (including exponent spelling and escaped string content);
+    // null remains null. Error/result builders preserve them and quote messages through json.hpp.
+    r = parse("{\"jsonrpc\":\"2.0\",\"id\":-1.25e+2,\"method\":\"tools/list\"}");
+    CHECK(!r.error && r.id_kind == McpIdKind::Number && r.id_raw == "-1.25e+2");
+    r = parse("{\"jsonrpc\":\"2.0\",\"id\":\"a\\\\\\\"b\",\"method\":\"tools/list\"}");
+    CHECK(!r.error && r.id_kind == McpIdKind::String && r.id_raw == "\"a\\\\\\\"b\"");
+    r = parse("{\"jsonrpc\":\"2.0\",\"id\":null,\"method\":\"tools/list\"}");
+    CHECK(!r.error && r.id_kind == McpIdKind::Null && r.id_raw == "null");
+    const std::string ok = mcp_result("-1.25e+2", "{\"ok\":true}");
+    CHECK(ok == "{\"jsonrpc\":\"2.0\",\"id\":-1.25e+2,\"result\":{\"ok\":true}}");
+    const std::string err = mcp_error("\"x\"", -32602, "bad \"args\"");
+    CHECK(err.find("\"id\":\"x\"") != std::string::npos);
+    CHECK(err.find("\"code\":-32602") != std::string::npos);
+    CHECK(err.find("bad \\\"args\\\"") != std::string::npos);
+    CHECK(std::string(mcp_error_message(McpRequest{})) == "Error");
+    McpRequest parse_err; parse_err.error = -32700;
+    CHECK(std::string(mcp_error_message(parse_err)) == "Parse error");
+    parse_err.error = -32600;
+    CHECK(std::string(mcp_error_message(parse_err)) == "Invalid Request");
+    parse_err.error = -32602;
+    CHECK(std::string(mcp_error_message(parse_err)) == "Invalid params");
+
+    // Fixed results expose exactly the two read-only no-argument tools and the full server name.
+    const std::string init = mcp_initialize_result("2025-11-25", "v9.9.9");
+    CHECK(init.find("\"protocolVersion\":\"2025-11-25\"") != std::string::npos);
+    CHECK(init.find("\"capabilities\":{\"tools\":{}}") != std::string::npos);
+    CHECK(init.find("\"name\":\"daikin-altherma-esp32\"") != std::string::npos);
+    CHECK(init.find("\"version\":\"v9.9.9\"") != std::string::npos);
+    const std::string catalog = mcp_tools_list_result();
+    CHECK(catalog.find("\"name\":\"get_status\"") != std::string::npos);
+    CHECK(catalog.find("\"name\":\"get_hp_values\"") != std::string::npos);
+    CHECK(catalog.find("\"name\":\"set_") == std::string::npos);
+    CHECK(catalog.find("\"additionalProperties\":false") != std::string::npos);
+    CHECK(catalog.find("\"readOnlyHint\":true") != std::string::npos);
+    const std::string tool_result = mcp_tool_result("{\"values\":[1]}", "snapshot");
+    CHECK(tool_result.find("\"content\":[{\"type\":\"text\",\"text\":\"snapshot\"}]")
+          != std::string::npos);
+    CHECK(tool_result.find("\"structuredContent\":{\"values\":[1]}") != std::string::npos);
+    CHECK(tool_result.find("\"isError\":false") != std::string::npos);
+    std::string streamed;
+    mcp_result_begin(streamed, "8");
+    mcp_tool_result_begin(streamed, "snapshot");
+    streamed += "{\"values\":[1]}";   // device appends /status or /values into this same buffer
+    mcp_tool_result_end(streamed);
+    mcp_result_end(streamed);
+    CHECK(streamed == "{\"jsonrpc\":\"2.0\",\"id\":8,\"result\":" + tool_result + "}");
+
+    // The scanner rejects broken escapes/surrogates and an attacker-controlled nesting bomb.
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":\"\\uD800\",\"method\":\"tools/list\"}")
+              .error == -32700);
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":\"\\uDC00\",\"method\":\"tools/list\"}")
+              .error == -32700);
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":\"\\q\",\"method\":\"tools/list\"}")
+              .error == -32700);
+    std::string deep = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"x\":";
+    deep += std::string(18, '[');
+    deep += "0";
+    deep += std::string(18, ']');
+    deep += "}";
+    CHECK(parse(deep).error == -32700);
 }
 
 static void test_http_surface() {
@@ -7221,7 +7367,7 @@ int main() {
     test_query_flag();
     test_redact();
     test_config_store();
-    test_mcp_jsonrpc();
+    test_mcp();
     test_http_surface();
     test_lwt_select();
     test_ou_stale();

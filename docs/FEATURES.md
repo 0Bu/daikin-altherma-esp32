@@ -15,7 +15,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | [`REGISTERS.md`](REGISTERS.md) | converter reference + full register/value map |
 | [`HOME_ASSISTANT.md`](HOME_ASSISTANT.md) | HA topics, discovery, derived power/COP/SCOP |
 | [`DESIGN.md`](DESIGN.md) | web-UI design contract |
-| [`MCP.md`](MCP.md) | MCP server (planned) |
+| [`MCP.md`](MCP.md) | stateless, read-only Streamable-HTTP MCP server |
 
 > **Status legend** — ✅ implemented & shipping · 🧪 implemented, host-tested pure logic ·
 > 🟡 partially implemented (a working core with a documented TODO) · 🔭 planned / stubbed route.
@@ -47,12 +47,12 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 17 | mDNS + DHCP hostname (option 12) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 18 | **In-app WiFi re-config + reason-aware one-shot credential rollback** | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`http_config.cpp`](../main/http_config.cpp), [`logic/wifi_rollback.hpp`](../main/logic/wifi_rollback.hpp), [`logic/config_model.hpp`](../main/logic/config_model.hpp) |
 | 19 | X10A auto-detection (protocol sweep → fingerprint → model, **I/U-capacity fallback** when the O/U 0x00 descriptor omits its capacity byte — it both ranks the representative and **narrows the candidate set**, dropping only classes that contradict it, **retried page probe + a second-sweep confirmation** before falling back to `generic`, and an **order-independent** representative pick so a reordered registry cannot move a published entity id or series) | ✅ 🧪 | [`hp_detect.cpp`](../main/hp_detect.cpp), [`logic/detect.hpp`](../main/logic/detect.hpp) |
-| 20 | **IDF-free host-tested logic core** (1961 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
+| 20 | **IDF-free host-tested logic core** (2033 checks, re-derived — see §8) | 🧪 | [`main/logic/`](../main/logic), [`test/test_logic.cpp`](../test/test_logic.cpp) |
 | 21 | CI pinned to the exact ESP-IDF the local Docker build uses | ✅ | [`idf-docker.sh`](../scripts/idf-docker.sh), [`build.yml`](../.github/workflows/build.yml) |
 | 22 | Traceable build identity (`app_elf_sha256`) matches a dump→its ELF | ✅ | [`http_status.cpp`](../main/http_status.cpp), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 23 | Firmware-footprint trims (~15 KB of unused IDF code paths) | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 24 | Status indicator — **runtime-selectable GPIO-LED / WS2812 back-end**, one image per board family | ✅ 🧪 | [`status_led.cpp`](../main/status_led.cpp), [`logic/led_pattern.hpp`](../main/logic/led_pattern.hpp) |
-| 25 | Read-only MCP server route | 🔭 | [`mcp_server.cpp`](../main/mcp_server.cpp) |
+| 25 | **Read-only MCP server** — stateless Streamable HTTP with host-tested JSON-RPC parsing/version negotiation, exactly `get_status` + `get_hp_values`, and no SSE/session/control path | ✅ 🧪 | [`mcp_server.cpp`](../main/mcp_server.cpp), [`logic/mcp.hpp`](../main/logic/mcp.hpp), [`MCP.md`](MCP.md) |
 | 26 | **MQTT broker save-time pre-flight** (DNS/TCP/connect+auth, heap-guarded) before persist | ✅ | [`http_config.cpp`](../main/http_config.cpp) |
 | 27 | **Task Watchdog** → clean reboot on a wedged poll/publish task | ✅ | [`hp_poll.cpp`](../main/hp_poll.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 28 | **`/status.sys`** always-on heap headroom + last-boot reason (LAN/WS, no broker) | ✅ 🧪 | [`http_status.cpp`](../main/http_status.cpp), [`logic/reset_reason.hpp`](../main/logic/reset_reason.hpp) |
@@ -362,7 +362,7 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   nothing to do with it. A sparsely-writing frame can step over the canary words entirely (the
   neighbouring TLS[1] survived, which is how we know it did). It then earned its keep on the OTHER
   runner of that same builder: `hp_poll` (whose WebSocket broadcaster also called
-  `build_status_json_string()`) was still at 8192 when #229 and #231 grew `/status` to ~3.5 KB, and
+  `http_append_status_json()`) was still at 8192 when #229 and #231 grew `/status` to ~3.5 KB, and
   the watchpoint caught it **at** the offending instruction — `exccause 0x41`, `hp_poll 7664/520`,
   inside a `malloc()` under `Config::Config` — instead of months later somewhere unrelated (#241).
   That second runner is now **gone** with the WebSocket push: `/status` is built on the httpd task
@@ -978,9 +978,10 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   routes each surface exposes, so the open setup AP serves only the provisioning routes while
   `/coredump`, `/diag` and the config/OTA/MCP surface stay trusted-LAN-only), the **atomic config
   save** (`config_store.hpp` — the credential/service fields are one CRC-checked NVS blob so a save is
-  all-or-nothing across a write failure or a power cut), the **JSON-RPC 2.0 response policy** for the
-  planned MCP route (`mcp_jsonrpc.hpp` — parse-error / invalid-request / notification-no-response /
-  method-not-found, and which id may be echoed) and the **query-flag policy** (`query_flag.hpp` — a `?clear=1`-style flag
+  all-or-nothing across a write failure or a power cut), the complete **MCP/JSON-RPC 2.0 core**
+  (`mcp.hpp` — bounded/depth-aware scanner, exact id echo, revision negotiation, read-only
+  method/tool dispatch, parse/invalid-request/method-or-tool-not-found/invalid-params errors, and
+  notification handling) and the **query-flag policy** (`query_flag.hpp` — a `?clear=1`-style flag
   acts only on exactly `1`, so `?clear=0` no longer wipes the diag log), and the **leaving-water
   measurement picker** (`lwt_select.hpp` — the host-testable twin of the web UI's `lwtRow`/`vLwt`,
   through which *every* browser consumer resolves — the schematic pill, the derived figures and the
@@ -1119,7 +1120,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md), [`ARCHITECTURE.md` �
   catalog sweep proving each `(page, offset, converter)` locator resolves to **exactly one** row
   **and to the right one**, asserted on the resolved row's own label, because six other rows share
   the `0x60/12` byte and every one of them would satisfy a page+offset match),
-  **1961 `CHECK`s** in
+  **2033 `CHECK`s** in
   [`test/test_logic.cpp`](../test/test_logic.cpp) — the three counts in this file are one number and
   drift together, so re-derive them rather than adjust one:
   `grep -o 'CHECK(' test/test_logic.cpp | wc -l` minus the macro's own definition line.
@@ -1465,7 +1466,7 @@ and gzipped into the app image** (polled, after a WebSocket push proved it could
 reports, and a **field-debuggable crash story** (flash core dumps, offline symbolication against an
 sha-matched ELF, retained MQTT crash + 18-entity heartbeat diagnostics). And the risky parts — decode,
 CRC, config, discovery, the health gate, the OTA downgrade gate — are **pure IDF-free logic verified
-on the host** (1961 checks),
+on the host** (2033 checks),
 gating the firmware build in CI. Everything is **runtime-configured from a captive-portal web UI**; the
 heat-pump model is **re-detected on every boot**.
 

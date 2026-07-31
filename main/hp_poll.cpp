@@ -397,7 +397,7 @@ void hp_poll_start() {
     // configured. The devices that do not have one pay nothing.
     //
     // What remains on this task is what it ran on for months: poll_once + hp_detect_run. #241's
-    // overflow was build_status_json_string() reached from the WebSocket broadcaster that used to
+    // overflow was http_append_status_json() reached from the WebSocket broadcaster that used to
     // live here, and that is gone (docs/ARCHITECTURE.md "Push vs. poll"):
     //
     //     TCB             NAME PRIO C/B  STACK USED/FREE
