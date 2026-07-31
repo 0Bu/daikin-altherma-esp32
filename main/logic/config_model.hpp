@@ -370,4 +370,13 @@ inline bool set_hp_clears_fingerprint(bool profile_present, const std::string& p
     return profile_present && profile_value == "auto";
 }
 
+// The rolling X10A observation belongs to one physical link/profile identity. An explicit profile
+// request is an identity statement even when its text matches the current value; changing either
+// wire may attach a different unit. HomeHub-only fields share /set_hp but are an independent source
+// and must not discard X10A evidence.
+inline bool set_hp_resets_checkup(bool profile_present, int old_rx, int old_tx,
+                                  int new_rx, int new_tx) {
+    return profile_present || old_rx != new_rx || old_tx != new_tx;
+}
+
 } // namespace daik

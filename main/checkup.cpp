@@ -1,4 +1,4 @@
-// The 24-hour plant health checkup. Policy (which rows, what counts as an edge, the bucket math, the
+// The 24-hour X10A plant observation. Policy (which rows, what counts as an edge, the bucket math, the
 // thresholds and the verdicts) lives in logic/checkup.hpp and is host-tested; this file is storage,
 // one mutex, and the fold from a poll cycle into the open hour.
 #include "checkup.hpp"
@@ -10,25 +10,21 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
+#include <atomic>
+
 namespace daik {
 
 namespace {
 
 logic::CheckupRing  s_ring;
 logic::CheckupState s_state;
-// Which inputs this profile has EVER supplied. Accumulated rather than re-derived per cycle: a page
-// that times out for one sweep leaves its rows out of the cache entirely (hp_poll only caches rows
-// whose register answered), so a per-cycle reading of coverage would flip a check to "unavailable"
-// on every dropped frame and then back — which is a broken bus reported as a missing feature.
-//
-// It is NOT reset when the model changes, and that is safe for a reason the trend rings could not
-// claim: a trend addresses its row by (reg, offset, UNIT), which can land on a different quantity in
-// another profile, while a health locator carries the CONVERTER too. (0x60, 12, 304) is "BUH Step1"
-// on every profile that has it — the catalog test asserts exactly that, per locator, across the
-// whole catalog — so a re-detected model cannot silently re-point one of these at something else.
+// Capability of the CURRENT converter-adjudicated profile. hp_poll derives it from the profile rows,
+// not from successful reads, so a timeout reduces evidence without pretending the feature vanished.
+// Replacing instead of OR-latching it is important when model detection changes at runtime.
 logic::CheckupCoverage s_cov;
 daik::FaultClass      s_fault_now = daik::FaultClass::Unknown;
 SemaphoreHandle_t     s_mtx = nullptr;
+std::atomic<bool>     s_reset_requested{false};
 
 // RAII lock, same idiom as history.cpp/hp_poll.cpp. Everything inside a critical section here is a
 // plain integer copy — nothing allocates, so an unwind cannot strand the mutex.
@@ -54,7 +50,7 @@ int find_row(const CachedValue* v, size_t n, const logic::CheckupLocator& l) {
 
 // A cached value as tenths of its unit. logic/history.hpp's parse, not a local strtod: the trends
 // ask the same question of the same string one call later, and two parses that disagreed about, say,
-// a non-numeric flag would make the health counters and the charts describe different plants.
+// a non-numeric flag would make the observation counters and the charts describe different plants.
 bool tenths(const CachedValue& cv, int& out) {
     return logic::history_parse_tenths(cv.value.c_str(), out);
 }
@@ -74,28 +70,40 @@ void flag_state(const CachedValue* v, size_t n, const logic::CheckupLocator& l,
     on    = t > 0;
 }
 
-// A numeric row's reading in tenths. `require_live` drops a value the outdoor unit is no longer
-// refreshing (CachedValue::held, logic/ou_stale.hpp) — used for outdoor air, where a held-over
-// number would otherwise decide whether a defrost happened above the frost line.
-bool reading(const CachedValue* v, size_t n, const logic::CheckupLocator& l, int& out,
-             bool require_live = false) {
+// A numeric row's reading in tenths.
+bool reading(const CachedValue* v, size_t n, const logic::CheckupLocator& l, int& out) {
     const int i = find_row(v, n, l);
     if (i < 0) return false;
-    if (require_live && v[i].held) return false;
     return tenths(v[i], out);
+}
+
+bool apply_reset_locked() {
+    if (!s_reset_requested.exchange(false)) return false;
+    s_ring.reset();
+    s_state = logic::CheckupState{};
+    s_cov = logic::CheckupCoverage{};
+    s_fault_now = daik::FaultClass::Unknown;
+    return true;
 }
 
 } // namespace
 
-void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running) {
+void checkup_reset() {
+    // Do not create/take the mutex from the httpd task. The poll task remains its sole creator, and
+    // only the record path consumes this request under that mutex; reports stay empty until then.
+    s_reset_requested.store(true);
+}
+
+void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
+                    const logic::CheckupCoverage& coverage) {
     if (!s_mtx) {
         s_mtx = xSemaphoreCreateMutex();           // created on the poll task, the only creator
         if (!s_mtx) {
-            diag_printf("health: mutex alloc failed — checkup disabled this boot\n");
+            diag_printf("checkup: mutex alloc failed — observation disabled this boot\n");
             return;
         }
     }
-    if (!v || !n) return;
+    if (!v && n) return;
 
     logic::CheckupSample s;
     s.rps_known   = rps_known;
@@ -104,43 +112,51 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     flag_state(v, n, logic::CHECKUP_LOC_DEFROST, s.defrost_known, s.defrost_on);
     flag_state(v, n, logic::CHECKUP_LOC_PUMP,    s.pump_known,    s.pump_on);
     flag_state(v, n, logic::CHECKUP_LOC_BSH,     s.bsh_known,     s.bsh_on);
-    // Either step is "the backup heater is on": step 2 without step 1 is not a state this plant
-    // reaches, but reading them as one flag means a model that only reports one still counts.
+    // Either active step proves the aggregate BUH is on. Proving it is OFF needs every step carried
+    // by this profile to be readable; one readable zero plus one timed-out step remains unknown.
     bool b1_known = false, b1_on = false, b2_known = false, b2_on = false;
     flag_state(v, n, logic::CHECKUP_LOC_BUH1, b1_known, b1_on);
     flag_state(v, n, logic::CHECKUP_LOC_BUH2, b2_known, b2_on);
-    s.buh_known = b1_known || b2_known;
     s.buh_on    = b1_on || b2_on;
+    s.buh_known = s.buh_on ||
+                  ((coverage.buh1 || coverage.buh2) &&
+                   (!coverage.buh1 || b1_known) &&
+                   (!coverage.buh2 || b2_known));
 
     s.bar_ok  = reading(v, n, logic::CHECKUP_LOC_PRESSURE, s.bar_tenths);
     s.flow_ok = reading(v, n, logic::CHECKUP_LOC_FLOW,     s.flow_tenths);
-    s.oat_ok  = reading(v, n, logic::CHECKUP_LOC_OUTDOOR,  s.oat_tenths, /*require_live=*/true);
+    s.retry_expected_mask = coverage.retry_mask;
 
-    // The fault class and the retry counters are matched by CONVERTER, not by a locator: a profile
-    // carries an error class on the outdoor page AND on the hydronic one, and a fault on either unit
-    // is a fault. The WORST class wins — reporting the hydronic "Normal" while the outdoor unit says
-    // "Error" would be a clean bill of health issued by the half that is fine.
-    bool have_rps_row = false;
-    bool have_fault_row = false, have_retry_row = false;
+    // Fault class is matched by converter because a profile carries it on the outdoor page AND the
+    // hydronic one. Retry counters use exact page/offset/converter identities because conv 311 also
+    // names unrelated values elsewhere. For faults the WORST readable class wins.
+    uint8_t fault_rows_read = 0;
     for (size_t i = 0; i < n; i++) {
         const CachedValue& cv = v[i];
-        if (logic::ou_is_rps_witness(cv.label.c_str(), cv.reg)) have_rps_row = true;
         if (logic::checkup_is_fault_class(cv.conv)) {
-            have_fault_row = true;
             const FaultClass c = fault_class_from_text(cv.value.c_str());
+            if (c != FaultClass::Unknown && fault_rows_read < UINT8_MAX) fault_rows_read++;
             if (fault_error_active(c)) s.fault = FaultClass::Error;
             else if (fault_warning_active(c) && !fault_error_active(s.fault)) s.fault = c;
             else if (c == FaultClass::Normal && s.fault == FaultClass::Unknown) s.fault = c;
         }
-        if (logic::checkup_is_retry_counter(cv.conv)) {
-            have_retry_row = true;
+        const int retry = logic::checkup_retry_index(cv.reg, cv.off, cv.conv);
+        if (retry >= 0) {
             int t = 0;
-            if (tenths(cv, t)) {
-                s.retry_known = true;
-                if (t > s.retry_max_tenths) s.retry_max_tenths = t;
+            if (tenths(cv, t) && t % 10 == 0) {
+                const int value = t / 10;
+                if (value >= 0 && value <= 7) {
+                    s.retry_known_mask |= static_cast<uint8_t>(1u << retry);
+                    s.retry_value[static_cast<size_t>(retry)] = static_cast<uint8_t>(value);
+                }
             }
         }
     }
+    // An active class on either unit is still a finding. "Normal" requires every fault-class row
+    // supplied by the profile; otherwise a timed-out outdoor page could be cleared by the indoor row.
+    if (!fault_error_active(s.fault) && !fault_warning_active(s.fault) &&
+        fault_rows_read < coverage.fault_rows)
+        s.fault = FaultClass::Unknown;
 
     const int64_t  now    = esp_timer_get_time();
     const uint32_t bucket = logic::checkup_bucket(now);
@@ -148,31 +164,42 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     Lock lk(s_mtx);
     if (!lk.held) return;
 
-    // Coverage is what the profile CAN supply, accumulated over the boot (see the note beside s_cov).
-    s_cov.rps      |= have_rps_row;
-    s_cov.defrost  |= s.defrost_known;
-    s_cov.heater   |= s.buh_known || s.bsh_known;
-    s_cov.pump     |= s.pump_known;
-    s_cov.pressure |= s.bar_ok;
-    s_cov.flow     |= s.flow_ok;
-    s_cov.fault    |= have_fault_row;
-    s_cov.retries  |= have_retry_row;
-    s_fault_now     = s.fault;
+    // A request can arrive while an old-link sweep is in flight. If this cycle consumes it, discard
+    // the whole sample after clearing state; otherwise the tail of old poll A would seed the window
+    // that new-link poll B continues. Dropping at most the first new sample is the conservative side.
+    if (apply_reset_locked()) return;
+    s_cov       = coverage;
+    s_fault_now = s.fault;
+    s_ring.observe(now);
 
-    // Crossing into a new hour closes the open bucket; whole hours with no cycle at all are pushed
-    // EMPTY (logic/checkup.hpp), which is what keeps `covered_s` an honest count of observed time.
-    if (s_state.have_bucket && bucket != s_state.bucket)
+    // Close the old hour before folding the current sample. For a continuous boundary, zero only
+    // the cross-boundary duration while retaining the prior tri-state witnesses: step() can then
+    // place an edge/current fault in the NEW bucket without retaining old seconds beyond 24 h. A
+    // long gap is left intact so step() rejects both elapsed time and edges and re-baselines here.
+    if (s_state.have_bucket && bucket != s_state.bucket) {
+        bool continuous_boundary = false;
+        if (s_state.last_us >= 0 && now >= s_state.last_us) {
+            const int64_t gap_us = now - s_state.last_us;
+            continuous_boundary =
+                gap_us <= static_cast<int64_t>(logic::CHECKUP_MAX_GAP_S) * 1000000;
+        }
         s_ring.commit(logic::checkup_skipped(s_state.bucket, bucket));
+        if (continuous_boundary) s_state.last_us = now; // dt=0, edge witnesses intentionally kept
+        logic::checkup_step(s_state, s_ring.pending, s, now);
+    } else {
+        logic::checkup_step(s_state, s_ring.pending, s, now);
+    }
     s_state.bucket      = bucket;
     s_state.have_bucket = true;
-
-    logic::checkup_step(s_state, s_ring.pending, s, now);
 }
 
 logic::CheckupReport checkup_report() {
     if (!s_mtx) return logic::CheckupReport{};
     Lock lk(s_mtx);
     if (!lk.held) return logic::CheckupReport{};
+    // Only the record path consumes a reset, because it can also discard the in-flight sample.
+    // Until then expose an empty report, never stale identity A and never consume the guard early.
+    if (s_reset_requested.load()) return logic::CheckupReport{};
     return logic::checkup_evaluate(logic::checkup_aggregate(s_ring), s_cov, s_fault_now);
 }
 

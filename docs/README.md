@@ -295,27 +295,49 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #   history:{dt,rows:[{id,label}]},   # rows with a 24 h trend;
                                    #        id = the concept (what /history takes), label = how the
                                    #        detected profile spells it. Absent rows are omitted.
-                                   #   health:{covered_s,status,checks:[{id,verdict,…}]},
-                                   #        # the 24 h plant CHECKUP (logic/checkup.hpp), judged on
-                                   #        the device. status = the worst verdict across the
-                                   #        checks; covered_s = how much of the day was actually
-                                   #        OBSERVED, in seconds (the ring is RAM, so a reboot
-                                   #        restarts it — reported rather than rounded to hours, so
-                                   #        the first hour reads as the small number it is).
-                                   #        Seven checks in READING order, fault first, each
-                                   #        verdict "unavailable" (this profile lacks the rows —
-                                   #        only 27 of 44 carry the compressor witness) |
-                                   #        "collecting" (window too short to judge yet — it
-                                   #        outranks "ok" in the aggregation, so a freshly booted
-                                   #        board can never report green) | "ok" | "info" | "warn",
-                                   #        plus its own named numbers:
+                                   #   health:{covered_s,full_span,status,available,assessable,evaluated,
+                                   #        checks:[{id,verdict,evidence,observed_s,required_s,…}]},
+                                   #        # rolling X10A operating OBSERVATION, not a whole-plant
+                                   #        health certificate. Storage is 23 completed 1 h buckets
+                                   #        plus the pending hour, so represented span is <=24 h;
+                                   #        RAM-only: reboot, explicit /detect, profile selection or
+                                   #        RX/TX-pin change starts a new X10A lifecycle; a HomeHub-only
+                                   #        edit does not. A reset discards an in-flight old-link sample.
+                                   #        covered_s is coarse card context only. Each check's
+                                   #        observed_s is its own valid evidence and required_s its
+                                   #        gate; absence-of-pattern checks require full_span plus
+                                   #        >=90% signal-specific evidence, while direct state and
+                                   #        observation-only flow publish their shorter stated gate.
+                                   #        Event states are read once per completed poll sweep, so a
+                                   #        pulse wholly between sweeps can be missed. Absolute monotonic
+                                   #        timestamps preserve fractional sweep time in evidence clocks.
+                                   #        available = supported/reportable rows; assessable = rows with
+                                   #        a bounded judgement; evaluated = assessable rows whose gate
+                                   #        is complete. Observations never support aggregate "ok".
+                                   #        verdict: "unavailable" (profile lacks required rows) |
+                                   #        "collecting" (supported, insufficient evidence) | "ok"
+                                   #        (eligible row has no finding / observation is available) |
+                                   #        "info" | "warn". Top-level status "ok" means only no finding
+                                   #        in the bounded checks counted by evaluated/assessable.
+                                   #        evidence: "device" | "manufacturer" | "heuristic" |
+                                   #        "observation" | "experimental". Only pressure >1 bar is
+                                   #        a manufacturer numeric boundary. min_bar is always the raw
+                                   #        minimum; <=1.0 bar is Info immediately and Warn only after
+                                   #        60 continuous seconds. Cycling/defrost are
+                                   #        heuristic Info, flow/heaters observations, retry changes
+                                   #        experimental strict deltas.
+                                   #        Named values remain stable:
                                    #          fault:{active}   cycling:{starts,mean_run_s}
-                                   #          defrost:{count,share_pct}   pressure:{min_bar}
-                                   #          flow:{min_l_min}   heater:{buh_min,bsh_min}
+                                   #          defrost:{count,paired_count,share_pct,defrost_s,run_s}
+                                   #          pressure:{min_bar}   flow:{min_l_min}
+                                   #          heater:{buh_min,bsh_min,buh_s,bsh_s}
                                    #          retries:{seen}
-                                   #        A number the check did not establish is null, never an
-                                   #        omitted key. NOT the same thing as GET /diag, which is
-                                   #        the log ring.
+                                   #        Unsupported/unestablished numbers are null, never a
+                                   #        plausible zero. Legacy heater minute fields are null for a
+                                   #        positive sub-minute runtime; *_s preserves it. Legacy
+                                   #        share_pct is null for a positive sub-percent ratio; raw
+                                   #        defrost_s/run_s preserve and adjudicate it. NOT GET /diag,
+                                   #        which is the log ring.
                                    #   sys:{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode},
                                    #   last_crash: null | {reason,reason_code,fault,coredump,
                                    #        task,pc,backtrace[],corrupted,elf_sha256},

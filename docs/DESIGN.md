@@ -698,40 +698,73 @@ Body, ordered:
    item 6.
    The **ESP32** card that used to sit above it is in Settings now (§5.6): this card is the *unit*,
    that one is the *board*.
-5. **Checkup card** — "Checkup · 24 h", styled exactly like the Model card, directly below it and
-   above the value groups. It answers the third question the dashboard has, after *what is it doing
-   now* (the system card) and *what did this one reading do today* (a value row's trend): **is
-   anything worth reporting?** Seven rows from `/status.health`, in the order the firmware sends them
-   (`logic/checkup.hpp` declares the checks in reading order, so there is no second opinion here
-   about which matters most): unit fault, compressor starts, defrost cycles, lowest water pressure,
-   lowest flow rate, backup heater, protection retries.
-   **Every verdict is the device's.** The firmware judges; the browser renders words and colour. A
-   threshold decided in `app.js` would be a second, ungated definition of the same judgement, and the
-   rules here are gated in CI against the whole profile catalog — the failure mode `lwt_select`
-   already demonstrated when a looser copy of its rule re-opened #121.
-   **A badge states the whole card in one word**, beside the heading, with a coloured dot: "All
-   clear" / "Worth a look" / "Needs attention" / "Collecting · 4 h of 24 h" / "Not available". The
-   word carries the statement and the dot only tints it (§9) — the badge is legible with no colour
-   perception at all.
-   **The window is stated, not implied.** The rings are RAM-only and this board reboots often, so a
-   partial window is the *normal* case, not an edge one. A check whose window is too short reports
-   "collecting…" and the badge names how much has been observed. A device that has been up ten
-   minutes must never show a green "All clear" it has no evidence for — the same refusal §8 makes
-   about a dead bus ("an idle plant with no readings, not a stale one"), applied to a count.
-   **A check the model cannot run says "—"**, and unlike "collecting" it does not hold the badge
-   back: only 27 of 44 profiles carry a compressor-speed row, so on the rest the cycling and retry
-   rows are simply off. Disable, never degrade (`logic/feature_gate.hpp`).
-   **Every row explains itself** (same expander and the same `MODEL_DESCRIPTIONS` table as item 4).
-   These rows need it more than any others on the dashboard, and for a different reason: a value row
-   states a *measurement* the reader can look up, while "31 starts, 6 min avg" states a *judgement* —
-   without the copy a reader cannot tell whether that is bad, why the firmware thinks so, or what
-   they would do about it. Each explainer therefore answers three things: what was counted, what
-   normal looks like, and what to do when it is not. It also states what the row does **not** claim:
-   the flow minimum deliberately carries no verdict (the required minimum is per model across a
-   3–18 kW catalog, and the unit raises 7H itself), and a defrost above the frost line is odd rather
-   than wrong (air humidity is not on the X10A bus).
-   Hidden entirely while the X10A link is down, like the Model card: a summary of the last 24 hours
-   presented beside a bus that is not answering reads as current when it is not.
+5. **X10A observation card** — "X10A observation · up to 24 h", styled exactly like the Model card, directly
+   below it and above the value groups. It answers the third question the dashboard has, after *what
+   is it doing now* (the system card) and *what did this one reading do today* (a value row's trend):
+   **what did X10A actually establish, and was anything worth following up?** It is deliberately not
+   a health certificate for the plant. X10A cannot establish refrigerant charge, sensor calibration,
+   hydraulic cleanliness, air path, mechanical condition or seasonal efficiency. Seven rows come
+   from `/status.health`, in firmware reading order: unit fault, compressor starts, defrost cycles,
+   lowest water pressure, lowest steady flow, BUH/BSH runtime and protection-retry changes.
+   **Every row names its evidence class.** `device` is the unit's own fault state;
+   `manufacturer` is the documented water-pressure boundary; `heuristic` marks cycling/defrost
+   patterns that can only be hints; `observation` is a measured fact with no universal judgement;
+   and `experimental` marks retry-counter semantics that are not yet manufacturer-validated. The
+   firmware classifies and supplies the evidence; the browser renders words and colour. A threshold
+   decided in `app.js` would be a second, ungated definition of the same rule.
+   **The badge summarizes evidence, not plant health.** Its text distinguishes an active/device or
+   documented-limit finding, a heuristic/experimental hint, incomplete collection and unavailable
+   inputs from “no finding in the evaluated X10A data”. It never says “healthy” or “all clear”.
+   `available`, `assessable` and `evaluated` keep three different denominators visible:
+   reportable rows, rows with a bounded judgement, and judgements whose evidence gate is complete.
+   Thus four evaluated judgements and seven supported rows read as `4/4 bewertet · 7 unterstützt`,
+   not as seven affirmative checks. Flow/heater observations, count-only defrost and a stable
+   experimental retry counter cannot manufacture a green summary; an actual retry increase may still
+   raise `info`.
+   **The window and each signal's evidence are stated, not implied.** Storage is 23 completed
+   one-hour buckets plus the pending hour, so it never represents more than 24 hours; the trade-off
+   is that it may contain slightly less than a day at a bucket boundary. `full_span` uses the actual
+   first/latest monotonic samples rather than the number of crossed hour boundaries. The ring is
+   RAM-only, so a reboot starts a new observation lifecycle; explicit X10A re-detection, profile
+   selection or RX/TX-pin change also starts a new identity, while a HomeHub-only edit deliberately
+   does not. A reset arriving during a sweep discards that sample, so the old link cannot seed the new
+   window. Any check that concludes an *absence* of a pattern
+   requires both `full_span` and at least 90% valid evidence for its own input; the direct current
+   fault state and observation-only flow value instead expose their explicit eligibility target.
+   Global poll uptime is never substituted for a missing compressor, pressure or heater row. Every row receives
+   `observed_s` and `required_s`; “collecting” is therefore check-specific rather than one card-wide
+   guess. Whole seconds are derived from absolute monotonic timestamps, so the serial sweep's
+   fractional duration telescopes instead of being floored away on every interval; continuity gaps
+   still use the exact microsecond delta. Event states are sampled once per completed sweep, not at a
+   guaranteed 1 Hz, so a pulse entirely between sweeps remains outside the evidence.
+   **A check the active profile cannot run says “—”.** That is `unavailable`, not a permissive zero,
+   and does not count as evaluated. Only 27 of 44 profiles carry a compressor-speed witness; defrost
+   count remains observable without it, while the compressor-runtime share stays unavailable and
+   cannot count as assessed. `paired_count` separately reports transitions with compressor evidence
+   at both endpoints; only that count may satisfy the heuristic's three-cycle guard. Even with an RPS
+   row, zero paired compressor runtime supplies no ratio denominator and therefore no defrost
+   judgement. Those count-only cases carry `observation`, not `heuristic`, in the API and UI. BUH
+   and BSH have separate capability and evidence clocks, so an absent BSH row renders as unknown,
+   never “0 min”; observed seconds are carried separately so a real 1–59-second activation displays
+   as `<1 min` instead of zero.
+   **Every row explains both the fact and its limit** (same expander and the same
+   `MODEL_DESCRIPTIONS` table as item 4). Water pressure is the sole manufacturer-backed numeric
+   decision: representative official manuals across monobloc, split, high-capacity, geothermal and
+   hybrid Altherma families require circuit/pump-inlet pressure **above 1 bar** (linked in
+   [ARCHITECTURE.md](ARCHITECTURE.md#the-host-tested-logic-core)). The displayed minimum is always the
+   raw lowest valid sample: at or below 1.0 bar it raises `info` immediately, while only 60 continuous
+   seconds raise `warn`. The confirmation changes warning strength, never the statistic. Cycling and
+   defrost can raise `info` only as heuristics: starts are not separated by
+   operating mode, and X10A has neither humidity nor evaporator-surface temperature. Flow is sampled
+   only after 60 seconds of continuous pump operation and remains observation-only because the
+   required minimum is model-specific. BUH/BSH runtime is also observation-only because weather,
+   defrost support, emergency mode, settings and PV operation change legitimate use. Protection
+   retries are experimental and count only a strict increase of an individually identified 3-bit
+   counter between continuous, fully comparable samples, including an increase first visible while
+   stopped or at a compressor-state boundary. An absolute non-zero value is only a baseline; a
+   decrease or possible reset/wrap interval proves neither an event nor the absence of one.
+   Hidden entirely while the X10A link is down, like the Model card: a rolling observation presented
+   beside a bus that is not answering reads as current when it is not.
 6. **Value groups** (§6) as cards, each a label→value·unit table, tabular numbers; every value of the
    detected profile is shown. A value that timed out this cycle shows "—" (not 0). The schematic
    answers "what is happening"; these tables stay as the exact-value reference — both read the same

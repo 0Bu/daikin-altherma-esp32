@@ -4,6 +4,7 @@
 // /set_ota and /set_lang persist their UI settings and apply them live; /detect re-runs detection in
 // RAM.
 #include "http_handlers.hpp"
+#include "checkup.hpp"
 #include "config.hpp"
 #include "hp_poll.hpp"
 #include "logic/config_model.hpp"
@@ -367,6 +368,8 @@ static esp_err_t set_hp(httpd_req_t* req) {
     // invalidate a settled fingerprint (which would force a spurious re-detect next poll).
     cJSON* profItem     = cJSON_GetObjectItem(j, "profile");
     bool   profile_sent = cJSON_IsString(profItem);
+    const int old_rx = c.rx_pin;
+    const int old_tx = c.tx_pin;
     // "auto" (the UI's only value) requests a fresh detection; a concrete id pins the model for this
     // session (accepted for API flexibility, never offered in the UI).
     if (profile_sent) c.profile = profItem->valuestring;
@@ -374,6 +377,8 @@ static esp_err_t set_hp(httpd_req_t* req) {
     // proto is auto-detected (hp_detect.cpp), not set from the UI.
     c.rx_pin    = ji(j, "rx", c.rx_pin);
     c.tx_pin    = ji(j, "tx", c.tx_pin);
+    const bool reset_checkup =
+        set_hp_resets_checkup(profile_sent, old_rx, old_tx, c.rx_pin, c.tx_pin);
     // The HomeHub Modbus stack (issue #32). All optional — an omitted key keeps its stored value, so
     // a wiring-only patch (rx/tx) leaves the HomeHub untouched and the pin picker's
     // {profile:"auto",rx,tx} POST cannot switch anything on. This is a SECOND source, not an
@@ -398,7 +403,10 @@ static esp_err_t set_hp(httpd_req_t* req) {
     // there is no new link to hand the poll engine and reconfigure must be skipped.
     if (!config_save(c, /*require_link=*/true))
         return send_err(req, "500 Internal Server Error", "config write failed");
-    hp_poll_reconfigure();
+    if (reset_checkup) {
+        checkup_reset();
+        hp_poll_reconfigure();
+    }
     // The HomeHub stack is told separately, because it IS separate: this starts or stops its task
     // and re-resolves its address without touching the X10A poll engine above.
     mb_reconfigure();
@@ -583,6 +591,7 @@ static esp_err_t do_detect(httpd_req_t* req) {
     c.profile  = "auto";
     c.fp_valid = false;
     config_set_runtime(c);
+    checkup_reset();
     hp_poll_reconfigure();
     // The HomeHub stack is told separately, because it IS separate: this starts or stops its task
     // and re-resolves its address without touching the X10A poll engine above.

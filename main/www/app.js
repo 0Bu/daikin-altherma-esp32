@@ -103,29 +103,44 @@ const I18N = {
     // unit reports no capacity, and the two are routinely different sizes.
     "card.capacity_iu": "Capacity (indoor unit)",
     "card.candidates": "Possible models", "card.oueeprom": "Outdoor unit ID",
-    // The Checkup card (logic/checkup.hpp). Row labels name what was COUNTED, not the sensor: the
-    // reader is being shown a 24-hour aggregate, and "Water pressure" would read as the live figure
+    // The X10A observation card (logic/checkup.hpp). Row labels name what was COUNTED, not the sensor:
+    // the reader is being shown a rolling aggregate, and "Water pressure" would read as the live figure
     // that is already in the value list further down.
-    "card.checkup": "Checkup · 24 h",
+    "card.checkup": "X10A observation · up to 24 h",
     "check.fault": "Unit fault", "check.cycling": "Compressor starts",
     "check.defrost": "Defrost cycles", "check.pressure": "Water pressure, lowest",
     "check.flow": "Flow rate, lowest", "check.heater": "Backup heater",
     "check.retries": "Protection retries",
-    "check.all_ok": "All clear", "check.notice": "Worth a look", "check.attention": "Needs attention",
-    "check.nodata": "Not available",
+    "check.all_ok": "No finding in observed X10A data", "check.notice": "Operating note",
+    "check.attention": "Fault / documented limit",
+    "check.nodata": "No assessable check available",
     "check.collecting": "collecting…",
+    "check.collecting_status": "Collecting",
     "check.collecting_for": (w) => `Collecting · ${w}`,
+    "check.summary": (s, n, a, r, w) => `${s} · ${n}/${a} assessed · ${r} supported · ${w}`,
+    "check.evidence": (n, r) => `${n} / ${r} observed`,
     "check.win_none": "no data yet",
+    "check.win_lt_min": "<1 min of 24 h",
     "check.win_min": (m) => `${m} min of 24 h`,
     "check.win_h": (h) => `${h} h of 24 h`,
+    "check.win_hm": (h, m) => `${h} h ${m} min of 24 h`,
+    "check.basis.device": "device state",
+    "check.basis.manufacturer": "manufacturer limit",
+    "check.basis.heuristic": "heuristic",
+    "check.basis.observation": "observation",
+    "check.basis.experimental": "experimental",
     "check.starts": (n) => `${n} ${n === 1 ? "start" : "starts"}`,
     "check.cycles": (n) => `${n} ${n === 1 ? "cycle" : "cycles"}`,
-    "check.mean": (m) => `${m} min avg`,
+    "check.paired_cycles": (n) => `${n} with compressor evidence`,
+    "check.mean": (d) => `${d} runtime/start`,
     "check.min": (m) => `${m} min`,
     "check.tank": (m) => `tank ${m} min`,
+    "check.tank_runtime": (d) => `tank ${d}`,
     "check.fault_err": "Fault active", "check.fault_warn": "Warning active",
-    "check.fault_past": "Occurred today", "check.fault_none": "None",
-    "check.retry_seen": "Occurred", "check.retry_none": "None",
+    "check.fault_past": "Seen in window", "check.fault_none": "None active",
+    "check.fault_unknown": "Current state unknown",
+    "check.fault_past_unknown": "Seen in window · current state unknown",
+    "check.retry_seen": "Counter increase seen", "check.retry_none": "No increase seen",
     "values.waiting": "Waiting for the first poll…",
     "group.Operation": "Operation", "group.Domestic hot water": "Domestic hot water",
     "group.Water circuit": "Water circuit", "group.Refrigerant / outdoor": "Refrigerant / outdoor",
@@ -288,26 +303,42 @@ const I18N = {
     "card.txpin": "TX-Pin", "card.capacity": "Leistung",
     "card.capacity_iu": "Leistung (Inneneinheit)",
     "card.candidates": "Mögliche Modelle", "card.oueeprom": "Kennung Außeneinheit",
-    "card.checkup": "Check · 24 h",
+    "card.checkup": "X10A-Betriebsbeobachtung · bis 24 h",
     "check.fault": "Störung der Anlage", "check.cycling": "Verdichterstarts",
     "check.defrost": "Abtauvorgänge", "check.pressure": "Wasserdruck, niedrigster",
     "check.flow": "Durchfluss, niedrigster", "check.heater": "Zusatzheizer",
     "check.retries": "Schutz-Rückregelungen",
-    "check.all_ok": "Alles in Ordnung", "check.notice": "Hinweis",
-    "check.attention": "Bitte prüfen", "check.nodata": "Nicht verfügbar",
+    "check.all_ok": "Keine Auffälligkeit in beobachteten X10A-Daten",
+    "check.notice": "Betriebshinweis",
+    "check.attention": "Störung / dokumentierte Grenze",
+    "check.nodata": "Keine bewertbare Prüfung verfügbar",
     "check.collecting": "sammelt…",
+    "check.collecting_status": "Sammelt",
     "check.collecting_for": (w) => `Sammelt · ${w}`,
+    "check.summary": (s, n, a, r, w) => `${s} · ${n}/${a} bewertet · ${r} unterstützt · ${w}`,
+    "check.evidence": (n, r) => `${n} / ${r} beobachtet`,
     "check.win_none": "noch keine Daten",
+    "check.win_lt_min": "<1 min von 24 h",
     "check.win_min": (m) => `${m} min von 24 h`,
     "check.win_h": (h) => `${h} h von 24 h`,
+    "check.win_hm": (h, m) => `${h} h ${m} min von 24 h`,
+    "check.basis.device": "Gerätezustand",
+    "check.basis.manufacturer": "Herstellergrenze",
+    "check.basis.heuristic": "Heuristik",
+    "check.basis.observation": "Beobachtung",
+    "check.basis.experimental": "experimentell",
     "check.starts": (n) => `${n} ${n === 1 ? "Start" : "Starts"}`,
     "check.cycles": (n) => `${n} ${n === 1 ? "Vorgang" : "Vorgänge"}`,
-    "check.mean": (m) => `Ø ${m} min`,
+    "check.paired_cycles": (n) => `${n} mit Verdichterevidenz`,
+    "check.mean": (d) => `${d} Laufzeit/Start`,
     "check.min": (m) => `${m} min`,
     "check.tank": (m) => `Speicher ${m} min`,
+    "check.tank_runtime": (d) => `Speicher ${d}`,
     "check.fault_err": "Störung aktiv", "check.fault_warn": "Warnung aktiv",
-    "check.fault_past": "Heute aufgetreten", "check.fault_none": "Keine",
-    "check.retry_seen": "Aufgetreten", "check.retry_none": "Keine",
+    "check.fault_past": "Im Fenster aufgetreten", "check.fault_none": "Aktuell keine",
+    "check.fault_unknown": "Aktueller Zustand unbekannt",
+    "check.fault_past_unknown": "Im Fenster aufgetreten · aktuell unbekannt",
+    "check.retry_seen": "Zähleranstieg beobachtet", "check.retry_none": "Kein Anstieg beobachtet",
     "values.waiting": "Warte auf die erste Abfrage…",
     "group.Operation": "Betrieb", "group.Domestic hot water": "Warmwasser",
     "group.Water circuit": "Wasserkreis", "group.Refrigerant / outdoor": "Kältemittel / Außen",
@@ -1418,17 +1449,58 @@ const CHECKUP_ROW = {
   heater:   "check.heater",
   retries:  "check.retries",
 };
-// Verdict → the row's value colour and the badge's dot. Warn is the app's `err` red because it is
-// the strongest thing this card says; Ok is left UNTINTED rather than green — seven green rows is
-// noise, and the badge already states that the plant is fine.
+// Verdict → the row's value colour and the badge's dot. Warn is reserved for a unit fault or the
+// documented pressure boundary; heuristic findings are Info. Ok is left untinted — seven coloured
+// rows are noise, and the badge already states the evidence-bounded result.
 const CHECKUP_TONE = { warn: "err", info: "warn", ok: "", collecting: "", unavailable: "" };
 
 // How much of the 24 hours has actually been observed. Printed rather than rounded away: the ring is
 // RAM-only and this device reboots often, so a partial window is the normal case and the reader has
 // to be able to see that a verdict rests on four hours rather than a day.
 function checkupWindow(s) {
-  if (!(s > 0)) return t("check.win_none");
-  return s < 3600 ? t("check.win_min", Math.max(1, Math.round(s / 60))) : t("check.win_h", Math.round(s / 3600));
+  const seconds = Math.min(24 * 3600, Math.floor(Number(s)));
+  if (!Number.isFinite(seconds) || seconds <= 0) return t("check.win_none");
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 1) return t("check.win_lt_min");
+  if (minutes < 60) return t("check.win_min", minutes);
+  const hours = Math.floor(minutes / 60), remainder = minutes % 60;
+  return remainder ? t("check.win_hm", hours, remainder) : t("check.win_h", hours);
+}
+
+function checkupDuration(s, roundUp = false) {
+  const seconds = Number(s);
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0 min";
+  const minutes = roundUp ? Math.ceil(seconds / 60) : Math.floor(seconds / 60);
+  if (minutes < 1) return "<1 min";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60), remainder = minutes % 60;
+  return remainder ? `${hours} h ${remainder} min` : `${hours} h`;
+}
+
+function checkupCollecting(c, value) {
+  if (!(c.required_s > 0)) return value;
+  return `${value} · ${t("check.evidence", checkupDuration(c.observed_s),
+                         checkupDuration(c.required_s, true))}`;
+}
+
+function checkupDefrostShare(c) {
+  const part = Number(c.defrost_s), total = Number(c.run_s);
+  if (Number.isFinite(part) && part >= 0 && Number.isFinite(total) && total > 0) {
+    if (part === 0) return "0 %";
+    const exact = part * 100 / total;
+    if (exact < 1) return "<1 %";
+    // Five decimals keep every rational step distinguishable around an integer-percent boundary for
+    // a denominator up to this 86,400-second window. Floor rather than round so the renderer never
+    // crosses any firmware-owned limit, without copying that limit into the browser.
+    const hundredThousandth = Math.floor(exact * 100000) / 100000;
+    return `${hundredThousandth.toFixed(5).replace(/\.?0+$/, "")} %`;
+  }
+  return c.share_pct == null ? "" : `${c.share_pct} %`; // older firmware
+}
+
+function checkupHeaterRuntime(seconds, minutes) {
+  if (seconds != null) return checkupDuration(seconds);
+  return minutes == null ? "" : t("check.min", minutes); // older firmware
 }
 
 // One row's value text. Every branch that has no number says so with a dash — a check that could not
@@ -1436,35 +1508,63 @@ function checkupWindow(s) {
 // stale one", applied to a count).
 function checkupValue(c) {
   const v = c.verdict;
+  // Count-only defrost evidence without an RPS witness or positive runtime denominator is a supported
+  // observation. `unavailable` means the defrost row itself was absent, so even a legacy payload's
+  // numeric zero proves nothing.
   if (v === "unavailable") return "—";
   const collecting = v === "collecting";
   switch (c.id) {
     case "fault":
       if (v === "warn") return t("check.fault_err");
-      if (v === "info") return c.active ? t("check.fault_warn") : t("check.fault_past");
+      if (v === "info") {
+        if (c.active === 1) return t("check.fault_warn");
+        if (c.active === 0) return t("check.fault_past");
+        return t("check.fault_past_unknown");
+      }
+      if (c.active == null) return t("check.fault_unknown");
       return t("check.fault_none");
     case "cycling": {
-      if (c.starts == null) return t("check.collecting");
+      if (c.starts == null) return checkupCollecting(c, t("check.collecting"));
       const starts = t("check.starts", c.starts);
-      if (collecting || c.mean_run_s == null) return starts;
-      return `${starts} · ${t("check.mean", Math.round(c.mean_run_s / 60))}`;
+      if (collecting || c.mean_run_s == null) return checkupCollecting(c, starts);
+      return `${starts} · ${t("check.mean", checkupDuration(c.mean_run_s))}`;
     }
     case "defrost": {
-      if (c.count == null) return t("check.collecting");
+      if (c.count == null) return checkupCollecting(c, t("check.collecting"));
       const n = t("check.cycles", c.count);
-      if (collecting || c.share_pct == null) return n;
-      return `${n} · ${c.share_pct} %`;
+      if (collecting) return checkupCollecting(c, n);
+      const share = checkupDefrostShare(c);
+      const paired = c.paired_count == null ? "" : t("check.paired_cycles", c.paired_count);
+      return [n, paired, share].filter(Boolean).join(" · ");
     }
-    case "pressure": return c.min_bar == null ? t("check.collecting") : `${c.min_bar} bar`;
-    case "flow":     return c.min_l_min == null ? t("check.collecting") : `${c.min_l_min} l/min`;
-    case "heater":
-      if (c.buh_min == null) return t("check.collecting");
-      return c.bsh_min ? `${t("check.min", c.buh_min)} · ${t("check.tank", c.bsh_min)}`
-                       : t("check.min", c.buh_min);
-    case "retries":  return c.seen == null ? t("check.collecting")
+    case "pressure": {
+      const value = c.min_bar == null ? t("check.collecting") : `${c.min_bar} bar`;
+      return collecting ? checkupCollecting(c, value) : value;
+    }
+    case "flow": {
+      const value = c.min_l_min == null ? t("check.collecting") : `${c.min_l_min} l/min`;
+      return collecting ? checkupCollecting(c, value) : value;
+    }
+    case "heater": {
+      const parts = [];
+      const buh = checkupHeaterRuntime(c.buh_s, c.buh_min);
+      const bsh = checkupHeaterRuntime(c.bsh_s, c.bsh_min);
+      if (buh) parts.push(buh);
+      if (bsh) parts.push(t("check.tank_runtime", bsh));
+      const value = parts.length ? parts.join(" · ") : t("check.collecting");
+      return collecting ? checkupCollecting(c, value) : value;
+    }
+    case "retries":  return c.seen == null ? checkupCollecting(c, t("check.collecting"))
                           : c.seen ? t("check.retry_seen") : t("check.retry_none");
   }
   return "—";
+}
+
+function checkupDisplayValue(c) {
+  const value = checkupValue(c);
+  const known = new Set(["device", "manufacturer", "heuristic", "observation", "experimental"]);
+  const basis = known.has(c.evidence) ? t(`check.basis.${c.evidence}`) : "";
+  return basis ? `${value} · ${basis}` : value;
 }
 
 function checkupCardHtml() {
@@ -1474,16 +1574,23 @@ function checkupCardHtml() {
   for (const c of h.checks) {
     const key = CHECKUP_ROW[c.id];
     if (!key) continue;                               // a check this UI does not know: skipped, never guessed at
-    rows += modelDescRow(`health_${c.id}`, t(key), checkupValue(c),
-                         { cls: CHECKUP_TONE[c.verdict] || "" });
+    const tone = CHECKUP_TONE[c.verdict] || "";
+    rows += modelDescRow(`health_${c.id}`, t(key), checkupDisplayValue(c),
+                         { cls: `checkup-val${tone ? ` ${tone}` : ""}` });
   }
   if (!rows) return "";
-  // The badge is the whole card in one word, and it is a WORD: the dot beside it only tints what the
-  // text already says (DESIGN.md §9). "Collecting" carries the window with it, because "collecting"
-  // on its own reads like a spinner rather than like a statement about how much evidence there is.
-  const badge = { ok: t("check.all_ok"), info: t("check.notice"), warn: t("check.attention"),
-                  collecting: t("check.collecting_for", checkupWindow(h.covered_s)),
+  // The badge states the bounded result, evaluated/assessable judgement count and broader number of
+  // supported rows. A finding can surface early while other rows collect, so coverage is never hidden.
+  const status = { ok: t("check.all_ok"), info: t("check.notice"), warn: t("check.attention"),
+                  collecting: t("check.collecting_status"),
                   unavailable: t("check.nodata") }[h.status] || "";
+  const available = Number.isFinite(h.available) ? h.available : h.checks.filter(c => c.verdict !== "unavailable").length;
+  const evaluated = Number.isFinite(h.evaluated) ? h.evaluated
+                  : h.checks.filter(c => c.verdict !== "unavailable" && c.verdict !== "collecting").length;
+  // New firmware distinguishes facts it can report from checks capable of a bounded judgement.
+  // Older payloads had only `available`; using it as the fallback keeps their established contract.
+  const assessable = Number.isFinite(h.assessable) ? h.assessable : available;
+  const badge = t("check.summary", status, evaluated, assessable, available, checkupWindow(h.covered_s));
   const badgeCls = { warn: "err", ok: "ok", collecting: "dim", unavailable: "dim" }[h.status] || "";
   return vcard(t("card.checkup"), rows, badge, badgeCls);
 }
@@ -2944,51 +3051,51 @@ const MODEL_DESCRIPTIONS = {
   // ── The Checkup card's explainers ──────────────────────────────────────────────────────────
   // These rows need their explainer more than any other on the dashboard, and for a different
   // reason than the Model card's: a value row states a measurement the reader can look up, while
-  // "31 starts, mean 6 min" states a JUDGEMENT. Without the copy a reader cannot tell whether that
-  // is bad, why the firmware thinks so, or what they would do about it — and a health card nobody
-  // can act on is a decoration. So each entry answers three things: what was counted, what normal
-  // looks like, and what to do when it is not.
+  // "31 starts, mean 6 min" states a JUDGEMENT, while flow/heater rows deliberately state only a
+  // measurement. Without the copy a reader cannot tell which is which, what the firmware actually
+  // established, or what they would do about it. So each entry answers what was counted, the limit
+  // of the claim, and what follow-up is supported.
   //
   // They also have to say what the row does NOT claim. Two of these checks are deliberately weaker
   // than they look — the flow minimum carries no verdict at all because the manufacturer's minimum
-  // is per model, and a defrost above the frost line is odd rather than wrong because humidity is
-  // not on this bus — and a reader who assumes the firmware is asserting more than it is will draw
+  // is per model, and a high defrost share is only a heuristic because humidity and coil temperature
+  // are not on this bus — and a reader who assumes the firmware is asserting more than it is will draw
   // the wrong conclusion from a correct number.
   health_fault: {
-    what: "The unit's own diagnostic state, read from both halves of the plant — the outdoor unit and the hydronic side. Daikin's class (Error / Warning / Caution) rather than the code: the code names the fault, the class says how serious the unit thinks it is.",
-    normal: "no fault at all. The row also reports a fault that has already cleared today, which is the one thing nothing else here remembers — a unit that stopped once overnight and restarted looks perfectly healthy by morning. The code itself is in the value list below, under Operation.",
-    de: { what: "Der Diagnosezustand der Anlage selbst, aus beiden Hälften gelesen — Außeneinheit und Hydraulikseite. Gezeigt wird Daikins Klasse (Fehler / Warnung / Vorsicht), nicht der Code: der Code benennt die Störung, die Klasse sagt, wie ernst die Anlage sie nimmt.",
-          normal: "gar keine Störung. Die Zeile meldet auch eine Störung, die heute schon wieder verschwunden ist — das Einzige, woran sich sonst nichts hier erinnert: eine Anlage, die nachts einmal abgeschaltet und neu gestartet hat, sieht am Morgen völlig gesund aus. Der Code selbst steht unten in der Werteliste unter „Betrieb“." } },
+    what: "The unit's own diagnostic class, read from every fault-class row supplied by the active X10A profile. An active Error is a direct device finding; Warning and Caution are shown as operating notes. A clear state is only accepted when all supported class rows were readable.",
+    normal: "no fault active. A class seen earlier in this RAM-only rolling window remains visible after it clears. Rebooting or explicitly changing the X10A identity (re-detection, profile or RX/TX pins) starts a new window; a HomeHub-only edit does not. The actual fault code and its description remain in the value list under Operation.",
+    de: { what: "Die geräteeigene Diagnoseklasse aus allen Störungsklassen-Zeilen, die das aktive X10A-Profil liefert. Ein aktiver Fehler ist ein direkter Gerätebefund; Warnung und Vorsicht erscheinen als Betriebshinweis. Ein freier Zustand gilt nur, wenn alle unterstützten Klassenzeilen lesbar waren.",
+          normal: "Aktuell keine Störung. Eine zuvor in diesem RAM-basierten rollierenden Fenster gelesene Klasse bleibt nach dem Verschwinden sichtbar. Ein Neustart oder eine explizite Änderung der X10A-Identität (Neuerkennung, Profil oder RX/TX-Pins) beginnt ein neues Fenster; eine reine HomeHub-Änderung nicht. Störungscode und Beschreibung stehen weiterhin unten in der Werteliste unter „Betrieb“." } },
   health_cycling: {
-    what: "How often the compressor started in the last 24 hours, and how long it ran per start on average. The average is the useful half: a start count alone does not know how cold the day was, and 24 starts is one an hour in January and a control problem in April.",
-    normal: "runs of 20 to 60 minutes. A 24-hour average under ten minutes, over at least a dozen starts, is short cycling — the unit reaching its minimum output before the building has taken the heat. It costs efficiency and compressor life. The usual causes are a flow temperature set higher than the building needs, too little water volume in the circuit, or thermostatic valves closing off most of the emitters. Hot-water charges are long runs and raise this average rather than spoiling it.",
-    de: { what: "Wie oft der Verdichter in den letzten 24 Stunden gestartet ist und wie lange er pro Start im Mittel lief. Der Mittelwert ist die aussagekräftige Hälfte: eine reine Startzahl weiß nicht, wie kalt der Tag war — 24 Starts sind im Januar einer pro Stunde und im April ein Regelungsproblem.",
-          normal: "Laufzeiten von 20 bis 60 Minuten. Ein 24-Stunden-Mittel unter zehn Minuten bei mindestens einem Dutzend Starts ist Takten — die Anlage erreicht ihre Mindestleistung, bevor das Gebäude die Wärme abgenommen hat. Das kostet Effizienz und Verdichterlebensdauer. Übliche Ursachen: eine höher als nötig eingestellte Vorlauftemperatur, zu wenig Wasservolumen im Kreis, oder Thermostatventile, die die meisten Heizflächen zudrehen. Warmwasserladungen sind lange Läufe und heben diesen Mittelwert, statt ihn zu verderben." } },
+    what: "Compressor off-to-on transitions and observed compressor runtime divided by observed starts. Runs crossing either window edge can be censored, so this is not a mean of completed cycles. The row needs a full rolling lifecycle plus at least 90% readable compressor-state evidence before it can report no finding.",
+    normal: "Less than ten minutes of observed runtime per start with at least twelve starts is a deliberately broad heuristic and only creates an operating note. X10A does not attach heating, cooling, hot-water demand or load to each cycle; mixed modes and window edges can mask or create the pattern. Use the figures as a prompt to inspect mode-specific history, not as proof of a defect.",
+    de: { what: "Gezählt werden Wechsel des Verdichters von Aus zu Ein; die beobachtete Verdichterlaufzeit wird durch die beobachteten Starts geteilt. Läufe an beiden Fensterrändern können abgeschnitten sein, daher ist dies kein Mittelwert abgeschlossener Zyklen. Für „keine Auffälligkeit“ braucht die Zeile einen vollständigen rollierenden Fensterzyklus und mindestens 90 % lesbaren Verdichterzustand.",
+          normal: "Weniger als zehn Minuten beobachtete Laufzeit je Start bei mindestens zwölf Starts ist eine bewusst breite Heuristik und erzeugt nur einen Betriebshinweis. X10A ordnet den Läufen weder Heizen, Kühlen, Warmwasserbedarf noch Last zu; gemischte Betriebsarten und Fensterränder können das Muster verdecken oder erzeugen. Die Zahlen sind ein Anlass, den betriebsartspezifischen Verlauf zu prüfen, kein Defektnachweis." } },
   health_defrost: {
-    what: "How often the outdoor unit defrosted, and what share of its running time that took. The share is what matters — four defrosts across a day of hard running is ordinary, four inside two hours of running is not.",
-    normal: "single-digit percent near freezing, and none at all in mild weather. A high share means the evaporator is icing faster than it should: a blocked or sheltered air path, a fan running slow, or a unit standing where its own discharge blows back into it. A defrost above 12 °C is flagged separately — no frost can form at that temperature, so it is reporting something other than ice. Note this cannot tell a NECESSARY defrost from an unnecessary one: air humidity is not available on the service port, so the firmware states the frequency and leaves the cause to you.",
-    de: { what: "Wie oft die Außeneinheit abgetaut hat und welchen Anteil ihrer Laufzeit das gekostet hat. Der Anteil ist das Entscheidende — vier Abtauungen über einen Tag harter Laufzeit sind normal, vier innerhalb von zwei Laufstunden nicht.",
-          normal: "einstellige Prozentwerte um den Gefrierpunkt, bei mildem Wetter gar keine. Ein hoher Anteil heißt, der Verdampfer vereist schneller als er sollte: verlegter oder verbauter Luftweg, zu langsam drehender Lüfter, oder ein Gerät, dessen eigene Abluft zurückgesaugt wird. Eine Abtauung über 12 °C wird gesondert gemeldet — bei der Temperatur kann sich kein Reif bilden, dort wird also etwas anderes als Eis gemeldet. Wichtig: nötige und unnötige Abtauungen kann das nicht unterscheiden — die Luftfeuchte liegt nicht auf der Serviceschnittstelle, die Firmware nennt die Häufigkeit und überlässt die Ursache Ihnen." } },
+    what: "Defrost off-to-on transitions and the share of compressor runtime for which defrost and compressor state were readable together. The raw cycle count stays visible; a separate paired count says how many transitions had compressor evidence at both endpoints. Missing or zero compressor-runtime evidence produces no ratio judgement.",
+    normal: "More than 15% across at least three paired cycles is only an operating note. Outdoor temperature alone cannot determine whether a defrost was necessary; X10A lacks humidity and coil-surface temperature. The observation supports follow-up of air path and weather context, but does not diagnose icing or a fan fault.",
+    de: { what: "Gezählt werden Wechsel der Abtauung von Aus zu Ein sowie ihr Anteil an der Verdichterlaufzeit, für die Abtau- und Verdichterzustand gleichzeitig lesbar waren. Die rohe Anzahl bleibt sichtbar; eine separate gepaarte Anzahl nennt Übergänge mit Verdichterevidenz an beiden Endpunkten. Ohne oder bei null Verdichterlaufzeit-Evidenz entsteht kein Anteilsurteil.",
+          normal: "Mehr als 15 % bei mindestens drei gepaarten Vorgängen ist nur ein Betriebshinweis. Aus der Außentemperatur allein lässt sich die Notwendigkeit einer Abtauung nicht bestimmen; X10A liefert weder Luftfeuchte noch Oberflächentemperatur des Wärmetauschers. Die Beobachtung begründet eine Prüfung von Luftweg und Wetterkontext, diagnostiziert aber weder Vereisung noch einen Lüfterfehler." } },
   health_pressure: {
-    what: "The LOWEST water pressure seen in the circuit over the last 24 hours — not the current reading. Pressure rises and falls with the water temperature, so a single glance at a hot system can look fine while the cold system sits below the minimum.",
-    normal: "1.5 to 2.0 bar in a cold system. Daikin requires at least 1 bar; below that the unit will eventually stop on a pressure fault. A slow fall over weeks is normal air being released and wants topping up; a fast fall is a leak or a tired expansion vessel, and topping that up repeatedly hides the problem rather than fixing it.",
-    de: { what: "Der NIEDRIGSTE Wasserdruck im Kreis in den letzten 24 Stunden — nicht der aktuelle Wert. Der Druck steigt und fällt mit der Wassertemperatur, ein einzelner Blick auf die warme Anlage kann also gut aussehen, während die kalte Anlage unter dem Mindestdruck liegt.",
-          normal: "1,5 bis 2,0 bar im kalten Zustand. Daikin verlangt mindestens 1 bar; darunter schaltet die Anlage irgendwann auf Druckstörung ab. Ein langsames Absinken über Wochen ist entweichende Luft und will nachgefüllt werden; ein schnelles Absinken ist ein Leck oder ein müdes Ausdehnungsgefäß — wiederholtes Nachfüllen verdeckt das Problem, statt es zu beheben." } },
+    what: "The raw lowest valid circuit-pressure sample in the rolling RAM window, with a separate pressure-specific evidence clock. Warning debounce never rewrites this minimum. One isolated sample cannot borrow the card's global collection time.",
+    normal: "Daikin documentation requires the circuit pressure to be above 1 bar. A minimum at or below 1.0 bar is shown immediately as an operating note and becomes a warning only after 60 continuous seconds, rejecting a lone corrupt frame without hiding the measurement. No separate preventive band is inferred. A normal minimum does not become a no-finding result until a full window lifecycle and 90% pressure evidence are present.",
+    de: { what: "Der rohe niedrigste gültige Druckwert im rollierenden RAM-Fenster mit eigener Evidenzzeit für den Druck. Die Warnungsentprellung schreibt dieses Minimum nie um. Ein einzelner Messwert kann sich nicht die globale Sammelzeit der Karte ausleihen.",
+          normal: "Laut Daikin-Dokumentation muss der Druck im Wasserkreis über 1 bar liegen. Ein Minimum bei oder unter 1,0 bar erscheint sofort als Betriebshinweis und wird erst nach 60 ununterbrochenen Sekunden zur Warnung; so wird ein einzelner beschädigter Frame verworfen, ohne den Messwert zu verbergen. Eine zusätzliche Vorsorgezone wird nicht abgeleitet. Aus einem unauffälligen Minimum wird erst nach einem vollständigen Fensterzyklus und 90 % Druckevidenz ein Ergebnis ohne Befund." } },
   health_flow: {
-    what: "The lowest flow rate measured while the circulation pump was actually running. Deliberately shown WITHOUT a verdict: the required minimum depends on the model — this firmware supports units from 3 kW to 18 kW — so a single threshold would be wrong for most of them.",
-    normal: "compare it against the minimum flow rate in your own unit's installation manual. Well above it is fine. Near or below it is what causes the 7H family of flow errors, and the unit raises those itself — they appear in the fault row above. Falling flow at an unchanged pump setting points at a dirty filter, a closed valve or air in the circuit.",
-    de: { what: "Der niedrigste Durchfluss, der bei tatsächlich laufender Umwälzpumpe gemessen wurde. Bewusst OHNE Bewertung: der geforderte Mindestdurchfluss hängt vom Modell ab — diese Firmware unterstützt Geräte von 3 kW bis 18 kW —, ein einzelner Schwellwert wäre für die meisten falsch.",
-          normal: "vergleichen Sie den Wert mit dem Mindestdurchfluss in der Installationsanleitung Ihres Geräts. Deutlich darüber ist gut. Nahe daran oder darunter führt zu den 7H-Störungen, und die meldet die Anlage selbst — sie erscheinen dann in der Störungszeile oben. Sinkender Durchfluss bei unveränderter Pumpeneinstellung deutet auf einen verschmutzten Filter, ein geschlossenes Ventil oder Luft im Kreis." } },
+    what: "The lowest valid flow sample after the circulation pump had been continuously known-on for 60 seconds. Pump start-up, valve movement, stopped-pump values, unknown state and communication gaps are excluded.",
+    normal: "This is observation only. The required minimum is model- and operating-condition-specific, so the firmware deliberately applies no generic threshold. Compare it with the installation documentation for the exact unit; a device-raised flow fault appears in the fault row.",
+    de: { what: "Der niedrigste gültige Durchflusswert, nachdem die Umwälzpumpe 60 Sekunden ununterbrochen nachweislich eingeschaltet war. Pumpenanlauf, Ventilbewegung, Werte bei stehender Pumpe, unbekannter Zustand und Kommunikationslücken sind ausgeschlossen.",
+          normal: "Das ist nur eine Beobachtung. Der erforderliche Mindestdurchfluss hängt von Modell und Betriebsbedingung ab; die Firmware wendet deshalb bewusst keinen allgemeinen Grenzwert an. Vergleichen Sie mit der Installationsdokumentation des exakten Geräts; eine von der Anlage gemeldete Durchflussstörung erscheint in der Störungszeile." } },
   health_heater: {
-    what: "How many minutes the electric backup heater ran in the heating circuit over 24 hours, and separately the tank's immersion heater. Both make heat at a COP of 1 — one kilowatt-hour in, one out — where the heat pump makes three or four.",
-    normal: "zero for the backup heater on all but the coldest days. Time on it is not a fault in itself: it also supports defrosting and runs in emergency mode. But an hour a day in mild weather usually means the heat pump is being cut off too early, or the backup heater's own switch-on temperature is set too high. The tank heater carries no threshold at all — some installations run it deliberately, for example to absorb surplus solar power.",
-    de: { what: "Wie viele Minuten der elektrische Zusatzheizer im Heizkreis in 24 Stunden lief — und getrennt davon der Heizstab im Speicher. Beide erzeugen Wärme mit einer Arbeitszahl von 1, also eine Kilowattstunde hinein für eine hinaus, während die Wärmepumpe drei bis vier daraus macht.",
-          normal: "null Minuten Zusatzheizer außer an den kältesten Tagen. Laufzeit ist für sich genommen kein Fehler: er unterstützt auch das Abtauen und läuft im Notbetrieb. Eine Stunde täglich bei mildem Wetter heißt aber meist, dass die Wärmepumpe zu früh abgeriegelt wird oder die Einschalttemperatur des Zusatzheizers zu hoch steht. Für den Speicher-Heizstab gilt gar kein Schwellwert — manche Anlagen betreiben ihn absichtlich, etwa um PV-Überschuss aufzunehmen." } },
+    what: "Observed time, carried in seconds, for the space-heating backup heater (BUH) and, independently, the tank immersion heater (BSH). It is accumulated between completed poll sweeps, so a pulse entirely between sweeps can still be missed. Unsupported or unreadable channels remain unknown rather than becoming zero; an active supported BUH step is sufficient to prove BUH on.",
+    normal: "Observation only. Weather, emergency mode, defrost support, installer settings, hot-water schedules and surplus-energy control can all make heater runtime legitimate. There is no universal runtime threshold and this row does not infer efficiency or a defect.",
+    de: { what: "Beobachtete, sekundengenau übertragene Zeit des Zusatzheizers im Heizkreis (BUH) und unabhängig davon des Heizstabs im Speicher (BSH). Sie wird zwischen abgeschlossenen Poll-Durchläufen aufsummiert; ein vollständig dazwischenliegender Impuls kann daher fehlen. Nicht unterstützte oder nicht lesbare Kanäle bleiben unbekannt und werden nicht zu null; ein aktiver unterstützter BUH-Schritt belegt dagegen den eingeschalteten BUH.",
+          normal: "Nur eine Beobachtung. Wetter, Notbetrieb, Abtauunterstützung, Installateureinstellungen, Warmwasserzeitpläne und Überschusssteuerung können Laufzeit jeweils plausibel machen. Es gibt keinen allgemeingültigen Laufzeitgrenzwert; die Zeile leitet weder Effizienz noch einen Defekt daraus ab." } },
   health_retries: {
-    what: "Whether the unit backed itself off a protection limit while running — discharge temperature, inverter current, high or low pressure, or heatsink temperature. These are counters the unit keeps for itself; they are not faults and nothing is reported to the user when they move.",
-    normal: "zero. A non-zero counter is the unit quietly working around something rather than stopping on it: the plant keeps running, the efficiency drops, and the only outward sign is that it does not quite deliver. Recurring discharge-temperature or high-pressure retries usually mean the water side is not taking the heat away — check flow rate and the flow temperature setting first.",
-    de: { what: "Ob die Anlage im Betrieb selbst an einer Schutzgrenze zurückgeregelt hat — Heißgastemperatur, Verdichterstrom, Hoch- oder Niederdruck, oder Kühlkörpertemperatur. Das sind Zähler, die die Anlage für sich führt; sie sind keine Störungen, und dem Nutzer wird nichts gemeldet, wenn sie sich bewegen.",
-          normal: "null. Ein Zähler über null heißt: die Anlage umgeht etwas still, statt darauf abzuschalten — sie läuft weiter, die Effizienz sinkt, und nach außen fällt nur auf, dass sie nicht ganz liefert. Wiederkehrende Heißgas- oder Hochdruck-Rückregelungen bedeuten meist, dass die Wasserseite die Wärme nicht abführt — prüfen Sie zuerst Durchfluss und eingestellte Vorlauftemperatur." } },
+    what: "Experimental observation of the five supported 3-bit protection counters. The first readable value is a baseline; only a strict per-counter increase between continuous, fully comparable samples is reported, including one that becomes visible while stopped or at a compressor-state boundary. A stable non-zero value is not an event. Decreases, gaps and resets are neither events nor no-event evidence.",
+    normal: "Not observing an increase does not prove that no limiting occurred: the counter reset, clamp and wrap semantics are not manufacturer-documented here. An increase is an operating note, not a fault and not a causal diagnosis. Correlate it with the named counter, live values and device faults before acting.",
+    de: { what: "Experimentelle Beobachtung der fünf unterstützten 3-Bit-Schutzzähler. Der erste lesbare Wert ist nur die Basis; gemeldet wird ausschließlich ein strenger Anstieg desselben Zählers zwischen lückenlosen, vollständig vergleichbaren Messungen — auch wenn er erst im Stillstand oder an einer Verdichter-Zustandsgrenze sichtbar wird. Ein stabiler Wert ungleich null ist kein Ereignis. Abnahmen, Lücken und Rücksetzungen sind weder Ereignisse noch Gegenbelege.",
+          normal: "Ein nicht beobachteter Anstieg beweist nicht, dass keine Begrenzung stattfand: Rücksetz-, Sättigungs- und Überlaufverhalten der Zähler sind hier nicht herstellerdokumentiert. Ein Anstieg ist ein Betriebshinweis, keine Störung und keine Ursachendiagnose. Vor Maßnahmen mit benanntem Zähler, Live-Werten und Gerätestörungen korrelieren." } },
   // The two board-memory rows on the ESP32 card. The copy has one job beyond naming the number: to
   // say what the SHAPE of the curve means, because that is the whole reason these rows exist rather
   // than living on /status alone.

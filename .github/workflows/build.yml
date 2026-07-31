@@ -144,6 +144,12 @@ jobs:
       - name: Test X10A/Modbus source arbitration
         run: node test/test_ui_source_matrix.mjs
 
+      # The X10A observation card must preserve nulls, per-signal evidence and bounded wording in
+      # both languages. Execute its production renderer so a future copy or fallback change cannot
+      # turn partial telemetry back into a whole-plant "healthy" claim.
+      - name: Test X10A observation UI contract
+        run: node test/test_ui_checkup.mjs
+
       # Domain-correctness gate: are the published values physically RIGHT? The logic tests above
       # verify the logic they are handed; they cannot see a well-formed value that is simply
       # false — a wrong converter compiles, passes them all, and publishes -971.5 °C to Home

@@ -278,17 +278,15 @@ void http_append_status_json(std::string& j, bool redact) {
     }
     j += "]},";
 
-    // ── The 24-hour plant checkup (logic/checkup.hpp) ───────────────────────────────────────────
+    // ── The rolling X10A plant observation (logic/checkup.hpp) ──────────────────────────────────
     // Counted EVENTS and window MINIMA — the questions no single reading can answer and the trend
     // rings structurally cannot either (a compressor cycle shorter than one 5-minute trend bucket
     // leaves no trace in it). Named `health` and not `diag`: GET /diag is the log ring the bug-report
     // button pulls, and two unrelated things under one word is how a reader ends up looking in the
     // wrong place.
     //
-    // `covered_s` is how much of the 24 hours was actually OBSERVED, and it is reported in SECONDS
-    // rather than as whole hours so the first hour after a reboot reads as the small number it is
-    // instead of rounding to "0 h". Every check states its own verdict against it: `collecting`
-    // until it has enough, never a green `ok` bought with no evidence.
+    // `covered_s` is card-level bus context. Each check additionally exposes its OWN evidence clock:
+    // a mostly-readable pressure row cannot lend 24 hours to an RPS row seen for two seconds.
     //
     // A field a check has not established is emitted as `null`, never omitted — an absent key is
     // indistinguishable from an older build that never had it, the same rule logic/redact.hpp
@@ -299,6 +297,14 @@ void http_append_status_json(std::string& j, bool redact) {
         const logic::CheckupReport hr = checkup_report();
         j += "\"health\":{\"covered_s\":";
         j += std::to_string(hr.covered_s);
+        j += ",\"full_span\":";
+        j += hr.full_span ? "true" : "false";
+        j += ",\"available\":";
+        j += std::to_string(hr.available);
+        j += ",\"assessable\":";
+        j += std::to_string(hr.assessable);
+        j += ",\"evaluated\":";
+        j += std::to_string(hr.evaluated);
         j += ",\"status\":";
         j += jstr(logic::checkup_verdict_name(hr.overall));
         j += ",\"checks\":[";
@@ -321,23 +327,49 @@ void http_append_status_json(std::string& j, bool redact) {
             j += ".";
             j += std::to_string(v % 10);
         };
+        // Compatibility minutes cannot represent a positive sub-minute runtime without lying as
+        // zero or rounding up. Emit null for that one interval; the additive *_s fields preserve the
+        // observed seconds accumulated between completed sweeps.
+        auto whole_minutes = [](int seconds) {
+            if (seconds < 0 || (seconds > 0 && seconds < 60)) return -1;
+            return seconds / 60;
+        };
         for (size_t i = 0; i < logic::CHECKUP_CHECK_COUNT; i++) {
             const auto  id = static_cast<logic::CheckupCheck>(i);
             const auto& ck = hr.checks[i];
             if (i) j += ",";
             j += "{\"id\":";
             j += jstr(logic::checkup_check_id(id));
+            j += ",\"evidence\":";
+            j += jstr(logic::checkup_result_evidence_name(id, ck));
             j += ",\"verdict\":";
             j += jstr(logic::checkup_verdict_name(ck.verdict));
+            j += ",\"observed_s\":";
+            j += std::to_string(ck.observed_s);
+            j += ",\"required_s\":";
+            j += std::to_string(ck.required_s);
             // Named per check rather than a generic pair: the browser must not have to carry a table
             // that says what `a` means for which id — that table would be a second definition of the
             // check, free to drift from this one.
             switch (id) {
                 case logic::CheckupCheck::Cycling:  num("starts", ck.a);   num("mean_run_s", ck.b); break;
-                case logic::CheckupCheck::Defrost:  num("count", ck.a);    num("share_pct", ck.b);  break;
+                case logic::CheckupCheck::Defrost: {
+                    num("count", ck.a);
+                    num("paired_count", ck.e);
+                    // The legacy whole-percent field cannot express a positive share below 1%.
+                    num("share_pct", ck.c > 0 && ck.b == 0 ? -1 : ck.b);
+                    num("defrost_s", ck.c);
+                    num("run_s", ck.d);
+                    break;
+                }
                 case logic::CheckupCheck::Pressure: tenths("min_bar", ck.a);                        break;
                 case logic::CheckupCheck::Flow:     tenths("min_l_min", ck.a);                      break;
-                case logic::CheckupCheck::Heater:   num("buh_min", ck.a);  num("bsh_min", ck.b);    break;
+                case logic::CheckupCheck::Heater:
+                    num("buh_min", whole_minutes(ck.a));
+                    num("bsh_min", whole_minutes(ck.b));
+                    num("buh_s", ck.a);
+                    num("bsh_s", ck.b);
+                    break;
                 case logic::CheckupCheck::Fault:    num("active", ck.a);                            break;
                 case logic::CheckupCheck::Retries:  num("seen", ck.a);                              break;
             }
