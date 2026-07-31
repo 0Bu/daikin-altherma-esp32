@@ -377,21 +377,23 @@ Body, ordered:
    `Space heating Operation ON/OFF` therefore reads `Space heating Operation` beside its **ON/OFF**
    value. The exact catalog label remains the identity used by `/values`, MQTT, history,
    selectors and description matching.
-   **The schematic never hides.** When the X10A link drops it is the only thing left that can say
-   why, so instead every value pill blanks to "—", every animation stops, the 3-way-valve label falls
-   back to a bare "3WV" (no branch claimed) and the demand pill disappears — an idle plant with no
-   readings, not a stale one — nothing on this screen is hidden by a dead bus.
-   **A sleeping outdoor unit is a related case, and it is resolved the SAME way.** The
+   **The schematic never hides.** When the X10A link drops, retained X10A values are never left on
+   screen: animations stop, the 3-way-valve label falls back to a bare "3WV" unless the independent
+   HomeHub can state its position, and every reading neither source can currently supply blanks to
+   "—". A live HomeHub may stand in only for the six quantities structurally paired by
+   `logic/homehub_map.hpp`; those pills turn petrol so the replacement source is visible, and the
+   inspector names the exact Modbus row. Nothing on this screen is hidden by a dead bus, and nothing
+   from its retained cache is presented as current.
+   **A sleeping outdoor unit is a related per-reading case.** The
    outdoor unit refreshes its own register pages only while it *runs*; stopped, it keeps answering
    with the last run's values (`logic/ou_stale.hpp`, host-tested against the whole catalog) — measured
    on a live unit, outdoor air held exactly 19.0 °C for five hours, stepped when the compressor
-   started, then sat at exactly 25.5 °C for three hours. So the outdoor-air and discharge pills
-   **blank to "—"** while the compressor is stopped, exactly as they do on a dead bus: a value the
-   unit is no longer measuring is not reported, rather than reported with a caveat attached. The
-   drawing has one vocabulary for "no reading right now" and this is it — a second, dimmer register
-   of half-valid numbers asks the user to remember which pills mean what, on a screen whose whole
-   job is to be read at a glance. What the pill cannot say, the inspector does: the outdoor unit's
-   idle explanation names the reason.
+   started, then sat at exactly 25.5 °C for three hours. Those **X10A** values are therefore never
+   reported as current. Discharge temperature still blanks to "—"; outdoor air does too when no
+   second source exists, but a live HomeHub outdoor-air measurement stands in because it continues
+   measuring while X10A rests. The replacement is petrol, not a dimmed stale value, and its inspector
+   headline/source line resolve to the HomeHub row. What the pill cannot say, the outdoor-unit
+   inspector does: it names either the Modbus substitution or the reason no current reading exists.
    ΔT blanks for a related but distinct reason: with the pump off and flow zero, the difference
    between two *stagnant* sensors is not a stale working point, it is not a working point at all.
    The **heat output blanks with it**, being computed from that same ΔT — and this is the one
@@ -548,26 +550,28 @@ Body, ordered:
    components ("Running — compressor at 62 rps.", "Paused — the valve is feeding the hot-water tank
    right now."), the **explainer** (what it is, and `Normal:` guidance where useful), and the
    **member readings** of that component as a compact label→value list.
-   For a value target, that list omits the target's own reading: it is already the headline, and an
-   available Modbus twin is already shown as the explainer's comparison line. Component targets have
-   no headline reading and keep their complete member list.
+   For a leaf value target, that list omits the target's own reading: it is already the headline, and
+   an available Modbus twin is already shown as the explainer's comparison line. A grouped target
+   keeps its complete value list even when one member is also the headline: the DHW tank therefore
+   lists X10A tank temperature, its Modbus twin, setpoint and both valve readings together below the
+   chart. Its explainer contains explanation only, never a specially placed value line or a sentence
+   that merely repeats those numbers. Component targets without a headline likewise keep their
+   complete member list.
    The explainer copy comes from the **same `DESCRIPTIONS` table** the value rows use (§5.3 item 6) —
    one source for "what does this mean", never a second parallel one. A value target resolves it
    through a canonical register label rather than the live one, so a profile's own spelling cannot
    drift onto a neighbouring entry. Component copy (outdoor unit, PHE, ΔT, heat output, heating
    circuit) has no equivalent in `DESCRIPTIONS` — nothing there describes an assembly or a derived
    figure — and lives in the inspector's own table, bilingual in the same `{en, de}` shape.
-   **The inspector blanks whatever the drawing blanks, and says why.** A reading the pill withheld —
-   a held-over outdoor-unit row while the compressor rests (`logic/ou_stale.hpp`), a ΔT with no water
-   moving — must not come back as the headline, as a member reading, or inside a state sentence: the
-   panel is *below the pill it explains*, so a number the picture just refused to state reads as a
-   correction of the picture, and it is precisely the last-run value the blanking exists to withhold.
-   The gate is **structural**, on the row's `/values` register page rather than its label, so it
-   covers every row and every profile's spelling of one; and because a blank pill cannot explain
-   itself, the panel replaces its state sentence with the *reason* it is blank (the compressor is
-   stopped and the unit only refreshes its own sensors while it runs). That division of labour is the
-   whole justification for blanking in the first place (§ the outdoor-unit rule above) — the drawing
-   keeps one vocabulary for "no reading right now", the inspector carries the explanation.
+   **The inspector follows the source the drawing chose, and says why when none can answer.** A stale
+   X10A reading the pill withheld — a held-over outdoor-unit row while the compressor rests
+   (`logic/ou_stale.hpp`) — must not come back as the headline, as a member reading, or inside a state
+   sentence. When a structurally paired live Modbus reading stands in, it becomes the petrol headline
+   under the HomeHub register name; otherwise the headline remains "—" and the panel explains why.
+   The held-over gate is **structural**, on the X10A row's `/values` register page rather than its
+   label, so it covers every profile's spelling. ΔT with no water moving has no second-source
+   exception and remains blank for the same one-answer rule: the panel is *below the pill it explains*
+   and cannot put back a number the picture just refused to state.
    **An explainer reads permanent-first: what the value IS, then what it is doing.** Every paragraph
    of the body is its own block (`.vdesc-p`), in this order — the "what is it" sentence, the timeless
    "Normal:" note, then the LIVE sentence: either the entry's own state prose or, when the reading is
@@ -583,8 +587,9 @@ Body, ordered:
    the mono source line resolve the same row the pill did, never the register the concept is named for.
    The panel re-renders every poll so an open explainer follows the live values, but only when what
    it draws actually changed — an unconditional rebuild would collapse a text selection mid-read.
-   Nothing in this section hides when the X10A link drops (§8): the schematic and its inspector stay,
-   blanked to "—" (item 1), because they carry the status block that says why.
+   Nothing in this section hides when the X10A link drops (§8): the schematic and its inspector stay;
+   live paired HomeHub readings remain visible in petrol and everything neither source can answer
+   blanks to "—" (item 1), because the card also carries the status block that says why.
    **There is no trend/history CARD** — but a trended row carries a 24-hour sparkline in its value-row
    explainer (§6) *and* here, under this inspector's explainer text. The original rule refused history
    outright, on the premise that "the firmware stores no history and a browser-side ring buffer is
@@ -594,11 +599,17 @@ Body, ordered:
    feature — long-term analysis belongs to Home Assistant/Grafana, which hold the real series across
    reboots and years. So: no card, no dashboard-level charting, no range picker. One sparkline, in the
    panel of the row it belongs to, for a day at a 5-minute raster.
-   **In the inspector it is the same sparkline, for the row the pill RESOLVED** — `inspRow`, not the
-   concept the target is named for. That is what keeps it right on a pill with a fallback source: while
-   the high side reads the refrigerant sensor instead of the frozen HP transducer, the headline, the
-   mono source line and the chart are one row. An ASSEMBLY (the outdoor unit, the PHE) still gets
-   **no** chart, for the same reason it gets no headline — there is no one reading it stands for.
+   **In the inspector it is the same chart, for the reading the pill RESOLVED.** For an unpaired
+   same-stack fallback, the exact X10A row still decides it: while the high side reads the
+   refrigerant sensor instead of the frozen HP transducer, the headline, mono source line and chart
+   are that one row. The six structurally paired schematic measurements are different: their X10A
+   and HomeHub rings are two instruments for one concept, so the chart draws both on one time/value
+   scale, names them with a blue `X10A` and petrol `HomeHub · Modbus` legend, and reads both values at
+   the same cursor instant. If X10A has no sample, its line has a gap while the petrol Modbus line may
+   continue; if the profile/link has no current X10A row, the Modbus ring can stand alone. It never
+   revives a retained X10A value beneath a petrol headline. An ASSEMBLY (the outdoor unit, the PHE)
+   still gets **no** chart, for the same reason it gets no headline — there is no one reading it
+   stands for.
    **A COMPUTED pill charts its own figure, never one of its inputs.** ΔT, heat output, electrical
    input and COP have no register, so the firmware buffers what each is computed FROM and the curve
    is assembled in the browser (`DERIVED` in `www/js/history.js`) by the same expressions `liveData()` uses
@@ -623,13 +634,13 @@ Body, ordered:
    refused, so the generic "no readings recorded yet" would call a deliberate refusal an empty
    buffer — one line under a pill that is showing the very number. A derived series may therefore
    name its own empty case, and the COP does.
-   **A chart under a BLANKED pill is not a way to get the number back.** The outdoor pills blank
-   while the unit rests, and their series is held-over for exactly those samples — so the curve draws
-   a gap there, the "now" marker is absent (it only exists where the newest sample is a reading), and
-   scrubbing that stretch reads "Außeneinheit ruht", never a value. The chart says what the day held;
-   it never states a present reading the pill above it has just refused. Anything that would draw the
-   last *known* sample as the live end — a clamped marker, an interpolated tail — breaks that and is
-   the §5.3-item-3 substitution failure with a 24-hour axis in front of it.
+   **A chart never gets a blanked X10A number back.** During outdoor-unit rest the X10A outdoor-air
+   series is held-over for exactly those samples, so its blue curve has a gap and its scrub value says
+   "Außeneinheit ruht". The independent HomeHub sensor keeps measuring and may draw a petrol value at
+   that same instant — explicitly under its own source name, never as a repaired X10A value. If
+   neither source measured, no marker appears. Anything that clamps or interpolates the last known
+   X10A sample into the live end remains the §5.3-item-3 substitution failure with a 24-hour axis in
+   front of it.
    **Which rows are trended is decided by this drawing.** Every numeric value the schematic shows has
    a curve — leaving/return water, tank, water pressure, flow, pump signal, refrigerant pressure,
    compressor rps, expansion valve, outdoor air, discharge temp, room temp, and the four computed
@@ -638,6 +649,10 @@ Body, ordered:
    numeric rows, and ringing all of them would cost ~38 KB of `.bss` — about a third of the low-water
    free heap measured on the reference board — for curves nobody opened. A value row reached through
    the LIST (§6) gets a chart where a trend already exists and none where it does not.
+   HomeHub adds exactly six second rings — leaving water, return water, DHW tank, outdoor air, flow
+   and room temperature — because those are the measurement concepts both sources structurally pair
+   and the schematic actually draws. Setpoints, states and Modbus-only readings do not acquire a
+   curve by resemblance of their labels.
    The one numeric pill with no chart is the **low-pressure** one, and it is the same honest answer
    as the high-side pill on the *other* leg of its fallback: both are the `0x20` transducer pair,
    which freezes with its page and, on the reference install, has published a flat 0.0 bar from both
@@ -1281,11 +1296,13 @@ page under near-identical cards). Specific:
   §5.3 item 0, since it lands long after this poll gives up.)
 - **Live writes** (heat pump): "Applied", stay on view; the next `/values` poll (≤2 s) brings the new
   values (a pin-pick also refreshes `/status` a few times to catch the connect).
-- **Connection loss**: the system card's status header greys to "No data"; the Connections tile's WiFi row shows "Offline" if WiFi dropped (and the gear is marked, §5.6), and
+- **Connection loss**: the system card's status header greys to "No data" only when neither source
+  can describe the plant; the Connections tile's WiFi row shows "Offline" if WiFi dropped (and the gear is marked, §5.6), and
   the **Heat-pump card collapses to a bare "Offline"** if the X10A link is down — model, protocol and
-  capacity vanish rather than showing stale cached values. The schematic blanks every pill to "—"
-  and stops every animation — an animated pipe over a silent bus would assert a flow nobody measured,
-  and a held-over reading would assert a value nobody is still measuring. The poll keeps retrying on
+  capacity vanish rather than showing stale cached values. The schematic stops X10A-only animations,
+  keeps current structurally paired HomeHub facts in petrol, and blanks every unsupported pill to
+  "—" — an animated pipe over a silent source would assert a flow nobody measured, and a retained
+  X10A reading would assert a value nobody is still measuring. The poll keeps retrying on
   its own cadence, backing off to at most 30 s (the schematic's status block shows "Unreachable —
   retrying…"), no hard error page; returning to the tab retries at once rather than waiting out the
   backoff. Each poll fetch is bounded at **6 s** so that state is reached on a link that drops

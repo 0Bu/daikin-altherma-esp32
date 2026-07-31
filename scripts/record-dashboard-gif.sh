@@ -5,8 +5,8 @@
 # The GIF is not a mockup: the page it films is main/www/{index.html,style.css,app.js} spliced
 # exactly as the firmware build splices them (tools/uigif/build_demo.py), with only the DEVICE
 # stubbed (tools/uigif/scenes.js). What you see is what renderLive() drew — including the honest
-# blanking (an idle outdoor unit's pills read "—", not last run's numbers), which is half of why
-# the picture is worth showing at all.
+# standby arbitration (held X10A readings disappear, while current paired HomeHub readings stand in
+# with petrol provenance), which is half of why the picture is worth showing at all.
 #
 # ONE PAGE LOAD PER FRAME. Every frame is its own headless Chrome, posed at a deterministic
 # animation instant by window.__pose (scenes.js) — the flow dashes, the fan and the pump must move

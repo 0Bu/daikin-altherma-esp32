@@ -281,6 +281,12 @@ svg .sc-hitline { fill: none; stroke: transparent; stroke-width: 18; stroke-line
    hit, and the value tints where a border would have been outlined. `fill: transparent` rather than
    `fill: none` is load-bearing — `none` is not painted and takes no pointer events. */
 svg .sc-hitarea { fill: transparent; pointer-events: all; }
+/* A hidden SVG hit group must disable its DESCENDANTS too. `.sc-hitarea` deliberately uses
+   `pointer-events: all`, and in SVG that value can receive a pointer even when an ancestor has
+   `visibility:hidden`. That left the invisible BSH badge tappable while its state was OFF. The
+   renderer owns aria-hidden + tabindex from the same state that owns visibility; this selector is
+   the pointer half of that single availability contract. */
+svg .sc-hit[aria-hidden="true"], svg .sc-hit[aria-hidden="true"] * { pointer-events: none; }
 svg .sc-hit-bare:hover .sc-val, svg .sc-hit-bare.sel .sc-val { fill: var(--brand-strong); }
 svg .sc-hit:hover :is(.sc-pipe, .sc-rpipe) { stroke: var(--brand); }
 svg .sc-hit.sel :is(.sc-pipe, .sc-rpipe) { stroke: var(--brand); }
@@ -565,6 +571,15 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   font-size: 12px; margin-bottom: 7px; }
 .vhist-t { color: var(--fg); font-weight: 600; }
 .vhist-range { color: var(--muted); }
+/* Two instruments on one scale. The legend carries names as well as colour, so an overlapping pair
+   is still identifiable and the distinction never depends on colour alone. */
+.vhist-legend { display: flex; flex-wrap: wrap; gap: 5px 14px; margin: -1px 0 5px;
+  font-size: 11.5px; color: var(--muted); }
+.vhist-source { display: inline-flex; align-items: center; gap: 5px; }
+.vhist-source i { display: inline-block; width: 16px; height: 2px; border-radius: 2px;
+  background: var(--brand-sky); }
+.vhist-source.mb { color: var(--src-mb); }
+.vhist-source.mb i { background: var(--src-mb); }
 /* The SVG stretches to the panel width; overflow stays visible so the stroke isn't clipped at the
    extremes (the geometry deliberately uses the full viewBox height — see HIST_H in app.js). */
 /* The tooltip gets its OWN strip above the plot: it follows the cursor horizontally (Grafana-style)
@@ -604,10 +619,18 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-line { fill: none; stroke: var(--brand-sky); stroke-width: 1.6px; stroke-linejoin: round; stroke-linecap: round; }
 .vhist-area { fill: var(--brand-sky); opacity: .13; stroke: none; }
 .vhist-pt { fill: var(--brand-sky); stroke: none; }
+/* HomeHub/Modbus uses the same petrol source token as its live schematic pills. Separate classes on
+   paths, lone points, cursor markers and the live endpoint keep the two sources consistent through
+   every chart state. */
+.vhist-line.mb { stroke: var(--src-mb); stroke-width: 1.8px; }
+.vhist-area.mb { fill: var(--src-mb); }
+.vhist-pt.mb { fill: var(--src-mb); }
+.vhist-mark.mb { background: var(--src-mb); }
 /* The live end of the series. An HTML dot, not an SVG circle: the plot is scaled non-uniformly, so
    a circle inside it would render as an ellipse (app.js maps its % position onto the same scale). */
 .vhist-now { position: absolute; right: 0; width: 7px; height: 7px; border-radius: 50%;
   background: var(--brand); box-shadow: 0 0 0 2.5px var(--card); transform: translate(50%, -50%); }
+.vhist-now.mb { background: var(--src-mb); }
 /* The same plot inside the schematic inspector — one chart, one vocabulary; only what it sits on
    differs. The card is --brand-tint rather than --card, and the "now" dot separates itself from the
    line with a ring of the BACKGROUND colour, so without this it draws a white halo on a tinted card. */
@@ -828,8 +851,9 @@ textarea.input[readonly] { font-size: 12px; color: var(--muted); white-space: pr
 /* A value the Modbus stack supplied: the fallback stand-in, and every row of the Modbus-only group. */
 .vrow-val.src-val-mb, .src-val-mb { color: var(--src-mb); }
 .src-val-mb .vrow-unit { color: var(--src-mb); opacity: .75; }
-/* A schematic pill drawn from the Modbus stack (only while X10A is down — see renderLive). Placed
-   after the base .sc-val rule so it wins on fill without needing an !important. */
+/* A schematic pill drawn from the Modbus stack (while X10A is down, or while its paired row is held
+   over at rest — see liveData/renderLive). Placed after the base .sc-val rule so it wins on fill
+   without needing an !important. */
 svg .sc-val.sc-mb { fill: var(--src-mb); }
 svg .sc-val.sc-mb .vrow-unit { fill: var(--src-mb); }
 

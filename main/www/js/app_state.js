@@ -16,13 +16,14 @@ const S = {
   // detach the node the pointer went down on (renderCards explains why that loses the click
   // outright). Released only by a timer, so it can never latch.
   clickHold: false,
-  // 24-hour trend per historied row: label -> {at, dt, unit, v[]} (or {err:true}). Cached in app
+  // 24-hour trend per historied concept: id -> {at, dt, unit, b0, v[]} for X10A and `modbus:<id>`
+  // for the independent HomeHub ring (or {err:true}). Cached in app
   // state for the same reason descOpen is — #valueGroups is rebuilt on every poll, and re-fetching
   // (or re-deriving) the sparkline 1×/s would both hammer the device and restart the panel's slide.
   // A missing entry means "not fetched yet", which is what makes the panel show its loading line.
   hist: new Map(),
   histBusy: new Set(),
-  // A PINNED trend readout per row: label -> {t} (the pinned sample's unix instant) or {i, gen} when
+  // A PINNED trend readout per concept: id -> {t} (the pinned sample's unix instant) or {i, gen} when
   // the device has no wall clock to anchor to. In app state, not the DOM, for the same reason
   // descOpen is: the panel is re-emitted on every poll, and a crosshair written imperatively would
   // vanish ~1×/s. Anchored to the INSTANT so the ring rolling under it re-resolves to the same

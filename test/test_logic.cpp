@@ -3086,6 +3086,7 @@ static void test_homehub_map() {
             if (daik::def::HOMEHUB_REGS[k].offset == c.offset) { reg_exists = true; break; }
         CHECK(reg_exists);
         CHECK(trend_by_id(c.concept_id) != nullptr);
+        CHECK(homehub_concept_index(c.concept_id) == static_cast<int>(i));
     }
     // Lookup both ways.
     CHECK(std::string(homehub_concept_for(43)) == "dhw_tank");
@@ -3093,6 +3094,8 @@ static void test_homehub_map() {
     CHECK(homehub_concept_for(51) == nullptr);   // power: X10A has no equivalent, deliberately unpaired
     CHECK(homehub_concept_for(41) == nullptr);   // post-BUH: a DIFFERENT measurement point, not leaving_water
     CHECK(homehub_concept_for(999) == nullptr);
+    CHECK(homehub_concept_index("heat_pump_power") == -1);
+    CHECK(homehub_concept_index(nullptr) == -1);
 
     // The X10A side resolves through trend_row_matches, so it agrees with the trend rings by
     // construction. Spot-check the locators the pairings above depend on.

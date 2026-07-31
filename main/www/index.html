@@ -82,8 +82,9 @@
              heating riser, the BUH step in its label, low-noise on the outdoor unit.
              Static DOM updated in place by renderLive() — deliberately NOT rebuilt per poll like
              #valueGroups: an innerHTML rebuild would restart the CSS flow animations every second.
-             The schematic never hides: when the X10A link drops it blanks to "—" (clearSchematic),
-             since it holds the only thing that can still say why. -->
+             The schematic never hides: when a source cannot state a reading it blanks that pill to
+             "—"; a live HomeHub may supply structurally paired readings in petrol instead. The card
+             itself holds the status block that says why. -->
         <section id="hpLive">
           <figure class="card schem-card" id="schem"
                   aria-label="Live system schematic: outdoor unit, refrigerant circuit, plate heat exchanger, water circuit with backup heater and 3-way valve, domestic hot water tank and heating circuit">
@@ -189,7 +190,8 @@
                      blanks, since it freezes with the rest of page 0x20 while the unit rests
                      (logic/ou_stale.hpp). "Außen"/"Outdoor" stays ON the value for the reason the
                      room reading keeps "Raum": under a box labelled OUTDOOR UNIT, a bare 12.5 °C
-                     could be any of the unit's temperatures. -->
+                     could be any of the unit's temperatures. While X10A holds this row over at rest,
+                     the live HomeHub outdoor-air pair may stand in and turns this value petrol. -->
                 <g class="sc-hit" data-insp="out" role="button" tabindex="0">
                   <rect class="sc-pill" x="62" y="376" width="104" height="22" rx="11"/>
                   <text class="sc-val" x="114" y="391" text-anchor="middle"><tspan data-i18n="schem.outdoor">Outdoor</tspan> <tspan id="svOut">—</tspan> °C</text>
@@ -453,7 +455,8 @@
                        rect keeps the label comfortably tappable without drawing a badge outline.
                        Hidden with visibility (not opacity alone) while off so it cannot retain an
                        invisible pointer or keyboard target. -->
-                  <g class="sc-bsh-state sc-hit" data-insp="bsh" role="button" tabindex="0">
+                  <g id="gBshState" class="sc-bsh-state sc-hit" data-insp="bsh" role="button"
+                     tabindex="-1" aria-hidden="true">
                     <rect class="sc-hitarea" x="518" y="272" width="116" height="22" rx="9"/>
                     <text class="sc-state" x="576" y="286" text-anchor="middle"
                           style="font-size:9px" data-i18n="schem.bsh_badge">E-heater active</text>

@@ -2,13 +2,14 @@
 // The 24-hour trend buffers: WHICH readings get one, and when a stored sample is a MEASUREMENT
 // rather than a repeat of one.
 //
-// The firmware keeps a fixed-cadence ring per trended row and serves it from GET /history; the web
-// UI draws it under a value row's explainer. Everything that decides *what* is trended and *whether
-// a sample counts* lives here rather than at the call site, for the same reason lwt_select.hpp and
-// ou_stale.hpp do: the rule runs against the generated def/ profile tables, which are C++, so the
-// CI logic-test can gate it against the whole catalog instead of one profile someone happened to
-// own. Adding a trend is one row in TRENDS below — the ring, the route and the browser are already
-// generic over it.
+// The firmware keeps a fixed-cadence ring per trended X10A/board row and serves it from GET
+// /history; history.cpp also instantiates six rings for the structurally paired HomeHub concepts in
+// homehub_map.hpp. The web UI draws either or both under a value row's explainer. Everything that
+// decides *what* is trended and *whether an X10A sample counts* lives here rather than at the call
+// site, for the same reason lwt_select.hpp and ou_stale.hpp do: the rule runs against the generated
+// def/ profile tables, which are C++, so the CI logic-test can gate it against the whole catalog
+// instead of one profile someone happened to own. Adding an X10A trend is one row in TRENDS below;
+// a HomeHub history must instead be one of HOMEHUB_CONCEPTS, so labels cannot expand the contract.
 //
 // ── Why a trend is a LOCATOR and not a label ────────────────────────────────────────────────────
 // A trend names the row it buffers by (register page, byte offset, unit) — never by its text. The
@@ -79,8 +80,9 @@ constexpr bool history_is_absent(HistorySample s) {
 }
 
 // The whole point of the memory analysis, stated where a future trend addition will see it: one
-// trend costs 576 bytes. Put the buffers in .bss, never on the heap — free heap is not the binding
-// limit on this board, the largest CONTIGUOUS block is, and a static array does not compete for it.
+// trend costs 576 bytes. Put the buffers in static storage, never on the heap — free heap is not the
+// binding limit on this board, the largest CONTIGUOUS block is, and a static array does not compete
+// for it. TrendRing's non-zero pending sentinel currently places the array in .data, not .bss.
 constexpr size_t HISTORY_BYTES_PER_TREND = HISTORY_SAMPLES * sizeof(HistorySample);
 static_assert(HISTORY_BYTES_PER_TREND == 576, "trend cost changed — re-check the memory budget");
 

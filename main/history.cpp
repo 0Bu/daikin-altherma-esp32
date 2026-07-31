@@ -3,6 +3,7 @@
 // storage, one mutex, and the fold from the poll cycle's values into a bucket.
 #include "history.hpp"
 #include "diag_log.hpp"
+#include "logic/homehub_map.hpp"
 #include "logic/history.hpp"
 
 #include "esp_heap_caps.h"      // heap_caps_get_largest_free_block — the max_alloc trend
@@ -22,6 +23,7 @@ using logic::HistorySample;
 using logic::HISTORY_HELD_OVER;
 using logic::HISTORY_NO_READING;
 using logic::HISTORY_SAMPLES;
+using logic::HOMEHUB_CONCEPT_COUNT;
 using logic::TREND_COUNT;
 
 namespace {
@@ -46,14 +48,24 @@ struct Trend {
 };
 
 Trend             s_ring[TREND_COUNT];
+// Only the six HomeHub measurements the schematic can draw get a second ring. Unlike X10A trends,
+// their labels/units are fixed by def/homehub.hpp, so this side needs no per-ring string buffers.
+logic::TrendRing  s_mb_ring[HOMEHUB_CONCEPT_COUNT];
+static_assert(HOMEHUB_CONCEPT_COUNT * logic::HISTORY_BYTES_PER_TREND == 3456,
+              "six paired HomeHub schematic trends should cost exactly 3456 bytes");
 uint32_t          s_bucket = 0;                    // the bucket s_ring[*].pending belongs to
 bool              s_have_bucket = false;
+uint32_t          s_mb_bucket = 0;
+bool              s_mb_have_bucket = false;
 // When the newest sample was committed, on the MONOTONIC clock. The route turns this into the
 // series' t0 (logic/history_t0): without it t0 was derived from `now` and drifted by up to a full
 // bucket between commits, which mislabelled every timestamp and let a PINNED readout round onto
 // the neighbouring sample. Monotonic because the commit may predate the first SNTP sync — its
 // wall-clock instant is then unknowable, but its age never is. -1 = nothing committed yet.
 int64_t           s_last_commit_us = -1;
+int64_t           s_mb_last_commit_us = -1;
+int64_t           s_last_commit_bucket = -1;
+int64_t           s_mb_last_commit_bucket = -1;
 SemaphoreHandle_t s_mtx = nullptr;
 
 // RAII lock, same idiom as hp_poll.cpp/config.cpp. Everything inside a critical section here is a
@@ -81,15 +93,14 @@ inline void copy_field(char* dst, size_t max, const char* src) {
 
 } // namespace
 
+void history_start() {
+    if (s_mtx) return;                              // app_main is the sole caller; defensive idempotence
+    s_mtx = xSemaphoreCreateMutex();
+    if (!s_mtx) diag_printf("history: mutex alloc failed — trends disabled this boot\n");
+}
+
 void history_record(const CachedValue* v, size_t n) {
-    if (!s_mtx) {
-        s_mtx = xSemaphoreCreateMutex();           // created on the poll task, the only creator
-        if (!s_mtx) {
-            diag_printf("history: mutex alloc failed — trends disabled this boot\n");
-            return;
-        }
-    }
-    if (!v || !n) return;
+    if (!s_mtx || !v || !n) return;
 
     // Views for the pure pickers. Bounded by the profile row count; the poll cache holds at most one
     // entry per ValueDef row (logic/profile_view.hpp sizes both). A trend addresses its row by
@@ -142,6 +153,7 @@ void history_record(const CachedValue* v, size_t n) {
         const uint32_t skipped = logic::history_skipped(s_bucket, bucket);
         for (auto& tr : s_ring) tr.ring.commit(skipped);
         s_last_commit_us = esp_timer_get_time();
+        s_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
     }
     s_bucket = bucket;
     s_have_bucket = true;
@@ -177,11 +189,51 @@ void history_record(const CachedValue* v, size_t n) {
     }
 }
 
+void history_record_modbus(const CachedValue* v, size_t n) {
+    if (!s_mtx) return;
+    const uint32_t bucket = logic::history_bucket(esp_timer_get_time());
+
+    // Parse before taking the history lock. strtod is locale-stable in this firmware and needs no
+    // shared state from the rings; keeping it outside makes the critical section plain fixed-size
+    // copies, just like the X10A path.
+    HistorySample sample[HOMEHUB_CONCEPT_COUNT];
+    for (size_t t = 0; t < HOMEHUB_CONCEPT_COUNT; t++) {
+        sample[t] = HISTORY_NO_READING;
+        if (!v) continue;
+        const uint16_t wanted = logic::HOMEHUB_CONCEPTS[t].offset;
+        for (size_t i = 0; i < n; i++) {
+            if (v[i].off != wanted) continue;
+            int tenths = 0;
+            if (value_tenths(v[i].value, tenths)) sample[t] = static_cast<HistorySample>(tenths);
+            break;
+        }
+    }
+
+    Lock lk(s_mtx);
+    if (!lk.held) return;
+    if (s_mb_have_bucket && bucket != s_mb_bucket) {
+        const uint32_t skipped = logic::history_skipped(s_mb_bucket, bucket);
+        for (auto& ring : s_mb_ring) ring.commit(skipped);
+        s_mb_last_commit_us = esp_timer_get_time();
+        s_mb_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
+    }
+    s_mb_bucket = bucket;
+    s_mb_have_bucket = true;
+    for (size_t t = 0; t < HOMEHUB_CONCEPT_COUNT; t++) s_mb_ring[t].fold(sample[t]);
+}
+
 size_t history_snapshot(size_t t, HistorySample* out, size_t max) {
     if (t >= TREND_COUNT || !out || !max || !s_mtx) return 0;
     Lock lk(s_mtx);
     if (!lk.held) return 0;
     return s_ring[t].ring.snapshot(out, max);
+}
+
+size_t history_modbus_snapshot(size_t t, HistorySample* out, size_t max) {
+    if (t >= HOMEHUB_CONCEPT_COUNT || !out || !max || !s_mtx) return 0;
+    Lock lk(s_mtx);
+    if (!lk.held) return 0;
+    return s_mb_ring[t].snapshot(out, max);
 }
 
 // Copied out under the lock rather than returning the pointer: the poll task rewrites these buffers
@@ -193,11 +245,35 @@ static size_t copy_under_lock(const char* src, char* out, size_t max) {
 }
 
 int32_t history_newest_age_s() {
-    if (!s_mtx || s_last_commit_us < 0) return -1;
+    if (!s_mtx) return -1;
     Lock lk(s_mtx);
     if (!lk.held || s_last_commit_us < 0) return -1;
     const int64_t age_us = esp_timer_get_time() - s_last_commit_us;
     return age_us < 0 ? 0 : static_cast<int32_t>(age_us / 1000000);
+}
+
+int32_t history_modbus_newest_age_s() {
+    if (!s_mtx) return -1;
+    Lock lk(s_mtx);
+    if (!lk.held || s_mb_last_commit_us < 0) return -1;
+    const int64_t age_us = esp_timer_get_time() - s_mb_last_commit_us;
+    return age_us < 0 ? 0 : static_cast<int32_t>(age_us / 1000000);
+}
+
+static int64_t oldest_bucket_under_lock(int64_t newest, size_t sample_count) {
+    return newest < 0 || !sample_count ? -1 : newest - static_cast<int64_t>(sample_count - 1);
+}
+
+int64_t history_oldest_bucket(size_t sample_count) {
+    if (!s_mtx) return -1;
+    Lock lk(s_mtx);
+    return lk.held ? oldest_bucket_under_lock(s_last_commit_bucket, sample_count) : -1;
+}
+
+int64_t history_modbus_oldest_bucket(size_t sample_count) {
+    if (!s_mtx) return -1;
+    Lock lk(s_mtx);
+    return lk.held ? oldest_bucket_under_lock(s_mb_last_commit_bucket, sample_count) : -1;
 }
 
 size_t history_label(size_t t, char* out, size_t max) {

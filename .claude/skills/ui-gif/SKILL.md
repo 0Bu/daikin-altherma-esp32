@@ -93,11 +93,12 @@ Look at the finished GIF. Then ask:
    candidate — the reversed loop and a genuinely negative ΔT), the scene list is the place, not a
    second GIF.
 2. **Does it still show the honest behaviour?** The standby scene is the point of the whole
-   recording: outdoor air, discharge and the electrical estimate read `—` because the outdoor unit
-   stops refreshing those pages while it rests (`logic/ou_stale.hpp`), and ΔT blanks with no flow.
-   That is the firmware's central claim about itself — a recording that quietly shows plausible
-   numbers there advertises the opposite of what this project does. A scene with nothing moving is
-   correct, not a broken frame.
+   recording: held X10A values never appear as current. Discharge and the INV-based electrical
+   estimate read `—` because the outdoor unit stops refreshing those pages while it rests
+   (`logic/ou_stale.hpp`); outdoor air is the live HomeHub measurement and is petrol, because that
+   independent sensor keeps measuring. ΔT blanks with no flow. That is the firmware's central claim
+   about itself — a recording that quietly shows the retained X10A outdoor value advertises the
+   opposite of what this project does. A scene with nothing moving is correct, not a broken frame.
 3. **Are the numbers physically coherent?** They are invented, but they are read as real: leaving
    water above the tank temperature during a charge, ΔT and flow consistent with the stated kW
    (`flow/60 × 4.186 × ΔT`), a DHW COP near 2.5–3 and a 38 °C heating COP near 4–5, the CT current
