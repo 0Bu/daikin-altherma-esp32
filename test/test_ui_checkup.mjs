@@ -15,6 +15,18 @@ const checkupSource = fs.readFileSync(new URL("../main/checkup.cpp", import.meta
 const pollSource = fs.readFileSync(new URL("../main/hp_poll.cpp", import.meta.url), "utf8");
 const configSource = fs.readFileSync(new URL("../main/http_config.cpp", import.meta.url), "utf8");
 
+// The checkup is the dashboard's first observation card: after the nameplate, before the live
+// "Operation" values. Its bounded 24-hour verdict is therefore visible before the reader scans
+// current operating state, and a future card reshuffle cannot silently bury it below that group.
+assert.match(dashboardSource, /const GROUPS = \[\s*\["Operation"/s,
+             "Operation must remain the first live-value group");
+assert.match(dashboardSource,
+             /setHtml\("valueGroups",\s*statusCardsHtml\(\)\s*\+\s*valueGroupsHtml\(/s,
+             "status cards, including the X10A check, must precede live-value groups");
+assert.match(dashboardSource,
+             /return hp\.connected \? vcard\(t\("card\.model"\), model\) \+ checkupCardHtml\(\) : "";/,
+             "X10A check must follow the Model card and precede Operation");
+
 // Pin the existing /status.health surface plus its additive evidence fields at the actual serializer.
 // The UI payloads below are synthetic by design; without this half, a C++ key drift could leave every
 // renderer test green while the board sends a different contract.
