@@ -17,6 +17,7 @@
 #include "logic/conv_override.hpp"
 #include "logic/board_pins.hpp"
 #include "logic/board_presets.hpp"
+#include "logic/binary_semantics.hpp"
 #include "logic/fault_state.hpp"
 #include "logic/raw_capture.hpp"
 #include "logic/captive.hpp"
@@ -1189,6 +1190,52 @@ static void test_binary_catalog() {
     CHECK(on_off_number("Heating") == nullptr);
     CHECK(on_off_number("on") == nullptr);
     CHECK(on_off_number(nullptr) == nullptr);
+}
+
+// The few bit rows whose 0/1 selects a named state must be identifiable without consulting their
+// generated English labels. All other bits remain ordinary ON/OFF flags. The catalog traversal pins
+// both sides: every semantic id resolves only to its intended structural row, and every occurrence
+// of those rows in all shipped profiles is covered.
+static void test_binary_semantics() {
+    CHECK(std::string(logic::binary_semantic_for(0x60, 12, 306)) == "valve_dhw");
+    CHECK(std::string(logic::binary_semantic_for(0x60, 12, 307)) == "valve_heat");
+    CHECK(std::string(logic::binary_semantic_for(0x60, 11, 301)) == "smart_grid_contact_1");
+    CHECK(std::string(logic::binary_semantic_for(0x60, 11, 302)) == "smart_grid_contact_2");
+    CHECK(logic::binary_semantic_for(0x60, 12, 305) == nullptr); // BSH polarity is undocumented
+    CHECK(logic::binary_semantic_for(0x62, 2, 303) == nullptr);  // ordinary activity flag
+    CHECK(logic::binary_semantic_for(0x60, 11, 303) == nullptr);
+
+    int valve_dhw = 0, valve_heat = 0, contact_1 = 0, contact_2 = 0, semantic_rows = 0;
+    for (const auto& p : def::profiles) {
+        for (size_t i = 0; i < p.count; i++) {
+            const ValueDef& d = p.values[i];
+            const char* semantic = logic::binary_semantic_for(d.reg, d.offset, d.conv);
+            if (!semantic) continue;
+            CHECK(conv_is_binary(d.conv));
+            semantic_rows++;
+            const std::string id(semantic);
+            if (id == "valve_dhw") {
+                CHECK(std::string(d.label) == "3way valve(On:DHW_Off:Space)");
+                valve_dhw++;
+            } else if (id == "valve_heat") {
+                CHECK(std::string(d.label) == "2way valve(On:Heat_Off:Cool)");
+                valve_heat++;
+            } else if (id == "smart_grid_contact_1") {
+                CHECK(std::string(d.label) == "SmartGridContact1");
+                contact_1++;
+            } else if (id == "smart_grid_contact_2") {
+                CHECK(std::string(d.label) == "SmartGridContact2");
+                contact_2++;
+            } else {
+                CHECK(false);
+            }
+        }
+    }
+    CHECK(valve_dhw == 44);
+    CHECK(valve_heat == 44);
+    CHECK(contact_1 == 16);
+    CHECK(contact_2 == 16);
+    CHECK(semantic_rows == 120);
 }
 
 // is_refrigerant_pressure() across the SHIPPED catalog. The production rule is STRUCTURAL (outdoor
@@ -8113,6 +8160,7 @@ int main() {
     test_button();
     test_discovery();
     test_binary_catalog();
+    test_binary_semantics();
     test_refrigerant_pressure_catalog();
     test_demand_flag_catalog();
     test_bsh_flag_catalog();

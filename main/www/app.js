@@ -163,6 +163,7 @@ const I18N = {
     "check.fault_past_unknown": "Seen in window · current state unknown",
     "check.retry_seen": "Counter increase seen", "check.retry_none": "No increase seen",
     "values.waiting": "Waiting for the first poll…",
+    "values.sg_x10a_mode": "Smart-Grid mode (X10A contacts)",
     "group.Operation": "Operation", "group.Domestic hot water": "Domestic hot water",
     "group.Water circuit": "Water circuit", "group.Refrigerant / outdoor": "Refrigerant / outdoor",
     "group.Electrical": "Electrical", "group.Device": "Device", "group.Other values": "Other values",
@@ -392,6 +393,7 @@ const I18N = {
     "check.fault_past_unknown": "Im Fenster aufgetreten · aktuell unbekannt",
     "check.retry_seen": "Zähleranstieg beobachtet", "check.retry_none": "Kein Anstieg beobachtet",
     "values.waiting": "Warte auf die erste Abfrage…",
+    "values.sg_x10a_mode": "Smart-Grid-Betriebsart (X10A-Kontakte)",
     "group.Operation": "Betrieb", "group.Domestic hot water": "Warmwasser",
     "group.Water circuit": "Wasserkreis", "group.Refrigerant / outdoor": "Kältemittel und Außeneinheit",
     "group.Electrical": "Elektrik", "group.Device": "Gerät", "group.Other values": "Weitere Werte",
@@ -1976,13 +1978,13 @@ const DESCRIPTIONS = [
 
   // ── Valves ──
   { re: /3.?way valve/i,
-    what: "The diverter valve routes water either to the DHW tank or to the space circuit. The HomeHub reports the named positions DHW and Space heating; the X10A equivalent uses ON = DHW and OFF = space circuit.",
+    what: "The diverter valve routes water either to the DHW tank or to the space circuit. Both sources are shown as the named positions DHW and Space heating; the underlying X10A bit remains 1 = DHW and 0 = space circuit.",
     normal: "DHW is the tank route; Space heating is the space-circuit route. The position alone does not prove that either circuit is currently operating.",
-    de: { what: "Das Umschaltventil leitet Wasser entweder zum Warmwasserspeicher oder in den Heiz- oder Kühlkreis. Der HomeHub meldet die benannten Positionen Brauchwarmwasser und Raumheizung; das X10A-Gegenstück verwendet ON = Warmwasser und OFF = Raumkreis.",
+    de: { what: "Das Umschaltventil leitet Wasser entweder zum Warmwasserspeicher oder in den Heiz- oder Kühlkreis. Beide Quellen werden als Brauchwarmwasser oder Raumheizung angezeigt; das zugrunde liegende X10A-Bit bleibt 1 = Warmwasser und 0 = Raumkreis.",
           normal: "Brauchwarmwasser ist der Speicherweg, Raumheizung der Weg zum Raumkreis. Die Ventilposition allein beweist nicht, dass der jeweilige Kreis gerade in Betrieb ist." } },
   { re: /2.?way valve/i,
-    what: "Selects the water path for the current mode — ON in heating, OFF in cooling (per the label).",
-    de: { what: "Wählt den Wasserweg für den aktuellen Modus. Wie die Bezeichnung angibt, steht ON für Heizbetrieb und OFF für Kühlbetrieb." } },
+    what: "Selects the water path for the current mode. The named display is Heating or Cooling; the underlying X10A bit remains 1 = Heating and 0 = Cooling.",
+    de: { what: "Wählt den Wasserweg für den aktuellen Modus. Angezeigt wird Heizen oder Kühlen; das zugrunde liegende X10A-Bit bleibt 1 = Heizen und 0 = Kühlen." } },
   { re: /mix valve position|bizone kit mix valve/i,
     what: "Opening of the bizone mixing valve, blending hot flow with cooler return to hold a lower temperature for a second (e.g. underfloor) zone.",
     normal: "modulates between fully closed and fully open to hold that zone's target.",
@@ -2051,9 +2053,9 @@ const DESCRIPTIONS = [
   // "operation mode" entry below. Without that ordering the Modbus card described the SG modes as the
   // outdoor unit's Heating/Cooling thermodynamic state, which is a different register and meaning.
   { exact: true, re: /^smart[- ]grid operation mode$/i,
-    what: "The HomeHub's Smart-Grid request: Free running, Forced off, Recommended on or Forced on. It is an energy-management command, not the outdoor unit's Heating/Cooling mode.",
+    what: "The Smart-Grid request: Free running, Forced off, Recommended on or Forced on. The HomeHub reports it directly; the X10A row derives the same four states from contacts 1 and 2. It is an energy-management command, not the outdoor unit's Heating/Cooling mode.",
     normal: "Free running during ordinary autonomous operation. The other modes should appear only while an external energy manager deliberately blocks, recommends or forces operation.",
-    de: { what: "Die Smart-Grid-Anforderung des HomeHub: Freier Betrieb, Zwangsabschaltung, Empfehlung ein oder Erzwungen ein. Das ist ein Energiemanagement-Befehl und nicht der Heiz- oder Kühlmodus der Außeneinheit.",
+    de: { what: "Die Smart-Grid-Anforderung: Freier Betrieb, Zwangsabschaltung, Empfehlung ein oder Erzwungen ein. Der HomeHub meldet sie direkt; die X10A-Zeile leitet dieselben vier Zustände aus Kontakt 1 und 2 ab. Das ist ein Energiemanagement-Befehl und nicht der Heiz- oder Kühlmodus der Außeneinheit.",
           normal: "Freier Betrieb im normalen autonomen Betrieb. Die anderen Modi sollten nur erscheinen, wenn ein externes Energiemanagement den Betrieb bewusst sperrt, empfiehlt oder erzwingt." } },
   { re: /operation mode|operation \/ fault|^operation$/i,
     what: "The configured heat/cool mode: Auto, Heating or Cooling. It is a mode selection, not a statement that the compressor or space circuit is running right now.",
@@ -2548,6 +2550,9 @@ const SMART_GRID_MODE_NUMBER = Object.freeze({
   "Recommended on": 2,
   "Forced on": 3,
 });
+const SMART_GRID_MODE_VALUE = Object.freeze([
+  "Free running", "Forced off", "Recommended on", "Forced on",
+]);
 const mbSmartGridMode = () => {
   const r = mbRow(MB_OFF_SMART_GRID);
   if (!r) return null;
@@ -2557,6 +2562,31 @@ const mbSmartGridMode = () => {
 // One lookup both go through. Gated on mbLive() for mbByConcept's reason: correct on its own.
 const mbRow = (off) =>
   mbLive() ? (S._modbus || []).find((m) => m && m.off === off && m.value != null) || null : null;
+
+// X10A exposes the Smart-Grid interface as two independent contact bits. Neither contact alone is
+// a user-facing operating mode; their documented combination is. Resolve the rows by the structural
+// metadata supplied by the firmware, fail closed if either bit is absent/malformed, and retain the
+// same canonical four names the HomeHub boundary uses.
+const x10aSemanticRow = (semantic, values = S._values || []) =>
+  values.find((r) => r && r.binary_semantic === semantic && r.value != null) || null;
+const x10aSmartGridModeFrom = (values) => {
+  const c1 = binaryValue(x10aSemanticRow("smart_grid_contact_1", values));
+  const c2 = binaryValue(x10aSemanticRow("smart_grid_contact_2", values));
+  if (c1 == null || c2 == null) return null;
+  return c1 ? (c2 ? 3 : 2) : (c2 ? 1 : 0);
+};
+const x10aSmartGridMode = () => x10aDown() ? null : x10aSmartGridModeFrom(S._values || []);
+const x10aSmartGridRow = () => {
+  const mode = x10aSmartGridMode();
+  return mode == null ? null : {
+    label: "Smart Grid operation mode",
+    displayLabel: t("values.sg_x10a_mode"),
+    value: SMART_GRID_MODE_VALUE[mode],
+    unit: "",
+    group: "Operation",
+    key: "x10a:smart-grid-mode",
+  };
+};
 
 // Closed-drawing and inspector wording for the same four-value enum. Only mode 2 gets the compact
 // boost marker; every other state stays readable in the HomeHub row and in an already-open
@@ -3227,15 +3257,26 @@ const ENUM_VALUE_I18N = Object.freeze({
   "Recommended on": "enum.recommended_on", "Forced on": "enum.forced_on",
 });
 
+// Most converter-300..307 rows are genuine flags and remain ON/OFF. These two structural ids are
+// selectors: their bit chooses a path/mode, so name that selected state instead of displaying the
+// electrical bit. The public value itself remains 0/1.
+const BINARY_VALUE_I18N = Object.freeze({
+  valve_dhw: Object.freeze({ "0": "enum.space_heating", "1": "enum.dhw" }),
+  valve_heat: Object.freeze({ "0": "enum.cooling", "1": "enum.heating" }),
+});
+
 // /values keeps the firmware-wide numeric 0/1 contract and marks true flags with binary:true.
-// Render only those rows as ON/OFF at the last, visual boundary: a plain numeric 0 or 1 can also be
-// a real count/stage. Named HomeHub enums arrive as stable English manufacturer terms and are
-// translated here; an undocumented value remains visible with its raw number.
+// Render ordinary flags as ON/OFF and structurally identified selectors as their named states at
+// the last, visual boundary: a plain numeric 0 or 1 can also be a real count/stage. Named HomeHub
+// enums arrive as stable English manufacturer terms and are translated here; an undocumented value
+// remains visible with its raw number.
 function displayValue(v) {
   if (!v || v.value == null) return "—";
   const raw = String(v.value);
   if (v.binary === true) {
     const state = raw.trim();
+    const named = BINARY_VALUE_I18N[v.binary_semantic]?.[state];
+    if (named) return t(named);
     if (state === "1") return t("state.on");
     if (state === "0") return t("state.off");
   }
@@ -3319,10 +3360,12 @@ function descAccordion(key, label, valHtml, cls, bodyHtml, trendId) {
 }
 
 // One value row. If a description matches the label, render the accordion; otherwise a plain,
-// unchanged row. The key IS the label here — catalog labels are unique within a render.
+// unchanged row. Catalog labels are unique within a render; a derived row supplies its own key and
+// visual label while keeping its canonical label for description matching.
 function vDescRow(v) {
   const label = v.label || "";
-  const shownLabel = displayReadingLabel(label);
+  const shownLabel = v.displayLabel || displayReadingLabel(label);
+  const key = v.key || label;
   let cls = v.state || v.class || "";
   const d = descFor(label);
   const hid = histIdFor(label);          // this profile's spelling -> the concept the device buffers
@@ -3346,7 +3389,7 @@ function vDescRow(v) {
   }
   // Body = the explainer, then the second source's reading, then the trend. Any part may be absent,
   // which is why the builder takes finished markup rather than a description.
-  return descAccordion(label, shownLabel, val, cls,
+  return descAccordion(key, shownLabel, val, cls,
                        (d ? descBodyHtml(d, src.value) : "") + mbNoteHtml(v, mb) +
                        histHtml(hid, v.unit, shownLabel), hid);
 }
@@ -3506,7 +3549,10 @@ function valueGroupsHtml(vals, connected) {
   // point of two independent stacks. Each row then shows the Modbus reading (marked) or blanks
   // (vDescRow); hiding the list wholesale would throw away readings that ARE being measured.
   if (!connected && !mbLive()) return "";
-  if (!vals.length) {
+  const rows = vals.slice();
+  const smartGrid = x10aSmartGridRow();
+  if (smartGrid) rows.push(smartGrid);
+  if (!rows.length) {
     // X10A has nothing to show yet. If the HomeHub is delivering, ITS readings are all there is —
     // show them rather than "waiting for the heat pump" over live data. This was the gap: the guard
     // above already let the Modbus case through, and then this line sent it straight back, so the
@@ -3518,7 +3564,7 @@ function valueGroupsHtml(vals, connected) {
   }
   const order = [...GROUPS.map((g) => g[0]), "Other values"];
   const buckets = new Map();
-  for (const v of vals) { const g = groupOf(v); (buckets.get(g) || buckets.set(g, []).get(g)).push(v); }
+  for (const v of rows) { const g = groupOf(v); (buckets.get(g) || buckets.set(g, []).get(g)).push(v); }
   const grouped = buckets.size > 1;
   const rowsOf = (rows) => rows.map((v) => vDescRow(v)).join("");
   // Group headings are translated; a firmware-supplied custom group (not in the dictionary) keeps its

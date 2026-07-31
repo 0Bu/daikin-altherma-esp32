@@ -15,6 +15,7 @@
 #include "history.hpp"
 #include "hp_poll.hpp"
 #include "hp_modbus.hpp"
+#include "logic/binary_semantics.hpp"
 #include "logic/homehub_map.hpp"
 #include "logic/history.hpp"
 #include "logic/convert.hpp"   // conv_is_binary — /values marks a bit-flag row from its converter id
@@ -571,7 +572,15 @@ static void append_values_array(std::string& j) {
         // is intentionally emitted only for binary rows: it lets the browser render ON/OFF without
         // treating every numeric zero/one as a switch, while adding no payload bytes to the many
         // non-binary readings.
-        if (conv_is_binary(v[i].conv)) j += ",\"binary\":true";
+        if (conv_is_binary(v[i].conv)) {
+            j += ",\"binary\":true";
+            // A selector is still a numeric bit at every published boundary, but the browser needs
+            // its structural meaning to avoid presenting a selected path as a generic ON/OFF flag.
+            // Emit only the four catalog identities with documented non-boolean semantics; all
+            // ordinary flags retain the compact payload and the familiar ON/OFF presentation.
+            if (const char* sid = logic::binary_semantic_for(v[i].reg, v[i].off, v[i].conv))
+                { j += ",\"binary_semantic\":"; j += jstr(sid); }
+        }
         // The DEVICE's own answer to "is this reading still current?" — logic/ou_stale.hpp applied on
         // the poll task (#209 defect 5), emitted only when true so the many live rows cost no bytes.
         // The browser still derives the same fact from `reg` + the compressor row, and the catalog
