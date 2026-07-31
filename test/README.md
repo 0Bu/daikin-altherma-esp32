@@ -39,14 +39,16 @@ as localised subtle text underneath it and in the accessible name, and unknown f
 to escaped human-readable API prose.
 
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named
-HomeHub status in the EKRHH register map. It pins the manufacturer terms in English and German,
-unknown-value visibility, and the boundary between named enums, structural binary ON/OFF flags and
-ordinary numeric `0`/`1` values.
+HomeHub status in the EKRHH register map and the schematic renderer against every X10A operation
+mode. It pins the manufacturer terms, readable diagram headlines and consistent German model-card
+labels, unknown-value visibility, and the boundary between named enums, structural binary ON/OFF
+flags and ordinary numeric `0`/`1` values.
 
 `node test/test_ui_homehub_copy.mjs` audits all 27 curated HomeHub rows as one semantic contract:
 the register guide's English name, the German visual label, the matching bilingual explanation and
-the visible status vocabulary. It also pins exact matches where a broad catalog regex would be
-misleading, notably room-temperature setpoints versus the unrelated `Thermo ON` demand flag.
+the visible status vocabulary. German labels must use fluent qualifiers instead of parenthetical
+fragments. The test also pins exact matches where a broad catalog regex would be misleading,
+notably room-temperature setpoints versus the unrelated `Thermo ON` demand flag.
 
 `node test/test_ui_error_codes.mjs` keeps the Error code row concise and source-aligned. It compares
 the internal 63-code lookup with `main/logic/error_codes.hpp`, requires a short German meaning for

@@ -133,15 +133,15 @@ jobs:
       - name: Test Modbus connection error status
         run: node test/test_ui_modbus_status.mjs
 
-      # HomeHub uses Int16 for both numbers and selectors. Execute the production display boundary
-      # and pin every manufacturer enum in English and German so a named mode cannot regress to an
-      # unexplained integer while true binary flags continue to render as ON/OFF.
-      - name: Test HomeHub enum rendering
+      # HomeHub uses Int16 for both numbers and selectors; X10A exposes stable English tokens for
+      # the current indoor operation mode. Execute both production display boundaries and pin every
+      # manufacturer enum plus every localised schematic headline in English and German.
+      - name: Test HomeHub enums and schematic operation modes
         run: node test/test_ui_homehub_enums.mjs
 
       # Coverage cannot detect a semantically wrong first-match description. Pin every curated
-      # HomeHub register to its manufacturer label, German visual label and bilingual explanation,
-      # including ON/OFF spelling and the room-temperature setpoint-vs-thermo-demand distinction.
+      # HomeHub register to its manufacturer label, fluent German visual label and bilingual
+      # explanation, including ON/OFF spelling and the setpoint-vs-thermo-demand distinction.
       - name: Test HomeHub labels and explanations
         run: node test/test_ui_homehub_copy.mjs
 

@@ -38,7 +38,9 @@ const I18N = {
     "sys.nodata": "No data", "sys.unreachable": "Unreachable",
     "sys.x10a_down": "X10A offline", "sys.mb_carrying": "Operating mode unknown — readings from Modbus",
     "sys.mb_only": "X10A offline — readings from Modbus",
-    "mode.dhw": "DHW", "mode.heat": "Heating", "mode.standby": "Standby",
+    "mode.stop": "Stop", "mode.heat": "Heating", "mode.cool": "Cooling",
+    "mode.dhw": "Hot water", "mode.heat_dhw": "Heating + hot water",
+    "mode.cool_dhw": "Cooling + hot water",
     "sys.unreachable_sub": "Can't reach the device — retrying…",
     "sys.waiting": "Waiting for the heat pump…", "sys.operating": "Operating",
     "sys.standby": "Standby — not running", "sys.defrosting": "Defrosting",
@@ -270,7 +272,9 @@ const I18N = {
     "sys.nodata": "Keine Daten", "sys.unreachable": "Nicht erreichbar",
     "sys.x10a_down": "X10A offline", "sys.mb_carrying": "Betriebsart unbekannt — Werte aus dem Modbus",
     "sys.mb_only": "X10A offline — Werte aus dem Modbus",
-    "mode.dhw": "Warmwasser", "mode.heat": "Heizung", "mode.standby": "Bereitschaft",
+    "mode.stop": "Stopp", "mode.heat": "Heizen", "mode.cool": "Kühlen",
+    "mode.dhw": "Warmwasser", "mode.heat_dhw": "Heizen + Warmwasser",
+    "mode.cool_dhw": "Kühlen + Warmwasser",
     "sys.unreachable_sub": "Gerät nicht erreichbar — erneuter Versuch…",
     "sys.waiting": "Warte auf die Wärmepumpe…", "sys.operating": "In Betrieb",
     "sys.standby": "Bereitschaft — läuft nicht", "sys.defrosting": "Abtauen",
@@ -281,7 +285,7 @@ const I18N = {
     "sys.warning_line": (c) => "Warnung · " + c + " — Wärmepumpe prüfen.",
     "sys.polled": (s) => `vor ${s}s abgefragt`,
     "recovery.title": "Wiederherstellungsmodus",
-    "recovery.meta": "Das Gerät ist zu oft neu gestartet und im Wiederherstellungsmodus hochgefahren. Wärmepumpen-Abfrage und MQTT sind pausiert. Korrigiere die Konfiguration (z. B. die RX/TX-Pins auf der Protokoll-Karte in den Einstellungen) und starte neu, um den Normalbetrieb fortzusetzen.",
+    "recovery.meta": "Das Gerät ist zu oft neu gestartet und im Wiederherstellungsmodus hochgefahren. Wärmepumpen-Abfrage und MQTT sind pausiert. Korrigiere in den Einstellungen die Konfiguration, etwa die RX/TX-Pins auf der Protokoll-Karte, und starte neu, um den Normalbetrieb fortzusetzen.",
     "rollback.title": "WLAN-Änderung fehlgeschlagen — zurückgesetzt",
     "rollback.meta": (back) => `Die neuen WLAN-Zugangsdaten konnten sich nicht verbinden, daher hat das Gerät das vorherige Netzwerk${back} wiederhergestellt und neu gestartet. Öffne die Einstellungen und prüfe in der Kachel „Verbindungen“ WLAN-Name und Passwort, dann versuche es erneut.`,
     "crash.title_fault": "Gerät ist nach einem Absturz neu gestartet",
@@ -343,7 +347,7 @@ const I18N = {
     "modbus.err.receive_failed": (r) => `HomeHub-Antwort konnte${r ? ` an Register ${r}` : ""} nicht gelesen werden.`,
     "modbus.err.invalid_response": (r) => `Ungültige Modbus-Antwort${r ? ` an Register ${r}` : ""}.`,
     "modbus.err.internal_error": "Der Modbus-Abfragezyklus ist intern fehlgeschlagen.",
-    "modbus.err.exception": (r, n, why) => `HomeHub lehnt Register ${r || "?"} ab (Ausnahme ${n}: ${why}).`,
+    "modbus.err.exception": (r, n, why) => `HomeHub lehnt Register ${r || "?"} ab — Ausnahme ${n}: ${why}.`,
     "modbus.exc.1": "unzulässige Funktion", "modbus.exc.2": "unzulässige Registeradresse",
     "modbus.exc.3": "unzulässiger Wert", "modbus.exc.4": "Gerätefehler",
     "modbus.exc.5": "Anfrage bestätigt", "modbus.exc.6": "Gerät beschäftigt",
@@ -353,9 +357,9 @@ const I18N = {
     "card.uptime": "Laufzeit",
     "card.freeheap": "Freier Speicher", "card.maxalloc": "Größter freier Block",
     "card.offline": "Offline", "card.protocol": "Protokoll", "card.rxpin": "RX-Pin",
-    "card.txpin": "TX-Pin", "card.capacity": "Leistung",
-    "card.capacity_iu": "Leistung (Inneneinheit)",
-    "card.candidates": "Mögliche Modelle", "card.oueeprom": "Kennung Außeneinheit",
+    "card.txpin": "TX-Pin", "card.capacity": "Nennleistung der Außeneinheit",
+    "card.capacity_iu": "Nennleistung der Inneneinheit",
+    "card.candidates": "Mögliche Modelle", "card.oueeprom": "Kennung der Außeneinheit",
     "card.checkup": "X10A-Check · 24 h",
     "check.fault": "Störung der Anlage", "check.cycling": "Verdichterstarts",
     "check.defrost": "Abtauvorgänge", "check.pressure": "Wasserdruck, niedrigster",
@@ -372,7 +376,7 @@ const I18N = {
     "check.detail.warn": "Ein Gerätebefund oder eine dokumentierte Grenze erfordert Prüfung.",
     "check.detail.collecting": (n, r) => `${n} von ${r} erfasst; eine Bewertung ist noch nicht möglich.`,
     "check.detail.collecting_unknown": "Noch nicht genug verwertbare Evidenz für eine Bewertung.",
-    "check.detail.observation": "Nur Messwert; dafür gibt es keinen allgemeinen OK-/WARNUNG-Grenzwert.",
+    "check.detail.observation": "Nur Messwert; dafür gibt es keinen allgemeinen Grenzwert für OK oder WARNUNG.",
     "check.detail.experimental": "Experimentelle Beobachtung; ein stabiler Zähler beweist nicht, dass keine Begrenzung stattfand.",
     "check.detail.unavailable": "Das aktive Profil liefert für diese Prüfung keine auswertbaren Daten.",
     "check.starts": (n) => `${n} ${n === 1 ? "Start" : "Starts"}`,
@@ -389,7 +393,7 @@ const I18N = {
     "check.retry_seen": "Zähleranstieg beobachtet", "check.retry_none": "Kein Anstieg beobachtet",
     "values.waiting": "Warte auf die erste Abfrage…",
     "group.Operation": "Betrieb", "group.Domestic hot water": "Warmwasser",
-    "group.Water circuit": "Wasserkreis", "group.Refrigerant / outdoor": "Kältemittel / Außen",
+    "group.Water circuit": "Wasserkreis", "group.Refrigerant / outdoor": "Kältemittel und Außeneinheit",
     "group.Electrical": "Elektrik", "group.Device": "Gerät", "group.Other values": "Weitere Werte",
     "group.Protection": "Schutz", "protect.limiting": "regelt zurück",
     "group.Values": "Werte",
@@ -439,7 +443,7 @@ const I18N = {
     "ota.title_check": "Tippen, um nach Firmware-Updates zu suchen",
     "ota.title_avail": (v) => `Update v${v} verfügbar — tippen zum Installieren`,
     "mq.err_format": "Host:Port eingeben — z. B. 192.168.1.10:1883 — oder mqtts://host:8883 für TLS",
-    "sl.err_port": "Port muss eine ganze Zahl 1–65535 sein (z. B. logs.example.com:514).",
+    "sl.err_port": "Port muss eine ganze Zahl von 1 bis 65535 sein, zum Beispiel logs.example.com:514.",
     "btn.saving": "Speichere…", "btn.save": "Speichern", "btn.cancel": "Abbrechen", "btn.close": "Schließen",
     // static index.html markup (data-i18n)
     "schem.outdoor_unit": "AUSSENEINHEIT", "schem.defrost_pill": "❄ Abtauen", "schem.outdoor": "Außen",
@@ -448,13 +452,13 @@ const I18N = {
     "schem.bsh_badge": "Heizstab aktiv",
     "schem.heating": "HEIZUNG", "schem.pump": "PUMPE", "schem.return": "Rücklauf", "schem.room": "Raum",
     "schem.flow_rate": "Durchfluss", "schem.water_press": "Wasserdruck",
-    "wifi.title": "WLAN-Konfiguration", "wifi.ssid": "WLAN-Netzwerk (SSID)", "wifi.pass": "WLAN-Passwort",
+    "wifi.title": "WLAN-Konfiguration", "wifi.ssid": "WLAN-Netzwerk · SSID", "wifi.pass": "WLAN-Passwort",
     "wifi.err_ssid": "SSID darf höchstens 32 Zeichen haben",
-    "wifi.err_pass": "Passwort muss leer (offenes Netz) oder 8–63 Zeichen lang sein",
+    "wifi.err_pass": "Für ein offenes Netz muss das Passwort leer sein, sonst 8–63 Zeichen lang",
     "wifi.hint": "SSID ist erforderlich. Scheitert die Verbindung zum neuen Netz, setzt das Gerät auf die alten WLAN-Einstellungen zurück.",
     "mqtt.title": "MQTT-Broker", "mqtt.hostport": "Host : Port", "mqtt.user": "Benutzername · optional",
     "mqtt.pass": "Passwort · optional", "mqtt.clear": "Gespeicherte Zugangsdaten entfernen — anonym verbinden",
-    "mqtt.hint": "Zugangsdaten erfordern einen TLS-Broker — mqtts://-URL verwenden (z. B. mqtts://host:8883). Leerer Host deaktiviert MQTT.",
+    "mqtt.hint": "Zugangsdaten erfordern einen TLS-Broker — eine mqtts://-URL verwenden, zum Beispiel mqtts://host:8883. Ein leerer Host deaktiviert MQTT.",
     "syslog.title": "Syslog-Server", "syslog.hostport": "Host : Port",
     "syslog.hint": "IP-Adresse oder Hostname und Port des Syslog-Servers. Leerer Host deaktiviert Syslog.",
     "ntp.title": "NTP-Server", "ntp.server": "Server",
@@ -467,11 +471,11 @@ const I18N = {
     "hh.err_unit": "Unit-ID muss zwischen 1 und 247 liegen",
     "board.title": "Board-Hardware", "board.ledtype": "Status-LED", "board.none": "Keine",
     "board.preset": "Board", "board.preset_custom": "Benutzerdefiniert",
-    "board.led_gpio": "Einfache LED (GPIO)", "board.led_ws2812": "Adressierbare RGB-LED (WS2812)",
+    "board.led_gpio": "Einfache LED · GPIO", "board.led_ws2812": "Adressierbare RGB-LED · WS2812",
     "board.ledpin": "LED-Pin", "board.btnpin": "Reset-Taster-Pin",
-    "board.ledinv": "Active low (LED leuchtet, wenn der Pin auf LOW liegt)",
-    "board.btninv": "Active low (Taster zieht den Pin auf GND)",
-    "board.hint": "Den Reset-Taster 5 Sekunden zu halten LÖSCHT alle gespeicherten Einstellungen (WLAN, MQTT, Syslog/NTP) und startet ins Setup-Portal neu — die LED blinkt rot, solange der Vorgang scharf ist, und leuchtet dann weiß, während gelöscht wird. Den Taster auf „Keine“ lassen, solange keiner verdrahtet ist: ein offener Pin kann floaten und ihn auslösen.",
+    "board.ledinv": "Aktiv bei LOW — LED leuchtet bei niedrigem Pin-Pegel",
+    "board.btninv": "Aktiv bei LOW — Taster zieht den Pin auf GND",
+    "board.hint": "Den Reset-Taster 5 Sekunden zu halten LÖSCHT alle gespeicherten Einstellungen wie WLAN, MQTT, Syslog und NTP und startet ins Setup-Portal neu — die LED blinkt rot, solange der Vorgang scharf ist, und leuchtet dann weiß, während gelöscht wird. Den Taster auf „Keine“ lassen, solange keiner verdrahtet ist: ein offener Pin kann floaten und ihn auslösen.",
     "card.hardware": "Hardware", "card.hw_off": "Keine",
     "card.hw_led": (pin, kind) => `GPIO${pin} · ${kind}`, "card.hw_btn": (pin) => `GPIO${pin}`,
     "card.firmware": "Version", "card.channel": "Update-Kanal",
@@ -492,6 +496,43 @@ function t(k, ...a) {
   const v = (I18N[LANG] && I18N[LANG][k] != null) ? I18N[LANG][k] : I18N.en[k];
   if (v == null) return k;
   return typeof v === "function" ? v(...a) : v;
+}
+
+// X10A keeps the converter's stable English operation-mode tokens in /values. The schematic is the
+// user-facing summary, so translate the complete conv-315 vocabulary here instead of leaking the
+// technical "DHW" abbreviation into an otherwise localised headline. Unknown future modes remain
+// visible verbatim rather than being guessed into a known state.
+const OPERATION_MODE_I18N = Object.freeze({
+  "Stop": "mode.stop",
+  "Heating": "mode.heat",
+  "Cooling": "mode.cool",
+  "DHW": "mode.dhw",
+  "Heating + DHW": "mode.heat_dhw",
+  "Cooling + DHW": "mode.cool_dhw",
+});
+function operationModeText(value) {
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const key = OPERATION_MODE_I18N[raw];
+  return key ? t(key) : raw;
+}
+function operationModeFromFlags(dhw, space) {
+  return dhw === true ? t("mode.dhw")
+       : space === true ? t("mode.heat")
+       : (dhw === false && space === false) ? t("mode.stop") : null;
+}
+// The diagram and its explainer are two views of the same state. X10A carries the detailed hydronic
+// enum; while that bus is down, the HomeHub's two activity flags still distinguish hot water, space
+// operation and stop. Resolve that one user-facing answer here so opening the explainer cannot turn
+// a visible "Stopp" headline back into an unexplained dash.
+function schematicOperationMode() {
+  const hp = S.status?.hp || {};
+  if (hp.connected) {
+    return operationModeText(pickValue(/i\/u operation mode/i) ||
+                             pickValue(/operation mode|^mode$/i));
+  }
+  return mbLive() ? operationModeFromFlags(mbBool(52), mbBool(53)) : null;
 }
 // Localise the static markup in index.html: elements tagged data-i18n get their text set from the
 // dictionary. Runs once at boot (the static DOM is never rebuilt). SVG <text>/<tspan> nodes work the
@@ -683,7 +724,7 @@ function renderApp() {
   // (conv 315 — Stop/Heating/Cooling/DHW/…) over the outdoor unit's Operation Mode: during a DHW run
   // the outdoor unit still reports "Heating" (it IS heating — the tank), but the user-relevant answer
   // is what the water side is doing. Plain first-match sorted the outdoor row first.
-  const mode = pickValue(/i\/u operation mode/i) || pickValue(/operation mode|^mode$/i);
+  const mode = schematicOperationMode();
   const fault = faultValue();
   const faulted = fault && !FAULT_OK.test(String(fault).trim());
   // Decode the readings ONCE, here: the status block and the drawing must not disagree about what
@@ -708,10 +749,7 @@ function renderApp() {
     // reads "heat" right through a DHW run, so a headline built from it would contradict the valve
     // drawn beside it.
     if (mbLive()) {
-      const dhw = mbBool(52), spc = mbBool(53);
-      const mbMode = dhw === true ? t("mode.dhw")
-                   : spc === true ? t("mode.heat")
-                   : (dhw === false && spc === false) ? t("mode.standby") : null;
+      const mbMode = mode;
       // A FAULT OR WARNING THE GATEWAY IS REPORTING OUTRANKS THE MODE. The diagnostic state and its
       // code are EKRHH offsets 21/22. Withholding either state while the device reports it is the
       // one direction a status headline must never fail in. Without this the card read a calm green
@@ -1842,7 +1880,7 @@ const DAIKIN_FAULT_CODES = Object.freeze([
   { code: "A5", en: "High-pressure peak-cut / frost protection problem", de: "Problem mit Hochdruckbegrenzung oder Frostschutz" },
   { code: "AA", en: "Backup heater overheated or not connected", de: "Zusatzheizer überhitzt oder nicht angeschlossen" },
   { code: "AC", en: "Booster heater overheated", de: "Speicherheizstab überhitzt" },
-  { code: "AH", en: "Tank disinfection (anti-legionella) not completed", de: "Speicherdesinfektion (Legionellenschutz) nicht abgeschlossen" },
+  { code: "AH", en: "Tank disinfection (anti-legionella) not completed", de: "Speicherdesinfektion zum Legionellenschutz nicht abgeschlossen" },
   { code: "AJ", en: "DHW heat-up time exceeded", de: "Aufheizzeit für Warmwasser überschritten" },
   { code: "C0", en: "Flow sensor fault", de: "Fehler am Volumenstromsensor" },
   { code: "C4", en: "Heat exchanger temperature sensor fault", de: "Fehler am Temperaturfühler des Wärmetauschers" },
@@ -1867,7 +1905,7 @@ const DAIKIN_FAULT_CODES = Object.freeze([
   { code: "H3", en: "Outdoor unit high-pressure switch fault", de: "Fehler am Hochdruckschalter der Außeneinheit" },
   { code: "H5", en: "Compressor overload protection fault", de: "Fehler am Überlastschutz des Verdichters" },
   { code: "H6", en: "Outdoor unit position-detection sensor fault", de: "Fehler am Positionserkennungssensor der Außeneinheit" },
-  { code: "H8", en: "Outdoor unit compressor input (CT) system fault", de: "Fehler am Strommesssystem (CT) des Außeneinheit-Verdichters" },
+  { code: "H8", en: "Outdoor unit compressor input (CT) system fault", de: "Fehler am CT-Strommesssystem des Außeneinheit-Verdichters" },
   { code: "H9", en: "Outdoor unit outside air temperature sensor fault", de: "Fehler am Außentemperaturfühler der Außeneinheit" },
   { code: "HC", en: "Tank temperature sensor fault", de: "Fehler am Speichertemperaturfühler" },
   { code: "HJ", en: "Water pressure sensor fault", de: "Fehler am Wasserdrucksensor" },
@@ -1892,7 +1930,7 @@ const DAIKIN_FAULT_CODES = Object.freeze([
   { code: "U4", en: "Indoor/outdoor unit communication problem", de: "Kommunikationsproblem zwischen Innen- und Außeneinheit" },
   { code: "U5", en: "User interface communication problem", de: "Kommunikationsproblem mit der Bedieneinheit" },
   { code: "U7", en: "Outdoor unit main CPU / inverter CPU transmission fault", de: "Übertragungsfehler zwischen Haupt-CPU und Inverter-CPU der Außeneinheit" },
-  { code: "U8", en: "External device (LAN adapter / room thermostat / USB) communication problem", de: "Kommunikationsproblem mit externem Gerät (LAN-Adapter, Raumthermostat oder USB)" },
+  { code: "U8", en: "External device (LAN adapter / room thermostat / USB) communication problem", de: "Kommunikationsproblem mit LAN-Adapter, Raumthermostat oder USB-Gerät" },
   { code: "UA", en: "Indoor/outdoor unit combination or compatibility problem", de: "Innen- und Außeneinheit sind falsch kombiniert oder nicht kompatibel" },
   { code: "UF", en: "Reversed piping or faulty communication wiring detected", de: "Vertauschte Rohrleitungen oder fehlerhafte Kommunikationsverdrahtung erkannt" },
 ]);
@@ -1906,11 +1944,11 @@ const DESCRIPTIONS = [
           normal: "meist 45–55 °C. Höher belastet den elektrischen Zusatzheizer und kostet mehr; ein wöchentlicher Zyklus auf ≥60 °C ist die normale Legionellen-Aufheizung." } },
   { re: /2nd domestic hot water/i,
     what: "A second temperature sensor in the hot-water tank (used on tanks with two sensors, e.g. top and bottom).",
-    de: { what: "Ein zweiter Temperaturfühler im Warmwasserspeicher (bei Speichern mit zwei Fühlern, z. B. oben und unten)." } },
+    de: { what: "Ein zweiter Temperaturfühler für Warmwasserspeicher mit zwei Messpunkten, etwa oben und unten." } },
   { re: /dhw tank temp|dhw tank/i,
     what: "The water temperature actually measured inside the hot-water tank (sensor R5T).",
     normal: "Below the DHW setpoint is expected after hot water has been used. During an active DHW cycle the temperature should rise; if it does not, compare the operation, flow and fault rows before drawing a conclusion.",
-    de: { what: "Die tatsächlich im Warmwasserspeicher gemessene Wassertemperatur (Fühler R5T).",
+    de: { what: "Die tatsächlich im Warmwasserspeicher gemessene Wassertemperatur am Fühler R5T.",
           normal: "Nach einer Warmwasserentnahme liegt sie erwartbar unter dem Sollwert. Während eines aktiven Warmwasser-Zyklus sollte sie steigen; tut sie das nicht, zuerst Betriebs-, Durchfluss- und Fehlerzeilen gemeinsam prüfen." } },
   { re: /powerful dhw/i,
     what: "A one-off boost that heats the tank to the setpoint as fast as possible, calling in the backup heater if needed.",
@@ -1920,8 +1958,8 @@ const DESCRIPTIONS = [
   { re: /tank preheat/i,
     what: "The tank is being warmed ahead of an expected draw (from the schedule or weather forecast) so hot water is ready in time.",
     normal: "briefly ON around scheduled/anticipated demand, OFF otherwise.",
-    de: { what: "Der Speicher wird vor einer erwarteten Entnahme (nach Zeitplan oder Wetterprognose) vorgewärmt, damit rechtzeitig Warmwasser bereitsteht.",
-          normal: "kurz ON rund um geplanten/erwarteten Bedarf, sonst OFF." } },
+    de: { what: "Der Speicher wird vor einer erwarteten Entnahme vorgewärmt, etwa nach Zeitplan oder Wetterprognose, damit rechtzeitig Warmwasser bereitsteht.",
+          normal: "kurz ON bei geplantem oder erwartetem Bedarf, sonst OFF." } },
   { re: /reheat on/i,
     what: "The tank is being topped back up to its comfort temperature between scheduled heating slots.",
     normal: "ON in short bursts to hold the tank warm; OFF most of the time.",
@@ -1933,22 +1971,22 @@ const DESCRIPTIONS = [
   { re: /boiler dhw demand/i,
     what: "On a hybrid (heat-pump + gas boiler) system: the boiler has been asked to make the hot water instead of the heat pump.",
     normal: "OFF on a heat-pump-only system; on a hybrid it comes ON when the boiler is cheaper/faster than the heat pump for DHW.",
-    de: { what: "Bei einem Hybridsystem (Wärmepumpe + Gaskessel): Der Kessel wurde angefordert, das Warmwasser statt der Wärmepumpe zu erzeugen.",
-          normal: "OFF bei reinem Wärmepumpenbetrieb; im Hybridsystem ON, wenn der Kessel für Warmwasser günstiger/schneller ist als die Wärmepumpe." } },
+    de: { what: "In einem Hybridsystem aus Wärmepumpe und Gaskessel wurde der Kessel angefordert, das Warmwasser statt der Wärmepumpe zu erzeugen.",
+          normal: "OFF bei reinem Wärmepumpenbetrieb; im Hybridsystem ON, wenn der Kessel Warmwasser günstiger oder schneller erzeugt als die Wärmepumpe." } },
 
   // ── Valves ──
   { re: /3.?way valve/i,
     what: "The diverter valve routes water either to the DHW tank or to the space circuit. The HomeHub reports the named positions DHW and Space heating; the X10A equivalent uses ON = DHW and OFF = space circuit.",
     normal: "DHW is the tank route; Space heating is the space-circuit route. The position alone does not prove that either circuit is currently operating.",
-    de: { what: "Das Umschaltventil leitet Wasser entweder zum Warmwasserspeicher oder in den Raumheiz-/Kühlkreis. Der HomeHub meldet die benannten Positionen Brauchwarmwasser und Raumheizung; das X10A-Gegenstück verwendet ON = Warmwasser und OFF = Raumkreis.",
+    de: { what: "Das Umschaltventil leitet Wasser entweder zum Warmwasserspeicher oder in den Heiz- oder Kühlkreis. Der HomeHub meldet die benannten Positionen Brauchwarmwasser und Raumheizung; das X10A-Gegenstück verwendet ON = Warmwasser und OFF = Raumkreis.",
           normal: "Brauchwarmwasser ist der Speicherweg, Raumheizung der Weg zum Raumkreis. Die Ventilposition allein beweist nicht, dass der jeweilige Kreis gerade in Betrieb ist." } },
   { re: /2.?way valve/i,
     what: "Selects the water path for the current mode — ON in heating, OFF in cooling (per the label).",
-    de: { what: "Wählt den Wasserweg für den aktuellen Modus — ON im Heizbetrieb, OFF im Kühlbetrieb (laut Bezeichnung)." } },
+    de: { what: "Wählt den Wasserweg für den aktuellen Modus. Wie die Bezeichnung angibt, steht ON für Heizbetrieb und OFF für Kühlbetrieb." } },
   { re: /mix valve position|bizone kit mix valve/i,
     what: "Opening of the bizone mixing valve, blending hot flow with cooler return to hold a lower temperature for a second (e.g. underfloor) zone.",
     normal: "modulates between fully closed and fully open to hold that zone's target.",
-    de: { what: "Öffnung des Bizone-Mischventils, das heißen Vorlauf mit kühlerem Rücklauf mischt, um für eine zweite Zone (z. B. Fußbodenheizung) eine niedrigere Temperatur zu halten.",
+    de: { what: "Öffnung des Bizone-Mischventils. Es mischt heißen Vorlauf mit kühlerem Rücklauf, um für eine zweite Zone, etwa eine Fußbodenheizung, eine niedrigere Temperatur zu halten.",
           normal: "regelt zwischen ganz geschlossen und ganz offen, um das Ziel dieser Zone zu halten." } },
 
   // ── Leaving / return / mixed water ──
@@ -1959,21 +1997,21 @@ const DESCRIPTIONS = [
           normal: "folgt der Außentemperatur: höher an kalten, niedriger an milden Tagen." } },
   { re: /mixed (leaving|water)/i,
     what: "Blended flow temperature of a mixed heating zone (after its mixing valve) — typically a cooler underfloor loop fed off a hotter primary circuit.",
-    de: { what: "Gemischte Vorlauftemperatur einer gemischten Heizzone (nach ihrem Mischventil) — typisch ein kühlerer Fußbodenkreis, gespeist aus einem heißeren Primärkreis." } },
+    de: { what: "Gemischte Vorlauftemperatur einer Heizzone hinter ihrem Mischventil. Typisch ist ein kühlerer Fußbodenkreis, der aus einem heißeren Primärkreis gespeist wird." } },
   { re: /after buh|outlet water buh|after buffer|tvbh/i,
     what: "Water temperature after the electric backup heater (sensor R2T) — the temperature that actually reaches your radiators/underfloor.",
     normal: "equal to the before-BUH temperature when the backup heater is off (the usual case); higher only while the BUH is firing.",
-    de: { what: "Wassertemperatur nach dem elektrischen Zusatzheizer (Fühler R2T) — die Temperatur, die tatsächlich an Heizkörper/Fußbodenheizung ankommt.",
-          normal: "gleich der Temperatur vor dem BUH, wenn der Zusatzheizer OFF ist (der Normalfall); höher nur, während der BUH heizt." } },
+    de: { what: "Wassertemperatur nach dem elektrischen Zusatzheizer, gemessen am Fühler R2T. Diese Temperatur erreicht tatsächlich die Heizkörper oder Fußbodenheizung.",
+          normal: "entspricht im Normalfall der Temperatur vor dem BUH, solange der Zusatzheizer OFF ist; höher nur, während der BUH heizt." } },
   { re: /before buh|after phe|outlet water heat exch|leaving water.*\(?r1t\)?|tv inflow|outlet water heat exchanger/i,
     what: "Water temperature leaving the heat pump's own heat exchanger, before the backup heater (sensor R1T) — the true heat-pump output temperature and the one used for ΔT / heat-output / COP.",
     normal: "space heating ~30–45 °C (underfloor lower, radiators higher); up to ~55 °C on a DHW run. Much higher than the target usually means the backup heater is contributing.",
-    de: { what: "Wassertemperatur, die den Wärmetauscher der Wärmepumpe verlässt, vor dem Zusatzheizer (Fühler R1T) — die eigentliche Vorlauftemperatur der Wärmepumpe und die Basis für ΔT / Wärmeleistung / COP.",
-          normal: "Raumheizung ~30–45 °C (Fußboden niedriger, Heizkörper höher); bis ~55 °C bei einem Warmwasser-Lauf. Deutlich über dem Ziel heißt meist, dass der Zusatzheizer mitwirkt." } },
+    de: { what: "Wassertemperatur am Fühler R1T, die den Wärmetauscher der Wärmepumpe noch vor dem Zusatzheizer verlässt. Sie ist die eigentliche Vorlauftemperatur der Wärmepumpe und die Basis für ΔT, Wärmeleistung und COP.",
+          normal: "bei Raumheizung meist ~30–45 °C; für Fußbodenheizung niedriger, für Heizkörper höher. Während einer Warmwasserladung sind bis zu ~55 °C üblich. Deutlich über dem Ziel wirkt meist der Zusatzheizer mit." } },
   { re: /inlet water|return water|tr return/i,
     what: "Water returning from the house back into the unit (sensor R4T). Leaving-water minus this is the ΔT across the system.",
     normal: "During heat delivery it is normally below the leaving-water temperature. The resulting ΔT depends on load and flow, so assess it only with the pump running and the operating mode known.",
-    de: { what: "Wasser, das aus dem Haus zurück ins Gerät strömt (Fühler R4T). Vorlauf minus dieser Wert ergibt das ΔT über die Anlage.",
+    de: { what: "Wasser, das aus dem Haus zurück ins Gerät strömt, gemessen am Fühler R4T. Die Differenz zum Vorlauf ergibt das ΔT der Anlage.",
           normal: "Bei Wärmeabgabe liegt sie normalerweise unter der Vorlauftemperatur. Das daraus entstehende ΔT hängt von Last und Volumenstrom ab und ist nur bei laufender Pumpe und bekannter Betriebsart sinnvoll zu bewerten." } },
 
   // ── Flow / pressure / pump ──
@@ -1990,36 +2028,36 @@ const DESCRIPTIONS = [
   { re: /water pump signal/i,
     what: "The speed command sent to the circulation pump. Note it is inverted — 0 means full speed, 100 means stopped (per the label).",
     normal: "a low number (fast pump) while heating or making DHW; 100 (stopped) when idle.",
-    de: { what: "Der Drehzahlbefehl an die Umwälzpumpe. Beachte: invertiert — 0 bedeutet volle Drehzahl, 100 bedeutet gestoppt (laut Bezeichnung).",
-          normal: "eine niedrige Zahl (schnelle Pumpe) beim Heizen oder Warmwasserbereiten; 100 (gestoppt) im Leerlauf." } },
+    de: { what: "Der Drehzahlbefehl an die Umwälzpumpe ist umgekehrt skaliert: 0 bedeutet volle Drehzahl, 100 bedeutet Stillstand.",
+          normal: "eine niedrige Zahl und damit schnelle Pumpendrehzahl beim Heizen oder Warmwasserbereiten; 100 im Leerlauf." } },
   { re: /water pump operation|circulation pump|solar pump|main pump|add pump|pump speed/i,
     what: "The circulation pump that moves water between the unit and the tank/emitters — whether it's running (or how hard, for a speed reading).",
     normal: "For an ON/OFF state, ON means the pump is running and OFF means it is stopped. Overrun and protective functions can keep it ON even when the compressor is not running.",
-    de: { what: "Die Umwälzpumpe, die Wasser zwischen Gerät und Speicher/Heizflächen bewegt — ob sie läuft (oder wie stark, bei einem Drehzahlwert).",
+    de: { what: "Zeigt, ob die Umwälzpumpe Wasser zwischen Gerät, Speicher und Heizflächen bewegt und bei einer Drehzahlangabe auch wie stark.",
           normal: "Bei einem ON/OFF-Status bedeutet ON, dass die Pumpe läuft, und OFF, dass sie steht. Nachlauf und Schutzfunktionen können sie auch bei stehendem Verdichter auf ON halten." } },
   { re: /water flow switch/i,
     what: "A safety switch that confirms water is genuinely flowing before the compressor or backup heater are allowed to run — protecting the heat exchanger from running dry.",
     normal: "ON (flow proven) whenever the pump is running.",
-    de: { what: "Ein Sicherheitsschalter, der bestätigt, dass tatsächlich Wasser fließt, bevor Verdichter oder Zusatzheizer laufen dürfen — schützt den Wärmetauscher vor Trockenlauf.",
-          normal: "ON (Durchfluss bestätigt), sobald die Pumpe läuft." } },
+    de: { what: "Ein Sicherheitsschalter, der den Wasserfluss bestätigt, bevor Verdichter oder Zusatzheizer laufen dürfen, und so den Wärmetauscher vor Trockenlauf schützt.",
+          normal: "ON bestätigt den Durchfluss, sobald die Pumpe läuft." } },
 
   // ── Operation / mode / fault ──
   { re: /i\/u operation mode/i,
     what: "What the water (indoor) side is doing right now: Stop, Heating, Cooling, Domestic Hot Water, or a heating+DHW combination.",
     normal: "reflects the current job. During a hot-water cycle it reads DHW even though the outdoor unit still shows Heating.",
-    de: { what: "Was die Wasserseite (Inneneinheit) gerade tut: Stopp, Heizen, Kühlen, Warmwasser oder eine Kombination aus Heizen+Warmwasser.",
-          normal: "spiegelt die aktuelle Aufgabe wider. Während eines Warmwasser-Zyklus steht hier WW, obwohl die Außeneinheit weiterhin Heizen anzeigt." } },
+    de: { what: "Was die Wasserseite der Inneneinheit gerade tut: Stopp, Heizen, Kühlen, Warmwasser oder Heizen + Warmwasser.",
+          normal: "spiegelt die aktuelle Aufgabe wider. Während eines Warmwasserzyklus steht hier Warmwasser, obwohl die Außeneinheit weiterhin Heizen anzeigt." } },
   // `exact` is enforced by the description audit: this HomeHub enum must win before the broad X10A
   // "operation mode" entry below. Without that ordering the Modbus card described the SG modes as the
   // outdoor unit's Heating/Cooling thermodynamic state, which is a different register and meaning.
   { exact: true, re: /^smart[- ]grid operation mode$/i,
     what: "The HomeHub's Smart-Grid request: Free running, Forced off, Recommended on or Forced on. It is an energy-management command, not the outdoor unit's Heating/Cooling mode.",
     normal: "Free running during ordinary autonomous operation. The other modes should appear only while an external energy manager deliberately blocks, recommends or forces operation.",
-    de: { what: "Die Smart-Grid-Anforderung des HomeHub: Freier Betrieb, Zwangsabschaltung, Empfehlung ein oder Erzwungen ein. Das ist ein Energiemanagement-Befehl, nicht der Heiz-/Kühlmodus der Außeneinheit.",
+    de: { what: "Die Smart-Grid-Anforderung des HomeHub: Freier Betrieb, Zwangsabschaltung, Empfehlung ein oder Erzwungen ein. Das ist ein Energiemanagement-Befehl und nicht der Heiz- oder Kühlmodus der Außeneinheit.",
           normal: "Freier Betrieb im normalen autonomen Betrieb. Die anderen Modi sollten nur erscheinen, wenn ein externes Energiemanagement den Betrieb bewusst sperrt, empfiehlt oder erzwingt." } },
   { re: /operation mode|operation \/ fault|^operation$/i,
     what: "The configured heat/cool mode: Auto, Heating or Cooling. It is a mode selection, not a statement that the compressor or space circuit is running right now.",
-    de: { what: "Der eingestellte Heiz-/Kühlmodus: Auto, Heizen oder Kühlen. Das ist eine Moduswahl und keine Aussage darüber, ob Verdichter oder Raumkreis gerade laufen." } },
+    de: { what: "Der eingestellte Heiz- oder Kühlmodus: Auto, Heizen oder Kühlen. Das ist eine Moduswahl und keine Aussage darüber, ob Verdichter oder Raumkreis gerade laufen." } },
   { re: /defrost/i,
     what: "The unit is melting frost off the outdoor coil by briefly running its cycle in reverse. Heating output pauses and steam may rise from the outdoor unit.",
     normal: "normal and self-clearing in cold, damp weather; a few minutes every so often. Constant defrosting suggests low refrigerant or poor airflow.",
@@ -2035,10 +2073,10 @@ const DESCRIPTIONS = [
     de: { what: "Bedeutung des aktuell gemeldeten Fehlercodes" } },
   { re: /emergency/i,
     what: "Emergency operation: the system is running in a fallback mode (often backup-heater only) after a fault, to keep some heat/hot water until it's serviced.",
-    de: { what: "Notbetrieb: Die Anlage läuft nach einer Störung in einem Ersatzbetrieb (oft nur Zusatzheizer), um bis zur Wartung etwas Wärme/Warmwasser zu liefern." } },
+    de: { what: "Notbetrieb: Die Anlage läuft nach einer Störung in einem Ersatzbetrieb, häufig nur mit dem Zusatzheizer, um bis zur Wartung etwas Wärme und Warmwasser zu liefern." } },
   { re: /alarm output/i,
     what: "The unit's alarm relay — switched ON to signal a fault to any external alarm/monitoring wired to it.",
-    de: { what: "Das Alarmrelais des Geräts — steht auf ON, um eine Störung an eine angeschlossene externe Alarm-/Überwachungseinrichtung zu melden." } },
+    de: { what: "Das Alarmrelais des Geräts steht auf ON, um eine Störung an eine angeschlossene externe Alarm- oder Überwachungseinrichtung zu melden." } },
 
   // ── Room / thermostat ──
   // This is the INDOOR UNIT's thermo-on bit (0x60/2 bit 3), not a room thermostat: it sits in the
@@ -2059,7 +2097,7 @@ const DESCRIPTIONS = [
   { re: /space heating operation|space h operation/i,
     what: "Whether space heating (as opposed to hot-water production) is currently active or being called for. This is the branch-specific one: it stays OFF through a hot-water charge, which the unit-wide \"Thermostat ON/OFF\" does not.",
     normal: "OFF all summer, and OFF while the 3-way valve is diverted to the tank.",
-    de: { what: "Ob die Raumheizung (im Unterschied zur Warmwasserbereitung) gerade aktiv ist oder angefordert wird. Das ist der zweigspezifische Wert: Er bleibt während einer Warmwasserladung OFF — anders als das geräteweite „Thermostat ON/OFF\".",
+    de: { what: "Ob die Raumheizung im Unterschied zur Warmwasserbereitung gerade aktiv ist oder angefordert wird. Das ist der zweigspezifische Wert: Er bleibt während einer Warmwasserladung OFF — anders als das geräteweite „Thermostat ON/OFF\".",
           normal: "den ganzen Sommer OFF, und auch OFF, solange das 3-Wege-Ventil auf den Speicher geschaltet ist." } },
   { re: /rt set ?point/i,
     what: "The target room temperature you've set for the zone the unit's own room sensor controls.",
@@ -2105,7 +2143,7 @@ const DESCRIPTIONS = [
   { re: /fin temp\.? ?(drop|protection retry)/i,
     what: "Inverter-heatsink protection: the power electronics' cooling fins are getting too hot, so the unit reduces output to cool them. The \"Drop Control\" row is ON while it is limiting; the \"Retry Qty\" row counts how often it has had to. (This is the protection — the heatsink's own temperature is the separate \"INV fin temp.\" reading.)",
     normal: "OFF / 0. Expected at most in hot weather at full output; regular counts point at restricted airflow around the outdoor unit.",
-    de: { what: "Schutz des Inverter-Kühlkörpers: Die Kühlrippen der Leistungselektronik werden zu heiß, deshalb senkt das Gerät die Leistung, um sie abzukühlen. Die Zeile „Drop Control“ ist ON, solange begrenzt wird; die Zeile „Retry Qty“ zählt, wie oft es nötig war. (Dies ist der Schutz — die Temperatur des Kühlkörpers selbst ist der eigene Wert „INV fin temp.“.)",
+    de: { what: "Schutz des Inverter-Kühlkörpers: Die Kühlrippen der Leistungselektronik werden zu heiß, deshalb senkt das Gerät die Leistung, um sie abzukühlen. Die Zeile „Drop Control“ ist ON, solange begrenzt wird; die Zeile „Retry Qty“ zählt, wie oft es nötig war. Gemeint ist hier der Schutz; die Kühlkörpertemperatur selbst steht im eigenen Wert „INV fin temp.“.",
           normal: "OFF / 0. Allenfalls bei heißem Wetter unter Volllast erwartbar; regelmäßige Zählungen deuten auf behinderten Luftstrom rund um die Außeneinheit hin." } },
   { re: /other drop control/i,
     what: "A catch-all flag: some protection other than discharge temperature, inverter current, high/low pressure or heatsink temperature is limiting the unit right now. The unit does not report which one.",
@@ -2121,11 +2159,11 @@ const DESCRIPTIONS = [
           normal: "Mit den lokalen Außenbedingungen vergleichen; Aufstellort, Sonne und Luftstrom können Abweichungen zu einer nahen Wetterstation verursachen." } },
   { re: /water heat exchanger (inlet|outlet)/i,
     what: "Raw water temperatures at the inlet/outlet of the plate heat exchanger that transfers heat between the refrigerant and the water.",
-    de: { what: "Rohe Wassertemperaturen am Ein-/Austritt des Plattenwärmetauschers, der Wärme zwischen Kältemittel und Wasser überträgt." } },
+    de: { what: "Rohe Wassertemperaturen am Ein- und Austritt des Plattenwärmetauschers, der Wärme zwischen Kältemittel und Wasser überträgt." } },
   { re: /o\/u heat exch|outdoor heat exchanger|heat exchanger mid-?temp|heat exch\. (mid-?)?temp/i,
     what: "Temperature of the outdoor coil, where refrigerant boils off (heating) or condenses (cooling) by exchanging heat with the outside air.",
     normal: "near or below freezing in cold-weather heating — that frost build-up is what triggers the periodic defrost.",
-    de: { what: "Temperatur der Außeneinheit-Wärmetauscherlamellen, wo das Kältemittel verdampft (Heizen) oder kondensiert (Kühlen) und dabei Wärme mit der Außenluft tauscht.",
+    de: { what: "Temperatur der Wärmetauscherlamellen an der Außeneinheit. Dort verdampft das Kältemittel im Heizbetrieb oder kondensiert im Kühlbetrieb und tauscht dabei Wärme mit der Außenluft.",
           normal: "beim Heizen im Kalten nahe oder unter dem Gefrierpunkt — diese Reifbildung löst das periodische Abtauen aus." } },
   { re: /discharge pipe|compressor outlet|inv discharge/i,
     what: "Temperature of the hot compressed refrigerant gas leaving the compressor.",
@@ -2140,17 +2178,17 @@ const DESCRIPTIONS = [
     de: { what: "Kältemitteltemperatur in der Flüssigkeitsleitung zwischen den Wärmetauschern." } },
   { re: /refrig\. temp\. evap/i,
     what: "Refrigerant temperature entering/leaving the evaporator (the heat exchanger absorbing heat).",
-    de: { what: "Kältemitteltemperatur beim Ein-/Austritt des Verdampfers (der Wärme aufnehmende Wärmetauscher)." } },
+    de: { what: "Kältemitteltemperatur beim Ein- oder Austritt des Verdampfers, also des wärmeaufnehmenden Wärmetauschers." } },
   { re: /injection tube|2 phase thermistor|r4t-deicer/i,
     what: "Temperature of a vapour/liquid-injection or de-icer sensor used by the compressor's internal control.",
-    de: { what: "Temperatur eines Dampf-/Flüssigkeits-Einspritz- oder Enteiser-Fühlers, den die interne Verdichterregelung nutzt." } },
+    de: { what: "Temperatur eines Dampf-, Flüssigkeitseinspritz- oder Enteiserfühlers, den die interne Verdichterregelung nutzt." } },
   { re: /(high|low) pressure ?\(?(sat|t)/i,
     what: "The high/low refrigerant pressure expressed as a saturation temperature — the temperature the refrigerant boils/condenses at for that pressure. Easier to sanity-check than raw bar.",
     de: { what: "Der Hoch-/Niederdruck des Kältemittels ausgedrückt als Sättigungstemperatur — die Temperatur, bei der das Kältemittel bei diesem Druck siedet/kondensiert. Leichter einzuschätzen als reine bar." } },
   { re: /(high|low) pressure/i,
     what: "Refrigerant pressure on the high (compressor discharge) or low (compressor suction) side. The gap between them is what the compressor works against, and it drives efficiency.",
     normal: "varies with outdoor temperature and load; steady during stable running.",
-    de: { what: "Kältemitteldruck auf der Hochdruck- (Verdichter-Druckseite) bzw. Niederdruckseite (Verdichter-Saugseite). Die Differenz dazwischen ist es, wogegen der Verdichter arbeitet, und sie bestimmt die Effizienz.",
+    de: { what: "Kältemitteldruck auf der Druck- oder Saugseite des Verdichters. Die Differenz zwischen Hoch- und Niederdruck bestimmt, wogegen der Verdichter arbeitet, und beeinflusst die Effizienz.",
           normal: "variiert mit Außentemperatur und Last; im stabilen Betrieb gleichmäßig." } },
   { re: /compressor speed|inv frequency|frequency \(rps\)/i,
     what: "How fast the inverter-driven compressor is spinning, in revolutions per second. This is the unit's main output control.",
@@ -2172,18 +2210,18 @@ const DESCRIPTIONS = [
           normal: "steigt mit der Verdichterlast; fällt im Leerlauf und in Teilen eines Abtauvorgangs auf 0." } },
   { re: /target (evap|cond)/i,
     what: "An internal control target the unit is steering the refrigerant circuit toward (target evaporating/condensing temperature) — not a value you set.",
-    de: { what: "Eine interne Regelvorgabe, auf die das Gerät den Kältekreis steuert (Ziel-Verdampfungs-/Kondensationstemperatur) — kein von dir eingestellter Wert." } },
+    de: { what: "Eine interne Regelvorgabe für den Kältekreis. Ziel ist die Verdampfungs- oder Kondensationstemperatur; dieser Wert wird nicht vom Benutzer eingestellt." } },
   { re: /target (discharge|port)/i,
     what: "An internal control target for the compressor discharge/port temperature — used by the unit's own protection logic.",
-    de: { what: "Eine interne Regelvorgabe für die Verdichter-Druckgas-/Anschlusstemperatur — genutzt von der eigenen Schutzlogik des Geräts." } },
+    de: { what: "Eine interne Regelvorgabe für die Temperatur am Druckgas- oder Verdichteranschluss, die von der Schutzlogik des Geräts genutzt wird." } },
   { re: /target delta t/i,
     what: "The target temperature difference (ΔT) between leaving and returning water the controller aims to maintain across the circuit.",
     normal: "commonly around 5 K for heating; the pump speed is trimmed to hold it.",
-    de: { what: "Die Ziel-Temperaturdifferenz (ΔT) zwischen Vor- und Rücklauf, die der Regler über den Kreis halten will.",
+    de: { what: "Die vom Regler angestrebte Temperaturdifferenz ΔT zwischen Vor- und Rücklauf.",
           normal: "beim Heizen üblich um 5 K; die Pumpendrehzahl wird nachgeregelt, um sie zu halten." } },
   { re: /refrigerant type/i,
     what: "The refrigerant this unit is charged with (e.g. R32 or R410A). It sets the pressure↔temperature curve used for the saturation-temperature readings.",
-    de: { what: "Das Kältemittel, mit dem dieses Gerät gefüllt ist (z. B. R32 oder R410A). Es legt die Druck-Temperatur-Kurve für die Sättigungstemperatur-Werte fest." } },
+    de: { what: "Das Kältemittel, mit dem dieses Gerät gefüllt ist, etwa R32 oder R410A. Es legt die Druck-Temperatur-Kurve der Sättigungstemperaturen fest." } },
   { re: /compressor port/i,
     what: "Temperature measured at a compressor port — part of the unit's internal protection monitoring.",
     de: { what: "An einem Verdichteranschluss gemessene Temperatur — Teil der internen Schutzüberwachung des Geräts." } },
@@ -2195,7 +2233,7 @@ const DESCRIPTIONS = [
   { re: /ct sensor|current measured by ct/i,
     what: "Mains current on one phase (L1/L2/L3), measured by a clamp (CT) sensor. Combined, these estimate the electrical power the unit is drawing.",
     normal: "rises with compressor and backup-heater load; near zero when idle.",
-    de: { what: "Netzstrom einer Phase (L1/L2/L3), gemessen mit einem Stromwandler (CT). Zusammen schätzen sie die elektrische Leistungsaufnahme des Geräts.",
+    de: { what: "Netzstrom einer der Phasen L1, L2 oder L3, gemessen mit einem CT-Stromwandler. Gemeinsam liefern die Phasenströme eine Schätzung der elektrischen Leistungsaufnahme.",
           normal: "steigt mit Verdichter- und Zusatzheizer-Last; nahe null im Leerlauf." } },
   { re: /inv (primary|secondary|compressor) current|inv .*current \(a\)/i,
     what: "Current drawn by the compressor inverter — a proxy for how hard the compressor is working.",
@@ -2203,19 +2241,19 @@ const DESCRIPTIONS = [
   { re: /inv fin temp|fin temp|heat sink temp/i,
     what: "Temperature of the inverter/power-electronics heatsink in the outdoor unit.",
     normal: "warm under load; a very high value makes the unit throttle to protect the electronics.",
-    de: { what: "Temperatur des Kühlkörpers der Inverter-/Leistungselektronik in der Außeneinheit.",
+    de: { what: "Temperatur des Kühlkörpers der Inverter- und Leistungselektronik in der Außeneinheit.",
           normal: "unter Last warm; ein sehr hoher Wert lässt das Gerät zurückregeln, um die Elektronik zu schützen." } },
 
   // ── Backup / booster heater ──
   { re: /buh output capacity/i,
     what: "Which stage(s) of the electric backup heater are engaged, as a capacity step.",
     normal: "0 when the heat pump covers the load alone; higher only in very cold weather or a fast DHW boost.",
-    de: { what: "Welche Stufe(n) des elektrischen Zusatzheizers aktiv sind, als Leistungsstufe.",
+    de: { what: "Welche Leistungsstufen des elektrischen Zusatzheizers aktiv sind.",
           normal: "0, wenn die Wärmepumpe die Last allein deckt; höher nur bei sehr kaltem Wetter oder einer schnellen Warmwasser-Aufheizung." } },
   { re: /buh step/i,
     what: "An electric backup-heater stage. These use resistive electricity (efficiency ≈ 1, unlike the heat pump), so they add heat when the heat pump can't keep up.",
     normal: "OFF most of the time. Frequent use noticeably raises running cost — expected only in a cold snap or during a boost.",
-    de: { what: "Eine Stufe des elektrischen Zusatzheizers. Diese nutzen Widerstandsstrom (Wirkungsgrad ≈ 1, anders als die Wärmepumpe) und ergänzen Wärme, wenn die Wärmepumpe nicht nachkommt.",
+    de: { what: "Eine Stufe des elektrischen Zusatzheizers. Sie nutzt Widerstandsstrom mit einem Wirkungsgrad von etwa 1 und ergänzt Wärme, wenn die Wärmepumpe nicht nachkommt.",
           normal: "die meiste Zeit OFF. Häufiger Einsatz erhöht die Betriebskosten spürbar — erwartbar nur bei Kälteeinbruch oder während einer Aufheizung." } },
   { re: /^bsh$/i,
     what: "The electric immersion heater in the domestic-hot-water tank. It can heat the tank without the compressor or water circulation pump running. X10A reports this BSH register only as ON/OFF; it carries no dedicated heater-power reading.",
@@ -2230,42 +2268,42 @@ const DESCRIPTIONS = [
   { re: /freeze protection/i,
     what: "Anti-freeze protection: the unit runs the pump (and if needed the heater) to stop water in the pipes freezing while it's otherwise idle in the cold.",
     normal: "ON only in freezing conditions when the system is idle.",
-    de: { what: "Frostschutz: Das Gerät lässt die Pumpe (und bei Bedarf den Heizer) laufen, damit das Wasser in den Leitungen im Kalten nicht einfriert, während sonst Ruhe herrscht.",
+    de: { what: "Frostschutz: Das Gerät lässt die Pumpe und bei Bedarf auch den Heizer laufen, damit das Wasser in den Leitungen bei Kälte nicht einfriert.",
           normal: "nur bei Frost und ruhender Anlage ON." } },
 
   // ── Geothermal / brine ──
   { re: /brine (inlet|outlet|temp|pump)|entering brine|leaving brine/i,
     what: "Ground-loop (brine) circuit reading on a geothermal unit — the fluid that carries heat to/from the ground, and its pump.",
     normal: "brine temperatures stay in a narrow band set by the ground; a slow seasonal drift is normal, a sharp drop is not.",
-    de: { what: "Messwert des Solekreises (Erdreich) bei einer Erdwärmepumpe — die Flüssigkeit, die Wärme aus dem/ins Erdreich trägt, sowie ihre Pumpe.",
+    de: { what: "Messwert des erdseitigen Solekreises einer Erdwärmepumpe. Erfasst werden die Flüssigkeit, die Wärme aus dem Erdreich aufnimmt oder dorthin abgibt, und ihre Pumpe.",
           normal: "Sole-Temperaturen bleiben in einem engen, vom Erdreich bestimmten Band; eine langsame saisonale Drift ist normal, ein plötzlicher Einbruch nicht." } },
 
   // ── Hybrid / second source / smart grid ──
   { re: /hybrid (op|heating)/i,
     what: "On a hybrid heat-pump + boiler system: which source the controller has chosen (heat pump only, hybrid, or boiler only) and its target.",
-    de: { what: "Bei einem Hybridsystem aus Wärmepumpe + Kessel: welche Quelle der Regler gewählt hat (nur Wärmepumpe, Hybrid oder nur Kessel) und deren Zielwert." } },
+    de: { what: "Bei einem Hybridsystem aus Wärmepumpe und Kessel zeigt der Wert die gewählte Quelle und ihren Zielwert: reine Wärmepumpe, Hybridbetrieb oder reiner Kesselbetrieb." } },
   { re: /bivalent|boiler operation|boiler heating target/i,
     what: "A second heat source (typically a boiler) being called in a bivalent/hybrid setup when the heat pump alone isn't enough or isn't the cheaper option.",
-    de: { what: "Eine zweite Wärmequelle (meist ein Kessel), die in einem bivalenten/Hybrid-Aufbau zugeschaltet wird, wenn die Wärmepumpe allein nicht ausreicht oder nicht die günstigere Wahl ist." } },
+    de: { what: "Eine zweite Wärmequelle, meist ein Kessel, die in einer bivalenten oder hybriden Anlage zugeschaltet wird, wenn die Wärmepumpe allein nicht ausreicht oder nicht die günstigere Wahl ist." } },
   { re: /be_cop|^cop\b/i,
     what: "The unit's own live estimate of its coefficient of performance — heat delivered ÷ electricity used. Higher is more efficient (3 means 3 kW of heat per 1 kW of power).",
     normal: "typically ~3–5 in mild heating; lower in hard frost or during DHW, and drops toward 1 whenever the backup heater runs.",
-    de: { what: "Die geräteeigene Live-Schätzung der Leistungszahl — gelieferte Wärme ÷ aufgenommener Strom. Höher ist effizienter (3 bedeutet 3 kW Wärme je 1 kW Strom).",
+    de: { what: "Die geräteeigene Live-Schätzung der Leistungszahl: gelieferte Wärme geteilt durch aufgenommene elektrische Leistung. Ein höherer Wert ist effizienter; 3 bedeutet 3 kW Wärme je 1 kW Strom.",
           normal: "typisch ~3–5 bei milder Heizung; niedriger bei strengem Frost oder Warmwasser und fällt Richtung 1, sobald der Zusatzheizer läuft." } },
   { re: /benefit kwh|smartgrid|smart grid|solar input/i,
     what: "An external utility/smart-grid or solar signal input — e.g. a cheap-tariff or surplus-PV window telling the unit it's a good time to store extra heat.",
     normal: "ON only while that external signal is active.",
-    de: { what: "Ein externes Versorger-/Smart-Grid- oder Solar-Signal — z. B. ein Niedrigtarif- oder PV-Überschuss-Fenster, das dem Gerät signalisiert, dass es günstig ist, zusätzliche Wärme zu speichern.",
+    de: { what: "Ein externes Signal vom Versorger, Smart Grid oder der Solaranlage, beispielsweise ein Niedrigtarif- oder PV-Überschussfenster. Es signalisiert dem Gerät, dass jetzt günstig zusätzliche Wärme gespeichert werden kann.",
           normal: "nur ON, solange dieses externe Signal aktiv ist." } },
 
   // ── Capacity / identity (put after BUH-capacity above) ──
   { re: /capacity/i,
     what: "The nominal rated capacity/size class of the unit (indoor or outdoor), in kW or as a code. It's a fixed property of the model, not a live measurement.",
-    de: { what: "Die nominale Leistungs-/Größenklasse des Geräts (Innen- oder Außeneinheit), in kW oder als Code. Eine feste Eigenschaft des Modells, kein Live-Messwert." } },
+    de: { what: "Die Nennleistung oder Größenklasse der Innen- oder Außeneinheit, angegeben in kW oder als Code. Sie ist eine feste Eigenschaft des Modells und kein Live-Messwert." } },
   { re: /silent mode|low noise/i,
     what: "Low-noise / quiet mode: caps fan and compressor speed to run more quietly, at the cost of some heating output.",
     normal: "ON during any scheduled quiet hours you've set; OFF otherwise.",
-    de: { what: "Geräuscharm-/Leise-Modus: begrenzt Lüfter- und Verdichterdrehzahl für leiseren Betrieb, auf Kosten etwas Heizleistung.",
+    de: { what: "Der Leisebetrieb begrenzt Lüfter- und Verdichterdrehzahl. Dadurch arbeitet die Anlage ruhiger, verliert aber etwas Heizleistung.",
           normal: "ON während eingestellter Ruhezeiten; sonst OFF." } },
   // ── HomeHub (Modbus) rows that no X10A entry above already covers ─────────────────────────────
   // Appended LAST on purpose: descFor takes the FIRST match, so nothing here can hijack copy an
@@ -2338,7 +2376,7 @@ const DESCRIPTIONS = [
   { re: /^space heating\/cooling on\/off$/i,
     what: "Whether the space circuit is ENABLED at all — the switch, not the current activity. The space-operation row above says whether it is being served right now.",
     normal: "ON = space heating/cooling enabled; OFF = disabled. OFF prevents normal space operation regardless of demand; seasonal scheduling depends on the installation's settings.",
-    de: { what: "Ob der Raumheiz-/Kühlkreis überhaupt FREIGEGEBEN ist — der Schalter, nicht die aktuelle Tätigkeit. Ob er gerade bedient wird, sagt die Zeile zum normalen Raumheiz-/Kühlbetrieb.",
+    de: { what: "Ob der Heiz- oder Kühlkreis überhaupt FREIGEGEBEN ist — der Schalter, nicht die aktuelle Tätigkeit. Ob er gerade bedient wird, sagt die Zeile zum normalen Raumheiz- oder Kühlbetrieb.",
           normal: "ON = Raumheizung/-kühlung freigegeben; OFF = gesperrt. OFF verhindert den normalen Raumbetrieb unabhängig von einer Anforderung; die saisonale Schaltung hängt von der Anlagenkonfiguration ab." } },
   { exact: true, re: /^quiet mode operation$/i,
     what: "Low-noise operation: the outdoor unit caps its fan and compressor speed, which costs capacity.",
@@ -3229,31 +3267,31 @@ function displayReadingLabel(label) {
 const HOMEHUB_LABEL_DE = Object.freeze({
   21: "Diagnosezustand der Anlage",
   22: "Fehlercode der Anlage",
-  23: "Fehler-Subcode der Anlage",
+  23: "Fehlersubcode der Anlage",
   30: "Umwälzpumpe aktiv",
   37: "Position des 3-Wege-Ventils",
   52: "Warmwasserbetrieb",
-  53: "Raumheiz-/Kühlbetrieb",
-  40: "Vorlauftemperatur (Plattenwärmetauscher)",
-  41: "Vorlauftemperatur (Zusatzheizer)",
+  53: "Raumheiz- oder Kühlbetrieb",
+  40: "Vorlauftemperatur am Plattenwärmetauscher",
+  41: "Vorlauftemperatur nach dem Zusatzheizer",
   42: "Rücklauftemperatur",
   43: "Warmwasserspeichertemperatur",
   44: "Außentemperatur",
-  45: "Kältemitteltemperatur (Flüssigkeitsleitung)",
+  45: "Kältemitteltemperatur der Flüssigkeitsleitung",
   49: "Volumenstrom",
-  50: "Raumtemperatur (Hauptzone)",
+  50: "Raumtemperatur der Hauptzone",
   51: "Elektrische Leistungsaufnahme",
-  1: "Vorlauf-Sollwert Heizen (Hauptzone)",
-  2: "Vorlauf-Sollwert Kühlen (Hauptzone)",
-  3: "Heiz-/Kühlmodus",
-  4: "Raumheizung/-kühlung freigegeben",
-  6: "Raum-Solltemperatur Heizen (Hauptzone)",
-  7: "Raum-Solltemperatur Kühlen (Hauptzone)",
+  1: "Heiz-Vorlaufsollwert der Hauptzone",
+  2: "Kühl-Vorlaufsollwert der Hauptzone",
+  3: "Heiz- oder Kühlmodus",
+  4: "Raumheizung oder -kühlung freigegeben",
+  6: "Heiz-Solltemperatur der Hauptzone",
+  7: "Kühl-Solltemperatur der Hauptzone",
   9: "Leisebetrieb",
-  10: "Warmwasser-Nachheiz-Sollwert",
+  10: "Sollwert für Warmwasser-Nachheizung",
   56: "Smart-Grid-Betriebsart",
-  57: "Leistungsgrenze (Pufferung)",
-  58: "Leistungsgrenze (allgemein)",
+  57: "Leistungsgrenze für Pufferung",
+  58: "Allgemeine Leistungsgrenze",
 });
 function displayHomeHubLabel(row) {
   const fallback = displayReadingLabel(row && row.label);
@@ -3329,7 +3367,7 @@ function vDescRow(v) {
 // already know why a heat pump cannot name itself.
 //
 // A SEPARATE table from DESCRIPTIONS, keyed by a stable row id rather than by the label, for two
-// reasons: these labels are TRANSLATED (`t("card.capacity_iu")` is "Leistung (Inneneinheit)" on a
+// reasons: these labels are TRANSLATED (`t("card.capacity_iu")` is "Nennleistung der Inneneinheit" on a
 // German page), so a regex over English label text would silently stop matching; and they are not
 // catalog labels, so entries here would read as dead to the coverage gate's D002 check
 // (tools/descriptions/check_descriptions.mjs), which is exactly right — it audits the catalog, and
@@ -3372,12 +3410,12 @@ const MODEL_DESCRIPTIONS = {
     what: "The lowest flow after the circulation pump was continuously ON for 60 seconds. Pump start, stopped-pump values and communication gaps are excluded.",
     normal: "Observation only: the required flow is model- and operating-condition-specific, so there is no generic OK/WARNING threshold. A device-raised flow fault appears in the fault row.",
     de: { what: "Der niedrigste Durchfluss, nachdem die Umwälzpumpe 60 Sekunden durchgehend ON war. Pumpenanlauf, Werte bei stehender Pumpe und Kommunikationslücken sind ausgeschlossen.",
-          normal: "Nur Beobachtung: Der erforderliche Durchfluss hängt von Modell und Betriebsbedingung ab; deshalb gibt es hier keinen allgemeinen OK-/WARNUNG-Grenzwert. Eine Gerätestörung erscheint in der Störungszeile." } },
+          normal: "Nur Beobachtung: Der erforderliche Durchfluss hängt von Modell und Betriebsbedingung ab; deshalb gibt es hier keinen allgemeinen Grenzwert für OK oder WARNUNG. Eine Gerätestörung erscheint in der Störungszeile." } },
   health_heater: {
     what: "Observed runtime of the space-heating backup heater (BUH) and tank heater (BSH). Very short pulses between polls can be missed; unreadable channels remain unknown, not zero.",
     normal: "Observation only. Weather, emergency mode, defrost support, schedules and surplus control can justify runtime. There is no universal OK/WARNING threshold or efficiency diagnosis.",
-    de: { what: "Beobachtete Laufzeit von Zusatzheizer (BUH) und Speicherheizstab (BSH). Sehr kurze Impulse zwischen Abfragen können fehlen; unlesbare Kanäle bleiben unbekannt und werden nicht zu null.",
-          normal: "Nur Beobachtung. Wetter, Notbetrieb, Abtauhilfe, Zeitpläne und Überschusssteuerung können Laufzeit erklären. Es gibt keinen allgemeinen OK-/WARNUNG-Grenzwert und keine Effizienzdiagnose." } },
+    de: { what: "Beobachtete Laufzeit des Zusatzheizers BUH und des Speicherheizstabs BSH. Sehr kurze Impulse zwischen Abfragen können fehlen; unlesbare Kanäle bleiben unbekannt und werden nicht zu null.",
+          normal: "Nur Beobachtung. Wetter, Notbetrieb, Abtauhilfe, Zeitpläne und Überschusssteuerung können Laufzeit erklären. Es gibt keinen allgemeinen Grenzwert für OK oder WARNUNG und keine Effizienzdiagnose." } },
   health_retries: {
     what: "Experimental check of five protection counters. Only a strict increase between continuous comparable samples counts, including one first visible while stopped or at a compressor-state boundary. Baseline, stable or decreasing values, gaps and resets do not.",
     normal: "An increase gives a NOTE, not a fault diagnosis. No increase does not prove that no limiting occurred because reset and wrap semantics are undocumented.",
@@ -3402,7 +3440,7 @@ const MODEL_DESCRIPTIONS = {
   capacity_iu: {
     what: "The INDOOR unit's rated capacity. It is shown instead of the outdoor unit's because this outdoor unit's identification page is too short to carry one — the firmware labels the half of the plant it actually read rather than presenting it as the system's size.",
     normal: "the two halves are routinely different sizes: an 8 kW indoor unit over a 6 kW outdoor unit is an ordinary pairing, so this figure is not necessarily the outdoor unit's.",
-    de: { what: "Die Nennleistung der INNENEINHEIT. Sie steht hier anstelle der Außeneinheit, weil deren Kennungsseite zu kurz ist, um eine zu enthalten — die Firmware benennt die Hälfte der Anlage, die sie tatsächlich gelesen hat, statt sie als Größe des Gesamtsystems auszugeben.",
+    de: { what: "Die Nennleistung der Inneneinheit. Sie steht hier anstelle der Außeneinheit, weil deren Kennungsseite zu kurz ist, um eine zu enthalten — die Firmware benennt die Hälfte der Anlage, die sie tatsächlich gelesen hat, statt sie als Größe des Gesamtsystems auszugeben.",
           normal: "beide Hälften sind regelmäßig unterschiedlich groß: eine 8-kW-Inneneinheit über einer 6-kW-Außeneinheit ist eine ganz normale Paarung — diese Zahl ist also nicht zwangsläufig die der Außeneinheit." } },
   // TWO variants, and which one is true depends on whether the outdoor unit reported its capacity.
   // logic/detect.hpp is explicit: candidates that share a page mask AND a kW class are
@@ -4010,7 +4048,7 @@ const bshInputRow = () => {
   return {
     label: tx({
       en: "Whole-unit electrical input (from CT, estimated)",
-      de: "Elektrische Gesamtaufnahme (aus CT, geschätzt)",
+      de: "Geschätzte elektrische Gesamtaufnahme · CT",
     }),
     value: "≈ " + fmt1(d.pel),
     unit: "kW",
@@ -4019,7 +4057,7 @@ const bshInputRow = () => {
 
 const PEL_ESTIMATED_WHAT = {
   en: "What the unit is drawing from the mains, and the divisor of the COP. An ESTIMATE: measured current × an assumed 230 V, so it ignores power factor. Which current it is decides what the COP above describes — CT clamps see the whole unit including the backup heater, the inverter current sees only the compressor. An inverter-based figure is not the plant's consumption and does not rise when the backup heater fires; the COP beside it is then the heat pump's own and says so.",
-  de: "Was das Gerät aus dem Netz zieht, und der Nenner des COP. Eine SCHÄTZUNG: gemessener Strom × angenommene 230 V, der Leistungsfaktor bleibt also unberücksichtigt. Welcher Strom es ist, entscheidet, was der COP darüber beschreibt — Stromwandler (CT) erfassen das ganze Gerät inklusive Zusatzheizer, der Inverterstrom nur den Verdichter. Ein Inverterwert ist nicht der Verbrauch der Anlage und steigt nicht, wenn der Zusatzheizer heizt; der COP daneben ist dann der der Wärmepumpe selbst und sagt das auch.",
+  de: "Was das Gerät aus dem Netz zieht, und der Nenner des COP. Eine SCHÄTZUNG: gemessener Strom × angenommene 230 V, der Leistungsfaktor bleibt also unberücksichtigt. Welcher Strom es ist, entscheidet, was der COP darüber beschreibt — CT-Stromwandler erfassen das ganze Gerät inklusive Zusatzheizer, der Inverterstrom nur den Verdichter. Ein Inverterwert ist nicht der Verbrauch der Anlage und steigt nicht, wenn der Zusatzheizer heizt; der COP daneben ist dann der der Wärmepumpe selbst und sagt das auch.",
 };
 const PEL_MEASURED_WHAT = {
   en: "The unit's electrical input, MEASURED by the HomeHub. Unlike X10A's current×230 V estimate, this value needs no assumed voltage or power-factor approximation. It covers the whole unit, including an active backup or tank heater; the dashboard therefore does not derive a COP from it because the available heat measurement covers only the heat-pump exchanger.",
@@ -4029,8 +4067,8 @@ const pelMeasured = (d) => !!d && d.pelSrc === "MB";
 const pelApproxText = (d) => d && d.pel != null && !pelMeasured(d) ? "≈ " : "";
 const PEL_INSPECT = {
   t: (d) => pelMeasured(d)
-    ? { en: "Electrical input (measured)", de: "Stromaufnahme (gemessen)" }
-    : { en: "Electrical input (estimated)", de: "Stromaufnahme (geschätzt)" },
+    ? { en: "Electrical input (measured)", de: "Gemessene Stromaufnahme" }
+    : { en: "Electrical input (estimated)", de: "Geschätzte Stromaufnahme" },
   aria: { en: "Electrical input", de: "Stromaufnahme" },
   trend: "pel",
   what: (d) => pelMeasured(d) ? PEL_MEASURED_WHAT : PEL_ESTIMATED_WHAT,
@@ -4046,10 +4084,10 @@ const PEL_INSPECT = {
         de: "Dieses Profil liefert keinen Strommesswert, daher lässt sich auch kein COP ableiten." }
     : d.pelSrc === "MB"
     ? { en: "Measured at the HomeHub electrical input (whole unit).",
-        de: "Am elektrischen Eingang des HomeHub gemessen (gesamte Anlage)." }
+        de: "Am elektrischen Eingang des HomeHub für die gesamte Anlage gemessen." }
     : d.pelSrc === "CT"
-    ? { en: "From the CT clamps (whole unit).", de: "Aus den Stromwandlern (gesamte Anlage)." }
-    : { en: "From the inverter current (compressor only).", de: "Aus dem Inverterstrom (nur Verdichter)." },
+    ? { en: "From the CT clamps (whole unit).", de: "Aus den Stromwandlern der gesamten Anlage." }
+    : { en: "From the inverter current (compressor only).", de: "Aus dem Inverterstrom des Verdichters." },
   rows: [/current measured by ct/i, /inv primary current/i],
 };
 
@@ -4057,6 +4095,10 @@ const INSPECT = {
   status: {
     t: { en: "Operating mode", de: "Betriebsart" },
     re: /i\/u operation mode/i, sample: "I/U Operation Mode",
+    // The source row deliberately keeps Daikin's stable English enum for API/MQTT consumers. The
+    // panel is visual UI, just like the schematic headline, and must therefore use the same complete
+    // translation instead of exposing "DHW" again after the user opens the explanation.
+    head: () => schematicOperationMode(),
     // "Thermostat ON/OFF" belongs HERE, not on the heating riser it used to be drawn on: it is a bit
     // in the very same status byte as the operating mode above it (0x60/2), and it says the indoor
     // unit is asking for the compressor — for hot water just as much as for the house.
@@ -4066,7 +4108,7 @@ const INSPECT = {
     t: { en: "Smart-Grid request via Modbus", de: "Smart-Grid-Anforderung über Modbus" },
     what: {
       en: "The external Smart-Grid request read back from the HomeHub: Free running, Forced off, Recommended on or Forced on. It is an energy-management command, not the outdoor unit's heating/cooling mode and not proof that a requested tank charge has started.",
-      de: "Die vom HomeHub zurückgelesene externe Smart-Grid-Anforderung: Freier Betrieb, Zwangsabschaltung, Empfehlung ein oder Erzwungen ein. Das ist ein Energiemanagement-Befehl, nicht der Heiz-/Kühlmodus der Außeneinheit und kein Beleg dafür, dass eine angeforderte Speicherladung bereits begonnen hat.",
+      de: "Die vom HomeHub zurückgelesene externe Smart-Grid-Anforderung: Freier Betrieb, Zwangsabschaltung, Empfehlung ein oder Erzwungen ein. Das ist ein Energiemanagement-Befehl und nicht der Heiz- oder Kühlmodus der Außeneinheit. Ebenso wenig belegt er, dass eine angeforderte Speicherladung bereits begonnen hat.",
     },
     head: (d) => sgModeText(d && d.sgMode),
     now: (d) => !d || d.sgMode == null
@@ -4166,11 +4208,11 @@ const INSPECT = {
       ? { en: "No estimate — flow rate or ΔT is missing on this model.",
           de: "Keine Schätzung — Durchfluss oder ΔT fehlt bei diesem Modell." }
       : { en: `About ${fmt1(d.pth)} kW crossing into the water (${fmt1(d.flow)} l/min at ΔT ${fmt1(d.dt)} K).`,
-          de: `Rund ${fmt1(d.pth)} kW gehen ins Wasser über (${fmt1(d.flow)} l/min bei ΔT ${fmt1(d.dt)} K).` },
+          de: `Rund ${fmt1(d.pth)} kW gehen ins Wasser über: ${fmt1(d.flow)} l/min bei ΔT ${fmt1(d.dt)} K.` },
     rows: [lwtRow, /inlet water/i, /flow sensor/i],
   },
   lwt: {
-    t: { en: "Leaving water (pre-BUH, R1T)", de: "Vorlauf (vor BUH, R1T)" },
+    t: { en: "Leaving water (pre-BUH, R1T)", de: "Vorlauf vor dem Zusatzheizer · R1T" },
     pick: lwtRow,
     sample: "Leaving Water Temp. before BUH (R1T)",
   },
@@ -4190,15 +4232,15 @@ const INSPECT = {
           de: "Derzeit kein ΔT — die Pumpe steht. Ohne Wasserbewegung driften die beiden Fühler beim Auskühlen nur auseinander; ihre Differenz ist kein Arbeitspunkt." }
       : d.dt == null ? null
       : { en: `${fmt1(d.dt)} K${d.dtSet != null ? ` against a ${fmt1(d.dtSet)} K heating target` : ""}. Around 5 K is a healthy heating ΔT; a negative value means heat is flowing back out (a defrost).`,
-          de: `${fmt1(d.dt)} K${d.dtSet != null ? ` bei ${fmt1(d.dtSet)} K Heiz-Ziel` : ""}. Rund 5 K sind ein gesundes Heiz-ΔT; ein negativer Wert heißt, dass Wärme zurückfließt (Abtauung).` },
+          de: `${fmt1(d.dt)} K${d.dtSet != null ? ` bei ${fmt1(d.dtSet)} K Heiz-Ziel` : ""}. Rund 5 K sind ein gesundes Heiz-ΔT; ein negativer Wert heißt, dass Wärme zurückfließt, etwa beim Abtauen.` },
     rows: [lwtRow, /inlet water/i, /target delta t heating/i],
   },
   pth: {
-    t: { en: "Heat output (estimated)", de: "Wärmeleistung (geschätzt)" },
+    t: { en: "Heat output (estimated)", de: "Geschätzte Wärmeleistung" },
     trend: "pth",
     what: {
       en: "An ESTIMATE, not a measurement — the bus carries no energy register. It is computed from flow rate and ΔT with the heat capacity of water (4.186 kJ/kg·K), so it is only as good as the flow sensor and the two water temperatures, and it counts only heat from the heat pump's own exchanger (the backup heater sits after it). During a defrost it goes negative, which is real: heat is being taken back out of the water.",
-      de: "Eine SCHÄTZUNG, keine Messung — auf dem Bus gibt es kein Energieregister. Berechnet aus Durchflussmenge und ΔT über die Wärmekapazität von Wasser (4,186 kJ/kg·K), also nur so genau wie der Durchflusssensor und die beiden Wassertemperaturen; gezählt wird nur die Wärme aus dem Wärmetauscher der Wärmepumpe (der Zusatzheizer sitzt dahinter). Beim Abtauen wird der Wert negativ — das ist echt: dem Wasser wird Wärme entzogen.",
+      de: "Eine SCHÄTZUNG, keine Messung — auf dem Bus gibt es kein Energieregister. Der Wert wird aus Durchflussmenge, ΔT und der Wärmekapazität von Wasser mit 4,186 kJ/kg·K berechnet. Er ist daher nur so genau wie der Durchflusssensor und die beiden Wassertemperaturen. Erfasst wird nur die Wärme aus dem Wärmetauscher der Wärmepumpe; der Zusatzheizer sitzt dahinter. Beim Abtauen wird der Wert negativ — das ist echt: dem Wasser wird Wärme entzogen.",
     },
     head: (d) => (d.dtStale || d.pth == null ? "—" : "≈ " + fmt1(d.pth) + " kW"),
     // The COP is quoted here only while it is built on THIS figure. With a whole-unit electrical
@@ -4222,7 +4264,7 @@ const INSPECT = {
               de: "Derzeit keine Wärmeleistung — die Pumpe steht, es trägt kein Wasser Wärme von den Platten ab. Das ist gar kein Arbeitspunkt und keine Leistung von null." })
       : d.pth == null ? null
       : { en: `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, about ${d.cop.toFixed(1)} kW of heat per kW of electricity (COP)` : ""}.`,
-          de: `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, etwa ${d.cop.toFixed(1)} kW Wärme je kW Strom (COP)` : ""}.` },
+          de: `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `; etwa ${d.cop.toFixed(1)} kW Wärme je kW Strom` : ""}.` },
     rows: [/flow sensor/i, /target delta t heating/i, /current measured by ct/i, /inv primary current/i],
   },
   // Its own pill next to the heat output, so its own entry — and the one derived figure with no
@@ -4235,15 +4277,15 @@ const INSPECT = {
   // nowhere. The rule and the matching numerator are logic/cop_scope.hpp, gated over the catalog.
   cop: {
     t: (d) => (d && d.copScope === "plant"
-      ? { en: "COP of the plant (estimated)", de: "COP der Anlage (geschätzt)" }
-      : { en: "COP of the heat pump (estimated)", de: "COP der Wärmepumpe (geschätzt)" }),
+      ? { en: "COP of the plant (estimated)", de: "Geschätzter COP der Anlage" }
+      : { en: "COP of the heat pump (estimated)", de: "Geschätzter COP der Wärmepumpe" }),
     // The hit target's accessible name — stable, because it is applied once at startup (see
     // labelSchematicHits). Which COP it turns out to be is the panel's to say, not the label's.
-    aria: { en: "COP (estimated)", de: "COP (geschätzt)" },
+    aria: { en: "COP (estimated)", de: "Geschätzter COP" },
     trend: "cop",
     what: {
       en: "Heat out divided by electricity in — how many kW of heat came out per kW that went in. Both sides must describe the SAME system or the quotient is not a COP at all: with whole-unit CT clamps the heat is measured after the backup heater, with the inverter current it is measured before it, so this reads as the plant's efficiency in one case and the heat pump's own in the other. It is a quotient of two ESTIMATES and inherits every assumption both make — and the accuracy is set by the heat side, not the electrical one: two uncalibrated factory sensors ±0.5–1 K across a ΔT of about 5 K already put the live figure within roughly ±15–25 %. Treat it as a working indication; the trustworthy number is the seasonal one (SCOP/JAZ), integrated from metered energy outside this device. It means nothing with the compressor stopped and shows \"—\" then.",
-      de: "Wärme raus geteilt durch Strom rein — wie viele kW Wärme je aufgenommenem kW herauskamen. Beide Seiten müssen dasselbe System beschreiben, sonst ist der Quotient gar kein COP: Mit Stromwandlern am ganzen Gerät wird die Wärme nach dem Zusatzheizer gemessen, mit dem Inverterstrom davor — einmal ist das die Effizienz der Anlage, einmal die der Wärmepumpe selbst. Ein Quotient zweier SCHÄTZUNGEN, der sämtliche Annahmen von beiden erbt — und die Genauigkeit bestimmt die Wärmeseite, nicht die elektrische: zwei unkalibrierte Werksfühler mit ±0,5–1 K über ein ΔT von rund 5 K legen den Live-Wert bereits auf etwa ±15–25 % fest. Als Arbeitsanhalt lesen; belastbar ist die Jahreszahl (SCOP/JAZ), integriert aus gemessener Energie außerhalb dieses Geräts. Bei stehendem Verdichter bedeutet er nichts und zeigt dann „—\".",
+      de: "Wärme raus geteilt durch Strom rein — wie viele kW Wärme je aufgenommenem kW herauskamen. Beide Seiten müssen dasselbe System beschreiben, sonst ist der Quotient gar kein COP: Mit Stromwandlern am ganzen Gerät wird die Wärme nach dem Zusatzheizer gemessen, mit dem Inverterstrom davor — einmal ist das die Effizienz der Anlage, einmal die der Wärmepumpe selbst. Ein Quotient zweier SCHÄTZUNGEN, der sämtliche Annahmen von beiden erbt — und die Genauigkeit bestimmt die Wärmeseite, nicht die elektrische: zwei unkalibrierte Werksfühler mit ±0,5–1 K über ein ΔT von rund 5 K legen den Live-Wert bereits auf etwa ±15–25 % fest. Als Arbeitsanhalt lesen; belastbar ist die Jahreszahl als SCOP oder JAZ, integriert aus gemessener Energie außerhalb dieses Geräts. Bei stehendem Verdichter bedeutet er nichts und zeigt dann „—\".",
     },
     head: (d) => (d.cop == null ? "—" : d.cop.toFixed(1)),
     // Four outcomes, four sentences. A suppressed wrong claim must not be replaced by another one,
@@ -4269,7 +4311,7 @@ const INSPECT = {
            /current measured by ct/i, /inv primary current/i, /buh step ?1/i, /^bsh$/i],
   },
   buh: {
-    t: { en: "Backup heater (BUH)", de: "Zusatzheizer (BUH)" },
+    t: { en: "Backup heater (BUH)", de: "Zusatzheizer · BUH" },
     re: /buh step ?1/i, sample: "BUH step 1",
     now: (d) => (d.buh1 == null && d.buh2 == null) ? null
       : d.buh2 ? { en: "Step 2 — both stages firing.", de: "Stufe 2 — beide Stufen heizen." }
@@ -4368,7 +4410,7 @@ const INSPECT = {
   // there it holds warm condensed liquid on the HIGH-pressure side, because the expansion valve sits
   // in the outdoor unit at its far end. The suction leg proper never leaves the outdoor unit.
   rhot: {
-    t: { en: "Gas line (hot gas in heating)", de: "Gasleitung (Heißgas im Heizbetrieb)" },
+    t: { en: "Gas line (hot gas in heating)", de: "Gasleitung · Heißgas im Heizbetrieb" },
     what: {
       en: "The thick pipe between the units. In heating, refrigerant leaves the compressor here as a hot, high-pressure gas and carries the heat to the plate exchanger, where it condenses and gives that heat to the water — the hottest point in the machine, and the discharge temperature beside it is measured right at the compressor outlet. In cooling the flow reverses and this same pipe returns cool gas from the exchanger to the compressor.",
       de: "Die dicke Leitung zwischen den Geräten. Im Heizbetrieb verlässt das Kältemittel den Verdichter hier als heißes Gas unter hohem Druck und trägt die Wärme zum Plattenwärmetauscher, wo es kondensiert und die Wärme ans Wasser abgibt — der heißeste Punkt der Maschine; die Heißgastemperatur daneben wird direkt am Verdichteraustritt gemessen. Im Kühlbetrieb kehrt sich die Richtung um und dieselbe Leitung führt kühles Gas vom Wärmetauscher zurück zum Verdichter.",
@@ -4664,10 +4706,13 @@ function renderInspect() {
   // ON/OFF instead of exposing an unexplained 1/0, while the row still names the source. With no
   // X10A row but a gateway reading, the headline is THAT reading, petrol — the pill above is
   // showing it, and a panel answering "—" underneath would deny the number the user just tapped.
-  if (hasHead) setTxt("inspNow", d && e.head ? e.head(d)
-                               : row ? inspVal(row, d)
-                               : fb ? displayValue(fb) + (fb.unit ? " " + fb.unit : "")
-                               : "—");
+  if (hasHead) {
+    const explicitHead = d && e.head ? e.head(d) : null;
+    setTxt("inspNow", explicitHead != null ? explicitHead
+                     : row ? inspVal(row, d)
+                     : fb ? displayValue(fb) + (fb.unit ? " " + fb.unit : "")
+                     : "—");
+  }
   $("inspNow").classList.toggle("src-val-mb", !!fb);
   // `now` is always prose — the live "what is it doing" sentence — and it CLOSES the body, as its
   // own paragraph after the timeless explainer and its "Normal:" note, in the body's own ink. It
