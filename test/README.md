@@ -33,6 +33,11 @@ test executes the production banner/inspector render functions from `main/www/ap
 that their DOM-write signatures invalidate when the persisted UI language changes while device state
 stays identical.
 
+`node test/test_ui_modbus_status.mjs` executes the production Connections-row helpers and pins the
+HomeHub contract: the discovered IPv4 remains the main value, a structured Modbus failure is rendered
+as localised subtle text underneath it and in the accessible name, and unknown future codes fall back
+to escaped human-readable API prose.
+
 `node test/test_ui_board_preset.mjs` executes the production Board Hardware modal functions. It
 pins the first-boot case where the build defaults equal the Seeed XIAO values but the board selector
 must still open on **Custom**, then verifies that choosing and editing presets within the open modal

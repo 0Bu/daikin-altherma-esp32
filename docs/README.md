@@ -285,11 +285,13 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #        registers,values,crc_err,timeout_err},
                                    #   profile:{id},
                                    #   modbus:{enabled,connected,discovering,host,port,unit_id,rx,
-                                   #           fails,values,actuation_enabled,error?},
+                                   #           fails,values,actuation_enabled,error?,error_code?,
+                                   #           error_detail?,error_register?},
                                    #        # the HomeHub link's READ-ONLY diagnostics. host is the
-                                   #        RESOLVED / mDNS-discovered host, not the requested one —
-                                   #        with mb_host empty the device finds the hub itself, and
-                                   #        the UI must show what it FOUND. No write counters: the
+                                   #        configured host or mDNS-discovered IPv4 — with mb_host
+                                   #        empty the device finds the hub once and fills the resolved
+                                   #        address into the UI. Structured error fields localise the
+                                   #        current failure; error keeps full log wording. No write counters: the
                                    #        link has none. actuation_enabled is reported straight
                                    #        from config and gates nothing today (P3).
                                    #   history:{dt,rows:[{id,label}]},   # rows with a 24 h trend;

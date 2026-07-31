@@ -26,6 +26,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <string>
 
 namespace daik {
 
@@ -146,6 +148,43 @@ enum class MbParse {
     QtyMismatch,   // read reply carries a different register count than the quantity we requested
     EchoMismatch,  // write echo address/value/quantity does not match what we sent
 };
+
+// Stable, human-readable protocol reasons for diagnostics. The web UI localises the structured
+// error code/detail from /status; these English strings are the equally important /diag + Syslog
+// evidence, where a bare enum ordinal would make an intermittent wire failure impossible to triage.
+inline const char* mb_parse_reason(MbParse p) {
+    switch (p) {
+        case MbParse::Ok:           return "valid response";
+        case MbParse::Exception:    return "Modbus exception";
+        case MbParse::TooShort:     return "response too short";
+        case MbParse::BadProtocol:  return "invalid protocol id";
+        case MbParse::BadLength:    return "invalid response length";
+        case MbParse::TxnMismatch:  return "transaction id mismatch";
+        case MbParse::UnitMismatch: return "unit id mismatch";
+        case MbParse::FcMismatch:   return "function code mismatch";
+        case MbParse::Malformed:    return "malformed response";
+        case MbParse::QtyMismatch:  return "register count mismatch";
+        case MbParse::EchoMismatch: return "write echo mismatch";
+    }
+    return "unknown response error";
+}
+
+// Modbus Application Protocol exception codes. Keep the numeric code beside this text in every log
+// and /status payload: an implementation may return a future/vendor code this table does not know.
+inline const char* mb_exception_reason(uint8_t code) {
+    switch (code) {
+        case 1:  return "illegal function";
+        case 2:  return "illegal data address";
+        case 3:  return "illegal data value";
+        case 4:  return "server device failure";
+        case 5:  return "acknowledge";
+        case 6:  return "server device busy";
+        case 8:  return "memory parity error";
+        case 10: return "gateway path unavailable";
+        case 11: return "gateway target failed to respond";
+        default: return "unknown exception";
+    }
+}
 
 struct MbResponse {
     bool           ok          = false;   // Ok: a read payload or a matched write echo is present
@@ -325,6 +364,17 @@ inline int mb_first_homehub(const char* const* names, int n) {
     for (int i = 0; i < n; i++)
         if (names[i] != nullptr && is_homehub_hostname(names[i])) return i;
     return -1;
+}
+
+// Render the IPv4 address carried by the selected mDNS result. Kept IDF-free so discovery's
+// persisted-value contract is host-tested: the selected A record, not the serial-derived mDNS name,
+// is what belongs in the editable Host field. The four arguments deliberately match ESP-IDF's
+// IP2STR(&addr) expansion at the device call site.
+inline std::string mb_ipv4_string(unsigned a, unsigned b, unsigned c, unsigned d) {
+    if (a > 255 || b > 255 || c > 255 || d > 255) return {};
+    char text[16];
+    const int n = std::snprintf(text, sizeof(text), "%u.%u.%u.%u", a, b, c, d);
+    return n > 0 && n < static_cast<int>(sizeof(text)) ? std::string(text) : std::string();
 }
 
 } // namespace daik

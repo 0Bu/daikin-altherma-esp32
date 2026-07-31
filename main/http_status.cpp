@@ -230,10 +230,11 @@ void http_append_status_json(std::string& j, bool redact) {
 
     // The HomeHub Modbus stack — a SECOND, INDEPENDENT source, never an alternative to the X10A link
     // reported above (docs/MODBUS_PROTOCOL.md). `enabled` distinguishes "no HomeHub on this
-    // installation" from "configured but not connected": the UI shows nothing at all for the first
-    // and a state for the second. `host` is the RESOLVED / mDNS-discovered host, so the card shows
-    // what discovery FOUND rather than the empty string it was asked with — redacted like the other
-    // reporter-identifying values. No write counters: the stack has no write path.
+    // installation" from "configured but not connected": the UI shows a configurable inactive row
+    // for the first and a live connection state for the second. `host` is the configured address or
+    // the IPv4 selected by mDNS, so
+    // the card shows what discovery FOUND rather than the empty string it was asked with — redacted
+    // like the other reporter-identifying values. No write counters: the stack has no write path.
     // Successive += with bare literals — the httpd-stack rule the rest of this builder follows.
     const ModbusStatus mb = mb_status();
     j += "\"modbus\":{\"enabled\":";  j += mb.enabled ? "true" : "false";
@@ -253,7 +254,19 @@ void http_append_status_json(std::string& j, bool redact) {
     j += ",\"fails\":";                j += std::to_string(mb.rx_fail);
     j += ",\"values\":";               j += std::to_string(mb.values);
     j += ",\"actuation_enabled\":";    j += c.actuation_enabled ? "true" : "false";
-    if (!mb.last_error.empty()) { j += ",\"error\":"; j += jstr(mb.last_error); }
+    if (!mb.last_error.empty()) {
+        // `error` remains the complete English /diag + Syslog wording for API compatibility and
+        // fallback clients. The structured companions let the web UI localise it without parsing
+        // prose, while preserving errno/exception/parser detail and the exact EKRHH register.
+        j += ",\"error\":";      j += jstr(mb.last_error);
+        j += ",\"error_code\":"; j += jstr(mb.last_error_code);
+        if (mb.last_error_detail >= 0) {
+            j += ",\"error_detail\":"; j += std::to_string(mb.last_error_detail);
+        }
+        if (mb.last_error_register > 0) {
+            j += ",\"error_register\":"; j += std::to_string(mb.last_error_register);
+        }
+    }
     j += "},";
 
     // Which rows carry a 24-hour trend, and at what cadence. The ID is the CONCEPT (GET /history

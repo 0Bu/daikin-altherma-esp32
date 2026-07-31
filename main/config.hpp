@@ -30,7 +30,7 @@ bool config_save(const Config& c, bool require_link = false);
 // poll engine must keep using it this session — a lost cache just means re-detecting next boot).
 bool config_save_link(int rx_pin, int tx_pin, Protocol proto);
 
-// Commit ONLY the one-shot mDNS search result (the discovered gateway hostname, or "" when nothing
+// Commit ONLY the one-shot mDNS search result (the discovered gateway IPv4 address, or "" when nothing
 // answered) + the "search has run" latch. MODBUS-TASK ONLY, narrow for the same field-ownership
 // reason as config_save_link. Returns false if the NVS write failed; the RAM patch is applied either
 // way, so this boot behaves correctly and only the one-shot promise costs a repeat next boot.

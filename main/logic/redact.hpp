@@ -41,8 +41,8 @@ inline constexpr const char* REDACTED = "<redacted>";
 // site uses it (that stays a review point — see .claude/CLAUDE.md), but it can at least state it.
 //   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker  syslog.host  ntp.server  modbus.host
 // modbus.host joined the set with the HomeHub transport (#32): it is a LAN address, and — when the
-// hub was auto-discovered — the hub's own serial-derived hostname (homehub-524288-<serial>), which
-// identifies the reporter's hardware as surely as an SSID does.
+// hub was auto-discovered — its LAN IPv4 address, which identifies the reporter's network just as
+// surely as a manually entered address does.
 inline constexpr std::size_t REDACTED_STATUS_FIELDS = 8;
 
 // Field-level substitution for the /status builder. Returns by value because every caller feeds it
@@ -84,15 +84,13 @@ inline constexpr DiagRedaction DIAG_REDACTIONS[] = {
     // incoherent: scrubbed in the JSON, printed in the log two sections below it. The second id is
     // the slugified base topic (a fixed compile-time name) and stays.
     {"mqtt: retired legacy HA device ", " (now "},
-    // hp_modbus.cpp "modbus: one-shot mDNS search found gateway %s" — the DISCOVERED HomeHub
-    // hostname, which is homehub-524288-<serial>: the hub's serial number, and so the reporter's
-    // hardware, exactly as identifying as an SSID. /status?redact=1 already withholds it as
+    // hp_modbus.cpp "modbus: one-shot mDNS search found gateway %s" — the DISCOVERED HomeHub IPv4.
+    // /status?redact=1 already withholds it as
     // modbus.host, and without this rule the same string was printed in /diag a few sections below
     // it in the very same bug report — the incoherence the mqtt rule above exists to prevent, in a
-    // second place. The FAILURE line ("… found no gateway — not searching again") is a separate
-    // statement on purpose and matches nothing here, so it survives whole.
+    // second place. The failure line contains no address and therefore survives whole.
     {"modbus: one-shot mDNS search found gateway ", ""},
-    // hp_modbus.cpp "modbus: %d HomeHubs discovered via mDNS — using %s" — the same hostname on the
+    // hp_modbus.cpp "modbus: %d HomeHubs discovered via mDNS — using %s" — the same IPv4 on the
     // several-hubs path. The marker starts AFTER the count, because a rule matches the RENDERED
     // line and "%d" never appears in one; the count therefore survives, which is the diagnostic
     // half — that more than one gateway answered is what explains an unexpected pick.

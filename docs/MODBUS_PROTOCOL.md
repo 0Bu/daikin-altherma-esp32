@@ -76,12 +76,24 @@ advertises on the `_http._tcp.local.` service."* Three consequences shape the im
 3. **mDNS needs a single subnet and multicast/IGMP.** A manual host is therefore mandatory as a
    fallback, not a nicety.
 
-**How it behaves:** leave the host **empty** and the device discovers the hub itself on every
-connection attempt and uses what it finds — no button to press, and `/status.modbus.host` reports the
-host it actually resolved so the UI shows what was found rather than what was asked for. Set a host
-(an IP, or a `.local` name resolved over mDNS, or an ordinary DNS name) and that address is used
-verbatim. If several `homehub-*` responders answer, the first is used and the count is logged to
-`/diag` rather than silently guessed at.
+**How it behaves:** leave the host **empty** and the device performs one discovery on the first boot
+with no recorded result. It identifies a `homehub-*` responder, takes its IPv4 A record, persists that
+numeric address and fills it into `/status.modbus.host` and the editable Host field. The outcome is
+persisted even when nothing answers, so an empty LAN is not browsed on every reboot; a hub added later
+is entered manually. Set a host (an IP, a `.local` name resolved over mDNS, or an ordinary DNS name)
+and that address is used verbatim. If several `homehub-*` responders answer, the first resolved IPv4
+is used and the count is logged to `/diag` rather than silently guessed at.
+
+On the first boot after upgrading, a legacy auto-discovered `homehub-*` value is resolved once and
+replaced by its numeric IPv4 address. A manually configured host is never rewritten by this migration.
+
+Every active failure is exposed as complete English `error` text plus structured `error_code`,
+`error_detail` and (for reads) `error_register` fields. The UI localises the structured cause as a
+quiet red line below the address. The same transition is written through `diag_printf`, which means
+it reaches both `/diag` and configured Syslog; repeated one-second retries do not spam the log, and a
+clean poll records recovery. Transport failures stop the current register sweep immediately so the
+first timeout/refusal/closed/invalid-response cause cannot be overwritten by later reads on a socket
+that is already closed.
 
 ## The register map
 
@@ -234,8 +246,8 @@ Everything is runtime — no reflash, and no reboot.
 
 | Field | Meaning |
 |---|---|
-| `mb_dhost`/`mb_searched` | The one-shot discovery result — hostname found ("" = none) and whether the search has run. Outside the blob: their writer is the Modbus task while the blob's is httpd |
-| `mb_host` | HomeHub IP or `.local`/DNS hostname. **Empty = mDNS auto-discovery** |
+| `mb_dhost`/`mb_searched` | The one-shot discovery result — resolved IPv4 found ("" = none) and whether the search has run. Outside the blob: their writer is the Modbus task while the blob's is httpd |
+| `mb_host` | HomeHub IP or `.local`/DNS hostname. Empty uses the persisted discovery result; only a never-searched device with no result performs mDNS discovery |
 | `mb_port` | Modbus TCP port, default `502` (validated 1–65535) |
 | `mb_unit_id` | Modbus unit id, default `1` (validated 1–247) |
 | `actuation_enabled` | P3 safety flag, default **false**. Persisted; gates nothing today |
@@ -260,9 +272,10 @@ combined link state with X10A, since either can be down alone and one merged "co
 exactly the case worth seeing. Config and diagnostics only; there are no pump controls, by design.
 
 **API:** `/status` carries a `modbus{enabled,connected,discovering,host,port,unit_id,rx,fails,values,
-actuation_enabled,error}` block. `host` is the **resolved** host, so the UI shows what discovery found
-rather than the empty string it was asked with (and it is redacted in a bug report — it is a LAN
-address and, on an auto-discovered hub, a serial-derived hostname). See [`../README.md`](../README.md)
+actuation_enabled,error,error_code,error_detail,error_register}` block (the error fields are omitted
+when healthy). `host` is the configured value or the IPv4 selected by discovery, so the UI shows what
+was found rather than the empty string it was asked with. It is redacted in a bug report because it is
+a LAN address. See [`../README.md`](../README.md)
 and `.claude/CLAUDE.md` for the full HTTP surface.
 
 ## Security

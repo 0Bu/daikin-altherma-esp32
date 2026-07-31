@@ -30,13 +30,19 @@ struct ModbusStatus {
     bool        enabled     = false;   // is this stack running at all? (a gateway address is known)
     bool        connected   = false;   // current socket has committed at least one fresh poll cycle
     bool        discovering = false;   // mDNS browse in progress, nothing resolved yet
-    std::string host;                  // the RESOLVED / discovered host ("" = none yet)
+    std::string host;                  // configured or discovered IPv4 address ("" = none yet)
     int         port    = 0;
     int         unit_id = 0;
     uint32_t    rx_ok   = 0;           // successful register reads since boot
     uint32_t    rx_fail = 0;           // failed reads since boot
     int         values  = 0;           // rows in the cache after the last cycle
+    // The current failure, not a historical counter. `last_error_code` is stable/localisable for the
+    // UI; `last_error` is the complete human-readable /diag + Syslog wording. detail carries errno,
+    // a Modbus exception code or an MbParse ordinal, and register carries the 1-based EKRHH offset.
+    std::string last_error_code;
     std::string last_error;
+    int         last_error_detail   = -1;
+    int         last_error_register = 0;
 };
 
 // Start the stack. Creates the status mutex always (so /status can report `enabled:false` before any
