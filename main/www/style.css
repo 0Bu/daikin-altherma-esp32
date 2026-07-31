@@ -1,5 +1,5 @@
 /* Daikin Altherma web UI. Design contract: docs/DESIGN.md. One self-contained page
-   (spliced with index.html + app.js at build, then gzipped). No webfonts, no external assets. */
+   (spliced with index.html + app.sources at build, then gzipped). No webfonts, no external assets. */
 
 :root {
   /* Daikin brand: cyan wordmark, light-cyan + deep-navy triangle */

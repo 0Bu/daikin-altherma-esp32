@@ -436,7 +436,7 @@ static esp_err_t set_syslog(httpd_req_t* req) {
     // Unchanged settings short-circuit — no NVS write, no reboot — exactly like /set_mqtt and
     // /set_ntp. A re-save of the same host/port would otherwise persist identical values and reboot,
     // dropping the poll cycle, MQTT availability and any open WebSocket for nothing. The UI already
-    // handles {"reboot":false} (app.js "No changes"). /set_wifi is deliberately NOT short-circuited:
+    // handles {"reboot":false} (www/js/settings.js "No changes"). /set_wifi is deliberately NOT short-circuited:
     // a re-save there re-arms the credential-rollback trial.
     if (host == c.syslog_host && port == c.syslog_port)
         return http_send_json(req, "{\"ok\":true,\"reboot\":false}");

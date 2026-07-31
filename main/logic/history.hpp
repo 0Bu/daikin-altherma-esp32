@@ -168,7 +168,7 @@ inline constexpr TrendDef TRENDS[] = {
     // without them (measured here over 30 days), which is exactly why the live rule prefers them
     // only when their sum is non-zero. Three rings for one figure because the sum is the browser's
     // to make: a "total current" trend would be a derived quantity computed in the firmware and
-    // then again in app.js, and the two would be free to disagree.
+    // then again in www/js/history.js, and the two would be free to disagree.
     { "ct_l1",            TrendKind::Row, 0x63, 14, "",    "" },
     { "ct_l2",            TrendKind::Row, 0x63, 15, "",    "" },
     { "ct_l3",            TrendKind::Row, 0x63, 16, "",    "" },

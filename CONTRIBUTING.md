@@ -58,7 +58,7 @@ a lie.
 `run-description-audit.sh` asks the same kind of question one layer up. Every reading reaches the
 web UI's value list as a row keyed by its catalog **label**, and tapping that row is meant to open a
 plain-language explainer — decided at render time by a first-match-wins regex sweep over the
-`DESCRIPTIONS` table in [`main/www/app.js`](main/www/app.js). A label nothing matches renders as a
+`DESCRIPTIONS` table in [`main/www/js/descriptions.js`](main/www/js/descriptions.js). A label nothing matches renders as a
 plain, un-tappable row: no error, no log, just a missing chevron among a hundred rows.
 [`main/def/overlay.hpp`](main/def/overlay.hpp) shipped 11 rows exactly so — nine with no explainer,
 and two that matched the *fin temp* heatsink-**temperature** entry, describing a protection flag and
@@ -116,7 +116,7 @@ perfectly forever, whatever the UI has since become, so every gate above stays g
 README shows a drawing that no longer exists. A screenshot cannot fail a test; it can only be out of
 date, and it looks exactly as good either way. CI has no browser, so the check is a **stamp**, not a
 re-render: it fingerprints the sources the recording was made from — the schematic markup, the CSS
-that draws and animates it, the `app.js` functions that paint it, the
+that draws and animates it, the assembled UI functions that paint it, the
 strings it prints, the scenes in [`tools/uigif/scenes.js`](tools/uigif/scenes.js) and the
 recorder's own framing — and fails when they no longer match
 [`tools/uigif/gif_stamp.txt`](tools/uigif/gif_stamp.txt). The frame is the schematic card **alone** —
@@ -130,8 +130,9 @@ moving. The fix is always to re-record — never to edit the stamp:
 scripts/record-dashboard-gif.sh    # ~5 min; needs Chrome + ffmpeg, so LOCAL only
 ```
 
-It films the real UI (`index.html` + `style.css` + `app.js`, spliced the way the firmware build
-splices them) with only the *device* stubbed, so what the GIF shows is what `renderLive()` drew.
+It films the real UI (`index.html` + `style.css` + the ordered
+[`app.sources`](main/www/app.sources) fragments, spliced the way the firmware build splices them)
+with only the *device* stubbed, so what the GIF shows is what `renderLive()` drew.
 Look at the result before committing: the gate proves the recording is current, never that it is a
 good picture. `tools/uigif/selftest.sh` proves the gate still catches each way it can go stale.
 

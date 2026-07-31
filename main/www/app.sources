@@ -1,0 +1,14 @@
+# Ordered classic-script fragments for the embedded device UI.
+#
+# The files deliberately share one global lexical scope: inline_assets.cmake concatenates them in
+# this order before inserting the result at index.html's script marker. This keeps the shipped page
+# byte-for-byte equivalent in execution model to the former app.js monolith without adding browser
+# module requests, a package manager, or a JavaScript runtime dependency to the firmware build.
+js/i18n.js
+js/app_state.js
+js/dashboard.js
+js/descriptions.js
+js/history.js
+js/schematic.js
+js/settings.js
+js/bootstrap.js

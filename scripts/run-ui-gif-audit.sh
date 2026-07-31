@@ -9,7 +9,7 @@
 #
 # CI has no browser, so this cannot re-render and compare pixels. It fingerprints the SOURCES the
 # recording depends on — the schematic markup and header, the CSS that draws and animates them, the
-# app.js functions that paint them, the strings they print, the scenes, and the recorder's own
+# assembled UI functions that paint them, the strings they print, the scenes, and the recorder's own
 # framing — and fails when that no longer matches the stamp recorded beside the GIF. It also reads
 # the GIF itself: a single-frame still, or 2-second frames, fails the one thing the recording is
 # for, which is showing the flow MOVING.

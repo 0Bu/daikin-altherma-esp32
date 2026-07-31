@@ -10,7 +10,7 @@
 // numbers that fix it are a documented per-board fact (docs/BOARDS.md) that the user should not have
 // to transcribe from a datasheet into five form fields.
 //
-// WHY IT IS FIRMWARE DATA rather than a table in www/app.js: a browser-side copy would be a SECOND
+// WHY IT IS FIRMWARE DATA rather than a table in www/js/settings.js: a browser-side copy would be a SECOND
 // statement of the same board facts, free to drift from docs/BOARDS.md and from the validator with
 // nothing to catch it — and a preset that fills pins the device then REJECTS is worse than no preset
 // at all. Living here, it is served through /status.board.presets (so the modal's presets and its

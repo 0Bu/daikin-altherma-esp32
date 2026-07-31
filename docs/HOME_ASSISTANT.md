@@ -470,7 +470,7 @@ wrong in the direction that flatters you: during a **defrost** the unit delibera
 production instead of as the withdrawal it is. In a live gauge that is a misleading instant; in the
 **integral** below it is a systematic error that never cancels, so produced heat and with it the JAZ
 come out too high — worst in winter, when defrosts are frequent and the number matters most. The
-firmware refuses the same clamp in its own dashboard for the same reason (`main/www/app.js`,
+firmware refuses the same clamp in its own dashboard for the same reason (`main/www/js/schematic.js`,
 `d.pth`). The Riemann integrator handles negative stretches correctly; let the sign through.
 
 **Do not default a missing input to `0`.** `| float(0)` turns an `unavailable` sensor — a reboot, a

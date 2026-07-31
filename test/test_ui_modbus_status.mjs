@@ -1,14 +1,10 @@
 // Regression test for the HomeHub connection row. Executes the production connLinks()/connRow()
 // functions so a backend error cannot turn the hostname red again without explaining why below it.
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import vm from "node:vm";
+import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
-const app = fs.readFileSync(new URL("../main/www/app.js", import.meta.url), "utf8");
-const from = app.indexOf("function modbusErrorText(");
-const to = app.indexOf("// ── Settings screen", from);
-assert.notEqual(from, -1, "missing production modbusErrorText()");
-assert.notEqual(to, -1, "missing end of production connection helpers");
+const dashboardSource = readAppFragments(["dashboard.js"]);
 
 const translated = {
   "modbus.err.response_timeout": (r) => `Zeitüberschreitung bei Register ${r}`,
@@ -21,7 +17,6 @@ const context = {
   esc: (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",
   }[c])),
-  editIcon: '<svg class="vcard-edit-icon"></svg>',
   t: (key, ...args) => {
     if (key === "conn.error") return `Fehler: ${args[0]}`;
     if (key === "conn.aria") return `${args[0]}: ${args[1]}`;
@@ -31,9 +26,9 @@ const context = {
 };
 const sandbox = vm.createContext(context);
 vm.runInContext(
-  `${app.slice(from, to)}\nthis.__connLinks = connLinks; this.__connRow = connRow;`,
+  `${dashboardSource}\nthis.__connLinks = connLinks; this.__connRow = connRow;`,
   sandbox,
-  { filename: "main/www/app.js" },
+  { filename: "main/www/app.sources" },
 );
 
 function baseModbus(patch) {

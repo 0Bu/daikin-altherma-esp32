@@ -11,7 +11,7 @@
 // Re-rendering it here is not an option: CI has no browser (the recorder needs Chrome + ffmpeg —
 // scripts/record-dashboard-gif.sh). So this gate compares a STAMP instead. It fingerprints exactly
 // the sources the recording depends on — the schematic markup, the CSS that draws and animates it,
-// the app.js functions that paint it, the strings it prints, the scenes it shows and the recorder's
+// the assembled UI functions that paint it, the strings it prints, the scenes it shows and the recorder's
 // own framing — and fails when that fingerprint no longer matches the one recorded beside the GIF.
 //
 // What it therefore does NOT claim: that the GIF looks good, that the scenes are still the right
@@ -25,6 +25,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { readAppSource } from "../ui/read_app_source.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const P = (rel) => resolve(ROOT, rel);
@@ -112,7 +113,7 @@ function schematicCss(css) {
   return kept.sort().join("\n");
 }
 
-// The app.js functions that PAINT the frames. A rename must stop the gate loudly: silently
+// The assembled UI functions that PAINT the frames. A rename must stop the gate loudly: silently
 // fingerprinting nothing is how a checker starts passing everything.
 const FNS = ["renderApp", "renderLive", "clearSchematic", "liveData", "plantState", "sysSet",
              "vLwt", "fmt0", "fmt1"];
@@ -120,7 +121,7 @@ const FNS = ["renderApp", "renderLive", "clearSchematic", "liveData", "plantStat
 function fnSource(js, name) {
   const re = new RegExp(`^(?:function\\s+${name}\\s*\\(|const\\s+${name}\\s*=)`, "m");
   const m = re.exec(js);
-  if (!m) die(`app.js has no ${name}() — the function that draws the recording was renamed or removed`);
+  if (!m) die(`app.sources has no ${name}() — the function that draws the recording was renamed or removed`);
   const start = m.index;
   const open = js.indexOf("{", start);
   const arrowEnd = js.indexOf("\n", start);
@@ -149,7 +150,9 @@ function i18nForFigure(figure, js) {
 
 const html = read("main/www/index.html");
 const css = read("main/www/style.css");
-const js = read("main/www/app.js");
+let js;
+try { js = readAppSource(P("main/www/app.sources")); }
+catch (e) { die(e.message); }
 
 const figure = block(html, /<figure\b[^>]*\bid="schem"/, "figure", "schematic card");
 
@@ -236,7 +239,7 @@ if (WRITE) {
     "# Recorded by scripts/record-dashboard-gif.sh — do not hand-edit.",
     "#",
     "# ui = a fingerprint of the sources docs/media/dashboard.gif was recorded FROM (the schematic",
-    "#      markup, the CSS that draws and animates it, the app.js functions that paint it, the",
+    "#      markup, the CSS that draws and animates it, the assembled UI functions that paint it, the",
     "#      strings it prints, the scenes, and this recorder's own framing).",
     "# gif = the sha256 of the recording itself, so a hand-edited or re-compressed GIF is caught too.",
     "#",

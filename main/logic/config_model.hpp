@@ -357,7 +357,7 @@ inline bool validate(const Config& c, std::string& reason, int max_gpio = 48,
 
 // Validate WiFi credentials from POST /set_wifi. The SSID must be 1..32 bytes (the 802.11 limit);
 // the password is either empty (open network) or a WPA-PSK-length 8..63 bytes. Same bounds the web
-// UI enforces client-side (main/www/app.js) — kept here so the authoritative check is host-tested.
+// UI enforces client-side (main/www/js/settings.js) — kept here so the authoritative check is host-tested.
 // Returns false + a reason on the first problem.
 inline bool wifi_credentials_valid(const std::string& ssid, const std::string& pass, std::string& reason) {
     if (ssid.empty() || ssid.size() > 32)                     { reason = "invalid ssid";     return false; }

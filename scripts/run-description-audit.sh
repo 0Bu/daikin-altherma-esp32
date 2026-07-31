@@ -2,7 +2,7 @@
 # Value-description coverage gate: does every reading the user can SEE have something to read?
 #
 # The web UI turns a value row into a tappable explainer by matching its catalog LABEL against the
-# DESCRIPTIONS table in main/www/app.js. A label nothing matches renders as a plain row — no error,
+# DESCRIPTIONS table in main/www/js/descriptions.js. A label nothing matches renders as a plain row — no error,
 # no log, just a missing chevron among a hundred rows. def/overlay.hpp shipped 11 such rows that
 # way. The catalog is machine-generated and grows without touching this repo's JS, so the gap
 # re-opens on its own; this asserts the two sides still line up.

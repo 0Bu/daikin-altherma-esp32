@@ -73,7 +73,7 @@ scripts/run-doc-entity-audit.sh   # do the docs' copy-paste ENTITY IDS exist? (c
 
 The third is the same question one layer up from the second: the domain audit asks whether a
 published value is physically true, the description audit asks whether the web UI has anything to
-SAY about it. A catalog label the `DESCRIPTIONS` table in `main/www/app.js` doesn't match renders as
+SAY about it. A catalog label the `DESCRIPTIONS` table in `main/www/js/descriptions.js` doesn't match renders as
 a plain, un-tappable row — no error, no log, just a missing chevron among a hundred rows — and the
 catalog is machine-generated, so the gap re-opens without anyone touching this repo's JS.
 `def/overlay.hpp` shipped 11 rows that way (9 with no explainer, 2 matching the "fin temp"
@@ -148,7 +148,7 @@ green while the README shows last month's pipes or a component that no longer ex
 cannot fail a test; it can only be out of date, and it looks exactly as good either way. CI has no
 browser, so this cannot re-render and diff pixels — it FINGERPRINTS the sources the recording was
 made from (the schematic markup, the CSS that draws and animates it, the
-app.js functions that paint it — `renderLive`/`liveData`/`clearSchematic`/… , each REQUIRED to
+assembled UI functions that paint it — `renderLive`/`liveData`/`clearSchematic`/… , each REQUIRED to
 exist or the check exits 2 rather than fingerprint nothing — the strings the drawing prints, the
 scenes, and the recorder's own framing) and fails when they no longer match the stamp beside the
 GIF (`tools/uigif/gif_stamp.txt`, per-source hashes so a failure NAMES what moved). It also parses
@@ -678,7 +678,7 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 never a graph (measured: 58 of ~99 became series). Since #210 the NUMBER is the
                 firmware-wide boundary, /values included: a bit-flag row carries the
                 value "1"/"0" plus a structural `"binary":true` marker, and the BROWSER renders ON/OFF
-                from that marker (www/app.js's vOn tests the value === "1", never the text — a consumer
+                from that marker (www/js/schematic.js's vOn tests the value === "1", never the text — a consumer
                 still expecting "ON" reads every flag as false, silently). Both call sites
                 key on conv_is_binary, never on the text, so the encoding and the entity type can't drift
                 apart. Builds before the split published these as `sensor`; that stale retained config is
@@ -1040,7 +1040,7 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 (docs/REGISTERS.md §"error codes", docs/HOME_ASSISTANT.md).
                 redact.hpp = what a diagnostic snapshot must NOT carry when it leaves the device,
                 for GET /status?redact=1 + GET /diag?redact=1 (the web UI's "Report a bug" action,
-                docs/REPORTING.md). In the DEVICE rather than in www/app.js because the browser
+                docs/REPORTING.md). In the DEVICE rather than in www/js/app_state.js because the browser
                 button, the curl fallback in the guide and anything later all need one answer, and
                 the copy that silently stops covering a newly-added field is the one that leaks it.
                 Two shapes, because the routes leak differently: /status leaks by FIELD (eight named
@@ -1078,7 +1078,7 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 single bounced sample must not read as a release. Pure, so that is tested rather
                 than discovered by holding a button on a desk.
                 lwt_select.hpp = the leaving-water MEASUREMENT picker (host-testable twin of
-                www/app.js's lwtRow/vLwt): the row that feeds the UI's ΔT / heat-output / COP must be the
+                www/js/schematic.js's lwtRow/vLwt): the row that feeds the UI's ΔT / heat-output / COP must be the
                 pre-BUH heat-exchanger outlet (R1T) and NEVER a setpoint / mixed-zone / post-BUH (R2T)
                 row — a setpoint substituted for a measurement makes all three plausibly wrong (#121,
                 the #35-#39 failure shape). Keyed on the (R1T) tag so the alias label forms ("Outlet
@@ -1127,7 +1127,7 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 valve, outdoor air, discharge temp, room temp — plus the ELECTRICAL inputs
                 (inv_current, ct_l1..3), which are inputs first and rows second: the drawing's
                 computed pills (ΔT, heat output, electrical input, COP) have no register to buffer,
-                so www/app.js's DERIVED assembles their curve from these rings with the same
+                so www/js/history.js's DERIVED assembles their curve from these rings with the same
                 expressions liveData() uses for the live number — one definition per figure instead
                 of a firmware copy and a browser copy free to drift. The other TWO are not rows at all — a TrendKind
                 tag splits "addressed by (reg, off, unit)" from "sampled from the board", and the
@@ -1156,7 +1156,7 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 temperature, the #35-#39 shape with no numeric tell. Only the PAGE plus the
                 compressor state can tell, so DESIGN.md's dead-bus rule ("an idle plant with no
                 readings, not a stale one") is applied to one sleeping UNIT instead of one silent
-                BUS, and resolved the SAME way: www/app.js's `d.ouHeldOver` BLANKS the outdoor pills
+                BUS, and resolved the SAME way: www/js/schematic.js's `d.ouHeldOver` BLANKS the outdoor pills
                 to "—". v1.0.13 showed them greyed with a `#heldNote` legend instead; that is
                 reverted — the drawing has ONE vocabulary for "no reading right now", and a second
                 dimmer register of half-valid numbers asks the reader to remember which pills mean
@@ -1376,7 +1376,7 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 fetched against nothing and reported as an unreachable server
                 ui_lang.hpp = which language the web UI renders in, when the browser default is
                 OVERRIDDEN. The UI is bilingual (de/en) and picks its language client-side from
-                navigator.language by default (main/www/app.js, DESIGN.md §1); this is the persistent
+                navigator.language by default (main/www/js/i18n.js, DESIGN.md §1); this is the persistent
                 MANUAL override on top of that — enum {Auto,De,En}, one writer (POST /set_lang), in
                 the config blob (v4) beside ota_channel for the same one-owner reason. Auto is a
                 first-class value, NOT the absence of one: a fresh or pre-v4 device reports "auto" and
@@ -1491,7 +1491,7 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 board_presets.hpp = the SAME per-board facts made applicable: the five board-local
                 settings (led_gpio/led_type/led_inverted/btn_gpio/btn_active_low) for each documented
                 board, served as /status.board.presets and filled into the Hardware modal by one
-                pick. In firmware, not in www/app.js, so a preset can be host-tested against the very
+                pick. In firmware, not in www/js/settings.js, so a preset can be host-tested against the very
                 validator POST /set_board applies (board_hw_valid) and cannot drift from
                 docs/BOARDS.md into pins the device would reject; board_presets_offerable() withholds
                 a preset this BUILD reserves (the AtomS3 Lite's GPIO35 LED is SPIIO4 on an Octal
@@ -1635,7 +1635,8 @@ def/            embedded per-model value profiles + registry (incl. the generic 
                 test_tie_break_order_independence() asserts the PROPERTY that removes the trigger the
                 issue named: permuting the registry cannot change the pick, now that criterion (4) is
                 the lowest profile id rather than file order (see detect.hpp above).
-www/            web UI sources (index.html + style.css + app.js -> one gzipped page) + setup.html.
+www/            web UI sources (index.html + style.css + app.sources fragments -> one gzipped page)
+                + setup.html.
                 The dashboard SCHEMATIC (the inline SVG in index.html, its sc-* CSS and its
                 INSPECT/I18N bindings) has its own gate — scripts/run-schematic-audit.sh + the
                 /schematic-review skill: a pill can name a physically correct value and still be

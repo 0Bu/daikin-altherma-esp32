@@ -9,7 +9,7 @@
 // The two electrical sources the browser chooses between sit on opposite boundaries:
 //   • the CT clamps (0x63) see the WHOLE unit — compressor, backup heater, pump, controls;
 //   • "INV primary current" (0x21) sees the OUTDOOR inverter only — compressor and fan.
-// (docs/DESIGN.md §"derived figures", www/app.js's pel explainer.)
+// (docs/DESIGN.md §"derived figures", www/js/schematic.js's pel explainer.)
 //
 // The heat side has the same split and the browser already picks the PRE-BUH outlet for it
 // (lwt_select.hpp — R1T, never a setpoint, never R2T), i.e. heat from the heat pump's own exchanger,
@@ -34,7 +34,7 @@
 // (DISABLE, NEVER DEGRADE), which lwt_select and ou_stale already apply: blank the reading rather
 // than offer a second, dimmer register of half-valid numbers.
 //
-// Host-testable twin of www/app.js, like lwt_select.hpp and ou_stale.hpp: there is no firmware
+// Host-testable twin of www/js/schematic.js, like lwt_select.hpp and ou_stale.hpp: there is no firmware
 // caller. It lives here so the CI logic-test gates the rule against the WHOLE generated catalog
 // rather than against whichever profile the author happened to be looking at.
 #include <cstddef>

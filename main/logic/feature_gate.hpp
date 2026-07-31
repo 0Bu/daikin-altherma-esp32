@@ -47,7 +47,7 @@
 namespace daik::logic {
 
 // "INV frequency (rps)" — the compressor run-state input. Matcher kept byte-for-byte identical to
-// www/app.js's `vNum(/inv frequency/i)` (see logic/ou_stale.hpp for why this row in particular has to
+// www/js/schematic.js's `vNum(/inv frequency/i)` (see logic/ou_stale.hpp for why this row in particular has to
 // stay trustworthy: it is what makes "Standby — not running" believable while the pills around it are
 // held over). One rule, two languages, same tokens.
 inline bool fg_is_run_state(const char* l) { return lwt_ci_contains(l, "inv frequency"); }

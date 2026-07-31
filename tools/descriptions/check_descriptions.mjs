@@ -1,4 +1,4 @@
-// Coverage audit for the web UI's value-description table (main/www/app.js `DESCRIPTIONS`).
+// Coverage audit for the web UI's value-description table (main/www/app.sources `DESCRIPTIONS`).
 //
 // ── What this gates, and why it is not covered by anything else ──────────────────────────────────
 // Every reading the firmware publishes reaches the value list as a row keyed by its catalog LABEL,
@@ -24,15 +24,16 @@
 // field-scraped: a scraper that silently stops recognising an entry would under-report and pass.
 // node is preinstalled on ubuntu-latest, so this adds a dependency to the local loop, not to CI.
 //
-// Usage:  node tools/descriptions/check_descriptions.mjs [--app <app.js>] [--def <def-dir>]
+// Usage:  node tools/descriptions/check_descriptions.mjs [--app <app.sources|app.js>] [--def <def-dir>]
 //                                                        [--exceptions <file>] [-v]
 // Exit:   0 = clean, 1 = findings, 2 = usage / parse / vacuity error.
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import { readAppSource } from '../ui/read_app_source.mjs';
 
 // ── arguments ────────────────────────────────────────────────────────────────────────────────────
-let APP = 'main/www/app.js';
+let APP = 'main/www/app.sources';
 let DEF = 'main/def';
 let EXC = 'tools/descriptions/audit_exceptions.txt';
 let verbose = false;
@@ -59,7 +60,7 @@ function die(code, msg) {
 const OPEN = 'const DESCRIPTIONS = [';
 const CLOSE = '\n];';
 // The Model card's copy: a second, smaller table keyed by row id instead of by label, because those
-// labels are TRANSLATED and are not catalog labels (see MODEL_DESCRIPTIONS in app.js). Coverage
+// labels are TRANSLATED and are not catalog labels (see MODEL_DESCRIPTIONS in js/history.js). Coverage
 // cannot be audited for it — there is no generated catalog of card rows to compare against — but the
 // SHAPE checks apply unchanged, and "someone adds an entry and forgets the German" is the drift that
 // actually happens. Optional: a tree without the table is not a failure, it is an older tree.
@@ -108,7 +109,7 @@ function loadFunction(src, file, open, close, what) {
 
 function loadDescriptions(file) {
   let src;
-  try { src = fs.readFileSync(file, 'utf8'); }
+  try { src = readAppSource(file); }
   catch (e) { die(2, `cannot read ${file}: ${e.message}`); }
 
   const table = loadTable(src, file, OPEN, CLOSE, '[]', 'DESCRIPTIONS', true);
@@ -211,7 +212,7 @@ function loadExceptions(file) {
     // person's hurry, and silencing D001 would restore the exact blind spot def/overlay.hpp hit.
     if (line.startsWith('D001 ')) {
       die(2, `${file}:${n + 1}: D001 cannot be adjudicated — write the missing copy in ` +
-             'main/www/app.js DESCRIPTIONS instead');
+             'main/www/js/descriptions.js DESCRIPTIONS instead');
     }
     out.set(line, n + 1);
   }
@@ -358,7 +359,7 @@ for (const f of findings) {
   console.error(`          key: ${f.code} ${f.key}`);
 }
 console.error(
-  '\n  D001 = a reading users can see has no explainer (add an entry to DESCRIPTIONS in main/www/app.js).\n' +
+  '\n  D001 = a reading users can see has no explainer (add an entry to DESCRIPTIONS in main/www/js/descriptions.js).\n' +
   '  D002 = an entry matches nothing any more (a renamed label left its regex behind).\n' +
   '  D003 = malformed entry.  D004 = missing/partial German copy.  D005 = stale ledger line.\n' +
   '  D006 = visible label still contains its value legend.  D007 = an unrelated label was changed.\n' +

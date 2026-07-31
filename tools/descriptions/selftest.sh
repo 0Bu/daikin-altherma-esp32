@@ -33,7 +33,7 @@ reset() {   # a pristine copy of everything the audit reads
 # Runs the audit over the patched copy; asserts the exit code and that the report names the finding.
 run_case() {
     local name="$1" want_rc="$2" needle="$3" out rc
-    out="$(node "$CHECK" --app "$WORK/main/www/app.js" --def "$WORK/main/def" \
+    out="$(node "$CHECK" --app "$WORK/main/www/app.sources" --def "$WORK/main/def" \
                          --exceptions "$WORK/exc.txt" 2>&1)"; rc=$?
     if [ "$rc" -ne "$want_rc" ]; then
         echo "  MISSED: $name — expected exit $want_rc, got $rc"
@@ -70,7 +70,7 @@ echo "== 2. THE regression: the page-0x10 protection copy is removed again =="
 # def/overlay.hpp's 11 rows reached the UI with no explainer (9) or the wrong one (2). Deleting the
 # section that fixed it must fail — this is the case the gate exists for.
 reset
-python3 - "$WORK/main/www/app.js" <<'PY'
+python3 - "$WORK/main/www/js/descriptions.js" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
 start = s.index('  // ── Protection retries & drop control')
@@ -81,7 +81,7 @@ run_case "removing the protection copy is caught" 1 "Comp. INV Current Drop"
 
 echo "== 3. an entry that matches nothing (a renamed label left its regex behind) =="
 reset
-python3 - "$WORK/main/www/app.js" <<'PY'
+python3 - "$WORK/main/www/js/descriptions.js" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
 s = s.replace('const DESCRIPTIONS = [',
@@ -92,7 +92,7 @@ run_case "dead entry is caught" 1 "D002"
 
 echo "== 4. an entry with no German copy (a German page would print English) =="
 reset
-python3 - "$WORK/main/www/app.js" <<'PY'
+python3 - "$WORK/main/www/js/descriptions.js" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
 s = s.replace('const DESCRIPTIONS = [',
@@ -105,7 +105,7 @@ echo "== 4b. a MODEL_DESCRIPTIONS entry with no German copy =="
 # The Model card's copy is a second table with no catalog to check coverage against, so the shape
 # checks are the only thing standing between it and a German page silently printing English.
 reset
-python3 - "$WORK/main/www/app.js" <<'PY'
+python3 - "$WORK/main/www/js/history.js" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
 s = s.replace('const MODEL_DESCRIPTIONS = {',
@@ -157,7 +157,7 @@ run_case "unparsable row format is caught" 2 "extraction is unreliable"
 
 echo "== 9. the DESCRIPTIONS table itself going missing is an error, not a pass =="
 reset
-python3 - "$WORK/main/www/app.js" <<'PY'
+python3 - "$WORK/main/www/js/descriptions.js" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
 open(p, 'w').write(s.replace('const DESCRIPTIONS = [', 'const DESCRIPTIONS_RENAMED = [', 1))
@@ -166,7 +166,7 @@ run_case "missing table is caught" 2 "must appear exactly once"
 
 echo "== 10. a raw ON/OFF catalog suffix must not return to the visible label =="
 reset
-python3 - "$WORK/main/www/app.js" <<'PY'
+python3 - "$WORK/main/www/js/history.js" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
 s = s.replace('  return cleaned || raw;', '  return raw;', 1)
@@ -176,7 +176,7 @@ run_case "raw ON/OFF label suffix is caught" 1 "D006"
 
 echo "== 11. an exact semantic entry must not be shadowed by broader copy =="
 reset
-python3 - "$WORK/main/www/app.js" <<'PY'
+python3 - "$WORK/main/www/js/descriptions.js" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
 s = s.replace('const DESCRIPTIONS = [',

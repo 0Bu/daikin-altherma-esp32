@@ -4,21 +4,17 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
-const app = fs.readFileSync(new URL("../main/www/app.js", import.meta.url), "utf8");
+const descriptionsSource = readAppFragments(["descriptions.js"]);
+const historySource = readAppFragments(["history.js"]);
 const map = fs.readFileSync(new URL("../main/def/homehub.hpp", import.meta.url), "utf8");
 
-function span(src, start, end) {
-  const from = src.indexOf(start);
-  assert.notEqual(from, -1, `missing production source marker: ${start}`);
-  const to = src.indexOf(end, from);
-  assert.notEqual(to, -1, `missing production source marker: ${end}`);
-  return src.slice(from, to);
-}
-
-const descOpen = "const DESCRIPTIONS = [";
-const descriptions = vm.runInNewContext("(" + span(app, descOpen, "\n];")
-  .slice(descOpen.length - 1) + "\n])", Object.create(null));
+const descriptionContext = { LANG: "en" };
+vm.createContext(descriptionContext);
+vm.runInContext(descriptionsSource + "\nthis.__descriptions = DESCRIPTIONS;", descriptionContext,
+  { filename: "main/www/js/descriptions.js" });
+const descriptions = descriptionContext.__descriptions;
 
 const rowRe = /\{\s*(\d+)\s*,\s*MbFunc::[^}]*?"((?:[^"\\]|\\.)*)"\s*(?:,\s*HomeHubValueKind::(\w+)\s*)?\}/g;
 const rows = [...map.matchAll(rowRe)].map((m) => ({
@@ -31,15 +27,12 @@ const firstDescription = (label) => descriptions.find((d) => {
   return d.re.test(label);
 });
 
-const labelSource =
-  span(app, "function displayReadingLabel(label) {", "\n}\n\n// HomeHub API") + "\n}" +
-  span(app, "const HOMEHUB_LABEL_DE = Object.freeze({", "\n}\n\n// The expandable row") + "\n}";
 function labels(lang) {
   const context = { LANG: lang };
   vm.createContext(context);
-  vm.runInContext(labelSource +
+  vm.runInContext(historySource +
     "\nthis.__api = { displayHomeHubLabel, HOMEHUB_LABEL_DE };", context,
-  { filename: "main/www/app.js" });
+  { filename: "main/www/app.sources" });
   return context.__api;
 }
 const deLabels = labels("de");
