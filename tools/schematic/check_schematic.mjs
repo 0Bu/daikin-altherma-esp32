@@ -958,7 +958,15 @@ for (const p of freePills) {
 // its three-blade predecessor was not, and wobbled.
 for (const id of rotorIds) {
   const rotor = byId.get(id);
-  if (!rotor) { add('G007', id, `CSS animates #${id} about its fill-box, but the SVG has no such element`, ''); continue; }
+  if (!rotor) {
+    // This audit intentionally slices only the system schematic. The header is now a static PNG,
+    // so every CSS-selected rotor must be represented in this SVG; retain the hard failure when a
+    // selftest removes #scFan entirely.
+    const outside = htmlSrc.slice(0, svgFrom) + htmlSrc.slice(svgTo + SVG_CLOSE.length);
+    if (new RegExp(`\\bid=["']${id}["']`).test(outside)) continue;
+    add('G007', id, `CSS animates #${id} about its fill-box, but the SVG has no such element`, '');
+    continue;
+  }
   const sub = nodes.filter((n) => { for (let p = n.el; p; p = p.parent) if (p === rotor.el) return true; return false; });
   let b = EMPTY;
   for (const n of sub) if (n.bbox && valid(n.bbox)) b = union(b, n.bbox);

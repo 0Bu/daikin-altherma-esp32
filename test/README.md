@@ -33,6 +33,10 @@ and present, and their exact ordered concatenation parses as one classic script.
 tests and audits use the same reader, so they cannot silently exercise a different source order than
 the firmware build.
 
+`node test/test_ui_fan_icon.mjs` pins the header to the supplied static three-blade PNG mark at 48 px.
+It separately keeps the live `#scFan` rotation in the system schematic and rejects a second header
+telemetry/animation branch.
+
 The same `gates` job runs `node test/test_ui_live_i18n.mjs` separately. That browser-free regression
 test executes the production banner/inspector render functions from the assembled UI source and verifies
 that their DOM-write signatures invalidate when the persisted UI language changes while device state
