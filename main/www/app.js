@@ -106,33 +106,29 @@ const I18N = {
     // The X10A observation card (logic/checkup.hpp). Row labels name what was COUNTED, not the sensor:
     // the reader is being shown a rolling aggregate, and "Water pressure" would read as the live figure
     // that is already in the value list further down.
-    "card.checkup": "X10A observation · up to 24 h",
+    "card.checkup": "X10A check · 24 h",
     "check.fault": "Unit fault", "check.cycling": "Compressor starts",
     "check.defrost": "Defrost cycles", "check.pressure": "Water pressure, lowest",
     "check.flow": "Flow rate, lowest", "check.heater": "Backup heater",
     "check.retries": "Protection retries",
-    "check.all_ok": "No finding in observed X10A data", "check.notice": "Operating note",
-    "check.attention": "Fault / documented limit",
-    "check.nodata": "No assessable check available",
-    "check.collecting": "collecting…",
-    "check.collecting_status": "Collecting",
-    "check.collecting_for": (w) => `Collecting · ${w}`,
-    "check.summary": (s, n, a, r, w) => `${s} · ${n}/${a} assessed · ${r} supported · ${w}`,
-    "check.evidence": (n, r) => `${n} / ${r} observed`,
-    "check.win_none": "no data yet",
-    "check.win_lt_min": "<1 min of 24 h",
-    "check.win_min": (m) => `${m} min of 24 h`,
-    "check.win_h": (h) => `${h} h of 24 h`,
-    "check.win_hm": (h, m) => `${h} h ${m} min of 24 h`,
-    "check.basis.device": "device state",
-    "check.basis.manufacturer": "manufacturer limit",
-    "check.basis.heuristic": "heuristic",
-    "check.basis.observation": "observation",
-    "check.basis.experimental": "experimental",
+    "check.status.ok": "OK", "check.status.info": "NOTE",
+    "check.status.warn": "WARNING", "check.status.collecting": "CHECKING",
+    "check.status.observation": "MEASURED ONLY", "check.status.experimental": "EXPERIMENTAL",
+    "check.status.unavailable": "NOT AVAILABLE",
+    "check.summary": (s, n, a) => a > 0 ? `${s} · ${n}/${a} assessed` : s,
+    "check.detail.label": "Status:",
+    "check.detail.ok": "Assessment complete; no finding in the observed X10A data.",
+    "check.detail.info": "Notable value or pattern; this is not proof of a defect.",
+    "check.detail.warn": "A device finding or documented limit needs attention.",
+    "check.detail.collecting": (n, r) => `${n} of ${r} captured; no assessment is possible yet.`,
+    "check.detail.collecting_unknown": "Not enough usable evidence for an assessment yet.",
+    "check.detail.observation": "Measured value only; there is no universal OK/WARNING limit.",
+    "check.detail.experimental": "Experimental observation; a stable counter is not proof that no limiting occurred.",
+    "check.detail.unavailable": "The active profile provides no assessable data for this check.",
     "check.starts": (n) => `${n} ${n === 1 ? "start" : "starts"}`,
     "check.cycles": (n) => `${n} ${n === 1 ? "cycle" : "cycles"}`,
-    "check.paired_cycles": (n) => `${n} with compressor evidence`,
-    "check.mean": (d) => `${d} runtime/start`,
+    "check.paired_cycles": (n) => `${n} paired`,
+    "check.mean": (d) => `${d}/start`,
     "check.min": (m) => `${m} min`,
     "check.tank": (m) => `tank ${m} min`,
     "check.tank_runtime": (d) => `tank ${d}`,
@@ -307,34 +303,29 @@ const I18N = {
     "card.txpin": "TX-Pin", "card.capacity": "Leistung",
     "card.capacity_iu": "Leistung (Inneneinheit)",
     "card.candidates": "Mögliche Modelle", "card.oueeprom": "Kennung Außeneinheit",
-    "card.checkup": "X10A-Betriebsbeobachtung · bis 24 h",
+    "card.checkup": "X10A-Check · 24 h",
     "check.fault": "Störung der Anlage", "check.cycling": "Verdichterstarts",
     "check.defrost": "Abtauvorgänge", "check.pressure": "Wasserdruck, niedrigster",
     "check.flow": "Durchfluss, niedrigster", "check.heater": "Zusatzheizer",
     "check.retries": "Schutz-Rückregelungen",
-    "check.all_ok": "Keine Auffälligkeit in beobachteten X10A-Daten",
-    "check.notice": "Betriebshinweis",
-    "check.attention": "Störung / dokumentierte Grenze",
-    "check.nodata": "Keine bewertbare Prüfung verfügbar",
-    "check.collecting": "sammelt…",
-    "check.collecting_status": "Sammelt",
-    "check.collecting_for": (w) => `Sammelt · ${w}`,
-    "check.summary": (s, n, a, r, w) => `${s} · ${n}/${a} bewertet · ${r} unterstützt · ${w}`,
-    "check.evidence": (n, r) => `${n} / ${r} beobachtet`,
-    "check.win_none": "noch keine Daten",
-    "check.win_lt_min": "<1 min von 24 h",
-    "check.win_min": (m) => `${m} min von 24 h`,
-    "check.win_h": (h) => `${h} h von 24 h`,
-    "check.win_hm": (h, m) => `${h} h ${m} min von 24 h`,
-    "check.basis.device": "Gerätezustand",
-    "check.basis.manufacturer": "Herstellergrenze",
-    "check.basis.heuristic": "Heuristik",
-    "check.basis.observation": "Beobachtung",
-    "check.basis.experimental": "experimentell",
+    "check.status.ok": "OK", "check.status.info": "HINWEIS",
+    "check.status.warn": "WARNUNG", "check.status.collecting": "PRÜFT",
+    "check.status.observation": "NUR MESSWERT", "check.status.experimental": "EXPERIMENTELL",
+    "check.status.unavailable": "NICHT VERFÜGBAR",
+    "check.summary": (s, n, a) => a > 0 ? `${s} · ${n}/${a} bewertet` : s,
+    "check.detail.label": "Status:",
+    "check.detail.ok": "Bewertung abgeschlossen; kein Befund in den beobachteten X10A-Daten.",
+    "check.detail.info": "Auffälliger Wert oder Verlauf; das ist kein Defektnachweis.",
+    "check.detail.warn": "Ein Gerätebefund oder eine dokumentierte Grenze erfordert Prüfung.",
+    "check.detail.collecting": (n, r) => `${n} von ${r} erfasst; eine Bewertung ist noch nicht möglich.`,
+    "check.detail.collecting_unknown": "Noch nicht genug verwertbare Evidenz für eine Bewertung.",
+    "check.detail.observation": "Nur Messwert; dafür gibt es keinen allgemeinen OK-/WARNUNG-Grenzwert.",
+    "check.detail.experimental": "Experimentelle Beobachtung; ein stabiler Zähler beweist nicht, dass keine Begrenzung stattfand.",
+    "check.detail.unavailable": "Das aktive Profil liefert für diese Prüfung keine auswertbaren Daten.",
     "check.starts": (n) => `${n} ${n === 1 ? "Start" : "Starts"}`,
     "check.cycles": (n) => `${n} ${n === 1 ? "Vorgang" : "Vorgänge"}`,
-    "check.paired_cycles": (n) => `${n} mit Verdichterevidenz`,
-    "check.mean": (d) => `${d} Laufzeit/Start`,
+    "check.paired_cycles": (n) => `${n} gepaart`,
+    "check.mean": (d) => `${d}/Start`,
     "check.min": (m) => `${m} min`,
     "check.tank": (m) => `Speicher ${m} min`,
     "check.tank_runtime": (d) => `Speicher ${d}`,
@@ -354,10 +345,10 @@ const I18N = {
     // broken label rather than as a translation.
     "state.on": "ON", "state.off": "OFF",
     "chip.demand_on": "Anforderung ON", "chip.demand_off": "Anforderung OFF", "chip.quiet": "Leise",
-    "schem.sg_forced_off": "MODBUS · ERZWUNGEN AUS", "schem.sg_boost": "MODBUS · BOOST AKTIV",
-    "schem.sg_forced_on": "MODBUS · ERZWUNGEN EIN",
-    "sg.mode0": "0 · Freier Betrieb", "sg.mode1": "1 · Erzwungen aus",
-    "sg.mode2": "2 · Empfohlen ein", "sg.mode3": "3 · Erzwungen ein",
+    "schem.sg_forced_off": "MODBUS · ERZWUNGEN OFF", "schem.sg_boost": "MODBUS · BOOST AKTIV",
+    "schem.sg_forced_on": "MODBUS · ERZWUNGEN ON",
+    "sg.mode0": "0 · Freier Betrieb", "sg.mode1": "1 · Erzwungen OFF",
+    "sg.mode2": "2 · Empfohlen ON", "sg.mode3": "3 · Erzwungen ON",
     "schem.to_dhw": "3WV → WW", "schem.to_heat": "3WV → Heizung",
     "normal.label": "Normal:",
     "hist.title": "Letzte 24 Stunden", "hist.since": (h) => `Seit Neustart · ${h} h`,
@@ -1316,7 +1307,7 @@ function esp32CardHtml() {
 // How long the board has been up (/status.uptime_s — seconds since boot, esp_timer). TWO units at
 // most, coarsest first: at three days nobody is reading the minutes, and a figure that reshuffles
 // every second is a clock, not a diagnostic. The unit symbols are SI and identical in both
-// languages, so this needs no translation table of its own — checkupWindow() already prints "min"
+// languages, so this needs no translation table of its own — checkupDuration() already prints "min"
 // and "h" untranslated for the same reason. Deliberately NOT the heartbeat's own uptime string
 // (logic/heartbeat.hpp's format_uptime, "Ddd+HH:MM:SS.mmm"): that one is read by Home Assistant and
 // sorts/parses as a fixed field, this one is read by a person standing in front of the board.
@@ -1457,38 +1448,44 @@ const CHECKUP_ROW = {
   heater:   "check.heater",
   retries:  "check.retries",
 };
-// Verdict → the row's value colour and the badge's dot. Warn is reserved for a unit fault or the
-// documented pressure boundary; heuristic findings are Info. Ok is left untinted — seven coloured
-// rows are noise, and the badge already states the evidence-bounded result.
-const CHECKUP_TONE = { warn: "err", info: "warn", ok: "", collecting: "", unavailable: "" };
+// Verdict → row value colour and card-dot colour. The word beside the reading is the primary signal;
+// colour only makes the five states faster to scan and never carries meaning on its own.
+const CHECKUP_TONE = { warn: "err", info: "warn", ok: "ok", collecting: "dim",
+                       observation: "dim", experimental: "dim", unavailable: "dim" };
 
-// How much of the 24 hours has actually been observed. Printed rather than rounded away: the ring is
-// RAM-only and this device reboots often, so a partial window is the normal case and the reader has
-// to be able to see that a verdict rests on four hours rather than a day.
-function checkupWindow(s) {
-  const seconds = Math.min(24 * 3600, Math.floor(Number(s)));
-  if (!Number.isFinite(seconds) || seconds <= 0) return t("check.win_none");
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 1) return t("check.win_lt_min");
-  if (minutes < 60) return t("check.win_min", minutes);
-  const hours = Math.floor(minutes / 60), remainder = minutes % 60;
-  return remainder ? t("check.win_hm", hours, remainder) : t("check.win_h", hours);
-}
-
-function checkupDuration(s, roundUp = false) {
+function checkupDuration(s) {
   const seconds = Number(s);
   if (!Number.isFinite(seconds) || seconds <= 0) return "0 min";
-  const minutes = roundUp ? Math.ceil(seconds / 60) : Math.floor(seconds / 60);
+  const minutes = Math.floor(seconds / 60);
   if (minutes < 1) return "<1 min";
   if (minutes < 60) return `${minutes} min`;
   const hours = Math.floor(minutes / 60), remainder = minutes % 60;
   return remainder ? `${hours} h ${remainder} min` : `${hours} h`;
 }
 
-function checkupCollecting(c, value) {
-  if (!(c.required_s > 0)) return value;
-  return `${value} · ${t("check.evidence", checkupDuration(c.observed_s),
-                         checkupDuration(c.required_s, true))}`;
+function checkupStatusKey(c) {
+  const verdict = typeof c === "string" ? c : c?.verdict;
+  if (verdict === "ok" && c?.evidence === "observation") return "observation";
+  if (verdict === "ok" && c?.evidence === "experimental") return "experimental";
+  return ["ok", "info", "warn", "collecting", "unavailable"].includes(verdict)
+    ? verdict : "unavailable";
+}
+
+function checkupStatusText(c) {
+  return t(`check.status.${checkupStatusKey(c)}`);
+}
+
+function checkupDetailHtml(c) {
+  const statusKey = checkupStatusKey(c);
+  let detail;
+  if (statusKey === "collecting") {
+    detail = c.required_s > 0
+      ? t("check.detail.collecting", checkupDuration(c.observed_s), checkupDuration(c.required_s))
+      : t("check.detail.collecting_unknown");
+  } else {
+    detail = t(`check.detail.${statusKey}`);
+  }
+  return descNoteHtml(t("check.detail.label"), `${checkupStatusText(c)} — ${detail}`);
 }
 
 function checkupDefrostShare(c) {
@@ -1514,12 +1511,12 @@ function checkupHeaterRuntime(seconds, minutes) {
 // One row's value text. Every branch that has no number says so with a dash — a check that could not
 // be evaluated must never print a plausible zero (DESIGN.md's "an idle plant with no readings, not a
 // stale one", applied to a count).
-function checkupValue(c) {
+function checkupMetricValue(c) {
   const v = c.verdict;
   // Count-only defrost evidence without an RPS witness or positive runtime denominator is a supported
   // observation. `unavailable` means the defrost row itself was absent, so even a legacy payload's
   // numeric zero proves nothing.
-  if (v === "unavailable") return "—";
+  if (v === "unavailable") return "";
   const collecting = v === "collecting";
   switch (c.id) {
     case "fault":
@@ -1532,26 +1529,24 @@ function checkupValue(c) {
       if (c.active == null) return t("check.fault_unknown");
       return t("check.fault_none");
     case "cycling": {
-      if (c.starts == null) return checkupCollecting(c, t("check.collecting"));
+      if (c.starts == null) return "";
       const starts = t("check.starts", c.starts);
-      if (collecting || c.mean_run_s == null) return checkupCollecting(c, starts);
+      if (collecting || c.mean_run_s == null) return starts;
       return `${starts} · ${t("check.mean", checkupDuration(c.mean_run_s))}`;
     }
     case "defrost": {
-      if (c.count == null) return checkupCollecting(c, t("check.collecting"));
+      if (c.count == null) return "";
       const n = t("check.cycles", c.count);
-      if (collecting) return checkupCollecting(c, n);
+      if (collecting) return n;
       const share = checkupDefrostShare(c);
       const paired = c.paired_count == null ? "" : t("check.paired_cycles", c.paired_count);
       return [n, paired, share].filter(Boolean).join(" · ");
     }
     case "pressure": {
-      const value = c.min_bar == null ? t("check.collecting") : `${c.min_bar} bar`;
-      return collecting ? checkupCollecting(c, value) : value;
+      return c.min_bar == null ? "" : `${c.min_bar} bar`;
     }
     case "flow": {
-      const value = c.min_l_min == null ? t("check.collecting") : `${c.min_l_min} l/min`;
-      return collecting ? checkupCollecting(c, value) : value;
+      return c.min_l_min == null ? "" : `${c.min_l_min} l/min`;
     }
     case "heater": {
       const parts = [];
@@ -1559,20 +1554,17 @@ function checkupValue(c) {
       const bsh = checkupHeaterRuntime(c.bsh_s, c.bsh_min);
       if (buh) parts.push(buh);
       if (bsh) parts.push(t("check.tank_runtime", bsh));
-      const value = parts.length ? parts.join(" · ") : t("check.collecting");
-      return collecting ? checkupCollecting(c, value) : value;
+      return parts.join(" · ");
     }
-    case "retries":  return c.seen == null ? checkupCollecting(c, t("check.collecting"))
-                          : c.seen ? t("check.retry_seen") : t("check.retry_none");
+    case "retries":  return c.seen == null ? "" : c.seen ? t("check.retry_seen") : t("check.retry_none");
   }
-  return "—";
+  return "";
 }
 
-function checkupDisplayValue(c) {
-  const value = checkupValue(c);
-  const known = new Set(["device", "manufacturer", "heuristic", "observation", "experimental"]);
-  const basis = known.has(c.evidence) ? t(`check.basis.${c.evidence}`) : "";
-  return basis ? `${value} · ${basis}` : value;
+function checkupValue(c) {
+  const value = checkupMetricValue(c);
+  const status = checkupStatusText(c);
+  return value ? `${value} · ${status}` : status;
 }
 
 function checkupCardHtml() {
@@ -1582,23 +1574,22 @@ function checkupCardHtml() {
   for (const c of h.checks) {
     const key = CHECKUP_ROW[c.id];
     if (!key) continue;                               // a check this UI does not know: skipped, never guessed at
-    const tone = CHECKUP_TONE[c.verdict] || "";
-    rows += modelDescRow(`health_${c.id}`, t(key), checkupDisplayValue(c),
-                         { cls: `checkup-val${tone ? ` ${tone}` : ""}` });
+    const tone = CHECKUP_TONE[checkupStatusKey(c)] || "";
+    rows += modelDescRow(`health_${c.id}`, t(key), checkupValue(c),
+                         { cls: `checkup-val${tone ? ` ${tone}` : ""}`,
+                           bodyPrefix: checkupDetailHtml(c) });
   }
   if (!rows) return "";
-  // The badge states the bounded result, evaluated/assessable judgement count and broader number of
-  // supported rows. A finding can surface early while other rows collect, so coverage is never hidden.
-  const status = { ok: t("check.all_ok"), info: t("check.notice"), warn: t("check.attention"),
-                  collecting: t("check.collecting_status"),
-                  unavailable: t("check.nodata") }[h.status] || "";
+  // The badge gives only the card-level verdict and judgement progress. Evidence clocks live in each
+  // row's explainer, where they qualify the result without competing with the first-glance status.
+  const status = checkupStatusText(h.status);
   const available = Number.isFinite(h.available) ? h.available : h.checks.filter(c => c.verdict !== "unavailable").length;
   const evaluated = Number.isFinite(h.evaluated) ? h.evaluated
                   : h.checks.filter(c => c.verdict !== "unavailable" && c.verdict !== "collecting").length;
   // New firmware distinguishes facts it can report from checks capable of a bounded judgement.
   // Older payloads had only `available`; using it as the fallback keeps their established contract.
   const assessable = Number.isFinite(h.assessable) ? h.assessable : available;
-  const badge = t("check.summary", status, evaluated, assessable, available, checkupWindow(h.covered_s));
+  const badge = t("check.summary", status, evaluated, assessable);
   const badgeCls = { warn: "err", ok: "ok", collecting: "dim", unavailable: "dim" }[h.status] || "";
   return vcard(t("card.checkup"), rows, badge, badgeCls);
 }
@@ -1825,7 +1816,7 @@ const DESCRIPTIONS = [
     what: "Water temperature after the electric backup heater (sensor R2T) — the temperature that actually reaches your radiators/underfloor.",
     normal: "equal to the before-BUH temperature when the backup heater is off (the usual case); higher only while the BUH is firing.",
     de: { what: "Wassertemperatur nach dem elektrischen Zusatzheizer (Fühler R2T) — die Temperatur, die tatsächlich an Heizkörper/Fußbodenheizung ankommt.",
-          normal: "gleich der Temperatur vor dem BUH, wenn der Zusatzheizer aus ist (der Normalfall); höher nur, während der BUH heizt." } },
+          normal: "gleich der Temperatur vor dem BUH, wenn der Zusatzheizer OFF ist (der Normalfall); höher nur, während der BUH heizt." } },
   { re: /before buh|after phe|outlet water heat exch|leaving water.*\(?r1t\)?|tv inflow|outlet water heat exchanger/i,
     what: "Water temperature leaving the heat pump's own heat exchanger, before the backup heater (sensor R1T) — the true heat-pump output temperature and the one used for ΔT / heat-output / COP.",
     normal: "space heating ~30–45 °C (underfloor lower, radiators higher); up to ~55 °C on a DHW run. Much higher than the target usually means the backup heater is contributing.",
@@ -1876,7 +1867,7 @@ const DESCRIPTIONS = [
   { exact: true, re: /^smart[- ]grid operation mode$/i,
     what: "The HomeHub's Smart-Grid request: 0 Free running, 1 Forced off, 2 Recommended on, 3 Forced on. It is an energy-management command, not the outdoor unit's Heating/Cooling mode.",
     normal: "0 during ordinary autonomous operation. Values 1–3 should appear only while an external energy manager deliberately blocks, recommends or forces operation.",
-    de: { what: "Die Smart-Grid-Anforderung des HomeHub: 0 Freier Betrieb, 1 Erzwungen aus, 2 Empfohlen ein, 3 Erzwungen ein. Das ist ein Energiemanagement-Befehl, nicht der Heiz-/Kühlmodus der Außeneinheit.",
+    de: { what: "Die Smart-Grid-Anforderung des HomeHub: 0 Freier Betrieb, 1 Erzwungen OFF, 2 Empfohlen ON, 3 Erzwungen ON. Das ist ein Energiemanagement-Befehl, nicht der Heiz-/Kühlmodus der Außeneinheit.",
           normal: "0 im normalen autonomen Betrieb. Die Werte 1–3 sollten nur erscheinen, wenn ein externes Energiemanagement den Betrieb bewusst sperrt, empfiehlt oder erzwingt." } },
   { re: /operation mode|operation \/ fault|^operation$/i,
     what: "The outdoor unit's thermodynamic mode (Heating, Cooling, …). While it heats the tank it still reports Heating — it is heating, just the water in the tank rather than the house.",
@@ -1912,7 +1903,7 @@ const DESCRIPTIONS = [
   { re: /thermostat/i,
     what: "Whether the indoor unit is currently asking the outdoor unit to run — Daikin's \"thermo ON\". It does not say what the heat is for: a hot-water charge turns it ON exactly like a call for space heating. For the heating circuit alone, read \"Space heating Operation\".",
     normal: "ON while the unit runs, OFF while it is satisfied — for either load.",
-    de: { what: "Ob die Inneneinheit gerade Betrieb der Außeneinheit anfordert — Daikins „Thermo ON\". Wofür die Wärme gebraucht wird, sagt das Bit nicht: Eine Warmwasserladung schaltet es genauso ein wie eine Heizungsanforderung. Für den Heizkreis allein ist „Space heating Operation\" der richtige Wert.",
+    de: { what: "Ob die Inneneinheit gerade Betrieb der Außeneinheit anfordert — Daikins „Thermo ON\". Wofür die Wärme gebraucht wird, sagt das Bit nicht: Eine Warmwasserladung setzt es genauso auf ON wie eine Heizungsanforderung. Für den Heizkreis allein ist „Space heating Operation\" der richtige Wert.",
           normal: "ON, solange das Gerät läuft, OFF, wenn der Bedarf gedeckt ist — für beide Lasten." } },
   { re: /space heating operation|space h operation/i,
     what: "Whether space heating (as opposed to hot-water production) is currently active or being called for. This is the branch-specific one: it stays OFF through a hot-water charge, which the unit-wide \"Thermostat ON/OFF\" does not.",
@@ -2156,12 +2147,12 @@ const DESCRIPTIONS = [
     what: "The water leaving the heat pump's plate heat exchanger, BEFORE the electric backup heater. This is the heat pump's own output — the figure the ΔT and the COP on the drawing are computed from.",
     normal: "runs above the return temperature while the pump is circulating; the gap between the two IS the ΔT. Equal to the row below it whenever the backup heater is off.",
     de: { what: "Das Wasser, das den Plattenwärmetauscher verlässt — VOR dem elektrischen Zusatzheizer. Das ist die Leistung der Wärmepumpe selbst und die Grundlage für ΔT und COP in der Zeichnung.",
-          normal: "liegt über dem Rücklauf, solange die Pumpe fördert; der Abstand zwischen beiden IST das ΔT. Bei ausgeschaltetem Zusatzheizer gleich der Zeile darunter." } },
+          normal: "liegt über dem Rücklauf, solange die Pumpe fördert; der Abstand zwischen beiden IST das ΔT. Bei Zusatzheizer OFF gleich der Zeile darunter." } },
   { re: /^leaving water temp\. \(buh\)$/i,
     what: "The same water AFTER the electric backup heater — what the house actually receives. The difference to the row above is the heater's contribution.",
     normal: "identical to the pre-heater reading whenever the backup heater is off, which is most of the time. A persistent gap means it is running, and that is resistance heat at a COP of 1.",
     de: { what: "Dasselbe Wasser NACH dem elektrischen Zusatzheizer — das, was im Haus ankommt. Die Differenz zur Zeile darüber ist der Beitrag des Heizstabs.",
-          normal: "bei ausgeschaltetem Zusatzheizer identisch mit dem Wert davor, und das ist der Normalfall. Ein dauerhafter Abstand heißt: er läuft — Widerstandswärme mit COP 1." } },
+          normal: "bei Zusatzheizer OFF identisch mit dem Wert davor, und das ist der Normalfall. Ein dauerhafter Abstand heißt: er läuft — Widerstandswärme mit COP 1." } },
   { re: /^liquid refrigerant temp\.$/i,
     what: "The refrigerant temperature in the liquid line between the outdoor unit and the exchanger — after it has given up its heat and condensed.",
     normal: "a few kelvin above the leaving water in heating, and it tracks the water rather than the weather. Far below outdoor air while idle simply means the circuit is at rest.",
@@ -2191,12 +2182,12 @@ const DESCRIPTIONS = [
     what: "Whether the space circuit is ENABLED at all — the switch, not the current activity. The space-operation row above says whether it is being served right now.",
     normal: "on through the heating season, off in summer. Off here means no amount of demand will start the circuit.",
     de: { what: "Ob der Heiz-/Kühlkreis überhaupt FREIGEGEBEN ist — der Schalter, nicht die aktuelle Tätigkeit. Ob er gerade bedient wird, sagt die Zeile „Space operation\" weiter oben.",
-          normal: "in der Heizperiode ein, im Sommer aus. Steht er hier auf aus, startet den Kreis auch keine Anforderung." } },
+          normal: "in der Heizperiode ON, im Sommer OFF. Steht er hier auf OFF, startet den Kreis auch keine Anforderung." } },
   { re: /^quiet mode$/i,
     what: "Low-noise operation: the outdoor unit caps its fan and compressor speed, which costs capacity.",
     normal: "off by default, or on to a schedule at night. On during a cold snap is worth knowing — it is a reason for a plant that cannot keep up.",
     de: { what: "Geräuscharmer Betrieb: die Außeneinheit begrenzt Lüfter- und Verdichterdrehzahl, was Leistung kostet.",
-          normal: "standardmäßig aus, oder nachts per Zeitprogramm ein. Bei Frost eingeschaltet ist eine Erklärung wert — es ist ein Grund dafür, dass eine Anlage nicht nachkommt." } },
+          normal: "standardmäßig OFF oder nachts per Zeitprogramm ON. Bei Frost ON ist eine Erklärung wert — es ist ein Grund dafür, dass eine Anlage nicht nachkommt." } },
   { re: /^dhw reheat setpoint$/i,
     what: "The tank temperature at which the unit starts a reheat, rather than waiting for the full DHW setpoint to be called for.",
     normal: "a few kelvin under the DHW setpoint. Set close to it and the unit reheats constantly; set far below and hot water runs out before it reacts.",
@@ -3095,40 +3086,40 @@ const MODEL_DESCRIPTIONS = {
   // are not on this bus — and a reader who assumes the firmware is asserting more than it is will draw
   // the wrong conclusion from a correct number.
   health_fault: {
-    what: "The unit's own diagnostic class, read from every fault-class row supplied by the active X10A profile. An active Error is a direct device finding; Warning and Caution are shown as operating notes. A clear state is only accepted when all supported class rows were readable.",
-    normal: "no fault active. A class seen earlier in this RAM-only rolling window remains visible after it clears. Rebooting or explicitly changing the X10A identity (re-detection, profile or RX/TX pins) starts a new window; a HomeHub-only edit does not. The actual fault code and its description remain in the value list under Operation.",
-    de: { what: "Die geräteeigene Diagnoseklasse aus allen Störungsklassen-Zeilen, die das aktive X10A-Profil liefert. Ein aktiver Fehler ist ein direkter Gerätebefund; Warnung und Vorsicht erscheinen als Betriebshinweis. Ein freier Zustand gilt nur, wenn alle unterstützten Klassenzeilen lesbar waren.",
-          normal: "Aktuell keine Störung. Eine zuvor in diesem RAM-basierten rollierenden Fenster gelesene Klasse bleibt nach dem Verschwinden sichtbar. Ein Neustart oder eine explizite Änderung der X10A-Identität (Neuerkennung, Profil oder RX/TX-Pins) beginnt ein neues Fenster; eine reine HomeHub-Änderung nicht. Störungscode und Beschreibung stehen weiterhin unten in der Werteliste unter „Betrieb“." } },
+    what: "The unit's own fault class. Error is a direct device finding; Warning and Caution produce a note. OK requires every supported fault-class row to be readable.",
+    normal: "A fault seen in this RAM window remains listed after it clears. Rebooting or changing the X10A identity starts a new window. The exact code remains under Operation.",
+    de: { what: "Die geräteeigene Störungsklasse. Fehler ist ein direkter Gerätebefund; Warnung und Vorsicht ergeben einen Hinweis. Für OK müssen alle unterstützten Klassenzeilen lesbar sein.",
+          normal: "Eine in diesem RAM-Fenster erkannte Störung bleibt nach dem Verschwinden vermerkt. Neustart oder Änderung der X10A-Identität beginnen ein neues Fenster. Der genaue Code steht unter „Betrieb“." } },
   health_cycling: {
-    what: "Compressor off-to-on transitions and observed compressor runtime divided by observed starts. Runs crossing either window edge can be censored, so this is not a mean of completed cycles. The row needs a full rolling lifecycle plus at least 90% readable compressor-state evidence before it can report no finding.",
-    normal: "Less than ten minutes of observed runtime per start with at least twelve starts is a deliberately broad heuristic and only creates an operating note. X10A does not attach heating, cooling, hot-water demand or load to each cycle; mixed modes and window edges can mask or create the pattern. Use the figures as a prompt to inspect mode-specific history, not as proof of a defect.",
-    de: { what: "Gezählt werden Wechsel des Verdichters von Aus zu Ein; die beobachtete Verdichterlaufzeit wird durch die beobachteten Starts geteilt. Läufe an beiden Fensterrändern können abgeschnitten sein, daher ist dies kein Mittelwert abgeschlossener Zyklen. Für „keine Auffälligkeit“ braucht die Zeile einen vollständigen rollierenden Fensterzyklus und mindestens 90 % lesbaren Verdichterzustand.",
-          normal: "Weniger als zehn Minuten beobachtete Laufzeit je Start bei mindestens zwölf Starts ist eine bewusst breite Heuristik und erzeugt nur einen Betriebshinweis. X10A ordnet den Läufen weder Heizen, Kühlen, Warmwasserbedarf noch Last zu; gemischte Betriebsarten und Fensterränder können das Muster verdecken oder erzeugen. Die Zahlen sind ein Anlass, den betriebsartspezifischen Verlauf zu prüfen, kein Defektnachweis." } },
+    what: "Counts compressor OFF-to-ON transitions and divides observed runtime by starts. Runs at the window edges may be incomplete.",
+    normal: "Below 10 minutes per start with at least 12 starts produces a NOTE, not a defect diagnosis. X10A does not separate heating, cooling and hot-water cycles; OK needs a full window and 90% readable compressor state.",
+    de: { what: "Gezählt werden Wechsel des Verdichters von OFF zu ON; die beobachtete Laufzeit wird durch die Starts geteilt. Läufe an den Fensterrändern können unvollständig sein.",
+          normal: "Unter 10 Minuten je Start bei mindestens 12 Starts ergibt HINWEIS, keinen Defektnachweis. X10A trennt Heizen, Kühlen und Warmwasser nicht; OK erfordert ein volles Fenster und 90 % lesbaren Verdichterzustand." } },
   health_defrost: {
-    what: "Defrost off-to-on transitions and the share of compressor runtime for which defrost and compressor state were readable together. The raw cycle count stays visible; a separate paired count says how many transitions had compressor evidence at both endpoints. Missing or zero compressor-runtime evidence produces no ratio judgement.",
-    normal: "More than 15% across at least three paired cycles is only an operating note. Outdoor temperature alone cannot determine whether a defrost was necessary; X10A lacks humidity and coil-surface temperature. The observation supports follow-up of air path and weather context, but does not diagnose icing or a fan fault.",
-    de: { what: "Gezählt werden Wechsel der Abtauung von Aus zu Ein sowie ihr Anteil an der Verdichterlaufzeit, für die Abtau- und Verdichterzustand gleichzeitig lesbar waren. Die rohe Anzahl bleibt sichtbar; eine separate gepaarte Anzahl nennt Übergänge mit Verdichterevidenz an beiden Endpunkten. Ohne oder bei null Verdichterlaufzeit-Evidenz entsteht kein Anteilsurteil.",
-          normal: "Mehr als 15 % bei mindestens drei gepaarten Vorgängen ist nur ein Betriebshinweis. Aus der Außentemperatur allein lässt sich die Notwendigkeit einer Abtauung nicht bestimmen; X10A liefert weder Luftfeuchte noch Oberflächentemperatur des Wärmetauschers. Die Beobachtung begründet eine Prüfung von Luftweg und Wetterkontext, diagnostiziert aber weder Vereisung noch einen Lüfterfehler." } },
+    what: "Counts defrost OFF-to-ON transitions and their share of paired compressor runtime. Without readable compressor runtime, no share is assessed.",
+    normal: "Above 15% with at least three paired cycles produces a NOTE only. X10A lacks humidity and coil-surface temperature, so it cannot diagnose icing or a fan fault.",
+    de: { what: "Gezählt werden Wechsel der Abtauung von OFF zu ON und ihr Anteil an der gemeinsam lesbaren Verdichterlaufzeit. Ohne lesbare Verdichterlaufzeit wird kein Anteil bewertet.",
+          normal: "Über 15 % bei mindestens drei gepaarten Vorgängen ergibt nur HINWEIS. X10A kennt weder Luftfeuchte noch Wärmetauscher-Oberflächentemperatur und diagnostiziert deshalb keine Vereisung oder Lüfterstörung." } },
   health_pressure: {
-    what: "The raw lowest valid circuit-pressure sample in the rolling RAM window, with a separate pressure-specific evidence clock. Warning debounce never rewrites this minimum. One isolated sample cannot borrow the card's global collection time.",
-    normal: "Daikin documentation requires the circuit pressure to be above 1 bar. A minimum at or below 1.0 bar is shown immediately as an operating note and becomes a warning only after 60 continuous seconds, rejecting a lone corrupt frame without hiding the measurement. No separate preventive band is inferred. A normal minimum does not become a no-finding result until a full window lifecycle and 90% pressure evidence are present.",
-    de: { what: "Der rohe niedrigste gültige Druckwert im rollierenden RAM-Fenster mit eigener Evidenzzeit für den Druck. Die Warnungsentprellung schreibt dieses Minimum nie um. Ein einzelner Messwert kann sich nicht die globale Sammelzeit der Karte ausleihen.",
-          normal: "Laut Daikin-Dokumentation muss der Druck im Wasserkreis über 1 bar liegen. Ein Minimum bei oder unter 1,0 bar erscheint sofort als Betriebshinweis und wird erst nach 60 ununterbrochenen Sekunden zur Warnung; so wird ein einzelner beschädigter Frame verworfen, ohne den Messwert zu verbergen. Eine zusätzliche Vorsorgezone wird nicht abgeleitet. Aus einem unauffälligen Minimum wird erst nach einem vollständigen Fensterzyklus und 90 % Druckevidenz ein Ergebnis ohne Befund." } },
+    what: "The lowest valid circuit-pressure reading in the rolling window. Its evidence time is tracked independently from the card.",
+    normal: "Daikin requires more than 1 bar. At or below 1.0 bar gives a NOTE immediately and a WARNING after 60 continuous seconds. OK needs a full window and 90% readable pressure data.",
+    de: { what: "Der niedrigste gültige Wasserdruck im rollierenden Fenster. Seine Evidenzzeit wird unabhängig von der Karte erfasst.",
+          normal: "Daikin fordert mehr als 1 bar. Bei höchstens 1,0 bar erscheint sofort HINWEIS und nach 60 durchgehenden Sekunden WARNUNG. OK erfordert ein volles Fenster und 90 % lesbare Druckdaten." } },
   health_flow: {
-    what: "The lowest valid flow sample after the circulation pump had been continuously known-on for 60 seconds. Pump start-up, valve movement, stopped-pump values, unknown state and communication gaps are excluded.",
-    normal: "This is observation only. The required minimum is model- and operating-condition-specific, so the firmware deliberately applies no generic threshold. Compare it with the installation documentation for the exact unit; a device-raised flow fault appears in the fault row.",
-    de: { what: "Der niedrigste gültige Durchflusswert, nachdem die Umwälzpumpe 60 Sekunden ununterbrochen nachweislich eingeschaltet war. Pumpenanlauf, Ventilbewegung, Werte bei stehender Pumpe, unbekannter Zustand und Kommunikationslücken sind ausgeschlossen.",
-          normal: "Das ist nur eine Beobachtung. Der erforderliche Mindestdurchfluss hängt von Modell und Betriebsbedingung ab; die Firmware wendet deshalb bewusst keinen allgemeinen Grenzwert an. Vergleichen Sie mit der Installationsdokumentation des exakten Geräts; eine von der Anlage gemeldete Durchflussstörung erscheint in der Störungszeile." } },
+    what: "The lowest flow after the circulation pump was continuously ON for 60 seconds. Pump start, stopped-pump values and communication gaps are excluded.",
+    normal: "Observation only: the required flow is model- and operating-condition-specific, so there is no generic OK/WARNING threshold. A device-raised flow fault appears in the fault row.",
+    de: { what: "Der niedrigste Durchfluss, nachdem die Umwälzpumpe 60 Sekunden durchgehend ON war. Pumpenanlauf, Werte bei stehender Pumpe und Kommunikationslücken sind ausgeschlossen.",
+          normal: "Nur Beobachtung: Der erforderliche Durchfluss hängt von Modell und Betriebsbedingung ab; deshalb gibt es hier keinen allgemeinen OK-/WARNUNG-Grenzwert. Eine Gerätestörung erscheint in der Störungszeile." } },
   health_heater: {
-    what: "Observed time, carried in seconds, for the space-heating backup heater (BUH) and, independently, the tank immersion heater (BSH). It is accumulated between completed poll sweeps, so a pulse entirely between sweeps can still be missed. Unsupported or unreadable channels remain unknown rather than becoming zero; an active supported BUH step is sufficient to prove BUH on.",
-    normal: "Observation only. Weather, emergency mode, defrost support, installer settings, hot-water schedules and surplus-energy control can all make heater runtime legitimate. There is no universal runtime threshold and this row does not infer efficiency or a defect.",
-    de: { what: "Beobachtete, sekundengenau übertragene Zeit des Zusatzheizers im Heizkreis (BUH) und unabhängig davon des Heizstabs im Speicher (BSH). Sie wird zwischen abgeschlossenen Poll-Durchläufen aufsummiert; ein vollständig dazwischenliegender Impuls kann daher fehlen. Nicht unterstützte oder nicht lesbare Kanäle bleiben unbekannt und werden nicht zu null; ein aktiver unterstützter BUH-Schritt belegt dagegen den eingeschalteten BUH.",
-          normal: "Nur eine Beobachtung. Wetter, Notbetrieb, Abtauunterstützung, Installateureinstellungen, Warmwasserzeitpläne und Überschusssteuerung können Laufzeit jeweils plausibel machen. Es gibt keinen allgemeingültigen Laufzeitgrenzwert; die Zeile leitet weder Effizienz noch einen Defekt daraus ab." } },
+    what: "Observed runtime of the space-heating backup heater (BUH) and tank heater (BSH). Very short pulses between polls can be missed; unreadable channels remain unknown, not zero.",
+    normal: "Observation only. Weather, emergency mode, defrost support, schedules and surplus control can justify runtime. There is no universal OK/WARNING threshold or efficiency diagnosis.",
+    de: { what: "Beobachtete Laufzeit von Zusatzheizer (BUH) und Speicherheizstab (BSH). Sehr kurze Impulse zwischen Abfragen können fehlen; unlesbare Kanäle bleiben unbekannt und werden nicht zu null.",
+          normal: "Nur Beobachtung. Wetter, Notbetrieb, Abtauhilfe, Zeitpläne und Überschusssteuerung können Laufzeit erklären. Es gibt keinen allgemeinen OK-/WARNUNG-Grenzwert und keine Effizienzdiagnose." } },
   health_retries: {
-    what: "Experimental observation of the five supported 3-bit protection counters. The first readable value is a baseline; only a strict per-counter increase between continuous, fully comparable samples is reported, including one that becomes visible while stopped or at a compressor-state boundary. A stable non-zero value is not an event. Decreases, gaps and resets are neither events nor no-event evidence.",
-    normal: "Not observing an increase does not prove that no limiting occurred: the counter reset, clamp and wrap semantics are not manufacturer-documented here. An increase is an operating note, not a fault and not a causal diagnosis. Correlate it with the named counter, live values and device faults before acting.",
-    de: { what: "Experimentelle Beobachtung der fünf unterstützten 3-Bit-Schutzzähler. Der erste lesbare Wert ist nur die Basis; gemeldet wird ausschließlich ein strenger Anstieg desselben Zählers zwischen lückenlosen, vollständig vergleichbaren Messungen — auch wenn er erst im Stillstand oder an einer Verdichter-Zustandsgrenze sichtbar wird. Ein stabiler Wert ungleich null ist kein Ereignis. Abnahmen, Lücken und Rücksetzungen sind weder Ereignisse noch Gegenbelege.",
-          normal: "Ein nicht beobachteter Anstieg beweist nicht, dass keine Begrenzung stattfand: Rücksetz-, Sättigungs- und Überlaufverhalten der Zähler sind hier nicht herstellerdokumentiert. Ein Anstieg ist ein Betriebshinweis, keine Störung und keine Ursachendiagnose. Vor Maßnahmen mit benanntem Zähler, Live-Werten und Gerätestörungen korrelieren." } },
+    what: "Experimental check of five protection counters. Only a strict increase between continuous comparable samples counts, including one first visible while stopped or at a compressor-state boundary. Baseline, stable or decreasing values, gaps and resets do not.",
+    normal: "An increase gives a NOTE, not a fault diagnosis. No increase does not prove that no limiting occurred because reset and wrap semantics are undocumented.",
+    de: { what: "Experimentelle Prüfung von fünf Schutzzählern. Nur ein strenger Anstieg zwischen lückenlosen vergleichbaren Messungen zählt, auch wenn er erst im Stillstand oder an einer Verdichter-Zustandsgrenze sichtbar wird. Basiswert, stabile oder abnehmende Werte, Lücken und Rücksetzungen nicht.",
+          normal: "Ein Anstieg ergibt HINWEIS, keine Störungsdiagnose. Kein Anstieg beweist nicht, dass keine Begrenzung stattfand, weil Rücksetz- und Überlaufverhalten undokumentiert sind." } },
   // The two board-memory rows on the ESP32 card. The copy has one job beyond naming the number: to
   // say what the SHAPE of the curve means, because that is the whole reason these rows exist rather
   // than living on /status alone.
@@ -3183,7 +3174,8 @@ function modelDescRow(id, label, value, opt = {}) {
   const val = esc(value) + (opt.unit ? `<span class="vrow-unit">${esc(opt.unit)}</span>` : "");
   // No trend half here: the firmware keeps series for catalog readings, and these rows are model
   // identity — a nameplate fact, not something that moves.
-  return descAccordion(`model:${id}`, label, val, opt.cls || "", descBodyHtml(d));
+  return descAccordion(`model:${id}`, label, val, opt.cls || "",
+                       (opt.bodyPrefix || "") + descBodyHtml(d));
 }
 
 // Toggle a value row's description accordion. Only the LIVE element is flipped here (so the CSS
@@ -3811,7 +3803,7 @@ const INSPECT = {
     t: { en: "Smart-Grid request via Modbus", de: "Smart-Grid-Anforderung über Modbus" },
     what: {
       en: "The external Smart-Grid request read back from the HomeHub: 0 Free running, 1 Forced off, 2 Recommended on, 3 Forced on. It is an energy-management command, not the outdoor unit's heating/cooling mode and not proof that a requested tank charge has started.",
-      de: "Die vom HomeHub zurückgelesene externe Smart-Grid-Anforderung: 0 Freier Betrieb, 1 Erzwungen aus, 2 Empfohlen ein, 3 Erzwungen ein. Das ist ein Energiemanagement-Befehl, nicht der Heiz-/Kühlmodus der Außeneinheit und kein Beleg dafür, dass eine angeforderte Speicherladung bereits begonnen hat.",
+      de: "Die vom HomeHub zurückgelesene externe Smart-Grid-Anforderung: 0 Freier Betrieb, 1 Erzwungen OFF, 2 Empfohlen ON, 3 Erzwungen ON. Das ist ein Energiemanagement-Befehl, nicht der Heiz-/Kühlmodus der Außeneinheit und kein Beleg dafür, dass eine angeforderte Speicherladung bereits begonnen hat.",
     },
     head: (d) => sgModeText(d && d.sgMode),
     now: (d) => !d || d.sgMode == null
@@ -3819,13 +3811,13 @@ const INSPECT = {
           de: "Vom HomeHub ist gerade kein aktueller Smart-Grid-Wert verfügbar." }
       : d.sgMode === 2
       ? { en: "Active: the HomeHub reports Recommended on. This is the Smart-Grid state energy managers such as evcc use for boost. It requests extra buffering; DHW mode, the 3-way valve and flow separately show whether the unit is actually charging the tank.",
-          de: "Aktiv: Der HomeHub meldet Empfohlen ein. Diesen Smart-Grid-Zustand verwenden Energiemanager wie evcc als Boost. Er fordert zusätzliches Puffern an; Warmwasser-Betriebsart, 3-Wege-Ventil und Durchfluss zeigen separat, ob die Anlage den Speicher tatsächlich lädt." }
+          de: "Aktiv: Der HomeHub meldet Empfohlen ON. Diesen Smart-Grid-Zustand verwenden Energiemanager wie evcc als Boost. Er fordert zusätzliches Puffern an; Warmwasser-Betriebsart, 3-Wege-Ventil und Durchfluss zeigen separat, ob die Anlage den Speicher tatsächlich lädt." }
       : d.sgMode === 1
       ? { en: "Active: the external energy manager is forcing operation off.",
-          de: "Aktiv: Das externe Energiemanagement erzwingt den ausgeschalteten Betrieb." }
+          de: "Aktiv: Das externe Energiemanagement erzwingt Betrieb OFF." }
       : d.sgMode === 3
       ? { en: "Active: the external energy manager is forcing operation on.",
-          de: "Aktiv: Das externe Energiemanagement erzwingt den eingeschalteten Betrieb." }
+          de: "Aktiv: Das externe Energiemanagement erzwingt Betrieb ON." }
       : { en: "No external Smart-Grid request is active; the unit is running autonomously.",
           de: "Keine externe Smart-Grid-Anforderung ist aktiv; die Anlage arbeitet selbstständig." },
   },
@@ -4019,7 +4011,7 @@ const INSPECT = {
     now: (d) => (d.buh1 == null && d.buh2 == null) ? null
       : d.buh2 ? { en: "Step 2 — both stages firing.", de: "Stufe 2 — beide Stufen heizen." }
       : d.buh1 ? { en: "Step 1 — one stage firing.", de: "Stufe 1 — eine Stufe heizt." }
-      : { en: "Off — the heat pump is covering the load on its own.", de: "Aus — die Wärmepumpe deckt die Last allein." },
+      : { en: "Off — the heat pump is covering the load on its own.", de: "OFF — die Wärmepumpe deckt die Last allein." },
     rows: [/buh step ?1/i, /buh step ?2/i, /buh output capacity/i],
   },
   bsh: {
@@ -4122,7 +4114,7 @@ const INSPECT = {
       ? { en: `Flowing — ${fmt1(d.circP)} bar at ${fmt0(d.disch)} °C.`,
           de: `Durchströmt — ${fmt1(d.circP)} bar bei ${fmt0(d.disch)} °C.` }
       : { en: "Still — the compressor is stopped, so the circuit is at rest and simply equalised.",
-          de: "Steht — der Verdichter ist aus, der Kreis ruht und ist einfach ausgeglichen." },
+          de: "Steht — der Verdichter ist OFF, der Kreis ruht und ist einfach ausgeglichen." },
     rows: [/^high pressure$/i, /discharge pipe temp/i],
   },
   rcold: {
@@ -4134,7 +4126,7 @@ const INSPECT = {
     now: (d) => (d.rps ?? 0) > 0
       ? { en: `Flowing — expansion valve at ${fmt0(d.eev)} pulses.`,
           de: `Durchströmt — Expansionsventil bei ${fmt0(d.eev)} Impulsen.` }
-      : { en: "Still — the compressor is stopped.", de: "Steht — der Verdichter ist aus." },
+      : { en: "Still — the compressor is stopped.", de: "Steht — der Verdichter ist OFF." },
     rows: [/^low pressure$/i, /expansion valve ?1/i],
   },
   wsup: {
