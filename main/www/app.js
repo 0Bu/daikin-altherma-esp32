@@ -149,6 +149,10 @@ const I18N = {
     "group.Values": "Values",
     "state.on": "ON", "state.off": "OFF",
     "chip.demand_on": "Demand ON", "chip.demand_off": "Demand OFF", "chip.quiet": "Quiet",
+    "schem.sg_forced_off": "MODBUS · FORCED OFF", "schem.sg_boost": "MODBUS · BOOST ACTIVE",
+    "schem.sg_forced_on": "MODBUS · FORCED ON",
+    "sg.mode0": "0 · Free running", "sg.mode1": "1 · Forced off",
+    "sg.mode2": "2 · Recommended on", "sg.mode3": "3 · Forced on",
     "schem.to_dhw": "3WV → DHW", "schem.to_heat": "3WV → heating",
     "normal.label": "Normal:",
     "hist.title": "Last 24 hours", "hist.since": (h) => `Since restart · ${h} h`,
@@ -350,6 +354,10 @@ const I18N = {
     // broken label rather than as a translation.
     "state.on": "ON", "state.off": "OFF",
     "chip.demand_on": "Anforderung ON", "chip.demand_off": "Anforderung OFF", "chip.quiet": "Leise",
+    "schem.sg_forced_off": "MODBUS · ERZWUNGEN AUS", "schem.sg_boost": "MODBUS · BOOST AKTIV",
+    "schem.sg_forced_on": "MODBUS · ERZWUNGEN EIN",
+    "sg.mode0": "0 · Freier Betrieb", "sg.mode1": "1 · Erzwungen aus",
+    "sg.mode2": "2 · Empfohlen ein", "sg.mode3": "3 · Erzwungen ein",
     "schem.to_dhw": "3WV → WW", "schem.to_heat": "3WV → Heizung",
     "normal.label": "Normal:",
     "hist.title": "Letzte 24 Stunden", "hist.since": (h) => `Seit Neustart · ${h} h`,
@@ -2282,6 +2290,10 @@ const MB_PAIRS = [
 // empty — so tapping a pill that read "54.3 °C" opened a panel headlined "—". The inspector blanking
 // what the pill blanks is the rule (ou_stale.hpp); the converse has to hold too.
 const mbForInspect = (key) => {
+  // Smart Grid is a Modbus-ONLY fact, not a fallback for an X10A reading. It therefore remains the
+  // inspector's source while both stacks are live — precisely the normal case in which the drawing
+  // needs to prove that an external energy manager's request reached the HomeHub.
+  if (key === "sgrequest") return mbRow(MB_OFF_SMART_GRID);
   if (!x10aDown() || !mbLive()) return null;
   // Electrical input has no X10A concept twin. It still becomes the schematic pill's source when
   // X10A is down, so the inspector needs the real register row for its label and Modbus badge rather
@@ -2303,15 +2315,36 @@ const mbVal = (off) => { const r = mbRow(off); return r ? String(r.value) : null
 // carries three "kW" rows and the other two are the power-LIMIT setpoints (holding 57/58): anything
 // selecting this reading by its UNIT will sooner or later select an installer's ceiling instead.
 const MB_OFF_POWER = 51;
+// The EKRHH data-model offset is 56; Modbus puts it on zero-based PDU address 55. evcc's `boost`
+// writes mode 2 (Recommended on) there. Keep the data-model offset here because `/values.modbus`
+// exposes `off`, not the wire address — mixing the two would make the active request disappear.
+const MB_OFF_SMART_GRID = 56;
 // …and the lookup itself is a named helper for the same reason every other resolution here is one:
 // it gives the rule ONE definition to be gated on, instead of a lookup spelled out at the call site
 // where the next reader sees a `find()` and a unit and has no way to know which of the three kW rows
 // was meant. Null when the gateway did not answer 51 — a missing measurement, never the nearest
 // number that shares its unit.
 const mbPower = () => mbRow(MB_OFF_POWER);
+// Smart-Grid operation mode is an enum, not a flag: 0 free, 1 forced off, 2 recommended on,
+// 3 forced on. Refuse anything else rather than turning an unknown future/corrupt value into a
+// plausible-looking request in the schematic.
+const mbSmartGridMode = () => {
+  const r = mbRow(MB_OFF_SMART_GRID);
+  if (!r) return null;
+  const n = Number(String(r.value).trim());
+  return Number.isInteger(n) && n >= 0 && n <= 3 ? n : null;
+};
 // One lookup both go through. Gated on mbLive() for mbByConcept's reason: correct on its own.
 const mbRow = (off) =>
   mbLive() ? (S._modbus || []).find((m) => m && m.off === off && m.value != null) || null : null;
+
+// Closed-drawing and inspector wording for the same four-value enum. Mode 0 has no badge — ordinary
+// autonomous operation is the absence of an external request — but it remains readable in the
+// inspector if a request ends while the panel is still open.
+const sgModeText = (mode) => mode == null ? "—" : t(`sg.mode${mode}`);
+const sgRequestText = (mode) => mode === 1 ? t("schem.sg_forced_off")
+                                  : mode === 2 ? t("schem.sg_boost")
+                                  : mode === 3 ? t("schem.sg_forced_on") : "";
 
 // ── WHICH SOURCE ANSWERS A PLANT STATE ─────────────────────────────────────────────────────────
 // One rule, one place. X10A leads while its link is LIVE and carries the row; otherwise a LIVE
@@ -3391,6 +3424,10 @@ function liveData() {
     // bit, that test fails and this selection has to become structural (keyed on reg, like ouPage).
     spaceH: stateOf(/^space heating operation/i, 53),
     quiet: vOn(/low noise control|silent mode/i),
+    // HomeHub holding offset 56 is the EXTERNAL Smart-Grid request. It is intentionally independent
+    // of the plant's operating mode: mode 2 proves that evcc's boost reached the controller, while
+    // the DHW flag / valve / flow separately prove whether the controller acted on it.
+    sgMode: mbSmartGridMode(),
   };
   // Pump % — the wire value is inverted ("Water pump signal (0:max-100:stop)").
   d.pump = d.pumpSig == null ? null : Math.min(100, Math.max(0, 100 - d.pumpSig));
@@ -3523,7 +3560,7 @@ function liveData() {
     // The three plant STATES survive, because they are no longer X10A values: stateOf() already
     // refused the retained X10A bit and returned the gateway's (or nothing). Clearing them here is
     // what used to blank the pump and the demand next to readings that were arriving.
-    const KEEP = new Set(["pumpOn", "valveDhw", "spaceH", "mbFields"]);
+    const KEEP = new Set(["pumpOn", "valveDhw", "spaceH", "sgMode", "mbFields"]);
     Object.keys(d).forEach((k) => { if (!KEEP.has(k)) d[k] = null; });
     d.ouHeldOver = false;         // nothing to hold over: the whole bus is silent, not one unit
     MB_PAIRS.forEach((p) => take(p.fld, p.cid));
@@ -3575,7 +3612,8 @@ function clearSchematic() {
   setTxt("svBuh", "");                 // no BUH step to report
   setTxt("svValve", "3WV");            // valve position unknown — don't claim a branch
   const sc = $("schem");
-  ["fan-on", "pump-on", "buh-on", "bsh-on", "defrost-on", "quiet-on"].forEach((c) => sc.classList.remove(c));
+  ["fan-on", "pump-on", "buh-on", "bsh-on", "defrost-on", "quiet-on", "sg-request-on"].forEach((c) => sc.classList.remove(c));
+  setTxt("svSgRequest", "");
   sc.classList.add("no-spaceh");       // no flag to show; the pill would otherwise sit stale
   $("schem").querySelectorAll(".sc-flow, .sc-rflow").forEach((el) => el.classList.remove("on", "rev"));
 }
@@ -3657,6 +3695,11 @@ function renderLive() {
   sc.classList.toggle("bsh-on", d.bsh === true);
   sc.classList.toggle("defrost-on", d.defrost === true);
   sc.classList.toggle("quiet-on", d.quiet === true);
+  // Non-zero means an EXTERNAL request is present. Mode 2 is evcc's boost / Daikin's Recommended
+  // on; the badge says exactly that without implying that DHW is already running. Modes 1 and 3
+  // use the same system-wide slot instead of being misattached to either hydronic branch.
+  setTxt("svSgRequest", sgRequestText(d.sgMode));
+  sc.classList.toggle("sg-request-on", d.sgMode != null && d.sgMode !== 0);
   // A BSH row is itself evidence that this profile has a DHW tank, even if its temperature did not
   // answer in this snapshot. Keep the branch visible so the active heater cannot disappear with it.
   sc.classList.toggle("no-dhw", d.tank == null && d.bsh == null);
@@ -3763,6 +3806,28 @@ const INSPECT = {
     // in the very same status byte as the operating mode above it (0x60/2), and it says the indoor
     // unit is asking for the compressor — for hot water just as much as for the house.
     rows: [/i\/u operation mode/i, /thermostat on/i, /(error|fault) code/i],
+  },
+  sgrequest: {
+    t: { en: "Smart-Grid request via Modbus", de: "Smart-Grid-Anforderung über Modbus" },
+    what: {
+      en: "The external Smart-Grid request read back from the HomeHub: 0 Free running, 1 Forced off, 2 Recommended on, 3 Forced on. It is an energy-management command, not the outdoor unit's heating/cooling mode and not proof that a requested tank charge has started.",
+      de: "Die vom HomeHub zurückgelesene externe Smart-Grid-Anforderung: 0 Freier Betrieb, 1 Erzwungen aus, 2 Empfohlen ein, 3 Erzwungen ein. Das ist ein Energiemanagement-Befehl, nicht der Heiz-/Kühlmodus der Außeneinheit und kein Beleg dafür, dass eine angeforderte Speicherladung bereits begonnen hat.",
+    },
+    head: (d) => sgModeText(d && d.sgMode),
+    now: (d) => !d || d.sgMode == null
+      ? { en: "No current Smart-Grid value is available from the HomeHub.",
+          de: "Vom HomeHub ist gerade kein aktueller Smart-Grid-Wert verfügbar." }
+      : d.sgMode === 2
+      ? { en: "Active: the HomeHub reports Recommended on. This is the Smart-Grid state energy managers such as evcc use for boost. It requests extra buffering; DHW mode, the 3-way valve and flow separately show whether the unit is actually charging the tank.",
+          de: "Aktiv: Der HomeHub meldet Empfohlen ein. Diesen Smart-Grid-Zustand verwenden Energiemanager wie evcc als Boost. Er fordert zusätzliches Puffern an; Warmwasser-Betriebsart, 3-Wege-Ventil und Durchfluss zeigen separat, ob die Anlage den Speicher tatsächlich lädt." }
+      : d.sgMode === 1
+      ? { en: "Active: the external energy manager is forcing operation off.",
+          de: "Aktiv: Das externe Energiemanagement erzwingt den ausgeschalteten Betrieb." }
+      : d.sgMode === 3
+      ? { en: "Active: the external energy manager is forcing operation on.",
+          de: "Aktiv: Das externe Energiemanagement erzwingt den eingeschalteten Betrieb." }
+      : { en: "No external Smart-Grid request is active; the unit is running autonomously.",
+          de: "Keine externe Smart-Grid-Anforderung ist aktiv; die Anlage arbeitet selbstständig." },
   },
   ou: {
     t: { en: "Outdoor unit", de: "Außeneinheit" },

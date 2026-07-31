@@ -104,7 +104,8 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [] }) {
   // explicitly — the same trick test_ui_live_i18n.mjs uses for its production function.
   vm.runInContext(
     SOURCE + "\nthis.__api = { mbByConcept, mbTwin, mbFallbackFor, mbLive, mbBool, mbVal, stateOf," +
-    " MB_PAIRS, MB_OFF_POWER, mbPower, mbForInspect, mbNoteHtml, inspCurRow, inspMember," +
+    " MB_PAIRS, MB_OFF_POWER, MB_OFF_SMART_GRID, mbPower, mbSmartGridMode, mbForInspect," +
+    " sgModeText, sgRequestText, mbNoteHtml, inspCurRow, inspMember," +
     " inspMembers, pelMeasured, pelApproxText, PEL_INSPECT };",
     context, { filename: "main/www/app.js" });
   return context.__api;
@@ -112,6 +113,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [] }) {
 
 const LWT_X = X("Leaving water temp. before BUH (R1T)", "38.6", "leaving_water");
 const LWT_M = M(40, "Leaving water temp. (PHE)", "38.1", "leaving_water");
+const SG = (value) => M(56, "Smart-Grid operation mode", String(value), null, { unit: "" });
 
 // ── 1. Both live, numeric — the gateway is reachable as the second opinion ─────────────────────
 {
@@ -121,6 +123,30 @@ const LWT_M = M(40, "Leaving water temp. (PHE)", "38.1", "leaving_water");
   assert.equal(c.mbTwin(LWT_X)?.value, "38.1", "both live: mbTwin must resolve off the row");
   // X10A leads: the fallback picker must NOT hand the gateway value over while X10A answers.
   assert.equal(c.mbFallbackFor("leaving_water"), null, "both live: no fallback while X10A answers");
+}
+
+// ── The Modbus-only Smart-Grid request is visible while BOTH stacks are live ───────────────────
+// It is not an X10A fallback: the normal installation has X10A and HomeHub side by side, and that
+// is exactly where the dashboard must prove that evcc's mode-2 boost reached the controller.
+{
+  const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+                  values: [LWT_X], modbus: [LWT_M, SG(2)] });
+  assert.equal(c.MB_OFF_SMART_GRID, 56, "UI uses the EKRHH data-model offset, not PDU address 55");
+  assert.equal(c.mbSmartGridMode(), 2, "mode 2 must reach the live schematic");
+  assert.equal(c.mbForInspect("sgrequest")?.value, "2",
+    "the inspector must remain traceable to the Modbus row while X10A is live");
+  assert.equal(c.sgModeText(2), "sg.mode2");
+  assert.equal(c.sgRequestText(2), "schem.sg_boost");
+}
+
+// A stale HomeHub cache is not an active request, and invalid enum values are not guessed into one.
+{
+  const down = ctx({ x10a: true, mbEnabled: true, mbConnected: false, modbus: [SG(2)] });
+  assert.equal(down.mbSmartGridMode(), null, "disconnected HomeHub: cached boost must disappear");
+  assert.equal(down.mbForInspect("sgrequest"), null, "disconnected HomeHub: no stale inspector row");
+
+  const invalid = ctx({ x10a: true, mbEnabled: true, mbConnected: true, modbus: [SG(4)] });
+  assert.equal(invalid.mbSmartGridMode(), null, "unknown Smart-Grid enum must fail closed");
 }
 
 // ── 2. Both live, a discrete CONTRADICTION — X10A still leads, both remain readable ────────────
