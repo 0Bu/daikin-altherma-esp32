@@ -196,15 +196,16 @@ inline std::string discovery_config(const std::string& node, const std::string& 
 }
 
 // ── HomeHub Modbus entities ─────────────────────────────────────────────────────────────────────
-// A separate HA device group and a flat payload. These are sensor/binary_sensor discovery configs
-// only: no command topic, number, switch, select or other writable component is ever emitted.
+// A source-specific entity namespace and flat payload inside the shared HA installation device.
+// These are sensor/binary_sensor discovery configs only: no command topic, number, switch, select
+// or other writable component is ever emitted.
 inline const char* modbus_ha_component(const def::HomeHubReg& reg) {
     return def::homehub_is_binary(reg) ? "binary_sensor" : "sensor";
 }
 
 inline std::string modbus_discovery_topic(const std::string& prefix, const std::string& x10a_node,
                                           const def::HomeHubReg& reg) {
-    const std::string node = modbus_device_node_id(x10a_node);
+    const std::string node = modbus_entity_node_id(x10a_node);
     return prefix + "/" + modbus_ha_component(reg) + "/" + node + "/" +
            object_id(reg.label) + "/config";
 }
@@ -216,11 +217,12 @@ inline std::string modbus_device_class(const def::HomeHubReg& reg) {
 }
 
 inline std::string modbus_discovery_config(const std::string& x10a_node,
+                                           const std::string& board_id,
                                            const std::string& state_topic,
                                            const std::string& device_avail_topic,
                                            const std::string& modbus_avail_topic,
                                            const def::HomeHubReg& reg) {
-    const std::string node = modbus_device_node_id(x10a_node);
+    const std::string node = modbus_entity_node_id(x10a_node);
     const std::string obj  = object_id(reg.label);
     const std::string dc   = modbus_device_class(reg);
     std::string j = "{";
@@ -236,7 +238,7 @@ inline std::string modbus_discovery_config(const std::string& x10a_node,
     if (def::homehub_is_binary(reg)) j += "\"pl_on\":\"1\",\"pl_off\":\"0\",";
     if (reg.unit[0]) { j += "\"unit_of_meas\":\""; j += reg.unit; j += "\","; }
     if (!dc.empty()) { j += "\"dev_cla\":\""; j += dc; j += "\",\"stat_cla\":\"measurement\","; }
-    j += modbus_device_json(x10a_node);
+    j += modbus_device_json(x10a_node, board_id);
     j += "}";
     return j;
 }

@@ -661,9 +661,9 @@ static void mb_poll_once() {
         // BORROWED kinds, not claims that a HomeHub register is an X10A one: 204 for the Text16
         // error code, and a bit-flag id for a register the catalog marks Binary, which is
         // what makes /values emit `"binary":true` so the browser renders ON/OFF instead of a bare 1.
-        // Named enums have already been formatted to the EKRHH status text at the common HomeHub
-        // boundary and deliberately carry no binary marker. Without this distinction the panel
-        // showed X10A "OFF" beside Modbus "1", and Operation mode as an unexplained integer.
+        // Named enums keep their raw numeric Modbus constants and deliberately carry no binary
+        // marker. /values adds their semantic enum id separately, so the visual UI can name them
+        // without turning MQTT's mode 2 into the text "Recommended on".
         // The MQTT bridge looks the register definition up by `off` and does not use this borrowed
         // converter to type Modbus JSON; this marker therefore remains limited to generic row/UI use.
         cv.conv = (r.type == MbType::Text16) ? 204 : def::homehub_is_binary(r) ? 300 : 0;

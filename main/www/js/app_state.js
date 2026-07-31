@@ -191,10 +191,10 @@ function renderApp() {
       // "Warmwasser" over a live error.
       const abnormality = mbUnitAbnormality();
       const code = mbVal(22);
-      if (abnormality === "Fault") {
+      if (abnormality === 1) {
         sysSet(t("sys.fault"), code && !/^-*$/.test(code.trim())
                                  ? t("sys.fault_line", code) : t("sys.mb_only"), "err");
-      } else if (abnormality === "Warning") {
+      } else if (abnormality === 2) {
         sysSet(t("sys.warning"), code && !/^-*$/.test(code.trim())
                                    ? t("sys.warning_line", code) : t("sys.mb_only"), "warn");
       } else {

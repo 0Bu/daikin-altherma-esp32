@@ -943,7 +943,7 @@ static void test_config_model() {
     CHECK(live.mqtt_uri == "mqtts://broker.lan");
 }
 
-// The HA X10A DEVICE identity (logic/ha_device.hpp). The one property that matters: it is a pure
+// The HA installation DEVICE identity (logic/ha_device.hpp). The one property that matters: it is a pure
 // function of the MQTT base topic and contains nothing board-specific — replacing the ESP32 must
 // keep the X10A device in HA (and with it the entities, their history and their statistics), which the
 // old MAC-derived node id could not do.
@@ -955,14 +955,15 @@ static void test_ha_device() {
     // an empty node would produce "homeassistant/sensor//x/config", which HA silently ignores.
     CHECK(device_node_id("///") == "daikin");
     CHECK(device_node_id("") == "daikin");
-    // Two base topics stay two X10A devices (that is how a second board is separated), one base topic
-    // stays one X10A device no matter which hardware publishes it.
+    // Two base topics stay two devices (that is how a second installation is separated), one base
+    // topic stays one device no matter which hardware or source publishes it.
     CHECK(device_node_id("daikin-altherma-esp32") != device_node_id("daikin-altherma-esp32-2"));
 
     // The device block: stable id FIRST (the anchor HA matches on after a swap), board id second.
     CHECK(device_json("daikin_altherma_esp32", "daikin_abc123") ==
           "\"dev\":{\"ids\":[\"daikin_altherma_esp32\",\"daikin_abc123\"],"
-          "\"name\":\"Daikin Altherma X10A\",\"mf\":\"Daikin\",\"mdl\":\"Altherma X10A\"}");
+          "\"name\":\"Daikin Altherma\",\"mf\":\"Daikin\","
+          "\"mdl\":\"Altherma X10A + HomeHub\"}");
     // No board id, or a board id that IS the node id -> a single identifier. A duplicated entry
     // would be a malformed device for HA, not a harmless repeat.
     CHECK(device_json("daikin_altherma_esp32", "").find("\"ids\":[\"daikin_altherma_esp32\"],")
@@ -981,14 +982,10 @@ static void test_ha_device() {
     CHECK(crash_discovery_config(node, brd, "s", "a", CRASH_SENSORS[0]).find(dev)
           != std::string::npos);
 
-    // Modbus is a SECOND HA device group. It intentionally shares neither the stable X10A id nor
-    // the board id, because HA merges devices when any identifier matches.
-    CHECK(modbus_device_node_id(node) == "daikin_altherma_esp32_modbus");
-    CHECK(modbus_device_json(node) ==
-          "\"dev\":{\"ids\":[\"daikin_altherma_esp32_modbus\"],"
-          "\"name\":\"Daikin Altherma Modbus\",\"mf\":\"Daikin\","
-          "\"mdl\":\"Altherma HomeHub Modbus\"}");
-    CHECK(modbus_device_json(node).find(brd) == std::string::npos);
+    // Modbus keeps a collision-free ENTITY namespace, but its dev object is byte-identical to X10A
+    // and diagnostics so Home Assistant presents one installation device.
+    CHECK(modbus_entity_node_id(node) == "daikin_altherma_esp32_modbus");
+    CHECK(modbus_device_json(node, brd) == dev);
 }
 
 static void test_discovery() {
@@ -1108,7 +1105,7 @@ static void test_discovery() {
     CHECK(oc.find("value_json['outdoor_state']['error_code']") != std::string::npos);
     CHECK(hc.find("value_json['hydronic']['error_code']") != std::string::npos);
 
-    // --- HomeHub values form a separate, read-only Modbus device and read a FLAT source topic. ---
+    // --- HomeHub values remain read-only and source-namespaced inside the shared device. ---
     const def::HomeHubReg* mb_temp = def::homehub_find(42);
     const def::HomeHubReg* mb_flag = def::homehub_find(30);
     const def::HomeHubReg* mb_mode = def::homehub_find(56);
@@ -1116,7 +1113,7 @@ static void test_discovery() {
     CHECK(modbus_discovery_topic("homeassistant", node, *mb_temp) ==
           "homeassistant/sensor/daikin_altherma_esp32_modbus/return_water_temperature/config");
     const std::string mt = modbus_discovery_config(
-        node, modbus_topic(base), availability_topic(base), modbus_availability_topic(base), *mb_temp);
+        node, board, modbus_topic(base), availability_topic(base), modbus_availability_topic(base), *mb_temp);
     CHECK(mt.find("\"uniq_id\":\"daikin_altherma_esp32_modbus_return_water_temperature\"")
           != std::string::npos);
     CHECK(mt.find("\"stat_t\":\"daikin-altherma-esp32/modbus\"") != std::string::npos);
@@ -1125,20 +1122,20 @@ static void test_discovery() {
                   "{\"topic\":\"daikin-altherma-esp32/modbus/status\"}]") != std::string::npos);
     CHECK(mt.find("\"avty_mode\":\"all\"") != std::string::npos);
     CHECK(mt.find("\"dev_cla\":\"temperature\"") != std::string::npos);
-    CHECK(mt.find("\"dev\":{\"ids\":[\"daikin_altherma_esp32_modbus\"]") != std::string::npos);
-    CHECK(mt.find(board) == std::string::npos);   // otherwise HA merges Modbus into X10A again
+    CHECK(mt.find("\"dev\":{\"ids\":[\"daikin_altherma_esp32\",\"daikin_abc123\"]")
+          != std::string::npos);
 
     CHECK(std::string(modbus_ha_component(*mb_flag)) == "binary_sensor");
     CHECK(modbus_discovery_topic("homeassistant", node, *mb_flag).find("/binary_sensor/")
           != std::string::npos);
     const std::string mf = modbus_discovery_config(
-        node, modbus_topic(base), availability_topic(base), modbus_availability_topic(base), *mb_flag);
+        node, board, modbus_topic(base), availability_topic(base), modbus_availability_topic(base), *mb_flag);
     CHECK(mf.find("\"pl_on\":\"1\",\"pl_off\":\"0\"") != std::string::npos);
     CHECK(mf.find("\"cmd_t\"") == std::string::npos);
 
     CHECK(std::string(modbus_ha_component(*mb_mode)) == "sensor");
     const std::string mm = modbus_discovery_config(
-        node, modbus_topic(base), availability_topic(base), modbus_availability_topic(base), *mb_mode);
+        node, board, modbus_topic(base), availability_topic(base), modbus_availability_topic(base), *mb_mode);
     CHECK(mm.find("\"pl_on\"") == std::string::npos);     // named enum, not a binary guess
     CHECK(mm.find("\"cmd_t\"") == std::string::npos);     // Modbus remains read-only
 
@@ -1146,14 +1143,13 @@ static void test_discovery() {
         const def::HomeHubReg& reg = def::HOMEHUB_REGS[i];
         const std::string topic = modbus_discovery_topic("homeassistant", node, reg);
         const std::string config = modbus_discovery_config(
-            node, modbus_topic(base), availability_topic(base), modbus_availability_topic(base), reg);
+            node, board, modbus_topic(base), availability_topic(base), modbus_availability_topic(base), reg);
         CHECK(topic.find(def::homehub_is_binary(reg) ? "/binary_sensor/" : "/sensor/")
               != std::string::npos);
         CHECK(config.find("\"stat_t\":\"daikin-altherma-esp32/modbus\"") != std::string::npos);
         CHECK(config.find("\"cmd_t\"") == std::string::npos);
-        CHECK(config.find("\"dev\":{\"ids\":[\"daikin_altherma_esp32_modbus\"]")
+        CHECK(config.find("\"dev\":{\"ids\":[\"daikin_altherma_esp32\",\"daikin_abc123\"]")
               != std::string::npos);
-        CHECK(config.find(board) == std::string::npos);
     }
 
     // The binary family is exactly 300-307 (one bit of data[0]); neighbours are not binary.
@@ -1752,10 +1748,10 @@ static void test_mqtt_group() {
     // The Modbus topic is source-specific and therefore flat. It has the exact same permanent type
     // contract and escaping behaviour as the grouped X10A encoder.
     CHECK(build_flat_json({{"modbus", "return_water_temperature", "35.5", PublishedKind::Number},
-                           {"modbus", "smart_grid_operation_mode", "Recommended on", PublishedKind::Text},
+                           {"modbus", "smart_grid_operation_mode", "2", PublishedKind::Number},
                            {"modbus", "broken_numeric", "OFF", PublishedKind::Number}})
           == "{\"return_water_temperature\":35.5,"
-             "\"smart_grid_operation_mode\":\"Recommended on\",\"broken_numeric\":null}");
+             "\"smart_grid_operation_mode\":2,\"broken_numeric\":null}");
     CHECK(build_flat_json({}) == "{}");
 
     // The group key doubles as an HA entity-name fragment for the DERIVED companions, which have no
@@ -3031,54 +3027,60 @@ static void test_homehub() {
     CHECK(ec && ec->type == MbType::Text16);
     CHECK(homehub_format(*ec, 0x5538, buf, sizeof(buf)) && std::string(buf) == "U8");
     CHECK(homehub_is_text(*ec));
-    // Dimensionless Int16 does NOT mean numeric. EKRHH 4P744838-1E §9.2 uses the same wire type
-    // for one real number (the error sub-code), five binary flags and four named enums. Pin the
-    // complete classification so another selector cannot reach the UI as "Mode 1" again.
-    int dimensionless = 0, statuses = 0;
+    // Dimensionless Int16 does not determine the SEMANTICS. EKRHH 4P744838-1E §9.2 uses the same
+    // numeric wire type for one real number (the error sub-code), five binary flags and four enums.
+    // Pin the complete classification and the one true text row.
+    int dimensionless = 0, statuses = 0, text_rows = 0;
     for (int i = 0; i < HOMEHUB_REG_COUNT; i++) {
         const HomeHubReg& r = HOMEHUB_REGS[i];
+        if (homehub_is_text(r)) text_rows++;
         if (r.type != MbType::Int16 || r.scale != 1 || r.unit[0] != '\0') continue;
         dimensionless++;
         if (r.kind == HomeHubValueKind::Number) CHECK(r.offset == 23);  // actual numeric sub-code
         else statuses++;
     }
-    CHECK(dimensionless == 10 && statuses == 9);
+    CHECK(dimensionless == 10 && statuses == 9 && text_rows == 1);
 
-    // Holding 3: 0 Auto, 1 Heating, 2 Cooling. Heating-only units return the unavailable sentinel,
-    // already covered above, rather than inventing another mode.
+    // Enums retain the raw constants on every public wire. /values carries a separate semantic id
+    // so the browser can still display the manufacturer's state names at the visual boundary.
+    // Holding 3: 0 Auto, 1 Heating, 2 Cooling. Heating-only units return the unavailable sentinel.
     const HomeHubReg* om = find(3);
     CHECK(om && om->kind == HomeHubValueKind::OperationMode && om->space == MbFunc::ReadHolding);
-    CHECK(homehub_format(*om, 0, buf, sizeof(buf)) && std::string(buf) == "Auto");
-    CHECK(homehub_format(*om, 1, buf, sizeof(buf)) && std::string(buf) == "Heating");
-    CHECK(homehub_format(*om, 2, buf, sizeof(buf)) && std::string(buf) == "Cooling");
-    CHECK(homehub_format(*om, 7, buf, sizeof(buf)) && std::string(buf) == "Unknown (7)");
-    CHECK(homehub_is_text(*om));
+    CHECK(homehub_format(*om, 0, buf, sizeof(buf)) && std::string(buf) == "0");
+    CHECK(homehub_format(*om, 1, buf, sizeof(buf)) && std::string(buf) == "1");
+    CHECK(homehub_format(*om, 2, buf, sizeof(buf)) && std::string(buf) == "2");
+    CHECK(homehub_format(*om, 7, buf, sizeof(buf)) && std::string(buf) == "7");
+    CHECK(!homehub_is_text(*om));
+    CHECK(std::string(homehub_enum_id(om->kind)) == "operation_mode");
 
     const HomeHubReg* abnormal = find(21);
     CHECK(abnormal && abnormal->kind == HomeHubValueKind::UnitAbnormality &&
           !homehub_is_binary(*abnormal));
-    CHECK(homehub_format(*abnormal, 0, buf, sizeof(buf)) && std::string(buf) == "No error");
-    CHECK(homehub_format(*abnormal, 1, buf, sizeof(buf)) && std::string(buf) == "Fault");
-    CHECK(homehub_format(*abnormal, 2, buf, sizeof(buf)) && std::string(buf) == "Warning");
+    CHECK(homehub_format(*abnormal, 0, buf, sizeof(buf)) && std::string(buf) == "0");
+    CHECK(homehub_format(*abnormal, 1, buf, sizeof(buf)) && std::string(buf) == "1");
+    CHECK(homehub_format(*abnormal, 2, buf, sizeof(buf)) && std::string(buf) == "2");
+    CHECK(std::string(homehub_enum_id(abnormal->kind)) == "unit_abnormality");
 
     const HomeHubReg* valve = find(37);
     CHECK(valve && valve->kind == HomeHubValueKind::ThreeWayValve && !homehub_is_binary(*valve));
-    CHECK(homehub_format(*valve, 0, buf, sizeof(buf)) && std::string(buf) == "Space heating");
-    CHECK(homehub_format(*valve, 1, buf, sizeof(buf)) && std::string(buf) == "DHW");
+    CHECK(homehub_format(*valve, 0, buf, sizeof(buf)) && std::string(buf) == "0");
+    CHECK(homehub_format(*valve, 1, buf, sizeof(buf)) && std::string(buf) == "1");
+    CHECK(std::string(homehub_enum_id(valve->kind)) == "three_way_valve");
 
     const HomeHubReg* sg = find(56);
     CHECK(sg && sg->kind == HomeHubValueKind::SmartGridMode && !homehub_is_binary(*sg));
-    const char* sg_names[] = {"Free running", "Forced off", "Recommended on", "Forced on"};
     for (int i = 0; i < 4; i++) {
         CHECK(homehub_format(*sg, static_cast<uint16_t>(i), buf, sizeof(buf)) &&
-              std::string(buf) == sg_names[i]);
+              std::string(buf) == std::to_string(i));
     }
+    CHECK(std::string(homehub_enum_id(sg->kind)) == "smart_grid_mode");
 
     // Real flags keep numeric 1/0 at the API boundary and are marked structurally for ON/OFF UI.
     for (uint16_t off : {30, 52, 53, 4, 9}) {
         const HomeHubReg* flag = find(off);
         CHECK(flag && homehub_is_binary(*flag));
         CHECK(!homehub_is_text(*flag));
+        CHECK(homehub_enum_id(flag->kind) == nullptr);
         CHECK(homehub_format(*flag, 0, buf, sizeof(buf)) && std::string(buf) == "0");
         CHECK(homehub_format(*flag, 1, buf, sizeof(buf)) && std::string(buf) == "1");
     }

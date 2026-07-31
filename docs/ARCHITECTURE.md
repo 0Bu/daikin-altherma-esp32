@@ -1142,9 +1142,9 @@ The Home Assistant bridge:
   write, and it is still read-only **by design**: the firmware reads registers and publishes them, and
   no MQTT subscribe, command topic, writable HA entity or HTTP write route exists to reach the pump
   (see [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)).
-- **Two HA source groups.** The X10A device id is the slugified MQTT base topic
+- **One HA installation device.** Its id is the slugified MQTT base topic
   (`daikin-altherma-esp32` → `daikin_altherma_esp32`, `logic/ha_device.hpp`), so replacing the ESP32
-  keeps the X10A device with its entities, history and long-term statistics — where the old MAC-derived
+  keeps the device with its entities, history and long-term statistics — where the old MAC-derived
   `daikin_<mac3>` produced a second device and restarted every statistic. The board's MAC id lives
   on as the **MQTT client id** (unique per connection) and a **second `dev.ids` entry** (HA matches a
   device by any identifier and merges, so a MAC-identified install is adopted rather than
@@ -1152,9 +1152,10 @@ The Home Assistant bridge:
   and the pre-#221 un-grouped entity ids — are retracted in **one bulk pass that completes before any
   replacement is published** (the diagnostics once per boot, the value entities once per detected
   profile), so the freed `entity_id` is reclaimed by the new entity and its recorder history and
-  long-term statistics carry over. HomeHub register entities use the separate stable id
-  `<node>_modbus` and the name **Daikin Altherma Modbus**. That device omits the board id, because HA
-  would merge the two source groups if they shared any identifier.
+  long-term statistics carry over. HomeHub register entities retain `<node>_modbus` only as their
+  discovery-topic and unique-id namespace; their `dev.ids` are identical to X10A and diagnostics,
+  so Home Assistant presents one **Daikin Altherma** device while same-named source entities cannot
+  collide.
 - **Own publish task + esp-mqtt client.** The event handler only flips status flags; all publishing
   happens in the task, so the mqtt event loop is never blocked by string building.
 - **Discovery is streamed.** A full Altherma value set can be 30–40+ entities; the bridge emits one
@@ -1174,7 +1175,9 @@ The Home Assistant bridge:
   (`value_json['<group>']['<object_id>']` — bracket notation, so a digit-leading slug like
   `2way_valve…` stays valid). `<base>/modbus` is a separate flat retained JSON object, published only
   for an enabled HomeHub stack. Its discovery configs read a plain object key and belong to the
-  Modbus HA device. A disconnected HomeHub publishes `{}` rather than preserving a previous TCP
+  Modbus HA device. Int16 enum values retain the raw numeric Modbus constant; `/values` carries
+  separate semantic metadata so the browser can name them without putting prose on MQTT/HA. A
+  disconnected HomeHub publishes `{}` rather than preserving a previous TCP
   session's values. Its entities combine `<base>/status` (board LWT) and
   `<base>/modbus/status` (link state) with `availability_mode: all`; disabling the stack retracts
   both Modbus topics and its discovery configs. On upgrade a bounded exact-topic subscription probes

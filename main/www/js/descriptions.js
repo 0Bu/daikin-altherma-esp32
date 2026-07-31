@@ -641,32 +641,33 @@ const binaryValue = (r) => {
   if (value === "0") return false;
   return null;
 };
-// Most gateway states retain the firmware-wide numeric 1/0 contract. The 3-way valve is different:
-// EKRHH §9.2 defines its values as the named destinations "Space heating" and "DHW", so it is an
-// enum rather than an ON/OFF flag. Preserve that meaning while still giving the schematic a boolean
-// direction to route on.
+// A numeric HomeHub enum, validated against the structural semantic id /values carries beside it.
+// Never infer a mode from the label or accept a decimal/text alias: unknown future values stay raw
+// in the value list but cannot become a plausible current state in the schematic.
+const modbusEnumNumber = (r, semantic, max) => {
+  if (!r || r.value == null || r.enum !== semantic) return null;
+  const raw = String(r.value).trim();
+  if (!/^-?\d+$/.test(raw)) return null;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) && n >= 0 && n <= max ? n : null;
+};
+// Most gateway states retain the firmware-wide numeric 1/0 contract. The 3-way valve is an enum,
+// but its PUBLIC value is now also the raw numeric Modbus constant. Its enum id preserves the
+// destination meaning while still giving the schematic a boolean direction to route on.
 const mbBinaryValue = (r) => {
   const binary = binaryValue(r);
   if (binary != null) return binary;
-  if (r && r.off === 37) {
-    const value = String(r.value).trim();
-    if (value === "DHW") return true;
-    if (value === "Space heating") return false;
-  }
+  const valve = modbusEnumNumber(r, "three_way_valve", 1);
+  if (valve != null) return valve === 1;
   return null;
 };
 // A HomeHub STATE register by its EKRHH offset, as a tri-state boolean (null = the gateway did not
 // answer it either). State is not a reading: it carries no unit and no trend, so it rides the offset
 // rather than the concept vocabulary logic/homehub_map.hpp reserves for paired MEASUREMENTS.
 const mbBool = (off) => mbBinaryValue(mbRow(off));
-// EKRHH input 21 is a three-state enum, not a flag: Warning must neither remain numeric "2" nor be
-// collapsed into Fault. Return only the manufacturer's canonical states used by the status header.
-const mbUnitAbnormality = () => {
-  const r = mbRow(21);
-  if (!r) return null;
-  const value = String(r.value).trim();
-  return value === "No error" || value === "Fault" || value === "Warning" ? value : null;
-};
+// EKRHH input 21 is a three-state enum, not a flag. Preserve the raw constant while ensuring the
+// status header never treats an unknown future value as a known Fault or Warning.
+const mbUnitAbnormality = () => modbusEnumNumber(mbRow(21), "unit_abnormality", 2);
 // The same register as raw TEXT — the error code is a Text16, not a flag.
 const mbVal = (off) => { const r = mbRow(off); return r ? String(r.value) : null; };
 // The MEASURED power consumption (EKRHH input register 51, def/homehub.hpp). Named because the map
@@ -683,24 +684,13 @@ const MB_OFF_SMART_GRID = 56;
 // was meant. Null when the gateway did not answer 51 — a missing measurement, never the nearest
 // number that shares its unit.
 const mbPower = () => mbRow(MB_OFF_POWER);
-// The HomeHub boundary exposes canonical enum text instead of opaque register numbers. Translate
-// those four names back to the drawing's compact internal index in one deliberately closed map;
-// unknown future/corrupt values must not become a plausible-looking Smart-Grid request.
-const SMART_GRID_MODE_NUMBER = Object.freeze({
-  "Free running": 0,
-  "Forced off": 1,
-  "Recommended on": 2,
-  "Forced on": 3,
-});
 const SMART_GRID_MODE_VALUE = Object.freeze([
   "Free running", "Forced off", "Recommended on", "Forced on",
 ]);
-const mbSmartGridMode = () => {
-  const r = mbRow(MB_OFF_SMART_GRID);
-  if (!r) return null;
-  const n = SMART_GRID_MODE_NUMBER[String(r.value).trim()];
-  return Number.isInteger(n) ? n : null;
-};
+// The HomeHub boundary exposes the raw 0..3 constant. The enum id makes the number structural;
+// unknown future/corrupt values must not become a plausible-looking Smart-Grid request.
+const mbSmartGridMode = () =>
+  modbusEnumNumber(mbRow(MB_OFF_SMART_GRID), "smart_grid_mode", 3);
 // One lookup both go through. Gated on mbLive() for mbByConcept's reason: correct on its own.
 const mbRow = (off) =>
   mbLive() ? (S._modbus || []).find((m) => m && m.off === off && m.value != null) || null : null;

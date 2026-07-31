@@ -33,8 +33,9 @@ inline constexpr uint8_t HOMEHUB_GROUP_REG = 0xEE;
 
 // A dimensionless Int16 can still be a NUMBER, a two-state FLAG or a named ENUM. The wire type
 // cannot distinguish them: the EKRHH guide uses Int16 for the fault sub-code, ON/OFF flags and every
-// mode selector alike. Classify them from the guide here, at the common decode boundary, so /values,
-// MCP and the browser cannot each invent a different meaning for the same register.
+// mode selector alike. Classify them from the guide here, at the common decode boundary. The public
+// value remains the raw numeric constant; presentation surfaces receive the enum id separately and
+// may render the manufacturer's name without replacing 2 with "Recommended on" on MQTT or APIs.
 enum class HomeHubValueKind : uint8_t {
     Number,
     Binary,
@@ -119,10 +120,10 @@ inline constexpr bool homehub_is_enum(HomeHubValueKind kind) {
            kind == HomeHubValueKind::ThreeWayValve || kind == HomeHubValueKind::SmartGridMode;
 }
 
-// JSON/HA wire type is a property of the register definition, never of the formatted value. Text16
-// and the named manufacturer enums are text in every state; ordinary and binary values are numeric.
+// JSON/HA wire type is a property of the register definition, never of the formatted value. Only
+// Text16 is text. Manufacturer enums remain their numeric Modbus constants on every public wire.
 inline constexpr bool homehub_is_text(const HomeHubReg& r) {
-    return r.type == MbType::Text16 || homehub_is_enum(r.kind);
+    return r.type == MbType::Text16;
 }
 
 inline constexpr const HomeHubReg* homehub_find(uint16_t offset) {
@@ -131,38 +132,14 @@ inline constexpr const HomeHubReg* homehub_find(uint16_t offset) {
     return nullptr;
 }
 
-// Canonical English values are the manufacturer's own §9.2 names. The browser localises these at
-// its visual boundary; protocol consumers get a stable, human-readable value instead of a number.
-inline constexpr const char* homehub_enum_name(HomeHubValueKind kind, int value) {
+// Stable semantic id carried beside a numeric enum in /values. MQTT deliberately publishes only
+// the number; the browser uses this metadata to name the state at the last, visual boundary.
+inline constexpr const char* homehub_enum_id(HomeHubValueKind kind) {
     switch (kind) {
-        case HomeHubValueKind::UnitAbnormality:
-            switch (value) {
-                case 0: return "No error";
-                case 1: return "Fault";
-                case 2: return "Warning";
-                default: return nullptr;
-            }
-        case HomeHubValueKind::OperationMode:
-            switch (value) {
-                case 0: return "Auto";
-                case 1: return "Heating";
-                case 2: return "Cooling";
-                default: return nullptr;
-            }
-        case HomeHubValueKind::ThreeWayValve:
-            switch (value) {
-                case 0: return "Space heating";
-                case 1: return "DHW";
-                default: return nullptr;
-            }
-        case HomeHubValueKind::SmartGridMode:
-            switch (value) {
-                case 0: return "Free running";
-                case 1: return "Forced off";
-                case 2: return "Recommended on";
-                case 3: return "Forced on";
-                default: return nullptr;
-            }
+        case HomeHubValueKind::UnitAbnormality: return "unit_abnormality";
+        case HomeHubValueKind::OperationMode:   return "operation_mode";
+        case HomeHubValueKind::ThreeWayValve:   return "three_way_valve";
+        case HomeHubValueKind::SmartGridMode:   return "smart_grid_mode";
         default: return nullptr;
     }
 }
@@ -179,21 +156,16 @@ inline bool homehub_decode(const HomeHubReg& r, uint16_t raw, MbValue& out) {
 
 // Format a decoded register into `buf` (no allocation, for the poll path). Returns false and leaves
 // `buf` untouched when the register carries no value (special / undecodable). Text16 is copied
-// verbatim; named enums use the manufacturer's status text; an undocumented enum value remains
-// diagnosable as "Unknown (N)" rather than silently acquiring the nearest valid meaning. Binary
-// flags stay numeric 1/0 for the firmware-wide wire contract and are rendered ON/OFF by the browser.
-// Other Int16 values with no extra scale are integers; scaled numerics print one decimal.
+// verbatim. Int16 enums, flags and ordinary integers all remain numeric constants; semantic enum
+// metadata is emitted separately by /values and the browser names known states visually. This also
+// leaves an undocumented enum value diagnosable as its raw number instead of silently coercing it.
+// Scaled numerics print one decimal.
 inline bool homehub_format(const HomeHubReg& r, uint16_t raw, char* buf, int buflen) {
     if (buf == nullptr || buflen <= 0) return false;
     MbValue v;
     if (!homehub_decode(r, raw, v)) return false;
     if (r.type == MbType::Text16) {
         std::snprintf(buf, static_cast<size_t>(buflen), "%s", v.text);
-    } else if (homehub_is_enum(r.kind)) {
-        const int value = static_cast<int>(v.value);
-        const char* name = homehub_enum_name(r.kind, value);
-        if (name) std::snprintf(buf, static_cast<size_t>(buflen), "%s", name);
-        else std::snprintf(buf, static_cast<size_t>(buflen), "Unknown (%d)", value);
     } else if (r.type == MbType::Int16 && r.scale == 1) {
         std::snprintf(buf, static_cast<size_t>(buflen), "%d", static_cast<int>(v.value));
     } else {
