@@ -53,6 +53,8 @@ extern const unsigned char index_html_gz_start[] asm("_binary_index_html_gz_star
 extern const unsigned char index_html_gz_end[]   asm("_binary_index_html_gz_end");
 extern const unsigned char setup_html_gz_start[] asm("_binary_setup_html_gz_start");
 extern const unsigned char setup_html_gz_end[]   asm("_binary_setup_html_gz_end");
+extern const unsigned char favicon_ico_start[]   asm("_binary_favicon_ico_start");
+extern const unsigned char favicon_ico_end[]     asm("_binary_favicon_ico_end");
 
 namespace daik {
 
@@ -83,6 +85,12 @@ static esp_err_t h_index(httpd_req_t* req) {
     if (setup_mode() || !wifi_configured())
         return http_send_gzip(req, "text/html", setup_html_gz_start, setup_html_gz_end);
     return http_send_gzip(req, "text/html", index_html_gz_start, index_html_gz_end);
+}
+
+static esp_err_t h_favicon(httpd_req_t* req) {
+    httpd_resp_set_type(req, "image/vnd.microsoft.icon");
+    return httpd_resp_send(req, reinterpret_cast<const char*>(favicon_ico_start),
+                           favicon_ico_end - favicon_ico_start);
 }
 
 // The catch-all ("/*"). In SETUP mode an unmatched GET is an OS connectivity probe far more often
@@ -912,10 +920,12 @@ static esp_err_t h_scan(httpd_req_t* req) {
 }
 
 void http_register_status(httpd_handle_t s, HttpSurface surface) {
-    // Provisioning surface (served on the open setup AP too): the setup page, nothing else. The
-    // portal takes a TYPED SSID, so /scan is NOT part of it (see logic/http_surface.hpp).
+    // Provisioning surface (served on the open setup AP too): the setup page and its inert favicon,
+    // nothing else. The portal takes a TYPED SSID, so /scan is NOT part of it
+    // (see logic/http_surface.hpp).
     http_register_on(s, surface, "/", HTTP_GET, h_index);
     http_register_on(s, surface, "/index.html", HTTP_GET, h_index);
+    http_register_on(s, surface, "/favicon.ico", HTTP_GET, h_favicon);
 
     // Everything below is trusted-LAN only — withheld from the open setup AP (F01). /diag and
     // /coredump can carry WiFi/MQTT secrets; /status/values/models expose live device state.

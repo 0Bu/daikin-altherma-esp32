@@ -4515,9 +4515,10 @@ static void test_http_surface() {
     const HttpSurface lan = HttpSurface::TrustedLan;
 
     // Trusted LAN exposes the full API — every route, either method.
-    for (const char* p : {"/", "/index.html", "/scan", "/status", "/values", "/diag", "/coredump",
-                          "/crash/dismiss", "/models", "/set_wifi", "/set_mqtt", "/set_ntp",
-                          "/set_hp", "/detect", "/ota/check", "/ota/update", "/mcp"}) {
+    for (const char* p : {"/", "/index.html", "/favicon.ico", "/scan", "/status", "/values",
+                          "/diag", "/coredump", "/crash/dismiss", "/models", "/set_wifi",
+                          "/set_mqtt", "/set_ntp", "/set_hp", "/detect", "/ota/check",
+                          "/ota/update", "/mcp"}) {
         CHECK(http_surface_serves(lan, p, false));
         CHECK(http_surface_serves(lan, p, true));
     }
@@ -4525,6 +4526,7 @@ static void test_http_surface() {
     // Open setup AP: ONLY the provisioning routes.
     CHECK(http_surface_serves(ap, "/", false));
     CHECK(http_surface_serves(ap, "/index.html", false));
+    CHECK(http_surface_serves(ap, "/favicon.ico", false));
     CHECK(http_surface_serves(ap, "/set_wifi", true));
 
     // …and nothing that reads state, carries secrets, or reconfigures the device. This is the F01
@@ -4557,6 +4559,7 @@ static void test_http_surface() {
     CHECK(!http_surface_serves(ap, "/set_wifi", false));
     CHECK(!http_surface_serves(ap, "/", true));
     CHECK(!http_surface_serves(ap, "/index.html", true));
+    CHECK(!http_surface_serves(ap, "/favicon.ico", true));
 }
 
 // logic/lwt_select.hpp — the leaving-water MEASUREMENT picker that feeds ΔT / heat output / COP.
