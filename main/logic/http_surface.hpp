@@ -23,8 +23,9 @@ namespace daik {
 enum class HttpSurface { SetupAp, TrustedLan };
 
 // Does `surface` expose a route at `path` with the given method? On the trusted LAN, everything.
-// On the open setup AP, ONLY: GET / , GET /index.html (setup.html) and POST /set_wifi (submit
-// credentials). Every other route — status/values/models/diag/coredump, the remaining /set_*
+// On the open setup AP, ONLY: GET / , GET /index.html (setup.html), GET /favicon.ico (an inert
+// static asset), and POST /set_wifi (submit credentials). Every other route —
+// status/values/models/diag/coredump, the remaining /set_*
 // config, /detect, OTA and MCP — is withheld: an unregistered GET falls through to the captive
 // catch-all (the setup page, never data), and an unregistered POST simply 404s.
 //
@@ -34,7 +35,7 @@ enum class HttpSurface { SetupAp, TrustedLan };
 inline bool http_surface_serves(HttpSurface surface, std::string_view path, bool is_post) {
     if (surface == HttpSurface::TrustedLan) return true;
     if (is_post) return path == "/set_wifi";
-    return path == "/" || path == "/index.html";
+    return path == "/" || path == "/index.html" || path == "/favicon.ico";
 }
 
 }  // namespace daik

@@ -34,6 +34,7 @@ idf_component_register(
         "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz"
         "${CMAKE_CURRENT_BINARY_DIR}/setup.html.gz"
         "${CMAKE_CURRENT_BINARY_DIR}/mcp.html.gz"
+        "${CMAKE_CURRENT_SOURCE_DIR}/www/favicon.ico"
     REQUIRES
         nvs_flash
         esp_wifi
