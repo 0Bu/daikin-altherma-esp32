@@ -46,8 +46,10 @@
 #include "logic/discovery.hpp"
 #include "logic/fault_state.hpp"
 #include "logic/heartbeat.hpp"
+#include "logic/ha_device_migration.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/reset_reason.hpp"
+#include "nvs_storage.hpp"
 #include "wifi.hpp"
 
 #include "esp_app_desc.h"
@@ -106,6 +108,7 @@ static std::string s_last_modbus_json;
 static int         s_last_modbus_live = -1;             // -1 unknown, 0 offline, 1 online
 static bool        s_modbus_discovery_announced = false;
 static bool        s_modbus_disabled_cleaned    = false;
+static HaModbusDeviceMigration s_modbus_device_migration;
 // Source-topic split migration: probe the retired retained topic without unconditionally publishing
 // an empty payload on every reconnect. The event task only raises `seen`; subscribe/delete/unsubscribe
 // remain on mqtt_task, preserving the single-publisher rule. The bounded probe repeats on reconnect
@@ -422,6 +425,19 @@ static void retract_modbus_discovery() {
         mqtt_publish(modbus_discovery_topic(s_prefix, s_node, def::HOMEHUB_REGS[i]), "", 0, 0, 1);
 }
 
+static void persist_modbus_device_migration() {
+    if (!s_modbus_device_migration.completion_needs_persist()) return;
+    const esp_err_t err = nvs_set_i32(HA_MODBUS_DEVICE_MIGRATION_KEY,
+                                      HA_MODBUS_DEVICE_MIGRATION_VERSION);
+    if (err == ESP_OK) {
+        s_modbus_device_migration.persisted();
+        diag_printf("mqtt: unified legacy Modbus HA device\n");
+    } else {
+        diag_printf("mqtt: Modbus HA device migration marker failed (%s); will retry\n",
+                    esp_err_to_name(err));
+    }
+}
+
 // Build + publish each source independently. The X10A payload is grouped by register page; the
 // Modbus topic is flat because its topic already supplies the source group. When the HomeHub link is
 // not live, `{}` actively removes every state instead of retaining values from an old TCP session.
@@ -640,6 +656,15 @@ static void mqtt_task(void*) {
                     // not briefly revive stale HomeHub values while this cycle checks cache liveness.
                     mqtt_publish(s_modbus_avail, "offline", 0, 0, 1);
                     s_last_modbus_live = 0;
+                    // Existing MQTT entities do not change HA devices when only dev.ids changes.
+                    // Delete the retained Modbus configs now, then wait three seconds before the
+                    // ordinary discovery path re-adds the SAME topics/unique ids under the common
+                    // device. The gap is load-bearing: HA must process removal before replacement.
+                    if (s_modbus_device_migration.begin(mb_status().enabled,
+                                                        esp_timer_get_time())) {
+                        retract_modbus_discovery();
+                        diag_printf("mqtt: migrating legacy Modbus HA device\n");
+                    }
                     // Probe before deleting the pre-split X10A payload. Publishing a tombstone
                     // unconditionally here used to recreate a visible empty <base>/state message
                     // on every reconnect even after the broker was clean. The DATA event raises the
@@ -682,13 +707,26 @@ static void mqtt_task(void*) {
 
                 const bool modbus_enabled = mb_status().enabled;
                 if (modbus_enabled) {
-                    if (!s_modbus_discovery_announced) {
+                    // Also start here, not only in the connect-announcement block: app_main starts
+                    // MQTT before the independent Modbus task, and a very fast broker connection
+                    // can therefore observe enabled=false transiently. Dynamic POST /set_hp enable
+                    // needs the same path. Never persist the marker until replacement is published.
+                    if (!s_modbus_discovery_announced &&
+                        s_modbus_device_migration.pending &&
+                        !s_modbus_device_migration.waiting &&
+                        s_modbus_device_migration.begin(true, esp_timer_get_time())) {
+                        retract_modbus_discovery();
+                        diag_printf("mqtt: migrating legacy Modbus HA device\n");
+                    }
+                    if (!s_modbus_discovery_announced &&
+                        s_modbus_device_migration.replacement_due(esp_timer_get_time())) {
                         publish_modbus_discovery();
                         s_modbus_discovery_announced = true;
                         s_modbus_disabled_cleaned = false;
                         publish_modbus_state(true);
+                        persist_modbus_device_migration();
                     } else {
-                        publish_modbus_state(false);
+                        if (s_modbus_discovery_announced) publish_modbus_state(false);
                     }
                 } else if (!s_modbus_disabled_cleaned) {
                     // Covers both an upgrade from an enabled build and a live POST /set_hp disable.
@@ -797,6 +835,8 @@ void mqtt_ha_start() {
     s_legacy_state = legacy_state_topic(s_base);
     s_heartbeat = heartbeat_topic(s_base);
     s_crash     = crash_topic(s_base);
+    s_modbus_device_migration.load(
+        nvs_get_i32(HA_MODBUS_DEVICE_MIGRATION_KEY, 0));
 
     if (!build_client()) return;                               // policy error already surfaced
     esp_mqtt_client_start(s_client);

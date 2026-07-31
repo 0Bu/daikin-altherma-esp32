@@ -116,6 +116,14 @@ Modbus discovery topics and unique ids retain a `_modbus` namespace solely to pr
 collisions; their `dev.ids` are the same installation and board identifiers as X10A and diagnostics,
 so Home Assistant joins all three surfaces into that one device.
 
+> **Upgrading from the earlier split X10A/Modbus device layout:** Home Assistant does not move an
+> existing MQTT entity to another device merely because a retained discovery payload's `dev.ids`
+> changes. The firmware therefore performs one persisted migration: it deletes the 27 retained
+> Modbus discovery configs, waits three seconds for HA to process those removals, and republishes the
+> same topics and `unique_id`s under the common **Daikin Altherma** device. Entity ids, recorder
+> history, statistics and per-entity customisations are preserved. The migration marker is written
+> only after replacement discovery is queued; a failed NVS write retries on a later reconnect.
+
 The board's own id `daikin_<mac3>` (low three bytes of the WiFi STA MAC) still exists, but only
 where the *hardware* is what's being identified: as the **MQTT client id** — which has to be unique
 per connection, so two boards briefly online during a swap don't kick each other off the broker —

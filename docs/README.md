@@ -509,8 +509,11 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   3-way valve, thermostat ON/OFF), whose state rides as the number `1`/`0` so it is usable in a
   metrics store as well as in HA, and `sensor` for everything else.
   An enabled HomeHub publishes its live, flat register map independently on `<base>/modbus` and
-  receives its own Modbus HA device/discovery group. A disconnected link publishes `{}`; disabling
-  it retracts the topic and discovery configs. HA combines the board LWT with retained
+  joins the X10A metrics and diagnostics on the same **Daikin Altherma** HA device while retaining a
+  collision-free `_modbus` entity namespace. An earlier separate Modbus device is migrated once by
+  deleting and re-adding the same retained configs after a three-second HA processing window, so
+  entity ids and history remain intact. A disconnected link publishes `{}`; disabling it retracts
+  the topic and discovery configs. HA combines the board LWT with retained
   `<base>/modbus/status` using `availability_mode: all`. HomeHub enums stay numeric constants (for
   example `smart_grid_operation_mode: 2`); only the web UI maps them to readable names. A short
   migration probe deletes an old retained `<base>/state` value if present; an already-clean broker

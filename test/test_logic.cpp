@@ -40,6 +40,7 @@
 #include "logic/ui_lang.hpp"
 #include "logic/ota_manifest.hpp"
 #include "logic/heartbeat.hpp"
+#include "logic/ha_device_migration.hpp"
 #include "logic/http_body.hpp"
 #include "logic/json.hpp"
 #include "logic/mqtt_group.hpp"
@@ -986,6 +987,32 @@ static void test_ha_device() {
     // and diagnostics so Home Assistant presents one installation device.
     CHECK(modbus_entity_node_id(node) == "daikin_altherma_esp32_modbus");
     CHECK(modbus_device_json(node, brd) == dev);
+
+    // Existing MQTT entities do NOT move device merely because dev.ids changes. Pin the one-time
+    // delete/re-add gate: the same topics/unique ids are retained, but replacement waits long enough
+    // for HA to process the tombstones. Failed marker persistence keeps the migration retryable.
+    CHECK(std::strlen(HA_MODBUS_DEVICE_MIGRATION_KEY) <= 15);
+    HaModbusDeviceMigration migration;
+    migration.load(0);
+    CHECK(migration.pending && !migration.waiting);
+    CHECK(migration.begin(true, 100));
+    CHECK(!migration.replacement_due(100 + HA_MODBUS_DEVICE_MIGRATION_DELAY_US - 1));
+    CHECK(migration.replacement_due(100 + HA_MODBUS_DEVICE_MIGRATION_DELAY_US));
+    CHECK(migration.completion_needs_persist());
+    CHECK(migration.pending);                 // failed NVS write -> retry remains armed
+    CHECK(migration.begin(true, 500));         // reconnect restarts the full delay
+    CHECK(!migration.replacement_due(500));
+    migration.persisted();
+    CHECK(!migration.pending);
+    CHECK(!migration.begin(true, 900));
+    CHECK(migration.replacement_due(900));
+
+    migration.load(HA_MODBUS_DEVICE_MIGRATION_VERSION);
+    CHECK(!migration.pending && !migration.begin(true, 1000));
+    migration.load(0);
+    CHECK(!migration.begin(false, 1000));     // transient/real disabled state never burns the marker
+    CHECK(migration.pending);
+    CHECK(migration.replacement_due(1000));
 }
 
 static void test_discovery() {

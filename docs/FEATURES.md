@@ -531,7 +531,9 @@ IDF v6.0 extracted it from core — [`idf_component.yml`](../main/idf_component.
   un-grouped ids).
   An enabled HomeHub publishes its live register map as flat JSON on `<base>/modbus`, under the same
   **Daikin Altherma** HA device as X10A and diagnostics but with a collision-free `_modbus` entity
-  namespace. A dead link yields `{}` and a disabled stack
+  namespace. Existing installations are moved from the earlier separate Modbus device by a
+  persisted one-time retained-config delete/re-add with a three-second HA processing window; topics,
+  unique ids, entity ids, history and customisations stay unchanged. A dead link yields `{}` and a disabled stack
   retracts the value/link-status topics and discovery configs. HA requires both the board LWT and
   `<base>/modbus/status` online. Its Int16 enums remain numeric constants on MQTT/HA (mode 2 stays
   `2`, never `"Recommended on"`); the browser names them from separate semantic metadata. A bounded

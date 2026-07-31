@@ -1175,7 +1175,9 @@ The Home Assistant bridge:
   (`value_json['<group>']['<object_id>']` — bracket notation, so a digit-leading slug like
   `2way_valve…` stays valid). `<base>/modbus` is a separate flat retained JSON object, published only
   for an enabled HomeHub stack. Its discovery configs read a plain object key and belong to the
-  Modbus HA device. Int16 enum values retain the raw numeric Modbus constant; `/values` carries
+  common X10A/Modbus/diagnostics HA device. Existing separate Modbus-device entities are migrated
+  once by deleting their retained configs, waiting three seconds, and re-announcing the same
+  topics/unique ids. Int16 enum values retain the raw numeric Modbus constant; `/values` carries
   separate semantic metadata so the browser can name them without putting prose on MQTT/HA. A
   disconnected HomeHub publishes `{}` rather than preserving a previous TCP
   session's values. Its entities combine `<base>/status` (board LWT) and
