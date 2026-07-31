@@ -818,17 +818,17 @@ textarea.input[readonly] { font-size: 12px; color: var(--muted); white-space: pr
    below the fold.) */
 /* The source badge. Outlined, lowercase and MONOSPACE — the type this UI already reserves for
    machine identity (the inspector's source line naming the /values row is mono for the same
-   reason), so the marker reads as metadata about the reading rather than as another word in the
-   sentence. Set beside a value, where the VALUE is what the eye should land on, so it carries its
-   weight in the outline instead of in ink. One badge wherever a gateway reading appears — the
-   explainer line and the inspector's member row — so a reader learns it once. */
+   reason), so the marker reads as quiet metadata rather than as another word in the sentence.
+   Its reduced opacity keeps the VALUE as the visual anchor while retaining the source on closer
+   inspection. One badge wherever a gateway reading appears — the explainer line and the
+   inspector's member row — so a reader learns it once. */
 .mb-tag {
   display: inline-block; vertical-align: 1px;
   padding: 1px 7px 2px; border-radius: var(--r-pill);
   border: 1px solid currentColor; background: var(--src-mb-soft); color: var(--src-mb);
   font-family: var(--font-mono);
-  font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: lowercase;
-  line-height: 1.4; white-space: nowrap;
+  font-size: 10px; font-weight: 600; letter-spacing: .05em; text-transform: lowercase;
+  line-height: 1.4; white-space: nowrap; opacity: .3;
 }
 /* The gateway's reading as a FULL row inside an explainer — its own label on the left, the value on
    the right, the same shape as the X10A row the explainer hangs under, so the two line up and read
