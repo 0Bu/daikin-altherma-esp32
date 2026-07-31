@@ -22,7 +22,7 @@ const SOURCE =
 function renderer(lang) {
   const context = { LANG: lang };
   vm.createContext(context);
-  vm.runInContext(SOURCE + "\nthis.__ui = { displayValue," +
+  vm.runInContext(SOURCE + "\nthis.__ui = { displayValue, operationModeText, operationModeFromFlags, labels: I18N[LANG]," +
     " sgModeText: (mode) => t(`sg.mode${mode}`)," +
     " sgBoostText: () => t(\"schem.sg_boost\") };", context,
     { filename: "main/www/app.js" });
@@ -66,4 +66,43 @@ assert.equal(en.displayValue({ value: "Unknown (7)" }), "Unknown (7)");
 assert.equal(de.displayValue({ value: "Unknown (7)" }), "Unbekannt (7)");
 assert.equal(de.displayValue({ value: "17" }), "17", "ordinary numeric values remain numeric");
 
-console.log("HomeHub enum UI: all manufacturer states named in English and German");
+const operationModes = [
+  ["Stop", "Stop", "Stopp"],
+  ["Heating", "Heating", "Heizen"],
+  ["Cooling", "Cooling", "Kühlen"],
+  ["DHW", "Hot water", "Warmwasser"],
+  ["Heating + DHW", "Heating + hot water", "Heizen + Warmwasser"],
+  ["Cooling + DHW", "Cooling + hot water", "Kühlen + Warmwasser"],
+];
+for (const [raw, english, german] of operationModes) {
+  assert.equal(en.operationModeText(raw), english, `English schematic mode: ${raw}`);
+  assert.equal(de.operationModeText(raw), german, `German schematic mode: ${raw}`);
+}
+assert.equal(de.operationModeText("Future mode"), "Future mode", "unknown modes remain visible");
+assert.equal(de.operationModeText(null), null, "an absent mode stays absent");
+assert.equal(de.operationModeFromFlags(true, false), "Warmwasser",
+  "the HomeHub DHW flag feeds the same German schematic vocabulary");
+assert.equal(de.operationModeFromFlags(false, true), "Heizen",
+  "the HomeHub space flag feeds the same German schematic vocabulary");
+assert.equal(de.operationModeFromFlags(false, false), "Stopp",
+  "inactive HomeHub flags feed the same German schematic vocabulary");
+assert.equal(de.operationModeFromFlags(null, false), null,
+  "incomplete HomeHub flags do not guess an operation mode");
+const modelLabels = {
+  capacity: "Nennleistung der Außeneinheit",
+  capacity_iu: "Nennleistung der Inneneinheit",
+  oueeprom: "Kennung der Außeneinheit",
+};
+for (const [key, expected] of Object.entries(modelLabels)) {
+  const actual = de.labels[`card.${key}`];
+  assert.equal(actual, expected, `German model-card label: ${key}`);
+  assert.doesNotMatch(actual, /[()]/, `German model-card label has no parenthetical qualifier: ${key}`);
+}
+assert.match(app,
+  /const mode = schematicOperationMode\(\);/,
+  "the schematic headline must use the shared X10A and HomeHub mode resolver");
+assert.match(app,
+  /head: \(\) => schematicOperationMode\(\)/,
+  "the open operation-mode explainer must use the same localised fallback headline");
+
+console.log("HomeHub enums and schematic operation modes: all states named in English and German");

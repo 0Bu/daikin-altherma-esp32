@@ -48,31 +48,31 @@ const enLabels = labels("en");
 const expected = new Map([
   [21, ["Unit abnormality", "Diagnosezustand der Anlage"]],
   [22, ["Unit abnormality code", "Fehlercode der Anlage"]],
-  [23, ["Unit abnormality sub code", "Fehler-Subcode der Anlage"]],
+  [23, ["Unit abnormality sub code", "Fehlersubcode der Anlage"]],
   [30, ["Circulation pump running", "Umwälzpumpe aktiv"]],
   [37, ["3-way valve", "Position des 3-Wege-Ventils"]],
   [52, ["DHW normal operation", "Warmwasserbetrieb"]],
-  [53, ["Space heating/cooling normal operation", "Raumheiz-/Kühlbetrieb"]],
-  [40, ["Leaving water temperature PHE", "Vorlauftemperatur (Plattenwärmetauscher)"]],
-  [41, ["Leaving water temperature BUH", "Vorlauftemperatur (Zusatzheizer)"]],
+  [53, ["Space heating/cooling normal operation", "Raumheiz- oder Kühlbetrieb"]],
+  [40, ["Leaving water temperature PHE", "Vorlauftemperatur am Plattenwärmetauscher"]],
+  [41, ["Leaving water temperature BUH", "Vorlauftemperatur nach dem Zusatzheizer"]],
   [42, ["Return water temperature", "Rücklauftemperatur"]],
   [43, ["Domestic Hot Water temperature", "Warmwasserspeichertemperatur"]],
   [44, ["Outside air temperature", "Außentemperatur"]],
-  [45, ["Liquid refrigerant temperature", "Kältemitteltemperatur (Flüssigkeitsleitung)"]],
+  [45, ["Liquid refrigerant temperature", "Kältemitteltemperatur der Flüssigkeitsleitung"]],
   [49, ["Flow rate", "Volumenstrom"]],
-  [50, ["Remote controller room temperature Main", "Raumtemperatur (Hauptzone)"]],
+  [50, ["Remote controller room temperature Main", "Raumtemperatur der Hauptzone"]],
   [51, ["Heat pump power consumption", "Elektrische Leistungsaufnahme"]],
-  [1, ["Leaving water Main Heating setpoint", "Vorlauf-Sollwert Heizen (Hauptzone)"]],
-  [2, ["Leaving water Main Cooling setpoint", "Vorlauf-Sollwert Kühlen (Hauptzone)"]],
-  [3, ["Operation mode", "Heiz-/Kühlmodus"]],
-  [4, ["Space heating/cooling ON/OFF", "Raumheizung/-kühlung freigegeben"]],
-  [6, ["Room thermostat control Heating setpoint Main", "Raum-Solltemperatur Heizen (Hauptzone)"]],
-  [7, ["Room thermostat control Cooling setpoint Main", "Raum-Solltemperatur Kühlen (Hauptzone)"]],
+  [1, ["Leaving water Main Heating setpoint", "Heiz-Vorlaufsollwert der Hauptzone"]],
+  [2, ["Leaving water Main Cooling setpoint", "Kühl-Vorlaufsollwert der Hauptzone"]],
+  [3, ["Operation mode", "Heiz- oder Kühlmodus"]],
+  [4, ["Space heating/cooling ON/OFF", "Raumheizung oder -kühlung freigegeben"]],
+  [6, ["Room thermostat control Heating setpoint Main", "Heiz-Solltemperatur der Hauptzone"]],
+  [7, ["Room thermostat control Cooling setpoint Main", "Kühl-Solltemperatur der Hauptzone"]],
   [9, ["Quiet mode operation", "Leisebetrieb"]],
-  [10, ["DHW reheat setpoint", "Warmwasser-Nachheiz-Sollwert"]],
+  [10, ["DHW reheat setpoint", "Sollwert für Warmwasser-Nachheizung"]],
   [56, ["Smart Grid operation mode", "Smart-Grid-Betriebsart"]],
-  [57, ["Power limit during Recommended on / buffering", "Leistungsgrenze (Pufferung)"]],
-  [58, ["General power limit", "Leistungsgrenze (allgemein)"]],
+  [57, ["Power limit during Recommended on / buffering", "Leistungsgrenze für Pufferung"]],
+  [58, ["General power limit", "Allgemeine Leistungsgrenze"]],
 ]);
 
 assert.equal(expected.size, rows.length, "the expected label contract must cover every row");
@@ -83,6 +83,8 @@ for (const row of rows) {
   assert.equal(enLabels.displayHomeHubLabel(row),
     names[0].replace(/[\s.]+ON\/OFF\s*$/i, ""), `English visual label at offset ${row.off}`);
   assert.equal(deLabels.displayHomeHubLabel(row), names[1], `German visual label at offset ${row.off}`);
+  assert.doesNotMatch(names[1], /[()]/,
+    `German visual label at offset ${row.off} should read fluently without parenthetical qualifiers`);
 
   const d = firstDescription(row.label);
   assert.ok(d, `missing description for ${row.label}`);
@@ -131,5 +133,13 @@ const quiet = firstDescription(rows.find((r) => r.off === 9).label);
 assert.doesNotMatch(`${quiet.normal} ${quiet.de.normal}`, /default|standardmäßig/i);
 const reheat = firstDescription(rows.find((r) => r.off === 10).label);
 assert.match(`${reheat.normal} ${reheat.de.normal}`, /hysteresis/i);
+
+const indoorMode = firstDescription("I/U operation mode");
+assert.equal(indoorMode.de.what,
+  "Was die Wasserseite der Inneneinheit gerade tut: Stopp, Heizen, Kühlen, Warmwasser oder Heizen + Warmwasser.");
+assert.match(indoorMode.de.normal, /steht hier Warmwasser/);
+assert.doesNotMatch(`${indoorMode.de.what} ${indoorMode.de.normal}`,
+  /Wasserseite \(|Heizen\+Warmwasser|\bWW\b/,
+  "the German operation-mode explanation uses fluent copy and the visible state names");
 
 console.log("HomeHub copy: 27/27 values, labels and bilingual explanations are semantically pinned");

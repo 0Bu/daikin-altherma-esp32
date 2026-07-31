@@ -101,14 +101,14 @@ const DEMO = (() => {
                 wp: "1.8", rp: "36.8", pumpSig: "22", pumpOn: true, valveDhw: true,
                 thermo: false, spaceOn: false, defrost: false, quiet: false, ct: "8.0" }) },
 
-    { name: "Heating", caption: "Heizung · Space heating",
+    { name: "Heating", caption: "Heizen · Heating",
       v: base({ mode: "Heating", ouMode: "Heating", out: "5.2", rps: "45", disch: "68.1", hp: "26.2",
                 lp: "6.4", eev: "280", inv: "6.1", fan: "4", lwt: "38.4", ret: "33.9", tank: "49.5",
                 tankSet: "50.0", lwSet: "38.0", room: "21.4", roomSet: "21.5", flow: "21.0",
                 wp: "1.8", rp: "26.2", pumpSig: "12", pumpOn: true, valveDhw: false,
                 thermo: true, spaceOn: true, defrost: false, quiet: false, ct: "6.0" }) },
 
-    { name: "Heating + DHW", caption: "Heizung + Warmwasser · Heating + DHW",
+    { name: "Heating + DHW", caption: "Heizen + Warmwasser · Heating + hot water",
       v: base({ mode: "Heating + DHW", ouMode: "Heating", out: "5.0", rps: "58", disch: "74.6",
                 hp: "34.6", lp: "6.8", eev: "305", inv: "7.4", fan: "5", lwt: "51.6", ret: "46.9",
                 tank: "46.8", tankSet: "50.0", lwSet: "38.0", room: "21.1", roomSet: "21.5",
