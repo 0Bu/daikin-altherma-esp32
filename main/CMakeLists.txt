@@ -33,6 +33,7 @@ idf_component_register(
     EMBED_FILES
         "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz"
         "${CMAKE_CURRENT_BINARY_DIR}/setup.html.gz"
+        "${CMAKE_CURRENT_BINARY_DIR}/mcp.html.gz"
     REQUIRES
         nvs_flash
         esp_wifi
@@ -139,3 +140,30 @@ add_custom_command(
     VERBATIM)
 add_custom_target(gen_setup_gz DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/setup.html.gz")
 add_dependencies(${COMPONENT_LIB} gen_setup_gz)
+
+# The MCP endpoint is both a protocol URL (POST) and a self-documenting setup page (GET). Keep its
+# source split for editability like the main UI, but ship one pre-gzipped, dependency-free page.
+# Symbols: _binary_mcp_html_gz_{start,end} (see mcp_server.cpp).
+add_custom_command(
+    OUTPUT  "${CMAKE_CURRENT_BINARY_DIR}/mcp_dashboard_inlined.html"
+    COMMAND ${CMAKE_COMMAND}
+            -DHTML=${CMAKE_CURRENT_SOURCE_DIR}/www/mcp_dashboard.html
+            -DCSS=${CMAKE_CURRENT_SOURCE_DIR}/www/mcp_dashboard.css
+            -DJS=${CMAKE_CURRENT_SOURCE_DIR}/www/mcp_dashboard.js
+            -DOUT=${CMAKE_CURRENT_BINARY_DIR}/mcp_dashboard_inlined.html
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/www/inline_assets.cmake
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/www/mcp_dashboard.html"
+            "${CMAKE_CURRENT_SOURCE_DIR}/www/mcp_dashboard.css"
+            "${CMAKE_CURRENT_SOURCE_DIR}/www/mcp_dashboard.js"
+            "${CMAKE_CURRENT_SOURCE_DIR}/www/inline_assets.cmake"
+    COMMENT "Inlining MCP dashboard assets"
+    VERBATIM)
+add_custom_command(
+    OUTPUT  "${CMAKE_CURRENT_BINARY_DIR}/mcp.html.gz"
+    COMMAND gzip -9 -n -c "${CMAKE_CURRENT_BINARY_DIR}/mcp_dashboard_inlined.html"
+            > "${CMAKE_CURRENT_BINARY_DIR}/mcp.html.gz"
+    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/mcp_dashboard_inlined.html"
+    COMMENT "Gzipping MCP dashboard"
+    VERBATIM)
+add_custom_target(gen_mcp_gz DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/mcp.html.gz")
+add_dependencies(${COMPONENT_LIB} gen_mcp_gz)

@@ -1,12 +1,16 @@
 // /mcp — read-only Model Context Protocol server for AI agents. Streamable HTTP, one stateless
-// JSON-RPC 2.0 message per POST, GET -> 405 (no SSE). logic/mcp.hpp owns all parsing, dispatch and
-// fixed result envelopes; this device glue only supplies the same snapshots as /status and /values.
+// JSON-RPC 2.0 message per POST; GET serves the self-documenting dashboard (not SSE). logic/mcp.hpp
+// owns all parsing, dispatch and fixed result envelopes; this device glue only supplies the same
+// snapshots as /status and /values.
 #include "http_handlers.hpp"
 #include "logic/mcp.hpp"
 #include "wifi.hpp"
 #include "esp_app_desc.h"
 #include "esp_http_server.h"
 #include <string>
+
+extern const unsigned char mcp_html_gz_start[] asm("_binary_mcp_html_gz_start");
+extern const unsigned char mcp_html_gz_end[]   asm("_binary_mcp_html_gz_end");
 
 namespace daik {
 
@@ -90,9 +94,17 @@ static esp_err_t mcp_post(httpd_req_t* req) {
 }
 
 static esp_err_t mcp_get(httpd_req_t* req) {
-    httpd_resp_set_status(req, "405 Method Not Allowed");
-    httpd_resp_set_hdr(req, "Allow", "POST");
-    return httpd_resp_sendstr(req, "POST only");
+    // One URL, method-selected: a person gets local setup help; an MCP client POSTs the protocol.
+    // The static page has no external assets or network activity. Inline CSS/JS is unavoidable
+    // because the asset is deliberately one pre-gzipped response in flash.
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
+    httpd_resp_set_hdr(req, "X-Frame-Options", "DENY");
+    httpd_resp_set_hdr(req, "Referrer-Policy", "no-referrer");
+    httpd_resp_set_hdr(req, "Content-Security-Policy",
+                       "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+                       "connect-src 'none'; img-src 'self' data:; base-uri 'none'; form-action 'none'");
+    return http_send_gzip(req, "text/html", mcp_html_gz_start, mcp_html_gz_end);
 }
 
 void http_register_mcp(httpd_handle_t s, HttpSurface surface) {

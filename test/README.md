@@ -46,6 +46,11 @@ evidence wrapping, old-payload fallbacks, per-row observation clocks, the two-st
 safe handling of future unknown checks and the source-level reset contract (a pending identity reset hides
 the report and drops the in-flight sample).
 
+`node test/test_mcp_dashboard.mjs` verifies the embedded GET `/mcp` asset contract: the page explains
+the endpoint and its security boundary, provides client and curl examples for the URL that served it,
+documents both tools, loads no external asset, makes no network request, and is served pre-gzipped
+with `connect-src 'none'`.
+
 ## Covered
 
 One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `main()` runs them.

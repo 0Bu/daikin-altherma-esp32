@@ -5,8 +5,9 @@ MCP clients can read heat-pump state directly. It is **strictly read-only**: the
 same cached snapshots as `GET /status` and `GET /values`; no tool writes configuration, commands the
 heat pump, or reaches a separate data source.
 
-> Transport: **Streamable HTTP**, stateless JSON-RPC 2.0. `GET /mcp` → `405` (no SSE). Same
-> trusted-LAN-only caveat as the rest of the API — no auth/TLS, keep it on your LAN.
+> Transport: **Streamable HTTP**, stateless JSON-RPC 2.0. `POST /mcp` is the protocol;
+> `GET /mcp` is a self-contained setup and information page (not SSE). Both share the same
+> trusted-LAN-only caveat as the rest of the API — no auth/TLS, keep them on your LAN.
 
 The implemented subset follows the date-versioned MCP specification:
 
@@ -26,6 +27,17 @@ The implemented subset follows the date-versioned MCP specification:
 The request body is bounded to 1 KiB and parsed by the IDF-free, host-tested
 [`logic/mcp.hpp`](../main/logic/mcp.hpp) core. Every route invocation still runs under the shared
 HTTP OOM guard.
+
+## Browser setup page
+
+Open [`http://daikin-altherma-esp32.local/mcp`](http://daikin-altherma-esp32.local/mcp) in a browser.
+The page is embedded in the firmware, pre-compressed, and has no CDN, font, script, image, or other
+external dependency.
+
+It explains MCP in the context of the device and shows the exact URL that served the page, a
+copyable `mcpServers` configuration, a curl initialization example, the two-tool summary, and the
+transport/security contract. The page is deliberately static: it makes no MCP or other network
+requests. Its restrictive CSP includes `connect-src 'none'`.
 
 ## Tools
 
