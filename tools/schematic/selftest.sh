@@ -84,7 +84,7 @@ echo "== 1. the rotor's bounding box comes off its hub (the fan wobble) =="
 # The rotor is safe to spin for TWO independent reasons, and the seed has to break both or it proves
 # nothing: a circle centred on the hub sits inside the rotating group and dominates its bounding box
 # (the CSS pivots on `transform-box: fill-box`, i.e. on that box), AND the four blades at 90° are
-# symmetric by themselves. Move the ring out and drop one blade — three blades at 0/90/180 with no
+# symmetric by themselves. Remove the ring and drop one blade — three blades at 0/90/180 with no
 # ring is exactly the shape whose box comes off the hub, which is the wobble this drawing shipped.
 # (This case went vacuous once before, when the artwork changed from three blades to four and moving
 #  the ring alone stopped producing the defect. A seed that no longer reproduces is a MISS, not a
@@ -93,9 +93,9 @@ reset
 patch_file "$WORK/main/www/index.html" <<'PY'
 import sys, re
 p = sys.argv[1]; s = open(p).read()
-m = re.search(r'( *)<g id="scFan">\n( *)(<circle r="42"[^\n]*\n)', s)
-if not m: sys.exit(1)
-s = s[:m.start()] + f'{m.group(1)}{m.group(3)}{m.group(1)}<g id="scFan">\n' + s[m.end():]
+s2 = re.sub(r' *<circle r="42"[^\n]*\n', '', s, count=1)
+if s2 == s: sys.exit(1)
+s = s2
 s2 = re.sub(r' *<use href="#fanBlade" transform="rotate\(270\)"/>\n', '', s, count=1)
 if s2 == s: sys.exit(1)
 open(p, 'w').write(s2)

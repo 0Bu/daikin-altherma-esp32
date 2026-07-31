@@ -266,8 +266,12 @@ is in Settings:
   pair (+ its swap) next cycle. The current pin is always in its own list even if off-catalogue.
 
 ### 5.3 Dashboard — the operating screen  (default after setup)
-Header (an **outdoor-unit icon** — a fan + louvered condenser, the brand mark across the app — then
-the **product name**, then the **settings gear** on the right, the one way off this screen, §5.6).
+Header (a **48 px static three-blade heat-pump fan mark** — then the **product name**, then the
+**settings gear** on the right, the one way off this screen, §5.6). The mark is the supplied
+blue-and-white silhouette, served as a dedicated local PNG so its rounded blade geometry remains
+unchanged. It is identity, not telemetry: only the outdoor-unit fan in the system schematic follows
+inverter frequency and defrost state; the global reduced-motion preference therefore affects that
+live drawing, not the header mark.
 
 - **Product name** (headline line): the fixed title **`daikin-altherma-esp32`** — a stable app
   identity, not the detected model. Spelled in full lower-case exactly like
@@ -422,7 +426,8 @@ Body, ordered:
    at its far end), plate heat exchanger, supply line through the backup heater **and then the
    circulation pump** to the 3-way valve, DHW tank with coil, heating circuit, and the return line.
    The two ROTATING parts — the outdoor fan and the pump's impeller — turn only while their part
-   runs, and that is all they claim. Neither carries a direction mark: a triangle in a pump circle
+   runs, and that is all they claim. The header is a static product mark and deliberately does not
+   imply a live run state. Neither rotating schematic part carries a direction mark: a triangle in a pump circle
    IS the direction symbol, so the rotating one the drawing used to have pointed against the flow for
    half of every turn. Direction is the **pipes'** job — the flow dashes animate in the flow
    direction, everywhere, and only while there is flow. Both rotors are drawn so their bounding box

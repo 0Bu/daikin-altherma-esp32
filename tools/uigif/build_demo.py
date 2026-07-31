@@ -9,6 +9,7 @@ re-implemented here: what the GIF shows is what renderLive() actually drew.
   tools/uigif/build_demo.py <repo-root> <out.html>
 """
 import pathlib
+import shutil
 import sys
 
 if len(sys.argv) != 3:
@@ -54,4 +55,10 @@ for mark in (CSS_MARK, JS_MARK):
 page = page.replace(CSS_MARK, css)
 page = page.replace(JS_MARK, harness + "\n" + js)
 out.write_text(page)
+# The dashboard header's brand mark is an embedded firmware asset rather than an inline SVG.
+# Keep the local recording page faithful too: its absolute URL resolves at the demo server root.
+brand_icon = www / "heat_pump_icon.png"
+if not brand_icon.is_file():
+    sys.exit("build_demo: missing main/www/heat_pump_icon.png")
+shutil.copyfile(brand_icon, out.parent / brand_icon.name)
 print(f"{out} ({len(page)} bytes)")

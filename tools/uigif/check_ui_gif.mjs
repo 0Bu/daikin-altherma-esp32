@@ -105,7 +105,12 @@ const SEL_REQUIRED = [/\.sc-flow/, /#scFan/, /^:root/, /^@keyframes\s+dashfwd/];
 
 function schematicCss(css) {
   const kept = [];
-  for (const r of cssRules(css)) if (SEL_VISIBLE.some((re) => re.test(r.sel))) kept.push(`${r.sel}{${r.body}}`);
+  for (const r of cssRules(css)) {
+    // Keep the source selector intact: the header brand icon is a static raster, so no dashboard
+    // selector is shared with the cropped system schematic's live animation any more.
+    if (!SEL_VISIBLE.some((re) => re.test(r.sel))) continue;
+    kept.push(`${r.sel}{${r.body}}`);
+  }
   if (kept.length < 20) die(`only ${kept.length} schematic CSS rules found — the stylesheet's shape changed`);
   for (const re of SEL_REQUIRED) {
     if (!kept.some((r) => re.test(r))) die(`no CSS rule matches ${re} — the drawing's own styles are no longer being read`);

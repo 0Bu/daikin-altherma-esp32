@@ -1,18 +1,18 @@
 # Recorded by scripts/record-dashboard-gif.sh — do not hand-edit.
 #
 # ui = a fingerprint of the sources docs/media/dashboard.gif was recorded FROM (the schematic
-#      markup, the CSS that draws and animates it, the app.js functions that paint it, the
+#      markup, the CSS that draws and animates it, the assembled UI functions that paint it, the
 #      strings it prints, the scenes, and this recorder's own framing).
 # gif = the sha256 of the recording itself, so a hand-edited or re-compressed GIF is caught too.
 #
 # tools/uigif/check_ui_gif.mjs fails when the UI has moved on and the recording has not. The fix
 # is to RE-RECORD (that is what the stamp is for), never to edit this file.
-ui=15aef7cb78976db5e187d3a19e6ccb53634cd8cedce1f41717d593f6efd24c1c
+ui=8fb31d24b0e3f86ce3613bff626fc41987314d7fcc7d7a2dd9e8e4ccb48cfd42
 part.schematic_markup=aa54c9639dc9e313fb05308e232e250111d9c6c1caeecd6546e7ebc34fa10868
 part.schematic_css=69c734b7bf466b2de758c8b726715c50509f4bf25f9e4e6c5d50d3e963cff33c
-part.painting_code=4d8aea38971cafedfad99df96cafa1cdb8f525b29ad9affe1d0bc74116c1b7b1
+part.painting_code=89ccb0470738ba2d5067da34a073dd82e8f58f5c55344e7e6994b1530ccc6b06
 part.drawing_strings=2d53c59b5ca8100582ed4bbe86c0893339fb10bc56cfd50c0a6e9c1158ca6063
-part.scenes=afd5dc3e4e692f71150e3358cba623e75674590dfe535aed9acd27f01486eee0
+part.scenes=7c695c43dc31159d45b64b1c4f14431f7ba2beaf3d1bdea5bb615e7027a0542f
 part.framing=27ddf15e3e785eeb423f30f21b20f929a720ca5f9179366a2744af1b3ca9feec
 gif=abc68652ce6f95da39ccd92f15b98bf0bb0f14b9116b4f6ce55a7d8ddb1078bf
 frames=112

@@ -117,12 +117,13 @@ main { flex: 1; }
   background: var(--err); border: 2px solid var(--bg);
 }
 
-/* logo mark: rounded brand square holding the "waves" glyph */
+/* Header brand icon: source-faithful three-blade fan mark, shown at 48 px so its full silhouette
+   holds its own beside the device name. The image itself already carries the blue ground. */
 .logo {
-  flex: none; border-radius: var(--r-logo); background: var(--brand);
-  display: grid; place-items: center; box-shadow: var(--shadow-logo); color: #fff;
+  flex: none; display: block; object-fit: contain;
 }
-.logo.md { width: 38px; height: 38px; }
+.logo.md { width: 48px; height: 48px; border-radius: 12px; }
+.logo svg { display: block; width: 100%; height: 100%; }
 
 /* ── Views / layout ─────────────────────────────────────────────────────── */
 .view { display: none; }
@@ -221,14 +222,8 @@ svg .cold { stroke: var(--flow-cold); }
 svg .sc-flow.on { opacity: 1; animation: dashfwd 1.1s linear infinite; }
 svg .sc-rflow.on { opacity: 1; animation: rdashfwd 1.1s linear infinite; }
 svg .sc-rflow.on.rev { animation-name: rdashrev; }
-/* Both spin about their own BOUNDING-BOX centre (no coordinates repeated here, so moving the
-   part in index.html cannot leave a stale pivot behind). That only lands on the real axle if the
-   rotating group's bounding box is centred on the hub, which each achieves differently: the fan
-   keeps its RING inside the rotating group (a centred circle is invisible under rotation and
-   dominates the bbox, so any blade shape pivots true), the pump's impeller is four blades at 90 deg
-   (symmetric by itself). See the notes in index.html — both are load-bearing, not styling. The
-   pump's 1.2 s became 1.6 s because four-fold symmetry makes a blade pass the same point every
-   quarter turn, which strobed; the fan's four swept blades run 2.6 s for the same reason. */
+/* The schematic fan and the pump spin about their own bounding-box centre. The header logo is a
+   static brand mark; it intentionally does not mirror live compressor state. */
 #scFan, #scPump { transform-box: fill-box; transform-origin: center; }
 .fan-on #scFan { animation: spin 2.6s linear infinite; }
 .pump-on #scPump { animation: spin 1.6s linear infinite; }
