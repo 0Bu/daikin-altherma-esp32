@@ -105,7 +105,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [] }) {
   vm.runInContext(
     SOURCE + "\nthis.__api = { mbByConcept, mbTwin, mbFallbackFor, mbLive, mbBool, mbVal, stateOf," +
     " MB_PAIRS, MB_OFF_POWER, mbPower, mbForInspect, mbNoteHtml, inspCurRow, inspMember," +
-    " pelMeasured, pelApproxText, PEL_INSPECT };",
+    " inspMembers, pelMeasured, pelApproxText, PEL_INSPECT };",
     context, { filename: "main/www/app.js" });
   return context.__api;
 }
@@ -310,7 +310,42 @@ const LWT_M = M(40, "Leaving water temp. (PHE)", "38.1", "leaving_water");
   assert.equal(m3.mb, null, "…and has no gateway row to stand in for it");
 }
 
-// ── 17. The MEASURED power is addressed by its offset, never by its unit ───────────────────────
+// ── 17. A headline reading is not repeated in the inspector's member list ─────────────────────
+// Value entries share the `rows` mechanism with components, and commonly include their own row in
+// that list. The headline already prints the X10A value and the explainer already prints its Modbus
+// twin; the member list must contain only the additional context rows. This is the exact shape that
+// duplicated both DHW tank temperatures in the panel.
+{
+  const TANK_X = X("DHW tank temp. (R5T)", "45.2", "dhw_tank");
+  const TANK_M = M(43, "DHW tank temp.", "45.4", "dhw_tank");
+  const SETPOINT = X("DHW setpoint", "48.0", null);
+  const E = { re: /dhw tank temp/i, rows: [/dhw tank temp/i, /dhw setpoint/i] };
+  const live = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+                     values: [TANK_X, SETPOINT], modbus: [TANK_M] });
+  const row = live.inspCurRow(E);
+  const members = live.inspMembers(E, row, null);
+  assert.equal(members.length, 1, "the member list keeps only the additional context row");
+  assert.equal(members[0].x10a, SETPOINT, "the DHW setpoint remains");
+  assert.equal(members.some((m) => m.x10a === TANK_X), false,
+    "the X10A headline is not repeated as a member");
+  assert.equal(members.some((m) => m.mb === TANK_M), false,
+    "the Modbus comparison is not repeated as a member");
+
+  // With X10A down, the gateway becomes the headline. It must still be removed from the list.
+  const down = ctx({ x10a: false, mbEnabled: true, mbConnected: true,
+                     values: [TANK_X], modbus: [TANK_M] });
+  const fallback = down.mbForInspect("tank");
+  assert.equal(fallback, TANK_M, "the tank target resolves the exact Modbus fallback row");
+  assert.deepEqual(down.inspMembers(E, null, fallback), [],
+    "the Modbus fallback headline is not repeated as a member");
+
+  // An assembly has no headline and therefore retains the full list, including the paired reading.
+  const assembly = { rows: [/dhw tank temp/i, /dhw setpoint/i] };
+  assert.equal(live.inspMembers(assembly, null, null).length, 2,
+    "component inspectors retain all of their member readings");
+}
+
+// ── 18. The MEASURED power is addressed by its offset, never by its unit ───────────────────────
 // Three rows in the HomeHub map carry "kW": the measured consumption at input 51 and the two power
 // LIMIT setpoints at holding 57/58. A first-match on the unit promoted an installer's configured
 // ceiling to the plant's measured draw the moment 51 was unavailable — and the Modbus card went on
@@ -357,4 +392,4 @@ const LWT_M = M(40, "Leaving water temp. (PHE)", "38.1", "leaving_water");
   assert.equal(byUnit.off, 57, "the unit-keyed lookup this replaced would have taken the limit");
 }
 
-console.log("UI source matrix: X10A/Modbus arbitration correct in all 17 states");
+console.log("UI source matrix: X10A/Modbus arbitration correct in all 18 states");
