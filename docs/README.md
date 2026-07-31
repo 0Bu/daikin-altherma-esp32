@@ -483,9 +483,10 @@ is gone. `/diag` and `/coredump` stream instead of building one big buffer.
 
 ## Home Assistant (MQTT)
 
-`main/mqtt_ha.cpp` mirrors every decoded value to MQTT using Home Assistant
-[MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery), so X10A metrics,
-optional Modbus metrics and diagnostics appear under one **Daikin Altherma** device — no YAML.
+`main/mqtt_ha.cpp` mirrors every decoded value to MQTT and uses Home Assistant
+[MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery) for X10A metrics
+and diagnostics under one **Daikin Altherma** device — no YAML. HomeHub values remain available on
+MQTT but are deliberately not announced to Home Assistant.
 **Read-only:** no
 command topics are subscribed. The bridge runs in its own task, independent of the poll engine.
 
@@ -508,14 +509,12 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   within its register page while HA's id namespace is flat (#221); the JSON key does not. `<component>` is `binary_sensor` for a bit-flag value (pump running,
   3-way valve, thermostat ON/OFF), whose state rides as the number `1`/`0` so it is usable in a
   metrics store as well as in HA, and `sensor` for everything else.
-  An enabled HomeHub publishes its live, flat register map independently on `<base>/modbus` and
-  joins the X10A metrics and diagnostics on the same **Daikin Altherma** HA device while retaining a
-  collision-free `_modbus` entity namespace. An earlier separate Modbus device is migrated once by
-  deleting and re-adding the same retained configs after a three-second HA processing window, so
-  entity ids and history remain intact. A disconnected link publishes `{}`; disabling it retracts
-  the topic and discovery configs. HA combines the board LWT with retained
-  `<base>/modbus/status` using `availability_mode: all`. HomeHub enums stay numeric constants (for
-  example `smart_grid_operation_mode: 2`); only the web UI maps them to readable names. A short
+  An enabled HomeHub publishes its live, flat register map independently on `<base>/modbus`, but no
+  HA discovery config references that topic. On upgrade, retained tombstones remove all 27 formerly
+  announced `_modbus` entities; the data stream itself remains intact. A disconnected link publishes
+  `{}` and disabling the source retracts its data topic. The former retained `<base>/modbus/status`
+  is deleted because its link state already lives in `<base>/heartbeat`. HomeHub enums stay numeric
+  constants (for example `smart_grid_operation_mode: 2`); only the web UI maps them to readable names. A short
   migration probe deletes an old retained `<base>/state` value if present; an already-clean broker
   receives no `/state` publish.
   Availability/LWT `<base>/status`. `<base>` defaults `daikin-altherma-esp32`,

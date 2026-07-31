@@ -1,7 +1,7 @@
 #pragma once
-// The Home Assistant DEVICE identity published by this firmware. X10A values, read-only HomeHub
-// Modbus values, board/link diagnostics and the crash report are four discovery surfaces of ONE
-// installation and therefore share one device identifier.
+// The Home Assistant DEVICE identity published by this firmware. X10A values, board/link
+// diagnostics and the crash report are discovery surfaces of ONE installation and therefore share
+// one device identifier. HomeHub Modbus values remain on MQTT but are not exposed to HA.
 //
 // The id is derived from the MQTT BASE TOPIC — the INSTALLATION — and NOT from the board's MAC.
 // It used to be `daikin_<mac3>`, which made the HA device an identity of the *hardware*: replacing
@@ -63,20 +63,15 @@ inline std::string device_json(const std::string& node, const std::string& board
     std::string j = "\"dev\":{\"ids\":[\"";
     j += node; j += "\"";
     if (!board_id.empty() && board_id != node) { j += ",\""; j += board_id; j += "\""; }
-    j += "],\"name\":\"Daikin Altherma\",\"mf\":\"Daikin\",\"mdl\":\"Altherma X10A + HomeHub\"}";
+    j += "],\"name\":\"Daikin Altherma\",\"mf\":\"Daikin\",\"mdl\":\"Altherma X10A\"}";
     return j;
 }
 
-// Modbus keeps a source-specific node/unique-id namespace so an identically named X10A entity never
-// collides with it. Home Assistant does not use the discovery topic's node_id as device identity;
-// the shared dev.ids object below deliberately joins both sources into the installation device.
+// Retired Modbus discovery used a source-specific entity namespace so an identically named X10A
+// entity could not collide with it. Keep the frozen namespace builder so firmware upgrades can
+// publish retained tombstones to the exact old topics.
 inline std::string modbus_entity_node_id(const std::string& x10a_node) {
     return x10a_node + "_modbus";
-}
-
-inline std::string modbus_device_json(const std::string& x10a_node,
-                                      const std::string& board_id) {
-    return device_json(x10a_node, board_id);
 }
 
 } // namespace daik

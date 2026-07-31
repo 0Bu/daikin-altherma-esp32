@@ -2,7 +2,8 @@
 // Home Assistant MQTT-Discovery payload builder. Pure string building, IDF-free, so the exact
 // bytes HA receives are asserted on the host (test/test_logic.cpp) rather than on the device.
 // mqtt_ha.cpp streams one of these per value on (re)connect. X10A sensors point at the grouped
-// <base>/x10a payload; HomeHub sensors point at the independent flat <base>/modbus payload.
+// <base>/x10a payload. HomeHub stays on the independent flat <base>/modbus MQTT topic without HA
+// discovery; only its frozen former topic names remain here so upgrades can retire them.
 #include <string>
 #include "value_def.hpp"
 #include "convert.hpp"
@@ -131,7 +132,9 @@ inline std::string modbus_topic(const std::string& base) {
     return base + "/modbus";
 }
 
-inline std::string modbus_availability_topic(const std::string& base) {
+// Builds through v1.0.0-dev.257 retained a duplicate HomeHub availability value here. Link state is
+// already part of <base>/heartbeat, so mqtt_ha.cpp uses this frozen name only to delete the old topic.
+inline std::string retired_modbus_status_topic(const std::string& base) {
     return base + "/modbus/status";
 }
 
@@ -195,10 +198,10 @@ inline std::string discovery_config(const std::string& node, const std::string& 
     return j;
 }
 
-// ── HomeHub Modbus entities ─────────────────────────────────────────────────────────────────────
-// A source-specific entity namespace and flat payload inside the shared HA installation device.
-// These are sensor/binary_sensor discovery configs only: no command topic, number, switch, select
-// or other writable component is ever emitted.
+// ── Retired HomeHub Modbus entities ──────────────────────────────────────────────────────────────
+// Firmware through v1.0.0-dev.257 emitted these discovery topics. HomeHub values still publish on
+// <base>/modbus, but HA must no longer expose them. Keep only the frozen topic builder so mqtt_ha.cpp
+// can delete every retained config precisely; there is deliberately no config-payload builder.
 inline const char* modbus_ha_component(const def::HomeHubReg& reg) {
     return def::homehub_is_binary(reg) ? "binary_sensor" : "sensor";
 }
@@ -208,39 +211,6 @@ inline std::string modbus_discovery_topic(const std::string& prefix, const std::
     const std::string node = modbus_entity_node_id(x10a_node);
     return prefix + "/" + modbus_ha_component(reg) + "/" + node + "/" +
            object_id(reg.label) + "/config";
-}
-
-inline std::string modbus_device_class(const def::HomeHubReg& reg) {
-    if (std::string(reg.unit) == "°C") return "temperature";
-    if (std::string(reg.unit) == "kW") return "power";
-    return "";
-}
-
-inline std::string modbus_discovery_config(const std::string& x10a_node,
-                                           const std::string& board_id,
-                                           const std::string& state_topic,
-                                           const std::string& device_avail_topic,
-                                           const std::string& modbus_avail_topic,
-                                           const def::HomeHubReg& reg) {
-    const std::string node = modbus_entity_node_id(x10a_node);
-    const std::string obj  = object_id(reg.label);
-    const std::string dc   = modbus_device_class(reg);
-    std::string j = "{";
-    j += "\"name\":\"";       j += reg.label; j += "\",";
-    j += "\"uniq_id\":\"";    j += node; j += "_"; j += obj; j += "\",";
-    j += "\"stat_t\":\"";     j += state_topic; j += "\",";
-    j += "\"val_tpl\":\"{{ value_json['"; j += obj; j += "'] }}\",";
-    // BOTH conditions must be online: the board/MQTT client (LWT) and this independent HomeHub link.
-    // A single shared availability topic would leave old Modbus states looking live after a LAN/link
-    // failure; a Modbus-only one would miss an ESP32 crash whose retained link status was still online.
-    j += "\"avty\":[{\"topic\":\""; j += device_avail_topic;
-    j += "\"},{\"topic\":\""; j += modbus_avail_topic; j += "\"}],\"avty_mode\":\"all\",";
-    if (def::homehub_is_binary(reg)) j += "\"pl_on\":\"1\",\"pl_off\":\"0\",";
-    if (reg.unit[0]) { j += "\"unit_of_meas\":\""; j += reg.unit; j += "\","; }
-    if (!dc.empty()) { j += "\"dev_cla\":\""; j += dc; j += "\",\"stat_cla\":\"measurement\","; }
-    j += modbus_device_json(x10a_node, board_id);
-    j += "}";
-    return j;
 }
 
 // ── DERIVED companion entities ───────────────────────────────────────────────────────────────────

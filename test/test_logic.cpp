@@ -40,7 +40,6 @@
 #include "logic/ui_lang.hpp"
 #include "logic/ota_manifest.hpp"
 #include "logic/heartbeat.hpp"
-#include "logic/ha_device_migration.hpp"
 #include "logic/http_body.hpp"
 #include "logic/json.hpp"
 #include "logic/mqtt_group.hpp"
@@ -964,7 +963,7 @@ static void test_ha_device() {
     CHECK(device_json("daikin_altherma_esp32", "daikin_abc123") ==
           "\"dev\":{\"ids\":[\"daikin_altherma_esp32\",\"daikin_abc123\"],"
           "\"name\":\"Daikin Altherma\",\"mf\":\"Daikin\","
-          "\"mdl\":\"Altherma X10A + HomeHub\"}");
+          "\"mdl\":\"Altherma X10A\"}");
     // No board id, or a board id that IS the node id -> a single identifier. A duplicated entry
     // would be a malformed device for HA, not a harmless repeat.
     CHECK(device_json("daikin_altherma_esp32", "").find("\"ids\":[\"daikin_altherma_esp32\"],")
@@ -983,36 +982,9 @@ static void test_ha_device() {
     CHECK(crash_discovery_config(node, brd, "s", "a", CRASH_SENSORS[0]).find(dev)
           != std::string::npos);
 
-    // Modbus keeps a collision-free ENTITY namespace, but its dev object is byte-identical to X10A
-    // and diagnostics so Home Assistant presents one installation device.
+    // The retired Modbus namespace stays frozen so an upgrade can delete the exact retained topics.
+    // It is not a live discovery surface and therefore has no device/config payload builder.
     CHECK(modbus_entity_node_id(node) == "daikin_altherma_esp32_modbus");
-    CHECK(modbus_device_json(node, brd) == dev);
-
-    // Existing MQTT entities do NOT move device merely because dev.ids changes. Pin the one-time
-    // delete/re-add gate: the same topics/unique ids are retained, but replacement waits long enough
-    // for HA to process the tombstones. Failed marker persistence keeps the migration retryable.
-    CHECK(std::strlen(HA_MODBUS_DEVICE_MIGRATION_KEY) <= 15);
-    HaModbusDeviceMigration migration;
-    migration.load(0);
-    CHECK(migration.pending && !migration.waiting);
-    CHECK(migration.begin(true, 100));
-    CHECK(!migration.replacement_due(100 + HA_MODBUS_DEVICE_MIGRATION_DELAY_US - 1));
-    CHECK(migration.replacement_due(100 + HA_MODBUS_DEVICE_MIGRATION_DELAY_US));
-    CHECK(migration.completion_needs_persist());
-    CHECK(migration.pending);                 // failed NVS write -> retry remains armed
-    CHECK(migration.begin(true, 500));         // reconnect restarts the full delay
-    CHECK(!migration.replacement_due(500));
-    migration.persisted();
-    CHECK(!migration.pending);
-    CHECK(!migration.begin(true, 900));
-    CHECK(migration.replacement_due(900));
-
-    migration.load(HA_MODBUS_DEVICE_MIGRATION_VERSION);
-    CHECK(!migration.pending && !migration.begin(true, 1000));
-    migration.load(0);
-    CHECK(!migration.begin(false, 1000));     // transient/real disabled state never burns the marker
-    CHECK(migration.pending);
-    CHECK(migration.replacement_due(1000));
 }
 
 static void test_discovery() {
@@ -1027,7 +999,7 @@ static void test_discovery() {
     const std::string st = x10a_topic(base);              // shared by the X10A sensors only
     CHECK(st == "daikin-altherma-esp32/x10a");             // node NOT in the message topic (one board/base)
     CHECK(modbus_topic(base) == "daikin-altherma-esp32/modbus");
-    CHECK(modbus_availability_topic(base) == "daikin-altherma-esp32/modbus/status");
+    CHECK(retired_modbus_status_topic(base) == "daikin-altherma-esp32/modbus/status");
     CHECK(legacy_state_topic(base) == "daikin-altherma-esp32/state");
     const std::string legacy = legacy_state_topic(base);
     CHECK(legacy_state_cleanup_candidate(legacy, legacy.data(), static_cast<int>(legacy.size()),
@@ -1132,51 +1104,27 @@ static void test_discovery() {
     CHECK(oc.find("value_json['outdoor_state']['error_code']") != std::string::npos);
     CHECK(hc.find("value_json['hydronic']['error_code']") != std::string::npos);
 
-    // --- HomeHub values remain read-only and source-namespaced inside the shared device. ---
+    // --- HomeHub MQTT remains, but HA discovery for all 27 registers is retired. ----------------
+    // Pin every old topic so mqtt_ha.cpp can publish retained tombstones after an upgrade. There is
+    // deliberately no config builder: no code path can re-expose a Modbus value to Home Assistant.
     const def::HomeHubReg* mb_temp = def::homehub_find(42);
     const def::HomeHubReg* mb_flag = def::homehub_find(30);
     const def::HomeHubReg* mb_mode = def::homehub_find(56);
     CHECK(mb_temp && mb_flag && mb_mode);
     CHECK(modbus_discovery_topic("homeassistant", node, *mb_temp) ==
           "homeassistant/sensor/daikin_altherma_esp32_modbus/return_water_temperature/config");
-    const std::string mt = modbus_discovery_config(
-        node, board, modbus_topic(base), availability_topic(base), modbus_availability_topic(base), *mb_temp);
-    CHECK(mt.find("\"uniq_id\":\"daikin_altherma_esp32_modbus_return_water_temperature\"")
-          != std::string::npos);
-    CHECK(mt.find("\"stat_t\":\"daikin-altherma-esp32/modbus\"") != std::string::npos);
-    CHECK(mt.find("value_json['return_water_temperature']") != std::string::npos);
-    CHECK(mt.find("\"avty\":[{\"topic\":\"daikin-altherma-esp32/status\"},"
-                  "{\"topic\":\"daikin-altherma-esp32/modbus/status\"}]") != std::string::npos);
-    CHECK(mt.find("\"avty_mode\":\"all\"") != std::string::npos);
-    CHECK(mt.find("\"dev_cla\":\"temperature\"") != std::string::npos);
-    CHECK(mt.find("\"dev\":{\"ids\":[\"daikin_altherma_esp32\",\"daikin_abc123\"]")
-          != std::string::npos);
-
     CHECK(std::string(modbus_ha_component(*mb_flag)) == "binary_sensor");
     CHECK(modbus_discovery_topic("homeassistant", node, *mb_flag).find("/binary_sensor/")
           != std::string::npos);
-    const std::string mf = modbus_discovery_config(
-        node, board, modbus_topic(base), availability_topic(base), modbus_availability_topic(base), *mb_flag);
-    CHECK(mf.find("\"pl_on\":\"1\",\"pl_off\":\"0\"") != std::string::npos);
-    CHECK(mf.find("\"cmd_t\"") == std::string::npos);
-
     CHECK(std::string(modbus_ha_component(*mb_mode)) == "sensor");
-    const std::string mm = modbus_discovery_config(
-        node, board, modbus_topic(base), availability_topic(base), modbus_availability_topic(base), *mb_mode);
-    CHECK(mm.find("\"pl_on\"") == std::string::npos);     // named enum, not a binary guess
-    CHECK(mm.find("\"cmd_t\"") == std::string::npos);     // Modbus remains read-only
 
     for (int i = 0; i < def::HOMEHUB_REG_COUNT; i++) {
         const def::HomeHubReg& reg = def::HOMEHUB_REGS[i];
         const std::string topic = modbus_discovery_topic("homeassistant", node, reg);
-        const std::string config = modbus_discovery_config(
-            node, board, modbus_topic(base), availability_topic(base), modbus_availability_topic(base), reg);
         CHECK(topic.find(def::homehub_is_binary(reg) ? "/binary_sensor/" : "/sensor/")
               != std::string::npos);
-        CHECK(config.find("\"stat_t\":\"daikin-altherma-esp32/modbus\"") != std::string::npos);
-        CHECK(config.find("\"cmd_t\"") == std::string::npos);
-        CHECK(config.find("\"dev\":{\"ids\":[\"daikin_altherma_esp32\",\"daikin_abc123\"]")
-              != std::string::npos);
+        CHECK(topic.find("/daikin_altherma_esp32_modbus/") != std::string::npos);
+        CHECK(topic.size() >= 7 && topic.compare(topic.size() - 7, 7, "/config") == 0);
     }
 
     // The binary family is exactly 300-307 (one bit of data[0]); neighbours are not binary.
