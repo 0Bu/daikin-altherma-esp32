@@ -292,21 +292,15 @@ void http_append_status_json(std::string& j, bool redact) {
 
     // The HomeHub Modbus stack — a SECOND, INDEPENDENT source, never an alternative to the X10A link
     // reported above (docs/MODBUS_PROTOCOL.md). `enabled` reports whether its runtime task exists;
-    // `mode` is the distinct, persistent user intent (Auto/Manual/Off), so a bounded Auto miss can
-    // stop its task without becoming indistinguishable from an explicit Off choice. `host` is the
-    // configured address or the IPv4 selected by mDNS during this boot, so
-    // the card shows what discovery FOUND rather than the empty string it was asked with — redacted
-    // like the other reporter-identifying values. No write counters: the stack has no write path.
+    // `host` is the one persistent switch and target: empty means disabled. Explicit discovery is a
+    // request-local dialog action and never appears here as a boot/runtime mode. No write counters:
+    // the stack has no write path.
     // Successive += with bare literals — the httpd-stack rule the rest of this builder follows.
     const ModbusStatus mb = mb_status();
     j += "\"modbus\":{\"enabled\":";  j += mb.enabled ? "true" : "false";
-    j += ",\"mode\":";                 j += jstr(homehub_mode_name(c));
     j += ",\"connected\":";            j += mb.connected ? "true" : "false";
     j += ",\"discovering\":";          j += mb.discovering ? "true" : "false";
-    // `searched` = this boot's bounded Auto search has completed. It resets on reboot or when Auto
-    // is explicitly selected again; unlike mode:"off", it is never persistent user intent.
-    j += ",\"searched\":";             j += c.mb_searched ? "true" : "false";
-    // The ADDRESS comes from the CONFIG (manual else discovered), the STATE from the live link.
+    // The ADDRESS comes from the CONFIG, the STATE from the live link.
     // Reading the address off the link status was wrong before the first connect ever succeeded:
     // ModbusStatus is zero-initialised, so a device that had never dialled reported port 0 and unit
     // id 0 — settings it would itself REJECT — which the UI then prefilled into its editor.

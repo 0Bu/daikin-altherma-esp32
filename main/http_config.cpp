@@ -1,5 +1,5 @@
 // POST config routes: /set_wifi, /set_mqtt, /set_ref_temp, /set_syslog, /set_ntp, /set_hp,
-// /set_board, /set_ota, /set_lang, /detect. Parse JSON, validate, then apply:
+// /set_board, /set_ota, /set_lang, /discover_homehub, /detect. Parse JSON, validate, then apply:
 // WiFi/MQTT/syslog/NTP/board persist to NVS + reboot; the reference mapping persists and applies
 // live; /set_hp persists the RX/TX pin cache (no reboot) but keeps the model session-only;
 // /set_ota and /set_lang persist their UI settings and apply them live; /detect re-runs detection in
@@ -432,54 +432,17 @@ static esp_err_t set_hp(httpd_req_t* req) {
     // a wiring-only patch (rx/tx) leaves the HomeHub untouched and the pin picker's
     // {profile:"auto",rx,tx} POST cannot switch anything on. This is a SECOND source, not an
     // alternative to X10A: enabling it starts a separate task, it does not stop the X10A poll.
-    // HomeHub user intent is explicit: Auto searches, Manual uses mb_host, Off never searches. The
-    // new mb_mode field is unambiguous; the legacy host-only API remains intuitive (non-empty =
-    // Manual, empty = Off). Selecting Auto clears this boot's prior outcome and starts a fresh
-    // bounded search. Omitted fields still leave this independent stack untouched.
+    // HomeHub configuration has one unambiguous switch: a non-empty address enables polling; an
+    // empty address disables the stack and causes no discovery or HomeHub request. Discovery is a
+    // separate, explicit /discover_homehub action which only returns an address for the dialog; it
+    // never mutates config behind the form's Save/Cancel boundary.
     cJSON* hostItem = cJSON_GetObjectItem(j, "mb_host");
-    cJSON* modeItem = cJSON_GetObjectItem(j, "mb_mode");
     const bool host_sent = cJSON_IsString(hostItem);
-    const bool mode_sent = cJSON_IsString(modeItem);
-    bool reset_mb_runtime = false;
     if (host_sent) c.mb_host = hostItem->valuestring;
-    bool bad_mb_mode = false;
-    if (mode_sent) {
-        const std::string mode = modeItem->valuestring;
-        if (mode == "auto") {
-            reset_mb_runtime = true;
-            c.homehub_enabled = true;
-            c.mb_host.clear();
-            c.mb_dhost.clear();
-            c.mb_searched = false;
-        } else if (mode == "manual") {
-            c.homehub_enabled = true;
-            bad_mb_mode = c.mb_host.empty();
-        } else if (mode == "off") {
-            reset_mb_runtime = true;
-            c.homehub_enabled = false;
-            c.mb_host.clear();
-            c.mb_dhost.clear();
-            c.mb_searched = false;
-        } else {
-            bad_mb_mode = true;
-        }
-    } else if (host_sent) {
-        // Backward-compatible host-only contract. Clearing is an intentional removal, not Auto;
-        // clients that want discovery send mb_mode:"auto" explicitly.
-        c.homehub_enabled = !c.mb_host.empty();
-        if (!c.homehub_enabled) {
-            reset_mb_runtime = true;
-            c.mb_dhost.clear();
-            c.mb_searched = false;
-        }
-    }
     c.mb_port           = ji(j, "mb_port", c.mb_port);
     c.mb_unit_id        = ji(j, "mb_unit_id", c.mb_unit_id);
     c.actuation_enabled = jb(j, "actuation_enabled", c.actuation_enabled);
     cJSON_Delete(j);
-    if (bad_mb_mode)
-        return send_err(req, "400 Bad Request", "mb_mode must be auto, manual with a host, or off");
-
     std::string reason;
     // Pass the real Kconfig-derived octal-SPI + status-LED facts (config.cpp) so validate() rejects a
     // chip-reserved GPIO — a flash/strapping/JTAG pad the UI dropdown never offers but a raw curl POST
@@ -489,7 +452,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
     // This route OWNS the pin cache, unlike the service routes whose link writes are only
     // best-effort maintenance. Require all three cache keys; on failure RAM stays untouched, so
     // there is no new link to hand the poll engine and reconfigure must be skipped.
-    if (!config_save(c, /*require_link=*/true, reset_mb_runtime))
+    if (!config_save(c, /*require_link=*/true))
         return send_err(req, "500 Internal Server Error", "config write failed");
     if (reset_checkup) {
         checkup_reset();
@@ -499,6 +462,21 @@ static esp_err_t set_hp(httpd_req_t* req) {
     // and re-resolves its address without touching the X10A poll engine above.
     mb_reconfigure();
     return http_send_json(req, "{\"ok\":true}");
+}
+
+// Explicit HomeHub discovery for the edit dialog. This is intentionally NOT part of boot or of the
+// Modbus poll task, and it does not save anything: the user sees the found IPv4 in the normal host
+// field and decides with Save or Cancel whether it becomes configuration. A bounded miss returns
+// control to that same field for manual entry.
+static esp_err_t discover_homehub_now(httpd_req_t* req) {
+    if (!wifi_info().connected)
+        return send_err(req, "400 Bad Request", "WiFi not connected");
+    std::string found;
+    if (!mb_discover_homehub(found))
+        return send_err(req, "404 Not Found", "No HomeHub found");
+    // mb_discover_homehub returns a numeric IPv4 assembled by firmware, never caller text.
+    const std::string body = std::string("{\"ok\":true,\"host\":\"") + found + "\"}";
+    return http_send_json(req, body.c_str());
 }
 
 static esp_err_t set_syslog(httpd_req_t* req) {
@@ -697,6 +675,7 @@ void http_register_config(httpd_handle_t s, HttpSurface surface) {
     http_register_on(s, surface, "/set_syslog", HTTP_POST, set_syslog);
     http_register_on(s, surface, "/set_ntp", HTTP_POST, set_ntp);
     http_register_on(s, surface, "/set_hp", HTTP_POST, set_hp);
+    http_register_on(s, surface, "/discover_homehub", HTTP_POST, discover_homehub_now);
     http_register_on(s, surface, "/set_board", HTTP_POST, set_board);
     http_register_on(s, surface, "/set_ota", HTTP_POST, set_ota);
     http_register_on(s, surface, "/set_lang", HTTP_POST, set_lang);

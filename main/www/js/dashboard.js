@@ -621,31 +621,25 @@ function connLinks() {
 
   // The HomeHub, as its OWN row — never folded into a combined link state with X10A. The two stacks
   // fail for unrelated reasons and either can be down alone, so one merged "connected" would hide
-  // exactly the case worth seeing. ALWAYS present, even with no address and no hub found. It used to
+  // exactly the case worth seeing. ALWAYS present, even with no configured address. It used to
   // appear only while the stack
   // was `enabled` — i.e. only once an address existed — which stranded the exact user this setting
-  // is for: the bounded mDNS search finds nothing, the stack retires, the row is never drawn,
+  // is for: no address means no task, the row is never drawn,
   // and there is no longer anywhere in the UI to type the address in. The standalone HomeHub card
   // was removed at the same time, so on a board with no X10A and no discovered hub the feature had
   // no reachable entry point at all. A configuration row is not a status readout; it has to exist
   // before the thing it configures does.
   const mbs = S.status?.modbus;
   if (mbs) {
-    const mode = mbs.mode || (mbs.host ? "manual" : "auto");
-    const off = mode === "off";
+    const off = !mbs.host;
     const detail = !off && mbs.enabled ? modbusErrorText(mbs) : "";
     // This row reports LINK HEALTH, so it uses the shared status palette. Petrol remains reserved
     // for Modbus READING provenance in the value tables, schematic and inspector.
-    const cls = off ? "" : mbs.connected ? "ok" : mbs.discovering ? "" : mbs.enabled ? "err"
-                    : mode === "manual" ? "err" : "";
+    const cls = off ? "" : mbs.connected ? "ok" : "err";
     const state = off ? t("conn.disabled")
                 : mbs.connected ? t("conn.connected")
-                : mbs.discovering ? t("conn.searching")
-                : mbs.enabled ? t("conn.offline")
-                : mode === "auto" && mbs.searched ? t("conn.notfound")
-                : mode === "manual" ? t("conn.offline") : t("conn.searching");
-    const endpoint = !off && mbs.host ? `${mbs.host}:${mbs.port || 502}`
-                              : mbs.discovering ? t("conn.searching") : "—";
+                : t("conn.offline");
+    const endpoint = !off ? `${mbs.host}:${mbs.port || 502}` : "—";
     links.push({ edit: "homehub", label: t("conn.homehub"), cls,
       value: esc(endpoint),
       detail, state: detail ? t("conn.error", detail) : state });

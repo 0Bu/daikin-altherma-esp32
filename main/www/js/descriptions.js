@@ -579,8 +579,8 @@ const mbByConcept = (cid) =>
 // Is the X10A stack currently delivering? Keyed on the LINK, not on individual rows: a bus that has
 // stopped answering leaves the last cache in place, so per-row emptiness would lag behind the truth.
 const x10aDown = () => !!(S.status && S.status.hp && S.status.hp.connected === false);
-// Is the HomeHub runtime task running AND connected? Both matter: Off or a completed Auto miss leaves
-// no live HomeHub source for this boot, and then nothing Modbus is shown anywhere.
+// Is the HomeHub runtime task running AND connected? Both matter: an empty saved address leaves no
+// live HomeHub source, and then nothing Modbus is shown anywhere.
 const mbLive = () => !!(S.status && S.status.modbus && S.status.modbus.enabled && S.status.modbus.connected);
 
 // The Modbus row that STANDS IN for an X10A row — only while X10A is down and the HomeHub is live.

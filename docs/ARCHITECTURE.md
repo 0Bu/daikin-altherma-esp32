@@ -96,16 +96,17 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
 http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /diag, /scan, /coredump,
                       POST /crash/dismiss. http_append_status_json() runs on the httpd task ALONE —
                       see "Push vs. poll" below for why that sentence is load-bearing
-http_config.cpp     → POST /set_wifi, /set_mqtt, /set_syslog, /set_ntp, /set_hp, /set_board,
-                      /set_ota, /set_lang, /detect. /set_hp also carries the TRANSPORT + the
-                      HomeHub Modbus params (mb_mode/mb_host/mb_port/mb_unit_id,
-                      actuation_enabled), applied live
+http_config.cpp     → POST /set_wifi, /set_mqtt, /set_syslog, /set_ntp, /set_hp,
+                      /discover_homehub, /set_board, /set_ota, /set_lang, /detect. /set_hp also
+                      carries the HomeHub Modbus params (mb_host/mb_port/mb_unit_id,
+                      actuation_enabled), applied live; /discover_homehub is a bounded, explicit
+                      dialog action that returns an IPv4 without saving it
 hp_modbus.cpp/.hpp  → THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT source beside X10A, not an
-                      alternative to it: its own task, cache and link state. Auto (default) runs a
-                      bounded per-boot mDNS search; Manual uses the entered address; Off alone skips
-                      future searches. A miss retires the task for that boot, so an absent HomeHub
-                      has no steady-state task. The lwIP client wraps logic/modbus.hpp framing and
-                      filters homehub-* from up to 64 _http._tcp responders. READ-ONLY by design
+                      alternative to it: its own task, cache and link state. A non-empty saved
+                      address starts polling; empty means no task, socket, discovery or requests.
+                      mDNS runs only from the dialog's explicit Search button and filters
+                      homehub-* from up to 64 _http._tcp responders per bounded attempt. The lwIP
+                      client wraps logic/modbus.hpp framing. READ-ONLY by design
                       (docs/MODBUS_PROTOCOL.md)
 def/homehub.hpp     → the HomeHub register map (input + holding), the Modbus counterpart of the X10A
                       def/ profiles; decoded via logic/modbus.hpp's Temp16/Pow16/Int16/Text16 codecs

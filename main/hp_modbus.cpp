@@ -7,9 +7,8 @@
 // failure closes it so the next cycle reconnects — the self-healing shape hp_comm.cpp uses for the
 // UART, applied to a socket.
 //
-// The task exists while Auto performs its bounded boot search or while an address is active. A miss
-// or explicit Off retires it, so a device without a HomeHub has no steady-state task/socket/traffic;
-// that is why the X10A poll task could give its 4 KB back (hp_poll.cpp).
+// The task exists only while a saved address is active. Empty configuration creates no task, socket,
+// mDNS browse or HomeHub traffic; explicit discovery runs on the HTTP request that the user starts.
 #include "hp_modbus.hpp"
 #include "config.hpp"
 #include "def/homehub.hpp"
@@ -46,7 +45,7 @@ static constexpr int MB_READ_TIMEOUT_MS = 1500;
 // The observed LAN advertises well over 20 HTTP services, while the old browse capped its result
 // list at 20. Since mDNS ordering is not stable, that could omit a perfectly healthy HomeHub. Keep
 // enough headroom for a busy home LAN and repeat a missed multicast query a few times, but stop the
-// Auto search within one bounded boot-time window.
+// explicit button-triggered search after one bounded request.
 static constexpr int MB_DISCOVERY_MAX_RESULTS = 64;
 static constexpr int MB_DISCOVERY_ATTEMPTS    = 3;
 static constexpr int MB_DISCOVERY_RETRY_MS    = 1000;
@@ -59,7 +58,7 @@ static uint32_t          s_link_generation = 0; // guarded by s_mtx; zero = no c
 // ── Poll-task-owned socket state (no lock — single owner, exactly like hp_comm.cpp's s_rx/s_tx) ─────
 static int         s_sock     = -1;   // open socket, or -1
 static uint16_t    s_txn      = 0;    // Modbus transaction id (echoed by the reply; wraps freely)
-static std::string s_req_host;        // the REQUESTED host this socket is for ("" = auto-discovery)
+static std::string s_req_host;        // the configured host this socket is for
 static int         s_req_port = 0;
 static int         s_unit     = 0;    // Modbus unit id addressed on this socket
 static bool        s_have_req = false;// whether s_req_* describe the current socket
@@ -72,9 +71,8 @@ static std::vector<CachedValue> s_cache;
 static uint32_t s_cache_generation = 0;      // guarded by s_cache_mtx; session that committed s_cache
 
 // Task handle + the connect backoff. s_task is read/written under s_mtx so a /set_hp that lands while
-// the old task is retiring cannot race it into either losing a requested Auto retry or starting two
-// tasks. Auto discovery is a separate bounded boot-time sequence; normal connect failures reuse the
-// X10A sweep's host-tested policy rather than browsing mDNS every cycle.
+// the old task is retiring cannot race it into starting two tasks. Discovery is never part of this
+// loop; normal connect failures reuse the X10A sweep's host-tested policy.
 static TaskHandle_t  s_task = nullptr;
 static DetectBackoff s_backoff;
 static int64_t       s_next_try_us = 0;
@@ -162,7 +160,7 @@ static void status_recovered() {
     if (recovered) diag_printf("modbus: communication recovered\n");
 }
 
-// A new user-selected target or Auto search is a new attempt, so an old failure is no longer the
+// A new user-selected target is a new attempt, so an old failure is no longer the
 // CURRENT state while that attempt is in flight. Unlike status_recovered(), this does not log a
 // recovery before any successful communication has happened.
 static void status_clear_error() {
@@ -253,8 +251,8 @@ static bool discover_homehub(std::string& found) {
         }
     }
     mdns_query_results_free(results);
-    // Several hubs on one LAN is unusual; the user chose auto-discovery, so use the first one that
-    // RESOLVED and say so, rather than silently picking among them. Gated on `ok` — with nothing
+    // Several hubs on one LAN is unusual; the user explicitly requested discovery, so use the first
+    // one that RESOLVED and say so, rather than silently picking among them. Gated on `ok` — with nothing
     // resolved there is no address to print, and "using " followed by nothing reads like a bug.
     if (ok && matches > 1) diag_printf("modbus: %d HomeHubs discovered via mDNS — using %s\n",
                                        matches, found.c_str());
@@ -262,6 +260,25 @@ static bool discover_homehub(std::string& found) {
         diag_printf("modbus: mDNS browse reached its %d-result safety limit without a HomeHub\n",
                     MB_DISCOVERY_MAX_RESULTS);
     return ok;
+}
+
+bool mb_discover_homehub(std::string& found) {
+    for (int attempt = 1; attempt <= MB_DISCOVERY_ATTEMPTS; attempt++) {
+        found.clear();
+        if (discover_homehub(found)) {
+            // The success line contains a private LAN IP and is covered by logic/redact.hpp.
+            diag_printf("modbus: manual mDNS search found gateway %s\n", found.c_str());
+            return true;
+        }
+        if (attempt < MB_DISCOVERY_ATTEMPTS) {
+            diag_printf("modbus: manual mDNS search attempt %d/%d found no HomeHub — retrying\n",
+                        attempt, MB_DISCOVERY_ATTEMPTS);
+            vTaskDelay(pdMS_TO_TICKS(MB_DISCOVERY_RETRY_MS));
+        }
+    }
+    diag_printf("modbus: no HomeHub found via manual mDNS search after %d attempts\n",
+                MB_DISCOVERY_ATTEMPTS);
+    return false;
 }
 
 // Non-blocking connect with a select() timeout (the tcp_port_probe idiom from http_config.cpp), then
@@ -354,33 +371,8 @@ static void mb_disconnect() {
     status_target(std::string(), 0, 0, false);
 }
 
-// One bounded Auto search set. A single browse is too brittle during WiFi/mDNS startup, but discovery
-// must still stop on a LAN without a gateway. The completed-negative latch is RAM-only, so the next
-// boot tries again unless the user explicitly selected Off.
-static bool mb_discover_bounded(std::string& found) {
-    status_clear_error();
-    status_target(std::string(), 0, 0, /*discovering=*/true);
-    for (int attempt = 1; attempt <= MB_DISCOVERY_ATTEMPTS; attempt++) {
-        found.clear();
-        if (discover_homehub(found)) {
-            esp_task_wdt_reset();              // each browse blocks for up to ~3 s
-            return true;
-        }
-        esp_task_wdt_reset();
-        if (attempt < MB_DISCOVERY_ATTEMPTS) {
-            diag_printf("modbus: mDNS search attempt %d/%d found no HomeHub — retrying\n",
-                        attempt, MB_DISCOVERY_ATTEMPTS);
-            vTaskDelay(pdMS_TO_TICKS(MB_DISCOVERY_RETRY_MS));
-        }
-    }
-    status_error(std::string("mdns_not_found"),
-                 std::string("no HomeHub found via mDNS after 3 attempts — "
-                             "Auto search stopped for this boot"));
-    return false;
-}
-
 static bool mb_ensure_connected(const std::string& host, int port, int unit_id) {
-    // No address, nothing to dial. There is no browse here — see mb_discover_bounded.
+    // No address, nothing to dial. There is deliberately no discovery fallback here.
     if (host.empty()) {
         status_error(std::string("no_address"), std::string("no HomeHub address configured"));
         return false;
@@ -756,17 +748,8 @@ static void mb_task(void*) {
     for (;;) {
         esp_task_wdt_reset();
         try {
-            // Auto can be selected while this task is already polling a manual address, so discovery
-            // belongs inside the loop. A completed miss latches only in RAM and causes the empty-host
-            // exit below; selecting Auto again clears that latch through POST /set_hp.
-            if (config_modbus_should_search(config())) {
-                std::string found;
-                const bool ok = mb_discover_bounded(found);
-                // The success line contains a private LAN IP and is covered by logic/redact.hpp.
-                if (ok) diag_printf("modbus: bounded mDNS search found gateway %s\n", found.c_str());
-                config_set_modbus_found(ok ? found : std::string());
-            }
-            // Off, or Auto after its bounded miss: no address means no task/socket after this point.
+            // Clearing the saved address disables the stack. No boot- or loop-triggered browse may
+            // turn an empty field back into an active HomeHub configuration.
             if (config_modbus_host(config()).empty()) break;
             if (esp_timer_get_time() >= s_next_try_us) mb_poll_once();
         } catch (const std::exception& e) {
@@ -777,9 +760,6 @@ static void mb_task(void*) {
         } catch (...) {
             diag_printf("modbus: cycle skipped (oom?)\n");
         }
-        // An allocation failure before Auto could commit its completed latch must not turn into an
-        // unbounded once-per-second browse loop. The next boot or explicit Auto selection may retry.
-        if (config_modbus_host(config()).empty() && config_modbus_should_search(config())) break;
         vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
     }
     mb_disconnect();
@@ -794,12 +774,9 @@ static void mb_task(void*) {
         s_cache.clear();
         s_cache_generation = 0;
     }
-    if (config().homehub_enabled)
-        diag_printf("modbus: Auto search has no gateway address — stack stopped for this boot\n");
-    else
-        diag_printf("modbus: HomeHub disabled by configuration — stack stopped\n");
+    diag_printf("modbus: HomeHub disabled by empty configuration — stack stopped\n");
     esp_task_wdt_delete(NULL);
-    // /set_hp may have selected Manual or reset Auto after this task decided to retire but before it
+    // /set_hp may have saved a new address after this task decided to retire but before it
     // cleared s_task. Its mb_reconfigure() correctly saw a task still alive and did not duplicate it;
     // now re-check the latest intent so that request is not lost in the teardown window.
     mb_task_start_if_enabled();
@@ -811,12 +788,10 @@ static void mb_task(void*) {
 // the socket calls directly on its own stack, and syslog.cpp has already measured that same chain at
 // 6144 with the note "4096 is too thin for that call chain". Its own locals are small (a 260 B ADU,
 // a 23-row vector) — nothing like the /status builder that drove hp_poll's sizing.
-// Start only when the user intent is not Off and either an address is known or Auto still owes this
-// boot its bounded search set.
+// Start only when a persistent address is configured. Empty means no task, no browse, no requests.
 static void mb_task_start_if_enabled() {
     const Config& c = config();
-    if (!c.homehub_enabled ||
-        (config_modbus_host(c).empty() && !config_modbus_should_search(c))) return;
+    if (!config_modbus_enabled(c)) return;
     Lock lk(s_mtx);
     if (s_task) return;
     s_status.enabled = true;

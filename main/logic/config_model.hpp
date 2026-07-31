@@ -78,25 +78,13 @@ struct Config {
     // deliberately NO "which transport" selector — that would model an exclusivity the hardware
     // does not have, and it is what an earlier revision of this got wrong.
     //
-    // USER INTENT and DISCOVERY OUTCOME are separate states. `homehub_enabled` is true by default:
-    // a new board starts in Auto mode and tries to find the gateway. A non-empty `mb_host` selects
-    // Manual mode. Only an explicit UI/API removal sets homehub_enabled=false (Off) and suppresses
-    // later searches. These combinations are not contradictory; together they form the three-state
-    // contract exposed by homehub_mode(): Auto / Manual / Off.
-    bool        homehub_enabled = true;
-    // Manually entered address. Empty means Auto while enabled, or no address while Off.
+    // The configured HomeHub address. Empty has one unambiguous meaning: HomeHub is disabled, so no
+    // Modbus task is created and neither mDNS nor the HomeHub is queried. Discovery is an explicit
+    // user action in the edit dialog; a successful search merely fills this persistent field when
+    // the user saves. It is never armed by boot or represented as a hidden runtime mode.
     std::string mb_host;
     int         mb_port     = MODBUS_TCP_PORT;      // Modbus TCP port (502; the plaintext HomeHub default)
     int         mb_unit_id  = MODBUS_DEFAULT_UNIT;  // Modbus unit/slave id (1..247, default 1)
-    // ── Auto-discovery outcome — RUNTIME ONLY ─────────────────────────────────────
-    // A bounded search is attempted once per boot (and whenever Auto is explicitly selected again).
-    // Found -> mb_dhost holds the resolved IPv4 for this session and polling starts. Not found ->
-    // mb_searched becomes true and the task retires for this boot. The negative result is deliberately
-    // NOT persisted: "no response just now" is not the user's "Off" choice, so the next boot tries
-    // again. This also prevents a stale discovered DHCP address becoming permanent configuration.
-    std::string mb_dhost;                 // IPv4 resolved this session ("" = none)
-    bool        mb_searched  = false;     // bounded Auto search completed during this boot
-
     // SAFETY FLAG for the future in-firmware actuation path (#32 P3), default OFF. P1/P2 build only
     // the READ stack — nothing writes a pump register — so this flag currently gates nothing; it is
     // persisted here so P3 lands without another blob-version bump, and so the UI/API can already
@@ -192,44 +180,13 @@ inline bool config_save_succeeded(bool blob_ok, bool link_ok, bool require_link)
     return blob_ok && (!require_link || link_ok);
 }
 
-// Persistent HomeHub user intent. The stored enable bit and manual-host field map to this public
-// three-state contract; transient discovery state never participates in the choice.
-enum class HomeHubMode { Auto, Manual, Off };
-
-inline HomeHubMode homehub_mode(const Config& c) {
-    if (!c.homehub_enabled) return HomeHubMode::Off;
-    return c.mb_host.empty() ? HomeHubMode::Auto : HomeHubMode::Manual;
-}
-
-inline const char* homehub_mode_name(const Config& c) {
-    switch (homehub_mode(c)) {
-        case HomeHubMode::Auto:   return "auto";
-        case HomeHubMode::Manual: return "manual";
-        case HomeHubMode::Off:    return "off";
-    }
-    return "off";
-}
-
-// The address the Modbus stack should dial. Off always wins; otherwise a manual entry wins over the
-// IPv4 found by Auto during this boot. Pure so the task, /status and UI cannot disagree.
+// The address the Modbus stack should dial. Empty is disabled. Keeping this accessor makes the
+// task, /status and UI share that single rule instead of reintroducing an implicit Auto state.
 inline const std::string& config_modbus_host(const Config& c) {
-    static const std::string empty;
-    if (!c.homehub_enabled) return empty;
-    return c.mb_host.empty() ? c.mb_dhost : c.mb_host;
+    return c.mb_host;
 }
 
-// Auto searches only while enabled, without a manual/session address, and before this boot's bounded
-// attempt set has completed. Off can never search; Manual can never second-guess the entered host.
-inline bool config_modbus_should_search(const Config& c) {
-    return homehub_mode(c) == HomeHubMode::Auto && c.mb_dhost.empty() && !c.mb_searched;
-}
-
-// Record this boot's bounded search outcome in RAM. `host` is empty when nothing answered;
-// mb_searched latches either way so a HomeHub-less LAN is not browsed forever during one boot.
-inline void apply_modbus_found(Config& c, std::string host) {
-    c.mb_dhost    = std::move(host);
-    c.mb_searched = true;
-}
+inline bool config_modbus_enabled(const Config& c) { return !c.mb_host.empty(); }
 
 inline void apply_link(Config& c, int rx_pin, int tx_pin, Protocol proto) {
     c.rx_pin = rx_pin;
@@ -360,7 +317,7 @@ inline bool validate(const Config& c, std::string& reason, int max_gpio = 48,
     if (!c.syslog_host.empty() && (c.syslog_port < 1 || c.syslog_port > 65535)) { reason = "syslog_port out of range"; return false; }
     // Modbus TCP link params. Checked UNCONDITIONALLY (not gated on transport): the struct defaults
     // 502/1 pass for every X10A config, so this only bites a bad Modbus setting. mb_host is free text
-    // like syslog_host — empty means mDNS auto-discovery, never invalid.
+    // like syslog_host — empty disables the optional HomeHub stack and is valid.
     if (c.mb_port < 1 || c.mb_port > 65535)   { reason = "mb_port out of range"; return false; }
     if (c.mb_unit_id < 1 || c.mb_unit_id > 247) { reason = "mb_unit_id out of range"; return false; }
     return true;

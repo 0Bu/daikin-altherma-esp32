@@ -143,6 +143,12 @@ jobs:
       - name: Test HomeHub connection row
         run: node test/test_ui_modbus_status.mjs
 
+      # Discovery is a user action in the address dialog, never a boot mode. Pin the IDF-facing
+      # orchestration that pure host C++ cannot link: empty host creates no task, the poll loop never
+      # browses mDNS, and the dedicated request fills the form without saving behind Cancel/Save.
+      - name: Test explicit HomeHub discovery lifecycle
+        run: node test/test_homehub_discovery_contract.mjs
+
       # HomeHub uses Int16 for both numbers and selectors; X10A exposes stable English tokens for
       # the current indoor operation mode. Execute both production display boundaries and pin every
       # manufacturer enum and localised schematic headline in English and German. Ordinary binary

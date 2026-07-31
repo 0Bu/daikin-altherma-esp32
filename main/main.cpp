@@ -106,8 +106,8 @@ extern "C" void app_main() {
         daik::hp_poll_start();           // X10A poll engine
         // The HomeHub Modbus stack — a SECOND, INDEPENDENT source (docs/MODBUS_PROTOCOL.md), not an
         // alternative to the line above: both run, and neither notices the other failing. The
-        // Auto (the default) gets one bounded discovery window per boot; Manual polls its address;
-        // Off, or Auto after a miss, has no steady-state task/socket/traffic.
+        // A saved address is polled; an empty address creates no task/socket/traffic and never
+        // triggers discovery. mDNS runs only from the dialog's explicit Search action.
         // Skipped in safe mode for the same reason the two above are: a boot-looping board is being
         // recovered through the web UI, and every optional consumer stays out of the way.
         daik::mb_start();

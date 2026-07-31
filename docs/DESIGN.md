@@ -254,8 +254,9 @@ The heat pump has **no configuration screen**. The model is **auto-detected** fr
 no poll-interval control (poll is fixed at 1 s). The one thing that *is* a choice is **which link**
 reaches the pump — the X10A service port (the default) or a HomeHub over Modbus TCP — and that is a
    connection, not a heat-pump setting, so it lives on its own row in the Settings Connections tile
-   (§5.6 item 1). Even there the HomeHub is **auto-discovered** by default: the resolved IPv4 is filled
-   in after discovery. Nothing on that row controls the pump. What there is to see or touch
+   (§5.6 item 1). Its address may be typed or found with an explicit **Search** button; firmware never
+   searches at boot. Saving the address empty disables the HomeHub stack. Nothing on that row
+   controls the pump. What there is to see or touch
 is otherwise split the way everything else is — what the *unit* is on the dashboard, what the *board*
 is in Settings:
 - **Model** name (the brand while offline) and detected capacity (shown only while the link is live)
@@ -1092,16 +1093,17 @@ vocabulary exactly:
      room in a one-line tile); it remains available from `/status.ntp.time` and every syslog
      TIMESTAMP — and from no HA entity (the "Device Time" sensor is retired, ARCHITECTURE.md → *The
      MQTT bridge*).
-   - **HomeHub** — always present so a completed bounded discovery miss cannot remove the only entry
-     point for retry/manual configuration. The value is the configured host or the IPv4 selected by mDNS,
-     followed by the configured port as `host:port`;
-     tapping opens the live (`POST /set_hp`, no reboot) Auto/Manual/Off + host/port/unit-id modal.
-     Auto is the default and retries on every boot (three browses, up to 64 HTTP responders each),
-     then stops for that boot; only an explicit Off choice suppresses future searches. Connected uses the
+   - **HomeHub** — always present even when disabled, so the empty state still has an entry point for
+     search or manual configuration. The value is the saved host followed by the configured port as
+     `host:port`; tapping opens the live (`POST /set_hp`, no reboot) host/port/unit-id modal. Its
+     **Search** button alone calls `POST /discover_homehub` (three browses, up to 64 HTTP responders
+     each), then fills the ordinary host field without saving behind Cancel/Save. Firmware never
+     searches at boot. Saving the host empty means Disabled and causes no mDNS or HomeHub requests.
+     Connected uses the
      shared `--ok` connection colour, a configured-but-down host uses `--err`, and the current
      structured failure is localised as a smaller `--err` line directly below the address and included
-     in the accessible name. Discovery filters on `homehub-*` and exposes the responder's numeric
-     IPv4 for the current session; neither a DHCP address nor a negative result is persisted.
+     in the accessible name. Discovery filters on `homehub-*` and offers the responder's numeric
+     IPv4 in the form; only Save persists it, while a negative result changes nothing.
      Failures are also sent to `/diag` and Syslog once per state transition. No setpoint, mode or switch appears here: this
      link remains read-only by design (`docs/SECURITY.md`). It stays a row of its own and is never
      folded into X10A state because the two sources fail independently.

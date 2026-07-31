@@ -225,7 +225,7 @@ User credentials + the X10A link cache are persisted; the model is re-detected o
 
 | NVS key | Meaning |
 |---------|---------|
-| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + the one-shot rollback backup + flags, MQTT (`uri`/`user`/`pass`), syslog (host/port; empty host = off), the SNTP server (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` default on next boot), from blob **v2** the **board-local hardware** (`led_gpio`/`led_type`/`led_inverted`/`btn_gpio`/`btn_active_low`, written by `/set_board`), from blob **v3** the **OTA update channel** (`ota_channel`, `POST /set_ota`), from blob **v4** the **UI-language override** (`ui_lang`, `POST /set_lang`) and from blob **v5/v6** the **HomeHub Modbus stack** (`mb_host`, `mb_port`, `mb_unit_id`, `actuation_enabled`, plus v6 `homehub_enabled`; enabled+empty host = Auto, enabled+host = Manual, disabled = Off). Discovery IP and negative result are runtime-only. One CRC-checked entry written with a single `nvs_set_blob`, so a save is **all-or-nothing** across a write failure *and* a power cut. Older blobs remain readable; v5 migrates enabled because only v6 can prove an intentional Off choice. WiFi rollback: the previous credentials are backed up here by `/set_wifi` and restored automatically if the new network fails to connect; `/status.wifi.rolled_back` reports it after the reboot. |
+| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + the one-shot rollback backup + flags, MQTT (`uri`/`user`/`pass`), syslog (host/port; empty host = off), the SNTP server (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` default on next boot), from blob **v2** the **board-local hardware** (`led_gpio`/`led_type`/`led_inverted`/`btn_gpio`/`btn_active_low`, written by `/set_board`), from blob **v3** the **OTA update channel** (`ota_channel`, `POST /set_ota`), from blob **v4** the **UI-language override** (`ui_lang`, `POST /set_lang`) and from blob **v5/v6** the **HomeHub Modbus stack** (`mb_host`, `mb_port`, `mb_unit_id`, `actuation_enabled`; v6's former enable bit remains only as a compatibility mirror). A non-empty `mb_host` is polled; empty disables the stack and never triggers discovery. One CRC-checked entry written with a single `nvs_set_blob`, so a save is **all-or-nothing** across a write failure *and* a power cut. Older blobs remain readable; a short-lived v6 enabled+empty Auto value migrates safely to disabled. WiFi rollback: the previous credentials are backed up here by `/set_wifi` and restored automatically if the new network fails to connect; `/status.wifi.rolled_back` reports it after the reboot. |
 | *(legacy per-key)* | `wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback`/`wifi_rolledbk`/`mqtt_*`/`syslog_*`/`ntp_server` — the pre-blob layout, still **read** as a fallback when `cfg` is absent (fresh device / OTA from an older build); superseded on the next save. |
 | `rx_pin` / `tx_pin` / `proto` | X10A link cache (physical wiring + framing) — kept as separate self-healing keys, tried first by the sweep, re-saved on change, re-validated on load. |
 | `board_set` | Has the user **stated** the board hardware, or are the five values in `cfg` merely this build's defaults? They cannot say on their own — the Kconfig defaults *equal* the XIAO preset — and the web UI needs the difference to name the board in its Hardware modal instead of opening on "Custom" beside the very preset that was just saved. Set by `POST /set_board` (the submit *is* the statement), revoked with the values if `config_load` rejects them, and reported as `/status.board.user_set`. Outside the blob although it has one writer: the flag never *names* a board — the UI derives that from the live values — so a drifted flag cannot produce a wrong name, only the "Custom" it already falls back to, and a blob version bump would have to be read by every older build. |
@@ -257,8 +257,8 @@ GET  /  (alias /index.html)        # embedded web UI (gzipped into the app binar
 GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this payload: the eight
                                    #   reporter-identifying values (wifi.ssid/ip/bssid/mac,
                                    #   mqtt.broker, syslog.host, ntp.server, modbus.host — the last
-                                   #   a LAN address and, on an auto-discovered HomeHub, its
-                                   #   serial-derived name) read "<redacted>"
+                                   #   a LAN address, whether typed or filled by Search) read
+                                   #   "<redacted>"
                                    #   (logic/redact.hpp). The KEY is always emitted — an omitted
                                    #   field is indistinguishable from an older build, and "which
                                    #   build produced this?" is the first question a frozen report
@@ -288,9 +288,8 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #           fails,values,actuation_enabled,error?,error_code?,
                                    #           error_detail?,error_register?},
                                    #        # the HomeHub link's READ-ONLY diagnostics. host is the
-                                   #        configured host or mDNS-discovered IPv4 — with mb_host
-                                   #        empty the device finds the hub once and fills the resolved
-                                   #        address into the UI. Structured error fields localise the
+                                   #        configured host. Empty means disabled; firmware never
+                                   #        searches at boot. Structured error fields localise the
                                    #        current failure; error keeps full log wording. No write counters: the
                                    #        link has none. actuation_enabled is reported straight
                                    #        from config and gates nothing today (P3).
@@ -436,16 +435,18 @@ POST /set_ntp                      # { server } → persist + reboot, no request
                                    #   SNTP client resolves + retries after reboot, same as syslog); an
                                    #   empty server resets to the compile-time default on next boot —
                                    #   SNTP has no disabled state, unlike syslog's empty-means-off.
-POST /set_hp                       # { profile?, rx?, tx?, mb_mode?, mb_host?, mb_port?,
+POST /set_hp                       # { profile?, rx?, tx?, mb_host?, mb_port?,
                                    #     mb_unit_id?, actuation_enabled? } → apply live (no reboot).
                                    #   Every key optional; an omitted one keeps its stored value.
                                    #   rx/tx PERSIST (pin cache), profile session-only; proto auto-detected.
                                    #   The Settings Protocol card's pin dropdown posts {profile:"auto",rx,tx} to re-detect.
-                                   #   mb_mode auto/manual/off controls the SECOND, independent Modbus
-                                   #   stack — it does NOT stop the X10A poll. Auto runs a bounded mDNS
-                                   #   search per boot; Manual requires mb_host; Off alone suppresses
-                                   #   future searches. User intent persists in blob v6; discovery does not.
+                                   #   mb_host controls the SECOND, independent Modbus stack — it does
+                                   #   NOT stop the X10A poll. Non-empty polls that address; empty
+                                   #   disables task, discovery and requests, including after reboot.
                                    #   mb_port 1..65535, mb_unit_id 1..247 — docs/MODBUS_PROTOCOL.md.
+POST /discover_homehub             # {} → bounded mDNS search started only by the HomeHub dialog's
+                                   #   Search button. Success: {ok:true,host:"<IPv4>"}; miss: 404.
+                                   #   Never persists or reconfigures — Save owns that boundary.
 POST /set_board                    # { led_gpio, led_type, led_inverted, btn_gpio, btn_active_low }
                                    #   → validate + persist + REBOOT (both are claimed once at task
                                    #   start, so they are not hot-swapped). The board's own onboard

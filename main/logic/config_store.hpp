@@ -82,10 +82,11 @@ struct ConfigBlob {
     // block takes the later number.
     //
     // There is no "transport" field: the HomeHub is a SECOND source, not an alternative to X10A
-    // (config_model.hpp). v6 restores an explicit user-intent bit: enabled+empty host is Auto,
-    // enabled+non-empty host is Manual, disabled is Off. A failed mDNS browse is not stored here.
-    bool        homehub_enabled   = true;
-    std::string mb_host;                // "" = mDNS auto-discovery
+    // (config_model.hpp). Current firmware uses mb_host alone: empty is disabled, non-empty is the
+    // address to poll. `homehub_enabled` is retained only as a decoded/encoded v6 compatibility
+    // mirror so the on-flash layout stays readable by the immediately preceding build.
+    bool        homehub_enabled   = false;
+    std::string mb_host;                // "" = disabled; discovery is an explicit UI action
     int32_t     mb_port           = 502;
     int32_t     mb_unit_id        = 1;
     bool        actuation_enabled = false;
@@ -96,8 +97,8 @@ struct ConfigBlob {
     std::string ref_temp_time_path;
     uint32_t    ref_temp_max_age_s = 600;
     bool        has_ref_temp = false;
-    // FALSE when the decoded blob predates v5 (no HomeHub block). The caller leaves the new default
-    // Auto intent in place; absence cannot prove an intentional Off choice.
+    // FALSE when the decoded blob predates v5 (no HomeHub block). The current empty-host default is
+    // disabled, so an upgrade never starts LAN discovery without an explicit user action.
     bool        has_modbus = false;
     // FALSE when the decoded blob predates v2, i.e. carries no board block at all. The caller must
     // then seed the board fields from the Kconfig defaults rather than from the members above:
@@ -110,8 +111,9 @@ struct ConfigBlob {
 inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
                           CONFIG_BLOB_MAGIC2  = 'C', CONFIG_BLOB_MAGIC3 = '1';
 // v2 appended the board-local hardware block, v3 the OTA update channel, v4 the UI language override,
-// v5 the HomeHub Modbus stack, v6 the explicit Auto/Manual/Off intent bit, v7 one MQTT-backed
-// reference-temperature mapping and v8 its source timestamp + maximum-age fields.
+// v5 the HomeHub Modbus stack, v6 its now-legacy enable compatibility bit, v7 one MQTT-backed
+// reference-temperature mapping and v8 its source timestamp + maximum-age fields. Current firmware
+// derives HomeHub enabled solely from whether mb_host is empty.
 // Bumping the version rather than reusing the previous one is what makes the trailing-garbage check
 // below still exact per version; OLDER blobs are ACCEPTED on read (see config_blob_deserialize)
 // because rejecting them would drop a user's WiFi and MQTT credentials on the OTA that introduced the
@@ -160,14 +162,13 @@ inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     v.push_back(static_cast<uint8_t>(c.ota_channel & 0xFF));
     // v4 block: the UI language, one byte (auto/de/en, room to grow).
     v.push_back(static_cast<uint8_t>(c.ui_lang & 0xFF));
-    // v5/v6 block: HomeHub transport fields. v6 gives the previously retired bit1 an explicit,
-    // versioned meaning again (user intent enabled); v5 readers ignore it and v5 blobs migrate to
-    // enabled regardless of the historical bit value.
+    // v5/v6 block: HomeHub transport fields. Bit1 remains populated as a compatibility mirror for
+    // the short-lived v6 Auto/Manual/Off build, but current firmware derives it from the address.
     detail::blob_put_str(v, c.mb_host);
     detail::blob_put_u32(v, static_cast<uint32_t>(c.mb_port));
     detail::blob_put_u32(v, static_cast<uint32_t>(c.mb_unit_id));
     v.push_back(static_cast<uint8_t>((c.actuation_enabled ? 1 : 0) |
-                                     (c.homehub_enabled ? 2 : 0)));
+                                     (!c.mb_host.empty() ? 2 : 0)));
     detail::blob_put_str(v, c.ref_temp_name);
     detail::blob_put_str(v, c.ref_temp_topic);
     detail::blob_put_str(v, c.ref_temp_path);
@@ -246,10 +247,9 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
         c.mb_port           = static_cast<int32_t>(mb_port);
         c.mb_unit_id        = static_cast<int32_t>(mb_unit_id);
         c.actuation_enabled = (mb_flags & 1) != 0;
-        // Current v5 builds always write bit1 as zero, while the earliest v5 build used it as an
-        // enable flag. Neither encoding can be migrated faithfully. The safe/user-requested rule is
-        // Auto/Manual ON by default; only a v6 blob can represent an intentional Off choice.
-        c.homehub_enabled   = version >= 6 ? (mb_flags & 2) != 0 : true;
+        // Keep the legacy member coherent for round-trip diagnostics, but do not let either v5's
+        // ambiguous bit or v6's short-lived Auto mode override the current empty-host rule.
+        c.homehub_enabled   = !c.mb_host.empty();
         c.has_modbus        = true;
     }
     if (version >= 7) {
