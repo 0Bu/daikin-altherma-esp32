@@ -44,7 +44,7 @@ SENSITIVE = re.compile(
     # worked example and the reason this list is not just the /status field names.
     r"\w*backup\w*|"
     # …and `found` is the second worked example, from the other direction: not a config value copied
-    # into a local, but a value DISCOVERED at runtime that becomes one. hp_modbus.cpp's one-shot mDNS
+    # into a local, but a value DISCOVERED at runtime that becomes one. hp_modbus.cpp's bounded mDNS
     # search writes the HomeHub's resolved IPv4 into a local called `found` and logs it
     # with no rule, while /status was redacting the very same string as modbus.host three sections
     # above. The heuristic could not see it because the name says nothing about what it holds — which

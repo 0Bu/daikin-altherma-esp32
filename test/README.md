@@ -47,7 +47,8 @@ HomeHub contract: the row names the configured peer rather than its Modbus proto
 IPv4 and configured port remain the main value, link health uses the same state colours as the other
 connection rows, a structured Modbus failure is rendered as localised
 subtle text underneath it and in the accessible name, and unknown future codes fall back to escaped
-human-readable API prose.
+human-readable API prose. It also pins the user-intent boundary: an Auto miss is "not found this
+boot", while an explicit Off choice remains "disabled"; neither is inferred from the other.
 
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named
 HomeHub status in the EKRHH register map and the schematic renderer against every X10A operation

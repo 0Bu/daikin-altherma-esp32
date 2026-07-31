@@ -352,7 +352,7 @@ inline char mb_ascii_lower(char c) {
 // only real HomeHubs. NUL-terminated input; a shorter string simply fails the prefix.
 inline bool is_homehub_hostname(const char* host) {
     if (host == nullptr) return false;
-    static const char pfx[] = "homehub";
+    static const char pfx[] = "homehub-";
     for (int i = 0; pfx[i] != '\0'; i++) {
         if (mb_ascii_lower(host[i]) != pfx[i]) return false;
     }
@@ -366,9 +366,9 @@ inline int mb_first_homehub(const char* const* names, int n) {
     return -1;
 }
 
-// Render the IPv4 address carried by the selected mDNS result. Kept IDF-free so discovery's
-// persisted-value contract is host-tested: the selected A record, not the serial-derived mDNS name,
-// is what belongs in the editable Host field. The four arguments deliberately match ESP-IDF's
+// Render the IPv4 address carried by the selected mDNS result. Kept IDF-free so discovery's status
+// contract is host-tested: expose the selected A record, not the serial-derived mDNS name. The four
+// arguments deliberately match ESP-IDF's
 // IP2STR(&addr) expansion at the device call site.
 inline std::string mb_ipv4_string(unsigned a, unsigned b, unsigned c, unsigned d) {
     if (a > 255 || b > 255 || c > 255 || d > 255) return {};

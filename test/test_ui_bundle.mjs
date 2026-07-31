@@ -24,4 +24,13 @@ assert.match(app, /\nboot\(\);\s*$/);
 assert.doesNotThrow(() => new vm.Script(app, { filename: "main/www/app.sources" }),
   "the ordered source fragments must parse as one classic script");
 
+// HomeHub intent must be explicit in both halves of the browser contract. Without these checks the
+// status renderer could understand Auto/Manual/Off while the modal silently fell back to the old
+// ambiguous empty-host form, or the form could show the selector but omit mb_mode from its POST.
+const html = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
+assert.match(html, /<select class="input" id="hhMode">[\s\S]*value="auto"[\s\S]*value="manual"[\s\S]*value="off"[\s\S]*<\/select>/,
+  "the HomeHub modal must expose Auto, Manual, and Off as explicit choices");
+assert.match(app, /applyLive\(\{ mb_mode: mode, mb_host:/,
+  "the HomeHub save must carry the selected mode to the firmware");
+
 console.log(`ui bundle: ${files.length} sources, ${Buffer.byteLength(app)} bytes — valid classic script`);

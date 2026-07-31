@@ -68,30 +68,24 @@ struct Config {
     // deliberately NO "which transport" selector — that would model an exclusivity the hardware
     // does not have, and it is what an earlier revision of this got wrong.
     //
-    // THE ADDRESS IS THE SWITCH. There is no separate enable flag: the stack runs when — and only
-    // when — a gateway address is known, so a board with none costs no task, no socket and no mDNS
-    // traffic, which is the property a flag was there to guarantee. A flag beside the address would
-    // be a second way to say the same thing, and the two can disagree.
-    //
-    // mb_host is the MANUALLY entered address ("" = none entered). It is not the whole answer: the
-    // address actually used is manual-else-discovered (config_modbus_host), because the one-shot
-    // search below writes its result to its own key.
+    // USER INTENT and DISCOVERY OUTCOME are separate states. `homehub_enabled` is true by default:
+    // a new board starts in Auto mode and tries to find the gateway. A non-empty `mb_host` selects
+    // Manual mode. Only an explicit UI/API removal sets homehub_enabled=false (Off) and suppresses
+    // later searches. These combinations are not contradictory; together they form the three-state
+    // contract exposed by homehub_mode(): Auto / Manual / Off.
+    bool        homehub_enabled = true;
+    // Manually entered address. Empty means Auto while enabled, or no address while Off.
     std::string mb_host;
     int         mb_port     = MODBUS_TCP_PORT;      // Modbus TCP port (502; the plaintext HomeHub default)
     int         mb_unit_id  = MODBUS_DEFAULT_UNIT;  // Modbus unit/slave id (1..247, default 1)
-    // ── The one-shot mDNS search result — PERSISTED, and written by the MODBUS task alone ────────
-    // The search is SUPPORTING, not continuous: the firmware browses ONCE, on the first boot that
-    // has no address at all, and then records what it learned. Found -> mb_dhost holds the resolved IPv4
-    // and the stack runs from then on. Not found -> mb_searched latches true and NO LATER BOOT
-    // BROWSES AGAIN; adding a HomeHub afterwards is a manual mb_host entry, which is a deliberate act
-    // and needs no search. That is why these two are not in the atomic credential blob: mb_host has
-    // exactly ONE writer (httpd, POST /set_hp) while these have exactly one OTHER writer (the Modbus
-    // task), and a task that saves a whole Config saves whatever it snapshotted — the same two-owner
-    // problem the rx/tx link cache is split out for. The IP is deliberately visible/editable in the
-    // Host field; if DHCP later changes it, the resulting reachability error says exactly what failed
-    // and the user can clear/re-enter the address.
-    std::string mb_dhost;                 // IPv4 address the mDNS search resolved ("" = none)
-    bool        mb_searched  = false;     // true once the one-shot search has run (found or not)
+    // ── Auto-discovery outcome — RUNTIME ONLY ─────────────────────────────────────
+    // A bounded search is attempted once per boot (and whenever Auto is explicitly selected again).
+    // Found -> mb_dhost holds the resolved IPv4 for this session and polling starts. Not found ->
+    // mb_searched becomes true and the task retires for this boot. The negative result is deliberately
+    // NOT persisted: "no response just now" is not the user's "Off" choice, so the next boot tries
+    // again. This also prevents a stale discovered DHCP address becoming permanent configuration.
+    std::string mb_dhost;                 // IPv4 resolved this session ("" = none)
+    bool        mb_searched  = false;     // bounded Auto search completed during this boot
 
     // SAFETY FLAG for the future in-firmware actuation path (#32 P3), default OFF. P1/P2 build only
     // the READ stack — nothing writes a pump register — so this flag currently gates nothing; it is
@@ -188,33 +182,40 @@ inline bool config_save_succeeded(bool blob_ok, bool link_ok, bool require_link)
     return blob_ok && (!require_link || link_ok);
 }
 
-// Apply the detected X10A link. Non-allocating, so it cannot throw inside the config mutex.
-// The address the Modbus stack should dial, and — because the address is the switch — whether that
-// stack exists at all. Manual entry WINS over the discovered IPv4 address, and does not erase it: a user
-// who types an address is correcting what the search found, and clearing the field again must fall
-// back to the search result rather than to nothing. Pure so the precedence is asserted once instead
-// of re-derived at each call site (the task's gate, its connect, /status and the UI).
+// Persistent HomeHub user intent. The stored enable bit and manual-host field map to this public
+// three-state contract; transient discovery state never participates in the choice.
+enum class HomeHubMode { Auto, Manual, Off };
+
+inline HomeHubMode homehub_mode(const Config& c) {
+    if (!c.homehub_enabled) return HomeHubMode::Off;
+    return c.mb_host.empty() ? HomeHubMode::Auto : HomeHubMode::Manual;
+}
+
+inline const char* homehub_mode_name(const Config& c) {
+    switch (homehub_mode(c)) {
+        case HomeHubMode::Auto:   return "auto";
+        case HomeHubMode::Manual: return "manual";
+        case HomeHubMode::Off:    return "off";
+    }
+    return "off";
+}
+
+// The address the Modbus stack should dial. Off always wins; otherwise a manual entry wins over the
+// IPv4 found by Auto during this boot. Pure so the task, /status and UI cannot disagree.
 inline const std::string& config_modbus_host(const Config& c) {
+    static const std::string empty;
+    if (!c.homehub_enabled) return empty;
     return c.mb_host.empty() ? c.mb_dhost : c.mb_host;
 }
 
-// Should the one-shot mDNS search run on this boot? Only when NOTHING is known: no manual address,
-// no recorded discovery, and the search has never completed. Latching on mb_searched rather than on
-// "mb_dhost is empty" is the whole point — a search that found nothing must be remembered as HAVING
-// RUN, or every boot browses the LAN again for a gateway that is not there.
+// Auto searches only while enabled, without a manual/session address, and before this boot's bounded
+// attempt set has completed. Off can never search; Manual can never second-guess the entered host.
 inline bool config_modbus_should_search(const Config& c) {
-    return c.mb_host.empty() && c.mb_dhost.empty() && !c.mb_searched;
+    return homehub_mode(c) == HomeHubMode::Auto && c.mb_dhost.empty() && !c.mb_searched;
 }
 
-// Upgrade migration for devices that persisted the serial-derived mDNS label before discovery was
-// changed to store its A record. Never rewrite a manually entered host, even if the user chose a
-// homehub-* name deliberately; only the Modbus task-owned discovery field is eligible.
-inline bool config_modbus_discovery_needs_ipv4(const Config& c) {
-    return c.mb_host.empty() && !c.mb_dhost.empty() && is_homehub_hostname(c.mb_dhost.c_str());
-}
-
-// Record the one-shot search's outcome in the live config. `host` is empty when nothing answered —
-// mb_searched latches either way, which is what makes the search one-shot.
+// Record this boot's bounded search outcome in RAM. `host` is empty when nothing answered;
+// mb_searched latches either way so a HomeHub-less LAN is not browsed forever during one boot.
 inline void apply_modbus_found(Config& c, std::string host) {
     c.mb_dhost    = std::move(host);
     c.mb_searched = true;

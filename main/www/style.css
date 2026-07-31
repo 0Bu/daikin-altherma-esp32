@@ -697,6 +697,7 @@ textarea.input[readonly] { font-size: 12px; color: var(--muted); white-space: pr
 .btn.secondary { background: var(--card); color: var(--fg); border-color: var(--line); }
 .btn.secondary:hover { border-color: var(--brand); color: var(--brand-strong); }
 .btn:disabled { opacity: .6; cursor: default; box-shadow: none; }
+.field-disabled { opacity: .6; }
 /* In-flight save button (DESIGN.md §8). The /set_mqtt broker pre-flight blocks up to ~8 s, long
    enough that a bare disabled button reads as an ignored click. */
 .spin {

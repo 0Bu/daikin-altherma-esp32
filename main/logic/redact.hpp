@@ -84,12 +84,12 @@ inline constexpr DiagRedaction DIAG_REDACTIONS[] = {
     // incoherent: scrubbed in the JSON, printed in the log two sections below it. The second id is
     // the slugified base topic (a fixed compile-time name) and stays.
     {"mqtt: retired legacy HA device ", " (now "},
-    // hp_modbus.cpp "modbus: one-shot mDNS search found gateway %s" — the DISCOVERED HomeHub IPv4.
+    // hp_modbus.cpp "modbus: bounded mDNS search found gateway %s" — the DISCOVERED HomeHub IPv4.
     // /status?redact=1 already withholds it as
     // modbus.host, and without this rule the same string was printed in /diag a few sections below
     // it in the very same bug report — the incoherence the mqtt rule above exists to prevent, in a
     // second place. The failure line contains no address and therefore survives whole.
-    {"modbus: one-shot mDNS search found gateway ", ""},
+    {"modbus: bounded mDNS search found gateway ", ""},
     // hp_modbus.cpp "modbus: %d HomeHubs discovered via mDNS — using %s" — the same IPv4 on the
     // several-hubs path. The marker starts AFTER the count, because a rule matches the RENDERED
     // line and "%d" never appears in one; the count therefore survives, which is the diagnostic

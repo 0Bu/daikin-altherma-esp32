@@ -632,10 +632,10 @@ integrate($P[$__range]) / 3600 / increase(heatpump_energy_kwh[$__range])
   trustworthy JAZ still wants an external CT/Shelly (plus a MID heat meter for a certified SCOP). On
   the *metering* ingredients EKRHH and this firmware are therefore **peers**, not a shortcut past
   them — EKRHH's real edge is **bidirectional control** (SG-Ready / §14a power modulation /
-  setpoints, the evcc path), where this firmware is (for now) read-only telemetry: a
-  firmware-exclusive Modbus client that reads and writes the HomeHub register set is planned
-  (issue #32, not yet wired in — see the transport core in `logic/modbus.hpp`), so this line
-  describes today's shipped behaviour, not the intended end state. That end state is **conditional**,
+  setpoints, the evcc path), where this firmware deliberately remains read-only telemetry. Its
+  independent HomeHub Modbus client is wired through `hp_modbus.cpp` and `logic/modbus.hpp`, but it
+  exposes no register-write function, MQTT command, HA control entity or HTTP actuation route. The
+  supported read path is **conditional**,
   not "every register unconditionally": the Modbus map needs Unified MMI2 ≥ 7.8.0 on the audited
   ERGA-EV/EHBH/X-E family, some registers are inoperative per model (e.g. holding regs 59 & 61 on
   Micon 20002203), and the link will be plaintext Modbus TCP `:502` by choice — the hub's TLS `:802`

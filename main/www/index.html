@@ -739,14 +739,22 @@
   </div>
 
   <!-- ═══ HomeHub edit modal (opened from the Connections tile's Modbus row) ═══
-       Edits the Modbus TCP link to the Daikin HomeHub. Host is an IP or a .local hostname; LEFT EMPTY
-       it auto-discovers the hub over mDNS. Applied live (POST /set_hp, no reboot). Read-only: this is
-       config + diagnostics only, never a pump control (issue #32 / docs/SECURITY.md). -->
+       Auto (default), Manual and Off are explicit user choices; a transient failed search can never
+       become Off by itself. Applied live (POST /set_hp, no reboot). Read-only: config + diagnostics
+       only, never a pump control (issue #32 / docs/SECURITY.md). -->
   <div class="modal" id="homehubModal" hidden>
     <div class="modal-backdrop" id="homehubBackdrop"></div>
     <form class="modal-card" id="homehubForm" role="dialog" aria-modal="true" aria-labelledby="homehubModalTitle">
       <div class="section-label card-title" id="homehubModalTitle" data-i18n="homehub.title">Modbus</div>
       <label class="field">
+        <span class="field-label plain" data-i18n="homehub.mode">Connection mode</span>
+        <select class="input" id="hhMode">
+          <option value="auto" data-i18n="homehub.mode_auto">Find automatically</option>
+          <option value="manual" data-i18n="homehub.mode_manual">Manual address</option>
+          <option value="off" data-i18n="homehub.mode_off">Disabled</option>
+        </select>
+      </label>
+      <label class="field" id="hhHostField">
         <span class="field-label plain" data-i18n="homehub.host">Host · IP or .local name</span>
         <input class="input" name="host" id="hhHost" placeholder="homehub-524288-9.local" autocomplete="off">
       </label>
@@ -759,7 +767,7 @@
         <input class="input num" name="unit" id="hhUnit" placeholder="1" inputmode="numeric" autocomplete="off">
       </label>
       <p class="hint err" id="hhError" hidden></p>
-      <p class="hint" data-i18n="homehub.hint">The gateway is searched for ONCE, on the first start with no address. When found, its IPv4 address is entered here automatically; enter an address by hand for a gateway added later. Port defaults to 502, unit id to 1. Read-only — the firmware never controls the heat pump from here.</p>
+      <p class="hint" data-i18n="homehub.hint">Automatic search makes a bounded set of attempts per boot and then stops. A later boot tries again; only Disabled stops future searches. Selecting automatic search again retries immediately. Port defaults to 502, unit id to 1. Read-only — the firmware never controls the heat pump from here.</p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="hhCancel" data-i18n="btn.cancel">Cancel</button>
         <button class="btn primary" type="submit" id="hhBtn" data-i18n="btn.save">Save</button>

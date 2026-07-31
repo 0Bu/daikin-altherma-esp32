@@ -9,6 +9,8 @@ const dashboardSource = readAppFragments(["dashboard.js"]);
 
 const translated = {
   "conn.homehub": "HomeHub",
+  "conn.disabled": "Deaktiviert",
+  "conn.notfound": "Bei diesem Start nicht gefunden",
   "modbus.err.response_timeout": (r) => `Zeitüberschreitung bei Register ${r}`,
   "modbus.err.exception": (r, n, why) => `Register ${r}: Ausnahme ${n} (${why})`,
   "modbus.exc.2": "unzulässige Registeradresse",
@@ -39,7 +41,8 @@ function baseModbus(patch) {
     mqtt: { configured: false },
     syslog: { configured: false },
     ntp: { synced: true, server: "pool.ntp.org" },
-    modbus: { enabled: true, connected: false, host: "203.0.113.137", port: 502, ...patch },
+    modbus: { mode: "manual", enabled: true, connected: false,
+      host: "203.0.113.137", port: 502, ...patch },
   };
   return sandbox.__connLinks().find((row) => row.edit === "homehub");
 }
@@ -84,6 +87,26 @@ function baseModbus(patch) {
   const html = sandbox.__connRow(row);
   assert.match(html, /future socket &lt;failure&gt;/,
     "unknown future codes fall back to escaped human-readable API prose");
+}
+
+{
+  const row = baseModbus({ mode: "auto", enabled: false, searched: true, host: "" });
+  assert.equal(row.cls, "", "a completed Auto miss is neutral, not an explicit broken address");
+  assert.equal(row.value, "—");
+  assert.equal(row.state, "Bei diesem Start nicht gefunden");
+}
+
+{
+  const row = baseModbus({ mode: "auto", enabled: true, discovering: true, host: "" });
+  assert.equal(row.cls, "", "an in-flight Auto search is neutral rather than a failed connection");
+  assert.equal(row.value, "conn.searching");
+}
+
+{
+  const row = baseModbus({ mode: "off", enabled: false, searched: false, host: "" });
+  assert.equal(row.cls, "", "an intentional Off choice is neutral");
+  assert.equal(row.value, "—");
+  assert.equal(row.state, "Deaktiviert", "Off stays distinct from this boot's Auto miss");
 }
 
 console.log("Modbus connection status: endpoint + shared state colours + localised inline error contract passed");

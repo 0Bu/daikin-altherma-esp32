@@ -76,16 +76,19 @@ advertises on the `_http._tcp.local.` service."* Three consequences shape the im
 3. **mDNS needs a single subnet and multicast/IGMP.** A manual host is therefore mandatory as a
    fallback, not a nicety.
 
-**How it behaves:** leave the host **empty** and the device performs one discovery on the first boot
-with no recorded result. It identifies a `homehub-*` responder, takes its IPv4 A record, persists that
-numeric address and fills it into `/status.modbus.host` and the editable Host field. The outcome is
-persisted even when nothing answers, so an empty LAN is not browsed on every reboot; a hub added later
-is entered manually. Set a host (an IP, a `.local` name resolved over mDNS, or an ordinary DNS name)
-and that address is used verbatim. If several `homehub-*` responders answer, the first resolved IPv4
-is used and the count is logged to `/diag` rather than silently guessed at.
+**How it behaves:** HomeHub configuration has three explicit modes. **Auto** is the default on a new
+or upgraded board. Each boot browses `_http._tcp` up to three times, accepting up to 64 responders per
+browse, then stops for that boot if none has a `homehub-*` hostname. The larger cap matters on real
+home LANs: a 20-result cap can exclude the HomeHub solely because mDNS result order is unspecified.
+A successful search puts the responder's IPv4 A record in `/status.modbus.host` for that session and
+starts polling. Neither the address nor a negative search result is persisted; the next boot searches
+again, so a missed multicast response or DHCP lease never becomes durable configuration. Selecting
+Auto in the UI again re-arms the bounded search immediately.
 
-On the first boot after upgrading, a legacy auto-discovered `homehub-*` value is resolved once and
-replaced by its numeric IPv4 address. A manually configured host is never rewritten by this migration.
+**Manual** uses the entered IP, `.local` name or ordinary DNS name verbatim and performs no discovery.
+**Off** is only an explicit user choice (clearing/removing the address in the legacy API maps to Off)
+and is the only state that suppresses future boot searches. If several `homehub-*` responders answer,
+the first resolved IPv4 is used and the count is logged to `/diag` rather than silently guessed at.
 
 Every active failure is exposed as complete English `error` text plus structured `error_code`,
 `error_detail` and (for reads) `error_register` fields. The UI localises the structured cause as a
@@ -159,8 +162,9 @@ mDNS or the hub. Coupling them lets either failure mask the other.
 What that buys, concretely:
 
 * Pull the service cable and the HomeHub keeps reporting. Lose the LAN and X10A keeps polling.
-* **A device with no HomeHub pays nothing.** The task is created only while the configured address, so
-  there is no task, no socket, no mDNS traffic and no stack — which is also why `hp_poll` could give
+* **A device with no HomeHub has no steady-state cost.** Auto uses one bounded discovery window per
+  boot, then retires the task; Off skips even that. Afterwards there is no task, socket or traffic —
+  which is also why `hp_poll` could give
   back the 4 KB an earlier revision had taken from it (its stack is 8192 again; the
   `getaddrinfo`/mDNS/socket call chain now lives on the task that actually makes those calls).
 * Disabling it live retires the task: it checks the flag at the top of its cycle and deletes itself.
@@ -272,33 +276,35 @@ Everything is runtime — no reflash, and no reboot.
 
 | Field | Meaning |
 |---|---|
-| `mb_dhost`/`mb_searched` | The one-shot discovery result — resolved IPv4 found ("" = none) and whether the search has run. Outside the blob: their writer is the Modbus task while the blob's is httpd |
-| `mb_host` | HomeHub IP or `.local`/DNS hostname. Empty uses the persisted discovery result; only a never-searched device with no result performs mDNS discovery |
+| `homehub_enabled` + `mb_host` | Persistent user intent: enabled + empty = Auto, enabled + address = Manual, disabled = Off |
+| `mb_dhost`/`mb_searched` | Runtime-only Auto outcome: IPv4 found this session and whether this boot's bounded search completed |
+| `mb_host` | Manual HomeHub IP or `.local`/DNS hostname; empty in Auto and Off |
 | `mb_port` | Modbus TCP port, default `502` (validated 1–65535) |
 | `mb_unit_id` | Modbus unit id, default `1` (validated 1–247) |
 | `actuation_enabled` | P3 safety flag, default **false**. Persisted; gates nothing today |
 
-All five are persisted in the atomic CRC-checked NVS config blob (**v5**,
-`main/logic/config_store.hpp`) and written by exactly one task (httpd, `POST /set_hp`). An older blob
-(v1–v4) still decodes and reports `has_modbus == false`, whose meaning is simply "this device predates
-the HomeHub stack" — the struct defaults already say so, so no fallback is needed and no user loses
-their credentials on the upgrade.
+The user-intent bit, manual host, port, unit and safety flag are persisted in the atomic CRC-checked
+NVS config blob (**v6**, `main/logic/config_store.hpp`) and written by exactly one task (httpd,
+`POST /set_hp`). Older blobs still decode without losing credentials. v1–v4 and v5 both migrate to
+enabled/Auto-or-Manual; only v6 can prove that the user deliberately selected Off. Discovery outcome
+is RAM-only and therefore cannot silently create that persistent choice.
 
 > **Why v5 and not v4.** This block and the UI-language byte were developed in parallel and both
 > claimed v4. main's language byte landed first and is already on published builds, so this took the
 > later number. A second, different "v4" would have decoded that language byte as a HomeHub setting
 > and switched a board onto a link it does not have, silently, on upgrade.
 
-**Applied live.** `POST /set_hp` persists and calls `mb_reconfigure()`, which starts the task when a
-HomeHub address becomes known and re-resolves it if it changed. Clearing the address is handled *by*
-the task (it retires itself at the top of its next cycle), so the socket keeps exactly one owner.
+**Applied live.** `POST /set_hp` accepts `mb_mode:"auto"|"manual"|"off"`, persists the user choice and
+calls `mb_reconfigure()`. Auto starts/re-arms discovery, Manual reconnects to its address, and Off is
+handled by the task at the top of its next cycle, so the socket keeps exactly one owner. For legacy
+clients, a non-empty host means Manual and an empty host means Off.
 
 **Web UI:** the HomeHub appears as its own row in Settings → Connections — never folded into a
 combined link state with X10A, since either can be down alone and one merged "connected" would hide
 exactly the case worth seeing. Its value is the active `host:port`, and its colour follows the shared
 connection-state vocabulary. Config and diagnostics only; there are no pump controls, by design.
 
-**API:** `/status` carries a `modbus{enabled,connected,discovering,host,port,unit_id,rx,fails,values,
+**API:** `/status` carries a `modbus{mode,enabled,connected,discovering,searched,host,port,unit_id,rx,fails,values,
 actuation_enabled,error,error_code,error_detail,error_register}` block (the error fields are omitted
 when healthy). `host` is the configured value or the IPv4 selected by discovery, so the UI shows what
 was found rather than the empty string it was asked with. It is redacted in a bug report because it is
