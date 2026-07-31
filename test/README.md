@@ -28,8 +28,13 @@ logic regression or an untested production path fails in seconds instead of afte
 build. `tools/coverage/selftest.sh` separately proves that an empty report and coverage below the
 floor fail closed.
 
+`node test/test_ui_bundle.mjs` first validates `main/www/app.sources`: every entry is local, unique
+and present, and their exact ordered concatenation parses as one classic script. All semantic UI
+tests and audits use the same reader, so they cannot silently exercise a different source order than
+the firmware build.
+
 The same `gates` job runs `node test/test_ui_live_i18n.mjs` separately. That browser-free regression
-test executes the production banner/inspector render functions from `main/www/app.js` and verifies
+test executes the production banner/inspector render functions from the assembled UI source and verifies
 that their DOM-write signatures invalidate when the persisted UI language changes while device state
 stays identical.
 
@@ -90,7 +95,7 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   HomeHub-only changes do not), and the field-owned detection patches (`apply_link` /
   `apply_model` touch only the link / model — a link commit must not revert a concurrent
   `/set_wifi`).
-- `logic/lwt_select.hpp` — the web UI's leaving-water MEASUREMENT picker (twin of `www/app.js`
+- `logic/lwt_select.hpp` — the web UI's leaving-water MEASUREMENT picker (twin of `www/js/schematic.js`
   `vLwt`): the pre-BUH heat-exchanger outlet (R1T) is chosen over a setpoint, a mixed-zone R1T, or
   the post-BUH (R2T) twin, across the four alias label forms — and, catalog-wide, every detectable
   profile resolves a real measurement and never a setpoint (issue #121, the #35–#39 failure shape).

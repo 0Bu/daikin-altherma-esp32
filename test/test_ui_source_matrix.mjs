@@ -1,5 +1,5 @@
 // THE SOURCE-ARBITRATION MATRIX — which of the two stacks answers a given fact, in every state the
-// pair can be in. Runs the REAL helpers out of main/www/app.js in a DOM-free VM harness, the same
+// pair can be in. Runs the REAL helpers out of the assembled UI source in a DOM-free VM harness, the same
 // shape test_ui_board_preset.mjs uses, because CI has no browser.
 //
 // It exists because the host gates were all green while the arbitration was wrong. The rule
@@ -21,32 +21,11 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
-const app = fs.readFileSync(new URL("../main/www/app.js", import.meta.url), "utf8");
+const SOURCE = readAppFragments(["descriptions.js", "schematic.js"]);
 const index = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const demo = fs.readFileSync(new URL("../tools/uigif/scenes.js", import.meta.url), "utf8");
-
-// The arbitration helpers are one contiguous block. Extracting the REAL source rather than
-// re-implementing the rule is the whole point: a second copy of it would be a second thing to drift.
-function span(start, end) {
-  const from = app.indexOf(start);
-  assert.notEqual(from, -1, `missing production source marker: ${start}`);
-  const to = app.indexOf(end, from);
-  assert.notEqual(to, -1, `missing production source marker: ${end}`);
-  return app.slice(from, to);
-}
-// THREE spans, and the second and third are the whole point of this round. The first review of this
-// file was right that it stopped at the helper boundary: it drove the arbitration helpers and never
-// the code that RENDERS with them, and the next two defects sat exactly in that gap — the value
-// row's explainer and the schematic inspector each went on building from the retained X10A row after
-// the bus fell silent, so the row header showed the gateway's reading while the body beneath it
-// printed a "difference" against a number minutes old. Every helper assertion below was green
-// throughout. A gate that stops one call short of the consumer is a gate on the wrong thing.
-const SOURCE =
-  span("const mbByConcept = (cid) =>", "// First matching description for a value label") +
-  span("function mbNoteHtml(row, mb)", "// Description body: the plain") +
-  span("// The X10A row this target may present as a CURRENT reading", "// The reading of a /values row as one string") +
-  span("const PEL_ESTIMATED_WHAT =", "\nconst INSPECT = {");
 
 // ── Fixtures ───────────────────────────────────────────────────────────────────────────────────
 // A /values X10A row and a HomeHub row, exactly as http_status.cpp serves them.
@@ -66,22 +45,9 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [] }) {
       _values: values,
       _modbus: modbus,
     },
-    // vOn is the X10A bit-flag reader; the real one is defined far from this block, so it is stubbed
-    // to exactly what it does — find a row by label regex and read its "1"/"0".
-    vOn: (re) => {
-      const r = context.S._values.find((v) => re.test(v.label || ""));
-      return r ? String(r.value).trim() === "1" : null;
-    },
-    // The row lookups the extracted renderers call. Stubbed because what is under test here is which
-    // SIDE answers, not how a label resolves to a row — and the resolution itself is already gated
-    // by the catalog CHECKs in test_logic.cpp. `pickRow`/`inspRow` read the X10A cache exactly as
-    // the real ones do, INCLUDING the part that matters: they keep answering after the link drops,
-    // because the cache is deliberately retained.
-    vRow: (re) => context.S._values.find((v) => re.test(v.label || "")) || null,
-    pickRow: (sel) => (typeof sel === "function" ? sel()
-                       : context.S._values.find((v) => sel.test(v.label || "")) || null),
-    inspRow: (e) => (e.pick ? e.pick() : e.re ? context.vRow(e.re) : null),
-    // Presentation helpers, faithful to the originals in the ways these assertions depend on.
+    // History/i18n live in separate production fragments and are outside this arbitration test;
+    // provide only their presentation boundary while executing the complete descriptions and
+    // schematic fragments, including their real row/state selectors and consumers.
     esc: (s) => String(s ?? "").replace(/[&<>"]/g,
       (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])),
     displayValue: (v) => {
@@ -98,7 +64,6 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [] }) {
                    : k === "src.delta" ? `Difference ${a} ${b}`
                    : k === "src.modbus_tag" ? "modbus" : k),
     tx: (o) => (o == null ? "" : typeof o === "string" ? o : o.en),
-    fmt1: (n) => (n == null ? "—" : n.toFixed(1)),
     LANG: "en",
   };
   vm.createContext(context);
@@ -110,7 +75,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [] }) {
     " SMART_GRID_MODE_VALUE, x10aSmartGridModeFrom, x10aSmartGridMode, x10aSmartGridRow," +
     " sgModeText, sgRequestText, mbNoteHtml, inspCurRow, inspMember," +
     " inspMembers, pelMeasured, pelApproxText, PEL_INSPECT };",
-    context, { filename: "main/www/app.js" });
+    context, { filename: "main/www/app.sources" });
   return context.__api;
 }
 
@@ -195,9 +160,9 @@ const X_SG = (contact, on) => ({
   assert.equal(c.sgRequestText(0), "", "free running has no schematic label");
   assert.equal(c.sgRequestText(1), "", "forced off has no schematic label");
   assert.equal(c.sgRequestText(3), "", "forced on has no schematic label");
-  assert.match(app, /classList\.toggle\("sg-boost-on", d\.sgMode === 2\)/,
+  assert.match(SOURCE, /classList\.toggle\("sg-boost-on", d\.sgMode === 2\)/,
     "only mode 2 may reveal the schematic boost marker");
-  assert.doesNotMatch(app, /sg-request-on/,
+  assert.doesNotMatch(SOURCE, /sg-request-on/,
     "the former all-nonzero request visibility rule must stay removed");
 }
 
@@ -466,8 +431,8 @@ const X_SG = (contact, on) => ({
   // The actual SVG and renderer must consume the same source-aware prefix helper the assertions
   // above exercise; otherwise a correct inspector could still leave the closed pill lying.
   assert.match(index, /id="pelApprox"/);
-  assert.match(app, /setTxt\("pelApprox", pelApproxText\(d\)\)/);
-  assert.match(app, /pel:\s*PEL_INSPECT/);
+  assert.match(SOURCE, /setTxt\("pelApprox", pelApproxText\(d\)\)/);
+  assert.match(SOURCE, /pel:\s*PEL_INSPECT/);
 
   // 51 absent (sentinel / unread) with both limits valid — the case that produced the wrong number.
   const gone = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],

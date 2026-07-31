@@ -2,7 +2,7 @@
 // UI LANGUAGE: which language the web UI renders in. IDF-free + host-tested.
 //
 // The web UI is bilingual (de/en) and localises itself in the BROWSER: by default it picks the
-// language from navigator.language, with no device involvement (main/www/app.js). This setting is
+// language from navigator.language, with no device involvement (main/www/js/i18n.js). This setting is
 // the MANUAL override on top of that default — a persistent, per-installation choice that wins over
 // the browser's guess and survives a reboot (config ui_lang, POST /set_lang; NVS blob v4).
 //

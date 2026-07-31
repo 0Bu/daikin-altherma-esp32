@@ -1,19 +1,11 @@
 // Regression test for the Board Hardware preset default. Runs the real production functions from
-// main/www/app.js in a tiny DOM-free VM harness: first-boot hardware values happen to equal the
+// the assembled production UI in a tiny DOM-free VM harness: first-boot hardware values equal the
 // Seeed XIAO preset, but values are not a physical board identity, so the modal must open on Custom.
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import vm from "node:vm";
+import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
-const app = fs.readFileSync(new URL("../main/www/app.js", import.meta.url), "utf8");
-
-function span(start, end) {
-  const from = app.indexOf(start);
-  assert.notEqual(from, -1, `missing production source marker: ${start}`);
-  const to = app.indexOf(end, from);
-  assert.notEqual(to, -1, `missing production source marker: ${end}`);
-  return app.slice(from, to);
-}
+const settingsSource = readAppFragments(["settings.js"]);
 
 function element(value = "") {
   return {
@@ -69,16 +61,15 @@ const context = {
   $: (id) => elements[id],
   esc: String,
   t: (key) => key,
-  boardPinOptions: (target, current) => { target.value = String(current); },
 };
 const sandbox = vm.createContext(context);
 vm.runInContext(
-  `${span("function syncBoardFields()", "function openBoard()")}
+  `${settingsSource}
    this.__fillBoard = fillBoard;
    this.__applyPreset = applyPreset;
    this.__syncPresetSelection = syncPresetSelection;`,
   sandbox,
-  { filename: "main/www/app.js" },
+  { filename: "main/www/app.sources" },
 );
 
 sandbox.__fillBoard();

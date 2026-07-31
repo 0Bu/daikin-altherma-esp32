@@ -1290,7 +1290,7 @@ static void test_refrigerant_pressure_catalog() {
 // VALUE is wrong. The branch's own request is "Space heating Operation ON/OFF" (0x62/2 bit 3), and
 // that is what the pill draws now.
 //
-// The browser picks both rows by LABEL (www/app.js liveData). That is only sound while a label means
+// The browser picks both rows by LABEL (www/js/schematic.js liveData). That is only sound while a label means
 // one thing, and docs/REGISTERS.md §5 documents a SECOND "Thermostat ON/OFF" — page 0x10 offset 1
 // bit 7, the outdoor unit's own — which no generated profile currently carries. def/overlay.hpp says
 // in as many words that the generator's page-0x10 input is narrower than the spec and that the
@@ -2332,7 +2332,7 @@ static void test_board_pins_local() {
 }
 
 // The board-hardware presets the UI's "Board" dropdown fills its five fields from. The whole point
-// of keeping this table in firmware rather than in www/app.js is that these CHECKs can run against
+// of keeping this table in firmware rather than in www/js/settings.js is that these CHECKs can run against
 // the very validator POST /set_board applies — a preset that fills pins the device then rejects
 // would be worse than no preset at all.
 static void test_board_presets() {
@@ -4560,7 +4560,7 @@ static void test_http_surface() {
 }
 
 // logic/lwt_select.hpp — the leaving-water MEASUREMENT picker that feeds ΔT / heat output / COP.
-// Host-testable twin of www/app.js pickLwtRow(); guards issue #121 (a setpoint must never be
+// Host-testable twin of www/js/schematic.js pickLwtRow(); guards issue #121 (a setpoint must never be
 // selected) and the post-BUH mis-credit (R2T must never win over R1T), across the real profile
 // catalog and the alias label forms plain "leaving water.*before" misses.
 static void test_lwt_select() {
@@ -4729,7 +4729,7 @@ static void test_ou_stale() {
                 disch_rows++;
             }
             // The ELECTRICAL-INPUT sources, and they fall on opposite sides of the rule — which is
-            // the whole reason www/app.js has to pick between them rather than blanking the pill
+            // the whole reason www/js/schematic.js has to pick between them rather than blanking the pill
             // wholesale. "INV primary current" is an outdoor-unit row and freezes with the rest of
             // 0x21; the CT clamps sit on the hydronic 0x63 and keep measuring. The browser's d.pel
             // used the INV row as an unconditional fallback whenever the CT sum read 0 — which is

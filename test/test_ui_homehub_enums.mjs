@@ -2,30 +2,25 @@
 // modes, flags and numbers alike as Int16; this pins the distinction that keeps "Operation mode 1"
 // from returning while true binary rows continue to use the firmware-wide 0/1 -> ON/OFF contract.
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import vm from "node:vm";
+import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
-const app = fs.readFileSync(new URL("../main/www/app.js", import.meta.url), "utf8");
-
-function span(start, end) {
-  const from = app.indexOf(start);
-  assert.notEqual(from, -1, `missing production source marker: ${start}`);
-  const to = app.indexOf(end, from);
-  assert.notEqual(to, -1, `missing production source marker: ${end}`);
-  return app.slice(from, to);
-}
-
-const SOURCE =
-  span("const I18N = {", "// Localise the static markup") +
-  span("const ENUM_VALUE_I18N = Object.freeze({", "// The generated X10A catalog sometimes");
+const SOURCE = readAppFragments(["i18n.js", "history.js"]);
+const appStateSource = readAppFragments(["app_state.js"]);
+const schematicSource = readAppFragments(["schematic.js"]);
 
 function renderer(lang) {
-  const context = { LANG: lang };
+  const context = {
+    document: { getElementById: () => null },
+    fetch: () => { throw new Error("unexpected fetch in enum test"); },
+    localStorage: { getItem: () => lang, setItem: () => {} },
+    navigator: { language: lang },
+  };
   vm.createContext(context);
   vm.runInContext(SOURCE + "\nthis.__ui = { displayValue, operationModeText, operationModeFromFlags, labels: I18N[LANG]," +
     " sgModeText: (mode) => t(`sg.mode${mode}`)," +
     " sgBoostText: () => t(\"schem.sg_boost\") };", context,
-    { filename: "main/www/app.js" });
+    { filename: "main/www/app.sources" });
   return context.__ui;
 }
 
@@ -113,10 +108,10 @@ for (const [key, expected] of Object.entries(modelLabels)) {
   assert.equal(actual, expected, `German model-card label: ${key}`);
   assert.doesNotMatch(actual, /[()]/, `German model-card label has no parenthetical qualifier: ${key}`);
 }
-assert.match(app,
+assert.match(appStateSource,
   /const mode = schematicOperationMode\(\);/,
   "the schematic headline must use the shared X10A and HomeHub mode resolver");
-assert.match(app,
+assert.match(schematicSource,
   /head: \(\) => schematicOperationMode\(\)/,
   "the open operation-mode explainer must use the same localised fallback headline");
 

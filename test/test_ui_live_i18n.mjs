@@ -1,28 +1,21 @@
 // Regression test for live UI-language changes. Runs the real production render functions from
-// main/www/app.js in a tiny DOM-free VM harness: a persistent surface must repaint when LANG changes
+// the assembled production UI in a tiny DOM-free VM harness: a persistent surface must repaint when LANG changes
 // even though every device/status value in its ordinary render signature remains identical.
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import vm from "node:vm";
+import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
-const app = fs.readFileSync(new URL("../main/www/app.js", import.meta.url), "utf8");
+const appStateSource = readAppFragments(["app_state.js"]);
+const schematicSource = readAppFragments(["schematic.js"]);
 
-function span(start, end) {
-  const from = app.indexOf(start);
-  assert.notEqual(from, -1, `missing production source marker: ${start}`);
-  const to = app.indexOf(end, from);
-  assert.notEqual(to, -1, `missing production source marker: ${end}`);
-  return app.slice(from, to);
-}
-
-function productionFunction(name, endMarker, context) {
+function productionApi(source, exports, context) {
   const sandbox = vm.createContext(context);
   vm.runInContext(
-    `${span(`function ${name}(`, endMarker)}\nthis.__productionFunction = ${name};`,
+    `${source}\nthis.__productionApi = { ${exports.join(", ")} };`,
     sandbox,
-    { filename: "main/www/app.js" },
+    { filename: "main/www/app.sources" },
   );
-  return { sandbox, fn: sandbox.__productionFunction };
+  return { sandbox, api: sandbox.__productionApi };
 }
 
 function element() {
@@ -39,7 +32,6 @@ function element() {
 function languageContext(status, target) {
   const context = {
     LANG: "en",
-    S: { status },
     $: () => target,
     esc: String,
   };
@@ -47,10 +39,12 @@ function languageContext(status, target) {
   return context;
 }
 
-function assertPersistentBannerRepaints(name, endMarker, status) {
+function assertPersistentBannerRepaints(name, status) {
   const target = element();
   const context = languageContext(status, target);
-  const render = productionFunction(name, endMarker, context).fn;
+  const { api } = productionApi(appStateSource, ["S", name], context);
+  api.S.status = status;
+  const render = api[name];
   render();
   assert.equal(target.writes, 1, `${name} must paint its initial language`);
   const english = target.innerHTML;
@@ -62,13 +56,11 @@ function assertPersistentBannerRepaints(name, endMarker, status) {
 
 assertPersistentBannerRepaints(
   "renderRecoveryBanner",
-  "// ── WiFi rollback banner",
   { sys: { safe_mode: true } },
 );
 
 assertPersistentBannerRepaints(
   "renderRollbackBanner",
-  "// ── Crash banner",
   { wifi: { rolled_back: true, ssid: "fallback" } },
 );
 
@@ -86,13 +78,11 @@ assertPersistentBannerRepaints(
     },
   };
   const context = languageContext(status, target);
-  context.S.crashAsk = "";
-  context.S.crashDismissed = "";
-  const render = productionFunction(
-    "renderCrashBanner",
-    "// Copy text to the clipboard.",
-    context,
-  ).fn;
+  const { api } = productionApi(appStateSource, ["S", "renderCrashBanner"], context);
+  api.S.status = status;
+  api.S.crashAsk = "";
+  api.S.crashDismissed = "";
+  const render = api.renderCrashBanner;
   render();
   assert.equal(target.writes, 1, "renderCrashBanner must paint its initial language");
   const english = target.innerHTML;
@@ -118,14 +108,8 @@ assertPersistentBannerRepaints(
     histHtml: () => `${context.LANG}:chart`,
     displayReadingLabel: String,
     DERIVED: {},
-    tx: String,
-    inspTitleText: () => "title",
   };
-  const render = productionFunction(
-    "renderInspectHist",
-    "function renderInspect()",
-    context,
-  ).fn;
+  const render = productionApi(schematicSource, ["renderInspectHist"], context).api.renderInspectHist;
   render(null, { label: "row", unit: "°C" });
   assert.equal(target.writes, 1, "renderInspectHist must paint its initial language");
   context.LANG = "de";
@@ -138,23 +122,13 @@ assertPersistentBannerRepaints(
   const context = {
     LANG: "en",
     S: { insp: "same", live: null },
-    inspRow: () => null,
-    inspVal: () => "",
-    pickRow: () => null,
-    inspTitleText: () => "same",
-    inspNowText: () => "",
-    inspHeld: () => false,
     // The second source. Null is the shape a device with no HomeHub sees, which is the right
     // baseline here: this asserts that LANG ALONE still moves the signature, so every other input
     // has to be held constant — including the one that now feeds the panel's comparison block.
     mbTwin: () => null,
     mbForInspect: () => null,
   };
-  const signature = productionFunction(
-    "inspectSig",
-    "// The trend under the inspector:",
-    context,
-  ).fn;
+  const signature = productionApi(schematicSource, ["inspectSig"], context).api.inspectSig;
   const english = signature({});
   context.LANG = "de";
   assert.notEqual(signature({}), english, "inspectSig must change when only LANG changes");

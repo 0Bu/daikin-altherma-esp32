@@ -99,25 +99,37 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
 )
 
 # Assemble + pre-compress the web UI at build time. The sources are split for edit locality —
-# www/index.html (markup with inline markers), www/style.css, www/app.js — and
+# www/index.html, www/style.css and the ordered JavaScript fragments in www/app.sources — and
 # inline_assets.cmake splices them back into the ONE self-contained page the device serves.
 # Browsers always accept gzip, so shipping the page pre-gzipped cuts bytes on the wire ~3x —
 # the single biggest lever for first-paint over a high-latency WiFi link. Regenerated on every
 # build, so the served page never goes stale. Symbols: _binary_index_html_gz_{start,end}
 # (see handle_index in http_status.cpp).
+set(APP_JS_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/www/app.sources")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${APP_JS_MANIFEST}")
+file(STRINGS "${APP_JS_MANIFEST}" APP_JS_ENTRIES ENCODING UTF-8)
+set(APP_JS_SOURCES "")
+foreach(raw IN LISTS APP_JS_ENTRIES)
+    string(STRIP "${raw}" rel)
+    if(NOT rel STREQUAL "" AND NOT rel MATCHES "^#")
+        list(APPEND APP_JS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/www/${rel}")
+    endif()
+endforeach()
+
 add_custom_command(
     OUTPUT  "${CMAKE_CURRENT_BINARY_DIR}/index_inlined.html"
     COMMAND ${CMAKE_COMMAND}
             -DHTML=${CMAKE_CURRENT_SOURCE_DIR}/www/index.html
             -DCSS=${CMAKE_CURRENT_SOURCE_DIR}/www/style.css
-            -DJS=${CMAKE_CURRENT_SOURCE_DIR}/www/app.js
+            -DJS_MANIFEST=${APP_JS_MANIFEST}
             -DOUT=${CMAKE_CURRENT_BINARY_DIR}/index_inlined.html
             -P ${CMAKE_CURRENT_SOURCE_DIR}/www/inline_assets.cmake
     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/www/index.html"
             "${CMAKE_CURRENT_SOURCE_DIR}/www/style.css"
-            "${CMAKE_CURRENT_SOURCE_DIR}/www/app.js"
+            "${APP_JS_MANIFEST}"
+            ${APP_JS_SOURCES}
             "${CMAKE_CURRENT_SOURCE_DIR}/www/inline_assets.cmake"
-    COMMENT "Inlining web UI assets (index.html + style.css + app.js)"
+    COMMENT "Inlining web UI assets (index.html + style.css + app.sources)"
     VERBATIM)
 add_custom_command(
     OUTPUT  "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz"

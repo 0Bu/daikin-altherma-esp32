@@ -20,7 +20,7 @@ well-formed, plausible, and attributing a real number to the wrong thing.
 
 **This review unlike `/domain-review` is conditional** — it is for changes that reach the drawing:
 `main/www/index.html`, `main/www/style.css`, the `INSPECT` / `I18N` / `liveData` / `paintSchematic`
-half of `main/www/app.js`, or `docs/DESIGN.md` §5.3 / §7. A change that cannot reach the drawing
+half of `main/www/js/schematic.js` plus `i18n.js`, or `docs/DESIGN.md` §5.3 / §7. A change that cannot reach the drawing
 does not need it. **You apply the fixes**, you do not just report them.
 
 ## 1. Run the audit (the mechanical half)
@@ -39,7 +39,7 @@ read (a renamed class, a missing marker), so nothing was checked.
 | `S001` | A hit target with no `INSPECT` entry — tapping it opens an empty panel. **Not adjudicable.** |
 | `S002` | An `INSPECT` entry with no hit target — copy nobody can reach. |
 | `S003` / `S010` | A `sample` that names no catalog register / matches no `DESCRIPTIONS` entry (a blank explainer). |
-| `S004` / `S005` | An `id` the SVG declares and app.js never writes, or the reverse — a silent no-op either way. |
+| `S004` / `S005` | An `id` the SVG declares and the assembled UI never writes, or the reverse — a silent no-op either way. |
 | `S006` | A `data-i18n` key missing from a language dict — the German page prints English, or the raw key. |
 | `S007` / `S008` / `S009` | Duplicate id / dangling `<use>` / character data adrift in the SVG. |
 | `S011` | A drawn pipe inside no hit target — unhoverable, and it fails by absence: nothing looks wrong. |

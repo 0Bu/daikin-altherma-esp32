@@ -105,8 +105,8 @@ why it is wrong).
 
 6. **Fix + PR (only when warranted and wanted).** Pick the fix at the RIGHT layer — this is where
    naïve fixes go wrong:
-   - **Display bug** (idle value shown misleadingly) → `www/app.js` only. No decode/catalog change.
-     Verify `node --check main/www/app.js`.
+   - **Display bug** (idle value shown misleadingly) → the relevant `www/js/` fragment only. No
+     decode/catalog change. Verify `node test/test_ui_bundle.mjs`.
    - **Wrong converter / unit / duplicate label** → the catalog. Profiles are **GENERATED**
      (`gen_profiles.py`, external to this repo) — do not blind-edit; change `docs/REGISTERS.md` (the
      in-repo source of truth) **and** the affected profiles consistently, then flag in the PR that the

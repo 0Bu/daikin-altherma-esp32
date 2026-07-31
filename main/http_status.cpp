@@ -545,7 +545,7 @@ static esp_err_t h_status(httpd_req_t* req) {
 //
 // `reg` is the X10A register PAGE the row was decoded from, and it is what makes the browser's
 // held-over rule STRUCTURAL: logic/ou_stale.hpp's ou_page_holds_over() keys on the page (0x20/0x21
-// stop being refreshed while the compressor rests), and www/app.js must apply the same rule to the
+// stop being refreshed while the compressor rests), and www/js/schematic.js must apply the same rule to the
 // rows it shows. Matching those rows by LABEL instead would be a second, drifting copy of the rule —
 // the catalog spells them ~50 different ways across the 43 profiles ("Outdoor air temp.",
 // "R1T-Outdoor air temp.", "Outdoor Air Temp (R1T)", …), so a pattern list would silently stop
@@ -758,7 +758,7 @@ static esp_err_t h_history(httpd_req_t* req) {
         // TENTHS on the wire, as plain integers — the browser scales by 10. Integers rather than
         // "41.6": shorter (a 288-sample body is ~1.1 KB instead of ~1.5 KB), exactly representable,
         // and no formatting code to get the sign or a trailing zero wrong. The `unit` field says
-        // what they are tenths OF, and app.js's histHtml documents the same contract on its side.
+        // what they are tenths OF, and www/js/history.js's histHtml documents the same contract on its side.
         if (logic::history_is_absent(samples[i])) j += "null";
         else j += std::to_string(static_cast<int>(samples[i]));
         // Flush every 64 samples so the peak string stays a few hundred bytes rather than the whole

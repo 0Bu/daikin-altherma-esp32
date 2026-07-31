@@ -5,7 +5,7 @@
 // measurement makes all four derived numbers *plausibly* wrong (issue #121, the failure shape of
 // #35-#39 — no numeric tell, just wrong).
 //
-// This header is the host-testable twin of www/app.js's pickLwtRow(): the SELECTION happens
+// This header is the host-testable twin of www/js/schematic.js's pickLwtRow(): the SELECTION happens
 // browser-side (there is no firmware caller), but the rule runs against the generated def/ profile
 // LABELS, which are C++ — so mirroring it here lets the CI logic-test gate it against the whole
 // catalog (every detectable profile must select a real pre-BUH measurement, never a setpoint /

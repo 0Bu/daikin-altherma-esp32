@@ -20,7 +20,7 @@ skill's.
 
 **Conditional, like `/schematic-review`** — it is for changes that reach the drawing:
 `main/www/index.html`'s schematic figure, the `sc-*` half of
-`main/www/style.css`, the painting functions in `main/www/app.js` (`renderLive`, `liveData`,
+`main/www/style.css`, the painting functions in `main/www/js/schematic.js` (`renderLive`, `liveData`,
 `clearSchematic`, `plantState`, `sysSet`, `vLwt`), the scene definitions in
 `tools/uigif/scenes.js`, or the recorder's framing in `scripts/record-dashboard-gif.sh`. Those are
 exactly the sources the gate fingerprints, so **the gate tells you whether it applies** — run it
@@ -57,7 +57,8 @@ scripts/record-dashboard-gif.sh --keep-frames   # leaves the PNGs for inspection
 ```
 
 Local only — needs Chrome and ffmpeg. What it films is the **real UI**: `index.html` + `style.css`
-+ `app.js` spliced exactly as the firmware build splices them (`tools/uigif/build_demo.py`), with
++ the ordered `app.sources` fragments spliced exactly as the firmware build splices them
+(`tools/uigif/build_demo.py`), with
 only the *device* stubbed (`tools/uigif/scenes.js`). Nothing about the drawing is re-implemented,
 so what the GIF shows is what `renderLive()` drew.
 
@@ -124,7 +125,7 @@ Look at the finished GIF. Then ask:
 scripts/run-ui-gif-audit.sh    # must be clean, and the stamp must be the one you just recorded
 tools/uigif/selftest.sh        # if you touched the checker: every case still caught
 scripts/run-schematic-audit.sh # the drawing the GIF is OF must itself be sound
-node --check main/www/app.js   # the harness is spliced into it; a syntax error yields blank frames
+node test/test_ui_bundle.mjs   # parses the exact ordered script the harness receives
 ```
 
 Then **look at the GIF**. The gate proves it is current; only you can see that it is a good picture

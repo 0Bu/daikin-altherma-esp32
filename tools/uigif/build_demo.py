@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Build the demo page the dashboard GIF is recorded from: the REAL web UI + a stubbed device.
 
-The splice is the one the firmware build does (main/www/inline_assets.cmake) — style.css and app.js
-back into index.html — plus tools/uigif/scenes.js ahead of app.js, so the app boots against a fake
-/status + /values instead of a board. Nothing about the UI is re-implemented here: what the GIF
-shows is what renderLive() actually drew.
+The splice is the one the firmware build does (main/www/inline_assets.cmake) — style.css and the
+ordered app.sources fragments back into index.html — plus tools/uigif/scenes.js ahead of the app,
+so the app boots against a fake /status + /values instead of a board. Nothing about the UI is
+re-implemented here: what the GIF shows is what renderLive() actually drew.
 
   tools/uigif/build_demo.py <repo-root> <out.html>
 """
@@ -21,7 +21,25 @@ here = pathlib.Path(__file__).parent
 www = root / "main" / "www"
 page = (www / "index.html").read_text()
 css = (www / "style.css").read_text()
-js = (www / "app.js").read_text()
+manifest = www / "app.sources"
+entries = []
+for raw in manifest.read_text().splitlines():
+    entry = raw.strip()
+    if not entry or entry.startswith("#"):
+        continue
+    candidate = (www / entry).resolve()
+    try:
+        candidate.relative_to(www.resolve())
+    except ValueError:
+        sys.exit(f"build_demo: app.sources entry escapes main/www: {entry!r}")
+    if candidate.suffix != ".js" or not candidate.is_file():
+        sys.exit(f"build_demo: invalid app.sources entry: {entry!r}")
+    if candidate in entries:
+        sys.exit(f"build_demo: duplicate app.sources entry: {entry!r}")
+    entries.append(candidate)
+if not entries:
+    sys.exit("build_demo: app.sources contains no JavaScript sources")
+js = "".join(source.read_text() for source in entries)
 harness = (here / "scenes.js").read_text()
 
 CSS_MARK = "/*@@INLINE:style.css@@*/\n"

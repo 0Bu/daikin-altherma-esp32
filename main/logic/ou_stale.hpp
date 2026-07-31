@@ -17,7 +17,7 @@
 // … a held-over reading would assert a value nobody is still measuring" — and this applies the same
 // rule to one sleeping UNIT instead of one silent BUS.
 //
-// Host-testable twin of www/app.js's `d.ouHeldOver` (like logic/lwt_select.hpp there is no firmware
+// Host-testable twin of www/js/schematic.js's `d.ouHeldOver` (like logic/lwt_select.hpp there is no firmware
 // caller): the rule keys on the generated def/ profile REGISTER ids, which are C++, so the CI
 // logic-test gates it against the whole catalog — every profile must keep the readings the UI BLANKS
 // on a held-over page, AND must keep the readings that DECIDE the run state on a live one. That

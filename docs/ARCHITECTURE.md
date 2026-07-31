@@ -191,9 +191,10 @@ recovery_button.cpp/.hpp → physical factory-reset button (btn_gpio/btn_active_
                       merely bracketed the flash write would be invisible. A FAILED erase does NOT
                       reboot (coming back up on the config it just claimed to delete is worse than
                       staying up and logging why). Started even in safe mode
-www/                → web UI sources: index.html + style.css + app.js, spliced into ONE
-                     self-contained page at build time (inline_assets.cmake) and served gzipped;
-                     setup.html is the captive-portal page (gzipped separately)
+www/                → web UI sources: index.html + style.css + app.sources + js/*.js. The manifest
+                     orders the classic-script fragments; inline_assets.cmake splices them into ONE
+                     self-contained page at build time and serves it gzipped. setup.html is the
+                     captive-portal page (gzipped separately)
 logic/              → IDF-free, host-tested pure logic (see below)
 ```
 
@@ -300,7 +301,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   This table carries the five settings (`led_gpio`, `led_type`, `led_inverted`, `btn_gpio`,
   `btn_active_low`) for each **documented** board, served as `/status.board.presets`, so the Hardware
   modal fills them from one pick instead of asking the user to transcribe pin numbers out of
-  [BOARDS.md](BOARDS.md). It lives in firmware rather than in `www/app.js` for the reason
+  [BOARDS.md](BOARDS.md). It lives in firmware rather than in `www/js/settings.js` for the reason
   `lwt_select.hpp` exists: a browser-side copy would be a second statement of the same facts, free to
   drift, and a preset that fills pins the device then *rejects* is worse than no preset. Here, the CI
   logic test asserts every offered preset passes the very validator `POST /set_board` applies
@@ -529,7 +530,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   carrying the device's own status, readings and log ([`REPORTING.md`](REPORTING.md)), which is only
   defensible because the board scrubs first — so this is the single implementation of that rule,
   shared by the web UI's "Report a bug" action and the manual `curl` fallback, rather than a copy in
-  `www/app.js` that would drift. Two shapes, because the routes leak differently: `/status` leaks by
+  `www/js/app_state.js` that would drift. Two shapes, because the routes leak differently: `/status` leaks by
   **field** (eight named values, substituted where each is *written* — a post-processing pass over
   the finished JSON is what the httpd stack budget has no room for), `/diag` leaks by **line**,
   which is the non-trivial half the `CHECK`s cover. It **fails closed**: a rule whose end token is
@@ -1512,8 +1513,10 @@ This is distinct from the image anti-brick recovery above; both are covered in
 
 ## Web UI config flow
 
-`www/` is split for edit locality (index.html markup + style.css + app.js) and spliced into ONE
-self-contained, pre-gzipped page at build time (`inline_assets.cmake`). The UI is **two screens**:
+`www/` is split for edit locality: `index.html`, `style.css` and the JavaScript fragments listed in
+`app.sources`. Firmware, tests and audits all consume that one ordered manifest; the fragments share
+one classic-script scope and are spliced into ONE self-contained, pre-gzipped page at build time
+(`inline_assets.cmake`). The UI is **two screens**:
 the dashboard (the plant — schematic, model, values, no config at all) and **Settings** behind the
 header gear (the Connections tile + the three ESP32 board cards — ESP32 board health, Protokoll
 [X10A link + pins] and Firmware [version/OTA + language] — flat, no sub-screens, all three built by

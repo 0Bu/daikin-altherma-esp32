@@ -26,7 +26,7 @@
 # places is a filter that will disagree with itself (this repo has now fixed that exact drift twice
 # in one day). Relevance = the PR changed the drawing, its contract, or the tools that judge it:
 #   main/www/                      the SVG, its CSS, and the INSPECT/I18N/liveData/paintSchematic
-#                                  half of app.js
+#                                  half of js/schematic.js
 #   docs/DESIGN.md                 §5.3/§7 ARE the drawing's specification, so an edit there changes
 #                                  what "correct" MEANS — the strongest reason to re-review
 #   tools/schematic/               the mechanical audit and its adjudication ledger

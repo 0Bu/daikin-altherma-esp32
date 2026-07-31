@@ -1,41 +1,19 @@
 // Contract test for the X10A operating-observation card. Executes the production checkup renderer
-// from main/www/app.js in a DOM-free VM so wording and null/evidence handling cannot drift into a
+// from the assembled production UI in a DOM-free VM so wording and null/evidence handling cannot drift into a
 // whole-plant health claim while the C++ report remains technically conservative.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
-const app = fs.readFileSync(new URL("../main/www/app.js", import.meta.url), "utf8");
+const i18nSource = readAppFragments(["i18n.js"]);
+const dashboardSource = readAppFragments(["dashboard.js"]);
+const explanationSource = readAppFragments(["descriptions.js", "history.js", "schematic.js"]);
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 const statusSource = fs.readFileSync(new URL("../main/http_status.cpp", import.meta.url), "utf8");
 const checkupSource = fs.readFileSync(new URL("../main/checkup.cpp", import.meta.url), "utf8");
 const pollSource = fs.readFileSync(new URL("../main/hp_poll.cpp", import.meta.url), "utf8");
 const configSource = fs.readFileSync(new URL("../main/http_config.cpp", import.meta.url), "utf8");
-
-function span(start, end) {
-  const from = app.indexOf(start);
-  assert.notEqual(from, -1, `missing production source marker: ${start}`);
-  const to = app.indexOf(end, from);
-  assert.notEqual(to, -1, `missing production source marker: ${end}`);
-  return app.slice(from, to);
-}
-
-// Limit the language assertion to this card. Other, unrelated value explainers may legitimately use
-// words such as "healthy"; this surface must not turn a bounded X10A observation into that claim.
-const checkupCopy = [
-  span("const I18N = {", "function t("),
-  span("  health_fault: {", "  // The two board-memory rows"),
-].join("\n");
-for (const [name, pattern] of [
-  ["German all-clear claim", /Alles in Ordnung/i],
-  ["English all-clear claim", /\bAll clear\b/i],
-  ["German health claim", /\bgesund(?:e[rsnm]?|heit|heitszustand)?\b/i],
-  ["English health claim", /\bhealthy\b|\bhealth status\b/i],
-  ["English whole-plant claim", /\b(?:plant|unit|system) (?:is )?(?:fine|healthy)\b/i],
-  ["German whole-plant claim", /\bAnlage (?:ist )?(?:gesund|in Ordnung)\b/i],
-]) {
-  assert.doesNotMatch(checkupCopy, pattern, `checkup copy must not contain a ${name}`);
-}
 
 // Pin the existing /status.health surface plus its additive evidence fields at the actual serializer.
 // The UI payloads below are synthetic by design; without this half, a C++ key drift could leave every
@@ -69,35 +47,30 @@ assert.match(configSource, /static esp_err_t do_detect[\s\S]*?checkup_reset\(\);
 
 const context = {
   S: { status: null },
+  document: { getElementById: () => null },
+  fetch: () => { throw new Error("unexpected fetch in checkup test"); },
+  localStorage: { getItem: () => "en", setItem: () => {} },
+  navigator: { language: "en" },
   descNoteHtml: (lead, text) => `<detail label="${lead}">${text}</detail>`,
   // Keep the renderer's semantic inputs visible in a compact deterministic string; no DOM is needed.
   modelDescRow: (id, label, value, opt = {}) =>
     `<row id="${id}" tone="${opt.cls || ""}" label="${label}"><value>${value}</value>${opt.bodyPrefix || ""}</row>`,
-  vcard: (title, rows, badge, cls = "") =>
-    `<card title="${title}" tone="${cls}" badge="${badge}">${rows}</card>`,
 };
 const sandbox = vm.createContext(context);
 vm.runInContext(
-  `${span("const I18N = {", "function t(")}
-   let __lang = "en";
-   function __t(k, ...a) {
-     const v = (I18N[__lang] && I18N[__lang][k] != null) ? I18N[__lang][k] : I18N.en[k];
-     if (v == null) return k;
-     return typeof v === "function" ? v(...a) : v;
-   }
-   const t = __t;
-   ${span("const CHECKUP_ROW = {", "// ── Connections tile")}
+  `${i18nSource}${dashboardSource}
    this.__checkup = {
      value: checkupValue,
      metric: checkupMetricValue,
      status: checkupStatusText,
      detail: checkupDetailHtml,
      card: checkupCardHtml,
-     text: (lang, key, ...args) => { __lang = lang; return __t(key, ...args); },
-     setLang: (lang) => { __lang = lang; },
+     copy: I18N,
+     text: (lang, key, ...args) => { LANG = lang; return t(key, ...args); },
+     setLang: (lang) => { LANG = lang; },
    };`,
   sandbox,
-  { filename: "main/www/app.js" },
+  { filename: "main/www/app.sources" },
 );
 const ui = sandbox.__checkup;
 
@@ -213,7 +186,7 @@ ui.setLang("en");
 let countOnlyCard = ui.card();
 assert.match(countOnlyCard, /3 cycles · MEASURED ONLY/);
 assert.doesNotMatch(countOnlyCard, /paired/);
-assert.match(countOnlyCard, /badge="NOT AVAILABLE"/);
+assert.match(countOnlyCard, />NOT AVAILABLE<\/span>/);
 assert.doesNotMatch(countOnlyCard, /heuristic/);
 assert.equal(
   ui.value({ id: "defrost", verdict: "ok", count: 1, defrost_s: 1, run_s: 1000 }),
@@ -265,13 +238,13 @@ let card = ui.card();
 assert.match(card, /tone="checkup-val ok"/,
              "OK rows must carry both the wrapping class and visible OK tone");
 assert.match(card, /X10A check · 24 h/);
-assert.match(card, /badge="OK · 4\/4 assessed"/);
+assert.match(card, />OK · 4\/4 assessed<\/span>/);
 assert.doesNotMatch(card, /7 values|24 h of/);
 assert.doesNotMatch(card, /\bAll clear\b|\bhealthy\b/i);
 ui.setLang("de");
 card = ui.card();
 assert.match(card, /X10A-Check · 24 h/);
-assert.match(card, /badge="OK · 4\/4 bewertet"/);
+assert.match(card, />OK · 4\/4 bewertet<\/span>/);
 assert.doesNotMatch(card, /7 Werte|von 24 h/);
 assert.doesNotMatch(card, /Alles in Ordnung|\bgesund/i);
 
@@ -284,12 +257,12 @@ context.S.status.health = {
 };
 ui.setLang("en");
 card = ui.card();
-assert.match(card, /badge="CHECKING · 1\/3 assessed"/);
+assert.match(card, />CHECKING · 1\/3 assessed<\/span>/);
 assert.match(card, /<value>1\.7 bar · CHECKING<\/value>/);
 assert.match(card, /CHECKING — 2 min of 1 h captured/);
 ui.setLang("de");
 card = ui.card();
-assert.match(card, /badge="PRÜFT · 1\/3 bewertet"/);
+assert.match(card, />PRÜFT · 1\/3 bewertet<\/span>/);
 assert.match(card, /<value>1\.7 bar · PRÜFT<\/value>/);
 assert.match(card, /PRÜFT — 2 min von 1 h erfasst/);
 
@@ -332,12 +305,12 @@ context.S.status.health = {
 };
 ui.setLang("en");
 card = ui.card();
-assert.match(card, /badge="CHECKING · 0\/1 assessed"/);
+assert.match(card, />CHECKING · 0\/1 assessed<\/span>/);
 assert.doesNotMatch(card, /23 h 30 min|1 values/);
 assert.doesNotMatch(card, /manufacturer limit/);
 ui.setLang("de");
 card = ui.card();
-assert.match(card, /badge="PRÜFT · 0\/1 bewertet"/);
+assert.match(card, />PRÜFT · 0\/1 bewertet<\/span>/);
 assert.doesNotMatch(card, /23 h 30 min|1 Werte/);
 assert.doesNotMatch(card, /Herstellergrenze/);
 
@@ -387,27 +360,52 @@ assert.doesNotMatch(card, /future_check|must-not-render/);
 context.S.status.health.checks = [{ id: "future_check", verdict: "warn" }];
 assert.equal(ui.card(), "", "unknown-only payload must not render an empty or guessed card");
 
+// Load the complete production explainer fragments and expose their data tables. These are real
+// module boundaries now; moving an unrelated comment can no longer change what this test executes.
+const descriptionContext = {};
+vm.runInNewContext(
+  `${explanationSource}
+   this.__copy = { descriptions: DESCRIPTIONS, model: MODEL_DESCRIPTIONS, inspect: INSPECT };`,
+  descriptionContext,
+  { filename: "main/www/app.sources" },
+);
+
+// Limit this wording check to Checkup keys and Checkup explainers. Other value explainers may
+// legitimately use words such as "healthy"; this surface must not turn a bounded observation into
+// a whole-plant claim.
+const checkupI18n = Object.values(ui.copy).flatMap((language) =>
+  Object.entries(language)
+    .filter(([key]) => key === "card.checkup" || key.startsWith("check."))
+    .map(([, value]) => String(value)));
+const checkupDescriptions = Object.entries(descriptionContext.__copy.model)
+  .filter(([key]) => key.startsWith("health_"))
+  .map(([, value]) => JSON.stringify(value));
+const checkupCopy = [...checkupI18n, ...checkupDescriptions].join("\n");
+for (const [name, pattern] of [
+  ["German all-clear claim", /Alles in Ordnung/i],
+  ["English all-clear claim", /\bAll clear\b/i],
+  ["German health claim", /\bgesund(?:e[rsnm]?|heit|heitszustand)?\b/i],
+  ["English health claim", /\bhealthy\b|\bhealth status\b/i],
+  ["English whole-plant claim", /\b(?:plant|unit|system) (?:is )?(?:fine|healthy)\b/i],
+  ["German whole-plant claim", /\bAnlage (?:ist )?(?:gesund|in Ordnung)\b/i],
+]) assert.doesNotMatch(checkupCopy, pattern, `checkup copy must not contain a ${name}`);
+
 // The concise explainer must retain the production retry comparator's important edge cases.
-const retryCopy = span("  health_retries: {", "  // The two board-memory rows");
+const retryCopy = JSON.stringify(descriptionContext.__copy.model.health_retries);
 assert.match(retryCopy, /while stopped or at a compressor-state boundary/);
 assert.match(retryCopy, /im Stillstand oder an einer Verdichter-Zustandsgrenze/);
 assert.match(retryCopy, /stable or decreasing values, gaps and resets do not/);
 assert.match(retryCopy, /stabile oder abnehmende Werte, Lücken und Rücksetzungen nicht/);
 assert.doesNotMatch(retryCopy, /with the compressor running|bei laufendem Verdichter/);
 
-const pressureCopy = span("  health_pressure: {", "  health_flow: {");
+const pressureCopy = JSON.stringify(descriptionContext.__copy.model.health_pressure);
 assert.match(pressureCopy, /NOTE immediately and a WARNING after 60 continuous seconds/);
 assert.match(pressureCopy, /sofort HINWEIS und nach 60 durchgehenden Sekunden WARNUNG/);
 
 // The hint box should answer the question without becoming a manual. Keep both paragraphs concise
 // while the source-level assertions above preserve the technically load-bearing caveats.
-const descriptionContext = {};
-vm.runInNewContext(
-  `${span("const MODEL_DESCRIPTIONS = {", "// A Model-card row")} this.__descriptions = MODEL_DESCRIPTIONS;`,
-  descriptionContext,
-);
 for (const id of ["fault", "cycling", "defrost", "pressure", "flow", "heater", "retries"]) {
-  const d = descriptionContext.__descriptions[`health_${id}`];
+  const d = descriptionContext.__copy.model[`health_${id}`];
   for (const [lang, copy] of [["en", d], ["de", d.de]]) {
     const length = `${copy.what} ${copy.normal || ""}`.length;
     assert.ok(length <= 520, `${id} ${lang} explainer is too long (${length} characters)`);
@@ -417,15 +415,11 @@ for (const id of ["fault", "cycling", "defrost", "pressure", "flow", "heater", "
 // Technical binary states stay ON/OFF in German explainers instead of switching between translated
 // prose forms. Named manufacturer enums such as Smart Grid "Empfehlung ein" are intentionally
 // outside this binary-state contract.
-const cyclingCopy = span("  health_cycling: {", "  health_defrost: {");
-const defrostCopy = span("  health_defrost: {", "  health_pressure: {");
+const cyclingCopy = JSON.stringify(descriptionContext.__copy.model.health_cycling);
+const defrostCopy = JSON.stringify(descriptionContext.__copy.model.health_defrost);
 assert.match(cyclingCopy, /von OFF zu ON/);
 assert.match(defrostCopy, /von OFF zu ON/);
-const explanationCopy = [
-  span("const DESCRIPTIONS = [", "// ── The two sources"),
-  span("const MODEL_DESCRIPTIONS = {", "// A Model-card row"),
-  span("const INSPECT = {", "// A row selector"),
-].join("\n");
+const explanationCopy = JSON.stringify(descriptionContext.__copy);
 for (const [name, pattern] of [
   ["Aus-zu-Ein transition", /von Aus zu Ein/i],
   ["translated switched-off state", /\bausgeschaltet(?:e[rmns]?)?\b/i],

@@ -33,7 +33,7 @@ page lives outside the firmware and cannot include `main/www/style.css`, so its 
 4. **Terse, dense, technical.** Tabular numbers, short labels, no decorative copy.
 5. **Browser-detected language (de / en) by default, with a manual override.** This principle scopes
    to the **device UI** (`main/www/`) — the GitHub Pages installer of §5.5 is English-only by decision,
-   and `setup.html` is served before `app.js` exists. The UI **chrome** (system status block, card
+   and `setup.html` is served before the device UI script exists. The UI **chrome** (system status block, card
    titles, connection rows, schematic labels, the inspector, modals, banners, toasts) and the tap-to-expand
    value **descriptions** (§6) are rendered in German for a `de*` browser (`navigator.language`) and
    English otherwise — English is the fallback for every string. That browser guess is the **default**;
@@ -43,7 +43,7 @@ page lives outside the firmware and cannot include `main/www/style.css`, so its 
    (`config ui_lang`, `logic/ui_lang.hpp`) and reports it back on `/status.ui.lang`. Once the user
    picks a language it wins over the browser guess on **every** client that opens the dashboard, until
    they set it back to Browser; the browser applies it live (`setLang()` in
-   `app.js` re-runs `applyStaticI18n()`), no reload. The **firmware is still English-only** — the
+   `js/i18n.js` re-runs `applyStaticI18n()`), no reload. The **firmware is still English-only** — the
    heat-pump **value labels** arrive over `/values` as English X10A register names
    (`docs/REGISTERS.md`) and are shown verbatim in **both** languages (the German descriptions explain
    them); the firmware ships no localized strings. All UI copy lives in one `I18N` dictionary; dynamic
@@ -596,7 +596,7 @@ Body, ordered:
    **no** chart, for the same reason it gets no headline — there is no one reading it stands for.
    **A COMPUTED pill charts its own figure, never one of its inputs.** ΔT, heat output, electrical
    input and COP have no register, so the firmware buffers what each is computed FROM and the curve
-   is assembled in the browser (`DERIVED` in `www/app.js`) by the same expressions `liveData()` uses
+   is assembled in the browser (`DERIVED` in `www/js/history.js`) by the same expressions `liveData()` uses
    for the live number — one definition of each figure, rather than a firmware copy and a browser
    copy free to drift. Drawing the flow rate under a heat-output headline would be the §5.3-item-3
    substitution with a 24-hour axis in front of it, and that is precisely what is not done here: the
@@ -718,7 +718,7 @@ Body, ordered:
    `OK`, `HINWEIS`, `WARNUNG`, `PRÜFT`, `NUR MESSWERT`, `EXPERIMENTELL` or
    `NICHT VERFÜGBAR`; its short expander carries evidence progress, basis and limits. Observation-only
    and experimental rows must never be promoted to `OK`. A threshold
-   decided in `app.js` would be a second, ungated definition of the same rule.
+   decided in `js/schematic.js` would be a second, ungated definition of the same rule.
    **The badge summarizes evidence, not plant health.** Its text distinguishes an active/device or
    documented-limit finding, a heuristic/experimental hint, incomplete collection and unavailable
    inputs from “no finding in the evaluated X10A data”. It never says “healthy” or “all clear”.
@@ -780,7 +780,7 @@ Body, ordered:
      (trailing chevron affordance, like the ESP32 card's Hardware row); tapping it slides open a short description
      beneath the row — what the reading means and, where useful, what is normal vs worth a look. The
      text is keyed to the value **label** by a first-match-wins pattern table (`DESCRIPTIONS` in
-     `app.js`), the same label-pattern technique the schematic/grouping already use, so one entry serves
+     `js/descriptions.js`), the same label-pattern technique the schematic/grouping already use, so one entry serves
      every profile's spelling of a quantity; a label that matches nothing stays a plain row — unless
      the firmware keeps a **trend** for it, which opens the same panel on its own (below).
      **The schematic inspector (§5.3 item 3) reads this same table**, so a quantity is explained
@@ -933,7 +933,7 @@ is exactly what a user would want to see move.
   modal overlay pattern every other decision uses (§5.1). Deliberate and deliberately isolated: it
   is a single yes/no with **no fields**, and the overlay machinery exists to host *inputs* — adding a
   fourth modal for one boolean would cost more UI surface than it buys. It is the **only**
-  `confirm()`/`alert()` in `app.js`; if a second one is ever wanted, that is the signal to build the
+  `confirm()`/`alert()` in the device UI fragments; if a second one is ever wanted, that is the signal to build the
   overlay properly instead of spreading native dialogs.
 - **What "up to date" can also mean.** When no manifest is reachable — none has been published yet,
   or the two `CONFIG_DAIKIN_OTA_*` URLs point somewhere empty — a check legitimately
@@ -996,7 +996,7 @@ block butted against the round CTA and steps cards below.
   **one dashboard** — there is no "Setup" screen, no model picker and no RX/TX step to send people to
   (§5.2, §5.3).
 - **English only — deliberately, not by omission.** The de/en browser detection of §1 stops at the
-  device UI: it is an `app.js` mechanism, and this page ships no `I18N` dictionary and no script
+  device UI: it is a `js/i18n.js` mechanism, and this page ships no `I18N` dictionary and no script
   beyond the PR-banner check. The divergence from the dashboard is **not** a gap to close — do not
   add a translation layer here to make the two consistent.
 
@@ -1356,7 +1356,9 @@ The design needs these additions to the firmware (all small, tracked as follow-u
 
 ## 11. Build / delivery
 
-Unchanged pipeline: `www/index.html` (markup + `//@@INLINE` markers) + `www/style.css` + `www/app.js`
-spliced by `inline_assets.cmake` into one gzipped page embedded in the firmware; `setup.html` gzipped
-separately for the captive portal. The SPA is view-switched client-side from `/status`; no routing,
-no external assets (CSP-clean, offline-capable on the device).
+Pipeline: `www/index.html` (markup + `//@@INLINE` markers) + `www/style.css` + the ordered classic-
+script fragments in `www/app.sources`, spliced by `inline_assets.cmake` into one gzipped page embedded
+in the firmware; `setup.html` is gzipped separately for the captive portal. The fragments remain one
+lexical scope and add neither browser requests nor a package-manager dependency. The SPA is view-
+switched client-side from `/status`; no routing, no external assets (CSP-clean, offline-capable on
+the device).

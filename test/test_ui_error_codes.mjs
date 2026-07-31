@@ -4,24 +4,23 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
-const app = fs.readFileSync(new URL("../main/www/app.js", import.meta.url), "utf8");
+const descriptionsSource = readAppFragments(["descriptions.js"]);
 const header = fs.readFileSync(new URL("../main/logic/error_codes.hpp", import.meta.url), "utf8");
 
-function span(src, start, end) {
-  const from = src.indexOf(start);
-  assert.notEqual(from, -1, `missing production source marker: ${start}`);
-  const to = src.indexOf(end, from);
-  assert.notEqual(to, -1, `missing production source marker: ${end}`);
-  return src.slice(from, to);
-}
-
-const tableSource = span(app, "const DAIKIN_FAULT_CODES = Object.freeze([", "\n\nconst DESCRIPTIONS");
-const tableContext = Object.create(null);
+const tableContext = {
+  LANG: "en",
+  esc: (value) => String(value)
+    .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;").replaceAll("'", "&#39;"),
+  t: () => "Normal:",
+};
 vm.createContext(tableContext);
-vm.runInContext(tableSource + "\nthis.__codes = DAIKIN_FAULT_CODES;", tableContext,
-  { filename: "main/www/app.js" });
-const uiCodes = Array.from(tableContext.__codes, (entry) => ({
+vm.runInContext(descriptionsSource + "\nthis.__ui = { codes: DAIKIN_FAULT_CODES," +
+  " render: faultCodeDetailHtml, setLang: (lang) => { LANG = lang; } };", tableContext,
+  { filename: "main/www/app.sources" });
+const uiCodes = Array.from(tableContext.__ui.codes, (entry) => ({
   code: entry.code, en: entry.en, de: entry.de,
 }));
 
@@ -37,30 +36,16 @@ for (const entry of uiCodes) {
   assert.ok(entry.de?.trim(), `${entry.code} needs a short German meaning`);
 }
 
-assert.doesNotMatch(app, /Der Daikin-Fehlercode \(z\. B\. U4, H3\)/,
+assert.doesNotMatch(descriptionsSource, /Der Daikin-Fehlercode \(z\. B\. U4, H3\)/,
   "the generic placeholder paragraph must not return");
-assert.match(app, /\{ re: \/error code\|fault code\/i, faultCode: true,/,
+assert.match(descriptionsSource, /\{ re: \/error code\|fault code\/i, faultCode: true,/,
   "X10A error-code rows must opt into current-code lookup");
-assert.match(app, /re: \/\^unit abnormality code\$\/i, faultCode: true,/,
+assert.match(descriptionsSource, /re: \/\^unit abnormality code\$\/i, faultCode: true,/,
   "HomeHub error-code rows must opt into current-code lookup");
 
-const rendererSource =
-  span(app, "function faultCodeDetailHtml(currentValue) {", "\n// ── 24-hour trend");
 function render(lang, currentValue) {
-  const context = {
-    LANG: lang,
-    DAIKIN_FAULT_CODES: uiCodes,
-    esc: (value) => String(value)
-      .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;").replaceAll("'", "&#39;"),
-    descParaHtml: (html) => `<div class="vdesc-p">${html}</div>`,
-    descNoteHtml: () => "",
-    t: () => "Normal:",
-  };
-  vm.createContext(context);
-  vm.runInContext(rendererSource + "\nthis.__render = faultCodeDetailHtml;", context,
-    { filename: "main/www/app.js" });
-  return context.__render(currentValue);
+  tableContext.__ui.setLang(lang);
+  return tableContext.__ui.render(currentValue);
 }
 
 for (const [lang, meaningKey] of [["en", "en"], ["de", "de"]]) {

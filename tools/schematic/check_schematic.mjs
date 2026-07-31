@@ -1,5 +1,5 @@
 // Structural / geometric / editorial audit of the DASHBOARD SCHEMATIC — the inline SVG in
-// main/www/index.html, its CSS in main/www/style.css and its bindings in main/www/app.js.
+// main/www/index.html, its CSS in main/www/style.css and its bindings in main/www/app.sources.
 //
 // ── What this gates, and why nothing else does ───────────────────────────────────────────────────
 // The drawing is the dashboard's whole "what is the plant doing right now" answer (DESIGN.md §5.3),
@@ -41,17 +41,18 @@
 // new element in the right place, is the German copy right — this stays quiet and the /schematic-review
 // skill (the judgement half) answers it. A gate that guesses teaches people to ignore it.
 //
-// Usage:  node tools/schematic/check_schematic.mjs [--html <index.html>] [--app <app.js>]
+// Usage:  node tools/schematic/check_schematic.mjs [--html <index.html>] [--app <app.sources|app.js>]
 //                                                  [--css <style.css>] [--def <def-dir>]
 //                                                  [--exceptions <file>] [-v]
 // Exit:   0 = clean, 1 = findings, 2 = usage / parse / vacuity error.
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import { readAppSource } from '../ui/read_app_source.mjs';
 
 // ── arguments ────────────────────────────────────────────────────────────────────────────────────
 let HTML = 'main/www/index.html';
-let APP = 'main/www/app.js';
+let APP = 'main/www/app.sources';
 let CSS = 'main/www/style.css';
 let DEF = 'main/def';
 let EXC = 'tools/schematic/audit_exceptions.txt';
@@ -262,8 +263,10 @@ for (const r of cssRules) {
 }
 const rotorIds = [...fillBoxIds].filter((i) => rotatedIds.has(i)).sort();
 
-// ── 3. app.js: the bindings, EVALUATED ───────────────────────────────────────────────────────────
-const appSrc = read(APP);
+// ── 3. app.sources: the bindings, EVALUATED ──────────────────────────────────────────────────────
+let appSrc;
+try { appSrc = readAppSource(APP); }
+catch (e) { die(2, e.message); }
 function evalTable(open, close, brace, what, extraGlobals = {}) {
   const n = appSrc.split(open).length - 1;
   if (n !== 1) die(2, `'${open}' must appear exactly once in ${APP} (found ${n})`);
@@ -298,7 +301,7 @@ const DESCRIPTIONS = evalTable('const DESCRIPTIONS = [', '\n];', '[', 'DESCRIPTI
 if (!INSPECT || typeof INSPECT !== 'object' || Object.keys(INSPECT).length === 0) die(2, 'INSPECT evaluated empty — refusing to pass vacuously');
 if (!I18N || !I18N.en || !I18N.de) die(2, 'I18N did not evaluate to an {en, de} pair');
 
-// Every "svXxx" string literal in app.js: the ids the app WRITES. Nothing else in this codebase is
+// Every "svXxx" string literal in the assembled UI: the ids the app WRITES. Nothing else here is
 // named that way, which is what makes the two directions checkable at all.
 const appSvIds = new Set([...appSrc.matchAll(/["'`](sv[A-Z]\w*)["'`]/g)].map((m) => m[1]));
 
@@ -722,7 +725,7 @@ const inspKeys = new Set(hitTargets.map((n) => n.el.attrs['data-insp']));
 for (const n of hitTargets) {
   const k = n.el.attrs['data-insp'];
   if (!INSPECT[k]) add('S001', k, `hit target data-insp="${k}" has no INSPECT entry (${at(n)})`,
-    'tapping it opens an empty inspector — add the entry in app.js or drop the target');
+    'tapping it opens an empty inspector — add the entry in js/schematic.js or drop the target');
 }
 for (const k of Object.keys(INSPECT)) {
   if (!inspKeys.has(k)) add('S002', k, `INSPECT.${k} has no hit target in the SVG`,
@@ -730,7 +733,7 @@ for (const k of Object.keys(INSPECT)) {
 }
 // S003/S010: a `sample` is the CANONICAL register label an entry resolves its explainer through —
 // deliberately not the LIVE label, since a profile's own spelling could match a neighbouring
-// DESCRIPTIONS entry (app.js says so at the table head). Two different things can go wrong with it,
+// DESCRIPTIONS entry (js/descriptions.js says so at the table head). Two things can go wrong with it,
 // and they fail in different places, so they are separate findings:
 //   S003 — it names no register any profile carries. The inspector's SOURCE line falls back to this
 //          string when the row is absent, so it would print a register name that does not exist.
@@ -755,15 +758,15 @@ for (const [k, e] of Object.entries(INSPECT)) {
       'the inspector opens with an EMPTY explainer — no error, no log, just a blank panel');
   }
 }
-// S004/S005: the ids the SVG declares and the ids app.js writes are one contract, and a mismatch is
+// S004/S005: the ids the SVG declares and the assembled UI writes are one contract, and a mismatch is
 // SILENT in both directions (setTxt on a missing id is a no-op; an unwritten id keeps its "—").
 for (const [id, n] of byId) {
   if (!/^sv/.test(id)) continue;
-  if (!appSvIds.has(id)) add('S004', id, `SVG id="${id}" is never written by app.js (${at(n)})`,
+  if (!appSvIds.has(id)) add('S004', id, `SVG id="${id}" is never written by the UI (${at(n)})`,
     'it will keep its placeholder forever — no error, no log');
 }
 for (const id of [...appSvIds].sort()) {
-  if (!byId.has(id)) add('S005', id, `app.js writes "${id}" but the SVG has no such id`,
+  if (!byId.has(id)) add('S005', id, `the UI writes "${id}" but the SVG has no such id`,
     'setTxt() on a missing element is a silent no-op — the reading never appears');
 }
 // S006: static markup is localised from I18N at boot; a key missing from a dict prints the KEY.

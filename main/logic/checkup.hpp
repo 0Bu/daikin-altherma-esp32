@@ -10,7 +10,7 @@
 // refrigerant charge, sensor calibration, hydraulic cleanliness, air path or seasonal efficiency.
 //
 // Issue #208 asked for it. This header is the half that can be decided; main/checkup.cpp is the
-// storage, and main/www/app.js is the card. What #208 asked for and this deliberately does NOT do is
+// storage, and main/www/js/dashboard.js is the card. What #208 asked for and this deliberately does NOT do is
 // listed at the bottom of this comment — each omission is a claim the bus cannot support.
 //
 // NOT logic/health_gate.hpp, which shares only the word: that one decides whether a freshly-OTA'd

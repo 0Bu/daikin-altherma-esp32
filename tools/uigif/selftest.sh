@@ -24,9 +24,11 @@ fails=0
 # A copy holding only what the checker reads.
 seed() {
     local d="$WORK/$1"; rm -rf "$d"
-    mkdir -p "$d/main/www" "$d/tools/uigif" "$d/scripts" "$d/docs/media"
-    cp "$ROOT"/main/www/{index.html,style.css,app.js} "$d/main/www/"
+    mkdir -p "$d/main/www" "$d/tools/uigif" "$d/tools/ui" "$d/scripts" "$d/docs/media"
+    cp "$ROOT"/main/www/{index.html,style.css,app.sources} "$d/main/www/"
+    cp -R "$ROOT/main/www/js" "$d/main/www/js"
     cp "$ROOT"/tools/uigif/{check_ui_gif.mjs,scenes.js} "$d/tools/uigif/"
+    cp "$ROOT/tools/ui/read_app_source.mjs" "$d/tools/ui/"
     cp "$ROOT/tools/uigif/gif_stamp.txt" "$d/tools/uigif/"
     cp "$ROOT/scripts/record-dashboard-gif.sh" "$d/scripts/"
     cp "$ROOT/docs/media/dashboard.gif" "$d/docs/media/"
@@ -67,7 +69,7 @@ check "schematic markup moved" 1 U001 \
 check "schematic css changed"  1 U001 \
     perl -0pi -e 's/(svg \.sc-flow\.on \{[^}]*)/$1 stroke-width: 9px;/' main/www/style.css
 check "painting code changed"  1 U001 \
-    perl -0pi -e 's/(function renderLive\(\) \{)/$1\n  \/\* selftest \*\//' main/www/app.js
+    perl -0pi -e 's/(function renderLive\(\) \{)/$1\n  \/\* selftest \*\//' main/www/js/schematic.js
 check "scenes changed"         1 U001 \
     perl -0pi -e 's/(name: "Standby")/$1 \/* selftest *\//' tools/uigif/scenes.js
 check "recorder framing changed" 1 U001 \
@@ -94,7 +96,7 @@ check "stamp missing"          1 U005 rm tools/uigif/gif_stamp.txt
 # 5. Vacuity: if the checker can no longer FIND what it fingerprints, it must stop loudly (exit 2)
 #    rather than fingerprint nothing and call the tree clean.
 check "painting fn renamed"    2 -  \
-    perl -0pi -e 's/function renderLive\(/function renderLiveXX(/' main/www/app.js
+    perl -0pi -e 's/function renderLive\(/function renderLiveXX(/' main/www/js/schematic.js
 check "schematic css gone"     2 -  \
     perl -0pi -e 's/\.sc-flow/.zz-flow/g' main/www/style.css
 

@@ -59,7 +59,7 @@ patch_file() {
 run_case() {
     local name="$1" want_rc="$2" needle="$3" out rc
     if [ "$seed_ok" -ne 1 ]; then echo "  MISSED: $name — the defect was never seeded"; fail=$((fail + 1)); return; fi
-    out="$(node "$CHECK" --html "$WORK/main/www/index.html" --app "$WORK/main/www/app.js" \
+    out="$(node "$CHECK" --html "$WORK/main/www/index.html" --app "$WORK/main/www/app.sources" \
                          --css "$WORK/main/www/style.css" --def "$WORK/main/def" \
                          --exceptions "$WORK/exc.txt" 2>&1)"; rc=$?
     if [ "$rc" -ne "$want_rc" ]; then
@@ -263,7 +263,7 @@ PY
 printf 'E002 rwt\n' >> "$WORK/exc.txt"
 run_case "E002 suppression is refused" 2 "cannot be adjudicated"
 
-echo "== 8. an id the SVG declares and app.js never writes (and the reverse) =="
+echo "== 8. an id the SVG declares and the UI never writes (and the reverse) =="
 # A setTxt() on a missing id is a silent no-op and an unwritten id keeps its "—" forever: the
 # reading simply never appears, with nothing anywhere to say why.
 reset
@@ -279,7 +279,7 @@ echo "== 9. a data-i18n key with no German =="
 # The static markup is localised at boot from I18N; a key missing on the German side prints the
 # English string, or the raw key. One label in a German drawing, silently.
 reset
-patch_file "$WORK/main/www/app.js" <<'PY'
+patch_file "$WORK/main/www/js/i18n.js" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
 if '"schem.heating": "HEIZUNG"' not in s: sys.exit(1)
@@ -291,7 +291,7 @@ echo "== 10. an INSPECT sample that resolves to no explainer =="
 # `sample` is how a pill's copy is looked up in DESCRIPTIONS. A typo does not throw — the panel just
 # opens with an empty body, which is the D001 shape one layer over.
 reset
-patch_file "$WORK/main/www/app.js" <<'PY'
+patch_file "$WORK/main/www/js/schematic.js" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
 if 'sample: "Flow sensor"' not in s: sys.exit(1)

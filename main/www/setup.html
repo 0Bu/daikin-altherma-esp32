@@ -115,7 +115,7 @@ button:disabled { opacity: .6; cursor: default; box-shadow: none; }
     e.preventDefault();
     // NOT trimmed: leading/trailing spaces are valid SSID bytes, so the field is an opaque identifier
     // — trimming would submit a different network name than the one typed. Same rule as the dashboard
-    // WiFi form (app.js).
+    // WiFi form (js/settings.js).
     const ssid = el("ssid").value;
     const pass = el("pass").value;
     const bad = credError(ssid, pass);
