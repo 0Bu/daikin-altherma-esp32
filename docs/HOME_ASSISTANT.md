@@ -232,8 +232,11 @@ booleans**, so roughly 30 of an ERGA profile's ~99 values — every binary one �
 Assistant but never a graph. The same reasoning applies to `wifi_connected` / `mqtt_connected` /
 `bus_connected` on the heartbeat topic, which are `1`/`0` for the same reason.
 
-The device's own web UI and `GET /values` read the same poll cache and also
-report `1`/`0`. No published value surface uses the text `ON`/`OFF`.
+`GET /values` reports the same numeric `1`/`0` values from the poll cache. The web UI translates only
+at its visual boundary: ordinary flags become `ON`/`OFF`, the two documented valve selectors become
+their named paths/modes, and the two Smart-Grid contacts additionally form one named four-state row.
+The optional `/values.binary_semantic` metadata drives that presentation; it does not change the
+MQTT or Home Assistant contract.
 
 > **Upgrading:** these entities change domain (`sensor.…` → `binary_sensor.…`), so their recorder
 > history does not carry over and any automation or template referencing one by entity id needs its

@@ -61,6 +61,21 @@ assert.equal(de.sgBoostText(), "BOOST", "German boost marker is compact and sour
 
 assert.equal(en.displayValue({ value: "1", binary: true }), "ON", "a real binary 1 remains ON");
 assert.equal(de.displayValue({ value: "0", binary: true }), "OFF", "a real binary 0 remains OFF");
+const selectorStates = [
+  ["valve_dhw", "0", "Space heating", "Raumheizung"],
+  ["valve_dhw", "1", "DHW", "Brauchwarmwasser"],
+  ["valve_heat", "0", "Cooling", "Kühlen"],
+  ["valve_heat", "1", "Heating", "Heizen"],
+];
+for (const [semantic, value, english, german] of selectorStates) {
+  const row = { value, binary: true, binary_semantic: semantic };
+  assert.equal(en.displayValue(row), english, `${semantic}=${value} English named state`);
+  assert.equal(de.displayValue(row), german, `${semantic}=${value} German named state`);
+}
+assert.equal(de.displayValue({ value: "1", binary: true, binary_semantic: "smart_grid_contact_1" }),
+  "ON", "an individual Smart-Grid contact remains an electrical ON/OFF fact");
+assert.equal(en.displayValue({ value: "0", binary: true, binary_semantic: "unknown_future" }),
+  "OFF", "an unknown semantic id fails back to the ordinary flag contract");
 assert.equal(de.displayValue({ value: "1" }), "1", "an untyped numeric one is never guessed to be a switch");
 assert.equal(en.displayValue({ value: "Unknown (7)" }), "Unknown (7)");
 assert.equal(de.displayValue({ value: "Unknown (7)" }), "Unbekannt (7)");

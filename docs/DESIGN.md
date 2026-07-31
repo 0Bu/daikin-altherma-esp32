@@ -358,12 +358,17 @@ Body, ordered:
    active, the inspector adds an estimated **whole-unit** electrical input only if live CT-clamp
    currents are available, and labels it as a total rather than claiming it as heater power. Pump
    and defrost were already drawn (rotation + "PUMP n%", the ❄ pill + the reversed refrigerant loop).
-   This presentation applies to every converter-300..307 bit flag in both the value cards and
+   This presentation applies to every converter-300..307 bit row in both the value cards and
    schematic inspector: `/values` retains the shared numeric `1`/`0` value and adds the structural
-   marker `binary:true`; only the browser's final display boundary renders it as **ON/OFF**,
-   independently of the selected UI language. Labels and numeric magnitude are deliberately not
-   used for type inference — several binary rows do not say "ON/OFF", while ordinary counters and
-   stages can legitimately read zero or one. At that same display boundary, the browser removes
+   marker `binary:true`. The browser's final display boundary renders ordinary activity flags as
+   **ON/OFF**. A second optional structural marker, `binary_semantic`, names the exceptional selector
+   bits: the 3-way valve becomes **Space heating/DHW**, the 2-way valve **Cooling/Heating**, and the
+   two Smart-Grid contacts additionally form one four-state **Free running/Forced off/Recommended
+   on/Forced on** row. This metadata changes presentation only; API, MQTT, history and HA remain
+   numeric `0`/`1`. Labels and numeric magnitude are deliberately not used for type inference —
+   several binary rows do not say "ON/OFF", while ordinary counters and stages can legitimately
+   read zero or one. BSH remains ON/OFF because its catalog does not establish a different bit
+   polarity. At that same display boundary, the browser removes
    trailing catalog value legends such as `ON/OFF` and `On:…_Off:…` from visible reading names:
    `Space heating Operation ON/OFF` therefore reads `Space heating Operation` beside its **ON/OFF**
    value. The exact catalog label remains the identity used by `/values`, MQTT, history,

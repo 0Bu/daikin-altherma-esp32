@@ -538,9 +538,11 @@ IDF v6.0 extracted it from core — [`idf_component.yml`](../main/idf_component.
   — HA gets a real on/off entity, and a metrics consumer (which drops strings *and* bools) finally
   gets the ~30 binary rows per profile that used to be invisible to it. The poll cache, `/values`
   and its payloads, history and MQTT keep the common `1`/`0` representation; `/values` adds
-  `binary:true` so the web UI can present those exact rows as **ON/OFF** in every UI language
-  without guessing from a label or misreading an ordinary numeric zero/one as a switch. For a
-  consistent value list, the same UI boundary removes redundant trailing catalog legends such as
+  `binary:true` so the web UI can distinguish those exact rows without guessing from a label or
+  misreading an ordinary numeric zero/one as a switch. Ordinary flags remain **ON/OFF**; optional
+  structural `binary_semantic` metadata gives the two valve selectors named states and lets the two
+  Smart-Grid contact bits form one four-state UI row. Every published boundary remains numeric 0/1.
+  For a consistent value list, the same UI boundary removes redundant trailing catalog legends such as
   `ON/OFF` and `On:…_Off:…` from visible reading names; raw labels remain unchanged in APIs, MQTT,
   history identities, selectors and description matching. The
   pre-split `sensor` discovery config is actively deleted on upgrade

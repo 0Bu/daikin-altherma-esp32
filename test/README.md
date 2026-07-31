@@ -41,8 +41,11 @@ to escaped human-readable API prose.
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named
 HomeHub status in the EKRHH register map and the schematic renderer against every X10A operation
 mode. It pins the manufacturer terms, readable diagram headlines and consistent German model-card
-labels, unknown-value visibility, and the boundary between named enums, structural binary ON/OFF
-flags and ordinary numeric `0`/`1` values.
+labels, unknown-value visibility, and the boundary between named enums, ordinary binary ON/OFF
+flags, structurally named valve selectors and ordinary numeric `0`/`1` values.
+
+`node test/test_ui_source_matrix.mjs` additionally pins the complete two-contact X10A Smart-Grid
+truth table, its derived named row, and fail-closed handling of missing, malformed or stale contacts.
 
 `node test/test_ui_homehub_copy.mjs` audits all 27 curated HomeHub rows as one semantic contract:
 the register guide's English name, the German visual label, the matching bilingual explanation and

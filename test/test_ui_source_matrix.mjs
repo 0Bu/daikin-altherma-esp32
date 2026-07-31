@@ -107,6 +107,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [] }) {
   vm.runInContext(
     SOURCE + "\nthis.__api = { mbByConcept, mbTwin, mbFallbackFor, mbLive, mbBool, mbVal, stateOf," +
     " MB_PAIRS, MB_OFF_POWER, MB_OFF_SMART_GRID, mbPower, mbSmartGridMode, mbForInspect," +
+    " SMART_GRID_MODE_VALUE, x10aSmartGridModeFrom, x10aSmartGridMode, x10aSmartGridRow," +
     " sgModeText, sgRequestText, mbNoteHtml, inspCurRow, inspMember," +
     " inspMembers, pelMeasured, pelApproxText, PEL_INSPECT };",
     context, { filename: "main/www/app.js" });
@@ -116,6 +117,10 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [] }) {
 const LWT_X = X("Leaving water temp. before BUH (R1T)", "38.6", "leaving_water");
 const LWT_M = M(40, "Leaving water temperature PHE", "38.1", "leaving_water");
 const SG = (value) => M(56, "Smart Grid operation mode", String(value), null, { unit: "" });
+const X_SG = (contact, on) => ({
+  label: `SmartGridContact${contact}`, value: on ? "1" : "0", unit: "", reg: 0x60,
+  binary: true, binary_semantic: `smart_grid_contact_${contact}`,
+});
 
 // The README recording drives the same production parser. Keep its fake HomeHub on the real API
 // boundary (named enums), or the visual regression artefact will omit boost while these helper
@@ -129,6 +134,40 @@ const SG = (value) => M(56, "Smart Grid operation mode", String(value), null, { 
   { filename: "tools/uigif/scenes.js" });
   assert.equal(demoContext.__smartGrid(0).value, "Free running");
   assert.equal(demoContext.__smartGrid(2).value, "Recommended on");
+}
+
+// The two X10A contact bits are not two user-facing modes. Pin the documented truth table and the
+// one derived named row, including fail-closed behaviour when the snapshot is incomplete or stale.
+{
+  const expected = ["Free running", "Forced off", "Recommended on", "Forced on"];
+  const combinations = [
+    [false, false, 0], [false, true, 1], [true, false, 2], [true, true, 3],
+  ];
+  for (const [c1, c2, mode] of combinations) {
+    const values = [X_SG(1, c1), X_SG(2, c2)];
+    const c = ctx({ x10a: true, mbEnabled: false, mbConnected: false, values });
+    assert.equal(c.x10aSmartGridModeFrom(values), mode, `contact truth table -> mode ${mode}`);
+    assert.equal(c.x10aSmartGridMode(), mode, `live X10A snapshot -> mode ${mode}`);
+    const row = c.x10aSmartGridRow();
+    assert.equal(row?.value, expected[mode], `derived mode ${mode} keeps canonical enum text`);
+    assert.equal(row?.label, "Smart Grid operation mode");
+    assert.equal(row?.displayLabel, "values.sg_x10a_mode");
+    assert.equal(row?.key, "x10a:smart-grid-mode");
+  }
+
+  const missing = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
+                        values: [X_SG(1, true)] });
+  assert.equal(missing.x10aSmartGridMode(), null, "one contact cannot invent a four-state mode");
+  assert.equal(missing.x10aSmartGridRow(), null, "incomplete contact snapshot adds no row");
+
+  const malformed = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
+                          values: [X_SG(1, true), { ...X_SG(2, false), value: "2" }] });
+  assert.equal(malformed.x10aSmartGridMode(), null, "a malformed bit fails closed");
+
+  const stale = ctx({ x10a: false, mbEnabled: false, mbConnected: false,
+                      values: [X_SG(1, true), X_SG(2, false)] });
+  assert.equal(stale.x10aSmartGridMode(), null, "a retained X10A cache is not a live contact state");
+  assert.equal(stale.x10aSmartGridRow(), null, "stale contacts add no derived row");
 }
 
 // ── 1. Both live, numeric — the gateway is reachable as the second opinion ─────────────────────
@@ -444,4 +483,4 @@ const SG = (value) => M(56, "Smart Grid operation mode", String(value), null, { 
   assert.equal(byUnit.off, 57, "the unit-keyed lookup this replaced would have taken the limit");
 }
 
-console.log("UI source matrix: X10A/Modbus arbitration correct in all 18 states");
+console.log("UI source matrix: source arbitration and X10A Smart-Grid truth table correct");

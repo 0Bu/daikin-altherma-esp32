@@ -135,8 +135,9 @@ jobs:
 
       # HomeHub uses Int16 for both numbers and selectors; X10A exposes stable English tokens for
       # the current indoor operation mode. Execute both production display boundaries and pin every
-      # manufacturer enum plus every localised schematic headline in English and German.
-      - name: Test HomeHub enums and schematic operation modes
+      # manufacturer enum and localised schematic headline in English and German. Ordinary binary
+      # flags must stay ON/OFF while the two valve selectors render their named paths/modes.
+      - name: Test enums, schematic modes, and semantic binary states
         run: node test/test_ui_homehub_enums.mjs
 
       # Coverage cannot detect a semantically wrong first-match description. Pin every curated

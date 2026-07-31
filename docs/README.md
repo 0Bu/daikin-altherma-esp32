@@ -356,11 +356,16 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #        capacity_kw_iu — dropping only classes that contradict
                                    #        it — so the set matches the evidence the pick used.
                                    #        Narrowing is not resolving: ambiguous can stay true.
-GET  /values                       # decoded readings [{label,value,unit,reg,binary?,held?}] (last poll);
+GET  /values                       # decoded readings
+                                   #   [{label,value,unit,reg,binary?,binary_semantic?,held?}]
+                                   #   (last poll);
                                    #   reg = the X10A register page the row was decoded from;
                                    #   binary:true marks converter-300..307 bit flags. Their value
-                                   #   remains numeric text "1"/"0"; the web UI alone presents
-                                   #   ON/OFF in every UI language and omits redundant trailing
+                                   #   remains numeric text "1"/"0". For the two valve selectors,
+                                   #   binary_semantic names the structural meaning and the web UI
+                                   #   presents the selected path/mode; ordinary flags stay ON/OFF.
+                                   #   The two marked Smart-Grid contacts additionally produce one
+                                   #   combined four-state mode in the UI. It also omits redundant
                                    #   ON/OFF / On:…_Off:… legends from visible labels. Raw labels
                                    #   remain unchanged in this response.
                                    #   held:true marks a reading the outdoor unit is no longer
