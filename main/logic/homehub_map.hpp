@@ -88,7 +88,7 @@ inline constexpr size_t HOMEHUB_CONCEPT_COUNT =
 // shares its triple; the catalog test asserts both, plus the identity of the row it resolves to.
 //
 // NOT PAIRED, and this one is the interesting refusal:
-//   52 DHW operation  — X10A has no plain "is DHW running" flag. The nearest row is
+//   52 DHW normal operation — X10A has no plain "is DHW running" flag. The nearest row is
 //                       "Powerful DHW Operation. ON/OFF" (0x62/2 conv 304), which is the BOOST — a
 //                       different fact that reads OFF through an ordinary hot-water cycle. Pairing
 //                       them would put "off" beside a tank actively being charged, which is worse
@@ -103,8 +103,8 @@ struct HomeHubState {
 };
 inline constexpr HomeHubState HOMEHUB_STATES[] = {
     { 30, 0x60, 12, 301, "pump_running" },  // Circulation pump running ↔ "Water pump operation"
-    { 37, 0x60, 12, 306, "valve_dhw"    },  // 3-way valve to DHW       ↔ "3way valve(On:DHW_Off:Space)"
-    { 53, 0x62,  2, 303, "space_op"     },  // Space operation          ↔ "Space heating Operation ON/OFF"
+    { 37, 0x60, 12, 306, "valve_dhw"    },  // 3-way valve              ↔ "3way valve(On:DHW_Off:Space)"
+    { 53, 0x62,  2, 303, "space_op"     },  // Space h/c normal op.     ↔ "Space heating Operation ON/OFF"
 };
 inline constexpr size_t HOMEHUB_STATE_COUNT = sizeof(HOMEHUB_STATES) / sizeof(HOMEHUB_STATES[0]);
 

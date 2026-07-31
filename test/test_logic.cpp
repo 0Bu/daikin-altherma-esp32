@@ -2875,7 +2875,7 @@ static void test_homehub() {
             if (HOMEHUB_REGS[i].offset == off) return &HOMEHUB_REGS[i];
         return nullptr;
     };
-    char buf[16];
+    char buf[32];
     MbValue v;
     // Temperature (Temp16 = signed /100 °C) — return water at offset 42, read from an input register.
     const HomeHubReg* t = find(42);
@@ -2897,10 +2897,55 @@ static void test_homehub() {
     const HomeHubReg* ec = find(22);
     CHECK(ec && ec->type == MbType::Text16);
     CHECK(homehub_format(*ec, 0x5538, buf, sizeof(buf)) && std::string(buf) == "U8");
-    // An Int16 mode (no extra scale) prints as a bare integer, read back from a HOLDING register.
+    // Dimensionless Int16 does NOT mean numeric. EKRHH 4P744838-1E §9.2 uses the same wire type
+    // for one real number (the error sub-code), five binary flags and four named enums. Pin the
+    // complete classification so another selector cannot reach the UI as "Mode 1" again.
+    int dimensionless = 0, statuses = 0;
+    for (int i = 0; i < HOMEHUB_REG_COUNT; i++) {
+        const HomeHubReg& r = HOMEHUB_REGS[i];
+        if (r.type != MbType::Int16 || r.scale != 1 || r.unit[0] != '\0') continue;
+        dimensionless++;
+        if (r.kind == HomeHubValueKind::Number) CHECK(r.offset == 23);  // actual numeric sub-code
+        else statuses++;
+    }
+    CHECK(dimensionless == 10 && statuses == 9);
+
+    // Holding 3: 0 Auto, 1 Heating, 2 Cooling. Heating-only units return the unavailable sentinel,
+    // already covered above, rather than inventing another mode.
     const HomeHubReg* om = find(3);
-    CHECK(om && om->type == MbType::Int16 && om->scale == 1 && om->space == MbFunc::ReadHolding);
-    CHECK(homehub_format(*om, 1, buf, sizeof(buf)) && std::string(buf) == "1");
+    CHECK(om && om->kind == HomeHubValueKind::OperationMode && om->space == MbFunc::ReadHolding);
+    CHECK(homehub_format(*om, 0, buf, sizeof(buf)) && std::string(buf) == "Auto");
+    CHECK(homehub_format(*om, 1, buf, sizeof(buf)) && std::string(buf) == "Heating");
+    CHECK(homehub_format(*om, 2, buf, sizeof(buf)) && std::string(buf) == "Cooling");
+    CHECK(homehub_format(*om, 7, buf, sizeof(buf)) && std::string(buf) == "Unknown (7)");
+
+    const HomeHubReg* abnormal = find(21);
+    CHECK(abnormal && abnormal->kind == HomeHubValueKind::UnitAbnormality &&
+          !homehub_is_binary(*abnormal));
+    CHECK(homehub_format(*abnormal, 0, buf, sizeof(buf)) && std::string(buf) == "No error");
+    CHECK(homehub_format(*abnormal, 1, buf, sizeof(buf)) && std::string(buf) == "Fault");
+    CHECK(homehub_format(*abnormal, 2, buf, sizeof(buf)) && std::string(buf) == "Warning");
+
+    const HomeHubReg* valve = find(37);
+    CHECK(valve && valve->kind == HomeHubValueKind::ThreeWayValve && !homehub_is_binary(*valve));
+    CHECK(homehub_format(*valve, 0, buf, sizeof(buf)) && std::string(buf) == "Space heating");
+    CHECK(homehub_format(*valve, 1, buf, sizeof(buf)) && std::string(buf) == "DHW");
+
+    const HomeHubReg* sg = find(56);
+    CHECK(sg && sg->kind == HomeHubValueKind::SmartGridMode && !homehub_is_binary(*sg));
+    const char* sg_names[] = {"Free running", "Forced off", "Recommended on", "Forced on"};
+    for (int i = 0; i < 4; i++) {
+        CHECK(homehub_format(*sg, static_cast<uint16_t>(i), buf, sizeof(buf)) &&
+              std::string(buf) == sg_names[i]);
+    }
+
+    // Real flags keep numeric 1/0 at the API boundary and are marked structurally for ON/OFF UI.
+    for (uint16_t off : {30, 52, 53, 4, 9}) {
+        const HomeHubReg* flag = find(off);
+        CHECK(flag && homehub_is_binary(*flag));
+        CHECK(homehub_format(*flag, 0, buf, sizeof(buf)) && std::string(buf) == "0");
+        CHECK(homehub_format(*flag, 1, buf, sizeof(buf)) && std::string(buf) == "1");
+    }
     // The 1-based EKRHH offset maps to the 0-based wire PDU address.
     uint16_t pdu = 0xFFFF;
     CHECK(mb_pdu_address(t->offset, pdu) && pdu == static_cast<uint16_t>(t->offset - 1));

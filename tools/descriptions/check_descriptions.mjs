@@ -143,11 +143,10 @@ const ROW_OPEN_RE = /^\s*\{\s*0x[0-9A-Fa-f]+\s*,/gm;
 // this audit — the one guard whose whole subject is "can the user find out what this value IS" —
 // stayed green. A scraper that matches nothing reports full coverage of nothing, which is the exact
 // failure the note above ROW_RE warns about, arriving through a format it did not know existed.
-// The label is the last STRING in the row; an optional trailing `, true` marks a two-state register
-// (def/homehub.hpp `bin`) and must not stop the match — when that field was added this regex matched
-// 20 of 27 rows and the parsed-vs-opens cross-check below correctly refused to run rather than
-// reporting coverage of a catalog it had only partly read.
-const HH_ROW_RE = /\{\s*\d+\s*,\s*MbFunc::[^}]*?"((?:[^"\\]|\\.)*)"\s*(?:,\s*\w+\s*)?\}/g;
+// The label is the last STRING in the row; an optional trailing HomeHubValueKind classifies a
+// dimensionless Int16 as number, binary flag or enum and must not stop the match. The parsed-vs-opens
+// cross-check below refuses to run if this row shape drifts again.
+const HH_ROW_RE = /\{\s*\d+\s*,\s*MbFunc::[^}]*?"((?:[^"\\]|\\.)*)"\s*(?:,\s*HomeHubValueKind::\w+\s*)?\}/g;
 const HH_OPEN_RE = /^\s*\{\s*\d+\s*,\s*MbFunc::/gm;
 
 function loadLabels(dir) {

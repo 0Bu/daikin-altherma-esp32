@@ -550,6 +550,14 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vdesc-p { margin-top: 11px; }
 .vdesc-p:first-child { margin-top: 0; }
 .vdesc-n { color: var(--fg); font-weight: 600; }
+/* One current Daikin code and its meaning. The 63-entry lookup stays internal; the explainer shows
+   the fact the user asked about instead of turning a single row into a service-manual index. */
+.fault-code-current {
+  display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 10px; align-items: baseline;
+}
+.fault-code-current code {
+  color: var(--fg); font: inherit; font-weight: 700; font-variant-numeric: tabular-nums;
+}
 /* ── 24-hour trend inside the explainer panel ───────────────────────────────
    A sparkline for the rows the firmware buffers (/status.history.rows). It sits BELOW the explainer
    text and is separated by a rule, so the panel reads text-then-evidence rather than as a chart with

@@ -659,12 +659,14 @@ static void mb_poll_once() {
         // conv only TYPES the value downstream (conv_is_binary for /values, published_kind for MQTT).
         // No X10A decode runs here — homehub_format already produced the string — so these are
         // BORROWED kinds, not claims that a HomeHub register is an X10A one: 204 for the Text16
-        // error code, and a bit-flag id for a register the catalog marks two-state (`bin`), which is
+        // error code, and a bit-flag id for a register the catalog marks Binary, which is
         // what makes /values emit `"binary":true` so the browser renders ON/OFF instead of a bare 1.
-        // Without it the panel showed X10A "OFF" beside Modbus "1" — one fact, two spellings.
+        // Named enums have already been formatted to the EKRHH status text at the common HomeHub
+        // boundary and deliberately carry no binary marker. Without this distinction the panel
+        // showed X10A "OFF" beside Modbus "1", and Operation mode as an unexplained integer.
         // Safe to borrow: these rows never reach the MQTT bridge (current_grouped reads the X10A
         // cache alone), so the id types the JSON and nothing else.
-        cv.conv = (r.type == MbType::Text16) ? 204 : r.bin ? 300 : 0;
+        cv.conv = (r.type == MbType::Text16) ? 204 : def::homehub_is_binary(r) ? 300 : 0;
         cv.held = false;                           // no held-over concept on this link
         char buf[24];
         if (def::homehub_format(r, raw, buf, sizeof(buf))) cv.value = buf;
