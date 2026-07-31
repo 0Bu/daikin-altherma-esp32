@@ -367,6 +367,12 @@ function wireRestOfApp() {
   // field error instead of a round-trip; the device validates them again (logic/config_model.hpp).
   for (const id of ["hhHost", "hhPort", "hhUnit"])
     $(id).addEventListener("input", () => { $(id).classList.remove("invalid"); $("hhError").hidden = true; });
+  $("hhMode").addEventListener("change", () => {
+    syncHomehubMode();
+    $("hhHost").classList.remove("invalid");
+    $("hhError").hidden = true;
+    if ($("hhMode").value === "manual") $("hhHost").focus();
+  });
   $("hhCancel").onclick = closeHomehub;
   $("homehubBackdrop").onclick = closeHomehub;
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("homehubModal").hidden) closeHomehub(); });
@@ -378,13 +384,16 @@ function wireRestOfApp() {
       $("hhError").hidden = false;
       toast(msg, "err");
     };
-    const host = $("hhHost").value.trim();          // empty = hand it back to mDNS auto-discovery
+    const mode = $("hhMode").value;
+    const host = $("hhHost").value.trim();
     const port = +($("hhPort").value.trim() || 502);
     const unit = +($("hhUnit").value.trim() || 1);
+    if (mode === "manual" && !host) return bad("hhHost", t("hh.err_host"));
     if (!Number.isInteger(port) || port < 1 || port > 65535) return bad("hhPort", t("hh.err_port"));
     if (!Number.isInteger(unit) || unit < 1 || unit > 247)   return bad("hhUnit", t("hh.err_unit"));
     setBusy("hhBtn", true);
-    const ok = await applyLive({ mb_host: host, mb_port: port, mb_unit_id: unit }, t("hh.saved"));
+    const ok = await applyLive({ mb_mode: mode, mb_host: mode === "manual" ? host : "",
+                                 mb_port: port, mb_unit_id: unit }, t("hh.saved"));
     setBusy("hhBtn", false);
     if (!ok) return;
     closeHomehub();

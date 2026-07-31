@@ -98,15 +98,15 @@ http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /di
                       see "Push vs. poll" below for why that sentence is load-bearing
 http_config.cpp     → POST /set_wifi, /set_mqtt, /set_syslog, /set_ntp, /set_hp, /set_board,
                       /set_ota, /set_lang, /detect. /set_hp also carries the TRANSPORT + the
-                      HomeHub Modbus params (mb_host/mb_port/mb_unit_id,
+                      HomeHub Modbus params (mb_mode/mb_host/mb_port/mb_unit_id,
                       actuation_enabled), applied live
 hp_modbus.cpp/.hpp  → THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT source beside X10A, not an
-                      alternative to it: its own task, cache and link state, gated on
-                      config().a configured address. The two fail for unrelated reasons, so either can be
-                      down while the other reports; a device with no HomeHub runs no task at all.
-                      A lwIP socket around the pure logic/modbus.hpp framing + mDNS discovery
-                      (browse _http._tcp, filter the homehub-* hostname — this firmware answers that
-                      same browse). READ-ONLY: no write function, by design (docs/MODBUS_PROTOCOL.md)
+                      alternative to it: its own task, cache and link state. Auto (default) runs a
+                      bounded per-boot mDNS search; Manual uses the entered address; Off alone skips
+                      future searches. A miss retires the task for that boot, so an absent HomeHub
+                      has no steady-state task. The lwIP client wraps logic/modbus.hpp framing and
+                      filters homehub-* from up to 64 _http._tcp responders. READ-ONLY by design
+                      (docs/MODBUS_PROTOCOL.md)
 def/homehub.hpp     → the HomeHub register map (input + holding), the Modbus counterpart of the X10A
                       def/ profiles; decoded via logic/modbus.hpp's Temp16/Pow16/Int16/Text16 codecs
 http_ota.cpp        → /ota/check|update|status
@@ -643,8 +643,8 @@ host-testable core is unusually large and valuable, because the risky parts are 
   cannot close its own string and inject a second key), and **refuses rather than truncates** an
   oversized value — a truncated `1.10.0` → `1.1` is a well-formed version that is ordered wrong.
 - `logic/modbus.hpp` — Modbus TCP framing (MBAP, no CRC; FC03/04/06/16 build + response/exception
-  parse) and the HomeHub `Temp16`/`Pow16`/`Int16`/`Text16` codecs + `homehub-*` mDNS filter. Host-
-  tested core for the **planned** firmware-exclusive HomeHub link (issue #32) — not yet wired in.
+  parse) and the HomeHub `Temp16`/`Pow16`/`Int16`/`Text16` codecs + exact `homehub-*` mDNS filter.
+  Host-tested core used by the read-only, independent HomeHub task in `hp_modbus.cpp`.
 - `logic/http_body.hpp` — request-body reassembly for `http_read_body`. A POST body is a TCP stream:
   `httpd_req_recv` returns what has arrived, and the IDF's own docs note a large body "may" take
   several calls. Reading once and calling it the whole body truncated any body split across segments,

@@ -95,21 +95,28 @@ function openNtp() {
 function closeNtp() { $("ntpModal").hidden = true; }
 
 // ── HomeHub / Modbus TCP (edit modal) ──────────────────────────────────────
-// Host, port and unit id of the Daikin HomeHub. The host field is prefilled from what the device is
-// ACTUALLY using (/status.modbus.host — the configured host, or the IPv4 mDNS discovered), so leaving
-// it as-is re-saves what is on screen. Clearing it hands the hub back to auto-discovery.
+// Auto / Manual / Off is user intent, distinct from whether this boot's bounded search succeeded.
+// The host field still shows the endpoint actually in use; in Auto that makes the discovered IPv4
+// visible and a switch to Manual can retain it, but only Manual makes the field editable.
 function fillHomehub() {
   const mb = S.status?.modbus || {};
+  $("hhMode").value = mb.mode || (mb.host ? "manual" : "auto");
   $("hhHost").value = mb.host || "";
   $("hhPort").value = mb.port || 502;
   $("hhUnit").value = mb.unit_id || 1;
+  syncHomehubMode();
+}
+function syncHomehubMode() {
+  const manual = $("hhMode").value === "manual";
+  $("hhHost").disabled = !manual;
+  $("hhHostField").classList.toggle("field-disabled", !manual);
 }
 function openHomehub() {
   fillHomehub();
   for (const id of ["hhHost", "hhPort", "hhUnit"]) $(id).classList.remove("invalid");
   $("hhError").hidden = true;
   $("homehubModal").hidden = false;
-  $("hhHost").focus();
+  ($("hhMode").value === "manual" ? $("hhHost") : $("hhMode")).focus();
 }
 function closeHomehub() { $("homehubModal").hidden = true; }
 

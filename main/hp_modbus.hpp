@@ -8,9 +8,8 @@
 // so coupling them would let either failure mask the other. Pulled service cable: the HomeHub keeps
 // reporting. LAN down: X10A keeps polling. Neither notices the other.
 //
-// It also costs NOTHING when absent: the task is created only when a gateway address is known
-// (config_modbus_host) or the one-shot search has yet to run, so a
-// device with no HomeHub has no task, no socket, no mDNS traffic and no stack.
+// It has no STEADY-STATE cost when absent: the task exists while a gateway address is active or Auto
+// still owes this boot its bounded search set. A miss retires it; Off skips it entirely.
 //
 // READ-ONLY, and here that is a choice rather than a limitation of the wire: unlike X10A — which has
 // no write command at all — Modbus would allow one. There is no write function in this header, no
@@ -24,10 +23,10 @@
 namespace daik {
 
 // Link diagnostics for /status.modbus + the MQTT heartbeat. Read-only: no write counters, because
-// there is no write path. `enabled` distinguishes "off" from "on but not connected" — the UI shows
-// nothing at all for the first and a state for the second.
+// there is no write path. `enabled` is runtime task existence; persistent Auto/Manual/Off intent is
+// reported separately from Config by /status.
 struct ModbusStatus {
-    bool        enabled     = false;   // is this stack running at all? (a gateway address is known)
+    bool        enabled     = false;   // task active (bounded Auto search or an address being polled)
     bool        connected   = false;   // current socket has committed at least one fresh poll cycle
     bool        discovering = false;   // mDNS browse in progress, nothing resolved yet
     std::string host;                  // configured or discovered IPv4 address ("" = none yet)

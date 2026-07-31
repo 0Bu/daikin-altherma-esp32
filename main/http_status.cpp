@@ -250,19 +250,20 @@ void http_append_status_json(std::string& j, bool redact) {
     j += "\"profile\":{\"id\":" + jstr(c.profile) + "},";
 
     // The HomeHub Modbus stack — a SECOND, INDEPENDENT source, never an alternative to the X10A link
-    // reported above (docs/MODBUS_PROTOCOL.md). `enabled` distinguishes "no HomeHub on this
-    // installation" from "configured but not connected": the UI shows a configurable inactive row
-    // for the first and a live connection state for the second. `host` is the configured address or
-    // the IPv4 selected by mDNS, so
+    // reported above (docs/MODBUS_PROTOCOL.md). `enabled` reports whether its runtime task exists;
+    // `mode` is the distinct, persistent user intent (Auto/Manual/Off), so a bounded Auto miss can
+    // stop its task without becoming indistinguishable from an explicit Off choice. `host` is the
+    // configured address or the IPv4 selected by mDNS during this boot, so
     // the card shows what discovery FOUND rather than the empty string it was asked with — redacted
     // like the other reporter-identifying values. No write counters: the stack has no write path.
     // Successive += with bare literals — the httpd-stack rule the rest of this builder follows.
     const ModbusStatus mb = mb_status();
     j += "\"modbus\":{\"enabled\":";  j += mb.enabled ? "true" : "false";
+    j += ",\"mode\":";                 j += jstr(homehub_mode_name(c));
     j += ",\"connected\":";            j += mb.connected ? "true" : "false";
     j += ",\"discovering\":";          j += mb.discovering ? "true" : "false";
-    // `searched` = the one-shot mDNS search has RUN. With no address that is the whole difference
-    // between "no gateway on this LAN, and we will not look again" and "about to look".
+    // `searched` = this boot's bounded Auto search has completed. It resets on reboot or when Auto
+    // is explicitly selected again; unlike mode:"off", it is never persistent user intent.
     j += ",\"searched\":";             j += c.mb_searched ? "true" : "false";
     // The ADDRESS comes from the CONFIG (manual else discovered), the STATE from the live link.
     // Reading the address off the link status was wrong before the first connect ever succeeded:

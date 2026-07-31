@@ -383,14 +383,53 @@ static esp_err_t set_hp(httpd_req_t* req) {
     // a wiring-only patch (rx/tx) leaves the HomeHub untouched and the pin picker's
     // {profile:"auto",rx,tx} POST cannot switch anything on. This is a SECOND source, not an
     // alternative to X10A: enabling it starts a separate task, it does not stop the X10A poll.
-    // mb_host is updated only when the key is present, so an unrelated patch cannot clobber the
-    // empty string that means auto-discovery. Ranges are enforced by validate() below.
+    // HomeHub user intent is explicit: Auto searches, Manual uses mb_host, Off never searches. The
+    // new mb_mode field is unambiguous; the legacy host-only API remains intuitive (non-empty =
+    // Manual, empty = Off). Selecting Auto clears this boot's prior outcome and starts a fresh
+    // bounded search. Omitted fields still leave this independent stack untouched.
     cJSON* hostItem = cJSON_GetObjectItem(j, "mb_host");
-    if (cJSON_IsString(hostItem)) c.mb_host = hostItem->valuestring;   // "" = fall back to the search
+    cJSON* modeItem = cJSON_GetObjectItem(j, "mb_mode");
+    const bool host_sent = cJSON_IsString(hostItem);
+    const bool mode_sent = cJSON_IsString(modeItem);
+    bool reset_mb_runtime = false;
+    if (host_sent) c.mb_host = hostItem->valuestring;
+    bool bad_mb_mode = false;
+    if (mode_sent) {
+        const std::string mode = modeItem->valuestring;
+        if (mode == "auto") {
+            reset_mb_runtime = true;
+            c.homehub_enabled = true;
+            c.mb_host.clear();
+            c.mb_dhost.clear();
+            c.mb_searched = false;
+        } else if (mode == "manual") {
+            c.homehub_enabled = true;
+            bad_mb_mode = c.mb_host.empty();
+        } else if (mode == "off") {
+            reset_mb_runtime = true;
+            c.homehub_enabled = false;
+            c.mb_host.clear();
+            c.mb_dhost.clear();
+            c.mb_searched = false;
+        } else {
+            bad_mb_mode = true;
+        }
+    } else if (host_sent) {
+        // Backward-compatible host-only contract. Clearing is an intentional removal, not Auto;
+        // clients that want discovery send mb_mode:"auto" explicitly.
+        c.homehub_enabled = !c.mb_host.empty();
+        if (!c.homehub_enabled) {
+            reset_mb_runtime = true;
+            c.mb_dhost.clear();
+            c.mb_searched = false;
+        }
+    }
     c.mb_port           = ji(j, "mb_port", c.mb_port);
     c.mb_unit_id        = ji(j, "mb_unit_id", c.mb_unit_id);
     c.actuation_enabled = jb(j, "actuation_enabled", c.actuation_enabled);
     cJSON_Delete(j);
+    if (bad_mb_mode)
+        return send_err(req, "400 Bad Request", "mb_mode must be auto, manual with a host, or off");
 
     std::string reason;
     // Pass the real Kconfig-derived octal-SPI + status-LED facts (config.cpp) so validate() rejects a
@@ -401,7 +440,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
     // This route OWNS the pin cache, unlike the service routes whose link writes are only
     // best-effort maintenance. Require all three cache keys; on failure RAM stays untouched, so
     // there is no new link to hand the poll engine and reconfigure must be skipped.
-    if (!config_save(c, /*require_link=*/true))
+    if (!config_save(c, /*require_link=*/true, reset_mb_runtime))
         return send_err(req, "500 Internal Server Error", "config write failed");
     if (reset_checkup) {
         checkup_reset();

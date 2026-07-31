@@ -63,9 +63,19 @@ Config config() {
     return g_cfg;
 }
 
-static void publish(const Config& c) {   // swap g_cfg under the lock
+static void publish(const Config& c, bool preserve_modbus_runtime = false) {
     Lock lk(g_mtx);
-    g_cfg = c;
+    if (!preserve_modbus_runtime) {
+        g_cfg = c;
+        return;
+    }
+    // Discovery may complete while an HTTP/WiFi writer is off-lock in NVS. Those writers own
+    // persistent settings, not this session's network observation; publishing their stale snapshot
+    // must not erase a just-found HomeHub and trigger another bounded browse.
+    Config next = c;
+    next.mb_dhost    = g_cfg.mb_dhost;
+    next.mb_searched = g_cfg.mb_searched;
+    g_cfg = std::move(next);
 }
 
 void config_load() {
@@ -113,10 +123,11 @@ void config_load() {
         // absent means "auto" (keep letting the browser decide), which the struct default already
         // says — like the channel above, and unlike the board block, there is no Kconfig fallback.
         if (b.has_lang) c.ui_lang = ui_lang_from_int(b.ui_lang);
-        // The HomeHub Modbus stack (blob v5). has_modbus == false is a pre-v5 device, from the era
-        // with no HomeHub stack at all — the struct defaults already say so (like has_ota and
-        // has_lang, no Kconfig fallback needed).
+        // The HomeHub Modbus stack (blob v5; explicit user intent in v6). Pre-v6 data deliberately
+        // migrates enabled: only v6 can prove the user selected Off, while a transient old discovery
+        // miss must become Auto and try again after the upgrade.
         if (b.has_modbus) {
+            c.homehub_enabled   = b.homehub_enabled;
             c.mb_host           = b.mb_host;
             c.mb_port           = b.mb_port;
             c.mb_unit_id        = b.mb_unit_id;
@@ -207,12 +218,11 @@ void config_load() {
         c.tx_pin = CONFIG_DAIKIN_TX_PIN;
     }
     c.proto        = parse_protocol(nvs_get_str("proto", CONFIG_DAIKIN_PROTOCOL));
-    // The one-shot mDNS search result — separate self-healing keys beside the link cache above, and
-    // for the same reason: their writer is the MODBUS task, while the credential blob's is httpd.
-    // mb_searched is what makes the search one-shot ACROSS REBOOTS; without persisting it, a LAN with
-    // no gateway would be browsed again on every single boot forever.
-    c.mb_dhost    = nvs_get_str("mb_dhost", "");
-    c.mb_searched = nvs_get_i32("mb_seen", 0) != 0;
+    // Discovery outcome is intentionally runtime-only. Old builds persisted mb_dhost/mb_seen, but a
+    // missed multicast reply is not an Off choice and a DHCP address is not durable configuration;
+    // ignore those legacy keys. Auto performs one bounded search set per boot, then stays quiet.
+    c.mb_dhost.clear();
+    c.mb_searched = false;
     c.profile      = "auto";
     c.fp_pages        = 0;
     c.fp_kw_tenths    = -1;
@@ -236,7 +246,7 @@ static bool put_i32(const char* key, int32_t val) {
     return e == ESP_OK;
 }
 
-bool config_save(const Config& c, bool require_link) {
+bool config_save(const Config& c, bool require_link, bool reset_modbus_runtime) {
     // Persist user settings (WiFi + MQTT + syslog + NTP) and the X10A link cache (RX/TX pins +
     // protocol). The MODEL is intentionally NOT written — profile + fingerprint (fp_*) are re-derived
     // every boot.
@@ -266,7 +276,8 @@ bool config_save(const Config& c, bool require_link) {
     // The UI language likewise: one writer (POST /set_lang, httpd), one persistent user choice.
     b.ui_lang = ui_lang_to_int(c.ui_lang);
     // The HomeHub Modbus stack rides the same blob: one writer (POST /set_hp, httpd), like the
-    // channel, the language and the board block. See logic/config_store.hpp (blob v5).
+    // channel, the language and the board block. See logic/config_store.hpp (blob v6).
+    b.homehub_enabled   = c.homehub_enabled;
     b.mb_host           = c.mb_host;
     b.mb_port           = c.mb_port;
     b.mb_unit_id        = c.mb_unit_id;
@@ -305,7 +316,7 @@ bool config_save(const Config& c, bool require_link) {
         // /set_hp changed none of its fields; for every other route that blob is the requested save.)
         return false;
     }
-    publish(c);
+    publish(c, /*preserve_modbus_runtime=*/!reset_modbus_runtime);
     return true;
 }
 
@@ -332,23 +343,14 @@ bool config_save_link(int rx_pin, int tx_pin, Protocol proto) {
     return ok;
 }
 
-// Record the one-shot mDNS search's outcome. MODBUS-TASK ONLY, and narrow for the same reason
-// config_save_link is: that task must never write a whole Config back, or it would revert a
-// /set_wifi or /set_mqtt that landed while it was off-lock on the network.
-//
-// `host` is the resolved IPv4 address, or empty when nothing answered — and that empty case is worth
-// persisting, because it is
-// what stops the next boot from searching again. RAM is patched even if the NVS write fails: the
-// result is true either way for THIS boot, and a lost write only costs one more search next time.
-bool config_save_modbus_found(const std::string& host) {
-    bool ok = true;
-    ok &= put_str("mb_dhost", host);
-    ok &= put_i32("mb_seen", 1);
+// Record this boot's bounded mDNS search outcome in RAM only. MODBUS-TASK ONLY and narrow: a network
+// observation must never persist a negative result as though the user selected Off, nor turn a DHCP
+// lease into durable configuration. The latch still prevents repeated browsing during this boot.
+void config_set_modbus_found(const std::string& host) {
     {
         Lock lk(g_mtx);
         apply_modbus_found(g_cfg, host);
     }
-    return ok;
 }
 
 // RAM-only by design: the model is re-detected every boot, so there is nothing to persist and no
@@ -364,7 +366,7 @@ void config_set_model(std::string profile, uint32_t fp_pages, int fp_kw_tenths, 
 // profile->"auto" + clears the fingerprint: acceptable as a whole-struct write because it runs on the
 // httpd task, which OWNS the credential fields (serialized against the other /set_* handlers), so it
 // cannot revert them. The poll task must NOT use this — it uses the field-owned config_set_model.
-void config_set_runtime(const Config& c) { publish(c); }
+void config_set_runtime(const Config& c) { publish(c, /*preserve_modbus_runtime=*/true); }
 
 // Kconfig-derived hardware facts (see config.hpp). Kept here — the one file that already owns the
 // CONFIG_* → link mapping — so board_pins' octal_spi/reserved inputs have a single source of truth

@@ -7,9 +7,9 @@
 // failure closes it so the next cycle reconnects — the self-healing shape hp_comm.cpp uses for the
 // UART, applied to a socket.
 //
-// The task exists only while a gateway ADDRESS is known: no address means no task, no socket, no mDNS
-// traffic and no stack. That is what makes this second source free for the devices that do not have
-// one, and it is why the X10A poll task could give its 4 KB back (hp_poll.cpp).
+// The task exists while Auto performs its bounded boot search or while an address is active. A miss
+// or explicit Off retires it, so a device without a HomeHub has no steady-state task/socket/traffic;
+// that is why the X10A poll task could give its 4 KB back (hp_poll.cpp).
 #include "hp_modbus.hpp"
 #include "config.hpp"
 #include "def/homehub.hpp"
@@ -43,6 +43,13 @@ namespace daik {
 // bounds the reassembly of the entire ADU, which is the part the Task Watchdog cares about (the poll
 // task resets once per register, so one read must stay well inside the 20 s TWDT budget).
 static constexpr int MB_READ_TIMEOUT_MS = 1500;
+// The observed LAN advertises well over 20 HTTP services, while the old browse capped its result
+// list at 20. Since mDNS ordering is not stable, that could omit a perfectly healthy HomeHub. Keep
+// enough headroom for a busy home LAN and repeat a missed multicast query a few times, but stop the
+// Auto search within one bounded boot-time window.
+static constexpr int MB_DISCOVERY_MAX_RESULTS = 64;
+static constexpr int MB_DISCOVERY_ATTEMPTS    = 3;
+static constexpr int MB_DISCOVERY_RETRY_MS    = 1000;
 
 // ── Link state (read by /status + heartbeat) ──────────────────────────────────────────────────────
 static SemaphoreHandle_t s_mtx = nullptr;   // guards s_status; created in mb_init()
@@ -64,9 +71,10 @@ static SemaphoreHandle_t s_cache_mtx = nullptr;
 static std::vector<CachedValue> s_cache;
 static uint32_t s_cache_generation = 0;      // guarded by s_cache_mtx; session that committed s_cache
 
-// Task handle + the connect backoff. A failed connect with no host configured is a ~3 s blocking
-// mDNS browse, so retrying every cycle would leave this task permanently blocked and the LAN
-// permanently browsed. Reuses the X10A sweep's host-tested policy rather than inventing a second one.
+// Task handle + the connect backoff. s_task is read/written under s_mtx so a /set_hp that lands while
+// the old task is retiring cannot race it into either losing a requested Auto retry or starting two
+// tasks. Auto discovery is a separate bounded boot-time sequence; normal connect failures reuse the
+// X10A sweep's host-tested policy rather than browsing mDNS every cycle.
 static TaskHandle_t  s_task = nullptr;
 static DetectBackoff s_backoff;
 static int64_t       s_next_try_us = 0;
@@ -153,6 +161,17 @@ static void status_recovered() {
     }
     if (recovered) diag_printf("modbus: communication recovered\n");
 }
+
+// A new user-selected target or Auto search is a new attempt, so an old failure is no longer the
+// CURRENT state while that attempt is in flight. Unlike status_recovered(), this does not log a
+// recovery before any successful communication has happened.
+static void status_clear_error() {
+    Lock lk(s_mtx);
+    s_status.last_error_code.clear();
+    s_status.last_error.clear();
+    s_status.last_error_detail   = -1;
+    s_status.last_error_register = 0;
+}
 // A successful TCP connect starts a new SESSION, but does not make the old cache live. The link only
 // becomes `connected` after this session has committed its first poll below. Reserving generation
 // zero makes a pre-first-poll cache impossible to mistake for current even on the first connection.
@@ -199,14 +218,17 @@ static bool resolve_host(const std::string& host, int port, sockaddr_in& out) {
 // mDNS-discover a HomeHub: browse _http._tcp (the service EKRHH advertises, guide §2.5), keep the
 // first responder whose hostname is "homehub-*" (logic/modbus.hpp is_homehub_hostname — this browse
 // also hears OUR OWN _http advert and unrelated HTTP devices, so the filter is mandatory), and take
-// its first IPv4. `found` returns that numeric address for persistence and /status — discovery uses
+// its first IPv4. `found` returns that numeric address for this session and /status — discovery uses
 // the mDNS name to IDENTIFY the HomeHub, but the editable Host field must show the resolved IP.
 static bool discover_homehub(std::string& found) {
     mdns_result_t* results = nullptr;
-    if (mdns_query_ptr("_http", "_tcp", 3000, 20, &results) != ESP_OK) return false;
+    if (mdns_query_ptr("_http", "_tcp", 3000, MB_DISCOVERY_MAX_RESULTS, &results) != ESP_OK)
+        return false;
     bool ok = false;
     int  matches = 0;
+    int  responders = 0;
     for (mdns_result_t* r = results; r != nullptr; r = r->next) {
+        responders++;
         const char* name = r->hostname ? r->hostname : r->instance_name;
         if (name == nullptr || !is_homehub_hostname(name)) continue;
         matches++;
@@ -236,6 +258,9 @@ static bool discover_homehub(std::string& found) {
     // resolved there is no address to print, and "using " followed by nothing reads like a bug.
     if (ok && matches > 1) diag_printf("modbus: %d HomeHubs discovered via mDNS — using %s\n",
                                        matches, found.c_str());
+    if (!ok && responders >= MB_DISCOVERY_MAX_RESULTS)
+        diag_printf("modbus: mDNS browse reached its %d-result safety limit without a HomeHub\n",
+                    MB_DISCOVERY_MAX_RESULTS);
     return ok;
 }
 
@@ -329,23 +354,33 @@ static void mb_disconnect() {
     status_target(std::string(), 0, 0, false);
 }
 
-// The ONE-SHOT search. Called at most once per boot, from the task below, and ONLY when nothing is
-// known — then the caller persists the outcome, INCLUDING the empty one, which is what stops the
-// next boot searching again. Deliberately NOT reachable from mb_ensure_connected: a connect path
-// that can browse browses on every failed cycle, i.e. a permanent multicast sweep on a LAN that has
-// no gateway, which is precisely the case the search has already answered.
-static bool mb_discover_once(std::string& found) {
+// One bounded Auto search set. A single browse is too brittle during WiFi/mDNS startup, but discovery
+// must still stop on a LAN without a gateway. The completed-negative latch is RAM-only, so the next
+// boot tries again unless the user explicitly selected Off.
+static bool mb_discover_bounded(std::string& found) {
+    status_clear_error();
     status_target(std::string(), 0, 0, /*discovering=*/true);
-    const bool ok = discover_homehub(found);
-    esp_task_wdt_reset();                      // the browse blocks for up to ~3 s
-    if (!ok) status_error(std::string("mdns_not_found"),
-                          std::string("no HomeHub found via mDNS — not searching again"));
-    return ok;
+    for (int attempt = 1; attempt <= MB_DISCOVERY_ATTEMPTS; attempt++) {
+        found.clear();
+        if (discover_homehub(found)) {
+            esp_task_wdt_reset();              // each browse blocks for up to ~3 s
+            return true;
+        }
+        esp_task_wdt_reset();
+        if (attempt < MB_DISCOVERY_ATTEMPTS) {
+            diag_printf("modbus: mDNS search attempt %d/%d found no HomeHub — retrying\n",
+                        attempt, MB_DISCOVERY_ATTEMPTS);
+            vTaskDelay(pdMS_TO_TICKS(MB_DISCOVERY_RETRY_MS));
+        }
+    }
+    status_error(std::string("mdns_not_found"),
+                 std::string("no HomeHub found via mDNS after 3 attempts — "
+                             "Auto search stopped for this boot"));
+    return false;
 }
 
-static bool mb_ensure_connected(const std::string& host, int port, int unit_id,
-                                bool migrate_discovered_name) {
-    // No address, nothing to dial. There is no browse here — see mb_discover_once.
+static bool mb_ensure_connected(const std::string& host, int port, int unit_id) {
+    // No address, nothing to dial. There is no browse here — see mb_discover_bounded.
     if (host.empty()) {
         status_error(std::string("no_address"), std::string("no HomeHub address configured"));
         return false;
@@ -357,6 +392,7 @@ static bool mb_ensure_connected(const std::string& host, int port, int unit_id,
     close_sock();
     // Announce the target before the blocking resolve, so /status shows what the device is
     // attempting rather than going silent for seconds.
+    status_clear_error();
     status_target(host, port, unit_id, /*discovering=*/false);
 
     sockaddr_in addr{};
@@ -366,19 +402,6 @@ static bool mb_ensure_connected(const std::string& host, int port, int unit_id,
         status_error(std::string("resolve_failed"),
                      std::string("HomeHub address could not be resolved"));
         return false;
-    }
-    if (migrate_discovered_name) {
-        // Pre-change firmware persisted homehub-<serial>.local in mb_dhost. Resolve it once, then
-        // replace ONLY that task-owned discovery value with the same numeric contract new searches
-        // use. A manual mb_host never sets migrate_discovered_name and is left byte-for-byte intact.
-        esp_ip4_addr_t ip{};
-        ip.addr = addr.sin_addr.s_addr;
-        std::string ipv4 = mb_ipv4_string(IP2STR(&ip));
-        if (!ipv4.empty()) {
-            resolved.swap(ipv4);
-            config_save_modbus_found(resolved);
-            diag_printf("modbus: migrated discovered gateway hostname to IPv4\n");
-        }
     }
     int connect_err = 0;
     const int sock = connect_socket(addr, 2000, connect_err);
@@ -581,8 +604,7 @@ static std::string failure_message(const MbFailure& f) {
 // poll_once(): sized reserve up front, everything staged in locals, one non-allocating commit.
 static void mb_poll_once() {
     const Config& c = config();
-    if (!mb_ensure_connected(config_modbus_host(c), c.mb_port, c.mb_unit_id,
-                             config_modbus_discovery_needs_ipv4(c))) {
+    if (!mb_ensure_connected(config_modbus_host(c), c.mb_port, c.mb_unit_id)) {
         // THE CACHE GOES WITH THE LINK. Keeping it was a real defect: /values kept serving the last
         // good readings, the browser had no way to tell they were minutes old, and it went on
         // printing them as the live second opinion — complete with a computed "difference" against a
@@ -721,6 +743,8 @@ static void mb_poll_once() {
     }
 }
 
+static void mb_task_start_if_enabled();
+
 // The task. Self-guarded like every other allocating FreeRTOS loop here (CLAUDE.md → Memory
 // constraints): an escaping std::bad_alloc would reach std::terminate and reboot the board over a
 // SECOND, optional data source — the one failure this stack must never cause the other one.
@@ -729,32 +753,20 @@ static void mb_poll_once() {
 // rather than a claim: the task, its 6 KB stack and the socket all go away.
 static void mb_task(void*) {
     esp_task_wdt_add(NULL);
-    // The ONE-SHOT mDNS search, before the first read attempt and at most once in this task's life.
-    // It runs only when NOTHING is known — no typed address, no recorded discovery, never searched —
-    // and its outcome is persisted either way. Persisting the EMPTY outcome is the load-bearing half:
-    // it is what tells every later boot that this LAN has no gateway, so the browse never happens
-    // again. A HomeHub added afterwards is a manual address entry, which is a deliberate act and
-    // needs no search.
-    try {
-        if (config_modbus_should_search(config())) {
-            std::string found;
-            const bool ok = mb_discover_once(found);
-            // TWO statements, not one with a substituted tail, and the split is a REDACTION
-            // requirement rather than a style choice. `found` is the hub's LAN IP — the same value
-            // /status?redact=1 withholds as modbus.host — so this success line needs a rule in
-            // logic/redact.hpp. The failure is already emitted by status_error() without an address,
-            // and therefore needs no redaction rule or duplicate line here.
-            if (ok) diag_printf("modbus: one-shot mDNS search found gateway %s\n", found.c_str());
-            config_save_modbus_found(ok ? found : std::string());
-        }
-    } catch (...) {
-        diag_printf("modbus: one-shot search skipped (oom?)\n");
-    }
     for (;;) {
         esp_task_wdt_reset();
         try {
-            // The ADDRESS is the switch: no address, no stack. Re-read every cycle so clearing it in
-            // the UI retires the task live, exactly as the old enable flag did.
+            // Auto can be selected while this task is already polling a manual address, so discovery
+            // belongs inside the loop. A completed miss latches only in RAM and causes the empty-host
+            // exit below; selecting Auto again clears that latch through POST /set_hp.
+            if (config_modbus_should_search(config())) {
+                std::string found;
+                const bool ok = mb_discover_bounded(found);
+                // The success line contains a private LAN IP and is covered by logic/redact.hpp.
+                if (ok) diag_printf("modbus: bounded mDNS search found gateway %s\n", found.c_str());
+                config_set_modbus_found(ok ? found : std::string());
+            }
+            // Off, or Auto after its bounded miss: no address means no task/socket after this point.
             if (config_modbus_host(config()).empty()) break;
             if (esp_timer_get_time() >= s_next_try_us) mb_poll_once();
         } catch (const std::exception& e) {
@@ -765,6 +777,9 @@ static void mb_task(void*) {
         } catch (...) {
             diag_printf("modbus: cycle skipped (oom?)\n");
         }
+        // An allocation failure before Auto could commit its completed latch must not turn into an
+        // unbounded once-per-second browse loop. The next boot or explicit Auto selection may retry.
+        if (config_modbus_host(config()).empty() && config_modbus_should_search(config())) break;
         vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
     }
     mb_disconnect();
@@ -772,15 +787,22 @@ static void mb_task(void*) {
         Lock lk(s_mtx);
         s_status.enabled = false;
         s_status.values  = 0;
+        s_task           = nullptr;
     }
     {
         Lock lk(s_cache_mtx);
         s_cache.clear();
         s_cache_generation = 0;
     }
-    diag_printf("modbus: no gateway address — stack stopped\n");
+    if (config().homehub_enabled)
+        diag_printf("modbus: Auto search has no gateway address — stack stopped for this boot\n");
+    else
+        diag_printf("modbus: HomeHub disabled by configuration — stack stopped\n");
     esp_task_wdt_delete(NULL);
-    s_task = nullptr;
+    // /set_hp may have selected Manual or reset Auto after this task decided to retire but before it
+    // cleared s_task. Its mb_reconfigure() correctly saw a task still alive and did not duplicate it;
+    // now re-check the latest intent so that request is not lost in the teardown window.
+    mb_task_start_if_enabled();
     vTaskDelete(nullptr);
 }
 
@@ -789,17 +811,20 @@ static void mb_task(void*) {
 // the socket calls directly on its own stack, and syslog.cpp has already measured that same chain at
 // 6144 with the note "4096 is too thin for that call chain". Its own locals are small (a 260 B ADU,
 // a 23-row vector) — nothing like the /status builder that drove hp_poll's sizing.
-// Start the task when a gateway is KNOWN — or when the one-shot search has never run, since the
-// search itself lives in the task (it blocks for ~3 s, and this is the task that may block).
+// Start only when the user intent is not Off and either an address is known or Auto still owes this
+// boot its bounded search set.
 static void mb_task_start_if_enabled() {
     const Config& c = config();
-    if (s_task || (config_modbus_host(c).empty() && !config_modbus_should_search(c))) return;
-    { Lock lk(s_mtx); s_status.enabled = true; }
+    if (!c.homehub_enabled ||
+        (config_modbus_host(c).empty() && !config_modbus_should_search(c))) return;
+    Lock lk(s_mtx);
+    if (s_task) return;
+    s_status.enabled = true;
     s_backoff.silent = 0;
     s_next_try_us    = 0;
     if (xTaskCreate(mb_task, "hp_modbus", 6144, nullptr, 4, &s_task) != pdPASS) {
         s_task = nullptr;
-        { Lock lk(s_mtx); s_status.enabled = false; }
+        s_status.enabled = false;
         diag_printf("modbus: task alloc failed — HomeHub readings unavailable this boot\n");
     }
 }
