@@ -698,7 +698,7 @@ Body, ordered:
    item 6.
    The **ESP32** card that used to sit above it is in Settings now (§5.6): this card is the *unit*,
    that one is the *board*.
-5. **X10A observation card** — "X10A observation · up to 24 h", styled exactly like the Model card, directly
+5. **X10A observation card** — "X10A check · 24 h", styled exactly like the Model card, directly
    below it and above the value groups. It answers the third question the dashboard has, after *what
    is it doing now* (the system card) and *what did this one reading do today* (a value row's trend):
    **what did X10A actually establish, and was anything worth following up?** It is deliberately not
@@ -706,22 +706,25 @@ Body, ordered:
    hydraulic cleanliness, air path, mechanical condition or seasonal efficiency. Seven rows come
    from `/status.health`, in firmware reading order: unit fault, compressor starts, defrost cycles,
    lowest water pressure, lowest steady flow, BUH/BSH runtime and protection-retry changes.
-   **Every row names its evidence class.** `device` is the unit's own fault state;
+   **Every row carries an evidence class in the API and explains it in its expander.** `device` is the unit's own fault state;
    `manufacturer` is the documented water-pressure boundary; `heuristic` marks cycling/defrost
    patterns that can only be hints; `observation` is a measured fact with no universal judgement;
    and `experimental` marks retry-counter semantics that are not yet manufacturer-validated. The
-   firmware classifies and supplies the evidence; the browser renders words and colour. A threshold
+   firmware classifies and supplies the evidence. The collapsed row shows the reading and one of
+   `OK`, `HINWEIS`, `WARNUNG`, `PRÜFT`, `NUR MESSWERT`, `EXPERIMENTELL` or
+   `NICHT VERFÜGBAR`; its short expander carries evidence progress, basis and limits. Observation-only
+   and experimental rows must never be promoted to `OK`. A threshold
    decided in `app.js` would be a second, ungated definition of the same rule.
    **The badge summarizes evidence, not plant health.** Its text distinguishes an active/device or
    documented-limit finding, a heuristic/experimental hint, incomplete collection and unavailable
    inputs from “no finding in the evaluated X10A data”. It never says “healthy” or “all clear”.
    `available`, `assessable` and `evaluated` keep three different denominators visible:
    reportable rows, rows with a bounded judgement, and judgements whose evidence gate is complete.
-   Thus four evaluated judgements and seven supported rows read as `4/4 bewertet · 7 unterstützt`,
-   not as seven affirmative checks. Flow/heater observations, count-only defrost and a stable
+   Thus four completed judgements read as `4/4 bewertet`; the broader count of reportable values is
+   not a health score and is omitted from the headline. Flow/heater observations, count-only defrost and a stable
    experimental retry counter cannot manufacture a green summary; an actual retry increase may still
    raise `info`.
-   **The window and each signal's evidence are stated, not implied.** Storage is 23 completed
+   **The window and each signal's evidence are stated in the expander, not crowded into every row.** Storage is 23 completed
    one-hour buckets plus the pending hour, so it never represents more than 24 hours; the trade-off
    is that it may contain slightly less than a day at a bucket boundary. `full_span` uses the actual
    first/latest monotonic samples rather than the number of crossed hour boundaries. The ring is
@@ -737,7 +740,7 @@ Body, ordered:
    fractional duration telescopes instead of being floored away on every interval; continuity gaps
    still use the exact microsecond delta. Event states are sampled once per completed sweep, not at a
    guaranteed 1 Hz, so a pulse entirely between sweeps remains outside the evidence.
-   **A check the active profile cannot run says “—”.** That is `unavailable`, not a permissive zero,
+   **A check the active profile cannot run says `NICHT VERFÜGBAR`.** That is `unavailable`, not a permissive zero,
    and does not count as evaluated. Only 27 of 44 profiles carry a compressor-speed witness; defrost
    count remains observable without it, while the compressor-runtime share stays unavailable and
    cannot count as assessed. `paired_count` separately reports transitions with compressor evidence

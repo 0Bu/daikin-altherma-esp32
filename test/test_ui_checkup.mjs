@@ -53,7 +53,9 @@ for (const key of [
 assert.match(statusSource, /if \(v < 0\) \{ j \+= "null"; return; \}/,
              "unestablished check numbers must serialize as null");
 assert.match(style, /\.vrow-val\.checkup-val\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;[^}]*text-align:\s*right;/s,
-             "long checkup evidence must wrap inside narrow cards");
+             "checkup readings and verdicts must wrap inside narrow cards");
+assert.match(style, /\.vrow-val\.dim\s*\{[^}]*color:\s*var\(--muted\)/s,
+             "CHECKING/observation-only rows need a distinct neutral visual state");
 assert.match(checkupSource, /if \(apply_reset_locked\(\)\) return;/,
              "record must discard the sample that consumes an identity reset");
 assert.match(checkupSource, /if \(s_reset_requested\.load\(\)\) return logic::CheckupReport\{\};/,
@@ -67,9 +69,10 @@ assert.match(configSource, /static esp_err_t do_detect[\s\S]*?checkup_reset\(\);
 
 const context = {
   S: { status: null },
+  descNoteHtml: (lead, text) => `<detail label="${lead}">${text}</detail>`,
   // Keep the renderer's semantic inputs visible in a compact deterministic string; no DOM is needed.
   modelDescRow: (id, label, value, opt = {}) =>
-    `<row id="${id}" tone="${opt.cls || ""}" label="${label}">${value}</row>`,
+    `<row id="${id}" tone="${opt.cls || ""}" label="${label}"><value>${value}</value>${opt.bodyPrefix || ""}</row>`,
   vcard: (title, rows, badge, cls = "") =>
     `<card title="${title}" tone="${cls}" badge="${badge}">${rows}</card>`,
 };
@@ -86,6 +89,9 @@ vm.runInContext(
    ${span("const CHECKUP_ROW = {", "// ── Connections tile")}
    this.__checkup = {
      value: checkupValue,
+     metric: checkupMetricValue,
+     status: checkupStatusText,
+     detail: checkupDetailHtml,
      card: checkupCardHtml,
      text: (lang, key, ...args) => { __lang = lang; return __t(key, ...args); },
      setLang: (lang) => { __lang = lang; },
@@ -95,44 +101,50 @@ vm.runInContext(
 );
 const ui = sandbox.__checkup;
 
-// The headline and every possible aggregate badge name the evidence boundary in both languages.
-assert.match(ui.text("en", "card.checkup"), /X10A.*observ/i);
-assert.match(ui.text("de", "card.checkup"), /X10A.*Betriebsbeobachtung/i);
-assert.equal(ui.text("en", "check.all_ok"), "No finding in observed X10A data");
-assert.equal(ui.text("de", "check.all_ok"), "Keine Auffälligkeit in beobachteten X10A-Daten");
-assert.equal(ui.text("en", "check.attention"), "Fault / documented limit");
-assert.equal(ui.text("de", "check.attention"), "Störung / dokumentierte Grenze");
-assert.equal(ui.text("en", "check.notice"), "Operating note");
-assert.equal(ui.text("de", "check.notice"), "Betriebshinweis");
+// The title keeps the bounded 24-hour scope without consuming most of a narrow card's first line.
+assert.equal(ui.text("en", "card.checkup"), "X10A check · 24 h");
+assert.equal(ui.text("de", "card.checkup"), "X10A-Check · 24 h");
+for (const [key, en, de] of [
+  ["ok", "OK", "OK"],
+  ["info", "NOTE", "HINWEIS"],
+  ["warn", "WARNING", "WARNUNG"],
+  ["collecting", "CHECKING", "PRÜFT"],
+  ["observation", "MEASURED ONLY", "NUR MESSWERT"],
+  ["experimental", "EXPERIMENTAL", "EXPERIMENTELL"],
+  ["unavailable", "NOT AVAILABLE", "NICHT VERFÜGBAR"],
+]) {
+  assert.equal(ui.text("en", `check.status.${key}`), en);
+  assert.equal(ui.text("de", `check.status.${key}`), de);
+}
 
 // BUH and BSH are independent channels. An unsupported/unreadable side is null, not a plausible zero,
 // while a real observed zero remains visible.
 ui.setLang("en");
 assert.equal(
   ui.value({ id: "heater", verdict: "ok", buh_min: 7, bsh_min: null }),
-  "7 min",
+  "7 min · OK",
   "a missing BSH channel must not be rendered as zero minutes",
 );
 assert.equal(
   ui.value({ id: "heater", verdict: "ok", buh_min: null, bsh_min: 9 }),
-  "tank 9 min",
+  "tank 9 min · OK",
   "a missing BUH channel must not suppress an observed BSH value",
 );
 assert.equal(
   ui.value({ id: "heater", verdict: "ok", buh_min: 0, bsh_min: 0 }),
-  "0 min · tank 0 min",
+  "0 min · tank 0 min · OK",
   "observed zeroes are facts and must not be mistaken for missing channels",
 );
 ui.setLang("de");
-assert.equal(ui.value({ id: "heater", verdict: "ok", buh_min: null, bsh_min: 9 }), "Speicher 9 min");
+assert.equal(ui.value({ id: "heater", verdict: "ok", buh_min: null, bsh_min: 9 }), "Speicher 9 min · OK");
 assert.equal(
   ui.value({ id: "heater", verdict: "ok", buh_s: 1, bsh_s: 59 }),
-  "<1 min · Speicher <1 min",
+  "<1 min · Speicher <1 min · OK",
   "positive sub-minute heater runtime must not collapse into a factual zero",
 );
 assert.equal(
   ui.value({ id: "heater", verdict: "ok", buh_s: 0, bsh_s: 60 }),
-  "0 min · Speicher 1 min",
+  "0 min · Speicher 1 min · OK",
   "an exact observed zero remains distinct from a positive runtime",
 );
 
@@ -145,14 +157,13 @@ for (const payload of [
   { id: "heater", verdict: "collecting", buh_s: null, bsh_s: null },
 ]) {
   const value = ui.value({ observed_s: 0, required_s: 3600, ...payload });
-  const primaryValue = value.split(" · ", 1)[0];
-  assert.match(primaryValue, /collecting…/);
-  assert.doesNotMatch(primaryValue, /\b0 (?:starts|cycles|min)\b/,
+  assert.equal(value, "CHECKING");
+  assert.doesNotMatch(value, /\b0 (?:starts|cycles)\b/,
                       "unreadable supported data must not render as an observed zero");
 }
 
-// Collecting copy uses the row's own observed/required clocks. Two rows with the same card-level
-// coverage deliberately render different evidence, proving global covered_s is not borrowed.
+// The collapsed row carries only its reading and verdict. Its own observed/required clocks move to
+// the explainer, proving that card-level coverage is not borrowed and first-glance text stays short.
 ui.setLang("en");
 const cyclingCollecting = ui.value({
   id: "cycling", verdict: "collecting", starts: 2, mean_run_s: null,
@@ -162,33 +173,35 @@ const pressureCollecting = ui.value({
   id: "pressure", verdict: "collecting", min_bar: 1.7,
   observed_s: 120, required_s: 3600,
 });
-assert.match(cyclingCollecting, /2 starts/);
-assert.match(cyclingCollecting, /1 h \/ 2 h observed/);
-assert.match(pressureCollecting, /1\.7 bar/);
-assert.match(pressureCollecting, /2 min \/ 1 h observed/);
+assert.equal(cyclingCollecting, "2 starts · CHECKING");
+assert.equal(pressureCollecting, "1.7 bar · CHECKING");
+assert.match(ui.detail({ verdict: "collecting", observed_s: 3600, required_s: 7200 }),
+             /CHECKING — 1 h of 2 h captured/);
+assert.match(ui.detail({ verdict: "collecting", observed_s: 120, required_s: 3600 }),
+             /CHECKING — 2 min of 1 h captured/);
 assert.notEqual(cyclingCollecting, pressureCollecting);
 
 ui.setLang("en");
 assert.equal(
   ui.value({ id: "cycling", verdict: "info", starts: 12, mean_run_s: 599 }),
-  "12 starts · 9 min runtime/start",
+  "12 starts · 9 min/start · NOTE",
   "a mean below the ten-minute heuristic must not round up to the boundary",
 );
 assert.equal(
   ui.value({ id: "cycling", verdict: "info", starts: 12, mean_run_s: 1 }),
-  "12 starts · <1 min runtime/start",
+  "12 starts · <1 min/start · NOTE",
   "positive runtime must not render as zero",
 );
 
 // Unsupported means no observation, even if a legacy payload happens to carry a plausible zero.
 // Count-only defrost without RPS is a supported `ok` path and remains separately visible.
-assert.equal(ui.value({ id: "defrost", verdict: "unavailable", count: 0 }), "—");
+assert.equal(ui.value({ id: "defrost", verdict: "unavailable", count: 0 }), "NOT AVAILABLE");
 assert.equal(ui.value({ id: "defrost", verdict: "ok", count: 0, share_pct: null,
-                        evidence: "observation" }), "0 cycles");
+                        evidence: "observation" }), "0 cycles · MEASURED ONLY");
 assert.equal(
   ui.value({ id: "defrost", verdict: "ok", count: 3, paired_count: 2,
              defrost_s: 200, run_s: 1000, evidence: "heuristic" }),
-  "3 cycles · 2 with compressor evidence · 20 %",
+  "3 cycles · 2 paired · 20 % · OK",
 );
 
 context.S.status = { health: {
@@ -198,23 +211,23 @@ context.S.status = { health: {
 } };
 ui.setLang("en");
 let countOnlyCard = ui.card();
-assert.match(countOnlyCard, /3 cycles · observation/);
-assert.doesNotMatch(countOnlyCard, /with compressor evidence/);
-assert.match(countOnlyCard, /No assessable check available · 0\/0 assessed · 1 supported/);
+assert.match(countOnlyCard, /3 cycles · MEASURED ONLY/);
+assert.doesNotMatch(countOnlyCard, /paired/);
+assert.match(countOnlyCard, /badge="NOT AVAILABLE"/);
 assert.doesNotMatch(countOnlyCard, /heuristic/);
 assert.equal(
   ui.value({ id: "defrost", verdict: "ok", count: 1, defrost_s: 1, run_s: 1000 }),
-  "1 cycle · <1 %",
+  "1 cycle · <1 % · OK",
   "a positive sub-percent defrost share must not collapse into zero",
 );
 assert.equal(
   ui.value({ id: "defrost", verdict: "info", count: 3, defrost_s: 151, run_s: 1000 }),
-  "3 cycles · 15.1 %",
+  "3 cycles · 15.1 % · NOTE",
   "the raw ratio must remain visibly above the 15% heuristic boundary",
 );
 assert.equal(
   ui.value({ id: "defrost", verdict: "info", count: 3, defrost_s: 12959, run_s: 86393 }),
-  "3 cycles · 15.00005 %",
+  "3 cycles · 15.00005 % · NOTE",
   "a small over-boundary ratio must remain visibly over its firmware-owned threshold",
 );
 
@@ -222,23 +235,25 @@ assert.equal(
 // keeps that uncertainty visible rather than silently falling back to "None active".
 assert.equal(
   ui.value({ id: "fault", verdict: "collecting", active: null }),
-  "Current state unknown",
+  "Current state unknown · CHECKING",
 );
 assert.equal(
   ui.value({ id: "fault", verdict: "info", active: null }),
-  "Seen in window · current state unknown",
+  "Seen in window · current state unknown · NOTE",
 );
 
-// Observed evidence is rounded down and required evidence up. A one-second shortfall must never
-// render as equality, and a 23.5-hour RAM window must never say "24 h of 24 h".
+// Observed evidence is rounded down. A one-second shortfall must not overstate the collected time;
+// the longer target remains available in the payload without bloating the collapsed row.
 const almostRequired = ui.value({
   id: "cycling", verdict: "collecting", starts: 2, mean_run_s: null,
   observed_s: 77759, required_s: 77760,
 });
-assert.match(almostRequired, /21 h 35 min \/ 21 h 36 min observed/);
+assert.equal(almostRequired, "2 starts · CHECKING");
+const almostRequiredDetail = ui.detail({ verdict: "collecting", observed_s: 77759, required_s: 77760 });
+assert.match(almostRequiredDetail, /21 h 35 min of 21 h 36 min captured/);
 
-// Aggregate badges remain bounded by observed data and state evaluated/assessable/supported counts
-// plus the real window. Findings do not hide incomplete rows; both languages carry the same contract.
+// Aggregate badges stay judgement-oriented: card status plus evaluated/assessable checks, without
+// presenting reportable-value count or collection duration as a health score.
 context.S.status = {
   health: {
     covered_s: 86400, status: "ok", available: 7, assessable: 4, evaluated: 4,
@@ -247,15 +262,17 @@ context.S.status = {
 };
 ui.setLang("en");
 let card = ui.card();
-assert.match(card, /tone="checkup-val"/,
-             "checkup rows must carry the narrow-card wrapping class");
-assert.match(card, /X10A observation · up to 24 h/);
-assert.match(card, /No finding in observed X10A data · 4\/4 assessed · 7 supported · 24 h of 24 h/);
+assert.match(card, /tone="checkup-val ok"/,
+             "OK rows must carry both the wrapping class and visible OK tone");
+assert.match(card, /X10A check · 24 h/);
+assert.match(card, /badge="OK · 4\/4 assessed"/);
+assert.doesNotMatch(card, /7 values|24 h of/);
 assert.doesNotMatch(card, /\bAll clear\b|\bhealthy\b/i);
 ui.setLang("de");
 card = ui.card();
-assert.match(card, /X10A-Betriebsbeobachtung · bis 24 h/);
-assert.match(card, /Keine Auffälligkeit in beobachteten X10A-Daten · 4\/4 bewertet · 7 unterstützt · 24 h von 24 h/);
+assert.match(card, /X10A-Check · 24 h/);
+assert.match(card, /badge="OK · 4\/4 bewertet"/);
+assert.doesNotMatch(card, /7 Werte|von 24 h/);
 assert.doesNotMatch(card, /Alles in Ordnung|\bgesund/i);
 
 context.S.status.health = {
@@ -267,12 +284,44 @@ context.S.status.health = {
 };
 ui.setLang("en");
 card = ui.card();
-assert.match(card, /Collecting · 1\/3 assessed · 5 supported · 2 h of 24 h/);
-assert.match(card, /2 min \/ 1 h observed/);
+assert.match(card, /badge="CHECKING · 1\/3 assessed"/);
+assert.match(card, /<value>1\.7 bar · CHECKING<\/value>/);
+assert.match(card, /CHECKING — 2 min of 1 h captured/);
 ui.setLang("de");
 card = ui.card();
-assert.match(card, /Sammelt · 1\/3 bewertet · 5 unterstützt · 2 h von 24 h/);
-assert.match(card, /2 min \/ 1 h beobachtet/);
+assert.match(card, /badge="PRÜFT · 1\/3 bewertet"/);
+assert.match(card, /<value>1\.7 bar · PRÜFT<\/value>/);
+assert.match(card, /PRÜFT — 2 min von 1 h erfasst/);
+
+// Regression payload matching the narrow German card that prompted the status-first design.
+// Collection clocks are present in the details but absent from every collapsed value.
+context.S.status.health = {
+  covered_s: 1200, status: "collecting", available: 7, assessable: 3, evaluated: 1,
+  checks: [
+    { id: "fault", verdict: "ok", active: 0, evidence: "device" },
+    { id: "cycling", verdict: "collecting", starts: 0, observed_s: 1200, required_s: 77760, evidence: "heuristic" },
+    { id: "defrost", verdict: "collecting", count: 0, observed_s: 1200, required_s: 77760, evidence: "observation" },
+    { id: "pressure", verdict: "collecting", min_bar: 1.7, observed_s: 1200, required_s: 77760, evidence: "manufacturer" },
+    { id: "flow", verdict: "collecting", min_l_min: null, observed_s: 0, required_s: 60, evidence: "observation" },
+    { id: "heater", verdict: "collecting", buh_s: 0, bsh_s: 0, observed_s: 1200, required_s: 77760, evidence: "observation" },
+    { id: "retries", verdict: "collecting", seen: null, observed_s: 1200, required_s: 77760, evidence: "experimental" },
+  ],
+};
+ui.setLang("de");
+card = ui.card();
+for (const value of [
+  "Aktuell keine · OK",
+  "0 Starts · PRÜFT",
+  "0 Vorgänge · PRÜFT",
+  "1.7 bar · PRÜFT",
+  "0 min · Speicher 0 min · PRÜFT",
+  "PRÜFT · 1/3 bewertet",
+]) assert.ok(card.includes(value), `missing concise German card status: ${value}`);
+const collapsedValues = [...card.matchAll(/<value>(.*?)<\/value>/g)].map((m) => m[1]);
+assert.ok(collapsedValues.length >= 7);
+for (const value of collapsedValues) assert.doesNotMatch(value, /20 min|21 h|gesammelt|erfasst/);
+assert.match(card, /20 min von 21 h 36 min erfasst/,
+             "the removed collection clock must remain available in the explainer");
 
 context.S.status.health = {
   covered_s: 23.5 * 3600, status: "collecting", available: 1, assessable: 1, evaluated: 0,
@@ -283,16 +332,17 @@ context.S.status.health = {
 };
 ui.setLang("en");
 card = ui.card();
-assert.match(card, /23 h 30 min of 24 h/);
-assert.doesNotMatch(card, /24 h of 24 h/);
-assert.match(card, /manufacturer limit/);
+assert.match(card, /badge="CHECKING · 0\/1 assessed"/);
+assert.doesNotMatch(card, /23 h 30 min|1 values/);
+assert.doesNotMatch(card, /manufacturer limit/);
 ui.setLang("de");
 card = ui.card();
-assert.match(card, /23 h 30 min von 24 h/);
-assert.match(card, /Herstellergrenze/);
+assert.match(card, /badge="PRÜFT · 0\/1 bewertet"/);
+assert.doesNotMatch(card, /23 h 30 min|1 Werte/);
+assert.doesNotMatch(card, /Herstellergrenze/);
 
-// Every API evidence class is visibly distinguished. Missing/unknown additive fields remain
-// backwards-compatible: older payloads render without guessing a class or dropping the card.
+// Evidence class refines OK: observation-only and experimental facts must not claim a completed
+// judgement. Missing additive fields remain backwards-compatible and use the firmware verdict.
 const evidenceChecks = [
   { id: "fault", verdict: "ok", active: 0, evidence: "device" },
   { id: "pressure", verdict: "ok", min_bar: 1.7, evidence: "manufacturer" },
@@ -303,16 +353,22 @@ const evidenceChecks = [
 context.S.status.health = { covered_s: 86400, status: "ok", checks: evidenceChecks };
 ui.setLang("en");
 card = ui.card();
-for (const basis of ["device state", "manufacturer limit", "heuristic", "observation", "experimental"])
-  assert.match(card, new RegExp(basis));
+for (const status of ["OK", "MEASURED ONLY", "EXPERIMENTAL"])
+  assert.match(card, new RegExp(status));
+assert.match(card, /<value>1\.7 bar · OK<\/value>/,
+             "manufacturer-bounded pressure can report OK after its evidence gate");
+assert.match(card, /<value>8\.4 l\/min · MEASURED ONLY<\/value>/,
+             "flow has no universal threshold and must not report OK");
+assert.match(card, /<value>No increase seen · EXPERIMENTAL<\/value>/,
+             "stable retry counters must not report OK");
 
 context.S.status.health = {
   covered_s: 3600, status: "collecting",
   checks: [{ id: "cycling", verdict: "collecting", starts: 1, mean_run_s: null }],
 };
 card = ui.card();
-assert.match(card, /0\/1 assessed · 1 supported/);
-assert.match(card, /1 start/);
+assert.match(card, /CHECKING · 0\/1 assessed/);
+assert.match(card, /1 start · CHECKING/);
 assert.doesNotMatch(card, /undefined|check\.basis/);
 
 // A future firmware may append checks this UI does not know. They are skipped without guessing a
@@ -326,24 +382,56 @@ context.S.status.health = {
 };
 ui.setLang("en");
 card = ui.card();
-assert.match(card, /Seen in window/);
+assert.match(card, /Seen in window · NOTE/);
 assert.doesNotMatch(card, /future_check|must-not-render/);
 context.S.status.health.checks = [{ id: "future_check", verdict: "warn" }];
 assert.equal(ui.card(), "", "unknown-only payload must not render an empty or guessed card");
 
-// The explainer must match the production retry comparator: a counter update may first become
-// visible while stopped or at a compressor-state boundary; decreases/resets prove neither side.
+// The concise explainer must retain the production retry comparator's important edge cases.
 const retryCopy = span("  health_retries: {", "  // The two board-memory rows");
 assert.match(retryCopy, /while stopped or at a compressor-state boundary/);
-assert.match(retryCopy, /neither events nor no-event evidence/);
 assert.match(retryCopy, /im Stillstand oder an einer Verdichter-Zustandsgrenze/);
-assert.match(retryCopy, /weder Ereignisse noch Gegenbelege/);
+assert.match(retryCopy, /stable or decreasing values, gaps and resets do not/);
+assert.match(retryCopy, /stabile oder abnehmende Werte, Lücken und Rücksetzungen nicht/);
 assert.doesNotMatch(retryCopy, /with the compressor running|bei laufendem Verdichter/);
 
 const pressureCopy = span("  health_pressure: {", "  health_flow: {");
-assert.match(pressureCopy, /shown immediately as an operating note/);
-assert.match(pressureCopy, /warning only after 60 continuous seconds/);
-assert.match(pressureCopy, /sofort als Betriebshinweis/);
-assert.match(pressureCopy, /erst nach 60 ununterbrochenen Sekunden zur Warnung/);
+assert.match(pressureCopy, /NOTE immediately and a WARNING after 60 continuous seconds/);
+assert.match(pressureCopy, /sofort HINWEIS und nach 60 durchgehenden Sekunden WARNUNG/);
+
+// The hint box should answer the question without becoming a manual. Keep both paragraphs concise
+// while the source-level assertions above preserve the technically load-bearing caveats.
+const descriptionContext = {};
+vm.runInNewContext(
+  `${span("const MODEL_DESCRIPTIONS = {", "// A Model-card row")} this.__descriptions = MODEL_DESCRIPTIONS;`,
+  descriptionContext,
+);
+for (const id of ["fault", "cycling", "defrost", "pressure", "flow", "heater", "retries"]) {
+  const d = descriptionContext.__descriptions[`health_${id}`];
+  for (const [lang, copy] of [["en", d], ["de", d.de]]) {
+    const length = `${copy.what} ${copy.normal || ""}`.length;
+    assert.ok(length <= 520, `${id} ${lang} explainer is too long (${length} characters)`);
+  }
+}
+
+// Technical binary states stay ON/OFF in German explainers instead of switching between translated
+// prose forms. Ordinary grammatical uses of "ein"/"aus" are intentionally outside this contract.
+const cyclingCopy = span("  health_cycling: {", "  health_defrost: {");
+const defrostCopy = span("  health_defrost: {", "  health_pressure: {");
+assert.match(cyclingCopy, /von OFF zu ON/);
+assert.match(defrostCopy, /von OFF zu ON/);
+const explanationCopy = [
+  span("const DESCRIPTIONS = [", "// ── The two sources"),
+  span("const MODEL_DESCRIPTIONS = {", "// A Model-card row"),
+  span("const INSPECT = {", "// A row selector"),
+].join("\n");
+for (const [name, pattern] of [
+  ["Aus-zu-Ein transition", /von Aus zu Ein/i],
+  ["translated switched-off state", /\bausgeschaltet(?:e[rmns]?)?\b/i],
+  ["translated switched-on state", /\beingeschaltet(?:e[rmns]?)?\b/i],
+  ["translated Smart-Grid state", /\b(?:Erzwungen|Empfohlen) (?:aus|ein)\b/i],
+  ["translated compressor state", /\bVerdichter ist aus\b/i],
+  ["translated backup-heater state", /\bZusatzheizer (?:ist )?aus\b/i],
+]) assert.doesNotMatch(explanationCopy, pattern, `${name} must use ON/OFF`);
 
 console.log("X10A checkup UI contract: evidence-bounded rendering verified");

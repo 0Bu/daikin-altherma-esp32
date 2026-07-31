@@ -39,7 +39,8 @@ must still open on **Custom**, then verifies that choosing and editing presets w
 continues to keep the selector in sync with the five hardware fields.
 
 `node test/test_ui_checkup.mjs` executes the production X10A observation-card renderer without a
-browser. It pins the evidence-bounded English/German wording, visible evidence classes, conservative
+browser. It pins the concise evidence-bounded English/German status words, evidence progress and
+limits in the row explainers, conservative
 duration rounding, raw defrost-ratio and sub-minute BUH/BSH fields, independent fault/defrost null
 handling, `available`/`assessable`/`evaluated`, the actual `/status.health` serializer keys, mobile
 evidence wrapping, old-payload fallbacks, per-row observation clocks, the two-stage pressure copy,
