@@ -942,9 +942,9 @@ static void test_config_model() {
     CHECK(live.mqtt_uri == "mqtts://broker.lan");
 }
 
-// The HA DEVICE identity (logic/ha_device.hpp). The one property that matters: it is a pure
+// The HA X10A DEVICE identity (logic/ha_device.hpp). The one property that matters: it is a pure
 // function of the MQTT base topic and contains nothing board-specific — replacing the ESP32 must
-// keep ONE device in HA (and with it the entities, their history and their statistics), which the
+// keep the X10A device in HA (and with it the entities, their history and their statistics), which the
 // old MAC-derived node id could not do.
 static void test_ha_device() {
     CHECK(device_node_id("daikin-altherma-esp32") == "daikin_altherma_esp32");
@@ -954,14 +954,14 @@ static void test_ha_device() {
     // an empty node would produce "homeassistant/sensor//x/config", which HA silently ignores.
     CHECK(device_node_id("///") == "daikin");
     CHECK(device_node_id("") == "daikin");
-    // Two base topics stay two devices (that is how a second board is separated), one base topic
-    // stays ONE device no matter which hardware publishes it.
+    // Two base topics stay two X10A devices (that is how a second board is separated), one base topic
+    // stays one X10A device no matter which hardware publishes it.
     CHECK(device_node_id("daikin-altherma-esp32") != device_node_id("daikin-altherma-esp32-2"));
 
     // The device block: stable id FIRST (the anchor HA matches on after a swap), board id second.
     CHECK(device_json("daikin_altherma_esp32", "daikin_abc123") ==
           "\"dev\":{\"ids\":[\"daikin_altherma_esp32\",\"daikin_abc123\"],"
-          "\"name\":\"Daikin Altherma\",\"mf\":\"Daikin\",\"mdl\":\"Altherma\"}");
+          "\"name\":\"Daikin Altherma X10A\",\"mf\":\"Daikin\",\"mdl\":\"Altherma X10A\"}");
     // No board id, or a board id that IS the node id -> a single identifier. A duplicated entry
     // would be a malformed device for HA, not a harmless repeat.
     CHECK(device_json("daikin_altherma_esp32", "").find("\"ids\":[\"daikin_altherma_esp32\"],")
@@ -979,6 +979,15 @@ static void test_ha_device() {
           != std::string::npos);
     CHECK(crash_discovery_config(node, brd, "s", "a", CRASH_SENSORS[0]).find(dev)
           != std::string::npos);
+
+    // Modbus is a SECOND HA device group. It intentionally shares neither the stable X10A id nor
+    // the board id, because HA merges devices when any identifier matches.
+    CHECK(modbus_device_node_id(node) == "daikin_altherma_esp32_modbus");
+    CHECK(modbus_device_json(node) ==
+          "\"dev\":{\"ids\":[\"daikin_altherma_esp32_modbus\"],"
+          "\"name\":\"Daikin Altherma Modbus\",\"mf\":\"Daikin\","
+          "\"mdl\":\"Altherma HomeHub Modbus\"}");
+    CHECK(modbus_device_json(node).find(brd) == std::string::npos);
 }
 
 static void test_discovery() {
@@ -990,14 +999,17 @@ static void test_discovery() {
     const std::string node  = device_node_id(base);        // the INSTALLATION — survives a board swap
     const std::string board = "daikin_abc123";             // this board's own MAC-derived id
     CHECK(node == "daikin_altherma_esp32");
-    const std::string st = state_topic(base);             // ONE shared topic for every sensor
-    CHECK(st == "daikin-altherma-esp32/state");            // node NOT in the message topic (one board/base)
+    const std::string st = x10a_topic(base);              // shared by the X10A sensors only
+    CHECK(st == "daikin-altherma-esp32/x10a");             // node NOT in the message topic (one board/base)
+    CHECK(modbus_topic(base) == "daikin-altherma-esp32/modbus");
+    CHECK(modbus_availability_topic(base) == "daikin-altherma-esp32/modbus/status");
+    CHECK(legacy_state_topic(base) == "daikin-altherma-esp32/state");
     CHECK(availability_topic(base) == "daikin-altherma-esp32/status");
     std::string cfg = discovery_config(node, board, st, availability_topic(base), def);
     CHECK(cfg.find("\"dev_cla\":\"temperature\"") != std::string::npos);
     CHECK(cfg.find("\"stat_cla\":\"measurement\"") != std::string::npos);
     CHECK(cfg.find("\"unit_of_meas\":\"°C\"") != std::string::npos);
-    CHECK(cfg.find("\"stat_t\":\"daikin-altherma-esp32/state\"") != std::string::npos);
+    CHECK(cfg.find("\"stat_t\":\"daikin-altherma-esp32/x10a\"") != std::string::npos);
     CHECK(cfg.find("\"avty_t\":\"daikin-altherma-esp32/status\"") != std::string::npos);
     // Shared JSON topic -> value_template subscripts group (page 0x61 -> hydronic_temps) + object.
     CHECK(cfg.find("\"val_tpl\":\"{{ value_json['hydronic_temps']['dhw_tank_temp_r5t'] }}\"")
@@ -1082,6 +1094,54 @@ static void test_discovery() {
     CHECK(oc.find("value_json['outdoor_state']['error_code']") != std::string::npos);
     CHECK(hc.find("value_json['hydronic']['error_code']") != std::string::npos);
 
+    // --- HomeHub values form a separate, read-only Modbus device and read a FLAT source topic. ---
+    const def::HomeHubReg* mb_temp = def::homehub_find(42);
+    const def::HomeHubReg* mb_flag = def::homehub_find(30);
+    const def::HomeHubReg* mb_mode = def::homehub_find(56);
+    CHECK(mb_temp && mb_flag && mb_mode);
+    CHECK(modbus_discovery_topic("homeassistant", node, *mb_temp) ==
+          "homeassistant/sensor/daikin_altherma_esp32_modbus/return_water_temperature/config");
+    const std::string mt = modbus_discovery_config(
+        node, modbus_topic(base), availability_topic(base), modbus_availability_topic(base), *mb_temp);
+    CHECK(mt.find("\"uniq_id\":\"daikin_altherma_esp32_modbus_return_water_temperature\"")
+          != std::string::npos);
+    CHECK(mt.find("\"stat_t\":\"daikin-altherma-esp32/modbus\"") != std::string::npos);
+    CHECK(mt.find("value_json['return_water_temperature']") != std::string::npos);
+    CHECK(mt.find("\"avty\":[{\"topic\":\"daikin-altherma-esp32/status\"},"
+                  "{\"topic\":\"daikin-altherma-esp32/modbus/status\"}]") != std::string::npos);
+    CHECK(mt.find("\"avty_mode\":\"all\"") != std::string::npos);
+    CHECK(mt.find("\"dev_cla\":\"temperature\"") != std::string::npos);
+    CHECK(mt.find("\"dev\":{\"ids\":[\"daikin_altherma_esp32_modbus\"]") != std::string::npos);
+    CHECK(mt.find(board) == std::string::npos);   // otherwise HA merges Modbus into X10A again
+
+    CHECK(std::string(modbus_ha_component(*mb_flag)) == "binary_sensor");
+    CHECK(modbus_discovery_topic("homeassistant", node, *mb_flag).find("/binary_sensor/")
+          != std::string::npos);
+    const std::string mf = modbus_discovery_config(
+        node, modbus_topic(base), availability_topic(base), modbus_availability_topic(base), *mb_flag);
+    CHECK(mf.find("\"pl_on\":\"1\",\"pl_off\":\"0\"") != std::string::npos);
+    CHECK(mf.find("\"cmd_t\"") == std::string::npos);
+
+    CHECK(std::string(modbus_ha_component(*mb_mode)) == "sensor");
+    const std::string mm = modbus_discovery_config(
+        node, modbus_topic(base), availability_topic(base), modbus_availability_topic(base), *mb_mode);
+    CHECK(mm.find("\"pl_on\"") == std::string::npos);     // named enum, not a binary guess
+    CHECK(mm.find("\"cmd_t\"") == std::string::npos);     // Modbus remains read-only
+
+    for (int i = 0; i < def::HOMEHUB_REG_COUNT; i++) {
+        const def::HomeHubReg& reg = def::HOMEHUB_REGS[i];
+        const std::string topic = modbus_discovery_topic("homeassistant", node, reg);
+        const std::string config = modbus_discovery_config(
+            node, modbus_topic(base), availability_topic(base), modbus_availability_topic(base), reg);
+        CHECK(topic.find(def::homehub_is_binary(reg) ? "/binary_sensor/" : "/sensor/")
+              != std::string::npos);
+        CHECK(config.find("\"stat_t\":\"daikin-altherma-esp32/modbus\"") != std::string::npos);
+        CHECK(config.find("\"cmd_t\"") == std::string::npos);
+        CHECK(config.find("\"dev\":{\"ids\":[\"daikin_altherma_esp32_modbus\"]")
+              != std::string::npos);
+        CHECK(config.find(board) == std::string::npos);
+    }
+
     // The binary family is exactly 300-307 (one bit of data[0]); neighbours are not binary.
     CHECK(!conv_is_binary(299) && !conv_is_binary(308) && !conv_is_binary(105));
     for (int c = 300; c <= 307; c++) CHECK(conv_is_binary(c));
@@ -1115,7 +1175,7 @@ static void test_binary_catalog() {
                   == "{\"test\":{\"flag\":0}}");
             CHECK(std::string(ha_component(d)) == "binary_sensor");
             const std::string cfg =
-                discovery_config("daikin_test", "daikin_board", "daikin/state", "daikin/status", d);
+                discovery_config("daikin_test", "daikin_board", "daikin/x10a", "daikin/status", d);
             CHECK(cfg.find("\"pl_on\":\"1\",\"pl_off\":\"0\"") != std::string::npos);
             CHECK(discovery_topic("homeassistant", "daikin_test", d)
                   == "homeassistant/binary_sensor/daikin_test/" + row_object_id(d) + "/config");
@@ -1606,7 +1666,7 @@ static void test_mqtt_group() {
           == "{\"hydronic\":{\"thermostat_on_off\":1,\"silent_mode\":0}}");
 
     // A text value routes through the shared logic/json.hpp encoder, so a control char in one can't
-    // break the state topic's JSON either (test_json covers the escaping itself).
+    // break the X10A topic's JSON either (test_json covers the escaping itself).
     CHECK(build_grouped_json({{"other", "raw", "a\nb", PublishedKind::Text}})
           == "{\"other\":{\"raw\":\"a\\nb\"}}");
 
@@ -1628,6 +1688,15 @@ static void test_mqtt_group() {
     // quoted (that IS the type flip) — the key stays, the type stays, the value is null.
     CHECK(build_grouped_json({{"actuators", "fan_1_step", "OFF", PublishedKind::Number}})
           == "{\"actuators\":{\"fan_1_step\":null}}");
+
+    // The Modbus topic is source-specific and therefore flat. It has the exact same permanent type
+    // contract and escaping behaviour as the grouped X10A encoder.
+    CHECK(build_flat_json({{"modbus", "return_water_temperature", "35.5", PublishedKind::Number},
+                           {"modbus", "smart_grid_operation_mode", "Recommended on", PublishedKind::Text},
+                           {"modbus", "broken_numeric", "OFF", PublishedKind::Number}})
+          == "{\"return_water_temperature\":35.5,"
+             "\"smart_grid_operation_mode\":\"Recommended on\",\"broken_numeric\":null}");
+    CHECK(build_flat_json({}) == "{}");
 
     // The group key doubles as an HA entity-name fragment for the DERIVED companions, which have no
     // catalog label of their own (logic/fault_state.hpp).
@@ -1895,7 +1964,7 @@ static void test_heartbeat() {
     CHECK(dj.find("false") == std::string::npos);
 
     // Diagnostic discovery: separate topics/component types, entity_category diagnostic, and the
-    // value_template points at the heartbeat topic (not the heat-pump state topic).
+    // value_template points at the heartbeat topic (not a heat-pump source topic).
     const std::string hb = heartbeat_topic(base);
     const std::string av = availability_topic(base);
     CHECK(HEARTBEAT_SENSOR_COUNT == 18);   // -2: device_time, wifi_quality (RETIRED_HEARTBEAT_SENSORS)
@@ -2870,11 +2939,15 @@ static void test_modbus_snapshot() {
 static void test_homehub() {
     using namespace daik::def;
     CHECK(HOMEHUB_REG_COUNT > 0);
-    auto find = [](uint16_t off) -> const HomeHubReg* {
-        for (int i = 0; i < HOMEHUB_REG_COUNT; i++)
-            if (HOMEHUB_REGS[i].offset == off) return &HOMEHUB_REGS[i];
-        return nullptr;
-    };
+    auto find = [](uint16_t off) -> const HomeHubReg* { return homehub_find(off); };
+    // Every register must remain independently addressable in the flat /modbus payload and HA
+    // discovery namespace. A label-slug collision would silently overwrite one JSON key/entity.
+    for (int i = 0; i < HOMEHUB_REG_COUNT; i++) {
+        CHECK(homehub_find(HOMEHUB_REGS[i].offset) == &HOMEHUB_REGS[i]);
+        CHECK(!object_id(HOMEHUB_REGS[i].label).empty());
+        for (int k = i + 1; k < HOMEHUB_REG_COUNT; k++)
+            CHECK(object_id(HOMEHUB_REGS[i].label) != object_id(HOMEHUB_REGS[k].label));
+    }
     char buf[32];
     MbValue v;
     // Temperature (Temp16 = signed /100 °C) — return water at offset 42, read from an input register.
@@ -2897,6 +2970,7 @@ static void test_homehub() {
     const HomeHubReg* ec = find(22);
     CHECK(ec && ec->type == MbType::Text16);
     CHECK(homehub_format(*ec, 0x5538, buf, sizeof(buf)) && std::string(buf) == "U8");
+    CHECK(homehub_is_text(*ec));
     // Dimensionless Int16 does NOT mean numeric. EKRHH 4P744838-1E §9.2 uses the same wire type
     // for one real number (the error sub-code), five binary flags and four named enums. Pin the
     // complete classification so another selector cannot reach the UI as "Mode 1" again.
@@ -2918,6 +2992,7 @@ static void test_homehub() {
     CHECK(homehub_format(*om, 1, buf, sizeof(buf)) && std::string(buf) == "Heating");
     CHECK(homehub_format(*om, 2, buf, sizeof(buf)) && std::string(buf) == "Cooling");
     CHECK(homehub_format(*om, 7, buf, sizeof(buf)) && std::string(buf) == "Unknown (7)");
+    CHECK(homehub_is_text(*om));
 
     const HomeHubReg* abnormal = find(21);
     CHECK(abnormal && abnormal->kind == HomeHubValueKind::UnitAbnormality &&
@@ -2943,15 +3018,17 @@ static void test_homehub() {
     for (uint16_t off : {30, 52, 53, 4, 9}) {
         const HomeHubReg* flag = find(off);
         CHECK(flag && homehub_is_binary(*flag));
+        CHECK(!homehub_is_text(*flag));
         CHECK(homehub_format(*flag, 0, buf, sizeof(buf)) && std::string(buf) == "0");
         CHECK(homehub_format(*flag, 1, buf, sizeof(buf)) && std::string(buf) == "1");
     }
     // The 1-based EKRHH offset maps to the 0-based wire PDU address.
     uint16_t pdu = 0xFFFF;
     CHECK(mb_pdu_address(t->offset, pdu) && pdu == static_cast<uint16_t>(t->offset - 1));
-    // The synthetic MQTT group page resolves to "homehub" (the poll branch tags every HomeHub cache
+    // The synthetic MQTT group page resolves to "modbus" (the poll branch tags every HomeHub cache
     // row with HOMEHUB_GROUP_REG so the bridge groups them together — this pins the two in step).
-    CHECK(std::string(group_for_page(HOMEHUB_GROUP_REG)) == "homehub");
+    CHECK(std::string(group_for_page(HOMEHUB_GROUP_REG)) == "modbus");
+    CHECK(homehub_find(999) == nullptr);
 }
 
 // The syslog replay records (logic/bootlog.hpp): the build-identity boot line + the crash rendered as
@@ -6655,7 +6732,7 @@ static void test_profile_view() {
 
     // The supplement must not introduce a DUPLICATE STATE KEY: mqtt_group.hpp nests the payload by
     // group, so two rows sharing a (group, object_id) would write one key and the second row would
-    // silently never arrive — in the state topic AND in VictoriaMetrics, which is keyed on that pair.
+    // silently never arrive — in the X10A topic AND in VictoriaMetrics, which is keyed on that pair.
     //
     // Scoped by group rather than global since #221. The old global form was an assertion about the
     // DELTA only, because the catalog itself carried label collisions ("Error Code" on both 0x10/5
@@ -6670,7 +6747,7 @@ static void test_profile_view() {
     }
 
     // ── The metric IDs these rows have already become in VictoriaMetrics (#180) ──────────────────
-    // Verified 2026-07-26: these 11 rows are INGESTED. Telegraf reads the grouped state topic and
+    // Verified 2026-07-26: these 11 rows are INGESTED. Telegraf reads the grouped X10A topic and
     // the store carries one series per row, named `daikin_altherma_<group>_<object_id>`. That
     // promotes BOTH halves of that name from presentation to load-bearing identifier — the group
     // key and each row's label-derived slug. #180's schema-coupling note asks whether an "ingest
@@ -7456,7 +7533,7 @@ static void test_tie_break_reach() {
 // page. The catalog carries "Error Code" on the outdoor page AND on the hydronic one, so before
 // #221 the two rows were announced under one id on one topic: the broker kept one payload, HA
 // created one entity, and the second sensor silently did not exist. Nothing errored — in HA it
-// reads as "my model doesn't have that sensor" — and the state topic was fine throughout (it nests
+// reads as "my model doesn't have that sensor" — and the X10A topic was fine throughout (it nests
 // by group), which is why this was invisible everywhere except Home Assistant.
 //
 // Measured before the fix: 44 of 45 profiles carried at least one collision, over five label slugs.
@@ -7492,7 +7569,7 @@ static std::string topic_object_of(const std::string& topic) {
 
 static void test_entity_identity() {
     const std::string node = "daikin_test", brd = "daikin_board", pfx = "homeassistant";
-    const std::string st = "base/state", av = "base/status", hb = "base/heartbeat", cr = "base/crash";
+    const std::string st = "base/x10a", av = "base/status", hb = "base/heartbeat", cr = "base/crash";
 
     std::set<std::string> colliding;                 // reported once, not once per profile
     int checked = 0;
@@ -7943,7 +8020,7 @@ static void test_fault_state() {
     CHECK(companion_discovery_topic("homeassistant", "daikin_test", "hydronic", "warning_active")
           == "homeassistant/binary_sensor/daikin_test/hydronic_warning_active/config");
     const std::string ccfg = companion_discovery_config(
-        "daikin_test", "daikin_board", "daikin/state", "daikin/status", "outdoor_state",
+        "daikin_test", "daikin_board", "daikin/x10a", "daikin/status", "outdoor_state",
         FAULT_COMPANIONS[0]);
     CHECK(ccfg.find("\"name\":\"Outdoor State Error Active\"") != std::string::npos);
     CHECK(ccfg.find("\"uniq_id\":\"daikin_test_outdoor_state_error_active\"") != std::string::npos);

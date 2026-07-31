@@ -3,7 +3,7 @@
 // and host-tested (test/test_logic.cpp) so the exact bytes the broker — and Home Assistant's
 // value_template / a Telegraf JSON parser — receive are asserted on the host, not the device.
 //
-// The MQTT bridge publishes ONE retained JSON object to <base>/state per cycle. Values are
+// The MQTT bridge publishes one retained X10A JSON object to <base>/x10a per cycle. Values are
 // grouped one level deep by their X10A register page:
 //     { "<group>": { "<object_id>": value, … }, … }   (max nesting depth 1)
 // Each HA discovery config points every sensor at this shared topic with a value_template that
@@ -34,9 +34,9 @@ inline const char* group_for_page(uint8_t reg) {
         case 0x63: return "mains_current";
         case 0x64: return "hybrid";
         case 0x65: return "mixing";
-        // The synthetic page every HomeHub (Modbus TCP) row is tagged with (def/homehub.hpp
-        // HOMEHUB_GROUP_REG = 0xEE), so the whole HomeHub map groups under one key on the state topic.
-        case 0xEE: return "homehub";
+        // The synthetic page every HomeHub row carries. The Modbus MQTT payload itself is flat, but
+        // this name remains the source label used by generic CachedValue consumers.
+        case 0xEE: return "modbus";
         default:   return "other";
     }
 }
@@ -98,9 +98,21 @@ struct GroupedValue {
     PublishedKind kind = PublishedKind::Number;
 };
 
+inline void append_published_value(std::string& j, const GroupedValue& value) {
+    if (value.kind == PublishedKind::Text) {
+        j += '"'; json_append_escaped(j, value.value); j += '"';
+    } else if (is_json_number(value.value)) {
+        j += value.value;
+    } else {
+        // A Number field whose formatted value is not a number is a broken contract, not a reason
+        // to change its JSON type. `null` is intentionally ignored by numeric metrics consumers.
+        j += "null";
+    }
+}
+
 // Build the retained state payload { "<group>": { "<key>": value, … }, … }. Groups and keys keep
 // first-seen order (the poll cache is already page-ordered). A Number field is emitted unquoted, a
-// Text field quoted — always, in every state. Pure — the device streams the result to <base>/state.
+// Text field quoted — always, in every state. Pure — the device streams the result to <base>/x10a.
 inline std::string build_grouped_json(const std::vector<GroupedValue>& vals) {
     std::vector<std::string>                     order;    // group names, in first-seen order
     std::vector<std::vector<const GroupedValue*>> buckets; // values per group, index-aligned to order
@@ -119,23 +131,24 @@ inline std::string build_grouped_json(const std::vector<GroupedValue>& vals) {
         for (size_t k = 0; k < bucket.size(); ++k) {
             if (k) j += ',';
             j += '"'; j += bucket[k]->key; j += "\":";
-            const std::string& val = bucket[k]->value;
-            if (bucket[k]->kind == PublishedKind::Text) {
-                j += '"'; json_append_escaped(j, val); j += '"';
-            } else if (is_json_number(val)) {
-                j += val;
-            } else {
-                // A Number field whose formatted value is not a number is a broken contract, not a
-                // reason to emit a string: quoting it here is exactly the type flip this struct
-                // exists to prevent, and it would reach the consumer looking like data. `null` keeps
-                // the key present and the type stable, and a metrics parser drops it the same way it
-                // drops an absent sample. Unreachable with the current converters — the catalog-wide
-                // test asserts every implemented id agrees with its published_kind in every state —
-                // so this is the fail-closed branch for a converter nobody has written yet.
-                j += "null";
-            }
+            append_published_value(j, *bucket[k]);
         }
         j += '}';
+    }
+    j += '}';
+    return j;
+}
+
+// Build the HomeHub payload for <base>/modbus. The topic already identifies the source, so repeating
+// a synthetic `modbus` object inside it would add nesting without information. Keys retain their
+// definition-owned Number/Text type exactly like the grouped X10A encoder above.
+inline std::string build_flat_json(const std::vector<GroupedValue>& vals) {
+    std::string j = "{";
+    j.reserve(vals.size() * 32 + 16);
+    for (size_t i = 0; i < vals.size(); i++) {
+        if (i) j += ',';
+        j += '"'; j += vals[i].key; j += "\":";
+        append_published_value(j, vals[i]);
     }
     j += '}';
     return j;

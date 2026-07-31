@@ -368,7 +368,7 @@ GET  /values                       # decoded readings [{label,value,unit,reg,bin
                                    #   numbers while the compressor rests. The value is still
                                    #   reported (the trend rings need it to tell "held over" from
                                    #   "no reading"), but it is not a current measurement, and the
-                                   #   MQTT state topic withholds it entirely.
+                                   #   MQTT X10A topic withholds it entirely.
 GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sample first:
                                    #   {id,label,dt,unit,t0,v[],held[[from,count],…]}
                                    #   unit = the ROW's own unit (never a hardcoded °C).
@@ -479,8 +479,9 @@ is gone. `/diag` and `/coredump` stream instead of building one big buffer.
 ## Home Assistant (MQTT)
 
 `main/mqtt_ha.cpp` mirrors every decoded value to MQTT using Home Assistant
-[MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery), so a **Daikin
-Altherma** device with all entities appears in HA automatically — no YAML. **Read-only:** no
+[MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery), so separate
+**Daikin Altherma X10A** and (when enabled) **Daikin Altherma Modbus** groups appear automatically —
+no YAML. **Read-only:** no
 command topics are subscribed. The bridge runs in its own task, independent of the poll engine.
 
 - **Enable:** set the broker in the web UI (gear → Connections → MQTT). Stored in NVS `mqtt_uri`.
@@ -495,13 +496,17 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   statistics). The board's own `daikin_<mac3>` remains the MQTT client id and a second `dev.ids`
   entry so an install from a MAC-identified build is merged, not duplicated — see
   [HOME_ASSISTANT.md → Device identity](HOME_ASSISTANT.md#device-identity).
-- **Topics:** `<base>/state` (one retained JSON of all values, grouped by register page —
+- **Topics:** `<base>/x10a` (one retained JSON of X10A values, grouped by register page —
   `{ "<group>": { "<object>": value } }`, max depth 1), plus per-value discovery configs under
   `<prefix>/<component>/<node>/<group>_<object>/config` (retained) whose `value_template` reads the
   group+object out of that JSON. The entity id carries the group because a label is unique only
   within its register page while HA's id namespace is flat (#221); the JSON key does not. `<component>` is `binary_sensor` for a bit-flag value (pump running,
   3-way valve, thermostat ON/OFF), whose state rides as the number `1`/`0` so it is usable in a
   metrics store as well as in HA, and `sensor` for everything else.
+  An enabled HomeHub publishes its live, flat register map independently on `<base>/modbus` and
+  receives its own Modbus HA device/discovery group. A disconnected link publishes `{}`; disabling
+  it retracts the topic and discovery configs. HA combines the board LWT with retained
+  `<base>/modbus/status` using `availability_mode: all`. The old retained `<base>/state` is deleted on connect.
   Availability/LWT `<base>/status`. `<base>` defaults `daikin-altherma-esp32`,
   `<prefix>` `homeassistant`.
 - **Type-stable, and honest about absence.** Whether a key is a JSON number or a JSON string is
@@ -516,7 +521,7 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   JSON of heap, uptime, WiFi/MQTT/bus counters, each field prefixed by its block name: `wifi_rssi`,
   `wifi_mac`, `wifi_bssid`, `mqtt_count`, `bus_rx_received`, …, plus `bus_ou_held_over`, which is
   *source* freshness rather than link health: it says the outdoor unit stopped refreshing its own
-  pages, so its readings are missing from the state topic while the bus itself is fine) and
+  pages, so its readings are missing from the X10A topic while the bus itself is fine) and
   `<base>/crash` (retained;
   **crash-only** — a "dump waiting" flag, published once per (re)connect but ONLY when the boot is
   *notable*: a real fault or a dump still in flash. A normal boot clears the topic with a zero-length

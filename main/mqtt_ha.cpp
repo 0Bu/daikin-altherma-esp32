@@ -2,12 +2,12 @@
 // esp-mqtt client in its own publish task:
 //   • TLS policy: credentials present ⇒ mqtts:// + CA-verified (esp_crt_bundle); NEVER send
 //     credentials over plaintext (no silent fallback — refuse with an error in /status.mqtt).
-//   • On (re)connect: mark availability "online", stream one retained discovery config per value of
-//     the active profile (logic/discovery.hpp) — a bit-flag row as a `binary_sensor` reading 1/0,
-//     every other row as a `sensor` — then publish the full grouped state JSON.
-//   • Each cycle: rebuild the grouped state JSON (logic/mqtt_group.hpp) and publish it to the ONE
-//     shared topic <base>/state — but only when the payload actually changed, so a quiet pump doesn't
-//     spam the broker. Message topics sit directly under <base> — one board per base topic; the node
+//   • On (re)connect: mark availability "online", stream retained discovery configs for the active
+//     X10A profile and, when configured, the HomeHub register map. They form two HA device groups.
+//   • Each cycle: publish X10A's grouped JSON to <base>/x10a and the generation-checked, flat
+//     HomeHub JSON to <base>/modbus — each only when changed. A disconnected HomeHub publishes `{}`
+//     rather than carrying an old TCP session's readings forward. Message topics sit directly under
+//     <base> — one board per base topic; the node
 //     id identifies the DEVICE only in each discovery config's uniq_id/dev.ids + the
 //     <prefix>/<component>/<node>/<group>_<object_id> discovery topic. That node id is derived from
 //     the BASE TOPIC (logic/ha_device.hpp), not from the board's MAC, so replacing the ESP32 keeps
@@ -19,7 +19,7 @@
 //     ids — are retracted in one pass before any replacement goes out.
 //   • Every HEARTBEAT_INTERVAL_S (10 s): rebuild + publish the board/link diagnostics JSON
 //     (logic/heartbeat.hpp) to <base>/heartbeat — diagnostics, not real-time telemetry, so unlike the
-//     state topic it's a fixed cadence, not publish-on-change.
+//     source value topics it's a fixed cadence, not publish-on-change.
 //   • Once per (re)connect: RETAIN the boot-time crash summary (logic/crashinfo.hpp) on <base>/crash
 //     ONLY when the reset was a real fault or a core-dump is still in flash; a normal boot clears the
 //     topic (zero-length retained) so no crash message lingers once the problem is resolved. When a
@@ -95,10 +95,14 @@ struct Lock {
 }  // namespace
 
 // Persisted so the pointers handed to esp-mqtt (and reused by the task) stay valid.
-static std::string s_uri, s_user, s_pass, s_node, s_board, s_base, s_prefix, s_avail, s_state,
-                   s_heartbeat, s_crash;
+static std::string s_uri, s_user, s_pass, s_node, s_board, s_base, s_prefix, s_avail, s_x10a,
+                   s_modbus, s_modbus_avail, s_legacy_state, s_heartbeat, s_crash;
 static std::string s_announced_profile;               // profile we last published discovery for (mqtt_task only)
-static std::string s_last_json;                       // last state JSON published (dedup guard; mqtt_task only)
+static std::string s_last_x10a_json;                  // per-topic dedup guards (mqtt_task only)
+static std::string s_last_modbus_json;
+static int         s_last_modbus_live = -1;             // -1 unknown, 0 offline, 1 online
+static bool        s_modbus_discovery_announced = false;
+static bool        s_modbus_disabled_cleaned    = false;
 // Stale-identity migration (mqtt_task only) — see retract_legacy_fixed / retract_stale_values below.
 static bool        s_legacy_fixed_retracted = false;   // heartbeat + crash entities: once per boot
 static std::string s_stale_values_profile;             // value entities: the profile they were
@@ -184,12 +188,7 @@ static void mqtt_publish(const std::string& topic, const char* payload, int len,
 //     temperature look freshly observed to every consumer downstream. The heartbeat's
 //     bus_ou_held_over says WHY the field went away, so this reads as a resting unit and not as a
 //     broken link.
-static std::vector<GroupedValue> current_grouped() {
-    // The X10A cache only. The HomeHub is a separate stack with its own cache, and it is deliberately
-    // NOT published here: it would put a second HA entity on every quantity both sources carry (two
-    // "DHW tank temp" sensors that disagree slightly), which is a worse answer than one. Its readings
-    // reach the web UI beside their X10A twins (docs/MODBUS_PROTOCOL.md), and its LINK health rides
-    // the heartbeat below.
+static std::vector<GroupedValue> current_x10a_values() {
     const size_t cap = hp_values_capacity();
     std::vector<CachedValue> cache(cap ? cap : 1);
     const size_t n = hp_values_snapshot(cache.data(), cache.size());
@@ -215,6 +214,26 @@ static std::vector<GroupedValue> current_grouped() {
                     out.push_back({group, FAULT_COMPANIONS[k].key, fault_companion_state(k, fc),
                                    PublishedKind::Number});
         }
+    }
+    return out;
+}
+
+// Current HomeHub values, but only when the accessor proves the copied cache belongs to the TCP
+// session that is still connected. The register definition supplies the permanent JSON type; a
+// formatted enum that happens to contain a digit never gets mistaken for a number.
+static std::vector<GroupedValue> current_modbus_values(bool& live) {
+    const size_t cap = mb_values_capacity();
+    std::vector<CachedValue> cache(cap ? cap : 1);
+    const size_t n = mb_values_snapshot(cache.data(), cache.size(), live);
+    std::vector<GroupedValue> out;
+    if (!live) return out;
+    out.reserve(n);
+    for (size_t i = 0; i < n; i++) {
+        if (cache[i].value.empty()) continue;
+        const def::HomeHubReg* reg = def::homehub_find(cache[i].off);
+        if (!reg) continue;   // fail closed: an untyped field must not reach a typed MQTT contract
+        out.push_back({"modbus", object_id(reg->label), cache[i].value,
+                       def::homehub_is_text(*reg) ? PublishedKind::Text : PublishedKind::Number});
     }
     return out;
 }
@@ -323,13 +342,13 @@ static void retract_stale_values(const logic::ProfileView& prof, const std::stri
 }
 
 // Stream one retained discovery config per value of the active profile. Every entity points at the
-// one shared state topic (s_state) and pulls its value out via a value_template. A bit-flag row lands
+// X10A topic (s_x10a) and pulls its value out via a value_template. A bit-flag row lands
 // under the binary_sensor component, everything else under sensor (logic/discovery.hpp ha_component).
-static void publish_discovery() {
+static void publish_x10a_discovery() {
     const std::string profile_id = config().profile;
     // The VIEW, not the raw profile: every row hp_poll caches needs a discovery config, and the
     // page-0x10 supplement (def/overlay.hpp) is part of that row set. Announcing fewer rows than the
-    // state topic carries would leave the extra values in MQTT with no HA entity to land in.
+    // X10A topic carries would leave the extra values in MQTT with no HA entity to land in.
     const auto prof = def::resolved(def::lookup(profile_id.c_str()));
     // Delete every config published under a superseded identity FIRST — the un-grouped ids (#221)
     // and, on a board that predates the base-topic device id, the MAC-era ones. The freed entity_id
@@ -358,18 +377,18 @@ static void publish_discovery() {
         const std::string obj = object_id(d.label);
         if (obj.empty()) continue;
         const std::string ct  = discovery_topic(s_prefix, s_node, d);
-        const std::string cfg = discovery_config(s_node, s_board, s_state, s_avail, d);
+        const std::string cfg = discovery_config(s_node, s_board, s_x10a, s_avail, d);
         mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained
         // The DERIVED numeric fault flags that ride beside a textual error class (#209 defect 4).
         // Announced here, from the same row loop that publishes the class itself, so the entity set
-        // and the payload cannot drift apart — current_grouped() emits these keys for exactly the
+        // and the payload cannot drift apart — current_x10a_values() emits these keys for exactly the
         // rows this branch announces.
         if (d.conv == 203) {
             const std::string group = group_for_page(d.reg);
             for (size_t k = 0; k < FAULT_COMPANION_COUNT; k++) {
                 const FaultCompanion& c = FAULT_COMPANIONS[k];
                 mqtt_publish(companion_discovery_topic(s_prefix, s_node, group, c.key),
-                             companion_discovery_config(s_node, s_board, s_state, s_avail, group, c)
+                             companion_discovery_config(s_node, s_board, s_x10a, s_avail, group, c)
                                  .c_str(),
                              0, 0, 1);            // retained
             }
@@ -377,18 +396,52 @@ static void publish_discovery() {
     }
 }
 
-// Build + publish the grouped state JSON to the shared topic, but only when it changed since the
-// last publish (`force` overrides for the post-(re)connect seed). Returns true if it published.
-static bool publish_state(bool force) {
-    const std::string js = build_grouped_json(current_grouped());
-    if (!force && js == s_last_json) return false;
-    mqtt_publish(s_state, js.c_str(), static_cast<int>(js.size()), 0, 1);       // retained
-    s_last_json = js;
+static void publish_modbus_discovery() {
+    for (int i = 0; i < def::HOMEHUB_REG_COUNT; i++) {
+        const def::HomeHubReg& reg = def::HOMEHUB_REGS[i];
+        const std::string topic = modbus_discovery_topic(s_prefix, s_node, reg);
+        const std::string cfg =
+            modbus_discovery_config(s_node, s_modbus, s_avail, s_modbus_avail, reg);
+        mqtt_publish(topic, cfg.c_str(), 0, 0, 1);
+    }
+}
+
+static void retract_modbus_discovery() {
+    for (int i = 0; i < def::HOMEHUB_REG_COUNT; i++)
+        mqtt_publish(modbus_discovery_topic(s_prefix, s_node, def::HOMEHUB_REGS[i]), "", 0, 0, 1);
+}
+
+// Build + publish each source independently. The X10A payload is grouped by register page; the
+// Modbus topic is flat because its topic already supplies the source group. When the HomeHub link is
+// not live, `{}` actively removes every state instead of retaining values from an old TCP session.
+static bool publish_x10a_state(bool force) {
+    const std::string js = build_grouped_json(current_x10a_values());
+    if (!force && js == s_last_x10a_json) return false;
+    mqtt_publish(s_x10a, js.c_str(), static_cast<int>(js.size()), 0, 1);
+    s_last_x10a_json = js;
     return true;
 }
 
+static bool publish_modbus_state(bool force) {
+    bool live = false;
+    const std::vector<GroupedValue> values = current_modbus_values(live);
+    const std::string js = live ? build_flat_json(values) : std::string("{}");
+    bool published = false;
+    if (force || static_cast<int>(live) != s_last_modbus_live) {
+        mqtt_publish(s_modbus_avail, live ? "online" : "offline", 0, 0, 1);
+        s_last_modbus_live = live ? 1 : 0;
+        published = true;
+    }
+    if (force || js != s_last_modbus_json) {
+        mqtt_publish(s_modbus, js.c_str(), static_cast<int>(js.size()), 0, 1);
+        s_last_modbus_json = js;
+        published = true;
+    }
+    return published;
+}
+
 // Stream one retained discovery config per diagnostic sensor (logic/heartbeat.hpp). These describe
-// the ESP32 board + X10A link itself, not a heat-pump value, so — unlike publish_discovery() —
+// the ESP32 board + X10A link itself, not a heat-pump value, so — unlike X10A discovery —
 // they don't wait on profile detection: WiFi signal and free heap are meaningful even while
 // profile == "auto".
 static void publish_heartbeat_discovery() {
@@ -450,7 +503,7 @@ static void publish_crash() {
 
 // Snapshot board/link diagnostics from the IDF heap/timer APIs + the poll/WiFi/MQTT state, and
 // publish it to the heartbeat topic (not retained). Called on a fixed HEARTBEAT_INTERVAL_S cadence
-// (mqtt_task) — diagnostics, not real-time telemetry, so unlike the state topic it always publishes
+// (mqtt_task) — diagnostics, not real-time telemetry, so unlike the source topics it always publishes
 // rather than only on change.
 static void publish_heartbeat() {
     HpStats  hp = hp_stats();
@@ -534,8 +587,8 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
     }
 }
 
-// Publish task: announce on (re)connect / profile change, then publish the grouped state JSON when
-// it changes. The per-cycle body is guarded — an OOM std::string build must skip the cycle, not
+// Publish task: announce on (re)connect / profile change, then publish both source JSON documents
+// when they change. The per-cycle body is guarded — an OOM std::string build must skip the cycle, not
 // throw through the FreeRTOS task and reboot the device.
 static void mqtt_task(void*) {
     esp_task_wdt_add(NULL);                            // watch the publish task for a wedged broker write
@@ -551,7 +604,11 @@ static void mqtt_task(void*) {
             if (s_connected) {
                 if (s_announce.exchange(false)) {              // consume: just (re)connected
                     s_announced_profile.clear();               // force a fresh discovery below
-                    s_last_json.clear();                       // force a full state re-seed
+                    s_last_x10a_json.clear();                  // force full per-topic state re-seeds
+                    s_last_modbus_json.clear();
+                    s_last_modbus_live = -1;
+                    s_modbus_discovery_announced = false;
+                    s_modbus_disabled_cleaned = false;
                     // Force the board/link diagnostic discovery to re-publish on THIS (re)connect. The
                     // disconnect handler also clears s_heartbeat_announced, but a DISCONNECT landing
                     // mid-discovery (after the check below, before the publishes finish) could leave it
@@ -560,6 +617,13 @@ static void mqtt_task(void*) {
                     s_heartbeat_announced = false;
                     heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S; // publish it right away, then every 10 s
                     mqtt_publish(s_avail, "online", 0, 0, 1);
+                    // Fail closed across reconnect: a retained `online` from a previous session must
+                    // not briefly revive stale HomeHub values while this cycle checks cache liveness.
+                    mqtt_publish(s_modbus_avail, "offline", 0, 0, 1);
+                    s_last_modbus_live = 0;
+                    // Delete the retained pre-split X10A payload. Nothing in this build consumes
+                    // <base>/state, so leaving it behind would expose a permanently frozen duplicate.
+                    mqtt_publish(s_legacy_state, "", 0, 0, 1);
                 }
                 if (!s_heartbeat_announced) {                  // board/link diagnostics — independent
                     publish_heartbeat_discovery();              // of heat-pump profile detection
@@ -568,16 +632,38 @@ static void mqtt_task(void*) {
                 }
                 const std::string prof = config().profile;
                 if (prof != "auto" && prof != s_announced_profile) {
-                    publish_discovery();                       // discovery for the (new) profile
+                    publish_x10a_discovery();                  // discovery for the (new) profile
                     s_announced_profile = prof;
-                    publish_state(true);                       // full retained seed
+                    publish_x10a_state(true);                  // full retained seed
                 } else if (!s_announced_profile.empty() && prof == s_announced_profile) {
-                    publish_state(false);                      // republish only when it changed
+                    publish_x10a_state(false);                 // republish only when it changed
                 }
                 // prof == "auto" (detection pending): wait — don't publish transient generic sensors.
 
+                const bool modbus_enabled = mb_status().enabled;
+                if (modbus_enabled) {
+                    if (!s_modbus_discovery_announced) {
+                        publish_modbus_discovery();
+                        s_modbus_discovery_announced = true;
+                        s_modbus_disabled_cleaned = false;
+                        publish_modbus_state(true);
+                    } else {
+                        publish_modbus_state(false);
+                    }
+                } else if (!s_modbus_disabled_cleaned) {
+                    // Covers both an upgrade from an enabled build and a live POST /set_hp disable.
+                    // Discovery is retained independently of values, so both surfaces need cleanup.
+                    retract_modbus_discovery();
+                    mqtt_publish(s_modbus, "", 0, 0, 1);
+                    mqtt_publish(s_modbus_avail, "", 0, 0, 1);
+                    s_last_modbus_json.clear();
+                    s_last_modbus_live = -1;
+                    s_modbus_discovery_announced = false;
+                    s_modbus_disabled_cleaned = true;
+                }
+
                 // Fixed HEARTBEAT_INTERVAL_S cadence — diagnostics, not real-time telemetry, so it
-                // doesn't need the state topic's every-cycle publish-on-change treatment.
+                // doesn't need the source topics' every-cycle publish-on-change treatment.
                 heartbeat_elapsed_s += delay_s;
                 if (heartbeat_elapsed_s >= HEARTBEAT_INTERVAL_S) {
                     publish_heartbeat();
@@ -665,14 +751,17 @@ void mqtt_ha_start() {
     s_board  = board_id();               // this board: MQTT client id + dev.ids merge key
     s_prefix = CONFIG_DAIKIN_MQTT_DISCOVERY_PREFIX;
     s_avail     = availability_topic(s_base);
-    s_state     = state_topic(s_base);
+    s_x10a      = x10a_topic(s_base);
+    s_modbus    = modbus_topic(s_base);
+    s_modbus_avail = modbus_availability_topic(s_base);
+    s_legacy_state = legacy_state_topic(s_base);
     s_heartbeat = heartbeat_topic(s_base);
     s_crash     = crash_topic(s_base);
 
     if (!build_client()) return;                               // policy error already surfaced
     esp_mqtt_client_start(s_client);
     if (xTaskCreate(mqtt_task, "mqtt_pub", 4096, nullptr, 4, nullptr) != pdPASS) {
-        // No publish task -> discovery/state/heartbeat never go out. The client keeps its connection
+        // No publish task -> discovery/value/heartbeat messages never go out. The client keeps its connection
         // (and LWT), but say so rather than looking configured-but-silent in /status.
         set_status(false, "publish task alloc failed");
         diag_printf("mqtt: publish task alloc failed — no MQTT publishing this boot\n");
