@@ -6,6 +6,11 @@
 
 const DEMO = (() => {
   const R = (label, value, unit, reg) => ({ label, value: value == null ? null : String(value), unit, reg });
+  // HomeHub telemetry has its own array and addresses registers by their EKRHH data-model offset.
+  // The DHW scene below reports mode 2 (Recommended on), which is what evcc's boost writes; every
+  // other scene reports mode 0 so the badge proves both its appearance and disappearance.
+  const SG = (value) => ({ label: "Smart-Grid operation mode", value: String(value), unit: "",
+                           off: 56, binary: false });
   // A BIT-FLAG row exactly as the firmware serves it since #210: the value is the NUMBER 1/0, and
   // `binary: true` is the structural marker that lets the browser render it as ON/OFF without
   // treating every numeric 0/1 as a switch (http_status.cpp, conv_is_binary). Emitting the old
@@ -122,6 +127,7 @@ const DEMO = (() => {
     ntp: { server: "pool.ntp.org", synced: true, time: "2026-01-18T07:42:11Z" },
     hp: { proto: "S", rx: 1, tx: 2, connected: true, last_ok_s: 0, registers: 12,
           values: scenes[i].v.length, crc_err: 0, timeout_err: 0 },
+    modbus: { enabled: true, connected: true },
     profile: { id: "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw" },
     sys: { free_heap: 118432, min_free_heap: 96120, max_alloc: 61440,
            reset_reason: "power_on", safe_mode: false },
@@ -133,7 +139,7 @@ const DEMO = (() => {
               model: { name: "EHVH/EHVX 04-08 kW", family: "Altherma 3 R", marketing: "Altherma 3 R W" } },
   });
 
-  return { scenes, status };
+  return { scenes, status, smartGrid: SG };
 })();
 
 // The README is English, so the demo page is too — the app picks its language from
@@ -157,7 +163,10 @@ try {
   window.fetch = async (url) => {
     const u = String(url);
     if (u.startsWith("/status")) return json(DEMO.status(idx));
-    if (u.startsWith("/values")) return json({ values: DEMO.scenes[idx].v });
+    if (u.startsWith("/values")) return json({
+      values: DEMO.scenes[idx].v,
+      modbus: [DEMO.smartGrid(idx === 1 ? 2 : 0)],
+    });
     if (u.startsWith("/history")) return { ok: false, status: 404, json: async () => ({}), text: async () => "" };
     if (u.startsWith("/diag")) return { ok: true, status: 200, text: async () => "[uptime 48213] demo", json: async () => ({}) };
     return json({});

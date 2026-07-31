@@ -179,6 +179,18 @@ svg .sc-status.dim { fill: var(--muted); }
    text keeps its normal colour, which is what separates it from .dim (no data at all, both muted).
    The words say which it is either way, so neither reading depends on the colour. */
 svg .sc-status.idle { fill: var(--brand-strong); }
+/* A non-zero HomeHub Smart-Grid request. Petrol carries SOURCE here, as it does on every other
+   Modbus reading; the words carry the state, so colour is never the only evidence. It is hidden by
+   visibility as well as opacity because the group is focusable/tappable (same rule as the defrost,
+   quiet and BSH badges below). */
+svg .sc-sg-request {
+  opacity: 0; visibility: hidden; transition: opacity .3s, visibility 0s .3s;
+}
+.sg-request-on .sc-sg-request {
+  opacity: 1; visibility: visible; transition: opacity .3s, visibility 0s;
+}
+svg .sc-sg-request-box { fill: var(--src-mb-soft); stroke: var(--src-mb); }
+svg .sc-sg-request .sc-val { fill: var(--src-mb); font-weight: 700; letter-spacing: .02em; }
 svg .sc-pipe { fill: none; stroke: var(--pipe); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
 svg .sc-rpipe { fill: none; stroke: var(--pipe); stroke-width: 3.5; stroke-linecap: round; }
 svg .sc-flow {
@@ -262,6 +274,8 @@ svg .sc-snow, svg .sc-quiet, svg .sc-bsh-state {
 svg .sc-hit { cursor: pointer; }
 svg .sc-hit:hover :is(.sc-pill, .sc-box, .sc-plate, .sc-buh, .sc-comp, .sc-valve, .sc-tie) { stroke: var(--brand); }
 svg .sc-hit.sel :is(.sc-pill, .sc-box, .sc-plate, .sc-buh, .sc-comp, .sc-valve) { stroke: var(--brand); stroke-width: 2.5; }
+svg .sc-hit:hover .sc-sg-request-box { stroke: var(--brand); }
+svg .sc-hit.sel .sc-sg-request-box { stroke: var(--brand); stroke-width: 2.5; }
 svg .sc-hit.sel .sc-tie { stroke: var(--brand); }
 /* Pipes: a 3.5–5 px stroke is far too thin to tap, so each run carries an invisible fat hit line.
    `pointer-events: stroke` is deliberate — it hit-tests the stroke area regardless of the paint
