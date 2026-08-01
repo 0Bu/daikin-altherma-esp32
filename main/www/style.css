@@ -329,6 +329,8 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 }
 .inspect-x:hover { color: var(--fg); }
 .inspect-body { font-size: 13.5px; color: var(--muted); line-height: 1.55; margin-top: 9px; }
+/* Description first, trend second, values last. Every value — including a Modbus twin of the
+   headline — enters this one divided list instead of interrupting the prose above the chart. */
 .inspect-rows { margin-top: 9px; }
 .inspect-row {
   display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
@@ -336,6 +338,9 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 }
 .inspect-row span:first-child { color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
 .inspect-row span:last-child { font-weight: 600; color: var(--fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* A source comparison belongs to the Modbus value immediately above it, not to the description.
+   It therefore gets no divider of its own; the next reading supplies the next list line. */
+.inspect-rows > .mb-delta { margin: -1px 0 0; padding: 0 0 5px; }
 
 /* Models without a DHW tank / room sensor: hide those schematic parts instead of dangling "—".
    Same rule for the two derived/flag pills: .no-pth when flow or ΔT is missing (no heat estimate),
@@ -820,12 +825,9 @@ textarea.input[readonly] { font-size: 12px; color: var(--muted); white-space: pr
 :root { --src-mb:#0E8A8A; --src-mb-soft:rgba(14,138,138,.10); }
 @media (prefers-color-scheme: dark) { :root { --src-mb:#3FB6B6; --src-mb-soft:rgba(63,182,182,.15); } }
 
-/* The second source, as one plain line at the end of an explainer — the same paragraph as the
-   "Normal:" note above it, only in petrol. No border, no card, no second value column: the row's own
-   reading is already stated in the header the reader just tapped, so this line is the OTHER
-   instrument and nothing else. (An earlier revision boxed the two sources together with their
-   difference; it repeated the header's own number in a heavier shape and pushed the description
-   below the fold.) */
+/* The second source inside a value-row accordion is one plain line at the end of its explainer.
+   Schematic inspectors instead put the same reading in their divided values section after the
+   chart, alongside every other component reading. */
 /* The source badge. Outlined, lowercase and MONOSPACE — the type this UI already reserves for
    machine identity (the inspector's source line naming the /values row is mono for the same
    reason), so the marker reads as quiet metadata rather than as another word in the sentence.

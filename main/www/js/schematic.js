@@ -1125,11 +1125,31 @@ function inspMembers(e, row, fb) {
     });
 }
 
-// A paired headline normally uses the compact comparison line in the explainer body. Grouped
-// targets put both readings in their complete member table instead, leaving the body as explanation
-// rather than a second, exceptional place for values.
-const inspSourceNoteHtml = (e, row) =>
-  e && e.listAllValues ? "" : mbNoteHtml(row, mbTwin(row));
+// Every reading below an inspector belongs in ONE value list after the trend. A leaf target keeps
+// its X10A reading in the prominent headline, so only the Modbus twin is added here; a grouped
+// target already keeps the complete X10A/Modbus pair in inspMembers(). This replaces the exceptional
+// path that inserted a leaf's Modbus value between the timeless description and the chart, while
+// all other values sat below the chart behind dividers.
+function inspValues(e, row, fb) {
+  const members = inspMembers(e, row, fb);
+  // Keep the old comparison contract: a second opinion is only meaningful while the primary
+  // headline has a current value. Grouped targets still show all available readings independently.
+  const twin = e && !e.listAllValues && row && row.value != null ? mbTwin(row) : null;
+  return twin ? [{ x10a: null, mb: twin, compare: row }, ...members] : members;
+}
+
+// Only call two readings equal/different while both are current. In particular, an X10A row held
+// over during an outdoor-unit restart must not turn a perfectly valid Modbus value into a false
+// disagreement warning.
+function inspComparisonHtml(m, d) {
+  // `compare` marks the leaf-headline twin that used to carry this note in the explainer. Existing
+  // grouped/context rows remain compact: moving the note must not multiply it across every pair.
+  const comparison = m.compare;
+  return comparison && comparison.value != null && !rowHeldOver(comparison, d)
+      && m.mb && m.mb.value != null
+    ? mbDeltaHtml(comparison, m.mb)
+    : "";
+}
 
 // The reading of a /values row as one string ("42.8 °C"); "—" for an absent row — and "—" for a row
 // the outdoor unit has stopped refreshing (rowHeldOver / logic/ou_stale.hpp), which is the SAME
@@ -1189,20 +1209,20 @@ function inspectSig(e) {
   const row = d ? inspCurRow(e) : null;
   // The fallback headline is a value like any other and moves like any other, so it is in the key.
   const fb = row ? null : mbForInspect(S.insp);
-  // Each member reading AND its Modbus twin: the panel draws both, so both have to be in the key.
-  // Use the same filtered set as the renderer; grouped targets deliberately include their headline
-  // pair here, while leaf targets keep that pair in the dedicated signature fields below.
+  // Every value row AND its Modbus twin: the panel draws both, so both have to be in the key. Use
+  // the same set as the renderer; grouped targets include their headline pair, while leaf targets
+  // include only their headline's Modbus twin because the X10A value is already in the header.
   // A value the body renders but the signature omits simply stops repainting — the mirror of putting
   // a side effect IN here, and the quieter of the two failures: the panel keeps showing the gateway's
   // reading from whenever something else last changed, looking perfectly current.
-  const rows = (d ? inspMembers(e, row, fb).map((m) => {
-    return inspVal(m.x10a, d) + (m.mb ? "/" + m.mb.value : "");
+  const rows = (d ? inspValues(e, row, fb).map((m) => {
+    return inspVal(m.x10a, d) + (m.mb ? "/" + m.mb.value : "")
+      + (m.compare ? "/" + m.compare.value : "");
   }) : []).join(",");
-  const twin = mbTwin(row);
   // LANG guarantees the full body is redrawn even when this particular entry's title/live sentence
   // happens to be spelled identically in both dictionaries.
-  return [LANG, S.insp, inspTitleText(e, d), inspVal(row, d), twin ? twin.value : "",
-          fb ? fb.value : "", d && e.head ? e.head(d) : "",
+  return [LANG, S.insp, inspTitleText(e, d), inspVal(row, d), fb ? fb.value : "",
+          d && e.head ? e.head(d) : "",
           inspNowText(e, d) || "", inspHeld(e, d) ? "held" : "", rows].join("|");
 }
 
@@ -1324,11 +1344,11 @@ function renderInspect() {
   const ownWhat = typeof e.what === "function" ? e.what(d) : e.what;
   const what = ownWhat ? descParaHtml(esc(tx(ownWhat)))
                        : (desc ? descBodyHtml(desc, (row || fb)?.value) : "");
-  // A leaf reading puts its SECOND source after the description. A grouped target keeps prose and
-  // values separate: all of its sources live together in the member table below the chart.
-  $("inspBody").innerHTML = what + inspSourceNoteHtml(e, row)
-    + (sentence ? descParaHtml(esc(sentence)) : "") + inspHeldHtml(e, d);
-  $("inspRows").innerHTML = !d ? "" : inspMembers(e, row, fb)
+  // Prose stays prose. Every live reading, including a leaf headline's second source, is rendered
+  // together after the chart in the divided value list below.
+  $("inspBody").innerHTML = what + (sentence ? descParaHtml(esc(sentence)) : "")
+    + inspHeldHtml(e, d);
+  $("inspRows").innerHTML = !d ? "" : inspValues(e, row, fb)
     // A member reading with a twin gets the gateway's value as its OWN row, labelled "(Modbus)" and
     // petrol throughout — never appended to the X10A value in the same cell, which is what this did
     // first and which rendered as "46.2 °C 46.0 °C": two numbers of equal weight, jammed together,
@@ -1347,7 +1367,8 @@ function renderInspect() {
         `<div class="inspect-row mb-row">` +
           `<span>${esc(displayHomeHubLabel(m.mb))} ` +
             `<span class="mb-tag">${esc(t("src.modbus_tag"))}</span></span>` +
-          `<span>${esc(displayValue(m.mb))}${mbUnit ? " " + esc(mbUnit) : ""}</span></div>`;
+          `<span>${esc(displayValue(m.mb))}${mbUnit ? " " + esc(mbUnit) : ""}</span></div>` +
+        inspComparisonHtml(m, d);
     })
     .join("");
 }

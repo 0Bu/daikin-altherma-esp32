@@ -83,8 +83,8 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     " mbUnitAbnormality," +
     " SMART_GRID_MODE_VALUE, x10aSmartGridModeFrom, x10aSmartGridMode, x10aSmartGridRow," +
     " sgModeText, sgRequestText, mbNoteHtml, inspCurRow, inspMember," +
-    " inspMembers, inspSourceNoteHtml, inspHeld, liveData, compressorRunning, waterThermalKind," +
-    " activeSpaceKind, ouReadingText, INSPECT," +
+    " inspMembers, inspValues, inspComparisonHtml, inspHeld, liveData, compressorRunning," +
+    " waterThermalKind, activeSpaceKind, ouReadingText, INSPECT," +
     " pelMeasured, pelApproxText, PEL_INSPECT, setSchematicHitAvailable };",
     context, { filename: "main/www/app.sources" });
   context.__api.S = context.S;
@@ -522,9 +522,9 @@ const X_SG = (contact, on) => ({
 }
 
 // ── 17. Leaf values stay compact; grouped targets list every value in one place ─────────────────
-// A leaf value does not repeat its headline in the member table. The tank, however, is a GROUP:
-// temperature, target and valve all belong in the table below the chart, including both sources for
-// paired readings. None of those readings gets a special line inside the explanatory prose.
+// A leaf value does not repeat its X10A headline in the value table, but its Modbus twin belongs
+// there after the chart with every additional reading. The tank is a GROUP: temperature, target and
+// valve all remain in that same table. No reading gets a special line inside the explanatory prose.
 {
   const TANK_X = X("DHW tank temp. (R5T)", "45.2", "dhw_tank");
   const TANK_M = M(43, "Domestic Hot Water temperature", "45.4", "dhw_tank");
@@ -535,17 +535,35 @@ const X_SG = (contact, on) => ({
   const row = live.inspCurRow(LEAF);
   assert.deepEqual(live.inspMembers(LEAF, row, null).map((m) => m.x10a), [SETPOINT],
     "a leaf value keeps only its additional context row");
-  assert.match(live.inspSourceNoteHtml(LEAF, row), /Domestic Hot Water temperature/,
-    "a leaf value retains the compact Modbus comparison in its explainer");
+  const leafValues = live.inspValues(LEAF, row, null);
+  assert.equal(leafValues.length, 2, "the leaf has one source twin and one context value");
+  assert.equal(leafValues[0].x10a, null, "the X10A headline is not repeated in the values section");
+  assert.equal(leafValues[0].mb, TANK_M,
+    "the headline's Modbus twin moves into the values section after the chart");
+  assert.equal(leafValues[0].compare, TANK_X,
+    "the twin keeps the X10A headline as its comparison reference");
+  assert.equal(leafValues[1].x10a, SETPOINT, "additional context follows the source twin");
+  assert.match(live.inspComparisonHtml(leafValues[0], live.liveData()), /Difference 0\.2 °C/,
+    "two current source readings keep their comparison note with the Modbus row");
+
+  const missingPrimary = { ...TANK_X, value: null };
+  assert.deepEqual(live.inspValues({ ...LEAF, rows: [] }, missingPrimary, null), [],
+    "a missing X10A headline does not manufacture a two-source value row");
+  assert.equal(live.inspComparisonHtml({ compare: missingPrimary, mb: TANK_M }, live.liveData()), "",
+    "a missing primary value is not reported as a source disagreement");
+
+  const heldData = { ...live.liveData(), ouHeldOver: true };
+  assert.equal(live.inspComparisonHtml({ compare: OUT_X, mb: OUT_M }, heldData), "",
+    "a held-over primary value is not reported as a source disagreement");
 
   const GROUP = { ...LEAF, listAllValues: true };
-  const members = live.inspMembers(GROUP, row, null);
+  const members = live.inspValues(GROUP, row, null);
   assert.equal(members.length, 2, "the grouped target keeps its full value list");
   assert.equal(members[0].x10a, TANK_X, "the X10A tank temperature is the first group row");
   assert.equal(members[0].mb, TANK_M, "its Modbus twin stays on the same group member");
+  assert.equal(live.inspComparisonHtml(members[0], live.liveData()), "",
+    "existing grouped source rows stay compact without multiplying comparison notes");
   assert.equal(members[1].x10a, SETPOINT, "the DHW setpoint follows in the same group");
-  assert.equal(live.inspSourceNoteHtml(GROUP, row), "",
-    "a grouped target puts no value line inside its explanatory prose");
   assert.equal(live.INSPECT.tank.listAllValues, true,
     "the production tank inspector opts into the complete group table");
   assert.equal(live.INSPECT.tank.now, undefined,
@@ -556,7 +574,7 @@ const X_SG = (contact, on) => ({
                      values: [TANK_X], modbus: [TANK_M] });
   const fallback = down.mbForInspect("tank");
   assert.equal(fallback, TANK_M, "the tank target resolves the exact Modbus fallback row");
-  assert.equal(down.inspMembers(GROUP, null, fallback)[0].mb, TANK_M,
+  assert.equal(down.inspValues(GROUP, null, fallback)[0].mb, TANK_M,
     "the Modbus fallback remains visible in the complete group table");
 
   // An assembly has no headline and therefore retains the full list, including the paired reading.
@@ -564,6 +582,11 @@ const X_SG = (contact, on) => ({
   assert.equal(live.inspMembers(assembly, null, null).length, 2,
     "component inspectors retain all of their member readings");
 }
+
+assert.doesNotMatch(SOURCE, /inspSourceNoteHtml/,
+  "the inspector must not have a special path that inserts a source value into prose");
+assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
+  "source comparison notes stay attached to their value inside the divided values section");
 
 // ── 18. The MEASURED power is addressed by its offset, never by its unit ───────────────────────
 // Three rows in the HomeHub map carry "kW": the measured consumption at input 51 and the two power
