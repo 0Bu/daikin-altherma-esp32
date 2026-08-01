@@ -66,6 +66,7 @@ const CLOSE = '\n];';
 // actually happens. Optional: a tree without the table is not a failure, it is an older tree.
 const MODEL_OPEN = 'const MODEL_DESCRIPTIONS = {';
 const MODEL_CLOSE = '\n};';
+const DISPLAY_UNIT_DECL = 'const LABEL_UNIT_SUFFIX = ';
 const DISPLAY_LABEL_OPEN = 'function displayReadingLabel(label) {';
 const DISPLAY_LABEL_CLOSE = '\n}';
 
@@ -93,7 +94,7 @@ function loadTable(src, file, open, close, braces, what, required) {
 // Load the actual browser helper rather than duplicating its transformation in the audit. The
 // independent catalog checks below define what it must achieve; evaluating the shipped function
 // makes a change to that function immediately visible to this gate.
-function loadFunction(src, file, open, close, what) {
+function loadFunction(src, file, open, close, what, preamble = '') {
   const n = src.split(open).length - 1;
   if (n !== 1) die(2, `'${open}' must appear exactly once in ${file} (found ${n})`);
   const from = src.indexOf(open);
@@ -101,7 +102,7 @@ function loadFunction(src, file, open, close, what) {
   if (to === -1) die(2, `no closing brace for ${what} in ${file}`);
   const literal = src.slice(from, to + close.length);
   let fn;
-  try { fn = vm.runInNewContext(`(${literal})`, Object.create(null), { timeout: 5000 }); }
+  try { fn = vm.runInNewContext(`${preamble}\n(${literal})`, Object.create(null), { timeout: 5000 }); }
   catch (e) { die(2, `${what} does not evaluate: ${e.message}`); }
   if (typeof fn !== 'function') die(2, `${what} did not evaluate to a function`);
   return fn;
@@ -120,8 +121,19 @@ function loadDescriptions(file) {
   if (model !== null && (typeof model !== 'object' || Array.isArray(model))) {
     die(2, 'MODEL_DESCRIPTIONS did not evaluate to an object');
   }
+  // displayReadingLabel deliberately shares this exact allow-list with displayUnit. Include the
+  // declaration when evaluating the helper in isolation, so the audit executes the production
+  // dependency rather than a looser second copy of it.
+  const unitDeclCount = src.split(DISPLAY_UNIT_DECL).length - 1;
+  if (unitDeclCount !== 1) {
+    die(2, `'${DISPLAY_UNIT_DECL}' must appear exactly once in ${file} (found ${unitDeclCount})`);
+  }
+  const unitDeclFrom = src.indexOf(DISPLAY_UNIT_DECL);
+  const unitDeclTo = src.indexOf(';', unitDeclFrom);
+  if (unitDeclTo === -1) die(2, `no closing semicolon for LABEL_UNIT_SUFFIX in ${file}`);
+  const unitPreamble = src.slice(unitDeclFrom, unitDeclTo + 1);
   const displayLabel = loadFunction(src, file, DISPLAY_LABEL_OPEN, DISPLAY_LABEL_CLOSE,
-                                    'displayReadingLabel');
+                                    'displayReadingLabel', unitPreamble);
   return { table, model, displayLabel };
 }
 
@@ -252,21 +264,22 @@ for (const [label, files] of [...cat.labels].sort((a, b) => a[0].localeCompare(b
   }
 }
 
-// D006/D007 — catalog type legends belong in the VALUE column, not in the visible row name.
-// D006 checks every spelling the generator currently emits, including the valve's On:…_Off:…
-// legend. D007 is the safety rail on the other side: a useful qualifier such as
-// "(0:max-100:stop)" must remain untouched.
-const LABEL_TYPE_SUFFIX = /(?:[\s.]+ON\/OFF|\s*\([^)]*On\s*:[^)]*Off\s*:[^)]*\))\s*$/i;
+// D006/D007 — catalog type legends and legacy unit suffixes belong in the VALUE column, not in the
+// visible row name. D006 checks every spelling the generator currently emits, including the
+// valve's On:…_Off:… legend. D007 is the safety rail on the other side: useful qualifiers such as
+// "(0:max-100:stop)", "(R1T)" and "(sat. °C)" must remain untouched.
+const LABEL_VALUE_SUFFIX =
+  /(?:[\s.]+ON\/OFF|\s*\([^)]*On\s*:[^)]*Off\s*:[^)]*\)|\s*\((?:kW|A|rps|pls|step|l\/min)\))\s*$/i;
 for (const label of [...cat.labels.keys()].sort((a, b) => a.localeCompare(b))) {
   const shown = displayLabel(label);
   if (typeof shown !== 'string' || !shown.trim()) {
     add('D006', label, `display label for "${label}" is empty or not a string`, String(shown));
-  } else if (LABEL_TYPE_SUFFIX.test(shown)) {
-    add('D006', label, `display label still contains a value legend: "${shown}"`,
-        'remove the trailing ON/OFF or On:…_Off:… annotation at the UI boundary');
-  } else if (!LABEL_TYPE_SUFFIX.test(label) && shown !== label) {
+  } else if (LABEL_VALUE_SUFFIX.test(shown)) {
+    add('D006', label, `display label still contains a value legend or unit: "${shown}"`,
+        'move the trailing state legend or unit to the value column at the UI boundary');
+  } else if (!LABEL_VALUE_SUFFIX.test(label) && shown !== label) {
     add('D007', label, `display label unexpectedly changes "${label}" to "${shown}"`,
-        'only trailing binary value legends may be removed');
+        'only trailing binary value legends and recognised unit suffixes may be removed');
   }
 }
 

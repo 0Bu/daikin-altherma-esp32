@@ -17,7 +17,7 @@ function renderer(lang) {
     navigator: { language: lang },
   };
   vm.createContext(context);
-  vm.runInContext(SOURCE + "\nthis.__ui = { displayValue, operationModeText, operationModeFromFlags, labels: I18N[LANG]," +
+  vm.runInContext(SOURCE + "\nthis.__ui = { displayValue, displayUnit, displayReadingLabel, operationModeText, operationModeFromFlags, labels: I18N[LANG]," +
     " sgModeText: (mode) => t(`sg.mode${mode}`)," +
     " sgBoostText: () => t(\"schem.sg_boost\") };", context,
     { filename: "main/www/app.sources" });
@@ -79,6 +79,31 @@ assert.equal(en.displayValue({ value: 7, enum: "operation_mode" }), "Unknown (7)
 assert.equal(de.displayValue({ value: 7, enum: "operation_mode" }), "Unbekannt (7)");
 assert.equal(en.displayValue({ value: -1, enum: "unknown_future" }), "Unknown (-1)");
 assert.equal(de.displayValue({ value: "17" }), "17", "ordinary numeric values remain numeric");
+
+// Legacy X10A catalog rows put these units in the label while HomeHub carries a dedicated field.
+// Both must cross the visual boundary as the same label/value shape, without guessing that every
+// parenthetical suffix is a unit.
+const legacyUnits = [
+  ["Flow sensor (l/min)", "Flow sensor", "L/min"],
+  ["O/U capacity (kW)", "O/U capacity", "kW"],
+  ["INV primary current (A)", "INV primary current", "A"],
+  ["INV frequency (rps)", "INV frequency", "rps"],
+  ["Expansion valve 1 (pls)", "Expansion valve 1", "pls"],
+  ["Fan 1 (step)", "Fan 1", "step"],
+];
+for (const [label, shown, unit] of legacyUnits) {
+  const row = { label, unit: "" };
+  assert.equal(en.displayReadingLabel(label), shown, `${label}: unit leaves the visual label`);
+  assert.equal(en.displayUnit(row), unit, `${label}: unit moves beside the visual value`);
+}
+assert.equal(en.displayUnit({ label: "Flow sensor (l/min)", unit: "L/min" }), "L/min",
+  "an explicit HomeHub-style unit wins without duplication");
+assert.equal(en.displayUnit({ label: "Flow sensor", unit: "l/min" }), "L/min",
+  "flow-unit spelling is canonical across both sources");
+assert.equal(en.displayReadingLabel("Outdoor Air Temp (R1T)"), "Outdoor Air Temp (R1T)",
+  "a sensor name in parentheses is not mistaken for a unit");
+assert.equal(en.displayReadingLabel("High Pressure (sat. °C)"), "High Pressure (sat. °C)",
+  "a semantic saturation-temperature qualifier stays in the label");
 
 const operationModes = [
   ["Stop", "Stop", "Stopp"],

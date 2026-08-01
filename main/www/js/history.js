@@ -148,7 +148,10 @@ async function ensureHist(id, source = "x10a") {
     // honest: such a pin is only valid for the exact series it was made on, and a refetch may have
     // rolled the ring — so it is dropped rather than re-pointed at a different sample.
     const gen = ((S.hist.get(key) || {}).gen || 0) + 1;
-    S.hist.set(key, { at: Date.now(), gen, source, dt: +j.dt || 300, unit: j.unit || "",
+    // A few legacy X10A rows carry their unit only in the catalog label. Normalise that at the
+    // visual boundary too, otherwise the live row can say "22.8 L/min" while its own trend and
+    // crosshair still say just "22.8". The API remains byte-for-byte compatible.
+    S.hist.set(key, { at: Date.now(), gen, source, dt: +j.dt || 300, unit: displayUnit(j),
                         t0: typeof j.t0 === "number" ? j.t0 : null,
                         b0: Number.isInteger(j.b0) ? j.b0 : null,
                         held: Array.isArray(j.held) ? j.held : [],
@@ -669,14 +672,36 @@ function displayValue(v) {
   return raw;
 }
 
+// Most rows carry a dedicated unit field. Several legacy X10A measurements instead put an exact unit
+// suffix in their generated label (for example "Flow sensor (l/min)" or "INV primary current
+// (A)") and leave `unit` empty. Keep that transport/catalog identity unchanged, but present every
+// measurement by the same UI rule: a clean name on the left and the unit beside the value.
+//
+// This is deliberately an allow-list rather than "anything in parentheses": suffixes such as
+// (R1T), (DLWA2), (L1) and the valve's (On:DHW_Off:Space) are names/legends, not units. Explicit
+// metadata always wins. L/min is canonicalised across X10A's historical `l/min` spelling and the
+// HomeHub's `L/min` spelling so paired readings are visually identical.
+const LABEL_UNIT_SUFFIX = /\s*\((kW|A|rps|pls|step|l\/min)\)\s*$/i;
+const CANONICAL_UNITS = Object.freeze({
+  "kw": "kW", "a": "A", "rps": "rps", "pls": "pls", "step": "step", "l/min": "L/min",
+});
+function displayUnit(v) {
+  const explicit = String(v?.unit ?? "").trim();
+  if (explicit) return CANONICAL_UNITS[explicit.toLowerCase()] || explicit;
+  const match = LABEL_UNIT_SUFFIX.exec(String(v?.label ?? "").trim());
+  return match ? CANONICAL_UNITS[match[1].toLowerCase()] : "";
+}
+
 // The generated X10A catalog sometimes appends the register's value legend to its technical name
 // ("Reheat ON/OFF", "3way valve(On:DHW_Off:Space)") and sometimes does not ("Defrost Operation").
-// The value column already shows ON/OFF, so carrying the legend in the row name is redundant and
-// inconsistent. Clean it only at the visual boundary: matching descriptions, history identities,
-// selectors and every API/MQTT payload continue to use the exact catalog label.
+// It also carries the legacy unit suffixes handled above. The value column already shows the state
+// or unit, so carrying either in the row name is redundant and inconsistent. Clean it only at the
+// visual boundary: matching descriptions, history identities, selectors and every API/MQTT payload
+// continue to use the exact catalog label.
 function displayReadingLabel(label) {
   const raw = String(label ?? "").trim();
   const cleaned = raw
+    .replace(LABEL_UNIT_SUFFIX, "")
     .replace(/\s*\([^)]*On\s*:[^)]*Off\s*:[^)]*\)\s*$/i, "")
     .replace(/[\s.]+ON\/OFF\s*$/i, "")
     .trim();
@@ -761,9 +786,10 @@ function vDescRow(v) {
   // the same refusal the held-over outdoor pills already make (logic/ou_stale.hpp).
   const src = fb || v;
   if (fb) cls = (cls ? cls + " " : "") + "src-val-mb";
+  const unit = displayUnit(src);
   const val = (x10aDown() && !fb)
     ? "—"
-    : esc(displayValue(src)) + (v.unit ? `<span class="vrow-unit">${esc(v.unit)}</span>` : "");
+    : esc(displayValue(src)) + (unit ? `<span class="vrow-unit">${esc(unit)}</span>` : "");
   if (!d && !hid && !mb) {
     return `<div class="vrow"><span class="vrow-label">${esc(shownLabel)}</span>` +
       `<span class="vrow-val ${cls}">${val}</span></div>`;
@@ -772,7 +798,7 @@ function vDescRow(v) {
   // which is why the builder takes finished markup rather than a description.
   return descAccordion(key, shownLabel, val, cls,
                        (d ? descBodyHtml(d, src.value) : "") + mbNoteHtml(v, mb) +
-                       histHtml(hid, v.unit, shownLabel), hid);
+                       histHtml(hid, displayUnit(v), shownLabel), hid);
 }
 
 // A Model-card row: the same accordion as a value row when copy exists for it, else the plain row
@@ -1007,8 +1033,9 @@ function modbusOnlyGroupHtml(all) {
   // plain line it was before, rather than an empty panel that opens onto nothing.
   const html = rows.map((m) => {
     const label = m.label || "", shown = displayHomeHubLabel(m);
+    const unit = displayUnit(m);
     const val = esc(displayValue(m)) +
-      (m.unit ? `<span class="vrow-unit">${esc(m.unit)}</span>` : "");
+      (unit ? `<span class="vrow-unit">${esc(unit)}</span>` : "");
     const d = descFor(label);
     const hid = m.concept && hasModbusHist(m.concept) ? m.concept : "";
     if (!d && !hid) {
@@ -1016,7 +1043,7 @@ function modbusOnlyGroupHtml(all) {
         `<span class="vrow-val src-val-mb">${val}</span></div>`;
     }
     return descAccordion(label, shown, val, "src-val-mb",
-                         (d ? descBodyHtml(d, m.value) : "") + histHtml(hid, m.unit, shown), hid);
+                         (d ? descBodyHtml(d, m.value) : "") + histHtml(hid, unit, shown), hid);
   }).join("");
   // The heading has to match what is IN the card: "Modbus only" is true of the unpaired handful and
   // false the moment `all` folds the paired rows in beside them.
