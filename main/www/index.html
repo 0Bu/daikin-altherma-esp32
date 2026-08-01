@@ -426,27 +426,27 @@
                      Drawn above the supply line it read as a stage of the flow rather than an
                      alternative to the heating, and put the drawing's two loads on two different
                      levels for no physical reason. Supply drops from the valve into the top; the
-                     return leaves the bottom and joins the shared return line at y=400, exactly like
-                     the heating circuit's does. Both risers sit on ONE axis (x=580, the valve's own
-                     outlet), like the heating branch's do on x=690: in and out of a coil is one
+                     return leaves the bottom and joins the shared return line at y=420, exactly like
+                     the heating circuit's does. Both risers sit on ONE axis (x=610, the valve's own
+                     outlet), like the heating branch's do on x=720: in and out of a coil is one
                      vertical run through the box, and offsetting the return by a few px read as a
                      kink in a straight pipe. They cannot be confused for one pipe — the box and its
                      coil sit between them, and they carry opposite flow colours. -->
                 <g class="g-dhw">
                   <g class="sc-hit" data-insp="wtank" role="button" tabindex="0">
                     <path class="sc-pipe" d="M610 180 V 248"/>
-                    <path class="sc-pipe" d="M610 358 V 420"/>
+                    <path class="sc-pipe" d="M610 388 V 420"/>
                     <path class="sc-hitline" d="M610 203 V 248"/>
-                    <path class="sc-hitline" d="M610 358 V 412"/>
+                    <path class="sc-hitline" d="M610 388 V 412"/>
                   </g>
                   <path class="sc-flow hot" id="fTank" d="M610 180 V 248"/>
                   <g class="sc-hit" data-insp="tank" role="button" tabindex="0">
-                    <rect class="sc-box sc-tank" x="514" y="248" width="124" height="110" rx="14"/>
+                    <rect class="sc-box sc-tank" x="514" y="248" width="124" height="140" rx="14"/>
                     <text class="sc-lbl" x="526" y="268" data-i18n="schem.dhw_tank">DHW TANK</text>
-                    <path d="M534 342 q10 -12 20 0 t20 0 t20 0 t20 0" fill="none" stroke="var(--pipe)" stroke-width="4" stroke-linecap="round"/>
-                    <path class="sc-flow hot" id="fCoil" style="stroke-width:4" d="M534 342 q10 -12 20 0 t20 0 t20 0 t20 0"/>
-                    <text class="sc-val" x="576" y="306" text-anchor="middle" style="font-size:17px"><tspan id="svTank">—</tspan> °C</text>
-                    <text class="sc-sub" x="576" y="324" text-anchor="middle"><tspan data-i18n="schem.set">set</tspan> <tspan id="svTankSet">—</tspan> °C</text>
+                    <path d="M534 374 q10 -12 20 0 t20 0 t20 0 t20 0" fill="none" stroke="var(--pipe)" stroke-width="4" stroke-linecap="round"/>
+                    <path class="sc-flow hot" id="fCoil" style="stroke-width:4" d="M534 374 q10 -12 20 0 t20 0 t20 0 t20 0"/>
+                    <text class="sc-val" x="576" y="329" text-anchor="middle" style="font-size:17px"><tspan id="svTank">—</tspan> °C</text>
+                    <text class="sc-sub" x="576" y="349" text-anchor="middle"><tspan data-i18n="schem.set">set</tspan> <tspan id="svTankSet">—</tspan> °C</text>
                   </g>
                   <!-- X10A BSH is the tank's electric immersion heater, not BUH step 1/2 in the
                        hydronic supply. It can run while compressor, circulation pump and flow are
@@ -457,15 +457,15 @@
                        invisible pointer or keyboard target. -->
                   <g id="gBshState" class="sc-bsh-state sc-hit" data-insp="bsh" role="button"
                      tabindex="-1" aria-hidden="true">
-                    <rect class="sc-hitarea" x="518" y="272" width="116" height="22" rx="9"/>
-                    <text class="sc-state" x="576" y="286" text-anchor="middle"
+                    <rect class="sc-hitarea" x="518" y="279" width="116" height="24" rx="9"/>
+                    <text class="sc-state" x="576" y="295" text-anchor="middle"
                           style="font-size:9px" data-i18n="schem.bsh_badge">E-heater active</text>
                   </g>
-                  <path class="sc-bsh-wave" d="M534 342 q10 -12 20 0 t20 0 t20 0 t20 0"/>
+                  <path class="sc-bsh-wave" d="M534 374 q10 -12 20 0 t20 0 t20 0 t20 0"/>
                   <!-- The tank return joins the shared run at y=420. Its PIPE moved up into the
                        branch group, where the highlight needs it — only the animated overlay stays
                        here, after the box, so it paints over the box's edge rather than under it. -->
-                  <path class="sc-flow cold" id="fTankRet" d="M610 358 V 420"/>
+                  <path class="sc-flow cold" id="fTankRet" d="M610 388 V 420"/>
                 </g>
                 <!-- Heating circuit -->
                 <!-- The heating branch owns BOTH its legs — the flow down from the valve and the
@@ -477,9 +477,9 @@
                      belongs to a branch, everything left of it is shared. -->
                 <g class="sc-hit" data-insp="wheat" role="button" tabindex="0">
                   <path class="sc-pipe" d="M610 180 H 720 V 248"/>
-                  <path class="sc-pipe" d="M720 358 V 420 H 610"/>
+                  <path class="sc-pipe" d="M720 388 V 420 H 610"/>
                   <path class="sc-hitline" d="M633 180 H 720 V 248"/>
-                  <path class="sc-hitline" d="M720 358 V 420 H 620"/>
+                  <path class="sc-hitline" d="M720 388 V 420 H 620"/>
                 </g>
                 <path class="sc-flow hot" id="fHeat" d="M610 180 H 720 V 248"/>
                 <!-- Space-heating demand: it gates THIS branch, so it stays on the heating riser
@@ -508,9 +508,9 @@
                      the box is labelled HEIZUNG, and an unattributed "20.0 °C" under that label
                      would read as a water temperature. -->
                 <g class="sc-hit" data-insp="heat" role="button" tabindex="0">
-                  <rect class="sc-box" x="654" y="248" width="132" height="110" rx="14"/>
+                  <rect class="sc-box" x="654" y="248" width="132" height="140" rx="14"/>
                   <text class="sc-lbl" x="666" y="268" data-i18n="schem.heating">HEATING</text>
-                  <path d="M680 278 v34 M700 278 v34 M720 278 v34 M740 278 v34 M760 278 v34" stroke="var(--line)" stroke-width="3" fill="none"/>
+                  <path d="M680 282 v55 M700 282 v55 M720 282 v55 M740 282 v55 M760 282 v55" stroke="var(--line)" stroke-width="3" fill="none"/>
                 </g>
                 <!-- Return line -->
                 <!-- The SHARED run only: from the merge at x=610 to the plate. Each drawn pipe
@@ -526,7 +526,7 @@
                      cycle animates a stretch of heating pipe that nothing is flowing through —
                      which is what the drawing did, and it is the same class of error as a reading
                      on the wrong branch: the picture asserting a flow the plant does not have. -->
-                <path class="sc-flow cold" id="fHeatRet" d="M720 358 V 420 H 610"/>
+                <path class="sc-flow cold" id="fHeatRet" d="M720 388 V 420 H 610"/>
                 <path class="sc-flow cold" id="fRet" d="M610 420 H 378"/>
                 <!-- Return line carries no pump (it is on the supply side — see the order note at
                      the supply run). What it does carry, in the manufacturer's order seen from the
@@ -539,7 +539,7 @@
                   <text class="sc-sub" x="523" y="467" text-anchor="middle" data-i18n="schem.return">return</text>
                   <path class="sc-tie" d="M523 431 V 424"/>
                 </g>
-                <!-- The three return sensors sit on the run's COMMON section — left of x=580, where
+                <!-- The three return sensors sit on the run's COMMON section — left of x=610, where
                      the tank branch joins the heating branch. That is not decoration: R4T is at the
                      indoor unit's water INLET, downstream of the merge, so it reads whichever branch
                      is flowing (the tank's during a DHW cycle, the heating's otherwise) and belongs
@@ -567,10 +567,10 @@
                      NAME is exactly what §5.3 allows a pill to carry — it is attribution, not the
                      commentary that was taken out of the drawing earlier. -->
                 <g class="sc-hit" data-insp="wp" role="button" tabindex="0">
-                  <rect class="sc-pill" x="449" y="386" width="60" height="22" rx="11"/>
-                  <text class="sc-val" x="479" y="401" text-anchor="middle"><tspan id="svWp">—</tspan> bar</text>
-                  <text class="sc-sub" x="479" y="380" text-anchor="middle" data-i18n="schem.water_press">water pressure</text>
-                  <path class="sc-tie" d="M479 408 V 416"/>
+                  <rect class="sc-pill" x="397" y="386" width="60" height="22" rx="11"/>
+                  <text class="sc-val" x="427" y="401" text-anchor="middle"><tspan id="svWp">—</tspan> bar</text>
+                  <text class="sc-sub" x="427" y="380" text-anchor="middle" data-i18n="schem.water_press">water pressure</text>
+                  <path class="sc-tie" d="M427 408 V 416"/>
                 </g>
                 <!-- Room reading: BARE text inside the heating box, like the tank's value in its
                      own box — a reading inside the component that owns it does not need a second
@@ -582,9 +582,9 @@
                      on hover/select (.sc-hit-bare) in place of a border. .no-room still hides the
                      reading alone, leaving an emitter box that claims nothing. Drawn last. -->
                 <g class="g-room sc-hit sc-hit-bare" data-insp="room" role="button" tabindex="0">
-                  <rect class="sc-hitarea" x="662" y="316" width="116" height="34" rx="11"/>
-                  <text class="sc-val" x="720" y="331" text-anchor="middle"><tspan data-i18n="schem.room">Room</tspan> <tspan id="svRoom">—</tspan> °C</text>
-                  <text class="sc-sub" x="720" y="345" text-anchor="middle"><tspan data-i18n="schem.set">set</tspan> <tspan id="svRoomSet">—</tspan> °C</text>
+                  <rect class="sc-hitarea" x="662" y="340" width="116" height="40" rx="11"/>
+                  <text class="sc-val" x="720" y="357" text-anchor="middle"><tspan data-i18n="schem.room">Room</tspan> <tspan id="svRoom">—</tspan> °C</text>
+                  <text class="sc-sub" x="720" y="375" text-anchor="middle"><tspan data-i18n="schem.set">set</tspan> <tspan id="svRoomSet">—</tspan> °C</text>
                 </g>
                 </g>
               </svg>

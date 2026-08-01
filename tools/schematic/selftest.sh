@@ -162,8 +162,8 @@ reset
 patch_file "$WORK/main/www/index.html" <<'SEED'
 import sys
 p = sys.argv[1]; s = open(p).read()
-pipe = '                  <path class="sc-pipe" d="M720 358 V 420 H 610"/>\n'
-hit = '                  <path class="sc-hitline" d="M720 358 V 420 H 620"/>\n'
+pipe = '                  <path class="sc-pipe" d="M720 388 V 420 H 610"/>\n'
+hit = '                  <path class="sc-hitline" d="M720 388 V 420 H 620"/>\n'
 ret = '                  <path class="sc-pipe" d="M610 420 H 378"/>\n'
 if pipe not in s or hit not in s or ret not in s: sys.exit(1)
 s = s.replace(pipe, '', 1).replace(hit, '', 1)
@@ -180,7 +180,7 @@ reset
 patch_file "$WORK/main/www/index.html" <<'SEED'
 import sys
 p = sys.argv[1]; s = open(p).read()
-leg = '                    <path class="sc-pipe" d="M610 358 V 420"/>\n'
+leg = '                    <path class="sc-pipe" d="M610 388 V 420"/>\n'
 after = '                  <path class="sc-flow hot" id="fTank" d="M610 180 V 248"/>\n'
 if leg not in s or after not in s: sys.exit(1)
 open(p, 'w').write(s.replace(leg, '', 1).replace(after, after + leg, 1))
