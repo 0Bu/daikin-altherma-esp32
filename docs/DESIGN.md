@@ -566,15 +566,17 @@ Body, ordered:
    missing value), the **source row label** in mono (the verbatim English register name, so a number
    in the picture can be traced to the value list in item 6), a live **state sentence** in bold for
    components ("Running — compressor at 62 rps.", "Paused — the valve is feeding the hot-water tank
-   right now."), the **explainer** (what it is, and `Normal:` guidance where useful), and the
-   **member readings** of that component as a compact label→value list.
-   For a leaf value target, that list omits the target's own reading: it is already the headline, and
-   an available Modbus twin is already shown as the explainer's comparison line. A grouped target
-   keeps its complete value list even when one member is also the headline: the DHW tank therefore
-   lists X10A tank temperature, its Modbus twin, setpoint and both valve readings together below the
-   chart. Its explainer contains explanation only, never a specially placed value line or a sentence
-   that merely repeats those numbers. Component targets without a headline likewise keep their
-   complete member list.
+   right now."), the **explainer** (what it is, and `Normal:` guidance where useful), the optional
+   **trend**, and the **member readings** of that component as a compact label→value list. Those are
+   three distinct vertical sections: description first, graphical history second, values last.
+   For a leaf value target, that list omits the target's own X10A reading because it is already the
+   headline, but keeps an available Modbus twin as its first divided value row, with the agreement or
+   difference directly underneath that row while both readings are current. A grouped target keeps
+   its complete value list even when one member is also the headline: the DHW tank therefore lists
+   X10A tank temperature, its Modbus
+   twin, setpoint and both valve readings together below the chart. An inspector's explainer contains
+   explanation only, never a specially placed value line or a sentence that merely repeats those
+   numbers. Component targets without a headline likewise keep their complete member list.
    The explainer copy comes from the **same `DESCRIPTIONS` table** the value rows use (§5.3 item 6) —
    one source for "what does this mean", never a second parallel one. A value target resolves it
    through a canonical register label rather than the live one, so a profile's own spelling cannot
@@ -1275,7 +1277,8 @@ enabled/available values are hidden.
   never colour alone.
 - **Inspector** — `--brand-tint` panel under the schematic (§5.3 item 3), bordered like a card: an
   uppercase `--muted` title + mono source label on the left, the headline reading on the right, then
-  the explainer paragraph and a `--line`-divided list of that component's readings. Idle it shows
+  the explainer, the optional trend and a `--line`-divided list of every additional X10A/Modbus
+  reading, in that order. Idle it shows
   **nothing** and collapses — see §5.3 item 3 for why a standing hint line is not offered. It keeps
   the CARD shape and does **not** take the value table's pushed-out form above: it is not opened out
   of a row, so there is nothing for it to emerge from underneath, and a top edge with no line above
