@@ -661,12 +661,12 @@ constexpr uint32_t CHECKUP_REQUIRED_S     = CHECKUP_WINDOW_S * 9u / 10u; // 90% 
 constexpr uint32_t CHECKUP_MIN_S_PRESSURE = CHECKUP_PRESSURE_CONFIRM_S;
 constexpr uint32_t CHECKUP_MIN_S_FLOW     = 60;         // steady flow after run-up, observation only
 
-// CYCLING. Two conditions, both required, and the second is the one that knows the load. A
-// modulating air-to-water unit runs 20-60 minutes per cycle when it is sized and controlled well; a
-// Window MEAN below ten minutes is a useful HEURISTIC, not a manufacturer limit: X10A does not attach
-// an operating mode to each completed cycle, so long DHW charges can mask short space-heating runs.
-// The start count is the guard against reading a mean off two samples, and a match is Info, never a
-// fault/limit verdict.
+// CYCLING. Two conditions, both required, and the second is the one that knows the load. The
+// 10-minute window mean is this project's diagnostic heuristic, not a Daikin service limit:
+// expected run length varies with model, load, weather, control and emitter system, and X10A does
+// not attach an operating mode to each completed cycle. Long DHW charges can therefore mask short
+// space-heating runs. The start count guards against reading a mean off two samples, and a match is
+// Info, never a fault/limit verdict.
 //
 // A DHW charge is a LONG run, so it raises the mean rather than tripping this. That matters on the
 // reference installation, where every DHW cycle terminates on the ~100 °C discharge limit and a
@@ -674,16 +674,19 @@ constexpr uint32_t CHECKUP_MIN_S_FLOW     = 60;         // steady flow after run
 constexpr uint32_t CHECKUP_CYCLING_MIN_STARTS   = 12;
 constexpr uint32_t CHECKUP_CYCLING_SHORT_RUN_S  = 600;    // 10 minutes, mean over the window
 
-// DEFROST. A share of simultaneously-observed compressor runtime, not a count. 15% is an intentionally
-// broad HEURISTIC, not a Daikin boundary: X10A carries no humidity or coil-surface temperature, so a
-// match is Info only. The PAIRED count guard stops one defrost in a short run from reading as 100%
-// and prevents unpaired edges from lending a partial ratio a larger sample basis.
+// DEFROST. A share of simultaneously-observed compressor runtime, not a count. 15% is an
+// intentionally broad project heuristic, not a Daikin boundary: model, humidity and coil-surface
+// conditions matter, while X10A supplies neither humidity nor coil-surface temperature. A match is
+// Info only. The PAIRED count guard stops one defrost in a short run from reading as 100% and
+// prevents unpaired edges from lending a partial ratio a larger sample basis.
 constexpr int      CHECKUP_DEFROST_SHARE_PCT = 15;
 constexpr uint32_t CHECKUP_DEFROST_MIN_COUNT = 3;
 
-// WATER PRESSURE, in tenths of bar. At or below 1.0 bar contradicts the documented ">1 bar"
-// boundary immediately as Info and becomes Warn after CHECKUP_PRESSURE_CONFIRM_S continuously.
-// There is deliberately neither an invented "preventive" band nor a second critical band.
+// WATER PRESSURE, in tenths of bar. Many current Altherma hydronic-unit manuals require more than
+// 1.0 bar, but the permitted filling and operating range is model-specific. At or below 1.0 bar is
+// therefore a conservative project diagnostic, not a universal Daikin limit: it becomes Info
+// immediately and Warn after CHECKUP_PRESSURE_CONFIRM_S continuously, while the UI points to the
+// exact unit manual. There is deliberately neither an invented "preventive" band nor another band.
 
 // HEATERS are observation only. Weather, emergency mode, defrost support, installer settings and PV
 // surplus all change legitimate use; X10A does not provide enough context for a universal threshold.

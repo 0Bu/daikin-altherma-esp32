@@ -489,8 +489,8 @@ const bshInputRow = () => {
 };
 
 const PEL_ESTIMATED_WHAT = {
-  en: "What the unit is drawing from the mains, and the divisor of the COP. An ESTIMATE: measured current × an assumed 230 V, so it ignores power factor. Which current it is decides what the COP above describes — CT clamps see the whole unit including the backup heater, the inverter current sees only the compressor. An inverter-based figure is not the plant's consumption and does not rise when the backup heater fires; the COP beside it is then the heat pump's own and says so.",
-  de: "Was das Gerät aus dem Netz zieht, und der Nenner des COP. Eine SCHÄTZUNG: gemessener Strom × angenommene 230 V, der Leistungsfaktor bleibt also unberücksichtigt. Welcher Strom es ist, entscheidet, was der COP darüber beschreibt — CT-Stromwandler erfassen das ganze Gerät inklusive Zusatzheizer, der Inverterstrom nur den Verdichter. Ein Inverterwert ist nicht der Verbrauch der Anlage und steigt nicht, wenn der Zusatzheizer heizt; der COP daneben ist dann der der Wärmepumpe selbst und sagt das auch.",
+  en: "A rough electrical-input ESTIMATE used as the COP divisor. The UI adds available phase currents and multiplies by an assumed 230 V; it does not know actual voltage or power factor. CT currents are treated as the whole-unit boundary, while inverter current covers the compressor side only. Therefore an inverter-based value is not total plant consumption and does not include a backup heater.",
+  de: "Eine grobe SCHÄTZUNG der elektrischen Aufnahme und der Nenner des COP. Die UI addiert verfügbare Phasenströme und multipliziert sie mit angenommenen 230 V; tatsächliche Spannung und Leistungsfaktor sind unbekannt. CT-Ströme behandelt sie als Systemgrenze des ganzen Geräts, der Inverterstrom deckt nur die Verdichterseite ab. Ein Inverterwert ist daher nicht der Gesamtverbrauch der Anlage und enthält den Zusatzheizer nicht.",
 };
 const PEL_MEASURED_WHAT = {
   en: "The unit's electrical input, MEASURED by the HomeHub. Unlike X10A's current×230 V estimate, this value needs no assumed voltage or power-factor approximation. It covers the whole unit, including an active backup or tank heater; the dashboard therefore does not derive a COP from it because the available heat measurement covers only the heat-pump exchanger.",
@@ -562,8 +562,8 @@ const INSPECT = {
   ou: {
     t: { en: "Outdoor unit", de: "Außeneinheit" },
     what: {
-      en: "The outdoor half of the heat pump: a fan pulls outside air over the evaporator, where the refrigerant boils and picks up heat even well below 0 °C, and the compressor raises that heat to a useful temperature before it crosses to the water side. Everything here is refrigerant, not water.",
-      de: "Die Außenhälfte der Wärmepumpe: Ein Ventilator saugt Außenluft über den Verdampfer, in dem das Kältemittel verdampft und dabei selbst deutlich unter 0 °C Wärme aufnimmt; der Verdichter hebt diese Wärme auf ein nutzbares Temperaturniveau, bevor sie auf die Wasserseite übergeht. Hier fließt Kältemittel, kein Wasser.",
+      en: "The heat-source side shown for an air-source system. The fan moves outdoor air across the coil; refrigerant absorbs heat there and the compressor raises its pressure and temperature before heat is transferred to the water circuit. Monobloc, ground-source and hybrid systems have a different physical layout, so this is a simplified flow diagram rather than a model-specific piping plan.",
+      de: "Die hier für eine Luft/Wasser-Anlage gezeigte Wärmequellenseite. Der Ventilator führt Außenluft über den Wärmetauscher; dort nimmt das Kältemittel Wärme auf. Der Verdichter erhöht anschließend Druck und Temperatur, bevor die Wärme an den Wasserkreis übergeht. Monoblock-, Sole- und Hybridanlagen sind physisch anders aufgebaut; die Darstellung ist deshalb ein vereinfachtes Fließbild und kein modellspezifischer Rohrplan.",
     },
     now: (d) => d.defrost
       ? { en: "Defrosting — the circuit is running in reverse to melt ice off the evaporator, so heat is briefly taken back out of the heating water.",
@@ -616,8 +616,8 @@ const INSPECT = {
   lp: {
     t: { en: "Low pressure", de: "Niederdruck" },
     what: {
-      en: "What the circuit drops to once past the expansion valve, measured at the outdoor unit at the far end of this pipe. Not available on every model — the outdoor unit here has a high-pressure switch but no low-pressure transducer, so this pill often stays \"—\".",
-      de: "Der Druck, auf den der Kreis hinter dem Expansionsventil abfällt, gemessen am Außengerät am fernen Ende dieser Leitung. Nicht jedes Modell liefert ihn — das Außengerät hier hat einen Hochdruckschalter, aber keinen Niederdruckgeber, daher bleibt diese Pille oft \"—\".",
+      en: "Refrigerant pressure on the low-pressure side of the compressor. In heating, this is the evaporating side after expansion. Not every supported profile exposes a low-pressure transducer; the value stays \"—\" when no usable reading is available.",
+      de: "Kältemitteldruck auf der Niederdruckseite des Verdichters. Im Heizbetrieb ist das die Verdampferseite nach der Entspannung. Nicht jedes unterstützte Profil liefert einen Niederdruckgeber; ohne nutzbaren Messwert bleibt die Anzeige „—“.",
     },
     re: /^low pressure$/i, sample: "Low pressure",
     rows: [/^low pressure$/i, /expansion valve ?1/i],
@@ -630,8 +630,8 @@ const INSPECT = {
   phe: {
     t: { en: "Plate heat exchanger", de: "Plattenwärmetauscher" },
     what: {
-      en: "Where the refrigerant hands its heat over to the heating water. The two never mix — they flow through alternating thin plates. Everything to its left is refrigerant, everything to its right is water; the heat crossing it is flow × ΔT, which is the estimate shown here.",
-      de: "Hier gibt das Kältemittel seine Wärme an das Heizwasser ab. Beide vermischen sich nie — sie strömen durch abwechselnde dünne Platten. Links davon ist Kältemittel, rechts Wasser; die übertragene Wärme ist Durchfluss × ΔT, also die hier gezeigte Schätzung.",
+      en: "The plate heat exchanger transfers heat between refrigerant and the water circuit without mixing the two fluids. The displayed heat output is estimated from water flow and the temperature difference across this exchanger.",
+      de: "Der Plattenwärmetauscher überträgt Wärme zwischen Kältemittel und Wasserkreis, ohne dass sich beide Medien vermischen. Die angezeigte Wärmeleistung wird aus Wasserdurchfluss und Temperaturdifferenz über diesem Wärmetauscher geschätzt.",
     },
     // With the pump stopped the ΔT is not a small working point, it is none at all (d.dtStale) — so
     // this says nothing is crossing, rather than quoting the two stagnant sensors' difference as if
@@ -656,8 +656,8 @@ const INSPECT = {
     t: { en: "ΔT across the system", de: "ΔT über die Anlage" },
     trend: "dt",   // computed series — see DERIVED
     what: {
-      en: "Leaving water minus return water — how much heat the house actually pulled out of the circuit. Not a register: it is computed from the two temperatures. The controller varies pump speed to hold its target ΔT.",
-      de: "Vorlauf minus Rücklauf — wie viel Wärme das Haus dem Kreis tatsächlich entzogen hat. Kein Registerwert, sondern aus den beiden Temperaturen berechnet. Der Regler variiert die Pumpendrehzahl, um sein Ziel-ΔT zu halten.",
+      en: "Leaving-water temperature minus return-water temperature. It is calculated from two sensor readings, not read from a separate register. Together with flow rate it indicates heat transfer through the active hydraulic circuit; the target depends on model, mode and emitter configuration.",
+      de: "Vorlauftemperatur minus Rücklauftemperatur. Der Wert wird aus zwei Fühlern berechnet und nicht aus einem eigenen Register gelesen. Zusammen mit dem Durchfluss beschreibt er die Wärmeübertragung im aktiven Hydraulikkreis; das Ziel hängt von Modell, Betriebsart und eingestellter Heizflächenart ab.",
     },
     // Blanks with the pill (d.dtStale) instead of restating the number the pill withheld, and says
     // why — the pill can only blank, the explainer is where the reason belongs.
@@ -666,16 +666,16 @@ const INSPECT = {
       ? { en: "No ΔT right now — the pump is stopped. With no water moving, the two sensors just drift apart as they cool, and their difference is not a working point.",
           de: "Derzeit kein ΔT — die Pumpe steht. Ohne Wasserbewegung driften die beiden Fühler beim Auskühlen nur auseinander; ihre Differenz ist kein Arbeitspunkt." }
       : d.dt == null ? null
-      : { en: `${fmt1(d.dt)} K${d.dtSet != null ? ` against a ${fmt1(d.dtSet)} K heating target` : ""}. Around 5 K is a healthy heating ΔT; a negative value means heat is flowing back out (a defrost).`,
-          de: `${fmt1(d.dt)} K${d.dtSet != null ? ` bei ${fmt1(d.dtSet)} K Heiz-Ziel` : ""}. Rund 5 K sind ein gesundes Heiz-ΔT; ein negativer Wert heißt, dass Wärme zurückfließt, etwa beim Abtauen.` },
+      : { en: `${fmt1(d.dt)} K${d.dtSet != null ? ` against a ${fmt1(d.dtSet)} K heating target` : ""}. Compare it with the controller target rather than a universal 5 K rule. A negative value can occur during defrost when heat is taken from the water circuit.`,
+          de: `${fmt1(d.dt)} K${d.dtSet != null ? ` bei ${fmt1(d.dtSet)} K Heiz-Ziel` : ""}. Vergleiche den Wert mit dem Reglerziel statt mit einer allgemeinen 5-K-Regel. Beim Abtauen kann er negativ werden, weil dem Wasserkreis Wärme entzogen wird.` },
     rows: [lwtRow, /inlet water/i, /target delta t heating/i],
   },
   pth: {
-    t: { en: "Heat output (estimated)", de: "Geschätzte Wärmeleistung" },
+    t: { en: "Heat output (estimated)", de: "Wärmeleistung (geschätzt)" },
     trend: "pth",
     what: {
-      en: "An ESTIMATE, not a measurement — the bus carries no energy register. It is computed from flow rate and ΔT with the heat capacity of water (4.186 kJ/kg·K), so it is only as good as the flow sensor and the two water temperatures, and it counts only heat from the heat pump's own exchanger (the backup heater sits after it). During a defrost it goes negative, which is real: heat is being taken back out of the water.",
-      de: "Eine SCHÄTZUNG, keine Messung — auf dem Bus gibt es kein Energieregister. Der Wert wird aus Durchflussmenge, ΔT und der Wärmekapazität von Wasser mit 4,186 kJ/kg·K berechnet. Er ist daher nur so genau wie der Durchflusssensor und die beiden Wassertemperaturen. Erfasst wird nur die Wärme aus dem Wärmetauscher der Wärmepumpe; der Zusatzheizer sitzt dahinter. Beim Abtauen wird der Wert negativ — das ist echt: dem Wasser wird Wärme entzogen.",
+      en: "A calculated estimate, not a direct power measurement. The UI uses flow × ΔT × 4.186 kJ/kg·K, assuming water. Accuracy therefore depends on the flow sensor, both temperature sensors and the actual fluid; glycol mixtures need a different density and heat capacity. This pre-BUH figure covers the heat pump's exchanger, not heat added later by the backup heater. It can be negative during defrost because heat is taken from the water circuit.",
+      de: "Eine berechnete Schätzung, keine direkte Leistungsmessung. Die UI verwendet Durchfluss × ΔT × 4,186 kJ/kg·K und nimmt dabei Wasser an. Die Genauigkeit hängt deshalb vom Durchflusssensor, beiden Temperaturfühlern und dem tatsächlichen Medium ab; Glykolgemische haben eine andere Dichte und Wärmekapazität. Dieser Wert vor dem BUH erfasst den Wärmepumpen-Wärmetauscher, nicht die später vom Zusatzheizer eingebrachte Wärme. Beim Abtauen kann er negativ werden, weil dem Wasserkreis Wärme entzogen wird.",
     },
     head: (d) => (d.dtStale || d.pth == null ? "—" : "≈ " + fmt1(d.pth) + " kW"),
     // The COP is quoted here only while it is built on THIS figure. With a whole-unit electrical
@@ -719,8 +719,8 @@ const INSPECT = {
     aria: { en: "COP (estimated)", de: "Geschätzter COP" },
     trend: "cop",
     what: {
-      en: "Heat out divided by electricity in — how many kW of heat came out per kW that went in. Both sides must describe the SAME system or the quotient is not a COP at all: with whole-unit CT clamps the heat is measured after the backup heater, with the inverter current it is measured before it, so this reads as the plant's efficiency in one case and the heat pump's own in the other. It is a quotient of two ESTIMATES and inherits every assumption both make — and the accuracy is set by the heat side, not the electrical one: two uncalibrated factory sensors ±0.5–1 K across a ΔT of about 5 K already put the live figure within roughly ±15–25 %. Treat it as a working indication; the trustworthy number is the seasonal one (SCOP/JAZ), integrated from metered energy outside this device. It means nothing with the compressor stopped and shows \"—\" then.",
-      de: "Wärme raus geteilt durch Strom rein — wie viele kW Wärme je aufgenommenem kW herauskamen. Beide Seiten müssen dasselbe System beschreiben, sonst ist der Quotient gar kein COP: Mit Stromwandlern am ganzen Gerät wird die Wärme nach dem Zusatzheizer gemessen, mit dem Inverterstrom davor — einmal ist das die Effizienz der Anlage, einmal die der Wärmepumpe selbst. Ein Quotient zweier SCHÄTZUNGEN, der sämtliche Annahmen von beiden erbt — und die Genauigkeit bestimmt die Wärmeseite, nicht die elektrische: zwei unkalibrierte Werksfühler mit ±0,5–1 K über ein ΔT von rund 5 K legen den Live-Wert bereits auf etwa ±15–25 % fest. Als Arbeitsanhalt lesen; belastbar ist die Jahreszahl als SCOP oder JAZ, integriert aus gemessener Energie außerhalb dieses Geräts. Bei stehendem Verdichter bedeutet er nichts und zeigt dann „—\".",
+      en: "Estimated heat output divided by estimated electrical input. Both values must cover the same system boundary: with CT currents the UI uses heat after the backup heater when that sensor exists; with inverter current it shows the heat pump alone. The result inherits the water/glycol, sensor, voltage and power-factor assumptions of both estimates. Daikin also describes calculated energy figures as estimates whose accuracy is not guaranteed. Use this as a live indication; metered seasonal energy is more meaningful. With the compressor stopped it shows \"—\".",
+      de: "Geschätzte Wärmeleistung geteilt durch geschätzte elektrische Aufnahme. Beide Werte müssen dieselbe Systemgrenze abdecken: Bei CT-Strömen verwendet die UI die Wärme hinter dem Zusatzheizer, sofern dieser Fühler vorhanden ist; beim Inverterstrom zeigt sie nur die Wärmepumpe. Das Ergebnis übernimmt alle Annahmen zu Wasser oder Glykol, Fühlern, Spannung und Leistungsfaktor aus beiden Schätzungen. Auch Daikin bezeichnet berechnete Energiewerte als Schätzungen ohne garantierte Genauigkeit. Nutze den Wert als Live-Hinweis; aussagekräftiger ist saisonal gemessene Energie. Bei stehendem Verdichter zeigt er „—“.",
     },
     head: (d) => (d.cop == null ? "—" : d.cop.toFixed(1)),
     // Four outcomes, four sentences. A suppressed wrong claim must not be replaced by another one,
@@ -751,7 +751,7 @@ const INSPECT = {
     now: (d) => (d.buh1 == null && d.buh2 == null) ? null
       : d.buh2 ? { en: "Step 2 — both stages firing.", de: "Stufe 2 — beide Stufen heizen." }
       : d.buh1 ? { en: "Step 1 — one stage firing.", de: "Stufe 1 — eine Stufe heizt." }
-      : { en: "Off — the heat pump is covering the load on its own.", de: "OFF — die Wärmepumpe deckt die Last allein." },
+      : { en: "Off — no backup-heater stage is active.", de: "Aus — keine Zusatzheizerstufe ist aktiv." },
     rows: [/buh step ?1/i, /buh step ?2/i, /buh output capacity/i],
   },
   bsh: {
@@ -776,7 +776,7 @@ const INSPECT = {
                    : { en: "Diverted to the heating circuit.", de: "Auf den Heizkreis geschaltet." },
   },
   tank: {
-    t: { en: "DHW tank", de: "Warmwasserspeicher" },
+    t: { en: "DHW tank / thermal store", de: "Warmwasser-/Wärmespeicher" },
     re: /dhw tank temp/i, sample: "DHW Tank Temp. (R5T)",
     // The tank box represents a GROUP even though its temperature is also the compact headline.
     // Keep every member in the one table below the chart; neither the Modbus twin nor a sentence
@@ -815,8 +815,8 @@ const INSPECT = {
   pump: {
     t: { en: "Circulation pump", de: "Umwälzpumpe" },
     what: {
-      en: "Drives the water round the whole circuit. It sits on the supply side, after the plate exchanger and after the backup heater, and is the last part the water passes before it leaves the unit for the 3-way valve. Its speed is modulated to hold the target ΔT: the harder the house pulls heat out, the faster it runs.",
-      de: "Treibt das Wasser durch den gesamten Kreis. Sie sitzt im Vorlauf, nach dem Plattenwärmetauscher und nach dem Zusatzheizer, und ist das letzte Bauteil, das das Wasser durchläuft, bevor es das Gerät zum 3-Wege-Ventil verlässt. Ihre Drehzahl wird geregelt, um das Ziel-ΔT zu halten: Je mehr Wärme das Haus entnimmt, desto schneller läuft sie.",
+      en: "Circulates water through the active hydraulic circuit. In the split-system layout shown, it is on the supply side after the plate heat exchanger and backup heater. The controller adjusts its speed according to operating mode, target ΔT and minimum-flow requirements.",
+      de: "Fördert Wasser durch den aktiven Hydraulikkreis. Im gezeigten Split-System-Aufbau sitzt sie im Vorlauf hinter Plattenwärmetauscher und Zusatzheizer. Der Regler passt ihre Drehzahl an Betriebsart, Ziel-ΔT und Mindestdurchfluss an.",
     },
     re: /water pump operation/i, sample: "Water pump operation",
     // 0 % is a stopped pump, not a pump "running at 0 %" — the old wording asserted circulation on
@@ -848,8 +848,8 @@ const INSPECT = {
   rhot: {
     t: { en: "Gas line (hot gas in heating)", de: "Gasleitung · Heißgas im Heizbetrieb" },
     what: {
-      en: "The thick pipe between the units. In heating, refrigerant leaves the compressor here as a hot, high-pressure gas and carries the heat to the plate exchanger, where it condenses and gives that heat to the water — the hottest point in the machine, and the discharge temperature beside it is measured right at the compressor outlet. In cooling the flow reverses and this same pipe returns cool gas from the exchanger to the compressor.",
-      de: "Die dicke Leitung zwischen den Geräten. Im Heizbetrieb verlässt das Kältemittel den Verdichter hier als heißes Gas unter hohem Druck und trägt die Wärme zum Plattenwärmetauscher, wo es kondensiert und die Wärme ans Wasser abgibt — der heißeste Punkt der Maschine; die Heißgastemperatur daneben wird direkt am Verdichteraustritt gemessen. Im Kühlbetrieb kehrt sich die Richtung um und dieselbe Leitung führt kühles Gas vom Wärmetauscher zurück zum Verdichter.",
+      en: "The gas line between outdoor and indoor units in the split-system layout shown. In heating, hot high-pressure gas leaves the compressor through this line and condenses in the plate heat exchanger, transferring heat to the water. In cooling, refrigerant flow reverses. Monobloc systems do not have this field refrigerant line.",
+      de: "Die Gasleitung zwischen Außen- und Inneneinheit im gezeigten Split-System-Aufbau. Im Heizbetrieb strömt heißes Gas unter hohem Druck vom Verdichter durch diese Leitung und kondensiert im Plattenwärmetauscher; dabei gibt es Wärme ans Wasser ab. Im Kühlbetrieb kehrt sich die Kältemittelrichtung um. Monoblock-Anlagen haben diese bauseitige Kältemittelleitung nicht.",
     },
     now: (d) => (d.rps ?? 0) > 0
       ? { en: `Flowing — ${fmt1(d.circP)} bar at ${fmt0(d.disch)} °C.`,
@@ -861,8 +861,8 @@ const INSPECT = {
   rcold: {
     t: { en: "Liquid line", de: "Flüssigkeitsleitung" },
     what: {
-      en: "The thin pipe between the units. In heating it carries the refrigerant back as a warm liquid, still under high pressure: it condensed in the plate exchanger and gave its heat to the water, but it has not expanded yet — the expansion valve sits in the outdoor unit at the far end of this pipe. Only past that valve does it turn cold and low-pressure, and only then does it pick up heat from the outside air in the outdoor coil, which is why that coil frosts up and needs defrosting.",
-      de: "Die dünne Leitung zwischen den Geräten. Im Heizbetrieb führt sie das Kältemittel als warme Flüssigkeit zurück, weiterhin unter hohem Druck: Es ist im Plattenwärmetauscher kondensiert und hat seine Wärme ans Wasser abgegeben, aber es ist noch nicht entspannt — das Expansionsventil sitzt im Außengerät am fernen Ende dieser Leitung. Erst hinter diesem Ventil wird es kalt und niederdruckseitig, und erst dann nimmt es im Außenwärmetauscher Wärme aus der Luft auf; deshalb bereift dieser und muss abgetaut werden.",
+      en: "The liquid line between outdoor and indoor units in the split-system layout shown. In heating, condensed high-pressure refrigerant returns through this line to the outdoor expansion valve. Downstream of that valve its pressure and temperature fall before it absorbs heat in the outdoor coil. In cooling, the direction reverses. Monobloc systems do not have this field refrigerant line.",
+      de: "Die Flüssigkeitsleitung zwischen Außen- und Inneneinheit im gezeigten Split-System-Aufbau. Im Heizbetrieb fließt kondensiertes Kältemittel unter hohem Druck durch diese Leitung zum Expansionsventil im Außengerät zurück. Hinter dem Ventil sinken Druck und Temperatur, bevor es im Außenwärmetauscher Wärme aufnimmt. Im Kühlbetrieb kehrt sich die Richtung um. Monoblock-Anlagen haben diese bauseitige Kältemittelleitung nicht.",
     },
     now: (d) => (d.rps ?? 0) > 0
       ? { en: `Flowing — expansion valve at ${fmt0(d.eev)} pulses.`,
@@ -873,8 +873,8 @@ const INSPECT = {
   wsup: {
     t: { en: "Flow pipe", de: "Vorlaufleitung" },
     what: {
-      en: "Heated water on its way from the plate exchanger, past the electric backup heater and through the circulation pump, to the 3-way valve that decides whether it goes to the tank or to the house. Nothing heats it between the exchanger and the valve unless the backup heater is firing — which is why the temperature shown before the heater is the one the heat pump itself produced.",
-      de: "Erwärmtes Wasser auf dem Weg vom Plattenwärmetauscher, am elektrischen Zusatzheizer vorbei und durch die Umwälzpumpe, zum 3-Wege-Ventil, das entscheidet, ob es zum Speicher oder ins Haus geht. Zwischen Wärmetauscher und Ventil erwärmt es nichts weiter — außer der Zusatzheizer heizt gerade; deshalb ist die vor dem Heizer gezeigte Temperatur die, die die Wärmepumpe selbst erzeugt hat.",
+      en: "Supply water leaving the plate heat exchanger. In the split-system layout shown it passes the electric backup heater and circulation pump before the 3-way valve routes it to the heating circuit or tank circuit. The pre-BUH temperature therefore describes the heat pump exchanger; a post-BUH sensor also includes electric heat added downstream.",
+      de: "Vorlaufwasser am Austritt des Plattenwärmetauschers. Im gezeigten Split-System-Aufbau passiert es den elektrischen Zusatzheizer und die Umwälzpumpe, bevor das 3-Wege-Ventil es zum Heiz- oder Speicherkreis leitet. Die Temperatur vor dem BUH beschreibt deshalb den Wärmepumpen-Wärmetauscher; ein Fühler hinter dem BUH enthält zusätzlich die danach eingebrachte elektrische Wärme.",
     },
     now: (d) => (d.pumpOn ?? (d.flow != null && d.flow > 1))
       ? { en: `Carrying ${degC(d.lwt)} at ${fmt1(d.flow)} l/min${d.buh1 || d.buh2 ? ", reheated by the backup heater" : ""}.`,
@@ -886,8 +886,8 @@ const INSPECT = {
   wtank: {
     t: { en: "Tank circuit", de: "Speicherkreis" },
     what: {
-      en: "The branch to the hot-water tank. The water does not enter the tank — it runs through a coil inside it and warms the stored water from the outside, then returns. It only flows while the 3-way valve points here, and a tank cycle pauses space heating for its duration.",
-      de: "Der Abzweig zum Warmwasserspeicher. Das Wasser gelangt nicht in den Speicher — es läuft durch eine Wendel darin und erwärmt das gespeicherte Wasser von außen, dann kehrt es zurück. Es fließt nur, solange das 3-Wege-Ventil hierher zeigt; eine Speicherladung pausiert währenddessen die Raumheizung.",
+      en: "The hydraulic branch used to charge the domestic-hot-water tank or thermal store. The exact heat exchanger differs by tank design: it can be a coil, an integrated charging circuit or a fresh-water storage arrangement. The drawing shows the function, not the model-specific internals. In this diverted layout, charging the tank pauses direct flow to the space-heating branch.",
+      de: "Der hydraulische Zweig zum Laden des Warmwasser- oder Wärmespeichers. Der genaue Wärmetauscher hängt von der Speicherbauart ab: möglich sind eine Wendel, ein integrierter Ladekreis oder ein Frischwasserspeicher-Aufbau. Die Zeichnung zeigt die Funktion, nicht den modellspezifischen Innenaufbau. In diesem Umschaltaufbau pausiert während der Speicherladung der direkte Durchfluss zum Heizkreis.",
     },
     now: (d) => d.valveDhw === true
       ? { en: `Charging the tank — ${degC(d.lwt)} in, tank at ${degC(d.tank)}.`,
@@ -901,8 +901,8 @@ const INSPECT = {
     // and the return back to the merge, like the tank branch's, and the copy already read that way.
     t: { en: "Heating branch", de: "Heizkreis" },
     what: {
-      en: "The branch that feeds the radiators or underfloor loops. What comes back down the return line is cooler by exactly the heat the house took — that difference is the ΔT shown at the exchanger.",
-      de: "Der Abzweig, der die Heizkörper bzw. Fußbodenkreise versorgt. Was über die Rücklaufleitung zurückkommt, ist genau um die vom Haus entnommene Wärme kühler — dieser Unterschied ist das am Wärmetauscher gezeigte ΔT.",
+      en: "The branch supplying radiators, underfloor loops or other heat emitters. While water circulates, the return is normally cooler in heating because the emitters transfer heat to the building. The displayed ΔT also includes pipe and distribution effects, so it is not a direct room-heat measurement.",
+      de: "Der Zweig zu Heizkörpern, Fußbodenheizung oder anderen Heizflächen. Bei laufendem Heizbetrieb ist der Rücklauf normalerweise kühler, weil die Heizflächen Wärme ans Gebäude abgeben. Das angezeigte ΔT enthält auch Rohr- und Verteilverluste und ist deshalb keine direkte Messung der Raumwärme.",
     },
     now: (d) => d.valveDhw === true
       ? { en: "Paused — the valve is diverted to the hot-water tank.",
@@ -916,8 +916,8 @@ const INSPECT = {
   wret: {
     t: { en: "Return pipe", de: "Rücklaufleitung" },
     what: {
-      en: "Cooled water coming back from the house and the tank, past the dirt filter and the flow and pressure sensors, into the plate exchanger to be warmed again. Its temperature is the honest measure of how much heat the building actually absorbed. The pump is not in this line — it sits on the supply side, after the backup heater.",
-      de: "Abgekühltes Wasser, das aus Haus und Speicher zurückkommt, am Schmutzfilter und den Durchfluss- und Drucksensoren vorbei in den Plattenwärmetauscher läuft und dort wieder erwärmt wird. Seine Temperatur ist das ehrliche Maß dafür, wie viel Wärme das Gebäude tatsächlich aufgenommen hat. Die Pumpe sitzt nicht in dieser Leitung, sondern im Vorlauf hinter dem Zusatzheizer.",
+      en: "Return water from the active heating or tank circuit on its way back to the plate heat exchanger. In the split-system layout shown it passes the water-side sensors before being heated again. Return temperature and flow together help describe heat transfer; return temperature alone does not measure the building's absorbed heat.",
+      de: "Rücklaufwasser aus dem aktiven Heiz- oder Speicherkreis auf dem Weg zurück zum Plattenwärmetauscher. Im gezeigten Split-System-Aufbau passiert es die wasserseitigen Fühler, bevor es erneut erwärmt wird. Rücklauftemperatur und Durchfluss beschreiben gemeinsam die Wärmeübertragung; die Rücklauftemperatur allein misst nicht die vom Gebäude aufgenommene Wärme.",
     },
     now: (d) => (d.pumpOn ?? (d.flow != null && d.flow > 1))
       ? { en: `Returning at ${degC(d.ret)}, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.`,

@@ -662,7 +662,7 @@
         <input class="input" name="pass" id="wfPass" type="password" placeholder="••••••••" autocomplete="off">
       </label>
       <p class="hint err" id="wfPassError" data-i18n="wifi.err_pass" hidden>Password must be empty (open network) or between 8 and 63 characters</p>
-      <p class="hint" data-i18n="wifi.hint">SSID is required. If connection to the new network fails, the device rolls back to the old WiFi settings.</p>
+      <p class="hint" data-i18n="wifi.hint">Enter the WiFi network name. If the device cannot connect, it restores the previous WiFi settings automatically.</p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="wfCancel" data-i18n="btn.cancel">Cancel</button>
         <button class="btn primary" type="submit" id="wfBtn" data-i18n="btn.save">Save</button>
@@ -694,7 +694,7 @@
         <input type="checkbox" id="mqClearCreds">
         <span data-i18n="mqtt.clear">Remove stored credentials — connect anonymously</span>
       </label>
-      <p class="hint" data-i18n="mqtt.hint">Credentials require a TLS broker — use an mqtts:// URL (e.g. mqtts://host:8883). Empty host disables MQTT.</p>
+      <p class="hint" data-i18n="mqtt.hint">A username or password requires an encrypted TLS connection (mqtts://, for example mqtts://host:8883). Leave the host empty to disable MQTT.</p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="mqCancel" data-i18n="btn.cancel">Cancel</button>
         <button class="btn primary" type="submit" id="mqBtn" data-i18n="btn.save">Save</button>
@@ -712,7 +712,7 @@
         <input class="input" name="host" id="slHost" placeholder="192.168.1.50:514" autocomplete="off">
       </label>
       <p class="hint err" id="slError" hidden></p>
-      <p class="hint" data-i18n="syslog.hint">IP address or hostname and port of the Syslog server. Empty host disables Syslog.</p>
+      <p class="hint" data-i18n="syslog.hint">Enter the Syslog server as hostname or IP address plus port. Leave the field empty to disable Syslog.</p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="slCancel" data-i18n="btn.cancel">Cancel</button>
         <button class="btn primary" type="submit" id="slBtn" data-i18n="btn.save">Save</button>
@@ -730,7 +730,7 @@
         <input class="input" name="server" id="ntpServer" placeholder="pool.ntp.org" autocomplete="off">
       </label>
       <p class="hint err" id="ntpError" hidden></p>
-      <p class="hint" data-i18n="ntp.hint">Hostname or IP of the NTP server the device syncs its clock from. Empty resets to the firmware default.</p>
+      <p class="hint" data-i18n="ntp.hint">Enter the hostname or IP address of the time server. Leave the field empty to use the firmware default.</p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="ntpCancel" data-i18n="btn.cancel">Cancel</button>
         <button class="btn primary" type="submit" id="ntpBtn" data-i18n="btn.save">Save</button>
@@ -816,7 +816,7 @@
         <span data-i18n="board.btninv">Active low (button shorts the pin to GND)</span>
       </label>
       <p class="hint err" id="bdError" hidden></p>
-      <p class="hint" data-i18n="board.hint">Holding the reset button for 5 seconds ERASES all stored settings (WiFi, MQTT, Syslog/NTP) and reboots into the setup portal — the LED flashes red while it is armed, then turns solid white while erasing. Leave the button on "None" unless one is actually wired: an unconnected pin can float and trigger it.</p>
+      <p class="hint" data-i18n="board.hint">Holding the reset button for 5 seconds ERASES all saved settings (WiFi, MQTT, Syslog and NTP) and opens the setup portal after a restart. The LED flashes red during the 5-second countdown and turns solid white while settings are erased. Select “None” unless a button is physically connected; an unconnected pin can trigger a reset by itself.</p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="bdCancel" data-i18n="btn.cancel">Cancel</button>
         <button class="btn primary" type="submit" id="bdBtn" data-i18n="btn.save">Save</button>
