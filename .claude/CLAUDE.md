@@ -62,7 +62,8 @@ logic with the plain system toolchain (no ESP-IDF/Docker/board), so decoding/con
 changes can be *verified*, not just reasoned about, even in a cloud session:
 
 ```bash
-scripts/run-mock-tests.sh    # compile + run host logic tests in seconds (cmake + g++/clang++)
+scripts/run-mock-tests.sh --coverage  # host logic tests + 95% executable-line coverage floor
+tools/coverage/selftest.sh   # prove the coverage gate rejects an under-covered production line
 scripts/run-domain-audit.sh  # is the value catalog physically RIGHT? (the domain-correctness gate)
 scripts/run-description-audit.sh  # can the user find out what each value IS? (node-only)
 scripts/run-schematic-audit.sh    # does the DRAWING still say what it means? (node-only)
@@ -71,9 +72,10 @@ scripts/run-ui-gif-audit.sh       # is the README's RECORDING still of this UI? 
 scripts/run-doc-entity-audit.sh   # do the docs' copy-paste ENTITY IDS exist? (c++ host compiler)
 ```
 
-The third is the same question one layer up from the second: the domain audit asks whether a
-published value is physically true, the description audit asks whether the web UI has anything to
-SAY about it. A catalog label the `DESCRIPTIONS` table in `main/www/js/descriptions.js` doesn't match renders as
+The description audit asks the same question one layer up from the domain audit: the domain audit
+asks whether a published value is physically true, the description audit whether the web UI has
+anything to SAY about it. A catalog label the `DESCRIPTIONS` table in
+`main/www/js/descriptions.js` doesn't match renders as
 a plain, un-tappable row — no error, no log, just a missing chevron among a hundred rows — and the
 catalog is machine-generated, so the gap re-opens without anyone touching this repo's JS.
 `def/overlay.hpp` shipped 11 rows that way (9 with no explainer, 2 matching the "fin temp"
@@ -499,9 +501,10 @@ hp_modbus.cpp   THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT source of rea
                 the pin or the framing; Modbus at the LAN, mDNS or the hub), so coupling them lets
                 either failure mask the other. Pull the service cable and the HomeHub keeps reporting;
                 lose the LAN and X10A keeps polling.
-                Gated on the configured ADDRESS alone (manual mb_host, else the one-shot discovery's mb_dhost),
-                and the gate is literal: no address means no
-                task, no socket, no mDNS traffic and no stack — which is what let hp_poll give back
+                Gated on the persistent HomeHub MODE: Auto (the default) runs one bounded mDNS search
+                per boot, Manual dials mb_host, and only explicit Off suppresses both. The runtime gate
+                is literal: after Auto misses, or whenever Off is selected, there is no
+                task, socket, mDNS traffic or stack — which is what let hp_poll give back
                 the 4 KB an earlier revision took from it (the getaddrinfo/mDNS/socket call chain now
                 lives on the task that makes those calls; syslog.cpp measured that same chain at 6144,
                 which is this task's size). Disabling it live retires the task: it checks the flag at
@@ -510,7 +513,7 @@ hp_modbus.cpp   THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT source of rea
                 parse (txn/unit/qty), a whole-reply deadline (a per-call SO_RCVTIMEO does not bound a
                 peer trickling one byte per timeout, and this task is watchdog-subscribed) and a socket
                 DROPPED on any framing/desync error so the next cycle reconnects. mDNS auto-discovery
-                when mb_host is empty: browse _http._tcp (what the hub advertises, EKRHH §2.5), filter
+                in Auto mode: browse _http._tcp (what the hub advertises, EKRHH §2.5), filter
                 is_homehub_hostname — MANDATORY, since this firmware answers that same browse — then
                 connect :502. A failed connect BACKS OFF through the X10A sweep's own host-tested
                 logic/detect_backoff.hpp: a browse with no hub on the LAN blocks ~3 s, so a 1 Hz retry
@@ -599,7 +602,8 @@ http_server.cpp esp_http_server :80; concerns register their own routes (http_ha
                 the symptom is deep links breaking rather than the new route 404ing. http_register()
                 logs a failed registration rather than discarding the return. Picks
                 the trust surface from the WiFi mode (esp_wifi_get_mode): the OPEN setup AP registers
-                ONLY the provisioning routes (GET / /index.html, POST /set_wifi + captive) and
+                ONLY the provisioning routes (GET / /index.html /favicon.ico, POST /set_wifi +
+                captive) and
                 withholds /scan /coredump /diag + the config/OTA/MCP surface from an unauthenticated
                 radio client; STA (trusted LAN) registers the full API. Boundary = host-tested
                 logic/http_surface.hpp, applied via http_register_on (http_common.cpp)
@@ -609,8 +613,9 @@ http_common.cpp shared HTTP helpers + the ONE OOM guard every route runs under: 
                 unwinding through esp_http_server's C frames to std::terminate -> reboot. EVERY route
                 is under it now — the one exception (/events, raw-registered because is_websocket
                 bypasses the trampoline, so it had to self-guard) no longer exists
-http_status.cpp GET / (setup.html in AP mode, else gzip UI) /status /values /history /models /diag /scan
-                /coredump + POST /crash/dismiss + captive catch-all. http_append_status_json() runs
+http_status.cpp GET / (setup.html in AP mode, else gzip UI) /favicon.ico /heat-pump-icon.png /status
+                /values /history /models /diag /scan /coredump + POST /crash/dismiss + captive
+                catch-all. http_append_status_json() runs
                 on the httpd task ALONE — it used to run on the poll task too, which is what
                 overflowed that task's stack (#241)
 http_config.cpp POST /set_wifi /set_mqtt /set_syslog /set_ntp /set_hp /set_board /set_ota /set_lang /detect
@@ -618,9 +623,14 @@ http_ota.cpp    /ota/check|update|status
 mcp_server.cpp  /mcp device glue (stateless read-only MCP: initialize/tools/list/tools/call;
                 get_status + get_hp_values reuse the exact HTTP snapshot builders; GET serves an
                 embedded dependency-free static information + setup page, never SSE)
-mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE shared grouped-JSON
-                state topic <base>/state (logic/mqtt_group.hpp), republished on change; LWT
-                availability, mqtts+CA on creds. A field's JSON TYPE comes from its CONVERTER
+mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; X10A publishes one retained
+                grouped-JSON document on <base>/x10a (logic/mqtt_group.hpp), and an enabled HomeHub
+                publishes its separate flat retained map on <base>/modbus. Both republish on change;
+                HomeHub values deliberately have no HA discovery entities, a disconnected link sends
+                {}, and Off retracts its data topic. Bounded exact-topic probes delete the retired
+                <base>/state and <base>/modbus/status values only when the broker proves they remain,
+                so a clean broker receives no repeating empty topics. LWT availability, mqtts+CA on
+                creds. A field's JSON TYPE comes from its CONVERTER
                 (PublishedKind, logic/convert.hpp) and is carried on GroupedValue — never re-inferred
                 from the formatted string, which is how ONE key came to alternate between the number
                 30 and the string "OFF" as a fan stopped, so Telegraf dropped the string, VM never got
@@ -632,7 +642,7 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; ONE sh
                 A conv-203 row also publishes error_active/warning_active in its own group
                 (logic/fault_state.hpp) with their own binary_sensor configs — a metrics store cannot
                 hold "U4" at all, so an alert on error_code != 0 never fired for exactly the faults it
-                exists to catch. current_grouped() WITHHOLDS a held-over row (CachedValue.held —
+                exists to catch. current_x10a_values() WITHHOLDS a held-over row (CachedValue.held —
                 the outdoor unit resting, #209 defect 5) and publish_discovery() retracts rather than
                 skips a row row_publishable() refuses, since a QUARANTINED row's retained config
                 would otherwise keep the last false value HA was ever sent as that entity's state. Message topics sit DIRECTLY under <base> (no node
@@ -845,7 +855,7 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 the summary is NEVER re-parsed on a request path (build_status_json is a request-path
                 builder; until the WebSocket push was removed it also ran on the poll task). An ORPHAN
                 dump — one whose parsed app-elf-sha does not match the RUNNING build
-                (logic::coredump_is_foreign, host-tested) — is ERASED at capture and its summary
+                (logic::coredump_is_foreign, host-tested) — is erased at capture and its summary
                 cleared: the coredump partition survives an OTA, and a panic that cannot write its own
                 dump leaves the previous build's in place, a valid image of another binary that passes
                 esp_core_dump_image_check() so `coredump` reads true and /status offers a download
@@ -853,21 +863,20 @@ diag_crash.cpp  one-shot boot capture of the reset reason (esp_reset_reason) + c
                 dump for THIS firmware is downloadable" and clears the slot for the next real panic;
                 the erase is conservative — foreign is declared only on PROOF (two present shas, a
                 meaningful common prefix, a mismatch), since erasing a dump that IS ours destroys the
-                one artifact a panic left. EXCEPTION: the `coredump` flag is re-read from flash per request (diag_crash_info_live()
-                — a 4-byte size-word read, NOT the summary parse), because /coredump?clear=1 can erase
-                the image mid-session; a cached flag would strand an uncleanable crash banner + a
-                download that 404s. mqtt_ha republishes the retained crash topic when the flag changes
-                — or when NOTABILITY does, which is the other write to this cache:
-                diag_crash_dismiss() (POST /crash/dismiss) erases the dump and then sets
-                EXCEPTION: the `coredump` flag is re-read from flash per request (diag_crash_info_live()
+                one artifact a panic left. A proven foreign image stays suppressed for the whole boot
+                even if its best-effort flash erase fails, and GET /coredump applies the same policy;
+                raw foreign residue can therefore never reappear as an undecodable download. EXCEPTION:
+                the `coredump` flag is re-read from flash per request (diag_crash_info_live()
                 — a 4-byte size-word read, NOT the summary parse), because /coredump?clear=1 can erase
                 the image mid-session; a cached flag would strand an uncleanable crash banner + a
                 download that 404s. mqtt_ha republishes the retained crash topic when the flag changes
                 — or when NOTABILITY does, which is the other write to this cache:
                 diag_crash_dismiss() (POST /crash/dismiss) erases the dump and then sets
                 CrashInfo::dismissed, the user DELETING the report rather than hiding it in one
-                browser. Erase first, mark second (a dismissal surviving a failed erase would say
-                "no crash" with the dump still in flash); the `dismissed` byte is the one field
+                browser. Erase first, mark second for current-firmware evidence (a dismissal surviving
+                a failed erase would say "no crash" with a downloadable dump still in flash). The one
+                exception is already-suppressed foreign residue: its failed erase cannot pin a separate
+                current fault banner. The `dismissed` byte is the one field
                 written after boot, a single monotonic false->true store no reader needs a lock for.
                 A dump-only republish test would have left HA's retained crash record standing after
                 a dismissal on a fault boot that never wrote a dump — which is most of them
@@ -1659,7 +1668,7 @@ www/            web UI sources (index.html + style.css + app.sources fragments -
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi creds + the one-shot rollback backup + flags (`wifi_rolledbk` outcome marker included), MQTT (`uri`/`user`/`pass`), syslog (empty host = off), `ntp_server` (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` compile-time default on next boot), (blob **v2**) the **board-local hardware** `led_gpio`/`led_type`/`led_inverted`/`btn_gpio`/`btn_active_low`, (blob **v3**) the **OTA update channel** (`ota_channel`, 0 = release / 1 = dev) (blob **v4**) the **UI language override** (`ui_lang`, 0 = auto / 1 = de / 2 = en) and (blob **v5**) the **HomeHub Modbus link** (`mb_host` — empty = none entered — `mb_port` 502, `mb_unit_id` 1, `actuation_enabled` false; there is NO enable flag and NO transport field — the ADDRESS is the switch, and the HomeHub is a SECOND source, not an alternative to X10A) — in the blob because, like the credentials and unlike the link cache, each has exactly ONE writer (httpd, `POST /set_board` / `POST /set_ota` / `POST /set_lang` / `POST /set_hp`). An OLDER blob is still ACCEPTED: **v1** (pre-board OTA) reports `has_board=false`, so `config_load` seeds the board fields from Kconfig instead of reading "absent" as "indicator off"; **v2** (pre-channel OTA) reports `has_ota=false` and **v3** (pre-language OTA) reports `has_lang=false`, neither needing a Kconfig fallback — the pre-v3 world had exactly ONE feed (the release channel the struct defaults to) the pre-v4 world had no override (auto = keep letting the browser detect the language), and **v4** (pre-HomeHub OTA) reports `has_modbus=false` because the pre-v5 world had no HomeHub link at all, which the struct already defaults to. Rejecting any would drop that user's WiFi/MQTT creds on the upgrade. One CRC-checked entry written all-or-nothing, so the whole credential/service state survives a write failure or power cut together — no per-key write-ordering. The X10A **link cache** `rx_pin`/`tx_pin`/`proto` stays as SEPARATE self-healing keys (two owners: `config_save` for a manual override, `config_save_link` for a detected pin; re-validated on load). So do the one-shot discovery keys `mb_dhost`/`mb_searched` — their writer is the Modbus task while the blob's is httpd, and a whole-struct writer reverts the other's field from a stale snapshot. So does `board_set` — did the USER STATE the board hardware, or are those five values merely this build's defaults? The values cannot say (the Kconfig defaults happen to EQUAL the XIAO preset), and the web UI needs the difference to name the board in its Hardware modal without claiming one nobody chose (#256) — or, the other way, opening on "Custom" beside the very preset the user just saved, so that re-picking their own board submits an unchanged form (#257). Outside the blob even though it has one writer, because the flag never NAMES a board: the UI derives the name from the live field values (`syncPresetSelection`) and this only licenses showing one, so a flag that drifted cannot produce a WRONG name, only the "Custom" the UI already falls back to. That, and a blob version bump is not free — two other branches already carry a v5 and a v6 blob, and a version a build does not know reads on the device as a WIPED configuration (the blob is refused, the legacy per-key fallback is empty, and the board comes up in the setup portal with its credentials intact but unread). Legacy per-key credential keys (`wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/…/`ntp_server`) are still READ as the fallback when `cfg` is absent (fresh device / pre-blob OTA). Plus the boot-loop **crash counter** `boot_fails` (safe_mode.cpp; here so a factory reset wipes it too). (Hostname is fixed at `CONFIG_DAIKIN_HOSTNAME`, poll cadence at `POLL_INTERVAL_S`=1 s, labels English-only.) |
+| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + one-shot rollback state, MQTT (`uri`/`user`/`pass`), syslog, `ntp_server`, from blob **v2** board-local hardware, from **v3** the OTA channel, from **v4** the UI-language override, from **v5** the HomeHub host/port/unit/safety fields and from **v6** its explicit `homehub_enabled` intent (enabled+empty host = Auto, enabled+host = Manual, disabled = Off). The five HomeHub fields have one writer (`POST /set_hp`, httpd); `mb_dhost`/`mb_searched` are runtime-only and reset every boot or explicit Auto selection. Old experimental `mb_dhost`/`mb_seen` keys are deleted on load and never consulted. Blobs v1–v5 remain readable without losing credentials; v5 migrates enabled because only v6 can prove an intentional Off choice. One CRC-checked entry is written all-or-nothing. The X10A link cache `rx_pin`/`tx_pin`/`proto` remains separate and self-healing (detection + httpd writers), as does `board_set`, the user's licence for the UI to name matching board hardware without persisting a board identity. Legacy per-key credential entries remain read-only fallback for pre-blob upgrades, and `boot_fails` is the boot-loop crash counter. |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -1703,6 +1712,8 @@ offset/size stable across versions.
 
 ```
 GET  /            embedded web UI (gzipped into the app binary)
+GET  /favicon.ico inert embedded setup/dashboard icon; also available on the open setup AP
+GET  /heat-pump-icon.png embedded dashboard app icon; trusted-LAN only
 GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity — matches a core dump
                   to its .elf), pins_avail[] (the chip-safe X10A GPIOs for the RX/TX picker, minus the
                   pins the firmware itself drives — the status indicator and the recovery button —
@@ -1754,7 +1765,8 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   hp{proto,rx,tx,connected,
                   last_ok_s,registers,values,crc_err,timeout_err}, profile{id},
                   plus
-                  modbus{connected,discovering,host,port,unit_id,rx,fails,actuation_enabled[,error]}
+                  modbus{mode,enabled,connected,discovering,searched,host,port,unit_id,rx,fails,
+                  values,actuation_enabled[,error,error_code,error_detail,error_register]}
                   — the HomeHub link's READ-ONLY diagnostics. `host` is the RESOLVED / mDNS-discovered
                   host, not the requested one: with mb_host empty the device discovers the hub itself,
                   and the card must show what it FOUND rather than the empty string it was asked with
@@ -1828,7 +1840,7 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus "binary":true 
                   HomeHub register — the browser matches on that string and does NO matching of its
                   own, since a label match here is the substitution lwt_select/ou_stale exist to
                   prevent. The HomeHub's own readings ride a SECOND array, `modbus`
-                  [{label,value,unit,off[,binary][,concept]}] — two arrays, never merged, mirroring
+                  [{label,value,unit,off[,binary][,enum][,concept]}] — two arrays, never merged, mirroring
                   the two stacks: the sources have separate liveness, and merging would make "is this
                   reading current?" a per-row question no consumer could answer. `off` is the EKRHH
                   data-model offset (def/homehub.hpp), which is what the pairing keys on.
@@ -1903,7 +1915,8 @@ GET  /status?redact=1   the bug-report form of /status: the eight reporter-ident
 GET  /scan        WiFi scan {"networks":[{ssid,rssi}]} — TRUSTED-LAN ONLY and read by NO shipped
                   client: the setup portal takes a TYPED SSID (no dropdown, no fetch), so this is a
                   humans/scripts diagnostic like /models, not part of the provisioning surface
-GET  /coredump[?clear=1]   stream the flash core-dump image (chunked octet-stream; 404 if none);
+GET  /coredump[?clear=1]   stream the current-firmware core-dump image (chunked octet-stream; 404 if
+                  none or if the only raw image is a proven foreign-build orphan);
                   ?clear=1 erases the coredump partition. Decode offline against the matching-version
                   .elf: scripts/decode-coredump.sh coredump.bin (CI archives the .elf per build). The
                   UI surfaces a crash banner + one-click download when /status.last_crash is set.
@@ -1917,9 +1930,11 @@ POST /crash/dismiss   ACKNOWLEDGE + DELETE this boot's crash report: erase the c
                   NEXT dump and deliberately leaves the fault reset on record, while this says the
                   crash has been dealt with; and a fault reset commonly carries no dump at all (a
                   stack overflow overruns it), where ?clear=1 changes nothing the banner keys on.
-                  ERASE FIRST, mark second: a failed erase answers 500 {ok:false,error} and marks
-                  NOTHING, since a dismissal surviving it would report "no crash" while the dump was
-                  still downloadable. RAM-only and needs no NVS — after any reboot the reset reason
+                  ERASE FIRST, mark second: a failed erase of current-firmware evidence answers 500
+                  {ok:false,error} and marks NOTHING, since a dismissal surviving it would report
+                  "no crash" while the dump was still downloadable. Proven-foreign residue is the
+                  exception: it is already suppressed from /status and GET /coredump, so an erase
+                  failure cannot pin a separate current-fault banner. RAM-only and needs no NVS — after any reboot the reset reason
                   is no longer a fault and the dump is gone, while a NEW crash must show. POST, not
                   a GET beside /coredump: it destroys the one artifact a bug report needs, so it must
                   not be reachable by a link or a prefetch. The reset REASON survives untouched
@@ -1965,14 +1980,17 @@ POST /set_ntp     {server} -> persist + reboot. No request-path network probe (t
                   CONFIG_DAIKIN_NTP_SERVER compile-time default" (SNTP has no disabled state, unlike
                   syslog_host's empty-means-off). Unchanged settings short-circuit to
                   {ok:true,reboot:false}, same as /set_mqtt.
-POST /set_hp      {profile,rx,tx,mb_host,mb_port,mb_unit_id,actuation_enabled}
+POST /set_hp      {profile,rx,tx,mb_mode,mb_host,mb_port,mb_unit_id,actuation_enabled}
                   -> validate + apply live (no reboot). Every key is OPTIONAL and an omitted one keeps
                   its stored value, which is what lets the pin picker POST {profile,rx,tx} without
                   flipping anyone onto Modbus — and lets the HomeHub modal POST only its three fields.
-                  `mb_host` starts/stops the SECOND stack — the ADDRESS is the switch, there is no enable flag — and it never stops the X10A poll. "" = no address entered, which after the one-shot search has run means the stack does not start; mb_port 1..65535
-                  and mb_unit_id 1..247 are range-checked by validate(). All five PERSIST in the
-                  atomic blob (v4) and apply live — the poll engine re-reads config() each cycle and
-                  starts or stops the HomeHub task via mb_reconfigure(), so it needs no reboot.
+                  `mb_mode` is the persistent HomeHub intent: auto performs/re-arms one bounded search,
+                  manual requires `mb_host`, and off suppresses both searches and sockets. The legacy
+                  host-only API maps non-empty to Manual and empty to Off. This SECOND stack never
+                  stops X10A. mb_port 1..65535 and mb_unit_id 1..247 are range-checked by validate().
+                  All five HomeHub fields (enable intent, host, port, unit and safety flag) persist in
+                  atomic blob v6 and apply live: the httpd route calls mb_reconfigure(), while the
+                  Modbus task remains the sole socket owner and retires/restarts itself as needed.
                   `actuation_enabled` is stored and gates NOTHING (there is no write path). rx/tx
                   PERSIST (the physical
                   pin cache — a manual override survives reboot); profile is session-only. The UI
@@ -2110,7 +2128,8 @@ which runs on esp-mqtt's own unguarded event task where the rule above is unavai
 ## Typical debugging
 
 ```bash
-scripts/run-mock-tests.sh                              # host logic tests (the fast loop)
+scripts/run-mock-tests.sh --coverage                   # host logic tests + 95% coverage floor
+tools/coverage/selftest.sh                             # prove the floor fails closed
 scripts/run-domain-audit.sh                            # are the catalog's values physically right?
 scripts/run-schematic-audit.sh                         # does the dashboard drawing still say what it means?
 screen /dev/cu.usbmodemXXXX 115200                     # serial monitor (native USB on s3)

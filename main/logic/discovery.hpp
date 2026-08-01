@@ -133,7 +133,8 @@ inline std::string modbus_topic(const std::string& base) {
 }
 
 // Builds through v1.0.0-dev.257 retained a duplicate HomeHub availability value here. Link state is
-// already part of <base>/heartbeat, so mqtt_ha.cpp uses this frozen name only to delete the old topic.
+// already part of <base>/heartbeat, so mqtt_ha.cpp uses this frozen name only for a bounded retained
+// probe and deletes the old topic when the broker proves it still exists.
 inline std::string retired_modbus_status_topic(const std::string& base) {
     return base + "/modbus/status";
 }
@@ -146,17 +147,17 @@ inline std::string legacy_state_topic(const std::string& base) {
     return base + "/state";
 }
 
-// MQTT_EVENT_DATA predicate for that migration probe. Only the first fragment of a non-empty,
-// RETAINED value on the exact legacy topic is evidence that the broker still holds the old payload.
+// MQTT_EVENT_DATA predicate for the migration probes above. Only the first fragment of a non-empty,
+// RETAINED value on the exact retired topic is evidence that the broker still holds the old payload.
 // A live non-retained publisher, a tombstone echo, a later fragment (whose topic metadata is not
 // guaranteed by every client version), or a sibling topic must never trigger another write.
-inline bool legacy_state_cleanup_candidate(const std::string& legacy_topic,
-                                           const char* topic, int topic_len, bool retained,
-                                           int total_data_len, int current_data_offset) {
+inline bool retained_cleanup_candidate(const std::string& retired_topic,
+                                       const char* topic, int topic_len, bool retained,
+                                       int total_data_len, int current_data_offset) {
     return retained && total_data_len > 0 && current_data_offset == 0 && topic && topic_len >= 0 &&
-           legacy_topic.size() == static_cast<size_t>(topic_len) &&
-           legacy_topic.compare(0, legacy_topic.size(), topic,
-                                static_cast<size_t>(topic_len)) == 0;
+           retired_topic.size() == static_cast<size_t>(topic_len) &&
+           retired_topic.compare(0, retired_topic.size(), topic,
+                                 static_cast<size_t>(topic_len)) == 0;
 }
 
 // Device availability topic (LWT): <base>/status -> "online"/"offline".

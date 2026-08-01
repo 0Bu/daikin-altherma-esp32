@@ -27,18 +27,21 @@ static_assert(static_cast<uint32_t>(CrashReason::BROWNOUT)   == ESP_RST_BROWNOUT
 // Filled once by diag_crash_capture(). Read-only thereafter EXCEPT for the `dismissed` byte, which
 // diag_crash_dismiss() sets once (see there for why that needs no lock).
 static CrashInfo s_ci;
+// Set only on boot-time proof that the on-flash image belongs to another firmware. The erase is
+// best-effort; this latch keeps a failed erase from making the rejected image reportable again when
+// diag_crash_info_live() performs its later raw flash presence check.
+static bool s_foreign_coredump = false;
 
-// A dump is "downloadable" on EXACTLY the terms GET /coredump uses: h_coredump streams the image iff
-// esp_core_dump_image_get() returns ESP_OK, so this predicate is that same call and nothing more —
-// any extra condition here could make /status advertise a dump the endpoint refuses, or vice versa,
-// which is the disagreement this whole path exists to prevent. (An ESP_OK return already guarantees
-// a sane size: esp_core_dump_partition_and_size_get rejects a blank partition — the size word reading
-// back 0xffffffff — with ESP_ERR_NOT_FOUND, and anything < 4 bytes with ESP_ERR_INVALID_SIZE.) Cost
-// is one 4-byte flash read of that size word — orders of magnitude cheaper than parsing the summary,
-// hence safe on a request path.
+// A dump is "downloadable" on EXACTLY the terms GET /coredump uses: the raw image must exist AND must
+// not be the proven-foreign image rejected during boot capture. h_coredump calls this same predicate
+// before streaming, so /status cannot advertise a dump the endpoint refuses or vice versa. (An
+// ESP_OK image_get return already guarantees a sane size: esp_core_dump_partition_and_size_get
+// rejects a blank partition — size word 0xffffffff — with ESP_ERR_NOT_FOUND, and anything < 4 bytes
+// with ESP_ERR_INVALID_SIZE.) Cost is one 4-byte flash read — much cheaper than parsing the summary.
 bool diag_crash_coredump_present() {
     size_t addr = 0, size = 0;
-    return esp_core_dump_image_get(&addr, &size) == ESP_OK;
+    const bool image_present = esp_core_dump_image_get(&addr, &size) == ESP_OK;
+    return coredump_is_reportable(image_present, s_foreign_coredump);
 }
 
 CrashInfo diag_crash_info_live() {
@@ -48,6 +51,7 @@ CrashInfo diag_crash_info_live() {
 }
 
 void diag_crash_capture() {
+    s_foreign_coredump = false;
     s_ci.reason   = static_cast<uint32_t>(esp_reset_reason());
     s_ci.coredump = diag_crash_coredump_present();
 
@@ -87,6 +91,7 @@ void diag_crash_capture() {
         char run_sha[65] = {0};
         esp_app_get_elf_sha256(run_sha, sizeof(run_sha));
         if (coredump_is_foreign(s_ci.elf_sha, run_sha)) {
+            s_foreign_coredump = true;
             diag_printf("crash: stale core dump from build %s (running %s) — erasing\n",
                         s_ci.elf_sha, run_sha);
             esp_err_t err = esp_core_dump_image_erase();
@@ -108,8 +113,10 @@ void diag_crash_capture() {
 const CrashInfo& diag_crash_info() { return s_ci; }
 
 // Acknowledge + delete this boot's crash report (see diag_crash.hpp). Erase FIRST, mark second: on a
-// failed erase nothing is marked, so the banner comes back rather than the device claiming a crash
-// is gone while its dump is still in flash.
+// failed erase of CURRENT-FIRMWARE evidence nothing is marked, so the banner comes back rather than
+// the device claiming a downloadable crash is gone. Proven-foreign residue is the deliberate
+// exception: it is already hidden from /status and GET /coredump, so an erase failure cannot pin an
+// otherwise-dismissible current fault banner.
 //
 // The erase is unconditional, not gated on diag_crash_coredump_present(): esp_core_dump_image_erase()
 // succeeds on an already-blank partition (it erases and writes the blank size word), and gating it on
@@ -123,12 +130,16 @@ const CrashInfo& diag_crash_info() { return s_ci; }
 // CrashInfo — no lock, and none of the paths involved may take one anyway (see CLAUDE.md).
 bool diag_crash_dismiss() {
     esp_err_t err = esp_core_dump_image_erase();
-    if (err != ESP_OK) {
+    if (err != ESP_OK && coredump_erase_failure_blocks_dismiss(s_foreign_coredump)) {
         diag_printf("crash: dismiss failed — coredump erase: %s\n", esp_err_to_name(err));
         return false;
     }
+    if (err != ESP_OK)
+        diag_printf("crash: foreign coredump residue erase failed again: %s — report may still be dismissed\n",
+                    esp_err_to_name(err));
     s_ci.dismissed = true;
-    diag_printf("crash: report dismissed (reset=%s, dump erased)\n", crash_reason_slug(s_ci.reason));
+    diag_printf("crash: report dismissed (reset=%s, %s)\n", crash_reason_slug(s_ci.reason),
+                err == ESP_OK ? "dump erased" : "foreign dump residue suppressed");
     return true;
 }
 

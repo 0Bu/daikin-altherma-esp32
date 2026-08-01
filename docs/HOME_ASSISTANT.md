@@ -66,12 +66,13 @@ Assistant discovery configs**: HA exposes only X10A values plus board/link diagn
 to those exact retired discovery topics remove them from existing HA installations
 without affecting `<base>/modbus`. Named HomeHub selectors keep their raw numeric constants in that
 MQTT state topic (`smart_grid_operation_mode: 2`); readable names remain a web-UI concern. The
-redundant retained `<base>/modbus/status` emitted by those builds is deleted too; current link state,
-receive count and failures are already carried by `<base>/heartbeat`.
+redundant retained `<base>/modbus/status` emitted by those builds is probed and deleted when present;
+current link state, receive count and failures are already carried by `<base>/heartbeat`.
 
-After upgrading, the firmware briefly probes for the legacy retained `<base>/state` payload and
-deletes it only when the broker actually returns one. Once it is absent, reconnects do not publish
-even an empty payload on that topic. X10A consumers must subscribe to `<base>/x10a`;
+After upgrading, the firmware briefly probes for legacy retained `<base>/state` and
+`<base>/modbus/status` payloads and deletes each only when the broker actually returns one. Once they
+are absent, reconnects do not publish even empty payloads on those topics. X10A consumers must
+subscribe to `<base>/x10a`;
 `<base>/state` is no longer a published topic.
 
 The board/link diagnostics on `<base>/heartbeat` are a **flat** JSON object — each field carried under

@@ -620,7 +620,8 @@ const ENUM_VALUE_I18N = Object.freeze({
   "Recommended on": "enum.recommended_on", "Forced on": "enum.forced_on",
 });
 
-// HomeHub enum values stay numeric in /values, MQTT and Home Assistant. /values carries this
+// HomeHub enum values stay numeric in /values and MQTT; Home Assistant publishes no HomeHub value
+// entities. /values carries this
 // separate semantic id so only the visual browser boundary turns e.g. smart_grid_mode=2 into the
 // manufacturer's readable state. Unknown numbers remain visible as Unknown (N), never coerced.
 const HOMEHUB_ENUM_VALUE_I18N = Object.freeze({

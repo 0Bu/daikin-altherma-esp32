@@ -133,8 +133,8 @@ Modbus constants; the names below are applied only by the visual UI and come fro
 | holding `4` / `9` | Space heating/cooling / quiet mode | binary `0`/`1`, displayed `OFF`/`ON` |
 | holding `56` | Smart Grid operation mode | `0` / `1` / `2` / `3` → Free running / Forced off / Recommended on / Forced on |
 
-The four enums retain their raw integer in `homehub_format()`, `/values`, MCP, MQTT and Home
-Assistant. `/values` carries a separate structural `enum` id so the browser can localise a known
+The four enums retain their raw integer in `homehub_format()`, `/values`, MCP and MQTT. `/values`
+carries a separate structural `enum` id so the browser can localise a known
 state; an undocumented number remains visible as `Unknown (N)` instead of being silently coerced.
 The flat MQTT payload therefore contains, for example,
 `"smart_grid_operation_mode":2`, never `"smart_grid_operation_mode":"Recommended on"`. The five
@@ -264,11 +264,14 @@ green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
 Registers with no X10A counterpart get their own group at the very end of the value list, after
 everything X10A carries.
 
-**MQTT publishes the X10A cache only.** Publishing both would put a second HA entity on every quantity
-they share — two "DHW tank temp" sensors that disagree slightly — which is a worse answer than one.
-The HomeHub's *link health* still rides the heartbeat (`modbus_enabled`/`modbus_connected`/`modbus_rx`/
-`modbus_fails`, payload-only: no HA entity, since a stack most devices never run would be an always-off
-diagnostic to rule out).
+**MQTT preserves the two sources instead of merging them.** X10A is retained as grouped JSON on
+`<base>/x10a`; an enabled HomeHub publishes its separate flat map on `<base>/modbus`. A disconnected
+HomeHub sends `{}` and Off retracts that data topic. The Modbus stream deliberately has no Home
+Assistant discovery: publishing both sources as HA entities would create two sensors for every shared
+quantity and hide which instrument is fresh. HomeHub link health rides the heartbeat
+(`modbus_enabled`/`modbus_connected`/`modbus_rx`/`modbus_fails`, payload-only). On upgrade, bounded
+exact-topic probes delete old retained `<base>/state` and `<base>/modbus/status` values only when the
+broker returns a non-empty retained payload; later reconnects are silent on already-clean topics.
 
 ## Configuration
 

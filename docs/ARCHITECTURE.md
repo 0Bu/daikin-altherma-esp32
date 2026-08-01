@@ -1181,13 +1181,13 @@ The Home Assistant bridge:
   retain the raw numeric Modbus constant; `/values` carries separate semantic metadata so the browser
   can name them without putting prose on MQTT. A disconnected HomeHub publishes `{}` rather than
   preserving a previous TCP session's values; disabling the stack retracts the Modbus data topic.
-  The former retained `<base>/modbus/status` duplicate is tombstoned on connect because link state,
-  receive count and failures already live in `<base>/heartbeat`. The
+  The former retained `<base>/modbus/status` duplicate is retired because link state, receive count
+  and failures already live in `<base>/heartbeat`. The
   27 discovery configs emitted by builds through `v1.0.0-dev.257` are permanent cleanup targets:
-  connect-time and five-minute retirement passes tombstone them and no replacement config exists. On upgrade a bounded
-  exact-topic subscription probes
-  for an obsolete retained `<base>/state` value; only a non-empty retained response triggers its
-  tombstone, so later reconnects do not publish an empty legacy topic.
+  connect-time and five-minute retirement passes tombstone them and no replacement config exists. On
+  upgrade, bounded exact-topic subscriptions probe for obsolete retained `<base>/state` and
+  `<base>/modbus/status` values; only a non-empty retained response triggers each tombstone, so later
+  reconnects do not publish either empty retired topic.
 - **A field's JSON type comes from its DEFINITION, never from its current value.** `GroupedValue`
   carries a `PublishedKind` (`logic/convert.hpp` `published_kind`, keyed on the converter id):
   `Number` is emitted unquoted, `Text` quoted — in **every** state of that field. The publisher used
@@ -1364,11 +1364,13 @@ Structure:
     WebSocket push was removed, also on the poll task — see "Push vs. poll"). A dump whose parsed
     `app_elf_sha256` does **not** match the running build (`coredump_is_foreign()`, host-tested) is an
     **orphan** — it survived an OTA, or a panic that could not write its own dump left the previous
-    build's dump in place — and is **erased** at capture, with the reason logged to `/diag`. Without
+    build's dump in place — and is erased at capture, with the reason logged to `/diag`. If that
+    best-effort erase fails, its proven foreign identity remains latched for this boot: both
+    `diag_crash_info_live()` and `GET /coredump` suppress the residue, so it cannot reappear as a
+    download `espcoredump` rejects. Without
     this an orphan passes `esp_core_dump_image_check()` (it is a valid image, just of another binary),
     so `coredump` reads true and `/status` offers a download that `espcoredump` then rejects on a
-    SHA-256 mismatch (#215). Erasing it makes `coredump` mean "a dump for **this** firmware is
-    downloadable" and clears the partition for the next real panic. The
+    SHA-256 mismatch (#215). Successful erasure also clears the partition for the next real panic. The
     `coredump` **presence flag** is the one exception: it IS re-checked from flash per request
     (`diag_crash_info_live()` — a 4-byte size-word read, not the summary reparse), because the image
     can be erased mid-session via `/coredump?clear=1` and a cached flag would then advertise a dump
@@ -1404,10 +1406,12 @@ Structure:
     `CrashInfo::dismissed`, so `crash_is_notable()` is false everywhere at once — `/status.last_crash`
     goes `null`, the retained MQTT crash topic is cleared on the next heartbeat tick, and the banner
     is gone across reloads, browsers and Home Assistant. Hiding it in page state alone (what this
-    replaced) survived exactly until the next reload. **Erase first, mark second**: a failed erase
-    answers `500 {"ok":false,…}` and marks nothing, because a dismissal that outlived a failed erase
-    would report "no crash" with the dump still downloadable — the one direction this must not fail
-    in. The flag is **RAM-only on purpose** and needs no NVS: after any reboot the reset reason is no
+    replaced) survived exactly until the next reload. **Erase first, mark second** for a dump from the
+    running firmware: a failed erase answers `500 {"ok":false,…}` and marks nothing, because a
+    dismissal that outlived it would report "no crash" with evidence still downloadable. A proven
+    foreign residue is the sole exception — it is already suppressed from `/status` and
+    `GET /coredump`, so its failed erase cannot pin a separate current-fault banner. The flag is
+    **RAM-only on purpose** and needs no NVS: after any reboot the reset reason is no
     longer a fault and the dump is gone, while a *new* crash captures a fresh `CrashInfo` and must
     show — which persisting a dismissal could suppress. The reset **reason** survives untouched
     (`/status.sys.reset_reason` and the heartbeat's own "Reset Reason" sensor): what was deleted is

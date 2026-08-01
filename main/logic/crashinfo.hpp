@@ -108,6 +108,21 @@ inline bool coredump_is_foreign(const char* dump_sha, const char* run_sha) {
     return std::strncmp(dump_sha, run_sha, n) != 0;
 }
 
+// A core-dump image is reportable/downloadable only when it belongs to this running firmware. The
+// flash erase attempted for a proven-foreign image can itself fail; that must not make a dump already
+// rejected on its ELF identity reappear through the later live presence check. `known_foreign` is a
+// boot-time proof, not a guess (coredump_is_foreign above).
+inline bool coredump_is_reportable(bool image_present, bool known_foreign) {
+    return image_present && !known_foreign;
+}
+
+// Dismissal normally fails closed when erasing the dump fails: current-firmware evidence must not be
+// hidden while it remains downloadable. A proven-foreign image is neither current evidence nor
+// downloadable, so its flash residue cannot pin an otherwise-dismissible current fault banner.
+inline bool coredump_erase_failure_blocks_dismiss(bool known_foreign) {
+    return !known_foreign;
+}
+
 // A last_crash worth surfacing = a fault reset OR an orphan core-dump still sitting in flash. A
 // clean power-on / software reboot is not notable (no banner), but its reason is still reported.
 //
