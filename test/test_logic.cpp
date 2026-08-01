@@ -998,21 +998,26 @@ static void test_discovery() {
     const std::string st = x10a_topic(base);              // shared by the X10A sensors only
     CHECK(st == "daikin-altherma-esp32/x10a");             // node NOT in the message topic (one board/base)
     CHECK(modbus_topic(base) == "daikin-altherma-esp32/modbus");
-    CHECK(retired_modbus_status_topic(base) == "daikin-altherma-esp32/modbus/status");
+    const std::string retired_status = retired_modbus_status_topic(base);
+    CHECK(retired_status == "daikin-altherma-esp32/modbus/status");
     CHECK(legacy_state_topic(base) == "daikin-altherma-esp32/state");
     const std::string legacy = legacy_state_topic(base);
-    CHECK(legacy_state_cleanup_candidate(legacy, legacy.data(), static_cast<int>(legacy.size()),
-                                         true, 123, 0));
-    CHECK(!legacy_state_cleanup_candidate(legacy, legacy.data(), static_cast<int>(legacy.size()),
-                                          false, 123, 0));  // live message, not retained
-    CHECK(!legacy_state_cleanup_candidate(legacy, legacy.data(), static_cast<int>(legacy.size()),
-                                          true, 0, 0));     // tombstone echo
-    CHECK(!legacy_state_cleanup_candidate(legacy, legacy.data(), static_cast<int>(legacy.size()),
-                                          true, 123, 64));  // later payload fragment
+    CHECK(retained_cleanup_candidate(legacy, legacy.data(), static_cast<int>(legacy.size()),
+                                     true, 123, 0));
+    CHECK(retained_cleanup_candidate(retired_status, retired_status.data(),
+                                     static_cast<int>(retired_status.size()), true, 7, 0));
+    CHECK(!retained_cleanup_candidate(legacy, legacy.data(), static_cast<int>(legacy.size()),
+                                      false, 123, 0));  // live message, not retained
+    CHECK(!retained_cleanup_candidate(legacy, legacy.data(), static_cast<int>(legacy.size()),
+                                      true, 0, 0));     // tombstone echo
+    CHECK(!retained_cleanup_candidate(legacy, legacy.data(), static_cast<int>(legacy.size()),
+                                      true, 123, 64));  // later payload fragment
     const std::string legacy_child = legacy + "/child";
-    CHECK(!legacy_state_cleanup_candidate(legacy, legacy_child.data(),
-                                          static_cast<int>(legacy_child.size()), true, 123, 0));
-    CHECK(!legacy_state_cleanup_candidate(legacy, nullptr, 0, true, 123, 0));
+    CHECK(!retained_cleanup_candidate(legacy, legacy_child.data(),
+                                      static_cast<int>(legacy_child.size()), true, 123, 0));
+    CHECK(!retained_cleanup_candidate(legacy, nullptr, 0, true, 123, 0));
+    CHECK(!retained_cleanup_candidate(retired_status, legacy.data(),
+                                      static_cast<int>(legacy.size()), true, 123, 0));
     CHECK(availability_topic(base) == "daikin-altherma-esp32/status");
     std::string cfg = discovery_config(node, board, st, availability_topic(base), def);
     CHECK(cfg.find("\"dev_cla\":\"temperature\"") != std::string::npos);
@@ -2597,6 +2602,15 @@ static void test_crashinfo() {
     clean.reason = 3;   // ESP_RST_SW
     CHECK(!crash_is_notable(clean));
     CHECK(build_crash_json(clean) == "{\"reason\":\"sw\",\"reason_code\":3,\"fault\":false,\"coredump\":false}");
+
+    // A proven-foreign image is never reportable, even if its best-effort boot-time erase failed and
+    // the raw partition still looks occupied. Current-firmware evidence keeps the fail-closed erase
+    // rule; foreign residue cannot pin a current fault banner that has no downloadable dump behind it.
+    CHECK(coredump_is_reportable(true, false));
+    CHECK(!coredump_is_reportable(false, false));
+    CHECK(!coredump_is_reportable(true, true));
+    CHECK(coredump_erase_failure_blocks_dismiss(false));
+    CHECK(!coredump_erase_failure_blocks_dismiss(true));
 
     // An orphan core-dump with no fault reason is still notable (a dump is waiting to be pulled).
     CrashInfo orphan;

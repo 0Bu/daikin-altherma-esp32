@@ -3,8 +3,9 @@
 // (esp_reset_reason) and, if a core-dump image is in flash, parses its SUMMARY
 // (esp_core_dump_get_summary — crashed task, PC, backtrace, app ELF sha) into a cached CrashInfo. A
 // dump whose app ELF sha does not match the RUNNING build is an ORPHAN (it survived an OTA, or a
-// panic that could not write its own dump left the previous one behind) — it is ERASED here so
-// `coredump` never advertises a download espcoredump would reject on a version mismatch (#215).
+// panic that could not write its own dump left the previous one behind) — it is erased here and,
+// even if that best-effort erase fails, suppressed for this boot so `coredump` never advertises a
+// download espcoredump would reject on a version mismatch (#215).
 // The reason + summary are boot-time FACTS and stay cached — the summary is never re-parsed from
 // flash on a request path (http_append_status_json also runs in the poll task's WS broadcaster,
 // which only self-guards std::bad_alloc by dropping the frame).
@@ -35,11 +36,12 @@ CrashInfo        diag_crash_info_live();
 // everywhere at once: /status.last_crash goes null, the retained MQTT crash topic is cleared on the
 // next heartbeat tick, and the web UI's banner stays gone across reloads and browsers.
 //
-// Ordering is the contract: the erase happens FIRST and a failure returns false WITHOUT marking
-// anything — a dismissal that survived a failed erase would report "no crash" while the dump was
-// still sitting in flash, which is the one direction this must not fail in. Erasing an already-empty
-// partition is success (nothing to delete is the state being asked for), so a fault reset with no
-// dump dismisses fine.
+// Ordering is the contract: the erase happens FIRST and a failure on a current-firmware dump returns
+// false WITHOUT marking anything — a dismissal that survived it would report "no crash" while the
+// evidence stayed downloadable. The only exception is proven-foreign residue: it is already neither
+// reportable nor downloadable, so its failed erase cannot pin a separate current fault banner.
+// Erasing an already-empty partition is success (nothing to delete is the state being asked for), so
+// a fault reset with no dump dismisses fine.
 bool             diag_crash_dismiss();
 
 } // namespace daik

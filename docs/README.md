@@ -409,7 +409,8 @@ GET  /scan                         # WiFi scan → {"networks":[{ssid,rssi}]} (n
                                    #   the setup portal takes a TYPED SSID and never scans. A
                                    #   diagnostic ("what does the board see, how strong?") for
                                    #   humans/scripts, like /models
-GET  /coredump[?clear=1]           # stream the flash core-dump image (chunked; 404 if none);
+GET  /coredump[?clear=1]           # stream this firmware's core-dump image (chunked; 404 if none or
+                                   #   if raw flash only holds a proven foreign-build orphan);
                                    #   ?clear=1 erases the coredump partition. Decode offline with
                                    #   scripts/decode-coredump.sh coredump.bin (matching-version .elf).
 POST /crash/dismiss                # DELETE this boot's crash report: erase the dump AND stop
@@ -417,7 +418,9 @@ POST /crash/dismiss                # DELETE this boot's crash report: erase the 
                                    #   retained MQTT crash topic clears and the web UI banner is gone
                                    #   for good (it used to hide in page state, which a reload undid).
                                    #   Irreversible — download the dump first if you plan to file a
-                                   #   bug report. A failed erase answers 500 and deletes nothing.
+                                   #   bug report. A failed erase of current-firmware evidence answers
+                                   #   500 and deletes nothing; already-suppressed foreign residue
+                                   #   cannot pin a separate current-fault banner.
                                    #   The reset REASON is unaffected (/status.sys.reset_reason).
 POST /set_wifi                     # { ssid, pass } → validate (ssid 1-32; pass ""|8-63) → persist +
                                    #   reboot; on failure 400 {ok:false,error} (nothing saved). Backs up
@@ -513,11 +516,12 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   An enabled HomeHub publishes its live, flat register map independently on `<base>/modbus`, but no
   HA discovery config references that topic. On upgrade, retained tombstones remove all 27 formerly
   announced `_modbus` entities; the data stream itself remains intact. A disconnected link publishes
-  `{}` and disabling the source retracts its data topic. The former retained `<base>/modbus/status`
-  is deleted because its link state already lives in `<base>/heartbeat`. HomeHub enums stay numeric
+  `{}` and disabling the source retracts its data topic. A bounded migration probe deletes the former
+  retained `<base>/modbus/status` value when it still exists because its link state already lives in
+  `<base>/heartbeat`. HomeHub enums stay numeric
   constants (for example `smart_grid_operation_mode: 2`); only the web UI maps them to readable names. A short
-  migration probe deletes an old retained `<base>/state` value if present; an already-clean broker
-  receives no `/state` publish.
+  migration probe does the same for an old retained `<base>/state` value; an already-clean broker
+  receives no publish on either retired topic.
   Availability/LWT `<base>/status`. `<base>` defaults `daikin-altherma-esp32`,
   `<prefix>` `homeassistant`.
 - **Type-stable, and honest about absence.** Whether a key is a JSON number or a JSON string is

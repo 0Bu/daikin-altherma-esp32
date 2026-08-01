@@ -31,7 +31,7 @@ struct CachedValue {
                                 // `conv` is 4-byte aligned, so putting it between `off` and `held`
                                 // pads twice and costs 4 bytes MORE per row than putting it last.
                                 // Two snapshot buffers hold ~116 of these as one CONTIGUOUS block
-                                // each (build_values_array on the httpd task, current_grouped on the
+                                // each (build_values_array on the httpd task, current_x10a_values on the
                                 // publish task), and the binding limit on this board is the largest
                                 // contiguous block — so a field-ordering slip is a real ~460 B of
                                 // extra peak, not a style point.

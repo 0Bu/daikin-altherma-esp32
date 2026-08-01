@@ -916,6 +916,16 @@ static esp_err_t h_coredump(httpd_req_t* req) {
         }
     }
 
+    // Match /status.last_crash exactly: a raw image proven to belong to another firmware is not a
+    // downloadable report, even when its best-effort boot-time erase failed and bytes remain in the
+    // partition. Without this gate the banner says "no dump" while the endpoint serves one that
+    // esp-coredump rejects on the ELF SHA mismatch.
+    if (!diag_crash_coredump_present()) {
+        httpd_resp_set_status(req, "404 Not Found");
+        httpd_resp_set_type(req, "text/plain");
+        return httpd_resp_sendstr(req, "No reportable coredump found");
+    }
+
     size_t address = 0;
     size_t size = 0;
     esp_err_t err = esp_core_dump_image_get(&address, &size);
