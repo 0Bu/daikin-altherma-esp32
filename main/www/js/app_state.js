@@ -212,7 +212,12 @@ function renderApp() {
     // measurement picker the schematic uses; a plain /leaving water/ match could hit a setpoint).
     const stale = vLwt() == null && hp.last_ok_s != null ? " · " + t("sys.polled", hp.last_ok_s) : "";
     const p = plantState(S.live);
-    sysSet(mode || t("sys.online"), t(p.key) + stale, p.tone);
+    // During a hot pump-overrun interval the Daikin mode row still says Cooling, but the water loop
+    // is not producing cold. Name the selected mode as such and let the activity line state the
+    // thermodynamic reality; a bare green "Cooling" over 57 °C moving water is otherwise false by
+    // ordinary reading even though both underlying registers are individually correct.
+    const modeHeadline = p === PLANT_COOL_RESIDUAL ? t("sys.cool_mode") : mode;
+    sysSet(modeHeadline || t("sys.online"), t(p.key) + stale, p.tone);
   }
   renderHeaderMeta();
   renderSettings();
@@ -250,6 +255,7 @@ const TONE_FILL = { err: "var(--err)", dim: "var(--muted)", idle: "var(--muted)"
 const PLANT_RUNNING = { key: "sys.operating", tone: "" };
 const PLANT_DEFROST = { key: "sys.defrosting", tone: "" };
 const PLANT_CIRC = { key: "sys.circulating", tone: "" };
+const PLANT_COOL_RESIDUAL = { key: "sys.residual_circulating", tone: "idle" };
 const PLANT_BSH = { key: "sys.bsh_active", tone: "" };
 const PLANT_STANDBY = { key: "sys.standby", tone: "idle" };
 function plantState(d) {
@@ -262,7 +268,14 @@ function plantState(d) {
   if ((d.rps ?? 0) > 0) return PLANT_RUNNING;
   // Compressor off but water still moving: pump overrun, or the backup heater carrying the load on
   // its own. Something IS happening — it just isn't the heat pump, which is the point of saying so.
-  if (d.pumpOn ?? (d.flow != null && d.flow > 1)) return PLANT_CIRC;
+  const moving = d.pumpOn ?? (d.flow != null && d.flow > 1);
+  // Positive R1T-R4T while Cooling is selected is the exact residual-hot circulation case: the
+  // compressor is stopped, so it cannot be cooling, and the water is losing stored heat on its way
+  // around the loop. This can be pump overrun/protection; it must not inherit the generic green
+  // "Cooling / Operating" presentation.
+  if (moving && d.thermalMode === "cool" && d.pthRaw != null && d.pthRaw > 0)
+    return PLANT_COOL_RESIDUAL;
+  if (moving) return PLANT_CIRC;
   return PLANT_STANDBY;
 }
 function sysSet(mode, status, tone) {

@@ -129,8 +129,8 @@ assert.match(`${reheat.normal} ${reheat.de.normal}`, /hysteresis/i);
 
 const indoorMode = firstDescription("I/U operation mode");
 assert.equal(indoorMode.de.what,
-  "Was die Wasserseite der Inneneinheit gerade tut: Stopp, Heizen, Kühlen, Warmwasser oder Heizen + Warmwasser.");
-assert.match(indoorMode.de.normal, /steht hier Warmwasser/);
+  "Die aktuelle Regler-Betriebsart der Wasserseite: Stopp, Heizen, Kühlen, Warmwasser oder eine Kombination. Die Betriebsart allein belegt weder einen laufenden Verdichter noch eine nutzbare Heiz- oder Kälteleistung.");
+assert.match(indoorMode.de.normal, /Aktivitätszeile.*steht hier Warmwasser/);
 assert.doesNotMatch(`${indoorMode.de.what} ${indoorMode.de.normal}`,
   /Wasserseite \(|Heizen\+Warmwasser|\bWW\b/,
   "the German operation-mode explanation uses fluent copy and the visible state names");

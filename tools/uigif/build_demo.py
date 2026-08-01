@@ -60,5 +60,7 @@ out.write_text(page)
 brand_icon = www / "heat_pump_icon.png"
 if not brand_icon.is_file():
     sys.exit("build_demo: missing main/www/heat_pump_icon.png")
-shutil.copyfile(brand_icon, out.parent / brand_icon.name)
+# The firmware route is hyphenated even though the source asset filename uses underscores.
+# Copy to the URL basename the real index requests; otherwise Chrome records a broken-image icon.
+shutil.copyfile(brand_icon, out.parent / "heat-pump-icon.png")
 print(f"{out} ({len(page)} bytes)")

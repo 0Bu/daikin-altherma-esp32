@@ -96,8 +96,10 @@ assert.equal(de.operationModeText("Future mode"), "Future mode", "unknown modes 
 assert.equal(de.operationModeText(null), null, "an absent mode stays absent");
 assert.equal(de.operationModeFromFlags(true, false), "Warmwasser",
   "the HomeHub DHW flag feeds the same German schematic vocabulary");
-assert.equal(de.operationModeFromFlags(false, true), "Heizen",
-  "the HomeHub space flag feeds the same German schematic vocabulary");
+assert.equal(de.operationModeFromFlags(false, true), "Raumbetrieb",
+  "the HomeHub space flag does not invent Heating when it cannot distinguish Heating/Cooling");
+assert.equal(de.operationModeFromFlags(true, true), "Raumbetrieb + Warmwasser",
+  "simultaneous HomeHub flags stay generic about the unsupported space-mode direction");
 assert.equal(de.operationModeFromFlags(false, false), "Stopp",
   "inactive HomeHub flags feed the same German schematic vocabulary");
 assert.equal(de.operationModeFromFlags(null, false), null,

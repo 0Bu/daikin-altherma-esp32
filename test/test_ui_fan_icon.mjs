@@ -7,6 +7,7 @@ import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 const html = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const css = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 const bootstrap = readAppFragments(["bootstrap.js"]);
+const demoBuilder = fs.readFileSync(new URL("../tools/uigif/build_demo.py", import.meta.url), "utf8");
 const raster = new URL("../main/www/heat_pump_icon.png", import.meta.url);
 
 assert.ok(fs.statSync(raster).size > 0, "the source-faithful fan raster must ship with the UI");
@@ -23,5 +24,7 @@ assert.match(css, /\.fan-on #scFan\s*\{\s*animation:\s*spin 2\.6s linear infinit
              "the outdoor-unit schematic must retain its live fan animation");
 assert.doesNotMatch(bootstrap, /syncAppFan|MutationObserver\(syncAppFan\)/,
                     "the static brand icon must not mirror telemetry state");
+assert.match(demoBuilder, /out\.parent \/ "heat-pump-icon\.png"/,
+             "the recording harness must copy the underscored source asset to the hyphenated UI URL");
 
 console.log("ui fan icon: static brand raster and live schematic fan verified");
