@@ -539,8 +539,9 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   pages, so its readings are missing from the X10A topic while the bus itself is fine) and
   `<base>/crash` (retained;
   **crash-only** — a "dump waiting" flag, published once per (re)connect but ONLY when the boot is
-  *notable*: a real fault or a dump still in flash. A normal boot clears the topic with a zero-length
-  retained message, so no crash message lingers once the problem is resolved. The reset reason is not
+  *notable*: a real fault or a dump still in flash. A normal boot publishes nothing on a clean broker;
+  the bridge first probes for an older retained crash and deletes it only when one actually exists,
+  so no payload-less `/crash` node is recreated on every connection. The reset reason is not
   a crash entity — it lives on the heartbeat's own "Reset Reason" sensor (the old duplicate "Last
   Reset Reason" crash entity was dropped). Republished on the heartbeat cadence if the "dump waiting"
   flag *or the notability* changes, so neither clearing a dump nor deleting the report in the web UI

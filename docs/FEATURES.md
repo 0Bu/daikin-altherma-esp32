@@ -642,10 +642,11 @@ the fact*, from the field, without a serial cable:
   actively retired — its stale retained discovery config is deleted on upgrade). The crash topic is
   **crash-only**:
   `build_crash_mqtt_payload()` emits the JSON only when the boot is *notable* (a real fault **or** a
-  core-dump still in flash) and returns `""` otherwise, which the bridge publishes as a **zero-length
-  retained** message that **clears** the topic — so a normal boot (USB re-enumeration, config-save/OTA
-  reboot, clean power-on) sends no crash message, and a stale crash record disappears from the broker
-  (and HA) as soon as the device reboots cleanly, i.e. once the problem is resolved. Clearing loses no
+  core-dump still in flash) and returns `""` otherwise. Empty means **do not publish**: the bridge
+  briefly probes the exact retained topic and sends a deletion only when the broker actually holds
+  an older crash. Thus a normal boot is silent on a clean broker (live clients do not invent a
+  payload-less `/crash` node), while a stale record still disappears from the broker and HA as soon
+  as the device reboots cleanly or the report is dismissed. Removing the record loses no
   information — the reset reason is carried unconditionally by the heartbeat's own "Reset Reason"
   sensor (`reset_reason_name` == `crash_reason_slug`, host-asserted). Published per (re)connect and
   republished on the heartbeat cadence when the "dump waiting" flag **or the notability** changes, so

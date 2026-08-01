@@ -26,8 +26,9 @@ by the object id alone — see below for why.
 <base>/x10a                                        {<group>: {<object_id>: value, …}, …}  (retained JSON)
 <base>/modbus                                      {<object_id>: value, …}  (retained JSON; enabled HomeHub only)
 <base>/heartbeat                                   board/link diagnostics (flat JSON, 10 s cadence)
-<base>/crash                                       crash report, retained — ONLY on a fault/dump boot; cleared otherwise
-                                                   (also cleared when the report is deleted in the web UI, POST /crash/dismiss)
+<base>/crash                                       crash report, retained — ONLY while a fault/dump is pending
+                                                   (an older retained report is deleted after a clean boot or
+                                                   POST /crash/dismiss; a clean broker receives no empty publish)
 <prefix>/<component>/<node>/<group>_<object_id>/config    discovery config per PUBLISHED value (retained)
 ```
 

@@ -1006,6 +1006,9 @@ static void test_discovery() {
                                      true, 123, 0));
     CHECK(retained_cleanup_candidate(retired_status, retired_status.data(),
                                      static_cast<int>(retired_status.size()), true, 7, 0));
+    const std::string crash = crash_topic(base);
+    CHECK(retained_cleanup_candidate(crash, crash.data(), static_cast<int>(crash.size()),
+                                     true, 42, 0));
     CHECK(!retained_cleanup_candidate(legacy, legacy.data(), static_cast<int>(legacy.size()),
                                       false, 123, 0));  // live message, not retained
     CHECK(!retained_cleanup_candidate(legacy, legacy.data(), static_cast<int>(legacy.size()),
@@ -2640,12 +2643,12 @@ static void test_crashinfo() {
     CHECK(crash_is_notable(fault_cleared));
 
     // The RETAINED <base>/crash MQTT payload is crash-ONLY: it carries the crash JSON when the boot
-    // is notable, and "" otherwise. The caller publishes "" as a zero-length retained message, which
-    // CLEARS the topic — so a normal boot sends no crash message and a stale crash record disappears
-    // once the device reboots cleanly (the problem resolved). Reset reason is not lost: the heartbeat
-    // carries it independently (parity asserted in test_boot_guard: reset_reason_name==crash_reason_slug).
-    CHECK(build_crash_mqtt_payload(clean).empty());       // config-save/OTA reboot -> clear
-    CHECK(build_crash_mqtt_payload(usb_replug).empty());  // USB re-enumeration -> clear
+    // is notable, and "" otherwise. Empty means NO crash publish; the caller probes the broker and
+    // sends a tombstone only when a stale retained crash actually exists. Thus a normal boot is
+    // silent on a clean broker while still removing an older crash. Reset reason is not lost: the
+    // heartbeat carries it independently (parity asserted in test_boot_guard).
+    CHECK(build_crash_mqtt_payload(clean).empty());       // config-save/OTA reboot -> no publish
+    CHECK(build_crash_mqtt_payload(usb_replug).empty());  // USB re-enumeration -> no publish
     CHECK(build_crash_mqtt_payload(orphan) == build_crash_json(orphan));            // dump waiting -> report
     CHECK(build_crash_mqtt_payload(fault_cleared) == build_crash_json(fault_cleared)); // fault sans dump -> report
 
@@ -2659,7 +2662,7 @@ static void test_crashinfo() {
     CrashInfo dismissed_fault = fault_cleared;
     dismissed_fault.dismissed = true;
     CHECK(!crash_is_notable(dismissed_fault));
-    CHECK(build_crash_mqtt_payload(dismissed_fault).empty());   // -> zero-length retained = topic cleared
+    CHECK(build_crash_mqtt_payload(dismissed_fault).empty());   // -> probe + delete only if retained
     CHECK(build_crash_json(dismissed_fault) == build_crash_json(fault_cleared));   // the reset itself is untouched
     CrashInfo dismissed_orphan = orphan;
     dismissed_orphan.dismissed = true;

@@ -587,8 +587,8 @@ host-testable core is unusually large and valuable, because the risky parts are 
 - `logic/crashinfo.hpp` — reset-reason slug + fault classification, and the `last_crash` / MQTT crash
   payload + paste-friendly text bundle (incl. the backtrace clamp) built from a captured summary. The
   retained MQTT crash payload (`build_crash_mqtt_payload`) is **crash-only**: the JSON when the boot is
-  *notable* (a real fault or a core-dump still in flash), else `""` — the bridge publishes that as a
-  zero-length retained message to **clear** the topic, so no crash message lingers after a clean boot.
+  *notable* (a real fault or a core-dump still in flash), else `""` — the bridge then probes for and
+  deletes an older retained crash, but publishes nothing when the broker is already clean.
 - `logic/reset_reason.hpp` — maps a raw `esp_reset_reason()` code to the stable slug used by
   `/status.sys.reset_reason` and the heartbeat, reusing `crashinfo`'s table so there is one
   vocabulary — a parity check asserts the two never drift apart.
@@ -1427,9 +1427,10 @@ Structure:
     discovery config is deleted on upgrade via a zero-length retained publish). The topic is
     **crash-only**
     (`build_crash_mqtt_payload`): the summary is retained only when the boot is *notable* (a real fault
-    or a dump still in flash); a normal boot (USB re-enumeration, config-save/OTA reboot, clean
-    power-on) publishes a **zero-length retained** message that **clears** the topic, so no crash
-    message lingers once the problem is resolved — the reset reason stays visible on the heartbeat's
+    or a dump still in flash); a normal boot is silent on a clean broker. The bridge briefly probes
+    the exact retained topic and publishes a deletion only when an older crash is actually present,
+    so live clients do not recreate a payload-less `/crash` node on every connection while stale
+    reports still disappear once resolved — the reset reason stays visible on the heartbeat's
     own "Reset Reason" sensor regardless. Published once per (re)connect **and** republished on the
     heartbeat cadence whenever the `coredump` flag **or the notability** changes, so a retained "Crash
     Dump Waiting" can't stay latched ON after the dump is pulled and cleared (and an orphan-dump-only
