@@ -716,6 +716,7 @@ const HOMEHUB_LABEL_DE = Object.freeze({
   22: "Fehlercode der Anlage",
   23: "Fehlersubcode der Anlage",
   30: "Umwälzpumpe aktiv",
+  31: "Verdichter aktiv",
   37: "Position des 3-Wege-Ventils",
   52: "Warmwasserbetrieb",
   53: "Raumheiz- oder Kühlbetrieb",

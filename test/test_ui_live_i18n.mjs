@@ -58,7 +58,7 @@ function assertPersistentBannerRepaints(name, status) {
   const { api } = productionApi(
     appStateSource,
     ["plantState", "PLANT_COOL_RESIDUAL", "PLANT_RUNNING"],
-    {},
+    { compressorRunning: (d) => d?.rps != null ? d.rps > 0 : d?.compressorOn === true },
   );
   const residual = api.plantState({
     rps: 0, pumpOn: true, flow: 19.1, thermalMode: "cool", pthRaw: 0.4,
@@ -68,6 +68,9 @@ function assertPersistentBannerRepaints(name, status) {
   assert.equal(residual.tone, "idle", "residual circulation must not receive the running-green tone");
   assert.equal(api.plantState({ rps: 42, pumpOn: true, thermalMode: "cool", pthRaw: -4 }).key,
     "sys.operating", "a running compressor remains active plant operation");
+  assert.equal(api.plantState({ rps: null, compressorOn: true, pumpOn: true,
+                                thermalMode: "heat", pthRaw: 7.8 }).key,
+    "sys.operating", "the HomeHub compressor witness keeps Modbus-only DHW in active operation");
 }
 
 assertPersistentBannerRepaints(

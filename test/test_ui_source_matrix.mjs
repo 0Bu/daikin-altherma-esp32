@@ -38,6 +38,9 @@ const X_VALVE = (on) => ({ label: "3way valve(On:DHW_Off:Space)", value: on ? "1
                            unit: "", reg: 0x60, binary: true, concept: "valve_dhw" });
 const M_VALVE = (on) => ({ label: "3-way valve", value: on ? 1 : 0,
                            unit: "", off: 37, enum: "three_way_valve", concept: "valve_dhw" });
+const M_FLAG = (off, label, on, concept = null) => ({
+  label, value: on ? 1 : 0, unit: "", off, binary: true, concept,
+});
 
 function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements = {} }) {
   const context = {
@@ -80,7 +83,8 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     " mbUnitAbnormality," +
     " SMART_GRID_MODE_VALUE, x10aSmartGridModeFrom, x10aSmartGridMode, x10aSmartGridRow," +
     " sgModeText, sgRequestText, mbNoteHtml, inspCurRow, inspMember," +
-    " inspMembers, inspSourceNoteHtml, inspHeld, liveData, activeSpaceKind, ouReadingText, INSPECT," +
+    " inspMembers, inspSourceNoteHtml, inspHeld, liveData, compressorRunning, waterThermalKind," +
+    " activeSpaceKind, ouReadingText, INSPECT," +
     " pelMeasured, pelApproxText, PEL_INSPECT, setSchematicHitAvailable };",
     context, { filename: "main/www/app.sources" });
   context.__api.S = context.S;
@@ -308,6 +312,51 @@ const X_SG = (contact, on) => ({
                   values: [], modbus: [LWT_M, M_VALVE(true)] });
   assert.equal(c.stateOf(/3.?way valve/i, 37), true, "modbus only: the gateway state answers");
   assert.equal(c.mbFallbackFor("leaving_water")?.value, "38.1", "modbus only: the reading stands in");
+}
+
+// The reported regression: during a Modbus-only DHW charge, the gateway already supplied routing,
+// pump, temperatures and flow, but the missing X10A rps row was treated as proof that the compressor
+// was stopped. That made an active charge look like neutral/cooling-side circulation. Input 31 is
+// the missing independent witness; no temperature inference or configured heat/cool mode is needed.
+{
+  const dhwModbus = [
+    M_FLAG(30, "Circulation pump running", true, "pump_running"),
+    M_FLAG(31, "Compressor running", true),
+    M_VALVE(true),
+    M_FLAG(52, "DHW normal operation", true),
+    M_FLAG(53, "Space heating/cooling normal operation", false, "space_op"),
+    M(40, "Leaving water temperature PHE", 54.1, "leaving_water"),
+    M(42, "Return water temperature", 49.4, "return_water"),
+    M(43, "Domestic Hot Water temperature", 39.5, "dhw_tank"),
+    M(49, "Flow rate", 24.0, "flow", { unit: "L/min" }),
+  ];
+  const c = ctx({ x10a: false, mbEnabled: true, mbConnected: true,
+                  values: [], modbus: dhwModbus });
+  const d = c.liveData();
+  assert.equal(d.rps, null, "Modbus-only does not invent a compressor speed");
+  assert.equal(d.compressorOn, true, "HomeHub input 31 supplies the live compressor witness");
+  assert.equal(c.compressorRunning(d), true, "the schematic recognises the gateway witness");
+  assert.equal(d.thermalMode, "heat", "a DHW-routed hydronic loop is a heating task");
+  assert.equal(c.waterThermalKind(d, true), "heat",
+    "active Modbus-only DHW receives heating colours, never cooling or neutral colours");
+  assert.equal(d.pthKind, "heating");
+  assert.ok(Math.abs(d.pth - 7.87) < 0.01,
+    "the witnessed PHE transfer is flow×(R1T−R4T), using the screenshot operating point");
+
+  const stopped = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],
+                        modbus: dhwModbus.map((r) => r.off === 31 ? { ...r, value: 0 } : r) });
+  const idle = stopped.liveData();
+  assert.equal(idle.pth, null, "compressor OFF keeps the same arithmetic from becoming heat output");
+  assert.equal(stopped.waterThermalKind(idle, true), "neutral",
+    "pump-only DHW remains explicitly neutral");
+
+  const space = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],
+                      modbus: dhwModbus.map((r) => r.off === 37 ? M_VALVE(false) : r) });
+  const autoSpace = space.liveData();
+  assert.equal(autoSpace.thermalMode, null,
+    "gateway-only Auto space operation does not guess Heating or Cooling");
+  assert.equal(space.waterThermalKind(autoSpace, true), "neutral",
+    "unknown gateway-only space direction remains neutral even with the compressor ON");
 }
 
 // ── 5. THE REGRESSION: X10A drops with a FILLED cache, the gateway says the OPPOSITE ───────────
