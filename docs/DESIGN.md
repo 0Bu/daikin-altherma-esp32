@@ -422,11 +422,15 @@ Body, ordered:
    The run state itself is never affected — the compressor witness (`INV frequency`) sits on a page
    that stays live in every profile, which is what makes "Standby — not running" trustworthy beside
    blanked pills.
-2. **System schematic** — the body of that card, drawing the hydraulic + refrigerant circuit
-   as an inline SVG: outdoor unit (fan + compressor with rps), refrigerant lines (gas + liquid — the
+2. **System schematic** — the body of that card, drawing a simplified air-source **split-system**
+   hydraulic + refrigerant circuit as an inline SVG: outdoor unit (fan + compressor with rps),
+   refrigerant lines (gas + liquid — the
    lower one is the **liquid** line, not a suction line: the expansion valve sits in the outdoor unit
    at its far end), plate heat exchanger, supply line through the backup heater **and then the
-   circulation pump** to the 3-way valve, DHW tank with coil, heating circuit, and the return line.
+   circulation pump** to the 3-way valve, DHW tank or thermal store, heating circuit, and the return
+   line. It explains the readings' functional relationship; it is not a model-specific piping plan.
+   Monobloc, ground-source, hybrid and alternative store arrangements have different physical
+   topologies, and their inspector text must say so wherever the pictured split layout matters.
    The two ROTATING parts — the outdoor fan and the pump's impeller — turn only while their part
    runs, and that is all they claim. The header is a static product mark and deliberately does not
    imply a live run state. Neither rotating schematic part carries a direction mark: a triangle in a pump circle
@@ -486,9 +490,11 @@ Body, ordered:
    without which the number above it is unowned, not commentary on it.
    The one exception is the **"≈"** on the two derived pills: it is part of the reading rather than a
    note about it, and without it a bare "4.6 kW" reads as measured whenever the inspector is closed.
-   Both are *derived*, never measured — thermal from flow × ΔT (≈4.186 kJ/kg·K), electrical
-   from current at an assumed 230 V — the bus has no energy registers, so their inspector entries are
-   titled "(estimated)" and open on saying so; a derived number must never read as a measured one. COP
+   Both are *derived*, never measured — thermal from flow × ΔT (≈4.186 kJ/kg·K, assuming water;
+   glycol mixtures have different density and heat capacity), electrical from current at an assumed
+   230 V. The X10A rows used by this view expose no direct live power measurement, so the inspector
+   entries are titled "(estimated)" and open on saying so; a derived number must never read as a
+   measured one. COP
    shows "—" unless the compressor is actually running, and the heat-output pill hides entirely
    when flow or ΔT is missing rather than printing a confident 0.0. The electrical pill obeys the
    held-over rule below on its INV source only: the CT clamps sit on a page the unit keeps
