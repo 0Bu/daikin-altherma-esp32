@@ -66,6 +66,24 @@ const fmt1 = (n) => (n == null ? "—" : n.toFixed(1));
 const fmt0 = (n) => (n == null ? "—" : String(Math.round(n)));
 const setTxt = (id, s) => { const el = $(id); if (el && el.textContent !== s) el.textContent = s; };
 
+// The preferred witness is X10A's actual compressor speed. In a gateway-only snapshot that row is
+// necessarily absent, but HomeHub input 31 supplies the corresponding current ON/OFF state. Keep
+// the speed threshold used by the thermal calculation when speed exists; the binary fallback has
+// no intermediate range to apply it to.
+const compressorRunning = (d, minRps = 0) => {
+  if (!d) return false;
+  return d.rps != null ? d.rps > minRps : d.compressorOn === true;
+};
+
+// The colour is a claim about THERMAL transfer, not merely hydraulic motion. Modbus-only DHW has
+// enough independent evidence for heating (compressor + DHW valve + pump); Modbus-only space Auto
+// still cannot distinguish heating from cooling and therefore remains neutral.
+const waterThermalKind = (d, pumping) => {
+  if (!d || pumping !== true) return null;
+  if (d.thermalMode == null || (!compressorRunning(d) && !(d.buh1 || d.buh2))) return "neutral";
+  return d.thermalMode === "cool" ? "cool" : "heat";
+};
+
 // The hydronic I/U mode is the only X10A row that distinguishes the SPACE circuit's season from
 // the task currently using the common water loop. Do not infer it from temperatures: the exact
 // cooling screenshot that prompted this rule had 57.8 °C residual DHW water while the I/U mode was
@@ -87,7 +105,7 @@ const spaceModeKind = () => {
 // A direction opposite to the declared task is a transition, sensor tolerance or another state we
 // cannot classify — blank it rather than relabel it into a plausible-looking capacity.
 function thermalValue(d, raw, allowDefrost) {
-  if (raw == null || d.dtStale || !((d.rps ?? 0) > 5)) return null;
+  if (raw == null || d.dtStale || !compressorRunning(d, 5)) return null;
   if (d.defrost === true) return allowDefrost ? raw : null;
   if (d.thermalMode === "cool") return raw < 0 ? -raw : null;
   if (d.thermalMode === "heat") return raw > 0 ? raw : null;
@@ -168,6 +186,9 @@ function liveData() {
     // renderLive then gives that pill the petrol source colour and the inspector names the register.
     mbFields: new Set(),
   };
+  // X10A leads when it can state a speed. When its whole link is down (or a profile has no speed
+  // row), the live HomeHub compressor flag supplies only the activity fact — never an invented rps.
+  d.compressorOn = !x10aDown() && d.rps != null ? d.rps > 0 : mbBool(31);
   d.spaceMode = spaceModeKind();
   // DHW always heats the tank-side hydronic loop, even when the simultaneous space season is Cooling.
   // Otherwise the I/U mode decides which direction across the PHE is useful output.
@@ -312,7 +333,7 @@ function liveData() {
     // The three plant STATES survive, because they are no longer X10A values: stateOf() already
     // refused the retained X10A bit and returned the gateway's (or nothing). Clearing them here is
     // what used to blank the pump and the demand next to readings that were arriving.
-    const KEEP = new Set(["pumpOn", "valveDhw", "spaceOp", "sgMode", "mbFields"]);
+    const KEEP = new Set(["pumpOn", "compressorOn", "valveDhw", "spaceOp", "sgMode", "mbFields"]);
     Object.keys(d).forEach((k) => { if (!KEEP.has(k)) d[k] = null; });
     d.ouHeldOver = false;         // nothing to hold over: the whole bus is silent, not one unit
     MB_PAIRS.forEach((p) => takeMb(p.fld, p.cid));
@@ -329,9 +350,9 @@ function liveData() {
     const pw = mbPower();
     if (pw) { const n = parseFloat(pw.value);
               if (Number.isFinite(n)) { d.pel = n; d.pelSrc = "MB"; d.mbFields.add("pel"); } }
-    // ΔT survives: both temperatures come from the gateway's own hydronic readings. Thermal output
-    // does NOT: this firmware does not import HomeHub input 31 (compressor running), so a gateway-only
-    // snapshot cannot distinguish active PHE transfer from pump-only redistribution.
+    // ΔT survives because both temperatures come from the gateway's own hydronic readings. Thermal
+    // output survives only with its independent input-31 compressor witness: without that current
+    // flag, the snapshot still cannot distinguish active PHE transfer from pump-only redistribution.
     d.dt = (d.lwt != null && d.ret != null) ? d.lwt - d.ret : null;
     d.dtStale = !(d.flow != null && d.flow > 1);
     d.spaceMode = null;
@@ -468,8 +489,8 @@ function renderLive() {
 
   // Schematic state classes drive the CSS animations (flows, fan, pump, BUH glow, defrost)
   const sc = $("schem");
-  const rpsOn = (d.rps ?? 0) > 0;
-  sc.classList.toggle("fan-on", rpsOn && d.defrost !== true);
+  const compressorOn = compressorRunning(d);
+  sc.classList.toggle("fan-on", compressorOn && d.defrost !== true);
   sc.classList.toggle("pump-on", pumping === true);
   sc.classList.toggle("buh-on", !!(d.buh1 || d.buh2));
   const bshActive = d.bsh === true;
@@ -480,8 +501,9 @@ function renderLive() {
   // Water always moves in the same hydraulic direction, but its THERMAL role reverses in cooling:
   // the supply is cold and the return warm. With the compressor stopped neither colour is earned —
   // the live 57 °C case was residual heat being circulated, so use a neutral moving trace instead.
-  sc.classList.toggle("cooling-mode", d.thermalMode === "cool");
-  sc.classList.toggle("water-neutral", pumping === true && !rpsOn && !(d.buh1 || d.buh2));
+  const waterKind = waterThermalKind(d, pumping);
+  sc.classList.toggle("cooling-mode", waterKind === "cool");
+  sc.classList.toggle("water-neutral", waterKind === "neutral");
   // Mode 2 is evcc's boost / Daikin's Recommended on. The compact marker says only that, without
   // repeating the Modbus source or implying that DHW is already running. Every non-boost state has
   // no drawing label; its exact manufacturer name remains available in the HomeHub row.
@@ -500,7 +522,10 @@ function renderLive() {
   const dhwPath = pumping && toDhw === true, heatPath = pumping && toDhw === false;
   onCls("fTank", dhwPath); onCls("fCoil", dhwPath); onCls("fTankRet", dhwPath);
   onCls("fHeat", heatPath); onCls("fHeatRet", heatPath);
-  onCls("rfHot", rpsOn); onCls("rfCold", rpsOn);
+  // Refrigerant direction is supportable only when both activity and the thermal task are known.
+  // This is true for Modbus-only DHW, but deliberately not for a gateway-only Auto space cycle.
+  const refrigerantOn = compressorOn && d.thermalMode != null;
+  onCls("rfHot", refrigerantOn); onCls("rfCold", refrigerantOn);
   // Cooling and defrost both reverse the refrigerant circuit relative to ordinary heating/DHW.
   const refrigerantReverse = d.defrost === true || d.thermalMode === "cool";
   $("rfHot").classList.toggle("rev", refrigerantReverse);
@@ -632,9 +657,12 @@ const INSPECT = {
     now: (d) => d.defrost
       ? { en: "Defrosting — the circuit is running in reverse to melt ice off the evaporator, so heat is briefly taken back out of the heating water.",
           de: "Abtauen — der Kreis läuft rückwärts, um den Verdampfer abzutauen; dabei wird dem Heizwasser kurzzeitig wieder Wärme entzogen." }
-      : (d.rps ?? 0) > 0
-        ? { en: `Running — compressor at ${fmt0(d.rps)} rps${d.quiet ? ", capped by quiet mode" : ""}.`,
-            de: `Läuft — Verdichter mit ${fmt0(d.rps)} rps${d.quiet ? ", durch den Leise-Modus begrenzt" : ""}.` }
+      : compressorRunning(d)
+        ? d.rps != null
+          ? { en: `Running — compressor at ${fmt0(d.rps)} rps${d.quiet ? ", capped by quiet mode" : ""}.`,
+              de: `Läuft — Verdichter mit ${fmt0(d.rps)} rps${d.quiet ? ", durch den Leise-Modus begrenzt" : ""}.` }
+          : { en: "Running — the HomeHub reports the compressor ON; speed and detailed outdoor-unit readings require X10A.",
+              de: "Läuft — der HomeHub meldet den Verdichter ON; Drehzahl und detaillierte Außengerätewerte benötigen X10A." }
         // Says why held X10A readings are not repeated at rest (logic/ou_stale.hpp). A structurally
         // paired live HomeHub outdoor reading may replace the held value; unpaired fields stay "—".
         : d.ouHeldOver && d.mbFields && d.mbFields.has("out")
@@ -700,7 +728,7 @@ const INSPECT = {
     // With the pump stopped the ΔT is not a small working point, it is none at all (d.dtStale) — so
     // this says nothing is crossing, rather than quoting the two stagnant sensors' difference as if
     // it were driving a heat flow.
-    now: (d) => !((d.rps ?? 0) > 5)
+    now: (d) => !compressorRunning(d, 5)
       ? { en: "No active refrigerant-side transfer — the compressor is stopped. Pump-only circulation can redistribute residual heat, but it is neither heating nor cooling capacity.",
           de: "Kein aktiver Kältemittel-Wärmeübergang — der Verdichter steht. Reiner Pumpenumlauf kann Restwärme verteilen, ist aber weder Heiz- noch Kälteleistung." }
       : d.dtStale
@@ -736,7 +764,7 @@ const INSPECT = {
       ? { en: "No ΔT right now — the pump is stopped. With no water moving, the two sensors just drift apart as they cool, and their difference is not a working point.",
           de: "Derzeit kein ΔT — die Pumpe steht. Ohne Wasserbewegung driften die beiden Fühler beim Auskühlen nur auseinander; ihre Differenz ist kein Arbeitspunkt." }
       : d.dt == null ? null
-      : !((d.rps ?? 0) > 5)
+      : !compressorRunning(d, 5)
       ? { en: `${fmt1(d.dt)} K with pump-only circulation. This is residual-temperature equalisation, not evidence of heating or cooling output.`,
           de: `${fmt1(d.dt)} K bei reinem Pumpenumlauf. Das ist ein Temperaturausgleich von Restwärme und kein Beleg für Heiz- oder Kälteleistung.` }
       : d.thermalMode === "cool"
@@ -889,7 +917,7 @@ const INSPECT = {
       ? { en: "Paused — the valve is feeding the hot-water tank right now.",
           de: "Pausiert — das Ventil versorgt gerade den Warmwasserspeicher." }
       : (d.pumpOn ?? (d.flow != null && d.flow > 1))
-        ? d.thermalMode === "cool" && !((d.rps ?? 0) > 5) && d.pthRaw != null && d.pthRaw > 0
+        ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0
           ? { en: `Residual-hot water is routed into the hydraulic space branch. Internal R1T is ${degC(d.lwt)}; no downstream sensor confirms the emitter temperature. This is not active cooling.`,
               de: `Restwarmes Wasser wird hydraulisch in den Raumzweig geführt. Der interne R1T misst ${degC(d.lwt)}; kein nachgeschalteter Fühler bestätigt die Temperatur an den Flächen. Das ist kein aktiver Kühlbetrieb.` }
           : { en: `Water is routed toward the ${activeSpaceKind(d) === "cool" ? "cooling" : activeSpaceKind(d) === "heat" ? "heating" : "space"} circuit. Internal R1T is ${degC(d.lwt)}; no downstream sensor confirms the emitter temperature.`,
@@ -948,9 +976,12 @@ const INSPECT = {
       en: "The gas line between outdoor and indoor units in the split-system layout shown. In heating, hot high-pressure gas leaves the compressor through this line and condenses in the plate heat exchanger, transferring heat to the water. In cooling, refrigerant flow reverses. Monobloc systems do not have this field refrigerant line.",
       de: "Die Gasleitung zwischen Außen- und Inneneinheit im gezeigten Split-System-Aufbau. Im Heizbetrieb strömt heißes Gas unter hohem Druck vom Verdichter durch diese Leitung und kondensiert im Plattenwärmetauscher; dabei gibt es Wärme ans Wasser ab. Im Kühlbetrieb kehrt sich die Kältemittelrichtung um. Monoblock-Anlagen haben diese bauseitige Kältemittelleitung nicht.",
     },
-    now: (d) => (d.rps ?? 0) > 0
-      ? { en: `Flowing — ${fmt1(d.circP)} bar at ${fmt0(d.disch)} °C.`,
-          de: `Durchströmt — ${fmt1(d.circP)} bar bei ${fmt0(d.disch)} °C.` }
+    now: (d) => compressorRunning(d)
+      ? d.rps != null
+        ? { en: `Flowing — ${fmt1(d.circP)} bar at ${fmt0(d.disch)} °C.`,
+            de: `Durchströmt — ${fmt1(d.circP)} bar bei ${fmt0(d.disch)} °C.` }
+        : { en: "Flowing — the HomeHub confirms compressor operation; pressure and discharge temperature require X10A.",
+            de: "Durchströmt — der HomeHub bestätigt Verdichterbetrieb; Druck und Heißgastemperatur benötigen X10A." }
       : { en: "Still — the compressor is stopped, so the circuit is at rest and simply equalised.",
           de: "Steht — der Verdichter ist OFF, der Kreis ruht und ist einfach ausgeglichen." },
     rows: [/^high pressure$/i, /discharge pipe temp/i],
@@ -961,9 +992,12 @@ const INSPECT = {
       en: "The liquid line between outdoor and indoor units in the split-system layout shown. In heating, condensed high-pressure refrigerant returns through this line to the outdoor expansion valve. Downstream of that valve its pressure and temperature fall before it absorbs heat in the outdoor coil. In cooling, the direction reverses. Monobloc systems do not have this field refrigerant line.",
       de: "Die Flüssigkeitsleitung zwischen Außen- und Inneneinheit im gezeigten Split-System-Aufbau. Im Heizbetrieb fließt kondensiertes Kältemittel unter hohem Druck durch diese Leitung zum Expansionsventil im Außengerät zurück. Hinter dem Ventil sinken Druck und Temperatur, bevor es im Außenwärmetauscher Wärme aufnimmt. Im Kühlbetrieb kehrt sich die Richtung um. Monoblock-Anlagen haben diese bauseitige Kältemittelleitung nicht.",
     },
-    now: (d) => (d.rps ?? 0) > 0
-      ? { en: `Flowing — expansion valve at ${fmt0(d.eev)} pulses.`,
-          de: `Durchströmt — Expansionsventil bei ${fmt0(d.eev)} Impulsen.` }
+    now: (d) => compressorRunning(d)
+      ? d.rps != null
+        ? { en: `Flowing — expansion valve at ${fmt0(d.eev)} pulses.`,
+            de: `Durchströmt — Expansionsventil bei ${fmt0(d.eev)} Impulsen.` }
+        : { en: "Flowing — the HomeHub confirms compressor operation; expansion-valve position requires X10A.",
+            de: "Durchströmt — der HomeHub bestätigt Verdichterbetrieb; die Stellung des Expansionsventils benötigt X10A." }
       : { en: "Still — the compressor is stopped.", de: "Steht — der Verdichter ist OFF." },
     rows: [/^low pressure$/i, /expansion valve ?1/i],
   },
@@ -1009,7 +1043,7 @@ const INSPECT = {
       ? { en: "Paused — the valve is diverted to the hot-water tank.",
           de: "Pausiert — das Ventil ist auf den Warmwasserspeicher umgeschaltet." }
       : (d.pumpOn ?? (d.flow != null && d.flow > 1))
-        ? d.thermalMode === "cool" && !((d.rps ?? 0) > 5) && d.pthRaw != null && d.pthRaw > 0
+        ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0
           ? { en: `Residual-heat circulation toward the hydraulic space branch at ${fmt1(d.flow)} l/min; no active cooling. Internal PHE sensors read R1T ${degC(d.lwt)} and R4T ${degC(d.ret)}; the field-side temperature is not measured.`,
               de: `Restwärme-Umlauf zum hydraulischen Raumzweig mit ${fmt1(d.flow)} l/min; keine aktive Kühlung. Die internen PHE-Fühler messen R1T ${degC(d.lwt)} und R4T ${degC(d.ret)}; die Temperatur auf der Feldseite wird nicht gemessen.` }
           : { en: `Circulating toward the space branch at ${fmt1(d.flow)} l/min. Internal PHE sensors read R1T ${degC(d.lwt)} and R4T ${degC(d.ret)}.`,

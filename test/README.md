@@ -59,7 +59,7 @@ binary ON/OFF flags, structurally named valve selectors and ordinary numeric `0`
 `node test/test_ui_source_matrix.mjs` additionally pins the complete two-contact X10A Smart-Grid
 truth table, its derived named row, and fail-closed handling of missing, malformed or stale contacts.
 
-`node test/test_ui_homehub_copy.mjs` audits all 27 curated HomeHub rows as one semantic contract:
+`node test/test_ui_homehub_copy.mjs` audits all 28 curated HomeHub rows as one semantic contract:
 the register guide's English name, the German visual label, the matching bilingual explanation and
 the visible status vocabulary. German labels must use fluent qualifiers instead of parenthetical
 fragments. The test also pins exact matches where a broad catalog regex would be misleading,

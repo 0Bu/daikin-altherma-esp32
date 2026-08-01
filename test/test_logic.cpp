@@ -3020,7 +3020,7 @@ static void test_homehub() {
     CHECK(homehub_format(*ec, 0x5538, buf, sizeof(buf)) && std::string(buf) == "U8");
     CHECK(homehub_is_text(*ec));
     // Dimensionless Int16 does not determine the SEMANTICS. EKRHH 4P744838-1E §9.2 uses the same
-    // numeric wire type for one real number (the error sub-code), five binary flags and four enums.
+    // numeric wire type for one real number (the error sub-code), six binary flags and four enums.
     // Pin the complete classification and the one true text row.
     int dimensionless = 0, statuses = 0, text_rows = 0;
     for (int i = 0; i < HOMEHUB_REG_COUNT; i++) {
@@ -3031,7 +3031,13 @@ static void test_homehub() {
         if (r.kind == HomeHubValueKind::Number) CHECK(r.offset == 23);  // actual numeric sub-code
         else statuses++;
     }
-    CHECK(dimensionless == 10 && statuses == 9 && text_rows == 1);
+    CHECK(dimensionless == 11 && statuses == 10 && text_rows == 1);
+
+    const HomeHubReg* compressor = find(31);
+    CHECK(compressor && compressor->kind == HomeHubValueKind::Binary &&
+          compressor->space == MbFunc::ReadInput);
+    CHECK(homehub_format(*compressor, 0, buf, sizeof(buf)) && std::string(buf) == "0");
+    CHECK(homehub_format(*compressor, 1, buf, sizeof(buf)) && std::string(buf) == "1");
 
     // Enums retain the raw constants on every public wire. /values carries a separate semantic id
     // so the browser can still display the manufacturer's state names at the visual boundary.

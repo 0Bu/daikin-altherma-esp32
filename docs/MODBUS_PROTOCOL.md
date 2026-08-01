@@ -127,6 +127,7 @@ Modbus constants; the names below are applied only by the visual UI and come fro
 |---|---|---|
 | input `21` | Unit abnormality | `0` / `1` / `2` → No error / Fault / Warning |
 | input `30` | Circulation pump running | binary `0`/`1`, displayed `OFF`/`ON` |
+| input `31` | Compressor running | binary `0`/`1`, displayed `OFF`/`ON` |
 | input `37` | 3-way valve | `0` / `1` → Space heating / DHW |
 | input `52` / `53` | DHW / space operation | binary `0`/`1`, displayed `OFF`/`ON` |
 | holding `3` | Operation mode | `0` / `1` / `2` → Auto / Heating / Cooling |
@@ -137,7 +138,7 @@ The four enums retain their raw integer in `homehub_format()`, `/values`, MCP an
 carries a separate structural `enum` id so the browser can localise a known
 state; an undocumented number remains visible as `Unknown (N)` instead of being silently coerced.
 The flat MQTT payload therefore contains, for example,
-`"smart_grid_operation_mode":2`, never `"smart_grid_operation_mode":"Recommended on"`. The five
+`"smart_grid_operation_mode":2`, never `"smart_grid_operation_mode":"Recommended on"`. The six
 true flags retain the same numeric `0`/`1` contract plus the structural `binary:true` marker, and
 only the visual boundary prints `OFF`/`ON`.
 

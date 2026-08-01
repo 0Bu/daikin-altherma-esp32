@@ -68,13 +68,14 @@ inline constexpr HomeHubReg HOMEHUB_REGS[] = {
     {22, MbFunc::ReadInput, MbType::Text16, 1, "",      "Unit abnormality code"},
     {23, MbFunc::ReadInput, MbType::Int16,  1, "",      "Unit abnormality sub code"},
     // ── Plant STATE (input) ─────────────────────────────────────────────────────────────────────
-    // Not readings but the two facts the DRAWING routes on. The 3-way valve is the reason they are
-    // here: with X10A silent the schematic had no valve position and drew the heating branch anyway
-    // — measured against the live X10A board during a DHW run, which showed the diverter on the tank
-    // while this one showed water going round the radiators. An unknown position must blank; a KNOWN
-    // one should come from whoever knows it, and the gateway does (EKRHH §9.2.2 offset 37, verified
-    // against the live unit: both read "to DHW" in the same minute).
+    // Not readings but the facts the DRAWING routes and colours on. The 3-way valve is the reason
+    // they are here: with X10A silent the schematic had no valve position and drew the space branch
+    // during a DHW run. The compressor witness matters just as much: without it, a live Modbus-only
+    // tank charge was classified as pump-only circulation and the hot-water loop lost its heating
+    // colour. Unknown must blank/neutralise; a KNOWN state should come from whoever knows it, and the
+    // gateway does (EKRHH §9.2.2 offsets 30/31/37, checked against the live unit).
     {30, MbFunc::ReadInput, MbType::Int16,  1, "",      "Circulation pump running", HomeHubValueKind::Binary},
+    {31, MbFunc::ReadInput, MbType::Int16,  1, "",      "Compressor running", HomeHubValueKind::Binary},
     {37, MbFunc::ReadInput, MbType::Int16,  1, "",      "3-way valve", HomeHubValueKind::ThreeWayValve},
     // What the plant is DOING, which the gateway knows and the X10A-less drawing had to call
     // "unknown". Two flags rather than the single "operation mode" register (offset 38 / holding 3):

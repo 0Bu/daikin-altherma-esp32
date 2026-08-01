@@ -265,7 +265,7 @@ function plantState(d) {
   // It is still active plant operation — and expensive resistive heat — so the exact X10A BSH flag
   // takes precedence over the generic compressor/pump states below.
   if (d.bsh === true) return PLANT_BSH;
-  if ((d.rps ?? 0) > 0) return PLANT_RUNNING;
+  if (compressorRunning(d)) return PLANT_RUNNING;
   // Compressor off but water still moving: pump overrun, or the backup heater carrying the load on
   // its own. Something IS happening — it just isn't the heat pump, which is the point of saying so.
   const moving = d.pumpOn ?? (d.flow != null && d.flow > 1);
