@@ -176,12 +176,13 @@ inline std::string build_crash_json(const CrashInfo& c) {
 
 // The RETAINED <base>/crash MQTT payload. A crash topic carries a message ONLY when the last reset
 // is NOTABLE (a real fault OR an orphan core-dump still in flash — crash_is_notable): the crash JSON.
-// Otherwise the payload is EMPTY, and the caller publishes it as a zero-length RETAINED message,
-// which CLEARS the retained topic — so a normal boot (USB re-enumeration, config-save / OTA reboot,
-// clean power-on) leaves no crash message, and a stale crash record disappears from the broker (and
-// Home Assistant) the moment the device reboots cleanly, i.e. once the problem is resolved. The reset
-// reason itself is never lost by clearing this: the heartbeat topic carries it as its own "Reset
-// Reason" sensor (reset_reason_name == crash_reason_slug, host-asserted), independent of a crash.
+// Otherwise the payload is EMPTY, which tells the caller NOT to publish a crash. The bridge briefly
+// probes the retained topic instead and sends a tombstone only if the broker proves an older crash is
+// still stored. Thus a normal boot (USB re-enumeration, config-save / OTA reboot, clean power-on)
+// does not create a visible payload-less topic on a clean broker, while a stale crash record still
+// disappears once the problem is resolved. The reset reason itself is never lost: the heartbeat
+// topic carries it as its own "Reset Reason" sensor (reset_reason_name == crash_reason_slug,
+// host-asserted), independent of a crash.
 inline std::string build_crash_mqtt_payload(const CrashInfo& c) {
     return crash_is_notable(c) ? build_crash_json(c) : std::string();
 }

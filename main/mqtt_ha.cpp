@@ -22,13 +22,15 @@
 //     (logic/heartbeat.hpp) to <base>/heartbeat — diagnostics, not real-time telemetry, so unlike the
 //     source value topics it's a fixed cadence, not publish-on-change.
 //   • Once per (re)connect: RETAIN the boot-time crash summary (logic/crashinfo.hpp) on <base>/crash
-//     ONLY when the reset was a real fault or a core-dump is still in flash; a normal boot clears the
-//     topic (zero-length retained) so no crash message lingers once the problem is resolved. When a
-//     crash IS reported it drives one diagnostic HA entity — a "dump waiting" flag (the reset reason
+//     ONLY when the reset was a real fault or a core-dump is still in flash. On a normal boot, probe
+//     the topic and delete it only if the broker still holds an older crash; a clean broker gets no
+//     empty publish, so live MQTT clients do not invent a payload-less /crash node. When a crash IS
+//     reported it drives one diagnostic HA entity — a "dump waiting" flag (the reset reason
 //     is the heartbeat's own "Reset Reason" sensor, so a crash entity for it would be a duplicate).
 //     Reason/backtrace only; never the raw dump or any secret.
-// Read-only: no command subscriptions. Two bounded migration probes look for actually-retained
-// <base>/state and <base>/modbus/status payloads; a clean broker receives no publish on either topic.
+// Read-only: no command subscriptions. Bounded exact-topic probes look for actually-retained
+// <base>/state, <base>/modbus/status and resolved <base>/crash payloads; a clean broker receives no
+// empty publish on any of them.
 // No-op if mqtt_uri is empty. Memory-safe: discovery is one small publish per value; the state JSON
 // is a single few-KB build, guarded against OOM.
 #include "mqtt_ha.hpp"
@@ -104,17 +106,20 @@ static std::string s_announced_profile;               // profile we last publish
 static std::string s_last_x10a_json;                  // per-topic dedup guards (mqtt_task only)
 static std::string s_last_modbus_json;
 static bool        s_modbus_disabled_cleaned    = false;
-// Retained-topic migrations: probe the two retired topics without unconditionally publishing empty
-// payloads on every reconnect. The event task only raises each `seen` flag; subscribe/delete/
-// unsubscribe remain on mqtt_task, preserving the single-publisher rule. The bounded probes repeat
-// on reconnect until an old value is found and deleted; once the broker is clean they are read-only
-// and silent.
+// Retained-topic cleanup: probe the two retired topics plus a resolved crash without unconditionally
+// publishing empty payloads on every reconnect. The event task only raises each `seen` flag;
+// subscribe/delete/unsubscribe remain on mqtt_task, preserving the single-publisher rule. The
+// bounded probes repeat on reconnect until an old value is found and deleted; once the broker is
+// clean they are read-only and silent.
 static std::atomic<bool> s_legacy_state_seen{false};
 static std::atomic<bool> s_retired_modbus_status_seen{false};
+static std::atomic<bool> s_crash_seen{false};
 static bool              s_legacy_probe_active = false;               // mqtt_task only
 static bool              s_retired_modbus_status_probe_active = false; // mqtt_task only
+static bool              s_crash_probe_active = false;                // mqtt_task only
 static int64_t           s_legacy_probe_deadline_us = 0;              // mqtt_task only
 static int64_t           s_retired_modbus_status_probe_deadline_us = 0; // mqtt_task only
+static int64_t           s_crash_probe_deadline_us = 0;               // mqtt_task only
 // Stale-identity migration (mqtt_task only) — see retract_legacy_fixed / retract_stale_values below.
 static bool        s_legacy_fixed_retracted = false;   // heartbeat + crash entities: once per boot
 static std::string s_stale_values_profile;             // value entities: the profile they were
@@ -126,8 +131,8 @@ static std::string s_stale_values_profile;             // value entities: the pr
 // Written false by the event task on DISCONNECT, written true + read by the publish task -> atomic.
 static std::atomic<bool> s_heartbeat_announced{false}; // diagnostic discovery streamed this connection?
 static bool         s_mqtt_ever_connected = false;     // event-task-only: first connect vs. a RE-connect
-static bool         s_crash_dump_pub      = false;     // mqtt_task-only: `coredump` flag last published on s_crash
-static bool         s_crash_notable_pub   = false;     // mqtt_task-only: was that publish a crash record, or the clear?
+static bool         s_crash_dump_pub      = false;     // mqtt_task-only: `coredump` at last crash-topic sync
+static bool         s_crash_notable_pub   = false;     // mqtt_task-only: was that sync a crash publish or cleanup probe?
 
 // Cumulative publish counters for the heartbeat's mqtt_{count,fails,reconnects} — see mqtt_publish().
 // pub_ok/pub_fail are touched only on the publish task (mqtt_publish + publish_heartbeat both run
@@ -497,17 +502,17 @@ static void publish_heartbeat_discovery() {
 }
 
 // Crash/reset diagnostics (logic/crashinfo.hpp): delete any retired entity, stream the discovery
-// config for the "dump waiting" binary_sensor, then
-// publish <base>/crash — but ONLY when the last reset is NOTABLE (a real fault OR an orphan core-dump
-// still in flash). A normal boot (USB re-enumeration, config-save / OTA reboot, clean power-on) is
-// not a crash, so build_crash_mqtt_payload() returns "" and we publish a zero-length RETAINED message
-// that CLEARS the topic: no crash message is sent when nothing crashed, and a stale crash record
-// disappears from the broker (and HA) as soon as the device reboots cleanly — i.e. once the problem
-// is resolved. The reset reason is still surfaced (unconditionally) by the heartbeat's own "Reset
-// Reason" sensor, so clearing here loses nothing. Retained so a late subscriber still sees a live
-// crash; captured once at boot (diag_crash.cpp) so the summary never changes at runtime. Never
-// carries secrets or the raw dump — just the reason + a raw-hex backtrace; the binary stays behind
-// GET /coredump.
+// config for the "dump waiting" binary_sensor, then publish <base>/crash — but ONLY when the last
+// reset is NOTABLE (a real fault OR an orphan core-dump still in flash). A normal boot (USB
+// re-enumeration, config-save / OTA reboot, clean power-on) is not a crash, so
+// build_crash_mqtt_payload() returns "". Do NOT publish that empty payload unconditionally: although
+// a retained tombstone is not stored by the broker, every live subscriber sees it and may display a
+// payload-less /crash node. Instead, briefly subscribe to the exact topic and delete it only when the
+// broker proves that an older retained crash is still present. Thus a clean broker is read-only and
+// silent, while stale crash records still disappear after a clean boot or explicit dismissal. The
+// reset reason is surfaced independently by the heartbeat's own "Reset Reason" sensor. A real crash
+// is retained so a late subscriber still sees it; it never carries secrets or the raw dump — just
+// the reason + a raw-hex backtrace; the binary stays behind GET /coredump.
 static void publish_crash() {
     if (!s_legacy_fixed_retracted) retract_legacy_fixed();   // delete the old ids FIRST (see above)
     // Delete any entity we USED to publish here but no longer do — a zero-length retained message to
@@ -526,11 +531,23 @@ static void publish_crash() {
         mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained
     }
     // _live(): read `coredump` from flash, not the boot-time cache — a dump pulled + cleared via
-    // /coredump?clear=1 while the device runs turns an orphan-dump boot NOT-notable, so this then
-    // publishes "" and clears the retained topic (a stale true would otherwise be replayed forever).
+    // /coredump?clear=1 while the device runs turns an orphan-dump boot NOT-notable, so the cleanup
+    // probe below removes an older retained record (a stale true would otherwise replay forever).
     const CrashInfo   ci = diag_crash_info_live();
-    const std::string js = build_crash_mqtt_payload(ci);   // "" when not notable -> clears the topic
-    mqtt_publish(s_crash, js.c_str(), static_cast<int>(js.size()), 0, 1);   // retained (zero-len clears)
+    const std::string js = build_crash_mqtt_payload(ci);
+    if (!js.empty()) {
+        // Defensive: notability normally cannot change false -> true without a reboot, but never let
+        // a cleanup probe race a newly-published crash if a future runtime source changes that rule.
+        if (s_crash_probe_active) {
+            esp_mqtt_client_unsubscribe(s_client, s_crash.c_str());
+            s_crash_probe_active = false;
+            s_crash_seen = false;
+        }
+        mqtt_publish(s_crash, js.c_str(), static_cast<int>(js.size()), 0, 1);   // retained
+    } else {
+        start_retained_cleanup_probe(s_crash, s_crash_seen, s_crash_probe_active,
+                                     s_crash_probe_deadline_us, "crash topic");
+    }
     s_crash_dump_pub    = ci.coredump;
     s_crash_notable_pub = !js.empty();
 }
@@ -629,6 +646,11 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
                                             e->current_data_offset)) {
             s_retired_modbus_status_seen = true;
         }
+        if (e && retained_cleanup_candidate(s_crash, e->topic, e->topic_len,
+                                            e->retain, e->total_data_len,
+                                            e->current_data_offset)) {
+            s_crash_seen = true;
+        }
         break; }
     default: break;
     }
@@ -689,9 +711,12 @@ static void mqtt_task(void*) {
                                                s_retired_modbus_status_seen,
                                                s_retired_modbus_status_probe_active,
                                                s_retired_modbus_status_probe_deadline_us);
+                service_retained_cleanup_probe(s_crash, s_crash_seen,
+                                               s_crash_probe_active,
+                                               s_crash_probe_deadline_us);
                 if (!s_heartbeat_announced) {                  // board/link diagnostics — independent
                     publish_heartbeat_discovery();              // of heat-pump profile detection
-                    publish_crash();                            // crash report if notable, else clears the topic
+                    publish_crash();                            // crash report if notable, else stale-record probe
                     s_heartbeat_announced = true;
                 }
                 const std::string prof = config().profile;
@@ -738,8 +763,8 @@ static void mqtt_task(void*) {
                     // Dump Waiting" ON until the next reconnect (and, for an orphan-dump-only boot,
                     // leave a stale crash record no longer backed by anything). Re-check on the
                     // heartbeat cadence (one 4-byte flash read, no summary parse) and republish only
-                    // on a real change — publish_crash() then re-decides notability and clears the
-                    // topic if the boot is no longer notable.
+                    // on a real change — publish_crash() then re-decides notability and probes away
+                    // an older retained topic if the boot is no longer notable.
                     // Done HERE, not in the /coredump handler: mqtt_publish() feeds the Task Watchdog
                     // and is only valid from this (subscribed) task.
                     //
