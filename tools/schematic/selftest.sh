@@ -147,9 +147,9 @@ reset
 patch_file "$WORK/main/www/index.html" <<'SEED'
 import sys
 p = sys.argv[1]; s = open(p).read()
-old = '<path class="sc-flow cold" id="fRet" d="M610 420 H 378"/>'
+old = '<path class="sc-flow water-flow cold" id="fRet" d="M610 420 H 378"/>'
 if old not in s: sys.exit(1)
-open(p, 'w').write(s.replace(old, '<path class="sc-flow cold" id="fRet" d="M720 420 H 378"/>'))
+open(p, 'w').write(s.replace(old, '<path class="sc-flow water-flow cold" id="fRet" d="M720 420 H 378"/>'))
 SEED
 run_case "an overlay across the junction is caught" 1 "E003"
 
@@ -181,7 +181,7 @@ patch_file "$WORK/main/www/index.html" <<'SEED'
 import sys
 p = sys.argv[1]; s = open(p).read()
 leg = '                    <path class="sc-pipe" d="M610 388 V 420"/>\n'
-after = '                  <path class="sc-flow hot" id="fTank" d="M610 180 V 248"/>\n'
+after = '                  <path class="sc-flow water-flow hot" id="fTank" d="M610 180 V 248"/>\n'
 if leg not in s or after not in s: sys.exit(1)
 open(p, 'w').write(s.replace(leg, '', 1).replace(after, after + leg, 1))
 SEED
@@ -195,9 +195,9 @@ reset
 patch_file "$WORK/main/www/index.html" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-old = '<text class="sc-lbl" x="666" y="268" data-i18n="schem.heating">'
+old = '<text class="sc-lbl" x="666" y="268" id="svSpaceCircuit" data-i18n="schem.space_circuit">'
 if old not in s: sys.exit(1)
-open(p, 'w').write(s.replace(old, '<text class="sc-lbl" x="666" y="186" data-i18n="schem.heating">', 1))
+open(p, 'w').write(s.replace(old, '<text class="sc-lbl" x="666" y="186" id="svSpaceCircuit" data-i18n="schem.space_circuit">', 1))
 PY
 run_case "label struck through by a pipe is caught" 1 "G003"
 
@@ -282,10 +282,10 @@ reset
 patch_file "$WORK/main/www/js/i18n.js" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-if '"schem.heating": "HEIZUNG"' not in s: sys.exit(1)
-open(p, 'w').write(s.replace('"schem.heating": "HEIZUNG",', '', 1))
+if '"schem.space_circuit": "RAUMKREIS"' not in s: sys.exit(1)
+open(p, 'w').write(s.replace('"schem.space_circuit": "RAUMKREIS",', '', 1))
 PY
-run_case "missing German label is caught" 1 "S006 schem.heating/de"
+run_case "missing German label is caught" 1 "S006 schem.space_circuit/de"
 
 echo "== 10. an INSPECT sample that resolves to no explainer =="
 # `sample` is how a pill's copy is looked up in DESCRIPTIONS. A typo does not throw — the panel just
@@ -377,9 +377,9 @@ reset
 patch_file "$WORK/main/www/index.html" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-old = '<path class="sc-flow hot" id="fSup1" d="M378 180 H 458"/>'
+old = '<path class="sc-flow water-flow hot" id="fSup1" d="M378 180 H 458"/>'
 if old not in s: sys.exit(1)
-open(p, 'w').write(s.replace(old, '<path class="sc-flow hot" id="fSup1" d="M378 180 H 450"/>', 1))
+open(p, 'w').write(s.replace(old, '<path class="sc-flow water-flow hot" id="fSup1" d="M378 180 H 450"/>', 1))
 PY
 run_case "a flow overlay off its pipe is caught" 1 "G010"
 

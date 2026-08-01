@@ -78,8 +78,8 @@
              The FIRST thing on the dashboard — the diagram is the answer to "what is the plant doing
              right now", so nothing sits above it but the alert banners, and nothing beside it: there
              is no status band and no chip row. Every fact the old hero carried is IN the drawing, at
-             the component it describes — mode/health in the status block, the thermostat on the
-             heating riser, the BUH step in its label, low-noise on the outdoor unit.
+             the component it describes — mode/health in the status block, normal space operation
+             on the room-circuit riser, the BUH step in its label, low-noise on the outdoor unit.
              Static DOM updated in place by renderLive() — deliberately NOT rebuilt per poll like
              #valueGroups: an innerHTML rebuild would restart the CSS flow animations every second.
              The schematic never hides: when a source cannot state a reading it blanks that pill to
@@ -87,7 +87,7 @@
              itself holds the status block that says why. -->
         <section id="hpLive">
           <figure class="card schem-card" id="schem"
-                  aria-label="Live system schematic: outdoor unit, refrigerant circuit, plate heat exchanger, water circuit with backup heater and 3-way valve, domestic hot water tank and heating circuit">
+                  aria-label="Live system schematic: outdoor unit, refrigerant circuit, plate heat exchanger, water circuit with backup heater and 3-way valve, domestic hot water tank and space circuit">
             <!-- EVERY value pill and component below is a hit target (class sc-hit + data-insp):
                  tapping one fills the inspector panel under the drawing with what it is, what is
                  normal, and what it is doing right now (renderInspect / INSPECT in app.js). The
@@ -303,8 +303,9 @@
                   <rect class="sc-pill" x="298" y="258" width="72" height="22" rx="11"/>
                   <text class="sc-val" x="334" y="273" text-anchor="middle">ΔT <tspan id="svDt">—</tspan> K</text>
                 </g>
-                <!-- Heat actually crossing the PHE into the water — flow × ΔT, so it belongs at the
-                     PHE and nowhere else. DERIVED, never measured, and the "≈" carries that in the
+                <!-- Mode-qualified transfer across the PHE — heat into the water for heating/DHW,
+                     heat removed from it for cooling. It belongs at the PHE and nowhere else.
+                     DERIVED, never measured, and the "≈" carries that in the
                      drawing — but the WORD "estimated" no longer does: annotations (this, the ΔT
                      target, the electrical figure's current source) are the INSPECTOR's half of the
                      card, reached by tapping the pill, so the picture stays readings only. Nothing is
@@ -317,7 +318,7 @@
                      its own explainer — the COP's is the only one with no catalog row behind it at
                      all, which is exactly the thing worth being able to tap. #gPth stays the wrapper
                      around both, so .no-pth still hides them together: without flow or ΔT there is
-                     no heat estimate, and a COP without one is not a figure either. -->
+                     no capacity estimate, and an efficiency quotient without one is not a figure. -->
                 <g id="gPth">
                   <g class="sc-hit" data-insp="pth" role="button" tabindex="0">
                     <rect class="sc-pill" x="298" y="290" width="72" height="22" rx="11"/>
@@ -325,7 +326,7 @@
                   </g>
                   <g class="sc-hit" data-insp="cop" role="button" tabindex="0">
                     <rect class="sc-pill" x="298" y="322" width="72" height="22" rx="11"/>
-                    <text class="sc-val" x="334" y="337" text-anchor="middle">COP <tspan id="svCop">—</tspan></text>
+                    <text class="sc-val" x="334" y="337" text-anchor="middle"><tspan id="svCopLabel">COP</tspan> <tspan id="svCop">—</tspan></text>
                   </g>
                 </g>
                 <!-- Water circuit: supply. The component ORDER is the manufacturer's, not a drawing
@@ -342,19 +343,21 @@
                   <path class="sc-hitline" d="M502 180 H 532"/>
                   <path class="sc-hitline" d="M566 180 H 596"/>
                 </g>
-                <path class="sc-flow hot" id="fSup1" d="M378 180 H 458"/>
-                <path class="sc-flow hot" id="fSup2" d="M502 180 H 532"/>
-                <path class="sc-flow hot" id="fSup3" d="M566 180 H 596"/>
+                <path class="sc-flow water-flow hot" id="fSup1" d="M378 180 H 458"/>
+                <path class="sc-flow water-flow hot" id="fSup2" d="M502 180 H 532"/>
+                <path class="sc-flow water-flow hot" id="fSup3" d="M566 180 H 596"/>
                 <!-- R1T, at the exchanger's water outlet and BEFORE the backup heater — which is
                      exactly where it is drawn. The sub-label says "pre-BUH" because the pill is NOT
-                     the system supply temperature: that is R2T, after the heater and the pump. The
+                     a downstream emitter temperature: R2T is after the heater and pump, while both
+                     remain inside the hydro module ahead of field piping. The
                      two are equal whenever the BUH is off (the normal case) and diverge the moment
                      it fires, so an unqualified "leaving water" would over-claim precisely when it
-                     matters. R1T is what ΔT / heat output / COP must be built on (lwt_select.hpp). -->
+                     matters. R1T is the PHE outlet used for the signed, mode-aware ΔT and capacity
+                     estimate (lwt_select.hpp); it can carry residual DHW heat in Cooling standby. -->
                 <g class="sc-hit" data-insp="lwt" role="button" tabindex="0">
                   <rect class="sc-pill" x="385" y="146" width="66" height="22" rx="11"/>
                   <text class="sc-val" x="418" y="161" text-anchor="middle"><tspan id="svLwt">—</tspan> °C</text>
-                  <text class="sc-sub" x="418" y="140" text-anchor="middle" data-i18n="schem.leaving_water">leaving water · pre-BUH</text>
+                  <text class="sc-sub" x="418" y="140" text-anchor="middle" data-i18n="schem.leaving_water">PHE out · pre-BUH</text>
                   <path class="sc-tie" d="M418 168 V 176"/>
                 </g>
                 <!-- Backup heater -->
@@ -439,12 +442,12 @@
                     <path class="sc-hitline" d="M610 203 V 248"/>
                     <path class="sc-hitline" d="M610 388 V 412"/>
                   </g>
-                  <path class="sc-flow hot" id="fTank" d="M610 180 V 248"/>
+                  <path class="sc-flow water-flow hot" id="fTank" d="M610 180 V 248"/>
                   <g class="sc-hit" data-insp="tank" role="button" tabindex="0">
                     <rect class="sc-box sc-tank" x="514" y="248" width="124" height="140" rx="14"/>
                     <text class="sc-lbl" x="526" y="268" data-i18n="schem.dhw_tank">DHW TANK</text>
                     <path d="M534 374 q10 -12 20 0 t20 0 t20 0 t20 0" fill="none" stroke="var(--pipe)" stroke-width="4" stroke-linecap="round"/>
-                    <path class="sc-flow hot" id="fCoil" style="stroke-width:4" d="M534 374 q10 -12 20 0 t20 0 t20 0 t20 0"/>
+                    <path class="sc-flow water-flow hot" id="fCoil" style="stroke-width:4" d="M534 374 q10 -12 20 0 t20 0 t20 0 t20 0"/>
                     <text class="sc-val" x="576" y="329" text-anchor="middle" style="font-size:17px"><tspan id="svTank">—</tspan> °C</text>
                     <text class="sc-sub" x="576" y="349" text-anchor="middle"><tspan data-i18n="schem.set">set</tspan> <tspan id="svTankSet">—</tspan> °C</text>
                   </g>
@@ -465,12 +468,12 @@
                   <!-- The tank return joins the shared run at y=420. Its PIPE moved up into the
                        branch group, where the highlight needs it — only the animated overlay stays
                        here, after the box, so it paints over the box's edge rather than under it. -->
-                  <path class="sc-flow cold" id="fTankRet" d="M610 388 V 420"/>
+                  <path class="sc-flow water-flow cold" id="fTankRet" d="M610 388 V 420"/>
                 </g>
-                <!-- Heating circuit -->
-                <!-- The heating branch owns BOTH its legs — the flow down from the valve and the
+                <!-- Space circuit: heating or cooling according to the I/U operating mode. -->
+                <!-- The space branch owns BOTH its legs — the flow down from the valve and the
                      return back to the junction — exactly as the tank branch owns both of its own.
-                     They were split before: the heating's return sat in the return group while the
+                     They were split before: the space return sat in the return group while the
                      tank's sat in its branch, so hovering the return lit up one circuit's return and
                      not the other's, and the shared run could not be highlighted for what it is.
                      The hit grouping now matches the flow grouping: everything right of the junction
@@ -481,14 +484,13 @@
                   <path class="sc-hitline" d="M633 180 H 720 V 248"/>
                   <path class="sc-hitline" d="M720 388 V 420 H 620"/>
                 </g>
-                <path class="sc-flow hot" id="fHeat" d="M610 180 H 720 V 248"/>
-                <!-- Space-heating demand: it gates THIS branch, so it stays on the heating riser
-                     above the emitter — it is not a reading OF the emitter but the request that
-                     decides whether water reaches it at all, which is also the one thing that
-                     explains an idle heating circuit. Hidden (.no-spaceh) on a profile that reports
-                     no space-heating flag, and while the link is down.
+                <path class="sc-flow water-flow hot" id="fHeat" d="M610 180 H 720 V 248"/>
+                <!-- Normal space heating/cooling operation. Daikin's catalog keeps the legacy label
+                     "Space heating Operation", but the state is not heating-only and not a thermostat
+                     demand: it can be ON in Cooling while Thermostat and compressor are OFF. It stays
+                     on the space riser as branch context and is hidden if no current row exists.
                      The row behind it is "Space heating Operation ON/OFF" (0x62/2 bit 3) — the
-                     BRANCH's own request. It is deliberately NOT "Thermostat ON/OFF", which this
+                     normal space-operation state. It is deliberately NOT "Thermostat ON/OFF", which this
                      pill drew until #199: that row is 0x60/2 bit 3, a bit in the INDOOR UNIT's
                      status byte beside I/U operation mode and freeze protection, i.e. "the hydro
                      module is asking for the compressor" with no statement about WHICH branch.
@@ -500,16 +502,17 @@
                   <rect class="sc-pill" x="664" y="212" width="112" height="20" rx="10"/>
                   <text class="sc-val" x="720" y="226" text-anchor="middle" style="font-size:10px" id="svSpaceH">—</text>
                 </g>
-                <!-- The heating circuit gets the same box as the tank — same band, same height —
+                <!-- The space circuit gets the same box as the tank — same band, same height —
                      because the valve alternates between exactly these two, and it carries its own
                      reading inside it for the same reason the tank does: the room temperature is the
                      controlled variable OF this circuit (its setpoint is what drives the branch),
                      measured in the space these emitters serve. The word "Raum" stays ON the value:
-                     the box is labelled HEIZUNG, and an unattributed "20.0 °C" under that label
-                     would read as a water temperature. -->
+                     an unattributed "20.0 °C" would read as a water temperature. The box names
+                     HEATING/COOLING only while signed ΔT plus a running compressor prove that active
+                     transfer; pump-only overrun stays the generic SPACE CIRCUIT. -->
                 <g class="sc-hit" data-insp="heat" role="button" tabindex="0">
                   <rect class="sc-box" x="654" y="248" width="132" height="140" rx="14"/>
-                  <text class="sc-lbl" x="666" y="268" data-i18n="schem.heating">HEATING</text>
+                  <text class="sc-lbl" x="666" y="268" id="svSpaceCircuit" data-i18n="schem.space_circuit">SPACE CIRCUIT</text>
                   <path d="M680 282 v55 M700 282 v55 M720 282 v55 M740 282 v55 M760 282 v55" stroke="var(--line)" stroke-width="3" fill="none"/>
                 </g>
                 <!-- Return line -->
@@ -521,13 +524,13 @@
                   <path class="sc-hitline" d="M600 420 H 387"/>
                 </g>
                 <!-- The return's two overlays are split at the tank JUNCTION (x=610), not at an
-                     arbitrary point on the drop: right of it the pipe carries the heating circuit
+                     arbitrary point on the drop: right of it the pipe carries the space circuit
                      ALONE, left of it both branches share one run. Split anywhere else and a DHW
                      cycle animates a stretch of heating pipe that nothing is flowing through —
                      which is what the drawing did, and it is the same class of error as a reading
                      on the wrong branch: the picture asserting a flow the plant does not have. -->
-                <path class="sc-flow cold" id="fHeatRet" d="M720 388 V 420 H 610"/>
-                <path class="sc-flow cold" id="fRet" d="M610 420 H 378"/>
+                <path class="sc-flow water-flow cold" id="fHeatRet" d="M720 388 V 420 H 610"/>
+                <path class="sc-flow water-flow cold" id="fRet" d="M610 420 H 378"/>
                 <!-- Return line carries no pump (it is on the supply side — see the order note at
                      the supply run). What it does carry, in the manufacturer's order seen from the
                      house: R4T at the inlet, then the dirt filter, the pressure sensor and the flow
@@ -536,7 +539,7 @@
                 <g class="sc-hit" data-insp="rwt" role="button" tabindex="0">
                   <rect class="sc-pill" x="490" y="431" width="66" height="22" rx="11"/>
                   <text class="sc-val" x="523" y="446" text-anchor="middle"><tspan id="svRwt">—</tspan> °C</text>
-                  <text class="sc-sub" x="523" y="467" text-anchor="middle" data-i18n="schem.return">return</text>
+                  <text class="sc-sub" x="523" y="467" text-anchor="middle" data-i18n="schem.return">PHE in</text>
                   <path class="sc-tie" d="M523 431 V 424"/>
                 </g>
                 <!-- The three return sensors sit on the run's COMMON section — left of x=610, where

@@ -54,6 +54,22 @@ function assertPersistentBannerRepaints(name, status) {
   assert.notEqual(target.innerHTML, english, `${name} must replace the old-language copy`);
 }
 
+{
+  const { api } = productionApi(
+    appStateSource,
+    ["plantState", "PLANT_COOL_RESIDUAL", "PLANT_RUNNING"],
+    {},
+  );
+  const residual = api.plantState({
+    rps: 0, pumpOn: true, flow: 19.1, thermalMode: "cool", pthRaw: 0.4,
+  });
+  assert.equal(residual.key, "sys.residual_circulating",
+    "hot pump-only circulation in Cooling must be named as residual heat, not active cooling");
+  assert.equal(residual.tone, "idle", "residual circulation must not receive the running-green tone");
+  assert.equal(api.plantState({ rps: 42, pumpOn: true, thermalMode: "cool", pthRaw: -4 }).key,
+    "sys.operating", "a running compressor remains active plant operation");
+}
+
 assertPersistentBannerRepaints(
   "renderRecoveryBanner",
   { sys: { safe_mode: true } },

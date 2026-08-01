@@ -4,7 +4,7 @@
 //
 // It exists because the host gates were all green while the arbitration was wrong. The rule
 // ("X10A leads, Modbus supports, stale is never live") was written out separately for the valve, the
-// pump and the space-heating demand, and the three had drifted into three different behaviours:
+// pump and the normal space-operation state, and the three had drifted into three different behaviours:
 //
 //   • the valve read `X10A ?? Modbus` and was never cleared when the X10A link dropped, so a STALE
 //     X10A position beat a live gateway one — the header said "DHW · readings from Modbus" while the
@@ -77,7 +77,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     " mbUnitAbnormality," +
     " SMART_GRID_MODE_VALUE, x10aSmartGridModeFrom, x10aSmartGridMode, x10aSmartGridRow," +
     " sgModeText, sgRequestText, mbNoteHtml, inspCurRow, inspMember," +
-    " inspMembers, inspSourceNoteHtml, inspHeld, liveData, ouReadingText, INSPECT," +
+    " inspMembers, inspSourceNoteHtml, inspHeld, liveData, activeSpaceKind, ouReadingText, INSPECT," +
     " pelMeasured, pelApproxText, PEL_INSPECT, setSchematicHitAvailable };",
     context, { filename: "main/www/app.sources" });
   context.__api.S = context.S;
@@ -561,4 +561,82 @@ const X_SG = (contact, on) => ({
   assert.equal(byUnit.off, 57, "the unit-keyed lookup this replaced would have taken the limit");
 }
 
-console.log("UI source matrix: source arbitration and X10A Smart-Grid truth table correct");
+// ── 19. Cooling semantics: residual-hot circulation is not cooling capacity ────────────────────
+// This reproduces the live 57.8/57.5 °C screenshot: Cooling selected, space circulation active,
+// compressor stopped. The two temperatures are internal PHE readings after a DHW run. Arithmetic
+// flow×ΔT is non-zero, but there is no refrigerant-side transfer and therefore no capacity or EER.
+{
+  const mode = (value) => ({ label: "I/U operation mode", value, unit: "", reg: 0x60 });
+  const bin = (label, on, reg = 0x62) => ({ label, value: on ? "1" : "0", unit: "", reg, binary: true });
+  const values = [
+    mode("Cooling"),
+    X("Leaving Water Temp. before BUH (R1T)", "57.8", "leaving_water"),
+    X("Inlet Water Temp. (R4T)", "57.5", "return_water"),
+    X("Flow sensor", "19.1", "flow_rate", { unit: "l/min" }),
+    { label: "Water pump signal (0:max-100:stop)", value: "34", unit: "%", reg: 0x62 },
+    bin("Water pump operation", true),
+    bin("Space heating Operation ON/OFF", true),
+    bin("Thermostat ON/OFF", false, 0x60),
+    X_VALVE(false), RPS_STOP,
+    bin("BUH step 1", false), bin("BUH step 2", false), bin("BSH", false),
+  ];
+  const c = ctx({ x10a: true, mbEnabled: false, mbConnected: false, values });
+  const d = c.liveData();
+  assert.equal(d.spaceMode, "cool", "I/U mode establishes the selected space season");
+  assert.equal(d.thermalMode, "cool", "space path in Cooling has cooling as its thermal task");
+  assert.equal(d.spaceOp, true, "legacy Space heating label is retained only as space operation");
+  assert.equal(d.dtSet, null, "heating target ΔT is not quoted in Cooling");
+  assert.equal(d.pthRaw > 0, true, "the residual-temperature arithmetic is intentionally non-zero");
+  assert.equal(d.pth, null, "stopped compressor suppresses the false cooling-capacity claim");
+  assert.equal(d.pthKind, null);
+  assert.equal(c.activeSpaceKind(d), null, "pump-only residual circulation is not labelled as a cooling circuit");
+  assert.equal(d.cop, null, "no active cooling capacity means no EER");
+  assert.equal(d.efficiencyKind, "eer", "the efficiency label still follows Cooling mode");
+  assert.match(c.INSPECT.phe.now(d).en, /compressor is stopped/);
+  assert.match(c.INSPECT.dt.now(d).en, /residual-temperature equalisation/);
+}
+
+// With the compressor running and R1T below R4T, the live 13.2/15.4 °C operating point becomes
+// positive cooling capacity and the quotient is EER. The opposite direction must still fail closed.
+{
+  const common = [
+    { label: "I/U operation mode", value: "Cooling", unit: "", reg: 0x60 },
+    X("Flow sensor", "15.0", "flow_rate", { unit: "l/min" }),
+    { label: "Water pump signal (0:max-100:stop)", value: "42", unit: "%", reg: 0x62 },
+    { label: "Water pump operation", value: "1", unit: "", reg: 0x62, binary: true },
+    X_VALVE(false),
+    { label: "INV frequency (rps)", value: "18", unit: "rps", reg: 0x30 },
+    { label: "INV primary current", value: "2.2", unit: "A", reg: 0x21 },
+    { label: "BUH step 1", value: "0", unit: "", reg: 0x62, binary: true },
+    { label: "BUH step 2", value: "0", unit: "", reg: 0x62, binary: true },
+    { label: "BSH", value: "0", unit: "", reg: 0x62, binary: true },
+  ];
+  const cool = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
+                     values: [...common,
+                       X("Leaving Water Temp. before BUH (R1T)", "13.2", "leaving_water"),
+                       X("Inlet Water Temp. (R4T)", "15.4", "return_water")] });
+  const d = cool.liveData();
+  assert.equal(d.pthKind, "cooling");
+  assert.equal(cool.activeSpaceKind(d), "cool", "verified active transfer labels the field circuit as cooling");
+  assert.ok(Math.abs(d.pth - 2.302) < 0.01, "cooling capacity is flow×(R4T-R1T)");
+  assert.ok(d.cop > 4.5 && d.cop < 4.6, "active cooling quotient is a positive EER");
+  assert.equal(cool.INSPECT.pth.t(d).en, "Cooling capacity (estimated)");
+  assert.equal(cool.INSPECT.cop.t(d).en, "EER of the heat pump (estimated)");
+  assert.match(cool.INSPECT.cop.what(d).en, /cooling capacity divided/i);
+
+  const wrongWay = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
+                         values: [...common,
+                           X("Leaving Water Temp. before BUH (R1T)", "24.0", "leaving_water"),
+                           X("Inlet Water Temp. (R4T)", "21.0", "return_water")] }).liveData();
+  assert.equal(wrongWay.pth, null, "Cooling never relabels heating-direction ΔT as capacity");
+  assert.equal(wrongWay.cop, null);
+}
+
+assert.match(index, /id="svSpaceCircuit" data-i18n="schem\.space_circuit"/);
+assert.match(index, /id="svCopLabel">COP</);
+assert.match(index, /class="sc-flow water-flow hot"/);
+assert.match(style, /\.cooling-mode \.water-flow\.hot/);
+assert.match(style, /\.water-neutral \.water-flow\.hot[\s\S]*\.water-neutral \.water-flow\.cold/);
+assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
+
+console.log("UI source matrix: arbitration, Smart-Grid and mode-aware cooling semantics correct");

@@ -38,13 +38,15 @@ const I18N = {
     "sys.nodata": "No data", "sys.unreachable": "Unreachable",
     "sys.x10a_down": "X10A offline", "sys.mb_carrying": "Operating mode unknown — readings from Modbus",
     "sys.mb_only": "X10A offline — readings from Modbus",
-    "mode.stop": "Stop", "mode.heat": "Heating", "mode.cool": "Cooling",
+    "mode.stop": "Stop", "mode.heat": "Heating", "mode.cool": "Cooling", "mode.space": "Space H/C",
     "mode.dhw": "Hot water", "mode.heat_dhw": "Heating + hot water",
-    "mode.cool_dhw": "Cooling + hot water",
+    "mode.cool_dhw": "Cooling + hot water", "mode.space_dhw": "Space H/C + hot water",
     "sys.unreachable_sub": "Can't reach the device — retrying…",
     "sys.waiting": "Waiting for the heat pump…", "sys.operating": "Operating",
     "sys.standby": "Standby — not running", "sys.defrosting": "Defrosting",
     "sys.circulating": "Circulating — compressor off",
+    "sys.cool_mode": "Cooling mode",
+    "sys.residual_circulating": "Residual-heat circulation — no cooling output",
     "sys.bsh_active": "Electric tank heater active",
     "sys.online": "Online", "sys.fault": "Fault", "sys.warning": "Warning",
     "sys.fault_line": (c) => "Fault · " + c + " — check the Daikin fault code.",
@@ -178,11 +180,11 @@ const I18N = {
     "enum.free_running": "Free running", "enum.forced_off": "Forced off",
     "enum.recommended_on": "Recommended on", "enum.forced_on": "Forced on",
     "enum.unknown": (n) => `Unknown (${n})`,
-    "chip.demand_on": "Demand ON", "chip.demand_off": "Demand OFF", "chip.quiet": "Quiet",
+    "chip.space_on": "Space H/C ON", "chip.space_off": "Space H/C OFF", "chip.quiet": "Quiet",
     "schem.sg_boost": "BOOST",
     "sg.mode0": "Free running", "sg.mode1": "Forced off",
     "sg.mode2": "Recommended on", "sg.mode3": "Forced on",
-    "schem.to_dhw": "3WV → DHW", "schem.to_heat": "3WV → heating",
+    "schem.to_dhw": "3WV → DHW", "schem.to_space": "3WV → space",
     "normal.label": "Normal:",
     "hist.title": "Last 24 hours", "hist.since": (h) => `Since restart · ${h} h`,
     "hist.now": "now", "hist.ago": (h) => `${h} h ago`,
@@ -221,9 +223,10 @@ const I18N = {
     // static index.html markup (data-i18n)
     "schem.outdoor_unit": "OUTDOOR UNIT", "schem.defrost_pill": "❄ defrost", "schem.outdoor": "Outdoor",
     "insp.close": "Close",
-    "schem.leaving_water": "leaving water · pre-BUH", "schem.dhw_tank": "DHW TANK", "schem.set": "set",
+    "schem.leaving_water": "PHE out · pre-BUH", "schem.dhw_tank": "DHW TANK", "schem.set": "set",
     "schem.bsh_badge": "E-heater active",
-    "schem.heating": "HEATING", "schem.pump": "PUMP", "schem.return": "return", "schem.room": "Room",
+    "schem.space_circuit": "SPACE CIRCUIT", "schem.heating": "HEATING", "schem.cooling": "COOLING",
+    "schem.pump": "PUMP", "schem.return": "PHE in", "schem.room": "Room",
     "schem.flow_rate": "flow", "schem.water_press": "water pressure",
     "wifi.title": "WiFi configuration", "wifi.ssid": "WiFi network (SSID)", "wifi.pass": "WiFi password",
     "wifi.err_ssid": "SSID must be 32 characters or less",
@@ -276,13 +279,15 @@ const I18N = {
     "sys.nodata": "Keine Daten", "sys.unreachable": "Nicht erreichbar",
     "sys.x10a_down": "X10A offline", "sys.mb_carrying": "Betriebsart unbekannt — Werte aus dem Modbus",
     "sys.mb_only": "X10A offline — Werte aus dem Modbus",
-    "mode.stop": "Stopp", "mode.heat": "Heizen", "mode.cool": "Kühlen",
+    "mode.stop": "Stopp", "mode.heat": "Heizen", "mode.cool": "Kühlen", "mode.space": "Raumbetrieb",
     "mode.dhw": "Warmwasser", "mode.heat_dhw": "Heizen + Warmwasser",
-    "mode.cool_dhw": "Kühlen + Warmwasser",
+    "mode.cool_dhw": "Kühlen + Warmwasser", "mode.space_dhw": "Raumbetrieb + Warmwasser",
     "sys.unreachable_sub": "Gerät nicht erreichbar — erneuter Versuch…",
     "sys.waiting": "Warte auf die Wärmepumpe…", "sys.operating": "In Betrieb",
     "sys.standby": "Bereitschaft — läuft nicht", "sys.defrosting": "Abtauen",
     "sys.circulating": "Umwälzung — Verdichter aus",
+    "sys.cool_mode": "Kühlmodus",
+    "sys.residual_circulating": "Restwärme-Umlauf — keine Kälteleistung",
     "sys.bsh_active": "Heizstab aktiv",
     "sys.online": "Online", "sys.fault": "Störung", "sys.warning": "Warnung",
     "sys.fault_line": (c) => "Störung · " + c + " — Daikin-Fehlercode prüfen.",
@@ -413,11 +418,11 @@ const I18N = {
     "enum.free_running": "Freier Betrieb", "enum.forced_off": "Zwangsabschaltung",
     "enum.recommended_on": "Empfehlung ein", "enum.forced_on": "Erzwungen ein",
     "enum.unknown": (n) => `Unbekannt (${n})`,
-    "chip.demand_on": "Anforderung ON", "chip.demand_off": "Anforderung OFF", "chip.quiet": "Leise",
+    "chip.space_on": "Raumbetrieb ON", "chip.space_off": "Raumbetrieb OFF", "chip.quiet": "Leise",
     "schem.sg_boost": "BOOST",
     "sg.mode0": "Freier Betrieb", "sg.mode1": "Zwangsabschaltung",
     "sg.mode2": "Empfehlung ein", "sg.mode3": "Erzwungen ein",
-    "schem.to_dhw": "3WV → WW", "schem.to_heat": "3WV → Heizung",
+    "schem.to_dhw": "3WV → WW", "schem.to_space": "3WV → Raumkreis",
     "normal.label": "Normal:",
     "hist.title": "Letzte 24 Stunden", "hist.since": (h) => `Seit Neustart · ${h} h`,
     "hist.now": "jetzt", "hist.ago": (h) => `vor ${h} h`,
@@ -453,9 +458,10 @@ const I18N = {
     // static index.html markup (data-i18n)
     "schem.outdoor_unit": "AUSSENEINHEIT", "schem.defrost_pill": "❄ Abtauen", "schem.outdoor": "Außen",
     "insp.close": "Schließen",
-    "schem.leaving_water": "Vorlauf · vor BUH", "schem.dhw_tank": "WW-SPEICHER", "schem.set": "Soll",
+    "schem.leaving_water": "PHE-Aus · vor BUH", "schem.dhw_tank": "WW-SPEICHER", "schem.set": "Soll",
     "schem.bsh_badge": "Heizstab aktiv",
-    "schem.heating": "HEIZUNG", "schem.pump": "PUMPE", "schem.return": "Rücklauf", "schem.room": "Raum",
+    "schem.space_circuit": "RAUMKREIS", "schem.heating": "HEIZUNG", "schem.cooling": "KÜHLEN",
+    "schem.pump": "PUMPE", "schem.return": "PHE-Ein", "schem.room": "Raum",
     "schem.flow_rate": "Durchfluss", "schem.water_press": "Wasserdruck",
     "wifi.title": "WLAN-Konfiguration", "wifi.ssid": "WLAN-Netzwerk · SSID", "wifi.pass": "WLAN-Passwort",
     "wifi.err_ssid": "SSID darf höchstens 32 Zeichen haben",
@@ -526,13 +532,14 @@ function operationModeText(value) {
   return key ? t(key) : raw;
 }
 function operationModeFromFlags(dhw, space) {
-  return dhw === true ? t("mode.dhw")
-       : space === true ? t("mode.heat")
+  return dhw === true && space === true ? t("mode.space_dhw")
+       : dhw === true ? t("mode.dhw")
+       : space === true ? t("mode.space")
        : (dhw === false && space === false) ? t("mode.stop") : null;
 }
 // The diagram and its explainer are two views of the same state. X10A carries the detailed hydronic
-// enum; while that bus is down, the HomeHub's two activity flags still distinguish hot water, space
-// operation and stop. Resolve that one user-facing answer here so opening the explainer cannot turn
+// enum; while that bus is down, the HomeHub's two activity flags distinguish hot water, generic space
+// operation and stop, but NOT Heating from Cooling. Resolve only that supportable answer here so
 // a visible "Stopp" headline back into an unexplained dash.
 function schematicOperationMode() {
   const hp = S.status?.hp || {};

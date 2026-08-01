@@ -348,8 +348,9 @@ Body, ordered:
    valve beside it said "→ heating". The headline names the mode; only the status line claims
    activity. **Standby mutes the dot but not the text**, which is what separates it from "no data"
    (both muted) — and the words say which it is regardless of colour (§9).
-   **State flags are drawn at their component**, never as a chip row: the space-heating demand is a
-   pill on the **heating riser** above the emitter (`--ok` while calling), the BUH step is part of the
+   **State flags are drawn at their component**, never as a chip row: Daikin's historically named
+   `Space heating Operation` is shown as normal **space heating/cooling operation** on the room-circuit
+   riser (`--ok` while ON), not as a thermostat demand or heating-only claim; the BUH step is part of the
    **BUH label** ("BUH 1"/"BUH 2", over the existing `--warn` tint — the tint says *on*, the digit
    says how much resistive heat is being paid for), X10A's exact **BSH** flag puts the unbordered
    `--warn` text "E-heater active" **inside the DHW tank** and animates an independent hot-colour
@@ -396,16 +397,19 @@ Body, ordered:
    inspector does: it names either the Modbus substitution or the reason no current reading exists.
    ΔT blanks for a related but distinct reason: with the pump off and flow zero, the difference
    between two *stagnant* sensors is not a stale working point, it is not a working point at all.
-   The **heat output blanks with it**, being computed from that same ΔT — and this is the one
-   blanking rule where the number it replaces was *arithmetically true*, which is exactly why it had
-   to go: flow × ΔT with flow at zero really is 0.0 kW, so the pill read as a measured plant output
-   rather than as the absence of one. Measured: during an app-started DHW boost the tank climbed at
-   ~2.7 kW on its immersion heater while the pill beside it said the plant was producing nothing.
-   Stating a product of a figure the drawing one pill over has just refused to state is the same
-   split this section already forbids. The inspector then says *which* silence it is — a stopped pump
-   alone, or a stopped pump while the tank heater fires, which is the case that reads as a broken
-   gauge, since the heater sits inside the tank past the flow sensor and past both leaving-water
-   sensors and no row on this bus can state its power. The **24-hour curve is deliberately not
+   The **thermal-capacity pill also requires a running compressor and a ΔT in the selected mode's
+   useful direction**. This is stricter than arithmetic: pump-only circulation can carry 57 °C
+   residual water after DHW while the controller already reports Cooling, but flow × ΔT is then
+   neither heat-pump heat output nor cooling capacity. With active heating/DHW the accepted sign is
+   R1T−R4T > 0; with active cooling it is R1T−R4T < 0 and the displayed capacity is its positive
+   magnitude. A missing/stagnant ΔT, stopped compressor, unknown mode or opposite sign blanks the
+   capacity and COP/EER instead of giving a well-formed name to an unsupported quantity. The
+   inspector names pump-only residual-temperature equalisation explicitly. In the 57 °C Cooling
+   case the status therefore reads **Cooling mode / residual-heat circulation — no cooling output**,
+   the emitter box remains the generic **space circuit**, and the moving water paths are neutral grey.
+   The valve and measured flow still show the hydraulic route toward the space branch; hiding that
+   would discard a real controller state, while calling the branch Cooling would invent active heat
+   removal. The **24-hour curve is deliberately not
    gated**: there a flat zero is the honest shape of a day that delivered nothing, while a gap would
    be indistinguishable from missing data — the live pill and the curve answer different questions.
    The **electrical input** is the same whenever it is falling back to the
@@ -427,7 +431,7 @@ Body, ordered:
    refrigerant lines (gas + liquid — the
    lower one is the **liquid** line, not a suction line: the expansion valve sits in the outdoor unit
    at its far end), plate heat exchanger, supply line through the backup heater **and then the
-   circulation pump** to the 3-way valve, DHW tank or thermal store, heating circuit, and the return
+   circulation pump** to the 3-way valve, DHW tank or thermal store, mode-aware space circuit, and the return
    line. It explains the readings' functional relationship; it is not a model-specific piping plan.
    Monobloc, ground-source, hybrid and alternative store arrangements have different physical
    topologies, and their inspector text must say so wherever the pictured split layout matters.
@@ -442,16 +446,17 @@ Body, ordered:
    The component **order is the manufacturer's** (installer reference §16.2: exchanger → R1T →
    backup heater → pump → R2T → outlet, then the field-supplied 3-way valve), not a drawing
    convenience — the pump is on the **supply** side, and drawing it in the return misplaced a real
-   part. For the same reason the **tank and the heating circuit are on one level**, side by side
+   part. For the same reason the **tank and the space circuit are on one level**, side by side
    below the 3-way valve, in the same box: they are not two stages of a flow but the two loads that
    valve alternates between, and drawing one of them above the supply line put a choice on two
    levels for no physical reason. Each box carries **its own reading and setpoint inside it** — tank
    temp for the one, room temp for the other, since the room is the controlled variable of that
    circuit — with the reading's own name kept on it ("Raum 20.0 °C", never a bare "20.0 °C" under a
    HEATING label, which would read as a water temperature). What stays *outside* the box is the
-   **space-heating demand**, on the riser above it: it is not a reading of the emitter but the request
-   that decides whether water reaches it at all. It is drawn from *"Space heating Operation ON/OFF"*
-   (`0x62/2` bit 3) — the branch's own request — and deliberately **not** from *"Thermostat ON/OFF"*,
+   **space heating/cooling operation** state, on the riser above it. It is drawn from
+   *"Space heating Operation ON/OFF"* (`0x62/2` bit 3), but the catalog's legacy name must not turn
+   it into a heating demand: the state can be ON in Cooling while thermostat and compressor are OFF.
+   It remains deliberately **not** *"Thermostat ON/OFF"*,
    which it drew until #199. That row is `0x60/2` bit 3, a bit in the **indoor unit's** status byte
    beside the I/U operation mode: Daikin's thermo-ON, which a hot-water charge raises exactly as
    readily as a call for heat. Measured on a live unit over three days it was ON 128/119/91 min per
@@ -460,8 +465,8 @@ Body, ordered:
    and the reason the pill's row is pinned to its page by a catalog test. It is still published, and
    the inspector now carries it under **Operating mode**, where that status byte belongs.
    Value pills sit at their physical measuring
-   points (outdoor temp, high/low pressure, discharge temp, EEV pulses, leaving/return water, ΔT, the
-   estimated **heat output and COP** at the PHE, the estimated **electrical input** on the outdoor
+   points (outdoor temp, high/low pressure, discharge temp, EEV pulses, PHE water outlet/inlet, ΔT, the
+   estimated mode-aware **heating/cooling capacity and COP/EER** at the PHE, the estimated **electrical input** on the outdoor
    unit where the power goes in, flow, water pressure, pump %, tank temp/setpoint, room
    temp/setpoint).
    **One pill, one reading.** Two readings sharing a pill ("28.4 bar · 71.2 °C") made one tap target
@@ -477,10 +482,14 @@ Body, ordered:
    weak tell for readings whose same-unit neighbours sit two components away. Naming those is
    attribution, not the commentary §5.3 keeps out of the picture.
    **There is no tile row under the diagram**: the working point belongs at the
-   parts it describes — the three figures that exist *across the exchanger* (ΔT, the flow × ΔT heat
-   output, and the COP from it) are drawn **on the plate itself**, which is widened to hold them, rather
-   than floating beside it, with the COP beside the heat output it is computed from, and the
-   electrical figure on the outdoor unit where the power actually goes in.
+   parts it describes — the figures that exist *across the exchanger* (signed R1T−R4T ΔT, the
+   mode-qualified flow × ΔT capacity, and COP/EER from it) are drawn **on the plate itself**. They are
+   shown only with a running compressor and a temperature difference in the useful direction:
+   positive R1T−R4T for heating/DHW, negative for cooling. Pump-only circulation can redistribute
+   residual heat and therefore never earns a capacity or efficiency value or a HEATING/COOLING field-
+   circuit label. R1T/R4T are internal PHE
+   sensors; neither is asserted to be the temperature at downstream room emitters. The electrical
+   figure remains on the outdoor unit, where the power actually goes in.
    **The drawing carries readings, not annotations.** Nothing in it explains, qualifies or sources a
    value: the ΔT's target setpoint, the word "estimated", and which current the electrical figure
    came from (CT clamps see the whole unit, the inverter current only the compressor — which is why
@@ -494,9 +503,10 @@ Body, ordered:
    glycol mixtures have different density and heat capacity), electrical from current at an assumed
    230 V. The X10A rows used by this view expose no direct live power measurement, so the inspector
    entries are titled "(estimated)" and open on saying so; a derived number must never read as a
-   measured one. COP
-   shows "—" unless the compressor is actually running, and the heat-output pill hides entirely
-   when flow or ΔT is missing rather than printing a confident 0.0. The electrical pill obeys the
+   measured one.
+   COP/EER shows "—" unless the compressor is actually running, and the capacity pill hides entirely
+   when the mode, flow, ΔT or transfer direction cannot support it rather than printing a confident
+   but misnamed value. The electrical pill obeys the
    held-over rule below on its INV source only: the CT clamps sit on a page the unit keeps
    refreshing (a non-zero reading at rest is genuine standby draw and is shown), while the inverter
    current freezes with the rest of the outdoor unit's pages — so with the compressor off the INV
@@ -505,9 +515,11 @@ Body, ordered:
    and the inverter current is left over from the last run). That reason must stay distinct from
    "this profile has no current row" — suppressing one wrong claim must not stand a *second* one in
    front of it, and that one is a claim about the hardware. **The pipes animate in flow
-   direction** while the pump runs — supply in `--flow-hot`, return in `--flow-cold`; the 3-way
-   valve state switches the animated branch (heating circuit ↔ tank coil), a defrost cycle reverses
-   the refrigerant-loop animation and shows a `--flow-cold` "❄ defrost" pill, and an active BUH
+   direction** while the pump runs. Thermal colour is mode-aware: heating/DHW uses hot outlet and cold
+   inlet; active cooling uses cold outlet and warm inlet; pump-only circulation is neutral because it
+   may be moving residual DHW heat. The 3-way valve switches the animated branch (space circuit ↔ tank coil);
+   cooling and defrost reverse the refrigerant animation, defrost additionally shows a
+   `--flow-cold` "❄ defrost" pill, and an active BUH
    tints its symbol `--warn`. All values map over `/values` **label patterns** (the same technique
    as `pickValue`), so the card degrades per model: a missing value renders "—", a
    missing tank/room sensor hides that schematic branch entirely. The SVG is **static DOM updated
