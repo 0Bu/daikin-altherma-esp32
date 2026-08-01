@@ -57,7 +57,10 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
       if (v.binary === true) { const s = raw.trim(); if (s === "1") return "ON"; if (s === "0") return "OFF"; }
       return raw;
     },
+    displayUnit: (v) => String(v?.unit ?? "").trim() ||
+      (/\((kW|A|rps|pls|step|l\/min)\)\s*$/i.exec(String(v?.label ?? ""))?.[1] || ""),
     displayReadingLabel: (l) => String(l ?? "").trim()
+      .replace(/\s*\((kW|A|rps|pls|step|l\/min)\)\s*$/i, "")
       .replace(/\s*\([^)]*On\s*:[^)]*Off\s*:[^)]*\)\s*$/i, "").trim(),
     displayHomeHubLabel: (r) => String(r?.label ?? "").trim(),
     t: (k, a, b) => (k === "src.disagree" ? "sources disagree"

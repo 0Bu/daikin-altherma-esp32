@@ -125,6 +125,7 @@ assertPersistentBannerRepaints(
     ensureHistPair: () => {},
     histCacheKey: (id, source) => source === "modbus" ? `modbus:${id}` : id,
     histHtml: () => `${context.LANG}:chart`,
+    displayUnit: (row) => row?.unit || "",
     displayReadingLabel: String,
     DERIVED: {},
   };

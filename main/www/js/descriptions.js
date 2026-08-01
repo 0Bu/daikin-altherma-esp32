@@ -794,10 +794,11 @@ const descNoteHtml = (lead, text) =>
 // is between this line and the value at the top, which is where their eye already is.
 //
 // The unit is the MODBUS row's own, not the X10A row's: this states what the gateway reads, and
-// borrowing the other source's unit word would quietly assert the two are identically scaled (they
-// are spelled "L/min" and "l/min" for the flow, which is exactly the kind of difference worth
-// keeping visible). Returns "" with no twin, with no X10A value to complement, and on every device
-// without a HomeHub — so an unpaired row keeps precisely the explainer it had before.
+// borrowing the other source's unit word would quietly assert the two are identically scaled.
+// `displayUnit` only canonicalises spelling (not scale), so the legacy X10A `l/min` and HomeHub
+// `L/min` forms no longer create a purely typographic mismatch. Returns "" with no twin, with no
+// X10A value to complement, and on every device without a HomeHub — so an unpaired row keeps
+// precisely the explainer it had before.
 function mbNoteHtml(row, mb) {
   if (!mb || mb.value == null || !row || row.value == null) return "";
   return mbRowHtml(mb) + mbDeltaHtml(row, mb);
@@ -813,10 +814,11 @@ function mbNoteHtml(row, mb) {
 // the pairing on real hardware reads to check that the two rows are the same quantity. Reusing the
 // X10A label would show them their own assumption back.
 function mbRowHtml(mb) {
+  const unit = displayUnit(mb);
   return `<div class="mb-line">` +
     `<span>${esc(displayHomeHubLabel(mb))} ` +
       `<span class="mb-tag">${esc(t("src.modbus_tag"))}</span></span>` +
-    `<span>${esc(displayValue(mb))}${mb.unit ? " " + esc(mb.unit) : ""}</span></div>`;
+    `<span>${esc(displayValue(mb))}${unit ? " " + esc(unit) : ""}</span></div>`;
 }
 
 // WHY two correct instruments read differently, per pairing. Only three of the nine have a
@@ -861,7 +863,7 @@ function mbDeltaHtml(row, mb) {
   const a = parseFloat(row.value), b = parseFloat(mb.value);
   if (!Number.isFinite(a) || !Number.isFinite(b)) return why ? `<div class="mb-delta">${esc(why)}</div>` : "";
   const dv = Math.abs(a - b);
-  const head = dv < 0.05 ? t("src.agree") : t("src.delta", fmt1(dv), row.unit || "");
+  const head = dv < 0.05 ? t("src.agree") : t("src.delta", fmt1(dv), displayUnit(row));
   return `<div class="mb-delta">${esc(head)}${why ? " — " + esc(why) : ""}</div>`;
 }
 

@@ -1102,7 +1102,11 @@ const inspSourceNoteHtml = (e, row) =>
 // answer the pill gives. The panel used to read every row straight off /values, so tapping a pill
 // the drawing had blanked produced its held-over number back in 19px — the explainer contradicting
 // the picture, and asserting as current exactly the last-run value the blanking exists to withhold.
-const inspVal = (r, d) => (r == null || rowHeldOver(r, d) ? "—" : displayValue(r) + (r.unit ? " " + r.unit : ""));
+const inspVal = (r, d) => {
+  if (r == null || rowHeldOver(r, d)) return "—";
+  const unit = displayUnit(r);
+  return displayValue(r) + (unit ? " " + unit : "");
+};
 
 // Said when the entry's headline reading is held over: the pill can only blank, so the reason it is
 // blank has to be stated here (the same division of labour the outdoor unit's idle sentence and the
@@ -1206,8 +1210,8 @@ function renderInspectHist(e, row) {
   // a chart, which is the failure cop_scope exists to prevent.
   const mb = pairedId ? mbByConcept(pairedId) : null;
   el.innerHTML = !id ? ""
-    : row ? histHtml(id, row.unit, displayReadingLabel(row.label))
-    : pairedId ? histHtml(id, mb ? mb.unit : "", mb ? displayHomeHubLabel(mb) : inspTitleText(e, null))
+    : row ? histHtml(id, displayUnit(row), displayReadingLabel(row.label))
+    : pairedId ? histHtml(id, mb ? displayUnit(mb) : "", mb ? displayHomeHubLabel(mb) : inspTitleText(e, null))
                : histHtml(id, DERIVED[id].unit, e.aria ? tx(e.aria) : inspTitleText(e, null));
 }
 
@@ -1240,6 +1244,7 @@ function renderInspect() {
   // The gateway's reading of this target while X10A is silent — null in normal operation, so
   // everything below is the panel it always was unless the drawing itself has switched source.
   const fb = row ? null : mbForInspect(S.insp);
+  const fbUnit = fb ? displayUnit(fb) : "";
   setTxt("inspTitle", inspTitleText(e, d));
   // The source line names the reading's origin, so a number in the picture can be traced to the row
   // it came from. On the fallback it names the MODBUS row — the X10A label would credit the wrong
@@ -1268,7 +1273,7 @@ function renderInspect() {
     const explicitHead = d && e.head ? e.head(d) : null;
     setTxt("inspNow", explicitHead != null ? explicitHead
                      : row ? inspVal(row, d)
-                     : fb ? displayValue(fb) + (fb.unit ? " " + fb.unit : "")
+                     : fb ? displayValue(fb) + (fbUnit ? " " + fbUnit : "")
                      : "—");
   }
   $("inspNow").classList.toggle("src-val-mb", !!fb);
@@ -1301,13 +1306,14 @@ function renderInspect() {
           `<span>${esc(inspVal(m.x10a, d))}</span></div>`
         : "";
       if (!m.mb) return row;
+      const mbUnit = displayUnit(m.mb);
       // The gateway's OWN label, like the explainer line — it names the register the number came
       // from, which is what someone checking the pairing against real hardware needs to read.
       return row +
         `<div class="inspect-row mb-row">` +
           `<span>${esc(displayHomeHubLabel(m.mb))} ` +
             `<span class="mb-tag">${esc(t("src.modbus_tag"))}</span></span>` +
-          `<span>${esc(displayValue(m.mb))}${m.mb.unit ? " " + esc(m.mb.unit) : ""}</span></div>`;
+          `<span>${esc(displayValue(m.mb))}${mbUnit ? " " + esc(mbUnit) : ""}</span></div>`;
     })
     .join("");
 }
