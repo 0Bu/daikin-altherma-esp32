@@ -359,10 +359,16 @@ host-testable core is unusually large and valuable, because the risky parts are 
   else answers a narrower question — `convert()` handles the wire format's own `0x8000` no-data
   marker, `reading_plausible()` catches a number that is *impossible*, `ValueDef::no_publish` carries
   what the generator knew. What is left is a field that decodes to an entirely ordinary number which
-  is not a measurement of anything, and only per-row evidence can identify it. Three verdicts exist;
-  two are in force. `ZeroMeansAbsent` (`Target Cond. Temp.`'s raw `0x0000`, flat through a full
+  is not a measurement of anything, and only per-row evidence can identify it. Four verdicts exist;
+  three are in force. `ZeroMeansAbsent` (`Target Cond. Temp.`'s raw `0x0000`, flat through a full
   compressor cycle) withholds only that exact value, because a global "0 °C is unavailable" rule
-  would destroy every thermistor reading that crosses zero. `AboveRangeIsAbsent` is the **expansion
+  would destroy every thermistor reading that crosses zero. `ZeroPageMeansAbsent` resolves the
+  page-level subset of #224 without making that mistake: `0xA1`, the second-outdoor-unit Water-HX
+  page, returned 16 zero bytes including its unit-family setting flags through the measured DHW
+  compressor cycle. Its four analog rows are withheld only while the complete reply through byte 9
+  is all zero; one non-zero byte proves the page populated and preserves even an individual exact
+  0 °C. A short reply cannot reach the flags and therefore proves no absence. `AboveRangeIsAbsent`
+  is the **expansion
   valve** pulse rows (conv 151): 30 days of published samples run 0-474 pulses and then carry six
   samples of exactly `0xFFF8`, with **nothing in between** — a discrete out-of-band integer rather
   than a distribution's tail. The obvious diagnosis, "conv 151 should have been signed", is *refuted*

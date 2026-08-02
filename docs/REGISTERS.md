@@ -460,6 +460,13 @@ the I/U capacity code (`0x60` offset 6).
 | 9 | 1 | 301 | 1 |  | Hydro split setting |
 | 9 | 1 | 300 | 0 |  | Alterma LT setting |
 
+> **Absent second-outdoor-unit signature (#224).** On the audited installation this complete page
+> answered with 16 zero bytes through a real DHW compressor cycle — including all unit-family flags
+> at offset 9. `logic/availability.hpp` therefore withholds the four analog rows at offsets 0, 2, 5
+> and 7 while the complete reply through byte 9 is all zero. This is deliberately a **page** rule:
+> an individual inlet, outlet or target of exactly 0 °C remains publishable when any other byte proves
+> the page populated, and a short reply that does not reach the flags proves nothing.
+
 #### Register `0x60`
 
 | Off | Len | Conv | Bit | Type | Value |

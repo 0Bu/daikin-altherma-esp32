@@ -26,6 +26,9 @@
 //                     false. The row is withheld from every publish surface until the wire evidence
 //                     settles the scale; the raw page dump (logic/raw_capture.hpp) is what preserves
 //                     the evidence in the meantime.
+//   ZeroPageMeansAbsent every byte in the returned page is zero, including fields that are not the
+//                     row being decoded. This is a page-level absent-feature signature; an
+//                     individual zero still publishes when any other byte proves the page live.
 //   AboveRangeIsAbsent  the row is a real measurement almost always, and occasionally carries a
 //                     single fixed out-of-band integer that no position/count could be. Unlike the
 //                     two above this is a VALUE test — but it cannot live in reading_plausible(),
@@ -42,10 +45,10 @@
 //
 // A rule is keyed on (page, offset, converter) — the row's structural identity, never its label,
 // for the reason lwt_select.hpp states at length: an alias or a re-spelling would silently move the
-// verdict onto a different quantity. It is deliberately NOT scoped to a profile id: the two rules
-// below sit at byte-identical (reg, offset, conv) coordinates in all 43 generated tables, and each
-// was measured on two INDEPENDENT unit families. A profile-id list would claim a per-model fact
-// nobody established, and would go stale the moment the generator emits a 44th table.
+// verdict onto a different quantity. It is deliberately NOT scoped to a profile id: each verdict is
+// about the wire structure at that coordinate — sometimes a single value, sometimes a whole-page
+// presence signature — and the catalog test pins its complete cross-profile reach. A profile-id list
+// would claim a per-model fact nobody established, and would go stale on the next generator run.
 //
 // ADDING A RULE IS AN ADJUDICATION, not a way to make an inconvenient number go away — the same
 // contract tools/domain/audit_exceptions.txt states. It needs a live capture or a documented model
@@ -61,6 +64,7 @@ namespace daik {
 enum class AvailabilityPolicy : uint8_t {
     Always,             // the default for every row in the catalog: publish whatever decoded
     ZeroMeansAbsent,    // an exact decoded zero is an unpopulated field on THIS row, not a reading
+    ZeroPageMeansAbsent,// the entire page payload is the absent-feature signature, not measurements
     Unproven,           // the decode itself is not trusted here — publish nothing, keep the evidence
     AboveRangeIsAbsent, // a decoded value above this row's physical ceiling is not a reading
 };
@@ -81,6 +85,9 @@ struct AvailabilityRule {
 // sits 33x above it. Fitting a bound to the observed maximum would be the mistake
 // logic/conv_override.hpp names: a threshold picked to make a number look nicer is not evidence.
 inline constexpr double EEV_PULSE_CEILING = 2000.0;
+// Page 0xA1's last defined presence witness is the unit-family flag byte at offset 9. A shorter
+// reply is incomplete evidence, never an absent-page signature.
+inline constexpr size_t A1_PRESENCE_BYTES = 10;
 
 inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // Target Evap. Temp. (0x10/6) USED TO BE HERE, as Unproven — "withheld until the run-time wire
@@ -105,6 +112,22 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // stands on the raw 0x0000 through full cycles; the second family does not exist yet.
     {0x10, 8, 114, AvailabilityPolicy::ZeroMeansAbsent, 0.0,
      "#209: raw 0x0000 through a full compressor cycle (one unit, two audits)"},
+
+    // Page 0xA1 is the second-outdoor-unit water-HX page, not four independent primary-unit
+    // thermistors. On the #209 reference installation its reply is 16 zero bytes, including the
+    // unit-family setting flags at byte 9, through a real DHW compressor cycle. That complete-page
+    // signature means no second outdoor unit is populated; publishing four 0 °C measurements from
+    // it invents hardware. This is deliberately NOT ZeroMeansAbsent: an inlet, outlet or target may
+    // legitimately cross 0 °C on a populated page, and it remains publishable as soon as ANY byte
+    // in that same reply proves the page live. #224 (the tractable page-level subset of defect 6).
+    {0xA1, 0, 119, AvailabilityPolicy::ZeroPageMeansAbsent, 0.0,
+     "#224: whole 0xA1 reply is zero, including unit-family flags (second O/U absent)"},
+    {0xA1, 2, 119, AvailabilityPolicy::ZeroPageMeansAbsent, 0.0,
+     "#224: whole 0xA1 reply is zero, including unit-family flags (second O/U absent)"},
+    {0xA1, 5, 114, AvailabilityPolicy::ZeroPageMeansAbsent, 0.0,
+     "#224: whole 0xA1 reply is zero, including unit-family flags (second O/U absent)"},
+    {0xA1, 7, 114, AvailabilityPolicy::ZeroPageMeansAbsent, 0.0,
+     "#224: whole 0xA1 reply is zero, including unit-family flags (second O/U absent)"},
 
     // ── Expansion valve pulse positions (conv 151) — raw 0xFFF8 is not a position ─────────────────
     // MEASURED on the reference unit's published series (VictoriaMetrics, 30 days, 30 s samples of
@@ -181,15 +204,29 @@ inline constexpr bool row_publishable(const ValueDef& d) {
 // 0.0, and widening it to a tolerance would start eating the real sub-0.1 °C readings the rule is
 // explicitly not allowed to touch. The ceiling test is one-sided for the same reason it is generous:
 // it refuses an impossible integer, it does not police the quantity's working range.
+// `page`/`page_len` are optional so callers without the current wire reply never invent a page-level
+// absence. ZeroPageMeansAbsent requires a complete payload through its last presence witness.
 //
 // Unproven is decided BEFORE the `ok` check — it is a verdict on the row, not on the number, so a
 // quarantined row publishes nothing whatever it decoded to.
-inline constexpr bool value_available(const ValueDef& d, bool ok, double value) {
+inline constexpr bool value_available(const ValueDef& d, bool ok, double value,
+                                      const uint8_t* page = nullptr, size_t page_len = 0) {
     const AvailabilityRule* r = availability_rule(d);
     if (!r) return true;
     if (r->policy == AvailabilityPolicy::Unproven) return false;
     if (!ok) return true;
     if (r->policy == AvailabilityPolicy::ZeroMeansAbsent && value == 0.0) return false;
+    if (r->policy == AvailabilityPolicy::ZeroPageMeansAbsent && page &&
+        page_len >= A1_PRESENCE_BYTES) {
+        bool all_zero = true;
+        for (size_t i = 0; i < page_len; i++) {
+            if (page[i] != 0) {
+                all_zero = false;
+                break;
+            }
+        }
+        if (all_zero) return false;
+    }
     if (r->policy == AvailabilityPolicy::AboveRangeIsAbsent && value > r->ceiling) return false;
     return true;
 }
