@@ -1,4 +1,4 @@
-// The six paired schematic measurements have two independent 24-hour rings. Execute the production
+// Paired schematic measurements and states have two independent 24-hour rings. Execute the production
 // browser combiner and renderer so an X10A gap cannot erase a live Modbus sample, and so the second
 // line remains visibly attributed instead of becoming an unlabeled near-overlap.
 import assert from "node:assert/strict";
@@ -9,10 +9,12 @@ const S = {
   status: { history: {
     rows: [
       { id: "dhw_tank", label: "DHW tank temp. (R5T)" },
+      { id: "bsh_state", label: "BSH" },
       { id: "smart_grid_mode", label: "Smart Grid operation mode" },
     ],
     modbus_rows: [
       { id: "dhw_tank", label: "Domestic Hot Water temperature" },
+      { id: "bsh_state", label: "Booster heater run" },
       { id: "smart_grid_mode", label: "Smart Grid operation mode" },
     ],
   } },
@@ -47,6 +49,12 @@ const context = {
     if (key === "hist.boost_active") return "Boost aktiv";
     if (key === "hist.boost_inactive") return "Boost aus";
     if (key === "hist.boost_aria") return `${arg} — Boost-Verlauf. ${arg2}`;
+    if (key === "hist.heater_total") return `Heizstab aktiv erfasst · ${arg} Rasterzeit`;
+    if (key === "hist.heater_run") return `${arg} · aktives Zeitfenster ca. ${arg2}`;
+    if (key === "hist.heater_none") return "Kein Heizstabeinsatz erfasst.";
+    if (key === "hist.heater_active") return "Heizstab aktiv";
+    if (key === "hist.heater_inactive") return "Heizstab aus";
+    if (key === "hist.heater_aria") return `${arg} — Heizstab-Verlauf. ${arg2}`;
     if (key.startsWith("sg.mode")) return ["Freier Betrieb", "Zwangsabschaltung", "Empfehlung ein", "Erzwungen ein"][+key.at(-1)];
     return labels[key] || key;
   },
@@ -106,6 +114,20 @@ assert.equal((boostHtml.match(/vhist-state-on mb/g) || []).length, 2,
 assert.match(boostHtml, /HomeHub · Modbus/);
 assert.match(h.scrubText(boostView, 1), /Modbus Boost aktiv · Empfehlung ein/,
   "scrubbing names the state and manufacturer mode, not the number 2.0");
+
+// BSH is also categorical. Its active buckets render as intervals and the wording calls the sum
+// raster time rather than exact runtime; X10A is the preferred physical-state source.
+S.hist.set("bsh_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
+  held: [], v: [0, 10, 0, 10] });
+S.hist.set("modbus:bsh_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
+  held: [], v: [0, 10, 0, 10] });
+const bshView = h.historyView("bsh_state");
+const bshHtml = h.histHtml("bsh_state", "", "Heizstab");
+assert.match(bshHtml, /vhist-state-track/);
+assert.doesNotMatch(bshHtml, /vhist-line/);
+assert.match(bshHtml, /Heizstab aktiv erfasst · 10 min Rasterzeit/);
+assert.match(bshHtml, /<strong>X10A<\/strong>/, "X10A leads the heater-run summary");
+assert.match(h.scrubText(bshView, 1), /X10A Heizstab aktiv/);
 
 // Bucket alignment, not array index: Modbus starts one raster later and must leave the first slot
 // empty rather than sliding its first sample under the older X10A point.

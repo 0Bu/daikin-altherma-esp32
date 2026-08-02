@@ -598,7 +598,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   background: var(--brand-sky); }
 .vhist-source.mb { color: var(--src-mb); }
 .vhist-source.mb i { background: var(--src-mb); }
-/* Boost history is a state timeline, not a numeric curve. One horizontal lane per source uses the
+/* Boost/heater history is a state timeline, not a numeric curve. One horizontal lane per source uses the
    same legend colours as numeric history; the inactive base is light grey, active spans are solid,
    and missing samples are hatched. Exact intervals and sampled durations are written below it. */
 .vhist-state-legend .vhist-source i { width: 16px; height: 7px; border-radius: 4px; }

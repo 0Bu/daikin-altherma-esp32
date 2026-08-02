@@ -405,10 +405,16 @@ const DESCRIPTIONS = [
     normal: "OFF when no auxiliary heat is required. Legitimate reasons for ON include low-temperature support, defrost, DHW, disinfection and emergency operation; the exact permission and balance temperatures are installer settings.",
     de: { what: "Eine elektrische Widerstandsheizer-Stufe in der Hydraulikeinheit. Sie gibt Wärme direkt an das Wasser ab, wenn die Regelung Zusatzwärme erlaubt oder anfordert.",
           normal: "OFF, solange keine Zusatzwärme benötigt wird. Zulässige Gründe für ON sind unter anderem Unterstützung bei niedriger Außentemperatur, Abtauen, Warmwasser, Desinfektion und Notbetrieb; Freigaben und Gleichgewichtstemperaturen stellt der Installateur ein." } },
+  { re: /^booster heater run$/i,
+    exact: true,
+    what: "The HomeHub's ON/OFF readback for the electric immersion heater in the domestic-hot-water tank (input register 32). It reports use, not power. Input register 51 is the measured electrical input of the whole heat-pump system and cannot be relabelled as the heater's own power.",
+    normal: "OFF while the tank heater is not active; ON means the controller reports the immersion heater running.",
+    de: { what: "Die ON/OFF-Rückmeldung des HomeHub für den elektrischen Tauchheizer im Warmwasserspeicher (Eingangsregister 32). Sie meldet den Einsatz, nicht die Leistung. Eingangsregister 51 ist die gemessene elektrische Gesamtaufnahme der Wärmepumpenanlage und darf nicht als eigene Heizstableistung bezeichnet werden.",
+          normal: "OFF, solange der Speicherheizstab nicht aktiv ist; ON bedeutet, dass die Regelung den laufenden Heizstab meldet." } },
   { re: /^bsh$/i,
-    what: "The electric immersion heater in the domestic-hot-water tank. It can heat the tank without the compressor or water circulation pump running. X10A reports this BSH register only as ON/OFF; it carries no dedicated heater-power reading.",
+    what: "The electric immersion heater in the domestic-hot-water tank. It can heat the tank without the compressor or water circulation pump running. X10A reports BSH only as ON/OFF; HomeHub input register 32 provides the same run state. Neither source carries dedicated heater power, and HomeHub input 51 is whole-system electrical input only.",
     normal: "OFF while the tank heater is not requested. Depending on the configuration it can be ON for powerful DHW, scheduled assistance, disinfection or emergency operation.",
-    de: { what: "Der elektrische Tauchheizer im Warmwasserspeicher. Er kann den Speicher erwärmen, ohne dass Verdichter oder Wasserpumpe laufen. X10A meldet dieses BSH-Register nur als ON/OFF; eine eigene Heizstableistung enthält es nicht.",
+    de: { what: "Der elektrische Tauchheizer im Warmwasserspeicher. Er kann den Speicher erwärmen, ohne dass Verdichter oder Wasserpumpe laufen. X10A meldet BSH nur als ON/OFF; HomeHub-Eingangsregister 32 liefert denselben Laufzustand. Keine der Quellen enthält eine eigene Heizstableistung, und HomeHub-Eingang 51 ist nur die elektrische Gesamtaufnahme.",
           normal: "OFF, solange der Speicherheizer nicht angefordert ist. Je nach Konfiguration kann er für Warmwasser-Hochleistungsbetrieb, geplante Unterstützung, Desinfektion oder Notbetrieb ON sein." } },
   { re: /thermal protector/i,
     what: "The thermal cut-out that protects an electric heater from overheating.",
@@ -636,6 +642,9 @@ const mbForInspect = (key) => {
   // needs to prove that an external energy manager's request reached the HomeHub.
   if (key === "sgrequest") return mbRow(MB_OFF_SMART_GRID);
   if (!mbLive()) return null;
+  // The tank heater is an exact state pair rather than a numeric pill in MB_PAIRS. When the X10A
+  // BSH row is absent/silent, its inspector still needs HomeHub input 32 as the named source.
+  if (key === "bsh") return mbByConcept("bsh_state");
   const p = MB_PAIRS.find((q) => q.insp === key);
   // Normally only a silent X10A link makes the gateway lead. `mbFields` is the per-reading exception:
   // liveData marks outdoor air there while X10A is connected but its sleeping outdoor-unit row is

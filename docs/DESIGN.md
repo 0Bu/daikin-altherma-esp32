@@ -654,7 +654,8 @@ Body, ordered:
    failed to measure outranks "nothing failed", since that is the stronger claim.
    The COP is the one that is deliberately drawn on fewer samples than its own inputs. A CT-sourced
    sample is left out entirely: `cop_scope.hpp`'s boundaries only pair once the resistive heaters are
-   known quiet, and their history is not buffered — three more rings for a gate rather than a curve.
+   known quiet, and their complete history is not buffered — BSH is now retained as a useful state
+   timeline, but the two BUH stages still are not, so the plant boundary cannot be reconstructed.
    An inverter-sourced sample needs no such evidence (both heaters sit outside both sides), which is
    why that is the branch that survives. Refusing the other is the same answer the live pill gives
    when it cannot pair the boundaries, not a relaxation of it.
@@ -681,12 +682,14 @@ Body, ordered:
    numeric rows, and ringing all of them would cost ~38 KB of `.bss` — about a third of the low-water
    free heap measured on the reference board — for curves nobody opened. A value row reached through
    the LIST (§6) gets a chart where a trend already exists and none where it does not.
-   HomeHub adds seven second rings: leaving water, return water, DHW tank, outdoor air, flow and room
-   temperature are the six measurement concepts both sources structurally pair; the seventh is the
-   explicit Smart-Grid-mode state timeline. It renders one light-grey/off track per source with
-   coloured mode-2 spans, lists every sampled Boost interval with start/end and approximate duration,
-   and reports the total sampled Boost time. Other setpoints, states and Modbus-only readings do not
-   acquire a curve by resemblance of their labels.
+   HomeHub adds eight second rings: leaving water, return water, DHW tank, outdoor air, flow and room
+   temperature are the six measurement concepts both sources structurally pair; BSH is the seventh,
+   converter-qualified pair; and the eighth is the explicit Smart-Grid-mode timeline. Both states
+   render one light-grey/off track per source with coloured active spans and written interval lists.
+   BSH uses event folding: once ON is observed it remains ON for that open five-minute bucket, so a
+   later OFF cannot erase the event. The UI calls the sum sampled raster time, not exact runtime; a
+   pulse entirely between poll sweeps can still be missed. Other setpoints, states and Modbus-only
+   readings do not acquire a curve by resemblance of their labels.
    The one numeric pill with no chart is the **low-pressure** one, and it is the same honest answer
    as the high-side pill on the *other* leg of its fallback: both are the `0x20` transducer pair,
    which freezes with its page and, on the reference install, has published a flat 0.0 bar from both

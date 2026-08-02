@@ -3,9 +3,9 @@
 // rather than a repeat of one.
 //
 // The firmware keeps a fixed-cadence ring per trended X10A/board row and serves it from GET
-// /history; history.cpp also instantiates seven rings for the HomeHub histories in homehub_map.hpp:
-// the six structurally paired measurements plus the Smart-Grid mode. The web UI draws either or
-// both under a value row's explainer. Everything that
+// /history; history.cpp also instantiates eight rings for the HomeHub histories in homehub_map.hpp:
+// six structurally paired measurements, the tank-heater state and the Smart-Grid mode. The web UI
+// draws either or both under a value row's explainer. Everything that
 // decides *what* is trended and *whether an X10A sample counts* lives here rather than at the call
 // site, for the same reason lwt_select.hpp and ou_stale.hpp do: the rule runs against the generated
 // def/ profile tables, which are C++, so the CI logic-test can gate it against the whole catalog
@@ -106,14 +106,17 @@ constexpr bool trend_cstr_eq(const char* a, const char* b) {
 // own memory, which has no register, no profile and no held-over state — it is sampled directly by
 // the recorder on the same cadence.
 enum class TrendKind : uint8_t {
-    Row,        // a decoded value from the poll cache, addressed by (reg, off, unit)
+    Row,         // a decoded value from the poll cache, addressed by (reg, off, unit)
+    BinaryEvent, // an exact bit row; any observed ON is retained for the open 5-minute bucket
     SmartGridMode, // four-state combination of X10A Smart-Grid contact 1 + contact 2
     FreeHeap,   // esp_get_free_heap_size()
     MaxAlloc,   // largest CONTIGUOUS free block — the real OOM ceiling on this board
 };
 
-// `reg`/`off`/`unit` are the LOCATOR for a Row (see the header note). `unit` is the string the poll
-// cache carries for the row — convert.hpp's unit_for_datatype(): "°C", "bar", "A", or "" for a row
+// `reg`/`off`/`unit` are the LOCATOR for an ordinary Row (see the header note). A BinaryEvent also
+// carries `conv`, because BSH shares its dimensionless byte with six unrelated state bits. `unit` is
+// the string the poll cache carries for the row — convert.hpp's unit_for_datatype(): "°C", "bar",
+// "A", or "" for a row
 // whose unit lives in its label ("Flow sensor (l/min)"). It is spelled out here rather than taken as
 // a type code so this header stays free of convert.hpp; the catalog test checks the two agree.
 //
@@ -129,6 +132,7 @@ struct TrendDef {
     uint8_t     off;
     const char* unit;
     const char* label;
+    int16_t     conv = -1; // BinaryEvent discriminator; ordinary rows do not need it
 };
 
 // Adding a trend is one row here — the ring, the route and the browser are already generic over it.
@@ -178,6 +182,12 @@ inline constexpr TrendDef TRENDS[] = {
     { "ct_l1",            TrendKind::Row, 0x63, 14, "",    "" },
     { "ct_l2",            TrendKind::Row, 0x63, 15, "",    "" },
     { "ct_l3",            TrendKind::Row, 0x63, 16, "",    "" },
+    // The DHW immersion-heater run flag. Seven dimensionless bits share 0x60/12, so converter 305
+    // is load-bearing: without it this trend would attach to whichever valve/pump bit sorts first.
+    // It is event-folded rather than last-value-folded so a heater pulse seen by a poll cannot be
+    // erased by a later OFF in the same 5-minute bucket. The UI calls the resulting spans sampled
+    // active windows, not exact runtime; a pulse entirely between poll sweeps can still be missed.
+    { "bsh_state",         TrendKind::BinaryEvent, 0x60, 12, "", "", 305 },
     // A STATE timeline rather than a numeric sensor curve. X10A exposes the mode through two
     // independent contact bits, so no single catalog row can be its locator. The recorder combines
     // both structurally identified rows into the documented 0..3 mode and stores it in tenths like
@@ -194,7 +204,7 @@ inline constexpr TrendDef TRENDS[] = {
     { "max_alloc",        TrendKind::MaxAlloc, 0, 0, "KiB", "Largest free block" },
 };
 constexpr size_t TREND_COUNT = sizeof(TRENDS) / sizeof(TRENDS[0]);
-// 19 trends = 10944 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
+// 20 trends = 11520 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
 // ceiling is a deliberate stop sign, not a hardware limit: .bss does not compete for the largest
 // CONTIGUOUS free block, which is what actually binds on this board, so the cost of a trend is a
 // few per cent of free heap and nothing at all of the fragmentation budget. Raise it only with the
@@ -236,8 +246,11 @@ constexpr HistorySample history_bytes_tenths_kib(uint32_t bytes) {
 // identity. A profile that does not carry the row yields no match at all (see trend_select).
 // A BOARD trend matches nothing here — it is not looking for a row, and a locator of (0, 0) must
 // never be allowed to collide with one.
-constexpr bool trend_row_matches(const TrendDef& d, unsigned reg, unsigned off, const char* unit) {
-    return d.kind == TrendKind::Row && reg == d.reg && off == d.off && trend_cstr_eq(unit, d.unit);
+constexpr bool trend_row_matches(const TrendDef& d, unsigned reg, unsigned off, const char* unit,
+                                 int conv = -1) {
+    const bool row_kind = d.kind == TrendKind::Row || d.kind == TrendKind::BinaryEvent;
+    return row_kind && reg == d.reg && off == d.off && trend_cstr_eq(unit, d.unit) &&
+           (d.conv < 0 || conv == d.conv);
 }
 
 // Index of the row a trend should buffer, or -1 when this profile carries no such row (the UI then
@@ -252,6 +265,16 @@ inline int trend_select(const TrendDef& d, const uint8_t* regs, const uint8_t* o
                         const char* const* units, size_t n) {
     for (size_t i = 0; i < n; ++i)
         if (trend_row_matches(d, regs[i], offs[i], units[i])) return static_cast<int>(i);
+    return -1;
+}
+
+// Converter-aware overload for bit rows. Kept separate so the many numeric callers do not need a
+// dummy array; a BinaryEvent deliberately cannot resolve through the narrower overload above.
+inline int trend_select(const TrendDef& d, const uint8_t* regs, const uint8_t* offs,
+                        const char* const* units, const int16_t* convs, size_t n) {
+    for (size_t i = 0; i < n; ++i)
+        if (trend_row_matches(d, regs[i], offs[i], units[i], convs ? convs[i] : -1))
+            return static_cast<int>(i);
     return -1;
 }
 
@@ -438,6 +461,15 @@ struct TrendRing {
     // nothing was measured at all, and then carries the LAST reason — the one still true at commit.
     void fold(HistorySample s) {
         if (!history_is_absent(s) || history_is_absent(pending)) pending = s;
+    }
+
+    // State-event folding: once ON was actually observed in this bucket it cannot be erased by a
+    // later OFF. This keeps a short heater run visible on the 5-minute raster without pretending its
+    // duration is known more precisely than the bucket. Unknown still yields to any real state.
+    void fold_binary_event(HistorySample s) {
+        constexpr HistorySample on = 10; // public binary 1 stored in the common tenths wire format
+        if (pending == on) return;
+        if (s == on || !history_is_absent(s) || history_is_absent(pending)) pending = s;
     }
 
     // Close the open bucket and open the next. `skipped` is how many buckets went by with no cycle

@@ -169,7 +169,7 @@ function liveData() {
     buh2: vOn(/buh step ?2/i),
     // Exact anchor is intentional: "Thermal protector BSH" is a different flag. BSH is the tank's
     // electric immersion heater and can be the only active component during an SG-Ready boost.
-    bsh: vOn(/^bsh$/i),
+    bsh: stateOf(/^bsh$/i, 32),
     defrost: vOn(/defrost operation/i),
     // "Space heating Operation ON/OFF" and HomeHub input 53 both mean normal SPACE heat/cool
     // OPERATION — not a thermostat demand and not heating-only. The controller can report it ON in
@@ -330,10 +330,10 @@ function liveData() {
     // Written this way a field added to liveData() is dropped by DEFAULT, so the failure mode is a
     // missing reading rather than a stale one presented as current.
     //
-    // The three plant STATES survive, because they are no longer X10A values: stateOf() already
+    // The four plant STATES survive, because they are no longer X10A values: stateOf() already
     // refused the retained X10A bit and returned the gateway's (or nothing). Clearing them here is
     // what used to blank the pump and the demand next to readings that were arriving.
-    const KEEP = new Set(["pumpOn", "compressorOn", "valveDhw", "spaceOp", "sgMode", "mbFields"]);
+    const KEEP = new Set(["pumpOn", "compressorOn", "valveDhw", "spaceOp", "bsh", "sgMode", "mbFields"]);
     Object.keys(d).forEach((k) => { if (!KEEP.has(k)) d[k] = null; });
     d.ouHeldOver = false;         // nothing to hold over: the whole bus is silent, not one unit
     MB_PAIRS.forEach((p) => takeMb(p.fld, p.cid));
@@ -559,17 +559,30 @@ function renderLive() {
 const tx = (o) => (o == null ? "" : typeof o === "string" ? o : (LANG === "de" && o.de) ? o.de : o.en);
 const degC = (n) => (n == null ? "—" : fmt1(n) + " °C");
 
-// X10A has no dedicated BSH-power register. Some profiles do expose the unit's CT clamp currents;
-// liveData turns those into an estimated WHOLE-UNIT input at assumed 230 V. Show that useful context
-// only while BSH is active and CT is the source — never substitute the inverter current (compressor
-// only), and never label the total as heater power because pumps/electronics may be part of it too.
+// Neither X10A nor HomeHub has a dedicated BSH-power register. HomeHub input 51 is a measured
+// WHOLE-SYSTEM input; some X10A profiles expose CT currents from which liveData estimates the same
+// broad boundary at assumed 230 V. Show either as context only while BSH is active, and never label
+// the total as heater power because compressor, pumps and electronics may be part of it too.
 const bshInputRow = () => {
   const d = S.live;
-  if (!d || d.bsh !== true || d.pel == null || d.pelSrc !== "CT") return null;
+  if (!d || d.bsh !== true) return null;
+  const measured = mbPower();
+  if (measured) {
+    const n = parseFloat(measured.value);
+    if (Number.isFinite(n)) return {
+      label: tx({
+        en: "Whole-system electrical input · HomeHub (not heater power)",
+        de: "Elektrische Gesamtaufnahme · HomeHub (keine Heizstableistung)",
+      }),
+      value: fmt1(n),
+      unit: "kW",
+    };
+  }
+  if (d.pel == null || d.pelSrc !== "CT") return null;
   return {
     label: tx({
-      en: "Whole-unit electrical input (from CT, estimated)",
-      de: "Geschätzte elektrische Gesamtaufnahme · CT",
+      en: "Whole-unit electrical input · CT estimate (not heater power)",
+      de: "Geschätzte Gesamtaufnahme · CT (keine Heizstableistung)",
     }),
     value: "≈ " + fmt1(d.pel),
     unit: "kW",
@@ -876,6 +889,7 @@ const INSPECT = {
   bsh: {
     t: { en: "Electric tank heater", de: "Heizstab" },
     re: /^bsh$/i, sample: "BSH",
+    trend: "bsh_state",
     // Replace the raw bit (1/0) in the headline with its actual meaning. The source line remains
     // "BSH", so the friendly state is still traceable to the exact X10A register.
     head: (d) => d.bsh == null ? "—" : t(d.bsh ? "state.on" : "state.off"),

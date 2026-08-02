@@ -84,7 +84,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     " SMART_GRID_MODE_VALUE, x10aSmartGridModeFrom, x10aSmartGridMode, x10aSmartGridRow," +
     " sgModeText, mbNoteHtml, inspCurRow, inspMember," +
     " inspMembers, inspValues, inspComparisonHtml, inspHeld, liveData, compressorRunning," +
-    " waterThermalKind, activeSpaceKind, ouReadingText, updateSchematicStateA11y, INSPECT," +
+    " waterThermalKind, activeSpaceKind, ouReadingText, updateSchematicStateA11y, bshInputRow, INSPECT," +
     " pelMeasured, pelApproxText, PEL_INSPECT };",
     context, { filename: "main/www/app.sources" });
   context.__api.S = context.S;
@@ -145,6 +145,9 @@ const X_SG = (contact, on) => ({
   label: `SmartGridContact${contact}`, value: on ? "1" : "0", unit: "", reg: 0x60,
   binary: true, binary_semantic: `smart_grid_contact_${contact}`,
 });
+const X_BSH = (on) => ({ label: "BSH", value: on ? "1" : "0", unit: "", reg: 0x60,
+                         binary: true, concept: "bsh_state" });
+const M_BSH = (on) => M_FLAG(32, "Booster heater run", on, "bsh_state");
 
 // The README recording drives the same production parser. Keep its fake HomeHub on the real API
 // boundary (raw numeric enum plus semantic metadata), or a regression to text could stay hidden.
@@ -297,6 +300,28 @@ const X_SG = (contact, on) => ({
   const invalid = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
                         modbus: [SG(4)] });
   assert.equal(invalid.mbSmartGridMode(), null, "unknown Smart-Grid enum must fail closed");
+}
+
+// BSH uses the same arbitration as the other physical states and remains traceable to HomeHub
+// input 32 when X10A cannot answer. Input 51 is whole-system context, never renamed heater power.
+{
+  const both = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+                     values: [X_BSH(false)], modbus: [M_BSH(true)] });
+  assert.equal(both.liveData().bsh, false, "live X10A BSH leads a contradictory HomeHub state");
+
+  const power = { label: "Heat pump power consumption", value: "2.40", unit: "kW", off: 51 };
+  const down = ctx({ x10a: false, mbEnabled: true, mbConnected: true,
+                     values: [X_BSH(false)], modbus: [M_BSH(true), power] });
+  const d = down.liveData();
+  down.S.live = d;
+  assert.equal(d.bsh, true, "HomeHub input 32 keeps the heater state live when X10A is silent");
+  assert.equal(down.mbForInspect("bsh"), down.S._modbus[0],
+    "the heater inspector names the exact HomeHub state row");
+  assert.equal(down.INSPECT.bsh.trend, "bsh_state");
+  const context = down.bshInputRow();
+  assert.equal(context.value, "2.4");
+  assert.match(context.label, /not heater power/,
+    "whole-system input must not be presented as dedicated heater power");
 }
 
 // ── 2. Both live, a discrete CONTRADICTION — X10A still leads, both remain readable ────────────

@@ -19,6 +19,10 @@ const DEMO = (() => {
   // fallback instead of painting the retained X10A number or a hard-coded demo value.
   const MB_OUT = (value) => ({ label: "Outdoor air temperature", value: String(value), unit: "°C",
                                off: 44, concept: "outdoor_air" });
+  const MB_BSH = (on) => ({ label: "Booster heater run", value: on ? 1 : 0, unit: "",
+                            off: 32, binary: true, concept: "bsh_state" });
+  const MB_POWER = (value) => ({ label: "Heat pump power consumption", value: String(value),
+                                 unit: "kW", off: 51 });
   const histRows = [
     ["leaving_water", "Leaving water temp. before BUH (R1T)"],
     ["return_water", "Inlet water temp.(R4T)"],
@@ -26,6 +30,7 @@ const DEMO = (() => {
     ["outdoor_air", "R1T-Outdoor air temp."],
     ["flow", "Flow sensor (l/min)"],
     ["room_temp", "Indoor ambient temp. (R1T)"],
+    ["bsh_state", "BSH"],
     ["smart_grid_mode", "Smart Grid operation mode"],
   ].map(([id, label]) => ({ id, label }));
   const mbHistRows = [
@@ -35,6 +40,7 @@ const DEMO = (() => {
     ["outdoor_air", "Outdoor air temperature"],
     ["flow", "Flow rate"],
     ["room_temp", "Room temperature"],
+    ["bsh_state", "Booster heater run"],
     ["smart_grid_mode", "Smart Grid operation mode"],
   ].map(([id, label]) => ({ id, label }));
   const histBase = {
@@ -44,6 +50,8 @@ const DEMO = (() => {
     outdoor_air:   [ 52,  51,  50, null, null,  49,  50,  52,  54,  55,  56,  57],
     flow:          [208, 211, 210, 214, 212, 209, 207, 205, 203, 202, 200, 198],
     room_temp:     [214, 214, 213, 213, 212, 212, 213, 213, 214, 214, 214, 214],
+    // Binary state in tenths. The two ON buckets are sampled active windows, not exact runtime.
+    bsh_state:     [0, 0, 0, 10, 10, 0, 0, 0, 0, 0, 0, 0],
     // Full Smart-Grid modes in tenths, like the real /history wire: two mode-2 Boost intervals.
     smart_grid_mode: [0, 0, 20, 20, 20, 0, 0, 20, 20, 0, 0, 0],
   };
@@ -52,10 +60,11 @@ const DEMO = (() => {
     if (!x) return null;
     // Keep both instruments recognisably close but not identical. Modbus continues through the
     // deliberate X10A outdoor-air gap, which makes the dual-source contract visible in an inspector.
-    const v = id === "smart_grid_mode" ? x : source === "modbus"
+    const state = id === "smart_grid_mode" || id === "bsh_state";
+    const v = state ? x : source === "modbus"
       ? x.map((n, i) => n == null ? 53 + i : n + (i % 3 === 0 ? 1 : 0))
       : x;
-    const unit = id === "smart_grid_mode" ? "" : id === "flow" ? "l/min" : "°C";
+    const unit = state ? "" : id === "flow" ? "l/min" : "°C";
     return { id, source, label: id, dt: 300, unit, t0: 1768720920, b0: 5895736,
              v, held: source === "x10a" && id === "outdoor_air" ? [[3, 2]] : [] };
   };
@@ -131,28 +140,28 @@ const DEMO = (() => {
   //   low side  evaporating ~10 K under the outdoor air
   //   standby   rp 14.2 bar = the equalised circuit near room temperature, not a fault
   const scenes = [
-    { name: "Standby", caption: "Bereitschaft · Standby", mbOut: "6.8",
+    { name: "Standby", caption: "Bereitschaft · Standby", mbOut: "6.8", mbPower: "0.1",
       v: base({ mode: "Stop", ouMode: "Heating", out: "19.0", rps: "0", disch: "24.5", hp: "0.0",
                 lp: "0.0", eev: "0", inv: "0.0", fan: "0", lwt: "28.4", ret: "28.0", tank: "48.2",
                 tankSet: "50.0", lwSet: "35.0", room: "21.4", roomSet: "21.0", flow: "0.0",
                 wp: "1.8", rp: "14.2", pumpSig: "100", pumpOn: false, valveDhw: false,
                 thermo: false, spaceOn: false, defrost: false, quiet: true, ct: "0.1" }) },
 
-    { name: "DHW", caption: "Warmwasser · Domestic hot water", mbOut: "8.8",
+    { name: "DHW", caption: "Warmwasser · Domestic hot water", mbOut: "8.8", mbPower: "1.8",
       v: base({ mode: "DHW", ouMode: "Heating", out: "8.5", rps: "62", disch: "78.4", hp: "36.8",
                 lp: "7.1", eev: "320", inv: "7.9", fan: "6", lwt: "54.8", ret: "49.8", tank: "44.0",
                 tankSet: "50.0", lwSet: "35.0", room: "21.2", roomSet: "21.0", flow: "14.0",
                 wp: "1.8", rp: "36.8", pumpSig: "22", pumpOn: true, valveDhw: true,
                 thermo: false, spaceOn: false, bshOn: true, defrost: false, quiet: false, ct: "8.0" }) },
 
-    { name: "Heating", caption: "Heizen · Heating", mbOut: "5.4",
+    { name: "Heating", caption: "Heizen · Heating", mbOut: "5.4", mbPower: "1.4",
       v: base({ mode: "Heating", ouMode: "Heating", out: "5.2", rps: "45", disch: "68.1", hp: "26.2",
                 lp: "6.4", eev: "280", inv: "6.1", fan: "4", lwt: "38.4", ret: "33.9", tank: "49.5",
                 tankSet: "50.0", lwSet: "38.0", room: "21.4", roomSet: "21.5", flow: "21.0",
                 wp: "1.8", rp: "26.2", pumpSig: "12", pumpOn: true, valveDhw: false,
                 thermo: true, spaceOn: true, defrost: false, quiet: false, ct: "6.0" }) },
 
-    { name: "Heating + DHW", caption: "Heizen + Warmwasser · Heating + hot water", mbOut: "5.2",
+    { name: "Heating + DHW", caption: "Heizen + Warmwasser · Heating + hot water", mbOut: "5.2", mbPower: "1.7",
       v: base({ mode: "Heating + DHW", ouMode: "Heating", out: "5.0", rps: "58", disch: "74.6",
                 hp: "34.6", lp: "6.8", eev: "305", inv: "7.4", fan: "5", lwt: "51.6", ret: "46.9",
                 tank: "46.8", tankSet: "50.0", lwSet: "38.0", room: "21.1", roomSet: "21.5",
@@ -187,7 +196,8 @@ const DEMO = (() => {
               model: { name: "EHVH/EHVX 04-08 kW", family: "Altherma 3 R", marketing: "Altherma 3 R W" } },
   });
 
-  return { scenes, status, smartGrid: SG, outdoorAir: MB_OUT, history: hist };
+  return { scenes, status, smartGrid: SG, outdoorAir: MB_OUT, tankHeater: MB_BSH,
+           electricalInput: MB_POWER, history: hist };
 })();
 
 // The README is English, so the demo page is too — the app picks its language from
@@ -213,7 +223,8 @@ try {
     if (u.startsWith("/status")) return json(DEMO.status(idx));
     if (u.startsWith("/values")) return json({
       values: DEMO.scenes[idx].v,
-      modbus: [DEMO.smartGrid(idx === 1 ? 2 : 0), DEMO.outdoorAir(DEMO.scenes[idx].mbOut)],
+      modbus: [DEMO.smartGrid(idx === 1 ? 2 : 0), DEMO.outdoorAir(DEMO.scenes[idx].mbOut),
+               DEMO.tankHeater(idx === 1), DEMO.electricalInput(DEMO.scenes[idx].mbPower)],
     });
     if (u.startsWith("/history")) {
       const p = new URL(u, location.origin).searchParams;

@@ -1,13 +1,12 @@
 #pragma once
 // The 24-hour trend rings. One fixed-cadence buffer per entry in logic/history.hpp's TRENDS, fed by
-// the X10A poll task, plus seven rings fed by the independent HomeHub task, and read by GET
-// /history. The HomeHub set is the six paired schematic measurements plus the Smart-Grid state
-// timeline.
+// the X10A poll task, plus eight rings fed by the independent HomeHub task, and read by GET
+// /history. The HomeHub set is six paired measurements plus BSH and Smart-Grid state timelines.
 //
 // The buffers are STATIC storage, never heap: on this board the binding limit is the largest
 // CONTIGUOUS free block, not free heap, and a static array does not compete for it. Their non-zero
-// pending sentinel places the rings in .data. Nineteen X10A/board/state rings cost 10944 bytes and
-// seven HomeHub rings another 4032 bytes — see logic/history.hpp's HISTORY_BYTES_PER_TREND and the
+// pending sentinel places the rings in .data. Twenty X10A/board/state rings cost 11520 bytes and
+// eight HomeHub rings another 4608 bytes — see logic/history.hpp's HISTORY_BYTES_PER_TREND and the
 // ceiling asserts beside both arrays.
 //
 // RAM only, and deliberately not persisted: a 576-byte blob rewritten every 5 minutes is ~100k NVS
@@ -32,7 +31,7 @@ void history_start();
 // and only touches the ring when a bucket boundary is crossed (once per HISTORY_DT_S).
 void history_record(const CachedValue* v, size_t n);
 
-// Feed one HomeHub cycle. The six paired measurements and Smart-Grid mode named in
+// Feed one HomeHub cycle. The six paired measurements plus BSH and Smart-Grid states named in
 // logic/homehub_map.hpp are buffered; other states, setpoints and Modbus-only values do not acquire
 // a chart. An empty cycle advances the source's time raster with gaps, so an outage does not make
 // the last Modbus point slide to "now".
