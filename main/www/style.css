@@ -691,6 +691,29 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 }
 .input.invalid { border-color: var(--err); }
 .input::placeholder { color: var(--muted); opacity: .8; }
+/* HomeHub discovery is an action on the address itself, so Search lives inside that field rather
+   than competing with Cancel/Save at the dialog boundary. The input keeps the real border and focus
+   ring; the overlaid button owns the right-hand segment and the extra padding keeps typed text from
+   running underneath it. `:focus-within` preserves one continuous field outline when tab focus moves
+   from the text box to Search. */
+.input-action { position: relative; }
+.input-action .input { padding-right: 126px; }
+.input-action:focus-within .input {
+  border-color: var(--brand); box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.input-action-btn {
+  position: absolute; top: 1px; right: 1px; bottom: 1px; width: 112px;
+  border: 0; border-left: 1px solid var(--line);
+  border-radius: 0 calc(var(--r-input) - 1px) calc(var(--r-input) - 1px) 0;
+  background: transparent; color: var(--brand-strong);
+  font: inherit; font-family: var(--font-sans); font-size: 12.5px; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  white-space: nowrap; cursor: pointer;
+}
+.input-action-btn:hover, .input-action-btn:focus-visible { background: var(--brand-tint); }
+.input-action-btn:focus-visible { outline: none; }
+.input-action-btn:disabled { opacity: .6; cursor: default; }
+.input-action-btn .spin { margin-right: 0; }
 /* The bug-report modal's two multi-line fields. `appearance: none` above already flattens them;
    these add what a <textarea> needs and an <input> does not — a readable line height, vertical-only
    resize (horizontal would break out of the modal card) and, for the generated report, a monospace
