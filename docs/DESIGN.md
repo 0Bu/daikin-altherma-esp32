@@ -1135,7 +1135,13 @@ vocabulary exactly:
    **Beobachten**, **Raumtemperaturquellen**, **Wetterprognose**, **Regelstrategie**, and
    **Sicherheit & Ausgabe** = **Nur lesend**. The room-source row is the only editable one in this
    first slice and opens the exact-topic, temperature-JSON-path, optional source-timestamp path and
-   maximum-age modal. Its summary reports one configured source, the raw temperature and qualified
+   maximum-age modal. Every text-like field in this and the other modals selects its complete value
+   on focus/click, so a long topic, host or JSON path can be replaced with one paste. The room-source
+   modal separates **Testen** from **Speichern**: Save starts disabled for a non-empty topic, Test
+   changes no persistent setting, and only a fresh value accepted through the exact mapping enables
+   Save. Any edit to topic, value path, timestamp path or maximum age invalidates that test again;
+   changing only the presentation name does not. An empty topic remains the explicit Disable state
+   and is directly saveable because there is deliberately no value to test. Its summary reports one configured source, the raw temperature and qualified
    source age; retained remains labelled. A retained payload without its own timestamp is visibly
    untrusted rather than made fresh by reconnecting, while a non-retained value without one ages
    from its monotonic MQTT arrival. The
