@@ -180,18 +180,14 @@ svg .sc-status.dim { fill: var(--muted); }
    text keeps its normal colour, which is what separates it from .dim (no data at all, both muted).
    The words say which it is either way, so neither reading depends on the colour. */
 svg .sc-status.idle { fill: var(--brand-strong); }
-/* HomeHub Smart-Grid mode 2, shown only as the compact petrol "BOOST" marker. The colour is enough
-   source context here; the HomeHub row and inspector retain the full manufacturer state. It is
-   hidden by visibility as well as opacity because the group is focusable/tappable (same rule as the
-   defrost, quiet and BSH badges below). */
-svg .sc-sg-request {
-  opacity: 0; visibility: hidden; transition: opacity .3s, visibility 0s .3s;
-}
-.sg-boost-on .sc-sg-request {
-  opacity: 1; visibility: visible; transition: opacity .3s, visibility 0s;
-}
-svg .sc-sg-request-box { fill: var(--src-mb-soft); stroke: var(--src-mb); }
-svg .sc-sg-request .sc-val { fill: var(--src-mb); font-weight: 700; letter-spacing: .02em; }
+/* HomeHub Smart-Grid mode 2. The permanent pill says only BOOST: inactive/unknown is light grey,
+   while mode 2 switches the full pill to the petrol source colour. The inspector and accessible
+   name keep the state in words without adding it to the compact face. */
+svg .sc-sg-request-box { fill: var(--hatch); stroke: var(--pipe); transition: fill .3s, stroke .3s; }
+svg .sc-sg-request .sc-val { fill: var(--muted); font-weight: 700; letter-spacing: .02em;
+  transition: fill .3s; }
+.sg-boost-on .sc-sg-request-box { fill: var(--src-mb-soft); stroke: var(--src-mb); }
+.sg-boost-on .sc-sg-request .sc-val { fill: var(--src-mb); }
 svg .sc-pipe { fill: none; stroke: var(--pipe); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
 svg .sc-rpipe { fill: none; stroke: var(--pipe); stroke-width: 3.5; stroke-linecap: round; }
 svg .sc-flow {
@@ -242,10 +238,15 @@ svg .sc-comp { fill: var(--brand-tint); stroke: var(--brand-strong); stroke-widt
 svg .sc-buh { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
 .buh-on .sc-buh { fill: var(--brand-tint); stroke: var(--warn); }
 .buh-on .sc-bolt { fill: var(--warn); }
+/* The BSH pill is always visible and says only E-heater/Heizstab. OFF/unknown is deliberately light
+   grey; active turns the border, fill and text orange together. The inspector and accessible name
+   retain the written state. */
+svg .sc-bsh-state-box { fill: var(--hatch); stroke: var(--pipe); transition: fill .3s, stroke .3s; }
+svg .sc-bsh-state .sc-state { fill: var(--muted); transition: fill .3s; }
+.bsh-on .sc-bsh-state-box { fill: var(--warn); fill-opacity: .11; stroke: var(--warn); }
 .bsh-on .sc-bsh-state .sc-state { fill: var(--warn); }
 /* BSH heats the tank electrically: animate the heater wave, but never fCoil, because that overlay
-   specifically means hydronic flow and the pump may be stopped. The label's surrounding rect is
-   only a transparent tap area; the requested visible state is the orange text without a border. */
+   specifically means hydronic flow and the pump may be stopped. */
 svg .sc-bsh-wave {
   fill: none; stroke: var(--flow-hot); stroke-width: 4; stroke-linecap: round;
   stroke-dasharray: 9 15; opacity: 0; transition: opacity .3s; pointer-events: none;
@@ -258,14 +259,13 @@ svg .sc-bolt { fill: var(--muted); }
    half the stroke, which is why the path itself is drawn a touch narrow. */
 svg .sc-vane { fill: var(--muted); stroke: var(--muted); stroke-width: 1.3;
   stroke-linejoin: round; stroke-linecap: round; }
-/* Both are hidden by opacity alone, which stops NEITHER hit testing NOR tab focus — and since they
-   are now hit targets, an invisible pill would both answer clicks and sit in the keyboard tab order
-   showing nothing. `visibility` fixes both at once; the delayed transition on it lets the opacity
-   fade finish before the element goes away (and applies instantly on the way in). */
-svg .sc-snow, svg .sc-quiet, svg .sc-bsh-state {
+/* Conditional defrost and quiet flags are hidden by visibility as well as opacity: opacity alone
+   stops neither hit testing nor tab focus. Boost and BSH are permanent state pills and do not
+   participate in this visibility contract. */
+svg .sc-snow, svg .sc-quiet {
   opacity: 0; visibility: hidden; transition: opacity .3s, visibility 0s .3s;
 }
-.defrost-on .sc-snow, .quiet-on .sc-quiet, .bsh-on .sc-bsh-state {
+.defrost-on .sc-snow, .quiet-on .sc-quiet {
   opacity: 1; visibility: visible; transition: opacity .3s, visibility 0s;
 }
 /* Daikin's normal space heating/cooling operation state on the space riser. It is not a thermostat
@@ -277,8 +277,8 @@ svg .sc-snow, svg .sc-quiet, svg .sc-bsh-state {
    picture reads as explorable without adding a single visual element to the drawing. Selected is
    thicker, not a different colour — one accent, two weights. */
 svg .sc-hit { cursor: pointer; }
-svg .sc-hit:hover :is(.sc-pill, .sc-box, .sc-plate, .sc-buh, .sc-comp, .sc-valve, .sc-tie) { stroke: var(--brand); }
-svg .sc-hit.sel :is(.sc-pill, .sc-box, .sc-plate, .sc-buh, .sc-comp, .sc-valve) { stroke: var(--brand); stroke-width: 2.5; }
+svg .sc-hit:hover :is(.sc-pill, .sc-box, .sc-plate, .sc-buh, .sc-bsh-state-box, .sc-comp, .sc-valve, .sc-tie) { stroke: var(--brand); }
+svg .sc-hit.sel :is(.sc-pill, .sc-box, .sc-plate, .sc-buh, .sc-bsh-state-box, .sc-comp, .sc-valve) { stroke: var(--brand); stroke-width: 2.5; }
 svg .sc-hit:hover .sc-sg-request-box { stroke: var(--brand); }
 svg .sc-hit.sel .sc-sg-request-box { stroke: var(--brand); stroke-width: 2.5; }
 svg .sc-hit.sel .sc-tie { stroke: var(--brand); }
@@ -293,9 +293,7 @@ svg .sc-hitline { fill: none; stroke: transparent; stroke-width: 18; stroke-line
 svg .sc-hitarea { fill: transparent; pointer-events: all; }
 /* A hidden SVG hit group must disable its DESCENDANTS too. `.sc-hitarea` deliberately uses
    `pointer-events: all`, and in SVG that value can receive a pointer even when an ancestor has
-   `visibility:hidden`. That left the invisible BSH badge tappable while its state was OFF. The
-   renderer owns aria-hidden + tabindex from the same state that owns visibility; this selector is
-   the pointer half of that single availability contract. */
+   `visibility:hidden`. Conditional flags therefore suppress the full subtree. */
 svg .sc-hit[aria-hidden="true"], svg .sc-hit[aria-hidden="true"] * { pointer-events: none; }
 svg .sc-hit-bare:hover .sc-val, svg .sc-hit-bare.sel .sc-val { fill: var(--brand-strong); }
 svg .sc-hit:hover :is(.sc-pipe, .sc-rpipe) { stroke: var(--brand); }
@@ -600,6 +598,23 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   background: var(--brand-sky); }
 .vhist-source.mb { color: var(--src-mb); }
 .vhist-source.mb i { background: var(--src-mb); }
+/* Boost history is a state timeline, not a numeric curve. One horizontal lane per source uses the
+   same legend colours as numeric history; the inactive base is light grey, active spans are solid,
+   and missing samples are hatched. Exact intervals and sampled durations are written below it. */
+.vhist-state-legend .vhist-source i { width: 16px; height: 7px; border-radius: 4px; }
+.vhist-state-graph { padding-top: 24px; }
+.vhist-state-plot { height: auto; display: grid; gap: 7px; padding: 4px 0; }
+.vhist-state-track { position: relative; height: 15px; overflow: hidden; border-radius: 999px;
+  background: var(--hatch); box-shadow: inset 0 0 0 1px var(--pipe); }
+.vhist-state-on, .vhist-state-gap { position: absolute; inset-block: 0; min-width: 2px; }
+.vhist-state-on { background: var(--brand-sky); }
+.vhist-state-on.mb { background: var(--src-mb); }
+.vhist-state-gap { background: repeating-linear-gradient(135deg, transparent 0 3px,
+  var(--line) 3px 5px); }
+.vhist-state-runs { display: grid; gap: 3px; margin-top: 8px; color: var(--muted);
+  font-size: 11.5px; }
+.vhist-state-runs strong { color: var(--fg); font-weight: 600; }
+.vhist-state-runs span { font-variant-numeric: tabular-nums; }
 /* The SVG stretches to the panel width; overflow stays visible so the stroke isn't clipped at the
    extremes (the geometry deliberately uses the full viewBox height — see HIST_H in app.js). */
 /* The tooltip gets its OWN strip above the plot: it follows the cursor horizontally (Grafana-style)

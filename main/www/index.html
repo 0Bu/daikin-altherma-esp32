@@ -131,15 +131,16 @@
                   <text class="sc-mode" id="svMode" x="50" y="34">—</text>
                   <text class="sc-status" id="svStatus" x="50" y="56"></text>
                 </g>
-                <!-- System-wide boost marker, separate from both hydronic branches. evcc boost
+                <!-- System-wide boost state, separate from both hydronic branches. evcc boost
                      arrives as Smart Grid mode 2 (Recommended on): that is evidence of the REQUEST,
-                     not evidence that the tank is already being charged. Hidden for every other
-                     mode and for no live HomeHub value, so only an actual boost adds a label. -->
+                     not evidence that the tank is already being charged. The pill always says only
+                     BOOST: petrol means mode 2, light grey means inactive/unknown. Its inspector
+                     keeps the exact manufacturer state in words. -->
                 <g id="gSgRequest" class="sc-sg-request sc-hit" data-insp="sgrequest"
                    role="button" tabindex="0">
                   <rect class="sc-sg-request-box" x="706" y="16" width="60" height="24" rx="12"/>
                   <text class="sc-val" x="736" y="32" text-anchor="middle"
-                        style="font-size:9.5px" id="svSgRequest"></text>
+                        style="font-size:9.5px" data-i18n="schem.sg_boost">BOOST</text>
                 </g>
                 <g transform="translate(0 -48)">
                 <!-- Outdoor unit. The box is drawn first so the parts sitting on it (compressor,
@@ -454,15 +455,15 @@
                   <!-- X10A BSH is the tank's electric immersion heater, not BUH step 1/2 in the
                        hydronic supply. It can run while compressor, circulation pump and flow are
                        all zero, so it gets its own state and animated heater overlay rather than
-                       turning on fCoil (which would falsely claim hydronic flow). The transparent
-                       rect keeps the label comfortably tappable without drawing a badge outline.
-                       Hidden with visibility (not opacity alone) while off so it cannot retain an
-                       invisible pointer or keyboard target. -->
+                       turning on fCoil (which would falsely claim hydronic flow). Its pill always
+                       says only "Heizstab": compact and centred instead of spanning the tank,
+                       orange while active and light grey while off/unknown. The inspector keeps
+                       the exact ON/OFF/unknown state in words. -->
                   <g id="gBshState" class="sc-bsh-state sc-hit" data-insp="bsh" role="button"
-                     tabindex="-1" aria-hidden="true">
-                    <rect class="sc-hitarea" x="518" y="279" width="116" height="24" rx="9"/>
-                    <text class="sc-state" x="576" y="295" text-anchor="middle"
-                          style="font-size:9px" data-i18n="schem.bsh_badge">E-heater active</text>
+                     tabindex="0">
+                    <rect class="sc-bsh-state-box" x="541" y="278" width="70" height="20" rx="10"/>
+                    <text class="sc-state" x="576" y="291" text-anchor="middle"
+                          style="font-size:8px" data-i18n="schem.bsh_label">E-heater</text>
                   </g>
                   <path class="sc-bsh-wave" d="M534 374 q10 -12 20 0 t20 0 t20 0 t20 0"/>
                   <!-- The tank return joins the shared run at y=420. Its PIPE moved up into the

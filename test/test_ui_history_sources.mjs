@@ -7,8 +7,14 @@ import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
 const S = {
   status: { history: {
-    rows: [{ id: "dhw_tank", label: "DHW tank temp. (R5T)" }],
-    modbus_rows: [{ id: "dhw_tank", label: "Domestic Hot Water temperature" }],
+    rows: [
+      { id: "dhw_tank", label: "DHW tank temp. (R5T)" },
+      { id: "smart_grid_mode", label: "Smart Grid operation mode" },
+    ],
+    modbus_rows: [
+      { id: "dhw_tank", label: "Domestic Hot Water temperature" },
+      { id: "smart_grid_mode", label: "Smart Grid operation mode" },
+    ],
   } },
   hist: new Map(), histBusy: new Set(), histPin: new Map(), clickHold: false, scrub: null,
 };
@@ -22,7 +28,8 @@ const context = {
   S, LANG: "de", renderApp() {}, renderCards() {}, renderInspect() {}, renderSettings() {},
   esc: (s) => String(s).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;"),
   tx: (x) => x.de,
-  t: (key, arg) => {
+  t: (key, ...args) => {
+    const [arg, arg2] = args;
     if (key === "hist.since") return `Seit Neustart · ${arg} h`;
     if (key === "hist.ago") return `vor ${arg} h`;
     if (key === "hist.rel") return `vor ${arg} h`;
@@ -30,6 +37,17 @@ const context = {
     if (key === "hist.heldnote") return `${arg} h Stillstand — nicht gemessen`;
     if (key === "hist.aria") return `${arg} — 24-Stunden-Verlauf`;
     if (key === "hist.aria_pinned") return `${arg} — angeheftet`;
+    if (key === "hist.duration_min") return `${arg} min`;
+    if (key === "hist.duration_h") return `${arg} h`;
+    if (key === "hist.duration_hm") return `${arg} h ${arg2} min`;
+    if (key === "hist.boost_total") return `Boost aktiv · ${arg}`;
+    if (key === "hist.boost_run") return `${arg} · ca. ${arg2}`;
+    if (key === "hist.boost_none") return "Kein Boost im aufgezeichneten Zeitraum.";
+    if (key === "hist.boost_ago_range") return `vor ${arg}–${arg2} h`;
+    if (key === "hist.boost_active") return "Boost aktiv";
+    if (key === "hist.boost_inactive") return "Boost aus";
+    if (key === "hist.boost_aria") return `${arg} — Boost-Verlauf. ${arg2}`;
+    if (key.startsWith("sg.mode")) return ["Freier Betrieb", "Zwangsabschaltung", "Empfehlung ein", "Erzwungen ein"][+key.at(-1)];
     return labels[key] || key;
   },
   fetch: async (url) => {
@@ -68,6 +86,26 @@ assert.match(html, /vhist-source mb[^>]*><i><\/i>HomeHub · Modbus/);
 assert.match(html, /vhist-line mb/);
 assert.match(html, /45\.2 – 45\.6 °C/,
   "both sources share one vertical scale, including the Modbus-only maximum");
+
+// Smart-Grid mode is a state timeline, not a misleading numeric 0..3 line. Mode 2 becomes two
+// visible Boost intervals whose sampled duration and source are written in words.
+S.hist.set("smart_grid_mode", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
+  held: [], v: [0, 20, 20, 0, 20, 20, 20, 0] });
+S.hist.set("modbus:smart_grid_mode", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
+  held: [], v: [0, 20, 20, 0, 20, 20, 20, 0] });
+const boostView = h.historyView("smart_grid_mode");
+const boostHtml = h.histHtml("smart_grid_mode", "", "Smart-Grid-Anforderung");
+assert.equal(boostView.series.length, 2);
+assert.match(boostHtml, /vhist-state-track/);
+assert.doesNotMatch(boostHtml, /vhist-line/,
+  "a categorical Smart-Grid mode must not be drawn as a numeric line");
+assert.match(boostHtml, /Boost aktiv · 25 min/,
+  "two mode-2 runs report their combined five-minute-sampled duration");
+assert.equal((boostHtml.match(/vhist-state-on mb/g) || []).length, 2,
+  "the HomeHub track shows exactly the two active Boost intervals");
+assert.match(boostHtml, /HomeHub · Modbus/);
+assert.match(h.scrubText(boostView, 1), /Modbus Boost aktiv · Empfehlung ein/,
+  "scrubbing names the state and manufacturer mode, not the number 2.0");
 
 // Bucket alignment, not array index: Modbus starts one raster later and must leave the first slot
 // empty rather than sliding its first sample under the older X10A point.

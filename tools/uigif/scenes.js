@@ -8,7 +8,7 @@ const DEMO = (() => {
   const R = (label, value, unit, reg) => ({ label, value: value == null ? null : String(value), unit, reg });
   // HomeHub telemetry has its own array and addresses registers by their EKRHH data-model offset.
   // The DHW scene below reports mode 2 (Recommended on), which is what evcc's boost writes; every
-  // other scene reports mode 0 so the badge proves both its appearance and disappearance.
+  // other scene reports mode 0 so the permanent pill proves both its active and inactive colours.
   // The API exposes the raw Modbus constant plus structural enum metadata. The browser alone names
   // mode 2 as Recommended on; keeping the demo in this exact shape catches a regression back to
   // human-readable text on the public wire.
@@ -26,6 +26,7 @@ const DEMO = (() => {
     ["outdoor_air", "R1T-Outdoor air temp."],
     ["flow", "Flow sensor (l/min)"],
     ["room_temp", "Indoor ambient temp. (R1T)"],
+    ["smart_grid_mode", "Smart Grid operation mode"],
   ].map(([id, label]) => ({ id, label }));
   const mbHistRows = [
     ["leaving_water", "Leaving water temperature"],
@@ -34,6 +35,7 @@ const DEMO = (() => {
     ["outdoor_air", "Outdoor air temperature"],
     ["flow", "Flow rate"],
     ["room_temp", "Room temperature"],
+    ["smart_grid_mode", "Smart Grid operation mode"],
   ].map(([id, label]) => ({ id, label }));
   const histBase = {
     leaving_water: [381, 383, 384, 386, 385, 387, 388, 386, 384, 382, 381, 380],
@@ -42,16 +44,18 @@ const DEMO = (() => {
     outdoor_air:   [ 52,  51,  50, null, null,  49,  50,  52,  54,  55,  56,  57],
     flow:          [208, 211, 210, 214, 212, 209, 207, 205, 203, 202, 200, 198],
     room_temp:     [214, 214, 213, 213, 212, 212, 213, 213, 214, 214, 214, 214],
+    // Full Smart-Grid modes in tenths, like the real /history wire: two mode-2 Boost intervals.
+    smart_grid_mode: [0, 0, 20, 20, 20, 0, 0, 20, 20, 0, 0, 0],
   };
   const hist = (id, source) => {
     const x = histBase[id];
     if (!x) return null;
     // Keep both instruments recognisably close but not identical. Modbus continues through the
     // deliberate X10A outdoor-air gap, which makes the dual-source contract visible in an inspector.
-    const v = source === "modbus"
+    const v = id === "smart_grid_mode" ? x : source === "modbus"
       ? x.map((n, i) => n == null ? 53 + i : n + (i % 3 === 0 ? 1 : 0))
       : x;
-    const unit = id === "flow" ? "l/min" : "°C";
+    const unit = id === "smart_grid_mode" ? "" : id === "flow" ? "l/min" : "°C";
     return { id, source, label: id, dt: 300, unit, t0: 1768720920, b0: 5895736,
              v, held: source === "x10a" && id === "outdoor_air" ? [[3, 2]] : [] };
   };
@@ -99,11 +103,11 @@ const DEMO = (() => {
     B("Space heating Operation ON/OFF", o.spaceOn, 0x62),
     B("BUH Step1", false, 0x60),
     B("BUH Step2", false, 0x60),
-    // The DHW tank's immersion heater. Present and OFF on purpose: the COP is BLOCKED while it is
-    // unknown, because no row in the profile can re-pair the boundaries once it heats tank water
-    // downstream of both leaving-water sensors. A demo that omits it shows "COP —" beside a
-    // perfectly good ΔT and kW figure — the gate cannot see that, only a person looking can.
-    B("BSH", false, 0x60),
+    // The DHW tank's immersion heater. Scene 2 switches it on to exercise the permanent orange
+    // pill; the other scenes keep the same row explicitly OFF so the light-grey state is visible.
+    // COP is deliberately blocked while it runs because its separate electrical heat has no power
+    // measurement that can be paired with the PHE boundaries.
+    B("BSH", !!o.bshOn, 0x60),
     B("Defrost Operation", o.defrost, 0x10),
     B("Silent Mode", o.quiet, 0x60),
     R("Current measured by CT sensor of L1", o.ct, "A", 0x63),
@@ -113,7 +117,7 @@ const DEMO = (() => {
 
   // ── The four scenes ─────────────────────────────────────────────────────────────────────────
   // 1) Standby      compressor off, no flow → held X10A outdoor pages; HomeHub outdoor air stands in
-  // 2) DHW          tank charge: valve to DHW, ~55 °C leaving water, COP ≈ 2.7
+  // 2) DHW          tank charge + active BSH: orange state pill; COP deliberately unavailable
   // 3) Heating      space heating at 38 °C leaving water, demand on the branch, COP ≈ 4.8
   // 4) Heating+DHW  both demands active (conv 315 mode 5); the unit is on the tank right now
   //
@@ -139,7 +143,7 @@ const DEMO = (() => {
                 lp: "7.1", eev: "320", inv: "7.9", fan: "6", lwt: "54.8", ret: "49.8", tank: "44.0",
                 tankSet: "50.0", lwSet: "35.0", room: "21.2", roomSet: "21.0", flow: "14.0",
                 wp: "1.8", rp: "36.8", pumpSig: "22", pumpOn: true, valveDhw: true,
-                thermo: false, spaceOn: false, defrost: false, quiet: false, ct: "8.0" }) },
+                thermo: false, spaceOn: false, bshOn: true, defrost: false, quiet: false, ct: "8.0" }) },
 
     { name: "Heating", caption: "Heizen · Heating", mbOut: "5.4",
       v: base({ mode: "Heating", ouMode: "Heating", out: "5.2", rps: "45", disch: "68.1", hp: "26.2",

@@ -736,11 +736,9 @@ const x10aSmartGridRow = () => {
   };
 };
 
-// Closed-drawing and inspector wording for the same four-value enum. Only mode 2 gets the compact
-// boost marker; every other state stays readable in the HomeHub row and in an already-open
-// inspector without adding a permanent status label to the drawing.
+// Inspector wording for the four-value enum. The closed BOOST pill intentionally keeps only its
+// stable name; the exact state is written in the inspector and in the target's accessible name.
 const sgModeText = (mode) => mode == null ? "—" : t(`sg.mode${mode}`);
-const sgRequestText = (mode) => mode === 2 ? t("schem.sg_boost") : "";
 
 // ── WHICH SOURCE ANSWERS A PLANT STATE ─────────────────────────────────────────────────────────
 // One rule, one place. X10A leads while its link is LIVE and carries the row; otherwise a LIVE
