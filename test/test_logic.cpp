@@ -8010,8 +8010,23 @@ static void test_availability() {
     CHECK(availability_policy(r1t) == AvailabilityPolicy::Always);
     CHECK(row_publishable(r1t) && value_available(r1t, true, 0.0));
     const ValueDef tdis{0xA1, 5, 114, 2, 1, "Target Discharge Temp."};
-    CHECK(availability_policy(tdis) == AvailabilityPolicy::Always);
-    CHECK(value_available(tdis, true, 0.0));
+    const ValueDef twin{0xA1, 0, 119, 2, 1, "(Raw data)Water heat exchanger inlet temp."};
+    const ValueDef twout{0xA1, 2, 119, 2, 1, "(Raw data)Water heat exchanger outlet temp."};
+    const ValueDef tport{0xA1, 7, 114, 2, 1, "Target port temperature"};
+    const uint8_t absent_a1[16] = {};
+    const uint8_t short_a1[9] = {};
+    uint8_t populated_a1[16] = {};
+    populated_a1[9] = 0x01;  // Altherma-LT setting bit: page exists, even if this row is exactly 0 °C
+    for (const ValueDef* d : {&twin, &twout, &tdis, &tport}) {
+        CHECK(availability_policy(*d) == AvailabilityPolicy::ZeroPageMeansAbsent);
+        CHECK(row_publishable(*d));
+        CHECK(value_available(*d, true, 0.0)); // no page context: never invent an absence verdict
+        CHECK(value_available(*d, true, 0.0, short_a1, sizeof(short_a1)));
+        CHECK(!value_available(*d, true, 0.0, absent_a1, sizeof(absent_a1)));
+        CHECK(!value_available(*d, true, 35.0, absent_a1, sizeof(absent_a1)));
+        CHECK(value_available(*d, true, 0.0, populated_a1, sizeof(populated_a1)));
+        CHECK(value_available(*d, true, 35.0, populated_a1, sizeof(populated_a1)));
+    }
 
     // The generated detect-only flag composes with the ledger rather than competing with it: both
     // reach the same predicate, so hp_poll and mqtt_ha's discovery cannot see different row sets.
@@ -8021,7 +8036,7 @@ static void test_availability() {
 
     // ── Against the real catalog ──────────────────────────────────────────────────────────────────
     int profiles_total = 0, evap_rows = 0, cond_rows = 0, suppressed = 0, odd_label = 0;
-    int eev_rows = 0, conv151_rows = 0;
+    int eev_rows = 0, conv151_rows = 0, zero_page_rows = 0;
     for (const auto& p : def::profiles) {
         profiles_total++;
         const auto view = def::resolved(p);
@@ -8068,6 +8083,15 @@ static void test_availability() {
                       (d.reg == 0xA0 && d.offset == 8));
                 CHECK(row_publishable(d));   // the valve is real — only the bad integer is withheld
             }
+            if (pol == AvailabilityPolicy::ZeroPageMeansAbsent) {
+                zero_page_rows++;
+                CHECK(d.reg == 0xA1);
+                CHECK((d.offset == 0 && d.conv == 119) ||
+                      (d.offset == 2 && d.conv == 119) ||
+                      (d.offset == 5 && d.conv == 114) ||
+                      (d.offset == 7 && d.conv == 114));
+                CHECK(row_publishable(d));   // entity stays; only the absent-page reply is withheld
+            }
             // NO CORE HYDRONIC ROW MAY BE TOUCHED. The audit in #209 is explicit that the hydronic
             // decode is excellent and must not be collaterally damaged: leaving/return water, tank,
             // flow, pressure and the setpoints all live on 0x60-0x62, and not one of them may fall
@@ -8096,6 +8120,8 @@ static void test_availability() {
     // re-reading before the ceiling is allowed to follow it there.
     CHECK(conv151_rows == 113);
     CHECK(eev_rows == conv151_rows);
+    // 21 profiles carry the two raw Water-HX rows; 19 of those also carry both target rows.
+    CHECK(zero_page_rows == 80);
 }
 
 // ── Numeric fault state beside the textual code (logic/fault_state.hpp) — #209 defect 4 ──────────
