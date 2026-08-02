@@ -16,7 +16,7 @@ Builds for the **esp32s3** target only.
 > (framing, checksum, register pages, detection) is in
 > [`docs/X10A_PROTOCOL.md`](../docs/X10A_PROTOCOL.md), and the converter-id/enum tables plus a full
 > register map in [`docs/REGISTERS.md`](../docs/REGISTERS.md). The OPTIONAL second SOURCE — the
-> READ-ONLY Modbus TCP link to a Daikin HomeHub (EKRHH), its mDNS discovery and its register map — is
+> READ-ONLY Modbus TCP link to a Daikin HomeHub (EKRHH), its explicit mDNS discovery action and its register map — is
 > [`docs/MODBUS_PROTOCOL.md`](../docs/MODBUS_PROTOCOL.md). It is a SECOND SOURCE, not an alternative
 > transport: both stacks run at once, independently, and a device without a HomeHub runs no Modbus
 > task at all. A cross-cutting catalog of the
@@ -501,23 +501,23 @@ hp_modbus.cpp   THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT source of rea
                 the pin or the framing; Modbus at the LAN, mDNS or the hub), so coupling them lets
                 either failure mask the other. Pull the service cable and the HomeHub keeps reporting;
                 lose the LAN and X10A keeps polling.
-                Gated on the persistent HomeHub MODE: Auto (the default) runs one bounded mDNS search
-                per boot, Manual dials mb_host, and only explicit Off suppresses both. The runtime gate
-                is literal: after Auto misses, or whenever Off is selected, there is no
-                task, socket, mDNS traffic or stack — which is what let hp_poll give back
-                the 4 KB an earlier revision took from it (the getaddrinfo/mDNS/socket call chain now
+                Gated on one persistent address: non-empty mb_host dials exactly that target; empty
+                disables the stack completely. The runtime gate is literal: while the address is
+                empty there is no task, socket, mDNS traffic or stack — which is what let hp_poll give
+                back the 4 KB an earlier revision took from it (the getaddrinfo/socket call chain now
                 lives on the task that makes those calls; syslog.cpp measured that same chain at 6144,
-                which is this task's size). Disabling it live retires the task: it checks the flag at
-                the top of its cycle and deletes itself, so the socket keeps exactly one owner.
+                which is this task's size). Disabling it live retires the task: it checks the address
+                at the top of its cycle and deletes itself, so the socket keeps exactly one owner.
                 A lwIP socket around the pure logic/modbus.hpp framing: MBAP send/recv, request-BOUND
                 parse (txn/unit/qty), a whole-reply deadline (a per-call SO_RCVTIMEO does not bound a
                 peer trickling one byte per timeout, and this task is watchdog-subscribed) and a socket
-                DROPPED on any framing/desync error so the next cycle reconnects. mDNS auto-discovery
-                in Auto mode: browse _http._tcp (what the hub advertises, EKRHH §2.5), filter
-                is_homehub_hostname — MANDATORY, since this firmware answers that same browse — then
-                connect :502. A failed connect BACKS OFF through the X10A sweep's own host-tested
-                logic/detect_backoff.hpp: a browse with no hub on the LAN blocks ~3 s, so a 1 Hz retry
-                would leave the task permanently blocked and the LAN permanently browsed.
+                DROPPED on any framing/desync error so the next cycle reconnects. mDNS discovery is
+                ONLY the explicit POST /discover_homehub dialog action: browse _http._tcp (what the
+                hub advertises, EKRHH §2.5), filter is_homehub_hostname — MANDATORY, since this
+                firmware answers that same browse — and return the resolved IPv4 without saving it.
+                The user may edit it and Save or Cancel. A failed connection to a saved target BACKS
+                OFF through the X10A sweep's own host-tested logic/detect_backoff.hpp; the poll task
+                never browses mDNS or silently changes the configured address.
                 READ-ONLY BY DESIGN and that is the whole stance of #32: no write function, no MQTT
                 command topic, no writable HA entity, no HTTP route that can set a pump register
                 (grep-verifiable). The wire WOULD allow a write (unlike X10A, which has no write
@@ -1668,7 +1668,7 @@ www/            web UI sources (index.html + style.css + app.sources fragments -
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + one-shot rollback state, MQTT (`uri`/`user`/`pass`), syslog, `ntp_server`, from blob **v2** board-local hardware, from **v3** the OTA channel, from **v4** the UI-language override, from **v5** the HomeHub host/port/unit/safety fields and from **v6** its explicit `homehub_enabled` intent (enabled+empty host = Auto, enabled+host = Manual, disabled = Off). The five HomeHub fields have one writer (`POST /set_hp`, httpd); `mb_dhost`/`mb_searched` are runtime-only and reset every boot or explicit Auto selection. Old experimental `mb_dhost`/`mb_seen` keys are deleted on load and never consulted. Blobs v1–v5 remain readable without losing credentials; v5 migrates enabled because only v6 can prove an intentional Off choice. One CRC-checked entry is written all-or-nothing. The X10A link cache `rx_pin`/`tx_pin`/`proto` remains separate and self-healing (detection + httpd writers), as does `board_set`, the user's licence for the UI to name matching board hardware without persisting a board identity. Legacy per-key credential entries remain read-only fallback for pre-blob upgrades, and `boot_fails` is the boot-loop crash counter. |
+| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + one-shot rollback state, MQTT (`uri`/`user`/`pass`), syslog, `ntp_server`, from blob **v2** board-local hardware, from **v3** the OTA channel, from **v4** the UI-language override, from **v5** the HomeHub host/port/unit/safety fields, **v6** its now-legacy enable compatibility bit, **v7** one MQTT reference-temperature name/topic/value-path mapping, and **v8** its timestamp path plus maximum age. Current firmware ignores the legacy HomeHub enable bit and derives the only intent from `mb_host`: non-empty polls that target, empty is disabled. The four HomeHub fields have one writer (`POST /set_hp`, httpd); the five reference-source fields have one writer (`POST /set_ref_temp`, httpd). Old experimental `mb_dhost`/`mb_seen` keys are deleted on load and never consulted. Blobs v1–v8 remain readable without losing credentials; a v6+ blob saved as HomeHub-enabled with an empty host becomes safely disabled instead of resuming hidden discovery, while v7 reference mappings gain an empty timestamp path and the 600 s default age. One CRC-checked entry is written all-or-nothing. The X10A link cache `rx_pin`/`tx_pin`/`proto` remains separate and self-healing (detection + httpd writers), as does `board_set`, the user's licence for the UI to name matching board hardware without persisting a board identity. Legacy per-key credential entries remain read-only fallback for pre-blob upgrades, and `boot_fails` is the boot-loop crash counter. |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -1745,6 +1745,11 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   stored, never their value; read from the CONFIG not the client — creds outlive a
                   disabled broker, which is exactly the state the UI must offer to clear via
                   /set_mqtt's clear_creds),
+                  reference_temperature{configured,name,topic,temperature_path,timestamp_path,
+                  max_age_s,subscribed,has_value,temperature_c,received_at,received_ago_s,source_at,
+                  timestamp_source,age_s,fresh,freshness_reason,retained,messages,errors[,error]} —
+                  the observation-only MQTT room/reference input and its explicit freshness verdict;
+                  it feeds no history, averaging or heat-pump control yet,
                   syslog{configured,resolved,reachable,host,port,error},
                   ota{channel} — "release"|"dev", the FEED the next OTA check reads (POST /set_ota).
                   On /status and not only /ota/status because the Settings Firmware card renders its
@@ -1765,14 +1770,13 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   hp{proto,rx,tx,connected,
                   last_ok_s,registers,values,crc_err,timeout_err}, profile{id},
                   plus
-                  modbus{mode,enabled,connected,discovering,searched,host,port,unit_id,rx,fails,
+                  modbus{enabled,connected,discovering,host,port,unit_id,rx,fails,
                   values,actuation_enabled[,error,error_code,error_detail,error_register]}
-                  — the HomeHub link's READ-ONLY diagnostics. `host` is the RESOLVED / mDNS-discovered
-                  host, not the requested one: with mb_host empty the device discovers the hub itself,
-                  and the card must show what it FOUND rather than the empty string it was asked with
-                  (redacted like the other reporter-identifying values). `discovering` = a browse is
-                  running with nothing resolved yet. There are no write counters — the link has none,
-                  and actuation_enabled is reported straight from config (it gates nothing today),
+                  — the HomeHub link's READ-ONLY diagnostics. `host` is the configured persistent
+                  target (redacted like the other reporter-identifying values); empty means disabled.
+                  Explicit discovery is request-local and therefore not a status mode; `discovering`
+                  remains false for wire compatibility. There are no write counters — the link has
+                  none, and actuation_enabled is reported straight from config (it gates nothing today),
                   sys{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode} — heap
                   headroom (free / since-boot low-water / largest-contiguous) + why the device last
                   booted, ALWAYS present (unlike last_crash, and unlike the MQTT heartbeat needs no
@@ -1902,10 +1906,10 @@ GET  /diag[?verbose=0|1][?clear=1][?redact=1]   in-memory diag log. ?redact=1 sc
                   to CHUNKED: a replacement is longer than most values it replaces, so the redacted
                   text can GROW past the static dump buffer, and the alternatives are a second ~8 KB
                   .bss buffer or a ~6 KB contiguous heap allocation
-GET  /status?redact=1   the bug-report form of /status: the eight reporter-identifying values
-                  (wifi.ssid/ip/bssid/mac, mqtt.broker, syslog.host, ntp.server, modbus.host — the
-                  last a LAN address and, on an auto-discovered HomeHub, its serial-derived
-                  hostname homehub-524288-<serial>) read "<redacted>".
+GET  /status?redact=1   the bug-report form of /status: the ten reporter-identifying values
+                  (wifi.ssid/ip/bssid/mac, mqtt.broker, reference_temperature.name/topic,
+                  syslog.host, ntp.server, modbus.host — the last is the saved HomeHub LAN address
+                  or `.local` hostname) read "<redacted>".
                   The KEY is always emitted — an omitted field is indistinguishable from an older
                   build that never had it, and "which build produced this?" is the first question a
                   frozen report must answer. Substituted where each value is WRITTEN, never as a
@@ -1980,16 +1984,20 @@ POST /set_ntp     {server} -> persist + reboot. No request-path network probe (t
                   CONFIG_DAIKIN_NTP_SERVER compile-time default" (SNTP has no disabled state, unlike
                   syslog_host's empty-means-off). Unchanged settings short-circuit to
                   {ok:true,reboot:false}, same as /set_mqtt.
-POST /set_hp      {profile,rx,tx,mb_mode,mb_host,mb_port,mb_unit_id,actuation_enabled}
+POST /set_ref_temp   {name,topic,temperature_path,timestamp_path,max_age_s} -> validate, persist and
+                  apply live on the existing MQTT client without reboot. Empty topic is the explicit
+                  disabled state; otherwise the topic is exact (no wildcards), paths are bounded
+                  dot-separated JSON selectors, and max_age_s is an integer in 10..3600. An unchanged
+                  mapping still reconfigures the subscription so the Settings action can retry it.
+POST /set_hp      {profile,rx,tx,mb_host,mb_port,mb_unit_id,actuation_enabled}
                   -> validate + apply live (no reboot). Every key is OPTIONAL and an omitted one keeps
                   its stored value, which is what lets the pin picker POST {profile,rx,tx} without
                   flipping anyone onto Modbus — and lets the HomeHub modal POST only its three fields.
-                  `mb_mode` is the persistent HomeHub intent: auto performs/re-arms one bounded search,
-                  manual requires `mb_host`, and off suppresses both searches and sockets. The legacy
-                  host-only API maps non-empty to Manual and empty to Off. This SECOND stack never
-                  stops X10A. mb_port 1..65535 and mb_unit_id 1..247 are range-checked by validate().
-                  All five HomeHub fields (enable intent, host, port, unit and safety flag) persist in
-                  atomic blob v6 and apply live: the httpd route calls mb_reconfigure(), while the
+                  `mb_host` is the complete HomeHub intent: non-empty polls exactly that address;
+                  empty suppresses tasks, searches and sockets. This SECOND stack never stops X10A.
+                  mb_port 1..65535 and mb_unit_id 1..247 are range-checked by validate(). The four
+                  HomeHub fields (host, port, unit and safety flag) persist in atomic blob v8 and
+                  apply live: the httpd route calls mb_reconfigure(), while the
                   Modbus task remains the sole socket owner and retires/restarts itself as needed.
                   `actuation_enabled` is stored and gates NOTHING (there is no write path). rx/tx
                   PERSIST (the physical
@@ -2000,6 +2008,10 @@ POST /set_hp      {profile,rx,tx,mb_mode,mb_host,mb_port,mb_unit_id,actuation_en
                   here — the UI language is its own setting now (POST /set_lang), no longer a /set_hp
                   field. RX/TX are auto-detected; when the bus is silent the Protocol card's pin dropdown
                   posts {profile:"auto",rx,tx} to re-run detection.
+POST /discover_homehub   {} -> run the bounded, explicit `_http._tcp` mDNS browse and return
+                  {ok:true,host:"<resolved IPv4>"}. Trusted-LAN only, no configuration write and no
+                  Modbus-task reconfigure: the dialog fills its ordinary address field, and only its
+                  later Save persists the result. A miss returns 404 so manual entry remains available.
 POST /set_board   {led_gpio,led_type,led_inverted,btn_gpio,btn_active_low} -> validate + persist +
                   REBOOT. The board's own onboard parts: which pin the status indicator is on, whether
                   it is a plain LED (led_type 0) or a WS2812 (1), and which pin (if any) carries the
