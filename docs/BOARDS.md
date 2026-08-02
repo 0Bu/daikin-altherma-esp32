@@ -4,6 +4,10 @@ Which ESP32-S3 boards this firmware runs on, what hardware each one brings, and 
 parts the firmware actually uses**. Wiring the X10A service port itself is
 [WIRING.md](WIRING.md); this page is about the board.
 
+The supported boards are the **M5Stack AtomS3 Lite** and **Seeed XIAO ESP32-S3**. Boards with an
+integrated display, including the M5Stack AtomS3 and M5StickS3, are intentionally unsupported: the
+firmware contains no display driver, display role, or remote-display MQTT path.
+
 > **One image, several boards.** CI publishes a single `esp32s3` artifact
 > ([`ci-build-all.sh`](../scripts/ci-build-all.sh)), so nothing board-specific may be a compile-time
 > choice — it would fork the binary, its OTA manifest and the web installer per board. Everything
@@ -21,8 +25,9 @@ parts the firmware actually uses**. Wiring the X10A service port itself is
 | **USB-Serial/JTAG** *(strongly preferred)* | `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG` — the serial console and the browser (Web Serial) installer. A board with only an external USB-UART bridge needs the console reconfigured. |
 
 **Not required:** PSRAM (`CONFIG_SPIRAM` is off — the heap discipline in
-[ARCHITECTURE.md](ARCHITECTURE.md) assumes internal RAM only), Bluetooth, Ethernet, a display, or an
-SD slot. None of them are used.
+[ARCHITECTURE.md](ARCHITECTURE.md) assumes internal RAM only), Bluetooth, Ethernet, or an SD slot.
+None of them are used. A display is outside the supported hardware scope rather than an unused
+optional peripheral.
 
 ---
 
