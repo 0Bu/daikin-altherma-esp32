@@ -133,6 +133,7 @@ function closeNtp() { $("ntpModal").hidden = true; }
 // The address is the entire persistent contract: non-empty polls it; empty disables HomeHub. mDNS
 // discovery is an explicit button action that fills this same field without saving behind the
 // dialog's Cancel/Save boundary.
+let homehubSearchGeneration = 0;
 function fillHomehub() {
   const mb = S.status?.modbus || {};
   $("hhHost").value = mb.host || "";
@@ -140,15 +141,24 @@ function fillHomehub() {
   $("hhUnit").value = mb.unit_id || 1;
 }
 function openHomehub() {
+  ++homehubSearchGeneration;  // invalidate a response from an earlier, already-closed dialog
   fillHomehub();
   for (const id of ["hhHost", "hhPort", "hhUnit"]) $(id).classList.remove("invalid");
   $("hhError").hidden = true;
+  $("hhSearch").disabled = false;
+  $("hhSearch").textContent = t("hh.search");
   $("homehubModal").hidden = false;
   $("hhHost").focus();
 }
-function closeHomehub() { $("homehubModal").hidden = true; }
+function closeHomehub() {
+  ++homehubSearchGeneration;
+  $("homehubModal").hidden = true;
+  $("hhSearch").disabled = false;
+  $("hhSearch").textContent = t("hh.search");
+}
 
 async function searchHomehub() {
+  const generation = ++homehubSearchGeneration;
   const button = $("hhSearch"), error = $("hhError"), host = $("hhHost");
   host.classList.remove("invalid");
   error.hidden = true;
@@ -157,6 +167,10 @@ async function searchHomehub() {
   try {
     const response = await post("/discover_homehub", {});
     const body = await response.json().catch(() => ({}));
+    // The request itself is bounded but cannot be cancelled once ESP-IDF is browsing mDNS. If this
+    // dialog was closed/reopened meanwhile, the old result belongs to the abandoned form and must
+    // not overwrite the freshly loaded saved address or the state of a newer search.
+    if (generation !== homehubSearchGeneration || $("homehubModal").hidden) return false;
     if (!response.ok || !body.host) {
       const message = response.status === 404 ? t("hh.not_found")
                     : body.error || t("toast.rejected");
@@ -171,14 +185,17 @@ async function searchHomehub() {
     host.focus();
     return true;
   } catch {
+    if (generation !== homehubSearchGeneration || $("homehubModal").hidden) return false;
     const message = t("toast.unreachable");
     error.textContent = message;
     error.hidden = false;
     toast(message, "err");
     return false;
   } finally {
-    button.disabled = false;
-    button.textContent = t("hh.search");
+    if (generation === homehubSearchGeneration) {
+      button.disabled = false;
+      button.textContent = t("hh.search");
+    }
   }
 }
 

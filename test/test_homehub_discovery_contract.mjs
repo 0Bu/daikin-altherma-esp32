@@ -3,6 +3,7 @@
 // boot/poll never browse mDNS, and only the explicit HTTP action may run the bounded search.
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import vm from "node:vm";
 
 const modbus = fs.readFileSync(new URL("../main/hp_modbus.cpp", import.meta.url), "utf8");
 const http = fs.readFileSync(new URL("../main/http_config.cpp", import.meta.url), "utf8");
@@ -33,5 +34,40 @@ assert.doesNotMatch(handler, /config_save|mb_reconfigure/,
 assert.match(http, /"\/discover_homehub", HTTP_POST, discover_homehub_now/,
   "the explicit discovery endpoint must be registered on the config surface");
 assert.match(html, /id="hhSearch"/, "the HomeHub dialog must expose the only discovery trigger");
+
+// Execute the production dialog functions across the cancellation race. The mDNS request keeps
+// running on the device after the browser closes the modal; its late response must not cross the
+// Cancel boundary and overwrite the saved address loaded by a newly opened dialog.
+const settings = fs.readFileSync(new URL("../main/www/js/settings.js", import.meta.url), "utf8");
+const element = (value = "") => ({
+  value, hidden: false, disabled: false, innerHTML: "", textContent: "",
+  classList: { add() {}, remove() {} }, focus() {},
+});
+const elements = {
+  hhHost: element(), hhPort: element(), hhUnit: element(), hhError: element(),
+  hhSearch: element(), homehubModal: element(),
+};
+let finishSearch;
+const pendingSearch = new Promise((resolve) => { finishSearch = resolve; });
+const context = vm.createContext({
+  S: { status: { modbus: { host: "saved-homehub.local", port: 502, unit_id: 1 } } },
+  $: (id) => elements[id], esc: String, t: (key) => key, toast() {},
+  post: async () => pendingSearch,
+});
+vm.runInContext(`${settings}\nthis.__homehub = { openHomehub, closeHomehub, searchHomehub };`, context,
+  { filename: "main/www/js/settings.js" });
+
+context.__homehub.openHomehub();
+const abandonedSearch = context.__homehub.searchHomehub();
+assert.equal(elements.hhSearch.disabled, true, "the active search must disable its trigger");
+context.__homehub.closeHomehub();
+context.__homehub.openHomehub();
+assert.equal(elements.hhHost.value, "saved-homehub.local", "reopen reloads the persisted address");
+finishSearch({ ok: true, status: 200, json: async () => ({ host: "203.0.113.137" }) });
+assert.equal(await abandonedSearch, false, "the abandoned request must be ignored");
+assert.equal(elements.hhHost.value, "saved-homehub.local",
+  "a late discovery response must not overwrite the newly opened form");
+assert.equal(elements.hhSearch.disabled, false,
+  "an old request must not change the trigger state of the new dialog session");
 
 console.log("HomeHub discovery lifecycle: explicit UI action only; empty host is boot/poll-off");
