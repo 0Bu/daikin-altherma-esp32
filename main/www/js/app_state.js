@@ -74,7 +74,7 @@ const VIEW = { dashboard: "viewDash", settings: "viewSettings" };
 const PARENT = { settings: "dashboard" };
 const TITLE = { settings: () => t("nav.settings") };
 // Every overlay that owns the Esc key; the navigation Esc stands down while one of them is open.
-const MODALS = ["wifiModal", "mqttModal", "syslogModal", "ntpModal", "homehubModal", "boardModal", "bugModal"];
+const MODALS = ["wifiModal", "mqttModal", "refTempModal", "syslogModal", "ntpModal", "homehubModal", "boardModal", "bugModal"];
 
 function go(stage) {
   S.stage = stage;
@@ -535,7 +535,7 @@ async function collectBugReport() {
     `firmware: ${s.version || "?"} (${s.platform || "?"})`,
     `app_elf_sha256: ${s.app_elf_sha256 || "?"}`,
     `generated: ${s.ntp?.time || "unknown — the device clock has not synced this boot"}`,
-    "redacted: wifi.ssid, wifi.ip, wifi.bssid, wifi.mac, mqtt.broker, syslog.host, ntp.server",
+    "redacted: wifi.ssid, wifi.ip, wifi.bssid, wifi.mac, mqtt.broker, reference_temperature.name, reference_temperature.topic, syslog.host, ntp.server",
     "",
     "",
   ].join("\n");

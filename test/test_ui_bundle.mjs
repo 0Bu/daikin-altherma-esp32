@@ -33,4 +33,24 @@ assert.match(html, /<select class="input" id="hhMode">[\s\S]*value="auto"[\s\S]*
 assert.match(app, /applyLive\(\{ mb_mode: mode, mb_host:/,
   "the HomeHub save must carry the selected mode to the firmware");
 
+// Dynamic LWT owns one permanent Settings card from the first capture slice onward. Only its room
+// source is editable today; forecast, strategy and output have explicit non-active/read-only homes.
+assert.match(app, /function dynamicControlCardHtml\(\)[\s\S]*t\("dyn\.mode"\)[\s\S]*t\("dyn\.room_sources"\)[\s\S]*t\("dyn\.weather"\)[\s\S]*t\("dyn\.strategy"\)[\s\S]*t\("dyn\.safety"\)/,
+  "the dynamic-LWT Settings card must keep all planned configuration domains together");
+assert.match(app, /t\("dyn\.observe"\)[\s\S]*t\("dyn\.read_only"\)/,
+  "the first slice must identify itself as observation-only and read-only");
+
+// The room-source row remains a user-configured exact MQTT mapping: the test Shelly source prefills
+// the modal, while the save sends separate topic/path fields to the firmware.
+assert.match(html, /id="refTempModal"[\s\S]*id="rtTopic"[\s\S]*id="rtPath"[\s\S]*id="rtTimePath"[\s\S]*id="rtMaxAge"/,
+  "the room-temperature source modal must expose value, timestamp, and freshness mapping");
+assert.match(app, /shelly1pmminig4-fixture00003\/status\/switch:0/,
+  "the requested Shelly topic must be available as the first-open test preset");
+assert.match(app, /post\("\/set_ref_temp", \{[\s\S]*temperature_path: temperaturePath, timestamp_path: timestampPath,[\s\S]*max_age_s:/,
+  "the reference-temperature save must persist timestamp and maximum-age policy");
+assert.match(app, /r\.retained[\s\S]*ref\.retained/,
+  "the captured-value UI must identify retained MQTT messages");
+assert.match(app, /r\.freshness_reason === "retained_without_timestamp"[\s\S]*ref\.time_untrusted/,
+  "retained values without source time must be shown as untrusted, never fresh");
+
 console.log(`ui bundle: ${files.length} sources, ${Buffer.byteLength(app)} bytes — valid classic script`);

@@ -481,6 +481,11 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vrow-val.checkup-val {
   min-width: 0; white-space: normal; overflow-wrap: anywhere; text-align: right; line-height: 1.35;
 }
+/* A Settings summary may combine a source name, reading and freshness. Keep ordinary scalar rows
+   compact, but let these summaries and conditional errors wrap instead of widening the card. */
+.vrow-val.settings-wrap {
+  min-width: 0; white-space: normal; overflow-wrap: anywhere; text-align: right; line-height: 1.35;
+}
 .vrow-unit { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 3px; }
 /* A native select sitting at the right of a value row: the RX/TX pin pickers (Protokoll card, shown
    until auto-detection locks the pins), the update-channel picker and the language picker (Firmware
@@ -762,6 +767,11 @@ textarea.input[readonly] { font-size: 12px; color: var(--muted); white-space: pr
    `flex: none` because `flex: 1` in a column divides HEIGHT, which would stretch three buttons to
    fill whatever space is left. */
 @media (max-width: 480px) {
+  /* A configured source carries name/count, temperature and freshness. Give that one summary a
+     second line on phones instead of shrinking its value cell until every character wraps. */
+  .dynamic-source-row { flex-wrap: wrap; gap: 4px; }
+  .dynamic-source-row .vrow-label,
+  .dynamic-source-row .vrow-val { flex: 1 1 100%; text-align: left; }
   .modal-actions { flex-direction: column-reverse; }
   .modal-actions .btn { flex: none; width: 100%; }
 }

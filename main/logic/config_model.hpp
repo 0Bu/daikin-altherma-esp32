@@ -9,6 +9,7 @@
 #include "led_pattern.hpp"  // LedType — the indicator back-end, now a runtime choice not a Kconfig one
 #include "ota_channel.hpp"  // OtaChannel — which published feed this device follows
 #include "modbus.hpp"       // MODBUS_TCP_PORT / MODBUS_DEFAULT_UNIT — the mb_* field defaults
+#include "reference_temperature.hpp"
 #include "ui_lang.hpp"      // UiLang — the web UI's manual language override (else browser-detected)
 
 namespace daik {
@@ -23,6 +24,15 @@ struct Config {
     std::string mqtt_uri;          // "" = MQTT disabled
     std::string mqtt_user;
     std::string mqtt_pass;
+    // One exact MQTT source for the room/reference temperature. An empty topic disables capture;
+    // dot-separated paths select the numeric temperature and, optionally, its source timestamp.
+    // Without a timestamp path only a live non-retained MQTT arrival may be fresh; retained values
+    // require source time so a reconnect cannot reset their age (logic/reference_temperature.hpp).
+    std::string ref_temp_name;
+    std::string ref_temp_topic;
+    std::string ref_temp_path;
+    std::string ref_temp_time_path;
+    uint32_t    ref_temp_max_age_s = REF_TEMP_MAX_AGE_DEFAULT_S;
     std::string syslog_host;       // "" = Syslog disabled
     int         syslog_port = 514;
     // SNTP server (main/sntp_time.cpp). Unlike syslog_host, "" is not "off" — SNTP has no disabled

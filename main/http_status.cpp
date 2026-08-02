@@ -25,6 +25,7 @@
 #include "logic/detect.hpp"
 #include "logic/json.hpp"
 #include "logic/query_flag.hpp"
+#include "logic/reference_temperature.hpp"
 #include "logic/redact.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/timestamp.hpp"
@@ -69,7 +70,7 @@ namespace daik {
 // radio range, and a control char in one used to emit unparseable JSON.
 static std::string jstr(const std::string& s) { return json_quote(s); }
 
-// The same, for the eight values `GET /status?redact=1` withholds (logic/redact.hpp). Applied where
+// The same, for the reporter-identifying values `GET /status?redact=1` withholds. Applied where
 // the value is WRITTEN, never as a pass over the finished JSON: this builder runs on the httpd task
 // whose stack overflow killed v1.0.12, so a second full-size buffer is exactly what the budget has
 // no room for. The KEY is always emitted — an omitted field is indistinguishable from an older
@@ -134,6 +135,7 @@ void http_append_status_json(std::string& j, bool redact) {
     const Config& c = config();
     HpStats     hp  = hp_stats();
     MqttStatus  m   = mqtt_status();
+    ReferenceTemperatureStatus rt = reference_temperature_status();
     WifiInfo    wi  = wifi_info();
     j += "{";
     j += "\"version\":" + jstr(esp_app_get_description()->version) + ",";
@@ -232,6 +234,45 @@ void http_append_status_json(std::string& j, bool redact) {
          ",\"tls\":" + (m.tls ? "true" : "false") +
          ",\"has_creds\":" + ((!c.mqtt_user.empty() || !c.mqtt_pass.empty()) ? "true" : "false") +
          ",\"broker\":" + jstr_r(m.broker, redact) + (m.error.empty() ? "" : ",\"error\":" + jstr(m.error)) + "},";
+    // One exact MQTT-backed reference-temperature source. Freshness is an input-quality verdict,
+    // not a control decision: payload source time wins; otherwise only a non-retained live arrival
+    // may age on the monotonic clock. The captured value remains visible when stale.
+    const uint64_t now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
+    const uint64_t ref_age_s = rt.has_value && now_ms >= rt.received_ms
+                             ? (now_ms - rt.received_ms) / 1000 : 0;
+    int64_t now_unix_s = -1;
+    int32_t now_sub_ms = 0;
+    time_now(now_unix_s, now_sub_ms);
+    ReferenceFreshness freshness = reference_freshness(rt.has_value, rt.retained,
+        rt.has_source_time, rt.source_unix_s, rt.received_ms, now_unix_s, now_ms,
+        c.ref_temp_max_age_s);
+    if (!rt.error.empty()) { freshness.fresh = false; freshness.reason = "invalid"; }
+    char ref_value[32] = {0};
+    if (rt.has_value) std::snprintf(ref_value, sizeof(ref_value), "%.6g", rt.temperature_c);
+    j += "\"reference_temperature\":{\"configured\":";
+    j += c.ref_temp_topic.empty() ? "false" : "true";
+    j += ",\"name\":";          j += jstr_r(c.ref_temp_name, redact);
+    j += ",\"topic\":";         j += jstr_r(c.ref_temp_topic, redact);
+    j += ",\"temperature_path\":"; j += jstr(c.ref_temp_path);
+    j += ",\"timestamp_path\":"; j += jstr(c.ref_temp_time_path);
+    j += ",\"max_age_s\":";     j += std::to_string(c.ref_temp_max_age_s);
+    j += ",\"subscribed\":";    j += rt.subscribed ? "true" : "false";
+    j += ",\"has_value\":";     j += rt.has_value ? "true" : "false";
+    j += ",\"temperature_c\":"; j += rt.has_value ? ref_value : "null";
+    j += ",\"received_at\":";
+    j += rt.has_value && rt.received_unix_s >= 0 ? jstr(rfc3339_utc(rt.received_unix_s)) : "null";
+    j += ",\"received_ago_s\":"; j += rt.has_value ? std::to_string(ref_age_s) : "null";
+    j += ",\"source_at\":";
+    j += rt.has_value && rt.has_source_time ? jstr(rfc3339_utc(rt.source_unix_s)) : "null";
+    j += ",\"timestamp_source\":"; j += rt.has_value ? jstr(rt.timestamp_source) : "null";
+    j += ",\"age_s\":";         j += freshness.age_known ? std::to_string(freshness.age_s) : "null";
+    j += ",\"fresh\":";         j += freshness.fresh ? "true" : "false";
+    j += ",\"freshness_reason\":"; j += jstr(freshness.reason);
+    j += ",\"retained\":";      j += rt.has_value && rt.retained ? "true" : "false";
+    j += ",\"messages\":";      j += std::to_string(rt.messages);
+    j += ",\"errors\":";        j += std::to_string(rt.errors);
+    if (!rt.error.empty()) { j += ",\"error\":"; j += jstr(rt.error); }
+    j += "},";
     SyslogStatus sy = syslog_status();
     j += "\"syslog\":{\"configured\":" + std::string(sy.configured ? "true" : "false") +
          ",\"resolved\":" + (sy.resolved ? "true" : "false") +

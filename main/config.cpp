@@ -104,6 +104,11 @@ void config_load() {
         c.wifi_ssid_backup = b.wifi_ssid_backup;       c.wifi_pass_backup = b.wifi_pass_backup;
         c.wifi_rollback_active = b.wifi_rollback_active; c.wifi_rolled_back = b.wifi_rolled_back;
         c.mqtt_uri = b.mqtt_uri;   c.mqtt_user = b.mqtt_user;   c.mqtt_pass = b.mqtt_pass;
+        if (b.has_ref_temp) {
+            c.ref_temp_name = b.ref_temp_name; c.ref_temp_topic = b.ref_temp_topic;
+            c.ref_temp_path = b.ref_temp_path; c.ref_temp_time_path = b.ref_temp_time_path;
+            c.ref_temp_max_age_s = b.ref_temp_max_age_s;
+        }
         c.syslog_host = b.syslog_host; c.syslog_port = b.syslog_port; c.ntp_server = b.ntp_server;
         // has_board is false for a blob written before the board block existed (v1). Those fields
         // were compile-time then, so "absent" must read as the Kconfig default, NOT as disabled —
@@ -264,6 +269,9 @@ bool config_save(const Config& c, bool require_link, bool reset_modbus_runtime) 
     b.wifi_ssid_backup = c.wifi_ssid_backup;   b.wifi_pass_backup = c.wifi_pass_backup;
     b.wifi_rollback_active = c.wifi_rollback_active; b.wifi_rolled_back = c.wifi_rolled_back;
     b.mqtt_uri = c.mqtt_uri;   b.mqtt_user = c.mqtt_user;   b.mqtt_pass = c.mqtt_pass;
+    b.ref_temp_name = c.ref_temp_name; b.ref_temp_topic = c.ref_temp_topic;
+    b.ref_temp_path = c.ref_temp_path; b.ref_temp_time_path = c.ref_temp_time_path;
+    b.ref_temp_max_age_s = c.ref_temp_max_age_s;
     b.syslog_host = c.syslog_host; b.syslog_port = c.syslog_port; b.ntp_server = c.ntp_server;
     // Board-local hardware rides the same atomic blob: like the credentials it has exactly ONE
     // writer (the httpd task, POST /set_board), so it needs no self-healing per-key treatment — and

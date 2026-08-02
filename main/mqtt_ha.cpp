@@ -28,9 +28,10 @@
 //     reported it drives one diagnostic HA entity — a "dump waiting" flag (the reset reason
 //     is the heartbeat's own "Reset Reason" sensor, so a crash entity for it would be a duplicate).
 //     Reason/backtrace only; never the raw dump or any secret.
-// Read-only: no command subscriptions. Bounded exact-topic probes look for actually-retained
-// <base>/state, <base>/modbus/status and resolved <base>/crash payloads; a clean broker receives no
-// empty publish on any of them.
+// Read-only with respect to plant commands: one user-configured exact topic may supply a raw
+// reference temperature. Bounded exact-topic probes also look for actually-retained <base>/state,
+// <base>/modbus/status and resolved <base>/crash payloads; a clean broker receives no empty publish
+// on any of them.
 // No-op if mqtt_uri is empty. Memory-safe: discovery is one small publish per value; the state JSON
 // is a single few-KB build, guarded against OOM.
 #include "mqtt_ha.hpp"
@@ -49,7 +50,9 @@
 #include "logic/fault_state.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/mqtt_group.hpp"
+#include "logic/reference_temperature.hpp"
 #include "logic/reset_reason.hpp"
+#include "sntp_time.hpp"
 #include "wifi.hpp"
 
 #include "esp_app_desc.h"
@@ -62,10 +65,15 @@
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 
+#include "cJSON.h"
+
 #include <atomic>
+#include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <exception>
 #include <string>
 #include <vector>
@@ -87,6 +95,30 @@ static std::atomic<bool>        s_connected{false};
 static std::atomic<bool>        s_announce{false};   // set on connect -> task re-announces (consumed
                                                      // once via exchange(false) so a reconnect can't
                                                      // be lost to a racing clear)
+static std::atomic<bool>        s_ref_reconfigure{false};
+
+// MQTT_EVENT_DATA runs on esp-mqtt's unguarded event task. It therefore only copies into this one
+// bounded frame and overwrites a length-1 queue; JSON parsing and all std::string work stay on the
+// exception-guarded mqtt_task. 1024 B comfortably covers the 435 B Shelly test payload while keeping
+// an accidentally huge subscribed document from consuming the ESP32 heap.
+static constexpr size_t REF_TEMP_PAYLOAD_MAX = 1024;
+struct ReferenceMqttFrame {
+    char   topic[REF_TEMP_TOPIC_MAX + 1] = {0};
+    char   payload[REF_TEMP_PAYLOAD_MAX + 1] = {0};
+    size_t payload_len = 0;
+    uint64_t received_ms = 0;
+    int64_t received_unix_s = -1;
+    bool   retained = false;
+};
+static QueueHandle_t       s_ref_queue = nullptr;
+static ReferenceMqttFrame  s_ref_rx;
+static ReferenceMqttFrame  s_ref_task_frame;          // mqtt_task-owned; keeps ~1.2 KB off its stack
+static bool                s_ref_rx_active = false;
+static ReferenceTemperatureStatus s_ref_status;
+static std::string         s_ref_subscribed_topic;  // mqtt_task only
+static std::string         s_ref_binding_topic;     // resets captured value when either half changes
+static std::string         s_ref_binding_path;
+static std::string         s_ref_binding_time_path;
 
 // RAII guard around s_mtx (same idiom as config.cpp / hp_poll.cpp). Replaces the raw take/give pairs
 // so a throw on a reader (the broker copy in mqtt_status) can't strand the mutex and wedge every
@@ -612,16 +644,234 @@ static void publish_heartbeat() {
     mqtt_publish(s_heartbeat, js.c_str(), static_cast<int>(js.size()), 0, 0);   // not retained
 }
 
+// Reassemble a possibly-fragmented MQTT DATA event without allocating. Every complete frame is
+// handed to mqtt_task; that task decides whether it is the currently configured reference topic.
+static void capture_reference_frame(esp_mqtt_event_handle_t e) {
+    if (!e || !s_ref_queue || e->total_data_len <= 0 ||
+        e->total_data_len > static_cast<int>(REF_TEMP_PAYLOAD_MAX)) {
+        s_ref_rx_active = false;
+        return;
+    }
+    if (e->current_data_offset == 0) {
+        s_ref_rx_active = e->topic && e->topic_len > 0 &&
+                          e->topic_len <= static_cast<int>(REF_TEMP_TOPIC_MAX);
+        if (!s_ref_rx_active) return;
+        std::memcpy(s_ref_rx.topic, e->topic, static_cast<size_t>(e->topic_len));
+        s_ref_rx.topic[e->topic_len] = '\0';
+        s_ref_rx.payload_len = static_cast<size_t>(e->total_data_len);
+        s_ref_rx.retained = e->retain != 0;
+        s_ref_rx.received_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
+        int32_t received_sub_ms = 0;
+        time_now(s_ref_rx.received_unix_s, received_sub_ms);
+    }
+    if (!s_ref_rx_active || e->current_data_offset < 0 || e->data_len < 0 ||
+        e->current_data_offset + e->data_len > e->total_data_len ||
+        e->total_data_len != static_cast<int>(s_ref_rx.payload_len)) {
+        s_ref_rx_active = false;
+        return;
+    }
+    if (e->data_len > 0)
+        std::memcpy(s_ref_rx.payload + e->current_data_offset, e->data,
+                    static_cast<size_t>(e->data_len));
+    if (e->current_data_offset + e->data_len == e->total_data_len) {
+        s_ref_rx.payload[s_ref_rx.payload_len] = '\0';
+        xQueueOverwrite(s_ref_queue, &s_ref_rx);   // queue length is exactly one
+        s_ref_rx_active = false;
+    }
+}
+
+static cJSON* reference_json_item(cJSON* root, const std::string& path) {
+    cJSON* node = root;
+    size_t pos = 0;
+    char key[REF_TEMP_KEY_MAX + 1];
+    while (pos < path.size()) {
+        const size_t dot = path.find('.', pos);
+        const size_t end = dot == std::string::npos ? path.size() : dot;
+        const size_t len = end - pos;  // validated by POST/load contract; still fail closed here
+        if (len == 0 || len > REF_TEMP_KEY_MAX || !cJSON_IsObject(node)) return nullptr;
+        std::memcpy(key, path.data() + pos, len);
+        key[len] = '\0';
+        node = cJSON_GetObjectItemCaseSensitive(node, key);
+        if (!node) return nullptr;
+        pos = dot == std::string::npos ? path.size() : dot + 1;
+    }
+    return node;
+}
+
+static bool reference_payload_timestamp(cJSON* item, int64_t& unix_s, const char*& source) {
+    if (cJSON_IsString(item) && item->valuestring &&
+        reference_parse_rfc3339(item->valuestring, unix_s)) {
+        source = "payload_rfc3339";
+        return true;
+    }
+    if (cJSON_IsNumber(item) && std::isfinite(item->valuedouble) &&
+        item->valuedouble == std::floor(item->valuedouble) &&
+        item->valuedouble >= 0 && item->valuedouble <= 4133980800.0) {
+        unix_s = static_cast<int64_t>(item->valuedouble);
+        source = "payload_unix_s";
+        return true;
+    }
+    return false;
+}
+
+static void set_reference_error(const char* error, bool count_error) {
+    Lock lk(s_mtx);
+    s_ref_status.error = error ? error : "";   // mqtt_task is exception-guarded; Lock is RAII
+    if (count_error) s_ref_status.errors++;
+}
+
+// Apply topic edits on the existing MQTT client. A binding change retires the old raw value: a
+// reading extracted by the previous path must never appear under the new sensor identity.
+static void service_reference_subscription(const Config& c) {
+    const bool configured = !c.ref_temp_topic.empty();
+    if (c.ref_temp_topic != s_ref_binding_topic || c.ref_temp_path != s_ref_binding_path ||
+        c.ref_temp_time_path != s_ref_binding_time_path) {
+        s_ref_binding_topic = c.ref_temp_topic;
+        s_ref_binding_path = c.ref_temp_path;
+        s_ref_binding_time_path = c.ref_temp_time_path;
+        Lock lk(s_mtx);
+        s_ref_status.has_value = false;
+        s_ref_status.has_source_time = false;
+        s_ref_status.received_ms = 0;
+        s_ref_status.received_unix_s = -1;
+        s_ref_status.source_unix_s = -1;
+        s_ref_status.retained = false;
+        s_ref_status.messages = 0;
+        s_ref_status.errors = 0;
+        s_ref_status.timestamp_source.clear();
+        s_ref_status.error.clear();
+    }
+    {
+        Lock lk(s_mtx);
+        s_ref_status.configured = configured;
+    }
+
+    const char* invalid = nullptr;
+    if (!reference_temperature_config_valid(c.ref_temp_name, c.ref_temp_topic,
+                                            c.ref_temp_path, c.ref_temp_time_path,
+                                            c.ref_temp_max_age_s, &invalid)) {
+        if (!s_ref_subscribed_topic.empty() && s_connected)
+            esp_mqtt_client_unsubscribe(s_client, s_ref_subscribed_topic.c_str());
+        s_ref_subscribed_topic.clear();
+        Lock lk(s_mtx);
+        s_ref_status.subscribed = false;
+        s_ref_status.error = invalid ? invalid : "invalid reference temperature config";
+        return;
+    }
+
+    const bool force = s_ref_reconfigure.exchange(false);
+    if (!s_connected) {
+        Lock lk(s_mtx);
+        s_ref_status.subscribed = false;
+        if (!configured) s_ref_subscribed_topic.clear();
+        return;
+    }
+    if (!force && s_ref_subscribed_topic == c.ref_temp_topic) return;
+
+    if (!s_ref_subscribed_topic.empty() && s_ref_subscribed_topic != c.ref_temp_topic)
+        esp_mqtt_client_unsubscribe(s_client, s_ref_subscribed_topic.c_str());
+    s_ref_subscribed_topic.clear();
+    if (!configured) {
+        Lock lk(s_mtx);
+        s_ref_status.subscribed = false;
+        s_ref_status.error.clear();
+        return;
+    }
+
+    const int id = esp_mqtt_client_subscribe(s_client, c.ref_temp_topic.c_str(), 0);
+    {
+        Lock lk(s_mtx);
+        s_ref_status.subscribed = id >= 0;
+        s_ref_status.error = id >= 0 ? "" : "MQTT subscribe failed";
+        if (id < 0) s_ref_status.errors++;
+    }
+    if (id >= 0) {
+        s_ref_subscribed_topic = c.ref_temp_topic;
+        diag_printf("mqtt: reference temperature subscription active\n");
+    }
+}
+
+static void service_reference_frames(const Config& c) {
+    if (!s_ref_queue) return;
+    while (xQueueReceive(s_ref_queue, &s_ref_task_frame, 0) == pdTRUE) {
+        const ReferenceMqttFrame& frame = s_ref_task_frame;
+        if (c.ref_temp_topic.empty() || frame.topic != c.ref_temp_topic) continue;
+        {
+            Lock lk(s_mtx);
+            s_ref_status.messages++;
+        }
+        cJSON* root = cJSON_ParseWithLength(frame.payload, frame.payload_len);
+        if (!root) {
+            set_reference_error("payload is not valid JSON", true);
+            continue;
+        }
+        cJSON* item = reference_json_item(root, c.ref_temp_path);
+        const bool valid = cJSON_IsNumber(item) && std::isfinite(item->valuedouble);
+        const double value = valid ? item->valuedouble : 0.0;
+        if (!valid) {
+            cJSON_Delete(root);
+            set_reference_error("JSON path is missing or not numeric", true);
+            continue;
+        }
+
+        bool has_source_time = false;
+        int64_t source_unix_s = -1;
+        const char* timestamp_source = "mqtt_arrival";
+        if (!c.ref_temp_time_path.empty()) {
+            cJSON* timestamp_item = reference_json_item(root, c.ref_temp_time_path);
+            if (!reference_payload_timestamp(timestamp_item, source_unix_s, timestamp_source)) {
+                cJSON_Delete(root);
+                set_reference_error("Timestamp path is missing or not RFC3339/Unix seconds", true);
+                continue;
+            }
+            has_source_time = true;
+            if (frame.received_unix_s >= 0 &&
+                source_unix_s > frame.received_unix_s + REF_TEMP_FUTURE_TOLERANCE_S) {
+                cJSON_Delete(root);
+                set_reference_error("Source timestamp is in the future", true);
+                continue;
+            }
+        }
+        cJSON_Delete(root);
+
+        bool out_of_order = false;
+        {
+            Lock lk(s_mtx);
+            out_of_order = has_source_time && s_ref_status.has_value &&
+                           s_ref_status.has_source_time && source_unix_s < s_ref_status.source_unix_s;
+        }
+        if (out_of_order) {
+            set_reference_error("Source timestamp moved backward", true);
+            continue;
+        }
+        {
+            Lock lk(s_mtx);
+            s_ref_status.temperature_c = value;
+            s_ref_status.received_ms = frame.received_ms;
+            s_ref_status.received_unix_s = frame.received_unix_s;
+            s_ref_status.has_source_time = has_source_time;
+            s_ref_status.source_unix_s = source_unix_s;
+            s_ref_status.timestamp_source = timestamp_source;
+            s_ref_status.retained = frame.retained;
+            s_ref_status.has_value = true;
+            s_ref_status.error.clear();
+        }
+        diag_printf("mqtt: reference temperature value captured%s\n",
+                    frame.retained ? " (retained)" : "");
+    }
+}
+
 static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
     switch (static_cast<esp_mqtt_event_id_t>(id)) {
     case MQTT_EVENT_CONNECTED:
         if (s_mqtt_ever_connected) s_mqtt_reconnects.fetch_add(1);   // a later CONNECTED is a RE-connect
         s_mqtt_ever_connected = true;
-        s_connected = true; s_announce = true; set_status(true, nullptr);
+        s_connected = true; s_announce = true; s_ref_reconfigure = true; set_status(true, nullptr);
         diag_printf("mqtt: connected\n");
         break;
     case MQTT_EVENT_DISCONNECTED:
         s_connected = false; s_heartbeat_announced = false; set_status(false, nullptr);
+        { Lock lk(s_mtx); s_ref_status.subscribed = false; }
         diag_printf("mqtt: disconnected (will retry)\n");
         break;
     case MQTT_EVENT_ERROR: {
@@ -636,6 +886,7 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
         break; }
     case MQTT_EVENT_DATA: {
         auto* e = static_cast<esp_mqtt_event_handle_t>(data);
+        capture_reference_frame(e);
         if (e && retained_cleanup_candidate(s_legacy_state, e->topic, e->topic_len,
                                             e->retain, e->total_data_len,
                                             e->current_data_offset)) {
@@ -671,6 +922,9 @@ static void mqtt_task(void*) {
         const int delay_s = POLL_INTERVAL_S;
 
         try {
+            const Config ref_config = config();
+            service_reference_subscription(ref_config);
+            service_reference_frames(ref_config);
             if (s_connected) {
                 if (s_announce.exchange(false)) {              // consume: just (re)connected
                     s_announced_profile.clear();               // force a fresh discovery below
@@ -719,7 +973,7 @@ static void mqtt_task(void*) {
                     publish_crash();                            // crash report if notable, else stale-record probe
                     s_heartbeat_announced = true;
                 }
-                const std::string prof = config().profile;
+                const std::string prof = ref_config.profile;
                 if (prof != "auto" && prof != s_announced_profile) {
                     publish_x10a_discovery();                  // discovery for the (new) profile
                     s_announced_profile = prof;
@@ -835,7 +1089,15 @@ void mqtt_ha_start() {
     if (!s_mtx) diag_printf("mqtt: status mutex alloc failed — status reads run unsynchronized\n");
     s_status.configured = !c.mqtt_uri.empty();
     s_status.broker     = c.mqtt_uri;
+    s_ref_status.configured = !c.ref_temp_topic.empty();
     if (!s_status.configured) return;
+
+    s_ref_queue = xQueueCreate(1, sizeof(ReferenceMqttFrame));
+    if (!s_ref_queue) {
+        s_ref_status.error = "receive queue alloc failed";
+        s_ref_status.errors++;
+        diag_printf("mqtt: reference receive queue alloc failed\n");
+    }
 
     s_base   = CONFIG_DAIKIN_MQTT_BASE_TOPIC;
     s_node   = device_node_id(s_base);   // HA device id: the installation, NOT this board
@@ -850,7 +1112,10 @@ void mqtt_ha_start() {
     s_crash     = crash_topic(s_base);
     if (!build_client()) return;                               // policy error already surfaced
     esp_mqtt_client_start(s_client);
-    if (xTaskCreate(mqtt_task, "mqtt_pub", 4096, nullptr, 4, nullptr) != pdPASS) {
+    // Hardware coredump: the 4 KiB task hit the ESP32-S3 stack-end watchpoint while building the
+    // heartbeat after Config gained the reference-source strings. heartbeat.hpp no longer creates
+    // chained temporary strings, and 6 KiB restores explicit headroom for future bounded mappings.
+    if (xTaskCreate(mqtt_task, "mqtt_pub", 6144, nullptr, 4, nullptr) != pdPASS) {
         // No publish task -> discovery/value/heartbeat messages never go out. The client keeps its connection
         // (and LWT), but say so rather than looking configured-but-silent in /status.
         set_status(false, "publish task alloc failed");
@@ -864,6 +1129,16 @@ MqttStatus mqtt_status() {
     MqttStatus st = s_status;   // reader may allocate under an RAII lock (the broker std::string copy)
     st.error = s_error;         // error is kept as a literal pointer; stringified here, under the lock
     return st;
+}
+
+ReferenceTemperatureStatus reference_temperature_status() {
+    if (!s_mtx) return s_ref_status;
+    Lock lk(s_mtx);
+    return s_ref_status;
+}
+
+void mqtt_reference_reconfigure() {
+    s_ref_reconfigure = true;
 }
 
 } // namespace daik

@@ -119,17 +119,21 @@ inline std::string format_uptime(uint64_t uptime_ms) {
 // nesting to subscript through — and it keeps every heartbeat key a plain snake_case identifier.
 inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     const uint32_t uptime_s = static_cast<uint32_t>(f.uptime_ms / 1000);
+    // mqtt_pub has to build this on a small FreeRTOS stack. Keep every append sequential: expressions
+    // such as `literal + std::to_string(value) + literal` retain multiple temporary std::strings in
+    // one frame. A hardware core dump caught that exact shape at the stack-end watchpoint even though
+    // the heap allocation itself was only 31 bytes.
     std::string j = "{";
     j += "\"version\":\""; json_append_escaped(j, f.version); j += "\",";
     j += "\"platform\":\""; json_append_escaped(j, f.platform); j += "\",";
-    j += "\"uptime_s\":" + std::to_string(uptime_s) + ",";
-    j += "\"uptime\":\"" + format_uptime(f.uptime_ms) + "\",";
-    j += "\"free_heap\":" + std::to_string(f.free_heap) + ",";
-    j += "\"min_free_heap\":" + std::to_string(f.min_free_heap) + ",";
-    j += "\"max_alloc\":" + std::to_string(f.max_alloc) + ",";
+    j += "\"uptime_s\":"; j += std::to_string(uptime_s); j += ",";
+    j += "\"uptime\":\""; j += format_uptime(f.uptime_ms); j += "\",";
+    j += "\"free_heap\":"; j += std::to_string(f.free_heap); j += ",";
+    j += "\"min_free_heap\":"; j += std::to_string(f.min_free_heap); j += ",";
+    j += "\"max_alloc\":"; j += std::to_string(f.max_alloc); j += ",";
     j += "\"reset_reason\":\""; json_append_escaped(j, f.reset_reason); j += "\",";
     // Numeric twin of the slug above — see HeartbeatFields. A string never reaches a metrics store.
-    j += "\"reset_reason_code\":" + std::to_string(f.reset_reason_code) + ",";
+    j += "\"reset_reason_code\":"; j += std::to_string(f.reset_reason_code); j += ",";
     j += "\"reset_fault\":"; j += f.reset_fault ? "1" : "0"; j += ",";
     // The three connectivity flags ride as the NUMBERS 1/0, not JSON bools. Measured on this
     // install's Telegraf → VictoriaMetrics pipeline: wifi_connected/mqtt_connected/bus_connected were
@@ -144,24 +148,28 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     // bssid null while offline (no AP).
     j += "\"wifi_connected\":"; j += f.wifi_connected ? "1" : "0";
     j += ",\"wifi_rssi\":"; j += f.wifi_connected ? std::to_string(f.wifi_rssi) : "null";
-    j += ",\"wifi_reconnects\":" + std::to_string(f.wifi_reconnects);
-    j += ",\"wifi_mac\":"; j += f.wifi_mac.empty() ? "null" : ("\"" + f.wifi_mac + "\"");
-    j += ",\"wifi_bssid\":"; j += f.wifi_bssid.empty() ? "null" : ("\"" + f.wifi_bssid + "\"");
+    j += ",\"wifi_reconnects\":"; j += std::to_string(f.wifi_reconnects);
+    j += ",\"wifi_mac\":";
+    if (f.wifi_mac.empty()) j += "null";
+    else { j += "\""; j += f.wifi_mac; j += "\""; }
+    j += ",\"wifi_bssid\":";
+    if (f.wifi_bssid.empty()) j += "null";
+    else { j += "\""; j += f.wifi_bssid; j += "\""; }
     // mqtt_*
     j += ",\"mqtt_connected\":"; j += f.mqtt_connected ? "1" : "0";
-    j += ",\"mqtt_count\":" + std::to_string(f.mqtt_count);
-    j += ",\"mqtt_fails\":" + std::to_string(f.mqtt_fails);
-    j += ",\"mqtt_reconnects\":" + std::to_string(f.mqtt_reconnects);
+    j += ",\"mqtt_count\":"; j += std::to_string(f.mqtt_count);
+    j += ",\"mqtt_fails\":"; j += std::to_string(f.mqtt_fails);
+    j += ",\"mqtt_reconnects\":"; j += std::to_string(f.mqtt_reconnects);
     // bus_*
     j += ",\"bus_connected\":"; j += f.bus_connected ? "1" : "0";
     j += ",\"bus_proto\":\""; j += f.bus_proto; j += "\"";
-    j += ",\"bus_registers\":" + std::to_string(f.registers);
-    j += ",\"bus_values\":" + std::to_string(f.values);
-    j += ",\"bus_last_ok_s\":" + std::to_string(f.last_ok_s);
-    j += ",\"bus_rx_received\":" + std::to_string(f.rx_received);
-    j += ",\"bus_rx_fails\":" + std::to_string(f.rx_fails);
-    j += ",\"bus_crc_err\":" + std::to_string(f.crc_err);
-    j += ",\"bus_timeout_err\":" + std::to_string(f.timeout_err);
+    j += ",\"bus_registers\":"; j += std::to_string(f.registers);
+    j += ",\"bus_values\":"; j += std::to_string(f.values);
+    j += ",\"bus_last_ok_s\":"; j += std::to_string(f.last_ok_s);
+    j += ",\"bus_rx_received\":"; j += std::to_string(f.rx_received);
+    j += ",\"bus_rx_fails\":"; j += std::to_string(f.rx_fails);
+    j += ",\"bus_crc_err\":"; j += std::to_string(f.crc_err);
+    j += ",\"bus_timeout_err\":"; j += std::to_string(f.timeout_err);
     // 1/0 NUMBER like the three connectivity flags above, and for the same measured reason.
     j += ",\"bus_ou_held_over\":"; j += f.ou_held_over ? "1" : "0";
     // Read commands actually sent. There is no bus_tx_writes/bus_tx_fails companion: the X10A
@@ -170,13 +178,13 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     // field set of another ESP32 HA bridge, which is not a reason this project keeps a field — a
     // metric that cannot vary is a line on a dashboard that always reads zero and an entity a reader
     // has to rule out. Dropped in #215; neither was ever an HA entity, so nothing is orphaned.
-    j += ",\"bus_tx_reads\":" + std::to_string(f.rx_received + f.rx_fails);
+    j += ",\"bus_tx_reads\":"; j += std::to_string(f.rx_received + f.rx_fails);
     // Modbus TCP (HomeHub) link — payload-only (no HA entity; see HeartbeatFields). The connectivity
     // flag rides as a 1/0 NUMBER like the others, for the same metrics-consumer reason.
     j += ",\"modbus_enabled\":"; j += f.modbus_enabled ? "1" : "0";
     j += ",\"modbus_connected\":"; j += f.modbus_connected ? "1" : "0";
-    j += ",\"modbus_rx\":" + std::to_string(f.modbus_rx);
-    j += ",\"modbus_fails\":" + std::to_string(f.modbus_fails);
+    j += ",\"modbus_rx\":"; j += std::to_string(f.modbus_rx);
+    j += ",\"modbus_fails\":"; j += std::to_string(f.modbus_fails);
     j += "}";
     return j;
 }

@@ -17,9 +17,10 @@ page lives outside the firmware and cannot include `main/www/style.css`, so its 
 1. **Two screens: the plant, and the box.** After provisioning the app opens on the **dashboard**,
    which is the heat pump — the live schematic, the detected model, every reading. The header
    **gear** opens **Settings**, which is the ESP32 and what it talks to: the Connections tile
-   (WiFi/MQTT/Syslog/NTP) and the ESP32 board card, split into three — ESP32 (board hardware,
-   uptime, memory), Protokoll (X10A link, RX/TX pins) and Firmware (version, OTA channel,
-   language). Nothing sits between the gear and those cards — Settings is **flat**, no
+   (WiFi/MQTT/Syslog/NTP), one **Dynamische Vorlaufregelung** card for the staged room/weather/
+   controller project, and the ESP32 board card split into three — ESP32 (board hardware, uptime,
+   memory), Protokoll (X10A link, RX/TX pins) and Firmware (version, OTA channel, language).
+   Nothing sits between the gear and those cards — Settings is **flat**, no
    menu of entries to tap through, because there is little enough of it that a menu would exist only
    to hide a card behind a second tap. Settings still reports forward: a link that is **down** marks
    the gear (§5.6), so putting a card behind it hides the controls, never the failures.
@@ -127,6 +128,8 @@ back (the header chevron, or `Esc`):
                                                           ◀── chevron ──   · Connections tile
                                                                               └─ row ─▶ modal (§5.1)
                                                                               └─ HomeHub ─▶ modal
+                                                                           · Dynamic LWT card
+                                                                              └─ Room sources ─▶ modal
                                                                            · ESP32 card
                                                                               └─ Hardware ─▶ modal
                                                                            · Protokoll card
@@ -149,7 +152,8 @@ The heat pump is otherwise **fully automatic** (auto-detected).
   captive `setup.html` (§5.0) and thereafter re-editable from the gear → Connections → WiFi
   (§5.1, with automatic rollback to the last working network if the new
   credentials fail), the MQTT broker from the same tile's MQTT row (§5.1), the heat pump
-  needs no setup (auto-detected; RX/TX pins on the Protokoll card in Settings, §5.6), and firmware
+  transport needs no setup (auto-detected; RX/TX pins on the Protokoll card in Settings, §5.6),
+  while optional dynamic-LWT inputs are configured on their own Settings card; firmware
   updates are checked by tapping the version — the header meta line, or the Version row on the
   Settings Firmware card, which does the same thing (§5.4).
 - MQTT is optional — an empty broker disables it.
@@ -1040,19 +1044,22 @@ block butted against the round CTA and steps cards below.
   beyond the PR-banner check. The divergence from the dashboard is **not** a gap to close — do not
   add a translation layer here to make the two consistent.
 
-### 5.6 Settings — the screen behind the gear (Connections + HomeHub + ESP32)
+### 5.6 Settings — the screen behind the gear (Connections + dynamic LWT + ESP32)
 The dashboard header's **gear** (right, `.iconbtn.bordered`) is the only way off the dashboard. It
 opens **Settings**, which swaps the dashboard header for a **back header** — a chevron plus the
 screen title. `Esc` leaves the same way, but only when no modal is open: a modal owns `Esc` first, so
 one key press never both closes a dialog and leaves the screen behind it.
 
-**Settings is flat.** No menu of entries, no sub-screens: the gear lands directly on the four cards,
+**Settings is flat.** No menu of entries, no sub-screens: the gear lands directly on the five cards,
 stacked in the same single column as everything else (§9). The Connections tile is the *same* card it
 was on the dashboard — the move changed where the configuration lives, not how it looks. The board
 card is the same story split three ways: **ESP32** / **Protokoll** / **Firmware** answer three
 different questions (the board itself, the X10A link, the running software) that one card used to
-answer at once, all three built and rebuilt together by one `esp32CardHtml()`. HomeHub/Modbus is a
-fifth row in the Connections tile and follows the same row vocabulary exactly:
+answer at once. The **Dynamische Vorlaufregelung** card is their neighbour rather than another
+top-level screen: its room source is the first implemented input, while forecast, strategy and
+output reserve the stable homes later phases will fill. All four are built and rebuilt together by
+one `esp32CardHtml()`. HomeHub/Modbus is a fifth row in the Connections tile and follows the same row
+vocabulary exactly:
 
 1. **Connections tile** — one full-width card, `--card` bordered like the value groups, titled
    "Connections". Combines **WiFi**, **MQTT**, **Syslog**, **NTP** and **Modbus** into one row each: a label on
@@ -1099,7 +1106,20 @@ fifth row in the Connections tile and follows the same row vocabulary exactly:
      link remains read-only by design (`docs/SECURITY.md`). It stays a row of its own and is never
      folded into X10A state because the two sources fail independently.
 
-2. **ESP32 card** — the board itself, styled exactly like the value groups (§6): the **Hardware**
+2. **Dynamische Vorlaufregelung card** — the permanent Settings home of the dynamic-LWT project,
+   currently and explicitly **Datenerfassung** only. Its five rows are **Betriebsart** =
+   **Beobachten**, **Raumtemperaturquellen**, **Wetterprognose**, **Regelstrategie**, and
+   **Sicherheit & Ausgabe** = **Nur lesend**. The room-source row is the only editable one in this
+   first slice and opens the exact-topic, temperature-JSON-path, optional source-timestamp path and
+   maximum-age modal. Its summary reports one configured source, the raw temperature and qualified
+   source age; retained remains labelled. A retained payload without its own timestamp is visibly
+   untrusted rather than made fresh by reconnecting, while a non-retained value without one ages
+   from its monotonic MQTT arrival. The
+   other three future-facing rows are honest state, not disabled controls: forecast is
+   **Nicht konfiguriert**, strategy **Nicht aktiv**, and output **Nur lesend**, with no pencil and no
+   click handler. The card must never imply that observing an MQTT value controls the heat pump.
+
+3. **ESP32 card** — the board itself, styled exactly like the value groups (§6): the **Hardware**
    row (status indicator + recovery-button pins), which opens the board-hardware modal, from
    `board{…}`. It carries **almost no board telemetry** — chip (`platform`) and **Last reset**
    (`sys.reset_reason`) were rows here through v1.0.14 and are gone: Settings states
@@ -1153,12 +1173,12 @@ fifth row in the Connections tile and follows the same row vocabulary exactly:
    through v1.0.13 on the reasoning that the header owned the affordance; in use that only made the
    version look inert precisely where a user is already deciding which build to run.
 
-**Readings and settings only** — none of the three cards carries an action. *Report a bug* was the
+**Only domain readings and settings live in the cards.** The generic *Report a bug* action was the
 (then single) card's last row through v1.0.0-dev.199 and is in the footer line below all of them now:
 a rare escape hatch drawn at a live reading's weight, immediately under *Largest free block*, read as
-one more board fact, and each card's whole claim is that every row on it is one.
+one more board fact, and each card's whole claim is that every row on it belongs to that domain.
 
-Under all four, a `--muted` monospace footer line naming the product and running version — and, after
+Under all five, a `--muted` monospace footer line naming the product and running version — and, after
 them, **Report a bug**, the screen's one action. It is the `.verlink` affordance the header's version
 button uses (§5.3 header): size, weight and colour all inherited, so at rest it is indistinguishable
 from the text beside it, with the brand tint + underline arriving only on hover/`:focus-visible`. It
@@ -1181,8 +1201,9 @@ marked and the mark would stop meaning anything. A **disabled** link is a choice
 raises nothing. The dot is never the only carrier: the button's `aria-label` states the count in
 words (§9).
 
-**Rebuild rule.** All four cards are rebuilt from `/status` on every push (the Connections tile and
-the three ESP32-family cards, the latter as one string from one `esp32CardHtml()` call), so the write
+**Rebuild rule.** All five cards are rebuilt from `/status` on every push (the Connections tile plus
+dynamic LWT and the three ESP32-family cards, the latter four as one string from one
+`esp32CardHtml()` call), so the write
 goes through the same change-guard the rest of the app uses — and the rebuild is skipped entirely
 while an RX/TX dropdown, the update-channel select **or the language select** has focus, or the poll
 would collapse it mid-pick. (Any future select on these cards has to join that guard — an open

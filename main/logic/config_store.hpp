@@ -89,6 +89,13 @@ struct ConfigBlob {
     int32_t     mb_port           = 502;
     int32_t     mb_unit_id        = 1;
     bool        actuation_enabled = false;
+    // ── v7/v8: one MQTT-backed reference-temperature source ───────────────────────────────────
+    std::string ref_temp_name, ref_temp_topic, ref_temp_path;
+    // v8 adds the source timestamp mapping and the freshness limit. Defaults migrate a v7 blob
+    // written by the hardware-tested capture slice without discarding its topic or credentials.
+    std::string ref_temp_time_path;
+    uint32_t    ref_temp_max_age_s = 600;
+    bool        has_ref_temp = false;
     // FALSE when the decoded blob predates v5 (no HomeHub block). The caller leaves the new default
     // Auto intent in place; absence cannot prove an intentional Off choice.
     bool        has_modbus = false;
@@ -103,13 +110,14 @@ struct ConfigBlob {
 inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
                           CONFIG_BLOB_MAGIC2  = 'C', CONFIG_BLOB_MAGIC3 = '1';
 // v2 appended the board-local hardware block, v3 the OTA update channel, v4 the UI language override,
-// v5 the HomeHub Modbus stack and v6 the explicit Auto/Manual/Off intent bit.
+// v5 the HomeHub Modbus stack, v6 the explicit Auto/Manual/Off intent bit, v7 one MQTT-backed
+// reference-temperature mapping and v8 its source timestamp + maximum-age fields.
 // Bumping the version rather than reusing the previous one is what makes the trailing-garbage check
 // below still exact per version; OLDER blobs are ACCEPTED on read (see config_blob_deserialize)
 // because rejecting them would drop a user's WiFi and MQTT credentials on the OTA that introduced the
 // field — the fallback path is the legacy per-key layout, which a device written by a blob-era build
 // has never populated.
-inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 6;
+inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 8;
 inline constexpr uint8_t  CONFIG_BLOB_VERSION_MIN = 1;
 // A string field longer than this is treated as corruption on decode: real credentials are short, so a
 // huge length is a garbled blob, not a value. Bounds the work and rejects a hostile/garbled length.
@@ -160,6 +168,11 @@ inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     detail::blob_put_u32(v, static_cast<uint32_t>(c.mb_unit_id));
     v.push_back(static_cast<uint8_t>((c.actuation_enabled ? 1 : 0) |
                                      (c.homehub_enabled ? 2 : 0)));
+    detail::blob_put_str(v, c.ref_temp_name);
+    detail::blob_put_str(v, c.ref_temp_topic);
+    detail::blob_put_str(v, c.ref_temp_path);
+    detail::blob_put_str(v, c.ref_temp_time_path);
+    detail::blob_put_u32(v, c.ref_temp_max_age_s);
     detail::blob_put_u32(v, config_crc32(v.data(), v.size()));   // CRC covers everything before it
     return v;
 }
@@ -239,9 +252,18 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
         c.homehub_enabled   = version >= 6 ? (mb_flags & 2) != 0 : true;
         c.has_modbus        = true;
     }
+    if (version >= 7) {
+        if (!get_str(c.ref_temp_name) || !get_str(c.ref_temp_topic) ||
+            !get_str(c.ref_temp_path)) return false;
+        c.has_ref_temp = true;
+    }
+    if (version >= 8) {
+        if (!get_str(c.ref_temp_time_path) || !get_u32(c.ref_temp_max_age_s)) return false;
+    }
     // Exact per version: a v1 blob must END after ntp_server, a v2 blob after the board block, a v3
-    // blob after the channel byte, a v4 blob after the language byte and v5/v6 after the HomeHub
-    // block. v6 changes the versioned meaning of a flag bit without changing this block's length.
+    // blob after the channel byte, a v4 blob after the language byte, v5/v6 after the HomeHub block
+    // v7 after the reference-source strings and v8 after timestamp/max-age. v6 changes one flag's
+    // meaning without changing the HomeHub block's size.
     // Accepting a prefix would let a truncated v2 decode as a valid v1 with silently-default pins.
     if (p != body_end) return false;   // trailing garbage -> reject rather than accept a prefix
     c.wifi_rollback_active = (flags & 1) != 0;
