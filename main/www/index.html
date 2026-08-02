@@ -783,10 +783,13 @@
     <div class="modal-backdrop" id="homehubBackdrop"></div>
     <form class="modal-card" id="homehubForm" role="dialog" aria-modal="true" aria-labelledby="homehubModalTitle">
       <div class="section-label card-title" id="homehubModalTitle" data-i18n="homehub.title">Modbus</div>
-      <label class="field">
-        <span class="field-label plain" data-i18n="homehub.host">Host · IP or .local name</span>
-        <input class="input" name="host" id="hhHost" placeholder="homehub-524288-9.local" autocomplete="off">
-      </label>
+      <div class="field">
+        <label class="field-label plain" for="hhHost" data-i18n="homehub.host">Host · IP or .local name</label>
+        <div class="input-action">
+          <input class="input" name="host" id="hhHost" placeholder="homehub-524288-9.local" autocomplete="off">
+          <button class="input-action-btn" type="button" id="hhSearch" data-i18n="hh.search">Search</button>
+        </div>
+      </div>
       <label class="field">
         <span class="field-label plain" data-i18n="homehub.port">Port</span>
         <input class="input num" name="port" id="hhPort" placeholder="502" inputmode="numeric" autocomplete="off">
@@ -799,7 +802,6 @@
       <p class="hint" data-i18n="homehub.hint">Search runs only when you press Search and fills the address field when a HomeHub answers. Save the result or enter an address manually. An empty address disables HomeHub completely: no search at boot and no requests. Port defaults to 502, unit id to 1. Read-only — the firmware never controls the heat pump from here.</p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="hhCancel" data-i18n="btn.cancel">Cancel</button>
-        <button class="btn secondary" type="button" id="hhSearch" data-i18n="hh.search">Search</button>
         <button class="btn primary" type="submit" id="hhBtn" data-i18n="btn.save">Save</button>
       </div>
     </form>

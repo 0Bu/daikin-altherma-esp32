@@ -27,8 +27,11 @@ assert.doesNotThrow(() => new vm.Script(app, { filename: "main/www/app.sources" 
 // HomeHub discovery is an explicit dialog action, never a boot mode. The same editable field accepts
 // a discovered or manual address, and saving it empty is the deliberate disabled state.
 const html = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
-assert.match(html, /id="hhHost"[\s\S]*id="hhSearch"[\s\S]*data-i18n="hh.search"/,
-  "the HomeHub modal must expose one editable host and an explicit Search button");
+const homehubHtml = html.slice(html.indexOf('id="homehubModal"'), html.indexOf('id="boardModal"'));
+assert.match(homehubHtml, /class="input-action"[\s\S]*id="hhHost"[\s\S]*id="hhSearch"[\s\S]*data-i18n="hh.search"/,
+  "the HomeHub modal must expose Search inside its editable host field");
+assert.doesNotMatch(homehubHtml.slice(homehubHtml.indexOf('class="modal-actions"')), /id="hhSearch"/,
+  "HomeHub Search must not return to the dialog-level Cancel/Save actions");
 assert.doesNotMatch(html, /id="hhMode"|value="auto"[\s\S]*value="manual"/,
   "the HomeHub dialog must not reintroduce an automatic boot mode");
 assert.match(app, /post\("\/discover_homehub", \{\}\)/,
