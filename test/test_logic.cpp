@@ -3093,9 +3093,26 @@ static void test_homehub_map() {
         CHECK(trend_by_id(c.concept_id) != nullptr);
         CHECK(homehub_concept_index(c.concept_id) == static_cast<int>(i));
     }
+    // The history set repeats those six pairings and adds exactly one unpaired state: Smart-Grid
+    // mode. Every entry still names a real register and a real trend, and the ring lookup is exact.
+    CHECK(HOMEHUB_HISTORY_COUNT == HOMEHUB_CONCEPT_COUNT + 1);
+    for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++) {
+        const auto& h = HOMEHUB_HISTORIES[i];
+        bool reg_exists = false;
+        for (int k = 0; k < daik::def::HOMEHUB_REG_COUNT; k++)
+            if (daik::def::HOMEHUB_REGS[k].offset == h.offset) { reg_exists = true; break; }
+        CHECK(reg_exists);
+        CHECK(trend_by_id(h.trend_id) != nullptr);
+        CHECK(homehub_history_index(h.trend_id) == static_cast<int>(i));
+    }
+    CHECK(std::string(HOMEHUB_HISTORIES[HOMEHUB_HISTORY_COUNT - 1].trend_id) == "smart_grid_mode");
+    CHECK(HOMEHUB_HISTORIES[HOMEHUB_HISTORY_COUNT - 1].offset == 56);
+    CHECK(homehub_history_index("heat_pump_power") == -1);
+    CHECK(homehub_history_index(nullptr) == -1);
     // Lookup both ways.
     CHECK(std::string(homehub_concept_for(43)) == "dhw_tank");
     CHECK(std::string(homehub_concept_for(40)) == "leaving_water");
+    CHECK(homehub_concept_for(56) == nullptr);   // historied state, but not a one-row X10A pairing
     CHECK(homehub_concept_for(51) == nullptr);   // power: X10A has no equivalent, deliberately unpaired
     CHECK(homehub_concept_for(41) == nullptr);   // post-BUH: a DIFFERENT measurement point, not leaving_water
     CHECK(homehub_concept_for(999) == nullptr);
@@ -5111,6 +5128,15 @@ static void test_history() {
     CHECK(!history_is_absent(0));                 // 0.0 °C is a READING, not an absence
     CHECK(!history_is_absent(-400));              // and so is -40.0 °C
 
+    // The two Smart-Grid contacts form one documented four-state enum. It is stored in tenths like
+    // every /history series, and a missing half stays absent rather than fabricating Free running.
+    CHECK(history_smart_grid_mode(true, false, true, false) == 0);
+    CHECK(history_smart_grid_mode(true, false, true, true)  == 10);
+    CHECK(history_smart_grid_mode(true, true,  true, false) == 20);  // Recommended on = Boost
+    CHECK(history_smart_grid_mode(true, true,  true, true)  == 30);
+    CHECK(history_smart_grid_mode(false, false, true, false) == HISTORY_NO_READING);
+    CHECK(history_smart_grid_mode(true, false, false, false) == HISTORY_NO_READING);
+
     // --- the compressor witness ----------------------------------------------------------------
     {
         const char* rows[] = { "R1T-Outdoor air temp.", "INV frequency (rps)" };
@@ -5341,6 +5367,10 @@ static void test_history() {
         { "ct_l1",            20, -1, 1 },
         { "ct_l2",            20, -1, 1 },
         { "ct_l3",            20, -1, 1 },
+        // Derived from two structurally identified contact rows, so it resolves no SINGLE catalog
+        // row. Its truth table is asserted above; test_binary_semantics pins both contacts' catalog
+        // coverage independently.
+        { "smart_grid_mode",   0,  0,  0 },
         // The board trends resolve no catalog row at all — every expectation below is skipped for
         // them, and what they must satisfy instead is asserted in its own block further down. They
         // are listed so the static_assert keeps forcing a decision for every TRENDS entry.
@@ -5433,23 +5463,28 @@ static void test_history() {
     // catalog would still be "working" on the author's own unit.
     for (size_t t = 0; t < TREND_COUNT; t++) CHECK(found[t] >= kExpect[t].min_profiles);
 
-    // --- the BOARD trends: no row, no page, no profile ------------------------------------------
-    // They share the table, the ring and the route with the catalog trends and must not share their
-    // failure modes. Two things are asserted: a board trend carries its own label (nothing else can
-    // give it one — the /status.history entry would otherwise be dropped as "profile lacks the row"),
-    // and it resolves NO catalog row, on any profile, ever.
+    // --- the non-row trends: one derived state plus two BOARD figures ---------------------------
+    // They share the table, the ring and the route with catalog trends and must not share their
+    // locator failure modes. Every one carries its own label and resolves NO single catalog row.
     int board_trends = 0;
+    int state_trends = 0;
     for (size_t t = 0; t < TREND_COUNT; t++) {
         if (TRENDS[t].kind == TrendKind::Row) {
             CHECK(TRENDS[t].label[0] == '\0');   // a row's label is the PROFILE's, discovered at runtime
             continue;
         }
-        board_trends++;
         CHECK(TRENDS[t].label[0] != '\0');
-        CHECK(trend_cstr_eq(TRENDS[t].unit, "KiB"));
         CHECK(found[t] == 0);
+        if (TRENDS[t].kind == TrendKind::SmartGridMode) {
+            state_trends++;
+            CHECK(TRENDS[t].unit[0] == '\0');
+        } else {
+            board_trends++;
+            CHECK(trend_cstr_eq(TRENDS[t].unit, "KiB"));
+        }
     }
     CHECK(board_trends == 2);
+    CHECK(state_trends == 1);
     {
         // The locator of a board trend is (0, 0) — which is a REAL byte window. Nothing may make it
         // match: the kind is checked first, so even a row crafted to look exactly like it is refused.

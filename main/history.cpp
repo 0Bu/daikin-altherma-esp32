@@ -3,6 +3,7 @@
 // storage, one mutex, and the fold from the poll cycle's values into a bucket.
 #include "history.hpp"
 #include "diag_log.hpp"
+#include "logic/binary_semantics.hpp"
 #include "logic/homehub_map.hpp"
 #include "logic/history.hpp"
 
@@ -23,7 +24,7 @@ using logic::HistorySample;
 using logic::HISTORY_HELD_OVER;
 using logic::HISTORY_NO_READING;
 using logic::HISTORY_SAMPLES;
-using logic::HOMEHUB_CONCEPT_COUNT;
+using logic::HOMEHUB_HISTORY_COUNT;
 using logic::TREND_COUNT;
 
 namespace {
@@ -48,11 +49,11 @@ struct Trend {
 };
 
 Trend             s_ring[TREND_COUNT];
-// Only the six HomeHub measurements the schematic can draw get a second ring. Unlike X10A trends,
+// The six paired HomeHub measurements plus Smart-Grid mode get a second ring. Unlike X10A trends,
 // their labels/units are fixed by def/homehub.hpp, so this side needs no per-ring string buffers.
-logic::TrendRing  s_mb_ring[HOMEHUB_CONCEPT_COUNT];
-static_assert(HOMEHUB_CONCEPT_COUNT * logic::HISTORY_BYTES_PER_TREND == 3456,
-              "six paired HomeHub schematic trends should cost exactly 3456 bytes");
+logic::TrendRing  s_mb_ring[HOMEHUB_HISTORY_COUNT];
+static_assert(HOMEHUB_HISTORY_COUNT * logic::HISTORY_BYTES_PER_TREND == 4032,
+              "seven HomeHub schematic histories should cost exactly 4032 bytes");
 uint32_t          s_bucket = 0;                    // the bucket s_ring[*].pending belongs to
 bool              s_have_bucket = false;
 uint32_t          s_mb_bucket = 0;
@@ -131,6 +132,35 @@ void history_record(const CachedValue* v, size_t n) {
         if (value_tenths(v[rps_i].value, rps_tenths)) { rps_known = true; rps_running = rps_tenths > 0; }
     }
 
+    // Smart-Grid mode is one state assembled from TWO contact bits. Resolve both by their structural
+    // semantics, never their labels; the generated catalog spells labels for humans, while these
+    // converter-backed ids are the same contract /values uses. Presence and readability stay
+    // separate: a timed-out contact leaves a gap but does not make the profile lose the feature.
+    bool sg_c1_supported = false, sg_c2_supported = false;
+    bool sg_c1_known = false, sg_c2_known = false;
+    bool sg_c1_on = false, sg_c2_on = false;
+    for (size_t i = 0; i < rows; i++) {
+        const char* sid = logic::binary_semantic_for(v[i].reg, v[i].off, v[i].conv);
+        if (!sid) continue;
+        bool* supported = nullptr;
+        bool* known = nullptr;
+        bool* on = nullptr;
+        if (std::strcmp(sid, "smart_grid_contact_1") == 0) {
+            supported = &sg_c1_supported; known = &sg_c1_known; on = &sg_c1_on;
+        } else if (std::strcmp(sid, "smart_grid_contact_2") == 0) {
+            supported = &sg_c2_supported; known = &sg_c2_known; on = &sg_c2_on;
+        } else continue;
+        *supported = true;
+        int tenths = 0;
+        if (value_tenths(v[i].value, tenths) && (tenths == 0 || tenths == 10)) {
+            *known = true;
+            *on = tenths == 10;
+        }
+    }
+    const bool sg_supported = sg_c1_supported && sg_c2_supported;
+    const HistorySample sg_mode = logic::history_smart_grid_mode(
+        sg_c1_known, sg_c1_on, sg_c2_known, sg_c2_on);
+
     const uint32_t bucket = logic::history_bucket(esp_timer_get_time());
 
     // The board's own memory, read BEFORE the lock: heap_caps_get_largest_free_block takes the
@@ -162,9 +192,22 @@ void history_record(const CachedValue* v, size_t n) {
         Trend& tr = s_ring[t];
         const logic::TrendDef& d = logic::TRENDS[t];
 
+        if (d.kind == logic::TrendKind::SmartGridMode) {
+            if (!sg_supported) {
+                if (tr.label[0]) tr.ring.reset();       // model no longer carries both contacts
+                tr.label[0] = '\0';
+                tr.unit[0] = '\0';
+                continue;
+            }
+            copy_field(tr.label, sizeof(tr.label), d.label);
+            copy_field(tr.unit, sizeof(tr.unit), d.unit);
+            tr.ring.fold(sg_mode);
+            continue;
+        }
+
         // A BOARD trend has no row to resolve: its label and unit are fixed, it is never absent, and
         // no page can hold it over. Sampled above, outside the lock, like everything else here.
-        if (d.kind != logic::TrendKind::Row) {
+        if (d.kind == logic::TrendKind::FreeHeap || d.kind == logic::TrendKind::MaxAlloc) {
             copy_field(tr.label, sizeof(tr.label), d.label);
             copy_field(tr.unit, sizeof(tr.unit), d.unit);
             tr.ring.fold(d.kind == logic::TrendKind::FreeHeap ? free_heap : max_alloc);
@@ -196,11 +239,11 @@ void history_record_modbus(const CachedValue* v, size_t n) {
     // Parse before taking the history lock. strtod is locale-stable in this firmware and needs no
     // shared state from the rings; keeping it outside makes the critical section plain fixed-size
     // copies, just like the X10A path.
-    HistorySample sample[HOMEHUB_CONCEPT_COUNT];
-    for (size_t t = 0; t < HOMEHUB_CONCEPT_COUNT; t++) {
+    HistorySample sample[HOMEHUB_HISTORY_COUNT];
+    for (size_t t = 0; t < HOMEHUB_HISTORY_COUNT; t++) {
         sample[t] = HISTORY_NO_READING;
         if (!v) continue;
-        const uint16_t wanted = logic::HOMEHUB_CONCEPTS[t].offset;
+        const uint16_t wanted = logic::HOMEHUB_HISTORIES[t].offset;
         for (size_t i = 0; i < n; i++) {
             if (v[i].off != wanted) continue;
             int tenths = 0;
@@ -219,7 +262,7 @@ void history_record_modbus(const CachedValue* v, size_t n) {
     }
     s_mb_bucket = bucket;
     s_mb_have_bucket = true;
-    for (size_t t = 0; t < HOMEHUB_CONCEPT_COUNT; t++) s_mb_ring[t].fold(sample[t]);
+    for (size_t t = 0; t < HOMEHUB_HISTORY_COUNT; t++) s_mb_ring[t].fold(sample[t]);
 }
 
 size_t history_snapshot(size_t t, HistorySample* out, size_t max) {
@@ -230,7 +273,7 @@ size_t history_snapshot(size_t t, HistorySample* out, size_t max) {
 }
 
 size_t history_modbus_snapshot(size_t t, HistorySample* out, size_t max) {
-    if (t >= HOMEHUB_CONCEPT_COUNT || !out || !max || !s_mtx) return 0;
+    if (t >= HOMEHUB_HISTORY_COUNT || !out || !max || !s_mtx) return 0;
     Lock lk(s_mtx);
     if (!lk.held) return 0;
     return s_mb_ring[t].snapshot(out, max);

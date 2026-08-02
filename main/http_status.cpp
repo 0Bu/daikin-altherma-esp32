@@ -347,20 +347,21 @@ void http_append_status_json(std::string& j, bool redact) {
         j += "}";
     }
     j += "],\"modbus_rows\":[";
-    // Only the HomeHub measurements that are structurally paired to schematic readings get a
-    // second ring. States, setpoints and Modbus-only values remain live rows without a chart. Keep
+    // Six HomeHub measurements structurally paired to schematic readings get a second ring, plus
+    // the Smart-Grid mode whose dedicated state timeline shows when and for how long Boost was
+    // active. Other states, setpoints and Modbus-only values remain live rows without a chart. Keep
     // the list empty when this installation has no HomeHub stack, so old/no-gateway devices do not
-    // offer six permanently empty series in the browser.
+    // offer permanently empty series in the browser.
     bool first_mb_trend = true;
     if (mb.enabled) {
-        for (size_t mt = 0; mt < logic::HOMEHUB_CONCEPT_COUNT; mt++) {
-            const auto& hc = logic::HOMEHUB_CONCEPTS[mt];
-            const def::HomeHubReg* r = def::homehub_find(hc.offset);
+        for (size_t mt = 0; mt < logic::HOMEHUB_HISTORY_COUNT; mt++) {
+            const auto& hh = logic::HOMEHUB_HISTORIES[mt];
+            const def::HomeHubReg* r = def::homehub_find(hh.offset);
             if (!r) continue;                         // compile-time table tests make this defensive
             if (!first_mb_trend) j += ",";
             first_mb_trend = false;
             j += "{\"id\":";
-            j += jstr(hc.concept_id);
+            j += jstr(hh.trend_id);
             j += ",\"label\":";
             j += jstr(r->label);
             j += "}";
@@ -766,8 +767,8 @@ static esp_err_t h_models(httpd_req_t* req) {
 }
 
 // GET /history?row=<trend id>[&source=modbus] — one 24-hour series, oldest sample first. X10A is the
-// backwards-compatible default; Modbus is available only for the six structurally paired schematic
-// measurements in logic/homehub_map.hpp.
+// backwards-compatible default; Modbus is available for the six structurally paired schematic
+// measurements plus the Smart-Grid state timeline in logic/homehub_map.hpp.
 //
 //   {"id":"outdoor_air","source":"x10a","label":"R1T-Outdoor air temp.","dt":300,
 //    "unit":"°C","t0":1784926349,"b0":5931421,"v":[131,null,…],
@@ -806,7 +807,7 @@ static esp_err_t h_history(httpd_req_t* req) {
     // working request and quietly attach the wrong sensor's history to whatever asked.
     size_t t = 0;
     if (def_) { while (t < logic::TREND_COUNT && &logic::TRENDS[t] != def_) t++; }
-    const int mb_t = modbus ? logic::homehub_concept_index(id) : -1;
+    const int mb_t = modbus ? logic::homehub_history_index(id) : -1;
     if (!def_ || t >= logic::TREND_COUNT || (modbus && mb_t < 0)) {
         httpd_resp_set_status(req, "404 Not Found");
         return http_send_json(req, "{\"ok\":false,\"error\":\"unknown trend\"}");
@@ -825,7 +826,7 @@ static esp_err_t h_history(httpd_req_t* req) {
 
     char lbl[80], unit[8];
     if (modbus) {
-        const def::HomeHubReg* r = def::homehub_find(logic::HOMEHUB_CONCEPTS[mb_t].offset);
+        const def::HomeHubReg* r = def::homehub_find(logic::HOMEHUB_HISTORIES[mb_t].offset);
         std::snprintf(lbl, sizeof(lbl), "%s", r ? r->label : "");
         std::snprintf(unit, sizeof(unit), "%s", r ? r->unit : "");
     } else {

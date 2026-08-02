@@ -1,8 +1,9 @@
 // ── 24-hour trend (a historied value row's explainer carries a sparkline under the text) ──────
 // WHICH rows have a trend is the FIRMWARE's answer. /status.history.rows names X10A rings;
-// modbus_rows names the six structurally paired HomeHub schematic readings. The device keeps both at
-// one fixed cadence and reports the labels each source owns. The browser never pattern-matches its
-// own candidates: offering a trend the device isn't buffering would be an empty chart by design.
+// modbus_rows names the six structurally paired HomeHub schematic readings plus the Smart-Grid state
+// timeline. The device keeps both at one fixed cadence and reports the labels each source owns. The
+// browser never pattern-matches its own candidates: offering a trend the device isn't buffering
+// would be an empty chart by design.
 // Each entry is {id, label}: the ID is the concept (logic/history.hpp's TRENDS — "dhw_tank",
 // "outdoor_air", "free_heap", …) and is what GET /history takes, while the LABEL is how this profile
 // spells the row. Requesting by id keeps the route model-independent; matching by label is how a
@@ -312,10 +313,95 @@ function historyView(id) {
   // field. Prefer the primary source's unit, but do not throw away the paired source's honest unit
   // merely because X10A's field is empty.
   const sharedUnit = primary.unit || series.find((s) => s.unit)?.unit || "";
-  return { dt, unit: sharedUnit, t0: typeof t0 === "number" ? t0 : null,
+  return { id, dt, unit: sharedUnit, t0: typeof t0 === "number" ? t0 : null,
            b0: mode === "bucket" ? start : null,
            gen: series.map((s) => `${s.source}:${s.raw.gen || 0}`).join("/"),
            v: union, series };
+}
+
+// Smart-Grid mode is a STATE, so a numeric line from 0 to 3 would answer the wrong question. Draw
+// one timeline track per source instead: light grey means not Boost, petrol/blue spans mean mode 2,
+// and hatched gaps mean no answer. The summary and run list state the sampled duration and the wall
+// times, which is what a line hovering at y=2 cannot say at a glance.
+const boostState = (v) => [0, 10, 20, 30].includes(v) ? v === 20 : null;
+function boostRuns(series, wanted) {
+  const out = [];
+  for (let i = 0; i < series.v.length; i++) {
+    if (boostState(series.v[i]) !== wanted) continue;
+    const from = i;
+    while (i + 1 < series.v.length && boostState(series.v[i + 1]) === wanted) i++;
+    out.push([from, i - from + 1]);
+  }
+  return out;
+}
+function histDuration(seconds) {
+  const min = Math.max(0, Math.round(seconds / 60));
+  const h = Math.floor(min / 60), m = min % 60;
+  return h && m ? t("hist.duration_hm", h, m)
+       : h ? t("hist.duration_h", h) : t("hist.duration_min", m);
+}
+function boostRunWhen(view, from, count) {
+  if (view.t0 != null) {
+    const clock = (i) => new Date((view.t0 + i * view.dt) * 1000)
+      .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
+    return `${clock(from)}–${clock(from + count)}`;
+  }
+  const old = ((view.v.length - from) * view.dt) / 3600;
+  const recent = ((view.v.length - from - count) * view.dt) / 3600;
+  return t("hist.boost_ago_range", old.toFixed(1), Math.max(0, recent).toFixed(1));
+}
+function boostHistHtml(id, name, view, wrap) {
+  const n = view.v.length;
+  const spanH = Math.max(1, Math.round((n * view.dt) / 3600));
+  const full = n * view.dt >= 23.5 * 3600;
+  // The live pill is a HomeHub readback, so prefer that source for the one duration/run summary.
+  // Keep both visual tracks when X10A is available: a disagreement remains visible rather than
+  // being merged into a plausible single answer.
+  const primary = view.series.find((s) => s.source === "modbus") || view.series[0];
+  const active = boostRuns(primary, true);
+  const total = active.reduce((sum, r) => sum + r[1] * view.dt, 0);
+  const gaps = boostRuns(primary, null).length;
+  const pct = (i) => ((i / n) * 100).toFixed(3);
+  const tracks = view.series.map((s) => {
+    const on = boostRuns(s, true).map(([from, count]) =>
+      `<span class="vhist-state-on${s.source === "modbus" ? " mb" : ""}"` +
+      ` style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
+    const missing = boostRuns(s, null).map(([from, count]) =>
+      `<span class="vhist-state-gap" style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
+    return `<div class="vhist-state-track" aria-hidden="true">${on}${missing}</div>`;
+  }).join("");
+  const legend = view.series.length > 1 || view.series[0].source === "modbus"
+    ? `<div class="vhist-legend vhist-state-legend">${view.series.map((s) =>
+        `<span class="vhist-source${s.source === "modbus" ? " mb" : ""}"><i></i>${esc(s.name)}</span>`).join("")}</div>`
+    : "";
+
+  const pi = histPinIndex(id, view);
+  let pinTip = "", pinCross = "";
+  if (pi >= 0) {
+    const px = (scrubFrac(pi, n) * 100).toFixed(3);
+    pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
+    pinTip = `<div class="vhist-tip vhist-pinned mono num" style="left:${px}%">${esc(scrubText(view, pi))}</div>`;
+  }
+  const totalText = t("hist.boost_total", histDuration(total));
+  const runList = active.length
+    ? active.map(([from, count]) => `<span>${esc(t("hist.boost_run", boostRunWhen(view, from, count),
+                                                    histDuration(count * view.dt)))}</span>`).join("")
+    : `<span>${esc(t("hist.boost_none"))}</span>`;
+  return wrap(
+    `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.since", spanH))}</span>` +
+      `<span class="vhist-range mono num">${esc(totalText)}</span></div>` + legend +
+    `<div class="vhist-graph vhist-state-graph${pi >= 0 ? " has-pin" : ""}">` +
+      `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +
+      `<div class="vhist-plot vhist-state-plot" data-hist="${esc(id)}" data-n="${n}" tabindex="0" role="img"` +
+        ` aria-label="${esc(t("hist.boost_aria", name || id, totalText))}">` + tracks + pinCross +
+        `<span class="vhist-cross vhist-live" hidden></span>` +
+      `</div>` +
+    `</div>` +
+    `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
+      (gaps ? `<span class="vhist-gap">${esc(t("hist.gaps", gaps))}</span>` : "") +
+      `<span>${esc(t("hist.now"))}</span></div>` +
+    `<div class="vhist-state-runs"><strong>${esc(primary.name)}</strong>${runList}</div>`
+  , "vhist-state");
 }
 
 // One historied row's trend, as the markup appended under its explainer text. Every state is a
@@ -350,6 +436,8 @@ function histHtml(id, unit, name) {
     const D = DERIVED[id];
     return wrap(`<div class="vhist-note">${esc(D && D.none ? tx(D.none) : t("hist.none"))}</div>`, "vhist-flat");
   }
+
+  if (id === "smart_grid_mode") return boostHistHtml(id, name, view, wrap);
 
   const n = view.v.length;
   const spanH = Math.max(1, Math.round((n * view.dt) / 3600));
@@ -520,6 +608,12 @@ function histPinToggle(id, i) {
 function scrubText(h, i) {
   const valueText = (s) => {
     const v = s.v[i];
+    if (h.id === "smart_grid_mode" && v != null) {
+      const mode = v / 10;
+      return Number.isInteger(mode) && mode >= 0 && mode <= 3
+        ? `${t(mode === 2 ? "hist.boost_active" : "hist.boost_inactive")} · ${t(`sg.mode${mode}`)}`
+        : t("hist.nm");
+    }
     return v != null ? (v / 10).toFixed(1) + (s.unit ? " " + s.unit : "")
          : histHeld(s, i) ? t("hist.held") : t("hist.nm");
   };

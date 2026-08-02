@@ -82,39 +82,53 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     " MB_PAIRS, MB_OFF_POWER, MB_OFF_SMART_GRID, mbPower, modbusEnumNumber, mbSmartGridMode, mbForInspect," +
     " mbUnitAbnormality," +
     " SMART_GRID_MODE_VALUE, x10aSmartGridModeFrom, x10aSmartGridMode, x10aSmartGridRow," +
-    " sgModeText, sgRequestText, mbNoteHtml, inspCurRow, inspMember," +
+    " sgModeText, mbNoteHtml, inspCurRow, inspMember," +
     " inspMembers, inspValues, inspComparisonHtml, inspHeld, liveData, compressorRunning," +
-    " waterThermalKind, activeSpaceKind, ouReadingText, INSPECT," +
-    " pelMeasured, pelApproxText, PEL_INSPECT, setSchematicHitAvailable };",
+    " waterThermalKind, activeSpaceKind, ouReadingText, updateSchematicStateA11y, INSPECT," +
+    " pelMeasured, pelApproxText, PEL_INSPECT };",
     context, { filename: "main/www/app.sources" });
   context.__api.S = context.S;
   return context.__api;
 }
 
-// A hidden conditional badge is absent from pointer, keyboard and accessibility interaction. The
-// BSH badge contains a transparent `.sc-hitarea` with `pointer-events:all`; SVG permits that child
-// to receive clicks through ancestor visibility, which is why the invisible heater link survived.
+// Boost and BSH are permanent state pills. Their compact faces keep only the stable component name;
+// the written state remains in the inspector and accessible name while colour changes on the face.
 {
-  const attrs = new Map();
-  const hit = {
-    setAttribute: (k, v) => attrs.set(k, String(v)),
-    removeAttribute: (k) => attrs.delete(k),
-    getAttribute: (k) => attrs.get(k) ?? null,
-  };
-  const c = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
-                  elements: { gBshState: hit } });
-  c.setSchematicHitAvailable("gBshState", false);
-  assert.equal(hit.getAttribute("tabindex"), "-1", "hidden BSH badge leaves the keyboard order");
-  assert.equal(hit.getAttribute("aria-hidden"), "true", "hidden BSH badge leaves the accessibility tree");
-  c.setSchematicHitAvailable("gBshState", true);
-  assert.equal(hit.getAttribute("tabindex"), "0", "active BSH badge becomes keyboard reachable");
-  assert.equal(hit.getAttribute("aria-hidden"), null, "active BSH badge becomes accessible");
+  assert.match(index, /id="gBshState"[\s\S]*?tabindex="0"/,
+    "the heater pill must remain interactive while it is off");
+  assert.doesNotMatch(index, /id="gBshState"[^>]*aria-hidden/);
+  assert.match(index, /id="gBshState"[\s\S]*?data-i18n="schem\.bsh_label"/,
+    "the heater pill keeps only its stable component name");
+  assert.match(index,
+    /class="sc-bsh-state-box" x="541" y="278" width="70" height="20" rx="10"/,
+    "the heater pill stays compact and centred inside the tank");
+  assert.doesNotMatch(index, /id="svSgRequest"/,
+    "the Boost pill has no visible active/inactive second line");
+  assert.match(style, /svg \.sc-bsh-state-box \{[^}]*fill:\s*var\(--hatch\)/,
+    "inactive heater pill uses the neutral light-grey fill");
+  assert.match(style, /\.bsh-on \.sc-bsh-state-box \{[^}]*stroke:\s*var\(--warn\)/,
+    "active heater pill turns orange as a whole pill");
+  assert.match(style, /svg \.sc-sg-request-box \{[^}]*fill:\s*var\(--hatch\)/,
+    "inactive Boost pill uses the neutral light-grey fill");
+  assert.match(style, /\.sg-boost-on \.sc-sg-request-box \{[^}]*stroke:\s*var\(--src-mb\)/,
+    "active Boost pill keeps the HomeHub petrol state colour");
 
-  assert.match(index, /id="gBshState"[\s\S]*?tabindex="-1" aria-hidden="true"/,
-    "the badge must start unavailable before the first live render");
-  assert.match(style,
-    /\.sc-hit\[aria-hidden="true"\]\s*\*\s*\{\s*pointer-events:\s*none;/,
-    "hidden hit-target descendants must override sc-hitarea pointer-events:all");
+  const attrs = (id) => ({
+    setAttribute: (k, v) => elements[id].values.set(k, String(v)),
+  });
+  const elements = {
+    gBshState: { values: new Map() },
+    gSgRequest: { values: new Map() },
+  };
+  Object.assign(elements.gBshState, attrs("gBshState"));
+  Object.assign(elements.gSgRequest, attrs("gSgRequest"));
+  const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true, elements });
+  c.updateSchematicStateA11y({ bsh: false, sgMode: 0 });
+  assert.equal(elements.gBshState.values.get("aria-label"), "schem.bsh_label: state.off");
+  assert.equal(elements.gSgRequest.values.get("aria-label"), "schem.sg_boost: sg.mode0");
+  c.updateSchematicStateA11y({ bsh: true, sgMode: 2 });
+  assert.equal(elements.gBshState.values.get("aria-label"), "schem.bsh_label: state.on");
+  assert.equal(elements.gSgRequest.values.get("aria-label"), "schem.sg_boost: sg.mode2");
 }
 
 const LWT_X = X("Leaving water temp. before BUH (R1T)", "38.6", "leaving_water");
@@ -267,12 +281,8 @@ const X_SG = (contact, on) => ({
   assert.equal(c.mbForInspect("sgrequest")?.value, 2,
     "the inspector must remain traceable to the Modbus row while X10A is live");
   assert.equal(c.sgModeText(2), "sg.mode2");
-  assert.equal(c.sgRequestText(2), "schem.sg_boost");
-  assert.equal(c.sgRequestText(0), "", "free running has no schematic label");
-  assert.equal(c.sgRequestText(1), "", "forced off has no schematic label");
-  assert.equal(c.sgRequestText(3), "", "forced on has no schematic label");
   assert.match(SOURCE, /classList\.toggle\("sg-boost-on", d\.sgMode === 2\)/,
-    "only mode 2 may reveal the schematic boost marker");
+    "only mode 2 may apply the active Boost colour");
   assert.doesNotMatch(SOURCE, /sg-request-on/,
     "the former all-nonzero request visibility rule must stay removed");
 }

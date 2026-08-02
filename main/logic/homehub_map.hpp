@@ -56,9 +56,9 @@ struct HomeHubConcept {
 //   51 power          — the real electrical input. X10A has NO equivalent at all: the dashboard
 //                       ESTIMATES it from CT clamps at an assumed 230 V. Deliberately unpaired —
 //                       pairing a measurement with an estimate would hide which one is which.
-//   1/2/6/7/10/56/57/58, 3, 4, 9, 21/22/23 — setpoints, modes and faults. Trends buffer MEASURED
-//                       rows only (a setpoint sits at its own offset and is not a reading), so no
-//                       concept exists for them.
+//   1/2/6/7/10/57/58, 3, 4, 9, 21/22/23 — setpoints, modes and faults. No paired measurement
+//                       concept exists for them. Offset 56 is the deliberate exception below: it
+//                       gets a state timeline, but not a one-row X10A pairing.
 inline constexpr HomeHubConcept HOMEHUB_CONCEPTS[] = {
     { 40, "leaving_water" },   // LWT PHE     ↔ 0x61/2  pre-BUH heat-exchanger outlet
     { 42, "return_water"  },   // return      ↔ 0x61/8  Inlet water temp. (R4T)
@@ -70,12 +70,43 @@ inline constexpr HomeHubConcept HOMEHUB_CONCEPTS[] = {
 inline constexpr size_t HOMEHUB_CONCEPT_COUNT =
     sizeof(HOMEHUB_CONCEPTS) / sizeof(HOMEHUB_CONCEPTS[0]);
 
+// Histories are a slightly wider contract than source PAIRING. The six measurements above are
+// still paired one-for-one, while Smart-Grid mode is a state assembled from TWO X10A contacts and
+// therefore cannot honestly be attached to either source row as its twin. It can still share one
+// history concept: both sources report the same documented 0..3 enum, and the UI draws their state
+// tracks independently so a disagreement remains visible.
+//
+// Keep this explicit rather than accepting any HomeHub number by label or kind. A state/setpoint
+// costs a 576-byte ring per source only by being named here and in TRENDS.
+struct HomeHubHistory {
+    uint16_t    offset;
+    const char* trend_id;
+};
+inline constexpr HomeHubHistory HOMEHUB_HISTORIES[] = {
+    { 40, "leaving_water"   },
+    { 42, "return_water"    },
+    { 43, "dhw_tank"        },
+    { 44, "outdoor_air"     },
+    { 49, "flow"            },
+    { 50, "room_temp"       },
+    { 56, "smart_grid_mode" },
+};
+inline constexpr size_t HOMEHUB_HISTORY_COUNT =
+    sizeof(HOMEHUB_HISTORIES) / sizeof(HOMEHUB_HISTORIES[0]);
+
 // Stable ring index for one paired measurement concept. The Modbus history recorder and
 // GET /history?source=modbus both use this, so a concept can never be written into one slot and read
 // back from another. Unknown and state-only concepts deliberately resolve to -1.
 inline constexpr int homehub_concept_index(const char* concept_id) {
     for (size_t i = 0; i < HOMEHUB_CONCEPT_COUNT; i++)
         if (trend_cstr_eq(HOMEHUB_CONCEPTS[i].concept_id, concept_id)) return static_cast<int>(i);
+    return -1;
+}
+
+// Stable ring index for every HomeHub history, including the unpaired Smart-Grid state timeline.
+inline constexpr int homehub_history_index(const char* trend_id) {
+    for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++)
+        if (trend_cstr_eq(HOMEHUB_HISTORIES[i].trend_id, trend_id)) return static_cast<int>(i);
     return -1;
 }
 
@@ -151,6 +182,26 @@ constexpr bool homehub_concepts_are_trends() {
     }
     return true;
 }
+constexpr bool homehub_histories_are_valid() {
+    // The first entries must reproduce every paired measurement exactly. This makes the apparent
+    // duplication above mechanically closed: changing a pairing without its history is a build
+    // error, not a missing second line in the browser.
+    if (HOMEHUB_HISTORY_COUNT < HOMEHUB_CONCEPT_COUNT) return false;
+    for (size_t i = 0; i < HOMEHUB_CONCEPT_COUNT; i++) {
+        if (HOMEHUB_HISTORIES[i].offset != HOMEHUB_CONCEPTS[i].offset ||
+            !trend_cstr_eq(HOMEHUB_HISTORIES[i].trend_id, HOMEHUB_CONCEPTS[i].concept_id)) return false;
+    }
+    for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++) {
+        bool trend = false;
+        for (const auto& d : TRENDS)
+            if (trend_cstr_eq(HOMEHUB_HISTORIES[i].trend_id, d.id)) { trend = true; break; }
+        if (!trend) return false;
+        for (size_t j = i + 1; j < HOMEHUB_HISTORY_COUNT; j++)
+            if (HOMEHUB_HISTORIES[i].offset == HOMEHUB_HISTORIES[j].offset ||
+                trend_cstr_eq(HOMEHUB_HISTORIES[i].trend_id, HOMEHUB_HISTORIES[j].trend_id)) return false;
+    }
+    return true;
+}
 // The two vocabularies share ONE namespace — the browser matches an X10A row to a Modbus row on the
 // concept string alone and cannot tell which table produced it. A state id that collided with a
 // trend id would pair a temperature with a flag: the #35-#39 substitution shape, arriving through a
@@ -175,6 +226,8 @@ constexpr bool homehub_offsets_are_distinct() {
 }  // namespace detail
 static_assert(detail::homehub_concepts_are_trends(),
               "a HOMEHUB_CONCEPTS entry names a trend id that logic/history.hpp does not define");
+static_assert(detail::homehub_histories_are_valid(),
+              "HomeHub histories drifted from their paired concepts or name an invalid trend");
 static_assert(detail::homehub_state_ids_are_distinct(),
               "a HOMEHUB_STATES id collides with a trend id or another state id");
 static_assert(detail::homehub_offsets_are_distinct(),

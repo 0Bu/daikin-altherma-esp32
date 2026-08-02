@@ -358,7 +358,9 @@ Body, ordered:
    riser (`--ok` while ON), not as a thermostat demand or heating-only claim; the BUH step is part of the
    **BUH label** ("BUH 1"/"BUH 2", over the existing `--warn` tint — the tint says *on*, the digit
    says how much resistive heat is being paid for), X10A's exact **BSH** flag puts the unbordered
-   `--warn` text "E-heater active" **inside the DHW tank** and animates an independent hot-colour
+   **permanent BSH state pill** inside the DHW tank. Its face always says only "E-heater"/"Heizstab":
+   light grey while inactive or unknown and orange while active. The inspector and accessible name
+   retain the written ON/OFF/unknown state. The active state also animates an independent hot-colour
    overlay on the heater wave (not the hydronic `fCoil` flow overlay), and
    low-noise mode is a pill **on the outdoor unit** beside the defrost pill. BSH is deliberately not
    inferred from BUH, Smart Grid or Powerful DHW: the electric immersion heater can run while the
@@ -383,6 +385,11 @@ Body, ordered:
    `Space heating Operation ON/OFF` therefore reads `Space heating Operation` beside its **ON/OFF**
    value. The exact catalog label remains the identity used by `/values`, MQTT, history,
    selectors and description matching.
+   The system-wide **BOOST pill is permanent for the same reason**. Its face always says only BOOST:
+   mode 2 (Recommended on) changes border/fill/text from light grey to petrol; every other or unknown
+   mode stays light grey. The inspector and accessible name retain the exact manufacturer state. It
+   stays separate from the tank branch because the request is not proof that the controller has
+   started a DHW charge.
    **The schematic never hides.** When the X10A link drops, retained X10A values are never left on
    screen: animations stop, the 3-way-valve label falls back to a bare "3WV" unless the independent
    HomeHub can state its position, and every reading neither source can currently supply blanks to
@@ -674,10 +681,12 @@ Body, ordered:
    numeric rows, and ringing all of them would cost ~38 KB of `.bss` — about a third of the low-water
    free heap measured on the reference board — for curves nobody opened. A value row reached through
    the LIST (§6) gets a chart where a trend already exists and none where it does not.
-   HomeHub adds exactly six second rings — leaving water, return water, DHW tank, outdoor air, flow
-   and room temperature — because those are the measurement concepts both sources structurally pair
-   and the schematic actually draws. Setpoints, states and Modbus-only readings do not acquire a
-   curve by resemblance of their labels.
+   HomeHub adds seven second rings: leaving water, return water, DHW tank, outdoor air, flow and room
+   temperature are the six measurement concepts both sources structurally pair; the seventh is the
+   explicit Smart-Grid-mode state timeline. It renders one light-grey/off track per source with
+   coloured mode-2 spans, lists every sampled Boost interval with start/end and approximate duration,
+   and reports the total sampled Boost time. Other setpoints, states and Modbus-only readings do not
+   acquire a curve by resemblance of their labels.
    The one numeric pill with no chart is the **low-pressure** one, and it is the same honest answer
    as the high-side pill on the *other* leg of its fallback: both are the `0x20` transducer pair,
    which freezes with its page and, on the reference install, has published a flat 0.0 bar from both
@@ -1296,8 +1305,9 @@ enabled/available values are hidden.
   tints its **value** on hover/select in place of a border.
 - **State pill** — a value pill carrying a flag rather than a number, sitting on the component it
   belongs to (§5.3 item 1): `--card` fill, text+border tinted `--ok`/`--warn`/`--flow-cold`/`--brand`
-  while the state is active, `--muted` otherwise. The text always names the state ("Demand off"),
-  never colour alone.
+  while the state is active, `--muted` otherwise. State pills normally name the state ("Demand off").
+  BOOST and Heizstab are the deliberate compact exception: their faces keep only the component name,
+  while the accessible name and inspector spell out the state.
 - **Inspector** — `--brand-tint` panel under the schematic (§5.3 item 3), bordered like a card: an
   uppercase `--muted` title + mono source label on the left, the headline reading on the right, then
   the explainer, the optional trend and a `--line`-divided list of every additional X10A/Modbus
@@ -1395,12 +1405,11 @@ page under near-identical cards). Specific:
   value-description expanders (§5.3 items 4 and 5 — value rows and Model-card rows share one
   builder) are real `<button>`s carrying `aria-expanded`, so they are focusable and toggle on
   Enter/Space with no extra key handling; the slide honours `prefers-reduced-motion`.
-- Contrast AA for text; status never conveyed by colour alone (pills carry text: "Connected",
-  "CRC 3", "off"). The Connections rows (§5.6) are the one deliberate exception to *visible*
-  text — a row shows only a colour-tinted address/name — so the status word that would otherwise
-  be a pill instead goes into the row's `aria-label`, keeping the rule for screen readers and
-  satisfying it programmatically rather than visually. The gear's attention dot follows the same
-  rule: the button's accessible name says how many connections are down.
+- Contrast AA for text; status never conveyed by colour alone (pills normally carry text:
+  "Connected", "CRC 3", "off"). Connections rows (§5.6) and the permanent BOOST/Heizstab pills are
+  deliberate exceptions to *visible* state text: their accessible names spell out the status, and
+  BOOST/Heizstab also expose it in the inspector. The gear's attention dot follows the same rule:
+  the button's accessible name says how many connections are down.
 - Respect `prefers-reduced-motion` (no non-essential transitions).
 
 ## 10. Firmware support required

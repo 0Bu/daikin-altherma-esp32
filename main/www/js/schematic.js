@@ -389,16 +389,17 @@ const SCHEM_PILL_IDS = [
 const ouReadingText = (d, key, n, fmt) =>
   d.ouHeldOver && !(d.mbFields && d.mbFields.has(key)) ? "—" : fmt(n);
 
-// A conditional SVG badge is either an interactive control or absent — never an invisible link.
-// CSS visibility alone is insufficient because an SVG descendant with `pointer-events:all` may
-// still receive a click. Keep pointer suppression (CSS), keyboard order and the accessibility tree
-// on one explicit state. The markup starts unavailable so there is no clickable boot-time window.
-function setSchematicHitAvailable(id, available) {
-  const hit = $(id);
-  if (!hit) return;
-  hit.setAttribute("tabindex", available ? "0" : "-1");
-  if (available) hit.removeAttribute("aria-hidden");
-  else hit.setAttribute("aria-hidden", "true");
+// The compact BOOST/Heizstab pill faces contain only their stable names. Preserve the state in the
+// accessible name as well as in the inspector, so the requested colour-only visual treatment does
+// not make the controls ambiguous to a screen reader.
+function updateSchematicStateA11y(d) {
+  const set = (id, label, state) => {
+    const el = $(id);
+    if (el) el.setAttribute("aria-label", `${label}: ${state}`);
+  };
+  set("gSgRequest", t("schem.sg_boost"), sgModeText(d && d.sgMode));
+  set("gBshState", t("schem.bsh_label"),
+      !d || d.bsh == null ? "—" : t(d.bsh ? "state.on" : "state.off"));
 }
 
 function clearSchematic() {
@@ -410,8 +411,7 @@ function clearSchematic() {
   const sc = $("schem");
   ["fan-on", "pump-on", "buh-on", "bsh-on", "defrost-on", "quiet-on", "sg-boost-on",
    "cooling-mode", "water-neutral"].forEach((c) => sc.classList.remove(c));
-  setSchematicHitAvailable("gBshState", false);
-  setTxt("svSgRequest", "");
+  updateSchematicStateA11y(null);
   sc.classList.add("no-spaceh");       // no flag to show; the pill would otherwise sit stale
   $("schem").querySelectorAll(".sc-flow, .sc-rflow").forEach((el) => el.classList.remove("on", "rev"));
 }
@@ -495,7 +495,6 @@ function renderLive() {
   sc.classList.toggle("buh-on", !!(d.buh1 || d.buh2));
   const bshActive = d.bsh === true;
   sc.classList.toggle("bsh-on", bshActive);
-  setSchematicHitAvailable("gBshState", bshActive);
   sc.classList.toggle("defrost-on", d.defrost === true);
   sc.classList.toggle("quiet-on", d.quiet === true);
   // Water always moves in the same hydraulic direction, but its THERMAL role reverses in cooling:
@@ -504,11 +503,11 @@ function renderLive() {
   const waterKind = waterThermalKind(d, pumping);
   sc.classList.toggle("cooling-mode", waterKind === "cool");
   sc.classList.toggle("water-neutral", waterKind === "neutral");
-  // Mode 2 is evcc's boost / Daikin's Recommended on. The compact marker says only that, without
-  // repeating the Modbus source or implying that DHW is already running. Every non-boost state has
-  // no drawing label; its exact manufacturer name remains available in the HomeHub row.
-  setTxt("svSgRequest", sgRequestText(d.sgMode));
+  // Mode 2 is evcc's boost / Daikin's Recommended on. The permanent pill changes colour without
+  // implying that DHW is already running. The exact manufacturer mode remains written in the
+  // HomeHub row, inspector and accessible name.
   sc.classList.toggle("sg-boost-on", d.sgMode === 2);
+  updateSchematicStateA11y(d);
   // A BSH row is itself evidence that this profile has a DHW tank, even if its temperature did not
   // answer in this snapshot. Keep the branch visible so the active heater cannot disappear with it.
   sc.classList.toggle("no-dhw", d.tank == null && d.bsh == null);
@@ -628,6 +627,7 @@ const INSPECT = {
   },
   sgrequest: {
     t: { en: "Smart-Grid request via Modbus", de: "Smart-Grid-Anforderung über Modbus" },
+    trend: "smart_grid_mode",
     what: {
       en: "The external Smart-Grid request read back from the HomeHub: Free running, Forced off, Recommended on or Forced on. It is an energy-management command, not the outdoor unit's heating/cooling mode and not proof that a requested tank charge has started.",
       de: "Die vom HomeHub zurückgelesene externe Smart-Grid-Anforderung: Freier Betrieb, Zwangsabschaltung, Empfehlung ein oder Erzwungen ein. Das ist ein Energiemanagement-Befehl und nicht der Heiz- oder Kühlmodus der Außeneinheit. Ebenso wenig belegt er, dass eine angeforderte Speicherladung bereits begonnen hat.",
@@ -1242,8 +1242,9 @@ function renderInspectHist(e, row) {
   const pair = MB_PAIRS.find((p) => p.insp === S.insp);
   const pairedId = pair && hasModbusHist(pair.cid) ? pair.cid : "";
   const trendId = e && typeof e.trend === "function" ? e.trend(S.live) : e && e.trend;
-  const id = row ? histIdFor(row.label)
-           : pairedId || (trendId && hasHist(trendId) ? trendId : "");
+  const explicitId = trendId && (hasHist(trendId) || hasModbusHist(trendId)) ? trendId : "";
+  const id = row ? histIdFor(row.label) || explicitId
+           : pairedId || explicitId;
   if (id) ensureHistPair(id);              // throttled to once a minute inside; no-op once cached
   const h = id ? S.hist.get(id) : null;
   const mh = id ? S.hist.get(histCacheKey(id, "modbus")) : null;
@@ -1266,7 +1267,7 @@ function renderInspectHist(e, row) {
   el.innerHTML = !id ? ""
     : row ? histHtml(id, displayUnit(row), displayReadingLabel(row.label))
     : pairedId ? histHtml(id, mb ? displayUnit(mb) : "", mb ? displayHomeHubLabel(mb) : inspTitleText(e, null))
-               : histHtml(id, DERIVED[id].unit, e.aria ? tx(e.aria) : inspTitleText(e, null));
+               : histHtml(id, DERIVED[id]?.unit || "", e.aria ? tx(e.aria) : inspTitleText(e, null));
 }
 
 function renderInspect() {
@@ -1402,6 +1403,7 @@ function labelSchematicHits() {
     ttl.textContent = name;
   });
   $("inspClose").setAttribute("aria-label", t("insp.close"));
+  updateSchematicStateA11y(S.live);
 }
 
 // Tap a hit target: select it, or close it when it is already open (tapping the same thing twice is

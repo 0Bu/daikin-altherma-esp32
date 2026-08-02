@@ -3,13 +3,14 @@
 // rather than a repeat of one.
 //
 // The firmware keeps a fixed-cadence ring per trended X10A/board row and serves it from GET
-// /history; history.cpp also instantiates six rings for the structurally paired HomeHub concepts in
-// homehub_map.hpp. The web UI draws either or both under a value row's explainer. Everything that
+// /history; history.cpp also instantiates seven rings for the HomeHub histories in homehub_map.hpp:
+// the six structurally paired measurements plus the Smart-Grid mode. The web UI draws either or
+// both under a value row's explainer. Everything that
 // decides *what* is trended and *whether an X10A sample counts* lives here rather than at the call
 // site, for the same reason lwt_select.hpp and ou_stale.hpp do: the rule runs against the generated
 // def/ profile tables, which are C++, so the CI logic-test can gate it against the whole catalog
 // instead of one profile someone happened to own. Adding an X10A trend is one row in TRENDS below;
-// a HomeHub history must instead be one of HOMEHUB_CONCEPTS, so labels cannot expand the contract.
+// a HomeHub history must instead be one of HOMEHUB_HISTORIES, so labels cannot expand the contract.
 //
 // ── Why a trend is a LOCATOR and not a label ────────────────────────────────────────────────────
 // A trend names the row it buffers by (register page, byte offset, unit) — never by its text. The
@@ -99,12 +100,14 @@ constexpr bool trend_cstr_eq(const char* a, const char* b) {
 // display label: labels differ per profile and would make a bookmarked/scripted request model-
 // specific, while the id is the concept.
 //
-// Two kinds of trend, in one table and one id space so the ring array, the route and the browser
-// stay generic over all of them. A Row trend is a decoded X10A reading found by the locator; a BOARD
-// trend is the ESP32's own memory, which has no register, no profile and no held-over state — it is
-// sampled directly by the recorder on the same cadence.
+// Three kinds of trend, in one table and one id space so the ring array, the route and the browser
+// stay generic over all of them. A Row trend is a decoded X10A reading found by the locator; the
+// Smart-Grid mode combines two structurally identified contact bits; a BOARD trend is the ESP32's
+// own memory, which has no register, no profile and no held-over state — it is sampled directly by
+// the recorder on the same cadence.
 enum class TrendKind : uint8_t {
     Row,        // a decoded value from the poll cache, addressed by (reg, off, unit)
+    SmartGridMode, // four-state combination of X10A Smart-Grid contact 1 + contact 2
     FreeHeap,   // esp_get_free_heap_size()
     MaxAlloc,   // largest CONTIGUOUS free block — the real OOM ceiling on this board
 };
@@ -115,9 +118,10 @@ enum class TrendKind : uint8_t {
 // a type code so this header stays free of convert.hpp; the catalog test checks the two agree.
 //
 // `label` is EMPTY for a Row — which profile row it resolved to is discovered at runtime, and its
-// label is how the browser attaches the series to the value row it is already drawing. A board trend
-// has no profile to ask, so it carries its own fixed English label (like every catalog label, and
-// for the same reason: /status and /history are read by scripts as well as by this UI).
+// label is how the browser attaches the series to the value row it is already drawing. A derived
+// state or board trend has no single profile row to ask, so it carries its own fixed English label
+// (like every catalog label, and for the same reason: /status and /history are read by scripts as
+// well as by this UI).
 struct TrendDef {
     const char* id;
     TrendKind   kind;
@@ -174,6 +178,13 @@ inline constexpr TrendDef TRENDS[] = {
     { "ct_l1",            TrendKind::Row, 0x63, 14, "",    "" },
     { "ct_l2",            TrendKind::Row, 0x63, 15, "",    "" },
     { "ct_l3",            TrendKind::Row, 0x63, 16, "",    "" },
+    // A STATE timeline rather than a numeric sensor curve. X10A exposes the mode through two
+    // independent contact bits, so no single catalog row can be its locator. The recorder combines
+    // both structurally identified rows into the documented 0..3 mode and stores it in tenths like
+    // every other series (0/10/20/30 on the wire). Mode 2 is Boost in the browser. Keeping the full
+    // enum preserves Forced off/Forced on for the scrub readout and lets the independent HomeHub
+    // mode use the same concept without erasing disagreements.
+    { "smart_grid_mode",   TrendKind::SmartGridMode, 0, 0, "", "Smart Grid operation mode" },
     // The BOARD's own memory. Not a plant reading, and here for the reason the single numbers on
     // /status could never answer: whether the heap is DRIFTING. A leak or a creeping fragmentation
     // shows as a slope over hours and is invisible in any one sample, which is why the spot figures
@@ -183,7 +194,7 @@ inline constexpr TrendDef TRENDS[] = {
     { "max_alloc",        TrendKind::MaxAlloc, 0, 0, "KiB", "Largest free block" },
 };
 constexpr size_t TREND_COUNT = sizeof(TRENDS) / sizeof(TRENDS[0]);
-// 18 trends = 10368 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
+// 19 trends = 10944 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
 // ceiling is a deliberate stop sign, not a hardware limit: .bss does not compete for the largest
 // CONTIGUOUS free block, which is what actually binds on this board, so the cost of a trend is a
 // few per cent of free heap and nothing at all of the fragmentation budget. Raise it only with the
@@ -206,7 +217,7 @@ constexpr size_t TREND_COUNT = sizeof(TRENDS) / sizeof(TRENDS[0]);
 // about; the difference is that each ring also costs its own size AGAIN in the flash image. Worth
 // knowing before anyone adds trends by the dozen.
 static_assert(TREND_COUNT * HISTORY_BYTES_PER_TREND <= 11520,
-              "trend buffers are .bss on a heap-tight board — justify the growth before raising this");
+              "trend buffers are static data on a heap-tight board — justify growth before raising this");
 
 // A board metric in bytes, as the ring stores it: tenths of a KiB (~102-byte resolution, finer than
 // anything worth reading off a 24-hour chart). CLAMPED, never wrapped: the ring is int16, so this
@@ -367,6 +378,17 @@ constexpr HistorySample history_store(bool has_value, int value_tenths, unsigned
     return ou_reading_held_over(reg, rps_known, rps_running) ? HISTORY_HELD_OVER
          : !has_value                                        ? HISTORY_NO_READING
          : static_cast<HistorySample>(value_tenths);
+}
+
+// The two X10A Smart-Grid contacts form one four-state mode:
+//   c1/c2 = 00 free, 01 forced off, 10 recommended on (Boost), 11 forced on.
+// Store the enum in TENTHS because /history has one numeric wire contract for every series. Unknown
+// is absence, never mode 0: one missing contact cannot prove that the controller is freely running.
+constexpr HistorySample history_smart_grid_mode(bool c1_known, bool c1_on,
+                                                bool c2_known, bool c2_on) {
+    if (!c1_known || !c2_known) return HISTORY_NO_READING;
+    const int mode = c1_on ? (c2_on ? 3 : 2) : (c2_on ? 1 : 0);
+    return static_cast<HistorySample>(mode * 10);
 }
 
 // A reading in tenths of its unit, parsed back from the FORMATTED string the poll cache holds.
