@@ -1141,8 +1141,11 @@ Three layers keep the WiFi station link up:
 
 The Home Assistant bridge:
 
-- **Read-only** — no command topics. The firmware only mirrors telemetry; it never actuates
-  the heat pump, so there is nothing to subscribe to. On X10A that is the protocol's own doing (it has
+- **Read-only** — no command topics. The firmware mirrors telemetry and never actuates the heat
+  pump. One optional exact-topic subscription captures and qualifies a reference-temperature input,
+  but no averaging or control path reads it. A configured payload timestamp (RFC3339 or Unix
+  seconds) supplies age across retained delivery and restarts; without one, only a non-retained live
+  delivery may age from monotonic MQTT arrival. On X10A the read-only boundary is the protocol's own doing (it has
   no write command). On the **optional Modbus TCP link to a Daikin HomeHub** the wire *would* allow a
   write, and it is still read-only **by design**: the firmware reads registers and publishes them, and
   no MQTT subscribe, command topic, HA value entity or HTTP write route exists to reach the pump
@@ -1159,8 +1162,9 @@ The Home Assistant bridge:
   profile), so the freed `entity_id` is reclaimed by the new entity and its recorder history and
   long-term statistics carry over. The device contains X10A values plus board/link diagnostics;
   HomeHub register values remain MQTT-only.
-- **Own publish task + esp-mqtt client.** The event handler only flips status flags; all publishing
-  happens in the task, so the mqtt event loop is never blocked by string building.
+- **Own publish task + esp-mqtt client.** The event handler flips status flags and copies a configured
+  reference payload into one bounded queue; JSON parsing, string work and all publishing happen in
+  the task, so the mqtt event loop is never blocked by either.
 - **Discovery is streamed.** A full Altherma value set can be 30–40+ entities; the bridge emits one
   entity's discovery config at a time (retained) on (re)connect, so it never needs one large
   contiguous heap block — the same memory discipline as the rest of the firmware. Layout-marker

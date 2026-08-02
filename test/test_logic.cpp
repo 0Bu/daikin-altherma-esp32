@@ -51,6 +51,7 @@
 #include "logic/ou_stale.hpp"
 #include "logic/cop_scope.hpp"
 #include "logic/mqtt_uri.hpp"
+#include "logic/reference_temperature.hpp"
 #include "logic/modbus.hpp"
 #include "logic/modbus_snapshot.hpp"
 #include "logic/query_flag.hpp"
@@ -4177,6 +4178,8 @@ static void test_config_store() {
     CHECK(b.mqtt_uri == a.mqtt_uri && b.mqtt_user == a.mqtt_user && b.mqtt_pass == a.mqtt_pass);
     CHECK(b.syslog_host == a.syslog_host && b.syslog_port == 514);
     CHECK(b.ntp_server == a.ntp_server);
+    CHECK(b.has_ref_temp && b.ref_temp_name.empty() && b.ref_temp_topic.empty() && b.ref_temp_path.empty());
+    CHECK(b.ref_temp_time_path.empty() && b.ref_temp_max_age_s == 600);
 
     // The other flag combination, and a negative-looking port stored as-is.
     ConfigBlob c; c.wifi_rolled_back = true; c.wifi_rollback_active = false; c.syslog_port = 65535;
@@ -4220,7 +4223,7 @@ static void test_config_store() {
     board.led_gpio = 35; board.led_type = 1; board.led_inverted = false;
     board.btn_gpio = 41; board.btn_active_low = true;
     std::vector<uint8_t> bb = config_blob_serialize(board);
-    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 6);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 8);
     ConfigBlob rt;
     CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
     CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
@@ -4242,12 +4245,13 @@ static void test_config_store() {
     // user's WiFi and MQTT credentials on the upgrade. It must decode, and it must report
     // has_board == false so the caller seeds the Kconfig defaults instead of reading "absent" as
     // "indicator disabled" (which would silently darken every XIAO's LED).
-    std::vector<uint8_t> v1 = buf;                       // `buf` is serialized as v6 by this build,
+    std::vector<uint8_t> v1 = buf;                       // `buf` is serialized as v8 by this build,
     // so build a genuine v1 body: header + the v1 fields only, by dropping every trailing block that
     // precedes the CRC — the 13-byte v2 board block (3x u32 + 1 flag byte), the 1-byte v3 channel,
     // the 1-byte v4 language and the 11-byte v5 HomeHub block (empty mb_host [2] + mb_port u32 +
-    // mb_unit_id u32 + 1 flag byte) = 26 bytes.
-    v1.erase(v1.end() - 4 - 26, v1.end() - 4);
+    // mb_unit_id u32 + 1 flag byte), three empty v7 strings (6 bytes), and the empty v8 timestamp
+    // path + max-age u32 (6 bytes) = 38 bytes.
+    v1.erase(v1.end() - 4 - 38, v1.end() - 4);
     v1[4] = 1;
     restamp(v1);
     ConfigBlob legacy;
@@ -4256,10 +4260,10 @@ static void test_config_store() {
     CHECK(!legacy.has_board);
     CHECK(legacy.wifi_ssid == a.wifi_ssid && legacy.mqtt_uri == a.mqtt_uri);   // v1 payload intact
     CHECK(legacy.led_gpio == -1);                        // the struct default, not the 999 sentinel
-    // A TRUNCATED v6 must not decode as a valid older blob with silently-default values: the version
-    // byte still says 6, so the missing HomeHub block is caught by the length rule, not papered over.
+    // A TRUNCATED v8 must not decode as a valid v7 blob with silently-default freshness fields: the
+    // version byte still says 8, so the missing timestamp/max-age block is caught.
     std::vector<uint8_t> trunc = bb;
-    trunc.erase(trunc.end() - 4 - 11, trunc.end() - 4);   // drop the 11-byte v5 HomeHub block
+    trunc.erase(trunc.end() - 4 - 6, trunc.end() - 4);    // drop empty v8 path + max-age u32
     restamp(trunc);
     CHECK(!config_blob_deserialize(trunc.data(), trunc.size(), out));
 
@@ -4277,7 +4281,7 @@ static void test_config_store() {
     // would be a spectacularly bad trade. has_ota == false is how the caller tells "no channel
     // stored" from "explicitly release"; both mean release, only the diag line differs.
     std::vector<uint8_t> v2 = bb;
-    v2.erase(v2.end() - 4 - 13, v2.end() - 4);           // drop the v3 channel + v4 language + v5 block
+    v2.erase(v2.end() - 4 - 25, v2.end() - 4);           // drop v3/v4/v5/v7/v8 blocks
     v2[4] = 2;
     restamp(v2);
     ConfigBlob pre;
@@ -4301,7 +4305,7 @@ static void test_config_store() {
     // v3 blob and must still decode — the channel survives, and the absent language reads as auto
     // (has_lang == false, ui_lang == 0), so the browser keeps auto-detecting exactly as before.
     std::vector<uint8_t> v3 = lbv;
-    v3.erase(v3.end() - 4 - 12, v3.end() - 4);           // drop the v4 language + the v5 HomeHub block
+    v3.erase(v3.end() - 4 - 24, v3.end() - 4);           // drop v4/v5/v7/v8 blocks
     v3[4] = 3;
     restamp(v3);
     ConfigBlob prel;
@@ -4318,7 +4322,7 @@ static void test_config_store() {
     mb.mb_host = "homehub-524288-abc.local";
     mb.mb_port = 502; mb.mb_unit_id = 3; mb.actuation_enabled = true; mb.homehub_enabled = true;
     std::vector<uint8_t> mbb = config_blob_serialize(mb);
-    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 6);
+    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 8);
     ConfigBlob mrt;
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
     CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-abc.local");
@@ -4338,6 +4342,7 @@ static void test_config_store() {
     // Current v5 firmware wrote the old enable bit as zero. Upgrading that blob must select Auto,
     // not Off: only v6 can prove the user deliberately disabled discovery.
     std::vector<uint8_t> v5 = mbb;
+    v5.erase(v5.end() - 4 - 12, v5.end() - 4);           // v5 predates the v7 + v8 blocks
     v5[4] = 5;
     v5[v5.size() - 5] &= static_cast<uint8_t>(~2u);      // HomeHub flag byte immediately before CRC
     restamp(v5);
@@ -4348,7 +4353,7 @@ static void test_config_store() {
     // language byte) must decode, report has_modbus == false and leave the mb_* struct defaults
     // (X10A / 502 / 1) — the same trade v1/v2/v3 already refuse to make.
     std::vector<uint8_t> v4 = mbb;
-    v4.erase(v4.end() - 4 - 11, v4.end() - 4);           // drop the 11-byte v5 block (empty host)
+    v4.erase(v4.end() - 4 - 23, v4.end() - 4);           // drop v5 + empty v7/v8 blocks
     v4[4] = 4;
     restamp(v4);
     ConfigBlob v4rt;
@@ -4356,6 +4361,86 @@ static void test_config_store() {
     CHECK(config_blob_deserialize(v4.data(), v4.size(), v4rt));
     CHECK(!v4rt.has_modbus && v4rt.mb_port == 502 && v4rt.mb_unit_id == 1);
     CHECK(v4rt.has_lang && v4rt.has_ota && v4rt.wifi_ssid == "net");   // the v4 payload is intact
+
+    // ── v7/v8: exact MQTT mapping, source timestamp and freshness ──────────────────────────────
+    ConfigBlob ref;
+    ref.wifi_ssid = "net";
+    ref.ref_temp_name = "Shelly test";
+    ref.ref_temp_topic = "shelly1pmminig4-fixture00003/status/switch:0";
+    ref.ref_temp_path = "temperature.tC";
+    ref.ref_temp_time_path = "thermostat.read_at";
+    ref.ref_temp_max_age_s = 900;
+    const std::vector<uint8_t> refb = config_blob_serialize(ref);
+    ConfigBlob refrt;
+    CHECK(config_blob_deserialize(refb.data(), refb.size(), refrt));
+    CHECK(refrt.has_ref_temp && refrt.ref_temp_name == ref.ref_temp_name);
+    CHECK(refrt.ref_temp_topic == ref.ref_temp_topic && refrt.ref_temp_path == ref.ref_temp_path);
+    CHECK(refrt.ref_temp_time_path == ref.ref_temp_time_path && refrt.ref_temp_max_age_s == 900);
+
+    // The hardware-tested capture slice wrote v7 with only name/topic/value-path. It must migrate
+    // in place: keep that mapping, add no imaginary timestamp path, and use the 10-minute default.
+    std::vector<uint8_t> v7 = refb;
+    v7.erase(v7.end() - 4 - (2 + ref.ref_temp_time_path.size() + 4), v7.end() - 4);
+    v7[4] = 7;
+    restamp(v7);
+    ConfigBlob v7rt;
+    CHECK(config_blob_deserialize(v7.data(), v7.size(), v7rt));
+    CHECK(v7rt.has_ref_temp && v7rt.ref_temp_topic == ref.ref_temp_topic);
+    CHECK(v7rt.ref_temp_time_path.empty() && v7rt.ref_temp_max_age_s == 600);
+
+    // A genuine v6 blob still carries every earlier setting and reports the new mapping absent.
+    std::vector<uint8_t> v6 = mbb;
+    v6.erase(v6.end() - 4 - 12, v6.end() - 4);
+    v6[4] = 6;
+    restamp(v6);
+    ConfigBlob v6rt;
+    CHECK(config_blob_deserialize(v6.data(), v6.size(), v6rt));
+    CHECK(v6rt.has_modbus && !v6rt.has_ref_temp && v6rt.ref_temp_topic.empty());
+}
+
+static void test_reference_temperature_config() {
+    const char* why = nullptr;
+    CHECK(reference_temperature_config_valid("Shelly test",
+          "shelly1pmminig4-fixture00003/status/switch:0", "temperature.tC", "", 600, &why));
+    CHECK(reference_temperature_config_valid("Meross", "meross/mts200b/id/state",
+          "thermostat.current_temperature_c", "thermostat.read_at", 600, &why));
+    CHECK(reference_temperature_config_valid("", "", "", "", 600, &why));  // empty topic = disabled
+    CHECK(!reference_temperature_config_valid("x", "sensors/+/temperature", "temperature.tC", "", 600, &why));
+    CHECK(std::string(why) == "MQTT topic must be exact (no + or # wildcard)");
+    CHECK(!reference_temperature_config_valid("x", "/sensors/room", "temperature.tC", "", 600, &why));
+    CHECK(!reference_temperature_config_valid("x", "sensors/room/", "temperature.tC", "", 600, &why));
+    CHECK(!reference_temperature_config_valid("x", "sensors/room", "temperature..tC", "", 600, &why));
+    CHECK(std::string(why) == "JSON path contains an empty key");
+    CHECK(!reference_temperature_config_valid("x", "sensors/room", "temperature.tC", "read..at", 600, &why));
+    CHECK(!reference_temperature_config_valid("x", "sensors/room", "temperature. tC", "", 600, &why));
+    CHECK(!reference_temperature_config_valid("x", "sensors/room", "temperature.tC", "", 9, &why));
+    CHECK(std::string(why) == "Maximum age must be between 10 and 3600 seconds");
+    CHECK(!reference_temperature_config_valid(std::string(REF_TEMP_NAME_MAX + 1, 'x'),
+                                               "sensors/room", "temperature.tC", "", 600, &why));
+
+    int64_t unix_s = -1;
+    CHECK(reference_parse_rfc3339("2026-08-02T08:35:12.792902415Z", unix_s));
+    CHECK(unix_s == 1785659712);
+    int64_t offset_s = -1;
+    CHECK(reference_parse_rfc3339("2026-08-02T10:35:12+02:00", offset_s));
+    CHECK(offset_s == unix_s);
+    CHECK(reference_parse_rfc3339("2024-02-29T12:04:56Z", unix_s));
+    CHECK(!reference_parse_rfc3339("2023-02-29T12:04:56Z", unix_s));
+    CHECK(!reference_parse_rfc3339("2026-08-02T08:35:12", unix_s));  // timezone is mandatory
+    CHECK(!reference_parse_rfc3339("2026-08-02T08:35:12.1234567890Z", unix_s));
+
+    ReferenceFreshness fresh = reference_freshness(true, true, true, 1000, 0, 1030, 0, 600);
+    CHECK(fresh.fresh && fresh.age_known && fresh.age_s == 30);
+    ReferenceFreshness stale = reference_freshness(true, true, true, 1000, 0, 1701, 0, 600);
+    CHECK(!stale.fresh && stale.age_known && stale.age_s == 701 && std::string(stale.reason) == "stale");
+    ReferenceFreshness replay = reference_freshness(true, true, false, -1, 5000, 2000, 6000, 600);
+    CHECK(!replay.fresh && !replay.age_known && std::string(replay.reason) == "retained_without_timestamp");
+    ReferenceFreshness live = reference_freshness(true, false, false, -1, 5000, -1, 65000, 600);
+    CHECK(live.fresh && live.age_s == 60);
+    ReferenceFreshness unsynced = reference_freshness(true, false, true, 1000, 0, -1, 0, 600);
+    CHECK(!unsynced.fresh && std::string(unsynced.reason) == "clock_unsynced");
+    ReferenceFreshness future = reference_freshness(true, false, true, 1100, 0, 1000, 0, 600);
+    CHECK(!future.fresh && std::string(future.reason) == "future_timestamp");
 }
 
 static void test_mcp() {
@@ -8166,6 +8251,7 @@ int main() {
     test_query_flag();
     test_redact();
     test_config_store();
+    test_reference_temperature_config();
     test_mcp();
     test_http_surface();
     test_lwt_select();

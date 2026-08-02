@@ -170,7 +170,8 @@ function firmwareRow(version) {
     `<span class="otastat" id="otaStatSet" role="status" aria-live="polite"></span></span></button>`;
 }
 
-// ESP32 board settings (on the Settings screen — renderSettings): THREE cards, split from what was
+// Settings cards rendered below Connections: the dynamic-LWT project plus THREE ESP32-family cards,
+// the latter split from what was
 // one, so each answers one question. ESP32 = the board itself (its onboard hardware and its own
 // health — uptime + the two memory curves). Protokoll = the X10A link (whether the bus answers, the
 // framing it speaks, and the RX/TX pins). Firmware = the running version, the update feed it follows,
@@ -213,7 +214,47 @@ function esp32CardHtml() {
     firmwareRow(s.version) +
     channelRow(s.ota?.channel === "dev" ? "dev" : "release") +
     langRow(s.ui?.lang === "de" || s.ui?.lang === "en" ? s.ui.lang : "auto");
-  return vcard("ESP32", esp32Rows) + vcard(t("card.proto_title"), protoRows) + vcard(t("card.fw_title"), fwRows);
+  return dynamicControlCardHtml() + vcard("ESP32", esp32Rows) +
+         vcard(t("card.proto_title"), protoRows) + vcard(t("card.fw_title"), fwRows);
+}
+
+// The permanent Settings home for the dynamic-LWT project. Only its first row family is live today:
+// one MQTT room-temperature source in observation mode. Forecast, strategy and output are explicit
+// neighbours now, so later phases extend this card instead of growing unrelated top-level settings.
+// None of the labels below claims control: the fixed operating mode is Observe and output is read-only.
+function dynamicControlCardHtml() {
+  const r = S.status?.reference_temperature || {};
+  const mqtt = S.status?.mqtt || {};
+  let badgeCls = "dim";
+  let source = t("dyn.not_configured"), sourceCls = "dim";
+  if (r.configured) {
+    source = t("dyn.one_source");
+    if (!mqtt.configured) { source += ` · ${t("ref.broker_off")}`; sourceCls = "err"; badgeCls = "err"; }
+    else if (r.error) { source += ` · ${t("dyn.input_error")}`; sourceCls = "err"; badgeCls = "err"; }
+    else if (r.has_value) {
+      const value = Number(r.temperature_c).toLocaleString(LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 2 });
+      const seconds = Number.isFinite(r.age_s) ? r.age_s : r.received_ago_s;
+      const age = seconds < 2 ? t("ref.now") : t("ref.ago", seconds);
+      source += ` · ${value} °C · ${age}`;
+      if (r.retained) source += ` · ${t("ref.retained")}`;
+      if (r.fresh) { sourceCls = "ok"; badgeCls = "ok"; }
+      else {
+        const reason = r.freshness_reason === "clock_unsynced" ? t("ref.clock_unsynced") :
+          r.freshness_reason === "retained_without_timestamp" ? t("ref.time_untrusted") : t("ref.stale");
+        source += ` · ${reason}`;
+        sourceCls = "warn"; badgeCls = "warn";
+      }
+    } else { source += ` · ${t("ref.waiting")}`; sourceCls = "warn"; }
+  }
+  let rows = vrow(t("dyn.mode"), t("dyn.observe"));
+  rows += `<button class="vrow vrow-btn dynamic-source-row" type="button" data-act="ref-temp" ` +
+    `aria-label="${esc(t("ref.title"))}"><span class="vrow-label">${esc(t("dyn.room_sources"))}</span>` +
+    `<span class="vrow-val settings-wrap ${sourceCls}">${esc(source)} ${editIcon}</span></button>`;
+  rows += vrow(t("dyn.weather"), t("dyn.not_configured"), { cls: "dim" });
+  rows += vrow(t("dyn.strategy"), t("dyn.inactive"), { cls: "dim" });
+  rows += vrow(t("dyn.safety"), t("dyn.read_only"));
+  if (r.error) rows += vrow(t("ref.error"), r.error, { cls: "err settings-wrap" });
+  return vcard(t("dyn.card"), rows, t("dyn.capture"), badgeCls);
 }
 
 // How long the board has been up (/status.uptime_s — seconds since boot, esp_timer). TWO units at
@@ -633,8 +674,8 @@ function connectionsHtml() {
 const connDown = () => connLinks().filter((l) => l.cls === "err");
 
 // ── Settings screen (behind the header gear) ─────────────────────────────────────────────────
-// The whole configuration on one screen, no menu level in between: the Connections tile and the
-// ESP32 / Protocol / Firmware cards rendered together by esp32CardHtml().
+// The whole configuration on one screen, no menu level in between: Connections, dynamic LWT, then
+// ESP32 / Protocol / Firmware, with the latter four rendered together by esp32CardHtml().
 function renderSettings() {
   // Both containers are rebuilt on every poll (link state, pins and the OTA row all change). The
   // Protocol card's RX/TX pin dropdown is interactive, so skip the rebuild while it is focused/open — otherwise the

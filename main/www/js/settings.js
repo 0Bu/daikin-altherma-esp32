@@ -67,6 +67,41 @@ const validMqtt = (h) => {
   return !h || /^[\w.\-]+:\d{2,5}$/.test(h) || /^(mqtts?|wss?):\/\/[\w.\-]+(:\d{2,5})?(\/\S*)?$/.test(h);
 };
 
+// ── Dynamic LWT · first room-temperature source ─────────────────────────
+// One observation profile for now: friendly name, exact topic, numeric value path, optional source
+// timestamp path and a freshness limit. Calibration/roles/control remain later Dyn-Control fields.
+// It is presented as an Observe-mode input under the permanent dynamic-control Settings card. The
+// Shelly mapping is a first-open TEST preset, never a firmware-wide default subscription.
+const REF_TEMP_TEST_TOPIC = "shelly1pmminig4-fixture00003/status/switch:0";
+function fillRefTemp() {
+  const r = S.status?.reference_temperature || {};
+  const configured = !!r.configured;
+  // Keep an explicitly disabled profile empty when it is reopened. A stored name is the marker;
+  // only a genuinely untouched mapping gets the Shelly transport-test preset.
+  const saved = configured || !!r.name || !!r.temperature_path || !!r.timestamp_path;
+  $("rtName").value = saved ? (r.name || "") : "Shelly 1PM Mini G4 · Test";
+  $("rtTopic").value = saved ? (r.topic || "") : REF_TEMP_TEST_TOPIC;
+  $("rtPath").value = saved ? (r.temperature_path || "") : "temperature.tC";
+  $("rtTimePath").value = saved ? (r.timestamp_path || "") : "";
+  $("rtMaxAge").value = Number.isInteger(r.max_age_s) ? r.max_age_s : 600;
+}
+function openRefTemp() {
+  fillRefTemp();
+  for (const id of ["rtName", "rtTopic", "rtPath", "rtTimePath", "rtMaxAge"])
+    $(id).classList.remove("invalid");
+  $("rtError").hidden = true;
+  $("refTempModal").hidden = false;
+  const topic = $("rtTopic");
+  topic.focus();
+  topic.setSelectionRange(0, 0);
+  topic.scrollLeft = 0;
+}
+function closeRefTemp() { $("refTempModal").hidden = true; }
+const validRefTopic = (v) => !v || (v.length <= 192 && v[0] !== "/" && !v.endsWith("/") &&
+                                      !/[+#\x00-\x1f\x7f]/.test(v));
+const validRefPath = (v) => v.length <= 128 && v.split(".").every((key) =>
+  key.length > 0 && key.length <= 64 && !/[\s\x00-\x1f\x7f]/.test(key));
+
 // ── Syslog (edit modal) ────────────────────────────────────────────────────
 function fillSyslog() {
   const sy = S.status?.syslog || {};

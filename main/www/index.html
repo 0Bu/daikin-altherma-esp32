@@ -626,10 +626,9 @@
     </section>
 
     <!-- ═══ SETTINGS (reached from the header gear) ═══
-         The device's configuration, on ONE screen — no menu level in between: the Connections tile
-         (populated by connectionsHtml()) and the three ESP32 board cards (esp32CardHtml() emits them
-         as one string — ESP32 board health, the Protokoll/X10A link + pin picker, and the Firmware
-         card with the version/OTA row, update channel and UI-language picker). -->
+         The device's configuration, on ONE screen — no menu level in between: Connections, the
+         dynamic-LWT project's permanent card, then the three ESP32-family cards. esp32CardHtml()
+         emits the latter four as one string so their live summaries update together. -->
     <section class="view" id="viewSettings">
       <div class="pad">
         <div class="conn-tile" id="connTile"></div>
@@ -702,6 +701,40 @@
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="mqCancel" data-i18n="btn.cancel">Cancel</button>
         <button class="btn primary" type="submit" id="mqBtn" data-i18n="btn.save">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ═══ Room-temperature MQTT source (first qualified input of dynamic LWT) ═══ -->
+  <div class="modal" id="refTempModal" hidden>
+    <div class="modal-backdrop" id="refTempBackdrop"></div>
+    <form class="modal-card" id="refTempForm" role="dialog" aria-modal="true" aria-labelledby="refTempModalTitle">
+      <div class="section-label card-title" id="refTempModalTitle" data-i18n="ref.title">Room-temperature source</div>
+      <label class="field">
+        <span class="field-label plain" data-i18n="ref.name">Name</span>
+        <input class="input" name="name" id="rtName" maxlength="48" placeholder="Living room" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label plain" data-i18n="ref.topic">MQTT topic</span>
+        <input class="input mono" name="topic" id="rtTopic" maxlength="192" placeholder="sensor/living-room/status" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label plain" data-i18n="ref.path">Temperature JSON path</span>
+        <input class="input mono" name="temperature_path" id="rtPath" maxlength="128" placeholder="temperature.tC" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label plain" data-i18n="ref.time_path">Timestamp JSON path · optional</span>
+        <input class="input mono" name="timestamp_path" id="rtTimePath" maxlength="128" placeholder="thermostat.read_at" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label plain" data-i18n="ref.max_age">Maximum age · seconds</span>
+        <input class="input" type="number" name="max_age_s" id="rtMaxAge" min="10" max="3600" step="1" value="600" inputmode="numeric">
+      </label>
+      <p class="hint err" id="rtError" hidden></p>
+      <p class="hint" data-i18n="ref.hint">The ESP32 subscribes to this exact topic and reads the numeric temperature plus an optional RFC3339 or Unix-seconds source timestamp. Retained values require a source timestamp to be fresh; a live value without one ages from MQTT arrival. Leave the topic empty to disable capture. The Shelly example is its internal device temperature and is only a transport test.</p>
+      <div class="modal-actions">
+        <button class="btn secondary" type="button" id="rtCancel" data-i18n="btn.cancel">Cancel</button>
+        <button class="btn primary" type="submit" id="rtBtn" data-i18n="ref.save_test">Save and test</button>
       </div>
     </form>
   </div>

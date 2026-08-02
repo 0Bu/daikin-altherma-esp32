@@ -165,6 +165,7 @@ function wireRestOfApp() {
     if (!act) return;
     if (act.dataset.act === "board") openBoard();
     else if (act.dataset.act === "ota") checkFirmwareUpdate();
+    else if (act.dataset.act === "ref-temp") openRefTemp();
   });
   $("settingsCards").addEventListener("change", (e) => {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();
@@ -305,6 +306,57 @@ function wireRestOfApp() {
   $("mqClearCreds").addEventListener("change", (e) => {
     setMqttClear(e.target.checked);
     $("mqBroker").classList.remove("invalid"); $("mqError").hidden = true;
+  });
+
+  $("rtCancel").onclick = closeRefTemp;
+  $("refTempBackdrop").onclick = closeRefTemp;
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("refTempModal").hidden) closeRefTemp();
+  });
+  for (const id of ["rtName", "rtTopic", "rtPath", "rtTimePath", "rtMaxAge"])
+    $(id).addEventListener("input", () => { $(id).classList.remove("invalid"); $("rtError").hidden = true; });
+  $("refTempForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = $("rtName").value.trim();
+    const topic = $("rtTopic").value.trim();
+    const temperaturePath = $("rtPath").value.trim();
+    const timestampPath = $("rtTimePath").value.trim();
+    const maxAge = Number($("rtMaxAge").value);
+    const bad = (id, msg) => {
+      $(id).classList.add("invalid");
+      $("rtError").textContent = msg;
+      $("rtError").hidden = false;
+      toast(msg, "err");
+    };
+    if (!validRefTopic(topic)) return bad("rtTopic", t("ref.err_topic"));
+    if (topic && !validRefPath(temperaturePath)) return bad("rtPath", t("ref.err_path"));
+    if (topic && timestampPath && !validRefPath(timestampPath))
+      return bad("rtTimePath", t("ref.err_time_path"));
+    if (topic && (!Number.isInteger(maxAge) || maxAge < 10 || maxAge > 3600))
+      return bad("rtMaxAge", t("ref.err_max_age"));
+    if (S.busy) { toast(t("toast.applying"), "info"); return; }
+    S.busy = true;
+    setBusy("rtBtn", true);
+    let r;
+    try {
+      r = await post("/set_ref_temp", {
+        name, topic, temperature_path: temperaturePath, timestamp_path: timestampPath,
+        max_age_s: topic ? maxAge : 600
+      });
+    } catch {
+      S.busy = false; setBusy("rtBtn", false); toast(t("toast.unreachable"), "err"); return;
+    }
+    if (!r.ok) {
+      const msg = await errorOf(r, t("toast.rejected"));
+      const field = /maximum age/i.test(msg) ? "rtMaxAge" :
+        /timestamp/i.test(msg) ? "rtTimePath" : /path/i.test(msg) ? "rtPath" :
+        /name/i.test(msg) ? "rtName" : "rtTopic";
+      S.busy = false; setBusy("rtBtn", false); bad(field, msg); return;
+    }
+    const res = await r.json().catch(() => ({}));
+    S.busy = false; setBusy("rtBtn", false); closeRefTemp();
+    toast(t(res.saved === false ? "toast.no_changes" : "ref.saved"), res.saved === false ? "info" : "ok");
+    await refreshStatus();
   });
 
   $("slHost").addEventListener("input", () => { $("slHost").classList.remove("invalid"); $("slError").hidden = true; });
