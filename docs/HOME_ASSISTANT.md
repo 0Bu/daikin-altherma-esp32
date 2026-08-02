@@ -338,20 +338,29 @@ published value is always 0–7** — treat it as a rate (deltas over time), not
 Whether the unit *clamps* at 7 or *wraps* to 0 is not documented and has not been observed on a live
 unit; until it has been, a delta of exactly −7 should be read as "unknown", not as a reset.
 
-**Verified so far** — a dated baseline, not a closed question (2026-07-26, live 4-8 kW monobloc
-detected as `altherma_ebla_edla_d_series_4_8kw_monobloc`, firmware `1.0.0-dev.188`). All 11 entities
-reach Home Assistant *and* survive the Telegraf → VictoriaMetrics path as numbers rather than being
-dropped as strings: 11 of 11 series present and continuous over an 18-hour window, 28 390–28 394
-samples each. Every counter sample was `0` and every flag `0` — and the raw page dump on `/diag`
-(`logic/hexdump.hpp`) shows page `0x10` offsets 10–12 reading `00 00 00` on the wire, so those zeros
-are the unit's own bytes, not a bit-masking or byte-offset defect.
+**Verified live** — dated evidence, not a closed counter question. On 2026-07-26, a live 4-8 kW
+monobloc detected as `altherma_ebla_edla_d_series_4_8kw_monobloc` and running firmware
+`1.0.0-dev.188` published all 11 entities. All survived the Telegraf → VictoriaMetrics path as
+numbers rather than being dropped as strings: 11 of 11 series were continuous over an 18-hour
+window, with 28 390–28 394 samples each. Every counter and flag was `0`; the raw page dump on
+`/diag` (`logic/hexdump.hpp`) showed page `0x10` offsets 10–12 as `00 00 00`, proving that the
+published zeros were the unit's own bytes rather than a masking or byte-offset defect.
 
-What that window could **not** settle is the one thing that matters most: whether a zero counter
-means a healthy plant or a byte this model never writes. It covered only a handful of brief DHW
-compressor cycles in July — no defrost, no cold-weather stress — so the counters never left `0`, and
-the clamp-vs-wrap question above is still unobserved. Deferred deliberately in
-[#180](https://github.com/0Bu/daikin-altherma-esp32/issues/180) until a loaded season has
-accumulated; the numbers above are the known-good baseline to compare that verification against.
+A second pass on 2026-08-02 added real limiting evidence. By 12:18 CEST, every one of the 11 fields
+had the same 296 119 stored samples: 223 923 on the retired `<base>/state` topic plus 72 196 on its
+`<base>/x10a` replacement. `Discharge Temp. Drop` asserted during two compressor runs, briefly on
+2026-07-27 and for about ten minutes on 2026-07-30. During the longer event the compressor held
+32 rps, discharge temperature reached 105.5 °C, refrigerant pressure was about 40–42 bar, and the
+inverter fin reached 54.5 °C. That correlation verifies the flag as a live protection-limiting
+signal and proves the shared offset-10 word is active on this model. The other five flags and all
+five retry counters remained `0`; no defrost occurred in the stored window.
+
+The remaining question is therefore narrower: observe the first strict increase of one retry
+counter and verify that transition against the raw page bytes and its surrounding operating
+context. A defrost or a counter reaching `7` is useful additional coverage, but neither is a proxy
+for that direct evidence. Until a real decrease is observed, the clamp-vs-wrap handling above stays
+fail-closed. Progress and the exact close gate are tracked in
+[#180](https://github.com/0Bu/daikin-altherma-esp32/issues/180).
 
 **The metric IDs are frozen.** Now that these rows are ingested, each one is carried in
 VictoriaMetrics as `daikin_altherma_<group>_<object_id>` — so the group key (`outdoor_state`) and
