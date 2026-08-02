@@ -199,9 +199,10 @@ locator resolves to exactly one row per profile. A
 `static_assert` pins every pairing to a real trend id, so a renamed trend is a build error rather than
 a pairing that silently stops happening.
 
-Six measurements plus one state pair, and — measured across the catalog — **all seven resolve on all
-39 detectable profiles**: leaving water, return water, DHW tank, outdoor air, flow, room temperature
-and booster-heater run (HomeHub input `32` ↔ X10A BSH converter `305`). The rest carry no pairing on
+Six measurements plus two state pairs, and — measured across the catalog — **all eight resolve on all
+39 detectable profiles**: leaving water, return water, DHW tank, outdoor air, flow, room temperature,
+booster-heater run (HomeHub input `32` ↔ X10A BSH converter `305`) and 3-way-valve position (input
+`37` ↔ converter `306`). The rest carry no pairing on
 purpose, each for a stated reason: the post-BUH outlet is a *different measurement
 point* (pairing it would be the substitution `lwt_select.hpp` refuses); the real power measurement has
 no X10A equivalent at all (X10A estimates it from CT clamps at an assumed 230 V, so pairing a

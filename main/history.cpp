@@ -53,8 +53,8 @@ Trend             s_ring[TREND_COUNT];
 // X10A trends,
 // their labels/units are fixed by def/homehub.hpp, so this side needs no per-ring string buffers.
 logic::TrendRing  s_mb_ring[HOMEHUB_HISTORY_COUNT];
-static_assert(HOMEHUB_HISTORY_COUNT * logic::HISTORY_BYTES_PER_TREND == 4608,
-              "eight HomeHub schematic histories should cost exactly 4608 bytes");
+static_assert(HOMEHUB_HISTORY_COUNT * logic::HISTORY_BYTES_PER_TREND == 5184,
+              "nine HomeHub schematic histories should cost exactly 5184 bytes");
 uint32_t          s_bucket = 0;                    // the bucket s_ring[*].pending belongs to
 bool              s_have_bucket = false;
 uint32_t          s_mb_bucket = 0;

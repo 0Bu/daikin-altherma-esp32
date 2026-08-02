@@ -27,6 +27,13 @@ assert.doesNotThrow(() => new vm.Script(app, { filename: "main/www/app.sources" 
 // HomeHub discovery is an explicit dialog action, never a boot mode. The same editable field accepts
 // a discovered or manual address, and saving it empty is the deliberate disabled state.
 const html = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
+const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
+assert.match(html, /id="gPth"[\s\S]*id="svPth"[\s\S]*id="svCop"/,
+  "the PHE must keep heat-output and COP placeholders in the schematic");
+assert.doesNotMatch(style, /\.no-pth\s+#gPth/,
+  "an idle working point must show PHE placeholders rather than hide supported figures");
+assert.doesNotMatch(app, /classList\.toggle\("no-pth"/,
+  "live rendering must not make the supported PHE figures disappear while idle");
 const homehubHtml = html.slice(html.indexOf('id="homehubModal"'), html.indexOf('id="boardModal"'));
 assert.match(homehubHtml, /class="input-action"[\s\S]*id="hhHost"[\s\S]*id="hhSearch"[\s\S]*data-i18n="hh.search"/,
   "the HomeHub modal must expose Search inside its editable host field");

@@ -58,8 +58,8 @@ struct HomeHubConcept {
 //                       ESTIMATES it from CT clamps at an assumed 230 V. Deliberately unpaired —
 //                       pairing a measurement with an estimate would hide which one is which.
 //   1/2/6/7/10/57/58, 3, 4, 9, 21/22/23 — setpoints, modes and faults. No paired measurement
-//                       concept exists for them. Offset 56 is the deliberate exception below: it
-//                       gets a state timeline, but not a one-row X10A pairing.
+//                       concept exists for them. Offsets 37 and 56 are deliberate state-timeline
+//                       exceptions below; only the valve also has one exact X10A row to pair.
 inline constexpr HomeHubConcept HOMEHUB_CONCEPTS[] = {
     { 40, "leaving_water" },   // LWT PHE     ↔ 0x61/2  pre-BUH heat-exchanger outlet
     { 42, "return_water"  },   // return      ↔ 0x61/8  Inlet water temp. (R4T)
@@ -68,13 +68,14 @@ inline constexpr HomeHubConcept HOMEHUB_CONCEPTS[] = {
     { 49, "flow"          },   // flow        ↔ 0x62/9  Flow sensor (l/min)
     { 50, "room_temp"     },   // room        ↔ 0x61/12 Indoor ambient temp. (R1T)
     { 32, "bsh_state"     },   // booster run ↔ 0x60/12 conv 305 BSH (DHW immersion heater)
+    { 37, "valve_dhw"     },   // 3-way valve ↔ 0x60/12 conv 306 (1 = DHW, 0 = space circuit)
 };
 inline constexpr size_t HOMEHUB_CONCEPT_COUNT =
     sizeof(HOMEHUB_CONCEPTS) / sizeof(HOMEHUB_CONCEPTS[0]);
 
-// Histories are a slightly wider contract than source PAIRING. The six measurements and exact BSH
-// state above are still paired one-for-one, while Smart-Grid mode is assembled from TWO X10A
-// contacts and
+// Histories are a slightly wider contract than source PAIRING. The six measurements, exact BSH flag
+// and exact 3-way-valve selector above are still paired one-for-one, while Smart-Grid mode is
+// assembled from TWO X10A contacts and
 // therefore cannot honestly be attached to either source row as its twin. It can still share one
 // history concept: both sources report the same documented 0..3 enum, and the UI draws their state
 // tracks independently so a disagreement remains visible.
@@ -93,6 +94,7 @@ inline constexpr HomeHubHistory HOMEHUB_HISTORIES[] = {
     { 49, "flow"            },
     { 50, "room_temp"       },
     { 32, "bsh_state"       },
+    { 37, "valve_dhw"       },
     { 56, "smart_grid_mode" },
 };
 inline constexpr size_t HOMEHUB_HISTORY_COUNT =
@@ -115,9 +117,10 @@ inline constexpr int homehub_history_index(const char* trend_id) {
 }
 
 // ── OTHER STATES: live pairings that do not need their own history ─────────────────────────────
-// BSH belongs above because it is trended. The remaining plant states — is the pump running, which
-// way is the diverter pointing — are paired live without spending another history ring: both sources
-// report them plainly, and a reader looking at "3way valve OFF" is owed the gateway's answer too.
+// BSH and the 3-way valve belong above because they are trended. The remaining plant states — pump
+// running and space heating/cooling operation — are paired live without spending another history
+// ring: both sources report them plainly, and a reader looking at a state is owed the gateway's
+// answer too.
 //
 // They need their own table because they need a WIDER KEY. `3way valve`, `2way valve`, `BSH`,
 // `BUH Step1`, `BUH Step2` and `Water pump operation` all live in ONE dimensionless byte — 0x60/12 —
@@ -143,7 +146,6 @@ struct HomeHubState {
 };
 inline constexpr HomeHubState HOMEHUB_STATES[] = {
     { 30, 0x60, 12, 301, "pump_running" },  // Circulation pump running ↔ "Water pump operation"
-    { 37, 0x60, 12, 306, "valve_dhw"    },  // 3-way valve              ↔ "3way valve(On:DHW_Off:Space)"
     { 53, 0x62,  2, 303, "space_op"     },  // Space h/c normal op.     ↔ "Space heating Operation ON/OFF"
 };
 inline constexpr size_t HOMEHUB_STATE_COUNT = sizeof(HOMEHUB_STATES) / sizeof(HOMEHUB_STATES[0]);

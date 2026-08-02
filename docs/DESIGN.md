@@ -415,7 +415,7 @@ Body, ordered:
    neither heat-pump heat output nor cooling capacity. With active heating/DHW the accepted sign is
    R1T−R4T > 0; with active cooling it is R1T−R4T < 0 and the displayed capacity is its positive
    magnitude. A missing/stagnant ΔT, stopped compressor, unknown mode or opposite sign blanks the
-   capacity and COP/EER instead of giving a well-formed name to an unsupported quantity. The
+   capacity and COP/EER to "—" instead of giving a well-formed name to an unsupported quantity. The
    inspector names pump-only residual-temperature equalisation explicitly. In the 57 °C Cooling
    case the status therefore reads **Cooling mode / residual-heat circulation — no cooling output**,
    the emitter box remains the generic **space circuit**, and the moving water paths are neutral grey.
@@ -516,9 +516,10 @@ Body, ordered:
    230 V. The X10A rows used by this view expose no direct live power measurement, so the inspector
    entries are titled "(estimated)" and open on saying so; a derived number must never read as a
    measured one.
-   COP/EER shows "—" unless the compressor is actually running, and the capacity pill hides entirely
-   when the mode, flow, ΔT or transfer direction cannot support it rather than printing a confident
-   but misnamed value. The electrical pill obeys the
+   COP/EER and capacity stay visible but show "—" unless the compressor is actually running and the
+   mode, flow, ΔT and transfer direction support the figure. Hiding both pills at idle made a supported
+   profile look as though it lacked the figures entirely; a placeholder preserves the component while
+   refusing the unsupported working point. The electrical pill obeys the
    held-over rule below on its INV source only: the CT clamps sit on a page the unit keeps
    refreshing (a non-zero reading at rest is genuine standby draw and is shown), while the inverter
    current freezes with the rest of the outdoor unit's pages — so with the compressor off the INV
@@ -642,8 +643,9 @@ Body, ordered:
    revives a retained X10A value beneath a petrol headline. An ASSEMBLY (the outdoor unit, the PHE)
    still gets **no** chart, for the same reason it gets no headline — there is no one reading it
    stands for.
-   **A COMPUTED pill charts its own figure, never one of its inputs.** ΔT, heat output, electrical
-   input and COP have no register, so the firmware buffers what each is computed FROM and the curve
+   **A COMPUTED pill charts its own figure, never one of its inputs.** Pump speed (the inverse of the
+   raw `0=max, 100=stop` signal), ΔT, heat output, electrical input and COP have no directly matching
+   displayed register value, so the firmware buffers what each is computed FROM and the curve
    is assembled in the browser (`DERIVED` in `www/js/history.js`) by the same expressions `liveData()` uses
    for the live number — one definition of each figure, rather than a firmware copy and a browser
    copy free to drift. Drawing the flow rate under a heat-output headline would be the §5.3-item-3
@@ -676,16 +678,18 @@ Body, ordered:
    front of it.
    **Which rows are trended is decided by this drawing.** Every numeric value the schematic shows has
    a curve — leaving/return water, tank, water pressure, flow, pump signal, refrigerant pressure,
-   compressor rps, expansion valve, outdoor air, discharge temp, room temp, and the four computed
+   compressor rps, expansion valve, outdoor air, discharge temp, room temp, and the five computed
    pills above — because those are the readings someone is actually looking at. That rule is also
    what keeps the cost small: the drawing holds ~16 numeric pills, while a profile publishes ~66
    numeric rows, and ringing all of them would cost ~38 KB of `.bss` — about a third of the low-water
    free heap measured on the reference board — for curves nobody opened. A value row reached through
    the LIST (§6) gets a chart where a trend already exists and none where it does not.
-   HomeHub adds eight second rings: leaving water, return water, DHW tank, outdoor air, flow and room
-   temperature are the six measurement concepts both sources structurally pair; BSH is the seventh,
-   converter-qualified pair; and the eighth is the explicit Smart-Grid-mode timeline. Both states
-   render one light-grey/off track per source with coloured active spans and written interval lists.
+   HomeHub adds nine second rings: leaving water, return water, DHW tank, outdoor air, flow and room
+   temperature are the six measurement concepts both sources structurally pair; BSH and the 3-way
+   valve are the seventh and eighth converter-qualified pairs; and the ninth is the explicit
+   Smart-Grid-mode timeline. All three states render one light-grey/inactive track per source with
+   coloured active spans and written interval lists. The valve names both destinations and reports
+   sampled time on the DHW and space-circuit branches; its latest observed position wins each bucket.
    BSH uses event folding: once ON is observed it remains ON for that open five-minute bucket, so a
    later OFF cannot erase the event. The UI calls the sum sampled raster time, not exact runtime; a
    pulse entirely between poll sweeps can still be missed. Other setpoints, states and Modbus-only

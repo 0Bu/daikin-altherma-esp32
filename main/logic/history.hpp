@@ -107,14 +107,16 @@ constexpr bool trend_cstr_eq(const char* a, const char* b) {
 // the recorder on the same cadence.
 enum class TrendKind : uint8_t {
     Row,         // a decoded value from the poll cache, addressed by (reg, off, unit)
+    BinaryState, // an exact bit row; the latest observed state wins inside the open bucket
     BinaryEvent, // an exact bit row; any observed ON is retained for the open 5-minute bucket
     SmartGridMode, // four-state combination of X10A Smart-Grid contact 1 + contact 2
     FreeHeap,   // esp_get_free_heap_size()
     MaxAlloc,   // largest CONTIGUOUS free block — the real OOM ceiling on this board
 };
 
-// `reg`/`off`/`unit` are the LOCATOR for an ordinary Row (see the header note). A BinaryEvent also
-// carries `conv`, because BSH shares its dimensionless byte with six unrelated state bits. `unit` is
+// `reg`/`off`/`unit` are the LOCATOR for an ordinary Row (see the header note). BinaryState and
+// BinaryEvent also carry `conv`, because the 3-way valve and BSH share their dimensionless byte with
+// five unrelated state bits. `unit` is
 // the string the poll cache carries for the row — convert.hpp's unit_for_datatype(): "°C", "bar",
 // "A", or "" for a row
 // whose unit lives in its label ("Flow sensor (l/min)"). It is spelled out here rather than taken as
@@ -132,7 +134,7 @@ struct TrendDef {
     uint8_t     off;
     const char* unit;
     const char* label;
-    int16_t     conv = -1; // BinaryEvent discriminator; ordinary rows do not need it
+    int16_t     conv = -1; // shared-bit discriminator; ordinary rows do not need it
 };
 
 // Adding a trend is one row here — the ring, the route and the browser are already generic over it.
@@ -188,6 +190,10 @@ inline constexpr TrendDef TRENDS[] = {
     // erased by a later OFF in the same 5-minute bucket. The UI calls the resulting spans sampled
     // active windows, not exact runtime; a pulse entirely between poll sweeps can still be missed.
     { "bsh_state",         TrendKind::BinaryEvent, 0x60, 12, "", "", 305 },
+    // The diverter is a persistent selector, not an event: the latest observed state in the bucket
+    // wins, so the timeline shows which branch was selected at each five-minute sample. Converter
+    // 306 is the load-bearing half of the locator in the shared 0x60/12 state byte.
+    { "valve_dhw",          TrendKind::BinaryState, 0x60, 12, "", "", 306 },
     // A STATE timeline rather than a numeric sensor curve. X10A exposes the mode through two
     // independent contact bits, so no single catalog row can be its locator. The recorder combines
     // both structurally identified rows into the documented 0..3 mode and stores it in tenths like
@@ -204,7 +210,7 @@ inline constexpr TrendDef TRENDS[] = {
     { "max_alloc",        TrendKind::MaxAlloc, 0, 0, "KiB", "Largest free block" },
 };
 constexpr size_t TREND_COUNT = sizeof(TRENDS) / sizeof(TRENDS[0]);
-// 20 trends = 11520 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
+// 21 trends = 12096 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
 // ceiling is a deliberate stop sign, not a hardware limit: .bss does not compete for the largest
 // CONTIGUOUS free block, which is what actually binds on this board, so the cost of a trend is a
 // few per cent of free heap and nothing at all of the fragmentation budget. Raise it only with the
@@ -226,7 +232,7 @@ constexpr size_t TREND_COUNT = sizeof(TRENDS) / sizeof(TRENDS[0]);
 // non-competition with the largest contiguous block, which is what the paragraph above is actually
 // about; the difference is that each ring also costs its own size AGAIN in the flash image. Worth
 // knowing before anyone adds trends by the dozen.
-static_assert(TREND_COUNT * HISTORY_BYTES_PER_TREND <= 11520,
+static_assert(TREND_COUNT * HISTORY_BYTES_PER_TREND <= 12096,
               "trend buffers are static data on a heap-tight board — justify growth before raising this");
 
 // A board metric in bytes, as the ring stores it: tenths of a KiB (~102-byte resolution, finer than
@@ -248,7 +254,8 @@ constexpr HistorySample history_bytes_tenths_kib(uint32_t bytes) {
 // never be allowed to collide with one.
 constexpr bool trend_row_matches(const TrendDef& d, unsigned reg, unsigned off, const char* unit,
                                  int conv = -1) {
-    const bool row_kind = d.kind == TrendKind::Row || d.kind == TrendKind::BinaryEvent;
+    const bool row_kind = d.kind == TrendKind::Row || d.kind == TrendKind::BinaryState ||
+                          d.kind == TrendKind::BinaryEvent;
     return row_kind && reg == d.reg && off == d.off && trend_cstr_eq(unit, d.unit) &&
            (d.conv < 0 || conv == d.conv);
 }
@@ -269,7 +276,8 @@ inline int trend_select(const TrendDef& d, const uint8_t* regs, const uint8_t* o
 }
 
 // Converter-aware overload for bit rows. Kept separate so the many numeric callers do not need a
-// dummy array; a BinaryEvent deliberately cannot resolve through the narrower overload above.
+// dummy array; a converter-qualified binary state deliberately cannot resolve through the narrower
+// overload above.
 inline int trend_select(const TrendDef& d, const uint8_t* regs, const uint8_t* offs,
                         const char* const* units, const int16_t* convs, size_t n) {
     for (size_t i = 0; i < n; ++i)
