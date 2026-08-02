@@ -31,8 +31,28 @@ struct ReferenceTemperatureStatus {
 };
 ReferenceTemperatureStatus reference_temperature_status();
 
+// A candidate mapping is tested on the existing authenticated MQTT connection without publishing
+// it to Config/NVS. The call waits for one value that passes the same JSON/timestamp/freshness
+// checks as the live source. `proof` is non-zero only after that value arrived; POST /set_ref_temp
+// presents it back so an untested mapping cannot be persisted through either the UI or a raw POST.
+struct ReferenceTemperatureTestConfig {
+    std::string topic, temperature_path, timestamp_path;
+    uint32_t max_age_s = 0;
+};
+struct ReferenceTemperatureTestResult {
+    bool passed=false, retained=false;
+    double temperature_c=0.0;
+    uint32_t proof=0;
+    std::string error;
+};
+ReferenceTemperatureTestResult mqtt_reference_test(const ReferenceTemperatureTestConfig& candidate,
+                                                    uint32_t timeout_ms);
+bool mqtt_reference_test_proof_valid(uint32_t proof,
+                                     const ReferenceTemperatureTestConfig& candidate);
+
 // Wake the existing MQTT task after POST /set_ref_temp. Topic changes are applied live; the
-// firmware does not create a second MQTT client and does not reboot.
+// firmware does not create a second MQTT client and does not reboot. This also retires the consumed
+// transient test proof.
 void mqtt_reference_reconfigure();
 
 } // namespace daik

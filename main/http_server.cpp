@@ -15,7 +15,7 @@ void http_start() {
     httpd_config_t cfg   = HTTPD_DEFAULT_CONFIG();
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
     // EXACTLY the number of routes registered below on the trusted-LAN surface — count them with
-    //   grep -c 'http_register(s\|http_register_on(s\|httpd_register_uri_handler(s' main/http_*.cpp main/mcp_server.cpp
+    //   awk '/http_register[(]s|http_register_on[(]s|httpd_register_uri_handler[(]s/{n++} END{print n}' main/http_*.cpp main/mcp_server.cpp
     // (minus http_common.cpp's own two definitions) — and raise it in the same commit that adds one.
     // Overflowing is SILENT and hits the WRONG route: httpd_register_uri_handler returns
     // ESP_ERR_HTTPD_HANDLERS_FULL, and the casualty is whatever registers LAST, which is deliberately
@@ -23,9 +23,9 @@ void http_start() {
     // not the new route 404ing. http_register() now logs a failed registration for that reason.
     // 24 since /events went away with the WebSocket push (docs/ARCHITECTURE.md "Push vs. poll"),
     // 25 when POST /set_lang (the UI language override) was added, 26 for /favicon.ico, 27 for the
-    // dashboard's dedicated 96 px heat-pump brand icon, 28 for POST /set_ref_temp, and 29 for
-    // explicit HomeHub discovery.
-    cfg.max_uri_handlers = 29;
+    // dashboard's dedicated 96 px heat-pump brand icon, 28 for POST /set_ref_temp, 29 for explicit
+    // HomeHub discovery, and 30 for the non-persistent POST /test_ref_temp probe.
+    cfg.max_uri_handlers = 30;
     cfg.lru_purge_enable = true;
     // 12 KB, not the 8 KB this ran on through v1.0.12 — MEASURED, not padded. v1.0.12 panicked and
     // the core dump's task table read `httpd 7728/460`: the task had been 7732 bytes deep at its last

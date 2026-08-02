@@ -761,10 +761,12 @@
         <input class="input" type="number" name="max_age_s" id="rtMaxAge" min="10" max="3600" step="1" value="600" inputmode="numeric">
       </label>
       <p class="hint err" id="rtError" hidden></p>
-      <p class="hint" data-i18n="ref.hint">The ESP32 subscribes to this exact topic and reads the numeric temperature plus an optional RFC3339 or Unix-seconds source timestamp. Retained values require a source timestamp to be fresh; a live value without one ages from MQTT arrival. Leave the topic empty to disable capture. The Shelly example is its internal device temperature and is only a transport test.</p>
+      <p class="hint ok" id="rtTestResult" aria-live="polite" hidden></p>
+      <p class="hint" data-i18n="ref.hint">Test must read a fresh value before Save is enabled. The ESP32 subscribes to this exact topic and reads the numeric temperature plus an optional RFC3339 or Unix-seconds source timestamp. Retained values require a source timestamp to be fresh; a live value without one ages from MQTT arrival. Leave the topic empty to disable capture. The Shelly example is its internal device temperature and is only a transport test.</p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="rtCancel" data-i18n="btn.cancel">Cancel</button>
-        <button class="btn primary" type="submit" id="rtBtn" data-i18n="ref.save_test">Save and test</button>
+        <button class="btn secondary" type="button" id="rtTestBtn" data-i18n="ref.test">Test</button>
+        <button class="btn primary" type="submit" id="rtBtn" data-i18n="btn.save" disabled>Save</button>
       </div>
     </form>
   </div>

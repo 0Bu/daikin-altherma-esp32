@@ -752,6 +752,7 @@ textarea.input[readonly] { font-size: 12px; color: var(--muted); white-space: pr
 .field.check span { font-size: 12px; color: var(--muted); }
 .hint { font-size: 13px; color: var(--muted); margin: 9px 2px 0; line-height: 1.5; }
 .hint.err { color: var(--err); margin-top: 6px; }
+.hint.ok { color: var(--brand-strong); margin-top: 6px; }
 
 /* ── Buttons (MQTT modal actions) ─────────────────────────────────────────── */
 .btn {

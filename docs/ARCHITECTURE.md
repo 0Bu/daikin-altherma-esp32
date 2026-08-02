@@ -96,9 +96,11 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
 http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /diag, /scan, /coredump,
                       POST /crash/dismiss. http_append_status_json() runs on the httpd task ALONE —
                       see "Push vs. poll" below for why that sentence is load-bearing
-http_config.cpp     → POST /set_wifi, /set_mqtt, /set_syslog, /set_ntp, /set_hp,
-                      /discover_homehub, /set_board, /set_ota, /set_lang, /detect. /set_hp also
-                      carries the HomeHub Modbus params (mb_host/mb_port/mb_unit_id,
+http_config.cpp     → POST /set_wifi, /set_mqtt, /test_ref_temp, /set_ref_temp, /set_syslog,
+                      /set_ntp, /set_hp, /discover_homehub, /set_board, /set_ota, /set_lang,
+                      /detect. /test_ref_temp proves that an exact MQTT mapping yields an accepted
+                      value without saving it; /set_ref_temp requires that proof and applies live.
+                      /set_hp also carries the HomeHub Modbus params (mb_host/mb_port/mb_unit_id,
                       actuation_enabled), applied live; /discover_homehub is a bounded, explicit
                       dialog action that returns an IPv4 without saving it
 hp_modbus.cpp/.hpp  → THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT source beside X10A, not an
@@ -1153,7 +1155,12 @@ The Home Assistant bridge:
   pump. One optional exact-topic subscription captures and qualifies a reference-temperature input,
   but no averaging or control path reads it. A configured payload timestamp (RFC3339 or Unix
   seconds) supplies age across retained delivery and restarts; without one, only a non-retained live
-  delivery may age from monotonic MQTT arrival. On X10A the read-only boundary is the protocol's own doing (it has
+  delivery may age from monotonic MQTT arrival. Editing that mapping is test-before-persist:
+  `POST /test_ref_temp` temporarily subscribes on the already-authenticated MQTT client and returns
+  a mapping-bound proof only after the normal JSON, timestamp and freshness checks accept a real
+  value; `POST /set_ref_temp` refuses a non-empty mapping without that proof. The transient test
+  never changes Config/NVS, and an empty topic remains the explicit disable operation that needs no
+  reading. On X10A the read-only boundary is the protocol's own doing (it has
   no write command). On the **optional Modbus TCP link to a Daikin HomeHub** the wire *would* allow a
   write, and it is still read-only **by design**: the firmware reads registers and publishes them, and
   no MQTT subscribe, command topic, HA value entity or HTTP write route exists to reach the pump
@@ -1170,9 +1177,11 @@ The Home Assistant bridge:
   profile), so the freed `entity_id` is reclaimed by the new entity and its recorder history and
   long-term statistics carry over. The device contains X10A values plus board/link diagnostics;
   HomeHub register values remain MQTT-only.
-- **Own publish task + esp-mqtt client.** The event handler flips status flags and copies a configured
-  reference payload into one bounded queue; JSON parsing, string work and all publishing happen in
-  the task, so the mqtt event loop is never blocked by either.
+- **Own publish task + esp-mqtt client.** The event handler flips status flags and copies a saved or
+  temporarily tested reference payload into one bounded queue; the same task-side decoder serves
+  both paths, so a successful pre-save test cannot disagree with live capture. JSON parsing, string
+  work, transient test subscription changes and all publishing happen in the task, so the mqtt
+  event loop is never blocked by either.
 - **Discovery is streamed.** A full Altherma value set can be 30–40+ entities; the bridge emits one
   entity's discovery config at a time (retained) on (re)connect, so it never needs one large
   contiguous heap block — the same memory discipline as the rest of the firmware. Layout-marker

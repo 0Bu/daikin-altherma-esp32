@@ -429,6 +429,16 @@ POST /set_mqtt                     # { broker, user?, pass?, clear_creds? } → 
                                    #   (DNS/TCP/connect+auth) → on success persist + reboot, on failure
                                    #   400 {ok:false,error} (nothing saved). Empty user+pass keeps stored
                                    #   creds; clear_creds:true removes them (anonymous); "" broker disables.
+POST /test_ref_temp                # { name, topic, temperature_path, timestamp_path?, max_age_s }
+                                   #   → temporarily subscribe on the existing authenticated MQTT
+                                   #   connection and wait up to 12 s for a value accepted by the live
+                                   #   JSON/timestamp/freshness decoder. Changes neither Config nor NVS.
+                                   #   Success returns {ok,test_proof,temperature_c,retained}; a retained
+                                   #   value without a usable source timestamp is rejected as stale.
+POST /set_ref_temp                 # the exact mapping above + test_proof → persist + apply live. A
+                                   #   non-empty topic requires a proof issued for that same topic/path/
+                                   #   age tuple; an empty topic is the explicit Disable operation and
+                                   #   needs no readable value or proof.
 POST /set_syslog                   # { host, port } → validate port range, persist + reboot ("" host
                                    #   disables). DNS/reachability resolve async, shown in /status.syslog
 POST /set_ntp                      # { server } → persist + reboot, no request-path network probe (the
@@ -463,7 +473,7 @@ POST /set_board                    # { led_gpio, led_type, led_inverted, btn_gpi
                                    #   short-circuit to {ok:true,reboot:false}. Rejects a pin the chip
                                    #   reserves, and any pin already claimed by the other of these two
                                    #   or by the X10A link (in both directions).
-#  all six /set_* above            # an NVS write failure → 500 {ok:false,error:"config write failed"},
+#  all seven persistent /set_* above # an NVS write failure → 500 {ok:false,error:"config write failed"},
                                    #   nothing applied and no reboot (the failing key is logged to /diag)
 POST /detect                       # re-run auto-detection (reset profile to "auto" + invalidate fingerprint)
 GET  /ota/check[?ms=<epoch>]       # start a background update check (poll /ota/status)

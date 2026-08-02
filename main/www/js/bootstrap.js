@@ -1,6 +1,12 @@
 
 // ── Boot ─────────────────────────────────────────────────────────────────
 function wire() {
+  // Every text-like field inside every popup follows the same replacement shortcut: focus/click
+  // selects the complete value. The click handler matters because a browser's default click action
+  // can otherwise collapse a selection made by focus back to one caret position.
+  for (const eventName of ["focusin", "click"])
+    document.addEventListener(eventName, (e) => { selectModalFieldContents(e.target); });
+
   // Navigation: the gear opens Settings, the back chevron returns to the dashboard.
   $("btnSettings").onclick = () => go("settings");
   $("btnBack").onclick = goBack;
@@ -314,44 +320,93 @@ function wireRestOfApp() {
     if (e.key === "Escape" && !$("refTempModal").hidden) closeRefTemp();
   });
   for (const id of ["rtName", "rtTopic", "rtPath", "rtTimePath", "rtMaxAge"])
-    $(id).addEventListener("input", () => { $(id).classList.remove("invalid"); $("rtError").hidden = true; });
-  $("refTempForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const name = $("rtName").value.trim();
-    const topic = $("rtTopic").value.trim();
-    const temperaturePath = $("rtPath").value.trim();
-    const timestampPath = $("rtTimePath").value.trim();
-    const maxAge = Number($("rtMaxAge").value);
+    $(id).addEventListener("input", () => {
+      $(id).classList.remove("invalid"); $("rtError").hidden = true;
+      if (id !== "rtName") resetRefTempTest();
+    });
+  const refTempInput = () => {
+    const input = refTempFormPayload();
     const bad = (id, msg) => {
       $(id).classList.add("invalid");
       $("rtError").textContent = msg;
       $("rtError").hidden = false;
       toast(msg, "err");
+      return null;
     };
-    if (!validRefTopic(topic)) return bad("rtTopic", t("ref.err_topic"));
-    if (topic && !validRefPath(temperaturePath)) return bad("rtPath", t("ref.err_path"));
-    if (topic && timestampPath && !validRefPath(timestampPath))
+    if (!validRefTopic(input.topic)) return bad("rtTopic", t("ref.err_topic"));
+    if (input.topic && !validRefPath(input.temperature_path))
+      return bad("rtPath", t("ref.err_path"));
+    if (input.topic && input.timestamp_path && !validRefPath(input.timestamp_path))
       return bad("rtTimePath", t("ref.err_time_path"));
-    if (topic && (!Number.isInteger(maxAge) || maxAge < 10 || maxAge > 3600))
+    if (input.topic && (!Number.isInteger(input.max_age_s) || input.max_age_s < 10 || input.max_age_s > 3600))
       return bad("rtMaxAge", t("ref.err_max_age"));
+    return input;
+  };
+  const showRefTempRequestError = (msg) => {
+    const field = /maximum age/i.test(msg) ? "rtMaxAge" :
+      /timestamp/i.test(msg) ? "rtTimePath" : /JSON path|path is/i.test(msg) ? "rtPath" :
+      /name/i.test(msg) ? "rtName" : /topic|mapping/i.test(msg) ? "rtTopic" : null;
+    if (field) $(field).classList.add("invalid");
+    $("rtError").textContent = msg;
+    $("rtError").hidden = false;
+    toast(msg, "err");
+  };
+  $("rtTestBtn").onclick = async () => {
+    const input = refTempInput();
+    if (!input || !input.topic) return;
+    if (S.busy) { toast(t("toast.applying"), "info"); return; }
+    resetRefTempTest();
+    S.busy = true;
+    setRefTempTesting(true);
+    let response;
+    try { response = await post("/test_ref_temp", input); }
+    catch {
+      S.busy = false; setRefTempTesting(false); resetRefTempTest();
+      toast(t("toast.unreachable"), "err"); return;
+    }
+    S.busy = false;
+    setRefTempTesting(false);
+    if (!response.ok) {
+      resetRefTempTest();
+      showRefTempRequestError(await errorOf(response, t("ref.test_failed")));
+      return;
+    }
+    const result = await response.json().catch(() => ({}));
+    if (!Number.isInteger(result.test_proof) || result.test_proof <= 0 ||
+        typeof result.temperature_c !== "number") {
+      resetRefTempTest();
+      showRefTempRequestError(t("ref.test_failed"));
+      return;
+    }
+    passRefTempTest(result.test_proof, result.temperature_c, result.retained === true);
+  };
+  $("refTempForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = refTempInput();
+    if (!input) return;
+    if (input.topic && refTempTestProof <= 0) {
+      showRefTempRequestError(t("ref.test_required"));
+      return;
+    }
     if (S.busy) { toast(t("toast.applying"), "info"); return; }
     S.busy = true;
     setBusy("rtBtn", true);
     let r;
     try {
-      r = await post("/set_ref_temp", {
-        name, topic, temperature_path: temperaturePath, timestamp_path: timestampPath,
-        max_age_s: topic ? maxAge : 600
-      });
+      r = await post("/set_ref_temp", { ...input, test_proof: refTempTestProof });
     } catch {
       S.busy = false; setBusy("rtBtn", false); toast(t("toast.unreachable"), "err"); return;
     }
     if (!r.ok) {
       const msg = await errorOf(r, t("toast.rejected"));
-      const field = /maximum age/i.test(msg) ? "rtMaxAge" :
-        /timestamp/i.test(msg) ? "rtTimePath" : /path/i.test(msg) ? "rtPath" :
-        /name/i.test(msg) ? "rtName" : "rtTopic";
-      S.busy = false; setBusy("rtBtn", false); bad(field, msg); return;
+      S.busy = false;
+      setBusy("rtBtn", false);
+      // A 409 means the device no longer recognises this proof (for example after another browser
+      // tested a different mapping). Do not leave Save enabled with a token the server has already
+      // rejected: retire it locally and require the visible Test step again.
+      if (r.status === 409) resetRefTempTest();
+      showRefTempRequestError(msg);
+      return;
     }
     const res = await r.json().catch(() => ({}));
     S.busy = false; setBusy("rtBtn", false); closeRefTemp();

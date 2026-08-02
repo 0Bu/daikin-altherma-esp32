@@ -96,6 +96,7 @@ static std::atomic<bool>        s_announce{false};   // set on connect -> task r
                                                      // once via exchange(false) so a reconnect can't
                                                      // be lost to a racing clear)
 static std::atomic<bool>        s_ref_reconfigure{false};
+static std::atomic<bool>        s_ref_probe_reconfigure{false};
 
 // MQTT_EVENT_DATA runs on esp-mqtt's unguarded event task. It therefore only copies into this one
 // bounded frame and overwrites a length-1 queue; JSON parsing and all std::string work stay on the
@@ -115,10 +116,21 @@ static ReferenceMqttFrame  s_ref_rx;
 static ReferenceMqttFrame  s_ref_task_frame;          // mqtt_task-owned; keeps ~1.2 KB off its stack
 static bool                s_ref_rx_active = false;
 static ReferenceTemperatureStatus s_ref_status;
+struct ReferenceProbeState {
+    ReferenceTemperatureTestConfig config;
+    uint32_t generation=0;
+    bool active=false, subscribed=false, passed=false, retained=false;
+    double temperature_c=0.0;
+    std::string error;
+};
+static ReferenceProbeState s_ref_probe;
+static SemaphoreHandle_t   s_ref_probe_sem = nullptr;
 static std::string         s_ref_subscribed_topic;  // mqtt_task only
 static std::string         s_ref_binding_topic;     // resets captured value when either half changes
 static std::string         s_ref_binding_path;
 static std::string         s_ref_binding_time_path;
+static std::string         s_ref_probe_subscribed_topic; // mqtt_task only; never persisted
+static uint32_t            s_ref_probe_task_generation = 0;
 
 // RAII guard around s_mtx (same idiom as config.cpp / hp_poll.cpp). Replaces the raw take/give pairs
 // so a throw on a reader (the broker copy in mqtt_status) can't strand the mutex and wedge every
@@ -714,6 +726,65 @@ static bool reference_payload_timestamp(cJSON* item, int64_t& unix_s, const char
     return false;
 }
 
+struct DecodedReferenceFrame {
+    bool valid=false, has_source_time=false;
+    double temperature_c=0.0;
+    int64_t source_unix_s=-1;
+    const char* timestamp_source="mqtt_arrival";
+    const char* error=nullptr;
+};
+
+// One parser for the saved source and the pre-save probe. Keeping both paths on this function is
+// load-bearing: a green test must mean the live capture will accept the exact same payload.
+static DecodedReferenceFrame decode_reference_frame(const ReferenceMqttFrame& frame,
+                                                     const std::string& temperature_path,
+                                                     const std::string& timestamp_path) {
+    DecodedReferenceFrame out;
+    cJSON* root = cJSON_ParseWithLength(frame.payload, frame.payload_len);
+    if (!root) { out.error = "payload is not valid JSON"; return out; }
+    cJSON* item = reference_json_item(root, temperature_path);
+    if (!cJSON_IsNumber(item) || !std::isfinite(item->valuedouble)) {
+        cJSON_Delete(root);
+        out.error = "JSON path is missing or not numeric";
+        return out;
+    }
+    out.temperature_c = item->valuedouble;
+    if (!timestamp_path.empty()) {
+        cJSON* timestamp_item = reference_json_item(root, timestamp_path);
+        if (!reference_payload_timestamp(timestamp_item, out.source_unix_s,
+                                         out.timestamp_source)) {
+            cJSON_Delete(root);
+            out.error = "Timestamp path is missing or not RFC3339/Unix seconds";
+            return out;
+        }
+        out.has_source_time = true;
+        if (frame.received_unix_s >= 0 &&
+            out.source_unix_s > frame.received_unix_s + REF_TEMP_FUTURE_TOLERANCE_S) {
+            cJSON_Delete(root);
+            out.error = "Source timestamp is in the future";
+            return out;
+        }
+    }
+    cJSON_Delete(root);
+    out.valid = true;
+    return out;
+}
+
+// A source timestamp must not move backwards relative to the last value accepted for this exact
+// mapping. This is part of acceptance, not just status rendering, so the transient Test and the
+// saved live path must call the same predicate. A different topic/path binding has no prior sample;
+// service_reference_subscription resets the status when that new mapping is applied.
+static bool reference_timestamp_moved_backward(const DecodedReferenceFrame& decoded,
+                                                const std::string& topic,
+                                                const std::string& temperature_path,
+                                                const std::string& timestamp_path) {
+    if (!decoded.has_source_time) return false;
+    Lock lk(s_mtx);
+    return topic == s_ref_binding_topic && temperature_path == s_ref_binding_path &&
+           timestamp_path == s_ref_binding_time_path && s_ref_status.has_value &&
+           s_ref_status.has_source_time && decoded.source_unix_s < s_ref_status.source_unix_s;
+}
+
 static void set_reference_error(const char* error, bool count_error) {
     Lock lk(s_mtx);
     s_ref_status.error = error ? error : "";   // mqtt_task is exception-guarded; Lock is RAII
@@ -791,67 +862,167 @@ static void service_reference_subscription(const Config& c) {
     }
 }
 
+// Subscribe a candidate independently of the saved mapping. Re-subscribing even when both topics
+// are equal is deliberate: it asks the broker to deliver the retained value again, so pressing Test
+// has a bounded answer instead of depending on when the saved source happens to publish next.
+static void service_reference_probe_subscription(const Config& saved) {
+    // Unlike the old status-only path, the probe shares std::strings with the HTTP task. A missing
+    // mutex therefore cannot degrade to best-effort locking: keep the feature unavailable instead.
+    if (!s_mtx) return;
+    if (s_ref_probe_reconfigure.exchange(false)) s_ref_probe_task_generation = 0;
+
+    ReferenceTemperatureTestConfig candidate;
+    uint32_t generation = 0;
+    bool active = false;
+    {
+        Lock lk(s_mtx);
+        active = s_ref_probe.active;
+        generation = s_ref_probe.generation;
+        if (active) candidate = s_ref_probe.config;
+    }
+
+    if (!active || !s_connected) {
+        if (s_connected && !s_ref_probe_subscribed_topic.empty() &&
+            s_ref_probe_subscribed_topic != saved.ref_temp_topic) {
+            esp_mqtt_client_unsubscribe(s_client, s_ref_probe_subscribed_topic.c_str());
+        }
+        s_ref_probe_subscribed_topic.clear();
+        if (!active) s_ref_probe_task_generation = 0;
+        return;
+    }
+    if (s_ref_probe_task_generation == generation) return;
+
+    // Copy BEFORE changing esp-mqtt state. The later swap is noexcept, so once subscribe succeeds
+    // the cleanup topic can always be recorded even if the heap is exhausted on this cycle.
+    std::string tracked_topic = candidate.topic;
+    if (!s_ref_probe_subscribed_topic.empty() &&
+        s_ref_probe_subscribed_topic != saved.ref_temp_topic &&
+        s_ref_probe_subscribed_topic != candidate.topic) {
+        esp_mqtt_client_unsubscribe(s_client, s_ref_probe_subscribed_topic.c_str());
+    }
+    const int id = esp_mqtt_client_subscribe(s_client, tracked_topic.c_str(), 0);
+    bool signal_failure = false;
+    {
+        Lock lk(s_mtx);
+        if (s_ref_probe.active && s_ref_probe.generation == generation) {
+            s_ref_probe.subscribed = id >= 0;
+            if (id < 0) {
+                s_ref_probe.active = false;
+                signal_failure = true;
+                s_ref_probe.error = "MQTT subscribe failed";
+            } else {
+                s_ref_probe.error.clear();
+            }
+        }
+    }
+    if (signal_failure && s_ref_probe_sem) xSemaphoreGive(s_ref_probe_sem);
+    s_ref_probe_task_generation = generation;
+    if (id >= 0) {
+        s_ref_probe_subscribed_topic.swap(tracked_topic);
+        diag_printf("mqtt: reference temperature test subscription active\n");
+    }
+}
+
+static const char* reference_probe_freshness_error(const char* reason) {
+    if (std::strcmp(reason, "retained_without_timestamp") == 0)
+        return "Retained value needs a source timestamp";
+    if (std::strcmp(reason, "clock_unsynced") == 0)
+        return "Clock is not synchronized";
+    if (std::strcmp(reason, "future_timestamp") == 0)
+        return "Source timestamp is in the future";
+    if (std::strcmp(reason, "stale") == 0)
+        return "Source value is older than the maximum age";
+    return "Source value is not fresh";
+}
+
+static void service_reference_probe_frame(const ReferenceMqttFrame& frame) {
+    if (!s_mtx) return;
+    ReferenceTemperatureTestConfig candidate;
+    uint32_t generation = 0;
+    {
+        Lock lk(s_mtx);
+        if (!s_ref_probe.active || frame.topic != s_ref_probe.config.topic) return;
+        candidate = s_ref_probe.config;
+        generation = s_ref_probe.generation;
+    }
+
+    const DecodedReferenceFrame decoded = decode_reference_frame(
+        frame, candidate.temperature_path, candidate.timestamp_path);
+    if (!decoded.valid) {
+        Lock lk(s_mtx);
+        if (s_ref_probe.active && s_ref_probe.generation == generation)
+            s_ref_probe.error = decoded.error ? decoded.error : "Source value is invalid";
+        return;
+    }
+    if (reference_timestamp_moved_backward(decoded, candidate.topic,
+                                           candidate.temperature_path,
+                                           candidate.timestamp_path)) {
+        Lock lk(s_mtx);
+        if (s_ref_probe.active && s_ref_probe.generation == generation)
+            s_ref_probe.error = "Source timestamp moved backward";
+        return;
+    }
+
+    const uint64_t now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
+    int64_t now_unix_s = -1;
+    int32_t now_sub_ms = 0;
+    time_now(now_unix_s, now_sub_ms);
+    const ReferenceFreshness freshness = reference_freshness(
+        true, frame.retained, decoded.has_source_time, decoded.source_unix_s,
+        frame.received_ms, now_unix_s, now_ms, candidate.max_age_s);
+    if (!freshness.fresh) {
+        Lock lk(s_mtx);
+        if (s_ref_probe.active && s_ref_probe.generation == generation)
+            s_ref_probe.error = reference_probe_freshness_error(freshness.reason);
+        return;
+    }
+
+    bool signal = false;
+    {
+        Lock lk(s_mtx);
+        if (s_ref_probe.active && s_ref_probe.generation == generation) {
+            s_ref_probe.active = false;
+            s_ref_probe.passed = true;
+            s_ref_probe.retained = frame.retained;
+            s_ref_probe.temperature_c = decoded.temperature_c;
+            s_ref_probe.error.clear();
+            signal = true;
+        }
+    }
+    if (signal && s_ref_probe_sem) xSemaphoreGive(s_ref_probe_sem);
+    if (signal) diag_printf("mqtt: reference temperature test passed\n");
+}
+
 static void service_reference_frames(const Config& c) {
     if (!s_ref_queue) return;
     while (xQueueReceive(s_ref_queue, &s_ref_task_frame, 0) == pdTRUE) {
         const ReferenceMqttFrame& frame = s_ref_task_frame;
+        service_reference_probe_frame(frame);
         if (c.ref_temp_topic.empty() || frame.topic != c.ref_temp_topic) continue;
         {
             Lock lk(s_mtx);
             s_ref_status.messages++;
         }
-        cJSON* root = cJSON_ParseWithLength(frame.payload, frame.payload_len);
-        if (!root) {
-            set_reference_error("payload is not valid JSON", true);
-            continue;
-        }
-        cJSON* item = reference_json_item(root, c.ref_temp_path);
-        const bool valid = cJSON_IsNumber(item) && std::isfinite(item->valuedouble);
-        const double value = valid ? item->valuedouble : 0.0;
-        if (!valid) {
-            cJSON_Delete(root);
-            set_reference_error("JSON path is missing or not numeric", true);
+        const DecodedReferenceFrame decoded = decode_reference_frame(
+            frame, c.ref_temp_path, c.ref_temp_time_path);
+        if (!decoded.valid) {
+            set_reference_error(decoded.error ? decoded.error : "Source value is invalid", true);
             continue;
         }
 
-        bool has_source_time = false;
-        int64_t source_unix_s = -1;
-        const char* timestamp_source = "mqtt_arrival";
-        if (!c.ref_temp_time_path.empty()) {
-            cJSON* timestamp_item = reference_json_item(root, c.ref_temp_time_path);
-            if (!reference_payload_timestamp(timestamp_item, source_unix_s, timestamp_source)) {
-                cJSON_Delete(root);
-                set_reference_error("Timestamp path is missing or not RFC3339/Unix seconds", true);
-                continue;
-            }
-            has_source_time = true;
-            if (frame.received_unix_s >= 0 &&
-                source_unix_s > frame.received_unix_s + REF_TEMP_FUTURE_TOLERANCE_S) {
-                cJSON_Delete(root);
-                set_reference_error("Source timestamp is in the future", true);
-                continue;
-            }
-        }
-        cJSON_Delete(root);
-
-        bool out_of_order = false;
-        {
-            Lock lk(s_mtx);
-            out_of_order = has_source_time && s_ref_status.has_value &&
-                           s_ref_status.has_source_time && source_unix_s < s_ref_status.source_unix_s;
-        }
-        if (out_of_order) {
+        if (reference_timestamp_moved_backward(decoded, c.ref_temp_topic, c.ref_temp_path,
+                                               c.ref_temp_time_path)) {
             set_reference_error("Source timestamp moved backward", true);
             continue;
         }
         {
             Lock lk(s_mtx);
-            s_ref_status.temperature_c = value;
+            s_ref_status.temperature_c = decoded.temperature_c;
             s_ref_status.received_ms = frame.received_ms;
             s_ref_status.received_unix_s = frame.received_unix_s;
-            s_ref_status.has_source_time = has_source_time;
-            s_ref_status.source_unix_s = source_unix_s;
-            s_ref_status.timestamp_source = timestamp_source;
+            s_ref_status.has_source_time = decoded.has_source_time;
+            s_ref_status.source_unix_s = decoded.source_unix_s;
+            s_ref_status.timestamp_source = decoded.timestamp_source;
             s_ref_status.retained = frame.retained;
             s_ref_status.has_value = true;
             s_ref_status.error.clear();
@@ -866,7 +1037,8 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
     case MQTT_EVENT_CONNECTED:
         if (s_mqtt_ever_connected) s_mqtt_reconnects.fetch_add(1);   // a later CONNECTED is a RE-connect
         s_mqtt_ever_connected = true;
-        s_connected = true; s_announce = true; s_ref_reconfigure = true; set_status(true, nullptr);
+        s_connected = true; s_announce = true; s_ref_reconfigure = true;
+        s_ref_probe_reconfigure = true; set_status(true, nullptr);
         diag_printf("mqtt: connected\n");
         break;
     case MQTT_EVENT_DISCONNECTED:
@@ -924,6 +1096,7 @@ static void mqtt_task(void*) {
         try {
             const Config ref_config = config();
             service_reference_subscription(ref_config);
+            service_reference_probe_subscription(ref_config);
             service_reference_frames(ref_config);
             if (s_connected) {
                 if (s_announce.exchange(false)) {              // consume: just (re)connected
@@ -1090,6 +1263,12 @@ void mqtt_ha_start() {
     s_status.configured = !c.mqtt_uri.empty();
     s_status.broker     = c.mqtt_uri;
     s_ref_status.configured = !c.ref_temp_topic.empty();
+    // Probe state contains std::strings shared with the HTTP task, so it is safe only when BOTH
+    // synchronization objects exist. The ordinary bridge can still run in its pre-existing
+    // best-effort status mode if the mutex allocation failed; the new cross-task test cannot.
+    s_ref_probe_sem = s_mtx ? xSemaphoreCreateBinary() : nullptr;
+    if (!s_ref_probe_sem)
+        diag_printf("mqtt: reference test semaphore alloc failed\n");
     if (!s_status.configured) return;
 
     s_ref_queue = xQueueCreate(1, sizeof(ReferenceMqttFrame));
@@ -1137,8 +1316,82 @@ ReferenceTemperatureStatus reference_temperature_status() {
     return s_ref_status;
 }
 
+ReferenceTemperatureTestResult mqtt_reference_test(
+    const ReferenceTemperatureTestConfig& candidate, uint32_t timeout_ms) {
+    ReferenceTemperatureTestResult result;
+    if (!s_mtx || !s_ref_probe_sem) {
+        result.error = "Reference test is unavailable";
+        return result;
+    }
+    if (!s_connected) { result.error = "MQTT broker is not connected"; return result; }
+
+    // Prepare every allocating field before touching the shared proof state. If this copy throws,
+    // handle_all returns 503 and a previously passed proof remains internally consistent instead of
+    // acquiring a new generation with a partially replaced mapping.
+    ReferenceTemperatureTestConfig prepared = candidate;
+    xSemaphoreTake(s_ref_probe_sem, 0);                  // discard a completed older test's signal
+    uint32_t generation = 0;
+    {
+        Lock lk(s_mtx);
+        if (s_ref_probe.active) {
+            result.error = "Another reference test is already running";
+            return result;
+        }
+        generation = s_ref_probe.generation + 1;
+        if (generation == 0 || generation > 0x7fffffffu) generation = 1;
+        s_ref_probe.passed = false;                      // invalidate before committing the new id
+        s_ref_probe.config.topic.swap(prepared.topic);   // noexcept after the prepared copies above
+        s_ref_probe.config.temperature_path.swap(prepared.temperature_path);
+        s_ref_probe.config.timestamp_path.swap(prepared.timestamp_path);
+        s_ref_probe.config.max_age_s = prepared.max_age_s;
+        s_ref_probe.generation = generation;
+        s_ref_probe.active = true;
+        s_ref_probe.subscribed = false;
+        s_ref_probe.retained = false;
+        s_ref_probe.temperature_c = 0.0;
+        s_ref_probe.error.clear();
+    }
+    s_ref_probe_reconfigure = true;
+
+    xSemaphoreTake(s_ref_probe_sem, pdMS_TO_TICKS(timeout_ms));
+    {
+        Lock lk(s_mtx);
+        if (s_ref_probe.generation == generation && s_ref_probe.passed) {
+            result.passed = true;
+            result.retained = s_ref_probe.retained;
+            result.temperature_c = s_ref_probe.temperature_c;
+            result.proof = generation;
+        } else if (s_ref_probe.generation == generation) {
+            s_ref_probe.active = false;
+            result.error = s_ref_probe.error.empty()
+                         ? "No fresh value received before the test timed out"
+                         : s_ref_probe.error;
+        } else {
+            result.error = "Reference test was replaced";
+        }
+    }
+    s_ref_probe_reconfigure = true;                     // retire a timed-out probe subscription
+    return result;
+}
+
+bool mqtt_reference_test_proof_valid(uint32_t proof,
+                                     const ReferenceTemperatureTestConfig& candidate) {
+    if (!s_mtx || proof == 0) return false;
+    Lock lk(s_mtx);
+    return s_ref_probe.passed && s_ref_probe.generation == proof &&
+           s_ref_probe.config.topic == candidate.topic &&
+           s_ref_probe.config.temperature_path == candidate.temperature_path &&
+           s_ref_probe.config.timestamp_path == candidate.timestamp_path &&
+           s_ref_probe.config.max_age_s == candidate.max_age_s;
+}
+
 void mqtt_reference_reconfigure() {
     s_ref_reconfigure = true;
+    s_ref_probe_reconfigure = true;
+    if (!s_mtx) return;                                  // probe never became available/active
+    Lock lk(s_mtx);
+    s_ref_probe.active = false;
+    s_ref_probe.passed = false;
 }
 
 } // namespace daik
