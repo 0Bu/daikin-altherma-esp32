@@ -49,11 +49,12 @@ struct Trend {
 };
 
 Trend             s_ring[TREND_COUNT];
-// The six paired HomeHub measurements plus Smart-Grid mode get a second ring. Unlike X10A trends,
+// Six paired HomeHub measurements plus tank-heater and Smart-Grid state get a second ring. Unlike
+// X10A trends,
 // their labels/units are fixed by def/homehub.hpp, so this side needs no per-ring string buffers.
 logic::TrendRing  s_mb_ring[HOMEHUB_HISTORY_COUNT];
-static_assert(HOMEHUB_HISTORY_COUNT * logic::HISTORY_BYTES_PER_TREND == 4032,
-              "seven HomeHub schematic histories should cost exactly 4032 bytes");
+static_assert(HOMEHUB_HISTORY_COUNT * logic::HISTORY_BYTES_PER_TREND == 4608,
+              "eight HomeHub schematic histories should cost exactly 4608 bytes");
 uint32_t          s_bucket = 0;                    // the bucket s_ring[*].pending belongs to
 bool              s_have_bucket = false;
 uint32_t          s_mb_bucket = 0;
@@ -105,22 +106,25 @@ void history_record(const CachedValue* v, size_t n) {
 
     // Views for the pure pickers. Bounded by the profile row count; the poll cache holds at most one
     // entry per ValueDef row (logic/profile_view.hpp sizes both). A trend addresses its row by
-    // (reg, off, unit) — the label rides along only to be reported and to detect a model change.
+    // (reg, off, unit, optional converter) — the label rides along only to be reported and to detect
+    // a model change.
     //
-    // These four live on the POLL TASK's 8 KB stack, so their width is not a detail: as `unsigned`
+    // These five live on the POLL TASK's stack, so their width is not a detail: as `unsigned`
     // the page and offset views would cost 2 KB between them instead of 512 B, for two values that
-    // are a byte each everywhere else in the firmware. 2.5 KB total, per cycle.
+    // are a byte each everywhere else in the firmware. 3 KB total, per cycle.
     constexpr size_t kMaxRows = 256;
     const size_t rows = n < kMaxRows ? n : kMaxRows;
     const char* labels[kMaxRows];
     const char* units[kMaxRows];
     uint8_t     regs[kMaxRows];
     uint8_t     offs[kMaxRows];
+    int16_t     convs[kMaxRows];
     for (size_t i = 0; i < rows; i++) {
         labels[i] = v[i].label.c_str();
         units[i]  = v[i].unit.c_str();
         regs[i]   = v[i].reg;
         offs[i]   = v[i].off;
+        convs[i]  = static_cast<int16_t>(v[i].conv);
     }
 
     // The compressor witness decides whether the outdoor pages are still being refreshed. ABSENT is
@@ -214,7 +218,7 @@ void history_record(const CachedValue* v, size_t n) {
             continue;
         }
 
-        const int idx = logic::trend_select(d, regs, offs, units, rows);
+        const int idx = logic::trend_select(d, regs, offs, units, convs, rows);
         const char* label = idx >= 0 ? labels[idx] : "";
 
         if (std::strncmp(label, tr.label, kLabelMax - 1) != 0) {    // different row -> different sensor
@@ -228,7 +232,10 @@ void history_record(const CachedValue* v, size_t n) {
 
         int tenths = 0;
         const bool has = value_tenths(v[idx].value, tenths);
-        tr.ring.fold(logic::history_store(has, tenths, regs[idx], rps_known, rps_running));
+        const HistorySample sample =
+            logic::history_store(has, tenths, regs[idx], rps_known, rps_running);
+        if (d.kind == logic::TrendKind::BinaryEvent) tr.ring.fold_binary_event(sample);
+        else tr.ring.fold(sample);
     }
 }
 
@@ -262,7 +269,12 @@ void history_record_modbus(const CachedValue* v, size_t n) {
     }
     s_mb_bucket = bucket;
     s_mb_have_bucket = true;
-    for (size_t t = 0; t < HOMEHUB_HISTORY_COUNT; t++) s_mb_ring[t].fold(sample[t]);
+    for (size_t t = 0; t < HOMEHUB_HISTORY_COUNT; t++) {
+        if (logic::trend_cstr_eq(logic::HOMEHUB_HISTORIES[t].trend_id, "bsh_state"))
+            s_mb_ring[t].fold_binary_event(sample[t]);
+        else
+            s_mb_ring[t].fold(sample[t]);
+    }
 }
 
 size_t history_snapshot(size_t t, HistorySample* out, size_t max) {

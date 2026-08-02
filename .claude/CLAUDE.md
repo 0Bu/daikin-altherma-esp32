@@ -548,16 +548,16 @@ hp_poll.cpp     poll engine task: X10A ONLY — the HomeHub is a separate stack 
                 (logic/raw_capture.hpp — #194's decisive experiment, which the detect-pass dump
                 structurally cannot take, since a detect pass is always a unit at rest)
 history.cpp     the 24-hour trend rings: one fixed-cadence buffer per logic/history.hpp TREND, fed by
-                the X10A poll task (history_record), plus seven HomeHub rings fed by the independent
+                the X10A poll task (history_record), plus eight HomeHub rings fed by the independent
                 Modbus task (history_record_modbus). Both calls happen BEFORE their cache commit and
                 OUTSIDE the cache mutex; this file has its own lock, created before either task starts.
                 GET /history defaults to X10A and takes source=modbus for the second ring. STATIC
                 (.data), never heap: the binding limit on this board is the largest CONTIGUOUS block,
-                and a static array does not compete for it — nineteen X10A/board/state trends cost
-                10944 B and the seven label-free HomeHub rings another 4032 B, for 14976 B of ring total, plus
+                and a static array does not compete for it — twenty X10A/board/state trends cost
+                11520 B and the eight label-free HomeHub rings another 4608 B, for 16128 B of ring total, plus
                 ~78 B of labels/units/counters each (the ceiling assert moved 7168 -> 11520 with that
                 arithmetic; the rule that keeps it this low is that a trend follows the SCHEMATIC's
-                ~16 numeric pills plus the one explicit Boost state timeline, not the ~66 numeric rows
+                ~16 numeric pills plus the explicit Boost and BSH state timelines, not the ~66 numeric rows
                 a profile publishes, which would be ~38 KB). RAM only ON PURPOSE: a 576 B blob rewritten every
                 5 minutes is ~100k NVS writes a year in the partition holding the WiFi credentials,
                 so a reboot empties the rings and the UI draws the span it actually has rather than

@@ -110,7 +110,8 @@ Read today (UC3 Daikin Altherma):
 * **Faults** (input): unit error active `21`, error code `22` (`Text16`), sub-code `23`
 * **Temperatures** (input, `Temp16`): leaving water PHE `40` / BUH `41`, return `42`, DHW tank `43`,
   outdoor air `44`, liquid refrigerant `45`, room `50`
-* **Flow + power** (input): flow `49` (`Int16`, L/min ×100), power `51` (`Pow16`, kW)
+* **Flow + electrical input** (input): flow `49` (`Int16`, L/min ×100), whole-system electrical
+  input `51` (`Pow16`, kW). Offset `51` is not dedicated booster-heater power.
 * **Setpoints and modes** (holding, read back **read-only**): LWT main heating `1` / cooling `2`,
   operation mode `3`, space heating ON/OFF `4`, room thermostat heating `6` / cooling `7`, quiet mode
   `9`, DHW reheat setpoint `10`, Smart-Grid mode `56`, power limits `57`/`58` (`Pow16`)
@@ -127,6 +128,7 @@ Modbus constants; the names below are applied only by the visual UI and come fro
 | input `21` | Unit abnormality | `0` / `1` / `2` → No error / Fault / Warning |
 | input `30` | Circulation pump running | binary `0`/`1`, displayed `OFF`/`ON` |
 | input `31` | Compressor running | binary `0`/`1`, displayed `OFF`/`ON` |
+| input `32` | Booster heater running (DHW tank immersion heater) | binary `0`/`1`, displayed `OFF`/`ON` |
 | input `37` | 3-way valve | `0` / `1` → Space heating / DHW |
 | input `52` / `53` | DHW / space operation | binary `0`/`1`, displayed `OFF`/`ON` |
 | holding `3` | Operation mode | `0` / `1` / `2` → Auto / Heating / Cooling |
@@ -137,7 +139,7 @@ The four enums retain their raw integer in `homehub_format()`, `/values`, MCP an
 carries a separate structural `enum` id so the browser can localise a known
 state; an undocumented number remains visible as `Unknown (N)` instead of being silently coerced.
 The flat MQTT payload therefore contains, for example,
-`"smart_grid_operation_mode":2`, never `"smart_grid_operation_mode":"Recommended on"`. The six
+`"smart_grid_operation_mode":2`, never `"smart_grid_operation_mode":"Recommended on"`. The seven
 true flags retain the same numeric `0`/`1` contract plus the structural `binary:true` marker, and
 only the visual boundary prints `OFF`/`ON`.
 
@@ -192,13 +194,15 @@ implausible against.
 
 The vocabulary is therefore **`logic/history.hpp`'s trend ids**, reused rather than reinvented: a
 trend is already "one physical quantity, addressed structurally by (register page, byte offset,
-unit)", and the catalog test already proves each locator resolves to exactly one row per profile. A
+unit, plus converter where a byte contains several bits)", and the catalog test already proves each
+locator resolves to exactly one row per profile. A
 `static_assert` pins every pairing to a real trend id, so a renamed trend is a build error rather than
 a pairing that silently stops happening.
 
-Six registers pair, and — measured across the catalog — **all six resolve on all 39 detectable
-profiles**: leaving water, return water, DHW tank, outdoor air, flow, room temperature. The rest carry
-no pairing on purpose, each for a stated reason: the post-BUH outlet is a *different measurement
+Six measurements plus one state pair, and — measured across the catalog — **all seven resolve on all
+39 detectable profiles**: leaving water, return water, DHW tank, outdoor air, flow, room temperature
+and booster-heater run (HomeHub input `32` ↔ X10A BSH converter `305`). The rest carry no pairing on
+purpose, each for a stated reason: the post-BUH outlet is a *different measurement
 point* (pairing it would be the substitution `lwt_select.hpp` refuses); the real power measurement has
 no X10A equivalent at all (X10A estimates it from CT clamps at an assumed 230 V, so pairing a
 measurement with an estimate would hide which is which); setpoints, modes and faults are not readings.
@@ -251,9 +255,9 @@ green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
   gateway measures the *whole unit's* electrical input, backup and immersion heater included, while
   the heat figure is across the plate exchanger alone — precisely the boundary mismatch
   [`cop_scope.hpp`](../main/logic/cop_scope.hpp) refuses, and one that collapses exactly when a
-  heater fires, reading as a failing heat pump while nothing is wrong. The gateway map carries
-  neither the compressor state nor the heater states, so there is nothing to decide it *with*, and
-  the answer is the one this firmware gives everywhere else: publish nothing, and name the reason
+  heater fires, reading as a failing heat pump while nothing is wrong. The gateway now carries the
+  compressor and tank-heater states, but not the BUH stage state and all source-boundary evidence the
+  quotient needs, so the answer remains: publish nothing, and name the reason
   (`feature_gate.hpp` — disable, never degrade).
   The electrical input itself *is* better here, since the HomeHub measures what X10A only estimates
   from CT clamps at an assumed 230 V — read from input register **51** by its offset, never by its

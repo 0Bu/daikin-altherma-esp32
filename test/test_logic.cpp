@@ -3013,13 +3013,16 @@ static void test_homehub() {
         if (r.kind == HomeHubValueKind::Number) CHECK(r.offset == 23);  // actual numeric sub-code
         else statuses++;
     }
-    CHECK(dimensionless == 11 && statuses == 10 && text_rows == 1);
+    CHECK(dimensionless == 12 && statuses == 11 && text_rows == 1);
 
     const HomeHubReg* compressor = find(31);
     CHECK(compressor && compressor->kind == HomeHubValueKind::Binary &&
           compressor->space == MbFunc::ReadInput);
     CHECK(homehub_format(*compressor, 0, buf, sizeof(buf)) && std::string(buf) == "0");
     CHECK(homehub_format(*compressor, 1, buf, sizeof(buf)) && std::string(buf) == "1");
+    const HomeHubReg* tank_heater = find(32);
+    CHECK(tank_heater && tank_heater->kind == HomeHubValueKind::Binary &&
+          tank_heater->space == MbFunc::ReadInput);
 
     // Enums retain the raw constants on every public wire. /values carries a separate semantic id
     // so the browser can still display the manufacturer's state names at the visual boundary.
@@ -3056,7 +3059,7 @@ static void test_homehub() {
     CHECK(std::string(homehub_enum_id(sg->kind)) == "smart_grid_mode");
 
     // Real flags keep numeric 1/0 at the API boundary and are marked structurally for ON/OFF UI.
-    for (uint16_t off : {30, 52, 53, 4, 9}) {
+    for (uint16_t off : {30, 32, 52, 53, 4, 9}) {
         const HomeHubReg* flag = find(off);
         CHECK(flag && homehub_is_binary(*flag));
         CHECK(!homehub_is_text(*flag));
@@ -3093,8 +3096,8 @@ static void test_homehub_map() {
         CHECK(trend_by_id(c.concept_id) != nullptr);
         CHECK(homehub_concept_index(c.concept_id) == static_cast<int>(i));
     }
-    // The history set repeats those six pairings and adds exactly one unpaired state: Smart-Grid
-    // mode. Every entry still names a real register and a real trend, and the ring lookup is exact.
+    // The history set repeats the six measurement plus BSH pairings and adds one unpaired state:
+    // Smart-Grid mode. Every entry still names a real register and a real trend, and the lookup is exact.
     CHECK(HOMEHUB_HISTORY_COUNT == HOMEHUB_CONCEPT_COUNT + 1);
     for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++) {
         const auto& h = HOMEHUB_HISTORIES[i];
@@ -3112,6 +3115,7 @@ static void test_homehub_map() {
     // Lookup both ways.
     CHECK(std::string(homehub_concept_for(43)) == "dhw_tank");
     CHECK(std::string(homehub_concept_for(40)) == "leaving_water");
+    CHECK(std::string(homehub_concept_for(32)) == "bsh_state");
     CHECK(homehub_concept_for(56) == nullptr);   // historied state, but not a one-row X10A pairing
     CHECK(homehub_concept_for(51) == nullptr);   // power: X10A has no equivalent, deliberately unpaired
     CHECK(homehub_concept_for(41) == nullptr);   // post-BUH: a DIFFERENT measurement point, not leaving_water
@@ -3124,6 +3128,7 @@ static void test_homehub_map() {
     CHECK(std::string(x10a_concept_for(0x61, 10, "°C", 0)) == "dhw_tank");
     CHECK(std::string(x10a_concept_for(0x61,  2, "°C", 0)) == "leaving_water");
     CHECK(std::string(x10a_concept_for(0x61,  8, "°C", 0)) == "return_water");
+    CHECK(std::string(x10a_concept_for(0x60, 12, "", 305)) == "bsh_state");
     CHECK(x10a_concept_for(0x61, 10, "bar", 0) == nullptr);   // unit is part of the locator
     CHECK(x10a_concept_for(0x99,  0, "°C", 0)  == nullptr);
 
@@ -3184,7 +3189,7 @@ static void test_homehub_map() {
     // THE TRAP, asserted directly: same page, same offset, different converter → different concept.
     CHECK(std::string(x10a_concept_for(0x60, 12, "", 306)) == "valve_dhw");
     CHECK(std::string(x10a_concept_for(0x60, 12, "", 301)) == "pump_running");
-    CHECK(x10a_concept_for(0x60, 12, "", 302) == nullptr);   // BSH etc. share the byte, pair nothing
+    CHECK(x10a_concept_for(0x60, 12, "", 302) == nullptr); // another bit sharing the byte stays unpaired
     CHECK(x10a_concept_for(0x62,  2, "", 304) == nullptr);   // the DHW BOOST is deliberately unpaired
 
     // Over the catalog: each state locator resolves to EXACTLY ONE row per detectable profile, and
@@ -5094,6 +5099,18 @@ static void test_history() {
         const TrendDef sat{ "probe", TrendKind::Row, 0x20, 12, "°C", "" };
         CHECK(trend_select(sat, regs, offs, units, 2) == 0);
     }
+    // Seven binary facts share 0x60/12 and the empty unit. BSH is converter 305; the narrower
+    // numeric-row selector must refuse it rather than making array order the identity.
+    {
+        const TrendDef* bsh = trend_by_id("bsh_state");
+        CHECK(bsh != nullptr && bsh->kind == TrendKind::BinaryEvent && bsh->conv == 305);
+        const uint8_t regs[]   = { 0x60, 0x60, 0x60 };
+        const uint8_t offs[]   = { 12,   12,   12   };
+        const char*   units[]  = { "",   "",   ""   };
+        const int16_t convs[]  = { 306,  305,  301  };
+        CHECK(trend_select(*bsh, regs, offs, units, 3) == -1);
+        CHECK(trend_select(*bsh, regs, offs, units, convs, 3) == 1);
+    }
 
     // --- a trend is a measurement, never a target (issue #121's rule) ---------------------------
     // Now structural rather than checked per label: a setpoint lives at its own offset (the tank's
@@ -5314,6 +5331,22 @@ static void test_history() {
         CHECK(out[3] == HISTORY_NO_READING && out[4] == HISTORY_NO_READING && out[5] == HISTORY_NO_READING);
     }
     {
+        // BSH is an event state: once ON was observed, an OFF later in the same five-minute bucket
+        // must not erase the use. This reports one active raster window, not exact seconds.
+        TrendRing r;
+        r.fold_binary_event(0);
+        r.fold_binary_event(10);
+        r.fold_binary_event(0);
+        r.fold_binary_event(HISTORY_NO_READING);
+        CHECK(r.pending == 10);
+        r.commit(0);
+        HistorySample out[2];
+        CHECK(r.snapshot(out, 2) == 1 && out[0] == 10);
+        r.fold_binary_event(HISTORY_NO_READING);
+        r.fold_binary_event(0);
+        CHECK(r.pending == 0);                 // a real OFF beats an initially missing sample
+    }
+    {
         // Wrap-around: fill past capacity and the readout must still be oldest-first, dropping only
         // the samples that actually fell off the back.
         TrendRing r;
@@ -5367,6 +5400,7 @@ static void test_history() {
         { "ct_l1",            20, -1, 1 },
         { "ct_l2",            20, -1, 1 },
         { "ct_l3",            20, -1, 1 },
+        { "bsh_state",        39, -1, 1 },   // exact bit 305 in the shared 0x60/12 state byte
         // Derived from two structurally identified contact rows, so it resolves no SINGLE catalog
         // row. Its truth table is asserted above; test_binary_semantics pins both contacts' catalog
         // coverage independently.
@@ -5398,12 +5432,14 @@ static void test_history() {
         const char* units[512];
         uint8_t     regs[512];
         uint8_t     offs[512];
+        int16_t     convs[512];
         size_t n = p.count < 512 ? p.count : 512;
         for (size_t i = 0; i < n; i++) {
             labels[i] = p.values[i].label;
             units[i]  = unit_for_datatype(p.values[i].type);
             regs[i]   = p.values[i].reg;
             offs[i]   = p.values[i].offset;
+            convs[i]  = static_cast<int16_t>(p.values[i].conv);
         }
 
         int picked[TREND_COUNT];
@@ -5411,7 +5447,7 @@ static void test_history() {
             const TrendDef* d = trend_by_id(kExpect[t].id);
             CHECK(d != nullptr);
             CHECK(d == &TRENDS[t]);                  // kExpect is in TRENDS order — keep it that way
-            picked[t] = trend_select(*d, regs, offs, units, n);
+            picked[t] = trend_select(*d, regs, offs, units, convs, n);
             if (picked[t] < 0) continue;
             found[t]++;
 
@@ -5420,7 +5456,7 @@ static void test_history() {
             // the same unit, the pick becomes table order — which is not a rule anyone stated.
             int hits = 0;
             for (size_t i = 0; i < n; i++)
-                if (trend_row_matches(*d, regs[i], offs[i], units[i])) hits++;
+                if (trend_row_matches(*d, regs[i], offs[i], units[i], convs[i])) hits++;
             CHECK(hits == 1);
 
             CHECK(p.values[picked[t]].type == kExpect[t].unit_type);
@@ -5469,7 +5505,7 @@ static void test_history() {
     int board_trends = 0;
     int state_trends = 0;
     for (size_t t = 0; t < TREND_COUNT; t++) {
-        if (TRENDS[t].kind == TrendKind::Row) {
+        if (TRENDS[t].kind == TrendKind::Row || TRENDS[t].kind == TrendKind::BinaryEvent) {
             CHECK(TRENDS[t].label[0] == '\0');   // a row's label is the PROFILE's, discovered at runtime
             continue;
         }

@@ -1,7 +1,7 @@
 // ── 24-hour trend (a historied value row's explainer carries a sparkline under the text) ──────
 // WHICH rows have a trend is the FIRMWARE's answer. /status.history.rows names X10A rings;
-// modbus_rows names the six structurally paired HomeHub schematic readings plus the Smart-Grid state
-// timeline. The device keeps both at one fixed cadence and reports the labels each source owns. The
+// modbus_rows names the six paired HomeHub measurements plus the BSH and Smart-Grid state timelines.
+// The device keeps both at one fixed cadence and reports the labels each source owns. The
 // browser never pattern-matches its own candidates: offering a trend the device isn't buffering
 // would be an empty chart by design.
 // Each entry is {id, label}: the ID is the concept (logic/history.hpp's TRENDS — "dhw_tank",
@@ -89,8 +89,8 @@ const DERIVED = {
   //             COP, it is not one at all.
   //   scope   — cop_scope.hpp: the CT clamps see the whole unit INCLUDING both resistive heaters
   //             while the heat side is the pre-BUH outlet, so a CT-sourced quotient is only honest
-  //             once the heaters are known quiet — and their history is not buffered (three more
-  //             rings, for a gate rather than a curve). So a CT-sourced sample draws NOTHING here.
+  //             once the heaters are known quiet — and complete heater history is unavailable (BSH
+  //             is buffered, the two BUH stages are not). So a CT-sourced sample draws NOTHING here.
   //             That is the same refusal the live pill makes when it cannot pair the boundaries,
   //             not a rounding of it: an INV-sourced sample has the heaters outside both sides and
   //             needs no such evidence, which is why it is the branch that survives.
@@ -98,8 +98,8 @@ const DERIVED = {
     unit: "", ins: ["flow", "leaving_water", "return_water", "comp_rps", "inv_current",
                     "ct_l1", "ct_l2", "ct_l3"],
     none: {
-      en: "No curve while the electrical figure comes from the CT clamps — pairing it with the heat side across a whole day would need the backup heaters' own history, which is not buffered.",
-      de: "Kein Verlauf, solange der Stromwert von den Stromwandlern kommt — ihn über einen ganzen Tag mit der Wärmeseite zu paaren, bräuchte die Historie der Zusatzheizer, die nicht gepuffert wird.",
+      en: "No curve while the electrical figure comes from the CT clamps — pairing it with the heat side across a whole day needs complete electric-heater history; BSH is buffered, but the two BUH stages are not.",
+      de: "Kein Verlauf, solange der Stromwert von den Stromwandlern kommt — die Paarung mit der Wärmeseite über einen ganzen Tag braucht die vollständige Elektroheizer-Historie; BSH wird gepuffert, die beiden BUH-Stufen nicht.",
     },
     ready: (h) => h.flow && h.leaving_water && h.return_water && h.comp_rps && h.inv_current,
     fn: (s) => {
@@ -319,17 +319,31 @@ function historyView(id) {
            v: union, series };
 }
 
-// Smart-Grid mode is a STATE, so a numeric line from 0 to 3 would answer the wrong question. Draw
-// one timeline track per source instead: light grey means not Boost, petrol/blue spans mean mode 2,
-// and hatched gaps mean no answer. The summary and run list state the sampled duration and the wall
-// times, which is what a line hovering at y=2 cannot say at a glance.
-const boostState = (v) => [0, 10, 20, 30].includes(v) ? v === 20 : null;
-function boostRuns(series, wanted) {
+// Categorical states need timelines, not numeric curves. Smart-Grid Boost and the tank heater each
+// draw one lane per source: light grey is inactive, petrol/blue is active and hatching is no answer.
+// The duration is explicitly sampled RASTER time. For BSH the firmware event-folds each open bucket,
+// so an ON seen during a five-minute bucket remains visible even if a later poll in that bucket is
+// OFF; it is not presented as second-accurate runtime.
+const STATE_HIST = Object.freeze({
+  smart_grid_mode: {
+    classify: (v) => [0, 10, 20, 30].includes(v) ? v === 20 : null,
+    primary: "modbus", total: "hist.boost_total", run: "hist.boost_run",
+    none: "hist.boost_none", active: "hist.boost_active", inactive: "hist.boost_inactive",
+    aria: "hist.boost_aria",
+  },
+  bsh_state: {
+    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
+    primary: "x10a", total: "hist.heater_total", run: "hist.heater_run",
+    none: "hist.heater_none", active: "hist.heater_active", inactive: "hist.heater_inactive",
+    aria: "hist.heater_aria",
+  },
+});
+function stateRuns(series, wanted, classify) {
   const out = [];
   for (let i = 0; i < series.v.length; i++) {
-    if (boostState(series.v[i]) !== wanted) continue;
+    if (classify(series.v[i]) !== wanted) continue;
     const from = i;
-    while (i + 1 < series.v.length && boostState(series.v[i + 1]) === wanted) i++;
+    while (i + 1 < series.v.length && classify(series.v[i + 1]) === wanted) i++;
     out.push([from, i - from + 1]);
   }
   return out;
@@ -340,7 +354,7 @@ function histDuration(seconds) {
   return h && m ? t("hist.duration_hm", h, m)
        : h ? t("hist.duration_h", h) : t("hist.duration_min", m);
 }
-function boostRunWhen(view, from, count) {
+function stateRunWhen(view, from, count) {
   if (view.t0 != null) {
     const clock = (i) => new Date((view.t0 + i * view.dt) * 1000)
       .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
@@ -350,23 +364,23 @@ function boostRunWhen(view, from, count) {
   const recent = ((view.v.length - from - count) * view.dt) / 3600;
   return t("hist.boost_ago_range", old.toFixed(1), Math.max(0, recent).toFixed(1));
 }
-function boostHistHtml(id, name, view, wrap) {
+function stateHistHtml(id, name, view, wrap, cfg) {
   const n = view.v.length;
   const spanH = Math.max(1, Math.round((n * view.dt) / 3600));
   const full = n * view.dt >= 23.5 * 3600;
-  // The live pill is a HomeHub readback, so prefer that source for the one duration/run summary.
-  // Keep both visual tracks when X10A is available: a disagreement remains visible rather than
-  // being merged into a plausible single answer.
-  const primary = view.series.find((s) => s.source === "modbus") || view.series[0];
-  const active = boostRuns(primary, true);
+  // Keep both lanes when both buses are available: a disagreement remains visible rather than
+  // being merged into a plausible single answer. The preferred source is part of the concept: the
+  // HomeHub owns the external SG request, while X10A leads for the physical BSH state.
+  const primary = view.series.find((s) => s.source === cfg.primary) || view.series[0];
+  const active = stateRuns(primary, true, cfg.classify);
   const total = active.reduce((sum, r) => sum + r[1] * view.dt, 0);
-  const gaps = boostRuns(primary, null).length;
+  const gaps = stateRuns(primary, null, cfg.classify).length;
   const pct = (i) => ((i / n) * 100).toFixed(3);
   const tracks = view.series.map((s) => {
-    const on = boostRuns(s, true).map(([from, count]) =>
+    const on = stateRuns(s, true, cfg.classify).map(([from, count]) =>
       `<span class="vhist-state-on${s.source === "modbus" ? " mb" : ""}"` +
       ` style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
-    const missing = boostRuns(s, null).map(([from, count]) =>
+    const missing = stateRuns(s, null, cfg.classify).map(([from, count]) =>
       `<span class="vhist-state-gap" style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
     return `<div class="vhist-state-track" aria-hidden="true">${on}${missing}</div>`;
   }).join("");
@@ -382,18 +396,18 @@ function boostHistHtml(id, name, view, wrap) {
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
     pinTip = `<div class="vhist-tip vhist-pinned mono num" style="left:${px}%">${esc(scrubText(view, pi))}</div>`;
   }
-  const totalText = t("hist.boost_total", histDuration(total));
+  const totalText = t(cfg.total, histDuration(total));
   const runList = active.length
-    ? active.map(([from, count]) => `<span>${esc(t("hist.boost_run", boostRunWhen(view, from, count),
-                                                    histDuration(count * view.dt)))}</span>`).join("")
-    : `<span>${esc(t("hist.boost_none"))}</span>`;
+    ? active.map(([from, count]) => `<span>${esc(t(cfg.run, stateRunWhen(view, from, count),
+                                                  histDuration(count * view.dt)))}</span>`).join("")
+    : `<span>${esc(t(cfg.none))}</span>`;
   return wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.since", spanH))}</span>` +
       `<span class="vhist-range mono num">${esc(totalText)}</span></div>` + legend +
     `<div class="vhist-graph vhist-state-graph${pi >= 0 ? " has-pin" : ""}">` +
       `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +
       `<div class="vhist-plot vhist-state-plot" data-hist="${esc(id)}" data-n="${n}" tabindex="0" role="img"` +
-        ` aria-label="${esc(t("hist.boost_aria", name || id, totalText))}">` + tracks + pinCross +
+        ` aria-label="${esc(t(cfg.aria, name || id, totalText))}">` + tracks + pinCross +
         `<span class="vhist-cross vhist-live" hidden></span>` +
       `</div>` +
     `</div>` +
@@ -437,7 +451,7 @@ function histHtml(id, unit, name) {
     return wrap(`<div class="vhist-note">${esc(D && D.none ? tx(D.none) : t("hist.none"))}</div>`, "vhist-flat");
   }
 
-  if (id === "smart_grid_mode") return boostHistHtml(id, name, view, wrap);
+  if (STATE_HIST[id]) return stateHistHtml(id, name, view, wrap, STATE_HIST[id]);
 
   const n = view.v.length;
   const spanH = Math.max(1, Math.round((n * view.dt) / 3600));
@@ -608,11 +622,15 @@ function histPinToggle(id, i) {
 function scrubText(h, i) {
   const valueText = (s) => {
     const v = s.v[i];
-    if (h.id === "smart_grid_mode" && v != null) {
+    const cfg = STATE_HIST[h.id];
+    if (cfg && v != null) {
+      const state = cfg.classify(v);
+      if (state == null) return t("hist.nm");
+      const label = t(state ? cfg.active : cfg.inactive);
+      if (h.id !== "smart_grid_mode") return label;
       const mode = v / 10;
       return Number.isInteger(mode) && mode >= 0 && mode <= 3
-        ? `${t(mode === 2 ? "hist.boost_active" : "hist.boost_inactive")} · ${t(`sg.mode${mode}`)}`
-        : t("hist.nm");
+        ? `${label} · ${t(`sg.mode${mode}`)}` : t("hist.nm");
     }
     return v != null ? (v / 10).toFixed(1) + (s.unit ? " " + s.unit : "")
          : histHeld(s, i) ? t("hist.held") : t("hist.nm");
@@ -811,6 +829,7 @@ const HOMEHUB_LABEL_DE = Object.freeze({
   23: "Fehlersubcode der Anlage",
   30: "Umwälzpumpe aktiv",
   31: "Verdichter aktiv",
+  32: "Heizstab aktiv",
   37: "Position des 3-Wege-Ventils",
   52: "Warmwasserbetrieb",
   53: "Raumheiz- oder Kühlbetrieb",

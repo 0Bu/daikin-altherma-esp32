@@ -20,7 +20,7 @@ const rowRe = /\{\s*(\d+)\s*,\s*MbFunc::[^}]*?"((?:[^"\\]|\\.)*)"\s*(?:,\s*HomeH
 const rows = [...map.matchAll(rowRe)].map((m) => ({
   off: Number(m[1]), label: m[2].replace(/\\(["\\])/g, "$1"), kind: m[3] || "Number",
 }));
-assert.equal(rows.length, 28, "all 28 curated HomeHub registers must be audited");
+assert.equal(rows.length, 29, "all 29 curated HomeHub registers must be audited");
 
 const firstDescription = (label) => descriptions.find((d) => {
   d.re.lastIndex = 0;
@@ -44,6 +44,7 @@ const expected = new Map([
   [23, ["Unit abnormality sub code", "Fehlersubcode der Anlage"]],
   [30, ["Circulation pump running", "Umwälzpumpe aktiv"]],
   [31, ["Compressor running", "Verdichter aktiv"]],
+  [32, ["Booster heater run", "Heizstab aktiv"]],
   [37, ["3-way valve", "Position des 3-Wege-Ventils"]],
   [52, ["DHW normal operation", "Warmwasserbetrieb"]],
   [53, ["Space heating/cooling normal operation", "Raumheiz- oder Kühlbetrieb"]],
@@ -136,4 +137,4 @@ assert.doesNotMatch(`${indoorMode.de.what} ${indoorMode.de.normal}`,
   /Wasserseite \(|Heizen\+Warmwasser|\bWW\b/,
   "the German operation-mode explanation uses fluent copy and the visible state names");
 
-console.log("HomeHub copy: 28/28 values, labels and bilingual explanations are semantically pinned");
+console.log("HomeHub copy: 29/29 values, labels and bilingual explanations are semantically pinned");

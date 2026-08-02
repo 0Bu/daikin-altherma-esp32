@@ -20,8 +20,9 @@
 //
 // ── The vocabulary is logic/history.hpp's TREND IDS, deliberately reused ────────────────────────
 // A trend is already "one physical quantity a human cares about, addressed STRUCTURALLY by
-// (register page, byte offset, unit)" — which is precisely the concept this pairing needs, and the
-// catalog test already proves each locator resolves to exactly one row on every profile. Inventing a
+// (register page, byte offset, unit, plus converter for a shared bit byte)" — which is precisely the
+// concept this pairing needs, and the catalog test already proves each locator resolves to exactly
+// one row on every profile. Inventing a
 // second concept vocabulary beside it would be two lists to keep in step for no gain, so a HomeHub
 // register names a TREND ID and the X10A side resolves through trend_row_matches(). The set is
 // asserted against TRENDS at compile time below, so a renamed or deleted trend is a build error
@@ -66,12 +67,14 @@ inline constexpr HomeHubConcept HOMEHUB_CONCEPTS[] = {
     { 44, "outdoor_air"   },   // outdoor air ↔ 0x20/0  R1T-Outdoor air temp.
     { 49, "flow"          },   // flow        ↔ 0x62/9  Flow sensor (l/min)
     { 50, "room_temp"     },   // room        ↔ 0x61/12 Indoor ambient temp. (R1T)
+    { 32, "bsh_state"     },   // booster run ↔ 0x60/12 conv 305 BSH (DHW immersion heater)
 };
 inline constexpr size_t HOMEHUB_CONCEPT_COUNT =
     sizeof(HOMEHUB_CONCEPTS) / sizeof(HOMEHUB_CONCEPTS[0]);
 
-// Histories are a slightly wider contract than source PAIRING. The six measurements above are
-// still paired one-for-one, while Smart-Grid mode is a state assembled from TWO X10A contacts and
+// Histories are a slightly wider contract than source PAIRING. The six measurements and exact BSH
+// state above are still paired one-for-one, while Smart-Grid mode is assembled from TWO X10A
+// contacts and
 // therefore cannot honestly be attached to either source row as its twin. It can still share one
 // history concept: both sources report the same documented 0..3 enum, and the UI draws their state
 // tracks independently so a disagreement remains visible.
@@ -89,14 +92,15 @@ inline constexpr HomeHubHistory HOMEHUB_HISTORIES[] = {
     { 44, "outdoor_air"     },
     { 49, "flow"            },
     { 50, "room_temp"       },
+    { 32, "bsh_state"       },
     { 56, "smart_grid_mode" },
 };
 inline constexpr size_t HOMEHUB_HISTORY_COUNT =
     sizeof(HOMEHUB_HISTORIES) / sizeof(HOMEHUB_HISTORIES[0]);
 
-// Stable ring index for one paired measurement concept. The Modbus history recorder and
+// Stable ring index for one paired reading/state concept. The Modbus history recorder and
 // GET /history?source=modbus both use this, so a concept can never be written into one slot and read
-// back from another. Unknown and state-only concepts deliberately resolve to -1.
+// back from another. Unknown and unpaired state concepts deliberately resolve to -1.
 inline constexpr int homehub_concept_index(const char* concept_id) {
     for (size_t i = 0; i < HOMEHUB_CONCEPT_COUNT; i++)
         if (trend_cstr_eq(HOMEHUB_CONCEPTS[i].concept_id, concept_id)) return static_cast<int>(i);
@@ -110,22 +114,18 @@ inline constexpr int homehub_history_index(const char* trend_id) {
     return -1;
 }
 
-// ── STATES: the same pairing for rows that are not MEASUREMENTS ────────────────────────────────
-// The table above can only name quantities a TREND addresses, and trends buffer measured numbers.
-// That left the plant's STATES — is the pump running, which way is the diverter pointing — unpaired
-// for a reason that is about this file's vocabulary rather than about the data: both sources report
-// them, plainly and unambiguously, and a reader looking at "3way valve OFF" is owed the gateway's
-// answer next to it just as much as for a temperature.
+// ── OTHER STATES: live pairings that do not need their own history ─────────────────────────────
+// BSH belongs above because it is trended. The remaining plant states — is the pump running, which
+// way is the diverter pointing — are paired live without spending another history ring: both sources
+// report them plainly, and a reader looking at "3way valve OFF" is owed the gateway's answer too.
 //
 // They need their own table because they need a WIDER KEY. `3way valve`, `2way valve`, `BSH`,
 // `BUH Step1`, `BUH Step2` and `Water pump operation` all live in ONE dimensionless byte — 0x60/12 —
-// and differ ONLY in which bit their converter masks. A (reg, offset, unit) locator, which is all a
-// trend has, resolves every one of them to the same row: ask it for the diverter and it answers with
-// the pump. So the key here is (reg, offset, CONVERTER), exactly one field wider and for exactly the
-// reason logic/checkup.hpp carries the same third field.
+// and differ ONLY in which bit their converter masks. The key here is therefore (reg, offset,
+// CONVERTER), the same discriminator the BSH BinaryEvent trend and logic/checkup.hpp use.
 //
-// Measured over the shipped catalog, each locator below appears on 44 profiles and no other row
-// shares its triple; the catalog test asserts both, plus the identity of the row it resolves to.
+// Measured over the detectable shipped catalog, each locator below appears on 39 profiles and no
+// other row shares its triple; the catalog test asserts both, plus the resolved row's identity.
 //
 // NOT PAIRED, and this one is the interesting refusal:
 //   52 DHW normal operation — X10A has no plain "is DHW running" flag. The nearest row is
@@ -157,13 +157,13 @@ inline const char* homehub_concept_for(uint16_t offset) {
     return nullptr;
 }
 
-// The concept an X10A row carries, or nullptr. MEASUREMENTS resolve through trend_row_matches() —
+// The concept an X10A row carries, or nullptr. TRENDED rows resolve through trend_row_matches() —
 // the SAME predicate the trend rings use, so a row pairs here exactly when it is the row the trend
 // buffers. STATES resolve on their own (reg, offset, conv) triple. Never keyed on the label (see the
 // header note).
 inline const char* x10a_concept_for(unsigned reg, unsigned off, const char* unit, int conv) {
     for (const auto& d : TRENDS)
-        if (trend_row_matches(d, reg, off, unit)) return d.id;
+        if (trend_row_matches(d, reg, off, unit, conv)) return d.id;
     for (const auto& s : HOMEHUB_STATES)
         if (s.reg == reg && s.off == off && s.conv == static_cast<unsigned>(conv)) return s.concept_id;
     return nullptr;
@@ -183,7 +183,7 @@ constexpr bool homehub_concepts_are_trends() {
     return true;
 }
 constexpr bool homehub_histories_are_valid() {
-    // The first entries must reproduce every paired measurement exactly. This makes the apparent
+    // The first entries must reproduce every paired concept exactly. This makes the apparent
     // duplication above mechanically closed: changing a pairing without its history is a build
     // error, not a missing second line in the browser.
     if (HOMEHUB_HISTORY_COUNT < HOMEHUB_CONCEPT_COUNT) return false;
