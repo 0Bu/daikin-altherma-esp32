@@ -45,7 +45,9 @@ inline constexpr int BOARD_PRESETS_MAX = 2;
 
 // The full table. Source of truth for these numbers is docs/BOARDS.md (the per-board hardware
 // inventory); keep the two in step — the doc is where a board's facts are argued and cited, this is
-// where they are executed.
+// where they are executed. Display-equipped boards are intentionally absent: the firmware has no
+// display driver or display role, so offering their non-display pin subset would falsely claim
+// board support.
 inline const BoardPreset* board_presets_all(int& count) {
     static const BoardPreset presets[] = {
         // The wiring reference (docs/WIRING.md): WS2812C-2020 on GPIO35, front button on GPIO41.

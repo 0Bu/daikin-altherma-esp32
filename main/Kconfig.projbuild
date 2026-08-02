@@ -139,7 +139,8 @@ menu "Daikin Altherma Configuration"
         help
             The indicator is a WS2812/WS2812C addressable pixel driven over RMT, not a plain
             level-driven LED. Both drivers are compiled in and the choice is runtime — this is
-            only the first-boot default. Set for M5Stack AtomS3 / AtomS3 Lite (GPIO35).
+            only the first-boot default. Set for M5Stack AtomS3 Lite (GPIO35). The display-equipped
+            AtomS3 and M5StickS3 boards are not supported.
 
     config DAIKIN_STATUS_LED_INVERTED
         bool "Invert LED state (Active Low, first-boot default)"
