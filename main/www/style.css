@@ -195,6 +195,16 @@ svg .sc-flow {
   stroke-dasharray: 9 15; opacity: 0; transition: opacity .4s;
 }
 svg .sc-rflow { fill: none; stroke-width: 3.5; stroke-linecap: round; stroke-dasharray: 6 12; opacity: 0; transition: opacity .4s; }
+/* Counterflow inside the PHE. The paths mirror the installer's two opposing combs and are painted
+   before the three solid value pills, so the animation remains readable without ever crossing the
+   figures. Water changes thermal colour in Cooling while its hydraulic direction stays fixed. */
+#schem { --phe-water-supply: var(--flow-hot); --phe-water-return: var(--flow-cold); }
+#schem.cooling-mode { --phe-water-supply: var(--flow-cold); --phe-water-return: var(--flow-hot); }
+#schem.water-neutral { --phe-water-supply: var(--muted); --phe-water-return: var(--muted); }
+svg .sc-phe-channel { stroke-linejoin: round; opacity: .2; }
+svg .sc-phe-refrigerant-flow { stroke: url(#pheRefrigerantFlow); }
+svg .sc-phe-water-flow { stroke: url(#pheWaterFlow); }
+#schem svg .sc-phe-refrigerant-flow.on, #schem svg .sc-phe-water-flow.on { opacity: .35; }
 /* The animated overlays are pure decoration drawn over the pipes. `opacity: 0` still receives
    pointer events, so without this an idle flow path would swallow every click meant for its pipe.
    The DRAWN pipes are inert for the same reason from the other side: a pipe run is later in paint

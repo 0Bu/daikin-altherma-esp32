@@ -514,6 +514,7 @@ function renderLive() {
   sc.classList.toggle("no-room", d.room == null);
   sc.classList.toggle("no-spaceh", d.spaceOp == null);
   const onCls = (id, on) => $(id).classList.toggle("on", !!on);
+  onCls("fPhe", pumping);
   onCls("fSup1", pumping); onCls("fSup2", pumping); onCls("fSup3", pumping); onCls("fRet", pumping);
   // Each branch needs the valve to SAY so — `!toDhw` was true for an unknown valve, which is how the
   // heating branch came to animate on no evidence at all.
@@ -523,10 +524,11 @@ function renderLive() {
   // Refrigerant direction is supportable only when both activity and the thermal task are known.
   // This is true for Modbus-only DHW, but deliberately not for a gateway-only Auto space cycle.
   const refrigerantOn = compressorOn && d.thermalMode != null;
-  onCls("rfHot", refrigerantOn); onCls("rfCold", refrigerantOn);
+  onCls("rfHot", refrigerantOn); onCls("rfPhe", refrigerantOn); onCls("rfCold", refrigerantOn);
   // Cooling and defrost both reverse the refrigerant circuit relative to ordinary heating/DHW.
   const refrigerantReverse = d.defrost === true || d.thermalMode === "cool";
   $("rfHot").classList.toggle("rev", refrigerantReverse);
+  $("rfPhe").classList.toggle("rev", refrigerantReverse);
   $("rfCold").classList.toggle("rev", refrigerantReverse);
 
   // The derived figures that used to live in KPI tiles below the drawing, now at their place in it:

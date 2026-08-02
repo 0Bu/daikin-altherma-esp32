@@ -290,7 +290,35 @@
                      beyond it (tank, heating, both returns) do not move. -->
                 <g class="sc-hit" data-insp="phe" role="button" tabindex="0">
                   <rect class="sc-plate" x="290" y="150" width="88" height="300" rx="6"/>
-                  <path d="M300 158 v284 M309 158 v284 M318 158 v284 M327 158 v284 M336 158 v284 M345 158 v284 M354 158 v284 M363 158 v284 M372 158 v284" stroke="var(--line)" stroke-width="1.5" fill="none"/>
+                  <!-- The installer schematic shows the two media as opposing combs inside the
+                       exchanger, not as anonymous plate hatching. Keep that topology here: hot gas
+                       enters at the upper-left and leaves as liquid at the lower-left; water enters
+                       at the lower-right and leaves at the upper-right. The neutral paths are the
+                       actual drawing and the coloured dashed twins are the live flow. Both sit
+                       BEFORE the three value pills in paint order, so their solid card fill masks
+                       the channels cleanly instead of letting a dash cross a number. -->
+                  <defs>
+                    <linearGradient id="pheRefrigerantFlow" gradientUnits="userSpaceOnUse"
+                                    x1="0" y1="150" x2="0" y2="450">
+                      <stop offset="0" stop-color="var(--flow-hot)"/>
+                      <stop offset="1" stop-color="var(--flow-cold)"/>
+                    </linearGradient>
+                    <linearGradient id="pheWaterFlow" gradientUnits="userSpaceOnUse"
+                                    x1="0" y1="150" x2="0" y2="450">
+                      <stop offset="0" stop-color="var(--phe-water-supply)"/>
+                      <stop offset="1" stop-color="var(--phe-water-return)"/>
+                    </linearGradient>
+                  </defs>
+                  <!-- Refrigerant: upper-left -> lower-left. -->
+                  <path class="sc-rpipe sc-phe-channel"
+                        d="M290 180 H306 V210 H320 V240 H306 V270 H320 V300 H306 V330 H320 V360 H306 V390 H320 V420 H290"/>
+                  <path class="sc-rflow sc-phe-refrigerant-flow" id="rfPhe"
+                        d="M290 180 H306 V210 H320 V240 H306 V270 H320 V300 H306 V330 H320 V360 H306 V390 H320 V420 H290"/>
+                  <!-- Water counterflow: lower-right -> upper-right. -->
+                  <path class="sc-pipe sc-phe-channel"
+                        d="M378 420 H348 V390 H362 V360 H348 V330 H362 V300 H348 V270 H362 V240 H348 V210 H362 V180 H378"/>
+                  <path class="sc-flow sc-phe-water-flow" id="fPhe"
+                        d="M378 420 H348 V390 H362 V360 H348 V330 H362 V300 H348 V270 H362 V240 H348 V210 H362 V180 H378"/>
                   <text class="sc-lbl" x="334" y="470" text-anchor="middle">PHE</text>
                 </g>
                 <!-- ΔT and the heat/COP estimate sit ON the plate, not beside it: both are measured
