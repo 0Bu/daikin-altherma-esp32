@@ -527,7 +527,13 @@ Body, ordered:
    right now" and the *reason* is the explainer's job (tapping the pill says the compressor is off
    and the inverter current is left over from the last run). That reason must stay distinct from
    "this profile has no current row" — suppressing one wrong claim must not stand a *second* one in
-   front of it, and that one is a claim about the hardware. **The pipes animate in flow
+   front of it, and that one is a claim about the hardware. Inside the PHE, the refrigerant and
+   water circuits use the same right-angled zigzag mirrored across the plate centreline, with the
+   animation running in opposite directions: refrigerant from the upper gas connection to the lower
+   liquid connection, water from the lower return connection to the upper supply connection. Those
+   internal channels paint behind the opaque ΔT/capacity/COP pills and stay deliberately subdued
+   (20% neutral line, 35% active dashes), so they explain the exchanger without competing with its
+   readings. **The pipes animate in flow
    direction** while the pump runs. Thermal colour is mode-aware: heating/DHW uses hot outlet and cold
    inlet; active cooling uses cold outlet and warm inlet; pump-only circulation is neutral because it
    may be moving residual DHW heat. The 3-way valve switches the animated branch (space circuit ↔ tank coil);

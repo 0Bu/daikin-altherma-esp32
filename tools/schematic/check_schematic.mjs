@@ -995,10 +995,17 @@ for (const id of rotorIds) {
       '(transform-box: fill-box), so it orbits instead of turning — make the artwork 90°/180° symmetric about the hub');
   }
 }
-// G008: every horizontal run sits on ONE of the drawing's two documented levels (the hot side and
-// the cold side). A third level is a run that drifted off the grid.
+// G008: every EXTERNAL horizontal run sits on ONE of the drawing's two documented levels (the hot
+// side and the cold side). The PHE's two internal counterflow channels deliberately fold between
+// those ports like the installer schematic's opposing combs; their horizontal teeth are component
+// internals, not third/fourth plant runs, and remain covered by G005 (axis alignment) + G010 (the
+// animated overlay must trace the neutral channel exactly).
 const hLevels = new Map();
-for (const s of pipeSegs) { if (!isH(s)) continue; const y = Math.round(s.a[1] * 10) / 10; hLevels.set(y, (hLevels.get(y) || 0) + 1); }
+for (const s of pipeSegs) {
+  if (!isH(s) || hitKey(s.node) === 'phe') continue;
+  const y = Math.round(s.a[1] * 10) / 10;
+  hLevels.set(y, (hLevels.get(y) || 0) + 1);
+}
 const levels = [...hLevels.entries()].sort((a, b) => b[1] - a[1]);
 if (levels.length > 2) {
   const keep = levels.slice(0, 2).map((l) => l[0]);
