@@ -341,11 +341,10 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .inspect-rows > .mb-delta { margin: -1px 0 0; padding: 0 0 5px; }
 
 /* Models without a DHW tank / room sensor: hide those schematic parts instead of dangling "—".
-   Same rule for the two derived/flag pills: .no-pth when flow or ΔT is missing (no heat estimate),
-   .no-spaceh when the profile reports no space-operation flag — or while the link is down. */
+   The derived PHE pills are different: every supported profile can compute them at a valid working
+   point, so they remain visible with "—" while idle. .no-spaceh hides an absent operation flag. */
 .no-dhw .g-dhw { display: none; }
 .no-room .g-room { display: none; }
-.no-pth #gPth { display: none; }
 .no-spaceh #gSpaceH { display: none; }
 
 /* ── Settings screen (behind the header gear) ─────────────────────────────────

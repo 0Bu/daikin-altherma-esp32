@@ -782,11 +782,12 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    held-over rule earns its place — a sample taken while the compressor rests is stored as *held
    over*, not as the number the frozen outdoor page keeps returning (`logic/history.hpp`,
    composing `logic/ou_stale.hpp`).
-   The independent HomeHub task feeds six additional rings through `history_record_modbus()` — only
-   the measurement concepts in `logic/homehub_map.hpp` that the schematic draws. Both recorders use
-   the same monotonic 5-minute bucket id, returned as `b0` by `/history`, so the browser can overlay
-   them exactly even before SNTP. An X10A absence stays a gap in the blue line while a HomeHub sample
-   at that bucket remains a petrol point; the sources are never merged into one synthetic series.
+   The independent HomeHub task feeds nine additional rings through `history_record_modbus()` — six
+   measurement concepts plus BSH, 3-way-valve and Smart-Grid state timelines explicitly named in
+   `logic/homehub_map.hpp`. Both recorders use the same monotonic 5-minute bucket id, returned as `b0`
+   by `/history`, so the browser can overlay them exactly even before SNTP. An X10A absence stays a
+   gap in the blue line while a HomeHub sample at that bucket remains a petrol point; the sources are
+   never merged into one synthetic series.
 4a. **Mark source freshness.** Before step 4, the cycle locates the compressor witness
    (`logic::ou_is_rps_witness` — "INV frequency (rps)", which must sit on a page that stays live) and
    marks every cached reading whose page the outdoor unit is no longer refreshing

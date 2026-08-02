@@ -9,12 +9,15 @@ const S = {
   status: { history: {
     rows: [
       { id: "dhw_tank", label: "DHW tank temp. (R5T)" },
+      { id: "pump_signal", label: "Water pump signal (0:max-100:stop)" },
       { id: "bsh_state", label: "BSH" },
+      { id: "valve_dhw", label: "3way valve(On:DHW_Off:Space)" },
       { id: "smart_grid_mode", label: "Smart Grid operation mode" },
     ],
     modbus_rows: [
       { id: "dhw_tank", label: "Domestic Hot Water temperature" },
       { id: "bsh_state", label: "Booster heater run" },
+      { id: "valve_dhw", label: "3-way valve" },
       { id: "smart_grid_mode", label: "Smart Grid operation mode" },
     ],
   } },
@@ -55,6 +58,13 @@ const context = {
     if (key === "hist.heater_active") return "Heizstab aktiv";
     if (key === "hist.heater_inactive") return "Heizstab aus";
     if (key === "hist.heater_aria") return `${arg} — Heizstab-Verlauf. ${arg2}`;
+    if (key === "hist.valve_dhw_total") return `Warmwasser · ${arg}`;
+    if (key === "hist.valve_space_total") return `Raumkreis · ${arg}`;
+    if (key === "hist.valve_run") return `${arg} · Warmwasser ca. ${arg2}`;
+    if (key === "hist.valve_none") return "Keine Warmwasserstellung erfasst.";
+    if (key === "hist.valve_dhw") return "Warmwasser";
+    if (key === "hist.valve_space") return "Raumkreis";
+    if (key === "hist.valve_aria") return `${arg} — 3-Wege-Ventil-Verlauf. ${arg2}`;
     if (key.startsWith("sg.mode")) return ["Freier Betrieb", "Zwangsabschaltung", "Empfehlung ein", "Erzwungen ein"][+key.at(-1)];
     return labels[key] || key;
   },
@@ -67,7 +77,7 @@ const context = {
 vm.createContext(context);
 vm.runInContext(readAppFragments(["history.js"]) +
   "\nthis.__api = { hasHist, hasModbusHist, histCacheKey, historyView, histHtml, scrubText," +
-  " ensureHist, ensureHistPair };", context, { filename: "main/www/js/history.js" });
+  " ensureHist, ensureHistPair, ensureDerived };", context, { filename: "main/www/js/history.js" });
 const h = context.__api;
 
 const x10a = { at: 1, gen: 1, dt: 300, unit: "°C", t0: null, b0: 100,
@@ -128,6 +138,28 @@ assert.doesNotMatch(bshHtml, /vhist-line/);
 assert.match(bshHtml, /Heizstab aktiv erfasst · 10 min Rasterzeit/);
 assert.match(bshHtml, /<strong>X10A<\/strong>/, "X10A leads the heater-run summary");
 assert.match(h.scrubText(bshView, 1), /X10A Heizstab aktiv/);
+
+// The schematic shows intuitive pump speed, while the X10A row is inverted (0=max, 100=stop).
+// Its inspector curve must transform the source ring instead of making a stopped pump look maximal.
+S.hist.set("pump_signal", { at: Date.now(), gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
+  held: [], v: [1000, 700, 0] });
+await h.ensureDerived("pump_speed");
+assert.deepEqual(Array.from(S.hist.get("pump_speed").v), [0, 300, 1000]);
+assert.match(h.histHtml("pump_speed", "", "Drehzahl der Umwälzpumpe"), /0\.0 – 100\.0 %/);
+
+// The diverter is categorical too. Both selected branches are named, both independent sources keep
+// their own lane, and no numeric 0/1 curve is drawn.
+S.hist.set("valve_dhw", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
+  held: [], v: [0, 0, 10, 10, 0, 10] });
+S.hist.set("modbus:valve_dhw", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
+  held: [], v: [0, 0, 10, 10, 0, 10] });
+const valveView = h.historyView("valve_dhw");
+const valveHtml = h.histHtml("valve_dhw", "", "3-Wege-Ventil");
+assert.match(valveHtml, /vhist-state-track/);
+assert.doesNotMatch(valveHtml, /vhist-line/);
+assert.match(valveHtml, /Warmwasser · 15 min · Raumkreis · 15 min/);
+assert.match(h.scrubText(valveView, 0), /X10A Raumkreis/);
+assert.match(h.scrubText(valveView, 2), /Modbus Warmwasser/);
 
 // Bucket alignment, not array index: Modbus starts one raster later and must leave the first slot
 // empty rather than sliding its first sample under the older X10A point.

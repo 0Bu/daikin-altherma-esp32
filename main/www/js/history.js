@@ -1,6 +1,7 @@
 // ── 24-hour trend (a historied value row's explainer carries a sparkline under the text) ──────
 // WHICH rows have a trend is the FIRMWARE's answer. /status.history.rows names X10A rings;
-// modbus_rows names the six paired HomeHub measurements plus the BSH and Smart-Grid state timelines.
+// modbus_rows names the six paired HomeHub measurements plus the BSH, 3-way-valve and Smart-Grid
+// state timelines.
 // The device keeps both at one fixed cadence and reports the labels each source owns. The
 // browser never pattern-matches its own candidates: offering a trend the device isn't buffering
 // would be an empty chart by design.
@@ -36,8 +37,9 @@ function hasHist(id) {
 }
 
 // ── Derived trends: the schematic pills that are COMPUTED, not read ────────────────────────────
-// ΔT, heat output, electrical input and COP have no register, so the device has nothing to buffer
-// for them. Their 24-hour curve is assembled HERE, out of the rings of what each is computed FROM,
+// Pump speed, ΔT, heat output, electrical input and COP have no directly matching register value, so
+// the device has nothing to buffer for the displayed figure itself. Their 24-hour curve is assembled
+// HERE, out of the rings of what each is computed FROM,
 // by the same expressions liveData() uses for the live number — one definition of each figure
 // rather than a firmware copy and a browser copy free to drift apart. `inv_current` and `ct_l1..3`
 // are in logic/history.hpp's TRENDS for exactly this; they are inputs first and rows second.
@@ -55,6 +57,15 @@ function hasHist(id) {
 // (feature_gate.hpp's DISABLE-NEVER-DEGRADE: no honest inputs, no curve — never a substitute one).
 // `fn(s)` = one sample from one bucket's values, null for a gap.
 const DERIVED = {
+  // The X10A row is an inverted control signal: 0 = maximum and 100 = stop. The schematic instead
+  // shows the intuitive speed percentage, so its chart must transform every sample by the exact same
+  // clamped expression as liveData(). Drawing the raw row would make an idle pump look maximal.
+  pump_speed: {
+    unit: "%", ins: ["pump_signal"],
+    ready: (h) => h.pump_signal,
+    fn: (s) => s.pump_signal == null ? null
+      : Math.min(100, Math.max(0, 100 - s.pump_signal)),
+  },
   dt: {
     unit: "K", ins: ["leaving_water", "return_water"],
     ready: (h) => h.leaving_water && h.return_water,
@@ -337,6 +348,12 @@ const STATE_HIST = Object.freeze({
     none: "hist.heater_none", active: "hist.heater_active", inactive: "hist.heater_inactive",
     aria: "hist.heater_aria",
   },
+  valve_dhw: {
+    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
+    primary: "x10a", total: "hist.valve_dhw_total", inactiveTotal: "hist.valve_space_total",
+    run: "hist.valve_run", none: "hist.valve_none",
+    active: "hist.valve_dhw", inactive: "hist.valve_space", aria: "hist.valve_aria",
+  },
 });
 function stateRuns(series, wanted, classify) {
   const out = [];
@@ -374,6 +391,8 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   const primary = view.series.find((s) => s.source === cfg.primary) || view.series[0];
   const active = stateRuns(primary, true, cfg.classify);
   const total = active.reduce((sum, r) => sum + r[1] * view.dt, 0);
+  const inactive = stateRuns(primary, false, cfg.classify);
+  const inactiveSeconds = inactive.reduce((sum, r) => sum + r[1] * view.dt, 0);
   const gaps = stateRuns(primary, null, cfg.classify).length;
   const pct = (i) => ((i / n) * 100).toFixed(3);
   const tracks = view.series.map((s) => {
@@ -396,7 +415,8 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
     pinTip = `<div class="vhist-tip vhist-pinned mono num" style="left:${px}%">${esc(scrubText(view, pi))}</div>`;
   }
-  const totalText = t(cfg.total, histDuration(total));
+  const totalText = t(cfg.total, histDuration(total)) + (cfg.inactiveTotal
+    ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "");
   const runList = active.length
     ? active.map(([from, count]) => `<span>${esc(t(cfg.run, stateRunWhen(view, from, count),
                                                   histDuration(count * view.dt)))}</span>`).join("")

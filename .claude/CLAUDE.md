@@ -548,16 +548,17 @@ hp_poll.cpp     poll engine task: X10A ONLY — the HomeHub is a separate stack 
                 (logic/raw_capture.hpp — #194's decisive experiment, which the detect-pass dump
                 structurally cannot take, since a detect pass is always a unit at rest)
 history.cpp     the 24-hour trend rings: one fixed-cadence buffer per logic/history.hpp TREND, fed by
-                the X10A poll task (history_record), plus eight HomeHub rings fed by the independent
+                the X10A poll task (history_record), plus nine HomeHub rings fed by the independent
                 Modbus task (history_record_modbus). Both calls happen BEFORE their cache commit and
                 OUTSIDE the cache mutex; this file has its own lock, created before either task starts.
                 GET /history defaults to X10A and takes source=modbus for the second ring. STATIC
                 (.data), never heap: the binding limit on this board is the largest CONTIGUOUS block,
-                and a static array does not compete for it — twenty X10A/board/state trends cost
-                11520 B and the eight label-free HomeHub rings another 4608 B, for 16128 B of ring total, plus
-                ~78 B of labels/units/counters each (the ceiling assert moved 7168 -> 11520 with that
+                and a static array does not compete for it — twenty-one X10A/board/state trends cost
+                12096 B and the nine label-free HomeHub rings another 5184 B, for 17280 B of ring total, plus
+                ~78 B of labels/units/counters each (the ceiling assert moved 7168 -> 12096 with that
                 arithmetic; the rule that keeps it this low is that a trend follows the SCHEMATIC's
-                ~16 numeric pills plus the explicit Boost and BSH state timelines, not the ~66 numeric rows
+                ~16 numeric pills plus the explicit Boost, BSH and 3-way-valve state timelines, not
+                the ~66 numeric rows
                 a profile publishes, which would be ~38 KB). RAM only ON PURPOSE: a 576 B blob rewritten every
                 5 minutes is ~100k NVS writes a year in the partition holding the WiFi credentials,
                 so a reboot empties the rings and the UI draws the span it actually has rather than
@@ -567,13 +568,14 @@ history.cpp     the 24-hour trend rings: one fixed-cadence buffer per logic/hist
                 (the converters stay the one source of what a value means, so the domain audit still
                 sees them unchanged). The rows are found by (reg, off, unit) straight off the poll
                 cache — CachedValue carries `off` for exactly this, and for nothing else — so no
-                label matching happens on the poll path at all. TWO trends are not rows at all: the
-                BOARD's own free heap and largest contiguous block, sampled here (before the lock —
-                heap_caps takes its own) in tenths of a KiB. They ride the same ring, route and
-                browser as the catalog trends; what they answer is the one question a single /status
-                number never could — whether the heap is DRIFTING (a leak is a slope, fragmentation
-                is the two lines separating). That is why they are back on the ESP32 card after #186
-                dropped the spot figures Two absences are distinguished, because conflating them
+                label matching happens on the poll path at all. THREE trends are not catalog rows:
+                Smart-Grid mode combines two contact bits, while the BOARD's own free heap and
+                largest contiguous block are sampled here (before the lock — heap_caps takes its
+                own) in tenths of a KiB. They ride the same ring, route and browser as the catalog
+                trends; the board pair answers the one question a single /status number never could
+                — whether the heap is DRIFTING (a leak is a slope, fragmentation is the two lines
+                separating). That is why they are back on the ESP32 card after #186 dropped the spot
+                figures. Two absences are distinguished, because conflating them
                 misattributes one to the other: NO_READING (register timed out / reading_plausible
                 refused) vs HELD_OVER (the outdoor unit was asleep — ou_stale.hpp). A model change
                 (POST /detect) DISCARDS a ring: the same trend on a different profile is a different
@@ -1131,8 +1133,9 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 CONSEQUENCES of addressing a row this way rather than conditions on it, asserted over
                 the catalog instead of re-checked per sample: a trend cannot reach a SETPOINT (a
                 target sits at its own offset), and the held-over page class IS the locator's reg, so
-                no second page field can drift from it. SIXTEEN of the eighteen are catalog rows, and WHICH rows is a rule
-                rather than a taste: every numeric value the SCHEMATIC draws gets a curve, because
+                no second page field can drift from it. EIGHTEEN of the twenty-one are catalog rows
+                (sixteen numeric plus the converter-qualified BSH and 3-way-valve bits), and WHICH rows is a rule
+                rather than a taste: every supported numeric value the SCHEMATIC draws gets a curve, because
                 those are the readings someone is actually looking at — leaving/return water, DHW
                 tank, water pressure, flow, pump signal, refrigerant pressure (0x62/15, the one that
                 stays LIVE — the 0x20 transducers read 0.0 bar even at 42 rps on the measured unit,
@@ -1141,12 +1144,14 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 LOW-pressure pill is the one numeric pill with no trend), compressor rps, expansion
                 valve, outdoor air, discharge temp, room temp — plus the ELECTRICAL inputs
                 (inv_current, ct_l1..3), which are inputs first and rows second: the drawing's
-                computed pills (ΔT, heat output, electrical input, COP) have no register to buffer,
+                computed pills (pump speed, ΔT, heat output, electrical input, COP) have no register
+                matching the displayed figure to buffer,
                 so www/js/history.js's DERIVED assembles their curve from these rings with the same
                 expressions liveData() uses for the live number — one definition per figure instead
-                of a firmware copy and a browser copy free to drift. The other TWO are not rows at all — a TrendKind
-                tag splits "addressed by (reg, off, unit)" from "sampled from the board", and the
-                board pair (free_heap/max_alloc, KiB) carries its own fixed label because no profile
+                of a firmware copy and a browser copy free to drift. The other THREE are not rows at
+                all — a TrendKind tag splits "addressed by (reg, off, unit)" from "sampled from the board", and the
+                combined Smart-Grid mode plus the board pair (free_heap/max_alloc, KiB) carry their
+                own fixed labels because no profile
                 has one to give; trend_row_matches refuses them against a row even when the row is
                 crafted to look like their (0,0) locator. Two absences are
                 distinguished (NO_READING vs HELD_OVER) and history_store COMPOSES

@@ -3096,8 +3096,9 @@ static void test_homehub_map() {
         CHECK(trend_by_id(c.concept_id) != nullptr);
         CHECK(homehub_concept_index(c.concept_id) == static_cast<int>(i));
     }
-    // The history set repeats the six measurement plus BSH pairings and adds one unpaired state:
-    // Smart-Grid mode. Every entry still names a real register and a real trend, and the lookup is exact.
+    // The history set repeats the six measurement, BSH and 3-way-valve pairings and adds one
+    // unpaired state: Smart-Grid mode. Every entry still names a real register and a real trend, and
+    // the lookup is exact.
     CHECK(HOMEHUB_HISTORY_COUNT == HOMEHUB_CONCEPT_COUNT + 1);
     for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++) {
         const auto& h = HOMEHUB_HISTORIES[i];
@@ -3110,12 +3111,14 @@ static void test_homehub_map() {
     }
     CHECK(std::string(HOMEHUB_HISTORIES[HOMEHUB_HISTORY_COUNT - 1].trend_id) == "smart_grid_mode");
     CHECK(HOMEHUB_HISTORIES[HOMEHUB_HISTORY_COUNT - 1].offset == 56);
+    CHECK(homehub_history_index("valve_dhw") >= 0);
     CHECK(homehub_history_index("heat_pump_power") == -1);
     CHECK(homehub_history_index(nullptr) == -1);
     // Lookup both ways.
     CHECK(std::string(homehub_concept_for(43)) == "dhw_tank");
     CHECK(std::string(homehub_concept_for(40)) == "leaving_water");
     CHECK(std::string(homehub_concept_for(32)) == "bsh_state");
+    CHECK(std::string(homehub_concept_for(37)) == "valve_dhw");
     CHECK(homehub_concept_for(56) == nullptr);   // historied state, but not a one-row X10A pairing
     CHECK(homehub_concept_for(51) == nullptr);   // power: X10A has no equivalent, deliberately unpaired
     CHECK(homehub_concept_for(41) == nullptr);   // post-BUH: a DIFFERENT measurement point, not leaving_water
@@ -3129,6 +3132,7 @@ static void test_homehub_map() {
     CHECK(std::string(x10a_concept_for(0x61,  2, "°C", 0)) == "leaving_water");
     CHECK(std::string(x10a_concept_for(0x61,  8, "°C", 0)) == "return_water");
     CHECK(std::string(x10a_concept_for(0x60, 12, "", 305)) == "bsh_state");
+    CHECK(std::string(x10a_concept_for(0x60, 12, "", 306)) == "valve_dhw");
     CHECK(x10a_concept_for(0x61, 10, "bar", 0) == nullptr);   // unit is part of the locator
     CHECK(x10a_concept_for(0x99,  0, "°C", 0)  == nullptr);
 
@@ -3221,7 +3225,7 @@ static void test_homehub_map() {
     // ── COVERAGE, PINNED ──────────────────────────────────────────────────────────────────────
     // The assertions above are "at most one per profile" and "carried by enough of them" — neither
     // says how MANY profiles actually resolve each pairing, so the docs' claim that they all do was
-    // an unguarded statement about the catalog. Measured: every one of the nine resolves on every
+    // an unguarded statement about the catalog. Measured: every one of the ten resolves on every
     // detectable profile. Pinned as a NUMBER rather than a >= so a regeneration that drops a row
     // from one family is a decision someone makes on purpose: a pairing that stops resolving does
     // not fail anywhere else — the second source simply, silently, stops appearing beside that row.
@@ -5099,17 +5103,22 @@ static void test_history() {
         const TrendDef sat{ "probe", TrendKind::Row, 0x20, 12, "°C", "" };
         CHECK(trend_select(sat, regs, offs, units, 2) == 0);
     }
-    // Seven binary facts share 0x60/12 and the empty unit. BSH is converter 305; the narrower
-    // numeric-row selector must refuse it rather than making array order the identity.
+    // Seven binary facts share 0x60/12 and the empty unit. BSH is converter 305 and the 3-way valve
+    // converter 306; the narrower numeric-row selector must refuse both rather than making array
+    // order the identity.
     {
         const TrendDef* bsh = trend_by_id("bsh_state");
         CHECK(bsh != nullptr && bsh->kind == TrendKind::BinaryEvent && bsh->conv == 305);
+        const TrendDef* valve = trend_by_id("valve_dhw");
+        CHECK(valve != nullptr && valve->kind == TrendKind::BinaryState && valve->conv == 306);
         const uint8_t regs[]   = { 0x60, 0x60, 0x60 };
         const uint8_t offs[]   = { 12,   12,   12   };
         const char*   units[]  = { "",   "",   ""   };
         const int16_t convs[]  = { 306,  305,  301  };
         CHECK(trend_select(*bsh, regs, offs, units, 3) == -1);
         CHECK(trend_select(*bsh, regs, offs, units, convs, 3) == 1);
+        CHECK(trend_select(*valve, regs, offs, units, 3) == -1);
+        CHECK(trend_select(*valve, regs, offs, units, convs, 3) == 0);
     }
 
     // --- a trend is a measurement, never a target (issue #121's rule) ---------------------------
@@ -5401,6 +5410,7 @@ static void test_history() {
         { "ct_l2",            20, -1, 1 },
         { "ct_l3",            20, -1, 1 },
         { "bsh_state",        39, -1, 1 },   // exact bit 305 in the shared 0x60/12 state byte
+        { "valve_dhw",        39, -1, 1 },   // exact bit 306; persistent DHW/space selector state
         // Derived from two structurally identified contact rows, so it resolves no SINGLE catalog
         // row. Its truth table is asserted above; test_binary_semantics pins both contacts' catalog
         // coverage independently.
@@ -5505,7 +5515,8 @@ static void test_history() {
     int board_trends = 0;
     int state_trends = 0;
     for (size_t t = 0; t < TREND_COUNT; t++) {
-        if (TRENDS[t].kind == TrendKind::Row || TRENDS[t].kind == TrendKind::BinaryEvent) {
+        if (TRENDS[t].kind == TrendKind::Row || TRENDS[t].kind == TrendKind::BinaryState ||
+            TRENDS[t].kind == TrendKind::BinaryEvent) {
             CHECK(TRENDS[t].label[0] == '\0');   // a row's label is the PROFILE's, discovered at runtime
             continue;
         }

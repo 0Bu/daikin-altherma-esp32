@@ -512,7 +512,6 @@ function renderLive() {
   // answer in this snapshot. Keep the branch visible so the active heater cannot disappear with it.
   sc.classList.toggle("no-dhw", d.tank == null && d.bsh == null);
   sc.classList.toggle("no-room", d.room == null);
-  sc.classList.toggle("no-pth", d.pth == null);
   sc.classList.toggle("no-spaceh", d.spaceOp == null);
   const onCls = (id, on) => $(id).classList.toggle("on", !!on);
   onCls("fSup1", pumping); onCls("fSup2", pumping); onCls("fSup3", pumping); onCls("fRet", pumping);
@@ -903,6 +902,7 @@ const INSPECT = {
   valve: {
     t: { en: "3-way valve", de: "3-Wege-Ventil" },
     re: /3.?way valve/i, sample: "3-way valve (On:DHW/Off:Space)",
+    trend: "valve_dhw",
     now: (d) => d.valveDhw == null ? null
       : d.valveDhw ? { en: "Diverted to the hot-water tank — the space circuit is paused meanwhile.",
                        de: "Auf den Warmwasserspeicher geschaltet — der Raumkreis pausiert solange." }
@@ -953,6 +953,8 @@ const INSPECT = {
   },
   pump: {
     t: { en: "Circulation pump", de: "Umwälzpumpe" },
+    aria: { en: "Circulation-pump speed", de: "Drehzahl der Umwälzpumpe" },
+    trend: "pump_speed",
     what: {
       en: "Circulates water through the common hydronic loop and the branch selected by the 3-way valve. In the split-system layout shown, it is on the supply side after the plate heat exchanger and backup heater. The controller adjusts its speed according to operating mode, target ΔT and minimum-flow requirements; it may also run with the compressor stopped for overrun, protection or temperature equalisation.",
       de: "Fördert Wasser durch den gemeinsamen Hydraulikkreis und den vom 3-Wege-Ventil gewählten Zweig. Im gezeigten Split-System-Aufbau sitzt sie im Vorlauf hinter Plattenwärmetauscher und Zusatzheizer. Der Regler passt ihre Drehzahl an Betriebsart, Ziel-ΔT und Mindestdurchfluss an; für Nachlauf, Schutz oder Temperaturausgleich kann sie auch bei stehendem Verdichter laufen.",
@@ -1278,8 +1280,9 @@ function renderInspectHist(e, row) {
   // the plant" over a series that is, by construction, the heat pump's own — a scope mismatch under
   // a chart, which is the failure cop_scope exists to prevent.
   const mb = pairedId ? mbByConcept(pairedId) : null;
+  const chartName = DERIVED[id] && e && e.aria ? tx(e.aria) : null;
   el.innerHTML = !id ? ""
-    : row ? histHtml(id, displayUnit(row), displayReadingLabel(row.label))
+    : row ? histHtml(id, displayUnit(row), chartName || displayReadingLabel(row.label))
     : pairedId ? histHtml(id, mb ? displayUnit(mb) : "", mb ? displayHomeHubLabel(mb) : inspTitleText(e, null))
                : histHtml(id, DERIVED[id]?.unit || "", e.aria ? tx(e.aria) : inspTitleText(e, null));
 }

@@ -348,10 +348,10 @@ void http_append_status_json(std::string& j, bool redact) {
     }
     j += "],\"modbus_rows\":[";
     // Six HomeHub measurements structurally paired to schematic readings get a second ring, plus
-    // the Smart-Grid mode whose dedicated state timeline shows when and for how long Boost was
-    // active. Other states, setpoints and Modbus-only values remain live rows without a chart. Keep
-    // the list empty when this installation has no HomeHub stack, so old/no-gateway devices do not
-    // offer permanently empty series in the browser.
+    // BSH, the 3-way valve and Smart-Grid mode as categorical state timelines. Other states,
+    // setpoints and Modbus-only values remain live rows without a chart. Keep the list empty when
+    // this installation has no HomeHub stack, so old/no-gateway devices do not offer permanently
+    // empty series in the browser.
     bool first_mb_trend = true;
     if (mb.enabled) {
         for (size_t mt = 0; mt < logic::HOMEHUB_HISTORY_COUNT; mt++) {
