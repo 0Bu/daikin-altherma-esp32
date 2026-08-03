@@ -68,7 +68,8 @@ weather_forecast.cpp/.hpp
                       fetch/decision provenance and freshness explicit; the provider does not expose
                       model-run issue time, so it remains null. If MQTT is configured, the single
                       publisher task mirrors an atomic retained evidence snapshot (without precise
-                      coordinates) to <base>/weather_forecast. No heat-pump control is written.
+                      coordinates) to <base>/weather/openmeteo/forecast. No heat-pump control is
+                      written and no weather HA entities are created.
 def/*.hpp           → embedded per-model value profiles (machine-generated in the ValueDef row
                        format); def/registry.hpp maps profile id→table, models_catalog.hpp = /models
 config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi rollback backup + link
@@ -1241,16 +1242,18 @@ The Home Assistant bridge:
   upgrade, bounded exact-topic subscriptions probe for obsolete retained `<base>/state` and
   `<base>/modbus/status` values; only a non-empty retained response triggers each tombstone, so later
   reconnects do not publish either empty retired topic.
-- **Forecast evidence topic.** `<base>/weather_forecast` is an independent retained JSON snapshot,
+- **Forecast evidence topic.** `<base>/weather/openmeteo/forecast` is an independent retained JSON snapshot,
   published on change. Values and their Open-Meteo/ICON provenance,
   fetch time, forecast horizon start, validity limit, runtime error and numeric `available`/`fresh`
   flags travel atomically. A failed refresh may retain the last figures for forensic comparison, but
   `available: 0` prevents them from looking decision-ready; `fetched_unix_s` and
   `valid_until_unix_s` let a historian independently verify age even after the board is offline.
-  Exact latitude/longitude is intentionally omitted. When weather is configured, HA Discovery adds
-  the two forecast values and diagnostic `available`/`fresh` binary sensors to the existing device;
-  disabling weather retracts all four configs. MQTT archives firmware evidence but is not a
-  dependency of forecast acquisition or future on-device decisions.
+  Exact latitude/longitude is intentionally omitted. Weather intentionally has no HA Discovery:
+  MQTT archives firmware evidence but is not a dependency of forecast acquisition or future
+  on-device decisions. Builds through `v1.0.0-dev.295` briefly published four weather discovery
+  configs; they are permanent cleanup targets. Upgrade retirement passes delete those configs, and
+  an exact-topic probe removes the former retained `<base>/weather_forecast` document only when it
+  still exists.
 - **A field's JSON type comes from its DEFINITION, never from its current value.** `GroupedValue`
   carries a `PublishedKind` (`logic/convert.hpp` `published_kind`, keyed on the converter id):
   `Number` is emitted unquoted, `Text` quoted — in **every** state of that field. The publisher used

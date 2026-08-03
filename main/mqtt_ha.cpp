@@ -7,13 +7,13 @@
 //     debug board). After activation, a bus loss marks availability offline once and then suppresses
 //     every publish until X10A returns.
 //   • On (re)connect: mark availability "online", stream retained discovery configs for the active
-//     X10A profile, weather forecast, diagnostics and enabled ENV III, and retract every retired
-//     HomeHub discovery config. HomeHub values stay on MQTT for non-HA consumers, but are deliberately
-//     not exposed as HA entities.
+//     X10A profile, diagnostics and enabled ENV III, and retract every retired HomeHub/weather
+//     discovery config. HomeHub values stay on MQTT for non-HA consumers, but are deliberately not
+//     exposed as HA entities; weather has no HA entities either.
 //   • Each cycle: publish X10A's grouped JSON to <base>/x10a, the generation-checked flat HomeHub
 //     JSON to <base>/modbus, and an atomic forecast/provenance snapshot to
-//     <base>/weather_forecast when changed, plus each fresh ENV III sample on <base>/env3. A
-//     disconnected HomeHub or unavailable/stale ENV III publishes `{}` rather than carrying an old
+//     <base>/weather/openmeteo/forecast when changed, plus each fresh ENV III sample on <base>/env3.
+//     A disconnected HomeHub or unavailable/stale ENV III publishes `{}` rather than carrying an old
 //     reading forward. Message topics sit directly under
 //     <base> — one board per base topic; the node
 //     id identifies the DEVICE only in each discovery config's uniq_id/dev.ids + the
@@ -157,31 +157,33 @@ struct Lock {
 
 // Persisted so the pointers handed to esp-mqtt (and reused by the task) stay valid.
 static std::string s_uri, s_user, s_pass, s_node, s_board, s_base, s_prefix, s_avail, s_x10a,
-                   s_modbus, s_weather, s_env3, s_retired_modbus_status, s_legacy_state, s_heartbeat, s_crash;
+                   s_modbus, s_weather, s_env3, s_retired_weather, s_retired_modbus_status,
+                   s_legacy_state, s_heartbeat, s_crash;
 static std::string s_announced_profile;               // profile we last published discovery for (mqtt_task only)
 static std::string s_last_x10a_json;                  // per-topic dedup guards (mqtt_task only)
 static std::string s_last_modbus_json;
 static std::string s_last_weather_json;
-static bool        s_weather_discovery_synced = false;
-static bool        s_weather_discovery_enabled = false;
 static std::string s_last_env3_json;
 static uint32_t    s_last_env3_samples          = 0;
 static bool        s_modbus_disabled_cleaned    = false;
 static bool        s_env3_disabled_cleaned      = false;
 static bool        s_env3_discovery_announced   = false;
-// Retained-topic cleanup: probe the two retired topics plus a resolved crash without unconditionally
+// Retained-topic cleanup: probe the retired topics plus a resolved crash without unconditionally
 // publishing empty payloads on every reconnect. The event task only raises each `seen` flag;
 // subscribe/delete/unsubscribe remain on mqtt_task, preserving the single-publisher rule. The
 // bounded probes repeat on reconnect until an old value is found and deleted; once the broker is
 // clean they are read-only and silent.
 static std::atomic<bool> s_legacy_state_seen{false};
 static std::atomic<bool> s_retired_modbus_status_seen{false};
+static std::atomic<bool> s_retired_weather_seen{false};
 static std::atomic<bool> s_crash_seen{false};
 static bool              s_legacy_probe_active = false;               // mqtt_task only
 static bool              s_retired_modbus_status_probe_active = false; // mqtt_task only
+static bool              s_retired_weather_probe_active = false;      // mqtt_task only
 static bool              s_crash_probe_active = false;                // mqtt_task only
 static int64_t           s_legacy_probe_deadline_us = 0;              // mqtt_task only
 static int64_t           s_retired_modbus_status_probe_deadline_us = 0; // mqtt_task only
+static int64_t           s_retired_weather_probe_deadline_us = 0;     // mqtt_task only
 static int64_t           s_crash_probe_deadline_us = 0;               // mqtt_task only
 // Stale-identity migration (mqtt_task only) — see retract_legacy_fixed / retract_stale_values below.
 static bool        s_legacy_fixed_retracted = false;   // heartbeat + crash entities: once per boot
@@ -211,7 +213,7 @@ static constexpr int HEARTBEAT_INTERVAL_S = 10;
 // A retained tombstone is not stored by the broker. If HA was offline during the firmware's MQTT
 // connect, it would miss that removal and keep the old registry entities. Repeating this low-volume
 // retirement burst makes cleanup eventually reliable without ever reintroducing a config payload.
-static constexpr int MODBUS_HA_RETIRE_INTERVAL_S = 5 * 60;
+static constexpr int HA_RETIRE_INTERVAL_S = 5 * 60;
 static constexpr int64_t RETIRED_TOPIC_PROBE_US = 5LL * 1000 * 1000;
 
 // Non-allocating under the lock: `err` is always a string literal, stored as a bare pointer. Runs on
@@ -535,6 +537,17 @@ static void retract_env3_discovery() {
         mqtt_publish(env3_discovery_topic(s_prefix, s_node, ENV3_HA_SENSORS[i]), "", 0, 0, 1);
 }
 
+// Builds up to v1.0.0-dev.295 briefly exposed the forecast as four HA entities. Forecast history
+// now has one explicit consumer contract on MQTT instead; delete the frozen discovery topics and
+// never publish replacement configs. Repeating this with the Modbus retirement also cleans brokers
+// restored from a backup made while those entities existed.
+static void retract_weather_discovery() {
+    for (int i = 0; i < RETIRED_WEATHER_HA_SENSOR_COUNT; ++i) {
+        const RetiredHaSensor& sensor = RETIRED_WEATHER_HA_SENSORS[i];
+        mqtt_publish(retired_weather_discovery_topic(s_prefix, s_node, sensor), "", 0, 0, 1);
+    }
+}
+
 // Build + publish each source independently. The X10A payload is grouped by register page; the
 // Modbus topic is flat because its topic already supplies the source group. When the HomeHub link is
 // not live, `{}` actively removes every state instead of retaining values from an old TCP session.
@@ -572,23 +585,6 @@ static void publish_weather_state() {
         mqtt_publish(s_weather, js.c_str(), static_cast<int>(js.size()), 0, 1);
         s_last_weather_json = js;
     }
-}
-
-static void sync_weather_discovery(bool enabled) {
-    if (s_weather_discovery_synced && enabled == s_weather_discovery_enabled) return;
-    for (int i = 0; i < WEATHER_HA_SENSOR_COUNT; ++i) {
-        const WeatherHaSensor& sensor = WEATHER_HA_SENSORS[i];
-        const std::string topic = weather_discovery_topic(s_prefix, s_node, sensor);
-        if (enabled) {
-            const std::string cfg = weather_discovery_config(
-                s_node, s_board, s_weather, s_avail, sensor);
-            mqtt_publish(topic, cfg.c_str(), static_cast<int>(cfg.size()), 0, 1);
-        } else {
-            mqtt_publish(topic, "", 0, 0, 1);
-        }
-    }
-    s_weather_discovery_synced = true;
-    s_weather_discovery_enabled = enabled;
 }
 
 // ENV III is independent observation telemetry and not part of either heat-pump payload. Three HA
@@ -1192,6 +1188,11 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
                                             e->current_data_offset)) {
             s_retired_modbus_status_seen = true;
         }
+        if (e && retained_cleanup_candidate(s_retired_weather, e->topic, e->topic_len,
+                                            e->retain, e->total_data_len,
+                                            e->current_data_offset)) {
+            s_retired_weather_seen = true;
+        }
         if (e && retained_cleanup_candidate(s_crash, e->topic, e->topic_len,
                                             e->retain, e->total_data_len,
                                             e->current_data_offset)) {
@@ -1208,7 +1209,7 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
 static void mqtt_task(void*) {
     esp_task_wdt_add(NULL);                            // watch the publish task for a wedged broker write
     int heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S;    // publish immediately on the first connected cycle
-    int modbus_ha_retire_elapsed_s = MODBUS_HA_RETIRE_INTERVAL_S;
+    int ha_retire_elapsed_s = HA_RETIRE_INTERVAL_S;
     MqttPublishGateState publish_gate = MqttPublishGateState::WaitingForX10a;
     bool client_start_failed = false;
     for (;;) {
@@ -1276,7 +1277,6 @@ static void mqtt_task(void*) {
                     s_last_x10a_json.clear();                  // force full per-topic state re-seeds
                     s_last_modbus_json.clear();
                     s_last_weather_json.clear();
-                    s_weather_discovery_synced = false;
                     s_last_env3_json.clear();
                     s_last_env3_samples = 0;
                     s_modbus_disabled_cleaned = false;
@@ -1294,9 +1294,10 @@ static void mqtt_task(void*) {
                     // permanently retired. Retained tombstones remove existing entities and make a
                     // restored stale broker converge again on the next reconnect.
                     retract_modbus_discovery();
-                    diag_printf("mqtt: retired HomeHub Modbus HA discovery\n");
-                    modbus_ha_retire_elapsed_s = 0;
-                    // Probe before deleting either retired data topic. Publishing tombstones
+                    retract_weather_discovery();
+                    diag_printf("mqtt: retired HomeHub and weather HA discovery\n");
+                    ha_retire_elapsed_s = 0;
+                    // Probe before deleting a retired data topic. Publishing tombstones
                     // unconditionally here recreates visible empty topics on every reconnect after
                     // the broker is already clean. DATA events raise the atomic flags only for
                     // non-empty retained values on these exact topics.
@@ -1308,6 +1309,10 @@ static void mqtt_task(void*) {
                                                  s_retired_modbus_status_probe_active,
                                                  s_retired_modbus_status_probe_deadline_us,
                                                  "retired Modbus status");
+                    start_retained_cleanup_probe(s_retired_weather, s_retired_weather_seen,
+                                                 s_retired_weather_probe_active,
+                                                 s_retired_weather_probe_deadline_us,
+                                                 "retired weather forecast");
                 }
                 service_retained_cleanup_probe(s_legacy_state, s_legacy_state_seen,
                                                s_legacy_probe_active,
@@ -1316,6 +1321,9 @@ static void mqtt_task(void*) {
                                                s_retired_modbus_status_seen,
                                                s_retired_modbus_status_probe_active,
                                                s_retired_modbus_status_probe_deadline_us);
+                service_retained_cleanup_probe(s_retired_weather, s_retired_weather_seen,
+                                               s_retired_weather_probe_active,
+                                               s_retired_weather_probe_deadline_us);
                 service_retained_cleanup_probe(s_crash, s_crash_seen,
                                                s_crash_probe_active,
                                                s_crash_probe_deadline_us);
@@ -1324,7 +1332,6 @@ static void mqtt_task(void*) {
                     publish_crash();                            // crash report if notable, else stale-record probe
                     s_heartbeat_announced = true;
                 }
-                sync_weather_discovery(ref_config.weather_enabled);
                 const std::string prof = ref_config.profile;
                 if (prof != "auto" && prof != s_announced_profile) {
                     publish_x10a_discovery();                  // discovery for the (new) profile
@@ -1352,7 +1359,7 @@ static void mqtt_task(void*) {
 
                 // Weather remains an independent firmware input. MQTT only archives the exact
                 // snapshot and provenance known locally; it is not a dependency, and precise
-                // configured coordinates never enter either the payload or its HA entities.
+                // configured coordinates never enter the payload. No HA entities are created.
                 publish_weather_state();
 
                 const bool env3_enabled = ref_config.env3_enabled && env3_board_supported(ref_config);
@@ -1378,11 +1385,12 @@ static void mqtt_task(void*) {
 
                 // HA may have been offline for the connect-time tombstones. Repeat the retired-topic
                 // cleanup periodically so it converges after HA returns; no retained config is ever
-                // recreated, and the independent /modbus data stream is untouched.
-                modbus_ha_retire_elapsed_s += delay_s;
-                if (modbus_ha_retire_elapsed_s >= MODBUS_HA_RETIRE_INTERVAL_S) {
+                // recreated, and the independent /modbus + /weather data streams are untouched.
+                ha_retire_elapsed_s += delay_s;
+                if (ha_retire_elapsed_s >= HA_RETIRE_INTERVAL_S) {
                     retract_modbus_discovery();
-                    modbus_ha_retire_elapsed_s = 0;
+                    retract_weather_discovery();
+                    ha_retire_elapsed_s = 0;
                 }
 
                 // Fixed HEARTBEAT_INTERVAL_S cadence — diagnostics, not real-time telemetry, so it
@@ -1492,6 +1500,7 @@ void mqtt_ha_start() {
     s_modbus    = modbus_topic(s_base);
     s_weather   = weather_forecast_topic(s_base);
     s_env3      = env3_topic(s_base);
+    s_retired_weather = retired_weather_forecast_topic(s_base);
     s_retired_modbus_status = retired_modbus_status_topic(s_base);
     s_legacy_state = legacy_state_topic(s_base);
     s_heartbeat = heartbeat_topic(s_base);
