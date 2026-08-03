@@ -771,6 +771,29 @@
     </form>
   </div>
 
+  <!-- Open-Meteo is fetched directly by the ESP32. Empty coordinates = no weather traffic. -->
+  <div class="modal" id="weatherModal" hidden>
+    <div class="modal-backdrop" id="weatherBackdrop"></div>
+    <form class="modal-card" id="weatherForm" role="dialog" aria-modal="true" aria-labelledby="weatherModalTitle" tabindex="-1">
+      <div class="section-label card-title" id="weatherModalTitle" data-i18n="wx.title">Open-Meteo weather forecast</div>
+      <label class="field">
+        <span class="field-label plain" data-i18n="wx.latitude">Latitude</span>
+        <input class="input mono" name="latitude" id="wxLatitude" inputmode="decimal" maxlength="48" placeholder="52.520000" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label plain" data-i18n="wx.longitude">Longitude</span>
+        <input class="input mono" name="longitude" id="wxLongitude" inputmode="decimal" maxlength="48" placeholder="13.405000" autocomplete="off">
+      </label>
+      <p class="hint err" id="wxError" aria-live="polite" hidden></p>
+      <p class="hint" data-i18n="wx.hint">Paste latitude and longitude copied from Google Maps into either field; the pair is split automatically. The ESP32 requests temperature and solar radiation for this location from Open-Meteo every 45 minutes. Leave both fields empty to disable weather requests. Coordinates and the device's public IP are sent to Open-Meteo only after Save. No forecast changes heat-pump controls in Observe mode.</p>
+      <p class="hint"><a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer" data-i18n="wx.attribution">Weather data by Open-Meteo.com · DWD ICON model</a></p>
+      <div class="modal-actions">
+        <button class="btn secondary" type="button" id="wxCancel" data-i18n="btn.cancel">Cancel</button>
+        <button class="btn primary" type="submit" id="wxBtn" data-i18n="btn.save">Save</button>
+      </div>
+    </form>
+  </div>
+
   <!-- ═══ Syslog edit modal (opened from the Connections tile's Syslog row pencil) ═══ -->
   <div class="modal" id="syslogModal" hidden>
     <div class="modal-backdrop" id="syslogBackdrop"></div>

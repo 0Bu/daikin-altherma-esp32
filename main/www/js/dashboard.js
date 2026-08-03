@@ -219,11 +219,12 @@ function esp32CardHtml() {
 }
 
 // The permanent Settings home for the dynamic-LWT project. Only its first row family is live today:
-// one MQTT room-temperature source in observation mode. Forecast, strategy and output are explicit
+// one MQTT room-temperature source and direct Open-Meteo forecast in observation mode. Strategy and output are explicit
 // neighbours now, so later phases extend this card instead of growing unrelated top-level settings.
 // None of the labels below claims control: the fixed operating mode is Observe and output is read-only.
 function dynamicControlCardHtml() {
   const r = S.status?.reference_temperature || {};
+  const w = S.status?.weather_forecast || {};
   const mqtt = S.status?.mqtt || {};
   let badgeCls = "dim";
   let source = t("dyn.not_configured"), sourceCls = "dim";
@@ -250,10 +251,25 @@ function dynamicControlCardHtml() {
   rows += `<button class="vrow vrow-btn dynamic-source-row" type="button" data-act="ref-temp" ` +
     `aria-label="${esc(t("ref.title"))}"><span class="vrow-label">${esc(t("dyn.room_sources"))}</span>` +
     `<span class="vrow-val settings-wrap ${sourceCls}">${esc(source)} ${editIcon}</span></button>`;
-  rows += vrow(t("dyn.weather"), t("dyn.not_configured"), { cls: "dim" });
+  let weather = t("dyn.not_configured"), weatherCls = "dim";
+  if (w.configured && w.fetching) { weather = t("wx.fetching"); weatherCls = "warn"; }
+  else if (w.configured && w.has_value) {
+    const outdoor = Number(w.outdoor_mean_2h_c).toLocaleString(
+      LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 1 });
+    const solar = Number(w.solar_energy_2h_wh_m2).toLocaleString(
+      LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 0 });
+    weather = `Open-Meteo · ${outdoor} °C / 2 h · ${solar} Wh/m²`;
+    if (w.fresh) weatherCls = "ok";
+    else { weather += ` · ${w.error ? t("wx.unavailable") : t("ref.stale")}`; weatherCls = w.error ? "err" : "warn"; }
+  } else if (w.configured) { weather = w.error ? t("wx.unavailable") : t("wx.waiting"); weatherCls = w.error ? "err" : "warn"; }
+  if (w.error) badgeCls = "err";
+  rows += `<button class="vrow vrow-btn dynamic-source-row" type="button" data-act="weather" ` +
+    `aria-label="${esc(t("wx.title"))}"><span class="vrow-label">${esc(t("dyn.weather"))}</span>` +
+    `<span class="vrow-val settings-wrap ${weatherCls}">${esc(weather)} ${editIcon}</span></button>`;
   rows += vrow(t("dyn.strategy"), t("dyn.inactive"), { cls: "dim" });
   rows += vrow(t("dyn.safety"), t("dyn.read_only"));
   if (r.error) rows += vrow(t("ref.error"), r.error, { cls: "err settings-wrap" });
+  if (w.error) rows += vrow(t("wx.error"), w.error, { cls: "err settings-wrap" });
   return vcard(t("dyn.card"), rows, t("dyn.capture"), badgeCls);
 }
 

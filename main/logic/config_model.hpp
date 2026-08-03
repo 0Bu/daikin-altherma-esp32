@@ -33,6 +33,11 @@ struct Config {
     std::string ref_temp_path;
     std::string ref_temp_time_path;
     uint32_t    ref_temp_max_age_s = REF_TEMP_MAX_AGE_DEFAULT_S;
+    // Open-Meteo location in signed microdegrees. The explicit bit keeps (0°, 0°) representable;
+    // disabled coordinates are canonicalized to zero and produce no weather traffic.
+    bool        weather_enabled = false;
+    int32_t     weather_latitude_e6 = 0;
+    int32_t     weather_longitude_e6 = 0;
     std::string syslog_host;       // "" = Syslog disabled
     int         syslog_port = 514;
     // SNTP server (main/sntp_time.cpp). Unlike syslog_host, "" is not "off" — SNTP has no disabled

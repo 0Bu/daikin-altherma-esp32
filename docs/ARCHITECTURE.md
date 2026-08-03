@@ -59,6 +59,16 @@ hp_poll.cpp/.hpp    → poll engine task: builds the active register set from th
                        polls each interval, fills the thread-safe value cache, drives errors. It
                        PUBLISHES nothing to the browser — that was the /events broadcaster, and
                        removing it took the /status builder off this task with it (#241)
+weather_forecast.cpp/.hpp
+                    → optional direct Open-Meteo client. A configured latitude/longitude starts one
+                      task that waits for WiFi + synchronized time and requests six hourly DWD ICON
+                      Seamless values over CA-verified HTTPS every 45 minutes (5-minute retry). The
+                      bounded JSON response supplies temperature_2m and shortwave_radiation; the
+                      next two complete hours become a mean °C value and summed Wh/m². /status keeps
+                      fetch/decision provenance and freshness explicit; the provider does not expose
+                      model-run issue time, so it remains null. If MQTT is configured, the single
+                      publisher task mirrors an atomic retained evidence snapshot (without precise
+                      coordinates) to <base>/weather_forecast. No heat-pump control is written.
 def/*.hpp           → embedded per-model value profiles (machine-generated in the ValueDef row
                        format); def/registry.hpp maps profile id→table, models_catalog.hpp = /models
 config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi rollback backup + link
@@ -96,10 +106,12 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
 http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /diag, /scan, /coredump,
                       POST /crash/dismiss. http_append_status_json() runs on the httpd task ALONE —
                       see "Push vs. poll" below for why that sentence is load-bearing
-http_config.cpp     → POST /set_wifi, /set_mqtt, /test_ref_temp, /set_ref_temp, /set_syslog,
+http_config.cpp     → POST /set_wifi, /set_mqtt, /test_ref_temp, /set_ref_temp, /set_weather, /set_syslog,
                       /set_ntp, /set_hp, /discover_homehub, /set_board, /set_ota, /set_lang,
                       /detect. /test_ref_temp proves that an exact MQTT mapping yields an accepted
                       value without saving it; /set_ref_temp requires that proof and applies live.
+                      /set_weather validates the DWD path component, persists it and only wakes the
+                      weather task; no DNS/TLS request runs on the httpd worker.
                       /set_hp also carries the HomeHub Modbus params (mb_host/mb_port/mb_unit_id,
                       actuation_enabled), applied live; /discover_homehub is a bounded, explicit
                       dialog action that returns an IPv4 without saving it
@@ -1213,6 +1225,16 @@ The Home Assistant bridge:
   upgrade, bounded exact-topic subscriptions probe for obsolete retained `<base>/state` and
   `<base>/modbus/status` values; only a non-empty retained response triggers each tombstone, so later
   reconnects do not publish either empty retired topic.
+- **Forecast evidence topic.** `<base>/weather_forecast` is an independent retained JSON snapshot,
+  published on change. Values and their Open-Meteo/ICON provenance,
+  fetch time, forecast horizon start, validity limit, runtime error and numeric `available`/`fresh`
+  flags travel atomically. A failed refresh may retain the last figures for forensic comparison, but
+  `available: 0` prevents them from looking decision-ready; `fetched_unix_s` and
+  `valid_until_unix_s` let a historian independently verify age even after the board is offline.
+  Exact latitude/longitude is intentionally omitted. When weather is configured, HA Discovery adds
+  the two forecast values and diagnostic `available`/`fresh` binary sensors to the existing device;
+  disabling weather retracts all four configs. MQTT archives firmware evidence but is not a
+  dependency of forecast acquisition or future on-device decisions.
 - **A field's JSON type comes from its DEFINITION, never from its current value.** `GroupedValue`
   carries a `PublishedKind` (`logic/convert.hpp` `published_kind`, keyed on the converter id):
   `Number` is emitted unquoted, `Text` quoted — in **every** state of that field. The publisher used

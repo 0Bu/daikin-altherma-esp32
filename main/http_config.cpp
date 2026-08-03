@@ -1,4 +1,4 @@
-// POST config routes: /set_wifi, /set_mqtt, /test_ref_temp, /set_ref_temp, /set_syslog, /set_ntp, /set_hp,
+// POST config routes: /set_wifi, /set_mqtt, /test_ref_temp, /set_ref_temp, /set_weather, /set_syslog, /set_ntp, /set_hp,
 // /set_board, /set_ota, /set_lang, /discover_homehub, /detect. Parse JSON, validate, then apply:
 // WiFi/MQTT/syslog/NTP/board persist to NVS + reboot; the reference mapping is first tested without
 // persistence, then its proof-gated save applies live; /set_hp persists the RX/TX pin cache (no
@@ -12,8 +12,10 @@
 #include "logic/config_model.hpp"
 #include "logic/mqtt_uri.hpp"   // parse_mqtt_uri — host/port/TLS split, host-tested
 #include "logic/reference_temperature.hpp"
+#include "logic/weather_forecast.hpp"
 #include "hp_modbus.hpp"        // mb_reconfigure — start/stop the second, independent stack
 #include "mqtt_ha.hpp"           // mqtt_reference_reconfigure — apply its exact subscription live
+#include "weather_forecast.hpp"
 
 #include "cJSON.h"
 #include "esp_http_server.h"
@@ -599,6 +601,38 @@ static esp_err_t set_ntp(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// POST /set_weather {latitude, longitude}. Two empty strings disable weather traffic; otherwise both
+// strict decimal coordinates are required. Saving is local and non-blocking: the dedicated weather
+// task performs TLS/DNS/JSON work only after this response.
+static esp_err_t set_weather(httpd_req_t* req) {
+    char body[192];
+    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
+    cJSON* j = cJSON_Parse(body);
+    if (!j) return send_err(req, "400 Bad Request", "bad json");
+    const std::string latitude = js(j, "latitude");
+    const std::string longitude = js(j, "longitude");
+    cJSON_Delete(j);
+    const WeatherLocationParse location = weather_location_parse(latitude, longitude);
+    if (!location.valid) {
+        if (std::strcmp(location.reason, "both_coordinates_required") == 0)
+            return send_err(req, "400 Bad Request", "latitude and longitude are both required");
+        if (std::strcmp(location.reason, "invalid_latitude") == 0)
+            return send_err(req, "400 Bad Request", "latitude must be between -90 and 90");
+        return send_err(req, "400 Bad Request", "longitude must be between -180 and 180");
+    }
+    Config c = config();
+    if (location.enabled == c.weather_enabled &&
+        location.latitude_e6 == c.weather_latitude_e6 &&
+        location.longitude_e6 == c.weather_longitude_e6)
+        return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
+    c.weather_enabled = location.enabled;
+    c.weather_latitude_e6 = location.latitude_e6;
+    c.weather_longitude_e6 = location.longitude_e6;
+    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    weather_forecast_reconfigure();
+    return http_send_json(req, "{\"ok\":true,\"reboot\":false,\"saved\":true}");
+}
+
 // POST /set_board {led_gpio, led_type, led_inverted, btn_gpio, btn_active_low} -> validate + persist
 // + reboot. This is the board's own hardware — which pin the status indicator is on, whether it is a
 // plain LED or a WS2812, and which pin (if any) carries the factory-reset button — kept in NVS
@@ -731,6 +765,7 @@ void http_register_config(httpd_handle_t s, HttpSurface surface) {
     http_register_on(s, surface, "/set_ref_temp", HTTP_POST, set_ref_temp);
     http_register_on(s, surface, "/set_syslog", HTTP_POST, set_syslog);
     http_register_on(s, surface, "/set_ntp", HTTP_POST, set_ntp);
+    http_register_on(s, surface, "/set_weather", HTTP_POST, set_weather);
     http_register_on(s, surface, "/set_hp", HTTP_POST, set_hp);
     http_register_on(s, surface, "/discover_homehub", HTTP_POST, discover_homehub_now);
     http_register_on(s, surface, "/set_board", HTTP_POST, set_board);

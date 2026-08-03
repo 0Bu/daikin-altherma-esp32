@@ -26,6 +26,8 @@
 #include "logic/json.hpp"
 #include "logic/query_flag.hpp"
 #include "logic/reference_temperature.hpp"
+#include "logic/weather_forecast.hpp"
+#include "weather_forecast.hpp"
 #include "logic/redact.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/timestamp.hpp"
@@ -123,7 +125,7 @@ static esp_err_t h_captive(httpd_req_t* req) {
     return httpd_resp_send(req, nullptr, 0);   // empty body — nothing to gzip, nothing to render
 }
 
-// `redact` withholds the eight reporter-identifying values (logic/redact.hpp) so a snapshot can be
+// `redact` withholds the ten reporter-identifying values (logic/redact.hpp) so a snapshot can be
 // pasted into a bug report. Defaulted OFF: the dashboard polls this same route and legitimately
 // shows the SSID and the broker — only GET /status?redact=1 asks for the scrubbed form.
 //
@@ -136,6 +138,7 @@ void http_append_status_json(std::string& j, bool redact) {
     HpStats     hp  = hp_stats();
     MqttStatus  m   = mqtt_status();
     ReferenceTemperatureStatus rt = reference_temperature_status();
+    WeatherForecastStatus wf = weather_forecast_status();
     WifiInfo    wi  = wifi_info();
     j += "{";
     j += "\"version\":" + jstr(esp_app_get_description()->version) + ",";
@@ -272,6 +275,59 @@ void http_append_status_json(std::string& j, bool redact) {
     j += ",\"messages\":";      j += std::to_string(rt.messages);
     j += ",\"errors\":";        j += std::to_string(rt.errors);
     if (!rt.error.empty()) { j += ",\"error\":"; j += jstr(rt.error); }
+    j += "},";
+    // Direct Open-Meteo forecast. Fetch time is the 90-minute liveness clock; the provider does not
+    // expose model-run issue time, so issued_at remains null instead of being fabricated. Failed
+    // refreshes retain the last numbers for diagnosis but set available/fresh false.
+    const bool weather_configured = c.weather_enabled;
+    const bool weather_has_value = weather_configured && wf.has_value;
+    WeatherFreshness weather = weather_freshness(
+        weather_has_value, wf.fetched_unix_s, now_unix_s, WEATHER_MAX_AGE_S);
+    if (!wf.available) { weather.fresh = false; weather.reason = wf.reason.empty() ? "unavailable" : wf.reason.c_str(); }
+    if (!weather_configured) { weather.fresh = false; weather.reason = "not_configured"; }
+    const bool weather_available = weather_configured && wf.available && weather.fresh;
+    const bool weather_fetching = weather_configured && wf.fetching;
+    const std::string weather_latitude = weather_configured
+            ? weather_coordinate_format_e6(c.weather_latitude_e6) : std::string();
+    const std::string weather_longitude = weather_configured
+            ? weather_coordinate_format_e6(c.weather_longitude_e6) : std::string();
+    char weather_outdoor[32] = {0}, weather_solar[32] = {0};
+    if (wf.has_value) {
+        std::snprintf(weather_outdoor, sizeof(weather_outdoor), "%.6g", wf.outdoor_mean_2h_c);
+        std::snprintf(weather_solar, sizeof(weather_solar), "%.6g", wf.solar_energy_2h_wh_m2);
+    }
+    j += "\"weather_forecast\":{\"configured\":";
+    j += weather_configured ? "true" : "false";
+    j += ",\"provider\":\"open-meteo\"";
+    j += ",\"model\":"; j += jstr(wf.model);
+    j += ",\"fetch_interval_s\":"; j += std::to_string(WEATHER_FETCH_INTERVAL_S);
+    j += ",\"max_age_s\":"; j += std::to_string(WEATHER_MAX_AGE_S);
+    j += ",\"fetching\":"; j += weather_fetching ? "true" : "false";
+    j += ",\"available\":"; j += weather_available ? "true" : "false";
+    j += ",\"has_value\":"; j += weather_has_value ? "true" : "false";
+    j += ",\"latitude\":"; j += weather_latitude.empty() ? "null" : jstr_r(weather_latitude, redact);
+    j += ",\"longitude\":"; j += weather_longitude.empty() ? "null" : jstr_r(weather_longitude, redact);
+    j += ",\"state\":";
+    j += jstr(!weather_configured ? "disabled" : (safe_mode_active() ? "waiting" : wf.state));
+    j += ",\"outdoor_mean_2h_c\":"; j += weather_has_value ? weather_outdoor : "null";
+    j += ",\"solar_energy_2h_wh_m2\":"; j += weather_has_value ? weather_solar : "null";
+    j += ",\"issued_at\":";
+    j += weather_has_value && wf.issued_unix_s >= 0 ? jstr(rfc3339_utc(wf.issued_unix_s)) : "null";
+    j += ",\"fetched_at\":";
+    j += weather_has_value ? jstr(rfc3339_utc(wf.fetched_unix_s)) : "null";
+    j += ",\"valid_for_decision_at\":";
+    j += weather_has_value ? jstr(rfc3339_utc(wf.decision_unix_s)) : "null";
+    j += ",\"last_attempt_at\":";
+    j += wf.last_attempt_unix_s >= 0 ? jstr(rfc3339_utc(wf.last_attempt_unix_s)) : "null";
+    j += ",\"age_s\":"; j += weather.age_known ? std::to_string(weather.age_s) : "null";
+    j += ",\"fresh\":"; j += weather.fresh ? "true" : "false";
+    j += ",\"freshness_reason\":"; j += jstr(weather.reason);
+    j += ",\"successes\":"; j += std::to_string(wf.successes);
+    j += ",\"errors\":"; j += std::to_string(wf.errors);
+    if (!weather_configured) { j += ",\"reason\":\"not_configured\""; }
+    else if (safe_mode_active()) { j += ",\"reason\":\"safe_mode\""; }
+    else if (!wf.reason.empty()) { j += ",\"reason\":"; j += jstr(wf.reason); }
+    if (!wf.error.empty()) { j += ",\"error\":"; j += jstr(wf.error); }
     j += "},";
     SyslogStatus sy = syslog_status();
     j += "\"syslog\":{\"configured\":" + std::string(sy.configured ? "true" : "false") +

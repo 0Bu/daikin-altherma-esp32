@@ -172,6 +172,7 @@ function wireRestOfApp() {
     if (act.dataset.act === "board") openBoard();
     else if (act.dataset.act === "ota") checkFirmwareUpdate();
     else if (act.dataset.act === "ref-temp") openRefTemp();
+    else if (act.dataset.act === "weather") openWeather();
   });
   $("settingsCards").addEventListener("change", (e) => {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();
@@ -465,6 +466,64 @@ function wireRestOfApp() {
       close: closeNtp,
       then: renderApp,
       busyMsg: t("toast.saving_ntp"),
+    });
+  });
+
+  ["wxLatitude", "wxLongitude"].forEach((id) => {
+    $(id).addEventListener("input", clearWeatherError);
+    $(id).addEventListener("paste", pasteWeatherCoordinates);
+  });
+  $("wxCancel").onclick = closeWeather;
+  $("weatherBackdrop").onclick = closeWeather;
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("weatherModal").hidden) closeWeather(); });
+  $("weatherForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    let latitude = $("wxLatitude").value.trim();
+    let longitude = $("wxLongitude").value.trim();
+    const pastedPair = parseWeatherCoordinatePair(latitude) || parseWeatherCoordinatePair(longitude);
+    if (pastedPair) {
+      latitude = pastedPair.latitude;
+      longitude = pastedPair.longitude;
+      $("wxLatitude").value = latitude;
+      $("wxLongitude").value = longitude;
+    }
+    const disabled = !latitude && !longitude;
+    if (!disabled && (!latitude || !longitude)) {
+      if (!latitude) $("wxLatitude").classList.add("invalid");
+      if (!longitude) $("wxLongitude").classList.add("invalid");
+      $("wxError").textContent = t("wx.err_both");
+      $("wxError").hidden = false;
+      return;
+    }
+    const normalizedLatitude = disabled ? "" : normalizeWeatherCoordinate(latitude, -90, 90);
+    if (!disabled && normalizedLatitude == null) {
+      $("wxLatitude").classList.add("invalid");
+      $("wxError").textContent = t("wx.err_latitude");
+      $("wxError").hidden = false;
+      return;
+    }
+    const normalizedLongitude = disabled ? "" : normalizeWeatherCoordinate(longitude, -180, 180);
+    if (!disabled && normalizedLongitude == null) {
+      $("wxLongitude").classList.add("invalid");
+      $("wxError").textContent = t("wx.err_longitude");
+      $("wxError").hidden = false;
+      return;
+    }
+    latitude = normalizedLatitude;
+    longitude = normalizedLongitude;
+    $("wxLatitude").value = latitude;
+    $("wxLongitude").value = longitude;
+    saveReboot("/set_weather", { latitude, longitude }, {
+      btn: "wxBtn",
+      showError: (msg) => {
+        $("wxLatitude").classList.add("invalid");
+        $("wxLongitude").classList.add("invalid");
+        $("wxError").textContent = msg;
+        $("wxError").hidden = false;
+      },
+      close: closeWeather,
+      then: renderApp,
+      busyMsg: t("wx.saving"),
     });
   });
 

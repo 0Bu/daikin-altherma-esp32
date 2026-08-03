@@ -134,6 +134,66 @@ function setRefTempTesting(on) {
   button.innerHTML = on ? `<span class="spin"></span>${esc(t("ref.testing"))}` : esc(t("ref.test"));
 }
 
+// ── Direct Open-Meteo weather source ──────────────────────────────────────
+function clearWeatherError() {
+  $("wxLatitude").classList.remove("invalid");
+  $("wxLongitude").classList.remove("invalid");
+  $("wxError").hidden = true;
+}
+
+// Firmware stores coordinates as signed microdegrees, so Google Maps' house-level precision is
+// rounded to the six decimal places the device can preserve. Decimal commas remain valid for a
+// single field; a copied Google Maps pair uses the unambiguous "decimal.point, separator" form.
+function normalizeWeatherCoordinate(value, min, max) {
+  const text = String(value ?? "").trim();
+  if (!/^[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)$/.test(text)) return null;
+  const number = Number(text.replace(",", "."));
+  if (!Number.isFinite(number) || number < min || number > max) return null;
+  const fixed = number.toFixed(6);
+  return fixed === "-0.000000" ? "0.000000" : fixed;
+}
+
+function parseWeatherCoordinatePair(value) {
+  const match = String(value ?? "").trim().match(
+    /^([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*,\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))$/);
+  if (!match) return null;
+  const latitude = normalizeWeatherCoordinate(match[1], -90, 90);
+  const longitude = normalizeWeatherCoordinate(match[2], -180, 180);
+  return latitude == null || longitude == null ? null : { latitude, longitude };
+}
+
+function pasteWeatherCoordinates(event) {
+  const clipboard = event.clipboardData;
+  if (!clipboard) return;
+  const text = clipboard.getData("text") || clipboard.getData("text/plain");
+  const pair = parseWeatherCoordinatePair(text);
+  if (pair) {
+    event.preventDefault();
+    $("wxLatitude").value = pair.latitude;
+    $("wxLongitude").value = pair.longitude;
+    clearWeatherError();
+    return;
+  }
+  const latitudeField = event.currentTarget?.id === "wxLatitude";
+  const coordinate = normalizeWeatherCoordinate(text, latitudeField ? -90 : -180,
+    latitudeField ? 90 : 180);
+  if (coordinate == null) return;
+  event.preventDefault();
+  event.currentTarget.value = coordinate;
+  clearWeatherError();
+}
+
+function openWeather() {
+  const w = S.status?.weather_forecast || {};
+  $("wxLatitude").value = w.latitude || "";
+  $("wxLongitude").value = w.longitude || "";
+  clearWeatherError();
+  openPopup("weatherModal");
+}
+function closeWeather() {
+  $("weatherModal").hidden = true;
+}
+
 // Popup editing contract: a click/focus selects a text field's complete value, so replacing a long
 // topic, host, JSON path or generated report is one paste. Checkboxes/radios/selects keep their
 // native interaction; select() is attempted for number inputs too and guarded for browser variance.

@@ -32,6 +32,7 @@
 #include "sntp_time.hpp"
 #include "status_led.hpp"
 #include "wifi.hpp"
+#include "weather_forecast.hpp"
 
 static const char* TAG = "main";
 
@@ -94,25 +95,26 @@ extern "C" void app_main() {
     daik::sntp_time_start();
 
     // --- Services ---
-    // The web UI + OTA are ALWAYS started (they are the recovery surface). In safe mode the two
-    // background subsystems a bad config could crash on — the X10A poll engine and the MQTT bridge —
-    // are skipped, so a wrong-pin config-loop stays fixable from the browser instead of over USB.
+    // The web UI + OTA are ALWAYS started (they are the recovery surface). In safe mode all optional
+    // background consumers — X10A, MQTT, Open-Meteo weather, and HomeHub — are skipped, so a bad-config
+    // boot loop stays fixable from the browser instead of over USB.
     // History has two independent producer tasks. Create their shared lock before either starts —
     // and before HTTP can ask for a snapshot — rather than racing two lazy creators on first boot.
     daik::history_start();
     daik::http_start();                  // esp_http_server on :80 (web UI + config + OTA + MCP)
     if (!daik::safe_mode_active()) {
         daik::mqtt_ha_start();           // HA MQTT-Discovery bridge (no-op if mqtt_uri empty)
+        daik::weather_forecast_start();  // direct Open-Meteo HTTPS/JSON fetch (no-op without location)
         daik::hp_poll_start();           // X10A poll engine
         // The HomeHub Modbus stack — a SECOND, INDEPENDENT source (docs/MODBUS_PROTOCOL.md), not an
         // alternative to the line above: both run, and neither notices the other failing. The
         // A saved address is polled; an empty address creates no task/socket/traffic and never
         // triggers discovery. mDNS runs only from the dialog's explicit Search action.
-        // Skipped in safe mode for the same reason the two above are: a boot-looping board is being
+        // Skipped in safe mode for the same reason the consumers above are: a boot-looping board is being
         // recovered through the web UI, and every optional consumer stays out of the way.
         daik::mb_start();
     } else {
-        ESP_LOGW(TAG, "SAFE MODE: X10A poll engine + HomeHub stack + MQTT bridge skipped — recover the config via the web UI");
+        ESP_LOGW(TAG, "SAFE MODE: X10A + HomeHub + MQTT + Open-Meteo weather skipped — recover the config via the web UI");
     }
     daik::ota_health_gate_arm();         // keep rollback armed until this image proves healthy
     daik::safe_mode_arm_healthy();       // clear the crash counter after BOOT_HEALTHY_S of continuous uptime

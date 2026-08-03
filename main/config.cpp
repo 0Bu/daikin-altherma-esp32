@@ -3,6 +3,7 @@
 #include "nvs_storage.hpp"
 #include "diag_log.hpp"
 #include "logic/config_store.hpp"   // ConfigBlob (de)serialize — the atomic CRC-checked config blob
+#include "logic/weather_forecast.hpp"
 #include "sdkconfig.h"
 #include "soc/soc_caps.h"   // SOC_GPIO_PIN_COUNT — per-target GPIO count for the link-pin check
 #include "esp_log.h"
@@ -99,6 +100,11 @@ void config_load() {
             c.ref_temp_path = b.ref_temp_path; c.ref_temp_time_path = b.ref_temp_time_path;
             c.ref_temp_max_age_s = b.ref_temp_max_age_s;
         }
+        if (b.has_weather) {
+            c.weather_enabled = b.weather_enabled;
+            c.weather_latitude_e6 = b.weather_latitude_e6;
+            c.weather_longitude_e6 = b.weather_longitude_e6;
+        }
         c.syslog_host = b.syslog_host; c.syslog_port = b.syslog_port; c.ntp_server = b.ntp_server;
         // has_board is false for a blob written before the board block existed (v1). Those fields
         // were compile-time then, so "absent" must read as the Kconfig default, NOT as disabled —
@@ -183,6 +189,13 @@ void config_load() {
     // "" (either no ntp_server yet, or an explicit empty save via POST /set_ntp) falls back to the
     // Kconfig default — unlike syslog_host, an empty ntp_server is not a disabled state to preserve.
     if (c.ntp_server.empty()) c.ntp_server = CONFIG_DAIKIN_NTP_SERVER;
+    if (!weather_location_e6_valid(c.weather_enabled, c.weather_latitude_e6,
+                                   c.weather_longitude_e6)) {
+        diag_printf("config: persisted Open-Meteo location rejected — weather forecast disabled\n");
+        c.weather_enabled = false;
+        c.weather_latitude_e6 = 0;
+        c.weather_longitude_e6 = 0;
+    }
 
     // Persisted X10A LINK cache: RX/TX pins + protocol. The wiring is physically boot-invariant, so
     // it is cached (fallback = compile-time Kconfig default) and tried FIRST by the detection sweep;
@@ -259,6 +272,9 @@ bool config_save(const Config& c, bool require_link) {
     b.ref_temp_name = c.ref_temp_name; b.ref_temp_topic = c.ref_temp_topic;
     b.ref_temp_path = c.ref_temp_path; b.ref_temp_time_path = c.ref_temp_time_path;
     b.ref_temp_max_age_s = c.ref_temp_max_age_s;
+    b.weather_enabled = c.weather_enabled;
+    b.weather_latitude_e6 = c.weather_latitude_e6;
+    b.weather_longitude_e6 = c.weather_longitude_e6;
     b.syslog_host = c.syslog_host; b.syslog_port = c.syslog_port; b.ntp_server = c.ntp_server;
     // Board-local hardware rides the same atomic blob: like the credentials it has exactly ONE
     // writer (the httpd task, POST /set_board), so it needs no self-healing per-key treatment — and
