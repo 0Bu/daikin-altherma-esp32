@@ -173,6 +173,7 @@ function wireRestOfApp() {
     else if (act.dataset.act === "ota") checkFirmwareUpdate();
     else if (act.dataset.act === "ref-temp") openRefTemp();
     else if (act.dataset.act === "weather") openWeather();
+    else if (act.dataset.act === "env3") openEnv3();
   });
   $("settingsCards").addEventListener("change", (e) => {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();
@@ -586,6 +587,7 @@ function wireRestOfApp() {
     // pin number the request path then has to reject. -1 is the honest answer for "nothing to pick".
     const pinOf = (id) => { const v = parseInt($(id).value, 10); return Number.isFinite(v) ? v : -1; };
     saveReboot("/set_board", {
+      preset_id: $("bdPreset").value || "custom",
       // Type "None" is the wire's led_gpio = -1; the pin select keeps its last value so re-enabling
       // the indicator doesn't make the user find their pin again.
       led_gpio: type < 0 ? -1 : pinOf("bdLedPin"),
@@ -599,6 +601,29 @@ function wireRestOfApp() {
       close: closeBoard,
       then: renderApp,
       busyMsg: t("toast.saving_board"),
+    });
+  });
+
+  $("envCancel").onclick = closeEnv3;
+  $("env3Backdrop").onclick = closeEnv3;
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("env3Modal").hidden) closeEnv3(); });
+  $("envSensor").addEventListener("change", () => { syncEnv3Fields(); $("envError").hidden = true; });
+  for (const id of ["envSda", "envScl"])
+    $(id).addEventListener("change", () => { $("envError").hidden = true; });
+  $("env3Form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const enabled = $("envSensor").value === "env_iii";
+    const sda = +$("envSda").value, scl = +$("envScl").value;
+    if (enabled && (!Number.isInteger(sda) || !Number.isInteger(scl) || sda === scl)) {
+      $("envError").textContent = t("env.err_pins"); $("envError").hidden = false;
+      toast(t("env.err_pins"), "err"); return;
+    }
+    saveReboot("/set_env3", { enabled, sda, scl }, {
+      btn: "envBtn",
+      showError: (msg) => { $("envError").textContent = msg; $("envError").hidden = false; },
+      close: closeEnv3,
+      then: renderApp,
+      busyMsg: t("env.saving"),
     });
   });
 }

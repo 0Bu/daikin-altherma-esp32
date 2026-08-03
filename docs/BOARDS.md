@@ -12,7 +12,7 @@ firmware contains no display driver, display role, or remote-display MQTT path.
 > ([`ci-build-all.sh`](../scripts/ci-build-all.sh)), so nothing board-specific may be a compile-time
 > choice — it would fork the binary, its OTA manifest and the web installer per board. Everything
 > below that differs between boards is therefore a **runtime setting** in NVS: the X10A RX/TX pins
-> (auto-detected, `POST /set_hp`) and the status indicator + recovery button (`POST /set_board`,
+> (auto-detected, `POST /set_hp`), optional ENV III SDA/SCL pins (`POST /set_env3`) and the status indicator + recovery button (`POST /set_board`,
 > **⚙ Settings → ESP32 → Hardware**). Kconfig only seeds a device that has never been configured.
 
 ## What the firmware requires
@@ -22,6 +22,7 @@ firmware contains no display driver, display role, or remote-display MQTT path.
 | **ESP32-S3** target | The only target built. Not a hard chip limit — the code is target-agnostic — but nothing else is compiled or tested. |
 | **≥ 4 MB flash** | [`partitions.csv`](../partitions.csv) is sized to fill 4 MB exactly (two ~2.03 MB OTA slots). A larger part simply leaves the top unused. |
 | **Two free GPIOs** | The X10A link (RX + TX). See [WIRING.md](WIRING.md) for the chip-safe set. |
+| **Two additional free GPIOs** *(optional)* | One I²C SDA/SCL pair when an ENV III outdoor sensor is enabled. |
 | **USB-Serial/JTAG** *(strongly preferred)* | `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG` — the serial console and the browser (Web Serial) installer. A board with only an external USB-UART bridge needs the console reconfigured. |
 
 **Not required:** PSRAM (`CONFIG_SPIRAM` is off — the heap discipline in
@@ -56,8 +57,10 @@ cached in NVS and re-used every boot. Their order does not matter: the swap is p
 **Firmware mapping.** Set under **⚙ Settings → ESP32 → Hardware** (a save reboots). Pick
 **M5Stack AtomS3 Lite** from the *Board* dropdown at the top of that dialog and all five fields below
 fill in — the dropdown is this table, served by the firmware (`logic/board_presets.hpp`), so it
-cannot drift from what follows. Nothing is written until you press Save, and editing any field
-afterwards switches the dropdown back to *Custom*.
+cannot drift from what follows. Save persists the stable id `m5stack_atoms3_lite` atomically with
+those fields; `/status.board.preset_id` and `.preset_name` therefore state the selection directly
+instead of inferring AtomS3 Lite from GPIO35/41. Nothing is written until you press Save, and editing
+any field afterwards switches the pending selection back to *Custom*.
 
 - Status LED → `led_gpio 35`, type **WS2812**. The six operating states then come out as colours —
   blue = setup portal, yellow = connecting, green = healthy, red double-flash = X10A down, orange =
@@ -115,6 +118,53 @@ header at all.
 
 ---
 
+## M5Stack ENV III — outdoor temperature, humidity and pressure
+
+ENV III is an optional, independent observation sensor. It combines an SHT30 at I²C address
+`0x44` with a QMP6988 at `0x70`; both share the same SDA/SCL pair. Enable it under
+**⚙ Settings → Dynamic leaving-water control → Outdoor measurements** by selecting **ENV III** in
+the sensor dropdown. Selecting **No sensor** disables the input. The dashboard then shows a
+separate **Outdoor climate** card. These readings do **not** replace or relabel Daikin's own R1T
+air-inlet value and are not yet consumed by a control algorithm. Every new fresh sample is also
+published as retained numeric JSON on `<base>/env3`, for example
+`{"temperature_c":20.25,"humidity_pct":45.50,"pressure_hpa":1008.75}`. A stale or unavailable
+sensor publishes `{}`. Home Assistant discovery creates separate measurement entities for ENV III
+temperature, humidity and air pressure. They require both an online device and the corresponding
+JSON key, so `{}` makes them unavailable without hiding unrelated heat-pump entities. Selecting
+**No sensor** retracts the state topic and all three retained discovery configurations.
+
+| Board / wiring | ENV III SDA | ENV III SCL | X10A consequence |
+|---|---:|---:|---|
+| AtomS3 Lite, ENV III in Grove | **GPIO2 (G2)** | **GPIO1 (G1)** | Grove is then unavailable to X10A; move X10A to two free header pins, for example RX 5 / TX 6. |
+| AtomS3 Lite, X10A stays in Grove | choose two free header GPIOs, e.g. **5** | e.g. **6** | ENV III needs a Grove breakout/adapter to those header pins. |
+
+ENV III is exposed only when the user has selected a board preset whose firmware metadata identifies
+the vendor as **M5Stack**. It is hidden on Seeed and Custom boards, the driver cannot start there, and
+an enabled raw `POST /set_env3` is rejected. This is vendor-based rather than hard-coded to the
+AtomS3 Lite: a future supported M5Stack board preset inherits the capability when it is added to the
+same table. Custom cannot assert a vendor, so it deliberately fails closed.
+
+The GPIO selectors preselect the AtomS3 Lite Grove mapping only when its pins are actually free. A save is
+rejected if ENV III overlaps X10A, the status LED, the recovery button, or a chip-reserved pad; the
+same check runs again at boot and disables an invalid persisted mapping. This matters on the AtomS3
+Lite because its one Grove connector cannot carry X10A and ENV III at the same time even though both
+use the same four-colour cable.
+
+I²C cannot discover which physical GPIOs carry SDA and SCL. It can probe the ENV III addresses only
+after the firmware has configured a candidate GPIO pair as an I²C bus. Therefore the dialog keeps
+explicit SDA/SCL selection: with Grove free it starts with GPIO2/1; with X10A on Grove it removes
+GPIO2/1 and selects two free header pins as the editable starting point. A future
+"search sensor" action could explicitly try board-safe free pairs, but an automatic boot-time scan
+would reconfigure unknown external pins and is deliberately not part of this implementation.
+
+Grove wire colours are **red 5 V, black GND, yellow SDA, white SCL**. M5Stack specifies a maximum
+temperature-measurement range of **−40–120 °C**. Its highest stated accuracy, **±0.2 °C**, applies
+from **0–60 °C**; the separately listed operating-temperature range is also **0–60 °C**. M5Stack
+does not state an IP weather-protection rating. For outdoor use, mount the unit in a ventilated,
+sheltered enclosure rather than exposing it directly to rain, condensation or full sun.
+
+---
+
 ## Other ESP32-S3 boards
 
 Any board meeting *What the firmware requires* works; you supply the pin knowledge the firmware
@@ -148,6 +198,7 @@ a board nobody touched.
 | Firmware feature | AtomS3 Lite | XIAO ESP32-S3 |
 |---|:---:|:---:|
 | X10A link (2 GPIOs) | ✅ pick from 1, 2, 5–8, 38 | ✅ 44/43, the defaults |
+| ENV III outdoor climate sensor (optional) | ✅ 2/1 Grove **or** two free header pins | — (M5Stack boards only) |
 | Browser (Web Serial) install + serial console | ✅ | ✅ |
 | OTA self-update (dual slot, signed) | ✅ | ✅ |
 | Status indicator | ✅ WS2812, GPIO35 | ✅ plain LED, GPIO21 |

@@ -3,13 +3,14 @@
 //   • TLS policy: credentials present ⇒ mqtts:// + CA-verified (esp_crt_bundle); NEVER send
 //     credentials over plaintext (no silent fallback — refuse with an error in /status.mqtt).
 //   • On (re)connect: mark availability "online", stream retained discovery configs for the active
-//     X10A profile, weather forecast and diagnostics, and retract every retired HomeHub discovery
-//     config. HomeHub
-//     values stay on MQTT for non-HA consumers, but are deliberately not exposed as HA entities.
+//     X10A profile, weather forecast, diagnostics and enabled ENV III, and retract every retired
+//     HomeHub discovery config. HomeHub values stay on MQTT for non-HA consumers, but are deliberately
+//     not exposed as HA entities.
 //   • Each cycle: publish X10A's grouped JSON to <base>/x10a, the generation-checked flat HomeHub
 //     JSON to <base>/modbus, and an atomic forecast/provenance snapshot to
-//     <base>/weather_forecast — each only when changed. A disconnected HomeHub publishes `{}`
-//     rather than carrying an old TCP session's readings forward. Message topics sit directly under
+//     <base>/weather_forecast when changed, plus each fresh ENV III sample on <base>/env3. A
+//     disconnected HomeHub or unavailable/stale ENV III publishes `{}` rather than carrying an old
+//     reading forward. Message topics sit directly under
 //     <base> — one board per base topic; the node
 //     id identifies the DEVICE only in each discovery config's uniq_id/dev.ids + the
 //     <prefix>/<component>/<node>/<group>_<object_id> discovery topic. That node id is derived from
@@ -42,6 +43,7 @@
 #include "def/registry.hpp"
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
+#include "env3.hpp"
 #include "hp_poll.hpp"
 #include "hp_modbus.hpp"
 #include "logic/availability.hpp"
@@ -49,6 +51,7 @@
 #include "logic/crashinfo.hpp"
 #include "logic/conv_override.hpp"
 #include "logic/discovery.hpp"
+#include "logic/env3.hpp"
 #include "logic/fault_state.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/mqtt_group.hpp"
@@ -149,14 +152,18 @@ struct Lock {
 
 // Persisted so the pointers handed to esp-mqtt (and reused by the task) stay valid.
 static std::string s_uri, s_user, s_pass, s_node, s_board, s_base, s_prefix, s_avail, s_x10a,
-                   s_modbus, s_weather, s_retired_modbus_status, s_legacy_state, s_heartbeat, s_crash;
+                   s_modbus, s_weather, s_env3, s_retired_modbus_status, s_legacy_state, s_heartbeat, s_crash;
 static std::string s_announced_profile;               // profile we last published discovery for (mqtt_task only)
 static std::string s_last_x10a_json;                  // per-topic dedup guards (mqtt_task only)
 static std::string s_last_modbus_json;
 static std::string s_last_weather_json;
 static bool        s_weather_discovery_synced = false;
 static bool        s_weather_discovery_enabled = false;
+static std::string s_last_env3_json;
+static uint32_t    s_last_env3_samples          = 0;
 static bool        s_modbus_disabled_cleaned    = false;
+static bool        s_env3_disabled_cleaned      = false;
+static bool        s_env3_discovery_announced   = false;
 // Retained-topic cleanup: probe the two retired topics plus a resolved crash without unconditionally
 // publishing empty payloads on every reconnect. The event task only raises each `seen` flag;
 // subscribe/delete/unsubscribe remain on mqtt_task, preserving the single-publisher rule. The
@@ -509,6 +516,20 @@ static void retract_modbus_discovery() {
         mqtt_publish(modbus_discovery_topic(s_prefix, s_node, def::HOMEHUB_REGS[i]), "", 0, 0, 1);
 }
 
+static void publish_env3_discovery() {
+    for (size_t i = 0; i < ENV3_HA_SENSOR_COUNT; ++i) {
+        const Env3HaSensor& sensor = ENV3_HA_SENSORS[i];
+        const std::string topic = env3_discovery_topic(s_prefix, s_node, sensor);
+        const std::string config = env3_discovery_config(s_node, s_board, s_env3, s_avail, sensor);
+        mqtt_publish(topic, config.c_str(), 0, 0, 1);
+    }
+}
+
+static void retract_env3_discovery() {
+    for (size_t i = 0; i < ENV3_HA_SENSOR_COUNT; ++i)
+        mqtt_publish(env3_discovery_topic(s_prefix, s_node, ENV3_HA_SENSORS[i]), "", 0, 0, 1);
+}
+
 // Build + publish each source independently. The X10A payload is grouped by register page; the
 // Modbus topic is flat because its topic already supplies the source group. When the HomeHub link is
 // not live, `{}` actively removes every state instead of retaining values from an old TCP session.
@@ -563,6 +584,23 @@ static void sync_weather_discovery(bool enabled) {
     }
     s_weather_discovery_synced = true;
     s_weather_discovery_enabled = enabled;
+}
+
+// ENV III is independent observation telemetry and not part of either heat-pump payload. Three HA
+// discovery entities read this same document. Publish every successful sensor sample, even if
+// rounding produces the same JSON, so a time-series subscriber sees the sensor's real 10 s sampling
+// cadence. Errors/staleness publish `{}` once; each entity's availability template sees its missing
+// key and becomes unavailable instead of carrying a plausible retained outdoor value forward.
+static void publish_env3_state() {
+    const Env3Status env = env3_status();
+    const std::string js = build_env3_mqtt_json(env.fresh, env.temperature_c,
+                                                env.humidity_pct, env.pressure_hpa);
+    const bool new_sample = env.fresh && env.samples != s_last_env3_samples;
+    if (new_sample || js != s_last_env3_json) {
+        mqtt_publish(s_env3, js.c_str(), static_cast<int>(js.size()), 0, 1);
+        s_last_env3_json = js;
+    }
+    s_last_env3_samples = env.samples;
 }
 
 // Stream one retained discovery config per diagnostic sensor (logic/heartbeat.hpp). These describe
@@ -1185,7 +1223,11 @@ static void mqtt_task(void*) {
                     s_last_modbus_json.clear();
                     s_last_weather_json.clear();
                     s_weather_discovery_synced = false;
+                    s_last_env3_json.clear();
+                    s_last_env3_samples = 0;
                     s_modbus_disabled_cleaned = false;
+                    s_env3_disabled_cleaned = false;
+                    s_env3_discovery_announced = false;
                     // Force the board/link diagnostic discovery to re-publish on THIS (re)connect. The
                     // disconnect handler also clears s_heartbeat_announced, but a DISCONNECT landing
                     // mid-discovery (after the check below, before the publishes finish) could leave it
@@ -1258,6 +1300,27 @@ static void mqtt_task(void*) {
                 // snapshot and provenance known locally; it is not a dependency, and precise
                 // configured coordinates never enter either the payload or its HA entities.
                 publish_weather_state();
+
+                const bool env3_enabled = ref_config.env3_enabled && env3_board_supported(ref_config);
+                if (env3_enabled) {
+                    s_env3_disabled_cleaned = false;
+                    if (!s_env3_discovery_announced) {
+                        publish_env3_discovery();
+                        s_env3_discovery_announced = true;
+                        diag_printf("mqtt: ENV III HA discovery announced\n");
+                    }
+                    publish_env3_state();
+                } else if (!s_env3_disabled_cleaned) {
+                    // Disabling the configured sensor removes its retained data topic and its three
+                    // retained discovery configs. The tombstones are repeated after every reconnect
+                    // so a restored old broker converges instead of resurrecting ghost entities.
+                    mqtt_publish(s_env3, "", 0, 0, 1);
+                    retract_env3_discovery();
+                    s_last_env3_json.clear();
+                    s_last_env3_samples = 0;
+                    s_env3_discovery_announced = false;
+                    s_env3_disabled_cleaned = true;
+                }
 
                 // HA may have been offline for the connect-time tombstones. Repeat the retired-topic
                 // cleanup periodically so it converges after HA returns; no retained config is ever
@@ -1374,6 +1437,7 @@ void mqtt_ha_start() {
     s_x10a      = x10a_topic(s_base);
     s_modbus    = modbus_topic(s_base);
     s_weather   = weather_forecast_topic(s_base);
+    s_env3      = env3_topic(s_base);
     s_retired_modbus_status = retired_modbus_status_topic(s_base);
     s_legacy_state = legacy_state_topic(s_base);
     s_heartbeat = heartbeat_topic(s_base);

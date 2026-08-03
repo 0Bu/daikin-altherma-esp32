@@ -2,8 +2,9 @@
 // Home Assistant MQTT-Discovery payload builder. Pure string building, IDF-free, so the exact
 // bytes HA receives are asserted on the host (test/test_logic.cpp) rather than on the device.
 // mqtt_ha.cpp streams one of these per value on (re)connect. X10A sensors point at the grouped
-// <base>/x10a payload. HomeHub stays on the independent flat <base>/modbus MQTT topic without HA
-// discovery; only its frozen former topic names remain here so upgrades can retire them.
+// <base>/x10a payload; ENV III exposes three sensors from its flat <base>/env3 payload. HomeHub
+// stays on the independent flat <base>/modbus MQTT topic without HA discovery; only its frozen
+// former topic names remain here so upgrades can retire them.
 #include <string>
 #include "value_def.hpp"
 #include "convert.hpp"
@@ -130,6 +131,60 @@ inline std::string x10a_topic(const std::string& base) {
 
 inline std::string modbus_topic(const std::string& base) {
     return base + "/modbus";
+}
+
+inline std::string env3_topic(const std::string& base) {
+    return base + "/env3";
+}
+
+// ENV III is one atomic observation but three Home Assistant sensors. The entity ids are scoped by
+// the source (`env3_...`) so they cannot collide with a Daikin X10A register whose label happens to
+// describe the same physical quantity. All three read the same retained flat JSON document.
+struct Env3HaSensor {
+    const char* object_id;
+    const char* name;
+    const char* json_key;
+    const char* unit;
+    const char* device_class;
+};
+
+inline constexpr Env3HaSensor ENV3_HA_SENSORS[] = {
+    {"env3_temperature", "ENV III Temperature",  "temperature_c", "°C",  "temperature"},
+    {"env3_humidity",    "ENV III Humidity",     "humidity_pct",  "%",   "humidity"},
+    {"env3_pressure",    "ENV III Air Pressure", "pressure_hpa",  "hPa", "atmospheric_pressure"},
+};
+inline constexpr size_t ENV3_HA_SENSOR_COUNT =
+    sizeof(ENV3_HA_SENSORS) / sizeof(ENV3_HA_SENSORS[0]);
+
+inline std::string env3_discovery_topic(const std::string& prefix, const std::string& node,
+                                        const Env3HaSensor& sensor) {
+    return prefix + "/sensor/" + node + "/" + sensor.object_id + "/config";
+}
+
+// Availability has two independent causes and therefore uses HA's availability list in `all`
+// mode: the ESP32 must be online AND this particular key must exist in the ENV III payload. The
+// driver publishes `{}` on read failure/staleness, so HA marks only these three entities unavailable
+// while the rest of the device remains online. Defaults `online`/`offline` match both templates.
+inline std::string env3_discovery_config(const std::string& node, const std::string& board_id,
+                                         const std::string& state_topic,
+                                         const std::string& device_availability_topic,
+                                         const Env3HaSensor& sensor) {
+    std::string j = "{";
+    j += "\"name\":\"";         j += sensor.name; j += "\",";
+    j += "\"uniq_id\":\"";      j += node; j += '_'; j += sensor.object_id; j += "\",";
+    j += "\"stat_t\":\"";       j += state_topic; j += "\",";
+    j += "\"val_tpl\":\"{{ value_json.get('"; j += sensor.json_key; j += "') }}\",";
+    j += "\"availability\":[{\"topic\":\""; j += device_availability_topic;
+    j += "\"},{\"topic\":\""; j += state_topic;
+    j += "\",\"value_template\":\"{{ 'online' if value_json.get('";
+    j += sensor.json_key;
+    j += "') is number else 'offline' }}\"}],\"availability_mode\":\"all\",";
+    j += "\"unit_of_meas\":\""; j += sensor.unit; j += "\",";
+    j += "\"dev_cla\":\"";      j += sensor.device_class; j += "\",";
+    j += "\"stat_cla\":\"measurement\",";
+    j += device_json(node, board_id);
+    j += "}";
+    return j;
 }
 
 // Builds through v1.0.0-dev.257 retained a duplicate HomeHub availability value here. Link state is

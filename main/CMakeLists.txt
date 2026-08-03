@@ -10,6 +10,7 @@ idf_component_register(
         "hp_detect.cpp"
         "hp_modbus.cpp"
         "hp_poll.cpp"
+        "env3.cpp"
         "history.cpp"
         "checkup.cpp"
         "http_server.cpp"
@@ -50,6 +51,7 @@ idf_component_register(
         esp-tls
         lwip
         esp_driver_uart
+        esp_driver_i2c
         esp_driver_gpio
         esp_driver_rmt
         led_strip

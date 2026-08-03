@@ -333,11 +333,9 @@ function syncBoardFields() {
 // board_presets.hpp — one table, host-tested against the same validator POST /set_board applies, so
 // the browser never carries a second copy of the board facts that could drift from it).
 //
-// A pick only FILLS the five fields; nothing is written until Save. The stored values do not carry
-// a board identity: in particular, the first-boot build defaults happen to equal the XIAO preset,
-// but that does not prove the board is a XIAO. Therefore each newly opened modal starts at "Custom".
-// While it stays open, editing the five fields still updates the selection so it never claims a
-// board the fields below no longer describe.
+// A pick fills the five fields and supplies the stable preset id persisted on Save. Untouched build
+// defaults carry no id, so they remain unselected even when their pins equal XIAO. Editing a field
+// changes the pending selection to Custom unless all five values again match a known preset.
 function boardPresets() {
   return Array.isArray(S.status?.board?.presets) ? S.status.board.presets : [];
 }
@@ -359,10 +357,11 @@ function boardFieldsMatch(p) {
 }
 // findIndex returns -1 when nothing matches, which is exactly the "Custom" option's value.
 function syncPresetSelection() {
-  if (boardPresets().length) $("bdPreset").value = String(boardPresets().findIndex(boardFieldsMatch));
+  const match = boardPresets().find(boardFieldsMatch);
+  $("bdPreset").value = match?.id || "custom";
 }
 function applyPreset() {
-  const p = boardPresets()[+$("bdPreset").value];
+  const p = boardPresets().find((candidate) => candidate.id === $("bdPreset").value);
   if (!p) return;                       // "Custom" — leave the fields exactly as the user has them
   $("bdLedType").value = String(p.led_gpio < 0 ? -1 : p.led_type);
   if (p.led_gpio >= 0) boardPinOptions($("bdLedPin"), p.led_gpio, false);
@@ -377,8 +376,8 @@ function fillBoard() {
   // Hidden when the device sent none — an older firmware, or a build whose reserved pins withhold
   // every preset (board_presets_offerable). The manual fields still do the whole job.
   $("bdPresetRow").hidden = presets.length === 0;
-  $("bdPreset").innerHTML = `<option value="-1">${esc(t("board.preset_custom"))}</option>` +
-    presets.map((p, i) => `<option value="${i}">${esc(p.name)}</option>`).join("");
+  $("bdPreset").innerHTML = `<option value="custom">${esc(t("board.preset_custom"))}</option>` +
+    presets.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
   const hasLed = b.led_gpio != null && b.led_gpio >= 0;
   $("bdLedType").value = hasLed ? String(b.led_type ?? 0) : "-1";
   boardPinOptions($("bdLedPin"), hasLed ? b.led_gpio : -1, false);
@@ -386,21 +385,10 @@ function fillBoard() {
   boardPinOptions($("bdBtnPin"), b.btn_gpio, true);
   $("bdBtnInv").checked = b.btn_active_low !== false;
   syncBoardFields();
-  // Name the board only once the USER has stated it (/status.board.user_set). The values alone
-  // cannot decide: a device that never saved hardware carries the build's defaults, which happen to
-  // EQUAL the XIAO preset, so naming it would label every freshly flashed board a XIAO — including
-  // an AtomS3 Lite, where that is an actively wrong claim (#256). Once the user HAS saved, the
-  // opposite failure applies and it is the one that got reported: the modal opened on "Custom"
-  // although the fields are exactly the AtomS3 preset just saved, so re-picking your own board
-  // submitted an unchanged form — no reboot, one grey "no changes" toast, and it reads as a save
-  // that did nothing (#257).
-  //
-  // The selection is DERIVED from the fields either way — syncPresetSelection is the single rule,
-  // the same one every field's change handler runs — so user_set decides only WHETHER a name is
-  // shown, never WHICH. That is also why forcing "Custom" here was not merely cautious but
-  // inconsistent: the same five values read "Custom" until you touched anything and "M5Stack AtomS3
-  // Lite" immediately after, one dataset described two ways.
-  if (b.user_set) syncPresetSelection(); else $("bdPreset").value = "-1";
+  // Use the persisted id directly. Pins are deliberately not allowed to name a board on open: a
+  // freshly flashed Atom may carry XIAO build defaults, and a manually wired Custom board may happen
+  // to use the same values as a preset. The request path separately rejects id/value mismatches.
+  $("bdPreset").value = presets.some((p) => p.id === b.preset_id) ? b.preset_id : "custom";
 }
 function openBoard() {
   fillBoard();
@@ -408,6 +396,43 @@ function openBoard() {
   openPopup("boardModal");
 }
 function closeBoard() { $("boardModal").hidden = true; }
+
+// ── ENV III outdoor-climate sensor ───────────────────────────────────────
+function env3AvailablePins() {
+  const raw = Array.isArray(S.status?.env3?.pins_avail) ? S.status.env3.pins_avail : [];
+  return [...new Set(raw.filter((p) => Number.isInteger(p) && p >= 0))].sort((a, b) => a - b);
+}
+function env3PinOptions(sel, current) {
+  const pins = env3AvailablePins();
+  sel.innerHTML = pins.map((p) => `<option value="${p}">GPIO ${p}</option>`).join("");
+  const selected = pins.includes(current) ? current : pins[0];
+  sel.value = selected === undefined ? "" : String(selected);
+}
+function env3SafePair(e) {
+  const pins = env3AvailablePins();
+  const sda = pins.includes(e.sda) ? e.sda : pins[0];
+  const scl = pins.includes(e.scl) && e.scl !== sda ? e.scl : pins.find((p) => p !== sda);
+  return { sda, scl };
+}
+function syncEnv3Fields() {
+  const enabled = $("envSensor").value === "env_iii";
+  for (const id of ["envSda", "envScl"]) $(id).disabled = !enabled;
+}
+function fillEnv3() {
+  const e = S.status?.env3 || {};
+  const pair = env3SafePair(e);
+  $("envSensor").value = e.enabled ? "env_iii" : "";
+  env3PinOptions($("envSda"), pair.sda);
+  env3PinOptions($("envScl"), pair.scl);
+  syncEnv3Fields();
+}
+function openEnv3() {
+  if (!S.status?.env3?.supported) return;
+  fillEnv3();
+  $("envError").hidden = true;
+  openPopup("env3Modal");
+}
+function closeEnv3() { closePopup("env3Modal"); }
 function signalBars(rssi) {
   const lit = rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1;
   const tone = rssi >= -70 ? "var(--ok)" : "var(--warn)";

@@ -1,5 +1,5 @@
 // POST config routes: /set_wifi, /set_mqtt, /test_ref_temp, /set_ref_temp, /set_weather, /set_syslog, /set_ntp, /set_hp,
-// /set_board, /set_ota, /set_lang, /discover_homehub, /detect. Parse JSON, validate, then apply:
+// /set_board, /set_env3, /set_ota, /set_lang, /discover_homehub, /detect. Parse JSON, validate, then apply:
 // WiFi/MQTT/syslog/NTP/board persist to NVS + reboot; the reference mapping is first tested without
 // persistence, then its proof-gated save applies live; /set_hp persists the RX/TX pin cache (no
 // reboot) but keeps the model session-only;
@@ -10,6 +10,7 @@
 #include "config.hpp"
 #include "hp_poll.hpp"
 #include "logic/config_model.hpp"
+#include "logic/env3.hpp"
 #include "logic/mqtt_uri.hpp"   // parse_mqtt_uri — host/port/TLS split, host-tested
 #include "logic/reference_temperature.hpp"
 #include "logic/weather_forecast.hpp"
@@ -633,7 +634,8 @@ static esp_err_t set_weather(httpd_req_t* req) {
     return http_send_json(req, "{\"ok\":true,\"reboot\":false,\"saved\":true}");
 }
 
-// POST /set_board {led_gpio, led_type, led_inverted, btn_gpio, btn_active_low} -> validate + persist
+// POST /set_board {preset_id, led_gpio, led_type, led_inverted, btn_gpio, btn_active_low}
+// -> validate + persist
 // + reboot. This is the board's own hardware — which pin the status indicator is on, whether it is a
 // plain LED or a WS2812, and which pin (if any) carries the factory-reset button — kept in NVS
 // rather than Kconfig so ONE published image serves boards that disagree about their onboard parts.
@@ -648,18 +650,43 @@ static esp_err_t set_board(httpd_req_t* req) {
     if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
     cJSON* j = cJSON_Parse(body);
     if (!j) return send_err(req, "400 Bad Request", "bad json");
-    Config c = config();
+    const Config& cur = config();
+    Config c = cur;
     c.led_gpio       = ji(j, "led_gpio", c.led_gpio);
     c.led_type       = ji(j, "led_type", c.led_type);
     c.led_inverted   = jb(j, "led_inverted", c.led_inverted);
     c.btn_gpio       = ji(j, "btn_gpio", c.btn_gpio);
     c.btn_active_low = jb(j, "btn_active_low", c.btn_active_low);
+    cJSON* preset_item = cJSON_GetObjectItem(j, "preset_id");
+    if (preset_item && !cJSON_IsString(preset_item)) {
+        cJSON_Delete(j);
+        return send_err(req, "400 Bad Request", "preset_id must be a string");
+    }
+    const bool preset_sent = preset_item != nullptr;
+    const std::string preset_key = preset_sent ? preset_item->valuestring : "";
     cJSON_Delete(j);
-    // Submitting this form IS the user stating their hardware — that is the whole content of the
-    // flag, so it is set for every accepted request rather than only when a value moved.
+    // Submitting this form is an explicit board statement. Current clients send the stable key;
+    // for a pre-v12 cached UI, recover the same exact-match choice once and persist it explicitly.
     c.board_user_set = true;
+    if (!preset_sent) {
+        c.board_preset_id = board_legacy_preset_id(c);
+    } else if (preset_key == "custom") {
+        c.board_preset_id = BoardPresetId::Custom;
+    } else {
+        const BoardPreset* preset = board_preset_by_key(preset_key);
+        if (!preset) return send_err(req, "400 Bad Request", "board preset is unknown");
+        c.board_preset_id = preset->id;
+    }
 
     std::string reason;
+    if (!board_identity_valid(c, reason))
+        return send_err(req, "400 Bad Request", reason.c_str());
+
+    // ENV III is an M5Stack-board feature. Switching to a Seeed or Custom board must not leave an
+    // already-running I2C task behind or make the user switch back merely to reach its Disable
+    // control: retire the optional sensor in the same atomic save and reboot.
+    if (c.env3_enabled && !env3_board_supported(c)) c.env3_enabled = false;
+
     // Checks the pins against the chip AND against the X10A link in the same snapshot, so neither
     // side can steal the other's GPIO whichever endpoint is called second (logic/config_model.hpp).
     if (!board_hw_valid(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi()))
@@ -670,8 +697,8 @@ static esp_err_t set_board(httpd_req_t* req) {
     // still the first time anyone stated what this board is. board_save_needed/board_reboot_needed
     // (logic/config_model.hpp, host-tested) keep them apart — persist the statement, but claim no
     // reboot for it, since no driver's pin changed.
-    const Config& cur = config();
-    if (!board_save_needed(c, cur))
+    const bool env_changed = c.env3_enabled != cur.env3_enabled;
+    if (!board_save_needed(c, cur) && !env_changed)
         return http_send_json(req, "{\"ok\":true,\"reboot\":false}");   // nothing to write, no reboot
 
     if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
@@ -679,8 +706,34 @@ static esp_err_t set_board(httpd_req_t* req) {
     // what keeps the ANSWER honest — {"reboot":false} alone makes the UI say "no changes", which
     // would report a write to NVS as nothing having happened. Additive, so the four routes that
     // never send it keep their exact contract.
-    if (!board_reboot_needed(c, cur))
+    if (!board_reboot_needed(c, cur) && !env_changed)
         return http_send_json(req, "{\"ok\":true,\"reboot\":false,\"saved\":true}");
+    http_send_json(req, "{\"ok\":true,\"reboot\":true}");
+    reboot_soon();
+    return ESP_OK;
+}
+
+// POST /set_env3 {enabled,sda,scl}. The I2C driver owns the bus for the life of its task, so a pin
+// change is persisted and applied by reboot just like board-local hardware. Disabled is always a
+// valid recovery state; enabled configs require a selected M5Stack board preset and must pass the
+// chip-safe and cross-subsystem collision rules.
+static esp_err_t set_env3(httpd_req_t* req) {
+    char body[256];
+    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
+    cJSON* j = cJSON_Parse(body);
+    if (!j) return send_err(req, "400 Bad Request", "bad json");
+    Config c = config();
+    c.env3_enabled = jb(j, "enabled", c.env3_enabled);
+    c.env3_sda = ji(j, "sda", c.env3_sda);
+    c.env3_scl = ji(j, "scl", c.env3_scl);
+    cJSON_Delete(j);
+    std::string reason;
+    if (!env3_config_valid(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi()))
+        return send_err(req, "400 Bad Request", reason.c_str());
+    const Config cur = config();
+    if (c.env3_enabled == cur.env3_enabled && c.env3_sda == cur.env3_sda && c.env3_scl == cur.env3_scl)
+        return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
+    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
     http_send_json(req, "{\"ok\":true,\"reboot\":true}");
     reboot_soon();
     return ESP_OK;
@@ -769,6 +822,7 @@ void http_register_config(httpd_handle_t s, HttpSurface surface) {
     http_register_on(s, surface, "/set_hp", HTTP_POST, set_hp);
     http_register_on(s, surface, "/discover_homehub", HTTP_POST, discover_homehub_now);
     http_register_on(s, surface, "/set_board", HTTP_POST, set_board);
+    http_register_on(s, surface, "/set_env3", HTTP_POST, set_env3);
     http_register_on(s, surface, "/set_ota", HTTP_POST, set_ota);
     http_register_on(s, surface, "/set_lang", HTTP_POST, set_lang);
     http_register_on(s, surface, "/detect", HTTP_POST, do_detect);

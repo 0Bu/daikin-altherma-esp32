@@ -219,12 +219,14 @@ function esp32CardHtml() {
 }
 
 // The permanent Settings home for the dynamic-LWT project. Only its first row family is live today:
-// one MQTT room-temperature source and direct Open-Meteo forecast in observation mode. Strategy and output are explicit
-// neighbours now, so later phases extend this card instead of growing unrelated top-level settings.
+// one MQTT room-temperature source, direct Open-Meteo forecast, and the optional ENV III observation
+// in Observe mode. Strategy and output are explicit neighbours now, so later phases extend this card
+// instead of growing unrelated top-level settings.
 // None of the labels below claims control: the fixed operating mode is Observe and output is read-only.
 function dynamicControlCardHtml() {
   const r = S.status?.reference_temperature || {};
   const w = S.status?.weather_forecast || {};
+  const env = S.status?.env3 || {};
   const mqtt = S.status?.mqtt || {};
   let badgeCls = "dim";
   let source = t("dyn.not_configured"), sourceCls = "dim";
@@ -266,6 +268,28 @@ function dynamicControlCardHtml() {
   rows += `<button class="vrow vrow-btn dynamic-source-row" type="button" data-act="weather" ` +
     `aria-label="${esc(t("wx.title"))}"><span class="vrow-label">${esc(t("dyn.weather"))}</span>` +
     `<span class="vrow-val settings-wrap ${weatherCls}">${esc(weather)} ${editIcon}</span></button>`;
+
+  // ENV III belongs to the M5Stack accessory ecosystem. The firmware derives `supported` from the
+  // user-selected board preset's vendor; omit the row entirely on Seeed/Custom boards rather than
+  // showing a control whose only possible Save result is rejection.
+  if (env.supported) {
+    let envText = t("dyn.not_configured"), envCls = "dim";
+    if (env.enabled) {
+      if (env.fresh) {
+        envText = `${Number(env.temperature_c).toLocaleString(LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 1 })} °C · ` +
+          `${Number(env.humidity_pct).toLocaleString(LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 0 })} % · ` +
+          `${Number(env.pressure_hpa).toLocaleString(LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 0 })} hPa`;
+        envCls = "ok";
+      } else if (env.error === "collecting") { envText = t("env.collecting"); envCls = "warn"; }
+      else { envText = t("env.unavailable"); envCls = "err"; }
+      if (envCls === "err") badgeCls = "err";
+      else if (envCls === "warn" && badgeCls !== "err") badgeCls = "warn";
+      else if (envCls === "ok" && badgeCls === "dim") badgeCls = "ok";
+    }
+    rows += `<button class="vrow vrow-btn dynamic-source-row" type="button" data-act="env3" ` +
+      `aria-label="${esc(t("env.title"))}"><span class="vrow-label">${esc(t("dyn.outdoor"))}</span>` +
+      `<span class="vrow-val settings-wrap ${envCls}">${esc(envText)} ${editIcon}</span></button>`;
+  }
   rows += vrow(t("dyn.strategy"), t("dyn.inactive"), { cls: "dim" });
   rows += vrow(t("dyn.safety"), t("dyn.read_only"));
   if (r.error) rows += vrow(t("ref.error"), r.error, { cls: "err settings-wrap" });
@@ -336,13 +360,14 @@ function memoryRows(sys) {
 // single collapsed row rather than the permanent real estate the X10A pins have.
 function boardRow() {
   const b = S.status?.board || {};
+  const board = b.preset_name || (b.user_set ? t("board.preset_custom") : t("board.not_selected"));
   const led = b.led_gpio == null || b.led_gpio < 0
     ? t("card.hw_off")
     : t("card.hw_led", b.led_gpio, b.led_type === 1 ? "WS2812" : "LED");
   const btn = b.btn_gpio == null || b.btn_gpio < 0 ? t("card.hw_off") : t("card.hw_btn", b.btn_gpio);
   return `<button class="vrow vrow-btn" type="button" data-act="board" aria-label="${esc(t("board.title"))}">` +
     `<span class="vrow-label">${esc(t("card.hardware"))}</span>` +
-    `<span class="vrow-val mono">${esc(led)} · ${esc(btn)}</span></button>`;
+    `<span class="vrow-val settings-wrap">${esc(board)} · ${esc(led)} · ${esc(btn)}</span></button>`;
 }
 
 // Every family name in def/model_names.hpp starts with "Altherma ", and the Model card's own heading
@@ -355,6 +380,19 @@ const shortFamily = (f) => String(f).replace(/^Altherma\s+/, "");
 // (connectionsHtml) — what the plant IS stays on the dashboard, what the board is SET TO moved.
 function statusCardsHtml() {
   const hp = S.status?.hp || {}, d = S.status?.detect || {};
+  const env = S.status?.env3 || {};
+  let environment = "";
+  if (env.supported && env.enabled) {
+    const value = (v, digits, unit) => env.fresh && Number.isFinite(Number(v))
+      ? `${Number(v).toLocaleString(LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: digits })} ${unit}` : "—";
+    const state = env.fresh ? t("env.live") : env.error === "collecting" ? t("env.collecting") : t("env.unavailable");
+    const cls = env.fresh ? "ok" : env.error === "collecting" ? "warn" : "err";
+    const rows = vrow(t("env.temperature"), value(env.temperature_c, 1, "°C"), { cls: "mono num" }) +
+      vrow(t("env.humidity"), value(env.humidity_pct, 0, "%"), { cls: "mono num" }) +
+      vrow(t("env.pressure"), value(env.pressure_hpa, 0, "hPa"), { cls: "mono num" }) +
+      vrow(t("env.sensor_state"), state, { cls });
+    environment = vcard(t("env.card"), rows, "ENV III", cls);
+  }
   // Outdoor unit as a full-width heading — model names are long and don't fit a label→value row.
   // The X10A link + protocol live on the Protocol card (they're about the board's bus), not here.
   // Identity is bus-derived: the model name degrades to the brand offline (hpModelName), and capacity
@@ -391,7 +429,7 @@ function statusCardsHtml() {
 
   // Model identity is only meaningful while the bus answers — hide the card entirely when the
   // heat-pump link is down instead of naming a unit (or showing a stale capacity) that isn't live.
-  return hp.connected ? vcard(t("card.model"), model) : "";
+  return environment + (hp.connected ? vcard(t("card.model"), model) : "");
 }
 
 // ── The Checkup card — "is anything worth reporting?" (logic/checkup.hpp, issue #208) ─────────

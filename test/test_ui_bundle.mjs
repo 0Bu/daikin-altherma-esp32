@@ -29,14 +29,15 @@ assert.doesNotThrow(() => new vm.Script(app, { filename: "main/www/app.sources" 
 const html = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 const httpConfig = fs.readFileSync(new URL("../main/http_config.cpp", import.meta.url), "utf8");
+const httpStatus = fs.readFileSync(new URL("../main/http_status.cpp", import.meta.url), "utf8");
 const mqttHa = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "utf8");
 const dialogs = [...html.matchAll(/<[^>]+class="modal-card"[^>]+role="dialog"[^>]*>/g)].map((m) => m[0]);
-assert.equal(dialogs.length, 9, "every custom popup must remain identifiable as a dialog");
+assert.equal(dialogs.length, 10, "every custom popup must remain identifiable as a dialog");
 for (const dialog of dialogs)
   assert.match(dialog, /tabindex="-1"/, "popup focus must land on the dialog container, not an input");
 assert.match(app, /function openPopup\(id\)[\s\S]*modal\.hidden = false;[\s\S]*querySelector\?\.\('\[role="dialog"\]'\)[\s\S]*focus\?\.\(\{ preventScroll: true \}\)/,
   "opening a popup must focus only its container without scrolling");
-for (const opener of ["openWifi", "openMqtt", "openRefTemp", "openWeather", "openSyslog", "openNtp", "openHomehub", "openBoard", "openBug"])
+for (const opener of ["openWifi", "openMqtt", "openRefTemp", "openWeather", "openSyslog", "openNtp", "openHomehub", "openBoard", "openEnv3", "openBug"])
   assert.match(app, new RegExp(`function ${opener}\\(\\)[\\s\\S]*?openPopup\\(\\"[^\\"]+\\"\\);`),
     `${opener} must use the no-field-autofocus popup path`);
 assert.match(html, /id="gPth"[\s\S]*id="svPth"[\s\S]*id="svCop"/,
@@ -59,9 +60,10 @@ assert.match(app, /applyLive\(\{ mb_host: host, mb_port: port, mb_unit_id: unit 
 assert.doesNotMatch(app, /mb_mode|config_modbus_should_search/,
   "the browser bundle must carry no hidden Auto-mode contract");
 
-// Dynamic LWT owns one permanent Settings card. Room input and direct Open-Meteo forecast are editable;
-// strategy and output keep explicit non-active/read-only homes.
-assert.match(app, /function dynamicControlCardHtml\(\)[\s\S]*t\("dyn\.mode"\)[\s\S]*t\("dyn\.room_sources"\)[\s\S]*t\("dyn\.weather"\)[\s\S]*t\("dyn\.strategy"\)[\s\S]*t\("dyn\.safety"\)/,
+// Dynamic LWT owns one permanent Settings card. Room input and direct Open-Meteo forecast are
+// editable; ENV III appears only for a selected M5Stack board. Strategy and output keep explicit
+// non-active/read-only homes.
+assert.match(app, /function dynamicControlCardHtml\(\)[\s\S]*t\("dyn\.mode"\)[\s\S]*t\("dyn\.room_sources"\)[\s\S]*t\("dyn\.weather"\)[\s\S]*t\("dyn\.outdoor"\)[\s\S]*t\("dyn\.strategy"\)[\s\S]*t\("dyn\.safety"\)/,
   "the dynamic-LWT Settings card must keep all planned configuration domains together");
 assert.match(app, /t\("dyn\.observe"\)[\s\S]*t\("dyn\.read_only"\)/,
   "the first slice must identify itself as observation-only and read-only");
@@ -79,6 +81,51 @@ assert.doesNotMatch(app, /weather[^\n]{0,120}broker_off|input\/weather/,
   "the Open-Meteo forecast must not depend on the MQTT broker or an adapter topic");
 assert.match(httpConfig, /static esp_err_t set_weather[\s\S]*weather_location_parse[\s\S]*weather_forecast_reconfigure/,
   "the coordinate save must validate both values and wake the firmware fetch task");
+assert.match(app, /data-act="env3"[\s\S]*function statusCardsHtml\(\)[\s\S]*t\("env\.temperature"\)[\s\S]*t\("env\.humidity"\)[\s\S]*t\("env\.pressure"\)/,
+  "ENV III must be configurable from the dynamic-control card and render an independent outdoor-climate card");
+assert.match(app, /if \(env\.supported\)[\s\S]*data-act="env3"/,
+  "the ENV III Settings row must exist only on a supported M5Stack board");
+assert.match(app, /if \(env\.supported && env\.enabled\)/,
+  "the ENV III dashboard card must be hidden on unsupported boards even with stale status data");
+assert.match(app, /function openEnv3\(\) \{[\s\S]*if \(!S\.status\?\.env3\?\.supported\) return;/,
+  "the ENV III modal must fail closed when called outside a supported M5Stack board");
+const envModalHtml = html.slice(html.indexOf('id="env3Modal"'), html.indexOf('<!-- Bug report'));
+assert.match(envModalHtml, /id="envSensor"[\s\S]*value=""[\s\S]*value="env_iii"[\s\S]*id="envSda"[\s\S]*id="envScl"/,
+  "the outdoor-sensor modal must expose one sensor selector followed by SDA and SCL");
+assert.doesNotMatch(envModalHtml, /type="checkbox"|envEnabled|envPreset|env\.hint|temperature measurement range|Temperatur-Messbereich/,
+  "the outdoor-sensor modal must contain no enable checkbox, wiring preset, or technical prose");
+assert.match(app, /SDA is the I²C data line \(yellow Grove wire\); SCL is the clock line \(white Grove wire\)/,
+  "the English modal must explain the two user-selected I2C wires");
+assert.match(app, /SDA ist die I²C-Datenleitung \(gelbe Grove-Leitung\), SCL die Taktleitung \(weiße Grove-Leitung\)/,
+  "the German modal must explain the two user-selected I2C wires");
+assert.match(app, /const enabled = \$\("envSensor"\)\.value === "env_iii";[\s\S]*saveReboot\("\/set_env3", \{ enabled, sda, scl \}/,
+  "ENV III wiring must use the rebooting persistent endpoint");
+assert.match(httpConfig, /env3_config_valid\(c[\s\S]*http_register_on\(s, surface, "\/set_env3"/,
+  "the device must validate ENV III pin collisions before registering the config route");
+assert.ok(httpStatus.includes("board_vendor_name(board_selected_vendor(c))"),
+  "status must expose the selected board vendor");
+assert.ok(httpStatus.includes('j += ",\\"preset_id\\":";') &&
+          httpStatus.includes("board_preset_key(c.board_preset_id)") &&
+          httpStatus.includes('j += ",\\"preset_name\\":";'),
+  "status must expose the explicitly persisted board preset id and display name");
+assert.match(app, /preset_id: \$\("bdPreset"\)\.value \|\| "custom"/,
+  "the Board dialog must submit the selected preset id instead of only its derived pin values");
+assert.match(httpConfig, /board_preset_by_key\(preset_key\)[\s\S]*board_identity_valid\(c, reason\)/,
+  "the device must reject unknown or hardware-mismatched board preset ids");
+assert.match(httpStatus, /const bool env_supported = env3_board_supported\(c\);[\s\S]*j \+= env_supported \? "true" : "false";/,
+  "status must expose the selected board vendor and the derived ENV III support decision");
+assert.match(httpConfig, /if \(c\.env3_enabled && !env3_board_supported\(c\)\) c\.env3_enabled = false;/,
+  "switching away from an M5Stack board must retire an enabled ENV III in the same save");
+assert.match(mqttHa, /s_env3\s*=\s*env3_topic\(s_base\)/,
+  "ENV III must use its own message topic directly below the configured MQTT base");
+assert.match(mqttHa, /const bool new_sample = env\.fresh && env\.samples != s_last_env3_samples;[\s\S]*mqtt_publish\(s_env3, js\.c_str\(\), static_cast<int>\(js\.size\(\)\), 0, 1\)/,
+  "every fresh ENV III sample must be published as retained telemetry, even when its values repeat");
+assert.match(mqttHa, /else if \(!s_env3_disabled_cleaned\)[\s\S]*mqtt_publish\(s_env3, "", 0, 0, 1\)/,
+  "disabling ENV III must retract its retained data topic");
+assert.match(mqttHa, /publish_env3_discovery\(\)[\s\S]*env3_discovery_config\(s_node, s_board, s_env3, s_avail, sensor\)/,
+  "enabled ENV III must announce temperature, humidity, and pressure through HA discovery");
+assert.match(mqttHa, /else if \(!s_env3_disabled_cleaned\)[\s\S]*retract_env3_discovery\(\)/,
+  "disabling ENV III must retract all retained HA discovery configs as well as state");
 
 // The room-source row remains a user-configured exact MQTT mapping. Test is non-persistent and Save
 // starts disabled; only the proof returned after a readable fresh value may accompany the save.

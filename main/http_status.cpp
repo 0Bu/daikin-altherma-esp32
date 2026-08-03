@@ -2,8 +2,10 @@
 #include "http_handlers.hpp"
 #include "checkup.hpp"
 #include "config.hpp"
+#include "env3.hpp"
 #include "logic/board_pins.hpp"
 #include "logic/board_presets.hpp"
+#include "logic/env3.hpp"
 #include "logic/captive.hpp"
 #include "def/model_names.hpp"
 #include "def/models_catalog.hpp"
@@ -168,7 +170,7 @@ void http_append_status_json(std::string& j, bool redact) {
     // applies in the other direction. Drives the ESP32 card's hardware rows; /set_board writes them
     // back.
     int lpins[BOARD_LOCAL_PINS_MAX];
-    int nlpins = board_pins_local(lpins, BOARD_LOCAL_PINS_MAX, hw_octal_spi(), config_link_pins(c));
+    int nlpins = board_pins_local(lpins, BOARD_LOCAL_PINS_MAX, hw_octal_spi(), config_board_reserved_pins(c));
     // Appended piece by piece with `+=` rather than as one `a + b + c + …` chain. A chain has to
     // materialise EVERY intermediate std::string at once — each one a live object in this frame — and
     // this function overflowed the httpd task's stack doing exactly that (see http_server.cpp for the
@@ -180,11 +182,14 @@ void http_append_status_json(std::string& j, bool redact) {
     j += ",\"led_inverted\":";        j += c.led_inverted ? "true" : "false";
     j += ",\"btn_gpio\":";            j += std::to_string(c.btn_gpio);
     j += ",\"btn_active_low\":";      j += c.btn_active_low ? "true" : "false";
-    // Whether the five values above were STATED by the user or are merely this build's defaults
-    // (Config::board_user_set). The UI needs it to name the board in the Hardware modal's dropdown
-    // without claiming one nobody chose — the values alone cannot say, since the Kconfig defaults
-    // happen to equal the XIAO preset.
+    // Explicit board identity, atomically persisted with the hardware values. `user_set=false`
+    // means untouched build defaults; `preset_id=custom` means the user deliberately saved manual
+    // hardware. No consumer has to infer Atom/XIAO from pins.
+    const BoardPreset* selected_board = board_selected_preset(c);
     j += ",\"user_set\":";            j += c.board_user_set ? "true" : "false";
+    j += ",\"preset_id\":";           j += jstr(c.board_user_set ? board_preset_key(c.board_preset_id) : "");
+    j += ",\"preset_name\":";         j += jstr(selected_board ? selected_board->name : "");
+    j += ",\"vendor\":";              j += jstr(board_vendor_name(board_selected_vendor(c)));
     j += ",\"pins_local\":[";
     for (int i = 0; i < nlpins; i++) { if (i) j += ","; j += std::to_string(lpins[i]); }
     // ...and the ready-made settings for the boards this project documents (logic/board_presets.hpp),
@@ -195,17 +200,66 @@ void http_append_status_json(std::string& j, bool redact) {
     // fixed rows (~170 bytes) — bounded, unlike the per-value payloads the heap rules are about.
     const BoardPreset* presets[BOARD_PRESETS_MAX];
     int npre = board_presets_offerable(presets, BOARD_PRESETS_MAX, hw_octal_spi(),
-                                       config_link_pins(c));
+                                       config_board_reserved_pins(c));
     j += "],\"presets\":[";
     for (int i = 0; i < npre; i++) {
         if (i) j += ",";
-        j += "{\"name\":";            j += jstr(presets[i]->name);
+        j += "{\"id\":";              j += jstr(presets[i]->key);
+        j += ",\"name\":";            j += jstr(presets[i]->name);
+        j += ",\"vendor\":";          j += jstr(board_vendor_name(presets[i]->vendor));
         j += ",\"led_gpio\":";        j += std::to_string(presets[i]->led_gpio);
         j += ",\"led_type\":";        j += std::to_string(presets[i]->led_type);
         j += ",\"led_inverted\":";    j += presets[i]->led_inverted ? "true" : "false";
         j += ",\"btn_gpio\":";        j += std::to_string(presets[i]->btn_gpio);
         j += ",\"btn_active_low\":";  j += presets[i]->btn_active_low ? "true" : "false";
         j += "}";
+    }
+    j += "]},";
+    // Independent outdoor-climate observation. These values do not replace the Daikin R1T source:
+    // only fresh, whole ENV III samples are exposed as numbers, while stale/error state stays
+    // explicit. The UI also receives only pins/presets that the current X10A + board config permits.
+    const bool env_supported = env3_board_supported(c);
+    const bool env_enabled = env_supported && c.env3_enabled;
+    const Env3Status env = env3_status();
+    int epins[BOARD_PINS_MAX];
+    const int nepins = env_supported
+        ? board_pins_offerable(epins, BOARD_PINS_MAX, hw_octal_spi(), config_env3_reserved_pins(c))
+        : 0;
+    const Env3Preset* epresets[ENV3_PRESETS_MAX];
+    const int nepre = env_supported
+        ? env3_presets_offerable(epresets, ENV3_PRESETS_MAX, hw_octal_spi(),
+                                 config_env3_reserved_pins(c))
+        : 0;
+    const bool env_fresh = env_enabled && env.fresh;
+    char env_temp[24] = {0}, env_hum[24] = {0}, env_press[24] = {0};
+    if (env_fresh) {
+        std::snprintf(env_temp, sizeof(env_temp), "%.2f", env.temperature_c);
+        std::snprintf(env_hum, sizeof(env_hum), "%.2f", env.humidity_pct);
+        std::snprintf(env_press, sizeof(env_press), "%.2f", env.pressure_hpa);
+    }
+    j += "\"env3\":{\"type\":\"env_iii\",\"supported\":";
+    j += env_supported ? "true" : "false";
+    j += ",\"enabled\":"; j += env_enabled ? "true" : "false";
+    j += ",\"sda\":"; j += std::to_string(c.env3_sda);
+    j += ",\"scl\":"; j += std::to_string(c.env3_scl);
+    j += ",\"connected\":"; j += env_enabled && env.connected ? "true" : "false";
+    j += ",\"fresh\":"; j += env_fresh ? "true" : "false";
+    j += ",\"age_s\":"; j += env_enabled && env.samples ? std::to_string(env.age_s) : "null";
+    j += ",\"temperature_c\":"; j += env_fresh ? env_temp : "null";
+    j += ",\"humidity_pct\":"; j += env_fresh ? env_hum : "null";
+    j += ",\"pressure_hpa\":"; j += env_fresh ? env_press : "null";
+    j += ",\"error\":";
+    j += jstr(!env_supported ? "unsupported_board" : env_enabled ? env.error : "disabled");
+    j += ",\"samples\":"; j += std::to_string(env.samples);
+    j += ",\"errors\":"; j += std::to_string(env.errors);
+    j += ",\"pins_avail\":[";
+    for (int i = 0; i < nepins; ++i) { if (i) j += ","; j += std::to_string(epins[i]); }
+    j += "],\"presets\":[";
+    for (int i = 0; i < nepre; ++i) {
+        if (i) j += ",";
+        j += "{\"name\":"; j += jstr(epresets[i]->name);
+        j += ",\"sda\":"; j += std::to_string(epresets[i]->sda);
+        j += ",\"scl\":"; j += std::to_string(epresets[i]->scl); j += "}";
     }
     j += "]},";
     char bssid_str[18] = {0};

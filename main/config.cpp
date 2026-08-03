@@ -4,6 +4,8 @@
 #include "diag_log.hpp"
 #include "logic/config_store.hpp"   // ConfigBlob (de)serialize — the atomic CRC-checked config blob
 #include "logic/weather_forecast.hpp"
+#include "logic/board_presets.hpp"
+#include "logic/env3.hpp"
 #include "sdkconfig.h"
 #include "soc/soc_caps.h"   // SOC_GPIO_PIN_COUNT — per-target GPIO count for the link-pin check
 #include "esp_log.h"
@@ -90,7 +92,9 @@ void config_load() {
     // cadence at POLL_INTERVAL_S, labels are English-only.)
     ConfigBlob b;
     std::vector<uint8_t> raw;
-    if (nvs_get_blob("cfg", raw) && config_blob_deserialize(raw.data(), raw.size(), b)) {
+    const bool blob_loaded = nvs_get_blob("cfg", raw) &&
+                             config_blob_deserialize(raw.data(), raw.size(), b);
+    if (blob_loaded) {
         c.wifi_ssid = b.wifi_ssid;                     c.wifi_pass = b.wifi_pass;
         c.wifi_ssid_backup = b.wifi_ssid_backup;       c.wifi_pass_backup = b.wifi_pass_backup;
         c.wifi_rollback_active = b.wifi_rollback_active; c.wifi_rolled_back = b.wifi_rolled_back;
@@ -134,6 +138,15 @@ void config_load() {
             c.mb_unit_id        = b.mb_unit_id;
             c.actuation_enabled = b.actuation_enabled;
         }
+        if (b.has_env3) {
+            c.env3_enabled = b.env3_enabled;
+            c.env3_sda = b.env3_sda;
+            c.env3_scl = b.env3_scl;
+        }
+        if (b.has_board_identity) {
+            c.board_user_set = b.board_user_set;
+            c.board_preset_id = static_cast<BoardPresetId>(b.board_preset_id);
+        }
     } else {
         // Legacy / first-boot fallback (per-key + Kconfig defaults).
         c.wifi_ssid = nvs_get_str("wifi_ssid", CONFIG_DAIKIN_WIFI_SSID);
@@ -150,11 +163,14 @@ void config_load() {
         c.ntp_server = nvs_get_str("ntp_server", CONFIG_DAIKIN_NTP_SERVER);
         seed_board_defaults(c);   // the legacy layout never held these — Kconfig is all there is
     }
-    // Has the user STATED this hardware? (Config::board_user_set — the UI's licence to name the
-    // board.) A separate self-healing key rather than a blob field, for the reason given there; its
-    // absence is the honest answer for every device that predates it, since none of them recorded a
-    // statement. Read BEFORE the validation below, which can revoke it.
-    c.board_user_set = nvs_get_i32("board_set", 0) != 0;
+    // Before blob v12 the separate `board_set` key recorded only that the hardware form had been
+    // submitted. Recover the same preset name that old UI derived from the stored fields, but never
+    // infer from untouched defaults (`board_set` absent/false). The next ordinary save writes the
+    // explicit id atomically into the current blob.
+    if (blob_loaded && !b.has_board_identity) {
+        c.board_user_set = nvs_get_i32("board_set", 0) != 0;
+        c.board_preset_id = board_legacy_preset_id(c);
+    }
     // Re-check the board-local pins on the way IN, for the same reason the X10A pair is re-checked
     // below: NVS holds whatever an older build, a different board's blob or a hand-crafted POST put
     // there, and both of these pins are DRIVEN (an output, or an input with a pull). A bad one is
@@ -174,6 +190,7 @@ void config_load() {
             // guess, not the user's. Leaving the flag set would let the modal name a board out of
             // pins the device just refused to drive.
             c.board_user_set = false;
+            c.board_preset_id = BoardPresetId::Custom;
             probe = c;
             probe.rx_pin = probe.tx_pin = -1;
             // A build whose OWN defaults don't validate is a misconfigured Kconfig, not user input.
@@ -184,6 +201,14 @@ void config_load() {
                 c.led_gpio = -1;
                 c.btn_gpio = -1;
             }
+        }
+    }
+    {
+        std::string why;
+        if (!board_identity_valid(c, why)) {
+            diag_printf("config: persisted board identity rejected (%s; id=%d) — using Custom\n",
+                        why.c_str(), static_cast<int>(c.board_preset_id));
+            c.board_preset_id = BoardPresetId::Custom;
         }
     }
     // "" (either no ntp_server yet, or an explicit empty save via POST /set_ntp) falls back to the
@@ -204,6 +229,16 @@ void config_load() {
     // sentinel/empty and are re-detected on every boot (a swapped unit is re-identified).
     c.rx_pin       = nvs_get_i32("rx_pin", CONFIG_DAIKIN_RX_PIN);
     c.tx_pin       = nvs_get_i32("tx_pin", CONFIG_DAIKIN_TX_PIN);
+    // Optional hardware fails closed on an invalid persisted mapping. Disabling it keeps the UI
+    // reachable without claiming or driving a bad pad; the stored pins remain visible for repair.
+    {
+        std::string why;
+        if (!env3_config_valid(c, why, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi())) {
+            diag_printf("config: persisted ENV III config rejected (%s; sda=%d scl=%d) — disabled\n",
+                        why.c_str(), c.env3_sda, c.env3_scl);
+            c.env3_enabled = false;
+        }
+    }
     // Re-check the pair on the way IN. BOTH write paths commit rx_pin and tx_pin as two independent
     // NVS writes — config_save and, since the field-owned split, config_save_link — so a save cut or
     // failed between them leaves a pair on flash the request path would have rejected outright:
@@ -224,6 +259,17 @@ void config_load() {
                     c.rx_pin, c.tx_pin, CONFIG_DAIKIN_RX_PIN, CONFIG_DAIKIN_TX_PIN);
         c.rx_pin = CONFIG_DAIKIN_RX_PIN;
         c.tx_pin = CONFIG_DAIKIN_TX_PIN;
+    }
+    // The fallback pair above can itself collide with ENV III (for example a damaged link cache is
+    // replaced by the XIAO 44/43 defaults while an ENV mapping already uses them). Optional ENV
+    // yields to the primary X10A link; re-check the final pair before either driver starts.
+    if (c.env3_enabled) {
+        std::string why;
+        if (!env3_config_valid(c, why, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi())) {
+            diag_printf("config: ENV III disabled after X10A fallback (%s; sda=%d scl=%d)\n",
+                        why.c_str(), c.env3_sda, c.env3_scl);
+            c.env3_enabled = false;
+        }
     }
     c.proto        = parse_protocol(nvs_get_str("proto", CONFIG_DAIKIN_PROTOCOL));
     // Old development builds persisted discovery-result keys. They are intentionally ignored:
@@ -275,6 +321,9 @@ bool config_save(const Config& c, bool require_link) {
     b.weather_enabled = c.weather_enabled;
     b.weather_latitude_e6 = c.weather_latitude_e6;
     b.weather_longitude_e6 = c.weather_longitude_e6;
+    b.env3_enabled = c.env3_enabled; b.env3_sda = c.env3_sda; b.env3_scl = c.env3_scl;
+    b.board_preset_id = static_cast<int32_t>(c.board_preset_id);
+    b.board_user_set = c.board_user_set;
     b.syslog_host = c.syslog_host; b.syslog_port = c.syslog_port; b.ntp_server = c.ntp_server;
     // Board-local hardware rides the same atomic blob: like the credentials it has exactly ONE
     // writer (the httpd task, POST /set_board), so it needs no self-healing per-key treatment — and
@@ -314,12 +363,6 @@ bool config_save(const Config& c, bool require_link) {
     if (!link_ok)
         diag_printf("config: link-cache key write failed after the atomic blob save "
                     "(self-heals on the next detect; re-validated on load)\n");
-    // The "user stated the board hardware" flag (Config::board_user_set). Its own key, and its own
-    // failure handling: it changes nothing the device DOES, so a failed write must not turn an
-    // already-committed save into a 500. The UI simply falls back to naming the board "Custom".
-    if (!put_i32("board_set", c.board_user_set ? 1 : 0))
-        diag_printf("config: NVS write failed key=board_set "
-                    "(harmless — the Hardware modal falls back to \"Custom\")\n");
     if (!config_save_succeeded(/*blob_ok=*/true, link_ok, require_link)) {
         // /set_hp owns the link and cannot call this a save when its cache did not land. Do not
         // publish its requested pins to RAM or wake the poll task. (The atomic blob also landed, but
