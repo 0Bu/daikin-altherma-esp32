@@ -194,14 +194,49 @@ function closeWeather() {
   $("weatherModal").hidden = true;
 }
 
-// Popup editing contract: a click/focus selects a text field's complete value, so replacing a long
-// topic, host, JSON path or generated report is one paste. Checkboxes/radios/selects keep their
-// native interaction; select() is attempted for number inputs too and guarded for browser variance.
+// Popup editing contract: activating an INACTIVE text field selects its complete value, so replacing
+// a long topic, host, JSON path or generated report is one paste. A click in the ALREADY ACTIVE field
+// must keep native caret placement. Checkboxes/radios/selects keep their native interaction;
+// select() is attempted for number inputs too and guarded for browser variance.
 function selectModalFieldContents(target) {
   if (!target || typeof target.matches !== "function" || typeof target.select !== "function") return false;
   if (!target.matches('.modal-card textarea, .modal-card input:not([type="checkbox"]):not([type="radio"]):not([type="file"])'))
     return false;
   try { target.select(); return true; } catch { return false; }
+}
+
+function selectModalFieldOnActivation(target, wasActive) {
+  return !wasActive && selectModalFieldContents(target);
+}
+
+// Browsers place the caret as part of their pointer/click default action, after focus has selected
+// the field. Remember the state BEFORE that action: the first click may re-apply select-all after
+// native caret placement, while a click that started in the active field remains entirely native.
+function wireModalFieldSelection(doc) {
+  let pointerTarget = null;
+  let pointerWasActive = false;
+  doc.addEventListener("pointerdown", (event) => {
+    pointerTarget = event.target;
+    pointerWasActive = doc.activeElement === event.target;
+    // Mobile browsers can keep a focus-time select-all alive across the next tap instead of
+    // collapsing it at the tapped caret position. Collapse the old selection before the native
+    // pointer/mouse default action runs; that action is still free to move the caret to the actual
+    // tap position. This also gives a deterministic collapsed caret if the browser does no more.
+    if (pointerWasActive && typeof event.target?.setSelectionRange === "function"
+        && event.target.selectionStart !== event.target.selectionEnd) {
+      const caret = event.target.selectionEnd ?? event.target.value?.length ?? 0;
+      try { event.target.setSelectionRange(caret, caret); } catch { /* unsupported input type */ }
+    }
+  });
+  doc.addEventListener("focusin", (event) => {
+    selectModalFieldOnActivation(event.target, false);
+  });
+  doc.addEventListener("click", (event) => {
+    if (event.target === pointerTarget)
+      selectModalFieldOnActivation(event.target, pointerWasActive);
+    pointerTarget = null;
+  });
+  doc.addEventListener("pointercancel", () => { pointerTarget = null; });
 }
 
 // ── Syslog (edit modal) ────────────────────────────────────────────────────
@@ -768,13 +803,13 @@ function otaWaitReboot() {
 // ── Reboot-and-reconnect writes (WiFi / MQTT / Syslog) ────────────────────
 // Mark a save button in-flight: disabled + spinner (DESIGN.md §8). The /set_mqtt broker pre-flight
 // blocks up to ~8 s, long enough that an un-styled disabled button reads as an ignored click.
-function setBusy(id, on) {
+function setBusy(id, on, busyLabel = "btn.saving") {
   const b = $(id);
   if (!b) return;
   b.disabled = on;
   if (on) {
     if (b.dataset.label == null) b.dataset.label = b.textContent;   // remember the idle label once
-    b.innerHTML = `<span class="spin"></span>${esc(t("btn.saving"))}`;
+    b.innerHTML = `<span class="spin"></span>${esc(t(busyLabel))}`;
   } else {
     b.textContent = b.dataset.label || t("btn.save");
   }
@@ -838,13 +873,13 @@ const REBOOT_POLL_WAIT_MS     = 21000;
 // off it reported "Saved" for REJECTED writes: with no reboot to wait for, the follow-up /status
 // answers on the first try, which the poll can't tell apart from a device that came back up.
 // (/set_wifi's 500 on a failed config_save is the same shape: nothing persisted, no reboot.)
-async function saveReboot(url, body, { btn, showError, close, then, busyMsg }) {
+async function saveReboot(url, body, { btn, showError, close, then, busyMsg, busyLabel }) {
   // The reboot-poll keeps S.busy set for ~22 s AFTER the modal closes, so the card is reopenable
   // while a change is still landing. Say so — a silent `return` here is exactly the ignored-write
   // feedback gap this whole flow exists to close.
   if (S.busy) { toast(t("toast.applying"), "info"); return; }
   S.busy = true;
-  setBusy(btn, true);
+  setBusy(btn, true, busyLabel);
   if (busyMsg) toast(busyMsg, "info");
   const idle = () => { S.busy = false; setBusy(btn, false); };
   const reject = (msg) => { idle(); showError(msg); toast(msg, "err"); };

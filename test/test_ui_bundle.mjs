@@ -158,8 +158,21 @@ assert.match(app, /r\.retained[\s\S]*ref\.retained/,
 assert.match(app, /r\.freshness_reason === "retained_without_timestamp"[\s\S]*ref\.time_untrusted/,
   "retained values without source time must be shown as untrusted, never fresh");
 
-// All popup text-like fields share one select-all behavior. Exercise the production helper and pin
-// the exclusions that preserve native checkbox/radio/file interaction.
+// Broker settings are test-before-persist too, but the test is performed synchronously by /set_mqtt:
+// an accepted non-empty broker must have completed MQTT CONNECT/auth. Heap pressure is retryable and
+// must never downgrade that proof to DNS + an open TCP port followed by a write.
+assert.match(html, /id="mqBtn"[^>]*data-i18n="btn\.save"/,
+  "the idle MQTT action must retain the concise Save label");
+assert.match(app, /saveReboot\("\/set_mqtt"[\s\S]*busyLabel: "btn\.verifying"/,
+  "the MQTT save action must remain visibly in verification state during the pre-flight");
+assert.match(httpConfig, /heap_caps_get_largest_free_block[\s\S]*503 Service Unavailable[\s\S]*Device busy; retry MQTT verification[\s\S]*esp_mqtt_client_init[\s\S]*ctx\.connected[\s\S]*config_save\(c\)/,
+  "insufficient probe resources or a failed MQTT CONNECT must return before config_save");
+assert.doesNotMatch(httpConfig, /skipping broker connect probe[\s\S]*saving anyway/,
+  "the broker pre-flight must never persist after skipping MQTT CONNECT/auth");
+
+// All popup text-like fields share one first-focus select-all behavior. Exercise the production
+// helper and pin both states: activation selects, a later click in the active field preserves its
+// native caret placement. Checkbox/radio/file interaction remains native too.
 const settingsSource = readAppFragments(["settings.js"]);
 
 // Google Maps copies "latitude, longitude" with more precision than the firmware's signed
@@ -193,17 +206,62 @@ for (const target of [weatherFields.wxLatitude, weatherFields.wxLongitude]) {
 }
 
 const selectContext = vm.createContext({ S: {}, $: () => ({}), t: (key) => key, esc: String });
-vm.runInContext(`${settingsSource}\nthis.__selectModalFieldContents = selectModalFieldContents;`,
+vm.runInContext(`${settingsSource}\nthis.__wireModalFieldSelection = wireModalFieldSelection;`,
   selectContext, { filename: "main/www/js/settings.js" });
 let selected = 0;
-assert.equal(selectContext.__selectModalFieldContents({
+const selectableField = {
   matches: () => true,
-  select: () => { selected++; },
-}), true);
-assert.equal(selected, 1, "a matching popup field must select its complete content");
+  value: "host:1883",
+  selectionStart: 9,
+  selectionEnd: 9,
+  select: () => {
+    selected++;
+    selectableField.selectionStart = 0;
+    selectableField.selectionEnd = selectableField.value.length;
+  },
+  setSelectionRange: (start, end) => {
+    selectableField.selectionStart = start;
+    selectableField.selectionEnd = end;
+  },
+};
+const otherField = {};
+const fieldListeners = {};
+const fieldDocument = {
+  activeElement: otherField,
+  addEventListener: (name, listener) => { fieldListeners[name] = listener; },
+};
+selectContext.__wireModalFieldSelection(fieldDocument);
+
+// First tap after blur: pointerdown sees INACTIVE, focus selects, and click restores that selection
+// after the browser's native caret placement.
+fieldListeners.pointerdown({ target: selectableField });
+fieldDocument.activeElement = selectableField;
+fieldListeners.focusin({ target: selectableField });
+fieldListeners.click({ target: selectableField });
+assert.equal(selected, 2, "activating an inactive popup field must leave its complete content selected");
+
+// Second tap while active: no focusin occurs and the click must not select again, so the browser can
+// place or move the caret itself.
+fieldListeners.pointerdown({ target: selectableField });
+fieldListeners.click({ target: selectableField });
+assert.equal(selected, 2, "clicking an already-active popup field must preserve native caret placement");
+assert.equal(selectableField.selectionStart, selectableField.value.length,
+  "the previous select-all must collapse before native caret placement on the second tap");
+assert.equal(selectableField.selectionEnd, selectableField.selectionStart,
+  "the second tap must leave a movable caret instead of a full selection");
+
+// Once blurred, the next tap is a new activation and gets the one-paste shortcut again.
+fieldDocument.activeElement = otherField;
+fieldListeners.pointerdown({ target: selectableField });
+fieldDocument.activeElement = selectableField;
+fieldListeners.focusin({ target: selectableField });
+fieldListeners.click({ target: selectableField });
+assert.equal(selected, 4, "the first tap after a later blur must select the complete content again");
 assert.match(app, /\.modal-card textarea, \.modal-card input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\):not\(\[type="file"\]\)/,
   "popup select-all must exclude controls without replaceable text");
-assert.match(app, /\["focusin", "click"\][\s\S]*selectModalFieldContents\(e\.target\)/,
-  "focus and click must both apply the popup-wide selection rule");
+assert.match(app, /wireModalFieldSelection\(document\)/,
+  "the popup selection state machine must be wired into the production UI");
+assert.doesNotMatch(app, /document\.addEventListener\("click", \(e\) => \{\s*selectModalFieldContents\(e\.target\)/,
+  "ordinary clicks in an active field must not unconditionally select all again");
 
 console.log(`ui bundle: ${files.length} sources, ${Buffer.byteLength(app)} bytes — valid classic script`);

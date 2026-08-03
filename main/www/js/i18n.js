@@ -248,7 +248,8 @@ const I18N = {
     "ota.title_avail": (v) => `Update v${v} available — tap to install`,
     "mq.err_format": "Enter host:port — e.g. 192.168.1.10:1883 — or mqtts://host:8883 for TLS",
     "sl.err_port": "Port must be a whole number 1–65535 (e.g. logs.example.com:514).",
-    "btn.saving": "Saving…", "btn.save": "Save", "btn.cancel": "Cancel", "btn.close": "Close",
+    "btn.saving": "Saving…", "btn.verifying": "Verifying…", "btn.save": "Save",
+    "btn.cancel": "Cancel", "btn.close": "Close",
     // static index.html markup (data-i18n)
     "schem.outdoor_unit": "OUTDOOR UNIT", "schem.defrost_pill": "❄ defrost", "schem.outdoor": "Outdoor",
     "insp.close": "Close",
@@ -550,7 +551,8 @@ const I18N = {
     "ota.title_avail": (v) => `Update v${v} verfügbar — tippen zum Installieren`,
     "mq.err_format": "Host:Port eingeben — z. B. 192.168.1.10:1883 — oder mqtts://host:8883 für TLS",
     "sl.err_port": "Port muss eine ganze Zahl von 1 bis 65535 sein, zum Beispiel logs.example.com:514.",
-    "btn.saving": "Speichere…", "btn.save": "Speichern", "btn.cancel": "Abbrechen", "btn.close": "Schließen",
+    "btn.saving": "Speichere…", "btn.verifying": "Prüfe…", "btn.save": "Speichern",
+    "btn.cancel": "Abbrechen", "btn.close": "Schließen",
     // static index.html markup (data-i18n)
     "schem.outdoor_unit": "AUSSENEINHEIT", "schem.defrost_pill": "❄ Abtauen", "schem.outdoor": "Außen",
     "insp.close": "Schließen",

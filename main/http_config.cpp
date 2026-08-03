@@ -148,7 +148,8 @@ static void on_mqtt_validate(void* handler_args, esp_event_base_t base, int32_t 
             if (e->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
                 ctx->error_msg = "TLS / TCP connection error";
             } else if (e->error_handle->connect_return_code != MQTT_CONNECTION_ACCEPTED) {
-                if (e->error_handle->connect_return_code == MQTT_CONNECTION_REFUSE_BAD_USERNAME) {
+                if (e->error_handle->connect_return_code == MQTT_CONNECTION_REFUSE_BAD_USERNAME ||
+                    e->error_handle->connect_return_code == MQTT_CONNECTION_REFUSE_NOT_AUTHORIZED) {
                     ctx->error_msg = "Invalid username or password";
                 } else {
                     ctx->error_msg = "Broker refused connection (auth/creds?)";
@@ -292,60 +293,61 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
         // 6. Connect and authenticate with credentials — but only if the heap can afford it.
         // A TLS client spins up a full mbedTLS session (~16 KB in-buf + 4 KB out-buf, each ONE
         // contiguous block) ON TOP of the live bridge's own session. On a fragmented heap that second
-        // session can exceed the largest free block and reboot the device. If we can't fit it, skip the
-        // connect probe (DNS + port were already checked) and fall through to persist + reboot — the
-        // boot path still surfaces a bad broker via /status.mqtt. Better a save without the deep check
-        // than an OOM crash on the request path. Threshold is generous for the TLS case.
+        // session can exceed the largest free block and reboot the device. If we can't fit it, reject
+        // this attempt WITHOUT persisting and let the UI offer a retry. DNS + an open TCP port do not
+        // prove MQTT CONNECT/authentication; saving after only those two checks would break this
+        // endpoint's test-before-persist contract. Threshold is generous for the TLS case.
         const size_t need = is_tls ? 48u * 1024u : 12u * 1024u;
         MqttValidateCtx ctx{};                       // error_msg zero-inits to nullptr
         ctx.sem = xSemaphoreCreateBinary();
-        if (ctx.sem && heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT) >= need) {
-            esp_mqtt_client_config_t cfg = {};
-            cfg.broker.address.uri = test_uri.c_str();
-            if (is_tls) cfg.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;
-            cfg.credentials.client_id = "daikin_val";
-            if (!user.empty()) cfg.credentials.username = user.c_str();
-            if (!pass.empty()) cfg.credentials.authentication.password = pass.c_str();
-            cfg.session.keepalive = 15;
+        if (!ctx.sem || heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT) < need) {
+            if (ctx.sem) vSemaphoreDelete(ctx.sem);
+            diag_printf("mqtt: broker connect probe deferred: insufficient contiguous heap; not saving\n");
+            return send_err(req, "503 Service Unavailable", "Device busy; retry MQTT verification");
+        }
 
-            esp_mqtt_client_handle_t client = esp_mqtt_client_init(&cfg);
-            if (!client) {
-                vSemaphoreDelete(ctx.sem);
-                httpd_resp_set_status(req, "500 Internal Server Error");
-                return http_send_json(req, "{\"ok\":false,\"error\":\"MQTT init failed\"}");
-            }
+        esp_mqtt_client_config_t cfg = {};
+        cfg.broker.address.uri = test_uri.c_str();
+        if (is_tls) cfg.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;
+        cfg.credentials.client_id = "daikin_val";
+        if (!user.empty()) cfg.credentials.username = user.c_str();
+        if (!pass.empty()) cfg.credentials.authentication.password = pass.c_str();
+        cfg.session.keepalive = 15;
 
-            esp_mqtt_client_register_event(client, static_cast<esp_mqtt_event_id_t>(MQTT_EVENT_ANY),
-                                           on_mqtt_validate, &ctx);
+        esp_mqtt_client_handle_t client = esp_mqtt_client_init(&cfg);
+        if (!client) {
+            vSemaphoreDelete(ctx.sem);
+            httpd_resp_set_status(req, "500 Internal Server Error");
+            return http_send_json(req, "{\"ok\":false,\"error\":\"MQTT init failed\"}");
+        }
 
-            // A failed start never produces an event, so waiting on the semaphore would burn the full
-            // 5 s and then blame a "connection timeout" — report the real cause immediately instead.
-            // No stop() here: nothing was started.
-            if (esp_mqtt_client_start(client) != ESP_OK) {
-                esp_mqtt_client_destroy(client);
-                vSemaphoreDelete(ctx.sem);
-                httpd_resp_set_status(req, "500 Internal Server Error");
-                return http_send_json(req, "{\"ok\":false,\"error\":\"MQTT client start failed\"}");
-            }
+        esp_mqtt_client_register_event(client, static_cast<esp_mqtt_event_id_t>(MQTT_EVENT_ANY),
+                                       on_mqtt_validate, &ctx);
 
-            bool finished = xSemaphoreTake(ctx.sem, pdMS_TO_TICKS(5000)) == pdTRUE;
-
-            esp_mqtt_client_stop(client);       // joins the mqtt task -> the callback can't touch ctx after this
+        // A failed start never produces an event, so waiting on the semaphore would burn the full
+        // 5 s and then blame a "connection timeout" — report the real cause immediately instead.
+        // No stop() here: nothing was started.
+        if (esp_mqtt_client_start(client) != ESP_OK) {
             esp_mqtt_client_destroy(client);
             vSemaphoreDelete(ctx.sem);
+            httpd_resp_set_status(req, "500 Internal Server Error");
+            return http_send_json(req, "{\"ok\":false,\"error\":\"MQTT client start failed\"}");
+        }
 
-            if (!finished) {
-                httpd_resp_set_status(req, "400 Bad Request");
-                return http_send_json(req, "{\"ok\":false,\"error\":\"MQTT connection timeout\"}");
-            }
-            if (!ctx.connected) {
-                // error_msg is a string literal by construction (see MqttValidateCtx) — never broker
-                // text, so it satisfies send_err's no-escaping precondition.
-                return send_err(req, "400 Bad Request", ctx.error_msg ? ctx.error_msg : "MQTT connection refused");
-            }
-        } else {
-            if (ctx.sem) vSemaphoreDelete(ctx.sem);
-            diag_printf("mqtt: low heap, skipping broker connect probe (DNS+port ok) — saving anyway\n");
+        bool finished = xSemaphoreTake(ctx.sem, pdMS_TO_TICKS(5000)) == pdTRUE;
+
+        esp_mqtt_client_stop(client);       // joins the mqtt task -> the callback can't touch ctx after this
+        esp_mqtt_client_destroy(client);
+        vSemaphoreDelete(ctx.sem);
+
+        if (!finished) {
+            httpd_resp_set_status(req, "400 Bad Request");
+            return http_send_json(req, "{\"ok\":false,\"error\":\"MQTT connection timeout\"}");
+        }
+        if (!ctx.connected) {
+            // error_msg is a string literal by construction (see MqttValidateCtx) — never broker
+            // text, so it satisfies send_err's no-escaping precondition.
+            return send_err(req, "400 Bad Request", ctx.error_msg ? ctx.error_msg : "MQTT connection refused");
         }
     }
 

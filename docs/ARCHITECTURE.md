@@ -1638,6 +1638,8 @@ place:
 - **MQTT** → `/set_mqtt` (edited from a modal off the Connections tile's MQTT row). Unlike Syslog, Save
   **pre-flights the broker synchronously** (DNS → TCP port → a short-lived esp-mqtt connect/auth,
   heap-guarded) and only persists + reboots on success — a bad host/port/password is rejected inline.
+  If contiguous heap is insufficient for the temporary client, the request returns a retryable 503
+  without writing; DNS plus an open TCP port never count as a successful MQTT verification.
   An empty username+password **keeps** the stored credentials (the modal never prefills them, so empty
   is what an unrelated broker edit sends). Clearing them therefore needs its own explicit signal:
   `clear_creds:true` (the modal's "remove stored credentials" checkbox, shown when
