@@ -121,91 +121,19 @@ jobs:
       - name: Verify the logic coverage gate still has teeth
         run: ./tools/coverage/selftest.sh
 
-      # The device UI is authored as ordered classic-script fragments but shipped as one inline
-      # script. Parse their exact concatenation before semantic tests execute the focused fragments.
-      - name: Test modular UI bundle assembly
-        run: node test/test_ui_bundle.mjs
-
-      # The header uses a readable static outdoor-unit fan mark. Pin its packaged raster and keep the
-      # telemetry-driven rotation exclusively in the system schematic.
-      - name: Test heat-pump fan app icon
-        run: node test/test_ui_fan_icon.mjs
-
-      # The device language override applies LIVE, including to persistent banners and an open
-      # schematic inspector. Their DOM-write guards key on status/data signatures; this executes the
-      # real production render functions with identical status and a changed LANG, so a guard that
-      # forgets the language cannot strand old-language copy until the next state change or reload.
-      - name: Test live UI language switching
-        run: node test/test_ui_live_i18n.mjs
-
-      # Execute the production HomeHub connection row and pin its host:port value, shared state
-      # palette, structured-error localisation, accessible state and quiet second line.
-      - name: Test HomeHub connection row
-        run: node test/test_ui_modbus_status.mjs
-
-      # Discovery is a user action in the address dialog, never a boot mode. Pin the IDF-facing
-      # orchestration that pure host C++ cannot link: empty host creates no task, the poll loop never
-      # browses mDNS, and the dedicated request fills the form without saving behind Cancel/Save.
-      - name: Test explicit HomeHub discovery lifecycle
-        run: node test/test_homehub_discovery_contract.mjs
+      # One source of truth for the whole device UI. It executes every test_ui_*.mjs contract, the
+      # HomeHub/MCP interaction boundaries and a behavioral matrix over the production one-time
+      # wiring: every shipped modal, Cancel/backdrop/Escape, accepted/rejected/invalid Save paths, and the
+      # ENV III board/no-sensor/sensor states. Its selftest re-seeds the undefined close-handler bug
+      # that once left both footer buttons visible but inert.
+      - name: Run complete UI use-case suite
+        run: ./scripts/run-ui-use-case-tests.sh
 
       # MQTT config alone must not let an unwired spare/debug board speak for the installation.
       # Pin the IDF-facing lifecycle that the pure gate test cannot link: X10A starts first, the
       # sole esp-mqtt start call is inside the gate, and ordinary publishes remain behind it.
       - name: Test X10A-gated MQTT lifecycle
         run: node test/test_mqtt_x10a_gate_contract.mjs
-
-      # HomeHub uses Int16 for both numbers and selectors; X10A exposes stable English tokens for
-      # the current indoor operation mode. Execute both production display boundaries and pin every
-      # manufacturer enum and localised schematic headline in English and German. Ordinary binary
-      # flags must stay ON/OFF while the two valve selectors render their named paths/modes.
-      - name: Test enums, schematic modes, and semantic binary states
-        run: node test/test_ui_homehub_enums.mjs
-
-      # Coverage cannot detect a semantically wrong first-match description. Pin every curated
-      # HomeHub register to its manufacturer label, fluent German visual label and bilingual
-      # explanation, including ON/OFF spelling and the setpoint-vs-thermo-demand distinction.
-      - name: Test HomeHub labels and explanations
-        run: node test/test_ui_homehub_copy.mjs
-
-      # The Error code accordion resolves only the currently reported two-character code. Keep its
-      # internal 63-code lookup aligned with the source-backed C++ table, require a German meaning
-      # for every entry and prove that unrelated codes never become a visible catalogue.
-      - name: Test current bilingual error-code explanation
-        run: node test/test_ui_error_codes.mjs
-
-      # Board presets are value-fill shortcuts, not persisted physical identities. The shipped
-      # first-boot values happen to equal the XIAO preset, so execute the real modal functions and
-      # prove a fresh device still opens on Custom while explicit preset picks keep working.
-      - name: Test Board Hardware preset default
-        run: node test/test_ui_board_preset.mjs
-
-      # GET /mcp is a dependency-free, static setup page while POST /mcp remains the protocol.
-      # Keep the embedded asset local and prohibit the documentation page from making requests.
-      - name: Test MCP setup page
-        run: node test/test_mcp_dashboard.mjs
-
-      # WHICH of the two stacks answers a given fact, in every state the pair can be in. The rule
-      # ("X10A leads, Modbus supports, stale is never live") is invisible to every other gate here —
-      # no value is wrong, no converter is wrong, no payload schema is wrong — and it shipped broken
-      # in both directions: a STALE X10A valve position beat a live gateway one while the header
-      # said the readings came from Modbus, and a dead gateway's last cache was drawn as the live
-      # second opinion with a computed difference against it. Both are states of the LINK PAIR, so
-      # the link pair is what this enumerates, against the real helpers.
-      - name: Test X10A/Modbus source arbitration
-        run: node test/test_ui_source_matrix.mjs
-
-      # The six paired schematic measurements keep independent X10A and HomeHub rings. Execute the
-      # production combiner and SVG renderer: bucket alignment, source labels, shared scaling and an
-      # X10A gap with a continuing petrol Modbus line are invisible to the bundle syntax gate.
-      - name: Test X10A/Modbus trend overlay
-        run: node test/test_ui_history_sources.mjs
-
-      # The X10A observation card must preserve nulls, per-signal evidence and bounded wording in
-      # both languages. Execute its production renderer so a future copy or fallback change cannot
-      # turn partial telemetry back into a whole-plant "healthy" claim.
-      - name: Test X10A observation UI contract
-        run: node test/test_ui_checkup.mjs
 
       # Domain-correctness gate: are the published values physically RIGHT? The logic tests above
       # verify the logic they are handed; they cannot see a well-formed value that is simply
