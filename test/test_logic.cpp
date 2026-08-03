@@ -5103,22 +5103,28 @@ static void test_history() {
         const TrendDef sat{ "probe", TrendKind::Row, 0x20, 12, "°C", "" };
         CHECK(trend_select(sat, regs, offs, units, 2) == 0);
     }
-    // Seven binary facts share 0x60/12 and the empty unit. BSH is converter 305 and the 3-way valve
-    // converter 306; the narrower numeric-row selector must refuse both rather than making array
-    // order the identity.
+    // Seven binary facts share 0x60/12 and the empty unit. BSH is converter 305, BUH stages are
+    // 304/303 and the 3-way valve is 306; the narrower numeric-row selector must refuse them rather
+    // than making array order the identity.
     {
         const TrendDef* bsh = trend_by_id("bsh_state");
         CHECK(bsh != nullptr && bsh->kind == TrendKind::BinaryEvent && bsh->conv == 305);
+        const TrendDef* buh1 = trend_by_id("buh_step1");
+        const TrendDef* buh2 = trend_by_id("buh_step2");
+        CHECK(buh1 != nullptr && buh1->kind == TrendKind::BinaryEvent && buh1->conv == 304);
+        CHECK(buh2 != nullptr && buh2->kind == TrendKind::BinaryEvent && buh2->conv == 303);
         const TrendDef* valve = trend_by_id("valve_dhw");
         CHECK(valve != nullptr && valve->kind == TrendKind::BinaryState && valve->conv == 306);
-        const uint8_t regs[]   = { 0x60, 0x60, 0x60 };
-        const uint8_t offs[]   = { 12,   12,   12   };
-        const char*   units[]  = { "",   "",   ""   };
-        const int16_t convs[]  = { 306,  305,  301  };
-        CHECK(trend_select(*bsh, regs, offs, units, 3) == -1);
-        CHECK(trend_select(*bsh, regs, offs, units, convs, 3) == 1);
-        CHECK(trend_select(*valve, regs, offs, units, 3) == -1);
-        CHECK(trend_select(*valve, regs, offs, units, convs, 3) == 0);
+        const uint8_t regs[]   = { 0x60, 0x60, 0x60, 0x60, 0x60 };
+        const uint8_t offs[]   = { 12,   12,   12,   12,   12   };
+        const char*   units[]  = { "",   "",   "",   "",   ""   };
+        const int16_t convs[]  = { 306,  305,  304,  303,  301  };
+        CHECK(trend_select(*bsh, regs, offs, units, 5) == -1);
+        CHECK(trend_select(*bsh, regs, offs, units, convs, 5) == 1);
+        CHECK(trend_select(*buh1, regs, offs, units, convs, 5) == 2);
+        CHECK(trend_select(*buh2, regs, offs, units, convs, 5) == 3);
+        CHECK(trend_select(*valve, regs, offs, units, 5) == -1);
+        CHECK(trend_select(*valve, regs, offs, units, convs, 5) == 0);
     }
 
     // --- a trend is a measurement, never a target (issue #121's rule) ---------------------------
@@ -5410,6 +5416,8 @@ static void test_history() {
         { "ct_l2",            20, -1, 1 },
         { "ct_l3",            20, -1, 1 },
         { "bsh_state",        39, -1, 1 },   // exact bit 305 in the shared 0x60/12 state byte
+        { "buh_step1",        39, -1, 1 },   // exact event-folded BUH stage bits 304/303
+        { "buh_step2",        39, -1, 1 },
         { "valve_dhw",        39, -1, 1 },   // exact bit 306; persistent DHW/space selector state
         // Derived from two structurally identified contact rows, so it resolves no SINGLE catalog
         // row. Its truth table is asserted above; test_binary_semantics pins both contacts' catalog

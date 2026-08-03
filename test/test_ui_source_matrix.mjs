@@ -318,6 +318,7 @@ const M_BSH = (on) => M_FLAG(32, "Booster heater run", on, "bsh_state");
   assert.equal(down.mbForInspect("bsh"), down.S._modbus[0],
     "the heater inspector names the exact HomeHub state row");
   assert.equal(down.INSPECT.bsh.trend, "bsh_state");
+  assert.equal(down.INSPECT.buh.trend, "buh_state");
   const context = down.bshInputRow();
   assert.equal(context.value, "2.4");
   assert.match(context.label, /not heater power/,

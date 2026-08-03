@@ -6,7 +6,7 @@
 //
 // The buffers are STATIC storage, never heap: on this board the binding limit is the largest
 // CONTIGUOUS free block, not free heap, and a static array does not compete for it. Their non-zero
-// pending sentinel places the rings in .data. Twenty-one X10A/board/state rings cost 12096 bytes and
+// pending sentinel places the rings in .data. Twenty-three X10A/board/state rings cost 13248 bytes and
 // nine HomeHub rings another 5184 bytes — see logic/history.hpp's HISTORY_BYTES_PER_TREND and the
 // ceiling asserts beside both arrays.
 //

@@ -31,6 +31,8 @@ const DEMO = (() => {
     ["flow", "Flow sensor (l/min)"],
     ["room_temp", "Indoor ambient temp. (R1T)"],
     ["bsh_state", "BSH"],
+    ["buh_step1", "BUH Step1"],
+    ["buh_step2", "BUH Step2"],
     ["smart_grid_mode", "Smart Grid operation mode"],
   ].map(([id, label]) => ({ id, label }));
   const mbHistRows = [
@@ -52,6 +54,8 @@ const DEMO = (() => {
     room_temp:     [214, 214, 213, 213, 212, 212, 213, 213, 214, 214, 214, 214],
     // Binary state in tenths. The two ON buckets are sampled active windows, not exact runtime.
     bsh_state:     [0, 0, 0, 10, 10, 0, 0, 0, 0, 0, 0, 0],
+    buh_step1:     [0, 0, 10, 10, 10, 10, 0, 0, 10, 10, 0, 0],
+    buh_step2:     [0, 0, 0, 0, 10, 10, 0, 0, 0, 10, 0, 0],
     // Full Smart-Grid modes in tenths, like the real /history wire: two mode-2 Boost intervals.
     smart_grid_mode: [0, 0, 20, 20, 20, 0, 0, 20, 20, 0, 0, 0],
   };
@@ -60,7 +64,7 @@ const DEMO = (() => {
     if (!x) return null;
     // Keep both instruments recognisably close but not identical. Modbus continues through the
     // deliberate X10A outdoor-air gap, which makes the dual-source contract visible in an inspector.
-    const state = id === "smart_grid_mode" || id === "bsh_state";
+    const state = id === "smart_grid_mode" || id === "bsh_state" || id.startsWith("buh_step");
     const v = state ? x : source === "modbus"
       ? x.map((n, i) => n == null ? 53 + i : n + (i % 3 === 0 ? 1 : 0))
       : x;

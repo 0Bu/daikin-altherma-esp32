@@ -881,6 +881,7 @@ const INSPECT = {
   buh: {
     t: { en: "Backup heater (BUH)", de: "Zusatzheizer · BUH" },
     re: /buh step ?1/i, sample: "BUH step 1",
+    trend: "buh_state",
     now: (d) => (d.buh1 == null && d.buh2 == null) ? null
       : d.buh2 ? { en: "Step 2 — both stages firing.", de: "Stufe 2 — beide Stufen heizen." }
       : d.buh1 ? { en: "Step 1 — one stage firing.", de: "Stufe 1 — eine Stufe heizt." }
@@ -1253,16 +1254,15 @@ function inspectSig(e) {
 // changes (~1×/s), and re-emitting the plot that often would tear down a crosshair mid-read and
 // restart the CSS transition. Only a new series (`gen`) or a moved pin actually changes the markup.
 function renderInspectHist(e, row) {
-  // A pill drawn from a ROW charts that row; a COMPUTED pill (ΔT, heat output, electrical input,
-  // COP) charts its own derived series, named by the entry's `trend`. Never one of its inputs: a
-  // curve of the flow rate under a heat-output headline is the substitution this file spends most
-  // of its comments preventing.
+  // A plain pill drawn from a ROW charts that row. A COMPUTED pill (ΔT, heat output, electrical
+  // input, COP) or a grouped component (BUH's two stage rows) charts the explicit series named by
+  // the entry's `trend`, even when one source row anchors the inspector. Never silently substitute
+  // one input: a flow-rate curve under a heat-output headline would be physically false.
   const pair = MB_PAIRS.find((p) => p.insp === S.insp);
   const pairedId = pair && hasModbusHist(pair.cid) ? pair.cid : "";
   const trendId = e && typeof e.trend === "function" ? e.trend(S.live) : e && e.trend;
   const explicitId = trendId && (hasHist(trendId) || hasModbusHist(trendId)) ? trendId : "";
-  const id = row ? histIdFor(row.label) || explicitId
-           : pairedId || explicitId;
+  const id = explicitId || (row ? histIdFor(row.label) : pairedId);
   if (id) ensureHistPair(id);              // throttled to once a minute inside; no-op once cached
   const h = id ? S.hist.get(id) : null;
   const mh = id ? S.hist.get(histCacheKey(id, "modbus")) : null;
