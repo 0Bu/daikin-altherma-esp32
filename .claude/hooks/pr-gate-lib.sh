@@ -209,7 +209,7 @@ gate_enforce() {
 
   action=""; selector=""
   case "$tool" in
-    mcp__github__merge_pull_request)
+    mcp__github__merge_pull_request|mcp__codex_apps__github_merge_pull_request)
       action="merge_pull_request (GitHub MCP)"
       selector="$(printf '%s' "$input" | jq -r '.tool_input.pullNumber // .tool_input.pull_number // ""' 2>/dev/null)"
       ;;

@@ -83,11 +83,16 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-schematic-review.sh\""
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-ui-use-case-review.sh\"",
+            "statusMessage": "Running complete UI use-case gate\u2026"
           }
         ]
       },
       {
-        "matcher": "mcp__github__merge_pull_request",
+        "matcher": "mcp__github__merge_pull_request|mcp__codex_apps__github_merge_pull_request",
         "hooks": [
           {
             "type": "command",
@@ -107,6 +112,11 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-schematic-review.sh\""
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/require-ui-use-case-review.sh\"",
+            "statusMessage": "Running complete UI use-case gate\u2026"
           }
         ]
       }

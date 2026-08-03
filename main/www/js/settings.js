@@ -473,7 +473,10 @@ function openEnv3() {
   $("envError").hidden = true;
   openPopup("env3Modal");
 }
-function closeEnv3() { closePopup("env3Modal"); }
+// Keep this symmetric with the other configuration modals: there is one shared open path, but each
+// close handler owns its modal directly.  `closePopup` does not exist; routing Cancel and the
+// successful Save callback through it left both ENV III footer actions unable to dismiss the dialog.
+function closeEnv3() { $("env3Modal").hidden = true; }
 function signalBars(rssi) {
   const lit = rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1;
   const tone = rssi >= -70 ? "var(--ok)" : "var(--warn)";

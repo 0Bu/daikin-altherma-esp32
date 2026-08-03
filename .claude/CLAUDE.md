@@ -68,6 +68,7 @@ tools/coverage/selftest.sh   # prove the coverage gate rejects an under-covered 
 scripts/run-domain-audit.sh  # is the value catalog physically RIGHT? (the domain-correctness gate)
 scripts/run-description-audit.sh  # can the user find out what each value IS? (node-only)
 scripts/run-schematic-audit.sh    # does the DRAWING still say what it means? (node-only)
+scripts/run-ui-use-case-tests.sh  # do all visible UI actions actually work? (node-only)
 scripts/run-redaction-audit.sh    # can a bug report still leak the USER's data? (python-only)
 scripts/run-ui-gif-audit.sh       # is the README's RECORDING still of this UI? (node-only)
 scripts/run-doc-entity-audit.sh   # do the docs' copy-paste ENTITY IDS exist? (c++ host compiler)
@@ -120,6 +121,16 @@ about it rather than guessing. That half is now a **PR-merge gate** too — COND
 than trusting a list here, and grow it there if a schematic fragment ever moves. The filter is safe
 here for the reason it is NOT safe on `/domain-review`: a value's meaning can change from almost
 anywhere, but the drawing is one inline SVG, one stylesheet and one binding table.
+
+The UI interaction contract is separate from the schematic's physical truth. Run
+`scripts/run-ui-use-case-tests.sh` for every UI-facing change: it executes the production wiring,
+requires every production modal to have a lifecycle case, and drives navigation, open, Cancel,
+backdrop, Escape, accepted/rejected Save, invalid-input, conditional ENV III and bug-report paths.
+It then runs the remaining semantic UI contracts and `tools/ui/selftest.sh`, which re-seeds the
+historical undefined ENV III close handler. CI runs this command in the required `gates` job. The
+maintainer's `/ui-use-case-review` adds real narrow/desktop click-through; for relevant diffs,
+`.claude/hooks/require-ui-use-case-review.sh` requires its current head-SHA stamp and reruns the
+deterministic suite immediately before merge.
 
 The FIFTH is the only gate here whose subject is the USER's data rather than the firmware's
 correctness. A bug report is filed as a PUBLIC GitHub issue carrying the device's own `/status`,
@@ -2165,6 +2176,7 @@ scripts/run-mock-tests.sh --coverage                   # host logic tests + 95% 
 tools/coverage/selftest.sh                             # prove the floor fails closed
 scripts/run-domain-audit.sh                            # are the catalog's values physically right?
 scripts/run-schematic-audit.sh                         # does the dashboard drawing still say what it means?
+scripts/run-ui-use-case-tests.sh                       # do all visible UI actions actually work?
 screen /dev/cu.usbmodemXXXX 115200                     # serial monitor (native USB on s3)
 curl http://daikin-altherma-esp32.local/status | jq          # device status (incl. last_crash)
 curl http://daikin-altherma-esp32.local/values | jq          # decoded values

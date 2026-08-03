@@ -33,6 +33,17 @@ and present, and their exact ordered concatenation parses as one classic script.
 tests and audits use the same reader, so they cannot silently exercise a different source order than
 the firmware build.
 
+`scripts/run-ui-use-case-tests.sh` is the complete hardware-free UI gate. In addition to every
+`test_ui_*.mjs` contract, HomeHub discovery and the MCP page, it runs
+`test/test_ui_use_cases.mjs`: a small deterministic DOM harness executes the production `wire()`
+function and requires every id in the production `MODALS` list to have a case. The matrix drives
+Settings/Back, open, Cancel, backdrop, Escape, accepted and rejected Save paths, representative
+invalid input, board-gated ENV III states, and both bug-report steps. `tools/ui/selftest.sh`
+re-introduces the historical undefined ENV III close handler and proves the matrix fails on the
+actual click path. It also simulates CLI and app-MCP merges, proving the hook accepts only a current
+review stamp and returns exit 2 for a failed suite or stale stamp. CI calls the same top-level
+command, rather than maintaining a second list.
+
 `node test/test_ui_fan_icon.mjs` pins the header to the supplied static three-blade PNG mark at 48 px.
 It separately keeps the live `#scFan` rotation in the system schematic and rejects a second header
 telemetry/animation branch.

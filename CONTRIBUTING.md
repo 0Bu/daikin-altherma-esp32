@@ -30,6 +30,7 @@ scripts/run-mock-tests.sh --coverage # host logic tests + 95% production-line fl
 scripts/run-domain-audit.sh        # is the value catalog physically RIGHT?
 scripts/run-description-audit.sh   # can a user find out what each value IS?
 scripts/run-schematic-audit.sh     # does the DRAWING still say what it means?
+scripts/run-ui-use-case-tests.sh   # do all visible UI actions actually work?
 scripts/run-ui-gif-audit.sh        # is the README's RECORDING still of this UI?
 scripts/run-doc-entity-audit.sh    # do the docs' copy-paste ENTITY IDS exist?
 ```
@@ -103,6 +104,16 @@ each, so `grep -c run_case` is the count) and asserts each is still caught. What
 on any PR that reaches the drawing, its contract or the tools that judge it (the regex in
 `.claude/hooks/require-schematic-review.sh` is the one definition — it is maintainer tooling, so as
 an outside contributor you never run it; assume any change under `main/www/` needs it).
+
+`run-ui-use-case-tests.sh` exercises the production UI wiring rather than merely parsing it. Its
+matrix must name every production modal and drives Settings/Back, open, Cancel, backdrop, Escape,
+accepted and rejected Save paths, representative invalid input, board-dependent ENV III states and
+the two-step bug-report dialog. It also runs every existing `test_ui_*.mjs` contract and a selftest
+that re-introduces the historical ENV III failure where visible Cancel and Save buttons called an
+undefined close function. CI runs the same command in the required `gates` job. For UI-relevant
+changes, the maintainer's `/ui-use-case-review` adds real narrow/desktop click-through and records a
+SHA-stamped result; `.claude/hooks/require-ui-use-case-review.sh` requires that current record and
+reruns the deterministic suite immediately before a command-line merge.
 
 `run-ui-gif-audit.sh` guards the README's **recording** of that drawing,
 [`docs/media/dashboard.gif`](docs/media/dashboard.gif) — the animated dashboard a new reader sees
@@ -265,11 +276,12 @@ silence a *new* finding on code your PR touches — that is the gate working.
 
 ## Pull requests
 
-Fill in [the template](.github/pull_request_template.md). Four checkboxes on it
-(`/project-review`, `/feature-docs`, `/domain-review`, `/schematic-review`) are **maintainer-only** —
+Fill in [the template](.github/pull_request_template.md). Five checkboxes on it
+(`/project-review`, `/feature-docs`, `/domain-review`, `/schematic-review`,
+`/ui-use-case-review`) are **maintainer-only** —
 they invoke Claude Code skills in this repo's `.claude/` directory and are not something an outside
 contributor can run. Leave them unchecked; the maintainer runs them before merge. Your equivalents
-are the four scripts above plus an honest note about hardware.
+are the scripts above plus an honest note about hardware.
 
 `main` is kept **strictly linear**, so PRs land as **squash merges** — enforced by a branch ruleset
 on `main` (require a pull request, require linear history, and the `gates` / `build` checks green),

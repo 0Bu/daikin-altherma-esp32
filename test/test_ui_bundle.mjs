@@ -102,6 +102,10 @@ assert.match(app, /function syncEnv3Fields\(\)[\s\S]*\$\("envPinFields"\)\.hidde
   "selecting no sensor must hide and disable both GPIO fields");
 assert.match(app, /function env3FormPayload\(\)[\s\S]*if \(!enabled\) return \{ enabled: false \};[\s\S]*saveReboot\("\/set_env3", body/,
   "disabling ENV III must submit an explicit false without stale pin fields");
+assert.match(app, /function closeEnv3\(\) \{ \$\("env3Modal"\)\.hidden = true; \}/,
+  "ENV III Cancel and the successful Save callback must dismiss the modal without an undefined helper");
+assert.doesNotMatch(app, /closePopup\(/,
+  "configuration dialogs must not call the nonexistent closePopup helper");
 assert.match(httpConfig, /env3_config_valid\(c[\s\S]*http_register_on\(s, surface, "\/set_env3"/,
   "the device must validate ENV III pin collisions before registering the config route");
 assert.ok(httpStatus.includes("board_vendor_name(board_selected_vendor(c))"),

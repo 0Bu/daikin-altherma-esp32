@@ -22,6 +22,7 @@ alone — those are Claude Code skills in this repo's .claude/ directory and are
 - [ ] `scripts/run-domain-audit.sh` clean (value-catalog domain correctness — a CI `gates` step)
 - [ ] `scripts/run-description-audit.sh` clean (every visible reading has an explainer)
 - [ ] `scripts/run-schematic-audit.sh` clean (the dashboard drawing — only if the web UI changed)
+- [ ] `scripts/run-ui-use-case-tests.sh` passes (all UI actions and modal lifecycles — a CI `gates` step)
 - [ ] Firmware built (`scripts/idf-docker.sh idf.py build`, or relied on CI) — N/A in a cloud session (no Docker daemon / no USB)
 - [ ] Exercised against a real heat pump / device where relevant (or noted why not)
 
@@ -41,6 +42,7 @@ alone — those are Claude Code skills in this repo's .claude/ directory and are
 - [ ] `/feature-docs` run if a technical feature changed — `docs/FEATURES.md` catalog synced
 - [ ] `/domain-review` run — required on EVERY merge: values verified physically right, sensible and authentic (a PR that cannot reach a value clears in seconds, but say what you checked)
 - [ ] `/schematic-review` run if the dashboard schematic changed — the drawing still tells the truth about the plant, and every reading is on the part that measures it
+- [ ] `/ui-use-case-review` clean — merge gate @ `<short-sha>` (required if UI behavior changed)
 <!-- `/ui-gif` is deliberately NOT a gate: re-recording is local-only, so a merge could never be the
      moment it happens. Run it when the dashboard drawing has moved on enough that the README's
      recording misrepresents it — on its own schedule, not this PR's. -->
