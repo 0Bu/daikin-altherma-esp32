@@ -5124,6 +5124,13 @@ static void test_weather_forecast_contract() {
     mqtt.reason = "fresh";
     const std::string mqtt_json = build_weather_mqtt_json(mqtt, 1100);
     CHECK(weather_forecast_topic("daikin") == "daikin/weather/openmeteo/forecast");
+    CHECK(weather_mqtt_action(false, false) == WeatherMqttAction::CleanupRetained);
+    CHECK(weather_mqtt_action(false, true) == WeatherMqttAction::CleanupRetained);
+    CHECK(weather_mqtt_action(true, false) == WeatherMqttAction::Suppress);
+    CHECK(weather_mqtt_action(true, true) == WeatherMqttAction::Publish);
+    const std::string current_weather = weather_forecast_topic("daikin");
+    CHECK(retained_cleanup_candidate(current_weather, current_weather.data(),
+                                     static_cast<int>(current_weather.size()), true, 7, 0));
     const std::string retired_weather = retired_weather_forecast_topic("daikin");
     CHECK(retired_weather == "daikin/weather_forecast");
     CHECK(retained_cleanup_candidate(retired_weather, retired_weather.data(),
@@ -5163,6 +5170,8 @@ static void test_weather_forecast_contract() {
     CHECK(failed_json.find("\"outdoor_mean_2h_c\":5.400000") != std::string::npos);
 
     WeatherMqttSnapshot disabled;
+    // The encoder remains total for diagnostics/unit tests, but mqtt_ha.cpp never publishes this
+    // synthetic disabled document: WeatherMqttAction::CleanupRetained owns that state instead.
     const std::string disabled_json = build_weather_mqtt_json(disabled, -1);
     CHECK(disabled_json.find("\"configured\":0") != std::string::npos);
     CHECK(disabled_json.find("\"available\":0,\"fresh\":0,\"has_value\":0") != std::string::npos);

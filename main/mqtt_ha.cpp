@@ -11,8 +11,9 @@
 //     discovery config. HomeHub values stay on MQTT for non-HA consumers, but are deliberately not
 //     exposed as HA entities; weather has no HA entities either.
 //   • Each cycle: publish X10A's grouped JSON to <base>/x10a, the generation-checked flat HomeHub
-//     JSON to <base>/modbus, and an atomic forecast/provenance snapshot to
-//     <base>/weather/openmeteo/forecast when changed, plus each fresh ENV III sample on <base>/env3.
+//     JSON to <base>/modbus, and — only while Open-Meteo is configured — an atomic
+//     forecast/provenance snapshot to <base>/weather/openmeteo/forecast when changed, plus each fresh
+//     ENV III sample on <base>/env3.
 //     A disconnected HomeHub or unavailable/stale ENV III publishes `{}` rather than carrying an old
 //     reading forward. Message topics sit directly under
 //     <base> — one board per base topic; the node
@@ -168,23 +169,28 @@ static uint32_t    s_last_env3_samples          = 0;
 static bool        s_modbus_disabled_cleaned    = false;
 static bool        s_env3_disabled_cleaned      = false;
 static bool        s_env3_discovery_announced   = false;
-// Retained-topic cleanup: probe the retired topics plus a resolved crash without unconditionally
-// publishing empty payloads on every reconnect. The event task only raises each `seen` flag;
-// subscribe/delete/unsubscribe remain on mqtt_task, preserving the single-publisher rule. The
+// Retained-topic cleanup: probe the retired topics, a disabled weather topic and a resolved crash
+// without unconditionally publishing empty payloads on every reconnect. The event task only raises
+// each `seen` flag; subscribe/delete/unsubscribe remain on mqtt_task, preserving the
+// single-publisher rule. The
 // bounded probes repeat on reconnect until an old value is found and deleted; once the broker is
 // clean they are read-only and silent.
 static std::atomic<bool> s_legacy_state_seen{false};
 static std::atomic<bool> s_retired_modbus_status_seen{false};
 static std::atomic<bool> s_retired_weather_seen{false};
+static std::atomic<bool> s_disabled_weather_seen{false};
 static std::atomic<bool> s_crash_seen{false};
 static bool              s_legacy_probe_active = false;               // mqtt_task only
 static bool              s_retired_modbus_status_probe_active = false; // mqtt_task only
 static bool              s_retired_weather_probe_active = false;      // mqtt_task only
+static bool              s_disabled_weather_probe_active = false;     // mqtt_task only
 static bool              s_crash_probe_active = false;                // mqtt_task only
 static int64_t           s_legacy_probe_deadline_us = 0;              // mqtt_task only
 static int64_t           s_retired_modbus_status_probe_deadline_us = 0; // mqtt_task only
 static int64_t           s_retired_weather_probe_deadline_us = 0;     // mqtt_task only
+static int64_t           s_disabled_weather_probe_deadline_us = 0;    // mqtt_task only
 static int64_t           s_crash_probe_deadline_us = 0;               // mqtt_task only
+static bool              s_disabled_weather_probe_started = false;    // mqtt_task only
 // Stale-identity migration (mqtt_task only) — see retract_legacy_fixed / retract_stale_values below.
 static bool        s_legacy_fixed_retracted = false;   // heartbeat + crash entities: once per boot
 static std::string s_stale_values_profile;             // value entities: the profile they were
@@ -569,8 +575,41 @@ static void publish_modbus_state() {
     }
 }
 
-static void publish_weather_state() {
+static void publish_weather_state(bool config_enabled) {
     const WeatherForecastStatus status = weather_forecast_status();
+    const WeatherMqttAction action = weather_mqtt_action(config_enabled, status.configured);
+    if (action != WeatherMqttAction::Publish) {
+        // Never retain or repeatedly publish a synthetic "not configured" forecast. On a real
+        // disable, probe first and tombstone only a non-empty retained predecessor; a clean broker
+        // receives no publish at all. During the short enable/reconfigure race, simply wait for the
+        // weather task's status to catch up.
+        s_last_weather_json.clear();
+        if (action == WeatherMqttAction::CleanupRetained) {
+            if (!s_disabled_weather_probe_started) {
+                start_retained_cleanup_probe(s_weather, s_disabled_weather_seen,
+                                             s_disabled_weather_probe_active,
+                                             s_disabled_weather_probe_deadline_us,
+                                             "disabled weather forecast");
+                s_disabled_weather_probe_started = true;
+            }
+            service_retained_cleanup_probe(s_weather, s_disabled_weather_seen,
+                                           s_disabled_weather_probe_active,
+                                           s_disabled_weather_probe_deadline_us);
+        } else if (s_disabled_weather_probe_active) {
+            esp_mqtt_client_unsubscribe(s_client, s_weather.c_str());
+            s_disabled_weather_probe_active = false;
+            s_disabled_weather_seen = false;
+        }
+        return;
+    }
+    // Re-enabling makes the next disable a new cleanup transition. Cancel a probe that may still be
+    // in flight so it cannot delete the first retained forecast published after reconfiguration.
+    s_disabled_weather_probe_started = false;
+    if (s_disabled_weather_probe_active) {
+        esp_mqtt_client_unsubscribe(s_client, s_weather.c_str());
+        s_disabled_weather_probe_active = false;
+        s_disabled_weather_seen = false;
+    }
     int64_t now_unix_s = -1;
     int32_t now_ms = 0;
     time_now(now_unix_s, now_ms);
@@ -1193,6 +1232,11 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
                                             e->current_data_offset)) {
             s_retired_weather_seen = true;
         }
+        if (e && retained_cleanup_candidate(s_weather, e->topic, e->topic_len,
+                                            e->retain, e->total_data_len,
+                                            e->current_data_offset)) {
+            s_disabled_weather_seen = true;
+        }
         if (e && retained_cleanup_candidate(s_crash, e->topic, e->topic_len,
                                             e->retain, e->total_data_len,
                                             e->current_data_offset)) {
@@ -1277,6 +1321,9 @@ static void mqtt_task(void*) {
                     s_last_x10a_json.clear();                  // force full per-topic state re-seeds
                     s_last_modbus_json.clear();
                     s_last_weather_json.clear();
+                    s_disabled_weather_probe_started = false;
+                    s_disabled_weather_probe_active = false;
+                    s_disabled_weather_seen = false;
                     s_last_env3_json.clear();
                     s_last_env3_samples = 0;
                     s_modbus_disabled_cleaned = false;
@@ -1357,10 +1404,10 @@ static void mqtt_task(void*) {
                     s_modbus_disabled_cleaned = true;
                 }
 
-                // Weather remains an independent firmware input. MQTT only archives the exact
-                // snapshot and provenance known locally; it is not a dependency, and precise
-                // configured coordinates never enter the payload. No HA entities are created.
-                publish_weather_state();
+                // Weather remains an independent firmware input. MQTT archives it only while the
+                // source is configured; disabling it probes away a retained predecessor without
+                // publishing a synthetic disabled document. No HA entities are created.
+                publish_weather_state(ref_config.weather_enabled);
 
                 const bool env3_enabled = ref_config.env3_enabled && env3_board_supported(ref_config);
                 if (env3_enabled) {
