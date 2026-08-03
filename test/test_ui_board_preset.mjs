@@ -27,6 +27,7 @@ const elements = {
   bdBtnInvRow: element(),
   bdBtnInv: element(),
   envSensor: element(),
+  envPinFields: element(),
   envSda: element(),
   envScl: element(),
 };
@@ -82,7 +83,8 @@ vm.runInContext(
    this.__applyPreset = applyPreset;
    this.__syncPresetSelection = syncPresetSelection;
    this.__fillEnv3 = fillEnv3;
-   this.__syncEnv3Fields = syncEnv3Fields;`,
+   this.__syncEnv3Fields = syncEnv3Fields;
+   this.__env3FormPayload = env3FormPayload;`,
   sandbox,
   { filename: "main/www/app.sources" },
 );
@@ -134,13 +136,18 @@ assert.equal(elements.envScl.value, "6");
 assert.doesNotMatch(elements.envSda.innerHTML, /value="[12]"/);
 assert.doesNotMatch(elements.envScl.innerHTML, /value="[12]"/);
 assert.equal(elements.envSensor.value, "", "an unconfigured sensor is represented by the select, not a checkbox");
+assert.equal(elements.envPinFields.hidden, true);
 assert.equal(elements.envSda.disabled, true);
 assert.equal(elements.envScl.disabled, true);
+assert.equal(JSON.stringify(sandbox.__env3FormPayload()), '{"enabled":false}',
+  "no sensor must submit an explicit disable and no stale GPIO values");
 
 elements.envSensor.value = "env_iii";
 sandbox.__syncEnv3Fields();
+assert.equal(elements.envPinFields.hidden, false);
 assert.equal(elements.envSda.disabled, false);
 assert.equal(elements.envScl.disabled, false);
+assert.equal(JSON.stringify(sandbox.__env3FormPayload()), '{"enabled":true,"sda":5,"scl":6}');
 
 // If Grove is free, the same stored defaults intentionally resolve to the official AtomS3 Lite
 // ENV III mapping directly in the GPIO selectors.
@@ -150,5 +157,6 @@ sandbox.__fillEnv3();
 assert.equal(elements.envSda.value, "2");
 assert.equal(elements.envScl.value, "1");
 assert.equal(elements.envSensor.value, "env_iii");
+assert.equal(elements.envPinFields.hidden, false);
 assert.equal(elements.envSda.disabled, false);
 assert.equal(elements.envScl.disabled, false);

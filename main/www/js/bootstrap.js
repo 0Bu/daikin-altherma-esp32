@@ -612,13 +612,12 @@ function wireRestOfApp() {
     $(id).addEventListener("change", () => { $("envError").hidden = true; });
   $("env3Form").addEventListener("submit", (e) => {
     e.preventDefault();
-    const enabled = $("envSensor").value === "env_iii";
-    const sda = +$("envSda").value, scl = +$("envScl").value;
-    if (enabled && (!Number.isInteger(sda) || !Number.isInteger(scl) || sda === scl)) {
+    const body = env3FormPayload();
+    if (body.enabled && (!Number.isInteger(body.sda) || !Number.isInteger(body.scl) || body.sda === body.scl)) {
       $("envError").textContent = t("env.err_pins"); $("envError").hidden = false;
       toast(t("env.err_pins"), "err"); return;
     }
-    saveReboot("/set_env3", { enabled, sda, scl }, {
+    saveReboot("/set_env3", body, {
       btn: "envBtn",
       showError: (msg) => { $("envError").textContent = msg; $("envError").hidden = false; },
       close: closeEnv3,
