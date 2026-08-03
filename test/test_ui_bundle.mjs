@@ -63,6 +63,10 @@ assert.match(html, /id="refTempModal"[\s\S]*id="rtTopic"[\s\S]*id="rtPath"[\s\S]
   "the room-temperature source modal must expose value, timestamp, and freshness mapping");
 assert.match(html, /id="rtTestBtn"[\s\S]*id="rtBtn"[^>]*disabled/,
   "Test must be available before the initially-disabled Save action");
+assert.match(style, /#refTempModal #rtTestBtn\s*\{[^}]*min-width:\s*0;[^}]*padding-inline:\s*12px;/s,
+  "the room-source Test status must stay inside its flex share without pushing Save outside the modal");
+assert.match(app, /"ref\.testing": "Waiting…"/);
+assert.match(app, /"ref\.testing": "Warten…"/);
 assert.match(app, /shelly1pmminig4-fixture00003\/status\/switch:0/,
   "the requested Shelly topic must be available as the first-open test preset");
 assert.match(app, /post\("\/test_ref_temp", input\)[\s\S]*passRefTempTest\(result\.test_proof/,

@@ -812,6 +812,10 @@ textarea.input[readonly] { font-size: 12px; color: var(--muted); white-space: pr
    not three narrow buttons each stacking their own words. */
 .modal-actions .btn { flex: 1; white-space: nowrap; }
 
+/* The room-source dialog has three actions. Keep its compact pending label inside the Test button's
+   existing flex share instead of letting intrinsic width push Save beyond the modal edge. */
+#refTempModal #rtTestBtn { min-width: 0; padding-inline: 12px; }
+
 /* The bug-report dialog is the one modal whose content is a CODE BLOCK, not label→field rows. The
    settings modals read better narrow; a device report at 420px wraps every JSON line into noise the
    user is being asked to check before posting it in public. */
