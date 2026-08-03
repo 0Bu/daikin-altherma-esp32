@@ -1,6 +1,6 @@
 // ── 24-hour trend (a historied value row's explainer carries a sparkline under the text) ──────
 // WHICH rows have a trend is the FIRMWARE's answer. /status.history.rows names X10A rings;
-// modbus_rows names the six paired HomeHub measurements plus the BSH, 3-way-valve and Smart-Grid
+// modbus_rows names the six paired HomeHub measurements plus BSH, 3-way-valve, Quiet and Smart-Grid
 // state timelines.
 // The device keeps both at one fixed cadence and reports the labels each source owns. The
 // browser never pattern-matches its own candidates: offering a trend the device isn't buffering
@@ -341,12 +341,23 @@ function historyView(id) {
            v: union, series };
 }
 
-// Categorical states need timelines, not numeric curves. Smart-Grid Boost and the tank heater each
-// draw one lane per source: light grey is inactive, petrol/blue is active and hatching is no answer.
-// The duration is explicitly sampled RASTER time. For BSH the firmware event-folds each open bucket,
-// so an ON seen during a five-minute bucket remains visible even if a later poll in that bucket is
-// OFF; it is not presented as second-accurate runtime.
+// Categorical states need timelines, not numeric curves. Paired states draw one lane per source:
+// light grey is inactive, petrol/blue is active and hatching is no answer.
+// Durations are explicitly sampled RASTER time. Event-folded BSH, BUH and defrost buckets keep an ON
+// observed during a five-minute bucket; they are not presented as second-accurate runtime.
 const STATE_HIST = Object.freeze({
+  defrost_state: {
+    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
+    primary: "x10a", total: "hist.defrost_total", run: "hist.defrost_run",
+    none: "hist.defrost_none", active: "hist.defrost_active", inactive: "hist.defrost_inactive",
+    aria: "hist.defrost_aria",
+  },
+  quiet_state: {
+    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
+    primary: "x10a", total: "hist.quiet_total", run: "hist.quiet_run",
+    none: "hist.quiet_none", active: "hist.quiet_active", inactive: "hist.quiet_inactive",
+    aria: "hist.quiet_aria",
+  },
   smart_grid_mode: {
     classify: (v) => [0, 10, 20, 30].includes(v) ? v === 20 : null,
     primary: "modbus", total: "hist.boost_total", run: "hist.boost_run",

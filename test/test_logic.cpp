@@ -3096,9 +3096,9 @@ static void test_homehub_map() {
         CHECK(trend_by_id(c.concept_id) != nullptr);
         CHECK(homehub_concept_index(c.concept_id) == static_cast<int>(i));
     }
-    // The history set repeats the six measurement, BSH and 3-way-valve pairings and adds one
-    // unpaired state: Smart-Grid mode. Every entry still names a real register and a real trend, and
-    // the lookup is exact.
+    // The history set repeats the six measurement plus BSH, 3-way-valve and Quiet pairings, then
+    // adds one unpaired state: Smart-Grid mode. Every entry still names a real register and a real
+    // trend, and the lookup is exact.
     CHECK(HOMEHUB_HISTORY_COUNT == HOMEHUB_CONCEPT_COUNT + 1);
     for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++) {
         const auto& h = HOMEHUB_HISTORIES[i];
@@ -3112,6 +3112,7 @@ static void test_homehub_map() {
     CHECK(std::string(HOMEHUB_HISTORIES[HOMEHUB_HISTORY_COUNT - 1].trend_id) == "smart_grid_mode");
     CHECK(HOMEHUB_HISTORIES[HOMEHUB_HISTORY_COUNT - 1].offset == 56);
     CHECK(homehub_history_index("valve_dhw") >= 0);
+    CHECK(homehub_history_index("quiet_state") >= 0);
     CHECK(homehub_history_index("heat_pump_power") == -1);
     CHECK(homehub_history_index(nullptr) == -1);
     // Lookup both ways.
@@ -3119,6 +3120,7 @@ static void test_homehub_map() {
     CHECK(std::string(homehub_concept_for(40)) == "leaving_water");
     CHECK(std::string(homehub_concept_for(32)) == "bsh_state");
     CHECK(std::string(homehub_concept_for(37)) == "valve_dhw");
+    CHECK(std::string(homehub_concept_for(9)) == "quiet_state");
     CHECK(homehub_concept_for(56) == nullptr);   // historied state, but not a one-row X10A pairing
     CHECK(homehub_concept_for(51) == nullptr);   // power: X10A has no equivalent, deliberately unpaired
     CHECK(homehub_concept_for(41) == nullptr);   // post-BUH: a DIFFERENT measurement point, not leaving_water
@@ -3133,6 +3135,7 @@ static void test_homehub_map() {
     CHECK(std::string(x10a_concept_for(0x61,  8, "°C", 0)) == "return_water");
     CHECK(std::string(x10a_concept_for(0x60, 12, "", 305)) == "bsh_state");
     CHECK(std::string(x10a_concept_for(0x60, 12, "", 306)) == "valve_dhw");
+    CHECK(std::string(x10a_concept_for(0x60,  2, "", 301)) == "quiet_state");
     CHECK(x10a_concept_for(0x61, 10, "bar", 0) == nullptr);   // unit is part of the locator
     CHECK(x10a_concept_for(0x99,  0, "°C", 0)  == nullptr);
 
@@ -5103,6 +5106,22 @@ static void test_history() {
         const TrendDef sat{ "probe", TrendKind::Row, 0x20, 12, "°C", "" };
         CHECK(trend_select(sat, regs, offs, units, 2) == 0);
     }
+    // Outdoor modes have their own exact page/offset/converter locators. Defrost is an observed
+    // event; Quiet is a persistent selector state.
+    {
+        const TrendDef* defrost = trend_by_id("defrost_state");
+        const TrendDef* quiet = trend_by_id("quiet_state");
+        CHECK(defrost != nullptr && defrost->kind == TrendKind::BinaryEvent);
+        CHECK(defrost->reg == 0x10 && defrost->off == 1 && defrost->conv == 304);
+        CHECK(quiet != nullptr && quiet->kind == TrendKind::BinaryState);
+        CHECK(quiet->reg == 0x60 && quiet->off == 2 && quiet->conv == 301);
+        const uint8_t regs[] = { 0x60, 0x10 };
+        const uint8_t offs[] = { 2, 1 };
+        const char* units[] = { "", "" };
+        const int16_t convs[] = { 301, 304 };
+        CHECK(trend_select(*quiet, regs, offs, units, convs, 2) == 0);
+        CHECK(trend_select(*defrost, regs, offs, units, convs, 2) == 1);
+    }
     // Seven binary facts share 0x60/12 and the empty unit. BSH is converter 305, BUH stages are
     // 304/303 and the 3-way valve is 306; the narrower numeric-row selector must refuse them rather
     // than making array order the identity.
@@ -5415,6 +5434,8 @@ static void test_history() {
         { "ct_l1",            20, -1, 1 },
         { "ct_l2",            20, -1, 1 },
         { "ct_l3",            20, -1, 1 },
+        { "defrost_state",     39, -1, 1 },   // exact event-folded Defrost Operation flag
+        { "quiet_state",       39, -1, 1 },   // exact persistent Silent Mode flag
         { "bsh_state",        39, -1, 1 },   // exact bit 305 in the shared 0x60/12 state byte
         { "buh_step1",        39, -1, 1 },   // exact event-folded BUH stage bits 304/303
         { "buh_step2",        39, -1, 1 },

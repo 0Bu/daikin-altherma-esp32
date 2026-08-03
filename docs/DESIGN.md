@@ -361,8 +361,10 @@ Body, ordered:
    **permanent BSH state pill** inside the DHW tank. Its face always says only "E-heater"/"Heizstab":
    light grey while inactive or unknown and orange while active. The inspector and accessible name
    retain the written ON/OFF/unknown state. The active state also animates an independent hot-colour
-   overlay on the heater wave (not the hydronic `fCoil` flow overlay), and
-   low-noise mode is a pill **on the outdoor unit** beside the defrost pill. BSH is deliberately not
+   overlay on the heater wave (not the hydronic `fCoil` flow overlay). **Quiet and Defrost are
+   permanent pills on the outdoor unit**: light grey while inactive or unknown and blue while
+   active, with written state in the inspector/accessibility name and a categorical history below.
+   BSH is deliberately not
    inferred from BUH, Smart Grid or Powerful DHW: the electric immersion heater can run while the
    compressor, hydronic pump and flow all read zero, so it also replaces the generic standby line
    with the unabbreviated "Electric tank heater active". Its inspector renders the raw BSH bit as
@@ -693,16 +695,17 @@ Body, ordered:
    numeric rows, and ringing all of them would cost ~38 KB of `.bss` — about a third of the low-water
    free heap measured on the reference board — for curves nobody opened. A value row reached through
    the LIST (§6) gets a chart where a trend already exists and none where it does not.
-   HomeHub adds nine second rings: leaving water, return water, DHW tank, outdoor air, flow and room
+   HomeHub adds ten second rings: leaving water, return water, DHW tank, outdoor air, flow and room
    temperature are the six measurement concepts both sources structurally pair; BSH and the 3-way
-   valve are the seventh and eighth converter-qualified pairs; and the ninth is the explicit
-   Smart-Grid-mode timeline. All three states render one light-grey/inactive track per source with
+   valve are the seventh and eighth converter-qualified pairs, Quiet is the ninth exact state pair,
+   and the tenth is the explicit Smart-Grid-mode timeline. All four HomeHub-backed states render one light-grey/inactive track per source with
    coloured active spans and written interval lists. The valve names both destinations and reports
    sampled time on the DHW and space-circuit branches; its latest observed position wins each bucket.
-   BSH uses event folding: once ON is observed it remains ON for that open five-minute bucket, so a
+   Quiet retains the latest sampled mode in each bucket. BSH uses event folding: once ON is observed it remains ON for that open five-minute bucket, so a
    later OFF cannot erase the event. BUH applies the same rule independently to its converter-
    qualified Step1 and Step2 bits; the browser combines the aligned rings into one component-level
-   timeline with written Aus/Stufe 1/Stufe 2 states and distinct stage colours. The UI calls each
+   timeline with written Aus/Stufe 1/Stufe 2 states and distinct stage colours. Defrost is likewise
+   event-folded into its X10A-only state timeline. The UI calls each
    sum sampled raster time, not exact runtime; a pulse entirely between poll sweeps can still be
    missed. Other setpoints, states and Modbus-only readings do not acquire a curve by resemblance of
    their labels.

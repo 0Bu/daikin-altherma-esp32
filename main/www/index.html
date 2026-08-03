@@ -202,15 +202,15 @@
                   <text class="sc-state" x="114" y="337" text-anchor="middle" style="font-size:9px">COMP</text>
                   <text class="sc-val" x="114" y="350" text-anchor="middle"><tspan id="svRps">—</tspan> rps</text>
                 </g>
-                <g class="sc-snow sc-hit" data-insp="defrost" role="button" tabindex="0">
-                  <rect class="sc-pill" x="110" y="282" width="70" height="20" rx="10" style="stroke:var(--flow-cold)"/>
-                  <text class="sc-val" x="145" y="296" text-anchor="middle" style="fill:var(--flow-cold)" data-i18n="schem.defrost_pill">❄ defrost</text>
+                <g id="gDefrostState" class="sc-snow sc-hit" data-insp="defrost" role="button" tabindex="0">
+                  <rect class="sc-pill" x="116" y="282" width="70" height="20" rx="10"/>
+                  <text class="sc-val" x="151" y="296" text-anchor="middle" data-i18n="schem.defrost_pill">❄ defrost</text>
                 </g>
                 <!-- Low-noise mode: a state OF the outdoor unit (fan/compressor capped), so it sits
-                     on the outdoor unit like the defrost pill. Shown only while active (.quiet-on). -->
-                <g class="sc-quiet sc-hit" data-insp="quiet" role="button" tabindex="0">
-                  <rect class="sc-pill" x="36" y="282" width="64" height="20" rx="10" style="stroke:var(--brand)"/>
-                  <text class="sc-val" x="68" y="296" text-anchor="middle" style="fill:var(--brand)" data-i18n="chip.quiet">Quiet</text>
+                     on the outdoor unit like the defrost pill. Both remain visible while inactive. -->
+                <g id="gQuietState" class="sc-quiet sc-hit" data-insp="quiet" role="button" tabindex="0">
+                  <rect class="sc-pill" x="42" y="282" width="64" height="20" rx="10"/>
+                  <text class="sc-val" x="74" y="296" text-anchor="middle" data-i18n="chip.quiet">Quiet</text>
                 </g>
                 <!-- X10A derives this figure from a phase current, so the drawing prefixes it with
                      "≈". A Modbus fallback is the HomeHub's measured input register 51 and removes

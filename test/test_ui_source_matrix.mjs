@@ -91,8 +91,9 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
   return context.__api;
 }
 
-// Boost and BSH are permanent state pills. Their compact faces keep only the stable component name;
-// the written state remains in the inspector and accessible name while colour changes on the face.
+// Boost, BSH and both outdoor modes are permanent state pills. Their compact faces keep only the
+// stable component name; the written state remains in the inspector and accessible name while
+// colour changes on the face.
 {
   assert.match(index, /id="gBshState"[\s\S]*?tabindex="0"/,
     "the heater pill must remain interactive while it is off");
@@ -112,6 +113,23 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     "inactive Boost pill uses the neutral light-grey fill");
   assert.match(style, /\.sg-boost-on \.sc-sg-request-box \{[^}]*stroke:\s*var\(--src-mb\)/,
     "active Boost pill keeps the HomeHub petrol state colour");
+  for (const id of ["gDefrostState", "gQuietState"]) {
+    assert.match(index, new RegExp(`id="${id}"[\\s\\S]*?tabindex="0"`),
+      `${id} must remain interactive while inactive`);
+    assert.doesNotMatch(index, new RegExp(`id="${id}"[^>]*aria-hidden`));
+  }
+  assert.match(index, /id="gQuietState"[\s\S]*?<rect class="sc-pill" x="42"[^>]*width="64"[\s\S]*?<text class="sc-val" x="74"/,
+    "Quiet is centred inside its own pill");
+  assert.match(index, /id="gDefrostState"[\s\S]*?<rect class="sc-pill" x="116"[^>]*width="70"[\s\S]*?<text class="sc-val" x="151"/,
+    "Defrost is centred inside its own pill");
+  assert.equal((42 + 116 + 70) / 2, 24 + 180 / 2,
+    "the combined Quiet/Defrost bounds share the outdoor-unit centre line");
+  assert.match(style, /svg \.sc-snow \.sc-pill, svg \.sc-quiet \.sc-pill \{[^}]*fill:\s*var\(--hatch\)[^}]*stroke:\s*var\(--pipe\)/,
+    "inactive outdoor-mode pills use the neutral grey treatment");
+  assert.match(style, /\.defrost-on \.sc-snow \.sc-pill, \.quiet-on \.sc-quiet \.sc-pill \{[^}]*stroke:\s*var\(--brand\)/,
+    "active outdoor modes turn blue");
+  assert.doesNotMatch(style, /svg \.sc-snow, svg \.sc-quiet \{[^}]*visibility:\s*hidden/,
+    "outdoor-mode pills must never be conditionally hidden");
 
   const attrs = (id) => ({
     setAttribute: (k, v) => elements[id].values.set(k, String(v)),
@@ -119,16 +137,21 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
   const elements = {
     gBshState: { values: new Map() },
     gSgRequest: { values: new Map() },
+    gDefrostState: { values: new Map() },
+    gQuietState: { values: new Map() },
   };
-  Object.assign(elements.gBshState, attrs("gBshState"));
-  Object.assign(elements.gSgRequest, attrs("gSgRequest"));
+  Object.keys(elements).forEach((id) => Object.assign(elements[id], attrs(id)));
   const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true, elements });
-  c.updateSchematicStateA11y({ bsh: false, sgMode: 0 });
+  c.updateSchematicStateA11y({ bsh: false, defrost: false, quiet: false, sgMode: 0 });
   assert.equal(elements.gBshState.values.get("aria-label"), "schem.bsh_label: state.off");
   assert.equal(elements.gSgRequest.values.get("aria-label"), "schem.sg_boost: sg.mode0");
-  c.updateSchematicStateA11y({ bsh: true, sgMode: 2 });
+  assert.equal(elements.gDefrostState.values.get("aria-label"), "schem.defrost_pill: state.off");
+  assert.equal(elements.gQuietState.values.get("aria-label"), "chip.quiet: state.off");
+  c.updateSchematicStateA11y({ bsh: true, defrost: true, quiet: true, sgMode: 2 });
   assert.equal(elements.gBshState.values.get("aria-label"), "schem.bsh_label: state.on");
   assert.equal(elements.gSgRequest.values.get("aria-label"), "schem.sg_boost: sg.mode2");
+  assert.equal(elements.gDefrostState.values.get("aria-label"), "schem.defrost_pill: state.on");
+  assert.equal(elements.gQuietState.values.get("aria-label"), "chip.quiet: state.on");
 }
 
 const LWT_X = X("Leaving water temp. before BUH (R1T)", "38.6", "leaving_water");
@@ -148,6 +171,9 @@ const X_SG = (contact, on) => ({
 const X_BSH = (on) => ({ label: "BSH", value: on ? "1" : "0", unit: "", reg: 0x60,
                          binary: true, concept: "bsh_state" });
 const M_BSH = (on) => M_FLAG(32, "Booster heater run", on, "bsh_state");
+const X_QUIET = (on) => ({ label: "Silent Mode", value: on ? "1" : "0", unit: "", reg: 0x60,
+                           binary: true, concept: "quiet_state" });
+const M_QUIET = (on) => M_FLAG(9, "Quiet mode operation", on, "quiet_state");
 
 // The README recording drives the same production parser. Keep its fake HomeHub on the real API
 // boundary (raw numeric enum plus semantic metadata), or a regression to text could stay hidden.
@@ -166,6 +192,23 @@ const M_BSH = (on) => M_FLAG(32, "Booster heater run", on, "bsh_state");
   assert.equal(demoOut.off, 44);
   assert.equal(demoOut.concept, "outdoor_air");
   assert.equal(demoOut.value, "6.8", "the standby recording exercises the live Modbus fallback");
+}
+
+// Quiet is the outdoor-unit state with an exact second source. X10A leads disagreements; HomeHub
+// input 9 keeps the pill and inspector current when the service bus is silent.
+{
+  const both = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+                     values: [X_QUIET(false)], modbus: [M_QUIET(true)] });
+  assert.equal(both.liveData().quiet, false, "live X10A Quiet leads a contradictory HomeHub state");
+  assert.equal(both.mbForInspect("quiet"), both.S._modbus[0],
+    "the Quiet inspector keeps the exact HomeHub state as a second opinion");
+
+  const down = ctx({ x10a: false, mbEnabled: true, mbConnected: true,
+                     values: [X_QUIET(false)], modbus: [M_QUIET(true)] });
+  assert.equal(down.liveData().quiet, true,
+    "HomeHub input 9 keeps Quiet current when X10A is silent");
+  assert.equal(down.INSPECT.quiet.trend, "quiet_state");
+  assert.equal(down.INSPECT.defrost.trend, "defrost_state");
 }
 
 // The two X10A contact bits are not two user-facing modes. Pin the documented truth table and the
