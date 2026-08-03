@@ -223,6 +223,27 @@ function esp32CardHtml() {
 // in Observe mode. Strategy and output are explicit neighbours now, so later phases extend this card
 // instead of growing unrelated top-level settings.
 // None of the labels below claims control: the fixed operating mode is Observe and output is read-only.
+// A configured source keeps the row itself short and editable while its current state sits in the
+// permanent info "tongue" underneath. The same geometry is used by value explainers; unlike those
+// explainers this one does not collapse, because clicking the row opens the source editor. Empty
+// sources stay on one compact row so "Not configured" does not create an empty-looking panel.
+function dynamicSourceRow(action, title, label, summary, summaryCls, configured) {
+  if (!configured) {
+    return `<button class="vrow vrow-btn dynamic-source-row dynamic-source-inline" type="button" ` +
+      `data-act="${action}" aria-label="${esc(title)}"><span class="vrow-label">${esc(label)}</span>` +
+      `<span class="vrow-val settings-wrap ${summaryCls}">${esc(summary)} ${editIcon}</span></button>`;
+  }
+  const statusId = `dynamic-${action}-status`;
+  return `<div class="vitem open settings-source-item">` +
+    `<button class="vrow vrow-btn dynamic-source-row" type="button" data-act="${action}" ` +
+    `aria-label="${esc(title)}" aria-describedby="${statusId}">` +
+    `<span class="vrow-label">${esc(label)}</span>` +
+    `<span class="vrow-val settings-source-edit" aria-hidden="true">${editIcon}</span></button>` +
+    `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body settings-source-tongue">` +
+    `<span class="settings-source-summary ${summaryCls}" id="${statusId}">${esc(summary)}</span>` +
+    `</div></div></div></div>`;
+}
+
 function dynamicControlCardHtml() {
   const r = S.status?.reference_temperature || {};
   const w = S.status?.weather_forecast || {};
@@ -250,9 +271,8 @@ function dynamicControlCardHtml() {
     } else { source += ` · ${t("ref.waiting")}`; sourceCls = "warn"; }
   }
   let rows = vrow(t("dyn.mode"), t("dyn.observe"));
-  rows += `<button class="vrow vrow-btn dynamic-source-row" type="button" data-act="ref-temp" ` +
-    `aria-label="${esc(t("ref.title"))}"><span class="vrow-label">${esc(t("dyn.room_sources"))}</span>` +
-    `<span class="vrow-val settings-wrap ${sourceCls}">${esc(source)} ${editIcon}</span></button>`;
+  rows += dynamicSourceRow("ref-temp", t("ref.title"), t("dyn.room_sources"),
+                           source, sourceCls, Boolean(r.configured));
   let weather = t("dyn.not_configured"), weatherCls = "dim";
   if (w.configured && w.fetching) { weather = t("wx.fetching"); weatherCls = "warn"; }
   else if (w.configured && w.has_value) {
@@ -265,9 +285,8 @@ function dynamicControlCardHtml() {
     else { weather += ` · ${w.error ? t("wx.unavailable") : t("ref.stale")}`; weatherCls = w.error ? "err" : "warn"; }
   } else if (w.configured) { weather = w.error ? t("wx.unavailable") : t("wx.waiting"); weatherCls = w.error ? "err" : "warn"; }
   if (w.error) badgeCls = "err";
-  rows += `<button class="vrow vrow-btn dynamic-source-row" type="button" data-act="weather" ` +
-    `aria-label="${esc(t("wx.title"))}"><span class="vrow-label">${esc(t("dyn.weather"))}</span>` +
-    `<span class="vrow-val settings-wrap ${weatherCls}">${esc(weather)} ${editIcon}</span></button>`;
+  rows += dynamicSourceRow("weather", t("wx.title"), t("dyn.weather"),
+                           weather, weatherCls, Boolean(w.configured));
 
   // ENV III belongs to the M5Stack accessory ecosystem. The firmware derives `supported` from the
   // user-selected board preset's vendor; omit the row entirely on Seeed/Custom boards rather than
@@ -286,9 +305,8 @@ function dynamicControlCardHtml() {
       else if (envCls === "warn" && badgeCls !== "err") badgeCls = "warn";
       else if (envCls === "ok" && badgeCls === "dim") badgeCls = "ok";
     }
-    rows += `<button class="vrow vrow-btn dynamic-source-row" type="button" data-act="env3" ` +
-      `aria-label="${esc(t("env.title"))}"><span class="vrow-label">${esc(t("dyn.outdoor"))}</span>` +
-      `<span class="vrow-val settings-wrap ${envCls}">${esc(envText)} ${editIcon}</span></button>`;
+    rows += dynamicSourceRow("env3", t("env.title"), t("dyn.outdoor"),
+                             envText, envCls, Boolean(env.enabled));
   }
   rows += vrow(t("dyn.strategy"), t("dyn.inactive"), { cls: "dim" });
   rows += vrow(t("dyn.safety"), t("dyn.read_only"));

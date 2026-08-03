@@ -1175,14 +1175,21 @@ vocabulary exactly:
    only a reachable SHT30 and QMP6988 may close the modal and persist the mapping. A rejection stays
    inline in the open dialog and releases Save for correction or retry. Live temperature, humidity
    and pressure are observation-only and render in a separate dashboard card, never as a
-   replacement for Daikin R1T.
+   replacement for Daikin R1T. Once a room, weather, or ENV III source is configured, its current
+   reading/freshness state moves out of the editable header into a permanently open
+   `--brand-tint` info tongue directly underneath. The header remains the setting label plus edit
+   affordance and still opens its modal; warning and error states keep the tongue but use their
+   semantic colour, so a temporary failure does not reshape the card. An unconfigured source stays
+   a compact row with **Not configured** and no tongue.
    Every text-like field in this and the other modals selects its complete value
    on focus/click, so a long topic, host or JSON path can be replaced with one paste. The room-source
-   modal separates **Testen** from **Speichern**: Save starts disabled for a non-empty topic, Test
-   changes no persistent setting, and only a fresh value accepted through the exact mapping enables
-   Save. Any edit to topic, value path, timestamp path or maximum age invalidates that test again;
-   changing only the presentation name does not. An empty topic remains the explicit Disable state
-   and is directly saveable because there is deliberately no value to test. Its summary reports one configured source, the raw temperature and qualified
+   modal has **Abbrechen**, **Löschen**, and **Speichern**. Save validates the fields, runs the
+   non-persistent live MQTT test, and only sends the mapping-bound proof to persistence after a fresh
+   value passed the exact topic/path/time/age mapping. A failed validation, timeout, unreadable value,
+   rejected proof, or write leaves the dialog open and releases Save for correction or retry.
+   Delete is enabled only for a configured source and posts the explicit empty mapping; it removes
+   the saved subscription and resets the captured runtime value without testing unsaved draft
+   fields. Its summary reports one configured source, the raw temperature and qualified
    source age; retained remains labelled. A retained payload without its own timestamp is visibly
    untrusted rather than made fresh by reconnecting, while a non-retained value without one ages
    from its monotonic MQTT arrival. The

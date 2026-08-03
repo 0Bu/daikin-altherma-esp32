@@ -71,7 +71,6 @@ const validMqtt = (h) => {
 // It is presented as an Observe-mode input under the permanent dynamic-control Settings card. The
 // Shelly mapping is a first-open TEST preset, never a firmware-wide default subscription.
 const REF_TEMP_TEST_TOPIC = "shelly1pmminig4-fixture00003/status/switch:0";
-let refTempTestProof = 0;
 function fillRefTemp() {
   const r = S.status?.reference_temperature || {};
   const configured = !!r.configured;
@@ -83,16 +82,16 @@ function fillRefTemp() {
   $("rtPath").value = saved ? (r.temperature_path || "") : "temperature.tC";
   $("rtTimePath").value = saved ? (r.timestamp_path || "") : "";
   $("rtMaxAge").value = Number.isInteger(r.max_age_s) ? r.max_age_s : 600;
+  $("rtDeleteBtn").disabled = !configured;
 }
 function openRefTemp() {
   fillRefTemp();
   for (const id of ["rtName", "rtTopic", "rtPath", "rtTimePath", "rtMaxAge"])
     $(id).classList.remove("invalid");
   $("rtError").hidden = true;
-  resetRefTempTest();
   openPopup("refTempModal");
 }
-function closeRefTemp() { resetRefTempTest(); $("refTempModal").hidden = true; }
+function closeRefTemp() { $("refTempModal").hidden = true; }
 const validRefTopic = (v) => !v || (v.length <= 192 && v[0] !== "/" && !v.endsWith("/") &&
                                       !/[+#\x00-\x1f\x7f]/.test(v));
 const validRefPath = (v) => v.length <= 128 && v.split(".").every((key) =>
@@ -107,31 +106,6 @@ function refTempFormPayload() {
     timestamp_path: $("rtTimePath").value.trim(),
     max_age_s: topic ? Number($("rtMaxAge").value) : 600,
   };
-}
-
-// A proof belongs to the mapping fields, not to its presentation name. Any edit that can change
-// what is subscribed/decoded/freshness-qualified retires it immediately. An empty topic is the one
-// intentional exception: it means Disable, so there is no value that could or should be tested.
-function resetRefTempTest() {
-  refTempTestProof = 0;
-  const topic = $("rtTopic").value.trim();
-  $("rtBtn").disabled = !!topic;
-  $("rtTestBtn").disabled = !topic;
-  $("rtTestResult").hidden = true;
-  $("rtTestResult").textContent = "";
-}
-
-function passRefTempTest(proof, temperature, retained) {
-  refTempTestProof = proof;
-  $("rtBtn").disabled = false;
-  $("rtTestResult").textContent = t("ref.test_passed", temperature, retained);
-  $("rtTestResult").hidden = false;
-}
-
-function setRefTempTesting(on) {
-  const button = $("rtTestBtn");
-  button.disabled = on;
-  button.innerHTML = on ? `<span class="spin"></span>${esc(t("ref.testing"))}` : esc(t("ref.test"));
 }
 
 // ── Direct Open-Meteo weather source ──────────────────────────────────────

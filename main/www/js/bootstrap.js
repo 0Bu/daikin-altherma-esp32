@@ -321,7 +321,6 @@ function wireRestOfApp() {
   for (const id of ["rtName", "rtTopic", "rtPath", "rtTimePath", "rtMaxAge"])
     $(id).addEventListener("input", () => {
       $(id).classList.remove("invalid"); $("rtError").hidden = true;
-      if (id !== "rtName") resetRefTempTest();
     });
   const refTempInput = () => {
     const input = refTempFormPayload();
@@ -332,7 +331,7 @@ function wireRestOfApp() {
       toast(msg, "err");
       return null;
     };
-    if (!validRefTopic(input.topic)) return bad("rtTopic", t("ref.err_topic"));
+    if (!input.topic || !validRefTopic(input.topic)) return bad("rtTopic", t("ref.err_topic"));
     if (input.topic && !validRefPath(input.temperature_path))
       return bad("rtPath", t("ref.err_path"));
     if (input.topic && input.timestamp_path && !validRefPath(input.timestamp_path))
@@ -350,68 +349,84 @@ function wireRestOfApp() {
     $("rtError").hidden = false;
     toast(msg, "err");
   };
-  $("rtTestBtn").onclick = async () => {
-    const input = refTempInput();
-    if (!input || !input.topic) return;
-    if (S.busy) { toast(t("toast.applying"), "info"); return; }
-    resetRefTempTest();
-    S.busy = true;
-    setRefTempTesting(true);
-    let response;
-    try { response = await post("/test_ref_temp", input); }
-    catch {
-      S.busy = false; setRefTempTesting(false); resetRefTempTest();
-      toast(t("toast.unreachable"), "err"); return;
+  // Save owns the complete contract: validate locally, obtain a mapping-bound proof from one fresh
+  // live MQTT value, then persist exactly that tested mapping. The second action is disabled while
+  // either flow is in flight, so Delete and Save cannot race each other from this dialog.
+  const setRefTempActionBusy = (button, on, label) => {
+    setBusy(button, on, label);
+    if (on) {
+      $("rtBtn").disabled = true;
+      $("rtDeleteBtn").disabled = true;
+    } else {
+      $("rtBtn").disabled = false;
+      $("rtDeleteBtn").disabled = !S.status?.reference_temperature?.configured;
     }
-    S.busy = false;
-    setRefTempTesting(false);
-    if (!response.ok) {
-      resetRefTempTest();
-      showRefTempRequestError(await errorOf(response, t("ref.test_failed")));
-      return;
-    }
-    const result = await response.json().catch(() => ({}));
-    if (!Number.isInteger(result.test_proof) || result.test_proof <= 0 ||
-        typeof result.temperature_c !== "number") {
-      resetRefTempTest();
-      showRefTempRequestError(t("ref.test_failed"));
-      return;
-    }
-    passRefTempTest(result.test_proof, result.temperature_c, result.retained === true);
   };
   $("refTempForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const input = refTempInput();
     if (!input) return;
-    if (input.topic && refTempTestProof <= 0) {
-      showRefTempRequestError(t("ref.test_required"));
-      return;
-    }
     if (S.busy) { toast(t("toast.applying"), "info"); return; }
     S.busy = true;
-    setBusy("rtBtn", true);
+    setRefTempActionBusy("rtBtn", true, "btn.verifying");
+    const idle = () => { S.busy = false; setRefTempActionBusy("rtBtn", false); };
+    let testResponse;
+    try { testResponse = await post("/test_ref_temp", input); }
+    catch {
+      idle(); showRefTempRequestError(t("toast.unreachable")); return;
+    }
+    if (!testResponse.ok) {
+      const msg = await errorOf(testResponse, t("ref.test_failed"));
+      idle(); showRefTempRequestError(msg); return;
+    }
+    const testResult = await testResponse.json().catch(() => ({}));
+    if (!Number.isInteger(testResult.test_proof) || testResult.test_proof <= 0 ||
+        !Number.isFinite(testResult.temperature_c)) {
+      idle(); showRefTempRequestError(t("ref.test_failed")); return;
+    }
+
     let r;
     try {
-      r = await post("/set_ref_temp", { ...input, test_proof: refTempTestProof });
+      r = await post("/set_ref_temp", { ...input, test_proof: testResult.test_proof });
     } catch {
-      S.busy = false; setBusy("rtBtn", false); toast(t("toast.unreachable"), "err"); return;
+      idle(); showRefTempRequestError(t("toast.unreachable")); return;
     }
     if (!r.ok) {
       const msg = await errorOf(r, t("toast.rejected"));
-      S.busy = false;
-      setBusy("rtBtn", false);
-      // A 409 means the device no longer recognises this proof (for example after another browser
-      // tested a different mapping). Do not leave Save enabled with a token the server has already
-      // rejected: retire it locally and require the visible Test step again.
-      if (r.status === 409) resetRefTempTest();
-      showRefTempRequestError(msg);
-      return;
+      idle(); showRefTempRequestError(msg); return;
     }
     const res = await r.json().catch(() => ({}));
-    S.busy = false; setBusy("rtBtn", false); closeRefTemp();
+    idle(); closeRefTemp();
     toast(t(res.saved === false ? "toast.no_changes" : "ref.saved"), res.saved === false ? "info" : "ok");
     await refreshStatus();
   });
+
+  // Delete is the explicit Off path. It does not depend on what is currently typed into the form:
+  // posting the empty mapping removes the saved subscription and makes mqtt_reference_reconfigure
+  // clear the captured runtime value as the binding changes.
+  $("rtDeleteBtn").onclick = async () => {
+    if (S.busy) { toast(t("toast.applying"), "info"); return; }
+    if (!S.status?.reference_temperature?.configured) return;
+    S.busy = true;
+    setRefTempActionBusy("rtDeleteBtn", true, "ref.deleting");
+    const idle = () => { S.busy = false; setRefTempActionBusy("rtDeleteBtn", false); };
+    let r;
+    try {
+      r = await post("/set_ref_temp", {
+        name: "", topic: "", temperature_path: "", timestamp_path: "",
+        max_age_s: 600, test_proof: 0,
+      });
+    } catch {
+      idle(); showRefTempRequestError(t("toast.unreachable")); return;
+    }
+    if (!r.ok) {
+      const msg = await errorOf(r, t("toast.rejected"));
+      idle(); showRefTempRequestError(msg); return;
+    }
+    idle(); closeRefTemp();
+    toast(t("ref.deleted"), "ok");
+    await refreshStatus();
+  };
 
   $("slHost").addEventListener("input", () => { $("slHost").classList.remove("invalid"); $("slError").hidden = true; });
 
