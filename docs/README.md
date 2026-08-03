@@ -547,14 +547,17 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   constants (for example `smart_grid_operation_mode: 2`); only the web UI maps them to readable names. A short
   migration probe does the same for an old retained `<base>/state` value; an already-clean broker
   receives no publish on either retired topic.
-  The optional firmware weather input is mirrored independently as one retained atomic evidence
-  document on `<base>/weather/openmeteo/forecast`: forecast values, Open-Meteo/ICON provenance,
+  The optional firmware weather input is mirrored independently, only while configured, as one
+  retained atomic evidence document on `<base>/weather/openmeteo/forecast`: forecast values,
+  Open-Meteo/ICON provenance,
   fetch and horizon timestamps, `valid_until_unix_s`, and numeric `available`/`fresh` flags. No HA
   Discovery entities are created for weather. Upgrade cleanup retracts the four configs published
   by the earlier short-lived contract and deletes a retained `<base>/weather_forecast` predecessor
   when it exists. The current document contains no coordinates. A failed refresh can preserve the last values for later
   analysis, but marks them unavailable so a historian can prove what was known without treating an
-  old forecast as current. MQTT is not required for the firmware to fetch or evaluate weather.
+  old forecast as current. Disabling Open-Meteo publishes no disabled document; a retained predecessor
+  is probe-deleted once when present, while an already-clean broker receives no publish on this topic.
+  MQTT is not required for the firmware to fetch or evaluate weather.
   Availability/LWT `<base>/status`. `<base>` defaults `daikin-altherma-esp32`,
   `<prefix>` `homeassistant`.
   WP3 defines future non-retained `<base>/intent/v1/evcc` domain intent semantics but installs no

@@ -1243,7 +1243,9 @@ The Home Assistant bridge:
   `<base>/modbus/status` values; only a non-empty retained response triggers each tombstone, so later
   reconnects do not publish either empty retired topic.
 - **Forecast evidence topic.** `<base>/weather/openmeteo/forecast` is an independent retained JSON snapshot,
-  published on change. Values and their Open-Meteo/ICON provenance,
+  published on change only while Open-Meteo is configured. A disabled source publishes no synthetic
+  state document; an exact retained probe tombstones an older payload only when one is actually present.
+  Values and their Open-Meteo/ICON provenance,
   fetch time, forecast horizon start, validity limit, runtime error and numeric `available`/`fresh`
   flags travel atomically. A failed refresh may retain the last figures for forensic comparison, but
   `available: 0` prevents them from looking decision-ready; `fetched_unix_s` and
