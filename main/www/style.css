@@ -153,6 +153,10 @@ svg .sc-box { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
 svg .sc-plate { fill: var(--hatch); stroke: var(--line); }
 svg .sc-lbl { fill: var(--muted); font: 700 10px var(--font-sans); letter-spacing: .08em; }
 svg .sc-pill { fill: var(--card); stroke: var(--line); }
+/* At the bottom of the outdoor unit, all four state/readout pills share one centred geometry and
+   vertical rhythm. The compressor remains a circle in the component row above because it is a
+   component symbol, not another reading in that stack. */
+svg .sc-ou-mode-pill, svg .sc-ou-reading { stroke-width: 1; }
 /* Leader tie: the hairline from a pill to the pipe it reads. Dotted and --line, so it joins the
    drawing's quietest layer — it answers "which pipe is this number from?" without competing with
    the pipe itself. Only pills drawn BESIDE a run carry one; a reading inside its component (tank,
