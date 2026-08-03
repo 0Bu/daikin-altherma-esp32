@@ -76,6 +76,17 @@ const TITLE = { settings: () => t("nav.settings") };
 // Every overlay that owns the Esc key; the navigation Esc stands down while one of them is open.
 const MODALS = ["wifiModal", "mqttModal", "refTempModal", "syslogModal", "ntpModal", "homehubModal", "boardModal", "bugModal"];
 
+// Open a popup without putting the caret into its first field. Focusing the dialog container keeps
+// the modal announced to keyboard/screen-reader users, while `preventScroll` avoids moving the page
+// and — most visibly on phones — no text selection or software keyboard appears until the user
+// deliberately chooses a field. Every modal card carries tabindex="-1" for this one purpose.
+function openPopup(id) {
+  const modal = $(id);
+  modal.hidden = false;
+  const dialog = modal.querySelector?.('[role="dialog"]');
+  dialog?.focus?.({ preventScroll: true });
+}
+
 function go(stage) {
   S.stage = stage;
   for (const [st, id] of Object.entries(VIEW)) $(id).classList.toggle("active", st === stage);
@@ -585,8 +596,7 @@ function openBug() {
   $("bugError").hidden = true;
   $("bugStep1").hidden = false;
   $("bugStep2").hidden = true;
-  $("bugModal").hidden = false;
-  $("bugWhat").focus();
+  openPopup("bugModal");
 }
 function closeBug() { $("bugModal").hidden = true; }
 

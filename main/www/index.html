@@ -683,7 +683,7 @@
   <!-- ═══ WiFi edit modal (opened from the Connections tile's WiFi row pencil) ═══ -->
   <div class="modal" id="wifiModal" hidden>
     <div class="modal-backdrop" id="wifiBackdrop"></div>
-    <form class="modal-card" id="wifiForm" role="dialog" aria-modal="true" aria-labelledby="wifiModalTitle">
+    <form class="modal-card" id="wifiForm" role="dialog" aria-modal="true" aria-labelledby="wifiModalTitle" tabindex="-1">
       <div class="section-label card-title" id="wifiModalTitle" data-i18n="wifi.title">WiFi configuration</div>
       <label class="field">
         <span class="field-label plain" data-i18n="wifi.ssid">WiFi network (SSID)</span>
@@ -706,7 +706,7 @@
   <!-- ═══ MQTT edit modal (opened from the Connections tile's MQTT row pencil) ═══ -->
   <div class="modal" id="mqttModal" hidden>
     <div class="modal-backdrop" id="mqttBackdrop"></div>
-    <form class="modal-card" id="mqttForm" role="dialog" aria-modal="true" aria-labelledby="mqttModalTitle">
+    <form class="modal-card" id="mqttForm" role="dialog" aria-modal="true" aria-labelledby="mqttModalTitle" tabindex="-1">
       <div class="section-label card-title" id="mqttModalTitle" data-i18n="mqtt.title">MQTT broker</div>
       <label class="field">
         <span class="field-label plain" data-i18n="mqtt.hostport">Host : port</span>
@@ -738,7 +738,7 @@
   <!-- ═══ Room-temperature MQTT source (first qualified input of dynamic LWT) ═══ -->
   <div class="modal" id="refTempModal" hidden>
     <div class="modal-backdrop" id="refTempBackdrop"></div>
-    <form class="modal-card" id="refTempForm" role="dialog" aria-modal="true" aria-labelledby="refTempModalTitle">
+    <form class="modal-card" id="refTempForm" role="dialog" aria-modal="true" aria-labelledby="refTempModalTitle" tabindex="-1">
       <div class="section-label card-title" id="refTempModalTitle" data-i18n="ref.title">Room-temperature source</div>
       <label class="field">
         <span class="field-label plain" data-i18n="ref.name">Name</span>
@@ -774,7 +774,7 @@
   <!-- ═══ Syslog edit modal (opened from the Connections tile's Syslog row pencil) ═══ -->
   <div class="modal" id="syslogModal" hidden>
     <div class="modal-backdrop" id="syslogBackdrop"></div>
-    <form class="modal-card" id="syslogForm" role="dialog" aria-modal="true" aria-labelledby="syslogModalTitle">
+    <form class="modal-card" id="syslogForm" role="dialog" aria-modal="true" aria-labelledby="syslogModalTitle" tabindex="-1">
       <div class="section-label card-title" id="syslogModalTitle" data-i18n="syslog.title">Syslog server</div>
       <label class="field">
         <span class="field-label plain" data-i18n="syslog.hostport">Host : port</span>
@@ -792,7 +792,7 @@
   <!-- ═══ NTP edit modal (opened from the Connections tile's NTP row pencil) ═══ -->
   <div class="modal" id="ntpModal" hidden>
     <div class="modal-backdrop" id="ntpBackdrop"></div>
-    <form class="modal-card" id="ntpForm" role="dialog" aria-modal="true" aria-labelledby="ntpModalTitle">
+    <form class="modal-card" id="ntpForm" role="dialog" aria-modal="true" aria-labelledby="ntpModalTitle" tabindex="-1">
       <div class="section-label card-title" id="ntpModalTitle" data-i18n="ntp.title">NTP server</div>
       <label class="field">
         <span class="field-label plain" data-i18n="ntp.server">Server</span>
@@ -813,7 +813,7 @@
        live (POST /set_hp, no reboot). Read-only: config + diagnostics only, never pump control. -->
   <div class="modal" id="homehubModal" hidden>
     <div class="modal-backdrop" id="homehubBackdrop"></div>
-    <form class="modal-card" id="homehubForm" role="dialog" aria-modal="true" aria-labelledby="homehubModalTitle">
+    <form class="modal-card" id="homehubForm" role="dialog" aria-modal="true" aria-labelledby="homehubModalTitle" tabindex="-1">
       <div class="section-label card-title" id="homehubModalTitle" data-i18n="homehub.title">Modbus</div>
       <div class="field">
         <label class="field-label plain" for="hhHost" data-i18n="homehub.host">Host · IP or .local name</label>
@@ -845,7 +845,7 @@
        reboots (both are claimed once at task start; see http_config.cpp set_board). -->
   <div class="modal" id="boardModal" hidden>
     <div class="modal-backdrop" id="boardBackdrop"></div>
-    <form class="modal-card" id="boardForm" role="dialog" aria-modal="true" aria-labelledby="boardModalTitle">
+    <form class="modal-card" id="boardForm" role="dialog" aria-modal="true" aria-labelledby="boardModalTitle" tabindex="-1">
       <div class="section-label card-title" id="boardModalTitle" data-i18n="board.title">Board hardware</div>
       <!-- Ready-made settings for the boards this project documents (logic/board_presets.hpp, served
            in /status.board.presets). Picking one only FILLS the fields below — nothing is saved until
@@ -896,7 +896,7 @@
        would buy nothing and cost a step where reports go to die half-finished. -->
   <div class="modal" id="bugModal" hidden>
     <div class="modal-backdrop" id="bugBackdrop"></div>
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="bugModalTitle">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="bugModalTitle" tabindex="-1">
       <div class="section-label card-title" id="bugModalTitle" data-i18n="bug.title">Report a bug</div>
       <div id="bugStep1">
         <p class="hint" data-i18n="bug.intro"></p>
