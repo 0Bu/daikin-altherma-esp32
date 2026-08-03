@@ -169,7 +169,7 @@
                        ring in the group and the next redesign is free too.
                        The hub is a --card disc over the blade roots with a --brand-strong centre:
                        the blades converge behind it, so the light ring is the drawing, not a gap. -->
-                  <g transform="translate(114 228)">
+                  <g transform="translate(74 244)">
                     <g id="scFan">
                       <circle r="42" fill="none" stroke="var(--line)" stroke-width="2"/>
                       <g fill="var(--brand)">
@@ -194,30 +194,30 @@
                      could be any of the unit's temperatures. While X10A holds this row over at rest,
                      the live HomeHub outdoor-air pair may stand in and turns this value petrol. -->
                 <g class="sc-hit" data-insp="out" role="button" tabindex="0">
-                  <rect class="sc-pill" x="62" y="376" width="104" height="22" rx="11"/>
-                  <text class="sc-val" x="114" y="391" text-anchor="middle"><tspan data-i18n="schem.outdoor">Outdoor</tspan> <tspan id="svOut">—</tspan> °C</text>
+                  <rect class="sc-pill sc-ou-reading" x="62" y="380" width="104" height="22" rx="11"/>
+                  <text class="sc-val" x="114" y="395" text-anchor="middle"><tspan data-i18n="schem.outdoor">Outdoor</tspan> <tspan id="svOut">—</tspan> °C</text>
                 </g>
                 <g class="sc-hit" data-insp="comp" role="button" tabindex="0">
-                  <circle class="sc-comp" cx="114" cy="340" r="26"/>
-                  <text class="sc-state" x="114" y="337" text-anchor="middle" style="font-size:9px">COMP</text>
-                  <text class="sc-val" x="114" y="350" text-anchor="middle"><tspan id="svRps">—</tspan> rps</text>
+                  <circle class="sc-comp" cx="158" cy="244" r="26"/>
+                  <text class="sc-state" x="158" y="241" text-anchor="middle" style="font-size:9px">COMP</text>
+                  <text class="sc-val" x="158" y="254" text-anchor="middle"><tspan id="svRps">—</tspan> rps</text>
                 </g>
                 <g id="gDefrostState" class="sc-snow sc-hit" data-insp="defrost" role="button" tabindex="0">
-                  <rect class="sc-pill" x="116" y="282" width="70" height="20" rx="10"/>
-                  <text class="sc-val" x="151" y="296" text-anchor="middle" data-i18n="schem.defrost_pill">❄ defrost</text>
+                  <rect class="sc-pill sc-ou-mode-pill" x="62" y="348" width="104" height="22" rx="11"/>
+                  <text class="sc-val" x="114" y="363" text-anchor="middle" data-i18n="schem.defrost_pill">❄ defrost</text>
                 </g>
                 <!-- Low-noise mode: a state OF the outdoor unit (fan/compressor capped), so it sits
                      on the outdoor unit like the defrost pill. Both remain visible while inactive. -->
                 <g id="gQuietState" class="sc-quiet sc-hit" data-insp="quiet" role="button" tabindex="0">
-                  <rect class="sc-pill" x="42" y="282" width="64" height="20" rx="10"/>
-                  <text class="sc-val" x="74" y="296" text-anchor="middle" data-i18n="chip.quiet">Quiet</text>
+                  <rect class="sc-pill sc-ou-mode-pill" x="62" y="316" width="104" height="22" rx="11"/>
+                  <text class="sc-val" x="114" y="331" text-anchor="middle" data-i18n="chip.quiet">Quiet</text>
                 </g>
                 <!-- X10A derives this figure from a phase current, so the drawing prefixes it with
                      "≈". A Modbus fallback is the HomeHub's measured input register 51 and removes
                      the prefix; the inspector names and explains the active source in both cases. -->
                 <g class="sc-hit" data-insp="pel" role="button" tabindex="0">
-                  <rect class="sc-pill" x="70" y="408" width="88" height="20" rx="10"/>
-                  <text class="sc-val" x="114" y="422" text-anchor="middle"><tspan id="pelApprox">≈ </tspan><tspan id="svPel">—</tspan> kW el.</text>
+                  <rect class="sc-pill sc-ou-reading" x="62" y="412" width="104" height="22" rx="11"/>
+                  <text class="sc-val" x="114" y="427" text-anchor="middle"><tspan id="pelApprox">≈ </tspan><tspan id="svPel">—</tspan> kW el.</text>
                 </g>
                 <!-- Refrigerant circuit (outdoor unit ↔ PHE). Each run pairs its drawn pipe with a
                      fat transparent sc-hitline: a 3.5–5 px stroke is not a tappable target on a

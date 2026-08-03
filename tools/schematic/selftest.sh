@@ -322,10 +322,10 @@ echo "== 12. vacuity: a renamed vocabulary must fail loudly, not audit nothing =
 # recognising them, "0 findings" looks exactly like success. Refuse to pass instead.
 reset
 patch_file "$WORK/main/www/index.html" <<'PY'
-import sys
+import re, sys
 p = sys.argv[1]; s = open(p).read()
 i = s.index('<div class="schem-scroll">')
-open(p, 'w').write(s[:i] + s[i:].replace('class="sc-pill"', 'class="sc-chip"'))
+open(p, 'w').write(s[:i] + re.sub(r'(?<=[" ])sc-pill(?=[" ])', 'sc-chip', s[i:]))
 PY
 run_case "renamed vocabulary refuses to pass" 2 "vocabulary changed"
 
