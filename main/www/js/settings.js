@@ -459,6 +459,15 @@ function env3FormPayload() {
   if (!enabled) return { enabled: false };
   return { enabled: true, sda: +$("envSda").value, scl: +$("envScl").value };
 }
+function env3SaveError(code, fallback) {
+  const key = {
+    env3_not_reachable: "env.err_not_reachable",
+    env3_sht30_not_found: "env.err_sht30",
+    env3_qmp6988_not_found: "env.err_qmp6988",
+    env3_disable_first: "env.err_disable_first",
+  }[code];
+  return key ? t(key) : fallback;
+}
 function fillEnv3() {
   const e = S.status?.env3 || {};
   const pair = env3SafePair(e);
@@ -823,9 +832,15 @@ function setBusy(id, on, busyLabel = "btn.saving") {
 // parses to JSON `null` would still resolve, and `null.error` throws — which here would escape
 // saveReboot before idle() runs and strand S.busy + the Save button disabled for good. Mirrors
 // setup.html's errorText().
-async function errorOf(r, fallback) {
+async function errorInfo(r, fallback) {
   const o = await r.json().catch(() => null);
-  return (o && typeof o.error === "string" && o.error) || fallback;
+  return {
+    message: (o && typeof o.error === "string" && o.error) || fallback,
+    code: (o && typeof o.code === "string") ? o.code : "",
+  };
+}
+async function errorOf(r, fallback) {
+  return (await errorInfo(r, fallback)).message;
 }
 
 // Poll /status until the rebooted device answers again, then hand back to `then`.
@@ -876,7 +891,7 @@ const REBOOT_POLL_WAIT_MS     = 21000;
 // off it reported "Saved" for REJECTED writes: with no reboot to wait for, the follow-up /status
 // answers on the first try, which the poll can't tell apart from a device that came back up.
 // (/set_wifi's 500 on a failed config_save is the same shape: nothing persisted, no reboot.)
-async function saveReboot(url, body, { btn, showError, close, then, busyMsg, busyLabel }) {
+async function saveReboot(url, body, { btn, showError, close, then, busyMsg, busyLabel, mapError }) {
   // The reboot-poll keeps S.busy set for ~22 s AFTER the modal closes, so the card is reopenable
   // while a change is still landing. Say so — a silent `return` here is exactly the ignored-write
   // feedback gap this whole flow exists to close.
@@ -898,7 +913,11 @@ async function saveReboot(url, body, { btn, showError, close, then, busyMsg, bus
   // 503 is the device out of contiguous heap, not a bad field: nothing was written and the same save
   // is worth retrying verbatim, so it gets a toast and no inline field error blaming the input.
   if (r.status === 503) { idle(); toast(t("toast.busy_retry"), "err"); return; }
-  if (!r.ok) { reject(await errorOf(r, t("toast.rejected"))); return; }
+  if (!r.ok) {
+    const error = await errorInfo(r, t("toast.rejected"));
+    reject(mapError ? mapError(error.code, error.message) : error.message);
+    return;
+  }
   const res = await r.json().catch(() => ({}));
   setBusy(btn, false);
   close();

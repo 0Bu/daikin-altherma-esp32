@@ -108,6 +108,11 @@ assert.doesNotMatch(app, /closePopup\(/,
   "configuration dialogs must not call the nonexistent closePopup helper");
 assert.match(httpConfig, /env3_config_valid\(c[\s\S]*http_register_on\(s, surface, "\/set_env3"/,
   "the device must validate ENV III pin collisions before registering the config route");
+assert.match(httpConfig,
+  /static esp_err_t set_env3[\s\S]*env3_save_check\(cur, c\)[\s\S]*env3_probe\(c\.env3_sda, c\.env3_scl\)[\s\S]*config_save\(c\)/,
+  "an enabled ENV III must prove both devices reachable before firmware persists its wiring");
+assert.match(app, /env3_sht30_not_found:\s*"env\.err_sht30"[\s\S]*mapError:\s*env3SaveError/,
+  "ENV III probe failures must stay in the dialog as localized errors");
 assert.ok(httpStatus.includes("board_vendor_name(board_selected_vendor(c))"),
   "status must expose the selected board vendor");
 assert.ok(httpStatus.includes('j += ",\\"preset_id\\":";') &&

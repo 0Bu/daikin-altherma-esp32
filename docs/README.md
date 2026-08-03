@@ -480,7 +480,16 @@ POST /set_board                    # { preset_id, led_gpio, led_type, led_invert
                                    #   short-circuit to {ok:true,reboot:false}. Rejects a pin the chip
                                    #   reserves, and any pin already claimed by the other of these two
                                    #   or by the X10A link (in both directions).
-#  all seven persistent /set_* above # an NVS write failure → 500 {ok:false,error:"config write failed"},
+POST /set_env3                     # { enabled, sda?, scl? } → validate + test-before-persist +
+                                   #   reboot. Enabling probes both ENV III components on the selected
+                                   #   I²C pair before NVS is written: SHT30 must return a CRC-valid
+                                   #   sample and QMP6988 its 0x5c chip id. A failed probe returns a
+                                   #   stable `code` plus an English `error`, changes nothing and leaves
+                                   #   the UI dialog open. An unchanged active mapping requires a fresh
+                                   #   runtime sample. Changing an active mapping is a deliberate
+                                   #   disable → reboot → rewire → enable sequence. Disabling
+                                   #   (`enabled:false`) never depends on attached hardware.
+#  all persistent /set_* above     # an NVS write failure → 500 {ok:false,error:"config write failed"},
                                    #   nothing applied and no reboot (the failing key is logged to /diag)
 POST /detect                       # re-run auto-detection (reset profile to "auto" + invalidate fingerprint)
 GET  /ota/check[?ms=<epoch>]       # start a background update check (poll /ota/status)

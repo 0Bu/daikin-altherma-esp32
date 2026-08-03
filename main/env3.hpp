@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "logic/env3.hpp"
 
 namespace daik {
 
@@ -18,5 +19,7 @@ struct Env3Status {
 
 void env3_start();
 Env3Status env3_status();
+// Short-lived, non-persistent reachability proof used by POST /set_env3 before it writes NVS.
+Env3ProbeResult env3_probe(int sda, int scl);
 
 } // namespace daik

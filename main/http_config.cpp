@@ -8,6 +8,7 @@
 #include "http_handlers.hpp"
 #include "checkup.hpp"
 #include "config.hpp"
+#include "env3.hpp"
 #include "hp_poll.hpp"
 #include "logic/config_model.hpp"
 #include "logic/env3.hpp"
@@ -48,6 +49,19 @@ static void reboot_soon() { vTaskDelay(pdMS_TO_TICKS(400)); esp_restart(); }
 static esp_err_t send_err(httpd_req_t* req, const char* status, const char* msg) {
     httpd_resp_set_status(req, status);
     return http_send_json(req, (std::string("{\"ok\":false,\"error\":\"") + msg + "\"}").c_str());
+}
+
+// ENV III reachability failures carry a stable code so the bilingual UI can translate them while
+// direct API clients still receive a useful English explanation.  All values are internal literals.
+static esp_err_t send_env3_err(httpd_req_t* req, const char* status,
+                               const char* code, const char* msg) {
+    httpd_resp_set_status(req, status);
+    std::string body = "{\"ok\":false,\"code\":\"";
+    body += code;
+    body += "\",\"error\":\"";
+    body += msg;
+    body += "\"}";
+    return http_send_json(req, body.c_str());
 }
 
 static const char* js(cJSON* o, const char* k, const char* def = "") {
@@ -717,14 +731,16 @@ static esp_err_t set_board(httpd_req_t* req) {
 
 // POST /set_env3 {enabled,sda,scl}. The I2C driver owns the bus for the life of its task, so a pin
 // change is persisted and applied by reboot just like board-local hardware. Disabled is always a
-// valid recovery state; enabled configs require a selected M5Stack board preset and must pass the
-// chip-safe and cross-subsystem collision rules.
+// valid recovery state. Enabling is proof-gated BEFORE config_save(): SHT30 must return a CRC-valid
+// measurement and QMP6988 its chip id on the selected pair. Thus a blue Save button cannot persist
+// a wiring guess and reboot into a permanently unavailable sensor.
 static esp_err_t set_env3(httpd_req_t* req) {
     char body[256];
     if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
     cJSON* j = cJSON_Parse(body);
     if (!j) return send_err(req, "400 Bad Request", "bad json");
-    Config c = config();
+    const Config cur = config();
+    Config c = cur;
     c.env3_enabled = jb(j, "enabled", c.env3_enabled);
     c.env3_sda = ji(j, "sda", c.env3_sda);
     c.env3_scl = ji(j, "scl", c.env3_scl);
@@ -732,7 +748,38 @@ static esp_err_t set_env3(httpd_req_t* req) {
     std::string reason;
     if (!env3_config_valid(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi()))
         return send_err(req, "400 Bad Request", reason.c_str());
-    const Config cur = config();
+
+    switch (env3_save_check(cur, c)) {
+        case Env3SaveCheck::None:
+            break;  // disabling is the recovery path and must never depend on attached hardware
+        case Env3SaveCheck::RunningSample: {
+            const Env3Status status = env3_status();
+            if (!status.connected || !status.fresh)
+                return send_env3_err(req, "422 Unprocessable Entity", "env3_not_reachable",
+                                     "ENV III is not currently reachable on the selected SDA/SCL pins");
+            break;
+        }
+        case Env3SaveCheck::HardwareProbe: {
+            switch (env3_probe(c.env3_sda, c.env3_scl)) {
+                case Env3ProbeResult::Ok:
+                    break;
+                case Env3ProbeResult::BusUnavailable:
+                    return send_env3_err(req, "503 Service Unavailable", "env3_probe_busy",
+                                         "The I2C probe could not start; retry the save");
+                case Env3ProbeResult::Sht30Unavailable:
+                    return send_env3_err(req, "422 Unprocessable Entity", "env3_sht30_not_found",
+                                         "ENV III temperature/humidity sensor not found on the selected pins");
+                case Env3ProbeResult::Qmp6988Unavailable:
+                    return send_env3_err(req, "422 Unprocessable Entity", "env3_qmp6988_not_found",
+                                         "ENV III pressure sensor not found on the selected pins");
+            }
+            break;
+        }
+        case Env3SaveCheck::DisableFirst:
+            return send_env3_err(req, "409 Conflict", "env3_disable_first",
+                                 "Disable ENV III before changing its SDA/SCL pins");
+    }
+
     if (c.env3_enabled == cur.env3_enabled && c.env3_sda == cur.env3_sda && c.env3_scl == cur.env3_scl)
         return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
     if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");

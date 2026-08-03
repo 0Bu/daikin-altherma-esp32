@@ -144,11 +144,20 @@ an enabled raw `POST /set_env3` is rejected. This is vendor-based rather than ha
 AtomS3 Lite: a future supported M5Stack board preset inherits the capability when it is added to the
 same table. Custom cannot assert a vendor, so it deliberately fails closed.
 
-The GPIO selectors preselect the AtomS3 Lite Grove mapping only when its pins are actually free. A save is
-rejected if ENV III overlaps X10A, the status LED, the recovery button, or a chip-reserved pad; the
-same check runs again at boot and disables an invalid persisted mapping. This matters on the AtomS3
-Lite because its one Grove connector cannot carry X10A and ENV III at the same time even though both
-use the same four-colour cable.
+The GPIO selectors preselect the AtomS3 Lite Grove mapping only when its pins are actually free. A
+save is rejected if ENV III overlaps X10A, the status LED, the recovery button, or a chip-reserved
+pad; the same check runs again at boot and disables an invalid persisted mapping. Enabling is also
+**test-before-persist**: on the selected pair, the SHT30 must return one CRC-valid measurement and
+the QMP6988 must return its `0x5c` chip id before the firmware writes NVS. If either device is not
+reachable, the dialog stays open with the matching error and no configuration is changed. Selecting
+**No sensor** remains directly saveable because disabling is the recovery path and requires no
+attached hardware. A running ENV III is accepted only while its latest sample is fresh. To move an
+already active sensor to other pins, first select **No sensor**, let the board restart, rewire it,
+then enable it on the new pair; this avoids creating a second I²C controller while the old one still
+owns its bus.
+
+This matters on the AtomS3 Lite because its one Grove connector cannot carry X10A and ENV III at the
+same time even though both use the same four-colour cable.
 
 I²C cannot discover which physical GPIOs carry SDA and SCL. It can probe the ENV III addresses only
 after the firmware has configured a candidate GPIO pair as an I²C bus. Therefore the dialog keeps

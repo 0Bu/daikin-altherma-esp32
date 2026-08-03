@@ -113,6 +113,11 @@ const fetch = async (url, options = {}) => {
   fetchState.calls.push({ url, body });
   if (fetchState.mode === "throw") throw new Error("unreachable");
   if (fetchState.mode === "reject") return response(false, { error: "rejected by test" });
+  if (fetchState.mode === "env3_missing" && url === "/set_env3")
+    return response(false, {
+      code: "env3_sht30_not_found",
+      error: "ENV III temperature/humidity sensor not found on the selected pins",
+    }, 422);
   if (url === "/status") return response(true, {});
   return response(true, { reboot: false, saved: false });
 };
@@ -321,6 +326,22 @@ await document.getElementById("env3Form").fire("submit");
 await settle();
 assert.equal(fetchState.calls.length, 0, "equal ENV III pins must be rejected before POST");
 assert.equal(document.getElementById("env3Modal").hidden, false, "invalid ENV III pins stay editable");
+
+document.getElementById("envSda").value = "2";
+document.getElementById("envScl").value = "1";
+fetchState.mode = "env3_missing";
+fetchState.calls.length = 0;
+await document.getElementById("env3Form").fire("submit");
+await settle();
+assert.ok(fetchState.calls.some((call) => call.url === "/set_env3"),
+  "a valid ENV III pair must be checked by firmware");
+assert.equal(document.getElementById("env3Modal").hidden, false,
+  "an unreachable ENV III must not be accepted or close the dialog");
+assert.equal(document.getElementById("envError").hidden, false,
+  "an unreachable ENV III must show an inline error");
+assert.equal(document.getElementById("envError").textContent,
+  "Der Temperatur-/Feuchtesensor des ENV III ist an diesen Pins nicht erreichbar.");
+assert.equal(ui.S.busy, false, "a failed ENV III probe must release the Save button");
 
 // Representative invalid inputs for every client-validated transport stay in their dialog and do
 // not reach firmware. Server-validated NTP/Board paths are covered by the HTTP rejection loop above.

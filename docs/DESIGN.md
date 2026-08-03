@@ -1159,9 +1159,13 @@ vocabulary exactly:
    **Beobachten**, **Raumtemperaturquellen**, **Außenmessungen**, **Regelstrategie**, and
    **Sicherheit & Ausgabe** = **Nur lesend**. The room-source row opens the exact-topic,
    temperature-JSON-path, optional source-timestamp path and maximum-age modal. The outdoor row opens
-   the opt-in ENV III wiring modal (preset plus SDA/SCL) only for a user-selected M5Stack board; live
-   temperature, humidity and pressure are observation-only and render in a separate dashboard card,
-   never as a replacement for Daikin R1T.
+   the opt-in ENV III wiring modal (sensor dropdown plus SDA/SCL) only for a user-selected M5Stack
+   board. Selecting **No sensor** hides and disables both pin fields. Selecting **ENV III** reveals
+   them and keeps the short data-line/clock-line explanation visible. Save shows a checking state;
+   only a reachable SHT30 and QMP6988 may close the modal and persist the mapping. A rejection stays
+   inline in the open dialog and releases Save for correction or retry. Live temperature, humidity
+   and pressure are observation-only and render in a separate dashboard card, never as a
+   replacement for Daikin R1T.
    Every text-like field in this and the other modals selects its complete value
    on focus/click, so a long topic, host or JSON path can be replaced with one paste. The room-source
    modal separates **Testen** from **Speichern**: Save starts disabled for a non-empty topic, Test

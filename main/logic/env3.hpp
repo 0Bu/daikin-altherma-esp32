@@ -136,6 +136,27 @@ inline bool env3_board_supported(const Config& c) {
     return board_selected_vendor(c) == BoardVendor::M5Stack;
 }
 
+// Saving an enabled sensor is proof-gated: selecting a pair of pins is only a wiring claim, not
+// evidence that an ENV III is attached there.  The HTTP handler follows this pure plan before it
+// writes NVS.  A running sensor already owns I2C0 for the life of its task, so its current pins are
+// verified from the latest fresh sample.  A new sensor can be probed directly.  Moving an already
+// running bus must be a disable -> rewire -> enable sequence; starting a second controller on a
+// partially shared pair would let two masters drive the same wire.
+enum class Env3SaveCheck : uint8_t { None, RunningSample, HardwareProbe, DisableFirst };
+
+inline Env3SaveCheck env3_save_check(const Config& current, const Config& proposed) {
+    if (!proposed.env3_enabled) return Env3SaveCheck::None;
+    if (!current.env3_enabled) return Env3SaveCheck::HardwareProbe;
+    if (current.env3_sda == proposed.env3_sda && current.env3_scl == proposed.env3_scl)
+        return Env3SaveCheck::RunningSample;
+    return Env3SaveCheck::DisableFirst;
+}
+
+// Hardware result from the synchronous pre-save probe.  Adding an IDF device handle does not touch
+// the wire, so reachability is stronger: SHT30 must return a CRC-valid measurement and QMP6988 must
+// return its documented chip id.  Only Ok permits config_save().
+enum class Env3ProbeResult : uint8_t { Ok, BusUnavailable, Sht30Unavailable, Qmp6988Unavailable };
+
 inline bool env3_config_valid(const Config& c, std::string& reason, int max_gpio = 48,
                               bool octal_spi = true) {
     if (!c.env3_enabled) return true;
