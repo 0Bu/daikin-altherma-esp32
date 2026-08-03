@@ -43,6 +43,7 @@
 #include "logic/http_body.hpp"
 #include "logic/json.hpp"
 #include "logic/mqtt_group.hpp"
+#include "logic/mqtt_publish_gate.hpp"
 #include "logic/link_watch.hpp"
 #include "logic/feature_gate.hpp"
 #include "logic/history.hpp"
@@ -9117,6 +9118,43 @@ static void test_raw_capture() {
     CHECK(!logic::raw_capture_due(b, true, 9999999 * sec));
 }
 
+// ── Outbound MQTT belongs to a proven X10A installation, never an unwired bench board ────────────
+static void test_mqtt_publish_gate() {
+    MqttPublishGateState state = MqttPublishGateState::WaitingForX10a;
+
+    // Broker configuration alone proves nothing. With no X10A reply the client itself stays
+    // stopped, so neither application messages nor its shared-topic LWT can reach the broker.
+    auto d = mqtt_publish_gate_step(state, false, false);
+    CHECK(d.next == MqttPublishGateState::WaitingForX10a);
+    CHECK(!d.start_client && !d.publish_cycle && !d.publish_offline && !d.resumed);
+
+    // The first valid bus cycle authorizes exactly the client start. Publication still waits for
+    // MQTT_EVENT_CONNECTED rather than racing the asynchronous connect.
+    d = mqtt_publish_gate_step(state, true, false);
+    CHECK(d.next == MqttPublishGateState::Active);
+    CHECK(d.start_client && !d.publish_cycle && !d.publish_offline && !d.resumed);
+    state = d.next;
+    d = mqtt_publish_gate_step(state, true, true);
+    CHECK(d.publish_cycle && !d.start_client && !d.publish_offline);
+
+    // A live installation going down gets one explicit offline marker, then complete silence.
+    d = mqtt_publish_gate_step(state, false, true);
+    CHECK(d.next == MqttPublishGateState::Paused);
+    CHECK(d.publish_offline && !d.publish_cycle && !d.start_client);
+    state = d.next;
+    d = mqtt_publish_gate_step(state, false, true);
+    CHECK(d.next == MqttPublishGateState::Paused);
+    CHECK(!d.publish_offline && !d.publish_cycle && !d.resumed);
+
+    // Recovery on the existing broker session asks the runtime for an online + fresh state seed;
+    // a recovery while the broker is down still changes state but cannot publish prematurely.
+    d = mqtt_publish_gate_step(state, true, true);
+    CHECK(d.next == MqttPublishGateState::Active);
+    CHECK(d.resumed && d.publish_cycle && !d.publish_offline);
+    d = mqtt_publish_gate_step(state, true, false);
+    CHECK(d.resumed && !d.publish_cycle && !d.publish_offline);
+}
+
 int main() {
     test_crc();
     test_registers();
@@ -9137,6 +9175,7 @@ int main() {
     test_availability();
     test_fault_state();
     test_raw_capture();
+    test_mqtt_publish_gate();
     test_published_kind();
     test_history();
     test_checkup();

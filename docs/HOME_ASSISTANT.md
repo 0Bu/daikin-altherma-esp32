@@ -9,7 +9,14 @@ MQTT but is not exposed as HA value entities. Topics, entities and derived (COP)
 
 Web UI → the **header gear → Connections → MQTT** → enter `IP:PORT`
 (+ user/pass if needed) → save. With the HA MQTT integration enabled, the device and its sensors
-appear on their own. Clear the broker to disable.
+appear on their own after X10A has returned a valid reply. Clear the broker to disable.
+
+X10A owns the outbound installation identity. Until the first valid X10A reply after boot, the
+firmware does not start its MQTT client at all: an unwired spare/debug board therefore publishes no
+state, discovery, heartbeat, auxiliary-source data or cleanup tombstone, and cannot arm the shared
+`<base>/status` last will. If an already-active X10A link later drops, the firmware publishes
+`offline` once and then suspends every other publish until the bus responds again; recovery publishes
+`online` and a fresh state seed. Local HTTP diagnostics remain available throughout.
 
 ## Topics
 

@@ -55,6 +55,10 @@ suite cannot link: boot and the Modbus poll task never browse mDNS, an empty add
 and only the dialog's explicit discovery endpoint runs the bounded search. The endpoint returns the
 found address to the form but cannot persist it behind the normal Save/Cancel boundary.
 
+`node test/test_mqtt_x10a_gate_contract.mjs` pins the other IDF-facing ownership boundary: the X10A
+poll task starts before MQTT, `mqtt_ha_start()` cannot start a client or arm the installation LWT,
+and the sole client-start plus all ordinary publications remain behind the X10A gate in `mqtt_task()`.
+
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named
 HomeHub status in the EKRHH register map and the schematic renderer against every X10A operation
 mode. It pins the manufacturer terms, readable diagram headlines and consistent German model-card
@@ -111,6 +115,8 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   `vLwt`): the pre-BUH heat-exchanger outlet (R1T) is chosen over a setpoint, a mixed-zone R1T, or
   the post-BUH (R2T) twin, across the four alias label forms — and, catalog-wide, every detectable
   profile resolves a real measurement and never a setpoint (issue #121, the #35–#39 failure shape).
+- `logic/mqtt_publish_gate.hpp` — an unwired board never starts MQTT or arms the installation LWT;
+  an active board publishes one offline transition on X10A loss, then stays silent until recovery.
 - `logic/profile_view.hpp` + `def/overlay.hpp` — the generated table plus the temporary page-`0x10`
   supplement as one row sequence, and the **overlay rule** (a block applies only if the base already
   references its page). Asserted: the block is withheld when the page is absent, base rows keep their

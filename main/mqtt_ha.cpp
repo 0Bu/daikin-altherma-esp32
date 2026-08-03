@@ -2,6 +2,10 @@
 // esp-mqtt client in its own publish task:
 //   • TLS policy: credentials present ⇒ mqtts:// + CA-verified (esp_crt_bundle); NEVER send
 //     credentials over plaintext (no silent fallback — refuse with an error in /status.mqtt).
+//   • X10A owns the outbound installation identity: until the first valid X10A reply, do not even
+//     start the MQTT client (therefore no connect-time publishes or broker-side LWT from an unwired
+//     debug board). After activation, a bus loss marks availability offline once and then suppresses
+//     every publish until X10A returns.
 //   • On (re)connect: mark availability "online", stream retained discovery configs for the active
 //     X10A profile, weather forecast, diagnostics and enabled ENV III, and retract every retired
 //     HomeHub discovery config. HomeHub values stay on MQTT for non-HA consumers, but are deliberately
@@ -55,6 +59,7 @@
 #include "logic/fault_state.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/mqtt_group.hpp"
+#include "logic/mqtt_publish_gate.hpp"
 #include "logic/reference_temperature.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/weather_mqtt.hpp"
@@ -1204,6 +1209,8 @@ static void mqtt_task(void*) {
     esp_task_wdt_add(NULL);                            // watch the publish task for a wedged broker write
     int heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S;    // publish immediately on the first connected cycle
     int modbus_ha_retire_elapsed_s = MODBUS_HA_RETIRE_INTERVAL_S;
+    MqttPublishGateState publish_gate = MqttPublishGateState::WaitingForX10a;
+    bool client_start_failed = false;
     for (;;) {
         // Feed the watchdog unconditionally at the top of every cycle — the loop wakes each second
         // regardless of connection state, so this must NOT be gated on s_connected or an actual
@@ -1212,11 +1219,58 @@ static void mqtt_task(void*) {
         const int delay_s = POLL_INTERVAL_S;
 
         try {
+            const HpStats hp = hp_stats();
+            const MqttPublishGateDecision gate = mqtt_publish_gate_step(
+                publish_gate, hp.connected, s_connected.load());
+
+            // Do not connect an unproven board to the broker. The configured LWT uses the shared
+            // installation availability topic, so merely connecting an unwired bench board would
+            // let its later socket loss overwrite the real publisher with `offline`, even if this
+            // task itself emitted no application message.
+            if (gate.start_client && !client_start_failed) {
+                const esp_err_t rc = esp_mqtt_client_start(s_client);
+                if (rc == ESP_OK) {
+                    publish_gate = gate.next;
+                    set_status(false, "");
+                    diag_printf("mqtt: starting after first X10A response\n");
+                } else {
+                    client_start_failed = true;        // esp-mqtt start is a one-shot lifecycle call
+                    set_status(false, "client start failed");
+                    diag_printf("mqtt: client start failed (%s)\n", esp_err_to_name(rc));
+                }
+            } else if (!gate.start_client) {
+                publish_gate = gate.next;
+            }
+
+            // Before the first X10A proof there is no started MQTT client to subscribe or publish
+            // through. A failed start likewise remains silent rather than retrying an invalid
+            // lifecycle transition every second.
+            if (publish_gate == MqttPublishGateState::WaitingForX10a) {
+                vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
+                continue;
+            }
+
             const Config ref_config = config();
             service_reference_subscription(ref_config);
             service_reference_probe_subscription(ref_config);
             service_reference_frames(ref_config);
-            if (s_connected) {
+
+            if (gate.publish_offline) {
+                mqtt_publish(s_avail, "offline", 0, 1, 1);
+                diag_printf("mqtt: X10A unavailable — publishing paused\n");
+            }
+
+            // A bus recovery on the same broker session needs only a fresh availability/state seed;
+            // discovery is already retained. If the broker reconnected while the bus was down,
+            // s_announce remains set and the full ordinary reconnect path below owns the reseed.
+            if (gate.resumed && s_connected && !s_announce.load()) {
+                mqtt_publish(s_avail, "online", 0, 0, 1);
+                s_last_x10a_json.clear();
+                heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S;
+                diag_printf("mqtt: X10A restored — publishing resumed\n");
+            }
+
+            if (gate.publish_cycle) {
                 if (s_announce.exchange(false)) {              // consume: just (re)connected
                     s_announced_profile.clear();               // force a fresh discovery below
                     s_last_x10a_json.clear();                  // force full per-topic state re-seeds
@@ -1443,13 +1497,16 @@ void mqtt_ha_start() {
     s_heartbeat = heartbeat_topic(s_base);
     s_crash     = crash_topic(s_base);
     if (!build_client()) return;                               // policy error already surfaced
-    esp_mqtt_client_start(s_client);
+    // mqtt_task starts the client only after hp_stats() proves a valid X10A reply. Starting it here
+    // would already arm the shared installation LWT, allowing an unwired debug board to alter MQTT
+    // even if every explicit mqtt_publish() below were gated.
+    set_status(false, "waiting for X10A response");
     // Hardware coredump: the 4 KiB task hit the ESP32-S3 stack-end watchpoint while building the
     // heartbeat after Config gained the reference-source strings. heartbeat.hpp no longer creates
     // chained temporary strings, and 6 KiB restores explicit headroom for future bounded mappings.
     if (xTaskCreate(mqtt_task, "mqtt_pub", 6144, nullptr, 4, nullptr) != pdPASS) {
-        // No publish task -> discovery/value/heartbeat messages never go out. The client keeps its connection
-        // (and LWT), but say so rather than looking configured-but-silent in /status.
+        // No publish task -> the client is never started, so no discovery/value/heartbeat message or
+        // shared-topic LWT can go out. Say so rather than looking configured-but-silent in /status.
         set_status(false, "publish task alloc failed");
         diag_printf("mqtt: publish task alloc failed — no MQTT publishing this boot\n");
     }

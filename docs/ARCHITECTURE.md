@@ -1199,6 +1199,14 @@ The Home Assistant bridge:
   both paths, so a successful pre-save test cannot disagree with live capture. JSON parsing, string
   work, transient test subscription changes and all publishing happen in the task, so the mqtt
   event loop is never blocked by either.
+- **X10A-gated installation ownership.** MQTT configuration is not authority to speak for the
+  installation. The client itself (including its shared `<base>/status` last will) starts only after
+  `hp_stats().connected` proves a valid X10A reply. An unwired spare/debug board consequently emits
+  no discovery, state, heartbeat, crash, weather, Modbus or cleanup publication. Once activated, an
+  X10A loss publishes one retained `offline` transition and pauses every other publish; recovery on
+  the same broker session restores `online` plus a fresh X10A/heartbeat seed, while a broker
+  reconnect follows the normal full announce path. HTTP diagnostics and the X10A retry loop remain
+  independent of the gate.
 - **Discovery is streamed.** A full Altherma value set can be 30–40+ entities; the bridge emits one
   entity's discovery config at a time (retained) on (re)connect, so it never needs one large
   contiguous heap block — the same memory discipline as the rest of the firmware. Layout-marker
