@@ -149,6 +149,12 @@ jobs:
       - name: Test explicit HomeHub discovery lifecycle
         run: node test/test_homehub_discovery_contract.mjs
 
+      # MQTT config alone must not let an unwired spare/debug board speak for the installation.
+      # Pin the IDF-facing lifecycle that the pure gate test cannot link: X10A starts first, the
+      # sole esp-mqtt start call is inside the gate, and ordinary publishes remain behind it.
+      - name: Test X10A-gated MQTT lifecycle
+        run: node test/test_mqtt_x10a_gate_contract.mjs
+
       # HomeHub uses Int16 for both numbers and selectors; X10A exposes stable English tokens for
       # the current indoor operation mode. Execute both production display boundaries and pin every
       # manufacturer enum and localised schematic headline in English and German. Ordinary binary
