@@ -2,8 +2,16 @@
 // browser combiner and renderer so an X10A gap cannot erase a live Modbus sample, and so the second
 // line remains visibly attributed instead of becoming an unlabeled near-overlap.
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import vm from "node:vm";
 import { readAppFragments } from "../tools/ui/read_app_source.mjs";
+
+const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
+assert.match(style, /\.vhist-state-graph \.vhist-tip \{[^}]*z-index:\s*2[^}]*white-space:\s*pre;/,
+  "state tooltips must paint over the timeline and honor only their deliberate vertical breaks");
+assert.ok(style.lastIndexOf(".vhist-state-on.mb { background: var(--src-mb); }") >
+          style.lastIndexOf(".vhist-state-on.sg-recommended"),
+  "the lower Modbus lane's petrol source colour must win over every categorical state fill");
 
 const S = {
   status: { history: {
@@ -52,7 +60,7 @@ const context = {
     if (key === "hist.duration_min") return `${arg} min`;
     if (key === "hist.duration_h") return `${arg} h`;
     if (key === "hist.duration_hm") return `${arg} h ${arg2} min`;
-    if (key === "hist.state_phase_run") return `${arg} · ${arg2} · ca. ${args[2]}`;
+    if (key === "hist.state_phase_run") return `${arg}\n${arg2} · ca. ${args[2]}`;
     if (key === "hist.modbus_plateau") return `Register unverändert ${arg} · ca. ${arg2} · Messalter unbekannt`;
     if (key === "hist.boost_total") return `Boost aktiv · ${arg}`;
     if (key === "hist.boost_none") return "Kein Boost im aufgezeichneten Zeitraum.";
@@ -169,15 +177,21 @@ assert.match(boostHtml, /Empfehlung ein/);
 assert.match(boostHtml, /Erzwungen ein/);
 assert.doesNotMatch(boostHtml, /vhist-state-runs|· Phasen/,
   "phase details belong to the chart popup, never a long list below it");
-assert.match(boostHtml, /HomeHub · Modbus/);
-assert.match(h.scrubText(boostView, 1), /Modbus Zwangsabschaltung/);
-assert.match(h.scrubText(boostView, 1), /Zwangsabschaltung .* ca\. 5 min/,
+assert.match(boostHtml, /vhist-state-lane-label">X10A/);
+assert.match(boostHtml, /vhist-state-lane-label mb">Modbus/);
+assert.doesNotMatch(boostHtml, /vhist-state-legend/,
+  "source names belong directly on their lanes, not in a detached legend");
+assert.match(h.scrubText(boostView, 1), /X10A \+ Modbus\nZwangsabschaltung/);
+assert.match(h.scrubText(boostView, 1), /Zwangsabschaltung\n.* · ca\. 5 min/,
   "the popup names the containing phase and sampled duration");
 assert.doesNotMatch(h.scrubText(boostView, 1), /Boost aus/,
   "a non-Boost manufacturer mode must not be reduced to the ambiguous words Boost off");
-assert.match(h.scrubText(boostView, 2), /Modbus Empfehlung ein · Boost aktiv/,
+assert.match(h.scrubText(boostView, 2), /X10A \+ Modbus\nEmpfehlung ein · Boost aktiv/,
   "scrubbing names the manufacturer mode before the derived Boost interpretation");
-assert.match(h.scrubText(boostView, 3), /Modbus Erzwungen ein/);
+assert.match(h.scrubText(boostView, 3), /X10A \+ Modbus\nErzwungen ein/);
+assert.match(h.scrubText(boostView, 2),
+  /^X10A \+ Modbus\nEmpfehlung ein · Boost aktiv\n.* · ca\. 5 min$/,
+  "matching source phases collapse into one compact, explicitly shared tooltip block");
 
 // BSH is also categorical. Its active buckets render as intervals and the wording calls the sum
 // raster time rather than exact runtime; X10A is the preferred physical-state source.
@@ -193,7 +207,7 @@ assert.match(bshHtml, /Heizstab aktiv erfasst · 10 min Rasterzeit/);
 assert.match(bshHtml, /vhist-state-on state-off/);
 assert.match(bshHtml, /vhist-state-on heater-on/);
 assert.doesNotMatch(bshHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(bshView, 1), /X10A Heizstab aktiv .* ca\. 5 min/);
+assert.match(h.scrubText(bshView, 1), /X10A \+ Modbus\nHeizstab aktiv\n.* · ca\. 5 min/);
 
 // Both outdoor pills open categorical timelines. Defrost is event-folded; Quiet keeps two
 // source-attributed lanes because X10A and HomeHub report the same exact mode independently.
@@ -207,7 +221,7 @@ assert.match(defrostHtml, /Abtauen aktiv erfasst · 10 min Rasterzeit/);
 assert.match(defrostHtml, /vhist-state-on state-off/);
 assert.match(defrostHtml, /vhist-state-on defrost-on/);
 assert.doesNotMatch(defrostHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(defrostView, 1), /Abtauen aktiv .* ca\. 5 min/);
+assert.match(h.scrubText(defrostView, 1), /Abtauen aktiv\n.* · ca\. 5 min/);
 
 S.hist.set("quiet_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
   held: [], v: [10, 10, 0, 0] });
@@ -219,12 +233,12 @@ assert.equal(quietView.series.length, 2);
 assert.match(quietHtml, /vhist-state-track/);
 assert.doesNotMatch(quietHtml, /vhist-line/);
 assert.match(quietHtml, /Leise-Modus aktiv erfasst · 10 min Rasterzeit/);
-assert.match(quietHtml, /HomeHub · Modbus/);
+assert.match(quietHtml, /vhist-state-lane-label mb">Modbus/);
 assert.match(quietHtml, /vhist-state-on state-off/);
 assert.match(quietHtml, /vhist-state-on quiet-on/);
 assert.doesNotMatch(quietHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(quietView, 0), /X10A Leise-Modus aktiv .* ca\. 10 min/);
-assert.match(h.scrubText(quietView, 1), /Modbus Leise-Modus aus .* ca\. 10 min/);
+assert.match(h.scrubText(quietView, 0), /X10A\nLeise-Modus aktiv\n.* · ca\. 10 min/);
+assert.match(h.scrubText(quietView, 1), /Modbus\nLeise-Modus aus\n.* · ca\. 10 min/);
 
 // BUH is one component with two event-folded stage bits. The browser combines both aligned rings
 // into an off/step-1/step-2 timeline; it must not graph either raw bit as a numeric 0/1 curve.
@@ -245,9 +259,9 @@ assert.match(buhHtml, /vhist-state-on step1/);
 assert.match(buhHtml, /vhist-state-on step2/);
 assert.match(buhHtml, /vhist-state-on state-off/);
 assert.doesNotMatch(buhHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(buhView, 1), /Stufe 1 .* ca\. 5 min/);
-assert.match(h.scrubText(buhView, 2), /Stufe 2 .* ca\. 10 min/);
-assert.match(h.scrubText(buhView, 5), /nicht gemessen .* ca\. 5 min/);
+assert.match(h.scrubText(buhView, 1), /Stufe 1\n.* · ca\. 5 min/);
+assert.match(h.scrubText(buhView, 2), /Stufe 2\n.* · ca\. 10 min/);
+assert.match(h.scrubText(buhView, 5), /nicht gemessen\n.* · ca\. 5 min/);
 
 // The schematic shows intuitive pump speed, while the X10A row is inverted (0=max, 100=stop).
 // Its inspector curve must transform the source ring instead of making a stopped pump look maximal.
@@ -271,8 +285,8 @@ assert.match(valveHtml, /Warmwasser · 15 min · Raumkreis · 15 min/);
 assert.match(valveHtml, /vhist-state-on valve-space/);
 assert.match(valveHtml, /vhist-state-on valve-dhw/);
 assert.doesNotMatch(valveHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(valveView, 0), /X10A Raumkreis .* ca\. 10 min/);
-assert.match(h.scrubText(valveView, 2), /Modbus Warmwasser .* ca\. 10 min/);
+assert.match(h.scrubText(valveView, 0), /X10A \+ Modbus\nRaumkreis\n.* · ca\. 10 min/);
+assert.match(h.scrubText(valveView, 2), /X10A \+ Modbus\nWarmwasser\n.* · ca\. 10 min/);
 
 // Bucket alignment, not array index: Modbus starts one raster later and must leave the first slot
 // empty rather than sliding its first sample under the older X10A point.

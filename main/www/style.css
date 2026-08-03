@@ -610,22 +610,26 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   background: var(--brand-sky); }
 .vhist-source.mb { color: var(--src-mb); }
 .vhist-source.mb i { background: var(--src-mb); }
-/* Component states are categorical timelines, not numeric curves. Every valid state owns a labelled
-   colour in the second legend; missing samples alone are hatched. Source is a separate channel: the
-   first legend and the thin outline around each lane identify X10A versus HomeHub, so a state keeps
-   the same fill on both buses and a disagreement cannot be blended into one plausible answer. */
-.vhist-state-legend .vhist-source i { width: 16px; height: 7px; border-radius: 4px; }
-.vhist-source-lanes .vhist-source i { background: transparent; box-shadow: 0 0 0 1.5px var(--brand-sky); }
-.vhist-source-lanes .vhist-source.mb i { background: transparent; box-shadow: 0 0 0 1.5px var(--src-mb); }
-.vhist-state-graph { padding-top: 38px; }
+/* Component states are categorical timelines, not numeric curves. Every valid X10A state owns a
+   labelled colour in the state legend; missing samples alone are hatched. HomeHub keeps its petrol
+   fill across every valid phase. Put the source name directly on its lane instead of making the eye
+   map a detached source legend onto two otherwise identical full-width bars. */
+.vhist-state-graph { padding-top: 58px; }
+/* State readouts are intentionally overlaid on the timeline. They can be taller than the reserved
+   strip because each source/state/interval/duration field is stacked vertically; keep the bubble
+   above the later-painted tracks and crosshair instead of letting the bars cut through its text. */
+.vhist-state-graph .vhist-tip { z-index: 2; white-space: pre; }
 .vhist-state-plot { height: auto; display: grid; gap: 7px; padding: 4px 0; }
+.vhist-state-lane { display: grid; gap: 3px; }
+.vhist-state-lane-label { color: var(--brand-sky); font-size: 11px; font-weight: 700;
+  line-height: 1; }
+.vhist-state-lane-label.mb { color: var(--src-mb); }
 .vhist-state-track { position: relative; height: 15px; overflow: hidden; border-radius: 999px;
   background: var(--hatch); box-shadow: inset 0 0 0 1px var(--pipe); }
 .vhist-state-track.x10a { box-shadow: inset 0 0 0 1px var(--pipe), 0 0 0 1px var(--brand-sky); }
 .vhist-state-track.modbus { box-shadow: inset 0 0 0 1px var(--pipe), 0 0 0 1px var(--src-mb); }
 .vhist-state-on, .vhist-state-gap { position: absolute; inset-block: 0; min-width: 2px; }
 .vhist-state-on { background: var(--brand-sky); }
-.vhist-state-on.mb { background: var(--src-mb); }
 .vhist-state-gap { background: repeating-linear-gradient(135deg, transparent 0 3px,
   var(--line) 3px 5px); }
 .vhist-level-legend { margin-top: -1px; }
@@ -656,6 +660,9 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-state-on.sg-recommended, .vhist-level.sg-recommended i {
   background: var(--src-mb);
 }
+/* Source identity wins the cascade for the lower lane. Keep this after every state-fill rule: the
+   state class still drives X10A and the tooltip wording, but must not repaint Modbus cyan/orange. */
+.vhist-state-on.mb { background: var(--src-mb); }
 /* The SVG stretches to the panel width; overflow stays visible so the stroke isn't clipped at the
    extremes (the geometry deliberately uses the full viewBox height — see HIST_H in app.js). */
 /* The tooltip gets its OWN strip above the plot: it follows the cursor horizontally (Grafana-style)

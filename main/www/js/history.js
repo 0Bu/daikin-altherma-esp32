@@ -492,12 +492,12 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     )).join("");
     const missing = stateRuns(s, null, cfg.classify).map(([from, count]) =>
       `<span class="vhist-state-gap" style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
-    return `<div class="vhist-state-track ${s.source}" aria-hidden="true">${on}${missing}</div>`;
+    const sourceLabel = s.source === "modbus" ? "Modbus" : "X10A";
+    return `<div class="vhist-state-lane">` +
+      `<span class="vhist-state-lane-label${s.source === "modbus" ? " mb" : ""}">${sourceLabel}</span>` +
+      `<div class="vhist-state-track ${s.source}" aria-hidden="true">${on}${missing}</div>` +
+    `</div>`;
   }).join("");
-  const legend = view.series.length > 1 || view.series[0].source === "modbus"
-    ? `<div class="vhist-legend vhist-state-legend${cfg.levels ? " vhist-source-lanes" : ""}">${view.series.map((s) =>
-        `<span class="vhist-source${s.source === "modbus" ? " mb" : ""}"><i></i>${esc(s.name)}</span>`).join("")}</div>`
-    : "";
   const levelLegend = cfg.levels
     ? `<div class="vhist-legend vhist-level-legend">${cfg.levels.map((level) =>
         `<span class="vhist-level ${level.cls}"><i></i>${esc(t(level.label))}</span>`).join("")}</div>`
@@ -514,7 +514,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "");
   return wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.since", spanH))}</span>` +
-      `<span class="vhist-range mono num">${esc(totalText)}</span></div>` + legend + levelLegend +
+      `<span class="vhist-range mono num">${esc(totalText)}</span></div>` + levelLegend +
     `<div class="vhist-graph vhist-state-graph${pi >= 0 ? " has-pin" : ""}">` +
       `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +
       `<div class="vhist-plot vhist-state-plot" data-hist="${esc(id)}" data-n="${n}" tabindex="0" role="img"` +
@@ -753,12 +753,20 @@ function scrubText(h, i) {
   if (cfg) {
     // A state chart is already a sequence of PHASES. Hovering any point therefore names the whole
     // containing phase — source, state, start/end and sampled duration — while the chart itself
-    // stays compact. Newlines keep paired X10A/HomeHub answers readable in the same popup.
-    return h.series.map((s) => {
+    // stays compact. Source, state and timing form deliberate vertical rows; timing and duration
+    // share one row because they describe the same interval. When both instruments report the exact
+    // same phase, collapse their duplicate prose into one explicitly shared source block. A genuine
+    // disagreement still renders as two consecutive blocks, so compactness never hides evidence.
+    const blocks = h.series.map((s) => {
       const [from, count] = sampleRunAt(s.v, i);
-      return `${s.source === "modbus" ? "Modbus" : "X10A"} ` +
-        t(cfg.run, valueText(s), stateRunWhen(h, from, count), histDuration(count * h.dt));
-    }).join("\n");
+      return {
+        source: s.source === "modbus" ? "Modbus" : "X10A",
+        detail: t(cfg.run, valueText(s), stateRunWhen(h, from, count), histDuration(count * h.dt)),
+      };
+    });
+    if (blocks.length > 1 && blocks.every((b) => b.detail === blocks[0].detail))
+      return `${blocks.map((b) => b.source).join(" + ")}\n${blocks[0].detail}`;
+    return blocks.map((b) => `${b.source}\n${b.detail}`).join("\n\n");
   }
   // With two lines the readout names both instruments at the SAME instant. A gap in either remains
   // visible as words rather than borrowing its neighbour's value. The HomeHub outdoor register has
