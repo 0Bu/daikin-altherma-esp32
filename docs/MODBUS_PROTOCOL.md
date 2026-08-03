@@ -1,11 +1,11 @@
 # Modbus TCP — the Daikin HomeHub link
 
-> **Status: READ-ONLY, and that is a design stance, not a phase.** This firmware speaks Modbus TCP to
-> a **Daikin HomeHub (EKRHH)** as a second, independent source beside the X10A service-port tap. It
-> **reads**; it does not write. There is no write function in `main/hp_modbus.cpp`, no command topic,
-> no writable HA entity and no HTTP endpoint that can set a pump register — verifiable by `grep`.
-> An in-firmware actuation path is planned separately (issue #32 P3) and is gated by the persisted
-> `actuation_enabled` flag, which today gates nothing because nothing writes.
+> **Status: independent read source plus default-off WP3 internal actuator.** This firmware speaks
+> Modbus TCP to a **Daikin HomeHub (EKRHH)** beside the primary X10A service-port tap. It reads the
+> curated map and has exactly one internal writable descriptor: holding register **54**, through the
+> socket-owning `hp_modbus` task. There is still no MQTT/HA/HTTP/MCP/raw-Modbus control surface.
+> Install, upgrade and reboot remain no-write: `actuation_enabled=false` and writer ownership
+> `unresolved`. The full contract is [`MODBUS_ACTUATION.md`](MODBUS_ACTUATION.md).
 >
 > **X10A remains primary.** There is no selector between the sources: once a HomeHub address is
 > configured, both stacks run independently. X10A leads wherever both provide the same quantity;
@@ -20,8 +20,8 @@ firmware has always been a one-way telemetry bridge ([`ARCHITECTURE.md`](ARCHITE
 X6A — *not* X10A) that exposes a Modbus server on the LAN. It is the officially supported writable
 path, and it publishes a smaller but more curated telemetry map than the raw X10A pages.
 
-This phase builds the **second source and its read path** only: discovery, connection, register decode,
-telemetry into the same cache every other surface reads, and link diagnostics.
+The source path remains independent. WP3 adds a bounded capability under it; it does not add the room
+controller or authorize a live-plant write.
 
 ## Wire facts
 
@@ -35,7 +35,7 @@ Source: *EKRHH Daikin HomeHub — Installer reference guide 4P744838-1E*, §2.5,
 | Framing | MBAP header `[txn(2), proto=0(2), len(2), unit(1)]` + PDU. **No CRC** — unlike Modbus RTU, integrity is the MBAP length + the TCP checksum |
 | Byte order | Big-endian on the wire |
 | Addressing | The HomeHub tables print **1-based** data-model offsets; the wire PDU address is **offset − 1** |
-| Function codes | FC03 read-holding, FC04 read-input (both used). FC06/FC16 write are implemented in the pure framing header but **called by nothing** |
+| Function codes | FC03 read-holding, FC04 read-input; FC06 is called only by the private register-54 actuator transaction. FC16 framing remains host-tested and unused |
 
 **Data formats** (16-bit, one register each):
 
@@ -112,9 +112,10 @@ Read today (UC3 Daikin Altherma):
   outdoor air `44`, liquid refrigerant `45`, room `50`
 * **Flow + electrical input** (input): flow `49` (`Int16`, L/min ×100), whole-system electrical
   input `51` (`Pow16`, kW). Offset `51` is not dedicated booster-heater power.
-* **Setpoints and modes** (holding, read back **read-only**): LWT main heating `1` / cooling `2`,
+* **Setpoints and modes** (holding, read back): LWT main heating `1` / cooling `2`,
   operation mode `3`, space heating ON/OFF `4`, room thermostat heating `6` / cooling `7`, quiet mode
-  `9`, DHW reheat setpoint `10`, Smart-Grid mode `56`, power limits `57`/`58` (`Pow16`)
+  `9`, DHW reheat setpoint `10`, LWT heating offset `54`, Smart-Grid mode `56`, power limits `57`/`58`
+  (`Pow16`). Only `54` is in WP3's explicit write allowlist; every other row remains telemetry-only.
 
 Reading a holding register is not a step toward writing it — the hub's own telemetry is split across
 both spaces, and a setpoint the plant is currently running to is a reading like any other.
@@ -286,13 +287,13 @@ Everything is runtime — no reflash, and no reboot.
 | `mb_host` | HomeHub IP or `.local`/DNS hostname; empty disables discovery, task and requests |
 | `mb_port` | Modbus TCP port, default `502` (validated 1–65535) |
 | `mb_unit_id` | Modbus unit id, default `1` (validated 1–247) |
-| `actuation_enabled` | P3 safety flag, default **false**. Persisted; gates nothing today |
+| `actuation_enabled` | WP3 safety gate, default **false**. Necessary but insufficient: link, fresh read, bounds and explicit writer ownership must also pass |
 
-The host, port, unit and safety flag are persisted in the atomic CRC-checked NVS config blob (**v6**,
+The host, port, unit and safety flag are persisted in the atomic CRC-checked NVS config blob (**v9**,
 `main/logic/config_store.hpp`) and written by exactly one task (httpd, `POST /set_hp`). Older blobs
-still decode without losing credentials. v6's former enable bit remains only as an on-flash
-compatibility mirror; current firmware derives enabled solely from a non-empty `mb_host`. Thus a
-short-lived enabled+empty Auto configuration safely becomes disabled after upgrade.
+still decode without losing credentials. Because v5-v8 wrote the actuation bit while it gated
+nothing, all of those versions migrate that bit to **false**; only a v9 save can explicitly arm it.
+HomeHub polling itself remains derived solely from a non-empty `mb_host`.
 
 > **Why v5 and not v4.** This block and the UI-language byte were developed in parallel and both
 > claimed v4. main's language byte landed first and is already on published builds, so this took the
@@ -309,11 +310,11 @@ combined link state with X10A, since either can be down alone and one merged "co
 exactly the case worth seeing. Its value is the active `host:port`, and its colour follows the shared
 connection-state vocabulary. Config and diagnostics only; there are no pump controls, by design.
 
-**API:** `/status` carries a `modbus{enabled,connected,discovering,host,port,unit_id,rx,fails,values,
-actuation_enabled,error,error_code,error_detail,error_register}` block (the error fields are omitted
-when healthy). `host` is the configured value; the Search button does not change it until Save. It is
-redacted in a bug report because it is a LAN address. See [`../README.md`](../README.md)
-and `.claude/CLAUDE.md` for the full HTTP surface.
+**API:** `/status.modbus` keeps the link/config fields and adds
+`task_stack_min_free_words` plus an `actuator` audit object. It distinguishes source/request,
+acceptance, echo, FC03 confirmation, effective gate, block/conflict and restore, with counters and
+timestamps. `host` is the configured value and is redacted in bug reports. See
+[`MODBUS_ACTUATION.md`](MODBUS_ACTUATION.md) and [`../README.md`](../README.md).
 
 ## Security
 
@@ -324,9 +325,10 @@ The threat model is in [`SECURITY.md`](SECURITY.md); the parts specific to this 
   principle write to the hub. That is a property of Modbus/TCP, not something this firmware can fix:
   **segment or firewall the HomeHub's `:502`** so only this device reaches it. TLS `:802` is the hub's
   only on-wire protection and is out of scope here.
-* **This firmware is not part of that attack surface**, because it never writes. The unauthenticated
-  `HA → MQTT → firmware → Modbus → pump` chain a generic Modbus-control bridge would create does not
-  exist: no MQTT subscribe, no command topic, no writable entity, no HTTP write route.
+* **The firmware has one internal write capability, not a control bridge.** The unauthenticated
+  `HA → MQTT/HTTP/MCP → raw Modbus → pump` chain does not exist: there is no command subscription,
+  writable entity, public register route or proxy. The private FC06 path accepts only a typed,
+  bounded register-54 plan after all WP3 gates.
 * **mDNS discovery trusts LAN multicast**, so the explicit Search action offers only responders
   whose hostname matches `homehub-*` rather than whatever answers first. A manually entered address
   is the user's trusted-LAN choice.
@@ -334,5 +336,4 @@ The threat model is in [`SECURITY.md`](SECURITY.md); the parts specific to this 
 ## Out of scope
 
 Modbus **RTU / RS-485** (needs a transceiver + DE/RE, absent on the reference boards), Modbus **TLS
-`:802`**, **UC4** air-to-air, **UC5** EEBUS, and the in-firmware actuation path (issue #32 P3) with
-the on-device `esp-dl` decision engine that would drive it.
+`:802`**, **UC4** air-to-air, **UC5** EEBUS, the room/LWT controller, and live actuator commissioning.

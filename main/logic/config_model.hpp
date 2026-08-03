@@ -85,10 +85,10 @@ struct Config {
     std::string mb_host;
     int         mb_port     = MODBUS_TCP_PORT;      // Modbus TCP port (502; the plaintext HomeHub default)
     int         mb_unit_id  = MODBUS_DEFAULT_UNIT;  // Modbus unit/slave id (1..247, default 1)
-    // SAFETY FLAG for the future in-firmware actuation path (#32 P3), default OFF. P1/P2 build only
-    // the READ stack — nothing writes a pump register — so this flag currently gates nothing; it is
-    // persisted here so P3 lands without another blob-version bump, and so the UI/API can already
-    // report it. There is no external writer by design.
+    // WP3 SAFETY FLAG (#300), default OFF. It gates the internal register-54 actuator in addition to
+    // its link/freshness/allowlist/ownership checks. Blob v9 deliberately disarms older persisted
+    // placeholder bits: state saved while the flag gated nothing is not consent for a later OTA.
+    // There is no raw-register or external protocol writer by design.
     bool        actuation_enabled = false;
 
     // ── Board-local hardware: the status indicator + the recovery button — PERSISTED ─────────────

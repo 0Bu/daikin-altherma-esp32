@@ -89,6 +89,8 @@ struct ConfigBlob {
     std::string mb_host;                // "" = disabled; discovery is an explicit UI action
     int32_t     mb_port           = 502;
     int32_t     mb_unit_id        = 1;
+    // v9 makes this previously inert bit authoritative. A v5-v8 `true` is forced OFF on decode:
+    // historical placeholder state is not consent for the first write-capable firmware.
     bool        actuation_enabled = false;
     // ── v7/v8: one MQTT-backed reference-temperature source ───────────────────────────────────
     std::string ref_temp_name, ref_temp_topic, ref_temp_path;
@@ -112,14 +114,15 @@ inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
                           CONFIG_BLOB_MAGIC2  = 'C', CONFIG_BLOB_MAGIC3 = '1';
 // v2 appended the board-local hardware block, v3 the OTA update channel, v4 the UI language override,
 // v5 the HomeHub Modbus stack, v6 its now-legacy enable compatibility bit, v7 one MQTT-backed
-// reference-temperature mapping and v8 its source timestamp + maximum-age fields. Current firmware
-// derives HomeHub enabled solely from whether mb_host is empty.
+// reference-temperature mapping, v8 its source timestamp + maximum-age fields, and v9 activates the
+// formerly inert actuation bit without changing the byte layout. Current firmware derives HomeHub
+// enabled solely from whether mb_host is empty; v5-v8 actuation bits decode OFF.
 // Bumping the version rather than reusing the previous one is what makes the trailing-garbage check
 // below still exact per version; OLDER blobs are ACCEPTED on read (see config_blob_deserialize)
 // because rejecting them would drop a user's WiFi and MQTT credentials on the OTA that introduced the
 // field — the fallback path is the legacy per-key layout, which a device written by a blob-era build
 // has never populated.
-inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 8;
+inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 9;
 inline constexpr uint8_t  CONFIG_BLOB_VERSION_MIN = 1;
 // A string field longer than this is treated as corruption on decode: real credentials are short, so a
 // huge length is a garbled blob, not a value. Bounds the work and rejects a hostile/garbled length.
@@ -246,7 +249,9 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
         const uint8_t mb_flags = d[p++];
         c.mb_port           = static_cast<int32_t>(mb_port);
         c.mb_unit_id        = static_cast<int32_t>(mb_unit_id);
-        c.actuation_enabled = (mb_flags & 1) != 0;
+        // Safety migration (#300): v5-v8 wrote this bit while it gated no code. Only a v9 save made
+        // by write-capable firmware counts as explicit enablement; every older blob disarms.
+        c.actuation_enabled = version >= 9 && (mb_flags & 1) != 0;
         // Keep the legacy member coherent for round-trip diagnostics, but do not let either v5's
         // ambiguous bit or v6's short-lived Auto mode override the current empty-host rule.
         c.homehub_enabled   = !c.mb_host.empty();
@@ -262,8 +267,8 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
     }
     // Exact per version: a v1 blob must END after ntp_server, a v2 blob after the board block, a v3
     // blob after the channel byte, a v4 blob after the language byte, v5/v6 after the HomeHub block
-    // v7 after the reference-source strings and v8 after timestamp/max-age. v6 changes one flag's
-    // meaning without changing the HomeHub block's size.
+    // v7 after the reference-source strings and v8/v9 after timestamp/max-age. v6 and v9 change a
+    // flag's meaning without changing the HomeHub block's size.
     // Accepting a prefix would let a truncated v2 decode as a valid v1 with silently-default pins.
     if (p != body_end) return false;   // trailing garbage -> reject rather than accept a prefix
     c.wifi_rollback_active = (flags & 1) != 0;

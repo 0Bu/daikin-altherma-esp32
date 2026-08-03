@@ -296,11 +296,11 @@ const I18N = {
     "syslog.hint": "Enter the Syslog server as hostname or IP address plus port. Leave the field empty to disable Syslog.",
     "ntp.title": "NTP server", "ntp.server": "Server",
     "ntp.hint": "Enter the hostname or IP address of the time server. Leave the field empty to use the firmware default.",
-    // HomeHub / transport card + its edit modal (issue #32). The link is READ-ONLY — the copy must
-    // never imply the firmware controls the pump from here (docs/SECURITY.md).
+    // HomeHub transport dialog (issue #32/#300). It exposes no actuator control; WP3's separate
+    // internal capability remains default-off and is observable only (docs/MODBUS_ACTUATION.md).
     "homehub.title": "Modbus", "homehub.host": "Host · IP or .local name",
     "homehub.port": "Port", "homehub.unit": "Unit id",
-    "homehub.hint": "Search runs only when you press Search and fills the address field when a HomeHub answers. Save the result or enter an address manually. An empty address disables HomeHub completely: no search at boot and no requests. Port defaults to 502, unit id to 1. Read-only — the firmware never controls the heat pump from here.",
+    "homehub.hint": "Search runs only when you press Search and fills the address field when a HomeHub answers. Save the result or enter an address manually. An empty address disables HomeHub completely: no search at boot and no requests. Port defaults to 502, unit id to 1. This dialog configures the data source only; it exposes no heat-pump control.",
     "hh.search": "Search", "hh.searching": "Searching…",
     "hh.found": (host) => `HomeHub found: ${host}`, "hh.not_found": "No HomeHub found — enter the address manually.",
     "hh.saved": "Modbus settings saved",
@@ -589,7 +589,7 @@ const I18N = {
     "ntp.hint": "Hostname oder IP des NTP-Servers, mit dem das Gerät seine Uhr synchronisiert. Leer setzt auf den Firmware-Standard zurück.",
     "homehub.title": "Modbus", "homehub.host": "Host · IP oder .local-Name",
     "homehub.port": "Port", "homehub.unit": "Unit-ID",
-    "homehub.hint": "Die Suche läuft nur nach einem Klick auf Suchen und trägt die gefundene Adresse in das Feld ein. Das Ergebnis speichern oder eine Adresse manuell eintragen. Eine leere Adresse deaktiviert HomeHub vollständig: keine Suche beim Start und keine Anfragen. Port ist standardmäßig 502, die Unit-ID 1. Nur lesend — die Firmware steuert die Wärmepumpe von hier aus nie.",
+    "homehub.hint": "Die Suche läuft nur nach einem Klick auf Suchen und trägt die gefundene Adresse in das Feld ein. Das Ergebnis speichern oder eine Adresse manuell eintragen. Eine leere Adresse deaktiviert HomeHub vollständig: keine Suche beim Start und keine Anfragen. Port ist standardmäßig 502, die Unit-ID 1. Dieser Dialog konfiguriert nur die Datenquelle und bietet keine Wärmepumpensteuerung.",
     "hh.search": "Suchen", "hh.searching": "Suche läuft…",
     "hh.found": (host) => `HomeHub gefunden: ${host}`, "hh.not_found": "Kein HomeHub gefunden — Adresse manuell eintragen.",
     "hh.saved": "Modbus-Einstellungen gespeichert",

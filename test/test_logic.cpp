@@ -54,6 +54,7 @@
 #include "logic/reference_temperature.hpp"
 #include "logic/modbus.hpp"
 #include "logic/modbus_snapshot.hpp"
+#include "logic/homehub_actuator.hpp"
 #include "logic/query_flag.hpp"
 #include "logic/redact.hpp"
 #include "logic/config_store.hpp"
@@ -1904,7 +1905,25 @@ static void test_heartbeat() {
                "\"bus_last_ok_s\":1,\"bus_rx_received\":763732,\"bus_rx_fails\":2,"
                "\"bus_crc_err\":0,\"bus_timeout_err\":2,\"bus_ou_held_over\":0,"
                "\"bus_tx_reads\":763734,"
-               "\"modbus_enabled\":0,\"modbus_connected\":0,\"modbus_rx\":0,\"modbus_fails\":0}");
+               "\"modbus_enabled\":0,\"modbus_connected\":0,\"modbus_rx\":0,\"modbus_fails\":0,"
+               "\"modbus_stack_min_free_words\":0,\"modbus_actuator_state\":0,"
+               "\"modbus_actuator_block\":0,\"modbus_actuator_owner\":0,"
+               "\"modbus_actuator_pending\":0,\"modbus_actuator_conflict\":0,"
+               "\"modbus_actuator_requested_valid\":0,\"modbus_actuator_requested_k\":0,"
+               "\"modbus_actuator_echoed_valid\":0,\"modbus_actuator_echoed_k\":0,"
+               "\"modbus_actuator_confirmed_valid\":0,\"modbus_actuator_confirmed_k\":0,"
+               "\"modbus_actuator_effective_valid\":0,\"modbus_actuator_effective_k\":0,"
+               "\"modbus_actuator_source\":0,\"modbus_actuator_sequence\":0,"
+               "\"modbus_actuator_correlation_id\":0,\"modbus_actuator_intent_age_ms\":-1,"
+               "\"modbus_actuator_last_write_ms\":-1,\"modbus_actuator_last_readback_ms\":-1,"
+               "\"modbus_actuator_last_restore_ms\":-1,\"modbus_actuator_queue_depth\":0,"
+               "\"modbus_actuator_requests\":0,\"modbus_actuator_accepted\":0,"
+               "\"modbus_actuator_rejected\":0,\"modbus_actuator_coalesced\":0,"
+               "\"modbus_actuator_write_attempts\":0,\"modbus_actuator_echo_confirmed\":0,"
+               "\"modbus_actuator_readback_confirmed\":0,\"modbus_actuator_write_failures\":0,"
+               "\"modbus_actuator_conflicts\":0,\"modbus_actuator_restore_attempts\":0,"
+               "\"modbus_actuator_restores\":0,\"modbus_actuator_restore_failures\":0,"
+               "\"modbus_actuator_refreshes\":0}");
 
     // ── #215: the reset reason has to survive a NUMERIC-ONLY consumer ──
     // Telegraf's json parser keeps numeric fields and drops everything else, so the `reset_reason`
@@ -1934,17 +1953,48 @@ static void test_heartbeat() {
     CHECK(j.find("bus_tx_fails") == std::string::npos);
     CHECK(j.find("\"bus_tx_reads\":") != std::string::npos);      // the real one stays
 
-    // Modbus TCP (HomeHub) link — payload-only fields (issue #32), 0/off on this X10A snapshot. The
-    // connectivity flag is a 1/0 NUMBER like the other links so a metrics consumer keeps it; there is
-    // no write counter (the link is read-only).
+    // Modbus TCP (HomeHub) link + WP3 actuator — payload-only fields. Connectivity and every boolean
+    // fact use numeric 1/0 so a metrics consumer keeps them.
     CHECK(j.find("\"modbus_connected\":0,") != std::string::npos);
     CHECK(j.find("\"modbus_connected\":false") == std::string::npos);   // number, not a dropped bool
-    HeartbeatFields mf; mf.modbus_enabled = true; mf.modbus_connected = true; mf.modbus_rx = 12; mf.modbus_fails = 3;
+    HeartbeatFields mf; mf.modbus_enabled = true; mf.modbus_connected = true;
+    mf.modbus_rx = 12; mf.modbus_fails = 3; mf.modbus_stack_min_free_words = 731;
+    mf.modbus_actuator_state = 5; mf.modbus_actuator_block = 0; mf.modbus_actuator_owner = 1;
+    mf.modbus_actuator_pending = true; mf.modbus_actuator_requested_valid = true;
+    mf.modbus_actuator_requested_k = -2; mf.modbus_actuator_echoed_valid = true;
+    mf.modbus_actuator_echoed_k = -2; mf.modbus_actuator_confirmed_valid = true;
+    mf.modbus_actuator_confirmed_k = -2; mf.modbus_actuator_effective_valid = true;
+    mf.modbus_actuator_effective_k = 0; mf.modbus_actuator_requests = 4;
+    mf.modbus_actuator_source = 1; mf.modbus_actuator_sequence = 9;
+    mf.modbus_actuator_correlation_id = 42; mf.modbus_actuator_intent_age_ms = 250;
+    mf.modbus_actuator_last_write_ms = 2000; mf.modbus_actuator_last_readback_ms = 2001;
+    mf.modbus_actuator_last_restore_ms = 1990; mf.modbus_actuator_queue_depth = 1;
+    mf.modbus_actuator_accepted = 2; mf.modbus_actuator_rejected = 1;
+    mf.modbus_actuator_coalesced = 1; mf.modbus_actuator_write_attempts = 2;
+    mf.modbus_actuator_echo_confirmed = 2; mf.modbus_actuator_readback_confirmed = 2;
+    mf.modbus_actuator_write_failures = 0; mf.modbus_actuator_conflicts = 0;
+    mf.modbus_actuator_restore_attempts = 1; mf.modbus_actuator_restores = 1;
+    mf.modbus_actuator_restore_failures = 0;
+    mf.modbus_actuator_refreshes = 0;
     const std::string mj = build_heartbeat_json(mf);
     CHECK(mj.find("\"modbus_enabled\":1,") != std::string::npos);
     CHECK(mj.find("\"modbus_connected\":1,") != std::string::npos);
     CHECK(mj.find("\"modbus_rx\":12,") != std::string::npos);
-    CHECK(mj.find("\"modbus_fails\":3}") != std::string::npos);
+    CHECK(mj.find("\"modbus_fails\":3,") != std::string::npos);
+    CHECK(mj.find("\"modbus_stack_min_free_words\":731,") != std::string::npos);
+    CHECK(mj.find("\"modbus_actuator_state\":5,") != std::string::npos);
+    CHECK(mj.find("\"modbus_actuator_owner\":1,") != std::string::npos);
+    CHECK(mj.find("\"modbus_actuator_pending\":1,") != std::string::npos);
+    CHECK(mj.find("\"modbus_actuator_requested_k\":-2,") != std::string::npos);
+    CHECK(mj.find("\"modbus_actuator_confirmed_k\":-2,") != std::string::npos);
+    CHECK(mj.find("\"modbus_actuator_effective_k\":0,") != std::string::npos);
+    CHECK(mj.find("\"modbus_actuator_correlation_id\":42,") != std::string::npos);
+    CHECK(mj.find("\"modbus_actuator_intent_age_ms\":250,") != std::string::npos);
+    CHECK(mj.find("\"modbus_actuator_queue_depth\":1,") != std::string::npos);
+    CHECK(mj.find("\"modbus_actuator_write_attempts\":2,") != std::string::npos);
+    CHECK(mj.find("\"modbus_actuator_restores\":1,") != std::string::npos);
+    CHECK(mj.find("\"modbus_actuator_restore_failures\":0,") != std::string::npos);
+    CHECK(mj.find("\"modbus_actuator_refreshes\":0}") != std::string::npos);
 
     // SOURCE freshness is its own field, and it is independent of bus health (#209 defect 5): the
     // link is up, the device is publishing, and the outdoor unit is simply not measuring. A consumer
@@ -3058,6 +3108,13 @@ static void test_homehub() {
     }
     CHECK(std::string(homehub_enum_id(sg->kind)) == "smart_grid_mode");
 
+    const HomeHubReg* lwt_offset = find(54);
+    CHECK(lwt_offset && lwt_offset->space == MbFunc::ReadHolding &&
+          lwt_offset->type == MbType::Int16 && lwt_offset->scale == 1);
+    CHECK(std::string(lwt_offset->unit) == "K");
+    CHECK(homehub_format(*lwt_offset, static_cast<uint16_t>(-3), buf, sizeof(buf)) &&
+          std::string(buf) == "-3");
+
     // Real flags keep numeric 1/0 at the API boundary and are marked structurally for ON/OFF UI.
     for (uint16_t off : {30, 32, 52, 53, 4, 9}) {
         const HomeHubReg* flag = find(off);
@@ -3074,6 +3131,324 @@ static void test_homehub() {
     // row with HOMEHUB_GROUP_REG so the bridge groups them together — this pins the two in step).
     CHECK(std::string(group_for_page(HOMEHUB_GROUP_REG)) == "modbus");
     CHECK(homehub_find(999) == nullptr);
+}
+
+static void test_homehub_actuator() {
+    using namespace daik::logic;
+
+    // The descriptor is the allowlist: domain callers can ask for an LWT offset, but cannot supply
+    // an address/function/type. Offset 54 is always encoded as holding/PDU 53 Int16, -10..+10 K.
+    CHECK(HOMEHUB_LWT_OFFSET_REGISTER == 54 && HOMEHUB_LWT_OFFSET_PDU == 53);
+    CHECK(HOMEHUB_LWT_OFFSET_MIN_K == -10 && HOMEHUB_LWT_OFFSET_MAX_K == 10);
+    CHECK(HOMEHUB_LWT_OFFSET_DESCRIPTOR.step == 1);
+    CHECK(HOMEHUB_LWT_OFFSET_DESCRIPTOR.refresh == ActuatorRefreshPolicy::OnChange);
+    CHECK(HOMEHUB_LWT_OFFSET_DESCRIPTOR.restore == ActuatorRestorePolicy::BaselineOnExit);
+    CHECK(homehub_actuation_allowlisted(54, MbFunc::ReadHolding, MbType::Int16));
+    CHECK(!homehub_actuation_allowlisted(53, MbFunc::ReadHolding, MbType::Int16));
+    CHECK(!homehub_actuation_allowlisted(54, MbFunc::ReadInput, MbType::Int16));
+    CHECK(!homehub_actuation_allowlisted(54, MbFunc::ReadHolding, MbType::Temp16));
+    uint16_t pdu = 0;
+    CHECK(mb_pdu_address(HOMEHUB_LWT_OFFSET_REGISTER, pdu) && pdu == HOMEHUB_LWT_OFFSET_PDU);
+    uint16_t raw = 0;
+    CHECK(mb_encode(MbType::Int16, -10, raw) && static_cast<int16_t>(raw) == -10);
+
+    // Stable telemetry vocabularies: /status carries the strings and heartbeat the numeric twins.
+    for (int i = 0; i <= static_cast<int>(ActuatorState::Failed); i++)
+        CHECK(std::string(actuator_state_name(static_cast<ActuatorState>(i))) != "unknown");
+    CHECK(std::string(actuator_state_name(static_cast<ActuatorState>(99))) == "unknown");
+    for (int i = 0; i <= static_cast<int>(ActuatorBlock::OutOfOrder); i++)
+        CHECK(std::string(actuator_block_name(static_cast<ActuatorBlock>(i))) != "unknown");
+    CHECK(std::string(actuator_block_name(static_cast<ActuatorBlock>(99))) == "unknown");
+    for (int i = 0; i <= static_cast<int>(ActuatorWriterOwnership::ExternalDirect); i++)
+        CHECK(std::string(actuator_ownership_name(static_cast<ActuatorWriterOwnership>(i))) != "unknown");
+    CHECK(std::string(actuator_ownership_name(static_cast<ActuatorWriterOwnership>(99))) == "unknown");
+    CHECK(actuator_source_priority(ActuatorSource::InternalController) == 100);
+    CHECK(actuator_source_priority(ActuatorSource::Evcc) == 50);
+    CHECK(actuator_source_priority(static_cast<ActuatorSource>(99)) == 0);
+    CHECK(std::string(actuator_source_name(ActuatorSource::InternalController)) == "internal_controller");
+    CHECK(std::string(actuator_source_name(ActuatorSource::Evcc)) == "evcc");
+    CHECK(std::string(actuator_source_name(static_cast<ActuatorSource>(99))) == "unknown");
+    CHECK(static_cast<uint8_t>(ActuatorPriorityLayer::SafetyFailsafe) >
+          static_cast<uint8_t>(ActuatorPriorityLayer::DaikinConstraint));
+    CHECK(static_cast<uint8_t>(ActuatorPriorityLayer::DaikinConstraint) >
+          static_cast<uint8_t>(ActuatorPriorityLayer::RoomLwtControl));
+    CHECK(static_cast<uint8_t>(ActuatorPriorityLayer::RoomLwtControl) >
+          static_cast<uint8_t>(ActuatorPriorityLayer::EvccEnergyIntent));
+    CHECK(sizeof(HomeHubActuator) <= 256);
+
+    // The future evcc adapter gets a versioned fail-closed contract but no subscription/control
+    // surface in WP3. Retained, stale, expired, uncorrelated and malformed envelopes are rejected.
+    EvccIntentEnvelope evcc;
+    evcc.source_time_ms = 1000; evcc.arrival_ms = 1100; evcc.expires_at_ms = 5000;
+    evcc.max_age_ms = 30000; evcc.sequence = 7; evcc.correlation_id = 42; evcc.requested = 2;
+    CHECK(validate_evcc_intent(evcc, 1200) == EvccIntentVerdict::Accept);
+    evcc.retained = true;
+    CHECK(validate_evcc_intent(evcc, 1200) == EvccIntentVerdict::Retained); evcc.retained = false;
+    evcc.schema_version++;
+    CHECK(validate_evcc_intent(evcc, 1200) == EvccIntentVerdict::InvalidSchema);
+    evcc.schema_version = HOMEHUB_ACTUATION_SCHEMA_VERSION;
+    evcc.source = ActuatorSource::InternalController;
+    CHECK(validate_evcc_intent(evcc, 1200) == EvccIntentVerdict::InvalidSource);
+    evcc.source = ActuatorSource::Evcc; evcc.correlation_id = 0;
+    CHECK(validate_evcc_intent(evcc, 1200) == EvccIntentVerdict::MissingCorrelation);
+    evcc.correlation_id = 42; evcc.arrival_ms = 900;
+    CHECK(validate_evcc_intent(evcc, 1200) == EvccIntentVerdict::InvalidTime);
+    evcc.arrival_ms = 1100; evcc.max_age_ms = 1000;
+    CHECK(validate_evcc_intent(evcc, 2001) == EvccIntentVerdict::Stale);
+    evcc.source_time_ms = 1900; evcc.arrival_ms = 1950; evcc.expires_at_ms = 1999;
+    CHECK(validate_evcc_intent(evcc, 2000) == EvccIntentVerdict::Expired);
+    evcc.expires_at_ms = 5000; evcc.requested = 4;
+    CHECK(validate_evcc_intent(evcc, 2000) == EvccIntentVerdict::InvalidRequest);
+    evcc.kind = EvccIntentKind::RecommendedPowerLimit; evcc.requested = 5000;
+    CHECK(validate_evcc_intent(evcc, 2000) == EvccIntentVerdict::Accept);
+    evcc.kind = EvccIntentKind::GeneralPowerLimit; evcc.requested = -1;
+    CHECK(validate_evcc_intent(evcc, 2000) == EvccIntentVerdict::InvalidRequest);
+    evcc.requested = 0;
+    CHECK(validate_evcc_intent(evcc, 2000) == EvccIntentVerdict::Accept);
+    evcc.kind = static_cast<EvccIntentKind>(99);
+    CHECK(validate_evcc_intent(evcc, 2000) == EvccIntentVerdict::InvalidRequest);
+    evcc.kind = EvccIntentKind::SmartGridMode; evcc.max_age_ms = HOMEHUB_INTENT_TTL_MIN_MS - 1;
+    CHECK(validate_evcc_intent(evcc, 2000) == EvccIntentVerdict::InvalidTime);
+
+    auto intent = [](int16_t offset, uint32_t sequence, int64_t issued = 1000) {
+        LwtOffsetIntent i;
+        i.offset_k = offset;
+        i.sequence = sequence;
+        i.issued_ms = issued;
+        i.ttl_ms = 30000;
+        return i;
+    };
+    auto armed = [] {
+        HomeHubActuator a;
+        a.set_enabled(true);
+        a.set_ownership(ActuatorWriterOwnership::Firmware);
+        return a;
+    };
+
+    // Admission fails closed before anything reaches the mailbox.
+    {
+        HomeHubActuator a;
+        CHECK(a.snapshot().state == ActuatorState::Off);
+        CHECK(a.snapshot().blocked == ActuatorBlock::Disabled);
+        CHECK(a.offer(intent(1, 1), false, true, 1000) == ActuatorOffer::Rejected);
+        CHECK(a.snapshot().blocked == ActuatorBlock::Disabled);
+    }
+    {
+        HomeHubActuator a; a.set_enabled(true);
+        CHECK(a.offer(intent(1, 1), true, true, 1000) == ActuatorOffer::Rejected);
+        CHECK(a.snapshot().blocked == ActuatorBlock::OwnershipUnresolved);
+        a.set_ownership(ActuatorWriterOwnership::ExternalDirect);
+        CHECK(a.offer(intent(1, 2), true, true, 1000) == ActuatorOffer::Rejected);
+        CHECK(a.snapshot().blocked == ActuatorBlock::OwnershipExternal);
+        a.set_ownership(ActuatorWriterOwnership::Firmware);
+        CHECK(a.offer(intent(1, 3), true, false, 1000) == ActuatorOffer::Rejected);
+        CHECK(a.snapshot().blocked == ActuatorBlock::Disconnected);
+    }
+    for (int bad : {-11, 11}) {
+        HomeHubActuator a = armed();
+        CHECK(a.offer(intent(static_cast<int16_t>(bad), 1), true, true, 1000) == ActuatorOffer::Rejected);
+        CHECK(a.snapshot().blocked == ActuatorBlock::OutOfRange);
+    }
+    {
+        HomeHubActuator a = armed();
+        LwtOffsetIntent i = intent(1, 1);
+        i.schema_version++;
+        CHECK(a.offer(i, true, true, 1000) == ActuatorOffer::Rejected);
+        CHECK(a.snapshot().blocked == ActuatorBlock::InvalidSchema);
+        i = intent(1, 2); i.source = static_cast<ActuatorSource>(99);
+        CHECK(a.offer(i, true, true, 1000) == ActuatorOffer::Rejected);
+        CHECK(a.snapshot().blocked == ActuatorBlock::InvalidSchema);
+        i = intent(1, 3); i.ttl_ms = HOMEHUB_INTENT_TTL_MIN_MS - 1;
+        CHECK(a.offer(i, true, true, 1000) == ActuatorOffer::Rejected);
+        CHECK(a.snapshot().blocked == ActuatorBlock::InvalidTtl);
+        i.ttl_ms = HOMEHUB_INTENT_TTL_MAX_MS + 1;
+        CHECK(a.offer(i, true, true, 1000) == ActuatorOffer::Rejected);
+        i = intent(1, 4, 1000); i.ttl_ms = 1000;
+        CHECK(a.offer(i, true, true, 2001) == ActuatorOffer::Rejected);
+        CHECK(a.snapshot().blocked == ActuatorBlock::StaleIntent);
+        i = intent(1, 5, 2000);
+        CHECK(a.offer(i, true, true, 1000) == ActuatorOffer::Rejected); // future monotonic timestamp
+    }
+
+    // One fixed slot: a same/higher-priority value replaces the pending value; evcc cannot replace
+    // a local controller request. No vector, string or queue allocation exists in this path.
+    {
+        HomeHubActuator a = armed();
+        CHECK(a.offer(intent(1, 1), true, true, 1000) == ActuatorOffer::Queued);
+        LwtOffsetIntent evcc = intent(2, 1); evcc.source = ActuatorSource::Evcc;
+        CHECK(a.offer(evcc, true, true, 1000) == ActuatorOffer::Rejected);
+        CHECK(a.snapshot().blocked == ActuatorBlock::LowerPriority);
+        CHECK(a.offer(intent(3, 2), true, true, 1000) == ActuatorOffer::Coalesced);
+        CHECK(a.snapshot().pending && a.snapshot().queued == 2 && a.snapshot().coalesced == 1);
+        CHECK(a.offer(intent(2, 2), true, true, 1000) == ActuatorOffer::Rejected);
+        CHECK(a.snapshot().blocked == ActuatorBlock::OutOfOrder);
+        ActuatorPlan plan = a.prepare_pending(true, true, 1001, true, 0);
+        CHECK(plan.action == ActuatorAction::Write && plan.register_offset == 54 &&
+              plan.pdu_address == 53 && static_cast<int16_t>(plan.target_raw) == 3 && plan.sequence == 2);
+        CHECK(a.snapshot().baseline_valid && a.snapshot().baseline_k == 0);
+        CHECK(a.snapshot().accepted == 1 && !a.snapshot().pending);
+        a.note_write_started(plan, 1002);
+        CHECK(a.snapshot().state == ActuatorState::Writing && a.snapshot().write_attempts == 1);
+        CHECK(a.note_echo(plan, plan.target_raw));
+        CHECK(a.snapshot().echoed_valid && a.snapshot().echoed_k == 3 && a.snapshot().echo_confirmed == 1);
+        CHECK(a.note_readback(plan, plan.target_raw, 1003));
+        CHECK(a.snapshot().state == ActuatorState::Confirmed && a.snapshot().confirmed_k == 3);
+        CHECK(a.snapshot().transaction_active && a.snapshot().readback_confirmed == 1);
+        CHECK(a.snapshot().source_time_ms == 1000 && a.snapshot().arrival_ms == 1000 &&
+              a.snapshot().intent_age_ms == 1 && a.snapshot().last_attempt_ms == 1002 &&
+              a.snapshot().last_write_ms == 1003 && a.snapshot().correlation_id == 0);
+
+        // Effective is a third claim: confirmed register value alone is insufficient. Input 53 says
+        // whether the space circuit is actually operating; unknown remains unavailable, OFF means 0.
+        CHECK(!a.snapshot().effective_valid);
+        a.observe_plant_gate(true, false);
+        CHECK(a.snapshot().effective_valid && a.snapshot().effective_k == 0);
+        a.observe_plant_gate(true, true);
+        CHECK(a.snapshot().effective_k == 3);
+        a.observe_current(true, plan.target_raw);
+        CHECK(!a.snapshot().conflict);
+
+        // Disable/failsafe restore: fresh pre-read attributes the current value to us, then the same
+        // FC06 echo + FC03 readback sequence proves the baseline is back.
+        a.set_enabled(false);
+        CHECK(a.snapshot().restore_pending && a.snapshot().state == ActuatorState::RestorePending);
+        ActuatorPlan restore = a.prepare_restore(true, true, plan.target_raw, 1004);
+        CHECK(restore.action == ActuatorAction::Restore && restore.target_raw == 0);
+        a.note_write_started(restore, 1005);
+        CHECK(a.snapshot().state == ActuatorState::Restoring && a.snapshot().restore_attempts == 1);
+        CHECK(a.note_echo(restore, 0));
+        CHECK(a.note_readback(restore, 0, 1006));
+        CHECK(a.snapshot().state == ActuatorState::Restored && !a.snapshot().transaction_active);
+        CHECK(a.snapshot().restores == 1 && !a.snapshot().restore_pending);
+        CHECK(a.snapshot().last_restore_ms == 1006 && a.snapshot().last_readback_ms == 1006);
+        a.set_enabled(false);
+        CHECK(a.snapshot().state == ActuatorState::Off);
+    }
+
+    // A request already equal to the fresh baseline is confirmed as a no-op; no write plan exists.
+    {
+        HomeHubActuator a = armed();
+        CHECK(a.offer(intent(-2, 1), true, true, 1000) == ActuatorOffer::Queued);
+        ActuatorPlan p = a.prepare_pending(true, true, 1001, true, static_cast<uint16_t>(-2));
+        CHECK(p.action == ActuatorAction::None);
+        CHECK(a.snapshot().state == ActuatorState::Confirmed && a.snapshot().noops == 1);
+        CHECK(!a.snapshot().transaction_active);
+        a.request_restore();
+        CHECK(!a.snapshot().restore_pending); // we changed nothing, so there is nothing to restore
+    }
+
+    // The dedicated pre-read is mandatory and must be usable, current and non-special.
+    for (int which = 0; which < 5; which++) {
+        HomeHubActuator a = armed();
+        LwtOffsetIntent i = intent(2, 1);
+        CHECK(a.offer(i, true, true, 1000) == ActuatorOffer::Queued);
+        ActuatorPlan p;
+        if (which == 0) p = a.prepare_pending(false, true, 1001, true, 0);
+        if (which == 1) p = a.prepare_pending(true, false, 1001, true, 0);
+        if (which == 2) p = a.prepare_pending(true, true, 40001, true, 0);
+        if (which == 3) p = a.prepare_pending(true, true, 1001, false, 0);
+        if (which == 4) p = a.prepare_pending(true, true, 1001, true, MB_UNAVAILABLE);
+        CHECK(p.action == ActuatorAction::None && a.snapshot().rejected == 1);
+        const ActuatorBlock expected[] = {ActuatorBlock::Disabled, ActuatorBlock::Disconnected,
+            ActuatorBlock::StaleIntent, ActuatorBlock::NoFreshRead, ActuatorBlock::SpecialRead};
+        CHECK(a.snapshot().blocked == expected[which]);
+    }
+
+    // Missing echo/readback never becomes confirmation. A transport-ambiguous write schedules a
+    // restore; a mismatched echo/readback or a later third-party value becomes CONFLICT and stops.
+    {
+        HomeHubActuator a = armed();
+        CHECK(a.offer(intent(4, 1), true, true, 1000) == ActuatorOffer::Queued);
+        ActuatorPlan p = a.prepare_pending(true, true, 1001, true, 0);
+        a.note_write_started(p);
+        a.note_transport_failure(p);
+        CHECK(a.snapshot().state == ActuatorState::Failed && a.snapshot().restore_pending);
+        CHECK(a.snapshot().write_failures == 1);
+        // The hub did apply it despite the lost reply; fresh read attributes target to our inflight.
+        ActuatorPlan r = a.prepare_restore(true, true, p.target_raw);
+        CHECK(r.action == ActuatorAction::Restore);
+        a.note_write_started(r);
+        a.note_transport_failure(r);
+        CHECK(a.snapshot().restore_failures == 1 && a.snapshot().restore_pending);
+        CHECK(a.prepare_restore(false, false, 0).action == ActuatorAction::None);
+        CHECK(a.snapshot().blocked == ActuatorBlock::RestoreUnavailable);
+    }
+    {
+        HomeHubActuator a = armed();
+        CHECK(a.offer(intent(4, 1), true, true, 1000) == ActuatorOffer::Queued);
+        ActuatorPlan p = a.prepare_pending(true, true, 1001, true, 0);
+        a.note_write_started(p);
+        CHECK(!a.note_echo(p, 5));
+        CHECK(a.snapshot().conflict && a.snapshot().blocked == ActuatorBlock::EchoMismatch);
+        CHECK(a.offer(intent(2, 2), true, true, 1002) == ActuatorOffer::Rejected);
+        CHECK(a.snapshot().blocked == ActuatorBlock::ExternalChange);
+    }
+    {
+        HomeHubActuator a = armed();
+        CHECK(a.offer(intent(4, 1), true, true, 1000) == ActuatorOffer::Queued);
+        ActuatorPlan p = a.prepare_pending(true, true, 1001, true, 0);
+        a.note_write_started(p); CHECK(a.note_echo(p, p.target_raw));
+        CHECK(!a.note_readback(p, 5));
+        CHECK(a.snapshot().conflict && a.snapshot().blocked == ActuatorBlock::ReadbackMismatch);
+    }
+    {
+        HomeHubActuator a = armed();
+        CHECK(a.offer(intent(4, 1), true, true, 1000) == ActuatorOffer::Queued);
+        ActuatorPlan p = a.prepare_pending(true, true, 1001, true, 0);
+        a.note_write_started(p); CHECK(a.note_echo(p, p.target_raw)); CHECK(a.note_readback(p, p.target_raw));
+        a.observe_current(true, 5);
+        CHECK(a.snapshot().state == ActuatorState::Conflict &&
+              a.snapshot().blocked == ActuatorBlock::ExternalChange);
+    }
+
+    // A failed request that demonstrably left the baseline untouched resolves as restored without a
+    // compensating write. A third value cannot be attributed to us and is never overwritten.
+    {
+        HomeHubActuator a = armed();
+        CHECK(a.offer(intent(4, 1), true, true, 1000) == ActuatorOffer::Queued);
+        ActuatorPlan p = a.prepare_pending(true, true, 1001, true, static_cast<uint16_t>(-1));
+        a.note_write_started(p); a.note_transport_failure(p);
+        CHECK(a.prepare_restore(true, true, static_cast<uint16_t>(-1), 2000).action == ActuatorAction::None);
+        CHECK(a.snapshot().state == ActuatorState::Restored && a.snapshot().restores == 1 &&
+              a.snapshot().last_restore_ms == 2000);
+    }
+    {
+        HomeHubActuator a = armed();
+        CHECK(a.offer(intent(4, 1), true, true, 1000) == ActuatorOffer::Queued);
+        ActuatorPlan p = a.prepare_pending(true, true, 1001, true, 0);
+        a.note_write_started(p); CHECK(a.note_echo(p, p.target_raw)); CHECK(a.note_readback(p, p.target_raw));
+        a.request_restore();
+        CHECK(a.prepare_restore(true, true, 7).action == ActuatorAction::None);
+        CHECK(a.snapshot().conflict && a.snapshot().blocked == ActuatorBlock::ExternalChange);
+    }
+
+    // Ownership is checked again at wire time, not just queue time: migration may become unresolved
+    // between the request and its fresh pre-read.
+    {
+        HomeHubActuator a = armed();
+        CHECK(a.offer(intent(1, 1), true, true, 1000) == ActuatorOffer::Queued);
+        a.set_ownership(ActuatorWriterOwnership::Unresolved);
+        CHECK(a.prepare_pending(true, true, 1001, true, 0).action == ActuatorAction::None);
+        CHECK(a.snapshot().blocked == ActuatorBlock::OwnershipUnresolved);
+    }
+    {
+        HomeHubActuator a = armed();
+        CHECK(a.offer(intent(1, 1), true, true, 1000) == ActuatorOffer::Queued);
+        a.set_ownership(ActuatorWriterOwnership::ExternalDirect);
+        CHECK(a.prepare_pending(true, true, 1001, true, 0).action == ActuatorAction::None);
+        CHECK(a.snapshot().blocked == ActuatorBlock::OwnershipExternal);
+    }
+    {
+        HomeHubActuator a = armed();
+        CHECK(a.offer(intent(2, 1), true, true, 1000) == ActuatorOffer::Queued);
+        ActuatorPlan p = a.prepare_pending(true, true, 1001, true, 0);
+        a.note_write_started(p);
+        a.mark_restore_unavailable();
+        CHECK(a.snapshot().conflict && a.snapshot().blocked == ActuatorBlock::RestoreUnavailable);
+        HomeHubActuator idle = armed();
+        idle.mark_restore_unavailable();
+        CHECK(!idle.snapshot().conflict);
+    }
 }
 
 // The syslog replay records (logic/bootlog.hpp): the build-identity boot line + the crash rendered as
@@ -4233,7 +4608,7 @@ static void test_config_store() {
     board.led_gpio = 35; board.led_type = 1; board.led_inverted = false;
     board.btn_gpio = 41; board.btn_active_low = true;
     std::vector<uint8_t> bb = config_blob_serialize(board);
-    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 8);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 9);
     ConfigBlob rt;
     CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
     CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
@@ -4255,7 +4630,7 @@ static void test_config_store() {
     // user's WiFi and MQTT credentials on the upgrade. It must decode, and it must report
     // has_board == false so the caller seeds the Kconfig defaults instead of reading "absent" as
     // "indicator disabled" (which would silently darken every XIAO's LED).
-    std::vector<uint8_t> v1 = buf;                       // `buf` is serialized as v8 by this build,
+    std::vector<uint8_t> v1 = buf;                       // `buf` is serialized as v9 by this build,
     // so build a genuine v1 body: header + the v1 fields only, by dropping every trailing block that
     // precedes the CRC — the 13-byte v2 board block (3x u32 + 1 flag byte), the 1-byte v3 channel,
     // the 1-byte v4 language and the 11-byte v5 HomeHub block (empty mb_host [2] + mb_port u32 +
@@ -4270,8 +4645,8 @@ static void test_config_store() {
     CHECK(!legacy.has_board);
     CHECK(legacy.wifi_ssid == a.wifi_ssid && legacy.mqtt_uri == a.mqtt_uri);   // v1 payload intact
     CHECK(legacy.led_gpio == -1);                        // the struct default, not the 999 sentinel
-    // A TRUNCATED v8 must not decode as a valid v7 blob with silently-default freshness fields: the
-    // version byte still says 8, so the missing timestamp/max-age block is caught.
+    // A TRUNCATED v9 must not decode with silently-default freshness fields: the version byte still
+    // says 9, so the missing timestamp/max-age block is caught.
     std::vector<uint8_t> trunc = bb;
     trunc.erase(trunc.end() - 4 - 6, trunc.end() - 4);    // drop empty v8 path + max-age u32
     restamp(trunc);
@@ -4332,7 +4707,7 @@ static void test_config_store() {
     mb.mb_host = "homehub-524288-abc.local";
     mb.mb_port = 502; mb.mb_unit_id = 3; mb.actuation_enabled = true; mb.homehub_enabled = false;
     std::vector<uint8_t> mbb = config_blob_serialize(mb);
-    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 8);
+    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 9);
     ConfigBlob mrt;
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
     CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-abc.local");
@@ -4365,7 +4740,15 @@ static void test_config_store() {
     restamp(v5);
     ConfigBlob v5rt;
     CHECK(config_blob_deserialize(v5.data(), v5.size(), v5rt));
-    CHECK(v5rt.has_modbus && !v5rt.homehub_enabled && v5rt.actuation_enabled);
+    CHECK(v5rt.has_modbus && !v5rt.homehub_enabled && !v5rt.actuation_enabled);
+    // v8 carried the same bit, but it was an inert placeholder. The first write-capable OTA must not
+    // reinterpret an old true as consent: the transport survives and actuation is forced OFF.
+    std::vector<uint8_t> v8 = mbb;
+    v8[4] = 8;
+    restamp(v8);
+    ConfigBlob v8rt;
+    CHECK(config_blob_deserialize(v8.data(), v8.size(), v8rt));
+    CHECK(v8rt.has_modbus && v8rt.mb_host == mb.mb_host && !v8rt.actuation_enabled);
     // BACKWARD COMPATIBILITY: a v4 blob (a device from before the transport existed, but WITH the
     // language byte) must decode, report has_modbus == false and leave the mb_* struct defaults
     // (X10A / 502 / 1) — the same trade v1/v2/v3 already refuse to make.
@@ -8412,6 +8795,7 @@ int main() {
     test_modbus();
     test_modbus_snapshot();
     test_homehub();
+    test_homehub_actuator();
     test_homehub_map();
     test_heartbeat();
     test_crashinfo();

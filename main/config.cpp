@@ -271,7 +271,7 @@ bool config_save(const Config& c, bool require_link) {
     // The UI language likewise: one writer (POST /set_lang, httpd), one persistent user choice.
     b.ui_lang = ui_lang_to_int(c.ui_lang);
     // The HomeHub Modbus stack rides the same blob: one writer (POST /set_hp, httpd), like the
-    // channel, the language and the board block. See logic/config_store.hpp (blob v6).
+    // channel, the language and the board block. See logic/config_store.hpp (blob v9).
     b.mb_host           = c.mb_host;
     b.mb_port           = c.mb_port;
     b.mb_unit_id        = c.mb_unit_id;
