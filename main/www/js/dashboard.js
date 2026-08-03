@@ -628,6 +628,23 @@ function modbusErrorText(mb) {
   return code && text !== key ? text : String(mb.error);
 }
 
+// /status.mqtt.error is deliberately a bounded firmware-owned reason, not a broker address or
+// credential. Keep the broker as the row's primary value and translate the known runtime reasons
+// into an actionable second line. A newer firmware may add another literal before these assets are
+// updated, so unknown text remains visible instead of degrading to an untranslated key.
+function mqttErrorText(mqtt) {
+  if (!mqtt || !mqtt.error) return "";
+  const keys = {
+    "waiting for X10A response": "mqtt.err.waiting_x10a",
+    "publish task alloc failed": "mqtt.err.task_alloc",
+    "tls/tcp error": "mqtt.err.transport",
+    "broker refused (auth/creds?)": "mqtt.err.refused",
+    "connection error": "mqtt.err.connection",
+  };
+  const raw = String(mqtt.error);
+  return keys[raw] ? t(keys[raw]) : raw;
+}
+
 function connLinks() {
   const w = S.status?.wifi || {}, m = S.status?.mqtt || {}, sy = S.status?.syslog || {}, nt = S.status?.ntp || {};
   const links = [];
@@ -648,12 +665,14 @@ function connLinks() {
   if (!m.configured) {
     links.push({ edit: "mqtt", label: "MQTT", cls: "", value: t("conn.disabled"), state: t("conn.disabled") });
   } else {
+    const detail = !m.connected ? mqttErrorText(m) : "";
     links.push({ edit: "mqtt", label: "MQTT",
       cls: m.connected ? "ok" : m.error ? "err" : "warn",
       // No TLS padlock marker: an mqtts:// broker already carries its own scheme in the URL, so the
       // icon only restated what the string says. A schemeless/mqtt:// broker is plaintext and shows none.
       value: esc(m.broker || "—"),
-      state: m.connected ? t("conn.connected") : m.error ? t("conn.error", m.error) : t("conn.connecting") });
+      detail,
+      state: m.connected ? t("conn.connected") : detail ? t("conn.error", detail) : t("conn.connecting") });
   }
 
   if (!sy.configured) {
@@ -706,11 +725,10 @@ function connLinks() {
 // screen readers, so `state` (a plain-text status word, never shown visually) goes into the row's
 // aria-label instead of the generic "Edit X" every other edit affordance in this app uses.
 function connRow(l) {
-  return `<button class="conn-row" type="button" data-edit="${esc(l.edit)}" aria-label="${esc(t("conn.aria", l.label, l.state))}">` +
+  return `<button class="conn-row${l.detail ? " has-detail" : ""}" type="button" data-edit="${esc(l.edit)}" aria-label="${esc(t("conn.aria", l.label, l.state))}">` +
     `<span class="conn-label">${esc(l.label)}</span>` +
-    `<span class="conn-value"><span class="conn-val ${l.cls || ""}">${l.value}</span>` +
-    `${l.detail ? `<span class="conn-detail">${esc(l.detail)}</span>` : ""}</span>` +
-    `${editIcon}</button>`;
+    `<span class="conn-value"><span class="conn-val ${l.cls || ""}">${l.value}</span></span>` +
+    `${editIcon}${l.detail ? `<span class="conn-detail-wrap"><span class="conn-detail">${esc(l.detail)}</span></span>` : ""}</button>`;
 }
 function connectionsHtml() {
   return `<div class="section-label">${esc(t("conn.title"))}</div>` + connLinks().map(connRow).join("");

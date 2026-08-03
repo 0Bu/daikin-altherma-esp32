@@ -486,6 +486,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
     cJSON* j = cJSON_Parse(body);
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     Config c    = config();
+    const bool modbus_was_enabled = config_modbus_enabled(c);
     // The RX/TX pins are the physical X10A wiring: PERSISTED so a manual override survives a reboot
     // (config_save below). The model "profile" is session-only — only touched when the request
     // explicitly sends "profile"; a wiring-only patch omits it so it does not re-select the model or
@@ -529,6 +530,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
     // there is no new link to hand the poll engine and reconfigure must be skipped.
     if (!config_save(c, /*require_link=*/true))
         return send_err(req, "500 Internal Server Error", "config write failed");
+    if (modbus_was_enabled && !config_modbus_enabled(c)) mqtt_request_modbus_cleanup();
     if (reset_checkup) {
         checkup_reset();
         hp_poll_reconfigure();
@@ -638,6 +640,7 @@ static esp_err_t set_weather(httpd_req_t* req) {
         return send_err(req, "400 Bad Request", "longitude must be between -180 and 180");
     }
     Config c = config();
+    const bool weather_was_enabled = c.weather_enabled;
     if (location.enabled == c.weather_enabled &&
         location.latitude_e6 == c.weather_latitude_e6 &&
         location.longitude_e6 == c.weather_longitude_e6)
@@ -646,6 +649,7 @@ static esp_err_t set_weather(httpd_req_t* req) {
     c.weather_latitude_e6 = location.latitude_e6;
     c.weather_longitude_e6 = location.longitude_e6;
     if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    if (weather_was_enabled && !location.enabled) mqtt_request_weather_cleanup();
     weather_forecast_reconfigure();
     return http_send_json(req, "{\"ok\":true,\"reboot\":false,\"saved\":true}");
 }

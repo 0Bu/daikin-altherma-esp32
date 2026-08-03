@@ -2,10 +2,11 @@
 // esp-mqtt client in its own publish task:
 //   • TLS policy: credentials present ⇒ mqtts:// + CA-verified (esp_crt_bundle); NEVER send
 //     credentials over plaintext (no silent fallback — refuse with an error in /status.mqtt).
-//   • X10A owns the outbound installation identity: until the first valid X10A reply, do not even
-//     start the MQTT client (therefore no connect-time publishes or broker-side LWT from an unwired
-//     debug board). After activation, a bus loss marks availability offline once and then suppresses
-//     every publish until X10A returns.
+//   • X10A owns the outbound installation identity, not inbound observation: before the first valid
+//     X10A reply, connect without the shared installation LWT and service only the configured
+//     reference-temperature subscription/test. The first reply replaces that read-only session with
+//     the normal LWT-bearing publisher. After activation, a bus loss marks availability offline once
+//     and then suppresses every ordinary publish until X10A returns; subscriptions stay alive.
 //   • On (re)connect: mark availability "online", stream retained discovery configs for the active
 //     X10A profile, diagnostics and enabled ENV III, and retract every retired HomeHub/weather
 //     discovery config. HomeHub values stay on MQTT for non-HA consumers, but are deliberately not
@@ -110,6 +111,15 @@ static std::atomic<bool>        s_announce{false};   // set on connect -> task r
                                                      // be lost to a racing clear)
 static std::atomic<bool>        s_ref_reconfigure{false};
 static std::atomic<bool>        s_ref_probe_reconfigure{false};
+static std::atomic<bool>        s_weather_cleanup_requested{false};
+static std::atomic<bool>        s_modbus_cleanup_requested{false};
+
+// The task starts a subscriber-only client immediately, then replaces it with an LWT-bearing client
+// after the first X10A proof. Definitions live beside the client builder below; forward declarations
+// keep the publish loop above the configuration/lifecycle glue without duplicating either contract.
+static bool build_client(bool publisher_lwt);
+static bool start_current_client();
+static bool promote_client_to_publisher();
 
 // MQTT_EVENT_DATA runs on esp-mqtt's unguarded event task. It therefore only copies into this one
 // bounded frame and overwrites a length-1 queue; JSON parsing and all std::string work stay on the
@@ -169,28 +179,25 @@ static uint32_t    s_last_env3_samples          = 0;
 static bool        s_modbus_disabled_cleaned    = false;
 static bool        s_env3_disabled_cleaned      = false;
 static bool        s_env3_discovery_announced   = false;
-// Retained-topic cleanup: probe the retired topics, a disabled weather topic and a resolved crash
-// without unconditionally publishing empty payloads on every reconnect. The event task only raises
-// each `seen` flag; subscribe/delete/unsubscribe remain on mqtt_task, preserving the
+// Retained-topic cleanup: probe retired topics and a resolved crash without unconditionally
+// publishing empty payloads on every reconnect. The event task only raises each `seen` flag;
+// subscribe/delete/unsubscribe remain on mqtt_task, preserving the
 // single-publisher rule. The
 // bounded probes repeat on reconnect until an old value is found and deleted; once the broker is
 // clean they are read-only and silent.
 static std::atomic<bool> s_legacy_state_seen{false};
 static std::atomic<bool> s_retired_modbus_status_seen{false};
 static std::atomic<bool> s_retired_weather_seen{false};
-static std::atomic<bool> s_disabled_weather_seen{false};
 static std::atomic<bool> s_crash_seen{false};
 static bool              s_legacy_probe_active = false;               // mqtt_task only
 static bool              s_retired_modbus_status_probe_active = false; // mqtt_task only
 static bool              s_retired_weather_probe_active = false;      // mqtt_task only
-static bool              s_disabled_weather_probe_active = false;     // mqtt_task only
 static bool              s_crash_probe_active = false;                // mqtt_task only
 static int64_t           s_legacy_probe_deadline_us = 0;              // mqtt_task only
 static int64_t           s_retired_modbus_status_probe_deadline_us = 0; // mqtt_task only
 static int64_t           s_retired_weather_probe_deadline_us = 0;     // mqtt_task only
-static int64_t           s_disabled_weather_probe_deadline_us = 0;    // mqtt_task only
 static int64_t           s_crash_probe_deadline_us = 0;               // mqtt_task only
-static bool              s_disabled_weather_probe_started = false;    // mqtt_task only
+static bool              s_disabled_weather_cleaned = false;          // mqtt_task only
 // Stale-identity migration (mqtt_task only) — see retract_legacy_fixed / retract_stale_values below.
 static bool        s_legacy_fixed_retracted = false;   // heartbeat + crash entities: once per boot
 static std::string s_stale_values_profile;             // value entities: the profile they were
@@ -575,41 +582,48 @@ static void publish_modbus_state() {
     }
 }
 
+// A user who clears one of these source configurations is explicitly asking the retained document
+// to disappear. That intent is narrower than installation publication authority: it may send only
+// a zero-length retained tombstone, even while X10A is absent, and cannot announce or replace any
+// value. Keep the request armed through broker outages; re-enabling before delivery cancels it.
+static void service_requested_topic_cleanup(const Config& c) {
+    if (!s_connected) return;
+    if (s_weather_cleanup_requested.exchange(false)) {
+        if (!c.weather_enabled) {
+            mqtt_publish(s_weather, "", 0, 1, 1);
+            s_disabled_weather_cleaned = true;
+            diag_printf("mqtt: user-disabled weather forecast topic deleted\n");
+        }
+    }
+    if (s_modbus_cleanup_requested.exchange(false)) {
+        if (!config_modbus_enabled(c)) {
+            mqtt_publish(s_modbus, "", 0, 1, 1);
+            s_modbus_disabled_cleaned = true;
+            s_last_modbus_json.clear();
+            diag_printf("mqtt: user-disabled Modbus topic deleted\n");
+        }
+    }
+}
+
 static void publish_weather_state(bool config_enabled) {
     const WeatherForecastStatus status = weather_forecast_status();
     const WeatherMqttAction action = weather_mqtt_action(config_enabled, status.configured);
     if (action != WeatherMqttAction::Publish) {
-        // Never retain or repeatedly publish a synthetic "not configured" forecast. On a real
-        // disable, probe first and tombstone only a non-empty retained predecessor; a clean broker
-        // receives no publish at all. During the short enable/reconfigure race, simply wait for the
-        // weather task's status to catch up.
+        // Never retain or repeatedly publish a synthetic "not configured" forecast. A real disable
+        // is explicit user intent, so send one retained tombstone directly. The previous probe-first
+        // path could miss the retained delivery and leave the forecast behind; an idempotent empty
+        // retained publish is the broker's definitive delete operation. During the short
+        // enable/reconfigure race, simply wait for the weather task's status to catch up.
         s_last_weather_json.clear();
-        if (action == WeatherMqttAction::CleanupRetained) {
-            if (!s_disabled_weather_probe_started) {
-                start_retained_cleanup_probe(s_weather, s_disabled_weather_seen,
-                                             s_disabled_weather_probe_active,
-                                             s_disabled_weather_probe_deadline_us,
-                                             "disabled weather forecast");
-                s_disabled_weather_probe_started = true;
-            }
-            service_retained_cleanup_probe(s_weather, s_disabled_weather_seen,
-                                           s_disabled_weather_probe_active,
-                                           s_disabled_weather_probe_deadline_us);
-        } else if (s_disabled_weather_probe_active) {
-            esp_mqtt_client_unsubscribe(s_client, s_weather.c_str());
-            s_disabled_weather_probe_active = false;
-            s_disabled_weather_seen = false;
+        if (action == WeatherMqttAction::CleanupRetained && !s_disabled_weather_cleaned) {
+            mqtt_publish(s_weather, "", 0, 1, 1);
+            s_disabled_weather_cleaned = true;
+            diag_printf("mqtt: disabled weather forecast topic deleted\n");
         }
         return;
     }
-    // Re-enabling makes the next disable a new cleanup transition. Cancel a probe that may still be
-    // in flight so it cannot delete the first retained forecast published after reconfiguration.
-    s_disabled_weather_probe_started = false;
-    if (s_disabled_weather_probe_active) {
-        esp_mqtt_client_unsubscribe(s_client, s_weather.c_str());
-        s_disabled_weather_probe_active = false;
-        s_disabled_weather_seen = false;
-    }
+    // Re-enabling makes the next disable a new cleanup transition.
+    s_disabled_weather_cleaned = false;
     int64_t now_unix_s = -1;
     int32_t now_ms = 0;
     time_now(now_unix_s, now_ms);
@@ -1232,11 +1246,6 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
                                             e->current_data_offset)) {
             s_retired_weather_seen = true;
         }
-        if (e && retained_cleanup_candidate(s_weather, e->topic, e->topic_len,
-                                            e->retain, e->total_data_len,
-                                            e->current_data_offset)) {
-            s_disabled_weather_seen = true;
-        }
         if (e && retained_cleanup_candidate(s_crash, e->topic, e->topic_len,
                                             e->retain, e->total_data_len,
                                             e->current_data_offset)) {
@@ -1254,8 +1263,17 @@ static void mqtt_task(void*) {
     esp_task_wdt_add(NULL);                            // watch the publish task for a wedged broker write
     int heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S;    // publish immediately on the first connected cycle
     int ha_retire_elapsed_s = HA_RETIRE_INTERVAL_S;
-    MqttPublishGateState publish_gate = MqttPublishGateState::WaitingForX10a;
-    bool client_start_failed = false;
+    MqttPublishGateState publish_gate = MqttPublishGateState::SubscriberOnly;
+    bool publisher_promotion_failed = false;
+
+    // Broker reachability and inbound observation do not depend on X10A. This first client carries
+    // no installation LWT, and the gate below still encloses EVERY explicit publish. It can therefore
+    // subscribe to the room source without letting an unwired board speak for the installation.
+    if (!start_current_client()) {
+        esp_task_wdt_delete(NULL);
+        vTaskDelete(NULL);
+    }
+    diag_printf("mqtt: subscriber-only client started (publishing waits for X10A)\n");
     for (;;) {
         // Feed the watchdog unconditionally at the top of every cycle — the loop wakes each second
         // regardless of connection state, so this must NOT be gated on s_connected or an actual
@@ -1268,37 +1286,29 @@ static void mqtt_task(void*) {
             const MqttPublishGateDecision gate = mqtt_publish_gate_step(
                 publish_gate, hp.connected, s_connected.load());
 
-            // Do not connect an unproven board to the broker. The configured LWT uses the shared
-            // installation availability topic, so merely connecting an unwired bench board would
-            // let its later socket loss overwrite the real publisher with `offline`, even if this
-            // task itself emitted no application message.
-            if (gate.start_client && !client_start_failed) {
-                const esp_err_t rc = esp_mqtt_client_start(s_client);
-                if (rc == ESP_OK) {
+            // The first valid bus response upgrades the existing subscriber-only session to a fresh
+            // client whose CONNECT packet carries the installation LWT. A clean stop means the old
+            // no-LWT session cannot emit `offline`; publication begins only after the replacement
+            // client reports MQTT_EVENT_CONNECTED on a later cycle.
+            if (gate.promote_publisher && !publisher_promotion_failed) {
+                if (promote_client_to_publisher()) {
                     publish_gate = gate.next;
-                    set_status(false, "");
-                    diag_printf("mqtt: starting after first X10A response\n");
                 } else {
-                    client_start_failed = true;        // esp-mqtt start is a one-shot lifecycle call
-                    set_status(false, "client start failed");
-                    diag_printf("mqtt: client start failed (%s)\n", esp_err_to_name(rc));
+                    publisher_promotion_failed = true; // do not repeat a stop/destroy transition
                 }
-            } else if (!gate.start_client) {
+            } else if (!gate.promote_publisher) {
                 publish_gate = gate.next;
             }
 
-            // Before the first X10A proof there is no started MQTT client to subscribe or publish
-            // through. A failed start likewise remains silent rather than retrying an invalid
-            // lifecycle transition every second.
-            if (publish_gate == MqttPublishGateState::WaitingForX10a) {
-                vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
-                continue;
-            }
-
+            // SubscriberOnly/Paused services exact-topic inbound subscriptions and bounded frame
+            // decoding. The only outbound exception is a user-requested retained tombstone for a
+            // just-disabled weather/HomeHub source. Ordinary publication remains below
+            // gate.publish_cycle, so no discovery/state/heartbeat/value payload can escape.
             const Config ref_config = config();
             service_reference_subscription(ref_config);
             service_reference_probe_subscription(ref_config);
             service_reference_frames(ref_config);
+            service_requested_topic_cleanup(ref_config);
 
             if (gate.publish_offline) {
                 mqtt_publish(s_avail, "offline", 0, 1, 1);
@@ -1321,9 +1331,7 @@ static void mqtt_task(void*) {
                     s_last_x10a_json.clear();                  // force full per-topic state re-seeds
                     s_last_modbus_json.clear();
                     s_last_weather_json.clear();
-                    s_disabled_weather_probe_started = false;
-                    s_disabled_weather_probe_active = false;
-                    s_disabled_weather_seen = false;
+                    s_disabled_weather_cleaned = false;
                     s_last_env3_json.clear();
                     s_last_env3_samples = 0;
                     s_modbus_disabled_cleaned = false;
@@ -1475,9 +1483,12 @@ static void mqtt_task(void*) {
     }
 }
 
-// Validate the URI/credential combination and build the client. Returns false (with an error set in
-// /status.mqtt) if the config would leak credentials over plaintext.
-static bool build_client() {
+// Validate the URI/credential combination and build one of two client modes. The initial
+// subscriber-only client deliberately has no shared installation LWT; after X10A proof the task
+// rebuilds it with publisher_lwt=true. Both modes use the same broker/TLS/credential identity.
+// Returns false (with an error set in /status.mqtt) if the config would leak credentials over
+// plaintext.
+static bool build_client(bool publisher_lwt) {
     const Config& c = config();
     s_uri  = c.mqtt_uri;
     s_user = c.mqtt_user;
@@ -1502,17 +1513,74 @@ static bool build_client() {
     if (!s_user.empty()) cfg.credentials.username = s_user.c_str();
     if (!s_pass.empty()) cfg.credentials.authentication.password = s_pass.c_str();
     cfg.session.keepalive         = 30;
-    cfg.session.last_will.topic   = s_avail.c_str();
-    cfg.session.last_will.msg     = "offline";
-    cfg.session.last_will.msg_len = 7;
-    cfg.session.last_will.qos     = 1;
-    cfg.session.last_will.retain  = 1;
+    if (publisher_lwt) {
+        cfg.session.last_will.topic   = s_avail.c_str();
+        cfg.session.last_will.msg     = "offline";
+        cfg.session.last_will.msg_len = 7;
+        cfg.session.last_will.qos     = 1;
+        cfg.session.last_will.retain  = 1;
+    }
 
     s_client = esp_mqtt_client_init(&cfg);
     if (!s_client) { set_status(false, "mqtt init failed"); return false; }
     esp_mqtt_client_register_event(s_client, static_cast<esp_mqtt_event_id_t>(MQTT_EVENT_ANY),
                                    on_mqtt, nullptr);
     { Lock lk(s_mtx); s_status.tls = is_tls; }
+    return true;
+}
+
+static bool start_current_client() {
+    if (!s_client) {
+        set_status(false, "mqtt init failed");
+        return false;
+    }
+    const esp_err_t rc = esp_mqtt_client_start(s_client);
+    if (rc == ESP_OK) {
+        set_status(false, "");
+        return true;
+    }
+    set_status(false, "client start failed");
+    diag_printf("mqtt: client start failed (%s)\n", esp_err_to_name(rc));
+    esp_mqtt_client_destroy(s_client);               // start failed: no task/session is running
+    s_client = nullptr;
+    return false;
+}
+
+// Replace the connected/read-only client rather than mutating its CONNECT contract in place. The
+// old session is stopped cleanly (so there is no LWT at all), then destroyed before the publisher
+// client is allocated, avoiding two simultaneous MQTT/TLS clients on this heap-constrained board.
+// This runs on mqtt_task, never inside esp-mqtt's event handler, which is the API's required stop
+// boundary. Task-owned subscription bookkeeping is cleared because the broker discarded the old
+// clean session; MQTT_EVENT_CONNECTED on the replacement forces both exact-topic subscriptions.
+static bool promote_client_to_publisher() {
+    if (!s_client) {
+        set_status(false, "mqtt init failed");
+        return false;
+    }
+    const esp_err_t stop_rc = esp_mqtt_client_stop(s_client);
+    if (stop_rc != ESP_OK) {
+        set_status(false, "client stop failed");
+        diag_printf("mqtt: subscriber client stop failed (%s)\n", esp_err_to_name(stop_rc));
+        return false;
+    }
+
+    s_connected = false;
+    set_status(false, "");
+    {
+        Lock lk(s_mtx);
+        s_ref_status.subscribed = false;
+    }
+    s_ref_subscribed_topic.clear();
+    s_ref_probe_subscribed_topic.clear();
+    s_ref_probe_task_generation = 0;
+    esp_mqtt_client_destroy(s_client);
+    s_client = nullptr;
+
+    if (!build_client(true) || !start_current_client()) {
+        diag_printf("mqtt: publisher client promotion failed\n");
+        return false;
+    }
+    diag_printf("mqtt: X10A proven — publisher client started with installation LWT\n");
     return true;
 }
 
@@ -1552,19 +1620,21 @@ void mqtt_ha_start() {
     s_legacy_state = legacy_state_topic(s_base);
     s_heartbeat = heartbeat_topic(s_base);
     s_crash     = crash_topic(s_base);
-    if (!build_client()) return;                               // policy error already surfaced
-    // mqtt_task starts the client only after hp_stats() proves a valid X10A reply. Starting it here
-    // would already arm the shared installation LWT, allowing an unwired debug board to alter MQTT
-    // even if every explicit mqtt_publish() below were gated.
-    set_status(false, "waiting for X10A response");
+    if (!build_client(false)) return;                          // policy error already surfaced
+    // mqtt_task starts this no-LWT client immediately for inbound reference observations. Every
+    // explicit publish stays behind the X10A gate, and only the first valid bus response replaces
+    // this handle with a client whose CONNECT packet arms the shared installation LWT.
+    set_status(false, "");
     // Hardware coredump: the 4 KiB task hit the ESP32-S3 stack-end watchpoint while building the
     // heartbeat after Config gained the reference-source strings. heartbeat.hpp no longer creates
     // chained temporary strings, and 6 KiB restores explicit headroom for future bounded mappings.
     if (xTaskCreate(mqtt_task, "mqtt_pub", 6144, nullptr, 4, nullptr) != pdPASS) {
-        // No publish task -> the client is never started, so no discovery/value/heartbeat message or
-        // shared-topic LWT can go out. Say so rather than looking configured-but-silent in /status.
+        // No task -> the client was built but never started, so neither subscriptions nor publishes
+        // are possible. Release it and say so rather than looking configured-but-silent in /status.
+        esp_mqtt_client_destroy(s_client);
+        s_client = nullptr;
         set_status(false, "publish task alloc failed");
-        diag_printf("mqtt: publish task alloc failed — no MQTT publishing this boot\n");
+        diag_printf("mqtt: publish task alloc failed — no MQTT activity this boot\n");
     }
 }
 
@@ -1659,5 +1729,8 @@ void mqtt_reference_reconfigure() {
     s_ref_probe.active = false;
     s_ref_probe.passed = false;
 }
+
+void mqtt_request_weather_cleanup() { s_weather_cleanup_requested = true; }
+void mqtt_request_modbus_cleanup() { s_modbus_cleanup_requested = true; }
 
 } // namespace daik

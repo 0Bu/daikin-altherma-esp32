@@ -5,7 +5,7 @@
   /* Daikin brand: cyan wordmark, light-cyan + deep-navy triangle */
   --brand:#0097E0; --brand-strong:#0079BD; --brand-sky:#5AC8F0; --brand-navy:#14285A; --brand-tint:#E9F6FD;
   --bg:#F4F5F7; --card:#FFFFFF; --fg:#1C2530; --muted:#6B7480; --line:#E2E5EA; --soft:#F1F3F5;
-  --ok:#1A9D5A; --warn:#C9740A; --err:#D23B3B;
+  --ok:#1A9D5A; --warn:#C9740A; --err:#D23B3B; --err-tint:#FDEEEE;
   /* Supply/return flow colours (the system schematic's pipes) — a CVD-validated pair,
      deliberately separate from the ok/warn/err STATE colours: they encode temperature, not health.
      The schematic's idle-pipe/plate greys derive from the neutral ramp, no extra brand tokens. */
@@ -27,7 +27,7 @@
   :root {
     --brand:#33ABE8; --brand-strong:#0097E0; --brand-navy:#0E1C43; --brand-tint:#12202B;
     --bg:#12151A; --card:#1B1F27; --fg:#E6E9EE; --muted:#93A0AF; --line:#2A2F39; --soft:#20242C;
-    --ok:#3FBE7A; --warn:#E08A2B; --err:#EA5A5A;
+    --ok:#3FBE7A; --warn:#E08A2B; --err:#EA5A5A; --err-tint:#331E21;
     --flow-hot:#E06A40; --flow-cold:#5A97DE;
     --pipe:#3A414D; --hatch:#232935;
     --shadow-card:0 1px 2px rgba(0,0,0,.5),0 10px 28px rgba(0,0,0,.45);
@@ -387,7 +387,8 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 }
 .conn-tile .section-label { display: block; margin-bottom: 4px; }
 .conn-row {
-  display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px;
+  display: grid; grid-template-columns: max-content minmax(0,1fr) max-content;
+  width: 100%; align-items: center; column-gap: 12px; row-gap: 0;
   padding: 11px 0; border-top: 1px solid var(--line);
   font: inherit; background: none; border-left: 0; border-right: 0; border-bottom: 0;
   cursor: pointer; text-align: left; color: inherit;
@@ -399,16 +400,32 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   color: var(--muted); flex: none;
 }
 .conn-value {
-  flex: 1; min-width: 0; margin-left: 12px; display: flex; flex-direction: column; align-items: flex-end;
+  min-width: 0; display: flex; flex-direction: column; align-items: flex-end;
 }
 .conn-val {
   width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--fg); text-align: right;
 }
 .conn-val.ok { color: var(--ok); } .conn-val.warn { color: var(--warn); } .conn-val.err { color: var(--err); }
+/* The runtime failure uses the SAME geometry as a value-row explainer: one full-row clip directly
+   below the label/value/edit header, a list divider across the row, and an inset body that slides
+   out from under that divider. Keeping the text inside .conn-value made the tongue only as wide as
+   the right-hand endpoint and produced the cramped strip the explainer pattern was designed to
+   avoid. The error tint remains semantic; shape, inset, type and motion now match .vdesc-body. */
+.conn-detail-wrap {
+  grid-column: 1 / -1; min-width: 0; overflow: hidden; margin-top: 3px;
+  box-shadow: inset 0 1px 0 var(--line);
+}
 .conn-detail {
-  width: 100%; margin-top: 3px; color: var(--err); font-size: 12px; font-weight: 500;
-  line-height: 1.3; text-align: right;
+  display: block; min-width: 0; margin: 0 10px 1px; padding: 13px 14px 12px;
+  background: var(--err-tint); border: 1px solid var(--line); border-top: 0;
+  border-radius: 0 0 var(--r-tile) var(--r-tile); box-shadow: var(--shadow-tongue);
+  color: var(--err); font-size: 13.5px; font-weight: 500; line-height: 1.55; text-align: left;
+  animation: conn-tongue-in .22s ease both;
+}
+@keyframes conn-tongue-in {
+  from { transform: translateY(-7px); }
+  to { transform: none; }
 }
 .conn-dbm { font-weight: 500; font-size: 14.5px; color: var(--muted); }
 .conn-name { font-weight: 600; }
@@ -917,6 +934,7 @@ textarea.input[readonly] { font-size: 12px; color: var(--muted); white-space: pr
   .conn-dbm, .vrow-label { font-size: 16.5px; }
   .vrow-unit { font-size: 13.5px; }
   .vdesc-body { font-size: 15px; }
+  .conn-detail { font-size: 15px; }
   .conn-row { padding: 14px 0; }
   .vrow, .vname { padding-top: 11px; padding-bottom: 11px; }
   .inspect-src { font-size: 13.5px; }

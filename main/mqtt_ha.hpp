@@ -56,4 +56,11 @@ bool mqtt_reference_test_proof_valid(uint32_t proof,
 // transient test proof.
 void mqtt_reference_reconfigure();
 
+// Explicit Settings disables own these two retained-topic tombstones. They are the only outbound
+// MQTT operations allowed before X10A proves installation publication authority; ordinary state,
+// discovery, diagnostics and automatic cleanup remain gated. Requests stay pending while the
+// broker is disconnected and are discarded if the corresponding source is re-enabled first.
+void mqtt_request_weather_cleanup();
+void mqtt_request_modbus_cleanup();
+
 } // namespace daik
