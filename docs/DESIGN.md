@@ -389,7 +389,10 @@ Body, ordered:
    selectors and description matching.
    The system-wide **BOOST pill is permanent for the same reason**. Its face always says only BOOST:
    mode 2 (Recommended on) changes border/fill/text from light grey to petrol; every other or unknown
-   mode stays light grey. The inspector and accessible name retain the exact manufacturer state. It
+   mode stays light grey. The inspector and accessible name retain the exact manufacturer state. Its
+   timeline shows the complete four-state Smart-Grid enum — Free running, Forced off, Recommended on
+   and Forced on — rather than collapsing modes 0, 1 and 3 into one visually identical "Boost off"
+   phase. Only Recommended on contributes to the separate sampled Boost-duration total. It
    stays separate from the tank branch because the request is not proof that the controller has
    started a DHW charge.
    **The schematic never hides.** When the X10A link drops, retained X10A values are never left on
@@ -405,10 +408,12 @@ Body, ordered:
    on a live unit, outdoor air held exactly 19.0 °C for five hours, stepped when the compressor
    started, then sat at exactly 25.5 °C for three hours. Those **X10A** values are therefore never
    reported as current. Discharge temperature still blanks to "—"; outdoor air does too when no
-   second source exists, but a live HomeHub outdoor-air measurement stands in because it continues
-   measuring while X10A rests. The replacement is petrol, not a dimmed stale value, and its inspector
+   second source exists, but the successfully polled HomeHub outdoor-air register may stand in because
+   it can continue changing while X10A rests. The replacement is petrol, not a dimmed X10A value, and its inspector
    headline/source line resolve to the HomeHub row. What the pill cannot say, the outdoor-unit
-   inspector does: it names either the Modbus substitution or the reason no current reading exists.
+   inspector does: it names either the Modbus substitution or the reason no current X10A reading
+   exists. A successful Modbus read proves transport freshness only: the register carries no source
+   timestamp, so the inspector says that the underlying measurement age remains unknown.
    ΔT blanks for a related but distinct reason: with the pump off and flow zero, the difference
    between two *stagnant* sensors is not a stale working point, it is not a working point at all.
    The **thermal-capacity pill also requires a running compressor and a ΔT in the selected mode's
@@ -556,7 +561,9 @@ Body, ordered:
    elements with `role="button"` + `tabindex`, activated by pointer, Enter or Space, each named by an
    SVG `<title>` (native tooltip *and* accessible name, from the one copy source); the SVG is
    therefore a labelled `role="group"`, never `aria-hidden` — a hidden subtree must not hold focusable
-   elements. Tapping the same target again, ✕, or Escape closes the panel.
+   elements. Opening a target preserves the page's current scroll position: the inspector may extend
+   below the viewport, but it must never pull the drawing out of sight. Tapping the same target again,
+   ✕, or Escape closes the panel.
    **A junction ends every claim.** Where a shared run parts into branches, all three ways the
    drawing speaks about a pipe stop at the same point: the animated flow overlay, the hit target that
    highlights and opens it, and the readings drawn beside it. One overlay across the junction
@@ -682,8 +689,9 @@ Body, ordered:
    name its own empty case, and the COP does.
    **A chart never gets a blanked X10A number back.** During outdoor-unit rest the X10A outdoor-air
    series is held-over for exactly those samples, so its blue curve has a gap and its scrub value says
-   "Außeneinheit ruht". The independent HomeHub sensor keeps measuring and may draw a petrol value at
-   that same instant — explicitly under its own source name, never as a repaired X10A value. If
+   "Außeneinheit ruht". The independently polled HomeHub register may draw a petrol value at that
+   same instant — explicitly under its own source name, never as a repaired X10A value. Its hover
+   popup names how long the observed register plateau lasts and that measurement age is unknown. If
    neither source measured, no marker appears. Anything that clamps or interpolates the last known
    X10A sample into the live end remains the §5.3-item-3 substitution failure with a 24-hour axis in
    front of it.
@@ -698,8 +706,15 @@ Body, ordered:
    HomeHub adds ten second rings: leaving water, return water, DHW tank, outdoor air, flow and room
    temperature are the six measurement concepts both sources structurally pair; BSH and the 3-way
    valve are the seventh and eighth converter-qualified pairs, Quiet is the ninth exact state pair,
-   and the tenth is the explicit Smart-Grid-mode timeline. All four HomeHub-backed states render one light-grey/inactive track per source with
-   coloured active spans and written interval lists. The valve names both destinations and reports
+   and the tenth is the explicit Smart-Grid-mode timeline. Every categorical timeline uses the same
+   grammar: one outlined track per available source, a separate labelled colour for every valid
+   state, and hatching only for missing samples. Hover, touch pinning and keyboard navigation show a
+   compact popup with source, state, phase start/end and sampled duration; those details are not
+   repeated as a long list below the chart. Source outline and state fill are separate visual channels, so
+   X10A/HomeHub disagreement remains visible without changing what a state colour means. The valve
+   therefore paints and lists both destinations instead of treating Raumkreis as an unlabeled empty
+   background; Smart Grid does the same for all four manufacturer modes; binary timelines explicitly
+   name both inactive and active phases. The valve names both destinations and reports
    sampled time on the DHW and space-circuit branches; its latest observed position wins each bucket.
    Quiet retains the latest sampled mode in each bucket. BSH uses event folding: once ON is observed it remains ON for that open five-minute bucket, so a
    later OFF cannot erase the event. BUH applies the same rule independently to its converter-

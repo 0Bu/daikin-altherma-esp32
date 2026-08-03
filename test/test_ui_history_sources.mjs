@@ -9,6 +9,7 @@ const S = {
   status: { history: {
     rows: [
       { id: "dhw_tank", label: "DHW tank temp. (R5T)" },
+      { id: "outdoor_air", label: "R1T-Outdoor air temp." },
       { id: "pump_signal", label: "Water pump signal (0:max-100:stop)" },
       { id: "defrost_state", label: "Defrost Operation" },
       { id: "quiet_state", label: "Silent Mode" },
@@ -20,6 +21,7 @@ const S = {
     ],
     modbus_rows: [
       { id: "dhw_tank", label: "Domestic Hot Water temperature" },
+      { id: "outdoor_air", label: "Outside air temperature" },
       { id: "quiet_state", label: "Quiet mode operation" },
       { id: "bsh_state", label: "Booster heater run" },
       { id: "valve_dhw", label: "3-way valve" },
@@ -50,33 +52,30 @@ const context = {
     if (key === "hist.duration_min") return `${arg} min`;
     if (key === "hist.duration_h") return `${arg} h`;
     if (key === "hist.duration_hm") return `${arg} h ${arg2} min`;
+    if (key === "hist.state_phase_run") return `${arg} · ${arg2} · ca. ${args[2]}`;
+    if (key === "hist.modbus_plateau") return `Register unverändert ${arg} · ca. ${arg2} · Messalter unbekannt`;
     if (key === "hist.boost_total") return `Boost aktiv · ${arg}`;
-    if (key === "hist.boost_run") return `${arg} · ca. ${arg2}`;
     if (key === "hist.boost_none") return "Kein Boost im aufgezeichneten Zeitraum.";
     if (key === "hist.boost_ago_range") return `vor ${arg}–${arg2} h`;
     if (key === "hist.boost_active") return "Boost aktiv";
     if (key === "hist.boost_inactive") return "Boost aus";
     if (key === "hist.boost_aria") return `${arg} — Boost-Verlauf. ${arg2}`;
     if (key === "hist.defrost_total") return `Abtauen aktiv erfasst · ${arg} Rasterzeit`;
-    if (key === "hist.defrost_run") return `${arg} · aktives Zeitfenster ca. ${arg2}`;
     if (key === "hist.defrost_none") return "Kein Abtauvorgang erfasst.";
     if (key === "hist.defrost_active") return "Abtauen aktiv";
     if (key === "hist.defrost_inactive") return "Abtauen aus";
     if (key === "hist.defrost_aria") return `${arg} — Abtauverlauf. ${arg2}`;
     if (key === "hist.quiet_total") return `Leise-Modus aktiv erfasst · ${arg} Rasterzeit`;
-    if (key === "hist.quiet_run") return `${arg} · aktives Zeitfenster ca. ${arg2}`;
     if (key === "hist.quiet_none") return "Kein Leise-Modus erfasst.";
     if (key === "hist.quiet_active") return "Leise-Modus aktiv";
     if (key === "hist.quiet_inactive") return "Leise-Modus aus";
     if (key === "hist.quiet_aria") return `${arg} — Verlauf des Leise-Modus. ${arg2}`;
     if (key === "hist.heater_total") return `Heizstab aktiv erfasst · ${arg} Rasterzeit`;
-    if (key === "hist.heater_run") return `${arg} · aktives Zeitfenster ca. ${arg2}`;
     if (key === "hist.heater_none") return "Kein Heizstabeinsatz erfasst.";
     if (key === "hist.heater_active") return "Heizstab aktiv";
     if (key === "hist.heater_inactive") return "Heizstab aus";
     if (key === "hist.heater_aria") return `${arg} — Heizstab-Verlauf. ${arg2}`;
     if (key === "hist.buh_total") return `Zusatzheizer aktiv erfasst · ${arg} Rasterzeit`;
-    if (key === "hist.buh_run") return `${arg} · ${arg2} · aktives Zeitfenster ca. ${args[2]}`;
     if (key === "hist.buh_none") return "Kein Zusatzheizereinsatz erfasst.";
     if (key === "hist.buh_active") return "Zusatzheizer aktiv";
     if (key === "hist.buh_inactive") return "Zusatzheizer aus";
@@ -85,7 +84,6 @@ const context = {
     if (key === "hist.buh_aria") return `${arg} — Zusatzheizer-Verlauf. ${arg2}`;
     if (key === "hist.valve_dhw_total") return `Warmwasser · ${arg}`;
     if (key === "hist.valve_space_total") return `Raumkreis · ${arg}`;
-    if (key === "hist.valve_run") return `${arg} · Warmwasser ca. ${arg2}`;
     if (key === "hist.valve_none") return "Keine Warmwasserstellung erfasst.";
     if (key === "hist.valve_dhw") return "Warmwasser";
     if (key === "hist.valve_space") return "Raumkreis";
@@ -130,25 +128,56 @@ assert.match(html, /vhist-line mb/);
 assert.match(html, /45\.2 – 45\.6 °C/,
   "both sources share one vertical scale, including the Modbus-only maximum");
 
-// Smart-Grid mode is a state timeline, not a misleading numeric 0..3 line. Mode 2 becomes two
-// visible Boost intervals whose sampled duration and source are written in words.
+// A successful HomeHub poll proves transport freshness, not when the controller last refreshed its
+// outdoor-temperature register. Keep that qualification in the graph popup: the chart must remain
+// compact, while hovering any petrol plateau names its observed interval and unknown measurement age.
+S.hist.set("outdoor_air", { at: 1, gen: 1, dt: 300, unit: "°C", t0: 1768720000, b0: 200,
+  held: [[1, 3]], v: [205, null, null, null] });
+S.hist.set("modbus:outdoor_air", { at: 1, gen: 1, dt: 300, unit: "°C", t0: 1768720000, b0: 200,
+  held: [], v: [205, 205, 205, 295] });
+const outdoorView = h.historyView("outdoor_air");
+const outdoorHtml = h.histHtml("outdoor_air", "°C", "Außentemperatur");
+assert.doesNotMatch(outdoorHtml, /Messalter unbekannt/,
+  "the freshness qualification must not become another static line below the chart");
+assert.match(h.scrubText(outdoorView, 1),
+  /Modbus 20\.5 °C · Register unverändert .* ca\. 15 min · Messalter unbekannt/,
+  "the popup distinguishes a repeated register value from a proven fresh measurement");
+
+// Smart-Grid mode is a complete categorical state timeline, not a misleading numeric 0..3 line.
+// Every manufacturer mode and a measurement gap are visible in both source lanes. Exact phase
+// intervals live in the hover/touch/keyboard popup, not in a repeated list below the chart; only
+// mode 2 contributes to the compact Boost total.
 S.hist.set("smart_grid_mode", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
-  held: [], v: [0, 20, 20, 0, 20, 20, 20, 0] });
+  held: [], v: [0, 10, 20, 30, null, 20, 0] });
 S.hist.set("modbus:smart_grid_mode", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
-  held: [], v: [0, 20, 20, 0, 20, 20, 20, 0] });
+  held: [], v: [0, 10, 20, 30, null, 20, 0] });
 const boostView = h.historyView("smart_grid_mode");
 const boostHtml = h.histHtml("smart_grid_mode", "", "Smart-Grid-Anforderung");
 assert.equal(boostView.series.length, 2);
 assert.match(boostHtml, /vhist-state-track/);
 assert.doesNotMatch(boostHtml, /vhist-line/,
   "a categorical Smart-Grid mode must not be drawn as a numeric line");
-assert.match(boostHtml, /Boost aktiv · 25 min/,
-  "two mode-2 runs report their combined five-minute-sampled duration");
-assert.equal((boostHtml.match(/vhist-state-on mb/g) || []).length, 2,
-  "the HomeHub track shows exactly the two active Boost intervals");
+assert.match(boostHtml, /Boost aktiv · 10 min/,
+  "only the two mode-2 buckets contribute to the Boost total");
+for (const cls of ["sg-free", "sg-forced-off", "sg-recommended", "sg-forced-on"])
+  assert.match(boostHtml, new RegExp(`vhist-state-on mb ${cls}`),
+    `the HomeHub lane visibly distinguishes ${cls}`);
+assert.match(boostHtml, /vhist-state-gap/);
+assert.match(boostHtml, /Freier Betrieb/);
+assert.match(boostHtml, /Zwangsabschaltung/);
+assert.match(boostHtml, /Empfehlung ein/);
+assert.match(boostHtml, /Erzwungen ein/);
+assert.doesNotMatch(boostHtml, /vhist-state-runs|· Phasen/,
+  "phase details belong to the chart popup, never a long list below it");
 assert.match(boostHtml, /HomeHub · Modbus/);
-assert.match(h.scrubText(boostView, 1), /Modbus Boost aktiv · Empfehlung ein/,
-  "scrubbing names the state and manufacturer mode, not the number 2.0");
+assert.match(h.scrubText(boostView, 1), /Modbus Zwangsabschaltung/);
+assert.match(h.scrubText(boostView, 1), /Zwangsabschaltung .* ca\. 5 min/,
+  "the popup names the containing phase and sampled duration");
+assert.doesNotMatch(h.scrubText(boostView, 1), /Boost aus/,
+  "a non-Boost manufacturer mode must not be reduced to the ambiguous words Boost off");
+assert.match(h.scrubText(boostView, 2), /Modbus Empfehlung ein · Boost aktiv/,
+  "scrubbing names the manufacturer mode before the derived Boost interpretation");
+assert.match(h.scrubText(boostView, 3), /Modbus Erzwungen ein/);
 
 // BSH is also categorical. Its active buckets render as intervals and the wording calls the sum
 // raster time rather than exact runtime; X10A is the preferred physical-state source.
@@ -161,8 +190,10 @@ const bshHtml = h.histHtml("bsh_state", "", "Heizstab");
 assert.match(bshHtml, /vhist-state-track/);
 assert.doesNotMatch(bshHtml, /vhist-line/);
 assert.match(bshHtml, /Heizstab aktiv erfasst · 10 min Rasterzeit/);
-assert.match(bshHtml, /<strong>X10A<\/strong>/, "X10A leads the heater-run summary");
-assert.match(h.scrubText(bshView, 1), /X10A Heizstab aktiv/);
+assert.match(bshHtml, /vhist-state-on state-off/);
+assert.match(bshHtml, /vhist-state-on heater-on/);
+assert.doesNotMatch(bshHtml, /vhist-state-runs|· Phasen/);
+assert.match(h.scrubText(bshView, 1), /X10A Heizstab aktiv .* ca\. 5 min/);
 
 // Both outdoor pills open categorical timelines. Defrost is event-folded; Quiet keeps two
 // source-attributed lanes because X10A and HomeHub report the same exact mode independently.
@@ -173,7 +204,10 @@ const defrostHtml = h.histHtml("defrost_state", "", "Abtauen");
 assert.match(defrostHtml, /vhist-state-track/);
 assert.doesNotMatch(defrostHtml, /vhist-line/);
 assert.match(defrostHtml, /Abtauen aktiv erfasst · 10 min Rasterzeit/);
-assert.match(h.scrubText(defrostView, 1), /Abtauen aktiv/);
+assert.match(defrostHtml, /vhist-state-on state-off/);
+assert.match(defrostHtml, /vhist-state-on defrost-on/);
+assert.doesNotMatch(defrostHtml, /vhist-state-runs|· Phasen/);
+assert.match(h.scrubText(defrostView, 1), /Abtauen aktiv .* ca\. 5 min/);
 
 S.hist.set("quiet_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
   held: [], v: [10, 10, 0, 0] });
@@ -186,8 +220,11 @@ assert.match(quietHtml, /vhist-state-track/);
 assert.doesNotMatch(quietHtml, /vhist-line/);
 assert.match(quietHtml, /Leise-Modus aktiv erfasst · 10 min Rasterzeit/);
 assert.match(quietHtml, /HomeHub · Modbus/);
-assert.match(h.scrubText(quietView, 0), /X10A Leise-Modus aktiv/);
-assert.match(h.scrubText(quietView, 1), /Modbus Leise-Modus aus/);
+assert.match(quietHtml, /vhist-state-on state-off/);
+assert.match(quietHtml, /vhist-state-on quiet-on/);
+assert.doesNotMatch(quietHtml, /vhist-state-runs|· Phasen/);
+assert.match(h.scrubText(quietView, 0), /X10A Leise-Modus aktiv .* ca\. 10 min/);
+assert.match(h.scrubText(quietView, 1), /Modbus Leise-Modus aus .* ca\. 10 min/);
 
 // BUH is one component with two event-folded stage bits. The browser combines both aligned rings
 // into an off/step-1/step-2 timeline; it must not graph either raw bit as a numeric 0/1 curve.
@@ -206,10 +243,11 @@ assert.doesNotMatch(buhHtml, /vhist-line/);
 assert.match(buhHtml, /Zusatzheizer aktiv erfasst · 15 min Rasterzeit/);
 assert.match(buhHtml, /vhist-state-on step1/);
 assert.match(buhHtml, /vhist-state-on step2/);
-assert.match(buhHtml, /Stufe 1 .* aktives Zeitfenster ca\. 5 min/);
-assert.match(buhHtml, /Stufe 2 .* aktives Zeitfenster ca\. 10 min/);
-assert.match(h.scrubText(buhView, 1), /Stufe 1/);
-assert.match(h.scrubText(buhView, 2), /Stufe 2/);
+assert.match(buhHtml, /vhist-state-on state-off/);
+assert.doesNotMatch(buhHtml, /vhist-state-runs|· Phasen/);
+assert.match(h.scrubText(buhView, 1), /Stufe 1 .* ca\. 5 min/);
+assert.match(h.scrubText(buhView, 2), /Stufe 2 .* ca\. 10 min/);
+assert.match(h.scrubText(buhView, 5), /nicht gemessen .* ca\. 5 min/);
 
 // The schematic shows intuitive pump speed, while the X10A row is inverted (0=max, 100=stop).
 // Its inspector curve must transform the source ring instead of making a stopped pump look maximal.
@@ -230,8 +268,11 @@ const valveHtml = h.histHtml("valve_dhw", "", "3-Wege-Ventil");
 assert.match(valveHtml, /vhist-state-track/);
 assert.doesNotMatch(valveHtml, /vhist-line/);
 assert.match(valveHtml, /Warmwasser · 15 min · Raumkreis · 15 min/);
-assert.match(h.scrubText(valveView, 0), /X10A Raumkreis/);
-assert.match(h.scrubText(valveView, 2), /Modbus Warmwasser/);
+assert.match(valveHtml, /vhist-state-on valve-space/);
+assert.match(valveHtml, /vhist-state-on valve-dhw/);
+assert.doesNotMatch(valveHtml, /vhist-state-runs|· Phasen/);
+assert.match(h.scrubText(valveView, 0), /X10A Raumkreis .* ca\. 10 min/);
+assert.match(h.scrubText(valveView, 2), /Modbus Warmwasser .* ca\. 10 min/);
 
 // Bucket alignment, not array index: Modbus starts one raster later and must leave the first slot
 // empty rather than sliding its first sample under the older X10A point.

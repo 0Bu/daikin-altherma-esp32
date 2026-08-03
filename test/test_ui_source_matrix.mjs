@@ -131,6 +131,12 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
   assert.doesNotMatch(style, /svg \.sc-snow, svg \.sc-quiet \{[^}]*visibility:\s*hidden/,
     "outdoor-mode pills must never be conditionally hidden");
 
+  const inspectPick = /function inspectPick\(key\) \{[\s\S]*?\n\}/.exec(SOURCE)?.[0] || "";
+  assert.match(inspectPick, /S\.insp = S\.insp !== key \? key : null/,
+    "every schematic target must use the shared toggle-only inspector handler");
+  assert.doesNotMatch(inspectPick, /scrollIntoView|scrollTo|scrollBy/,
+    "opening BOOST, BUH or any other inspector must preserve the browser scroll position");
+
   const attrs = (id) => ({
     setAttribute: (k, v) => elements[id].values.set(k, String(v)),
   });
@@ -273,7 +279,7 @@ const M_QUIET = (on) => M_FLAG(9, "Quiet mode operation", on, "quiet_state");
 
 // ── Both links live, but the outdoor unit is resting ────────────────────────────────────────────
 // X10A remains connected and its cache remains filled; only page 0x20/0x21 is held over. Outdoor
-// air has an independently current HomeHub twin and should therefore become a per-reading petrol
+// air has an independently polled HomeHub twin and should therefore become a per-reading petrol
 // fallback. Discharge has no pair and must remain blank. This is distinct from the all-X10A-down
 // branch exercised below and is the standby case that used to leave the schematic at "Outdoor —".
 {
@@ -283,7 +289,7 @@ const M_QUIET = (on) => M_FLAG(9, "Quiet mode operation", on, "quiet_state");
   c.S.live = d;
 
   assert.equal(d.ouHeldOver, true, "stopped compressor makes the outdoor-unit page held over");
-  assert.equal(d.out, 28.5, "the current HomeHub outdoor temperature replaces retained X10A");
+  assert.equal(d.out, 28.5, "the HomeHub outdoor register replaces retained X10A");
   assert.equal(d.mbFields.has("out"), true, "the replacement carries Modbus provenance");
   assert.equal(c.ouReadingText(d, "out", d.out, (n) => n.toFixed(1)), "28.5",
     "the schematic shows the current replacement instead of a dash");
@@ -297,8 +303,10 @@ const M_QUIET = (on) => M_FLAG(9, "Quiet mode operation", on, "quiet_state");
     "the outdoor inspector resolves the exact HomeHub row used by the pill");
   assert.equal(c.inspHeld(c.INSPECT.out, d), false,
     "a live Modbus headline must not be followed by a no-current-reading note");
-  assert.match(c.INSPECT.ou.now(d).de, /aktuellen HomeHub-Messung/,
+  assert.match(c.INSPECT.ou.now(d).de, /HomeHub-Modbus-Register/,
     "the German outdoor-unit explanation names the standby substitution");
+  assert.match(c.INSPECT.ou.now(d).de, /Alter der zugrunde liegenden Messung.*unbekannt/,
+    "a successful Modbus poll must not claim source-measurement freshness");
 
   c.S.insp = "disch";
   assert.equal(c.mbForInspect("disch"), null, "unpaired discharge has no invented fallback");
