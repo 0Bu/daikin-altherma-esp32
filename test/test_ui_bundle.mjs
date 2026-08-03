@@ -94,10 +94,10 @@ assert.match(envModalHtml, /id="envSensor"[\s\S]*value="" selected[\s\S]*value="
   "the outdoor-sensor modal must default to no sensor and keep its SDA/SCL group hidden until selected");
 assert.doesNotMatch(envModalHtml, /type="checkbox"|envEnabled|envPreset|env\.hint|temperature measurement range|Temperatur-Messbereich/,
   "the outdoor-sensor modal must contain no enable checkbox, wiring preset, or technical prose");
-assert.match(app, /SDA carries the I²C data; SCL provides the clock\./,
-  "the English modal must explain SDA and SCL in one short sentence");
-assert.match(app, /SDA überträgt die I²C-Daten, SCL gibt den Takt vor\./,
-  "the German modal must explain SDA and SCL in one short sentence");
+assert.match(app, /SDA is the I²C data line \(yellow Grove wire\); SCL is the clock line \(white Grove wire\)/,
+  "the English modal must retain the original SDA/SCL wiring explanation");
+assert.match(app, /SDA ist die I²C-Datenleitung \(gelbe Grove-Leitung\), SCL die Taktleitung \(weiße Grove-Leitung\)/,
+  "the German modal must retain the original SDA/SCL wiring explanation");
 assert.match(app, /function syncEnv3Fields\(\)[\s\S]*\$\("envPinFields"\)\.hidden = !enabled;[\s\S]*disabled = !enabled/,
   "selecting no sensor must hide and disable both GPIO fields");
 assert.match(app, /function env3FormPayload\(\)[\s\S]*if \(!enabled\) return \{ enabled: false \};[\s\S]*saveReboot\("\/set_env3", body/,
