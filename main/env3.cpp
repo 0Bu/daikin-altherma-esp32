@@ -76,7 +76,7 @@ bool add_device(i2c_master_bus_handle_t bus, uint8_t address, i2c_master_dev_han
     return i2c_master_bus_add_device(bus, &cfg, &out) == ESP_OK;
 }
 
-bool initialize(SensorBus& sensor, int sda, int scl) {
+bool create_bus(SensorBus& sensor, int sda, int scl) {
     if (!sensor.bus) {
         i2c_master_bus_config_t cfg = {};
         cfg.i2c_port = I2C_NUM_0;
@@ -87,6 +87,27 @@ bool initialize(SensorBus& sensor, int sda, int scl) {
         cfg.flags.enable_internal_pullup = true;
         if (i2c_new_master_bus(&cfg, &sensor.bus) != ESP_OK) return false;
     }
+    return true;
+}
+
+void delete_bus(SensorBus& sensor) {
+    if (sensor.qmp) {
+        i2c_master_bus_rm_device(sensor.qmp);
+        sensor.qmp = nullptr;
+    }
+    if (sensor.sht) {
+        i2c_master_bus_rm_device(sensor.sht);
+        sensor.sht = nullptr;
+    }
+    if (sensor.bus) {
+        i2c_del_master_bus(sensor.bus);
+        sensor.bus = nullptr;
+    }
+    sensor.initialized = false;
+}
+
+bool initialize(SensorBus& sensor, int sda, int scl) {
+    if (!create_bus(sensor, sda, scl)) return false;
     // Device handles can fail independently (for example under low heap). Retry only the missing
     // handle on the next cycle; never call an I2C transaction with a null handle after a partial add.
     if (!sensor.sht && !add_device(sensor.bus, ENV3_SHT30_ADDR, sensor.sht)) return false;
@@ -156,6 +177,43 @@ void task(void*) {
 }
 
 } // namespace
+
+Env3ProbeResult env3_probe(int sda, int scl) {
+    SensorBus sensor;
+    const auto finish = [&](Env3ProbeResult result) {
+        delete_bus(sensor);
+        return result;
+    };
+    if (!create_bus(sensor, sda, scl) ||
+        !add_device(sensor.bus, ENV3_SHT30_ADDR, sensor.sht) ||
+        !add_device(sensor.bus, ENV3_QMP6988_ADDR, sensor.qmp))
+        return finish(Env3ProbeResult::BusUnavailable);
+
+    // QMP6988 identifies itself as 0x5c at 0xd1.  Retry once so a single line disturbance cannot
+    // turn a correctly wired sensor into a rejected save.
+    bool qmp_ok = false;
+    for (int attempt = 0; attempt < 2 && !qmp_ok; ++attempt) {
+        uint8_t chip_id = 0;
+        qmp_ok = read_reg(sensor.qmp, 0xd1, &chip_id, 1) == ESP_OK && chip_id == 0x5c;
+    }
+    if (!qmp_ok) return finish(Env3ProbeResult::Qmp6988Unavailable);
+
+    // SHT30 has no chip-id register.  A successful single-shot transaction with both documented
+    // CRC bytes valid is the positive identity/reachability proof instead of merely seeing 0x44 ACK.
+    bool sht_ok = false;
+    for (int attempt = 0; attempt < 2 && !sht_ok; ++attempt) {
+        const uint8_t command[2] = {0x2c, 0x06};
+        uint8_t raw[6] = {};
+        if (i2c_master_transmit(sensor.sht, command, sizeof(command), I2C_TIMEOUT_MS) != ESP_OK)
+            continue;
+        vTaskDelay(pdMS_TO_TICKS(20));
+        if (i2c_master_receive(sensor.sht, raw, sizeof(raw), I2C_TIMEOUT_MS) != ESP_OK)
+            continue;
+        float temperature = 0.0f, humidity = 0.0f;
+        sht_ok = env3_decode_sht30(raw, temperature, humidity);
+    }
+    return finish(sht_ok ? Env3ProbeResult::Ok : Env3ProbeResult::Sht30Unavailable);
+}
 
 void env3_start() {
     const Config cfg = config();

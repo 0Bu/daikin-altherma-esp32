@@ -619,7 +619,9 @@ function wireRestOfApp() {
       showError: (msg) => { $("envError").textContent = msg; $("envError").hidden = false; },
       close: closeEnv3,
       then: renderApp,
-      busyMsg: t("env.saving"),
+      busyMsg: t("env.checking"),
+      busyLabel: "env.checking",
+      mapError: env3SaveError,
     });
   });
 }

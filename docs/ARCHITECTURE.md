@@ -108,11 +108,15 @@ http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /di
                       POST /crash/dismiss. http_append_status_json() runs on the httpd task ALONE —
                       see "Push vs. poll" below for why that sentence is load-bearing
 http_config.cpp     → POST /set_wifi, /set_mqtt, /test_ref_temp, /set_ref_temp, /set_weather, /set_syslog,
-                      /set_ntp, /set_hp, /discover_homehub, /set_board, /set_ota, /set_lang,
+                      /set_ntp, /set_hp, /discover_homehub, /set_board, /set_env3, /set_ota, /set_lang,
                       /detect. /test_ref_temp proves that an exact MQTT mapping yields an accepted
                       value without saving it; /set_ref_temp requires that proof and applies live.
                       /set_weather validates the DWD path component, persists it and only wakes the
                       weather task; no DNS/TLS request runs on the httpd worker.
+                      /set_env3 proof-gates an enable before NVS: a short-lived bus requires one
+                      CRC-valid SHT30 sample and the QMP6988 chip id on the proposed pins. Disable
+                      remains probe-free; an already running unchanged mapping instead requires a
+                      fresh driver sample, and moving that owned bus is disable-first.
                       /set_hp also carries the HomeHub Modbus params (mb_host/mb_port/mb_unit_id,
                       actuation_enabled), applied live; /discover_homehub is a bounded, explicit
                       dialog action that returns an IPv4 without saving it
