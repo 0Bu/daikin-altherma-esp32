@@ -33,91 +33,31 @@ struct WeatherMqttSnapshot {
 };
 
 inline std::string weather_forecast_topic(const std::string& base) {
+    return base + "/weather/openmeteo/forecast";
+}
+
+// Frozen names from the short-lived HA Discovery contract. Weather is an input to the firmware and
+// an MQTT evidence stream, not a second HA weather integration. Keep only these tombstone targets so
+// an upgraded board removes the four retained configs that an earlier build may have published.
+inline const RetiredHaSensor RETIRED_WEATHER_HA_SENSORS[] = {
+    {"sensor", "weather_forecast_outdoor_mean_2h"},
+    {"sensor", "weather_forecast_solar_energy_2h"},
+    {"binary_sensor", "weather_forecast_available"},
+    {"binary_sensor", "weather_forecast_fresh"},
+};
+inline constexpr int RETIRED_WEATHER_HA_SENSOR_COUNT =
+    sizeof(RETIRED_WEATHER_HA_SENSORS) / sizeof(RETIRED_WEATHER_HA_SENSORS[0]);
+
+inline std::string retired_weather_discovery_topic(const std::string& prefix,
+                                                   const std::string& node,
+                                                   const RetiredHaSensor& sensor) {
+    return prefix + "/" + sensor.component + "/" + node + "/" + sensor.object_id + "/config";
+}
+
+// Frozen predecessor of weather_forecast_topic(). It is probed and deleted only when a non-empty
+// retained payload still exists, so upgrading does not leave two forecast contracts behind.
+inline std::string retired_weather_forecast_topic(const std::string& base) {
     return base + "/weather_forecast";
-}
-
-struct WeatherHaSensor {
-    const char* component;
-    const char* object_id;
-    const char* name;
-    const char* json_path;
-    const char* unit;
-    const char* device_class;
-    const char* state_class;
-    bool diagnostic;
-    bool require_forecast_available;
-};
-
-inline const WeatherHaSensor WEATHER_HA_SENSORS[] = {
-    {"sensor", "weather_forecast_outdoor_mean_2h", "Forecast Outdoor Temperature (2h Mean)",
-     "outdoor_mean_2h_c", "°C", "temperature", "measurement", false, true},
-    {"sensor", "weather_forecast_solar_energy_2h", "Forecast Solar Energy (2h)",
-     "solar_energy_2h_wh_m2", "Wh/m²", "", "measurement", false, true},
-    {"binary_sensor", "weather_forecast_available", "Forecast Available",
-     "available", "", "", "", true, false},
-    {"binary_sensor", "weather_forecast_fresh", "Forecast Fresh",
-     "fresh", "", "", "", true, false},
-};
-inline constexpr int WEATHER_HA_SENSOR_COUNT =
-    sizeof(WEATHER_HA_SENSORS) / sizeof(WEATHER_HA_SENSORS[0]);
-
-inline std::string weather_discovery_topic(const std::string& prefix, const std::string& node,
-                                           const WeatherHaSensor& s) {
-    return prefix + "/" + s.component + "/" + node + "/" + s.object_id + "/config";
-}
-
-inline std::string weather_discovery_config(const std::string& node,
-                                            const std::string& board_id,
-                                            const std::string& weather_topic,
-                                            const std::string& avail_topic,
-                                            const WeatherHaSensor& s) {
-    std::string out = "{\"name\":\"";
-    json_append_escaped(out, s.name);
-    out += "\",\"uniq_id\":\"";
-    out += node;
-    out += '_';
-    out += s.object_id;
-    out += "\",\"stat_t\":\"";
-    out += weather_topic;
-    out += "\",\"val_tpl\":\"{{ value_json.";
-    out += s.json_path;
-    out += " }}\",";
-    if (s.require_forecast_available) {
-        // Both sources matter: LWT catches an offline ESP32, while the retained forecast document
-        // catches a live board whose provider data failed or aged out.
-        out += "\"availability\":[{\"topic\":\"";
-        out += avail_topic;
-        out += "\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\"},";
-        out += "{\"topic\":\"";
-        out += weather_topic;
-        out += "\",\"value_template\":\"{{ 'online' if value_json.available == 1 else 'offline' }}\",";
-        out += "\"payload_available\":\"online\",\"payload_not_available\":\"offline\"}],";
-        out += "\"availability_mode\":\"all\",";
-    } else {
-        out += "\"avty_t\":\"";
-        out += avail_topic;
-        out += "\",";
-    }
-    if (s.component[0] == 'b') out += "\"pl_on\":\"1\",\"pl_off\":\"0\",";
-    if (s.unit[0]) {
-        out += "\"unit_of_meas\":\"";
-        json_append_escaped(out, s.unit);
-        out += "\",";
-    }
-    if (s.device_class[0]) {
-        out += "\"dev_cla\":\"";
-        out += s.device_class;
-        out += "\",";
-    }
-    if (s.state_class[0]) {
-        out += "\"stat_cla\":\"";
-        out += s.state_class;
-        out += "\",";
-    }
-    if (s.diagnostic) out += "\"ent_cat\":\"diagnostic\",";
-    out += device_json(node, board_id);
-    out += '}';
-    return out;
 }
 
 inline void weather_mqtt_append_string(std::string& out, const char* key,

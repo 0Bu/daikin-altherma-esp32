@@ -5119,7 +5119,11 @@ static void test_weather_forecast_contract() {
     mqtt.state = "ok";
     mqtt.reason = "fresh";
     const std::string mqtt_json = build_weather_mqtt_json(mqtt, 1100);
-    CHECK(weather_forecast_topic("daikin") == "daikin/weather_forecast");
+    CHECK(weather_forecast_topic("daikin") == "daikin/weather/openmeteo/forecast");
+    const std::string retired_weather = retired_weather_forecast_topic("daikin");
+    CHECK(retired_weather == "daikin/weather_forecast");
+    CHECK(retained_cleanup_candidate(retired_weather, retired_weather.data(),
+                                     static_cast<int>(retired_weather.size()), true, 7, 0));
     CHECK(mqtt_json.find("\"provider\":\"open-meteo\"") != std::string::npos);
     CHECK(mqtt_json.find("\"model\":\"icon_seamless\"") != std::string::npos);
     CHECK(mqtt_json.find("\"available\":1,\"fresh\":1,\"has_value\":1") != std::string::npos);
@@ -5131,27 +5135,15 @@ static void test_weather_forecast_contract() {
     CHECK(mqtt_json.find("latitude") == std::string::npos);
     CHECK(mqtt_json.find("longitude") == std::string::npos);
 
-    CHECK(WEATHER_HA_SENSOR_COUNT == 4);
-    const std::string weather_device = device_json("daikin", "board");
-    const WeatherHaSensor& temperature_sensor = WEATHER_HA_SENSORS[0];
-    CHECK(weather_discovery_topic("homeassistant", "daikin", temperature_sensor) ==
+    // HA Discovery is intentionally absent. These are only frozen cleanup targets for configs
+    // published by the previous build; their ids must never be repurposed.
+    CHECK(RETIRED_WEATHER_HA_SENSOR_COUNT == 4);
+    CHECK(retired_weather_discovery_topic("homeassistant", "daikin",
+                                             RETIRED_WEATHER_HA_SENSORS[0]) ==
           "homeassistant/sensor/daikin/weather_forecast_outdoor_mean_2h/config");
-    const std::string temperature_config = weather_discovery_config(
-        "daikin", "board", "daikin/weather_forecast", "daikin/status", temperature_sensor);
-    CHECK(temperature_config.find("\"uniq_id\":\"daikin_weather_forecast_outdoor_mean_2h\"") !=
-          std::string::npos);
-    CHECK(temperature_config.find("\"unit_of_meas\":\"°C\"") != std::string::npos);
-    CHECK(temperature_config.find("\"dev_cla\":\"temperature\"") != std::string::npos);
-    CHECK(temperature_config.find("\"stat_cla\":\"measurement\"") != std::string::npos);
-    CHECK(temperature_config.find("\"availability_mode\":\"all\"") != std::string::npos);
-    CHECK(temperature_config.find("value_json.available == 1") != std::string::npos);
-    CHECK(temperature_config.find(weather_device) != std::string::npos);
-    const std::string available_config = weather_discovery_config(
-        "daikin", "board", "daikin/weather_forecast", "daikin/status", WEATHER_HA_SENSORS[2]);
-    CHECK(available_config.find("\"pl_on\":\"1\",\"pl_off\":\"0\"") != std::string::npos);
-    CHECK(available_config.find("\"ent_cat\":\"diagnostic\"") != std::string::npos);
-    CHECK(available_config.find("\"avty_t\":\"daikin/status\"") != std::string::npos);
-    CHECK(available_config.find("\"availability\":[") == std::string::npos);
+    CHECK(retired_weather_discovery_topic("homeassistant", "daikin",
+                                             RETIRED_WEATHER_HA_SENSORS[3]) ==
+          "homeassistant/binary_sensor/daikin/weather_forecast_fresh/config");
 
     // An old value remains available for forensic history after a provider error, but it cannot
     // masquerade as decision-ready data: both availability signals fail closed atomically.
@@ -8623,10 +8615,6 @@ static void test_entity_identity() {
         for (int i = 0; i < CRASH_SENSOR_COUNT; i++)
             claim(uniq_id_of(crash_discovery_config(node, brd, cr, av, CRASH_SENSORS[i])),
                   "crash", crash_discovery_topic(pfx, node, CRASH_SENSORS[i]));
-        for (int i = 0; i < WEATHER_HA_SENSOR_COUNT; i++)
-            claim(uniq_id_of(weather_discovery_config(node, brd, "weather", av,
-                                                       WEATHER_HA_SENSORS[i])),
-                  "weather", weather_discovery_topic(pfx, node, WEATHER_HA_SENSORS[i]));
         // A RETIRED id is not published any more, but it must never be RE-USED either: the whole
         // point of retiring it is that a broker somewhere still holds its retained config, and a new
         // entity claiming that id would inherit the corpse instead of getting a fresh registry entry.
@@ -8641,6 +8629,8 @@ static void test_entity_identity() {
         };
         for (int i = 0; i < RETIRED_CRASH_SENSOR_COUNT; i++)     burned(RETIRED_CRASH_SENSORS[i]);
         for (int i = 0; i < RETIRED_HEARTBEAT_SENSOR_COUNT; i++) burned(RETIRED_HEARTBEAT_SENSORS[i]);
+        for (int i = 0; i < RETIRED_WEATHER_HA_SENSOR_COUNT; i++)
+            burned(RETIRED_WEATHER_HA_SENSORS[i]);
     }
 
     CHECK(checked > 4000);        // every profile x every family, not a sampled subset
