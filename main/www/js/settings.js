@@ -11,8 +11,7 @@ function openWifi() {
   $("wfPass").classList.remove("invalid");
   $("wfSSIDError").hidden = true;
   $("wfPassError").hidden = true;
-  $("wifiModal").hidden = false;
-  $("wfSSID").focus();
+  openPopup("wifiModal");
 }
 function closeWifi() { $("wifiModal").hidden = true; }
 // Route a /set_wifi rejection to the field it names — wifi_credentials_valid answers "invalid ssid" /
@@ -52,8 +51,7 @@ function setMqttClear(on) {
 function openMqtt() {
   fillMqtt();
   $("mqBroker").classList.remove("invalid"); $("mqError").hidden = true;
-  $("mqttModal").hidden = false;
-  $("mqBroker").focus();
+  openPopup("mqttModal");
 }
 function closeMqtt() { $("mqttModal").hidden = true; }
 // Accept a bare host:port (defaults to plaintext mqtt://) OR an explicit scheme. Credentials require
@@ -92,8 +90,7 @@ function openRefTemp() {
     $(id).classList.remove("invalid");
   $("rtError").hidden = true;
   resetRefTempTest();
-  $("refTempModal").hidden = false;
-  $("rtTopic").focus();
+  openPopup("refTempModal");
 }
 function closeRefTemp() { resetRefTempTest(); $("refTempModal").hidden = true; }
 const validRefTopic = (v) => !v || (v.length <= 192 && v[0] !== "/" && !v.endsWith("/") &&
@@ -156,8 +153,7 @@ function openSyslog() {
   fillSyslog();
   $("slHost").classList.remove("invalid");
   $("slError").hidden = true;
-  $("syslogModal").hidden = false;
-  $("slHost").focus();
+  openPopup("syslogModal");
 }
 function closeSyslog() { $("syslogModal").hidden = true; }
 
@@ -169,8 +165,7 @@ function openNtp() {
   fillNtp();
   $("ntpServer").classList.remove("invalid");
   $("ntpError").hidden = true;
-  $("ntpModal").hidden = false;
-  $("ntpServer").focus();
+  openPopup("ntpModal");
 }
 function closeNtp() { $("ntpModal").hidden = true; }
 
@@ -192,8 +187,7 @@ function openHomehub() {
   $("hhError").hidden = true;
   $("hhSearch").disabled = false;
   $("hhSearch").textContent = t("hh.search");
-  $("homehubModal").hidden = false;
-  $("hhHost").focus();
+  openPopup("homehubModal");
 }
 function closeHomehub() {
   ++homehubSearchGeneration;
@@ -351,7 +345,7 @@ function fillBoard() {
 function openBoard() {
   fillBoard();
   $("bdError").hidden = true;
-  $("boardModal").hidden = false;
+  openPopup("boardModal");
 }
 function closeBoard() { $("boardModal").hidden = true; }
 function signalBars(rssi) {

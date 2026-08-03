@@ -831,6 +831,8 @@ textarea.input[readonly] { font-size: 12px; color: var(--muted); white-space: pr
   background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card);
   box-shadow: var(--shadow-card); padding: 20px; animation: tin .22s cubic-bezier(.2,.7,.3,1);
 }
+/* Programmatic landing point only: the first Tab moves to a real control with its normal ring. */
+.modal-card[tabindex="-1"]:focus { outline: none; }
 .modal-actions { display: flex; gap: 10px; margin-top: 18px; }
 /* nowrap: a label broken mid-phrase inside a button reads as a layout fault rather than a choice.
    When three of them stop fitting, the row becomes a column (below) — that is the honest answer,

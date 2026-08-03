@@ -30,6 +30,15 @@ const html = fs.readFileSync(new URL("../main/www/index.html", import.meta.url),
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 const httpConfig = fs.readFileSync(new URL("../main/http_config.cpp", import.meta.url), "utf8");
 const mqttHa = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "utf8");
+const dialogs = [...html.matchAll(/<[^>]+class="modal-card"[^>]+role="dialog"[^>]*>/g)].map((m) => m[0]);
+assert.equal(dialogs.length, 8, "every custom popup must remain identifiable as a dialog");
+for (const dialog of dialogs)
+  assert.match(dialog, /tabindex="-1"/, "popup focus must land on the dialog container, not an input");
+assert.match(app, /function openPopup\(id\)[\s\S]*modal\.hidden = false;[\s\S]*querySelector\?\.\('\[role="dialog"\]'\)[\s\S]*focus\?\.\(\{ preventScroll: true \}\)/,
+  "opening a popup must focus only its container without scrolling");
+for (const opener of ["openWifi", "openMqtt", "openRefTemp", "openSyslog", "openNtp", "openHomehub", "openBoard", "openBug"])
+  assert.match(app, new RegExp(`function ${opener}\\(\\)[\\s\\S]*?openPopup\\(\\"[^\\"]+\\"\\);`),
+    `${opener} must use the no-field-autofocus popup path`);
 assert.match(html, /id="gPth"[\s\S]*id="svPth"[\s\S]*id="svCop"/,
   "the PHE must keep heat-output and COP placeholders in the schematic");
 assert.doesNotMatch(style, /\.no-pth\s+#gPth/,
