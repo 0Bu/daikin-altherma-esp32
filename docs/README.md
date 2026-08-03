@@ -254,10 +254,10 @@ LAN only, see [SECURITY.md](SECURITY.md).
 
 ```
 GET  /  (alias /index.html)        # embedded web UI (gzipped into the app binary)
-GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this payload: the eight
+GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this payload: the ten
                                    #   reporter-identifying values (wifi.ssid/ip/bssid/mac,
-                                   #   mqtt.broker, syslog.host, ntp.server, modbus.host — the last
-                                   #   a LAN address, whether typed or filled by Search) read
+                                   #   mqtt.broker, syslog.host, ntp.server, modbus.host plus the
+                                   #   weather latitude/longitude — network/location identifiers) read
                                    #   "<redacted>"
                                    #   (logic/redact.hpp). The KEY is always emitted — an omitted
                                    #   field is indistinguishable from an older build, and "which
@@ -438,6 +438,10 @@ POST /set_ref_temp                 # the exact mapping above + test_proof → pe
                                    #   non-empty topic requires a proof issued for that same topic/path/
                                    #   age tuple; an empty topic is the explicit Disable operation and
                                    #   needs no readable value or proof.
+POST /set_weather                  # { latitude, longitude } as strict decimal strings → persist +
+                                   #   wake the firmware weather task. Both empty disables weather
+                                   #   traffic; otherwise both are required. Open-Meteo HTTPS/JSON
+                                   #   work is asynchronous, never on the httpd worker.
 POST /set_syslog                   # { host, port } → validate port range, persist + reboot ("" host
                                    #   disables). DNS/reachability resolve async, shown in /status.syslog
 POST /set_ntp                      # { server } → persist + reboot, no request-path network probe (the
@@ -534,6 +538,14 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   constants (for example `smart_grid_operation_mode: 2`); only the web UI maps them to readable names. A short
   migration probe does the same for an old retained `<base>/state` value; an already-clean broker
   receives no publish on either retired topic.
+  The optional firmware weather input is mirrored independently as one retained atomic evidence
+  document on `<base>/weather_forecast`: forecast values, Open-Meteo/ICON provenance, fetch and
+  horizon timestamps, `valid_until_unix_s`, and numeric `available`/`fresh` flags. HA Discovery adds
+  the two values and diagnostic availability/freshness entities while weather is configured; the
+  value entities become unavailable as soon as the forecast is not decision-ready. The document
+  contains no coordinates. A failed refresh can preserve the last values for later
+  analysis, but marks them unavailable so a historian can prove what was known without treating an
+  old forecast as current. MQTT is not required for the firmware to fetch or evaluate weather.
   Availability/LWT `<base>/status`. `<base>` defaults `daikin-altherma-esp32`,
   `<prefix>` `homeassistant`.
   WP3 defines future non-retained `<base>/intent/v1/evcc` domain intent semantics but installs no

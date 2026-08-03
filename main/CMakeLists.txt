@@ -4,6 +4,7 @@ idf_component_register(
         "config.cpp"
         "nvs_storage.cpp"
         "wifi.cpp"
+        "weather_forecast.cpp"
         "hp_comm.cpp"
         "hp_convert.cpp"
         "hp_detect.cpp"

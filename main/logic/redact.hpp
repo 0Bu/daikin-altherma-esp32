@@ -9,7 +9,7 @@
 // copies of a rule the CI gate can only see in one place.
 //
 // TWO SHAPES, because the two routes leak differently:
-//   * /status leaks by FIELD — eight named values in a JSON object built field by field, so the
+//   * /status leaks by FIELD — ten named values in a JSON object built field by field, so the
 //     substitution happens where the value is written (http_status.cpp calls redact_or) and never as
 //     a post-processing pass over the finished string. That matters: http_append_status_json() runs
 //     on the httpd task whose stack overflow killed v1.0.12, and a second full-size buffer is
@@ -36,13 +36,14 @@ namespace daik {
 // nothing, e.g. bssid while offline) and from an absent key (an older build).
 inline constexpr const char* REDACTED = "<redacted>";
 
-// The eight /status values http_status.cpp passes through redact_or. Listed here rather than only at
+// The ten /status values http_status.cpp passes through redact_or. Listed here rather than only at
 // the call sites so the set is reviewable in one place; the header cannot enforce that every call
 // site uses it (that stays a review point — see .claude/CLAUDE.md), but it can at least state it.
-//   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker  syslog.host  ntp.server  modbus.host
+//   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker  weather.latitude  weather.longitude
+//   syslog.host  ntp.server  modbus.host
 // modbus.host joined the set with the HomeHub transport (#32): it is a LAN address, whether typed
 // manually or filled by the explicit discovery button.
-inline constexpr std::size_t REDACTED_STATUS_FIELDS = 8;
+inline constexpr std::size_t REDACTED_STATUS_FIELDS = 10;
 
 // Field-level substitution for the /status builder. Returns by value because every caller feeds it
 // straight into json_quote(), which copies anyway.

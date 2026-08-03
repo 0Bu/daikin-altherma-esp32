@@ -31,12 +31,12 @@ const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url),
 const httpConfig = fs.readFileSync(new URL("../main/http_config.cpp", import.meta.url), "utf8");
 const mqttHa = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "utf8");
 const dialogs = [...html.matchAll(/<[^>]+class="modal-card"[^>]+role="dialog"[^>]*>/g)].map((m) => m[0]);
-assert.equal(dialogs.length, 8, "every custom popup must remain identifiable as a dialog");
+assert.equal(dialogs.length, 9, "every custom popup must remain identifiable as a dialog");
 for (const dialog of dialogs)
   assert.match(dialog, /tabindex="-1"/, "popup focus must land on the dialog container, not an input");
 assert.match(app, /function openPopup\(id\)[\s\S]*modal\.hidden = false;[\s\S]*querySelector\?\.\('\[role="dialog"\]'\)[\s\S]*focus\?\.\(\{ preventScroll: true \}\)/,
   "opening a popup must focus only its container without scrolling");
-for (const opener of ["openWifi", "openMqtt", "openRefTemp", "openSyslog", "openNtp", "openHomehub", "openBoard", "openBug"])
+for (const opener of ["openWifi", "openMqtt", "openRefTemp", "openWeather", "openSyslog", "openNtp", "openHomehub", "openBoard", "openBug"])
   assert.match(app, new RegExp(`function ${opener}\\(\\)[\\s\\S]*?openPopup\\(\\"[^\\"]+\\"\\);`),
     `${opener} must use the no-field-autofocus popup path`);
 assert.match(html, /id="gPth"[\s\S]*id="svPth"[\s\S]*id="svCop"/,
@@ -59,12 +59,26 @@ assert.match(app, /applyLive\(\{ mb_host: host, mb_port: port, mb_unit_id: unit 
 assert.doesNotMatch(app, /mb_mode|config_modbus_should_search/,
   "the browser bundle must carry no hidden Auto-mode contract");
 
-// Dynamic LWT owns one permanent Settings card from the first capture slice onward. Only its room
-// source is editable today; forecast, strategy and output have explicit non-active/read-only homes.
+// Dynamic LWT owns one permanent Settings card. Room input and direct Open-Meteo forecast are editable;
+// strategy and output keep explicit non-active/read-only homes.
 assert.match(app, /function dynamicControlCardHtml\(\)[\s\S]*t\("dyn\.mode"\)[\s\S]*t\("dyn\.room_sources"\)[\s\S]*t\("dyn\.weather"\)[\s\S]*t\("dyn\.strategy"\)[\s\S]*t\("dyn\.safety"\)/,
   "the dynamic-LWT Settings card must keep all planned configuration domains together");
 assert.match(app, /t\("dyn\.observe"\)[\s\S]*t\("dyn\.read_only"\)/,
   "the first slice must identify itself as observation-only and read-only");
+assert.match(html, /id="weatherModal"[\s\S]*id="wxLatitude"[\s\S]*id="wxLongitude"[\s\S]*data-i18n="wx\.hint"[\s\S]*open-meteo\.com/,
+  "the direct Open-Meteo source must expose coordinate entry, privacy, and attribution");
+assert.doesNotMatch(html, /id="wxLocate"/,
+  "the HTTP device UI must not offer a browser-geolocation action that requires HTTPS or localhost");
+assert.match(app, /data-act="weather"[\s\S]*function openWeather\(\)[\s\S]*saveReboot\("\/set_weather", \{ latitude, longitude \}/,
+  "the forecast row must edit latitude and longitude through the firmware config route");
+assert.match(app, /function parseWeatherCoordinatePair\([\s\S]*function pasteWeatherCoordinates\([\s\S]*addEventListener\("paste", pasteWeatherCoordinates\)/,
+  "a Google Maps coordinate pair pasted into either field must be split before save");
+assert.doesNotMatch(app, /navigator\.geolocation/,
+  "the direct device UI must carry no unreachable browser-geolocation logic");
+assert.doesNotMatch(app, /weather[^\n]{0,120}broker_off|input\/weather/,
+  "the Open-Meteo forecast must not depend on the MQTT broker or an adapter topic");
+assert.match(httpConfig, /static esp_err_t set_weather[\s\S]*weather_location_parse[\s\S]*weather_forecast_reconfigure/,
+  "the coordinate save must validate both values and wake the firmware fetch task");
 
 // The room-source row remains a user-configured exact MQTT mapping. Test is non-persistent and Save
 // starts disabled; only the proof returned after a readable fresh value may accompany the save.
@@ -98,6 +112,37 @@ assert.match(app, /r\.freshness_reason === "retained_without_timestamp"[\s\S]*re
 // All popup text-like fields share one select-all behavior. Exercise the production helper and pin
 // the exclusions that preserve native checkbox/radio/file interaction.
 const settingsSource = readAppFragments(["settings.js"]);
+
+// Google Maps copies "latitude, longitude" with more precision than the firmware's signed
+// microdegrees. Exercise the production parser, including either-field paste and range rejection.
+const weatherFields = {
+  wxLatitude: { id: "wxLatitude", value: "", classList: { remove() {} } },
+  wxLongitude: { id: "wxLongitude", value: "", classList: { remove() {} } },
+  wxError: { hidden: false },
+};
+const weatherContext = vm.createContext({ S: {}, $: (id) => weatherFields[id], t: (key) => key, esc: String });
+vm.runInContext(`${settingsSource}\nthis.__parseWeatherCoordinatePair = parseWeatherCoordinatePair; this.__pasteWeatherCoordinates = pasteWeatherCoordinates;`,
+  weatherContext, { filename: "main/www/js/settings.js" });
+const googlePair = "12.34567890123456, 23.45678901234567";
+const parsedGooglePair = weatherContext.__parseWeatherCoordinatePair(googlePair);
+assert.equal(parsedGooglePair.latitude, "12.345678");
+assert.equal(parsedGooglePair.longitude, "23.456789");
+assert.equal(weatherContext.__parseWeatherCoordinatePair("91.0, 7.0"), null,
+  "latitude outside the valid range must not be accepted as a pair");
+for (const target of [weatherFields.wxLatitude, weatherFields.wxLongitude]) {
+  weatherFields.wxLatitude.value = "";
+  weatherFields.wxLongitude.value = "";
+  let prevented = false;
+  weatherContext.__pasteWeatherCoordinates({
+    currentTarget: target,
+    clipboardData: { getData: () => googlePair },
+    preventDefault: () => { prevented = true; },
+  });
+  assert.equal(prevented, true, "recognized coordinate-pair paste must replace native field insertion");
+  assert.equal(weatherFields.wxLatitude.value, "12.345678");
+  assert.equal(weatherFields.wxLongitude.value, "23.456789");
+}
+
 const selectContext = vm.createContext({ S: {}, $: () => ({}), t: (key) => key, esc: String });
 vm.runInContext(`${settingsSource}\nthis.__selectModalFieldContents = selectModalFieldContents;`,
   selectContext, { filename: "main/www/js/settings.js" });

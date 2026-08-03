@@ -52,6 +52,9 @@
 #include "logic/cop_scope.hpp"
 #include "logic/mqtt_uri.hpp"
 #include "logic/reference_temperature.hpp"
+#include "logic/weather_forecast.hpp"
+#include "logic/weather_mqtt.hpp"
+#include "logic/open_meteo.hpp"
 #include "logic/modbus.hpp"
 #include "logic/modbus_snapshot.hpp"
 #include "logic/homehub_actuator.hpp"
@@ -4565,6 +4568,8 @@ static void test_config_store() {
     CHECK(b.ntp_server == a.ntp_server);
     CHECK(b.has_ref_temp && b.ref_temp_name.empty() && b.ref_temp_topic.empty() && b.ref_temp_path.empty());
     CHECK(b.ref_temp_time_path.empty() && b.ref_temp_max_age_s == 600);
+    CHECK(b.has_weather && !b.weather_enabled && b.weather_latitude_e6 == 0 &&
+          b.weather_longitude_e6 == 0);
 
     // The other flag combination, and a negative-looking port stored as-is.
     ConfigBlob c; c.wifi_rolled_back = true; c.wifi_rollback_active = false; c.syslog_port = 65535;
@@ -4608,7 +4613,7 @@ static void test_config_store() {
     board.led_gpio = 35; board.led_type = 1; board.led_inverted = false;
     board.btn_gpio = 41; board.btn_active_low = true;
     std::vector<uint8_t> bb = config_blob_serialize(board);
-    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 9);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 10);
     ConfigBlob rt;
     CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
     CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
@@ -4630,13 +4635,13 @@ static void test_config_store() {
     // user's WiFi and MQTT credentials on the upgrade. It must decode, and it must report
     // has_board == false so the caller seeds the Kconfig defaults instead of reading "absent" as
     // "indicator disabled" (which would silently darken every XIAO's LED).
-    std::vector<uint8_t> v1 = buf;                       // `buf` is serialized as v9 by this build,
+    std::vector<uint8_t> v1 = buf;                       // `buf` is serialized as v10 by this build,
     // so build a genuine v1 body: header + the v1 fields only, by dropping every trailing block that
     // precedes the CRC — the 13-byte v2 board block (3x u32 + 1 flag byte), the 1-byte v3 channel,
     // the 1-byte v4 language and the 11-byte v5 HomeHub block (empty mb_host [2] + mb_port u32 +
     // mb_unit_id u32 + 1 flag byte), three empty v7 strings (6 bytes), and the empty v8 timestamp
-    // path + max-age u32 (6 bytes) = 38 bytes.
-    v1.erase(v1.end() - 4 - 38, v1.end() - 4);
+    // path + max-age u32 (6 bytes), plus the v10 coordinate block (9 bytes) = 47 bytes.
+    v1.erase(v1.end() - 4 - 47, v1.end() - 4);
     v1[4] = 1;
     restamp(v1);
     ConfigBlob legacy;
@@ -4645,10 +4650,10 @@ static void test_config_store() {
     CHECK(!legacy.has_board);
     CHECK(legacy.wifi_ssid == a.wifi_ssid && legacy.mqtt_uri == a.mqtt_uri);   // v1 payload intact
     CHECK(legacy.led_gpio == -1);                        // the struct default, not the 999 sentinel
-    // A TRUNCATED v9 must not decode with silently-default freshness fields: the version byte still
-    // says 9, so the missing timestamp/max-age block is caught.
+    // A TRUNCATED v10 must not decode with silently-default freshness/weather fields: the version
+    // byte still says 10, so the missing max-age/location tail is caught.
     std::vector<uint8_t> trunc = bb;
-    trunc.erase(trunc.end() - 4 - 6, trunc.end() - 4);    // drop empty v8 path + max-age u32
+    trunc.erase(trunc.end() - 4 - 15, trunc.end() - 4);   // drop v8 path/max-age + v10 location
     restamp(trunc);
     CHECK(!config_blob_deserialize(trunc.data(), trunc.size(), out));
 
@@ -4666,7 +4671,7 @@ static void test_config_store() {
     // would be a spectacularly bad trade. has_ota == false is how the caller tells "no channel
     // stored" from "explicitly release"; both mean release, only the diag line differs.
     std::vector<uint8_t> v2 = bb;
-    v2.erase(v2.end() - 4 - 25, v2.end() - 4);           // drop v3/v4/v5/v7/v8 blocks
+    v2.erase(v2.end() - 4 - 34, v2.end() - 4);           // drop v3/v4/v5/v7/v8/v10 blocks
     v2[4] = 2;
     restamp(v2);
     ConfigBlob pre;
@@ -4690,7 +4695,7 @@ static void test_config_store() {
     // v3 blob and must still decode — the channel survives, and the absent language reads as auto
     // (has_lang == false, ui_lang == 0), so the browser keeps auto-detecting exactly as before.
     std::vector<uint8_t> v3 = lbv;
-    v3.erase(v3.end() - 4 - 24, v3.end() - 4);           // drop v4/v5/v7/v8 blocks
+    v3.erase(v3.end() - 4 - 33, v3.end() - 4);           // drop v4/v5/v7/v8/v10 blocks
     v3[4] = 3;
     restamp(v3);
     ConfigBlob prel;
@@ -4707,7 +4712,7 @@ static void test_config_store() {
     mb.mb_host = "homehub-524288-abc.local";
     mb.mb_port = 502; mb.mb_unit_id = 3; mb.actuation_enabled = true; mb.homehub_enabled = false;
     std::vector<uint8_t> mbb = config_blob_serialize(mb);
-    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 9);
+    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 10);
     ConfigBlob mrt;
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
     CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-abc.local");
@@ -4726,6 +4731,8 @@ static void test_config_store() {
     // The immediately preceding v6 build could persist enabled+empty as Auto. Preserve its wire
     // shape as an upgrade fixture: current firmware must ignore that bit and decode empty as Off.
     std::vector<uint8_t> legacy_v6_auto = mbb;
+    legacy_v6_auto.erase(legacy_v6_auto.end() - 4 - 21, legacy_v6_auto.end() - 4);
+    legacy_v6_auto[4] = 6;
     legacy_v6_auto[legacy_v6_auto.size() - 5] |= 2u;
     restamp(legacy_v6_auto);
     ConfigBlob legacy_v6_rt;
@@ -4734,7 +4741,7 @@ static void test_config_store() {
     // A v5 empty-host blob also decodes disabled. Its historical flag was ambiguous, so it cannot
     // arm discovery in the current explicit-search contract.
     std::vector<uint8_t> v5 = mbb;
-    v5.erase(v5.end() - 4 - 12, v5.end() - 4);           // v5 predates the v7 + v8 blocks
+    v5.erase(v5.end() - 4 - 21, v5.end() - 4);           // v5 predates the v7 + v8 + v10 blocks
     v5[4] = 5;
     v5[v5.size() - 5] &= static_cast<uint8_t>(~2u);      // HomeHub flag byte immediately before CRC
     restamp(v5);
@@ -4744,6 +4751,7 @@ static void test_config_store() {
     // v8 carried the same bit, but it was an inert placeholder. The first write-capable OTA must not
     // reinterpret an old true as consent: the transport survives and actuation is forced OFF.
     std::vector<uint8_t> v8 = mbb;
+    v8.erase(v8.end() - 4 - 9, v8.end() - 4);            // v8 predates the v10 location
     v8[4] = 8;
     restamp(v8);
     ConfigBlob v8rt;
@@ -4753,7 +4761,7 @@ static void test_config_store() {
     // language byte) must decode, report has_modbus == false and leave the mb_* struct defaults
     // (X10A / 502 / 1) — the same trade v1/v2/v3 already refuse to make.
     std::vector<uint8_t> v4 = mbb;
-    v4.erase(v4.end() - 4 - 23, v4.end() - 4);           // drop v5 + empty v7/v8 blocks
+    v4.erase(v4.end() - 4 - 32, v4.end() - 4);           // drop v5 + empty v7/v8/v10 blocks
     v4[4] = 4;
     restamp(v4);
     ConfigBlob v4rt;
@@ -4780,7 +4788,7 @@ static void test_config_store() {
     // The hardware-tested capture slice wrote v7 with only name/topic/value-path. It must migrate
     // in place: keep that mapping, add no imaginary timestamp path, and use the 10-minute default.
     std::vector<uint8_t> v7 = refb;
-    v7.erase(v7.end() - 4 - (2 + ref.ref_temp_time_path.size() + 4), v7.end() - 4);
+    v7.erase(v7.end() - 4 - (2 + ref.ref_temp_time_path.size() + 4 + 9), v7.end() - 4);
     v7[4] = 7;
     restamp(v7);
     ConfigBlob v7rt;
@@ -4790,12 +4798,33 @@ static void test_config_store() {
 
     // A genuine v6 blob still carries every earlier setting and reports the new mapping absent.
     std::vector<uint8_t> v6 = mbb;
-    v6.erase(v6.end() - 4 - 12, v6.end() - 4);
+    v6.erase(v6.end() - 4 - 21, v6.end() - 4);
     v6[4] = 6;
     restamp(v6);
     ConfigBlob v6rt;
     CHECK(config_blob_deserialize(v6.data(), v6.size(), v6rt));
     CHECK(v6rt.has_modbus && !v6rt.has_ref_temp && v6rt.ref_temp_topic.empty());
+
+    // ── v10: direct Open-Meteo location ────────────────────────────────────────────────────────
+    ConfigBlob weather;
+    weather.wifi_ssid = "net";
+    weather.weather_enabled = true;
+    weather.weather_latitude_e6 = 52520008;
+    weather.weather_longitude_e6 = 13404954;
+    const std::vector<uint8_t> weatherb = config_blob_serialize(weather);
+    ConfigBlob weatherrt;
+    CHECK(config_blob_deserialize(weatherb.data(), weatherb.size(), weatherrt));
+    CHECK(weatherrt.has_weather && weatherrt.weather_enabled);
+    CHECK(weatherrt.weather_latitude_e6 == 52520008 &&
+          weatherrt.weather_longitude_e6 == 13404954);
+    std::vector<uint8_t> v9 = weatherb;
+    v9.erase(v9.end() - 4 - 9, v9.end() - 4);
+    v9[4] = 9;
+    restamp(v9);
+    ConfigBlob v9rt;
+    CHECK(config_blob_deserialize(v9.data(), v9.size(), v9rt));
+    CHECK(!v9rt.has_weather && !v9rt.weather_enabled && v9rt.weather_latitude_e6 == 0 &&
+          v9rt.weather_longitude_e6 == 0);
 }
 
 static void test_reference_temperature_config() {
@@ -4841,6 +4870,155 @@ static void test_reference_temperature_config() {
     CHECK(!unsynced.fresh && std::string(unsynced.reason) == "clock_unsynced");
     ReferenceFreshness future = reference_freshness(true, false, true, 1100, 0, 1000, 0, 600);
     CHECK(!future.fresh && std::string(future.reason) == "future_timestamp");
+}
+
+static void test_weather_forecast_contract() {
+    int64_t fetched = -1, decision = -1;
+    CHECK(reference_parse_rfc3339("2026-08-03T10:30:00Z", fetched));
+    CHECK(reference_parse_rfc3339("2026-08-03T11:00:00Z", decision));
+    WeatherForecastSample sample{
+        1, "open-meteo", "icon_seamless", -1, fetched, decision, 5.4, 82.0};
+    WeatherValidation valid = weather_validate(sample, fetched + 20);
+    CHECK(valid.valid && std::string(valid.reason) == "ok");
+
+    WeatherLocationParse location = weather_location_parse("52.520008", "13.404954");
+    CHECK(location.valid && location.enabled && location.latitude_e6 == 52520008 &&
+          location.longitude_e6 == 13404954);
+    CHECK(weather_coordinate_format_e6(location.latitude_e6) == "52.520008");
+    CHECK(weather_coordinate_format_e6(-1) == "-0.000001");
+    CHECK(weather_location_parse("52,520008", "13,404954").valid);
+    CHECK(weather_location_parse("", "").valid && !weather_location_parse("", "").enabled);
+    CHECK(!weather_location_parse("52.5", "").valid);
+    CHECK(!weather_location_parse("90.000001", "13.4").valid);
+    CHECK(!weather_location_parse("52.5", "180.000001").valid);
+    CHECK(!weather_location_parse("52.5e0", "13.4").valid);
+    CHECK(!weather_location_parse("+52.5", "13.4").valid);
+    CHECK(!weather_location_parse("52.5&x=1", "13.4").valid);
+    CHECK(!weather_location_parse("52.1234567", "13.4").valid);
+    CHECK(weather_location_e6_valid(true, 90000000, -180000000));
+    CHECK(!weather_location_e6_valid(false, 1, 0));
+    CHECK(weather_reason_valid("fetch_failed"));
+    CHECK(!weather_reason_valid("provider said something arbitrary"));
+
+    WeatherForecastSample bad = sample;
+    bad.version = 2;
+    CHECK(!weather_validate(bad).valid &&
+          std::string(weather_validate(bad).reason) == "unsupported_version");
+    bad = sample; bad.model = "best_match";
+    CHECK(std::string(weather_validate(bad).reason) == "invalid_model");
+    bad = sample; bad.decision_unix_s = bad.fetched_unix_s + 3601;
+    CHECK(std::string(weather_validate(bad).reason) == "invalid_decision_time");
+    bad = sample; bad.outdoor_mean_2h_c = std::nan("");
+    CHECK(std::string(weather_validate(bad).reason) == "invalid_outdoor_mean");
+    bad = sample; bad.solar_energy_2h_wh_m2 = -0.1;
+    CHECK(std::string(weather_validate(bad).reason) == "invalid_solar_energy");
+
+    WeatherFreshness fresh = weather_freshness(true, 1000, 1000 + WEATHER_MAX_AGE_S);
+    CHECK(fresh.fresh && fresh.age_known && fresh.age_s == WEATHER_MAX_AGE_S);
+    WeatherFreshness stale = weather_freshness(true, 1000, 1001 + WEATHER_MAX_AGE_S);
+    CHECK(!stale.fresh && stale.age_known && std::string(stale.reason) == "stale");
+    WeatherFreshness future = weather_freshness(true, 1100, 1000);
+    CHECK(!future.fresh && std::string(future.reason) == "future_fetch");
+    WeatherFreshness unsynced = weather_freshness(true, 1000, -1);
+    CHECK(!unsynced.fresh && std::string(unsynced.reason) == "clock_unsynced");
+
+    WeatherMqttSnapshot mqtt;
+    mqtt.configured = true;
+    mqtt.available = true;
+    mqtt.has_value = true;
+    mqtt.outdoor_mean_2h_c = 5.4;
+    mqtt.solar_energy_2h_wh_m2 = 82.0;
+    mqtt.fetched_unix_s = 1000;
+    mqtt.forecast_start_unix_s = 1200;
+    mqtt.last_attempt_unix_s = 999;
+    mqtt.successes = 4;
+    mqtt.state = "ok";
+    mqtt.reason = "fresh";
+    const std::string mqtt_json = build_weather_mqtt_json(mqtt, 1100);
+    CHECK(weather_forecast_topic("daikin") == "daikin/weather_forecast");
+    CHECK(mqtt_json.find("\"provider\":\"open-meteo\"") != std::string::npos);
+    CHECK(mqtt_json.find("\"model\":\"icon_seamless\"") != std::string::npos);
+    CHECK(mqtt_json.find("\"available\":1,\"fresh\":1,\"has_value\":1") != std::string::npos);
+    CHECK(mqtt_json.find("\"issued_unix_s\":null") != std::string::npos);
+    CHECK(mqtt_json.find("\"fetched_unix_s\":1000") != std::string::npos);
+    CHECK(mqtt_json.find("\"forecast_start_unix_s\":1200") != std::string::npos);
+    CHECK(mqtt_json.find("\"valid_until_unix_s\":6400") != std::string::npos);
+    CHECK(mqtt_json.find("\"outdoor_mean_2h_c\":5.400000") != std::string::npos);
+    CHECK(mqtt_json.find("latitude") == std::string::npos);
+    CHECK(mqtt_json.find("longitude") == std::string::npos);
+
+    CHECK(WEATHER_HA_SENSOR_COUNT == 4);
+    const std::string weather_device = device_json("daikin", "board");
+    const WeatherHaSensor& temperature_sensor = WEATHER_HA_SENSORS[0];
+    CHECK(weather_discovery_topic("homeassistant", "daikin", temperature_sensor) ==
+          "homeassistant/sensor/daikin/weather_forecast_outdoor_mean_2h/config");
+    const std::string temperature_config = weather_discovery_config(
+        "daikin", "board", "daikin/weather_forecast", "daikin/status", temperature_sensor);
+    CHECK(temperature_config.find("\"uniq_id\":\"daikin_weather_forecast_outdoor_mean_2h\"") !=
+          std::string::npos);
+    CHECK(temperature_config.find("\"unit_of_meas\":\"°C\"") != std::string::npos);
+    CHECK(temperature_config.find("\"dev_cla\":\"temperature\"") != std::string::npos);
+    CHECK(temperature_config.find("\"stat_cla\":\"measurement\"") != std::string::npos);
+    CHECK(temperature_config.find("\"availability_mode\":\"all\"") != std::string::npos);
+    CHECK(temperature_config.find("value_json.available == 1") != std::string::npos);
+    CHECK(temperature_config.find(weather_device) != std::string::npos);
+    const std::string available_config = weather_discovery_config(
+        "daikin", "board", "daikin/weather_forecast", "daikin/status", WEATHER_HA_SENSORS[2]);
+    CHECK(available_config.find("\"pl_on\":\"1\",\"pl_off\":\"0\"") != std::string::npos);
+    CHECK(available_config.find("\"ent_cat\":\"diagnostic\"") != std::string::npos);
+    CHECK(available_config.find("\"avty_t\":\"daikin/status\"") != std::string::npos);
+    CHECK(available_config.find("\"availability\":[") == std::string::npos);
+
+    // An old value remains available for forensic history after a provider error, but it cannot
+    // masquerade as decision-ready data: both availability signals fail closed atomically.
+    mqtt.available = false;
+    mqtt.state = "error";
+    mqtt.reason = "fetch_failed";
+    mqtt.error = "http_503";
+    mqtt.errors = 1;
+    const std::string failed_json = build_weather_mqtt_json(mqtt, 6401);
+    CHECK(failed_json.find("\"available\":0,\"fresh\":0,\"has_value\":1") != std::string::npos);
+    CHECK(failed_json.find("\"freshness_reason\":\"stale\"") != std::string::npos);
+    CHECK(failed_json.find("\"error\":\"http_503\"") != std::string::npos);
+    CHECK(failed_json.find("\"outdoor_mean_2h_c\":5.400000") != std::string::npos);
+
+    WeatherMqttSnapshot disabled;
+    const std::string disabled_json = build_weather_mqtt_json(disabled, -1);
+    CHECK(disabled_json.find("\"configured\":0") != std::string::npos);
+    CHECK(disabled_json.find("\"available\":0,\"fresh\":0,\"has_value\":0") != std::string::npos);
+    CHECK(disabled_json.find("\"fetched_unix_s\":null") != std::string::npos);
+    CHECK(disabled_json.find("\"outdoor_mean_2h_c\":null") != std::string::npos);
+
+    WeatherForecastSample same = sample;
+    CHECK(!weather_timestamp_moved_backward(same, sample));  // duplicate delivery is idempotent
+    WeatherForecastSample older = sample; older.fetched_unix_s--;
+    CHECK(weather_timestamp_moved_backward(older, sample));
+
+    // At 10:30 the next decision instant is 11:00. Open-Meteo's values at 12:00 and 13:00
+    // represent the following two one-hour bins; W/m² means sum numerically to two-hour Wh/m².
+    std::vector<int64_t> times;
+    for (const char* timestamp : {"2026-08-03T10:00:00Z", "2026-08-03T11:00:00Z",
+                                  "2026-08-03T12:00:00Z", "2026-08-03T13:00:00Z"}) {
+        int64_t value = -1;
+        CHECK(reference_parse_rfc3339(timestamp, value));
+        times.push_back(value);
+    }
+    const std::vector<double> temperature{6.0, 7.0, 8.0, 10.0};
+    const std::vector<double> shortwave{0.0, 50.0, 100.0, 200.0};
+    WeatherForecastSample derived;
+    WeatherValidation dv = open_meteo_derive_forecast(
+        times, temperature, shortwave, fetched, derived);
+    CHECK(dv.valid);
+    CHECK(derived.provider == "open-meteo" && derived.model == "icon_seamless");
+    CHECK(derived.issued_unix_s == -1 && derived.decision_unix_s == decision);
+    CHECK(std::abs(derived.outdoor_mean_2h_c - 9.0) < 0.001);
+    CHECK(std::abs(derived.solar_energy_2h_wh_m2 - 300.0) < 0.001);
+    std::vector<double> short_payload{0.0, 1.0};
+    CHECK(std::string(open_meteo_derive_forecast(
+          times, temperature, short_payload, fetched, derived).reason) == "payload_shape_invalid");
+    times[2] += 1;
+    CHECK(std::string(open_meteo_derive_forecast(
+          times, temperature, shortwave, fetched, derived).reason) == "non_hourly_horizon");
 }
 
 static void test_mcp() {
@@ -8261,6 +8439,10 @@ static void test_entity_identity() {
         for (int i = 0; i < CRASH_SENSOR_COUNT; i++)
             claim(uniq_id_of(crash_discovery_config(node, brd, cr, av, CRASH_SENSORS[i])),
                   "crash", crash_discovery_topic(pfx, node, CRASH_SENSORS[i]));
+        for (int i = 0; i < WEATHER_HA_SENSOR_COUNT; i++)
+            claim(uniq_id_of(weather_discovery_config(node, brd, "weather", av,
+                                                       WEATHER_HA_SENSORS[i])),
+                  "weather", weather_discovery_topic(pfx, node, WEATHER_HA_SENSORS[i]));
         // A RETIRED id is not published any more, but it must never be RE-USED either: the whole
         // point of retiring it is that a broker somewhere still holds its retained config, and a new
         // entity claiming that id would inherit the corpse instead of getting a fresh registry entry.
@@ -8760,6 +8942,7 @@ int main() {
     test_redact();
     test_config_store();
     test_reference_temperature_config();
+    test_weather_forecast_contract();
     test_mcp();
     test_http_surface();
     test_lwt_select();
