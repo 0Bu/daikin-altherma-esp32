@@ -176,7 +176,7 @@ function liveData() {
     // Cooling while Thermostat is OFF (live unit, 2026-08-01). Keep the exact row anchor, but name
     // the field for what Daikin documents instead of preserving the old interpretation in code.
     spaceOp: stateOf(/^space heating operation/i, 53),
-    quiet: vOn(/low noise control|silent mode/i),
+    quiet: stateOf(/low noise control|silent mode/i, 9),
     // HomeHub holding offset 56 is the EXTERNAL Smart-Grid request. It is intentionally independent
     // of the plant's operating mode: mode 2 proves that evcc's boost reached the controller, while
     // the DHW flag / valve / flow separately prove whether the controller acted on it.
@@ -330,10 +330,10 @@ function liveData() {
     // Written this way a field added to liveData() is dropped by DEFAULT, so the failure mode is a
     // missing reading rather than a stale one presented as current.
     //
-    // The four plant STATES survive, because they are no longer X10A values: stateOf() already
+    // The paired plant STATES survive, because they are no longer X10A values: stateOf() already
     // refused the retained X10A bit and returned the gateway's (or nothing). Clearing them here is
     // what used to blank the pump and the demand next to readings that were arriving.
-    const KEEP = new Set(["pumpOn", "compressorOn", "valveDhw", "spaceOp", "bsh", "sgMode", "mbFields"]);
+    const KEEP = new Set(["pumpOn", "compressorOn", "valveDhw", "spaceOp", "bsh", "quiet", "sgMode", "mbFields"]);
     Object.keys(d).forEach((k) => { if (!KEEP.has(k)) d[k] = null; });
     d.ouHeldOver = false;         // nothing to hold over: the whole bus is silent, not one unit
     MB_PAIRS.forEach((p) => takeMb(p.fld, p.cid));
@@ -389,9 +389,8 @@ const SCHEM_PILL_IDS = [
 const ouReadingText = (d, key, n, fmt) =>
   d.ouHeldOver && !(d.mbFields && d.mbFields.has(key)) ? "—" : fmt(n);
 
-// The compact BOOST/Heizstab pill faces contain only their stable names. Preserve the state in the
-// accessible name as well as in the inspector, so the requested colour-only visual treatment does
-// not make the controls ambiguous to a screen reader.
+// Compact permanent state pills contain only their stable names. Preserve the state in the
+// accessible name as well as in the inspector, so the colour-only face remains unambiguous.
 function updateSchematicStateA11y(d) {
   const set = (id, label, state) => {
     const el = $(id);
@@ -400,6 +399,10 @@ function updateSchematicStateA11y(d) {
   set("gSgRequest", t("schem.sg_boost"), sgModeText(d && d.sgMode));
   set("gBshState", t("schem.bsh_label"),
       !d || d.bsh == null ? "—" : t(d.bsh ? "state.on" : "state.off"));
+  set("gDefrostState", t("schem.defrost_pill"),
+      !d || d.defrost == null ? "—" : t(d.defrost ? "state.on" : "state.off"));
+  set("gQuietState", t("chip.quiet"),
+      !d || d.quiet == null ? "—" : t(d.quiet ? "state.on" : "state.off"));
 }
 
 function clearSchematic() {
@@ -976,10 +979,18 @@ const INSPECT = {
   defrost: {
     t: { en: "Defrost", de: "Abtauen" },
     re: /defrost operation/i, sample: "Defrost Operation",
+    trend: "defrost_state",
+    now: (d) => d.defrost == null ? null : d.defrost
+      ? { en: "Defrost is active.", de: "Abtauen ist aktiv." }
+      : { en: "Off — no defrost cycle is active.", de: "Aus — kein Abtauvorgang ist aktiv." },
   },
   quiet: {
     t: { en: "Quiet mode", de: "Leise-Modus" },
     re: /low noise control|silent mode/i, sample: "Low noise control",
+    trend: "quiet_state",
+    now: (d) => d.quiet == null ? null : d.quiet
+      ? { en: "Quiet mode is active.", de: "Der Leise-Modus ist aktiv." }
+      : { en: "Off — quiet mode is not active.", de: "Aus — der Leise-Modus ist nicht aktiv." },
   },
 
   // ── Pipe runs. Each says what is IN it, which way it goes, and whether anything is moving now —

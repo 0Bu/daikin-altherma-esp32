@@ -21,6 +21,8 @@ const DEMO = (() => {
                                off: 44, concept: "outdoor_air" });
   const MB_BSH = (on) => ({ label: "Booster heater run", value: on ? 1 : 0, unit: "",
                             off: 32, binary: true, concept: "bsh_state" });
+  const MB_QUIET = (on) => ({ label: "Quiet mode operation", value: on ? 1 : 0, unit: "",
+                              off: 9, binary: true, concept: "quiet_state" });
   const MB_POWER = (value) => ({ label: "Heat pump power consumption", value: String(value),
                                  unit: "kW", off: 51 });
   const histRows = [
@@ -30,6 +32,8 @@ const DEMO = (() => {
     ["outdoor_air", "R1T-Outdoor air temp."],
     ["flow", "Flow sensor (l/min)"],
     ["room_temp", "Indoor ambient temp. (R1T)"],
+    ["defrost_state", "Defrost Operation"],
+    ["quiet_state", "Silent Mode"],
     ["bsh_state", "BSH"],
     ["buh_step1", "BUH Step1"],
     ["buh_step2", "BUH Step2"],
@@ -42,6 +46,7 @@ const DEMO = (() => {
     ["outdoor_air", "Outdoor air temperature"],
     ["flow", "Flow rate"],
     ["room_temp", "Room temperature"],
+    ["quiet_state", "Quiet mode operation"],
     ["bsh_state", "Booster heater run"],
     ["smart_grid_mode", "Smart Grid operation mode"],
   ].map(([id, label]) => ({ id, label }));
@@ -52,6 +57,8 @@ const DEMO = (() => {
     outdoor_air:   [ 52,  51,  50, null, null,  49,  50,  52,  54,  55,  56,  57],
     flow:          [208, 211, 210, 214, 212, 209, 207, 205, 203, 202, 200, 198],
     room_temp:     [214, 214, 213, 213, 212, 212, 213, 213, 214, 214, 214, 214],
+    defrost_state: [0, 0, 0, 0, 10, 10, 0, 0, 0, 0, 0, 0],
+    quiet_state:   [0, 10, 10, 10, 0, 0, 0, 10, 10, 0, 0, 0],
     // Binary state in tenths. The two ON buckets are sampled active windows, not exact runtime.
     bsh_state:     [0, 0, 0, 10, 10, 0, 0, 0, 0, 0, 0, 0],
     buh_step1:     [0, 0, 10, 10, 10, 10, 0, 0, 10, 10, 0, 0],
@@ -64,7 +71,8 @@ const DEMO = (() => {
     if (!x) return null;
     // Keep both instruments recognisably close but not identical. Modbus continues through the
     // deliberate X10A outdoor-air gap, which makes the dual-source contract visible in an inspector.
-    const state = id === "smart_grid_mode" || id === "bsh_state" || id.startsWith("buh_step");
+    const state = id === "smart_grid_mode" || id === "bsh_state" || id === "defrost_state" ||
+      id === "quiet_state" || id.startsWith("buh_step");
     const v = state ? x : source === "modbus"
       ? x.map((n, i) => n == null ? 53 + i : n + (i % 3 === 0 ? 1 : 0))
       : x;
@@ -238,7 +246,7 @@ const DEMO = (() => {
               model: { name: "EHVH/EHVX 04-08 kW", family: "Altherma 3 R", marketing: "Altherma 3 R W" } },
   });
 
-  return { scenes, status, smartGrid: SG, outdoorAir: MB_OUT, tankHeater: MB_BSH,
+  return { scenes, status, smartGrid: SG, outdoorAir: MB_OUT, tankHeater: MB_BSH, quietMode: MB_QUIET,
            electricalInput: MB_POWER, history: hist };
 })();
 
@@ -267,6 +275,8 @@ try {
       values: DEMO.scenes[idx].v,
       modbus: [DEMO.smartGrid(DEMO.scenes[idx].sgMode || 0), DEMO.outdoorAir(DEMO.scenes[idx].mbOut),
                DEMO.tankHeater(!!DEMO.scenes[idx].mbBsh),
+               DEMO.quietMode(DEMO.scenes[idx].v.some((r) =>
+                 r.label === "Silent Mode" && String(r.value).trim() === "1")),
                DEMO.electricalInput(DEMO.scenes[idx].mbPower)],
     });
     if (u.startsWith("/history")) {

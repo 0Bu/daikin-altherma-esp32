@@ -57,9 +57,9 @@ struct HomeHubConcept {
 //   51 power          — the real electrical input. X10A has NO equivalent at all: the dashboard
 //                       ESTIMATES it from CT clamps at an assumed 230 V. Deliberately unpaired —
 //                       pairing a measurement with an estimate would hide which one is which.
-//   1/2/6/7/10/57/58, 3, 4, 9, 21/22/23 — setpoints, modes and faults. No paired measurement
-//                       concept exists for them. Offsets 37 and 56 are deliberate state-timeline
-//                       exceptions below; only the valve also has one exact X10A row to pair.
+//   1/2/6/7/10/57/58, 3, 4, 21/22/23 — setpoints, other modes and faults. No paired measurement
+//                       concept exists for them. Offsets 9 and 37 are exact state pairs below;
+//                       offset 56 is the unpaired Smart-Grid state-timeline exception.
 inline constexpr HomeHubConcept HOMEHUB_CONCEPTS[] = {
     { 40, "leaving_water" },   // LWT PHE     ↔ 0x61/2  pre-BUH heat-exchanger outlet
     { 42, "return_water"  },   // return      ↔ 0x61/8  Inlet water temp. (R4T)
@@ -69,12 +69,13 @@ inline constexpr HomeHubConcept HOMEHUB_CONCEPTS[] = {
     { 50, "room_temp"     },   // room        ↔ 0x61/12 Indoor ambient temp. (R1T)
     { 32, "bsh_state"     },   // booster run ↔ 0x60/12 conv 305 BSH (DHW immersion heater)
     { 37, "valve_dhw"     },   // 3-way valve ↔ 0x60/12 conv 306 (1 = DHW, 0 = space circuit)
+    {  9, "quiet_state"    },   // Quiet mode ↔ 0x60/2 conv 301 Silent Mode
 };
 inline constexpr size_t HOMEHUB_CONCEPT_COUNT =
     sizeof(HOMEHUB_CONCEPTS) / sizeof(HOMEHUB_CONCEPTS[0]);
 
-// Histories are a slightly wider contract than source PAIRING. The six measurements, exact BSH flag
-// and exact 3-way-valve selector above are still paired one-for-one, while Smart-Grid mode is
+// Histories are a slightly wider contract than source PAIRING. The six measurements and three exact
+// state flags/selectors above are still paired one-for-one, while Smart-Grid mode is
 // assembled from TWO X10A contacts and
 // therefore cannot honestly be attached to either source row as its twin. It can still share one
 // history concept: both sources report the same documented 0..3 enum, and the UI draws their state
@@ -95,6 +96,7 @@ inline constexpr HomeHubHistory HOMEHUB_HISTORIES[] = {
     { 50, "room_temp"       },
     { 32, "bsh_state"       },
     { 37, "valve_dhw"       },
+    {  9, "quiet_state"     },
     { 56, "smart_grid_mode" },
 };
 inline constexpr size_t HOMEHUB_HISTORY_COUNT =
@@ -117,7 +119,7 @@ inline constexpr int homehub_history_index(const char* trend_id) {
 }
 
 // ── OTHER STATES: live pairings that do not need their own history ─────────────────────────────
-// BSH and the 3-way valve belong above because they are trended. The remaining plant states — pump
+// BSH, the 3-way valve and Quiet belong above because they are trended. The remaining plant states — pump
 // running and space heating/cooling operation — are paired live without spending another history
 // ring: both sources report them plainly, and a reader looking at a state is owed the gateway's
 // answer too.

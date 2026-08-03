@@ -10,6 +10,8 @@ const S = {
     rows: [
       { id: "dhw_tank", label: "DHW tank temp. (R5T)" },
       { id: "pump_signal", label: "Water pump signal (0:max-100:stop)" },
+      { id: "defrost_state", label: "Defrost Operation" },
+      { id: "quiet_state", label: "Silent Mode" },
       { id: "bsh_state", label: "BSH" },
       { id: "buh_step1", label: "BUH Step1" },
       { id: "buh_step2", label: "BUH Step2" },
@@ -18,6 +20,7 @@ const S = {
     ],
     modbus_rows: [
       { id: "dhw_tank", label: "Domestic Hot Water temperature" },
+      { id: "quiet_state", label: "Quiet mode operation" },
       { id: "bsh_state", label: "Booster heater run" },
       { id: "valve_dhw", label: "3-way valve" },
       { id: "smart_grid_mode", label: "Smart Grid operation mode" },
@@ -54,6 +57,18 @@ const context = {
     if (key === "hist.boost_active") return "Boost aktiv";
     if (key === "hist.boost_inactive") return "Boost aus";
     if (key === "hist.boost_aria") return `${arg} — Boost-Verlauf. ${arg2}`;
+    if (key === "hist.defrost_total") return `Abtauen aktiv erfasst · ${arg} Rasterzeit`;
+    if (key === "hist.defrost_run") return `${arg} · aktives Zeitfenster ca. ${arg2}`;
+    if (key === "hist.defrost_none") return "Kein Abtauvorgang erfasst.";
+    if (key === "hist.defrost_active") return "Abtauen aktiv";
+    if (key === "hist.defrost_inactive") return "Abtauen aus";
+    if (key === "hist.defrost_aria") return `${arg} — Abtauverlauf. ${arg2}`;
+    if (key === "hist.quiet_total") return `Leise-Modus aktiv erfasst · ${arg} Rasterzeit`;
+    if (key === "hist.quiet_run") return `${arg} · aktives Zeitfenster ca. ${arg2}`;
+    if (key === "hist.quiet_none") return "Kein Leise-Modus erfasst.";
+    if (key === "hist.quiet_active") return "Leise-Modus aktiv";
+    if (key === "hist.quiet_inactive") return "Leise-Modus aus";
+    if (key === "hist.quiet_aria") return `${arg} — Verlauf des Leise-Modus. ${arg2}`;
     if (key === "hist.heater_total") return `Heizstab aktiv erfasst · ${arg} Rasterzeit`;
     if (key === "hist.heater_run") return `${arg} · aktives Zeitfenster ca. ${arg2}`;
     if (key === "hist.heater_none") return "Kein Heizstabeinsatz erfasst.";
@@ -148,6 +163,31 @@ assert.doesNotMatch(bshHtml, /vhist-line/);
 assert.match(bshHtml, /Heizstab aktiv erfasst · 10 min Rasterzeit/);
 assert.match(bshHtml, /<strong>X10A<\/strong>/, "X10A leads the heater-run summary");
 assert.match(h.scrubText(bshView, 1), /X10A Heizstab aktiv/);
+
+// Both outdoor pills open categorical timelines. Defrost is event-folded; Quiet keeps two
+// source-attributed lanes because X10A and HomeHub report the same exact mode independently.
+S.hist.set("defrost_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
+  held: [], v: [0, 10, 0, 10] });
+const defrostView = h.historyView("defrost_state");
+const defrostHtml = h.histHtml("defrost_state", "", "Abtauen");
+assert.match(defrostHtml, /vhist-state-track/);
+assert.doesNotMatch(defrostHtml, /vhist-line/);
+assert.match(defrostHtml, /Abtauen aktiv erfasst · 10 min Rasterzeit/);
+assert.match(h.scrubText(defrostView, 1), /Abtauen aktiv/);
+
+S.hist.set("quiet_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
+  held: [], v: [10, 10, 0, 0] });
+S.hist.set("modbus:quiet_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
+  held: [], v: [10, 0, 0, 10] });
+const quietView = h.historyView("quiet_state");
+const quietHtml = h.histHtml("quiet_state", "", "Leise-Modus");
+assert.equal(quietView.series.length, 2);
+assert.match(quietHtml, /vhist-state-track/);
+assert.doesNotMatch(quietHtml, /vhist-line/);
+assert.match(quietHtml, /Leise-Modus aktiv erfasst · 10 min Rasterzeit/);
+assert.match(quietHtml, /HomeHub · Modbus/);
+assert.match(h.scrubText(quietView, 0), /X10A Leise-Modus aktiv/);
+assert.match(h.scrubText(quietView, 1), /Modbus Leise-Modus aus/);
 
 // BUH is one component with two event-folded stage bits. The browser combines both aligned rings
 // into an off/step-1/step-2 timeline; it must not graph either raw bit as a numeric 0/1 curve.

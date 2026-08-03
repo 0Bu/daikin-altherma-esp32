@@ -271,15 +271,18 @@ svg .sc-bolt { fill: var(--muted); }
    half the stroke, which is why the path itself is drawn a touch narrow. */
 svg .sc-vane { fill: var(--muted); stroke: var(--muted); stroke-width: 1.3;
   stroke-linejoin: round; stroke-linecap: round; }
-/* Conditional defrost and quiet flags are hidden by visibility as well as opacity: opacity alone
-   stops neither hit testing nor tab focus. Boost and BSH are permanent state pills and do not
-   participate in this visibility contract. */
-svg .sc-snow, svg .sc-quiet {
-  opacity: 0; visibility: hidden; transition: opacity .3s, visibility 0s .3s;
+/* Outdoor-unit modes are permanent state pills like Boost. OFF/unknown stays neutral; active turns
+   the whole pill blue. The inspector and accessible name retain the written ON/OFF state. */
+svg .sc-snow .sc-pill, svg .sc-quiet .sc-pill {
+  fill: var(--hatch); stroke: var(--pipe); transition: fill .3s, stroke .3s;
 }
-.defrost-on .sc-snow, .quiet-on .sc-quiet {
-  opacity: 1; visibility: visible; transition: opacity .3s, visibility 0s;
+svg .sc-snow .sc-val, svg .sc-quiet .sc-val {
+  fill: var(--muted); transition: fill .3s;
 }
+.defrost-on .sc-snow .sc-pill, .quiet-on .sc-quiet .sc-pill {
+  fill: var(--brand); fill-opacity: .11; stroke: var(--brand);
+}
+.defrost-on .sc-snow .sc-val, .quiet-on .sc-quiet .sc-val { fill: var(--brand); }
 /* Daikin's normal space heating/cooling operation state on the space riser. It is not a thermostat
    demand; --ok means the documented operation state is ON, while the text carries the exact fact. */
 #gSpaceH.on .sc-pill { stroke: var(--ok); }
@@ -303,9 +306,7 @@ svg .sc-hitline { fill: none; stroke: transparent; stroke-width: 18; stroke-line
    hit, and the value tints where a border would have been outlined. `fill: transparent` rather than
    `fill: none` is load-bearing — `none` is not painted and takes no pointer events. */
 svg .sc-hitarea { fill: transparent; pointer-events: all; }
-/* A hidden SVG hit group must disable its DESCENDANTS too. `.sc-hitarea` deliberately uses
-   `pointer-events: all`, and in SVG that value can receive a pointer even when an ancestor has
-   `visibility:hidden`. Conditional flags therefore suppress the full subtree. */
+/* A deliberately hidden SVG hit group must disable its descendants too. */
 svg .sc-hit[aria-hidden="true"], svg .sc-hit[aria-hidden="true"] * { pointer-events: none; }
 svg .sc-hit-bare:hover .sc-val, svg .sc-hit-bare.sel .sc-val { fill: var(--brand-strong); }
 svg .sc-hit:hover :is(.sc-pipe, .sc-rpipe) { stroke: var(--brand); }

@@ -3,8 +3,8 @@
 // rather than a repeat of one.
 //
 // The firmware keeps a fixed-cadence ring per trended X10A/board row and serves it from GET
-// /history; history.cpp also instantiates nine rings for the HomeHub histories in homehub_map.hpp:
-// six structurally paired measurements, the tank-heater state, the 3-way valve and the Smart-Grid
+// /history; history.cpp also instantiates ten rings for the HomeHub histories in homehub_map.hpp:
+// six structurally paired measurements, tank-heater, 3-way-valve and Quiet states, plus Smart-Grid
 // mode. The web UI draws either or both under a value row's explainer. Everything that
 // decides *what* is trended and *whether an X10A sample counts* lives here rather than at the call
 // site, for the same reason lwt_select.hpp and ou_stale.hpp do: the rule runs against the generated
@@ -184,6 +184,11 @@ inline constexpr TrendDef TRENDS[] = {
     { "ct_l1",            TrendKind::Row, 0x63, 14, "",    "" },
     { "ct_l2",            TrendKind::Row, 0x63, 15, "",    "" },
     { "ct_l3",            TrendKind::Row, 0x63, 16, "",    "" },
+    // Outdoor-unit mode flags. Defrost is event-folded so an observed short cycle survives its
+    // open bucket; Quiet is a persistent mode whose latest observed value wins. Converter ids are
+    // load-bearing because both pages also contain unrelated bits at neighbouring/shared offsets.
+    { "defrost_state",     TrendKind::BinaryEvent, 0x10,  1, "", "", 304 },
+    { "quiet_state",       TrendKind::BinaryState, 0x60,  2, "", "", 301 },
     // The DHW immersion-heater run flag. Seven dimensionless bits share 0x60/12, so converter 305
     // is load-bearing: without it this trend would attach to whichever valve/pump bit sorts first.
     // It is event-folded rather than last-value-folded so a heater pulse seen by a poll cannot be
@@ -217,7 +222,7 @@ inline constexpr TrendDef TRENDS[] = {
     { "max_alloc",        TrendKind::MaxAlloc, 0, 0, "KiB", "Largest free block" },
 };
 constexpr size_t TREND_COUNT = sizeof(TRENDS) / sizeof(TRENDS[0]);
-// 23 trends = 13248 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
+// 25 trends = 14400 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
 // ceiling is a deliberate stop sign, not a hardware limit: .bss does not compete for the largest
 // CONTIGUOUS free block, which is what actually binds on this board, so the cost of a trend is a
 // few per cent of free heap and nothing at all of the fragmentation budget. Raise it only with the
@@ -239,7 +244,7 @@ constexpr size_t TREND_COUNT = sizeof(TRENDS) / sizeof(TRENDS[0]);
 // non-competition with the largest contiguous block, which is what the paragraph above is actually
 // about; the difference is that each ring also costs its own size AGAIN in the flash image. Worth
 // knowing before anyone adds trends by the dozen.
-static_assert(TREND_COUNT * HISTORY_BYTES_PER_TREND <= 13248,
+static_assert(TREND_COUNT * HISTORY_BYTES_PER_TREND <= 14400,
               "trend buffers are static data on a heap-tight board — justify growth before raising this");
 
 // A board metric in bytes, as the ring stores it: tenths of a KiB (~102-byte resolution, finer than
