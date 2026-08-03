@@ -24,8 +24,8 @@ assert.match(dashboardSource,
              /const checkup = S\.status\?\.hp\?\.connected \? checkupCardHtml\(\) : "";\s*setHtml\("valueGroups",\s*checkup\s*\+\s*statusCardsHtml\(\)\s*\+\s*valueGroupsHtml\(/s,
              "X10A check must render first in the post-diagram card stream");
 assert.match(dashboardSource,
-             /return hp\.connected \? vcard\(t\("card\.model"\), model\) : "";/,
-             "Model card must follow the X10A check and precede Operation");
+             /return environment \+ \(hp\.connected \? vcard\(t\("card\.model"\), model\) : ""\);/,
+             "independent outdoor observation and Model cards must follow the X10A check and precede Operation");
 
 // Pin the existing /status.health surface plus its additive evidence fields at the actual serializer.
 // The UI payloads below are synthetic by design; without this half, a C++ key drift could leave every

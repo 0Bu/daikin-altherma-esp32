@@ -61,6 +61,7 @@
 #include "logic/query_flag.hpp"
 #include "logic/redact.hpp"
 #include "logic/config_store.hpp"
+#include "logic/env3.hpp"
 #include "logic/mcp.hpp"
 #include "logic/http_surface.hpp"
 #include "logic/registers.hpp"
@@ -833,15 +834,17 @@ static void test_config_model() {
     stored.btn_gpio = -1; stored.btn_active_low = true; stored.board_user_set = false;
     Config want = stored;                // the user picks the preset the device already carries
     want.board_user_set = true;          // ...which the submit itself states
+    want.board_preset_id = BoardPresetId::SeeedXiaoEsp32S3;
     CHECK(board_hw_same(want, stored));
     CHECK(board_save_needed(want, stored));      // the statement is new -> persist it
     CHECK(!board_reboot_needed(want, stored));   // ...but no driver's pin moved -> no reboot
     // Once recorded, the same submit really is a no-op: neither a save nor a reboot.
-    Config recorded = stored; recorded.board_user_set = true;
+    Config recorded = want;
     CHECK(!board_save_needed(want, recorded));
     CHECK(!board_reboot_needed(want, recorded));
     // A hardware change is both, whether or not the statement was already on record.
     Config atom = want;
+    atom.board_preset_id = BoardPresetId::M5StackAtomS3Lite;
     atom.led_gpio = 35; atom.led_type = static_cast<int>(LedType::Ws2812); atom.led_inverted = false;
     atom.btn_gpio = 41;
     CHECK(!board_hw_same(atom, recorded));
@@ -859,12 +862,11 @@ static void test_config_model() {
         CHECK(!board_hw_same(one, recorded));
         CHECK(board_reboot_needed(one, recorded) && board_save_needed(one, recorded));
     }
-    // The statement is never RETRACTED by a request: /set_board only ever sets it, so a stored
-    // `true` against a would-be `false` is not a reason to write (only the values could be).
-    Config unstated = recorded; unstated.board_user_set = false;
-    CHECK(!board_save_needed(unstated, recorded));
-    // A fresh Config has made no claim — that is what keeps a newly flashed board unnamed.
-    CHECK(!Config{}.board_user_set);
+    // Identity moves independently from hardware: explicit Custom is saved without a reboot, and
+    // untouched defaults remain unnamed even when their hardware happens to match XIAO.
+    Config custom = recorded; custom.board_preset_id = BoardPresetId::Custom;
+    CHECK(board_save_needed(custom, recorded) && !board_reboot_needed(custom, recorded));
+    CHECK(!Config{}.board_user_set && Config{}.board_preset_id == BoardPresetId::Custom);
 
     CHECK(parse_protocol("S") == Protocol::S);
     CHECK(parse_protocol("I") == Protocol::I);
@@ -955,8 +957,8 @@ static void test_ha_device() {
           != std::string::npos);
     CHECK(device_json("daikin_x", "daikin_x").find("\"ids\":[\"daikin_x\"],") != std::string::npos);
 
-    // All THREE discovery surfaces must describe the same device — values, board diagnostics and the
-    // crash entity. A dev block that drifted between them would split the board across two HA
+    // All FOUR discovery surfaces must describe the same device — values, board diagnostics, the
+    // crash entity and ENV III. A dev block that drifted between them would split the board across two HA
     // devices again, which is the failure this identity exists to remove.
     const std::string node = device_node_id("daikin-altherma-esp32"), brd = "daikin_abc123";
     const std::string dev  = device_json(node, brd);
@@ -965,6 +967,8 @@ static void test_ha_device() {
     CHECK(heartbeat_discovery_config(node, brd, "s", "a", HEARTBEAT_SENSORS[0]).find(dev)
           != std::string::npos);
     CHECK(crash_discovery_config(node, brd, "s", "a", CRASH_SENSORS[0]).find(dev)
+          != std::string::npos);
+    CHECK(env3_discovery_config(node, brd, "env", "a", ENV3_HA_SENSORS[0]).find(dev)
           != std::string::npos);
 
     // The retired Modbus namespace stays frozen so an upgrade can delete the exact retained topics.
@@ -984,6 +988,35 @@ static void test_discovery() {
     const std::string st = x10a_topic(base);              // shared by the X10A sensors only
     CHECK(st == "daikin-altherma-esp32/x10a");             // node NOT in the message topic (one board/base)
     CHECK(modbus_topic(base) == "daikin-altherma-esp32/modbus");
+    CHECK(env3_topic(base) == "daikin-altherma-esp32/env3");
+    CHECK(ENV3_HA_SENSOR_COUNT == 3);
+    CHECK(env3_discovery_topic("homeassistant", node, ENV3_HA_SENSORS[0]) ==
+          "homeassistant/sensor/daikin_altherma_esp32/env3_temperature/config");
+    CHECK(env3_discovery_topic("homeassistant", node, ENV3_HA_SENSORS[1]) ==
+          "homeassistant/sensor/daikin_altherma_esp32/env3_humidity/config");
+    CHECK(env3_discovery_topic("homeassistant", node, ENV3_HA_SENSORS[2]) ==
+          "homeassistant/sensor/daikin_altherma_esp32/env3_pressure/config");
+    for (size_t i = 0; i < ENV3_HA_SENSOR_COUNT; ++i) {
+        const Env3HaSensor& sensor = ENV3_HA_SENSORS[i];
+        const std::string env_cfg = env3_discovery_config(
+            node, board, env3_topic(base), availability_topic(base), sensor);
+        CHECK(env_cfg.find(std::string("\"uniq_id\":\"") + node + "_" + sensor.object_id + "\"")
+              != std::string::npos);
+        CHECK(env_cfg.find("\"stat_t\":\"daikin-altherma-esp32/env3\"") != std::string::npos);
+        CHECK(env_cfg.find(std::string("value_json.get('") + sensor.json_key + "')")
+              != std::string::npos);
+        CHECK(env_cfg.find("\"availability_mode\":\"all\"") != std::string::npos);
+        CHECK(env_cfg.find("{\"topic\":\"daikin-altherma-esp32/status\"}")
+              != std::string::npos);
+        CHECK(env_cfg.find("{\"topic\":\"daikin-altherma-esp32/env3\",\"value_template\":")
+              != std::string::npos);
+        CHECK(env_cfg.find("is number else 'offline'") != std::string::npos);
+        CHECK(env_cfg.find(std::string("\"unit_of_meas\":\"") + sensor.unit + "\"")
+              != std::string::npos);
+        CHECK(env_cfg.find(std::string("\"dev_cla\":\"") + sensor.device_class + "\"")
+              != std::string::npos);
+        CHECK(env_cfg.find("\"stat_cla\":\"measurement\"") != std::string::npos);
+    }
     const std::string retired_status = retired_modbus_status_topic(base);
     CHECK(retired_status == "daikin-altherma-esp32/modbus/status");
     CHECK(legacy_state_topic(base) == "daikin-altherma-esp32/state");
@@ -2377,21 +2410,62 @@ static void test_board_presets() {
         std::string why;
         CHECK(board_hw_valid(c, why, 48, /*octal_spi=*/false));
         CHECK(led_type_valid(all[i].led_type));
+        CHECK(all[i].key != nullptr && all[i].key[0] != '\0');
         CHECK(all[i].name != nullptr && all[i].name[0] != '\0');
     }
     // Names are what the user picks by, so they must be distinct — two "AtomS3 Lite" rows would make
     // the dropdown a coin toss.
     for (int i = 0; i < all_n; i++)
-        for (int k = i + 1; k < all_n; k++) CHECK(std::string(all[i].name) != all[k].name);
+        for (int k = i + 1; k < all_n; k++) {
+            CHECK(all[i].id != all[k].id);
+            CHECK(std::string(all[i].key) != all[k].key);
+            CHECK(std::string(all[i].name) != all[k].name);
+        }
 
     // The two documented boards, by their docs/BOARDS.md facts. Pinned as VALUES: this table is the
     // executed half of that doc, and a silent edit here is a user flashing the wrong pin.
     CHECK(std::string(all[0].name) == "M5Stack AtomS3 Lite");
+    CHECK(all[0].id == BoardPresetId::M5StackAtomS3Lite);
+    CHECK(std::string(all[0].key) == "m5stack_atoms3_lite");
+    CHECK(all[0].vendor == BoardVendor::M5Stack);
     CHECK(all[0].led_gpio == 35 && all[0].led_type == 1 && !all[0].led_inverted);
     CHECK(all[0].btn_gpio == 41 && all[0].btn_active_low);
     CHECK(std::string(all[1].name) == "Seeed XIAO ESP32-S3");
+    CHECK(all[1].id == BoardPresetId::SeeedXiaoEsp32S3);
+    CHECK(std::string(all[1].key) == "seeed_xiao_esp32s3");
+    CHECK(all[1].vendor == BoardVendor::Seeed);
     CHECK(all[1].led_gpio == 21 && all[1].led_type == 0 && all[1].led_inverted);
     CHECK(all[1].btn_gpio == -1);               // no button broken out — never guess a pin for one
+    CHECK(board_preset_by_key("m5stack_atoms3_lite") == &all[0]);
+    CHECK(board_preset_by_id(BoardPresetId::SeeedXiaoEsp32S3) == &all[1]);
+    CHECK(board_preset_by_key("atoms3_lite") == nullptr);  // no fuzzy/model-name identity
+
+    // Vendor-gated features depend on an explicitly selected preset, never on boot defaults or a
+    // display-name prefix. A future M5Stack preset only needs the same enum value to inherit the
+    // accessory policy.
+    Config identified;
+    identified.led_gpio = all[0].led_gpio; identified.led_type = all[0].led_type;
+    identified.led_inverted = all[0].led_inverted;
+    identified.btn_gpio = all[0].btn_gpio; identified.btn_active_low = all[0].btn_active_low;
+    CHECK(board_selected_vendor(identified) == BoardVendor::Unknown);
+    identified.board_user_set = true;
+    identified.board_preset_id = BoardPresetId::M5StackAtomS3Lite;
+    CHECK(board_selected_vendor(identified) == BoardVendor::M5Stack);
+    identified.led_inverted = !identified.led_inverted; // irrelevant for WS2812 identity
+    CHECK(board_selected_vendor(identified) == BoardVendor::M5Stack);
+    identified.led_gpio = 34;                           // Custom board, no longer a preset match
+    CHECK(board_selected_vendor(identified) == BoardVendor::Unknown);
+    std::string identity_why;
+    CHECK(!board_identity_valid(identified, identity_why));
+    identified.board_preset_id = BoardPresetId::Custom;
+    CHECK(board_identity_valid(identified, identity_why));
+    Config legacy_identity = identified;
+    legacy_identity.led_gpio = all[0].led_gpio; legacy_identity.led_type = all[0].led_type;
+    legacy_identity.led_inverted = all[0].led_inverted;
+    legacy_identity.btn_gpio = all[0].btn_gpio; legacy_identity.btn_active_low = all[0].btn_active_low;
+    CHECK(board_legacy_preset_id(legacy_identity) == BoardPresetId::M5StackAtomS3Lite);
+    legacy_identity.board_user_set = false;
+    CHECK(board_legacy_preset_id(legacy_identity) == BoardPresetId::Custom);
 
     // The AtomS3 Lite's button sits on a dedicated-JTAG pad. That it is legal for board-local I/O but
     // NOT for the X10A picker is the exact asymmetry this preset depends on (board_pins.hpp).
@@ -4557,6 +4631,8 @@ static void test_config_store() {
     a.mqtt_uri = "mqtts://broker:8883"; a.mqtt_user = "u ser"; a.mqtt_pass = "";
     a.syslog_host = "logs.example.com"; a.syslog_port = 514;
     a.ntp_server = "pool.ntp.org";
+    a.board_preset_id = static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite);
+    a.board_user_set = true;
     std::vector<uint8_t> buf = config_blob_serialize(a);
     ConfigBlob b;
     CHECK(config_blob_deserialize(buf.data(), buf.size(), b));
@@ -4570,6 +4646,9 @@ static void test_config_store() {
     CHECK(b.ref_temp_time_path.empty() && b.ref_temp_max_age_s == 600);
     CHECK(b.has_weather && !b.weather_enabled && b.weather_latitude_e6 == 0 &&
           b.weather_longitude_e6 == 0);
+    CHECK(b.has_env3 && !b.env3_enabled && b.env3_sda == 2 && b.env3_scl == 1);
+    CHECK(b.has_board_identity && b.board_user_set &&
+          b.board_preset_id == static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite));
 
     // The other flag combination, and a negative-looking port stored as-is.
     ConfigBlob c; c.wifi_rolled_back = true; c.wifi_rollback_active = false; c.syslog_port = 65535;
@@ -4612,12 +4691,16 @@ static void test_config_store() {
     board.wifi_ssid = "net";
     board.led_gpio = 35; board.led_type = 1; board.led_inverted = false;
     board.btn_gpio = 41; board.btn_active_low = true;
+    board.board_preset_id = static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite);
+    board.board_user_set = true;
     std::vector<uint8_t> bb = config_blob_serialize(board);
-    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 10);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 12);
     ConfigBlob rt;
     CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
     CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
     CHECK(rt.btn_gpio == 41 && rt.btn_active_low);
+    CHECK(rt.has_board_identity && rt.board_user_set &&
+          rt.board_preset_id == static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite));
     CHECK(rt.wifi_ssid == "net");                       // the v1 fields still round-trip unchanged
     // The two board booleans are packed into one flag byte — they must not bleed into each other.
     board.led_inverted = true; board.btn_active_low = false;
@@ -4635,13 +4718,13 @@ static void test_config_store() {
     // user's WiFi and MQTT credentials on the upgrade. It must decode, and it must report
     // has_board == false so the caller seeds the Kconfig defaults instead of reading "absent" as
     // "indicator disabled" (which would silently darken every XIAO's LED).
-    std::vector<uint8_t> v1 = buf;                       // `buf` is serialized as v10 by this build,
+    std::vector<uint8_t> v1 = buf;                       // `buf` is serialized as v12 by this build,
     // so build a genuine v1 body: header + the v1 fields only, by dropping every trailing block that
     // precedes the CRC — the 13-byte v2 board block (3x u32 + 1 flag byte), the 1-byte v3 channel,
     // the 1-byte v4 language and the 11-byte v5 HomeHub block (empty mb_host [2] + mb_port u32 +
     // mb_unit_id u32 + 1 flag byte), three empty v7 strings (6 bytes), and the empty v8 timestamp
-    // path + max-age u32 (6 bytes), plus the v10 coordinate block (9 bytes) = 47 bytes.
-    v1.erase(v1.end() - 4 - 47, v1.end() - 4);
+    // path + max-age u32 (6 bytes), weather (9), ENV III (9) and board identity (2) = 58 bytes.
+    v1.erase(v1.end() - 4 - 58, v1.end() - 4);
     v1[4] = 1;
     restamp(v1);
     ConfigBlob legacy;
@@ -4650,10 +4733,9 @@ static void test_config_store() {
     CHECK(!legacy.has_board);
     CHECK(legacy.wifi_ssid == a.wifi_ssid && legacy.mqtt_uri == a.mqtt_uri);   // v1 payload intact
     CHECK(legacy.led_gpio == -1);                        // the struct default, not the 999 sentinel
-    // A TRUNCATED v10 must not decode with silently-default freshness/weather fields: the version
-    // byte still says 10, so the missing max-age/location tail is caught.
+    // A TRUNCATED v12 must not decode with a silently-default board identity.
     std::vector<uint8_t> trunc = bb;
-    trunc.erase(trunc.end() - 4 - 15, trunc.end() - 4);   // drop v8 path/max-age + v10 location
+    trunc.erase(trunc.end() - 4 - 2, trunc.end() - 4);    // drop v12 identity block
     restamp(trunc);
     CHECK(!config_blob_deserialize(trunc.data(), trunc.size(), out));
 
@@ -4671,7 +4753,7 @@ static void test_config_store() {
     // would be a spectacularly bad trade. has_ota == false is how the caller tells "no channel
     // stored" from "explicitly release"; both mean release, only the diag line differs.
     std::vector<uint8_t> v2 = bb;
-    v2.erase(v2.end() - 4 - 34, v2.end() - 4);           // drop v3/v4/v5/v7/v8/v10 blocks
+    v2.erase(v2.end() - 4 - 45, v2.end() - 4);           // drop v3/v4/v5/v7/v8/v10/v11/v12
     v2[4] = 2;
     restamp(v2);
     ConfigBlob pre;
@@ -4695,7 +4777,7 @@ static void test_config_store() {
     // v3 blob and must still decode — the channel survives, and the absent language reads as auto
     // (has_lang == false, ui_lang == 0), so the browser keeps auto-detecting exactly as before.
     std::vector<uint8_t> v3 = lbv;
-    v3.erase(v3.end() - 4 - 33, v3.end() - 4);           // drop v4/v5/v7/v8/v10 blocks
+    v3.erase(v3.end() - 4 - 44, v3.end() - 4);           // drop v4/v5/v7/v8/v10/v11/v12
     v3[4] = 3;
     restamp(v3);
     ConfigBlob prel;
@@ -4712,7 +4794,7 @@ static void test_config_store() {
     mb.mb_host = "homehub-524288-abc.local";
     mb.mb_port = 502; mb.mb_unit_id = 3; mb.actuation_enabled = true; mb.homehub_enabled = false;
     std::vector<uint8_t> mbb = config_blob_serialize(mb);
-    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 10);
+    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 12);
     ConfigBlob mrt;
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
     CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-abc.local");
@@ -4731,7 +4813,7 @@ static void test_config_store() {
     // The immediately preceding v6 build could persist enabled+empty as Auto. Preserve its wire
     // shape as an upgrade fixture: current firmware must ignore that bit and decode empty as Off.
     std::vector<uint8_t> legacy_v6_auto = mbb;
-    legacy_v6_auto.erase(legacy_v6_auto.end() - 4 - 21, legacy_v6_auto.end() - 4);
+    legacy_v6_auto.erase(legacy_v6_auto.end() - 4 - 32, legacy_v6_auto.end() - 4);
     legacy_v6_auto[4] = 6;
     legacy_v6_auto[legacy_v6_auto.size() - 5] |= 2u;
     restamp(legacy_v6_auto);
@@ -4741,7 +4823,7 @@ static void test_config_store() {
     // A v5 empty-host blob also decodes disabled. Its historical flag was ambiguous, so it cannot
     // arm discovery in the current explicit-search contract.
     std::vector<uint8_t> v5 = mbb;
-    v5.erase(v5.end() - 4 - 21, v5.end() - 4);           // v5 predates the v7 + v8 + v10 blocks
+    v5.erase(v5.end() - 4 - 32, v5.end() - 4);           // v5 predates v7/v8/v10/v11/v12
     v5[4] = 5;
     v5[v5.size() - 5] &= static_cast<uint8_t>(~2u);      // HomeHub flag byte immediately before CRC
     restamp(v5);
@@ -4751,7 +4833,7 @@ static void test_config_store() {
     // v8 carried the same bit, but it was an inert placeholder. The first write-capable OTA must not
     // reinterpret an old true as consent: the transport survives and actuation is forced OFF.
     std::vector<uint8_t> v8 = mbb;
-    v8.erase(v8.end() - 4 - 9, v8.end() - 4);            // v8 predates the v10 location
+    v8.erase(v8.end() - 4 - 20, v8.end() - 4);           // v8 predates weather/ENV III/identity
     v8[4] = 8;
     restamp(v8);
     ConfigBlob v8rt;
@@ -4761,7 +4843,7 @@ static void test_config_store() {
     // language byte) must decode, report has_modbus == false and leave the mb_* struct defaults
     // (X10A / 502 / 1) — the same trade v1/v2/v3 already refuse to make.
     std::vector<uint8_t> v4 = mbb;
-    v4.erase(v4.end() - 4 - 32, v4.end() - 4);           // drop v5 + empty v7/v8/v10 blocks
+    v4.erase(v4.end() - 4 - 43, v4.end() - 4);           // drop v5/v7/v8/v10/v11/v12
     v4[4] = 4;
     restamp(v4);
     ConfigBlob v4rt;
@@ -4788,7 +4870,7 @@ static void test_config_store() {
     // The hardware-tested capture slice wrote v7 with only name/topic/value-path. It must migrate
     // in place: keep that mapping, add no imaginary timestamp path, and use the 10-minute default.
     std::vector<uint8_t> v7 = refb;
-    v7.erase(v7.end() - 4 - (2 + ref.ref_temp_time_path.size() + 4 + 9), v7.end() - 4);
+    v7.erase(v7.end() - 4 - (2 + ref.ref_temp_time_path.size() + 4 + 20), v7.end() - 4);
     v7[4] = 7;
     restamp(v7);
     ConfigBlob v7rt;
@@ -4798,7 +4880,7 @@ static void test_config_store() {
 
     // A genuine v6 blob still carries every earlier setting and reports the new mapping absent.
     std::vector<uint8_t> v6 = mbb;
-    v6.erase(v6.end() - 4 - 21, v6.end() - 4);
+    v6.erase(v6.end() - 4 - 32, v6.end() - 4);
     v6[4] = 6;
     restamp(v6);
     ConfigBlob v6rt;
@@ -4817,14 +4899,115 @@ static void test_config_store() {
     CHECK(weatherrt.has_weather && weatherrt.weather_enabled);
     CHECK(weatherrt.weather_latitude_e6 == 52520008 &&
           weatherrt.weather_longitude_e6 == 13404954);
+    // A genuine v10 blob keeps weather but predates ENV III and explicit board identity.
+    std::vector<uint8_t> v10 = weatherb;
+    v10.erase(v10.end() - 4 - 11, v10.end() - 4);
+    v10[4] = 10;
+    restamp(v10);
+    ConfigBlob v10rt;
+    CHECK(config_blob_deserialize(v10.data(), v10.size(), v10rt));
+    CHECK(v10rt.has_weather && v10rt.weather_enabled && !v10rt.has_env3 &&
+          !v10rt.has_board_identity);
+
+    // ── v11/v12: ENV III wiring and explicit board identity ────────────────────────────────────
+    ConfigBlob envb;
+    envb.wifi_ssid = "net"; envb.env3_enabled = true; envb.env3_sda = 5; envb.env3_scl = 6;
+    std::vector<uint8_t> envbuf = config_blob_serialize(envb);
+    ConfigBlob envrt;
+    CHECK(config_blob_deserialize(envbuf.data(), envbuf.size(), envrt));
+    CHECK(envrt.has_env3 && envrt.env3_enabled && envrt.env3_sda == 5 && envrt.env3_scl == 6);
+    // v11 already carried ENV III but no explicit board id. It remains readable so the load path can
+    // migrate the old `board_set` statement instead of losing credentials or sensor wiring.
+    std::vector<uint8_t> v11 = envbuf;
+    v11.erase(v11.end() - 4 - 2, v11.end() - 4);
+    v11[4] = 11;
+    restamp(v11);
+    ConfigBlob v11rt;
+    CHECK(config_blob_deserialize(v11.data(), v11.size(), v11rt));
+    CHECK(v11rt.has_weather && v11rt.has_env3 && !v11rt.has_board_identity &&
+          !v11rt.board_user_set);
+
+    // A v9 upgrade predates both independent outdoor sources and remains disabled by default.
     std::vector<uint8_t> v9 = weatherb;
-    v9.erase(v9.end() - 4 - 9, v9.end() - 4);
+    v9.erase(v9.end() - 4 - 20, v9.end() - 4);
     v9[4] = 9;
     restamp(v9);
     ConfigBlob v9rt;
     CHECK(config_blob_deserialize(v9.data(), v9.size(), v9rt));
     CHECK(!v9rt.has_weather && !v9rt.weather_enabled && v9rt.weather_latitude_e6 == 0 &&
           v9rt.weather_longitude_e6 == 0);
+    CHECK(!v9rt.has_env3 && !v9rt.env3_enabled && v9rt.env3_sda == 2 && v9rt.env3_scl == 1);
+}
+
+static void test_env3() {
+    const uint8_t crc_bytes[2] = {0xbe, 0xef};
+    CHECK(env3_sht_crc(crc_bytes, 2) == 0x92);
+    uint8_t sht[6] = {0x66, 0x66, 0, 0x80, 0x00, 0};
+    sht[2] = env3_sht_crc(sht, 2); sht[5] = env3_sht_crc(sht + 3, 2);
+    float temperature = 0.0f, humidity = 0.0f;
+    CHECK(env3_decode_sht30(sht, temperature, humidity));
+    CHECK(std::fabs(temperature - 25.0f) < 0.01f);
+    CHECK(std::fabs(humidity - 50.0008f) < 0.01f);
+    sht[5] ^= 1;
+    CHECK(!env3_decode_sht30(sht, temperature, humidity));
+    CHECK(env3_sample_plausible(-40.0f, 0.0f, 300.0f));
+    CHECK(env3_sample_plausible(120.0f, 100.0f, 1100.0f));
+    CHECK(!env3_sample_plausible(-40.01f, 50.0f, 1000.0f));
+    CHECK(!env3_sample_plausible(120.01f, 50.0f, 1000.0f));
+    CHECK(!env3_sample_plausible(20.0f, 50.0f, 1100.01f));
+    CHECK(build_env3_mqtt_json(true, 20.25f, 45.5f, 1008.75f) ==
+          "{\"temperature_c\":20.25,\"humidity_pct\":45.50,\"pressure_hpa\":1008.75}");
+    CHECK(build_env3_mqtt_json(false, 20.25f, 45.5f, 1008.75f) == "{}");
+    CHECK(build_env3_mqtt_json(true, 20.25f, 45.5f, 1200.0f) == "{}");
+    CHECK(build_env3_mqtt_json(true, std::nanf(""), 45.5f, 1008.75f) == "{}");
+
+    uint8_t calibration_raw[25] = {};
+    calibration_raw[0] = 0x80; calibration_raw[18] = 0x7f; calibration_raw[19] = 0xff;
+    calibration_raw[20] = 0x12; calibration_raw[21] = 0x34;
+    calibration_raw[22] = 0xfe; calibration_raw[23] = 0xdc; calibration_raw[24] = 0xa5;
+    const Env3QmpCalibration cal = env3_qmp_calibration(calibration_raw);
+    CHECK(cal.a0 == 0x7fff5);
+    CHECK(cal.b00 == static_cast<int32_t>(0xfff8000a));
+    CHECK(cal.a1 == 3608L * 0x1234 - 1731677965L);
+    CHECK(cal.a2 == 16889L * static_cast<int16_t>(0xfedc) - 87619360L);
+    const uint8_t qmp_raw[6] = {0x80, 0x00, 0x00, 0x80, 0x00, 0x00};
+    float qmp_temp = 0.0f, pressure = 0.0f;
+    env3_decode_qmp6988(cal, qmp_raw, qmp_temp, pressure);
+    CHECK(std::isfinite(qmp_temp) && std::isfinite(pressure));
+
+    Config c;
+    std::string why;
+    CHECK(env3_config_valid(c, why));                         // disabled is always recoverable
+    c.env3_enabled = true; c.env3_sda = 5; c.env3_scl = 6;
+    CHECK(!env3_config_valid(c, why, 48, false));             // no stated board identity
+    CHECK(why.find("M5Stack") != std::string::npos);
+    c.board_user_set = true;
+    c.board_preset_id = BoardPresetId::M5StackAtomS3Lite;
+    c.led_gpio = 35; c.led_type = 1; c.led_inverted = false;
+    c.btn_gpio = 41; c.btn_active_low = true;
+    CHECK(env3_config_valid(c, why, 48, false));
+    c.rx_pin = 5;
+    CHECK(!env3_config_valid(c, why, 48, false));
+    CHECK(why.find("SDA") != std::string::npos);
+    c.rx_pin = 44; c.env3_scl = 5;
+    CHECK(!env3_config_valid(c, why, 48, false));
+    c.env3_scl = 49;
+    CHECK(!env3_config_valid(c, why, 48, false));
+    c.env3_sda = 2; c.env3_scl = 1; c.rx_pin = 1; c.tx_pin = 2;
+    CHECK(!env3_config_valid(c, why, 48, false));             // Atom Grove conflicts with X10A 1/2
+    c.rx_pin = 44; c.tx_pin = 43;
+    CHECK(env3_config_valid(c, why, 48, false));
+    c.env3_sda = 35; c.env3_scl = 6;
+    CHECK(!env3_config_valid(c, why, 48, false));
+    c.env3_sda = 5;
+    c.led_gpio = 21; c.led_type = 0; c.led_inverted = true; c.btn_gpio = -1;
+    CHECK(!env3_config_valid(c, why, 48, false));             // selected Seeed board is unsupported
+    CHECK(why.find("M5Stack") != std::string::npos);
+
+    const Env3Preset* presets[ENV3_PRESETS_MAX] = {};
+    CHECK(env3_presets_offerable(presets, ENV3_PRESETS_MAX, false) == 1);
+    CHECK(presets[0]->sda == 2 && presets[0]->scl == 1);
+    CHECK(env3_presets_offerable(presets, 1, false, ReservedPins{2}) == 0);
 }
 
 static void test_reference_temperature_config() {
@@ -8941,6 +9124,7 @@ int main() {
     test_query_flag();
     test_redact();
     test_config_store();
+    test_env3();
     test_reference_temperature_config();
     test_weather_forecast_contract();
     test_mcp();

@@ -300,14 +300,15 @@ host-testable core is unusually large and valuable, because the risky parts are 
   reserves (flash, octal flash/PSRAM, strapping, and GPIO19/20 which *are* the USB-Serial/JTAG
   console this firmware logs over) is still excluded from both sets.
 
-  The **reservation runs in both directions**, and each list names its own. `board_pins_offerable()`
-  takes `config_reserved_pins()` — the indicator + button, withheld from the X10A picker.
-  `board_pins_local()` takes `config_link_pins()` — the live `rx`/`tx`, withheld from the LED and
-  button pickers. It has to: `board_hw_valid()` rejects a local pin that equals either link pin, so
+  The **reservation runs in every direction**, and each list names its own. `board_pins_offerable()`
+  takes `config_reserved_pins()` — indicator + button + enabled ENV III, withheld from the X10A picker.
+  `board_pins_local()` takes `config_board_reserved_pins()` — live X10A plus enabled ENV III,
+  withheld from the LED and button pickers. ENV III uses `config_env3_reserved_pins()` to withhold
+  X10A, LED and button pins. It has to: `board_hw_valid()` rejects a local pin that equals a claimed pin, so
   a picker still listing GPIO44/43 was offering a choice whose only outcome is
   `400 "led_gpio is in use by the X10A link"`. `ReservedPins` is therefore deliberately anonymous
-  about which pair it holds (`pin_a`/`pin_b`); the two factories in `logic/config_model.hpp` are
-  where the direction is stated. The same second axis applies to `board_presets_offerable()`: a
+  about which subsystem it holds (`pin_a`…`pin_d`); the named factories in `logic/config_model.hpp`
+  state the direction. The same second axis applies to `board_presets_offerable()`: a
   preset colliding with where the link currently sits is withheld, exactly as one colliding with an
   Octal build is.
 - `logic/board_presets.hpp` — the same per-board facts made *applicable*. One published image serves
@@ -325,20 +326,20 @@ host-testable core is unusually large and valuable, because the risky parts are 
   reserves — the AtomS3 Lite's GPIO35 is free on this project's Quad-flash build and is SPIIO4 on an
   Octal one — the same "a pick that cannot work is not a pick" rule the X10A dropdown follows. It
   asserts nothing about which board this *is* (still unknowable): picking a preset is the **user**
-  telling the firmware what the hardware is. That telling is now *recorded* — `Config::board_user_set`,
-  NVS key `board_set`, served as `/status.board.user_set` — because the stored values cannot stand in
-  for it: a device that never saved hardware carries the Kconfig defaults, which happen to **equal**
-  the XIAO preset, so "these values are the XIAO preset" is true both of a XIAO owner's deliberate
-  save and of a board nobody has configured. Naming the board off the values alone labels every
-  freshly flashed device a XIAO; refusing to name it at all leaves the Hardware modal opening on
-  "Custom" beside the preset just saved, so the user re-picks their own board and submits an
-  unchanged form. The flag is what separates the two, and it also splits what `POST /set_board` owes
-  a request: the five values decide the **reboot** (a driver's pin moved), the statement decides only
-  a **save** — `board_save_needed()` / `board_reboot_needed()` in `logic/config_model.hpp`,
-  host-tested over all four combinations. It stays **outside** the atomic config blob despite having
-  one writer, because it never *names* a board — the UI derives the name from the live field values,
-  so this only licenses showing one, and a flag out of step with the values can produce no wrong
-  name, only the "Custom" that is already the fallback.
+  telling the firmware what the hardware is. Blob v12 records that statement as the stable
+  `Config::board_preset_id` together with `board_user_set` and all five hardware fields in one atomic
+  CRC-protected write. `/status.board.preset_id` and `.preset_name` expose it directly. A device that
+  never saved hardware carries the Kconfig defaults, which happen to **equal** the XIAO preset, but
+  carries no selected id and remains unidentified. Conversely, an Atom selection remains Atom across
+  refresh and reboot without re-deriving its name from GPIO35/41. The request rejects an unknown id
+  or a known id whose submitted fields do not match its preset; manually edited fields are saved as
+  `custom`. Each preset also carries a non-display `BoardVendor`; vendor-bound accessories such as
+  ENV III use this validated explicit identity, not a model-name or pin heuristic. Thus a future
+  M5Stack preset inherits the capability while Seeed, unstated and Custom boards fail closed.
+  Hardware values decide the **reboot** (a driver's pin moved); identity-only changes require a
+  **save** but no reboot (`board_save_needed()` / `board_reboot_needed()`). Pre-v12 `board_set=true`
+  is a read-only migration hint: an exact historical field match recovers the same name the old UI
+  displayed, while untouched defaults never acquire an identity.
 - `logic/profile_view.hpp` — the active model's rows **as every consumer must see them**: the
   generated table plus the hand-written `def/overlay.hpp` supplement, as one indexable sequence. Four
   call sites read the row set and they are not independent — `hp_poll` decodes them, `mqtt_ha`
@@ -1213,7 +1214,14 @@ The Home Assistant bridge:
   nesting depth 1, e.g. `hydronic`, `outdoor_state`, `inverter`). Every sensor's discovery config
   points at the X10A topic and subscripts its value out with a `value_template`
   (`value_json['<group>']['<object_id>']` — bracket notation, so a digit-leading slug like
-  `2way_valve…` stays valid). `<base>/modbus` is a separate flat retained JSON object, published only
+  `2way_valve…` stays valid). `<base>/env3` is a separate flat retained numeric observation payload:
+  `{"temperature_c":20.25,"humidity_pct":45.50,"pressure_hpa":1008.75}`. Every new fresh 10 s
+  sample is published, including an unchanged reading; error or staleness changes the retained
+  payload to `{}`. Three retained HA discovery configs expose ENV III temperature, humidity and air
+  pressure as measurement sensors. Their availability is `all`: both the device LWT must be online
+  and the corresponding JSON key must exist, so `{}` makes only the ENV III entities unavailable.
+  Disabling the sensor retracts both the state topic and all three discovery configs. ENV III is
+  never folded into X10A or HomeHub state. `<base>/modbus` is a separate flat retained JSON object, published only
   for an enabled HomeHub stack and intentionally not referenced by HA discovery. Int16 enum values
   retain the raw numeric Modbus constant; `/values` carries separate semantic metadata so the browser
   can name them without putting prose on MQTT. A disconnected HomeHub publishes `{}` rather than

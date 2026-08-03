@@ -1,8 +1,9 @@
 #pragma once
 // Home Assistant MQTT-Discovery bridge. Its own task: connects to mqtt_uri (mqtts + CA-verified
 // when credentials are present — no silent plaintext fallback), streams one discovery config
-// per value on (re)connect (logic/discovery.hpp), then republishes the retained state
-// JSON whenever the value set changes (checked each poll cycle). Read-only: no command subscriptions —
+// per value on (re)connect (logic/discovery.hpp), republishes retained heat-pump state when its
+// value set changes, and publishes each fresh ENV III sample on its own retained topic with three
+// discovery entities (temperature, humidity, pressure). Read-only: no command subscriptions —
 // the one optional inbound subscription captures a configured reference-temperature number and
 // never actuates the heat pump. No-op if mqtt_uri is empty.
 #include <cstdint>

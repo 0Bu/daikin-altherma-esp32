@@ -74,7 +74,7 @@ const VIEW = { dashboard: "viewDash", settings: "viewSettings" };
 const PARENT = { settings: "dashboard" };
 const TITLE = { settings: () => t("nav.settings") };
 // Every overlay that owns the Esc key; the navigation Esc stands down while one of them is open.
-const MODALS = ["wifiModal", "mqttModal", "refTempModal", "weatherModal", "syslogModal", "ntpModal", "homehubModal", "boardModal", "bugModal"];
+const MODALS = ["wifiModal", "mqttModal", "refTempModal", "weatherModal", "syslogModal", "ntpModal", "homehubModal", "boardModal", "env3Modal", "bugModal"];
 
 // Open a popup without putting the caret into its first field. Focusing the dialog container keeps
 // the modal announced to keyboard/screen-reader users, while `preventScroll` avoids moving the page

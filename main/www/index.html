@@ -871,9 +871,9 @@
     <form class="modal-card" id="boardForm" role="dialog" aria-modal="true" aria-labelledby="boardModalTitle" tabindex="-1">
       <div class="section-label card-title" id="boardModalTitle" data-i18n="board.title">Board hardware</div>
       <!-- Ready-made settings for the boards this project documents (logic/board_presets.hpp, served
-           in /status.board.presets). Picking one only FILLS the fields below — nothing is saved until
-           Save — so it stays a shortcut the user can inspect and override, not a hidden action. The
-           row hides itself when the device sent no presets. -->
+           in /status.board.presets). The stable selected id and the fields below are saved together;
+           manual edits switch the pending selection to Custom. The row hides itself when the device
+           sent no presets. -->
       <label class="field" id="bdPresetRow" hidden>
         <span class="field-label plain" data-i18n="board.preset">Board</span>
         <select class="input" id="bdPreset"></select>
@@ -907,6 +907,37 @@
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="bdCancel" data-i18n="btn.cancel">Cancel</button>
         <button class="btn primary" type="submit" id="bdBtn" data-i18n="btn.save">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Outdoor-sensor configuration. The selected sensor owns one I2C bus for the boot, so saving
+       applies by reboot. ENV III is the only supported type for now; the selector keeps the UI
+       extensible without a second enabled/disabled control. -->
+  <div class="modal" id="env3Modal" hidden>
+    <div class="modal-backdrop" id="env3Backdrop"></div>
+    <form class="modal-card" id="env3Form" role="dialog" aria-modal="true" aria-labelledby="env3ModalTitle" tabindex="-1">
+      <div class="section-label card-title" id="env3ModalTitle" data-i18n="env.title">Outdoor sensor</div>
+      <label class="field">
+        <span class="field-label plain" data-i18n="env.sensor_state">Sensor</span>
+        <select class="input" id="envSensor">
+          <option value="" data-i18n="env.none">No sensor</option>
+          <option value="env_iii">ENV III</option>
+        </select>
+      </label>
+      <label class="field">
+        <span class="field-label plain">SDA</span>
+        <select class="input mono num" id="envSda"></select>
+      </label>
+      <label class="field">
+        <span class="field-label plain">SCL</span>
+        <select class="input mono num" id="envScl"></select>
+      </label>
+      <p class="hint err" id="envError" hidden></p>
+      <p class="hint" data-i18n="env.pins_hint">SDA is the I²C data line (yellow Grove wire); SCL is the clock line (white Grove wire). Select the GPIOs to which these two sensor wires are actually connected.</p>
+      <div class="modal-actions">
+        <button class="btn secondary" type="button" id="envCancel" data-i18n="btn.cancel">Cancel</button>
+        <button class="btn primary" type="submit" id="envBtn" data-i18n="btn.save">Save</button>
       </div>
     </form>
   </div>

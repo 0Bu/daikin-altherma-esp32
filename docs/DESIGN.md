@@ -1156,10 +1156,13 @@ vocabulary exactly:
 
 2. **Dynamische Vorlaufregelung card** — the permanent Settings home of the dynamic-LWT project,
    currently and explicitly **Datenerfassung** only. Its five rows are **Betriebsart** =
-   **Beobachten**, **Raumtemperaturquellen**, **Wetterprognose**, **Regelstrategie**, and
-   **Sicherheit & Ausgabe** = **Nur lesend**. The room-source row is the only editable one in this
-   first slice and opens the exact-topic, temperature-JSON-path, optional source-timestamp path and
-   maximum-age modal. Every text-like field in this and the other modals selects its complete value
+   **Beobachten**, **Raumtemperaturquellen**, **Außenmessungen**, **Regelstrategie**, and
+   **Sicherheit & Ausgabe** = **Nur lesend**. The room-source row opens the exact-topic,
+   temperature-JSON-path, optional source-timestamp path and maximum-age modal. The outdoor row opens
+   the opt-in ENV III wiring modal (preset plus SDA/SCL) only for a user-selected M5Stack board; live
+   temperature, humidity and pressure are observation-only and render in a separate dashboard card,
+   never as a replacement for Daikin R1T.
+   Every text-like field in this and the other modals selects its complete value
    on focus/click, so a long topic, host or JSON path can be replaced with one paste. The room-source
    modal separates **Testen** from **Speichern**: Save starts disabled for a non-empty topic, Test
    changes no persistent setting, and only a fresh value accepted through the exact mapping enables
@@ -1169,9 +1172,9 @@ vocabulary exactly:
    source age; retained remains labelled. A retained payload without its own timestamp is visibly
    untrusted rather than made fresh by reconnecting, while a non-retained value without one ages
    from its monotonic MQTT arrival. The
-   other three future-facing rows are honest state, not disabled controls: forecast is
-   **Nicht konfiguriert**, strategy **Nicht aktiv**, and output **Nur lesend**, with no pencil and no
-   click handler. The card must never imply that observing an MQTT value controls the heat pump.
+   remaining future-facing rows are honest state, not disabled controls: strategy is **Nicht aktiv**
+   and output **Nur lesend**, with no pencil and no click handler. The card must never imply that
+   observing an MQTT value or ENV III measurement controls the heat pump.
 
 3. **ESP32 card** — the board itself, styled exactly like the value groups (§6): the **Hardware**
    row (status indicator + recovery-button pins), which opens the board-hardware modal, from

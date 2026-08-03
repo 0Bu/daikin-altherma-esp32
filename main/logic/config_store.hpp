@@ -1,7 +1,7 @@
 #pragma once
 // Atomic config persistence (F02). The credential + service settings — WiFi credentials, the one-shot
-// rollback backup + flags, MQTT, syslog, NTP and the board-local hardware (status indicator +
-// recovery button, added in blob v2) — are serialized into ONE length-checked,
+// rollback backup + flags, MQTT, syslog, NTP, board-local hardware (v2) and its explicit preset
+// identity (v11) — are serialized into ONE length-checked,
 // CRC32-protected byte blob and written to a single NVS key ("cfg"). A single nvs_set_blob is atomic
 // at the NVS entry level: either the whole new blob lands or the previous one remains. So a save is
 // all-or-nothing across BOTH a mid-write NVS failure AND a power cut, with no per-key rollback and no
@@ -104,6 +104,17 @@ struct ConfigBlob {
     int32_t     weather_latitude_e6 = 0;
     int32_t     weather_longitude_e6 = 0;
     bool        has_weather = false;
+    // ── v11: optional ENV III I2C sensor ───────────────────────────────────────────────────────
+    bool        env3_enabled = false;
+    int32_t     env3_sda = 2;
+    int32_t     env3_scl = 1;
+    bool        has_env3 = false;
+    // ── v12: explicit board-preset identity ─────────────────────────────────────────────────────
+    // Stored atomically beside the v2 hardware block. 0 = Custom, 1 = AtomS3 Lite, 2 = XIAO;
+    // board_user_set distinguishes deliberate Custom from untouched Kconfig defaults.
+    int32_t     board_preset_id = 0;
+    bool        board_user_set = false;
+    bool        has_board_identity = false;
     // FALSE when the decoded blob predates v5 (no HomeHub block). The current empty-host default is
     // disabled, so an upgrade never starts LAN discovery without an explicit user action.
     bool        has_modbus = false;
@@ -121,14 +132,15 @@ inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
 // v5 the HomeHub Modbus stack, v6 its now-legacy enable compatibility bit, v7 one MQTT-backed
 // reference-temperature mapping, v8 its source timestamp + maximum-age fields, and v9 activates the
 // formerly inert actuation bit without changing the byte layout, and v10 the direct Open-Meteo
-// location. Current firmware derives HomeHub
+// location, v11 appends ENV III enable + SDA/SCL pins, and v12 appends the explicit board-preset id
+// + selected flag. Current firmware derives HomeHub
 // enabled solely from whether mb_host is empty; v5-v8 actuation bits decode OFF.
 // Bumping the version rather than reusing the previous one is what makes the trailing-garbage check
 // below still exact per version; OLDER blobs are ACCEPTED on read (see config_blob_deserialize)
 // because rejecting them would drop a user's WiFi and MQTT credentials on the OTA that introduced the
 // field — the fallback path is the legacy per-key layout, which a device written by a blob-era build
 // has never populated.
-inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 10;
+inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 12;
 inline constexpr uint8_t  CONFIG_BLOB_VERSION_MIN = 1;
 // A string field longer than this is treated as corruption on decode: real credentials are short, so a
 // huge length is a garbled blob, not a value. Bounds the work and rejects a hostile/garbled length.
@@ -186,6 +198,11 @@ inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     detail::blob_put_u32(v, static_cast<uint32_t>(c.weather_latitude_e6));
     detail::blob_put_u32(v, static_cast<uint32_t>(c.weather_longitude_e6));
     v.push_back(c.weather_enabled ? 1u : 0u);
+    v.push_back(c.env3_enabled ? 1 : 0);
+    detail::blob_put_u32(v, static_cast<uint32_t>(c.env3_sda));
+    detail::blob_put_u32(v, static_cast<uint32_t>(c.env3_scl));
+    v.push_back(static_cast<uint8_t>(c.board_preset_id));
+    v.push_back(c.board_user_set ? 1 : 0);
     detail::blob_put_u32(v, config_crc32(v.data(), v.size()));   // CRC covers everything before it
     return v;
 }
@@ -282,11 +299,26 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
         c.weather_enabled = d[p++] != 0;
         c.has_weather = true;
     }
+    if (version >= 11) {
+        if (p + 1 > body_end) return false;
+        c.env3_enabled = d[p++] != 0;
+        uint32_t sda = 0, scl = 0;
+        if (!get_u32(sda) || !get_u32(scl)) return false;
+        c.env3_sda = static_cast<int32_t>(sda);
+        c.env3_scl = static_cast<int32_t>(scl);
+        c.has_env3 = true;
+    }
+    if (version >= 12) {
+        if (p + 2 > body_end) return false;
+        c.board_preset_id = static_cast<int32_t>(d[p++]);
+        c.board_user_set = d[p++] != 0;
+        c.has_board_identity = true;
+    }
     // Exact per version: a v1 blob must END after ntp_server, a v2 blob after the board block, a v3
     // blob after the channel byte, a v4 blob after the language byte, v5/v6 after the HomeHub block
     // v7 after the reference-source strings, v8/v9 after timestamp/max-age, and v10 after the
-    // Open-Meteo location. v6 and v9 change a
-    // flag's meaning without changing the HomeHub block's size.
+    // Open-Meteo location, v11 after ENV III, and v12 after the explicit board identity.
+    // v6 and v9 change a flag's meaning without changing the HomeHub block's size.
     // Accepting a prefix would let a truncated v2 decode as a valid v1 with silently-default pins.
     if (p != body_end) return false;   // trailing garbage -> reject rather than accept a prefix
     c.wifi_rollback_active = (flags & 1) != 0;

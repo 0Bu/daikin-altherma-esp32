@@ -43,29 +43,34 @@ struct BoardPins {
 // against the real lists host-side, so it can't silently drift from the arrays below.
 inline constexpr int BOARD_PINS_MAX = 28;
 
-// Up to two GPIOs that are already SPOKEN FOR, and which the list being built therefore may not
-// offer. Deliberately generic (pin_a/pin_b, not led/button), because the reservation runs in BOTH
-// directions and naming the fields after one direction made the other read as a lie:
+// Up to four GPIOs that are already SPOKEN FOR, and which the list being built therefore may not
+// offer. Deliberately generic (pin_a…pin_d, not led/button/sensor), because the reservation runs in
+// every direction and naming the fields after one direction made the others read as a lie:
 //
 //   X10A picker  reserves the status indicator + the recovery button — pins status_led.cpp drives
 //                as an output (or clocks WS2812 bits onto) and button.cpp holds as a pulled input.
 //   LED/button   reserves the X10A link's rx/tx — pins hp_comm.cpp routes a UART onto.
 //   pickers
 //
-// Which pair is which is stated at the call site by the two factories in config_model.hpp
-// (config_reserved_pins / config_link_pins), never inferred from a field name here. All four pins
-// are runtime-configured (NVS), so neither side can be a compile-time constant any more.
+// Which set is which is stated at the call site by the named factories in config_model.hpp, never
+// inferred from a field name here. All pins are runtime-configured (NVS), so no direction can be a
+// compile-time constant any more.
 //
 // The int constructor is deliberately NOT explicit: it keeps `board_pin_offerable(p, octal, 21)`
 // — the single-reservation call shape from before the button existed — compiling and meaning
 // exactly what it did, so adding a second reservation didn't require touching every call site and
-// test at once. -1 in either field means "nothing reserved there".
+// test at once. -1 in any field means "nothing reserved there".
 struct ReservedPins {
     int pin_a = -1;
     int pin_b = -1;
+    int pin_c = -1;
+    int pin_d = -1;
     constexpr ReservedPins() = default;
-    constexpr ReservedPins(int a, int b = -1) : pin_a(a), pin_b(b) {}
-    constexpr bool claims(int pin) const { return pin >= 0 && (pin == pin_a || pin == pin_b); }
+    constexpr ReservedPins(int a, int b = -1, int c = -1, int d = -1)
+        : pin_a(a), pin_b(b), pin_c(c), pin_d(d) {}
+    constexpr bool claims(int pin) const {
+        return pin >= 0 && (pin == pin_a || pin == pin_b || pin == pin_c || pin == pin_d);
+    }
 };
 
 // octal_spi: true if THIS build's flash and/or PSRAM run Octal I/O (GPIO33-37 then carry

@@ -14,6 +14,15 @@
 
 namespace daik {
 
+// Stable identity of a board preset explicitly selected by the user. `Custom` is also the default
+// numeric value; board_user_set distinguishes untouched build defaults from a deliberately saved
+// Custom selection. The preset table maps these ids to names, vendors and hardware values.
+enum class BoardPresetId : uint8_t {
+    Custom = 0,
+    M5StackAtomS3Lite = 1,
+    SeeedXiaoEsp32S3 = 2,
+};
+
 // Fixed poll cadence: the heat pump is queried every second (near-real-time; the MQTT bridge
 // publishes only changes, so a fast poll is cheap). Not runtime-configurable.
 inline constexpr int POLL_INTERVAL_S = 1;
@@ -96,6 +105,13 @@ struct Config {
     // There is no raw-register or external protocol writer by design.
     bool        actuation_enabled = false;
 
+    // Optional M5Stack ENV III outdoor-climate sensor. Both devices on the unit share one I2C
+    // pair (SHT30 0x44 + QMP6988 0x70). Disabled by default so an OTA never starts driving pins the
+    // user did not wire. Runtime pins keep the single published ESP32-S3 image board-neutral.
+    bool        env3_enabled = false;
+    int         env3_sda     = 2;
+    int         env3_scl     = 1;
+
     // ── Board-local hardware: the status indicator + the recovery button — PERSISTED ─────────────
     // RUNTIME, not Kconfig, and that is the whole point. CI publishes ONE esp32s3 image
     // (scripts/ci-build-all.sh), but the boards it runs on disagree about their own onboard parts:
@@ -115,22 +131,12 @@ struct Config {
     // Did the USER state this hardware, or are these merely the build's defaults? The five values
     // above cannot answer it: a fresh device is seeded from Kconfig, and those happen to EQUAL the
     // XIAO preset — so "GPIO21, plain, active-low" is both what a XIAO owner deliberately saved and
-    // what nobody has said anything about. The web UI needs the difference to name the board in its
-    // preset dropdown without CLAIMING one nobody chose (#256), and without the opposite failure
-    // (#257): a modal that opens on "Custom" although the values are exactly the preset the user
-    // just saved, so re-picking their own board submits an unchanged form.
-    //
-    // NOT in the atomic config blob, unlike the five values it describes, and that is a decision
-    // rather than an oversight. The flag never NAMES a board — the UI derives the name from the live
-    // field values (syncPresetSelection) and this only decides whether a name may be shown at all —
-    // so a flag that drifted from the values cannot produce a WRONG board name, only the "Custom"
-    // the UI already falls back to. That removes the all-or-nothing argument that puts one-writer
-    // fields in the blob, and it avoids a blob version bump, which is not free here: two other
-    // branches already carry a v5 and a v6 blob, and a version a build does not know reads on the
-    // device as a wiped configuration (config_blob_deserialize refuses it, the legacy per-key
-    // fallback is empty, and the board comes up in the setup portal with its credentials intact but
-    // unread).
+    // what nobody has said anything about. `board_preset_id` is the concrete statement — never
+    // inferred from LED/button values at runtime — while this flag distinguishes untouched defaults
+    // from an explicitly saved Custom board. Both ride atomically with the five hardware fields in
+    // blob v12, so identity and pins cannot disagree after a power cut.
     bool        board_user_set = false;
+    BoardPresetId board_preset_id = BoardPresetId::Custom;
 
     // ── Auto-detected MODEL (not the link). Set by hp_detect.cpp; see logic/detect.hpp. ──
     // SESSION-ONLY: applied to the in-RAM config via config_set_model (apply_model, below) and NEVER
@@ -242,15 +248,28 @@ inline bool link_pins_safe(int rx, int tx, bool octal_spi, ReservedPins reserved
 // The GPIOs the firmware itself drives, as board_pins.hpp's `reserved` input. One accessor so the
 // three places that need it — /status's pin dropdown, /set_hp's validation and config_load()'s
 // load-path re-check — cannot disagree about which pins are spoken for.
-inline ReservedPins config_reserved_pins(const Config& c) { return ReservedPins{c.led_gpio, c.btn_gpio}; }
+inline ReservedPins config_reserved_pins(const Config& c) {
+    return c.env3_enabled ? ReservedPins{c.led_gpio, c.btn_gpio, c.env3_sda, c.env3_scl}
+                          : ReservedPins{c.led_gpio, c.btn_gpio};
+}
 
 // The MIRROR of the above: the GPIOs the X10A link occupies, for the LED/button pin pickers
 // (/status.board.pins_local via board_pins_local). The reservation has to run in both directions or
 // it protects only one of them — board_hw_valid() below rejects an indicator or button pin that
 // equals rx/tx, so a picker that still offers those two is offering a pick the device will refuse.
-// Two named factories rather than one, because which pair is reserved is the caller's statement of
-// intent; board_pins.hpp's ReservedPins is deliberately anonymous about it (pin_a/pin_b).
+// Named factories rather than one ambiguous helper, because which subsystem is reserved is the
+// caller's statement of intent; board_pins.hpp's ReservedPins is deliberately anonymous about it.
 inline ReservedPins config_link_pins(const Config& c) { return ReservedPins{c.rx_pin, c.tx_pin}; }
+
+// Reservations for board-local pickers/presets and for the ENV III picker respectively. Keeping
+// the directions explicit prevents either dialog from offering a GPIO the other subsystem owns.
+inline ReservedPins config_board_reserved_pins(const Config& c) {
+    return c.env3_enabled ? ReservedPins{c.rx_pin, c.tx_pin, c.env3_sda, c.env3_scl}
+                          : ReservedPins{c.rx_pin, c.tx_pin};
+}
+inline ReservedPins config_env3_reserved_pins(const Config& c) {
+    return ReservedPins{c.rx_pin, c.tx_pin, c.led_gpio, c.btn_gpio};
+}
 
 // Validate the board-local hardware half of a config (POST /set_board, and the load path). Separate
 // from validate() below because it is checked on its own route and must name its own field; the two
@@ -269,11 +288,13 @@ inline bool board_hw_valid(const Config& c, std::string& reason, int max_gpio = 
         if (!gpio_in_range(c.led_gpio, max_gpio))          { reason = "led_gpio out of range";  return false; }
         if (!board_pin_local_io(c.led_gpio, octal_spi))    { reason = "led_gpio is a reserved GPIO"; return false; }
         if (c.led_gpio == c.rx_pin || c.led_gpio == c.tx_pin) { reason = "led_gpio is in use by the X10A link"; return false; }
+        if (c.env3_enabled && (c.led_gpio == c.env3_sda || c.led_gpio == c.env3_scl)) { reason = "led_gpio is in use by ENV III"; return false; }
     }
     if (c.btn_gpio >= 0) {
         if (!gpio_in_range(c.btn_gpio, max_gpio))          { reason = "btn_gpio out of range";  return false; }
         if (!board_pin_local_io(c.btn_gpio, octal_spi))    { reason = "btn_gpio is a reserved GPIO"; return false; }
         if (c.btn_gpio == c.rx_pin || c.btn_gpio == c.tx_pin) { reason = "btn_gpio is in use by the X10A link"; return false; }
+        if (c.env3_enabled && (c.btn_gpio == c.env3_sda || c.btn_gpio == c.env3_scl)) { reason = "btn_gpio is in use by ENV III"; return false; }
         if (c.btn_gpio == c.led_gpio)                      { reason = "btn_gpio and led_gpio must differ"; return false; }
     }
     return true;
@@ -282,9 +303,9 @@ inline bool board_hw_valid(const Config& c, std::string& reason, int max_gpio = 
 // ── What POST /set_board actually has to DO ─────────────────────────────────────────────────────
 // TWO independent facts can move, and conflating them is what produced #257. The five HARDWARE
 // values decide whether a REBOOT is needed (both are claimed once at task start — the WS2812 opens
-// an RMT channel, the button installs a pull). Whether the user has STATED this hardware
-// (board_user_set) decides only what the modal may call the board next time, and needs no reboot at
-// all. Pure so the four combinations are asserted rather than re-derived at the route.
+// an RMT channel, the button installs a pull). The explicitly selected preset id decides which board
+// the firmware may name and which vendor-gated accessories it may enable; changing identity without
+// changing hardware needs a SAVE but no reboot. Pure so the combinations are asserted here.
 //
 // The case that matters is `values same, not yet stated`: a XIAO owner picking "Seeed XIAO" on a
 // device still carrying the Kconfig defaults changes no value, so the old route answered
@@ -294,12 +315,15 @@ inline bool board_hw_same(const Config& a, const Config& b) {
     return a.led_gpio == b.led_gpio && a.led_type == b.led_type && a.led_inverted == b.led_inverted &&
            a.btn_gpio == b.btn_gpio && a.btn_active_low == b.btn_active_low;
 }
+inline bool board_identity_same(const Config& a, const Config& b) {
+    return a.board_user_set == b.board_user_set && a.board_preset_id == b.board_preset_id;
+}
 // A reboot is owed to a HARDWARE change alone: recording the statement changes nothing a driver holds.
 inline bool board_reboot_needed(const Config& want, const Config& cur) { return !board_hw_same(want, cur); }
-// ...but a save is owed to either. `want.board_user_set` is true for every /set_board request (the
-// submit IS the statement), so this reduces to "the values moved, or we had not recorded it yet".
+// ...but a save is owed to hardware or explicit identity. Atom -> Custom with identical fields is a
+// real statement change, even though no driver needs a reboot.
 inline bool board_save_needed(const Config& want, const Config& cur) {
-    return !board_hw_same(want, cur) || (want.board_user_set && !cur.board_user_set);
+    return !board_hw_same(want, cur) || !board_identity_same(want, cur);
 }
 
 // Validate a config coming from the web UI. Returns false + a reason on the first problem. Pass the

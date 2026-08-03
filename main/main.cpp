@@ -19,6 +19,7 @@
 #include "config.hpp"
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
+#include "env3.hpp"
 #include "history.hpp"
 #include "syslog.hpp"
 #include "hp_poll.hpp"
@@ -103,6 +104,7 @@ extern "C" void app_main() {
     daik::history_start();
     daik::http_start();                  // esp_http_server on :80 (web UI + config + OTA + MCP)
     if (!daik::safe_mode_active()) {
+        daik::env3_start();              // optional outdoor climate sensor (no-op unless configured)
         daik::mqtt_ha_start();           // HA MQTT-Discovery bridge (no-op if mqtt_uri empty)
         daik::weather_forecast_start();  // direct Open-Meteo HTTPS/JSON fetch (no-op without location)
         daik::hp_poll_start();           // X10A poll engine
@@ -114,7 +116,7 @@ extern "C" void app_main() {
         // recovered through the web UI, and every optional consumer stays out of the way.
         daik::mb_start();
     } else {
-        ESP_LOGW(TAG, "SAFE MODE: X10A + HomeHub + MQTT + Open-Meteo weather skipped — recover the config via the web UI");
+        ESP_LOGW(TAG, "SAFE MODE: ENV III + X10A + HomeHub + MQTT + Open-Meteo weather skipped — recover the config via the web UI");
     }
     daik::ota_health_gate_arm();         // keep rollback armed until this image proves healthy
     daik::safe_mode_arm_healthy();       // clear the crash counter after BOOT_HEALTHY_S of continuous uptime
