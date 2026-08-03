@@ -116,7 +116,7 @@ const DEMO = (() => {
     B("Space heating Operation ON/OFF", o.spaceOn, 0x62),
     B("BUH Step1", false, 0x60),
     B("BUH Step2", false, 0x60),
-    // The DHW tank's immersion heater. Scene 2 switches it on to exercise the permanent orange
+    // The DHW tank's immersion heater. One scene switches it on to exercise the permanent orange
     // pill; the other scenes keep the same row explicitly OFF so the light-grey state is visible.
     // COP is deliberately blocked while it runs because its separate electrical heat has no power
     // measurement that can be paired with the PHE boundaries.
@@ -128,11 +128,10 @@ const DEMO = (() => {
     R("Current measured by CT sensor of L3", "0.0", "A", 0x63),
   ];
 
-  // ── The four scenes ─────────────────────────────────────────────────────────────────────────
-  // 1) Standby      compressor off, no flow → held X10A outdoor pages; HomeHub outdoor air stands in
-  // 2) DHW          tank charge + active BSH: orange state pill; COP deliberately unavailable
-  // 3) Heating      space heating at 38 °C leaving water, demand on the branch, COP ≈ 4.8
-  // 4) Heating+DHW  both demands active (conv 315 mode 5); the unit is on the tank right now
+  // ── Operating-state atlas ───────────────────────────────────────────────────────────────────
+  // This covers every normal plantState() result plus every published hydronic mode: standby,
+  // heating, defrost, circulation, DHW/BSH, both combined modes, cooling and cooling residual-heat
+  // circulation. Fault/warning/link states are diagnostics rather than operating states.
   //
   // The numbers are invented, but they are READ as measurements, so they have to hold together:
   //   heat      pth = flow/60 × 4.186 × ΔT      and    pel = ΣCT × 230 V    →    COP = pth/pel
@@ -144,33 +143,72 @@ const DEMO = (() => {
   //   low side  evaporating ~10 K under the outdoor air
   //   standby   rp 14.2 bar = the equalised circuit near room temperature, not a fault
   const scenes = [
-    { name: "Standby", caption: "Bereitschaft · Standby", mbOut: "6.8", mbPower: "0.1",
+    { name: "Standby", caption: "Bereitschaft · Standby", mbOut: "6.8", mbPower: "0.1", sgMode: 0,
       v: base({ mode: "Stop", ouMode: "Heating", out: "19.0", rps: "0", disch: "24.5", hp: "0.0",
                 lp: "0.0", eev: "0", inv: "0.0", fan: "0", lwt: "28.4", ret: "28.0", tank: "48.2",
                 tankSet: "50.0", lwSet: "35.0", room: "21.4", roomSet: "21.0", flow: "0.0",
                 wp: "1.8", rp: "14.2", pumpSig: "100", pumpOn: false, valveDhw: false,
                 thermo: false, spaceOn: false, defrost: false, quiet: true, ct: "0.1" }) },
 
-    { name: "DHW", caption: "Warmwasser · Domestic hot water", mbOut: "8.8", mbPower: "1.8",
-      v: base({ mode: "DHW", ouMode: "Heating", out: "8.5", rps: "62", disch: "78.4", hp: "36.8",
-                lp: "7.1", eev: "320", inv: "7.9", fan: "6", lwt: "54.8", ret: "49.8", tank: "44.0",
-                tankSet: "50.0", lwSet: "35.0", room: "21.2", roomSet: "21.0", flow: "14.0",
-                wp: "1.8", rp: "36.8", pumpSig: "22", pumpOn: true, valveDhw: true,
-                thermo: false, spaceOn: false, bshOn: true, defrost: false, quiet: false, ct: "8.0" }) },
-
-    { name: "Heating", caption: "Heizen · Heating", mbOut: "5.4", mbPower: "1.4",
+    { name: "Heating", caption: "Heizen · Heating", mbOut: "5.4", mbPower: "1.4", sgMode: 0,
       v: base({ mode: "Heating", ouMode: "Heating", out: "5.2", rps: "45", disch: "68.1", hp: "26.2",
                 lp: "6.4", eev: "280", inv: "6.1", fan: "4", lwt: "38.4", ret: "33.9", tank: "49.5",
                 tankSet: "50.0", lwSet: "38.0", room: "21.4", roomSet: "21.5", flow: "21.0",
                 wp: "1.8", rp: "26.2", pumpSig: "12", pumpOn: true, valveDhw: false,
                 thermo: true, spaceOn: true, defrost: false, quiet: false, ct: "6.0" }) },
 
-    { name: "Heating + DHW", caption: "Heizen + Warmwasser · Heating + hot water", mbOut: "5.2", mbPower: "1.7",
+    { name: "Defrost", caption: "Abtauen · Defrost", mbOut: "0.8", mbPower: "2.0", sgMode: 0,
+      v: base({ mode: "Heating", ouMode: "Heating", out: "0.6", rps: "70", disch: "31.0", hp: "29.4",
+                lp: "7.8", eev: "410", inv: "8.8", fan: "0", lwt: "26.0", ret: "31.0", tank: "48.7",
+                tankSet: "50.0", lwSet: "38.0", room: "21.2", roomSet: "21.5", flow: "22.0",
+                wp: "1.8", rp: "29.4", pumpSig: "10", pumpOn: true, valveDhw: false,
+                thermo: true, spaceOn: true, defrost: true, quiet: false, ct: "8.7" }) },
+
+    { name: "Circulation", caption: "Nachlauf · Circulation", mbOut: "4.8", mbPower: "0.2", sgMode: 0,
+      v: base({ mode: "Heating", ouMode: "Heating", out: "5.2", rps: "0", disch: "58.0", hp: "0.0",
+                lp: "0.0", eev: "0", inv: "0.0", fan: "0", lwt: "32.1", ret: "31.9", tank: "48.5",
+                tankSet: "50.0", lwSet: "38.0", room: "21.3", roomSet: "21.5", flow: "12.0",
+                wp: "1.8", rp: "15.0", pumpSig: "38", pumpOn: true, valveDhw: false,
+                thermo: false, spaceOn: false, defrost: false, quiet: true, ct: "0.8" }) },
+
+    { name: "DHW + BSH", caption: "Warmwasser + Heizstab · DHW + immersion heater",
+      mbOut: "8.8", mbPower: "4.2", sgMode: 2, mbBsh: true,
+      v: base({ mode: "DHW", ouMode: "Heating", out: "8.5", rps: "62", disch: "78.4", hp: "36.8",
+                lp: "7.1", eev: "320", inv: "7.9", fan: "6", lwt: "54.8", ret: "49.8", tank: "44.0",
+                tankSet: "50.0", lwSet: "35.0", room: "21.2", roomSet: "21.0", flow: "14.0",
+                wp: "1.8", rp: "36.8", pumpSig: "22", pumpOn: true, valveDhw: true,
+                thermo: false, spaceOn: false, bshOn: true, defrost: false, quiet: false, ct: "8.0" }) },
+
+    { name: "Heating + DHW", caption: "Heizen + Warmwasser · Heating + hot water",
+      mbOut: "5.2", mbPower: "1.7", sgMode: 0,
       v: base({ mode: "Heating + DHW", ouMode: "Heating", out: "5.0", rps: "58", disch: "74.6",
                 hp: "34.6", lp: "6.8", eev: "305", inv: "7.4", fan: "5", lwt: "51.6", ret: "46.9",
                 tank: "46.8", tankSet: "50.0", lwSet: "38.0", room: "21.1", roomSet: "21.5",
                 flow: "15.5", wp: "1.8", rp: "34.6", pumpSig: "18", pumpOn: true, valveDhw: true,
                 thermo: true, spaceOn: true, defrost: false, quiet: false, ct: "7.4" }) },
+
+    { name: "Cooling + DHW", caption: "Kühlen + Warmwasser · Cooling + hot water",
+      mbOut: "29.6", mbPower: "1.8", sgMode: 0,
+      v: base({ mode: "Cooling + DHW", ouMode: "Heating", out: "29.4", rps: "60", disch: "76.0",
+                hp: "35.2", lp: "7.6", eev: "330", inv: "7.8", fan: "6", lwt: "52.0", ret: "47.2",
+                tank: "45.8", tankSet: "50.0", lwSet: "18.0", room: "24.0", roomSet: "23.0",
+                flow: "15.0", wp: "1.8", rp: "35.2", pumpSig: "18", pumpOn: true, valveDhw: true,
+                thermo: true, spaceOn: true, defrost: false, quiet: false, ct: "7.7" }) },
+
+    { name: "Cooling", caption: "Kühlen · Cooling", mbOut: "30.2", mbPower: "1.2", sgMode: 0,
+      v: base({ mode: "Cooling", ouMode: "Cooling", out: "30.0", rps: "44", disch: "69.0", hp: "28.2",
+                lp: "7.4", eev: "295", inv: "5.4", fan: "5", lwt: "12.0", ret: "16.0", tank: "48.0",
+                tankSet: "50.0", lwSet: "18.0", room: "24.2", roomSet: "23.0", flow: "21.0",
+                wp: "1.8", rp: "28.2", pumpSig: "14", pumpOn: true, valveDhw: false,
+                thermo: false, spaceOn: true, defrost: false, quiet: false, ct: "5.3" }) },
+
+    { name: "Cooling residual", caption: "Restwärme-Nachlauf · Cooling residual circulation",
+      mbOut: "27.0", mbPower: "0.2", sgMode: 0,
+      v: base({ mode: "Cooling", ouMode: "Cooling", out: "30.0", rps: "0", disch: "64.0", hp: "0.0",
+                lp: "0.0", eev: "0", inv: "0.0", fan: "0", lwt: "42.0", ret: "38.0", tank: "48.0",
+                tankSet: "50.0", lwSet: "18.0", room: "24.0", roomSet: "23.0", flow: "14.0",
+                wp: "1.8", rp: "17.0", pumpSig: "34", pumpOn: true, valveDhw: false,
+                thermo: false, spaceOn: true, defrost: false, quiet: true, ct: "0.8" }) },
   ];
 
   const status = (i) => ({
@@ -227,8 +265,9 @@ try {
     if (u.startsWith("/status")) return json(DEMO.status(idx));
     if (u.startsWith("/values")) return json({
       values: DEMO.scenes[idx].v,
-      modbus: [DEMO.smartGrid(idx === 1 ? 2 : 0), DEMO.outdoorAir(DEMO.scenes[idx].mbOut),
-               DEMO.tankHeater(idx === 1), DEMO.electricalInput(DEMO.scenes[idx].mbPower)],
+      modbus: [DEMO.smartGrid(DEMO.scenes[idx].sgMode || 0), DEMO.outdoorAir(DEMO.scenes[idx].mbOut),
+               DEMO.tankHeater(!!DEMO.scenes[idx].mbBsh),
+               DEMO.electricalInput(DEMO.scenes[idx].mbPower)],
     });
     if (u.startsWith("/history")) {
       const p = new URL(u, location.origin).searchParams;
@@ -260,8 +299,9 @@ try {
   // Each animation is given a WHOLE number of cycles across the GIF's total length T, so the last
   // frame hands over to the first without a jump. Their real periods do not share a practical
   // common multiple (1.1 / 1.6 / 2.6 s → 228.8 s), so a shared clock would tear the loop on two of
-  // the three; rounding each to its nearest whole-cycle count changes the fan by ~13 % and the
-  // pump by ~10 %, which no viewer can see, and the seam disappears.
+  // the three. With the recorder's 10 fps / 135-frame timing, rounding stays within 6 % of every
+  // live period and advances the pump only 21.3° per frame — below half its 45° vane spacing, so
+  // the GIF cannot reverse its apparent direction through the wagon-wheel effect.
   window.__pose = (tMs, totalMs) => {
     document.getAnimations().forEach((a) => {
       const dur = a.effect && a.effect.getTiming().duration;      // ms, or "auto"

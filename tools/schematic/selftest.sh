@@ -9,15 +9,16 @@
 # THROWAWAY COPY of the tree and asserts the audit fails on it with the right finding code. The
 # working tree is never touched.
 #
-# The six-defect corpus (cases 1-6):
+# The seven-defect corpus (cases 1-6 plus 1b):
 #   1  a three-blade rotor whose bounding box is not centred on its hub — it orbits, it does not spin
 #   2  the leaving-water pill floating ~40 px above the pipe it names
 #   3  the return-temperature pill past the tank junction, claiming the heating branch
 #   4  the "HEIZUNG" label struck through by the heating riser (it rendered as "HEIZUNC")
 #   5  a horizontal run off the drawing's two-level grid
 #   6  a "bar" pill with no name, while two other "bar" pills exist
-# and cases 3b-3d, found the same way the six were — by a person looking at (and clicking) the
-# picture. All three sit on the ONE structure the six never touched, the branch junction:
+#   1b the pump rotating counter-clockwise instead of its specified clockwise direction
+# and cases 3b-3d, found the same way the seven were — by a person looking at (and clicking) the
+# picture. All three sit on the ONE structure the seven never touched, the branch junction:
 #   3b a flow overlay drawn ACROSS the branch junction, so a DHW cycle animated heating pipe
 #   3c a hit target owning pipe on BOTH sides of it — the highlight making the same false claim
 #   3d a pipe inside no hit target at all, which is why 3c read as a selection that merely stops
@@ -101,6 +102,18 @@ if s2 == s: sys.exit(1)
 open(p, 'w').write(s2)
 PY
 run_case "off-hub rotor is caught" 1 "G007"
+
+echo "== 1b. the pump rotates counter-clockwise instead of clockwise =="
+reset
+patch_file "$WORK/main/www/style.css" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = '@keyframes pump-spin { to { transform: rotate(360deg); } }'
+if old not in s: sys.exit(1)
+new = '@keyframes pump-spin { to { transform: rotate(-360deg); } }'
+open(p, 'w').write(s.replace(old, new, 1))
+PY
+run_case "counter-clockwise pump is caught" 1 "G012"
 
 echo "== 2. a value pill floating ~40 px above the pipe it names =="
 # The leaving-water pill sits over the plate's water outlet BECAUSE that is where R1T is; drifted

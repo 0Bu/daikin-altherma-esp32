@@ -242,7 +242,9 @@ svg .sc-rflow.on.rev { animation-name: rdashrev; }
    static brand mark; it intentionally does not mirror live compressor state. */
 #scFan, #scPump { transform-box: fill-box; transform-origin: center; }
 .fan-on #scFan { animation: spin 2.6s linear infinite; }
-.pump-on #scPump { animation: spin 1.6s linear infinite; }
+/* Keep the pump's clockwise direction explicit and independent of the fan's animation period. */
+@keyframes pump-spin { to { transform: rotate(360deg); } }
+.pump-on #scPump { animation: pump-spin 1.6s linear infinite; }
 svg .sc-valve { fill: var(--card); stroke: var(--muted); stroke-width: 1.5; }
 svg .sc-comp { fill: var(--brand-tint); stroke: var(--brand-strong); stroke-width: 1.5; }
 svg .sc-buh { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }

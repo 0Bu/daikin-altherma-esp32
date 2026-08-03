@@ -100,7 +100,7 @@ plausible, attributing a real number to the wrong thing. It PARSES the real SVG 
 transforms, path geometry, text metrics) and EVALUATES the real binding tables, so there is no second
 copy of either to drift, and reports in three layers: structure (hit target ↔ inspector entry ↔ id ↔
 translation), geometry (viewBox, overlaps, struck-through labels, axis-aligned runs, a pill's tie to
-its own pipe, rotor symmetry, a run's INVISIBLE tap area not reaching into the fitting it meets —
+its own pipe, rotor symmetry and pump rotation direction, a run's INVISIBLE tap area not reaching into the fitting it meets —
 `stroke-linecap: round` adds half a stroke past every endpoint and each trim in the drawing had been
 computed as if the cap were flat, so the 3-way valve outlined itself on hover and then opened the DHW
 branch) and domain (a repeated unit needs a name; a return-run reading stays
@@ -138,7 +138,7 @@ redacting three sections above it. `tools/redact/audit_exceptions.txt` is its le
 The SIXTH guards the README's RECORDING of that drawing — `docs/media/dashboard.gif`, the animated
 dashboard a new user sees before anything else. It is the ONLY one of these that is NOT a CI step
 and NOT a merge condition, and the reason is a property of its remedy rather than of its subject:
-the only fix it can ever ask for is a LOCAL re-record (Chrome + ffmpeg, ~5 min), which no runner and
+the only fix it can ever ask for is a LOCAL re-record (Chrome + ffmpeg, ~10 min), which no runner and
 no cloud session can perform. A gate whose fix is unavailable where it fires does not get the
 recording re-made — it gets the STAMP re-written to clear the red, which is strictly worse than not
 checking at all, because the GIF then carries a stamp asserting it is current. So it is run ON
@@ -166,12 +166,13 @@ the fingerprint with it, since a source that cannot change a pixel must not be a
 audits — their findings are questions about intent, this one has a single answer (re-record), and a
 "this cannot alter a frame" entry would be a guess about pixels when the machine that settles it is
 on the desk. Re-recording is `scripts/record-dashboard-gif.sh` (Chrome + ffmpeg, LOCAL only; one
-headless page load per frame, each POSED at a deterministic animation instant by `window.__pose` in
-`tools/uigif/scenes.js`, since wall-clock time cannot survive a fresh page load — and each
+headless page load per steady frame and two per crossfade frame, each source POSED at the same
+deterministic animation instant by `window.__pose` in `tools/uigif/scenes.js`, since wall-clock time
+cannot survive a fresh page load — and each
 animation given a whole number of cycles across the total so the loop closes: the real periods
 1.1/1.6/2.6 s share no practical common multiple). `tools/uigif/selftest.sh` proves the gate still
-catches each way the recording can go stale. The judgement half is the `/ui-gif` skill: whether the
-four scenes are still the right ones, whether the invented numbers are still physically coherent,
+catches each way the recording can go stale. The judgement half is the `/ui-gif` skill: whether all
+nine normal operating scenes are still the right ones, whether the invented numbers are physically coherent,
 and whether the standby scene still shows the honest blanking that is the point of showing it at
 all.
 
