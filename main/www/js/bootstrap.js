@@ -1,11 +1,7 @@
 
 // ── Boot ─────────────────────────────────────────────────────────────────
 function wire() {
-  // Every text-like field inside every popup follows the same replacement shortcut: focus/click
-  // selects the complete value. The click handler matters because a browser's default click action
-  // can otherwise collapse a selection made by focus back to one caret position.
-  for (const eventName of ["focusin", "click"])
-    document.addEventListener(eventName, (e) => { selectModalFieldContents(e.target); });
+  wireModalFieldSelection(document);
 
   // Navigation: the gear opens Settings, the back chevron returns to the dashboard.
   $("btnSettings").onclick = () => go("settings");
@@ -271,6 +267,7 @@ function wireRestOfApp() {
       close: closeMqtt,
       then: renderApp,
       busyMsg: t("toast.verifying_mqtt"),   // the endpoint pre-flights the broker (DNS→TCP→CONNECT)
+      busyLabel: "btn.verifying",
     });
   });
   $("mqBroker").addEventListener("input", () => { $("mqBroker").classList.remove("invalid"); $("mqError").hidden = true; });
