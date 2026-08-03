@@ -112,12 +112,17 @@ const fetch = async (url, options = {}) => {
   const body = options.body ? JSON.parse(options.body) : null;
   fetchState.calls.push({ url, body });
   if (fetchState.mode === "throw") throw new Error("unreachable");
-  if (fetchState.mode === "reject") return response(false, { error: "rejected by test" });
   if (fetchState.mode === "env3_missing" && url === "/set_env3")
     return response(false, {
       code: "env3_sht30_not_found",
       error: "ENV III temperature/humidity sensor not found on the selected pins",
     }, 422);
+  if (url === "/test_ref_temp") {
+    if (fetchState.mode === "ref_test_reject")
+      return response(false, { error: "No fresh value received before the test timed out" }, 422);
+    return response(true, { ok: true, test_proof: 71, temperature_c: 21.5, retained: false });
+  }
+  if (fetchState.mode === "reject") return response(false, { error: "rejected by test" });
   if (url === "/status") return response(true, {});
   return response(true, { reboot: false, saved: false });
 };
@@ -158,7 +163,10 @@ const ui = context.__ui;
 ui.S.status = {
   wifi: { ssid: "DemoNet" },
   mqtt: { broker: "203.0.113.27:1883", has_creds: false },
-  reference_temperature: { configured: true, name: "", topic: "", temperature_path: "", timestamp_path: "", max_age_s: 600 },
+  reference_temperature: {
+    configured: true, name: "Living room", topic: "sensor/living-room/status",
+    temperature_path: "temperature.tC", timestamp_path: "", max_age_s: 600,
+  },
   weather_forecast: { latitude: "", longitude: "" },
   syslog: {},
   ntp: { server: "pool.ntp.org" },
@@ -263,7 +271,12 @@ const settle = async () => {
   await new Promise((resolve) => setImmediate(resolve));
 };
 const configureValid = (item) => {
-  if (item.modal === "refTempModal") document.getElementById("rtTopic").value = "";
+  if (item.modal === "refTempModal") {
+    document.getElementById("rtTopic").value = "sensor/living-room/status";
+    document.getElementById("rtPath").value = "temperature.tC";
+    document.getElementById("rtTimePath").value = "";
+    document.getElementById("rtMaxAge").value = "600";
+  }
   if (item.modal === "env3Modal") {
     document.getElementById("envSensor").value = "env_iii";
     document.getElementById("envSda").value = "2";
@@ -281,6 +294,12 @@ for (const item of cases.filter((entry) => entry.form)) {
   await settle();
   assert.equal(document.getElementById(item.modal).hidden, true, `${item.name}: accepted Save must close`);
   assert.ok(fetchState.calls.some((call) => call.url === item.url), `${item.name}: Save must call ${item.url}`);
+  if (item.modal === "refTempModal") {
+    assert.deepEqual(fetchState.calls.map((call) => call.url), ["/test_ref_temp", "/set_ref_temp"],
+      "one room-source Save must run live test before persistence");
+    assert.equal(fetchState.calls[1]?.body?.test_proof, 71,
+      "room-source persistence must present the proof returned by that live test");
+  }
 
   fetchState.mode = "reject";
   fetchState.calls.length = 0;
@@ -292,6 +311,61 @@ for (const item of cases.filter((entry) => entry.form)) {
   assert.equal(document.getElementById(item.modal).hidden, false, `${item.name}: rejected Save must stay open`);
   assert.equal(ui.S.busy, false, `${item.name}: rejected Save must release busy state`);
 }
+
+// Room source Save owns validation + live test + persistence. A failed live read never reaches the
+// write endpoint, and the separate destructive action clears the mapping without testing whatever
+// draft happens to be in the form.
+const roomSource = cases.find((item) => item.modal === "refTempModal");
+fetchState.mode = "ref_test_reject";
+fetchState.calls.length = 0;
+ui.S.busy = false;
+open(roomSource);
+configureValid(roomSource);
+await document.getElementById("refTempForm").fire("submit");
+await settle();
+assert.deepEqual(fetchState.calls.map((call) => call.url), ["/test_ref_temp"],
+  "a failed live test must not attempt to persist the room source");
+assert.equal(document.getElementById("refTempModal").hidden, false,
+  "a failed live test must keep the mapping editable");
+assert.equal(document.getElementById("rtError").hidden, false,
+  "a failed live test must explain its failure inline");
+assert.equal(ui.S.busy, false, "a failed live test must release Save");
+
+fetchState.mode = "ok";
+fetchState.calls.length = 0;
+ui.S.busy = false;
+open(roomSource);
+assert.equal(document.getElementById("rtDeleteBtn").disabled, false,
+  "a configured room source must expose Delete");
+document.getElementById("rtName").value = "unsaved draft";
+await document.getElementById("rtDeleteBtn").fire("click");
+await settle();
+assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_ref_temp"],
+  "Delete must not run the live-test endpoint");
+assert.deepEqual(fetchState.calls[0]?.body, {
+  name: "", topic: "", temperature_path: "", timestamp_path: "", max_age_s: 600, test_proof: 0,
+}, "Delete must submit the explicit empty mapping rather than the draft fields");
+assert.equal(document.getElementById("refTempModal").hidden, true,
+  "accepted Delete must close the dialog");
+
+fetchState.mode = "reject";
+fetchState.calls.length = 0;
+ui.S.busy = false;
+open(roomSource);
+await document.getElementById("rtDeleteBtn").fire("click");
+await settle();
+assert.equal(document.getElementById("refTempModal").hidden, false,
+  "rejected Delete must keep the dialog open");
+assert.equal(document.getElementById("rtDeleteBtn").disabled, false,
+  "rejected Delete must release its button for retry");
+assert.equal(ui.S.busy, false, "rejected Delete must release global busy state");
+
+ui.S.status.reference_temperature.configured = false;
+fetchState.mode = "ok";
+open(roomSource);
+assert.equal(document.getElementById("rtDeleteBtn").disabled, true,
+  "an unconfigured source must not offer a destructive no-op");
+ui.S.status.reference_temperature.configured = true;
 
 // ENV III's board gate and both selector states are distinct use cases.  Pins disappear and are
 // disabled when no sensor is selected, and the disable request must not leak stale pin values.

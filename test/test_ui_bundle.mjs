@@ -71,7 +71,7 @@ assert.match(html, /id="weatherModal"[\s\S]*id="wxLatitude"[\s\S]*id="wxLongitud
   "the direct Open-Meteo source must expose coordinate entry, privacy, and attribution");
 assert.doesNotMatch(html, /id="wxLocate"/,
   "the HTTP device UI must not offer a browser-geolocation action that requires HTTPS or localhost");
-assert.match(app, /data-act="weather"[\s\S]*function openWeather\(\)[\s\S]*saveReboot\("\/set_weather", \{ latitude, longitude \}/,
+assert.match(app, /dynamicSourceRow\("weather"[\s\S]*function openWeather\(\)[\s\S]*saveReboot\("\/set_weather", \{ latitude, longitude \}/,
   "the forecast row must edit latitude and longitude through the firmware config route");
 assert.match(app, /function parseWeatherCoordinatePair\([\s\S]*function pasteWeatherCoordinates\([\s\S]*addEventListener\("paste", pasteWeatherCoordinates\)/,
   "a Google Maps coordinate pair pasted into either field must be split before save");
@@ -81,9 +81,9 @@ assert.doesNotMatch(app, /weather[^\n]{0,120}broker_off|input\/weather/,
   "the Open-Meteo forecast must not depend on the MQTT broker or an adapter topic");
 assert.match(httpConfig, /static esp_err_t set_weather[\s\S]*weather_location_parse[\s\S]*weather_forecast_reconfigure/,
   "the coordinate save must validate both values and wake the firmware fetch task");
-assert.match(app, /data-act="env3"[\s\S]*function statusCardsHtml\(\)[\s\S]*t\("env\.temperature"\)[\s\S]*t\("env\.humidity"\)[\s\S]*t\("env\.pressure"\)/,
+assert.match(app, /dynamicSourceRow\("env3"[\s\S]*function statusCardsHtml\(\)[\s\S]*t\("env\.temperature"\)[\s\S]*t\("env\.humidity"\)[\s\S]*t\("env\.pressure"\)/,
   "ENV III must be configurable from the dynamic-control card and render an independent outdoor-climate card");
-assert.match(app, /if \(env\.supported\)[\s\S]*data-act="env3"/,
+assert.match(app, /if \(env\.supported\)[\s\S]*dynamicSourceRow\("env3"/,
   "the ENV III Settings row must exist only on a supported M5Stack board");
 assert.match(app, /if \(env\.supported && env\.enabled\)/,
   "the ENV III dashboard card must be hidden on unsupported boards even with stale status data");
@@ -138,24 +138,23 @@ assert.match(mqttHa, /publish_env3_discovery\(\)[\s\S]*env3_discovery_config\(s_
 assert.match(mqttHa, /else if \(!s_env3_disabled_cleaned\)[\s\S]*retract_env3_discovery\(\)/,
   "disabling ENV III must retract all retained HA discovery configs as well as state");
 
-// The room-source row remains a user-configured exact MQTT mapping. Test is non-persistent and Save
-// starts disabled; only the proof returned after a readable fresh value may accompany the save.
+// The room-source row remains a user-configured exact MQTT mapping. Save performs the non-persistent
+// live test itself and only then presents its proof to persistence; Delete posts the explicit empty
+// mapping that clears the source and captured value.
 assert.match(html, /id="refTempModal"[\s\S]*id="rtTopic"[\s\S]*id="rtPath"[\s\S]*id="rtTimePath"[\s\S]*id="rtMaxAge"/,
   "the room-temperature source modal must expose value, timestamp, and freshness mapping");
-assert.match(html, /id="rtTestBtn"[\s\S]*id="rtBtn"[^>]*disabled/,
-  "Test must be available before the initially-disabled Save action");
-assert.match(style, /#refTempModal #rtTestBtn\s*\{[^}]*min-width:\s*0;[^}]*padding-inline:\s*12px;/s,
-  "the room-source Test status must stay inside its flex share without pushing Save outside the modal");
-assert.match(app, /"ref\.testing": "Waiting…"/);
-assert.match(app, /"ref\.testing": "Warten…"/);
+assert.match(html, /id="rtDeleteBtn"[^>]*data-i18n="ref\.delete"[\s\S]*id="rtBtn"[^>]*data-i18n="btn\.save"/,
+  "Delete must replace the separate Test action while Save remains immediately actionable");
+assert.doesNotMatch(html, /id="rtTestBtn"|id="rtTestResult"/,
+  "the room-source dialog must not retain a separate Test action or stale proof result");
 assert.match(app, /shelly1pmminig4-fixture00003\/status\/switch:0/,
   "the requested Shelly topic must be available as the first-open test preset");
-assert.match(app, /post\("\/test_ref_temp", input\)[\s\S]*passRefTempTest\(result\.test_proof/,
-  "the browser must wait for the device's test proof before enabling Save");
-assert.match(app, /post\("\/set_ref_temp", \{ \.\.\.input, test_proof: refTempTestProof \}\)/,
-  "the reference-temperature save must present the exact mapping's test proof");
-assert.match(app, /r\.status === 409\) resetRefTempTest\(\)/,
-  "a server-rejected proof must disable Save until the mapping is tested again");
+assert.match(app, /refTempForm[^]*post\("\/test_ref_temp", input\)[^]*testResult\.test_proof[^]*post\("\/set_ref_temp", \{ \.\.\.input, test_proof: testResult\.test_proof \}\)/,
+  "Save must obtain a live proof and persist exactly that tested mapping in one user action");
+assert.match(app, /\$\("rtDeleteBtn"\)\.onclick[^]*post\("\/set_ref_temp", \{[^]*name: "", topic: "", temperature_path: "", timestamp_path: ""/,
+  "Delete must clear the saved mapping without testing the form's current field contents");
+assert.match(app, /"ref\.delete": "Delete"[^]*"ref\.delete": "Löschen"/,
+  "Delete must remain explicit in both supported languages");
 assert.match(httpConfig, /mqtt_reference_test_proof_valid\(in\.test_proof, tested\)[\s\S]*Test this MQTT mapping successfully before saving/,
   "a raw POST must not bypass the test-before-persist contract");
 assert.match(httpConfig, /static esp_err_t test_ref_temp[\s\S]*mqtt_reference_test\([\s\S]*12000/,

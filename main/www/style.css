@@ -588,6 +588,20 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    An inset box-shadow rather than a border-bottom: a border would add a pixel to the row's height
    on open and shift every row below by one. */
 .vitem.open .vrow-desc { box-shadow: inset 0 -1px 0 var(--line); }
+/* Configured dynamic-control sources reuse the same open tongue, but their row opens an editor
+   rather than toggling the panel. Keep the divider and edit affordance on that permanent header;
+   the current reading/status belongs to the panel underneath. */
+.settings-source-item.open > .dynamic-source-row { box-shadow: inset 0 -1px 0 var(--line); }
+.settings-source-edit { display: inline-flex; align-items: center; color: var(--muted); }
+.settings-source-tongue { overflow-wrap: anywhere; }
+.settings-source-summary {
+  display: block; min-width: 0; font-size: 15px; font-weight: 600;
+  font-variant-numeric: tabular-nums; line-height: 1.4;
+}
+.settings-source-summary.ok { color: var(--ok); }
+.settings-source-summary.warn { color: var(--warn); }
+.settings-source-summary.err { color: var(--err); }
+.settings-source-summary.dim { color: var(--muted); }
 /* A labelled note inside an explainer — "Normal: …", "No current reading: …" (app.js descNoteHtml).
    Its own paragraph rather than a run-on sentence: the note answers a different question from the
    "what is it" line above it, and set solid the two read as one paragraph that changes subject
@@ -867,10 +881,6 @@ textarea.input[readonly] { font-size: 12px; color: var(--muted); white-space: pr
    not three narrow buttons each stacking their own words. */
 .modal-actions .btn { flex: 1; white-space: nowrap; }
 
-/* The room-source dialog has three actions. Keep its compact pending label inside the Test button's
-   existing flex share instead of letting intrinsic width push Save beyond the modal edge. */
-#refTempModal #rtTestBtn { min-width: 0; padding-inline: 12px; }
-
 /* The bug-report dialog is the one modal whose content is a CODE BLOCK, not label→field rows. The
    settings modals read better narrow; a device report at 420px wraps every JSON line into noise the
    user is being asked to check before posting it in public. */
@@ -886,11 +896,11 @@ textarea.input[readonly] { font-size: 12px; color: var(--muted); white-space: pr
      Stack it below the time span instead of squeezing both into narrow multi-line columns. */
   .vhist-head { display: grid; justify-content: stretch; gap: 2px; }
   .vhist-range { text-align: left; }
-  /* A configured source carries name/count, temperature and freshness. Give that one summary a
-     second line on phones instead of shrinking its value cell until every character wraps. */
-  .dynamic-source-row { flex-wrap: wrap; gap: 4px; }
-  .dynamic-source-row .vrow-label,
-  .dynamic-source-row .vrow-val { flex: 1 1 100%; text-align: left; }
+  /* Only the compact, unconfigured source row may need a second line. Configured source details
+     have their own full-width tongue, so their header remains the short label + edit action. */
+  .dynamic-source-inline { flex-wrap: wrap; gap: 4px; }
+  .dynamic-source-inline .vrow-label,
+  .dynamic-source-inline .vrow-val { flex: 1 1 100%; text-align: left; }
   .modal-actions { flex-direction: column-reverse; }
   .modal-actions .btn { flex: none; width: 100%; }
 }
@@ -934,6 +944,7 @@ textarea.input[readonly] { font-size: 12px; color: var(--muted); white-space: pr
   .conn-dbm, .vrow-label { font-size: 16.5px; }
   .vrow-unit { font-size: 13.5px; }
   .vdesc-body { font-size: 15px; }
+  .settings-source-summary { font-size: 17px; }
   .conn-detail { font-size: 15px; }
   .conn-row { padding: 14px 0; }
   .vrow, .vname { padding-top: 11px; padding-bottom: 11px; }
