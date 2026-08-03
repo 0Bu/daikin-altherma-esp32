@@ -63,7 +63,8 @@ cannot currently stand behind shown as `—` rather than as a number.
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Deep internal reference: poll engine, MQTT bridge, WiFi/OTA |
 | [docs/DESIGN.md](docs/DESIGN.md) | Web UI design contract (tokens, layout, states) |
 | [docs/X10A_PROTOCOL.md](docs/X10A_PROTOCOL.md) | X10A wire protocol: framing, checksum, register pages, detection |
-| [docs/MODBUS_PROTOCOL.md](docs/MODBUS_PROTOCOL.md) | The optional read-only Modbus TCP link to a Daikin HomeHub (mDNS discovery, register map) |
+| [docs/MODBUS_PROTOCOL.md](docs/MODBUS_PROTOCOL.md) | The optional Modbus TCP source to a Daikin HomeHub (mDNS discovery, register map) |
+| [docs/MODBUS_ACTUATION.md](docs/MODBUS_ACTUATION.md) | WP3 single-writer/register-54 safety, evcc intent handoff and restore contract |
 | [docs/REGISTERS.md](docs/REGISTERS.md) | Register map + converter/enum tables behind the value catalog |
 | [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md) | MQTT topics, entities and derived (COP) sensors |
 | [docs/WIRING.md](docs/WIRING.md) | Visual wiring diagram + picking RX/TX pins on other boards |
@@ -76,8 +77,9 @@ cannot currently stand behind shown as `—` rather than as a number.
 
 ## Scope & credits
 
-Read-only monitor: it polls and never actuates the heat pump. On X10A the protocol has no write
-command; on the optional HomeHub Modbus TCP link the wire would allow one and the firmware still
-never writes, by design ([docs/MODBUS_PROTOCOL.md](docs/MODBUS_PROTOCOL.md)).
+X10A is a read-only monitor because the protocol has no write command. The optional HomeHub stack
+adds one default-off internal register-54 actuator capability; it has no controller or external
+command surface and remains inactive until a later, explicitly commissioned work package
+([docs/MODBUS_ACTUATION.md](docs/MODBUS_ACTUATION.md)).
 Trusted LAN only; no API auth/TLS. MIT ([LICENSE](LICENSE)); protocol / value definitions derived
 from [ESPAltherma](https://github.com/raomin/ESPAltherma) (MIT). No warranty; not affiliated with Daikin.

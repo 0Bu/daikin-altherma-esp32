@@ -381,17 +381,13 @@ same rows arrive by the normal route and the entities are unchanged.
 > **Upgrading:** these entities are new, not renamed — nothing pre-existing changes domain or
 > entity id, so no history is affected. They appear on the next connect after the update.
 
-> **Read-only bridge — no command topics.** The firmware only mirrors telemetry; it never
-> actuates the heat pump. To *control* the unit (e.g. SG-Ready boost on PV surplus), drive the
-> heat pump's own SG-Ready / thermostat contacts or a Modbus/EKRHH interface from your energy
-> manager — that is out of scope for this firmware.
+> **Home Assistant/MQTT remain read-only — no command topics.** The firmware mirrors telemetry to HA;
+> it exposes no writable entity or HA/MQTT command route.
 >
-> That holds for **both** transports. The firmware can also read a **Daikin HomeHub (EKRHH)
-> over Modbus TCP** beside X10A ([MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)) — and where X10A simply
-> *has* no write command, the HomeHub link is read-only **by design**: no MQTT subscribe, no command
-> topic or writable entity. Using the HomeHub as this firmware's source does not turn it into a
-> control path. Its readings are published on `<base>/modbus` without per-value HA discovery;
-> board + link heartbeat diagnostics are unaffected.
+> X10A has no write command. The HomeHub task has one separate, internal, default-off register-54
+> capability ([MODBUS_ACTUATION.md](MODBUS_ACTUATION.md)); using the HomeHub as a source still does not
+> make HA a control path. Readings remain on `<base>/modbus` without per-value HA discovery, while
+> heartbeat carries read-only actuator audit fields.
 
 ## Derived power, energy & COP / SCOP / JAZ
 
@@ -643,9 +639,9 @@ integrate($P[$__range]) / 3600 / increase(heatpump_energy_kwh[$__range])
   trustworthy JAZ still wants an external CT/Shelly (plus a MID heat meter for a certified SCOP). On
   the *metering* ingredients EKRHH and this firmware are therefore **peers**, not a shortcut past
   them — EKRHH's real edge is **bidirectional control** (SG-Ready / §14a power modulation /
-  setpoints, the evcc path), where this firmware deliberately remains read-only telemetry. Its
-  independent HomeHub Modbus client is wired through `hp_modbus.cpp` and `logic/modbus.hpp`, but it
-  exposes no register-write function, MQTT command, HA control entity or HTTP actuation route. The
+  setpoints, the evcc path). This firmware now contains one internal, default-off LWT-offset actuator
+  but exposes no MQTT command, HA control entity, HTTP/MCP register route or generic proxy; active
+  ownership/commissioning is a separate work package ([MODBUS_ACTUATION.md](MODBUS_ACTUATION.md)). The
   supported read path is **conditional**,
   not "every register unconditionally": the Modbus map needs Unified MMI2 ≥ 7.8.0 on the audited
   ERGA-EV/EHBH/X-E family, some registers are inoperative per model (e.g. holding regs 59 & 61 on

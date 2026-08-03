@@ -225,7 +225,7 @@ User credentials + the X10A link cache are persisted; the model is re-detected o
 
 | NVS key | Meaning |
 |---------|---------|
-| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + the one-shot rollback backup + flags, MQTT (`uri`/`user`/`pass`), syslog (host/port; empty host = off), the SNTP server (empty = reset to the `CONFIG_DAIKIN_NTP_SERVER` default on next boot), from blob **v2** the **board-local hardware** (`led_gpio`/`led_type`/`led_inverted`/`btn_gpio`/`btn_active_low`, written by `/set_board`), from blob **v3** the **OTA update channel** (`ota_channel`, `POST /set_ota`), from blob **v4** the **UI-language override** (`ui_lang`, `POST /set_lang`) and from blob **v5/v6** the **HomeHub Modbus stack** (`mb_host`, `mb_port`, `mb_unit_id`, `actuation_enabled`; v6's former enable bit remains only as a compatibility mirror). A non-empty `mb_host` is polled; empty disables the stack and never triggers discovery. One CRC-checked entry written with a single `nvs_set_blob`, so a save is **all-or-nothing** across a write failure *and* a power cut. Older blobs remain readable; a short-lived v6 enabled+empty Auto value migrates safely to disabled. WiFi rollback: the previous credentials are backed up here by `/set_wifi` and restored automatically if the new network fails to connect; `/status.wifi.rolled_back` reports it after the reboot. |
+| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + rollback flags, MQTT, syslog, SNTP, from v2 board hardware, v3 OTA channel, v4 UI language, v5 HomeHub, v7/v8 reference-temperature mapping/freshness and **v9** authoritative `actuation_enabled`. A non-empty `mb_host` polls; empty disables the stack. One CRC-checked entry is written atomically. Older blobs remain readable, but v5-v8 actuation placeholder bits migrate OFF so the first write-capable OTA cannot reinterpret inert history as consent. |
 | *(legacy per-key)* | `wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback`/`wifi_rolledbk`/`mqtt_*`/`syslog_*`/`ntp_server` — the pre-blob layout, still **read** as a fallback when `cfg` is absent (fresh device / OTA from an older build); superseded on the next save. |
 | `rx_pin` / `tx_pin` / `proto` | X10A link cache (physical wiring + framing) — kept as separate self-healing keys, tried first by the sweep, re-saved on change, re-validated on load. |
 | `board_set` | Has the user **stated** the board hardware, or are the five values in `cfg` merely this build's defaults? They cannot say on their own — the Kconfig defaults *equal* the XIAO preset — and the web UI needs the difference to name the board in its Hardware modal instead of opening on "Custom" beside the very preset that was just saved. Set by `POST /set_board` (the submit *is* the statement), revoked with the values if `config_load` rejects them, and reported as `/status.board.user_set`. Outside the blob although it has one writer: the flag never *names* a board — the UI derives that from the live values — so a drifted flag cannot produce a wrong name, only the "Custom" it already falls back to, and a blob version bump would have to be read by every older build. |
@@ -285,14 +285,13 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #        registers,values,crc_err,timeout_err},
                                    #   profile:{id},
                                    #   modbus:{enabled,connected,discovering,host,port,unit_id,rx,
-                                   #           fails,values,actuation_enabled,error?,error_code?,
-                                   #           error_detail?,error_register?},
-                                   #        # the HomeHub link's READ-ONLY diagnostics. host is the
-                                   #        configured host. Empty means disabled; firmware never
-                                   #        searches at boot. Structured error fields localise the
-                                   #        current failure; error keeps full log wording. No write counters: the
-                                   #        link has none. actuation_enabled is reported straight
-                                   #        from config and gates nothing today (P3).
+                                   #           fails,values,actuation_enabled,task_stack_min_free_words,
+                                   #           actuator:{state,state_name,blocked,blocked_reason,ownership,
+                                   #             requested_k,echoed_k,confirmed_k,effective_k,baseline_k,
+                                   #             source,sequence,correlation_id,timestamps/counters,…},
+                                   #           error?,error_code?,error_detail?,error_register?},
+                                   #        # link diagnostics + WP3 read-only audit evidence; no API
+                                   #        field is a command. Empty host disables polling/search.
                                    #   history:{dt,rows:[{id,label}]},   # rows with a 24 h trend;
                                    #        id = the concept (what /history takes), label = how the
                                    #        detected profile spells it. Absent rows are omitted.
@@ -454,6 +453,8 @@ POST /set_hp                       # { profile?, rx?, tx?, mb_host?, mb_port?,
                                    #   NOT stop the X10A poll. Non-empty polls that address; empty
                                    #   disables task, discovery and requests, including after reboot.
                                    #   mb_port 1..65535, mb_unit_id 1..247 — docs/MODBUS_PROTOCOL.md.
+                                   #   actuation_enabled is only one safety gate; ownership is
+                                   #   unresolved on boot and no HTTP raw-register route exists.
 POST /discover_homehub             # {} → bounded mDNS search started only by the HomeHub dialog's
                                    #   Search button. Success: {ok:true,host:"<IPv4>"}; miss: 404.
                                    #   Never persists or reconfigures — Save owns that boundary.
@@ -535,6 +536,8 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   receives no publish on either retired topic.
   Availability/LWT `<base>/status`. `<base>` defaults `daikin-altherma-esp32`,
   `<prefix>` `homeassistant`.
+  WP3 defines future non-retained `<base>/intent/v1/evcc` domain intent semantics but installs no
+  subscription; see [MODBUS_ACTUATION.md](MODBUS_ACTUATION.md).
 - **Type-stable, and honest about absence.** Whether a key is a JSON number or a JSON string is
   decided by the value's converter, so **no key ever changes type** between states — a stopped fan
   publishes `0`, never `"OFF"`. Textual Daikin fault fields keep their text and gain permanently
@@ -624,12 +627,9 @@ Full threat model + Flash Encryption / Secure Boot notes: [SECURITY.md](SECURITY
 - The API has **no auth / TLS** by design (trusted LAN only) — never expose it to the internet.
 - WiFi/MQTT credentials live in NVS **unencrypted** by default; enable Flash + NVS Encryption
   (irreversible) if physical access is a concern.
-- The heat-pump link is **read-only** — the firmware polls and never actuates the unit, so there are
-  no control outputs at all. On X10A that is the protocol's own doing (it has no write command); on
-  the optional HomeHub **Modbus TCP** link the wire *would* allow a write and it is read-only **by
-  design** — no write function, no MQTT command topic, no writable entity, no HTTP write route
-  ([MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md), [SECURITY.md](SECURITY.md)). That link's own `:502` is
-  unencrypted and has no Modbus-level credential, so segment or firewall the HomeHub to this device.
+- X10A is read-only. HomeHub has one internal, default-off register-54 actuator with no MQTT/HA/HTTP/
+  MCP raw control surface ([MODBUS_ACTUATION.md](MODBUS_ACTUATION.md)). Its `:502` is unencrypted and
+  has no Modbus-level credential, so segment or firewall the HomeHub to this device.
 
 ---
 

@@ -44,15 +44,13 @@ and the OTA-signing / key lifecycle.
     an open-source firmware — but contains **no** runtime secrets (WiFi/MQTT credentials live only in
     device NVS, never in the image). Signing still uses the offline OTA key, which is never built into
     or derivable from the ELF.
-- **The heat-pump link is read-only.** The firmware only polls registers; it cannot change the heat
-  pump's settings or actuate it in any way, and there are no control outputs. On the default **X10A**
-  link that is the protocol's own doing — it has no write command. On the optional **Modbus TCP link
-  to a Daikin HomeHub** the wire *would* allow a write, and the link is still read-only **by design**:
-  the client has no write function, and there is no MQTT command topic, writable HA entity or HTTP
-  route that can set a pump register. (A persisted `actuation_enabled` flag exists, defaults to
-  **false**, and today gates nothing, because nothing writes.) So the unauthenticated
-  `HA → MQTT → firmware → Modbus → pump` chain a generic Modbus-control bridge would create does not
-  exist here.
+- **X10A is read-only; HomeHub has one default-off internal actuator.** X10A has no write command.
+  The optional HomeHub link permits exactly the bounded holding-register-54 transaction documented in
+  [`MODBUS_ACTUATION.md`](MODBUS_ACTUATION.md), owned by the existing poll task. Install, upgrade and
+  reboot remain no-write (`actuation_enabled=false`, ownership `unresolved`), and no MQTT command
+  subscription, writable HA entity, HTTP/MCP register route or Modbus proxy exists. Thus the
+  unauthenticated `HA → MQTT/HTTP → raw Modbus → pump` bridge is still absent; an internal caller can
+  submit only a typed LWT-offset intent and must pass enable/link/freshness/ownership gates.
   - **The HomeHub's own `:502` is the residual surface, and it is not ours to fix.** Modbus TCP on
     port 502 is unencrypted and carries **no Modbus-level credential** — no user, password or token
     (the guide's SKI/QR trust mechanism is EEBUS-only). On a shared LAN any host can in principle

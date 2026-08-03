@@ -108,8 +108,9 @@ hp_modbus.cpp/.hpp  → THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT sourc
                       address starts polling; empty means no task, socket, discovery or requests.
                       mDNS runs only from the dialog's explicit Search button and filters
                       homehub-* from up to 64 _http._tcp responders per bounded attempt. The lwIP
-                      client wraps logic/modbus.hpp framing. READ-ONLY by design
-                      (docs/MODBUS_PROTOCOL.md)
+                      client wraps logic/modbus.hpp framing. WP3 keeps that task as sole socket owner
+                      and adds one typed/default-off register-54 transaction through
+                      logic/homehub_actuator.hpp (docs/MODBUS_ACTUATION.md); no external raw writer
 def/homehub.hpp     → the HomeHub register map (input + holding), the Modbus counterpart of the X10A
                       def/ profiles; decoded via logic/modbus.hpp's Temp16/Pow16/Int16/Text16 codecs
 http_ota.cpp        → /ota/check|update|status
@@ -653,7 +654,11 @@ host-testable core is unusually large and valuable, because the risky parts are 
   oversized value — a truncated `1.10.0` → `1.1` is a well-formed version that is ordered wrong.
 - `logic/modbus.hpp` — Modbus TCP framing (MBAP, no CRC; FC03/04/06/16 build + response/exception
   parse) and the HomeHub `Temp16`/`Pow16`/`Int16`/`Text16` codecs + exact `homehub-*` mDNS filter.
-  Host-tested core used by the read-only, independent HomeHub task in `hp_modbus.cpp`.
+  Host-tested wire core used by the independent HomeHub task in `hp_modbus.cpp`.
+- `logic/homehub_actuator.hpp` — WP3's fixed-size single-writer policy: one-slot coalescing mailbox,
+  versioned domain intents/priority, register-54 descriptor, fresh-baseline/echo/readback transaction,
+  restore/conflict state and retained/stale-safe future evcc envelope. It is the only policy that may
+  produce an FC06 plan; the device wrapper owns the socket.
 - `logic/http_body.hpp` — request-body reassembly for `http_read_body`. A POST body is a TCP stream:
   `httpd_req_recv` returns what has arrived, and the IDF's own docs note a large body "may" take
   several calls. Reading once and calling it the whole body truncated any body split across segments,
@@ -1151,7 +1156,7 @@ Three layers keep the WiFi station link up:
 
 The Home Assistant bridge:
 
-- **Read-only** — no command topics. The firmware mirrors telemetry and never actuates the heat
+- **Read-only** — no command topics. This bridge mirrors telemetry and never actuates the heat
   pump. One optional exact-topic subscription captures and qualifies a reference-temperature input,
   but no averaging or control path reads it. A configured payload timestamp (RFC3339 or Unix
   seconds) supplies age across retained delivery and restarts; without one, only a non-retained live
@@ -1160,11 +1165,10 @@ The Home Assistant bridge:
   a mapping-bound proof only after the normal JSON, timestamp and freshness checks accept a real
   value; `POST /set_ref_temp` refuses a non-empty mapping without that proof. The transient test
   never changes Config/NVS, and an empty topic remains the explicit disable operation that needs no
-  reading. On X10A the read-only boundary is the protocol's own doing (it has
-  no write command). On the **optional Modbus TCP link to a Daikin HomeHub** the wire *would* allow a
-  write, and it is still read-only **by design**: the firmware reads registers and publishes them, and
-  no MQTT subscribe, command topic, HA value entity or HTTP write route exists to reach the pump
-  (see [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)).
+  reading. X10A has no write command. The optional HomeHub link has one internal, default-off typed
+  actuator, but the MQTT bridge still has no actuation subscription/command topic and HA/HTTP/MCP
+  expose no write path. The future evcc v1 envelope is specified but deliberately not subscribed in
+  WP3 (see [MODBUS_ACTUATION.md](MODBUS_ACTUATION.md)).
 - **One HA installation device.** Its id is the slugified MQTT base topic
   (`daikin-altherma-esp32` → `daikin_altherma_esp32`, `logic/ha_device.hpp`), so replacing the ESP32
   keeps the device with its entities, history and long-term statistics — where the old MAC-derived
@@ -1306,13 +1310,11 @@ The Home Assistant bridge:
     request sent). There is no `bus_tx_writes`/`bus_tx_fails` companion: the X10A bridge is read-only,
     so both were hardcoded `0` and could never vary. They were dropped in #215 — a metric that cannot
     change is a dashboard line that always reads zero. Neither was ever an HA entity.
-  - **`modbus_*`**: `modbus_connected` (a 1/0 number like the other link flags), `modbus_rx` /
-    `modbus_fails` — the optional HomeHub Modbus TCP link's own counters
-    ([MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)), 0/off on a device using X10A. There is no write
-    counter here either, and for a stronger reason than the `bus_tx_*` case above: that link has no
-    write path at all. **Payload-only — deliberately no HA entity**, since a link most devices never
-    use would be an always-off diagnostic to rule out, which is exactly what got `device_time` and
-    `wifi_quality` retired.
+  - **`modbus_*`**: link state/read counters plus flat numeric `modbus_actuator_*` state, block reason,
+    owner, queue/source/correlation/age, separate request/echo/readback/effect values, transaction and
+    restore/conflict/failure counters, and HomeHub-task stack high-water evidence
+    ([MODBUS_ACTUATION.md](MODBUS_ACTUATION.md)). **Payload-only — deliberately no HA entity**; this is
+    an audit stream, not a command/control surface.
 
   Published on a fixed `HEARTBEAT_INTERVAL_S` (10 s) cadence — unlike the source value topics, this is
   diagnostics rather than real-time telemetry, so it always sends the latest snapshot rather than

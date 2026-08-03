@@ -11,19 +11,21 @@
 // It has no STEADY-STATE cost when absent: an empty saved address creates no task and performs no
 // discovery. mDNS discovery runs only when the user presses Search in the HomeHub dialog.
 //
-// READ-ONLY, and here that is a choice rather than a limitation of the wire: unlike X10A — which has
-// no write command at all — Modbus would allow one. There is no write function in this header, no
-// caller for one, and no HTTP or MQTT route that could reach it. Actuation is P3.
+// WP3 (#300) adds one deliberately narrow exception to the read stack: an internal, default-off
+// actuator for the signed leaving-water offset at holding register 54. It remains the sole socket
+// owner. There is no raw-register API and no HTTP/MQTT/MCP write route.
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include "hp_poll.hpp"      // CachedValue — the shared row shape, so /values needs no second type
 #include "logic/modbus.hpp"
+#include "logic/homehub_actuator.hpp"
 
 namespace daik {
 
-// Link diagnostics for /status.modbus + the MQTT heartbeat. Read-only: no write counters, because
-// there is no write path. `enabled` is runtime task existence and therefore requires a saved host.
+// Link + actuator diagnostics for /status.modbus and the MQTT heartbeat. `enabled` is runtime task
+// existence and therefore requires a saved host. ActuatorSnapshot keeps requested, echoed,
+// confirmed, effective and blocked facts separate; callers must not collapse them to one "set" bit.
 struct ModbusStatus {
     bool        enabled     = false;   // task active (a configured address is being polled)
     bool        connected   = false;   // current socket has committed at least one fresh poll cycle
@@ -41,6 +43,8 @@ struct ModbusStatus {
     std::string last_error;
     int         last_error_detail   = -1;
     int         last_error_register = 0;
+    logic::ActuatorSnapshot actuator;
+    uint32_t    task_stack_min_free_words = 0;  // FreeRTOS high-water mark; 0 until task runs
 };
 
 // Start the stack. Creates the status mutex always (so /status can report `enabled:false` before any
@@ -60,6 +64,21 @@ bool mb_discover_homehub(std::string& found);
 
 // Thread-safe snapshot of the link state.
 ModbusStatus mb_status();
+
+// Internal domain API. Callers can request only an LWT offset; they cannot choose a Modbus address,
+// function code or raw word. The one-slot mailbox is allocation-free and coalesces newer intents.
+// The request still fails closed unless actuation is enabled, the link is live, writer ownership is
+// explicitly Firmware, and the poll task obtains a fresh FC03 baseline immediately before FC06.
+logic::ActuatorOffer mb_request_lwt_offset(const logic::LwtOffsetIntent& intent);
+
+// Ownership is unresolved on every boot. The component that completes the evcc/direct-writer
+// migration must explicitly grant Firmware ownership before any request can pass. This API changes
+// policy state only; it performs no I/O.
+void mb_set_actuation_writer_ownership(logic::ActuatorWriterOwnership ownership);
+
+// Best-effort failsafe/orderly-stop restore request. The hp_modbus task performs it on its socket;
+// callers never write directly. Power loss/crash cannot guarantee a network round-trip restore.
+void mb_request_actuation_restore();
 
 // Thread-safe snapshot copy of the HomeHub value cache. Returns the count written. Rows carry the
 // same CachedValue shape as the X10A cache, so /values and the browser need no second row type;

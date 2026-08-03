@@ -20,7 +20,7 @@ const rowRe = /\{\s*(\d+)\s*,\s*MbFunc::[^}]*?"((?:[^"\\]|\\.)*)"\s*(?:,\s*HomeH
 const rows = [...map.matchAll(rowRe)].map((m) => ({
   off: Number(m[1]), label: m[2].replace(/\\(["\\])/g, "$1"), kind: m[3] || "Number",
 }));
-assert.equal(rows.length, 29, "all 29 curated HomeHub registers must be audited");
+assert.equal(rows.length, 30, "all 30 curated HomeHub registers must be audited");
 
 const firstDescription = (label) => descriptions.find((d) => {
   d.re.lastIndex = 0;
@@ -65,6 +65,7 @@ const expected = new Map([
   [7, ["Room thermostat control Cooling setpoint Main", "Kühl-Solltemperatur der Hauptzone"]],
   [9, ["Quiet mode operation", "Leisebetrieb"]],
   [10, ["DHW reheat setpoint", "Sollwert für Warmwasser-Nachheizung"]],
+  [54, ["Leaving water Main Heating offset", "Vorlaufkorrektur der Haupt-Heizzone"]],
   [56, ["Smart Grid operation mode", "Smart-Grid-Betriebsart"]],
   [57, ["Power limit during Recommended on / buffering", "Leistungsgrenze für Pufferung"]],
   [58, ["General power limit", "Allgemeine Leistungsgrenze"]],
@@ -137,4 +138,4 @@ assert.doesNotMatch(`${indoorMode.de.what} ${indoorMode.de.normal}`,
   /Wasserseite \(|Heizen\+Warmwasser|\bWW\b/,
   "the German operation-mode explanation uses fluent copy and the visible state names");
 
-console.log("HomeHub copy: 29/29 values, labels and bilingual explanations are semantically pinned");
+console.log("HomeHub copy: 30/30 values, labels and bilingual explanations are semantically pinned");

@@ -922,6 +922,7 @@ const HOMEHUB_LABEL_DE = Object.freeze({
   7: "Kühl-Solltemperatur der Hauptzone",
   9: "Leisebetrieb",
   10: "Sollwert für Warmwasser-Nachheizung",
+  54: "Vorlaufkorrektur der Haupt-Heizzone",
   56: "Smart-Grid-Betriebsart",
   57: "Leistungsgrenze für Pufferung",
   58: "Allgemeine Leistungsgrenze",

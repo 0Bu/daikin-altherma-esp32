@@ -16,8 +16,9 @@ Builds for the **esp32s3** target only.
 > (framing, checksum, register pages, detection) is in
 > [`docs/X10A_PROTOCOL.md`](../docs/X10A_PROTOCOL.md), and the converter-id/enum tables plus a full
 > register map in [`docs/REGISTERS.md`](../docs/REGISTERS.md). The OPTIONAL second SOURCE — the
-> READ-ONLY Modbus TCP link to a Daikin HomeHub (EKRHH), its explicit mDNS discovery action and its register map — is
-> [`docs/MODBUS_PROTOCOL.md`](../docs/MODBUS_PROTOCOL.md). It is a SECOND SOURCE, not an alternative
+> Modbus TCP link to a Daikin HomeHub (EKRHH), its explicit mDNS discovery action and its register map — is
+> [`docs/MODBUS_PROTOCOL.md`](../docs/MODBUS_PROTOCOL.md); its narrow default-off register-54
+> actuator contract is [`docs/MODBUS_ACTUATION.md`](../docs/MODBUS_ACTUATION.md). It is a SECOND SOURCE, not an alternative
 > transport: both stacks run at once, independently, and a device without a HomeHub runs no Modbus
 > task at all. A cross-cutting catalog of the
 > platform features this firmware implements (Secure Boot v2 signing, OTA + health gate,
@@ -519,11 +520,16 @@ hp_modbus.cpp   THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT source of rea
                 The user may edit it and Save or Cancel. A failed connection to a saved target BACKS
                 OFF through the X10A sweep's own host-tested logic/detect_backoff.hpp; the poll task
                 never browses mDNS or silently changes the configured address.
-                READ-ONLY BY DESIGN and that is the whole stance of #32: no write function, no MQTT
-                command topic, no writable HA entity, no HTTP route that can set a pump register
-                (grep-verifiable). The wire WOULD allow a write (unlike X10A, which has no write
-                command) — the restraint is the firmware's. config actuation_enabled is persisted,
-                defaults false, and gates nothing today because nothing writes. docs/MODBUS_PROTOCOL.md
+                WP3 adds one deliberately narrow write capability without changing socket ownership:
+                this task is the SOLE runtime Modbus writer, and only accepts the internal typed
+                leaving-water-offset intent for holding register 54. Each transaction is a dedicated
+                fresh FC03 baseline, FC06 with request-bound echo, then independent FC03 readback;
+                an unexplained value or mismatch latches CONFLICT. The fixed one-slot mailbox and
+                policy are in logic/homehub_actuator.hpp. The actuator is default-off, requires an
+                explicit firmware-writer ownership handoff, and restores the captured baseline on
+                disable/orderly exit when the link permits it. There is no MQTT command subscriber,
+                writable HA entity, HTTP write route or generic raw-register API. The future evcc
+                envelope and operational limits are specified in docs/MODBUS_ACTUATION.md.
 hp_poll.cpp     poll engine task: X10A ONLY — the HomeHub is a separate stack in hp_modbus.cpp with
                 its own task and cache, so nothing here branches on a transport and this task's 8192
                 stack is the one it ran on for months. (auto-detect if profile=="auto") profile
@@ -1526,8 +1532,10 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 (Temp16/Pow16/Int16/Text16 decode+encode) + the homehub-* mDNS filter — the
                 host-tested core of the firmware-exclusive HomeHub Modbus link (issue #32). WIRED as
                 of P1/P2: hp_modbus.cpp is the socket around it and def/homehub.hpp the register map.
-                Its FC06/FC16 WRITE builders are still called by NOTHING — the link reads only, and
-                the actuation path (P3) is not built.
+                FC06 is private to hp_modbus.cpp's register-54 actuator transaction; FC16 remains
+                unused. homehub_actuator.hpp = the IDF-free, allocation-free WP3 policy/state machine:
+                typed requests, admission/ownership/priority/TTL gates, bounded coalescing, baseline,
+                echo, independent readback, restore and latched conflict evidence.
                 homehub_map.hpp = WHICH X10A ROW A HOMEHUB REGISTER IS THE SAME QUANTITY AS — the
                 ENTIRETY of the sharing between the two otherwise-independent stacks, and the reason
                 the web UI can print a Modbus reading beside its X10A twin and let it stand in when
@@ -1675,7 +1683,7 @@ www/            web UI sources (index.html + style.css + app.sources fragments -
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + one-shot rollback state, MQTT (`uri`/`user`/`pass`), syslog, `ntp_server`, from blob **v2** board-local hardware, from **v3** the OTA channel, from **v4** the UI-language override, from **v5** the HomeHub host/port/unit/safety fields, **v6** its now-legacy enable compatibility bit, **v7** one MQTT reference-temperature name/topic/value-path mapping, and **v8** its timestamp path plus maximum age. Current firmware ignores the legacy HomeHub enable bit and derives the only intent from `mb_host`: non-empty polls that target, empty is disabled. The four HomeHub fields have one writer (`POST /set_hp`, httpd); the five reference-source fields have one writer (`POST /set_ref_temp`, httpd). Old experimental `mb_dhost`/`mb_seen` keys are deleted on load and never consulted. Blobs v1–v8 remain readable without losing credentials; a v6+ blob saved as HomeHub-enabled with an empty host becomes safely disabled instead of resuming hidden discovery, while v7 reference mappings gain an empty timestamp path and the 600 s default age. One CRC-checked entry is written all-or-nothing. The X10A link cache `rx_pin`/`tx_pin`/`proto` remains separate and self-healing (detection + httpd writers), as does `board_set`, the user's licence for the UI to name matching board hardware without persisting a board identity. Legacy per-key credential entries remain read-only fallback for pre-blob upgrades, and `boot_fails` is the boot-loop crash counter. |
+| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + one-shot rollback state, MQTT (`uri`/`user`/`pass`), syslog, `ntp_server`, from blob **v2** board-local hardware, from **v3** the OTA channel, from **v4** the UI-language override, from **v5** the HomeHub host/port/unit/safety fields, **v6** its enable compatibility bit, **v7** one MQTT reference-temperature name/topic/value-path mapping, **v8** its timestamp path plus maximum age, and **v9** the safe WP3 actuation opt-in semantics. Blobs v1–v8 remain readable without losing credentials, but their historical actuation bit is forced false because it did not previously authorize writes; only a v9 save can express the new consent. Non-empty `mb_host` enables polling, while writing additionally requires the v9 flag and explicit firmware-writer ownership. The four HomeHub fields have one writer (`POST /set_hp`, httpd); the five reference-source fields have one writer (`POST /set_ref_temp`, httpd). Old experimental `mb_dhost`/`mb_seen` keys are deleted on load and never consulted. A v6+ blob saved as HomeHub-enabled with an empty host becomes safely disabled instead of resuming hidden discovery, while v7 reference mappings gain an empty timestamp path and the 600 s default age. One CRC-checked entry is written all-or-nothing. The X10A link cache `rx_pin`/`tx_pin`/`proto` remains separate and self-healing (detection + httpd writers), as does `board_set`, the user's licence for the UI to name matching board hardware without persisting a board identity. Legacy per-key credential entries remain read-only fallback for pre-blob upgrades, and `boot_fails` is the boot-loop crash counter. |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -1778,12 +1786,15 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   last_ok_s,registers,values,crc_err,timeout_err}, profile{id},
                   plus
                   modbus{enabled,connected,discovering,host,port,unit_id,rx,fails,
-                  values,actuation_enabled[,error,error_code,error_detail,error_register]}
-                  — the HomeHub link's READ-ONLY diagnostics. `host` is the configured persistent
+                  values,actuation_enabled,task_stack_min_free_words,actuator{...}
+                  [,error,error_code,error_detail,error_register]}
+                  — the HomeHub link diagnostics. The nested actuator object carries separate
+                  requested/echoed/confirmed/effective values, ownership, source, block/conflict
+                  reason, queue depth, transaction timestamps and monotonic counters. `host` is the configured persistent
                   target (redacted like the other reporter-identifying values); empty means disabled.
                   Explicit discovery is request-local and therefore not a status mode; `discovering`
-                  remains false for wire compatibility. There are no write counters — the link has
-                  none, and actuation_enabled is reported straight from config (it gates nothing today),
+                  remains false for wire compatibility. The flat MQTT heartbeat mirrors the actuator's
+                  numeric state, reasons, values, timestamps and counters but creates no writable entity,
                   sys{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode} — heap
                   headroom (free / since-boot low-water / largest-contiguous) + why the device last
                   booted, ALWAYS present (unlike last_crash, and unlike the MQTT heartbeat needs no
@@ -2003,10 +2014,13 @@ POST /set_hp      {profile,rx,tx,mb_host,mb_port,mb_unit_id,actuation_enabled}
                   `mb_host` is the complete HomeHub intent: non-empty polls exactly that address;
                   empty suppresses tasks, searches and sockets. This SECOND stack never stops X10A.
                   mb_port 1..65535 and mb_unit_id 1..247 are range-checked by validate(). The four
-                  HomeHub fields (host, port, unit and safety flag) persist in atomic blob v8 and
+                  HomeHub fields (host, port, unit and safety flag) persist in atomic blob v9 and
                   apply live: the httpd route calls mb_reconfigure(), while the
                   Modbus task remains the sole socket owner and retires/restarts itself as needed.
-                  `actuation_enabled` is stored and gates NOTHING (there is no write path). rx/tx
+                  `actuation_enabled` is the default-off first write gate. It is deliberately
+                  insufficient by itself: the internal typed request must also hold explicit firmware
+                  writer ownership and pass link, freshness, range, priority and conflict gates. No
+                  HTTP/MQTT/HA caller can supply a raw register or grant that ownership. rx/tx
                   PERSIST (the physical
                   pin cache — a manual override survives reboot); profile is session-only. The UI
                   always sends profile="auto" (fully automatic — no manual model pick); a concrete id
