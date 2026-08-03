@@ -36,9 +36,10 @@ function hasHist(id) {
   return D ? D.ready(Object.fromEntries(D.ins.map((k) => [k, hasDeviceHist(k)]))) : hasDeviceHist(id);
 }
 
-// ── Derived trends: the schematic pills that are COMPUTED, not read ────────────────────────────
+// ── Derived trends: computed pills and combined component states ───────────────────────────────
 // Pump speed, ΔT, heat output, electrical input and COP have no directly matching register value, so
-// the device has nothing to buffer for the displayed figure itself. Their 24-hour curve is assembled
+// the device has nothing to buffer for the displayed figure itself. BUH likewise has two physical
+// stage bits but one component-level inspector. Their 24-hour curves/timeline are assembled
 // HERE, out of the rings of what each is computed FROM,
 // by the same expressions liveData() uses for the live number — one definition of each figure
 // rather than a firmware copy and a browser copy free to drift apart. `inv_current` and `ct_l1..3`
@@ -57,6 +58,16 @@ function hasHist(id) {
 // (feature_gate.hpp's DISABLE-NEVER-DEGRADE: no honest inputs, no curve — never a substitute one).
 // `fn(s)` = one sample from one bucket's values, null for a gap.
 const DERIVED = {
+  // Both BUH stages are event-folded by the firmware before they get here: an ON observed anywhere
+  // in the open five-minute bucket survives a later OFF. Combine those aligned, structurally
+  // converter-qualified rings into the same three states the live BUH inspector uses. Step 2 wins
+  // because it denotes the higher output stage; a missing input leaves a gap rather than proving OFF.
+  buh_state: {
+    unit: "", ins: ["buh_step1", "buh_step2"],
+    ready: (h) => h.buh_step1 && h.buh_step2,
+    fn: (s) => s.buh_step1 == null || s.buh_step2 == null ? null
+      : s.buh_step2 > 0 ? 2 : s.buh_step1 > 0 ? 1 : 0,
+  },
   // The X10A row is an inverted control signal: 0 = maximum and 100 = stop. The schematic instead
   // shows the intuitive speed percentage, so its chart must transform every sample by the exact same
   // clamped expression as liveData(). Drawing the raw row would make an idle pump look maximal.
@@ -99,18 +110,18 @@ const DERIVED = {
   //   running — the live pill's own (rps > 5, ΔT > 0.5); a COP of a stopped plant is not a small
   //             COP, it is not one at all.
   //   scope   — cop_scope.hpp: the CT clamps see the whole unit INCLUDING both resistive heaters
-  //             while the heat side is the pre-BUH outlet, so a CT-sourced quotient is only honest
-  //             once the heaters are known quiet — and complete heater history is unavailable (BSH
-  //             is buffered, the two BUH stages are not). So a CT-sourced sample draws NOTHING here.
-  //             That is the same refusal the live pill makes when it cannot pair the boundaries,
-  //             not a rounding of it: an INV-sourced sample has the heaters outside both sides and
-  //             needs no such evidence, which is why it is the branch that survives.
+  //             while the heat side buffered here is the pre-BUH outlet. BUH stages now have their
+  //             own timeline, but the post-BUH R2T history needed to apply the live boundary switch
+  //             is not buffered, and tank-heater heat crosses neither water sensor. So a CT-sourced
+  //             sample still draws NOTHING here. That is the same refusal the live pill makes when
+  //             it cannot pair the boundaries, not a rounding of it: an INV-sourced sample has the
+  //             heaters outside both sides and needs no such evidence, which is why it survives.
   cop: {
     unit: "", ins: ["flow", "leaving_water", "return_water", "comp_rps", "inv_current",
                     "ct_l1", "ct_l2", "ct_l3"],
     none: {
-      en: "No curve while the electrical figure comes from the CT clamps — pairing it with the heat side across a whole day needs complete electric-heater history; BSH is buffered, but the two BUH stages are not.",
-      de: "Kein Verlauf, solange der Stromwert von den Stromwandlern kommt — die Paarung mit der Wärmeseite über einen ganzen Tag braucht die vollständige Elektroheizer-Historie; BSH wird gepuffert, die beiden BUH-Stufen nicht.",
+      en: "No COP curve while the electrical figure comes from the CT clamps — that current covers the whole plant, but the buffered heat side ends before the backup heater and cannot include heat added by the tank heater.",
+      de: "Kein COP-Verlauf, solange der Stromwert von den Stromwandlern kommt — dieser Strom umfasst die ganze Anlage, die gepufferte Wärmeseite endet jedoch vor dem Zusatzheizer und kann die Wärme des Heizstabs im Speicher nicht erfassen.",
     },
     ready: (h) => h.flow && h.leaving_water && h.return_water && h.comp_rps && h.inv_current,
     fn: (s) => {
@@ -348,6 +359,20 @@ const STATE_HIST = Object.freeze({
     none: "hist.heater_none", active: "hist.heater_active", inactive: "hist.heater_inactive",
     aria: "hist.heater_aria",
   },
+  buh_state: {
+    classify: (v) => [0, 10, 20].includes(v) ? v > 0 : null,
+    primary: "x10a", total: "hist.buh_total", run: "hist.buh_run",
+    none: "hist.buh_none", active: "hist.buh_active", inactive: "hist.buh_inactive",
+    aria: "hist.buh_aria",
+    valueLabel: (v) => v === 0 ? "hist.buh_inactive"
+      : v === 10 ? "hist.buh_step1" : v === 20 ? "hist.buh_step2" : "",
+    levels: [
+      { match: (v) => [0, 10, 20].includes(v) ? v === 10 : null,
+        cls: "step1", label: "hist.buh_step1" },
+      { match: (v) => [0, 10, 20].includes(v) ? v === 20 : null,
+        cls: "step2", label: "hist.buh_step2" },
+    ],
+  },
   valve_dhw: {
     classify: (v) => [0, 10].includes(v) ? v === 10 : null,
     primary: "x10a", total: "hist.valve_dhw_total", inactiveTotal: "hist.valve_space_total",
@@ -396,9 +421,11 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   const gaps = stateRuns(primary, null, cfg.classify).length;
   const pct = (i) => ((i / n) * 100).toFixed(3);
   const tracks = view.series.map((s) => {
-    const on = stateRuns(s, true, cfg.classify).map(([from, count]) =>
-      `<span class="vhist-state-on${s.source === "modbus" ? " mb" : ""}"` +
-      ` style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
+    const levels = cfg.levels || [{ match: cfg.classify, cls: "" }];
+    const on = levels.flatMap((level) => stateRuns(s, true, level.match).map(([from, count]) =>
+      `<span class="vhist-state-on${s.source === "modbus" ? " mb" : ""}` +
+      `${level.cls ? " " + level.cls : ""}" style="left:${pct(from)}%;width:${pct(count)}%"></span>`
+    )).join("");
     const missing = stateRuns(s, null, cfg.classify).map(([from, count]) =>
       `<span class="vhist-state-gap" style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
     return `<div class="vhist-state-track" aria-hidden="true">${on}${missing}</div>`;
@@ -406,6 +433,10 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   const legend = view.series.length > 1 || view.series[0].source === "modbus"
     ? `<div class="vhist-legend vhist-state-legend">${view.series.map((s) =>
         `<span class="vhist-source${s.source === "modbus" ? " mb" : ""}"><i></i>${esc(s.name)}</span>`).join("")}</div>`
+    : "";
+  const levelLegend = cfg.levels
+    ? `<div class="vhist-legend vhist-level-legend">${cfg.levels.map((level) =>
+        `<span class="vhist-level ${level.cls}"><i></i>${esc(t(level.label))}</span>`).join("")}</div>`
     : "";
 
   const pi = histPinIndex(id, view);
@@ -417,13 +448,19 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   }
   const totalText = t(cfg.total, histDuration(total)) + (cfg.inactiveTotal
     ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "");
+  const detailedRuns = cfg.levels ? cfg.levels.flatMap((level) =>
+    stateRuns(primary, true, level.match).map(([from, count]) => [from, count, level.label]))
+    .sort((a, b) => a[0] - b[0]) : [];
   const runList = active.length
-    ? active.map(([from, count]) => `<span>${esc(t(cfg.run, stateRunWhen(view, from, count),
-                                                  histDuration(count * view.dt)))}</span>`).join("")
+    ? (cfg.levels ? detailedRuns.map(([from, count, label]) =>
+        `<span>${esc(t(cfg.run, t(label), stateRunWhen(view, from, count),
+                      histDuration(count * view.dt)))}</span>`).join("")
+      : active.map(([from, count]) => `<span>${esc(t(cfg.run, stateRunWhen(view, from, count),
+                                                    histDuration(count * view.dt)))}</span>`).join(""))
     : `<span>${esc(t(cfg.none))}</span>`;
   return wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.since", spanH))}</span>` +
-      `<span class="vhist-range mono num">${esc(totalText)}</span></div>` + legend +
+      `<span class="vhist-range mono num">${esc(totalText)}</span></div>` + legend + levelLegend +
     `<div class="vhist-graph vhist-state-graph${pi >= 0 ? " has-pin" : ""}">` +
       `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +
       `<div class="vhist-plot vhist-state-plot" data-hist="${esc(id)}" data-n="${n}" tabindex="0" role="img"` +
@@ -646,6 +683,10 @@ function scrubText(h, i) {
     if (cfg && v != null) {
       const state = cfg.classify(v);
       if (state == null) return t("hist.nm");
+      if (cfg.valueLabel) {
+        const key = cfg.valueLabel(v);
+        return key ? t(key) : t("hist.nm");
+      }
       const label = t(state ? cfg.active : cfg.inactive);
       if (h.id !== "smart_grid_mode") return label;
       const mode = v / 10;

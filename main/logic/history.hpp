@@ -3,9 +3,9 @@
 // rather than a repeat of one.
 //
 // The firmware keeps a fixed-cadence ring per trended X10A/board row and serves it from GET
-// /history; history.cpp also instantiates eight rings for the HomeHub histories in homehub_map.hpp:
-// six structurally paired measurements, the tank-heater state and the Smart-Grid mode. The web UI
-// draws either or both under a value row's explainer. Everything that
+// /history; history.cpp also instantiates nine rings for the HomeHub histories in homehub_map.hpp:
+// six structurally paired measurements, the tank-heater state, the 3-way valve and the Smart-Grid
+// mode. The web UI draws either or both under a value row's explainer. Everything that
 // decides *what* is trended and *whether an X10A sample counts* lives here rather than at the call
 // site, for the same reason lwt_select.hpp and ou_stale.hpp do: the rule runs against the generated
 // def/ profile tables, which are C++, so the CI logic-test can gate it against the whole catalog
@@ -190,6 +190,13 @@ inline constexpr TrendDef TRENDS[] = {
     // erased by a later OFF in the same 5-minute bucket. The UI calls the resulting spans sampled
     // active windows, not exact runtime; a pulse entirely between poll sweeps can still be missed.
     { "bsh_state",         TrendKind::BinaryEvent, 0x60, 12, "", "", 305 },
+    // The hydronic backup heater has two separately published stages. Keep both exact converter-
+    // qualified bits: the browser combines their aligned rings into one categorical BUH timeline
+    // (off / step 1 / step 2), while each raw row still retains its own auditable history. Event
+    // folding is intentional here too — a short heater pulse observed anywhere in the open bucket
+    // must not be erased by a later OFF and disappear from the 5-minute raster.
+    { "buh_step1",          TrendKind::BinaryEvent, 0x60, 12, "", "", 304 },
+    { "buh_step2",          TrendKind::BinaryEvent, 0x60, 12, "", "", 303 },
     // The diverter is a persistent selector, not an event: the latest observed state in the bucket
     // wins, so the timeline shows which branch was selected at each five-minute sample. Converter
     // 306 is the load-bearing half of the locator in the shared 0x60/12 state byte.
@@ -210,7 +217,7 @@ inline constexpr TrendDef TRENDS[] = {
     { "max_alloc",        TrendKind::MaxAlloc, 0, 0, "KiB", "Largest free block" },
 };
 constexpr size_t TREND_COUNT = sizeof(TRENDS) / sizeof(TRENDS[0]);
-// 21 trends = 12096 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
+// 23 trends = 13248 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
 // ceiling is a deliberate stop sign, not a hardware limit: .bss does not compete for the largest
 // CONTIGUOUS free block, which is what actually binds on this board, so the cost of a trend is a
 // few per cent of free heap and nothing at all of the fragmentation budget. Raise it only with the
@@ -232,7 +239,7 @@ constexpr size_t TREND_COUNT = sizeof(TRENDS) / sizeof(TRENDS[0]);
 // non-competition with the largest contiguous block, which is what the paragraph above is actually
 // about; the difference is that each ring also costs its own size AGAIN in the flash image. Worth
 // knowing before anyone adds trends by the dozen.
-static_assert(TREND_COUNT * HISTORY_BYTES_PER_TREND <= 12096,
+static_assert(TREND_COUNT * HISTORY_BYTES_PER_TREND <= 13248,
               "trend buffers are static data on a heap-tight board — justify growth before raising this");
 
 // A board metric in bytes, as the ring stores it: tenths of a KiB (~102-byte resolution, finer than

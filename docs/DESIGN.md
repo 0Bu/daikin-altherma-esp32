@@ -661,9 +661,10 @@ Body, ordered:
    gap; and it is marked *resting* only when EVERY missing input was — one input that genuinely
    failed to measure outranks "nothing failed", since that is the stronger claim.
    The COP is the one that is deliberately drawn on fewer samples than its own inputs. A CT-sourced
-   sample is left out entirely: `cop_scope.hpp`'s boundaries only pair once the resistive heaters are
-   known quiet, and their complete history is not buffered — BSH is now retained as a useful state
-   timeline, but the two BUH stages still are not, so the plant boundary cannot be reconstructed.
+   sample is left out entirely: `cop_scope.hpp`'s live boundary can move to post-BUH R2T when the
+   resistive heater fires, while the trend buffers only the pre-BUH heat side; BSH heat crosses
+   neither water sensor. The two BUH stages are now buffered for their own categorical timeline,
+   but that does not manufacture the missing post-BUH/tank heat needed for a whole-plant quotient.
    An inverter-sourced sample needs no such evidence (both heaters sit outside both sides), which is
    why that is the branch that survives. Refusing the other is the same answer the live pill gives
    when it cannot pair the boundaries, not a relaxation of it.
@@ -697,9 +698,12 @@ Body, ordered:
    coloured active spans and written interval lists. The valve names both destinations and reports
    sampled time on the DHW and space-circuit branches; its latest observed position wins each bucket.
    BSH uses event folding: once ON is observed it remains ON for that open five-minute bucket, so a
-   later OFF cannot erase the event. The UI calls the sum sampled raster time, not exact runtime; a
-   pulse entirely between poll sweeps can still be missed. Other setpoints, states and Modbus-only
-   readings do not acquire a curve by resemblance of their labels.
+   later OFF cannot erase the event. BUH applies the same rule independently to its converter-
+   qualified Step1 and Step2 bits; the browser combines the aligned rings into one component-level
+   timeline with written Aus/Stufe 1/Stufe 2 states and distinct stage colours. The UI calls each
+   sum sampled raster time, not exact runtime; a pulse entirely between poll sweeps can still be
+   missed. Other setpoints, states and Modbus-only readings do not acquire a curve by resemblance of
+   their labels.
    The one numeric pill with no chart is the **low-pressure** one, and it is the same honest answer
    as the high-side pill on the *other* leg of its fallback: both are the `0x20` transducer pair,
    which freezes with its page and, on the reference install, has published a flat 0.0 bar from both

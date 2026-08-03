@@ -618,8 +618,14 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-state-on, .vhist-state-gap { position: absolute; inset-block: 0; min-width: 2px; }
 .vhist-state-on { background: var(--brand-sky); }
 .vhist-state-on.mb { background: var(--src-mb); }
+.vhist-state-on.step2 { background: var(--warn); }
 .vhist-state-gap { background: repeating-linear-gradient(135deg, transparent 0 3px,
   var(--line) 3px 5px); }
+.vhist-level-legend { margin-top: -1px; }
+.vhist-level { display: inline-flex; align-items: center; gap: 5px; }
+.vhist-level i { display: inline-block; width: 16px; height: 7px; border-radius: 4px;
+  background: var(--brand-sky); }
+.vhist-level.step2 i { background: var(--warn); }
 .vhist-state-runs { display: grid; gap: 3px; margin-top: 8px; color: var(--muted);
   font-size: 11.5px; }
 .vhist-state-runs strong { color: var(--fg); font-weight: 600; }

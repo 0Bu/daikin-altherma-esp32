@@ -11,6 +11,8 @@ const S = {
       { id: "dhw_tank", label: "DHW tank temp. (R5T)" },
       { id: "pump_signal", label: "Water pump signal (0:max-100:stop)" },
       { id: "bsh_state", label: "BSH" },
+      { id: "buh_step1", label: "BUH Step1" },
+      { id: "buh_step2", label: "BUH Step2" },
       { id: "valve_dhw", label: "3way valve(On:DHW_Off:Space)" },
       { id: "smart_grid_mode", label: "Smart Grid operation mode" },
     ],
@@ -58,6 +60,14 @@ const context = {
     if (key === "hist.heater_active") return "Heizstab aktiv";
     if (key === "hist.heater_inactive") return "Heizstab aus";
     if (key === "hist.heater_aria") return `${arg} — Heizstab-Verlauf. ${arg2}`;
+    if (key === "hist.buh_total") return `Zusatzheizer aktiv erfasst · ${arg} Rasterzeit`;
+    if (key === "hist.buh_run") return `${arg} · ${arg2} · aktives Zeitfenster ca. ${args[2]}`;
+    if (key === "hist.buh_none") return "Kein Zusatzheizereinsatz erfasst.";
+    if (key === "hist.buh_active") return "Zusatzheizer aktiv";
+    if (key === "hist.buh_inactive") return "Zusatzheizer aus";
+    if (key === "hist.buh_step1") return "Stufe 1";
+    if (key === "hist.buh_step2") return "Stufe 2";
+    if (key === "hist.buh_aria") return `${arg} — Zusatzheizer-Verlauf. ${arg2}`;
     if (key === "hist.valve_dhw_total") return `Warmwasser · ${arg}`;
     if (key === "hist.valve_space_total") return `Raumkreis · ${arg}`;
     if (key === "hist.valve_run") return `${arg} · Warmwasser ca. ${arg2}`;
@@ -138,6 +148,28 @@ assert.doesNotMatch(bshHtml, /vhist-line/);
 assert.match(bshHtml, /Heizstab aktiv erfasst · 10 min Rasterzeit/);
 assert.match(bshHtml, /<strong>X10A<\/strong>/, "X10A leads the heater-run summary");
 assert.match(h.scrubText(bshView, 1), /X10A Heizstab aktiv/);
+
+// BUH is one component with two event-folded stage bits. The browser combines both aligned rings
+// into an off/step-1/step-2 timeline; it must not graph either raw bit as a numeric 0/1 curve.
+const now = Date.now();
+S.hist.set("buh_step1", { at: now, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
+  held: [], v: [0, 10, 10, 0, 0, null] });
+S.hist.set("buh_step2", { at: now, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
+  held: [], v: [0, 0, 10, 10, 0, 0] });
+assert.equal(h.hasHist("buh_state"), true);
+await h.ensureDerived("buh_state");
+assert.deepEqual(Array.from(S.hist.get("buh_state").v), [0, 10, 20, 20, 0, null]);
+const buhView = h.historyView("buh_state");
+const buhHtml = h.histHtml("buh_state", "", "Zusatzheizer · BUH");
+assert.match(buhHtml, /vhist-state-track/);
+assert.doesNotMatch(buhHtml, /vhist-line/);
+assert.match(buhHtml, /Zusatzheizer aktiv erfasst · 15 min Rasterzeit/);
+assert.match(buhHtml, /vhist-state-on step1/);
+assert.match(buhHtml, /vhist-state-on step2/);
+assert.match(buhHtml, /Stufe 1 .* aktives Zeitfenster ca\. 5 min/);
+assert.match(buhHtml, /Stufe 2 .* aktives Zeitfenster ca\. 10 min/);
+assert.match(h.scrubText(buhView, 1), /Stufe 1/);
+assert.match(h.scrubText(buhView, 2), /Stufe 2/);
 
 // The schematic shows intuitive pump speed, while the X10A row is inverted (0=max, 100=stop).
 // Its inspector curve must transform the source ring instead of making a stopped pump look maximal.
