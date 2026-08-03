@@ -921,20 +921,22 @@
       <label class="field">
         <span class="field-label plain" data-i18n="env.sensor_state">Sensor</span>
         <select class="input" id="envSensor">
-          <option value="" data-i18n="env.none">No sensor</option>
+          <option value="" selected data-i18n="env.none">No sensor</option>
           <option value="env_iii">ENV III</option>
         </select>
       </label>
-      <label class="field">
-        <span class="field-label plain">SDA</span>
-        <select class="input mono num" id="envSda"></select>
-      </label>
-      <label class="field">
-        <span class="field-label plain">SCL</span>
-        <select class="input mono num" id="envScl"></select>
-      </label>
+      <div id="envPinFields" hidden>
+        <label class="field">
+          <span class="field-label plain">SDA</span>
+          <select class="input mono num" id="envSda"></select>
+        </label>
+        <label class="field">
+          <span class="field-label plain">SCL</span>
+          <select class="input mono num" id="envScl"></select>
+        </label>
+        <p class="hint" data-i18n="env.pins_hint">SDA carries the I²C data; SCL provides the clock.</p>
+      </div>
       <p class="hint err" id="envError" hidden></p>
-      <p class="hint" data-i18n="env.pins_hint">SDA is the I²C data line (yellow Grove wire); SCL is the clock line (white Grove wire). Select the GPIOs to which these two sensor wires are actually connected.</p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="envCancel" data-i18n="btn.cancel">Cancel</button>
         <button class="btn primary" type="submit" id="envBtn" data-i18n="btn.save">Save</button>

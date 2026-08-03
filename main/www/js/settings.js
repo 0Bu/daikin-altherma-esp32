@@ -416,7 +416,13 @@ function env3SafePair(e) {
 }
 function syncEnv3Fields() {
   const enabled = $("envSensor").value === "env_iii";
+  $("envPinFields").hidden = !enabled;
   for (const id of ["envSda", "envScl"]) $(id).disabled = !enabled;
+}
+function env3FormPayload() {
+  const enabled = $("envSensor").value === "env_iii";
+  if (!enabled) return { enabled: false };
+  return { enabled: true, sda: +$("envSda").value, scl: +$("envScl").value };
 }
 function fillEnv3() {
   const e = S.status?.env3 || {};

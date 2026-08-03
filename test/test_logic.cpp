@@ -4998,6 +4998,10 @@ static void test_env3() {
     CHECK(!env3_config_valid(c, why, 48, false));             // Atom Grove conflicts with X10A 1/2
     c.rx_pin = 44; c.tx_pin = 43;
     CHECK(env3_config_valid(c, why, 48, false));
+    CHECK(config_reserved_pins(c).claims(c.env3_sda) && config_reserved_pins(c).claims(c.env3_scl));
+    c.env3_enabled = false;
+    CHECK(!config_reserved_pins(c).claims(c.env3_sda) && !config_reserved_pins(c).claims(c.env3_scl));
+    c.env3_enabled = true;
     c.env3_sda = 35; c.env3_scl = 6;
     CHECK(!env3_config_valid(c, why, 48, false));
     c.env3_sda = 5;

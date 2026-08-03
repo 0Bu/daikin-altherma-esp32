@@ -90,16 +90,18 @@ assert.match(app, /if \(env\.supported && env\.enabled\)/,
 assert.match(app, /function openEnv3\(\) \{[\s\S]*if \(!S\.status\?\.env3\?\.supported\) return;/,
   "the ENV III modal must fail closed when called outside a supported M5Stack board");
 const envModalHtml = html.slice(html.indexOf('id="env3Modal"'), html.indexOf('<!-- Bug report'));
-assert.match(envModalHtml, /id="envSensor"[\s\S]*value=""[\s\S]*value="env_iii"[\s\S]*id="envSda"[\s\S]*id="envScl"/,
-  "the outdoor-sensor modal must expose one sensor selector followed by SDA and SCL");
+assert.match(envModalHtml, /id="envSensor"[\s\S]*value="" selected[\s\S]*value="env_iii"[\s\S]*id="envPinFields" hidden[\s\S]*id="envSda"[\s\S]*id="envScl"/,
+  "the outdoor-sensor modal must default to no sensor and keep its SDA/SCL group hidden until selected");
 assert.doesNotMatch(envModalHtml, /type="checkbox"|envEnabled|envPreset|env\.hint|temperature measurement range|Temperatur-Messbereich/,
   "the outdoor-sensor modal must contain no enable checkbox, wiring preset, or technical prose");
-assert.match(app, /SDA is the I²C data line \(yellow Grove wire\); SCL is the clock line \(white Grove wire\)/,
-  "the English modal must explain the two user-selected I2C wires");
-assert.match(app, /SDA ist die I²C-Datenleitung \(gelbe Grove-Leitung\), SCL die Taktleitung \(weiße Grove-Leitung\)/,
-  "the German modal must explain the two user-selected I2C wires");
-assert.match(app, /const enabled = \$\("envSensor"\)\.value === "env_iii";[\s\S]*saveReboot\("\/set_env3", \{ enabled, sda, scl \}/,
-  "ENV III wiring must use the rebooting persistent endpoint");
+assert.match(app, /SDA carries the I²C data; SCL provides the clock\./,
+  "the English modal must explain SDA and SCL in one short sentence");
+assert.match(app, /SDA überträgt die I²C-Daten, SCL gibt den Takt vor\./,
+  "the German modal must explain SDA and SCL in one short sentence");
+assert.match(app, /function syncEnv3Fields\(\)[\s\S]*\$\("envPinFields"\)\.hidden = !enabled;[\s\S]*disabled = !enabled/,
+  "selecting no sensor must hide and disable both GPIO fields");
+assert.match(app, /function env3FormPayload\(\)[\s\S]*if \(!enabled\) return \{ enabled: false \};[\s\S]*saveReboot\("\/set_env3", body/,
+  "disabling ENV III must submit an explicit false without stale pin fields");
 assert.match(httpConfig, /env3_config_valid\(c[\s\S]*http_register_on\(s, surface, "\/set_env3"/,
   "the device must validate ENV III pin collisions before registering the config route");
 assert.ok(httpStatus.includes("board_vendor_name(board_selected_vendor(c))"),
