@@ -452,9 +452,11 @@ Body, ordered:
    imply a live run state. Neither rotating schematic part carries a direction mark: a triangle in a pump circle
    IS the direction symbol, so the rotating one the drawing used to have pointed against the flow for
    half of every turn. Direction is the **pipes'** job — the flow dashes animate in the flow
-   direction, everywhere, and only while there is flow. Both rotors are drawn so their bounding box
-   is centred on the hub (an even blade count, or the ring drawn inside the rotating group), because
-   the CSS pivots on that box and anything else orbits its own axle.
+   direction, everywhere, and only while there is flow. The pump's eight vanes turn
+   **clockwise**; the outdoor fan keeps its own clockwise animation. Both rotors are drawn so their
+   bounding box is centred on the hub (an even
+   blade count, or the ring drawn inside the rotating group), because the CSS pivots on that box and
+   anything else orbits its own axle.
    The component **order is the manufacturer's** (installer reference §16.2: exchanger → R1T →
    backup heater → pump → R2T → outlet, then the field-supplied 3-way valve), not a drawing
    convenience — the pump is on the **supply** side, and drawing it in the return misplaced a real

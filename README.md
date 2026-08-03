@@ -53,7 +53,7 @@ Visual diagram, the full cable chain, and the wiring worked through on specific 
 One screen, live from the bus: what the unit is doing right now, with any reading the firmware
 cannot currently stand behind shown as `—` rather than as a number.
 
-![The dashboard through four operating states: standby, domestic hot water, space heating, and heating + DHW](docs/media/dashboard.gif)
+![The dashboard through its normal operating states, with smooth transitions between standby, heating, defrost, circulation, hot water and cooling](docs/media/dashboard.gif)
 
 ## Reference
 

@@ -8,15 +8,15 @@
 # out of date, and nothing else in this repo can tell.
 #
 # CI has no browser, so this cannot re-render and compare pixels. It fingerprints the SOURCES the
-# recording depends on — the schematic markup and header, the CSS that draws and animates them, the
-# assembled UI functions that paint them, the strings they print, the scenes, and the recorder's own
+# recording depends on — the schematic markup, the CSS that draws and animates it, the assembled UI
+# functions that paint it, the strings they print, the scenes, and the recorder's own
 # framing — and fails when that no longer matches the stamp recorded beside the GIF. It also reads
 # the GIF itself: a single-frame still, or 2-second frames, fails the one thing the recording is
 # for, which is showing the flow MOVING.
 #
 # The fix for a failure is always to RE-RECORD (scripts/record-dashboard-gif.sh, needs Chrome +
-# ffmpeg locally) — never to edit the stamp. The judgement half — are the four scenes still the
-# right ones, does the picture still show what the firmware can do — is the /ui-gif skill.
+# ffmpeg locally) — never to edit the stamp. The judgement half — are all normal operating scenes
+# present, do their transitions and readings stay honest — is the /ui-gif skill.
 #
 # Usage: scripts/run-ui-gif-audit.sh [-v]
 # Exit:  0 = current, 1 = findings, 2 = usage / the fingerprint could not be taken.

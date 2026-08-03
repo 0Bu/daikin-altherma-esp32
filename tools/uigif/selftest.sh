@@ -68,6 +68,8 @@ check "schematic markup moved" 1 U001 \
     perl -0pi -e 's/(<figure\b[^>]*\bid="schem")/$1 data-selftest="moved"/' main/www/index.html
 check "schematic css changed"  1 U001 \
     perl -0pi -e 's/(svg \.sc-flow\.on \{[^}]*)/$1 stroke-width: 9px;/' main/www/style.css
+check "pump direction changed"  1 U001 \
+    perl -0pi -e 's/(@keyframes pump-spin[^}]*rotate\()360deg/${1}-360deg/' main/www/style.css
 check "painting code changed"  1 U001 \
     perl -0pi -e 's/(function renderLive\(\) \{)/$1\n  \/\* selftest \*\//' main/www/js/schematic.js
 check "scenes changed"         1 U001 \

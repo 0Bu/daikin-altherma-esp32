@@ -45,7 +45,7 @@ read (a renamed class, a missing marker), so nothing was checked.
 | `S011` | A drawn pipe inside no hit target — unhoverable, and it fails by absence: nothing looks wrong. |
 | `G001`–`G005` | Outside the viewBox, overlapping, struck through by a pipe, overflowing its pill, skewed. |
 | `G006` | A pill too far from — or not over — the run it names. The defect class the gate exists for. |
-| `G007` | A rotor whose bounding box is not centred on its hub; the CSS pivots on the **bbox**, so it orbits. |
+| `G007` / `G012` | A rotor whose bounding box is not centred on its hub, or the pump rotating counter-clockwise instead of clockwise. |
 | `G008` / `G009` | A run off the two-level grid, or a box whose margins no longer match it. |
 | `G010` | An animated flow overlay tracing no drawn pipe — the two copies of one path have drifted. |
 | `G011` | A run's *invisible* tap area reaching into a fitting drawn earlier. The hit lines are `stroke-linecap: round`, so each covers half a stroke past its declared endpoint; every trim had been computed as if the cap were flat, and the 3-way valve outlined itself on hover and then opened the DHW branch. Says nothing about two hit lines meeting — that place is genuinely shared, and `E004` decides whose it is. |

@@ -1,6 +1,6 @@
 ---
 name: ui-gif
-description: Keep the README's dashboard recording (docs/media/dashboard.gif) current with the web UI. Runs the mechanical gate (is the GIF still of THIS UI?), re-records it, and judges what the gate cannot — are the four scenes still the right ones, does the picture still show honestly what the firmware does. Use after any change that reaches the dashboard drawing, its pills, its animations or its copy.
+description: Keep the README's dashboard recording (docs/media/dashboard.gif) current with the web UI. Runs the mechanical gate, re-records every normal operating state with smooth transitions, and judges what the gate cannot — whether the picture honestly shows what the firmware does. Use after any change that reaches the dashboard drawing, its pills, its animations or its copy.
 model: opus
 ---
 
@@ -52,7 +52,7 @@ frame" entry would be a guess about pixels, and the machine that can settle it i
 ## 2. Re-record
 
 ```bash
-scripts/record-dashboard-gif.sh        # ~5 min: 112 frames, then stamps
+scripts/record-dashboard-gif.sh        # ~10 min: 135 frames, then stamps
 scripts/record-dashboard-gif.sh --keep-frames   # leaves the PNGs for inspection
 ```
 
@@ -64,10 +64,11 @@ so what the GIF shows is what `renderLive()` drew.
 
 Three things about it that are easy to break and hard to notice:
 
-- **One page load per frame.** Wall-clock time cannot survive that, so each frame is *posed*:
-  `window.__pose(t, T)` pauses every CSS animation and sets its `currentTime`. Delete that and the
-  GIF silently becomes 112 copies of one instant — still valid, still green on `U004`'s frame
-  count, and motionless.
+- **One page load per source image.** A steady frame needs one screenshot; each crossfade frame
+  needs the outgoing and incoming states at the same instant and lets ffmpeg blend them. Wall-clock
+  time cannot survive those fresh loads, so each source is *posed*: `window.__pose(t, T)` pauses
+  every CSS animation and sets its `currentTime`. Delete that and the GIF silently becomes copies
+  of one instant — still valid, still green on `U004`'s frame count, and motionless.
 - **Each animation gets a whole number of cycles across the total length**, which is what closes
   the loop without a jump. The real periods (dashes 1.1 s, pump 1.6 s, fan 2.6 s) share no
   practical common multiple, so a single shared clock tears two of the three at the seam.
@@ -87,11 +88,11 @@ Three things about it that are easy to break and hard to notice:
 
 Look at the finished GIF. Then ask:
 
-1. **Are these still the right four scenes?** Standby → DHW → Heating → Heating + DHW, because they
-   are what the *machine* does and they are the four `IU_MODE` states a user recognises
-   (`logic/convert.hpp`). If the firmware grew a state worth showing (defrost is the obvious
-   candidate — the reversed loop and a genuinely negative ΔT), the scene list is the place, not a
-   second GIF.
+1. **Are all nine operating scenes still true?** Standby → Heating → Defrost → Circulation →
+   DHW + BSH → Heating + DHW → Cooling + DHW → Cooling → Cooling residual circulation. Together
+   they cover every normal `plantState()` result and every published `IU_MODE` state
+   (`logic/convert.hpp`). Fault, warning and link-loss presentations are diagnostics, not operating
+   scenes. A new normal state belongs in this sequence, not in a second GIF.
 2. **Does it still show the honest behaviour?** The standby scene is the point of the whole
    recording: held X10A values never appear as current. Discharge and the INV-based electrical
    estimate read `—` because the outdoor unit stops refreshing those pages while it rests
@@ -116,9 +117,9 @@ Look at the finished GIF. Then ask:
    card's height leaves it clipped, or leaves a sliver of the header or the next card in frame —
    adjust `CROP` in the recorder rather than living with it. Measure, don't guess: the recorder's
    comment carries the CSS box the current numbers came from.
-7. **Is it still a reasonable size?** ~750 kB for 112 frames. GitHub serves it on every README
-   view; if a change pushes it past a couple of megabytes, drop `WIDTH` or `PER_SCENE_MS` before
-   dropping the frame rate — motion is the thing being paid for.
+7. **Is it still a reasonable size?** ~2 MB for 135 frames. GitHub serves it on every README
+   view; if a change pushes it past a couple of megabytes, drop `WIDTH`, `DWELL_FRAMES` or
+   `TRANSITION_FRAMES` before dropping the frame rate — motion is the thing being paid for.
 
 ## 4. Verify, don't assert
 

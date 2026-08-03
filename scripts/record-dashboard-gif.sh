@@ -8,10 +8,11 @@
 # standby arbitration (held X10A readings disappear, while current paired HomeHub readings stand in
 # with petrol provenance), which is half of why the picture is worth showing at all.
 #
-# ONE PAGE LOAD PER FRAME. Every frame is its own headless Chrome, posed at a deterministic
-# animation instant by window.__pose (scenes.js) — the flow dashes, the fan and the pump must move
-# in the GIF, and wall-clock time cannot survive a fresh page load. Each animation is given a WHOLE
-# number of cycles across the total length so the loop closes without a jump (their real periods,
+# ONE PAGE LOAD PER SOURCE IMAGE. A steady frame needs one screenshot; a transition frame needs the
+# outgoing and incoming scene at the same deterministic instant, then ffmpeg blends them. Every
+# screenshot is posed by window.__pose (scenes.js) — the flow dashes, fan and pump must move in the
+# GIF, and wall-clock time cannot survive a fresh page load. Each animation is given a WHOLE number
+# of cycles across the total length so the loop closes without a jump (their real periods,
 # 1.1 / 1.6 / 2.6 s, share no practical common multiple).
 #
 # Requires: Chrome, ffmpeg, python3. LOCAL ONLY — CI has no browser, which is why the gate that
@@ -36,9 +37,10 @@ CHROME_FLAGS="${CHROME_FLAGS:-}"
 
 # ── Recording parameters. These are part of the artefact, so the stamp covers this file: change a
 # ── crop or a frame rate and the GIF on disk no longer matches the one this script would make.
-SCENES=4
-PER_SCENE_MS=2240          # 28 frames of 80 ms — a whole number of frames per scene
-STEP_MS=80                 # 12.5 fps
+SCENES=9                   # every normal plant state + every published hydronic mode
+DWELL_FRAMES=10            # 1.0 s fully readable at 100 ms/frame
+TRANSITION_FRAMES=5        # 500 ms crossfade to the next scene (including last -> first)
+STEP_MS=100                # 10 fps; avoids wagon-wheel reversal of the eight-vane pump
 VIEWPORT="1000,760"
 SCALE=2                    # device pixel ratio; the crop below is in DEVICE pixels
 # The schematic card alone — NOT the header line above it. The header carries the running version,
@@ -52,9 +54,19 @@ CROP="1616:952:192:176"    # the schematic card, nothing above or below it
 WIDTH=900                  # final GIF width
 WATCHDOG_TICKS=200         # 0.1 s each — a ceiling per frame, not the normal path
 
-TOTAL_MS=$((SCENES * PER_SCENE_MS))
-FRAMES_PER_SCENE=$((PER_SCENE_MS / STEP_MS))
-TOTAL_FRAMES=$((SCENES * FRAMES_PER_SCENE))
+SLOT_FRAMES=$((DWELL_FRAMES + TRANSITION_FRAMES))
+TOTAL_FRAMES=$((SCENES * SLOT_FRAMES))
+TOTAL_MS=$((TOTAL_FRAMES * STEP_MS))
+
+# The pump turns once per 1.6 s in the live UI and has eight identical vanes. At 8 fps its posed
+# phase advanced farther than half the 45° vane spacing per frame, so the GIF appeared to turn the
+# opposite way (the wagon-wheel effect). Keep the sampled advance strictly below that ambiguity
+# limit. This protects the recording without changing the live animation's speed or direction.
+PUMP_CYCLES=$(((TOTAL_MS + 800) / 1600))
+if [ $((2 * PUMP_CYCLES * 8)) -ge "$TOTAL_FRAMES" ]; then
+    echo "record-dashboard-gif: frame rate aliases the pump direction — raise the sampling rate" >&2
+    exit 2
+fi
 
 for tool in ffmpeg python3; do
     command -v "$tool" >/dev/null 2>&1 || { echo "record-dashboard-gif: need $tool" >&2; exit 2; }
@@ -69,7 +81,7 @@ cleanup() {
 trap cleanup EXIT
 [ "${1:-}" = "--keep-frames" ] && KEEP=1
 
-mkdir -p "$WORK/frames" "$WORK/profile" "$(dirname "$GIF")"
+mkdir -p "$WORK/frames" "$WORK/blend" "$WORK/profile" "$(dirname "$GIF")"
 python3 tools/uigif/build_demo.py "$ROOT" "$WORK/demo.html" >/dev/null
 
 # file:// cannot be cache-busted reliably and blocks nothing we need — serve the one file instead.
@@ -100,9 +112,8 @@ if [ "$(curl -fsS "http://127.0.0.1:$PORT/demo.html" | shasum -a 256 | cut -d' '
     exit 2
 fi
 
-shoot() {                  # shoot <frame-index> <scene> <t-ms>
-    local n=$1 scene=$2 t=$3 pid i out sz prev
-    out="$WORK/frames/f$(printf '%04d' "$n").png"
+shoot() {                  # shoot <output-path> <scene> <t-ms>
+    local out=$1 scene=$2 t=$3 pid i sz prev
     "$CHROME" --headless=new --disable-gpu --hide-scrollbars ${CHROME_FLAGS:+$CHROME_FLAGS} \
         --force-device-scale-factor="$SCALE" --window-size="$VIEWPORT" \
         --virtual-time-budget=2500 --user-data-dir="$WORK/profile" \
@@ -129,11 +140,27 @@ shoot() {                  # shoot <frame-index> <scene> <t-ms>
     wait "$pid" 2>/dev/null || true
 }
 
-echo "recording $TOTAL_FRAMES frames ($SCENES scenes x ${PER_SCENE_MS}ms @ ${STEP_MS}ms)…"
+echo "recording $TOTAL_FRAMES frames ($SCENES scenes, ${DWELL_FRAMES} steady + ${TRANSITION_FRAMES} transition @ ${STEP_MS}ms)…"
 n=0
 for scene in $(seq 0 $((SCENES - 1))); do
-    for k in $(seq 0 $((FRAMES_PER_SCENE - 1))); do
-        shoot "$n" "$scene" $(( scene * PER_SCENE_MS + k * STEP_MS ))
+    next=$(( (scene + 1) % SCENES ))
+    for k in $(seq 0 $((SLOT_FRAMES - 1))); do
+        t=$((n * STEP_MS))
+        frame="$WORK/frames/f$(printf '%04d' "$n").png"
+        if [ "$k" -lt "$DWELL_FRAMES" ]; then
+            shoot "$frame" "$scene" "$t"
+        else
+            # Crossfade both real UI states. The last blend is 100 % incoming, so the final
+            # transition lands exactly on scene 0 and the GIF loops without a state jump.
+            blend_k=$((k - DWELL_FRAMES + 1))
+            a="$WORK/blend/a$(printf '%04d' "$n").png"
+            b="$WORK/blend/b$(printf '%04d' "$n").png"
+            shoot "$a" "$scene" "$t"
+            shoot "$b" "$next" "$t"
+            ffmpeg -y -i "$a" -i "$b" \
+                -filter_complex "blend=all_expr='A*($TRANSITION_FRAMES-$blend_k)/$TRANSITION_FRAMES+B*$blend_k/$TRANSITION_FRAMES'" \
+                -frames:v 1 "$frame" 2>/dev/null
+        fi
         n=$((n + 1))
         printf '\r  frame %d/%d' "$n" "$TOTAL_FRAMES"
     done

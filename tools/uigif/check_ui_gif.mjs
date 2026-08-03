@@ -14,8 +14,8 @@
 // the assembled UI functions that paint it, the strings it prints, the scenes it shows and the recorder's
 // own framing — and fails when that fingerprint no longer matches the one recorded beside the GIF.
 //
-// What it therefore does NOT claim: that the GIF looks good, that the scenes are still the right
-// four, or that a number in it is physically true. That is the /ui-gif skill's half, and the
+// What it therefore does NOT claim: that the GIF looks good, that the operating-state atlas is
+// complete, or that a number in it is physically true. That is the /ui-gif skill's half, and the
 // domain/schematic gates'. This one answers one question — was this GIF made from these sources.
 //
 // Usage:  node tools/uigif/check_ui_gif.mjs [--write-stamp] [-v]
@@ -96,12 +96,13 @@ function* cssRules(css, prefix = "") {
 // Selectors whose rules are visible in the recorded crop.
 const SEL_VISIBLE = [
   /(^|[\s,>~+(])#schem\b/, /\.sc-/, /#sc[A-Z]/,
-  /^@keyframes\s+(dashfwd|rdashfwd|rdashrev|spin)\b/,
+  /^@keyframes\s+(dashfwd|rdashfwd|rdashrev|pump-spin|spin)\b/,
   /(^|[\s,])(:root|body|\.card|\.pad|\.view)\b/,
 ];
 // If any of these stops matching, the extractor has gone blind rather than the CSS gone quiet —
 // the "clean" that follows would be a lie, so it is exit 2, not a pass.
-const SEL_REQUIRED = [/\.sc-flow/, /#scFan/, /^:root/, /^@keyframes\s+dashfwd/];
+const SEL_REQUIRED = [/\.sc-flow/, /#scFan/, /^:root/, /^@keyframes\s+dashfwd/,
+                      /^@keyframes\s+pump-spin/];
 
 function schematicCss(css) {
   const kept = [];

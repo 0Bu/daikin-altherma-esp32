@@ -86,7 +86,8 @@ It parses the real SVG (coordinates, transforms, path geometry, text metrics) an
 binding tables, so no second copy of either can drift, and reports in three layers: **structure**
 (`S…` — hit target ↔ inspector entry ↔ element id ↔ translation), **geometry** (`G…` — viewBox,
 overlaps, labels struck through, axis-aligned runs, a pill's distance to its own pipe, rotor
-symmetry, and a run's *invisible* tap area not reaching into the fitting it meets: the hit lines are
+symmetry and pump rotation direction, and a run's *invisible* tap area not reaching into the fitting
+it meets: the hit lines are
 `stroke-linecap: round`, so each one also covers half a stroke past its declared endpoint, and every
 trim in the drawing had been computed as if the cap were flat — the 3-way valve outlined itself on
 hover and then opened the DHW branch) and **domain** (`E…` — a repeated unit needs a name; a
@@ -107,7 +108,7 @@ an outside contributor you never run it; assume any change under `main/www/` nee
 [`docs/media/dashboard.gif`](docs/media/dashboard.gif) — the animated dashboard a new reader sees
 before anything else. **It is not a CI step and not a merge condition**, unlike everything else on
 this page, and the reason is its remedy rather than its subject: the only fix it can ask for is a
-local re-record (Chrome + ffmpeg, ~5 min), which no runner can perform. A gate whose fix is
+local re-record (Chrome + ffmpeg, ~10 min), which no runner can perform. A gate whose fix is
 unavailable where it fires gets the *stamp* rewritten rather than the recording re-made — a GIF then
 carrying a stamp that asserts it is current. As an outside contributor you are welcome to run it and
 say what it reported; keeping the recording current is the maintainer's `/ui-gif` skill, on its own
@@ -127,7 +128,7 @@ frame, or frames held over 200 ms, fails the thing a recording is *for*, which i
 moving. The fix is always to re-record — never to edit the stamp:
 
 ```bash
-scripts/record-dashboard-gif.sh    # ~5 min; needs Chrome + ffmpeg, so LOCAL only
+scripts/record-dashboard-gif.sh    # ~10 min; needs Chrome + ffmpeg, so LOCAL only
 ```
 
 It films the real UI (`index.html` + `style.css` + the ordered

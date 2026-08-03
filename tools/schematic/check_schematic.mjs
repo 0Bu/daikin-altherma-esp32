@@ -10,7 +10,7 @@
 // through by a riser. Those are not rendering bugs; they are the #35-#39 failure shape drawn in
 // SVG: well-formed, plausible, and attributing a real reading to the wrong thing.
 //
-// Six real defects from this drawing's history are the corpus (tools/schematic/selftest.sh):
+// Seven real defects from this drawing's history are the corpus (tools/schematic/selftest.sh):
 //   (a) a three-blade rotor whose bounding-box centre sat off the hub, so the fan wobbled around a
 //       point beside its own axle (the CSS spins about `transform-box: fill-box`, i.e. the BBOX);
 //   (b) the leaving-water pill floating ~40 px above the pipe it names;
@@ -20,13 +20,14 @@
 //   (e) two horizontal runs at unequal spacing where the drawing documents ONE grid;
 //   (f) a "1.8 bar" pill with no name sub-label while two other "bar" pills exist — position alone
 //       carrying the difference between a sealed heating circuit and a refrigerant circuit.
+//   (g) the pump turning counter-clockwise even though the visual contract specifies clockwise.
 // Three more came from a person clicking through the finished drawing, all on the ONE structure the
-// first six never touched — where a shared run parts into two branches, and which of the three
+// first seven never touched — where a shared run parts into two branches, and which of the three
 // answers (the animation, the highlight, the inspector) is allowed to cross that point:
-//   (g) a flow overlay reaching across the junction, so a DHW cycle animated heating pipe (E003);
-//   (h) a hit target owning pipe on both sides of it, so hovering the return lit one circuit's
+//   (h) a flow overlay reaching across the junction, so a DHW cycle animated heating pipe (E003);
+//   (i) a hit target owning pipe on both sides of it, so hovering the return lit one circuit's
 //       return and not the other's (E004);
-//   (i) a pipe drawn inside no hit target at all — invisible by ABSENCE, which is what made (h)
+//   (j) a pipe drawn inside no hit target at all — invisible by ABSENCE, which is what made (i)
 //       read as a selection that merely stops (S011).
 //
 // ── Why node, and why the SVG is PARSED ─────────────────────────────────────────────────────────
@@ -194,14 +195,15 @@ const [VBX, VBY, VBW, VBH] = vb;
 const cssSrc = read(CSS);
 // @keyframes blocks first (nested braces), so the flat rule scan below cannot mistake their inner
 // blocks for rules.
-const kfRotate = new Set();
+const kfRotate = new Map();
 {
   const re = /@keyframes\s+([\w-]+)\s*\{/g;
   let m;
   while ((m = re.exec(cssSrc)) !== null) {
     let depth = 1, j = re.lastIndex;
     while (j < cssSrc.length && depth > 0) { if (cssSrc[j] === '{') depth++; else if (cssSrc[j] === '}') depth--; j++; }
-    if (/rotate\s*\(/.test(cssSrc.slice(re.lastIndex, j))) kfRotate.add(m[1]);
+    const rot = /rotate\s*\(\s*(-?[\d.]+)deg\s*\)/.exec(cssSrc.slice(re.lastIndex, j));
+    if (rot) kfRotate.set(m[1], parseFloat(rot[1]));
   }
 }
 const cssFlat = cssSrc.replace(/@keyframes\s+[\w-]+\s*\{(?:[^{}]|\{[^{}]*\})*\}/g, '');
@@ -248,7 +250,7 @@ for (const r of cssRules) {
 // Which element ids spin about their own BOUNDING BOX, and are actually animated with a rotation.
 // Both halves matter: `transform-box: fill-box; transform-origin: center` is what makes the pivot
 // the bbox centre rather than a coordinate, and the animation is what makes a wrong pivot visible.
-const fillBoxIds = new Set(), rotatedIds = new Set();
+const fillBoxIds = new Set(), rotatedIds = new Set(), animationForId = new Map();
 for (const r of cssRules) {
   const fillBox = /transform-box\s*:\s*fill-box/.test(r.body) && /transform-origin\s*:\s*center/.test(r.body);
   const anim = /animation\s*:\s*([\w-]+)/.exec(r.body);
@@ -258,7 +260,7 @@ for (const r of cssRules) {
     const id = /#([\w-]+)\s*$/.exec(s.trim());
     if (!id) continue;
     if (fillBox) fillBoxIds.add(id[1]);
-    if (spins) rotatedIds.add(id[1]);
+    if (spins) { rotatedIds.add(id[1]); animationForId.set(id[1], anim[1]); }
   }
 }
 const rotorIds = [...fillBoxIds].filter((i) => rotatedIds.has(i)).sort();
@@ -995,6 +997,20 @@ for (const id of rotorIds) {
       '(transform-box: fill-box), so it orbits instead of turning — make the artwork 90°/180° symmetric about the hub');
   }
 }
+// G012: the pump's clockwise direction is part of the visual contract. In screen coordinates that
+// means a positive CSS turn. A green freshness stamp is not enough — the drawing gate pins the
+// direction that a person had to notice.
+{
+  const anim = animationForId.get('scPump');
+  const deg = anim == null ? null : kfRotate.get(anim);
+  if (deg == null) {
+    add('G012', 'scPump', '#scPump has no readable rotating animation',
+      'the pump must use its own positive clockwise keyframe');
+  } else if (deg <= 0) {
+    add('G012', 'scPump', `#scPump uses ${anim} (${fx(deg)}deg), so it does not turn clockwise`,
+      'turn the pump clockwise with a positive rotation');
+  }
+}
 // G008: every EXTERNAL horizontal run sits on ONE of the drawing's two documented levels (the hot
 // side and the cold side). The PHE's two internal counterflow channels deliberately fold between
 // those ports like the installer schematic's opposing combs; their horizontal teeth are component
@@ -1303,6 +1319,7 @@ console.error(
   '  G007 rotor not centred on its hub        G008 run off the two-level grid   G009 unequal run margins\n' +
   '  G010 flow overlay traces no pipe\n' +
   '  G011 a pipe\'s tap area reaches into a fitting drawn earlier (the round line cap overhangs)\n' +
+  '  G012 pump rotates counter-clockwise instead of clockwise\n' +
   '  E001 repeated unit with no name          E002 pill on the wrong branch\n' +
   '  E003 flow overlay spans a junction — one animation cannot state two branches\' flow states\n' +
   '  E004 hit target spans a junction — one highlight cannot select two branches as one pipe\n' +
