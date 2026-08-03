@@ -9132,29 +9132,32 @@ static void test_raw_capture() {
     CHECK(!logic::raw_capture_due(b, true, 9999999 * sec));
 }
 
-// ── Outbound MQTT belongs to a proven X10A installation, never an unwired bench board ────────────
+// ── MQTT may observe before X10A; outbound installation identity still needs proof ──────────────
 static void test_mqtt_publish_gate() {
-    MqttPublishGateState state = MqttPublishGateState::WaitingForX10a;
+    MqttPublishGateState state = MqttPublishGateState::SubscriberOnly;
 
-    // Broker configuration alone proves nothing. With no X10A reply the client itself stays
-    // stopped, so neither application messages nor its shared-topic LWT can reach the broker.
+    // Broker configuration alone proves no installation ownership. The no-LWT client may be
+    // connected for subscriptions, but the gate authorizes no application publication.
     auto d = mqtt_publish_gate_step(state, false, false);
-    CHECK(d.next == MqttPublishGateState::WaitingForX10a);
-    CHECK(!d.start_client && !d.publish_cycle && !d.publish_offline && !d.resumed);
+    CHECK(d.next == MqttPublishGateState::SubscriberOnly);
+    CHECK(!d.promote_publisher && !d.publish_cycle && !d.publish_offline && !d.resumed);
+    d = mqtt_publish_gate_step(state, false, true);
+    CHECK(d.next == MqttPublishGateState::SubscriberOnly);
+    CHECK(!d.promote_publisher && !d.publish_cycle && !d.publish_offline && !d.resumed);
 
-    // The first valid bus cycle authorizes exactly the client start. Publication still waits for
-    // MQTT_EVENT_CONNECTED rather than racing the asynchronous connect.
-    d = mqtt_publish_gate_step(state, true, false);
+    // The first valid bus cycle authorizes exactly the replacement by an LWT-bearing client.
+    // Publication still waits for that new client's MQTT_EVENT_CONNECTED.
+    d = mqtt_publish_gate_step(state, true, true);
     CHECK(d.next == MqttPublishGateState::Active);
-    CHECK(d.start_client && !d.publish_cycle && !d.publish_offline && !d.resumed);
+    CHECK(d.promote_publisher && !d.publish_cycle && !d.publish_offline && !d.resumed);
     state = d.next;
     d = mqtt_publish_gate_step(state, true, true);
-    CHECK(d.publish_cycle && !d.start_client && !d.publish_offline);
+    CHECK(d.publish_cycle && !d.promote_publisher && !d.publish_offline);
 
     // A live installation going down gets one explicit offline marker, then complete silence.
     d = mqtt_publish_gate_step(state, false, true);
     CHECK(d.next == MqttPublishGateState::Paused);
-    CHECK(d.publish_offline && !d.publish_cycle && !d.start_client);
+    CHECK(d.publish_offline && !d.publish_cycle && !d.promote_publisher);
     state = d.next;
     d = mqtt_publish_gate_step(state, false, true);
     CHECK(d.next == MqttPublishGateState::Paused);

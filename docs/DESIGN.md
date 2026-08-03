@@ -1127,7 +1127,17 @@ vocabulary exactly:
      itself coloured `--ok` (Connected) / `--warn` (Connecting…) / `--err` (Error) — from
      `mqtt{configured,connected,broker,error}`. There is **no** TLS padlock marker: an `mqtts://`
      broker already shows its scheme in the URL, so the icon only restated the string (`mqtt.tls` is
-     therefore unused by the UI). There is also **no** "HA discovery" row: discovery is streamed
+     therefore unused by the UI). A broker can be connected/green while X10A is unavailable because
+     the no-LWT MQTT session may still receive the configured room-temperature source; X10A owns
+     publication, not broker-link health. While disconnected with a non-empty `error`, the broker
+     remains the primary value and the localised cause is shown in a red panel underneath it;
+     the accessible state contains the same cause. Known firmware reasons are translated, while a
+     future unknown reason falls back to the escaped API text instead of disappearing. Visually the
+     cause reuses the value explainer geometry: a full-row clipped area, 10 px inset,
+     explainer padding/type/line-height, no panel top border, bottom-only `--r-tile` corners,
+     `--shadow-tongue`, and a one-shot `.22s` downward slide. Only its `--err-tint`/`--err` palette
+     differs. The global `prefers-reduced-motion` rule removes that animation. There is also
+     **no** "HA discovery" row: discovery is streamed
      unconditionally on every (re)connect, so a row saying so would carry no information.
    - **Syslog** — **Disabled** (neutral) when no host is set; else `host:port` coloured `--ok` once
      DNS resolves and the advisory reachability probe answers, `--warn` while resolving or when the

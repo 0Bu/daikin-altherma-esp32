@@ -61,14 +61,31 @@ subtle text underneath it and in the accessible name, and unknown future codes f
 human-readable API prose. It also pins the user-intent boundary: an empty address is disabled, while
 a non-empty address whose task/link is down is visibly offline. Discovery does not create a boot mode.
 
+`node test/test_ui_mqtt_status.mjs` executes the production MQTT Connections row together with its
+real German/English dictionary. A disconnected configured broker keeps its endpoint as the primary
+value and shows the bounded runtime cause as subtle error text underneath and in the accessible name.
+Known connection causes are actionable and localised; the former first-X10A wait string remains
+translated for older cached firmware/UI combinations, while unknown future firmware text stays
+visible and escaped. Connecting has no error line, and a connected broker cannot display a stale
+one. The error is a full-row, inset, bottom-rounded tinted tongue with the same clip, spacing,
+typography and downward slide as a value explainer; it is no longer constrained to the endpoint's
+right-hand value column. The global reduced-motion contract removes that non-essential animation.
+
 `node test/test_homehub_discovery_contract.mjs` pins the IDF-facing lifecycle that the pure C++ host
 suite cannot link: boot and the Modbus poll task never browse mDNS, an empty address creates no task,
 and only the dialog's explicit discovery endpoint runs the bounded search. The endpoint returns the
 found address to the form but cannot persist it behind the normal Save/Cancel boundary.
 
 `node test/test_mqtt_x10a_gate_contract.mjs` pins the other IDF-facing ownership boundary: the X10A
-poll task starts before MQTT, `mqtt_ha_start()` cannot start a client or arm the installation LWT,
-and the sole client-start plus all ordinary publications remain behind the X10A gate in `mqtt_task()`.
+poll task starts before MQTT; `mqtt_ha_start()` builds a no-LWT client; `mqtt_task()` starts it for
+saved/test reference subscriptions even without X10A; and the first bus proof cleanly replaces it
+with the LWT-bearing publisher. All ordinary publications remain behind the X10A gate.
+
+`node test/test_mqtt_source_cleanup_contract.mjs` pins the deliberately narrow exception: clearing
+an enabled Weather or HomeHub configuration first persists the disabled state, then requests one
+QoS-1 retained empty tombstone for its source topic. That explicit deletion is serviced on the
+subscriber-only broker connection even without X10A, while no discovery/state/heartbeat publisher
+is reachable from the cleanup boundary. Re-enabling before broker delivery cancels the request.
 
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named
 HomeHub status in the EKRHH register map and the schematic renderer against every X10A operation
@@ -126,8 +143,9 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   `vLwt`): the pre-BUH heat-exchanger outlet (R1T) is chosen over a setpoint, a mixed-zone R1T, or
   the post-BUH (R2T) twin, across the four alias label forms — and, catalog-wide, every detectable
   profile resolves a real measurement and never a setpoint (issue #121, the #35–#39 failure shape).
-- `logic/mqtt_publish_gate.hpp` — an unwired board never starts MQTT or arms the installation LWT;
-  an active board publishes one offline transition on X10A loss, then stays silent until recovery.
+- `logic/mqtt_publish_gate.hpp` — an unwired board may connect/subscribe without an installation
+  LWT but cannot publish; the first X10A proof promotes it, and an active board publishes one offline
+  transition on later X10A loss before ordinary publication stays silent until recovery.
 - `logic/profile_view.hpp` + `def/overlay.hpp` — the generated table plus the temporary page-`0x10`
   supplement as one row sequence, and the **overlay rule** (a block applies only if the base already
   references its page). Asserted: the block is withheld when the page is absent, base rows keep their

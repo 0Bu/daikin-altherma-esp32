@@ -130,11 +130,17 @@ jobs:
         run: ./scripts/run-ui-use-case-tests.sh
 
       # MQTT config alone must not let an unwired spare/debug board speak for the installation.
-      # Pin the IDF-facing lifecycle that the pure gate test cannot link: X10A starts first, the
-      # sole esp-mqtt start call is inside the gate, and ordinary publishes remain behind it.
+      # Pin the IDF-facing lifecycle that the pure gate test cannot link: a no-LWT session may
+      # subscribe before X10A; the first bus proof replaces it with the LWT publisher; and ordinary
+      # publishes remain behind the gate.
       - name: Test X10A-gated MQTT lifecycle
         run: node test/test_mqtt_x10a_gate_contract.mjs
 
+      # Clearing an enabled Weather or HomeHub connection is explicit broker-cleanup intent. Pin
+      # the only X10A-free outbound exception: one retained empty tombstone for that source topic,
+      # requested only after the disable was persisted; no ordinary publisher may run there.
+      - name: Test explicit MQTT source cleanup
+        run: node test/test_mqtt_source_cleanup_contract.mjs
       # Domain-correctness gate: are the published values physically RIGHT? The logic tests above
       # verify the logic they are handed; they cannot see a well-formed value that is simply
       # false — a wrong converter compiles, passes them all, and publishes -971.5 °C to Home

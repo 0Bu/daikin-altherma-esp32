@@ -1204,14 +1204,19 @@ The Home Assistant bridge:
   both paths, so a successful pre-save test cannot disagree with live capture. JSON parsing, string
   work, transient test subscription changes and all publishing happen in the task, so the mqtt
   event loop is never blocked by either.
-- **X10A-gated installation ownership.** MQTT configuration is not authority to speak for the
-  installation. The client itself (including its shared `<base>/status` last will) starts only after
-  `hp_stats().connected` proves a valid X10A reply. An unwired spare/debug board consequently emits
-  no discovery, state, heartbeat, crash, weather, Modbus or cleanup publication. Once activated, an
-  X10A loss publishes one retained `offline` transition and pauses every other publish; recovery on
-  the same broker session restores `online` plus a fresh X10A/heartbeat seed, while a broker
-  reconnect follows the normal full announce path. HTTP diagnostics and the X10A retry loop remain
-  independent of the gate.
+- **X10A-gated installation ownership, not MQTT input.** MQTT configuration is not authority to
+  speak for the installation. Before the first valid X10A reply, the client connects without the
+  shared `<base>/status` last will and services only the configured reference-temperature
+  subscription/test. All ordinary discovery, state, heartbeat, crash, weather and Modbus publication
+  remains blocked. The only outbound exception is explicit Settings cleanup: clearing an enabled
+  Weather or HomeHub configuration queues that source's retained empty tombstone after the disabled
+  config was persisted. When `hp_stats().connected` first proves the bus, the task cleanly stops and
+  destroys that no-LWT session, then creates one ordinary client whose CONNECT carries the shared
+  installation LWT; the two MQTT/TLS sessions never coexist. Once activated, an X10A loss publishes
+  one retained `offline` transition and pauses every other publish while inbound subscriptions stay
+  live. Recovery on the same broker session restores `online` plus a fresh X10A/heartbeat seed,
+  while a broker reconnect follows the normal full announce path. HTTP diagnostics and the X10A
+  retry loop remain independent of the gate.
 - **Discovery is streamed.** A full Altherma value set can be 30–40+ entities; the bridge emits one
   entity's discovery config at a time (retained) on (re)connect, so it never needs one large
   contiguous heap block — the same memory discipline as the rest of the firmware. Layout-marker
@@ -1238,7 +1243,9 @@ The Home Assistant bridge:
   for an enabled HomeHub stack and intentionally not referenced by HA discovery. Int16 enum values
   retain the raw numeric Modbus constant; `/values` carries separate semantic metadata so the browser
   can name them without putting prose on MQTT. A disconnected HomeHub publishes `{}` rather than
-  preserving a previous TCP session's values; disabling the stack retracts the Modbus data topic.
+  preserving a previous TCP session's values; clearing the HomeHub address queues one QoS-1 retained
+  empty tombstone after the disabled config was persisted, retracting the Modbus data topic even if
+  X10A is unavailable.
   The former retained `<base>/modbus/status` duplicate is retired because link state, receive count
   and failures already live in `<base>/heartbeat`. The
   27 discovery configs emitted by builds through `v1.0.0-dev.257` are permanent cleanup targets:
@@ -1248,7 +1255,8 @@ The Home Assistant bridge:
   reconnects do not publish either empty retired topic.
 - **Forecast evidence topic.** `<base>/weather/openmeteo/forecast` is an independent retained JSON snapshot,
   published on change only while Open-Meteo is configured. A disabled source publishes no synthetic
-  state document; an exact retained probe tombstones an older payload only when one is actually present.
+  state document; clearing both location fields directly sends one QoS-1 retained empty tombstone,
+  so the broker definitively removes an older payload even if X10A is unavailable.
   Values and their Open-Meteo/ICON provenance,
   fetch time, forecast horizon start, validity limit, runtime error and numeric `available`/`fresh`
   flags travel atomically. A failed refresh may retain the last figures for forensic comparison, but

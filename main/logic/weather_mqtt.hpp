@@ -35,7 +35,7 @@ struct WeatherMqttSnapshot {
 // The persisted config and the weather task's runtime snapshot can briefly disagree while
 // POST /set_weather wakes the task. Publishing is allowed only after both agree that weather is
 // configured. Disabling is different from that short enable transition: it owns a retained-topic
-// cleanup probe so an older forecast cannot survive after its source was removed.
+// tombstone so an older forecast cannot survive after its source was removed.
 enum class WeatherMqttAction { Suppress, Publish, CleanupRetained };
 
 inline WeatherMqttAction weather_mqtt_action(bool config_enabled, bool runtime_configured) {

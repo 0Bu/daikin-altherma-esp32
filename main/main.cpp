@@ -105,9 +105,9 @@ extern "C" void app_main() {
     daik::http_start();                  // esp_http_server on :80 (web UI + config + OTA + MCP)
     if (!daik::safe_mode_active()) {
         daik::env3_start();              // optional outdoor climate sensor (no-op unless configured)
-        // Start the core X10A owner before MQTT: the bridge does not start its broker client (and
-        // therefore cannot arm the installation LWT or publish anything) until this task has
-        // committed a valid bus response.
+        // Start the core X10A owner before MQTT so the bridge can promote as soon as a valid bus
+        // response arrives. Until then MQTT uses a no-LWT subscriber-only connection for the room
+        // source; no installation discovery/state/diagnostic payload is published.
         daik::hp_poll_start();           // X10A poll engine
         daik::mqtt_ha_start();           // HA MQTT-Discovery bridge (no-op if mqtt_uri empty)
         daik::weather_forecast_start();  // direct Open-Meteo HTTPS/JSON fetch (no-op without location)
