@@ -341,43 +341,80 @@ function historyView(id) {
            v: union, series };
 }
 
-// Categorical states need timelines, not numeric curves. Paired states draw one lane per source:
-// light grey is inactive, petrol/blue is active and hatching is no answer.
+// Categorical states need timelines, not numeric curves. Every valid state gets an explicit level,
+// legend entry and coloured span; hatching is reserved for no answer. Exact phase intervals belong
+// in the chart's hover/touch/keyboard tooltip instead of a second textual list below the same graph.
+// Paired states
+// draw one outlined lane per source, so colour means STATE while the outline/label means SOURCE.
 // Durations are explicitly sampled RASTER time. Event-folded BSH, BUH and defrost buckets keep an ON
 // observed during a five-minute bucket; they are not presented as second-accurate runtime.
 const STATE_HIST = Object.freeze({
   defrost_state: {
     classify: (v) => [0, 10].includes(v) ? v === 10 : null,
-    primary: "x10a", total: "hist.defrost_total", run: "hist.defrost_run",
+    primary: "x10a", total: "hist.defrost_total", run: "hist.state_phase_run",
     none: "hist.defrost_none", active: "hist.defrost_active", inactive: "hist.defrost_inactive",
     aria: "hist.defrost_aria",
+    levels: [
+      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
+        cls: "state-off", label: "hist.defrost_inactive" },
+      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
+        cls: "defrost-on", label: "hist.defrost_active" },
+    ],
   },
   quiet_state: {
     classify: (v) => [0, 10].includes(v) ? v === 10 : null,
-    primary: "x10a", total: "hist.quiet_total", run: "hist.quiet_run",
+    primary: "x10a", total: "hist.quiet_total", run: "hist.state_phase_run",
     none: "hist.quiet_none", active: "hist.quiet_active", inactive: "hist.quiet_inactive",
     aria: "hist.quiet_aria",
+    levels: [
+      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
+        cls: "state-off", label: "hist.quiet_inactive" },
+      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
+        cls: "quiet-on", label: "hist.quiet_active" },
+    ],
   },
   smart_grid_mode: {
     classify: (v) => [0, 10, 20, 30].includes(v) ? v === 20 : null,
-    primary: "modbus", total: "hist.boost_total", run: "hist.boost_run",
+    primary: "modbus", total: "hist.boost_total", run: "hist.state_phase_run",
     none: "hist.boost_none", active: "hist.boost_active", inactive: "hist.boost_inactive",
     aria: "hist.boost_aria",
+    // BOOST itself is mode 2, but a Boost inspector that paints modes 0, 1 and 3 as one identical
+    // "off" bar hides whether the controller was free, inhibited or forced on. Paint the complete
+    // four-state Smart-Grid enum and list every HomeHub phase; the Boost total above remains the
+    // sampled amount of mode 2 so the permanent BOOST pill and its history keep the same contract.
+    levels: [
+      { match: (v) => [0, 10, 20, 30].includes(v) ? v === 0 : null,
+        cls: "sg-free", label: "sg.mode0" },
+      { match: (v) => [0, 10, 20, 30].includes(v) ? v === 10 : null,
+        cls: "sg-forced-off", label: "sg.mode1" },
+      { match: (v) => [0, 10, 20, 30].includes(v) ? v === 20 : null,
+        cls: "sg-recommended", label: "sg.mode2" },
+      { match: (v) => [0, 10, 20, 30].includes(v) ? v === 30 : null,
+        cls: "sg-forced-on", label: "sg.mode3" },
+    ],
   },
   bsh_state: {
     classify: (v) => [0, 10].includes(v) ? v === 10 : null,
-    primary: "x10a", total: "hist.heater_total", run: "hist.heater_run",
+    primary: "x10a", total: "hist.heater_total", run: "hist.state_phase_run",
     none: "hist.heater_none", active: "hist.heater_active", inactive: "hist.heater_inactive",
     aria: "hist.heater_aria",
+    levels: [
+      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
+        cls: "state-off", label: "hist.heater_inactive" },
+      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
+        cls: "heater-on", label: "hist.heater_active" },
+    ],
   },
   buh_state: {
     classify: (v) => [0, 10, 20].includes(v) ? v > 0 : null,
-    primary: "x10a", total: "hist.buh_total", run: "hist.buh_run",
+    primary: "x10a", total: "hist.buh_total", run: "hist.state_phase_run",
     none: "hist.buh_none", active: "hist.buh_active", inactive: "hist.buh_inactive",
     aria: "hist.buh_aria",
     valueLabel: (v) => v === 0 ? "hist.buh_inactive"
       : v === 10 ? "hist.buh_step1" : v === 20 ? "hist.buh_step2" : "",
     levels: [
+      { match: (v) => [0, 10, 20].includes(v) ? v === 0 : null,
+        cls: "state-off", label: "hist.buh_inactive" },
       { match: (v) => [0, 10, 20].includes(v) ? v === 10 : null,
         cls: "step1", label: "hist.buh_step1" },
       { match: (v) => [0, 10, 20].includes(v) ? v === 20 : null,
@@ -387,8 +424,14 @@ const STATE_HIST = Object.freeze({
   valve_dhw: {
     classify: (v) => [0, 10].includes(v) ? v === 10 : null,
     primary: "x10a", total: "hist.valve_dhw_total", inactiveTotal: "hist.valve_space_total",
-    run: "hist.valve_run", none: "hist.valve_none",
+    run: "hist.state_phase_run", none: "hist.valve_none",
     active: "hist.valve_dhw", inactive: "hist.valve_space", aria: "hist.valve_aria",
+    levels: [
+      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
+        cls: "valve-space", label: "hist.valve_space" },
+      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
+        cls: "valve-dhw", label: "hist.valve_dhw" },
+    ],
   },
 });
 function stateRuns(series, wanted, classify) {
@@ -417,6 +460,16 @@ function stateRunWhen(view, from, count) {
   const recent = ((view.v.length - from - count) * view.dt) / 3600;
   return t("hist.boost_ago_range", old.toFixed(1), Math.max(0, recent).toFixed(1));
 }
+// The complete contiguous phase containing sample `i`. The same helper serves categorical states
+// and the HomeHub outdoor-register plateau note: both are answers about an INTERVAL, not just the
+// one bucket under the cursor. `key` decides what counts as the same phase.
+function sampleRunAt(values, i, key = (v) => v) {
+  const wanted = key(values[i]);
+  let from = i, to = i;
+  while (from > 0 && key(values[from - 1]) === wanted) from--;
+  while (to + 1 < values.length && key(values[to + 1]) === wanted) to++;
+  return [from, to - from + 1];
+}
 function stateHistHtml(id, name, view, wrap, cfg) {
   const n = view.v.length;
   const spanH = Math.max(1, Math.round((n * view.dt) / 3600));
@@ -439,10 +492,10 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     )).join("");
     const missing = stateRuns(s, null, cfg.classify).map(([from, count]) =>
       `<span class="vhist-state-gap" style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
-    return `<div class="vhist-state-track" aria-hidden="true">${on}${missing}</div>`;
+    return `<div class="vhist-state-track ${s.source}" aria-hidden="true">${on}${missing}</div>`;
   }).join("");
   const legend = view.series.length > 1 || view.series[0].source === "modbus"
-    ? `<div class="vhist-legend vhist-state-legend">${view.series.map((s) =>
+    ? `<div class="vhist-legend vhist-state-legend${cfg.levels ? " vhist-source-lanes" : ""}">${view.series.map((s) =>
         `<span class="vhist-source${s.source === "modbus" ? " mb" : ""}"><i></i>${esc(s.name)}</span>`).join("")}</div>`
     : "";
   const levelLegend = cfg.levels
@@ -459,16 +512,6 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   }
   const totalText = t(cfg.total, histDuration(total)) + (cfg.inactiveTotal
     ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "");
-  const detailedRuns = cfg.levels ? cfg.levels.flatMap((level) =>
-    stateRuns(primary, true, level.match).map(([from, count]) => [from, count, level.label]))
-    .sort((a, b) => a[0] - b[0]) : [];
-  const runList = active.length
-    ? (cfg.levels ? detailedRuns.map(([from, count, label]) =>
-        `<span>${esc(t(cfg.run, t(label), stateRunWhen(view, from, count),
-                      histDuration(count * view.dt)))}</span>`).join("")
-      : active.map(([from, count]) => `<span>${esc(t(cfg.run, stateRunWhen(view, from, count),
-                                                    histDuration(count * view.dt)))}</span>`).join(""))
-    : `<span>${esc(t(cfg.none))}</span>`;
   return wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.since", spanH))}</span>` +
       `<span class="vhist-range mono num">${esc(totalText)}</span></div>` + legend + levelLegend +
@@ -481,8 +524,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     `</div>` +
     `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
       (gaps ? `<span class="vhist-gap">${esc(t("hist.gaps", gaps))}</span>` : "") +
-      `<span>${esc(t("hist.now"))}</span></div>` +
-    `<div class="vhist-state-runs"><strong>${esc(primary.name)}</strong>${runList}</div>`
+      `<span>${esc(t("hist.now"))}</span></div>`
   , "vhist-state");
 }
 
@@ -702,15 +744,36 @@ function scrubText(h, i) {
       if (h.id !== "smart_grid_mode") return label;
       const mode = v / 10;
       return Number.isInteger(mode) && mode >= 0 && mode <= 3
-        ? `${label} · ${t(`sg.mode${mode}`)}` : t("hist.nm");
+        ? `${t(`sg.mode${mode}`)}${mode === 2 ? ` · ${label}` : ""}` : t("hist.nm");
     }
     return v != null ? (v / 10).toFixed(1) + (s.unit ? " " + s.unit : "")
          : histHeld(s, i) ? t("hist.held") : t("hist.nm");
   };
+  const cfg = STATE_HIST[h.id];
+  if (cfg) {
+    // A state chart is already a sequence of PHASES. Hovering any point therefore names the whole
+    // containing phase — source, state, start/end and sampled duration — while the chart itself
+    // stays compact. Newlines keep paired X10A/HomeHub answers readable in the same popup.
+    return h.series.map((s) => {
+      const [from, count] = sampleRunAt(s.v, i);
+      return `${s.source === "modbus" ? "Modbus" : "X10A"} ` +
+        t(cfg.run, valueText(s), stateRunWhen(h, from, count), histDuration(count * h.dt));
+    }).join("\n");
+  }
   // With two lines the readout names both instruments at the SAME instant. A gap in either remains
-  // visible as words rather than borrowing its neighbour's value.
+  // visible as words rather than borrowing its neighbour's value. The HomeHub outdoor register has
+  // no source timestamp, so its popup also states the complete observed plateau and the unknown
+  // measurement age — a fresh TCP read must not be mislabeled as a fresh sensor observation.
+  const sourceText = (s) => {
+    let out = `${s.source === "modbus" ? "Modbus" : "X10A"} ${valueText(s)}`;
+    if (h.id === "outdoor_air" && s.source === "modbus" && s.v[i] != null) {
+      const [from, count] = sampleRunAt(s.v, i);
+      out += ` · ${t("hist.modbus_plateau", stateRunWhen(h, from, count), histDuration(count * h.dt))}`;
+    }
+    return out;
+  };
   const val = h.series && (h.series.length > 1 || h.series[0].source === "modbus")
-    ? h.series.map((s) => `${s.source === "modbus" ? "Modbus" : "X10A"} ${valueText(s)}`).join(" · ")
+    ? h.series.map(sourceText).join(h.id === "outdoor_air" ? "\n" : " · ")
     : valueText(h.series ? h.series[0] : h);
   let when;
   if (h.t0 != null) {

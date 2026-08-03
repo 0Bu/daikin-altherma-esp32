@@ -182,7 +182,7 @@ function liveData() {
     // the DHW flag / valve / flow separately prove whether the controller acted on it.
     sgMode: mbSmartGridMode(),
     // Source provenance for schematic fields. Normally empty: X10A leads. A field is added only
-    // when liveData replaces an unavailable X10A reading with the independent HomeHub measurement;
+    // when liveData replaces an unavailable X10A reading with the independent HomeHub register;
     // renderLive then gives that pill the petrol source colour and the inspector names the register.
     mbFields: new Set(),
   };
@@ -208,8 +208,8 @@ function liveData() {
   // UNKNOWN rps (a profile with no such row) reads as CURRENT, never as held over: that is absence
   // of evidence, and blanking on a guess would cost a reading that may well be live.
   d.ouHeldOver = d.rps != null && d.rps === 0;
-  // X10A's outdoor-air row is held over at rest, but the HomeHub's independent sensor keeps
-  // measuring. Prefer that CURRENT reading to a blank pill, while retaining ouHeldOver so every
+  // X10A's outdoor-air row is held over at rest, but the independently polled HomeHub register can
+  // continue changing. Prefer that register value to a blank pill, while retaining ouHeldOver so every
   // other page-0x20/0x21 value (notably discharge temperature) is still withheld. The pairing is the
   // firmware's structural concept, never a browser label guess; a missing/disconnected HomeHub still
   // leaves the ordinary "—" behaviour intact.
@@ -458,7 +458,7 @@ function renderLive() {
   // Schematic badges
   // Outdoor air + discharge come off the pages the outdoor unit stops refreshing when it stops
   // running (d.ouHeldOver): never assert the retained X10A number as current. Outdoor air may instead
-  // carry the independent HomeHub measurement (`mbFields.out`); discharge has no such pairing and
+  // carry the independent HomeHub register (`mbFields.out`); discharge has no such pairing and
   // keeps the ordinary "—". Petrol makes the replacement source visible without adding a caption.
   setTxt("svOut", ouReadingText(d, "out", d.out, fmt1)); setTxt("svRps", fmt0(d.rps));
   // High-side badge shows the circuit pressure (real refrigerant sensor when the compressor's own HP
@@ -681,10 +681,10 @@ const INSPECT = {
           : { en: "Running — the HomeHub reports the compressor ON; speed and detailed outdoor-unit readings require X10A.",
               de: "Läuft — der HomeHub meldet den Verdichter ON; Drehzahl und detaillierte Außengerätewerte benötigen X10A." }
         // Says why held X10A readings are not repeated at rest (logic/ou_stale.hpp). A structurally
-        // paired live HomeHub outdoor reading may replace the held value; unpaired fields stay "—".
+        // paired HomeHub outdoor register may replace the held value; unpaired fields stay "—".
         : d.ouHeldOver && d.mbFields && d.mbFields.has("out")
-          ? { en: "Idle — the compressor is stopped, so no active heating or cooling transfer is taking place. X10A stops refreshing the outdoor unit's own sensors while it rests; outdoor air is therefore shown from the live HomeHub measurement, while discharge temperature remains \"—\".",
-              de: "Standby — der Verdichter steht, daher findet kein aktiver Heiz- oder Kühltransfer statt. X10A aktualisiert die eigenen Sensoren der Außeneinheit im Stillstand nicht mehr; die Außentemperatur stammt deshalb aus der aktuellen HomeHub-Messung, die Heißgastemperatur bleibt „—“." }
+          ? { en: "Idle — the compressor is stopped, so no active heating or cooling transfer is taking place. X10A stops refreshing the outdoor unit's own sensors while it rests; outdoor air is therefore shown from the HomeHub Modbus register, while discharge temperature remains \"—\". The register is being read successfully but carries no source timestamp, so the age of the underlying measurement is unknown.",
+              de: "Standby — der Verdichter steht, daher findet kein aktiver Heiz- oder Kühltransfer statt. X10A aktualisiert die eigenen Sensoren der Außeneinheit im Stillstand nicht mehr; die Außentemperatur stammt deshalb aus dem HomeHub-Modbus-Register, die Heißgastemperatur bleibt „—“. Das Register wird erfolgreich gelesen, trägt aber keinen Quellzeitstempel; das Alter der zugrunde liegenden Messung ist daher unbekannt." }
           : { en: "Idle — the compressor is stopped, so no active heating or cooling transfer is taking place. The outdoor unit also stops refreshing its own sensors while it rests, so outdoor air and discharge temperature read \"—\" rather than repeat the last run's values.",
               de: "Standby — der Verdichter steht, daher findet kein aktiver Heiz- oder Kühltransfer statt. Die Außeneinheit aktualisiert im Stillstand auch ihre eigenen Sensoren nicht mehr; Außenluft und Heißgastemperatur zeigen daher „—“ statt die Werte des letzten Laufs zu wiederholen." },
     rows: [/outdoor air/i, /inv frequency/i, /^high pressure$/i, /discharge pipe temp/i, /expansion valve ?1/i, /defrost operation/i],
@@ -1437,10 +1437,11 @@ function labelSchematicHits() {
 }
 
 // Tap a hit target: select it, or close it when it is already open (tapping the same thing twice is
-// the natural "done reading" gesture, and there is no other close on touch besides the ✕).
+// the natural "done reading" gesture, and there is no other close on touch besides the ✕). Keep the
+// viewport exactly where the reader put it: the inspector is deliberately below the drawing and can
+// be taller than the viewport, so scrollIntoView() would align its lower edge and move the diagram
+// out of sight just when the reader asks for its explanation.
 function inspectPick(key) {
-  const opening = S.insp !== key;
-  S.insp = opening ? key : null;
+  S.insp = S.insp !== key ? key : null;
   renderInspect();
-  if (opening) $("inspCard").scrollIntoView({ block: "nearest", inline: "nearest" });
 }

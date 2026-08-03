@@ -14,9 +14,9 @@ const DEMO = (() => {
   // human-readable text on the public wire.
   const SG = (mode) => ({ label: "Smart-Grid operation mode", value: mode, unit: "",
                            off: 56, enum: "smart_grid_mode" });
-  // The independent HomeHub outdoor-air sensor keeps measuring while X10A's page 0x20 is held over
-  // at rest. Its structural concept is what lets the standby scene exercise the real per-reading
-  // fallback instead of painting the retained X10A number or a hard-coded demo value.
+  // The independently polled HomeHub outdoor-air register can continue changing while X10A's page
+  // 0x20 is held over at rest. Its structural concept lets the standby scene exercise the real
+  // fallback without claiming that a successful register read proves the measurement's age.
   const MB_OUT = (value) => ({ label: "Outdoor air temperature", value: String(value), unit: "°C",
                                off: 44, concept: "outdoor_air" });
   const MB_BSH = (on) => ({ label: "Booster heater run", value: on ? 1 : 0, unit: "",
@@ -35,6 +35,7 @@ const DEMO = (() => {
     ["defrost_state", "Defrost Operation"],
     ["quiet_state", "Silent Mode"],
     ["bsh_state", "BSH"],
+    ["valve_dhw", "3way valve(On:DHW_Off:Space)"],
     ["buh_step1", "BUH Step1"],
     ["buh_step2", "BUH Step2"],
     ["smart_grid_mode", "Smart Grid operation mode"],
@@ -48,6 +49,7 @@ const DEMO = (() => {
     ["room_temp", "Room temperature"],
     ["quiet_state", "Quiet mode operation"],
     ["bsh_state", "Booster heater run"],
+    ["valve_dhw", "3-way valve"],
     ["smart_grid_mode", "Smart Grid operation mode"],
   ].map(([id, label]) => ({ id, label }));
   const histBase = {
@@ -61,10 +63,12 @@ const DEMO = (() => {
     quiet_state:   [0, 10, 10, 10, 0, 0, 0, 10, 10, 0, 0, 0],
     // Binary state in tenths. The two ON buckets are sampled active windows, not exact runtime.
     bsh_state:     [0, 0, 0, 10, 10, 0, 0, 0, 0, 0, 0, 0],
+    valve_dhw:     [0, 0, 10, 10, 0, 0, 10, 10, 0, 0, 0, 0],
     buh_step1:     [0, 0, 10, 10, 10, 10, 0, 0, 10, 10, 0, 0],
     buh_step2:     [0, 0, 0, 0, 10, 10, 0, 0, 0, 10, 0, 0],
-    // Full Smart-Grid modes in tenths, like the real /history wire: two mode-2 Boost intervals.
-    smart_grid_mode: [0, 0, 20, 20, 20, 0, 0, 20, 20, 0, 0, 0],
+    // Full Smart-Grid modes in tenths, like the real /history wire. All four manufacturer modes and
+    // a missing raster are present so the inspector demo exercises every categorical phase.
+    smart_grid_mode: [0, 0, 10, 10, 20, 20, 30, 30, null, 0, 20, 20],
   };
   const hist = (id, source) => {
     const x = histBase[id];
@@ -72,7 +76,7 @@ const DEMO = (() => {
     // Keep both instruments recognisably close but not identical. Modbus continues through the
     // deliberate X10A outdoor-air gap, which makes the dual-source contract visible in an inspector.
     const state = id === "smart_grid_mode" || id === "bsh_state" || id === "defrost_state" ||
-      id === "quiet_state" || id.startsWith("buh_step");
+      id === "quiet_state" || id === "valve_dhw" || id.startsWith("buh_step");
     const v = state ? x : source === "modbus"
       ? x.map((n, i) => n == null ? 53 + i : n + (i % 3 === 0 ? 1 : 0))
       : x;

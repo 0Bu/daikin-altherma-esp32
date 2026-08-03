@@ -852,8 +852,8 @@ const MB_DELTA_WHY = {
     de: "der HomeHub misst am Plattentauscher, X10A vor dem Reserveheizer",
   },
   outdoor_air: {
-    en: "while the compressor rests X10A holds the last run's value — the HomeHub keeps measuring",
-    de: "bei stehendem Verdichter hält X10A den Wert des letzten Laufs — der HomeHub misst weiter",
+    en: "while the compressor rests X10A holds the last run's value — the independently polled HomeHub register can continue changing, but carries no measurement timestamp",
+    de: "bei stehendem Verdichter hält X10A den Wert des letzten Laufs — das unabhängig abgefragte HomeHub-Register kann sich weiter ändern, trägt aber keinen Messzeitstempel",
   },
   room_temp: {
     en: "the two read the room from different controllers",
