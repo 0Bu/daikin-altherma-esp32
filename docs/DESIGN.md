@@ -113,9 +113,9 @@ failed in two ways a request cannot — silently (a dropped queue message froze 
 reboot, #238) and globally (its broadcaster ran the `/status` builder on the task that owns the X10A
 UART, #241). Every browser now gets the same live UI instead of one class getting a manual reload.
 Both cadences are the SCREEN's, not the plant's: the poll engine still reads the bus at 1 Hz. Once
-the device is on the network the app opens on the **dashboard** and stays there unless the user asks
-for **Settings** (the header gear, §5.6). That is the whole navigation tree — two screens, one way
-back (the header chevron, or `Esc`):
+the device is on the network the app opens on the **dashboard** unless its URL addresses **Settings**
+or one of Settings' popups. That is the whole navigation tree — two screens plus addressable modal
+children, one way back at each level (the header chevron, popup close action, browser Back, or `Esc`):
 
 ```
                     ┌─────────────── served from SoftAP (192.168.4.1) ───────────────┐
@@ -138,9 +138,14 @@ back (the header chevron, or `Esc`):
                                                                               └─ Channel/Language ─▶ select
 ```
 
-There is **no routing and no history integration**: the screen is app state, not a URL. The page is
-served from the device with no paths, and a hash route would survive a reload into a screen the user
-did not ask to be on.
+The device still serves one document and no client-side paths. Its selected place is a **hash route**,
+so it never creates another firmware HTTP resource: `/` is the dashboard, `/#settings` is Settings,
+and `/#settings/<popup>` addresses each dialog (for example `wifi`, `room-temperature`,
+`board-hardware`, or `bug-report`). The gear and every popup open add browser-history entries.
+Browser Back/Forward, the header chevron, Cancel/backdrop, Save and `Esc` all traverse or canonicalize
+the same hierarchy instead of maintaining a second navigation state. Reloading or sharing one of
+these URLs restores exactly that screen/dialog through its normal fill lifecycle. A first status
+response may hydrate a restored form, but never overwrites a draft the user has already begun.
 
 The **dashboard** carries no config at all. Every write lives on **Settings** (§5.6): the WiFi
 credentials, MQTT broker, Syslog and NTP servers are a **modal** off their row on the Connections
@@ -1102,7 +1107,8 @@ block butted against the round CTA and steps cards below.
 The dashboard header's **gear** (right, `.iconbtn.bordered`) is the only way off the dashboard. It
 opens **Settings**, which swaps the dashboard header for a **back header** — a chevron plus the
 screen title. `Esc` leaves the same way, but only when no modal is open: a modal owns `Esc` first, so
-one key press never both closes a dialog and leaves the screen behind it.
+one key press never both closes a dialog and leaves the screen behind it. Settings is addressable as
+`#settings`; each modal extends that route with its stable human-readable name.
 
 **Settings is flat.** No menu of entries, no sub-screens: the gear lands directly on the five cards,
 stacked in the same single column as everything else (§9). The Connections tile is the *same* card it
@@ -1514,5 +1520,6 @@ Pipeline: `www/index.html` (markup + `//@@INLINE` markers) + `www/style.css` + t
 script fragments in `www/app.sources`, spliced by `inline_assets.cmake` into one gzipped page embedded
 in the firmware; `setup.html` is gzipped separately for the captive portal. The fragments remain one
 lexical scope and add neither browser requests nor a package-manager dependency. The SPA is view-
-switched client-side from `/status`; no routing, no external assets (CSP-clean, offline-capable on
-the device).
+switched client-side from `/status` and hash-routed through the browser History API; the hash never
+reaches the firmware HTTP server. There are no external assets (CSP-clean, offline-capable on the
+device).

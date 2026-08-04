@@ -1,7 +1,6 @@
 // Web UI for daikin-altherma-esp32 — a client-side, view-switched SPA over the firmware HTTP API.
-// The dashboard is what the app opens on and where it spends its life; the header gear leads to a
-// Settings menu whose entries push sub-screens (Connections today), and each connection is edited
-// from a modal there.
+// The hash-free URL is the dashboard; the header gear leads to the flat, addressable Settings screen,
+// and each configuration row opens its own addressable modal there.
 // Design contract: docs/DESIGN.md. Split from index.html for edit locality; spliced back in at
 // build time (inline_assets.cmake). No framework, no external assets.
 "use strict";

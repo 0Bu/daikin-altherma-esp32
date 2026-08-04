@@ -67,14 +67,94 @@ const S = {
 // Two screens, both in the DOM; only .active shows. Deliberately FLAT — the gear opens the whole
 // configuration at once, with no menu level in between: there is little enough of it that a menu
 // would be a list of one or two entries whose only job is to hide a card behind a second tap.
-// PARENT still maps the way back, so the header chevron and Esc walk the same path. There is no
-// URL/history integration on purpose — the page is served from the device with no paths, and a hash
-// route would survive a reload into a screen the user did not ask for.
+//
+// The VIEW is app state, but the selected place is also a stable hash route. The firmware therefore
+// still serves exactly one path while Settings and each popup become reloadable, linkable browser-
+// history entries. A popup is a child of Settings: Back/Cancel/Esc returns to #settings, then another
+// Back returns to the dashboard. Hashes are intentionally human-readable, not DOM ids; DOM names can
+// change without invalidating a bookmarked configuration URL.
 const VIEW = { dashboard: "viewDash", settings: "viewSettings" };
 const PARENT = { settings: "dashboard" };
 const TITLE = { settings: () => t("nav.settings") };
-// Every overlay that owns the Esc key; the navigation Esc stands down while one of them is open.
-const MODALS = ["wifiModal", "mqttModal", "refTempModal", "weatherModal", "syslogModal", "ntpModal", "homehubModal", "boardModal", "env3Modal", "bugModal"];
+const POPUP_ROUTES = Object.freeze({
+  wifiModal: "wifi",
+  mqttModal: "mqtt",
+  refTempModal: "room-temperature",
+  weatherModal: "weather",
+  syslogModal: "syslog",
+  ntpModal: "ntp",
+  homehubModal: "homehub",
+  boardModal: "board-hardware",
+  env3Modal: "env-iii",
+  bugModal: "bug-report",
+});
+const ROUTE_POPUPS = Object.freeze(Object.fromEntries(
+  Object.entries(POPUP_ROUTES).map(([id, route]) => [route, id])));
+// Every overlay that owns the Esc key; deriving it from the route registry makes an unaddressable
+// shipped modal impossible without also breaking the interaction matrix's HTML/registry equality.
+const MODALS = Object.freeze(Object.keys(POPUP_ROUTES));
+const ROUTE_STATE = "daikinUiRoute";
+let _applyingRoute = false;
+let _routePopupNeedsHydration = null;
+
+function parseRoute(hash = location.hash) {
+  if (!hash || hash === "#") return { valid: true, stage: "dashboard", popup: null, hash: "" };
+  if (hash === "#settings") return { valid: true, stage: "settings", popup: null, hash };
+  const match = /^#settings\/([^/]+)$/.exec(hash);
+  const popup = match && Object.prototype.hasOwnProperty.call(ROUTE_POPUPS, match[1])
+    ? ROUTE_POPUPS[match[1]] : null;
+  return popup ? { valid: true, stage: "settings", popup, hash }
+               : { valid: false, stage: "dashboard", popup: null, hash: "" };
+}
+
+function routeHash(stage, popup = null) {
+  if (stage !== "settings") return "";
+  return popup ? `#settings/${POPUP_ROUTES[popup]}` : "#settings";
+}
+
+// Keep query parameters (if a reverse proxy added any) while changing only the client-side route.
+// Supplying the path as well is required to CLEAR a hash; pushState("", ...) would retain it.
+function routeUrl(hash) {
+  return `${location.pathname || "/"}${location.search || ""}${hash}`;
+}
+
+function browserHistory() {
+  return typeof history !== "undefined" && typeof history.pushState === "function" ? history : null;
+}
+
+function writeRoute(stage, popup = null, { replace = false, parent } = {}) {
+  const hash = routeHash(stage, popup);
+  const h = browserHistory();
+  if (!h) {
+    if (location.hash !== hash) location.hash = hash;
+    return;
+  }
+  const previous = parseRoute(location.hash).hash;
+  const state = { [ROUTE_STATE]: true, route: hash,
+    parent: parent !== undefined ? parent : replace ? (h.state?.parent ?? null) : previous };
+  h[replace ? "replaceState" : "pushState"](state, "", routeUrl(hash));
+}
+
+function showStage(stage) {
+  S.stage = stage;
+  for (const [st, id] of Object.entries(VIEW)) $(id).classList.toggle("active", st === stage);
+  renderHeader();
+  window.scrollTo(0, 0);
+}
+
+function returnToRoute(stage, popup = null) {
+  const wanted = routeHash(stage, popup);
+  const current = parseRoute(location.hash).hash;
+  const h = browserHistory();
+  if (h?.state?.[ROUTE_STATE] && h.state.route === current && h.state.parent === wanted &&
+      typeof h.back === "function") {
+    h.back();
+    return;
+  }
+  // A directly loaded/bookmarked popup has no in-app parent entry. Replace it with Settings rather
+  // than sending Back to an unrelated previous site or leaving a closed popup in the address bar.
+  writeRoute(stage, popup, { replace: true, parent: null });
+}
 
 // A phone modal owns vertical scrolling while it is open. In particular, iOS Safari otherwise
 // scrolls the document behind a long dialog once the finger reaches the card boundary. Keep the
@@ -92,24 +172,127 @@ function syncModalScrollLock() {
 // deliberately chooses a field. Every modal card carries tabindex="-1" for this one purpose.
 function openPopup(id) {
   const modal = $(id);
+  // Only one addressable overlay can own the screen. This is mostly a defensive invariant (the UI
+  // exposes no popup-to-popup action), but it also keeps a manually changed hash deterministic.
+  for (const other of MODALS) {
+    if (other === id || $(other).hidden) continue;
+    const wasApplyingRoute = _applyingRoute;
+    _applyingRoute = true;
+    try { closePopupForRoute(other); }
+    finally { _applyingRoute = wasApplyingRoute; }
+  }
   modal.hidden = false;
   syncModalScrollLock();
   const dialog = modal.querySelector?.('[role="dialog"]');
   dialog?.focus?.({ preventScroll: true });
+  if (_applyingRoute) return;
+
+  if (S.stage !== "settings") showStage("settings");
+  const current = parseRoute(location.hash);
+  if (current.popup === id) return;
+  // All popups live under Settings. Should a caller ever open one from another screen, record the
+  // intermediate parent too so one Back closes the popup without skipping Settings entirely.
+  if (current.hash !== "#settings") writeRoute("settings");
+  writeRoute("settings", id);
 }
 
 function closePopup(id) {
   $(id).hidden = true;
   syncModalScrollLock();
+  if (_routePopupNeedsHydration === id) _routePopupNeedsHydration = null;
+  if (!_applyingRoute && parseRoute(location.hash).popup === id) returnToRoute("settings");
 }
 
 function go(stage) {
-  S.stage = stage;
-  for (const [st, id] of Object.entries(VIEW)) $(id).classList.toggle("active", st === stage);
-  renderHeader();
-  window.scrollTo(0, 0);
+  if (S.stage !== stage) showStage(stage);
+  if (!_applyingRoute && parseRoute(location.hash).hash !== routeHash(stage)) writeRoute(stage);
 }
-function goBack() { go(PARENT[S.stage] || "dashboard"); }
+function goBack() {
+  const stage = PARENT[S.stage] || "dashboard";
+  if (S.stage !== stage) showStage(stage);
+  if (!_applyingRoute) returnToRoute(stage);
+}
+
+// Route application deliberately uses each popup's real open/close function. That preserves form
+// filling and the HomeHub search-generation cancellation boundary for Back/Forward exactly as for
+// its Cancel button; directly flipping `hidden` here would create a second, weaker lifecycle.
+function openPopupForRoute(id) {
+  if (id === "wifiModal") openWifi();
+  else if (id === "mqttModal") openMqtt();
+  else if (id === "refTempModal") openRefTemp();
+  else if (id === "weatherModal") openWeather();
+  else if (id === "syslogModal") openSyslog();
+  else if (id === "ntpModal") openNtp();
+  else if (id === "homehubModal") openHomehub();
+  else if (id === "boardModal") openBoard();
+  else if (id === "env3Modal") openEnv3();
+  else if (id === "bugModal") openBug();
+}
+
+function closePopupForRoute(id) {
+  if (id === "wifiModal") closeWifi();
+  else if (id === "mqttModal") closeMqtt();
+  else if (id === "refTempModal") closeRefTemp();
+  else if (id === "weatherModal") closeWeather();
+  else if (id === "syslogModal") closeSyslog();
+  else if (id === "ntpModal") closeNtp();
+  else if (id === "homehubModal") closeHomehub();
+  else if (id === "boardModal") closeBoard();
+  else if (id === "env3Modal") closeEnv3();
+  else if (id === "bugModal") closeBug();
+}
+
+function applyRouteFromLocation() {
+  let route = parseRoute(location.hash);
+  let unavailablePopup = false;
+  const h = browserHistory();
+  if (!route.valid) {
+    writeRoute("dashboard", null, { replace: true, parent: null });
+    route = parseRoute("");
+  } else if (!h?.state?.[ROUTE_STATE] || h.state.route !== route.hash) {
+    // A pasted/bookmarked hash (including an address-bar edit without a reload) has no known in-app
+    // parent. Mark the existing entry without inventing one; explicit Close then safely replaces it.
+    writeRoute(route.stage, route.popup, { replace: true, parent: null });
+  }
+
+  _routePopupNeedsHydration = null;
+  _applyingRoute = true;
+  try {
+    for (const id of MODALS)
+      if (id !== route.popup && !$(id).hidden) closePopupForRoute(id);
+    // Do not jump Settings back to the top when browser Back merely closes its popup.
+    if (S.stage !== route.stage) showStage(route.stage);
+    else renderHeader();
+    if (route.popup && $(route.popup).hidden) openPopupForRoute(route.popup);
+    // On a reload the route is restored before the first /status arrives. Keep the popup visible,
+    // then refill it from that first response unless the user has already started editing.
+    if (route.popup && !S.status) _routePopupNeedsHydration = route.popup;
+    else if (route.popup && $(route.popup).hidden) unavailablePopup = true;
+  } finally {
+    _applyingRoute = false;
+  }
+  if (unavailablePopup) {
+    writeRoute("settings", null, { replace: true, parent: null });
+    applyRouteFromLocation();
+  }
+}
+
+function hydrateRoutedPopup() {
+  const id = _routePopupNeedsHydration;
+  _routePopupNeedsHydration = null;
+  if (!id || parseRoute(location.hash).popup !== id) return;
+  _applyingRoute = true;
+  try { openPopupForRoute(id); }
+  finally { _applyingRoute = false; }
+  // ENV III is the only board-gated popup. Once status proves the board cannot expose it, keep the
+  // URL truthful instead of leaving an address whose selected dialog cannot exist on this device.
+  if ($(id).hidden) {
+    writeRoute("settings", null, { replace: true, parent: null });
+    applyRouteFromLocation();
+  }
+}
+
+function initNavigation() { applyRouteFromLocation(); }
 // The ONE innerHTML write path for every per-poll container, guarded twice against the same failure:
 // a poll lands every 2 s, and a rebuild landing between mousedown and mouseup destroys the element
 // under the finger, so the browser fires NO click at all — the tap is lost with nothing logged.
@@ -163,6 +346,7 @@ async function refreshStatus() {
   let s;
   try { s = await j("/status", { signal: pollSignal() }); } catch { markUnreachable(); return false; }
   S.status = s;
+  hydrateRoutedPopup();
   setLangFromStatus(s);   // apply the device's language override (if any) before painting this frame
   renderApp();
   return true;
