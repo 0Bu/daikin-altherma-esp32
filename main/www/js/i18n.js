@@ -239,6 +239,7 @@ const I18N = {
     "ota.pct": (p) => `${p}%`, "ota.rebooting": "rebooting…", "ota.failed": "update failed",
     "ota.timeout": "timed out", "ota.cancelled": "cancelled", "ota.busy": "device busy",
     "ota.unreachable": "device unreachable",
+    "ota.active_title": "Firmware update", "ota.active_sub": (detail) => `Installation in progress · ${detail}`,
     // The install finished; only the automatic page reload gave up waiting for the board.
     "ota.reload_hint": "installed — reload the page",
     "ota.confirm": (cur, avail) => `Update available: v${cur} → v${avail}\n\nThe device downloads and installs the signed image, then reboots. If the new firmware can't get online it rolls back automatically.`,
@@ -577,6 +578,7 @@ const I18N = {
     "ota.pct": (p) => `${p}%`, "ota.rebooting": "Neustart…", "ota.failed": "Update fehlgeschlagen",
     "ota.timeout": "Zeitüberschreitung", "ota.cancelled": "abgebrochen", "ota.busy": "Gerät ausgelastet",
     "ota.unreachable": "Gerät nicht erreichbar",
+    "ota.active_title": "Firmware-Update", "ota.active_sub": (detail) => `Installation läuft · ${detail}`,
     "ota.reload_hint": "installiert — Seite neu laden",
     "ota.confirm": (cur, avail) => `Update verfügbar: v${cur} → v${avail}\n\nDas Gerät lädt das signierte Abbild, installiert es und startet neu. Kommt die neue Firmware nicht online, wird automatisch zurückgesetzt.`,
     "aria.ota": "Nach Firmware-Updates suchen",

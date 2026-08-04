@@ -589,9 +589,8 @@ function otaRing(pct, indet) {
 // error: the Settings one exists only while that card is rendered.
 let otaSeq = 0;
 const OTA_SLOTS = ["otaStat", "otaStatSet"];
-function otaInline(text, { ring = false, pct = null, cls = "" } = {}) {
-  otaSeq++;
-  S.otaShown = !!(text || ring);          // freezes the Settings rebuild — see renderSettings
+function paintOtaInline() {
+  const { text = "", ring = false, pct = null, cls = "" } = S.otaView || {};
   for (const id of OTA_SLOTS) {
     const el = $(id);
     if (!el) continue;
@@ -603,6 +602,12 @@ function otaInline(text, { ring = false, pct = null, cls = "" } = {}) {
       el.appendChild(span);
     }
   }
+}
+function otaInline(text, { ring = false, pct = null, cls = "" } = {}) {
+  otaSeq++;
+  S.otaShown = !!(text || ring);          // freezes the Settings rebuild — see renderSettings
+  S.otaView = { text, ring, pct, cls };   // lets a slot created after a refresh catch up immediately
+  paintOtaInline();
 }
 // Clear the readout after a terminal message has had time to be read — but ONLY if nothing has been
 // written since. Tapping the version twice inside the linger window (up to date → tap again) would
@@ -630,6 +635,7 @@ async function otaPoll(waitStates, tries, onTick) {
 
 // Terminal inline failure: show it, let it linger a beat longer than a success, and release the flow.
 function otaFail(text) {
+  S.otaInstalling = false;
   S.otaBusy = false;
   otaInline(text, { cls: "err" });
   otaInlineClear(6000);
@@ -685,6 +691,7 @@ async function checkFirmwareUpdate() {
     catch { otaFail(t("ota.failed")); return; }
     if (r.status === 503) { otaFail(t("ota.busy")); return; }
     if (!r.ok) { otaFail(await errorOf(r, t("ota.failed"))); return; }
+    S.otaInstalling = true;
 
     const done = await otaWatch();
     if (!done)                  { otaFail(t("ota.timeout")); return; }
@@ -706,7 +713,10 @@ async function checkFirmwareUpdate() {
 // reload mid-update, where otherwise the header would sit silent while the device was busy.
 function otaWatch() {
   return otaPoll(["checking", "updating"], 300, (st) => {
-    if (st.state === "updating") otaInline(t("ota.pct", st.progress ?? 0), { ring: true, pct: st.progress ?? 0 });
+    if (st.state === "updating") {
+      otaInline(t("ota.pct", st.progress ?? 0), { ring: true, pct: st.progress ?? 0 });
+      if (!S.status) renderOtaDashboardStatus();
+    }
   });
 }
 
@@ -718,20 +728,46 @@ async function resumeOta() {
   try { s = await j("/ota/status"); } catch { return; }
   if (!s || (s.state !== "updating" && s.state !== "done")) return;
   if (S.otaBusy) return;
-  S.busy = true; S.otaBusy = true;
+  S.busy = true; S.otaBusy = true; S.otaInstalling = true;
   let handedOff = false;
   try {
+    // /status is the largest response the device builds and may legitimately be unavailable while
+    // the OTA TLS task owns the scarce heap. Build an accurate OTA-only shell from this much smaller
+    // response instead of leaving Settings empty and calling the reachable device unreachable.
+    const otaOnly = renderOtaResumeShell(s);
     if (s.state === "updating") otaInline(t("ota.pct", s.progress ?? 0), { ring: true, pct: s.progress ?? 0 });
+    if (otaOnly) renderOtaDashboardStatus();
     const done = s.state === "done" ? s : await otaWatch();
     if (!done)                  { otaFail(t("ota.timeout")); return; }
     if (done.state === "error") { otaFail(done.message || t("ota.failed")); return; }
     otaInline(t("ota.rebooting"), { ring: true, pct: 100 });
+    if (otaOnly) renderOtaDashboardStatus();
     otaWaitReboot();
     handedOff = true;
   } finally {
     if (!handedOff) S.busy = false;
     if (!handedOff && S.otaBusy) S.otaBusy = false;
   }
+}
+
+// The pre-/status Settings surface used only after a refresh into a running OTA. It deliberately
+// contains ONLY facts /ota/status actually owns (current version + selected channel); connection,
+// plant and memory rows are omitted rather than guessed. The first later /status frame replaces it
+// with the complete cards through renderSettings's settingsHydrated exception.
+function renderOtaResumeShell(s) {
+  if (S.status) return false;
+  const current = s.current || "?";
+  const channel = s.channel === "dev" ? t("chan.dev") : t("chan.release");
+
+  $("hdrIp").textContent = location.hostname || "—";
+  $("verLink").textContent = "v" + current;
+  $("verLink").title = t("ota.active_title");
+  $("settingsVer").textContent = "daikin-altherma-esp32 · v" + current;
+  $("connTile").hidden = true;
+  setHtml("settingsCards", vcard(t("card.fw_title"),
+    firmwareRow(current) + vrow(t("card.channel"), channel)));
+  S.settingsHydrated = false;
+  return true;
 }
 
 // After "done" the device reboots ~600 ms later — and the page in the browser was served by the OLD
@@ -782,7 +818,7 @@ function otaWaitReboot() {
     // settles the question either way. Never answered at all: a reload would replace the one status
     // line the user has with a browser error page, so keep the message and let them choose when.
     if (s) { location.reload(); return; }
-    S.busy = false; S.otaBusy = false;
+    S.busy = false; S.otaBusy = false; S.otaInstalling = false;
     otaInline(t("ota.reload_hint"), { cls: "err" });   // no auto-clear: it asks the user to act
   };
   probe();

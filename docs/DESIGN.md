@@ -1027,7 +1027,13 @@ is exactly what a user would want to see move.
 - **A running update is adopted on page load** (`resumeOta`). The download lives on the device, not
   in the tab, so a reload mid-update — or a second browser — would otherwise show a silent header
   while the board was busy. One `GET /ota/status` at boot joins the existing download at its current
-  percentage; finding `idle` leaves the header untouched.
+  percentage; finding `idle` leaves the header untouched. `/status` is the largest HTTP allocation
+  and may temporarily be refused while the OTA TLS task owns the scarce heap. In that window the
+  successful OTA response is the stronger reachability evidence: the dashboard names the running
+  firmware installation instead of showing **Unreachable**, and Settings renders an OTA-only
+  Firmware card from the response's current version/channel rather than an empty tile. The first
+  later `/status` response hydrates the complete Settings cards exactly once; subsequent status
+  frames remain frozen so they cannot erase the directly-painted progress readout.
 - **Terminal messages clear on a sequence guard, not a timer alone.** Each write to the readout bumps
   a counter and a delayed clear only fires if nothing has been written since. Tapping the version
   again inside the linger window would otherwise let the *first* run's pending timer wipe the
