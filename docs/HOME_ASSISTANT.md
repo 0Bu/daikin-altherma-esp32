@@ -89,6 +89,23 @@ its block name as a prefix (`wifi_connected`, `wifi_rssi`, `wifi_mac`, `wifi_bss
 associated AP's BSSID ride the `wifi_` set, so a heartbeat can be pinned to a specific board and the AP
 it roamed onto.
 
+The same heartbeat carries the firmware-accepted living-room view as permanently numeric fields for
+Telegraf/VictoriaMetrics: `room_temperature_valid`, `room_setpoint_valid`,
+`room_control_eligible`, nullable `room_temperature_c`, `room_setpoint_c`, `room_error_k`, nullable
+`room_source_unix_s`/`room_age_s`, fixed `room_calibration_k=0`, counters, and
+`room_reason_code`. The string `room_source_id="living_room"` provides human provenance but is not
+needed as a metric field. `room_error_k` is emitted only when current temperature, target, source
+freshness and every configured eligibility gate pass; this is an accepted view, not a controller or
+heat-pump write.
+
+`room_reason_code` is stable across firmware versions: `0` eligible; `1` not configured; `2` no
+value; `3` invalid payload; `4` missing source time; `5` clock unsynced; `6` future timestamp; `7`
+backward timestamp; `8` retained without timestamp; `9` stale; `10` invalid arrival clock; `11`
+temperature out of range; `12` missing target mapping; `13` missing target; `14` target out of range;
+`15` missing enabled state; `16` disabled; `17` missing HVAC mode; `18` non-heating mode. The textual
+slug is available in `/status.reference_temperature.reason`; metric alerts should use the numeric
+code.
+
 Each value's `object_id` is a lowercase, alnum-only slug of its label (e.g. *"DHW Tank Temp
 (R5T)"* → `dhw_tank_temp_r5t`). The template uses bracket subscripts, so a slug that starts with a
 digit (*"2way valve…"* → `2way_valve_…`) stays valid.

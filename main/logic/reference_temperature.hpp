@@ -1,7 +1,7 @@
 #pragma once
-// Configuration + freshness contract for one MQTT-backed reference-temperature source. This slice
-// captures and classifies one value but still does not average it or feed it into heat-pump control.
-// Kept IDF-free so POST validation, RFC3339 parsing and retained/restart behavior are host-tested.
+// Configuration, freshness and canonical single-room contract for one MQTT-backed reference source.
+// It remains read-only: no function in this header calls the HomeHub actuator. Kept IDF-free so POST
+// validation, RFC3339 parsing, retained/restart behavior, plausibility and eligibility are host-tested.
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -16,6 +16,11 @@ inline constexpr uint32_t REF_TEMP_MAX_AGE_DEFAULT_S = 600;
 inline constexpr uint32_t REF_TEMP_MAX_AGE_MIN_S     = 10;
 inline constexpr uint32_t REF_TEMP_MAX_AGE_MAX_S     = 3600;
 inline constexpr int64_t  REF_TEMP_FUTURE_TOLERANCE_S = 60;
+inline constexpr double   REF_ROOM_TEMPERATURE_MIN_C = 5.0;
+inline constexpr double   REF_ROOM_TEMPERATURE_MAX_C = 35.0;
+inline constexpr double   REF_ROOM_SETPOINT_MIN_C    = 5.0;
+inline constexpr double   REF_ROOM_SETPOINT_MAX_C    = 35.0;
+inline constexpr const char* REF_ROOM_SOURCE_ID = "living_room";
 
 // Exact topics only. Wildcards would let one small ESP32 subscription receive an unbounded set of
 // unrelated payloads and make "which sensor produced this value?" ambiguous.
@@ -53,7 +58,10 @@ inline bool reference_json_path_valid(std::string_view path, const char** why = 
 
 inline bool reference_temperature_config_valid(std::string_view name, std::string_view topic,
                                                std::string_view temperature_path,
+                                               std::string_view setpoint_path,
                                                std::string_view timestamp_path,
+                                               std::string_view enabled_path,
+                                               std::string_view hvac_mode_path,
                                                uint32_t max_age_s,
                                                const char** why = nullptr) {
     auto fail = [&](const char* text) { if (why) *why = text; return false; };
@@ -61,7 +69,12 @@ inline bool reference_temperature_config_valid(std::string_view name, std::strin
     if (!reference_topic_valid(topic, why)) return false;
     if (topic.empty()) return true;                         // disabling needs no leftover fields
     if (!reference_json_path_valid(temperature_path, why)) return false;
+    // A pre-v13 persisted mapping has no target path. Keep it readable as observation-only after OTA;
+    // POST /set_ref_temp separately requires a target for every newly saved enabled profile.
+    if (!setpoint_path.empty() && !reference_json_path_valid(setpoint_path, why)) return false;
     if (!timestamp_path.empty() && !reference_json_path_valid(timestamp_path, why)) return false;
+    if (!enabled_path.empty() && !reference_json_path_valid(enabled_path, why)) return false;
+    if (!hvac_mode_path.empty() && !reference_json_path_valid(hvac_mode_path, why)) return false;
     if (max_age_s < REF_TEMP_MAX_AGE_MIN_S || max_age_s > REF_TEMP_MAX_AGE_MAX_S)
         return fail("Maximum age must be between 10 and 3600 seconds");
     return true;
@@ -181,6 +194,137 @@ inline ReferenceFreshness reference_freshness(bool has_value, bool retained,
     f.fresh = true;
     f.reason = "fresh";
     return f;
+}
+
+// Stable numeric vocabulary stored in the heartbeat. Code 0 is the only eligible state; all other
+// values are explicit reasons why no room error may reach a later controller. Never renumber these:
+// VictoriaMetrics history and alerts key on the integer while /status exposes the matching slug.
+enum class ReferenceRoomReason : uint8_t {
+    Eligible                 = 0,
+    NotConfigured            = 1,
+    NoValue                  = 2,
+    InvalidPayload           = 3,
+    MissingSourceTime        = 4,
+    ClockUnsynced            = 5,
+    FutureTimestamp          = 6,
+    BackwardTimestamp        = 7,
+    RetainedWithoutTimestamp = 8,
+    Stale                    = 9,
+    ArrivalClockInvalid      = 10,
+    TemperatureOutOfRange    = 11,
+    MissingSetpointMapping   = 12,
+    MissingSetpoint          = 13,
+    SetpointOutOfRange       = 14,
+    MissingEnabledState      = 15,
+    Disabled                 = 16,
+    MissingHvacMode          = 17,
+    NonHeatingMode           = 18,
+};
+
+inline const char* reference_room_reason_name(ReferenceRoomReason reason) {
+    switch (reason) {
+    case ReferenceRoomReason::Eligible:                 return "eligible";
+    case ReferenceRoomReason::NotConfigured:            return "not_configured";
+    case ReferenceRoomReason::NoValue:                  return "no_value";
+    case ReferenceRoomReason::InvalidPayload:           return "invalid_payload";
+    case ReferenceRoomReason::MissingSourceTime:        return "missing_source_time";
+    case ReferenceRoomReason::ClockUnsynced:            return "clock_unsynced";
+    case ReferenceRoomReason::FutureTimestamp:          return "future_timestamp";
+    case ReferenceRoomReason::BackwardTimestamp:        return "backward_timestamp";
+    case ReferenceRoomReason::RetainedWithoutTimestamp: return "retained_without_timestamp";
+    case ReferenceRoomReason::Stale:                    return "stale";
+    case ReferenceRoomReason::ArrivalClockInvalid:      return "arrival_clock_invalid";
+    case ReferenceRoomReason::TemperatureOutOfRange:    return "temperature_out_of_range";
+    case ReferenceRoomReason::MissingSetpointMapping:   return "missing_setpoint_mapping";
+    case ReferenceRoomReason::MissingSetpoint:          return "missing_setpoint";
+    case ReferenceRoomReason::SetpointOutOfRange:       return "setpoint_out_of_range";
+    case ReferenceRoomReason::MissingEnabledState:      return "missing_enabled_state";
+    case ReferenceRoomReason::Disabled:                 return "disabled";
+    case ReferenceRoomReason::MissingHvacMode:          return "missing_hvac_mode";
+    case ReferenceRoomReason::NonHeatingMode:           return "non_heating_mode";
+    }
+    return "invalid_payload";
+}
+
+inline ReferenceRoomReason reference_room_freshness_reason(std::string_view reason) {
+    if (reason == "clock_unsynced") return ReferenceRoomReason::ClockUnsynced;
+    if (reason == "future_timestamp") return ReferenceRoomReason::FutureTimestamp;
+    if (reason == "retained_without_timestamp") return ReferenceRoomReason::RetainedWithoutTimestamp;
+    if (reason == "stale") return ReferenceRoomReason::Stale;
+    if (reason == "arrival_clock_invalid") return ReferenceRoomReason::ArrivalClockInvalid;
+    return ReferenceRoomReason::InvalidPayload;
+}
+
+struct ReferenceRoomRaw {
+    bool configured = false;
+    bool has_temperature = false;
+    bool payload_valid = true;
+    double temperature_c = 0.0;
+    bool has_source_time = false;
+    bool setpoint_mapped = false;
+    bool has_setpoint = false;
+    double setpoint_c = 0.0;
+    bool enabled_mapped = false;
+    bool has_enabled = false;
+    bool enabled = false;
+    bool hvac_mode_mapped = false;
+    bool has_hvac_mode = false;
+    std::string_view hvac_mode;
+    ReferenceRoomReason payload_reason = ReferenceRoomReason::InvalidPayload;
+};
+
+struct ReferenceRoomSample {
+    bool temperature_valid = false;
+    bool setpoint_valid = false;
+    bool control_eligible = false;
+    bool has_room_error = false;
+    double temperature_c = 0.0;
+    double setpoint_c = 0.0;
+    double room_error_k = 0.0;
+    ReferenceRoomReason reason = ReferenceRoomReason::NotConfigured;
+};
+
+// One selected living-room source, fixed calibration 0 K. Current temperature validity is separate
+// from control eligibility: disabled/non-heating state keeps an otherwise trustworthy observation
+// visible, but it cannot produce room_error_k. `active` is deliberately absent — a thermostat at its
+// target is expected to be inactive and that is not an input fault.
+inline ReferenceRoomSample reference_room_sample(const ReferenceRoomRaw& raw,
+                                                 const ReferenceFreshness& freshness) {
+    ReferenceRoomSample out;
+    out.temperature_c = raw.temperature_c;                // calibration is fixed at exactly 0 K
+    out.setpoint_c = raw.setpoint_c;
+    auto reject = [&](ReferenceRoomReason reason) { out.reason = reason; return out; };
+    if (!raw.configured) return reject(ReferenceRoomReason::NotConfigured);
+    if (!raw.has_temperature) return reject(ReferenceRoomReason::NoValue);
+    if (!raw.payload_valid) return reject(raw.payload_reason);
+    if (!raw.has_source_time) {
+        return reject(freshness.reason && std::string_view(freshness.reason) == "retained_without_timestamp"
+                      ? ReferenceRoomReason::RetainedWithoutTimestamp
+                      : ReferenceRoomReason::MissingSourceTime);
+    }
+    if (!freshness.fresh) return reject(reference_room_freshness_reason(freshness.reason));
+    if (raw.temperature_c < REF_ROOM_TEMPERATURE_MIN_C ||
+        raw.temperature_c > REF_ROOM_TEMPERATURE_MAX_C)
+        return reject(ReferenceRoomReason::TemperatureOutOfRange);
+    out.temperature_valid = true;
+    if (!raw.setpoint_mapped) return reject(ReferenceRoomReason::MissingSetpointMapping);
+    if (!raw.has_setpoint) return reject(ReferenceRoomReason::MissingSetpoint);
+    if (raw.setpoint_c < REF_ROOM_SETPOINT_MIN_C || raw.setpoint_c > REF_ROOM_SETPOINT_MAX_C)
+        return reject(ReferenceRoomReason::SetpointOutOfRange);
+    out.setpoint_valid = true;
+    if (raw.enabled_mapped) {
+        if (!raw.has_enabled) return reject(ReferenceRoomReason::MissingEnabledState);
+        if (!raw.enabled) return reject(ReferenceRoomReason::Disabled);
+    }
+    if (raw.hvac_mode_mapped) {
+        if (!raw.has_hvac_mode) return reject(ReferenceRoomReason::MissingHvacMode);
+        if (raw.hvac_mode != "heat") return reject(ReferenceRoomReason::NonHeatingMode);
+    }
+    out.control_eligible = true;
+    out.has_room_error = true;
+    out.room_error_k = out.setpoint_c - out.temperature_c;
+    out.reason = ReferenceRoomReason::Eligible;
+    return out;
 }
 
 }  // namespace daik

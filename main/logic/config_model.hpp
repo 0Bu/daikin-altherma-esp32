@@ -33,14 +33,17 @@ struct Config {
     std::string mqtt_uri;          // "" = MQTT disabled
     std::string mqtt_user;
     std::string mqtt_pass;
-    // One exact MQTT source for the room/reference temperature. An empty topic disables capture;
-    // dot-separated paths select the numeric temperature and, optionally, its source timestamp.
+    // One exact MQTT source for the living-room sample. An empty topic disables capture;
+    // dot-separated paths select current/target, source timestamp and optional heating eligibility.
     // Without a timestamp path only a live non-retained MQTT arrival may be fresh; retained values
     // require source time so a reconnect cannot reset their age (logic/reference_temperature.hpp).
     std::string ref_temp_name;
     std::string ref_temp_topic;
     std::string ref_temp_path;
+    std::string ref_temp_setpoint_path;
     std::string ref_temp_time_path;
+    std::string ref_temp_enabled_path;
+    std::string ref_temp_hvac_mode_path;
     uint32_t    ref_temp_max_age_s = REF_TEMP_MAX_AGE_DEFAULT_S;
     // Open-Meteo location in signed microdegrees. The explicit bit keeps (0°, 0°) representable;
     // disabled coordinates are canonicalized to zero and produce no weather traffic.

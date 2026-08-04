@@ -428,15 +428,16 @@ POST /set_mqtt                     # { broker, user?, pass?, clear_creds? } → 
                                    #   (DNS/TCP/connect+auth) → on success persist + reboot, on failure
                                    #   400 {ok:false,error} (nothing saved). Empty user+pass keeps stored
                                    #   creds; clear_creds:true removes them (anonymous); "" broker disables.
-POST /test_ref_temp                # { name, topic, temperature_path, timestamp_path?, max_age_s }
+POST /test_ref_temp                # { name, topic, temperature_path, setpoint_path, timestamp_path,
+                                   #   enabled_path?, hvac_mode_path?, max_age_s }
                                    #   → temporarily subscribe on the existing authenticated MQTT
                                    #   connection and wait up to 12 s for a value accepted by the live
-                                   #   JSON/timestamp/freshness decoder. Changes neither Config nor NVS.
-                                   #   Success returns {ok,test_proof,temperature_c,retained}; a retained
-                                   #   value without a usable source timestamp is rejected as stale.
+                                   #   JSON/timestamp/plausibility decoder. Changes neither Config nor NVS.
+                                   #   Success returns current + target, typed optional gates and a proof;
+                                   #   missing/stale source time or out-of-range temperatures are rejected.
 POST /set_ref_temp                 # the exact mapping above + test_proof → persist + apply live. A
                                    #   non-empty topic requires a proof issued for that same topic/path/
-                                   #   age tuple; an empty topic is the explicit Disable operation and
+                                   #   gate/age tuple; an empty topic is the explicit Disable operation and
                                    #   needs no readable value or proof.
 POST /set_weather                  # { latitude, longitude } as strict decimal strings → persist +
                                    #   wake the firmware weather task. Both empty disables weather

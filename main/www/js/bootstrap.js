@@ -328,7 +328,8 @@ function wireRestOfApp() {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !$("refTempModal").hidden) closeRefTemp();
   });
-  for (const id of ["rtName", "rtTopic", "rtPath", "rtTimePath", "rtMaxAge"])
+  for (const id of ["rtName", "rtTopic", "rtPath", "rtSetpointPath", "rtTimePath",
+                    "rtEnabledPath", "rtHvacModePath", "rtMaxAge"])
     $(id).addEventListener("input", () => {
       $(id).classList.remove("invalid"); $("rtError").hidden = true;
     });
@@ -344,15 +345,23 @@ function wireRestOfApp() {
     if (!input.topic || !validRefTopic(input.topic)) return bad("rtTopic", t("ref.err_topic"));
     if (input.topic && !validRefPath(input.temperature_path))
       return bad("rtPath", t("ref.err_path"));
-    if (input.topic && input.timestamp_path && !validRefPath(input.timestamp_path))
+    if (input.topic && !validRefPath(input.setpoint_path))
+      return bad("rtSetpointPath", t("ref.err_setpoint_path"));
+    if (input.topic && !validRefPath(input.timestamp_path))
       return bad("rtTimePath", t("ref.err_time_path"));
+    if (input.topic && input.enabled_path && !validRefPath(input.enabled_path))
+      return bad("rtEnabledPath", t("ref.err_enabled_path"));
+    if (input.topic && input.hvac_mode_path && !validRefPath(input.hvac_mode_path))
+      return bad("rtHvacModePath", t("ref.err_hvac_mode_path"));
     if (input.topic && (!Number.isInteger(input.max_age_s) || input.max_age_s < 10 || input.max_age_s > 3600))
       return bad("rtMaxAge", t("ref.err_max_age"));
     return input;
   };
   const showRefTempRequestError = (msg) => {
     const field = /maximum age/i.test(msg) ? "rtMaxAge" :
-      /timestamp/i.test(msg) ? "rtTimePath" : /JSON path|path is/i.test(msg) ? "rtPath" :
+      /setpoint|target/i.test(msg) ? "rtSetpointPath" : /timestamp/i.test(msg) ? "rtTimePath" :
+      /enabled/i.test(msg) ? "rtEnabledPath" : /HVAC/i.test(msg) ? "rtHvacModePath" :
+      /JSON path|path is/i.test(msg) ? "rtPath" :
       /name/i.test(msg) ? "rtName" : /topic|mapping/i.test(msg) ? "rtTopic" : null;
     if (field) $(field).classList.add("invalid");
     $("rtError").textContent = msg;
@@ -391,7 +400,7 @@ function wireRestOfApp() {
     }
     const testResult = await testResponse.json().catch(() => ({}));
     if (!Number.isInteger(testResult.test_proof) || testResult.test_proof <= 0 ||
-        !Number.isFinite(testResult.temperature_c)) {
+        !Number.isFinite(testResult.temperature_c) || !Number.isFinite(testResult.setpoint_c)) {
       idle(); showRefTempRequestError(t("ref.test_failed")); return;
     }
 
@@ -423,7 +432,8 @@ function wireRestOfApp() {
     let r;
     try {
       r = await post("/set_ref_temp", {
-        name: "", topic: "", temperature_path: "", timestamp_path: "",
+        name: "", topic: "", temperature_path: "", setpoint_path: "", timestamp_path: "",
+        enabled_path: "", hvac_mode_path: "",
         max_age_s: 600, test_proof: 0,
       });
     } catch {

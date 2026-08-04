@@ -121,7 +121,11 @@ const fetch = async (url, options = {}) => {
   if (url === "/test_ref_temp") {
     if (fetchState.mode === "ref_test_reject")
       return response(false, { error: "No fresh value received before the test timed out" }, 422);
-    return response(true, { ok: true, test_proof: 71, temperature_c: 21.5, retained: false });
+    return response(true, {
+      ok: true, test_proof: 71, temperature_c: 21.5, setpoint_c: 22.0,
+      control_eligible: true, room_error_k: 0.5, reason: "eligible", reason_code: 0,
+      retained: false,
+    });
   }
   if (fetchState.mode === "reject") return response(false, { error: "rejected by test" });
   if (url === "/status") return response(true, {});
@@ -217,7 +221,9 @@ ui.S.status = {
   mqtt: { broker: "203.0.113.27:1883", has_creds: false },
   reference_temperature: {
     configured: true, name: "Living room", topic: "sensor/living-room/status",
-    temperature_path: "temperature.tC", timestamp_path: "", max_age_s: 600,
+    temperature_path: "temperature.tC", setpoint_path: "target.tC",
+    timestamp_path: "read_at", enabled_path: "enabled", hvac_mode_path: "hvac_mode",
+    max_age_s: 600,
   },
   weather_forecast: { latitude: "", longitude: "" },
   syslog: {},
@@ -422,7 +428,10 @@ const configureValid = (item) => {
   if (item.modal === "refTempModal") {
     document.getElementById("rtTopic").value = "sensor/living-room/status";
     document.getElementById("rtPath").value = "temperature.tC";
-    document.getElementById("rtTimePath").value = "";
+    document.getElementById("rtSetpointPath").value = "target.tC";
+    document.getElementById("rtTimePath").value = "read_at";
+    document.getElementById("rtEnabledPath").value = "enabled";
+    document.getElementById("rtHvacModePath").value = "hvac_mode";
     document.getElementById("rtMaxAge").value = "600";
   }
   if (item.modal === "env3Modal") {
@@ -497,6 +506,7 @@ assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_ref_temp"],
   "Delete must not run the live-test endpoint");
 assert.deepEqual(fetchState.calls[0]?.body, {
   name: "", topic: "", temperature_path: "", timestamp_path: "", max_age_s: 600, test_proof: 0,
+  setpoint_path: "", enabled_path: "", hvac_mode_path: "",
 }, "Delete must submit the explicit empty mapping rather than the draft fields");
 assert.equal(document.getElementById("refTempModal").hidden, true,
   "accepted Delete must close the dialog");

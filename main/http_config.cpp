@@ -381,7 +381,7 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
 }
 
 struct RefTempRequest {
-    std::string name, topic, path, time_path;
+    std::string name, topic, path, setpoint_path, time_path, enabled_path, hvac_mode_path;
     uint32_t max_age_s = REF_TEMP_MAX_AGE_DEFAULT_S;
     uint32_t test_proof = 0;
 };
@@ -389,14 +389,17 @@ struct RefTempRequest {
 // Parse Test and Save through one contract. Otherwise the most important guarantee in this dialog
 // could drift: the candidate that earned the proof would not necessarily be the mapping persisted.
 static const char* parse_ref_temp_request(httpd_req_t* req, RefTempRequest& out) {
-    char body[1024];
+    char body[1536];
     if (http_read_body(req, body, sizeof(body)) < 0) return "bad body";
     cJSON* j = cJSON_Parse(body);
     if (!j) return "bad json";
     out.name      = js(j, "name");
     out.topic     = js(j, "topic");
     out.path      = js(j, "temperature_path");
+    out.setpoint_path = js(j, "setpoint_path");
     out.time_path = js(j, "timestamp_path");
+    out.enabled_path = js(j, "enabled_path");
+    out.hvac_mode_path = js(j, "hvac_mode_path");
     cJSON* age_item = cJSON_GetObjectItem(j, "max_age_s");
     const bool age_type_valid = !age_item || (cJSON_IsNumber(age_item) &&
                                 age_item->valuedouble == static_cast<double>(age_item->valueint));
@@ -416,17 +419,24 @@ static const char* parse_ref_temp_request(httpd_req_t* req, RefTempRequest& out)
     if (!proof_type_valid) return "Test proof must be a whole number";
     if (out.topic.empty()) {                             // empty topic is the explicit Off state
         out.path.clear();
+        out.setpoint_path.clear();
         out.time_path.clear();
+        out.enabled_path.clear();
+        out.hvac_mode_path.clear();
     }
+    if (!out.topic.empty() && out.setpoint_path.empty()) return "Setpoint JSON path is required";
+    if (!out.topic.empty() && out.time_path.empty()) return "Timestamp JSON path is required";
     const char* why = nullptr;
-    if (!reference_temperature_config_valid(out.name, out.topic, out.path, out.time_path,
+    if (!reference_temperature_config_valid(out.name, out.topic, out.path, out.setpoint_path,
+                                            out.time_path, out.enabled_path, out.hvac_mode_path,
                                             out.max_age_s, &why))
         return why ? why : "invalid reference temperature config";
     return nullptr;
 }
 
 static ReferenceTemperatureTestConfig ref_temp_test_config(const RefTempRequest& in) {
-    return {in.topic, in.path, in.time_path, in.max_age_s};
+    return {in.topic, in.path, in.setpoint_path, in.time_path,
+            in.enabled_path, in.hvac_mode_path, in.max_age_s};
 }
 
 // Test on the already-authenticated live MQTT connection. Nothing in Config or NVS changes here;
@@ -443,16 +453,21 @@ static esp_err_t test_ref_temp(httpd_req_t* req) {
         return send_err(req, "422 Unprocessable Entity",
                         result.error.empty() ? "No fresh MQTT value received" : result.error.c_str());
 
-    char response[192];
+    char response[384];
     std::snprintf(response, sizeof(response),
-                  "{\"ok\":true,\"test_proof\":%lu,\"temperature_c\":%.6g,\"retained\":%s}",
-                  static_cast<unsigned long>(result.proof), result.temperature_c,
+                  "{\"ok\":true,\"test_proof\":%lu,\"temperature_c\":%.6g,"
+                  "\"setpoint_c\":%.6g,\"control_eligible\":%s,\"room_error_k\":%s,"
+                  "\"reason\":\"%s\",\"reason_code\":%u,\"retained\":%s}",
+                  static_cast<unsigned long>(result.proof), result.temperature_c, result.setpoint_c,
+                  result.control_eligible ? "true" : "false",
+                  result.control_eligible ? std::to_string(result.room_error_k).c_str() : "null",
+                  reference_room_reason_name(result.reason), static_cast<unsigned>(result.reason),
                   result.retained ? "true" : "false");
     return http_send_json(req, response);
 }
 
-// Observation-only room/reference-temperature source. The mapping + freshness policy apply live on
-// the existing MQTT connection; no averaging or heat-pump control consumes it yet. A non-empty
+// Decision-ready but still read-only room source. The mapping + freshness policy apply live on the
+// existing MQTT connection; no controller or HomeHub write consumes it yet. A non-empty
 // mapping cannot reach Config/NVS until this exact topic/path/age tuple produced a fresh value.
 static esp_err_t set_ref_temp(httpd_req_t* req) {
     RefTempRequest in;
@@ -465,14 +480,20 @@ static esp_err_t set_ref_temp(httpd_req_t* req) {
 
     Config c = config();
     if (c.ref_temp_name == in.name && c.ref_temp_topic == in.topic && c.ref_temp_path == in.path &&
-        c.ref_temp_time_path == in.time_path && c.ref_temp_max_age_s == in.max_age_s) {
+        c.ref_temp_setpoint_path == in.setpoint_path && c.ref_temp_time_path == in.time_path &&
+        c.ref_temp_enabled_path == in.enabled_path &&
+        c.ref_temp_hvac_mode_path == in.hvac_mode_path &&
+        c.ref_temp_max_age_s == in.max_age_s) {
         mqtt_reference_reconfigure();                 // consume the proof + retry the saved mapping
         return http_send_json(req, "{\"ok\":true,\"saved\":false,\"reboot\":false}");
     }
     c.ref_temp_name = in.name;
     c.ref_temp_topic = in.topic;
     c.ref_temp_path = in.path;
+    c.ref_temp_setpoint_path = in.setpoint_path;
     c.ref_temp_time_path = in.time_path;
+    c.ref_temp_enabled_path = in.enabled_path;
+    c.ref_temp_hvac_mode_path = in.hvac_mode_path;
     c.ref_temp_max_age_s = in.max_age_s;
     if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
     mqtt_reference_reconfigure();

@@ -102,6 +102,9 @@ void config_load() {
         if (b.has_ref_temp) {
             c.ref_temp_name = b.ref_temp_name; c.ref_temp_topic = b.ref_temp_topic;
             c.ref_temp_path = b.ref_temp_path; c.ref_temp_time_path = b.ref_temp_time_path;
+            c.ref_temp_setpoint_path = b.ref_temp_setpoint_path;
+            c.ref_temp_enabled_path = b.ref_temp_enabled_path;
+            c.ref_temp_hvac_mode_path = b.ref_temp_hvac_mode_path;
             c.ref_temp_max_age_s = b.ref_temp_max_age_s;
         }
         if (b.has_weather) {
@@ -317,6 +320,9 @@ bool config_save(const Config& c, bool require_link) {
     b.mqtt_uri = c.mqtt_uri;   b.mqtt_user = c.mqtt_user;   b.mqtt_pass = c.mqtt_pass;
     b.ref_temp_name = c.ref_temp_name; b.ref_temp_topic = c.ref_temp_topic;
     b.ref_temp_path = c.ref_temp_path; b.ref_temp_time_path = c.ref_temp_time_path;
+    b.ref_temp_setpoint_path = c.ref_temp_setpoint_path;
+    b.ref_temp_enabled_path = c.ref_temp_enabled_path;
+    b.ref_temp_hvac_mode_path = c.ref_temp_hvac_mode_path;
     b.ref_temp_max_age_s = c.ref_temp_max_age_s;
     b.weather_enabled = c.weather_enabled;
     b.weather_latitude_e6 = c.weather_latitude_e6;
