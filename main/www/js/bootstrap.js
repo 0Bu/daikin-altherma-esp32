@@ -443,6 +443,9 @@ function wireRestOfApp() {
       const msg = await errorOf(r, t("toast.rejected"));
       idle(); showRefTempRequestError(msg); return;
     }
+    // The accepted empty mapping is already authoritative. Clear the local copy before releasing
+    // the dialog so a fast reopen cannot render the old mapping while /status is still refreshing.
+    S.status.reference_temperature = { configured: false, max_age_s: 600 };
     idle(); closeRefTemp();
     toast(t("ref.deleted"), "ok");
     await refreshStatus();
