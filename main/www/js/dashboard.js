@@ -227,7 +227,7 @@ function esp32CardHtml() {
 // permanent info "tongue" underneath. The same geometry is used by value explainers; unlike those
 // explainers this one does not collapse, because clicking the row opens the source editor. Empty
 // sources stay on one compact row so "Not configured" does not create an empty-looking panel.
-function dynamicSourceRow(action, title, label, summary, summaryCls, configured) {
+function dynamicSourceRow(action, title, label, summary, summaryCls, configured, detailHtml = "") {
   if (!configured) {
     return `<button class="vrow vrow-btn dynamic-source-row dynamic-source-inline" type="button" ` +
       `data-act="${action}" aria-label="${esc(title)}"><span class="vrow-label">${esc(label)}</span>` +
@@ -239,9 +239,31 @@ function dynamicSourceRow(action, title, label, summary, summaryCls, configured)
     `aria-label="${esc(title)}" aria-describedby="${statusId}">` +
     `<span class="vrow-label">${esc(label)}</span>` +
     `<span class="vrow-val settings-source-edit" aria-hidden="true">${editIcon}</span></button>` +
-    `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body settings-source-tongue">` +
-    `<span class="settings-source-summary ${summaryCls}" id="${statusId}">${esc(summary)}</span>` +
+    `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body settings-source-tongue" id="${statusId}">` +
+    (detailHtml || `<span class="settings-source-summary ${summaryCls}">${esc(summary)}</span>`) +
     `</div></div></div></div>`;
+}
+
+// The weather tongue explains the two derived forecast numbers instead of compressing them into
+// one slash-separated status line. It deliberately uses the ordinary explainer paragraphs and
+// lead-ins, so this permanent Settings panel reads like every opened value/checkup explainer.
+// Old values remain visible when freshness fails because they are useful diagnostic evidence; the
+// status paragraph says explicitly that they are no longer current.
+function weatherSourceDetailHtml(w, outdoor, solar) {
+  let statusKey;
+  if (w.fetching) statusKey = "fetching";
+  else if (w.has_value && w.fresh) statusKey = "fresh";
+  else if (w.error) statusKey = "unavailable";
+  else if (w.has_value) statusKey = "stale";
+  else statusKey = "waiting";
+
+  let html = descNoteHtml(t("wx.detail.status"),
+    `${t(`wx.status.${statusKey}`)} — ${t(`wx.detail.${statusKey}`)}`);
+  if (w.has_value) {
+    html += descNoteHtml(t("wx.detail.temperature_label"), t("wx.detail.temperature", outdoor));
+    html += descNoteHtml(t("wx.detail.solar_label"), t("wx.detail.solar", solar));
+  }
+  return html + descNoteHtml(t("wx.detail.source_label"), t("wx.detail.source"));
 }
 
 function dynamicControlCardHtml() {
@@ -274,19 +296,23 @@ function dynamicControlCardHtml() {
   rows += dynamicSourceRow("ref-temp", t("ref.title"), t("dyn.room_sources"),
                            source, sourceCls, Boolean(r.configured));
   let weather = t("dyn.not_configured"), weatherCls = "dim";
+  let outdoor = "", solar = "";
+  if (w.configured && w.has_value) {
+    outdoor = Number(w.outdoor_mean_2h_c).toLocaleString(
+      LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 1 });
+    solar = Number(w.solar_energy_2h_wh_m2).toLocaleString(
+      LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 0 });
+  }
   if (w.configured && w.fetching) { weather = t("wx.fetching"); weatherCls = "warn"; }
   else if (w.configured && w.has_value) {
-    const outdoor = Number(w.outdoor_mean_2h_c).toLocaleString(
-      LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 1 });
-    const solar = Number(w.solar_energy_2h_wh_m2).toLocaleString(
-      LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 0 });
     weather = `Open-Meteo · ${outdoor} °C / 2 h · ${solar} Wh/m²`;
     if (w.fresh) weatherCls = "ok";
     else { weather += ` · ${w.error ? t("wx.unavailable") : t("ref.stale")}`; weatherCls = w.error ? "err" : "warn"; }
   } else if (w.configured) { weather = w.error ? t("wx.unavailable") : t("wx.waiting"); weatherCls = w.error ? "err" : "warn"; }
   if (w.error) badgeCls = "err";
   rows += dynamicSourceRow("weather", t("wx.title"), t("dyn.weather"),
-                           weather, weatherCls, Boolean(w.configured));
+                           weather, weatherCls, Boolean(w.configured),
+                           w.configured ? weatherSourceDetailHtml(w, outdoor, solar) : "");
 
   // ENV III belongs to the M5Stack accessory ecosystem. The firmware derives `supported` from the
   // user-selected board preset's vendor; omit the row entirely on Seeed/Custom boards rather than
