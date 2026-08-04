@@ -50,10 +50,12 @@ It separately keeps the live `#scFan` rotation in the system schematic and rejec
 telemetry/animation branch.
 
 `node test/test_ui_ota_refresh.mjs` executes the production OTA resume and Settings render paths for
-a refresh during a running download. It pins the compact OTA-only recovery card, retained progress,
-one-time hydration by a later full status response, and the rule that a successful `/ota/status`
-must not be overwritten by a generic red unreachable state when the larger `/status` allocation is
-temporarily refused under OTA TLS heap pressure.
+a refresh during a running download. It pins the version- and age-bound same-tab snapshot restore,
+complete Dashboard/Settings preservation, explicit cached-state label and write lock, plus the
+compact OTA-only fallback for a second tab. It also covers retained progress, one-time hydration by
+a later full status response, and the rule that a successful `/ota/status` must not be overwritten
+by a generic red unreachable state when the larger `/status` allocation is temporarily refused
+under OTA TLS heap pressure.
 
 The same `gates` job runs `node test/test_ui_live_i18n.mjs` separately. That browser-free regression
 test executes the production banner/inspector render functions from the assembled UI source and verifies

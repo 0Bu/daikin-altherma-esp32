@@ -663,6 +663,72 @@ function otaInlineClear(delay = 3500) {
   setTimeout(() => { if (otaSeq === mine) otaInline(""); }, delay);
 }
 
+// Keep one complete render frame across a same-tab reload during OTA. sessionStorage is deliberately
+// narrower than localStorage: it is origin- and tab-scoped, disappears with the tab, and does not
+// teach a second browser anything the compact /ota/status response did not prove. The version and
+// age checks below prevent a snapshot from another firmware run being adopted as current.
+const OTA_RENDER_CACHE_KEY = "daikinOtaRenderV1";
+const OTA_RENDER_CACHE_MAX_AGE_MS = 15 * 60 * 1000;
+function otaCacheStorage() {
+  try { return typeof sessionStorage === "undefined" ? null : sessionStorage; }
+  catch { return null; }                       // Safari private mode / storage policy
+}
+function otaCacheClear() {
+  try { otaCacheStorage()?.removeItem(OTA_RENDER_CACHE_KEY); } catch { /* best effort */ }
+}
+function otaCacheStore() {
+  if (!S.status || typeof S.status.version !== "string") return false;
+  const payload = {
+    saved_at_ms: Date.now(),
+    status: S.status,
+    values: Array.isArray(S._values) ? S._values : [],
+    modbus: Array.isArray(S._modbus) ? S._modbus : [],
+  };
+  try {
+    const storage = otaCacheStorage();
+    if (!storage) return false;
+    storage.setItem(OTA_RENDER_CACHE_KEY, JSON.stringify(payload));
+    return true;
+  } catch { return false; }                    // quota or serialization failure keeps safe fallback
+}
+function otaCacheRestore(otaStatus) {
+  // The normal poll may beat the compact resume request on a healthy board. Never replace a frame
+  // freshly obtained in this page with an older persisted one merely because the two requests raced.
+  if (S.status) return false;
+  const storage = otaCacheStorage();
+  if (!storage) return false;
+  let cached;
+  try { cached = JSON.parse(storage.getItem(OTA_RENDER_CACHE_KEY) || "null"); }
+  catch { otaCacheClear(); return false; }
+
+  const age = Date.now() - cached?.saved_at_ms;
+  const valid = cached && Number.isFinite(cached.saved_at_ms) && age >= -60000 &&
+    age <= OTA_RENDER_CACHE_MAX_AGE_MS && cached.status &&
+    typeof cached.status.version === "string" && typeof otaStatus?.current === "string" &&
+    cached.status.version === otaStatus.current && Array.isArray(cached.values) &&
+    Array.isArray(cached.modbus);
+  if (!valid) { otaCacheClear(); return false; }
+
+  S.status = cached.status;
+  S._values = cached.values;
+  S._modbus = cached.modbus;
+  S.otaCached = true;
+  setLangFromStatus(S.status);
+  renderApp();
+  return true;
+}
+
+// Settings remain readable during installation but cannot issue a competing write. Guard the
+// optional DOM methods so the browser-free UI tests and the pre-status recovery shell share this
+// exact production path.
+function syncOtaSettingsLock() {
+  const locked = !!(S.otaInstalling || S.otaCached);
+  for (const id of ["connTile", "settingsCards"]) {
+    const controls = $(id)?.querySelectorAll?.("button, select, input") || [];
+    for (const control of controls) control.disabled = locked;
+  }
+}
+
 // Poll /ota/status until `state` leaves the set we're waiting on, or we run out of patience.
 // Every OTA phase is asynchronous on the device (the download runs on its own task so the single
 // httpd worker stays free), so the UI's whole job here is to watch a state machine it does not drive.
@@ -681,6 +747,8 @@ async function otaPoll(waitStates, tries, onTick) {
 function otaFail(text) {
   S.otaInstalling = false;
   S.otaBusy = false;
+  otaCacheClear();
+  syncOtaSettingsLock();
   otaInline(text, { cls: "err" });
   otaInlineClear(6000);
 }
@@ -736,6 +804,8 @@ async function checkFirmwareUpdate() {
     if (r.status === 503) { otaFail(t("ota.busy")); return; }
     if (!r.ok) { otaFail(await errorOf(r, t("ota.failed"))); return; }
     S.otaInstalling = true;
+    otaCacheStore();
+    syncOtaSettingsLock();
 
     const done = await otaWatch();
     if (!done)                  { otaFail(t("ota.timeout")); return; }
@@ -770,22 +840,27 @@ function otaWatch() {
 async function resumeOta() {
   let s;
   try { s = await j("/ota/status"); } catch { return; }
-  if (!s || (s.state !== "updating" && s.state !== "done")) return;
+  if (!s || (s.state !== "updating" && s.state !== "done")) {
+    otaCacheClear();
+    return;
+  }
   if (S.otaBusy) return;
   S.busy = true; S.otaBusy = true; S.otaInstalling = true;
   let handedOff = false;
   try {
-    // /status is the largest response the device builds and may legitimately be unavailable while
-    // the OTA TLS task owns the scarce heap. Build an accurate OTA-only shell from this much smaller
-    // response instead of leaving Settings empty and calling the reachable device unreachable.
-    const otaOnly = renderOtaResumeShell(s);
+    // Prefer the complete last frame saved by this tab. If it is absent, stale or belongs to another
+    // running version, /status is still the largest response the device builds and may legitimately
+    // be unavailable while OTA TLS owns the scarce heap; retain the accurate OTA-only shell then.
+    const restored = otaCacheRestore(s);
+    const otaOnly = !restored && renderOtaResumeShell(s);
+    syncOtaSettingsLock();
     if (s.state === "updating") otaInline(t("ota.pct", s.progress ?? 0), { ring: true, pct: s.progress ?? 0 });
-    if (otaOnly) renderOtaDashboardStatus();
+    if (restored || otaOnly) renderOtaDashboardStatus();
     const done = s.state === "done" ? s : await otaWatch();
     if (!done)                  { otaFail(t("ota.timeout")); return; }
     if (done.state === "error") { otaFail(done.message || t("ota.failed")); return; }
     otaInline(t("ota.rebooting"), { ring: true, pct: 100 });
-    if (otaOnly) renderOtaDashboardStatus();
+    if (restored || otaOnly) renderOtaDashboardStatus();
     otaWaitReboot();
     handedOff = true;
   } finally {

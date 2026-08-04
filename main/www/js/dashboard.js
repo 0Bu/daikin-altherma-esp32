@@ -49,6 +49,11 @@ async function refreshValues() {
   // no comparison, no fallback. Never merged into S._values: the two have separate liveness, and
   // merging would make "is this reading current?" unanswerable per row.
   S._modbus = Array.isArray(r.modbus) ? r.modbus : [];
+  // A successful values response follows a successful status response in pollTick, so together
+  // they supersede a restored OTA snapshot. While installation continues, keep this newer complete
+  // frame as the next reload's bounded fallback.
+  S.otaCached = false;
+  if (S.otaInstalling) otaCacheStore();
   renderApp();
   return true;
 }
@@ -903,14 +908,23 @@ function renderSettings() {
   // status-backed render, then repaint the retained OTA view into the newly-created #otaStatSet.
   const firstStatusRender = !S.settingsHydrated;
   if (!picking && (!S.otaShown || firstStatusRender)) {
-    setHtml("settingsCards", esp32CardHtml());
+    setHtml("settingsCards", (S.otaCached ? otaSnapshotCardHtml() : "") + esp32CardHtml());
     if (!S.clickHold) {
       S.settingsHydrated = true;
       if (S.otaShown) paintOtaInline();
     }
   }
   $("settingsVer").textContent = "daikin-altherma-esp32 · v" + (S.status?.version || "?");
+  syncOtaSettingsLock();
   renderSettingsDot();
+}
+
+// A restored frame is valuable only if its age is impossible to miss. Use the same expandable
+// information row as the other Settings facts: the compact value says "snapshot", and its tongue
+// explains that live reads may be paused and writes are locked until the install finishes.
+function otaSnapshotCardHtml() {
+  return vcard(t("ota.snapshot_title"), settingsValueInfoRow("ota", "snapshot",
+    t("ota.snapshot_label"), t("ota.snapshot_value"), "warn", t("ota.snapshot_help")));
 }
 // The gear's attention marker. The connection rows live behind it now, so a broker that stopped
 // answering would otherwise be invisible from the dashboard — the screen the user is on all day.
