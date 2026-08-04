@@ -113,10 +113,12 @@ http_config.cpp     → POST /set_wifi, /set_mqtt, /test_ref_temp, /set_ref_temp
                       value without saving it; /set_ref_temp requires that proof and applies live.
                       /set_weather validates the DWD path component, persists it and only wakes the
                       weather task; no DNS/TLS request runs on the httpd worker.
-                      /set_env3 proof-gates an enable before NVS: a short-lived bus requires one
-                      CRC-valid SHT30 sample and the QMP6988 chip id on the proposed pins. Disable
-                      remains probe-free; an already running unchanged mapping instead requires a
-                      fresh driver sample, and moving that owned bus is disable-first.
+                      /set_board atomically owns board identity/peripherals plus the integrated ENV
+                      III fields. Its shared preflight proof-gates an enable before the one NVS
+                      write: a short-lived bus requires one CRC-valid SHT30 sample and the QMP6988
+                      chip id on the proposed pins. Disable remains probe-free; an already running
+                      unchanged mapping instead requires a fresh driver sample, and moving that
+                      owned bus is disable-first. /set_env3 retains the same gate for older clients.
                       /set_hp also carries the HomeHub Modbus params (mb_host/mb_port/mb_unit_id,
                       actuation_enabled), applied live; /discover_homehub is a bounded, explicit
                       dialog action that returns an IPv4 without saving it
@@ -336,10 +338,11 @@ host-testable core is unusually large and valuable, because the risky parts are 
   CRC-protected write. `/status.board.preset_id` and `.preset_name` expose it directly. A device that
   never saved hardware carries the Kconfig defaults, which happen to **equal** the XIAO preset, but
   carries no selected id and remains unidentified. Conversely, an Atom selection remains Atom across
-  refresh and reboot without re-deriving its name from GPIO35/41. The request rejects an unknown id
-  or a known id whose submitted fields do not match its preset; manually edited fields are saved as
-  `custom`. Each preset also carries a non-display `BoardVendor`; vendor-bound accessories such as
-  ENV III use this validated explicit identity, not a model-name or pin heuristic. Thus a future
+  refresh and reboot without re-deriving its name from GPIO35/41 — including when its LED or reset
+  button is disabled or moved. The request rejects an unknown id, while `board_hw_valid()` separately
+  validates the customized peripheral GPIOs; only explicitly choosing `custom` changes identity.
+  Each preset also carries a non-display `BoardVendor`; vendor-bound accessories such as ENV III use
+  this validated explicit identity, not a model-name or pin heuristic. Thus a future
   M5Stack preset inherits the capability while Seeed, unstated and Custom boards fail closed.
   Hardware values decide the **reboot** (a driver's pin moved); identity-only changes require a
   **save** but no reboot (`board_save_needed()` / `board_reboot_needed()`). Pre-v12 `board_set=true`

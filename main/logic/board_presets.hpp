@@ -106,9 +106,11 @@ inline const char* board_preset_key(BoardPresetId id) {
     return preset ? preset->key : "";
 }
 
-// A selected id is accepted only with a field-for-field match. Fresh Kconfig defaults equal the
-// XIAO fields but carry no selected id and therefore identify nothing. Ignore polarity where the
-// corresponding hardware is absent or a WS2812, mirroring the Hardware modal's matcher.
+// Field matching exists only for the pre-v12 migration: that legacy format recorded that board
+// settings had been saved, but not which physical board the user had selected. Current firmware
+// persists identity independently. The onboard LED/button defaults are useful starting values, not
+// an identity proof: an AtomS3 Lite remains an AtomS3 Lite when its indicator or reset button is
+// deliberately disabled.
 inline bool board_preset_matches(const BoardPreset& p, const Config& c) {
     if (p.led_gpio != c.led_gpio) return false;
     if (p.led_gpio >= 0) {
@@ -120,8 +122,9 @@ inline bool board_preset_matches(const BoardPreset& p, const Config& c) {
     return true;
 }
 
-// Exact identity validation used on POST and load. A known id with different hardware is never
-// accepted as that board: either apply the preset values or save the edited fields as Custom.
+// Identity validation used on POST and load. A current-format identity is the user's explicit board
+// selection, not a reverse lookup from configurable peripherals. The ordinary hardware validator
+// independently rejects unsafe GPIOs and collisions.
 inline bool board_identity_valid(const Config& c, std::string& reason) {
     if (!c.board_user_set) {
         if (c.board_preset_id == BoardPresetId::Custom) return true;
@@ -129,13 +132,8 @@ inline bool board_identity_valid(const Config& c, std::string& reason) {
         return false;
     }
     if (c.board_preset_id == BoardPresetId::Custom) return true;
-    const BoardPreset* preset = board_preset_by_id(c.board_preset_id);
-    if (!preset) {
+    if (!board_preset_by_id(c.board_preset_id)) {
         reason = "board preset is unknown";
-        return false;
-    }
-    if (!board_preset_matches(*preset, c)) {
-        reason = "board preset does not match its hardware fields";
         return false;
     }
     return true;
@@ -143,8 +141,7 @@ inline bool board_identity_valid(const Config& c, std::string& reason) {
 
 inline const BoardPreset* board_selected_preset(const Config& c) {
     if (!c.board_user_set || c.board_preset_id == BoardPresetId::Custom) return nullptr;
-    const BoardPreset* preset = board_preset_by_id(c.board_preset_id);
-    return preset && board_preset_matches(*preset, c) ? preset : nullptr;
+    return board_preset_by_id(c.board_preset_id);
 }
 
 // Upgrade helper for pre-v12 firmware: the old `board_set` bit stated that these hardware values

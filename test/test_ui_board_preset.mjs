@@ -10,6 +10,7 @@ function element(value = "") {
   return {
     value,
     checked: false,
+    disabled: false,
     hidden: false,
     innerHTML: "",
   };
@@ -26,6 +27,8 @@ const elements = {
   bdBtnPin: element(),
   bdBtnInvRow: element(),
   bdBtnInv: element(),
+  bdError: element(),
+  bdEnvSection: element(),
   envSensor: element(),
   envPinFields: element(),
   envSda: element(),
@@ -36,6 +39,7 @@ const presets = [
   {
     id: "m5stack_atoms3_lite",
     name: "M5Stack AtomS3 Lite",
+    vendor: "m5stack",
     led_gpio: 35,
     led_type: 1,
     led_inverted: false,
@@ -45,6 +49,7 @@ const presets = [
   {
     id: "seeed_xiao_esp32s3",
     name: "Seeed XIAO ESP32-S3",
+    vendor: "seeed",
     led_gpio: 21,
     led_type: 0,
     led_inverted: true,
@@ -81,8 +86,9 @@ vm.runInContext(
   `${settingsSource}
    this.__fillBoard = fillBoard;
    this.__applyPreset = applyPreset;
-   this.__syncPresetSelection = syncPresetSelection;
+   this.__syncBoardFields = syncBoardFields;
    this.__fillEnv3 = fillEnv3;
+   this.__syncBoardEnv3Visibility = syncBoardEnv3Visibility;
    this.__syncEnv3Fields = syncEnv3Fields;
    this.__env3FormPayload = env3FormPayload;`,
   sandbox,
@@ -97,35 +103,46 @@ assert.equal(elements.bdLedPin.value, "21");
 assert.equal(elements.bdLedInv.checked, true);
 assert.equal(elements.bdBtnPin.value, "-1");
 
-// The preset remains a working fill shortcut, and edits made while the modal is open still keep the
-// label honest.
+// The preset remains a working fill shortcut and its explicit identity remains selected while the
+// configurable onboard peripherals are disabled.
 elements.bdPreset.value = "m5stack_atoms3_lite";
 sandbox.__applyPreset();
 assert.equal(elements.bdLedType.value, "1");
 assert.equal(elements.bdLedPin.value, "35");
 assert.equal(elements.bdBtnPin.value, "41");
+assert.equal(elements.bdLedPin.disabled, false);
+assert.equal(elements.bdLedInv.disabled, true, "WS2812 has no active-low GPIO control");
+assert.equal(elements.bdBtnInv.disabled, false);
+assert.equal(elements.bdEnvSection.hidden, false, "Atom selection must reveal its accessory settings");
+assert.equal(elements.envSensor.disabled, false);
 
-elements.bdLedPin.value = "21";
-sandbox.__syncPresetSelection();
-assert.equal(elements.bdPreset.value, "custom", "a hand edit must return the selection to Custom");
-
-elements.bdLedPin.value = "35";
-sandbox.__syncPresetSelection();
+elements.bdLedType.value = "-1";
+elements.bdBtnPin.value = "-1";
+sandbox.__syncBoardFields();
 assert.equal(elements.bdPreset.value, "m5stack_atoms3_lite",
-  "an exact in-modal preset match may name that preset");
+  "disabling Atom LED and reset button must keep the explicit Atom identity");
+assert.equal(elements.bdLedPin.disabled, true, "a hidden LED pin must also be disabled");
+assert.equal(elements.bdBtnInv.disabled, true, "a hidden reset polarity must also be disabled");
+
+elements.bdPreset.value = "custom";
+sandbox.__applyPreset();
+assert.equal(elements.bdEnvSection.hidden, true, "Custom must hide the M5Stack accessory section");
+assert.equal(elements.envSensor.disabled, true);
+assert.equal(elements.envSda.disabled, true);
+assert.equal(elements.envScl.disabled, true);
 
 // Reopening uses the explicitly persisted id, not a fresh comparison of pins. This is the core
 // contract needed by ENV III: Atom remains visibly and semantically selected across refresh/reboot.
 context.S.status.board.preset_id = "m5stack_atoms3_lite";
 context.S.status.board.preset_name = "M5Stack AtomS3 Lite";
 context.S.status.board.user_set = true;
-context.S.status.board.led_gpio = 35;
-context.S.status.board.led_type = 1;
+context.S.status.board.led_gpio = -1;
+context.S.status.board.led_type = 0;
 context.S.status.board.led_inverted = false;
-context.S.status.board.btn_gpio = 41;
+context.S.status.board.btn_gpio = -1;
 sandbox.__fillBoard();
 assert.equal(elements.bdPreset.value, "m5stack_atoms3_lite",
-  "the stored AtomS3 Lite id must reopen as AtomS3 Lite without pin inference");
+  "the stored AtomS3 Lite id must reopen as AtomS3 Lite despite disabled peripherals");
 
 // I2C addresses identify devices only after a bus pair has been selected. When X10A reserves the
 // Atom's Grove GPIO1/2, the modal must not resurrect those unavailable persisted defaults; it picks
@@ -136,6 +153,7 @@ assert.equal(elements.envScl.value, "6");
 assert.doesNotMatch(elements.envSda.innerHTML, /value="[12]"/);
 assert.doesNotMatch(elements.envScl.innerHTML, /value="[12]"/);
 assert.equal(elements.envSensor.value, "", "an unconfigured sensor is represented by the select, not a checkbox");
+assert.equal(elements.bdEnvSection.hidden, false);
 assert.equal(elements.envPinFields.hidden, true);
 assert.equal(elements.envSda.disabled, true);
 assert.equal(elements.envScl.disabled, true);

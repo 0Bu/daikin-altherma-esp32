@@ -346,50 +346,44 @@ function boardPinOptions(sel, cur, withNone) {
 function syncBoardFields() {
   const type = +$("bdLedType").value;
   $("bdLedPinRow").hidden = type < 0;
+  $("bdLedPin").disabled = type < 0;
   $("bdLedInvRow").hidden = type !== 0;
-  $("bdBtnInvRow").hidden = +$("bdBtnPin").value < 0;
+  $("bdLedInv").disabled = type !== 0;
+  const buttonEnabled = +$("bdBtnPin").value >= 0;
+  $("bdBtnInvRow").hidden = !buttonEnabled;
+  $("bdBtnInv").disabled = !buttonEnabled;
 }
 // ── Board presets ───────────────────────────────────────────────────────────
 // The ready-made per-board settings the device serves in /status.board.presets (logic/
 // board_presets.hpp — one table, host-tested against the same validator POST /set_board applies, so
 // the browser never carries a second copy of the board facts that could drift from it).
 //
-// A pick fills the five fields and supplies the stable preset id persisted on Save. Untouched build
-// defaults carry no id, so they remain unselected even when their pins equal XIAO. Editing a field
-// changes the pending selection to Custom unless all five values again match a known preset.
+// A pick fills the five fields and supplies the stable board identity persisted on Save. Untouched
+// build defaults carry no id, so they remain unselected even when their pins equal XIAO. The five
+// values are configurable peripherals, not an identity proof: disabling Atom's LED or reset button
+// deliberately keeps Atom selected. Only choosing Custom changes the identity to Custom.
 function boardPresets() {
   return Array.isArray(S.status?.board?.presets) ? S.status.board.presets : [];
 }
-// Compare only the fields that are actually in play: polarity is meaningless for a WS2812 (it
-// encodes "off" as the zero colour) and for an absent LED/button, so a difference there must not
-// downgrade an otherwise-exact match to "Custom".
-function boardFieldsMatch(p) {
-  const type = +$("bdLedType").value;
-  const led = type < 0 ? -1 : +$("bdLedPin").value;
-  if (p.led_gpio !== led) return false;
-  if (led >= 0) {
-    if (p.led_type !== type) return false;
-    if (type === 0 && !!p.led_inverted !== $("bdLedInv").checked) return false;
-  }
-  const btn = +$("bdBtnPin").value;
-  if (p.btn_gpio !== btn) return false;
-  if (btn >= 0 && p.btn_active_low !== $("bdBtnInv").checked) return false;
-  return true;
+function selectedBoardPreset() {
+  return boardPresets().find((candidate) => candidate.id === $("bdPreset").value);
 }
-// findIndex returns -1 when nothing matches, which is exactly the "Custom" option's value.
-function syncPresetSelection() {
-  const match = boardPresets().find(boardFieldsMatch);
-  $("bdPreset").value = match?.id || "custom";
-}
+function boardSupportsEnv3() { return selectedBoardPreset()?.vendor === "m5stack"; }
 function applyPreset() {
-  const p = boardPresets().find((candidate) => candidate.id === $("bdPreset").value);
-  if (!p) return;                       // "Custom" — leave the fields exactly as the user has them
+  $("bdError").hidden = true;
+  const p = selectedBoardPreset();
+  if (!p) {                             // "Custom" — leave the fields exactly as the user has them
+    syncBoardEnv3Visibility();
+    return;
+  }
   $("bdLedType").value = String(p.led_gpio < 0 ? -1 : p.led_type);
   if (p.led_gpio >= 0) boardPinOptions($("bdLedPin"), p.led_gpio, false);
   $("bdLedInv").checked = !!p.led_inverted;
   boardPinOptions($("bdBtnPin"), p.btn_gpio, true);
   $("bdBtnInv").checked = p.btn_active_low !== false;
   syncBoardFields();
+  refreshEnv3PinOptions();
+  syncBoardEnv3Visibility();
 }
 function fillBoard() {
   const b = S.status?.board || {};
@@ -408,11 +402,13 @@ function fillBoard() {
   syncBoardFields();
   // Use the persisted id directly. Pins are deliberately not allowed to name a board on open: a
   // freshly flashed Atom may carry XIAO build defaults, and a manually wired Custom board may happen
-  // to use the same values as a preset. The request path separately rejects id/value mismatches.
+  // to use the same values as a preset. Current-format identity deliberately remains independent of
+  // later LED/button customization; the request path validates those GPIOs separately.
   $("bdPreset").value = presets.some((p) => p.id === b.preset_id) ? b.preset_id : "custom";
 }
 function openBoard() {
   fillBoard();
+  fillEnv3();
   $("bdError").hidden = true;
   openPopup("boardModal");
 }
@@ -421,7 +417,11 @@ function closeBoard() { closePopup("boardModal"); }
 // ── ENV III outdoor-climate sensor ───────────────────────────────────────
 function env3AvailablePins() {
   const raw = Array.isArray(S.status?.env3?.pins_avail) ? S.status.env3.pins_avail : [];
-  return [...new Set(raw.filter((p) => Number.isInteger(p) && p >= 0))].sort((a, b) => a - b);
+  const used = new Set();
+  if (+$("bdLedType").value >= 0) used.add(+$("bdLedPin").value);
+  if (+$("bdBtnPin").value >= 0) used.add(+$("bdBtnPin").value);
+  return [...new Set(raw.filter((p) => Number.isInteger(p) && p >= 0 && !used.has(p)))]
+    .sort((a, b) => a - b);
 }
 function env3PinOptions(sel, current) {
   const pins = env3AvailablePins();
@@ -436,12 +436,23 @@ function env3SafePair(e) {
   return { sda, scl };
 }
 function syncEnv3Fields() {
-  const enabled = $("envSensor").value === "env_iii";
+  const enabled = boardSupportsEnv3() && $("envSensor").value === "env_iii";
   $("envPinFields").hidden = !enabled;
   for (const id of ["envSda", "envScl"]) $(id).disabled = !enabled;
 }
+function syncBoardEnv3Visibility() {
+  const supported = boardSupportsEnv3();
+  $("bdEnvSection").hidden = !supported;
+  $("envSensor").disabled = !supported;
+  syncEnv3Fields();
+}
+function refreshEnv3PinOptions() {
+  const pair = env3SafePair({ sda: +$("envSda").value, scl: +$("envScl").value });
+  env3PinOptions($("envSda"), pair.sda);
+  env3PinOptions($("envScl"), pair.scl);
+}
 function env3FormPayload() {
-  const enabled = $("envSensor").value === "env_iii";
+  const enabled = boardSupportsEnv3() && $("envSensor").value === "env_iii";
   if (!enabled) return { enabled: false };
   return { enabled: true, sda: +$("envSda").value, scl: +$("envScl").value };
 }
@@ -460,17 +471,8 @@ function fillEnv3() {
   $("envSensor").value = e.enabled ? "env_iii" : "";
   env3PinOptions($("envSda"), pair.sda);
   env3PinOptions($("envScl"), pair.scl);
-  syncEnv3Fields();
+  syncBoardEnv3Visibility();
 }
-function openEnv3() {
-  if (!S.status?.env3?.supported) return;
-  fillEnv3();
-  $("envError").hidden = true;
-  openPopup("env3Modal");
-}
-// Keep this symmetric with the other configuration modals: the shared close path dismisses the
-// owned modal and releases the document scroll lock in one operation.
-function closeEnv3() { closePopup("env3Modal"); }
 function signalBars(rssi) {
   const lit = rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1;
   const tone = rssi >= -70 ? "var(--ok)" : "var(--warn)";

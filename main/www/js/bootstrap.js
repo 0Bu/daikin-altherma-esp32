@@ -163,8 +163,9 @@ function wireTrendScrub(gv) {
 // their container — same one-time setup, same order as before.
 function wireRestOfApp() {
   // The three-card ESP32 group (#settingsCards) is rebuilt every poll too, so its controls are
-  // delegated as well: the Hardware row opens the board modal, the Firmware row runs the OTA check,
-  // and the Protocol card's RX/TX dropdowns re-run pin auto-detection on change. The check stays on this screen — it
+  // delegated as well: Hardware's left action expands its explanation, its right action opens the
+  // board modal, the Firmware row runs the OTA check, and the Protocol card's RX/TX dropdowns re-run
+  // pin auto-detection on change. The check stays on this screen — it
   // reports into the Firmware row's own slot (otaInline paints both slots), so nothing has to
   // navigate to make the flow visible.
   $("settingsCards").addEventListener("click", (e) => {
@@ -172,14 +173,13 @@ function wireRestOfApp() {
     // collapse the panel the user was reading — the same guard #valueGroups carries.
     if (e.target.closest("[data-hist]")) return;
     const desc = e.target.closest("[data-desc]");
-    if (desc) return toggleDesc(desc);        // the two memory rows expand like any value row
+    if (desc) return toggleDesc(desc);        // memory rows and Hardware's left action expand
     const act = e.target.closest("[data-act]");
     if (!act) return;
     if (act.dataset.act === "board") openBoard();
     else if (act.dataset.act === "ota") checkFirmwareUpdate();
     else if (act.dataset.act === "ref-temp") openRefTemp();
     else if (act.dataset.act === "weather") openWeather();
-    else if (act.dataset.act === "env3") openEnv3();
   });
   $("settingsCards").addEventListener("change", (e) => {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();
@@ -602,12 +602,16 @@ function wireRestOfApp() {
   $("bugGo").onclick = bugPrepare;
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("bugModal").hidden) closeBug(); });
   $("bdPreset").addEventListener("change", applyPreset);
-  // Every field the presets cover re-decides which preset (if any) the form now describes — see
-  // syncPresetSelection. The two that also change the form's SHAPE keep doing that first.
-  $("bdLedType").addEventListener("change", () => { syncBoardFields(); syncPresetSelection(); });
-  $("bdBtnPin").addEventListener("change", () => { syncBoardFields(); syncPresetSelection(); });
-  for (const id of ["bdLedPin", "bdLedInv", "bdBtnInv"])
-    $(id).addEventListener("change", syncPresetSelection);
+  // Board identity and configurable peripherals are independent. Editing LED/reset therefore keeps
+  // the explicit board selection; it only refreshes ENV III's collision-free candidate pins.
+  $("bdLedType").addEventListener("change", () => { syncBoardFields(); refreshEnv3PinOptions(); });
+  $("bdBtnPin").addEventListener("change", () => { syncBoardFields(); refreshEnv3PinOptions(); });
+  $("bdLedPin").addEventListener("change", refreshEnv3PinOptions);
+  for (const id of ["bdLedInv", "bdBtnInv"])
+    $(id).addEventListener("change", () => { $("bdError").hidden = true; });
+  $("envSensor").addEventListener("change", () => { syncEnv3Fields(); $("bdError").hidden = true; });
+  for (const id of ["envSda", "envScl"])
+    $(id).addEventListener("change", () => { $("bdError").hidden = true; });
   $("boardForm").addEventListener("submit", (e) => {
     e.preventDefault();
     const type = +$("bdLedType").value;
@@ -615,6 +619,11 @@ function wireRestOfApp() {
     // local pins at all) must read as "no indicator", never as GPIO0 — `+""` is 0, and 0 is a real
     // pin number the request path then has to reject. -1 is the honest answer for "nothing to pick".
     const pinOf = (id) => { const v = parseInt($(id).value, 10); return Number.isFinite(v) ? v : -1; };
+    const env = env3FormPayload();
+    if (env.enabled && (!Number.isInteger(env.sda) || !Number.isInteger(env.scl) || env.sda === env.scl)) {
+      $("bdError").textContent = t("env.err_pins"); $("bdError").hidden = false;
+      toast(t("env.err_pins"), "err"); return;
+    }
     saveReboot("/set_board", {
       preset_id: $("bdPreset").value || "custom",
       // Type "None" is the wire's led_gpio = -1; the pin select keeps its last value so re-enabling
@@ -624,35 +633,16 @@ function wireRestOfApp() {
       led_inverted: $("bdLedInv").checked,
       btn_gpio: pinOf("bdBtnPin"),
       btn_active_low: $("bdBtnInv").checked,
+      env3_enabled: env.enabled,
+      env3_sda: env.enabled ? env.sda : +(S.status?.env3?.sda ?? 2),
+      env3_scl: env.enabled ? env.scl : +(S.status?.env3?.scl ?? 1),
     }, {
       btn: "bdBtn",
       showError: (msg) => { $("bdError").textContent = msg; $("bdError").hidden = false; },
       close: closeBoard,
       then: renderApp,
-      busyMsg: t("toast.saving_board"),
-    });
-  });
-
-  $("envCancel").onclick = closeEnv3;
-  $("env3Backdrop").onclick = closeEnv3;
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("env3Modal").hidden) closeEnv3(); });
-  $("envSensor").addEventListener("change", () => { syncEnv3Fields(); $("envError").hidden = true; });
-  for (const id of ["envSda", "envScl"])
-    $(id).addEventListener("change", () => { $("envError").hidden = true; });
-  $("env3Form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const body = env3FormPayload();
-    if (body.enabled && (!Number.isInteger(body.sda) || !Number.isInteger(body.scl) || body.sda === body.scl)) {
-      $("envError").textContent = t("env.err_pins"); $("envError").hidden = false;
-      toast(t("env.err_pins"), "err"); return;
-    }
-    saveReboot("/set_env3", body, {
-      btn: "envBtn",
-      showError: (msg) => { $("envError").textContent = msg; $("envError").hidden = false; },
-      close: closeEnv3,
-      then: renderApp,
-      busyMsg: t("env.checking"),
-      busyLabel: "env.checking",
+      busyMsg: t(env.enabled ? "env.checking" : "toast.saving_board"),
+      busyLabel: env.enabled ? "env.checking" : "btn.saving",
       mapError: env3SaveError,
     });
   });

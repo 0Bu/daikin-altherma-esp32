@@ -12,8 +12,9 @@ firmware contains no display driver, display role, or remote-display MQTT path.
 > ([`ci-build-all.sh`](../scripts/ci-build-all.sh)), so nothing board-specific may be a compile-time
 > choice — it would fork the binary, its OTA manifest and the web installer per board. Everything
 > below that differs between boards is therefore a **runtime setting** in NVS: the X10A RX/TX pins
-> (auto-detected, `POST /set_hp`), optional ENV III SDA/SCL pins (`POST /set_env3`) and the status indicator + recovery button (`POST /set_board`,
-> **⚙ Settings → ESP32 → Hardware**). Kconfig only seeds a device that has never been configured.
+> (auto-detected, `POST /set_hp`) plus board identity, optional ENV III SDA/SCL, status indicator and
+> recovery button (one atomic `POST /set_board`, **⚙ Settings → ESP32 → Hardware**). The legacy
+> `POST /set_env3` route remains API-compatible. Kconfig only seeds a device that has never been configured.
 
 ## What the firmware requires
 
@@ -60,7 +61,8 @@ fill in — the dropdown is this table, served by the firmware (`logic/board_pre
 cannot drift from what follows. Save persists the stable id `m5stack_atoms3_lite` atomically with
 those fields; `/status.board.preset_id` and `.preset_name` therefore state the selection directly
 instead of inferring AtomS3 Lite from GPIO35/41. Nothing is written until you press Save, and editing
-any field afterwards switches the pending selection back to *Custom*.
+LED or reset-button settings afterwards keeps the physical AtomS3 Lite identity selected. Only an
+explicit choice of *Custom* removes that identity and its M5Stack accessory capability.
 
 - Status LED → `led_gpio 35`, type **WS2812**. The six operating states then come out as colours —
   blue = setup portal, yellow = connecting, green = healthy, red double-flash = X10A down, orange =
@@ -121,9 +123,9 @@ header at all.
 ## M5Stack ENV III — outdoor temperature, humidity and pressure
 
 ENV III is an optional, independent observation sensor. It combines an SHT30 at I²C address
-`0x44` with a QMP6988 at `0x70`; both share the same SDA/SCL pair. Enable it under
-**⚙ Settings → Dynamic leaving-water control → Outdoor measurements** by selecting **ENV III** in
-the sensor dropdown. Selecting **No sensor** disables the input. The dashboard then shows a
+`0x44` with a QMP6988 at `0x70`; both share the same SDA/SCL pair. Select **M5Stack AtomS3 Lite**
+under **⚙ Settings → ESP32 → Hardware**, then configure **Outdoor sensor → ENV III** in that same
+dialog. Selecting **No sensor** disables the input. The dashboard then shows a
 separate **Outdoor climate** card. These readings do **not** replace or relabel Daikin's own R1T
 air-inlet value and are not yet consumed by a control algorithm. Every new fresh sample is also
 published as retained numeric JSON on `<base>/env3`, for example
@@ -138,18 +140,19 @@ JSON key, so `{}` makes them unavailable without hiding unrelated heat-pump enti
 | AtomS3 Lite, ENV III in Grove | **GPIO2 (G2)** | **GPIO1 (G1)** | Grove is then unavailable to X10A; move X10A to two free header pins, for example RX 5 / TX 6. |
 | AtomS3 Lite, X10A stays in Grove | choose two free header GPIOs, e.g. **5** | e.g. **6** | ENV III needs a Grove breakout/adapter to those header pins. |
 
-ENV III is exposed only when the user has selected a board preset whose firmware metadata identifies
-the vendor as **M5Stack**. It is hidden on Seeed and Custom boards, the driver cannot start there, and
-an enabled raw `POST /set_env3` is rejected. This is vendor-based rather than hard-coded to the
+ENV III is exposed only when the pending board selection has firmware metadata identifying the
+vendor as **M5Stack**. Its section is hidden and disabled for Seeed and Custom, the driver cannot
+start there, and an enabled raw `POST /set_env3` is rejected. This is vendor-based rather than hard-coded to the
 AtomS3 Lite: a future supported M5Stack board preset inherits the capability when it is added to the
 same table. Custom cannot assert a vendor, so it deliberately fails closed.
 
 The GPIO selectors preselect the AtomS3 Lite Grove mapping only when its pins are actually free. A
 save is rejected if ENV III overlaps X10A, the status LED, the recovery button, or a chip-reserved
-pad; the same check runs again at boot and disables an invalid persisted mapping. Enabling is also
-**test-before-persist**: on the selected pair, the SHT30 must return one CRC-valid measurement and
-the QMP6988 must return its `0x5c` chip id before the firmware writes NVS. If either device is not
-reachable, the dialog stays open with the matching error and no configuration is changed. Selecting
+pad; the same check runs again at boot and disables an invalid persisted mapping. Board identity,
+LED/button and sensor are validated as one proposed snapshot. Enabling is **test-before-persist**:
+on the selected pair, the SHT30 must return one CRC-valid measurement and the QMP6988 must return its
+`0x5c` chip id before the firmware writes that snapshot once. If either device is not reachable, the
+Board Hardware dialog stays open with the matching error and none of its changes are saved. Selecting
 **No sensor** remains directly saveable because disabling is the recovery path and requires no
 attached hardware. A running ENV III is accepted only while its latest sample is fresh. To move an
 already active sensor to other pins, first select **No sensor**, let the board restart, rewire it,

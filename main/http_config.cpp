@@ -66,6 +66,49 @@ static esp_err_t send_env3_err(httpd_req_t* req, const char* status,
     return http_send_json(req, body.c_str());
 }
 
+// Shared test-before-persist gate for the standalone compatibility endpoint and the integrated
+// Board Hardware form. The caller owns the one eventual config_save(), so a failed sensor probe can
+// never leave board identity/peripherals saved while ENV III stayed behind (or vice versa).
+static esp_err_t env3_save_preflight(httpd_req_t* req, const Config& current,
+                                     const Config& proposed, bool& allowed) {
+    allowed = false;
+    std::string reason;
+    if (!env3_config_valid(proposed, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi())) {
+        return send_err(req, "400 Bad Request", reason.c_str());
+    }
+    switch (env3_save_check(current, proposed)) {
+        case Env3SaveCheck::None:
+            allowed = true;  // disabling is the recovery path and never needs attached hardware
+            return ESP_OK;
+        case Env3SaveCheck::RunningSample: {
+            const Env3Status status = env3_status();
+            if (status.connected && status.fresh) { allowed = true; return ESP_OK; }
+            return send_env3_err(req, "422 Unprocessable Entity", "env3_not_reachable",
+                                 "ENV III is not currently reachable on the selected SDA/SCL pins");
+        }
+        case Env3SaveCheck::HardwareProbe:
+            switch (env3_probe(proposed.env3_sda, proposed.env3_scl)) {
+                case Env3ProbeResult::Ok:
+                    allowed = true;
+                    return ESP_OK;
+                case Env3ProbeResult::BusUnavailable:
+                    return send_env3_err(req, "503 Service Unavailable", "env3_probe_busy",
+                                         "The I2C probe could not start; retry the save");
+                case Env3ProbeResult::Sht30Unavailable:
+                    return send_env3_err(req, "422 Unprocessable Entity", "env3_sht30_not_found",
+                                         "ENV III temperature/humidity sensor not found on the selected pins");
+                case Env3ProbeResult::Qmp6988Unavailable:
+                    return send_env3_err(req, "422 Unprocessable Entity", "env3_qmp6988_not_found",
+                                         "ENV III pressure sensor not found on the selected pins");
+            }
+            return ESP_FAIL;
+        case Env3SaveCheck::DisableFirst:
+            return send_env3_err(req, "409 Conflict", "env3_disable_first",
+                                 "Disable ENV III before changing its SDA/SCL pins");
+    }
+    return ESP_FAIL;
+}
+
 static const char* js(cJSON* o, const char* k, const char* def = "") {
     cJSON* v = cJSON_GetObjectItem(o, k);
     return (v && cJSON_IsString(v)) ? v->valuestring : def;
@@ -707,11 +750,11 @@ static esp_err_t set_weather(httpd_req_t* req) {
     return http_send_json(req, "{\"ok\":true,\"reboot\":false,\"saved\":true}");
 }
 
-// POST /set_board {preset_id, led_gpio, led_type, led_inverted, btn_gpio, btn_active_low}
-// -> validate + persist
-// + reboot. This is the board's own hardware — which pin the status indicator is on, whether it is a
-// plain LED or a WS2812, and which pin (if any) carries the factory-reset button — kept in NVS
-// rather than Kconfig so ONE published image serves boards that disagree about their onboard parts.
+// POST /set_board {preset_id, led_gpio, led_type, led_inverted, btn_gpio, btn_active_low,
+//                  env3_enabled, env3_sda, env3_scl} -> validate + persist + optional reboot.
+// This one atomic form owns the board identity, its configurable local peripherals and the optional
+// M5Stack ENV III accessory. Keeping them in one request means selecting AtomS3 Lite and attaching
+// its Grove sensor cannot save only half of the intended configuration.
 //
 // Unlike /set_hp (which applies pins live), this REBOOTS. Both settings are claimed once at task
 // start: the indicator opens an RMT channel for a WS2812, the button installs a pull on its pin.
@@ -730,6 +773,9 @@ static esp_err_t set_board(httpd_req_t* req) {
     c.led_inverted   = jb(j, "led_inverted", c.led_inverted);
     c.btn_gpio       = ji(j, "btn_gpio", c.btn_gpio);
     c.btn_active_low = jb(j, "btn_active_low", c.btn_active_low);
+    c.env3_enabled   = jb(j, "env3_enabled", c.env3_enabled);
+    c.env3_sda       = ji(j, "env3_sda", c.env3_sda);
+    c.env3_scl       = ji(j, "env3_scl", c.env3_scl);
     cJSON* preset_item = cJSON_GetObjectItem(j, "preset_id");
     if (preset_item && !cJSON_IsString(preset_item)) {
         cJSON_Delete(j);
@@ -755,9 +801,9 @@ static esp_err_t set_board(httpd_req_t* req) {
     if (!board_identity_valid(c, reason))
         return send_err(req, "400 Bad Request", reason.c_str());
 
-    // ENV III is an M5Stack-board feature. Switching to a Seeed or Custom board must not leave an
-    // already-running I2C task behind or make the user switch back merely to reach its Disable
-    // control: retire the optional sensor in the same atomic save and reboot.
+    // ENV III is an M5Stack-board feature. Switching to a Seeed or Custom board retires the optional
+    // sensor in this same atomic save; its controls disappear as soon as the pending selection is no
+    // longer M5Stack, so the server must make the hidden state explicit rather than retain it.
     if (c.env3_enabled && !env3_board_supported(c)) c.env3_enabled = false;
 
     // Checks the pins against the chip AND against the X10A link in the same snapshot, so neither
@@ -765,13 +811,16 @@ static esp_err_t set_board(httpd_req_t* req) {
     if (!board_hw_valid(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi()))
         return send_err(req, "400 Bad Request", reason.c_str());
 
+    bool env_allowed = false;
+    const esp_err_t env_result = env3_save_preflight(req, cur, c, env_allowed);
+    if (!env_allowed) return env_result;
+
     // Two independent questions, and answering them with ONE comparison is what made a XIAO owner's
     // save vanish (#257): picking the preset your device already carries moves no VALUE, but it is
     // still the first time anyone stated what this board is. board_save_needed/board_reboot_needed
     // (logic/config_model.hpp, host-tested) keep them apart — persist the statement, but claim no
     // reboot for it, since no driver's pin changed.
-    const bool env_changed = c.env3_enabled != cur.env3_enabled;
-    if (!board_save_needed(c, cur) && !env_changed)
+    if (!board_env_save_needed(c, cur))
         return http_send_json(req, "{\"ok\":true,\"reboot\":false}");   // nothing to write, no reboot
 
     if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
@@ -779,7 +828,7 @@ static esp_err_t set_board(httpd_req_t* req) {
     // what keeps the ANSWER honest — {"reboot":false} alone makes the UI say "no changes", which
     // would report a write to NVS as nothing having happened. Additive, so the four routes that
     // never send it keep their exact contract.
-    if (!board_reboot_needed(c, cur) && !env_changed)
+    if (!board_env_reboot_needed(c, cur))
         return http_send_json(req, "{\"ok\":true,\"reboot\":false,\"saved\":true}");
     http_send_json(req, "{\"ok\":true,\"reboot\":true}");
     reboot_soon();
@@ -802,42 +851,11 @@ static esp_err_t set_env3(httpd_req_t* req) {
     c.env3_sda = ji(j, "sda", c.env3_sda);
     c.env3_scl = ji(j, "scl", c.env3_scl);
     cJSON_Delete(j);
-    std::string reason;
-    if (!env3_config_valid(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi()))
-        return send_err(req, "400 Bad Request", reason.c_str());
+    bool env_allowed = false;
+    const esp_err_t env_result = env3_save_preflight(req, cur, c, env_allowed);
+    if (!env_allowed) return env_result;
 
-    switch (env3_save_check(cur, c)) {
-        case Env3SaveCheck::None:
-            break;  // disabling is the recovery path and must never depend on attached hardware
-        case Env3SaveCheck::RunningSample: {
-            const Env3Status status = env3_status();
-            if (!status.connected || !status.fresh)
-                return send_env3_err(req, "422 Unprocessable Entity", "env3_not_reachable",
-                                     "ENV III is not currently reachable on the selected SDA/SCL pins");
-            break;
-        }
-        case Env3SaveCheck::HardwareProbe: {
-            switch (env3_probe(c.env3_sda, c.env3_scl)) {
-                case Env3ProbeResult::Ok:
-                    break;
-                case Env3ProbeResult::BusUnavailable:
-                    return send_env3_err(req, "503 Service Unavailable", "env3_probe_busy",
-                                         "The I2C probe could not start; retry the save");
-                case Env3ProbeResult::Sht30Unavailable:
-                    return send_env3_err(req, "422 Unprocessable Entity", "env3_sht30_not_found",
-                                         "ENV III temperature/humidity sensor not found on the selected pins");
-                case Env3ProbeResult::Qmp6988Unavailable:
-                    return send_env3_err(req, "422 Unprocessable Entity", "env3_qmp6988_not_found",
-                                         "ENV III pressure sensor not found on the selected pins");
-            }
-            break;
-        }
-        case Env3SaveCheck::DisableFirst:
-            return send_env3_err(req, "409 Conflict", "env3_disable_first",
-                                 "Disable ENV III before changing its SDA/SCL pins");
-    }
-
-    if (c.env3_enabled == cur.env3_enabled && c.env3_sda == cur.env3_sda && c.env3_scl == cur.env3_scl)
+    if (env3_config_same(c, cur))
         return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
     if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
     http_send_json(req, "{\"ok\":true,\"reboot\":true}");

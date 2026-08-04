@@ -113,7 +113,7 @@ const fetch = async (url, options = {}) => {
   const body = options.body ? JSON.parse(options.body) : null;
   fetchState.calls.push({ url, body });
   if (fetchState.mode === "throw") throw new Error("unreachable");
-  if (fetchState.mode === "env3_missing" && url === "/set_env3")
+  if (fetchState.mode === "env3_missing" && url === "/set_board")
     return response(false, {
       code: "env3_sht30_not_found",
       error: "ENV III temperature/humidity sensor not found on the selected pins",
@@ -212,7 +212,7 @@ vm.runInContext(`${source}
   this.__ui = {
     S, MODALS, POPUP_ROUTES, wire, initNavigation, applyRouteFromLocation, hydrateRoutedPopup,
     openWifi, openMqtt, openRefTemp, openWeather, openSyslog,
-    openNtp, openHomehub, openBoard, openEnv3, openBug,
+    openNtp, openHomehub, openBoard, openBug,
   };`, context, { filename: "main/www/app.sources" });
 const ui = context.__ui;
 
@@ -231,7 +231,15 @@ ui.S.status = {
   modbus: { host: "", port: 502, unit_id: 1 },
   board: {
     preset_id: "m5stack_atoms3_lite",
-    presets: [],
+    preset_name: "M5Stack AtomS3 Lite",
+    user_set: true,
+    presets: [{
+      id: "m5stack_atoms3_lite", name: "M5Stack AtomS3 Lite", vendor: "m5stack",
+      led_gpio: 35, led_type: 1, led_inverted: false, btn_gpio: 41, btn_active_low: true,
+    }, {
+      id: "seeed_xiao_esp32s3", name: "Seeed XIAO ESP32-S3", vendor: "seeed",
+      led_gpio: 21, led_type: 0, led_inverted: true, btn_gpio: -1, btn_active_low: true,
+    }],
     pins_local: [1, 2, 5, 6, 35, 41],
     led_gpio: 35,
     led_type: 1,
@@ -251,7 +259,6 @@ const cases = [
   { name: "NTP", modal: "ntpModal", open: "openNtp", cancel: "ntpCancel", backdrop: "ntpBackdrop", form: "ntpForm", url: "/set_ntp" },
   { name: "HomeHub", modal: "homehubModal", open: "openHomehub", cancel: "hhCancel", backdrop: "homehubBackdrop", form: "homehubForm", url: "/set_hp", customSave: true },
   { name: "Board", modal: "boardModal", open: "openBoard", cancel: "bdCancel", backdrop: "boardBackdrop", form: "boardForm", url: "/set_board" },
-  { name: "ENV III", modal: "env3Modal", open: "openEnv3", cancel: "envCancel", backdrop: "env3Backdrop", form: "env3Form", url: "/set_env3" },
   { name: "Bug report", modal: "bugModal", open: "openBug", cancel: "bugCancel", backdrop: "bugBackdrop" },
 ];
 
@@ -290,14 +297,6 @@ const loadRoute = (hash) => {
 loadRoute("#settings/toString");
 assert.equal(ui.S.stage, "dashboard", "an unknown or inherited-object hash must fail closed");
 assert.equal(location.hash, "", "an unknown popup hash must canonicalize to the dashboard URL");
-
-const supportedStatus = ui.S.status;
-ui.S.status = { ...supportedStatus, env3: { ...supportedStatus.env3, supported: false } };
-loadRoute("#settings/env-iii");
-assert.equal(document.getElementById("env3Modal").hidden, true,
-  "a board-gated popup route must fail closed when the device does not expose it");
-assert.equal(location.hash, "#settings", "an unavailable popup route must canonicalize to Settings");
-ui.S.status = supportedStatus;
 
 // This is the state a full reload presents to initNavigation: a URL selected by the address bar,
 // with no in-app parent metadata. The exact dialog must be restored and an explicit close must stay
@@ -360,7 +359,6 @@ for (const entry of [
   ["settingsCards", "[data-act]", "act", "board", "boardModal"],
   ["settingsCards", "[data-act]", "act", "ref-temp", "refTempModal"],
   ["settingsCards", "[data-act]", "act", "weather", "weatherModal"],
-  ["settingsCards", "[data-act]", "act", "env3", "env3Modal"],
   ["connTile", "[data-edit]", "edit", "wifi", "wifiModal"],
   ["connTile", "[data-edit]", "edit", "mqtt", "mqttModal"],
   ["connTile", "[data-edit]", "edit", "syslog", "syslogModal"],
@@ -431,11 +429,6 @@ const configureValid = (item) => {
     document.getElementById("rtSetpointPath").value = "target.tC";
     document.getElementById("rtTimePath").value = "read_at";
     document.getElementById("rtMaxAge").value = "600";
-  }
-  if (item.modal === "env3Modal") {
-    document.getElementById("envSensor").value = "env_iii";
-    document.getElementById("envSda").value = "2";
-    document.getElementById("envScl").value = "1";
   }
 };
 
@@ -569,27 +562,58 @@ assert.equal(fetchState.calls[0]?.body?.hvac_mode_path, "",
   "a new source must not inherit a stale hidden HVAC gate");
 ui.S.status.reference_temperature.configured = true;
 
-// ENV III's board gate and both selector states are distinct use cases.  Pins disappear and are
-// disabled when no sensor is selected, and the disable request must not leak stale pin values.
-ui.S.status.env3.supported = false;
-resetModals();
-ui.openEnv3();
-assert.equal(document.getElementById("env3Modal").hidden, true, "unsupported board must not open ENV III");
-ui.S.status.env3.supported = true;
+// ENV III now belongs to the Board Hardware form. Custom/Seeed hide and disable the entire
+// accessory section; Atom reveals it. No-sensor and board hardware are persisted atomically.
+const boardCase = cases.find((item) => item.modal === "boardModal");
+ui.S.status.board.preset_id = "custom";
+ui.S.status.board.preset_name = "";
+ui.S.status.board.user_set = true;
+open(boardCase);
+assert.equal(document.getElementById("bdEnvSection").hidden, true,
+  "Custom board must hide the M5Stack outdoor-sensor settings");
+assert.equal(document.getElementById("envSensor").disabled, true);
+assert.equal(document.getElementById("envSda").disabled, true);
+assert.equal(document.getElementById("envScl").disabled, true);
+
+ui.S.status.board.preset_id = "m5stack_atoms3_lite";
+ui.S.status.board.preset_name = "M5Stack AtomS3 Lite";
 ui.S.status.env3.enabled = false;
 fetchState.mode = "ok";
 fetchState.calls.length = 0;
-open(cases.find((item) => item.modal === "env3Modal"));
+ui.S.busy = false;
+open(boardCase);
+assert.equal(document.getElementById("bdEnvSection").hidden, false,
+  "AtomS3 Lite must expose the integrated outdoor-sensor settings");
 assert.equal(document.getElementById("envPinFields").hidden, true);
 assert.equal(document.getElementById("envSda").disabled, true);
 assert.equal(document.getElementById("envScl").disabled, true);
-await document.getElementById("env3Form").fire("submit");
+await document.getElementById("boardForm").fire("submit");
 await settle();
-const disableRequest = fetchState.calls.find((call) => call.url === "/set_env3");
-assert.deepEqual(disableRequest?.body, { enabled: false }, "No sensor must release both GPIOs");
+const disableRequest = fetchState.calls.find((call) => call.url === "/set_board");
+assert.equal(disableRequest?.body?.preset_id, "m5stack_atoms3_lite");
+assert.equal(disableRequest?.body?.env3_enabled, false, "No sensor must release both GPIOs atomically");
+
+// Peripheral customization must not rewrite the explicit board identity to Custom.
+fetchState.calls.length = 0;
+ui.S.busy = false;
+open(boardCase);
+document.getElementById("bdLedType").value = "-1";
+await document.getElementById("bdLedType").fire("change");
+document.getElementById("bdBtnPin").value = "-1";
+await document.getElementById("bdBtnPin").fire("change");
+assert.equal(document.getElementById("bdPreset").value, "m5stack_atoms3_lite",
+  "disabling LED/reset must keep AtomS3 Lite selected");
+await document.getElementById("boardForm").fire("submit");
+await settle();
+const customized = fetchState.calls.find((call) => call.url === "/set_board")?.body;
+assert.equal(customized?.preset_id, "m5stack_atoms3_lite");
+assert.equal(customized?.led_gpio, -1);
+assert.equal(customized?.btn_gpio, -1);
 
 ui.S.status.env3.enabled = true;
-open(cases.find((item) => item.modal === "env3Modal"));
+fetchState.mode = "ok";
+ui.S.busy = false;
+open(boardCase);
 document.getElementById("envSensor").value = "";
 await document.getElementById("envSensor").fire("change");
 assert.equal(document.getElementById("envPinFields").hidden, true, "No sensor selection hides pins immediately");
@@ -598,26 +622,26 @@ await document.getElementById("envSensor").fire("change");
 assert.equal(document.getElementById("envPinFields").hidden, false, "ENV III selection reveals pins immediately");
 document.getElementById("envScl").value = document.getElementById("envSda").value;
 fetchState.calls.length = 0;
-await document.getElementById("env3Form").fire("submit");
+await document.getElementById("boardForm").fire("submit");
 await settle();
 assert.equal(fetchState.calls.length, 0, "equal ENV III pins must be rejected before POST");
-assert.equal(document.getElementById("env3Modal").hidden, false, "invalid ENV III pins stay editable");
+assert.equal(document.getElementById("boardModal").hidden, false, "invalid ENV III pins stay editable");
 
 document.getElementById("envSda").value = "2";
 document.getElementById("envScl").value = "1";
 fetchState.mode = "env3_missing";
 fetchState.calls.length = 0;
-await document.getElementById("env3Form").fire("submit");
+await document.getElementById("boardForm").fire("submit");
 await settle();
-assert.ok(fetchState.calls.some((call) => call.url === "/set_env3"),
-  "a valid ENV III pair must be checked by firmware");
-assert.equal(document.getElementById("env3Modal").hidden, false,
-  "an unreachable ENV III must not be accepted or close the dialog");
-assert.equal(document.getElementById("envError").hidden, false,
-  "an unreachable ENV III must show an inline error");
-assert.equal(document.getElementById("envError").textContent,
+assert.ok(fetchState.calls.some((call) => call.url === "/set_board"),
+  "a valid integrated ENV III pair must be checked by firmware");
+assert.equal(document.getElementById("boardModal").hidden, false,
+  "an unreachable ENV III must not be accepted or close Board Hardware");
+assert.equal(document.getElementById("bdError").hidden, false,
+  "an unreachable ENV III must show an inline error in Board Hardware");
+assert.equal(document.getElementById("bdError").textContent,
   "Der Temperatur-/Feuchtesensor des ENV III ist an diesen Pins nicht erreichbar.");
-assert.equal(ui.S.busy, false, "a failed ENV III probe must release the Save button");
+assert.equal(ui.S.busy, false, "a failed ENV III probe must release the shared Save button");
 
 // Representative invalid inputs for every client-validated transport stay in their dialog and do
 // not reach firmware. Server-validated NTP/Board paths are covered by the HTTP rejection loop above.

@@ -1185,19 +1185,15 @@ vocabulary exactly:
 
 2. **Dynamische Vorlaufregelung card** — the permanent Settings home of the dynamic-LWT project,
    currently and explicitly **Datenerfassung** only. Its five rows are **Betriebsart** =
-   **Beobachten**, **Raumtemperaturquellen**, **Außenmessungen**, **Regelstrategie**, and
+   **Beobachten**, **Raumtemperaturquellen**, **Wetterprognose**, **Regelstrategie**, and
    **Sicherheit & Ausgabe** = **Nur lesend**. The room-source row opens the exact-topic,
    current-temperature, target-temperature and source-timestamp JSON paths plus the maximum-age
    modal. Advanced optional enabled/HVAC-mode mappings remain API-compatible but are not exposed as
    ordinary UI fields; an existing mapping is preserved while its visible source binding is unchanged,
-   while a new or repointed source starts without hidden gates. The outdoor row opens
-   the opt-in ENV III wiring modal (sensor dropdown plus SDA/SCL) only for a user-selected M5Stack
-   board. Selecting **No sensor** hides and disables both pin fields. Selecting **ENV III** reveals
-   them and keeps the short data-line/clock-line explanation visible. Save shows a checking state;
-   only a reachable SHT30 and QMP6988 may close the modal and persist the mapping. A rejection stays
-   inline in the open dialog and releases Save for correction or retry. Live temperature, humidity
-   and pressure are observation-only and render in a separate dashboard card, never as a
-   replacement for Daikin R1T. Once a room, weather, or ENV III source is configured, its current
+   while a new or repointed source starts without hidden gates. ENV III is a physical
+   board accessory and therefore no longer appears as a separate row here; its measurements remain
+   observation-only and render in a separate dashboard card, never as a replacement for Daikin R1T.
+   Once a room or weather source is configured, its current
    reading/freshness state moves out of the editable header into a permanently open
    `--brand-tint` info tongue directly underneath. The header remains the setting label plus edit
    affordance and still opens its modal; warning and error states keep the tongue but use their
@@ -1224,8 +1220,14 @@ vocabulary exactly:
    observing an MQTT value or ENV III measurement controls the heat pump.
 
 3. **ESP32 card** — the board itself, styled exactly like the value groups (§6): the **Hardware**
-   row (status indicator + recovery-button pins), which opens the board-hardware modal, from
-   `board{…}`. It carries **almost no board telemetry** — chip (`platform`) and **Last reset**
+   row (selected board, status indicator, recovery-button pins and configured ENV III marker), which
+   opens the board-hardware modal, from `board{…}` + `env3{…}`. Selecting a preset fills recommended
+   peripheral defaults but records physical identity independently: disabling LED or reset keeps
+   AtomS3 Lite selected. A conditional **Outdoor sensor** fieldset appears inside the same modal for
+   a pending M5Stack selection and is hidden/disabled for Custom or Seeed. **Save** validates the
+   complete board/sensor snapshot; an enabled ENV III must pass its SHT30/QMP6988 live probe before
+   one atomic write, so a rejection leaves every draft change in the open dialog and persists none.
+   It carries **almost no board telemetry** — chip (`platform`) and **Last reset**
    (`sys.reset_reason`) were rows here through v1.0.14 and are gone: Settings states
    what the board is **set to**, and read-only numbers nobody acts on from this screen only pushed
    the settings that ARE actionable further down it. Neither is lost — the chip is a static fact of

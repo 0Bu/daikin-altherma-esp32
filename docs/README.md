@@ -468,15 +468,18 @@ POST /set_hp                       # { profile?, rx?, tx?, mb_host?, mb_port?,
 POST /discover_homehub             # {} → bounded mDNS search started only by the HomeHub dialog's
                                    #   Search button. Success: {ok:true,host:"<IPv4>"}; miss: 404.
                                    #   Never persists or reconfigures — Save owns that boundary.
-POST /set_board                    # { preset_id, led_gpio, led_type, led_inverted, btn_gpio, btn_active_low }
-                                   #   → validate + persist; REBOOT only when hardware fields change
+POST /set_board                    # { preset_id, led_gpio, led_type, led_inverted, btn_gpio,
+                                   #   btn_active_low, env3_enabled, env3_sda, env3_scl }
+                                   #   → validate + atomically persist the complete Board Hardware
+                                   #   form; REBOOT when peripheral or sensor fields change
                                    #   (both are claimed once at task start, so they are not
                                    #   hot-swapped). The board's own onboard
                                    #   parts: indicator pin + driver (0 = plain GPIO LED, 1 = WS2812)
                                    #   + polarity, and the recovery-button pin. -1 = absent for either.
                                    #   `preset_id` is stable (`m5stack_atoms3_lite`,
-                                   #   `seeed_xiao_esp32s3`, or `custom`) and is validated against
-                                   #   the five fields, then persisted atomically with them. Picking
+                                   #   `seeed_xiao_esp32s3`, or `custom`) and is validated as an
+                                   #   explicit identity independently of configurable peripherals.
+                                   #   Disabling LED/reset therefore retains AtomS3 Lite. Picking
                                    #   the preset a device already carries moves
                                    #   no value, so it saves without rebooting and answers
                                    #   {ok:true,reboot:false,saved:true} — `saved` is what stops the
@@ -485,13 +488,16 @@ POST /set_board                    # { preset_id, led_gpio, led_type, led_invert
                                    #   boards with different onboard hardware. Unchanged settings
                                    #   short-circuit to {ok:true,reboot:false}. Rejects a pin the chip
                                    #   reserves, and any pin already claimed by the other of these two
-                                   #   or by the X10A link (in both directions).
-POST /set_env3                     # { enabled, sda?, scl? } → validate + test-before-persist +
-                                   #   reboot. Enabling probes both ENV III components on the selected
+                                   #   or by the X10A link (in both directions). An enabled ENV III
+                                   #   is probed before the one config write, so no partial board-only
+                                   #   change can land after a failed sensor test.
+POST /set_env3                     # Compatibility route: { enabled, sda?, scl? } → the same
+                                   #   validate + test-before-persist + reboot contract. The current
+                                   #   UI uses /set_board. Enabling probes both ENV III components on the selected
                                    #   I²C pair before NVS is written: SHT30 must return a CRC-valid
                                    #   sample and QMP6988 its 0x5c chip id. A failed probe returns a
                                    #   stable `code` plus an English `error`, changes nothing and leaves
-                                   #   the UI dialog open. An unchanged active mapping requires a fresh
+                                   #   the Board Hardware dialog open. An unchanged active mapping requires a fresh
                                    #   runtime sample. Changing an active mapping is a deliberate
                                    #   disable → reboot → rewire → enable sequence. Disabling
                                    #   (`enabled:false`) never depends on attached hardware.
