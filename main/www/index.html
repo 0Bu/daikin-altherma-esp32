@@ -746,34 +746,41 @@
       </label>
       <label class="field">
         <span class="field-label plain" data-i18n="ref.topic">MQTT topic</span>
-        <input class="input mono" name="topic" id="rtTopic" maxlength="192" placeholder="sensor/living-room/status" autocomplete="off">
+        <input class="input mono" name="topic" id="rtTopic" maxlength="192" placeholder="sensor/living-room/status" autocomplete="off" aria-describedby="rtTopicHelp">
+        <span class="field-help" id="rtTopicHelp" data-i18n="ref.topic_help">The exact MQTT topic where the thermostat publishes its JSON status.</span>
       </label>
       <label class="field">
         <span class="field-label plain" data-i18n="ref.path">Temperature JSON path</span>
-        <input class="input mono" name="temperature_path" id="rtPath" maxlength="128" placeholder="thermostat.current_temperature_c" autocomplete="off">
+        <input class="input mono" name="temperature_path" id="rtPath" maxlength="128" placeholder="thermostat.current_temperature_c" autocomplete="off" aria-describedby="rtPathHelp">
+        <span class="field-help" id="rtPathHelp" data-i18n="ref.path_help">Current room temperature in °C.</span>
       </label>
       <label class="field">
         <span class="field-label plain" data-i18n="ref.setpoint_path">Target-temperature JSON path</span>
-        <input class="input mono" name="setpoint_path" id="rtSetpointPath" maxlength="128" placeholder="thermostat.target_temperature_c" autocomplete="off">
+        <input class="input mono" name="setpoint_path" id="rtSetpointPath" maxlength="128" placeholder="thermostat.target_temperature_c" autocomplete="off" aria-describedby="rtSetpointPathHelp">
+        <span class="field-help" id="rtSetpointPathHelp" data-i18n="ref.setpoint_path_help">Desired room temperature in °C.</span>
       </label>
       <label class="field">
         <span class="field-label plain" data-i18n="ref.time_path">Timestamp JSON path</span>
-        <input class="input mono" name="timestamp_path" id="rtTimePath" maxlength="128" placeholder="thermostat.read_at" autocomplete="off">
+        <input class="input mono" name="timestamp_path" id="rtTimePath" maxlength="128" placeholder="thermostat.read_at" autocomplete="off" aria-describedby="rtTimePathHelp">
+        <span class="field-help" id="rtTimePathHelp" data-i18n="ref.time_path_help">Measurement time as RFC3339 or Unix seconds.</span>
       </label>
       <label class="field">
         <span class="field-label plain" data-i18n="ref.enabled_path">Enabled JSON path · optional</span>
-        <input class="input mono" name="enabled_path" id="rtEnabledPath" maxlength="128" placeholder="thermostat.enabled" autocomplete="off">
+        <input class="input mono" name="enabled_path" id="rtEnabledPath" maxlength="128" placeholder="thermostat.enabled" autocomplete="off" aria-describedby="rtEnabledPathHelp">
+        <span class="field-help" id="rtEnabledPathHelp" data-i18n="ref.enabled_path_help">Enable state as true/false or 1/0.</span>
       </label>
       <label class="field">
         <span class="field-label plain" data-i18n="ref.hvac_mode_path">HVAC-mode JSON path · optional</span>
-        <input class="input mono" name="hvac_mode_path" id="rtHvacModePath" maxlength="128" placeholder="thermostat.hvac_mode" autocomplete="off">
+        <input class="input mono" name="hvac_mode_path" id="rtHvacModePath" maxlength="128" placeholder="thermostat.hvac_mode" autocomplete="off" aria-describedby="rtHvacModePathHelp">
+        <span class="field-help" id="rtHvacModePathHelp" data-i18n="ref.hvac_mode_path_help">Operating mode as text; use “heat” for heating.</span>
       </label>
       <label class="field">
         <span class="field-label plain" data-i18n="ref.max_age">Maximum age · seconds</span>
-        <input class="input" type="number" name="max_age_s" id="rtMaxAge" min="10" max="3600" step="1" value="600" inputmode="numeric">
+        <input class="input" type="number" name="max_age_s" id="rtMaxAge" min="10" max="3600" step="1" value="600" inputmode="numeric" aria-describedby="rtMaxAgeHelp">
+        <span class="field-help" id="rtMaxAgeHelp" data-i18n="ref.max_age_help">Maximum permitted age of the source reading, from 10 to 3600 seconds.</span>
       </label>
       <p class="hint err" id="rtError" hidden></p>
-      <p class="hint" data-i18n="ref.hint">Save validates current temperature, target and source time, then stores the mapping only after a live test. Enabled and HVAC mode optionally gate control eligibility; thermostat active state does not. The timestamp may be RFC3339 text or Unix seconds. Delete removes the saved source and its captured reading.</p>
+      <p class="hint" data-i18n="ref.hint">Save tests the mapping with a current MQTT message before storing it. Delete removes the source and its captured reading.</p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="rtCancel" data-i18n="btn.cancel">Cancel</button>
         <button class="btn danger" type="button" id="rtDeleteBtn" data-i18n="ref.delete">Delete</button>
