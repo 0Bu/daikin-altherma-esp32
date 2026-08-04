@@ -328,8 +328,7 @@ function wireRestOfApp() {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !$("refTempModal").hidden) closeRefTemp();
   });
-  for (const id of ["rtName", "rtTopic", "rtPath", "rtSetpointPath", "rtTimePath",
-                    "rtEnabledPath", "rtHvacModePath", "rtMaxAge"])
+  for (const id of ["rtName", "rtTopic", "rtPath", "rtSetpointPath", "rtTimePath", "rtMaxAge"])
     $(id).addEventListener("input", () => {
       $(id).classList.remove("invalid"); $("rtError").hidden = true;
     });
@@ -349,10 +348,6 @@ function wireRestOfApp() {
       return bad("rtSetpointPath", t("ref.err_setpoint_path"));
     if (input.topic && !validRefPath(input.timestamp_path))
       return bad("rtTimePath", t("ref.err_time_path"));
-    if (input.topic && input.enabled_path && !validRefPath(input.enabled_path))
-      return bad("rtEnabledPath", t("ref.err_enabled_path"));
-    if (input.topic && input.hvac_mode_path && !validRefPath(input.hvac_mode_path))
-      return bad("rtHvacModePath", t("ref.err_hvac_mode_path"));
     if (input.topic && (!Number.isInteger(input.max_age_s) || input.max_age_s < 10 || input.max_age_s > 3600))
       return bad("rtMaxAge", t("ref.err_max_age"));
     return input;
@@ -360,7 +355,6 @@ function wireRestOfApp() {
   const showRefTempRequestError = (msg) => {
     const field = /maximum age/i.test(msg) ? "rtMaxAge" :
       /setpoint|target/i.test(msg) ? "rtSetpointPath" : /timestamp/i.test(msg) ? "rtTimePath" :
-      /enabled/i.test(msg) ? "rtEnabledPath" : /HVAC/i.test(msg) ? "rtHvacModePath" :
       /JSON path|path is/i.test(msg) ? "rtPath" :
       /name/i.test(msg) ? "rtName" : /topic|mapping/i.test(msg) ? "rtTopic" : null;
     if (field) $(field).classList.add("invalid");

@@ -1187,8 +1187,10 @@ vocabulary exactly:
    currently and explicitly **Datenerfassung** only. Its five rows are **Betriebsart** =
    **Beobachten**, **Raumtemperaturquellen**, **Außenmessungen**, **Regelstrategie**, and
    **Sicherheit & Ausgabe** = **Nur lesend**. The room-source row opens the exact-topic,
-   current-temperature, target-temperature and source-timestamp JSON paths, optional enabled/HVAC-mode
-   paths and maximum-age modal. The outdoor row opens
+   current-temperature, target-temperature and source-timestamp JSON paths plus the maximum-age
+   modal. Advanced optional enabled/HVAC-mode mappings remain API-compatible but are not exposed as
+   ordinary UI fields; an existing mapping is preserved while its visible source binding is unchanged,
+   while a new or repointed source starts without hidden gates. The outdoor row opens
    the opt-in ENV III wiring modal (sensor dropdown plus SDA/SCL) only for a user-selected M5Stack
    board. Selecting **No sensor** hides and disables both pin fields. Selecting **ENV III** reveals
    them and keeps the short data-line/clock-line explanation visible. Save shows a checking state;

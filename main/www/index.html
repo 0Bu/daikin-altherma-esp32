@@ -765,16 +765,6 @@
         <span class="field-help" id="rtTimePathHelp" data-i18n="ref.time_path_help">Measurement time as RFC3339 or Unix seconds.</span>
       </label>
       <label class="field">
-        <span class="field-label plain" data-i18n="ref.enabled_path">Enabled JSON path · optional</span>
-        <input class="input mono" name="enabled_path" id="rtEnabledPath" maxlength="128" placeholder="thermostat.enabled" autocomplete="off" aria-describedby="rtEnabledPathHelp">
-        <span class="field-help" id="rtEnabledPathHelp" data-i18n="ref.enabled_path_help">Enable state as true/false or 1/0.</span>
-      </label>
-      <label class="field">
-        <span class="field-label plain" data-i18n="ref.hvac_mode_path">HVAC-mode JSON path · optional</span>
-        <input class="input mono" name="hvac_mode_path" id="rtHvacModePath" maxlength="128" placeholder="thermostat.hvac_mode" autocomplete="off" aria-describedby="rtHvacModePathHelp">
-        <span class="field-help" id="rtHvacModePathHelp" data-i18n="ref.hvac_mode_path_help">Operating mode as text; use “heat” for heating.</span>
-      </label>
-      <label class="field">
         <span class="field-label plain" data-i18n="ref.max_age">Maximum age · seconds</span>
         <input class="input" type="number" name="max_age_s" id="rtMaxAge" min="10" max="3600" step="1" value="600" inputmode="numeric" aria-describedby="rtMaxAgeHelp">
         <span class="field-help" id="rtMaxAgeHelp" data-i18n="ref.max_age_help">Maximum permitted age of the source reading, from 10 to 3600 seconds.</span>
