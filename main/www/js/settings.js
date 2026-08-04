@@ -70,7 +70,7 @@ const validMqtt = (h) => {
 // freshness limit. Calibration is fixed at 0 K; no roles or weights. The backend still accepts the
 // older optional eligibility-gate mappings. They are deliberately not editable here; preserving
 // them for an otherwise unchanged source avoids silently weakening an installed configuration.
-// It is presented as an Observe-mode input under the permanent dynamic-control Settings card. A new
+// It is presented as an Observe-mode input under the opt-in dynamic-control Settings card. A new
 // profile starts empty; placeholders illustrate the installed Meross contract without subscribing.
 function fillRefTemp() {
   const r = S.status?.reference_temperature || {};
@@ -556,7 +556,9 @@ async function onLangPick() {
 // Explicit consent for experimental input collection and write-free SHADOW evaluation. The backend
 // accepts only off/shadow and validates the dependencies again, so a raw request cannot bypass the
 // same fail-closed boundary. No optimistic S.status mutation: /status is the persisted truth and
-// restores the switch after either a rejection or an NVS failure.
+// restores the switch after either a rejection or an NVS failure. The click-hold guard can suppress
+// the refreshStatus() repaint that lands while this tap is still resolving, so reconcile the cards
+// once that short guard has certainly expired as well.
 async function onDynamicLwtPick() {
   const toggle = $("e32DynamicLwt");
   const enable = toggle.checked;
@@ -583,6 +585,7 @@ async function onDynamicLwtPick() {
     await refreshStatus();
   } finally {
     S.busy = false;
+    setTimeout(renderSettings, CLICK_HOLD_UP_MS + 10);
   }
 }
 

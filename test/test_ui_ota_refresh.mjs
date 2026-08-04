@@ -127,7 +127,8 @@ class Element {
   assert.match(elements.settingsCards.innerHTML, /Firmware-Update/, "Settings labels the snapshot prominently");
   assert.match(elements.settingsCards.innerHTML, />ESP32</, "the complete board card remains visible");
   assert.match(elements.settingsCards.innerHTML, /Protokoll/, "the complete protocol card remains visible");
-  assert.match(elements.settingsCards.innerHTML, /Dynamische/, "the dynamic-control card remains visible");
+  assert.doesNotMatch(elements.settingsCards.innerHTML, /<div class="section-label">Dynamische/,
+    "a restored OFF snapshot must keep the experimental card hidden");
   assert.equal(elements.connTile.controls[0].disabled, true, "connection writes are locked during OTA");
   assert.equal(elements.settingsCards.controls[0].disabled, true, "Settings writes are locked during OTA");
   assert.equal(S.otaView.text, "78%", "progress resumes over the restored content");

@@ -65,7 +65,7 @@ assert.match(app, /applyLive\(\{ mb_host: host, mb_port: port, mb_unit_id: unit 
 assert.doesNotMatch(app, /mb_mode|config_modbus_should_search/,
   "the browser bundle must carry no hidden Auto-mode contract");
 
-// Dynamic LWT owns one permanent bottom Settings card. Room input and direct Open-Meteo forecast are
+// Dynamic LWT owns one opt-in bottom Settings card. Room input and direct Open-Meteo forecast are
 // editable there; board-bound ENV III lives under Board Hardware. The Firmware switch owns explicit
 // OFF/SHADOW consent, while output stays read-only.
 assert.match(app, /function dynamicControlCardHtml\(\)[\s\S]*t\("dyn\.mode"\)[\s\S]*t\("dyn\.room_sources"\)[\s\S]*t\("dyn\.weather"\)[\s\S]*t\("dyn\.strategy"\)[\s\S]*t\("dyn\.safety"\)/,
@@ -78,10 +78,14 @@ assert.match(app, /function dynamicLwtSwitchRow\(\)[\s\S]*id="e32DynamicLwt"[\s\
   "Firmware must expose the explicit OFF/SHADOW switch");
 assert.match(app, /function onDynamicLwtPick\(\)[\s\S]*post\("\/set_dynamic_lwt", \{ mode: enable \? "shadow" : "off" \}\)/,
   "the switch must persist only the backend's OFF/SHADOW vocabulary");
+assert.match(app, /function onDynamicLwtPick\(\)[\s\S]*setTimeout\(renderSettings, CLICK_HOLD_UP_MS \+ 10\)/,
+  "the dynamic-LWT card must reconcile immediately after the switch tap guard expires");
 assert.match(app, /e\.target\.id === "e32DynamicLwt"[\s\S]*onDynamicLwtPick\(\)/,
   "the rebuilt Firmware card must delegate switch changes to the live handler");
+assert.match(app, /function dynamicControlCardHtml\(\)[\s\S]*if \(d\.mode !== "shadow"\) return "";/,
+  "the experimental dynamic-control card must remain hidden until Firmware selects SHADOW");
 assert.match(app, /vcard\(t\("card\.fw_title"\), fwRows\) \+ dynamicControlCardHtml\(\)/,
-  "the experimental dynamic-control card must render after Firmware at the bottom");
+  "the enabled experimental card must render after Firmware at the bottom");
 assert.match(app, /vcard\(t\("dyn\.card"\), rows, t\("dyn\.experimental"\), "experimental"\)/,
   "the bottom card must carry a written experimental pill");
 const weatherModalHtml = html.match(/<div class="modal" id="weatherModal"[\s\S]*?<\/form>\s*<\/div>/)?.[0] || "";
