@@ -16,6 +16,8 @@ class Element {
     this.dataset = {};
     this.attributes = {};
     this.children = [];
+    this.controls = [];
+    this.disabled = false;
     this._html = "";
     this.classList = { contains: () => false, toggle: () => {} };
   }
@@ -23,6 +25,123 @@ class Element {
   get innerHTML() { return this._html; }
   setAttribute(name, value) { this.attributes[name] = String(value); }
   appendChild(child) { this.children.push(child); return child; }
+  querySelectorAll() { return this.controls; }
+}
+
+// The tab that initiated OTA has a bounded session snapshot. A reload in that same tab must restore
+// the complete dashboard/Settings state, label it as cached, and lock every Settings control while
+// the device is installing. The compact shell below remains the fallback for a second tab.
+{
+  const elements = elementsFor(
+    "hdrIp", "verLink", "settingsVer", "connTile", "settingsCards", "otaStat", "otaStatSet",
+    "settingsDot", "btnSettings",
+  );
+  elements.connTile.controls = [new Element("conn-action")];
+  elements.settingsCards.controls = [new Element("settings-action")];
+
+  const cachedStatus = {
+    version: "1.4.72-dev.333",
+    uptime_s: 123,
+    hp: { connected: true, proto: "I", rx: 1, tx: 2 },
+    pins_avail: [1, 2],
+    board: { preset_name: "Test board", led_gpio: -1, btn_gpio: -1 },
+    sys: {},
+    ota: { channel: "dev" },
+    ui: { lang: "de" },
+    wifi: { connected: true, ssid: "test-wifi", std: "Wi-Fi" },
+    mqtt: { configured: false },
+    syslog: { configured: false },
+    ntp: { synced: true, server: "pool.ntp.org" },
+    dynamic_lwt: { mode: "off" },
+  };
+  const cacheKey = "daikinOtaRenderV1";
+  const storage = new Map([[cacheKey, JSON.stringify({
+    saved_at_ms: Date.now(),
+    status: cachedStatus,
+    values: [{ label: "Operation Mode", value: "Heating" }],
+    modbus: [{ label: "Leaving water temperature", value: "31.0" }],
+  })]]);
+  const sessionStorage = {
+    getItem: (key) => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, String(value)),
+    removeItem: (key) => storage.delete(key),
+  };
+  const S = {
+    status: null, busy: false, otaBusy: false, otaInstalling: false, otaShown: false, otaView: null,
+    otaAvail: null, otaCached: false, settingsHydrated: false, clickHold: false, scrub: null,
+    descOpen: new Set(),
+  };
+  let languageHydrations = 0;
+  let dashboardStatusPaints = 0;
+  const context = {
+    S,
+    LANG: "de",
+    MODEL_DESCRIPTIONS: {},
+    sessionStorage,
+    document: { activeElement: null, createElement: () => new Element() },
+    location: { hostname: "daikin.local", reload() {} },
+    $: (id) => elements[id] || null,
+    esc: (value) => String(value ?? ""),
+    t: (key, ...args) => {
+      const text = {
+        "ota.pct": `${args[0]}%`,
+        "ota.snapshot_title": "Firmware-Update",
+        "ota.snapshot_label": "Datenstand",
+        "ota.snapshot_value": "Zwischengespeichert",
+        "ota.snapshot_help": "Letzter empfangener Stand; Einstellungen gesperrt.",
+        "card.proto_title": "Protokoll",
+        "card.fw_title": "Firmware",
+        "card.channel": "Update-Kanal",
+        "chan.dev": "Entwicklung",
+        "chan.release": "Release",
+        "dyn.card": "Dynamische Vorlaufregelung",
+      };
+      return text[key] ?? key;
+    },
+    setHtml: (id, html) => { elements[id].innerHTML = html; },
+    hasHist: () => false,
+    setLangFromStatus: () => { languageHydrations += 1; },
+    renderOtaDashboardStatus: () => { dashboardStatusPaints += 1; },
+    j: async () => ({ state: "updating", progress: 78, current: "1.4.72-dev.333", channel: "dev" }),
+    setTimeout: () => 1,
+    clearTimeout: () => {},
+  };
+  const source = readAppFragments(["dashboard.js", "settings.js"]);
+  const sandbox = vm.createContext(context);
+  vm.runInContext(
+    `${source}\nthis.__api = { resumeOta, renderSettings, otaCacheRestore };`,
+    sandbox,
+    { filename: "main/www/app.sources" },
+  );
+  context.renderApp = () => sandbox.__api.renderSettings();
+
+  sandbox.__api.resumeOta();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(S.otaCached, true, "the matching same-tab frame must be marked as a snapshot");
+  assert.equal(S.status.version, "1.4.72-dev.333", "the complete status frame is restored");
+  assert.equal(S._values[0].value, "Heating", "X10A values survive the reload");
+  assert.equal(S._modbus[0].value, "31.0", "HomeHub values survive the reload independently");
+  assert.equal(languageHydrations, 1, "the restored device language is applied before rendering");
+  assert.equal(elements.connTile.hidden, false, "known connections remain visible");
+  assert.match(elements.settingsCards.innerHTML, /Firmware-Update/, "Settings labels the snapshot prominently");
+  assert.match(elements.settingsCards.innerHTML, />ESP32</, "the complete board card remains visible");
+  assert.match(elements.settingsCards.innerHTML, /Protokoll/, "the complete protocol card remains visible");
+  assert.match(elements.settingsCards.innerHTML, /Dynamische/, "the dynamic-control card remains visible");
+  assert.equal(elements.connTile.controls[0].disabled, true, "connection writes are locked during OTA");
+  assert.equal(elements.settingsCards.controls[0].disabled, true, "Settings writes are locked during OTA");
+  assert.equal(S.otaView.text, "78%", "progress resumes over the restored content");
+  assert.equal(dashboardStatusPaints, 1, "the dashboard explicitly labels the restored OTA state");
+
+  const freshStatus = { version: "fresh-live-frame" };
+  S.status = freshStatus;
+  assert.equal(sandbox.__api.otaCacheRestore({ current: "1.4.72-dev.333" }), false,
+    "a normal status response that wins the startup race must never be replaced by cache");
+  assert.equal(S.status, freshStatus, "the freshly fetched frame remains authoritative");
+  S.status = null;
+  assert.equal(sandbox.__api.otaCacheRestore({ current: "another-version" }), false,
+    "a snapshot from another running version must be rejected");
+  assert.equal(storage.has(cacheKey), false, "a rejected snapshot is removed");
 }
 
 function elementsFor(...ids) {
@@ -154,4 +273,4 @@ function elementsFor(...ids) {
     "ordinary failures keep the existing unreachable behavior");
 }
 
-console.log("OTA refresh: recovery shell, first Settings hydration, and truthful reachability passed");
+console.log("OTA refresh: same-tab snapshot, recovery fallback, Settings hydration, and reachability passed");

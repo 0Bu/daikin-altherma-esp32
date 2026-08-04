@@ -1029,11 +1029,18 @@ is exactly what a user would want to see move.
   while the board was busy. One `GET /ota/status` at boot joins the existing download at its current
   percentage; finding `idle` leaves the header untouched. `/status` is the largest HTTP allocation
   and may temporarily be refused while the OTA TLS task owns the scarce heap. In that window the
-  successful OTA response is the stronger reachability evidence: the dashboard names the running
-  firmware installation instead of showing **Unreachable**, and Settings renders an OTA-only
-  Firmware card from the response's current version/channel rather than an empty tile. The first
-  later `/status` response hydrates the complete Settings cards exactly once; subsequent status
-  frames remain frozen so they cannot erase the directly-painted progress readout.
+  successful OTA response is the stronger reachability evidence. The tab that starts installation
+  stores its last complete `/status` + `/values` frame in a 15-minute `sessionStorage` entry. A
+  same-tab reload restores that frame only when its version exactly matches `/ota/status.current`,
+  keeps the complete dashboard and Settings visible, labels them as the **last received state**, and
+  disables Settings writes until restart. A successful later `/status` + `/values` pair supersedes
+  the restored frame and refreshes the bounded fallback while OTA remains active. A second tab,
+  unavailable/blocked storage, an expired entry or a version mismatch still gets the conservative
+  OTA-only Firmware card from current version/channel rather than invented plant or connection
+  state. In both paths the dashboard names the running installation instead of showing
+  **Unreachable**. The first later `/status` response can hydrate complete Settings exactly once;
+  subsequent status frames remain frozen so they cannot erase the directly-painted progress
+  readout. An idle OTA state and every terminal failure remove the cache.
 - **Terminal messages clear on a sequence guard, not a timer alone.** Each write to the readout bumps
   a counter and a delayed clear only fires if nothing has been written since. Tapping the version
   again inside the linger window would otherwise let the *first* run's pending timer wipe the

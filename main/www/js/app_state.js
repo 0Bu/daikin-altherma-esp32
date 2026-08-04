@@ -74,6 +74,10 @@ const S = {
   // frame must be allowed to replace the OTA-only recovery card even while otaShown freezes all
   // subsequent card rebuilds.
   settingsHydrated: false,
+  // True when a reload into a running OTA restored the last complete status/value frame from this
+  // browser tab. The data stays useful, but is explicitly labelled as a snapshot until one new
+  // /status + /values pair lands; it must never silently masquerade as a live plant reading.
+  otaCached: false,
 };
 
 // ── Navigation (dashboard ⇄ Settings) ────────────────────────────────────
@@ -510,13 +514,13 @@ function sysSet(mode, status, tone) {
   $("svDot").setAttribute("fill", TONE_FILL[tone || ""]);
 }
 
-// Honest dashboard fallback while an OTA install owns enough heap that /status may not fit. No
-// plant reading is retained across the refresh (stale values must never look live); the schematic
-// therefore stays blank, but its headline explains the known operation instead of claiming the
-// device is unreachable. otaView is updated by every progress tick.
+// Honest dashboard status while an OTA install owns enough heap that /status may not fit. A reload
+// may have restored the last complete frame from this tab; in that case the schematic remains
+// populated but the headline explicitly calls it a snapshot. Without one the schematic stays blank.
+// otaView is updated by every progress tick.
 function renderOtaDashboardStatus() {
   const detail = S.otaView?.text || t("ota.starting");
-  sysSet(t("ota.active_title"), t("ota.active_sub", detail), "idle");
+  sysSet(t("ota.active_title"), t(S.otaCached ? "ota.active_sub_cached" : "ota.active_sub", detail), "idle");
 }
 function pickValue(re) {
   const v = (S._values || []).find((x) => re.test(x.label || ""));
