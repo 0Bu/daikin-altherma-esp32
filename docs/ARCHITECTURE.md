@@ -922,7 +922,10 @@ just-wired unit is still identified promptly. A pass does:
 2. **Page probe** — query every page any profile can reference (`0x00,0x10,0x20,0x21,0x30,0x60–0x65,
    0xA0,0xA1`) plus `0x11`; set a bit in a **page mask** for each page that answers. Each page is
    **retried up to `DETECT_PAGE_TRIES` (3) times** before its bit is cleared. This probe gathers the
-   unit's *identity*, not its values, and `signature_consistent` matches on page **subset** — so one
+   unit's *identity*, not its values, so expected missing/rejected pages stay quiet at transport
+   level (`logic/hp_query_log.hpp`); partial/corrupt frames remain visible, and a completely silent
+   link still produces one actionable detection result. `signature_consistent` matches on page
+   **subset** — so one
    dropped frame clears one bit and can make *every* profile inconsistent at once. Measured against
    the shipped signatures on a live `0x1bff` fingerprint, all 12 single-page losses change the
    answer and **8 of them leave no candidate at all**, which lands the unit on `generic` (53 rows

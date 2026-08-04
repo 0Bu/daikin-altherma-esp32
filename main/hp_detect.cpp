@@ -21,7 +21,7 @@ static const uint8_t PROBE_PAGES[] = {
 // length, else -1. (hp_query already strips framing/CRC and returns <0 on timeout/NAK/bad CRC.)
 static int read_page(uint8_t reg, Protocol proto, uint8_t* out, int outmax) {
     uint8_t buf[64];
-    const int n = hp_query(reg, proto, buf, sizeof(buf));
+    const int n = hp_query(reg, proto, buf, sizeof(buf), HpQueryLogPolicy::IntegrityOnly);
     if (n <= 0) return -1;
     const int poff = payload_offset(proto);
     int paylen = n - poff - 1;                       // minus header, minus CRC byte
@@ -105,10 +105,9 @@ DetectResult hp_detect_run() {
         //     way on purpose). Probing on anyway means an answer heard on the old pair gets recorded
         //     as this candidate's — and poll_detect then persists that wrong pair via
         //     config_save_link, so the next boot starts from a lie the sweep has to undo.
-        //   * A failed first INSTALL leaves no driver at all, and every hp_query then reports
-        //     "HP timeout — check X10A cable / GND": a wiring accusation against a fault that is
-        //     entirely on this side of the connector. Naming the real cause once is the whole point
-        //     of the equivalent guard in poll_once.
+        //   * A failed first INSTALL leaves no driver at all. Probing anyway would make a local UART
+        //     failure indistinguishable from a silent X10A link. Naming the real cause once is the
+        //     whole point of the equivalent guard in poll_once.
         if (!hp_uart_init(cand[i].rx, cand[i].tx)) {
             diag_printf("detect: UART bring-up failed on rx=%d tx=%d — skipping this pair\n",
                         cand[i].rx, cand[i].tx);

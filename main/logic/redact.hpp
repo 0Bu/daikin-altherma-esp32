@@ -78,12 +78,6 @@ inline constexpr DiagRedaction DIAG_REDACTIONS[] = {
     // esp_err_to_name() of the failure case survives, only the server name goes.
     {"sntp: time synced (", ")"},
     {"sntp: init failed (", ")"},
-    // mqtt_ha.cpp "mqtt: retired legacy HA device %s (now %s)". The first id is board_id() =
-    // "daikin_<low 3 bytes of the STA MAC>" — the unique half of the MAC, which is exactly what
-    // /status withholds by redacting wifi.mac, so leaving it here would have made the redaction
-    // incoherent: scrubbed in the JSON, printed in the log two sections below it. The second id is
-    // the slugified base topic (a fixed compile-time name) and stays.
-    {"mqtt: retired legacy HA device ", " (now "},
     // hp_modbus.cpp "modbus: manual mDNS search found gateway %s" — the DISCOVERED HomeHub IPv4.
     // /status?redact=1 already withholds it as
     // modbus.host, and without this rule the same string was printed in /diag a few sections below

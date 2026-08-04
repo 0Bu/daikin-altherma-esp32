@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include "logic/crc.hpp"
+#include "logic/hp_query_log.hpp"
 
 namespace daik {
 
@@ -11,9 +12,11 @@ namespace daik {
 bool hp_uart_init(int rx_pin, int tx_pin);
 void hp_uart_deinit();
 
-// Query one register. Writes the reply into buf (capacity buflen); returns the number of
-// verified bytes (payload framing intact, CRC ok) or <0 on timeout / error / bad CRC. The
-// caller extracts values via the active profile (hp_poll.cpp).
-int hp_query(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen);
+// Query one register. Writes the reply into buf (capacity buflen); returns the number of verified
+// bytes (payload framing intact, CRC ok) or <0 on timeout / rejection / bad CRC. Detection passes
+// use IntegrityOnly because absent pages are an expected part of fingerprinting; normal polling
+// keeps All because it queries only pages selected for the detected profile.
+int hp_query(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen,
+             HpQueryLogPolicy log_policy = HpQueryLogPolicy::All);
 
 } // namespace daik

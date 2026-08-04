@@ -61,7 +61,8 @@ void hp_uart_deinit() {
     if (s_inited) { uart_driver_delete(PORT); s_inited = false; }
 }
 
-int hp_query(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen) {
+int hp_query(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen,
+             HpQueryLogPolicy log_policy) {
     // The buffer has to hold the reply we are about to ASK FOR. Checked before the request goes out
     // rather than while parsing it: there is no point putting a query on the bus whose answer we
     // would have to abandon, and the answer is knowable here.
@@ -75,8 +76,9 @@ int hp_query(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen) {
     // the caller's buffer size and the register table at once. One local check retires it.
     int replyLen = reply_len(reg, proto);
     if (!reply_len_fits(replyLen, buflen)) {
-        diag_printf("HP reply buffer too small for reg 0x%02x: need %d, have %u (rx=%d tx=%d)\n",
-                    reg, replyLen, static_cast<unsigned>(buflen), s_rx, s_tx);
+        if (hp_query_should_log(log_policy, HpQueryFailure::InvalidLength))
+            diag_printf("HP reply buffer too small for reg 0x%02x: need %d, have %u (rx=%d tx=%d)\n",
+                        reg, replyLen, static_cast<unsigned>(buflen), s_rx, s_tx);
         return -1;
     }
 
@@ -97,26 +99,37 @@ int hp_query(uint8_t reg, Protocol proto, uint8_t* buf, size_t buflen) {
             if (proto == Protocol::I && len == 3) {
                 replyLen = reply_len_dynamic(buf);
                 if (!reply_len_fits(replyLen, buflen)) {
-                    diag_printf("HP invalid dynamic reply len %d (max %u) on reg 0x%02x (rx=%d tx=%d)\n",
-                                replyLen, static_cast<unsigned>(buflen), reg, s_rx, s_tx);
+                    if (hp_query_should_log(log_policy, HpQueryFailure::InvalidLength))
+                        diag_printf("HP invalid dynamic reply len %d (max %u) on reg 0x%02x (rx=%d tx=%d)\n",
+                                    replyLen, static_cast<unsigned>(buflen), reg, s_rx, s_tx);
                     return -1;
                 }
             }
             if (len == 2 && is_error_reply(buf, len)) {
-                diag_printf("HP error 0x15 0xEA on reg 0x%02x (try protocol S?) (rx=%d tx=%d)\n", reg, s_rx, s_tx);
+                if (hp_query_should_log(log_policy, HpQueryFailure::Rejected))
+                    diag_printf("HP query rejected for reg 0x%02x (protocol %c, reply 0x15 0xEA; rx=%d tx=%d)\n",
+                                reg, static_cast<char>(proto), s_rx, s_tx);
                 return -2;
             }
         }
     }
     if (len == 0) {
-        diag_printf("HP timeout reg 0x%02x on rx=%d tx=%d — check X10A cable / GND\n", reg, s_rx, s_tx);
+        if (hp_query_should_log(log_policy, HpQueryFailure::NoReply))
+            diag_printf("HP no reply for reg 0x%02x (protocol %c; rx=%d tx=%d)\n",
+                        reg, static_cast<char>(proto), s_rx, s_tx);
         return -1;
     }
     if (len < replyLen) {
-        diag_printf("HP short reply reg 0x%02x %d/%d (rx=%d tx=%d)\n", reg, len, replyLen, s_rx, s_tx);
+        if (hp_query_should_log(log_policy, HpQueryFailure::ShortReply))
+            diag_printf("HP short reply reg 0x%02x %d/%d (rx=%d tx=%d)\n",
+                        reg, len, replyLen, s_rx, s_tx);
         return -1;
     }
-    if (!crc_ok(buf, len)) { diag_printf("HP wrong CRC reg 0x%02x (rx=%d tx=%d)\n", reg, s_rx, s_tx); return -3; }
+    if (!crc_ok(buf, len)) {
+        if (hp_query_should_log(log_policy, HpQueryFailure::BadCrc))
+            diag_printf("HP wrong CRC reg 0x%02x (rx=%d tx=%d)\n", reg, s_rx, s_tx);
+        return -3;
+    }
     return len;
 }
 
