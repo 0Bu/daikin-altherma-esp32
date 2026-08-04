@@ -87,8 +87,8 @@ static void poll_once() {
         logic::checkup_cover_row(checkup_coverage, row.reg, row.offset, row.conv, row.label);
     }
     // If the UART can't be brought up on these pins, do NOT sweep: every hp_query would then read an
-    // uninstalled driver and emit a misleading "HP timeout — check X10A cable / GND" per register.
-    // Name the real cause once and keep the last good cache. (validate()/config_load now reject
+    // uninstalled driver and report a missing reply per register. Name the real local cause once and
+    // keep the last good cache. (validate()/config_load now reject
     // reserved pins, so this is a belt-and-braces guard rather than the common path.)
     if (!hp_uart_init(c.rx_pin, c.tx_pin)) {
         char eb[48];

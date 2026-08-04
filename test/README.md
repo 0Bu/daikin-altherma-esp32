@@ -268,6 +268,9 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   reinstall, no heap), the detect sweep's `{44,43}↔{43,44}` alternation is a register-only `Remap`
   (**not** an `Install`) — the exact turn that used to reinstall the driver ~2×/s and fragment the
   heap into the `hp_poll` abort — and a one-sided pin change never reads as a false `Noop`.
+- `logic/hp_query_log.hpp` — detection suppresses expected no-reply/rejected results while probing
+  the union of every model's pages, but still reports partial/corrupt frames; normal profile polling
+  keeps every transport failure visible.
 - `logic/detect_backoff.hpp` — the silent-bus detect cadence: full 1 s cadence through the grace
   window (so a bus that answers early is never delayed), then geometric growth **clamped** to the
   60 s ceiling, monotonic and overflow-safe under saturation, with a bus answer resetting to the

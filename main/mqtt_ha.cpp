@@ -152,6 +152,7 @@ struct ReferenceProbeState {
 static ReferenceProbeState s_ref_probe;
 static SemaphoreHandle_t   s_ref_probe_sem = nullptr;
 static std::string         s_ref_subscribed_topic;  // mqtt_task only
+static bool                s_ref_subscription_announced = false; // one success line per binding
 static std::string         s_ref_binding_topic;     // resets captured value when either half changes
 static std::string         s_ref_binding_path;
 static std::string         s_ref_binding_setpoint_path;
@@ -215,6 +216,7 @@ static std::string s_stale_values_profile;             // value entities: the pr
 // Written false by the event task on DISCONNECT, written true + read by the publish task -> atomic.
 static std::atomic<bool> s_heartbeat_announced{false}; // diagnostic discovery streamed this connection?
 static bool         s_mqtt_ever_connected = false;     // event-task-only: first connect vs. a RE-connect
+static std::atomic<bool> s_client_is_publisher{false};  // set before this client's event task starts
 static bool         s_crash_dump_pub      = false;     // mqtt_task-only: `coredump` at last crash-topic sync
 static bool         s_crash_notable_pub   = false;     // mqtt_task-only: was that sync a crash publish or cleanup probe?
 
@@ -404,7 +406,6 @@ static void retract_legacy_fixed() {   // heartbeat + crash entities (no profile
     for (int i = 0; i < RETIRED_CRASH_SENSOR_COUNT; i++)
         mqtt_publish(crash_discovery_topic(s_prefix, RETIRED_CRASH_SENSORS[i].component, s_board,
                                            RETIRED_CRASH_SENSORS[i].object_id), "", 0, 0, 1);
-    diag_printf("mqtt: retired legacy HA device %s (now %s)\n", s_board.c_str(), s_node.c_str());
 }
 
 // ── Ungrouped (pre-#221) value discovery configs ─────────────────────────────────────────────────
@@ -1163,6 +1164,7 @@ static void service_reference_subscription(const Config& c) {
         s_ref_binding_time_path = c.ref_temp_time_path;
         s_ref_binding_enabled_path = c.ref_temp_enabled_path;
         s_ref_binding_hvac_mode_path = c.ref_temp_hvac_mode_path;
+        s_ref_subscription_announced = false;
         Lock lk(s_mtx);
         s_ref_status.has_value = false;
         s_ref_status.has_source_time = false;
@@ -1231,7 +1233,10 @@ static void service_reference_subscription(const Config& c) {
     }
     if (id >= 0) {
         s_ref_subscribed_topic = c.ref_temp_topic;
-        diag_printf("mqtt: reference temperature subscription active\n");
+        if (!s_ref_subscription_announced) {
+            s_ref_subscription_announced = true;
+            diag_printf("mqtt: reference temperature source subscribed\n");
+        }
     }
 }
 
@@ -1450,8 +1455,10 @@ static void service_reference_frames(const Config& c) {
         room_raw.has_hvac_mode = decoded.has_hvac_mode;
         room_raw.hvac_mode = decoded.hvac_mode;
         const ReferenceRoomSample room = reference_room_sample(room_raw, freshness);
+        bool first_valid_payload = false;
         {
             Lock lk(s_mtx);
+            first_valid_payload = !s_ref_status.has_value;
             s_ref_status.temperature_c = decoded.temperature_c;
             s_ref_status.has_setpoint = decoded.has_setpoint;
             s_ref_status.setpoint_c = decoded.setpoint_c;
@@ -1472,8 +1479,9 @@ static void service_reference_frames(const Config& c) {
             if (decoded.control_parse_error) s_ref_status.errors++;
             if (!room.control_eligible) s_ref_status.rejections++;
         }
-        diag_printf("mqtt: reference temperature value captured%s\n",
-                    frame.retained ? " (retained)" : "");
+        if (first_valid_payload)
+            diag_printf("mqtt: reference temperature source received first valid payload%s\n",
+                        frame.retained ? " (retained)" : "");
     }
 }
 
@@ -1484,7 +1492,8 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
         s_mqtt_ever_connected = true;
         s_connected = true; s_announce = true; s_ref_reconfigure = true;
         s_ref_probe_reconfigure = true; set_status(true, nullptr);
-        diag_printf("mqtt: connected\n");
+        diag_printf("mqtt: %s client connected\n",
+                    s_client_is_publisher ? "publisher" : "observation");
         break;
     case MQTT_EVENT_DISCONNECTED:
         s_connected = false; s_heartbeat_announced = false; set_status(false, nullptr);
@@ -1624,7 +1633,6 @@ static void mqtt_task(void*) {
                     // restored stale broker converge again on the next reconnect.
                     retract_modbus_discovery();
                     retract_weather_discovery();
-                    diag_printf("mqtt: retired HomeHub and weather HA discovery\n");
                     ha_retire_elapsed_s = 0;
                     // Probe before deleting a retired data topic. Publishing tombstones
                     // unconditionally here recreates visible empty topics on every reconnect after
@@ -1797,6 +1805,7 @@ static bool build_client(bool publisher_lwt) {
 
     s_client = esp_mqtt_client_init(&cfg);
     if (!s_client) { set_status(false, "mqtt init failed"); return false; }
+    s_client_is_publisher = publisher_lwt;
     esp_mqtt_client_register_event(s_client, static_cast<esp_mqtt_event_id_t>(MQTT_EVENT_ANY),
                                    on_mqtt, nullptr);
     { Lock lk(s_mtx); s_status.tls = is_tls; }

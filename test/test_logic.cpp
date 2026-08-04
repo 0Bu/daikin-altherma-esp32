@@ -41,6 +41,7 @@
 #include "logic/ui_lang.hpp"
 #include "logic/ota_manifest.hpp"
 #include "logic/heartbeat.hpp"
+#include "logic/hp_query_log.hpp"
 #include "logic/http_body.hpp"
 #include "logic/json.hpp"
 #include "logic/mqtt_group.hpp"
@@ -153,6 +154,19 @@ static void test_crc() {
             CHECK(reply_len_fits(n, 64));
         }
     }
+}
+
+static void test_hp_query_log_policy() {
+    // Detection probes the union of all known model pages. A rejected/absent page is therefore a
+    // fingerprint bit, not an incident; corruption remains visible. Polling a detected profile keeps
+    // every failure because those pages were selected as part of this unit's live contract.
+    CHECK(!hp_query_should_log(HpQueryLogPolicy::IntegrityOnly, HpQueryFailure::NoReply));
+    CHECK(!hp_query_should_log(HpQueryLogPolicy::IntegrityOnly, HpQueryFailure::Rejected));
+    CHECK(hp_query_should_log(HpQueryLogPolicy::IntegrityOnly, HpQueryFailure::ShortReply));
+    CHECK(hp_query_should_log(HpQueryLogPolicy::IntegrityOnly, HpQueryFailure::InvalidLength));
+    CHECK(hp_query_should_log(HpQueryLogPolicy::IntegrityOnly, HpQueryFailure::BadCrc));
+    CHECK(hp_query_should_log(HpQueryLogPolicy::All, HpQueryFailure::NoReply));
+    CHECK(hp_query_should_log(HpQueryLogPolicy::All, HpQueryFailure::Rejected));
 }
 
 static void test_registers() {
@@ -4638,10 +4652,6 @@ static void test_redact() {
     CHECK(redact_diag_line("sntp: time synced (pool.ntp.org)") == "sntp: time synced (<redacted>)");
     CHECK(redact_diag_line("sntp: init failed (pool.ntp.org): ESP_ERR_INVALID_STATE") ==
           "sntp: init failed (<redacted>): ESP_ERR_INVALID_STATE");
-    // The MAC-derived legacy HA device id. /status redacts wifi.mac, so printing its unique half
-    // here would leave the redaction incoherent — scrubbed in the JSON, spelled out in the log.
-    CHECK(redact_diag_line("mqtt: retired legacy HA device daikin_a1b2c3 (now daikin-altherma-esp32)") ==
-          "mqtt: retired legacy HA device <redacted> (now daikin-altherma-esp32)");
     // The DISCOVERED HomeHub IPv4 identifies the reporter's LAN just like a manually entered
     // address, so /status withholds it as modbus.host and /diag must not put it back.
     CHECK(redact_diag_line("modbus: manual mDNS search found gateway 203.0.113.137") ==
@@ -9504,6 +9514,7 @@ static void test_mqtt_publish_gate() {
 
 int main() {
     test_crc();
+    test_hp_query_log_policy();
     test_registers();
     test_convert();
     test_query_flag();
