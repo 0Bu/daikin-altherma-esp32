@@ -810,8 +810,22 @@ function renderSettings() {
   if (S.scrub) return;
   const a = document.activeElement;
   const picking = !!(a && a.classList && (a.classList.contains("pin-sel") || a.classList.contains("chan-sel") || a.classList.contains("lang-sel")));
-  if (!picking) setHtml("connTile", connectionsHtml());
-  if (!picking && !S.otaShown) setHtml("settingsCards", esp32CardHtml());
+  if (!picking) {
+    $("connTile").hidden = false;             // resumeOta hides the unavailable pre-status shell
+    setHtml("connTile", connectionsHtml());
+  }
+  // otaShown normally freezes an ALREADY-RENDERED card so direct progress DOM writes survive the
+  // once-per-status rebuild. A reload reverses that order: resumeOta learns about the download first
+  // and can set otaShown before /status has ever produced the full cards. Permit exactly that first
+  // status-backed render, then repaint the retained OTA view into the newly-created #otaStatSet.
+  const firstStatusRender = !S.settingsHydrated;
+  if (!picking && (!S.otaShown || firstStatusRender)) {
+    setHtml("settingsCards", esp32CardHtml());
+    if (!S.clickHold) {
+      S.settingsHydrated = true;
+      if (S.otaShown) paintOtaInline();
+    }
+  }
   $("settingsVer").textContent = "daikin-altherma-esp32 · v" + (S.status?.version || "?");
   renderSettingsDot();
 }

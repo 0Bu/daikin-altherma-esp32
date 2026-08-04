@@ -57,10 +57,23 @@ const S = {
   // OTA flow also takes, otaBusy is what keeps a second tap from starting a parallel check.
   otaAvail: null,
   otaBusy: false,
+  // True only after an install was accepted by the device (or adopted from /ota/status after a
+  // reload). During that phase the OTA endpoint can still answer while the much larger /status
+  // builder temporarily cannot allocate. That is an UPDATE IN PROGRESS, not proof that the device
+  // is unreachable; markUnreachable uses this bit to keep the dashboard's words truthful.
+  otaInstalling: false,
   // Whether the inline readout currently has something on screen (a ring, a percentage, a terminal
   // message inside its linger window). It is what freezes the Settings rebuild — see renderSettings.
   // Not the same thing as otaBusy: the terminal messages are written after the flow has released.
   otaShown: false,
+  // The inline readout is state as well as DOM. Ordinarily otaInline paints both existing slots
+  // directly. After a refresh during OTA, however, the Settings slot is created only after the
+  // running update has been discovered; keeping the last paint here lets that new slot catch up.
+  otaView: null,
+  // A reload starts with no /status and therefore no Settings cards. The first successful status
+  // frame must be allowed to replace the OTA-only recovery card even while otaShown freezes all
+  // subsequent card rebuilds.
+  settingsHydrated: false,
 };
 
 // ── Navigation (dashboard ⇄ Settings) ────────────────────────────────────
@@ -352,6 +365,10 @@ async function refreshStatus() {
   return true;
 }
 function markUnreachable() {
+  // A live /ota/status response has already proved that the board is reachable. The full /status
+  // payload is its largest HTTP allocation and can be refused while the HTTPS OTA task owns the
+  // scarce contiguous heap. Do not turn that expected resource window into a red device failure.
+  if (S.otaInstalling) { renderOtaDashboardStatus(); return; }
   sysSet(t("sys.unreachable"), t("sys.unreachable_sub"), "err");
 }
 
@@ -494,6 +511,15 @@ function sysSet(mode, status, tone) {
   setTxt("svStatus", status);
   $("svStatus").setAttribute("class", "sc-status" + (tone ? " " + tone : ""));
   $("svDot").setAttribute("fill", TONE_FILL[tone || ""]);
+}
+
+// Honest dashboard fallback while an OTA install owns enough heap that /status may not fit. No
+// plant reading is retained across the refresh (stale values must never look live); the schematic
+// therefore stays blank, but its headline explains the known operation instead of claiming the
+// device is unreachable. otaView is updated by every progress tick.
+function renderOtaDashboardStatus() {
+  const detail = S.otaView?.text || t("ota.starting");
+  sysSet(t("ota.active_title"), t("ota.active_sub", detail), "idle");
 }
 function pickValue(re) {
   const v = (S._values || []).find((x) => re.test(x.label || ""));

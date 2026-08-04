@@ -1723,7 +1723,11 @@ place:
   the config saves use — an OTA replaces the served UI itself, so `otaWaitReboot` waits for the board
   to come back (version changed / `uptime_s` went backwards / seen down→up) and **reloads the page**.
   A download already running on the device is adopted on page load (`resumeOta`), so a reload
-  mid-update keeps showing the progress.
+  mid-update keeps showing the progress. Because the OTA status payload is much smaller than the
+  full `/status` builder, it also owns the refresh fallback: while TLS heap pressure prevents the
+  latter from landing, the dashboard reports the known installation state and Settings shows a
+  version/channel-only Firmware card. A later successful `/status` replaces that shell with the
+  complete Settings cards once without wiping the OTA progress slot.
 
 The board/platform is reported by `/status.platform` — read by `/status` consumers and the web UI's
 paste-ready crash bundle, no longer a row on any Settings card.

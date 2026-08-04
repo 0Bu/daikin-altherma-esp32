@@ -32,7 +32,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 2 | Refuse-to-flash-unsigned guard | ✅ | [`require-signed.sh`](../scripts/require-signed.sh) |
 | 3 | Dual-OTA layout + **NVS-preserving OTA and no-Erase Web Serial updates** | ✅ 🧪 | [`partitions.csv`](../partitions.csv), [`ci-build-all.sh`](../scripts/ci-build-all.sh), [`check-web-installer-plan.py`](../scripts/check-web-installer-plan.py), [`test_web_installer_plan.py`](../test/test_web_installer_plan.py) |
 | 4 | OTA rollback + **connectivity-proving health gate** | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/health_gate.hpp`](../main/logic/health_gate.hpp) |
-| 5 | OTA manifest check + signed download + **two-point downgrade gate** | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp) |
+| 5 | OTA manifest check + signed download + **two-point downgrade gate** + refresh-resilient UI progress | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`www/js/settings.js`](../main/www/js/settings.js), [`test_ui_ota_refresh.mjs`](../test/test_ui_ota_refresh.mjs) |
 | 6 | Live UI by **polling** `/status` + `/values` — no push transport, on purpose (#238/#241) | ✅ | [`www/app.sources`](../main/www/app.sources), [`http_status.cpp`](../main/http_status.cpp) |
 | 7 | Gzipped web UI **embedded in the app image**, assembled at build time | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt) |
 | 8 | HTTP handlers under an **OOM `try/catch` → 503** discipline | ✅ | [`http_common.cpp`](../main/http_common.cpp), [`http_status.cpp`](../main/http_status.cpp) |
@@ -199,6 +199,10 @@ See [`ARCHITECTURE.md` → OTA, signing, partitions](ARCHITECTURE.md) and
   with it), and never twice concurrently (two TLS sessions compete for the largest *contiguous*
   block). The manifest is parsed by [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp) —
   bounded, allocation-free, depth-aware, and it **refuses rather than truncates** an oversized value.
+  Reloading the page during that task adopts the compact `/ota/status` response even when TLS heap
+  pressure temporarily makes the larger `/status` allocation return 503: the dashboard keeps the
+  known installation percentage, Settings shows only version/channel facts that endpoint owns, and
+  the first later full status hydrates the complete cards without erasing the progress readout.
 - **✅ 🧪 Two-point downgrade gate** ([`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp)): a
   signature proves a build is *authentic*, not *newer*, so an attacker who can serve a genuine old
   image could otherwise walk a fleet backwards onto a fixed bug. The gate refuses anything not

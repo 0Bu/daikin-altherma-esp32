@@ -49,6 +49,12 @@ command, rather than maintaining a second list.
 It separately keeps the live `#scFan` rotation in the system schematic and rejects a second header
 telemetry/animation branch.
 
+`node test/test_ui_ota_refresh.mjs` executes the production OTA resume and Settings render paths for
+a refresh during a running download. It pins the compact OTA-only recovery card, retained progress,
+one-time hydration by a later full status response, and the rule that a successful `/ota/status`
+must not be overwritten by a generic red unreachable state when the larger `/status` allocation is
+temporarily refused under OTA TLS heap pressure.
+
 The same `gates` job runs `node test/test_ui_live_i18n.mjs` separately. That browser-free regression
 test executes the production banner/inspector render functions from the assembled UI source and verifies
 that their DOM-write signatures invalidate when the persisted UI language changes while device state
