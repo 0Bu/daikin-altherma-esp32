@@ -143,15 +143,15 @@ assert.match(mqttHa, /else if \(!s_env3_disabled_cleaned\)[\s\S]*retract_env3_di
 // The room-source row remains a user-configured exact MQTT mapping. Save performs the non-persistent
 // live test itself and only then presents its proof to persistence; Delete posts the explicit empty
 // mapping that clears the source and captured value.
-assert.match(html, /id="refTempModal"[\s\S]*id="rtTopic"[\s\S]*id="rtPath"[\s\S]*id="rtSetpointPath"[\s\S]*id="rtTimePath"[\s\S]*id="rtEnabledPath"[\s\S]*id="rtHvacModePath"[\s\S]*id="rtMaxAge"/,
-  "the room-temperature source modal must expose current, target, source-time and eligibility mappings");
+assert.match(html, /id="refTempModal"[\s\S]*id="rtTopic"[\s\S]*id="rtPath"[\s\S]*id="rtSetpointPath"[\s\S]*id="rtTimePath"[\s\S]*id="rtMaxAge"/,
+  "the room-temperature source modal must expose current, target, source-time and freshness mappings");
+assert.doesNotMatch(html, /id="rtEnabledPath"|id="rtHvacModePath"|ref\.enabled_path|ref\.hvac_mode_path/,
+  "advanced eligibility mappings must not appear as optional fields in the room-source dialog");
 for (const [input, help, key] of [
   ["rtTopic", "rtTopicHelp", "ref.topic_help"],
   ["rtPath", "rtPathHelp", "ref.path_help"],
   ["rtSetpointPath", "rtSetpointPathHelp", "ref.setpoint_path_help"],
   ["rtTimePath", "rtTimePathHelp", "ref.time_path_help"],
-  ["rtEnabledPath", "rtEnabledPathHelp", "ref.enabled_path_help"],
-  ["rtHvacModePath", "rtHvacModePathHelp", "ref.hvac_mode_path_help"],
   ["rtMaxAge", "rtMaxAgeHelp", "ref.max_age_help"],
 ]) {
   assert.match(html, new RegExp(`id="${input}"[^>]*aria-describedby="${help}"[\\s\\S]*id="${help}"[^>]*data-i18n="${key.replace(".", "\\.")}"`),
@@ -165,6 +165,10 @@ assert.doesNotMatch(html, /id="rtTestBtn"|id="rtTestResult"/,
   "the room-source dialog must not retain a separate Test action or stale proof result");
 assert.doesNotMatch(app, /shelly1pmminig4-fixture00003\/status\/switch:0/,
   "an untouched profile must not carry the obsolete Shelly device-temperature preset");
+assert.doesNotMatch(app, /\$\("rtEnabledPath"\)|\$\("rtHvacModePath"\)/,
+  "the browser bundle must not retain DOM access to the removed optional fields");
+assert.match(app, /const sameMapping = !!saved\.configured[\s\S]*enabled_path: sameMapping \? \(saved\.enabled_path \|\| ""\) : ""[\s\S]*hvac_mode_path: sameMapping \? \(saved\.hvac_mode_path \|\| ""\) : ""/,
+  "editing an unchanged source must preserve existing advanced gates without exposing them in the UI");
 assert.match(app, /refTempForm[^]*post\("\/test_ref_temp", input\)[^]*testResult\.test_proof[^]*post\("\/set_ref_temp", \{ \.\.\.input, test_proof: testResult\.test_proof \}\)/,
   "Save must obtain a live proof and persist exactly that tested mapping in one user action");
 assert.match(app, /\$\("rtDeleteBtn"\)\.onclick[^]*post\("\/set_ref_temp", \{[^]*name: "", topic: "", temperature_path: "", setpoint_path: "", timestamp_path: ""/,

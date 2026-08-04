@@ -430,8 +430,6 @@ const configureValid = (item) => {
     document.getElementById("rtPath").value = "temperature.tC";
     document.getElementById("rtSetpointPath").value = "target.tC";
     document.getElementById("rtTimePath").value = "read_at";
-    document.getElementById("rtEnabledPath").value = "enabled";
-    document.getElementById("rtHvacModePath").value = "hvac_mode";
     document.getElementById("rtMaxAge").value = "600";
   }
   if (item.modal === "env3Modal") {
@@ -459,6 +457,10 @@ for (const item of cases.filter((entry) => entry.form)) {
       "one room-source Save must run live test before persistence");
     assert.equal(fetchState.calls[1]?.body?.test_proof, 71,
       "room-source persistence must present the proof returned by that live test");
+    assert.equal(fetchState.calls[0]?.body?.enabled_path, "enabled",
+      "editing the visible fields of an unchanged source must preserve its existing enabled gate");
+    assert.equal(fetchState.calls[0]?.body?.hvac_mode_path, "hvac_mode",
+      "editing the visible fields of an unchanged source must preserve its existing HVAC gate");
   }
 
   fetchState.mode = "reject";
@@ -513,8 +515,7 @@ assert.equal(document.getElementById("refTempModal").hidden, true,
 assert.equal(document.body.classList.contains("modal-open"), false,
   "accepted Delete must release background scrolling");
 open(roomSource);
-for (const id of ["rtName", "rtTopic", "rtPath", "rtSetpointPath", "rtTimePath",
-                  "rtEnabledPath", "rtHvacModePath"])
+for (const id of ["rtName", "rtTopic", "rtPath", "rtSetpointPath", "rtTimePath"])
   assert.equal(document.getElementById(id).value, "",
     `accepted Delete must leave ${id} empty when the dialog is reopened`);
 assert.equal(document.getElementById("rtMaxAge").value, "600",
@@ -552,12 +553,20 @@ fetchState.mode = "ok";
 open(roomSource);
 assert.equal(document.getElementById("rtDeleteBtn").disabled, true,
   "an unconfigured source must not offer a destructive no-op");
-for (const id of ["rtName", "rtTopic", "rtPath", "rtSetpointPath", "rtTimePath",
-                  "rtEnabledPath", "rtHvacModePath"])
+for (const id of ["rtName", "rtTopic", "rtPath", "rtSetpointPath", "rtTimePath"])
   assert.equal(document.getElementById(id).value, "",
     `an unconfigured source must ignore stale ${id} status data`);
 assert.equal(document.getElementById("rtMaxAge").value, "600",
   "an unconfigured source must use the standard freshness limit instead of stale status data");
+fetchState.calls.length = 0;
+ui.S.busy = false;
+configureValid(roomSource);
+await document.getElementById("refTempForm").fire("submit");
+await settle();
+assert.equal(fetchState.calls[0]?.body?.enabled_path, "",
+  "a new source must not inherit a stale hidden enabled gate");
+assert.equal(fetchState.calls[0]?.body?.hvac_mode_path, "",
+  "a new source must not inherit a stale hidden HVAC gate");
 ui.S.status.reference_temperature.configured = true;
 
 // ENV III's board gate and both selector states are distinct use cases.  Pins disappear and are

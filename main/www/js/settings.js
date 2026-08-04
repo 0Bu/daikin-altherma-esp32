@@ -66,8 +66,10 @@ const validMqtt = (h) => {
 };
 
 // ── Dynamic LWT · first room-temperature source ─────────────────────────
-// One decision-ready, still read-only profile: exact current/target/source-time mappings, optional
-// enabled/heating gates and a freshness limit. Calibration is fixed at 0 K; no roles or weights.
+// One decision-ready, still read-only profile: exact current/target/source-time mappings and a
+// freshness limit. Calibration is fixed at 0 K; no roles or weights. The backend still accepts the
+// older optional eligibility-gate mappings. They are deliberately not editable here; preserving
+// them for an otherwise unchanged source avoids silently weakening an installed configuration.
 // It is presented as an Observe-mode input under the permanent dynamic-control Settings card. A new
 // profile starts empty; placeholders illustrate the installed Meross contract without subscribing.
 function fillRefTemp() {
@@ -78,15 +80,12 @@ function fillRefTemp() {
   $("rtPath").value = configured ? (r.temperature_path || "") : "";
   $("rtSetpointPath").value = configured ? (r.setpoint_path || "") : "";
   $("rtTimePath").value = configured ? (r.timestamp_path || "") : "";
-  $("rtEnabledPath").value = configured ? (r.enabled_path || "") : "";
-  $("rtHvacModePath").value = configured ? (r.hvac_mode_path || "") : "";
   $("rtMaxAge").value = configured && Number.isInteger(r.max_age_s) ? r.max_age_s : 600;
   $("rtDeleteBtn").disabled = !configured;
 }
 function openRefTemp() {
   fillRefTemp();
-  for (const id of ["rtName", "rtTopic", "rtPath", "rtSetpointPath", "rtTimePath",
-                    "rtEnabledPath", "rtHvacModePath", "rtMaxAge"])
+  for (const id of ["rtName", "rtTopic", "rtPath", "rtSetpointPath", "rtTimePath", "rtMaxAge"])
     $(id).classList.remove("invalid");
   $("rtError").hidden = true;
   openPopup("refTempModal");
@@ -99,14 +98,24 @@ const validRefPath = (v) => v.length <= 128 && v.split(".").every((key) =>
 
 function refTempFormPayload() {
   const topic = $("rtTopic").value.trim();
+  const temperaturePath = $("rtPath").value.trim();
+  const setpointPath = $("rtSetpointPath").value.trim();
+  const timestampPath = $("rtTimePath").value.trim();
+  const saved = S.status?.reference_temperature || {};
+  const sameMapping = !!saved.configured && topic === (saved.topic || "") &&
+    temperaturePath === (saved.temperature_path || "") &&
+    setpointPath === (saved.setpoint_path || "") &&
+    timestampPath === (saved.timestamp_path || "");
   return {
     name: $("rtName").value.trim(),
     topic,
-    temperature_path: $("rtPath").value.trim(),
-    setpoint_path: $("rtSetpointPath").value.trim(),
-    timestamp_path: $("rtTimePath").value.trim(),
-    enabled_path: $("rtEnabledPath").value.trim(),
-    hvac_mode_path: $("rtHvacModePath").value.trim(),
+    temperature_path: temperaturePath,
+    setpoint_path: setpointPath,
+    timestamp_path: timestampPath,
+    // Existing API clients may still manage these advanced gates. Keep them only while the visible
+    // source mapping is unchanged; a new/repointed source starts without invisible assumptions.
+    enabled_path: sameMapping ? (saved.enabled_path || "") : "",
+    hvac_mode_path: sameMapping ? (saved.hvac_mode_path || "") : "",
     max_age_s: topic ? Number($("rtMaxAge").value) : 600,
   };
 }
