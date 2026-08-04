@@ -73,16 +73,14 @@ const validMqtt = (h) => {
 function fillRefTemp() {
   const r = S.status?.reference_temperature || {};
   const configured = !!r.configured;
-  // Keep an explicitly disabled or genuinely untouched profile empty when it is reopened.
-  const saved = configured || !!r.name || !!r.temperature_path || !!r.timestamp_path || !!r.setpoint_path;
-  $("rtName").value = saved ? (r.name || "") : "";
-  $("rtTopic").value = saved ? (r.topic || "") : "";
-  $("rtPath").value = saved ? (r.temperature_path || "") : "";
-  $("rtSetpointPath").value = saved ? (r.setpoint_path || "") : "";
-  $("rtTimePath").value = saved ? (r.timestamp_path || "") : "";
-  $("rtEnabledPath").value = saved ? (r.enabled_path || "") : "";
-  $("rtHvacModePath").value = saved ? (r.hvac_mode_path || "") : "";
-  $("rtMaxAge").value = Number.isInteger(r.max_age_s) ? r.max_age_s : 600;
+  $("rtName").value = configured ? (r.name || "") : "";
+  $("rtTopic").value = configured ? (r.topic || "") : "";
+  $("rtPath").value = configured ? (r.temperature_path || "") : "";
+  $("rtSetpointPath").value = configured ? (r.setpoint_path || "") : "";
+  $("rtTimePath").value = configured ? (r.timestamp_path || "") : "";
+  $("rtEnabledPath").value = configured ? (r.enabled_path || "") : "";
+  $("rtHvacModePath").value = configured ? (r.hvac_mode_path || "") : "";
+  $("rtMaxAge").value = configured && Number.isInteger(r.max_age_s) ? r.max_age_s : 600;
   $("rtDeleteBtn").disabled = !configured;
 }
 function openRefTemp() {

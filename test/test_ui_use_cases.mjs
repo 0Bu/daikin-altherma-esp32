@@ -512,10 +512,25 @@ assert.equal(document.getElementById("refTempModal").hidden, true,
   "accepted Delete must close the dialog");
 assert.equal(document.body.classList.contains("modal-open"), false,
   "accepted Delete must release background scrolling");
+open(roomSource);
+for (const id of ["rtName", "rtTopic", "rtPath", "rtSetpointPath", "rtTimePath",
+                  "rtEnabledPath", "rtHvacModePath"])
+  assert.equal(document.getElementById(id).value, "",
+    `accepted Delete must leave ${id} empty when the dialog is reopened`);
+assert.equal(document.getElementById("rtMaxAge").value, "600",
+  "an empty source must retain only the real default freshness limit");
+assert.equal(document.getElementById("rtDeleteBtn").disabled, true,
+  "the locally cleared source must not offer another Delete before the status refresh completes");
 
 fetchState.mode = "reject";
 fetchState.calls.length = 0;
 ui.S.busy = false;
+ui.S.status.reference_temperature = {
+  configured: true, name: "Living room", topic: "sensor/living-room/status",
+  temperature_path: "temperature.tC", setpoint_path: "target.tC",
+  timestamp_path: "read_at", enabled_path: "enabled", hvac_mode_path: "hvac_mode",
+  max_age_s: 600,
+};
 open(roomSource);
 await document.getElementById("rtDeleteBtn").fire("click");
 await settle();
@@ -527,11 +542,22 @@ assert.equal(document.getElementById("rtDeleteBtn").disabled, false,
   "rejected Delete must release its button for retry");
 assert.equal(ui.S.busy, false, "rejected Delete must release global busy state");
 
-ui.S.status.reference_temperature.configured = false;
+ui.S.status.reference_temperature = {
+  configured: false, name: "stale name", topic: "stale/topic",
+  temperature_path: "stale.current", setpoint_path: "stale.target",
+  timestamp_path: "stale.time", enabled_path: "stale.enabled",
+  hvac_mode_path: "stale.hvac", max_age_s: 900,
+};
 fetchState.mode = "ok";
 open(roomSource);
 assert.equal(document.getElementById("rtDeleteBtn").disabled, true,
   "an unconfigured source must not offer a destructive no-op");
+for (const id of ["rtName", "rtTopic", "rtPath", "rtSetpointPath", "rtTimePath",
+                  "rtEnabledPath", "rtHvacModePath"])
+  assert.equal(document.getElementById(id).value, "",
+    `an unconfigured source must ignore stale ${id} status data`);
+assert.equal(document.getElementById("rtMaxAge").value, "600",
+  "an unconfigured source must use the standard freshness limit instead of stale status data");
 ui.S.status.reference_temperature.configured = true;
 
 // ENV III's board gate and both selector states are distinct use cases.  Pins disappear and are
