@@ -212,8 +212,9 @@ function dynamicLwtSwitchRow() {
     `<div class="vdesc-p">${esc(t("dyn.enable_help"))}</div>`);
 }
 
-// Settings cards rendered below Connections: THREE ESP32-family cards followed by the experimental
-// dynamic-LWT project. The ESP32 cards were split from what was
+// Settings cards rendered below Connections: THREE permanent ESP32-family cards, followed by the
+// experimental dynamic-LWT project only after its Firmware switch selects SHADOW. The ESP32 cards
+// were split from what was
 // one, so each answers one question. ESP32 = the board itself (its onboard hardware and its own
 // health — uptime + the two memory curves). Protokoll = the X10A link (whether the bus answers, the
 // framing it speaks, and the RX/TX pins). Firmware = the running version, the update feed it follows,
@@ -263,7 +264,8 @@ function esp32CardHtml() {
          vcard(t("card.fw_title"), fwRows) + dynamicControlCardHtml();
 }
 
-// The permanent Settings home for the dynamic-LWT project. Every main row uses the same split
+// The opt-in Settings home for the dynamic-LWT project. OFF is represented entirely by the explicit
+// Firmware switch above; the card itself appears only in SHADOW. Every main row uses the same split
 // interaction as Board Hardware: the label owns the otherwise empty left area and toggles its
 // explanation tongue; a compact value on the right opens an editor only where one exists. This
 // keeps status/explanation and configuration as two explicit actions on configured and empty rows.
@@ -331,6 +333,9 @@ function dynamicControlCardHtml() {
   const w = S.status?.weather_forecast || {};
   const mqtt = S.status?.mqtt || {};
   const d = S.status?.dynamic_lwt || {};
+  // Keep the experimental surface out of ordinary Settings until the user has explicitly enabled
+  // it. Saved source mappings remain in firmware/NVS; hiding the card is presentation, not deletion.
+  if (d.mode !== "shadow") return "";
   const captureEnabled = d.mode === "shadow";
   let sourceCls = "dim";
   let temperature = "", setpoint = "", age = "";
@@ -873,7 +878,7 @@ const connDown = () => connLinks().filter((l) => l.cls === "err");
 
 // ── Settings screen (behind the header gear) ─────────────────────────────────────────────────
 // The whole configuration on one screen, no menu level in between: Connections, ESP32 / Protocol /
-// Firmware, then dynamic LWT at the bottom, all four rendered together by esp32CardHtml().
+// Firmware, then (only while enabled) dynamic LWT at the bottom, rendered together by esp32CardHtml().
 function renderSettings() {
   // Both containers are rebuilt on every poll (link state, pins and the OTA row all change). The
   // Protocol card's RX/TX pin dropdown is interactive, so skip the rebuild while it is focused/open — otherwise the

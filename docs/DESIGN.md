@@ -17,9 +17,10 @@ page lives outside the firmware and cannot include `main/www/style.css`, so its 
 1. **Two screens: the plant, and the box.** After provisioning the app opens on the **dashboard**,
    which is the heat pump — the live schematic, the detected model, every reading. The header
    **gear** opens **Settings**, which is the ESP32 and what it talks to: the Connections tile
-   (WiFi/MQTT/Syslog/NTP), one **Dynamische Vorlaufregelung** card for the staged room/weather/
-   controller project, and the ESP32 board card split into three — ESP32 (board hardware, uptime,
+   (WiFi/MQTT/Syslog/NTP), and the ESP32 board card split into three — ESP32 (board hardware, uptime,
    memory), Protokoll (X10A link, RX/TX pins) and Firmware (version, OTA channel, language).
+   A **Dynamische Vorlaufregelung** card for the staged room/weather/controller project appears
+   below Firmware only after its explicit Firmware switch has been enabled.
    Nothing sits between the gear and those cards — Settings is **flat**, no
    menu of entries to tap through, because there is little enough of it that a menu would exist only
    to hide a card behind a second tap. Settings still reports forward: a link that is **down** marks
@@ -1123,14 +1124,15 @@ screen title. `Esc` leaves the same way, but only when no modal is open: a modal
 one key press never both closes a dialog and leaves the screen behind it. Settings is addressable as
 `#settings`; each modal extends that route with its stable human-readable name.
 
-**Settings is flat.** No menu of entries, no sub-screens: the gear lands directly on the five cards,
-stacked in the same single column as everything else (§9). The Connections tile is the *same* card it
-was on the dashboard — the move changed where the configuration lives, not how it looks. The board
-card is the same story split three ways: **ESP32** / **Protokoll** / **Firmware** answer three
+**Settings is flat.** No menu of entries, no sub-screens: the gear lands directly on four permanent
+cards, stacked in the same single column as everything else (§9). The Connections tile is the *same*
+card it was on the dashboard — the move changed where the configuration lives, not how it looks. The
+board card is the same story split three ways: **ESP32** / **Protokoll** / **Firmware** answer three
 different questions (the board itself, the X10A link, the running software) that one card used to
-answer at once. The **Dynamische Vorlaufregelung** card is their neighbour rather than another
-top-level screen and deliberately comes last, after Firmware. All four are built and rebuilt together
-by one `esp32CardHtml()`. HomeHub/Modbus is a fifth row in the Connections tile and follows the same row
+answer at once. When its Firmware switch selects SHADOW, the **Dynamische Vorlaufregelung** card is
+their conditional neighbour rather than another top-level screen and deliberately comes last, after
+Firmware. The three permanent cards and this optional fourth are built and rebuilt together by one
+`esp32CardHtml()`. HomeHub/Modbus is a fifth row in the Connections tile and follows the same row
 vocabulary exactly:
 
 1. **Connections tile** — one full-width card, `--card` bordered like the value groups, titled
@@ -1252,23 +1254,25 @@ vocabulary exactly:
    The fourth row is the persisted, default-OFF **Dynamische Vorlaufregelung** switch. It maps only
    to OFF/SHADOW: enabling requires MQTT, a complete room source and HomeHub; it never exposes ACTIVE.
 
-5. **Dynamische Vorlaufregelung card** — the permanent, bottom-most Settings home of the dynamic-LWT
-   project, marked with a written **Experimentell** pill rather than a live-health dot. Its five rows
+5. **Dynamische Vorlaufregelung card** — the conditional, bottom-most Settings home of the dynamic-LWT
+   project, shown only while the Firmware switch selects SHADOW and marked with a written
+   **Experimentell** pill rather than a live-health dot. Its five rows
    are **Betriebsart**, **Raumtemperaturquellen**, **Wetterprognose**, **Regelstrategie**, and
-   **Sicherheit & Ausgabe** = **Nur lesend**. OFF keeps saved source settings but removes the room
-   subscription, clears captured runtime values, pauses Open-Meteo and evaluates no proposal.
-   SHADOW reads and validates the configured inputs and runs the bounded P controller, but retains
-   the write-free output boundary. The room-source row opens the exact MQTT topic, current and target
-   temperature paths, source timestamp and maximum age; the weather row opens its location modal.
+   **Sicherheit & Ausgabe** = **Nur lesend**. OFF hides this card, keeps saved source settings, removes
+   the room subscription, clears captured runtime values, pauses Open-Meteo and evaluates no proposal.
+   The Firmware switch remains visible as the way back in. SHADOW reads and validates the configured
+   inputs and runs the bounded P controller, but retains the write-free output boundary. The
+   room-source row opens the exact MQTT topic, current and target temperature paths, source timestamp
+   and maximum age; the weather row opens its location modal.
    Advanced optional enabled/HVAC-mode mappings remain API-compatible but are not ordinary UI fields.
    ENV III remains a separate board accessory and never substitutes for Daikin R1T.
 
    Every row has a pull-out explanation tongue. Live room and weather values are not repeated as an
-   unexplained green summary line: the tongue names status, quantity, time/freshness and provenance
-   in separate labelled paragraphs, matching the value explanations elsewhere in the UI. The compact
-   right side carries only the configured source/provider and its semantic state. OFF tongues explain
-   why collection is paused and deliberately suppress any old runtime readings. The room-source modal
-   remains test-before-persist; Delete removes the saved mapping and captured value. Retained data
+   unexplained green summary line: while the card is enabled, the tongue names status, quantity,
+   time/freshness and provenance in separate labelled paragraphs, matching the value explanations
+   elsewhere in the UI. The compact right side carries only the configured source/provider and its
+   semantic state. The room-source modal remains test-before-persist; Delete removes the saved mapping
+   and captured value. Retained data
    without trusted source time fails closed, and `/status` plus the numeric heartbeat retain the full
    canonical and controller evidence. No UI path sends a setpoint or HomeHub write.
 
@@ -1300,10 +1304,10 @@ marked and the mark would stop meaning anything. A **disabled** link is a choice
 raises nothing. The dot is never the only carrier: the button's `aria-label` states the count in
 words (§9).
 
-**Rebuild rule.** All five cards are rebuilt from `/status` on every push (the Connections tile plus
-dynamic LWT and the three ESP32-family cards, the latter four as one string from one
-`esp32CardHtml()` call), so the write
-goes through the same change-guard the rest of the app uses — and the rebuild is skipped entirely
+**Rebuild rule.** The four permanent cards and optional dynamic-LWT card are rebuilt from `/status`
+on every push. The Connections tile is one container; the three ESP32-family cards and conditional
+dynamic-LWT card are emitted as one string by `esp32CardHtml()`. The write goes through the same
+change-guard the rest of the app uses — and the rebuild is skipped entirely
 while an RX/TX dropdown, the update-channel select **or the language select** has focus, or the poll
 would collapse it mid-pick. (Any future select on these cards has to join that guard — an open
 native dropdown is destroyed by an `innerHTML` write, and the poll is ~1×/s.)

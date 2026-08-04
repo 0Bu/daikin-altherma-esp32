@@ -143,6 +143,8 @@ S.status = {
   },
 };
 let html = sandbox.__renderDynamic();
+assert.match(html, /section-badge experimental">Experimentell<\/span>/,
+  "the enabled bottom card must carry a written experimental pill");
 assert.equal((html.match(/class="vdesc-body settings-info-tongue"/g) || []).length, 5,
   "all five dynamic-control rows must render an information tongue");
 for (const key of ["mode", "room-sources", "weather", "strategy", "safety"]) {
@@ -242,16 +244,7 @@ S.status.weather_forecast = {
   solar_energy_2h_wh_m2: 514, fresh: true,
 };
 html = sandbox.__renderDynamic();
-assert.match(html, /data-desc="dynamic:mode"[^]*?<span class="settings-split-value[^>]*>Aus<\/span>/,
-  "OFF must be visible as the operating mode");
-assert.match(html, /id="dynamic-room-sources-detail"[^]*Status:<\/span> Aus — Erfassung durch Firmware-Schalter ausgeschaltet\./,
-  "OFF must explain why the saved room source is not collecting");
-assert.match(html, /id="dynamic-weather-detail"[^]*Status:<\/span> Aus — Prognoseerfassung ausgeschaltet\./,
-  "OFF must explain why the saved forecast source is not collecting");
-assert.doesNotMatch(html, /25,1 °C ist die aktuelle Raumtemperatur|22,6 °C ist die mittlere prognostizierte/,
-  "OFF must not present retained runtime values as active evidence");
-assert.match(html, /section-badge experimental">Experimentell<\/span>/,
-  "the bottom card must carry a written experimental pill");
+assert.equal(html, "", "OFF must hide the complete experimental controller card");
 
 // Protocol and Firmware use the same info-tongue contract while keeping their independent controls.
 S.status = {
@@ -275,13 +268,15 @@ assert.match(html, /id="e32Lang"[^]*<option value="auto" selected>Browser<\/opti
   "the language selector must survive the split explanation row");
 assert.match(html, /id="e32DynamicLwt" role="switch" aria-label="Dynamische Vorlaufregelung"/,
   "the firmware card must contain an unchecked default-OFF switch");
+assert.doesNotMatch(html, /<div class="section-label">Dynamische Vorlaufregelung/,
+  "OFF must leave only the Firmware switch and hide the experimental card");
 assert.ok(html.indexOf("card.fw_title") < 0, "translated card titles must be resolved");
-assert.ok(html.indexOf("<div class=\"section-label\">Firmware") <
-          html.indexOf("<div class=\"section-label\">Dynamische Vorlaufregelung"),
-  "the experimental controller card must render after Firmware at the bottom");
 S.status.dynamic_lwt = { mode: "shadow" };
 html = sandbox.__renderEsp32();
 assert.match(html, /id="e32DynamicLwt" role="switch" checked/,
   "SHADOW must render the Firmware switch as enabled");
+assert.ok(html.indexOf("<div class=\"section-label\">Firmware") <
+          html.indexOf("<div class=\"section-label\">Dynamische Vorlaufregelung"),
+  "SHADOW must reveal the experimental controller card after Firmware at the bottom");
 
 console.log("settings source tongue use-cases: ok");
