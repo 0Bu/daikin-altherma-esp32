@@ -115,6 +115,7 @@ const vcard = (label, rows, badge, badgeCls) => `<div class="vgroup"><div class=
   (badge ? `<span class="section-badge ${badgeCls || ""}">${esc(badge)}</span>` : "") +
   `</div>${rows}</div></div>`;
 const editIcon = `<svg class="vcard-edit-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
+const settingsChevIcon = `<svg class="vrow-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>`;
 
 // RX/TX pin dropdown row — shown only when auto-detection hasn't locked a working pin pair, so the
 // user picks from the chip's safe GPIOs (logic/board_pins.hpp → /status.pins_avail).
@@ -218,30 +219,26 @@ function esp32CardHtml() {
          vcard(t("card.proto_title"), protoRows) + vcard(t("card.fw_title"), fwRows);
 }
 
-// The permanent Settings home for the dynamic-LWT project. Only its first row family is live today:
-// one MQTT room-temperature source, direct Open-Meteo forecast, and the optional ENV III observation
-// in Observe mode. Strategy and output are explicit neighbours now, so later phases extend this card
-// instead of growing unrelated top-level settings.
-// None of the labels below claims control: the fixed operating mode is Observe and output is read-only.
-// A configured source keeps the row itself short and editable while its current state sits in the
-// permanent info "tongue" underneath. The same geometry is used by value explainers; unlike those
-// explainers this one does not collapse, because clicking the row opens the source editor. Empty
-// sources stay on one compact row so "Not configured" does not create an empty-looking panel.
-function dynamicSourceRow(action, title, label, summary, summaryCls, configured, detailHtml = "") {
-  if (!configured) {
-    return `<button class="vrow vrow-btn dynamic-source-row dynamic-source-inline" type="button" ` +
-      `data-act="${action}" aria-label="${esc(title)}"><span class="vrow-label">${esc(label)}</span>` +
-      `<span class="vrow-val settings-wrap ${summaryCls}">${esc(summary)} ${editIcon}</span></button>`;
-  }
-  const statusId = `dynamic-${action}-status`;
-  return `<div class="vitem open settings-source-item">` +
-    `<button class="vrow vrow-btn dynamic-source-row" type="button" data-act="${action}" ` +
-    `aria-label="${esc(title)}" aria-describedby="${statusId}">` +
-    `<span class="vrow-label">${esc(label)}</span>` +
-    `<span class="vrow-val settings-source-edit" aria-hidden="true">${editIcon}</span></button>` +
-    `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body settings-source-tongue" id="${statusId}">` +
-    (detailHtml || `<span class="settings-source-summary ${summaryCls}">${esc(summary)}</span>`) +
-    `</div></div></div></div>`;
+// The permanent Settings home for the dynamic-LWT project. Every main row uses the same split
+// interaction as Board Hardware: the label owns the otherwise empty left area and toggles its
+// explanation tongue; a compact value on the right opens an editor only where one exists. This
+// keeps status/explanation and configuration as two explicit actions on configured and empty rows.
+function dynamicInfoRow(key, label, value, valueCls, bodyHtml, action = "", title = "") {
+  const stateKey = `dynamic:${key}`;
+  const detailId = `dynamic-${key}-detail`;
+  const open = S.descOpen?.has(stateKey) === true;
+  const right = action
+    ? `<button class="settings-split-action dynamic-config-open vrow-val settings-wrap ${valueCls}" ` +
+      `type="button" data-act="${action}" aria-label="${esc(`${title}: ${value}`)}">` +
+      `<span>${esc(value)}</span>${editIcon}</button>`
+    : `<span class="settings-split-value vrow-val settings-wrap ${valueCls}">${esc(value)}</span>`;
+  return `<div class="vitem${open ? " open" : ""} dynamic-info-item">` +
+    `<div class="vrow settings-split-row dynamic-info-row">` +
+    `<button class="settings-split-info dynamic-info-toggle" type="button" data-desc="${stateKey}" ` +
+    `aria-expanded="${open ? "true" : "false"}" aria-controls="${detailId}">` +
+    `<span class="vrow-label">${esc(label)}</span>${settingsChevIcon}</button>${right}</div>` +
+    `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body settings-source-tongue" ` +
+    `id="${detailId}">${bodyHtml}</div></div></div></div>`;
 }
 
 // The weather tongue explains the two derived forecast numbers instead of compressing them into
@@ -269,7 +266,6 @@ function weatherSourceDetailHtml(w, outdoor, solar) {
 function dynamicControlCardHtml() {
   const r = S.status?.reference_temperature || {};
   const w = S.status?.weather_forecast || {};
-  const env = S.status?.env3 || {};
   const mqtt = S.status?.mqtt || {};
   let badgeCls = "dim";
   let source = t("dyn.not_configured"), sourceCls = "dim";
@@ -292,9 +288,13 @@ function dynamicControlCardHtml() {
       }
     } else { source += ` · ${t("ref.waiting")}`; sourceCls = "warn"; }
   }
-  let rows = vrow(t("dyn.mode"), t("dyn.observe"));
-  rows += dynamicSourceRow("ref-temp", t("ref.title"), t("dyn.room_sources"),
-                           source, sourceCls, Boolean(r.configured));
+  let rows = dynamicInfoRow("mode", t("dyn.mode"), t("dyn.observe"), "",
+    `<div class="vdesc-p">${esc(t("dyn.mode_help"))}</div>`);
+  const sourceValue = r.configured ? t("dyn.one_source") : t("dyn.not_configured");
+  const sourceBody = `<span class="settings-source-summary ${sourceCls}" id="dynamic-ref-temp-status">` +
+    `${esc(source)}</span><div class="vdesc-p">${esc(t("ref.hint"))}</div>`;
+  rows += dynamicInfoRow("room-sources", t("dyn.room_sources"), sourceValue, sourceCls,
+    sourceBody, "ref-temp", t("ref.title"));
   let weather = t("dyn.not_configured"), weatherCls = "dim";
   let outdoor = "", solar = "";
   if (w.configured && w.has_value) {
@@ -310,32 +310,17 @@ function dynamicControlCardHtml() {
     else { weather += ` · ${w.error ? t("wx.unavailable") : t("ref.stale")}`; weatherCls = w.error ? "err" : "warn"; }
   } else if (w.configured) { weather = w.error ? t("wx.unavailable") : t("wx.waiting"); weatherCls = w.error ? "err" : "warn"; }
   if (w.error) badgeCls = "err";
-  rows += dynamicSourceRow("weather", t("wx.title"), t("dyn.weather"),
-                           weather, weatherCls, Boolean(w.configured),
-                           w.configured ? weatherSourceDetailHtml(w, outdoor, solar) : "");
+  const weatherValue = w.configured ? "Open-Meteo" : t("dyn.not_configured");
+  const weatherBody = `<span class="settings-source-summary ${weatherCls}" id="dynamic-weather-status">` +
+    `${esc(weather)}</span>` + (w.configured ? weatherSourceDetailHtml(w, outdoor, solar) : "") +
+    `<div class="vdesc-p">${esc(t("wx.hint"))}</div>`;
+  rows += dynamicInfoRow("weather", t("dyn.weather"), weatherValue, weatherCls,
+    weatherBody, "weather", t("wx.title"));
 
-  // ENV III belongs to the M5Stack accessory ecosystem. The firmware derives `supported` from the
-  // user-selected board preset's vendor; omit the row entirely on Seeed/Custom boards rather than
-  // showing a control whose only possible Save result is rejection.
-  if (env.supported) {
-    let envText = t("dyn.not_configured"), envCls = "dim";
-    if (env.enabled) {
-      if (env.fresh) {
-        envText = `${Number(env.temperature_c).toLocaleString(LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 1 })} °C · ` +
-          `${Number(env.humidity_pct).toLocaleString(LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 0 })} % · ` +
-          `${Number(env.pressure_hpa).toLocaleString(LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 0 })} hPa`;
-        envCls = "ok";
-      } else if (env.error === "collecting") { envText = t("env.collecting"); envCls = "warn"; }
-      else { envText = t("env.unavailable"); envCls = "err"; }
-      if (envCls === "err") badgeCls = "err";
-      else if (envCls === "warn" && badgeCls !== "err") badgeCls = "warn";
-      else if (envCls === "ok" && badgeCls === "dim") badgeCls = "ok";
-    }
-    rows += dynamicSourceRow("env3", t("env.title"), t("dyn.outdoor"),
-                             envText, envCls, Boolean(env.enabled));
-  }
-  rows += vrow(t("dyn.strategy"), t("dyn.inactive"), { cls: "dim" });
-  rows += vrow(t("dyn.safety"), t("dyn.read_only"));
+  rows += dynamicInfoRow("strategy", t("dyn.strategy"), t("dyn.inactive"), "dim",
+    `<div class="vdesc-p">${esc(t("dyn.strategy_help"))}</div>`);
+  rows += dynamicInfoRow("safety", t("dyn.safety"), t("dyn.read_only"), "",
+    `<div class="vdesc-p">${esc(t("dyn.safety_help"))}</div>`);
   if (r.error) rows += vrow(t("ref.error"), r.error, { cls: "err settings-wrap" });
   if (w.error) rows += vrow(t("wx.error"), w.error, { cls: "err settings-wrap" });
   return vcard(t("dyn.card"), rows, t("dyn.capture"), badgeCls);
@@ -398,20 +383,61 @@ function memoryRows(sys) {
          row("max_alloc", "card.maxalloc", sys.max_alloc);
 }
 
-// The board's own onboard parts — status indicator + recovery button — as ONE summary row that
-// opens the editor. They are runtime settings (one firmware image serves boards with different
-// onboard hardware), but they are also set once per board and never touched again, so they get a
-// single collapsed row rather than the permanent real estate the X10A pins have.
+const boardLedPhases = ["off", "setup", "connecting", "healthy", "bus_down", "mqtt_down", "wipe_armed", "wiping"];
+const boardLedRgbSwatches = ["led-off", "led-blue", "led-yellow", "led-green", "led-red", "led-orange", "led-red", "led-white"];
+
+// Render the legend for the SAVED LED backend in the explanation tongue. The editor deliberately
+// contains controls only; its unsaved selection must not replace the meaning of the active hardware.
+// No configured LED means no legend, matching the explicit "None" selection in the editor.
+function boardLedLegend(b) {
+  if (b.led_gpio == null || b.led_gpio < 0) return "";
+  const kind = b.led_type === 1 ? "rgb" : "gpio";
+  const swatches = kind === "rgb" ? boardLedRgbSwatches : boardLedPhases.map((phase) => phase === "off" ? "led-off" : "led-plain");
+  const rows = boardLedPhases.map((phase, index) =>
+    `<li><span class="led-swatch ${swatches[index]}" aria-hidden="true"></span>` +
+    `<span>${esc(t(`board.led_${kind}_${phase}`))}</span></li>`).join("");
+  return `<div class="hardware-led-legend"><div class="led-legend-title">` +
+    `${esc(t(kind === "rgb" ? "board.ledlegend_rgb" : "board.ledlegend_gpio"))}</div>` +
+    `<ul class="led-pattern-list">${rows}</ul></div>`;
+}
+
+// The board's own onboard parts — status indicator + recovery button — as ONE summary row with TWO
+// explicit actions. "Hardware" on the left expands the explanation tongue; the selected board name
+// on the right opens the editor. Keeping those actions in separate buttons avoids one
+// tap both explaining and editing, while S.descOpen preserves the tongue across status-poll rebuilds.
 function boardRow() {
   const b = S.status?.board || {};
+  const env = S.status?.env3 || {};
   const board = b.preset_name || (b.user_set ? t("board.preset_custom") : t("board.not_selected"));
-  const led = b.led_gpio == null || b.led_gpio < 0
-    ? t("card.hw_off")
-    : t("card.hw_led", b.led_gpio, b.led_type === 1 ? "WS2812" : "LED");
-  const btn = b.btn_gpio == null || b.btn_gpio < 0 ? t("card.hw_off") : t("card.hw_btn", b.btn_gpio);
-  return `<button class="vrow vrow-btn" type="button" data-act="board" aria-label="${esc(t("board.title"))}">` +
-    `<span class="vrow-label">${esc(t("card.hardware"))}</span>` +
-    `<span class="vrow-val settings-wrap">${esc(board)} · ${esc(led)} · ${esc(btn)}</span></button>`;
+  const boardDetail = b.preset_id === "m5stack_atoms3_lite" ? t("card.hw_board_m5stack")
+    : b.preset_id === "seeed_xiao_esp32s3" ? t("card.hw_board_seeed")
+    : t("card.hw_board_other", board);
+  const active = b.led_inverted ? t("card.hw_active_low") : t("card.hw_active_high");
+  const ledDetail = b.led_gpio == null || b.led_gpio < 0 ? t("card.hw_led_disabled")
+    : t("card.hw_led_detail", b.led_type === 1 ? "WS2812" : "LED", b.led_gpio,
+        b.led_type === 1 ? "" : active);
+  const btnActive = b.btn_active_low === false ? t("card.hw_active_high") : t("card.hw_active_low");
+  const btnDetail = b.btn_gpio == null || b.btn_gpio < 0 ? t("card.hw_btn_disabled")
+    : t("card.hw_btn_detail", b.btn_gpio, btnActive);
+  const envDetail = !env.supported ? "" : env.enabled
+    ? t("card.hw_env_detail", env.sda ?? "—", env.scl ?? "—") : t("card.hw_env_disabled");
+  const detail = `<div class="vdesc-p">${esc(boardDetail)}</div>` +
+    `<div class="vdesc-p">${esc([ledDetail, btnDetail, envDetail].filter(Boolean).join(" "))}</div>` +
+    boardLedLegend(b) +
+    `<div class="hardware-help"><div class="vdesc-p">${esc(t("board.hint"))}</div>` +
+    (env.supported ? `<div class="vdesc-p">${esc(t("env.pins_hint"))}</div>` : "") + `</div>`;
+  const key = "board:hardware";
+  const open = S.descOpen?.has(key) === true;
+  return `<div class="vitem${open ? " open" : ""} hardware-item">` +
+    `<div class="vrow hardware-row settings-split-row">` +
+    `<button class="hardware-info-toggle settings-split-info" type="button" data-desc="${key}" ` +
+    `aria-expanded="${open ? "true" : "false"}" aria-controls="board-hardware-detail">` +
+    `<span class="vrow-label">${esc(t("card.hardware"))}</span>${settingsChevIcon}</button>` +
+    `<button class="hardware-config-open settings-split-action vrow-val settings-wrap" type="button" data-act="board" ` +
+    `aria-label="${esc(`${t("board.title")}: ${board}`)}">` +
+    `<span>${esc(board)}</span>${editIcon}</button></div>` +
+    `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body board-hardware-tongue" ` +
+    `id="board-hardware-detail">${detail}</div></div></div></div>`;
 }
 
 // Every family name in def/model_names.hpp starts with "Altherma ", and the Model card's own heading

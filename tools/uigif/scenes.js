@@ -228,7 +228,18 @@ const DEMO = (() => {
     app_elf_sha256: "9f2c1ab4de77c0315b8e6a41d2f905c7",
     pins_avail: [1, 2, 4, 5, 6, 7, 8, 9, 38, 43, 44],
     board: { led_gpio: 35, led_type: 1, led_inverted: false, btn_gpio: 41, btn_active_low: true,
-             pins_local: [1, 2, 4, 5, 6, 7, 8, 9, 38, 39, 40, 41, 42, 43, 44], presets: [] },
+             user_set: true, preset_id: "m5stack_atoms3_lite", preset_name: "M5Stack AtomS3 Lite",
+             vendor: "m5stack", pins_local: [1, 2, 4, 5, 6, 7, 8, 9, 38, 39, 40, 41, 42, 43, 44],
+             presets: [
+               { id: "m5stack_atoms3_lite", name: "M5Stack AtomS3 Lite", vendor: "m5stack",
+                 led_gpio: 35, led_type: 1, led_inverted: false, btn_gpio: 41, btn_active_low: true },
+               { id: "seeed_xiao_esp32s3", name: "Seeed XIAO ESP32-S3", vendor: "seeed",
+                 led_gpio: 21, led_type: 0, led_inverted: true, btn_gpio: -1, btn_active_low: true },
+             ] },
+    env3: { supported: true, enabled: true, connected: true, fresh: true, error: "",
+            sda: 2, scl: 1, temperature_c: 20.25, humidity_pct: 45.5, pressure_hpa: 1008.75,
+            pins_avail: [1, 2, 4, 5, 6, 7, 8, 9, 38, 43, 44],
+            presets: [{ name: "M5Stack AtomS3 Lite · Grove", sda: 2, scl: 1 }] },
     wifi: { ssid: "Example1", ip: "203.0.113.170", rssi: -58, connected: true,
             bssid: "02:00:00:00:00:02", mac: "02:00:00:00:00:01", std: "Wi-Fi 5", rolled_back: false },
     mqtt: { configured: true, connected: true, tls: false, has_creds: true,
@@ -254,11 +265,14 @@ const DEMO = (() => {
            electricalInput: MB_POWER, history: hist };
 })();
 
-// The README is English, so the demo page is too — the app picks its language from
-// navigator.language at load (DESIGN.md §2), which on this machine is German.
+// The README recording is English by default, while `?lang=de` gives UI reviews a deterministic
+// German render. The real app still chooses through navigator.language (DESIGN.md §2).
 try {
-  Object.defineProperty(navigator, "language", { value: "en-GB", configurable: true });
-  Object.defineProperty(navigator, "languages", { value: ["en-GB", "en"], configurable: true });
+  const demoLang = /(?:^|[?&])lang=de(?:&|$)/.test(location.search) ? "de-DE" : "en-GB";
+  Object.defineProperty(navigator, "language", { value: demoLang, configurable: true });
+  Object.defineProperty(navigator, "languages", {
+    value: demoLang === "de-DE" ? ["de-DE", "de"] : ["en-GB", "en"], configurable: true,
+  });
 } catch { /* leave the browser's own language */ }
 
 // ── Stub the device: no fetch, no board ──────────────────────────────────────────────────────

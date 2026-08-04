@@ -116,8 +116,9 @@ and its meaning may appear; unavailable and unknown values have explicit, non-in
 
 `node test/test_ui_board_preset.mjs` executes the production Board Hardware modal functions. It
 pins the first-boot case where the build defaults equal the Seeed XIAO values but the board selector
-must still open on **Custom**, then verifies that choosing and editing presets within the open modal
-continues to keep the selector in sync with the five hardware fields.
+must still open on **Custom**, then verifies that an explicitly chosen AtomS3 Lite remains selected
+when LED/reset are disabled. It also covers the integrated ENV III section: hidden and disabled for
+Custom/Seeed, visible for M5Stack, with safe distinct SDA/SCL defaults and explicit disable payload.
 
 `node test/test_ui_checkup.mjs` executes the production X10A observation-card renderer without a
 browser. It pins the concise evidence-bounded English/German status words, evidence progress and

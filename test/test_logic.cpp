@@ -2543,10 +2543,13 @@ static void test_board_presets() {
     CHECK(board_selected_vendor(identified) == BoardVendor::M5Stack);
     identified.led_inverted = !identified.led_inverted; // irrelevant for WS2812 identity
     CHECK(board_selected_vendor(identified) == BoardVendor::M5Stack);
-    identified.led_gpio = 34;                           // Custom board, no longer a preset match
-    CHECK(board_selected_vendor(identified) == BoardVendor::Unknown);
+    // Identity is independent of configurable peripherals. Disabling or moving the indicator and
+    // reset input must not silently turn a physical Atom into Custom or remove M5Stack accessories.
+    identified.led_gpio = -1;
+    identified.btn_gpio = -1;
+    CHECK(board_selected_vendor(identified) == BoardVendor::M5Stack);
     std::string identity_why;
-    CHECK(!board_identity_valid(identified, identity_why));
+    CHECK(board_identity_valid(identified, identity_why));
     identified.board_preset_id = BoardPresetId::Custom;
     CHECK(board_identity_valid(identified, identity_why));
     Config legacy_identity = identified;
@@ -5107,8 +5110,12 @@ static void test_env3() {
 
     Config proposed = c;
     proposed.env3_enabled = true; proposed.env3_sda = 5; proposed.env3_scl = 6;
+    CHECK(board_env_save_needed(proposed, c));
+    CHECK(board_env_reboot_needed(proposed, c));
     CHECK(env3_save_check(c, proposed) == Env3SaveCheck::HardwareProbe);
     Config running = proposed;
+    CHECK(!board_env_save_needed(running, proposed));
+    CHECK(!board_env_reboot_needed(running, proposed));
     CHECK(env3_save_check(running, proposed) == Env3SaveCheck::RunningSample);
     proposed.env3_scl = 7;
     CHECK(env3_save_check(running, proposed) == Env3SaveCheck::DisableFirst);
@@ -5142,6 +5149,7 @@ static void test_env3() {
     CHECK(!env3_config_valid(c, why, 48, false));
     c.env3_sda = 5;
     c.led_gpio = 21; c.led_type = 0; c.led_inverted = true; c.btn_gpio = -1;
+    c.board_preset_id = BoardPresetId::SeeedXiaoEsp32S3;
     CHECK(!env3_config_valid(c, why, 48, false));             // selected Seeed board is unsupported
     CHECK(why.find("M5Stack") != std::string::npos);
 

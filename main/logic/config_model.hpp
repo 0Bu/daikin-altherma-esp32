@@ -141,7 +141,8 @@ struct Config {
     // what nobody has said anything about. `board_preset_id` is the concrete statement — never
     // inferred from LED/button values at runtime — while this flag distinguishes untouched defaults
     // from an explicitly saved Custom board. Both ride atomically with the five hardware fields in
-    // blob v12, so identity and pins cannot disagree after a power cut.
+    // blob v12, while remaining semantically independent: a user may disable Atom's onboard LED or
+    // reset button without changing which physical board this is.
     bool        board_user_set = false;
     BoardPresetId board_preset_id = BoardPresetId::Custom;
 

@@ -30,9 +30,10 @@ const html = fs.readFileSync(new URL("../main/www/index.html", import.meta.url),
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 const httpConfig = fs.readFileSync(new URL("../main/http_config.cpp", import.meta.url), "utf8");
 const httpStatus = fs.readFileSync(new URL("../main/http_status.cpp", import.meta.url), "utf8");
+const boardPresets = fs.readFileSync(new URL("../main/logic/board_presets.hpp", import.meta.url), "utf8");
 const mqttHa = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "utf8");
 const dialogs = [...html.matchAll(/<[^>]+class="modal-card"[^>]+role="dialog"[^>]*>/g)].map((m) => m[0]);
-assert.equal(dialogs.length, 10, "every custom popup must remain identifiable as a dialog");
+assert.equal(dialogs.length, 9, "every custom popup must remain identifiable as a dialog");
 for (const dialog of dialogs)
   assert.match(dialog, /tabindex="-1"/, "popup focus must land on the dialog container, not an input");
 assert.match(app, /function openPopup\(id\)[\s\S]*modal\.hidden = false;[\s\S]*querySelector\?\.\('\[role="dialog"\]'\)[\s\S]*focus\?\.\(\{ preventScroll: true \}\)/,
@@ -41,7 +42,7 @@ assert.match(app, /function syncModalScrollLock\(\)[\s\S]*MODALS\.some[\s\S]*doc
   "modal lifecycle must lock both possible document scrollers");
 assert.match(app, /function closePopup\(id\)[\s\S]*hidden = true;[\s\S]*syncModalScrollLock\(\)/,
   "all popup close paths must also release the shared scroll lock");
-for (const opener of ["openWifi", "openMqtt", "openRefTemp", "openWeather", "openSyslog", "openNtp", "openHomehub", "openBoard", "openEnv3", "openBug"])
+for (const opener of ["openWifi", "openMqtt", "openRefTemp", "openWeather", "openSyslog", "openNtp", "openHomehub", "openBoard", "openBug"])
   assert.match(app, new RegExp(`function ${opener}\\(\\)[\\s\\S]*?openPopup\\(\\"[^\\"]+\\"\\);`),
     `${opener} must use the no-field-autofocus popup path`);
 assert.match(html, /id="gPth"[\s\S]*id="svPth"[\s\S]*id="svCop"/,
@@ -65,18 +66,23 @@ assert.doesNotMatch(app, /mb_mode|config_modbus_should_search/,
   "the browser bundle must carry no hidden Auto-mode contract");
 
 // Dynamic LWT owns one permanent Settings card. Room input and direct Open-Meteo forecast are
-// editable; ENV III appears only for a selected M5Stack board. Strategy and output keep explicit
+// editable there; board-bound ENV III lives under Board Hardware. Strategy and output keep explicit
 // non-active/read-only homes.
-assert.match(app, /function dynamicControlCardHtml\(\)[\s\S]*t\("dyn\.mode"\)[\s\S]*t\("dyn\.room_sources"\)[\s\S]*t\("dyn\.weather"\)[\s\S]*t\("dyn\.outdoor"\)[\s\S]*t\("dyn\.strategy"\)[\s\S]*t\("dyn\.safety"\)/,
+assert.match(app, /function dynamicControlCardHtml\(\)[\s\S]*t\("dyn\.mode"\)[\s\S]*t\("dyn\.room_sources"\)[\s\S]*t\("dyn\.weather"\)[\s\S]*t\("dyn\.strategy"\)[\s\S]*t\("dyn\.safety"\)/,
   "the dynamic-LWT Settings card must keep all planned configuration domains together");
+assert.doesNotMatch(app, /dynamicSourceRow\("env3"/,
+  "the board-bound outdoor sensor must not remain as a separate dynamic-control setting");
 assert.match(app, /t\("dyn\.observe"\)[\s\S]*t\("dyn\.read_only"\)/,
   "the first slice must identify itself as observation-only and read-only");
-assert.match(html, /id="weatherModal"[\s\S]*id="wxLatitude"[\s\S]*id="wxLongitude"[\s\S]*data-i18n="wx\.hint"[\s\S]*open-meteo\.com/,
-  "the direct Open-Meteo source must expose coordinate entry, privacy, and attribution");
+const weatherModalHtml = html.match(/<div class="modal" id="weatherModal"[\s\S]*?<\/form>\s*<\/div>/)?.[0] || "";
+assert.match(weatherModalHtml, /id="wxLatitude"[\s\S]*id="wxLongitude"[\s\S]*href="https:\/\/open-meteo\.com\/"[\s\S]*data-i18n="wx\.attribution"/,
+  "the direct Open-Meteo source must expose coordinate entry and attribution");
+assert.doesNotMatch(weatherModalHtml, /data-i18n="wx\.hint"/,
+  "the weather explanation belongs in the Settings tongue, not the editor");
 assert.doesNotMatch(html, /id="wxLocate"/,
   "the HTTP device UI must not offer a browser-geolocation action that requires HTTPS or localhost");
-assert.match(app, /dynamicSourceRow\("weather"[\s\S]*function openWeather\(\)[\s\S]*saveReboot\("\/set_weather", \{ latitude, longitude \}/,
-  "the forecast row must edit latitude and longitude through the firmware config route");
+assert.match(app, /dynamicInfoRow\("weather"[\s\S]*"weather", t\("wx\.title"\)\)[\s\S]*function openWeather\(\)[\s\S]*saveReboot\("\/set_weather", \{ latitude, longitude \}/,
+  "the forecast value must open latitude and longitude editing through the firmware config route");
 assert.match(app, /function parseWeatherCoordinatePair\([\s\S]*function pasteWeatherCoordinates\([\s\S]*addEventListener\("paste", pasteWeatherCoordinates\)/,
   "a Google Maps coordinate pair pasted into either field must be split before save");
 assert.doesNotMatch(app, /navigator\.geolocation/,
@@ -85,34 +91,44 @@ assert.doesNotMatch(app, /weather[^\n]{0,120}broker_off|input\/weather/,
   "the Open-Meteo forecast must not depend on the MQTT broker or an adapter topic");
 assert.match(httpConfig, /static esp_err_t set_weather[\s\S]*weather_location_parse[\s\S]*weather_forecast_reconfigure/,
   "the coordinate save must validate both values and wake the firmware fetch task");
-assert.match(app, /dynamicSourceRow\("env3"[\s\S]*function statusCardsHtml\(\)[\s\S]*t\("env\.temperature"\)[\s\S]*t\("env\.humidity"\)[\s\S]*t\("env\.pressure"\)/,
-  "ENV III must be configurable from the dynamic-control card and render an independent outdoor-climate card");
-assert.match(app, /if \(env\.supported\)[\s\S]*dynamicSourceRow\("env3"/,
-  "the ENV III Settings row must exist only on a supported M5Stack board");
+assert.match(app, /function statusCardsHtml\(\)[\s\S]*t\("env\.temperature"\)[\s\S]*t\("env\.humidity"\)[\s\S]*t\("env\.pressure"\)/,
+  "ENV III must retain its independent outdoor-climate measurement card");
 assert.match(app, /if \(env\.supported && env\.enabled\)/,
   "the ENV III dashboard card must be hidden on unsupported boards even with stale status data");
-assert.match(app, /function openEnv3\(\) \{[\s\S]*if \(!S\.status\?\.env3\?\.supported\) return;/,
-  "the ENV III modal must fail closed when called outside a supported M5Stack board");
-const envModalHtml = html.slice(html.indexOf('id="env3Modal"'), html.indexOf('<!-- Bug report'));
-assert.match(envModalHtml, /id="envSensor"[\s\S]*value="" selected[\s\S]*value="env_iii"[\s\S]*id="envPinFields" hidden[\s\S]*id="envSda"[\s\S]*id="envScl"/,
-  "the outdoor-sensor modal must default to no sensor and keep its SDA/SCL group hidden until selected");
-assert.doesNotMatch(envModalHtml, /type="checkbox"|envEnabled|envPreset|env\.hint|temperature measurement range|Temperatur-Messbereich/,
-  "the outdoor-sensor modal must contain no enable checkbox, wiring preset, or technical prose");
-assert.match(app, /SDA is the I²C data line \(yellow Grove wire\); SCL is the clock line \(white Grove wire\)/,
-  "the English modal must retain the original SDA/SCL wiring explanation");
-assert.match(app, /SDA ist die I²C-Datenleitung \(gelbe Grove-Leitung\), SCL die Taktleitung \(weiße Grove-Leitung\)/,
-  "the German modal must retain the original SDA/SCL wiring explanation");
+assert.doesNotMatch(html, /id="env3Modal"|id="env3Form"/,
+  "ENV III must not remain in a separate popup");
+const boardModalHtml = html.slice(html.indexOf('id="boardModal"'), html.indexOf('<!-- Bug report'));
+assert.match(boardModalHtml, /id="bdEnvSection" hidden[\s\S]*data-i18n="env\.title"[\s\S]*id="envSensor"[\s\S]*value="" selected[\s\S]*value="env_iii"[\s\S]*id="envPinFields" hidden[\s\S]*id="envSda"[\s\S]*id="envScl"/,
+  "Board Hardware must contain the M5Stack outdoor-sensor section and default it to no sensor");
+assert.match(boardModalHtml, /class="pin-grid board-pin-grid"[\s\S]*id="bdLedPin"[\s\S]*id="bdBtnPin"[\s\S]*class="pin-grid" id="envPinFields" hidden/,
+  "Board Hardware must lay out board and ENV pins in compact rows");
+assert.doesNotMatch(boardModalHtml, /bdLedLegend|board\.led_(?:rgb|gpio)_|data-i18n="board\.hint"|data-i18n="env\.pins_hint"/,
+  "the Board editor must contain controls only; LED, reset and I2C explanations belong to the Hardware tongue");
+assert.doesNotMatch(boardModalHtml, /envEnabled|envPreset|env\.hint|temperature measurement range|Temperatur-Messbereich/,
+  "the integrated sensor section must contain no enable checkbox, wiring preset, or technical prose");
+assert.match(app, /"env\.pins_hint": "SDA = data \(yellow Grove wire\); SCL = clock \(white Grove wire\)\."/,
+  "the English Hardware tongue must explain SDA/SCL concisely");
+assert.match(app, /"env\.pins_hint": "SDA = Datenleitung \(gelbe Grove-Leitung\), SCL = Taktleitung \(weiße Grove-Leitung\)\."/,
+  "the German Hardware tongue must explain SDA/SCL concisely");
+assert.match(app, /"board\.led_rgb_setup": "Blue, blinking slowly[\s\S]*"board\.led_gpio_wiping": "Solid after very rapid blinking[\s\S]*"board\.led_rgb_setup": "Blau, langsam blinkend[\s\S]*"board\.led_gpio_wiping": "Dauerlicht nach sehr schnellem Blinken/,
+  "both concise status-LED legends must stay bilingual");
+assert.match(style, /\.pin-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)[^}]*\}[\s\S]*\.pin-grid\[hidden\]\s*\{[^}]*display:\s*none/,
+  "board and ENV pin fields must stay in two-column rows without overriding their hidden state");
+assert.match(app, /function boardLedLegend\(b\)[\s\S]*if \(b\.led_gpio == null \|\| b\.led_gpio < 0\) return "";[\s\S]*board\.led_\$\{kind\}_\$\{phase\}[\s\S]*function boardRow\(\)[\s\S]*boardLedLegend\(b\)[\s\S]*t\("board\.hint"\)[\s\S]*t\("env\.pins_hint"\)/,
+  "the Hardware tongue must render the saved LED backend plus reset and I2C explanations");
+assert.match(app, /function syncBoardFields\(\)[\s\S]*\$\("bdLedPin"\)\.disabled = type < 0;[\s\S]*\$\("bdLedInv"\)\.disabled = type !== 0;[\s\S]*\$\("bdBtnInv"\)\.disabled = !buttonEnabled/,
+  "every hidden Board Hardware control must follow the selected type");
 assert.match(app, /function syncEnv3Fields\(\)[\s\S]*\$\("envPinFields"\)\.hidden = !enabled;[\s\S]*disabled = !enabled/,
   "selecting no sensor must hide and disable both GPIO fields");
-assert.match(app, /function env3FormPayload\(\)[\s\S]*if \(!enabled\) return \{ enabled: false \};[\s\S]*saveReboot\("\/set_env3", body/,
-  "disabling ENV III must submit an explicit false without stale pin fields");
-assert.match(app, /function closeEnv3\(\) \{ closePopup\("env3Modal"\); \}/,
-  "ENV III Cancel and the successful Save callback must use the defined shared close path");
-assert.match(httpConfig, /env3_config_valid\(c[\s\S]*http_register_on\(s, surface, "\/set_env3"/,
-  "the device must validate ENV III pin collisions before registering the config route");
+assert.match(app, /function boardSupportsEnv3\(\) \{ return selectedBoardPreset\(\)\?\.vendor === "m5stack"; \}[\s\S]*\$\("bdEnvSection"\)\.hidden = !supported;[\s\S]*\$\("envSensor"\)\.disabled = !supported/,
+  "only a pending M5Stack identity may reveal and enable the integrated sensor section");
+assert.match(app, /function env3FormPayload\(\)[\s\S]*if \(!enabled\) return \{ enabled: false \};[\s\S]*saveReboot\("\/set_board", \{[\s\S]*env3_enabled: env\.enabled[\s\S]*env3_sda:[\s\S]*env3_scl:/,
+  "Board Save must submit board and sensor configuration through one atomic route");
+assert.match(httpConfig, /env3_config_valid\(proposed[\s\S]*http_register_on\(s, surface, "\/set_env3"/,
+  "the compatibility endpoint must retain authoritative ENV III collision validation");
 assert.match(httpConfig,
-  /static esp_err_t set_env3[\s\S]*env3_save_check\(cur, c\)[\s\S]*env3_probe\(c\.env3_sda, c\.env3_scl\)[\s\S]*config_save\(c\)/,
-  "an enabled ENV III must prove both devices reachable before firmware persists its wiring");
+  /static esp_err_t env3_save_preflight[\s\S]*env3_save_check\(current, proposed\)[\s\S]*env3_probe\(proposed\.env3_sda, proposed\.env3_scl\)[\s\S]*static esp_err_t set_board[\s\S]*env3_save_preflight\(req, cur, c, env_allowed\)[\s\S]*config_save\(c\)/,
+  "integrated Save must prove ENV III reachable before atomically persisting board and sensor");
 assert.match(app, /env3_sht30_not_found:\s*"env\.err_sht30"[\s\S]*mapError:\s*env3SaveError/,
   "ENV III probe failures must stay in the dialog as localized errors");
 assert.ok(httpStatus.includes("board_vendor_name(board_selected_vendor(c))"),
@@ -124,7 +140,9 @@ assert.ok(httpStatus.includes('j += ",\\"preset_id\\":";') &&
 assert.match(app, /preset_id: \$\("bdPreset"\)\.value \|\| "custom"/,
   "the Board dialog must submit the selected preset id instead of only its derived pin values");
 assert.match(httpConfig, /board_preset_by_key\(preset_key\)[\s\S]*board_identity_valid\(c, reason\)/,
-  "the device must reject unknown or hardware-mismatched board preset ids");
+  "the device must reject unknown board preset ids");
+assert.match(boardPresets, /inline const BoardPreset\* board_selected_preset[\s\S]*return board_preset_by_id\(c\.board_preset_id\);/,
+  "selected board identity must not be re-derived from configurable LED/reset values");
 assert.match(httpStatus, /const bool env_supported = env3_board_supported\(c\);[\s\S]*j \+= env_supported \? "true" : "false";/,
   "status must expose the selected board vendor and the derived ENV III support decision");
 assert.match(httpConfig, /if \(c\.env3_enabled && !env3_board_supported\(c\)\) c\.env3_enabled = false;/,

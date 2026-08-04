@@ -526,9 +526,34 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vrow .pin-sel, .vrow .chan-sel, .vrow .lang-sel { width: auto; padding: 6px 8px; border-radius: 9px; appearance: auto; font-size: 14px; }
 .vrow .pin-sel { min-width: 76px; }
 .vrow .chan-sel, .vrow .lang-sel { min-width: 124px; max-width: 60%; }
-/* tappable value row (ESP32 card: Firmware → check for an OTA update, Hardware → the board modal) */
+/* tappable value row (ESP32 card: Firmware → check for an OTA update) */
 .vrow-btn { width: 100%; font: inherit; background: none; border: 0; border-top: 1px solid var(--line); cursor: pointer; text-align: left; }
 .vrow-btn:hover .vrow-label, .vrow-btn:hover .vrow-val { color: var(--brand-strong); }
+/* Split Settings rows deliberately have two adjacent areas: the label expands an explainer, while
+   the compact value opens configuration when one exists. The row keeps the exact same padding and
+   line height as every other .vrow; pseudo-elements extend both button targets through that padding
+   without making the visible row taller. Hardware and Dynamic control share this geometry. */
+.settings-split-row { min-height: calc(1.5em + 18px); }
+.settings-split-info, .settings-split-action {
+  position: relative; min-height: 0; padding: 0; border: 0; background: none; cursor: pointer;
+  font-family: inherit; line-height: inherit; color: inherit;
+}
+.settings-split-info::before, .settings-split-action::before {
+  content: ""; position: absolute; inset: -9px 0;
+}
+.settings-split-info {
+  flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 7px; text-align: left;
+}
+.settings-split-action {
+  flex: 0 1 auto; min-width: 0; max-width: 72%; display: inline-flex; align-items: center;
+  justify-content: flex-end; gap: 6px; text-align: right;
+}
+.settings-split-value { flex: 0 1 auto; min-width: 0; max-width: 72%; text-align: right; }
+.settings-split-action > span { min-width: 0; overflow-wrap: anywhere; }
+.settings-split-action .vcard-edit-icon { flex: none; }
+.settings-split-info:hover .vrow-label,
+.settings-split-info:hover .vrow-chev,
+.settings-split-action:hover { color: var(--brand-strong); }
 /* The Firmware row carries the OTA readout (#otaStatSet) beside its version, so the check reports
    where it was started instead of sending the user to the dashboard for it. Two adjustments to the
    ordinary value cell, both about a message being longer than a value: it may WRAP to a second line
@@ -588,12 +613,15 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    An inset box-shadow rather than a border-bottom: a border would add a pixel to the row's height
    on open and shift every row below by one. */
 .vitem.open .vrow-desc { box-shadow: inset 0 -1px 0 var(--line); }
-/* Configured dynamic-control sources reuse the same open tongue, but their row opens an editor
-   rather than toggling the panel. Keep the divider and edit affordance on that permanent header;
-   the current reading/status belongs to the panel underneath. */
-.settings-source-item.open > .dynamic-source-row { box-shadow: inset 0 -1px 0 var(--line); }
-.settings-source-edit { display: inline-flex; align-items: center; color: var(--muted); }
+.hardware-item.open > .hardware-row { box-shadow: inset 0 -1px 0 var(--line); }
+.dynamic-info-item.open > .dynamic-info-row { box-shadow: inset 0 -1px 0 var(--line); }
 .settings-source-tongue { overflow-wrap: anywhere; }
+.board-hardware-tongue { overflow-wrap: anywhere; }
+.hardware-led-legend, .hardware-help {
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line);
+}
+.hardware-led-legend .led-legend-title { font-size: inherit; }
+.hardware-led-legend .led-pattern-list li { margin-top: 6px; }
 .settings-source-summary {
   display: block; min-width: 0; font-size: 15px; font-weight: 600;
   font-variant-numeric: tabular-nums; line-height: 1.4;
@@ -888,6 +916,44 @@ html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; 
 }
 /* Programmatic landing point only: the first Tab moves to a real control with its normal ring. */
 .modal-card[tabindex="-1"]:focus { outline: none; }
+.modal-section {
+  min-width: 0; margin: 22px 0 0; padding: 20px 0 0;
+  border: 0; border-top: 1px solid var(--line);
+}
+.modal-section > legend { float: left; width: 100%; margin: 0 0 14px; padding: 0; }
+.modal-section > legend + * { clear: both; }
+#boardForm { padding: 18px; }
+#boardForm .field { margin-bottom: 10px; }
+#boardForm .input { padding: 9px 11px; }
+#boardForm .hint { margin-top: 6px; font-size: 12.5px; line-height: 1.4; }
+#boardForm .field-note { margin: -4px 2px 10px; }
+.led-legend-title { color: var(--fg); font-size: 12.5px; font-weight: 700; }
+.led-pattern-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.led-pattern-list li { display: grid; grid-template-columns: 9px minmax(0, 1fr); gap: 7px; margin-top: 4px; }
+.led-swatch {
+  width: 8px; height: 8px; margin-top: 4px; border-radius: 50%;
+  background: currentColor; border: 1px solid rgba(0,0,0,.18); box-shadow: 0 0 0 1px rgba(255,255,255,.25);
+}
+.led-off { color: var(--muted); background: transparent; }
+.led-blue { color: #1687ff; }
+.led-yellow { color: #e0ad00; }
+.led-green { color: #0da56a; }
+.led-red { color: #df3030; }
+.led-orange { color: #ef751c; }
+.led-white { color: #fff; }
+.led-plain { color: var(--fg); }
+#boardForm .modal-section { margin-top: 16px; padding-top: 14px; }
+#boardForm .modal-section > legend { margin-bottom: 10px; }
+#boardForm .modal-actions { margin-top: 14px; }
+.pin-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px;
+}
+.pin-grid[hidden] { display: none; }
+.pin-grid .field { min-width: 0; }
+#boardForm .pin-grid .field { margin-bottom: 0; }
+.pin-grid .hint { grid-column: 1 / -1; }
+.board-pin-grid { margin-bottom: 10px; }
+.board-pin-grid #bdLedPinRow[hidden] ~ .field { grid-column: 1 / -1; }
 .modal-actions { display: flex; gap: 10px; margin-top: 18px; }
 /* nowrap: a label broken mid-phrase inside a button reads as a layout fault rather than a choice.
    When three of them stop fitting, the row becomes a column (below) — that is the honest answer,
@@ -909,11 +975,6 @@ html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; 
      Stack it below the time span instead of squeezing both into narrow multi-line columns. */
   .vhist-head { display: grid; justify-content: stretch; gap: 2px; }
   .vhist-range { text-align: left; }
-  /* Only the compact, unconfigured source row may need a second line. Configured source details
-     have their own full-width tongue, so their header remains the short label + edit action. */
-  .dynamic-source-inline { flex-wrap: wrap; gap: 4px; }
-  .dynamic-source-inline .vrow-label,
-  .dynamic-source-inline .vrow-val { flex: 1 1 100%; text-align: left; }
   .modal-actions { flex-direction: column-reverse; }
   .modal-actions .btn { flex: none; width: 100%; }
 }
@@ -961,6 +1022,8 @@ html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; 
   .conn-detail { font-size: 15px; }
   .conn-row { padding: 14px 0; }
   .vrow, .vname { padding-top: 11px; padding-bottom: 11px; }
+  .settings-split-row { min-height: calc(1.5em + 22px); }
+  .settings-split-info::before, .settings-split-action::before { inset-block: -11px; }
   .inspect-src { font-size: 13.5px; }
   .inspect-title { font-size: 13.5px; }
   .inspect-now { font-size: 21px; }

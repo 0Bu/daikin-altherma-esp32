@@ -12,9 +12,10 @@ cp "$proj/test/test_ui_use_cases.mjs" "$tmp/test/"
 cp "$proj/test/test_ui_modal_scroll.mjs" "$tmp/test/"
 cp -R "$proj/tools/ui" "$tmp/tools/ui"
 
-# Re-seed the historical ENV III failure: both Cancel and accepted Save route through an undefined
-# helper. The behavioral matrix must fail on the first real action, not merely parse the bundle.
-sed 's/function closeEnv3() { closePopup("env3Modal"); }/function closeEnv3() { missingClosePopup("env3Modal"); }/' \
+# Re-seed the historical ENV III failure on its new owning Board Hardware dialog: Cancel and an
+# accepted atomic Save route through an undefined close helper. The behavioral matrix must fail on
+# the first real action, not merely parse the bundle.
+sed 's/function closeBoard() { closePopup("boardModal"); }/function closeBoard() { missingClosePopup("boardModal"); }/' \
   "$tmp/main/www/js/settings.js" > "$tmp/main/www/js/settings.js.mutated"
 mv "$tmp/main/www/js/settings.js.mutated" "$tmp/main/www/js/settings.js"
 
@@ -23,7 +24,7 @@ if (cd "$tmp" && node test/test_ui_use_cases.mjs >/dev/null 2>&1); then
   exit 1
 fi
 
-echo "ui selftest: historical ENV III action failure is detected"
+echo "ui selftest: historical ENV III modal-action failure is detected"
 
 # Re-seed the iPhone failure: legacy 100vh includes Safari's browser chrome and lets a long dialog
 # extend below the actually visible viewport. The focused layout contract must reject that rollback.

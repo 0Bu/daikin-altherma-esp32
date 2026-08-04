@@ -98,7 +98,6 @@ const POPUP_ROUTES = Object.freeze({
   ntpModal: "ntp",
   homehubModal: "homehub",
   boardModal: "board-hardware",
-  env3Modal: "env-iii",
   bugModal: "bug-report",
 });
 const ROUTE_POPUPS = Object.freeze(Object.fromEntries(
@@ -238,7 +237,6 @@ function openPopupForRoute(id) {
   else if (id === "ntpModal") openNtp();
   else if (id === "homehubModal") openHomehub();
   else if (id === "boardModal") openBoard();
-  else if (id === "env3Modal") openEnv3();
   else if (id === "bugModal") openBug();
 }
 
@@ -251,7 +249,6 @@ function closePopupForRoute(id) {
   else if (id === "ntpModal") closeNtp();
   else if (id === "homehubModal") closeHomehub();
   else if (id === "boardModal") closeBoard();
-  else if (id === "env3Modal") closeEnv3();
   else if (id === "bugModal") closeBug();
 }
 

@@ -144,6 +144,20 @@ inline bool env3_board_supported(const Config& c) {
 // partially shared pair would let two masters drive the same wire.
 enum class Env3SaveCheck : uint8_t { None, RunningSample, HardwareProbe, DisableFirst };
 
+inline bool env3_config_same(const Config& a, const Config& b) {
+    return a.env3_enabled == b.env3_enabled && a.env3_sda == b.env3_sda && a.env3_scl == b.env3_scl;
+}
+
+// The integrated Board Hardware form persists board identity/peripherals and ENV III in one atomic
+// blob. Board identity alone needs a save but no reboot; every ENV III change needs a reboot because
+// its I2C controller is owned for the lifetime of the sensor task.
+inline bool board_env_save_needed(const Config& proposed, const Config& current) {
+    return board_save_needed(proposed, current) || !env3_config_same(proposed, current);
+}
+inline bool board_env_reboot_needed(const Config& proposed, const Config& current) {
+    return board_reboot_needed(proposed, current) || !env3_config_same(proposed, current);
+}
+
 inline Env3SaveCheck env3_save_check(const Config& current, const Config& proposed) {
     if (!proposed.env3_enabled) return Env3SaveCheck::None;
     if (!current.env3_enabled) return Env3SaveCheck::HardwareProbe;

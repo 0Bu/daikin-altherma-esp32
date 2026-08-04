@@ -770,7 +770,6 @@
         <span class="field-help" id="rtMaxAgeHelp" data-i18n="ref.max_age_help">Maximum permitted age of the source reading, from 10 to 3600 seconds.</span>
       </label>
       <p class="hint err" id="rtError" hidden></p>
-      <p class="hint" data-i18n="ref.hint">Save tests the mapping with a current MQTT message before storing it. Delete removes the source and its captured reading.</p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="rtCancel" data-i18n="btn.cancel">Cancel</button>
         <button class="btn danger" type="button" id="rtDeleteBtn" data-i18n="ref.delete">Delete</button>
@@ -793,7 +792,6 @@
         <input class="input mono" name="longitude" id="wxLongitude" inputmode="decimal" maxlength="48" placeholder="13.405000" autocomplete="off">
       </label>
       <p class="hint err" id="wxError" aria-live="polite" hidden></p>
-      <p class="hint" data-i18n="wx.hint">Paste latitude and longitude copied from Google Maps into either field; the pair is split automatically. The ESP32 requests temperature and solar radiation for this location from Open-Meteo every 45 minutes. Leave both fields empty to disable weather requests. Coordinates and the device's public IP are sent to Open-Meteo only after Save. No forecast changes heat-pump controls in Observe mode.</p>
       <p class="hint"><a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer" data-i18n="wx.attribution">Weather data by Open-Meteo.com · DWD ICON model</a></p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="wxCancel" data-i18n="btn.cancel">Cancel</button>
@@ -879,9 +877,9 @@
     <form class="modal-card" id="boardForm" role="dialog" aria-modal="true" aria-labelledby="boardModalTitle" tabindex="-1">
       <div class="section-label card-title" id="boardModalTitle" data-i18n="board.title">Board hardware</div>
       <!-- Ready-made settings for the boards this project documents (logic/board_presets.hpp, served
-           in /status.board.presets). The stable selected id and the fields below are saved together;
-           manual edits switch the pending selection to Custom. The row hides itself when the device
-           sent no presets. -->
+           in /status.board.presets). Selecting one fills its recommended peripheral defaults, while
+           its stable identity remains selected when LED or reset-button settings are customized.
+           The row hides itself when the device sent no presets. -->
       <label class="field" id="bdPresetRow" hidden>
         <span class="field-label plain" data-i18n="board.preset">Board</span>
         <select class="input" id="bdPreset"></select>
@@ -894,60 +892,52 @@
           <option value="1" data-i18n="board.led_ws2812">Addressable RGB (WS2812)</option>
         </select>
       </label>
-      <label class="field" id="bdLedPinRow">
-        <span class="field-label plain" data-i18n="board.ledpin">LED pin</span>
-        <select class="input mono num" id="bdLedPin"></select>
-      </label>
+      <div class="pin-grid board-pin-grid">
+        <label class="field" id="bdLedPinRow">
+          <span class="field-label plain" data-i18n="board.ledpin">LED pin</span>
+          <select class="input mono num" id="bdLedPin"></select>
+        </label>
+        <label class="field">
+          <span class="field-label plain" data-i18n="board.btnpin">Reset button pin</span>
+          <select class="input mono num" id="bdBtnPin"></select>
+        </label>
+      </div>
       <label class="field check" id="bdLedInvRow">
         <input type="checkbox" id="bdLedInv">
         <span data-i18n="board.ledinv">Active low (LED lights when the pin is driven LOW)</span>
-      </label>
-      <label class="field">
-        <span class="field-label plain" data-i18n="board.btnpin">Reset button pin</span>
-        <select class="input mono num" id="bdBtnPin"></select>
       </label>
       <label class="field check" id="bdBtnInvRow">
         <input type="checkbox" id="bdBtnInv">
         <span data-i18n="board.btninv">Active low (button shorts the pin to GND)</span>
       </label>
+
+      <!-- ENV III is an accessory of the explicitly selected M5Stack board, so it is configured in
+           the same atomic form rather than as an unrelated Dynamic-control setting. The entire
+           section hides and disables itself for Custom/Seeed. -->
+      <fieldset class="modal-section" id="bdEnvSection" hidden>
+        <legend class="section-label" data-i18n="env.title">Outdoor sensor</legend>
+        <label class="field">
+          <span class="field-label plain" data-i18n="env.sensor_state">Sensor</span>
+          <select class="input" id="envSensor">
+            <option value="" selected data-i18n="env.none">No sensor</option>
+            <option value="env_iii">ENV III</option>
+          </select>
+        </label>
+        <div class="pin-grid" id="envPinFields" hidden>
+          <label class="field">
+            <span class="field-label plain">SDA</span>
+            <select class="input mono num" id="envSda"></select>
+          </label>
+          <label class="field">
+            <span class="field-label plain">SCL</span>
+            <select class="input mono num" id="envScl"></select>
+          </label>
+        </div>
+      </fieldset>
       <p class="hint err" id="bdError" hidden></p>
-      <p class="hint" data-i18n="board.hint">Holding the reset button for 5 seconds ERASES all saved settings (WiFi, MQTT, Syslog and NTP) and opens the setup portal after a restart. The LED flashes red during the 5-second countdown and turns solid white while settings are erased. Select “None” unless a button is physically connected; an unconnected pin can trigger a reset by itself.</p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="bdCancel" data-i18n="btn.cancel">Cancel</button>
         <button class="btn primary" type="submit" id="bdBtn" data-i18n="btn.save">Save</button>
-      </div>
-    </form>
-  </div>
-
-  <!-- Outdoor-sensor configuration. The selected sensor owns one I2C bus for the boot, so saving
-       applies by reboot. ENV III is the only supported type for now; the selector keeps the UI
-       extensible without a second enabled/disabled control. -->
-  <div class="modal" id="env3Modal" hidden>
-    <div class="modal-backdrop" id="env3Backdrop"></div>
-    <form class="modal-card" id="env3Form" role="dialog" aria-modal="true" aria-labelledby="env3ModalTitle" tabindex="-1">
-      <div class="section-label card-title" id="env3ModalTitle" data-i18n="env.title">Outdoor sensor</div>
-      <label class="field">
-        <span class="field-label plain" data-i18n="env.sensor_state">Sensor</span>
-        <select class="input" id="envSensor">
-          <option value="" selected data-i18n="env.none">No sensor</option>
-          <option value="env_iii">ENV III</option>
-        </select>
-      </label>
-      <div id="envPinFields" hidden>
-        <label class="field">
-          <span class="field-label plain">SDA</span>
-          <select class="input mono num" id="envSda"></select>
-        </label>
-        <label class="field">
-          <span class="field-label plain">SCL</span>
-          <select class="input mono num" id="envScl"></select>
-        </label>
-        <p class="hint" data-i18n="env.pins_hint">SDA is the I²C data line (yellow Grove wire); SCL is the clock line (white Grove wire). Select the GPIOs to which these two sensor wires are actually connected.</p>
-      </div>
-      <p class="hint err" id="envError" hidden></p>
-      <div class="modal-actions">
-        <button class="btn secondary" type="button" id="envCancel" data-i18n="btn.cancel">Cancel</button>
-        <button class="btn primary" type="submit" id="envBtn" data-i18n="btn.save">Save</button>
       </div>
     </form>
   </div>

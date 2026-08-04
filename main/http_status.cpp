@@ -202,6 +202,14 @@ void http_append_status_json(std::string& j, bool redact) {
     const BoardPreset* presets[BOARD_PRESETS_MAX];
     int npre = board_presets_offerable(presets, BOARD_PRESETS_MAX, hw_octal_spi(),
                                        config_board_reserved_pins(c));
+    // An explicitly selected board is identity, not a promise that its optional onboard defaults
+    // are still enabled. Keep it in the selector even when a customized LED/button or another live
+    // reservation means re-applying the factory fields would currently be rejected.
+    if (selected_board) {
+        bool present = false;
+        for (int i = 0; i < npre; ++i) present = present || presets[i] == selected_board;
+        if (!present && npre < BOARD_PRESETS_MAX) presets[npre++] = selected_board;
+    }
     j += "],\"presets\":[";
     for (int i = 0; i < npre; i++) {
         if (i) j += ",";
@@ -218,19 +226,18 @@ void http_append_status_json(std::string& j, bool redact) {
     j += "]},";
     // Independent outdoor-climate observation. These values do not replace the Daikin R1T source:
     // only fresh, whole ENV III samples are exposed as numbers, while stale/error state stays
-    // explicit. The UI also receives only pins/presets that the current X10A + board config permits.
+    // explicit. The integrated Board Hardware form may select AtomS3 Lite and ENV III in the same
+    // atomic save, so candidate I2C pins are available even while the currently persisted board is
+    // Custom/Seeed. They exclude the live X10A pair here; the browser filters its pending LED/button
+    // choices and the request path validates the complete proposed snapshot authoritatively.
     const bool env_supported = env3_board_supported(c);
     const bool env_enabled = env_supported && c.env3_enabled;
     const Env3Status env = env3_status();
     int epins[BOARD_PINS_MAX];
-    const int nepins = env_supported
-        ? board_pins_offerable(epins, BOARD_PINS_MAX, hw_octal_spi(), config_env3_reserved_pins(c))
-        : 0;
+    const int nepins = board_pins_offerable(epins, BOARD_PINS_MAX, hw_octal_spi(), config_link_pins(c));
     const Env3Preset* epresets[ENV3_PRESETS_MAX];
-    const int nepre = env_supported
-        ? env3_presets_offerable(epresets, ENV3_PRESETS_MAX, hw_octal_spi(),
-                                 config_env3_reserved_pins(c))
-        : 0;
+    const int nepre = env3_presets_offerable(epresets, ENV3_PRESETS_MAX, hw_octal_spi(),
+                                             config_link_pins(c));
     const bool env_fresh = env_enabled && env.fresh;
     char env_temp[24] = {0}, env_hum[24] = {0}, env_press[24] = {0};
     if (env_fresh) {
