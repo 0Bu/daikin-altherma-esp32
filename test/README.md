@@ -37,8 +37,9 @@ the firmware build.
 `test_ui_*.mjs` contract, HomeHub discovery and the MCP page, it runs
 `test/test_ui_use_cases.mjs`: a small deterministic DOM harness executes the production `wire()`
 function and requires every id in the production `MODALS` list to have a case. The matrix drives
-Settings/Back, open, Cancel, backdrop, Escape, accepted and rejected Save paths, representative
-invalid input, board-gated ENV III states, and both bug-report steps. `tools/ui/selftest.sh`
+Settings/Back, stable popup URLs, reload restoration, browser Back/Forward, open, Cancel, backdrop,
+Escape, accepted and rejected Save paths, representative invalid input, board-gated ENV III states,
+and both bug-report steps. `tools/ui/selftest.sh`
 re-introduces the historical undefined ENV III close handler and proves the matrix fails on the
 actual click path. It also simulates CLI and app-MCP merges, proving the hook accepts only a current
 review stamp and returns exit 2 for a failed suite or stale stamp. CI calls the same top-level

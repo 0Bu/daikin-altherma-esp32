@@ -2,6 +2,16 @@
 // ── Boot ─────────────────────────────────────────────────────────────────
 function wire() {
   wireModalFieldSelection(document);
+  window.addEventListener("popstate", applyRouteFromLocation);
+  // pushState traversal across hash routes fires popstate; a user editing the hash in the address
+  // bar fires hashchange. Applying the same idempotent route handles both entry paths.
+  window.addEventListener("hashchange", applyRouteFromLocation);
+  // A route restored before the first status response opens immediately with conservative empty
+  // fields. That response may fill an untouched form, but the first real user interaction owns it.
+  const keepRouteDraft = () => { _routePopupNeedsHydration = null; };
+  document.addEventListener("input", keepRouteDraft);
+  document.addEventListener("pointerdown", keepRouteDraft);
+  document.addEventListener("keydown", keepRouteDraft);
 
   // Navigation: the gear opens Settings, the back chevron returns to the dashboard.
   $("btnSettings").onclick = () => go("settings");
@@ -749,7 +759,7 @@ async function boot() {
   applyStaticI18n();       // localise the static index.html markup (data-i18n) before the first render
   labelSchematicHits();    // name the clickable schematic parts from the INSPECT table
   wire();
-  go("dashboard");         // the app always opens on the dashboard (and this syncs the header to it)
+  initNavigation();        // restore dashboard / Settings / exact popup from the address + history
   resumeOta();             // adopt a download already running (reload mid-update / second tab)
 
   pollStart();             // the live data: /status + /values on a timer (there is no push)

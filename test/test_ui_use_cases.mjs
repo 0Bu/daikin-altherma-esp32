@@ -128,13 +128,64 @@ const fetch = async (url, options = {}) => {
   return response(true, { reboot: false, saved: false });
 };
 
+// Minimal same-document History API. push/replace do not emit events; Back/Forward emit popstate,
+// matching the browser contract the production hash router relies on.
+const location = { pathname: "/", search: "", hash: "", reload() {} };
+const windowListeners = new Map();
+const window = {
+  scrollTo() {},
+  open() {},
+  addEventListener(type, listener) {
+    const listeners = windowListeners.get(type) || [];
+    listeners.push(listener);
+    windowListeners.set(type, listeners);
+  },
+  fire(type) { for (const listener of windowListeners.get(type) || []) listener({ type }); },
+};
+const historyEntries = [{ hash: "", state: null }];
+let historyIndex = 0;
+const setHistoryLocation = (url) => {
+  const parsed = new URL(url, "http://device.local/");
+  location.pathname = parsed.pathname;
+  location.search = parsed.search;
+  location.hash = parsed.hash;
+};
+const history = {
+  get state() { return historyEntries[historyIndex].state; },
+  pushState(state, _title, url) {
+    setHistoryLocation(url);
+    historyEntries.splice(++historyIndex, Infinity, { hash: location.hash, state });
+  },
+  replaceState(state, _title, url) {
+    setHistoryLocation(url);
+    historyEntries[historyIndex] = { hash: location.hash, state };
+  },
+  back() {
+    if (!historyIndex) return;
+    const oldHash = location.hash;
+    historyIndex--;
+    location.hash = historyEntries[historyIndex].hash;
+    window.fire("popstate");
+    if (location.hash !== oldHash) window.fire("hashchange");
+  },
+  forward() {
+    if (historyIndex >= historyEntries.length - 1) return;
+    const oldHash = location.hash;
+    historyIndex++;
+    location.hash = historyEntries[historyIndex].hash;
+    window.fire("popstate");
+    if (location.hash !== oldHash) window.fire("hashchange");
+  },
+};
+
 const context = vm.createContext({
   document,
   fetch,
   navigator: { language: "de-DE" },
   localStorage: { getItem() { return null; }, setItem() {} },
-  window: { scrollTo() {}, open() {} },
-  location: { reload() {} },
+  window,
+  history,
+  location,
   URL,
   URLSearchParams,
   Blob,
@@ -155,7 +206,7 @@ vm.runInContext(`${source}
   refreshStatus = async () => true;
   collectBugReport = async () => ({ text: "redacted report", failed: false });
   this.__ui = {
-    S, MODALS, wire,
+    S, MODALS, POPUP_ROUTES, wire, initNavigation, applyRouteFromLocation, hydrateRoutedPopup,
     openWifi, openMqtt, openRefTemp, openWeather, openSyslog,
     openNtp, openHomehub, openBoard, openEnv3, openBug,
   };`, context, { filename: "main/www/app.sources" });
@@ -203,15 +254,89 @@ const htmlModals = [...html.matchAll(/<div class="modal" id="([^"]+Modal)"/g)].m
 assert.deepEqual([...ui.MODALS].sort(), htmlModals, "MODALS must name every modal in the shipped HTML");
 assert.deepEqual(cases.map((item) => item.modal).sort(), htmlModals,
   "the interaction matrix must cover every shipped modal");
+const popupRoutes = Object.values(ui.POPUP_ROUTES);
+assert.equal(new Set(popupRoutes).size, ui.MODALS.length, "every popup route must be unique");
+assert.ok(popupRoutes.every((route) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(route)),
+  "popup routes must remain human-readable stable URL segments");
 
 ui.wire();
+ui.initNavigation();
 
 // Navigation is part of the same one-time wiring.  If wiring aborts early, these assertions and all
 // modal actions below fail together instead of leaving a half-interactive page.
+assert.equal(location.hash, "", "the dashboard must keep the canonical hash-free device URL");
 await document.getElementById("btnSettings").onclick();
 assert.equal(ui.S.stage, "settings", "Settings must open from the dashboard");
+assert.equal(location.hash, "#settings", "Settings must be an addressable history entry");
 await document.getElementById("btnBack").onclick();
 assert.equal(ui.S.stage, "dashboard", "Back must return to the dashboard");
+assert.equal(location.hash, "", "Back from Settings must restore the dashboard URL");
+history.forward();
+assert.equal(ui.S.stage, "settings", "browser Forward must restore Settings");
+assert.equal(location.hash, "#settings", "browser Forward must restore the Settings URL");
+history.back();
+
+const loadRoute = (hash) => {
+  history.replaceState(null, "", `/${hash}`);
+  ui.applyRouteFromLocation();
+};
+
+loadRoute("#settings/toString");
+assert.equal(ui.S.stage, "dashboard", "an unknown or inherited-object hash must fail closed");
+assert.equal(location.hash, "", "an unknown popup hash must canonicalize to the dashboard URL");
+
+const supportedStatus = ui.S.status;
+ui.S.status = { ...supportedStatus, env3: { ...supportedStatus.env3, supported: false } };
+loadRoute("#settings/env-iii");
+assert.equal(document.getElementById("env3Modal").hidden, true,
+  "a board-gated popup route must fail closed when the device does not expose it");
+assert.equal(location.hash, "#settings", "an unavailable popup route must canonicalize to Settings");
+ui.S.status = supportedStatus;
+
+// This is the state a full reload presents to initNavigation: a URL selected by the address bar,
+// with no in-app parent metadata. The exact dialog must be restored and an explicit close must stay
+// inside the app instead of navigating to whatever site preceded the pasted link.
+loadRoute("#settings/mqtt");
+assert.equal(ui.S.stage, "settings", "a popup URL must restore its Settings parent");
+assert.equal(document.getElementById("mqttModal").hidden, false, "a popup URL must restore the exact popup");
+assert.equal(document.getElementById("mqBroker").value, "203.0.113.27:1883",
+  "a restored popup must use the normal status-backed form fill path");
+await document.getElementById("mqCancel").onclick();
+assert.equal(location.hash, "#settings", "closing a directly loaded popup must canonicalize to Settings");
+
+// Startup restores the overlay before the first status request has returned. Its normal form fill
+// runs once that response arrives, but an impatient user's draft wins over the late response.
+const loadedStatus = ui.S.status;
+ui.S.status = null;
+loadRoute("#settings/wifi");
+assert.equal(document.getElementById("wfSSID").value, "", "pre-status reload must not invent saved values");
+document.getElementById("wfSSID").value = "Draft network";
+await document.fire("input", { target: document.getElementById("wfSSID") });
+ui.S.status = loadedStatus;
+ui.hydrateRoutedPopup();
+assert.equal(document.getElementById("wfSSID").value, "Draft network",
+  "the first status response must not overwrite a draft started after reload");
+await document.getElementById("wfCancel").onclick();
+
+ui.S.status = null;
+loadRoute("#settings/wifi");
+ui.S.status = loadedStatus;
+ui.hydrateRoutedPopup();
+assert.equal(document.getElementById("wfSSID").value, "DemoNet",
+  "an untouched reload popup must hydrate from the first status response");
+await document.getElementById("wfCancel").onclick();
+
+// An in-app popup has a real Settings parent: Back closes it and Forward opens the same one again.
+ui.openWifi();
+assert.equal(location.hash, "#settings/wifi", "opening a popup must add its stable route");
+history.back();
+assert.equal(document.getElementById("wifiModal").hidden, true, "browser Back must close the popup");
+assert.equal(location.hash, "#settings", "browser Back from a popup must retain Settings");
+history.forward();
+assert.equal(document.getElementById("wifiModal").hidden, false, "browser Forward must restore the popup");
+assert.equal(document.getElementById("wfSSID").value, "DemoNet",
+  "browser Forward must run the popup's normal fill lifecycle");
+await document.getElementById("wfCancel").onclick();
 
 const resetModals = () => {
   for (const id of ui.MODALS) document.getElementById(id).hidden = true;
@@ -237,18 +362,23 @@ for (const entry of [
   ["connTile", "[data-edit]", "edit", "homehub", "homehubModal"],
 ]) {
   const [host, selector, key, value, modal] = entry;
-  resetModals();
+  loadRoute("#settings");
   await document.getElementById(host).fire("click", { target: delegatedTarget(selector, key, value) });
   assert.equal(document.getElementById(modal).hidden, false, `${value}: visible entry action must open`);
+  assert.equal(location.hash, `#settings/${ui.POPUP_ROUTES[modal]}`,
+    `${value}: visible entry action must add its addressable popup route`);
 }
-resetModals();
+loadRoute("#settings");
 await document.getElementById("footBug").onclick();
 assert.equal(document.getElementById("bugModal").hidden, false, "Report a bug footer action must open");
+assert.equal(location.hash, "#settings/bug-report", "Report a bug must add its addressable popup route");
 
 const open = (item) => {
-  resetModals();
+  loadRoute("#settings");
   ui[item.open]();
   assert.equal(document.getElementById(item.modal).hidden, false, `${item.name}: open`);
+  assert.equal(location.hash, `#settings/${ui.POPUP_ROUTES[item.modal]}`,
+    `${item.name}: open must add the popup URL`);
   assert.equal(document.documentElement.classList.contains("modal-open"), true,
     `${item.name}: open must lock the document scroller`);
   assert.equal(document.body.classList.contains("modal-open"), true,
@@ -261,6 +391,7 @@ for (const item of cases) {
   assert.equal(typeof cancel.onclick, "function", `${item.name}: Cancel must be wired`);
   await cancel.onclick({ preventDefault() {} });
   assert.equal(document.getElementById(item.modal).hidden, true, `${item.name}: Cancel must close`);
+  assert.equal(location.hash, "#settings", `${item.name}: Cancel must return the URL to Settings`);
   assert.equal(document.documentElement.classList.contains("modal-open"), false,
     `${item.name}: Cancel must release document scrolling`);
   assert.equal(document.body.classList.contains("modal-open"), false,
@@ -271,12 +402,14 @@ for (const item of cases) {
   assert.equal(typeof backdrop.onclick, "function", `${item.name}: backdrop must be wired`);
   await backdrop.onclick({ preventDefault() {} });
   assert.equal(document.getElementById(item.modal).hidden, true, `${item.name}: backdrop must close`);
+  assert.equal(location.hash, "#settings", `${item.name}: backdrop must return the URL to Settings`);
   assert.equal(document.documentElement.classList.contains("modal-open"), false,
     `${item.name}: backdrop must release document scrolling`);
 
   open(item);
   await document.fire("keydown", { key: "Escape" });
   assert.equal(document.getElementById(item.modal).hidden, true, `${item.name}: Escape must close`);
+  assert.equal(location.hash, "#settings", `${item.name}: Escape must return the URL to Settings`);
   assert.equal(document.body.classList.contains("modal-open"), false,
     `${item.name}: Escape must release body scrolling`);
 }
@@ -308,6 +441,7 @@ for (const item of cases.filter((entry) => entry.form)) {
   await document.getElementById(item.form).fire("submit");
   await settle();
   assert.equal(document.getElementById(item.modal).hidden, true, `${item.name}: accepted Save must close`);
+  assert.equal(location.hash, "#settings", `${item.name}: accepted Save must return the URL to Settings`);
   assert.equal(document.body.classList.contains("modal-open"), false,
     `${item.name}: accepted Save must release background scrolling`);
   assert.ok(fetchState.calls.some((call) => call.url === item.url), `${item.name}: Save must call ${item.url}`);

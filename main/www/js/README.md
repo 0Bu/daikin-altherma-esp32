@@ -8,7 +8,7 @@ separate browser modules and do not create additional HTTP requests.
 | Source | Responsibility |
 |---|---|
 | `i18n.js` | shared browser/API helpers, language selection and the bilingual `I18N` catalog |
-| `app_state.js` | application state, navigation, status rendering, banners and bug reports |
+| `app_state.js` | application state, hash/history navigation, status rendering, banners and bug reports |
 | `dashboard.js` | value/status cards, the observation card, connections and Settings layout |
 | `descriptions.js` | Daikin error meanings, value explanations and X10A/HomeHub source semantics |
 | `history.js` | device/derived trends, scrubbing, display labels and value-group rendering |
