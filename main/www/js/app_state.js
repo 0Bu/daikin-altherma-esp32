@@ -76,6 +76,16 @@ const TITLE = { settings: () => t("nav.settings") };
 // Every overlay that owns the Esc key; the navigation Esc stands down while one of them is open.
 const MODALS = ["wifiModal", "mqttModal", "refTempModal", "weatherModal", "syslogModal", "ntpModal", "homehubModal", "boardModal", "env3Modal", "bugModal"];
 
+// A phone modal owns vertical scrolling while it is open. In particular, iOS Safari otherwise
+// scrolls the document behind a long dialog once the finger reaches the card boundary. Keep the
+// lock on both roots because browsers disagree about whether the document scroller is <html> or
+// <body>; release it only after the final open modal has closed.
+function syncModalScrollLock() {
+  const open = MODALS.some((id) => !$(id).hidden);
+  document.documentElement.classList.toggle("modal-open", open);
+  document.body.classList.toggle("modal-open", open);
+}
+
 // Open a popup without putting the caret into its first field. Focusing the dialog container keeps
 // the modal announced to keyboard/screen-reader users, while `preventScroll` avoids moving the page
 // and — most visibly on phones — no text selection or software keyboard appears until the user
@@ -83,8 +93,14 @@ const MODALS = ["wifiModal", "mqttModal", "refTempModal", "weatherModal", "syslo
 function openPopup(id) {
   const modal = $(id);
   modal.hidden = false;
+  syncModalScrollLock();
   const dialog = modal.querySelector?.('[role="dialog"]');
   dialog?.focus?.({ preventScroll: true });
+}
+
+function closePopup(id) {
+  $(id).hidden = true;
+  syncModalScrollLock();
 }
 
 function go(stage) {
@@ -598,7 +614,7 @@ function openBug() {
   $("bugStep2").hidden = true;
   openPopup("bugModal");
 }
-function closeBug() { $("bugModal").hidden = true; }
+function closeBug() { closePopup("bugModal"); }
 
 // Step 2: build the report and show it. GitHub is NOT opened here — the tab opens on the copy
 // button below, so that the moment the user arrives at the form the clipboard already holds what

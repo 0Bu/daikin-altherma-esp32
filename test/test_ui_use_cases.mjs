@@ -74,6 +74,7 @@ class Document {
     this.elements = new Map();
     this.listeners = new Map();
     this.activeElement = null;
+    this.documentElement = new Element("html", this);
     this.body = new Element("body", this);
   }
   getElementById(id) {
@@ -214,6 +215,8 @@ assert.equal(ui.S.stage, "dashboard", "Back must return to the dashboard");
 
 const resetModals = () => {
   for (const id of ui.MODALS) document.getElementById(id).hidden = true;
+  document.documentElement.classList.remove("modal-open");
+  document.body.classList.remove("modal-open");
 };
 const delegatedTarget = (selector, key, value) => ({
   closest(query) { return query === selector ? { dataset: { [key]: value } } : null; },
@@ -246,6 +249,10 @@ const open = (item) => {
   resetModals();
   ui[item.open]();
   assert.equal(document.getElementById(item.modal).hidden, false, `${item.name}: open`);
+  assert.equal(document.documentElement.classList.contains("modal-open"), true,
+    `${item.name}: open must lock the document scroller`);
+  assert.equal(document.body.classList.contains("modal-open"), true,
+    `${item.name}: open must lock the body scroller`);
 };
 
 for (const item of cases) {
@@ -254,16 +261,24 @@ for (const item of cases) {
   assert.equal(typeof cancel.onclick, "function", `${item.name}: Cancel must be wired`);
   await cancel.onclick({ preventDefault() {} });
   assert.equal(document.getElementById(item.modal).hidden, true, `${item.name}: Cancel must close`);
+  assert.equal(document.documentElement.classList.contains("modal-open"), false,
+    `${item.name}: Cancel must release document scrolling`);
+  assert.equal(document.body.classList.contains("modal-open"), false,
+    `${item.name}: Cancel must release body scrolling`);
 
   open(item);
   const backdrop = document.getElementById(item.backdrop);
   assert.equal(typeof backdrop.onclick, "function", `${item.name}: backdrop must be wired`);
   await backdrop.onclick({ preventDefault() {} });
   assert.equal(document.getElementById(item.modal).hidden, true, `${item.name}: backdrop must close`);
+  assert.equal(document.documentElement.classList.contains("modal-open"), false,
+    `${item.name}: backdrop must release document scrolling`);
 
   open(item);
   await document.fire("keydown", { key: "Escape" });
   assert.equal(document.getElementById(item.modal).hidden, true, `${item.name}: Escape must close`);
+  assert.equal(document.body.classList.contains("modal-open"), false,
+    `${item.name}: Escape must release body scrolling`);
 }
 
 const settle = async () => {
@@ -293,6 +308,8 @@ for (const item of cases.filter((entry) => entry.form)) {
   await document.getElementById(item.form).fire("submit");
   await settle();
   assert.equal(document.getElementById(item.modal).hidden, true, `${item.name}: accepted Save must close`);
+  assert.equal(document.body.classList.contains("modal-open"), false,
+    `${item.name}: accepted Save must release background scrolling`);
   assert.ok(fetchState.calls.some((call) => call.url === item.url), `${item.name}: Save must call ${item.url}`);
   if (item.modal === "refTempModal") {
     assert.deepEqual(fetchState.calls.map((call) => call.url), ["/test_ref_temp", "/set_ref_temp"],
@@ -309,6 +326,8 @@ for (const item of cases.filter((entry) => entry.form)) {
   await document.getElementById(item.form).fire("submit");
   await settle();
   assert.equal(document.getElementById(item.modal).hidden, false, `${item.name}: rejected Save must stay open`);
+  assert.equal(document.body.classList.contains("modal-open"), true,
+    `${item.name}: rejected Save must keep background scrolling locked`);
   assert.equal(ui.S.busy, false, `${item.name}: rejected Save must release busy state`);
 }
 
@@ -347,6 +366,8 @@ assert.deepEqual(fetchState.calls[0]?.body, {
 }, "Delete must submit the explicit empty mapping rather than the draft fields");
 assert.equal(document.getElementById("refTempModal").hidden, true,
   "accepted Delete must close the dialog");
+assert.equal(document.body.classList.contains("modal-open"), false,
+  "accepted Delete must release background scrolling");
 
 fetchState.mode = "reject";
 fetchState.calls.length = 0;
@@ -356,6 +377,8 @@ await document.getElementById("rtDeleteBtn").fire("click");
 await settle();
 assert.equal(document.getElementById("refTempModal").hidden, false,
   "rejected Delete must keep the dialog open");
+assert.equal(document.body.classList.contains("modal-open"), true,
+  "rejected Delete must keep background scrolling locked");
 assert.equal(document.getElementById("rtDeleteBtn").disabled, false,
   "rejected Delete must release its button for retry");
 assert.equal(ui.S.busy, false, "rejected Delete must release global busy state");

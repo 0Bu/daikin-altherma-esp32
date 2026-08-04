@@ -37,6 +37,10 @@ for (const dialog of dialogs)
   assert.match(dialog, /tabindex="-1"/, "popup focus must land on the dialog container, not an input");
 assert.match(app, /function openPopup\(id\)[\s\S]*modal\.hidden = false;[\s\S]*querySelector\?\.\('\[role="dialog"\]'\)[\s\S]*focus\?\.\(\{ preventScroll: true \}\)/,
   "opening a popup must focus only its container without scrolling");
+assert.match(app, /function syncModalScrollLock\(\)[\s\S]*MODALS\.some[\s\S]*document\.documentElement\.classList\.toggle\("modal-open", open\)[\s\S]*document\.body\.classList\.toggle\("modal-open", open\)/,
+  "modal lifecycle must lock both possible document scrollers");
+assert.match(app, /function closePopup\(id\)[\s\S]*hidden = true;[\s\S]*syncModalScrollLock\(\)/,
+  "all popup close paths must also release the shared scroll lock");
 for (const opener of ["openWifi", "openMqtt", "openRefTemp", "openWeather", "openSyslog", "openNtp", "openHomehub", "openBoard", "openEnv3", "openBug"])
   assert.match(app, new RegExp(`function ${opener}\\(\\)[\\s\\S]*?openPopup\\(\\"[^\\"]+\\"\\);`),
     `${opener} must use the no-field-autofocus popup path`);
@@ -102,10 +106,8 @@ assert.match(app, /function syncEnv3Fields\(\)[\s\S]*\$\("envPinFields"\)\.hidde
   "selecting no sensor must hide and disable both GPIO fields");
 assert.match(app, /function env3FormPayload\(\)[\s\S]*if \(!enabled\) return \{ enabled: false \};[\s\S]*saveReboot\("\/set_env3", body/,
   "disabling ENV III must submit an explicit false without stale pin fields");
-assert.match(app, /function closeEnv3\(\) \{ \$\("env3Modal"\)\.hidden = true; \}/,
-  "ENV III Cancel and the successful Save callback must dismiss the modal without an undefined helper");
-assert.doesNotMatch(app, /closePopup\(/,
-  "configuration dialogs must not call the nonexistent closePopup helper");
+assert.match(app, /function closeEnv3\(\) \{ closePopup\("env3Modal"\); \}/,
+  "ENV III Cancel and the successful Save callback must use the defined shared close path");
 assert.match(httpConfig, /env3_config_valid\(c[\s\S]*http_register_on\(s, surface, "\/set_env3"/,
   "the device must validate ENV III pin collisions before registering the config route");
 assert.match(httpConfig,

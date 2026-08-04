@@ -210,6 +210,13 @@ each; every row carries a trailing **pencil** and the whole row is tappable, ope
 **modal** over the dimmed screen. The first four rows share the identical
 overlay pattern (Cancel / backdrop / `Esc` dismiss without writing; Save reboots to apply, then closes
 back to Settings — `Esc` closes the modal only, never also the screen behind it). The forms:
+
+On phones the overlay is sized from the **dynamic visible viewport** (`100dvh`, with a `100vh`
+fallback), not Safari's browser-chrome-inclusive legacy viewport. A long modal card owns vertical
+touch scrolling and contains overscroll; while any modal is open both possible document scrollers
+are locked. Closing the final modal releases them, so a drag can reach every footer action without
+moving the Settings page behind the dialog.
+
 - **WiFi**: SSID (required, 1–32 chars) + password (empty for an open network, else 8–63 chars),
   validated both in the UI and by `POST /set_wifi`. Only the SSID prefills (the password is never
   exposed by `/status`). **Save** → `POST /set_wifi` (persist + reboot). If WiFi was already
@@ -1468,6 +1475,8 @@ page under near-identical cards). Specific:
   wall-mounted tablet), lots of empty margin around little content. The bump lives in **one** media
   block so the ramp stays coherent; it never changes the single-column layout, only its size.
 - Wide content (long value tables) never causes horizontal page scroll; the table scrolls in its card.
+- Long modal content scrolls inside the visible dynamic viewport; the background page is locked until
+  the final dialog closes, including iOS Safari with its expanding/collapsing browser bars.
 - Keyboard: logical tab order, visible focus ring, Enter submits the view's primary action. The
   value-description expanders (§5.3 items 4 and 5 — value rows and Model-card rows share one
   builder) are real `<button>`s carrying `aria-expanded`, so they are focusable and toggle on

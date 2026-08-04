@@ -13,7 +13,7 @@ function openWifi() {
   $("wfPassError").hidden = true;
   openPopup("wifiModal");
 }
-function closeWifi() { $("wifiModal").hidden = true; }
+function closeWifi() { closePopup("wifiModal"); }
 // Route a /set_wifi rejection to the field it names — wifi_credentials_valid answers "invalid ssid" /
 // "invalid password", and the modal's two hints already state exactly those rules, so mark the field
 // and unhide its own hint rather than overwriting it with the terser server wording (the toast carries
@@ -53,7 +53,7 @@ function openMqtt() {
   $("mqBroker").classList.remove("invalid"); $("mqError").hidden = true;
   openPopup("mqttModal");
 }
-function closeMqtt() { $("mqttModal").hidden = true; }
+function closeMqtt() { closePopup("mqttModal"); }
 // Accept a bare host:port (defaults to plaintext mqtt://) OR an explicit scheme. Credentials require
 // mqtts:// (the bridge refuses plaintext + creds), so the field MUST allow a scheme — otherwise the
 // only secure path is un-enterable. mqtt(s)://host[:port] and ws(s):// forms pass; empty disables.
@@ -91,7 +91,7 @@ function openRefTemp() {
   $("rtError").hidden = true;
   openPopup("refTempModal");
 }
-function closeRefTemp() { $("refTempModal").hidden = true; }
+function closeRefTemp() { closePopup("refTempModal"); }
 const validRefTopic = (v) => !v || (v.length <= 192 && v[0] !== "/" && !v.endsWith("/") &&
                                       !/[+#\x00-\x1f\x7f]/.test(v));
 const validRefPath = (v) => v.length <= 128 && v.split(".").every((key) =>
@@ -165,7 +165,7 @@ function openWeather() {
   openPopup("weatherModal");
 }
 function closeWeather() {
-  $("weatherModal").hidden = true;
+  closePopup("weatherModal");
 }
 
 // Popup editing contract: activating an INACTIVE text field selects its complete value, so replacing
@@ -224,7 +224,7 @@ function openSyslog() {
   $("slError").hidden = true;
   openPopup("syslogModal");
 }
-function closeSyslog() { $("syslogModal").hidden = true; }
+function closeSyslog() { closePopup("syslogModal"); }
 
 // ── NTP (edit modal) ───────────────────────────────────────────────────────
 function fillNtp() {
@@ -236,7 +236,7 @@ function openNtp() {
   $("ntpError").hidden = true;
   openPopup("ntpModal");
 }
-function closeNtp() { $("ntpModal").hidden = true; }
+function closeNtp() { closePopup("ntpModal"); }
 
 // ── HomeHub / Modbus TCP (edit modal) ──────────────────────────────────────
 // The address is the entire persistent contract: non-empty polls it; empty disables HomeHub. mDNS
@@ -260,7 +260,7 @@ function openHomehub() {
 }
 function closeHomehub() {
   ++homehubSearchGeneration;
-  $("homehubModal").hidden = true;
+  closePopup("homehubModal");
   $("hhSearch").disabled = false;
   $("hhSearch").textContent = t("hh.search");
 }
@@ -404,7 +404,7 @@ function openBoard() {
   $("bdError").hidden = true;
   openPopup("boardModal");
 }
-function closeBoard() { $("boardModal").hidden = true; }
+function closeBoard() { closePopup("boardModal"); }
 
 // ── ENV III outdoor-climate sensor ───────────────────────────────────────
 function env3AvailablePins() {
@@ -456,10 +456,9 @@ function openEnv3() {
   $("envError").hidden = true;
   openPopup("env3Modal");
 }
-// Keep this symmetric with the other configuration modals: there is one shared open path, but each
-// close handler owns its modal directly.  `closePopup` does not exist; routing Cancel and the
-// successful Save callback through it left both ENV III footer actions unable to dismiss the dialog.
-function closeEnv3() { $("env3Modal").hidden = true; }
+// Keep this symmetric with the other configuration modals: the shared close path dismisses the
+// owned modal and releases the document scroll lock in one operation.
+function closeEnv3() { closePopup("env3Modal"); }
 function signalBars(rssi) {
   const lit = rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1;
   const tone = rssi >= -70 ? "var(--ok)" : "var(--warn)";

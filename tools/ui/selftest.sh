@@ -9,11 +9,12 @@ trap 'rm -rf "$tmp"; [ -z "${hook_tmp:-}" ] || rm -rf "$hook_tmp"' EXIT
 mkdir -p "$tmp/main" "$tmp/test" "$tmp/tools"
 cp -R "$proj/main/www" "$tmp/main/www"
 cp "$proj/test/test_ui_use_cases.mjs" "$tmp/test/"
+cp "$proj/test/test_ui_modal_scroll.mjs" "$tmp/test/"
 cp -R "$proj/tools/ui" "$tmp/tools/ui"
 
 # Re-seed the historical ENV III failure: both Cancel and accepted Save route through an undefined
 # helper. The behavioral matrix must fail on the first real action, not merely parse the bundle.
-sed 's/function closeEnv3() { $("env3Modal").hidden = true; }/function closeEnv3() { closePopup("env3Modal"); }/' \
+sed 's/function closeEnv3() { closePopup("env3Modal"); }/function closeEnv3() { missingClosePopup("env3Modal"); }/' \
   "$tmp/main/www/js/settings.js" > "$tmp/main/www/js/settings.js.mutated"
 mv "$tmp/main/www/js/settings.js.mutated" "$tmp/main/www/js/settings.js"
 
@@ -23,6 +24,19 @@ if (cd "$tmp" && node test/test_ui_use_cases.mjs >/dev/null 2>&1); then
 fi
 
 echo "ui selftest: historical ENV III action failure is detected"
+
+# Re-seed the iPhone failure: legacy 100vh includes Safari's browser chrome and lets a long dialog
+# extend below the actually visible viewport. The focused layout contract must reject that rollback.
+sed 's/height: 100vh; height: 100dvh;/height: 100vh;/' \
+  "$tmp/main/www/style.css" > "$tmp/main/www/style.css.mutated"
+mv "$tmp/main/www/style.css.mutated" "$tmp/main/www/style.css"
+
+if (cd "$tmp" && node test/test_ui_modal_scroll.mjs >/dev/null 2>&1); then
+  echo "ui selftest: iPhone 100vh modal regression escaped the layout contract" >&2
+  exit 1
+fi
+
+echo "ui selftest: iPhone dynamic-viewport regression is detected"
 
 # Prove the merge hook itself fails closed. A checked current review reaches the suite; a suite
 # failure and a stale SHA stamp must both block with exit 2.
