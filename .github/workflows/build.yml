@@ -141,6 +141,10 @@ jobs:
       # requested only after the disable was persisted; no ordinary publisher may run there.
       - name: Test explicit MQTT source cleanup
         run: node test/test_mqtt_source_cleanup_contract.mjs
+      # WP2 is intentionally SHADOW-only. Host maths tests cannot prove a later orchestration edit
+      # did not wire its proposal into the HomeHub mailbox, so pin the source boundary as well.
+      - name: Test dynamic-LWT shadow-only boundary
+        run: node test/test_dynamic_lwt_shadow_contract.mjs
       # Domain-correctness gate: are the published values physically RIGHT? The logic tests above
       # verify the logic they are handed; they cannot see a well-formed value that is simply
       # false — a wrong converter compiles, passes them all, and publishes -971.5 °C to Home

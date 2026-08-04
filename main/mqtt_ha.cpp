@@ -139,6 +139,7 @@ static ReferenceMqttFrame  s_ref_rx;
 static ReferenceMqttFrame  s_ref_task_frame;          // mqtt_task-owned; keeps ~1.2 KB off its stack
 static bool                s_ref_rx_active = false;
 static ReferenceTemperatureStatus s_ref_status;
+static logic::DynamicLwtShadowController s_dynamic_lwt_controller;  // guarded by s_mtx
 struct ReferenceProbeState {
     ReferenceTemperatureTestConfig config;
     uint32_t generation=0;
@@ -735,6 +736,63 @@ static void publish_crash() {
     s_crash_notable_pub = !js.empty();
 }
 
+// Evaluate WP2 every mqtt_task cycle, including while publication is paused or the broker is down.
+// Tying evaluation to publish_heartbeat() would leave the last SHADOW verdict looking healthy during
+// exactly the X10A/MQTT failures that must move it to FAILSAFE. The task still exists because SHADOW
+// can only be enabled for a configured MQTT room source (enforced by /set_dynamic_lwt).
+static logic::DynamicLwtSnapshot evaluate_dynamic_lwt(const Config& cfg, const HpStats& hp) {
+    const ReferenceTemperatureStatus rt = reference_temperature_status();
+    const uint64_t now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
+    int64_t now_unix_s = -1;
+    int32_t now_sub_ms = 0;
+    time_now(now_unix_s, now_sub_ms);
+    const ReferenceFreshness freshness = reference_freshness(
+        rt.has_value, rt.retained, rt.has_source_time, rt.source_unix_s, rt.received_ms,
+        now_unix_s, now_ms, cfg.ref_temp_max_age_s);
+    ReferenceRoomRaw room_raw;
+    room_raw.configured = !cfg.ref_temp_topic.empty();
+    room_raw.has_temperature = rt.has_value;
+    room_raw.payload_valid = rt.error.empty();
+    room_raw.temperature_c = rt.temperature_c;
+    room_raw.has_source_time = rt.has_source_time;
+    room_raw.setpoint_mapped = !cfg.ref_temp_setpoint_path.empty();
+    room_raw.has_setpoint = rt.has_setpoint;
+    room_raw.setpoint_c = rt.setpoint_c;
+    room_raw.enabled_mapped = !cfg.ref_temp_enabled_path.empty();
+    room_raw.has_enabled = rt.has_enabled;
+    room_raw.enabled = rt.enabled;
+    room_raw.hvac_mode_mapped = !cfg.ref_temp_hvac_mode_path.empty();
+    room_raw.has_hvac_mode = rt.has_hvac_mode;
+    room_raw.hvac_mode = rt.hvac_mode;
+    room_raw.payload_reason = rt.rejection_reason;
+    const ReferenceRoomSample room = reference_room_sample(room_raw, freshness);
+
+    const ModbusStatus mbs = mb_status();
+    const logic::ActuatorSnapshot& act = mbs.actuator;
+    const WeatherForecastStatus wx = weather_forecast_status();
+    WeatherFreshness wx_freshness = weather_freshness(
+        cfg.weather_enabled && wx.has_value, wx.fetched_unix_s, now_unix_s, WEATHER_MAX_AGE_S);
+    if (!wx.available) wx_freshness.fresh = false;
+
+    logic::DynamicLwtInputs in;
+    in.mode = cfg.dynamic_lwt_mode;
+    in.room_control_eligible = room.control_eligible;
+    in.room_error_k = room.room_error_k;
+    in.x10a_connected = hp.connected;
+    in.homehub_connected = mbs.connected;
+    in.plant_gate_known = act.plant_gate_known;
+    in.plant_gate_active = act.plant_gate_active;
+    in.forecast_available = cfg.weather_enabled && wx.available && wx_freshness.fresh;
+    in.actuator_conflict = act.conflict;
+    in.now_ms = static_cast<int64_t>(now_ms);
+    in.room_has_source_time = rt.has_value && rt.has_source_time;
+    in.room_source_unix_s = rt.source_unix_s;
+    in.room_age_known = freshness.age_known;
+    in.room_age_s = freshness.age_s;
+    Lock lk(s_mtx);
+    return s_dynamic_lwt_controller.evaluate(in);
+}
+
 // Snapshot board/link diagnostics from the IDF heap/timer APIs + the poll/WiFi/MQTT state, and
 // publish it to the heartbeat topic (not retained). Called on a fixed HEARTBEAT_INTERVAL_S cadence
 // (mqtt_task) — diagnostics, not real-time telemetry, so unlike the source topics it always publishes
@@ -848,6 +906,39 @@ static void publish_heartbeat() {
     // Numeric MQTT metrics use 0 for "no request/source yet"; unlike the enum values 1/2 this does
     // not invent InternalController provenance on a freshly booted, inactive device.
     f.modbus_actuator_source = act.requested_valid ? static_cast<uint8_t>(act.source) : 0;
+
+    // The controller is evaluated every mqtt_task cycle, not on the publication cadence. This copy
+    // therefore already reflects paused/disconnected fail-closed transitions.
+    const logic::DynamicLwtSnapshot controller = dynamic_lwt_status();
+    f.lwt_controller_mode = static_cast<uint8_t>(controller.mode);
+    f.lwt_controller_state = static_cast<uint8_t>(controller.state);
+    f.lwt_controller_reason = static_cast<uint8_t>(controller.reason);
+    f.lwt_controller_decision_eligible = controller.decision_eligible;
+    f.lwt_controller_proposal_produced = controller.proposal_produced;
+    f.lwt_controller_has_terms = controller.has_terms;
+    f.lwt_controller_has_requested_offset = controller.has_requested_offset;
+    f.lwt_controller_deadband = controller.deadband;
+    f.lwt_controller_quantized = controller.quantized;
+    f.lwt_controller_clamped = controller.clamped;
+    f.lwt_controller_rate_limited = controller.rate_limited;
+    f.lwt_controller_forecast_available = controller.forecast_available;
+    f.lwt_controller_plant_gate_known = controller.plant_gate_known;
+    f.lwt_controller_plant_gate_active = controller.plant_gate_active;
+    f.lwt_controller_actuator_conflict = controller.actuator_conflict;
+    f.lwt_controller_has_room_source_time = controller.room_has_source_time;
+    f.lwt_controller_room_age_known = controller.room_age_known;
+    f.lwt_controller_room_source_unix_s = controller.room_source_unix_s;
+    f.lwt_controller_room_age_s = controller.room_age_s;
+    f.lwt_controller_p_term_k = controller.p_term_k;
+    f.lwt_controller_unclamped_offset_k = controller.unclamped_offset_k;
+    f.lwt_controller_bounded_offset_k = controller.bounded_offset_k;
+    f.lwt_controller_requested_offset_k = controller.requested_offset_k;
+    f.lwt_controller_last_decision_ms = controller.last_decision_ms;
+    f.lwt_controller_sequence = controller.sequence;
+    f.lwt_controller_evaluations = controller.evaluations;
+    f.lwt_controller_decisions = controller.decisions;
+    f.lwt_controller_holds = controller.holds;
+    f.lwt_controller_failsafes = controller.failsafes;
     f.modbus_actuator_sequence = act.sequence;
     f.modbus_actuator_correlation_id = act.correlation_id;
     f.modbus_actuator_intent_age_ms = act.intent_age_ms;
@@ -1491,6 +1582,7 @@ static void mqtt_task(void*) {
             service_reference_probe_subscription(ref_config);
             service_reference_frames(ref_config);
             service_requested_topic_cleanup(ref_config);
+            evaluate_dynamic_lwt(ref_config, hp);
 
             if (gate.publish_offline) {
                 mqtt_publish(s_avail, "offline", 0, 1, 1);
@@ -1832,6 +1924,12 @@ ReferenceTemperatureStatus reference_temperature_status() {
     if (!s_mtx) return s_ref_status;
     Lock lk(s_mtx);
     return s_ref_status;
+}
+
+logic::DynamicLwtSnapshot dynamic_lwt_status() {
+    if (!s_mtx) return s_dynamic_lwt_controller.snapshot();
+    Lock lk(s_mtx);
+    return s_dynamic_lwt_controller.snapshot();
 }
 
 ReferenceTemperatureTestResult mqtt_reference_test(

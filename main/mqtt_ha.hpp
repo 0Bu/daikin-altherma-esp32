@@ -8,6 +8,7 @@
 // never actuates the heat pump. No-op if mqtt_uri is empty.
 #include <cstdint>
 #include <string>
+#include "logic/dynamic_lwt_controller.hpp"
 #include "logic/reference_temperature.hpp"
 
 namespace daik {
@@ -21,8 +22,7 @@ MqttStatus mqtt_status();
 // Observation + decision-readiness status for the one configured living-room source. `received_ms` is
 // monotonic MQTT arrival time; source_unix_s is present only when the configured payload field was
 // parsed. The status endpoint derives freshness from these without mutating the captured sample.
-// No heat-pump control logic reads this yet; the canonical fields are evidence for the later shadow
-// controller and never call the HomeHub actuator.
+// The write-free WP2 shadow controller reads this canonical view. It never calls the HomeHub actuator.
 struct ReferenceTemperatureStatus {
     bool configured=false, subscribed=false, has_value=false, retained=false, has_source_time=false;
     double temperature_c=0.0;
@@ -36,6 +36,10 @@ struct ReferenceTemperatureStatus {
     std::string hvac_mode, timestamp_source, eligibility_error, error;
 };
 ReferenceTemperatureStatus reference_temperature_status();
+
+// Last write-free WP2 controller evaluation. The state machine is owned by mqtt_task and guarded by
+// the MQTT status mutex; HTTP/status readers receive a copy. No actuator object crosses this API.
+logic::DynamicLwtSnapshot dynamic_lwt_status();
 
 // A candidate mapping is tested on the existing authenticated MQTT connection without publishing
 // it to Config/NVS. The call waits for one value that passes the same JSON/timestamp/freshness

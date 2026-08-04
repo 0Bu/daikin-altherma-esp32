@@ -612,6 +612,12 @@ host-testable core is unusually large and valuable, because the risky parts are 
   the SNTP wall clock (`sntp_time.cpp`) as a `device_class: "timestamp"` sensor — HA's native
   "last updated N ago" entity, rendering `null` (unsynced) as its normal "unknown" state rather than
   a fabricated epoch date.
+- `logic/dynamic_lwt_controller.hpp` — the deterministic, allocation- and I/O-free WP2 P controller.
+  It accepts only OFF/SHADOW, uses gain 1, a ±0.25 K deadband, whole-kelvin quantization, a ±2 K
+  envelope, a 1 K/decision slew limit and a 30-minute cadence. Missing room/X10A/HomeHub/plant-gate
+  evidence fails closed; an inactive plant holds; unavailable forecast degrades while contributing
+  exactly zero. Its output is a telemetry snapshot only: the header has no actuator type and the
+  runtime adapter never calls `mb_request_lwt_offset()`.
 - `logic/crashinfo.hpp` — reset-reason slug + fault classification, and the `last_crash` / MQTT crash
   payload + paste-friendly text bundle (incl. the backtrace clamp) built from a captured summary. The
   retained MQTT crash payload (`build_crash_mqtt_payload`) is **crash-only**: the JSON when the boot is

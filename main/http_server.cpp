@@ -25,8 +25,8 @@ void http_start() {
     // 25 when POST /set_lang (the UI language override) was added, 26 for /favicon.ico, 27 for the
     // dashboard's dedicated 96 px heat-pump brand icon, 28 for POST /set_ref_temp, 29 for explicit
     // HomeHub discovery, 30 for the non-persistent POST /test_ref_temp probe, 31 for the direct
-    // Open-Meteo location setting, and 32 for ENV III.
-    cfg.max_uri_handlers = 32;
+    // Open-Meteo location setting, 32 for ENV III, and 33 for the OFF/SHADOW dynamic-LWT mode.
+    cfg.max_uri_handlers = 33;
     cfg.lru_purge_enable = true;
     // 16 KB, not the 8 KB this ran on through v1.0.12 — MEASURED, not padded. v1.0.12 panicked and
     // the core dump's task table read `httpd 7728/460`: the task had been 7732 bytes deep at its last
