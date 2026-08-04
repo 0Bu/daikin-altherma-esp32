@@ -9,6 +9,7 @@
 #include "led_pattern.hpp"  // LedType — the indicator back-end, now a runtime choice not a Kconfig one
 #include "ota_channel.hpp"  // OtaChannel — which published feed this device follows
 #include "modbus.hpp"       // MODBUS_TCP_PORT / MODBUS_DEFAULT_UNIT — the mb_* field defaults
+#include "dynamic_lwt_controller.hpp"
 #include "reference_temperature.hpp"
 #include "ui_lang.hpp"      // UiLang — the web UI's manual language override (else browser-detected)
 
@@ -50,6 +51,9 @@ struct Config {
     bool        weather_enabled = false;
     int32_t     weather_latitude_e6 = 0;
     int32_t     weather_longitude_e6 = 0;
+    // WP2 (#334) exposes only OFF and write-free SHADOW. The default is deliberately OFF so an OTA,
+    // migration or reboot never starts making controller decisions without an explicit operator save.
+    logic::DynamicLwtMode dynamic_lwt_mode = logic::DynamicLwtMode::Off;
     std::string syslog_host;       // "" = Syslog disabled
     int         syslog_port = 514;
     // SNTP server (main/sntp_time.cpp). Unlike syslog_host, "" is not "off" — SNTP has no disabled
@@ -160,6 +164,21 @@ struct Config {
     std::string fp_eeprom;          // rendered O/U EEPROM digits (display only)
     bool        fp_valid     = false;
 };
+
+// SHADOW is useful only while all three observation paths exist. Keep this predicate beside Config
+// so boot migration and every save share one definition; removing a dependency is an implicit,
+// fail-closed disarm rather than a way to leave a stale SHADOW mode behind without its evaluator.
+inline bool dynamic_lwt_shadow_ready(const Config& c) {
+    return !c.mqtt_uri.empty() && !c.ref_temp_topic.empty() && !c.ref_temp_path.empty() &&
+           !c.ref_temp_setpoint_path.empty() && !c.ref_temp_time_path.empty() && !c.mb_host.empty();
+}
+
+inline bool dynamic_lwt_disarm_if_unready(Config& c) {
+    if (c.dynamic_lwt_mode != logic::DynamicLwtMode::Shadow || dynamic_lwt_shadow_ready(c))
+        return false;
+    c.dynamic_lwt_mode = logic::DynamicLwtMode::Off;
+    return true;
+}
 
 // ── Field-owned patches (config.cpp applies these to the live config under its mutex) ────────────
 // Two tasks write the config: the httpd task (/set_*) and the poll task (auto-detection). A writer
@@ -352,6 +371,10 @@ inline bool validate(const Config& c, std::string& reason, int max_gpio = 48,
     // like syslog_host — empty disables the optional HomeHub stack and is valid.
     if (c.mb_port < 1 || c.mb_port > 65535)   { reason = "mb_port out of range"; return false; }
     if (c.mb_unit_id < 1 || c.mb_unit_id > 247) { reason = "mb_unit_id out of range"; return false; }
+    if (!logic::dynamic_lwt_mode_valid(c.dynamic_lwt_mode)) {
+        reason = "dynamic_lwt_mode unknown";
+        return false;
+    }
     return true;
 }
 

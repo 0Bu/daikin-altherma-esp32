@@ -140,6 +140,7 @@ void http_append_status_json(std::string& j, bool redact) {
     HpStats     hp  = hp_stats();
     MqttStatus  m   = mqtt_status();
     ReferenceTemperatureStatus rt = reference_temperature_status();
+    const logic::DynamicLwtSnapshot dlwt = dynamic_lwt_status();
     WeatherForecastStatus wf = weather_forecast_status();
     WifiInfo    wi  = wifi_info();
     j += "{";
@@ -370,6 +371,47 @@ void http_append_status_json(std::string& j, bool redact) {
     j += ",\"rejections\":";    j += std::to_string(rt.rejections);
     if (!rt.eligibility_error.empty()) { j += ",\"eligibility_error\":"; j += jstr(rt.eligibility_error); }
     if (!rt.error.empty()) { j += ",\"error\":"; j += jstr(rt.error); }
+    j += "},";
+    // WP2 deterministic controller evidence. `mode` is the persisted operator choice; state/reason
+    // are the last mqtt-task evaluation. OFF/SHADOW are the only accepted modes and this snapshot has
+    // no actuator result because #334 cannot call the actuator.
+    j += "\"dynamic_lwt\":{\"mode\":\"";
+    j += logic::dynamic_lwt_mode_name(c.dynamic_lwt_mode);
+    j += "\",\"mode_code\":"; j += std::to_string(static_cast<unsigned>(c.dynamic_lwt_mode));
+    j += ",\"state\":\""; j += logic::dynamic_lwt_state_name(dlwt.state); j += "\"";
+    j += ",\"state_code\":"; j += std::to_string(static_cast<unsigned>(dlwt.state));
+    j += ",\"reason\":\""; j += logic::dynamic_lwt_reason_name(dlwt.reason); j += "\"";
+    j += ",\"reason_code\":"; j += std::to_string(static_cast<unsigned>(dlwt.reason));
+    j += ",\"decision_eligible\":"; j += dlwt.decision_eligible ? "true" : "false";
+    j += ",\"proposal_produced\":"; j += dlwt.proposal_produced ? "true" : "false";
+    j += ",\"room_error_k\":";
+    j += dlwt.has_terms ? std::to_string(dlwt.room_error_k) : "null";
+    j += ",\"p_term_k\":"; j += dlwt.has_terms ? std::to_string(dlwt.p_term_k) : "null";
+    j += ",\"unclamped_offset_k\":";
+    j += dlwt.has_terms ? std::to_string(dlwt.unclamped_offset_k) : "null";
+    j += ",\"bounded_offset_k\":";
+    j += dlwt.has_terms ? std::to_string(dlwt.bounded_offset_k) : "null";
+    j += ",\"requested_offset_k\":";
+    j += dlwt.has_requested_offset ? std::to_string(dlwt.requested_offset_k) : "null";
+    j += ",\"forecast_contribution_k\":0";
+    j += ",\"deadband\":"; j += dlwt.deadband ? "true" : "false";
+    j += ",\"quantized\":"; j += dlwt.quantized ? "true" : "false";
+    j += ",\"clamped\":"; j += dlwt.clamped ? "true" : "false";
+    j += ",\"rate_limited\":"; j += dlwt.rate_limited ? "true" : "false";
+    j += ",\"forecast_available\":"; j += dlwt.forecast_available ? "true" : "false";
+    j += ",\"plant_gate_known\":"; j += dlwt.plant_gate_known ? "true" : "false";
+    j += ",\"plant_gate_active\":"; j += dlwt.plant_gate_active ? "true" : "false";
+    j += ",\"actuator_conflict\":"; j += dlwt.actuator_conflict ? "true" : "false";
+    j += ",\"room_source_unix_s\":";
+    j += dlwt.room_has_source_time ? std::to_string(dlwt.room_source_unix_s) : "null";
+    j += ",\"room_age_s\":"; j += dlwt.room_age_known ? std::to_string(dlwt.room_age_s) : "null";
+    j += ",\"last_decision_ms\":";
+    j += dlwt.last_decision_ms >= 0 ? std::to_string(dlwt.last_decision_ms) : "null";
+    j += ",\"sequence\":"; j += std::to_string(dlwt.sequence);
+    j += ",\"evaluations\":"; j += std::to_string(dlwt.evaluations);
+    j += ",\"decisions\":"; j += std::to_string(dlwt.decisions);
+    j += ",\"holds\":"; j += std::to_string(dlwt.holds);
+    j += ",\"failsafes\":"; j += std::to_string(dlwt.failsafes);
     j += "},";
     // Direct Open-Meteo forecast. Fetch time is the 90-minute liveness clock; the provider does not
     // expose model-run issue time, so issued_at remains null instead of being fabricated. Failed

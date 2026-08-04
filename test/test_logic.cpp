@@ -32,6 +32,7 @@
 #include "logic/detect.hpp"
 #include "logic/detect_backoff.hpp"
 #include "logic/discovery.hpp"
+#include "logic/dynamic_lwt_controller.hpp"
 #include "logic/error_codes.hpp"
 #include "logic/checkup.hpp"
 #include "logic/health_gate.hpp"
@@ -1943,6 +1944,20 @@ static void test_heartbeat() {
                "\"room_temperature_c\":null,\"room_setpoint_c\":null,\"room_error_k\":null,"
                "\"room_source_unix_s\":null,\"room_age_s\":null,\"room_reason_code\":1,"
                "\"room_messages\":0,\"room_errors\":0,\"room_rejections\":0,"
+               "\"lwt_controller_mode\":0,\"lwt_controller_state\":0,\"lwt_controller_reason\":0,"
+               "\"lwt_controller_decision_eligible\":0,\"lwt_controller_proposal_produced\":0,"
+               "\"lwt_controller_p_term_k\":null,\"lwt_controller_unclamped_offset_k\":null,"
+               "\"lwt_controller_bounded_offset_k\":null,\"lwt_controller_requested_offset_k\":null,"
+               "\"lwt_controller_forecast_contribution_k\":0,\"lwt_controller_deadband\":0,"
+               "\"lwt_controller_quantized\":0,\"lwt_controller_clamped\":0,"
+               "\"lwt_controller_rate_limited\":0,\"lwt_controller_forecast_available\":0,"
+               "\"lwt_controller_plant_gate_known\":0,\"lwt_controller_plant_gate_active\":0,"
+               "\"lwt_controller_actuator_conflict\":0,"
+               "\"lwt_controller_room_source_unix_s\":null,"
+               "\"lwt_controller_room_age_s\":null,\"lwt_controller_last_decision_ms\":null,"
+               "\"lwt_controller_sequence\":0,\"lwt_controller_evaluations\":0,"
+               "\"lwt_controller_decisions\":0,\"lwt_controller_holds\":0,"
+               "\"lwt_controller_failsafes\":0,"
                "\"bus_connected\":1,\"bus_proto\":\"I\",\"bus_registers\":10,\"bus_values\":48,"
                "\"bus_last_ok_s\":1,\"bus_rx_received\":763732,\"bus_rx_fails\":2,"
                "\"bus_crc_err\":0,\"bus_timeout_err\":2,\"bus_ou_held_over\":0,"
@@ -2029,6 +2044,45 @@ static void test_heartbeat() {
     CHECK(roomj.find("\"room_messages\":42,") != std::string::npos);
     CHECK(roomj.find("\"room_errors\":2,") != std::string::npos);
     CHECK(roomj.find("\"room_rejections\":7,") != std::string::npos);
+    HeartbeatFields cf;
+    cf.lwt_controller_mode = 1;
+    cf.lwt_controller_state = 3;
+    cf.lwt_controller_reason = 10;
+    cf.lwt_controller_decision_eligible = true;
+    cf.lwt_controller_proposal_produced = true;
+    cf.lwt_controller_has_terms = true;
+    cf.lwt_controller_has_requested_offset = true;
+    cf.lwt_controller_clamped = true;
+    cf.lwt_controller_rate_limited = true;
+    cf.lwt_controller_plant_gate_known = true;
+    cf.lwt_controller_plant_gate_active = true;
+    cf.lwt_controller_has_room_source_time = true;
+    cf.lwt_controller_room_age_known = true;
+    cf.lwt_controller_room_source_unix_s = 1770000000;
+    cf.lwt_controller_room_age_s = 12;
+    cf.lwt_controller_p_term_k = 3.0;
+    cf.lwt_controller_unclamped_offset_k = 3.0;
+    cf.lwt_controller_bounded_offset_k = 2;
+    cf.lwt_controller_requested_offset_k = 1;
+    cf.lwt_controller_last_decision_ms = 1800000;
+    cf.lwt_controller_sequence = 7;
+    cf.lwt_controller_evaluations = 12;
+    cf.lwt_controller_decisions = 7;
+    cf.lwt_controller_holds = 2;
+    cf.lwt_controller_failsafes = 3;
+    const std::string cj = build_heartbeat_json(cf);
+    CHECK(cj.find("\"lwt_controller_mode\":1,") != std::string::npos);
+    CHECK(cj.find("\"lwt_controller_state\":3,") != std::string::npos);
+    CHECK(cj.find("\"lwt_controller_reason\":10,") != std::string::npos);
+    CHECK(cj.find("\"lwt_controller_p_term_k\":3.000000,") != std::string::npos);
+    CHECK(cj.find("\"lwt_controller_bounded_offset_k\":2,") != std::string::npos);
+    CHECK(cj.find("\"lwt_controller_requested_offset_k\":1,") != std::string::npos);
+    CHECK(cj.find("\"lwt_controller_forecast_contribution_k\":0,") != std::string::npos);
+    CHECK(cj.find("\"lwt_controller_plant_gate_known\":1,") != std::string::npos);
+    CHECK(cj.find("\"lwt_controller_room_source_unix_s\":1770000000,") != std::string::npos);
+    CHECK(cj.find("\"lwt_controller_room_age_s\":12,") != std::string::npos);
+    CHECK(cj.find("\"lwt_controller_last_decision_ms\":1800000,") != std::string::npos);
+    CHECK(cj.find("\"lwt_controller_decisions\":7,") != std::string::npos);
     HeartbeatFields mf; mf.modbus_enabled = true; mf.modbus_connected = true;
     mf.modbus_rx = 12; mf.modbus_fails = 3; mf.modbus_stack_min_free_words = 731;
     mf.modbus_actuator_state = 5; mf.modbus_actuator_block = 0; mf.modbus_actuator_owner = 1;
@@ -4669,6 +4723,7 @@ static void test_config_store() {
     a.ntp_server = "pool.ntp.org";
     a.board_preset_id = static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite);
     a.board_user_set = true;
+    a.dynamic_lwt_mode = static_cast<int32_t>(daik::logic::DynamicLwtMode::Shadow);
     std::vector<uint8_t> buf = config_blob_serialize(a);
     ConfigBlob b;
     CHECK(config_blob_deserialize(buf.data(), buf.size(), b));
@@ -4687,6 +4742,8 @@ static void test_config_store() {
     CHECK(b.has_env3 && !b.env3_enabled && b.env3_sda == 2 && b.env3_scl == 1);
     CHECK(b.has_board_identity && b.board_user_set &&
           b.board_preset_id == static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite));
+    CHECK(b.has_dynamic_lwt &&
+          b.dynamic_lwt_mode == static_cast<int32_t>(daik::logic::DynamicLwtMode::Shadow));
 
     // The other flag combination, and a negative-looking port stored as-is.
     ConfigBlob c; c.wifi_rolled_back = true; c.wifi_rollback_active = false; c.syslog_port = 65535;
@@ -4732,7 +4789,7 @@ static void test_config_store() {
     board.board_preset_id = static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite);
     board.board_user_set = true;
     std::vector<uint8_t> bb = config_blob_serialize(board);
-    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 13);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 14);
     ConfigBlob rt;
     CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
     CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
@@ -4762,8 +4819,8 @@ static void test_config_store() {
     // the 1-byte v4 language and the 11-byte v5 HomeHub block (empty mb_host [2] + mb_port u32 +
     // mb_unit_id u32 + 1 flag byte), three empty v7 strings (6 bytes), and the empty v8 timestamp
     // path + max-age u32 (6 bytes), weather (9), ENV III (9), board identity (2), and the three
-    // empty v13 room-control strings (6) = 64 bytes.
-    v1.erase(v1.end() - 4 - 64, v1.end() - 4);
+    // empty v13 room-control strings (6), and v14 controller mode (1) = 65 bytes.
+    v1.erase(v1.end() - 4 - 65, v1.end() - 4);
     v1[4] = 1;
     restamp(v1);
     ConfigBlob legacy;
@@ -4772,7 +4829,7 @@ static void test_config_store() {
     CHECK(!legacy.has_board);
     CHECK(legacy.wifi_ssid == a.wifi_ssid && legacy.mqtt_uri == a.mqtt_uri);   // v1 payload intact
     CHECK(legacy.led_gpio == -1);                        // the struct default, not the 999 sentinel
-    // A TRUNCATED v13 must not decode with silently-default room-control mappings.
+    // A TRUNCATED v14 must not decode with a partial room-control/mode suffix.
     std::vector<uint8_t> trunc = bb;
     trunc.erase(trunc.end() - 4 - 6, trunc.end() - 4);    // drop the three empty v13 strings
     restamp(trunc);
@@ -4792,7 +4849,7 @@ static void test_config_store() {
     // would be a spectacularly bad trade. has_ota == false is how the caller tells "no channel
     // stored" from "explicitly release"; both mean release, only the diag line differs.
     std::vector<uint8_t> v2 = bb;
-    v2.erase(v2.end() - 4 - 51, v2.end() - 4);           // drop v3 through v13
+    v2.erase(v2.end() - 4 - 52, v2.end() - 4);           // drop v3 through v14
     v2[4] = 2;
     restamp(v2);
     ConfigBlob pre;
@@ -4816,7 +4873,7 @@ static void test_config_store() {
     // v3 blob and must still decode — the channel survives, and the absent language reads as auto
     // (has_lang == false, ui_lang == 0), so the browser keeps auto-detecting exactly as before.
     std::vector<uint8_t> v3 = lbv;
-    v3.erase(v3.end() - 4 - 50, v3.end() - 4);           // drop v4 through v13
+    v3.erase(v3.end() - 4 - 51, v3.end() - 4);           // drop v4 through v14
     v3[4] = 3;
     restamp(v3);
     ConfigBlob prel;
@@ -4833,7 +4890,7 @@ static void test_config_store() {
     mb.mb_host = "homehub-524288-abc.local";
     mb.mb_port = 502; mb.mb_unit_id = 3; mb.actuation_enabled = true; mb.homehub_enabled = false;
     std::vector<uint8_t> mbb = config_blob_serialize(mb);
-    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 13);
+    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 14);
     ConfigBlob mrt;
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
     CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-abc.local");
@@ -4852,7 +4909,7 @@ static void test_config_store() {
     // The immediately preceding v6 build could persist enabled+empty as Auto. Preserve its wire
     // shape as an upgrade fixture: current firmware must ignore that bit and decode empty as Off.
     std::vector<uint8_t> legacy_v6_auto = mbb;
-    legacy_v6_auto.erase(legacy_v6_auto.end() - 4 - 38, legacy_v6_auto.end() - 4);
+    legacy_v6_auto.erase(legacy_v6_auto.end() - 4 - 39, legacy_v6_auto.end() - 4);
     legacy_v6_auto[4] = 6;
     legacy_v6_auto[legacy_v6_auto.size() - 5] |= 2u;
     restamp(legacy_v6_auto);
@@ -4862,7 +4919,7 @@ static void test_config_store() {
     // A v5 empty-host blob also decodes disabled. Its historical flag was ambiguous, so it cannot
     // arm discovery in the current explicit-search contract.
     std::vector<uint8_t> v5 = mbb;
-    v5.erase(v5.end() - 4 - 38, v5.end() - 4);           // v5 predates v7 through v13
+    v5.erase(v5.end() - 4 - 39, v5.end() - 4);           // v5 predates v7 through v14
     v5[4] = 5;
     v5[v5.size() - 5] &= static_cast<uint8_t>(~2u);      // HomeHub flag byte immediately before CRC
     restamp(v5);
@@ -4872,7 +4929,7 @@ static void test_config_store() {
     // v8 carried the same bit, but it was an inert placeholder. The first write-capable OTA must not
     // reinterpret an old true as consent: the transport survives and actuation is forced OFF.
     std::vector<uint8_t> v8 = mbb;
-    v8.erase(v8.end() - 4 - 26, v8.end() - 4);           // v8 predates weather/ENV III/identity/v13
+    v8.erase(v8.end() - 4 - 27, v8.end() - 4);           // v8 predates weather/ENV III/identity/v13/v14
     v8[4] = 8;
     restamp(v8);
     ConfigBlob v8rt;
@@ -4882,7 +4939,7 @@ static void test_config_store() {
     // language byte) must decode, report has_modbus == false and leave the mb_* struct defaults
     // (X10A / 502 / 1) — the same trade v1/v2/v3 already refuse to make.
     std::vector<uint8_t> v4 = mbb;
-    v4.erase(v4.end() - 4 - 49, v4.end() - 4);           // drop v5 through v13
+    v4.erase(v4.end() - 4 - 50, v4.end() - 4);           // drop v5 through v14
     v4[4] = 4;
     restamp(v4);
     ConfigBlob v4rt;
@@ -4912,13 +4969,22 @@ static void test_config_store() {
           refrt.ref_temp_enabled_path == ref.ref_temp_enabled_path &&
           refrt.ref_temp_hvac_mode_path == ref.ref_temp_hvac_mode_path);
 
+    // v13 already has room control but predates the controller mode; it must migrate OFF.
+    std::vector<uint8_t> v13 = refb;
+    v13.erase(v13.end() - 4 - 1, v13.end() - 4);
+    v13[4] = 13;
+    restamp(v13);
+    ConfigBlob v13rt;
+    CHECK(config_blob_deserialize(v13.data(), v13.size(), v13rt));
+    CHECK(v13rt.has_ref_control && !v13rt.has_dynamic_lwt && v13rt.dynamic_lwt_mode == 0);
+
     // v12 migrates the already deployed current/source-time mapping without inventing control
     // authorization. It remains observable and explicitly lacks target/eligibility mappings.
     const size_t v13_ref_bytes = 2 + ref.ref_temp_setpoint_path.size() +
                                  2 + ref.ref_temp_enabled_path.size() +
                                  2 + ref.ref_temp_hvac_mode_path.size();
     std::vector<uint8_t> v12 = refb;
-    v12.erase(v12.end() - 4 - v13_ref_bytes, v12.end() - 4);
+    v12.erase(v12.end() - 4 - (v13_ref_bytes + 1), v12.end() - 4);
     v12[4] = 12;
     restamp(v12);
     ConfigBlob v12rt;
@@ -4929,7 +4995,7 @@ static void test_config_store() {
     // The hardware-tested capture slice wrote v7 with only name/topic/value-path. It must migrate
     // in place: keep that mapping, add no imaginary timestamp path, and use the 10-minute default.
     std::vector<uint8_t> v7 = refb;
-    v7.erase(v7.end() - 4 - (2 + ref.ref_temp_time_path.size() + 4 + 20 + v13_ref_bytes),
+    v7.erase(v7.end() - 4 - (2 + ref.ref_temp_time_path.size() + 4 + 20 + v13_ref_bytes + 1),
              v7.end() - 4);
     v7[4] = 7;
     restamp(v7);
@@ -4940,7 +5006,7 @@ static void test_config_store() {
 
     // A genuine v6 blob still carries every earlier setting and reports the new mapping absent.
     std::vector<uint8_t> v6 = mbb;
-    v6.erase(v6.end() - 4 - 38, v6.end() - 4);
+    v6.erase(v6.end() - 4 - 39, v6.end() - 4);
     v6[4] = 6;
     restamp(v6);
     ConfigBlob v6rt;
@@ -4961,7 +5027,7 @@ static void test_config_store() {
           weatherrt.weather_longitude_e6 == 13404954);
     // A genuine v10 blob keeps weather but predates ENV III and explicit board identity.
     std::vector<uint8_t> v10 = weatherb;
-    v10.erase(v10.end() - 4 - 17, v10.end() - 4);
+    v10.erase(v10.end() - 4 - 18, v10.end() - 4);
     v10[4] = 10;
     restamp(v10);
     ConfigBlob v10rt;
@@ -4979,7 +5045,7 @@ static void test_config_store() {
     // v11 already carried ENV III but no explicit board id. It remains readable so the load path can
     // migrate the old `board_set` statement instead of losing credentials or sensor wiring.
     std::vector<uint8_t> v11 = envbuf;
-    v11.erase(v11.end() - 4 - 8, v11.end() - 4);
+    v11.erase(v11.end() - 4 - 9, v11.end() - 4);
     v11[4] = 11;
     restamp(v11);
     ConfigBlob v11rt;
@@ -4989,7 +5055,7 @@ static void test_config_store() {
 
     // A v9 upgrade predates both independent outdoor sources and remains disabled by default.
     std::vector<uint8_t> v9 = weatherb;
-    v9.erase(v9.end() - 4 - 26, v9.end() - 4);
+    v9.erase(v9.end() - 4 - 27, v9.end() - 4);
     v9[4] = 9;
     restamp(v9);
     ConfigBlob v9rt;
@@ -5185,6 +5251,146 @@ static void test_reference_temperature_config() {
     raw.payload_valid = false;
     raw.payload_reason = ReferenceRoomReason::BackwardTimestamp;
     CHECK(reference_room_sample(raw, fresh).reason == ReferenceRoomReason::BackwardTimestamp);
+}
+
+static void test_dynamic_lwt_controller() {
+    using namespace daik::logic;
+    DynamicLwtMode parsed = DynamicLwtMode::Off;
+    CHECK(dynamic_lwt_mode_parse("off", parsed) && parsed == DynamicLwtMode::Off);
+    CHECK(dynamic_lwt_mode_parse("shadow", parsed) && parsed == DynamicLwtMode::Shadow);
+    CHECK(!dynamic_lwt_mode_parse("active", parsed));  // WP2 cannot represent an actuator mode
+    CHECK(dynamic_lwt_mode_from_int(1) == DynamicLwtMode::Shadow);
+    CHECK(dynamic_lwt_mode_from_int(2) == DynamicLwtMode::Off);  // unknown fails closed
+    CHECK(dynamic_lwt_quantize(0.5) == 1 && dynamic_lwt_quantize(-0.5) == -1);
+
+    auto ready = [] {
+        DynamicLwtInputs in;
+        in.mode = DynamicLwtMode::Shadow;
+        in.room_control_eligible = true;
+        in.room_error_k = 0.6;
+        in.x10a_connected = true;
+        in.homehub_connected = true;
+        in.plant_gate_known = true;
+        in.plant_gate_active = true;
+        in.forecast_available = true;
+        in.now_ms = 0;
+        in.room_has_source_time = true;
+        in.room_source_unix_s = 1234;
+        in.room_age_known = true;
+        in.room_age_s = 5;
+        return in;
+    };
+
+    DynamicLwtShadowController controller;
+    DynamicLwtInputs in;  // default OFF after install/migration/reboot
+    const DynamicLwtSnapshot off = controller.evaluate(in);
+    CHECK(off.mode == DynamicLwtMode::Off && off.state == DynamicLwtState::Off);
+    CHECK(off.reason == DynamicLwtReason::Disabled && !off.has_requested_offset);
+
+    in = ready();
+    DynamicLwtSnapshot decision = controller.evaluate(in);
+    CHECK(decision.state == DynamicLwtState::Shadow &&
+          decision.reason == DynamicLwtReason::ShadowDecision);
+    CHECK(decision.decision_eligible && decision.proposal_produced &&
+          decision.has_requested_offset && decision.requested_offset_k == 1);
+    CHECK(decision.sequence == 1 && decision.decisions == 1 &&
+          decision.room_source_unix_s == 1234 && decision.room_age_s == 5);
+
+    in.now_ms = 1000;
+    DynamicLwtSnapshot cadence = controller.evaluate(in);
+    CHECK(cadence.state == DynamicLwtState::Shadow &&
+          cadence.reason == DynamicLwtReason::CadenceWait);
+    CHECK(!cadence.proposal_produced && cadence.has_requested_offset &&
+          cadence.requested_offset_k == 1 && cadence.sequence == 1);
+
+    DynamicLwtShadowController deadband_controller;
+    in = ready(); in.room_error_k = 0.2;
+    DynamicLwtSnapshot deadband = deadband_controller.evaluate(in);
+    CHECK(deadband.deadband && deadband.requested_offset_k == 0 &&
+          deadband.reason == DynamicLwtReason::Deadband);
+
+    DynamicLwtShadowController rate_controller;
+    in = ready(); in.room_error_k = -3.0;
+    DynamicLwtSnapshot low = rate_controller.evaluate(in);
+    CHECK(low.clamped && low.rate_limited && low.bounded_offset_k == -2 &&
+          low.requested_offset_k == -1 && low.reason == DynamicLwtReason::RateLimited);
+    in.now_ms += DYNAMIC_LWT_DECISION_CADENCE_MS; in.room_error_k = 3.0;
+    DynamicLwtSnapshot limited = rate_controller.evaluate(in);
+    CHECK(limited.clamped && limited.rate_limited && limited.bounded_offset_k == 2);
+    CHECK(limited.requested_offset_k == 0 && limited.reason == DynamicLwtReason::RateLimited);
+    in.now_ms += DYNAMIC_LWT_DECISION_CADENCE_MS;
+    CHECK(rate_controller.evaluate(in).requested_offset_k == 1);
+    in.now_ms += DYNAMIC_LWT_DECISION_CADENCE_MS;
+    CHECK(rate_controller.evaluate(in).requested_offset_k == 2);
+
+    DynamicLwtShadowController degraded_controller;
+    in = ready(); in.forecast_available = false;
+    DynamicLwtSnapshot degraded = degraded_controller.evaluate(in);
+    CHECK(degraded.state == DynamicLwtState::Degraded &&
+          degraded.reason == DynamicLwtReason::ForecastUnavailable);
+    CHECK(degraded.has_requested_offset && degraded.forecast_contribution_k == 0);
+
+    DynamicLwtShadowController gates;
+    in = ready(); in.room_control_eligible = false;
+    CHECK(gates.evaluate(in).reason == DynamicLwtReason::RoomUnavailable);
+    in = ready(); in.x10a_connected = false;
+    CHECK(gates.evaluate(in).reason == DynamicLwtReason::X10aUnavailable);
+    in = ready(); in.homehub_connected = false;
+    CHECK(gates.evaluate(in).reason == DynamicLwtReason::HomeHubUnavailable);
+    in = ready(); in.plant_gate_known = false;
+    CHECK(gates.evaluate(in).reason == DynamicLwtReason::PlantGateUnknown);
+    in = ready(); in.plant_gate_active = false;
+    DynamicLwtSnapshot hold = gates.evaluate(in);
+    CHECK(hold.state == DynamicLwtState::Hold && hold.reason == DynamicLwtReason::PlantInactive);
+    CHECK(!hold.has_requested_offset && hold.holds == 1);
+
+    // FAILSAFE and HOLD disarm cadence/proposal memory. Recovery may decide immediately, but its
+    // first proposal is again limited to one kelvin from neutral.
+    DynamicLwtShadowController recovery;
+    in = ready(); in.room_error_k = 3.0;
+    CHECK(recovery.evaluate(in).requested_offset_k == 1);
+    in.now_ms = 1000; in.x10a_connected = false;
+    CHECK(recovery.evaluate(in).state == DynamicLwtState::Failsafe);
+    in = ready(); in.now_ms = 2000; in.room_error_k = -3.0;
+    DynamicLwtSnapshot after_failsafe = recovery.evaluate(in);
+    CHECK(after_failsafe.proposal_produced && after_failsafe.requested_offset_k == -1);
+    in.now_ms = 3000; in.plant_gate_active = false;
+    CHECK(recovery.evaluate(in).state == DynamicLwtState::Hold);
+    in = ready(); in.now_ms = 4000; in.room_error_k = 3.0;
+    DynamicLwtSnapshot after_hold = recovery.evaluate(in);
+    CHECK(after_hold.proposal_produced && after_hold.requested_offset_k == 1);
+    in.now_ms = 3999;
+    CHECK(recovery.evaluate(in).reason == DynamicLwtReason::ClockInvalid);
+
+    // An explicit OFF disarms and clears the cadence memory. Re-enabling SHADOW may decide at once,
+    // but the sequence/counters remain useful boot-local evidence.
+    DynamicLwtShadowController rearm;
+    in = ready(); CHECK(rearm.evaluate(in).proposal_produced);
+    in.mode = DynamicLwtMode::Off; in.now_ms = 10;
+    CHECK(rearm.evaluate(in).state == DynamicLwtState::Off);
+    in = ready(); in.now_ms = 20;
+    CHECK(rearm.evaluate(in).proposal_produced);
+
+    Config invalid;
+    invalid.dynamic_lwt_mode = static_cast<DynamicLwtMode>(2);
+    std::string reason;
+    CHECK(!validate(invalid, reason));
+    CHECK(reason == "dynamic_lwt_mode unknown");
+
+    Config dependencies;
+    dependencies.dynamic_lwt_mode = DynamicLwtMode::Shadow;
+    CHECK(!dynamic_lwt_shadow_ready(dependencies));
+    CHECK(dynamic_lwt_disarm_if_unready(dependencies));
+    CHECK(dependencies.dynamic_lwt_mode == DynamicLwtMode::Off);
+    dependencies.mqtt_uri = "mqtt://broker";
+    dependencies.ref_temp_topic = "room";
+    dependencies.ref_temp_path = "current";
+    dependencies.ref_temp_setpoint_path = "target";
+    dependencies.ref_temp_time_path = "read_at";
+    dependencies.mb_host = "homehub.local";
+    dependencies.dynamic_lwt_mode = DynamicLwtMode::Shadow;
+    CHECK(dynamic_lwt_shadow_ready(dependencies));
+    CHECK(!dynamic_lwt_disarm_if_unready(dependencies));
 }
 
 static void test_weather_forecast_contract() {
@@ -5522,7 +5728,7 @@ static void test_http_surface() {
     // Trusted LAN exposes the full API — every route, either method.
     for (const char* p : {"/", "/index.html", "/favicon.ico", "/scan", "/status", "/values",
                           "/diag", "/coredump", "/crash/dismiss", "/models", "/set_wifi",
-                          "/set_mqtt", "/set_ntp", "/set_hp", "/detect", "/ota/check",
+                          "/set_mqtt", "/set_ntp", "/set_dynamic_lwt", "/set_hp", "/detect", "/ota/check",
                           "/ota/update", "/mcp"}) {
         CHECK(http_surface_serves(lan, p, false));
         CHECK(http_surface_serves(lan, p, true));
@@ -9297,6 +9503,7 @@ int main() {
     test_config_store();
     test_env3();
     test_reference_temperature_config();
+    test_dynamic_lwt_controller();
     test_weather_forecast_contract();
     test_mcp();
     test_http_surface();

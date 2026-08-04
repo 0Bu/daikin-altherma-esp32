@@ -73,6 +73,38 @@ struct HeartbeatFields {
     uint32_t    room_errors = 0;
     uint32_t    room_rejections = 0;
 
+    // WP2 (#334) deterministic SHADOW controller. All booleans render as numeric 0/1 for Telegraf;
+    // unavailable terms/offsets render null. These are proposals only — there is no actuator call.
+    uint8_t     lwt_controller_mode = 0;
+    uint8_t     lwt_controller_state = 0;
+    uint8_t     lwt_controller_reason = 0;
+    bool        lwt_controller_decision_eligible = false;
+    bool        lwt_controller_proposal_produced = false;
+    bool        lwt_controller_has_terms = false;
+    bool        lwt_controller_has_requested_offset = false;
+    bool        lwt_controller_deadband = false;
+    bool        lwt_controller_quantized = false;
+    bool        lwt_controller_clamped = false;
+    bool        lwt_controller_rate_limited = false;
+    bool        lwt_controller_forecast_available = false;
+    bool        lwt_controller_plant_gate_known = false;
+    bool        lwt_controller_plant_gate_active = false;
+    bool        lwt_controller_actuator_conflict = false;
+    bool        lwt_controller_has_room_source_time = false;
+    bool        lwt_controller_room_age_known = false;
+    int64_t     lwt_controller_room_source_unix_s = -1;
+    uint64_t    lwt_controller_room_age_s = 0;
+    double      lwt_controller_p_term_k = 0.0;
+    double      lwt_controller_unclamped_offset_k = 0.0;
+    int16_t     lwt_controller_bounded_offset_k = 0;
+    int16_t     lwt_controller_requested_offset_k = 0;
+    int64_t     lwt_controller_last_decision_ms = -1;
+    uint32_t    lwt_controller_sequence = 0;
+    uint32_t    lwt_controller_evaluations = 0;
+    uint32_t    lwt_controller_decisions = 0;
+    uint32_t    lwt_controller_holds = 0;
+    uint32_t    lwt_controller_failsafes = 0;
+
     bool        bus_connected  = false;   // hp_stats().connected — X10A link up this cycle
     char        bus_proto      = '?';
     int         registers      = 0;
@@ -232,6 +264,49 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += ",\"room_messages\":"; j += std::to_string(f.room_messages);
     j += ",\"room_errors\":"; j += std::to_string(f.room_errors);
     j += ",\"room_rejections\":"; j += std::to_string(f.room_rejections);
+    // Deterministic LWT shadow controller. Numeric-only so the existing Telegraf parser archives it.
+    j += ",\"lwt_controller_mode\":"; j += std::to_string(f.lwt_controller_mode);
+    j += ",\"lwt_controller_state\":"; j += std::to_string(f.lwt_controller_state);
+    j += ",\"lwt_controller_reason\":"; j += std::to_string(f.lwt_controller_reason);
+    j += ",\"lwt_controller_decision_eligible\":";
+    j += f.lwt_controller_decision_eligible ? "1" : "0";
+    j += ",\"lwt_controller_proposal_produced\":";
+    j += f.lwt_controller_proposal_produced ? "1" : "0";
+    j += ",\"lwt_controller_p_term_k\":";
+    j += f.lwt_controller_has_terms ? std::to_string(f.lwt_controller_p_term_k) : "null";
+    j += ",\"lwt_controller_unclamped_offset_k\":";
+    j += f.lwt_controller_has_terms ? std::to_string(f.lwt_controller_unclamped_offset_k) : "null";
+    j += ",\"lwt_controller_bounded_offset_k\":";
+    j += f.lwt_controller_has_terms ? std::to_string(f.lwt_controller_bounded_offset_k) : "null";
+    j += ",\"lwt_controller_requested_offset_k\":";
+    j += f.lwt_controller_has_requested_offset
+       ? std::to_string(f.lwt_controller_requested_offset_k) : "null";
+    j += ",\"lwt_controller_forecast_contribution_k\":0";
+    j += ",\"lwt_controller_deadband\":"; j += f.lwt_controller_deadband ? "1" : "0";
+    j += ",\"lwt_controller_quantized\":"; j += f.lwt_controller_quantized ? "1" : "0";
+    j += ",\"lwt_controller_clamped\":"; j += f.lwt_controller_clamped ? "1" : "0";
+    j += ",\"lwt_controller_rate_limited\":"; j += f.lwt_controller_rate_limited ? "1" : "0";
+    j += ",\"lwt_controller_forecast_available\":";
+    j += f.lwt_controller_forecast_available ? "1" : "0";
+    j += ",\"lwt_controller_plant_gate_known\":";
+    j += f.lwt_controller_plant_gate_known ? "1" : "0";
+    j += ",\"lwt_controller_plant_gate_active\":";
+    j += f.lwt_controller_plant_gate_active ? "1" : "0";
+    j += ",\"lwt_controller_actuator_conflict\":";
+    j += f.lwt_controller_actuator_conflict ? "1" : "0";
+    j += ",\"lwt_controller_room_source_unix_s\":";
+    j += f.lwt_controller_has_room_source_time
+       ? std::to_string(f.lwt_controller_room_source_unix_s) : "null";
+    j += ",\"lwt_controller_room_age_s\":";
+    j += f.lwt_controller_room_age_known ? std::to_string(f.lwt_controller_room_age_s) : "null";
+    j += ",\"lwt_controller_last_decision_ms\":";
+    j += f.lwt_controller_last_decision_ms >= 0
+       ? std::to_string(f.lwt_controller_last_decision_ms) : "null";
+    j += ",\"lwt_controller_sequence\":"; j += std::to_string(f.lwt_controller_sequence);
+    j += ",\"lwt_controller_evaluations\":"; j += std::to_string(f.lwt_controller_evaluations);
+    j += ",\"lwt_controller_decisions\":"; j += std::to_string(f.lwt_controller_decisions);
+    j += ",\"lwt_controller_holds\":"; j += std::to_string(f.lwt_controller_holds);
+    j += ",\"lwt_controller_failsafes\":"; j += std::to_string(f.lwt_controller_failsafes);
     // bus_*
     j += ",\"bus_connected\":"; j += f.bus_connected ? "1" : "0";
     j += ",\"bus_proto\":\""; j += f.bus_proto; j += "\"";
