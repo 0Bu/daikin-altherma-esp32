@@ -497,15 +497,6 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .section-badge.ok::before  { background: var(--ok); }
 .section-badge.err::before { background: var(--err); }
 .section-badge.dim::before { background: var(--muted); }
-/* Maturity is not a live status. The dynamic-control marker is therefore a written pill without a
-   traffic-light dot: it says that the whole card is experimental, independent of whether inputs
-   happen to be healthy right now. */
-.section-badge.experimental {
-  display: inline-flex; align-items: center; padding: 2px 7px; border: 1px solid var(--line);
-  border-radius: var(--r-pill); background: var(--brand-tint); color: var(--fg);
-  font-size: 10.5px; letter-spacing: .25px;
-}
-.section-badge.experimental::before { display: none; }
 .vrow {
   display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
   padding: 9px 0; border-top: 1px solid var(--line);

@@ -86,8 +86,10 @@ assert.match(app, /function dynamicControlCardHtml\(\)[\s\S]*if \(d\.mode !== "s
   "the experimental dynamic-control card must remain hidden until Firmware selects SHADOW");
 assert.match(app, /vcard\(t\("card\.fw_title"\), fwRows\) \+ dynamicControlCardHtml\(\)/,
   "the enabled experimental card must render after Firmware at the bottom");
-assert.match(app, /vcard\(t\("dyn\.card"\), rows, t\("dyn\.experimental"\), "experimental"\)/,
-  "the bottom card must carry a written experimental pill");
+assert.match(app, /return vcard\(t\("dyn\.card"\), rows\);/,
+  "the bottom card must render without a maturity pill");
+assert.doesNotMatch(app, /"dyn\.experimental"|section-badge\.experimental/,
+  "the removed experimental pill must leave no translation or styling contract behind");
 const weatherModalHtml = html.match(/<div class="modal" id="weatherModal"[\s\S]*?<\/form>\s*<\/div>/)?.[0] || "";
 assert.match(weatherModalHtml, /id="wxLatitude"[\s\S]*id="wxLongitude"[\s\S]*href="https:\/\/open-meteo\.com\/"[\s\S]*data-i18n="wx\.attribution"/,
   "the direct Open-Meteo source must expose coordinate entry and attribution");

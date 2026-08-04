@@ -23,7 +23,6 @@ const labels = {
   "dyn.strategy_off_help": "Strategie ausgeschaltet",
   "dyn.safety_help": "Sicherheits-Erklärung",
   "dyn.card": "Dynamische Vorlaufregelung",
-  "dyn.experimental": "Experimentell",
   "dyn.not_configured": "Nicht konfiguriert",
   "dyn.one_source": "1 Quelle",
   "dyn.input_error": "Eingabefehler",
@@ -143,8 +142,8 @@ S.status = {
   },
 };
 let html = sandbox.__renderDynamic();
-assert.match(html, /section-badge experimental">Experimentell<\/span>/,
-  "the enabled bottom card must carry a written experimental pill");
+assert.doesNotMatch(html, /section-badge|Experimentell/,
+  "the enabled bottom card must not carry an experimental pill");
 assert.equal((html.match(/class="vdesc-body settings-info-tongue"/g) || []).length, 5,
   "all five dynamic-control rows must render an information tongue");
 for (const key of ["mode", "room-sources", "weather", "strategy", "safety"]) {
