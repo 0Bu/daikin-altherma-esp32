@@ -1255,8 +1255,7 @@ vocabulary exactly:
    to OFF/SHADOW: enabling requires MQTT, a complete room source and HomeHub; it never exposes ACTIVE.
 
 5. **Dynamische Vorlaufregelung card** — the conditional, bottom-most Settings home of the dynamic-LWT
-   project, shown only while the Firmware switch selects SHADOW and marked with a written
-   **Experimentell** pill rather than a live-health dot. Its five rows
+   project, shown only while the Firmware switch selects SHADOW. Its five rows
    are **Betriebsart**, **Raumtemperaturquellen**, **Wetterprognose**, **Regelstrategie**, and
    **Sicherheit & Ausgabe** = **Nur lesend**. OFF hides this card, keeps saved source settings, removes
    the room subscription, clears captured runtime values, pauses Open-Meteo and evaluates no proposal.

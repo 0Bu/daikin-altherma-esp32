@@ -390,7 +390,7 @@ function dynamicControlCardHtml() {
     `<div class="vdesc-p">${esc(t("dyn.safety_help"))}</div>`);
   if (captureEnabled && r.error) rows += vrow(t("ref.error"), r.error, { cls: "err settings-wrap" });
   if (captureEnabled && w.error) rows += vrow(t("wx.error"), w.error, { cls: "err settings-wrap" });
-  return vcard(t("dyn.card"), rows, t("dyn.experimental"), "experimental");
+  return vcard(t("dyn.card"), rows);
 }
 
 // How long the board has been up (/status.uptime_s — seconds since boot, esp_timer). TWO units at
