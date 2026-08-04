@@ -143,17 +143,17 @@ assert.match(mqttHa, /else if \(!s_env3_disabled_cleaned\)[\s\S]*retract_env3_di
 // The room-source row remains a user-configured exact MQTT mapping. Save performs the non-persistent
 // live test itself and only then presents its proof to persistence; Delete posts the explicit empty
 // mapping that clears the source and captured value.
-assert.match(html, /id="refTempModal"[\s\S]*id="rtTopic"[\s\S]*id="rtPath"[\s\S]*id="rtTimePath"[\s\S]*id="rtMaxAge"/,
-  "the room-temperature source modal must expose value, timestamp, and freshness mapping");
+assert.match(html, /id="refTempModal"[\s\S]*id="rtTopic"[\s\S]*id="rtPath"[\s\S]*id="rtSetpointPath"[\s\S]*id="rtTimePath"[\s\S]*id="rtEnabledPath"[\s\S]*id="rtHvacModePath"[\s\S]*id="rtMaxAge"/,
+  "the room-temperature source modal must expose current, target, source-time and eligibility mappings");
 assert.match(html, /id="rtDeleteBtn"[^>]*data-i18n="ref\.delete"[\s\S]*id="rtBtn"[^>]*data-i18n="btn\.save"/,
   "Delete must replace the separate Test action while Save remains immediately actionable");
 assert.doesNotMatch(html, /id="rtTestBtn"|id="rtTestResult"/,
   "the room-source dialog must not retain a separate Test action or stale proof result");
-assert.match(app, /shelly1pmminig4-fixture00003\/status\/switch:0/,
-  "the requested Shelly topic must be available as the first-open test preset");
+assert.doesNotMatch(app, /shelly1pmminig4-fixture00003\/status\/switch:0/,
+  "an untouched profile must not carry the obsolete Shelly device-temperature preset");
 assert.match(app, /refTempForm[^]*post\("\/test_ref_temp", input\)[^]*testResult\.test_proof[^]*post\("\/set_ref_temp", \{ \.\.\.input, test_proof: testResult\.test_proof \}\)/,
   "Save must obtain a live proof and persist exactly that tested mapping in one user action");
-assert.match(app, /\$\("rtDeleteBtn"\)\.onclick[^]*post\("\/set_ref_temp", \{[^]*name: "", topic: "", temperature_path: "", timestamp_path: ""/,
+assert.match(app, /\$\("rtDeleteBtn"\)\.onclick[^]*post\("\/set_ref_temp", \{[^]*name: "", topic: "", temperature_path: "", setpoint_path: "", timestamp_path: ""/,
   "Delete must clear the saved mapping without testing the form's current field contents");
 assert.match(app, /"ref\.delete": "Delete"[^]*"ref\.delete": "Löschen"/,
   "Delete must remain explicit in both supported languages");

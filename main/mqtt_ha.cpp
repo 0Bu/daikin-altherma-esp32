@@ -143,15 +143,20 @@ struct ReferenceProbeState {
     ReferenceTemperatureTestConfig config;
     uint32_t generation=0;
     bool active=false, subscribed=false, passed=false, retained=false;
-    double temperature_c=0.0;
-    std::string error;
+    bool control_eligible=false, has_enabled=false, enabled=false, has_hvac_mode=false;
+    double temperature_c=0.0, setpoint_c=0.0, room_error_k=0.0;
+    ReferenceRoomReason reason=ReferenceRoomReason::InvalidPayload;
+    std::string hvac_mode, error;
 };
 static ReferenceProbeState s_ref_probe;
 static SemaphoreHandle_t   s_ref_probe_sem = nullptr;
 static std::string         s_ref_subscribed_topic;  // mqtt_task only
 static std::string         s_ref_binding_topic;     // resets captured value when either half changes
 static std::string         s_ref_binding_path;
+static std::string         s_ref_binding_setpoint_path;
 static std::string         s_ref_binding_time_path;
+static std::string         s_ref_binding_enabled_path;
+static std::string         s_ref_binding_hvac_mode_path;
 static std::string         s_ref_probe_subscribed_topic; // mqtt_task only; never persisted
 static uint32_t            s_ref_probe_task_generation = 0;
 
@@ -737,6 +742,7 @@ static void publish_crash() {
 static void publish_heartbeat() {
     HpStats  hp = hp_stats();
     WifiInfo wi = wifi_info();
+    const Config cfg = config();
     HeartbeatFields f;
     f.version         = esp_app_get_description()->version;
     f.platform        = CONFIG_IDF_TARGET;
@@ -771,7 +777,7 @@ static void publish_heartbeat() {
     f.mqtt_fails      = s_mqtt_pub_fail;
     f.mqtt_reconnects = s_mqtt_reconnects;
     f.bus_connected   = hp.connected;
-    f.bus_proto       = static_cast<char>(config().proto);
+    f.bus_proto       = static_cast<char>(cfg.proto);
     f.registers       = hp.registers;
     f.values          = hp.values;
     f.crc_err         = hp.crc_err;
@@ -780,6 +786,45 @@ static void publish_heartbeat() {
     f.rx_fails        = hp.rx_fail_total;
     f.last_ok_s       = hp.last_ok_s;
     f.ou_held_over    = hp.ou_held_over;
+    const ReferenceTemperatureStatus rt = reference_temperature_status();
+    const uint64_t room_now_ms = f.uptime_ms;
+    int64_t room_now_unix_s = -1;
+    int32_t room_now_sub_ms = 0;
+    time_now(room_now_unix_s, room_now_sub_ms);
+    const ReferenceFreshness room_freshness = reference_freshness(
+        rt.has_value, rt.retained, rt.has_source_time, rt.source_unix_s, rt.received_ms,
+        room_now_unix_s, room_now_ms, cfg.ref_temp_max_age_s);
+    ReferenceRoomRaw room_raw;
+    room_raw.configured = !cfg.ref_temp_topic.empty();
+    room_raw.has_temperature = rt.has_value;
+    room_raw.payload_valid = rt.error.empty();
+    room_raw.temperature_c = rt.temperature_c;
+    room_raw.has_source_time = rt.has_source_time;
+    room_raw.setpoint_mapped = !cfg.ref_temp_setpoint_path.empty();
+    room_raw.has_setpoint = rt.has_setpoint;
+    room_raw.setpoint_c = rt.setpoint_c;
+    room_raw.enabled_mapped = !cfg.ref_temp_enabled_path.empty();
+    room_raw.has_enabled = rt.has_enabled;
+    room_raw.enabled = rt.enabled;
+    room_raw.hvac_mode_mapped = !cfg.ref_temp_hvac_mode_path.empty();
+    room_raw.has_hvac_mode = rt.has_hvac_mode;
+    room_raw.hvac_mode = rt.hvac_mode;
+    room_raw.payload_reason = rt.rejection_reason;
+    const ReferenceRoomSample room = reference_room_sample(room_raw, room_freshness);
+    f.room_temperature_valid = room.temperature_valid;
+    f.room_setpoint_valid = room.setpoint_valid;
+    f.room_control_eligible = room.control_eligible;
+    f.room_temperature_c = room.temperature_c;
+    f.room_setpoint_c = room.setpoint_c;
+    f.room_error_k = room.room_error_k;
+    f.room_has_source_time = rt.has_value && rt.has_source_time;
+    f.room_source_unix_s = rt.source_unix_s;
+    f.room_age_known = room_freshness.age_known;
+    f.room_age_s = room_freshness.age_s;
+    f.room_reason_code = static_cast<uint8_t>(room.reason);
+    f.room_messages = rt.messages;
+    f.room_errors = rt.errors;
+    f.room_rejections = rt.rejections;
     const ModbusStatus mbs = mb_status();
     f.modbus_enabled   = mbs.enabled;
     f.modbus_connected = mbs.connected;
@@ -899,18 +944,26 @@ static bool reference_payload_timestamp(cJSON* item, int64_t& unix_s, const char
 }
 
 struct DecodedReferenceFrame {
-    bool valid=false, has_source_time=false;
-    double temperature_c=0.0;
+    bool valid=false, has_source_time=false, has_setpoint=false;
+    bool has_enabled=false, enabled=false, has_hvac_mode=false, control_parse_error=false;
+    double temperature_c=0.0, setpoint_c=0.0;
     int64_t source_unix_s=-1;
+    ReferenceRoomReason error_reason=ReferenceRoomReason::InvalidPayload;
+    ReferenceRoomReason control_reason=ReferenceRoomReason::Eligible;
+    std::string hvac_mode;
     const char* timestamp_source="mqtt_arrival";
     const char* error=nullptr;
+    const char* control_error=nullptr;
 };
 
 // One parser for the saved source and the pre-save probe. Keeping both paths on this function is
 // load-bearing: a green test must mean the live capture will accept the exact same payload.
 static DecodedReferenceFrame decode_reference_frame(const ReferenceMqttFrame& frame,
                                                      const std::string& temperature_path,
-                                                     const std::string& timestamp_path) {
+                                                     const std::string& setpoint_path,
+                                                     const std::string& timestamp_path,
+                                                     const std::string& enabled_path,
+                                                     const std::string& hvac_mode_path) {
     DecodedReferenceFrame out;
     cJSON* root = cJSON_ParseWithLength(frame.payload, frame.payload_len);
     if (!root) { out.error = "payload is not valid JSON"; return out; }
@@ -921,11 +974,23 @@ static DecodedReferenceFrame decode_reference_frame(const ReferenceMqttFrame& fr
         return out;
     }
     out.temperature_c = item->valuedouble;
+    if (!setpoint_path.empty()) {
+        cJSON* setpoint_item = reference_json_item(root, setpoint_path);
+        if (cJSON_IsNumber(setpoint_item) && std::isfinite(setpoint_item->valuedouble)) {
+            out.has_setpoint = true;
+            out.setpoint_c = setpoint_item->valuedouble;
+        } else {
+            out.control_parse_error = true;
+            out.control_reason = ReferenceRoomReason::MissingSetpoint;
+            out.control_error = "Setpoint path is missing or not numeric";
+        }
+    }
     if (!timestamp_path.empty()) {
         cJSON* timestamp_item = reference_json_item(root, timestamp_path);
         if (!reference_payload_timestamp(timestamp_item, out.source_unix_s,
                                          out.timestamp_source)) {
             cJSON_Delete(root);
+            out.error_reason = ReferenceRoomReason::MissingSourceTime;
             out.error = "Timestamp path is missing or not RFC3339/Unix seconds";
             return out;
         }
@@ -933,8 +998,36 @@ static DecodedReferenceFrame decode_reference_frame(const ReferenceMqttFrame& fr
         if (frame.received_unix_s >= 0 &&
             out.source_unix_s > frame.received_unix_s + REF_TEMP_FUTURE_TOLERANCE_S) {
             cJSON_Delete(root);
+            out.error_reason = ReferenceRoomReason::FutureTimestamp;
             out.error = "Source timestamp is in the future";
             return out;
+        }
+    }
+    if (!enabled_path.empty()) {
+        cJSON* enabled_item = reference_json_item(root, enabled_path);
+        if (cJSON_IsBool(enabled_item)) {
+            out.has_enabled = true;
+            out.enabled = cJSON_IsTrue(enabled_item);
+        } else if (cJSON_IsNumber(enabled_item) &&
+                   (enabled_item->valuedouble == 0.0 || enabled_item->valuedouble == 1.0)) {
+            out.has_enabled = true;
+            out.enabled = enabled_item->valuedouble == 1.0;
+        } else if (!out.control_parse_error) {
+            out.control_parse_error = true;
+            out.control_reason = ReferenceRoomReason::MissingEnabledState;
+            out.control_error = "Enabled path is missing or not boolean/0/1";
+        }
+    }
+    if (!hvac_mode_path.empty()) {
+        cJSON* hvac_item = reference_json_item(root, hvac_mode_path);
+        if (cJSON_IsString(hvac_item) && hvac_item->valuestring &&
+            std::strlen(hvac_item->valuestring) <= 16) {
+            out.has_hvac_mode = true;
+            out.hvac_mode = hvac_item->valuestring;
+        } else if (!out.control_parse_error) {
+            out.control_parse_error = true;
+            out.control_reason = ReferenceRoomReason::MissingHvacMode;
+            out.control_error = "HVAC mode path is missing or not a short string";
         }
     }
     cJSON_Delete(root);
@@ -957,10 +1050,11 @@ static bool reference_timestamp_moved_backward(const DecodedReferenceFrame& deco
            s_ref_status.has_source_time && decoded.source_unix_s < s_ref_status.source_unix_s;
 }
 
-static void set_reference_error(const char* error, bool count_error) {
+static void set_reference_error(const char* error, ReferenceRoomReason reason, bool count_error) {
     Lock lk(s_mtx);
     s_ref_status.error = error ? error : "";   // mqtt_task is exception-guarded; Lock is RAII
-    if (count_error) s_ref_status.errors++;
+    s_ref_status.rejection_reason = reason;
+    if (count_error) { s_ref_status.errors++; s_ref_status.rejections++; }
 }
 
 // Apply topic edits on the existing MQTT client. A binding change retires the old raw value: a
@@ -968,20 +1062,33 @@ static void set_reference_error(const char* error, bool count_error) {
 static void service_reference_subscription(const Config& c) {
     const bool configured = !c.ref_temp_topic.empty();
     if (c.ref_temp_topic != s_ref_binding_topic || c.ref_temp_path != s_ref_binding_path ||
-        c.ref_temp_time_path != s_ref_binding_time_path) {
+        c.ref_temp_setpoint_path != s_ref_binding_setpoint_path ||
+        c.ref_temp_time_path != s_ref_binding_time_path ||
+        c.ref_temp_enabled_path != s_ref_binding_enabled_path ||
+        c.ref_temp_hvac_mode_path != s_ref_binding_hvac_mode_path) {
         s_ref_binding_topic = c.ref_temp_topic;
         s_ref_binding_path = c.ref_temp_path;
+        s_ref_binding_setpoint_path = c.ref_temp_setpoint_path;
         s_ref_binding_time_path = c.ref_temp_time_path;
+        s_ref_binding_enabled_path = c.ref_temp_enabled_path;
+        s_ref_binding_hvac_mode_path = c.ref_temp_hvac_mode_path;
         Lock lk(s_mtx);
         s_ref_status.has_value = false;
         s_ref_status.has_source_time = false;
+        s_ref_status.has_setpoint = false;
+        s_ref_status.has_enabled = false;
+        s_ref_status.has_hvac_mode = false;
         s_ref_status.received_ms = 0;
         s_ref_status.received_unix_s = -1;
         s_ref_status.source_unix_s = -1;
         s_ref_status.retained = false;
         s_ref_status.messages = 0;
         s_ref_status.errors = 0;
+        s_ref_status.rejections = 0;
         s_ref_status.timestamp_source.clear();
+        s_ref_status.hvac_mode.clear();
+        s_ref_status.eligibility_error.clear();
+        s_ref_status.rejection_reason = ReferenceRoomReason::InvalidPayload;
         s_ref_status.error.clear();
     }
     {
@@ -991,13 +1098,16 @@ static void service_reference_subscription(const Config& c) {
 
     const char* invalid = nullptr;
     if (!reference_temperature_config_valid(c.ref_temp_name, c.ref_temp_topic,
-                                            c.ref_temp_path, c.ref_temp_time_path,
+                                            c.ref_temp_path, c.ref_temp_setpoint_path,
+                                            c.ref_temp_time_path, c.ref_temp_enabled_path,
+                                            c.ref_temp_hvac_mode_path,
                                             c.ref_temp_max_age_s, &invalid)) {
         if (!s_ref_subscribed_topic.empty() && s_connected)
             esp_mqtt_client_unsubscribe(s_client, s_ref_subscribed_topic.c_str());
         s_ref_subscribed_topic.clear();
         Lock lk(s_mtx);
         s_ref_status.subscribed = false;
+        s_ref_status.rejection_reason = ReferenceRoomReason::InvalidPayload;
         s_ref_status.error = invalid ? invalid : "invalid reference temperature config";
         return;
     }
@@ -1119,7 +1229,8 @@ static void service_reference_probe_frame(const ReferenceMqttFrame& frame) {
     }
 
     const DecodedReferenceFrame decoded = decode_reference_frame(
-        frame, candidate.temperature_path, candidate.timestamp_path);
+        frame, candidate.temperature_path, candidate.setpoint_path, candidate.timestamp_path,
+        candidate.enabled_path, candidate.hvac_mode_path);
     if (!decoded.valid) {
         Lock lk(s_mtx);
         if (s_ref_probe.active && s_ref_probe.generation == generation)
@@ -1149,6 +1260,34 @@ static void service_reference_probe_frame(const ReferenceMqttFrame& frame) {
         return;
     }
 
+    ReferenceRoomRaw raw;
+    raw.configured = true;
+    raw.has_temperature = true;
+    raw.temperature_c = decoded.temperature_c;
+    raw.has_source_time = decoded.has_source_time;
+    raw.setpoint_mapped = !candidate.setpoint_path.empty();
+    raw.has_setpoint = decoded.has_setpoint;
+    raw.setpoint_c = decoded.setpoint_c;
+    raw.enabled_mapped = !candidate.enabled_path.empty();
+    raw.has_enabled = decoded.has_enabled;
+    raw.enabled = decoded.enabled;
+    raw.hvac_mode_mapped = !candidate.hvac_mode_path.empty();
+    raw.has_hvac_mode = decoded.has_hvac_mode;
+    raw.hvac_mode = decoded.hvac_mode;
+    const ReferenceRoomSample sample = reference_room_sample(raw, freshness);
+    // Save proves that every mapped field is present, typed and plausible. A thermostat may be
+    // disabled or in another HVAC mode while the user edits settings; that is a valid mapping proof
+    // but remains visibly control-ineligible until the live state returns to enabled heating.
+    if (!sample.temperature_valid || !sample.setpoint_valid ||
+        (raw.enabled_mapped && !raw.has_enabled) ||
+        (raw.hvac_mode_mapped && !raw.has_hvac_mode)) {
+        Lock lk(s_mtx);
+        if (s_ref_probe.active && s_ref_probe.generation == generation)
+            s_ref_probe.error = decoded.control_error ? decoded.control_error
+                              : reference_room_reason_name(sample.reason);
+        return;
+    }
+
     bool signal = false;
     {
         Lock lk(s_mtx);
@@ -1157,6 +1296,14 @@ static void service_reference_probe_frame(const ReferenceMqttFrame& frame) {
             s_ref_probe.passed = true;
             s_ref_probe.retained = frame.retained;
             s_ref_probe.temperature_c = decoded.temperature_c;
+            s_ref_probe.setpoint_c = decoded.setpoint_c;
+            s_ref_probe.control_eligible = sample.control_eligible;
+            s_ref_probe.room_error_k = sample.room_error_k;
+            s_ref_probe.reason = sample.reason;
+            s_ref_probe.has_enabled = decoded.has_enabled;
+            s_ref_probe.enabled = decoded.enabled;
+            s_ref_probe.has_hvac_mode = decoded.has_hvac_mode;
+            s_ref_probe.hvac_mode = decoded.hvac_mode;
             s_ref_probe.error.clear();
             signal = true;
         }
@@ -1176,20 +1323,51 @@ static void service_reference_frames(const Config& c) {
             s_ref_status.messages++;
         }
         const DecodedReferenceFrame decoded = decode_reference_frame(
-            frame, c.ref_temp_path, c.ref_temp_time_path);
+            frame, c.ref_temp_path, c.ref_temp_setpoint_path, c.ref_temp_time_path,
+            c.ref_temp_enabled_path, c.ref_temp_hvac_mode_path);
         if (!decoded.valid) {
-            set_reference_error(decoded.error ? decoded.error : "Source value is invalid", true);
+            set_reference_error(decoded.error ? decoded.error : "Source value is invalid",
+                                decoded.error_reason, true);
             continue;
         }
 
         if (reference_timestamp_moved_backward(decoded, c.ref_temp_topic, c.ref_temp_path,
                                                c.ref_temp_time_path)) {
-            set_reference_error("Source timestamp moved backward", true);
+            set_reference_error("Source timestamp moved backward",
+                                ReferenceRoomReason::BackwardTimestamp, true);
             continue;
         }
+        const uint64_t now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
+        int64_t now_unix_s = -1;
+        int32_t now_sub_ms = 0;
+        time_now(now_unix_s, now_sub_ms);
+        const ReferenceFreshness freshness = reference_freshness(
+            true, frame.retained, decoded.has_source_time, decoded.source_unix_s,
+            frame.received_ms, now_unix_s, now_ms, c.ref_temp_max_age_s);
+        ReferenceRoomRaw room_raw;
+        room_raw.configured = true;
+        room_raw.has_temperature = true;
+        room_raw.temperature_c = decoded.temperature_c;
+        room_raw.has_source_time = decoded.has_source_time;
+        room_raw.setpoint_mapped = !c.ref_temp_setpoint_path.empty();
+        room_raw.has_setpoint = decoded.has_setpoint;
+        room_raw.setpoint_c = decoded.setpoint_c;
+        room_raw.enabled_mapped = !c.ref_temp_enabled_path.empty();
+        room_raw.has_enabled = decoded.has_enabled;
+        room_raw.enabled = decoded.enabled;
+        room_raw.hvac_mode_mapped = !c.ref_temp_hvac_mode_path.empty();
+        room_raw.has_hvac_mode = decoded.has_hvac_mode;
+        room_raw.hvac_mode = decoded.hvac_mode;
+        const ReferenceRoomSample room = reference_room_sample(room_raw, freshness);
         {
             Lock lk(s_mtx);
             s_ref_status.temperature_c = decoded.temperature_c;
+            s_ref_status.has_setpoint = decoded.has_setpoint;
+            s_ref_status.setpoint_c = decoded.setpoint_c;
+            s_ref_status.has_enabled = decoded.has_enabled;
+            s_ref_status.enabled = decoded.enabled;
+            s_ref_status.has_hvac_mode = decoded.has_hvac_mode;
+            s_ref_status.hvac_mode = decoded.hvac_mode;
             s_ref_status.received_ms = frame.received_ms;
             s_ref_status.received_unix_s = frame.received_unix_s;
             s_ref_status.has_source_time = decoded.has_source_time;
@@ -1197,7 +1375,11 @@ static void service_reference_frames(const Config& c) {
             s_ref_status.timestamp_source = decoded.timestamp_source;
             s_ref_status.retained = frame.retained;
             s_ref_status.has_value = true;
+            s_ref_status.rejection_reason = ReferenceRoomReason::Eligible;
+            s_ref_status.eligibility_error = decoded.control_error ? decoded.control_error : "";
             s_ref_status.error.clear();
+            if (decoded.control_parse_error) s_ref_status.errors++;
+            if (!room.control_eligible) s_ref_status.rejections++;
         }
         diag_printf("mqtt: reference temperature value captured%s\n",
                     frame.retained ? " (retained)" : "");
@@ -1678,13 +1860,24 @@ ReferenceTemperatureTestResult mqtt_reference_test(
         s_ref_probe.passed = false;                      // invalidate before committing the new id
         s_ref_probe.config.topic.swap(prepared.topic);   // noexcept after the prepared copies above
         s_ref_probe.config.temperature_path.swap(prepared.temperature_path);
+        s_ref_probe.config.setpoint_path.swap(prepared.setpoint_path);
         s_ref_probe.config.timestamp_path.swap(prepared.timestamp_path);
+        s_ref_probe.config.enabled_path.swap(prepared.enabled_path);
+        s_ref_probe.config.hvac_mode_path.swap(prepared.hvac_mode_path);
         s_ref_probe.config.max_age_s = prepared.max_age_s;
         s_ref_probe.generation = generation;
         s_ref_probe.active = true;
         s_ref_probe.subscribed = false;
         s_ref_probe.retained = false;
+        s_ref_probe.control_eligible = false;
+        s_ref_probe.has_enabled = false;
+        s_ref_probe.enabled = false;
+        s_ref_probe.has_hvac_mode = false;
         s_ref_probe.temperature_c = 0.0;
+        s_ref_probe.setpoint_c = 0.0;
+        s_ref_probe.room_error_k = 0.0;
+        s_ref_probe.reason = ReferenceRoomReason::InvalidPayload;
+        s_ref_probe.hvac_mode.clear();
         s_ref_probe.error.clear();
     }
     s_ref_probe_reconfigure = true;
@@ -1696,6 +1889,14 @@ ReferenceTemperatureTestResult mqtt_reference_test(
             result.passed = true;
             result.retained = s_ref_probe.retained;
             result.temperature_c = s_ref_probe.temperature_c;
+            result.setpoint_c = s_ref_probe.setpoint_c;
+            result.control_eligible = s_ref_probe.control_eligible;
+            result.room_error_k = s_ref_probe.room_error_k;
+            result.reason = s_ref_probe.reason;
+            result.has_enabled = s_ref_probe.has_enabled;
+            result.enabled = s_ref_probe.enabled;
+            result.has_hvac_mode = s_ref_probe.has_hvac_mode;
+            result.hvac_mode = s_ref_probe.hvac_mode;
             result.proof = generation;
         } else if (s_ref_probe.generation == generation) {
             s_ref_probe.active = false;
@@ -1717,7 +1918,10 @@ bool mqtt_reference_test_proof_valid(uint32_t proof,
     return s_ref_probe.passed && s_ref_probe.generation == proof &&
            s_ref_probe.config.topic == candidate.topic &&
            s_ref_probe.config.temperature_path == candidate.temperature_path &&
+           s_ref_probe.config.setpoint_path == candidate.setpoint_path &&
            s_ref_probe.config.timestamp_path == candidate.timestamp_path &&
+           s_ref_probe.config.enabled_path == candidate.enabled_path &&
+           s_ref_probe.config.hvac_mode_path == candidate.hvac_mode_path &&
            s_ref_probe.config.max_age_s == candidate.max_age_s;
 }
 

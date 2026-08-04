@@ -55,6 +55,24 @@ struct HeartbeatFields {
     uint32_t    mqtt_fails      = 0;   // cumulative failed esp_mqtt_client_publish() calls
     uint32_t    mqtt_reconnects = 0;   // cumulative RE-connects (excludes the first-ever connect)
 
+    // Canonical single-room input (#288). Numeric-only companions ensure the existing Telegraf JSON
+    // parser archives what firmware accepted, not merely the raw publisher document. Unavailable
+    // numbers render null; the validity flags and stable reason code explain why.
+    bool        room_temperature_valid = false;
+    bool        room_setpoint_valid = false;
+    bool        room_control_eligible = false;
+    bool        room_has_source_time = false;
+    bool        room_age_known = false;
+    double      room_temperature_c = 0.0;
+    double      room_setpoint_c = 0.0;
+    double      room_error_k = 0.0;
+    int64_t     room_source_unix_s = -1;
+    uint64_t    room_age_s = 0;
+    uint8_t     room_reason_code = 1;
+    uint32_t    room_messages = 0;
+    uint32_t    room_errors = 0;
+    uint32_t    room_rejections = 0;
+
     bool        bus_connected  = false;   // hp_stats().connected — X10A link up this cycle
     char        bus_proto      = '?';
     int         registers      = 0;
@@ -193,6 +211,27 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += ",\"mqtt_count\":"; j += std::to_string(f.mqtt_count);
     j += ",\"mqtt_fails\":"; j += std::to_string(f.mqtt_fails);
     j += ",\"mqtt_reconnects\":"; j += std::to_string(f.mqtt_reconnects);
+    // Canonical room input. source_id is stable human provenance; Telegraf intentionally drops the
+    // string and stores the adjacent numeric evidence under the stable heartbeat measurement/topic.
+    j += ",\"room_source_id\":\"living_room\"";
+    j += ",\"room_calibration_k\":0";
+    j += ",\"room_temperature_valid\":"; j += f.room_temperature_valid ? "1" : "0";
+    j += ",\"room_setpoint_valid\":"; j += f.room_setpoint_valid ? "1" : "0";
+    j += ",\"room_control_eligible\":"; j += f.room_control_eligible ? "1" : "0";
+    j += ",\"room_temperature_c\":";
+    j += f.room_temperature_valid ? std::to_string(f.room_temperature_c) : "null";
+    j += ",\"room_setpoint_c\":";
+    j += f.room_setpoint_valid ? std::to_string(f.room_setpoint_c) : "null";
+    j += ",\"room_error_k\":";
+    j += f.room_control_eligible ? std::to_string(f.room_error_k) : "null";
+    j += ",\"room_source_unix_s\":";
+    j += f.room_has_source_time ? std::to_string(f.room_source_unix_s) : "null";
+    j += ",\"room_age_s\":";
+    j += f.room_age_known ? std::to_string(f.room_age_s) : "null";
+    j += ",\"room_reason_code\":"; j += std::to_string(f.room_reason_code);
+    j += ",\"room_messages\":"; j += std::to_string(f.room_messages);
+    j += ",\"room_errors\":"; j += std::to_string(f.room_errors);
+    j += ",\"room_rejections\":"; j += std::to_string(f.room_rejections);
     // bus_*
     j += ",\"bus_connected\":"; j += f.bus_connected ? "1" : "0";
     j += ",\"bus_proto\":\""; j += f.bus_proto; j += "\"";

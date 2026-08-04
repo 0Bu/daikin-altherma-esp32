@@ -291,9 +291,8 @@ void http_append_status_json(std::string& j, bool redact) {
          ",\"tls\":" + (m.tls ? "true" : "false") +
          ",\"has_creds\":" + ((!c.mqtt_user.empty() || !c.mqtt_pass.empty()) ? "true" : "false") +
          ",\"broker\":" + jstr_r(m.broker, redact) + (m.error.empty() ? "" : ",\"error\":" + jstr(m.error)) + "},";
-    // One exact MQTT-backed reference-temperature source. Freshness is an input-quality verdict,
-    // not a control decision: payload source time wins; otherwise only a non-retained live arrival
-    // may age on the monotonic clock. The captured value remains visible when stale.
+    // One exact MQTT-backed living-room source. Freshness and canonical eligibility remain separate:
+    // a disabled thermostat may still expose a trustworthy temperature but cannot emit room_error_k.
     const uint64_t now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
     const uint64_t ref_age_s = rt.has_value && now_ms >= rt.received_ms
                              ? (now_ms - rt.received_ms) / 1000 : 0;
@@ -303,31 +302,73 @@ void http_append_status_json(std::string& j, bool redact) {
     ReferenceFreshness freshness = reference_freshness(rt.has_value, rt.retained,
         rt.has_source_time, rt.source_unix_s, rt.received_ms, now_unix_s, now_ms,
         c.ref_temp_max_age_s);
+    ReferenceRoomRaw room_raw;
+    room_raw.configured = !c.ref_temp_topic.empty();
+    room_raw.has_temperature = rt.has_value;
+    room_raw.payload_valid = rt.error.empty();
+    room_raw.temperature_c = rt.temperature_c;
+    room_raw.has_source_time = rt.has_source_time;
+    room_raw.setpoint_mapped = !c.ref_temp_setpoint_path.empty();
+    room_raw.has_setpoint = rt.has_setpoint;
+    room_raw.setpoint_c = rt.setpoint_c;
+    room_raw.enabled_mapped = !c.ref_temp_enabled_path.empty();
+    room_raw.has_enabled = rt.has_enabled;
+    room_raw.enabled = rt.enabled;
+    room_raw.hvac_mode_mapped = !c.ref_temp_hvac_mode_path.empty();
+    room_raw.has_hvac_mode = rt.has_hvac_mode;
+    room_raw.hvac_mode = rt.hvac_mode;
+    room_raw.payload_reason = rt.rejection_reason;
+    const ReferenceRoomSample room = reference_room_sample(room_raw, freshness);
     if (!rt.error.empty()) { freshness.fresh = false; freshness.reason = "invalid"; }
     char ref_value[32] = {0};
     if (rt.has_value) std::snprintf(ref_value, sizeof(ref_value), "%.6g", rt.temperature_c);
+    char ref_setpoint[32] = {0};
+    if (rt.has_setpoint) std::snprintf(ref_setpoint, sizeof(ref_setpoint), "%.6g", rt.setpoint_c);
+    char ref_error_k[32] = {0};
+    if (room.has_room_error) std::snprintf(ref_error_k, sizeof(ref_error_k), "%.6g", room.room_error_k);
     j += "\"reference_temperature\":{\"configured\":";
     j += c.ref_temp_topic.empty() ? "false" : "true";
     j += ",\"name\":";          j += jstr_r(c.ref_temp_name, redact);
     j += ",\"topic\":";         j += jstr_r(c.ref_temp_topic, redact);
     j += ",\"temperature_path\":"; j += jstr(c.ref_temp_path);
+    j += ",\"setpoint_path\":"; j += jstr(c.ref_temp_setpoint_path);
     j += ",\"timestamp_path\":"; j += jstr(c.ref_temp_time_path);
+    j += ",\"enabled_path\":"; j += jstr(c.ref_temp_enabled_path);
+    j += ",\"hvac_mode_path\":"; j += jstr(c.ref_temp_hvac_mode_path);
+    j += ",\"source_id\":\""; j += REF_ROOM_SOURCE_ID; j += "\"";
+    j += ",\"calibration_k\":0";
+    j += ",\"temperature_min_c\":"; j += std::to_string(REF_ROOM_TEMPERATURE_MIN_C);
+    j += ",\"temperature_max_c\":"; j += std::to_string(REF_ROOM_TEMPERATURE_MAX_C);
     j += ",\"max_age_s\":";     j += std::to_string(c.ref_temp_max_age_s);
     j += ",\"subscribed\":";    j += rt.subscribed ? "true" : "false";
     j += ",\"has_value\":";     j += rt.has_value ? "true" : "false";
     j += ",\"temperature_c\":"; j += rt.has_value ? ref_value : "null";
+    j += ",\"has_setpoint\":"; j += rt.has_setpoint ? "true" : "false";
+    j += ",\"setpoint_c\":"; j += rt.has_setpoint ? ref_setpoint : "null";
+    j += ",\"enabled\":"; j += rt.has_enabled ? (rt.enabled ? "true" : "false") : "null";
+    j += ",\"hvac_mode\":"; j += rt.has_hvac_mode ? jstr(rt.hvac_mode) : "null";
     j += ",\"received_at\":";
     j += rt.has_value && rt.received_unix_s >= 0 ? jstr(rfc3339_utc(rt.received_unix_s)) : "null";
     j += ",\"received_ago_s\":"; j += rt.has_value ? std::to_string(ref_age_s) : "null";
     j += ",\"source_at\":";
     j += rt.has_value && rt.has_source_time ? jstr(rfc3339_utc(rt.source_unix_s)) : "null";
+    j += ",\"source_unix_s\":";
+    j += rt.has_value && rt.has_source_time ? std::to_string(rt.source_unix_s) : "null";
     j += ",\"timestamp_source\":"; j += rt.has_value ? jstr(rt.timestamp_source) : "null";
     j += ",\"age_s\":";         j += freshness.age_known ? std::to_string(freshness.age_s) : "null";
     j += ",\"fresh\":";         j += freshness.fresh ? "true" : "false";
     j += ",\"freshness_reason\":"; j += jstr(freshness.reason);
+    j += ",\"temperature_valid\":"; j += room.temperature_valid ? "true" : "false";
+    j += ",\"setpoint_valid\":"; j += room.setpoint_valid ? "true" : "false";
+    j += ",\"control_eligible\":"; j += room.control_eligible ? "true" : "false";
+    j += ",\"room_error_k\":"; j += room.has_room_error ? ref_error_k : "null";
+    j += ",\"reason\":"; j += jstr(reference_room_reason_name(room.reason));
+    j += ",\"reason_code\":"; j += std::to_string(static_cast<unsigned>(room.reason));
     j += ",\"retained\":";      j += rt.has_value && rt.retained ? "true" : "false";
     j += ",\"messages\":";      j += std::to_string(rt.messages);
     j += ",\"errors\":";        j += std::to_string(rt.errors);
+    j += ",\"rejections\":";    j += std::to_string(rt.rejections);
+    if (!rt.eligibility_error.empty()) { j += ",\"eligibility_error\":"; j += jstr(rt.eligibility_error); }
     if (!rt.error.empty()) { j += ",\"error\":"; j += jstr(rt.error); }
     j += "},";
     // Direct Open-Meteo forecast. Fetch time is the 90-minute liveness clock; the provider does not

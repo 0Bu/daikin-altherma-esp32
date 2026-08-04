@@ -92,13 +92,20 @@ struct ConfigBlob {
     // v9 makes this previously inert bit authoritative. A v5-v8 `true` is forced OFF on decode:
     // historical placeholder state is not consent for the first write-capable firmware.
     bool        actuation_enabled = false;
-    // ── v7/v8: one MQTT-backed reference-temperature source ───────────────────────────────────
+    // ── v7/v8/v13: one MQTT-backed reference-temperature source ───────────────────────────────
     std::string ref_temp_name, ref_temp_topic, ref_temp_path;
     // v8 adds the source timestamp mapping and the freshness limit. Defaults migrate a v7 blob
     // written by the hardware-tested capture slice without discarding its topic or credentials.
     std::string ref_temp_time_path;
     uint32_t    ref_temp_max_age_s = 600;
+    // v13 appends control-readiness mappings at the END of the blob so every earlier version keeps
+    // its byte-exact layout. Empty on v7-v12 migration: the old source remains observable but cannot
+    // produce an eligible room error until a target mapping is explicitly saved.
+    std::string ref_temp_setpoint_path;
+    std::string ref_temp_enabled_path;
+    std::string ref_temp_hvac_mode_path;
     bool        has_ref_temp = false;
+    bool        has_ref_control = false;
     // ── v10: direct Open-Meteo location ────────────────────────────────────────────────────────
     bool        weather_enabled = false;
     int32_t     weather_latitude_e6 = 0;
@@ -133,14 +140,14 @@ inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
 // reference-temperature mapping, v8 its source timestamp + maximum-age fields, and v9 activates the
 // formerly inert actuation bit without changing the byte layout, and v10 the direct Open-Meteo
 // location, v11 appends ENV III enable + SDA/SCL pins, and v12 appends the explicit board-preset id
-// + selected flag. Current firmware derives HomeHub
+// + selected flag, and v13 appends room setpoint/enabled/HVAC mappings. Current firmware derives HomeHub
 // enabled solely from whether mb_host is empty; v5-v8 actuation bits decode OFF.
 // Bumping the version rather than reusing the previous one is what makes the trailing-garbage check
 // below still exact per version; OLDER blobs are ACCEPTED on read (see config_blob_deserialize)
 // because rejecting them would drop a user's WiFi and MQTT credentials on the OTA that introduced the
 // field — the fallback path is the legacy per-key layout, which a device written by a blob-era build
 // has never populated.
-inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 12;
+inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 13;
 inline constexpr uint8_t  CONFIG_BLOB_VERSION_MIN = 1;
 // A string field longer than this is treated as corruption on decode: real credentials are short, so a
 // huge length is a garbled blob, not a value. Bounds the work and rejects a hostile/garbled length.
@@ -203,6 +210,11 @@ inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     detail::blob_put_u32(v, static_cast<uint32_t>(c.env3_scl));
     v.push_back(static_cast<uint8_t>(c.board_preset_id));
     v.push_back(c.board_user_set ? 1 : 0);
+    // v13 block: appended after the v12 identity rather than inserted beside v8, preserving every
+    // historical version's exact body. The timestamp remains in v8; these fields add eligibility.
+    detail::blob_put_str(v, c.ref_temp_setpoint_path);
+    detail::blob_put_str(v, c.ref_temp_enabled_path);
+    detail::blob_put_str(v, c.ref_temp_hvac_mode_path);
     detail::blob_put_u32(v, config_crc32(v.data(), v.size()));   // CRC covers everything before it
     return v;
 }
@@ -314,10 +326,16 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
         c.board_user_set = d[p++] != 0;
         c.has_board_identity = true;
     }
+    if (version >= 13) {
+        if (!get_str(c.ref_temp_setpoint_path) || !get_str(c.ref_temp_enabled_path) ||
+            !get_str(c.ref_temp_hvac_mode_path)) return false;
+        c.has_ref_control = true;
+    }
     // Exact per version: a v1 blob must END after ntp_server, a v2 blob after the board block, a v3
     // blob after the channel byte, a v4 blob after the language byte, v5/v6 after the HomeHub block
     // v7 after the reference-source strings, v8/v9 after timestamp/max-age, and v10 after the
-    // Open-Meteo location, v11 after ENV III, and v12 after the explicit board identity.
+    // Open-Meteo location, v11 after ENV III, v12 after the explicit board identity, and v13 after
+    // the three room-control mapping strings.
     // v6 and v9 change a flag's meaning without changing the HomeHub block's size.
     // Accepting a prefix would let a truncated v2 decode as a valid v1 with silently-default pins.
     if (p != body_end) return false;   // trailing garbage -> reject rather than accept a prefix

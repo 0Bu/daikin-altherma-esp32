@@ -1694,7 +1694,7 @@ www/            web UI sources (index.html + style.css + app.sources fragments -
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + one-shot rollback state, MQTT (`uri`/`user`/`pass`), syslog, `ntp_server`, from blob **v2** board-local hardware, from **v3** the OTA channel, from **v4** the UI-language override, from **v5** the HomeHub host/port/unit/safety fields, **v6** its enable compatibility bit, **v7** one MQTT reference-temperature name/topic/value-path mapping, **v8** its timestamp path plus maximum age, and **v9** the safe WP3 actuation opt-in semantics. Blobs v1–v8 remain readable without losing credentials, but their historical actuation bit is forced false because it did not previously authorize writes; only a v9 save can express the new consent. Non-empty `mb_host` enables polling, while writing additionally requires the v9 flag and explicit firmware-writer ownership. The four HomeHub fields have one writer (`POST /set_hp`, httpd); the five reference-source fields have one writer (`POST /set_ref_temp`, httpd). Old experimental `mb_dhost`/`mb_seen` keys are deleted on load and never consulted. A v6+ blob saved as HomeHub-enabled with an empty host becomes safely disabled instead of resuming hidden discovery, while v7 reference mappings gain an empty timestamp path and the 600 s default age. One CRC-checked entry is written all-or-nothing. The X10A link cache `rx_pin`/`tx_pin`/`proto` remains separate and self-healing (detection + httpd writers), as does `board_set`, the user's licence for the UI to name matching board hardware without persisting a board identity. Legacy per-key credential entries remain read-only fallback for pre-blob upgrades, and `boot_fails` is the boot-loop crash counter. |
+| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + one-shot rollback state, MQTT (`uri`/`user`/`pass`), syslog, `ntp_server`, from blob **v2** board-local hardware, from **v3** the OTA channel, from **v4** the UI-language override, from **v5** the HomeHub host/port/unit/safety fields, **v6** its enable compatibility bit, **v7** one MQTT reference-temperature name/topic/value-path mapping, **v8** its timestamp path plus maximum age, **v9** the safe WP3 actuation opt-in semantics, **v10** weather location, **v11** ENV III, **v12** board-preset identity, and **v13** target/enabled/HVAC readiness mappings for the room source. Blobs v1–v8 remain readable without losing credentials, but their historical actuation bit is forced false because it did not previously authorize writes; only a v9 save can express the new consent. Non-empty `mb_host` enables polling, while writing additionally requires the v9 flag and explicit firmware-writer ownership. HomeHub and reference-source fields have narrow httpd writers (`POST /set_hp`, `POST /set_ref_temp`). Old experimental `mb_dhost`/`mb_seen` keys are deleted on load and never consulted. Pre-v13 room mappings remain observable after migration but are ineligible until a target mapping is saved deliberately. One CRC-checked entry is written all-or-nothing. The X10A link cache `rx_pin`/`tx_pin`/`proto` remains separate and self-healing (detection + httpd writers), as does `board_set`, the user's licence for the UI to name matching board hardware without persisting a board identity. Legacy per-key credential entries remain read-only fallback for pre-blob upgrades, and `boot_fails` is the boot-loop crash counter. |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -1771,11 +1771,14 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   stored, never their value; read from the CONFIG not the client — creds outlive a
                   disabled broker, which is exactly the state the UI must offer to clear via
                   /set_mqtt's clear_creds),
-                  reference_temperature{configured,name,topic,temperature_path,timestamp_path,
-                  max_age_s,subscribed,has_value,temperature_c,received_at,received_ago_s,source_at,
-                  timestamp_source,age_s,fresh,freshness_reason,retained,messages,errors[,error]} —
-                  the observation-only MQTT room/reference input and its explicit freshness verdict;
-                  it feeds no history, averaging or heat-pump control yet,
+                  reference_temperature{configured,name,topic,temperature_path,setpoint_path,
+                  timestamp_path,enabled_path,hvac_mode_path,max_age_s,subscribed,has_value,
+                  source_id,calibration_k,temperature_c,target_temperature_c,enabled,hvac_mode,
+                  received_at,received_ago_s,source_at,timestamp_source,age_s,fresh,freshness_reason,
+                  temperature_valid,setpoint_valid,control_eligible,room_error_k,reason,reason_code,
+                  retained,messages,errors,rejections[,error][,eligibility_error]} — the decoded and
+                  canonical MQTT living-room input. The flat heartbeat archives its numeric accepted
+                  view; it feeds no averaging, controller or heat-pump write yet,
                   syslog{configured,resolved,reachable,host,port,error},
                   ota{channel} — "release"|"dev", the FEED the next OTA check reads (POST /set_ota).
                   On /status and not only /ota/status because the Settings Firmware card renders its

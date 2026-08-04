@@ -750,18 +750,30 @@
       </label>
       <label class="field">
         <span class="field-label plain" data-i18n="ref.path">Temperature JSON path</span>
-        <input class="input mono" name="temperature_path" id="rtPath" maxlength="128" placeholder="temperature.tC" autocomplete="off">
+        <input class="input mono" name="temperature_path" id="rtPath" maxlength="128" placeholder="thermostat.current_temperature_c" autocomplete="off">
       </label>
       <label class="field">
-        <span class="field-label plain" data-i18n="ref.time_path">Timestamp JSON path · optional</span>
+        <span class="field-label plain" data-i18n="ref.setpoint_path">Target-temperature JSON path</span>
+        <input class="input mono" name="setpoint_path" id="rtSetpointPath" maxlength="128" placeholder="thermostat.target_temperature_c" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label plain" data-i18n="ref.time_path">Timestamp JSON path</span>
         <input class="input mono" name="timestamp_path" id="rtTimePath" maxlength="128" placeholder="thermostat.read_at" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label plain" data-i18n="ref.enabled_path">Enabled JSON path · optional</span>
+        <input class="input mono" name="enabled_path" id="rtEnabledPath" maxlength="128" placeholder="thermostat.enabled" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label plain" data-i18n="ref.hvac_mode_path">HVAC-mode JSON path · optional</span>
+        <input class="input mono" name="hvac_mode_path" id="rtHvacModePath" maxlength="128" placeholder="thermostat.hvac_mode" autocomplete="off">
       </label>
       <label class="field">
         <span class="field-label plain" data-i18n="ref.max_age">Maximum age · seconds</span>
         <input class="input" type="number" name="max_age_s" id="rtMaxAge" min="10" max="3600" step="1" value="600" inputmode="numeric">
       </label>
       <p class="hint err" id="rtError" hidden></p>
-      <p class="hint" data-i18n="ref.hint">Save validates the mapping, reads a fresh value, and stores it only after that live test succeeds. The optional timestamp may be RFC3339 text or Unix seconds. Retained values require it to be fresh; live values without it age from MQTT arrival. Delete removes the saved source and its captured reading. The Shelly example is its internal device temperature and is only a transport test.</p>
+      <p class="hint" data-i18n="ref.hint">Save validates current temperature, target and source time, then stores the mapping only after a live test. Enabled and HVAC mode optionally gate control eligibility; thermostat active state does not. The timestamp may be RFC3339 text or Unix seconds. Delete removes the saved source and its captured reading.</p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="rtCancel" data-i18n="btn.cancel">Cancel</button>
         <button class="btn danger" type="button" id="rtDeleteBtn" data-i18n="ref.delete">Delete</button>

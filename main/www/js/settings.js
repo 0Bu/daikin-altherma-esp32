@@ -66,27 +66,29 @@ const validMqtt = (h) => {
 };
 
 // ── Dynamic LWT · first room-temperature source ─────────────────────────
-// One observation profile for now: friendly name, exact topic, numeric value path, optional source
-// timestamp path and a freshness limit. Calibration/roles/control remain later Dyn-Control fields.
-// It is presented as an Observe-mode input under the permanent dynamic-control Settings card. The
-// Shelly mapping is a first-open TEST preset, never a firmware-wide default subscription.
-const REF_TEMP_TEST_TOPIC = "shelly1pmminig4-fixture00003/status/switch:0";
+// One decision-ready, still read-only profile: exact current/target/source-time mappings, optional
+// enabled/heating gates and a freshness limit. Calibration is fixed at 0 K; no roles or weights.
+// It is presented as an Observe-mode input under the permanent dynamic-control Settings card. A new
+// profile starts empty; placeholders illustrate the installed Meross contract without subscribing.
 function fillRefTemp() {
   const r = S.status?.reference_temperature || {};
   const configured = !!r.configured;
-  // Keep an explicitly disabled profile empty when it is reopened. A stored name is the marker;
-  // only a genuinely untouched mapping gets the Shelly transport-test preset.
-  const saved = configured || !!r.name || !!r.temperature_path || !!r.timestamp_path;
-  $("rtName").value = saved ? (r.name || "") : "Shelly 1PM Mini G4 · Test";
-  $("rtTopic").value = saved ? (r.topic || "") : REF_TEMP_TEST_TOPIC;
-  $("rtPath").value = saved ? (r.temperature_path || "") : "temperature.tC";
+  // Keep an explicitly disabled or genuinely untouched profile empty when it is reopened.
+  const saved = configured || !!r.name || !!r.temperature_path || !!r.timestamp_path || !!r.setpoint_path;
+  $("rtName").value = saved ? (r.name || "") : "";
+  $("rtTopic").value = saved ? (r.topic || "") : "";
+  $("rtPath").value = saved ? (r.temperature_path || "") : "";
+  $("rtSetpointPath").value = saved ? (r.setpoint_path || "") : "";
   $("rtTimePath").value = saved ? (r.timestamp_path || "") : "";
+  $("rtEnabledPath").value = saved ? (r.enabled_path || "") : "";
+  $("rtHvacModePath").value = saved ? (r.hvac_mode_path || "") : "";
   $("rtMaxAge").value = Number.isInteger(r.max_age_s) ? r.max_age_s : 600;
   $("rtDeleteBtn").disabled = !configured;
 }
 function openRefTemp() {
   fillRefTemp();
-  for (const id of ["rtName", "rtTopic", "rtPath", "rtTimePath", "rtMaxAge"])
+  for (const id of ["rtName", "rtTopic", "rtPath", "rtSetpointPath", "rtTimePath",
+                    "rtEnabledPath", "rtHvacModePath", "rtMaxAge"])
     $(id).classList.remove("invalid");
   $("rtError").hidden = true;
   openPopup("refTempModal");
@@ -103,7 +105,10 @@ function refTempFormPayload() {
     name: $("rtName").value.trim(),
     topic,
     temperature_path: $("rtPath").value.trim(),
+    setpoint_path: $("rtSetpointPath").value.trim(),
     timestamp_path: $("rtTimePath").value.trim(),
+    enabled_path: $("rtEnabledPath").value.trim(),
+    hvac_mode_path: $("rtHvacModePath").value.trim(),
     max_age_s: topic ? Number($("rtMaxAge").value) : 600,
   };
 }

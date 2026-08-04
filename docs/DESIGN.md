@@ -1181,7 +1181,8 @@ vocabulary exactly:
    currently and explicitly **Datenerfassung** only. Its five rows are **Betriebsart** =
    **Beobachten**, **Raumtemperaturquellen**, **Außenmessungen**, **Regelstrategie**, and
    **Sicherheit & Ausgabe** = **Nur lesend**. The room-source row opens the exact-topic,
-   temperature-JSON-path, optional source-timestamp path and maximum-age modal. The outdoor row opens
+   current-temperature, target-temperature and source-timestamp JSON paths, optional enabled/HVAC-mode
+   paths and maximum-age modal. The outdoor row opens
    the opt-in ENV III wiring modal (sensor dropdown plus SDA/SCL) only for a user-selected M5Stack
    board. Selecting **No sensor** hides and disables both pin fields. Selecting **ENV III** reveals
    them and keeps the short data-line/clock-line explanation visible. Save shows a checking state;
@@ -1202,10 +1203,14 @@ vocabulary exactly:
    rejected proof, or write leaves the dialog open and releases Save for correction or retry.
    Delete is enabled only for a configured source and posts the explicit empty mapping; it removes
    the saved subscription and resets the captured runtime value without testing unsaved draft
-   fields. Its summary reports one configured source, the raw temperature and qualified
-   source age; retained remains labelled. A retained payload without its own timestamp is visibly
+   fields. Its compact summary reports one configured source, the raw current temperature and
+   qualified source age; retained remains labelled. The full target and canonical eligibility
+   evidence is exposed by `/status` and the numeric heartbeat. A retained payload without its own timestamp is visibly
    untrusted rather than made fresh by reconnecting, while a non-retained value without one ages
    from its monotonic MQTT arrival. The
+   fixed plausibility bounds, calibration `0`, the stable source id `living_room`, and numeric
+   accepted-view heartbeat fields keep the input suitable for later control and VictoriaMetrics
+   without enabling control today. `active` is observable publisher context, not a validity gate. The
    remaining future-facing rows are honest state, not disabled controls: strategy is **Nicht aktiv**
    and output **Nur lesend**, with no pencil and no click handler. The card must never imply that
    observing an MQTT value or ENV III measurement controls the heat pump.

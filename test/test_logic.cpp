@@ -1938,6 +1938,11 @@ static void test_heartbeat() {
                "\"wifi_connected\":1,\"wifi_rssi\":-76,\"wifi_reconnects\":3,"
                "\"wifi_mac\":\"A1:B2:C3:D4:E5:F6\",\"wifi_bssid\":\"00:11:22:33:44:55\","
                "\"mqtt_connected\":1,\"mqtt_count\":89282,\"mqtt_fails\":0,\"mqtt_reconnects\":1,"
+               "\"room_source_id\":\"living_room\",\"room_calibration_k\":0,"
+               "\"room_temperature_valid\":0,\"room_setpoint_valid\":0,\"room_control_eligible\":0,"
+               "\"room_temperature_c\":null,\"room_setpoint_c\":null,\"room_error_k\":null,"
+               "\"room_source_unix_s\":null,\"room_age_s\":null,\"room_reason_code\":1,"
+               "\"room_messages\":0,\"room_errors\":0,\"room_rejections\":0,"
                "\"bus_connected\":1,\"bus_proto\":\"I\",\"bus_registers\":10,\"bus_values\":48,"
                "\"bus_last_ok_s\":1,\"bus_rx_received\":763732,\"bus_rx_fails\":2,"
                "\"bus_crc_err\":0,\"bus_timeout_err\":2,\"bus_ou_held_over\":0,"
@@ -1994,6 +1999,36 @@ static void test_heartbeat() {
     // fact use numeric 1/0 so a metrics consumer keeps them.
     CHECK(j.find("\"modbus_connected\":0,") != std::string::npos);
     CHECK(j.find("\"modbus_connected\":false") == std::string::npos);   // number, not a dropped bool
+    HeartbeatFields roomf;
+    roomf.room_temperature_valid = true;
+    roomf.room_setpoint_valid = true;
+    roomf.room_control_eligible = true;
+    roomf.room_has_source_time = true;
+    roomf.room_age_known = true;
+    roomf.room_temperature_c = 20.5;
+    roomf.room_setpoint_c = 22.0;
+    roomf.room_error_k = 1.5;
+    roomf.room_source_unix_s = 1785830400;
+    roomf.room_age_s = 17;
+    roomf.room_reason_code = static_cast<uint8_t>(ReferenceRoomReason::Eligible);
+    roomf.room_messages = 42;
+    roomf.room_errors = 2;
+    roomf.room_rejections = 7;
+    const std::string roomj = build_heartbeat_json(roomf);
+    CHECK(roomj.find("\"room_source_id\":\"living_room\"") != std::string::npos);
+    CHECK(roomj.find("\"room_calibration_k\":0,") != std::string::npos);
+    CHECK(roomj.find("\"room_temperature_valid\":1,") != std::string::npos);
+    CHECK(roomj.find("\"room_setpoint_valid\":1,") != std::string::npos);
+    CHECK(roomj.find("\"room_control_eligible\":1,") != std::string::npos);
+    CHECK(roomj.find("\"room_temperature_c\":20.500000,") != std::string::npos);
+    CHECK(roomj.find("\"room_setpoint_c\":22.000000,") != std::string::npos);
+    CHECK(roomj.find("\"room_error_k\":1.500000,") != std::string::npos);
+    CHECK(roomj.find("\"room_source_unix_s\":1785830400,") != std::string::npos);
+    CHECK(roomj.find("\"room_age_s\":17,") != std::string::npos);
+    CHECK(roomj.find("\"room_reason_code\":0,") != std::string::npos);
+    CHECK(roomj.find("\"room_messages\":42,") != std::string::npos);
+    CHECK(roomj.find("\"room_errors\":2,") != std::string::npos);
+    CHECK(roomj.find("\"room_rejections\":7,") != std::string::npos);
     HeartbeatFields mf; mf.modbus_enabled = true; mf.modbus_connected = true;
     mf.modbus_rx = 12; mf.modbus_fails = 3; mf.modbus_stack_min_free_words = 731;
     mf.modbus_actuator_state = 5; mf.modbus_actuator_block = 0; mf.modbus_actuator_owner = 1;
@@ -4644,7 +4679,9 @@ static void test_config_store() {
     CHECK(b.syslog_host == a.syslog_host && b.syslog_port == 514);
     CHECK(b.ntp_server == a.ntp_server);
     CHECK(b.has_ref_temp && b.ref_temp_name.empty() && b.ref_temp_topic.empty() && b.ref_temp_path.empty());
-    CHECK(b.ref_temp_time_path.empty() && b.ref_temp_max_age_s == 600);
+    CHECK(b.ref_temp_time_path.empty() && b.ref_temp_max_age_s == 600 && b.has_ref_control);
+    CHECK(b.ref_temp_setpoint_path.empty() && b.ref_temp_enabled_path.empty() &&
+          b.ref_temp_hvac_mode_path.empty());
     CHECK(b.has_weather && !b.weather_enabled && b.weather_latitude_e6 == 0 &&
           b.weather_longitude_e6 == 0);
     CHECK(b.has_env3 && !b.env3_enabled && b.env3_sda == 2 && b.env3_scl == 1);
@@ -4695,7 +4732,7 @@ static void test_config_store() {
     board.board_preset_id = static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite);
     board.board_user_set = true;
     std::vector<uint8_t> bb = config_blob_serialize(board);
-    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 12);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 13);
     ConfigBlob rt;
     CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
     CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
@@ -4724,8 +4761,9 @@ static void test_config_store() {
     // precedes the CRC — the 13-byte v2 board block (3x u32 + 1 flag byte), the 1-byte v3 channel,
     // the 1-byte v4 language and the 11-byte v5 HomeHub block (empty mb_host [2] + mb_port u32 +
     // mb_unit_id u32 + 1 flag byte), three empty v7 strings (6 bytes), and the empty v8 timestamp
-    // path + max-age u32 (6 bytes), weather (9), ENV III (9) and board identity (2) = 58 bytes.
-    v1.erase(v1.end() - 4 - 58, v1.end() - 4);
+    // path + max-age u32 (6 bytes), weather (9), ENV III (9), board identity (2), and the three
+    // empty v13 room-control strings (6) = 64 bytes.
+    v1.erase(v1.end() - 4 - 64, v1.end() - 4);
     v1[4] = 1;
     restamp(v1);
     ConfigBlob legacy;
@@ -4734,9 +4772,9 @@ static void test_config_store() {
     CHECK(!legacy.has_board);
     CHECK(legacy.wifi_ssid == a.wifi_ssid && legacy.mqtt_uri == a.mqtt_uri);   // v1 payload intact
     CHECK(legacy.led_gpio == -1);                        // the struct default, not the 999 sentinel
-    // A TRUNCATED v12 must not decode with a silently-default board identity.
+    // A TRUNCATED v13 must not decode with silently-default room-control mappings.
     std::vector<uint8_t> trunc = bb;
-    trunc.erase(trunc.end() - 4 - 2, trunc.end() - 4);    // drop v12 identity block
+    trunc.erase(trunc.end() - 4 - 6, trunc.end() - 4);    // drop the three empty v13 strings
     restamp(trunc);
     CHECK(!config_blob_deserialize(trunc.data(), trunc.size(), out));
 
@@ -4754,7 +4792,7 @@ static void test_config_store() {
     // would be a spectacularly bad trade. has_ota == false is how the caller tells "no channel
     // stored" from "explicitly release"; both mean release, only the diag line differs.
     std::vector<uint8_t> v2 = bb;
-    v2.erase(v2.end() - 4 - 45, v2.end() - 4);           // drop v3/v4/v5/v7/v8/v10/v11/v12
+    v2.erase(v2.end() - 4 - 51, v2.end() - 4);           // drop v3 through v13
     v2[4] = 2;
     restamp(v2);
     ConfigBlob pre;
@@ -4778,7 +4816,7 @@ static void test_config_store() {
     // v3 blob and must still decode — the channel survives, and the absent language reads as auto
     // (has_lang == false, ui_lang == 0), so the browser keeps auto-detecting exactly as before.
     std::vector<uint8_t> v3 = lbv;
-    v3.erase(v3.end() - 4 - 44, v3.end() - 4);           // drop v4/v5/v7/v8/v10/v11/v12
+    v3.erase(v3.end() - 4 - 50, v3.end() - 4);           // drop v4 through v13
     v3[4] = 3;
     restamp(v3);
     ConfigBlob prel;
@@ -4795,7 +4833,7 @@ static void test_config_store() {
     mb.mb_host = "homehub-524288-abc.local";
     mb.mb_port = 502; mb.mb_unit_id = 3; mb.actuation_enabled = true; mb.homehub_enabled = false;
     std::vector<uint8_t> mbb = config_blob_serialize(mb);
-    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 12);
+    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 13);
     ConfigBlob mrt;
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
     CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-abc.local");
@@ -4814,7 +4852,7 @@ static void test_config_store() {
     // The immediately preceding v6 build could persist enabled+empty as Auto. Preserve its wire
     // shape as an upgrade fixture: current firmware must ignore that bit and decode empty as Off.
     std::vector<uint8_t> legacy_v6_auto = mbb;
-    legacy_v6_auto.erase(legacy_v6_auto.end() - 4 - 32, legacy_v6_auto.end() - 4);
+    legacy_v6_auto.erase(legacy_v6_auto.end() - 4 - 38, legacy_v6_auto.end() - 4);
     legacy_v6_auto[4] = 6;
     legacy_v6_auto[legacy_v6_auto.size() - 5] |= 2u;
     restamp(legacy_v6_auto);
@@ -4824,7 +4862,7 @@ static void test_config_store() {
     // A v5 empty-host blob also decodes disabled. Its historical flag was ambiguous, so it cannot
     // arm discovery in the current explicit-search contract.
     std::vector<uint8_t> v5 = mbb;
-    v5.erase(v5.end() - 4 - 32, v5.end() - 4);           // v5 predates v7/v8/v10/v11/v12
+    v5.erase(v5.end() - 4 - 38, v5.end() - 4);           // v5 predates v7 through v13
     v5[4] = 5;
     v5[v5.size() - 5] &= static_cast<uint8_t>(~2u);      // HomeHub flag byte immediately before CRC
     restamp(v5);
@@ -4834,7 +4872,7 @@ static void test_config_store() {
     // v8 carried the same bit, but it was an inert placeholder. The first write-capable OTA must not
     // reinterpret an old true as consent: the transport survives and actuation is forced OFF.
     std::vector<uint8_t> v8 = mbb;
-    v8.erase(v8.end() - 4 - 20, v8.end() - 4);           // v8 predates weather/ENV III/identity
+    v8.erase(v8.end() - 4 - 26, v8.end() - 4);           // v8 predates weather/ENV III/identity/v13
     v8[4] = 8;
     restamp(v8);
     ConfigBlob v8rt;
@@ -4844,7 +4882,7 @@ static void test_config_store() {
     // language byte) must decode, report has_modbus == false and leave the mb_* struct defaults
     // (X10A / 502 / 1) — the same trade v1/v2/v3 already refuse to make.
     std::vector<uint8_t> v4 = mbb;
-    v4.erase(v4.end() - 4 - 43, v4.end() - 4);           // drop v5/v7/v8/v10/v11/v12
+    v4.erase(v4.end() - 4 - 49, v4.end() - 4);           // drop v5 through v13
     v4[4] = 4;
     restamp(v4);
     ConfigBlob v4rt;
@@ -4860,6 +4898,9 @@ static void test_config_store() {
     ref.ref_temp_topic = "shelly1pmminig4-fixture00003/status/switch:0";
     ref.ref_temp_path = "temperature.tC";
     ref.ref_temp_time_path = "thermostat.read_at";
+    ref.ref_temp_setpoint_path = "thermostat.target_temperature_c";
+    ref.ref_temp_enabled_path = "thermostat.enabled";
+    ref.ref_temp_hvac_mode_path = "thermostat.hvac_mode";
     ref.ref_temp_max_age_s = 900;
     const std::vector<uint8_t> refb = config_blob_serialize(ref);
     ConfigBlob refrt;
@@ -4867,11 +4908,29 @@ static void test_config_store() {
     CHECK(refrt.has_ref_temp && refrt.ref_temp_name == ref.ref_temp_name);
     CHECK(refrt.ref_temp_topic == ref.ref_temp_topic && refrt.ref_temp_path == ref.ref_temp_path);
     CHECK(refrt.ref_temp_time_path == ref.ref_temp_time_path && refrt.ref_temp_max_age_s == 900);
+    CHECK(refrt.has_ref_control && refrt.ref_temp_setpoint_path == ref.ref_temp_setpoint_path &&
+          refrt.ref_temp_enabled_path == ref.ref_temp_enabled_path &&
+          refrt.ref_temp_hvac_mode_path == ref.ref_temp_hvac_mode_path);
+
+    // v12 migrates the already deployed current/source-time mapping without inventing control
+    // authorization. It remains observable and explicitly lacks target/eligibility mappings.
+    const size_t v13_ref_bytes = 2 + ref.ref_temp_setpoint_path.size() +
+                                 2 + ref.ref_temp_enabled_path.size() +
+                                 2 + ref.ref_temp_hvac_mode_path.size();
+    std::vector<uint8_t> v12 = refb;
+    v12.erase(v12.end() - 4 - v13_ref_bytes, v12.end() - 4);
+    v12[4] = 12;
+    restamp(v12);
+    ConfigBlob v12rt;
+    CHECK(config_blob_deserialize(v12.data(), v12.size(), v12rt));
+    CHECK(v12rt.has_ref_temp && !v12rt.has_ref_control &&
+          v12rt.ref_temp_topic == ref.ref_temp_topic && v12rt.ref_temp_setpoint_path.empty());
 
     // The hardware-tested capture slice wrote v7 with only name/topic/value-path. It must migrate
     // in place: keep that mapping, add no imaginary timestamp path, and use the 10-minute default.
     std::vector<uint8_t> v7 = refb;
-    v7.erase(v7.end() - 4 - (2 + ref.ref_temp_time_path.size() + 4 + 20), v7.end() - 4);
+    v7.erase(v7.end() - 4 - (2 + ref.ref_temp_time_path.size() + 4 + 20 + v13_ref_bytes),
+             v7.end() - 4);
     v7[4] = 7;
     restamp(v7);
     ConfigBlob v7rt;
@@ -4881,7 +4940,7 @@ static void test_config_store() {
 
     // A genuine v6 blob still carries every earlier setting and reports the new mapping absent.
     std::vector<uint8_t> v6 = mbb;
-    v6.erase(v6.end() - 4 - 32, v6.end() - 4);
+    v6.erase(v6.end() - 4 - 38, v6.end() - 4);
     v6[4] = 6;
     restamp(v6);
     ConfigBlob v6rt;
@@ -4902,7 +4961,7 @@ static void test_config_store() {
           weatherrt.weather_longitude_e6 == 13404954);
     // A genuine v10 blob keeps weather but predates ENV III and explicit board identity.
     std::vector<uint8_t> v10 = weatherb;
-    v10.erase(v10.end() - 4 - 11, v10.end() - 4);
+    v10.erase(v10.end() - 4 - 17, v10.end() - 4);
     v10[4] = 10;
     restamp(v10);
     ConfigBlob v10rt;
@@ -4920,7 +4979,7 @@ static void test_config_store() {
     // v11 already carried ENV III but no explicit board id. It remains readable so the load path can
     // migrate the old `board_set` statement instead of losing credentials or sensor wiring.
     std::vector<uint8_t> v11 = envbuf;
-    v11.erase(v11.end() - 4 - 2, v11.end() - 4);
+    v11.erase(v11.end() - 4 - 8, v11.end() - 4);
     v11[4] = 11;
     restamp(v11);
     ConfigBlob v11rt;
@@ -4930,7 +4989,7 @@ static void test_config_store() {
 
     // A v9 upgrade predates both independent outdoor sources and remains disabled by default.
     std::vector<uint8_t> v9 = weatherb;
-    v9.erase(v9.end() - 4 - 20, v9.end() - 4);
+    v9.erase(v9.end() - 4 - 26, v9.end() - 4);
     v9[4] = 9;
     restamp(v9);
     ConfigBlob v9rt;
@@ -5029,22 +5088,33 @@ static void test_env3() {
 static void test_reference_temperature_config() {
     const char* why = nullptr;
     CHECK(reference_temperature_config_valid("Shelly test",
-          "shelly1pmminig4-fixture00003/status/switch:0", "temperature.tC", "", 600, &why));
+          "shelly1pmminig4-fixture00003/status/switch:0", "temperature.tC", "", "", "", "", 600, &why));
     CHECK(reference_temperature_config_valid("Meross", "meross/mts200b/id/state",
-          "thermostat.current_temperature_c", "thermostat.read_at", 600, &why));
-    CHECK(reference_temperature_config_valid("", "", "", "", 600, &why));  // empty topic = disabled
-    CHECK(!reference_temperature_config_valid("x", "sensors/+/temperature", "temperature.tC", "", 600, &why));
+          "thermostat.current_temperature_c", "thermostat.target_temperature_c",
+          "thermostat.read_at", "thermostat.enabled", "thermostat.hvac_mode", 600, &why));
+    CHECK(reference_temperature_config_valid("", "", "", "", "", "", "", 600, &why));
+    CHECK(!reference_temperature_config_valid("x", "sensors/+/temperature", "temperature.tC",
+                                               "target", "read_at", "", "", 600, &why));
     CHECK(std::string(why) == "MQTT topic must be exact (no + or # wildcard)");
-    CHECK(!reference_temperature_config_valid("x", "/sensors/room", "temperature.tC", "", 600, &why));
-    CHECK(!reference_temperature_config_valid("x", "sensors/room/", "temperature.tC", "", 600, &why));
-    CHECK(!reference_temperature_config_valid("x", "sensors/room", "temperature..tC", "", 600, &why));
+    CHECK(!reference_temperature_config_valid("x", "/sensors/room", "temperature.tC",
+                                               "target", "read_at", "", "", 600, &why));
+    CHECK(!reference_temperature_config_valid("x", "sensors/room/", "temperature.tC",
+                                               "target", "read_at", "", "", 600, &why));
+    CHECK(!reference_temperature_config_valid("x", "sensors/room", "temperature..tC",
+                                               "target", "read_at", "", "", 600, &why));
     CHECK(std::string(why) == "JSON path contains an empty key");
-    CHECK(!reference_temperature_config_valid("x", "sensors/room", "temperature.tC", "read..at", 600, &why));
-    CHECK(!reference_temperature_config_valid("x", "sensors/room", "temperature. tC", "", 600, &why));
-    CHECK(!reference_temperature_config_valid("x", "sensors/room", "temperature.tC", "", 9, &why));
+    CHECK(!reference_temperature_config_valid("x", "sensors/room", "temperature.tC",
+                                               "target..c", "read_at", "", "", 600, &why));
+    CHECK(!reference_temperature_config_valid("x", "sensors/room", "temperature.tC",
+                                               "target", "read..at", "", "", 600, &why));
+    CHECK(!reference_temperature_config_valid("x", "sensors/room", "temperature. tC",
+                                               "target", "read_at", "", "", 600, &why));
+    CHECK(!reference_temperature_config_valid("x", "sensors/room", "temperature.tC",
+                                               "target", "read_at", "", "", 9, &why));
     CHECK(std::string(why) == "Maximum age must be between 10 and 3600 seconds");
     CHECK(!reference_temperature_config_valid(std::string(REF_TEMP_NAME_MAX + 1, 'x'),
-                                               "sensors/room", "temperature.tC", "", 600, &why));
+                                               "sensors/room", "temperature.tC", "target",
+                                               "read_at", "", "", 600, &why));
 
     int64_t unix_s = -1;
     CHECK(reference_parse_rfc3339("2026-08-02T08:35:12.792902415Z", unix_s));
@@ -5069,6 +5139,52 @@ static void test_reference_temperature_config() {
     CHECK(!unsynced.fresh && std::string(unsynced.reason) == "clock_unsynced");
     ReferenceFreshness future = reference_freshness(true, false, true, 1100, 0, 1000, 0, 600);
     CHECK(!future.fresh && std::string(future.reason) == "future_timestamp");
+
+    ReferenceRoomRaw raw;
+    raw.configured = true;
+    raw.has_temperature = true;
+    raw.temperature_c = 20.5;
+    raw.has_source_time = true;
+    raw.setpoint_mapped = true;
+    raw.has_setpoint = true;
+    raw.setpoint_c = 22.0;
+    raw.enabled_mapped = true;
+    raw.has_enabled = true;
+    raw.enabled = true;
+    raw.hvac_mode_mapped = true;
+    raw.has_hvac_mode = true;
+    raw.hvac_mode = "heat";
+    const ReferenceRoomSample eligible = reference_room_sample(raw, fresh);
+    CHECK(eligible.temperature_valid && eligible.setpoint_valid && eligible.control_eligible);
+    CHECK(eligible.has_room_error && eligible.room_error_k == 1.5);
+    CHECK(eligible.reason == ReferenceRoomReason::Eligible);
+    CHECK(std::string(reference_room_reason_name(eligible.reason)) == "eligible");
+
+    raw.enabled = false;
+    const ReferenceRoomSample disabled = reference_room_sample(raw, fresh);
+    CHECK(disabled.temperature_valid && disabled.setpoint_valid && !disabled.control_eligible);
+    CHECK(!disabled.has_room_error && disabled.reason == ReferenceRoomReason::Disabled);
+    raw.enabled = true;
+    raw.hvac_mode = "cool";
+    CHECK(reference_room_sample(raw, fresh).reason == ReferenceRoomReason::NonHeatingMode);
+    raw.hvac_mode = "heat";
+    raw.has_setpoint = false;
+    CHECK(reference_room_sample(raw, fresh).reason == ReferenceRoomReason::MissingSetpoint);
+    raw.has_setpoint = true;
+    raw.setpoint_c = 36.0;
+    CHECK(reference_room_sample(raw, fresh).reason == ReferenceRoomReason::SetpointOutOfRange);
+    raw.setpoint_c = 22.0;
+    raw.temperature_c = 4.9;
+    CHECK(reference_room_sample(raw, fresh).reason == ReferenceRoomReason::TemperatureOutOfRange);
+    raw.temperature_c = 20.5;
+    raw.has_source_time = false;
+    CHECK(reference_room_sample(raw, live).reason == ReferenceRoomReason::MissingSourceTime);
+    CHECK(reference_room_sample(raw, replay).reason == ReferenceRoomReason::RetainedWithoutTimestamp);
+    raw.has_source_time = true;
+    CHECK(reference_room_sample(raw, stale).reason == ReferenceRoomReason::Stale);
+    raw.payload_valid = false;
+    raw.payload_reason = ReferenceRoomReason::BackwardTimestamp;
+    CHECK(reference_room_sample(raw, fresh).reason == ReferenceRoomReason::BackwardTimestamp);
 }
 
 static void test_weather_forecast_contract() {
