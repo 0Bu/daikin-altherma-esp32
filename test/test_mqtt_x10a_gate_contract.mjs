@@ -30,7 +30,7 @@ const publishCycle = task.indexOf("if (gate.publish_cycle)");
 assert.ok(initialStart >= 0 && gateStep > initialStart && promote > gateStep,
   "the no-LWT client must start before X10A decides publisher promotion");
 assert.ok(refSubscription > promote && refProbe > refSubscription && refFrames > refProbe,
-  "saved/test reference subscriptions and frame decoding must run outside the publish gate");
+  "eligible saved-source/Test servicing and frame decoding must run outside the publish gate");
 assert.ok(offline > refFrames && resume > offline && publishCycle > resume,
   "offline/resume transitions and every ordinary publication must follow inbound servicing");
 assert.doesNotMatch(task.slice(promote, refSubscription), /SubscriberOnly[\s\S]*continue\s*;/,

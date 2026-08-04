@@ -571,6 +571,11 @@ static esp_err_t set_dynamic_lwt(httpd_req_t* req) {
         return http_send_json(req, "{\"ok\":true,\"saved\":false,\"reboot\":false}");
     c.dynamic_lwt_mode = want;
     if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    // Apply the consent boundary now, not after either worker's normal sleep interval. OFF removes
+    // the saved room subscription and pauses Open-Meteo; SHADOW starts both on their next cycle.
+    mqtt_reference_reconfigure();
+    weather_forecast_reconfigure();
+    if (want == logic::DynamicLwtMode::Off) mqtt_request_weather_cleanup();
     diag_printf("dynamic_lwt: mode set to %s (shadow never calls actuator)\n",
                 logic::dynamic_lwt_mode_name(want));
     return http_send_json(req, "{\"ok\":true,\"saved\":true,\"reboot\":false}");

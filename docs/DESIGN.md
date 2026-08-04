@@ -1109,7 +1109,7 @@ block butted against the round CTA and steps cards below.
   beyond the PR-banner check. The divergence from the dashboard is **not** a gap to close — do not
   add a translation layer here to make the two consistent.
 
-### 5.6 Settings — the screen behind the gear (Connections + dynamic LWT + ESP32)
+### 5.6 Settings — the screen behind the gear (Connections + ESP32 + dynamic LWT)
 The dashboard header's **gear** (right, `.iconbtn.bordered`) is the only way off the dashboard. It
 opens **Settings**, which swaps the dashboard header for a **back header** — a chevron plus the
 screen title. `Esc` leaves the same way, but only when no modal is open: a modal owns `Esc` first, so
@@ -1122,9 +1122,8 @@ was on the dashboard — the move changed where the configuration lives, not how
 card is the same story split three ways: **ESP32** / **Protokoll** / **Firmware** answer three
 different questions (the board itself, the X10A link, the running software) that one card used to
 answer at once. The **Dynamische Vorlaufregelung** card is their neighbour rather than another
-top-level screen: its room source is the first implemented input, while forecast, strategy and
-output reserve the stable homes later phases will fill. All four are built and rebuilt together by
-one `esp32CardHtml()`. HomeHub/Modbus is a fifth row in the Connections tile and follows the same row
+top-level screen and deliberately comes last, after Firmware. All four are built and rebuilt together
+by one `esp32CardHtml()`. HomeHub/Modbus is a fifth row in the Connections tile and follows the same row
 vocabulary exactly:
 
 1. **Connections tile** — one full-width card, `--card` bordered like the value groups, titled
@@ -1183,43 +1182,7 @@ vocabulary exactly:
      link remains read-only by design (`docs/SECURITY.md`). It stays a row of its own and is never
      folded into X10A state because the two sources fail independently.
 
-2. **Dynamische Vorlaufregelung card** — the permanent Settings home of the dynamic-LWT project,
-   currently and explicitly **Datenerfassung** only. Its five rows are **Betriebsart** =
-   **Beobachten**, **Raumtemperaturquellen**, **Wetterprognose**, **Regelstrategie**, and
-   **Sicherheit & Ausgabe** = **Nur lesend**. The room-source row opens the exact-topic,
-   current-temperature, target-temperature and source-timestamp JSON paths plus the maximum-age
-   modal. Advanced optional enabled/HVAC-mode mappings remain API-compatible but are not exposed as
-   ordinary UI fields; an existing mapping is preserved while its visible source binding is unchanged,
-   while a new or repointed source starts without hidden gates. ENV III is a physical
-   board accessory and therefore no longer appears as a separate row here; its measurements remain
-   observation-only and render in a separate dashboard card, never as a replacement for Daikin R1T.
-   Once a room or weather source is configured, its current
-   reading/freshness state moves out of the editable header into a permanently open
-   `--brand-tint` info tongue directly underneath. The header remains the setting label plus edit
-   affordance and still opens its modal; warning and error states keep the tongue but use their
-   semantic colour, so a temporary failure does not reshape the card. An unconfigured source stays
-   a compact row with **Not configured** and no tongue.
-   Every text-like field in this and the other modals selects its complete value
-   on focus/click, so a long topic, host or JSON path can be replaced with one paste. The room-source
-   modal has **Abbrechen**, **Löschen**, and **Speichern**. Save validates the fields, runs the
-   non-persistent live MQTT test, and only sends the mapping-bound proof to persistence after a fresh
-   value passed the exact topic/path/time/age mapping. A failed validation, timeout, unreadable value,
-   rejected proof, or write leaves the dialog open and releases Save for correction or retry.
-   Delete is enabled only for a configured source and posts the explicit empty mapping; it removes
-   the saved subscription and resets the captured runtime value without testing unsaved draft
-   fields. Its compact summary reports one configured source, the raw current temperature and
-   qualified source age; retained remains labelled. The full target and canonical eligibility
-   evidence is exposed by `/status` and the numeric heartbeat. A retained payload without its own timestamp is visibly
-   untrusted rather than made fresh by reconnecting, while a non-retained value without one ages
-   from its monotonic MQTT arrival. The
-   fixed plausibility bounds, calibration `0`, the stable source id `living_room`, and numeric
-   accepted-view heartbeat fields keep the input suitable for later control and VictoriaMetrics
-   without enabling control today. `active` is observable publisher context, not a validity gate. The
-   remaining future-facing rows are honest state, not disabled controls: strategy is **Nicht aktiv**
-   and output **Nur lesend**, with no pencil and no click handler. The card must never imply that
-   observing an MQTT value or ENV III measurement controls the heat pump.
-
-3. **ESP32 card** — the board itself, styled exactly like the value groups (§6): the **Hardware**
+2. **ESP32 card** — the board itself, styled exactly like the value groups (§6): the **Hardware**
    row (selected board, status indicator, recovery-button pins and configured ENV III marker), which
    opens the board-hardware modal, from `board{…}` + `env3{…}`. Selecting a preset fills recommended
    peripheral defaults but records physical identity independently: disabling LED or reset keeps
@@ -1257,13 +1220,13 @@ vocabulary exactly:
    translated unit strings (the Checkup window already prints `min`/`h` untranslated).
    **The card's order encodes what the rows are**: the board's own setting (Hardware) → its own
    health (uptime, then the two memory rows).
-4. **Protokoll card** — the X10A link, split out because it answers a different question than the
+3. **Protokoll card** — the X10A link, split out because it answers a different question than the
    board's own health does (*is the bus alive*, not *is the board healthy*): the heat-pump link
    (Online/Offline) and X10A protocol, then the **RX/TX pins** — read-only when detected, else a
    usable-GPIO dropdown (§5.2). From `pins_avail`, `hp{proto,rx,tx,connected,last_ok_s}`. **Link
-   facts, top to bottom** (link, protocol, RX, TX) — there is no setting on this card, only what the
-   bus is currently doing and which pins it is doing it on.
-5. **Firmware card** — the running software: the **Version** (`version`) and the **Update channel**
+   facts, top to bottom** (link, protocol, RX, TX). Each label opens the ordinary `--brand-tint`
+   explanation tongue; the right-side value or pin selector remains an independent action.
+4. **Firmware card** — the running software: the **Version** (`version`) and the **Update channel**
    select (`ota.channel` → `POST /set_ota`, §5.4), then **Language** (`ui.lang` → `POST /set_lang`,
    §1) — a three-option select, **Browser** / English / Deutsch, "Browser" because that option *is*
    the browser's own guess (`navigator.language`), not a separate automatic mode. Picking one is a
@@ -1277,7 +1240,30 @@ vocabulary exactly:
    no longer differ in is **behaviour**: both are the OTA trigger, and both carry a readout slot, so
    the check runs and reports **here**, without leaving Settings (§5.4). This row was read-only
    through v1.0.13 on the reasoning that the header owned the affordance; in use that only made the
-   version look inert precisely where a user is already deciding which build to run.
+   version look inert precisely where a user is already deciding which build to run. Version,
+   update channel and language each have the same label-owned explanation tongue as Protocol.
+   The fourth row is the persisted, default-OFF **Dynamische Vorlaufregelung** switch. It maps only
+   to OFF/SHADOW: enabling requires MQTT, a complete room source and HomeHub; it never exposes ACTIVE.
+
+5. **Dynamische Vorlaufregelung card** — the permanent, bottom-most Settings home of the dynamic-LWT
+   project, marked with a written **Experimentell** pill rather than a live-health dot. Its five rows
+   are **Betriebsart**, **Raumtemperaturquellen**, **Wetterprognose**, **Regelstrategie**, and
+   **Sicherheit & Ausgabe** = **Nur lesend**. OFF keeps saved source settings but removes the room
+   subscription, clears captured runtime values, pauses Open-Meteo and evaluates no proposal.
+   SHADOW reads and validates the configured inputs and runs the bounded P controller, but retains
+   the write-free output boundary. The room-source row opens the exact MQTT topic, current and target
+   temperature paths, source timestamp and maximum age; the weather row opens its location modal.
+   Advanced optional enabled/HVAC-mode mappings remain API-compatible but are not ordinary UI fields.
+   ENV III remains a separate board accessory and never substitutes for Daikin R1T.
+
+   Every row has a pull-out explanation tongue. Live room and weather values are not repeated as an
+   unexplained green summary line: the tongue names status, quantity, time/freshness and provenance
+   in separate labelled paragraphs, matching the value explanations elsewhere in the UI. The compact
+   right side carries only the configured source/provider and its semantic state. OFF tongues explain
+   why collection is paused and deliberately suppress any old runtime readings. The room-source modal
+   remains test-before-persist; Delete removes the saved mapping and captured value. Retained data
+   without trusted source time fails closed, and `/status` plus the numeric heartbeat retain the full
+   canonical and controller evidence. No UI path sends a setpoint or HomeHub write.
 
 **Only domain readings and settings live in the cards.** The generic *Report a bug* action was the
 (then single) card's last row through v1.0.0-dev.199 and is in the footer line below all of them now:

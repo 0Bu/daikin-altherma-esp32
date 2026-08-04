@@ -117,14 +117,36 @@ const vcard = (label, rows, badge, badgeCls) => `<div class="vgroup"><div class=
 const editIcon = `<svg class="vcard-edit-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
 const settingsChevIcon = `<svg class="vrow-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>`;
 
+// One Settings row with the same pull-out explanation tongue used by measured values. The label
+// owns the explanation action; `rightHtml` remains an independent readout or control. Keeping the
+// split generic lets Protocol, Firmware, Board Hardware and the experimental controller explain
+// their values without turning a select, OTA action or switch into an accidental accordion toggle.
+function settingsInfoRow(stateKey, detailId, label, rightHtml, bodyHtml, itemCls = "") {
+  const open = S.descOpen?.has(stateKey) === true;
+  return `<div class="vitem${open ? " open" : ""} settings-info-item${itemCls ? ` ${itemCls}` : ""}">` +
+    `<div class="vrow settings-split-row settings-info-row">` +
+    `<button class="settings-split-info settings-info-toggle" type="button" data-desc="${stateKey}" ` +
+    `aria-expanded="${open ? "true" : "false"}" aria-controls="${detailId}">` +
+    `<span class="vrow-label">${esc(label)}</span>${settingsChevIcon}</button>${rightHtml}</div>` +
+    `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body settings-info-tongue" ` +
+    `id="${detailId}">${bodyHtml}</div></div></div></div>`;
+}
+
+function settingsValueInfoRow(scope, key, label, value, valueCls, help) {
+  const right = `<span class="settings-split-value vrow-val settings-wrap ${valueCls || ""}">${esc(value)}</span>`;
+  return settingsInfoRow(`${scope}:${key}`, `${scope}-${key}-detail`, label, right,
+    `<div class="vdesc-p">${esc(help)}</div>`);
+}
+
 // RX/TX pin dropdown row — shown only when auto-detection hasn't locked a working pin pair, so the
 // user picks from the chip's safe GPIOs (logic/board_pins.hpp → /status.pins_avail).
 // The current pin is always an option even if it's off-list (e.g. a stale/custom value).
-function pinSelRow(label, id, val, pins) {
+function pinSelRow(label, id, val, pins, key, help) {
   const list = (val != null && !pins.includes(val)) ? [val, ...pins].sort((a, b) => a - b) : pins;
   const opts = list.map((p) => `<option value="${p}"${p === val ? " selected" : ""}>${p}</option>`).join("");
-  return `<div class="vrow"><span class="vrow-label">${esc(label)}</span>` +
-    `<select class="input mono num pin-sel" id="${id}" aria-label="${esc(label)}">${opts}</select></div>`;
+  const select = `<select class="input mono num pin-sel" id="${id}" aria-label="${esc(label)}">${opts}</select>`;
+  return settingsInfoRow(`protocol:${key}`, `protocol-${key}-detail`, label, select,
+    `<div class="vdesc-p">${esc(help)}</div>`);
 }
 
 // The update-channel row (Firmware card): which published feed the next OTA check reads. Two feeds
@@ -135,9 +157,10 @@ function pinSelRow(label, id, val, pins) {
 function channelRow(cur) {
   const opt = (v, label) =>
     `<option value="${v}"${v === cur ? " selected" : ""}>${esc(label)}</option>`;
-  return `<div class="vrow"><span class="vrow-label">${esc(t("card.channel"))}</span>` +
-    `<select class="input chan-sel" id="e32Chan" aria-label="${esc(t("card.channel"))}">` +
-    opt("release", t("chan.release")) + opt("dev", t("chan.dev")) + `</select></div>`;
+  const select = `<select class="input chan-sel" id="e32Chan" aria-label="${esc(t("card.channel"))}">` +
+    opt("release", t("chan.release")) + opt("dev", t("chan.dev")) + `</select>`;
+  return settingsInfoRow("firmware:channel", "firmware-channel-detail", t("card.channel"), select,
+    `<div class="vdesc-p">${esc(t("card.channel_help"))}</div>`);
 }
 
 // The language row (Firmware card): the web UI's manual language override. "Browser" hands the
@@ -149,9 +172,10 @@ function channelRow(cur) {
 function langRow(cur) {
   const opt = (v, label) =>
     `<option value="${v}"${v === cur ? " selected" : ""}>${esc(label)}</option>`;
-  return `<div class="vrow"><span class="vrow-label">${esc(t("card.language"))}</span>` +
-    `<select class="input lang-sel" id="e32Lang" aria-label="${esc(t("card.language"))}">` +
-    opt("auto", t("lang.auto")) + opt("en", t("lang.en")) + opt("de", t("lang.de")) + `</select></div>`;
+  const select = `<select class="input lang-sel" id="e32Lang" aria-label="${esc(t("card.language"))}">` +
+    opt("auto", t("lang.auto")) + opt("en", t("lang.en")) + opt("de", t("lang.de")) + `</select>`;
+  return settingsInfoRow("firmware:language", "firmware-language-detail", t("card.language"), select,
+    `<div class="vdesc-p">${esc(t("card.language_help"))}</div>`);
 }
 
 // The version row (Firmware card): the running version, and the SAME OTA trigger the dashboard
@@ -164,15 +188,27 @@ function langRow(cur) {
 // same place the header keeps its own (`#otaStat`).
 function firmwareRow(version) {
   const title = S.otaAvail ? t("ota.title_avail", S.otaAvail) : t("ota.title_check");
-  return `<button class="vrow vrow-btn vrow-fw" type="button" data-act="ota" ` +
+  const action = `<button class="settings-split-action vrow-fw" type="button" data-act="ota" ` +
     `aria-label="${esc(t("aria.ota"))}" title="${esc(title)}">` +
-    `<span class="vrow-label">${esc(t("card.firmware"))}</span>` +
     `<span class="vrow-val mono">v${esc(version || "?")}` +
     `<span class="otastat" id="otaStatSet" role="status" aria-live="polite"></span></span></button>`;
+  return settingsInfoRow("firmware:version", "firmware-version-detail", t("card.firmware"), action,
+    `<div class="vdesc-p">${esc(t("card.firmware_help"))}</div>`);
 }
 
-// Settings cards rendered below Connections: the dynamic-LWT project plus THREE ESP32-family cards,
-// the latter split from what was
+// The one explicit consent gate for the experimental controller. It selects SHADOW, never ACTIVE:
+// the current firmware may collect/validate inputs and calculate a proposal, but cannot write it.
+function dynamicLwtSwitchRow() {
+  const on = S.status?.dynamic_lwt?.mode === "shadow";
+  const toggle = `<label class="settings-toggle" title="${esc(t("dyn.enable_help"))}">` +
+    `<input type="checkbox" id="e32DynamicLwt" role="switch"${on ? " checked" : ""} ` +
+    `aria-label="${esc(t("dyn.enable"))}"><span class="settings-toggle-track" aria-hidden="true"></span></label>`;
+  return settingsInfoRow("firmware:dynamic-lwt", "firmware-dynamic-lwt-detail", t("dyn.enable"), toggle,
+    `<div class="vdesc-p">${esc(t("dyn.enable_help"))}</div>`);
+}
+
+// Settings cards rendered below Connections: THREE ESP32-family cards followed by the experimental
+// dynamic-LWT project. The ESP32 cards were split from what was
 // one, so each answers one question. ESP32 = the board itself (its onboard hardware and its own
 // health — uptime + the two memory curves). Protokoll = the X10A link (whether the bus answers, the
 // framing it speaks, and the RX/TX pins). Firmware = the running version, the update feed it follows,
@@ -194,9 +230,9 @@ function esp32CardHtml() {
   const proto = hp.proto === "I" ? "X10A-I" : hp.proto === "S" ? "X10A-S" : "—";
   const pinsLocked = hp.connected || (typeof hp.last_ok_s === "number" && hp.last_ok_s >= 0 && hp.last_ok_s <= 30);
   const avail = Array.isArray(s.pins_avail) ? s.pins_avail : [];
-  const pinRow = (label, id, val, other) => pinsLocked
-    ? vrow(label, val != null ? String(val) : "—", { cls: "mono num" })
-    : pinSelRow(label, id, val, avail.filter((p) => p !== other));
+  const pinRow = (label, id, val, other, key, help) => pinsLocked
+    ? settingsValueInfoRow("protocol", key, label, val != null ? String(val) : "—", "mono num", help)
+    : pinSelRow(label, id, val, avail.filter((p) => p !== other), key, help);
   // ESP32 — the board's onboard hardware and its own health. READINGS AND SETTINGS ONLY; the one
   // action this card family used to carry ("Report a bug") is in the Settings footer line now
   // (index.html #footBug), a rare escape hatch that read as one more board fact under "Largest free block".
@@ -206,17 +242,20 @@ function esp32CardHtml() {
     memoryRows(s.sys || {});
   // Protokoll — the X10A link: connection state, framing, and the RX/TX pins it is wired on.
   const protoRows =
-    vrow(t("card.hplink"), hp.connected ? t("card.online") : t("card.offline"), { cls: hp.connected ? "ok" : "err" }) +
-    vrow(t("card.protocol"), hp.connected ? proto : "—") +
-    pinRow(t("card.rxpin"), "e32Rx", hp.rx, hp.tx) +
-    pinRow(t("card.txpin"), "e32Tx", hp.tx, hp.rx);
-  // Firmware — the running version (tap = OTA check), the feed it follows, and the UI language.
+    settingsValueInfoRow("protocol", "link", t("card.hplink"),
+      hp.connected ? t("card.online") : t("card.offline"), hp.connected ? "ok" : "err", t("card.hplink_help")) +
+    settingsValueInfoRow("protocol", "framing", t("card.protocol"), hp.connected ? proto : "—", "",
+      t("card.protocol_help")) +
+    pinRow(t("card.rxpin"), "e32Rx", hp.rx, hp.tx, "rx", t("card.rxpin_help")) +
+    pinRow(t("card.txpin"), "e32Tx", hp.tx, hp.rx, "tx", t("card.txpin_help"));
+  // Firmware — running build, update feed, language and the explicit default-OFF experimental gate.
   const fwRows =
     firmwareRow(s.version) +
     channelRow(s.ota?.channel === "dev" ? "dev" : "release") +
-    langRow(s.ui?.lang === "de" || s.ui?.lang === "en" ? s.ui.lang : "auto");
-  return dynamicControlCardHtml() + vcard("ESP32", esp32Rows) +
-         vcard(t("card.proto_title"), protoRows) + vcard(t("card.fw_title"), fwRows);
+    langRow(s.ui?.lang === "de" || s.ui?.lang === "en" ? s.ui.lang : "auto") +
+    dynamicLwtSwitchRow();
+  return vcard("ESP32", esp32Rows) + vcard(t("card.proto_title"), protoRows) +
+         vcard(t("card.fw_title"), fwRows) + dynamicControlCardHtml();
 }
 
 // The permanent Settings home for the dynamic-LWT project. Every main row uses the same split
@@ -224,21 +263,13 @@ function esp32CardHtml() {
 // explanation tongue; a compact value on the right opens an editor only where one exists. This
 // keeps status/explanation and configuration as two explicit actions on configured and empty rows.
 function dynamicInfoRow(key, label, value, valueCls, bodyHtml, action = "", title = "") {
-  const stateKey = `dynamic:${key}`;
-  const detailId = `dynamic-${key}-detail`;
-  const open = S.descOpen?.has(stateKey) === true;
   const right = action
     ? `<button class="settings-split-action dynamic-config-open vrow-val settings-wrap ${valueCls}" ` +
       `type="button" data-act="${action}" aria-label="${esc(`${title}: ${value}`)}">` +
       `<span>${esc(value)}</span>${editIcon}</button>`
     : `<span class="settings-split-value vrow-val settings-wrap ${valueCls}">${esc(value)}</span>`;
-  return `<div class="vitem${open ? " open" : ""} dynamic-info-item">` +
-    `<div class="vrow settings-split-row dynamic-info-row">` +
-    `<button class="settings-split-info dynamic-info-toggle" type="button" data-desc="${stateKey}" ` +
-    `aria-expanded="${open ? "true" : "false"}" aria-controls="${detailId}">` +
-    `<span class="vrow-label">${esc(label)}</span>${settingsChevIcon}</button>${right}</div>` +
-    `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body settings-source-tongue" ` +
-    `id="${detailId}">${bodyHtml}</div></div></div></div>`;
+  return settingsInfoRow(`dynamic:${key}`, `dynamic-${key}-detail`, label, right, bodyHtml,
+    "dynamic-info-item");
 }
 
 // The weather tongue explains the two derived forecast numbers instead of compressing them into
@@ -246,9 +277,10 @@ function dynamicInfoRow(key, label, value, valueCls, bodyHtml, action = "", titl
 // lead-ins, so this permanent Settings panel reads like every opened value/checkup explainer.
 // Old values remain visible when freshness fails because they are useful diagnostic evidence; the
 // status paragraph says explicitly that they are no longer current.
-function weatherSourceDetailHtml(w, outdoor, solar) {
+function weatherSourceDetailHtml(w, outdoor, solar, captureEnabled) {
   let statusKey;
-  if (w.fetching) statusKey = "fetching";
+  if (!captureEnabled) statusKey = "inactive";
+  else if (w.fetching) statusKey = "fetching";
   else if (w.has_value && w.fresh) statusKey = "fresh";
   else if (w.error) statusKey = "unavailable";
   else if (w.has_value) statusKey = "stale";
@@ -256,46 +288,72 @@ function weatherSourceDetailHtml(w, outdoor, solar) {
 
   let html = descNoteHtml(t("wx.detail.status"),
     `${t(`wx.status.${statusKey}`)} — ${t(`wx.detail.${statusKey}`)}`);
-  if (w.has_value) {
+  if (captureEnabled && w.has_value) {
     html += descNoteHtml(t("wx.detail.temperature_label"), t("wx.detail.temperature", outdoor));
     html += descNoteHtml(t("wx.detail.solar_label"), t("wx.detail.solar", solar));
   }
   return html + descNoteHtml(t("wx.detail.source_label"), t("wx.detail.source"));
 }
 
+function roomSourceDetailHtml(r, mqtt, captureEnabled, temperature, setpoint, age) {
+  let statusKey = "waiting", detail = t("ref.detail.waiting");
+  if (!captureEnabled) { statusKey = "inactive"; detail = t("ref.detail.inactive"); }
+  else if (!mqtt.configured) { statusKey = "unavailable"; detail = t("ref.broker_off"); }
+  else if (r.error) { statusKey = "unavailable"; detail = t("ref.detail.error", r.error); }
+  else if (r.has_value && r.fresh) { statusKey = "fresh"; detail = t("ref.detail.fresh"); }
+  else if (r.has_value) {
+    statusKey = "stale";
+    detail = r.freshness_reason === "retained_without_timestamp" ? t("ref.time_untrusted")
+      : r.freshness_reason === "clock_unsynced" ? t("ref.clock_unsynced")
+      : t("ref.detail.stale");
+  }
+
+  const retained = captureEnabled && r.has_value && r.retained ? ` · ${t("ref.retained")}` : "";
+  let html = descNoteHtml(t("ref.detail.status_label"),
+    `${t(`ref.status.${statusKey}`)} — ${detail}${retained}`);
+  if (captureEnabled && r.has_value) {
+    html += descNoteHtml(t("ref.detail.temperature_label"), t("ref.detail.temperature", temperature));
+    if (r.has_setpoint)
+      html += descNoteHtml(t("ref.detail.setpoint_label"), t("ref.detail.setpoint", setpoint));
+    html += descNoteHtml(t("ref.detail.age_label"), t("ref.detail.age", age));
+  }
+  const sourceName = r.name || "MQTT";
+  return html + descNoteHtml(t("ref.detail.source_label"), t("ref.detail.source", sourceName));
+}
+
 function dynamicControlCardHtml() {
   const r = S.status?.reference_temperature || {};
   const w = S.status?.weather_forecast || {};
   const mqtt = S.status?.mqtt || {};
-  let badgeCls = "dim";
-  let source = t("dyn.not_configured"), sourceCls = "dim";
+  const d = S.status?.dynamic_lwt || {};
+  const captureEnabled = d.mode === "shadow";
+  let sourceCls = "dim";
+  let temperature = "", setpoint = "", age = "";
   if (r.configured) {
-    source = t("dyn.one_source");
-    if (!mqtt.configured) { source += ` · ${t("ref.broker_off")}`; sourceCls = "err"; badgeCls = "err"; }
-    else if (r.error) { source += ` · ${t("dyn.input_error")}`; sourceCls = "err"; badgeCls = "err"; }
+    if (!captureEnabled) sourceCls = "dim";
+    else if (!mqtt.configured) sourceCls = "err";
+    else if (r.error) sourceCls = "err";
     else if (r.has_value) {
-      const value = Number(r.temperature_c).toLocaleString(LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 2 });
+      temperature = Number(r.temperature_c).toLocaleString(
+        LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 2 });
+      if (r.has_setpoint) setpoint = Number(r.setpoint_c).toLocaleString(
+        LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 2 });
       const seconds = Number.isFinite(r.age_s) ? r.age_s : r.received_ago_s;
-      const age = seconds < 2 ? t("ref.now") : t("ref.ago", seconds);
-      source += ` · ${value} °C · ${age}`;
-      if (r.retained) source += ` · ${t("ref.retained")}`;
-      if (r.fresh) { sourceCls = "ok"; badgeCls = "ok"; }
-      else {
-        const reason = r.freshness_reason === "clock_unsynced" ? t("ref.clock_unsynced") :
-          r.freshness_reason === "retained_without_timestamp" ? t("ref.time_untrusted") : t("ref.stale");
-        source += ` · ${reason}`;
-        sourceCls = "warn"; badgeCls = "warn";
-      }
-    } else { source += ` · ${t("ref.waiting")}`; sourceCls = "warn"; }
+      age = Number.isFinite(seconds) ? (seconds < 2 ? t("ref.now") : t("ref.ago", seconds))
+        : t("ref.age_unknown");
+      sourceCls = r.fresh ? "ok" : "warn";
+    } else sourceCls = "warn";
   }
-  let rows = dynamicInfoRow("mode", t("dyn.mode"), t("dyn.observe"), "",
-    `<div class="vdesc-p">${esc(t("dyn.mode_help"))}</div>`);
+  let rows = dynamicInfoRow("mode", t("dyn.mode"),
+    captureEnabled ? t("dyn.observe") : t("dyn.off"), captureEnabled ? "" : "dim",
+    `<div class="vdesc-p">${esc(t(captureEnabled ? "dyn.mode_help" : "dyn.off_help"))}</div>`);
   const sourceValue = r.configured ? t("dyn.one_source") : t("dyn.not_configured");
-  const sourceBody = `<span class="settings-source-summary ${sourceCls}" id="dynamic-ref-temp-status">` +
-    `${esc(source)}</span><div class="vdesc-p">${esc(t("ref.hint"))}</div>`;
+  const sourceBody = (r.configured
+    ? roomSourceDetailHtml(r, mqtt, captureEnabled, temperature, setpoint, age) : "") +
+    `<div class="vdesc-p">${esc(t("ref.hint"))}</div>`;
   rows += dynamicInfoRow("room-sources", t("dyn.room_sources"), sourceValue, sourceCls,
     sourceBody, "ref-temp", t("ref.title"));
-  let weather = t("dyn.not_configured"), weatherCls = "dim";
+  let weatherCls = "dim";
   let outdoor = "", solar = "";
   if (w.configured && w.has_value) {
     outdoor = Number(w.outdoor_mean_2h_c).toLocaleString(
@@ -303,27 +361,26 @@ function dynamicControlCardHtml() {
     solar = Number(w.solar_energy_2h_wh_m2).toLocaleString(
       LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 0 });
   }
-  if (w.configured && w.fetching) { weather = t("wx.fetching"); weatherCls = "warn"; }
+  if (w.configured && !captureEnabled) weatherCls = "dim";
+  else if (w.configured && w.fetching) weatherCls = "warn";
   else if (w.configured && w.has_value) {
-    weather = `Open-Meteo · ${outdoor} °C / 2 h · ${solar} Wh/m²`;
     if (w.fresh) weatherCls = "ok";
-    else { weather += ` · ${w.error ? t("wx.unavailable") : t("ref.stale")}`; weatherCls = w.error ? "err" : "warn"; }
-  } else if (w.configured) { weather = w.error ? t("wx.unavailable") : t("wx.waiting"); weatherCls = w.error ? "err" : "warn"; }
-  if (w.error) badgeCls = "err";
+    else weatherCls = w.error ? "err" : "warn";
+  } else if (w.configured) weatherCls = w.error ? "err" : "warn";
   const weatherValue = w.configured ? "Open-Meteo" : t("dyn.not_configured");
-  const weatherBody = `<span class="settings-source-summary ${weatherCls}" id="dynamic-weather-status">` +
-    `${esc(weather)}</span>` + (w.configured ? weatherSourceDetailHtml(w, outdoor, solar) : "") +
+  const weatherBody = (w.configured ? weatherSourceDetailHtml(w, outdoor, solar, captureEnabled) : "") +
     `<div class="vdesc-p">${esc(t("wx.hint"))}</div>`;
   rows += dynamicInfoRow("weather", t("dyn.weather"), weatherValue, weatherCls,
     weatherBody, "weather", t("wx.title"));
 
-  rows += dynamicInfoRow("strategy", t("dyn.strategy"), t("dyn.inactive"), "dim",
-    `<div class="vdesc-p">${esc(t("dyn.strategy_help"))}</div>`);
+  rows += dynamicInfoRow("strategy", t("dyn.strategy"),
+    captureEnabled ? t("dyn.shadow_strategy") : t("dyn.inactive"), captureEnabled ? "" : "dim",
+    `<div class="vdesc-p">${esc(t(captureEnabled ? "dyn.strategy_help" : "dyn.strategy_off_help"))}</div>`);
   rows += dynamicInfoRow("safety", t("dyn.safety"), t("dyn.read_only"), "",
     `<div class="vdesc-p">${esc(t("dyn.safety_help"))}</div>`);
-  if (r.error) rows += vrow(t("ref.error"), r.error, { cls: "err settings-wrap" });
-  if (w.error) rows += vrow(t("wx.error"), w.error, { cls: "err settings-wrap" });
-  return vcard(t("dyn.card"), rows, t("dyn.capture"), badgeCls);
+  if (captureEnabled && r.error) rows += vrow(t("ref.error"), r.error, { cls: "err settings-wrap" });
+  if (captureEnabled && w.error) rows += vrow(t("wx.error"), w.error, { cls: "err settings-wrap" });
+  return vcard(t("dyn.card"), rows, t("dyn.experimental"), "experimental");
 }
 
 // How long the board has been up (/status.uptime_s — seconds since boot, esp_timer). TWO units at
@@ -810,8 +867,8 @@ function connectionsHtml() {
 const connDown = () => connLinks().filter((l) => l.cls === "err");
 
 // ── Settings screen (behind the header gear) ─────────────────────────────────────────────────
-// The whole configuration on one screen, no menu level in between: Connections, dynamic LWT, then
-// ESP32 / Protocol / Firmware, with the latter four rendered together by esp32CardHtml().
+// The whole configuration on one screen, no menu level in between: Connections, ESP32 / Protocol /
+// Firmware, then dynamic LWT at the bottom, all four rendered together by esp32CardHtml().
 function renderSettings() {
   // Both containers are rebuilt on every poll (link state, pins and the OTA row all change). The
   // Protocol card's RX/TX pin dropdown is interactive, so skip the rebuild while it is focused/open — otherwise the

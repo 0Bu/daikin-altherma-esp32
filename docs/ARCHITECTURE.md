@@ -620,7 +620,11 @@ host-testable core is unusually large and valuable, because the risky parts are 
   envelope, a 1 K/decision slew limit and a 30-minute cadence. Missing room/X10A/HomeHub/plant-gate
   evidence fails closed; an inactive plant holds; unavailable forecast degrades while contributing
   exactly zero. Its output is a telemetry snapshot only: the header has no actuator type and the
-  runtime adapter never calls `mb_request_lwt_offset()`.
+  runtime adapter never calls `mb_request_lwt_offset()`. OFF is also the input-consent boundary:
+  the saved room mapping remains editable but unsubscribed, Open-Meteo keeps its saved coordinates
+  without making a request, captured runtime inputs are cleared, and no proposal is evaluated.
+  The Firmware-card switch applies OFF/SHADOW live; SHADOW is accepted only when MQTT, a complete
+  room mapping and HomeHub are configured.
 - `logic/crashinfo.hpp` — reset-reason slug + fault classification, and the `last_crash` / MQTT crash
   payload + paste-friendly text bundle (incl. the backtrace clamp) built from a captured summary. The
   retained MQTT crash payload (`build_crash_mqtt_payload`) is **crash-only**: the JSON when the boot is

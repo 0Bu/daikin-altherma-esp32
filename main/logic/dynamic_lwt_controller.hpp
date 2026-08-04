@@ -165,7 +165,6 @@ public:
     const DynamicLwtSnapshot& snapshot() const { return s_; }
 
     const DynamicLwtSnapshot& evaluate(const DynamicLwtInputs& in) {
-        s_.evaluations++;
         s_.mode = dynamic_lwt_mode_valid(in.mode) ? in.mode : DynamicLwtMode::Off;
         s_.proposal_produced = false;
         s_.decision_eligible = false;
@@ -194,6 +193,7 @@ public:
             s_.reason = DynamicLwtReason::Disabled;
             return s_;
         }
+        s_.evaluations++;
         if (in.now_ms < 0 || (last_now_ms_ >= 0 && in.now_ms < last_now_ms_))
             return failsafe(DynamicLwtReason::ClockInvalid);
         last_now_ms_ = in.now_ms;

@@ -162,7 +162,7 @@ function wireTrendScrub(gv) {
 // The remaining delegated wiring, split out only so the scrub handlers above can be a function of
 // their container — same one-time setup, same order as before.
 function wireRestOfApp() {
-  // The three-card ESP32 group (#settingsCards) is rebuilt every poll too, so its controls are
+  // The ESP32/Protocol/Firmware/dynamic group (#settingsCards) is rebuilt every poll too, so its controls are
   // delegated as well: Hardware's left action expands its explanation, its right action opens the
   // board modal, the Firmware row runs the OTA check, and the Protocol card's RX/TX dropdowns re-run
   // pin auto-detection on change. The check stays on this screen — it
@@ -185,6 +185,7 @@ function wireRestOfApp() {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();
     else if (e.target.id === "e32Chan") onChannelPick();
     else if (e.target.id === "e32Lang") onLangPick();
+    else if (e.target.id === "e32DynamicLwt") onDynamicLwtPick();
   });
   // The Connections tile (#connTile) is rebuilt every poll too — each row's pencil opens its own
   // edit modal (WiFi/MQTT/Syslog/NTP), delegated the same way.

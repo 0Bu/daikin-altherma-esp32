@@ -33,6 +33,20 @@ const evaluator = mqtt.slice(evaluateStart, evaluateEnd);
 assert.doesNotMatch(evaluator, /mb_request_lwt_offset\s*\(|LwtOffsetIntent|\.offer\s*\(/,
   "the runtime shadow adapter may observe actuator state but must not offer or write an intent");
 
+const subscriptionStart = mqtt.indexOf("static void service_reference_subscription(");
+const subscriptionEnd = mqtt.indexOf("static void service_reference_probe_subscription(", subscriptionStart);
+const subscription = mqtt.slice(subscriptionStart, subscriptionEnd);
+assert.match(subscription, /capture_enabled[\s\S]*DynamicLwtMode::Shadow/,
+  "the saved room mapping may be subscribed only after explicit SHADOW enablement");
+assert.match(subscription, /if \(!capture_enabled\)[\s\S]*esp_mqtt_client_unsubscribe/,
+  "OFF must actively remove an existing saved-source subscription");
+
+const framesStart = mqtt.indexOf("static void service_reference_frames(");
+const framesEnd = mqtt.indexOf("static void on_mqtt(", framesStart);
+const framesService = mqtt.slice(framesStart, framesEnd);
+assert.match(framesService, /service_reference_probe_frame\(frame\);[\s\S]*dynamic_lwt_mode != logic::DynamicLwtMode::Shadow[\s\S]*continue/,
+  "OFF must ignore saved-source frames while retaining the independent pre-enable Test path");
+
 const taskStart = mqtt.indexOf("static void mqtt_task(void*)");
 const taskEnd = mqtt.indexOf("static bool build_client(", taskStart);
 assert.ok(taskStart >= 0 && taskEnd > taskStart, "the MQTT task boundary must remain identifiable");
@@ -42,6 +56,19 @@ const evaluate = task.indexOf("evaluate_dynamic_lwt(ref_config, hp)");
 const publishGate = task.indexOf("if (gate.publish_cycle)");
 assert.ok(frames >= 0 && evaluate > frames && publishGate > evaluate,
   "SHADOW must evaluate after inbound room data and even while ordinary publication is gated");
+assert.match(task, /publish_weather_state\(ref_config\.weather_enabled &&[\s\S]*DynamicLwtMode::Shadow\)/,
+  "weather evidence may be published only while the experimental collection switch is enabled");
+
+const weather = read("main/weather_forecast.cpp");
+assert.match(weather, /dynamic_lwt_mode != logic::DynamicLwtMode::Shadow[\s\S]*set_feature_inactive\(cfg\)/,
+  "OFF must pause Open-Meteo before any network fetch");
+
+const httpConfig = read("main/http_config.cpp");
+const setModeStart = httpConfig.indexOf("static esp_err_t set_dynamic_lwt(");
+const setModeEnd = httpConfig.indexOf("static esp_err_t set_hp(", setModeStart);
+const setMode = httpConfig.slice(setModeStart, setModeEnd);
+assert.match(setMode, /mqtt_reference_reconfigure\(\);[\s\S]*weather_forecast_reconfigure\(\);/,
+  "the Firmware switch must apply both collection boundaries live");
 
 const cppFiles = fs.readdirSync(path.join(root, "main"), { withFileTypes: true })
   .filter(entry => entry.isFile() && entry.name.endsWith(".cpp"))
