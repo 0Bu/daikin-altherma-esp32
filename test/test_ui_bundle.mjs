@@ -145,6 +145,20 @@ assert.match(mqttHa, /else if \(!s_env3_disabled_cleaned\)[\s\S]*retract_env3_di
 // mapping that clears the source and captured value.
 assert.match(html, /id="refTempModal"[\s\S]*id="rtTopic"[\s\S]*id="rtPath"[\s\S]*id="rtSetpointPath"[\s\S]*id="rtTimePath"[\s\S]*id="rtEnabledPath"[\s\S]*id="rtHvacModePath"[\s\S]*id="rtMaxAge"/,
   "the room-temperature source modal must expose current, target, source-time and eligibility mappings");
+for (const [input, help, key] of [
+  ["rtTopic", "rtTopicHelp", "ref.topic_help"],
+  ["rtPath", "rtPathHelp", "ref.path_help"],
+  ["rtSetpointPath", "rtSetpointPathHelp", "ref.setpoint_path_help"],
+  ["rtTimePath", "rtTimePathHelp", "ref.time_path_help"],
+  ["rtEnabledPath", "rtEnabledPathHelp", "ref.enabled_path_help"],
+  ["rtHvacModePath", "rtHvacModePathHelp", "ref.hvac_mode_path_help"],
+  ["rtMaxAge", "rtMaxAgeHelp", "ref.max_age_help"],
+]) {
+  assert.match(html, new RegExp(`id="${input}"[^>]*aria-describedby="${help}"[\\s\\S]*id="${help}"[^>]*data-i18n="${key.replace(".", "\\.")}"`),
+    `${input} must expose its localized explanation to visual and assistive users`);
+}
+assert.doesNotMatch(html, /id="rtName"[^>]*aria-describedby|id="rtNameHelp"|data-i18n="ref\.name_help"/,
+  "the self-explanatory room-source name must not carry redundant help text");
 assert.match(html, /id="rtDeleteBtn"[^>]*data-i18n="ref\.delete"[\s\S]*id="rtBtn"[^>]*data-i18n="btn\.save"/,
   "Delete must replace the separate Test action while Save remains immediately actionable");
 assert.doesNotMatch(html, /id="rtTestBtn"|id="rtTestResult"/,
