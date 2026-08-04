@@ -54,6 +54,7 @@ const context = vm.createContext({
   S: { status: { modbus: { host: "saved-homehub.local", port: 502, unit_id: 1 } } },
   $: (id) => elements[id], esc: String, t: (key) => key, toast() {},
   openPopup: (id) => { elements[id].hidden = false; },
+  closePopup: (id) => { elements[id].hidden = true; },
   post: async () => pendingSearch,
 });
 vm.runInContext(`${settings}\nthis.__homehub = { openHomehub, closeHomehub, searchHomehub };`, context,

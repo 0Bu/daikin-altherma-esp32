@@ -866,10 +866,20 @@ textarea.input[readonly] { font-size: 12px; color: var(--muted); white-space: pr
 .served { font-size: 12.5px; color: var(--muted); text-align: center; margin: 16px 0 0; font-family: var(--font-mono); }
 
 /* ── Modal (dashboard edit popups, e.g. MQTT) ───────────────────────────── */
-.modal { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 18px; }
+/* The document must not take over a finger drag from an open dialog. `html` is the scroller in
+   Safari while Chromium commonly reports `body`, so the JS lifecycle marks both. */
+html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; }
+.modal {
+  position: fixed; inset: 0; z-index: 50; display: grid; place-items: center;
+  grid-template-rows: minmax(0, 1fr); overflow: hidden;
+  height: 100vh; height: 100dvh;
+  padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right))
+           max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
+}
 .modal-backdrop { position: absolute; inset: 0; background: rgba(16,20,28,.5); animation: fade .18s ease; }
 .modal-card {
-  position: relative; width: 100%; max-width: 420px; max-height: calc(100vh - 36px); overflow-y: auto;
+  position: relative; width: 100%; max-width: 420px; min-height: 0; max-height: 100%; overflow-y: auto;
+  overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
   background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card);
   box-shadow: var(--shadow-card); padding: 20px; animation: tin .22s cubic-bezier(.2,.7,.3,1);
 }
