@@ -159,6 +159,7 @@ static std::string         s_ref_binding_setpoint_path;
 static std::string         s_ref_binding_time_path;
 static std::string         s_ref_binding_enabled_path;
 static std::string         s_ref_binding_hvac_mode_path;
+static bool                s_ref_capture_enabled = false; // saved mapping may remain while OFF
 static std::string         s_ref_probe_subscribed_topic; // mqtt_task only; never persisted
 static uint32_t            s_ref_probe_task_generation = 0;
 
@@ -596,10 +597,10 @@ static void publish_modbus_state() {
 static void service_requested_topic_cleanup(const Config& c) {
     if (!s_connected) return;
     if (s_weather_cleanup_requested.exchange(false)) {
-        if (!c.weather_enabled) {
+        if (!c.weather_enabled || c.dynamic_lwt_mode != logic::DynamicLwtMode::Shadow) {
             mqtt_publish(s_weather, "", 0, 1, 1);
             s_disabled_weather_cleaned = true;
-            diag_printf("mqtt: user-disabled weather forecast topic deleted\n");
+            diag_printf("mqtt: inactive weather forecast topic deleted\n");
         }
     }
     if (s_modbus_cleanup_requested.exchange(false)) {
@@ -1153,17 +1154,21 @@ static void set_reference_error(const char* error, ReferenceRoomReason reason, b
 // reading extracted by the previous path must never appear under the new sensor identity.
 static void service_reference_subscription(const Config& c) {
     const bool configured = !c.ref_temp_topic.empty();
+    const bool capture_enabled = configured &&
+        c.dynamic_lwt_mode == logic::DynamicLwtMode::Shadow;
     if (c.ref_temp_topic != s_ref_binding_topic || c.ref_temp_path != s_ref_binding_path ||
         c.ref_temp_setpoint_path != s_ref_binding_setpoint_path ||
         c.ref_temp_time_path != s_ref_binding_time_path ||
         c.ref_temp_enabled_path != s_ref_binding_enabled_path ||
-        c.ref_temp_hvac_mode_path != s_ref_binding_hvac_mode_path) {
+        c.ref_temp_hvac_mode_path != s_ref_binding_hvac_mode_path ||
+        capture_enabled != s_ref_capture_enabled) {
         s_ref_binding_topic = c.ref_temp_topic;
         s_ref_binding_path = c.ref_temp_path;
         s_ref_binding_setpoint_path = c.ref_temp_setpoint_path;
         s_ref_binding_time_path = c.ref_temp_time_path;
         s_ref_binding_enabled_path = c.ref_temp_enabled_path;
         s_ref_binding_hvac_mode_path = c.ref_temp_hvac_mode_path;
+        s_ref_capture_enabled = capture_enabled;
         s_ref_subscription_announced = false;
         Lock lk(s_mtx);
         s_ref_status.has_value = false;
@@ -1187,6 +1192,21 @@ static void service_reference_subscription(const Config& c) {
     {
         Lock lk(s_mtx);
         s_ref_status.configured = configured;
+    }
+
+    // OFF is the collection boundary, not just an actuator boundary. Keep the saved mapping visible
+    // to /status and the editor, but remove its live subscription and captured runtime values. The
+    // candidate Test path below remains independent so a source can be proved before the operator
+    // enables SHADOW.
+    if (!capture_enabled) {
+        s_ref_reconfigure.exchange(false);
+        if (!s_ref_subscribed_topic.empty() && s_connected)
+            esp_mqtt_client_unsubscribe(s_client, s_ref_subscribed_topic.c_str());
+        s_ref_subscribed_topic.clear();
+        Lock lk(s_mtx);
+        s_ref_status.subscribed = false;
+        s_ref_status.error.clear();
+        return;
     }
 
     const char* invalid = nullptr;
@@ -1413,6 +1433,7 @@ static void service_reference_frames(const Config& c) {
     while (xQueueReceive(s_ref_queue, &s_ref_task_frame, 0) == pdTRUE) {
         const ReferenceMqttFrame& frame = s_ref_task_frame;
         service_reference_probe_frame(frame);
+        if (c.dynamic_lwt_mode != logic::DynamicLwtMode::Shadow) continue;
         if (c.ref_temp_topic.empty() || frame.topic != c.ref_temp_topic) continue;
         {
             Lock lk(s_mtx);
@@ -1694,10 +1715,12 @@ static void mqtt_task(void*) {
                     s_modbus_disabled_cleaned = true;
                 }
 
-                // Weather remains an independent firmware input. MQTT archives it only while the
-                // source is configured; disabling it probes away a retained predecessor without
-                // publishing a synthetic disabled document. No HA entities are created.
-                publish_weather_state(ref_config.weather_enabled);
+                // Weather remains an independent firmware input. MQTT archives it only while both
+                // its saved source and the explicit SHADOW collection gate are enabled; OFF removes
+                // the retained predecessor without publishing a synthetic disabled document. No HA
+                // entities are created.
+                publish_weather_state(ref_config.weather_enabled &&
+                                      ref_config.dynamic_lwt_mode == logic::DynamicLwtMode::Shadow);
 
                 const bool env3_enabled = ref_config.env3_enabled && env3_board_supported(ref_config);
                 if (env3_enabled) {

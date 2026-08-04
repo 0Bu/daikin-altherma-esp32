@@ -3,6 +3,7 @@
 #include "config.hpp"
 #include "diag_log.hpp"
 #include "logic/open_meteo.hpp"
+#include "logic/dynamic_lwt_controller.hpp"
 #include "logic/weather_forecast.hpp"
 #include "sntp_time.hpp"
 #include "wifi.hpp"
@@ -191,12 +192,37 @@ void set_disabled() {
     s_status.error.clear();
 }
 
+// Coordinates are a saved input, but OFF withdraws consent to send them (and the public source IP)
+// to Open-Meteo. Keep the location visible to the editor while clearing every runtime value, so a
+// disabled card cannot present yesterday's forecast as if collection were merely idle.
+void set_feature_inactive(const Config& cfg) {
+    Lock lk(s_mtx);
+    s_status.configured = true;
+    s_status.fetching = false;
+    s_status.available = false;
+    s_status.has_value = false;
+    s_status.latitude = weather_coordinate_format_e6(cfg.weather_latitude_e6);
+    s_status.longitude = weather_coordinate_format_e6(cfg.weather_longitude_e6);
+    s_status.issued_unix_s = -1;
+    s_status.fetched_unix_s = -1;
+    s_status.decision_unix_s = -1;
+    s_status.last_attempt_unix_s = -1;
+    s_status.state = "disabled";
+    s_status.reason = "dynamic_lwt_disabled";
+    s_status.error.clear();
+}
+
 void weather_task(void*) {
     for (;;) {
         try {
             const Config cfg = config();
             if (!cfg.weather_enabled) {
                 set_disabled();
+                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(60000));
+                continue;
+            }
+            if (cfg.dynamic_lwt_mode != logic::DynamicLwtMode::Shadow) {
+                set_feature_inactive(cfg);
                 ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(60000));
                 continue;
             }

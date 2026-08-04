@@ -5304,6 +5304,8 @@ static void test_dynamic_lwt_controller() {
     const DynamicLwtSnapshot off = controller.evaluate(in);
     CHECK(off.mode == DynamicLwtMode::Off && off.state == DynamicLwtState::Off);
     CHECK(off.reason == DynamicLwtReason::Disabled && !off.has_requested_offset);
+    CHECK(off.evaluations == 0);
+    CHECK(controller.evaluate(in).evaluations == 0);  // OFF collects and analyses nothing
 
     in = ready();
     DynamicLwtSnapshot decision = controller.evaluate(in);

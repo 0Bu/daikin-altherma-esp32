@@ -50,4 +50,13 @@ assert.match(setWeather, /weather_was_enabled && !location.enabled/);
 assert.ok(weatherSave >= 0 && weatherRequest > weatherSave,
   "weather cleanup may be requested only after the disabling config was persisted");
 
+const setDynamicStart = http.indexOf("static esp_err_t set_dynamic_lwt(");
+const setDynamicEnd = http.indexOf("static esp_err_t set_hp(", setDynamicStart);
+const setDynamic = http.slice(setDynamicStart, setDynamicEnd);
+const dynamicSave = setDynamic.indexOf("config_save(c)");
+const dynamicRequest = setDynamic.indexOf("mqtt_request_weather_cleanup()");
+assert.match(setDynamic, /want == logic::DynamicLwtMode::Off/);
+assert.ok(dynamicSave >= 0 && dynamicRequest > dynamicSave,
+  "turning the feature OFF must retract weather evidence only after OFF was persisted");
+
 console.log("MQTT source cleanup: explicit weather + Modbus tombstones bypass X10A safely");

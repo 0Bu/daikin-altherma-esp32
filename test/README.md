@@ -85,7 +85,8 @@ found address to the form but cannot persist it behind the normal Save/Cancel bo
 
 `node test/test_mqtt_x10a_gate_contract.mjs` pins the other IDF-facing ownership boundary: the X10A
 poll task starts before MQTT; `mqtt_ha_start()` builds a no-LWT client; `mqtt_task()` starts it for
-saved/test reference subscriptions even without X10A; and the first bus proof cleanly replaces it
+the pre-enable Test subscription and, only in SHADOW, the saved reference subscription even without
+X10A; and the first bus proof cleanly replaces it
 with the LWT-bearing publisher. All ordinary publications remain behind the X10A gate.
 
 `node test/test_mqtt_source_cleanup_contract.mjs` pins the deliberately narrow exception: clearing

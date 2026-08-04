@@ -553,6 +553,39 @@ async function onLangPick() {
   toast(t("lang.saved"), "ok");
 }
 
+// Explicit consent for experimental input collection and write-free SHADOW evaluation. The backend
+// accepts only off/shadow and validates the dependencies again, so a raw request cannot bypass the
+// same fail-closed boundary. No optimistic S.status mutation: /status is the persisted truth and
+// restores the switch after either a rejection or an NVS failure.
+async function onDynamicLwtPick() {
+  const toggle = $("e32DynamicLwt");
+  const enable = toggle.checked;
+  if (S.busy) {
+    toggle.checked = S.status?.dynamic_lwt?.mode === "shadow";
+    toast(t("toast.applying"), "info");
+    return;
+  }
+  S.busy = true;
+  toggle.disabled = true;
+  toggle.blur();
+  try {
+    const r = await post("/set_dynamic_lwt", { mode: enable ? "shadow" : "off" });
+    if (!r.ok) {
+      const msg = r.status === 409 ? t("dyn.enable_requirements") : await errorOf(r, t("toast.rejected"));
+      toast(msg, "err");
+      await refreshStatus();
+      return;
+    }
+    toast(t(enable ? "dyn.enabled" : "dyn.disabled"), "ok");
+    await refreshStatus();
+  } catch {
+    toast(t("toast.unreachable"), "err");
+    await refreshStatus();
+  } finally {
+    S.busy = false;
+  }
+}
+
 // ── Firmware / OTA ───────────────────────────────────────────────────────
 // Tapping the version in the header meta line checks for an OTA update, and offers to install one:
 // the full /ota/check -> /ota/status -> /ota/update flow is wired below against the device-side

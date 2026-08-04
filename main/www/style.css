@@ -497,6 +497,15 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .section-badge.ok::before  { background: var(--ok); }
 .section-badge.err::before { background: var(--err); }
 .section-badge.dim::before { background: var(--muted); }
+/* Maturity is not a live status. The dynamic-control marker is therefore a written pill without a
+   traffic-light dot: it says that the whole card is experimental, independent of whether inputs
+   happen to be healthy right now. */
+.section-badge.experimental {
+  display: inline-flex; align-items: center; padding: 2px 7px; border: 1px solid var(--line);
+  border-radius: var(--r-pill); background: var(--brand-tint); color: var(--fg);
+  font-size: 10.5px; letter-spacing: .25px;
+}
+.section-badge.experimental::before { display: none; }
 .vrow {
   display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
   padding: 9px 0; border-top: 1px solid var(--line);
@@ -554,6 +563,26 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .settings-split-info:hover .vrow-label,
 .settings-split-info:hover .vrow-chev,
 .settings-split-action:hover { color: var(--brand-strong); }
+/* Native checkbox semantics with a compact switch presentation. The input remains focusable and
+   announces its checked state through role=switch; the painted track carries no text or meaning on
+   its own. */
+.settings-toggle { position: relative; display: inline-flex; align-items: center; cursor: pointer; }
+.settings-toggle input {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
+  clip-path: inset(50%); white-space: nowrap;
+}
+.settings-toggle-track {
+  position: relative; display: block; width: 42px; height: 24px; border: 1px solid var(--line);
+  border-radius: var(--r-pill); background: var(--soft); transition: background .15s, border-color .15s;
+}
+.settings-toggle-track::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+  border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s;
+}
+.settings-toggle input:checked + .settings-toggle-track { background: var(--brand-tint); border-color: var(--brand); }
+.settings-toggle input:checked + .settings-toggle-track::after { transform: translateX(18px); background: var(--brand-strong); }
+.settings-toggle input:focus-visible + .settings-toggle-track { outline: 2px solid var(--brand); outline-offset: 3px; }
+.settings-toggle input:disabled + .settings-toggle-track { opacity: .55; cursor: wait; }
 /* The Firmware row carries the OTA readout (#otaStatSet) beside its version, so the check reports
    where it was started instead of sending the user to the dashboard for it. Two adjustments to the
    ordinary value cell, both about a message being longer than a value: it may WRAP to a second line
@@ -614,22 +643,14 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    on open and shift every row below by one. */
 .vitem.open .vrow-desc { box-shadow: inset 0 -1px 0 var(--line); }
 .hardware-item.open > .hardware-row { box-shadow: inset 0 -1px 0 var(--line); }
-.dynamic-info-item.open > .dynamic-info-row { box-shadow: inset 0 -1px 0 var(--line); }
-.settings-source-tongue { overflow-wrap: anywhere; }
+.settings-info-item.open > .settings-info-row { box-shadow: inset 0 -1px 0 var(--line); }
+.settings-info-tongue { overflow-wrap: anywhere; }
 .board-hardware-tongue { overflow-wrap: anywhere; }
 .hardware-led-legend, .hardware-help {
   margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line);
 }
 .hardware-led-legend .led-legend-title { font-size: inherit; }
 .hardware-led-legend .led-pattern-list li { margin-top: 6px; }
-.settings-source-summary {
-  display: block; min-width: 0; font-size: 15px; font-weight: 600;
-  font-variant-numeric: tabular-nums; line-height: 1.4;
-}
-.settings-source-summary.ok { color: var(--ok); }
-.settings-source-summary.warn { color: var(--warn); }
-.settings-source-summary.err { color: var(--err); }
-.settings-source-summary.dim { color: var(--muted); }
 /* A labelled note inside an explainer — "Normal: …", "No current reading: …" (app.js descNoteHtml).
    Its own paragraph rather than a run-on sentence: the note answers a different question from the
    "what is it" line above it, and set solid the two read as one paragraph that changes subject
@@ -1018,7 +1039,6 @@ html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; 
   .conn-dbm, .vrow-label { font-size: 16.5px; }
   .vrow-unit { font-size: 13.5px; }
   .vdesc-body { font-size: 15px; }
-  .settings-source-summary { font-size: 17px; }
   .conn-detail { font-size: 15px; }
   .conn-row { padding: 14px 0; }
   .vrow, .vname { padding-top: 11px; padding-bottom: 11px; }
