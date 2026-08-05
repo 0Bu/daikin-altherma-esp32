@@ -255,10 +255,12 @@ svg .sc-buh { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
 .buh-on .sc-buh { fill: var(--brand-tint); stroke: var(--warn); }
 .buh-on .sc-bolt { fill: var(--warn); }
 /* The BSH pill is always visible and says only E-heater/Heizstab. OFF/unknown is deliberately light
-   grey; active turns the border, fill and text orange together. The inspector and accessible name
-   retain the written state. */
+   grey; active turns the pill and the tank outline orange together, so the whole store signals the
+   heat source that is currently active. The inspector and accessible name retain the written state. */
+svg .sc-tank { transition: stroke .3s; }
 svg .sc-bsh-state-box { fill: var(--hatch); stroke: var(--pipe); transition: fill .3s, stroke .3s; }
 svg .sc-bsh-state .sc-state { fill: var(--muted); transition: fill .3s; }
+.bsh-on .sc-tank { stroke: var(--warn); }
 .bsh-on .sc-bsh-state-box { fill: var(--warn); fill-opacity: .11; stroke: var(--warn); }
 .bsh-on .sc-bsh-state .sc-state { fill: var(--warn); }
 /* BSH heats the tank electrically: animate the heater wave, but never fCoil, because that overlay
