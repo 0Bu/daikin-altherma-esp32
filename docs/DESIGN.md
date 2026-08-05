@@ -1260,7 +1260,7 @@ vocabulary exactly:
 
 5. **Dynamische Vorlaufregelung card** — the conditional, bottom-most Settings home of the dynamic-LWT
    project, shown only while the Firmware switch selects SHADOW. Its five rows
-   are **Betriebsart**, **Raumtemperaturquellen**, **Wetterprognose**, **Regelstrategie**, and
+   are **Betriebsart**, **Raumtemperaturquelle**, **Wetterprognose**, **Regelstrategie**, and
    **Sicherheit & Ausgabe** = **Nur lesend**. OFF hides this card, keeps saved source settings, removes
    the room subscription, clears captured runtime values, pauses Open-Meteo and evaluates no proposal.
    The Firmware switch remains visible as the way back in. SHADOW reads and validates the configured
@@ -1273,9 +1273,9 @@ vocabulary exactly:
    Every row has a pull-out explanation tongue. Live room and weather values are not repeated as an
    unexplained green summary line: while the card is enabled, the tongue names status, quantity,
    time/freshness and provenance in separate labelled paragraphs, matching the value explanations
-   elsewhere in the UI. The compact right side carries only the configured source/provider and its
-   semantic state. The room-source modal remains test-before-persist; Delete removes the saved mapping
-   and captured value. Retained data
+   elsewhere in the UI. The compact right side reports whether the single room-temperature source is
+   configured; the weather row names its configured provider. The room-source modal remains
+   test-before-persist; Delete removes the saved mapping and captured value. Retained data
    without trusted source time fails closed, and `/status` plus the numeric heartbeat retain the full
    canonical and controller evidence. No UI path sends a setpoint or HomeHub write.
 

@@ -357,11 +357,11 @@ function dynamicControlCardHtml() {
   let rows = dynamicInfoRow("mode", t("dyn.mode"),
     captureEnabled ? t("dyn.observe") : t("dyn.off"), captureEnabled ? "" : "dim",
     `<div class="vdesc-p">${esc(t(captureEnabled ? "dyn.mode_help" : "dyn.off_help"))}</div>`);
-  const sourceValue = r.configured ? t("dyn.one_source") : t("dyn.not_configured");
+  const sourceValue = r.configured ? t("dyn.configured") : t("dyn.not_configured");
   const sourceBody = (r.configured
     ? roomSourceDetailHtml(r, mqtt, captureEnabled, temperature, setpoint, age) : "") +
     `<div class="vdesc-p">${esc(t("ref.hint"))}</div>`;
-  rows += dynamicInfoRow("room-sources", t("dyn.room_sources"), sourceValue, sourceCls,
+  rows += dynamicInfoRow("room-sources", t("dyn.room_source"), sourceValue, sourceCls,
     sourceBody, "ref-temp", t("ref.title"));
   let weatherCls = "dim";
   let outdoor = "", solar = "";
