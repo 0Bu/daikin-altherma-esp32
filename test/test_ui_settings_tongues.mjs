@@ -72,11 +72,12 @@ const labels = {
   "wx.detail.inactive": "Prognoseerfassung ausgeschaltet.",
   "wx.detail.temperature_label": "Temperatur:",
   "wx.detail.temperature": "{0} °C ist die mittlere prognostizierte Außenlufttemperatur für die nächsten zwei vollständigen Stunden.",
-  "wx.detail.solar_label": "Sonnenenergie:",
-  "wx.detail.solar": "{0} Wh/m² ist die Summe der prognostizierten kurzwelligen Sonnenenergie je Quadratmeter im selben Zeitraum.",
+  "wx.detail.solar_label": "Globalstrahlung:",
+  "wx.detail.solar": "{0} Wh/m² ist die prognostizierte Globalstrahlung auf eine horizontale Fläche im selben Zweistundenzeitraum.",
   "wx.detail.source_label": "Quelle:",
-  "wx.detail.source": "Open-Meteo · DWD-ICON-Modell. Nur Beobachtung.",
-  "wx.hint": "Wetter-Erklärung",
+  "wx.detail.source": "Open-Meteo · DWD ICON Seamless. Nur Beobachtung; die Prognose verändert die Wärmepumpensteuerung nicht.",
+  "wx.hint.configured": "Wetter-Konfiguration",
+  "wx.hint.setup": "Wetter-Einrichtung",
   "env.title": "Außensensor",
   "env.collecting": "Messwerte werden erfasst",
   "env.unavailable": "Sensor nicht erreichbar",
@@ -173,12 +174,14 @@ assert.match(weatherTongue, /<span class="vdesc-n">Status:<\/span> Aktuell — D
   "weather must explain its freshness instead of presenting an unexplained green line");
 assert.match(weatherTongue, /<span class="vdesc-n">Temperatur:<\/span> 22,6 °C ist die mittlere prognostizierte Außenlufttemperatur für die nächsten zwei vollständigen Stunden\./,
   "weather must define the displayed two-hour temperature mean");
-assert.match(weatherTongue, /<span class="vdesc-n">Sonnenenergie:<\/span> 0 Wh\/m² ist die Summe der prognostizierten kurzwelligen Sonnenenergie je Quadratmeter im selben Zeitraum\./,
-  "weather must define the accumulated solar-energy value, including a valid zero");
-assert.match(weatherTongue, /<span class="vdesc-n">Quelle:<\/span> Open-Meteo · DWD-ICON-Modell\. Nur Beobachtung\./,
+assert.match(weatherTongue, /<span class="vdesc-n">Globalstrahlung:<\/span> 0 Wh\/m² ist die prognostizierte Globalstrahlung auf eine horizontale Fläche im selben Zweistundenzeitraum\./,
+  "weather must define the accumulated global horizontal irradiation, including a valid zero");
+assert.match(weatherTongue, /<span class="vdesc-n">Quelle:<\/span> Open-Meteo · DWD ICON Seamless\. Nur Beobachtung; die Prognose verändert die Wärmepumpensteuerung nicht\./,
   "weather must state provenance and its observation-only boundary");
-assert.match(weatherTongue, /Wetter-Erklärung/,
-  "weather configuration guidance must move from the popup into the tongue");
+assert.match(weatherTongue, /Wetter-Konfiguration/,
+  "configured weather guidance must remain in the tongue");
+assert.doesNotMatch(weatherTongue, /Wetter-Einrichtung/,
+  "configured weather must not repeat coordinate-entry guidance");
 const roomButton = html.match(/<button[^>]*data-act="ref-temp"[\s\S]*?<\/button>/)?.[0] || "";
 assert.match(roomButton, /<span>1 Quelle<\/span>/,
   "the compact room-source value must be the popup action");
@@ -187,7 +190,7 @@ assert.doesNotMatch(roomButton, /25,1 °C|vor 17 s/,
 const weatherButton = html.match(/<button[^>]*data-act="weather"[\s\S]*?<\/button>/)?.[0] || "";
 assert.match(weatherButton, /<span>Open-Meteo<\/span>/,
   "the compact weather-provider value must be the popup action");
-for (const explanation of ["Betriebsart-Erklärung", "Raumquellen-Erklärung", "Wetter-Erklärung", "Strategie-Erklärung", "Sicherheits-Erklärung"])
+for (const explanation of ["Betriebsart-Erklärung", "Raumquellen-Erklärung", "Wetter-Konfiguration", "Strategie-Erklärung", "Sicherheits-Erklärung"])
   assert.ok(html.includes(explanation), `dynamic explanation tongue must include: ${explanation}`);
 
 S.descOpen.add("dynamic:strategy");
@@ -203,8 +206,10 @@ assert.equal((html.match(/class="vdesc-body settings-info-tongue"/g) || []).leng
   "unconfigured sources must retain their explanation tongues");
 assert.equal((html.match(/<span>Nicht konfiguriert<\/span>/g) || []).length, 2,
   "each empty editable source must expose Not configured as its popup value");
-assert.ok(html.includes("Raumquellen-Erklärung") && html.includes("Wetter-Erklärung"),
+assert.ok(html.includes("Raumquellen-Erklärung") && html.includes("Wetter-Einrichtung"),
   "unconfigured sources must still explain how their inputs work");
+assert.doesNotMatch(html, /Wetter-Konfiguration/,
+  "unconfigured weather must show setup guidance instead of configured-source guidance");
 
 S.status.reference_temperature = { configured: true, error: "bad payload" };
 S.status.weather_forecast = { configured: true, fetching: true };
