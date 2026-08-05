@@ -65,15 +65,22 @@ assert.match(app, /applyLive\(\{ mb_host: host, mb_port: port, mb_unit_id: unit 
 assert.doesNotMatch(app, /mb_mode|config_modbus_should_search/,
   "the browser bundle must carry no hidden Auto-mode contract");
 
-// Dynamic LWT owns one opt-in bottom Settings card. Room input and direct Open-Meteo forecast are
-// editable there; board-bound ENV III lives under Board Hardware. The Firmware switch owns explicit
-// OFF/SHADOW consent, while output stays read-only.
-assert.match(app, /function dynamicControlCardHtml\(\)[\s\S]*t\("dyn\.mode"\)[\s\S]*t\("dyn\.room_source"\)[\s\S]*t\("dyn\.weather"\)[\s\S]*t\("dyn\.strategy"\)[\s\S]*t\("dyn\.safety"\)/,
-  "the dynamic-LWT Settings card must keep all planned configuration domains together");
+// The heating-curve diagnosis owns one opt-in bottom Settings card. Room input and direct
+// Open-Meteo forecast are editable there; board-bound ENV III lives under Board Hardware. The
+// Firmware switch owns explicit OFF/SHADOW consent.
+assert.match(app, /function dynamicControlCardHtml\(\)[\s\S]*t\("dyn\.state"\)[\s\S]*t\("dyn\.room_source"\)[\s\S]*t\("dyn\.weather"\)[\s\S]*t\("dyn\.strategy"\)/,
+  "the diagnosis Settings card must keep all planned configuration domains together");
 assert.doesNotMatch(app, /dynamicSourceRow\("env3"/,
   "the board-bound outdoor sensor must not remain as a separate dynamic-control setting");
-assert.match(app, /t\("dyn\.observe"\)[\s\S]*t\("dyn\.read_only"\)/,
-  "SHADOW must identify itself as observation-only and read-only");
+// The card must NOT restate the Firmware toggle as a second mode row, and must not carry a
+// constant "read-only" row: with the write path deleted (#294) neither can ever say anything else,
+// and a line that cannot vary is one more thing a reader has to rule out.
+assert.doesNotMatch(app, /t\("dyn\.mode"\)|t\("dyn\.safety"\)|t\("dyn\.read_only"\)|t\("dyn\.observe"\)/,
+  "the diagnosis card must carry neither a duplicate mode row nor a constant read-only row");
+// The state row must distinguish "the plant is not heating" from a fault: through the summer that
+// is the expected reading, and styling it as a warning would train the user to ignore the row.
+assert.match(app, /function dynamicStateRow\([\s\S]*"dyn\.state_waiting", cls: ""/,
+  "an idle plant must be a neutral state, not a warning");
 assert.match(app, /function dynamicLwtSwitchRow\(\)[\s\S]*id="e32DynamicLwt"[\s\S]*role="switch"/,
   "Firmware must expose the explicit OFF/SHADOW switch");
 assert.match(app, /function onDynamicLwtPick\(\)[\s\S]*post\("\/set_dynamic_lwt", \{ mode: enable \? "shadow" : "off" \}\)/,
