@@ -47,9 +47,9 @@ other selftest here: a floor that has stopped failing turns a percentage into de
 
 `run-contract-tests.sh` covers what the host suite structurally cannot. `test_logic.cpp` links the
 IDF-free headers, so it proves what a rule *decides* — never that the firmware still calls it from
-the right task, in the right order, or from the only file allowed to. "`hp_modbus.cpp` is the sole
-caller of the actuator mailbox" is a claim about a whole component, and the only way to check it is
-to read the source text, which is what each `test/test_*_contract.mjs` does. The glob is deliberate:
+the right task, in the right order, or not at all. "No source file can issue a Modbus write" is a
+claim about a whole component, and the only way to check it is to read the source text, which is
+what each `test/test_*_contract.mjs` does. The glob is deliberate:
 a new sibling joins the gate with no workflow edit, the same property `test_ui_*.mjs` already had.
 
 `run-domain-audit.sh` is separate on purpose, and the distinction matters:
