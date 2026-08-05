@@ -82,7 +82,7 @@ below and edit them out by hand before you post.
 
 ## What is removed, and what deliberately is not
 
-The device replaces these eight values with `<redacted>` and **keeps the field itself**:
+The device replaces these twelve values with `<redacted>` and **keeps the field itself**:
 
 | Field | Why it goes |
 |---|---|
@@ -91,9 +91,16 @@ The device replaces these eight values with `<redacted>` and **keeps the field i
 | `wifi.bssid` | your router's radio address — locatable in public databases |
 | `wifi.mac` | identifies this specific board |
 | `mqtt.broker` | may contain a username and password if you typed them into the URL |
+| `reference_temperature.name` | a name you typed, usually naming a room or a person |
+| `reference_temperature.topic` | a path through your own broker — normally carries a room or device name |
+| `weather_forecast.latitude` | where your house is, to six decimals |
+| `weather_forecast.longitude` | the other half of the same |
 | `syslog.host` | an internal hostname |
 | `ntp.server` | often an internal hostname too |
 | `modbus.host` | your saved HomeHub address, whether typed manually or filled by the explicit Search button |
+
+The two coordinates are the only entries here that are not an address on your network: everything
+else identifies a machine, and those identify a place.
 
 The `/diag` log is scrubbed line by line for the same things.
 

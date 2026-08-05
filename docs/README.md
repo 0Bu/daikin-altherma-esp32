@@ -254,11 +254,11 @@ LAN only, see [SECURITY.md](SECURITY.md).
 
 ```
 GET  /  (alias /index.html)        # embedded web UI (gzipped into the app binary)
-GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this payload: the ten
+GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this payload: the twelve
                                    #   reporter-identifying values (wifi.ssid/ip/bssid/mac,
-                                   #   mqtt.broker, syslog.host, ntp.server, modbus.host plus the
-                                   #   weather latitude/longitude — network/location identifiers) read
-                                   #   "<redacted>"
+                                   #   mqtt.broker, reference_temperature.name/topic, syslog.host,
+                                   #   ntp.server, modbus.host plus the weather latitude/longitude
+                                   #   — network/location identifiers) read "<redacted>"
                                    #   (logic/redact.hpp). The KEY is always emitted — an omitted
                                    #   field is indistinguishable from an older build, and "which
                                    #   build produced this?" is the first question a frozen report

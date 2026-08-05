@@ -9,7 +9,7 @@
 // copies of a rule the CI gate can only see in one place.
 //
 // TWO SHAPES, because the two routes leak differently:
-//   * /status leaks by FIELD — ten named values in a JSON object built field by field, so the
+//   * /status leaks by FIELD — twelve named values in a JSON object built field by field, so the
 //     substitution happens where the value is written (http_status.cpp calls redact_or) and never as
 //     a post-processing pass over the finished string. That matters: http_append_status_json() runs
 //     on the httpd task whose stack overflow killed v1.0.12, and a second full-size buffer is
@@ -25,6 +25,12 @@
 // Deliberately NOT redacted, because they identify the FIRMWARE rather than the reporter:
 // version, app_elf_sha256, uptime, heap, the X10A pins, the detected model. And not wifi.rssi /
 // wifi.connected / syslog.port either — the point of the report is that those still answer.
+// The CLOSEST CALL is reference_temperature's five *_path selectors: user-typed, up to 128 chars,
+// and sitting in the same block as the name and topic that ARE redacted. They stay because a path
+// describes the SHAPE of someone else's payload (`thermostat.current_temperature_c`) rather than
+// naming a machine, a room or a place, and a report whose room source cannot be parsed cannot be
+// diagnosed. A path spelled `zones.<room>.temp` would break that reasoning — which is why this is
+// written down as a decision rather than left as the one shape the derived count cannot see.
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -36,14 +42,22 @@ namespace daik {
 // nothing, e.g. bssid while offline) and from an absent key (an older build).
 inline constexpr const char* REDACTED = "<redacted>";
 
-// The ten /status values http_status.cpp passes through redact_or. Listed here rather than only at
-// the call sites so the set is reviewable in one place; the header cannot enforce that every call
-// site uses it (that stays a review point — see .claude/CLAUDE.md), but it can at least state it.
-//   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker  weather.latitude  weather.longitude
+// The twelve /status values http_status.cpp passes through redact_or. Listed here rather than only
+// at the call sites so the set is reviewable in one place:
+//   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker
+//   reference_temperature.name  reference_temperature.topic
+//   weather_forecast.latitude  weather_forecast.longitude
 //   syslog.host  ntp.server  modbus.host
 // modbus.host joined the set with the HomeHub transport (#32): it is a LAN address, whether typed
-// manually or filled by the explicit discovery button.
-inline constexpr std::size_t REDACTED_STATUS_FIELDS = 10;
+// manually or filled by the explicit discovery button. The room source's name and topic joined with
+// #62 — a topic is a path through the reporter's own broker and often carries a room or a device
+// name, and the name field is one the user typed.
+//
+// The COUNT is checked (tools/redact/check_diag_coverage.py derives it from the call sites), which
+// it was not until this comment and that constant had drifted two fields apart in silence. What is
+// still only a review point is the direction no count can see: a NEW identifying field that nobody
+// wrapped at all. It never reaches the redactor, so it never reaches this number either.
+inline constexpr std::size_t REDACTED_STATUS_FIELDS = 12;
 
 // Field-level substitution for the /status builder. Returns by value because every caller feeds it
 // straight into json_quote(), which copies anyway.

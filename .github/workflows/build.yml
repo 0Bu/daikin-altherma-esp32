@@ -129,22 +129,22 @@ jobs:
       - name: Run complete UI use-case suite
         run: ./scripts/run-ui-use-case-tests.sh
 
-      # MQTT config alone must not let an unwired spare/debug board speak for the installation.
-      # Pin the IDF-facing lifecycle that the pure gate test cannot link: a no-LWT session may
-      # subscribe before X10A; the first bus proof replaces it with the LWT publisher; and ordinary
-      # publishes remain behind the gate.
-      - name: Test X10A-gated MQTT lifecycle
-        run: node test/test_mqtt_x10a_gate_contract.mjs
-
-      # Clearing an enabled Weather or HomeHub connection is explicit broker-cleanup intent. Pin
-      # the only X10A-free outbound exception: one retained empty tombstone for that source topic,
-      # requested only after the disable was persisted; no ordinary publisher may run there.
-      - name: Test explicit MQTT source cleanup
-        run: node test/test_mqtt_source_cleanup_contract.mjs
-      # WP2 is intentionally SHADOW-only. Host maths tests cannot prove a later orchestration edit
-      # did not wire its proposal into the HomeHub mailbox, so pin the source boundary as well.
-      - name: Test dynamic-LWT shadow-only boundary
-        run: node test/test_dynamic_lwt_shadow_contract.mjs
+      # The source-boundary contracts: assertions about main/*.cpp that the host suite cannot make,
+      # since it links the IDF-free headers alone. Pinned here are the X10A-gated MQTT lifecycle (a
+      # no-LWT session may subscribe before X10A; the first bus proof replaces it with the LWT
+      # publisher; ordinary publishes stay behind the gate), the one X10A-free outbound exception
+      # (a single retained tombstone per explicitly disabled source, only after the disable was
+      # persisted), the HomeHub discovery lifecycle (only the explicit UI action may browse mDNS)
+      # and the dynamic-LWT CONSENT boundary (SHADOW proposes and writes nothing — hp_modbus.cpp
+      # stays the sole caller of the actuator mailbox — and since #341 the mode gates COLLECTION
+      # too: OFF unsubscribes the saved room source, ignores its frames, publishes no weather
+      # evidence and pauses Open-Meteo before any fetch, while set_dynamic_lwt applies both
+      # boundaries live and tombstones the weather topic only after OFF was persisted). These were
+      # three bare `node` steps with no local entry point, so the
+      # local loop skipped them and a new sibling was invisible everywhere at once; the script globs
+      # test/test_*_contract.mjs, so one now joins the gate without a workflow edit.
+      - name: Test firmware source-boundary contracts
+        run: ./scripts/run-contract-tests.sh
       # Domain-correctness gate: are the published values physically RIGHT? The logic tests above
       # verify the logic they are handed; they cannot see a well-formed value that is simply
       # false — a wrong converter compiles, passes them all, and publishes -971.5 °C to Home

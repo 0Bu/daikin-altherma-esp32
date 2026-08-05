@@ -107,12 +107,19 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
 http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /diag, /scan, /coredump,
                       POST /crash/dismiss. http_append_status_json() runs on the httpd task ALONE —
                       see "Push vs. poll" below for why that sentence is load-bearing
-http_config.cpp     → POST /set_wifi, /set_mqtt, /test_ref_temp, /set_ref_temp, /set_weather, /set_syslog,
+http_config.cpp     → POST /set_wifi, /set_mqtt, /test_ref_temp, /set_ref_temp, /set_weather,
+                      /set_dynamic_lwt, /set_syslog,
                       /set_ntp, /set_hp, /discover_homehub, /set_board, /set_env3, /set_ota, /set_lang,
-                      /detect. /test_ref_temp proves that an exact MQTT mapping yields an accepted
+                      /detect — all FIFTEEN, which http_server.cpp's cfg.max_uri_handlers is sized
+                      exactly to. /test_ref_temp proves that an exact MQTT mapping yields an accepted
                       value without saving it; /set_ref_temp requires that proof and applies live.
                       /set_weather validates the DWD path component, persists it and only wakes the
                       weather task; no DNS/TLS request runs on the httpd worker.
+                      /set_dynamic_lwt is the CONSENT boundary rather than one feature's switch:
+                      besides the controller mode it calls mqtt_reference_reconfigure() and
+                      weather_forecast_reconfigure(), and on OFF requests the retained weather
+                      topic's cleanup — so the room subscription and the Open-Meteo traffic start
+                      and stop with the mode, at the request rather than an interval later.
                       /set_board atomically owns board identity/peripherals plus the integrated ENV
                       III fields. Its shared preflight proof-gates an enable before the one NVS
                       write: a short-lived bus requires one CRC-valid SHT30 sample and the QMP6988
@@ -562,9 +569,12 @@ host-testable core is unusually large and valuable, because the risky parts are 
   defensible because the board scrubs first — so this is the single implementation of that rule,
   shared by the web UI's "Report a bug" action and the manual `curl` fallback, rather than a copy in
   `www/js/app_state.js` that would drift. Two shapes, because the routes leak differently: `/status` leaks by
-  **field** (eight named values, substituted where each is *written* — a post-processing pass over
+  **field** (twelve named values, substituted where each is *written* — a post-processing pass over
   the finished JSON is what the httpd stack budget has no room for), `/diag` leaks by **line**,
-  which is the non-trivial half the `CHECK`s cover. It **fails closed**: a rule whose end token is
+  which is the non-trivial half the `CHECK`s cover. That count is **derived** from the call sites by
+  the redaction audit rather than restated here, because it had already been wrong in four places at
+  once — the header said ten, the audit tool eight, this file eight, and the builder wrapped twelve.
+  It **fails closed**: a rule whose end token is
   missing — a line the ring truncated mid-value, precisely when a value sits unterminated at the
   end — redacts to end of line rather than giving up, while the trailing newline survives so the
   ring's line structure does. The **value** is replaced and the **key** kept: a dropped field is
