@@ -9,7 +9,7 @@
 #include "led_pattern.hpp"  // LedType — the indicator back-end, now a runtime choice not a Kconfig one
 #include "ota_channel.hpp"  // OtaChannel — which published feed this device follows
 #include "modbus.hpp"       // MODBUS_TCP_PORT / MODBUS_DEFAULT_UNIT — the mb_* field defaults
-#include "dynamic_lwt_controller.hpp"
+#include "heating_curve_diagnosis.hpp"
 #include "reference_temperature.hpp"
 #include "ui_lang.hpp"      // UiLang — the web UI's manual language override (else browser-detected)
 
@@ -51,9 +51,9 @@ struct Config {
     bool        weather_enabled = false;
     int32_t     weather_latitude_e6 = 0;
     int32_t     weather_longitude_e6 = 0;
-    // No dynamic-LWT mode field: the heating-curve diagnosis arms itself from the two sources below
-    // (dynamic_lwt_armed), so there is nothing here to persist, migrate or leave stale. Its retired
-    // blob byte is still written as zero — see config_store.hpp.
+    // No dynamic-LWT mode field: the heating-curve diagnosis arms itself from the required MQTT room
+    // mapping (heating_curve_diagnosis_armed); forecast is optional comparison evidence. There is
+    // nothing here to persist as an operating mode. Its retired blob byte stays zero; see config_store.hpp.
     std::string syslog_host;       // "" = Syslog disabled
     int         syslog_port = 514;
     // SNTP server (main/sntp_time.cpp). Unlike syslog_host, "" is not "off" — SNTP has no disabled
@@ -160,20 +160,19 @@ struct Config {
     bool        fp_valid     = false;
 };
 
-// WHETHER THE HEATING-CURVE DIAGNOSIS RUNS — derived from the configuration, never switched. It is
-// armed exactly while both of the inputs it describes exist: a decodable MQTT room-temperature
-// source (which needs a broker to arrive over) and a forecast location. Nothing is persisted, so
-// there is no mode to migrate, no stale SHADOW to disarm on boot, and no way for the answer to
-// disagree with the configuration a reader can see. Deleting either source disarms it by the same
-// definition that armed it.
+// WHETHER THE HEATING-CURVE DIAGNOSIS RUNS — derived from the configuration, never switched. The
+// canonical MQTT room source is its only required configured data source. Forecast is an OPTIONAL
+// comparison covariate and must not block raw room-error samples or force a user to disclose a
+// location to Open-Meteo. Nothing is persisted, so there is no mode to migrate or stale state to
+// disarm on boot. Deleting the room source disarms the sampler immediately.
 //
 // The HomeHub is deliberately NOT in here even though the plant gate comes from it. A missing
-// mb_host is a missing PREREQUISITE and belongs in the running state (failsafe homehub_unavailable),
+// mb_host is a missing PREREQUISITE and belongs in the running state (blocked homehub_unavailable),
 // where the UI names it and points at the setting; folding it in here would silently hide the whole
 // card from anyone who has not set one up yet, which is how they would find out they need one.
-inline bool dynamic_lwt_armed(const Config& c) {
+inline bool heating_curve_diagnosis_armed(const Config& c) {
     return !c.mqtt_uri.empty() && !c.ref_temp_topic.empty() && !c.ref_temp_path.empty() &&
-           !c.ref_temp_setpoint_path.empty() && !c.ref_temp_time_path.empty() && c.weather_enabled;
+           !c.ref_temp_setpoint_path.empty() && !c.ref_temp_time_path.empty();
 }
 
 // ── Field-owned patches (config.cpp applies these to the live config under its mutex) ────────────

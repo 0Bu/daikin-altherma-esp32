@@ -503,7 +503,7 @@ static bool mb_read(MbFunc space, uint16_t addr, uint16_t qty, MbResponse& out,
         { Lock lk(s_mtx); s_status.rx_fail++; s_status.connected = false; }
         return false;
     }
-    const MbParse p = mb_parse_response(adu, got, txn, unit, space, addr, qty, out);
+    const MbParse p = mb_parse_response(adu, got, txn, unit, space, qty, out);
     if (p == MbParse::Ok) {
         Lock lk(s_mtx);
         s_status.rx_ok++;
@@ -573,7 +573,7 @@ static std::string failure_message(const MbFailure& f) {
             break;
         case MbFailureType::InvalidResponse: {
             const char* reason = f.detail >= static_cast<int>(MbParse::TooShort) &&
-                                 f.detail <= static_cast<int>(MbParse::EchoMismatch)
+                                 f.detail <= static_cast<int>(MbParse::QtyMismatch)
                                ? mb_parse_reason(static_cast<MbParse>(f.detail))
                                : "invalid MBAP length";
             std::snprintf(msg, sizeof(msg), "invalid Modbus response at register %u (%s)",
@@ -643,6 +643,8 @@ static void mb_poll_once() {
     MbFailure first_failure;
     bool plant_gate_known = false;
     bool plant_gate_active = false;
+    bool heating_mode_known = false;
+    bool heating_mode_active = false;
 
     for (int i = 0; i < def::HOMEHUB_REG_COUNT; i++) {
         esp_task_wdt_reset();                      // each read is a bounded LAN round-trip
@@ -676,13 +678,18 @@ static void mb_poll_once() {
             { Lock lk(s_mtx); s_status.connected = false; }
             break;
         }
-        // THE PLANT GATE — input register 53, "Space heating/cooling normal operation". The one
-        // reading the shadow controller needs to tell a real space-heating window from a DHW cycle
-        // (register 52) or a standstill. A sentinel or an out-of-range word leaves `known` false:
+        // THE SPACE-OPERATION GATE — input register 53 explicitly covers heating AND cooling. It
+        // separates normal space operation from DHW/standstill, but only input register 38 below can
+        // distinguish a heating window from cooling. A sentinel/out-of-range word leaves `known` false:
         // an unknown gate must never read as "inactive", which is an ordinary quiet plant.
         if (r.space == MbFunc::ReadInput && r.offset == 53 && !mb_is_special(raw) && raw <= 1) {
             plant_gate_known = true;
             plant_gate_active = raw == 1;
+        }
+        if (r.space == MbFunc::ReadInput && r.offset == 38 && !mb_is_special(raw) &&
+            (raw == 1 || raw == 2)) {
+            heating_mode_known = true;
+            heating_mode_active = raw == 1;
         }
         CachedValue cv;
         cv.label = r.label;
@@ -713,6 +720,8 @@ static void mb_poll_once() {
         Lock lk(s_mtx);
         s_status.plant_gate_known  = plant_gate_known;
         s_status.plant_gate_active = plant_gate_active;
+        s_status.heating_mode_known  = heating_mode_known;
+        s_status.heating_mode_active = heating_mode_active;
     }
 
     bool current_session = false;

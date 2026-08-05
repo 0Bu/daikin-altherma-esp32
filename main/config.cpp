@@ -312,9 +312,9 @@ bool config_save(const Config& requested, bool require_link) {
     // that could not complete). Because this blob is written HERE (the httpd task) alone, the poll
     // task (config_save_link) can never revert a credential change — the field-ownership guarantee is
     // kept without the narrow per-key writes.
-    // No dynamic-LWT canonicalization here any more: the diagnosis derives its arming from the room
-    // source and the forecast location on every evaluation (config_model.hpp's dynamic_lwt_armed),
-    // so deleting either one disarms it by definition and there is no stored mode left to reconcile.
+    // No dynamic-LWT canonicalization here any more: the diagnosis derives its arming from the MQTT
+    // room source on every evaluation (config_model.hpp's heating_curve_diagnosis_armed). Forecast
+    // is optional comparison evidence; deleting the room source disarms sampling immediately.
     Config c = requested;
     ConfigBlob b;
     b.wifi_ssid = c.wifi_ssid;                 b.wifi_pass = c.wifi_pass;

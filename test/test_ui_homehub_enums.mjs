@@ -31,6 +31,8 @@ const modes = [
   ["operation_mode", 0, "Auto", "Auto"],
   ["operation_mode", 1, "Heating", "Heizen"],
   ["operation_mode", 2, "Cooling", "Kühlen"],
+  ["current_operation_mode", 1, "Heating", "Heizen"],
+  ["current_operation_mode", 2, "Cooling", "Kühlen"],
   ["unit_abnormality", 0, "No error", "Kein Fehler"],
   ["unit_abnormality", 1, "Fault", "Fehler"],
   ["unit_abnormality", 2, "Warning", "Warnung"],
@@ -77,6 +79,8 @@ assert.equal(en.displayValue({ value: "0", binary: true, binary_semantic: "unkno
 assert.equal(de.displayValue({ value: "1" }), "1", "an untyped numeric one is never guessed to be a switch");
 assert.equal(en.displayValue({ value: 7, enum: "operation_mode" }), "Unknown (7)");
 assert.equal(de.displayValue({ value: 7, enum: "operation_mode" }), "Unbekannt (7)");
+assert.equal(en.displayValue({ value: 0, enum: "current_operation_mode" }), "Unknown (0)",
+  "input 38 has no Auto value; zero must not be borrowed from holding register 3");
 assert.equal(en.displayValue({ value: -1, enum: "unknown_future" }), "Unknown (-1)");
 assert.equal(de.displayValue({ value: "17" }), "17", "ordinary numeric values remain numeric");
 

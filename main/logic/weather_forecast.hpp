@@ -1,9 +1,8 @@
 #pragma once
-// Open-Meteo forecast contract shared by the on-device HTTPS/JSON fetcher and host tests. The
-// With the explicit dynamic-LWT Firmware switch in SHADOW, the firmware requests one configured
-// coordinate every 45 minutes, derives only the two bounded features needed by #288, and never
-// stores the provider response or writes heat-pump controls. OFF preserves the location but sends
-// no request.
+// Open-Meteo forecast contract shared by the on-device HTTPS/JSON fetcher and host tests. A saved
+// location is the explicit collection/privacy boundary: the firmware requests it every 45 minutes,
+// derives two bounded comparison features and never stores the provider response or writes heat-pump
+// controls. Clearing the location sends no request. Forecast is optional for local room-error samples.
 #include <cmath>
 #include <cstddef>
 #include <cstdint>

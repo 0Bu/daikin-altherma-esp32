@@ -103,8 +103,9 @@ struct ConfigBlob {
     std::string ref_temp_hvac_mode_path;
     bool        has_ref_temp = false;
     bool        has_ref_control = false;
-    // ── v14: RETIRED controller-mode byte. The heating-curve diagnosis arms itself from the two
-    // sources it reads (config_model.hpp's dynamic_lwt_armed), so there is no mode to store. The
+    // ── v14: RETIRED controller-mode byte. The heating-curve diagnosis arms itself from its
+    // required MQTT room source (config_model.hpp's heating_curve_diagnosis_armed), so there is no
+    // mode to store; the optional forecast never gates sampling. The
     // byte keeps its place in the layout — the exact-length rule below is what refuses a truncated
     // newer blob, and shrinking v14 would make a v13 blob decode as one — and is written as zero and
     // ignored on read, exactly as the v9 actuation-consent bit is. `has_dynamic_lwt` stays as the

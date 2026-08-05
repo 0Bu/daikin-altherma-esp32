@@ -73,38 +73,34 @@ struct HeartbeatFields {
     uint32_t    room_errors = 0;
     uint32_t    room_rejections = 0;
 
-    // The deterministic SHADOW controller. All booleans render as numeric 0/1 for Telegraf;
-    // unavailable terms/offsets render null. These are MEASUREMENTS, not commands: the controller
-    // has no actuator to call, and the aggregate of these proposals over a season is the heating-
-    // curve verdict this project exists to produce (#294).
-    bool        lwt_controller_armed = false;
-    uint8_t     lwt_controller_state = 0;
-    uint8_t     lwt_controller_reason = 0;
-    bool        lwt_controller_decision_eligible = false;
-    bool        lwt_controller_proposal_produced = false;
-    bool        lwt_controller_has_terms = false;
-    bool        lwt_controller_has_requested_offset = false;
-    bool        lwt_controller_deadband = false;
-    bool        lwt_controller_quantized = false;
-    bool        lwt_controller_clamped = false;
-    bool        lwt_controller_rate_limited = false;
-    bool        lwt_controller_forecast_available = false;
-    bool        lwt_controller_plant_gate_known = false;
-    bool        lwt_controller_plant_gate_active = false;
-    bool        lwt_controller_has_room_source_time = false;
-    bool        lwt_controller_room_age_known = false;
-    int64_t     lwt_controller_room_source_unix_s = -1;
-    uint64_t    lwt_controller_room_age_s = 0;
-    double      lwt_controller_p_term_k = 0.0;
-    double      lwt_controller_unclamped_offset_k = 0.0;
-    int16_t     lwt_controller_bounded_offset_k = 0;
-    int16_t     lwt_controller_requested_offset_k = 0;
-    int64_t     lwt_controller_last_decision_ms = -1;
-    uint32_t    lwt_controller_sequence = 0;
-    uint32_t    lwt_controller_evaluations = 0;
-    uint32_t    lwt_controller_decisions = 0;
-    uint32_t    lwt_controller_holds = 0;
-    uint32_t    lwt_controller_failsafes = 0;
+    // Versioned HEATING-CURVE DIAGNOSIS telemetry. This is raw room-error evidence sampled in a
+    // confirmed heating window, not a leaving-water command or calibrated correction. `sequence`
+    // plus the absolute `last_sample_unix_s` is the event contract: unlike the retired ephemeral
+    // proposal flag it cannot disappear between 10-second heartbeat publications.
+    uint8_t     heating_curve_method_version = 0;
+    bool        heating_curve_armed = false;
+    uint8_t     heating_curve_state = 0;
+    uint8_t     heating_curve_reason = 0;
+    bool        heating_curve_sample_eligible = false;
+    bool        heating_curve_forecast_available = false;
+    bool        heating_curve_plant_gate_known = false;
+    bool        heating_curve_plant_gate_active = false;
+    bool        heating_curve_heating_mode_known = false;
+    bool        heating_curve_heating_mode_active = false;
+    bool        heating_curve_has_current_room_error = false;
+    bool        heating_curve_has_last_sample = false;
+    bool        heating_curve_has_room_source_time = false;
+    bool        heating_curve_room_age_known = false;
+    double      heating_curve_current_room_error_k = 0.0;
+    double      heating_curve_last_sample_room_error_k = 0.0;
+    int64_t     heating_curve_room_source_unix_s = -1;
+    uint64_t    heating_curve_room_age_s = 0;
+    int64_t     heating_curve_last_sample_unix_s = -1;
+    uint32_t    heating_curve_sequence = 0;
+    uint32_t    heating_curve_evaluations = 0;
+    uint32_t    heating_curve_samples = 0;
+    uint32_t    heating_curve_holds = 0;
+    uint32_t    heating_curve_blocks = 0;
 
     bool        bus_connected  = false;   // hp_stats().connected — X10A link up this cycle
     char        bus_proto      = '?';
@@ -231,47 +227,43 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += ",\"room_messages\":"; j += std::to_string(f.room_messages);
     j += ",\"room_errors\":"; j += std::to_string(f.room_errors);
     j += ",\"room_rejections\":"; j += std::to_string(f.room_rejections);
-    // Deterministic LWT shadow controller. Numeric-only so the existing Telegraf parser archives it.
-    j += ",\"lwt_controller_armed\":"; j += f.lwt_controller_armed ? "1" : "0";
-    j += ",\"lwt_controller_state\":"; j += std::to_string(f.lwt_controller_state);
-    j += ",\"lwt_controller_reason\":"; j += std::to_string(f.lwt_controller_reason);
-    j += ",\"lwt_controller_decision_eligible\":";
-    j += f.lwt_controller_decision_eligible ? "1" : "0";
-    j += ",\"lwt_controller_proposal_produced\":";
-    j += f.lwt_controller_proposal_produced ? "1" : "0";
-    j += ",\"lwt_controller_p_term_k\":";
-    j += f.lwt_controller_has_terms ? std::to_string(f.lwt_controller_p_term_k) : "null";
-    j += ",\"lwt_controller_unclamped_offset_k\":";
-    j += f.lwt_controller_has_terms ? std::to_string(f.lwt_controller_unclamped_offset_k) : "null";
-    j += ",\"lwt_controller_bounded_offset_k\":";
-    j += f.lwt_controller_has_terms ? std::to_string(f.lwt_controller_bounded_offset_k) : "null";
-    j += ",\"lwt_controller_requested_offset_k\":";
-    j += f.lwt_controller_has_requested_offset
-       ? std::to_string(f.lwt_controller_requested_offset_k) : "null";
-    j += ",\"lwt_controller_forecast_contribution_k\":0";
-    j += ",\"lwt_controller_deadband\":"; j += f.lwt_controller_deadband ? "1" : "0";
-    j += ",\"lwt_controller_quantized\":"; j += f.lwt_controller_quantized ? "1" : "0";
-    j += ",\"lwt_controller_clamped\":"; j += f.lwt_controller_clamped ? "1" : "0";
-    j += ",\"lwt_controller_rate_limited\":"; j += f.lwt_controller_rate_limited ? "1" : "0";
-    j += ",\"lwt_controller_forecast_available\":";
-    j += f.lwt_controller_forecast_available ? "1" : "0";
-    j += ",\"lwt_controller_plant_gate_known\":";
-    j += f.lwt_controller_plant_gate_known ? "1" : "0";
-    j += ",\"lwt_controller_plant_gate_active\":";
-    j += f.lwt_controller_plant_gate_active ? "1" : "0";
-    j += ",\"lwt_controller_room_source_unix_s\":";
-    j += f.lwt_controller_has_room_source_time
-       ? std::to_string(f.lwt_controller_room_source_unix_s) : "null";
-    j += ",\"lwt_controller_room_age_s\":";
-    j += f.lwt_controller_room_age_known ? std::to_string(f.lwt_controller_room_age_s) : "null";
-    j += ",\"lwt_controller_last_decision_ms\":";
-    j += f.lwt_controller_last_decision_ms >= 0
-       ? std::to_string(f.lwt_controller_last_decision_ms) : "null";
-    j += ",\"lwt_controller_sequence\":"; j += std::to_string(f.lwt_controller_sequence);
-    j += ",\"lwt_controller_evaluations\":"; j += std::to_string(f.lwt_controller_evaluations);
-    j += ",\"lwt_controller_decisions\":"; j += std::to_string(f.lwt_controller_decisions);
-    j += ",\"lwt_controller_holds\":"; j += std::to_string(f.lwt_controller_holds);
-    j += ",\"lwt_controller_failsafes\":"; j += std::to_string(f.lwt_controller_failsafes);
+    // Heating-curve diagnosis v2. Numeric-only so the existing Telegraf parser archives every field.
+    j += ",\"heating_curve_method_version\":";
+    j += std::to_string(f.heating_curve_method_version);
+    j += ",\"heating_curve_armed\":"; j += f.heating_curve_armed ? "1" : "0";
+    j += ",\"heating_curve_state\":"; j += std::to_string(f.heating_curve_state);
+    j += ",\"heating_curve_reason\":"; j += std::to_string(f.heating_curve_reason);
+    j += ",\"heating_curve_sample_eligible\":";
+    j += f.heating_curve_sample_eligible ? "1" : "0";
+    j += ",\"heating_curve_current_room_error_k\":";
+    j += f.heating_curve_has_current_room_error
+       ? std::to_string(f.heating_curve_current_room_error_k) : "null";
+    j += ",\"heating_curve_last_sample_room_error_k\":";
+    j += f.heating_curve_has_last_sample
+       ? std::to_string(f.heating_curve_last_sample_room_error_k) : "null";
+    j += ",\"heating_curve_forecast_available\":";
+    j += f.heating_curve_forecast_available ? "1" : "0";
+    j += ",\"heating_curve_plant_gate_known\":";
+    j += f.heating_curve_plant_gate_known ? "1" : "0";
+    j += ",\"heating_curve_plant_gate_active\":";
+    j += f.heating_curve_plant_gate_active ? "1" : "0";
+    j += ",\"heating_curve_heating_mode_known\":";
+    j += f.heating_curve_heating_mode_known ? "1" : "0";
+    j += ",\"heating_curve_heating_mode_active\":";
+    j += f.heating_curve_heating_mode_active ? "1" : "0";
+    j += ",\"heating_curve_room_source_unix_s\":";
+    j += f.heating_curve_has_room_source_time
+       ? std::to_string(f.heating_curve_room_source_unix_s) : "null";
+    j += ",\"heating_curve_room_age_s\":";
+    j += f.heating_curve_room_age_known ? std::to_string(f.heating_curve_room_age_s) : "null";
+    j += ",\"heating_curve_last_sample_unix_s\":";
+    j += f.heating_curve_has_last_sample
+       ? std::to_string(f.heating_curve_last_sample_unix_s) : "null";
+    j += ",\"heating_curve_sequence\":"; j += std::to_string(f.heating_curve_sequence);
+    j += ",\"heating_curve_evaluations\":"; j += std::to_string(f.heating_curve_evaluations);
+    j += ",\"heating_curve_samples\":"; j += std::to_string(f.heating_curve_samples);
+    j += ",\"heating_curve_holds\":"; j += std::to_string(f.heating_curve_holds);
+    j += ",\"heating_curve_blocks\":"; j += std::to_string(f.heating_curve_blocks);
     // bus_*
     j += ",\"bus_connected\":"; j += f.bus_connected ? "1" : "0";
     j += ",\"bus_proto\":\""; j += f.bus_proto; j += "\"";

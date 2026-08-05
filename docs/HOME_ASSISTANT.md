@@ -96,7 +96,7 @@ Telegraf/VictoriaMetrics: `room_temperature_valid`, `room_setpoint_valid`,
 `room_reason_code`. The string `room_source_id="living_room"` provides human provenance but is not
 needed as a metric field. `room_error_k` is emitted only when current temperature, target, source
 freshness and every configured eligibility gate pass. These `room_*` fields remain the canonical
-input view; the separate `lwt_controller_*` fields are the controller's decision evidence.
+live input view; the separate versioned `heating_curve_*` fields are durable diagnosis samples.
 
 `room_reason_code` is stable across firmware versions: `0` eligible; `1` not configured; `2` no
 value; `3` invalid payload; `4` missing source time; `5` clock unsynced; `6` future timestamp; `7`
@@ -106,18 +106,26 @@ temperature out of range; `12` missing target mapping; `13` missing target; `14`
 slug is available in `/status.reference_temperature.reason`; metric alerts should use the numeric
 code.
 
-The write-free shadow controller adds numeric `lwt_controller_*` fields to the same heartbeat for
-Telegraf/VictoriaMetrics. `lwt_controller_armed` is `1` while both of its sources — the MQTT room
-mapping and a forecast location — are configured; it replaced a `lwt_controller_mode` that reported
-a stored operator choice, and any series built on that field must be rebuilt on this one. State
-codes are `0` off, `1` shadow,
-`2` hold, `3` degraded and `4` failsafe. Reason codes are `0` disabled, `1` shadow decision, `2`
-cadence wait, `3` deadband, `4` rate limited, `5` room unavailable, `6` X10A unavailable, `7`
-HomeHub unavailable, `8` plant gate unknown, `9` plant inactive, `10` forecast unavailable and `11`
-clock invalid. Nullable P/unclamped/bounded/requested-offset terms, decision sequence and counters,
-source age, forecast/gate/conflict flags and every clamp/quantization/rate-limit flag make a proposed
-offset reconstructible in VictoriaMetrics. The controller evaluates every second, decides at most
-every 30 minutes, has no ACTIVE mode and never calls the HomeHub actuator.
+Heating-curve diagnosis method version `2` adds numeric `heating_curve_*` fields to the same
+heartbeat for Telegraf/VictoriaMetrics. It is armed by the configured, timestamped MQTT room mapping;
+the Open-Meteo forecast is optional comparison evidence and does not require a location to be
+disclosed. State codes are `0` off, `1` recording, `2` hold, `3` degraded and `4` blocked. Reason
+codes are `0` disabled, `1` sample recorded, `2` sampling interval, `5` room unavailable, `6` X10A
+unavailable, `7` HomeHub unavailable, `8` plant gate unknown, `9` plant inactive, `10` forecast
+unavailable, `11` clock invalid, `12` heating/cooling mode unknown and `13` non-heating mode. Codes
+`3` and `4` remain unused so the retired deadband/rate-limit meanings are never silently reused.
+
+`heating_curve_current_room_error_k` is the current raw room deviation while a sample is eligible
+(`target - actual`: positive means too cold, negative means too warm);
+`heating_curve_last_sample_room_error_k` is the last recorded value. It is **not** a leaving-water
+offset and must not be converted one-to-one into one. Register 53 proves normal space operation and
+input register 38 independently proves Heating rather than Cooling. Every 30 minutes the firmware
+stores the unchanged room error with `heating_curve_last_sample_unix_s` and increments
+`heating_curve_sequence`. Consumers detect an event by a sequence increase and use its absolute
+timestamp; they must not count every repeated 10-second heartbeat as a new sample. A reboot is
+identified by uptime/sequence reset. Seasonal analysis groups these raw samples by outdoor
+temperature and reads them together with actual LWT clipping, run time and thermostat duty. There
+is no P term, deadband, rounding, clamp, slew limit, requested offset or plant write path.
 
 Each value's `object_id` is a lowercase, alnum-only slug of its label (e.g. *"DHW Tank Temp
 (R5T)"* → `dhw_tank_temp_r5t`). The template uses bracket subscripts, so a slug that starts with a

@@ -8,7 +8,7 @@
 // never actuates the heat pump. No-op if mqtt_uri is empty.
 #include <cstdint>
 #include <string>
-#include "logic/dynamic_lwt_controller.hpp"
+#include "logic/heating_curve_diagnosis.hpp"
 #include "logic/reference_temperature.hpp"
 
 namespace daik {
@@ -39,7 +39,7 @@ ReferenceTemperatureStatus reference_temperature_status();
 
 // Last write-free controller evaluation. The state machine is owned by mqtt_task and guarded by
 // the MQTT status mutex; HTTP/status readers receive a copy. No actuator object crosses this API.
-logic::DynamicLwtSnapshot dynamic_lwt_status();
+logic::HeatingCurveSnapshot heating_curve_status();
 
 // A candidate mapping is tested on the existing authenticated MQTT connection without publishing
 // it to Config/NVS. The call waits for one value that passes the same JSON/timestamp/freshness

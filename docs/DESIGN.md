@@ -129,7 +129,7 @@ children, one way back at each level (the header chevron, popup close action, br
                                                           ◀── chevron ──   · Connections tile
                                                                               └─ row ─▶ modal (§5.1)
                                                                               └─ HomeHub ─▶ modal
-                                                                           · Dynamic LWT card
+                                                                           · Heating-curve diagnosis
                                                                               └─ Room sources ─▶ modal
                                                                            · ESP32 card
                                                                               └─ Hardware ─▶ modal
@@ -159,7 +159,7 @@ The heat pump is otherwise **fully automatic** (auto-detected).
   (§5.1, with automatic rollback to the last working network if the new
   credentials fail), the MQTT broker from the same tile's MQTT row (§5.1), the heat pump
   transport needs no setup (auto-detected; RX/TX pins on the Protokoll card in Settings, §5.6),
-  while optional dynamic-LWT inputs are configured on their own Settings card; firmware
+  while optional heating-curve-diagnosis inputs are configured on their own Settings card; firmware
   updates are checked by tapping the version — the header meta line, or the Version row on the
   Settings Firmware card, which does the same thing (§5.4).
 - MQTT is optional — an empty broker disables it.
@@ -1121,7 +1121,7 @@ block butted against the round CTA and steps cards below.
   beyond the PR-banner check. The divergence from the dashboard is **not** a gap to close — do not
   add a translation layer here to make the two consistent.
 
-### 5.6 Settings — the screen behind the gear (Connections + ESP32 + dynamic LWT)
+### 5.6 Settings — the screen behind the gear (Connections + ESP32 + heating-curve diagnosis)
 The dashboard header's **gear** (right, `.iconbtn.bordered`) is the only way off the dashboard. It
 opens **Settings**, which swaps the dashboard header for a **back header** — a chevron plus the
 screen title. `Esc` leaves the same way, but only when no modal is open: a modal owns `Esc` first, so
@@ -1262,20 +1262,21 @@ vocabulary exactly:
    that actually hands out a broker topic or a coordinate pair.
 
 5. **Heizkurven-Diagnose card** — the bottom-most Settings home of the room-feedback project,
-   ALWAYS rendered, because this is where both of its sources are configured. The card is a
-   DIAGNOSIS, not a control: it records the leaving-water offset the weather-dependent curve would
-   need, and the season aggregate of those proposals is the verdict. It runs by itself once a room
-   source and a location exist. Nothing is written to the plant — the firmware has no write path
-   (`docs/MODBUS_PROTOCOL.md`).
+   ALWAYS rendered, because this is where its required room source and optional forecast are
+   configured. The card is a DIAGNOSIS, not a control: during confirmed heating windows it records
+   the raw room deviation (target minus actual; positive means too cold) every 30 minutes. That is an uncalibrated indicator,
+   not a leaving-water offset; one room kelvin must never be presented as one water kelvin. Seasonal
+   interpretation also needs actual LWT clipping, run time and thermostat duty. Nothing is written
+   to the plant — the firmware has no write path (`docs/MODBUS_PROTOCOL.md`).
 
    Its four rows are **Status**, **Raumtemperaturquelle**, **Wetterprognose** and **Verfahren**.
-   There is deliberately no fifth: no "Betriebsart" readout (there is no mode — the two source rows
-   below ARE the arming condition) and no constant "Sicherheit & Ausgabe = Nur lesend" line — with
+   There is deliberately no fifth: no "Betriebsart" readout (there is no controller mode — saving
+   the MQTT room mapping is the arming condition) and no constant "Sicherheit & Ausgabe = Nur lesend" line — with
    the write path deleted neither could ever say anything else, and a row that cannot vary is one
    more thing a reader has to rule out (the rule that dropped `bus_tx_writes`, §5.3).
 
-   **Status** names why no verdict exists yet: recording, recording without forecast, waiting for
-   space heating, which source is still to be set up, or the specific blocked input. An idle plant is
+   **Status** names why no sample exists yet: recording, recording without forecast, waiting for
+   space heating, cooling excluded, which prerequisite is still to be set up, or the specific blocked input. An idle plant is
    NEUTRAL, never a warning — through the non-heating half of the year it is the expected reading,
    and a permanently orange row is one the user learns to ignore, which would cost exactly the months
    when it finally means something. **A setup step is likewise dim, not orange**: nothing is wrong
@@ -1288,8 +1289,9 @@ vocabulary exactly:
    one making the specific claim was the one that was wrong. **Nothing on this card may report an
    input as missing while another row reports the same input as fine.**
 
-   Deleting a source is the whole disarm: the subscription stops, the runtime values clear,
-   Open-Meteo pauses, and the state row says which source to set up. The
+   Deleting the room source is the whole disarm: the subscription stops and runtime values clear.
+   Deleting the forecast only stops Open-Meteo traffic; sampling remains armed and the state is
+   "recording without forecast" when a heating window is otherwise valid. The
    room-source row opens the exact MQTT topic, current and target temperature paths, source timestamp
    and maximum age; the weather row opens its location modal.
    Advanced optional enabled/HVAC-mode mappings remain API-compatible but are not ordinary UI fields.
@@ -1302,7 +1304,7 @@ vocabulary exactly:
    configured; the weather row names its configured provider. The room-source modal remains
    test-before-persist; Delete removes the saved mapping and captured value. Retained data
    without trusted source time fails closed, and `/status` plus the numeric heartbeat retain the full
-   canonical and controller evidence. No UI path sends a setpoint or HomeHub write.
+   canonical and diagnosis evidence. No UI path sends a setpoint or HomeHub write.
 
 **Only domain readings and settings live in the cards.** The generic *Report a bug* action was the
 (then single) card's last row through v1.0.0-dev.199 and is in the footer line below all of them now:
@@ -1332,9 +1334,9 @@ marked and the mark would stop meaning anything. A **disabled** link is a choice
 raises nothing. The dot is never the only carrier: the button's `aria-label` states the count in
 words (§9).
 
-**Rebuild rule.** The four permanent cards and optional dynamic-LWT card are rebuilt from `/status`
+**Rebuild rule.** The permanent cards including heating-curve diagnosis are rebuilt from `/status`
 on every push. The Connections tile is one container; the three ESP32-family cards and conditional
-dynamic-LWT card are emitted as one string by `esp32CardHtml()`. The write goes through the same
+heating-curve card are emitted as one string by `esp32CardHtml()`. The write goes through the same
 change-guard the rest of the app uses — and the rebuild is skipped entirely
 while an RX/TX dropdown, the update-channel select **or the language select** has focus, or the poll
 would collapse it mid-pick. (Any future select on these cards has to join that guard — an open

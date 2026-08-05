@@ -65,12 +65,12 @@ const validMqtt = (h) => {
   return !h || /^[\w.\-]+:\d{2,5}$/.test(h) || /^(mqtts?|wss?):\/\/[\w.\-]+(:\d{2,5})?(\/\S*)?$/.test(h);
 };
 
-// ── Dynamic LWT · first room-temperature source ─────────────────────────
-// One decision-ready, still read-only profile: exact current/target/source-time mappings and a
+// ── Heating-curve diagnosis · required room-temperature source ────────────
+// One diagnosis-ready, read-only profile: exact current/target/source-time mappings and a
 // freshness limit. Calibration is fixed at 0 K; no roles or weights. The backend still accepts the
 // older optional eligibility-gate mappings. They are deliberately not editable here; preserving
 // them for an otherwise unchanged source avoids silently weakening an installed configuration.
-// It is presented as an Observe-mode input under the opt-in dynamic-control Settings card. A new
+// It is presented as the required input under the always-visible diagnosis card. A new
 // profile starts empty; placeholders illustrate the installed Meross contract without subscribing.
 function fillRefTemp() {
   const r = S.status?.reference_temperature || {};

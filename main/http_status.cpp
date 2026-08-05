@@ -142,7 +142,7 @@ void http_append_status_json(std::string& j, bool redact) {
     HpStats     hp  = hp_stats();
     MqttStatus  m   = mqtt_status();
     ReferenceTemperatureStatus rt = reference_temperature_status();
-    const logic::DynamicLwtSnapshot dlwt = dynamic_lwt_status();
+    const logic::HeatingCurveSnapshot heating_curve = heating_curve_status();
     WeatherForecastStatus wf = weather_forecast_status();
     WifiInfo    wi  = wifi_info();
     j += "{";
@@ -381,45 +381,39 @@ void http_append_status_json(std::string& j, bool redact) {
     if (!rt.eligibility_error.empty()) { j += ",\"eligibility_error\":"; j += jstr(rt.eligibility_error); }
     if (!rt.error.empty()) { j += ",\"error\":"; j += jstr(rt.error); }
     j += "},";
-    // Deterministic controller evidence. `armed` is DERIVED from the two configured sources rather
-    // than stored (config_model.hpp's dynamic_lwt_armed) — there is no operator mode and no
-    // /set_dynamic_lwt route any more; state/reason are the last mqtt-task evaluation. The proposal
-    // is a MEASUREMENT: no actuator exists to carry it to the plant (#294).
-    j += "\"dynamic_lwt\":{\"armed\":";
-    j += dynamic_lwt_armed(c) ? "true" : "false";
-    j += ",\"state\":\""; j += logic::dynamic_lwt_state_name(dlwt.state); j += "\"";
-    j += ",\"state_code\":"; j += std::to_string(static_cast<unsigned>(dlwt.state));
-    j += ",\"reason\":\""; j += logic::dynamic_lwt_reason_name(dlwt.reason); j += "\"";
-    j += ",\"reason_code\":"; j += std::to_string(static_cast<unsigned>(dlwt.reason));
-    j += ",\"decision_eligible\":"; j += dlwt.decision_eligible ? "true" : "false";
-    j += ",\"proposal_produced\":"; j += dlwt.proposal_produced ? "true" : "false";
-    j += ",\"room_error_k\":";
-    j += dlwt.has_terms ? std::to_string(dlwt.room_error_k) : "null";
-    j += ",\"p_term_k\":"; j += dlwt.has_terms ? std::to_string(dlwt.p_term_k) : "null";
-    j += ",\"unclamped_offset_k\":";
-    j += dlwt.has_terms ? std::to_string(dlwt.unclamped_offset_k) : "null";
-    j += ",\"bounded_offset_k\":";
-    j += dlwt.has_terms ? std::to_string(dlwt.bounded_offset_k) : "null";
-    j += ",\"requested_offset_k\":";
-    j += dlwt.has_requested_offset ? std::to_string(dlwt.requested_offset_k) : "null";
-    j += ",\"forecast_contribution_k\":0";
-    j += ",\"deadband\":"; j += dlwt.deadband ? "true" : "false";
-    j += ",\"quantized\":"; j += dlwt.quantized ? "true" : "false";
-    j += ",\"clamped\":"; j += dlwt.clamped ? "true" : "false";
-    j += ",\"rate_limited\":"; j += dlwt.rate_limited ? "true" : "false";
-    j += ",\"forecast_available\":"; j += dlwt.forecast_available ? "true" : "false";
-    j += ",\"plant_gate_known\":"; j += dlwt.plant_gate_known ? "true" : "false";
-    j += ",\"plant_gate_active\":"; j += dlwt.plant_gate_active ? "true" : "false";
+    // Heating-curve diagnosis v2: raw room error sampled only in confirmed HEATING operation. The
+    // absolute timestamp + monotonic sequence is the durable event contract; no actuator-derived
+    // P/quantized/bounded/requested-offset vocabulary remains.
+    j += "\"heating_curve\":{\"method_version\":";
+    j += std::to_string(logic::HEATING_CURVE_DIAGNOSIS_METHOD_VERSION);
+    j += ",\"armed\":"; j += heating_curve_diagnosis_armed(c) ? "true" : "false";
+    j += ",\"state\":\""; j += logic::heating_curve_state_name(heating_curve.state); j += "\"";
+    j += ",\"state_code\":"; j += std::to_string(static_cast<unsigned>(heating_curve.state));
+    j += ",\"reason\":\""; j += logic::heating_curve_reason_name(heating_curve.reason); j += "\"";
+    j += ",\"reason_code\":"; j += std::to_string(static_cast<unsigned>(heating_curve.reason));
+    j += ",\"sample_eligible\":"; j += heating_curve.sample_eligible ? "true" : "false";
+    j += ",\"current_room_error_k\":";
+    j += heating_curve.has_current_room_error
+       ? std::to_string(heating_curve.current_room_error_k) : "null";
+    j += ",\"last_sample_room_error_k\":";
+    j += heating_curve.has_last_sample
+       ? std::to_string(heating_curve.last_sample_room_error_k) : "null";
+    j += ",\"last_sample_unix_s\":";
+    j += heating_curve.has_last_sample ? std::to_string(heating_curve.last_sample_unix_s) : "null";
+    j += ",\"forecast_available\":"; j += heating_curve.forecast_available ? "true" : "false";
+    j += ",\"plant_gate_known\":"; j += heating_curve.plant_gate_known ? "true" : "false";
+    j += ",\"plant_gate_active\":"; j += heating_curve.plant_gate_active ? "true" : "false";
+    j += ",\"heating_mode_known\":"; j += heating_curve.heating_mode_known ? "true" : "false";
+    j += ",\"heating_mode_active\":"; j += heating_curve.heating_mode_active ? "true" : "false";
     j += ",\"room_source_unix_s\":";
-    j += dlwt.room_has_source_time ? std::to_string(dlwt.room_source_unix_s) : "null";
-    j += ",\"room_age_s\":"; j += dlwt.room_age_known ? std::to_string(dlwt.room_age_s) : "null";
-    j += ",\"last_decision_ms\":";
-    j += dlwt.last_decision_ms >= 0 ? std::to_string(dlwt.last_decision_ms) : "null";
-    j += ",\"sequence\":"; j += std::to_string(dlwt.sequence);
-    j += ",\"evaluations\":"; j += std::to_string(dlwt.evaluations);
-    j += ",\"decisions\":"; j += std::to_string(dlwt.decisions);
-    j += ",\"holds\":"; j += std::to_string(dlwt.holds);
-    j += ",\"failsafes\":"; j += std::to_string(dlwt.failsafes);
+    j += heating_curve.room_has_source_time ? std::to_string(heating_curve.room_source_unix_s) : "null";
+    j += ",\"room_age_s\":";
+    j += heating_curve.room_age_known ? std::to_string(heating_curve.room_age_s) : "null";
+    j += ",\"sequence\":"; j += std::to_string(heating_curve.sequence);
+    j += ",\"evaluations\":"; j += std::to_string(heating_curve.evaluations);
+    j += ",\"samples\":"; j += std::to_string(heating_curve.samples);
+    j += ",\"holds\":"; j += std::to_string(heating_curve.holds);
+    j += ",\"blocks\":"; j += std::to_string(heating_curve.blocks);
     j += "},";
     // Direct Open-Meteo forecast. Fetch time is the 90-minute liveness clock; the provider does not
     // expose model-run issue time, so issued_at remains null instead of being fabricated. Failed
@@ -517,6 +511,8 @@ void http_append_status_json(std::string& j, bool redact) {
     // answer or answered a sentinel — never read that as an inactive plant.
     j += ",\"plant_gate_known\":";  j += mb.plant_gate_known ? "true" : "false";
     j += ",\"plant_gate_active\":"; j += mb.plant_gate_active ? "true" : "false";
+    j += ",\"heating_mode_known\":";  j += mb.heating_mode_known ? "true" : "false";
+    j += ",\"heating_mode_active\":"; j += mb.heating_mode_active ? "true" : "false";
     if (!mb.last_error.empty()) {
         // `error` remains the complete English /diag + Syslog wording for API compatibility and
         // fallback clients. The structured companions let the web UI localise it without parsing

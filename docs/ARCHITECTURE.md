@@ -628,23 +628,24 @@ host-testable core is unusually large and valuable, because the risky parts are 
   the SNTP wall clock (`sntp_time.cpp`) as a `device_class: "timestamp"` sensor — HA's native
   "last updated N ago" entity, rendering `null` (unsynced) as its normal "unknown" state rather than
   a fabricated epoch date.
-- `logic/dynamic_lwt_controller.hpp` — the deterministic, allocation- and I/O-free P controller.
-  It uses gain 1, a ±0.25 K deadband, whole-kelvin quantization, a ±2 K envelope, a 1 K/decision
-  slew limit and a 30-minute cadence. Missing room/X10A/HomeHub/plant-gate evidence fails closed;
-  an inactive plant holds; unavailable forecast degrades while contributing exactly zero. Its output
-  is a MEASUREMENT, not a command: no actuator exists to carry it to the plant, and the season
-  aggregate of these proposals is the heating-curve verdict of #294.
-  ARMING IS DERIVED, never switched or stored: `dynamic_lwt_armed()` (config_model.hpp) answers it
-  from the two sources the diagnosis reads — the MQTT room mapping and a forecast location — so
-  deleting either disarms it on the next cycle and nothing persisted can disagree with the
-  configuration. There is no mode enum, no blob field and no route; v14's byte is written zero and
-  ignored. The switch that used to gate this is gone because it could not be reached: it answered
-  409 until those sources existed, while the only editors for them lived inside the card it revealed.
-  THE GATE ORDER inside `evaluate()` is itself load-bearing — the plant gate is asked BEFORE the room
-  source. Both fail together outside the heating season (a room thermostat switched off for the
-  summer is not control-eligible), and answering "room unavailable" made a plant resting exactly as
-  it should read as a standing FAILSAFE: the reference installation stood at failsafes=2734, holds=0
-  in August with nothing wrong. HOLD is the whole truth about an idle plant whatever the room says.
+- `logic/heating_curve_diagnosis.hpp` — the deterministic, allocation- and I/O-free heating-curve
+  diagnosis sampler, method version 2. It
+  records the **raw** reference-room deviation at most once per 30 minutes during confirmed normal
+  space **heating**. It does not contain the retired P gain, deadband, quantization, ±2 K envelope,
+  slew limit or requested-offset vocabulary: room kelvin is not calibrated leaving-water kelvin.
+  ARMING IS DERIVED, never switched or stored: `heating_curve_diagnosis_armed()`
+  (`config_model.hpp`) requires only the timestamped MQTT room mapping. Forecast is optional
+  comparison evidence; deleting it must not stop local sampling or make location disclosure a
+  prerequisite. There is no mode enum, live blob field or route; v14's retired byte is written zero
+  and ignored.
+  THE GATE ORDER inside `evaluate()` is load-bearing. HomeHub connectivity and input register 53
+  first prove normal space operation; input register 38 then distinguishes Heating from Cooling;
+  only after those gates may room/X10A/clock evidence form a sample. An idle summer plant is a neutral
+  HOLD even when its thermostat is off, while cooling is a distinct non-heating HOLD and never enters
+  the heating data set. Unknown or stale evidence blocks rather than guesses. Temporary holds/blocks
+  retain the last absolute sample timestamp and sequence so recovery cannot manufacture a new event;
+  deleting the room source disarms and clears sample memory. No actuator or Modbus write vocabulary
+  exists anywhere in the firmware.
 - `logic/crashinfo.hpp` — reset-reason slug + fault classification, and the `last_crash` / MQTT crash
   payload + paste-friendly text bundle (incl. the backtrace clamp) built from a captured summary. The
   retained MQTT crash payload (`build_crash_mqtt_payload`) is **crash-only**: the JSON when the boot is

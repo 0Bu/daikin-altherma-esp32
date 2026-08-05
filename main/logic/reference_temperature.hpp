@@ -322,6 +322,7 @@ inline ReferenceRoomSample reference_room_sample(const ReferenceRoomRaw& raw,
     }
     out.control_eligible = true;
     out.has_room_error = true;
+    // Canonical sign: target - actual. Positive means the room is too cold; negative too warm.
     out.room_error_k = out.setpoint_c - out.temperature_c;
     out.reason = ReferenceRoomReason::Eligible;
     return out;
