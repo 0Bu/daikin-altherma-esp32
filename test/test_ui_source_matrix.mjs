@@ -109,6 +109,8 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     "inactive heater pill uses the neutral light-grey fill");
   assert.match(style, /\.bsh-on \.sc-bsh-state-box \{[^}]*stroke:\s*var\(--warn\)/,
     "active heater pill turns orange as a whole pill");
+  assert.match(style, /\.bsh-on \.sc-tank \{[^}]*stroke:\s*var\(--warn\)/,
+    "active heater restores the orange outline around the whole DHW tank");
   assert.match(style, /svg \.sc-sg-request-box \{[^}]*fill:\s*var\(--hatch\)/,
     "inactive Boost pill uses the neutral light-grey fill");
   assert.match(style, /\.sg-boost-on \.sc-sg-request-box \{[^}]*stroke:\s*var\(--src-mb\)/,
