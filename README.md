@@ -64,7 +64,6 @@ cannot currently stand behind shown as `—` rather than as a number.
 | [docs/DESIGN.md](docs/DESIGN.md) | Web UI design contract (tokens, layout, states) |
 | [docs/X10A_PROTOCOL.md](docs/X10A_PROTOCOL.md) | X10A wire protocol: framing, checksum, register pages, detection |
 | [docs/MODBUS_PROTOCOL.md](docs/MODBUS_PROTOCOL.md) | The optional Modbus TCP source to a Daikin HomeHub (mDNS discovery, register map) |
-| [docs/MODBUS_ACTUATION.md](docs/MODBUS_ACTUATION.md) | WP3 single-writer/register-54 safety, evcc intent handoff and restore contract |
 | [docs/REGISTERS.md](docs/REGISTERS.md) | Register map + converter/enum tables behind the value catalog |
 | [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md) | MQTT topics, entities and derived (COP) sensors |
 | [docs/WIRING.md](docs/WIRING.md) | Visual wiring diagram + picking RX/TX pins on other boards |
@@ -77,9 +76,10 @@ cannot currently stand behind shown as `—` rather than as a number.
 
 ## Scope & credits
 
-X10A is a read-only monitor because the protocol has no write command. The optional HomeHub stack
-adds one default-off internal register-54 actuator capability; it has no controller or external
-command surface and remains inactive until a later, explicitly commissioned work package
-([docs/MODBUS_ACTUATION.md](docs/MODBUS_ACTUATION.md)).
+This firmware only ever reads the heat pump. X10A has no write command in the protocol, and the
+optional HomeHub link has none in the code: no source file can even frame a Modbus write, and a CI
+contract test keeps it that way ([docs/MODBUS_PROTOCOL.md](docs/MODBUS_PROTOCOL.md)). Other clients
+on your LAN — the Onecta app, the unit's own controller, evcc — do write the hub; this firmware just
+reports what they left behind.
 Trusted LAN only; no API auth/TLS. MIT ([LICENSE](LICENSE)); protocol / value definitions derived
 from [ESPAltherma](https://github.com/raomin/ESPAltherma) (MIT). No warranty; not affiliated with Daikin.
