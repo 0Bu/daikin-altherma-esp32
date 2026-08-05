@@ -29,15 +29,20 @@ class Element {
 }
 
 // The tab that initiated OTA has a bounded session snapshot. A reload in that same tab must restore
-// the complete dashboard/Settings state, label it as cached, and lock every Settings control while
-// the device is installing. The compact shell below remains the fallback for a second tab.
+// the complete dashboard/Settings state, label it as cached, and lock every Settings write control
+// while the device is installing. Read-only explanation toggles remain usable. The compact shell
+// below remains the fallback for a second tab.
 {
   const elements = elementsFor(
     "hdrIp", "verLink", "settingsVer", "connTile", "settingsCards", "otaStat", "otaStatSet",
     "settingsDot", "btnSettings",
   );
-  elements.connTile.controls = [new Element("conn-action")];
-  elements.settingsCards.controls = [new Element("settings-action")];
+  const connAction = new Element("conn-action");
+  const settingsAction = new Element("settings-action");
+  const explanationToggle = new Element("hardware-info");
+  explanationToggle.dataset.desc = "board:hardware";
+  elements.connTile.controls = [connAction];
+  elements.settingsCards.controls = [settingsAction, explanationToggle];
 
   const cachedStatus = {
     version: "1.4.72-dev.333",
@@ -129,8 +134,10 @@ class Element {
   assert.match(elements.settingsCards.innerHTML, /Protokoll/, "the complete protocol card remains visible");
   assert.doesNotMatch(elements.settingsCards.innerHTML, /<div class="section-label">Dynamische/,
     "a restored OFF snapshot must keep the experimental card hidden");
-  assert.equal(elements.connTile.controls[0].disabled, true, "connection writes are locked during OTA");
-  assert.equal(elements.settingsCards.controls[0].disabled, true, "Settings writes are locked during OTA");
+  assert.equal(connAction.disabled, true, "connection writes are locked during OTA");
+  assert.equal(settingsAction.disabled, true, "Settings writes are locked during OTA");
+  assert.equal(explanationToggle.disabled, false,
+    "read-only information tongues remain interactive while OTA locks competing writes");
   assert.equal(S.otaView.text, "78%", "progress resumes over the restored content");
   assert.equal(dashboardStatusPaints, 1, "the dashboard explicitly labels the restored OTA state");
 

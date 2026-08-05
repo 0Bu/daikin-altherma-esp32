@@ -685,14 +685,19 @@ function otaCacheRestore(otaStatus) {
   return true;
 }
 
-// Settings remain readable during installation but cannot issue a competing write. Guard the
-// optional DOM methods so the browser-free UI tests and the pre-status recovery shell share this
-// exact production path.
+// Settings remain readable during installation but cannot issue a competing write. Explanation
+// toggles (`data-desc`) are read-only navigation inside the already-loaded page, so they deliberately
+// remain enabled: disabling every button here also disabled the Hardware/Firmware/snapshot tongues
+// at the exact time their context is most useful. Guard the optional DOM methods so the browser-free
+// UI tests and the pre-status recovery shell share this exact production path.
 function syncOtaSettingsLock() {
   const locked = !!(S.otaInstalling || S.otaCached);
   for (const id of ["connTile", "settingsCards"]) {
     const controls = $(id)?.querySelectorAll?.("button, select, input") || [];
-    for (const control of controls) control.disabled = locked;
+    for (const control of controls) {
+      const explanationToggle = typeof control.dataset?.desc === "string";
+      control.disabled = locked && !explanationToggle;
+    }
   }
 }
 
