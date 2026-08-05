@@ -10,7 +10,7 @@ const labels = {
   "dyn.mode": "Betriebsart",
   "dyn.observe": "Beobachten",
   "dyn.off": "Aus",
-  "dyn.room_sources": "Raumtemperaturquellen",
+  "dyn.room_source": "Raumtemperaturquelle",
   "dyn.weather": "Wetterprognose",
   "dyn.strategy": "Regelstrategie",
   "dyn.shadow_strategy": "P-Regler · Schatten",
@@ -24,7 +24,7 @@ const labels = {
   "dyn.safety_help": "Sicherheits-Erklärung",
   "dyn.card": "Dynamische Vorlaufregelung",
   "dyn.not_configured": "Nicht konfiguriert",
-  "dyn.one_source": "1 Quelle",
+  "dyn.configured": "Konfiguriert",
   "dyn.input_error": "Eingabefehler",
   "ref.title": "Raumtemperaturquelle",
   "ref.ago": "vor {0} s",
@@ -158,7 +158,7 @@ assert.equal((html.match(/class="settings-split-action dynamic-config-open/g) ||
   "only room-temperature and weather values may be popup actions");
 assert.equal((html.match(/class="settings-split-value/g) || []).length, 3,
   "mode, strategy and safety values must remain non-interactive readouts");
-assert.doesNotMatch(html, /settings-source-summary|1 Quelle · 25,1 °C|Open-Meteo · 22,6 °C \/ 2 h/,
+assert.doesNotMatch(html, /settings-source-summary|Konfiguriert · 25,1 °C|Open-Meteo · 22,6 °C \/ 2 h/,
   "obsolete green summary lines must not duplicate values inside the tongues");
 const roomTongue = html.match(/<div class="vdesc-body settings-info-tongue" id="dynamic-room-sources-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
 assert.equal((roomTongue.match(/class="vdesc-p"/g) || []).length, 6,
@@ -183,8 +183,10 @@ assert.match(weatherTongue, /Wetter-Konfiguration/,
 assert.doesNotMatch(weatherTongue, /Wetter-Einrichtung/,
   "configured weather must not repeat coordinate-entry guidance");
 const roomButton = html.match(/<button[^>]*data-act="ref-temp"[\s\S]*?<\/button>/)?.[0] || "";
-assert.match(roomButton, /<span>1 Quelle<\/span>/,
-  "the compact room-source value must be the popup action");
+assert.match(roomButton, /<span>Konfiguriert<\/span>/,
+  "the compact room-source value must describe its configuration state");
+assert.doesNotMatch(html, /1 Quelle|Raumtemperaturquellen/,
+  "the single room-temperature input must not be presented as a source count or plural collection");
 assert.doesNotMatch(roomButton, /25,1 °C|vor 17 s/,
   "the configured reading must no longer be duplicated inside the editable header");
 const weatherButton = html.match(/<button[^>]*data-act="weather"[\s\S]*?<\/button>/)?.[0] || "";

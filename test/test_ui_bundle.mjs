@@ -68,7 +68,7 @@ assert.doesNotMatch(app, /mb_mode|config_modbus_should_search/,
 // Dynamic LWT owns one opt-in bottom Settings card. Room input and direct Open-Meteo forecast are
 // editable there; board-bound ENV III lives under Board Hardware. The Firmware switch owns explicit
 // OFF/SHADOW consent, while output stays read-only.
-assert.match(app, /function dynamicControlCardHtml\(\)[\s\S]*t\("dyn\.mode"\)[\s\S]*t\("dyn\.room_sources"\)[\s\S]*t\("dyn\.weather"\)[\s\S]*t\("dyn\.strategy"\)[\s\S]*t\("dyn\.safety"\)/,
+assert.match(app, /function dynamicControlCardHtml\(\)[\s\S]*t\("dyn\.mode"\)[\s\S]*t\("dyn\.room_source"\)[\s\S]*t\("dyn\.weather"\)[\s\S]*t\("dyn\.strategy"\)[\s\S]*t\("dyn\.safety"\)/,
   "the dynamic-LWT Settings card must keep all planned configuration domains together");
 assert.doesNotMatch(app, /dynamicSourceRow\("env3"/,
   "the board-bound outdoor sensor must not remain as a separate dynamic-control setting");
