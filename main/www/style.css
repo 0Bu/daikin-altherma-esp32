@@ -536,7 +536,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .settings-split-row { min-height: calc(1.5em + 18px); }
 .settings-split-info, .settings-split-action {
   position: relative; min-height: 0; padding: 0; border: 0; background: none; cursor: pointer;
-  font-family: inherit; line-height: inherit; color: inherit;
+  font-family: inherit; line-height: inherit; color: inherit; -webkit-tap-highlight-color: transparent;
 }
 .settings-split-info::before, .settings-split-action::before {
   content: ""; position: absolute; inset: -9px 0;

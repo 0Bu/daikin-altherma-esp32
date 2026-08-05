@@ -71,6 +71,8 @@ assert.match(style, /\.pin-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*m
   "the shared board and ENV pin row must remain a real two-column grid");
 assert.match(style, /\.settings-split-info, \.settings-split-action\s*\{[^}]*min-height:\s*0;[^}]*padding:\s*0;/,
   "split Settings actions must not add height inside the standard value row");
+assert.match(style, /\.settings-split-info, \.settings-split-action\s*\{[^}]*-webkit-tap-highlight-color:\s*transparent;/,
+  "iOS must not paint the enlarged split-button hit areas while they are tapped");
 assert.match(style, /\.settings-split-info::before, \.settings-split-action::before\s*\{[^}]*inset:\s*-9px 0;/,
   "compact split actions must retain full-row click targets through the row padding");
 assert.match(style, /\.settings-split-info\s*\{[^}]*flex:\s*1 1 auto;/,
