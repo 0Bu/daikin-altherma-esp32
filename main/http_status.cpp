@@ -127,9 +127,11 @@ static esp_err_t h_captive(httpd_req_t* req) {
     return httpd_resp_send(req, nullptr, 0);   // empty body — nothing to gzip, nothing to render
 }
 
-// `redact` withholds the ten reporter-identifying values (logic/redact.hpp) so a snapshot can be
+// `redact` withholds the reporter-identifying values (logic/redact.hpp) so a snapshot can be
 // pasted into a bug report. Defaulted OFF: the dashboard polls this same route and legitimately
 // shows the SSID and the broker — only GET /status?redact=1 asks for the scrubbed form.
+// No count here on purpose: this file IS the set (every jstr_r below is one member), and stating
+// how many would be the sixth restatement of a number that had already drifted in four places.
 //
 // Runs on ONE task: the httpd worker. It used to run on the poll task too (the /events WebSocket
 // broadcaster), and that second runner is what overflowed hp_poll's stack (#241) — a ~3.5 KB JSON

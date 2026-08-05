@@ -65,6 +65,7 @@ changes can be *verified*, not just reasoned about, even in a cloud session:
 ```bash
 scripts/run-mock-tests.sh --coverage  # host logic tests + 95% executable-line coverage floor
 tools/coverage/selftest.sh   # prove the coverage gate rejects an under-covered production line
+scripts/run-contract-tests.sh     # do the firmware's SOURCE boundaries still hold? (node-only)
 scripts/run-domain-audit.sh  # is the value catalog physically RIGHT? (the domain-correctness gate)
 scripts/run-description-audit.sh  # can the user find out what each value IS? (node-only)
 scripts/run-schematic-audit.sh    # does the DRAWING still say what it means? (node-only)
@@ -145,7 +146,17 @@ matching rule (a heuristic on identifier names, not a proof — it catches the l
 while debugging, not a value laundered through an unrelated local first), and on its first run it
 found `mqtt: retired legacy HA device %s` printing the unique half of the MAC that `/status` was
 redacting three sections above it. `tools/redact/audit_exceptions.txt` is its ledger and
-`tools/redact/selftest.sh` re-seeds both defects it was built for.
+`tools/redact/selftest.sh` re-seeds every defect it was built for — one `expect_red` each, so
+`grep -c '^expect_red ' tools/redact/selftest.sh` is the count — across BOTH halves: a deleted
+/diag rule, an unruled leaking line, the discovered-identity shape the name heuristic could only see
+because SENSITIVE lists bland words, a line printing the ROOM SOURCE's topic, a /status field that
+stopped being wrapped, and a `REDACTED_STATUS_FIELDS` declaration that drifted while the builder was
+right. That fourth case pins a gap this project had open rather than a defect it once shipped: the
+room source's name and topic and the weather coordinates were redacted on /status while NOTHING in
+the diag heuristic matched them, so the two halves disagreed about the same four values and only the
+JSON half was scrubbing them. SENSITIVE must stay a SUPERSET of the /status field set for that
+reason, and widening it cost nothing — measured, it adds no finding on the current firmware, so what
+it closed was latent.
 
 The SIXTH guards the README's RECORDING of that drawing — `docs/media/dashboard.gif`, the animated
 dashboard a new user sees before anything else. It is the ONLY one of these that is NOT a CI step
@@ -205,6 +216,27 @@ across models, and the docs should state a majority id and name the alternatives
 question here is the decidable one, does this id exist anywhere a real device could produce it.
 There is NO exceptions ledger: an id either resolves or it does not. `tools/docs/selftest.sh`
 re-seeds the two defects it was built for plus an ordinary typo.
+
+`run-contract-tests.sh` is not one of that layered sequence — it asks a question none of them can,
+because they all run against `main/logic/`. The host suite LINKS the IDF-free headers, so it proves
+what a rule DECIDES and can never prove that the firmware still calls it from the right task, in the
+right order, or from the only file entitled to: "hp_modbus.cpp is the sole caller of
+mb_request_lwt_offset()" is a claim about a whole component, and the only instrument that can settle
+it is the source TEXT. So each `test/test_*_contract.mjs` reads `main/*.cpp` and asserts a boundary —
+the X10A-gated MQTT lifecycle, the single X10A-free tombstone exception, the explicit-action-only
+mDNS browse, and the dynamic-LWT CONSENT boundary. That last one is two claims, not one: WP2
+proposes and writes nothing (hp_modbus.cpp stays the sole caller of mb_request_lwt_offset()), and
+since #341 the mode gates COLLECTION as well — OFF may not subscribe the saved room source, must
+actively unsubscribe an existing one, ignores its frames while leaving the pre-enable Test path
+intact, publishes no weather evidence, and pauses Open-Meteo before any fetch, with
+POST /set_dynamic_lwt applying both boundaries live and retracting the weather topic only after OFF
+was persisted. An experimental feature left off must cost no broker subscription and no outbound
+request, which is a property of the whole component and so exactly what a source-text check is for. It is the newest entry point and exists
+because these were three bare `node test/…` steps in build.yml and nothing else: CI ran them, no
+local command did, and a fourth sibling added the same way would have been invisible to every entry
+point at once. The GLOB is the fix, not the wrapper — `test_ui_*.mjs` already had that property, and
+these did not. A glob matching nothing exits 2 rather than reporting success, since "no tests found"
+must never look like "all tests passed" in the very script written to stop a check from disappearing.
 
 (Three more fast gates guard the PUBLISHED ARTIFACTS rather than the firmware —
 `scripts/run-pages-publish-tests.sh`, git-only, relevant when `scripts/publish-pages-branch.sh` or
@@ -565,6 +597,98 @@ hp_poll.cpp     poll engine task: X10A ONLY — the HomeHub is a separate stack 
                 DUMPS the raw 0x10/0x20 payloads to /diag while the compressor RUNS
                 (logic/raw_capture.hpp — #194's decisive experiment, which the detect-pass dump
                 structurally cannot take, since a detect pass is always a unit at rest)
+env3.cpp        OPTIONAL local climate sensor — the M5Stack ENV III Grove unit (SHT30 temperature +
+                humidity at 0x44, QMP6988 pressure at 0x70 on one I2C bus). A THIRD reading source
+                beside X10A and the HomeHub, sharing nothing with either: its own task (4096, prio 4),
+                its own 10s sample cadence and its own 30s freshness window. Like hp_modbus.cpp the
+                runtime gate is literal — disabled, or a board whose preset is not M5Stack, and there
+                is no task, no bus and no pullups; env3_start() re-checks that itself rather than
+                trusting the caller, so a hand-edited Config cannot start an accessory this board has
+                no connector for. Support is decided by the board's VENDOR (env3_board_supported ->
+                BoardVendor::M5Stack), not its model: what makes the sensor plausible is the Grove
+                HY2.0-4P port carrying the pins the one preset names (SDA=2/SCL=1 on the AtomS3 Lite),
+                and a vendor is the coarsest fact that implies it. The pin reservation runs in ALL
+                directions (logic/config_model.hpp's config_env3_reserved_pins vs the X10A link, the
+                status LED and the recovery button, each rejecting the others' pins with a named
+                reason) — the same both-ways rule board_pins.hpp already applies, one axis wider. That is the VALIDATOR; the OFFER deliberately is not, since #339: /status.env3's pins_avail and presets are filtered by the live X10A pair ALONE and are sent even while the persisted board is Seeed or Custom, because ONE form now selects the board and its sensor in a single save and a server-side filter computed from the PERSISTED board would withhold exactly the pins the user is about to need. The browser filters its own PENDING LED/button picks, and the request path validates the whole proposed snapshot — the only place all four subsystems are known at once.
+                A SAVE is HARDWARE-PROVEN, not merely validated (logic/env3.hpp's Env3SaveCheck):
+                enabling on new pins runs env3_probe (a short-lived bus torn down again, retrying the
+                QMP6988 chip id and then a full CRC-valid SHT30 measurement — SHT30 has NO chip-id
+                register, so a decoded measurement is the only identity proof an ACK cannot give),
+                changing pins while running demands DisableFirst (two masters briefly driving one
+                shared wire is a bus fault, not a config change), and DISABLING checks nothing at all
+                — it is the recovery path and must never depend on hardware that may be the problem.
+                Each refusal carries a machine code (env3_not_reachable / env3_sht30_not_found /
+                env3_qmp6988_not_found / env3_probe_busy / env3_disable_first) beside the English
+                text, so the bilingual UI translates without the API losing its one wording. Applies
+                by REBOOT unlike /set_hp: the I2C driver owns the bus for the task's life. Published
+                as a retained flat JSON on <base>/env3 plus three HA entities (ENV3_HA_SENSORS) whose
+                discovery config carries a TWO-entry availability list with mode "all" — the device
+                LWT and a template on the state topic itself — so a stale or failed sensor marks only
+                these three entities unavailable while the rest of the device stays online, and an
+                error publishes {} rather than carrying the last plausible outdoor value forward.
+                It republishes when the SAMPLE COUNTER advanced even if the rounded text is identical,
+                so a time-series subscriber sees the sensor's real 10s cadence instead of a gap that
+                reads like a dropout. The QMP6988's own temperature is decoded and DISCARDED — one
+                quantity, one sensor, so nothing has to explain which of two temperatures a reading
+                is. Deliberately NOT in /values, the trend rings, the checkup or the schematic: those
+                describe the heat pump, and an accessory on the board is not a plant reading. NOT
+                watchdog-subscribed either — every transaction is bounded by a 100ms I2C timeout, so
+                the loop cannot wedge the way a silent UART can
+weather_forecast.cpp  the Open-Meteo forecast client (provider + model pinned in code:
+                icon_seamless), the second non-Daikin input to the dynamic-LWT controller. Own task,
+                and its 12288 stack is the largest of the tasks this firmware creates itself (only
+                the httpd worker's 16384 is bigger) for the reason CLAUDE.md's stack section states —
+                TLS + HTTP + JSON on one frame — with the loop body under a try/catch —
+                though only the `catch (const std::exception&)` half: unlike mqtt_task, poll_task,
+                mb_task and syslog_task it carries no `catch (...)`, so a non-std throw still unwinds
+                past the task boundary into std::terminate and reboots the board. Cadence 45 min on success, 5 min on
+                failure, and POST /set_weather only NOTIFIES it, so the request path does no DNS, TLS
+                or JSON work. Skipped in safe mode — and, since #341, GATED ON THE DYNAMIC-LWT MODE:
+                the loop reads config().dynamic_lwt_mode and in anything but SHADOW calls
+                set_feature_inactive() and idles on a 60 s notify-wait BEFORE the URL is built, so no
+                socket opens at all. OFF withdraws consent to send the coordinates (and this
+                installation's public source IP) to a third party, which is a decision about the
+                REQUEST, not about the answer. That state is deliberately NOT the unconfigured one:
+                set_disabled() clears the coordinates and reasons "not_configured", while
+                set_feature_inactive keeps configured=true and the saved location visible to the
+                editor and blanks has_value, available and all four timestamps under state
+                "disabled" / reason "dynamic_lwt_disabled" — a card that kept the last numbers would
+                present yesterday's forecast as if collection were merely idle. POST /set_dynamic_lwt
+                notifies this task exactly like /set_weather, so the boundary moves at the request
+                rather than up to a sleep interval later. The response is bounded before it is read
+                (Content-Length checked against an 8 KiB cap, then 1 KiB chunks against a running
+                total) and never stored: nothing about a forecast survives a reboot. forecast_hours=6
+                is deliberately larger than the four bins needed, so a request that crosses an hour
+                boundary during the TLS handshake still has two COMPLETE future bins to average.
+                logic/open_meteo.hpp derives the two figures the controller sees — outdoor_mean_2h_c
+                and solar_energy_2h_wh_m2 — from the two bins after the decision instant; the
+                Wh/m² sum is exact rather than approximate because Open-Meteo's hourly
+                shortwave_radiation IS the mean W/m² over the preceding hour, so two adjacent means
+                sum numerically to an energy. Everything else here is refusal, and it is the point:
+                issued_at stays null rather than being backfilled from the fetch time (the endpoint
+                does not expose the model-run instant, and a synthesized one would be a fabricated
+                provenance — the same refusal logic/timestamp.hpp makes for an unsynced clock); the
+                units are re-verified against the units the query asked for, so a provider changing
+                them fails closed instead of publishing a °F number as °C; a provider timestamp that
+                moves BACKWARD is rejected; and a location edit invalidates the stored value outright,
+                since an old city's forecast must never be reported under a new one. The three
+                liveness facts fail closed TOGETHER — available = configured AND the task's own
+                availability AND fresh, computed the same way in /status, in the MQTT document and in
+                the controller's input — while a failed refresh KEEPS the last numbers visible
+                (has_value stays true) purely for diagnosis. PRIVACY is structural, not a review
+                point: the coordinates are redacted in /status?redact=1 (logic/redact.hpp) and the
+                MQTT evidence document on <base>/weather/openmeteo/forecast carries NO coordinates at
+                all, which a host test pins by asserting the substrings are absent — a broker archive
+                is a place an installation's location would otherwise sit forever. Since #341 the document is
+                published only while the location AND the mode are both on
+                (publish_weather_state(weather_enabled && mode == Shadow)); OFF turns that into a
+                CleanupRetained, and /set_dynamic_lwt additionally requests the one empty RETAINED
+                publish (mqtt_request_weather_cleanup, "mqtt: inactive weather forecast topic
+                deleted") — a retained forecast nobody deletes goes on reading like a live input long
+                after collection was withdrawn. No HA discovery
+                entities (four are RETIRED and actively retracted): this is a metrics stream, and a
+                forecast is not a state of this device
 history.cpp     the 24-hour trend rings: one fixed-cadence buffer per logic/history.hpp TREND, fed by
                 the X10A poll task (history_record), plus nine HomeHub rings fed by the independent
                 Modbus task (history_record_modbus). Both calls happen BEFORE their cache commit and
@@ -639,7 +763,15 @@ http_status.cpp GET / (setup.html in AP mode, else gzip UI) /favicon.ico /heat-p
                 catch-all. http_append_status_json() runs
                 on the httpd task ALONE — it used to run on the poll task too, which is what
                 overflowed that task's stack (#241)
-http_config.cpp POST /set_wifi /set_mqtt /set_syslog /set_ntp /set_hp /set_board /set_ota /set_lang /detect
+http_config.cpp POST /set_wifi /set_mqtt /test_ref_temp /set_ref_temp /set_syslog /set_ntp
+                /set_weather /set_dynamic_lwt /set_hp /discover_homehub /set_board /set_env3
+                /set_ota /set_lang /detect — ALL FIFTEEN write routes, and the count is the point:
+                http_server.cpp's cfg.max_uri_handlers is sized exactly to the trusted-LAN route
+                total, so a route added here without raising it there overflows onto the SPA
+                catch-all. Three of the fifteen are not config writers: /test_ref_temp writes nothing
+                at all (it earns the proof /set_ref_temp then demands), /discover_homehub only
+                resolves an address for the dialog to fill in, and /detect resets profile +
+                fingerprint in RAM alone, since detection is re-run every boot anyway
 http_ota.cpp    /ota/check|update|status
 mcp_server.cpp  /mcp device glue (stateless read-only MCP: initialize/tools/list/tools/call;
                 get_status + get_hp_values reuse the exact HTTP snapshot builders; GET serves an
@@ -777,6 +909,54 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; X10A p
                 connect/publish, so a long broker outage can't false-trip) PLUS once per publish inside
                 mqtt_publish() (so a ~30-publish reconnect burst on a slow link can't exceed the 20s
                 budget) — a wedged publish reboots, a slow-but-progressing one never does.
+                TWO things that are not publishing also live on this task, both because they are
+                driven by INBOUND frames on this same authenticated client. (1) The REFERENCE-SOURCE
+                PROBE behind POST /test_ref_temp: a candidate room mapping is subscribed on the
+                EXISTING client (never a second connection, never a Config write), decoded by the
+                same JSON/freshness/eligibility path the live source uses, and on a passing frame it
+                issues a generation number as a PROOF. mqtt_reference_test_proof_valid() then binds
+                that proof to all seven behavioural fields, so testing topic A cannot license saving
+                topic B, and an edited path or max_age invalidates it. RAM-only and single-use — a
+                save consumes it, a reboot forgets it — which is exactly right for evidence about a
+                broker that may have changed since. (2) The DYNAMIC-LWT SHADOW CONTROLLER
+                (logic/dynamic_lwt_controller.hpp), evaluated once per 1s cycle but COUNTED only while
+                armed — #341 moved the `evaluations` increment past the OFF early return, so
+                /status.dynamic_lwt.evaluations and lwt_controller_evaluations measure armed cycles
+                rather than seconds of uptime, and a board that was never switched on reads 0 instead
+                of a number that looks like activity. It lives here rather
+                than in a file of its own because its one input arrives as an MQTT frame, SHADOW can
+                only be armed WITH a configured MQTT room source, and the evaluation has to ride the
+                task CYCLE rather than publish_heartbeat(): on the publish cadence the last verdict
+                would keep reading healthy through exactly the broker outage that must move it to
+                FAILSAFE. It runs BEFORE the publish gate for that reason. SHADOW means write-free —
+                it proposes a requested_offset_k and calls nothing; the pure header cannot even name
+                an actuator. Since #341 the mode is ALSO the consent boundary for COLLECTION, and that half
+                lives in this file: service_reference_subscription computes capture_enabled =
+                configured && SHADOW, and while OFF it swallows the pending reconfigure,
+                UNSUBSCRIBES the live room topic, drops the captured runtime values and reports
+                subscribed:false — while `configured` keeps showing the saved mapping, so there is
+                still something to edit. A flip of that flag counts as a BINDING change and retires
+                the captured value with it: a reading taken under a consent since withdrawn must not
+                outlive it. service_reference_frames still runs service_reference_probe_frame()
+                FIRST and only then skips the live decode, which is what keeps POST /test_ref_temp
+                able to PROVE a candidate source BEFORE arming — otherwise the only way to test a
+                mapping would be to enable the collection it is being tested for.
+                test/test_dynamic_lwt_shadow_contract.mjs pins that whole boundary, not just that
+                hp_modbus.cpp stays the ONLY file calling mb_request_lwt_offset(): the subscription
+                gate, the OFF unsubscribe, the surviving probe path, the weather publish gate,
+                weather_forecast.cpp's pre-fetch pause and both live reconfigures in
+                /set_dynamic_lwt. A P term on the room error
+                (gain 1, ±0.25 K deadband, whole kelvin, ±2 K envelope, ≤1 K per decision, one
+                decision per 30 min), fail-closed on every input it depends on: an ineligible room
+                source, a down X10A bus, a down HomeHub or an unknown plant gate is FAILSAFE, an
+                inactive plant is HOLD. Each of those RESETS the proposal memory, which is what makes
+                the 1 K slew bind the FIRST decision after any restart too — otherwise recovery would
+                be a ±2 K jump through the one limit that exists to prevent it. The forecast is a
+                STATE modifier only (Shadow vs Degraded) and contributes a hardwired 0 K, so a
+                missing forecast can never move water temperature by way of a term nobody sized.
+                Reaches the outside as flat lwt_controller_* heartbeat fields and /status.dynamic_lwt
+                — no HA entities, deliberately: a proposal nothing acts on is telemetry to reason
+                about, not a state to put in front of a user as if it were the plant's
 ota_update.cpp  pull-based signed OTA: manifest check -> TWO-POINT downgrade gate -> esp_https_ota
                 into the inactive slot -> signature verify on install -> reboot, plus the rollback
                 health gate. Reads the CHANNEL (config ota_channel, logic/ota_channel.hpp) fresh on
@@ -1078,10 +1258,17 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 docs/REPORTING.md). In the DEVICE rather than in www/js/app_state.js because the browser
                 button, the curl fallback in the guide and anything later all need one answer, and
                 the copy that silently stops covering a newly-added field is the one that leaks it.
-                Two shapes, because the routes leak differently: /status leaks by FIELD (eight named
-                values, substituted where each is WRITTEN — a post-processing pass over the finished
+                Two shapes, because the routes leak differently: /status leaks by FIELD (named values
+                substituted where each is WRITTEN — a post-processing pass over the finished
                 JSON is what the httpd stack budget has no room for), /diag leaks by LINE, which is
-                the non-trivial half the CHECKs are about. It FAILS CLOSED: a rule whose end token is
+                the non-trivial half the CHECKs are about. The field COUNT is now DERIVED from those
+                call sites by tools/redact/check_diag_coverage.py rather than restated: the header
+                said ten, the audit tool said eight and the builder wrapped twelve, and nothing
+                compared them because nothing consumed the constant — an inert number reading like a
+                guarantee, the shape this file rejects a `.clang-tidy` for. What that count still
+                cannot see is a new identifying field nobody wrapped AT ALL: it never reaches the
+                redactor, so it never reaches the number either, and that half stays a review point.
+                It FAILS CLOSED: a rule whose end token is
                 missing (a line the ring truncated mid-value — exactly when a value sits
                 unterminated at the end) redacts to the end of the line rather than giving up,
                 while the trailing newline is preserved so the ring's line structure survives. The
@@ -1694,7 +1881,7 @@ www/            web UI sources (index.html + style.css + app.sources fragments -
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + one-shot rollback state, MQTT (`uri`/`user`/`pass`), syslog, `ntp_server`, from blob **v2** board-local hardware, from **v3** the OTA channel, from **v4** the UI-language override, from **v5** the HomeHub host/port/unit/safety fields, **v6** its enable compatibility bit, **v7** one MQTT reference-temperature name/topic/value-path mapping, **v8** its timestamp path plus maximum age, **v9** the safe WP3 actuation opt-in semantics, **v10** weather location, **v11** ENV III, **v12** board-preset identity, and **v13** target/enabled/HVAC readiness mappings for the room source. Blobs v1–v8 remain readable without losing credentials, but their historical actuation bit is forced false because it did not previously authorize writes; only a v9 save can express the new consent. Non-empty `mb_host` enables polling, while writing additionally requires the v9 flag and explicit firmware-writer ownership. HomeHub and reference-source fields have narrow httpd writers (`POST /set_hp`, `POST /set_ref_temp`). Old experimental `mb_dhost`/`mb_seen` keys are deleted on load and never consulted. Pre-v13 room mappings remain observable after migration but are ineligible until a target mapping is saved deliberately. One CRC-checked entry is written all-or-nothing. The X10A link cache `rx_pin`/`tx_pin`/`proto` remains separate and self-healing (detection + httpd writers), as does `board_set`, the user's licence for the UI to name matching board hardware without persisting a board identity. Legacy per-key credential entries remain read-only fallback for pre-blob upgrades, and `boot_fails` is the boot-loop crash counter. |
+| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + one-shot rollback state, MQTT (`uri`/`user`/`pass`), syslog, `ntp_server`, from blob **v2** board-local hardware, from **v3** the OTA channel, from **v4** the UI-language override, from **v5** the HomeHub host/port/unit/safety fields, **v6** its enable compatibility bit, **v7** one MQTT reference-temperature name/topic/value-path mapping, **v8** its timestamp path plus maximum age, **v9** the safe WP3 actuation opt-in semantics, **v10** weather location, **v11** ENV III, **v12** board-preset identity, **v13** target/enabled/HVAC readiness mappings for the room source, and **v14** the dynamic-LWT controller mode (ONE byte: `off`/`shadow`, since ACTIVE is deliberately not representable in the persisted vocabulary). Every earlier blob (v1–v13) remains readable without losing credentials — the read path accepts any version in `CONFIG_BLOB_VERSION_MIN`..`CONFIG_BLOB_VERSION` and rejects a length that does not land exactly on the end, so a truncated newer blob is refused rather than read as an older one. TWO fields are then forced to their safe value rather than trusted: a pre-v9 actuation bit decodes false because it did not previously authorize writes (only a v9 save can express the new consent), and a pre-v14 blob carries no controller mode at all, so it migrates to OFF — as does any unknown byte, so every install, upgrade and reboot starts disarmed. Non-empty `mb_host` enables polling, while writing additionally requires the v9 flag and explicit firmware-writer ownership. HomeHub and reference-source fields have narrow httpd writers (`POST /set_hp`, `POST /set_ref_temp`). Old experimental `mb_dhost`/`mb_seen` keys are deleted on load and never consulted. Pre-v13 room mappings remain observable after migration but are ineligible until a target mapping is saved deliberately. One CRC-checked entry is written all-or-nothing. The X10A link cache `rx_pin`/`tx_pin`/`proto` remains separate and self-healing (detection + httpd writers), as does `board_set`, the user's licence for the UI to name matching board hardware without persisting a board identity. Legacy per-key credential entries remain read-only fallback for pre-blob upgrades, and `boot_fails` is the boot-loop crash counter. |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -1744,8 +1931,8 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   to its .elf), pins_avail[] (the chip-safe X10A GPIOs for the RX/TX picker, minus the
                   pins the firmware itself drives — the status indicator and the recovery button —
                   logic/board_pins.hpp),
-                  board{led_gpio,led_type,led_inverted,btn_gpio,btn_active_low,user_set,pins_local[],
-                  presets[]}
+                  board{led_gpio,led_type,led_inverted,btn_gpio,btn_active_low,user_set,preset_id,
+                  preset_name,vendor,pins_local[],presets[]}
                   (the runtime board-hardware config written by POST /set_board; user_set = the user
                   has STATED this hardware, as opposed to it being the build's defaults — the NVS
                   `board_set` key above, and the Hardware modal's licence to NAME the board in its
@@ -1759,8 +1946,28 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   fields — nothing is saved until the user submits. Carried in this payload rather
                   than a route of its own because the modal already reads pins_local from it: one
                   source, no second fetch to fail, and a preset cannot arrive disagreeing with the
-                  pin lists it must fit inside. Empty on a build (or a link position) whose reserved
-                  pins withhold every preset — the UI then hides the row),
+                  pin lists it must fit inside. Empty only when NO board is selected and this build
+                  (or the current link position) withholds every preset — the UI then hides the row;
+                  a SELECTED board is re-added even when its factory LED/button fields would now be
+                  refused (#339), since a selector missing the identity the same payload reports would
+                  read as the board having been forgotten),
+                  env3{type,supported,enabled,sda,scl,connected,fresh,age_s,temperature_c,
+                  humidity_pct,pressure_hpa,error,samples,errors,pins_avail[],presets[]} — the
+                  optional M5Stack ENV III sensor (env3.cpp). `supported` is the BOARD's answer
+                  (an M5Stack preset is selected) and `enabled` is already ANDed with it, so a stale
+                  enabled flag on a Seeed board reads as off rather than as a sensor that ought to be
+                  working. The three readings are null unless the sample is fresh — never a last-known
+                  value, the same rule the held-over X10A rows follow — and `error` then carries WHY
+                  ("unsupported_board"|"disabled"|"collecting"|"sensor_not_found"|"sht30_crc"|…),
+                  since "no number" and "no number BECAUSE the CRC failed" are different findings.
+                  pins_avail[]/presets[] are this bus's own I2C candidates and are NOT gated on
+                  `supported`: since #339 the Board Hardware form saves board identity and ENV III in
+                  ONE atomic POST /set_board, so selecting AtomS3 Lite and attaching its Grove sensor
+                  in a single submit needs the pins offered while the PERSISTED board is still
+                  Custom/Seeed. They reserve the LIVE X10A pair alone (config_link_pins) — the pending
+                  LED/button pins are filtered by the browser, and the complete proposed snapshot is
+                  re-validated authoritatively on the request path (env3_config_valid over
+                  config_env3_reserved_pins), so the wider offer can never persist a colliding pair,
                   wifi{ssid,ip,rssi,connected,bssid,mac,std,rolled_back}
                   (bssid/std are the associated AP's BSSID + PHY standard name e.g. "Wi-Fi 4", null
                   while offline; mac is this STA's own MAC, always present; rolled_back = the last
@@ -1773,12 +1980,58 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   /set_mqtt's clear_creds),
                   reference_temperature{configured,name,topic,temperature_path,setpoint_path,
                   timestamp_path,enabled_path,hvac_mode_path,max_age_s,subscribed,has_value,
-                  source_id,calibration_k,temperature_c,target_temperature_c,enabled,hvac_mode,
-                  received_at,received_ago_s,source_at,timestamp_source,age_s,fresh,freshness_reason,
+                  source_id,calibration_k,temperature_min_c,temperature_max_c,temperature_c,
+                  has_setpoint,setpoint_c,enabled,hvac_mode,received_at,received_ago_s,source_at,
+                  source_unix_s,timestamp_source,age_s,fresh,freshness_reason,
                   temperature_valid,setpoint_valid,control_eligible,room_error_k,reason,reason_code,
                   retained,messages,errors,rejections[,error][,eligibility_error]} — the decoded and
                   canonical MQTT living-room input. The flat heartbeat archives its numeric accepted
-                  view; it feeds no averaging, controller or heat-pump write yet,
+                  view. It is the SOLE input of the dynamic-LWT shadow controller below (room_error_k
+                  is that controller's P term) and still feeds no averaging and no heat-pump write —
+                  and since #341 the dependency runs BOTH ways: dynamic_lwt_mode is the COLLECTION
+                  boundary, not merely an actuator one, so in OFF the saved mapping stays visible
+                  (configured, topic, every path, max_age_s) while `subscribed` goes false, the broker
+                  subscription is dropped and every captured field is CLEARED — has_value false,
+                  temperature_c/setpoint_c/room_error_k null, messages/errors/rejections back to 0.
+                  Keeping the mapping but not the data is what stops withdrawn consent from reading as
+                  a broken source; POST /test_ref_temp stays OUTSIDE the gate, so a candidate can be
+                  proved before SHADOW is ever enabled,
+                  weather_forecast{configured,provider,model,fetch_interval_s,max_age_s,fetching,
+                  available,has_value,latitude,longitude,state,outdoor_mean_2h_c,
+                  solar_energy_2h_wh_m2,issued_at,fetched_at,valid_for_decision_at,last_attempt_at,
+                  age_s,fresh,freshness_reason,successes,errors[,reason][,error]} — the Open-Meteo
+                  ICON forecast (weather_forecast.cpp). `available` is the three-way AND of
+                  configured, the task's own availability and freshness, so a consumer never has to
+                  combine them itself; a FAILED refresh keeps has_value plus the last two numbers for
+                  diagnosis while available/fresh go false, which is the distinction between "no data"
+                  and "data that must not be acted on". FETCHING is gated on the dynamic-LWT mode
+                  (#341): in OFF the task takes set_feature_inactive, so `configured` and the
+                  coordinates stay while state reads "disabled", freshness_reason and reason read
+                  "dynamic_lwt_disabled", and has_value, both numbers AND all four timestamps are
+                  CLEARED — the deliberate opposite of the failed-refresh case, since a source whose
+                  consent was withdrawn must not present yesterday's forecast as collection merely
+                  being idle. `issued_at` is ALWAYS null — the endpoint does
+                  not expose the model-run instant and fetch time is not a substitute for it.
+                  latitude/longitude are null when unconfigured and "<redacted>" under ?redact=1,
+                  dynamic_lwt{mode,mode_code,state,state_code,reason,reason_code,decision_eligible,
+                  proposal_produced,room_error_k,p_term_k,unclamped_offset_k,bounded_offset_k,
+                  requested_offset_k,forecast_contribution_k,deadband,quantized,clamped,rate_limited,
+                  forecast_available,plant_gate_known,plant_gate_active,actuator_conflict,
+                  room_source_unix_s,room_age_s,last_decision_ms,sequence,evaluations,decisions,
+                  holds,failsafes} — the write-free shadow controller (mqtt_ha.cpp,
+                  logic/dynamic_lwt_controller.hpp). `mode` is the PERSISTED operator choice
+                  ("off"|"shadow") while state/reason are the last 1s evaluation
+                  ("off"|"shadow"|"hold"|"degraded"|"failsafe" / "disabled"|"shadow_decision"|
+                  "cadence_wait"|"deadband"|"rate_limited"|"room_unavailable"|"x10a_unavailable"|
+                  "homehub_unavailable"|"plant_gate_unknown"|"plant_inactive"|"forecast_unavailable"|
+                  "clock_invalid"), each mirrored as a numeric *_code for a metrics consumer that
+                  drops strings — the #215 lesson applied at birth rather than after the fact. Every
+                  term is null rather than 0 until the controller has actually computed it, since a
+                  0.0 K offset it never proposed is a claim it never made — with ONE stated exception:
+                  `forecast_contribution_k` is the literal 0 unconditionally, because WP2 has no
+                  forecast term at all (the snapshot field is fixed at zero and nothing writes it).
+                  A null there would claim the term exists and is merely unknown. There is no actuator
+                  result in this block and cannot be one,
                   syslog{configured,resolved,reachable,host,port,error},
                   ota{channel} — "release"|"dev", the FEED the next OTA check reads (POST /set_ota).
                   On /status and not only /ota/status because the Settings Firmware card renders its
@@ -1938,10 +2191,15 @@ GET  /diag[?verbose=0|1][?clear=1][?redact=1]   in-memory diag log. ?redact=1 sc
                   to CHUNKED: a replacement is longer than most values it replaces, so the redacted
                   text can GROW past the static dump buffer, and the alternatives are a second ~8 KB
                   .bss buffer or a ~6 KB contiguous heap allocation
-GET  /status?redact=1   the bug-report form of /status: the ten reporter-identifying values
+GET  /status?redact=1   the bug-report form of /status: the twelve reporter-identifying values
                   (wifi.ssid/ip/bssid/mac, mqtt.broker, reference_temperature.name/topic,
-                  syslog.host, ntp.server, modbus.host — the last is the saved HomeHub LAN address
-                  or `.local` hostname) read "<redacted>".
+                  weather_forecast.latitude/longitude, syslog.host, ntp.server, modbus.host — the
+                  last is the saved HomeHub LAN address or `.local` hostname) read "<redacted>".
+                  TWO entries are in the set for a reason the network addresses are not: the
+                  coordinates are the reporter's HOUSE to six decimals, and
+                  reference_temperature.name is a word the user typed — usually a room, sometimes a
+                  person. The count is DERIVED from the call sites by the redaction audit, so this
+                  list and logic/redact.hpp's cannot silently disagree with the builder again.
                   The KEY is always emitted — an omitted field is indistinguishable from an older
                   build that never had it, and "which build produced this?" is the first question a
                   frozen report must answer. Substituted where each value is WRITTEN, never as a
@@ -2016,11 +2274,88 @@ POST /set_ntp     {server} -> persist + reboot. No request-path network probe (t
                   CONFIG_DAIKIN_NTP_SERVER compile-time default" (SNTP has no disabled state, unlike
                   syslog_host's empty-means-off). Unchanged settings short-circuit to
                   {ok:true,reboot:false}, same as /set_mqtt.
-POST /set_ref_temp   {name,topic,temperature_path,timestamp_path,max_age_s} -> validate, persist and
+POST /test_ref_temp  {name,topic,temperature_path,setpoint_path,timestamp_path,enabled_path,
+                  hvac_mode_path,max_age_s} -> subscribe the CANDIDATE mapping on the existing
+                  authenticated MQTT client, wait up to 12 s for a frame, decode it through the very
+                  path the live source uses, and answer {ok,test_proof,temperature_c,setpoint_c,
+                  control_eligible,room_error_k,reason,reason_code,retained} — or 422 with the reason
+                  it did not (no fresh value, invalid JSON path, timestamp moved backward, broker not
+                  connected, another test running). It WRITES NOTHING: no Config, no NVS, no change
+                  to the live subscription. An empty topic is 400 here, because "test nothing" is not
+                  a question. The whole point is the `test_proof` it returns — see the next route.
+                  Uses the SAME parser as /set_ref_temp, so the mapping that earned the proof is
+                  byte-for-byte the mapping that can then be persisted. This probe is the ONE part of
+                  the reference stack the dynamic-LWT consent gate does not stop: the frame reaches
+                  the probe before the SHADOW check drops it, because the required order is test ->
+                  save -> arm, and a gate that also blocked the test would make the first step depend
+                  on the last
+POST /set_ref_temp   {name,topic,temperature_path,setpoint_path,timestamp_path,enabled_path,
+                  hvac_mode_path,max_age_s,test_proof} -> validate, persist and
                   apply live on the existing MQTT client without reboot. Empty topic is the explicit
                   disabled state; otherwise the topic is exact (no wildcards), paths are bounded
                   dot-separated JSON selectors, and max_age_s is an integer in 10..3600. An unchanged
                   mapping still reconfigures the subscription so the Settings action can retry it.
+                  A non-empty mapping REQUIRES a valid `test_proof` from /test_ref_temp or answers
+                  409 "Test this MQTT mapping successfully before saving" — the one route here that
+                  demands evidence rather than merely well-formed input, because this mapping is the
+                  SOLE input of the dynamic-LWT controller and a typo in it does not fail loudly: it
+                  produces a plausible-looking room error, or a permanent FAILSAFE that reads like a
+                  broken feature. The proof is bound to all seven BEHAVIOURAL fields (not the name,
+                  which is cosmetic and needs no retest), so testing one topic cannot license saving
+                  another, and editing a path or the max age invalidates it. It is RAM-only and
+                  single-use: a save consumes it, a newer test supersedes it, a reboot forgets it —
+                  which is right for evidence about a broker that may have changed since. Deleting a
+                  source (empty topic) needs no proof: removal must never depend on the thing being
+                  removed still working
+POST /set_weather {latitude,longitude} -> validate + persist + notify the weather task (no reboot,
+                  and no DNS/TLS/JSON on the request path). Saving the location does not start
+                  fetching it: like the room source, this is gated on the dynamic-LWT mode, and while
+                  that is off the task reports state "disabled", reason "dynamic_lwt_disabled" and
+                  sends Open-Meteo nothing. The coordinates stay a saved input the editor can show;
+                  what OFF withdraws is consent to hand them — and this device's public source IP —
+                  to a third party, which storing a location is not the same act as. Both are
+                  STRINGS parsed strictly (optional sign, digits, `.` or the German `,`, at most six
+                  decimals — an exponent, whitespace or a `+` is rejected rather than coerced, since
+                  a coordinate that silently becomes a different one is a request the user cannot
+                  see failing). BOTH EMPTY is the explicit disabled state; exactly one empty is 400
+                  "latitude and longitude are both required" — half a location is never a location.
+                  Disabling also requests the retained MQTT topic's cleanup, so a stopped forecast
+                  leaves no last-known values on the broker
+POST /set_dynamic_lwt  {mode:"off"|"shadow"} -> validate + persist + apply live (no reboot; the next
+                  1 s mqtt_task evaluation reads it). This is the CONSENT BOUNDARY, not merely the
+                  controller's own setting: the handler also calls mqtt_reference_reconfigure() and
+                  weather_forecast_reconfigure(), and on OFF mqtt_request_weather_cleanup(), so the
+                  room subscription and the Open-Meteo traffic start and stop with the mode rather
+                  than with the routes that SAVED them. Both are pushed here rather than left to each
+                  worker's own sleep interval — an OFF that takes 45 minutes to stop talking to a
+                  third party is not a withdrawal of consent, it is a delay. "active" is REFUSED like any other unknown
+                  word — it is deliberately absent from the accepted vocabulary, the persisted byte
+                  and the enum, so no request, no stored blob and no migration can express a
+                  controller that writes. "shadow" additionally requires the inputs it would depend
+                  on to already exist (MQTT broker, the room topic with its temperature, setpoint and
+                  timestamp paths, and a HomeHub address) or
+                  answers 409: arming a controller that can only report FAILSAFE is not a setting,
+                  it is a fault report the user configured by hand. Removing any of those later
+                  DISARMS the mode on load rather than leaving it armed and failing
+POST /set_env3    {enabled,sda,scl} -> validate + PROVE + persist + REBOOT. A standalone
+                  COMPATIBILITY endpoint since #339 folded ENV III into the Board Hardware form — no
+                  shipped client posts here (the UI sends env3_* to /set_board), and both routes run
+                  the one env3_save_preflight so the two can never disagree about what counts as
+                  evidence. Every key is optional
+                  and an omitted one keeps its stored value. Refused unless the selected board preset
+                  is an M5Stack one (the Grove port is what makes the sensor plausible), the two pins
+                  differ, and both survive the same reservation rules the X10A link, the status LED
+                  and the recovery button apply to each other. Beyond validation it demands EVIDENCE
+                  from the hardware, graded by what is changing (logic/env3.hpp's Env3SaveCheck):
+                  enabling on new pins runs a real bus probe (422 env3_sht30_not_found /
+                  env3_qmp6988_not_found, 503 env3_probe_busy), enabling on the pins already running
+                  requires a fresh sample (422 env3_not_reachable), moving pins while running is 409
+                  env3_disable_first (two masters must never briefly drive one shared wire), and
+                  DISABLING checks nothing at all — it is the recovery path and must not depend on
+                  the hardware that may be the problem. Each refusal carries a machine `code` beside
+                  the English `error` so the bilingual UI can translate without the API losing its
+                  one wording. Reboots on a real change, unlike /set_hp's live apply: the I2C driver
+                  owns the bus for the task's life
 POST /set_hp      {profile,rx,tx,mb_host,mb_port,mb_unit_id,actuation_enabled}
                   -> validate + apply live (no reboot). Every key is OPTIONAL and an omitted one keeps
                   its stored value, which is what lets the pin picker POST {profile,rx,tx} without
@@ -2047,7 +2382,17 @@ POST /discover_homehub   {} -> run the bounded, explicit `_http._tcp` mDNS brows
                   {ok:true,host:"<resolved IPv4>"}. Trusted-LAN only, no configuration write and no
                   Modbus-task reconfigure: the dialog fills its ordinary address field, and only its
                   later Save persists the result. A miss returns 404 so manual entry remains available.
-POST /set_board   {led_gpio,led_type,led_inverted,btn_gpio,btn_active_low} -> validate + persist +
+POST /set_board   {preset_id,led_gpio,led_type,led_inverted,btn_gpio,btn_active_low,
+                  env3_enabled,env3_sda,env3_scl} -> validate + PROVE + persist + optional REBOOT.
+                  ONE atomic form owns the board identity, its onboard parts and the optional M5Stack
+                  ENV III accessory, so choosing AtomS3 Lite and attaching its Grove sensor cannot
+                  half-save. It therefore also answers ENV III's graded evidence refusals (the same
+                  422/503/409 codes /set_env3 returns, via the shared env3_save_preflight), and a
+                  board switch away from M5Stack retires env3_enabled in that same save rather than
+                  leaving an I2C task running for hardware the form no longer shows. preset_id is the
+                  stable key: a non-string is 400 "preset_id must be a string", an unknown one 400
+                  "board preset is unknown", and an omitted one recovers the legacy exact-match choice
+                  once for a pre-v12 cached UI.
                   REBOOT. The board's own onboard parts: which pin the status indicator is on, whether
                   it is a plain LED (led_type 0) or a WS2812 (1), and which pin (if any) carries the
                   factory-reset button. -1 = absent for either pin. Runtime rather than Kconfig because
@@ -2060,8 +2405,11 @@ POST /set_board   {led_gpio,led_type,led_inverted,btn_gpio,btn_active_low} -> va
                   what this board is (the `board_set` key / user_set above). Picking the preset your
                   device already carries moves no value but is still that statement, so it is a SAVE
                   with NO reboot — {ok:true,reboot:false,saved:true}, where `saved` is what stops the
-                  UI reporting an NVS write as "no changes". Decided by board_save_needed /
-                  board_reboot_needed (logic/config_model.hpp, host-tested), never re-derived here.
+                  UI reporting an NVS write as "no changes". Decided by board_env_save_needed /
+                  board_env_reboot_needed (logic/env3.hpp, host-tested), never re-derived here —
+                  they OR the board answer with an ENV III change, so a sensor edit always reboots
+                  even when no board value moved: its I2C controller is owned for the sensor task's
+                  whole life.
                   A submit that moves neither still short-circuits to {ok:true,reboot:false} like
                   /set_mqtt//set_syslog//set_ntp.
                   Validation (board_hw_valid) checks the chip-safe LOCAL-I/O set — wider than the X10A
@@ -2069,7 +2417,7 @@ POST /set_board   {led_gpio,led_type,led_inverted,btn_gpio,btn_active_low} -> va
                   sits there (AtomS3 Lite: GPIO41) — plus the collision rules, in BOTH directions: no
                   pin may be claimed by the indicator, the button and the X10A link at once, whichever
                   endpoint is called second
-   (all eight /set_*) a failed route-owned NVS write answers 500
+   (every /set_*) a failed route-owned NVS write answers 500
                   {ok:false,error:"config write failed"} and does NOT reboot/apply; unrelated
                   self-healing link-cache maintenance failures are logged without rejecting a
                   committed service blob, while /set_hp requires those keys (the failing key is on /diag)
@@ -2148,9 +2496,19 @@ whoever builds /status. **A builder shared by two tasks is only as safe as its s
 check every runner, not the one that crashed.
 
 The SECOND runner is now gone: removing the WebSocket push left /status built on the httpd task
-alone (12288, measured 1456 used under 4376 concurrent requests), and `hp_poll` went back to 8192,
-since the builder is precisely what it could not fit. So the rule to carry forward is the general
-one, not the two numbers: **anything that grows /status grows every stack that builds it**, and a
+alone, and `hp_poll` went back to 8192, since the builder is precisely what it could not fit.
+
+**And then it happened a THIRD time, on the surviving runner (#318).** ENV III extended the same
+builder, and the two signed CI ELFs show exactly what that cost: the httpd handler's FIXED FRAME
+grew from 0x2630 (9776) bytes in dev.295 to 0x2950 (10576) in dev.296, leaving 1712 bytes of a
+12288 stack for `config()`'s nested `Config`/`std::string` copy, httpd itself and interrupts. The
+dev.296 OTA double-faulted inside `config()` with the running task's TCB overwritten, and rolled
+back. It is now **16384**, chosen to leave 5808 bytes above the measured frame. Two lessons beyond
+the number, both about method: a stack budget is read off the ELF's frame size and a decoded dump,
+never off an idle heap reading (an idle board looks fine at every one of these sizes), and the
+crash arrived through OTA — the one path where a too-small stack takes down a fleet rather than a
+desk. So the rule to carry forward is the general
+one, not the numbers: **anything that grows /status grows every stack that builds it**, and a
 change that hands a task a large new builder raises that task's stack in the same commit. Nothing on
 `/status` reports stack headroom — the task table in a core dump is the only place it is visible.
 
@@ -2180,6 +2538,7 @@ tools/coverage/selftest.sh                             # prove the floor fails c
 scripts/run-domain-audit.sh                            # are the catalog's values physically right?
 scripts/run-schematic-audit.sh                         # does the dashboard drawing still say what it means?
 scripts/run-ui-use-case-tests.sh                       # do all visible UI actions actually work?
+scripts/run-contract-tests.sh                          # do the firmware's source boundaries hold?
 screen /dev/cu.usbmodemXXXX 115200                     # serial monitor (native USB on s3)
 curl http://daikin-altherma-esp32.local/status | jq          # device status (incl. last_crash)
 curl http://daikin-altherma-esp32.local/values | jq          # decoded values

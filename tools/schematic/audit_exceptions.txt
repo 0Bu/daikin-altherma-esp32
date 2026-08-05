@@ -50,5 +50,3 @@ E001 disch
 # and its inspector copy are written for the documented register and stay ready for it. Delete this
 # line when the generator emits the row — S000 will remind you.
 S003 quiet
-
-# ── KNOWN-DEFECT — the status-block comment lost its "<!--" ──────────────────────────────────────

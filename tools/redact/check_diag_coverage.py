@@ -1,7 +1,20 @@
 #!/usr/bin/env python3
-"""Does every diag line that prints an identifying value have a redaction rule?
+"""Does the bug report still scrub everything it claims to?
 
-WHY THIS EXISTS. `GET /diag?redact=1` is the ONLY thing standing between a user's log and a public
+TWO checks, one per half of the redaction surface, because the two halves fail differently.
+
+(A) `/status` leaks by FIELD, and the header states how many it scrubs. That number is a CLAIM about
+another file, so it drifts the moment a field is added — silently, since nothing consumed it: it was
+`10` while the builder passed TWELVE fields through the redactor, the header's own comment listed a
+set missing `reference_temperature.name`/`.topic`, and this file's comment said `eight`. Three
+numbers, three places, no reader able to tell which was true. So the count is now DERIVED from the
+call sites and compared against the declaration; a new redacted field moves the number or fails.
+What it deliberately does NOT check is the direction that needs a human: whether a field that
+SHOULD be redacted is missing entirely. A field nobody wrapped is a field this count never sees.
+
+(B) `/diag` leaks by LINE, and the guard there is an allowlist:
+
+WHY (B) EXISTS. `GET /diag?redact=1` is the ONLY thing standing between a user's log and a public
 bug report (docs/REPORTING.md — the whole report is posted to a public issue precisely because the
 device scrubs it first). That scrubbing is an ALLOWLIST: `logic/redact.hpp` names specific log
 statements. A new `diag_printf` that interpolates a hostname or an SSID is simply not covered, and
@@ -29,10 +42,24 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 HEADER = ROOT / "main" / "logic" / "redact.hpp"
+STATUS = ROOT / "main" / "http_status.cpp"
 LEDGER = Path(__file__).with_name("audit_exceptions.txt")
 
-# Identifiers whose VALUE originates with the user or identifies this specific installation. Keep in
-# step with the eight /status fields redact.hpp lists; anything here reaching a log line needs a rule.
+# Identifiers whose VALUE originates with the user or identifies this specific installation. This
+# has to be kept a SUPERSET of the /status fields check (A) counts: a field redacted in the JSON and
+# printed in the log two sections below it is the exact incoherence a redaction rule exists to
+# prevent, and it is check (B), not (A), that would have to see it. It had fallen behind by four —
+# the room source's name and topic and the weather coordinates were redacted in /status with nothing
+# here matching them — so a diag line naming the reporter's living room or house location was
+# invisible. Widen this list in the same commit that redacts a new field.
+#
+# What it still cannot see, stated rather than implied: a value reaching diag_printf under a name
+# that says nothing about what it holds. `found` and `\w*backup\w*` below are two such shapes that
+# already bit; http_config.cpp's `in.topic` is a third, uncaught today because it only chooses
+# between two fixed strings and adding a token for it would buy one adjudicated false positive
+# rather than coverage. `board_id`/`s_board` are kept though #340 deleted the one line they matched:
+# board identity is still a leakable value and the next line to print it should not have to
+# rediscover that.
 SENSITIVE = re.compile(
     r"\b("
     r"wifi_ssid|wifi_pass|ssid|"
@@ -50,7 +77,12 @@ SENSITIVE = re.compile(
     # above. The heuristic could not see it because the name says nothing about what it holds — which
     # is the whole reason this list exists rather than a scan for the /status field names alone. Any
     # local that RECEIVES a discovered identity belongs here under whatever bland word it was given.
-    r"found|discovered|hostname"
+    r"found|discovered|hostname|"
+    # The four /status fields this list was missing: the room source the user named and pointed at a
+    # topic through their own broker, and the coordinates of their house. Written as the CONFIG field
+    # names because that is how a log line would reach them (c.ref_temp_topic.c_str()); measured, they
+    # add no finding today, so the gap they closed was latent rather than live.
+    r"ref_temp_\w+|weather_latitude\w*|weather_longitude\w*"
     r")\b"
 )
 
@@ -63,6 +95,32 @@ def markers():
     text = HEADER.read_text()
     block = text.split("DIAG_REDACTIONS[]", 1)[1].split("};", 1)[0]
     return [m.group(1) for m in re.finditer(r'\{\s*"((?:[^"\\]|\\.)*)"\s*,', block)]
+
+
+def declared_status_fields():
+    """The count redact.hpp CLAIMS it scrubs out of /status."""
+    m = re.search(r"REDACTED_STATUS_FIELDS\s*=\s*(\d+)", HEADER.read_text())
+    if not m:
+        print("redaction: REDACTED_STATUS_FIELDS is gone from redact.hpp — refusing to check")
+        sys.exit(2)
+    return int(m.group(1))
+
+
+def status_redaction_sites():
+    """Every /status value actually passed through the redactor, counted where it is WRITTEN.
+
+    Counting call sites rather than trusting the constant is the whole point: the substitution
+    happens field by field as the JSON is built (a pass over the finished string is what the httpd
+    stack budget has no room for), so the call sites ARE the set. Both spellings count — jstr_r()
+    is today's wrapper, redact_or() the primitive underneath it — so a field wrapped directly is
+    still seen. The helper's own definition is not a field.
+    """
+    out = []
+    for n, line in enumerate(STATUS.read_text().splitlines(), 1):
+        if re.search(r"std::string\s+jstr_r\s*\(", line):
+            continue
+        out += [n for _ in re.finditer(r"\b(?:jstr_r|redact_or)\s*\(", line)]
+    return out
 
 
 def adjudicated():
@@ -80,6 +138,19 @@ def main():
     rules = markers()
     skip = adjudicated()
     findings, checked = [], 0
+
+    # (A) /status — the declared field count against the call sites that produce it.
+    declared, sites = declared_status_fields(), status_redaction_sites()
+    print(f"redaction: /status redacts {len(sites)} field(s), redact.hpp declares {declared}")
+    if len(sites) != declared:
+        where = ", ".join(f"{STATUS.relative_to(ROOT)}:{n}" for n in sites)
+        print("\nMISCOUNTED — redact.hpp's REDACTED_STATUS_FIELDS no longer describes the builder:\n")
+        print(f"  declared {declared}, found {len(sites)} at {where}")
+        print("    fix: set REDACTED_STATUS_FIELDS in main/logic/redact.hpp to the real count AND")
+        print("         name the new field in the comment beside it. If a field was ADDED to")
+        print("         /status without being wrapped, wrap it instead — this check counts what")
+        print("         is redacted, and cannot see a value nobody passed through redact_or().\n")
+        return 1
 
     for src in sorted((ROOT / "main").glob("*.cpp")):
         text = src.read_text()

@@ -2,12 +2,18 @@
 # Does the redaction guard still catch what it was built for?
 #
 # The same contract tools/domain/selftest.sh and tools/schematic/selftest.sh keep: a check that
-# reports "clean" is worthless unless it can be shown to go red. This one re-seeds the two defects
-# the guard exists for, in a throwaway copy of the tree, and fails if either passes.
+# reports "clean" is worthless unless it can be shown to go red. This one re-seeds every defect the
+# guard exists for, in a throwaway copy of the tree, and fails if any of them passes — one
+# `expect_red` each, so `grep -c '^expect_red ' selftest.sh` is the count. Both halves are covered:
 #
-#   1. A redaction rule is deleted (the list falls behind the code it describes).
-#   2. A new diag line prints a config value with no rule (the list never caught up in the first
-#      place) — this is the shape of the mqtt board_id leak the guard found on its first run.
+#   /diag   — a redaction rule is deleted (the list falls behind the code it describes); a new diag
+#             line prints a config value with no rule (the list never caught up in the first place,
+#             the shape of the mqtt board_id leak the guard found on its first run); the
+#             DISCOVERED-identity shape, which the heuristic sees only because SENSITIVE lists bland
+#             names rather than the /status field names alone; and a line printing the ROOM SOURCE's
+#             topic, which pins the four fields SENSITIVE was missing while /status already redacted
+#             them — the one case that is silently green if that list narrows again.
+#   /status — a field stops being wrapped, and the declared count drifts while the code is right.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -79,5 +85,57 @@ assert s2 != s, "seed 3 did not apply — the rule text moved"
 open(p, "w").write(s2)
 PY
 expect_red "an unruled diag line printing a DISCOVERED HomeHub IPv4"
+
+cp -R "$ROOT/main/logic/redact.hpp" "$TMP/main/logic/redact.hpp"
+
+# 4. The /status half, in the direction that LEAKS: a field stops being wrapped. This is not a
+#    hypothetical — it is the shipped shape of the same defect one layer up, where the declared count
+#    sat at 10 while the builder wrapped 12 and nothing compared them. Un-wrapping the room topic
+#    (a path through the reporter's own broker, usually carrying a room or device name) drops the
+#    derived count below the declaration, which is the only signal available: the JSON still parses,
+#    the key is still there, and the value is simply real.
+python3 - "$TMP/main/http_status.cpp" <<'PY'
+import sys, re
+p = sys.argv[1]
+s = open(p).read()
+s2 = re.sub(r"jstr_r\(c\.ref_temp_topic,\s*redact\)", "jstr(c.ref_temp_topic)", s, count=1)
+assert s2 != s, "seed 4 did not apply — the reference-topic call site moved"
+open(p, "w").write(s2)
+PY
+expect_red "a /status field that stopped being redacted"
+
+cp -R "$ROOT/main/http_status.cpp" "$TMP/main/http_status.cpp"
+
+# 5. The same comparison from the other side: the DECLARATION drifts while the code is right. Seeded
+#    with the exact number the header carried before this check existed.
+python3 - "$TMP/main/logic/redact.hpp" <<'PY'
+import sys, re
+p = sys.argv[1]
+s = open(p).read()
+s2 = re.sub(r"(REDACTED_STATUS_FIELDS\s*=\s*)\d+", r"\g<1>10", s, count=1)
+assert s2 != s, "seed 5 did not apply — REDACTED_STATUS_FIELDS moved"
+open(p, "w").write(s2)
+PY
+expect_red "a stale REDACTED_STATUS_FIELDS declaration"
+
+cp -R "$ROOT/main/logic/redact.hpp" "$TMP/main/logic/redact.hpp"
+
+# 6. The heuristic's own coverage, on the four fields it was MISSING until this list was widened:
+#    the room source's name and topic and the house coordinates were redacted in /status while
+#    nothing in SENSITIVE matched them, so a log line naming the reporter's living room was
+#    invisible to the check that exists to see exactly that. Seeded on the room topic, since it is
+#    the one whose value is a path through the reporter's own broker and normally carries a room or
+#    a device name. Without the widening this case is silently green.
+python3 - "$TMP/main/http_config.cpp" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+needle = "static esp_err_t set_syslog"
+i = s.index(needle)
+s = s[:i] + ('static void seeded_ref() { diag_printf("mqtt: reference source %s\\n",'
+             ' c.ref_temp_topic.c_str()); }\n\n') + s[i:]
+open(p, "w").write(s)
+PY
+expect_red "a diag line printing the room source's topic with no rule"
 
 exit "$fail"

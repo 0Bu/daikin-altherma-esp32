@@ -27,10 +27,12 @@ which CI does **not** run (see below).
 
 ```bash
 scripts/run-mock-tests.sh --coverage # host logic tests + 95% production-line floor
+scripts/run-contract-tests.sh      # do the firmware's SOURCE boundaries still hold?
 scripts/run-domain-audit.sh        # is the value catalog physically RIGHT?
 scripts/run-description-audit.sh   # can a user find out what each value IS?
 scripts/run-schematic-audit.sh     # does the DRAWING still say what it means?
 scripts/run-ui-use-case-tests.sh   # do all visible UI actions actually work?
+scripts/run-redaction-audit.sh     # can a bug report still leak the USER's data?
 scripts/run-ui-gif-audit.sh        # is the README's RECORDING still of this UI?
 scripts/run-doc-entity-audit.sh    # do the docs' copy-paste ENTITY IDS exist?
 ```
@@ -39,7 +41,16 @@ scripts/run-doc-entity-audit.sh    # do the docs' copy-paste ENTITY IDS exist?
 [`test/test_logic.cpp`](test/test_logic.cpp) — the CRC and framing, the value converters, register
 extraction, the config model and the Home Assistant discovery payloads — and requires at least 95%
 aggregate executable-line coverage in those production headers. The test driver and generated
-profiles do not count toward the percentage. Details in [`test/README.md`](test/README.md).
+profiles do not count toward the percentage. Details in [`test/README.md`](test/README.md). If you
+touch the coverage tooling itself, run `tools/coverage/selftest.sh` — the same argument as every
+other selftest here: a floor that has stopped failing turns a percentage into decoration.
+
+`run-contract-tests.sh` covers what the host suite structurally cannot. `test_logic.cpp` links the
+IDF-free headers, so it proves what a rule *decides* — never that the firmware still calls it from
+the right task, in the right order, or from the only file allowed to. "`hp_modbus.cpp` is the sole
+caller of the actuator mailbox" is a claim about a whole component, and the only way to check it is
+to read the source text, which is what each `test/test_*_contract.mjs` does. The glob is deliberate:
+a new sibling joins the gate with no workflow edit, the same property `test_ui_*.mjs` already had.
 
 `run-domain-audit.sh` is separate on purpose, and the distinction matters:
 
@@ -114,6 +125,23 @@ undefined close function. CI runs the same command in the required `gates` job. 
 changes, the maintainer's `/ui-use-case-review` adds real narrow/desktop click-through and records a
 SHA-stamped result; `.claude/hooks/require-ui-use-case-review.sh` requires that current record and
 reruns the deterministic suite immediately before a command-line merge.
+
+`run-redaction-audit.sh` is the only gate here whose subject is the **user's data** rather than the
+firmware's correctness, and it is the one an outside contributor is most likely to need without
+expecting to. A bug report is filed as a *public* GitHub issue carrying the device's own `/status`,
+`/values` and `/diag` ([`docs/REPORTING.md`](docs/REPORTING.md)) — defensible only because the device
+scrubs it first ([`main/logic/redact.hpp`](main/logic/redact.hpp)). There is no private channel behind
+it and nobody reviews a report before it is posted. Two halves, failing differently: `/status` leaks
+by **field**, so the audit derives how many fields the builder actually wraps and compares that
+against the header's declaration (they had drifted two apart, in silence, because nothing consumed
+the number); `/diag` leaks by **line**, guarded by an allowlist of named log statements, and an
+allowlist falls behind quietly — a new `diag_printf` interpolating a hostname or an SSID is simply
+not covered, and the symptom is a correct-looking log line with a real value in it. On its first run
+it found `mqtt: retired legacy HA device %s` printing the unique half of the MAC that `/status` was
+redacting three sections above. Adjudications go in
+[`tools/redact/audit_exceptions.txt`](tools/redact/audit_exceptions.txt); `tools/redact/selftest.sh`
+re-seeds every defect it was built for. Neither half can see the direction that needs a human: a new
+identifying field nobody wrapped at all never reaches the redactor, so it never reaches the count.
 
 `run-ui-gif-audit.sh` guards the README's **recording** of that drawing,
 [`docs/media/dashboard.gif`](docs/media/dashboard.gif) — the animated dashboard a new reader sees
