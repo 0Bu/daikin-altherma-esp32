@@ -1,7 +1,7 @@
 // THE HOMEHUB MODBUS STACK: transport + poll task + cache, a second INDEPENDENT source beside the
-// X10A one (hp_modbus.hpp, docs/MODBUS_PROTOCOL.md). WP3 adds one allowlisted write transaction:
-// holding register 54 through logic/homehub_actuator.hpp. The SAME task remains the sole socket
-// owner; no other task and no protocol handler can issue a raw write.
+// X10A one (hp_modbus.hpp, docs/MODBUS_PROTOCOL.md). READ-ONLY: this file issues no Modbus write
+// function code at all. The register-54 actuator that #300 built here was removed when dynamic LWT
+// actuation was retired (#294), so "no write" is a property of the code, not of a guard around it.
 //
 // Everything here is owned by ONE task (mb_task, below) exactly as hp_poll owns the X10A UART, and
 // other tasks see only the mutex-guarded snapshots. The socket is opened once and reused; any read
@@ -55,7 +55,6 @@ static constexpr int MB_DISCOVERY_RETRY_MS    = 1000;
 static SemaphoreHandle_t s_mtx = nullptr;   // guards s_status; created in mb_init()
 static ModbusStatus      s_status;          // guarded by s_mtx
 static uint32_t          s_link_generation = 0; // guarded by s_mtx; zero = no connected session yet
-static logic::HomeHubActuator s_actuator;   // guarded by s_mtx; fixed-size, allocation-free policy
 
 // ── Poll-task-owned socket state (no lock — single owner, exactly like hp_comm.cpp's s_rx/s_tx) ─────
 static int         s_sock     = -1;   // open socket, or -1
@@ -114,32 +113,6 @@ ModbusStatus mb_status() {
     if (!s_mtx) return ModbusStatus{};
     Lock lk(s_mtx);
     return s_status;
-}
-
-static void actuator_sync_locked() { s_status.actuator = s_actuator.snapshot(); }
-
-logic::ActuatorOffer mb_request_lwt_offset(const logic::LwtOffsetIntent& intent) {
-    const Config c = config();
-    if (!s_mtx) return logic::ActuatorOffer::Rejected;
-    Lock lk(s_mtx);
-    const logic::ActuatorOffer result = s_actuator.offer(
-        intent, c.actuation_enabled, s_status.connected, esp_timer_get_time() / 1000);
-    actuator_sync_locked();
-    return result;
-}
-
-void mb_set_actuation_writer_ownership(logic::ActuatorWriterOwnership ownership) {
-    if (!s_mtx) return;
-    Lock lk(s_mtx);
-    s_actuator.set_ownership(ownership);
-    actuator_sync_locked();
-}
-
-void mb_request_actuation_restore() {
-    if (!s_mtx) return;
-    Lock lk(s_mtx);
-    s_actuator.request_restore(esp_timer_get_time() / 1000);
-    actuator_sync_locked();
 }
 
 // ── Status writers. Strings are built BY THE CALLER and swapped in (noexcept) so nothing allocates
@@ -556,75 +529,6 @@ static bool mb_read(MbFunc space, uint16_t addr, uint16_t qty, MbResponse& out,
     return false;
 }
 
-// The only wire write primitive, private to the socket-owning poll task. Callers must present the
-// plan produced by HomeHubActuator; the descriptor check makes the register-54 allowlist a runtime
-// invariant too, not merely a type/comment convention. The FC06 reply is request-bound by
-// mb_parse_response (txn/unit/address/value); a later, separate FC03 performs confirmation.
-static bool mb_write_single(const logic::ActuatorPlan& plan, MbResponse& out, MbFailure& failure) {
-    failure = MbFailure{};
-    if (!logic::homehub_actuation_allowlisted(plan.register_offset, MbFunc::ReadHolding,
-                                              MbType::Int16) ||
-        plan.pdu_address != logic::HOMEHUB_LWT_OFFSET_PDU ||
-        (plan.action != logic::ActuatorAction::Write &&
-         plan.action != logic::ActuatorAction::Restore)) {
-        failure.type = MbFailureType::RequestBuild;
-        failure.reg = plan.register_offset;
-        return false;
-    }
-    if (s_sock < 0) {
-        failure.type = MbFailureType::ConnectionClosed;
-        failure.detail = ENOTCONN;
-        failure.reg = plan.register_offset;
-        return false;
-    }
-    uint8_t req[16];
-    const uint16_t txn = ++s_txn;
-    const uint8_t unit = static_cast<uint8_t>(s_unit);
-    const int n = mb_build_write_single(req, sizeof(req), txn, unit, plan.pdu_address,
-                                        plan.target_raw);
-    if (n < 0) {
-        failure.type = MbFailureType::RequestBuild;
-        failure.reg = plan.register_offset;
-        return false;
-    }
-    const int sent = send(s_sock, req, n, 0);
-    if (sent != n) {
-        const int err = sent < 0 ? errno : EIO;
-        failure.detail = err;
-        failure.type = (err == EAGAIN || err == EWOULDBLOCK || err == ETIMEDOUT)
-                         ? MbFailureType::SendTimeout
-                         : (err == ECONNRESET || err == ENOTCONN || err == EPIPE)
-                             ? MbFailureType::ConnectionClosed : MbFailureType::SendFailed;
-        failure.reg = plan.register_offset;
-        close_sock();
-        { Lock lk(s_mtx); s_status.connected = false; }
-        return false;
-    }
-    uint8_t adu[32];
-    const int got = recv_adu(s_sock, adu, sizeof(adu), failure);
-    if (got < 0) {
-        failure.reg = plan.register_offset;
-        close_sock();
-        { Lock lk(s_mtx); s_status.connected = false; }
-        return false;
-    }
-    const MbParse parsed = mb_parse_response(adu, got, txn, unit, MbFunc::WriteSingle,
-                                             plan.pdu_address, plan.target_raw, out);
-    if (parsed == MbParse::Ok) return true;
-    failure.reg = plan.register_offset;
-    if (parsed == MbParse::Exception) {
-        failure.type = MbFailureType::Exception;
-        failure.detail = out.exc_code;
-    } else {
-        failure.type = MbFailureType::InvalidResponse;
-        failure.detail = static_cast<int>(parsed);
-        close_sock();
-        Lock lk(s_mtx);
-        s_status.connected = false;
-    }
-    return false;
-}
-
 static const char* failure_code(MbFailureType type) {
     switch (type) {
         case MbFailureType::RequestBuild:     return "request_failed";
@@ -688,129 +592,6 @@ static std::string failure_message(const MbFailure& f) {
     return msg;
 }
 
-// Execute at most one fixed-size actuator plan. A pending domain intent first receives its own FC03
-// baseline read; only then can the state machine admit an FC06. Confirmation is another FC03, never
-// the echo alone. Returns a newly confirmed raw value so the ordinary poll cache can publish the
-// same-cycle readback rather than the pre-write value.
-static bool mb_process_actuator(bool enabled, uint16_t& confirmed_raw) {
-    logic::ActuatorSnapshot before;
-    {
-        Lock lk(s_mtx);
-        s_actuator.set_enabled(enabled);
-        actuator_sync_locked();
-        before = s_actuator.snapshot();
-    }
-    if (!before.pending && !before.restore_pending) return false;
-
-    MbResponse pre;
-    MbFailure pre_failure;
-    uint16_t current_raw = 0;
-    const bool pre_read = mb_read(MbFunc::ReadHolding, logic::HOMEHUB_LWT_OFFSET_PDU, 1,
-                                  pre, pre_failure) && mb_reg_at(pre, 0, current_raw);
-    if (!pre_read && pre_failure.type == MbFailureType::None) {
-        pre_failure = MbFailure{MbFailureType::InvalidResponse,
-                                static_cast<int>(MbParse::Malformed),
-                                logic::HOMEHUB_LWT_OFFSET_REGISTER};
-    }
-    pre_failure.reg = logic::HOMEHUB_LWT_OFFSET_REGISTER;
-
-    logic::ActuatorPlan plan;
-    {
-        Lock lk(s_mtx);
-        const bool connected = s_sock >= 0;
-        if (s_actuator.snapshot().restore_pending)
-            plan = s_actuator.prepare_restore(connected, pre_read, current_raw,
-                                              esp_timer_get_time() / 1000);
-        else
-            plan = s_actuator.prepare_pending(enabled, connected, esp_timer_get_time() / 1000,
-                                              pre_read, current_raw);
-        actuator_sync_locked();
-    }
-    if (!pre_read && pre_failure.type != MbFailureType::None) {
-        status_error(std::string(failure_code(pre_failure.type)), failure_message(pre_failure),
-                     pre_failure.detail, pre_failure.reg, /*link_down=*/s_sock < 0);
-    }
-    if (plan.action == logic::ActuatorAction::None) return false;
-
-    // Defence in depth: even a corrupted plan cannot escape the descriptor allowlist.
-    if (!logic::homehub_actuation_allowlisted(plan.register_offset, MbFunc::ReadHolding,
-                                              MbType::Int16) ||
-        plan.pdu_address != logic::HOMEHUB_LWT_OFFSET_PDU) {
-        Lock lk(s_mtx);
-        s_actuator.mark_restore_unavailable();
-        actuator_sync_locked();
-        return false;
-    }
-    {
-        Lock lk(s_mtx);
-        s_actuator.note_write_started(plan, esp_timer_get_time() / 1000);
-        actuator_sync_locked();
-    }
-
-    MbResponse echo;
-    MbFailure write_failure;
-    if (!mb_write_single(plan, echo, write_failure)) {
-        {
-            Lock lk(s_mtx);
-            if (write_failure.type == MbFailureType::InvalidResponse &&
-                write_failure.detail == static_cast<int>(MbParse::EchoMismatch))
-                s_actuator.note_echo(plan, echo.echo_value);  // latches CONFLICT
-            else
-                s_actuator.note_transport_failure(plan);
-            actuator_sync_locked();
-        }
-        status_error(std::string(failure_code(write_failure.type)), failure_message(write_failure),
-                     write_failure.detail, write_failure.reg, /*link_down=*/s_sock < 0);
-        return false;
-    }
-    {
-        Lock lk(s_mtx);
-        if (!s_actuator.note_echo(plan, echo.echo_value)) {
-            actuator_sync_locked();
-            return false;
-        }
-        actuator_sync_locked();
-    }
-
-    MbResponse readback;
-    MbFailure readback_failure;
-    uint16_t raw = 0;
-    const bool readback_ok = mb_read(MbFunc::ReadHolding, logic::HOMEHUB_LWT_OFFSET_PDU, 1,
-                                     readback, readback_failure) &&
-                             mb_reg_at(readback, 0, raw);
-    if (!readback_ok) {
-        if (readback_failure.type == MbFailureType::None)
-            readback_failure = MbFailure{MbFailureType::InvalidResponse,
-                static_cast<int>(MbParse::Malformed), logic::HOMEHUB_LWT_OFFSET_REGISTER};
-        readback_failure.reg = logic::HOMEHUB_LWT_OFFSET_REGISTER;
-        {
-            Lock lk(s_mtx);
-            s_actuator.note_transport_failure(plan);
-            actuator_sync_locked();
-        }
-        status_error(std::string(failure_code(readback_failure.type)),
-                     failure_message(readback_failure), readback_failure.detail,
-                     readback_failure.reg, /*link_down=*/s_sock < 0);
-        return false;
-    }
-
-    bool confirmed = false;
-    {
-        Lock lk(s_mtx);
-        confirmed = s_actuator.note_readback(plan, raw, esp_timer_get_time() / 1000);
-        actuator_sync_locked();
-    }
-    if (!confirmed) {
-        status_error(std::string("actuator_readback_mismatch"),
-                     std::string("HomeHub actuator readback did not match register 54 request"),
-                     static_cast<int>(raw), logic::HOMEHUB_LWT_OFFSET_REGISTER,
-                     /*link_down=*/false);
-        return false;
-    }
-    confirmed_raw = raw;
-    return true;
-}
-
 // ── One poll cycle ───────────────────────────────────────────────────────────────────────────────
 // Reads the whole HomeHub map into this stack's own cache. Structurally the twin of hp_poll's
 // poll_once(): sized reserve up front, everything staged in locals, one non-allocating commit.
@@ -825,25 +606,6 @@ static void mb_poll_once() {
     if (s_have_req && (target != s_req_host || c.mb_port != s_req_port || c.mb_unit_id != s_unit))
         history_modbus_reset();
 
-    // A configured target change would otherwise close the old socket inside mb_ensure_connected()
-    // before the only writer had a chance to restore its baseline. Try once on the old socket. If
-    // proof is unavailable, latch a conflict so a coincidentally similar value on the new hub can
-    // never be mistaken for our old transaction.
-    if (s_have_req && (target != s_req_host || c.mb_port != s_req_port || c.mb_unit_id != s_unit)) {
-        {
-            Lock lk(s_mtx);
-            s_actuator.request_restore(esp_timer_get_time() / 1000);
-            actuator_sync_locked();
-        }
-        uint16_t ignored = 0;
-        mb_process_actuator(/*enabled=*/false, ignored);
-        {
-            Lock lk(s_mtx);
-            const logic::ActuatorSnapshot a = s_actuator.snapshot();
-            if (a.transaction_active || a.restore_pending) s_actuator.mark_restore_unavailable();
-            actuator_sync_locked();
-        }
-    }
     if (!mb_ensure_connected(target, c.mb_port, c.mb_unit_id)) {
         // THE CACHE GOES WITH THE LINK. Keeping it was a real defect: /values kept serving the last
         // good readings, the browser had no way to tell they were minutes old, and it went on
@@ -879,8 +641,6 @@ static void mb_poll_once() {
     std::vector<CachedValue> fresh;
     fresh.reserve(def::HOMEHUB_REG_COUNT);
     MbFailure first_failure;
-    bool lwt_observed = false;
-    uint16_t lwt_raw = 0;
     bool plant_gate_known = false;
     bool plant_gate_active = false;
 
@@ -916,11 +676,10 @@ static void mb_poll_once() {
             { Lock lk(s_mtx); s_status.connected = false; }
             break;
         }
-        if (r.space == MbFunc::ReadHolding &&
-            r.offset == logic::HOMEHUB_LWT_OFFSET_REGISTER && !mb_is_special(raw)) {
-            lwt_observed = true;
-            lwt_raw = raw;
-        }
+        // THE PLANT GATE — input register 53, "Space heating/cooling normal operation". The one
+        // reading the shadow controller needs to tell a real space-heating window from a DHW cycle
+        // (register 52) or a standstill. A sentinel or an out-of-range word leaves `known` false:
+        // an unknown gate must never read as "inactive", which is an ordinary quiet plant.
         if (r.space == MbFunc::ReadInput && r.offset == 53 && !mb_is_special(raw) && raw <= 1) {
             plant_gate_known = true;
             plant_gate_active = raw == 1;
@@ -952,24 +711,8 @@ static void mb_poll_once() {
 
     {
         Lock lk(s_mtx);
-        s_actuator.observe_current(lwt_observed, lwt_raw);
-        s_actuator.observe_plant_gate(plant_gate_known, plant_gate_active);
-        actuator_sync_locked();
-    }
-
-    uint16_t confirmed_lwt = 0;
-    if (mb_process_actuator(c.actuation_enabled, confirmed_lwt)) {
-        const def::HomeHubReg* reg = def::homehub_find(logic::HOMEHUB_LWT_OFFSET_REGISTER);
-        char value[24];
-        if (reg && def::homehub_format(*reg, confirmed_lwt, value, sizeof(value))) {
-            for (CachedValue& row : fresh) {
-                if (row.reg == def::HOMEHUB_GROUP_REG &&
-                    row.off == logic::HOMEHUB_LWT_OFFSET_REGISTER) {
-                    row.value = value;
-                    break;
-                }
-            }
-        }
+        s_status.plant_gate_known  = plant_gate_known;
+        s_status.plant_gate_active = plant_gate_active;
     }
 
     bool current_session = false;
@@ -1033,23 +776,7 @@ static void mb_task(void*) {
         try {
             // Clearing the saved address disables the stack. No boot- or loop-triggered browse may
             // turn an empty field back into an active HomeHub configuration.
-            if (config_modbus_host(config()).empty()) {
-                {
-                    Lock lk(s_mtx);
-                    s_actuator.request_restore(esp_timer_get_time() / 1000);
-                    actuator_sync_locked();
-                }
-                uint16_t ignored = 0;
-                mb_process_actuator(/*enabled=*/false, ignored);
-                {
-                    Lock lk(s_mtx);
-                    const logic::ActuatorSnapshot a = s_actuator.snapshot();
-                    if (a.transaction_active || a.restore_pending)
-                        s_actuator.mark_restore_unavailable();
-                    actuator_sync_locked();
-                }
-                break;
-            }
+            if (config_modbus_host(config()).empty()) break;
             if (esp_timer_get_time() >= s_next_try_us) mb_poll_once();
         } catch (const std::exception& e) {
             // Keep the allocation guard allocation-free: constructing the UI error itself can throw
@@ -1101,8 +828,6 @@ static void mb_task_start_if_enabled() {
     Lock lk(s_mtx);
     if (s_task) return;
     s_status.enabled = true;
-    s_actuator.set_enabled(c.actuation_enabled);
-    actuator_sync_locked();
     s_backoff.silent = 0;
     s_next_try_us    = 0;
     if (xTaskCreate(mb_task, "hp_modbus", 6144, nullptr, 4, &s_task) != pdPASS) {

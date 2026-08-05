@@ -15,9 +15,12 @@ assert.ok(taskStart >= 0 && taskEnd > taskStart, "the Modbus task boundary must 
 const task = modbus.slice(taskStart, taskEnd);
 assert.doesNotMatch(task, /discover_homehub\s*\(|mdns_query_(?:ptr|a)\s*\(|config_modbus_should_search/,
   "boot/poll task must never perform HomeHub discovery");
-assert.match(task,
-  /if \(config_modbus_host\(config\(\)\)\.empty\(\)\) \{[\s\S]*?request_restore\([\s\S]*?mb_process_actuator\(\/\*enabled=\*\/false, ignored\);[\s\S]*?break;[\s\S]*?\}/,
-  "clearing the address must attempt the bounded restore, then retire without a fallback search");
+// Clearing the address retires the task outright. There is no restore step any more: the write path
+// was removed with dynamic LWT actuation (#294), so the stack owns nothing on the hub to put back.
+assert.match(task, /if \(config_modbus_host\(config\(\)\)\.empty\(\)\) break;/,
+  "clearing the address must retire the task without a fallback search");
+assert.doesNotMatch(task, /request_restore\(|mb_process_actuator\(/,
+  "the retired actuator must leave no restore step in the task loop");
 
 const startStart = modbus.indexOf("static void mb_task_start_if_enabled()", taskEnd);
 const startEnd = modbus.indexOf("void mb_start()", startStart);

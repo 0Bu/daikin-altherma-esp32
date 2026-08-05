@@ -95,44 +95,11 @@ inline int mb_build_read(uint8_t* buf, size_t buflen, uint16_t txn, uint8_t unit
     return static_cast<int>(need);
 }
 
-// FC06 write-single-register request: MBAP(7) + PDU[0x06, addr(2), value(2)] = 12 bytes.
-inline int mb_build_write_single(uint8_t* buf, size_t buflen, uint16_t txn, uint8_t unit,
-                                 uint16_t addr, uint16_t value) {
-    const size_t need = MBAP_LEN + 5;
-    if (buf == nullptr || buflen < need) return -1;
-    mb_put_u16(buf + 0, txn);
-    mb_put_u16(buf + 2, 0);
-    mb_put_u16(buf + 4, 6);
-    buf[6] = unit;
-    buf[7] = static_cast<uint8_t>(MbFunc::WriteSingle);
-    mb_put_u16(buf + 8, addr);
-    mb_put_u16(buf + 10, value);
-    return static_cast<int>(need);
-}
-
-// FC16 write-multiple-registers request: MBAP(7) + PDU[0x10, addr(2), qty(2), bytecount(1), data(2*qty)].
-inline int mb_build_write_multiple(uint8_t* buf, size_t buflen, uint16_t txn, uint8_t unit,
-                                   uint16_t addr, const uint16_t* values, uint16_t qty) {
-    if (buf == nullptr || values == nullptr) return -1;
-    // Above MB_MAX_WRITE_REGS the byte-count field below would narrow to a lie (qty 128 -> "0"),
-    // emitting a frame whose Byte Count != 2*Quantity. Refuse rather than build a corrupt ADU.
-    if (qty == 0 || qty > MB_MAX_WRITE_REGS) return -1;
-    const size_t bytecount = static_cast<size_t>(qty) * 2;
-    const size_t pdu_len   = 6 + bytecount;              // fc+addr+qty+bytecount + data
-    const size_t need      = MBAP_LEN + pdu_len;
-    if (buflen < need) return -1;
-    mb_put_u16(buf + 0, txn);
-    mb_put_u16(buf + 2, 0);
-    mb_put_u16(buf + 4, static_cast<uint16_t>(1 + pdu_len));   // length = unit + PDU
-    buf[6] = unit;
-    buf[7] = static_cast<uint8_t>(MbFunc::WriteMultiple);
-    mb_put_u16(buf + 8, addr);
-    mb_put_u16(buf + 10, qty);
-    buf[12] = static_cast<uint8_t>(bytecount);
-    for (uint16_t i = 0; i < qty; i++) mb_put_u16(buf + 13 + i * 2, values[i]);
-    return static_cast<int>(need);
-}
-
+// THERE IS NO WRITE-REQUEST BUILDER. FC06/FC16 framing helpers existed here until the register-54
+// actuation path was retired (#294): this firmware cannot construct a Modbus write frame at all, so
+// "read-only" is a property of the code rather than of a guard around a dormant capability. The
+// parser below still CLASSIFIES a write echo — inert, since no such reply can arrive — because that
+// branch is part of the one shared response parser every read goes through.
 // ── Response parsing ────────────────────────────────────────────────────────────────────────────
 enum class MbParse {
     Ok,            // well-formed, request-bound, non-exception response (read data in `payload`, or a

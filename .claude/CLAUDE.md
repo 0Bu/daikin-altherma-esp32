@@ -17,8 +17,9 @@ Builds for the **esp32s3** target only.
 > [`docs/X10A_PROTOCOL.md`](../docs/X10A_PROTOCOL.md), and the converter-id/enum tables plus a full
 > register map in [`docs/REGISTERS.md`](../docs/REGISTERS.md). The OPTIONAL second SOURCE — the
 > Modbus TCP link to a Daikin HomeHub (EKRHH), its explicit mDNS discovery action and its register map — is
-> [`docs/MODBUS_PROTOCOL.md`](../docs/MODBUS_PROTOCOL.md); its narrow default-off register-54
-> actuator contract is [`docs/MODBUS_ACTUATION.md`](../docs/MODBUS_ACTUATION.md). It is a SECOND SOURCE, not an alternative
+> [`docs/MODBUS_PROTOCOL.md`](../docs/MODBUS_PROTOCOL.md). The link is READ-ONLY;
+> [`docs/MODBUS_ACTUATION.md`](../docs/MODBUS_ACTUATION.md) is the DECISION RECORD for the
+> register-54 actuator that once existed and was removed. It is a SECOND SOURCE, not an alternative
 > transport: both stacks run at once, independently, and a device without a HomeHub runs no Modbus
 > task at all. A cross-cutting catalog of the
 > platform features this firmware implements (Secure Boot v2 signing, OTA + health gate,
@@ -224,8 +225,10 @@ right order, or from the only file entitled to: "hp_modbus.cpp is the sole calle
 mb_request_lwt_offset()" is a claim about a whole component, and the only instrument that can settle
 it is the source TEXT. So each `test/test_*_contract.mjs` reads `main/*.cpp` and asserts a boundary —
 the X10A-gated MQTT lifecycle, the single X10A-free tombstone exception, the explicit-action-only
-mDNS browse, and the dynamic-LWT CONSENT boundary. That last one is two claims, not one: WP2
-proposes and writes nothing (hp_modbus.cpp stays the sole caller of mb_request_lwt_offset()), and
+mDNS browse, and the dynamic-LWT CONSENT boundary. That last one is two claims, not one: the
+controller proposes and writes nothing — and since the write path was RETIRED (#294) that half is
+now the stronger assertion that NO firmware source contains a write entry point, an actuator type,
+an FC06/FC16 request builder or an issued write function code, checked across every file — and
 since #341 the mode gates COLLECTION as well — OFF may not subscribe the saved room source, must
 actively unsubscribe an existing one, ignores its frames while leaving the pre-enable Test path
 intact, publishes no weather evidence, and pauses Open-Meteo before any fetch, with
@@ -563,16 +566,20 @@ hp_modbus.cpp   THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT source of rea
                 The user may edit it and Save or Cancel. A failed connection to a saved target BACKS
                 OFF through the X10A sweep's own host-tested logic/detect_backoff.hpp; the poll task
                 never browses mDNS or silently changes the configured address.
-                WP3 adds one deliberately narrow write capability without changing socket ownership:
-                this task is the SOLE runtime Modbus writer, and only accepts the internal typed
-                leaving-water-offset intent for holding register 54. Each transaction is a dedicated
-                fresh FC03 baseline, FC06 with request-bound echo, then independent FC03 readback;
-                an unexplained value or mismatch latches CONFLICT. The fixed one-slot mailbox and
-                policy are in logic/homehub_actuator.hpp. The actuator is default-off, requires an
-                explicit firmware-writer ownership handoff, and restores the captured baseline on
-                disable/orderly exit when the link permits it. There is no MQTT command subscriber,
-                writable HA entity, HTTP write route or generic raw-register API. The future evcc
-                envelope and operational limits are specified in docs/MODBUS_ACTUATION.md.
+                READ-ONLY, and that is now a property of the CODE rather than of a guard: the
+                register-54 actuator #300 built here (typed intent mailbox, fresh FC03 baseline, FC06
+                bound echo, independent FC03 readback, CONFLICT latch, baseline restore) was DELETED
+                when #294 retired dynamic LWT actuation — together with logic/homehub_actuator.hpp,
+                the actuation_enabled config field, the /status.modbus.actuator object, the
+                modbus_actuator_* heartbeat fields, the evcc intent envelope and logic/modbus.hpp's
+                FC06/FC16 request BUILDERS. It was never commissioned (0 requests, 0 write attempts).
+                What was kept is the PLANT GATE: an ordinary FC04 read of input register 53 ("Space
+                heating/cooling normal operation"), the one HomeHub fact the shadow controller needs
+                to tell a real space-heating window from a DHW cycle (register 52) or a standstill —
+                reported on /status.modbus as plant_gate_known/plant_gate_active, where known=false
+                means the register did not answer and must NEVER read as an inactive plant. Reasoning
+                and the third-party writers that remain (Onecta, MMI — evcc writes only EKRHH 56/57)
+                are in docs/MODBUS_ACTUATION.md.
 hp_poll.cpp     poll engine task: X10A ONLY — the HomeHub is a separate stack in hp_modbus.cpp with
                 its own task and cache, so nothing here branches on a transport and this task's 8192
                 stack is the one it ran on for months. (auto-detect if profile=="auto") profile
@@ -1881,7 +1888,7 @@ www/            web UI sources (index.html + style.css + app.sources fragments -
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + one-shot rollback state, MQTT (`uri`/`user`/`pass`), syslog, `ntp_server`, from blob **v2** board-local hardware, from **v3** the OTA channel, from **v4** the UI-language override, from **v5** the HomeHub host/port/unit/safety fields, **v6** its enable compatibility bit, **v7** one MQTT reference-temperature name/topic/value-path mapping, **v8** its timestamp path plus maximum age, **v9** the safe WP3 actuation opt-in semantics, **v10** weather location, **v11** ENV III, **v12** board-preset identity, **v13** target/enabled/HVAC readiness mappings for the room source, and **v14** the dynamic-LWT controller mode (ONE byte: `off`/`shadow`, since ACTIVE is deliberately not representable in the persisted vocabulary). Every earlier blob (v1–v13) remains readable without losing credentials — the read path accepts any version in `CONFIG_BLOB_VERSION_MIN`..`CONFIG_BLOB_VERSION` and rejects a length that does not land exactly on the end, so a truncated newer blob is refused rather than read as an older one. TWO fields are then forced to their safe value rather than trusted: a pre-v9 actuation bit decodes false because it did not previously authorize writes (only a v9 save can express the new consent), and a pre-v14 blob carries no controller mode at all, so it migrates to OFF — as does any unknown byte, so every install, upgrade and reboot starts disarmed. Non-empty `mb_host` enables polling, while writing additionally requires the v9 flag and explicit firmware-writer ownership. HomeHub and reference-source fields have narrow httpd writers (`POST /set_hp`, `POST /set_ref_temp`). Old experimental `mb_dhost`/`mb_seen` keys are deleted on load and never consulted. Pre-v13 room mappings remain observable after migration but are ineligible until a target mapping is saved deliberately. One CRC-checked entry is written all-or-nothing. The X10A link cache `rx_pin`/`tx_pin`/`proto` remains separate and self-healing (detection + httpd writers), as does `board_set`, the user's licence for the UI to name matching board hardware without persisting a board identity. Legacy per-key credential entries remain read-only fallback for pre-blob upgrades, and `boot_fails` is the boot-loop crash counter. |
+| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + one-shot rollback state, MQTT (`uri`/`user`/`pass`), syslog, `ntp_server`, from blob **v2** board-local hardware, from **v3** the OTA channel, from **v4** the UI-language override, from **v5** the HomeHub host/port/unit fields, **v6** its enable compatibility bit, **v7** one MQTT reference-temperature name/topic/value-path mapping, **v8** its timestamp path plus maximum age, **v9** a now-RETIRED actuation opt-in bit, **v10** weather location, **v11** ENV III, **v12** board-preset identity, **v13** target/enabled/HVAC readiness mappings for the room source, and **v14** the dynamic-LWT controller mode (ONE byte: `off`/`shadow`, since ACTIVE is deliberately not representable in the persisted vocabulary). Every earlier blob (v1–v13) remains readable without losing credentials — the read path accepts any version in `CONFIG_BLOB_VERSION_MIN`..`CONFIG_BLOB_VERSION` and rejects a length that does not land exactly on the end, so a truncated newer blob is refused rather than read as an older one. TWO fields are then forced to their safe value rather than trusted: the v9 actuation-consent bit is DISCARDED on decode whatever it holds — the capability it gated was removed (#294), and reading it back would resurrect consent for something the firmware can no longer do (the byte stays in the layout, written as 0, so the blob shape is unchanged) — and a pre-v14 blob carries no controller mode at all, so it migrates to OFF, as does any unknown byte, so every install, upgrade and reboot starts disarmed. Non-empty `mb_host` enables polling; nothing enables writing, because no write path exists. HomeHub and reference-source fields have narrow httpd writers (`POST /set_hp`, `POST /set_ref_temp`). Old experimental `mb_dhost`/`mb_seen` keys are deleted on load and never consulted. Pre-v13 room mappings remain observable after migration but are ineligible until a target mapping is saved deliberately. One CRC-checked entry is written all-or-nothing. The X10A link cache `rx_pin`/`tx_pin`/`proto` remains separate and self-healing (detection + httpd writers), as does `board_set`, the user's licence for the UI to name matching board hardware without persisting a board identity. Legacy per-key credential entries remain read-only fallback for pre-blob upgrades, and `boot_fails` is the boot-loop crash counter. |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -2053,11 +2060,12 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   last_ok_s,registers,values,crc_err,timeout_err}, profile{id},
                   plus
                   modbus{enabled,connected,discovering,host,port,unit_id,rx,fails,
-                  values,actuation_enabled,task_stack_min_free_words,actuator{...}
+                  values,task_stack_min_free_words,plant_gate_known,plant_gate_active
                   [,error,error_code,error_detail,error_register]}
-                  — the HomeHub link diagnostics. The nested actuator object carries separate
-                  requested/echoed/confirmed/effective values, ownership, source, block/conflict
-                  reason, queue depth, transaction timestamps and monotonic counters. `host` is the configured persistent
+                  — the HomeHub link diagnostics. READ-ONLY: there is no actuator object and no
+                  actuation flag (docs/MODBUS_ACTUATION.md). The PLANT GATE pair is input register 53,
+                  the one HomeHub fact the shadow controller consumes — `known` false means the
+                  register did not answer and must never read as an inactive plant. `host` is the configured persistent
                   target (redacted like the other reporter-identifying values); empty means disabled.
                   Explicit discovery is request-local and therefore not a status mode; `discovering`
                   remains false for wire compatibility. The flat MQTT heartbeat mirrors the actuator's
@@ -2356,20 +2364,18 @@ POST /set_env3    {enabled,sda,scl} -> validate + PROVE + persist + REBOOT. A st
                   the English `error` so the bilingual UI can translate without the API losing its
                   one wording. Reboots on a real change, unlike /set_hp's live apply: the I2C driver
                   owns the bus for the task's life
-POST /set_hp      {profile,rx,tx,mb_host,mb_port,mb_unit_id,actuation_enabled}
+POST /set_hp      {profile,rx,tx,mb_host,mb_port,mb_unit_id}
                   -> validate + apply live (no reboot). Every key is OPTIONAL and an omitted one keeps
                   its stored value, which is what lets the pin picker POST {profile,rx,tx} without
                   flipping anyone onto Modbus — and lets the HomeHub modal POST only its three fields.
                   `mb_host` is the complete HomeHub intent: non-empty polls exactly that address;
                   empty suppresses tasks, searches and sockets. This SECOND stack never stops X10A.
-                  mb_port 1..65535 and mb_unit_id 1..247 are range-checked by validate(). The four
-                  HomeHub fields (host, port, unit and safety flag) persist in atomic blob v9 and
-                  apply live: the httpd route calls mb_reconfigure(), while the
-                  Modbus task remains the sole socket owner and retires/restarts itself as needed.
-                  `actuation_enabled` is the default-off first write gate. It is deliberately
-                  insufficient by itself: the internal typed request must also hold explicit firmware
-                  writer ownership and pass link, freshness, range, priority and conflict gates. No
-                  HTTP/MQTT/HA caller can supply a raw register or grant that ownership. rx/tx
+                  mb_port 1..65535 and mb_unit_id 1..247 are range-checked by validate(). The three
+                  HomeHub fields (host, port, unit) persist in the atomic blob and apply live: the
+                  httpd route calls mb_reconfigure(), while the Modbus task remains the sole socket
+                  owner and retires/restarts itself as needed. `actuation_enabled` is NOT accepted —
+                  the register-54 write path is retired (#294, docs/MODBUS_ACTUATION.md), and an
+                  accepted-but-inert field would read like a capability that still exists. rx/tx
                   PERSIST (the physical
                   pin cache — a manual override survives reboot); profile is session-only. The UI
                   always sends profile="auto" (fully automatic — no manual model pick); a concrete id

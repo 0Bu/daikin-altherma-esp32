@@ -1,138 +1,66 @@
-# HomeHub internal actuator contract (WP3)
+# HomeHub actuation — retired
 
-This document is the write-safety and operator contract for issue #300. The capability is deliberately
-**inactive after install, upgrade, reboot and recovery**: `actuation_enabled` defaults to `false`, blob
-v5-v8 placeholder flags migrate to `false`, and writer ownership starts `unresolved` on every boot.
-WP3 adds no controller and performs no live-plant commissioning write.
+**Status: there is no write path. This document is a decision record, not a contract.**
 
-## Ownership and exposed surface
+The firmware's Modbus TCP link to the Daikin HomeHub (EKRHH) is **read-only**, and that is a property
+of the code rather than of a guard around a dormant capability. No source file contains a write entry
+point, an actuator contract, an FC06/FC16 request builder, or an issued Modbus write function code.
+`test/test_dynamic_lwt_shadow_contract.mjs` walks every file under `main/` and `main/logic/` and fails
+if any of them reappears.
 
-`hp_modbus` remains the only task that owns a HomeHub socket and the only code that can call the
-private FC06 primitive. Firmware callers submit a typed `LwtOffsetIntent`; they cannot provide a
-Modbus address, function code or raw word. There is no MQTT command subscription, writable Home
-Assistant entity, HTTP register route, MCP write tool or Modbus proxy.
+## What existed, and what was removed
 
-The fixed-size mailbox holds one intent. A newer same/higher-priority intent replaces the pending
-entry; a replayed/out-of-order source sequence or lower-priority replacement is rejected. The state
-machine and mailbox contain no `std::string`, `std::vector` or per-command allocation and are guarded
-by a 256-byte compile-time size ceiling.
+Issue #300 (PR #309) built a deliberately narrow single-writer actuator for holding register 54, the
+main-zone weather-dependent leaving-water offset: a typed fixed-size intent mailbox, a register-54
+allowlist, a fresh FC03 baseline before every write, FC06 with request-bound echo validation, an
+independent FC03 readback as the only confirmation, a conflict latch that stopped rather than fought
+another writer, and baseline restore on disable or orderly stop. It shipped default-off with writer
+ownership unresolved on every boot, and it was never commissioned: zero requests and zero write
+attempts over its whole deployed life.
 
-## Initial writable descriptor
+It is now deleted, together with `logic/homehub_actuator.hpp`, the `actuation_enabled` configuration
+field, the `/status.modbus.actuator` object, the `modbus_actuator_*` heartbeat fields, the versioned
+evcc intent envelope, and the FC06/FC16 request builders in `logic/modbus.hpp`.
 
-| Property | Value |
-|---|---|
-| Domain | Main heating weather-dependent leaving-water offset |
-| EKRHH holding register | **54** |
-| PDU address | **53** (data-model offset minus one) |
-| Wire type | signed `Int16`; negative K values use two's-complement encoding |
-| Range / step | **-10..+10 K**, step **1 K** |
-| Refresh | **OnChange** — no periodic reassertion |
-| Restore | restore the fresh pre-write baseline on disable, mode exit, failsafe or orderly stop |
+## Why
 
-This is the complete allowlist. Holding registers 1-10 and 56-58 remain readback-only. A later
-register 56-58 implementation must add an explicit descriptor and use this same mailbox/task; the
-fact that FC16 framing exists or a holding row is readable grants no write access.
-The domain intent carries an `int16_t`, not a floating-point value, so NaN/infinity cannot cross the
-API boundary; a future JSON adapter must reject non-integer/non-finite values before constructing it.
+The consumer that would have driven it was the dynamic leaving-water-temperature trim of epic #294,
+and that epic **retired actuation** on 2026-08-05: `SHADOW` is its terminal state, and the controller
+is now a heating-curve *diagnosis* whose proposals are measurements rather than commands. The reasons
+belong to the plant, not to this code — the house already regulates every room locally (three-zone
+underfloor heating downstairs with its own thermostats, radiator valves upstairs), so a trim would
+correct what is already corrected; valves can only throttle, so the trim would add capability only in
+the direction that costs energy; and the weather-dependent curve was measured sitting at its 35 °C
+installer minimum for every heating hour on record, which makes the efficiency-positive downward half
+of a ±2 K trim a no-op. See #294 for the full argument.
 
-## Transaction contract
+With no consumer, keeping the write path would have meant carrying a plant-writing capability whose
+only protection was a test asserting nobody called it. Deleting it makes the guarantee structural, and
+restores the read-only premise that [`SECURITY.md`](SECURITY.md) relies on when it accepts an
+unauthenticated HTTP surface on a trusted LAN.
 
-An intent is not a write acceptance. It first has to pass enable, live-link, range, TTL, sequence,
-priority and explicit `Firmware` ownership gates. Immediately before wire admission the task performs
-a dedicated FC03 read of holding 54 and records the baseline. Only then does it:
+## What was kept
 
-1. send FC06 on the task-owned socket;
-2. bind the reply to transaction id, unit id, PDU address and exact echoed value;
-3. perform a separate FC03 readback;
-4. mark the value confirmed only when that readback matches.
+The **plant gate** — HomeHub input register 53, "Space heating/cooling normal operation" — is an
+ordinary FC04 read and stays. It is the one HomeHub fact the shadow controller consumes: it separates
+a real space-heating window from a DHW cycle (register 52) or a standstill, so a diagnostic proposal
+is only ever formed while the plant is actually heating. It is reported on `/status.modbus` as
+`plant_gate_known` / `plant_gate_active`, where `known: false` means the register did not answer or
+answered a sentinel — never read that as an inactive plant.
 
-The descriptor uses OnChange refresh, so a confirmed value is not periodically reasserted. A later
-poll value that differs from the firmware-confirmed value enters `CONFLICT`; the firmware stops rather
-than fighting another last-writer-wins client. A timeout or lost socket is ambiguous, so the next
-available fresh read may prove baseline (nothing to restore), our target (restore baseline), or a
-third value (`CONFLICT`).
+Everything else about the link is unchanged: `docs/MODBUS_PROTOCOL.md` describes the read stack, the
+register map lives in `main/def/homehub.hpp`, and the framing core is `main/logic/modbus.hpp`.
 
-Requested, accepted, echoed, confirmed and effective are separate facts. “Effective” is available
-only when the confirmed register value and HomeHub input 53 (space heating/cooling normal operation)
-are both known; an inactive gate reports an effective offset of zero. Neither confirmation nor that
-gate proves delivered heat—the X10A/HomeHub plant observations remain the evidence for actual effect.
+## Third-party writers
 
-## Restore boundary
+Register 54 has legitimate writers that are not this firmware, and they are not contested: the Onecta
+app and the unit's own MMI (a `−10 K → 0` edit on 2026-07-31 is on record in VictoriaMetrics). evcc
+writes the Smart-Grid registers EKRHH 56/57 through its `daikin-homehub` template and has no code path
+to 54. Mind the address base when comparing: evcc template addresses are 0-based PDU, the EKRHH data
+model is 1-based, so register 54 = PDU 53 and evcc's `address: 55` is EKRHH 56.
 
-Disabling actuation with the HomeHub still connected, clearing/changing the HomeHub target, or calling
-the internal failsafe restore API asks the same socket-owning task to fresh-read and restore its saved
-baseline. A target change is not allowed to carry an unresolved transaction to another hub. If the
-old socket cannot prove/restore the value, the state latches conflict/unavailable and later writes stop.
+## If this is ever revisited
 
-This is best effort. A process crash, reset, power loss or network loss cannot guarantee an immediate
-restore because the HomeHub supplies no lease or automatic expiry. That boundary is why active
-commissioning remains WP4 and why ownership and post-write readback are mandatory.
-
-## Versioned evcc MQTT intent contract
-
-WP3 defines the handoff contract but intentionally does **not** install the subscription. The future
-adapter topic is `<base>/intent/v1/evcc`, QoS 1, **non-retained**. A v1 payload is:
-
-```json
-{
-  "version": 1,
-  "source": "evcc",
-  "source_time": "2026-08-03T12:34:56.000Z",
-  "expires_at": "2026-08-03T12:35:26.000Z",
-  "max_age_ms": 30000,
-  "sequence": 481,
-  "correlation_id": "evcc-481",
-  "request": {
-    "kind": "smart_grid_mode",
-    "value": 2
-  }
-}
-```
-
-`kind` is one of `smart_grid_mode` (integer 0..3), `recommended_power_limit_w` or
-`general_power_limit_w` (non-negative whole watts). The firmware stamps a separate monotonic
-`arrival_ms`; source time, arrival time, expiry/max-age and correlation id remain separately visible
-in the audit status. It rejects a retained message, unsupported version/source/kind, missing
-correlation id, invalid/future/inconsistent timestamps, expiry, excess age, out-of-order sequence or
-invalid value. A retained value is never treated as current merely because MQTT delivered it now.
-
-The deterministic priority order is:
-
-1. safety/failsafe restore;
-2. Daikin operating/protection constraints;
-3. room/LWT controller intent;
-4. evcc Smart-Grid/power-limit intent.
-
-Lower layers cannot replace a queued higher layer. Registers 56-58 are not writable in WP3; once
-implemented they must be translated from the domain request above, never from a raw address/value.
-
-## evcc migration and rollback
-
-Active firmware ownership is blocked until all of these are evidenced:
-
-1. inventory every direct evcc/HomeHub Modbus writer and record the current register 56-58 policy;
-2. deploy evcc intent publication in shadow mode and verify version, timestamps, expiry, sequence and
-   correlation ids without enabling a firmware write;
-3. disable evcc's direct Modbus writes and verify, over an agreed observation window, that no other
-   client changes 54 or 56-58;
-4. restrict HomeHub plaintext `:502` at the network boundary to the ESP32 where practical;
-5. only then let the future WP4 owner call `mb_set_actuation_writer_ownership(Firmware)` and perform
-   the separately authorized `+1 K -> confirm -> restore` commissioning procedure.
-
-Rollback order is the reverse safety boundary: disable/failsafe the firmware actuator and verify its
-baseline restore, return ownership to `Unresolved`, deploy the previous firmware/config, and only then
-re-enable a direct evcc writer if required. Never run both writers during rollback.
-
-## Audit and resource evidence
-
-`/status.modbus.actuator` exposes numeric and named state/reason/ownership, queue depth, source,
-sequence, correlation id, timestamps/age, baseline/requested/echoed/confirmed/effective values, plant
-gate and all queue/write/echo/readback/refresh/restore/conflict/failure counters. The heartbeat mirrors
-the operational fields as flat numeric `modbus_actuator_*` metrics. `task_stack_min_free_words`
-captures the HomeHub task high-water mark; ordinary heartbeat heap and largest-block metrics remain
-the heap evidence.
-
-Host coverage exercises bounds, signed encoding, coalescing/order, retained/stale evcc rejection,
-priority, every gate, echo/readback, reconnect ambiguity, restore and conflict. The explicit ESP-IDF
-6.0.2 ESP32-S3 build is required. Runtime high-water/heap deltas under command load belong to the WP4
-commissioning run because WP3 is forbidden to write the live plant.
+Restoring the capability means restoring the code from git history and re-deciding #294, not relaxing
+a flag. The contract test is the tripwire; it should fail loudly, and that failure is the intended
+design review.

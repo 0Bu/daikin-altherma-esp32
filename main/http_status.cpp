@@ -381,9 +381,9 @@ void http_append_status_json(std::string& j, bool redact) {
     if (!rt.eligibility_error.empty()) { j += ",\"eligibility_error\":"; j += jstr(rt.eligibility_error); }
     if (!rt.error.empty()) { j += ",\"error\":"; j += jstr(rt.error); }
     j += "},";
-    // WP2 deterministic controller evidence. `mode` is the persisted operator choice; state/reason
-    // are the last mqtt-task evaluation. OFF/SHADOW are the only accepted modes and this snapshot has
-    // no actuator result because #334 cannot call the actuator.
+    // Deterministic controller evidence. `mode` is the persisted operator choice; state/reason are
+    // the last mqtt-task evaluation. OFF/SHADOW are the only accepted modes, and the proposal is a
+    // MEASUREMENT: no actuator exists to carry it to the plant (#294).
     j += "\"dynamic_lwt\":{\"mode\":\"";
     j += logic::dynamic_lwt_mode_name(c.dynamic_lwt_mode);
     j += "\",\"mode_code\":"; j += std::to_string(static_cast<unsigned>(c.dynamic_lwt_mode));
@@ -410,7 +410,6 @@ void http_append_status_json(std::string& j, bool redact) {
     j += ",\"forecast_available\":"; j += dlwt.forecast_available ? "true" : "false";
     j += ",\"plant_gate_known\":"; j += dlwt.plant_gate_known ? "true" : "false";
     j += ",\"plant_gate_active\":"; j += dlwt.plant_gate_active ? "true" : "false";
-    j += ",\"actuator_conflict\":"; j += dlwt.actuator_conflict ? "true" : "false";
     j += ",\"room_source_unix_s\":";
     j += dlwt.room_has_source_time ? std::to_string(dlwt.room_source_unix_s) : "null";
     j += ",\"room_age_s\":"; j += dlwt.room_age_known ? std::to_string(dlwt.room_age_s) : "null";
@@ -495,8 +494,8 @@ void http_append_status_json(std::string& j, bool redact) {
     // The HomeHub Modbus stack — a SECOND, INDEPENDENT source, never an alternative to the X10A link
     // reported above (docs/MODBUS_PROTOCOL.md). `enabled` reports whether its runtime task exists;
     // `host` is the one persistent switch and target: empty means disabled. Explicit discovery is a
-    // request-local dialog action and never appears here as a boot/runtime mode. The nested actuator
-    // object is WP3's evidence trail; it never compresses request/echo/readback/effect into one flag.
+    // request-local dialog action and never appears here as a boot/runtime mode. The link is READ-ONLY:
+    // there is no actuator object and no actuation flag, because the write path was removed (#294).
     // Successive += with bare literals — the httpd-stack rule the rest of this builder follows.
     const ModbusStatus mb = mb_status();
     j += "\"modbus\":{\"enabled\":";  j += mb.enabled ? "true" : "false";
@@ -512,61 +511,12 @@ void http_append_status_json(std::string& j, bool redact) {
     j += ",\"rx\":";                   j += std::to_string(mb.rx_ok);
     j += ",\"fails\":";                j += std::to_string(mb.rx_fail);
     j += ",\"values\":";               j += std::to_string(mb.values);
-    j += ",\"actuation_enabled\":";    j += c.actuation_enabled ? "true" : "false";
-    const logic::ActuatorSnapshot& a = mb.actuator;
     j += ",\"task_stack_min_free_words\":"; j += std::to_string(mb.task_stack_min_free_words);
-    j += ",\"actuator\":{\"state\":"; j += std::to_string(static_cast<unsigned>(a.state));
-    j += ",\"state_name\":\""; j += logic::actuator_state_name(a.state); j += "\"";
-    j += ",\"blocked\":"; j += std::to_string(static_cast<unsigned>(a.blocked));
-    j += ",\"blocked_reason\":\""; j += logic::actuator_block_name(a.blocked); j += "\"";
-    j += ",\"ownership\":"; j += std::to_string(static_cast<unsigned>(a.ownership));
-    j += ",\"ownership_name\":\""; j += logic::actuator_ownership_name(a.ownership); j += "\"";
-    j += ",\"pending\":"; j += a.pending ? "true" : "false";
-    j += ",\"restore_pending\":"; j += a.restore_pending ? "true" : "false";
-    j += ",\"conflict\":"; j += a.conflict ? "true" : "false";
-    j += ",\"transaction_active\":"; j += a.transaction_active ? "true" : "false";
-    j += ",\"baseline_k\":"; j += a.baseline_valid ? std::to_string(a.baseline_k) : "null";
-    j += ",\"requested_k\":"; j += a.requested_valid ? std::to_string(a.requested_k) : "null";
-    j += ",\"echoed_k\":"; j += a.echoed_valid ? std::to_string(a.echoed_k) : "null";
-    j += ",\"confirmed_k\":"; j += a.confirmed_valid ? std::to_string(a.confirmed_k) : "null";
-    j += ",\"effective_k\":"; j += a.effective_valid ? std::to_string(a.effective_k) : "null";
-    j += ",\"plant_gate_known\":"; j += a.plant_gate_known ? "true" : "false";
-    j += ",\"plant_gate_active\":"; j += a.plant_gate_active ? "true" : "false";
-    j += ",\"source\":";
-    j += a.requested_valid ? std::to_string(static_cast<unsigned>(a.source)) : "null";
-    j += ",\"source_name\":";
-    if (a.requested_valid) {
-        j += "\""; j += logic::actuator_source_name(a.source); j += "\"";
-    } else {
-        j += "null";
-    }
-    j += ",\"sequence\":"; j += std::to_string(a.sequence);
-    j += ",\"correlation_id\":"; j += std::to_string(a.correlation_id);
-    j += ",\"source_time_ms\":"; j += std::to_string(a.source_time_ms);
-    j += ",\"arrival_ms\":"; j += std::to_string(a.arrival_ms);
-    j += ",\"intent_age_ms\":"; j += std::to_string(a.intent_age_ms);
-    j += ",\"last_decision_ms\":"; j += std::to_string(a.last_decision_ms);
-    j += ",\"last_attempt_ms\":"; j += std::to_string(a.last_attempt_ms);
-    j += ",\"last_write_ms\":"; j += std::to_string(a.last_write_ms);
-    j += ",\"last_readback_ms\":"; j += std::to_string(a.last_readback_ms);
-    j += ",\"last_restore_ms\":"; j += std::to_string(a.last_restore_ms);
-    j += ",\"queue_depth\":"; j += a.pending ? "1" : "0";
-    j += ",\"requests\":"; j += std::to_string(a.requests);
-    j += ",\"queued\":"; j += std::to_string(a.queued);
-    j += ",\"accepted\":"; j += std::to_string(a.accepted);
-    j += ",\"rejected\":"; j += std::to_string(a.rejected);
-    j += ",\"coalesced\":"; j += std::to_string(a.coalesced);
-    j += ",\"noops\":"; j += std::to_string(a.noops);
-    j += ",\"write_attempts\":"; j += std::to_string(a.write_attempts);
-    j += ",\"echo_confirmed\":"; j += std::to_string(a.echo_confirmed);
-    j += ",\"readback_confirmed\":"; j += std::to_string(a.readback_confirmed);
-    j += ",\"write_failures\":"; j += std::to_string(a.write_failures);
-    j += ",\"conflicts\":"; j += std::to_string(a.conflicts);
-    j += ",\"restore_attempts\":"; j += std::to_string(a.restore_attempts);
-    j += ",\"restores\":"; j += std::to_string(a.restores);
-    j += ",\"restore_failures\":"; j += std::to_string(a.restore_failures);
-    j += ",\"refreshes\":"; j += std::to_string(a.refreshes);
-    j += "}";
+    // The PLANT GATE (input register 53) is the one HomeHub fact the shadow controller consumes, so
+    // it is reported here beside the link it comes from. `known` false means the register did not
+    // answer or answered a sentinel — never read that as an inactive plant.
+    j += ",\"plant_gate_known\":";  j += mb.plant_gate_known ? "true" : "false";
+    j += ",\"plant_gate_active\":"; j += mb.plant_gate_active ? "true" : "false";
     if (!mb.last_error.empty()) {
         // `error` remains the complete English /diag + Syslog wording for API compatibility and
         // fallback clients. The structured companions let the web UI localise it without parsing

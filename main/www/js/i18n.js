@@ -375,8 +375,8 @@ const I18N = {
     "syslog.hint": "Enter the Syslog server as hostname or IP address plus port. Leave the field empty to disable Syslog.",
     "ntp.title": "NTP server", "ntp.server": "Server",
     "ntp.hint": "Enter the hostname or IP address of the time server. Leave the field empty to use the firmware default.",
-    // HomeHub transport dialog (issue #32/#300). It exposes no actuator control; WP3's separate
-    // internal capability remains default-off and is observable only (docs/MODBUS_ACTUATION.md).
+    // HomeHub transport dialog (issue #32). It exposes no actuator control; the link is read-only,
+    // because the register-54 write path is retired (docs/MODBUS_ACTUATION.md).
     "homehub.title": "Modbus", "homehub.host": "Host · IP or .local name",
     "homehub.port": "Port", "homehub.unit": "Unit id",
     "homehub.hint": "Search runs only when you press Search and fills the address field when a HomeHub answers. Save the result or enter an address manually. An empty address disables HomeHub completely: no search at boot and no requests. Port defaults to 502, unit id to 1. This dialog configures the data source only; it exposes no heat-pump control.",

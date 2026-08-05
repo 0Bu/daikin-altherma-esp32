@@ -44,13 +44,16 @@ and the OTA-signing / key lifecycle.
     an open-source firmware — but contains **no** runtime secrets (WiFi/MQTT credentials live only in
     device NVS, never in the image). Signing still uses the offline OTA key, which is never built into
     or derivable from the ELF.
-- **X10A is read-only; HomeHub has one default-off internal actuator.** X10A has no write command.
-  The optional HomeHub link permits exactly the bounded holding-register-54 transaction documented in
-  [`MODBUS_ACTUATION.md`](MODBUS_ACTUATION.md), owned by the existing poll task. Install, upgrade and
-  reboot remain no-write (`actuation_enabled=false`, ownership `unresolved`), and no MQTT command
-  subscription, writable HA entity, HTTP/MCP register route or Modbus proxy exists. Thus the
-  unauthenticated `HA → MQTT/HTTP → raw Modbus → pump` bridge is still absent; an internal caller can
-  submit only a typed LWT-offset intent and must pass enable/link/freshness/ownership gates.
+- **Both links are read-only.** X10A has no write command.
+  The optional HomeHub link no longer has one either: its bounded register-54 actuator was **removed**
+  when dynamic LWT actuation was retired ([`MODBUS_ACTUATION.md`](MODBUS_ACTUATION.md)), so no source
+  file contains a write entry point, an FC06/FC16 request builder or an issued write function code,
+  and a CI contract test walks every file to keep it that way. No MQTT command subscription, writable
+  HA entity, HTTP/MCP register route or Modbus proxy exists either. The unauthenticated
+  `HA → MQTT/HTTP → raw Modbus → pump` bridge is therefore absent by construction rather than by
+  policy — which is what lets the rest of this document accept an unauthenticated surface on a
+  trusted LAN. Note the converse: `:502` has no Modbus credential, so OTHER clients on the LAN
+  (Onecta, the unit's MMI, evcc) can still write the hub. Segment it.
   - **The HomeHub's own `:502` is the residual surface, and it is not ours to fix.** Modbus TCP on
     port 502 is unencrypted and carries **no Modbus-level credential** — no user, password or token
     (the guide's SKI/QR trust mechanism is EEBUS-only). On a shared LAN any host can in principle

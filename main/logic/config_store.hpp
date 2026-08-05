@@ -89,9 +89,6 @@ struct ConfigBlob {
     std::string mb_host;                // "" = disabled; discovery is an explicit UI action
     int32_t     mb_port           = 502;
     int32_t     mb_unit_id        = 1;
-    // v9 makes this previously inert bit authoritative. A v5-v8 `true` is forced OFF on decode:
-    // historical placeholder state is not consent for the first write-capable firmware.
-    bool        actuation_enabled = false;
     // ── v7/v8/v13: one MQTT-backed reference-temperature source ───────────────────────────────
     std::string ref_temp_name, ref_temp_topic, ref_temp_path;
     // v8 adds the source timestamp mapping and the freshness limit. Defaults migrate a v7 blob
@@ -199,8 +196,9 @@ inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     detail::blob_put_str(v, c.mb_host);
     detail::blob_put_u32(v, static_cast<uint32_t>(c.mb_port));
     detail::blob_put_u32(v, static_cast<uint32_t>(c.mb_unit_id));
-    v.push_back(static_cast<uint8_t>((c.actuation_enabled ? 1 : 0) |
-                                     (!c.mb_host.empty() ? 2 : 0)));
+    // Bit0 was the v9 actuation-consent flag. The write path is RETIRED (#294), so it is written
+    // as 0 forever and ignored on decode; the byte itself stays so the blob layout is unchanged.
+    v.push_back(static_cast<uint8_t>(!c.mb_host.empty() ? 2 : 0));
     detail::blob_put_str(v, c.ref_temp_name);
     detail::blob_put_str(v, c.ref_temp_topic);
     detail::blob_put_str(v, c.ref_temp_path);
@@ -293,9 +291,10 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
         const uint8_t mb_flags = d[p++];
         c.mb_port           = static_cast<int32_t>(mb_port);
         c.mb_unit_id        = static_cast<int32_t>(mb_unit_id);
-        // Safety migration (#300): v5-v8 wrote this bit while it gated no code. Only a v9 save made
-        // by write-capable firmware counts as explicit enablement; every older blob disarms.
-        c.actuation_enabled = version >= 9 && (mb_flags & 1) != 0;
+        // Bit0 (v9 actuation consent) is deliberately DISCARDED: the write path it gated no longer
+        // exists (#294). Reading it back would resurrect consent for a capability the firmware has
+        // dropped, so a stored 1 must not survive into any decoded config.
+        (void)mb_flags;
         // Keep the legacy member coherent for round-trip diagnostics, but do not let either v5's
         // ambiguous bit or v6's short-lived Auto mode override the current empty-host rule.
         c.homehub_enabled   = !c.mb_host.empty();

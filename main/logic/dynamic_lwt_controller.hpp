@@ -110,7 +110,6 @@ struct DynamicLwtInputs {
     bool plant_gate_known = false;
     bool plant_gate_active = false;
     bool forecast_available = false;
-    bool actuator_conflict = false;  // evidence only; no actuator path exists in this controller
     int64_t now_ms = -1;
     bool room_has_source_time = false;
     int64_t room_source_unix_s = -1;
@@ -134,7 +133,6 @@ struct DynamicLwtSnapshot {
     bool forecast_available = false;
     bool plant_gate_known = false;
     bool plant_gate_active = false;
-    bool actuator_conflict = false;
 
     double room_error_k = 0.0;
     double p_term_k = 0.0;
@@ -177,7 +175,6 @@ public:
         s_.forecast_available = in.forecast_available;
         s_.plant_gate_known = in.plant_gate_known;
         s_.plant_gate_active = in.plant_gate_known && in.plant_gate_active;
-        s_.actuator_conflict = in.actuator_conflict;
         s_.room_has_source_time = in.room_has_source_time;
         s_.room_source_unix_s = in.room_source_unix_s;
         s_.room_age_known = in.room_age_known;

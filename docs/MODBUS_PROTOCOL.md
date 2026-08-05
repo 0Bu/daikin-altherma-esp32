@@ -1,11 +1,11 @@
 # Modbus TCP — the Daikin HomeHub link
 
-> **Status: independent read source plus default-off WP3 internal actuator.** This firmware speaks
+> **Status: independent READ source. There is no write path.** This firmware speaks
 > Modbus TCP to a **Daikin HomeHub (EKRHH)** beside the primary X10A service-port tap. It reads the
 > curated map and has exactly one internal writable descriptor: holding register **54**, through the
 > socket-owning `hp_modbus` task. There is still no MQTT/HA/HTTP/MCP/raw-Modbus control surface.
-> Install, upgrade and reboot remain no-write: `actuation_enabled=false` and writer ownership
-> `unresolved`. The full contract is [`MODBUS_ACTUATION.md`](MODBUS_ACTUATION.md).
+> The register-54 actuator built for #300 was removed when dynamic LWT actuation was retired; no
+> source file can build or issue a Modbus write. See [`MODBUS_ACTUATION.md`](MODBUS_ACTUATION.md).
 >
 > **X10A remains primary.** There is no selector between the sources: once a HomeHub address is
 > configured, both stacks run independently. X10A leads wherever both provide the same quantity;
@@ -35,7 +35,7 @@ Source: *EKRHH Daikin HomeHub — Installer reference guide 4P744838-1E*, §2.5,
 | Framing | MBAP header `[txn(2), proto=0(2), len(2), unit(1)]` + PDU. **No CRC** — unlike Modbus RTU, integrity is the MBAP length + the TCP checksum |
 | Byte order | Big-endian on the wire |
 | Addressing | The HomeHub tables print **1-based** data-model offsets; the wire PDU address is **offset − 1** |
-| Function codes | FC03 read-holding, FC04 read-input; FC06 is called only by the private register-54 actuator transaction. FC16 framing remains host-tested and unused |
+| Function codes | FC03 read-holding, FC04 read-input. Nothing else: the FC06/FC16 request builders were removed with the write path, so this firmware cannot frame a write |
 
 **Data formats** (16-bit, one register each):
 
@@ -287,13 +287,13 @@ Everything is runtime — no reflash, and no reboot.
 | `mb_host` | HomeHub IP or `.local`/DNS hostname; empty disables discovery, task and requests |
 | `mb_port` | Modbus TCP port, default `502` (validated 1–65535) |
 | `mb_unit_id` | Modbus unit id, default `1` (validated 1–247) |
-| `actuation_enabled` | WP3 safety gate, default **false**. Necessary but insufficient: link, fresh read, bounds and explicit writer ownership must also pass |
+| *(retired)* | The v9 `actuation_enabled` consent bit is no longer a config field. It is still present in the blob layout as a permanently-zero bit and is discarded on decode |
 
-The host, port, unit and safety flag are persisted in the atomic CRC-checked NVS config blob (**v9**,
-`main/logic/config_store.hpp`) and written by exactly one task (httpd, `POST /set_hp`). Older blobs
-still decode without losing credentials. Because v5-v8 wrote the actuation bit while it gated
-nothing, all of those versions migrate that bit to **false**; only a v9 save can explicitly arm it.
-HomeHub polling itself remains derived solely from a non-empty `mb_host`.
+The host, port and unit are persisted in the atomic CRC-checked NVS config blob
+(`main/logic/config_store.hpp`) and written by exactly one task (httpd, `POST /set_hp`). Older blobs
+still decode without losing credentials. The v9 actuation-consent bit is DISCARDED on decode: reading
+it back would resurrect consent for a capability the firmware no longer has. HomeHub polling itself
+remains derived solely from a non-empty `mb_host`.
 
 > **Why v5 and not v4.** This block and the UI-language byte were developed in parallel and both
 > claimed v4. main's language byte landed first and is already on published builds, so this took the
@@ -310,10 +310,10 @@ combined link state with X10A, since either can be down alone and one merged "co
 exactly the case worth seeing. Its value is the active `host:port`, and its colour follows the shared
 connection-state vocabulary. Config and diagnostics only; there are no pump controls, by design.
 
-**API:** `/status.modbus` keeps the link/config fields and adds
-`task_stack_min_free_words` plus an `actuator` audit object. It distinguishes source/request,
-acceptance, echo, FC03 confirmation, effective gate, block/conflict and restore, with counters and
-timestamps. `host` is the configured value and is redacted in bug reports. See
+**API:** `/status.modbus` carries the link/config fields, `task_stack_min_free_words` and the
+plant-gate pair `plant_gate_known` / `plant_gate_active` (input register 53 — the one HomeHub fact the
+shadow controller consumes). There is no actuator object: it was removed with the write path. `host`
+is the configured value and is redacted in bug reports. See
 [`MODBUS_ACTUATION.md`](MODBUS_ACTUATION.md) and [`../README.md`](../README.md).
 
 ## Security
@@ -336,4 +336,4 @@ The threat model is in [`SECURITY.md`](SECURITY.md); the parts specific to this 
 ## Out of scope
 
 Modbus **RTU / RS-485** (needs a transceiver + DE/RE, absent on the reference boards), Modbus **TLS
-`:802`**, **UC4** air-to-air, **UC5** EEBUS, the room/LWT controller, and live actuator commissioning.
+`:802`**, **UC4** air-to-air and **UC5** EEBUS. Actuation of any kind is out of scope.

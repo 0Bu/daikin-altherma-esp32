@@ -74,7 +74,9 @@ struct HeartbeatFields {
     uint32_t    room_rejections = 0;
 
     // WP2 (#334) deterministic SHADOW controller. All booleans render as numeric 0/1 for Telegraf;
-    // unavailable terms/offsets render null. These are proposals only — there is no actuator call.
+    // unavailable terms/offsets render null. These are MEASUREMENTS, not commands: the controller
+    // has no actuator to call, and the aggregate of these proposals over a season is the heating-
+    // curve verdict this project exists to produce (#294).
     uint8_t     lwt_controller_mode = 0;
     uint8_t     lwt_controller_state = 0;
     uint8_t     lwt_controller_reason = 0;
@@ -89,7 +91,6 @@ struct HeartbeatFields {
     bool        lwt_controller_forecast_available = false;
     bool        lwt_controller_plant_gate_known = false;
     bool        lwt_controller_plant_gate_active = false;
-    bool        lwt_controller_actuator_conflict = false;
     bool        lwt_controller_has_room_source_time = false;
     bool        lwt_controller_room_age_known = false;
     int64_t     lwt_controller_room_source_unix_s = -1;
@@ -126,48 +127,14 @@ struct HeartbeatFields {
     // The HomeHub Modbus stack (issue #32) — a SECOND, INDEPENDENT source, so these are its OWN
     // counters and say nothing about the X10A bus above (that is the point: the two fail separately).
     // All zero on a device without a HomeHub, which is a real fleet/config distinction rather than
-    // the always-constant kind that got bus_tx_writes dropped. WP3 actuator fields are payload-only:
-    // numeric state/reason/ownership, separate request/echo/readback/effect facts and counters. The
-    // user-facing view is /status.modbus + the web UI. Deliberately NO HA entities.
+    // the always-constant kind that got bus_tx_writes dropped. There are no write counters and no
+    // actuator fields: the link issues no Modbus write at all (#294 retired the register-54 write
+    // path), which is why nothing here mirrors bus_tx_writes' fate of reporting a constant zero.
     bool        modbus_enabled   = false;  // is the second stack running at all on this device?
     bool        modbus_connected = false;
     uint32_t    modbus_rx        = 0;   // successful HomeHub register reads since boot
     uint32_t    modbus_fails     = 0;   // failed reads since boot
     uint32_t    modbus_stack_min_free_words = 0;
-    uint8_t     modbus_actuator_state = 0;
-    uint8_t     modbus_actuator_block = 0;
-    uint8_t     modbus_actuator_owner = 0;
-    bool        modbus_actuator_pending = false;
-    bool        modbus_actuator_conflict = false;
-    bool        modbus_actuator_requested_valid = false;
-    int16_t     modbus_actuator_requested_k = 0;
-    bool        modbus_actuator_echoed_valid = false;
-    int16_t     modbus_actuator_echoed_k = 0;
-    bool        modbus_actuator_confirmed_valid = false;
-    int16_t     modbus_actuator_confirmed_k = 0;
-    bool        modbus_actuator_effective_valid = false;
-    int16_t     modbus_actuator_effective_k = 0;
-    uint8_t     modbus_actuator_source = 0;
-    uint32_t    modbus_actuator_sequence = 0;
-    uint32_t    modbus_actuator_correlation_id = 0;
-    int64_t     modbus_actuator_intent_age_ms = -1;
-    int64_t     modbus_actuator_last_write_ms = -1;
-    int64_t     modbus_actuator_last_readback_ms = -1;
-    int64_t     modbus_actuator_last_restore_ms = -1;
-    uint8_t     modbus_actuator_queue_depth = 0;
-    uint32_t    modbus_actuator_requests = 0;
-    uint32_t    modbus_actuator_accepted = 0;
-    uint32_t    modbus_actuator_rejected = 0;
-    uint32_t    modbus_actuator_coalesced = 0;
-    uint32_t    modbus_actuator_write_attempts = 0;
-    uint32_t    modbus_actuator_echo_confirmed = 0;
-    uint32_t    modbus_actuator_readback_confirmed = 0;
-    uint32_t    modbus_actuator_write_failures = 0;
-    uint32_t    modbus_actuator_conflicts = 0;
-    uint32_t    modbus_actuator_restore_attempts = 0;
-    uint32_t    modbus_actuator_restores = 0;
-    uint32_t    modbus_actuator_restore_failures = 0;
-    uint32_t    modbus_actuator_refreshes = 0;
 };
 
 // Heartbeat topic: <base>/heartbeat — separate from the source value topics so a Telegraf/HA consumer
@@ -292,8 +259,6 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += f.lwt_controller_plant_gate_known ? "1" : "0";
     j += ",\"lwt_controller_plant_gate_active\":";
     j += f.lwt_controller_plant_gate_active ? "1" : "0";
-    j += ",\"lwt_controller_actuator_conflict\":";
-    j += f.lwt_controller_actuator_conflict ? "1" : "0";
     j += ",\"lwt_controller_room_source_unix_s\":";
     j += f.lwt_controller_has_room_source_time
        ? std::to_string(f.lwt_controller_room_source_unix_s) : "null";
@@ -333,40 +298,6 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += ",\"modbus_rx\":"; j += std::to_string(f.modbus_rx);
     j += ",\"modbus_fails\":"; j += std::to_string(f.modbus_fails);
     j += ",\"modbus_stack_min_free_words\":"; j += std::to_string(f.modbus_stack_min_free_words);
-    j += ",\"modbus_actuator_state\":"; j += std::to_string(f.modbus_actuator_state);
-    j += ",\"modbus_actuator_block\":"; j += std::to_string(f.modbus_actuator_block);
-    j += ",\"modbus_actuator_owner\":"; j += std::to_string(f.modbus_actuator_owner);
-    j += ",\"modbus_actuator_pending\":"; j += f.modbus_actuator_pending ? "1" : "0";
-    j += ",\"modbus_actuator_conflict\":"; j += f.modbus_actuator_conflict ? "1" : "0";
-    j += ",\"modbus_actuator_requested_valid\":"; j += f.modbus_actuator_requested_valid ? "1" : "0";
-    j += ",\"modbus_actuator_requested_k\":"; j += std::to_string(f.modbus_actuator_requested_k);
-    j += ",\"modbus_actuator_echoed_valid\":"; j += f.modbus_actuator_echoed_valid ? "1" : "0";
-    j += ",\"modbus_actuator_echoed_k\":"; j += std::to_string(f.modbus_actuator_echoed_k);
-    j += ",\"modbus_actuator_confirmed_valid\":"; j += f.modbus_actuator_confirmed_valid ? "1" : "0";
-    j += ",\"modbus_actuator_confirmed_k\":"; j += std::to_string(f.modbus_actuator_confirmed_k);
-    j += ",\"modbus_actuator_effective_valid\":"; j += f.modbus_actuator_effective_valid ? "1" : "0";
-    j += ",\"modbus_actuator_effective_k\":"; j += std::to_string(f.modbus_actuator_effective_k);
-    j += ",\"modbus_actuator_source\":"; j += std::to_string(f.modbus_actuator_source);
-    j += ",\"modbus_actuator_sequence\":"; j += std::to_string(f.modbus_actuator_sequence);
-    j += ",\"modbus_actuator_correlation_id\":"; j += std::to_string(f.modbus_actuator_correlation_id);
-    j += ",\"modbus_actuator_intent_age_ms\":"; j += std::to_string(f.modbus_actuator_intent_age_ms);
-    j += ",\"modbus_actuator_last_write_ms\":"; j += std::to_string(f.modbus_actuator_last_write_ms);
-    j += ",\"modbus_actuator_last_readback_ms\":"; j += std::to_string(f.modbus_actuator_last_readback_ms);
-    j += ",\"modbus_actuator_last_restore_ms\":"; j += std::to_string(f.modbus_actuator_last_restore_ms);
-    j += ",\"modbus_actuator_queue_depth\":"; j += std::to_string(f.modbus_actuator_queue_depth);
-    j += ",\"modbus_actuator_requests\":"; j += std::to_string(f.modbus_actuator_requests);
-    j += ",\"modbus_actuator_accepted\":"; j += std::to_string(f.modbus_actuator_accepted);
-    j += ",\"modbus_actuator_rejected\":"; j += std::to_string(f.modbus_actuator_rejected);
-    j += ",\"modbus_actuator_coalesced\":"; j += std::to_string(f.modbus_actuator_coalesced);
-    j += ",\"modbus_actuator_write_attempts\":"; j += std::to_string(f.modbus_actuator_write_attempts);
-    j += ",\"modbus_actuator_echo_confirmed\":"; j += std::to_string(f.modbus_actuator_echo_confirmed);
-    j += ",\"modbus_actuator_readback_confirmed\":"; j += std::to_string(f.modbus_actuator_readback_confirmed);
-    j += ",\"modbus_actuator_write_failures\":"; j += std::to_string(f.modbus_actuator_write_failures);
-    j += ",\"modbus_actuator_conflicts\":"; j += std::to_string(f.modbus_actuator_conflicts);
-    j += ",\"modbus_actuator_restore_attempts\":"; j += std::to_string(f.modbus_actuator_restore_attempts);
-    j += ",\"modbus_actuator_restores\":"; j += std::to_string(f.modbus_actuator_restores);
-    j += ",\"modbus_actuator_restore_failures\":"; j += std::to_string(f.modbus_actuator_restore_failures);
-    j += ",\"modbus_actuator_refreshes\":"; j += std::to_string(f.modbus_actuator_refreshes);
     j += "}";
     return j;
 }
