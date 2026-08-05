@@ -622,7 +622,8 @@ static esp_err_t set_hp(httpd_req_t* req) {
     if (host_sent) c.mb_host = hostItem->valuestring;
     c.mb_port           = ji(j, "mb_port", c.mb_port);
     c.mb_unit_id        = ji(j, "mb_unit_id", c.mb_unit_id);
-    c.actuation_enabled = jb(j, "actuation_enabled", c.actuation_enabled);
+    // `actuation_enabled` is deliberately NOT accepted: the register-54 write path is retired (#294)
+    // and an accepted-but-inert field would read like a capability that still exists.
     const bool reset_mb_history = homehub_history_identity_changed(
         old_mb_host, old_mb_port, old_mb_unit, c.mb_host, c.mb_port, c.mb_unit_id);
     cJSON_Delete(j);

@@ -143,7 +143,6 @@ void config_load() {
             c.mb_host           = b.mb_host;
             c.mb_port           = b.mb_port;
             c.mb_unit_id        = b.mb_unit_id;
-            c.actuation_enabled = b.actuation_enabled;
         }
         if (b.has_env3) {
             c.env3_enabled = b.env3_enabled;
@@ -362,7 +361,6 @@ bool config_save(const Config& requested, bool require_link) {
     b.mb_host           = c.mb_host;
     b.mb_port           = c.mb_port;
     b.mb_unit_id        = c.mb_unit_id;
-    b.actuation_enabled = c.actuation_enabled;
     const std::vector<uint8_t> blob = config_blob_serialize(b);
 
     const esp_err_t e = nvs_set_blob("cfg", blob.data(), blob.size());

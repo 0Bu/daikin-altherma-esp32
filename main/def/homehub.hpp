@@ -5,7 +5,7 @@
 //
 // The poll engine reads INPUT registers (FC04, read-only by the Modbus spec) and a curated set of
 // HOLDING registers (FC03). WP3 (#300) permits exactly one holding row below — offset 54 — through
-// logic/homehub_actuator.hpp's internal, default-off state machine. This catalog remains descriptive:
+// the retired register-54 actuator (docs/MODBUS_ACTUATION.md). This catalog remains descriptive:
 // it grants no write access, and every other holding row is telemetry-only.
 //
 // Decoded through logic/modbus.hpp's MbType codecs; a 32765/66/67 special value (mb_is_special) is
@@ -110,8 +110,9 @@ inline constexpr HomeHubReg HOMEHUB_REGS[] = {
     {7,  MbFunc::ReadHolding, MbType::Int16, 1, "°C", "Room thermostat control Cooling setpoint Main"},
     {9,  MbFunc::ReadHolding, MbType::Int16, 1, "",   "Quiet mode operation", HomeHubValueKind::Binary},
     {10, MbFunc::ReadHolding, MbType::Int16, 1, "°C", "DHW reheat setpoint"},
-    // The only WP3 allowlisted actuator: an Int16 offset in K, bounded to -10..+10 by
-    // logic/homehub_actuator.hpp. The ordinary poll still publishes its independently read value.
+    // The main-zone weather-dependent offset, an Int16 in K. This firmware only READS it: the
+    // actuator that once wrote it is retired (docs/MODBUS_ACTUATION.md). Onecta and the MMI are its
+    // legitimate writers, so this row is the independent readback of whatever they last set.
     {54, MbFunc::ReadHolding, MbType::Int16, 1, "K",  "Leaving water Main Heating offset"},
     {56, MbFunc::ReadHolding, MbType::Int16, 1, "",   "Smart Grid operation mode", HomeHubValueKind::SmartGridMode},
     {57, MbFunc::ReadHolding, MbType::Pow16, 1, "kW", "Power limit during Recommended on / buffering"},

@@ -225,7 +225,7 @@ User credentials + the X10A link cache are persisted; the model is re-detected o
 
 | NVS key | Meaning |
 |---------|---------|
-| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + rollback flags, MQTT, syslog, SNTP, from v2 board hardware, v3 OTA channel, v4 UI language, v5 HomeHub, v7/v8 reference-temperature mapping/freshness, **v9** authoritative `actuation_enabled`, v10 Open-Meteo location, v11 ENV III wiring, v12 explicit board-preset identity, v13 reference target/readiness mappings and **v14 default-OFF dynamic-LWT mode**. Preset id and board pins are one atomic statement. A non-empty `mb_host` polls; empty disables the stack. Older blobs remain readable; pre-v14 blobs always migrate dynamic LWT to OFF, and v5-v8 actuation placeholder bits migrate OFF so inert history cannot become consent. |
+| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + rollback flags, MQTT, syslog, SNTP, from v2 board hardware, v3 OTA channel, v4 UI language, v5 HomeHub, v7/v8 reference-temperature mapping/freshness, v9 (retired actuation bit, now ignored), v10 Open-Meteo location, v11 ENV III wiring, v12 explicit board-preset identity, v13 reference target/readiness mappings and **v14 default-OFF dynamic-LWT mode**. Preset id and board pins are one atomic statement. A non-empty `mb_host` polls; empty disables the stack. Older blobs remain readable; pre-v14 blobs always migrate dynamic LWT to OFF, and the v9 actuation-consent bit is discarded on decode because the capability it gated no longer exists. |
 | *(legacy per-key)* | `wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback`/`wifi_rolledbk`/`mqtt_*`/`syslog_*`/`ntp_server` — the pre-blob layout, still **read** as a fallback when `cfg` is absent (fresh device / OTA from an older build); superseded on the next save. |
 | `rx_pin` / `tx_pin` / `proto` | X10A link cache (physical wiring + framing) — kept as separate self-healing keys, tried first by the sweep, re-saved on change, re-validated on load. |
 | `board_set` | **Legacy migration input only.** Pre-v12 builds stored this bit without a concrete preset id. On upgrade, `true` plus an exact historical field match is migrated to the same board the old UI displayed; untouched defaults (`false`) remain unidentified. New saves store `board_user_set` and the stable preset id atomically in `cfg`. |
@@ -285,10 +285,8 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #        registers,values,crc_err,timeout_err},
                                    #   profile:{id},
                                    #   modbus:{enabled,connected,discovering,host,port,unit_id,rx,
-                                   #           fails,values,actuation_enabled,task_stack_min_free_words,
-                                   #           actuator:{state,state_name,blocked,blocked_reason,ownership,
-                                   #             requested_k,echoed_k,confirmed_k,effective_k,baseline_k,
-                                   #             source,sequence,correlation_id,timestamps/counters,…},
+                                   #           fails,values,task_stack_min_free_words,
+                                   #           plant_gate_known,plant_gate_active,
                                    #           error?,error_code?,error_detail?,error_register?},
                                    #        # link diagnostics + WP3 read-only audit evidence; no API
                                    #        field is a command. Empty host disables polling/search.
@@ -442,8 +440,9 @@ POST /set_ref_temp                 # the exact mapping above + test_proof → pe
 POST /set_dynamic_lwt              # { mode:"off"|"shadow" } → persist + apply live, no reboot.
                                    #   `active` is not an accepted value. SHADOW additionally requires
                                    #   the MQTT room source (topic, target and source-time paths) and
-                                   #   HomeHub to be configured. It computes evidence only and has no
-                                   #   actuator call; default and every pre-v14 migration are OFF.
+                                   #   HomeHub to be configured. Its proposal is a MEASUREMENT: no
+                                   #   actuator exists (docs/MODBUS_ACTUATION.md). Default and every
+                                   #   pre-v14 migration are OFF.
 POST /set_weather                  # { latitude, longitude } as strict decimal strings → persist +
                                    #   wake the firmware weather task. Both empty disables weather
                                    #   traffic; otherwise both are required. Open-Meteo HTTPS/JSON
@@ -455,7 +454,7 @@ POST /set_ntp                      # { server } → persist + reboot, no request
                                    #   empty server resets to the compile-time default on next boot —
                                    #   SNTP has no disabled state, unlike syslog's empty-means-off.
 POST /set_hp                       # { profile?, rx?, tx?, mb_host?, mb_port?,
-                                   #     mb_unit_id?, actuation_enabled? } → apply live (no reboot).
+                                   #     mb_unit_id? } → apply live (no reboot).
                                    #   Every key optional; an omitted one keeps its stored value.
                                    #   rx/tx PERSIST (pin cache), profile session-only; proto auto-detected.
                                    #   The Settings Protocol card's pin dropdown posts {profile:"auto",rx,tx} to re-detect.
@@ -463,8 +462,8 @@ POST /set_hp                       # { profile?, rx?, tx?, mb_host?, mb_port?,
                                    #   NOT stop the X10A poll. Non-empty polls that address; empty
                                    #   disables task, discovery and requests, including after reboot.
                                    #   mb_port 1..65535, mb_unit_id 1..247 — docs/MODBUS_PROTOCOL.md.
-                                   #   actuation_enabled is only one safety gate; ownership is
-                                   #   unresolved on boot and no HTTP raw-register route exists.
+                                   #   The link is READ-ONLY: no actuation field is accepted and no
+                                   #   HTTP raw-register route exists (docs/MODBUS_ACTUATION.md).
 POST /discover_homehub             # {} → bounded mDNS search started only by the HomeHub dialog's
                                    #   Search button. Success: {ok:true,host:"<IPv4>"}; miss: 404.
                                    #   Never persists or reconfigures — Save owns that boundary.
@@ -581,8 +580,9 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   MQTT is not required for the firmware to fetch or evaluate weather.
   Availability/LWT `<base>/status`. `<base>` defaults `daikin-altherma-esp32`,
   `<prefix>` `homeassistant`.
-  WP3 defines future non-retained `<base>/intent/v1/evcc` domain intent semantics but installs no
-  subscription; see [MODBUS_ACTUATION.md](MODBUS_ACTUATION.md).
+  There is no inbound command topic at all; the evcc intent envelope that was once specified for
+  `<base>/intent/v1/evcc` is retired with the write path
+  (see [MODBUS_ACTUATION.md](MODBUS_ACTUATION.md)).
 - **Type-stable, and honest about absence.** Whether a key is a JSON number or a JSON string is
   decided by the value's converter, so **no key ever changes type** between states — a stopped fan
   publishes `0`, never `"OFF"`. Textual Daikin fault fields keep their text and gain permanently
@@ -672,9 +672,10 @@ Full threat model + Flash Encryption / Secure Boot notes: [SECURITY.md](SECURITY
 - The API has **no auth / TLS** by design (trusted LAN only) — never expose it to the internet.
 - WiFi/MQTT credentials live in NVS **unencrypted** by default; enable Flash + NVS Encryption
   (irreversible) if physical access is a concern.
-- X10A is read-only. HomeHub has one internal, default-off register-54 actuator with no MQTT/HA/HTTP/
-  MCP raw control surface ([MODBUS_ACTUATION.md](MODBUS_ACTUATION.md)). Its `:502` is unencrypted and
-  has no Modbus-level credential, so segment or firewall the HomeHub to this device.
+- X10A is read-only, and so is the HomeHub link: the register-54 actuator is retired, so no source
+  file can build or issue a Modbus write ([MODBUS_ACTUATION.md](MODBUS_ACTUATION.md)). Its `:502` is
+  unencrypted and has no Modbus-level credential, so segment or firewall the HomeHub to this device —
+  other clients (Onecta, the MMI, evcc) can still write it.
 
 ---
 

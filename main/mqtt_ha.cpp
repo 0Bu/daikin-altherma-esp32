@@ -770,7 +770,6 @@ static logic::DynamicLwtSnapshot evaluate_dynamic_lwt(const Config& cfg, const H
     const ReferenceRoomSample room = reference_room_sample(room_raw, freshness);
 
     const ModbusStatus mbs = mb_status();
-    const logic::ActuatorSnapshot& act = mbs.actuator;
     const WeatherForecastStatus wx = weather_forecast_status();
     WeatherFreshness wx_freshness = weather_freshness(
         cfg.weather_enabled && wx.has_value, wx.fetched_unix_s, now_unix_s, WEATHER_MAX_AGE_S);
@@ -782,10 +781,9 @@ static logic::DynamicLwtSnapshot evaluate_dynamic_lwt(const Config& cfg, const H
     in.room_error_k = room.room_error_k;
     in.x10a_connected = hp.connected;
     in.homehub_connected = mbs.connected;
-    in.plant_gate_known = act.plant_gate_known;
-    in.plant_gate_active = act.plant_gate_active;
+    in.plant_gate_known = mbs.plant_gate_known;
+    in.plant_gate_active = mbs.plant_gate_active;
     in.forecast_available = cfg.weather_enabled && wx.available && wx_freshness.fresh;
-    in.actuator_conflict = act.conflict;
     in.now_ms = static_cast<int64_t>(now_ms);
     in.room_has_source_time = rt.has_value && rt.has_source_time;
     in.room_source_unix_s = rt.source_unix_s;
@@ -891,23 +889,8 @@ static void publish_heartbeat() {
     f.modbus_rx        = mbs.rx_ok;
     f.modbus_fails     = mbs.rx_fail;
     f.modbus_stack_min_free_words = mbs.task_stack_min_free_words;
-    const logic::ActuatorSnapshot& act = mbs.actuator;
-    f.modbus_actuator_state = static_cast<uint8_t>(act.state);
-    f.modbus_actuator_block = static_cast<uint8_t>(act.blocked);
-    f.modbus_actuator_owner = static_cast<uint8_t>(act.ownership);
-    f.modbus_actuator_pending = act.pending || act.restore_pending;
-    f.modbus_actuator_conflict = act.conflict;
-    f.modbus_actuator_requested_valid = act.requested_valid;
-    f.modbus_actuator_requested_k = act.requested_k;
-    f.modbus_actuator_echoed_valid = act.echoed_valid;
-    f.modbus_actuator_echoed_k = act.echoed_k;
-    f.modbus_actuator_confirmed_valid = act.confirmed_valid;
-    f.modbus_actuator_confirmed_k = act.confirmed_k;
-    f.modbus_actuator_effective_valid = act.effective_valid;
-    f.modbus_actuator_effective_k = act.effective_k;
     // Numeric MQTT metrics use 0 for "no request/source yet"; unlike the enum values 1/2 this does
     // not invent InternalController provenance on a freshly booted, inactive device.
-    f.modbus_actuator_source = act.requested_valid ? static_cast<uint8_t>(act.source) : 0;
 
     // The controller is evaluated every mqtt_task cycle, not on the publication cadence. This copy
     // therefore already reflects paused/disconnected fail-closed transitions.
@@ -926,7 +909,6 @@ static void publish_heartbeat() {
     f.lwt_controller_forecast_available = controller.forecast_available;
     f.lwt_controller_plant_gate_known = controller.plant_gate_known;
     f.lwt_controller_plant_gate_active = controller.plant_gate_active;
-    f.lwt_controller_actuator_conflict = controller.actuator_conflict;
     f.lwt_controller_has_room_source_time = controller.room_has_source_time;
     f.lwt_controller_room_age_known = controller.room_age_known;
     f.lwt_controller_room_source_unix_s = controller.room_source_unix_s;
@@ -941,26 +923,6 @@ static void publish_heartbeat() {
     f.lwt_controller_decisions = controller.decisions;
     f.lwt_controller_holds = controller.holds;
     f.lwt_controller_failsafes = controller.failsafes;
-    f.modbus_actuator_sequence = act.sequence;
-    f.modbus_actuator_correlation_id = act.correlation_id;
-    f.modbus_actuator_intent_age_ms = act.intent_age_ms;
-    f.modbus_actuator_last_write_ms = act.last_write_ms;
-    f.modbus_actuator_last_readback_ms = act.last_readback_ms;
-    f.modbus_actuator_last_restore_ms = act.last_restore_ms;
-    f.modbus_actuator_queue_depth = act.pending ? 1 : 0;
-    f.modbus_actuator_requests = act.requests;
-    f.modbus_actuator_accepted = act.accepted;
-    f.modbus_actuator_rejected = act.rejected;
-    f.modbus_actuator_coalesced = act.coalesced;
-    f.modbus_actuator_write_attempts = act.write_attempts;
-    f.modbus_actuator_echo_confirmed = act.echo_confirmed;
-    f.modbus_actuator_readback_confirmed = act.readback_confirmed;
-    f.modbus_actuator_write_failures = act.write_failures;
-    f.modbus_actuator_conflicts = act.conflicts;
-    f.modbus_actuator_restore_attempts = act.restore_attempts;
-    f.modbus_actuator_restores = act.restores;
-    f.modbus_actuator_restore_failures = act.restore_failures;
-    f.modbus_actuator_refreshes = act.refreshes;
 
     const std::string js = build_heartbeat_json(f);
     mqtt_publish(s_heartbeat, js.c_str(), static_cast<int>(js.size()), 0, 0);   // not retained

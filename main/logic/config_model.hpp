@@ -106,12 +106,6 @@ struct Config {
     std::string mb_host;
     int         mb_port     = MODBUS_TCP_PORT;      // Modbus TCP port (502; the plaintext HomeHub default)
     int         mb_unit_id  = MODBUS_DEFAULT_UNIT;  // Modbus unit/slave id (1..247, default 1)
-    // WP3 SAFETY FLAG (#300), default OFF. It gates the internal register-54 actuator in addition to
-    // its link/freshness/allowlist/ownership checks. Blob v9 deliberately disarms older persisted
-    // placeholder bits: state saved while the flag gated nothing is not consent for a later OTA.
-    // There is no raw-register or external protocol writer by design.
-    bool        actuation_enabled = false;
-
     // Optional M5Stack ENV III outdoor-climate sensor. Both devices on the unit share one I2C
     // pair (SHT30 0x44 + QMP6988 0x70). Disabled by default so an OTA never starts driving pins the
     // user did not wire. Runtime pins keep the single published ESP32-S3 image board-neutral.
