@@ -1,4 +1,5 @@
-// POST config routes: /set_wifi, /set_mqtt, /test_ref_temp, /set_ref_temp, /set_weather,
+// POST config routes: /set_wifi, /set_mqtt, /test_ref_temp, /set_ref_temp,
+// /test_circulation, /set_circulation, /set_weather,
 // /set_syslog, /set_ntp, /set_hp,
 // /set_board, /set_env3, /set_ota, /set_lang, /discover_homehub, /detect. Parse JSON, validate, then apply:
 // WiFi/MQTT/syslog/NTP/board persist to NVS + reboot; the reference mapping is first tested without
@@ -546,9 +547,132 @@ static esp_err_t set_ref_temp(httpd_req_t* req) {
     return http_send_json(req, "{\"ok\":true,\"saved\":true,\"reboot\":false}");
 }
 
-// The controller's only setting. The accepted vocabulary intentionally ends at SHADOW: there is no
-// ACTIVE value to typo into or reach through a raw HTTP request, and this handler has no actuator
-// dependency. Applied live by the next mqtt-task evaluation; no reboot.
+struct CirculationRequest {
+    std::string name, topic, power_path, time_path;
+    uint32_t max_age_s = CIRC_SOURCE_MAX_AGE_DEFAULT_S;
+    uint16_t on_tenths_w = CIRC_SOURCE_ON_TENTHS_W_DEFAULT;
+    uint16_t off_tenths_w = CIRC_SOURCE_OFF_TENTHS_W_DEFAULT;
+    uint16_t confirm_s = CIRC_SOURCE_CONFIRM_DEFAULT_S;
+    uint32_t test_proof = 0;
+};
+
+static bool parse_tenths_w(cJSON* root, const char* key, uint16_t fallback, uint16_t& out) {
+    cJSON* item = cJSON_GetObjectItem(root, key);
+    if (!item) { out = fallback; return true; }
+    if (!cJSON_IsNumber(item) || !std::isfinite(item->valuedouble) ||
+        item->valuedouble < 0.0 || item->valuedouble > 6553.5) return false;
+    const double tenths = item->valuedouble * 10.0;
+    if (std::fabs(tenths - std::round(tenths)) > 0.000001) return false;
+    out = static_cast<uint16_t>(std::round(tenths));
+    return true;
+}
+
+static const char* parse_circulation_request(httpd_req_t* req, CirculationRequest& out) {
+    char body[1280];
+    if (http_read_body(req, body, sizeof(body)) < 0) return "bad body";
+    cJSON* j = cJSON_Parse(body);
+    if (!j) return "bad json";
+    out.name = js(j, "name");
+    out.topic = js(j, "topic");
+    out.power_path = js(j, "power_path");
+    out.time_path = js(j, "timestamp_path");
+    cJSON* age = cJSON_GetObjectItem(j, "max_age_s");
+    cJSON* confirm = cJSON_GetObjectItem(j, "confirm_s");
+    cJSON* proof = cJSON_GetObjectItem(j, "test_proof");
+    const bool age_ok = !age || (cJSON_IsNumber(age) && age->valuedouble == age->valueint &&
+                                 age->valueint >= 0);
+    const bool confirm_ok = !confirm || (cJSON_IsNumber(confirm) &&
+        confirm->valuedouble == confirm->valueint && confirm->valueint >= 0 &&
+        confirm->valueint <= UINT16_MAX);
+    const bool proof_ok = !proof || (cJSON_IsNumber(proof) && proof->valuedouble >= 0 &&
+        proof->valuedouble <= 2147483647.0 && proof->valuedouble == std::floor(proof->valuedouble));
+    if (age_ok && age) out.max_age_s = static_cast<uint32_t>(age->valueint);
+    if (confirm_ok && confirm) out.confirm_s = static_cast<uint16_t>(confirm->valueint);
+    if (proof_ok && proof) out.test_proof = static_cast<uint32_t>(proof->valuedouble);
+    const bool on_ok = parse_tenths_w(j, "on_threshold_w",
+                                     CIRC_SOURCE_ON_TENTHS_W_DEFAULT, out.on_tenths_w);
+    const bool off_ok = parse_tenths_w(j, "off_threshold_w",
+                                      CIRC_SOURCE_OFF_TENTHS_W_DEFAULT, out.off_tenths_w);
+    cJSON_Delete(j);
+    if (!age_ok) return "Maximum age must be a whole number";
+    if (!confirm_ok) return "Confirmation time must be a whole number";
+    if (!proof_ok) return "Test proof must be a whole number";
+    if (!on_ok || !off_ok) return "Power thresholds must use at most one decimal place";
+    if (out.topic.empty()) {
+        out.power_path.clear();
+        out.time_path.clear();
+    }
+    const char* why = nullptr;
+    if (!circulation_source_config_valid(out.name, out.topic, out.power_path, out.time_path,
+                                         out.max_age_s, out.on_tenths_w, out.off_tenths_w,
+                                         out.confirm_s, &why))
+        return why ? why : "invalid circulation source config";
+    return nullptr;
+}
+
+static CirculationSourceTestConfig circulation_test_config(const CirculationRequest& in) {
+    return {in.topic, in.power_path, in.time_path, in.max_age_s,
+            in.on_tenths_w, in.off_tenths_w, in.confirm_s};
+}
+
+static esp_err_t test_circulation(httpd_req_t* req) {
+    CirculationRequest in;
+    if (const char* error = parse_circulation_request(req, in))
+        return send_err(req, "400 Bad Request", error);
+    if (in.topic.empty()) return send_err(req, "400 Bad Request", "MQTT topic is required for a test");
+    const CirculationSourceTestResult result =
+        mqtt_circulation_test(circulation_test_config(in), 12000);
+    if (!result.passed)
+        return send_err(req, "422 Unprocessable Entity",
+                        result.error.empty() ? "No fresh MQTT value received" : result.error.c_str());
+    char response[256];
+    std::snprintf(response, sizeof(response),
+                  "{\"ok\":true,\"test_proof\":%lu,\"power_w\":%.6g,"
+                  "\"state\":\"%s\",\"retained\":%s}",
+                  static_cast<unsigned long>(result.proof), result.power_w,
+                  circulation_power_state_name(result.state), result.retained ? "true" : "false");
+    return http_send_json(req, response);
+}
+
+static esp_err_t set_circulation(httpd_req_t* req) {
+    CirculationRequest in;
+    if (const char* error = parse_circulation_request(req, in))
+        return send_err(req, "400 Bad Request", error);
+    const CirculationSourceTestConfig tested = circulation_test_config(in);
+    if (!in.topic.empty() && !mqtt_circulation_test_proof_valid(in.test_proof, tested))
+        return send_err(req, "409 Conflict", "Test this MQTT mapping successfully before saving");
+
+    Config c = config();
+    if (c.circulation_name == in.name && c.circulation_topic == in.topic &&
+        c.circulation_power_path == in.power_path && c.circulation_time_path == in.time_path &&
+        c.circulation_max_age_s == in.max_age_s &&
+        c.circulation_on_tenths_w == in.on_tenths_w &&
+        c.circulation_off_tenths_w == in.off_tenths_w &&
+        c.circulation_confirm_s == in.confirm_s) {
+        return http_send_json(req, "{\"ok\":true,\"saved\":false,\"reboot\":false}");
+    }
+    const bool evidence_mapping_changed =
+        c.circulation_topic != in.topic ||
+        c.circulation_power_path != in.power_path ||
+        c.circulation_time_path != in.time_path ||
+        c.circulation_max_age_s != in.max_age_s ||
+        c.circulation_on_tenths_w != in.on_tenths_w ||
+        c.circulation_off_tenths_w != in.off_tenths_w ||
+        c.circulation_confirm_s != in.confirm_s;
+    c.circulation_name = in.name;
+    c.circulation_topic = in.topic;
+    c.circulation_power_path = in.power_path;
+    c.circulation_time_path = in.time_path;
+    c.circulation_max_age_s = in.max_age_s;
+    c.circulation_on_tenths_w = in.on_tenths_w;
+    c.circulation_off_tenths_w = in.off_tenths_w;
+    c.circulation_confirm_s = in.confirm_s;
+    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    if (evidence_mapping_changed) mqtt_circulation_reconfigure();
+    diag_printf("mqtt: circulation power mapping saved%s\n", in.topic.empty() ? " (disabled)" : "");
+    return http_send_json(req, "{\"ok\":true,\"saved\":true,\"reboot\":false}");
+}
+
 static esp_err_t set_hp(httpd_req_t* req) {
     char body[2048];
     if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
@@ -922,6 +1046,8 @@ void http_register_config(httpd_handle_t s, HttpSurface surface) {
     http_register_on(s, surface, "/set_mqtt", HTTP_POST, set_mqtt);
     http_register_on(s, surface, "/test_ref_temp", HTTP_POST, test_ref_temp);
     http_register_on(s, surface, "/set_ref_temp", HTTP_POST, set_ref_temp);
+    http_register_on(s, surface, "/test_circulation", HTTP_POST, test_circulation);
+    http_register_on(s, surface, "/set_circulation", HTTP_POST, set_circulation);
     http_register_on(s, surface, "/set_syslog", HTTP_POST, set_syslog);
     http_register_on(s, surface, "/set_ntp", HTTP_POST, set_ntp);
     http_register_on(s, surface, "/set_weather", HTTP_POST, set_weather);

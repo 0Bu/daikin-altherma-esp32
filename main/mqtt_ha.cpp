@@ -45,6 +45,7 @@
 // is a single few-KB build, guarded against OOM.
 #include "mqtt_ha.hpp"
 #include "config.hpp"
+#include "checkup.hpp"
 #include "def/overlay.hpp"
 #include "def/registry.hpp"
 #include "diag_crash.hpp"
@@ -111,6 +112,8 @@ static std::atomic<bool>        s_announce{false};   // set on connect -> task r
                                                      // be lost to a racing clear)
 static std::atomic<bool>        s_ref_reconfigure{false};
 static std::atomic<bool>        s_ref_probe_reconfigure{false};
+static std::atomic<bool>        s_circulation_reconfigure{false};
+static std::atomic<bool>        s_circulation_probe_reconfigure{false};
 static std::atomic<bool>        s_weather_cleanup_requested{false};
 static std::atomic<bool>        s_modbus_cleanup_requested{false};
 
@@ -162,6 +165,26 @@ static std::string         s_ref_binding_hvac_mode_path;
 static bool                s_ref_capture_enabled = false; // saved mapping may remain while OFF
 static std::string         s_ref_probe_subscribed_topic; // mqtt_task only; never persisted
 static uint32_t            s_ref_probe_task_generation = 0;
+
+static CirculationSourceStatus s_circulation_status;
+static CirculationPowerTracker s_circulation_tracker;
+struct CirculationProbeState {
+    CirculationSourceTestConfig config;
+    uint32_t generation=0;
+    bool active=false, subscribed=false, passed=false, retained=false;
+    double power_w=0.0;
+    CirculationPowerState state=CirculationPowerState::Unknown;
+    std::string error;
+};
+static CirculationProbeState s_circulation_probe;
+static SemaphoreHandle_t s_circulation_probe_sem = nullptr;
+static std::string s_circulation_subscribed_topic;
+static std::string s_circulation_probe_subscribed_topic;
+static uint32_t s_circulation_probe_task_generation = 0;
+static std::string s_circulation_binding_topic;
+static std::string s_circulation_binding_power_path;
+static std::string s_circulation_binding_time_path;
+static uint32_t s_circulation_runtime_max_age_s = CIRC_SOURCE_MAX_AGE_DEFAULT_S; // guarded by s_mtx
 
 // RAII guard around s_mtx (same idiom as config.cpp / hp_poll.cpp). Replaces the raw take/give pairs
 // so a throw on a reader (the broker copy in mqtt_status) can't strand the mutex and wedge every
@@ -1105,6 +1128,191 @@ static bool reference_timestamp_moved_backward(const DecodedReferenceFrame& deco
            s_ref_status.has_source_time && decoded.source_unix_s < s_ref_status.source_unix_s;
 }
 
+struct DecodedCirculationFrame {
+    bool valid=false;
+    double power_w=0.0;
+    int64_t source_unix_s=-1;
+    const char* timestamp_source="payload_unix_s";
+    const char* error=nullptr;
+};
+
+static DecodedCirculationFrame decode_circulation_frame(const ReferenceMqttFrame& frame,
+                                                        const std::string& power_path,
+                                                        const std::string& timestamp_path) {
+    DecodedCirculationFrame out;
+    cJSON* root = cJSON_ParseWithLength(frame.payload, frame.payload_len);
+    if (!root) { out.error = "payload is not valid JSON"; return out; }
+    cJSON* power = reference_json_item(root, power_path);
+    if (!cJSON_IsNumber(power) || !std::isfinite(power->valuedouble) ||
+        power->valuedouble < 0.0 || power->valuedouble > CIRC_SOURCE_POWER_MAX_W) {
+        cJSON_Delete(root);
+        out.error = "Power path is missing, not numeric or out of range";
+        return out;
+    }
+    cJSON* timestamp = reference_json_item(root, timestamp_path);
+    if (!reference_payload_timestamp(timestamp, out.source_unix_s, out.timestamp_source)) {
+        cJSON_Delete(root);
+        out.error = "Timestamp path is missing or not RFC3339/Unix seconds";
+        return out;
+    }
+    if (frame.received_unix_s >= 0 &&
+        out.source_unix_s > frame.received_unix_s + REF_TEMP_FUTURE_TOLERANCE_S) {
+        cJSON_Delete(root);
+        out.error = "Source timestamp is in the future";
+        return out;
+    }
+    out.power_w = power->valuedouble;
+    out.valid = true;
+    cJSON_Delete(root);
+    return out;
+}
+
+static ReferenceFreshness circulation_frame_freshness(const ReferenceMqttFrame& frame,
+                                                       const DecodedCirculationFrame& decoded,
+                                                       uint32_t max_age_s) {
+    return reference_freshness(true, frame.retained, true, decoded.source_unix_s,
+                               frame.received_ms, frame.received_unix_s, frame.received_ms,
+                               max_age_s);
+}
+
+static bool circulation_timestamp_moved_backward(const DecodedCirculationFrame& decoded,
+                                                  const std::string& topic,
+                                                  const std::string& power_path,
+                                                  const std::string& timestamp_path) {
+    Lock lk(s_mtx);
+    return topic == s_circulation_binding_topic &&
+           power_path == s_circulation_binding_power_path &&
+           timestamp_path == s_circulation_binding_time_path &&
+           s_circulation_status.has_value &&
+           decoded.source_unix_s < s_circulation_status.source_unix_s;
+}
+
+static void reset_circulation_status_locked(bool configured) {
+    s_circulation_status = CirculationSourceStatus{};
+    s_circulation_status.configured = configured;
+    s_circulation_tracker.reset();
+}
+
+static void service_circulation_subscription(const Config& c) {
+    const bool configured = !c.circulation_topic.empty();
+    if (c.circulation_topic != s_circulation_binding_topic ||
+        c.circulation_power_path != s_circulation_binding_power_path ||
+        c.circulation_time_path != s_circulation_binding_time_path) {
+        s_circulation_binding_topic = c.circulation_topic;
+        s_circulation_binding_power_path = c.circulation_power_path;
+        s_circulation_binding_time_path = c.circulation_time_path;
+        Lock lk(s_mtx);
+        s_circulation_runtime_max_age_s = c.circulation_max_age_s;
+        reset_circulation_status_locked(configured);
+    } else {
+        Lock lk(s_mtx);
+        s_circulation_runtime_max_age_s = c.circulation_max_age_s;
+        s_circulation_status.configured = configured;
+    }
+
+    if (!configured) {
+        s_circulation_reconfigure.exchange(false);
+        if (!s_circulation_subscribed_topic.empty() && s_connected &&
+            s_circulation_subscribed_topic != s_ref_subscribed_topic &&
+            s_circulation_subscribed_topic != s_ref_probe_subscribed_topic)
+            esp_mqtt_client_unsubscribe(s_client, s_circulation_subscribed_topic.c_str());
+        s_circulation_subscribed_topic.clear();
+        Lock lk(s_mtx);
+        s_circulation_status.subscribed = false;
+        return;
+    }
+
+    const char* invalid = nullptr;
+    if (!circulation_source_config_valid(
+            c.circulation_name, c.circulation_topic, c.circulation_power_path,
+            c.circulation_time_path, c.circulation_max_age_s,
+            c.circulation_on_tenths_w, c.circulation_off_tenths_w,
+            c.circulation_confirm_s, &invalid)) {
+        Lock lk(s_mtx);
+        s_circulation_status.subscribed = false;
+        s_circulation_status.error = invalid ? invalid : "invalid circulation source config";
+        s_circulation_status.errors++;
+        return;
+    }
+
+    const bool force = s_circulation_reconfigure.exchange(false);
+    if (force) {
+        // Reconnects and persisted threshold/age changes both require a fresh, confirmed state.
+        // A previously confirmed ON/OFF must not cross either boundary as current evidence.
+        Lock lk(s_mtx);
+        reset_circulation_status_locked(configured);
+    }
+    if (!s_connected) {
+        Lock lk(s_mtx);
+        s_circulation_status.subscribed = false;
+        return;
+    }
+    if (!force && s_circulation_subscribed_topic == c.circulation_topic) return;
+    if (!s_circulation_subscribed_topic.empty() &&
+        s_circulation_subscribed_topic != c.circulation_topic &&
+        s_circulation_subscribed_topic != s_ref_subscribed_topic &&
+        s_circulation_subscribed_topic != s_ref_probe_subscribed_topic)
+        esp_mqtt_client_unsubscribe(s_client, s_circulation_subscribed_topic.c_str());
+
+    const int id = esp_mqtt_client_subscribe(s_client, c.circulation_topic.c_str(), 0);
+    {
+        Lock lk(s_mtx);
+        s_circulation_status.subscribed = id >= 0;
+        s_circulation_status.error = id >= 0 ? "" : "MQTT subscribe failed";
+        if (id < 0) s_circulation_status.errors++;
+    }
+    if (id >= 0) {
+        s_circulation_subscribed_topic = c.circulation_topic;
+        diag_printf("mqtt: circulation power subscription active\n");
+    }
+}
+
+static void service_circulation_probe_subscription(const Config& saved) {
+    if (!s_connected) return;
+    if (s_circulation_probe_reconfigure.exchange(false))
+        s_circulation_probe_task_generation = 0;
+    bool active = false;
+    uint32_t generation = 0;
+    CirculationSourceTestConfig candidate;
+    {
+        Lock lk(s_mtx);
+        active = s_circulation_probe.active;
+        generation = s_circulation_probe.generation;
+        if (active) candidate = s_circulation_probe.config;
+    }
+    if (!active) {
+        if (!s_circulation_probe_subscribed_topic.empty() &&
+            s_circulation_probe_subscribed_topic != saved.circulation_topic &&
+            s_circulation_probe_subscribed_topic != s_ref_subscribed_topic &&
+            s_circulation_probe_subscribed_topic != s_ref_probe_subscribed_topic)
+            esp_mqtt_client_unsubscribe(s_client, s_circulation_probe_subscribed_topic.c_str());
+        s_circulation_probe_subscribed_topic.clear();
+        s_circulation_probe_task_generation = 0;
+        return;
+    }
+    if (s_circulation_probe_task_generation == generation) return;
+    const bool already_subscribed = candidate.topic == saved.circulation_topic &&
+                                    s_circulation_subscribed_topic == candidate.topic;
+    const int id = already_subscribed ? 0 :
+        esp_mqtt_client_subscribe(s_client, candidate.topic.c_str(), 0);
+    bool signal = false;
+    {
+        Lock lk(s_mtx);
+        if (s_circulation_probe.active && s_circulation_probe.generation == generation) {
+            s_circulation_probe.subscribed = id >= 0;
+            if (id < 0) {
+                s_circulation_probe.active = false;
+                s_circulation_probe.error = "MQTT subscribe failed";
+                signal = true;
+            }
+        }
+    }
+    if (id >= 0 && !already_subscribed)
+        s_circulation_probe_subscribed_topic = candidate.topic;
+    s_circulation_probe_task_generation = generation;
+    if (signal && s_circulation_probe_sem) xSemaphoreGive(s_circulation_probe_sem);
+}
+
 static void set_reference_error(const char* error, ReferenceRoomReason reason, bool count_error) {
     Lock lk(s_mtx);
     s_ref_status.error = error ? error : "";   // mqtt_task is exception-guarded; Lock is RAII
@@ -1163,7 +1371,9 @@ static void service_reference_subscription(const Config& c) {
     // can still be proved before it is saved.
     if (!capture_enabled) {
         s_ref_reconfigure.exchange(false);
-        if (!s_ref_subscribed_topic.empty() && s_connected)
+        if (!s_ref_subscribed_topic.empty() && s_connected &&
+            s_ref_subscribed_topic != s_circulation_subscribed_topic &&
+            s_ref_subscribed_topic != s_circulation_probe_subscribed_topic)
             esp_mqtt_client_unsubscribe(s_client, s_ref_subscribed_topic.c_str());
         s_ref_subscribed_topic.clear();
         Lock lk(s_mtx);
@@ -1178,7 +1388,9 @@ static void service_reference_subscription(const Config& c) {
                                             c.ref_temp_time_path, c.ref_temp_enabled_path,
                                             c.ref_temp_hvac_mode_path,
                                             c.ref_temp_max_age_s, &invalid)) {
-        if (!s_ref_subscribed_topic.empty() && s_connected)
+        if (!s_ref_subscribed_topic.empty() && s_connected &&
+            s_ref_subscribed_topic != s_circulation_subscribed_topic &&
+            s_ref_subscribed_topic != s_circulation_probe_subscribed_topic)
             esp_mqtt_client_unsubscribe(s_client, s_ref_subscribed_topic.c_str());
         s_ref_subscribed_topic.clear();
         Lock lk(s_mtx);
@@ -1197,7 +1409,9 @@ static void service_reference_subscription(const Config& c) {
     }
     if (!force && s_ref_subscribed_topic == c.ref_temp_topic) return;
 
-    if (!s_ref_subscribed_topic.empty() && s_ref_subscribed_topic != c.ref_temp_topic)
+    if (!s_ref_subscribed_topic.empty() && s_ref_subscribed_topic != c.ref_temp_topic &&
+        s_ref_subscribed_topic != s_circulation_subscribed_topic &&
+        s_ref_subscribed_topic != s_circulation_probe_subscribed_topic)
         esp_mqtt_client_unsubscribe(s_client, s_ref_subscribed_topic.c_str());
     s_ref_subscribed_topic.clear();
     if (!configured) {
@@ -1244,7 +1458,9 @@ static void service_reference_probe_subscription(const Config& saved) {
 
     if (!active || !s_connected) {
         if (s_connected && !s_ref_probe_subscribed_topic.empty() &&
-            s_ref_probe_subscribed_topic != saved.ref_temp_topic) {
+            s_ref_probe_subscribed_topic != saved.ref_temp_topic &&
+            s_ref_probe_subscribed_topic != s_circulation_subscribed_topic &&
+            s_ref_probe_subscribed_topic != s_circulation_probe_subscribed_topic) {
             esp_mqtt_client_unsubscribe(s_client, s_ref_probe_subscribed_topic.c_str());
         }
         s_ref_probe_subscribed_topic.clear();
@@ -1258,7 +1474,9 @@ static void service_reference_probe_subscription(const Config& saved) {
     std::string tracked_topic = candidate.topic;
     if (!s_ref_probe_subscribed_topic.empty() &&
         s_ref_probe_subscribed_topic != saved.ref_temp_topic &&
-        s_ref_probe_subscribed_topic != candidate.topic) {
+        s_ref_probe_subscribed_topic != candidate.topic &&
+        s_ref_probe_subscribed_topic != s_circulation_subscribed_topic &&
+        s_ref_probe_subscribed_topic != s_circulation_probe_subscribed_topic) {
         esp_mqtt_client_unsubscribe(s_client, s_ref_probe_subscribed_topic.c_str());
     }
     const int id = esp_mqtt_client_subscribe(s_client, tracked_topic.c_str(), 0);
@@ -1391,10 +1609,104 @@ static void service_reference_probe_frame(const ReferenceMqttFrame& frame) {
     if (signal) diag_printf("mqtt: reference temperature test passed\n");
 }
 
+static void service_circulation_probe_frame(const ReferenceMqttFrame& frame) {
+    CirculationSourceTestConfig candidate;
+    uint32_t generation = 0;
+    {
+        Lock lk(s_mtx);
+        if (!s_circulation_probe.active || frame.topic != s_circulation_probe.config.topic) return;
+        candidate = s_circulation_probe.config;
+        generation = s_circulation_probe.generation;
+    }
+    const DecodedCirculationFrame decoded = decode_circulation_frame(
+        frame, candidate.power_path, candidate.timestamp_path);
+    const ReferenceFreshness freshness = decoded.valid
+        ? circulation_frame_freshness(frame, decoded, candidate.max_age_s)
+        : ReferenceFreshness{};
+    bool signal = false;
+    {
+        Lock lk(s_mtx);
+        if (!s_circulation_probe.active || s_circulation_probe.generation != generation) return;
+        if (!decoded.valid) {
+            s_circulation_probe.error = decoded.error ? decoded.error : "Source value is invalid";
+            return;
+        }
+        if (!freshness.fresh) {
+            s_circulation_probe.error = freshness.reason ? freshness.reason : "Source value is stale";
+            return;
+        }
+        s_circulation_probe.active = false;
+        s_circulation_probe.passed = true;
+        s_circulation_probe.retained = frame.retained;
+        s_circulation_probe.power_w = decoded.power_w;
+        s_circulation_probe.state = circulation_power_class(
+            decoded.power_w, candidate.on_tenths_w, candidate.off_tenths_w);
+        s_circulation_probe.error.clear();
+        signal = true;
+    }
+    if (signal && s_circulation_probe_sem) xSemaphoreGive(s_circulation_probe_sem);
+}
+
+static void service_circulation_frame(const ReferenceMqttFrame& frame, const Config& c) {
+    service_circulation_probe_frame(frame);
+    if (c.circulation_topic.empty() || frame.topic != c.circulation_topic) return;
+    {
+        Lock lk(s_mtx);
+        s_circulation_status.messages++;
+    }
+    const DecodedCirculationFrame decoded = decode_circulation_frame(
+        frame, c.circulation_power_path, c.circulation_time_path);
+    if (!decoded.valid) {
+        Lock lk(s_mtx);
+        s_circulation_status.error = decoded.error ? decoded.error : "Source value is invalid";
+        s_circulation_status.errors++;
+        s_circulation_status.rejections++;
+        return;
+    }
+    if (circulation_timestamp_moved_backward(decoded, c.circulation_topic,
+                                             c.circulation_power_path,
+                                             c.circulation_time_path)) {
+        Lock lk(s_mtx);
+        s_circulation_status.error = "Source timestamp moved backward";
+        s_circulation_status.errors++;
+        s_circulation_status.rejections++;
+        return;
+    }
+    const ReferenceFreshness freshness =
+        circulation_frame_freshness(frame, decoded, c.circulation_max_age_s);
+    if (!freshness.fresh) {
+        Lock lk(s_mtx);
+        s_circulation_status.error = freshness.reason ? freshness.reason : "Source value is stale";
+        s_circulation_status.rejections++;
+        return;
+    }
+    Lock lk(s_mtx);
+    if (s_circulation_status.has_value &&
+        (frame.received_ms < s_circulation_status.received_ms ||
+         frame.received_ms - s_circulation_status.received_ms >
+             static_cast<uint64_t>(c.circulation_max_age_s) * 1000))
+        s_circulation_tracker.reset();
+    s_circulation_tracker.observe(decoded.power_w, frame.received_ms,
+                                  c.circulation_on_tenths_w,
+                                  c.circulation_off_tenths_w,
+                                  c.circulation_confirm_s);
+    s_circulation_status.power_w = decoded.power_w;
+    s_circulation_status.received_ms = frame.received_ms;
+    s_circulation_status.received_unix_s = frame.received_unix_s;
+    s_circulation_status.source_unix_s = decoded.source_unix_s;
+    s_circulation_status.retained = frame.retained;
+    s_circulation_status.has_source_time = true;
+    s_circulation_status.has_value = true;
+    s_circulation_status.timestamp_source = decoded.timestamp_source;
+    s_circulation_status.state = s_circulation_tracker.confirmed;
+    s_circulation_status.error.clear();
+}
+
 static void service_reference_frames(const Config& c) {
     if (!s_ref_queue) return;
     while (xQueueReceive(s_ref_queue, &s_ref_task_frame, 0) == pdTRUE) {
         const ReferenceMqttFrame& frame = s_ref_task_frame;
+        service_circulation_frame(frame, c);
         service_reference_probe_frame(frame);
         if (c.ref_temp_topic.empty() || frame.topic != c.ref_temp_topic) continue;
         {
@@ -1474,13 +1786,14 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
         if (s_mqtt_ever_connected) s_mqtt_reconnects.fetch_add(1);   // a later CONNECTED is a RE-connect
         s_mqtt_ever_connected = true;
         s_connected = true; s_announce = true; s_ref_reconfigure = true;
-        s_ref_probe_reconfigure = true; set_status(true, nullptr);
+        s_ref_probe_reconfigure = true; s_circulation_reconfigure = true;
+        s_circulation_probe_reconfigure = true; set_status(true, nullptr);
         diag_printf("mqtt: %s client connected\n",
                     s_client_is_publisher ? "publisher" : "observation");
         break;
     case MQTT_EVENT_DISCONNECTED:
         s_connected = false; s_heartbeat_announced = false; set_status(false, nullptr);
-        { Lock lk(s_mtx); s_ref_status.subscribed = false; }
+        { Lock lk(s_mtx); s_ref_status.subscribed = false; s_circulation_status.subscribed = false; }
         diag_printf("mqtt: disconnected (will retry)\n");
         break;
     case MQTT_EVENT_ERROR: {
@@ -1572,6 +1885,8 @@ static void mqtt_task(void*) {
             const Config ref_config = config();
             service_reference_subscription(ref_config);
             service_reference_probe_subscription(ref_config);
+            service_circulation_subscription(ref_config);
+            service_circulation_probe_subscription(ref_config);
             service_reference_frames(ref_config);
             service_requested_topic_cleanup(ref_config);
             evaluate_heating_curve(ref_config, hp);
@@ -1835,10 +2150,14 @@ static bool promote_client_to_publisher() {
     {
         Lock lk(s_mtx);
         s_ref_status.subscribed = false;
+        s_circulation_status.subscribed = false;
     }
     s_ref_subscribed_topic.clear();
     s_ref_probe_subscribed_topic.clear();
     s_ref_probe_task_generation = 0;
+    s_circulation_subscribed_topic.clear();
+    s_circulation_probe_subscribed_topic.clear();
+    s_circulation_probe_task_generation = 0;
     esp_mqtt_client_destroy(s_client);
     s_client = nullptr;
 
@@ -1857,18 +2176,25 @@ void mqtt_ha_start() {
     s_status.configured = !c.mqtt_uri.empty();
     s_status.broker     = c.mqtt_uri;
     s_ref_status.configured = !c.ref_temp_topic.empty();
+    s_circulation_status.configured = !c.circulation_topic.empty();
+    s_circulation_runtime_max_age_s = c.circulation_max_age_s;
     // Probe state contains std::strings shared with the HTTP task, so it is safe only when BOTH
     // synchronization objects exist. The ordinary bridge can still run in its pre-existing
     // best-effort status mode if the mutex allocation failed; the new cross-task test cannot.
     s_ref_probe_sem = s_mtx ? xSemaphoreCreateBinary() : nullptr;
     if (!s_ref_probe_sem)
         diag_printf("mqtt: reference test semaphore alloc failed\n");
+    s_circulation_probe_sem = s_mtx ? xSemaphoreCreateBinary() : nullptr;
+    if (!s_circulation_probe_sem)
+        diag_printf("mqtt: circulation-source test semaphore alloc failed\n");
     if (!s_status.configured) return;
 
     s_ref_queue = xQueueCreate(1, sizeof(ReferenceMqttFrame));
     if (!s_ref_queue) {
         s_ref_status.error = "receive queue alloc failed";
         s_ref_status.errors++;
+        s_circulation_status.error = "receive queue alloc failed";
+        s_circulation_status.errors++;
         diag_printf("mqtt: reference receive queue alloc failed\n");
     }
 
@@ -2022,6 +2348,144 @@ void mqtt_reference_reconfigure() {
     Lock lk(s_mtx);
     s_ref_probe.active = false;
     s_ref_probe.passed = false;
+}
+
+CirculationSourceStatus circulation_source_status() {
+    CirculationSourceStatus st;
+    if (!s_mtx) st = s_circulation_status;
+    else {
+        Lock lk(s_mtx);
+        st = s_circulation_status;
+    }
+    const Config c = config();
+    st.configured = !c.circulation_topic.empty();
+    const uint64_t now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
+    int64_t now_unix_s = -1;
+    int32_t now_sub_ms = 0;
+    time_now(now_unix_s, now_sub_ms);
+    const ReferenceFreshness freshness = reference_freshness(
+        st.has_value, st.retained, st.has_source_time, st.source_unix_s,
+        st.received_ms, now_unix_s, now_ms, c.circulation_max_age_s);
+    st.fresh = freshness.fresh;
+    st.age_known = freshness.age_known;
+    st.age_s = freshness.age_s;
+    st.freshness_reason = freshness.reason ? freshness.reason : "no_value";
+    if (!st.fresh) st.state = CirculationPowerState::Unknown;
+    return st;
+}
+
+CirculationPumpSample circulation_pump_sample() {
+    // Poll-task hot path: copy only POD under the MQTT mutex. Calling circulation_source_status()
+    // here would copy several std::strings plus the whole Config every sweep, creating permanent
+    // heap churn merely to obtain two booleans.
+    bool configured = false, has_value = false, retained = false, has_source_time = false;
+    uint64_t received_ms = 0;
+    int64_t source_unix_s = -1;
+    uint32_t max_age_s = CIRC_SOURCE_MAX_AGE_DEFAULT_S;
+    CirculationPowerState state = CirculationPowerState::Unknown;
+    {
+        Lock lk(s_mtx);
+        configured = s_circulation_status.configured;
+        has_value = s_circulation_status.has_value;
+        retained = s_circulation_status.retained;
+        has_source_time = s_circulation_status.has_source_time;
+        received_ms = s_circulation_status.received_ms;
+        source_unix_s = s_circulation_status.source_unix_s;
+        state = s_circulation_status.state;
+        max_age_s = s_circulation_runtime_max_age_s;
+    }
+    const uint64_t now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
+    int64_t now_unix_s = -1;
+    int32_t now_sub_ms = 0;
+    time_now(now_unix_s, now_sub_ms);
+    const bool fresh = reference_freshness(
+        has_value, retained, has_source_time, source_unix_s,
+        received_ms, now_unix_s, now_ms, max_age_s).fresh;
+    return {configured, fresh && state != CirculationPowerState::Unknown,
+            fresh && state == CirculationPowerState::On};
+}
+
+CirculationSourceTestResult mqtt_circulation_test(
+    const CirculationSourceTestConfig& candidate, uint32_t timeout_ms) {
+    CirculationSourceTestResult result;
+    if (!s_mtx || !s_circulation_probe_sem) {
+        result.error = "Circulation source test is unavailable";
+        return result;
+    }
+    if (!s_connected) { result.error = "MQTT broker is not connected"; return result; }
+
+    CirculationSourceTestConfig prepared = candidate;
+    xSemaphoreTake(s_circulation_probe_sem, 0);
+    uint32_t generation = 0;
+    {
+        Lock lk(s_mtx);
+        if (s_circulation_probe.active) {
+            result.error = "Another circulation source test is already running";
+            return result;
+        }
+        generation = s_circulation_probe.generation + 1;
+        if (generation == 0 || generation > 0x7fffffffu) generation = 1;
+        s_circulation_probe.passed = false;
+        s_circulation_probe.config.topic.swap(prepared.topic);
+        s_circulation_probe.config.power_path.swap(prepared.power_path);
+        s_circulation_probe.config.timestamp_path.swap(prepared.timestamp_path);
+        s_circulation_probe.config.max_age_s = prepared.max_age_s;
+        s_circulation_probe.config.on_tenths_w = prepared.on_tenths_w;
+        s_circulation_probe.config.off_tenths_w = prepared.off_tenths_w;
+        s_circulation_probe.config.confirm_s = prepared.confirm_s;
+        s_circulation_probe.generation = generation;
+        s_circulation_probe.active = true;
+        s_circulation_probe.subscribed = false;
+        s_circulation_probe.retained = false;
+        s_circulation_probe.power_w = 0.0;
+        s_circulation_probe.state = CirculationPowerState::Unknown;
+        s_circulation_probe.error.clear();
+    }
+    s_circulation_probe_reconfigure = true;
+    xSemaphoreTake(s_circulation_probe_sem, pdMS_TO_TICKS(timeout_ms));
+    {
+        Lock lk(s_mtx);
+        if (s_circulation_probe.generation == generation && s_circulation_probe.passed) {
+            result.passed = true;
+            result.retained = s_circulation_probe.retained;
+            result.power_w = s_circulation_probe.power_w;
+            result.state = s_circulation_probe.state;
+            result.proof = generation;
+        } else if (s_circulation_probe.generation == generation) {
+            s_circulation_probe.active = false;
+            result.error = s_circulation_probe.error.empty()
+                         ? "No fresh value received before the test timed out"
+                         : s_circulation_probe.error;
+        } else {
+            result.error = "Circulation source test was replaced";
+        }
+    }
+    s_circulation_probe_reconfigure = true;
+    return result;
+}
+
+bool mqtt_circulation_test_proof_valid(uint32_t proof,
+                                       const CirculationSourceTestConfig& candidate) {
+    if (!s_mtx || proof == 0) return false;
+    Lock lk(s_mtx);
+    return s_circulation_probe.passed && s_circulation_probe.generation == proof &&
+           s_circulation_probe.config.topic == candidate.topic &&
+           s_circulation_probe.config.power_path == candidate.power_path &&
+           s_circulation_probe.config.timestamp_path == candidate.timestamp_path &&
+           s_circulation_probe.config.max_age_s == candidate.max_age_s &&
+           s_circulation_probe.config.on_tenths_w == candidate.on_tenths_w &&
+           s_circulation_probe.config.off_tenths_w == candidate.off_tenths_w &&
+           s_circulation_probe.config.confirm_s == candidate.confirm_s;
+}
+
+void mqtt_circulation_reconfigure() {
+    s_circulation_reconfigure = true;
+    s_circulation_probe_reconfigure = true;
+    checkup_dhw_reset();                // source identity/threshold changes invalidate attribution only
+    if (!s_mtx) return;
+    Lock lk(s_mtx);
+    s_circulation_probe.active = false;
+    s_circulation_probe.passed = false;
 }
 
 void mqtt_request_weather_cleanup() { s_weather_cleanup_requested = true; }

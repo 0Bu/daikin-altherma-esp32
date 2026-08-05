@@ -57,7 +57,7 @@ async function refreshValues() {
   renderApp();
   return true;
 }
-// Dashboard cards: the X10A checkup first, directly below the live diagram, followed by the
+// Dashboard cards: the rolling plant diagnostics first, directly below the live diagram, followed by the
 // detected unit (Model) and the heat-pump value groups — all one continuous card grid, each block
 // styled like OPERATION. The board (ESP32) card and the
 // WiFi/MQTT/Syslog/NTP rows are NOT here: both moved behind the gear onto Settings (renderSettings).
@@ -72,7 +72,7 @@ function renderCards() {
   // container bypassing both. The unchanged-markup half earns its keep here too — an idle plant or a
   // dropped X10A link produces identical markup, so those pushes stop writing at all.
   // Keep the observation first in the card stream: #valueGroups immediately follows #hpLive in the
-  // document, so this places the X10A check directly after the diagram before every other card.
+  // document, so this places plant diagnostics directly after the diagram before every other card.
   // It remains linked to X10A liveness, as it was when statusCardsHtml() owned the card.
   const checkup = S.status?.hp?.connected ? checkupCardHtml() : "";
   setHtml("valueGroups", checkup + statusCardsHtml() + valueGroupsHtml(S._values || [], S.status?.hp?.connected));
@@ -201,14 +201,46 @@ function firmwareRow(version) {
     `<div class="vdesc-p">${esc(t("card.firmware_help"))}</div>`);
 }
 
-// Settings cards rendered below Connections: THREE permanent ESP32-family cards, followed by the
-// heating-curve diagnosis card, which is ALWAYS rendered — it is where its two sources are
-// configured, so hiding it until they were configured left no way to configure them. The ESP32 cards
+function circulationSettingsCardHtml() {
+  const c = S.status?.circulation_source || {};
+  let value = t("circ.not_configured"), cls = "dim";
+  if (c.configured) {
+    if (c.error) { value = t("circ.unavailable"); cls = "err"; }
+    else if (c.has_value && c.fresh) {
+      value = c.state === "on" ? t("circ.running") : c.state === "off" ? t("circ.stopped") : t("circ.checking");
+      cls = c.state === "unknown" ? "warn" : "ok";
+    } else { value = c.has_value ? t("circ.stale") : t("circ.waiting"); cls = "warn"; }
+  }
+  let body = `<div class="vdesc-p">${esc(t("circ.settings_help"))}</div>`;
+  if (c.configured) {
+    const source = c.name || "MQTT";
+    body = descNoteHtml(t("circ.detail.source"), source);
+    if (c.has_value) {
+      const power = Number(c.power_w).toLocaleString(LANG === "de" ? "de-DE" : "en-US",
+        { maximumFractionDigits: 1 });
+      body += descNoteHtml(t("circ.detail.power"), `${power} W`);
+      body += descNoteHtml(t("circ.detail.state"), value);
+      if (Number.isFinite(c.age_s)) body += descNoteHtml(t("circ.detail.age"), checkupDuration(c.age_s));
+    }
+    body += `<div class="vdesc-p">${esc(t("circ.settings_help"))}</div>`;
+  }
+  const right = `<button class="settings-split-action vrow-val settings-wrap ${cls}" type="button" ` +
+    `data-act="circulation" aria-label="${esc(`${t("circ.title")}: ${value}`)}">` +
+    `<span>${esc(value)}</span>${editIcon}</button>`;
+  const row = settingsInfoRow("diagnostics:circulation", "diagnostics-circulation-detail",
+    t("circ.row"), right, body);
+  return vcard(t("settings.diagnostics"), row);
+}
+
+// Settings cards rendered below Connections: THREE permanent ESP32-family cards, the plant-
+// diagnostics card and then the heating-curve diagnosis card. The latter is ALWAYS rendered — it is
+// where its two sources are configured, so hiding it until they were configured left no way to
+// configure them. The ESP32 cards
 // were split from what was
 // one, so each answers one question. ESP32 = the board itself (its onboard hardware and its own
 // health — uptime + the two memory curves). Protokoll = the X10A link (whether the bus answers, the
 // framing it speaks, and the RX/TX pins). Firmware = the running version, the update feed it follows,
-// and the UI language. All three render into one container (#settingsCards) as concatenated vcards,
+// and the UI language. All four render into one container (#settingsCards) as concatenated vcards,
 // so the delegated click/change listeners bound there keep working across the split.
 //
 // The board-health rows are the ONLY telemetry here, and each earns its place by answering a question
@@ -253,7 +285,8 @@ function esp32CardHtml() {
     channelRow(s.ota?.channel === "dev" ? "dev" : "release") +
     langRow(s.ui?.lang === "de" || s.ui?.lang === "en" ? s.ui.lang : "auto");
   return vcard("ESP32", esp32Rows) + vcard(t("card.proto_title"), protoRows) +
-         vcard(t("card.fw_title"), fwRows) + dynamicControlCardHtml();
+         vcard(t("card.fw_title"), fwRows) + circulationSettingsCardHtml() +
+         dynamicControlCardHtml();
 }
 
 // The Settings home for the heating-curve diagnosis. Every main row uses the same split
@@ -633,7 +666,7 @@ function statusCardsHtml() {
   return environment + (hp.connected ? vcard(t("card.model"), model) : "");
 }
 
-// ── The Checkup card — "is anything worth reporting?" (logic/checkup.hpp, issue #208) ─────────
+// ── The diagnosis card — "is anything worth reporting?" (logic/checkup.hpp, #208/#349) ─────────
 // The dashboard already answers what the plant is doing NOW (the schematic) and what one reading did
 // today (a value row's trend). This is the third question, and the only one that needs counting
 // rather than reading: how often the compressor started, what share of runtime went into defrosting,
@@ -649,6 +682,7 @@ function statusCardsHtml() {
 // no second opinion here about which row matters most.
 const CHECKUP_ROW = {
   fault:    "check.fault",
+  dhw_loss: "check.dhw_loss",
   cycling:  "check.cycling",
   defrost:  "check.defrost",
   pressure: "check.pressure",
@@ -736,6 +770,15 @@ function checkupMetricValue(c) {
       }
       if (c.active == null) return t("check.fault_unknown");
       return t("check.fault_none");
+    case "dhw_loss": {
+      if (c.max_k_h == null) return c.windows ? t("check.loss_windows", c.windows) : "";
+      const rate = Number(c.max_k_h).toLocaleString(LANG === "de" ? "de-DE" : "en-US",
+        { maximumFractionDigits: 1 });
+      const attribution = c.high_pump_off > 0 ? t("check.loss_pump_off")
+        : c.high_with_pump > 0 ? t("check.loss_with_pump")
+        : c.high_windows > 0 ? t("check.loss_unattributed") : "";
+      return [`${rate} K/h`, t("check.loss_windows", c.windows || 0), attribution].filter(Boolean).join(" · ");
+    }
     case "cycling": {
       if (c.starts == null) return "";
       const starts = t("check.starts", c.starts);

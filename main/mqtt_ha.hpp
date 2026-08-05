@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <string>
 #include "logic/heating_curve_diagnosis.hpp"
+#include "logic/circulation_source.hpp"
 #include "logic/reference_temperature.hpp"
 
 namespace daik {
@@ -66,6 +67,41 @@ bool mqtt_reference_test_proof_valid(uint32_t proof,
 // firmware does not create a second MQTT client and does not reboot. This also retires the consumed
 // transient test proof.
 void mqtt_reference_reconfigure();
+
+// Independent read-only power witness for the potable-water circulation pump.  It shares the
+// already-authenticated MQTT client but has its own exact topic, parser, freshness and test proof.
+struct CirculationSourceStatus {
+    bool configured=false, subscribed=false, has_value=false, retained=false, has_source_time=false;
+    bool fresh=false, age_known=false;
+    double power_w=0.0;
+    uint64_t received_ms=0, age_s=0;
+    int64_t received_unix_s=-1, source_unix_s=-1;
+    uint32_t messages=0, errors=0, rejections=0;
+    CirculationPowerState state=CirculationPowerState::Unknown;
+    std::string timestamp_source, freshness_reason, error;
+};
+CirculationSourceStatus circulation_source_status();
+
+struct CirculationPumpSample { bool configured=false, known=false, on=false; };
+CirculationPumpSample circulation_pump_sample();
+
+struct CirculationSourceTestConfig {
+    std::string topic, power_path, timestamp_path;
+    uint32_t max_age_s=0;
+    uint16_t on_tenths_w=0, off_tenths_w=0, confirm_s=0;
+};
+struct CirculationSourceTestResult {
+    bool passed=false, retained=false;
+    double power_w=0.0;
+    CirculationPowerState state=CirculationPowerState::Unknown;
+    uint32_t proof=0;
+    std::string error;
+};
+CirculationSourceTestResult mqtt_circulation_test(const CirculationSourceTestConfig& candidate,
+                                                  uint32_t timeout_ms);
+bool mqtt_circulation_test_proof_valid(uint32_t proof,
+                                       const CirculationSourceTestConfig& candidate);
+void mqtt_circulation_reconfigure();
 
 // Explicit Settings disables own these two retained-topic tombstones. They are the only outbound
 // MQTT operations allowed before X10A proves installation publication authority; ordinary state,

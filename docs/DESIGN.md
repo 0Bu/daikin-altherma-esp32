@@ -810,16 +810,16 @@ Body, ordered:
    item 6.
    The **ESP32** card that used to sit above it is in Settings now (§5.6): this card is the *unit*,
    that one is the *board*.
-5. **X10A observation card** — "X10A check · 24 h", styled exactly like the Model card, directly
+5. **Plant-diagnostics card** — "Anlagendiagnose · 24 h" / "Plant diagnostics · 24 h", styled exactly like the Model card, directly
    below it and above the value groups. It answers the third question the dashboard has, after *what
    is it doing now* (the system card) and *what did this one reading do today* (a value row's trend):
-   **what did X10A actually establish, and was anything worth following up?** It is deliberately not
+   **what did the on-board inputs establish, and was anything worth following up?** It is deliberately not
    a health certificate for the plant. X10A cannot establish refrigerant charge, sensor calibration,
-   hydraulic cleanliness, air path, mechanical condition or seasonal efficiency. Seven rows come
-   from `/status.health`, in firmware reading order: unit fault, compressor starts, defrost cycles,
+   hydraulic cleanliness, air path, mechanical condition or seasonal efficiency. Eight rows come
+   from `/status.health`, in firmware reading order: unit fault, DHW tank heat loss, compressor starts, defrost cycles,
    lowest water pressure, lowest steady flow, BUH/BSH runtime and protection-retry changes.
    **Every row carries an evidence class in the API and explains it in its expander.** `device` is the unit's own fault state;
-   `manufacturer` is the documented water-pressure boundary; `heuristic` marks cycling/defrost
+   `manufacturer` is the documented water-pressure boundary; `heuristic` marks DHW-loss/cycling/defrost
    patterns that can only be hints; `observation` is a measured fact with no universal judgement;
    and `experimental` marks retry-counter semantics that are not yet manufacturer-validated. The
    firmware classifies and supplies the evidence. The collapsed row shows the reading and one of
@@ -829,7 +829,7 @@ Body, ordered:
    decided in `js/schematic.js` would be a second, ungated definition of the same rule.
    **The badge summarizes evidence, not plant health.** Its text distinguishes an active/device or
    documented-limit finding, a heuristic/experimental hint, incomplete collection and unavailable
-   inputs from “no finding in the evaluated X10A data”. It never says “healthy” or “all clear”.
+   inputs from “no finding in the observed plant data”. It never says “healthy” or “all clear”.
    `available`, `assessable` and `evaluated` keep three different denominators visible:
    reportable rows, rows with a bounded judgement, and judgements whose evidence gate is complete.
    Thus four completed judgements read as `4/4 bewertet`; the broader count of reportable values is
@@ -862,6 +862,15 @@ Body, ordered:
    and BSH have separate capability and evidence clocks, so an absent BSH row renders as unknown,
    never “0 min”; observed seconds are carried separately so a real 1–59-second activation displays
    as `<1 min` instead of zero.
+   **DHW heat loss uses clean one-hour R5T windows and an optional independent pump witness.** Tank
+   charging, internal-pump/BSH operation, 45 minutes of settling and draw-like temperature steps are
+   excluded. At least 0.8 K/h raises only `HINWEIS`; a green absence result needs a full 24-hour
+   lifecycle plus six clean hours. Settings → **Anlagendiagnose** configures the exact Shelly MQTT
+   topic, `apower`/source-time JSON paths, maximum age, ON/OFF hysteresis and confirmation. The row
+   distinguishes high loss during confirmed pump operation from high loss persisting after two hours
+   of confirmed pump-off evidence. It never turns either correlation into proof of a diverter/check-
+   valve or insulation defect: R5T is one point in a stratified tank, and draws/gravity circulation
+   remain alternative causes.
    **Every row explains both the fact and its limit** (same expander and the same
    `MODEL_DESCRIPTIONS` table as item 4). Water pressure is the sole manufacturer-backed numeric
    decision: representative official manuals across monobloc, split, high-capacity, geothermal and
@@ -1128,14 +1137,16 @@ screen title. `Esc` leaves the same way, but only when no modal is open: a modal
 one key press never both closes a dialog and leaves the screen behind it. Settings is addressable as
 `#settings`; each modal extends that route with its stable human-readable name.
 
-**Settings is flat.** No menu of entries, no sub-screens: the gear lands directly on four permanent
+**Settings is flat.** No menu of entries, no sub-screens: the gear lands directly on five permanent
 cards, stacked in the same single column as everything else (§9). The Connections tile is the *same*
 card it was on the dashboard — the move changed where the configuration lives, not how it looks. The
 board card is the same story split three ways: **ESP32** / **Protokoll** / **Firmware** answer three
 different questions (the board itself, the X10A link, the running software) that one card used to
-answer at once. The **Heizkurven-Diagnose** card is their neighbour rather than another top-level
-screen and deliberately comes last, after Firmware. All four are built and rebuilt together by one
-`esp32CardHtml()`. HomeHub/Modbus is a fifth row in the Connections tile and follows the same row
+answer at once. The permanent **Anlagendiagnose** card configures the independent read-only
+circulation-pump power source. The **Heizkurven-Diagnose** card is their permanent neighbour rather
+than another top-level screen and deliberately comes last, after Firmware and Anlagendiagnose. All
+five are built and rebuilt together by one `esp32CardHtml()`. HomeHub/Modbus is a fifth row in the
+Connections tile and follows the same row
 vocabulary exactly:
 
 1. **Connections tile** — one full-width card, `--card` bordered like the value groups, titled

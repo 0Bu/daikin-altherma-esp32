@@ -82,7 +82,7 @@ SENSITIVE = re.compile(
     # topic through their own broker, and the coordinates of their house. Written as the CONFIG field
     # names because that is how a log line would reach them (c.ref_temp_topic.c_str()); measured, they
     # add no finding today, so the gap they closed was latent rather than live.
-    r"ref_temp_\w+|weather_latitude\w*|weather_longitude\w*"
+    r"ref_temp_\w+|circulation_\w+|weather_latitude\w*|weather_longitude\w*"
     r")\b"
 )
 

@@ -10,6 +10,7 @@
 #include "ota_channel.hpp"  // OtaChannel — which published feed this device follows
 #include "modbus.hpp"       // MODBUS_TCP_PORT / MODBUS_DEFAULT_UNIT — the mb_* field defaults
 #include "heating_curve_diagnosis.hpp"
+#include "circulation_source.hpp"
 #include "reference_temperature.hpp"
 #include "ui_lang.hpp"      // UiLang — the web UI's manual language override (else browser-detected)
 
@@ -46,6 +47,18 @@ struct Config {
     std::string ref_temp_enabled_path;
     std::string ref_temp_hvac_mode_path;
     uint32_t    ref_temp_max_age_s = REF_TEMP_MAX_AGE_DEFAULT_S;
+    // Independent, read-only electrical witness for the potable-water circulation pump.  The
+    // board subscribes to the exact MQTT status topic already consumed by observability; it never
+    // queries VictoriaMetrics and never controls the relay.  Empty topic disables attribution while
+    // the X10A-only tank-loss observation remains available.
+    std::string circulation_name;
+    std::string circulation_topic;
+    std::string circulation_power_path;
+    std::string circulation_time_path;
+    uint32_t    circulation_max_age_s = CIRC_SOURCE_MAX_AGE_DEFAULT_S;
+    uint16_t    circulation_on_tenths_w = CIRC_SOURCE_ON_TENTHS_W_DEFAULT;
+    uint16_t    circulation_off_tenths_w = CIRC_SOURCE_OFF_TENTHS_W_DEFAULT;
+    uint16_t    circulation_confirm_s = CIRC_SOURCE_CONFIRM_DEFAULT_S;
     // Open-Meteo location in signed microdegrees. The explicit bit keeps (0°, 0°) representable;
     // disabled coordinates are canonicalized to zero and produce no weather traffic.
     bool        weather_enabled = false;
@@ -366,6 +379,16 @@ inline bool validate(const Config& c, std::string& reason, int max_gpio = 48,
     // like syslog_host — empty disables the optional HomeHub stack and is valid.
     if (c.mb_port < 1 || c.mb_port > 65535)   { reason = "mb_port out of range"; return false; }
     if (c.mb_unit_id < 1 || c.mb_unit_id > 247) { reason = "mb_unit_id out of range"; return false; }
+    const char* circulation_why = nullptr;
+    if (!circulation_source_config_valid(c.circulation_name, c.circulation_topic,
+                                         c.circulation_power_path, c.circulation_time_path,
+                                         c.circulation_max_age_s,
+                                         c.circulation_on_tenths_w,
+                                         c.circulation_off_tenths_w,
+                                         c.circulation_confirm_s, &circulation_why)) {
+        reason = circulation_why ? circulation_why : "invalid circulation source config";
+        return false;
+    }
     return true;
 }
 
@@ -392,10 +415,10 @@ inline bool set_hp_clears_fingerprint(bool profile_present, const std::string& p
     return profile_present && profile_value == "auto";
 }
 
-// The rolling X10A observation belongs to one physical link/profile identity. An explicit profile
+// The X10A-backed part of the rolling plant diagnosis belongs to one physical link/profile identity. An explicit profile
 // request is an identity statement even when its text matches the current value; changing either
 // wire may attach a different unit. HomeHub-only fields share /set_hp but are an independent source
-// and must not discard X10A evidence.
+// and must not discard that evidence.
 inline bool set_hp_resets_checkup(bool profile_present, int old_rx, int old_tx,
                                   int new_rx, int new_tx) {
     return profile_present || old_rx != new_rx || old_tx != new_tx;

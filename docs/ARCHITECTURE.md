@@ -108,13 +108,16 @@ http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /di
                       POST /crash/dismiss. http_append_status_json() runs on the httpd task ALONE —
                       see "Push vs. poll" below for why that sentence is load-bearing
 http_config.cpp     → POST /set_wifi, /set_mqtt, /test_ref_temp, /set_ref_temp, /set_weather,
+                      /test_circulation, /set_circulation,
                       /set_syslog,
                       /set_ntp, /set_hp, /discover_homehub, /set_board, /set_env3, /set_ota, /set_lang,
-                      /detect — all FOURTEEN, which http_server.cpp's cfg.max_uri_handlers is sized
+                      /detect — all SIXTEEN, which http_server.cpp's cfg.max_uri_handlers is sized
                       exactly to (and which must be LOWERED in the same commit that retires a route,
                       as retiring /set_dynamic_lwt did: a count left above the real one is a comment
                       that has stopped describing the code depending on it). /test_ref_temp proves that an exact MQTT mapping yields an accepted
                       value without saving it; /set_ref_temp requires that proof and applies live.
+                      /test_circulation and /set_circulation use the same proof boundary for a
+                      read-only active-power mapping; neither route can switch the configured plug.
                       /set_weather validates the DWD path component, persists it and only wakes the
                       weather task; no DNS/TLS request runs on the httpd worker.
                       CONSENT rides on the SAVE of each source, not on a switch in front of them:
@@ -482,12 +485,12 @@ host-testable core is unusually large and valuable, because the risky parts are 
   inference run without run-state on more than a third of the detected catalog. No firmware caller
   yet (#69 Phase 3 has not landed); pure and host-tested so the policy is asserted rather than
   re-litigated at the future call site.
-- `logic/checkup.hpp` — the **rolling X10A plant observation** ([#208](https://github.com/0Bu/daikin-altherma-esp32/issues/208)):
+- `logic/checkup.hpp` — the **rolling on-board plant diagnostics** ([#208](https://github.com/0Bu/daikin-altherma-esp32/issues/208), [#349](https://github.com/0Bu/daikin-altherma-esp32/issues/349)):
   the third question the dashboard answers, after *what is it doing now* (the schematic) and *what did
   this one reading do today* (the trends). It reports counted events, durations and window minima —
   compressor starts and observed runtime per detected start, defrost count and (where compressor
   state exists) share of paired runtime, water pressure and steady-flow minima, observed BUH/BSH
-  seconds, the
+  seconds, clean one-hour R5T tank-cooling windows with circulation-pump attribution, the
   unit's fault class and protection-retry counter changes — through `/status.health`. It does **not**
   issue a plant-health certificate: X10A does not establish refrigerant charge, sensor calibration,
   hydraulic cleanliness, air path, mechanical condition or seasonal efficiency. `checkup.cpp` owns
@@ -563,8 +566,20 @@ host-testable core is unusually large and valuable, because the risky parts are 
      not count as no-event evidence. Pure observations and stable experimental counters do not enter
      `evaluated` or support an overall `Ok`; an actual retry increase can still raise aggregate `Info`.
 
-  The card also deliberately omits claims the bus cannot support: 3-way-valve leakage inferred from
-  DHW cooling (a circulation loop dominates that slope and the sensors sit upstream of the diverter),
+  **DHW heat loss adds one independent witness without overstating causality.** A candidate window
+  requires the 3-way valve outside DHW, the internal water pump and BSH off, plausible R5T, and 45
+  minutes of settling after tank charging. A drop of at least 0.4 K inside ten minutes is treated as
+  draw-like contamination and discards that segment. The remaining non-overlapping one-hour windows
+  report their maximum R5T drop; at least 0.8 K/h is an `Info` project heuristic, while `Ok` requires
+  a complete 24-hour lifecycle and six clean hours. When configured, the board subscribes to the
+  Shelly's exact MQTT status topic and uses mapped active power with hysteresis, freshness and
+  confirmation. A high window is labelled “with pump” only with at least five minutes of confirmed
+  run time, and “pump off” only after at least two hours of confirmed off time plus 90% source
+  coverage. R5T is a point sensor in a stratified tank: even high loss with the external pump off is
+  not proof of a leaking diverter/check valve, a gravity loop, insulation loss or a draw.
+
+  The card also deliberately omits claims the available inputs cannot support: 3-way-valve leakage
+  inferred from DHW cooling, even after independent circulation-pump correlation,
   a universal minimum-flow threshold, a flat daily-start alarm, and any overall “healthy” verdict.
 - `logic/redact.hpp` — what a diagnostic snapshot must **not** carry when it leaves the device, for
   `GET /status?redact=1` and `GET /diag?redact=1`. A bug report is filed as a *public* GitHub issue
@@ -572,7 +587,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   defensible because the board scrubs first — so this is the single implementation of that rule,
   shared by the web UI's "Report a bug" action and the manual `curl` fallback, rather than a copy in
   `www/js/app_state.js` that would drift. Two shapes, because the routes leak differently: `/status` leaks by
-  **field** (twelve named values, substituted where each is *written* — a post-processing pass over
+  **field** (fourteen named values, substituted where each is *written* — a post-processing pass over
   the finished JSON is what the httpd stack budget has no room for), `/diag` leaks by **line**,
   which is the non-trivial half the `CHECK`s cover. That count is **derived** from the call sites by
   the redaction audit rather than restated here, because it had already been wrong in four places at
@@ -863,7 +878,7 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    `RAW_CAPTURE_MAX` (8) times **per boot, never refilled** — a series rather than a point, because
    two candidate scales that both fit one sample may not fit a curve, and a budget because one line
    per second would evict the rest of the boot's evidence from the 6 KB diag ring within a minute.
-4c. **Fold the cycle into the rolling X10A observation** (`checkup_record()`, `checkup.cpp`), beside the trend
+4c. **Fold the cycle into the rolling plant diagnostics** (`checkup_record()`, `checkup.cpp`), beside the trend
    rings and on the same terms — before the commit, outside the cache mutex, with this cycle's values
    still the task's own. It counts **events**, signal-specific observed seconds and **window minima**:
    compressor start edges and observed runtime, defrost transitions, separate observed BUH/BSH
@@ -1208,7 +1223,8 @@ Three layers keep the WiFi station link up:
 The Home Assistant bridge:
 
 - **Read-only** — no command topics. This bridge mirrors telemetry and never actuates the heat
-  pump. One optional exact-topic subscription captures and qualifies a reference-temperature input,
+  pump or Shelly plug. Two optional exact-topic subscriptions capture and qualify a
+  reference-temperature input and the circulation pump's active-power witness,
   but no averaging or control path reads it. A configured payload timestamp (RFC3339 or Unix
   seconds) supplies age across retained delivery and restarts; without one, only a non-retained live
   delivery may age from monotonic MQTT arrival. Editing that mapping is test-before-persist:
@@ -1216,7 +1232,9 @@ The Home Assistant bridge:
   a mapping-bound proof only after the normal JSON, timestamp and freshness checks accept a real
   value; `POST /set_ref_temp` refuses a non-empty mapping without that proof. The transient test
   never changes Config/NVS, and an empty topic remains the explicit disable operation that needs no
-  reading. Neither link can write: X10A has no write command by protocol, and no source file can
+  reading. The circulation mapping likewise requires `POST /test_circulation` proof before
+  `POST /set_circulation`; its threshold state is derived from mapped watts, never relay `output`.
+  Neither link can write: X10A has no write command by protocol, and no source file can
   build or issue a Modbus frame for the HomeHub (see [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)).
 - **One HA installation device.** Its id is the slugified MQTT base topic
   (`daikin-altherma-esp32` → `daikin_altherma_esp32`, `logic/ha_device.hpp`), so replacing the ESP32
@@ -1231,14 +1249,14 @@ The Home Assistant bridge:
   long-term statistics carry over. The device contains X10A values plus board/link diagnostics;
   HomeHub register values remain MQTT-only.
 - **Own publish task + esp-mqtt client.** The event handler flips status flags and copies a saved or
-  temporarily tested reference payload into one bounded queue; the same task-side decoder serves
+  temporarily tested reference/circulation payload into one bounded queue; the same task-side decoder serves
   both paths, so a successful pre-save test cannot disagree with live capture. JSON parsing, string
   work, transient test subscription changes and all publishing happen in the task, so the mqtt
   event loop is never blocked by either.
 - **X10A-gated installation ownership, not MQTT input.** MQTT configuration is not authority to
   speak for the installation. Before the first valid X10A reply, the client connects without the
-  shared `<base>/status` last will and services only the configured reference-temperature
-  subscription/test. All ordinary discovery, state, heartbeat, crash, weather and Modbus publication
+  shared `<base>/status` last will and services only configured reference-temperature and
+  circulation-power subscriptions/tests. All ordinary discovery, state, heartbeat, crash, weather and Modbus publication
   remains blocked. The only outbound exception is explicit Settings cleanup: clearing an enabled
   Weather or HomeHub configuration queues that source's retained empty tombstone after the disabled
   config was persisted. When `hp_stats().connected` first proves the bus, the task cleanly stops and
@@ -1639,9 +1657,10 @@ This is distinct from the image anti-brick recovery above; both are covered in
 one classic-script scope and are spliced into ONE self-contained, pre-gzipped page at build time
 (`inline_assets.cmake`). The UI is **two screens**:
 the dashboard (the plant — schematic, model, values, no config at all) and **Settings** behind the
-header gear (the Connections tile + the three ESP32 board cards — ESP32 board health, Protokoll
-[X10A link + pins] and Firmware [version/OTA + language] — flat, no sub-screens, all three built by
-one `esp32CardHtml()` and rebuilt together on every poll). Settings drives the config endpoints in
+header gear (the Connections tile + four ESP32 board cards — ESP32 board health, Protokoll
+[X10A link + pins] and Firmware [version/OTA + language] — plus the permanent Anlagendiagnose card;
+flat, no sub-screens, all four built by one `esp32CardHtml()` and rebuilt together on every poll).
+Settings drives the config endpoints in
 place:
 
 - **WiFi** → `/set_wifi`, provisioned first from the captive `setup.html` and thereafter **re-editable
@@ -1720,6 +1739,14 @@ place:
   (no UI control), the poll interval is fixed at 1 s (not sent). `/set_hp` still accepts only
   `{profile, rx, tx}` — the UI language is its own setting now (see the **Language** bullet below),
   never a `/set_hp` field.
+- **DHW circulation-pump witness** → `/test_circulation` then `/set_circulation` (Settings
+  **Anlagendiagnose** card). The fields are the exact MQTT topic, active-power and source-time JSON
+  paths, maximum age, ON/OFF hysteresis and confirmation time. Save accepts only a fresh value
+  and binds the proof to that exact tuple before writing blob v15; Delete posts the empty mapping.
+  The defaults match the observed Shelly Plug S contract (`apower`, `aenergy.minute_ts`, 3.0 W ON,
+  1.0 W OFF, 120 s age, 60 s confirmation), but remain editable. The board subscribes to the same
+  Shelly MQTT message that an external VictoriaMetrics pipeline may store; it does not query
+  VictoriaMetrics and does not publish a Shelly command.
 - **Language** → `/set_lang` (Settings **Firmware** card). The UI is bilingual (de/en) and picks its
   language client-side from `navigator.language` by default — a browser fact, not device state — but
   the card's picker (**Browser** / English / Deutsch) can force one, which then **persists** in the
@@ -1737,7 +1764,7 @@ place:
   has a slot in each (`#otaStat`, `#otaStatSet`) and `otaInline` paints both, so the flow reports on
   whichever screen started it (only one is ever visible; the other screen is `display:none`). The
   Settings slot is painted into the DOM rather than rebuilt from state, so `renderSettings` freezes
-  **all three ESP32 board cards** together while `S.otaShown` (they are built and painted as one
+  **all permanent Settings cards** together while `S.otaShown` (they are built and painted as one
   string, `esp32CardHtml()`) — otherwise the once-a-second rebuild would blink the percentage out and
   restart the spinner animation every frame. The flow itself:
   `GET /ota/check`, poll `GET /ota/status` until the check finishes, confirm, `POST

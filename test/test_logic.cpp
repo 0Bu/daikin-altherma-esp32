@@ -4315,6 +4315,31 @@ static void test_config_store() {
           b.board_preset_id == static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite));
     // v14's byte is RETIRED — only the "this blob was at least v14" witness survives it.
     CHECK(b.has_dynamic_lwt);
+    CHECK(b.has_circulation && b.circulation_topic.empty() &&
+          b.circulation_max_age_s == 120 && b.circulation_on_tenths_w == 30 &&
+          b.circulation_off_tenths_w == 10 && b.circulation_confirm_s == 60);
+
+    // v15 is append-only: the complete Shelly mapping and exact tenths-of-watt thresholds round-trip,
+    // while a genuine v14 blob remains readable and reports the source absent.
+    ConfigBlob circ;
+    circ.wifi_ssid = "net";
+    circ.circulation_name = "DHW circulation";
+    circ.circulation_topic = "shellyplugsg3-fixture00001/status/switch:0";
+    circ.circulation_power_path = "apower";
+    circ.circulation_time_path = "aenergy.minute_ts";
+    circ.circulation_max_age_s = 120;
+    circ.circulation_on_tenths_w = 30;
+    circ.circulation_off_tenths_w = 10;
+    circ.circulation_confirm_s = 60;
+    const std::vector<uint8_t> circ_buf = config_blob_serialize(circ);
+    ConfigBlob circ_rt;
+    CHECK(config_blob_deserialize(circ_buf.data(), circ_buf.size(), circ_rt));
+    CHECK(circ_rt.has_circulation && circ_rt.circulation_name == circ.circulation_name &&
+          circ_rt.circulation_topic == circ.circulation_topic &&
+          circ_rt.circulation_power_path == "apower" &&
+          circ_rt.circulation_time_path == "aenergy.minute_ts");
+    CHECK(circ_rt.circulation_max_age_s == 120 && circ_rt.circulation_on_tenths_w == 30 &&
+          circ_rt.circulation_off_tenths_w == 10 && circ_rt.circulation_confirm_s == 60);
 
     // The other flag combination, and a negative-looking port stored as-is.
     ConfigBlob c; c.wifi_rolled_back = true; c.wifi_rollback_active = false; c.syslog_port = 65535;
@@ -4341,6 +4366,17 @@ static void test_config_store() {
         v[v.size()-4] = k & 0xFF; v[v.size()-3] = (k>>8) & 0xFF;
         v[v.size()-2] = (k>>16) & 0xFF; v[v.size()-1] = (k>>24) & 0xFF;
     };
+    const size_t circ_suffix_bytes = 2 + circ.circulation_name.size() +
+        2 + circ.circulation_topic.size() + 2 + circ.circulation_power_path.size() +
+        2 + circ.circulation_time_path.size() + 16;
+    std::vector<uint8_t> v14 = circ_buf;
+    v14.erase(v14.end() - 4 - circ_suffix_bytes, v14.end() - 4);
+    v14[4] = 14;
+    restamp(v14);
+    ConfigBlob v14_rt;
+    CHECK(config_blob_deserialize(v14.data(), v14.size(), v14_rt));
+    CHECK(v14_rt.wifi_ssid == "net" && !v14_rt.has_circulation &&
+          v14_rt.circulation_topic.empty());
     // Unknown version, CRC re-stamped: rejected by the version check alone — on BOTH sides of the
     // accepted range, so a future v3 blob written by a newer build is refused rather than
     // half-decoded by this one.
@@ -4360,7 +4396,7 @@ static void test_config_store() {
     board.board_preset_id = static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite);
     board.board_user_set = true;
     std::vector<uint8_t> bb = config_blob_serialize(board);
-    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 14);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 15);
     ConfigBlob rt;
     CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
     CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
@@ -4390,8 +4426,9 @@ static void test_config_store() {
     // the 1-byte v4 language and the 11-byte v5 HomeHub block (empty mb_host [2] + mb_port u32 +
     // mb_unit_id u32 + 1 flag byte), three empty v7 strings (6 bytes), and the empty v8 timestamp
     // path + max-age u32 (6 bytes), weather (9), ENV III (9), board identity (2), and the three
-    // empty v13 room-control strings (6), and v14 controller mode (1) = 65 bytes.
-    v1.erase(v1.end() - 4 - 65, v1.end() - 4);
+    // empty v13 room-control strings (6), v14 controller mode (1), and the empty/default v15
+    // circulation-source block (24) = 89 bytes.
+    v1.erase(v1.end() - 4 - 89, v1.end() - 4);
     v1[4] = 1;
     restamp(v1);
     ConfigBlob legacy;
@@ -4420,7 +4457,7 @@ static void test_config_store() {
     // would be a spectacularly bad trade. has_ota == false is how the caller tells "no channel
     // stored" from "explicitly release"; both mean release, only the diag line differs.
     std::vector<uint8_t> v2 = bb;
-    v2.erase(v2.end() - 4 - 52, v2.end() - 4);           // drop v3 through v14
+    v2.erase(v2.end() - 4 - 76, v2.end() - 4);           // drop v3 through v15
     v2[4] = 2;
     restamp(v2);
     ConfigBlob pre;
@@ -4444,7 +4481,7 @@ static void test_config_store() {
     // v3 blob and must still decode — the channel survives, and the absent language reads as auto
     // (has_lang == false, ui_lang == 0), so the browser keeps auto-detecting exactly as before.
     std::vector<uint8_t> v3 = lbv;
-    v3.erase(v3.end() - 4 - 51, v3.end() - 4);           // drop v4 through v14
+    v3.erase(v3.end() - 4 - 75, v3.end() - 4);           // drop v4 through v15
     v3[4] = 3;
     restamp(v3);
     ConfigBlob prel;
@@ -4461,7 +4498,7 @@ static void test_config_store() {
     mb.mb_host = "homehub-524288-abc.local";
     mb.mb_port = 502; mb.mb_unit_id = 3; mb.homehub_enabled = false;
     std::vector<uint8_t> mbb = config_blob_serialize(mb);
-    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 14);
+    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 15);
     ConfigBlob mrt;
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
     CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-abc.local");
@@ -4485,7 +4522,7 @@ static void test_config_store() {
     // index would make these checks assert nothing at all.
     ConfigBlob consent_src = mb; consent_src.mb_host = "homehub-524288-abc.local";
     std::vector<uint8_t> consent = config_blob_serialize(consent_src);
-    const size_t flag_byte = consent.size() - 5 - 39;    // HomeHub flag byte, before the v7+ tail
+    const size_t flag_byte = consent.size() - 5 - 63;    // HomeHub flag byte, before the v7+ tail
     CHECK((consent[flag_byte] & 2u) != 0);               // offset pinned by the mirror bit
     CHECK((consent[flag_byte] & 1u) == 0);               // the encoder never sets the consent bit
     consent[flag_byte] |= 1u;
@@ -4500,7 +4537,7 @@ static void test_config_store() {
     // The immediately preceding v6 build could persist enabled+empty as Auto. Preserve its wire
     // shape as an upgrade fixture: current firmware must ignore that bit and decode empty as Off.
     std::vector<uint8_t> legacy_v6_auto = mbb;
-    legacy_v6_auto.erase(legacy_v6_auto.end() - 4 - 39, legacy_v6_auto.end() - 4);
+    legacy_v6_auto.erase(legacy_v6_auto.end() - 4 - 63, legacy_v6_auto.end() - 4);
     legacy_v6_auto[4] = 6;
     legacy_v6_auto[legacy_v6_auto.size() - 5] |= 2u;
     restamp(legacy_v6_auto);
@@ -4510,7 +4547,7 @@ static void test_config_store() {
     // A v5 empty-host blob also decodes disabled. Its historical flag was ambiguous, so it cannot
     // arm discovery in the current explicit-search contract.
     std::vector<uint8_t> v5 = mbb;
-    v5.erase(v5.end() - 4 - 39, v5.end() - 4);           // v5 predates v7 through v14
+    v5.erase(v5.end() - 4 - 63, v5.end() - 4);           // v5 predates v7 through v15
     v5[4] = 5;
     v5[v5.size() - 5] &= static_cast<uint8_t>(~2u);      // HomeHub flag byte immediately before CRC
     restamp(v5);
@@ -4520,7 +4557,7 @@ static void test_config_store() {
     // v8 carried the same bit as an inert placeholder. It stays inert forever now that the write
     // path is gone: the transport survives the migration and nothing decodes a consent flag.
     std::vector<uint8_t> v8 = mbb;
-    v8.erase(v8.end() - 4 - 27, v8.end() - 4);           // v8 predates weather/ENV III/identity/v13/v14
+    v8.erase(v8.end() - 4 - 51, v8.end() - 4);           // v8 predates weather/ENV III/identity/v13-v15
     v8[4] = 8;
     restamp(v8);
     ConfigBlob v8rt;
@@ -4530,7 +4567,7 @@ static void test_config_store() {
     // language byte) must decode, report has_modbus == false and leave the mb_* struct defaults
     // (X10A / 502 / 1) — the same trade v1/v2/v3 already refuse to make.
     std::vector<uint8_t> v4 = mbb;
-    v4.erase(v4.end() - 4 - 50, v4.end() - 4);           // drop v5 through v14
+    v4.erase(v4.end() - 4 - 74, v4.end() - 4);           // drop v5 through v15
     v4[4] = 4;
     restamp(v4);
     ConfigBlob v4rt;
@@ -4562,7 +4599,7 @@ static void test_config_store() {
 
     // v13 already has room control but predates the controller mode; it must migrate OFF.
     std::vector<uint8_t> v13 = refb;
-    v13.erase(v13.end() - 4 - 1, v13.end() - 4);
+    v13.erase(v13.end() - 4 - 25, v13.end() - 4);
     v13[4] = 13;
     restamp(v13);
     ConfigBlob v13rt;
@@ -4575,7 +4612,7 @@ static void test_config_store() {
                                  2 + ref.ref_temp_enabled_path.size() +
                                  2 + ref.ref_temp_hvac_mode_path.size();
     std::vector<uint8_t> v12 = refb;
-    v12.erase(v12.end() - 4 - (v13_ref_bytes + 1), v12.end() - 4);
+    v12.erase(v12.end() - 4 - (v13_ref_bytes + 25), v12.end() - 4);
     v12[4] = 12;
     restamp(v12);
     ConfigBlob v12rt;
@@ -4586,7 +4623,7 @@ static void test_config_store() {
     // The hardware-tested capture slice wrote v7 with only name/topic/value-path. It must migrate
     // in place: keep that mapping, add no imaginary timestamp path, and use the 10-minute default.
     std::vector<uint8_t> v7 = refb;
-    v7.erase(v7.end() - 4 - (2 + ref.ref_temp_time_path.size() + 4 + 20 + v13_ref_bytes + 1),
+    v7.erase(v7.end() - 4 - (2 + ref.ref_temp_time_path.size() + 4 + 20 + v13_ref_bytes + 25),
              v7.end() - 4);
     v7[4] = 7;
     restamp(v7);
@@ -4597,7 +4634,7 @@ static void test_config_store() {
 
     // A genuine v6 blob still carries every earlier setting and reports the new mapping absent.
     std::vector<uint8_t> v6 = mbb;
-    v6.erase(v6.end() - 4 - 39, v6.end() - 4);
+    v6.erase(v6.end() - 4 - 63, v6.end() - 4);
     v6[4] = 6;
     restamp(v6);
     ConfigBlob v6rt;
@@ -4618,7 +4655,7 @@ static void test_config_store() {
           weatherrt.weather_longitude_e6 == 13404954);
     // A genuine v10 blob keeps weather but predates ENV III and explicit board identity.
     std::vector<uint8_t> v10 = weatherb;
-    v10.erase(v10.end() - 4 - 18, v10.end() - 4);
+    v10.erase(v10.end() - 4 - 42, v10.end() - 4);
     v10[4] = 10;
     restamp(v10);
     ConfigBlob v10rt;
@@ -4636,7 +4673,7 @@ static void test_config_store() {
     // v11 already carried ENV III but no explicit board id. It remains readable so the load path can
     // migrate the old `board_set` statement instead of losing credentials or sensor wiring.
     std::vector<uint8_t> v11 = envbuf;
-    v11.erase(v11.end() - 4 - 9, v11.end() - 4);
+    v11.erase(v11.end() - 4 - 33, v11.end() - 4);
     v11[4] = 11;
     restamp(v11);
     ConfigBlob v11rt;
@@ -4646,7 +4683,7 @@ static void test_config_store() {
 
     // A v9 upgrade predates both independent outdoor sources and remains disabled by default.
     std::vector<uint8_t> v9 = weatherb;
-    v9.erase(v9.end() - 4 - 27, v9.end() - 4);
+    v9.erase(v9.end() - 4 - 51, v9.end() - 4);
     v9[4] = 9;
     restamp(v9);
     ConfigBlob v9rt;
@@ -4847,6 +4884,43 @@ static void test_reference_temperature_config() {
     raw.payload_valid = false;
     raw.payload_reason = ReferenceRoomReason::BackwardTimestamp;
     CHECK(reference_room_sample(raw, fresh).reason == ReferenceRoomReason::BackwardTimestamp);
+}
+
+static void test_circulation_source() {
+    const char* why = nullptr;
+    CHECK(circulation_source_config_valid("DHW circulation",
+          "shellyplugsg3-fixture00001/status/switch:0", "apower", "aenergy.minute_ts",
+          120, 30, 10, 60, &why));
+    CHECK(circulation_source_config_valid("", "", "", "", 120, 30, 10, 60, &why));
+    CHECK(!circulation_source_config_valid("pump", "shelly/+/status", "apower",
+                                           "aenergy.minute_ts", 120, 30, 10, 60, &why));
+    CHECK(!circulation_source_config_valid("pump", "shelly/status", "apower",
+                                           "aenergy.minute_ts", 120, 10, 10, 60, &why));
+    CHECK(std::string(why) == "ON threshold must be greater than OFF threshold");
+    CHECK(!circulation_source_config_valid("pump", "shelly/status", "apower",
+                                           "aenergy.minute_ts", 9, 30, 10, 60, &why));
+    CHECK(!circulation_source_config_valid("pump", "shelly/status", "apower",
+                                           "aenergy.minute_ts", 120, 30, 10, 0, &why));
+
+    CHECK(circulation_power_class(0.0, 30, 10) == CirculationPowerState::Off);
+    CHECK(circulation_power_class(1.0, 30, 10) == CirculationPowerState::Off);
+    CHECK(circulation_power_class(2.0, 30, 10) == CirculationPowerState::Unknown);
+    CHECK(circulation_power_class(3.0, 30, 10) == CirculationPowerState::On);
+    CHECK(circulation_power_class(5.7, 30, 10) == CirculationPowerState::On);
+    CHECK(circulation_power_class(-0.1, 30, 10) == CirculationPowerState::Unknown);
+
+    CirculationPowerTracker tracker;
+    tracker.observe(5.7, 1000, 30, 10, 60);
+    CHECK(tracker.confirmed == CirculationPowerState::Unknown);  // one retained sample is no proof
+    tracker.observe(5.6, 60'999, 30, 10, 60);
+    CHECK(tracker.confirmed == CirculationPowerState::Unknown);
+    tracker.observe(5.6, 61'000, 30, 10, 60);
+    CHECK(tracker.confirmed == CirculationPowerState::On);
+    tracker.observe(2.0, 62'000, 30, 10, 60);                    // hysteresis preserves proof
+    CHECK(tracker.confirmed == CirculationPowerState::On);
+    tracker.observe(0.0, 70'000, 30, 10, 60);
+    tracker.observe(0.1, 130'000, 30, 10, 60);
+    CHECK(tracker.confirmed == CirculationPowerState::Off);
 }
 
 static void test_heating_curve_diagnosis() {
@@ -6993,6 +7067,67 @@ static void test_checkup() {
         CHECK(r.buf[0].starts == 0 && (r.buf[0].flags & CHECKUP_F_FAULT) == 0);
     }
 
+    {
+        // DHW cooling is built from clean, non-overlapping one-hour R5T windows. With actual Shelly
+        // power known OFF continuously, a 1.0 K/h decline becomes attributable only after the
+        // independent two-hour off-settling guard; the first hour is still a real high-loss finding,
+        // just not yet an off-pump one.
+        DhwLossState st;
+        DhwLossBucket b;
+        CheckupSample s;
+        s.valve_known = s.pump_known = s.bsh_known = true;
+        s.valve_dhw = s.pump_on = s.bsh_on = false;
+        s.r5t_ok = true;
+        s.circulation_configured = s.circulation_known = true;
+        s.circulation_on = false;
+        for (int sec = 0; sec <= 2 * 3600 + 10; sec += 10) {
+            s.r5t_tenths = 500 - sec / 360;              // exactly 1.0 K/h at 0.1 K resolution
+            dhw_loss_step(st, b, s, static_cast<int64_t>(sec) * 1000000);
+        }
+        CHECK(b.windows == 2 && b.high_windows == 2 && b.max_loss_tenths_k_h == 10);
+        CHECK(b.high_with_pump == 0 && b.high_pump_off == 1);
+        CHECK(b.circulation_on_s == 0 && b.circulation_known_s >= 2 * 3600 - 10);
+
+        // The same measured loss with ~5.7 W continuously present is correlated with pump operation.
+        DhwLossState on_st;
+        DhwLossBucket on_b;
+        s.circulation_on = true;
+        for (int sec = 0; sec <= 3610; sec += 10) {
+            s.r5t_tenths = 500 - sec / 360;
+            dhw_loss_step(on_st, on_b, s, static_cast<int64_t>(sec) * 1000000);
+        }
+        CHECK(on_b.windows == 1 && on_b.high_with_pump == 1 && on_b.high_pump_off == 0);
+
+        // A 0.4 K step inside ten minutes is draw-like contamination. It resets the candidate rather
+        // than becoming a spectacular heat-loss rate in the diagnosis.
+        DhwLossState draw_st;
+        DhwLossBucket draw_b;
+        s.circulation_on = false;
+        for (int sec = 0; sec <= 3600; sec += 10) {
+            s.r5t_tenths = sec < 300 ? 500 : 496;
+            dhw_loss_step(draw_st, draw_b, s, static_cast<int64_t>(sec) * 1000000);
+        }
+        CHECK(draw_b.windows == 0 && draw_b.high_windows == 0);
+
+        // A positive tank-charge witness starts the 45-minute settling guard even when a different
+        // state row timed out in the same sweep. Recovering that row must not admit the charge tail.
+        DhwLossState settle_st;
+        DhwLossBucket settle_b;
+        s.valve_known = true;
+        s.valve_dhw = true;
+        s.pump_known = false;
+        s.bsh_known = true;
+        s.bsh_on = false;
+        s.r5t_tenths = 500;
+        dhw_loss_step(settle_st, settle_b, s, 0);
+        CHECK(settle_st.settle_remaining_s == DHW_LOSS_SETTLE_S);
+        s.valve_dhw = false;
+        s.pump_known = true;
+        dhw_loss_step(settle_st, settle_b, s, 10'000'000);
+        CHECK(settle_st.settle_remaining_s == DHW_LOSS_SETTLE_S - 10);
+        CHECK(settle_st.segment_start_us < 0 && settle_b.windows == 0);
+    }
+
     // --- verdicts -------------------------------------------------------------------------------
     // Full capability and a complete evidence window unless a case says otherwise.
     CheckupCoverage full;
@@ -7419,16 +7554,24 @@ static void test_checkup() {
         CheckupWindow good = day();
         good.starts = 8;
         good.run_s  = 8u * 3600;
-        const CheckupReport ok = checkup_evaluate(good, full, FaultClass::Normal);
+        CheckupCoverage all = full;
+        all.valve = all.r5t = true;
+        DhwLossWindow clean_dhw;
+        clean_dhw.observed_s = DHW_LOSS_REQUIRED_S;
+        clean_dhw.circulation_known_s = DHW_LOSS_REQUIRED_S;
+        clean_dhw.windows = DHW_LOSS_REQUIRED_S / DHW_LOSS_WINDOW_S;
+        clean_dhw.max_loss_tenths_k_h = 3;
+        const CheckupReport ok = checkup_evaluate(good, all, FaultClass::Normal, clean_dhw);
         CHECK(ok.overall == CheckupVerdict::Ok);
-        CHECK(ok.full_span && ok.available == CHECKUP_CHECK_COUNT && ok.assessable == 4 &&
-              ok.evaluated == 4); // fault, cycling, defrost ratio and pressure
+        CHECK(ok.full_span && ok.available == CHECKUP_CHECK_COUNT && ok.assessable == 5 &&
+              ok.evaluated == 5); // fault, DHW loss, cycling, defrost ratio and pressure
 
         CheckupWindow idle_no_ratio = good;
         idle_no_ratio.dfr_run_s = 0;
-        const CheckupReport idle_defrost = checkup_evaluate(idle_no_ratio, full, FaultClass::Normal);
+        const CheckupReport idle_defrost =
+            checkup_evaluate(idle_no_ratio, all, FaultClass::Normal, clean_dhw);
         CHECK(idle_defrost[CheckupCheck::Defrost].verdict == CheckupVerdict::Ok);
-        CHECK(idle_defrost.assessable == 3 && idle_defrost.evaluated == 3);
+        CHECK(idle_defrost.assessable == 4 && idle_defrost.evaluated == 4);
 
         // Flow and heaters are facts without universal judgement; count-only defrost is likewise not
         // an assessment. They can fill rows but can never manufacture "no finding".
@@ -7445,14 +7588,15 @@ static void test_checkup() {
         // an absence conclusion and therefore stays outside the evaluated denominator.
         CheckupWindow retry_event = good;
         retry_event.flags |= CHECKUP_F_RETRY;
-        const CheckupReport with_retry = checkup_evaluate(retry_event, full, FaultClass::Normal);
+        const CheckupReport with_retry =
+            checkup_evaluate(retry_event, all, FaultClass::Normal, clean_dhw);
         CHECK(with_retry[CheckupCheck::Retries].verdict == CheckupVerdict::Info);
         CHECK(with_retry.overall == CheckupVerdict::Info);
-        CHECK(with_retry.assessable == 4 && with_retry.evaluated == 4);
+        CHECK(with_retry.assessable == 5 && with_retry.evaluated == 5);
         // These strings are the existing /status.health wire contract. Non-empty is insufficient:
         // a well-formed rename would make an older UI silently skip a row or misread a verdict.
         static const char* const kCheckIds[] = {
-            "fault", "cycling", "defrost", "pressure", "flow", "heater", "retries",
+            "fault", "dhw_loss", "cycling", "defrost", "pressure", "flow", "heater", "retries",
         };
         CHECK(sizeof(kCheckIds) / sizeof(kCheckIds[0]) == CHECKUP_CHECK_COUNT);
         for (size_t i = 0; i < CHECKUP_CHECK_COUNT; i++) {
@@ -7466,6 +7610,7 @@ static void test_checkup() {
         CHECK(std::string(checkup_verdict_name(CheckupVerdict::Warn)) == "warn");
         CHECK(std::string(checkup_evidence_name(CheckupCheck::Fault)) == "device");
         CHECK(std::string(checkup_evidence_name(CheckupCheck::Pressure)) == "manufacturer");
+        CHECK(std::string(checkup_evidence_name(CheckupCheck::DhwLoss)) == "heuristic");
         CHECK(std::string(checkup_evidence_name(CheckupCheck::Cycling)) == "heuristic");
         CHECK(std::string(checkup_evidence_name(CheckupCheck::Defrost)) == "heuristic");
         CHECK(std::string(checkup_evidence_name(CheckupCheck::Flow)) == "observation");
@@ -9145,6 +9290,7 @@ int main() {
     test_config_store();
     test_env3();
     test_reference_temperature_config();
+    test_circulation_source();
     test_heating_curve_diagnosis();
     test_weather_forecast_contract();
     test_mcp();

@@ -142,6 +142,7 @@ void http_append_status_json(std::string& j, bool redact) {
     HpStats     hp  = hp_stats();
     MqttStatus  m   = mqtt_status();
     ReferenceTemperatureStatus rt = reference_temperature_status();
+    CirculationSourceStatus circulation = circulation_source_status();
     const logic::HeatingCurveSnapshot heating_curve = heating_curve_status();
     WeatherForecastStatus wf = weather_forecast_status();
     WifiInfo    wi  = wifi_info();
@@ -415,6 +416,51 @@ void http_append_status_json(std::string& j, bool redact) {
     j += ",\"holds\":"; j += std::to_string(heating_curve.holds);
     j += ",\"blocks\":"; j += std::to_string(heating_curve.blocks);
     j += "},";
+    // Independent electrical witness for the potable-water circulation pump. Topic/name are
+    // identifying installation data and therefore follow the same redaction boundary as the room
+    // source. Power and source-time remain non-secret diagnostic evidence.
+    char circulation_power[32] = {0};
+    if (circulation.has_value)
+        std::snprintf(circulation_power, sizeof(circulation_power), "%.6g", circulation.power_w);
+    auto tenths_w_text = [](uint16_t value) {
+        char out[24];
+        std::snprintf(out, sizeof(out), "%u.%u", static_cast<unsigned>(value / 10),
+                      static_cast<unsigned>(value % 10));
+        return std::string(out);
+    };
+    j += "\"circulation_source\":{\"configured\":";
+    j += c.circulation_topic.empty() ? "false" : "true";
+    j += ",\"name\":"; j += jstr_r(c.circulation_name, redact);
+    j += ",\"topic\":"; j += jstr_r(c.circulation_topic, redact);
+    j += ",\"power_path\":"; j += jstr(c.circulation_power_path);
+    j += ",\"timestamp_path\":"; j += jstr(c.circulation_time_path);
+    j += ",\"max_age_s\":"; j += std::to_string(c.circulation_max_age_s);
+    j += ",\"on_threshold_w\":"; j += tenths_w_text(c.circulation_on_tenths_w);
+    j += ",\"off_threshold_w\":"; j += tenths_w_text(c.circulation_off_tenths_w);
+    j += ",\"confirm_s\":"; j += std::to_string(c.circulation_confirm_s);
+    j += ",\"subscribed\":"; j += circulation.subscribed ? "true" : "false";
+    j += ",\"has_value\":"; j += circulation.has_value ? "true" : "false";
+    j += ",\"power_w\":"; j += circulation.has_value ? circulation_power : "null";
+    j += ",\"state\":"; j += jstr(circulation_power_state_name(circulation.state));
+    j += ",\"source_at\":";
+    j += circulation.has_value && circulation.has_source_time
+        ? jstr(rfc3339_utc(circulation.source_unix_s)) : "null";
+    j += ",\"source_unix_s\":";
+    j += circulation.has_value && circulation.has_source_time
+        ? std::to_string(circulation.source_unix_s) : "null";
+    j += ",\"timestamp_source\":";
+    j += circulation.has_value ? jstr(circulation.timestamp_source) : "null";
+    j += ",\"age_s\":";
+    j += circulation.age_known ? std::to_string(circulation.age_s) : "null";
+    j += ",\"fresh\":"; j += circulation.fresh ? "true" : "false";
+    j += ",\"freshness_reason\":"; j += jstr(circulation.freshness_reason);
+    j += ",\"retained\":";
+    j += circulation.has_value && circulation.retained ? "true" : "false";
+    j += ",\"messages\":"; j += std::to_string(circulation.messages);
+    j += ",\"errors\":"; j += std::to_string(circulation.errors);
+    j += ",\"rejections\":"; j += std::to_string(circulation.rejections);
+    if (!circulation.error.empty()) { j += ",\"error\":"; j += jstr(circulation.error); }
+    j += "},";
     // Direct Open-Meteo forecast. Fetch time is the 90-minute liveness clock; the provider does not
     // expose model-run issue time, so issued_at remains null instead of being fabricated. Failed
     // refreshes retain the last numbers for diagnosis but set available/fresh false.
@@ -571,7 +617,7 @@ void http_append_status_json(std::string& j, bool redact) {
     }
     j += "]},";
 
-    // ── The rolling X10A plant observation (logic/checkup.hpp) ──────────────────────────────────
+    // ── The rolling on-board plant diagnosis (logic/checkup.hpp) ────────────────────────────────
     // Counted EVENTS and window MINIMA — the questions no single reading can answer and the trend
     // rings structurally cannot either (a compressor cycle shorter than one 5-minute trend bucket
     // leaves no trace in it). Named `health` and not `diag`: GET /diag is the log ring the bug-report
@@ -645,6 +691,15 @@ void http_append_status_json(std::string& j, bool redact) {
             // that says what `a` means for which id — that table would be a second definition of the
             // check, free to drift from this one.
             switch (id) {
+                case logic::CheckupCheck::DhwLoss:
+                    tenths("max_k_h", ck.a);
+                    num("windows", ck.b);
+                    num("high_windows", ck.c);
+                    num("high_with_pump", ck.d);
+                    num("high_pump_off", ck.e);
+                    num("circulation_on_s", ck.f);
+                    num("circulation_known_s", ck.g);
+                    break;
                 case logic::CheckupCheck::Cycling:  num("starts", ck.a);   num("mean_run_s", ck.b); break;
                 case logic::CheckupCheck::Defrost: {
                     num("count", ck.a);

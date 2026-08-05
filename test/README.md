@@ -278,10 +278,11 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   window (so a bus that answers early is never delayed), then geometric growth **clamped** to the
   60 s ceiling, monotonic and overflow-safe under saturation, with a bus answer resetting to the
   floor at once (a swapped-in unit is swept the next cycle, not up to a minute later).
-- `logic/checkup.hpp` — the rolling X10A observation's structural locators, completed-sweep edges,
+- `logic/checkup.hpp` — the rolling plant diagnostics' structural locators, completed-sweep edges,
   sub-second telescoping evidence clocks, gap/bucket/window boundaries, real monotonic `full_span`,
   raw pressure minimum plus independently confirmed low-pressure fact, flow run-up, BUH/BSH observed
-  seconds, raw/paired defrost edge counts, exact retry-counter deltas and the evidence-bounded aggregate. Pure observations,
+  seconds, raw/paired defrost edge counts, exact retry-counter deltas, clean one-hour R5T loss windows,
+  draw/charge/settling exclusion, circulation-power attribution and the evidence-bounded aggregate. Pure observations,
   count-only/zero-denominator defrost and stable experimental counters are reportable but cannot
   support aggregate `ok`; catalog-wide uniqueness pins every locator to the intended row.
 

@@ -33,7 +33,7 @@ const httpStatus = fs.readFileSync(new URL("../main/http_status.cpp", import.met
 const boardPresets = fs.readFileSync(new URL("../main/logic/board_presets.hpp", import.meta.url), "utf8");
 const mqttHa = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "utf8");
 const dialogs = [...html.matchAll(/<[^>]+class="modal-card"[^>]+role="dialog"[^>]*>/g)].map((m) => m[0]);
-assert.equal(dialogs.length, 9, "every custom popup must remain identifiable as a dialog");
+assert.equal(dialogs.length, 10, "every custom popup must remain identifiable as a dialog");
 for (const dialog of dialogs)
   assert.match(dialog, /tabindex="-1"/, "popup focus must land on the dialog container, not an input");
 assert.match(app, /function openPopup\(id\)[\s\S]*modal\.hidden = false;[\s\S]*querySelector\?\.\('\[role="dialog"\]'\)[\s\S]*focus\?\.\(\{ preventScroll: true \}\)/,
@@ -42,7 +42,7 @@ assert.match(app, /function syncModalScrollLock\(\)[\s\S]*MODALS\.some[\s\S]*doc
   "modal lifecycle must lock both possible document scrollers");
 assert.match(app, /function closePopup\(id\)[\s\S]*hidden = true;[\s\S]*syncModalScrollLock\(\)/,
   "all popup close paths must also release the shared scroll lock");
-for (const opener of ["openWifi", "openMqtt", "openRefTemp", "openWeather", "openSyslog", "openNtp", "openHomehub", "openBoard", "openBug"])
+for (const opener of ["openWifi", "openMqtt", "openRefTemp", "openCirculation", "openWeather", "openSyslog", "openNtp", "openHomehub", "openBoard", "openBug"])
   assert.match(app, new RegExp(`function ${opener}\\(\\)[\\s\\S]*?openPopup\\(\\"[^\\"]+\\"\\);`),
     `${opener} must use the no-field-autofocus popup path`);
 assert.match(html, /id="gPth"[\s\S]*id="svPth"[\s\S]*id="svCop"/,
@@ -88,8 +88,8 @@ assert.doesNotMatch(app, /e32DynamicLwt|onDynamicLwtPick|set_dynamic_lwt/,
   "the heating-curve diagnosis must have no switch, handler or mode route");
 assert.doesNotMatch(app, /function dynamicControlCardHtml\(\)[\s\S]{0,600}?return "";/,
   "the card must always render — it is where its own sources are configured");
-assert.match(app, /vcard\(t\("card\.fw_title"\), fwRows\) \+ dynamicControlCardHtml\(\)/,
-  "the diagnosis card must render after Firmware at the bottom");
+assert.match(app, /vcard\(t\("card\.fw_title"\), fwRows\) \+ circulationSettingsCardHtml\(\) \+\s*dynamicControlCardHtml\(\)/,
+  "plant and heating-curve diagnostics must render after Firmware at the bottom");
 // A source that is CURRENT but cannot produce a verdict must not be the one row that looks fine
 // while the state row above it reports the diagnosis blocked.
 assert.match(app, /sourceCls = !r\.fresh \? "warn" : r\.control_eligible \? "ok" : "warn"/,
@@ -247,6 +247,21 @@ assert.match(app, /r\.retained[\s\S]*ref\.retained/,
   "the captured-value UI must identify retained MQTT messages");
 assert.match(app, /r\.freshness_reason === "retained_without_timestamp"[\s\S]*ref\.time_untrusted/,
   "retained values without source time must be shown as untrusted, never fresh");
+
+// The circulation witness is a second read-only exact MQTT mapping. It consumes actual active power,
+// not Shelly relay intent, and shares the same live-test-before-persist safety boundary.
+assert.match(html, /id="circulationModal"[\s\S]*id="circTopic"[\s\S]*id="circPowerPath"[\s\S]*id="circTimePath"[\s\S]*id="circOn"[\s\S]*id="circOff"[\s\S]*id="circMaxAge"[\s\S]*id="circConfirm"/,
+  "circulation settings must expose the exact topic, JSON paths, freshness, hysteresis and confirmation");
+assert.match(app, /circulationForm[^]*post\("\/test_circulation", input\)[^]*testResult\.test_proof[^]*post\("\/set_circulation", \{ \.\.\.input, test_proof: testResult\.test_proof \}\)/,
+  "circulation Save must test the exact live mapping before persisting it");
+assert.match(app, /\$\("circDeleteBtn"\)\.onclick[^]*post\("\/set_circulation", \{[^]*name: "", topic: "", power_path: "", timestamp_path: ""/,
+  "circulation Delete must clear the mapping without switching the plug");
+assert.match(httpConfig, /mqtt_circulation_test_proof_valid\(in\.test_proof, tested\)[\s\S]*Test this MQTT mapping successfully before saving/,
+  "a raw circulation-source POST must not bypass the live proof");
+assert.match(mqttHa, /decode_circulation_frame[\s\S]*power_path[\s\S]*timestamp_path/,
+  "the MQTT runtime must decode mapped active power and trusted source time");
+assert.doesNotMatch(mqttHa, /circulation[\s\S]{0,160}(?:command|switch|output)[\s\S]{0,80}(?:publish|write)/i,
+  "circulation diagnosis must not grow a Shelly actuation path");
 
 // Broker settings are test-before-persist too, but the test is performed synchronously by /set_mqtt:
 // an accepted non-empty broker must have completed MQTT CONNECT/auth. Heap pressure is retryable and
