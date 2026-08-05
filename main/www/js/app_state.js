@@ -428,8 +428,8 @@ function renderApp() {
         sysSet(t("sys.warning"), code && !/^-*$/.test(code.trim())
                                    ? t("sys.warning_line", code) : t("sys.mb_only"), "warn");
       } else {
-        sysSet(mbMode || t("sys.x10a_down"),
-               mbMode ? t("sys.mb_only") : t("sys.mb_carrying"), mbMode ? "" : "warn");
+        const view = modbusStatusView(mbMode, S.live);
+        sysSet(view.mode, view.status, view.tone);
       }
     }
     else          sysSet(t("sys.nodata"), t("sys.waiting"), "dim");
@@ -507,6 +507,18 @@ function plantState(d) {
   if (moving) return PLANT_CIRC;
   return PLANT_STANDBY;
 }
+
+// A live HomeHub knows more than the fallback headline's DHW/space flags: input 31 witnesses the
+// compressor, input 30 the circulation pump, input 32 the tank heater, and input 49 the flow. Use
+// those facts for the same activity line and dot tone as X10A. Treating any known Modbus mode as
+// green made an idle plant read as active even while every one of those witnesses said it was off.
+// Keep source provenance appended to the activity words; the headline remains the operating mode.
+function modbusStatusView(mode, live) {
+  if (!mode) return { mode: t("sys.x10a_down"), status: t("sys.mb_carrying"), tone: "warn" };
+  const p = plantState(live);
+  return { mode, status: `${t(p.key)} · ${t("sys.mb_source")}`, tone: p.tone };
+}
+
 function sysSet(mode, status, tone) {
   setTxt("svMode", mode);
   setTxt("svStatus", status);

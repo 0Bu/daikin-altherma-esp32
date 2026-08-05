@@ -36,7 +36,7 @@ const I18N = {
   en: {
     "sys.nodata": "No data", "sys.unreachable": "Unreachable",
     "sys.x10a_down": "X10A offline", "sys.mb_carrying": "Operating mode unknown — readings from Modbus",
-    "sys.mb_only": "X10A offline — readings from Modbus",
+    "sys.mb_only": "X10A offline — readings from Modbus", "sys.mb_source": "X10A offline · Modbus",
     "mode.stop": "Stop", "mode.heat": "Heating", "mode.cool": "Cooling", "mode.space": "Space H/C",
     "mode.dhw": "Hot water", "mode.heat_dhw": "Heating + hot water",
     "mode.cool_dhw": "Cooling + hot water", "mode.space_dhw": "Space H/C + hot water",
@@ -443,7 +443,7 @@ const I18N = {
   de: {
     "sys.nodata": "Keine Daten", "sys.unreachable": "Nicht erreichbar",
     "sys.x10a_down": "X10A offline", "sys.mb_carrying": "Betriebsart unbekannt — Werte aus dem Modbus",
-    "sys.mb_only": "X10A offline — Werte aus dem Modbus",
+    "sys.mb_only": "X10A offline — Werte aus dem Modbus", "sys.mb_source": "X10A offline · Modbus",
     "mode.stop": "Stopp", "mode.heat": "Heizen", "mode.cool": "Kühlen", "mode.space": "Raumbetrieb",
     "mode.dhw": "Warmwasser", "mode.heat_dhw": "Heizen + Warmwasser",
     "mode.cool_dhw": "Kühlen + Warmwasser", "mode.space_dhw": "Raumbetrieb + Warmwasser",

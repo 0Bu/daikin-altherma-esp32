@@ -57,8 +57,11 @@ function assertPersistentBannerRepaints(name, status) {
 {
   const { api } = productionApi(
     appStateSource,
-    ["plantState", "PLANT_COOL_RESIDUAL", "PLANT_RUNNING"],
-    { compressorRunning: (d) => d?.rps != null ? d.rps > 0 : d?.compressorOn === true },
+    ["plantState", "modbusStatusView", "PLANT_COOL_RESIDUAL", "PLANT_RUNNING"],
+    {
+      compressorRunning: (d) => d?.rps != null ? d.rps > 0 : d?.compressorOn === true,
+      t: (key) => key,
+    },
   );
   const residual = api.plantState({
     rps: 0, pumpOn: true, flow: 19.1, thermalMode: "cool", pthRaw: 0.4,
@@ -71,6 +74,28 @@ function assertPersistentBannerRepaints(name, status) {
   assert.equal(api.plantState({ rps: null, compressorOn: true, pumpOn: true,
                                 thermalMode: "heat", pthRaw: 7.8 }).key,
     "sys.operating", "the HomeHub compressor witness keeps Modbus-only DHW in active operation");
+
+  const idleModbus = api.modbusStatusView("mode.dhw", {
+    rps: null, compressorOn: false, pumpOn: false, flow: 0, bsh: false,
+  });
+  assert.equal(idleModbus.mode, "mode.dhw", "the HomeHub DHW flag remains the mode headline");
+  assert.equal(idleModbus.status, "sys.standby · sys.mb_source",
+    "Modbus-only DHW with every activity witness off must say that the plant is not running");
+  assert.equal(idleModbus.tone, "idle",
+    "Modbus-only DHW standby must mute the dot instead of treating a known mode as active");
+
+  const runningModbus = api.modbusStatusView("mode.dhw", {
+    rps: null, compressorOn: true, pumpOn: true, flow: 14, bsh: false,
+  });
+  assert.equal(runningModbus.status, "sys.operating · sys.mb_source");
+  assert.equal(runningModbus.tone, "", "a running HomeHub compressor keeps the active green tone");
+
+  const unknownMode = api.modbusStatusView(null, {
+    rps: null, compressorOn: false, pumpOn: false, flow: 0, bsh: false,
+  });
+  assert.equal(unknownMode.mode, "sys.x10a_down");
+  assert.equal(unknownMode.status, "sys.mb_carrying");
+  assert.equal(unknownMode.tone, "warn", "an unknown Modbus mode keeps the existing warning state");
 }
 
 assertPersistentBannerRepaints(
