@@ -228,12 +228,11 @@ mDNS browse, and the dynamic-LWT CONSENT boundary. That last one is two claims, 
 controller proposes and writes nothing — and since the write path was RETIRED (#294) that half is
 now the stronger assertion that NO firmware source contains a write entry point, an actuator type,
 an FC06/FC16 request builder or an issued write function code, checked across every file — and
-since #341 the mode gates COLLECTION as well — OFF may not subscribe the saved room source, must
-actively unsubscribe an existing one, ignores its frames while leaving the pre-enable Test path
-intact, publishes no weather evidence, and pauses Open-Meteo before any fetch, with
-POST /set_dynamic_lwt applying both boundaries live and retracting the weather topic only after OFF
-was persisted. An experimental feature left off must cost no broker subscription and no outbound
-request, which is a property of the whole component and so exactly what a source-text check is for. It is the newest entry point and exists
+and since #357 it pins the CONSENT boundary in its current shape — a SAVED source is what starts a
+subscription or a fetch, with no second gate in front of it; deleting one must actively unsubscribe
+and stop the traffic; the pre-enable Test path must stay reachable ahead of both; ARMING must be
+derived rather than stored; and the plant gate must be evaluated BEFORE the room source. Those are
+properties of a whole component and so exactly what a source-text check is for. It is the newest entry point and exists
 because these were three bare `node test/…` steps in build.yml and nothing else: CI ran them, no
 local command did, and a fourth sibling added the same way would have been invisible to every entry
 point at once. The GLOB is the fix, not the wrapper — `test_ui_*.mjs` already had that property, and
@@ -646,19 +645,16 @@ weather_forecast.cpp  the Open-Meteo forecast client (provider + model pinned in
                 mb_task and syslog_task it carries no `catch (...)`, so a non-std throw still unwinds
                 past the task boundary into std::terminate and reboots the board. Cadence 45 min on success, 5 min on
                 failure, and POST /set_weather only NOTIFIES it, so the request path does no DNS, TLS
-                or JSON work. Skipped in safe mode — and, since #341, GATED ON THE DYNAMIC-LWT MODE:
-                the loop reads config().dynamic_lwt_mode and in anything but SHADOW calls
-                set_feature_inactive() and idles on a 60 s notify-wait BEFORE the URL is built, so no
-                socket opens at all. OFF withdraws consent to send the coordinates (and this
-                installation's public source IP) to a third party, which is a decision about the
-                REQUEST, not about the answer. That state is deliberately NOT the unconfigured one:
-                set_disabled() clears the coordinates and reasons "not_configured", while
-                set_feature_inactive keeps configured=true and the saved location visible to the
-                editor and blanks has_value, available and all four timestamps under state
-                "disabled" / reason "dynamic_lwt_disabled" — a card that kept the last numbers would
-                present yesterday's forecast as if collection were merely idle. POST /set_dynamic_lwt
-                notifies this task exactly like /set_weather, so the boundary moves at the request
-                rather than up to a sleep interval later. The response is bounded before it is read
+                or JSON work. Skipped in safe mode. THE SAVED LOCATION IS THE WHOLE GATE (#357): the
+                loop checks cfg.weather_enabled and idles on a 60 s notify-wait BEFORE the URL is
+                built, so no socket opens at all — one condition, checked in one place. #341's second
+                gate (a separate dynamic-LWT mode, with a set_feature_inactive() state that kept
+                configured=true while blanking every runtime value) is GONE with the switch that set
+                it: saving coordinates IS the consent to send them, and to send this installation's
+                public source IP with them, so a stored location deliberately not being fetched no
+                longer exists as a state. Clearing the location is set_disabled(), which drops the
+                coordinates and reasons "not_configured". POST /set_weather notifies this task, so
+                the boundary moves at the request rather than up to a sleep interval later. The response is bounded before it is read
                 (Content-Length checked against an 8 KiB cap, then 1 KiB chunks against a running
                 total) and never stored: nothing about a forecast survives a reboot. forecast_hours=6
                 is deliberately larger than the four bins needed, so a request that crosses an hour
@@ -682,13 +678,13 @@ weather_forecast.cpp  the Open-Meteo forecast client (provider + model pinned in
                 point: the coordinates are redacted in /status?redact=1 (logic/redact.hpp) and the
                 MQTT evidence document on <base>/weather/openmeteo/forecast carries NO coordinates at
                 all, which a host test pins by asserting the substrings are absent — a broker archive
-                is a place an installation's location would otherwise sit forever. Since #341 the document is
-                published only while the location AND the mode are both on
-                (publish_weather_state(weather_enabled && mode == Shadow)); OFF turns that into a
-                CleanupRetained, and /set_dynamic_lwt additionally requests the one empty RETAINED
-                publish (mqtt_request_weather_cleanup, "mqtt: inactive weather forecast topic
-                deleted") — a retained forecast nobody deletes goes on reading like a live input long
-                after collection was withdrawn. No HA discovery
+                is a place an installation's location would otherwise sit forever. The document is
+                published while the location is saved (publish_weather_state(weather_enabled));
+                clearing it turns that into a CleanupRetained and /set_weather requests the one empty
+                RETAINED publish (mqtt_request_weather_cleanup) — a retained forecast nobody deletes
+                goes on reading like a live input long after collection was withdrawn. Exactly ONE
+                route can retract it, which the cleanup contract asserts: a second retraction path in
+                a route nothing posts to would never run. No HA discovery
                 entities (four are RETIRED and actively retracted): this is a metrics stream, and a
                 forecast is not a state of this device
 history.cpp     the 24-hour trend rings: one fixed-cadence buffer per logic/history.hpp TREND, fed by
@@ -766,11 +762,13 @@ http_status.cpp GET / (setup.html in AP mode, else gzip UI) /favicon.ico /heat-p
                 on the httpd task ALONE — it used to run on the poll task too, which is what
                 overflowed that task's stack (#241)
 http_config.cpp POST /set_wifi /set_mqtt /test_ref_temp /set_ref_temp /set_syslog /set_ntp
-                /set_weather /set_dynamic_lwt /set_hp /discover_homehub /set_board /set_env3
-                /set_ota /set_lang /detect — ALL FIFTEEN write routes, and the count is the point:
+                /set_weather /set_hp /discover_homehub /set_board /set_env3
+                /set_ota /set_lang /detect — ALL FOURTEEN write routes, and the count is the point:
                 http_server.cpp's cfg.max_uri_handlers is sized exactly to the trusted-LAN route
                 total, so a route added here without raising it there overflows onto the SPA
-                catch-all. Three of the fifteen are not config writers: /test_ref_temp writes nothing
+                catch-all — and one RETIRED here without lowering it there leaves a comment that has
+                stopped describing the code depending on it (#357 retired /set_dynamic_lwt: 33 -> 32).
+                Three of the fourteen are not config writers: /test_ref_temp writes nothing
                 at all (it earns the proof /set_ref_temp then demands), /discover_homehub only
                 resolves an address for the dialog to fill in, and /detect resets profile +
                 fingerprint in RAM alone, since detection is re-run every boot anyway
@@ -920,45 +918,56 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; X10A p
                 that proof to all seven behavioural fields, so testing topic A cannot license saving
                 topic B, and an edited path or max_age invalidates it. RAM-only and single-use — a
                 save consumes it, a reboot forgets it — which is exactly right for evidence about a
-                broker that may have changed since. (2) The DYNAMIC-LWT SHADOW CONTROLLER
+                broker that may have changed since. (2) The HEATING-CURVE DIAGNOSIS CONTROLLER
                 (logic/dynamic_lwt_controller.hpp), evaluated once per 1s cycle but COUNTED only while
                 armed — #341 moved the `evaluations` increment past the OFF early return, so
                 /status.dynamic_lwt.evaluations and lwt_controller_evaluations measure armed cycles
-                rather than seconds of uptime, and a board that was never switched on reads 0 instead
-                of a number that looks like activity. It lives here rather
-                than in a file of its own because its one input arrives as an MQTT frame, SHADOW can
+                rather than seconds of uptime, and a board whose sources are not configured reads 0
+                instead of a number that looks like activity. It lives here rather
+                than in a file of its own because its one input arrives as an MQTT frame, it can
                 only be armed WITH a configured MQTT room source, and the evaluation has to ride the
                 task CYCLE rather than publish_heartbeat(): on the publish cadence the last verdict
                 would keep reading healthy through exactly the broker outage that must move it to
-                FAILSAFE. It runs BEFORE the publish gate for that reason. SHADOW means write-free —
+                FAILSAFE. It runs BEFORE the publish gate for that reason. It is write-free —
                 it proposes a requested_offset_k and calls nothing; the pure header cannot even name
                 an actuator. Since #341 the mode is ALSO the consent boundary for COLLECTION, and that half
                 lives in this file: service_reference_subscription computes capture_enabled =
-                configured && SHADOW, and while OFF it swallows the pending reconfigure,
-                UNSUBSCRIBES the live room topic, drops the captured runtime values and reports
-                subscribed:false — while `configured` keeps showing the saved mapping, so there is
-                still something to edit. A flip of that flag counts as a BINDING change and retires
-                the captured value with it: a reading taken under a consent since withdrawn must not
-                outlive it. service_reference_frames still runs service_reference_probe_frame()
-                FIRST and only then skips the live decode, which is what keeps POST /test_ref_temp
-                able to PROVE a candidate source BEFORE arming — otherwise the only way to test a
-                mapping would be to enable the collection it is being tested for.
+                configured — the SAVE of a topic is the consent to subscribe to it, and #357 removed
+                the second gate that used to stand in front (a switch that could not be reached: it
+                answered 409 until the very sources whose only editors lived on the card it revealed
+                were configured). Deleting the topic swallows the pending reconfigure, UNSUBSCRIBES
+                the live room topic, drops the captured runtime values and reports subscribed:false.
+                A flip of that flag counts as a BINDING change and retires the captured value with
+                it: a reading taken under a consent since withdrawn must not outlive it.
+                service_reference_frames still runs service_reference_probe_frame() FIRST and only
+                then decodes the SAVED source, which is what keeps POST /test_ref_temp able to PROVE
+                a candidate BEFORE it is saved — otherwise the only way to test a mapping would be to
+                save the one being tested.
                 test/test_dynamic_lwt_shadow_contract.mjs pins that whole boundary, not just that
                 hp_modbus.cpp stays the ONLY file calling mb_request_lwt_offset(): the subscription
-                gate, the OFF unsubscribe, the surviving probe path, the weather publish gate,
-                weather_forecast.cpp's pre-fetch pause and both live reconfigures in
-                /set_dynamic_lwt. A P term on the room error
+                gate, the delete-unsubscribe, the surviving probe path, the weather publish gate,
+                weather_forecast.cpp's pre-fetch check, that arming is DERIVED rather than stored,
+                and the GATE ORDER inside evaluate(). A P term on the room error
                 (gain 1, ±0.25 K deadband, whole kelvin, ±2 K envelope, ≤1 K per decision, one
                 decision per 30 min), fail-closed on every input it depends on: an ineligible room
                 source, a down X10A bus, a down HomeHub or an unknown plant gate is FAILSAFE, an
-                inactive plant is HOLD. Each of those RESETS the proposal memory, which is what makes
+                inactive plant is HOLD — and the ORDER is load-bearing, not incidental: the plant
+                gate is asked BEFORE the room source, because outside the heating season both fail at
+                once (a room thermostat switched off for the summer is not control-eligible) and
+                answering "room unavailable" turned a plant resting exactly as it should into a
+                standing fault. Measured on the reference installation in August: failsafes=2734,
+                holds=0, with nothing whatever wrong. HOLD is the whole truth about an idle plant
+                whatever the room says. Each failsafe/hold RESETS the proposal memory, which is what makes
                 the 1 K slew bind the FIRST decision after any restart too — otherwise recovery would
                 be a ±2 K jump through the one limit that exists to prevent it. The forecast is a
                 STATE modifier only (Shadow vs Degraded) and contributes a hardwired 0 K, so a
                 missing forecast can never move water temperature by way of a term nobody sized.
                 Reaches the outside as flat lwt_controller_* heartbeat fields and /status.dynamic_lwt
                 — no HA entities, deliberately: a proposal nothing acts on is telemetry to reason
-                about, not a state to put in front of a user as if it were the plant's
+                about, not a state to put in front of a user as if it were the plant's. ARMING is
+                DERIVED from the two sources (logic/config_model.hpp's dynamic_lwt_armed), never
+                stored: there is no mode enum, no Config field, no blob byte in use and no route, so
+                nothing persisted can disagree with the configuration a reader sees in the editor
 ota_update.cpp  pull-based signed OTA: manifest check -> TWO-POINT downgrade gate -> esp_https_ota
                 into the inactive slot -> signature verify on install -> reboot, plus the rollback
                 health gate. Reads the CHANNEL (config ota_channel, logic/ota_channel.hpp) fresh on
@@ -1882,7 +1891,7 @@ www/            web UI sources (index.html + style.css + app.sources fragments -
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + one-shot rollback state, MQTT (`uri`/`user`/`pass`), syslog, `ntp_server`, from blob **v2** board-local hardware, from **v3** the OTA channel, from **v4** the UI-language override, from **v5** the HomeHub host/port/unit fields, **v6** its enable compatibility bit, **v7** one MQTT reference-temperature name/topic/value-path mapping, **v8** its timestamp path plus maximum age, **v9** a now-RETIRED actuation opt-in bit, **v10** weather location, **v11** ENV III, **v12** board-preset identity, **v13** target/enabled/HVAC readiness mappings for the room source, and **v14** the dynamic-LWT controller mode (ONE byte: `off`/`shadow`, since ACTIVE is deliberately not representable in the persisted vocabulary). Every earlier blob (v1–v13) remains readable without losing credentials — the read path accepts any version in `CONFIG_BLOB_VERSION_MIN`..`CONFIG_BLOB_VERSION` and rejects a length that does not land exactly on the end, so a truncated newer blob is refused rather than read as an older one. TWO fields are then forced to their safe value rather than trusted: the v9 actuation-consent bit is DISCARDED on decode whatever it holds — the capability it gated was removed (#294), and reading it back would resurrect consent for something the firmware can no longer do (the byte stays in the layout, written as 0, so the blob shape is unchanged) — and a pre-v14 blob carries no controller mode at all, so it migrates to OFF, as does any unknown byte, so every install, upgrade and reboot starts disarmed. Non-empty `mb_host` enables polling; nothing enables writing, because no write path exists. HomeHub and reference-source fields have narrow httpd writers (`POST /set_hp`, `POST /set_ref_temp`). Old experimental `mb_dhost`/`mb_seen` keys are deleted on load and never consulted. Pre-v13 room mappings remain observable after migration but are ineligible until a target mapping is saved deliberately. One CRC-checked entry is written all-or-nothing. The X10A link cache `rx_pin`/`tx_pin`/`proto` remains separate and self-healing (detection + httpd writers), as does `board_set`, the user's licence for the UI to name matching board hardware without persisting a board identity. Legacy per-key credential entries remain read-only fallback for pre-blob upgrades, and `boot_fails` is the boot-loop crash counter. |
+| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + one-shot rollback state, MQTT (`uri`/`user`/`pass`), syslog, `ntp_server`, from blob **v2** board-local hardware, from **v3** the OTA channel, from **v4** the UI-language override, from **v5** the HomeHub host/port/unit fields, **v6** its enable compatibility bit, **v7** one MQTT reference-temperature name/topic/value-path mapping, **v8** its timestamp path plus maximum age, **v9** a now-RETIRED actuation opt-in bit, **v10** weather location, **v11** ENV III, **v12** board-preset identity, **v13** target/enabled/HVAC readiness mappings for the room source, and **v14** one byte that carried the dynamic-LWT controller mode and is now RETIRED (#357) — written as zero and ignored on read, since the heating-curve diagnosis derives its arming from the two sources it reads rather than storing a mode; the byte keeps its place because the exact-length rule below is what refuses a truncated newer blob, and shrinking v14 would make a v13 blob decode as one. Every earlier blob (v1–v13) remains readable without losing credentials — the read path accepts any version in `CONFIG_BLOB_VERSION_MIN`..`CONFIG_BLOB_VERSION` and rejects a length that does not land exactly on the end, so a truncated newer blob is refused rather than read as an older one. TWO fields are then forced to their safe value rather than trusted: the v9 actuation-consent bit is DISCARDED on decode whatever it holds — the capability it gated was removed (#294), and reading it back would resurrect consent for something the firmware can no longer do (the byte stays in the layout, written as 0, so the blob shape is unchanged) — and the v14 controller-mode byte is DISCARDED the same way, for the same reason one version later: the mode it held no longer exists, and every install, upgrade and reboot decides arming from the live configuration instead. Non-empty `mb_host` enables polling; nothing enables writing, because no write path exists. HomeHub and reference-source fields have narrow httpd writers (`POST /set_hp`, `POST /set_ref_temp`). Old experimental `mb_dhost`/`mb_seen` keys are deleted on load and never consulted. Pre-v13 room mappings remain observable after migration but are ineligible until a target mapping is saved deliberately. One CRC-checked entry is written all-or-nothing. The X10A link cache `rx_pin`/`tx_pin`/`proto` remains separate and self-healing (detection + httpd writers), as does `board_set`, the user's licence for the UI to name matching board hardware without persisting a board identity. Legacy per-key credential entries remain read-only fallback for pre-blob upgrades, and `boot_fails` is the boot-loop crash counter. |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -1988,15 +1997,15 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   retained,messages,errors,rejections[,error][,eligibility_error]} — the decoded and
                   canonical MQTT living-room input. The flat heartbeat archives its numeric accepted
                   view. It is the SOLE input of the dynamic-LWT shadow controller below (room_error_k
-                  is that controller's P term) and still feeds no averaging and no heat-pump write —
-                  and since #341 the dependency runs BOTH ways: dynamic_lwt_mode is the COLLECTION
-                  boundary, not merely an actuator one, so in OFF the saved mapping stays visible
-                  (configured, topic, every path, max_age_s) while `subscribed` goes false, the broker
-                  subscription is dropped and every captured field is CLEARED — has_value false,
-                  temperature_c/setpoint_c/room_error_k null, messages/errors/rejections back to 0.
-                  Keeping the mapping but not the data is what stops withdrawn consent from reading as
-                  a broken source; POST /test_ref_temp stays OUTSIDE the gate, so a candidate can be
-                  proved before SHADOW is ever enabled,
+                  is that controller's P term) and still feeds no averaging and no heat-pump write.
+                  SAVING the topic is the whole consent to subscribe to it (#357 removed the second
+                  gate #341 had added): while one is stored it is subscribed and decoded, and
+                  deleting it drops the subscription and CLEARS every captured field. `reason` is the
+                  load-bearing one for a UI — "disabled" (the thermostat reports itself off),
+                  "non_heating_mode", "stale" — because a reading can be present, fresh and still
+                  unusable, and the diagnosis card must say WHICH rather than call the input missing.
+                  POST /test_ref_temp stays outside all of it, so a candidate can be proved before it
+                  is saved,
                   weather_forecast{configured,provider,model,fetch_interval_s,max_age_s,fetching,
                   available,has_value,latitude,longitude,state,outdoor_mean_2h_c,
                   solar_energy_2h_wh_m2,issued_at,fetched_at,valid_for_decision_at,last_attempt_at,
@@ -2005,23 +2014,23 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   configured, the task's own availability and freshness, so a consumer never has to
                   combine them itself; a FAILED refresh keeps has_value plus the last two numbers for
                   diagnosis while available/fresh go false, which is the distinction between "no data"
-                  and "data that must not be acted on". FETCHING is gated on the dynamic-LWT mode
-                  (#341): in OFF the task takes set_feature_inactive, so `configured` and the
-                  coordinates stay while state reads "disabled", freshness_reason and reason read
-                  "dynamic_lwt_disabled", and has_value, both numbers AND all four timestamps are
-                  CLEARED — the deliberate opposite of the failed-refresh case, since a source whose
-                  consent was withdrawn must not present yesterday's forecast as collection merely
-                  being idle. `issued_at` is ALWAYS null — the endpoint does
+                  and "data that must not be acted on". FETCHING is gated on the SAVED LOCATION and
+                  nothing else (#357 removed #341's second gate along with its
+                  "dynamic_lwt_disabled" state): saving coordinates is the consent to send them, so
+                  a stored-but-deliberately-unfetched location is no longer a state that exists.
+                  `issued_at` is ALWAYS null — the endpoint does
                   not expose the model-run instant and fetch time is not a substitute for it.
                   latitude/longitude are null when unconfigured and "<redacted>" under ?redact=1,
-                  dynamic_lwt{mode,mode_code,state,state_code,reason,reason_code,decision_eligible,
+                  dynamic_lwt{armed,state,state_code,reason,reason_code,decision_eligible,
                   proposal_produced,room_error_k,p_term_k,unclamped_offset_k,bounded_offset_k,
                   requested_offset_k,forecast_contribution_k,deadband,quantized,clamped,rate_limited,
                   forecast_available,plant_gate_known,plant_gate_active,actuator_conflict,
                   room_source_unix_s,room_age_s,last_decision_ms,sequence,evaluations,decisions,
                   holds,failsafes} — the write-free shadow controller (mqtt_ha.cpp,
-                  logic/dynamic_lwt_controller.hpp). `mode` is the PERSISTED operator choice
-                  ("off"|"shadow") while state/reason are the last 1s evaluation
+                  logic/dynamic_lwt_controller.hpp). `armed` is DERIVED from the two configured
+                  sources (dynamic_lwt_armed: the MQTT room mapping AND a forecast location) — never
+                  stored, so nothing persisted can disagree with the configuration; state/reason are
+                  the last 1s evaluation
                   ("off"|"shadow"|"hold"|"degraded"|"failsafe" / "disabled"|"shadow_decision"|
                   "cadence_wait"|"deadband"|"rate_limited"|"room_unavailable"|"x10a_unavailable"|
                   "homehub_unavailable"|"plant_gate_unknown"|"plant_inactive"|"forecast_unavailable"|
@@ -2032,8 +2041,11 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   `forecast_contribution_k` is the literal 0 unconditionally, because the controller
                   has no forecast term at all (the snapshot field is fixed at zero and nothing writes
                   it — the forecast is evidence for comparing periods, never a control input).
-                  A null there would claim the term exists and is merely unknown. There is no actuator
-                  result in this block and cannot be one,
+                  A null there would claim the term exists and is merely unknown. The reason ORDER is
+                  a property worth knowing when reading this block: an idle plant answers
+                  "plant_inactive" (HOLD) even when the room source is also ineligible, because both
+                  are true all summer and reporting the room made a resting plant read as a standing
+                  fault. There is no actuator result in this block and cannot be one,
                   syslog{configured,resolved,reachable,host,port,error},
                   ota{channel} — "release"|"dev", the FEED the next OTA check reads (POST /set_ota).
                   On /status and not only /ota/status because the Settings Firmware card renders its
@@ -2311,12 +2323,12 @@ POST /set_ref_temp   {name,topic,temperature_path,setpoint_path,timestamp_path,e
                   source (empty topic) needs no proof: removal must never depend on the thing being
                   removed still working
 POST /set_weather {latitude,longitude} -> validate + persist + notify the weather task (no reboot,
-                  and no DNS/TLS/JSON on the request path). Saving the location does not start
-                  fetching it: like the room source, this is gated on the dynamic-LWT mode, and while
-                  that is off the task reports state "disabled", reason "dynamic_lwt_disabled" and
-                  sends Open-Meteo nothing. The coordinates stay a saved input the editor can show;
-                  what OFF withdraws is consent to hand them — and this device's public source IP —
-                  to a third party, which storing a location is not the same act as. Both are
+                  and no DNS/TLS/JSON on the request path). SAVING THE LOCATION IS THE CONSENT to
+                  hand these coordinates — and this device's public source IP — to a third party, so
+                  the task fetches while one is stored and stops when it is cleared. There is no
+                  second switch: #341 put one in front of this and #357 removed it, because the
+                  request is the act being consented to and the save is the only place a user states
+                  it. Both are
                   STRINGS parsed strictly (optional sign, digits, `.` or the German `,`, at most six
                   decimals — an exponent, whitespace or a `+` is rejected rather than coerced, since
                   a coordinate that silently becomes a different one is a request the user cannot
@@ -2324,22 +2336,15 @@ POST /set_weather {latitude,longitude} -> validate + persist + notify the weathe
                   "latitude and longitude are both required" — half a location is never a location.
                   Disabling also requests the retained MQTT topic's cleanup, so a stopped forecast
                   leaves no last-known values on the broker
-POST /set_dynamic_lwt  {mode:"off"|"shadow"} -> validate + persist + apply live (no reboot; the next
-                  1 s mqtt_task evaluation reads it). This is the CONSENT BOUNDARY, not merely the
-                  controller's own setting: the handler also calls mqtt_reference_reconfigure() and
-                  weather_forecast_reconfigure(), and on OFF mqtt_request_weather_cleanup(), so the
-                  room subscription and the Open-Meteo traffic start and stop with the mode rather
-                  than with the routes that SAVED them. Both are pushed here rather than left to each
-                  worker's own sleep interval — an OFF that takes 45 minutes to stop talking to a
-                  third party is not a withdrawal of consent, it is a delay. "active" is REFUSED like any other unknown
-                  word — it is deliberately absent from the accepted vocabulary, the persisted byte
-                  and the enum, so no request, no stored blob and no migration can express a
-                  controller that writes. "shadow" additionally requires the inputs it would depend
-                  on to already exist (MQTT broker, the room topic with its temperature, setpoint and
-                  timestamp paths, and a HomeHub address) or
-                  answers 409: arming a controller that can only report FAILSAFE is not a setting,
-                  it is a fault report the user configured by hand. Removing any of those later
-                  DISARMS the mode on load rather than leaving it armed and failing
+(no /set_dynamic_lwt)  RETIRED in #357. There is no controller mode to POST: the heating-curve
+                  diagnosis arms itself while the room mapping and the forecast location are both
+                  configured (logic/config_model.hpp's dynamic_lwt_armed), and each of those routes
+                  already applies its own collection boundary live. What the route bought was a
+                  second statement of a fact the configuration already made — and it could not be
+                  reached: it answered 409 until those sources existed, while the only editors for
+                  them lived inside the Settings card that was hidden until the mode was on. An
+                  ACTIVE controller stays unrepresentable for the stronger reason than a rejected
+                  word: no enum, no Config field, no live blob byte and no route exist to carry one.
 POST /set_env3    {enabled,sda,scl} -> validate + PROVE + persist + REBOOT. A standalone
                   COMPATIBILITY endpoint since #339 folded ENV III into the Board Hardware form — no
                   shipped client posts here (the UI sends env3_* to /set_board), and both routes run

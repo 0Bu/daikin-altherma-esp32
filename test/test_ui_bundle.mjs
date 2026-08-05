@@ -81,18 +81,27 @@ assert.doesNotMatch(app, /t\("dyn\.mode"\)|t\("dyn\.safety"\)|t\("dyn\.read_only
 // is the expected reading, and styling it as a warning would train the user to ignore the row.
 assert.match(app, /function dynamicStateRow\([\s\S]*"dyn\.state_waiting", cls: ""/,
   "an idle plant must be a neutral state, not a warning");
-assert.match(app, /function dynamicLwtSwitchRow\(\)[\s\S]*id="e32DynamicLwt"[\s\S]*role="switch"/,
-  "Firmware must expose the explicit OFF/SHADOW switch");
-assert.match(app, /function onDynamicLwtPick\(\)[\s\S]*post\("\/set_dynamic_lwt", \{ mode: enable \? "shadow" : "off" \}\)/,
-  "the switch must persist only the backend's OFF/SHADOW vocabulary");
-assert.match(app, /function onDynamicLwtPick\(\)[\s\S]*setTimeout\(renderSettings, CLICK_HOLD_UP_MS \+ 10\)/,
-  "the dynamic-LWT card must reconcile immediately after the switch tap guard expires");
-assert.match(app, /e\.target\.id === "e32DynamicLwt"[\s\S]*onDynamicLwtPick\(\)/,
-  "the rebuilt Firmware card must delegate switch changes to the live handler");
-assert.match(app, /function dynamicControlCardHtml\(\)[\s\S]*if \(d\.mode !== "shadow"\) return "";/,
-  "the experimental dynamic-control card must remain hidden until Firmware selects SHADOW");
+// NO ON/OFF SWITCH, and its absence is asserted rather than assumed. The switch it replaced could
+// not be reached: the editors for the two sources it demanded live inside the card it revealed, and
+// it answered 409 until those sources existed. Arming is derived from them instead.
+assert.doesNotMatch(app, /e32DynamicLwt|onDynamicLwtPick|set_dynamic_lwt/,
+  "the heating-curve diagnosis must have no switch, handler or mode route");
+assert.doesNotMatch(app, /function dynamicControlCardHtml\(\)[\s\S]{0,600}?return "";/,
+  "the card must always render — it is where its own sources are configured");
 assert.match(app, /vcard\(t\("card\.fw_title"\), fwRows\) \+ dynamicControlCardHtml\(\)/,
-  "the enabled experimental card must render after Firmware at the bottom");
+  "the diagnosis card must render after Firmware at the bottom");
+// A source that is CURRENT but cannot produce a verdict must not be the one row that looks fine
+// while the state row above it reports the diagnosis blocked.
+assert.match(app, /sourceCls = !r\.fresh \? "warn" : r\.control_eligible \? "ok" : "warn"/,
+  "a fresh but ineligible room source must not render as OK");
+// The blocked line must name the room source's OWN reason, from one table both the state row and
+// the source explanation read, so the two cannot give different accounts of one block.
+assert.match(app, /const ROOM_BLOCK_LINES = \{[\s\S]*disabled:\s*"dyn\.room_off"/,
+  "the room block reasons must be a single shared table");
+assert.match(app, /d\.reason === "room_unavailable"[\s\S]{0,200}?ROOM_BLOCK_LINES\[room\.reason\]/,
+  "a blocked diagnosis must say WHY the room source is unusable");
+assert.match(app, /ROOM_BLOCK_LINES\[r\.reason\]\)\s*\n?\s*html \+= descNoteHtml/,
+  "the source tongue must state the same reason the state row does");
 assert.match(app, /return vcard\(t\("dyn\.card"\), rows\);/,
   "the bottom card must render without a maturity pill");
 assert.doesNotMatch(app, /"dyn\.experimental"|section-badge\.experimental/,

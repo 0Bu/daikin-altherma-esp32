@@ -50,13 +50,14 @@ assert.match(setWeather, /weather_was_enabled && !location.enabled/);
 assert.ok(weatherSave >= 0 && weatherRequest > weatherSave,
   "weather cleanup may be requested only after the disabling config was persisted");
 
-const setDynamicStart = http.indexOf("static esp_err_t set_dynamic_lwt(");
-const setDynamicEnd = http.indexOf("static esp_err_t set_hp(", setDynamicStart);
-const setDynamic = http.slice(setDynamicStart, setDynamicEnd);
-const dynamicSave = setDynamic.indexOf("config_save(c)");
-const dynamicRequest = setDynamic.indexOf("mqtt_request_weather_cleanup()");
-assert.match(setDynamic, /want == logic::DynamicLwtMode::Off/);
-assert.ok(dynamicSave >= 0 && dynamicRequest > dynamicSave,
-  "turning the feature OFF must retract weather evidence only after OFF was persisted");
+// The retained forecast has exactly ONE way to stop being published now, and so exactly one place
+// that must retract it: deleting the location. /set_dynamic_lwt was the second, and it is retired
+// along with the mode it set — a tombstone request left behind in a route nothing posts to would be
+// a retraction path that can never run.
+assert.doesNotMatch(http, /set_dynamic_lwt/,
+  "the retired mode route must not reappear as a second weather-retraction path");
+const cleanupCallers = (http.match(/mqtt_request_weather_cleanup\(\)/g) || []).length;
+assert.equal(cleanupCallers, 1,
+  "exactly one route may retract the retained forecast: the one that deletes the location");
 
 console.log("MQTT source cleanup: explicit weather + Modbus tombstones bypass X10A safely");

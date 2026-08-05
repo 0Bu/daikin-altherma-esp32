@@ -103,8 +103,12 @@ struct ConfigBlob {
     std::string ref_temp_hvac_mode_path;
     bool        has_ref_temp = false;
     bool        has_ref_control = false;
-    // ── v14: deterministic controller mode (0=OFF, 1=SHADOW; ACTIVE is not representable) ───────
-    int32_t     dynamic_lwt_mode = 0;
+    // ── v14: RETIRED controller-mode byte. The heating-curve diagnosis arms itself from the two
+    // sources it reads (config_model.hpp's dynamic_lwt_armed), so there is no mode to store. The
+    // byte keeps its place in the layout — the exact-length rule below is what refuses a truncated
+    // newer blob, and shrinking v14 would make a v13 blob decode as one — and is written as zero and
+    // ignored on read, exactly as the v9 actuation-consent bit is. `has_dynamic_lwt` stays as the
+    // "this blob was at least v14" witness the migration tests read.
     bool        has_dynamic_lwt = false;
     // ── v10: direct Open-Meteo location ────────────────────────────────────────────────────────
     bool        weather_enabled = false;
@@ -140,8 +144,10 @@ inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
 // reference-temperature mapping, v8 its source timestamp + maximum-age fields, and v9 activates the
 // formerly inert actuation bit without changing the byte layout, and v10 the direct Open-Meteo
 // location, v11 appends ENV III enable + SDA/SCL pins, and v12 appends the explicit board-preset id
-// + selected flag, v13 appends room setpoint/enabled/HVAC mappings, and v14 appends the OFF/SHADOW
-// dynamic-LWT mode. Current firmware derives HomeHub enabled solely from whether mb_host is empty;
+// + selected flag, v13 appends room setpoint/enabled/HVAC mappings, and v14 appends one byte that
+// carried the OFF/SHADOW dynamic-LWT mode and is now retired — written zero, ignored on read, since
+// the diagnosis arms itself from its configured sources. Current firmware derives HomeHub enabled
+// solely from whether mb_host is empty;
 // v5-v8 actuation bits decode OFF and every pre-v14 controller mode migrates OFF.
 // Bumping the version rather than reusing the previous one is what makes the trailing-garbage check
 // below still exact per version; OLDER blobs are ACCEPTED on read (see config_blob_deserialize)
@@ -217,8 +223,8 @@ inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     detail::blob_put_str(v, c.ref_temp_setpoint_path);
     detail::blob_put_str(v, c.ref_temp_enabled_path);
     detail::blob_put_str(v, c.ref_temp_hvac_mode_path);
-    // v14 block. One byte is enough because ACTIVE is intentionally not part of this package.
-    v.push_back(static_cast<uint8_t>(c.dynamic_lwt_mode & 0xFF));
+    // v14 block: the retired controller-mode byte, always zero (see the field's comment above).
+    v.push_back(0);
     detail::blob_put_u32(v, config_crc32(v.data(), v.size()));   // CRC covers everything before it
     return v;
 }
@@ -338,15 +344,16 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
     }
     if (version >= 14) {
         if (p + 1 > body_end) return false;
-        c.dynamic_lwt_mode = static_cast<int32_t>(d[p++]);
+        p++;   // retired controller-mode byte, whatever it holds — arming is derived, not stored
         c.has_dynamic_lwt = true;
     }
     // Exact per version: a v1 blob must END after ntp_server, a v2 blob after the board block, a v3
     // blob after the channel byte, a v4 blob after the language byte, v5/v6 after the HomeHub block
     // v7 after the reference-source strings, v8/v9 after timestamp/max-age, and v10 after the
     // Open-Meteo location, v11 after ENV III, v12 after the explicit board identity, v13 after the
-    // three room-control mapping strings, and v14 after the one-byte controller mode.
-    // v6 and v9 change a flag's meaning without changing the HomeHub block's size.
+    // three room-control mapping strings, and v14 after its one retired byte.
+    // v6 and v9 change a flag's meaning without changing the HomeHub block's size, as does v14's
+    // retirement of the mode byte — the LENGTH is the contract here, not what a byte still means.
     // Accepting a prefix would let a truncated v2 decode as a valid v1 with silently-default pins.
     if (p != body_end) return false;   // trailing garbage -> reject rather than accept a prefix
     c.wifi_rollback_active = (flags & 1) != 0;

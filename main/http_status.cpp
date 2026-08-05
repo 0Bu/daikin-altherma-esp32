@@ -381,12 +381,12 @@ void http_append_status_json(std::string& j, bool redact) {
     if (!rt.eligibility_error.empty()) { j += ",\"eligibility_error\":"; j += jstr(rt.eligibility_error); }
     if (!rt.error.empty()) { j += ",\"error\":"; j += jstr(rt.error); }
     j += "},";
-    // Deterministic controller evidence. `mode` is the persisted operator choice; state/reason are
-    // the last mqtt-task evaluation. OFF/SHADOW are the only accepted modes, and the proposal is a
-    // MEASUREMENT: no actuator exists to carry it to the plant (#294).
-    j += "\"dynamic_lwt\":{\"mode\":\"";
-    j += logic::dynamic_lwt_mode_name(c.dynamic_lwt_mode);
-    j += "\",\"mode_code\":"; j += std::to_string(static_cast<unsigned>(c.dynamic_lwt_mode));
+    // Deterministic controller evidence. `armed` is DERIVED from the two configured sources rather
+    // than stored (config_model.hpp's dynamic_lwt_armed) — there is no operator mode and no
+    // /set_dynamic_lwt route any more; state/reason are the last mqtt-task evaluation. The proposal
+    // is a MEASUREMENT: no actuator exists to carry it to the plant (#294).
+    j += "\"dynamic_lwt\":{\"armed\":";
+    j += dynamic_lwt_armed(c) ? "true" : "false";
     j += ",\"state\":\""; j += logic::dynamic_lwt_state_name(dlwt.state); j += "\"";
     j += ",\"state_code\":"; j += std::to_string(static_cast<unsigned>(dlwt.state));
     j += ",\"reason\":\""; j += logic::dynamic_lwt_reason_name(dlwt.reason); j += "\"";

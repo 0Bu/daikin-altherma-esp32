@@ -77,7 +77,7 @@ struct HeartbeatFields {
     // unavailable terms/offsets render null. These are MEASUREMENTS, not commands: the controller
     // has no actuator to call, and the aggregate of these proposals over a season is the heating-
     // curve verdict this project exists to produce (#294).
-    uint8_t     lwt_controller_mode = 0;
+    bool        lwt_controller_armed = false;
     uint8_t     lwt_controller_state = 0;
     uint8_t     lwt_controller_reason = 0;
     bool        lwt_controller_decision_eligible = false;
@@ -232,7 +232,7 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += ",\"room_errors\":"; j += std::to_string(f.room_errors);
     j += ",\"room_rejections\":"; j += std::to_string(f.room_rejections);
     // Deterministic LWT shadow controller. Numeric-only so the existing Telegraf parser archives it.
-    j += ",\"lwt_controller_mode\":"; j += std::to_string(f.lwt_controller_mode);
+    j += ",\"lwt_controller_armed\":"; j += f.lwt_controller_armed ? "1" : "0";
     j += ",\"lwt_controller_state\":"; j += std::to_string(f.lwt_controller_state);
     j += ",\"lwt_controller_reason\":"; j += std::to_string(f.lwt_controller_reason);
     j += ",\"lwt_controller_decision_eligible\":";
