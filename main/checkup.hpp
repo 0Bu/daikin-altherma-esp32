@@ -1,5 +1,5 @@
 #pragma once
-// The rolling X10A plant observation — storage and plumbing. Everything decidable (row locators,
+// The rolling plant diagnosis — storage and plumbing. Everything decidable (row locators,
 // the edge rules, the ring mechanics, the thresholds and the verdicts) lives in logic/checkup.hpp and
 // is host-tested; this file is the static ring, one mutex, and the fold from a poll cycle's cached
 // values into the open hour.
@@ -38,6 +38,10 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
 // in-flight sample; report stays empty while the request is pending.
 // HomeHub-only reconfiguration must not call this; it is an independent source.
 void checkup_reset();
+
+// Start only the DHW-loss/circulation window over after its independent source, mapping or power
+// thresholds change. Other X10A-backed findings keep their already-collected 24-hour evidence.
+void checkup_dhw_reset();
 
 // The judged 24-hour window. Read by GET /status (httpd task) and by the WebSocket status broadcast
 // (poll task), so it copies out under the lock — the report is a plain POD, so nothing allocates

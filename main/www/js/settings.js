@@ -120,6 +120,42 @@ function refTempFormPayload() {
   };
 }
 
+// ── DHW circulation-pump power source ───────────────────────────────────
+function fillCirculation() {
+  const c = S.status?.circulation_source || {};
+  const configured = !!c.configured;
+  $("circName").value = configured ? (c.name || "") : t("circ.default_name");
+  $("circTopic").value = configured ? (c.topic || "") : "";
+  $("circPowerPath").value = configured ? (c.power_path || "apower") : "apower";
+  $("circTimePath").value = configured ? (c.timestamp_path || "aenergy.minute_ts") : "aenergy.minute_ts";
+  $("circMaxAge").value = configured && Number.isInteger(c.max_age_s) ? c.max_age_s : 120;
+  $("circOn").value = configured && Number.isFinite(c.on_threshold_w) ? c.on_threshold_w : 3.0;
+  $("circOff").value = configured && Number.isFinite(c.off_threshold_w) ? c.off_threshold_w : 1.0;
+  $("circConfirm").value = configured && Number.isInteger(c.confirm_s) ? c.confirm_s : 60;
+  $("circDeleteBtn").disabled = !configured;
+}
+function openCirculation() {
+  fillCirculation();
+  for (const id of ["circName", "circTopic", "circPowerPath", "circTimePath", "circMaxAge", "circOn", "circOff", "circConfirm"])
+    $(id).classList.remove("invalid");
+  $("circError").hidden = true;
+  openPopup("circulationModal");
+}
+function closeCirculation() { closePopup("circulationModal"); }
+function circulationFormPayload() {
+  const topic = $("circTopic").value.trim();
+  return {
+    name: $("circName").value.trim(),
+    topic,
+    power_path: topic ? $("circPowerPath").value.trim() : "",
+    timestamp_path: topic ? $("circTimePath").value.trim() : "",
+    max_age_s: topic ? Number($("circMaxAge").value) : 120,
+    on_threshold_w: topic ? Number($("circOn").value) : 3.0,
+    off_threshold_w: topic ? Number($("circOff").value) : 1.0,
+    confirm_s: topic ? Number($("circConfirm").value) : 60,
+  };
+}
+
 // ── Direct Open-Meteo weather source ──────────────────────────────────────
 function clearWeatherError() {
   $("wxLatitude").classList.remove("invalid");

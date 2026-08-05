@@ -658,8 +658,9 @@
 
     <!-- ═══ SETTINGS (reached from the header gear) ═══
          The device's configuration, on ONE screen — no menu level in between: Connections, the
-         permanent heating-curve-diagnosis card, then the three ESP32-family cards. esp32CardHtml()
-         emits the latter four as one string so their live summaries update together. -->
+         three ESP32-family cards, permanent plant-diagnostics card and permanent heating-curve-
+         diagnosis card. esp32CardHtml() emits all five as one string so their live summaries update
+         together. -->
     <section class="view" id="viewSettings">
       <div class="pad">
         <div class="conn-tile" id="connTile"></div>
@@ -775,6 +776,59 @@
         <button class="btn secondary" type="button" id="rtCancel" data-i18n="btn.cancel">Cancel</button>
         <button class="btn danger" type="button" id="rtDeleteBtn" data-i18n="ref.delete">Delete</button>
         <button class="btn primary" type="submit" id="rtBtn" data-i18n="btn.save">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ═══ Potable-water circulation-pump MQTT power source ═══ -->
+  <div class="modal" id="circulationModal" hidden>
+    <div class="modal-backdrop" id="circulationBackdrop"></div>
+    <form class="modal-card" id="circulationForm" role="dialog" aria-modal="true" aria-labelledby="circulationModalTitle" tabindex="-1">
+      <div class="section-label card-title" id="circulationModalTitle" data-i18n="circ.title">Circulation-pump source</div>
+      <label class="field">
+        <span class="field-label plain" data-i18n="circ.name">Name</span>
+        <input class="input" id="circName" maxlength="48" placeholder="Circulation pump" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label plain" data-i18n="circ.topic">MQTT topic</span>
+        <input class="input mono" id="circTopic" maxlength="192" placeholder="shellyplugsg3-…/status/switch:0" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label plain" data-i18n="circ.power_path">Power JSON path</span>
+        <input class="input mono" id="circPowerPath" maxlength="128" value="apower" placeholder="apower" autocomplete="off">
+        <span class="field-help" data-i18n="circ.power_help">Actual active power in watts; the relay output is not used.</span>
+      </label>
+      <label class="field">
+        <span class="field-label plain" data-i18n="circ.time_path">Timestamp JSON path</span>
+        <input class="input mono" id="circTimePath" maxlength="128" value="aenergy.minute_ts" placeholder="aenergy.minute_ts" autocomplete="off">
+        <span class="field-help" data-i18n="circ.time_help">Measurement time as RFC3339 or Unix seconds.</span>
+      </label>
+      <div class="pin-grid">
+        <label class="field">
+          <span class="field-label plain" data-i18n="circ.on_threshold">ON from · W</span>
+          <input class="input num" type="number" id="circOn" min="0.1" max="6553.5" step="0.1" value="3.0" inputmode="decimal">
+        </label>
+        <label class="field">
+          <span class="field-label plain" data-i18n="circ.off_threshold">OFF through · W</span>
+          <input class="input num" type="number" id="circOff" min="0" max="6553.4" step="0.1" value="1.0" inputmode="decimal">
+        </label>
+      </div>
+      <div class="pin-grid">
+        <label class="field">
+          <span class="field-label plain" data-i18n="circ.max_age">Maximum age · seconds</span>
+          <input class="input num" type="number" id="circMaxAge" min="10" max="3600" step="1" value="120" inputmode="numeric">
+        </label>
+        <label class="field">
+          <span class="field-label plain" data-i18n="circ.confirm">Confirmation · seconds</span>
+          <input class="input num" type="number" id="circConfirm" min="1" max="600" step="1" value="60" inputmode="numeric">
+        </label>
+      </div>
+      <p class="hint" data-i18n="circ.hint">Read-only. Saving first tests one fresh MQTT value and never switches the plug.</p>
+      <p class="hint err" id="circError" hidden></p>
+      <div class="modal-actions">
+        <button class="btn secondary" type="button" id="circCancel" data-i18n="btn.cancel">Cancel</button>
+        <button class="btn danger" type="button" id="circDeleteBtn" data-i18n="circ.delete">Delete</button>
+        <button class="btn primary" type="submit" id="circBtn" data-i18n="btn.save">Save</button>
       </div>
     </form>
   </div>

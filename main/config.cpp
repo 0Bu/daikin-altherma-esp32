@@ -112,6 +112,29 @@ void config_load() {
             c.weather_latitude_e6 = b.weather_latitude_e6;
             c.weather_longitude_e6 = b.weather_longitude_e6;
         }
+        if (b.has_circulation && b.circulation_on_tenths_w <= UINT16_MAX &&
+            b.circulation_off_tenths_w <= UINT16_MAX && b.circulation_confirm_s <= UINT16_MAX) {
+            const uint16_t on_w = static_cast<uint16_t>(b.circulation_on_tenths_w);
+            const uint16_t off_w = static_cast<uint16_t>(b.circulation_off_tenths_w);
+            const uint16_t confirm_s = static_cast<uint16_t>(b.circulation_confirm_s);
+            const char* why = nullptr;
+            if (circulation_source_config_valid(
+                    b.circulation_name, b.circulation_topic, b.circulation_power_path,
+                    b.circulation_time_path, b.circulation_max_age_s, on_w, off_w,
+                    confirm_s, &why)) {
+                c.circulation_name = b.circulation_name;
+                c.circulation_topic = b.circulation_topic;
+                c.circulation_power_path = b.circulation_power_path;
+                c.circulation_time_path = b.circulation_time_path;
+                c.circulation_max_age_s = b.circulation_max_age_s;
+                c.circulation_on_tenths_w = on_w;
+                c.circulation_off_tenths_w = off_w;
+                c.circulation_confirm_s = confirm_s;
+            } else {
+                diag_printf("config: invalid circulation source ignored (%s)\n",
+                            why ? why : "invalid config");
+            }
+        }
         c.syslog_host = b.syslog_host; c.syslog_port = b.syslog_port; c.ntp_server = b.ntp_server;
         // has_board is false for a blob written before the board block existed (v1). Those fields
         // were compile-time then, so "absent" must read as the Kconfig default, NOT as disabled —
@@ -327,6 +350,14 @@ bool config_save(const Config& requested, bool require_link) {
     b.ref_temp_enabled_path = c.ref_temp_enabled_path;
     b.ref_temp_hvac_mode_path = c.ref_temp_hvac_mode_path;
     b.ref_temp_max_age_s = c.ref_temp_max_age_s;
+    b.circulation_name = c.circulation_name;
+    b.circulation_topic = c.circulation_topic;
+    b.circulation_power_path = c.circulation_power_path;
+    b.circulation_time_path = c.circulation_time_path;
+    b.circulation_max_age_s = c.circulation_max_age_s;
+    b.circulation_on_tenths_w = c.circulation_on_tenths_w;
+    b.circulation_off_tenths_w = c.circulation_off_tenths_w;
+    b.circulation_confirm_s = c.circulation_confirm_s;
     b.weather_enabled = c.weather_enabled;
     b.weather_latitude_e6 = c.weather_latitude_e6;
     b.weather_longitude_e6 = c.weather_longitude_e6;

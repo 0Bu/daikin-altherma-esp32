@@ -179,6 +179,7 @@ function wireRestOfApp() {
     if (act.dataset.act === "board") openBoard();
     else if (act.dataset.act === "ota") checkFirmwareUpdate();
     else if (act.dataset.act === "ref-temp") openRefTemp();
+    else if (act.dataset.act === "circulation") openCirculation();
     else if (act.dataset.act === "weather") openWeather();
   });
   $("settingsCards").addEventListener("change", (e) => {
@@ -442,6 +443,115 @@ function wireRestOfApp() {
     S.status.reference_temperature = { configured: false, max_age_s: 600 };
     idle(); closeRefTemp();
     toast(t("ref.deleted"), "ok");
+    await refreshStatus();
+  };
+
+  $("circCancel").onclick = closeCirculation;
+  $("circulationBackdrop").onclick = closeCirculation;
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("circulationModal").hidden) closeCirculation();
+  });
+  for (const id of ["circName", "circTopic", "circPowerPath", "circTimePath", "circMaxAge", "circOn", "circOff", "circConfirm"])
+    $(id).addEventListener("input", () => {
+      $(id).classList.remove("invalid"); $("circError").hidden = true;
+    });
+  const circulationInput = () => {
+    const input = circulationFormPayload();
+    const bad = (id, msg) => {
+      $(id).classList.add("invalid");
+      $("circError").textContent = msg;
+      $("circError").hidden = false;
+      toast(msg, "err");
+      return null;
+    };
+    if (!input.topic || !validRefTopic(input.topic)) return bad("circTopic", t("circ.err_topic"));
+    if (!validRefPath(input.power_path)) return bad("circPowerPath", t("circ.err_power_path"));
+    if (!validRefPath(input.timestamp_path)) return bad("circTimePath", t("circ.err_time_path"));
+    if (!Number.isInteger(input.max_age_s) || input.max_age_s < 10 || input.max_age_s > 3600)
+      return bad("circMaxAge", t("circ.err_max_age"));
+    if (!Number.isInteger(input.confirm_s) || input.confirm_s < 1 || input.confirm_s > 600)
+      return bad("circConfirm", t("circ.err_confirm"));
+    const atMostOneDecimal = (v) => Number.isFinite(v) && Math.abs(v * 10 - Math.round(v * 10)) < 1e-7;
+    if (!atMostOneDecimal(input.on_threshold_w) || input.on_threshold_w < 0.1 || input.on_threshold_w > 6553.5)
+      return bad("circOn", t("circ.err_threshold"));
+    if (!atMostOneDecimal(input.off_threshold_w) || input.off_threshold_w < 0 || input.off_threshold_w > 6553.4)
+      return bad("circOff", t("circ.err_threshold"));
+    if (input.on_threshold_w <= input.off_threshold_w)
+      return bad("circOn", t("circ.err_order"));
+    return input;
+  };
+  const showCirculationRequestError = (msg) => {
+    const field = /maximum age/i.test(msg) ? "circMaxAge" : /confirmation/i.test(msg) ? "circConfirm" :
+      /ON threshold/i.test(msg) ? "circOn" : /power threshold/i.test(msg) ? "circOff" :
+      /timestamp/i.test(msg) ? "circTimePath" : /JSON path|path is/i.test(msg) ? "circPowerPath" :
+      /name/i.test(msg) ? "circName" : /topic|mapping/i.test(msg) ? "circTopic" : null;
+    if (field) $(field).classList.add("invalid");
+    $("circError").textContent = msg;
+    $("circError").hidden = false;
+    toast(msg, "err");
+  };
+  const setCirculationActionBusy = (button, on, label) => {
+    setBusy(button, on, label);
+    if (on) {
+      $("circBtn").disabled = true;
+      $("circDeleteBtn").disabled = true;
+    } else {
+      $("circBtn").disabled = false;
+      $("circDeleteBtn").disabled = !S.status?.circulation_source?.configured;
+    }
+  };
+  $("circulationForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = circulationInput();
+    if (!input) return;
+    if (S.busy) { toast(t("toast.applying"), "info"); return; }
+    S.busy = true;
+    setCirculationActionBusy("circBtn", true, "btn.verifying");
+    const idle = () => { S.busy = false; setCirculationActionBusy("circBtn", false); };
+    let testResponse;
+    try { testResponse = await post("/test_circulation", input); }
+    catch { idle(); showCirculationRequestError(t("toast.unreachable")); return; }
+    if (!testResponse.ok) {
+      const msg = await errorOf(testResponse, t("circ.test_failed"));
+      idle(); showCirculationRequestError(msg); return;
+    }
+    const testResult = await testResponse.json().catch(() => ({}));
+    if (!Number.isInteger(testResult.test_proof) || testResult.test_proof <= 0 ||
+        !Number.isFinite(testResult.power_w)) {
+      idle(); showCirculationRequestError(t("circ.test_failed")); return;
+    }
+    let r;
+    try { r = await post("/set_circulation", { ...input, test_proof: testResult.test_proof }); }
+    catch { idle(); showCirculationRequestError(t("toast.unreachable")); return; }
+    if (!r.ok) {
+      const msg = await errorOf(r, t("toast.rejected"));
+      idle(); showCirculationRequestError(msg); return;
+    }
+    const res = await r.json().catch(() => ({}));
+    idle(); closeCirculation();
+    toast(t(res.saved === false ? "toast.no_changes" : "circ.saved"), res.saved === false ? "info" : "ok");
+    await refreshStatus();
+  });
+  $("circDeleteBtn").onclick = async () => {
+    if (S.busy) { toast(t("toast.applying"), "info"); return; }
+    if (!S.status?.circulation_source?.configured) return;
+    S.busy = true;
+    setCirculationActionBusy("circDeleteBtn", true, "circ.deleting");
+    const idle = () => { S.busy = false; setCirculationActionBusy("circDeleteBtn", false); };
+    let r;
+    try {
+      r = await post("/set_circulation", {
+        name: "", topic: "", power_path: "", timestamp_path: "", max_age_s: 120,
+        on_threshold_w: 3.0, off_threshold_w: 1.0, confirm_s: 60, test_proof: 0,
+      });
+    } catch { idle(); showCirculationRequestError(t("toast.unreachable")); return; }
+    if (!r.ok) {
+      const msg = await errorOf(r, t("toast.rejected"));
+      idle(); showCirculationRequestError(msg); return;
+    }
+    S.status.circulation_source = { configured: false, max_age_s: 120 };
+    idle(); closeCirculation();
+    toast(t("circ.deleted"), "ok");
     await refreshStatus();
   };
 

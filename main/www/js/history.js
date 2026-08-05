@@ -1125,6 +1125,11 @@ const MODEL_DESCRIPTIONS = {
     normal: "A fault seen in this RAM window remains listed after it clears. Rebooting or changing the X10A identity starts a new window. The exact code remains under Operation.",
     de: { what: "Die geräteeigene Störungsklasse. Fehler ist ein direkter Gerätebefund; Warnung und Vorsicht ergeben einen Hinweis. Für OK müssen alle unterstützten Klassenzeilen lesbar sein.",
           normal: "Eine in diesem RAM-Fenster erkannte Störung bleibt nach dem Verschwinden vermerkt. Neustart oder Änderung der X10A-Identität beginnen ein neues Fenster. Der genaue Code steht unter „Betrieb“." } },
+  health_dhw_loss: {
+    what: "Maximum R5T drop in clean one-hour windows: tank charging, internal-pump operation, BSH, the 45-minute settling period and draw-like drops are excluded. Actual MQTT plug power attributes high loss to the DHW circulation pump.",
+    normal: "At least 0.8 K/h gives a NOTE as a project heuristic. R5T is one point in a stratified tank: even high loss with the external pump off does not by itself prove a leaking valve, check valve or insulation defect. OK needs a full 24-hour lifecycle and six clean hours.",
+    de: { what: "Größter R5T-Abfall in bereinigten Stundenfenstern: Speicherladung, interne Pumpe, BSH, 45 Minuten Beruhigung und zapfungsähnliche Sprünge sind ausgeschlossen. Die MQTT-Plug-Leistung ordnet hohen Verlust der Warmwasser-Zirkulationspumpe zu.",
+          normal: "Ab 0,8 K/h erscheint HINWEIS als Projekt-Heuristik. R5T misst nur einen Punkt im geschichteten Speicher: Hoher Verlust bei Pumpe AUS beweist weder undichtes Ventil noch Rückschlagventil- oder Dämmungsfehler. OK erfordert volle 24 Stunden und sechs bereinigte Stunden." } },
   health_cycling: {
     what: "Counts compressor OFF-to-ON transitions and divides observed runtime by starts. Runs at the window edges may be incomplete.",
     normal: "Below 10 minutes per start with at least 12 starts produces a NOTE. This is a conservative project heuristic, not a Daikin service limit or a defect diagnosis. X10A does not separate heating, cooling and hot-water cycles; OK needs a full window and 90% readable compressor state.",

@@ -253,7 +253,7 @@ static void poll_once() {
     // `fresh` is still ours here — after the move below it is empty.
     history_record(fresh.data(), fresh.size());
 
-    // The rolling X10A observation, on the same terms and for the same reason it is here rather than derived
+    // The rolling plant diagnosis, on the same terms and for the same reason it is here rather than derived
     // later: compressor starts, defrosts and backup-heater minutes are EVENTS, and an event that
     // happens between two samples of a 5-minute trend ring leaves no trace in it at all — which is
     // precisely the short-run evidence the observation exists to preserve (logic/checkup.hpp). The compressor

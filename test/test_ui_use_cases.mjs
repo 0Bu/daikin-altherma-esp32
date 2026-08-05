@@ -127,6 +127,13 @@ const fetch = async (url, options = {}) => {
       retained: false,
     });
   }
+  if (url === "/test_circulation") {
+    if (fetchState.mode === "circ_test_reject")
+      return response(false, { error: "No fresh pump-power value received before timeout" }, 422);
+    return response(true, {
+      ok: true, test_proof: 83, power_w: 5.7, state: "on", retained: false,
+    });
+  }
   if (fetchState.mode === "reject") return response(false, { error: "rejected by test" });
   if (url === "/status") return response(true, {});
   return response(true, { reboot: false, saved: false });
@@ -211,7 +218,7 @@ vm.runInContext(`${source}
   collectBugReport = async () => ({ text: "redacted report", failed: false });
   this.__ui = {
     S, MODALS, POPUP_ROUTES, wire, initNavigation, applyRouteFromLocation, hydrateRoutedPopup,
-    openWifi, openMqtt, openRefTemp, openWeather, openSyslog,
+    openWifi, openMqtt, openRefTemp, openCirculation, openWeather, openSyslog,
     openNtp, openHomehub, openBoard, openBug,
   };`, context, { filename: "main/www/app.sources" });
 const ui = context.__ui;
@@ -224,6 +231,12 @@ ui.S.status = {
     temperature_path: "temperature.tC", setpoint_path: "target.tC",
     timestamp_path: "read_at", enabled_path: "enabled", hvac_mode_path: "hvac_mode",
     max_age_s: 600,
+  },
+  circulation_source: {
+    configured: true, name: "DHW circulation",
+    topic: "shellyplugsg3-fixture00001/status/switch:0",
+    power_path: "apower", timestamp_path: "aenergy.minute_ts",
+    max_age_s: 120, on_threshold_w: 3.0, off_threshold_w: 1.0, confirm_s: 60,
   },
   weather_forecast: { latitude: "", longitude: "" },
   syslog: {},
@@ -254,6 +267,7 @@ const cases = [
   { name: "Wi-Fi", modal: "wifiModal", open: "openWifi", cancel: "wfCancel", backdrop: "wifiBackdrop", form: "wifiForm", url: "/set_wifi" },
   { name: "MQTT", modal: "mqttModal", open: "openMqtt", cancel: "mqCancel", backdrop: "mqttBackdrop", form: "mqttForm", url: "/set_mqtt" },
   { name: "Room temperature", modal: "refTempModal", open: "openRefTemp", cancel: "rtCancel", backdrop: "refTempBackdrop", form: "refTempForm", url: "/set_ref_temp", customSave: true },
+  { name: "Circulation pump", modal: "circulationModal", open: "openCirculation", cancel: "circCancel", backdrop: "circulationBackdrop", form: "circulationForm", url: "/set_circulation", customSave: true },
   { name: "Weather", modal: "weatherModal", open: "openWeather", cancel: "wxCancel", backdrop: "weatherBackdrop", form: "weatherForm", url: "/set_weather" },
   { name: "Syslog", modal: "syslogModal", open: "openSyslog", cancel: "slCancel", backdrop: "syslogBackdrop", form: "syslogForm", url: "/set_syslog" },
   { name: "NTP", modal: "ntpModal", open: "openNtp", cancel: "ntpCancel", backdrop: "ntpBackdrop", form: "ntpForm", url: "/set_ntp" },
@@ -358,6 +372,7 @@ const delegatedTarget = (selector, key, value) => ({
 for (const entry of [
   ["settingsCards", "[data-act]", "act", "board", "boardModal"],
   ["settingsCards", "[data-act]", "act", "ref-temp", "refTempModal"],
+  ["settingsCards", "[data-act]", "act", "circulation", "circulationModal"],
   ["settingsCards", "[data-act]", "act", "weather", "weatherModal"],
   ["connTile", "[data-edit]", "edit", "wifi", "wifiModal"],
   ["connTile", "[data-edit]", "edit", "mqtt", "mqttModal"],
@@ -429,6 +444,14 @@ const configureValid = (item) => {
     document.getElementById("rtSetpointPath").value = "target.tC";
     document.getElementById("rtTimePath").value = "read_at";
     document.getElementById("rtMaxAge").value = "600";
+  } else if (item.modal === "circulationModal") {
+    document.getElementById("circTopic").value = "shellyplugsg3-fixture00001/status/switch:0";
+    document.getElementById("circPowerPath").value = "apower";
+    document.getElementById("circTimePath").value = "aenergy.minute_ts";
+    document.getElementById("circMaxAge").value = "120";
+    document.getElementById("circOn").value = "3.0";
+    document.getElementById("circOff").value = "1.0";
+    document.getElementById("circConfirm").value = "60";
   }
 };
 
@@ -454,6 +477,13 @@ for (const item of cases.filter((entry) => entry.form)) {
       "editing the visible fields of an unchanged source must preserve its existing enabled gate");
     assert.equal(fetchState.calls[0]?.body?.hvac_mode_path, "hvac_mode",
       "editing the visible fields of an unchanged source must preserve its existing HVAC gate");
+  } else if (item.modal === "circulationModal") {
+    assert.deepEqual(fetchState.calls.map((call) => call.url), ["/test_circulation", "/set_circulation"],
+      "one circulation-source Save must run live test before persistence");
+    assert.equal(fetchState.calls[1]?.body?.test_proof, 83,
+      "circulation-source persistence must present the exact live proof");
+    assert.equal(fetchState.calls[0]?.body?.power_path, "apower");
+    assert.equal(fetchState.calls[0]?.body?.timestamp_path, "aenergy.minute_ts");
   }
 
   fetchState.mode = "reject";
@@ -561,6 +591,43 @@ assert.equal(fetchState.calls[0]?.body?.enabled_path, "",
 assert.equal(fetchState.calls[0]?.body?.hvac_mode_path, "",
   "a new source must not inherit a stale hidden HVAC gate");
 ui.S.status.reference_temperature.configured = true;
+
+// Circulation-source Save follows the same proof boundary, but its proof is actual active power.
+// Delete removes only the read-only observer mapping; there is no Shelly switch request.
+const circulationSource = cases.find((item) => item.modal === "circulationModal");
+fetchState.mode = "circ_test_reject";
+fetchState.calls.length = 0;
+ui.S.busy = false;
+open(circulationSource);
+configureValid(circulationSource);
+await document.getElementById("circulationForm").fire("submit");
+await settle();
+assert.deepEqual(fetchState.calls.map((call) => call.url), ["/test_circulation"],
+  "a failed live power test must not persist the circulation source");
+assert.equal(document.getElementById("circulationModal").hidden, false);
+assert.equal(document.getElementById("circError").hidden, false);
+assert.equal(ui.S.busy, false);
+
+fetchState.mode = "ok";
+fetchState.calls.length = 0;
+ui.S.busy = false;
+open(circulationSource);
+assert.equal(document.getElementById("circDeleteBtn").disabled, false);
+document.getElementById("circTopic").value = "unsaved/draft";
+await document.getElementById("circDeleteBtn").fire("click");
+await settle();
+assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_circulation"],
+  "circulation Delete must not run the live-test endpoint");
+assert.deepEqual(fetchState.calls[0]?.body, {
+  name: "", topic: "", power_path: "", timestamp_path: "", max_age_s: 120,
+  on_threshold_w: 3, off_threshold_w: 1, confirm_s: 60, test_proof: 0,
+}, "circulation Delete must submit the explicit empty observer mapping");
+assert.equal(document.getElementById("circulationModal").hidden, true);
+open(circulationSource);
+assert.equal(document.getElementById("circTopic").value, "");
+assert.equal(document.getElementById("circPowerPath").value, "apower");
+assert.equal(document.getElementById("circTimePath").value, "aenergy.minute_ts");
+assert.equal(document.getElementById("circDeleteBtn").disabled, true);
 
 // ENV III now belongs to the Board Hardware form. Custom/Seeed hide and disable the entire
 // accessory section; Atom reveals it. No-sensor and board hardware are persisted atomically.

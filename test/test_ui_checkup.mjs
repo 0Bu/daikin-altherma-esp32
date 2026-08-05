@@ -1,4 +1,4 @@
-// Contract test for the X10A operating-observation card. Executes the production checkup renderer
+// Contract test for the rolling plant-diagnostics card. Executes the production checkup renderer
 // from the assembled production UI in a DOM-free VM so wording and null/evidence handling cannot drift into a
 // whole-plant health claim while the C++ report remains technically conservative.
 import assert from "node:assert/strict";
@@ -23,10 +23,10 @@ assert.match(dashboardSource, /const GROUPS = \[\s*\["Operation"/s,
              "Operation must remain the first live-value group");
 assert.match(dashboardSource,
              /const checkup = S\.status\?\.hp\?\.connected \? checkupCardHtml\(\) : "";\s*setHtml\("valueGroups",\s*checkup\s*\+\s*statusCardsHtml\(\)\s*\+\s*valueGroupsHtml\(/s,
-             "X10A check must render first in the post-diagram card stream");
+             "plant diagnostics must render first in the post-diagram card stream");
 assert.match(dashboardSource,
              /return environment \+ \(hp\.connected \? vcard\(t\("card\.model"\), model\) : ""\);/,
-             "independent outdoor observation and Model cards must follow the X10A check and precede Operation");
+             "independent outdoor observation and Model cards must follow plant diagnostics and precede Operation");
 
 // Pin the existing /status.health surface plus its additive evidence fields at the actual serializer.
 // The UI payloads below are synthetic by design; without this half, a C++ key drift could leave every
@@ -37,6 +37,8 @@ for (const key of [
   "full_span", "available", "assessable", "evaluated", "evidence", "observed_s", "required_s",
   "starts", "mean_run_s", "count", "paired_count", "share_pct", "defrost_s", "run_s",
   "min_bar", "min_l_min", "buh_min", "bsh_min", "buh_s", "bsh_s", "active", "seen",
+  "max_k_h", "windows", "high_windows", "high_with_pump", "high_pump_off",
+  "circulation_on_s", "circulation_known_s",
 ]) {
   assert.match(normalizedStatusSource, new RegExp(`"${key}"`),
                `missing /status.health key ${key}`);
@@ -100,8 +102,8 @@ vm.runInContext(
 const ui = sandbox.__checkup;
 
 // The title keeps the bounded 24-hour scope without consuming most of a narrow card's first line.
-assert.equal(ui.text("en", "card.checkup"), "X10A check · 24 h");
-assert.equal(ui.text("de", "card.checkup"), "X10A-Check · 24 h");
+assert.equal(ui.text("en", "card.checkup"), "Plant diagnostics · 24 h");
+assert.equal(ui.text("de", "card.checkup"), "Anlagendiagnose · 24 h");
 for (const [key, en, de] of [
   ["ok", "OK", "OK"],
   ["info", "NOTE", "HINWEIS"],
@@ -190,6 +192,20 @@ assert.equal(
   "12 starts · <1 min/start · NOTE",
   "positive runtime must not render as zero",
 );
+assert.equal(
+  ui.value({ id: "dhw_loss", verdict: "info", max_k_h: 1.2, windows: 6,
+             high_windows: 2, high_with_pump: 2, high_pump_off: 0 }),
+  "1.2 K/h · 6 windows · during circulation-pump operation · NOTE",
+  "high tank loss must expose its independent pump attribution",
+);
+ui.setLang("de");
+assert.equal(
+  ui.value({ id: "dhw_loss", verdict: "info", max_k_h: 1.0, windows: 4,
+             high_windows: 2, high_with_pump: 0, high_pump_off: 1 }),
+  "1 K/h · 4 Fenster · auch bei ausgeschalteter Zirkulationspumpe · HINWEIS",
+  "off-pump evidence must not be mislabeled as a circulation-pump cause",
+);
+ui.setLang("en");
 
 // Unsupported means no observation, even if a legacy payload happens to carry a plausible zero.
 // Count-only defrost without RPS is a supported `ok` path and remains separately visible.
@@ -262,13 +278,13 @@ ui.setLang("en");
 let card = ui.card();
 assert.match(card, /tone="checkup-val ok"/,
              "OK rows must carry both the wrapping class and visible OK tone");
-assert.match(card, /X10A check · 24 h/);
+assert.match(card, /Plant diagnostics · 24 h/);
 assert.match(card, />OK · 4\/4 assessed<\/span>/);
 assert.doesNotMatch(card, /7 values|24 h of/);
 assert.doesNotMatch(card, /\bAll clear\b|\bhealthy\b/i);
 ui.setLang("de");
 card = ui.card();
-assert.match(card, /X10A-Check · 24 h/);
+assert.match(card, /Anlagendiagnose · 24 h/);
 assert.match(card, />OK · 4\/4 bewertet<\/span>/);
 assert.doesNotMatch(card, /7 Werte|von 24 h/);
 assert.doesNotMatch(card, /Alles in Ordnung|\bgesund/i);
@@ -429,7 +445,7 @@ assert.match(pressureCopy, /sofort HINWEIS und nach 60 durchgehenden Sekunden WA
 
 // The hint box should answer the question without becoming a manual. Keep both paragraphs concise
 // while the source-level assertions above preserve the technically load-bearing caveats.
-for (const id of ["fault", "cycling", "defrost", "pressure", "flow", "heater", "retries"]) {
+for (const id of ["fault", "dhw_loss", "cycling", "defrost", "pressure", "flow", "heater", "retries"]) {
   const d = descriptionContext.__copy.model[`health_${id}`];
   for (const [lang, copy] of [["en", d], ["de", d.de]]) {
     const length = `${copy.what} ${copy.normal || ""}`.length;
@@ -453,4 +469,4 @@ for (const [name, pattern] of [
   ["translated backup-heater state", /\bZusatzheizer (?:ist )?aus\b/i],
 ]) assert.doesNotMatch(explanationCopy, pattern, `${name} must use ON/OFF`);
 
-console.log("X10A checkup UI contract: evidence-bounded rendering verified");
+console.log("plant-diagnostics UI contract: evidence-bounded rendering verified");

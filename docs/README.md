@@ -437,6 +437,14 @@ POST /set_ref_temp                 # the exact mapping above + test_proof → pe
                                    #   non-empty topic requires a proof issued for that same topic/path/
                                    #   gate/age tuple; an empty topic is the explicit Disable operation and
                                    #   needs no readable value or proof.
+POST /test_circulation             # { name, topic, power_path, timestamp_path, max_age_s,
+                                   #   on_threshold_w, off_threshold_w, confirm_s } → temporarily
+                                   #   subscribe and require one fresh active-power value; returns watts,
+                                   #   threshold state and a mapping-bound proof. Read-only: no Shelly command.
+POST /set_circulation              # the exact mapping above + test_proof → persist as blob v15 and
+                                   #   apply live without reboot. Empty topic deletes the observer mapping.
+                                   #   Defaults: apower, aenergy.minute_ts, 3.0/1.0 W, 120 s age,
+                                   #   60 s confirmation; every field is configurable in Settings.
                                    #   (There is no POST /set_dynamic_lwt. The heating-curve diagnosis
                                    #   arms itself from the timestamped MQTT room source above. The
                                    #   forecast below is optional comparison evidence, so location

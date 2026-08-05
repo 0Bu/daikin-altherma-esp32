@@ -111,6 +111,14 @@ struct ConfigBlob {
     // ignored on read, exactly as the v9 actuation-consent bit is. `has_dynamic_lwt` stays as the
     // "this blob was at least v14" witness the migration tests read.
     bool        has_dynamic_lwt = false;
+    // ── v15: independent MQTT power witness for the potable-water circulation pump ────────────
+    std::string circulation_name, circulation_topic, circulation_power_path,
+                circulation_time_path;
+    uint32_t    circulation_max_age_s = 120;
+    uint32_t    circulation_on_tenths_w = 30;
+    uint32_t    circulation_off_tenths_w = 10;
+    uint32_t    circulation_confirm_s = 60;
+    bool        has_circulation = false;
     // ── v10: direct Open-Meteo location ────────────────────────────────────────────────────────
     bool        weather_enabled = false;
     int32_t     weather_latitude_e6 = 0;
@@ -147,15 +155,16 @@ inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
 // location, v11 appends ENV III enable + SDA/SCL pins, and v12 appends the explicit board-preset id
 // + selected flag, v13 appends room setpoint/enabled/HVAC mappings, and v14 appends one byte that
 // carried the OFF/SHADOW dynamic-LWT mode and is now retired — written zero, ignored on read, since
-// the diagnosis arms itself from its configured sources. Current firmware derives HomeHub enabled
-// solely from whether mb_host is empty;
+// the diagnosis arms itself from its configured sources; v15 appends the independent circulation-
+// pump MQTT power mapping. Current firmware
+// derives HomeHub enabled solely from whether mb_host is empty;
 // v5-v8 actuation bits decode OFF and every pre-v14 controller mode migrates OFF.
 // Bumping the version rather than reusing the previous one is what makes the trailing-garbage check
 // below still exact per version; OLDER blobs are ACCEPTED on read (see config_blob_deserialize)
 // because rejecting them would drop a user's WiFi and MQTT credentials on the OTA that introduced the
 // field — the fallback path is the legacy per-key layout, which a device written by a blob-era build
 // has never populated.
-inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 14;
+inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 15;
 inline constexpr uint8_t  CONFIG_BLOB_VERSION_MIN = 1;
 // A string field longer than this is treated as corruption on decode: real credentials are short, so a
 // huge length is a garbled blob, not a value. Bounds the work and rejects a hostile/garbled length.
@@ -226,6 +235,16 @@ inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     detail::blob_put_str(v, c.ref_temp_hvac_mode_path);
     // v14 block: the retired controller-mode byte, always zero (see the field's comment above).
     v.push_back(0);
+    // v15 block. Thresholds are tenths of watts to keep the persisted representation exact and
+    // portable across host/newlib floating-point implementations.
+    detail::blob_put_str(v, c.circulation_name);
+    detail::blob_put_str(v, c.circulation_topic);
+    detail::blob_put_str(v, c.circulation_power_path);
+    detail::blob_put_str(v, c.circulation_time_path);
+    detail::blob_put_u32(v, c.circulation_max_age_s);
+    detail::blob_put_u32(v, c.circulation_on_tenths_w);
+    detail::blob_put_u32(v, c.circulation_off_tenths_w);
+    detail::blob_put_u32(v, c.circulation_confirm_s);
     detail::blob_put_u32(v, config_crc32(v.data(), v.size()));   // CRC covers everything before it
     return v;
 }
@@ -348,11 +367,19 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
         p++;   // retired controller-mode byte, whatever it holds — arming is derived, not stored
         c.has_dynamic_lwt = true;
     }
+    if (version >= 15) {
+        if (!get_str(c.circulation_name) || !get_str(c.circulation_topic) ||
+            !get_str(c.circulation_power_path) || !get_str(c.circulation_time_path) ||
+            !get_u32(c.circulation_max_age_s) || !get_u32(c.circulation_on_tenths_w) ||
+            !get_u32(c.circulation_off_tenths_w) || !get_u32(c.circulation_confirm_s)) return false;
+        c.has_circulation = true;
+    }
     // Exact per version: a v1 blob must END after ntp_server, a v2 blob after the board block, a v3
     // blob after the channel byte, a v4 blob after the language byte, v5/v6 after the HomeHub block
     // v7 after the reference-source strings, v8/v9 after timestamp/max-age, and v10 after the
     // Open-Meteo location, v11 after ENV III, v12 after the explicit board identity, v13 after the
-    // three room-control mapping strings, and v14 after its one retired byte.
+    // three room-control mapping strings, v14 after its one retired byte, and v15 after the
+    // circulation-pump source mapping and thresholds.
     // v6 and v9 change a flag's meaning without changing the HomeHub block's size, as does v14's
     // retirement of the mode byte — the LENGTH is the contract here, not what a byte still means.
     // Accepting a prefix would let a truncated v2 decode as a valid v1 with silently-default pins.

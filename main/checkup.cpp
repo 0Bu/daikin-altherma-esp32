@@ -1,10 +1,11 @@
-// The 24-hour X10A plant observation. Policy (which rows, what counts as an edge, the bucket math, the
+// The 24-hour plant diagnosis. Policy (which rows, what counts as an edge, the bucket math, the
 // thresholds and the verdicts) lives in logic/checkup.hpp and is host-tested; this file is storage,
 // one mutex, and the fold from a poll cycle into the open hour.
 #include "checkup.hpp"
 #include "diag_log.hpp"
 #include "logic/checkup.hpp"
 #include "logic/history.hpp"     // history_parse_tenths — the ONE parse of a cached value
+#include "mqtt_ha.hpp"           // independent circulation-pump electrical witness
 
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -18,6 +19,8 @@ namespace {
 
 logic::CheckupRing  s_ring;
 logic::CheckupState s_state;
+logic::DhwLossRing  s_dhw_ring;
+logic::DhwLossState s_dhw_state;
 // Capability of the CURRENT converter-adjudicated profile. hp_poll derives it from the profile rows,
 // not from successful reads, so a timeout reduces evidence without pretending the feature vanished.
 // Replacing instead of OR-latching it is important when model detection changes at runtime.
@@ -25,6 +28,7 @@ logic::CheckupCoverage s_cov;
 daik::FaultClass      s_fault_now = daik::FaultClass::Unknown;
 SemaphoreHandle_t     s_mtx = nullptr;
 std::atomic<bool>     s_reset_requested{false};
+std::atomic<bool>     s_dhw_reset_requested{false};
 
 // RAII lock, same idiom as history.cpp/hp_poll.cpp. Everything inside a critical section here is a
 // plain integer copy — nothing allocates, so an unwind cannot strand the mutex.
@@ -79,10 +83,20 @@ bool reading(const CachedValue* v, size_t n, const logic::CheckupLocator& l, int
 
 bool apply_reset_locked() {
     if (!s_reset_requested.exchange(false)) return false;
+    s_dhw_reset_requested.store(false);
     s_ring.reset();
     s_state = logic::CheckupState{};
+    s_dhw_ring.reset();
+    s_dhw_state = logic::DhwLossState{};
     s_cov = logic::CheckupCoverage{};
     s_fault_now = daik::FaultClass::Unknown;
+    return true;
+}
+
+bool apply_dhw_reset_locked() {
+    if (!s_dhw_reset_requested.exchange(false)) return false;
+    s_dhw_ring.reset();
+    s_dhw_state = logic::DhwLossState{};
     return true;
 }
 
@@ -92,6 +106,10 @@ void checkup_reset() {
     // Do not create/take the mutex from the httpd task. The poll task remains its sole creator, and
     // only the record path consumes this request under that mutex; reports stay empty until then.
     s_reset_requested.store(true);
+}
+
+void checkup_dhw_reset() {
+    s_dhw_reset_requested.store(true);
 }
 
 void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
@@ -112,6 +130,7 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     flag_state(v, n, logic::CHECKUP_LOC_DEFROST, s.defrost_known, s.defrost_on);
     flag_state(v, n, logic::CHECKUP_LOC_PUMP,    s.pump_known,    s.pump_on);
     flag_state(v, n, logic::CHECKUP_LOC_BSH,     s.bsh_known,     s.bsh_on);
+    flag_state(v, n, logic::CHECKUP_LOC_VALVE,   s.valve_known,   s.valve_dhw);
     // Either active step proves the aggregate BUH is on. Proving it is OFF needs every step carried
     // by this profile to be readable; one readable zero plus one timed-out step remains unknown.
     bool b1_known = false, b1_on = false, b2_known = false, b2_on = false;
@@ -125,6 +144,11 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
 
     s.bar_ok  = reading(v, n, logic::CHECKUP_LOC_PRESSURE, s.bar_tenths);
     s.flow_ok = reading(v, n, logic::CHECKUP_LOC_FLOW,     s.flow_tenths);
+    s.r5t_ok  = reading(v, n, logic::CHECKUP_LOC_R5T,      s.r5t_tenths);
+    const CirculationPumpSample circulation = circulation_pump_sample();
+    s.circulation_configured = circulation.configured;
+    s.circulation_known = circulation.known;
+    s.circulation_on = circulation.on;
     s.retry_expected_mask = coverage.retry_mask;
 
     // Fault class is matched by converter because a profile carries it on the outdoor page AND the
@@ -168,6 +192,7 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     // the whole sample after clearing state; otherwise the tail of old poll A would seed the window
     // that new-link poll B continues. Dropping at most the first new sample is the conservative side.
     if (apply_reset_locked()) return;
+    const bool discard_dhw_sample = apply_dhw_reset_locked();
     s_cov       = coverage;
     s_fault_now = s.fault;
     s_ring.observe(now);
@@ -183,11 +208,17 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
             continuous_boundary =
                 gap_us <= static_cast<int64_t>(logic::CHECKUP_MAX_GAP_S) * 1000000;
         }
-        s_ring.commit(logic::checkup_skipped(s_state.bucket, bucket));
+        const uint32_t skipped = logic::checkup_skipped(s_state.bucket, bucket);
+        s_ring.commit(skipped);
+        s_dhw_ring.commit(skipped);
         if (continuous_boundary) s_state.last_us = now; // dt=0, edge witnesses intentionally kept
         logic::checkup_step(s_state, s_ring.pending, s, now);
+        if (!discard_dhw_sample)
+            logic::dhw_loss_step(s_dhw_state, s_dhw_ring.pending, s, now);
     } else {
         logic::checkup_step(s_state, s_ring.pending, s, now);
+        if (!discard_dhw_sample)
+            logic::dhw_loss_step(s_dhw_state, s_dhw_ring.pending, s, now);
     }
     s_state.bucket      = bucket;
     s_state.have_bucket = true;
@@ -200,7 +231,10 @@ logic::CheckupReport checkup_report() {
     // Only the record path consumes a reset, because it can also discard the in-flight sample.
     // Until then expose an empty report, never stale identity A and never consume the guard early.
     if (s_reset_requested.load()) return logic::CheckupReport{};
-    return logic::checkup_evaluate(logic::checkup_aggregate(s_ring), s_cov, s_fault_now);
+    return logic::checkup_evaluate(
+        logic::checkup_aggregate(s_ring), s_cov, s_fault_now,
+        s_dhw_reset_requested.load() ? logic::DhwLossWindow{}
+                                     : logic::dhw_loss_aggregate(s_dhw_ring));
 }
 
 } // namespace daik

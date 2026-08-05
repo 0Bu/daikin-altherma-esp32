@@ -1,12 +1,13 @@
 #pragma once
-// THE ROLLING PLANT CHECKUP — what did X10A actually establish in at most the last 24 hours?
+// THE ROLLING PLANT CHECKUP — what did the on-board inputs establish in at most the last 24 hours?
 //
 // The dashboard already answers "what is it doing right now" (the schematic) and "what did this one
 // reading do today" (logic/history.hpp's trends). Neither answers the question a user actually asks
 // once a month: *did the observed data contain anything worth following up?* That answer is a small
 // number of COUNTED EVENTS and WINDOW MINIMA — how often the compressor started, how much of its
 // runtime went into defrosting, how low the water pressure got — none of which any single reading can
-// express. It is deliberately NOT a certificate that the whole plant is healthy: X10A cannot prove
+// express. It is deliberately NOT a certificate that the whole plant is healthy: X10A plus an
+// independent circulation-pump power witness still cannot prove
 // refrigerant charge, sensor calibration, hydraulic cleanliness, air path or seasonal efficiency.
 //
 // Issue #208 asked for it. This header is the half that can be decided; main/checkup.cpp is the
@@ -55,12 +56,10 @@
 //     (page, offset, converter) identities: conv 311 also names unrelated quantities elsewhere.
 //
 // ── WHAT IS NOT BUILT, AND WHY ──────────────────────────────────────────────────────────────────
-//   * 3-WAY VALVE LEAKAGE from the DHW tank's cooling rate. Refused, not deferred. The rate is
-//     dominated by things that are not the valve: measured on the reference installation, the tank
-//     loses 0.30 K/h with the DHW circulation pump off and 1.20 K/h with it on — a healthy plant
-//     with a circulation loop would be reported as a leaking valve every single day. A "valve:
-//     sealed" verdict also asserts something a temperature slope cannot establish in either
-//     direction.
+//   * 3-WAY VALVE LEAKAGE from the DHW tank's cooling rate. The rate is now observed, but never
+//     relabelled as a valve verdict: measured external circulation power can explain correlation or
+//     establish that high loss persisted with that pump off; it still cannot distinguish gravity
+//     circulation/check valve, a draw, insulation or a leaking diverter by itself.
 //   * AN ABSOLUTE MINIMUM-FLOW THRESHOLD. The manufacturer's minimum is per model (the catalog spans
 //     3 kW to 18 kW), and one number laid across 44 profiles would never fire on the large units and
 //     always fire on the small ones. The unit raises 7H itself when flow is genuinely insufficient,
@@ -68,6 +67,7 @@
 //   * A DAILY START-COUNT THRESHOLD. 24 starts on a cold day is one per hour and healthy; 24 starts
 //     in the shoulder season is cycling. A start count alone does not know the load. The MEAN RUN
 //     LENGTH does — see CHECKUP_CYCLING_SHORT_RUN_S.
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 
@@ -116,6 +116,8 @@ inline constexpr CheckupLocator CHECKUP_LOC_BSH      = {0x60, 12, 305};  // "BSH
 inline constexpr CheckupLocator CHECKUP_LOC_PUMP     = {0x60, 12, 301};  // "Water pump operation"
 inline constexpr CheckupLocator CHECKUP_LOC_PRESSURE = {0x62, 11, 105};  // "Water pressure" (bar)
 inline constexpr CheckupLocator CHECKUP_LOC_FLOW     = {0x62,  9, 105};  // "Flow sensor (l/min)"
+inline constexpr CheckupLocator CHECKUP_LOC_VALVE    = {0x60, 12, 306};  // 1=DHW, 0=space
+inline constexpr CheckupLocator CHECKUP_LOC_R5T      = {0x61, 10, 105};  // DHW tank sensor, 0.1 °C
 
 // Does this row carry the value a locator addresses? Three exact comparisons; no matching, no
 // heuristics, and nothing that a re-spelling or a translation could move.
@@ -280,9 +282,13 @@ struct CheckupSample {
     bool buh_known     = false, buh_on       = false;   // either BUH step
     bool bsh_known     = false, bsh_on       = false;
     bool pump_known    = false, pump_on      = false;
+    bool valve_known   = false, valve_dhw    = false;
+    bool circulation_configured = false;
+    bool circulation_known = false, circulation_on = false;
 
     bool bar_ok  = false;  int bar_tenths  = 0;
     bool flow_ok = false;  int flow_tenths = 0;
+    bool r5t_ok  = false;  int r5t_tenths  = 0;
 
     FaultClass fault = FaultClass::Unknown;             // Unknown when no conv-203 row was read
     uint8_t retry_expected_mask = 0;                    // counters supplied by the active profile
@@ -303,6 +309,180 @@ struct CheckupState {
     uint32_t bucket        = 0;
     bool     have_bucket   = false;
 };
+
+// ── DHW tank cooling / external circulation correlation ───────────────────────────────────────
+// Kept in its own compact ring: CheckupBucket already occupies 864 of its guarded 896 bytes, and a
+// per-hour DHW extension there would violate the deliberately measured heap/static budget.  Only
+// completed clean one-hour windows are retained.  Draw-contaminated or charge/settling segments do
+// not contribute observed seconds, so a plausible zero can never be bought with discarded data.
+struct DhwLossBucket {
+    uint16_t observed_s = 0;
+    uint16_t circulation_known_s = 0;
+    uint16_t circulation_on_s = 0;
+    int16_t max_loss_tenths_k_h = CHECKUP_ABSENT;
+    uint8_t windows = 0;
+    uint8_t high_windows = 0;
+    uint8_t high_with_pump = 0;
+    uint8_t high_pump_off = 0;
+};
+
+constexpr size_t DHW_LOSS_BYTES = sizeof(DhwLossBucket) * CHECKUP_BUCKETS;
+static_assert(DHW_LOSS_BYTES <= 384, "DHW loss ring exceeded its static-memory budget");
+
+struct DhwLossRing {
+    DhwLossBucket buf[CHECKUP_COMPLETED_BUCKETS] = {};
+    uint8_t count = 0;
+    uint8_t head = 0;
+    DhwLossBucket pending;
+
+    void reset() {
+        for (auto& b : buf) b = DhwLossBucket{};
+        count = head = 0;
+        pending = DhwLossBucket{};
+    }
+    void push(const DhwLossBucket& b) {
+        buf[head] = b;
+        head = static_cast<uint8_t>((head + 1) % CHECKUP_COMPLETED_BUCKETS);
+        if (count < CHECKUP_COMPLETED_BUCKETS) count++;
+    }
+    void commit(uint32_t skipped) {
+        push(pending);
+        for (uint32_t i = 0; i < skipped && i < CHECKUP_COMPLETED_BUCKETS; i++)
+            push(DhwLossBucket{});
+        pending = DhwLossBucket{};
+    }
+};
+
+struct DhwLossState {
+    int64_t last_us = -1;
+    int64_t segment_start_us = -1;
+    int64_t draw_anchor_us = -1;
+    int segment_start_tenths = 0;
+    int draw_anchor_tenths = 0;
+    uint32_t segment_circulation_known_s = 0;
+    uint32_t segment_circulation_on_s = 0;
+    uint32_t circulation_off_run_s = 0;
+    uint32_t settle_remaining_s = 0;
+
+    void reset_segment() {
+        segment_start_us = draw_anchor_us = -1;
+        segment_circulation_known_s = segment_circulation_on_s = 0;
+    }
+};
+
+constexpr uint32_t DHW_LOSS_WINDOW_S = 3600;             // R5T resolves only 0.1 K
+constexpr uint32_t DHW_LOSS_SETTLE_S = 45 * 60;          // issue #349 method after a tank charge
+constexpr uint32_t DHW_LOSS_DRAW_WINDOW_S = 10 * 60;
+constexpr int      DHW_LOSS_DRAW_DROP_TENTHS = 4;        // >0.35 K in ten minutes at 0.1 K resolution
+constexpr int      DHW_LOSS_HIGH_TENTHS_K_H = 8;         // project heuristic, not a Daikin limit
+constexpr uint32_t DHW_LOSS_CIRC_KNOWN_PCT = 90;
+constexpr uint32_t DHW_LOSS_CIRC_MIN_ON_S = 5 * 60;
+constexpr uint32_t DHW_LOSS_CIRC_OFF_SETTLE_S = 2 * 3600;
+constexpr uint32_t DHW_LOSS_REQUIRED_S = 6 * 3600;       // plus a complete 24 h lifecycle for clear
+
+inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSample& s,
+                          int64_t now_us) {
+    uint32_t dt = 0;
+    bool continuous = false;
+    if (st.last_us >= 0 && now_us >= st.last_us) {
+        const int64_t gap_us = now_us - st.last_us;
+        if (gap_us <= static_cast<int64_t>(CHECKUP_MAX_GAP_S) * 1000000) {
+            dt = static_cast<uint32_t>(now_us / 1000000 - st.last_us / 1000000);
+            continuous = true;
+        }
+    }
+    st.last_us = now_us;
+
+    if (continuous && s.circulation_configured && s.circulation_known && !s.circulation_on)
+        st.circulation_off_run_s =
+            std::min<uint32_t>(UINT32_MAX - dt, st.circulation_off_run_s) + dt;
+    else if (!continuous || !s.circulation_configured || !s.circulation_known || s.circulation_on)
+        st.circulation_off_run_s = 0;
+
+    const bool states_known = s.valve_known && s.pump_known && s.bsh_known;
+    // Any positive charge witness starts settling even when another state row timed out in this
+    // sweep. Requiring all three rows here would miss the charge and could admit its steep tail as
+    // tank loss as soon as the timed-out row recovered.
+    const bool heating_tank = (s.valve_known && s.valve_dhw) || (s.bsh_known && s.bsh_on);
+    if (heating_tank) {
+        st.settle_remaining_s = DHW_LOSS_SETTLE_S;
+        st.reset_segment();
+        return;
+    }
+    if (!continuous) {
+        st.reset_segment();
+        return;
+    }
+    if (st.settle_remaining_s) {
+        st.settle_remaining_s = dt >= st.settle_remaining_s ? 0 : st.settle_remaining_s - dt;
+        st.reset_segment();
+        return;
+    }
+
+    // Baseline method: valve on space, internal water pump off, BSH off, and a plausible R5T.
+    const bool eligible = states_known && !s.valve_dhw && !s.pump_on && !s.bsh_on &&
+                          s.r5t_ok && s.r5t_tenths >= 0 && s.r5t_tenths <= 900;
+    if (!eligible) {
+        st.reset_segment();
+        return;
+    }
+
+    if (st.draw_anchor_us < 0 || now_us < st.draw_anchor_us ||
+        now_us - st.draw_anchor_us > static_cast<int64_t>(DHW_LOSS_DRAW_WINDOW_S) * 1000000) {
+        st.draw_anchor_us = now_us;
+        st.draw_anchor_tenths = s.r5t_tenths;
+    } else if (st.draw_anchor_tenths - s.r5t_tenths >= DHW_LOSS_DRAW_DROP_TENTHS) {
+        // A draw can mimic a spectacular cooling rate. Discard everything since the anchor, then
+        // start a new candidate segment at the post-draw temperature.
+        st.reset_segment();
+        st.draw_anchor_us = now_us;
+        st.draw_anchor_tenths = s.r5t_tenths;
+    }
+
+    if (st.segment_start_us < 0) {
+        st.segment_start_us = now_us;
+        st.segment_start_tenths = s.r5t_tenths;
+        return;
+    }
+    if (s.circulation_configured && s.circulation_known) {
+        st.segment_circulation_known_s =
+            std::min<uint32_t>(UINT32_MAX - dt, st.segment_circulation_known_s) + dt;
+        if (s.circulation_on)
+            st.segment_circulation_on_s =
+                std::min<uint32_t>(UINT32_MAX - dt, st.segment_circulation_on_s) + dt;
+    }
+
+    const uint32_t elapsed_s = static_cast<uint32_t>((now_us - st.segment_start_us) / 1000000);
+    if (elapsed_s < DHW_LOSS_WINDOW_S) return;
+    const int drop_tenths = std::max(0, st.segment_start_tenths - s.r5t_tenths);
+    const int loss_tenths_k_h = static_cast<int>(
+        static_cast<uint64_t>(drop_tenths) * DHW_LOSS_WINDOW_S / elapsed_s);
+    b.observed_s = checkup_add_u16(b.observed_s, elapsed_s);
+    b.circulation_known_s = checkup_add_u16(
+        b.circulation_known_s, st.segment_circulation_known_s);
+    b.circulation_on_s = checkup_add_u16(b.circulation_on_s, st.segment_circulation_on_s);
+    b.windows = checkup_add_u8(b.windows, 1);
+    if (b.max_loss_tenths_k_h == CHECKUP_ABSENT ||
+        loss_tenths_k_h > b.max_loss_tenths_k_h)
+        b.max_loss_tenths_k_h = static_cast<int16_t>(loss_tenths_k_h);
+
+    if (loss_tenths_k_h >= DHW_LOSS_HIGH_TENTHS_K_H) {
+        b.high_windows = checkup_add_u8(b.high_windows, 1);
+        const bool source_covered = st.segment_circulation_known_s * 100u >=
+                                    elapsed_s * DHW_LOSS_CIRC_KNOWN_PCT;
+        if (source_covered && st.segment_circulation_on_s >= DHW_LOSS_CIRC_MIN_ON_S)
+            b.high_with_pump = checkup_add_u8(b.high_with_pump, 1);
+        else if (source_covered && st.segment_circulation_on_s == 0 &&
+                 st.circulation_off_run_s >= DHW_LOSS_CIRC_OFF_SETTLE_S)
+            b.high_pump_off = checkup_add_u8(b.high_pump_off, 1);
+    }
+
+    // Adjacent, non-overlapping one-hour windows preserve the sensor resolution and keep every
+    // completed statistic inside exactly one hourly retention bucket.
+    st.segment_start_us = now_us;
+    st.segment_start_tenths = s.r5t_tenths;
+    st.segment_circulation_known_s = st.segment_circulation_on_s = 0;
+}
 
 // Do not sample a pump's first minute as the day's hydraulic minimum. Ramp-up, valve motion and air
 // purge are real transient states but not the steady circuit flow a reader compares with the model's
@@ -535,6 +715,38 @@ inline CheckupWindow checkup_aggregate(const CheckupRing& r) {
     return w;
 }
 
+struct DhwLossWindow {
+    uint32_t observed_s = 0;
+    uint32_t circulation_known_s = 0;
+    uint32_t circulation_on_s = 0;
+    uint32_t windows = 0;
+    uint32_t high_windows = 0;
+    uint32_t high_with_pump = 0;
+    uint32_t high_pump_off = 0;
+    int max_loss_tenths_k_h = CHECKUP_ABSENT;
+};
+
+inline DhwLossWindow dhw_loss_aggregate(const DhwLossRing& r) {
+    DhwLossWindow w;
+    auto fold = [&w](const DhwLossBucket& b) {
+        w.observed_s += b.observed_s;
+        w.circulation_known_s += b.circulation_known_s;
+        w.circulation_on_s += b.circulation_on_s;
+        w.windows += b.windows;
+        w.high_windows += b.high_windows;
+        w.high_with_pump += b.high_with_pump;
+        w.high_pump_off += b.high_pump_off;
+        if (b.max_loss_tenths_k_h != CHECKUP_ABSENT &&
+            (w.max_loss_tenths_k_h == CHECKUP_ABSENT ||
+             b.max_loss_tenths_k_h > w.max_loss_tenths_k_h))
+            w.max_loss_tenths_k_h = b.max_loss_tenths_k_h;
+    };
+    const size_t oldest = r.count < CHECKUP_COMPLETED_BUCKETS ? 0 : r.head;
+    for (size_t i = 0; i < r.count; i++) fold(r.buf[(oldest + i) % CHECKUP_COMPLETED_BUCKETS]);
+    fold(r.pending);
+    return w;
+}
+
 // ── What the active profile can supply ──────────────────────────────────────────────────────────
 // Evidence from the ROWS, never from the model id — the argument logic/feature_gate.hpp makes and
 // measures: `generic` is the extreme case but not the only one, and an id check would have let a
@@ -549,6 +761,8 @@ struct CheckupCoverage {
     bool pump     = false;
     bool pressure = false;
     bool flow     = false;
+    bool valve    = false;
+    bool r5t      = false;
     bool fault    = false;   // any conv-203 row
     bool retries  = false;   // any exact protection-counter identity from def/overlay.hpp
     uint8_t fault_rows = 0;  // every supported class row must be clear before "Normal" is established
@@ -569,6 +783,8 @@ inline void checkup_cover_row(CheckupCoverage& c, unsigned reg, unsigned off, in
     if (checkup_row_matches(CHECKUP_LOC_PUMP,     reg, off, conv)) c.pump = true;
     if (checkup_row_matches(CHECKUP_LOC_PRESSURE, reg, off, conv)) c.pressure = true;
     if (checkup_row_matches(CHECKUP_LOC_FLOW,     reg, off, conv)) c.flow = true;
+    if (checkup_row_matches(CHECKUP_LOC_VALVE,    reg, off, conv)) c.valve = true;
+    if (checkup_row_matches(CHECKUP_LOC_R5T,      reg, off, conv)) c.r5t = true;
     if (checkup_is_fault_class(conv)) {
         c.fault = true;
         if (c.fault_rows < UINT8_MAX) c.fault_rows++;
@@ -606,15 +822,16 @@ constexpr CheckupVerdict checkup_worse(CheckupVerdict a, CheckupVerdict b) {
 // first" — a second ordering table in the browser would be free to disagree with this one, and the
 // row a reader most needs (an active fault) is the one that must not end up sixth.
 enum class CheckupCheck : uint8_t {
-    Fault = 0, Cycling, Defrost, Pressure, Flow, Heater, Retries
+    Fault = 0, DhwLoss, Cycling, Defrost, Pressure, Flow, Heater, Retries
 };
-constexpr size_t CHECKUP_CHECK_COUNT = 7;
+constexpr size_t CHECKUP_CHECK_COUNT = 8;
 
 // Stable wire ids — what /status.health prints and what the browser keys its copy on. Not the label:
 // labels are translated in the UI, ids are not.
 inline const char* checkup_check_id(CheckupCheck c) {
     switch (c) {
         case CheckupCheck::Cycling:  return "cycling";
+        case CheckupCheck::DhwLoss:  return "dhw_loss";
         case CheckupCheck::Defrost:  return "defrost";
         case CheckupCheck::Pressure: return "pressure";
         case CheckupCheck::Flow:     return "flow";
@@ -632,6 +849,7 @@ inline const char* checkup_evidence_name(CheckupCheck c) {
         case CheckupCheck::Fault:    return "device";
         case CheckupCheck::Pressure: return "manufacturer";
         case CheckupCheck::Cycling:  return "heuristic";
+        case CheckupCheck::DhwLoss:  return "heuristic";
         case CheckupCheck::Defrost:  return "heuristic";
         case CheckupCheck::Flow:     return "observation";
         case CheckupCheck::Heater:   return "observation";
@@ -707,6 +925,8 @@ struct CheckupCheckResult {
     int c = -1;
     int d = -1;
     int e = -1;
+    int f = -1;
+    int g = -1;
 };
 
 // Defrost has two claim strengths under one stable row id: its transition count is an observation,
@@ -738,14 +958,14 @@ struct CheckupReport {
 // right now and one that cleared three hours ago are different findings and must not collapse into
 // one badge.
 inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCoverage& cov,
-                                    FaultClass fault_now) {
+                                    FaultClass fault_now, const DhwLossWindow& dhw = {}) {
     CheckupReport r;
     r.covered_s = w.covered_s;
     r.full_span = w.full_span;
 
     auto set = [&r](CheckupCheck check, CheckupVerdict v, uint32_t observed_s,
                     uint32_t required_s, int a = -1, int b = -1,
-                    int c = -1, int d = -1, int e = -1) {
+                    int c = -1, int d = -1, int e = -1, int f = -1, int g = -1) {
         CheckupCheckResult& x = r.checks[static_cast<size_t>(check)];
         x.verdict = v;
         x.observed_s = observed_s;
@@ -755,7 +975,39 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
         x.c = c;
         x.d = d;
         x.e = e;
+        x.f = f;
+        x.g = g;
     };
+
+    // ── DHW loss: max clean one-hour R5T loss and independent circulation attribution ─────────
+    // The 0.8 K/h boundary is the installation's project heuristic, never a manufacturer limit.
+    // A high clean window is useful immediately; a reassuring absence waits for a complete 24 h
+    // lifecycle and at least six clean hours.  The Shelly strengthens attribution but is optional:
+    // missing/stale external evidence never erases an X10A-established high tank loss.
+    const bool dhw_supported = cov.r5t && cov.valve && cov.pump && cov.bsh;
+    if (!dhw_supported) {
+        set(CheckupCheck::DhwLoss, CheckupVerdict::Unavailable, 0, DHW_LOSS_REQUIRED_S);
+    } else if (dhw.high_windows > 0) {
+        set(CheckupCheck::DhwLoss, CheckupVerdict::Info,
+            dhw.observed_s, DHW_LOSS_REQUIRED_S, dhw.max_loss_tenths_k_h,
+            static_cast<int>(dhw.windows), static_cast<int>(dhw.high_windows),
+            static_cast<int>(dhw.high_with_pump), static_cast<int>(dhw.high_pump_off),
+            static_cast<int>(dhw.circulation_on_s),
+            static_cast<int>(dhw.circulation_known_s));
+    } else if (!w.full_span || dhw.observed_s < DHW_LOSS_REQUIRED_S) {
+        set(CheckupCheck::DhwLoss, CheckupVerdict::Collecting,
+            dhw.observed_s, DHW_LOSS_REQUIRED_S,
+            dhw.max_loss_tenths_k_h == CHECKUP_ABSENT ? -1 : dhw.max_loss_tenths_k_h,
+            static_cast<int>(dhw.windows), 0, 0, 0,
+            static_cast<int>(dhw.circulation_on_s),
+            static_cast<int>(dhw.circulation_known_s));
+    } else {
+        set(CheckupCheck::DhwLoss, CheckupVerdict::Ok,
+            dhw.observed_s, DHW_LOSS_REQUIRED_S, dhw.max_loss_tenths_k_h,
+            static_cast<int>(dhw.windows), 0, 0, 0,
+            static_cast<int>(dhw.circulation_on_s),
+            static_cast<int>(dhw.circulation_known_s));
+    }
 
     // ── Cycling: starts (a) and observed runtime per observed start in seconds (b) ───────────────
     // Window edges can censor a run, and the aggregate carries no operating mode or heat demand.
@@ -926,6 +1178,7 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
         if (c.verdict != CheckupVerdict::Unavailable) r.available++;
         const bool adjudicates =
             check == CheckupCheck::Fault ||
+            check == CheckupCheck::DhwLoss ||
             check == CheckupCheck::Cycling ||
             check == CheckupCheck::Pressure ||
             (check == CheckupCheck::Defrost && cov.rps && w.dfr_run_s > 0);
