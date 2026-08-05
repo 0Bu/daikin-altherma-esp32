@@ -41,6 +41,7 @@ enum class HomeHubValueKind : uint8_t {
     Binary,
     UnitAbnormality,   // 0 No error, 1 Fault, 2 Warning
     OperationMode,     // 0 Auto, 1 Heating, 2 Cooling
+    CurrentOperationMode, // input 38: 1 Heating, 2 Cooling (there is no Auto value)
     ThreeWayValve,     // 0 Space heating, 1 DHW
     SmartGridMode,     // 0 Free running, 1 Forced off, 2 Recommended on, 3 Forced on
 };
@@ -88,6 +89,9 @@ inline constexpr HomeHubReg HOMEHUB_REGS[] = {
     // diverter is on the tank. These two say whether each circuit is actually being served.
     {52, MbFunc::ReadInput, MbType::Int16,  1, "",      "DHW normal operation", HomeHubValueKind::Binary},
     {53, MbFunc::ReadInput, MbType::Int16,  1, "",      "Space heating/cooling normal operation", HomeHubValueKind::Binary},
+    // Unlike offset 53, this CURRENT mode distinguishes the active heating and cooling seasons.
+    // The diagnosis combines both: 53 proves normal space operation, 38 proves it is HEATING.
+    {38, MbFunc::ReadInput, MbType::Int16,  1, "",      "Current operation mode", HomeHubValueKind::CurrentOperationMode},
     // ── Temperatures (input, Temp16 = signed /100 °C) ─────────────────────────────────────────────
     {40, MbFunc::ReadInput, MbType::Temp16, 1, "°C",    "Leaving water temperature PHE"},
     {41, MbFunc::ReadInput, MbType::Temp16, 1, "°C",    "Leaving water temperature BUH"},
@@ -126,6 +130,7 @@ inline constexpr bool homehub_is_binary(const HomeHubReg& r) {
 
 inline constexpr bool homehub_is_enum(HomeHubValueKind kind) {
     return kind == HomeHubValueKind::UnitAbnormality || kind == HomeHubValueKind::OperationMode ||
+           kind == HomeHubValueKind::CurrentOperationMode ||
            kind == HomeHubValueKind::ThreeWayValve || kind == HomeHubValueKind::SmartGridMode;
 }
 
@@ -147,6 +152,7 @@ inline constexpr const char* homehub_enum_id(HomeHubValueKind kind) {
     switch (kind) {
         case HomeHubValueKind::UnitAbnormality: return "unit_abnormality";
         case HomeHubValueKind::OperationMode:   return "operation_mode";
+        case HomeHubValueKind::CurrentOperationMode: return "current_operation_mode";
         case HomeHubValueKind::ThreeWayValve:   return "three_way_valve";
         case HomeHubValueKind::SmartGridMode:   return "smart_grid_mode";
         default: return nullptr;

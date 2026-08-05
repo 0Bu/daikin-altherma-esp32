@@ -32,7 +32,7 @@
 #include "logic/detect.hpp"
 #include "logic/detect_backoff.hpp"
 #include "logic/discovery.hpp"
-#include "logic/dynamic_lwt_controller.hpp"
+#include "logic/heating_curve_diagnosis.hpp"
 #include "logic/error_codes.hpp"
 #include "logic/checkup.hpp"
 #include "logic/health_gate.hpp"
@@ -1961,19 +1961,18 @@ static void test_heartbeat() {
                "\"room_temperature_c\":null,\"room_setpoint_c\":null,\"room_error_k\":null,"
                "\"room_source_unix_s\":null,\"room_age_s\":null,\"room_reason_code\":1,"
                "\"room_messages\":0,\"room_errors\":0,\"room_rejections\":0,"
-               "\"lwt_controller_armed\":0,\"lwt_controller_state\":0,\"lwt_controller_reason\":0,"
-               "\"lwt_controller_decision_eligible\":0,\"lwt_controller_proposal_produced\":0,"
-               "\"lwt_controller_p_term_k\":null,\"lwt_controller_unclamped_offset_k\":null,"
-               "\"lwt_controller_bounded_offset_k\":null,\"lwt_controller_requested_offset_k\":null,"
-               "\"lwt_controller_forecast_contribution_k\":0,\"lwt_controller_deadband\":0,"
-               "\"lwt_controller_quantized\":0,\"lwt_controller_clamped\":0,"
-               "\"lwt_controller_rate_limited\":0,\"lwt_controller_forecast_available\":0,"
-               "\"lwt_controller_plant_gate_known\":0,\"lwt_controller_plant_gate_active\":0,"
-               "\"lwt_controller_room_source_unix_s\":null,"
-               "\"lwt_controller_room_age_s\":null,\"lwt_controller_last_decision_ms\":null,"
-               "\"lwt_controller_sequence\":0,\"lwt_controller_evaluations\":0,"
-               "\"lwt_controller_decisions\":0,\"lwt_controller_holds\":0,"
-               "\"lwt_controller_failsafes\":0,"
+               "\"heating_curve_method_version\":0,\"heating_curve_armed\":0,"
+               "\"heating_curve_state\":0,\"heating_curve_reason\":0,"
+               "\"heating_curve_sample_eligible\":0,"
+               "\"heating_curve_current_room_error_k\":null,"
+               "\"heating_curve_last_sample_room_error_k\":null,"
+               "\"heating_curve_forecast_available\":0,"
+               "\"heating_curve_plant_gate_known\":0,\"heating_curve_plant_gate_active\":0,"
+               "\"heating_curve_heating_mode_known\":0,\"heating_curve_heating_mode_active\":0,"
+               "\"heating_curve_room_source_unix_s\":null,\"heating_curve_room_age_s\":null,"
+               "\"heating_curve_last_sample_unix_s\":null,\"heating_curve_sequence\":0,"
+               "\"heating_curve_evaluations\":0,\"heating_curve_samples\":0,"
+               "\"heating_curve_holds\":0,\"heating_curve_blocks\":0,"
                "\"bus_connected\":1,\"bus_proto\":\"I\",\"bus_registers\":10,\"bus_values\":48,"
                "\"bus_last_ok_s\":1,\"bus_rx_received\":763732,\"bus_rx_fails\":2,"
                "\"bus_crc_err\":0,\"bus_timeout_err\":2,\"bus_ou_held_over\":0,"
@@ -2044,44 +2043,43 @@ static void test_heartbeat() {
     CHECK(roomj.find("\"room_errors\":2,") != std::string::npos);
     CHECK(roomj.find("\"room_rejections\":7,") != std::string::npos);
     HeartbeatFields cf;
-    cf.lwt_controller_armed = true;
-    cf.lwt_controller_state = 3;
-    cf.lwt_controller_reason = 10;
-    cf.lwt_controller_decision_eligible = true;
-    cf.lwt_controller_proposal_produced = true;
-    cf.lwt_controller_has_terms = true;
-    cf.lwt_controller_has_requested_offset = true;
-    cf.lwt_controller_clamped = true;
-    cf.lwt_controller_rate_limited = true;
-    cf.lwt_controller_plant_gate_known = true;
-    cf.lwt_controller_plant_gate_active = true;
-    cf.lwt_controller_has_room_source_time = true;
-    cf.lwt_controller_room_age_known = true;
-    cf.lwt_controller_room_source_unix_s = 1770000000;
-    cf.lwt_controller_room_age_s = 12;
-    cf.lwt_controller_p_term_k = 3.0;
-    cf.lwt_controller_unclamped_offset_k = 3.0;
-    cf.lwt_controller_bounded_offset_k = 2;
-    cf.lwt_controller_requested_offset_k = 1;
-    cf.lwt_controller_last_decision_ms = 1800000;
-    cf.lwt_controller_sequence = 7;
-    cf.lwt_controller_evaluations = 12;
-    cf.lwt_controller_decisions = 7;
-    cf.lwt_controller_holds = 2;
-    cf.lwt_controller_failsafes = 3;
+    cf.heating_curve_method_version = 2;
+    cf.heating_curve_armed = true;
+    cf.heating_curve_state = 3;
+    cf.heating_curve_reason = 10;
+    cf.heating_curve_sample_eligible = true;
+    cf.heating_curve_forecast_available = true;
+    cf.heating_curve_plant_gate_known = true;
+    cf.heating_curve_plant_gate_active = true;
+    cf.heating_curve_heating_mode_known = true;
+    cf.heating_curve_heating_mode_active = true;
+    cf.heating_curve_has_current_room_error = true;
+    cf.heating_curve_has_last_sample = true;
+    cf.heating_curve_has_room_source_time = true;
+    cf.heating_curve_room_age_known = true;
+    cf.heating_curve_current_room_error_k = -2.9;
+    cf.heating_curve_last_sample_room_error_k = -2.8;
+    cf.heating_curve_room_source_unix_s = 1770000000;
+    cf.heating_curve_room_age_s = 12;
+    cf.heating_curve_last_sample_unix_s = 1770000001;
+    cf.heating_curve_sequence = 7;
+    cf.heating_curve_evaluations = 12;
+    cf.heating_curve_samples = 7;
+    cf.heating_curve_holds = 2;
+    cf.heating_curve_blocks = 3;
     const std::string cj = build_heartbeat_json(cf);
-    CHECK(cj.find("\"lwt_controller_armed\":1,") != std::string::npos);
-    CHECK(cj.find("\"lwt_controller_state\":3,") != std::string::npos);
-    CHECK(cj.find("\"lwt_controller_reason\":10,") != std::string::npos);
-    CHECK(cj.find("\"lwt_controller_p_term_k\":3.000000,") != std::string::npos);
-    CHECK(cj.find("\"lwt_controller_bounded_offset_k\":2,") != std::string::npos);
-    CHECK(cj.find("\"lwt_controller_requested_offset_k\":1,") != std::string::npos);
-    CHECK(cj.find("\"lwt_controller_forecast_contribution_k\":0,") != std::string::npos);
-    CHECK(cj.find("\"lwt_controller_plant_gate_known\":1,") != std::string::npos);
-    CHECK(cj.find("\"lwt_controller_room_source_unix_s\":1770000000,") != std::string::npos);
-    CHECK(cj.find("\"lwt_controller_room_age_s\":12,") != std::string::npos);
-    CHECK(cj.find("\"lwt_controller_last_decision_ms\":1800000,") != std::string::npos);
-    CHECK(cj.find("\"lwt_controller_decisions\":7,") != std::string::npos);
+    CHECK(cj.find("\"heating_curve_method_version\":2,") != std::string::npos);
+    CHECK(cj.find("\"heating_curve_armed\":1,") != std::string::npos);
+    CHECK(cj.find("\"heating_curve_state\":3,") != std::string::npos);
+    CHECK(cj.find("\"heating_curve_reason\":10,") != std::string::npos);
+    CHECK(cj.find("\"heating_curve_current_room_error_k\":-2.900000,") != std::string::npos);
+    CHECK(cj.find("\"heating_curve_last_sample_room_error_k\":-2.800000,") != std::string::npos);
+    CHECK(cj.find("\"heating_curve_heating_mode_active\":1,") != std::string::npos);
+    CHECK(cj.find("\"heating_curve_room_source_unix_s\":1770000000,") != std::string::npos);
+    CHECK(cj.find("\"heating_curve_room_age_s\":12,") != std::string::npos);
+    CHECK(cj.find("\"heating_curve_last_sample_unix_s\":1770000001,") != std::string::npos);
+    CHECK(cj.find("\"heating_curve_samples\":7,") != std::string::npos);
+    CHECK(cj.find("lwt_controller_") == std::string::npos);
     HeartbeatFields mf; mf.modbus_enabled = true; mf.modbus_connected = true;
     mf.modbus_rx = 12; mf.modbus_fails = 3; mf.modbus_stack_min_free_words = 731;
     const std::string mj = build_heartbeat_json(mf);
@@ -2955,8 +2953,8 @@ static void test_modbus() {
     CHECK(mb_get_u16(buf + 8) == 55 && mb_get_u16(buf + 10) == 1);
     // FC04 read-input uses the same shape with a different function code.
     CHECK(mb_build_read(buf, sizeof(buf), 1, 1, MbFunc::ReadInput, 40, 6) == 12 && buf[7] == 0x04);
-    // Guards: a write FC, qty 0, and an undersized buffer are all rejected.
-    CHECK(mb_build_read(buf, sizeof(buf), 1, 1, MbFunc::WriteSingle, 1, 1) == -1);
+    // Guards: qty 0 and an undersized buffer are rejected. A write function code is not part of
+    // MbFunc at all, so a caller cannot even express a write request.
     CHECK(mb_build_read(buf, sizeof(buf), 1, 1, MbFunc::ReadHolding, 1, 0) == -1);
     CHECK(mb_build_read(buf, 8, 1, 1, MbFunc::ReadHolding, 1, 1) == -1);
     // A read response states its size in ONE byte, so qty tops out at 125 (§6.3): 125 builds, 126 is
@@ -2965,19 +2963,18 @@ static void test_modbus() {
     CHECK(mb_build_read(buf, sizeof(buf), 1, 1, MbFunc::ReadHolding, 1, MB_MAX_READ_REGS + 1) == -1);
     CHECK(mb_build_read(buf, sizeof(buf), 1, 1, MbFunc::ReadInput, 1, 1000) == -1);
 
-    // The FC06/FC16 request builders are GONE (#294): this firmware cannot frame a Modbus write.
-    // There is nothing to assert here — a reintroduced caller would not compile, which is a stronger
-    // guarantee than any CHECK. mb_parse_response still classifies a write echo (below) because that
-    // branch belongs to the one shared parser every read goes through; no such reply can arrive.
+    // The FC06/FC16 request builders, response vocabulary and value encoders are GONE (#294): this
+    // firmware cannot frame, confirm or prepare a Modbus write. Reintroducing a caller does not
+    // compile, which is stronger than a runtime assertion.
 
     // ── Parse a well-formed FC03 read response: 3 registers ──
     MbResponse r;
     // MBAP(txn=7,proto=0,len=9,unit=1) + PDU[fc=03, bytecount=6, d0..d5]
     uint8_t resp[] = {0x00,0x07, 0x00,0x00, 0x00,0x09, 0x01,
                       0x03, 0x06, 0x07,0xD0, 0xFB,0x2E, 0x7F,0xFE};
-    // The parse is request-bound: pass the address + quantity that were requested (addr is unused for
-    // reads — a read reply doesn't echo it — but the register count MUST match the requested qty=3).
-    CHECK(mb_parse_response(resp, sizeof(resp), 7, 1, MbFunc::ReadHolding, /*addr*/40, /*qty*/3, r) == MbParse::Ok);
+    // The parse is request-bound: the register count MUST match the requested quantity=3. A read
+    // reply does not echo its start address, so transaction id + function + quantity are the proof.
+    CHECK(mb_parse_response(resp, sizeof(resp), 7, 1, MbFunc::ReadHolding, /*qty*/3, r) == MbParse::Ok);
     CHECK(r.ok && !r.exception && r.txn == 7 && r.unit == 1 && r.fc == 0x03);
     CHECK(mb_reg_count(r) == 3);
     uint16_t rv = 0;
@@ -2986,32 +2983,13 @@ static void test_modbus() {
     CHECK(mb_reg_at(r, 2, rv) && rv == 0x7FFE);     // 32766 (unavailable sentinel)
     CHECK(!mb_reg_at(r, 3, rv));                    // out-of-range index rejected
     // Asking for a different quantity than the reply carries is a desync (QtyMismatch), not Ok.
-    CHECK(mb_parse_response(resp, sizeof(resp), 7, 1, MbFunc::ReadHolding, 40, 2, r) == MbParse::QtyMismatch);
+    CHECK(mb_parse_response(resp, sizeof(resp), 7, 1, MbFunc::ReadHolding, 2, r) == MbParse::QtyMismatch);
     CHECK(!r.ok);
-    CHECK(mb_parse_response(resp, sizeof(resp), 7, 1, MbFunc::ReadHolding, 40, 4, r) == MbParse::QtyMismatch);
-
-    // ── Parse a write-single echo (FC06): addr 0x37, value 0x07D0 ──
-    uint8_t wecho[] = {0x00,0x42, 0x00,0x00, 0x00,0x06, 0x01, 0x06, 0x00,0x37, 0x07,0xD0};
-    CHECK(mb_parse_response(wecho, sizeof(wecho), 0x42, 1, MbFunc::WriteSingle, /*addr*/0x37, /*value*/0x07D0, r) == MbParse::Ok);
-    CHECK(r.ok && r.fc == 0x06 && r.echo_addr == 0x37 && r.echo_value == 0x07D0);   // echo exposed
-    // The echo must match the request: a different echoed address or value is EchoMismatch, never a
-    // confirmed write (the hub acted on a register/value we didn't ask for).
-    CHECK(mb_parse_response(wecho, sizeof(wecho), 0x42, 1, MbFunc::WriteSingle, 0x38, 0x07D0, r) == MbParse::EchoMismatch);
-    CHECK(!r.ok);
-    CHECK(mb_parse_response(wecho, sizeof(wecho), 0x42, 1, MbFunc::WriteSingle, 0x37, 0x07D1, r) == MbParse::EchoMismatch);
-    // FC16 write-multiple echo [fc, addr(2), qty(2)]: addr 56, qty 2.
-    uint8_t wmecho[] = {0x00,0x01, 0x00,0x00, 0x00,0x06, 0x01, 0x10, 0x00,0x38, 0x00,0x02};
-    CHECK(mb_parse_response(wmecho, sizeof(wmecho), 1, 1, MbFunc::WriteMultiple, /*addr*/56, /*qty*/2, r) == MbParse::Ok);
-    CHECK(r.ok && r.echo_addr == 56 && r.echo_value == 2);
-    CHECK(mb_parse_response(wmecho, sizeof(wmecho), 1, 1, MbFunc::WriteMultiple, 56, 3, r) == MbParse::EchoMismatch);   // qty
-    // A write echo is exactly [fc, addr(2), value|qty(2)]; a truncated one is Malformed, not Ok.
-    uint8_t wshort[] = {0x00,0x42, 0x00,0x00, 0x00,0x04, 0x01, 0x06, 0x00,0x37};
-    CHECK(mb_parse_response(wshort, sizeof(wshort), 0x42, 1, MbFunc::WriteSingle, 0x37, 0x07D0, r) == MbParse::Malformed);
-    CHECK(!r.ok);
+    CHECK(mb_parse_response(resp, sizeof(resp), 7, 1, MbFunc::ReadHolding, 4, r) == MbParse::QtyMismatch);
 
     // ── Parse a Modbus exception response (FC03 | 0x80, code 0x02 = illegal data address) ──
     uint8_t exc[] = {0x00,0x07, 0x00,0x00, 0x00,0x03, 0x01, 0x83, 0x02};
-    CHECK(mb_parse_response(exc, sizeof(exc), 7, 1, MbFunc::ReadHolding, /*addr*/0, /*qty*/1, r) == MbParse::Exception);
+    CHECK(mb_parse_response(exc, sizeof(exc), 7, 1, MbFunc::ReadHolding, /*qty*/1, r) == MbParse::Exception);
     CHECK(!r.ok && r.exception && r.exc_code == 0x02 && r.fc == 0x03);
     CHECK(std::string(mb_exception_reason(r.exc_code)) == "illegal data address");
     CHECK(std::string(mb_exception_reason(11)) == "gateway target failed to respond");
@@ -3019,22 +2997,22 @@ static void test_modbus() {
     // An exception PDU with a TRAILING byte (len bumped to 4, an extra 0x00) must be Malformed — the
     // old `pdu_len < 2` check accepted [fc|0x80, code, <junk>] as a clean exception.
     uint8_t exctrail[] = {0x00,0x07, 0x00,0x00, 0x00,0x04, 0x01, 0x83, 0x02, 0x00};
-    CHECK(mb_parse_response(exctrail, sizeof(exctrail), 7, 1, MbFunc::ReadHolding, 0, 1, r) == MbParse::Malformed);
+    CHECK(mb_parse_response(exctrail, sizeof(exctrail), 7, 1, MbFunc::ReadHolding, 1, r) == MbParse::Malformed);
 
     // ── Parse-error paths ──
-    CHECK(mb_parse_response(resp, 5, 7, 1, MbFunc::ReadHolding, 40, 3, r) == MbParse::TooShort);
+    CHECK(mb_parse_response(resp, 5, 7, 1, MbFunc::ReadHolding, 3, r) == MbParse::TooShort);
     uint8_t badproto[] = {0x00,0x07, 0x00,0x01, 0x00,0x03, 0x01, 0x03, 0x00};  // proto id != 0
-    CHECK(mb_parse_response(badproto, sizeof(badproto), 7, 1, MbFunc::ReadHolding, 40, 3, r) == MbParse::BadProtocol);
+    CHECK(mb_parse_response(badproto, sizeof(badproto), 7, 1, MbFunc::ReadHolding, 3, r) == MbParse::BadProtocol);
     uint8_t badlen[] = {0x00,0x07, 0x00,0x00, 0x00,0x09, 0x01, 0x03, 0x00};    // len 9 != actual
-    CHECK(mb_parse_response(badlen, sizeof(badlen), 7, 1, MbFunc::ReadHolding, 40, 3, r) == MbParse::BadLength);
-    CHECK(mb_parse_response(resp, sizeof(resp), 8, 1, MbFunc::ReadHolding, 40, 3, r) == MbParse::TxnMismatch);
-    CHECK(mb_parse_response(resp, sizeof(resp), 7, 2, MbFunc::ReadHolding, 40, 3, r) == MbParse::UnitMismatch);
-    CHECK(mb_parse_response(resp, sizeof(resp), 7, 1, MbFunc::ReadInput, 40, 3, r) == MbParse::FcMismatch);
+    CHECK(mb_parse_response(badlen, sizeof(badlen), 7, 1, MbFunc::ReadHolding, 3, r) == MbParse::BadLength);
+    CHECK(mb_parse_response(resp, sizeof(resp), 8, 1, MbFunc::ReadHolding, 3, r) == MbParse::TxnMismatch);
+    CHECK(mb_parse_response(resp, sizeof(resp), 7, 2, MbFunc::ReadHolding, 3, r) == MbParse::UnitMismatch);
+    CHECK(mb_parse_response(resp, sizeof(resp), 7, 1, MbFunc::ReadInput, 3, r) == MbParse::FcMismatch);
     CHECK(std::string(mb_parse_reason(MbParse::BadProtocol)) == "invalid protocol id");
     CHECK(std::string(mb_parse_reason(MbParse::TxnMismatch)) == "transaction id mismatch");
     // Consistent MBAP length (6 = unit + 5-byte PDU) but an odd register byte count (3) -> Malformed.
     uint8_t oddbc[] = {0x00,0x07, 0x00,0x00, 0x00,0x06, 0x01, 0x03, 0x03, 0x01,0x02,0x03};
-    CHECK(mb_parse_response(oddbc, sizeof(oddbc), 7, 1, MbFunc::ReadHolding, 40, 3, r) == MbParse::Malformed);
+    CHECK(mb_parse_response(oddbc, sizeof(oddbc), 7, 1, MbFunc::ReadHolding, 3, r) == MbParse::Malformed);
 
     // ── Value codecs: decode (EKRHH guide §9.2 data formats) ──
     CHECK(approx(mb_decode(MbType::Temp16, 0x07D0).value, 20.0));     // 2000 /100
@@ -3053,51 +3031,6 @@ static void test_modbus() {
     CHECK(mb_decode(MbType::Int16, 32767).special && !mb_decode(MbType::Int16, 32767).ok);
     CHECK(mb_decode(MbType::Temp16, 32766).special);
     CHECK(mb_decode(MbType::Int16, 32764).ok && !mb_decode(MbType::Int16, 32764).special);
-
-    // ── Encode (inverse), incl. explicit values and round-trips ──
-    uint16_t e = 0;
-    CHECK(mb_encode(MbType::Temp16, 20.0, e) && e == 0x07D0);
-    CHECK(mb_encode(MbType::Temp16, -12.34, e) && e == 0xFB2E);
-    CHECK(mb_encode(MbType::Pow16, 4.5, e) && e == 0x01C2);         // write kW: ×100
-    CHECK(mb_encode(MbType::Int16, -1.0, e) && e == 0xFFFF);
-    CHECK(mb_encode(MbType::Int16, 2.0, e) && e == 0x0002);
-    CHECK(mb_encode_text16('U', '8') == 0x5538);
-    // encode(decode(x)) == x for every non-special raw across the numeric types.
-    for (uint16_t raw : {uint16_t(0x0000), uint16_t(0x0001), uint16_t(0x07D0), uint16_t(0xFB2E),
-                         uint16_t(0x1234), uint16_t(0x7FFC), uint16_t(0x8000), uint16_t(0xFFFF)}) {
-        for (MbType t : {MbType::Int16, MbType::Temp16, MbType::Pow16}) {
-            MbValue d = mb_decode(t, raw);
-            uint16_t back = 0;
-            CHECK(d.ok && mb_encode(t, d.value, back) && back == raw);
-        }
-    }
-    CHECK(mb_encode_text16(mb_decode(MbType::Text16, 0x5538).text[0],
-                           mb_decode(MbType::Text16, 0x5538).text[1]) == 0x5538);
-
-    // ── Encode rejects anything that would not round-trip, instead of wrapping silently ──
-    // Out of int16 range: 400 °C once encoded to 0x9C40, which reads back as -255.36 °C.
-    uint16_t untouched = 0xABCD;
-    CHECK(!mb_encode(MbType::Temp16, 400.0, untouched) && untouched == 0xABCD);  // out param preserved
-    CHECK(!mb_encode(MbType::Temp16, -400.0, untouched));
-    CHECK(!mb_encode(MbType::Pow16, -500.0, untouched));                         // once gave +155.36 kW
-    CHECK(!mb_encode(MbType::Int16, 40000.0, untouched));
-    CHECK(!mb_encode(MbType::Int16, -40000.0, untouched));
-    // Boundaries: the extremes of int16 still encode, one step beyond does not.
-    CHECK(mb_encode(MbType::Temp16, -327.68, e) && e == 0x8000);
-    CHECK(mb_encode(MbType::Int16, -32768.0, e) && e == 0x8000);
-    CHECK(!mb_encode(MbType::Int16, -32769.0, untouched));
-    CHECK(mb_encode(MbType::Int16, 32764.0, e) && e == 0x7FFC);
-    // Encoding a sentinel is refused — we must never write a value decode reports as "no value".
-    CHECK(!mb_encode(MbType::Int16, 32765.0, untouched));
-    CHECK(!mb_encode(MbType::Int16, 32766.0, untouched));
-    CHECK(!mb_encode(MbType::Int16, 32767.0, untouched));
-    CHECK(!mb_encode(MbType::Temp16, 327.67, untouched));           // scales onto MB_UNSUPPORTED
-    // Text16 is two packed chars, not a number -> rejected; mb_encode_text16 is the way.
-    CHECK(!mb_encode(MbType::Text16, 1.0, untouched));
-    // Non-finite input has no defined rounding -> rejected rather than fed to lround.
-    CHECK(!mb_encode(MbType::Temp16, std::nan(""), untouched));
-    CHECK(!mb_encode(MbType::Temp16, HUGE_VAL, untouched));
-    CHECK(!mb_encode(MbType::Temp16, -HUGE_VAL, untouched));
 
     // ── mDNS HomeHub hostname filter: keep real HomeHubs, drop our own advert / unrelated hosts ──
     CHECK(is_homehub_hostname("homehub-524288-123456"));            // EKRHH guide §13.1.2 form
@@ -3182,7 +3115,7 @@ static void test_homehub() {
         if (r.kind == HomeHubValueKind::Number) CHECK(r.offset == 23);  // actual numeric sub-code
         else statuses++;
     }
-    CHECK(dimensionless == 12 && statuses == 11 && text_rows == 1);
+    CHECK(dimensionless == 13 && statuses == 12 && text_rows == 1);
 
     const HomeHubReg* compressor = find(31);
     CHECK(compressor && compressor->kind == HomeHubValueKind::Binary &&
@@ -3204,6 +3137,14 @@ static void test_homehub() {
     CHECK(homehub_format(*om, 7, buf, sizeof(buf)) && std::string(buf) == "7");
     CHECK(!homehub_is_text(*om));
     CHECK(std::string(homehub_enum_id(om->kind)) == "operation_mode");
+    // Input 38 is the CURRENT operating mode used as an independent heating-vs-cooling witness;
+    // holding 3 above is the requested/selected mode and cannot prove what is running now.
+    const HomeHubReg* current_mode = find(38);
+    CHECK(current_mode && current_mode->kind == HomeHubValueKind::CurrentOperationMode &&
+          current_mode->space == MbFunc::ReadInput);
+    CHECK(homehub_format(*current_mode, 1, buf, sizeof(buf)) && std::string(buf) == "1");
+    CHECK(homehub_format(*current_mode, 2, buf, sizeof(buf)) && std::string(buf) == "2");
+    CHECK(std::string(homehub_enum_id(current_mode->kind)) == "current_operation_mode");
 
     const HomeHubReg* abnormal = find(21);
     CHECK(abnormal && abnormal->kind == HomeHubValueKind::UnitAbnormality &&
@@ -4908,12 +4849,11 @@ static void test_reference_temperature_config() {
     CHECK(reference_room_sample(raw, fresh).reason == ReferenceRoomReason::BackwardTimestamp);
 }
 
-static void test_dynamic_lwt_controller() {
+static void test_heating_curve_diagnosis() {
     using namespace daik::logic;
-    CHECK(dynamic_lwt_quantize(0.5) == 1 && dynamic_lwt_quantize(-0.5) == -1);
 
     auto ready = [] {
-        DynamicLwtInputs in;
+        HeatingCurveInputs in;
         in.armed = true;
         in.room_control_eligible = true;
         in.room_error_k = 0.6;
@@ -4921,8 +4861,11 @@ static void test_dynamic_lwt_controller() {
         in.homehub_connected = true;
         in.plant_gate_known = true;
         in.plant_gate_active = true;
+        in.heating_mode_known = true;
+        in.heating_mode_active = true;
         in.forecast_available = true;
         in.now_ms = 0;
+        in.now_unix_s = 1770000000;
         in.room_has_source_time = true;
         in.room_source_unix_s = 1234;
         in.room_age_known = true;
@@ -4930,144 +4873,142 @@ static void test_dynamic_lwt_controller() {
         return in;
     };
 
-    DynamicLwtShadowController controller;
-    DynamicLwtInputs in;  // default: neither source configured, so nothing is armed
-    const DynamicLwtSnapshot off = controller.evaluate(in);
-    CHECK(!off.armed && off.state == DynamicLwtState::Off);
-    CHECK(off.reason == DynamicLwtReason::Disabled && !off.has_requested_offset);
+    HeatingCurveDiagnosis diagnosis;
+    HeatingCurveInputs in;  // default: no room source configured, so nothing is armed
+    const HeatingCurveSnapshot off = diagnosis.evaluate(in);
+    CHECK(!off.armed && off.state == HeatingCurveState::Off);
+    CHECK(off.reason == HeatingCurveReason::Disabled && !off.has_last_sample);
     CHECK(off.evaluations == 0);
-    CHECK(controller.evaluate(in).evaluations == 0);  // unarmed analyses nothing
+    CHECK(diagnosis.evaluate(in).evaluations == 0);  // unarmed diagnosis analyses nothing
 
     in = ready();
-    DynamicLwtSnapshot decision = controller.evaluate(in);
-    CHECK(decision.state == DynamicLwtState::Shadow &&
-          decision.reason == DynamicLwtReason::ShadowDecision);
-    CHECK(decision.decision_eligible && decision.proposal_produced &&
-          decision.has_requested_offset && decision.requested_offset_k == 1);
-    CHECK(decision.sequence == 1 && decision.decisions == 1 &&
-          decision.room_source_unix_s == 1234 && decision.room_age_s == 5);
+    HeatingCurveSnapshot sample = diagnosis.evaluate(in);
+    CHECK(sample.state == HeatingCurveState::Recording &&
+          sample.reason == HeatingCurveReason::SampleRecorded);
+    CHECK(sample.sample_eligible && sample.has_current_room_error && sample.has_last_sample);
+    CHECK(approx(sample.current_room_error_k, 0.6) && approx(sample.last_sample_room_error_k, 0.6));
+    CHECK(sample.last_sample_unix_s == 1770000000 && sample.sequence == 1 && sample.samples == 1 &&
+          sample.room_source_unix_s == 1234 && sample.room_age_s == 5);
 
     in.now_ms = 1000;
-    DynamicLwtSnapshot cadence = controller.evaluate(in);
-    CHECK(cadence.state == DynamicLwtState::Shadow &&
-          cadence.reason == DynamicLwtReason::CadenceWait);
-    CHECK(!cadence.proposal_produced && cadence.has_requested_offset &&
-          cadence.requested_offset_k == 1 && cadence.sequence == 1);
+    in.now_unix_s++;
+    in.room_error_k = 1.2345;
+    HeatingCurveSnapshot cadence = diagnosis.evaluate(in);
+    CHECK(cadence.state == HeatingCurveState::Recording &&
+          cadence.reason == HeatingCurveReason::SamplingInterval);
+    CHECK(cadence.sample_eligible && approx(cadence.current_room_error_k, 1.2345));
+    CHECK(cadence.has_last_sample && approx(cadence.last_sample_room_error_k, 0.6) &&
+          cadence.sequence == 1 && cadence.samples == 1);
 
-    DynamicLwtShadowController deadband_controller;
-    in = ready(); in.room_error_k = 0.2;
-    DynamicLwtSnapshot deadband = deadband_controller.evaluate(in);
-    CHECK(deadband.deadband && deadband.requested_offset_k == 0 &&
-          deadband.reason == DynamicLwtReason::Deadband);
+    // The stored value is the exact raw error — no deadband, rounding, clamp or slew operation.
+    in.now_ms = HEATING_CURVE_SAMPLE_CADENCE_MS;
+    in.now_unix_s = 1770001800;
+    in.room_error_k = -2.3456;
+    sample = diagnosis.evaluate(in);
+    CHECK(sample.reason == HeatingCurveReason::SampleRecorded && sample.sequence == 2);
+    CHECK(approx(sample.last_sample_room_error_k, -2.3456) &&
+          sample.last_sample_unix_s == 1770001800);
 
-    DynamicLwtShadowController rate_controller;
-    in = ready(); in.room_error_k = -3.0;
-    DynamicLwtSnapshot low = rate_controller.evaluate(in);
-    CHECK(low.clamped && low.rate_limited && low.bounded_offset_k == -2 &&
-          low.requested_offset_k == -1 && low.reason == DynamicLwtReason::RateLimited);
-    in.now_ms += DYNAMIC_LWT_DECISION_CADENCE_MS; in.room_error_k = 3.0;
-    DynamicLwtSnapshot limited = rate_controller.evaluate(in);
-    CHECK(limited.clamped && limited.rate_limited && limited.bounded_offset_k == 2);
-    CHECK(limited.requested_offset_k == 0 && limited.reason == DynamicLwtReason::RateLimited);
-    in.now_ms += DYNAMIC_LWT_DECISION_CADENCE_MS;
-    CHECK(rate_controller.evaluate(in).requested_offset_k == 1);
-    in.now_ms += DYNAMIC_LWT_DECISION_CADENCE_MS;
-    CHECK(rate_controller.evaluate(in).requested_offset_k == 2);
-
-    DynamicLwtShadowController degraded_controller;
+    HeatingCurveDiagnosis degraded_diagnosis;
     in = ready(); in.forecast_available = false;
-    DynamicLwtSnapshot degraded = degraded_controller.evaluate(in);
-    CHECK(degraded.state == DynamicLwtState::Degraded &&
-          degraded.reason == DynamicLwtReason::ForecastUnavailable);
-    CHECK(degraded.has_requested_offset && degraded.forecast_contribution_k == 0);
+    HeatingCurveSnapshot degraded = degraded_diagnosis.evaluate(in);
+    CHECK(degraded.state == HeatingCurveState::Degraded &&
+          degraded.reason == HeatingCurveReason::ForecastUnavailable);
+    CHECK(degraded.has_last_sample && approx(degraded.last_sample_room_error_k, 0.6));
 
-    DynamicLwtShadowController gates;
-    in = ready(); in.room_control_eligible = false;
-    CHECK(gates.evaluate(in).reason == DynamicLwtReason::RoomUnavailable);
-    in = ready(); in.x10a_connected = false;
-    CHECK(gates.evaluate(in).reason == DynamicLwtReason::X10aUnavailable);
+    HeatingCurveDiagnosis gates;
     in = ready(); in.homehub_connected = false;
-    CHECK(gates.evaluate(in).reason == DynamicLwtReason::HomeHubUnavailable);
+    CHECK(gates.evaluate(in).reason == HeatingCurveReason::HomeHubUnavailable);
     in = ready(); in.plant_gate_known = false;
-    CHECK(gates.evaluate(in).reason == DynamicLwtReason::PlantGateUnknown);
+    CHECK(gates.evaluate(in).reason == HeatingCurveReason::PlantGateUnknown);
     in = ready(); in.plant_gate_active = false;
-    DynamicLwtSnapshot hold = gates.evaluate(in);
-    CHECK(hold.state == DynamicLwtState::Hold && hold.reason == DynamicLwtReason::PlantInactive);
-    CHECK(!hold.has_requested_offset && hold.holds == 1);
+    HeatingCurveSnapshot hold = gates.evaluate(in);
+    CHECK(hold.state == HeatingCurveState::Hold && hold.reason == HeatingCurveReason::PlantInactive);
+    CHECK(!hold.sample_eligible && hold.holds == 1);
+    in = ready(); in.heating_mode_known = false;
+    CHECK(gates.evaluate(in).reason == HeatingCurveReason::HeatingModeUnknown);
+    in = ready(); in.heating_mode_active = false;
+    CHECK(gates.evaluate(in).reason == HeatingCurveReason::NonHeatingMode);
+    in = ready(); in.room_control_eligible = false;
+    CHECK(gates.evaluate(in).reason == HeatingCurveReason::RoomUnavailable);
+    in = ready(); in.x10a_connected = false;
+    CHECK(gates.evaluate(in).reason == HeatingCurveReason::X10aUnavailable);
+    in = ready(); in.now_unix_s = -1;
+    CHECK(gates.evaluate(in).reason == HeatingCurveReason::ClockInvalid);
 
     // THE ORDER OF THOSE GATES IS ITSELF THE CONTRACT: an idle plant is HOLD even when the room
     // source is ineligible, because outside the heating season BOTH are true at once — a room
     // thermostat switched off for the summer is not control-eligible — and answering
     // "room input unavailable" turns a plant resting exactly as it should into a standing fault.
-    // The reference installation reported failsafes=2734, holds=0 in August with nothing wrong.
-    DynamicLwtShadowController seasonal;
+    // The reference installation reported thousands of blocks in August with nothing wrong.
+    HeatingCurveDiagnosis seasonal;
     in = ready(); in.plant_gate_active = false; in.room_control_eligible = false;
-    const DynamicLwtSnapshot summer = seasonal.evaluate(in);
-    CHECK(summer.state == DynamicLwtState::Hold && summer.reason == DynamicLwtReason::PlantInactive);
-    CHECK(summer.holds == 1 && summer.failsafes == 0);
+    const HeatingCurveSnapshot summer = seasonal.evaluate(in);
+    CHECK(summer.state == HeatingCurveState::Hold && summer.reason == HeatingCurveReason::PlantInactive);
+    CHECK(summer.holds == 1 && summer.blocks == 0);
     // While the plant IS heating the same ineligible source is a real block, and still says so.
     in = ready(); in.room_control_eligible = false;
-    const DynamicLwtSnapshot heating = seasonal.evaluate(in);
-    CHECK(heating.state == DynamicLwtState::Failsafe &&
-          heating.reason == DynamicLwtReason::RoomUnavailable);
+    const HeatingCurveSnapshot heating = seasonal.evaluate(in);
+    CHECK(heating.state == HeatingCurveState::Blocked &&
+          heating.reason == HeatingCurveReason::RoomUnavailable);
     // A down HomeHub outranks the gate it is the only source of: an unknown gate is never read as
     // an idle plant.
     in = ready(); in.homehub_connected = false; in.plant_gate_active = false;
-    CHECK(seasonal.evaluate(in).reason == DynamicLwtReason::HomeHubUnavailable);
+    CHECK(seasonal.evaluate(in).reason == HeatingCurveReason::HomeHubUnavailable);
 
-    // FAILSAFE and HOLD disarm cadence/proposal memory. Recovery may decide immediately, but its
-    // first proposal is again limited to one kelvin from neutral.
-    DynamicLwtShadowController recovery;
+    // A transient plant/data block must not create a fresh event on recovery. The absolute event
+    // timestamp + boot-local sequence stay durable until the 30-minute sampling interval expires.
+    HeatingCurveDiagnosis recovery;
     in = ready(); in.room_error_k = 3.0;
-    CHECK(recovery.evaluate(in).requested_offset_k == 1);
+    CHECK(recovery.evaluate(in).sequence == 1);
     in.now_ms = 1000; in.x10a_connected = false;
-    CHECK(recovery.evaluate(in).state == DynamicLwtState::Failsafe);
+    CHECK(recovery.evaluate(in).state == HeatingCurveState::Blocked);
     in = ready(); in.now_ms = 2000; in.room_error_k = -3.0;
-    DynamicLwtSnapshot after_failsafe = recovery.evaluate(in);
-    CHECK(after_failsafe.proposal_produced && after_failsafe.requested_offset_k == -1);
+    HeatingCurveSnapshot after_block = recovery.evaluate(in);
+    CHECK(after_block.reason == HeatingCurveReason::SamplingInterval && after_block.sequence == 1 &&
+          approx(after_block.last_sample_room_error_k, 3.0));
     in.now_ms = 3000; in.plant_gate_active = false;
-    CHECK(recovery.evaluate(in).state == DynamicLwtState::Hold);
+    CHECK(recovery.evaluate(in).state == HeatingCurveState::Hold);
     in = ready(); in.now_ms = 4000; in.room_error_k = 3.0;
-    DynamicLwtSnapshot after_hold = recovery.evaluate(in);
-    CHECK(after_hold.proposal_produced && after_hold.requested_offset_k == 1);
-    in.now_ms = 3999;
-    CHECK(recovery.evaluate(in).reason == DynamicLwtReason::ClockInvalid);
+    CHECK(recovery.evaluate(in).reason == HeatingCurveReason::SamplingInterval);
+    in.now_ms = 1999;
+    CHECK(recovery.evaluate(in).reason == HeatingCurveReason::ClockInvalid);
 
-    // Deleting a source disarms and clears the cadence memory. Re-configuring may decide at once,
-    // but the sequence/counters remain useful boot-local evidence.
-    DynamicLwtShadowController rearm;
-    in = ready(); CHECK(rearm.evaluate(in).proposal_produced);
+    // Deleting the required source disarms and clears sample memory. Re-configuring records at once,
+    // while the sequence/counters remain useful boot-local evidence.
+    HeatingCurveDiagnosis rearm;
+    in = ready(); CHECK(rearm.evaluate(in).sequence == 1);
     in.armed = false; in.now_ms = 10;
-    CHECK(rearm.evaluate(in).state == DynamicLwtState::Off);
+    CHECK(rearm.evaluate(in).state == HeatingCurveState::Off && !rearm.snapshot().has_last_sample);
     in = ready(); in.now_ms = 20;
-    CHECK(rearm.evaluate(in).proposal_produced);
+    CHECK(rearm.evaluate(in).sequence == 2 && rearm.snapshot().has_last_sample);
 
     // ARMING IS DERIVED FROM THE CONFIGURATION — there is no mode byte, no /set_dynamic_lwt and so
     // no way for a stored answer to disagree with the sources a reader can see. Every input the
-    // diagnosis READS is required; the HomeHub deliberately is NOT, so a device without one still
+    // diagnosis NEEDS is required; the HomeHub deliberately is NOT, so a device without one still
     // shows the card and is told which prerequisite is missing rather than shown nothing.
     Config dependencies;
-    CHECK(!dynamic_lwt_armed(dependencies));
+    CHECK(!heating_curve_diagnosis_armed(dependencies));
     dependencies.mqtt_uri = "mqtt://broker";
     dependencies.ref_temp_topic = "room";
     dependencies.ref_temp_path = "current";
     dependencies.ref_temp_setpoint_path = "target";
     dependencies.ref_temp_time_path = "read_at";
-    CHECK(!dynamic_lwt_armed(dependencies));   // no forecast location yet
+    CHECK(heating_curve_diagnosis_armed(dependencies));   // forecast location is optional
     dependencies.weather_enabled = true;
-    CHECK(dynamic_lwt_armed(dependencies));
+    CHECK(heating_curve_diagnosis_armed(dependencies));
     dependencies.mb_host = "";                 // a missing HomeHub is a runtime state, not a disarm
-    CHECK(dynamic_lwt_armed(dependencies));
+    CHECK(heating_curve_diagnosis_armed(dependencies));
     for (std::string Config::*field : {&Config::mqtt_uri, &Config::ref_temp_topic,
                                        &Config::ref_temp_path, &Config::ref_temp_setpoint_path,
                                        &Config::ref_temp_time_path}) {
         Config one = dependencies;
         (one.*field).clear();
-        CHECK(!dynamic_lwt_armed(one));        // any deleted input disarms it
+        CHECK(!heating_curve_diagnosis_armed(one));        // any deleted required input disarms it
     }
     Config no_weather = dependencies;
     no_weather.weather_enabled = false;
-    CHECK(!dynamic_lwt_armed(no_weather));
+    CHECK(heating_curve_diagnosis_armed(no_weather));
 }
 
 static void test_weather_forecast_contract() {
@@ -9204,7 +9145,7 @@ int main() {
     test_config_store();
     test_env3();
     test_reference_temperature_config();
-    test_dynamic_lwt_controller();
+    test_heating_curve_diagnosis();
     test_weather_forecast_contract();
     test_mcp();
     test_http_surface();

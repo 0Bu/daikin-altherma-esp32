@@ -658,7 +658,7 @@
 
     <!-- ═══ SETTINGS (reached from the header gear) ═══
          The device's configuration, on ONE screen — no menu level in between: Connections, the
-         dynamic-LWT project's permanent card, then the three ESP32-family cards. esp32CardHtml()
+         permanent heating-curve-diagnosis card, then the three ESP32-family cards. esp32CardHtml()
          emits the latter four as one string so their live summaries update together. -->
     <section class="view" id="viewSettings">
       <div class="pad">
@@ -736,7 +736,7 @@
     </form>
   </div>
 
-  <!-- ═══ Room-temperature MQTT source (first qualified input of dynamic LWT) ═══ -->
+  <!-- ═══ Room-temperature MQTT source (required heating-curve-diagnosis input) ═══ -->
   <div class="modal" id="refTempModal" hidden>
     <div class="modal-backdrop" id="refTempBackdrop"></div>
     <form class="modal-card" id="refTempForm" role="dialog" aria-modal="true" aria-labelledby="refTempModalTitle" tabindex="-1">

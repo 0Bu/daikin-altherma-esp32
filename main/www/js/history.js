@@ -909,6 +909,7 @@ const ENUM_VALUE_I18N = Object.freeze({
 const HOMEHUB_ENUM_VALUE_I18N = Object.freeze({
   unit_abnormality: Object.freeze(["enum.no_error", "enum.fault", "enum.warning"]),
   operation_mode: Object.freeze(["enum.auto", "enum.heating", "enum.cooling"]),
+  current_operation_mode: Object.freeze([null, "enum.heating", "enum.cooling"]),
   three_way_valve: Object.freeze(["enum.space_heating", "enum.dhw"]),
   smart_grid_mode: Object.freeze([
     "enum.free_running", "enum.forced_off", "enum.recommended_on", "enum.forced_on",
@@ -998,6 +999,7 @@ const HOMEHUB_LABEL_DE = Object.freeze({
   31: "Verdichter aktiv",
   32: "Heizstab aktiv",
   37: "Position des 3-Wege-Ventils",
+  38: "Aktueller Heiz- oder Kühlmodus",
   52: "Warmwasserbetrieb",
   53: "Raumheiz- oder Kühlbetrieb",
   40: "Vorlauftemperatur am Plattenwärmetauscher",

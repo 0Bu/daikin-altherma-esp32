@@ -135,11 +135,10 @@ jobs:
       # publisher; ordinary publishes stay behind the gate), the one X10A-free outbound exception
       # (a single retained tombstone per explicitly disabled source, only after the disable was
       # persisted), the HomeHub discovery lifecycle (only the explicit UI action may browse mDNS)
-      # and the dynamic-LWT CONSENT boundary (SHADOW proposes and writes nothing — hp_modbus.cpp
-      # stays the sole caller of the actuator mailbox — and since #341 the mode gates COLLECTION
-      # too: OFF unsubscribes the saved room source, ignores its frames, publishes no weather
-      # evidence and pauses Open-Meteo before any fetch, while set_dynamic_lwt applies both
-      # boundaries live and tombstones the weather topic only after OFF was persisted). These were
+      # and the heating-curve-diagnosis boundary (the firmware records only raw target-minus-actual
+      # room error and exposes no Modbus write capability; explicit consent subscribes the saved
+      # room source, while forecast evidence remains optional and private). Collection is additionally
+      # gated by HomeHub readiness, an active plant and a positively identified heating mode. These were
       # three bare `node` steps with no local entry point, so the
       # local loop skipped them and a new sibling was invisible everywhere at once; the script globs
       # test/test_*_contract.mjs, so one now joins the gate without a workflow edit.

@@ -20,7 +20,7 @@ const rowRe = /\{\s*(\d+)\s*,\s*MbFunc::[^}]*?"((?:[^"\\]|\\.)*)"\s*(?:,\s*HomeH
 const rows = [...map.matchAll(rowRe)].map((m) => ({
   off: Number(m[1]), label: m[2].replace(/\\(["\\])/g, "$1"), kind: m[3] || "Number",
 }));
-assert.equal(rows.length, 30, "all 30 curated HomeHub registers must be audited");
+assert.equal(rows.length, 31, "all 31 curated HomeHub registers must be audited");
 
 const firstDescription = (label) => descriptions.find((d) => {
   d.re.lastIndex = 0;
@@ -46,6 +46,7 @@ const expected = new Map([
   [31, ["Compressor running", "Verdichter aktiv"]],
   [32, ["Booster heater run", "Heizstab aktiv"]],
   [37, ["3-way valve", "Position des 3-Wege-Ventils"]],
+  [38, ["Current operation mode", "Aktueller Heiz- oder Kühlmodus"]],
   [52, ["DHW normal operation", "Warmwasserbetrieb"]],
   [53, ["Space heating/cooling normal operation", "Raumheiz- oder Kühlbetrieb"]],
   [40, ["Leaving water temperature PHE", "Vorlauftemperatur am Plattenwärmetauscher"]],
@@ -105,6 +106,7 @@ for (const row of rows) {
 const enumStates = {
   UnitAbnormality: [["No error", "Kein Fehler"], ["Fault", "Fehler"], ["Warning", "Warnung"]],
   OperationMode: [["Auto", "Auto"], ["Heating", "Heizen"], ["Cooling", "Kühlen"]],
+  CurrentOperationMode: [["Heating", "Heizen"], ["Cooling", "Kühlen"]],
   ThreeWayValve: [["Space heating", "Raumheizung"], ["DHW", "Brauchwarmwasser"]],
   SmartGridMode: [["Free running", "Freier Betrieb"], ["Forced off", "Zwangsabschaltung"],
                   ["Recommended on", "Empfehlung ein"], ["Forced on", "Erzwungen ein"]],
@@ -138,4 +140,4 @@ assert.doesNotMatch(`${indoorMode.de.what} ${indoorMode.de.normal}`,
   /Wasserseite \(|Heizen\+Warmwasser|\bWW\b/,
   "the German operation-mode explanation uses fluent copy and the visible state names");
 
-console.log("HomeHub copy: 30/30 values, labels and bilingual explanations are semantically pinned");
+console.log("HomeHub copy: 31/31 values, labels and bilingual explanations are semantically pinned");

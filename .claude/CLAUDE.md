@@ -220,18 +220,16 @@ re-seeds the two defects it was built for plus an ordinary typo.
 `run-contract-tests.sh` is not one of that layered sequence — it asks a question none of them can,
 because they all run against `main/logic/`. The host suite LINKS the IDF-free headers, so it proves
 what a rule DECIDES and can never prove that the firmware still calls it from the right task, in the
-right order, or from the only file entitled to: "hp_modbus.cpp is the sole caller of
-mb_request_lwt_offset()" is a claim about a whole component, and the only instrument that can settle
-it is the source TEXT. So each `test/test_*_contract.mjs` reads `main/*.cpp` and asserts a boundary —
+right order, or from the only file entitled to: "no source can frame a Modbus write" is a claim
+about a whole component, and the only instrument that can settle it is source TEXT. So each
+`test/test_*_contract.mjs` reads the relevant firmware tree and asserts a boundary —
 the X10A-gated MQTT lifecycle, the single X10A-free tombstone exception, the explicit-action-only
-mDNS browse, and the dynamic-LWT CONSENT boundary. That last one is two claims, not one: the
-controller proposes and writes nothing — and since the write path was RETIRED (#294) that half is
-now the stronger assertion that NO firmware source contains a write entry point, an actuator type,
-an FC06/FC16 request builder or an issued write function code, checked across every file — and
-and since #357 it pins the CONSENT boundary in its current shape — a SAVED source is what starts a
-subscription or a fetch, with no second gate in front of it; deleting one must actively unsubscribe
-and stop the traffic; the pre-enable Test path must stay reachable ahead of both; ARMING must be
-derived rather than stored; and the plant gate must be evaluated BEFORE the room source. Those are
+mDNS browse, and the heating-curve CONSENT/DIAGNOSIS boundary. The last recursively scans all C++
+sources and asserts that no write entry point, actuator type, FC06/FC16 function vocabulary, echo
+parser or value encoder survives. It pins the current consent shape: saving the room source starts
+that subscription; saving coordinates independently starts optional forecast traffic; deleting each
+stops only its own collection; the pre-save room Test remains reachable; arming is derived from the
+room mapping only; and gate order is HomeHub, plant-active, heating-mode, room, X10A. Those are
 properties of a whole component and so exactly what a source-text check is for. It is the newest entry point and exists
 because these were three bare `node test/…` steps in build.yml and nothing else: CI ran them, no
 local command did, and a fourth sibling added the same way would have been invisible to every entry
@@ -566,7 +564,7 @@ hp_modbus.cpp   THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT source of rea
                 never browses mDNS or silently changes the configured address.
                 READ-ONLY as a property of the CODE, not of a guard around a dormant capability:
                 no write entry point, no FC06/FC16 request builder, no issued write function code
-                anywhere under main/ — test/test_dynamic_lwt_shadow_contract.mjs walks every file to
+                anywhere under main/ — test/test_heating_curve_diagnosis_contract.mjs walks every file to
                 keep it so, and re-adding one fails there first. The hub's other clients (Onecta, the
                 MMI, evcc on EKRHH 56/57) do write it; this firmware only reads their result. One
                 HomeHub fact reaches the controller: the PLANT GATE, an ordinary FC04 read of input
@@ -637,7 +635,7 @@ env3.cpp        OPTIONAL local climate sensor — the M5Stack ENV III Grove unit
                 watchdog-subscribed either — every transaction is bounded by a 100ms I2C timeout, so
                 the loop cannot wedge the way a silent UART can
 weather_forecast.cpp  the Open-Meteo forecast client (provider + model pinned in code:
-                icon_seamless), the second non-Daikin input to the dynamic-LWT controller. Own task,
+                icon_seamless), optional comparison evidence for heating-curve diagnosis. Own task,
                 and its 12288 stack is the largest of the tasks this firmware creates itself (only
                 the httpd worker's 16384 is bigger) for the reason CLAUDE.md's stack section states —
                 TLS + HTTP + JSON on one frame — with the loop body under a try/catch —
@@ -648,7 +646,7 @@ weather_forecast.cpp  the Open-Meteo forecast client (provider + model pinned in
                 or JSON work. Skipped in safe mode. THE SAVED LOCATION IS THE WHOLE GATE (#357): the
                 loop checks cfg.weather_enabled and idles on a 60 s notify-wait BEFORE the URL is
                 built, so no socket opens at all — one condition, checked in one place. #341's second
-                gate (a separate dynamic-LWT mode, with a set_feature_inactive() state that kept
+                gate (the retired dynamic-LWT mode, with a set_feature_inactive() state that kept
                 configured=true while blanking every runtime value) is GONE with the switch that set
                 it: saving coordinates IS the consent to send them, and to send this installation's
                 public source IP with them, so a stored location deliberately not being fetched no
@@ -918,19 +916,18 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; X10A p
                 that proof to all seven behavioural fields, so testing topic A cannot license saving
                 topic B, and an edited path or max_age invalidates it. RAM-only and single-use — a
                 save consumes it, a reboot forgets it — which is exactly right for evidence about a
-                broker that may have changed since. (2) The HEATING-CURVE DIAGNOSIS CONTROLLER
-                (logic/dynamic_lwt_controller.hpp), evaluated once per 1s cycle but COUNTED only while
-                armed — #341 moved the `evaluations` increment past the OFF early return, so
-                /status.dynamic_lwt.evaluations and lwt_controller_evaluations measure armed cycles
-                rather than seconds of uptime, and a board whose sources are not configured reads 0
-                instead of a number that looks like activity. It lives here rather
+                broker that may have changed since. (2) The HEATING-CURVE DIAGNOSIS SAMPLER
+                (logic/heating_curve_diagnosis.hpp), evaluated once per 1s cycle but COUNTED only while
+                armed. `/status.heating_curve.evaluations` and `heating_curve_evaluations` measure
+                armed cycles rather than seconds of uptime, so an unconfigured board reads 0 instead
+                of a number that looks like activity. It lives here rather
                 than in a file of its own because its one input arrives as an MQTT frame, it can
                 only be armed WITH a configured MQTT room source, and the evaluation has to ride the
-                task CYCLE rather than publish_heartbeat(): on the publish cadence the last verdict
-                would keep reading healthy through exactly the broker outage that must move it to
-                FAILSAFE. It runs BEFORE the publish gate for that reason. It is write-free —
-                it proposes a requested_offset_k and calls nothing; the pure header cannot even name
-                an actuator. Since #341 the mode is ALSO the consent boundary for COLLECTION, and that half
+                task CYCLE rather than publish_heartbeat(): on the publish cadence the last state
+                would lag exactly the broker/X10A outage that must block it. It runs BEFORE the
+                publish gate for that reason. It records raw room error only; it has no P/deadband/
+                quantization/clamp/slew/offset vocabulary and cannot name an actuator. The saved
+                room mapping is ALSO the consent boundary for COLLECTION, and that half
                 lives in this file: service_reference_subscription computes capture_enabled =
                 configured — the SAVE of a topic is the consent to subscribe to it, and #357 removed
                 the second gate that used to stand in front (a switch that could not be reached: it
@@ -943,31 +940,22 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; X10A p
                 then decodes the SAVED source, which is what keeps POST /test_ref_temp able to PROVE
                 a candidate BEFORE it is saved — otherwise the only way to test a mapping would be to
                 save the one being tested.
-                test/test_dynamic_lwt_shadow_contract.mjs pins that whole boundary, not just that
-                hp_modbus.cpp stays the ONLY file calling mb_request_lwt_offset(): the subscription
-                gate, the delete-unsubscribe, the surviving probe path, the weather publish gate,
-                weather_forecast.cpp's pre-fetch check, that arming is DERIVED rather than stored,
-                and the GATE ORDER inside evaluate(). A P term on the room error
-                (gain 1, ±0.25 K deadband, whole kelvin, ±2 K envelope, ≤1 K per decision, one
-                decision per 30 min), fail-closed on every input it depends on: an ineligible room
-                source, a down X10A bus, a down HomeHub or an unknown plant gate is FAILSAFE, an
-                inactive plant is HOLD — and the ORDER is load-bearing, not incidental: the plant
-                gate is asked BEFORE the room source, because outside the heating season both fail at
-                once (a room thermostat switched off for the summer is not control-eligible) and
-                answering "room unavailable" turned a plant resting exactly as it should into a
-                standing fault. Measured on the reference installation in August: failsafes=2734,
-                holds=0, with nothing whatever wrong. HOLD is the whole truth about an idle plant
-                whatever the room says. Each failsafe/hold RESETS the proposal memory, which is what makes
-                the 1 K slew bind the FIRST decision after any restart too — otherwise recovery would
-                be a ±2 K jump through the one limit that exists to prevent it. The forecast is a
-                STATE modifier only (Shadow vs Degraded) and contributes a hardwired 0 K, so a
-                missing forecast can never move water temperature by way of a term nobody sized.
-                Reaches the outside as flat lwt_controller_* heartbeat fields and /status.dynamic_lwt
-                — no HA entities, deliberately: a proposal nothing acts on is telemetry to reason
-                about, not a state to put in front of a user as if it were the plant's. ARMING is
-                DERIVED from the two sources (logic/config_model.hpp's dynamic_lwt_armed), never
-                stored: there is no mode enum, no Config field, no blob byte in use and no route, so
-                nothing persisted can disagree with the configuration a reader sees in the editor
+                test/test_heating_curve_diagnosis_contract.mjs pins that whole boundary recursively across
+                every C++ source: subscription/delete/probe, derived room-only arming, optional
+                forecast and absence of every Modbus write vocabulary. The GATE ORDER is load-bearing:
+                HomeHub connectivity, register 53 normal-space operation and register 38 Heating
+                are established BEFORE room/X10A/clock evidence. An idle summer plant is HOLD even
+                when its thermostat is off; Cooling is a separate non-heating HOLD and never enters
+                the data set. Unknown evidence is BLOCKED. Every 30 minutes of eligible heating the
+                exact raw room error is stored with an absolute Unix timestamp and sequence. A
+                transient HOLD/BLOCK retains cadence and the last event so recovery cannot fabricate
+                a new sample; deleting the room source disarms and clears sample memory. Forecast is
+                optional comparison evidence (Recording vs Degraded), never a control term.
+                The outside contract is `/status.heating_curve` plus flat `heating_curve_*` heartbeat
+                fields. Consumers detect events by a sequence increase, use `last_sample_unix_s`, and
+                treat a sequence/uptime reset as reboot. No HA entities: this is analysis evidence,
+                not a plant command. ARMING is derived by `heating_curve_diagnosis_armed()` from the
+                MQTT room mapping only; there is no mode enum, live blob byte or route
 ota_update.cpp  pull-based signed OTA: manifest check -> TWO-POINT downgrade gate -> esp_https_ota
                 into the inactive slot -> signature verify on install -> reboot, plus the rollback
                 health gate. Reads the CHANNEL (config ota_channel, logic/ota_channel.hpp) fresh on
@@ -1891,7 +1879,7 @@ www/            web UI sources (index.html + style.css + app.sources fragments -
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + one-shot rollback state, MQTT (`uri`/`user`/`pass`), syslog, `ntp_server`, from blob **v2** board-local hardware, from **v3** the OTA channel, from **v4** the UI-language override, from **v5** the HomeHub host/port/unit fields, **v6** its enable compatibility bit, **v7** one MQTT reference-temperature name/topic/value-path mapping, **v8** its timestamp path plus maximum age, **v9** a now-RETIRED actuation opt-in bit, **v10** weather location, **v11** ENV III, **v12** board-preset identity, **v13** target/enabled/HVAC readiness mappings for the room source, and **v14** one byte that carried the dynamic-LWT controller mode and is now RETIRED (#357) — written as zero and ignored on read, since the heating-curve diagnosis derives its arming from the two sources it reads rather than storing a mode; the byte keeps its place because the exact-length rule below is what refuses a truncated newer blob, and shrinking v14 would make a v13 blob decode as one. Every earlier blob (v1–v13) remains readable without losing credentials — the read path accepts any version in `CONFIG_BLOB_VERSION_MIN`..`CONFIG_BLOB_VERSION` and rejects a length that does not land exactly on the end, so a truncated newer blob is refused rather than read as an older one. TWO fields are then forced to their safe value rather than trusted: the v9 actuation-consent bit is DISCARDED on decode whatever it holds — the capability it gated was removed (#294), and reading it back would resurrect consent for something the firmware can no longer do (the byte stays in the layout, written as 0, so the blob shape is unchanged) — and the v14 controller-mode byte is DISCARDED the same way, for the same reason one version later: the mode it held no longer exists, and every install, upgrade and reboot decides arming from the live configuration instead. Non-empty `mb_host` enables polling; nothing enables writing, because no write path exists. HomeHub and reference-source fields have narrow httpd writers (`POST /set_hp`, `POST /set_ref_temp`). Old experimental `mb_dhost`/`mb_seen` keys are deleted on load and never consulted. Pre-v13 room mappings remain observable after migration but are ineligible until a target mapping is saved deliberately. One CRC-checked entry is written all-or-nothing. The X10A link cache `rx_pin`/`tx_pin`/`proto` remains separate and self-healing (detection + httpd writers), as does `board_set`, the user's licence for the UI to name matching board hardware without persisting a board identity. Legacy per-key credential entries remain read-only fallback for pre-blob upgrades, and `boot_fails` is the boot-loop crash counter. |
+| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials and rollback state; MQTT, syslog and SNTP; board-local hardware; OTA channel/language; HomeHub; the MQTT reference-room mapping/freshness/readiness fields; optional Open-Meteo location; ENV III; and board-preset identity. The v9 actuation bit and v14 dynamic-LWT mode byte are layout-compatible retired bytes: both serialize as zero and are ignored on read. Heating-curve diagnosis derives arming from the timestamped MQTT room mapping only; forecast is optional and has its own location-consent boundary. Blob versions v1–v14 remain exact-length/CRC checked, so a truncated newer blob is never accepted as an older one. Non-empty `mb_host` enables read-only polling; no setting enables writing. Legacy per-key credentials remain read-only fallback; `boot_fails` is the boot-loop crash counter. |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -1996,8 +1984,8 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   temperature_valid,setpoint_valid,control_eligible,room_error_k,reason,reason_code,
                   retained,messages,errors,rejections[,error][,eligibility_error]} — the decoded and
                   canonical MQTT living-room input. The flat heartbeat archives its numeric accepted
-                  view. It is the SOLE input of the dynamic-LWT shadow controller below (room_error_k
-                  is that controller's P term) and still feeds no averaging and no heat-pump write.
+                  view. It is the required heating-curve-diagnosis input; `room_error_k` is recorded
+                  raw and is not an LWT correction. It feeds no heat-pump write.
                   SAVING the topic is the whole consent to subscribe to it (#357 removed the second
                   gate #341 had added): while one is stored it is subscribed and decoded, and
                   deleting it drops the subscription and CLEARS every captured field. `reason` is the
@@ -2021,31 +2009,21 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   `issued_at` is ALWAYS null — the endpoint does
                   not expose the model-run instant and fetch time is not a substitute for it.
                   latitude/longitude are null when unconfigured and "<redacted>" under ?redact=1,
-                  dynamic_lwt{armed,state,state_code,reason,reason_code,decision_eligible,
-                  proposal_produced,room_error_k,p_term_k,unclamped_offset_k,bounded_offset_k,
-                  requested_offset_k,forecast_contribution_k,deadband,quantized,clamped,rate_limited,
-                  forecast_available,plant_gate_known,plant_gate_active,actuator_conflict,
-                  room_source_unix_s,room_age_s,last_decision_ms,sequence,evaluations,decisions,
-                  holds,failsafes} — the write-free shadow controller (mqtt_ha.cpp,
-                  logic/dynamic_lwt_controller.hpp). `armed` is DERIVED from the two configured
-                  sources (dynamic_lwt_armed: the MQTT room mapping AND a forecast location) — never
-                  stored, so nothing persisted can disagree with the configuration; state/reason are
-                  the last 1s evaluation
-                  ("off"|"shadow"|"hold"|"degraded"|"failsafe" / "disabled"|"shadow_decision"|
-                  "cadence_wait"|"deadband"|"rate_limited"|"room_unavailable"|"x10a_unavailable"|
-                  "homehub_unavailable"|"plant_gate_unknown"|"plant_inactive"|"forecast_unavailable"|
-                  "clock_invalid"), each mirrored as a numeric *_code for a metrics consumer that
-                  drops strings — the #215 lesson applied at birth rather than after the fact. Every
-                  term is null rather than 0 until the controller has actually computed it, since a
-                  0.0 K offset it never proposed is a claim it never made — with ONE stated exception:
-                  `forecast_contribution_k` is the literal 0 unconditionally, because the controller
-                  has no forecast term at all (the snapshot field is fixed at zero and nothing writes
-                  it — the forecast is evidence for comparing periods, never a control input).
-                  A null there would claim the term exists and is merely unknown. The reason ORDER is
-                  a property worth knowing when reading this block: an idle plant answers
-                  "plant_inactive" (HOLD) even when the room source is also ineligible, because both
-                  are true all summer and reporting the room made a resting plant read as a standing
-                  fault. There is no actuator result in this block and cannot be one,
+                  heating_curve{method_version,armed,state,state_code,reason,reason_code,
+                  sample_eligible,current_room_error_k,last_sample_room_error_k,
+                  last_sample_unix_s,forecast_available,plant_gate_known,plant_gate_active,
+                  heating_mode_known,heating_mode_active,room_source_unix_s,room_age_s,sequence,
+                  evaluations,samples,holds,blocks} — versioned raw heating-curve diagnosis
+                  (mqtt_ha.cpp, logic/heating_curve_diagnosis.hpp). `armed` is derived from the
+                  timestamped MQTT room mapping only; forecast is optional. State/reason are the last
+                  1s evaluation (`off|recording|hold|degraded|blocked` and `disabled|sample_recorded|
+                  sampling_interval|room_unavailable|x10a_unavailable|homehub_unavailable|
+                  plant_gate_unknown|plant_inactive|forecast_unavailable|clock_invalid|
+                  heating_mode_unknown|non_heating_mode`), mirrored as stable numeric codes. Codes
+                  3/4 remain unused after removal of deadband/rate-limit semantics. Nullable raw
+                  errors are facts only while eligible/recorded; sequence + absolute timestamp form
+                  the durable event contract. Room error is not an LWT offset. There is no actuator
+                  result in this block and cannot be one,
                   syslog{configured,resolved,reachable,host,port,error},
                   ota{channel} — "release"|"dev", the FEED the next OTA check reads (POST /set_ota).
                   On /status and not only /ota/status because the Settings Firmware card renders its
@@ -2300,10 +2278,9 @@ POST /test_ref_temp  {name,topic,temperature_path,setpoint_path,timestamp_path,e
                   a question. The whole point is the `test_proof` it returns — see the next route.
                   Uses the SAME parser as /set_ref_temp, so the mapping that earned the proof is
                   byte-for-byte the mapping that can then be persisted. This probe is the ONE part of
-                  the reference stack the dynamic-LWT consent gate does not stop: the frame reaches
-                  the probe before the SHADOW check drops it, because the required order is test ->
-                  save -> arm, and a gate that also blocked the test would make the first step depend
-                  on the last
+                  the reference stack outside the saved-source subscription: the frame reaches the
+                  probe before live-source decoding, because the required order is test -> save ->
+                  arm, and a gate that blocked the test would make the first step depend on the last
 POST /set_ref_temp   {name,topic,temperature_path,setpoint_path,timestamp_path,enabled_path,
                   hvac_mode_path,max_age_s,test_proof} -> validate, persist and
                   apply live on the existing MQTT client without reboot. Empty topic is the explicit
@@ -2313,8 +2290,8 @@ POST /set_ref_temp   {name,topic,temperature_path,setpoint_path,timestamp_path,e
                   A non-empty mapping REQUIRES a valid `test_proof` from /test_ref_temp or answers
                   409 "Test this MQTT mapping successfully before saving" — the one route here that
                   demands evidence rather than merely well-formed input, because this mapping is the
-                  SOLE input of the dynamic-LWT controller and a typo in it does not fail loudly: it
-                  produces a plausible-looking room error, or a permanent FAILSAFE that reads like a
+                  required heating-curve diagnosis input and a typo does not fail loudly: it
+                  produces a plausible-looking room error, or a permanent BLOCK that reads like a
                   broken feature. The proof is bound to all seven BEHAVIOURAL fields (not the name,
                   which is cosmetic and needs no retest), so testing one topic cannot license saving
                   another, and editing a path or the max age invalidates it. It is RAM-only and
@@ -2337,9 +2314,9 @@ POST /set_weather {latitude,longitude} -> validate + persist + notify the weathe
                   Disabling also requests the retained MQTT topic's cleanup, so a stopped forecast
                   leaves no last-known values on the broker
 (no /set_dynamic_lwt)  RETIRED in #357. There is no controller mode to POST: the heating-curve
-                  diagnosis arms itself while the room mapping and the forecast location are both
-                  configured (logic/config_model.hpp's dynamic_lwt_armed), and each of those routes
-                  already applies its own collection boundary live. What the route bought was a
+                  diagnosis arms itself while the timestamped MQTT room mapping is configured
+                  (`heating_curve_diagnosis_armed`). Forecast/location is optional comparison evidence;
+                  `/set_weather` applies its own collection/privacy boundary live. What the route bought was a
                   second statement of a fact the configuration already made — and it could not be
                   reached: it answered 409 until those sources existed, while the only editors for
                   them lived inside the Settings card that was hidden until the mode was on. An

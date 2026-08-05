@@ -6,7 +6,7 @@
 >
 > **There is no write path, and that is a property of the code.** No source file contains a write
 > entry point, an FC06/FC16 request builder or an issued write function code, and
-> `test/test_dynamic_lwt_shadow_contract.mjs` walks every file under `main/` to keep it that way.
+> `test/test_heating_curve_diagnosis_contract.mjs` walks every file under `main/` to keep it that way.
 > A write capability existed briefly and was removed unused; re-adding one is a deliberate design
 > decision that fails that test first. There is no MQTT/HA/HTTP/MCP/raw-Modbus control surface
 > either. Other clients on the LAN (the Onecta app, the unit's MMI, evcc) do write the hub — segment
@@ -136,6 +136,7 @@ Modbus constants; the names below are applied only by the visual UI and come fro
 | input `31` | Compressor running | binary `0`/`1`, displayed `OFF`/`ON` |
 | input `32` | Booster heater running (DHW tank immersion heater) | binary `0`/`1`, displayed `OFF`/`ON` |
 | input `37` | 3-way valve | `0` / `1` → Space heating / DHW |
+| input `38` | Current operation mode (API label disambiguates the guide's second "Operation mode") | `1` / `2` → Heating / Cooling |
 | input `52` / `53` | DHW / space operation | binary `0`/`1`, displayed `OFF`/`ON` |
 | holding `3` | Operation mode | `0` / `1` / `2` → Auto / Heating / Cooling |
 | holding `4` / `9` | Space heating/cooling / quiet mode | binary `0`/`1`, displayed `OFF`/`ON` |

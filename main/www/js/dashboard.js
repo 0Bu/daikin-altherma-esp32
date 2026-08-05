@@ -348,28 +348,26 @@ function roomSourceDetailHtml(r, mqtt, temperature, setpoint, age) {
 // STATE first because that is what decides whether anything is being recorded at all; the reason
 // only refines it. HOLD/plant_inactive is deliberately neutral, not a warning.
 //
-// Two of these lines name something OUTSIDE the controller's own vocabulary, and that is the point:
+// Two of these lines name something OUTSIDE the sampler's own vocabulary, and that is the point:
 // a blocked diagnosis is only useful if it says which thing to go and fix.
-//  - NOT ARMED is not one state but three (no room source, no forecast location, neither), and the
-//    controller cannot tell them apart — it is handed one `armed` bool. /status carries both
-//    `configured` flags, so the distinction is drawn here, dim rather than warned: an unconfigured
-//    source is a setup step, not a fault.
+//  - NOT ARMED means the required room source is not configured. Forecast is deliberately optional:
+//    requiring a location would block raw room-error evidence and turn disclosure to a third-party
+//    weather service into a prerequisite for a local diagnosis.
 //  - ROOM_UNAVAILABLE used to read "room input unavailable" while the source sat green and current
 //    two rows below it, which is the opposite of a diagnosis. The room reason (`disabled` — the
 //    thermostat is switched off; `stale`; `non_heating_mode`; …) is already on /status and says
 //    exactly what is wrong, so it is what gets printed.
 function dynamicStateRow(d, room, weather, modbus) {
-  if (d.state === "shadow")
+  if (d.state === "recording")
     return { key: "dyn.state_recording", cls: "ok", help: "dyn.state_help_recording" };
   if (d.state === "degraded")
     return { key: "dyn.state_recording_nowx", cls: "ok", help: "dyn.state_help_recording" };
+  if (d.state === "hold" && d.reason === "non_heating_mode")
+    return { key: "dyn.state_cooling", cls: "", help: "dyn.state_help_cooling" };
   if (d.state === "hold")
     return { key: "dyn.state_waiting", cls: "", help: "dyn.state_help_waiting" };
-  if (d.state === "off") {
-    const key = !room.configured && !weather.configured ? "dyn.state_setup_both"
-      : !room.configured ? "dyn.state_setup_room" : "dyn.state_setup_weather";
-    return { key, cls: "dim", help: "dyn.state_help_setup" };
-  }
+  if (d.state === "off")
+    return { key: "dyn.state_setup_room", cls: "dim", help: "dyn.state_help_setup" };
   if (d.reason === "room_unavailable")
     return { key: ROOM_BLOCK_LINES[room.reason] || "dyn.state_room", cls: "warn",
              help: "dyn.state_help_room" };
@@ -379,6 +377,7 @@ function dynamicStateRow(d, room, weather, modbus) {
     x10a_unavailable:    "dyn.state_x10a",
     homehub_unavailable: "dyn.state_homehub",
     plant_gate_unknown:  "dyn.state_gate",
+    heating_mode_unknown:"dyn.state_mode",
     clock_invalid:       "dyn.state_clock",
   }[d.reason];
   return { key: blocked || "dyn.state_blocked", cls: "warn", help: "dyn.state_help_blocked" };
@@ -388,7 +387,7 @@ function dynamicControlCardHtml() {
   const r = S.status?.reference_temperature || {};
   const w = S.status?.weather_forecast || {};
   const mqtt = S.status?.mqtt || {};
-  const d = S.status?.dynamic_lwt || {};
+  const d = S.status?.heating_curve || {};
   const modbus = S.status?.modbus || {};
   // ALWAYS rendered. Through v1.0.0-dev.331 this returned "" unless an explicit switch had selected
   // SHADOW — while that switch answered 409 until the very sources whose only editors live on this
@@ -412,15 +411,14 @@ function dynamicControlCardHtml() {
       sourceCls = !r.fresh ? "warn" : r.control_eligible ? "ok" : "warn";
     } else sourceCls = "warn";
   }
-  // The STATE, not the mode. The Firmware-card toggle already says on/off, so repeating it here
-  // would be a second control-shaped restatement of one bit. What a reader cannot see anywhere else
-  // is why no verdict exists yet — and through the summer the honest answer ("the plant is not
-  // heating") must NOT be styled as a fault, because it is the expected state for months.
+  // The STATE, not an imaginary operating mode. What a reader needs is why no sample exists yet;
+  // through the summer the honest answer ("the plant is not heating") must NOT be styled as a fault,
+  // because it is the expected state for months.
   const st = dynamicStateRow(d, r, w, modbus);
   // The state tongue carries WHAT THIS IS before what it is doing. That paragraph used to hang off
   // the Firmware switch, which is where a reader met the feature first; with the switch gone the
   // first row of its own card is that place, and a card whose title is the only thing explaining it
-  // would leave "P controller, ±2 K" as the sole account of what is being recorded.
+  // would leave the short method label as the sole account of what is being recorded.
   let rows = dynamicInfoRow("state", t("dyn.state"), t(st.key), st.cls,
     `<div class="vdesc-p">${esc(t("dyn.card_help"))}</div>` +
     `<div class="vdesc-p">${esc(t(st.help))}</div>`);
@@ -944,7 +942,8 @@ const connDown = () => connLinks().filter((l) => l.cls === "err");
 
 // ── Settings screen (behind the header gear) ─────────────────────────────────────────────────
 // The whole configuration on one screen, no menu level in between: Connections, ESP32 / Protocol /
-// Firmware, then (only while enabled) dynamic LWT at the bottom, rendered together by esp32CardHtml().
+// Firmware, then the always-visible heating-curve diagnosis at the bottom, rendered together by
+// esp32CardHtml().
 function renderSettings() {
   // Both containers are rebuilt on every poll (link state, pins and the OTA row all change). The
   // Protocol card's RX/TX pin dropdown is interactive, so skip the rebuild while it is focused/open — otherwise the

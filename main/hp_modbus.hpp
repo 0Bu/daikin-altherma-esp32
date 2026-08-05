@@ -15,8 +15,8 @@
 // register-54 actuator built for #300 was REMOVED with the retirement of dynamic LWT actuation
 // (#294 — SHADOW is the terminal state of that epic). No Modbus write function code is issued
 // anywhere in this firmware, there is no intent API, and there is no HTTP/MQTT/MCP write route.
-// The one piece kept from that work is the PLANT GATE below: an ordinary FC04 read that tells the
-// shadow controller whether space heating is actually running.
+// The observation-only pieces kept from that work are the two PLANT GATES below: ordinary FC04
+// reads that prove normal space operation and distinguish heating from cooling.
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -44,12 +44,15 @@ struct ModbusStatus {
     std::string last_error;
     int         last_error_detail   = -1;
     int         last_error_register = 0;
-    // The PLANT GATE: HomeHub input register 53 ("Space heating/cooling normal operation"), the one
-    // input the shadow controller needs to tell a real space-heating window from DHW or standstill.
+    // HomeHub input register 53 says SPACE HEATING OR COOLING is in normal operation. It cannot by
+    // itself license a heating-curve sample. Input register 38 supplies the current mode; both must be
+    // known and mode must be Heating before the diagnosis records a room-error sample.
     // `known` is false whenever the register did not answer this cycle or answered a sentinel — an
     // unknown gate must never read as "inactive", which would look like an ordinary quiet plant.
     bool        plant_gate_known  = false;
     bool        plant_gate_active = false;
+    bool        heating_mode_known  = false;
+    bool        heating_mode_active = false;
     uint32_t    task_stack_min_free_words = 0;  // FreeRTOS high-water mark; 0 until task runs
 };
 

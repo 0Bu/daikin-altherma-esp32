@@ -23,9 +23,9 @@ const labels = {
   "dyn.room_source": "Raumtemperaturquelle",
   "dyn.weather": "Wetterprognose",
   "dyn.strategy": "Verfahren",
-  "dyn.shadow_strategy": "P-Regler, ±2 K",
+  "dyn.shadow_strategy": "Rohe Raumabweichung · 30 min",
   "dyn.inactive": "Nicht aktiv",
-  "dyn.strategy_help": "Verfahrens-Erklärung",
+  "dyn.strategy_help": "Raum-Sollwert minus Ist-Raumtemperatur: positiv bedeutet zu kalt.",
   "dyn.card": "Heizkurven-Diagnose",
   "dyn.not_configured": "Nicht konfiguriert",
   "dyn.configured": "Konfiguriert",
@@ -112,6 +112,8 @@ const labels = {
   "lang.en": "English",
   "dyn.card_help": "Diagnose-Erklärung",
   "dyn.state_help_setup": "Einrichtungs-Erklärung",
+  "dyn.state_setup_homehub": "HomeHub nicht eingerichtet",
+  "dyn.state_help_setup_homehub": "HomeHub-Erklärung",
   "dyn.state_setup_both": "Noch nicht eingerichtet",
   "dyn.state_setup_room": "Raumquelle einrichten",
   "dyn.state_setup_weather": "Standort einrichten",
@@ -144,7 +146,7 @@ S.status = {
     configured: true, has_value: true, outdoor_mean_2h_c: 22.6,
     solar_energy_2h_wh_m2: 0, fresh: true,
   },
-  dynamic_lwt: { armed: true, state: "hold", reason: "plant_inactive" },
+  heating_curve: { method_version: 2, armed: true, state: "hold", reason: "plant_inactive" },
   env3: {
     supported: true, enabled: true, fresh: true,
     temperature_c: 20.2, humidity_pct: 46, pressure_hpa: 1009,
@@ -165,6 +167,8 @@ assert.doesNotMatch(html, /Wartet auf Heizbetrieb<\/span>[\s\S]{0,40}(warn|err)/
   "the idle-plant state must not carry a warning class");
 assert.doesNotMatch(html, /Betriebsart|Sicherheit & Ausgabe|Nur lesend/,
   "the duplicate mode row and the constant read-only row must be gone");
+assert.match(html, /Raum-Sollwert minus Ist-Raumtemperatur: positiv bedeutet zu kalt/,
+  "the method tongue must pin the canonical room-error sign");
 for (const key of ["state", "room-sources", "weather", "strategy"]) {
   const infoButton = html.match(new RegExp(`<button class="settings-split-info[^"]*"[^>]*data-desc="dynamic:${key}"[\\s\\S]*?<\\/button>`))?.[0] || "";
   assert.match(infoButton, /aria-expanded="false"/,
@@ -210,7 +214,8 @@ assert.doesNotMatch(roomButton, /25,1 °C|vor 17 s/,
 const weatherButton = html.match(/<button[^>]*data-act="weather"[\s\S]*?<\/button>/)?.[0] || "";
 assert.match(weatherButton, /<span>Open-Meteo<\/span>/,
   "the compact weather-provider value must be the popup action");
-for (const explanation of ["Anlage heizt nicht", "Raumquellen-Erklärung", "Wetter-Konfiguration", "Verfahrens-Erklärung"])
+for (const explanation of ["Anlage heizt nicht", "Raumquellen-Erklärung", "Wetter-Konfiguration",
+                           "Raum-Sollwert minus Ist-Raumtemperatur: positiv bedeutet zu kalt."])
   assert.ok(html.includes(explanation), `dynamic explanation tongue must include: ${explanation}`);
 
 S.descOpen.add("dynamic:strategy");
@@ -258,27 +263,29 @@ assert.match(html, /id="dynamic-weather-detail"[^]*<span class="vdesc-n">Status:
 assert.doesNotMatch(html, /<span class="vdesc-n">Temperatur:<\/span>|<span class="vdesc-n">Sonnenenergie:<\/span>/,
   "an unavailable forecast without a sample must not invent value explanations");
 
-// UNCONFIGURED IS STILL A RENDERED CARD. This is where both of its sources are configured, so
-// hiding it until they were configured left nowhere to configure them — and the switch that used
-// to reveal it refused to turn on until they existed.
-S.status.dynamic_lwt = { armed: false, state: "off", reason: "disabled" };
+// UNCONFIGURED IS STILL A RENDERED CARD. This is where the required room source and the optional
+// forecast are configured, so hiding it until setup would leave nowhere to configure them.
+S.status.heating_curve = { method_version: 2, armed: false, state: "off", reason: "disabled" };
 S.status.reference_temperature = {};
 S.status.weather_forecast = {};
 html = sandbox.__renderDynamic();
 assert.notEqual(html, "", "the card must render even with nothing configured yet");
-assert.match(html, /Noch nicht eingerichtet/, "an unset-up diagnosis must say so plainly");
-assert.doesNotMatch(html, /Noch nicht eingerichtet<\/span>[\s\S]{0,40}(warn|err)/,
+assert.match(html, /Raumquelle einrichten/, "an unset-up diagnosis must name its required source");
+assert.doesNotMatch(html, /Raumquelle einrichten<\/span>[\s\S]{0,40}(warn|err)/,
   "a setup step must not be styled as a fault");
 assert.match(html, /Einrichtungs-Erklärung/, "it must explain what to configure");
 S.status.reference_temperature = { configured: true };
+S.status.heating_curve = { method_version: 2, armed: true, state: "blocked", reason: "homehub_unavailable" };
 html = sandbox.__renderDynamic();
-assert.match(html, /Standort einrichten/,
-  "with only the room source configured, the MISSING half must be the one named");
+assert.match(html, /HomeHub offline|HomeHub nicht eingerichtet/,
+  "forecast must stay optional; after room setup the real missing plant witness is named");
+assert.doesNotMatch(html, /Standort einrichten/,
+  "a third-party forecast location must never be presented as required for local diagnosis");
 
 // A ROOM SOURCE THAT IS CURRENT BUT UNUSABLE. Through v1.0.0-dev.331 this read "Raumeingang fehlt"
 // while the source itself sat green and current two rows below — the state row and the source row
 // disagreeing about the same source. Both now state the source's own reason.
-S.status.dynamic_lwt = { armed: true, state: "failsafe", reason: "room_unavailable" };
+S.status.heating_curve = { method_version: 2, armed: true, state: "blocked", reason: "room_unavailable" };
 S.status.reference_temperature = {
   configured: true, name: "Example rm", has_value: true, temperature_c: 25.1,
   has_setpoint: true, setpoint_c: 22, age_s: 17, fresh: true,
@@ -303,7 +310,7 @@ assert.match(html, /<span class="vdesc-n">Verwertbar:<\/span> Raumthermostat aus
 S.status = {
   version: "1.0.0-dev.317", pins_avail: [1, 2, 4, 5],
   hp: { connected: true, proto: "I", rx: 2, tx: 1, last_ok_s: 0 },
-  ota: { channel: "dev" }, ui: { lang: "auto" }, dynamic_lwt: { armed: false, state: "off" },
+  ota: { channel: "dev" }, ui: { lang: "auto" }, heating_curve: { method_version: 2, armed: false, state: "off" },
   board: {}, env3: {}, sys: {}, mqtt: {}, reference_temperature: {}, weather_forecast: {},
 };
 S.descOpen.clear();

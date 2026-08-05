@@ -139,7 +139,7 @@ static ReferenceMqttFrame  s_ref_rx;
 static ReferenceMqttFrame  s_ref_task_frame;          // mqtt_task-owned; keeps ~1.2 KB off its stack
 static bool                s_ref_rx_active = false;
 static ReferenceTemperatureStatus s_ref_status;
-static logic::DynamicLwtShadowController s_dynamic_lwt_controller;  // guarded by s_mtx
+static logic::HeatingCurveDiagnosis s_heating_curve_diagnosis;  // guarded by s_mtx
 struct ReferenceProbeState {
     ReferenceTemperatureTestConfig config;
     uint32_t generation=0;
@@ -738,12 +738,12 @@ static void publish_crash() {
     s_crash_notable_pub = !js.empty();
 }
 
-// Evaluate the controller every mqtt_task cycle, including while publication is paused or the broker is down.
-// Tying evaluation to publish_heartbeat() would leave the last verdict looking healthy during
-// exactly the X10A/MQTT failures that must move it to FAILSAFE. Arming is DERIVED here rather than
-// read from a stored mode: dynamic_lwt_armed() answers it from the same configuration the editor
-// shows, so a deleted source disarms the diagnosis on the very next cycle.
-static logic::DynamicLwtSnapshot evaluate_dynamic_lwt(const Config& cfg, const HpStats& hp) {
+// Evaluate the diagnosis every mqtt_task cycle, including while publication is paused or the broker
+// is down. Tying evaluation to publish_heartbeat() would leave the last verdict looking healthy
+// during exactly the X10A/MQTT failures that must block it. Arming is derived here rather than read
+// from a stored mode: heating_curve_diagnosis_armed() answers it from the same room-source
+// configuration the editor shows, so deleting that source disarms sampling on the next cycle.
+static logic::HeatingCurveSnapshot evaluate_heating_curve(const Config& cfg, const HpStats& hp) {
     const ReferenceTemperatureStatus rt = reference_temperature_status();
     const uint64_t now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
     int64_t now_unix_s = -1;
@@ -776,22 +776,25 @@ static logic::DynamicLwtSnapshot evaluate_dynamic_lwt(const Config& cfg, const H
         cfg.weather_enabled && wx.has_value, wx.fetched_unix_s, now_unix_s, WEATHER_MAX_AGE_S);
     if (!wx.available) wx_freshness.fresh = false;
 
-    logic::DynamicLwtInputs in;
-    in.armed = dynamic_lwt_armed(cfg);
+    logic::HeatingCurveInputs in;
+    in.armed = heating_curve_diagnosis_armed(cfg);
     in.room_control_eligible = room.control_eligible;
     in.room_error_k = room.room_error_k;
     in.x10a_connected = hp.connected;
     in.homehub_connected = mbs.connected;
     in.plant_gate_known = mbs.plant_gate_known;
     in.plant_gate_active = mbs.plant_gate_active;
+    in.heating_mode_known = mbs.heating_mode_known;
+    in.heating_mode_active = mbs.heating_mode_active;
     in.forecast_available = cfg.weather_enabled && wx.available && wx_freshness.fresh;
     in.now_ms = static_cast<int64_t>(now_ms);
+    in.now_unix_s = now_unix_s;
     in.room_has_source_time = rt.has_value && rt.has_source_time;
     in.room_source_unix_s = rt.source_unix_s;
     in.room_age_known = freshness.age_known;
     in.room_age_s = freshness.age_s;
     Lock lk(s_mtx);
-    return s_dynamic_lwt_controller.evaluate(in);
+    return s_heating_curve_diagnosis.evaluate(in);
 }
 
 // Snapshot board/link diagnostics from the IDF heap/timer APIs + the poll/WiFi/MQTT state, and
@@ -895,35 +898,31 @@ static void publish_heartbeat() {
 
     // The controller is evaluated every mqtt_task cycle, not on the publication cadence. This copy
     // therefore already reflects paused/disconnected fail-closed transitions.
-    const logic::DynamicLwtSnapshot controller = dynamic_lwt_status();
-    f.lwt_controller_armed = controller.armed;
-    f.lwt_controller_state = static_cast<uint8_t>(controller.state);
-    f.lwt_controller_reason = static_cast<uint8_t>(controller.reason);
-    f.lwt_controller_decision_eligible = controller.decision_eligible;
-    f.lwt_controller_proposal_produced = controller.proposal_produced;
-    f.lwt_controller_has_terms = controller.has_terms;
-    f.lwt_controller_has_requested_offset = controller.has_requested_offset;
-    f.lwt_controller_deadband = controller.deadband;
-    f.lwt_controller_quantized = controller.quantized;
-    f.lwt_controller_clamped = controller.clamped;
-    f.lwt_controller_rate_limited = controller.rate_limited;
-    f.lwt_controller_forecast_available = controller.forecast_available;
-    f.lwt_controller_plant_gate_known = controller.plant_gate_known;
-    f.lwt_controller_plant_gate_active = controller.plant_gate_active;
-    f.lwt_controller_has_room_source_time = controller.room_has_source_time;
-    f.lwt_controller_room_age_known = controller.room_age_known;
-    f.lwt_controller_room_source_unix_s = controller.room_source_unix_s;
-    f.lwt_controller_room_age_s = controller.room_age_s;
-    f.lwt_controller_p_term_k = controller.p_term_k;
-    f.lwt_controller_unclamped_offset_k = controller.unclamped_offset_k;
-    f.lwt_controller_bounded_offset_k = controller.bounded_offset_k;
-    f.lwt_controller_requested_offset_k = controller.requested_offset_k;
-    f.lwt_controller_last_decision_ms = controller.last_decision_ms;
-    f.lwt_controller_sequence = controller.sequence;
-    f.lwt_controller_evaluations = controller.evaluations;
-    f.lwt_controller_decisions = controller.decisions;
-    f.lwt_controller_holds = controller.holds;
-    f.lwt_controller_failsafes = controller.failsafes;
+    const logic::HeatingCurveSnapshot diagnosis = heating_curve_status();
+    f.heating_curve_method_version = logic::HEATING_CURVE_DIAGNOSIS_METHOD_VERSION;
+    f.heating_curve_armed = diagnosis.armed;
+    f.heating_curve_state = static_cast<uint8_t>(diagnosis.state);
+    f.heating_curve_reason = static_cast<uint8_t>(diagnosis.reason);
+    f.heating_curve_sample_eligible = diagnosis.sample_eligible;
+    f.heating_curve_forecast_available = diagnosis.forecast_available;
+    f.heating_curve_plant_gate_known = diagnosis.plant_gate_known;
+    f.heating_curve_plant_gate_active = diagnosis.plant_gate_active;
+    f.heating_curve_heating_mode_known = diagnosis.heating_mode_known;
+    f.heating_curve_heating_mode_active = diagnosis.heating_mode_active;
+    f.heating_curve_has_current_room_error = diagnosis.has_current_room_error;
+    f.heating_curve_has_last_sample = diagnosis.has_last_sample;
+    f.heating_curve_has_room_source_time = diagnosis.room_has_source_time;
+    f.heating_curve_room_age_known = diagnosis.room_age_known;
+    f.heating_curve_current_room_error_k = diagnosis.current_room_error_k;
+    f.heating_curve_last_sample_room_error_k = diagnosis.last_sample_room_error_k;
+    f.heating_curve_room_source_unix_s = diagnosis.room_source_unix_s;
+    f.heating_curve_room_age_s = diagnosis.room_age_s;
+    f.heating_curve_last_sample_unix_s = diagnosis.last_sample_unix_s;
+    f.heating_curve_sequence = diagnosis.sequence;
+    f.heating_curve_evaluations = diagnosis.evaluations;
+    f.heating_curve_samples = diagnosis.samples;
+    f.heating_curve_holds = diagnosis.holds;
+    f.heating_curve_blocks = diagnosis.blocks;
 
     const std::string js = build_heartbeat_json(f);
     mqtt_publish(s_heartbeat, js.c_str(), static_cast<int>(js.size()), 0, 0);   // not retained
@@ -1575,7 +1574,7 @@ static void mqtt_task(void*) {
             service_reference_probe_subscription(ref_config);
             service_reference_frames(ref_config);
             service_requested_topic_cleanup(ref_config);
-            evaluate_dynamic_lwt(ref_config, hp);
+            evaluate_heating_curve(ref_config, hp);
 
             if (gate.publish_offline) {
                 mqtt_publish(s_avail, "offline", 0, 1, 1);
@@ -1919,10 +1918,10 @@ ReferenceTemperatureStatus reference_temperature_status() {
     return s_ref_status;
 }
 
-logic::DynamicLwtSnapshot dynamic_lwt_status() {
-    if (!s_mtx) return s_dynamic_lwt_controller.snapshot();
+logic::HeatingCurveSnapshot heating_curve_status() {
+    if (!s_mtx) return s_heating_curve_diagnosis.snapshot();
     Lock lk(s_mtx);
-    return s_dynamic_lwt_controller.snapshot();
+    return s_heating_curve_diagnosis.snapshot();
 }
 
 ReferenceTemperatureTestResult mqtt_reference_test(
