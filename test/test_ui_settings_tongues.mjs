@@ -7,22 +7,26 @@ import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
 const source = readAppFragments(["dashboard.js"]);
 const labels = {
-  "dyn.mode": "Betriebsart",
-  "dyn.observe": "Beobachten",
-  "dyn.off": "Aus",
+  "dyn.state": "Status",
+  "dyn.state_recording": "Zeichnet auf",
+  "dyn.state_recording_nowx": "Zeichnet auf · ohne Prognose",
+  "dyn.state_waiting": "Wartet auf Heizbetrieb",
+  "dyn.state_room": "Raumeingang fehlt",
+  "dyn.state_x10a": "X10A offline",
+  "dyn.state_homehub": "HomeHub offline",
+  "dyn.state_gate": "Anlagenzustand unbekannt",
+  "dyn.state_clock": "Uhrzeit nicht gesetzt",
+  "dyn.state_blocked": "Zeichnet nicht auf",
+  "dyn.state_help_recording": "Aufzeichnung laeuft",
+  "dyn.state_help_waiting": "Anlage heizt nicht",
+  "dyn.state_help_blocked": "Eingang fehlt",
   "dyn.room_source": "Raumtemperaturquelle",
   "dyn.weather": "Wetterprognose",
-  "dyn.strategy": "Regelstrategie",
-  "dyn.shadow_strategy": "P-Regler · Schatten",
+  "dyn.strategy": "Verfahren",
+  "dyn.shadow_strategy": "P-Regler, ±2 K",
   "dyn.inactive": "Nicht aktiv",
-  "dyn.safety": "Sicherheit & Ausgabe",
-  "dyn.read_only": "Nur lesend",
-  "dyn.mode_help": "Betriebsart-Erklärung",
-  "dyn.off_help": "Erfassung ausgeschaltet",
-  "dyn.strategy_help": "Strategie-Erklärung",
-  "dyn.strategy_off_help": "Strategie ausgeschaltet",
-  "dyn.safety_help": "Sicherheits-Erklärung",
-  "dyn.card": "Dynamische Vorlaufregelung",
+  "dyn.strategy_help": "Verfahrens-Erklärung",
+  "dyn.card": "Heizkurven-Diagnose",
   "dyn.not_configured": "Nicht konfiguriert",
   "dyn.configured": "Konfiguriert",
   "dyn.input_error": "Eingabefehler",
@@ -108,7 +112,7 @@ const labels = {
   "lang.auto": "Browser",
   "lang.de": "Deutsch",
   "lang.en": "English",
-  "dyn.enable": "Dynamische Vorlaufregelung",
+  "dyn.enable": "Heizkurven-Diagnose",
   "dyn.enable_help": "Standardmäßig aus.",
   "aria.ota": "Nach Firmware-Updates suchen",
   "ota.title_check": "Nach Updates suchen",
@@ -136,7 +140,7 @@ S.status = {
     configured: true, has_value: true, outdoor_mean_2h_c: 22.6,
     solar_energy_2h_wh_m2: 0, fresh: true,
   },
-  dynamic_lwt: { mode: "shadow" },
+  dynamic_lwt: { mode: "shadow", state: "hold", reason: "plant_inactive" },
   env3: {
     supported: true, enabled: true, fresh: true,
     temperature_c: 20.2, humidity_pct: 46, pressure_hpa: 1009,
@@ -145,9 +149,17 @@ S.status = {
 let html = sandbox.__renderDynamic();
 assert.doesNotMatch(html, /section-badge|Experimentell/,
   "the enabled bottom card must not carry an experimental pill");
-assert.equal((html.match(/class="vdesc-body settings-info-tongue"/g) || []).length, 5,
-  "all five dynamic-control rows must render an information tongue");
-for (const key of ["mode", "room-sources", "weather", "strategy", "safety"]) {
+assert.equal((html.match(/class="vdesc-body settings-info-tongue"/g) || []).length, 4,
+  "all four diagnosis rows must render an information tongue");
+// The idle-plant state is the reading a user sees for months. It must say what it means and must
+// not be styled as a fault, or the row becomes noise exactly when it is the only thing to read.
+assert.match(html, /Wartet auf Heizbetrieb/,
+  "an idle plant must be named, not reported as an error");
+assert.doesNotMatch(html, /Wartet auf Heizbetrieb<\/span>[\s\S]{0,40}(warn|err)/,
+  "the idle-plant state must not carry a warning class");
+assert.doesNotMatch(html, /Betriebsart|Sicherheit & Ausgabe|Nur lesend/,
+  "the duplicate mode row and the constant read-only row must be gone");
+for (const key of ["state", "room-sources", "weather", "strategy"]) {
   const infoButton = html.match(new RegExp(`<button class="settings-split-info[^"]*"[^>]*data-desc="dynamic:${key}"[\\s\\S]*?<\\/button>`))?.[0] || "";
   assert.match(infoButton, /aria-expanded="false"/,
     `${key} label must be a closed explanation action on first render`);
@@ -156,8 +168,8 @@ for (const key of ["mode", "room-sources", "weather", "strategy", "safety"]) {
 }
 assert.equal((html.match(/class="settings-split-action dynamic-config-open/g) || []).length, 2,
   "only room-temperature and weather values may be popup actions");
-assert.equal((html.match(/class="settings-split-value/g) || []).length, 3,
-  "mode, strategy and safety values must remain non-interactive readouts");
+assert.equal((html.match(/class="settings-split-value/g) || []).length, 2,
+  "state and method values must remain non-interactive readouts");
 assert.doesNotMatch(html, /settings-source-summary|Konfiguriert · 25,1 °C|Open-Meteo · 22,6 °C \/ 2 h/,
   "obsolete green summary lines must not duplicate values inside the tongues");
 const roomTongue = html.match(/<div class="vdesc-body settings-info-tongue" id="dynamic-room-sources-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
@@ -192,7 +204,7 @@ assert.doesNotMatch(roomButton, /25,1 °C|vor 17 s/,
 const weatherButton = html.match(/<button[^>]*data-act="weather"[\s\S]*?<\/button>/)?.[0] || "";
 assert.match(weatherButton, /<span>Open-Meteo<\/span>/,
   "the compact weather-provider value must be the popup action");
-for (const explanation of ["Betriebsart-Erklärung", "Raumquellen-Erklärung", "Wetter-Konfiguration", "Strategie-Erklärung", "Sicherheits-Erklärung"])
+for (const explanation of ["Anlage heizt nicht", "Raumquellen-Erklärung", "Wetter-Konfiguration", "Verfahrens-Erklärung"])
   assert.ok(html.includes(explanation), `dynamic explanation tongue must include: ${explanation}`);
 
 S.descOpen.add("dynamic:strategy");
@@ -204,7 +216,7 @@ S.descOpen.clear();
 S.status.reference_temperature = {};
 S.status.weather_forecast = {};
 html = sandbox.__renderDynamic();
-assert.equal((html.match(/class="vdesc-body settings-info-tongue"/g) || []).length, 5,
+assert.equal((html.match(/class="vdesc-body settings-info-tongue"/g) || []).length, 4,
   "unconfigured sources must retain their explanation tongues");
 assert.equal((html.match(/<span>Nicht konfiguriert<\/span>/g) || []).length, 2,
   "each empty editable source must expose Not configured as its popup value");
@@ -272,7 +284,7 @@ assert.match(html, /id="e32Chan"[^]*<option value="dev" selected>Development<\/o
   "the update selector must survive the split explanation row");
 assert.match(html, /id="e32Lang"[^]*<option value="auto" selected>Browser<\/option>/,
   "the language selector must survive the split explanation row");
-assert.match(html, /id="e32DynamicLwt" role="switch" aria-label="Dynamische Vorlaufregelung"/,
+assert.match(html, /id="e32DynamicLwt" role="switch" aria-label="Heizkurven-Diagnose"/,
   "the firmware card must contain an unchecked default-OFF switch");
 assert.doesNotMatch(html, /<div class="section-label">Dynamische Vorlaufregelung/,
   "OFF must leave only the Firmware switch and hide the experimental card");
@@ -282,7 +294,7 @@ html = sandbox.__renderEsp32();
 assert.match(html, /id="e32DynamicLwt" role="switch" checked/,
   "SHADOW must render the Firmware switch as enabled");
 assert.ok(html.indexOf("<div class=\"section-label\">Firmware") <
-          html.indexOf("<div class=\"section-label\">Dynamische Vorlaufregelung"),
-  "SHADOW must reveal the experimental controller card after Firmware at the bottom");
+          html.indexOf("<div class=\"section-label\">Heizkurven-Diagnose"),
+  "SHADOW must reveal the diagnosis card after Firmware at the bottom");
 
 console.log("settings source tongue use-cases: ok");

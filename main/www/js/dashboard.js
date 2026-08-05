@@ -328,6 +328,26 @@ function roomSourceDetailHtml(r, mqtt, captureEnabled, temperature, setpoint, ag
   return html + descNoteHtml(t("ref.detail.source_label"), t("ref.detail.source", sourceName));
 }
 
+// state + reason -> one plain-language line, its severity class and its explanation. Keyed on the
+// STATE first because that is what decides whether anything is being recorded at all; the reason
+// only refines it. HOLD/plant_inactive is deliberately neutral, not a warning.
+function dynamicStateRow(d) {
+  if (d.state === "shadow")
+    return { key: "dyn.state_recording", cls: "ok", help: "dyn.state_help_recording" };
+  if (d.state === "degraded")
+    return { key: "dyn.state_recording_nowx", cls: "ok", help: "dyn.state_help_recording" };
+  if (d.state === "hold")
+    return { key: "dyn.state_waiting", cls: "", help: "dyn.state_help_waiting" };
+  const blocked = {
+    room_unavailable:    "dyn.state_room",
+    x10a_unavailable:    "dyn.state_x10a",
+    homehub_unavailable: "dyn.state_homehub",
+    plant_gate_unknown:  "dyn.state_gate",
+    clock_invalid:       "dyn.state_clock",
+  }[d.reason];
+  return { key: blocked || "dyn.state_blocked", cls: "warn", help: "dyn.state_help_blocked" };
+}
+
 function dynamicControlCardHtml() {
   const r = S.status?.reference_temperature || {};
   const w = S.status?.weather_forecast || {};
@@ -354,9 +374,13 @@ function dynamicControlCardHtml() {
       sourceCls = r.fresh ? "ok" : "warn";
     } else sourceCls = "warn";
   }
-  let rows = dynamicInfoRow("mode", t("dyn.mode"),
-    captureEnabled ? t("dyn.observe") : t("dyn.off"), captureEnabled ? "" : "dim",
-    `<div class="vdesc-p">${esc(t(captureEnabled ? "dyn.mode_help" : "dyn.off_help"))}</div>`);
+  // The STATE, not the mode. The Firmware-card toggle already says on/off, so repeating it here
+  // would be a second control-shaped restatement of one bit. What a reader cannot see anywhere else
+  // is why no verdict exists yet — and through the summer the honest answer ("the plant is not
+  // heating") must NOT be styled as a fault, because it is the expected state for months.
+  const st = dynamicStateRow(d);
+  let rows = dynamicInfoRow("state", t("dyn.state"), t(st.key), st.cls,
+    `<div class="vdesc-p">${esc(t(st.help))}</div>`);
   const sourceValue = r.configured ? t("dyn.configured") : t("dyn.not_configured");
   const sourceBody = (r.configured
     ? roomSourceDetailHtml(r, mqtt, captureEnabled, temperature, setpoint, age) : "") +
@@ -383,11 +407,11 @@ function dynamicControlCardHtml() {
   rows += dynamicInfoRow("weather", t("dyn.weather"), weatherValue, weatherCls,
     weatherBody, "weather", t("wx.title"));
 
-  rows += dynamicInfoRow("strategy", t("dyn.strategy"),
-    captureEnabled ? t("dyn.shadow_strategy") : t("dyn.inactive"), captureEnabled ? "" : "dim",
-    `<div class="vdesc-p">${esc(t(captureEnabled ? "dyn.strategy_help" : "dyn.strategy_off_help"))}</div>`);
-  rows += dynamicInfoRow("safety", t("dyn.safety"), t("dyn.read_only"), "",
-    `<div class="vdesc-p">${esc(t("dyn.safety_help"))}</div>`);
+  rows += dynamicInfoRow("strategy", t("dyn.strategy"), t("dyn.shadow_strategy"), "",
+    `<div class="vdesc-p">${esc(t("dyn.strategy_help"))}</div>`);
+  // No "Safety & output → read-only" row. It was a hardcoded constant that could never say anything
+  // else, and since the write path was deleted (#294) it can never BECOME anything else either —
+  // the same reason bus_tx_writes was dropped from the heartbeat. The card's own copy carries it.
   if (captureEnabled && r.error) rows += vrow(t("ref.error"), r.error, { cls: "err settings-wrap" });
   if (captureEnabled && w.error) rows += vrow(t("wx.error"), w.error, { cls: "err settings-wrap" });
   return vcard(t("dyn.card"), rows);

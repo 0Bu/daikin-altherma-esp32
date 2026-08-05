@@ -19,7 +19,7 @@ page lives outside the firmware and cannot include `main/www/style.css`, so its 
    **gear** opens **Settings**, which is the ESP32 and what it talks to: the Connections tile
    (WiFi/MQTT/Syslog/NTP), and the ESP32 board card split into three — ESP32 (board hardware, uptime,
    memory), Protokoll (X10A link, RX/TX pins) and Firmware (version, OTA channel, language).
-   A **Dynamische Vorlaufregelung** card for the staged room/weather/controller project appears
+   A **Heizkurven-Diagnose** card for the room/weather/controller project appears
    below Firmware only after its explicit Firmware switch has been enabled.
    Nothing sits between the gear and those cards — Settings is **flat**, no
    menu of entries to tap through, because there is little enough of it that a menu would exist only
@@ -1133,7 +1133,7 @@ cards, stacked in the same single column as everything else (§9). The Connectio
 card it was on the dashboard — the move changed where the configuration lives, not how it looks. The
 board card is the same story split three ways: **ESP32** / **Protokoll** / **Firmware** answer three
 different questions (the board itself, the X10A link, the running software) that one card used to
-answer at once. When its Firmware switch selects SHADOW, the **Dynamische Vorlaufregelung** card is
+answer at once. When its Firmware switch selects SHADOW, the **Heizkurven-Diagnose** card is
 their conditional neighbour rather than another top-level screen and deliberately comes last, after
 Firmware. The three permanent cards and this optional fourth are built and rebuilt together by one
 `esp32CardHtml()`. HomeHub/Modbus is a fifth row in the Connections tile and follows the same row
@@ -1255,13 +1255,28 @@ vocabulary exactly:
    through v1.0.13 on the reasoning that the header owned the affordance; in use that only made the
    version look inert precisely where a user is already deciding which build to run. Version,
    update channel and language each have the same label-owned explanation tongue as Protocol.
-   The fourth row is the persisted, default-OFF **Dynamische Vorlaufregelung** switch. It maps only
+   The fourth row is the persisted, default-OFF **Heizkurven-Diagnose** switch. It maps only
    to OFF/SHADOW: enabling requires MQTT, a complete room source and HomeHub; it never exposes ACTIVE.
 
-5. **Dynamische Vorlaufregelung card** — the conditional, bottom-most Settings home of the dynamic-LWT
-   project, shown only while the Firmware switch selects SHADOW. Its five rows
-   are **Betriebsart**, **Raumtemperaturquelle**, **Wetterprognose**, **Regelstrategie**, and
-   **Sicherheit & Ausgabe** = **Nur lesend**. OFF hides this card, keeps saved source settings, removes
+5. **Heizkurven-Diagnose card** — the conditional, bottom-most Settings home of the room-feedback
+   project, shown only while the Firmware switch selects SHADOW. The card is a DIAGNOSIS, not a
+   control: it records the leaving-water offset the weather-dependent curve would need, and the
+   season aggregate of those proposals is the verdict. Nothing is written to the plant — the
+   firmware has no write path (`docs/MODBUS_ACTUATION.md`).
+
+   Its four rows are **Status**, **Raumtemperaturquelle**, **Wetterprognose** and **Verfahren**.
+   There is deliberately no fifth: the card must not restate the Firmware toggle as a second
+   "Betriebsart" readout, and must not carry a constant "Sicherheit & Ausgabe = Nur lesend" line —
+   with the write path deleted neither could ever say anything else, and a row that cannot vary is
+   one more thing a reader has to rule out (the rule that dropped `bus_tx_writes`, §5.3).
+
+   **Status** names why no verdict exists yet: recording, recording without forecast, waiting for
+   space heating, or the specific missing input (room, X10A, HomeHub, plant gate, clock). An idle
+   plant is NEUTRAL, never a warning — through the non-heating half of the year it is the expected
+   reading, and a permanently orange row is one the user learns to ignore, which would cost exactly
+   the months when it finally means something.
+
+   OFF hides this card, keeps saved source settings, removes
    the room subscription, clears captured runtime values, pauses Open-Meteo and evaluates no proposal.
    The Firmware switch remains visible as the way back in. SHADOW reads and validates the configured
    inputs and runs the bounded P controller, but retains the write-free output boundary. The

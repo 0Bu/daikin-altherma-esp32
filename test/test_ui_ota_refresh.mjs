@@ -94,7 +94,7 @@ class Element {
         "card.channel": "Update-Kanal",
         "chan.dev": "Entwicklung",
         "chan.release": "Release",
-        "dyn.card": "Dynamische Vorlaufregelung",
+        "dyn.card": "Heizkurven-Diagnose",
       };
       return text[key] ?? key;
     },
