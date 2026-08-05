@@ -717,6 +717,10 @@ const INSPECT = {
     t: { en: "Discharge temperature", de: "Heißgastemperatur" },
     re: /discharge pipe temp/i, sample: "Discharge pipe temp.",
     rows: [/discharge pipe temp/i, /^high pressure$/i],
+    // Keep the last run visible as a curve while the compressor rests. The current 0x20 reading is
+    // intentionally withheld then because the outdoor unit only repeats its held-over value, but
+    // the history ring preserves the samples that were genuinely measured during operation.
+    trend: "discharge",
   },
   // Both readings belong to the OUTDOOR unit, not to the liquid line they are drawn on: the
   // expansion valve is fitted there, and the low pressure is what exists downstream of it. They sit

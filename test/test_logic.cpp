@@ -908,6 +908,10 @@ static void test_config_model() {
     CHECK(!set_hp_resets_checkup(false, 44, 43, 44, 43));        // HomeHub-only update
     CHECK(set_hp_resets_checkup(true, 44, 43, 44, 43));          // explicit profile/re-detect
     CHECK(set_hp_resets_checkup(false, 44, 43, 18, 17));         // physically different X10A link
+    CHECK(!homehub_history_identity_changed("hub.local", 502, 1, "hub.local", 502, 1));
+    CHECK(homehub_history_identity_changed("hub-a.local", 502, 1, "hub-b.local", 502, 1));
+    CHECK(homehub_history_identity_changed("hub.local", 502, 1, "hub.local", 1502, 1));
+    CHECK(homehub_history_identity_changed("hub.local", 502, 1, "hub.local", 502, 2));
 
     // Field-owned detection commits. The poll task snapshots the config, probes the bus for a whole
     // sweep, then commits — so anything it writes beyond its OWN fields is written from a snapshot
@@ -6269,6 +6273,17 @@ static void test_history() {
     CHECK(trend_by_id("dhw_tan") == nullptr);                    // prefix is not a match
     CHECK(trend_by_id("dhw_tank_x") == nullptr);
 
+    // One missing register page is a gap, not a new sensor. The ring identity may change only when
+    // the structural row actually resolved; profile/link changes reset all rings explicitly.
+    CHECK(!history_row_identity_changed("Expansion valve 1 (pls)", -1, ""));
+    CHECK(!history_row_identity_changed("INV frequency (rps)", -1, ""));
+    CHECK(!history_row_identity_changed("Expansion valve 1 (pls)", 3,
+                                        "Expansion valve 1 (pls)"));
+    CHECK(history_row_identity_changed("Expansion valve 1 (pls)", 3,
+                                       "Expansion valve 2 (pls)"));
+    CHECK(!history_row_identity_changed("", 3, "Expansion valve 1 (pls)"));
+    CHECK(!history_row_identity_changed(nullptr, 3, "Expansion valve 1 (pls)"));
+
     // --- what gets STORED --------------------------------------------------------------------
     // The held-over test wins over everything: the bus DID answer, and hp_format DID produce a
     // plausible value — that is exactly what makes this failure invisible without the page rule.
@@ -6312,6 +6327,10 @@ static void test_history() {
     CHECK(history_bucket(299'999'999LL) == 0);
     CHECK(history_bucket(300'000'000LL) == 1);
     CHECK(history_bucket(24LL * 3600 * 1000000) == HISTORY_SAMPLES);   // a full day later
+    CHECK(history_completed_samples(0) == 0);
+    CHECK(history_completed_samples(12) == 12);                  // one hour of common raster
+    CHECK(history_completed_samples(HISTORY_SAMPLES) == HISTORY_SAMPLES);
+    CHECK(history_completed_samples(HISTORY_SAMPLES + 99) == HISTORY_SAMPLES);
     // Skipped-bucket arithmetic: adjacent buckets skip NOTHING (the once-per-5-min common case), and
     // a non-advancing clock yields 0 rather than an unsigned wrap-around that would blank the ring.
     CHECK(history_skipped(5, 6) == 0);
@@ -6500,6 +6519,14 @@ static void test_history() {
         // reset() really empties it — a model change must not leave the previous unit's tail behind.
         r.reset();
         CHECK(r.snapshot(out, HISTORY_SAMPLES) == 0);
+        // A new source/identity keeps the common elapsed window as explicit gaps. It never carries
+        // old readings forward, and a late start beyond 24 h still caps at exactly one day.
+        r.reset_with_gaps(8);
+        CHECK(r.snapshot(out, HISTORY_SAMPLES) == 8);
+        for (size_t i = 0; i < 8; i++) CHECK(out[i] == HISTORY_NO_READING);
+        r.reset_with_gaps(HISTORY_SAMPLES + 20);
+        CHECK(r.snapshot(out, HISTORY_SAMPLES) == HISTORY_SAMPLES);
+        for (size_t i = 0; i < HISTORY_SAMPLES; i++) CHECK(out[i] == HISTORY_NO_READING);
     }
     {
         // A skip larger than the whole ring must not run away: it fills at most one full ring.

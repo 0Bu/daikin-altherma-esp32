@@ -11,6 +11,7 @@
 #include "checkup.hpp"
 #include "config.hpp"
 #include "env3.hpp"
+#include "history.hpp"
 #include "hp_poll.hpp"
 #include "logic/config_model.hpp"
 #include "logic/env3.hpp"
@@ -588,6 +589,9 @@ static esp_err_t set_hp(httpd_req_t* req) {
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     Config c    = config();
     const bool modbus_was_enabled = config_modbus_enabled(c);
+    const std::string old_mb_host = c.mb_host;
+    const int old_mb_port = c.mb_port;
+    const int old_mb_unit = c.mb_unit_id;
     // The RX/TX pins are the physical X10A wiring: PERSISTED so a manual override survives a reboot
     // (config_save below). The model "profile" is session-only — only touched when the request
     // explicitly sends "profile"; a wiring-only patch omits it so it does not re-select the model or
@@ -619,6 +623,8 @@ static esp_err_t set_hp(httpd_req_t* req) {
     c.mb_port           = ji(j, "mb_port", c.mb_port);
     c.mb_unit_id        = ji(j, "mb_unit_id", c.mb_unit_id);
     c.actuation_enabled = jb(j, "actuation_enabled", c.actuation_enabled);
+    const bool reset_mb_history = homehub_history_identity_changed(
+        old_mb_host, old_mb_port, old_mb_unit, c.mb_host, c.mb_port, c.mb_unit_id);
     cJSON_Delete(j);
     std::string reason;
     // Pass the real Kconfig-derived octal-SPI + status-LED facts (config.cpp) so validate() rejects a
@@ -634,8 +640,10 @@ static esp_err_t set_hp(httpd_req_t* req) {
     if (modbus_was_enabled && !config_modbus_enabled(c)) mqtt_request_modbus_cleanup();
     if (reset_checkup) {
         checkup_reset();
+        history_reset();
         hp_poll_reconfigure();
     }
+    if (reset_mb_history) history_modbus_reset();
     // The HomeHub stack is told separately, because it IS separate: this starts or stops its task
     // and re-resolves its address without touching the X10A poll engine above.
     mb_reconfigure();
@@ -930,6 +938,7 @@ static esp_err_t do_detect(httpd_req_t* req) {
     c.fp_valid = false;
     config_set_runtime(c);
     checkup_reset();
+    history_reset();
     hp_poll_reconfigure();
     // The HomeHub stack is told separately, because it IS separate: this starts or stops its task
     // and re-resolves its address without touching the X10A poll engine above.

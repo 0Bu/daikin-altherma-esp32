@@ -742,10 +742,12 @@ Body, ordered:
    which freezes with its page and, on the reference install, has published a flat 0.0 bar from both
    sensors for 30 days. There is no low-side equivalent of the `0x62/15` fallback, so the choice is
    an empty chart or none, and none is the one that does not look like a broken sensor. Four rules the chart inherits from the rest of this document:
-   - **The axis states the span actually held.** The rings are RAM (persisting them would be ~100k
-     NVS writes a year in the partition holding the WiFi credentials), so every `/set_*` and every
-     OTA empties them. A fresh device reads "Seit Neustart · 1 h", never a 24-hour axis padded with
-     absence.
+   - **Every source uses one boot-aligned raster.** The 288 five-minute slots retain exactly 24 hours
+     in RAM (persisting them would be ~100k NVS writes a year in the partition holding the WiFi
+     credentials). Before one day of uptime every chart therefore shows the same growing span, for
+     example "Aufzeichnung · 11 h". A row that resolves late, a HomeHub enabled later, or an explicit
+     source-identity change keeps those elapsed slots as visible gaps instead of shortening only its
+     own axis or mixing readings from two devices. After 24 hours every chart is a rolling day.
    - **A gap breaks the line.** A timed-out register or a value `reading_plausible()` refused is
      drawn as a gap, never interpolated across — the same refusal the blanked pills make (item 3).
    - **Idle is not a gap.** On the outdoor pages (0x20/0x21) a sample taken while the compressor

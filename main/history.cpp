@@ -13,6 +13,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -68,6 +69,8 @@ int64_t           s_last_commit_us = -1;
 int64_t           s_mb_last_commit_us = -1;
 int64_t           s_last_commit_bucket = -1;
 int64_t           s_mb_last_commit_bucket = -1;
+std::atomic<bool> s_reset_requested{false};
+std::atomic<bool> s_mb_reset_requested{false};
 SemaphoreHandle_t s_mtx = nullptr;
 
 // RAII lock, same idiom as hp_poll.cpp/config.cpp. Everything inside a critical section here is a
@@ -93,6 +96,10 @@ inline void copy_field(char* dst, size_t max, const char* src) {
     dst[max - 1] = '\0';
 }
 
+inline bool board_trend(const logic::TrendDef& d) {
+    return d.kind == logic::TrendKind::FreeHeap || d.kind == logic::TrendKind::MaxAlloc;
+}
+
 } // namespace
 
 void history_start() {
@@ -101,8 +108,22 @@ void history_start() {
     if (!s_mtx) diag_printf("history: mutex alloc failed — trends disabled this boot\n");
 }
 
+void history_reset() {
+    // The request may come from the httpd task while the poll task owns the current fold. Defer the
+    // reset to history_record(), like checkup_reset(), so one task performs both reset and reseed
+    // under the existing history mutex.
+    s_reset_requested.store(true);
+}
+
+void history_modbus_reset() {
+    // Same deferred-reset boundary as X10A: a HomeHub host/port/unit edit can race the old poll
+    // cycle, so the Modbus task clears and reseeds its rings before folding the new identity.
+    s_mb_reset_requested.store(true);
+}
+
 void history_record(const CachedValue* v, size_t n) {
-    if (!s_mtx || !v || !n) return;
+    if (!s_mtx) return;
+    if (!v) n = 0;
 
     // Views for the pure pickers. Bounded by the profile row count; the poll cache holds at most one
     // entry per ValueDef row (logic/profile_view.hpp sizes both). A trend addresses its row by
@@ -125,6 +146,18 @@ void history_record(const CachedValue* v, size_t n) {
         regs[i]   = v[i].reg;
         offs[i]   = v[i].off;
         convs[i]  = static_cast<int16_t>(v[i].conv);
+    }
+
+    // Resolve every row once before the lock. Besides avoiding a second catalog scan, this lets a
+    // changed non-empty label reset ALL X10A plant rings together before any current-bucket sample
+    // is folded. Board histories are independent of the heat-pump identity and remain intact.
+    int selected[TREND_COUNT];
+    for (size_t t = 0; t < TREND_COUNT; t++) {
+        const logic::TrendDef& d = logic::TRENDS[t];
+        selected[t] = (d.kind == logic::TrendKind::Row ||
+                       d.kind == logic::TrendKind::BinaryState ||
+                       d.kind == logic::TrendKind::BinaryEvent)
+            ? logic::trend_select(d, regs, offs, units, convs, rows) : -1;
     }
 
     // The compressor witness decides whether the outdoor pages are still being refreshed. ABSENT is
@@ -165,7 +198,8 @@ void history_record(const CachedValue* v, size_t n) {
     const HistorySample sg_mode = logic::history_smart_grid_mode(
         sg_c1_known, sg_c1_on, sg_c2_known, sg_c2_on);
 
-    const uint32_t bucket = logic::history_bucket(esp_timer_get_time());
+    const int64_t now_us = esp_timer_get_time();
+    const uint32_t bucket = logic::history_bucket(now_us);
 
     // The board's own memory, read BEFORE the lock: heap_caps_get_largest_free_block takes the
     // heap's internal lock, and taking that under ours would invent a lock order this file has no
@@ -181,16 +215,44 @@ void history_record(const CachedValue* v, size_t n) {
     Lock lk(s_mtx);
     if (!lk.held) return;
 
-    // Crossing into a new bucket closes every trend's open one (TrendRing::commit fills whatever was
-    // skipped, so the time axis stays linear — see logic/history.hpp).
-    if (s_have_bucket && bucket != s_bucket) {
+    // Every X10A and board ring shares the monotonic boot epoch. If polling starts late, seed the
+    // already-completed part of the 24-hour window with explicit gaps instead of giving each source
+    // a different apparent start time.
+    if (!s_have_bucket) {
+        const size_t completed = logic::history_completed_samples(bucket);
+        for (auto& tr : s_ring) tr.ring.reset_with_gaps(completed);
+        if (completed) {
+            s_last_commit_us = static_cast<int64_t>(bucket) * logic::HISTORY_DT_S * 1000000;
+            s_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
+        }
+    } else if (bucket != s_bucket) {
+        // Crossing into a new bucket closes every trend's open one (TrendRing::commit fills whatever
+        // was skipped, so the time axis stays linear — see logic/history.hpp).
         const uint32_t skipped = logic::history_skipped(s_bucket, bucket);
         for (auto& tr : s_ring) tr.ring.commit(skipped);
-        s_last_commit_us = esp_timer_get_time();
+        s_last_commit_us = now_us;
         s_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
     }
     s_bucket = bucket;
     s_have_bucket = true;
+
+    bool identity_changed = false;
+    for (size_t t = 0; t < TREND_COUNT; t++) {
+        const int idx = selected[t];
+        if (idx >= 0 && logic::history_row_identity_changed(s_ring[t].label, idx, labels[idx])) {
+            identity_changed = true;
+            break;
+        }
+    }
+    if (s_reset_requested.exchange(false) || identity_changed) {
+        const size_t completed = logic::history_completed_samples(bucket);
+        for (size_t t = 0; t < TREND_COUNT; t++) {
+            if (board_trend(logic::TRENDS[t])) continue;
+            s_ring[t].ring.reset_with_gaps(completed);
+            s_ring[t].label[0] = '\0';
+            s_ring[t].unit[0] = '\0';
+        }
+    }
 
     for (size_t t = 0; t < TREND_COUNT; t++) {
         Trend& tr = s_ring[t];
@@ -198,9 +260,9 @@ void history_record(const CachedValue* v, size_t n) {
 
         if (d.kind == logic::TrendKind::SmartGridMode) {
             if (!sg_supported) {
-                if (tr.label[0]) tr.ring.reset();       // model no longer carries both contacts
-                tr.label[0] = '\0';
-                tr.unit[0] = '\0';
+                // A page timeout can hide either contact for one sweep. Preserve the established
+                // identity and let the untouched NO_READING pending value become a gap; an actual
+                // model/link change arrives through history_reset() above.
                 continue;
             }
             copy_field(tr.label, sizeof(tr.label), d.label);
@@ -211,22 +273,18 @@ void history_record(const CachedValue* v, size_t n) {
 
         // A BOARD trend has no row to resolve: its label and unit are fixed, it is never absent, and
         // no page can hold it over. Sampled above, outside the lock, like everything else here.
-        if (d.kind == logic::TrendKind::FreeHeap || d.kind == logic::TrendKind::MaxAlloc) {
+        if (board_trend(d)) {
             copy_field(tr.label, sizeof(tr.label), d.label);
             copy_field(tr.unit, sizeof(tr.unit), d.unit);
             tr.ring.fold(d.kind == logic::TrendKind::FreeHeap ? free_heap : max_alloc);
             continue;
         }
 
-        const int idx = logic::trend_select(d, regs, offs, units, convs, rows);
-        const char* label = idx >= 0 ? labels[idx] : "";
-
-        if (std::strncmp(label, tr.label, kLabelMax - 1) != 0) {    // different row -> different sensor
-            tr.ring.reset();
-            std::strncpy(tr.label, label, kLabelMax - 1);
-            tr.label[kLabelMax - 1] = '\0';
-        }
-        if (idx < 0) { tr.unit[0] = '\0'; continue; }
+        const int idx = selected[t];
+        // Missing in this sweep means NO READING, not NO FEATURE. Keep the established label, unit
+        // and ring; pending is already NO_READING and the bucket commit will preserve the gap.
+        if (idx < 0) continue;
+        copy_field(tr.label, sizeof(tr.label), labels[idx]);
         std::strncpy(tr.unit, v[idx].unit.c_str(), sizeof(tr.unit) - 1);
         tr.unit[sizeof(tr.unit) - 1] = '\0';
 
@@ -241,7 +299,8 @@ void history_record(const CachedValue* v, size_t n) {
 
 void history_record_modbus(const CachedValue* v, size_t n) {
     if (!s_mtx) return;
-    const uint32_t bucket = logic::history_bucket(esp_timer_get_time());
+    const int64_t now_us = esp_timer_get_time();
+    const uint32_t bucket = logic::history_bucket(now_us);
 
     // Parse before taking the history lock. strtod is locale-stable in this firmware and needs no
     // shared state from the rings; keeping it outside makes the critical section plain fixed-size
@@ -261,14 +320,25 @@ void history_record_modbus(const CachedValue* v, size_t n) {
 
     Lock lk(s_mtx);
     if (!lk.held) return;
-    if (s_mb_have_bucket && bucket != s_mb_bucket) {
+    if (!s_mb_have_bucket) {
+        const size_t completed = logic::history_completed_samples(bucket);
+        for (auto& ring : s_mb_ring) ring.reset_with_gaps(completed);
+        if (completed) {
+            s_mb_last_commit_us = static_cast<int64_t>(bucket) * logic::HISTORY_DT_S * 1000000;
+            s_mb_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
+        }
+    } else if (bucket != s_mb_bucket) {
         const uint32_t skipped = logic::history_skipped(s_mb_bucket, bucket);
         for (auto& ring : s_mb_ring) ring.commit(skipped);
-        s_mb_last_commit_us = esp_timer_get_time();
+        s_mb_last_commit_us = now_us;
         s_mb_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
     }
     s_mb_bucket = bucket;
     s_mb_have_bucket = true;
+    if (s_mb_reset_requested.exchange(false)) {
+        const size_t completed = logic::history_completed_samples(bucket);
+        for (auto& ring : s_mb_ring) ring.reset_with_gaps(completed);
+    }
     for (size_t t = 0; t < HOMEHUB_HISTORY_COUNT; t++) {
         if (logic::trend_cstr_eq(logic::HOMEHUB_HISTORIES[t].trend_id, "bsh_state"))
             s_mb_ring[t].fold_binary_event(sample[t]);
@@ -280,14 +350,15 @@ void history_record_modbus(const CachedValue* v, size_t n) {
 size_t history_snapshot(size_t t, HistorySample* out, size_t max) {
     if (t >= TREND_COUNT || !out || !max || !s_mtx) return 0;
     Lock lk(s_mtx);
-    if (!lk.held) return 0;
+    // Do not expose the old physical identity while its deferred reset is waiting for the poll task.
+    if (!lk.held || (s_reset_requested.load() && !board_trend(logic::TRENDS[t]))) return 0;
     return s_ring[t].ring.snapshot(out, max);
 }
 
 size_t history_modbus_snapshot(size_t t, HistorySample* out, size_t max) {
     if (t >= HOMEHUB_HISTORY_COUNT || !out || !max || !s_mtx) return 0;
     Lock lk(s_mtx);
-    if (!lk.held) return 0;
+    if (!lk.held || s_mb_reset_requested.load()) return 0;
     return s_mb_ring[t].snapshot(out, max);
 }
 
@@ -310,7 +381,7 @@ int32_t history_newest_age_s() {
 int32_t history_modbus_newest_age_s() {
     if (!s_mtx) return -1;
     Lock lk(s_mtx);
-    if (!lk.held || s_mb_last_commit_us < 0) return -1;
+    if (!lk.held || s_mb_reset_requested.load() || s_mb_last_commit_us < 0) return -1;
     const int64_t age_us = esp_timer_get_time() - s_mb_last_commit_us;
     return age_us < 0 ? 0 : static_cast<int32_t>(age_us / 1000000);
 }
@@ -328,7 +399,8 @@ int64_t history_oldest_bucket(size_t sample_count) {
 int64_t history_modbus_oldest_bucket(size_t sample_count) {
     if (!s_mtx) return -1;
     Lock lk(s_mtx);
-    return lk.held ? oldest_bucket_under_lock(s_mb_last_commit_bucket, sample_count) : -1;
+    return lk.held && !s_mb_reset_requested.load()
+        ? oldest_bucket_under_lock(s_mb_last_commit_bucket, sample_count) : -1;
 }
 
 size_t history_label(size_t t, char* out, size_t max) {
@@ -336,7 +408,7 @@ size_t history_label(size_t t, char* out, size_t max) {
     out[0] = '\0';
     if (t >= TREND_COUNT || !s_mtx) return 0;
     Lock lk(s_mtx);
-    if (!lk.held) return 0;
+    if (!lk.held || (s_reset_requested.load() && !board_trend(logic::TRENDS[t]))) return 0;
     return copy_under_lock(s_ring[t].label, out, max);
 }
 
@@ -345,7 +417,7 @@ size_t history_unit(size_t t, char* out, size_t max) {
     out[0] = '\0';
     if (t >= TREND_COUNT || !s_mtx) return 0;
     Lock lk(s_mtx);
-    if (!lk.held) return 0;
+    if (!lk.held || (s_reset_requested.load() && !board_trend(logic::TRENDS[t]))) return 0;
     return copy_under_lock(s_ring[t].unit, out, max);
 }
 

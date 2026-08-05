@@ -818,6 +818,13 @@ static void mb_poll_once() {
     const Config& c = config();
     const std::string target = config_modbus_host(c);
 
+    // The poll task owns the socket identity, so it is the final race-free authority for a target
+    // change. /set_hp also requests this reset immediately to hide the old series from readers; this
+    // second request covers an old cycle that happened to consume that flag before noticing the new
+    // configuration. The reset keeps the boot-aligned raster and replaces old-target data with gaps.
+    if (s_have_req && (target != s_req_host || c.mb_port != s_req_port || c.mb_unit_id != s_unit))
+        history_modbus_reset();
+
     // A configured target change would otherwise close the old socket inside mb_ensure_connected()
     // before the only writer had a chance to restore its baseline. Try once on the old socket. If
     // proof is unavailable, latch a conflict so a coincidentally similar value on the new hub can

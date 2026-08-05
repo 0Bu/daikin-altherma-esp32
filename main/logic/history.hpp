@@ -95,6 +95,19 @@ constexpr bool trend_cstr_eq(const char* a, const char* b) {
     return *a == *b;
 }
 
+// A missing row in ONE poll is not a new sensor identity: its register page may simply have timed
+// out, in which case the open bucket must become a gap while the preceding history survives. The
+// first successful resolution is metadata for an until-then empty/gapped ring, not an identity
+// change either. Only a row that actually resolved after another non-empty label can prove that the
+// label behind a structural locator changed.
+// Explicit profile/link changes reset every X10A ring through history_reset() instead, including
+// the harder case where the new profile carries no row at this locator at all.
+constexpr bool history_row_identity_changed(const char* stored_label, int resolved_row,
+                                            const char* resolved_label) {
+    return resolved_row >= 0 && stored_label && *stored_label &&
+           !trend_cstr_eq(stored_label, resolved_label);
+}
+
 // ── The trend catalog ───────────────────────────────────────────────────────────────────────────
 // `id` is the stable wire name (GET /history?row=<id>, and the /status.history entry). It is NOT the
 // display label: labels differ per profile and would make a bookmarked/scripted request model-
@@ -327,6 +340,14 @@ constexpr uint32_t history_bucket(int64_t uptime_us) {
     return static_cast<uint32_t>(uptime_us / (static_cast<int64_t>(HISTORY_DT_S) * 1000000));
 }
 
+// Completed five-minute buckets since the monotonic boot epoch, capped to the 24-hour ring. A
+// source that first appears later (a slow X10A page, or HomeHub enabled after boot) seeds these
+// positions as gaps so every chart keeps the same honest time window instead of starting at a
+// source-specific hour. No data is fabricated: the padding is HISTORY_NO_READING throughout.
+constexpr size_t history_completed_samples(uint32_t current_bucket) {
+    return current_bucket < HISTORY_SAMPLES ? current_bucket : HISTORY_SAMPLES;
+}
+
 // How many buckets went by with no poll cycle at all, between the bucket that was open (`prev`) and
 // the one we are now in (`now`). Pure because it is an off-by-one with no visible symptom: get it
 // wrong by one and every earlier sample sits one bucket off on the time axis, which no test of the
@@ -469,6 +490,15 @@ struct TrendRing {
     HistorySample pending = HISTORY_NO_READING;    // the bucket currently being folded
 
     void reset() { count = 0; head = 0; pending = HISTORY_NO_READING; }
+
+    // Start a new measurement identity on the common boot-aligned raster. The elapsed part of the
+    // 24-hour window remains visible as explicit gaps, so resetting one source cannot shorten its
+    // axis relative to the others or splice readings from two physical devices.
+    void reset_with_gaps(size_t completed) {
+        reset();
+        const size_t n = completed < HISTORY_SAMPLES ? completed : HISTORY_SAMPLES;
+        for (size_t i = 0; i < n; i++) push(HISTORY_NO_READING);
+    }
 
     void push(HistorySample s) {
         buf[head] = s;

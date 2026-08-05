@@ -411,4 +411,12 @@ inline bool set_hp_resets_checkup(bool profile_present, int old_rx, int old_tx,
     return profile_present || old_rx != new_rx || old_tx != new_tx;
 }
 
+// HomeHub history belongs to one physical Modbus target. Actuation consent and other /set_hp fields
+// do not change that identity; host, port or unit id do. The recorder preserves the common 24-hour
+// raster but turns the elapsed part into gaps so values from two gateways are never spliced.
+inline bool homehub_history_identity_changed(const std::string& old_host, int old_port, int old_unit,
+                                             const std::string& new_host, int new_port, int new_unit) {
+    return old_host != new_host || old_port != new_port || old_unit != new_unit;
+}
+
 } // namespace daik

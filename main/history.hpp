@@ -12,9 +12,10 @@
 //
 // RAM only, and deliberately not persisted: a 576-byte blob rewritten every 5 minutes is ~100k NVS
 // writes a year in the partition that holds the WiFi credentials, to save a history that is only
-// ever nice-to-have. The consequence is stated rather than hidden — a reboot (every /set_*, every
-// OTA) empties the rings, and the UI draws the span it actually has ("Seit Neustart · 1 h") instead
-// of padding a 24-hour axis with absence.
+// ever nice-to-have. After a reboot/OTA the common raster therefore grows from zero to 24 hours.
+// A later X10A/HomeHub identity change removes the old readings but preserves that boot-aligned
+// raster as explicit gaps, so every chart shows the same elapsed window without splicing devices.
+// The UI draws the span actually retained ("Aufzeichnung · 11 h" until the first full day).
 #include "hp_poll.hpp"          // CachedValue
 #include "logic/history.hpp"
 
@@ -37,6 +38,15 @@ void history_record(const CachedValue* v, size_t n);
 // acquire a chart. An empty cycle advances the source's time raster with gaps, so an outage does not
 // make the last Modbus point slide to "now".
 void history_record_modbus(const CachedValue* v, size_t n);
+
+// Start a new X10A observation identity after explicit re-detection, link rewiring or profile
+// selection. Cross-task safe: the poll task consumes the request under the history mutex before it
+// folds the first sample of the newly resolved unit. HomeHub is an independent source and remains.
+void history_reset();
+
+// Start a new HomeHub observation identity after host, port or unit-id changes. Like the X10A
+// reset, elapsed positions remain explicit gaps on the common boot-aligned 24-hour raster.
+void history_modbus_reset();
 
 // Copy trend `t`'s samples OLDEST-FIRST into `out`. Returns the count written (0 .. HISTORY_SAMPLES,
 // and 0 when the profile carries no such row or nothing has been recorded yet). Non-allocating under
