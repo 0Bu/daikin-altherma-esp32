@@ -357,8 +357,10 @@ Body, ordered:
    no data), the **operation mode** as the headline (Heating / Cooling / DHW / Defrost / Stop — the
    hydronic I/U mode, see item 2), and one status line under it — "Operating", "Defrosting",
    "Circulating — compressor off", "Standby — not running", "Fault · U4 — check the outdoor unit.",
-   "Waiting for the heat pump…", "Can't reach the device — retrying…". The last-poll age is
-   appended only when the drawing has no leaving-water pill to prove freshness itself.
+   "Waiting for the heat pump…", "Can't reach the device — retrying…". With X10A offline and a
+   live HomeHub fallback, the same activity line is derived from the HomeHub compressor, pump,
+   tank-heater and flow witnesses and appends "X10A offline · Modbus" for provenance. The last-poll
+   age is appended only when the drawing has no leaving-water pill to prove freshness itself.
    The status line is derived from the **readings** (compressor rps, defrost flag, pump/flow), never
    from the fact that the X10A bus answers: it once said "Operating" in green whenever the link was
    up, so an idle plant was announced as running directly above pills that all read zero — and a
