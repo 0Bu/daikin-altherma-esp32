@@ -101,6 +101,18 @@ assert.match(app, /dynamicInfoRow\("weather"[\s\S]*"weather", t\("wx\.title"\)\)
   "the forecast value must open latitude and longitude editing through the firmware config route");
 assert.match(app, /function parseWeatherCoordinatePair\([\s\S]*function pasteWeatherCoordinates\([\s\S]*addEventListener\("paste", pasteWeatherCoordinates\)/,
   "a Google Maps coordinate pair pasted into either field must be split before save");
+const weatherCopyLines = app.split("\n").filter((line) =>
+  /^\s*"wx\.(?:detail\.source|hint\.(?:configured|setup))"\s*:/.test(line));
+assert.equal(weatherCopyLines.length, 6,
+  "weather provenance plus configured/setup guidance must exist in both languages");
+for (const line of weatherCopyLines)
+  assert.doesNotMatch(line, /experimental|experimentell/i,
+    "weather copy must not refer to the controller's experimental Firmware switch");
+const configuredGermanWeatherCopy = weatherCopyLines.find((line) => line.includes("Der ESP32 ruft")) || "";
+assert.equal((configuredGermanWeatherCopy.match(/alle 45 Minuten/g) || []).length, 1,
+  "configured German weather guidance must state its refresh interval exactly once");
+assert.doesNotMatch(configuredGermanWeatherCopy, /Google Maps/,
+  "configured weather guidance must not repeat coordinate-entry instructions");
 assert.doesNotMatch(app, /navigator\.geolocation/,
   "the direct device UI must carry no unreachable browser-geolocation logic");
 assert.doesNotMatch(app, /weather[^\n]{0,120}broker_off|input\/weather/,

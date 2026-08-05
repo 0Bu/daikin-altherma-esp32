@@ -379,7 +379,7 @@ function dynamicControlCardHtml() {
   } else if (w.configured) weatherCls = w.error ? "err" : "warn";
   const weatherValue = w.configured ? "Open-Meteo" : t("dyn.not_configured");
   const weatherBody = (w.configured ? weatherSourceDetailHtml(w, outdoor, solar, captureEnabled) : "") +
-    `<div class="vdesc-p">${esc(t("wx.hint"))}</div>`;
+    `<div class="vdesc-p">${esc(t(w.configured ? "wx.hint.configured" : "wx.hint.setup"))}</div>`;
   rows += dynamicInfoRow("weather", t("dyn.weather"), weatherValue, weatherCls,
     weatherBody, "weather", t("wx.title"));
 
