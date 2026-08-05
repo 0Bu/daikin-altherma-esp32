@@ -318,6 +318,8 @@ const M_QUIET = (on) => M_FLAG(9, "Quiet mode operation", on, "quiet_state");
   assert.equal(c.mbForInspect("disch"), null, "unpaired discharge has no invented fallback");
   assert.equal(c.inspHeld(c.INSPECT.disch, d), true,
     "the unpaired held-over reading still explains why it is blank");
+  assert.equal(c.INSPECT.disch.trend, "discharge",
+    "the held-over discharge inspector still offers the measured history from the last run");
 }
 
 // Zero degrees is a valid outdoor measurement, not a missing-value sentinel.

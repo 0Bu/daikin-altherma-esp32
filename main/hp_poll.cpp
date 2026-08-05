@@ -340,9 +340,10 @@ static bool poll_detect() {                                    // returns true i
         s_no_match = 0;
     }
     // The profile/link now names a new observation identity. This is deliberately before the
-    // same-cycle poll: checkup_record consumes the reset and discards that in-flight boundary sample;
-    // the following sweep seeds only the resolved unit.
+    // same-cycle poll: both rolling observations consume the reset before accepting the newly
+    // resolved unit, so neither can splice the prior physical identity into its first sample.
     checkup_reset();
+    history_reset();
     config_set_model(d.best.empty() ? "generic" : d.best, d.page_mask, d.kw_tenths, d.iu_kw_tenths,
                      d.eeprom);
     return true;

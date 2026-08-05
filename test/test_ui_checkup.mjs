@@ -13,6 +13,7 @@ const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url),
 const statusSource = fs.readFileSync(new URL("../main/http_status.cpp", import.meta.url), "utf8");
 const checkupSource = fs.readFileSync(new URL("../main/checkup.cpp", import.meta.url), "utf8");
 const pollSource = fs.readFileSync(new URL("../main/hp_poll.cpp", import.meta.url), "utf8");
+const modbusPollSource = fs.readFileSync(new URL("../main/hp_modbus.cpp", import.meta.url), "utf8");
 const configSource = fs.readFileSync(new URL("../main/http_config.cpp", import.meta.url), "utf8");
 
 // The checkup is the dashboard's first card after the live diagram, before the Model and live
@@ -54,10 +55,20 @@ assert.match(checkupSource, /if \(s_reset_requested\.load\(\)\) return logic::Ch
              "report must stay empty without consuming a pending identity reset");
 assert.ok(pollSource.indexOf("checkup_reset();") < pollSource.indexOf("config_set_model("),
           "automatic detection must request reset before publishing the resolved profile");
-assert.match(configSource, /set_hp_resets_checkup\([^;]+;\s*[\s\S]*?if \(reset_checkup\) \{\s*checkup_reset\(\);/m,
-             "/set_hp must route the pure identity predicate into the reset request");
-assert.match(configSource, /static esp_err_t do_detect[\s\S]*?checkup_reset\(\);\s*hp_poll_reconfigure\(\);/m,
-             "explicit /detect must reset the observation before reconfiguring the poll task");
+assert.ok(pollSource.indexOf("history_reset();") < pollSource.indexOf("config_set_model("),
+          "automatic detection must reset trend identity before publishing the resolved profile");
+assert.match(configSource,
+             /set_hp_resets_checkup\([^;]+;\s*[\s\S]*?if \(reset_checkup\) \{\s*checkup_reset\(\);\s*history_reset\(\);/m,
+             "/set_hp must route the pure identity predicate into both X10A reset requests");
+assert.match(configSource,
+             /static esp_err_t do_detect[\s\S]*?checkup_reset\(\);\s*history_reset\(\);\s*hp_poll_reconfigure\(\);/m,
+             "explicit /detect must reset both X10A observations before reconfiguring the poll task");
+assert.match(configSource,
+             /homehub_history_identity_changed\([\s\S]*?if \(reset_mb_history\) history_modbus_reset\(\);/m,
+             "/set_hp must reset HomeHub history only when host, port or unit identity changes");
+assert.match(modbusPollSource,
+             /if \(s_have_req && \(target != s_req_host \|\| c\.mb_port != s_req_port \|\| c\.mb_unit_id != s_unit\)\)\s*history_modbus_reset\(\);/m,
+             "the Modbus task must close the race where an old cycle consumes the HTTP reset");
 
 const context = {
   S: { status: null },

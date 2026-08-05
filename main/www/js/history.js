@@ -201,12 +201,11 @@ async function ensureHistPair(id) {
 // series came from. `gen` still counts assemblies, which keeps an index-anchored pin as honest here
 // as it is there.
 //
-// Samples are aligned by INDEX, which the firmware makes exact: history.cpp commits every ring on
-// the one bucket boundary, so equal lengths mean equal instants. Unequal lengths can still happen —
-// an input fetched a bucket earlier than another, or a ring reset by a model change — and the
-// answer is to align on the NEWEST sample (both series end at "now") and take the overlap. Padding
-// the short one instead would slide a whole curve along the axis, which is the mislabelling
-// history.hpp refuses when it fills skipped buckets rather than compressing them.
+// Inputs share the firmware's monotonic bucket ids. Build their UNION raster and leave null wherever
+// one input has no sample: taking only the shortest input used to collapse an otherwise 24-hour
+// derived curve to 1 h or 8 h after one row appeared/reset later. `b0` makes padding exact rather
+// than a guess; wall time is the next choice, and newest-tail alignment remains only for legacy
+// responses without either anchor.
 async function ensureDerived(id) {
   const D = DERIVED[id];
   if (S.histBusy.has(id)) return;
@@ -216,16 +215,32 @@ async function ensureDerived(id) {
     await Promise.all(use.map((k) => ensureHist(k)));
     const src = use.map((k) => [k, S.hist.get(k)]).filter(([, h]) => h && !h.err && h.v.length);
     if (!src.length) { S.hist.set(id, { at: Date.now(), err: true, v: [] }); return; }
-    const n = Math.min(...src.map(([, h]) => h.v.length));
-    const base = src[0][1];
+    const dt = src[0][1].dt || 300;
+    let start = 0, end = 0, mode = "tail";
+    if (src.every(([, h]) => Number.isInteger(h.b0))) {
+      mode = "bucket";
+      start = Math.min(...src.map(([, h]) => h.b0));
+      end = Math.max(...src.map(([, h]) => h.b0 + h.v.length - 1));
+    } else if (src.every(([, h]) => typeof h.t0 === "number" && h.dt === dt)) {
+      mode = "time";
+      start = Math.min(...src.map(([, h]) => h.t0));
+      end = Math.max(...src.map(([, h]) => h.t0 + (h.v.length - 1) * dt));
+    } else {
+      end = Math.max(...src.map(([, h]) => h.v.length)) - 1;
+    }
+    const n = mode === "tail" ? end + 1
+      : Math.round((end - start) / (mode === "time" ? dt : 1)) + 1;
+    const sourceIndex = (h, i) => mode === "bucket" ? start + i - h.b0
+      : mode === "time" ? Math.round((start + i * dt - h.t0) / dt)
+      : h.v.length - n + i;
     const v = [], heldRuns = [];
     for (let i = 0; i < n; i++) {
       const s = {}; let missing = 0, heldMissing = 0;
       for (const [k, h] of src) {
-        const j = h.v.length - n + i;                     // tail-aligned: both series end at "now"
-        const raw = h.v[j];
+        const j = sourceIndex(h, i);
+        const raw = j >= 0 && j < h.v.length ? h.v[j] : null;
         s[k] = raw == null ? null : raw / 10;             // tenths on the wire, units in the formula
-        if (raw == null) { missing++; if (histHeld(h, j)) heldMissing++; }
+        if (raw == null) { missing++; if (j >= 0 && j < h.v.length && histHeld(h, j)) heldMissing++; }
       }
       const out = D.fn(s);
       v.push(out == null || !Number.isFinite(out) ? null : Math.round(out * 10));
@@ -239,9 +254,18 @@ async function ensureDerived(id) {
       }
     }
     const gen = ((S.hist.get(id) || {}).gen || 0) + 1;
-    S.hist.set(id, { at: Date.now(), gen, dt: base.dt, unit: D.unit,
-                     t0: typeof base.t0 === "number" ? base.t0 + (base.v.length - n) * base.dt : null,
-                     b0: Number.isInteger(base.b0) ? base.b0 + (base.v.length - n) : null,
+    const wall = src.find(([, h]) => typeof h.t0 === "number");
+    const bucket = src.find(([, h]) => Number.isInteger(h.b0));
+    const t0 = mode === "time" ? start
+      : mode === "bucket" && wall ? wall[1].t0 - (wall[1].b0 - start) * dt
+      : wall ? wall[1].t0 - (n - wall[1].v.length) * dt : null;
+    const b0 = mode === "bucket" ? start
+      : mode === "time" && bucket && typeof bucket[1].t0 === "number"
+        ? bucket[1].b0 - Math.round((bucket[1].t0 - start) / dt)
+      : bucket ? bucket[1].b0 - (n - bucket[1].v.length) : null;
+    S.hist.set(id, { at: Date.now(), gen, dt, unit: D.unit,
+                     t0: typeof t0 === "number" ? t0 : null,
+                     b0: Number.isInteger(b0) ? b0 : null,
                      held: heldRuns, v });
   } catch (e) {
     S.hist.set(id, { at: Date.now(), err: true, v: [] });
@@ -513,7 +537,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   const totalText = t(cfg.total, histDuration(total)) + (cfg.inactiveTotal
     ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "");
   return wrap(
-    `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.since", spanH))}</span>` +
+    `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
       `<span class="vhist-range mono num">${esc(totalText)}</span></div>` + levelLegend +
     `<div class="vhist-graph vhist-state-graph${pi >= 0 ? " has-pin" : ""}">` +
       `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +
@@ -565,9 +589,9 @@ function histHtml(id, unit, name) {
 
   const n = view.v.length;
   const spanH = Math.max(1, Math.round((n * view.dt) / 3600));
-  // The axis states the span the device ACTUALLY holds, never a padded 24 h: the buffer lives in RAM
-  // and every /set_* and OTA reboots the board, so a fresh device has minutes of history, not a day.
-  // Stretching the axis to 24 h would draw that absence as if it were flat measured data.
+  // The axis states the common boot-aligned span the device actually holds. Before 24 h uptime it
+  // grows with the board; after that every source remains a rolling day. A source that started or
+  // changed later contributes explicit null gaps, never a shorter axis or fabricated flat data.
   const full  = n * view.dt >= 23.5 * 3600;
   const { lo, hi, X, Y } = histScale(allPts, n);
 
@@ -657,7 +681,7 @@ function histHtml(id, unit, name) {
         `<span class="vhist-source${s.source === "modbus" ? " mb" : ""}"><i></i>${esc(s.name)}</span>`).join("")}</div>`
     : "";
   return wrap(
-    `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.since", spanH))}</span>` +
+    `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
     `<span class="vhist-range mono num">${esc(rng)}</span></div>` + legend +
     `<div class="vhist-graph${pi >= 0 ? " has-pin" : ""}">` +
       `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +

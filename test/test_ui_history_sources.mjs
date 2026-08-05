@@ -7,16 +7,27 @@ import vm from "node:vm";
 import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
+const firmwareHistory = fs.readFileSync(new URL("../main/history.cpp", import.meta.url), "utf8");
 assert.match(style, /\.vhist-state-graph \.vhist-tip \{[^}]*z-index:\s*2[^}]*white-space:\s*pre;/,
   "state tooltips must paint over the timeline and honor only their deliberate vertical breaks");
 assert.ok(style.lastIndexOf(".vhist-state-on.mb { background: var(--src-mb); }") >
           style.lastIndexOf(".vhist-state-on.sg-recommended"),
   "the lower Modbus lane's petrol source colour must win over every categorical state fill");
+assert.match(firmwareHistory,
+  /if \(!s_have_bucket\)[\s\S]*?history_completed_samples\(bucket\)[\s\S]*?s_ring\)[\s\S]*?reset_with_gaps\(completed\)/m,
+  "X10A and board rings must seed the elapsed boot raster even when polling starts late");
+assert.match(firmwareHistory,
+  /if \(!s_mb_have_bucket\)[\s\S]*?history_completed_samples\(bucket\)[\s\S]*?s_mb_ring\)[\s\S]*?reset_with_gaps\(completed\)/m,
+  "HomeHub rings must use the same boot-aligned raster when enabled later");
+assert.match(firmwareHistory, /void history_record\([^)]*\) \{\s*if \(!s_mtx\) return;\s*if \(!v\) n = 0;/m,
+  "an empty X10A sweep must still advance board histories and the shared gap raster");
 
 const S = {
   status: { history: {
     rows: [
       { id: "dhw_tank", label: "DHW tank temp. (R5T)" },
+      { id: "leaving_water", label: "Leaving water temp. before BUH (R1T)" },
+      { id: "return_water", label: "Inlet water temp.(R4T)" },
       { id: "outdoor_air", label: "R1T-Outdoor air temp." },
       { id: "pump_signal", label: "Water pump signal (0:max-100:stop)" },
       { id: "defrost_state", label: "Defrost Operation" },
@@ -50,7 +61,7 @@ const context = {
   tx: (x) => x.de,
   t: (key, ...args) => {
     const [arg, arg2] = args;
-    if (key === "hist.since") return `Seit Neustart · ${arg} h`;
+    if (key === "hist.recorded") return `Aufzeichnung · ${arg} h`;
     if (key === "hist.ago") return `vor ${arg} h`;
     if (key === "hist.rel") return `vor ${arg} h`;
     if (key === "hist.gaps") return `${arg} Lücke`;
@@ -130,11 +141,25 @@ assert.match(h.scrubText(view, 1), /Modbus 45\.5 °C/,
   "the same cursor instant reads both instruments and preserves the X10A gap");
 
 const html = h.histHtml("dhw_tank", "°C", "Warmwasserspeichertemperatur");
+assert.match(html, /Aufzeichnung · 1 h/,
+  "a partial ring reports its recorded span without claiming that the board restarted");
+assert.doesNotMatch(html, /Neustart/);
 assert.match(html, /vhist-source[^>]*><i><\/i>X10A/);
 assert.match(html, /vhist-source mb[^>]*><i><\/i>HomeHub · Modbus/);
 assert.match(html, /vhist-line mb/);
 assert.match(html, /45\.2 – 45\.6 °C/,
   "both sources share one vertical scale, including the Modbus-only maximum");
+
+// A derived curve keeps the UNION of its input rasters. Before this contract, taking the shortest
+// input collapsed an 11-hour chart to 1 or 8 hours after one register appeared/reset later.
+S.hist.set("leaving_water", { at: Date.now(), gen: 1, dt: 300, unit: "°C", t0: null, b0: 100,
+  held: [], v: [400, 410, 420] });
+S.hist.set("return_water", { at: Date.now(), gen: 1, dt: 300, unit: "°C", t0: null, b0: 101,
+  held: [], v: [350, 360] });
+await h.ensureDerived("dt");
+assert.equal(S.hist.get("dt").b0, 100);
+assert.deepEqual(Array.from(S.hist.get("dt").v), [null, 60, 60],
+  "the earlier bucket remains a gap instead of being cut off with the shorter input");
 
 // A successful HomeHub poll proves transport freshness, not when the controller last refreshed its
 // outdoor-temperature register. Keep that qualification in the graph popup: the chart must remain
