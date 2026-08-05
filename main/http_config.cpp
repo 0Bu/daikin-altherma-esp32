@@ -1,10 +1,9 @@
 // POST config routes: /set_wifi, /set_mqtt, /test_ref_temp, /set_ref_temp, /set_weather,
-// /set_dynamic_lwt, /set_syslog, /set_ntp, /set_hp,
+// /set_syslog, /set_ntp, /set_hp,
 // /set_board, /set_env3, /set_ota, /set_lang, /discover_homehub, /detect. Parse JSON, validate, then apply:
 // WiFi/MQTT/syslog/NTP/board persist to NVS + reboot; the reference mapping is first tested without
-// persistence, then its proof-gated save applies live; /set_dynamic_lwt persists OFF/SHADOW and is
-// evaluated on the next mqtt-task cycle; /set_hp persists the RX/TX pin cache (no reboot) but keeps
-// the model session-only;
+// persistence, then its proof-gated save applies live; /set_hp persists the RX/TX pin cache (no
+// reboot) but keeps the model session-only;
 // /set_ota and /set_lang persist their UI settings and apply them live; /detect re-runs detection in
 // RAM.
 #include "http_handlers.hpp"
@@ -550,38 +549,6 @@ static esp_err_t set_ref_temp(httpd_req_t* req) {
 // The controller's only setting. The accepted vocabulary intentionally ends at SHADOW: there is no
 // ACTIVE value to typo into or reach through a raw HTTP request, and this handler has no actuator
 // dependency. Applied live by the next mqtt-task evaluation; no reboot.
-static esp_err_t set_dynamic_lwt(httpd_req_t* req) {
-    char body[128];
-    if (http_read_body(req, body, sizeof(body)) < 0)
-        return send_err(req, "400 Bad Request", "bad body");
-    cJSON* j = cJSON_Parse(body);
-    if (!j) return send_err(req, "400 Bad Request", "bad json");
-    const std::string mode = js(j, "mode");
-    cJSON_Delete(j);
-
-    logic::DynamicLwtMode want = logic::DynamicLwtMode::Off;
-    if (!logic::dynamic_lwt_mode_parse(mode.c_str(), want))
-        return send_err(req, "400 Bad Request", "mode must be off or shadow");
-
-    Config c = config();
-    if (want == logic::DynamicLwtMode::Shadow && !dynamic_lwt_shadow_ready(c)) {
-        return send_err(req, "409 Conflict",
-                        "shadow requires configured MQTT room input and HomeHub");
-    }
-    if (c.dynamic_lwt_mode == want)
-        return http_send_json(req, "{\"ok\":true,\"saved\":false,\"reboot\":false}");
-    c.dynamic_lwt_mode = want;
-    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
-    // Apply the consent boundary now, not after either worker's normal sleep interval. OFF removes
-    // the saved room subscription and pauses Open-Meteo; SHADOW starts both on their next cycle.
-    mqtt_reference_reconfigure();
-    weather_forecast_reconfigure();
-    if (want == logic::DynamicLwtMode::Off) mqtt_request_weather_cleanup();
-    diag_printf("dynamic_lwt: mode set to %s (shadow never calls actuator)\n",
-                logic::dynamic_lwt_mode_name(want));
-    return http_send_json(req, "{\"ok\":true,\"saved\":true,\"reboot\":false}");
-}
-
 static esp_err_t set_hp(httpd_req_t* req) {
     char body[2048];
     if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
@@ -958,7 +925,6 @@ void http_register_config(httpd_handle_t s, HttpSurface surface) {
     http_register_on(s, surface, "/set_syslog", HTTP_POST, set_syslog);
     http_register_on(s, surface, "/set_ntp", HTTP_POST, set_ntp);
     http_register_on(s, surface, "/set_weather", HTTP_POST, set_weather);
-    http_register_on(s, surface, "/set_dynamic_lwt", HTTP_POST, set_dynamic_lwt);
     http_register_on(s, surface, "/set_hp", HTTP_POST, set_hp);
     http_register_on(s, surface, "/discover_homehub", HTTP_POST, discover_homehub_now);
     http_register_on(s, surface, "/set_board", HTTP_POST, set_board);

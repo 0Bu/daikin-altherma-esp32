@@ -225,7 +225,7 @@ User credentials + the X10A link cache are persisted; the model is re-detected o
 
 | NVS key | Meaning |
 |---------|---------|
-| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + rollback flags, MQTT, syslog, SNTP, from v2 board hardware, v3 OTA channel, v4 UI language, v5 HomeHub, v7/v8 reference-temperature mapping/freshness, v9 (retired actuation bit, now ignored), v10 Open-Meteo location, v11 ENV III wiring, v12 explicit board-preset identity, v13 reference target/readiness mappings and **v14 default-OFF dynamic-LWT mode**. Preset id and board pins are one atomic statement. A non-empty `mb_host` polls; empty disables the stack. Older blobs remain readable; pre-v14 blobs always migrate dynamic LWT to OFF, and the v9 actuation-consent bit is discarded on decode because the capability it gated no longer exists. |
+| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + rollback flags, MQTT, syslog, SNTP, from v2 board hardware, v3 OTA channel, v4 UI language, v5 HomeHub, v7/v8 reference-temperature mapping/freshness, v9 (retired actuation bit, now ignored), v10 Open-Meteo location, v11 ENV III wiring, v12 explicit board-preset identity, v13 reference target/readiness mappings and **v14 (retired dynamic-LWT mode byte, now written zero and ignored)**. Preset id and board pins are one atomic statement. A non-empty `mb_host` polls; empty disables the stack. Older blobs remain readable; the v9 actuation-consent bit and the v14 mode byte are both discarded on decode because what they gated no longer exists — the heating-curve diagnosis derives its arming from the room source and the forecast location instead of storing a mode. |
 | *(legacy per-key)* | `wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback`/`wifi_rolledbk`/`mqtt_*`/`syslog_*`/`ntp_server` — the pre-blob layout, still **read** as a fallback when `cfg` is absent (fresh device / OTA from an older build); superseded on the next save. |
 | `rx_pin` / `tx_pin` / `proto` | X10A link cache (physical wiring + framing) — kept as separate self-healing keys, tried first by the sweep, re-saved on change, re-validated on load. |
 | `board_set` | **Legacy migration input only.** Pre-v12 builds stored this bit without a concrete preset id. On upgrade, `true` plus an exact historical field match is migrated to the same board the old UI displayed; untouched defaults (`false`) remain unidentified. New saves store `board_user_set` and the stable preset id atomically in `cfg`. |
@@ -437,12 +437,11 @@ POST /set_ref_temp                 # the exact mapping above + test_proof → pe
                                    #   non-empty topic requires a proof issued for that same topic/path/
                                    #   gate/age tuple; an empty topic is the explicit Disable operation and
                                    #   needs no readable value or proof.
-POST /set_dynamic_lwt              # { mode:"off"|"shadow" } → persist + apply live, no reboot.
-                                   #   `active` is not an accepted value. SHADOW additionally requires
-                                   #   the MQTT room source (topic, target and source-time paths) and
-                                   #   HomeHub to be configured. Its proposal is a MEASUREMENT: no
-                                   #   actuator exists. Default and every
-                                   #   pre-v14 migration are OFF.
+                                   #   (There is no POST /set_dynamic_lwt. The heating-curve diagnosis
+                                   #   arms itself while the MQTT room source above and a forecast
+                                   #   location below are both configured, so there is no mode to set,
+                                   #   store or migrate. Its proposal is a MEASUREMENT: no actuator
+                                   #   exists.)
 POST /set_weather                  # { latitude, longitude } as strict decimal strings → persist +
                                    #   wake the firmware weather task. Both empty disables weather
                                    #   traffic; otherwise both are required. Open-Meteo HTTPS/JSON

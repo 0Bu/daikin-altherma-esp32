@@ -108,18 +108,21 @@ http_status.cpp     → GET / (web UI), /status, /values, /history, /models, /di
                       POST /crash/dismiss. http_append_status_json() runs on the httpd task ALONE —
                       see "Push vs. poll" below for why that sentence is load-bearing
 http_config.cpp     → POST /set_wifi, /set_mqtt, /test_ref_temp, /set_ref_temp, /set_weather,
-                      /set_dynamic_lwt, /set_syslog,
+                      /set_syslog,
                       /set_ntp, /set_hp, /discover_homehub, /set_board, /set_env3, /set_ota, /set_lang,
-                      /detect — all FIFTEEN, which http_server.cpp's cfg.max_uri_handlers is sized
-                      exactly to. /test_ref_temp proves that an exact MQTT mapping yields an accepted
+                      /detect — all FOURTEEN, which http_server.cpp's cfg.max_uri_handlers is sized
+                      exactly to (and which must be LOWERED in the same commit that retires a route,
+                      as retiring /set_dynamic_lwt did: a count left above the real one is a comment
+                      that has stopped describing the code depending on it). /test_ref_temp proves that an exact MQTT mapping yields an accepted
                       value without saving it; /set_ref_temp requires that proof and applies live.
                       /set_weather validates the DWD path component, persists it and only wakes the
                       weather task; no DNS/TLS request runs on the httpd worker.
-                      /set_dynamic_lwt is the CONSENT boundary rather than one feature's switch:
-                      besides the controller mode it calls mqtt_reference_reconfigure() and
-                      weather_forecast_reconfigure(), and on OFF requests the retained weather
-                      topic's cleanup — so the room subscription and the Open-Meteo traffic start
-                      and stop with the mode, at the request rather than an interval later.
+                      CONSENT rides on the SAVE of each source, not on a switch in front of them:
+                      /set_ref_temp starts and stops the room subscription and /set_weather the
+                      Open-Meteo traffic, the latter requesting the retained weather topic's cleanup
+                      once the disabled location is persisted. There is no /set_dynamic_lwt — the
+                      heating-curve diagnosis arms itself from those two saves, so no stored mode can
+                      disagree with the configuration a reader can see.
                       /set_board atomically owns board identity/peripherals plus the integrated ENV
                       III fields. Its shared preflight proof-gates an enable before the one NVS
                       write: a short-lived bus requires one CRC-valid SHT30 sample and the QMP6988
@@ -626,16 +629,22 @@ host-testable core is unusually large and valuable, because the risky parts are 
   "last updated N ago" entity, rendering `null` (unsynced) as its normal "unknown" state rather than
   a fabricated epoch date.
 - `logic/dynamic_lwt_controller.hpp` — the deterministic, allocation- and I/O-free P controller.
-  It accepts only OFF/SHADOW, uses gain 1, a ±0.25 K deadband, whole-kelvin quantization, a ±2 K
-  envelope, a 1 K/decision slew limit and a 30-minute cadence. Missing room/X10A/HomeHub/plant-gate
-  evidence fails closed; an inactive plant holds; unavailable forecast degrades while contributing
-  exactly zero. Its output is a MEASUREMENT, not a command: no actuator exists to carry it to the
-  plant, and the season aggregate of these proposals is the heating-curve verdict of #294. OFF is
-  also the input-consent boundary:
-  the saved room mapping remains editable but unsubscribed, Open-Meteo keeps its saved coordinates
-  without making a request, captured runtime inputs are cleared, and no proposal is evaluated.
-  The Firmware-card switch applies OFF/SHADOW live; SHADOW is accepted only when MQTT, a complete
-  room mapping and HomeHub are configured.
+  It uses gain 1, a ±0.25 K deadband, whole-kelvin quantization, a ±2 K envelope, a 1 K/decision
+  slew limit and a 30-minute cadence. Missing room/X10A/HomeHub/plant-gate evidence fails closed;
+  an inactive plant holds; unavailable forecast degrades while contributing exactly zero. Its output
+  is a MEASUREMENT, not a command: no actuator exists to carry it to the plant, and the season
+  aggregate of these proposals is the heating-curve verdict of #294.
+  ARMING IS DERIVED, never switched or stored: `dynamic_lwt_armed()` (config_model.hpp) answers it
+  from the two sources the diagnosis reads — the MQTT room mapping and a forecast location — so
+  deleting either disarms it on the next cycle and nothing persisted can disagree with the
+  configuration. There is no mode enum, no blob field and no route; v14's byte is written zero and
+  ignored. The switch that used to gate this is gone because it could not be reached: it answered
+  409 until those sources existed, while the only editors for them lived inside the card it revealed.
+  THE GATE ORDER inside `evaluate()` is itself load-bearing — the plant gate is asked BEFORE the room
+  source. Both fail together outside the heating season (a room thermostat switched off for the
+  summer is not control-eligible), and answering "room unavailable" made a plant resting exactly as
+  it should read as a standing FAILSAFE: the reference installation stood at failsafes=2734, holds=0
+  in August with nothing wrong. HOLD is the whole truth about an idle plant whatever the room says.
 - `logic/crashinfo.hpp` — reset-reason slug + fault classification, and the `last_crash` / MQTT crash
   payload + paste-friendly text bundle (incl. the backtrace clamp) built from a captured summary. The
   retained MQTT crash payload (`build_crash_mqtt_payload`) is **crash-only**: the JSON when the boot is

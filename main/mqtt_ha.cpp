@@ -597,7 +597,7 @@ static void publish_modbus_state() {
 static void service_requested_topic_cleanup(const Config& c) {
     if (!s_connected) return;
     if (s_weather_cleanup_requested.exchange(false)) {
-        if (!c.weather_enabled || c.dynamic_lwt_mode != logic::DynamicLwtMode::Shadow) {
+        if (!c.weather_enabled) {
             mqtt_publish(s_weather, "", 0, 1, 1);
             s_disabled_weather_cleaned = true;
             diag_printf("mqtt: inactive weather forecast topic deleted\n");
@@ -739,9 +739,10 @@ static void publish_crash() {
 }
 
 // Evaluate the controller every mqtt_task cycle, including while publication is paused or the broker is down.
-// Tying evaluation to publish_heartbeat() would leave the last SHADOW verdict looking healthy during
-// exactly the X10A/MQTT failures that must move it to FAILSAFE. The task still exists because SHADOW
-// can only be enabled for a configured MQTT room source (enforced by /set_dynamic_lwt).
+// Tying evaluation to publish_heartbeat() would leave the last verdict looking healthy during
+// exactly the X10A/MQTT failures that must move it to FAILSAFE. Arming is DERIVED here rather than
+// read from a stored mode: dynamic_lwt_armed() answers it from the same configuration the editor
+// shows, so a deleted source disarms the diagnosis on the very next cycle.
 static logic::DynamicLwtSnapshot evaluate_dynamic_lwt(const Config& cfg, const HpStats& hp) {
     const ReferenceTemperatureStatus rt = reference_temperature_status();
     const uint64_t now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
@@ -776,7 +777,7 @@ static logic::DynamicLwtSnapshot evaluate_dynamic_lwt(const Config& cfg, const H
     if (!wx.available) wx_freshness.fresh = false;
 
     logic::DynamicLwtInputs in;
-    in.mode = cfg.dynamic_lwt_mode;
+    in.armed = dynamic_lwt_armed(cfg);
     in.room_control_eligible = room.control_eligible;
     in.room_error_k = room.room_error_k;
     in.x10a_connected = hp.connected;
@@ -895,7 +896,7 @@ static void publish_heartbeat() {
     // The controller is evaluated every mqtt_task cycle, not on the publication cadence. This copy
     // therefore already reflects paused/disconnected fail-closed transitions.
     const logic::DynamicLwtSnapshot controller = dynamic_lwt_status();
-    f.lwt_controller_mode = static_cast<uint8_t>(controller.mode);
+    f.lwt_controller_armed = controller.armed;
     f.lwt_controller_state = static_cast<uint8_t>(controller.state);
     f.lwt_controller_reason = static_cast<uint8_t>(controller.reason);
     f.lwt_controller_decision_eligible = controller.decision_eligible;
@@ -1115,9 +1116,11 @@ static void set_reference_error(const char* error, ReferenceRoomReason reason, b
 // Apply topic edits on the existing MQTT client. A binding change retires the old raw value: a
 // reading extracted by the previous path must never appear under the new sensor identity.
 static void service_reference_subscription(const Config& c) {
+    // Saving a room topic IS the consent to subscribe to it — there is no second switch in front of
+    // this any more. A configured source is therefore always collected, which is also what makes it
+    // observable in the editor before the forecast half of the diagnosis exists.
     const bool configured = !c.ref_temp_topic.empty();
-    const bool capture_enabled = configured &&
-        c.dynamic_lwt_mode == logic::DynamicLwtMode::Shadow;
+    const bool capture_enabled = configured;
     if (c.ref_temp_topic != s_ref_binding_topic || c.ref_temp_path != s_ref_binding_path ||
         c.ref_temp_setpoint_path != s_ref_binding_setpoint_path ||
         c.ref_temp_time_path != s_ref_binding_time_path ||
@@ -1156,10 +1159,9 @@ static void service_reference_subscription(const Config& c) {
         s_ref_status.configured = configured;
     }
 
-    // OFF is the collection boundary, not just an actuator boundary. Keep the saved mapping visible
-    // to /status and the editor, but remove its live subscription and captured runtime values. The
-    // candidate Test path below remains independent so a source can be proved before the operator
-    // enables SHADOW.
+    // Deleting the topic is the collection boundary. Drop the live subscription and the captured
+    // runtime values with it. The candidate Test path below stays independent of this, so a mapping
+    // can still be proved before it is saved.
     if (!capture_enabled) {
         s_ref_reconfigure.exchange(false);
         if (!s_ref_subscribed_topic.empty() && s_connected)
@@ -1395,7 +1397,6 @@ static void service_reference_frames(const Config& c) {
     while (xQueueReceive(s_ref_queue, &s_ref_task_frame, 0) == pdTRUE) {
         const ReferenceMqttFrame& frame = s_ref_task_frame;
         service_reference_probe_frame(frame);
-        if (c.dynamic_lwt_mode != logic::DynamicLwtMode::Shadow) continue;
         if (c.ref_temp_topic.empty() || frame.topic != c.ref_temp_topic) continue;
         {
             Lock lk(s_mtx);
@@ -1677,12 +1678,10 @@ static void mqtt_task(void*) {
                     s_modbus_disabled_cleaned = true;
                 }
 
-                // Weather remains an independent firmware input. MQTT archives it only while both
-                // its saved source and the explicit SHADOW collection gate are enabled; OFF removes
-                // the retained predecessor without publishing a synthetic disabled document. No HA
-                // entities are created.
-                publish_weather_state(ref_config.weather_enabled &&
-                                      ref_config.dynamic_lwt_mode == logic::DynamicLwtMode::Shadow);
+                // Weather remains an independent firmware input. MQTT archives it while its saved
+                // location exists; deleting the location removes the retained predecessor without
+                // publishing a synthetic disabled document. No HA entities are created.
+                publish_weather_state(ref_config.weather_enabled);
 
                 const bool env3_enabled = ref_config.env3_enabled && env3_board_supported(ref_config);
                 if (env3_enabled) {

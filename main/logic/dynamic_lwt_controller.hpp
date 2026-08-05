@@ -12,38 +12,13 @@
 
 namespace daik::logic {
 
-enum class DynamicLwtMode : uint8_t {
-    Off    = 0,
-    Shadow = 1,
-};
-
-inline constexpr bool dynamic_lwt_mode_valid(DynamicLwtMode mode) {
-    return mode == DynamicLwtMode::Off || mode == DynamicLwtMode::Shadow;
-}
-
-inline constexpr DynamicLwtMode dynamic_lwt_mode_from_int(int value) {
-    return value == static_cast<int>(DynamicLwtMode::Shadow) ? DynamicLwtMode::Shadow
-                                                             : DynamicLwtMode::Off;
-}
-
-inline const char* dynamic_lwt_mode_name(DynamicLwtMode mode) {
-    return mode == DynamicLwtMode::Shadow ? "shadow" : "off";
-}
-
-inline bool dynamic_lwt_mode_parse(const char* value, DynamicLwtMode& out) {
-    if (!value) return false;
-    if (value[0] == 'o' && value[1] == 'f' && value[2] == 'f' && value[3] == '\0') {
-        out = DynamicLwtMode::Off;
-        return true;
-    }
-    if (value[0] == 's' && value[1] == 'h' && value[2] == 'a' && value[3] == 'd' &&
-        value[4] == 'o' && value[5] == 'w' && value[6] == '\0') {
-        out = DynamicLwtMode::Shadow;
-        return true;
-    }
-    return false;  // ACTIVE is intentionally not part of the accepted vocabulary.
-}
-
+// ARMING IS DERIVED, NOT SWITCHED. There is no operator mode here and no persisted mode byte: the
+// diagnosis runs exactly while the two inputs it describes are configured (a room-temperature source
+// and a forecast location), and it stops when either is deleted. The switch that used to sit in
+// front of this was a second statement of a fact the configuration already made, and it could not be
+// reached: the editors for both sources live inside the card the switch revealed, while the switch
+// itself refused to turn on until those same sources were configured. Consent now rides on the SAVE
+// of each source, which is the act that actually hands a broker topic or a coordinate pair out.
 enum class DynamicLwtState : uint8_t {
     Off      = 0,
     Shadow   = 1,
@@ -104,7 +79,7 @@ inline constexpr int16_t DYNAMIC_LWT_MAX_STEP_K          = 1;
 inline constexpr int64_t DYNAMIC_LWT_DECISION_CADENCE_MS = 30 * 60 * 1000;
 
 struct DynamicLwtInputs {
-    DynamicLwtMode mode = DynamicLwtMode::Off;
+    bool armed = false;   // both sources configured — see dynamic_lwt_armed() in config_model.hpp
     bool room_control_eligible = false;
     double room_error_k = 0.0;
     bool x10a_connected = false;
@@ -120,7 +95,7 @@ struct DynamicLwtInputs {
 };
 
 struct DynamicLwtSnapshot {
-    DynamicLwtMode mode = DynamicLwtMode::Off;
+    bool armed = false;
     DynamicLwtState state = DynamicLwtState::Off;
     DynamicLwtReason reason = DynamicLwtReason::Disabled;
 
@@ -165,7 +140,7 @@ public:
     const DynamicLwtSnapshot& snapshot() const { return s_; }
 
     const DynamicLwtSnapshot& evaluate(const DynamicLwtInputs& in) {
-        s_.mode = dynamic_lwt_mode_valid(in.mode) ? in.mode : DynamicLwtMode::Off;
+        s_.armed = in.armed;
         s_.proposal_produced = false;
         s_.decision_eligible = false;
         s_.has_terms = false;
@@ -182,9 +157,9 @@ public:
         s_.room_age_known = in.room_age_known;
         s_.room_age_s = in.room_age_s;
 
-        if (s_.mode == DynamicLwtMode::Off) {
-            // OFF is a real disarm, not merely a display state. Re-enabling SHADOW starts from no
-            // remembered proposal and may evaluate immediately.
+        if (!in.armed) {
+            // Deleting a source is a real disarm, not merely a display state. Re-configuring starts
+            // from no remembered proposal and may evaluate immediately.
             reset_proposal_memory();
             s_.last_decision_ms = -1;
             last_now_ms_ = -1;
@@ -196,9 +171,15 @@ public:
         if (in.now_ms < 0 || (last_now_ms_ >= 0 && in.now_ms < last_now_ms_))
             return failsafe(DynamicLwtReason::ClockInvalid);
         last_now_ms_ = in.now_ms;
-        if (!in.room_control_eligible || !std::isfinite(in.room_error_k))
-            return failsafe(DynamicLwtReason::RoomUnavailable);
-        if (!in.x10a_connected) return failsafe(DynamicLwtReason::X10aUnavailable);
+        // THE PLANT GATE IS ASKED FIRST, BEFORE THE EVIDENCE CHECKS BELOW IT. A plant that is not
+        // heating carries no verdict to record whatever the room source says, so HOLD is the whole
+        // truth about it — and outside the heating season that is the state for months. Asked in the
+        // other order (room first, as through v1.0.0-dev.331) a normal August reported FAILSAFE
+        // "room input unavailable", because a room thermostat switched off for the summer is not
+        // control-eligible: the reference installation stood at failsafes=2734, holds=0 with nothing
+        // whatever wrong with it, and the UI painted its seasonal rest as a fault. The counters are
+        // part of the defect, not just the wording — a fault tally that only ever counts summer can
+        // never distinguish a real one.
         if (!in.homehub_connected) return failsafe(DynamicLwtReason::HomeHubUnavailable);
         if (!in.plant_gate_known) return failsafe(DynamicLwtReason::PlantGateUnknown);
         if (!in.plant_gate_active) {
@@ -210,6 +191,9 @@ public:
             s_.holds++;
             return s_;
         }
+        if (!in.room_control_eligible || !std::isfinite(in.room_error_k))
+            return failsafe(DynamicLwtReason::RoomUnavailable);
+        if (!in.x10a_connected) return failsafe(DynamicLwtReason::X10aUnavailable);
 
         s_.decision_eligible = true;
         s_.room_error_k = in.room_error_k;

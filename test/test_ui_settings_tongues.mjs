@@ -67,13 +67,11 @@ const labels = {
   "wx.status.stale": "Veraltet",
   "wx.status.unavailable": "Nicht verfügbar",
   "wx.status.waiting": "Wartet",
-  "wx.status.inactive": "Aus",
   "wx.detail.fresh": "Die Prognose wurde erfolgreich abgerufen.",
   "wx.detail.fetching": "Der ESP32 ruft gerade neue Prognosedaten ab.",
   "wx.detail.stale": "Der letzte erfolgreiche Abruf ist zu alt; die Werte werden nur zur Diagnose angezeigt.",
   "wx.detail.unavailable": "Der letzte Abruf ist fehlgeschlagen; ein älterer Wert wird, falls vorhanden, nur zur Diagnose angezeigt.",
   "wx.detail.waiting": "Es wurde noch keine Prognose empfangen.",
-  "wx.detail.inactive": "Prognoseerfassung ausgeschaltet.",
   "wx.detail.temperature_label": "Temperatur:",
   "wx.detail.temperature": "{0} °C ist die mittlere prognostizierte Außenlufttemperatur für die nächsten zwei vollständigen Stunden.",
   "wx.detail.solar_label": "Globalstrahlung:",
@@ -112,8 +110,14 @@ const labels = {
   "lang.auto": "Browser",
   "lang.de": "Deutsch",
   "lang.en": "English",
-  "dyn.enable": "Heizkurven-Diagnose",
-  "dyn.enable_help": "Standardmäßig aus.",
+  "dyn.card_help": "Diagnose-Erklärung",
+  "dyn.state_help_setup": "Einrichtungs-Erklärung",
+  "dyn.state_setup_both": "Noch nicht eingerichtet",
+  "dyn.state_setup_room": "Raumquelle einrichten",
+  "dyn.state_setup_weather": "Standort einrichten",
+  "dyn.room_off": "Raumthermostat ausgeschaltet",
+  "dyn.state_help_room": "Raumblock-Erklärung",
+  "ref.detail.eligibility_label": "Verwertbar:",
   "aria.ota": "Nach Firmware-Updates suchen",
   "ota.title_check": "Nach Updates suchen",
 };
@@ -134,13 +138,13 @@ S.status = {
   mqtt: { configured: true },
   reference_temperature: {
     configured: true, name: "Example rm", has_value: true, temperature_c: 25.1,
-    has_setpoint: true, setpoint_c: 22.0, age_s: 17, fresh: true,
+    has_setpoint: true, setpoint_c: 22.0, age_s: 17, fresh: true, control_eligible: true,
   },
   weather_forecast: {
     configured: true, has_value: true, outdoor_mean_2h_c: 22.6,
     solar_energy_2h_wh_m2: 0, fresh: true,
   },
-  dynamic_lwt: { mode: "shadow", state: "hold", reason: "plant_inactive" },
+  dynamic_lwt: { armed: true, state: "hold", reason: "plant_inactive" },
   env3: {
     supported: true, enabled: true, fresh: true,
     temperature_c: 20.2, humidity_pct: 46, pressure_hpa: 1009,
@@ -155,6 +159,8 @@ assert.equal((html.match(/class="vdesc-body settings-info-tongue"/g) || []).leng
 // not be styled as a fault, or the row becomes noise exactly when it is the only thing to read.
 assert.match(html, /Wartet auf Heizbetrieb/,
   "an idle plant must be named, not reported as an error");
+assert.ok(html.indexOf("Diagnose-Erklärung") < html.indexOf("Anlage heizt nicht"),
+  "the state tongue must say what the diagnosis IS before what it is doing right now");
 assert.doesNotMatch(html, /Wartet auf Heizbetrieb<\/span>[\s\S]{0,40}(warn|err)/,
   "the idle-plant state must not carry a warning class");
 assert.doesNotMatch(html, /Betriebsart|Sicherheit & Ausgabe|Nur lesend/,
@@ -252,49 +258,72 @@ assert.match(html, /id="dynamic-weather-detail"[^]*<span class="vdesc-n">Status:
 assert.doesNotMatch(html, /<span class="vdesc-n">Temperatur:<\/span>|<span class="vdesc-n">Sonnenenergie:<\/span>/,
   "an unavailable forecast without a sample must not invent value explanations");
 
-S.status.dynamic_lwt = { mode: "off" };
+// UNCONFIGURED IS STILL A RENDERED CARD. This is where both of its sources are configured, so
+// hiding it until they were configured left nowhere to configure them — and the switch that used
+// to reveal it refused to turn on until they existed.
+S.status.dynamic_lwt = { armed: false, state: "off", reason: "disabled" };
+S.status.reference_temperature = {};
+S.status.weather_forecast = {};
+html = sandbox.__renderDynamic();
+assert.notEqual(html, "", "the card must render even with nothing configured yet");
+assert.match(html, /Noch nicht eingerichtet/, "an unset-up diagnosis must say so plainly");
+assert.doesNotMatch(html, /Noch nicht eingerichtet<\/span>[\s\S]{0,40}(warn|err)/,
+  "a setup step must not be styled as a fault");
+assert.match(html, /Einrichtungs-Erklärung/, "it must explain what to configure");
+S.status.reference_temperature = { configured: true };
+html = sandbox.__renderDynamic();
+assert.match(html, /Standort einrichten/,
+  "with only the room source configured, the MISSING half must be the one named");
+
+// A ROOM SOURCE THAT IS CURRENT BUT UNUSABLE. Through v1.0.0-dev.331 this read "Raumeingang fehlt"
+// while the source itself sat green and current two rows below — the state row and the source row
+// disagreeing about the same source. Both now state the source's own reason.
+S.status.dynamic_lwt = { armed: true, state: "failsafe", reason: "room_unavailable" };
 S.status.reference_temperature = {
   configured: true, name: "Example rm", has_value: true, temperature_c: 25.1,
   has_setpoint: true, setpoint_c: 22, age_s: 17, fresh: true,
+  control_eligible: false, reason: "disabled",
 };
 S.status.weather_forecast = {
   configured: true, has_value: true, outdoor_mean_2h_c: 22.6,
   solar_energy_2h_wh_m2: 514, fresh: true,
 };
 html = sandbox.__renderDynamic();
-assert.equal(html, "", "OFF must hide the complete experimental controller card");
+assert.doesNotMatch(html, /Raumeingang fehlt/,
+  "a present, current reading must never be reported as a missing input");
+assert.match(html, /Raumthermostat ausgeschaltet/,
+  "the blocked state must name the room source's own reason");
+const blockedRoomButton = html.match(/<button[^>]*data-act="ref-temp"[\s\S]*?<\/button>/)?.[0] || "";
+assert.match(blockedRoomButton, /class="[^"]*\bwarn\b/,
+  "the source that is blocking the diagnosis must not be the one row rendered as OK");
+assert.match(html, /<span class="vdesc-n">Verwertbar:<\/span> Raumthermostat ausgeschaltet/,
+  "the source tongue must give the same reason as the state row");
 
 // Protocol and Firmware use the same info-tongue contract while keeping their independent controls.
 S.status = {
   version: "1.0.0-dev.317", pins_avail: [1, 2, 4, 5],
   hp: { connected: true, proto: "I", rx: 2, tx: 1, last_ok_s: 0 },
-  ota: { channel: "dev" }, ui: { lang: "auto" }, dynamic_lwt: { mode: "off" },
+  ota: { channel: "dev" }, ui: { lang: "auto" }, dynamic_lwt: { armed: false, state: "off" },
   board: {}, env3: {}, sys: {}, mqtt: {}, reference_temperature: {}, weather_forecast: {},
 };
 S.descOpen.clear();
 html = sandbox.__renderEsp32();
 for (const key of ["protocol:link", "protocol:framing", "protocol:rx", "protocol:tx",
-                   "firmware:version", "firmware:channel", "firmware:language", "firmware:dynamic-lwt"]) {
+                   "firmware:version", "firmware:channel", "firmware:language"]) {
   assert.match(html, new RegExp(`data-desc="${key}"`), `${key} must expose an information tongue`);
 }
 for (const explanation of ["Verbindungs-Erklärung", "Protokoll-Erklärung", "RX-Erklärung", "TX-Erklärung",
-                           "Firmware-Erklärung", "Kanal-Erklärung", "Sprach-Erklärung", "Standardmäßig aus."])
+                           "Firmware-Erklärung", "Kanal-Erklärung", "Sprach-Erklärung"])
   assert.ok(html.includes(explanation), `Protocol/Firmware explanation must include: ${explanation}`);
 assert.match(html, /id="e32Chan"[^]*<option value="dev" selected>Development<\/option>/,
   "the update selector must survive the split explanation row");
 assert.match(html, /id="e32Lang"[^]*<option value="auto" selected>Browser<\/option>/,
   "the language selector must survive the split explanation row");
-assert.match(html, /id="e32DynamicLwt" role="switch" aria-label="Heizkurven-Diagnose"/,
-  "the firmware card must contain an unchecked default-OFF switch");
-assert.doesNotMatch(html, /<div class="section-label">Dynamische Vorlaufregelung/,
-  "OFF must leave only the Firmware switch and hide the experimental card");
+assert.doesNotMatch(html, /e32DynamicLwt|role="switch"/,
+  "the Firmware card must carry no heating-curve switch: arming is derived from the sources");
 assert.ok(html.indexOf("card.fw_title") < 0, "translated card titles must be resolved");
-S.status.dynamic_lwt = { mode: "shadow" };
-html = sandbox.__renderEsp32();
-assert.match(html, /id="e32DynamicLwt" role="switch" checked/,
-  "SHADOW must render the Firmware switch as enabled");
 assert.ok(html.indexOf("<div class=\"section-label\">Firmware") <
           html.indexOf("<div class=\"section-label\">Heizkurven-Diagnose"),
-  "SHADOW must reveal the diagnosis card after Firmware at the bottom");
+  "the diagnosis card must follow Firmware at the bottom, configured or not");
 
 console.log("settings source tongue use-cases: ok");

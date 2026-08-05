@@ -112,10 +112,6 @@ void config_load() {
             c.weather_latitude_e6 = b.weather_latitude_e6;
             c.weather_longitude_e6 = b.weather_longitude_e6;
         }
-        if (b.has_dynamic_lwt) {
-            // Unknown future/corrupt values fail closed to OFF; ACTIVE is not representable.
-            c.dynamic_lwt_mode = logic::dynamic_lwt_mode_from_int(b.dynamic_lwt_mode);
-        }
         c.syslog_host = b.syslog_host; c.syslog_port = b.syslog_port; c.ntp_server = b.ntp_server;
         // has_board is false for a blob written before the board block existed (v1). Those fields
         // were compile-time then, so "absent" must read as the Kconfig default, NOT as disabled —
@@ -168,9 +164,6 @@ void config_load() {
         c.syslog_port = nvs_get_i32("syslog_port", CONFIG_DAIKIN_SYSLOG_PORT);
         c.ntp_server = nvs_get_str("ntp_server", CONFIG_DAIKIN_NTP_SERVER);
         seed_board_defaults(c);   // the legacy layout never held these — Kconfig is all there is
-    }
-    if (dynamic_lwt_disarm_if_unready(c)) {
-        diag_printf("config: dynamic LWT SHADOW lost a required input — disarmed to OFF\n");
     }
     // Before blob v12 the separate `board_set` key recorded only that the hardware form had been
     // submitted. Recover the same preset name that old UI derived from the stored fields, but never
@@ -319,14 +312,10 @@ bool config_save(const Config& requested, bool require_link) {
     // that could not complete). Because this blob is written HERE (the httpd task) alone, the poll
     // task (config_save_link) can never revert a credential change — the field-ownership guarantee is
     // kept without the narrow per-key writes.
-    // A service can be disabled through its own route after SHADOW was selected. Canonicalize every
-    // save in one place so MQTT/room/HomeHub removal cannot persist a mode whose evaluator no longer
-    // exists. The caller's requested object is left untouched; only the atomic persisted/live copy
-    // is disarmed.
+    // No dynamic-LWT canonicalization here any more: the diagnosis derives its arming from the room
+    // source and the forecast location on every evaluation (config_model.hpp's dynamic_lwt_armed),
+    // so deleting either one disarms it by definition and there is no stored mode left to reconcile.
     Config c = requested;
-    if (dynamic_lwt_disarm_if_unready(c)) {
-        diag_printf("config: dynamic LWT dependency removed — disarmed to OFF\n");
-    }
     ConfigBlob b;
     b.wifi_ssid = c.wifi_ssid;                 b.wifi_pass = c.wifi_pass;
     b.wifi_ssid_backup = c.wifi_ssid_backup;   b.wifi_pass_backup = c.wifi_pass_backup;
@@ -341,7 +330,6 @@ bool config_save(const Config& requested, bool require_link) {
     b.weather_enabled = c.weather_enabled;
     b.weather_latitude_e6 = c.weather_latitude_e6;
     b.weather_longitude_e6 = c.weather_longitude_e6;
-    b.dynamic_lwt_mode = static_cast<int32_t>(c.dynamic_lwt_mode);
     b.env3_enabled = c.env3_enabled; b.env3_sda = c.env3_sda; b.env3_scl = c.env3_scl;
     b.board_preset_id = static_cast<int32_t>(c.board_preset_id);
     b.board_user_set = c.board_user_set;

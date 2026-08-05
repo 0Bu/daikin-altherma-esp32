@@ -96,7 +96,7 @@ Telegraf/VictoriaMetrics: `room_temperature_valid`, `room_setpoint_valid`,
 `room_reason_code`. The string `room_source_id="living_room"` provides human provenance but is not
 needed as a metric field. `room_error_k` is emitted only when current temperature, target, source
 freshness and every configured eligibility gate pass. These `room_*` fields remain the canonical
-input view; the separate `lwt_controller_*` fields are the controller's SHADOW decision evidence.
+input view; the separate `lwt_controller_*` fields are the controller's decision evidence.
 
 `room_reason_code` is stable across firmware versions: `0` eligible; `1` not configured; `2` no
 value; `3` invalid payload; `4` missing source time; `5` clock unsynced; `6` future timestamp; `7`
@@ -106,8 +106,11 @@ temperature out of range; `12` missing target mapping; `13` missing target; `14`
 slug is available in `/status.reference_temperature.reason`; metric alerts should use the numeric
 code.
 
-The default-OFF shadow controller adds numeric `lwt_controller_*` fields to the same heartbeat for
-Telegraf/VictoriaMetrics. Mode codes are `0` OFF and `1` SHADOW; state codes are `0` off, `1` shadow,
+The write-free shadow controller adds numeric `lwt_controller_*` fields to the same heartbeat for
+Telegraf/VictoriaMetrics. `lwt_controller_armed` is `1` while both of its sources — the MQTT room
+mapping and a forecast location — are configured; it replaced a `lwt_controller_mode` that reported
+a stored operator choice, and any series built on that field must be rebuilt on this one. State
+codes are `0` off, `1` shadow,
 `2` hold, `3` degraded and `4` failsafe. Reason codes are `0` disabled, `1` shadow decision, `2`
 cadence wait, `3` deadband, `4` rate limited, `5` room unavailable, `6` X10A unavailable, `7`
 HomeHub unavailable, `8` plant gate unknown, `9` plant inactive, `10` forecast unavailable and `11`

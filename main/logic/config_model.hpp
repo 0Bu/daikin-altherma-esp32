@@ -51,9 +51,9 @@ struct Config {
     bool        weather_enabled = false;
     int32_t     weather_latitude_e6 = 0;
     int32_t     weather_longitude_e6 = 0;
-    // Only OFF and write-free SHADOW exist. The default is deliberately OFF so an OTA,
-    // migration or reboot never starts making controller decisions without an explicit operator save.
-    logic::DynamicLwtMode dynamic_lwt_mode = logic::DynamicLwtMode::Off;
+    // No dynamic-LWT mode field: the heating-curve diagnosis arms itself from the two sources below
+    // (dynamic_lwt_armed), so there is nothing here to persist, migrate or leave stale. Its retired
+    // blob byte is still written as zero — see config_store.hpp.
     std::string syslog_host;       // "" = Syslog disabled
     int         syslog_port = 514;
     // SNTP server (main/sntp_time.cpp). Unlike syslog_host, "" is not "off" — SNTP has no disabled
@@ -160,19 +160,20 @@ struct Config {
     bool        fp_valid     = false;
 };
 
-// SHADOW is useful only while all three observation paths exist. Keep this predicate beside Config
-// so boot migration and every save share one definition; removing a dependency is an implicit,
-// fail-closed disarm rather than a way to leave a stale SHADOW mode behind without its evaluator.
-inline bool dynamic_lwt_shadow_ready(const Config& c) {
+// WHETHER THE HEATING-CURVE DIAGNOSIS RUNS — derived from the configuration, never switched. It is
+// armed exactly while both of the inputs it describes exist: a decodable MQTT room-temperature
+// source (which needs a broker to arrive over) and a forecast location. Nothing is persisted, so
+// there is no mode to migrate, no stale SHADOW to disarm on boot, and no way for the answer to
+// disagree with the configuration a reader can see. Deleting either source disarms it by the same
+// definition that armed it.
+//
+// The HomeHub is deliberately NOT in here even though the plant gate comes from it. A missing
+// mb_host is a missing PREREQUISITE and belongs in the running state (failsafe homehub_unavailable),
+// where the UI names it and points at the setting; folding it in here would silently hide the whole
+// card from anyone who has not set one up yet, which is how they would find out they need one.
+inline bool dynamic_lwt_armed(const Config& c) {
     return !c.mqtt_uri.empty() && !c.ref_temp_topic.empty() && !c.ref_temp_path.empty() &&
-           !c.ref_temp_setpoint_path.empty() && !c.ref_temp_time_path.empty() && !c.mb_host.empty();
-}
-
-inline bool dynamic_lwt_disarm_if_unready(Config& c) {
-    if (c.dynamic_lwt_mode != logic::DynamicLwtMode::Shadow || dynamic_lwt_shadow_ready(c))
-        return false;
-    c.dynamic_lwt_mode = logic::DynamicLwtMode::Off;
-    return true;
+           !c.ref_temp_setpoint_path.empty() && !c.ref_temp_time_path.empty() && c.weather_enabled;
 }
 
 // ── Field-owned patches (config.cpp applies these to the live config under its mutex) ────────────
@@ -366,10 +367,6 @@ inline bool validate(const Config& c, std::string& reason, int max_gpio = 48,
     // like syslog_host — empty disables the optional HomeHub stack and is valid.
     if (c.mb_port < 1 || c.mb_port > 65535)   { reason = "mb_port out of range"; return false; }
     if (c.mb_unit_id < 1 || c.mb_unit_id > 247) { reason = "mb_unit_id out of range"; return false; }
-    if (!logic::dynamic_lwt_mode_valid(c.dynamic_lwt_mode)) {
-        reason = "dynamic_lwt_mode unknown";
-        return false;
-    }
     return true;
 }
 

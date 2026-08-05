@@ -201,19 +201,9 @@ function firmwareRow(version) {
     `<div class="vdesc-p">${esc(t("card.firmware_help"))}</div>`);
 }
 
-// The one explicit consent gate for the experimental controller. It selects SHADOW, never ACTIVE:
-// the current firmware may collect/validate inputs and calculate a proposal, but cannot write it.
-function dynamicLwtSwitchRow() {
-  const on = S.status?.dynamic_lwt?.mode === "shadow";
-  const toggle = `<label class="settings-toggle" title="${esc(t("dyn.enable_help"))}">` +
-    `<input type="checkbox" id="e32DynamicLwt" role="switch"${on ? " checked" : ""} ` +
-    `aria-label="${esc(t("dyn.enable"))}"><span class="settings-toggle-track" aria-hidden="true"></span></label>`;
-  return settingsInfoRow("firmware:dynamic-lwt", "firmware-dynamic-lwt-detail", t("dyn.enable"), toggle,
-    `<div class="vdesc-p">${esc(t("dyn.enable_help"))}</div>`);
-}
-
 // Settings cards rendered below Connections: THREE permanent ESP32-family cards, followed by the
-// experimental dynamic-LWT project only after its Firmware switch selects SHADOW. The ESP32 cards
+// heating-curve diagnosis card, which is ALWAYS rendered — it is where its two sources are
+// configured, so hiding it until they were configured left no way to configure them. The ESP32 cards
 // were split from what was
 // one, so each answers one question. ESP32 = the board itself (its onboard hardware and its own
 // health — uptime + the two memory curves). Protokoll = the X10A link (whether the bus answers, the
@@ -254,18 +244,19 @@ function esp32CardHtml() {
       t("card.protocol_help")) +
     pinRow(t("card.rxpin"), "e32Rx", hp.rx, hp.tx, "rx", t("card.rxpin_help")) +
     pinRow(t("card.txpin"), "e32Tx", hp.tx, hp.rx, "tx", t("card.txpin_help"));
-  // Firmware — running build, update feed, language and the explicit default-OFF experimental gate.
+  // Firmware — running build, update feed and language. No heating-curve switch: that diagnosis arms
+  // itself from the two sources configured on its own card, so a switch here would have been a
+  // second statement of a fact the configuration already makes — and an unreachable one, since the
+  // editors for those sources live inside the card the switch used to reveal.
   const fwRows =
     firmwareRow(s.version) +
     channelRow(s.ota?.channel === "dev" ? "dev" : "release") +
-    langRow(s.ui?.lang === "de" || s.ui?.lang === "en" ? s.ui.lang : "auto") +
-    dynamicLwtSwitchRow();
+    langRow(s.ui?.lang === "de" || s.ui?.lang === "en" ? s.ui.lang : "auto");
   return vcard("ESP32", esp32Rows) + vcard(t("card.proto_title"), protoRows) +
          vcard(t("card.fw_title"), fwRows) + dynamicControlCardHtml();
 }
 
-// The opt-in Settings home for the dynamic-LWT project. OFF is represented entirely by the explicit
-// Firmware switch above; the card itself appears only in SHADOW. Every main row uses the same split
+// The Settings home for the heating-curve diagnosis. Every main row uses the same split
 // interaction as Board Hardware: the label owns the otherwise empty left area and toggles its
 // explanation tongue; a compact value on the right opens an editor only where one exists. This
 // keeps status/explanation and configuration as two explicit actions on configured and empty rows.
@@ -284,10 +275,9 @@ function dynamicInfoRow(key, label, value, valueCls, bodyHtml, action = "", titl
 // lead-ins, so this permanent Settings panel reads like every opened value/checkup explainer.
 // Old values remain visible when freshness fails because they are useful diagnostic evidence; the
 // status paragraph says explicitly that they are no longer current.
-function weatherSourceDetailHtml(w, outdoor, solar, captureEnabled) {
+function weatherSourceDetailHtml(w, outdoor, solar) {
   let statusKey;
-  if (!captureEnabled) statusKey = "inactive";
-  else if (w.fetching) statusKey = "fetching";
+  if (w.fetching) statusKey = "fetching";
   else if (w.has_value && w.fresh) statusKey = "fresh";
   else if (w.error) statusKey = "unavailable";
   else if (w.has_value) statusKey = "stale";
@@ -295,17 +285,38 @@ function weatherSourceDetailHtml(w, outdoor, solar, captureEnabled) {
 
   let html = descNoteHtml(t("wx.detail.status"),
     `${t(`wx.status.${statusKey}`)} — ${t(`wx.detail.${statusKey}`)}`);
-  if (captureEnabled && w.has_value) {
+  if (w.has_value) {
     html += descNoteHtml(t("wx.detail.temperature_label"), t("wx.detail.temperature", outdoor));
     html += descNoteHtml(t("wx.detail.solar_label"), t("wx.detail.solar", solar));
   }
   return html + descNoteHtml(t("wx.detail.source_label"), t("wx.detail.source"));
 }
 
-function roomSourceDetailHtml(r, mqtt, captureEnabled, temperature, setpoint, age) {
+// Why a room reading that ARRIVED cannot produce a verdict — logic/reference_temperature.hpp's
+// ReferenceRoomReason, in the words a user can act on. ONE table, read by both the state line at
+// the top of the card and the source's own explanation further down, so the two can never give
+// different accounts of the same block. A reason with no entry here falls back to the generic line
+// rather than printing a raw enum name; the firmware may add reasons without this file changing.
+const ROOM_BLOCK_LINES = {
+  disabled:                   "dyn.room_off",
+  non_heating_mode:           "dyn.room_not_heating",
+  stale:                      "dyn.room_stale",
+  retained_without_timestamp: "dyn.room_stale",
+  clock_unsynced:             "dyn.state_clock",
+  no_value:                   "dyn.room_no_value",
+  invalid_payload:            "dyn.room_invalid",
+  temperature_out_of_range:   "dyn.room_invalid",
+  setpoint_out_of_range:      "dyn.room_invalid",
+  missing_setpoint:           "dyn.room_no_setpoint",
+  missing_setpoint_mapping:   "dyn.room_no_setpoint",
+  missing_source_time:        "dyn.room_no_time",
+  missing_enabled_state:      "dyn.room_no_flag",
+  missing_hvac_mode:          "dyn.room_no_flag",
+};
+
+function roomSourceDetailHtml(r, mqtt, temperature, setpoint, age) {
   let statusKey = "waiting", detail = t("ref.detail.waiting");
-  if (!captureEnabled) { statusKey = "inactive"; detail = t("ref.detail.inactive"); }
-  else if (!mqtt.configured) { statusKey = "unavailable"; detail = t("ref.broker_off"); }
+  if (!mqtt.configured) { statusKey = "unavailable"; detail = t("ref.broker_off"); }
   else if (r.error) { statusKey = "unavailable"; detail = t("ref.detail.error", r.error); }
   else if (r.has_value && r.fresh) { statusKey = "fresh"; detail = t("ref.detail.fresh"); }
   else if (r.has_value) {
@@ -315,10 +326,15 @@ function roomSourceDetailHtml(r, mqtt, captureEnabled, temperature, setpoint, ag
       : t("ref.detail.stale");
   }
 
-  const retained = captureEnabled && r.has_value && r.retained ? ` · ${t("ref.retained")}` : "";
+  const retained = r.has_value && r.retained ? ` · ${t("ref.retained")}` : "";
   let html = descNoteHtml(t("ref.detail.status_label"),
     `${t(`ref.status.${statusKey}`)} — ${detail}${retained}`);
-  if (captureEnabled && r.has_value) {
+  // A source that is CURRENT but not usable for a verdict is the case that used to render as a
+  // plain green "Configured" while the state row above it reported the diagnosis blocked. Say so
+  // here, in the same tongue that already explains the reading.
+  if (r.has_value && r.fresh && !r.control_eligible && ROOM_BLOCK_LINES[r.reason])
+    html += descNoteHtml(t("ref.detail.eligibility_label"), t(ROOM_BLOCK_LINES[r.reason]));
+  if (r.has_value) {
     html += descNoteHtml(t("ref.detail.temperature_label"), t("ref.detail.temperature", temperature));
     if (r.has_setpoint)
       html += descNoteHtml(t("ref.detail.setpoint_label"), t("ref.detail.setpoint", setpoint));
@@ -331,15 +347,35 @@ function roomSourceDetailHtml(r, mqtt, captureEnabled, temperature, setpoint, ag
 // state + reason -> one plain-language line, its severity class and its explanation. Keyed on the
 // STATE first because that is what decides whether anything is being recorded at all; the reason
 // only refines it. HOLD/plant_inactive is deliberately neutral, not a warning.
-function dynamicStateRow(d) {
+//
+// Two of these lines name something OUTSIDE the controller's own vocabulary, and that is the point:
+// a blocked diagnosis is only useful if it says which thing to go and fix.
+//  - NOT ARMED is not one state but three (no room source, no forecast location, neither), and the
+//    controller cannot tell them apart — it is handed one `armed` bool. /status carries both
+//    `configured` flags, so the distinction is drawn here, dim rather than warned: an unconfigured
+//    source is a setup step, not a fault.
+//  - ROOM_UNAVAILABLE used to read "room input unavailable" while the source sat green and current
+//    two rows below it, which is the opposite of a diagnosis. The room reason (`disabled` — the
+//    thermostat is switched off; `stale`; `non_heating_mode`; …) is already on /status and says
+//    exactly what is wrong, so it is what gets printed.
+function dynamicStateRow(d, room, weather, modbus) {
   if (d.state === "shadow")
     return { key: "dyn.state_recording", cls: "ok", help: "dyn.state_help_recording" };
   if (d.state === "degraded")
     return { key: "dyn.state_recording_nowx", cls: "ok", help: "dyn.state_help_recording" };
   if (d.state === "hold")
     return { key: "dyn.state_waiting", cls: "", help: "dyn.state_help_waiting" };
+  if (d.state === "off") {
+    const key = !room.configured && !weather.configured ? "dyn.state_setup_both"
+      : !room.configured ? "dyn.state_setup_room" : "dyn.state_setup_weather";
+    return { key, cls: "dim", help: "dyn.state_help_setup" };
+  }
+  if (d.reason === "room_unavailable")
+    return { key: ROOM_BLOCK_LINES[room.reason] || "dyn.state_room", cls: "warn",
+             help: "dyn.state_help_room" };
+  if (d.reason === "homehub_unavailable" && !modbus.enabled)
+    return { key: "dyn.state_setup_homehub", cls: "dim", help: "dyn.state_help_setup_homehub" };
   const blocked = {
-    room_unavailable:    "dyn.state_room",
     x10a_unavailable:    "dyn.state_x10a",
     homehub_unavailable: "dyn.state_homehub",
     plant_gate_unknown:  "dyn.state_gate",
@@ -353,15 +389,14 @@ function dynamicControlCardHtml() {
   const w = S.status?.weather_forecast || {};
   const mqtt = S.status?.mqtt || {};
   const d = S.status?.dynamic_lwt || {};
-  // Keep the experimental surface out of ordinary Settings until the user has explicitly enabled
-  // it. Saved source mappings remain in firmware/NVS; hiding the card is presentation, not deletion.
-  if (d.mode !== "shadow") return "";
-  const captureEnabled = d.mode === "shadow";
+  const modbus = S.status?.modbus || {};
+  // ALWAYS rendered. Through v1.0.0-dev.331 this returned "" unless an explicit switch had selected
+  // SHADOW — while that switch answered 409 until the very sources whose only editors live on this
+  // card were configured. The feature could not be reached from the UI at all.
   let sourceCls = "dim";
   let temperature = "", setpoint = "", age = "";
   if (r.configured) {
-    if (!captureEnabled) sourceCls = "dim";
-    else if (!mqtt.configured) sourceCls = "err";
+    if (!mqtt.configured) sourceCls = "err";
     else if (r.error) sourceCls = "err";
     else if (r.has_value) {
       temperature = Number(r.temperature_c).toLocaleString(
@@ -371,19 +406,27 @@ function dynamicControlCardHtml() {
       const seconds = Number.isFinite(r.age_s) ? r.age_s : r.received_ago_s;
       age = Number.isFinite(seconds) ? (seconds < 2 ? t("ref.now") : t("ref.ago", seconds))
         : t("ref.age_unknown");
-      sourceCls = r.fresh ? "ok" : "warn";
+      // Green means "this can produce a verdict", not merely "a number arrived recently". A fresh
+      // reading from a thermostat that reports itself switched off is exactly what blocks the
+      // diagnosis, so it must not be the one row on the card that looks fine.
+      sourceCls = !r.fresh ? "warn" : r.control_eligible ? "ok" : "warn";
     } else sourceCls = "warn";
   }
   // The STATE, not the mode. The Firmware-card toggle already says on/off, so repeating it here
   // would be a second control-shaped restatement of one bit. What a reader cannot see anywhere else
   // is why no verdict exists yet — and through the summer the honest answer ("the plant is not
   // heating") must NOT be styled as a fault, because it is the expected state for months.
-  const st = dynamicStateRow(d);
+  const st = dynamicStateRow(d, r, w, modbus);
+  // The state tongue carries WHAT THIS IS before what it is doing. That paragraph used to hang off
+  // the Firmware switch, which is where a reader met the feature first; with the switch gone the
+  // first row of its own card is that place, and a card whose title is the only thing explaining it
+  // would leave "P controller, ±2 K" as the sole account of what is being recorded.
   let rows = dynamicInfoRow("state", t("dyn.state"), t(st.key), st.cls,
+    `<div class="vdesc-p">${esc(t("dyn.card_help"))}</div>` +
     `<div class="vdesc-p">${esc(t(st.help))}</div>`);
   const sourceValue = r.configured ? t("dyn.configured") : t("dyn.not_configured");
   const sourceBody = (r.configured
-    ? roomSourceDetailHtml(r, mqtt, captureEnabled, temperature, setpoint, age) : "") +
+    ? roomSourceDetailHtml(r, mqtt, temperature, setpoint, age) : "") +
     `<div class="vdesc-p">${esc(t("ref.hint"))}</div>`;
   rows += dynamicInfoRow("room-sources", t("dyn.room_source"), sourceValue, sourceCls,
     sourceBody, "ref-temp", t("ref.title"));
@@ -395,14 +438,13 @@ function dynamicControlCardHtml() {
     solar = Number(w.solar_energy_2h_wh_m2).toLocaleString(
       LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 0 });
   }
-  if (w.configured && !captureEnabled) weatherCls = "dim";
-  else if (w.configured && w.fetching) weatherCls = "warn";
+  if (w.configured && w.fetching) weatherCls = "warn";
   else if (w.configured && w.has_value) {
     if (w.fresh) weatherCls = "ok";
     else weatherCls = w.error ? "err" : "warn";
   } else if (w.configured) weatherCls = w.error ? "err" : "warn";
   const weatherValue = w.configured ? "Open-Meteo" : t("dyn.not_configured");
-  const weatherBody = (w.configured ? weatherSourceDetailHtml(w, outdoor, solar, captureEnabled) : "") +
+  const weatherBody = (w.configured ? weatherSourceDetailHtml(w, outdoor, solar) : "") +
     `<div class="vdesc-p">${esc(t(w.configured ? "wx.hint.configured" : "wx.hint.setup"))}</div>`;
   rows += dynamicInfoRow("weather", t("dyn.weather"), weatherValue, weatherCls,
     weatherBody, "weather", t("wx.title"));
@@ -412,8 +454,8 @@ function dynamicControlCardHtml() {
   // No "Safety & output → read-only" row. It was a hardcoded constant that could never say anything
   // else, and since the write path was deleted (#294) it can never BECOME anything else either —
   // the same reason bus_tx_writes was dropped from the heartbeat. The card's own copy carries it.
-  if (captureEnabled && r.error) rows += vrow(t("ref.error"), r.error, { cls: "err settings-wrap" });
-  if (captureEnabled && w.error) rows += vrow(t("wx.error"), w.error, { cls: "err settings-wrap" });
+  if (r.error) rows += vrow(t("ref.error"), r.error, { cls: "err settings-wrap" });
+  if (w.error) rows += vrow(t("wx.error"), w.error, { cls: "err settings-wrap" });
   return vcard(t("dyn.card"), rows);
 }
 

@@ -1961,7 +1961,7 @@ static void test_heartbeat() {
                "\"room_temperature_c\":null,\"room_setpoint_c\":null,\"room_error_k\":null,"
                "\"room_source_unix_s\":null,\"room_age_s\":null,\"room_reason_code\":1,"
                "\"room_messages\":0,\"room_errors\":0,\"room_rejections\":0,"
-               "\"lwt_controller_mode\":0,\"lwt_controller_state\":0,\"lwt_controller_reason\":0,"
+               "\"lwt_controller_armed\":0,\"lwt_controller_state\":0,\"lwt_controller_reason\":0,"
                "\"lwt_controller_decision_eligible\":0,\"lwt_controller_proposal_produced\":0,"
                "\"lwt_controller_p_term_k\":null,\"lwt_controller_unclamped_offset_k\":null,"
                "\"lwt_controller_bounded_offset_k\":null,\"lwt_controller_requested_offset_k\":null,"
@@ -2044,7 +2044,7 @@ static void test_heartbeat() {
     CHECK(roomj.find("\"room_errors\":2,") != std::string::npos);
     CHECK(roomj.find("\"room_rejections\":7,") != std::string::npos);
     HeartbeatFields cf;
-    cf.lwt_controller_mode = 1;
+    cf.lwt_controller_armed = true;
     cf.lwt_controller_state = 3;
     cf.lwt_controller_reason = 10;
     cf.lwt_controller_decision_eligible = true;
@@ -2070,7 +2070,7 @@ static void test_heartbeat() {
     cf.lwt_controller_holds = 2;
     cf.lwt_controller_failsafes = 3;
     const std::string cj = build_heartbeat_json(cf);
-    CHECK(cj.find("\"lwt_controller_mode\":1,") != std::string::npos);
+    CHECK(cj.find("\"lwt_controller_armed\":1,") != std::string::npos);
     CHECK(cj.find("\"lwt_controller_state\":3,") != std::string::npos);
     CHECK(cj.find("\"lwt_controller_reason\":10,") != std::string::npos);
     CHECK(cj.find("\"lwt_controller_p_term_k\":3.000000,") != std::string::npos);
@@ -4354,7 +4354,6 @@ static void test_config_store() {
     a.ntp_server = "pool.ntp.org";
     a.board_preset_id = static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite);
     a.board_user_set = true;
-    a.dynamic_lwt_mode = static_cast<int32_t>(daik::logic::DynamicLwtMode::Shadow);
     std::vector<uint8_t> buf = config_blob_serialize(a);
     ConfigBlob b;
     CHECK(config_blob_deserialize(buf.data(), buf.size(), b));
@@ -4373,8 +4372,8 @@ static void test_config_store() {
     CHECK(b.has_env3 && !b.env3_enabled && b.env3_sda == 2 && b.env3_scl == 1);
     CHECK(b.has_board_identity && b.board_user_set &&
           b.board_preset_id == static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite));
-    CHECK(b.has_dynamic_lwt &&
-          b.dynamic_lwt_mode == static_cast<int32_t>(daik::logic::DynamicLwtMode::Shadow));
+    // v14's byte is RETIRED — only the "this blob was at least v14" witness survives it.
+    CHECK(b.has_dynamic_lwt);
 
     // The other flag combination, and a negative-looking port stored as-is.
     ConfigBlob c; c.wifi_rolled_back = true; c.wifi_rollback_active = false; c.syslog_port = 65535;
@@ -4627,7 +4626,7 @@ static void test_config_store() {
     restamp(v13);
     ConfigBlob v13rt;
     CHECK(config_blob_deserialize(v13.data(), v13.size(), v13rt));
-    CHECK(v13rt.has_ref_control && !v13rt.has_dynamic_lwt && v13rt.dynamic_lwt_mode == 0);
+    CHECK(v13rt.has_ref_control && !v13rt.has_dynamic_lwt);
 
     // v12 migrates the already deployed current/source-time mapping without inventing control
     // authorization. It remains observable and explicitly lacks target/eligibility mappings.
@@ -4911,17 +4910,11 @@ static void test_reference_temperature_config() {
 
 static void test_dynamic_lwt_controller() {
     using namespace daik::logic;
-    DynamicLwtMode parsed = DynamicLwtMode::Off;
-    CHECK(dynamic_lwt_mode_parse("off", parsed) && parsed == DynamicLwtMode::Off);
-    CHECK(dynamic_lwt_mode_parse("shadow", parsed) && parsed == DynamicLwtMode::Shadow);
-    CHECK(!dynamic_lwt_mode_parse("active", parsed));  // no actuator mode is representable
-    CHECK(dynamic_lwt_mode_from_int(1) == DynamicLwtMode::Shadow);
-    CHECK(dynamic_lwt_mode_from_int(2) == DynamicLwtMode::Off);  // unknown fails closed
     CHECK(dynamic_lwt_quantize(0.5) == 1 && dynamic_lwt_quantize(-0.5) == -1);
 
     auto ready = [] {
         DynamicLwtInputs in;
-        in.mode = DynamicLwtMode::Shadow;
+        in.armed = true;
         in.room_control_eligible = true;
         in.room_error_k = 0.6;
         in.x10a_connected = true;
@@ -4938,12 +4931,12 @@ static void test_dynamic_lwt_controller() {
     };
 
     DynamicLwtShadowController controller;
-    DynamicLwtInputs in;  // default OFF after install/migration/reboot
+    DynamicLwtInputs in;  // default: neither source configured, so nothing is armed
     const DynamicLwtSnapshot off = controller.evaluate(in);
-    CHECK(off.mode == DynamicLwtMode::Off && off.state == DynamicLwtState::Off);
+    CHECK(!off.armed && off.state == DynamicLwtState::Off);
     CHECK(off.reason == DynamicLwtReason::Disabled && !off.has_requested_offset);
     CHECK(off.evaluations == 0);
-    CHECK(controller.evaluate(in).evaluations == 0);  // OFF collects and analyses nothing
+    CHECK(controller.evaluate(in).evaluations == 0);  // unarmed analyses nothing
 
     in = ready();
     DynamicLwtSnapshot decision = controller.evaluate(in);
@@ -5002,6 +4995,26 @@ static void test_dynamic_lwt_controller() {
     CHECK(hold.state == DynamicLwtState::Hold && hold.reason == DynamicLwtReason::PlantInactive);
     CHECK(!hold.has_requested_offset && hold.holds == 1);
 
+    // THE ORDER OF THOSE GATES IS ITSELF THE CONTRACT: an idle plant is HOLD even when the room
+    // source is ineligible, because outside the heating season BOTH are true at once — a room
+    // thermostat switched off for the summer is not control-eligible — and answering
+    // "room input unavailable" turns a plant resting exactly as it should into a standing fault.
+    // The reference installation reported failsafes=2734, holds=0 in August with nothing wrong.
+    DynamicLwtShadowController seasonal;
+    in = ready(); in.plant_gate_active = false; in.room_control_eligible = false;
+    const DynamicLwtSnapshot summer = seasonal.evaluate(in);
+    CHECK(summer.state == DynamicLwtState::Hold && summer.reason == DynamicLwtReason::PlantInactive);
+    CHECK(summer.holds == 1 && summer.failsafes == 0);
+    // While the plant IS heating the same ineligible source is a real block, and still says so.
+    in = ready(); in.room_control_eligible = false;
+    const DynamicLwtSnapshot heating = seasonal.evaluate(in);
+    CHECK(heating.state == DynamicLwtState::Failsafe &&
+          heating.reason == DynamicLwtReason::RoomUnavailable);
+    // A down HomeHub outranks the gate it is the only source of: an unknown gate is never read as
+    // an idle plant.
+    in = ready(); in.homehub_connected = false; in.plant_gate_active = false;
+    CHECK(seasonal.evaluate(in).reason == DynamicLwtReason::HomeHubUnavailable);
+
     // FAILSAFE and HOLD disarm cadence/proposal memory. Recovery may decide immediately, but its
     // first proposal is again limited to one kelvin from neutral.
     DynamicLwtShadowController recovery;
@@ -5020,35 +5033,41 @@ static void test_dynamic_lwt_controller() {
     in.now_ms = 3999;
     CHECK(recovery.evaluate(in).reason == DynamicLwtReason::ClockInvalid);
 
-    // An explicit OFF disarms and clears the cadence memory. Re-enabling SHADOW may decide at once,
+    // Deleting a source disarms and clears the cadence memory. Re-configuring may decide at once,
     // but the sequence/counters remain useful boot-local evidence.
     DynamicLwtShadowController rearm;
     in = ready(); CHECK(rearm.evaluate(in).proposal_produced);
-    in.mode = DynamicLwtMode::Off; in.now_ms = 10;
+    in.armed = false; in.now_ms = 10;
     CHECK(rearm.evaluate(in).state == DynamicLwtState::Off);
     in = ready(); in.now_ms = 20;
     CHECK(rearm.evaluate(in).proposal_produced);
 
-    Config invalid;
-    invalid.dynamic_lwt_mode = static_cast<DynamicLwtMode>(2);
-    std::string reason;
-    CHECK(!validate(invalid, reason));
-    CHECK(reason == "dynamic_lwt_mode unknown");
-
+    // ARMING IS DERIVED FROM THE CONFIGURATION — there is no mode byte, no /set_dynamic_lwt and so
+    // no way for a stored answer to disagree with the sources a reader can see. Every input the
+    // diagnosis READS is required; the HomeHub deliberately is NOT, so a device without one still
+    // shows the card and is told which prerequisite is missing rather than shown nothing.
     Config dependencies;
-    dependencies.dynamic_lwt_mode = DynamicLwtMode::Shadow;
-    CHECK(!dynamic_lwt_shadow_ready(dependencies));
-    CHECK(dynamic_lwt_disarm_if_unready(dependencies));
-    CHECK(dependencies.dynamic_lwt_mode == DynamicLwtMode::Off);
+    CHECK(!dynamic_lwt_armed(dependencies));
     dependencies.mqtt_uri = "mqtt://broker";
     dependencies.ref_temp_topic = "room";
     dependencies.ref_temp_path = "current";
     dependencies.ref_temp_setpoint_path = "target";
     dependencies.ref_temp_time_path = "read_at";
-    dependencies.mb_host = "homehub.local";
-    dependencies.dynamic_lwt_mode = DynamicLwtMode::Shadow;
-    CHECK(dynamic_lwt_shadow_ready(dependencies));
-    CHECK(!dynamic_lwt_disarm_if_unready(dependencies));
+    CHECK(!dynamic_lwt_armed(dependencies));   // no forecast location yet
+    dependencies.weather_enabled = true;
+    CHECK(dynamic_lwt_armed(dependencies));
+    dependencies.mb_host = "";                 // a missing HomeHub is a runtime state, not a disarm
+    CHECK(dynamic_lwt_armed(dependencies));
+    for (std::string Config::*field : {&Config::mqtt_uri, &Config::ref_temp_topic,
+                                       &Config::ref_temp_path, &Config::ref_temp_setpoint_path,
+                                       &Config::ref_temp_time_path}) {
+        Config one = dependencies;
+        (one.*field).clear();
+        CHECK(!dynamic_lwt_armed(one));        // any deleted input disarms it
+    }
+    Config no_weather = dependencies;
+    no_weather.weather_enabled = false;
+    CHECK(!dynamic_lwt_armed(no_weather));
 }
 
 static void test_weather_forecast_contract() {
@@ -5386,7 +5405,7 @@ static void test_http_surface() {
     // Trusted LAN exposes the full API — every route, either method.
     for (const char* p : {"/", "/index.html", "/favicon.ico", "/scan", "/status", "/values",
                           "/diag", "/coredump", "/crash/dismiss", "/models", "/set_wifi",
-                          "/set_mqtt", "/set_ntp", "/set_dynamic_lwt", "/set_hp", "/detect", "/ota/check",
+                          "/set_mqtt", "/set_ntp", "/set_weather", "/set_hp", "/detect", "/ota/check",
                           "/ota/update", "/mcp"}) {
         CHECK(http_surface_serves(lan, p, false));
         CHECK(http_surface_serves(lan, p, true));

@@ -19,8 +19,8 @@ page lives outside the firmware and cannot include `main/www/style.css`, so its 
    **gear** opens **Settings**, which is the ESP32 and what it talks to: the Connections tile
    (WiFi/MQTT/Syslog/NTP), and the ESP32 board card split into three — ESP32 (board hardware, uptime,
    memory), Protokoll (X10A link, RX/TX pins) and Firmware (version, OTA channel, language).
-   A **Heizkurven-Diagnose** card for the room/weather/controller project appears
-   below Firmware only after its explicit Firmware switch has been enabled.
+   A **Heizkurven-Diagnose** card for the room/weather/controller project always sits
+   below Firmware — it is where its own two sources are configured.
    Nothing sits between the gear and those cards — Settings is **flat**, no
    menu of entries to tap through, because there is little enough of it that a menu would exist only
    to hide a card behind a second tap. Settings still reports forward: a link that is **down** marks
@@ -1133,9 +1133,8 @@ cards, stacked in the same single column as everything else (§9). The Connectio
 card it was on the dashboard — the move changed where the configuration lives, not how it looks. The
 board card is the same story split three ways: **ESP32** / **Protokoll** / **Firmware** answer three
 different questions (the board itself, the X10A link, the running software) that one card used to
-answer at once. When its Firmware switch selects SHADOW, the **Heizkurven-Diagnose** card is
-their conditional neighbour rather than another top-level screen and deliberately comes last, after
-Firmware. The three permanent cards and this optional fourth are built and rebuilt together by one
+answer at once. The **Heizkurven-Diagnose** card is their neighbour rather than another top-level
+screen and deliberately comes last, after Firmware. All four are built and rebuilt together by one
 `esp32CardHtml()`. HomeHub/Modbus is a fifth row in the Connections tile and follows the same row
 vocabulary exactly:
 
@@ -1255,31 +1254,42 @@ vocabulary exactly:
    through v1.0.13 on the reasoning that the header owned the affordance; in use that only made the
    version look inert precisely where a user is already deciding which build to run. Version,
    update channel and language each have the same label-owned explanation tongue as Protocol.
-   The fourth row is the persisted, default-OFF **Heizkurven-Diagnose** switch. It maps only
-   to OFF/SHADOW: enabling requires MQTT, a complete room source and HomeHub; it never exposes ACTIVE.
+   There is no fourth row: the Heizkurven-Diagnose switch that used to sit here is GONE. It stated
+   a fact the configuration already made, and it could not be reached — it answered 409 until a room
+   source and a HomeHub were configured, while the only editors for those live inside the card the
+   switch revealed. **A switch whose precondition is only reachable behind itself is not a consent
+   gate, it is a locked door.** Consent rides on the SAVE of each source instead, which is the act
+   that actually hands out a broker topic or a coordinate pair.
 
-5. **Heizkurven-Diagnose card** — the conditional, bottom-most Settings home of the room-feedback
-   project, shown only while the Firmware switch selects SHADOW. The card is a DIAGNOSIS, not a
-   control: it records the leaving-water offset the weather-dependent curve would need, and the
-   season aggregate of those proposals is the verdict. Nothing is written to the plant — the
-   firmware has no write path (`docs/MODBUS_PROTOCOL.md`).
+5. **Heizkurven-Diagnose card** — the bottom-most Settings home of the room-feedback project,
+   ALWAYS rendered, because this is where both of its sources are configured. The card is a
+   DIAGNOSIS, not a control: it records the leaving-water offset the weather-dependent curve would
+   need, and the season aggregate of those proposals is the verdict. It runs by itself once a room
+   source and a location exist. Nothing is written to the plant — the firmware has no write path
+   (`docs/MODBUS_PROTOCOL.md`).
 
    Its four rows are **Status**, **Raumtemperaturquelle**, **Wetterprognose** and **Verfahren**.
-   There is deliberately no fifth: the card must not restate the Firmware toggle as a second
-   "Betriebsart" readout, and must not carry a constant "Sicherheit & Ausgabe = Nur lesend" line —
-   with the write path deleted neither could ever say anything else, and a row that cannot vary is
-   one more thing a reader has to rule out (the rule that dropped `bus_tx_writes`, §5.3).
+   There is deliberately no fifth: no "Betriebsart" readout (there is no mode — the two source rows
+   below ARE the arming condition) and no constant "Sicherheit & Ausgabe = Nur lesend" line — with
+   the write path deleted neither could ever say anything else, and a row that cannot vary is one
+   more thing a reader has to rule out (the rule that dropped `bus_tx_writes`, §5.3).
 
    **Status** names why no verdict exists yet: recording, recording without forecast, waiting for
-   space heating, or the specific missing input (room, X10A, HomeHub, plant gate, clock). An idle
-   plant is NEUTRAL, never a warning — through the non-heating half of the year it is the expected
-   reading, and a permanently orange row is one the user learns to ignore, which would cost exactly
-   the months when it finally means something.
+   space heating, which source is still to be set up, or the specific blocked input. An idle plant is
+   NEUTRAL, never a warning — through the non-heating half of the year it is the expected reading,
+   and a permanently orange row is one the user learns to ignore, which would cost exactly the months
+   when it finally means something. **A setup step is likewise dim, not orange**: nothing is wrong
+   with a device whose sources have not been configured yet.
 
-   OFF hides this card, keeps saved source settings, removes
-   the room subscription, clears captured runtime values, pauses Open-Meteo and evaluates no proposal.
-   The Firmware switch remains visible as the way back in. SHADOW reads and validates the configured
-   inputs and runs the bounded P controller, but retains the write-free output boundary. The
+   Where the block IS the room source, the row says WHICH WAY it is unusable — "Raumthermostat
+   ausgeschaltet", "Raumwert zu alt" — from the source's own `/status` reason, and the source row
+   below it turns amber to match. Through v1.0.0-dev.331 it read "Raumeingang fehlt" while that
+   source sat green and current two rows underneath: two rows disagreeing about one source, and the
+   one making the specific claim was the one that was wrong. **Nothing on this card may report an
+   input as missing while another row reports the same input as fine.**
+
+   Deleting a source is the whole disarm: the subscription stops, the runtime values clear,
+   Open-Meteo pauses, and the state row says which source to set up. The
    room-source row opens the exact MQTT topic, current and target temperature paths, source timestamp
    and maximum age; the weather row opens its location modal.
    Advanced optional enabled/HVAC-mode mappings remain API-compatible but are not ordinary UI fields.
