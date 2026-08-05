@@ -547,7 +547,7 @@ static esp_err_t set_ref_temp(httpd_req_t* req) {
     return http_send_json(req, "{\"ok\":true,\"saved\":true,\"reboot\":false}");
 }
 
-// WP2's only controller setting. The accepted vocabulary intentionally ends at SHADOW: there is no
+// The controller's only setting. The accepted vocabulary intentionally ends at SHADOW: there is no
 // ACTIVE value to typo into or reach through a raw HTTP request, and this handler has no actuator
 // dependency. Applied live by the next mqtt-task evaluation; no reboot.
 static esp_err_t set_dynamic_lwt(httpd_req_t* req) {

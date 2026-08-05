@@ -380,7 +380,7 @@ const I18N = {
     "ntp.title": "NTP server", "ntp.server": "Server",
     "ntp.hint": "Enter the hostname or IP address of the time server. Leave the field empty to use the firmware default.",
     // HomeHub transport dialog (issue #32). It exposes no actuator control; the link is read-only,
-    // because the register-54 write path is retired (docs/MODBUS_ACTUATION.md).
+    // because the Modbus link is read-only (docs/MODBUS_PROTOCOL.md).
     "homehub.title": "Modbus", "homehub.host": "Host · IP or .local name",
     "homehub.port": "Port", "homehub.unit": "Unit id",
     "homehub.hint": "Search runs only when you press Search and fills the address field when a HomeHub answers. Save the result or enter an address manually. An empty address disables HomeHub completely: no search at boot and no requests. Port defaults to 502, unit id to 1. This dialog configures the data source only; it exposes no heat-pump control.",

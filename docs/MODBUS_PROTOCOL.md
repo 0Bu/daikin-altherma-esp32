@@ -1,11 +1,16 @@
 # Modbus TCP — the Daikin HomeHub link
 
-> **Status: independent READ source. There is no write path.** This firmware speaks
-> Modbus TCP to a **Daikin HomeHub (EKRHH)** beside the primary X10A service-port tap. It reads the
-> curated map and has exactly one internal writable descriptor: holding register **54**, through the
-> socket-owning `hp_modbus` task. There is still no MQTT/HA/HTTP/MCP/raw-Modbus control surface.
-> The register-54 actuator built for #300 was removed when dynamic LWT actuation was retired; no
-> source file can build or issue a Modbus write. See [`MODBUS_ACTUATION.md`](MODBUS_ACTUATION.md).
+> **Status: independent READ source.** This firmware speaks Modbus TCP to a **Daikin HomeHub
+> (EKRHH)** beside the primary X10A service-port tap and reads the curated map through the
+> socket-owning `hp_modbus` task.
+>
+> **There is no write path, and that is a property of the code.** No source file contains a write
+> entry point, an FC06/FC16 request builder or an issued write function code, and
+> `test/test_dynamic_lwt_shadow_contract.mjs` walks every file under `main/` to keep it that way.
+> A write capability existed briefly and was removed unused; re-adding one is a deliberate design
+> decision that fails that test first. There is no MQTT/HA/HTTP/MCP/raw-Modbus control surface
+> either. Other clients on the LAN (the Onecta app, the unit's MMI, evcc) do write the hub — segment
+> `:502` accordingly.
 >
 > **X10A remains primary.** There is no selector between the sources: once a HomeHub address is
 > configured, both stacks run independently. X10A leads wherever both provide the same quantity;
@@ -20,8 +25,7 @@ firmware has always been a one-way telemetry bridge ([`ARCHITECTURE.md`](ARCHITE
 X6A — *not* X10A) that exposes a Modbus server on the LAN. It is the officially supported writable
 path, and it publishes a smaller but more curated telemetry map than the raw X10A pages.
 
-The source path remains independent. WP3 adds a bounded capability under it; it does not add the room
-controller or authorize a live-plant write.
+The source path is read-only. This firmware never writes the hub.
 
 ## Wire facts
 
@@ -115,7 +119,8 @@ Read today (UC3 Daikin Altherma):
 * **Setpoints and modes** (holding, read back): LWT main heating `1` / cooling `2`,
   operation mode `3`, space heating ON/OFF `4`, room thermostat heating `6` / cooling `7`, quiet mode
   `9`, DHW reheat setpoint `10`, LWT heating offset `54`, Smart-Grid mode `56`, power limits `57`/`58`
-  (`Pow16`). Only `54` is in WP3's explicit write allowlist; every other row remains telemetry-only.
+  (`Pow16`). All of them are telemetry-only here; `54` is read back as the independent record of
+  whatever the Onecta app or the MMI last set.
 
 Reading a holding register is not a step toward writing it — the hub's own telemetry is split across
 both spaces, and a setpoint the plant is currently running to is a reading like any other.
@@ -314,7 +319,7 @@ connection-state vocabulary. Config and diagnostics only; there are no pump cont
 plant-gate pair `plant_gate_known` / `plant_gate_active` (input register 53 — the one HomeHub fact the
 shadow controller consumes). There is no actuator object: it was removed with the write path. `host`
 is the configured value and is redacted in bug reports. See
-[`MODBUS_ACTUATION.md`](MODBUS_ACTUATION.md) and [`../README.md`](../README.md).
+[`../README.md`](../README.md).
 
 ## Security
 
@@ -325,10 +330,9 @@ The threat model is in [`SECURITY.md`](SECURITY.md); the parts specific to this 
   principle write to the hub. That is a property of Modbus/TCP, not something this firmware can fix:
   **segment or firewall the HomeHub's `:502`** so only this device reaches it. TLS `:802` is the hub's
   only on-wire protection and is out of scope here.
-* **The firmware has one internal write capability, not a control bridge.** The unauthenticated
-  `HA → MQTT/HTTP/MCP → raw Modbus → pump` chain does not exist: there is no command subscription,
-  writable entity, public register route or proxy. The private FC06 path accepts only a typed,
-  bounded register-54 plan after all WP3 gates.
+* **The firmware cannot write the hub at all.** The unauthenticated
+  `HA → MQTT/HTTP/MCP → raw Modbus → pump` chain does not exist, and not merely because no route is
+  exposed: there is no write primitive to route to.
 * **mDNS discovery trusts LAN multicast**, so the explicit Search action offers only responders
   whose hostname matches `homehub-*` rather than whatever answers first. A manually entered address
   is the user's trusted-LAN choice.

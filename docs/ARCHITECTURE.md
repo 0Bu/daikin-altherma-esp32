@@ -135,7 +135,7 @@ hp_modbus.cpp/.hpp  → THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT sourc
                       mDNS runs only from the dialog's explicit Search button and filters
                       homehub-* from up to 64 _http._tcp responders per bounded attempt. The lwIP
                       client wraps logic/modbus.hpp framing. READ-ONLY: no write function code is
-                      issued anywhere — the register-54 actuator is retired (docs/MODBUS_ACTUATION.md).
+                      issued anywhere, and no source file can build one (docs/MODBUS_PROTOCOL.md).
                       The one fact it feeds the controller is the PLANT GATE (input register 53)
 def/homehub.hpp     → the HomeHub register map (input + holding), the Modbus counterpart of the X10A
                       def/ profiles; decoded via logic/modbus.hpp's Temp16/Pow16/Int16/Text16 codecs
@@ -625,7 +625,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   the SNTP wall clock (`sntp_time.cpp`) as a `device_class: "timestamp"` sensor — HA's native
   "last updated N ago" entity, rendering `null` (unsynced) as its normal "unknown" state rather than
   a fabricated epoch date.
-- `logic/dynamic_lwt_controller.hpp` — the deterministic, allocation- and I/O-free WP2 P controller.
+- `logic/dynamic_lwt_controller.hpp` — the deterministic, allocation- and I/O-free P controller.
   It accepts only OFF/SHADOW, uses gain 1, a ±0.25 K deadband, whole-kelvin quantization, a ±2 K
   envelope, a 1 K/decision slew limit and a 30-minute cadence. Missing room/X10A/HomeHub/plant-gate
   evidence fails closed; an inactive plant holds; unavailable forecast degrades while contributing
@@ -1206,9 +1206,8 @@ The Home Assistant bridge:
   a mapping-bound proof only after the normal JSON, timestamp and freshness checks accept a real
   value; `POST /set_ref_temp` refuses a non-empty mapping without that proof. The transient test
   never changes Config/NVS, and an empty topic remains the explicit disable operation that needs no
-  reading. X10A has no write command, and the HomeHub link no longer has one either: its register-54
-  actuator is retired, so no source file can build or issue a Modbus write
-  (see [MODBUS_ACTUATION.md](MODBUS_ACTUATION.md)).
+  reading. Neither link can write: X10A has no write command by protocol, and no source file can
+  build or issue a Modbus frame for the HomeHub (see [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)).
 - **One HA installation device.** Its id is the slugified MQTT base topic
   (`daikin-altherma-esp32` → `daikin_altherma_esp32`, `logic/ha_device.hpp`), so replacing the ESP32
   keeps the device with its entities, history and long-term statistics — where the old MAC-derived
@@ -1388,8 +1387,8 @@ The Home Assistant bridge:
     so both were hardcoded `0` and could never vary. They were dropped in #215 — a metric that cannot
     change is a dashboard line that always reads zero. Neither was ever an HA entity.
   - **`modbus_*`**: link state, read counters and HomeHub-task stack high-water evidence. There are
-    no write counters and no actuator fields — the link issues no Modbus write at all
-    ([MODBUS_ACTUATION.md](MODBUS_ACTUATION.md)). **Payload-only — deliberately no HA entity.**
+    no write counters — the link issues no Modbus write at all.
+    **Payload-only — deliberately no HA entity.**
 
   Published on a fixed `HEARTBEAT_INTERVAL_S` (10 s) cadence — unlike the source value topics, this is
   diagnostics rather than real-time telemetry, so it always sends the latest snapshot rather than

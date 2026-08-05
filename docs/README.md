@@ -288,7 +288,7 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #           fails,values,task_stack_min_free_words,
                                    #           plant_gate_known,plant_gate_active,
                                    #           error?,error_code?,error_detail?,error_register?},
-                                   #        # link diagnostics + WP3 read-only audit evidence; no API
+                                   #        # link diagnostics; read-only, no write API
                                    #        field is a command. Empty host disables polling/search.
                                    #   history:{dt,rows:[{id,label}]},   # rows with a 24 h trend;
                                    #        id = the concept (what /history takes), label = how the
@@ -441,7 +441,7 @@ POST /set_dynamic_lwt              # { mode:"off"|"shadow" } → persist + apply
                                    #   `active` is not an accepted value. SHADOW additionally requires
                                    #   the MQTT room source (topic, target and source-time paths) and
                                    #   HomeHub to be configured. Its proposal is a MEASUREMENT: no
-                                   #   actuator exists (docs/MODBUS_ACTUATION.md). Default and every
+                                   #   actuator exists. Default and every
                                    #   pre-v14 migration are OFF.
 POST /set_weather                  # { latitude, longitude } as strict decimal strings → persist +
                                    #   wake the firmware weather task. Both empty disables weather
@@ -463,7 +463,7 @@ POST /set_hp                       # { profile?, rx?, tx?, mb_host?, mb_port?,
                                    #   disables task, discovery and requests, including after reboot.
                                    #   mb_port 1..65535, mb_unit_id 1..247 — docs/MODBUS_PROTOCOL.md.
                                    #   The link is READ-ONLY: no actuation field is accepted and no
-                                   #   HTTP raw-register route exists (docs/MODBUS_ACTUATION.md).
+                                   #   HTTP raw-register route exists (docs/MODBUS_PROTOCOL.md).
 POST /discover_homehub             # {} → bounded mDNS search started only by the HomeHub dialog's
                                    #   Search button. Success: {ok:true,host:"<IPv4>"}; miss: 404.
                                    #   Never persists or reconfigures — Save owns that boundary.
@@ -580,9 +580,7 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   MQTT is not required for the firmware to fetch or evaluate weather.
   Availability/LWT `<base>/status`. `<base>` defaults `daikin-altherma-esp32`,
   `<prefix>` `homeassistant`.
-  There is no inbound command topic at all; the evcc intent envelope that was once specified for
-  `<base>/intent/v1/evcc` is retired with the write path
-  (see [MODBUS_ACTUATION.md](MODBUS_ACTUATION.md)).
+  There is no inbound command topic at all.
 - **Type-stable, and honest about absence.** Whether a key is a JSON number or a JSON string is
   decided by the value's converter, so **no key ever changes type** between states — a stopped fan
   publishes `0`, never `"OFF"`. Textual Daikin fault fields keep their text and gain permanently
@@ -673,7 +671,7 @@ Full threat model + Flash Encryption / Secure Boot notes: [SECURITY.md](SECURITY
 - WiFi/MQTT credentials live in NVS **unencrypted** by default; enable Flash + NVS Encryption
   (irreversible) if physical access is a concern.
 - X10A is read-only, and so is the HomeHub link: the register-54 actuator is retired, so no source
-  file can build or issue a Modbus write ([MODBUS_ACTUATION.md](MODBUS_ACTUATION.md)). Its `:502` is
+  file can build or issue a Modbus write ([MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)). Its `:502` is
   unencrypted and has no Modbus-level credential, so segment or firewall the HomeHub to this device —
   other clients (Onecta, the MMI, evcc) can still write it.
 

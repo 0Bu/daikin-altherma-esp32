@@ -2009,7 +2009,7 @@ static void test_heartbeat() {
     CHECK(j.find("bus_tx_fails") == std::string::npos);
     CHECK(j.find("\"bus_tx_reads\":") != std::string::npos);      // the real one stays
 
-    // Modbus TCP (HomeHub) link + WP3 actuator — payload-only fields. Connectivity and every boolean
+    // Modbus TCP (HomeHub) link — payload-only fields. Connectivity and every boolean
     // fact use numeric 1/0 so a metrics consumer keeps them.
     CHECK(j.find("\"modbus_connected\":0,") != std::string::npos);
     CHECK(j.find("\"modbus_connected\":false") == std::string::npos);   // number, not a dropped bool
@@ -4914,7 +4914,7 @@ static void test_dynamic_lwt_controller() {
     DynamicLwtMode parsed = DynamicLwtMode::Off;
     CHECK(dynamic_lwt_mode_parse("off", parsed) && parsed == DynamicLwtMode::Off);
     CHECK(dynamic_lwt_mode_parse("shadow", parsed) && parsed == DynamicLwtMode::Shadow);
-    CHECK(!dynamic_lwt_mode_parse("active", parsed));  // WP2 cannot represent an actuator mode
+    CHECK(!dynamic_lwt_mode_parse("active", parsed));  // no actuator mode is representable
     CHECK(dynamic_lwt_mode_from_int(1) == DynamicLwtMode::Shadow);
     CHECK(dynamic_lwt_mode_from_int(2) == DynamicLwtMode::Off);  // unknown fails closed
     CHECK(dynamic_lwt_quantize(0.5) == 1 && dynamic_lwt_quantize(-0.5) == -1);

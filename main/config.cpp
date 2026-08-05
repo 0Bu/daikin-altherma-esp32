@@ -113,7 +113,7 @@ void config_load() {
             c.weather_longitude_e6 = b.weather_longitude_e6;
         }
         if (b.has_dynamic_lwt) {
-            // Unknown future/corrupt values fail closed to OFF; ACTIVE is not representable in WP2.
+            // Unknown future/corrupt values fail closed to OFF; ACTIVE is not representable.
             c.dynamic_lwt_mode = logic::dynamic_lwt_mode_from_int(b.dynamic_lwt_mode);
         }
         c.syslog_host = b.syslog_host; c.syslog_port = b.syslog_port; c.ntp_server = b.ntp_server;

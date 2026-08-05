@@ -738,7 +738,7 @@ static void publish_crash() {
     s_crash_notable_pub = !js.empty();
 }
 
-// Evaluate WP2 every mqtt_task cycle, including while publication is paused or the broker is down.
+// Evaluate the controller every mqtt_task cycle, including while publication is paused or the broker is down.
 // Tying evaluation to publish_heartbeat() would leave the last SHADOW verdict looking healthy during
 // exactly the X10A/MQTT failures that must move it to FAILSAFE. The task still exists because SHADOW
 // can only be enabled for a configured MQTT room source (enforced by /set_dynamic_lwt).

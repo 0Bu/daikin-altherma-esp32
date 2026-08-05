@@ -51,7 +51,7 @@ struct Config {
     bool        weather_enabled = false;
     int32_t     weather_latitude_e6 = 0;
     int32_t     weather_longitude_e6 = 0;
-    // WP2 (#334) exposes only OFF and write-free SHADOW. The default is deliberately OFF so an OTA,
+    // Only OFF and write-free SHADOW exist. The default is deliberately OFF so an OTA,
     // migration or reboot never starts making controller decisions without an explicit operator save.
     logic::DynamicLwtMode dynamic_lwt_mode = logic::DynamicLwtMode::Off;
     std::string syslog_host;       // "" = Syslog disabled

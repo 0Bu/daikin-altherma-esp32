@@ -73,7 +73,7 @@ struct HeartbeatFields {
     uint32_t    room_errors = 0;
     uint32_t    room_rejections = 0;
 
-    // WP2 (#334) deterministic SHADOW controller. All booleans render as numeric 0/1 for Telegraf;
+    // The deterministic SHADOW controller. All booleans render as numeric 0/1 for Telegraf;
     // unavailable terms/offsets render null. These are MEASUREMENTS, not commands: the controller
     // has no actuator to call, and the aggregate of these proposals over a season is the heating-
     // curve verdict this project exists to produce (#294).
