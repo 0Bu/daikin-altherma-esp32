@@ -22,7 +22,7 @@ MqttStatus mqtt_status();
 // Observation + decision-readiness status for the one configured living-room source. `received_ms` is
 // monotonic MQTT arrival time; source_unix_s is present only when the configured payload field was
 // parsed. The status endpoint derives freshness from these without mutating the captured sample.
-// The write-free WP2 shadow controller reads this canonical view. It never calls the HomeHub actuator.
+// The write-free shadow controller reads this canonical view. There is no actuator to call.
 struct ReferenceTemperatureStatus {
     bool configured=false, subscribed=false, has_value=false, retained=false, has_source_time=false;
     double temperature_c=0.0;
@@ -37,7 +37,7 @@ struct ReferenceTemperatureStatus {
 };
 ReferenceTemperatureStatus reference_temperature_status();
 
-// Last write-free WP2 controller evaluation. The state machine is owned by mqtt_task and guarded by
+// Last write-free controller evaluation. The state machine is owned by mqtt_task and guarded by
 // the MQTT status mutex; HTTP/status readers receive a copy. No actuator object crosses this API.
 logic::DynamicLwtSnapshot dynamic_lwt_status();
 

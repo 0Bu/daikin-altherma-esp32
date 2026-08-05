@@ -46,7 +46,7 @@ and the OTA-signing / key lifecycle.
     or derivable from the ELF.
 - **Both links are read-only.** X10A has no write command.
   The optional HomeHub link no longer has one either: its bounded register-54 actuator was **removed**
-  when dynamic LWT actuation was retired ([`MODBUS_ACTUATION.md`](MODBUS_ACTUATION.md)), so no source
+  when dynamic LWT actuation was retired ([`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md)), so no source
   file contains a write entry point, an FC06/FC16 request builder or an issued write function code,
   and a CI contract test walks every file to keep it that way. No MQTT command subscription, writable
   HA entity, HTTP/MCP register route or Modbus proxy exists either. The unauthenticated

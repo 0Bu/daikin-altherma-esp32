@@ -1,7 +1,9 @@
 #pragma once
-// WP2 (#334): deterministic, I/O-free dynamic-LWT shadow controller.
+// Deterministic, I/O-free leaving-water shadow controller — the HEATING-CURVE DIAGNOSIS.
+// Its proposal is a MEASUREMENT, never a command: aggregated over a heating season it answers
+// whether the weather-dependent curve is set correctly. Nothing here can reach the plant.
 //
-// This file deliberately has no dependency on hp_modbus.hpp or homehub_actuator.hpp. The runtime
+// This file deliberately has no dependency on the Modbus transport. The runtime
 // adapter may observe HomeHub/X10A facts and publish this snapshot, but there is no type here that
 // can address a register or offer an actuator intent. That structural boundary is the safety proof
 // for SHADOW: a proposed offset is evidence only.
@@ -139,7 +141,7 @@ struct DynamicLwtSnapshot {
     double unclamped_offset_k = 0.0;
     int16_t bounded_offset_k = 0;
     int16_t requested_offset_k = 0;
-    int16_t forecast_contribution_k = 0;  // fixed at zero throughout WP2
+    int16_t forecast_contribution_k = 0;  // permanently zero — the forecast is evidence, not input
 
     bool room_has_source_time = false;
     int64_t room_source_unix_s = -1;

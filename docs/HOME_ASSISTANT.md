@@ -106,7 +106,7 @@ temperature out of range; `12` missing target mapping; `13` missing target; `14`
 slug is available in `/status.reference_temperature.reason`; metric alerts should use the numeric
 code.
 
-The default-OFF WP2 controller adds numeric `lwt_controller_*` fields to the same heartbeat for
+The default-OFF shadow controller adds numeric `lwt_controller_*` fields to the same heartbeat for
 Telegraf/VictoriaMetrics. Mode codes are `0` OFF and `1` SHADOW; state codes are `0` off, `1` shadow,
 `2` hold, `3` degraded and `4` failsafe. Reason codes are `0` disabled, `1` shadow decision, `2`
 cadence wait, `3` deadband, `4` rate limited, `5` room unavailable, `6` X10A unavailable, `7`
@@ -418,10 +418,9 @@ same rows arrive by the normal route and the entities are unchanged.
 > **Home Assistant/MQTT remain read-only — no command topics.** The firmware mirrors telemetry to HA;
 > it exposes no writable entity or HA/MQTT command route.
 >
-> X10A has no write command. The HomeHub task has one separate, internal, default-off register-54
-> capability ([MODBUS_ACTUATION.md](MODBUS_ACTUATION.md)); using the HomeHub as a source still does not
-> make HA a control path. Readings remain on `<base>/modbus` without per-value HA discovery, while
-> heartbeat carries read-only actuator audit fields.
+> Neither link has a write command: X10A has none by protocol, and the HomeHub link has none by
+> construction ([MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)). Using the HomeHub as a source does not
+> make HA a control path. Readings remain on `<base>/modbus` without per-value HA discovery.
 
 ## Derived power, energy & COP / SCOP / JAZ
 
@@ -673,9 +672,9 @@ integrate($P[$__range]) / 3600 / increase(heatpump_energy_kwh[$__range])
   trustworthy JAZ still wants an external CT/Shelly (plus a MID heat meter for a certified SCOP). On
   the *metering* ingredients EKRHH and this firmware are therefore **peers**, not a shortcut past
   them — EKRHH's real edge is **bidirectional control** (SG-Ready / §14a power modulation /
-  setpoints, the evcc path). This firmware now contains one internal, default-off LWT-offset actuator
-  but exposes no MQTT command, HA control entity, HTTP/MCP register route or generic proxy; active
-  ownership/commissioning is a separate work package ([MODBUS_ACTUATION.md](MODBUS_ACTUATION.md)). The
+  setpoints, the evcc path). This firmware deliberately does not compete there: it holds no write
+  capability at all and exposes no MQTT command, HA control entity, HTTP/MCP register route or
+  generic proxy ([MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)). The
   supported read path is **conditional**,
   not "every register unconditionally": the Modbus map needs Unified MMI2 ≥ 7.8.0 on the audited
   ERGA-EV/EHBH/X-E family, some registers are inoperative per model (e.g. holding regs 59 & 61 on

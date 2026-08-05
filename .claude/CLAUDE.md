@@ -17,9 +17,8 @@ Builds for the **esp32s3** target only.
 > [`docs/X10A_PROTOCOL.md`](../docs/X10A_PROTOCOL.md), and the converter-id/enum tables plus a full
 > register map in [`docs/REGISTERS.md`](../docs/REGISTERS.md). The OPTIONAL second SOURCE — the
 > Modbus TCP link to a Daikin HomeHub (EKRHH), its explicit mDNS discovery action and its register map — is
-> [`docs/MODBUS_PROTOCOL.md`](../docs/MODBUS_PROTOCOL.md). The link is READ-ONLY;
-> [`docs/MODBUS_ACTUATION.md`](../docs/MODBUS_ACTUATION.md) is the DECISION RECORD for the
-> register-54 actuator that once existed and was removed. It is a SECOND SOURCE, not an alternative
+> [`docs/MODBUS_PROTOCOL.md`](../docs/MODBUS_PROTOCOL.md) — the link is READ-ONLY and cannot frame a
+> write at all. It is a SECOND SOURCE, not an alternative
 > transport: both stacks run at once, independently, and a device without a HomeHub runs no Modbus
 > task at all. A cross-cutting catalog of the
 > platform features this firmware implements (Secure Boot v2 signing, OTA + health gate,
@@ -566,20 +565,16 @@ hp_modbus.cpp   THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT source of rea
                 The user may edit it and Save or Cancel. A failed connection to a saved target BACKS
                 OFF through the X10A sweep's own host-tested logic/detect_backoff.hpp; the poll task
                 never browses mDNS or silently changes the configured address.
-                READ-ONLY, and that is now a property of the CODE rather than of a guard: the
-                register-54 actuator #300 built here (typed intent mailbox, fresh FC03 baseline, FC06
-                bound echo, independent FC03 readback, CONFLICT latch, baseline restore) was DELETED
-                when #294 retired dynamic LWT actuation — together with logic/homehub_actuator.hpp,
-                the actuation_enabled config field, the /status.modbus.actuator object, the
-                modbus_actuator_* heartbeat fields, the evcc intent envelope and logic/modbus.hpp's
-                FC06/FC16 request BUILDERS. It was never commissioned (0 requests, 0 write attempts).
-                What was kept is the PLANT GATE: an ordinary FC04 read of input register 53 ("Space
-                heating/cooling normal operation"), the one HomeHub fact the shadow controller needs
-                to tell a real space-heating window from a DHW cycle (register 52) or a standstill —
-                reported on /status.modbus as plant_gate_known/plant_gate_active, where known=false
-                means the register did not answer and must NEVER read as an inactive plant. Reasoning
-                and the third-party writers that remain (Onecta, MMI — evcc writes only EKRHH 56/57)
-                are in docs/MODBUS_ACTUATION.md.
+                READ-ONLY as a property of the CODE, not of a guard around a dormant capability:
+                no write entry point, no FC06/FC16 request builder, no issued write function code
+                anywhere under main/ — test/test_dynamic_lwt_shadow_contract.mjs walks every file to
+                keep it so, and re-adding one fails there first. The hub's other clients (Onecta, the
+                MMI, evcc on EKRHH 56/57) do write it; this firmware only reads their result. One
+                HomeHub fact reaches the controller: the PLANT GATE, an ordinary FC04 read of input
+                register 53 ("Space heating/cooling normal operation"), which separates a real
+                space-heating window from a DHW cycle (register 52) or a standstill. On /status.modbus
+                as plant_gate_known/plant_gate_active — known=false means the register did not answer
+                and must NEVER read as an inactive plant.
 hp_poll.cpp     poll engine task: X10A ONLY — the HomeHub is a separate stack in hp_modbus.cpp with
                 its own task and cache, so nothing here branches on a transport and this task's 8192
                 stack is the one it ran on for months. (auto-detect if profile=="auto") profile
@@ -1735,12 +1730,11 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 this IS (unknowable); picking one is the USER stating the hardware;
                 modbus.hpp = Modbus TCP framing (MBAP, no CRC) + HomeHub register codecs
                 (Temp16/Pow16/Int16/Text16 decode+encode) + the homehub-* mDNS filter — the
-                host-tested core of the firmware-exclusive HomeHub Modbus link (issue #32). WIRED as
-                of P1/P2: hp_modbus.cpp is the socket around it and def/homehub.hpp the register map.
-                FC06 is private to hp_modbus.cpp's register-54 actuator transaction; FC16 remains
-                unused. homehub_actuator.hpp = the IDF-free, allocation-free WP3 policy/state machine:
-                typed requests, admission/ownership/priority/TTL gates, bounded coalescing, baseline,
-                echo, independent readback, restore and latched conflict evidence.
+                host-tested core of the firmware-exclusive HomeHub Modbus link (issue #32);
+                hp_modbus.cpp is the socket around it and def/homehub.hpp the register map. It builds
+                READS ONLY — there is no FC06/FC16 request builder, so this firmware cannot frame a
+                Modbus write (the encode half of the codecs stays because decode/encode are one
+                round-trip-tested pair).
                 homehub_map.hpp = WHICH X10A ROW A HOMEHUB REGISTER IS THE SAME QUANTITY AS — the
                 ENTIRETY of the sharing between the two otherwise-independent stacks, and the reason
                 the web UI can print a Modbus reading beside its X10A twin and let it stand in when
@@ -2035,8 +2029,9 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   drops strings — the #215 lesson applied at birth rather than after the fact. Every
                   term is null rather than 0 until the controller has actually computed it, since a
                   0.0 K offset it never proposed is a claim it never made — with ONE stated exception:
-                  `forecast_contribution_k` is the literal 0 unconditionally, because WP2 has no
-                  forecast term at all (the snapshot field is fixed at zero and nothing writes it).
+                  `forecast_contribution_k` is the literal 0 unconditionally, because the controller
+                  has no forecast term at all (the snapshot field is fixed at zero and nothing writes
+                  it — the forecast is evidence for comparing periods, never a control input).
                   A null there would claim the term exists and is merely unknown. There is no actuator
                   result in this block and cannot be one,
                   syslog{configured,resolved,reachable,host,port,error},
@@ -2063,7 +2058,7 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   values,task_stack_min_free_words,plant_gate_known,plant_gate_active
                   [,error,error_code,error_detail,error_register]}
                   — the HomeHub link diagnostics. READ-ONLY: there is no actuator object and no
-                  actuation flag (docs/MODBUS_ACTUATION.md). The PLANT GATE pair is input register 53,
+                  actuation flag — the link is read-only. The PLANT GATE pair is input register 53,
                   the one HomeHub fact the shadow controller consumes — `known` false means the
                   register did not answer and must never read as an inactive plant. `host` is the configured persistent
                   target (redacted like the other reporter-identifying values); empty means disabled.
@@ -2374,8 +2369,8 @@ POST /set_hp      {profile,rx,tx,mb_host,mb_port,mb_unit_id}
                   HomeHub fields (host, port, unit) persist in the atomic blob and apply live: the
                   httpd route calls mb_reconfigure(), while the Modbus task remains the sole socket
                   owner and retires/restarts itself as needed. `actuation_enabled` is NOT accepted —
-                  the register-54 write path is retired (#294, docs/MODBUS_ACTUATION.md), and an
-                  accepted-but-inert field would read like a capability that still exists. rx/tx
+                  the Modbus link is read-only, and an accepted-but-inert field would read like a
+                  capability that still exists. rx/tx
                   PERSIST (the physical
                   pin cache — a manual override survives reboot); profile is session-only. The UI
                   always sends profile="auto" (fully automatic — no manual model pick); a concrete id

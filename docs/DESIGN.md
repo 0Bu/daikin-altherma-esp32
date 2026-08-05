@@ -1262,7 +1262,7 @@ vocabulary exactly:
    project, shown only while the Firmware switch selects SHADOW. The card is a DIAGNOSIS, not a
    control: it records the leaving-water offset the weather-dependent curve would need, and the
    season aggregate of those proposals is the verdict. Nothing is written to the plant — the
-   firmware has no write path (`docs/MODBUS_ACTUATION.md`).
+   firmware has no write path (`docs/MODBUS_PROTOCOL.md`).
 
    Its four rows are **Status**, **Raumtemperaturquelle**, **Wetterprognose** and **Verfahren**.
    There is deliberately no fifth: the card must not restate the Firmware toggle as a second
