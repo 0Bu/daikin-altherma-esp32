@@ -6,8 +6,8 @@
 //
 // The buffers are STATIC storage, never heap: on this board the binding limit is the largest
 // CONTIGUOUS free block, not free heap, and a static array does not compete for it. Their non-zero
-// pending sentinel places the rings in .data. Twenty-five X10A/board/state rings cost 14400 bytes and
-// ten HomeHub rings another 5760 bytes — see logic/history.hpp's HISTORY_BYTES_PER_TREND and the
+// pending sentinel places the rings in .data. Thirty-one X10A/board/state rings cost 17856 bytes and
+// twelve HomeHub rings another 6912 bytes — see logic/history.hpp's HISTORY_BYTES_PER_TREND and the
 // ceiling asserts beside both arrays.
 //
 // RAM only, and deliberately not persisted: a 576-byte blob rewritten every 5 minutes is ~100k NVS
@@ -47,6 +47,10 @@ void history_reset();
 // Start a new HomeHub observation identity after host, port or unit-id changes. Like the X10A
 // reset, elapsed positions remain explicit gaps on the common boot-aligned 24-hour raster.
 void history_modbus_reset();
+
+// Start a new identity for the two optional external circulation witnesses without discarding the
+// independent X10A/HomeHub histories.
+void history_circulation_reset();
 
 // Copy trend `t`'s samples OLDEST-FIRST into `out`. Returns the count written (0 .. HISTORY_SAMPLES,
 // and 0 when the profile carries no such row or nothing has been recorded yet). Non-allocating under

@@ -10,6 +10,12 @@ const vNum = (re) => { const r = vRow(re); if (!r) return null; const n = parseF
 // Bit-flag values arrive as numeric 1/0 (logic/convert.hpp conv 300-307). null = row absent.
 const vOn = (re) => { const r = vRow(re); return r ? String(r.value).trim() === "1" : null; };
 
+// Page 0x20 / offset 2 across the supported model catalog. The sensor's physical role is stable
+// while Daikin's labels are not: ordinary air-source units call it the outdoor heat exchanger,
+// other families call the same location a deicer or two-phase thermistor. Keep the alternatives
+// exact so "Heat exchanger mid-temp." at offset 8 can never substitute for this R4T curve.
+const OUTDOOR_HX_RE = /^(?:2 phase thermistor \(R4T\)|O\/U Heat Exch\. Temp\.(?:\(R4T\))?|O\/U Heat Exchanger Temp|Outdoor heat exchanger temp\.|R4T-Deicer temp\.)$/i;
+
 // The outdoor unit's OWN register pages — logic/ou_stale.hpp's ou_page_holds_over(), transcribed:
 // 0x20 (outdoor sensors) and 0x21 (inverter) are only refreshed while the compressor runs, so with
 // it stopped every row on them is the LAST RUN's value. Keyed on the row's REGISTER, which /values
@@ -139,10 +145,12 @@ function liveData() {
   const cts = (S._values || []).filter((x) => /current measured by ct/i.test(x.label || "") && x.value != null);
   const ct = cts.reduce((a, x) => a + (parseFloat(x.value) || 0), 0);
   const inv = vNum(/inv primary current/i);
+  const postBuh = postBuhRow();
   const d = {
     lwt, ret,
     dt: lwt != null && ret != null ? lwt - ret : null,
     out: vNum(/outdoor air/i),
+    ouHx: vNum(OUTDOOR_HX_RE),
     flow: vNum(/flow sensor/i),
     wp: vNum(/^water pressure$/i),
     rps: vNum(/inv frequency/i),
@@ -151,6 +159,8 @@ function liveData() {
     rp: vNum(/^refrigerant pressure sensor$/i),
     disch: vNum(/discharge pipe temp/i),
     eev: vNum(/expansion valve ?1/i),
+    r2t: postBuh && Number.isFinite(parseFloat(postBuh.value)) ? parseFloat(postBuh.value) : null,
+    r3t: vNum(/refrig\. temp\. liquid side/i),
     tank: vNum(/dhw tank temp/i),
     tankSet: vNum(/dhw setpoint/i),
     room: vNum(/^indoor ambient temp/i),
@@ -165,6 +175,8 @@ function liveData() {
     // documented data model (§9.2.2) and are the one thing about a HomeHub row that cannot be
     // re-spelled.
     valveDhw: stateOf(/3.?way valve/i, 37),        // label documents On:DHW / Off:Space
+    valveHeat: stateOf(/2.?way valve/i),           // true = heating, false = cooling
+    flowSwitch: stateOf(/water flow switch/i),
     buh1: vOn(/buh step ?1/i),
     buh2: vOn(/buh step ?2/i),
     // Exact anchor is intentional: "Thermal protector BSH" is a different flag. BSH is the tank's
@@ -380,8 +392,9 @@ function liveData() {
 // SVG now stays on screen when the bus goes quiet (it holds the status block — see renderLive), so
 // leaving the last readings in place would assert values nobody is measuring any more.
 const SCHEM_PILL_IDS = [
-  "svOut", "svRps", "svHp", "svLp", "svDisch", "svEev", "svLwt", "svRwt", "svDt",
+  "svOut", "svOuHx", "svRps", "svHp", "svLp", "svDisch", "svEev", "svLwt", "svRwt", "svDt",
   "svFlow", "svWp", "svPump", "svTank", "svTankSet", "svRoom", "svRoomSet", "svPth", "svCop", "svPel",
+  "svR2t", "svR3t", "svValve2", "svFlowSwitch",
 ];
 // A held outdoor-unit row has no current X10A value. It may still have a current replacement from
 // the independent Modbus stack; mbFields is the proof that `n` is that replacement, not the retained
@@ -403,6 +416,10 @@ function updateSchematicStateA11y(d) {
       !d || d.defrost == null ? "—" : t(d.defrost ? "state.on" : "state.off"));
   set("gQuietState", t("chip.quiet"),
       !d || d.quiet == null ? "—" : t(d.quiet ? "state.on" : "state.off"));
+  set("g2wv", t("schem.valve_heat"),
+      !d || d.valveHeat == null ? "—" : t(d.valveHeat ? "enum.heating" : "enum.cooling"));
+  set("gFlowSwitch", t("schem.flow_switch"),
+      !d || d.flowSwitch == null ? "—" : t(d.flowSwitch ? "state.on" : "state.off"));
 }
 
 function clearSchematic() {
@@ -413,7 +430,7 @@ function clearSchematic() {
   setTxt("svCopLabel", "COP");
   const sc = $("schem");
   ["fan-on", "pump-on", "buh-on", "bsh-on", "defrost-on", "quiet-on", "sg-boost-on",
-   "cooling-mode", "water-neutral"].forEach((c) => sc.classList.remove(c));
+   "cooling-mode", "water-neutral", "valve-heat", "flow-switch-on"].forEach((c) => sc.classList.remove(c));
   updateSchematicStateA11y(null);
   sc.classList.add("no-spaceh");       // no flag to show; the pill would otherwise sit stale
   $("schem").querySelectorAll(".sc-flow, .sc-rflow").forEach((el) => el.classList.remove("on", "rev"));
@@ -429,7 +446,7 @@ function renderLive() {
   // the known pill set rather than per setTxt, so a pill that stops being Modbus-sourced cannot keep
   // the colour from a previous cycle.
   const mbf = (d && d.mbFields) || new Set();
-  // The six paired pills come from MB_PAIRS; the four DERIVED ones have no register and so no
+  // The eight paired pills come from MB_PAIRS; the four DERIVED ones have no register and so no
   // concept — they are marked because their inputs were (liveData adds them to mbFields).
   const MB_PILL = { ...Object.fromEntries(MB_PAIRS.map((p) => [p.fld, p.pill])),
                     pel: "svPel", dt: "svDt", pth: "svPth", cop: "svCop" };
@@ -456,11 +473,12 @@ function renderLive() {
   setTxt("svBuh", d.buh2 ? "\u00A02" : d.buh1 ? "\u00A01" : "");
 
   // Schematic badges
-  // Outdoor air + discharge come off the pages the outdoor unit stops refreshing when it stops
+  // Outdoor air, outdoor heat exchanger and discharge come off the pages the outdoor unit stops refreshing when it stops
   // running (d.ouHeldOver): never assert the retained X10A number as current. Outdoor air may instead
   // carry the independent HomeHub register (`mbFields.out`); discharge has no such pairing and
   // keeps the ordinary "—". Petrol makes the replacement source visible without adding a caption.
   setTxt("svOut", ouReadingText(d, "out", d.out, fmt1)); setTxt("svRps", fmt0(d.rps));
+  setTxt("svOuHx", ouReadingText(d, "ouHx", d.ouHx, fmt1));
   // High-side badge shows the circuit pressure (real refrigerant sensor when the compressor's own HP
   // transducer is idle-zero — see d.circP). Low/suction side has no equivalent at-rest gauge, so show
   // "—" rather than a misleading 0.0 bar when the compressor is off.
@@ -468,6 +486,9 @@ function renderLive() {
   setTxt("svLp", !d.ouHeldOver && d.lp != null && d.lp > 0 ? fmt1(d.lp) : "—");
   setTxt("svDisch", ouReadingText(d, "disch", d.disch, fmt0)); setTxt("svEev", fmt0(d.eev));
   setTxt("svLwt", fmt1(d.lwt)); setTxt("svRwt", fmt1(d.ret));
+  setTxt("svR2t", fmt1(d.r2t)); setTxt("svR3t", fmt1(d.r3t));
+  setTxt("svValve2", d.valveHeat == null ? "—" : t(d.valveHeat ? "enum.heating" : "enum.cooling"));
+  setTxt("svFlowSwitch", d.flowSwitch == null ? "—" : t(d.flowSwitch ? "state.on" : "state.off"));
   // ΔT only means something with water moving (d.dtStale, decided in liveData so the explainer
   // gates on the very same fact). Same reasoning as the derived kW/COP, which already gate.
   setTxt("svDt", d.dtStale ? "—" : fmt1(d.dt)); setTxt("svFlow", fmt1(d.flow));
@@ -500,6 +521,8 @@ function renderLive() {
   sc.classList.toggle("bsh-on", bshActive);
   sc.classList.toggle("defrost-on", d.defrost === true);
   sc.classList.toggle("quiet-on", d.quiet === true);
+  sc.classList.toggle("valve-heat", d.valveHeat === true);
+  sc.classList.toggle("flow-switch-on", d.flowSwitch === true);
   // Water always moves in the same hydraulic direction, but its THERMAL role reverses in cooling:
   // the supply is cold and the return warm. With the compressor stopped neither colour is earned —
   // the live 57 °C case was residual heat being circulated, so use a neutral moving trace instead.
@@ -687,7 +710,7 @@ const INSPECT = {
               de: "Standby — der Verdichter steht, daher findet kein aktiver Heiz- oder Kühltransfer statt. X10A aktualisiert die eigenen Sensoren der Außeneinheit im Stillstand nicht mehr; die Außentemperatur stammt deshalb aus dem HomeHub-Modbus-Register, die Heißgastemperatur bleibt „—“. Das Register wird erfolgreich gelesen, trägt aber keinen Quellzeitstempel; das Alter der zugrunde liegenden Messung ist daher unbekannt." }
           : { en: "Idle — the compressor is stopped, so no active heating or cooling transfer is taking place. The outdoor unit also stops refreshing its own sensors while it rests, so outdoor air and discharge temperature read \"—\" rather than repeat the last run's values.",
               de: "Standby — der Verdichter steht, daher findet kein aktiver Heiz- oder Kühltransfer statt. Die Außeneinheit aktualisiert im Stillstand auch ihre eigenen Sensoren nicht mehr; Außenluft und Heißgastemperatur zeigen daher „—“ statt die Werte des letzten Laufs zu wiederholen." },
-    rows: [/outdoor air/i, /inv frequency/i, /^high pressure$/i, /discharge pipe temp/i, /expansion valve ?1/i, /defrost operation/i],
+    rows: [/outdoor air/i, OUTDOOR_HX_RE, /inv frequency/i, /^high pressure$/i, /discharge pipe temp/i, /expansion valve ?1/i, /defrost operation/i],
   },
   comp: {
     t: { en: "Compressor", de: "Verdichter" },
@@ -695,6 +718,19 @@ const INSPECT = {
     rows: [/inv frequency/i, /inv primary current/i, /discharge pipe temp/i],
   },
   out: { t: { en: "Outdoor air", de: "Außentemperatur" }, re: /outdoor air/i, sample: "Outdoor Air Temp. (R1T)" },
+  ouhx: {
+    t: {
+      en: "Outdoor heat-exchanger temperature (R4T)",
+      de: "Außengeräte-Wärmetauschertemperatur · R4T",
+    },
+    re: OUTDOOR_HX_RE,
+    sample: "O/U Heat Exch. Temp.(R4T)",
+    trend: "outdoor_heat_exchanger",
+    what: {
+      en: "Temperature at the outdoor air heat exchanger. In heating mode the coil can fall below freezing and accumulate frost; its temperature and the defrost state together show when the controller is protecting and clearing the coil.",
+      de: "Temperatur am Außenluft-Wärmetauscher. Im Heizbetrieb kann der Wärmetauscher unter den Gefrierpunkt fallen und bereifen; Temperatur und Abtaustatus zeigen gemeinsam, wann die Regelung den Wärmetauscher schützt und abtaut.",
+    },
+  },
   // ── One pill, one reading, one entry ──────────────────────────────────────────────────────────
   // The high side and the low side used to be ONE pill each carrying two readings ("28.4 bar ·
   // 71.2 °C"), and one entry explaining the pair. Split into separate pills, each needs its own
@@ -740,6 +776,15 @@ const INSPECT = {
     re: /expansion valve ?1/i, sample: "Expansion valve 1 (pls)",
     rows: [/expansion valve ?1/i, /^low pressure$/i],
   },
+  r3t: {
+    t: { en: "Refrigerant liquid-side temperature (R3T)", de: "Kältemittel-Flüssigkeitstemperatur · R3T" },
+    re: /refrig\. temp\. liquid side/i, sample: "Refrig. Temp. liquid side (R3T)",
+    trend: "refrigerant_liquid",
+    what: {
+      en: "Temperature of the refrigerant on the liquid side of the indoor heat exchanger. It is a refrigerant sensor, not a water-return temperature.",
+      de: "Temperatur des Kältemittels auf der Flüssigkeitsseite des Innenwärmetauschers. Das ist ein Kältemittelfühler und keine Wasser-Rücklauftemperatur.",
+    },
+  },
   phe: {
     t: { en: "Plate heat exchanger", de: "Plattenwärmetauscher" },
     what: {
@@ -769,6 +814,15 @@ const INSPECT = {
     t: { en: "PHE water outlet (pre-BUH, R1T)", de: "PHE-Wasseraustritt · vor BUH · R1T" },
     pick: lwtRow,
     sample: "Leaving Water Temp. before BUH (R1T)",
+  },
+  r2t: {
+    t: { en: "Leaving water after BUH/pump (R2T)", de: "Vorlauf nach BUH/Pumpe · R2T" },
+    pick: postBuhRow, sample: "Leaving water temp. after BUH (R2T)",
+    trend: "leaving_water_post_buh",
+    what: {
+      en: "Water temperature after the backup heater and circulation pump, before the field valves. Unlike R1T, it includes heat added by the BUH.",
+      de: "Wassertemperatur hinter Zusatzheizer und Umwälzpumpe, vor den bauseitigen Ventilen. Anders als R1T enthält sie die vom BUH eingebrachte Wärme.",
+    },
   },
   rwt: { t: { en: "PHE water inlet (R4T)", de: "PHE-Wassereintritt · R4T" }, re: /inlet water/i, sample: "Inlet Water Temp. (R4T)" },
   dt: {
@@ -917,6 +971,14 @@ const INSPECT = {
       : d.valveDhw ? { en: "Diverted to the hot-water tank — the space circuit is paused meanwhile.",
                        de: "Auf den Warmwasserspeicher geschaltet — der Raumkreis pausiert solange." }
                    : { en: "Diverted to the space circuit.", de: "Auf den Raumkreis geschaltet." },
+  },
+  valve2: {
+    t: { en: "2-way valve · heating/cooling", de: "2-Wege-Ventil · Heizen/Kühlen" },
+    re: /2.?way valve/i, sample: "2way valve(On:Heat_Off:Cool)", trend: "valve_heat",
+    head: (d) => d.valveHeat == null ? "—" : t(d.valveHeat ? "enum.heating" : "enum.cooling"),
+    now: (d) => d.valveHeat == null ? null : d.valveHeat
+      ? { en: "Heating position selected.", de: "Heizstellung gewählt." }
+      : { en: "Cooling position selected.", de: "Kühlstellung gewählt." },
   },
   tank: {
     t: { en: "DHW tank / thermal store", de: "Warmwasser-/Wärmespeicher" },
@@ -1101,6 +1163,15 @@ const INSPECT = {
     t: { en: "Flow rate", de: "Durchfluss" },
     re: /flow sensor/i, sample: "Flow sensor",
     rows: [/flow sensor/i, /^water pressure$/i, /water pump signal/i],
+  },
+  flow_switch: {
+    t: { en: "Water flow switch", de: "Wasserströmungsschalter" },
+    re: /water flow switch/i, sample: "Water flow switch", trend: "water_flow_switch",
+    head: (d) => d.flowSwitch == null ? "—" : t(d.flowSwitch ? "state.on" : "state.off"),
+    now: (d) => d.flowSwitch == null ? null : d.flowSwitch
+      ? { en: "Closed — the controller has a binary flow proof.", de: "Geschlossen — die Regelung hat eine binäre Strömungsfreigabe." }
+      : { en: "Open — no binary flow proof. Compare this with the measured flow rate.", de: "Offen — keine binäre Strömungsfreigabe. Mit dem gemessenen Volumenstrom vergleichen." },
+    rows: [/water flow switch/i, /flow sensor/i, /water pump operation/i],
   },
   wp: {
     t: { en: "Water pressure", de: "Wasserdruck" },

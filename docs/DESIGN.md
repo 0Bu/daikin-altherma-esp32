@@ -667,7 +667,7 @@ Body, ordered:
    **In the inspector it is the same chart, for the reading the pill RESOLVED.** For an unpaired
    same-stack fallback, the exact X10A row still decides it: while the high side reads the
    refrigerant sensor instead of the frozen HP transducer, the headline, mono source line and chart
-   are that one row. The six structurally paired schematic measurements are different: their X10A
+   are that one row. The eight structurally paired schematic measurements are different: their X10A
    and HomeHub rings are two instruments for one concept, so the chart draws both on one time/value
    scale, names them with a blue `X10A` and petrol `HomeHub · Modbus` legend, and reads both values at
    the same cursor instant. If X10A has no sample, its line has a gap while the petrol Modbus line may
@@ -688,9 +688,10 @@ Body, ordered:
    failed to measure outranks "nothing failed", since that is the stronger claim.
    The COP is the one that is deliberately drawn on fewer samples than its own inputs. A CT-sourced
    sample is left out entirely: `cop_scope.hpp`'s live boundary can move to post-BUH R2T when the
-   resistive heater fires, while the trend buffers only the pre-BUH heat side; BSH heat crosses
-   neither water sensor. The two BUH stages are now buffered for their own categorical timeline,
-   but that does not manufacture the missing post-BUH/tank heat needed for a whole-plant quotient.
+   resistive heater fires, and R2T now has its own curve, but BSH heat crosses neither water sensor.
+   The derived COP deliberately retains the conservative single-boundary rule rather than splicing
+   a whole-plant quotient from five-minute last-sample rings whose heater and temperature events may
+   have occurred at different instants within the bucket.
    An inverter-sourced sample needs no such evidence (both heaters sit outside both sides), which is
    why that is the branch that survives. Refusing the other is the same answer the live pill gives
    when it cannot pair the boundaries, not a relaxation of it.
@@ -711,17 +712,18 @@ Body, ordered:
    X10A sample into the live end remains the §5.3-item-3 substitution failure with a 24-hour axis in
    front of it.
    **Which rows are trended is decided by this drawing.** Every numeric value the schematic shows has
-   a curve — leaving/return water, tank, water pressure, flow, pump signal, refrigerant pressure,
-   compressor rps, expansion valve, outdoor air, discharge temp, room temp, and the five computed
+   a curve — pre- and post-BUH leaving water, return water, tank, water pressure, flow, pump signal,
+   refrigerant pressure and liquid temperature, compressor rps, expansion valve, outdoor air,
+   outdoor-coil and discharge temperatures, room temperature, and the five computed
    pills above — because those are the readings someone is actually looking at. That rule is also
-   what keeps the cost small: the drawing holds ~16 numeric pills, while a profile publishes ~66
+   what keeps the cost small: the drawing holds about twenty numeric pills, while a profile publishes ~66
    numeric rows, and ringing all of them would cost ~38 KB of `.bss` — about a third of the low-water
    free heap measured on the reference board — for curves nobody opened. A value row reached through
    the LIST (§6) gets a chart where a trend already exists and none where it does not.
-   HomeHub adds ten second rings: leaving water, return water, DHW tank, outdoor air, flow and room
-   temperature are the six measurement concepts both sources structurally pair; BSH and the 3-way
-   valve are the seventh and eighth converter-qualified pairs, Quiet is the ninth exact state pair,
-   and the tenth is the explicit Smart-Grid-mode timeline. Every categorical timeline uses the same
+   HomeHub adds twelve second rings: pre- and post-BUH leaving water, return water, DHW tank, outdoor
+   air, liquid refrigerant, flow and room temperature are the eight measurement concepts both sources
+   structurally pair; BSH, the 3-way valve and Quiet are exact state pairs, and the twelfth ring is the
+   explicit Smart-Grid-mode timeline. Every categorical timeline uses the same
    grammar: one outlined track per available source, a separate labelled colour for every valid
    state, and hatching only for missing samples. Hover, touch pinning and keyboard navigation show a
    compact popup with source, state, phase start/end and sampled duration; those details are not

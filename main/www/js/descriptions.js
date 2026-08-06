@@ -622,12 +622,12 @@ const mbFallbackFor = (cid) => (x10aDown() && mbLive() ? mbByConcept(cid) : null
 // to readings.
 const mbTwin = (row) => (row && !x10aDown() ? mbByConcept(row.concept) : null);
 
-// The six quantities BOTH sources measure, in ONE table. Each row names the same thing three ways:
+// The eight quantities BOTH sources measure, in ONE table. Each row names the same thing three ways:
 // the field liveData fills, the schematic pill that draws it, the INSPECT target that pill opens —
 // against the CONCEPT the firmware paired them on (logic/homehub_map.hpp, resolved structurally by
 // register/offset/unit, never by label).
 //
-// One table because these were three separate lists of the same six things, and they had already
+// One table because these were three separate lists of the same things, and they had already
 // drifted: liveData's field is `ret` where the INSPECT target is `rwt`. Three lists are three
 // chances to disagree, and the disagreement is SILENT in the worst direction — a name that matches
 // nothing means the second source simply never appears, which looks exactly like a HomeHub that
@@ -635,9 +635,11 @@ const mbTwin = (row) => (row && !x10aDown() ? mbByConcept(row.concept) : null);
 // cannot show a wrong value, only no value.
 const MB_PAIRS = [
   { fld: "lwt",  pill: "svLwt",  insp: "lwt",  cid: "leaving_water" },
+  { fld: "r2t",  pill: "svR2t",  insp: "r2t",  cid: "leaving_water_post_buh" },
   { fld: "ret",  pill: "svRwt",  insp: "rwt",  cid: "return_water"  },
   { fld: "tank", pill: "svTank", insp: "tank", cid: "dhw_tank"      },
   { fld: "out",  pill: "svOut",  insp: "out",  cid: "outdoor_air"   },
+  { fld: "r3t",  pill: "svR3t",  insp: "r3t",  cid: "refrigerant_liquid" },
   { fld: "flow", pill: "svFlow", insp: "flow", cid: "flow"          },
   { fld: "room", pill: "svRoom", insp: "room", cid: "room_temp"     },
 ];

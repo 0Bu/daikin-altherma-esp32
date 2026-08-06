@@ -53,6 +53,7 @@
 #include "env3.hpp"
 #include "hp_poll.hpp"
 #include "hp_modbus.hpp"
+#include "history.hpp"
 #include "logic/availability.hpp"
 #include "logic/convert.hpp"   // conv_is_binary, published_kind — a row's wire type and entity domain
 #include "logic/crashinfo.hpp"
@@ -2482,6 +2483,7 @@ void mqtt_circulation_reconfigure() {
     s_circulation_reconfigure = true;
     s_circulation_probe_reconfigure = true;
     checkup_dhw_reset();                // source identity/threshold changes invalidate attribution only
+    history_circulation_reset();
     if (!s_mtx) return;
     Lock lk(s_mtx);
     s_circulation_probe.active = false;

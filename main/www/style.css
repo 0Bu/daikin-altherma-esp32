@@ -293,6 +293,11 @@ svg .sc-snow .sc-val, svg .sc-quiet .sc-val {
    demand; --ok means the documented operation state is ON, while the text carries the exact fact. */
 #gSpaceH.on .sc-pill { stroke: var(--ok); }
 #gSpaceH.on .sc-val { fill: var(--ok); }
+.sc-selector .sc-pill { fill: var(--hatch); stroke: var(--pipe); transition: fill .3s, stroke .3s; }
+.valve-heat #g2wv .sc-pill, .flow-switch-on #gFlowSwitch .sc-pill {
+  fill: var(--brand); fill-opacity: .11; stroke: var(--brand);
+}
+.valve-heat #g2wv .sc-val, .flow-switch-on #gFlowSwitch .sc-val { fill: var(--brand-strong); }
 /* ── Clickable schematic: every value pill and component is a hit target ──────────────────────
    Hover/focus/selected all reinforce the SAME affordance (the shape's outline turns brand) so the
    picture reads as explorable without adding a single visual element to the drawing. Selected is
@@ -722,7 +727,8 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 }
 .vhist-state-on.quiet-on, .vhist-level.quiet-on i,
 .vhist-state-on.step1, .vhist-level.step1 i,
-.vhist-state-on.valve-space, .vhist-level.valve-space i {
+.vhist-state-on.valve-space, .vhist-level.valve-space i,
+.vhist-state-on.valve-cool, .vhist-level.valve-cool i {
   background: var(--brand-sky);
 }
 .vhist-state-on.heater-on, .vhist-level.heater-on i,
@@ -731,6 +737,9 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-state-on.sg-forced-on, .vhist-level.sg-forced-on i {
   background: var(--warn);
 }
+.vhist-state-on.valve-heat, .vhist-level.valve-heat i { background: var(--brand); }
+.vhist-state-on.circulation-on, .vhist-level.circulation-on i,
+.vhist-state-on.flow-switch-on, .vhist-level.flow-switch-on i { background: var(--ok); }
 .vhist-state-on.sg-forced-off, .vhist-level.sg-forced-off i {
   background: var(--err);
 }
@@ -740,6 +749,8 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 /* Source identity wins the cascade for the lower lane. Keep this after every state-fill rule: the
    state class still drives X10A and the tooltip wording, but must not repaint Modbus cyan/orange. */
 .vhist-state-on.mb { background: var(--src-mb); }
+
+.modal-subtitle { margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
 /* The SVG stretches to the panel width; overflow stays visible so the stroke isn't clipped at the
    extremes (the geometry deliberately uses the full viewBox height — see HIST_H in app.js). */
 /* The tooltip gets its OWN strip above the plot: it follows the cursor horizontally (Grafana-style)

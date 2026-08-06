@@ -101,8 +101,12 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
   assert.match(index, /id="gBshState"[\s\S]*?data-i18n="schem\.bsh_label"/,
     "the heater pill keeps only its stable component name");
   assert.match(index,
-    /class="sc-bsh-state-box" x="541" y="278" width="70" height="20" rx="10"/,
+    /class="sc-bsh-state-box" x="541" y="288" width="70" height="20" rx="10"/,
     "the heater pill stays compact and centred inside the tank");
+  assert.match(index, /class="sc-box sc-tank" x="518" y="258" width="120" height="140"/,
+    "the DHW tank keeps the shared compact consumer width");
+  assert.match(index, /class="sc-box" x="660" y="258" width="120" height="140"/,
+    "the space circuit matches the DHW tank width without squeezing its contents");
   assert.doesNotMatch(index, /id="svSgRequest"/,
     "the Boost pill has no visible active/inactive second line");
   assert.match(style, /svg \.sc-bsh-state-box \{[^}]*fill:\s*var\(--hatch\)/,
@@ -120,18 +124,20 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
       `${id} must remain interactive while inactive`);
     assert.doesNotMatch(index, new RegExp(`id="${id}"[^>]*aria-hidden`));
   }
-  assert.match(index, /<g transform="translate\(74 244\)">[\s\S]*?id="scFan"/,
-    "the fan occupies the vertically centred left side of the outdoor-unit component row");
-  assert.match(index, /data-insp="comp"[\s\S]*?<circle class="sc-comp" cx="158" cy="244" r="26"/,
-    "the compressor shares the fan's vertical centre on the right side of the component row");
+  assert.match(index, /<g transform="translate\(74 231\)">[\s\S]*?id="scFan"/,
+    "the fan is vertically centred between the outdoor-unit heading and first pill");
+  assert.match(index, /data-insp="comp"[\s\S]*?<circle class="sc-comp" cx="158" cy="231" r="26"/,
+    "the compressor shares the fan's vertical centre between heading and first pill");
   assert.match(index, /id="gQuietState"[\s\S]*?<rect class="sc-pill sc-ou-mode-pill" x="62" y="316" width="104" height="22" rx="11"[\s\S]*?<text class="sc-val" x="114" y="331"/,
-    "Quiet starts the bottom-aligned outdoor pill column");
+    "Quiet follows the electrical-input row in the outdoor pill column");
   assert.match(index, /id="gDefrostState"[\s\S]*?<rect class="sc-pill sc-ou-mode-pill" x="62" y="348" width="104" height="22" rx="11"[\s\S]*?<text class="sc-val" x="114" y="363"/,
     "Defrost follows Quiet in the single centred outdoor pill column");
   assert.match(index, /data-insp="out"[\s\S]*?<rect class="sc-pill sc-ou-reading" x="62" y="380" width="104" height="22" rx="11"/,
     "outdoor air uses the shared outdoor readout geometry");
-  assert.match(index, /data-insp="pel"[\s\S]*?<rect class="sc-pill sc-ou-reading" x="62" y="412" width="104" height="22" rx="11"/,
-    "electrical input ends the pill column 16 px above the outdoor-unit bottom");
+  assert.match(index, /data-insp="pel"[\s\S]*?<rect class="sc-pill sc-ou-reading" x="62" y="288" width="104" height="22" rx="11"/,
+    "electrical input starts the outdoor pill column below the component row");
+  assert.match(index, /data-insp="ouhx"[\s\S]*?<rect class="sc-pill sc-ou-reading" x="62" y="412" width="104" height="22" rx="11"/,
+    "outdoor heat-exchanger R4T ends the pill column above the outdoor-unit bottom");
   assert.match(style, /svg \.sc-snow \.sc-pill, svg \.sc-quiet \.sc-pill \{[^}]*fill:\s*var\(--hatch\)[^}]*stroke:\s*var\(--pipe\)/,
     "inactive outdoor-mode pills use the neutral grey treatment");
   assert.match(style, /\.defrost-on \.sc-snow \.sc-pill, \.quiet-on \.sc-quiet \.sc-pill \{[^}]*stroke:\s*var\(--brand\)/,
@@ -526,7 +532,7 @@ const M_QUIET = (on) => M_FLAG(9, "Quiet mode operation", on, "quiet_state");
 // pinned here rather than left to be re-derived.
 {
   const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true });
-  assert.equal(c.MB_PAIRS.length, 6, "six measurement pairings");
+  assert.equal(c.MB_PAIRS.length, 8, "eight measurement pairings");
   for (const p of c.MB_PAIRS) {
     for (const k of ["fld", "pill", "insp", "cid"]) {
       assert.equal(typeof p[k], "string", `MB_PAIRS entry needs ${k}`);
