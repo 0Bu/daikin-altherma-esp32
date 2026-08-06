@@ -509,8 +509,8 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vrow-val { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--fg); white-space: nowrap; }
 .vrow-val.ok { color: var(--ok); } .vrow-val.warn { color: var(--warn); } .vrow-val.err { color: var(--err); }
 .vrow-val.dim { color: var(--muted); }
-/* Checkup values combine the reading with one short textual verdict. Keep them right-aligned and
-   wrappable for the heater's two runtimes on narrow phones. */
+/* Checkup rows show only their textual status. Keep even the longer unavailable/observation labels
+   right-aligned and wrappable on narrow phones; readings and assessments live in the explainer. */
 .vrow-val.checkup-val {
   min-width: 0; white-space: normal; overflow-wrap: anywhere; text-align: right; line-height: 1.35;
 }

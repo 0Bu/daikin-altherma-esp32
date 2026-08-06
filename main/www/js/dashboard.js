@@ -690,8 +690,9 @@ const CHECKUP_ROW = {
   heater:   "check.heater",
   retries:  "check.retries",
 };
-// Verdict → row value colour and card-dot colour. The word beside the reading is the primary signal;
-// colour only makes the five states faster to scan and never carries meaning on its own.
+// Verdict → row-status colour and card-dot colour. The collapsed row deliberately carries only this
+// status; its reading and assessment live together in the explainer so the card remains scannable.
+// Colour only makes the states faster to scan and never carries meaning on its own.
 const CHECKUP_TONE = { warn: "err", info: "warn", ok: "ok", collecting: "dim",
                        observation: "dim", experimental: "dim", unavailable: "dim" };
 
@@ -719,6 +720,7 @@ function checkupStatusText(c) {
 
 function checkupDetailHtml(c) {
   const statusKey = checkupStatusKey(c);
+  const value = checkupMetricValue(c);
   let detail;
   if (statusKey === "collecting") {
     detail = c.required_s > 0
@@ -727,7 +729,9 @@ function checkupDetailHtml(c) {
   } else {
     detail = t(`check.detail.${statusKey}`);
   }
-  return descNoteHtml(t("check.detail.label"), `${checkupStatusText(c)} — ${detail}`);
+  const reading = value ? descNoteHtml(t("check.detail.value_label"), value) : "";
+  return reading + descNoteHtml(t("check.detail.assessment_label"),
+                                `${checkupStatusText(c)} — ${detail}`);
 }
 
 function checkupDefrostShare(c) {
@@ -813,9 +817,7 @@ function checkupMetricValue(c) {
 }
 
 function checkupValue(c) {
-  const value = checkupMetricValue(c);
-  const status = checkupStatusText(c);
-  return value ? `${value} · ${status}` : status;
+  return checkupStatusText(c);
 }
 
 function checkupCardHtml() {

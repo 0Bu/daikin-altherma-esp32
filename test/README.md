@@ -123,9 +123,9 @@ must still open on **Custom**, then verifies that an explicitly chosen AtomS3 Li
 when LED/reset are disabled. It also covers the integrated ENV III section: hidden and disabled for
 Custom/Seeed, visible for M5Stack, with safe distinct SDA/SCL defaults and explicit disable payload.
 
-`node test/test_ui_checkup.mjs` executes the production X10A observation-card renderer without a
-browser. It pins the concise evidence-bounded English/German status words, evidence progress and
-limits in the row explainers, conservative
+`node test/test_ui_checkup.mjs` executes the production plant-diagnostics card renderer without a
+browser. It pins status-only collapsed rows, values and assessments in the row explainers, the
+concise evidence-bounded English/German status words, evidence progress and limits, conservative
 duration rounding, raw defrost-ratio and sub-minute BUH/BSH fields, independent fault/defrost null
 handling, `available`/`assessable`/`evaluated`, the actual `/status.health` serializer keys, mobile
 evidence wrapping, old-payload fallbacks, per-row observation clocks, the two-stage pressure copy,
