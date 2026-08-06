@@ -303,12 +303,13 @@ function histScale(pts, sampleCount) {
 // 5-minute bucket and therefore the authoritative alignment even before SNTP; wall time is the next
 // choice, and tail alignment is the backwards-compatible fallback for an older response. A missing
 // sample stays null in its own series — the other instrument may still draw at that instant.
-function historyView(id) {
+function historyView(id, source = "") {
   const x10aName = id === "circulation_state" ? "MQTT" : "X10A";
   const raw = [
     { source: "x10a", name: x10aName, h: S.hist.get(id) },
     { source: "modbus", name: "HomeHub · Modbus", h: S.hist.get(histCacheKey(id, "modbus")) },
-  ].filter((s) => s.h && !s.h.err && Array.isArray(s.h.v) && s.h.v.length);
+  ].filter((s) => (!source || s.source === source) &&
+    s.h && !s.h.err && Array.isArray(s.h.v) && s.h.v.length);
   if (!raw.length) return null;
 
   const dt = raw[0].h.dt || 300;
@@ -401,6 +402,7 @@ const STATE_HIST = Object.freeze({
   smart_grid_mode: {
     classify: (v) => [0, 10, 20, 30].includes(v) ? v === 20 : null,
     primary: "modbus", total: "hist.boost_total", run: "hist.state_phase_run",
+    compactTooltip: true,
     none: "hist.boost_none", active: "hist.boost_active", inactive: "hist.boost_inactive",
     aria: "hist.boost_aria",
     // BOOST itself is mode 2, but a Boost inspector that paints modes 0, 1 and 3 as one identical
@@ -421,6 +423,7 @@ const STATE_HIST = Object.freeze({
   bsh_state: {
     classify: (v) => [0, 10].includes(v) ? v === 10 : null,
     primary: "x10a", total: "hist.heater_total", run: "hist.state_phase_run",
+    compactTooltip: true,
     none: "hist.heater_none", active: "hist.heater_active", inactive: "hist.heater_inactive",
     aria: "hist.heater_aria",
     levels: [
@@ -433,9 +436,12 @@ const STATE_HIST = Object.freeze({
   buh_state: {
     classify: (v) => [0, 10, 20].includes(v) ? v > 0 : null,
     primary: "x10a", total: "hist.buh_total", run: "hist.state_phase_run",
+    compactTooltip: true,
     none: "hist.buh_none", active: "hist.buh_active", inactive: "hist.buh_inactive",
     aria: "hist.buh_aria",
     valueLabel: (v) => v === 0 ? "hist.buh_inactive"
+      : v === 10 ? "hist.buh_step1" : v === 20 ? "hist.buh_step2" : "",
+    compactValueLabel: (v) => v === 0 ? "hist.state_off"
       : v === 10 ? "hist.buh_step1" : v === 20 ? "hist.buh_step2" : "",
     levels: [
       { match: (v) => [0, 10, 20].includes(v) ? v === 0 : null,
@@ -565,6 +571,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     : "";
 
   const pi = histPinIndex(id, view);
+  const sourceAttr = view.series.length === 1 ? ` data-source="${esc(view.series[0].source)}"` : "";
   let pinTip = "", pinCross = "";
   if (pi >= 0) {
     const px = (scrubFrac(pi, n) * 100).toFixed(3);
@@ -578,7 +585,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
       `<span class="vhist-range mono num">${esc(totalText)}</span></div>` + levelLegend +
     `<div class="vhist-graph vhist-state-graph${pi >= 0 ? " has-pin" : ""}">` +
       `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +
-      `<div class="vhist-plot vhist-state-plot" data-hist="${esc(id)}" data-n="${n}" tabindex="0" role="img"` +
+      `<div class="vhist-plot vhist-state-plot" data-hist="${esc(id)}"${sourceAttr} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(cfg.aria, name || id, totalText))}">` + tracks + pinCross +
         `<span class="vhist-cross vhist-live" hidden></span>` +
       `</div>` +
@@ -594,13 +601,14 @@ function stateHistHtml(id, name, view, wrap, cfg) {
 // GAPS (a timed-out register, or a reading reading_plausible() refused) and must break the line —
 // interpolating across them would draw a measurement that was never taken, which is exactly the
 // failure the blanked pills elsewhere in this UI exist to prevent.
-function histHtml(id, unit, name) {
-  const offeredX = hasHist(id), offeredM = hasModbusHist(id);
+function histHtml(id, unit, name, source = "") {
+  const offeredX = source !== "modbus" && hasHist(id);
+  const offeredM = source !== "x10a" && hasModbusHist(id);
   if (!offeredX && !offeredM) return "";
   const hx = offeredX ? S.hist.get(id) : null;
   const hm = offeredM ? S.hist.get(histCacheKey(id, "modbus")) : null;
   const wrap = (body, cls) => `<div class="vhist${cls ? " " + cls : ""}">${body}</div>`;
-  const view = historyView(id);
+  const view = historyView(id, source);
   if (!view && ((offeredX && !hx) || (offeredM && !hm)))
     return wrap(`<div class="vhist-note">${esc(t("hist.loading"))}</div>`, "vhist-flat");
   if (!view && [hx, hm].filter(Boolean).every((h) => h.err))
@@ -702,6 +710,7 @@ function histHtml(id, unit, name) {
   // Its instant is re-resolved here on every render, so the pin follows its measurement as the ring
   // rolls and disappears once that measurement has left the day.
   const pi = histPinIndex(id, view);
+  const sourceAttr = view.series.length === 1 ? ` data-source="${esc(view.series[0].source)}"` : "";
   let pinTip = "", pinCross = "", pinMarks = "";
   if (pi >= 0) {
     const px = (scrubFrac(pi, n) * 100).toFixed(3);
@@ -722,7 +731,7 @@ function histHtml(id, unit, name) {
     `<span class="vhist-range mono num">${esc(rng)}</span></div>` + legend +
     `<div class="vhist-graph${pi >= 0 ? " has-pin" : ""}">` +
       `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +
-      `<div class="vhist-plot" data-hist="${esc(id)}" data-n="${n}" tabindex="0" role="img"` +
+      `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", name || id, pi >= 0 ? scrubText(view, pi) : ""))}">` +
         `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${area}${line}${dots}</svg>` +
         nowDots + pinCross + pinMarks +
@@ -771,8 +780,8 @@ function histPinIndex(id, h) {
 }
 // Pin sample `i` of `label`, or UNPIN when that same sample is already pinned — tapping the readout
 // you just made is the obvious way to dismiss it, and needs no extra affordance on a 72 px plot.
-function histPinToggle(id, i) {
-  const h = historyView(id);
+function histPinToggle(id, i, source = "") {
+  const h = historyView(id, source);
   if (!h || !h.v.length) return;
   i = Math.max(0, Math.min(h.v.length - 1, i));
   if (histPinIndex(id, h) === i) S.histPin.delete(id);
@@ -812,6 +821,24 @@ function scrubText(h, i) {
   };
   const cfg = STATE_HIST[h.id];
   if (cfg) {
+    // BOOST, BSH and BUH keep the popup deliberately terse: the complete phase interval followed
+    // by its compact status. Use the concept's authoritative source when a diagnostic chart happens
+    // to carry both lanes; source names and sampled durations stay out of this compact readout.
+    if (cfg.compactTooltip) {
+      const primary = h.series.find((s) => s.source === cfg.primary) || h.series[0];
+      const [from, count] = sampleRunAt(primary.v, i);
+      const v = primary.v[i];
+      let status = t("hist.nm");
+      if (v != null) {
+        const key = cfg.compactValueLabel ? cfg.compactValueLabel(v) : "";
+        if (key) status = t(key);
+        else {
+          const state = cfg.classify(v);
+          if (state != null) status = t(state ? "hist.state_active" : "hist.state_off");
+        }
+      }
+      return `${stateRunWhen(h, from, count)} · ${status}`;
+    }
     // A state chart is already a sequence of PHASES. Hovering any point therefore names the whole
     // containing phase — source, state, start/end and sampled duration — while the chart itself
     // stays compact. Source, state and timing form deliberate vertical rows; timing and duration
@@ -858,7 +885,7 @@ function scrubText(h, i) {
 // Paint the crosshair for sample `i`. Pure DOM writes on the existing nodes — no innerHTML, so a
 // drag never rebuilds what it is holding on to.
 function scrubMove(plot, i) {
-  const h = historyView(plot.dataset.hist);
+  const h = historyView(plot.dataset.hist, plot.dataset.source || "");
   const n = +plot.dataset.n;
   if (!h || !n) return;
   i = Math.max(0, Math.min(n - 1, i));

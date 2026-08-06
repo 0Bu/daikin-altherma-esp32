@@ -586,36 +586,6 @@ function renderLive() {
 const tx = (o) => (o == null ? "" : typeof o === "string" ? o : (LANG === "de" && o.de) ? o.de : o.en);
 const degC = (n) => (n == null ? "—" : fmt1(n) + " °C");
 
-// Neither X10A nor HomeHub has a dedicated BSH-power register. HomeHub input 51 is a measured
-// WHOLE-SYSTEM input; some X10A profiles expose CT currents from which liveData estimates the same
-// broad boundary at assumed 230 V. Show either as context only while BSH is active, and never label
-// the total as heater power because compressor, pumps and electronics may be part of it too.
-const bshInputRow = () => {
-  const d = S.live;
-  if (!d || d.bsh !== true) return null;
-  const measured = mbPower();
-  if (measured) {
-    const n = parseFloat(measured.value);
-    if (Number.isFinite(n)) return {
-      label: tx({
-        en: "Whole-system electrical input · HomeHub (not heater power)",
-        de: "Elektrische Gesamtaufnahme · HomeHub (keine Heizstableistung)",
-      }),
-      value: fmt1(n),
-      unit: "kW",
-    };
-  }
-  if (d.pel == null || d.pelSrc !== "CT") return null;
-  return {
-    label: tx({
-      en: "Whole-unit electrical input · CT estimate (not heater power)",
-      de: "Geschätzte Gesamtaufnahme · CT (keine Heizstableistung)",
-    }),
-    value: "≈ " + fmt1(d.pel),
-    unit: "kW",
-  };
-};
-
 const PEL_ESTIMATED_WHAT = {
   en: "A rough electrical-input ESTIMATE used as the COP or EER divisor. The UI adds available phase currents and multiplies by an assumed 230 V; it does not know actual voltage or power factor. CT currents are treated as the whole-unit boundary, including a backup heater, while inverter current covers the compressor side only. Therefore an inverter-based value is not total plant consumption.",
   de: "Eine grobe SCHÄTZUNG der elektrischen Aufnahme und der Nenner von COP oder EER. Die UI addiert verfügbare Phasenströme und multipliziert sie mit angenommenen 230 V; tatsächliche Spannung und Leistungsfaktor sind unbekannt. CT-Ströme behandelt sie als Systemgrenze des ganzen Geräts einschließlich Zusatzheizer, der Inverterstrom deckt nur die Verdichterseite ab. Ein Inverterwert ist daher nicht der Gesamtverbrauch der Anlage.",
@@ -668,6 +638,7 @@ const INSPECT = {
   sgrequest: {
     t: { en: "Smart-Grid request via Modbus", de: "Smart-Grid-Anforderung über Modbus" },
     trend: "smart_grid_mode",
+    trendSource: "modbus",
     what: {
       en: "The external Smart-Grid request read back from the HomeHub: Free running, Forced off, Recommended on or Forced on. It is an energy-management command, not the outdoor unit's heating/cooling mode and not proof that a requested tank charge has started.",
       de: "Die vom HomeHub zurückgelesene externe Smart-Grid-Anforderung: Freier Betrieb, Zwangsabschaltung, Empfehlung ein oder Erzwungen ein. Das ist ein Energiemanagement-Befehl und nicht der Heiz- oder Kühlmodus der Außeneinheit. Ebenso wenig belegt er, dass eine angeforderte Speicherladung bereits begonnen hat.",
@@ -952,16 +923,25 @@ const INSPECT = {
   bsh: {
     t: { en: "Electric tank heater", de: "Heizstab" },
     re: /^bsh$/i, sample: "BSH",
+    // This panel deliberately presents only the physical X10A BSH contact and its sampled X10A
+    // timeline: no HomeHub second opinion and no whole-system power context.
+    x10aOnly: true,
     trend: "bsh_state",
+    trendSource: "x10a",
     // Replace the raw bit (1/0) in the headline with its actual meaning. The source line remains
     // "BSH", so the friendly state is still traceable to the exact X10A register.
-    head: (d) => d.bsh == null ? "—" : t(d.bsh ? "state.on" : "state.off"),
-    now: (d) => d.bsh == null ? null
-      : d.bsh
+    head: () => {
+      const on = x10aDown() ? null : vOn(/^bsh$/i);
+      return on == null ? "—" : t(on ? "state.on" : "state.off");
+    },
+    now: () => {
+      const on = x10aDown() ? null : vOn(/^bsh$/i);
+      return on == null ? null
+      : on
         ? { en: "Electric tank heater active.", de: "Heizstab aktiv." }
         : { en: "Off — the tank is not using its electric immersion heater.",
-            de: "OFF — der Heizstab im Speicher ist nicht aktiv." },
-    rows: [() => bshInputRow()],
+            de: "OFF — der Heizstab im Speicher ist nicht aktiv." };
+    },
   },
   valve: {
     t: { en: "3-way valve", de: "3-Wege-Ventil" },
@@ -1236,6 +1216,9 @@ function inspMembers(e, row, fb) {
 // path that inserted a leaf's Modbus value between the timeless description and the chart, while
 // all other values sat below the chart behind dividers.
 function inspValues(e, row, fb) {
+  // Some inspectors intentionally expose one authoritative X10A contact only. Do not manufacture
+  // the generic leaf twin or append component/context rows for those entries.
+  if (e && e.x10aOnly) return [];
   const members = inspMembers(e, row, fb);
   // Keep the old comparison contract: a second opinion is only meaningful while the primary
   // headline has a current value. Grouped targets still show all available readings independently.
@@ -1347,15 +1330,21 @@ function renderInspectHist(e, row) {
   const pair = MB_PAIRS.find((p) => p.insp === S.insp);
   const pairedId = pair && hasModbusHist(pair.cid) ? pair.cid : "";
   const trendId = e && typeof e.trend === "function" ? e.trend(S.live) : e && e.trend;
-  const explicitId = trendId && (hasHist(trendId) || hasModbusHist(trendId)) ? trendId : "";
+  const trendSource = e && e.trendSource || "";
+  const offered = (id) => trendSource === "modbus" ? hasModbusHist(id)
+    : trendSource === "x10a" ? hasHist(id) : hasHist(id) || hasModbusHist(id);
+  const explicitId = trendId && offered(trendId) ? trendId : "";
   const id = explicitId || (row ? histIdFor(row.label) : pairedId);
-  if (id) ensureHistPair(id);              // throttled to once a minute inside; no-op once cached
-  const h = id ? S.hist.get(id) : null;
-  const mh = id ? S.hist.get(histCacheKey(id, "modbus")) : null;
+  if (id) {
+    if (trendSource) ensureHist(id, trendSource);
+    else ensureHistPair(id);                // throttled to once a minute inside; no-op once cached
+  }
+  const h = id && trendSource !== "modbus" ? S.hist.get(id) : null;
+  const mh = id && trendSource !== "x10a" ? S.hist.get(histCacheKey(id, "modbus")) : null;
   const pin = id ? S.histPin.get(id) : null;
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
   // inspector chart even when the series generation and pinned sample are unchanged.
-  const sig = [LANG, id, h ? (h.err ? "e" : h.gen) : "", mh ? (mh.err ? "e" : mh.gen) : "",
+  const sig = [LANG, id, trendSource, h ? (h.err ? "e" : h.gen) : "", mh ? (mh.err ? "e" : mh.gen) : "",
                pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
   if (sig === S.inspHistSig) return;
   S.inspHistSig = sig;
@@ -1370,9 +1359,9 @@ function renderInspectHist(e, row) {
   const mb = pairedId ? mbByConcept(pairedId) : null;
   const chartName = DERIVED[id] && e && e.aria ? tx(e.aria) : null;
   el.innerHTML = !id ? ""
-    : row ? histHtml(id, displayUnit(row), chartName || displayReadingLabel(row.label))
-    : pairedId ? histHtml(id, mb ? displayUnit(mb) : "", mb ? displayHomeHubLabel(mb) : inspTitleText(e, null))
-               : histHtml(id, DERIVED[id]?.unit || "", e.aria ? tx(e.aria) : inspTitleText(e, null));
+    : row ? histHtml(id, displayUnit(row), chartName || displayReadingLabel(row.label), trendSource)
+    : pairedId ? histHtml(id, mb ? displayUnit(mb) : "", mb ? displayHomeHubLabel(mb) : inspTitleText(e, null), trendSource)
+               : histHtml(id, DERIVED[id]?.unit || "", e.aria ? tx(e.aria) : inspTitleText(e, null), trendSource);
 }
 
 function renderInspect() {

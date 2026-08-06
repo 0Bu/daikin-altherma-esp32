@@ -72,6 +72,8 @@ const context = {
     if (key === "hist.duration_h") return `${arg} h`;
     if (key === "hist.duration_hm") return `${arg} h ${arg2} min`;
     if (key === "hist.state_phase_run") return `${arg}\n${arg2} · ca. ${args[2]}`;
+    if (key === "hist.state_active") return "Aktiv";
+    if (key === "hist.state_off") return "Aus";
     if (key === "hist.modbus_plateau") return `Register unverändert ${arg} · ca. ${arg2} · Messalter unbekannt`;
     if (key === "hist.boost_total") return `Boost aktiv · ${arg}`;
     if (key === "hist.boost_none") return "Kein Boost im aufgezeichneten Zeitraum.";
@@ -206,17 +208,27 @@ assert.match(boostHtml, /vhist-state-lane-label">X10A/);
 assert.match(boostHtml, /vhist-state-lane-label mb">Modbus/);
 assert.doesNotMatch(boostHtml, /vhist-state-legend/,
   "source names belong directly on their lanes, not in a detached legend");
-assert.match(h.scrubText(boostView, 1), /X10A \+ Modbus\nZwangsabschaltung/);
-assert.match(h.scrubText(boostView, 1), /Zwangsabschaltung\n.* · ca\. 5 min/,
-  "the popup names the containing phase and sampled duration");
-assert.doesNotMatch(h.scrubText(boostView, 1), /Boost aus/,
-  "a non-Boost manufacturer mode must not be reduced to the ambiguous words Boost off");
-assert.match(h.scrubText(boostView, 2), /X10A \+ Modbus\nEmpfehlung ein · Boost aktiv/,
-  "scrubbing names the manufacturer mode before the derived Boost interpretation");
-assert.match(h.scrubText(boostView, 3), /X10A \+ Modbus\nErzwungen ein/);
-assert.match(h.scrubText(boostView, 2),
-  /^X10A \+ Modbus\nEmpfehlung ein · Boost aktiv\n.* · ca\. 5 min$/,
-  "matching source phases collapse into one compact, explicitly shared tooltip block");
+for (const i of [1, 3])
+  assert.match(h.scrubText(boostView, i), /^\d{2}:\d{2}–\d{2}:\d{2} · Aus$/,
+    "non-Boost Smart-Grid modes keep the compact Boost status off");
+assert.match(h.scrubText(boostView, 2), /^\d{2}:\d{2}–\d{2}:\d{2} · Aktiv$/,
+  "mode 2 shows the compact active Boost status");
+for (const i of [1, 2, 3])
+  assert.doesNotMatch(h.scrubText(boostView, i), /X10A|Modbus|Boost|Empfehlung|Erzwungen|Zwang|ca\.|min/);
+
+// The schematic's BOOST inspector is a HomeHub/Modbus request, so it deliberately filters the
+// otherwise shared Smart-Grid history to that instrument. The generic value-row history above stays
+// dual-source for diagnostics; only this filtered view loses the X10A lane and tooltip block.
+const boostModbusView = h.historyView("smart_grid_mode", "modbus");
+const boostModbusHtml = h.histHtml("smart_grid_mode", "", "Smart-Grid-Anforderung", "modbus");
+assert.equal(boostModbusView.series.length, 1);
+assert.equal(boostModbusView.series[0].source, "modbus");
+assert.doesNotMatch(boostModbusHtml, /vhist-state-lane-label">X10A/);
+assert.match(boostModbusHtml, /vhist-state-lane-label mb">Modbus/);
+assert.match(boostModbusHtml, /data-source="modbus"/,
+  "scrubbing and pinning must resolve the same Modbus-only view that the chart renders");
+assert.match(h.scrubText(boostModbusView, 2), /^\d{2}:\d{2}–\d{2}:\d{2} · Aktiv$/);
+assert.doesNotMatch(h.scrubText(boostModbusView, 2), /X10A|Modbus|Boost|Empfehlung|ca\.|min/);
 
 // BSH is also categorical. Its active buckets render as intervals and the wording calls the sum
 // raster time rather than exact runtime; X10A is the preferred physical-state source.
@@ -232,7 +244,21 @@ assert.match(bshHtml, /Heizstab aktiv erfasst · 10 min Rasterzeit/);
 assert.match(bshHtml, /vhist-state-on state-off/);
 assert.match(bshHtml, /vhist-state-on heater-on/);
 assert.doesNotMatch(bshHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(bshView, 1), /X10A \+ Modbus\nHeizstab aktiv\n.* · ca\. 5 min/);
+assert.match(h.scrubText(bshView, 0), /^\d{2}:\d{2}–\d{2}:\d{2} · Aus$/);
+assert.match(h.scrubText(bshView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · Aktiv$/);
+assert.doesNotMatch(h.scrubText(bshView, 1), /X10A|Modbus|Heizstab|ca\.|min/);
+
+// The Heizstab schematic inspector keeps the categorical history but narrows it to the authoritative
+// X10A BSH state. The generic value-row chart above remains dual-source for diagnostics.
+const bshX10aView = h.historyView("bsh_state", "x10a");
+const bshX10aHtml = h.histHtml("bsh_state", "", "Heizstab", "x10a");
+assert.equal(bshX10aView.series.length, 1);
+assert.equal(bshX10aView.series[0].source, "x10a");
+assert.match(bshX10aHtml, /vhist-state-lane-label">X10A/);
+assert.doesNotMatch(bshX10aHtml, /vhist-state-lane-label mb">Modbus/);
+assert.match(bshX10aHtml, /data-source="x10a"/);
+assert.match(h.scrubText(bshX10aView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · Aktiv$/);
+assert.doesNotMatch(h.scrubText(bshX10aView, 1), /X10A|Modbus|Heizstab|ca\.|min/);
 
 // Both outdoor pills open categorical timelines. Defrost is event-folded; Quiet keeps two
 // source-attributed lanes because X10A and HomeHub report the same exact mode independently.
@@ -284,9 +310,13 @@ assert.match(buhHtml, /vhist-state-on step1/);
 assert.match(buhHtml, /vhist-state-on step2/);
 assert.match(buhHtml, /vhist-state-on state-off/);
 assert.doesNotMatch(buhHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(buhView, 1), /Stufe 1\n.* · ca\. 5 min/);
-assert.match(h.scrubText(buhView, 2), /Stufe 2\n.* · ca\. 10 min/);
-assert.match(h.scrubText(buhView, 5), /nicht gemessen\n.* · ca\. 5 min/);
+assert.match(h.scrubText(buhView, 0), /^\d{2}:\d{2}–\d{2}:\d{2} · Aus$/);
+assert.match(h.scrubText(buhView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · Stufe 1$/);
+assert.match(h.scrubText(buhView, 2), /^\d{2}:\d{2}–\d{2}:\d{2} · Stufe 2$/);
+assert.match(h.scrubText(buhView, 5), /^\d{2}:\d{2}–\d{2}:\d{2} · nicht gemessen$/,
+  "a BUH gap remains explicit without adding source or duration prose");
+for (const i of [0, 1, 2, 5])
+  assert.doesNotMatch(h.scrubText(buhView, i), /X10A|Modbus|Zusatzheizer|ca\.|min/);
 
 // The schematic shows intuitive pump speed, while the X10A row is inverted (0=max, 100=stop).
 // Its inspector curve must transform the source ring instead of making a stopped pump look maximal.

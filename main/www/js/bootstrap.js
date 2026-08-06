@@ -130,7 +130,7 @@ function wireTrendScrub(gv) {
       const label = plot.dataset.hist;
       const i = e.type === "pointerup" ? scrubIndex(plot, e.clientX) : -1;
       scrubEnd(plot);
-      if (i >= 0) histPinToggle(label, i);
+      if (i >= 0) histPinToggle(label, i, plot.dataset.source || "");
     });
   }
   // Keyboard: the plot is focusable, so arrow keys step through samples and the tooltip is the
@@ -146,7 +146,7 @@ function wireTrendScrub(gv) {
     if (e.key === "Escape") { S.histPin.delete(plot.dataset.hist); scrubEnd(plot); return renderTrendHosts(); }
     if (e.key === "Enter" || e.key === " ") {   // pin what the arrow keys are reading out
       const cur = plot.dataset.cur == null ? n - 1 : +plot.dataset.cur;
-      return histPinToggle(plot.dataset.hist, cur);
+      return histPinToggle(plot.dataset.hist, cur, plot.dataset.source || "");
     }
     const cur = plot.dataset.cur == null ? n - 1 : +plot.dataset.cur;
     const next = e.key === "Home" ? 0 : e.key === "End" ? n - 1 : cur + step;
