@@ -16,8 +16,8 @@ const S = {
   // detach the node the pointer went down on (renderCards explains why that loses the click
   // outright). Released only by a timer, so it can never latch.
   clickHold: false,
-  // 24-hour trend per historied concept: id -> {at, dt, unit, b0, v[]} for X10A and `modbus:<id>`
-  // for the independent HomeHub ring (or {err:true}). Cached in app
+  // 24-hour trend per historied concept: id -> {at, dt, unit, b0, v[]} for X10A, `modbus:<id>`
+  // for HomeHub, and `env3:<id>` for the independent outdoor sensor (or {err:true}). Cached in app
   // state for the same reason descOpen is — #valueGroups is rebuilt on every poll, and re-fetching
   // (or re-deriving) the sparkline 1×/s would both hammer the device and restart the panel's slide.
   // A missing entry means "not fetched yet", which is what makes the panel show its loading line.

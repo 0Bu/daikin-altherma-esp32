@@ -71,7 +71,7 @@ static esp_err_t send_env3_err(httpd_req_t* req, const char* status,
 // Board Hardware form. The caller owns the one eventual config_save(), so a failed sensor probe can
 // never leave board identity/peripherals saved while ENV III stayed behind (or vice versa).
 static esp_err_t env3_save_preflight(httpd_req_t* req, const Config& current,
-                                     const Config& proposed, bool& allowed) {
+                                     Config& proposed, bool& allowed) {
     allowed = false;
     std::string reason;
     if (!env3_config_valid(proposed, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi())) {
@@ -87,11 +87,29 @@ static esp_err_t env3_save_preflight(httpd_req_t* req, const Config& current,
             return send_env3_err(req, "422 Unprocessable Entity", "env3_not_reachable",
                                  "ENV III is not currently reachable on the selected SDA/SCL pins");
         }
-        case Env3SaveCheck::HardwareProbe:
-            switch (env3_probe(proposed.env3_sda, proposed.env3_scl)) {
+        case Env3SaveCheck::HardwareProbe: {
+            const Env3ProbeResult direct = env3_probe(proposed.env3_sda, proposed.env3_scl);
+            if (direct == Env3ProbeResult::Ok) {
+                allowed = true;
+                return ESP_OK;
+            }
+            // Probe exactly one alternative: the same two explicitly selected, board-safe GPIOs
+            // with their I2C roles reversed. This is not a scan of arbitrary external pins. A save
+            // becomes self-correcting only when BOTH ENV III devices prove the reversed mapping;
+            // otherwise the original component-specific error remains the useful diagnosis.
+            if (env3_probe_may_try_swapped(direct) &&
+                env3_probe(proposed.env3_scl, proposed.env3_sda) == Env3ProbeResult::Ok) {
+                const int requested_sda = proposed.env3_sda;
+                proposed.env3_sda = proposed.env3_scl;
+                proposed.env3_scl = requested_sda;
+                diag_printf("env3: SDA/SCL were reversed; saving corrected mapping SDA=%d SCL=%d\n",
+                            proposed.env3_sda, proposed.env3_scl);
+                allowed = true;
+                return ESP_OK;
+            }
+            switch (direct) {
                 case Env3ProbeResult::Ok:
-                    allowed = true;
-                    return ESP_OK;
+                    break; // handled above
                 case Env3ProbeResult::BusUnavailable:
                     return send_env3_err(req, "503 Service Unavailable", "env3_probe_busy",
                                          "The I2C probe could not start; retry the save");
@@ -103,6 +121,7 @@ static esp_err_t env3_save_preflight(httpd_req_t* req, const Config& current,
                                          "ENV III pressure sensor not found on the selected pins");
             }
             return ESP_FAIL;
+        }
         case Env3SaveCheck::DisableFirst:
             return send_env3_err(req, "409 Conflict", "env3_disable_first",
                                  "Disable ENV III before changing its SDA/SCL pins");

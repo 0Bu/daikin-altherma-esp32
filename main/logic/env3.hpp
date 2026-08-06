@@ -35,10 +35,19 @@ inline bool env3_decode_sht30(const uint8_t raw[6], float& temperature_c, float&
     return true;
 }
 
+inline const char* env3_sample_implausibility(float temperature_c, float humidity_pct,
+                                               float pressure_hpa) {
+    if (!std::isfinite(temperature_c)) return "temperature_not_finite";
+    if (temperature_c < -40.0f || temperature_c > 120.0f) return "temperature_out_of_range";
+    if (!std::isfinite(humidity_pct)) return "humidity_not_finite";
+    if (humidity_pct < 0.0f || humidity_pct > 100.0f) return "humidity_out_of_range";
+    if (!std::isfinite(pressure_hpa)) return "pressure_not_finite";
+    if (pressure_hpa < 300.0f || pressure_hpa > 1100.0f) return "pressure_out_of_range";
+    return nullptr;
+}
+
 inline bool env3_sample_plausible(float temperature_c, float humidity_pct, float pressure_hpa) {
-    return std::isfinite(temperature_c) && temperature_c >= -40.0f && temperature_c <= 120.0f &&
-           std::isfinite(humidity_pct) && humidity_pct >= 0.0f && humidity_pct <= 100.0f &&
-           std::isfinite(pressure_hpa) && pressure_hpa >= 300.0f && pressure_hpa <= 1100.0f;
+    return env3_sample_implausibility(temperature_c, humidity_pct, pressure_hpa) == nullptr;
 }
 
 // MQTT carries only a complete, current ENV III observation. `{}` deliberately invalidates a
@@ -133,7 +142,8 @@ inline void env3_decode_qmp6988(const Env3QmpCalibration& c, const uint8_t raw[6
 }
 
 inline bool env3_board_supported(const Config& c) {
-    return board_selected_vendor(c) == BoardVendor::M5Stack;
+    const BoardPreset* board = board_selected_preset(c);
+    return board && board->vendor == BoardVendor::M5Stack && board->i2c_pin_count >= 2;
 }
 
 // Saving an enabled sensor is proof-gated: selecting a pair of pins is only a wiring claim, not
@@ -171,6 +181,34 @@ inline Env3SaveCheck env3_save_check(const Config& current, const Config& propos
 // return its documented chip id.  Only Ok permits config_save().
 enum class Env3ProbeResult : uint8_t { Ok, BusUnavailable, Sht30Unavailable, Qmp6988Unavailable };
 
+// A failed device proof can be a genuinely absent ENV III or simply SDA/SCL wired in the opposite
+// order. Only sensor-level failures justify trying the reversed pair: BusUnavailable means I2C0
+// itself could not be created, so a second GPIO guess would hide a resource failure rather than
+// diagnose wiring. The HTTP preflight persists the reversed pair only when that second proof is Ok.
+constexpr bool env3_probe_may_try_swapped(Env3ProbeResult result) {
+    return result == Env3ProbeResult::Sht30Unavailable ||
+           result == Env3ProbeResult::Qmp6988Unavailable;
+}
+
+struct Env3HistoryDef { const char* id; const char* label; const char* unit; };
+inline constexpr Env3HistoryDef ENV3_HISTORIES[] = {
+    {"env3_temperature", "ENV III temperature", "°C"},
+    {"env3_humidity",    "ENV III humidity",    "%"},
+    {"env3_pressure",    "ENV III air pressure", "hPa"},
+};
+inline constexpr size_t ENV3_HISTORY_COUNT = sizeof(ENV3_HISTORIES) / sizeof(ENV3_HISTORIES[0]);
+
+inline int env3_history_index(const char* id) {
+    if (!id) return -1;
+    for (size_t i = 0; i < ENV3_HISTORY_COUNT; ++i) {
+        const char* a = ENV3_HISTORIES[i].id;
+        const char* b = id;
+        while (*a && *a == *b) { ++a; ++b; }
+        if (*a == *b) return static_cast<int>(i);
+    }
+    return -1;
+}
+
 inline bool env3_config_valid(const Config& c, std::string& reason, int max_gpio = 48,
                               bool octal_spi = true) {
     if (!c.env3_enabled) return true;
@@ -178,11 +216,14 @@ inline bool env3_config_valid(const Config& c, std::string& reason, int max_gpio
         reason = "ENV III requires a selected M5Stack board preset"; return false;
     }
     if (c.env3_sda == c.env3_scl) { reason = "ENV III SDA and SCL must differ"; return false; }
+    const BoardPreset* board = board_selected_preset(c);
     const ReservedPins used = config_env3_reserved_pins(c);
-    if (!gpio_in_range(c.env3_sda, max_gpio) || !board_pin_offerable(c.env3_sda, octal_spi, used)) {
+    if (!gpio_in_range(c.env3_sda, max_gpio) ||
+        !board_preset_i2c_pin_offerable(board, c.env3_sda, octal_spi, used)) {
         reason = "ENV III SDA is unavailable or already in use"; return false;
     }
-    if (!gpio_in_range(c.env3_scl, max_gpio) || !board_pin_offerable(c.env3_scl, octal_spi, used)) {
+    if (!gpio_in_range(c.env3_scl, max_gpio) ||
+        !board_preset_i2c_pin_offerable(board, c.env3_scl, octal_spi, used)) {
         reason = "ENV III SCL is unavailable or already in use"; return false;
     }
     return true;
@@ -197,14 +238,14 @@ inline const Env3Preset* env3_presets_all(int& count) {
     count = static_cast<int>(sizeof(presets) / sizeof(presets[0]));
     return presets;
 }
-inline int env3_presets_offerable(const Env3Preset** out, int cap, bool octal_spi,
-                                  ReservedPins used = {}) {
+inline int env3_presets_offerable(const Env3Preset** out, int cap, const BoardPreset* board,
+                                  bool octal_spi, ReservedPins used = {}) {
     int all_n = 0, n = 0;
     const Env3Preset* all = env3_presets_all(all_n);
     for (int i = 0; i < all_n && n < cap; ++i) {
         if (all[i].sda == all[i].scl ||
-            !board_pin_offerable(all[i].sda, octal_spi, used) ||
-            !board_pin_offerable(all[i].scl, octal_spi, used)) continue;
+            !board_preset_i2c_pin_offerable(board, all[i].sda, octal_spi, used) ||
+            !board_preset_i2c_pin_offerable(board, all[i].scl, octal_spi, used)) continue;
         out[n++] = &all[i];
     }
     return n;

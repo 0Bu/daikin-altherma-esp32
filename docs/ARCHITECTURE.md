@@ -354,9 +354,12 @@ host-testable core is unusually large and valuable, because the risky parts are 
   refresh and reboot without re-deriving its name from GPIO35/41 — including when its LED or reset
   button is disabled or moved. The request rejects an unknown id, while `board_hw_valid()` separately
   validates the customized peripheral GPIOs; only explicitly choosing `custom` changes identity.
-  Each preset also carries a non-display `BoardVendor`; vendor-bound accessories such as ENV III use
-  this validated explicit identity, not a model-name or pin heuristic. Thus a future
-  M5Stack preset inherits the capability while Seeed, unstated and Custom boards fail closed.
+  Each preset also carries a non-display `BoardVendor` and its physically exposed external-I2C pins;
+  vendor-bound accessories such as ENV III use this validated explicit identity and connector
+  inventory, not a model-name or chip-wide pin heuristic. Thus AtomS3 Lite offers exactly
+  `1/2/5/6/7/8/38`; exposed GPIO39 is deliberately withheld after failed ENV III hardware tests,
+  while Seeed, unstated and Custom boards fail closed. A future M5Stack preset must declare its own
+  pin inventory.
   Hardware values decide the **reboot** (a driver's pin moved); identity-only changes require a
   **save** but no reboot (`board_save_needed()` / `board_reboot_needed()`). Pre-v12 `board_set=true`
   is a read-only migration hint: an exact historical field match recovers the same name the old UI
@@ -899,7 +902,7 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    an accidental 25th open hour. See *The host-tested logic core* for why a
    row is addressed by (page, offset, **converter**) here and by (page, offset, unit) in the trends.
 5. Sleep `POLL_INTERVAL_S` (fixed 1 s — see `config.cpp`). The MQTT bridge and HTTP `/values` read
-   the cache; they never touch the UART. Neither source's trends are published to MQTT — they exist for
+   the cache; they never touch the UART. X10A, HomeHub and ENV III trends are not published to MQTT — they exist for
    the web UI, and Home Assistant already records its own history for every entity.
 
 Config changes from the web UI (`/set_hp`) apply live: the task rereads `config` at the top of the
@@ -1288,7 +1291,9 @@ The Home Assistant bridge:
   pressure as measurement sensors. Their availability is `all`: both the device LWT must be online
   and the corresponding JSON key must exist, so `{}` makes only the ENV III entities unavailable.
   Disabling the sensor retracts both the state topic and all three discovery configs. ENV III is
-  never folded into X10A or HomeHub state. `<base>/modbus` is a separate flat retained JSON object, published only
+  never folded into X10A or HomeHub state. The ENV task independently folds valid samples into three
+  static 5-minute/24-hour rings; `/history?...&source=env3` serves them to the Board Hardware infobox,
+  so X10A loss cannot stop the outdoor-climate history. `<base>/modbus` is a separate flat retained JSON object, published only
   for an enabled HomeHub stack and intentionally not referenced by HA discovery. Int16 enum values
   retain the raw numeric Modbus constant; `/values` carries separate semantic metadata so the browser
   can name them without putting prose on MQTT. A disconnected HomeHub publishes `{}` rather than

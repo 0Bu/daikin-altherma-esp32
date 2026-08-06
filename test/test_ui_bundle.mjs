@@ -141,10 +141,12 @@ assert.doesNotMatch(app, /weather[^\n]{0,120}broker_off|input\/weather/,
   "the Open-Meteo forecast must not depend on the MQTT broker or an adapter topic");
 assert.match(httpConfig, /static esp_err_t set_weather[\s\S]*weather_location_parse[\s\S]*weather_forecast_reconfigure/,
   "the coordinate save must validate both values and wake the firmware fetch task");
-assert.match(app, /function statusCardsHtml\(\)[\s\S]*t\("env\.temperature"\)[\s\S]*t\("env\.humidity"\)[\s\S]*t\("env\.pressure"\)/,
-  "ENV III must retain its independent outdoor-climate measurement card");
-assert.match(app, /if \(env\.supported && env\.enabled\)/,
-  "the ENV III dashboard card must be hidden on unsupported boards even with stale status data");
+assert.doesNotMatch(app, /function statusCardsHtml\(\)[\s\S]*vcard\(t\("env\.card"\)/,
+  "ENV III must not retain a standalone outdoor-climate dashboard card");
+assert.match(html, /id="gEnv3"[^>]*data-insp="env3"[\s\S]*id="svEnv3Temp"[\s\S]*id="gSgRequest"/,
+  "the ENV III temperature pill must sit immediately before Boost and open the shared inspector");
+assert.match(app, /function renderEnv3Pill\(\)[\s\S]*env\.supported === true && env\.enabled === true[\s\S]*group\.style\.display = configured/,
+  "the ENV III pill must be hidden on unsupported or disabled boards even with stale status data");
 assert.doesNotMatch(html, /id="env3Modal"|id="env3Form"/,
   "ENV III must not remain in a separate popup");
 const boardModalHtml = html.slice(html.indexOf('id="boardModal"'), html.indexOf('<!-- Bug report'));
@@ -156,10 +158,10 @@ assert.doesNotMatch(boardModalHtml, /bdLedLegend|board\.led_(?:rgb|gpio)_|data-i
   "the Board editor must contain controls only; LED, reset and I2C explanations belong to the Hardware tongue");
 assert.doesNotMatch(boardModalHtml, /envEnabled|envPreset|env\.hint|temperature measurement range|Temperatur-Messbereich/,
   "the integrated sensor section must contain no enable checkbox, wiring preset, or technical prose");
-assert.match(app, /"env\.pins_hint": "SDA = data \(yellow Grove wire\); SCL = clock \(white Grove wire\)\."/,
-  "the English Hardware tongue must explain SDA/SCL concisely");
-assert.match(app, /"env\.pins_hint": "SDA = Datenleitung \(gelbe Grove-Leitung\), SCL = Taktleitung \(weiße Grove-Leitung\)\."/,
-  "the German Hardware tongue must explain SDA/SCL concisely");
+assert.match(app, /"env\.pins_hint": "SDA = data \(yellow Grove wire\); SCL = clock \(white Grove wire\)\.[^"]*saves the working assignment automatically\."/,
+  "the English Hardware tongue must explain SDA/SCL and automatic reversal");
+assert.match(app, /"env\.pins_hint": "SDA = Datenleitung \(gelbe Grove-Leitung\), SCL = Taktleitung \(weiße Grove-Leitung\)\.[^"]*funktionierende Zuordnung automatisch\."/,
+  "the German Hardware tongue must explain SDA/SCL and automatic reversal");
 assert.match(app, /"board\.led_rgb_setup": "Blue, blinking slowly[\s\S]*"board\.led_gpio_wiping": "Solid after very rapid blinking[\s\S]*"board\.led_rgb_setup": "Blau, langsam blinkend[\s\S]*"board\.led_gpio_wiping": "Dauerlicht nach sehr schnellem Blinken/,
   "both concise status-LED legends must stay bilingual");
 assert.match(style, /\.pin-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)[^}]*\}[\s\S]*\.pin-grid\[hidden\]\s*\{[^}]*display:\s*none/,
@@ -177,8 +179,21 @@ assert.match(app, /function env3FormPayload\(\)[\s\S]*if \(!enabled\) return \{ 
 assert.match(httpConfig, /env3_config_valid\(proposed[\s\S]*http_register_on\(s, surface, "\/set_env3"/,
   "the compatibility endpoint must retain authoritative ENV III collision validation");
 assert.match(httpConfig,
-  /static esp_err_t env3_save_preflight[\s\S]*env3_save_check\(current, proposed\)[\s\S]*env3_probe\(proposed\.env3_sda, proposed\.env3_scl\)[\s\S]*static esp_err_t set_board[\s\S]*env3_save_preflight\(req, cur, c, env_allowed\)[\s\S]*config_save\(c\)/,
-  "integrated Save must prove ENV III reachable before atomically persisting board and sensor");
+  /static esp_err_t env3_save_preflight[\s\S]*env3_probe\(proposed\.env3_sda, proposed\.env3_scl\)[\s\S]*env3_probe\(proposed\.env3_scl, proposed\.env3_sda\)[\s\S]*proposed\.env3_sda = proposed\.env3_scl[\s\S]*static esp_err_t set_board[\s\S]*env3_save_preflight\(req, cur, c, env_allowed\)[\s\S]*config_save\(c\)/,
+  "integrated Save must prove the requested or reversed ENV III mapping before one atomic save");
+assert.ok(httpStatus.includes('j += "],\\\"env3_rows\\\":[";') &&
+          httpStatus.includes("ENV3_HISTORIES") &&
+          httpStatus.includes('std::strcmp(source, "env3")') &&
+          httpStatus.includes("history_env3_snapshot"),
+  "status and /history must expose the independent ENV III trend source");
+assert.match(app, /if \(e\.env3\)[\s\S]*t\("env\.temperature"\)[\s\S]*t\("env\.humidity"\)[\s\S]*t\("env\.pressure"\)/,
+  "the ENV III inspector must carry all three localized live readings");
+assert.match(app, /const ENV3_COMBINED_ID = "env3_combined"[\s\S]*const ENV3_COMBINED_SERIES[\s\S]*function env3HistHtml\(\)/,
+  "one combined timeline must render the three independently scaled ENV III series");
+assert.match(app, /function env3SeriesClass\(source\)[\s\S]*env-temperature[\s\S]*env-humidity[\s\S]*env-pressure/,
+  "the three ENV III lines must keep distinct stable style classes");
+assert.match(app, /if \(e && e\.env3\)[\s\S]*ensureHist\(s\.id, "env3"\)[\s\S]*env3HistHtml\(\)/,
+  "opening the ENV III pill must fetch all three rings and render their combined inspector trend");
 assert.match(app, /env3_sht30_not_found:\s*"env\.err_sht30"[\s\S]*mapError:\s*env3SaveError/,
   "ENV III probe failures must stay in the dialog as localized errors");
 assert.ok(httpStatus.includes("board_vendor_name(board_selected_vendor(c))"),

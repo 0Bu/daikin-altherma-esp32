@@ -1,14 +1,16 @@
 #pragma once
 // Ready-made board-hardware settings: the onboard status-indicator and recovery-button facts of the
-// reference boards, as ONE table the web UI's "Board" dropdown fills its five fields from.
+// reference boards, plus the GPIOs each board actually exposes for external I2C accessories, as ONE
+// table the web UI's "Board" dropdown fills from.
 //
 // WHY THIS EXISTS. One published esp32s3 image serves every board, so the indicator and the button
 // are runtime settings (config_model.hpp, POST /set_board) seeded from Kconfig — and the shipped
 // Kconfig seed is the XIAO's plain LED on GPIO21. Flash or OTA that image onto an M5Stack AtomS3
 // Lite, whose only light is a WS2812 on GPIO35, and the firmware drives a pin with nothing on it:
 // the board looks dead while being perfectly healthy, and nothing on /diag says otherwise. The five
-// numbers that fix it are a documented per-board fact (docs/BOARDS.md) that the user should not have
-// to transcribe from a datasheet into five form fields.
+// numbers that fix it — and the header-pin inventory that keeps accessory selectors honest — are
+// documented per-board facts (docs/BOARDS.md) that the user should not have to transcribe from a
+// datasheet into form fields.
 //
 // WHY IT IS FIRMWARE DATA rather than a table in www/js/settings.js: a browser-side copy would be a SECOND
 // statement of the same board facts, free to drift from docs/BOARDS.md and from the validator with
@@ -21,17 +23,17 @@
 // to — there is no board-ID EEPROM and nothing the ESP32-S3 can report (board_pins.hpp says this at
 // length for the X10A pin set, and it is no more knowable here). Picking a preset is the USER
 // telling the firmware what the hardware is; its stable id is persisted together with the same five
-// fields, never discovered from them. Which is also why the list stays short: a board earns an entry
-// by being one the project documents and tests against, not by existing.
+// configurable fields, never discovered from them. Which is also why the list stays short: a board
+// earns an entry by being one the project documents and tests against, not by existing.
 #include "board_pins.hpp"
 #include "config_model.hpp"
 
 namespace daik {
 
 // Vendor is an explicit property of a user-selectable board preset, never inferred from its
-// display name. Features tied to an accessory ecosystem (currently M5Stack ENV III) can therefore
-// accept future M5Stack presets without hard-coding one Atom model or accidentally enabling on a
-// different vendor whose LED/button pins happen to match.
+// display name. Features tied to an accessory ecosystem (currently M5Stack ENV III) use it together
+// with explicit connector metadata, without hard-coding one model name or accidentally enabling on
+// a different vendor whose LED/button pins happen to match.
 enum class BoardVendor : uint8_t { Unknown = 0, M5Stack, Seeed };
 
 inline const char* board_vendor_name(BoardVendor vendor) {
@@ -42,9 +44,10 @@ inline const char* board_vendor_name(BoardVendor vendor) {
     }
 }
 
-// Vendor is metadata; the remaining members mirror the five board-local fields of Config
-// (config_model.hpp), so applying a preset remains a field-for-field copy with nowhere for a
-// translation bug to hide.
+// The five LED/button members mirror the board-local fields of Config (config_model.hpp), so applying
+// a preset remains a field-for-field copy with nowhere for a translation bug to hide. `i2c_pins` is
+// different: it is immutable board metadata used to narrow an external-accessory picker to pads that
+// physically exist on this board. It is not persisted because the preset id already names the fact.
 struct BoardPreset {
     BoardPresetId id;
     const char* key;               // stable JSON/config key; display name may change independently
@@ -55,11 +58,21 @@ struct BoardPreset {
     bool        led_inverted;    // GPIO type only; a WS2812 encodes "off" as the zero colour
     int         btn_gpio;        // -1 = no button broken out (the XIAO) — NOT "user must wire one"
     bool        btn_active_low;
+    const int*  i2c_pins;        // physically exposed GPIOs allowed for an external I2C accessory
+    int         i2c_pin_count;
 };
 
 // Upper bound on a returned list, for sizing a caller's buffer. Asserted against the real table
 // host-side so it cannot silently drift.
 inline constexpr int BOARD_PRESETS_MAX = 2;
+inline constexpr int BOARD_I2C_PINS_MAX = 8;
+
+// AtomS3 Lite pin map C124: Grove G1/G2 and side-header G5-G8/G38 are usable for ENV III. Although
+// GPIO39 is physically exposed beside GPIO38, repeated ENV III tests on separate AtomS3 Lite boards
+// did not establish reliable I2C communication on that pad. Keep it out of both dropdowns and the
+// request validator instead of offering a wiring combination that cannot pass the save-time probe.
+// Onboard-only GPIO4/35/41 and chip pads absent from the headers are deliberately omitted as well.
+inline constexpr int ATOMS3_LITE_I2C_PINS[] = {1, 2, 5, 6, 7, 8, 38};
 
 // The full table. Source of truth for these numbers is docs/BOARDS.md (the per-board hardware
 // inventory); keep the two in step — the doc is where a board's facts are argued and cited, this is
@@ -72,13 +85,14 @@ inline const BoardPreset* board_presets_all(int& count) {
         // GPIO41 is MTDI, a dedicated-JTAG pad — legal for board-local I/O and withheld only from
         // the X10A picker, which is exactly the asymmetry board_pins.hpp's local-I/O set exists for.
         {BoardPresetId::M5StackAtomS3Lite, "m5stack_atoms3_lite",
-         "M5Stack AtomS3 Lite", BoardVendor::M5Stack, 35, 1, false, 41, true},
+         "M5Stack AtomS3 Lite", BoardVendor::M5Stack, 35, 1, false, 41, true,
+         ATOMS3_LITE_I2C_PINS, static_cast<int>(sizeof(ATOMS3_LITE_I2C_PINS) / sizeof(int))},
         // Plain single-colour LED, ACTIVE LOW (pin driven LOW = lit). No button broken out, so the
         // preset leaves the recovery button off rather than guessing a free pin for the user to
         // solder to: an unconfigured input floats, and a floating pin that reads "pressed" for five
         // seconds factory-resets a board nobody touched (recovery_button.cpp).
         {BoardPresetId::SeeedXiaoEsp32S3, "seeed_xiao_esp32s3",
-         "Seeed XIAO ESP32-S3", BoardVendor::Seeed, 21, 0, true, -1, true},
+         "Seeed XIAO ESP32-S3", BoardVendor::Seeed, 21, 0, true, -1, true, nullptr, 0},
     };
     count = (int)(sizeof(presets) / sizeof(presets[0]));
     return presets;
@@ -159,6 +173,31 @@ inline BoardPresetId board_legacy_preset_id(const Config& c) {
 inline BoardVendor board_selected_vendor(const Config& c) {
     const BoardPreset* preset = board_selected_preset(c);
     return preset ? preset->vendor : BoardVendor::Unknown;
+}
+
+// Board-aware external-I2C pins. The generic X10A list intentionally withholds every dedicated
+// JTAG pad and cannot know which chip pads reach a connector. A selected board can answer both
+// questions: membership in its documented header list, followed by the chip-level local-I/O safety
+// rule. The latter can admit dedicated JTAG for board-local peripherals, but GPIO39 is deliberately
+// absent from Atom's ENV III inventory after hardware tests; flash, strapping,
+// USB-console and build-dependent Octal-SPI conflicts. Runtime reservations remove occupied pads.
+inline bool board_preset_i2c_pin_offerable(const BoardPreset* preset, int pin, bool octal_spi,
+                                           ReservedPins used = {}) {
+    if (!preset || used.claims(pin) || !board_pin_local_io(pin, octal_spi)) return false;
+    for (int i = 0; i < preset->i2c_pin_count; ++i)
+        if (preset->i2c_pins[i] == pin) return true;
+    return false;
+}
+
+inline int board_preset_i2c_pins_offerable(const BoardPreset* preset, int* out, int cap,
+                                            bool octal_spi, ReservedPins used = {}) {
+    if (!preset || !out || cap <= 0) return 0;
+    int n = 0;
+    for (int i = 0; i < preset->i2c_pin_count && n < cap; ++i) {
+        const int pin = preset->i2c_pins[i];
+        if (board_preset_i2c_pin_offerable(preset, pin, octal_spi, used)) out[n++] = pin;
+    }
+    return n;
 }
 
 // The presets THIS BUILD and THIS CONFIG can actually apply. A preset whose LED or button pin is

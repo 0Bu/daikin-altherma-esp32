@@ -575,6 +575,12 @@ function boardLedLegend(b) {
     `<ul class="led-pattern-list">${rows}</ul></div>`;
 }
 
+function boardHardwareSection(kind, title, detail, help = "") {
+  return `<section class="hardware-detail-section hardware-${kind}-section">` +
+    `<div class="hardware-detail-title">${esc(title)}</div>` +
+    `<div class="vdesc-p">${esc(detail)}</div>${help}</section>`;
+}
+
 // The board's own onboard parts — status indicator + recovery button — as ONE summary row with TWO
 // explicit actions. "Hardware" on the left expands the explanation tongue; the selected board name
 // on the right opens the editor. Keeping those actions in separate buttons avoids one
@@ -596,10 +602,11 @@ function boardRow() {
   const envDetail = !env.supported ? "" : env.enabled
     ? t("card.hw_env_detail", env.sda ?? "—", env.scl ?? "—") : t("card.hw_env_disabled");
   const detail = `<div class="vdesc-p">${esc(boardDetail)}</div>` +
-    `<div class="vdesc-p">${esc([ledDetail, btnDetail, envDetail].filter(Boolean).join(" "))}</div>` +
-    boardLedLegend(b) +
-    `<div class="hardware-help"><div class="vdesc-p">${esc(t("board.hint"))}</div>` +
-    (env.supported ? `<div class="vdesc-p">${esc(t("env.pins_hint"))}</div>` : "") + `</div>`;
+    boardHardwareSection("led", t("board.ledtype"), ledDetail, boardLedLegend(b)) +
+    boardHardwareSection("reset", t("board.reset_section"), btnDetail,
+      `<div class="hardware-detail-help vdesc-p">${esc(t("board.hint"))}</div>`) +
+    (env.supported ? boardHardwareSection("env3", t("board.env3_section"), envDetail,
+      `<div class="hardware-detail-help vdesc-p">${esc(t("env.pins_hint"))}</div>`) : "");
   const key = "board:hardware";
   const open = S.descOpen?.has(key) === true;
   return `<div class="vitem${open ? " open" : ""} hardware-item">` +
@@ -624,19 +631,6 @@ const shortFamily = (f) => String(f).replace(/^Altherma\s+/, "");
 // (connectionsHtml) — what the plant IS stays on the dashboard, what the board is SET TO moved.
 function statusCardsHtml() {
   const hp = S.status?.hp || {}, d = S.status?.detect || {};
-  const env = S.status?.env3 || {};
-  let environment = "";
-  if (env.supported && env.enabled) {
-    const value = (v, digits, unit) => env.fresh && Number.isFinite(Number(v))
-      ? `${Number(v).toLocaleString(LANG === "de" ? "de-DE" : "en-US", { maximumFractionDigits: digits })} ${unit}` : "—";
-    const state = env.fresh ? t("env.live") : env.error === "collecting" ? t("env.collecting") : t("env.unavailable");
-    const cls = env.fresh ? "ok" : env.error === "collecting" ? "warn" : "err";
-    const rows = vrow(t("env.temperature"), value(env.temperature_c, 1, "°C"), { cls: "mono num" }) +
-      vrow(t("env.humidity"), value(env.humidity_pct, 0, "%"), { cls: "mono num" }) +
-      vrow(t("env.pressure"), value(env.pressure_hpa, 0, "hPa"), { cls: "mono num" }) +
-      vrow(t("env.sensor_state"), state, { cls });
-    environment = vcard(t("env.card"), rows, "ENV III", cls);
-  }
   // Outdoor unit as a full-width heading — model names are long and don't fit a label→value row.
   // The X10A link + protocol live on the Protocol card (they're about the board's bus), not here.
   // Identity is bus-derived: the model name degrades to the brand offline (hpModelName), and capacity
@@ -673,7 +667,7 @@ function statusCardsHtml() {
 
   // Model identity is only meaningful while the bus answers — hide the card entirely when the
   // heat-pump link is down instead of naming a unit (or showing a stale capacity) that isn't live.
-  return environment + (hp.connected ? vcard(t("card.model"), model) : "");
+  return hp.connected ? vcard(t("card.model"), model) : "";
 }
 
 // ── The diagnosis card — "is anything worth reporting?" (logic/checkup.hpp, #208/#349) ─────────

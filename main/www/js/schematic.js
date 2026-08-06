@@ -434,6 +434,50 @@ function updateSchematicStateA11y(d) {
       !d || d.flowSwitch == null ? "—" : t(d.flowSwitch ? "state.on" : "state.off"));
 }
 
+// ENV III is independent of both liveData sources: an X10A outage must not blank a fresh outdoor
+// sensor, and a live HomeHub must not make a stale ENV sample current. Keep its formatter and state
+// decision in one place so the compact header pill and the inspector always tell the same truth.
+function env3State(env) {
+  return env.fresh ? { text: t("env.live"), cls: "ok" }
+    : env.error === "collecting" ? { text: t("env.collecting"), cls: "warn" }
+    : { text: t("env.unavailable"), cls: "err" };
+}
+
+function env3Value(env, key, digits, unit) {
+  if (!env.fresh || !Number.isFinite(Number(env[key]))) return `— ${unit}`;
+  const locale = LANG === "de" ? "de-DE" : "en-US";
+  const value = Number(env[key]).toLocaleString(locale,
+    { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  return `${value} ${unit}`;
+}
+
+function renderEnv3Pill() {
+  const group = $("gEnv3");
+  if (!group) return;
+  const env = S.status?.env3 || {};
+  const configured = env.supported === true && env.enabled === true;
+  group.style.display = configured ? "" : "none";
+  group.setAttribute("tabindex", configured ? "0" : "-1");
+  if (!configured) {
+    group.setAttribute("aria-hidden", "true");
+    if (S.insp === "env3") {
+      S.insp = null;
+      S.inspSig = "";
+      S.inspHistSig = "";
+    }
+    return;
+  }
+  group.removeAttribute("aria-hidden");
+  const temperature = env3Value(env, "temperature_c", 1, "°C");
+  const state = env3State(env);
+  setTxt("svEnv3Temp", temperature);
+  group.classList.toggle("fresh", env.fresh === true);
+  const label = `${t("env.card")}: ${temperature}; ${state.text}`;
+  group.setAttribute("aria-label", label);
+  const title = group.querySelector(":scope > title");
+  if (title) title.textContent = label;
+}
+
 function clearSchematic() {
   SCHEM_PILL_IDS.forEach((id) => setTxt(id, "—"));
   setTxt("svBuh", "");                 // no BUH step to report
@@ -453,6 +497,7 @@ function renderLive() {
   // value has arrived). The status block above and this drawing therefore render from the SAME
   // snapshot and cannot disagree about whether the plant is running. The inspector reads it too, so
   // an open explainer follows the live values.
+  renderEnv3Pill();
   const d = S.live;
   // Mark every pill this cycle drew from the Modbus stack, and unmark the rest. Done in ONE pass over
   // the known pill set rather than per setTxt, so a pill that stops being Modbus-sourced cannot keep
@@ -647,6 +692,14 @@ const INSPECT = {
     // in the very same status byte as the operating mode above it (0x60/2), and it says the indoor
     // unit is asking for the compressor — for hot water just as much as for the house.
     rows: [/i\/u operation mode/i, /thermostat on/i, /(error|fault) code/i],
+  },
+  // Board-local observation rather than a heat-pump register. Its custom renderer keeps all three
+  // current measurements together and hands their three independent history rings to one combined
+  // timeline; no X10A/HomeHub row is invented merely to fit the ordinary inspector path.
+  env3: {
+    t: { en: "Outdoor climate", de: "Außenklima" },
+    aria: { en: "Outdoor climate from ENV III", de: "Außenklima vom ENV III" },
+    env3: true,
   },
   sgrequest: {
     t: { en: "Smart-Grid request via Modbus", de: "Smart-Grid-Anforderung über Modbus" },
@@ -1339,6 +1392,11 @@ const inspTitleText = (e, d) => tx(typeof e.t === "function" ? e.t(d) : e.t);
 // still repaints while an idle second does not.
 function inspectSig(e) {
   if (!e) return "";
+  if (e.env3) {
+    const env = S.status?.env3 || {};
+    return [LANG, S.insp, env.supported, env.enabled, env.fresh, env.error || "",
+            env.temperature_c, env.humidity_pct, env.pressure_hpa].join("|");
+  }
   const d = S.live;
   const row = d ? inspCurRow(e) : null;
   // The fallback headline is a value like any other and moves like any other, so it is in the key.
@@ -1369,6 +1427,23 @@ function inspectSig(e) {
 // changes (~1×/s), and re-emitting the plot that often would tear down a crosshair mid-read and
 // restart the CSS transition. Only a new series (`gen`) or a moved pin actually changes the markup.
 function renderInspectHist(e, row) {
+  if (e && e.env3) {
+    const offered = ENV3_COMBINED_SERIES.filter((s) => hasEnv3Hist(s.id));
+    for (const s of offered) ensureHist(s.id, "env3");
+    const seriesSig = offered.map((s) => {
+      const h = S.hist.get(histCacheKey(s.id, "env3"));
+      return `${s.id}:${h ? (h.err ? "e" : h.gen) : ""}`;
+    });
+    const pin = S.histPin.get(ENV3_COMBINED_ID);
+    const sig = [LANG, ENV3_COMBINED_ID, ...seriesSig,
+                 pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
+    if (sig === S.inspHistSig) return;
+    S.inspHistSig = sig;
+    const el = $("inspHist");
+    el.hidden = !offered.length;
+    el.innerHTML = offered.length ? env3HistHtml() : "";
+    return;
+  }
   // A plain pill drawn from a ROW charts that row. A COMPUTED pill (ΔT, heat output, electrical
   // input, COP) or a grouped component (BUH's two stage rows) charts the explicit series named by
   // the entry's `trend`, even when one source row anchors the inspector. Never silently substitute
@@ -1430,6 +1505,32 @@ function renderInspect() {
   $("inspCard").hidden = !e;
   document.querySelectorAll("#schem .sc-hit").forEach((el) => el.classList.toggle("sel", el.dataset.insp === S.insp));
   if (!e) return;
+  if (e.env3) {
+    const env = S.status?.env3 || {};
+    const state = env3State(env);
+    const valueRow = (label, value) =>
+      `<div class="inspect-row"><span>${esc(label)}</span><span>${esc(value)}</span></div>`;
+    setTxt("inspTitle", inspTitleText(e, null));
+    setTxt("inspSrc", "ENV III");
+    $("inspSrc").hidden = false;
+    $("inspSrc").classList.toggle("src-val-mb", false);
+    $("inspNow").hidden = false;
+    setTxt("inspNow", env3Value(env, "temperature_c", 1, "°C"));
+    $("inspNow").classList.toggle("src-val-mb", false);
+    // Values precede the chart so the combined timeline is the final, full-width evidence block in
+    // the infobox. Temperature is repeated deliberately: the header mirrors the pill while this
+    // list keeps the three ENV III instruments directly comparable and independently labelled.
+    $("inspBody").innerHTML =
+      `<div class="inspect-env-state ${state.cls}">${esc(t("env.sensor_state"))}: ${esc(state.text)}</div>` +
+      `<div class="vdesc-p">${esc(t("env.history_help"))}</div>` +
+      `<div class="inspect-rows inspect-env-values">` +
+        valueRow(t("env.temperature"), env3Value(env, "temperature_c", 1, "°C")) +
+        valueRow(t("env.humidity"), env3Value(env, "humidity_pct", 0, "%")) +
+        valueRow(t("env.pressure"), env3Value(env, "pressure_hpa", 0, "hPa")) +
+      `</div>`;
+    $("inspRows").innerHTML = "";
+    return;
+  }
   // `d` is the drawing's snapshot and is NOT null merely because X10A is silent — liveData() still
   // builds one from the gateway when it is delivering, which is what makes the fallback a drawing
   // rather than a blank card. So "is there a snapshot" and "is the X10A row current" are two

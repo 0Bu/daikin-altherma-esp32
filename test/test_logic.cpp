@@ -2503,19 +2503,24 @@ static void test_board_presets() {
     CHECK(all[0].vendor == BoardVendor::M5Stack);
     CHECK(all[0].led_gpio == 35 && all[0].led_type == 1 && !all[0].led_inverted);
     CHECK(all[0].btn_gpio == 41 && all[0].btn_active_low);
+    const int atom_i2c[] = {1, 2, 5, 6, 7, 8, 38};
+    CHECK(all[0].i2c_pin_count == static_cast<int>(sizeof(atom_i2c) / sizeof(atom_i2c[0])));
+    CHECK(all[0].i2c_pin_count <= BOARD_I2C_PINS_MAX);
+    for (int i = 0; i < all[0].i2c_pin_count; ++i) CHECK(all[0].i2c_pins[i] == atom_i2c[i]);
     CHECK(std::string(all[1].name) == "Seeed XIAO ESP32-S3");
     CHECK(all[1].id == BoardPresetId::SeeedXiaoEsp32S3);
     CHECK(std::string(all[1].key) == "seeed_xiao_esp32s3");
     CHECK(all[1].vendor == BoardVendor::Seeed);
     CHECK(all[1].led_gpio == 21 && all[1].led_type == 0 && all[1].led_inverted);
     CHECK(all[1].btn_gpio == -1);               // no button broken out — never guess a pin for one
+    CHECK(all[1].i2c_pins == nullptr && all[1].i2c_pin_count == 0);
     CHECK(board_preset_by_key("m5stack_atoms3_lite") == &all[0]);
     CHECK(board_preset_by_id(BoardPresetId::SeeedXiaoEsp32S3) == &all[1]);
     CHECK(board_preset_by_key("atoms3_lite") == nullptr);  // no fuzzy/model-name identity
 
     // Vendor-gated features depend on an explicitly selected preset, never on boot defaults or a
-    // display-name prefix. A future M5Stack preset only needs the same enum value to inherit the
-    // accessory policy.
+    // display-name prefix. Connector-bound features additionally require that preset's physical
+    // I2C inventory, so a future board cannot inherit the Atom layout by vendor name alone.
     Config identified;
     identified.led_gpio = all[0].led_gpio; identified.led_type = all[0].led_type;
     identified.led_inverted = all[0].led_inverted;
@@ -2547,6 +2552,21 @@ static void test_board_presets() {
     // NOT for the X10A picker is the exact asymmetry this preset depends on (board_pins.hpp).
     CHECK(board_pin_local_io(41, /*octal_spi=*/false));
     CHECK(!board_pin_offerable(41, /*octal_spi=*/false));
+
+    // ENV III uses the selected board's TESTED connector inventory, not every safe chip pad.
+    // GPIO39 is exposed but deliberately unavailable after failed ENV III hardware tests; GPIO10 is
+    // chip-safe but absent from the Atom headers. Neither may appear or validate.
+    CHECK(board_preset_i2c_pin_offerable(&all[0], 38, false));
+    CHECK(!board_preset_i2c_pin_offerable(&all[0], 39, false));
+    CHECK(!board_preset_i2c_pin_offerable(&all[0], 10, false));
+    CHECK(!board_preset_i2c_pin_offerable(&all[1], 38, false));
+    int i2c_buf[BOARD_I2C_PINS_MAX];
+    int ni2c = board_preset_i2c_pins_offerable(
+        &all[0], i2c_buf, BOARD_I2C_PINS_MAX, false, ReservedPins{1, 35});
+    CHECK(ni2c == all[0].i2c_pin_count - 1);      // GPIO1 occupied; non-header GPIO35 changes nothing
+    CHECK(i2c_buf[0] == 2 && i2c_buf[ni2c - 1] == 38);
+    CHECK(board_preset_i2c_pins_offerable(&all[0], i2c_buf, 2, false) == 2);
+    CHECK(board_preset_i2c_pins_offerable(nullptr, i2c_buf, BOARD_I2C_PINS_MAX, false) == 0);
 
     // Offering is build-aware: GPIO35 is free on this project's Quad-flash build and is SPIIO4 on an
     // Octal one, so an Octal build withholds the AtomS3 Lite preset instead of offering a pick that
@@ -4726,11 +4746,32 @@ static void test_env3() {
     CHECK(!env3_sample_plausible(-40.01f, 50.0f, 1000.0f));
     CHECK(!env3_sample_plausible(120.01f, 50.0f, 1000.0f));
     CHECK(!env3_sample_plausible(20.0f, 50.0f, 1100.01f));
+    CHECK(env3_sample_implausibility(20.0f, 50.0f, 1000.0f) == nullptr);
+    CHECK(std::string(env3_sample_implausibility(-40.01f, 50.0f, 1000.0f)) ==
+          "temperature_out_of_range");
+    CHECK(std::string(env3_sample_implausibility(20.0f, -0.01f, 1000.0f)) ==
+          "humidity_out_of_range");
+    CHECK(std::string(env3_sample_implausibility(20.0f, 50.0f, 299.99f)) ==
+          "pressure_out_of_range");
+    CHECK(std::string(env3_sample_implausibility(std::nanf(""), 50.0f, 1000.0f)) ==
+          "temperature_not_finite");
     CHECK(build_env3_mqtt_json(true, 20.25f, 45.5f, 1008.75f) ==
           "{\"temperature_c\":20.25,\"humidity_pct\":45.50,\"pressure_hpa\":1008.75}");
     CHECK(build_env3_mqtt_json(false, 20.25f, 45.5f, 1008.75f) == "{}");
     CHECK(build_env3_mqtt_json(true, 20.25f, 45.5f, 1200.0f) == "{}");
     CHECK(build_env3_mqtt_json(true, std::nanf(""), 45.5f, 1008.75f) == "{}");
+    CHECK(env3_probe_may_try_swapped(Env3ProbeResult::Sht30Unavailable));
+    CHECK(env3_probe_may_try_swapped(Env3ProbeResult::Qmp6988Unavailable));
+    CHECK(!env3_probe_may_try_swapped(Env3ProbeResult::Ok));
+    CHECK(!env3_probe_may_try_swapped(Env3ProbeResult::BusUnavailable));
+    CHECK(ENV3_HISTORY_COUNT == 3);
+    CHECK(env3_history_index("env3_temperature") == 0);
+    CHECK(env3_history_index("env3_humidity") == 1);
+    CHECK(env3_history_index("env3_pressure") == 2);
+    CHECK(env3_history_index("outdoor_air") == -1);
+    CHECK(std::string(ENV3_HISTORIES[0].unit) == "°C");
+    CHECK(std::string(ENV3_HISTORIES[1].unit) == "%");
+    CHECK(std::string(ENV3_HISTORIES[2].unit) == "hPa");
 
     uint8_t calibration_raw[25] = {};
     calibration_raw[0] = 0x80; calibration_raw[18] = 0x7f; calibration_raw[19] = 0xff;
@@ -4772,6 +4813,11 @@ static void test_env3() {
     c.led_gpio = 35; c.led_type = 1; c.led_inverted = false;
     c.btn_gpio = 41; c.btn_active_low = true;
     CHECK(env3_config_valid(c, why, 48, false));
+    c.env3_sda = 38; c.env3_scl = 39;
+    CHECK(!env3_config_valid(c, why, 48, false));            // GPIO39 is not offered for ENV III
+    c.env3_sda = 10;
+    CHECK(!env3_config_valid(c, why, 48, false));            // safe chip pad, absent from Atom header
+    c.env3_sda = 5; c.env3_scl = 6;
     c.rx_pin = 5;
     CHECK(!env3_config_valid(c, why, 48, false));
     CHECK(why.find("SDA") != std::string::npos);
@@ -4796,9 +4842,12 @@ static void test_env3() {
     CHECK(why.find("M5Stack") != std::string::npos);
 
     const Env3Preset* presets[ENV3_PRESETS_MAX] = {};
-    CHECK(env3_presets_offerable(presets, ENV3_PRESETS_MAX, false) == 1);
+    const BoardPreset* atom = board_preset_by_id(BoardPresetId::M5StackAtomS3Lite);
+    const BoardPreset* seeed = board_preset_by_id(BoardPresetId::SeeedXiaoEsp32S3);
+    CHECK(env3_presets_offerable(presets, ENV3_PRESETS_MAX, atom, false) == 1);
     CHECK(presets[0]->sda == 2 && presets[0]->scl == 1);
-    CHECK(env3_presets_offerable(presets, 1, false, ReservedPins{2}) == 0);
+    CHECK(env3_presets_offerable(presets, 1, atom, false, ReservedPins{2}) == 0);
+    CHECK(env3_presets_offerable(presets, ENV3_PRESETS_MAX, seeed, false) == 0);
 }
 
 static void test_reference_temperature_config() {

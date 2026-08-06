@@ -90,7 +90,7 @@ assert.match(style, /\.settings-split-row\s*\{[^}]*min-height:\s*calc\(1\.5em \+
 assert.match(style, /@media \(min-width: 600px\)[\s\S]*\.settings-split-row\s*\{[^}]*min-height:\s*calc\(1\.5em \+ 22px\)/,
   "split Settings rows must track the larger standard padding on tablet and desktop");
 
-const S = { status: {}, descOpen: new Set(), histPin: new Map() };
+const S = { status: {}, descOpen: new Set(), histPin: new Map(), hist: new Map(), histBusy: new Set() };
 const renderSandbox = vm.createContext({
   S,
   navigator: { language: "en-GB" },
@@ -100,6 +100,7 @@ const renderSandbox = vm.createContext({
 });
 vm.runInContext(`${readAppFragments(["i18n.js", "dashboard.js", "history.js"])}
   this.__renderBoard = (lang) => { LANG = lang; return boardRow(); };
+  this.__env3Tooltip = (lang, i) => { LANG = lang; return scrubText(historyView(ENV3_COMBINED_ID), i); };
   this.__toggleDesc = toggleDesc;`, renderSandbox,
   { filename: "main/www/app.sources" });
 
@@ -108,8 +109,18 @@ S.status = {
     preset_id: "m5stack_atoms3_lite", preset_name: "M5Stack AtomS3 Lite", user_set: true,
     led_gpio: 35, led_type: 1, led_inverted: false, btn_gpio: 41, btn_active_low: true,
   },
-  env3: { supported: true, enabled: true, sda: 2, scl: 1 },
+  env3: { supported: true, enabled: true, sda: 2, scl: 1, fresh: true,
+          temperature_c: 21.5, humidity_pct: 48, pressure_hpa: 1007 },
+  history: { dt: 300, rows: [], modbus_rows: [], env3_rows: [
+    { id: "env3_temperature", label: "ENV III temperature" },
+    { id: "env3_humidity", label: "ENV III humidity" },
+    { id: "env3_pressure", label: "ENV III air pressure" },
+  ] },
 };
+const now = Date.now();
+S.hist.set("env3:env3_temperature", { at: now, gen: 1, source: "env3", dt: 300, unit: "°C", b0: 1, v: [205, 210, 215] });
+S.hist.set("env3:env3_humidity", { at: now, gen: 1, source: "env3", dt: 300, unit: "%", b0: 1, v: [500, 490, 480] });
+S.hist.set("env3:env3_pressure", { at: now, gen: 1, source: "env3", dt: 300, unit: "hPa", b0: 1, v: [10050, 10060, 10070] });
 let rendered = renderSandbox.__renderBoard("de");
 assert.match(rendered, /class="vitem hardware-item"[\s\S]*class="hardware-info-toggle[^"]*"[^>]*data-desc="board:hardware"[^>]*aria-expanded="false"[^>]*aria-controls="board-hardware-detail"/,
   "Hardware on the left must be a closed explanation toggle on first render");
@@ -122,17 +133,47 @@ assert.doesNotMatch(boardButton, /GPIO|WS2812|ENV III|Keine/,
   "pins, LED type and outdoor sensor must stay out of the right action");
 assert.match(rendered, /class="vdesc-body board-hardware-tongue" id="board-hardware-detail"/,
   "the selected hardware facts must render in the standard dashboard tongue geometry");
+assert.doesNotMatch(rendered, /data-trends="env3_temperature,env3_humidity,env3_pressure"/,
+  "opening Hardware must no longer fetch outdoor-climate history");
+assert.doesNotMatch(rendered, /ENV-III-Messwerte|data-hist="env3_combined"/,
+  "live ENV III values and their chart must not be duplicated in the Hardware tongue");
+assert.equal(renderSandbox.__env3Tooltip("de", 2),
+  "jetzt\nTemperatur  21,5 °C\nLuftfeuchte  48,0 %\nLuftdruck  1.007,0 hPa",
+  "one readable localized tooltip must report time and all three measurements together");
+assert.match(style, /\.vhist-env3 \.vhist-graph\s*\{[^}]*padding-top:\s*9\dpx;/,
+  "the combined chart must reserve enough vertical room for its four-line tooltip");
+assert.match(style, /\.vhist-env3 \.vhist-tip\s*\{[^}]*min-width:[^;}]+;[^}]*white-space:\s*pre;/,
+  "the ENV III tooltip must retain readable lines instead of wrapping into a vertical strip");
 for (const text of [
   "Das M5Stack AtomS3 Lite ist ein kompaktes ESP32-S3-Board mit integrierter WS2812-RGB-Status-LED.",
-  "Status-LED: WS2812 auf GPIO35.",
-  "Reset-Taster: GPIO41, aktiv bei LOW.",
-  "Außensensor: ENV III mit SDA auf GPIO2 und SCL auf GPIO1.",
+  "WS2812 auf GPIO35.",
+  "GPIO41, aktiv bei LOW.",
+  "SDA auf GPIO2, SCL auf GPIO1.",
+  I18N.de["board.ledtype"],
+  I18N.de["board.reset_section"],
+  I18N.de["board.env3_section"],
   I18N.de["board.ledlegend_rgb"],
   I18N.de["board.hint"],
   I18N.de["env.pins_hint"],
 ]) assert.ok(rendered.includes(text), `German M5Stack hardware tongue must include: ${text}`);
 for (const pattern of patterns) assert.ok(rendered.includes(pattern[4]),
   `German M5Stack hardware tongue must include RGB phase: ${pattern[4]}`);
+const ledSectionAt = rendered.indexOf("hardware-led-section");
+const resetSectionAt = rendered.indexOf("hardware-reset-section");
+const env3SectionAt = rendered.indexOf("hardware-env3-section");
+assert.ok(ledSectionAt >= 0 && ledSectionAt < resetSectionAt && resetSectionAt < env3SectionAt,
+  "hardware facts must be grouped in LED, reset-button, ENV III order");
+const ledSection = rendered.slice(ledSectionAt, resetSectionAt);
+const resetSection = rendered.slice(resetSectionAt, env3SectionAt);
+const env3Section = rendered.slice(env3SectionAt);
+assert.doesNotMatch(ledSection, /Reset-Taster 5 Sekunden|SDA = Datenleitung/,
+  "the LED section must not contain reset-button or ENV III help");
+assert.match(resetSection, /Reset-Taster 5 Sekunden/,
+  "the reset instructions must stay with the reset-button assignment");
+assert.doesNotMatch(resetSection, /SDA = Datenleitung/,
+  "the reset-button section must not contain ENV III wiring help");
+assert.match(env3Section, /SDA = Datenleitung/,
+  "the ENV III wiring and automatic pin-swap explanation must stay with ENV III");
 
 const liveItem = { classList: { names: new Set(), contains(name) { return this.names.has(name); },
   toggle(name, force) { if (force) this.names.add(name); else this.names.delete(name); } } };
@@ -153,9 +194,12 @@ assert.equal(S.descOpen.has("board:hardware"), false);
 rendered = renderSandbox.__renderBoard("en");
 for (const text of [
   "M5Stack AtomS3 Lite is a compact ESP32-S3 board with an onboard WS2812 RGB status LED.",
-  "Status LED: WS2812 on GPIO35.",
-  "Reset button: GPIO41, active LOW.",
-  "Outdoor sensor: ENV III with SDA on GPIO2 and SCL on GPIO1.",
+  "WS2812 on GPIO35.",
+  "GPIO41, active LOW.",
+  "SDA on GPIO2, SCL on GPIO1.",
+  I18N.en["board.ledtype"],
+  I18N.en["board.reset_section"],
+  I18N.en["board.env3_section"],
   I18N.en["board.ledlegend_rgb"],
   I18N.en["board.hint"],
   I18N.en["env.pins_hint"],
@@ -176,8 +220,8 @@ assert.match(boardButton, /<span>Seeed XIAO ESP32-S3<\/span>/,
   "the right action must display only the selected XIAO board name");
 assert.doesNotMatch(boardButton, /GPIO|LED|ENV III|Keine/,
   "XIAO pin and peripheral details must stay in the explanation tongue");
-assert.ok(rendered.includes("Status-LED: LED auf GPIO21, aktiv bei LOW."));
-assert.ok(rendered.includes("Reset-Taster: nicht konfiguriert."));
+assert.ok(rendered.includes("LED auf GPIO21, aktiv bei LOW."));
+assert.ok(rendered.includes("Nicht konfiguriert."));
 assert.ok(rendered.includes(I18N.de["board.ledlegend_gpio"]));
 assert.ok(rendered.includes(I18N.de["board.hint"]));
 for (const pattern of patterns) assert.ok(rendered.includes(pattern[6]),

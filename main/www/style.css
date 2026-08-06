@@ -9,7 +9,7 @@
   /* Supply/return flow colours (the system schematic's pipes) — a CVD-validated pair,
      deliberately separate from the ok/warn/err STATE colours: they encode temperature, not health.
      The schematic's idle-pipe/plate greys derive from the neutral ramp, no extra brand tokens. */
-  --flow-hot:#DC5A32; --flow-cold:#3F7FD0;
+  --flow-hot:#DC5A32; --flow-cold:#3F7FD0; --env-pressure:#7456C5;
   --pipe:#C9CED6; --hatch:#EDF0F3;
   --focus-ring:rgba(0,151,224,.22);
   --shadow-logo:0 2px 8px rgba(0,151,224,.35);
@@ -28,7 +28,7 @@
     --brand:#33ABE8; --brand-strong:#0097E0; --brand-navy:#0E1C43; --brand-tint:#12202B;
     --bg:#12151A; --card:#1B1F27; --fg:#E6E9EE; --muted:#93A0AF; --line:#2A2F39; --soft:#20242C;
     --ok:#3FBE7A; --warn:#E08A2B; --err:#EA5A5A; --err-tint:#331E21;
-    --flow-hot:#E06A40; --flow-cold:#5A97DE;
+    --flow-hot:#E06A40; --flow-cold:#5A97DE; --env-pressure:#A58BE2;
     --pipe:#3A414D; --hatch:#232935;
     --shadow-card:0 1px 2px rgba(0,0,0,.5),0 10px 28px rgba(0,0,0,.45);
     --shadow-tongue:inset 0 6px 7px -7px rgba(0,0,0,.55);
@@ -192,6 +192,14 @@ svg .sc-sg-request .sc-val { fill: var(--muted); font-weight: 700; letter-spacin
   transition: fill .3s; }
 .sg-boost-on .sc-sg-request-box { fill: var(--src-mb-soft); stroke: var(--src-mb); }
 .sg-boost-on .sc-sg-request .sc-val { fill: var(--src-mb); }
+/* Optional ENV III lives beside the permanent Boost state rather than as another dashboard card.
+   The face carries only its primary reading; all three instruments and their common timeline are
+   one tap away in the standard schematic inspector. A configured but stale sensor remains visible
+   as "— °C", while a fresh sample earns the ordinary measurement-blue treatment. */
+svg .sc-env3-box { fill: var(--card); stroke: var(--line); transition: fill .3s, stroke .3s; }
+svg .sc-env3 .sc-val { fill: var(--muted); transition: fill .3s; }
+svg .sc-env3.fresh .sc-env3-box { fill: var(--brand-tint); stroke: var(--brand); }
+svg .sc-env3.fresh .sc-val { fill: var(--brand-strong); }
 svg .sc-pipe { fill: none; stroke: var(--pipe); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
 svg .sc-rpipe { fill: none; stroke: var(--pipe); stroke-width: 3.5; stroke-linecap: round; }
 svg .sc-flow {
@@ -307,6 +315,8 @@ svg .sc-hit:hover :is(.sc-pill, .sc-box, .sc-plate, .sc-buh, .sc-bsh-state-box, 
 svg .sc-hit.sel :is(.sc-pill, .sc-box, .sc-plate, .sc-buh, .sc-bsh-state-box, .sc-comp, .sc-valve) { stroke: var(--brand); stroke-width: 2.5; }
 svg .sc-hit:hover .sc-sg-request-box { stroke: var(--brand); }
 svg .sc-hit.sel .sc-sg-request-box { stroke: var(--brand); stroke-width: 2.5; }
+svg .sc-hit:hover .sc-env3-box { stroke: var(--brand); }
+svg .sc-hit.sel .sc-env3-box { stroke: var(--brand); stroke-width: 2.5; }
 svg .sc-hit.sel .sc-tie { stroke: var(--brand); }
 /* Pipes: a 3.5–5 px stroke is far too thin to tap, so each run carries an invisible fat hit line.
    `pointer-events: stroke` is deliberate — it hit-tests the stroke area regardless of the paint
@@ -351,6 +361,11 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 }
 .inspect-x:hover { color: var(--fg); }
 .inspect-body { font-size: 13.5px; color: var(--muted); line-height: 1.55; margin-top: 9px; }
+.inspect-env-state { color: var(--fg); font-weight: 650; }
+.inspect-env-state.ok { color: var(--ok); }
+.inspect-env-state.warn { color: var(--warn); }
+.inspect-env-state.err { color: var(--err); }
+.inspect-env-values { margin-top: 10px; }
 /* Description first, trend second, values last. Every value — including a Modbus twin of the
    headline — enters this one divided list instead of interrupting the prose above the chart. */
 .inspect-rows { margin-top: 9px; }
@@ -653,9 +668,11 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .settings-info-item.open > .settings-info-row { box-shadow: inset 0 -1px 0 var(--line); }
 .settings-info-tongue { overflow-wrap: anywhere; }
 .board-hardware-tongue { overflow-wrap: anywhere; }
-.hardware-led-legend, .hardware-help {
-  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line);
-}
+.hardware-detail-section { margin-top: 15px; padding-top: 13px; border-top: 1px solid var(--line); }
+.hardware-detail-title { color: var(--fg); font-weight: 700; margin-bottom: 7px; }
+.hardware-detail-section > .vdesc-p { margin: 0; }
+.hardware-detail-help { margin-top: 9px !important; }
+.hardware-led-legend { margin-top: 11px; }
 .hardware-led-legend .led-legend-title { font-size: inherit; }
 .hardware-led-legend .led-pattern-list li { margin-top: 6px; }
 /* A labelled note inside an explainer — "Normal: …", "No current reading: …" (app.js descNoteHtml).
@@ -672,6 +689,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vdesc-p { margin-top: 11px; }
 .vdesc-p:first-child { margin-top: 0; }
 .vdesc-n { color: var(--fg); font-weight: 600; }
+
 /* One current Daikin code and its meaning. The 63-entry lookup stays internal; the explainer shows
    the fact the user asked about instead of turning a single row into a service-manual index. */
 .fault-code-current {
@@ -701,6 +719,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   background: var(--brand-sky); }
 .vhist-source.mb { color: var(--src-mb); }
 .vhist-source.mb i { background: var(--src-mb); }
+.vhist-source small { color: inherit; font-size: 10.5px; }
 /* Component states are categorical timelines, not numeric curves. Every valid X10A state owns a
    labelled colour in the state legend; missing samples alone are hatched. HomeHub keeps its petrol
    fill across every valid phase. Put the source name directly on its lane instead of making the eye
@@ -797,6 +816,12 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   max-width: calc(100% - 8px); line-height: 1.35;
   border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px;
   box-shadow: 0 1px 3px rgba(0,0,0,.10); }
+.vhist-env3 .vhist-graph { padding-top: 96px; }
+.vhist-env3 .vhist-tip { min-width: min(220px, calc(100% - 8px)); white-space: pre;
+  padding: 7px 10px; line-height: 1.55; border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(16,20,28,.12); }
+.vhist-env3 .vhist-tip.tip-start { transform: none; margin-left: 4px; }
+.vhist-env3 .vhist-tip.tip-end { transform: translateX(-100%); margin-left: -4px; }
 .vhist-line { fill: none; stroke: var(--brand-sky); stroke-width: 1.6px; stroke-linejoin: round; stroke-linecap: round; }
 .vhist-area { fill: var(--brand-sky); opacity: .13; stroke: none; }
 .vhist-pt { fill: var(--brand-sky); stroke: none; }
@@ -807,6 +832,18 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-area.mb { fill: var(--src-mb); }
 .vhist-pt.mb { fill: var(--src-mb); }
 .vhist-mark.mb { background: var(--src-mb); }
+.vhist-source.env-temperature { color: var(--flow-hot); }
+.vhist-source.env-temperature i, .vhist-mark.env-temperature, .vhist-now.env-temperature { background: var(--flow-hot); }
+.vhist-line.env-temperature { stroke: var(--flow-hot); stroke-width: 1.9px; }
+.vhist-pt.env-temperature { fill: var(--flow-hot); }
+.vhist-source.env-humidity { color: var(--flow-cold); }
+.vhist-source.env-humidity i, .vhist-mark.env-humidity, .vhist-now.env-humidity { background: var(--flow-cold); }
+.vhist-line.env-humidity { stroke: var(--flow-cold); stroke-width: 1.8px; stroke-dasharray: 5 2; }
+.vhist-pt.env-humidity { fill: var(--flow-cold); }
+.vhist-source.env-pressure { color: var(--env-pressure); }
+.vhist-source.env-pressure i, .vhist-mark.env-pressure, .vhist-now.env-pressure { background: var(--env-pressure); }
+.vhist-line.env-pressure { stroke: var(--env-pressure); stroke-width: 1.8px; stroke-dasharray: 1.5 2; }
+.vhist-pt.env-pressure { fill: var(--env-pressure); }
 /* The live end of the series. An HTML dot, not an SVG circle: the plot is scaled non-uniformly, so
    a circle inside it would render as an ellipse (app.js maps its % position onto the same scale). */
 .vhist-now { position: absolute; right: 0; width: 7px; height: 7px; border-radius: 50%;

@@ -452,7 +452,12 @@ function closeBoard() { closePopup("boardModal"); }
 
 // ── ENV III outdoor-climate sensor ───────────────────────────────────────
 function env3AvailablePins() {
-  const raw = Array.isArray(S.status?.env3?.pins_avail) ? S.status.env3.pins_avail : [];
+  // Current firmware attaches the physical I2C-pin inventory to each board preset, so selecting
+  // AtomS3 Lite immediately narrows the list even before that pending identity is saved. Keep the
+  // env3-level fallback for an older device payload during a rolling OTA/browser-cache transition.
+  const presetPins = selectedBoardPreset()?.i2c_pins;
+  const raw = Array.isArray(presetPins) ? presetPins
+    : Array.isArray(S.status?.env3?.pins_avail) ? S.status.env3.pins_avail : [];
   const used = new Set();
   if (+$("bdLedType").value >= 0) used.add(+$("bdLedPin").value);
   if (+$("bdBtnPin").value >= 0) used.add(+$("bdBtnPin").value);
