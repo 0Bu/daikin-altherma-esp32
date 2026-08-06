@@ -43,6 +43,7 @@
 #include "logic/heartbeat.hpp"
 #include "logic/hp_query_log.hpp"
 #include "logic/http_body.hpp"
+#include "logic/http_cache.hpp"
 #include "logic/json.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/mqtt_publish_gate.hpp"
@@ -91,6 +92,19 @@ static int g_failures = 0;
 static bool approx(double a, double b) { return std::fabs(a - b) < 1e-6; }
 
 using namespace daik;
+
+static void test_http_cache() {
+    constexpr std::string_view tag = "\"012345abcdef\"";
+    CHECK(http_if_none_match(tag, tag));
+    CHECK(http_if_none_match(" W/\"012345abcdef\" ", tag));
+    CHECK(http_if_none_match("\"old\", W/\"012345abcdef\", \"new\"", tag));
+    CHECK(http_if_none_match("*", tag));
+    CHECK(http_if_none_match("\"comma,inside\", \"012345abcdef\"", tag));
+    CHECK(!http_if_none_match("\"012345abcde\"", tag));
+    CHECK(!http_if_none_match("\"x012345abcdefx\"", tag));
+    CHECK(!http_if_none_match("", tag));
+    CHECK(!http_if_none_match(tag, ""));
+}
 
 static void test_crc() {
     // Sum-then-NOT (X10A checksum).
@@ -9295,6 +9309,7 @@ static void test_mqtt_publish_gate() {
 }
 
 int main() {
+    test_http_cache();
     test_crc();
     test_hp_query_log_policy();
     test_registers();

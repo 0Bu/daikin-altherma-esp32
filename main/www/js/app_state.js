@@ -359,13 +359,13 @@ function toast(msg, type = "info") {
 // Returns whether the fetch landed, so the poll loop can back off on a device that stopped
 // answering. Its failure path IS the unreachable banner — every caller wants that, and a second
 // copy of the decision in the loop could disagree with this one.
-async function refreshStatus() {
+async function refreshStatus(paint = true) {
   let s;
   try { s = await j("/status", { signal: pollSignal() }); } catch { markUnreachable(); return false; }
   S.status = s;
   hydrateRoutedPopup();
   setLangFromStatus(s);   // apply the device's language override (if any) before painting this frame
-  renderApp();
+  if (paint) renderApp();
   return true;
 }
 function markUnreachable() {

@@ -21,6 +21,7 @@
 #include "logic/binary_semantics.hpp"
 #include "logic/homehub_map.hpp"
 #include "logic/history.hpp"
+#include "logic/http_cache.hpp"
 #include "logic/convert.hpp"   // conv_is_binary — /values marks a bit-flag row from its converter id
 #include "logic/mqtt_group.hpp" // is_json_number — keep numeric HomeHub values numeric in /values
 #include "logic/crashinfo.hpp"
@@ -90,21 +91,65 @@ static bool setup_mode() {
     return esp_wifi_get_mode(&mode) == ESP_OK && (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA);
 }
 
+// The validator identifies the exact app image, so any OTA that can change an embedded asset also
+// changes the ETag.  The caller adds the resource name because a strong validator must not claim
+// that the dashboard, favicon and heat-pump raster are byte-identical representations.
+static const char* app_image_sha() {
+    static char sha[65] = {0};
+    if (sha[0] == '\0') esp_app_get_elf_sha256(sha, sizeof(sha));
+    return sha;
+}
+
+// Prepare safe revalidation for immutable-in-this-image assets.  `no-cache` means STORE but always
+// revalidate: a same-image navigation becomes a tiny 304, while an OTA can never leave the old UI
+// fresh under the same URL.  Oversized/malformed request validators fail open to a normal 200 body.
+static esp_err_t static_asset_cache(httpd_req_t* req, const char* asset,
+                                    char* etag, size_t etag_size, bool& not_modified) {
+    not_modified = false;
+    snprintf(etag, etag_size, "\"%s-%s\"", app_image_sha(), asset);
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+    httpd_resp_set_hdr(req, "ETag", etag);
+
+    char candidate[192] = {0};
+    const size_t len = httpd_req_get_hdr_value_len(req, "If-None-Match");
+    if (len == 0 || len >= sizeof(candidate) ||
+        httpd_req_get_hdr_value_str(req, "If-None-Match", candidate, sizeof(candidate)) != ESP_OK ||
+        !http_if_none_match(candidate, etag)) {
+        return ESP_OK;
+    }
+
+    not_modified = true;
+    httpd_resp_set_status(req, "304 Not Modified");
+    return httpd_resp_send(req, nullptr, 0);
+}
+
 // Serve the captive setup page if the device is running in SoftAP (setup) mode, or if
 // WiFi is not yet configured. Otherwise serve the full dashboard web UI.
 static esp_err_t h_index(httpd_req_t* req) {
     if (setup_mode() || !wifi_configured())
         return http_send_gzip(req, "text/html", setup_html_gz_start, setup_html_gz_end);
+    char etag[80] = {0};
+    bool not_modified = false;
+    const esp_err_t cache_err = static_asset_cache(req, "dashboard", etag, sizeof(etag), not_modified);
+    if (cache_err != ESP_OK || not_modified) return cache_err;
     return http_send_gzip(req, "text/html", index_html_gz_start, index_html_gz_end);
 }
 
 static esp_err_t h_favicon(httpd_req_t* req) {
+    char etag[80] = {0};
+    bool not_modified = false;
+    const esp_err_t cache_err = static_asset_cache(req, "favicon", etag, sizeof(etag), not_modified);
+    if (cache_err != ESP_OK || not_modified) return cache_err;
     httpd_resp_set_type(req, "image/vnd.microsoft.icon");
     return httpd_resp_send(req, reinterpret_cast<const char*>(favicon_ico_start),
                            favicon_ico_end - favicon_ico_start);
 }
 
 static esp_err_t h_heat_pump_icon(httpd_req_t* req) {
+    char etag[80] = {0};
+    bool not_modified = false;
+    const esp_err_t cache_err = static_asset_cache(req, "heat-pump", etag, sizeof(etag), not_modified);
+    if (cache_err != ESP_OK || not_modified) return cache_err;
     httpd_resp_set_type(req, "image/png");
     return httpd_resp_send(req, reinterpret_cast<const char*>(heat_pump_icon_png_start),
                            heat_pump_icon_png_end - heat_pump_icon_png_start);

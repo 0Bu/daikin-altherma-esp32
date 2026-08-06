@@ -103,14 +103,20 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
     -Werror=unused-result
 )
 
-# Assemble + pre-compress the web UI at build time. The sources are split for edit locality —
+# Assemble, minify and pre-compress the web UI at build time. The sources are split for edit locality —
 # www/index.html, www/style.css and the ordered JavaScript fragments in www/app.sources — and
 # inline_assets.cmake splices them back into the ONE self-contained page the device serves.
-# Browsers always accept gzip, so shipping the page pre-gzipped cuts bytes on the wire ~3x —
-# the single biggest lever for first-paint over a high-latency WiFi link. Regenerated on every
-# build, so the served page never goes stale. Symbols: _binary_index_html_gz_{start,end}
-# (see handle_index in http_status.cpp).
+# The editable sources keep their load-bearing comments; the offline Python step strips CSS/JS
+# comments and whitespace from the artefact only, then produces deterministic gzip.  The size
+# budget makes UI growth a build failure instead of silently multiplying TCP windows again.
+# Symbols: _binary_index_html_gz_{start,end} (see h_index in http_status.cpp).
 set(APP_JS_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/www/app.sources")
+set(UI_MINIFIER "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/minify_and_gzip.py")
+set(UI_MINIFIER_VENDOR
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/vendor/rjsmin.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/vendor/rcssmin.py")
+set(UI_GZIP_MAX_BYTES 153600)
+idf_build_get_property(PYTHON PYTHON)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${APP_JS_MANIFEST}")
 file(STRINGS "${APP_JS_MANIFEST}" APP_JS_ENTRIES ENCODING UTF-8)
 set(APP_JS_SOURCES "")
@@ -138,10 +144,14 @@ add_custom_command(
     VERBATIM)
 add_custom_command(
     OUTPUT  "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz"
-    COMMAND gzip -9 -n -c "${CMAKE_CURRENT_BINARY_DIR}/index_inlined.html"
-            > "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz"
+    COMMAND ${PYTHON} "${UI_MINIFIER}"
+            --input "${CMAKE_CURRENT_BINARY_DIR}/index_inlined.html"
+            --output "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz"
+            --max-gzip-bytes ${UI_GZIP_MAX_BYTES}
     DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/index_inlined.html"
-    COMMENT "Gzipping web UI (index_inlined.html -> index.html.gz)"
+            "${UI_MINIFIER}"
+            ${UI_MINIFIER_VENDOR}
+    COMMENT "Minifying and gzipping web UI (limit: ${UI_GZIP_MAX_BYTES} bytes)"
     VERBATIM)
 add_custom_target(gen_index_gz DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz")
 add_dependencies(${COMPONENT_LIB} gen_index_gz)

@@ -23,6 +23,12 @@ assert.match(app, /\nasync function boot\(\)/);
 assert.match(app, /\nboot\(\);\s*$/);
 assert.doesNotThrow(() => new vm.Script(app, { filename: "main/www/app.sources" }),
   "the ordered source fragments must parse as one classic script");
+assert.match(app, /async function refreshStatus\(paint = true\)[\s\S]*if \(paint\) renderApp\(\)/,
+  "status refresh must allow the poller to defer its full render");
+assert.match(app, /async function refreshValues\(paint = true\)[\s\S]*if \(paint\) renderApp\(\)/,
+  "values refresh must allow the poller to defer its full render");
+assert.match(app, /ok = await refreshStatus\(false\)[\s\S]*deferredPaint = ok[\s\S]*refreshValues\(!deferredPaint\)[\s\S]*if \(deferredPaint\) renderApp\(\)/,
+  "a status+values poll must paint the complete frame exactly once");
 
 // HomeHub discovery is an explicit dialog action, never a boot mode. The same editable field accepts
 // a discovered or manual address, and saving it empty is the deliberate disabled state.

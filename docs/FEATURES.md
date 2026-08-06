@@ -34,7 +34,7 @@ an honest status, then links to the deep-dive doc that explains the *why* and th
 | 4 | OTA rollback + **connectivity-proving health gate** | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/health_gate.hpp`](../main/logic/health_gate.hpp) |
 | 5 | OTA manifest check + signed download + **two-point downgrade gate** + refresh-resilient UI progress | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`logic/version_cmp.hpp`](../main/logic/version_cmp.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`www/js/settings.js`](../main/www/js/settings.js), [`test_ui_ota_refresh.mjs`](../test/test_ui_ota_refresh.mjs) |
 | 6 | Live UI by **polling** `/status` + `/values` — no push transport, on purpose (#238/#241) | ✅ | [`www/app.sources`](../main/www/app.sources), [`http_status.cpp`](../main/http_status.cpp) |
-| 7 | Gzipped web UI **embedded in the app image**, assembled at build time | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt) |
+| 7 | Build-minified, deterministic gzip web UI **embedded in the app image**, with a 150 KiB delivery budget and image-specific ETag revalidation | ✅ 🧪 | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`http_status.cpp`](../main/http_status.cpp), [`test_ui_delivery_contract.mjs`](../test/test_ui_delivery_contract.mjs) |
 | 8 | HTTP handlers under an **OOM `try/catch` → 503** discipline | ✅ | [`http_common.cpp`](../main/http_common.cpp), [`http_status.cpp`](../main/http_status.cpp) |
 | 9 | Home Assistant MQTT auto-discovery, separate X10A/HomeHub state topics, LWT | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/discovery.hpp`](../main/logic/discovery.hpp) |
 | 10 | **MQTTS + CA-bundle** TLS; credentials never sent in cleartext | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
@@ -390,12 +390,11 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
 - **LWIP tuned for the workload** ([`sdkconfig.defaults`](../sdkconfig.defaults)): socket cap lifted to
   16 (http server + mDNS + SNTP + MQTT + OTA can otherwise starve the download of a BSD socket), and
   the TCP send/receive windows doubled — `CONFIG_LWIP_TCP_{SND_BUF,WND}_DEFAULT=11520`, 2× the IDF
-  default of 5760 — which halves the round-trips the page costs. The page is **~71 KB gzipped**
-  (229 KB spliced, ~3.1× compression), so it still spans ~7 window-fulls: the win is halving that,
-  not clearing it in one. It has grown with the interactive schematic and is worth re-measuring when
-  `www/` gains weight — run the build's own splice
-  ([`inline_assets.cmake`](../main/www/inline_assets.cmake)) and `gzip -9`, since nothing minifies or
-  strips comments (the served page is byte-identical to a hand-written monolithic `index.html`).
+  default of 5760.  The editable UI sources keep their explanatory comments, while the firmware
+  build syntax-minifies the assembled inline CSS/JavaScript and then applies deterministic gzip.
+  A **150 KiB gzip hard limit** fails the build before future UI growth can silently multiply TCP
+  windows again.  The size printed by the build is the authoritative current measurement; keep the
+  limit tied to live first-load timing rather than increasing socket buffers to mask asset growth.
 
 ### Captive-portal provisioning
 
