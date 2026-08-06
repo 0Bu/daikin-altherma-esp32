@@ -81,6 +81,17 @@ const compressorRunning = (d, minRps = 0) => {
   return d.rps != null ? d.rps > minRps : d.compressorOn === true;
 };
 
+// Prefer the measured flow over the pump command/status. An external pump, coast-down or a stale/
+// conflicting binary status can produce real flow while the internal pump reports OFF. Conversely,
+// pump ON without a flow reading is only a pump report, not proof that water moves. Return null for
+// that unknown state so animations and prose do not turn a command into a measurement.
+const waterMoving = (d) => {
+  if (!d) return null;
+  if (d.flow != null) return d.flow > 0.5;
+  return d.pumpOn === false ? false : null;
+};
+const pumpFlowConflict = (d) => !!d && d.pumpOn === false && d.flow != null && d.flow > 0.5;
+
 // The colour is a claim about THERMAL transfer, not merely hydraulic motion. Modbus-only DHW has
 // enough independent evidence for heating (compressor + DHW valve + pump); Modbus-only space Auto
 // still cannot distinguish heating from cooling and therefore remains neutral.
@@ -252,8 +263,9 @@ function liveData() {
   // HERE rather than in renderLive so the drawing and the explainer cannot disagree about it — the
   // pill blanked while the inspector went on quoting the number was the same split that let a
   // held-over outdoor temperature survive in the explainer after the pill stopped showing it.
-  // Unknown flow AND unknown pump (no rows) still prints: that is not evidence of no flow.
-  d.dtStale = d.pumpOn === false && d.flow != null && d.flow <= 0;
+  // A working ΔT needs measured water movement. Pump ON alone is not enough; a missing flow value
+  // therefore blanks the working-point claim just like a measured zero does.
+  d.dtStale = waterMoving(d) !== true;
   // Derived figures, marked "est." in the UI — the bus has no energy registers. Thermal output from
   // flow × ΔT (water ≈ 4.186 kJ/kg·K); electrical from the CT phase currents at an assumed 230 V,
   // falling back to the inverter primary current when the profile has no CT rows. applyThermalPlan
@@ -366,7 +378,7 @@ function liveData() {
     // output survives only with its independent input-31 compressor witness: without that current
     // flag, the snapshot still cannot distinguish active PHE transfer from pump-only redistribution.
     d.dt = (d.lwt != null && d.ret != null) ? d.lwt - d.ret : null;
-    d.dtStale = !(d.flow != null && d.flow > 1);
+    d.dtStale = waterMoving(d) !== true;
     d.spaceMode = null;
     d.thermalMode = d.valveDhw === true ? "heat" : null;
     applyThermalPlan(d);
@@ -462,7 +474,7 @@ function renderLive() {
   // Bit-flag states, each drawn at the component it belongs to: normal space heat/cool operation on
   // the space riser, the BUH step in the BUH label, low-noise mode on the outdoor unit. (Pump and
   // defrost were already drawn — rotation + "PUMP n%", the ❄ pill + the reversed refrigerant loop.)
-  const pumping = d.pumpOn ?? (d.flow != null ? d.flow > 1 : null);
+  const pumping = waterMoving(d);
   setTxt("svSpaceH", t(d.spaceOp ? "chip.space_on" : "chip.space_off"));
   $("gSpaceH").classList.toggle("on", d.spaceOp === true);
   const spaceKind = activeSpaceKind(d);
@@ -587,18 +599,18 @@ const tx = (o) => (o == null ? "" : typeof o === "string" ? o : (LANG === "de" &
 const degC = (n) => (n == null ? "—" : fmt1(n) + " °C");
 
 const PEL_ESTIMATED_WHAT = {
-  en: "A rough electrical-input ESTIMATE used as the COP or EER divisor. The UI adds available phase currents and multiplies by an assumed 230 V; it does not know actual voltage or power factor. CT currents are treated as the whole-unit boundary, including a backup heater, while inverter current covers the compressor side only. Therefore an inverter-based value is not total plant consumption.",
-  de: "Eine grobe SCHÄTZUNG der elektrischen Aufnahme und der Nenner von COP oder EER. Die UI addiert verfügbare Phasenströme und multipliziert sie mit angenommenen 230 V; tatsächliche Spannung und Leistungsfaktor sind unbekannt. CT-Ströme behandelt sie als Systemgrenze des ganzen Geräts einschließlich Zusatzheizer, der Inverterstrom deckt nur die Verdichterseite ab. Ein Inverterwert ist daher nicht der Gesamtverbrauch der Anlage.",
+  en: "A rough electrical-input ESTIMATE used as the COP or EER divisor. The UI adds available phase currents and multiplies by an assumed 230 V; it does not know actual voltage or power factor. Inverter current covers the compressor side only. CT currents can cover more loads, but the exact boundary depends on how the transformers are installed and wired.",
+  de: "Eine grobe SCHÄTZUNG der elektrischen Aufnahme und der Nenner von COP oder EER. Die UI addiert verfügbare Phasenströme und multipliziert sie mit angenommenen 230 V; tatsächliche Spannung und Leistungsfaktor sind unbekannt. Der Inverterstrom deckt nur die Verdichterseite ab. Stromwandler können weitere Verbraucher erfassen; die genaue Bilanzgrenze hängt jedoch von Einbau und Verdrahtung ab.",
 };
 const PEL_MEASURED_WHAT = {
-      en: "The unit's electrical input, MEASURED by the HomeHub. Unlike X10A's current×230 V estimate, this value needs no assumed voltage or power-factor approximation. It covers the whole unit, including active electric heaters; the dashboard derives no COP/EER unless the available thermal boundary matches it.",
-      de: "Die elektrische Leistungsaufnahme der Anlage, vom HomeHub GEMESSEN. Anders als die X10A-Schätzung aus Strom×230 V benötigt dieser Wert keine angenommene Spannung oder Leistungsfaktor-Näherung. Er umfasst die ganze Anlage einschließlich aktiver Elektroheizer; das Dashboard berechnet nur dann COP/EER, wenn die verfügbare thermische Bilanz dazu passt.",
+      en: "The electrical power-consumption value reported by the heat-pump system through HomeHub input register 51. Unlike X10A's current×230 V estimate, the UI does not calculate this number. The public HomeHub register guide does not establish its calibration, exact measurement point or whether every electric heater is included; do not treat it as a certified whole-plant meter.",
+      de: "Der vom Wärmepumpensystem über HomeHub-Eingangsregister 51 gemeldete Wert zur elektrischen Leistungsaufnahme. Anders als die X10A-Schätzung aus Strom×230 V berechnet die UI diese Zahl nicht selbst. Die öffentliche HomeHub-Registerbeschreibung belegt weder Kalibrierung und genauen Messpunkt noch, ob jeder Elektroheizer enthalten ist; der Wert ist daher kein nachgewiesener Gesamtanlagen-Zähler.",
 };
 const pelMeasured = (d) => !!d && d.pelSrc === "MB";
 const pelApproxText = (d) => d && d.pel != null && !pelMeasured(d) ? "≈ " : "";
 const PEL_INSPECT = {
   t: (d) => pelMeasured(d)
-    ? { en: "Electrical input (measured)", de: "Gemessene Stromaufnahme" }
+    ? { en: "Electrical input (HomeHub)", de: "Stromaufnahme (HomeHub)" }
     : { en: "Electrical input (estimated)", de: "Geschätzte Stromaufnahme" },
   aria: { en: "Electrical input", de: "Stromaufnahme" },
   trend: "pel",
@@ -614,10 +626,11 @@ const PEL_INSPECT = {
     ? { en: "No current reading on this profile, so no COP/EER can be derived either.",
         de: "Dieses Profil liefert keinen Strommesswert, daher lässt sich auch kein COP/EER ableiten." }
     : d.pelSrc === "MB"
-    ? { en: "Measured at the HomeHub electrical input (whole unit).",
-        de: "Am elektrischen Eingang des HomeHub für die gesamte Anlage gemessen." }
+    ? { en: "Reported through HomeHub input register 51; the exact measurement boundary is not documented here.",
+        de: "Über HomeHub-Eingangsregister 51 gemeldet; die genaue Messgrenze ist hier nicht dokumentiert." }
     : d.pelSrc === "CT"
-    ? { en: "From the CT clamps (whole unit).", de: "Aus den Stromwandlern der gesamten Anlage." }
+    ? { en: "Estimated from the CT clamps; included loads depend on their wiring.",
+        de: "Aus den Stromwandlern geschätzt; welche Verbraucher enthalten sind, hängt von ihrer Verdrahtung ab." }
     : { en: "From the inverter current (compressor only).", de: "Aus dem Inverterstrom des Verdichters." },
   rows: [/current measured by ct/i, /inv primary current/i],
 };
@@ -759,8 +772,8 @@ const INSPECT = {
   phe: {
     t: { en: "Plate heat exchanger", de: "Plattenwärmetauscher" },
     what: {
-      en: "The plate heat exchanger transfers energy between refrigerant and the water circuit without mixing the two fluids. In heating/DHW it transfers heat into the water; in cooling it removes heat from it. The displayed mode-aware capacity is estimated from water flow and R1T/R4T across the exchanger; both sensors are inside the hydro module.",
-      de: "Der Plattenwärmetauscher überträgt Energie zwischen Kältemittel und Wasserkreis, ohne dass sich beide Medien vermischen. Beim Heizen bzw. bei Warmwasser geht Wärme ins Wasser, beim Kühlen wird sie ihm entzogen. Die angezeigte betriebsartabhängige Leistung wird aus Wasserdurchfluss sowie R1T/R4T über dem Wärmetauscher geschätzt; beide Fühler sitzen in der Inneneinheit.",
+      en: "The plate heat exchanger transfers energy between refrigerant and the water circuit without mixing the two fluids. In heating/DHW it transfers heat into the water; in cooling it removes heat from it. The displayed mode-aware capacity is estimated from water flow and R1T/R4T across the exchanger. Those sensors belong to the hydraulic unit; their exact physical installation depends on the model.",
+      de: "Der Plattenwärmetauscher überträgt Energie zwischen Kältemittel und Wasserkreis, ohne dass sich beide Medien vermischen. Beim Heizen beziehungsweise bei Warmwasser geht Wärme ins Wasser, beim Kühlen wird sie ihm entzogen. Die angezeigte betriebsartabhängige Leistung wird aus Wasserdurchfluss sowie R1T/R4T über dem Wärmetauscher geschätzt. Diese Fühler gehören zur Hydraulikeinheit; ihre genaue Einbauposition hängt vom Modell ab.",
     },
     // With the pump stopped the ΔT is not a small working point, it is none at all (d.dtStale) — so
     // this says nothing is crossing, rather than quoting the two stagnant sensors' difference as if
@@ -769,8 +782,8 @@ const INSPECT = {
       ? { en: "No active refrigerant-side transfer — the compressor is stopped. Pump-only circulation can redistribute residual heat, but it is neither heating nor cooling capacity.",
           de: "Kein aktiver Kältemittel-Wärmeübergang — der Verdichter steht. Reiner Pumpenumlauf kann Restwärme verteilen, ist aber weder Heiz- noch Kälteleistung." }
       : d.dtStale
-      ? { en: "Nothing crossing — the pump is stopped, so no water is carrying heat away from the plates.",
-          de: "Kein Übergang — die Pumpe steht, es trägt kein Wasser Wärme von den Platten ab." }
+      ? { en: "No water-side transfer can be calculated — current pump and flow readings do not establish water movement through the plates.",
+          de: "Kein wasserseitiger Übergang berechenbar — die aktuellen Pumpen- und Durchflusswerte belegen keine Wasserbewegung durch die Platten." }
       : d.pth == null
       ? { en: "No directional estimate — the readings do not establish useful transfer in the selected operating mode.",
           de: "Keine gerichtete Schätzung — die Messwerte belegen im gewählten Betrieb keinen nutzbaren Energieübergang." }
@@ -787,12 +800,12 @@ const INSPECT = {
     sample: "Leaving Water Temp. before BUH (R1T)",
   },
   r2t: {
-    t: { en: "Leaving water after BUH/pump (R2T)", de: "Vorlauf nach BUH/Pumpe · R2T" },
+    t: { en: "Leaving water after BUH (R2T)", de: "Vorlauf nach BUH · R2T" },
     pick: postBuhRow, sample: "Leaving water temp. after BUH (R2T)",
     trend: "leaving_water_post_buh",
     what: {
-      en: "Water temperature after the backup heater and circulation pump, before the field valves. Unlike R1T, it includes heat added by the BUH.",
-      de: "Wassertemperatur hinter Zusatzheizer und Umwälzpumpe, vor den bauseitigen Ventilen. Anders als R1T enthält sie die vom BUH eingebrachte Wärme.",
+      en: "Water temperature reported after the backup heater. Unlike the pre-BUH R1T reading, it can include heat added by the electric heater. The exact position relative to the pump and field valves depends on the hydraulic unit.",
+      de: "Hinter dem Zusatzheizer gemeldete Wassertemperatur. Anders als der R1T-Wert vor dem BUH kann sie die vom elektrischen Heizer eingebrachte Wärme enthalten. Die genaue Lage zu Pumpe und bauseitigen Ventilen hängt von der Hydraulikeinheit ab.",
     },
   },
   rwt: { t: { en: "PHE water inlet (R4T)", de: "PHE-Wassereintritt · R4T" }, re: /inlet water/i, sample: "Inlet Water Temp. (R4T)" },
@@ -807,8 +820,8 @@ const INSPECT = {
     // why — the pill can only blank, the explainer is where the reason belongs.
     head: (d) => (d.dtStale || d.dt == null ? "—" : fmt1(d.dt) + " K"),
     now: (d) => d.dtStale
-      ? { en: "No ΔT right now — the pump is stopped. With no water moving, the two sensors just drift apart as they cool, and their difference is not a working point.",
-          de: "Derzeit kein ΔT — die Pumpe steht. Ohne Wasserbewegung driften die beiden Fühler beim Auskühlen nur auseinander; ihre Differenz ist kein Arbeitspunkt." }
+      ? { en: "No working ΔT right now — current pump and flow readings do not establish water movement. Without measured circulation, the two sensors can drift apart while cooling and their difference is not an operating point.",
+          de: "Derzeit kein Arbeits-ΔT — die aktuellen Pumpen- und Durchflusswerte belegen keine Wasserbewegung. Ohne gemessene Zirkulation können die beiden Fühler beim Auskühlen auseinanderdriften; ihre Differenz ist dann kein Arbeitspunkt." }
       : d.dt == null ? null
       : !compressorRunning(d, 5)
       ? { en: `${fmt1(d.dt)} K with pump-only circulation. This is residual-temperature equalisation, not evidence of heating or cooling output.`,
@@ -847,10 +860,10 @@ const INSPECT = {
     // COP explainers follow.
     now: (d) => d.dtStale
       ? (d.bsh === true
-          ? { en: "Nothing is crossing the exchanger — the pump is stopped. The tank is still being heated, but by the electric heater inside it, which sits past the flow sensor and both water sensors: no reading on this bus can state its power.",
-              de: "Am Wärmetauscher geht nichts über — die Pumpe steht. Der Speicher wird trotzdem beheizt, aber vom Heizstab in ihm; der sitzt hinter dem Durchflusssensor und beiden Wasserfühlern, kein Wert auf diesem Bus kann seine Leistung angeben." }
-          : { en: "No heat output right now — the pump is stopped, so no water is carrying heat away from the plates. That is no working point at all rather than an output of zero.",
-              de: "Derzeit keine Wärmeleistung — die Pumpe steht, es trägt kein Wasser Wärme von den Platten ab. Das ist gar kein Arbeitspunkt und keine Leistung von null." })
+          ? { en: "No heat transfer across the PHE can be calculated because current pump and flow readings do not establish circulation. The tank can still be heated by its internal electric heater; its heat crosses neither PHE water sensor, so this bus cannot state that heater's output.",
+              de: "Am PHE ist keine Wärmeübertragung berechenbar, weil die aktuellen Pumpen- und Durchflusswerte keine Zirkulation belegen. Der Speicher kann trotzdem durch seinen internen Heizstab erwärmt werden; dessen Wärme passiert keinen der beiden PHE-Wasserfühler, daher kann dieser Bus seine Heizleistung nicht angeben." }
+          : { en: "No heat output can be calculated right now because current pump and flow readings do not establish water movement through the PHE. This is no usable operating point rather than an output of zero.",
+              de: "Derzeit ist keine Wärmeleistung berechenbar, weil die aktuellen Pumpen- und Durchflusswerte keine Wasserbewegung durch den PHE belegen. Das ist kein nutzbarer Arbeitspunkt und nicht eine Leistung von null." })
       : d.pth == null ? null
       : d.pthKind === "cooling"
       ? { en: `≈ ${fmt1(d.pth)} kW cooling${d.cop != null ? `, EER ${d.cop.toFixed(1)}` : ""}.`,
@@ -871,7 +884,7 @@ const INSPECT = {
     t: (d) => d && d.efficiencyKind === "eer"
       ? { en: "EER of the heat pump (estimated)", de: "Geschätzter EER der Wärmepumpe" }
       : (d && d.copScope === "plant"
-      ? { en: "COP of the plant (estimated)", de: "Geschätzter COP der Anlage" }
+      ? { en: "COP with post-BUH boundary (estimated)", de: "Geschätzter COP mit Bilanz hinter BUH" }
       : { en: "COP of the heat pump (estimated)", de: "Geschätzter COP der Wärmepumpe" }),
     // The hit target's accessible name — stable, because it is applied once at startup (see
     // labelSchematicHits). Which COP it turns out to be is the panel's to say, not the label's.
@@ -881,28 +894,28 @@ const INSPECT = {
       ? { en: "Estimated cooling capacity divided by estimated electrical input. The cooling numerator uses internal PHE sensors and is accepted only with a running compressor and R1T below R4T. The result inherits the water/glycol, sensor, voltage and power-factor assumptions of both estimates. Daikin also describes calculated energy figures as estimates whose accuracy is not guaranteed. This is an instantaneous EER, not a seasonal efficiency figure; metered seasonal energy is more meaningful.",
           de: "Geschätzte Kälteleistung geteilt durch geschätzte elektrische Aufnahme. Der Kühlzähler nutzt die internen PHE-Fühler und wird nur bei laufendem Verdichter sowie R1T unter R4T gewertet. Das Ergebnis übernimmt alle Annahmen zu Wasser oder Glykol, Fühlern, Spannung und Leistungsfaktor aus beiden Schätzungen. Auch Daikin bezeichnet berechnete Energiewerte als Schätzungen ohne garantierte Genauigkeit. Das ist ein momentaner EER und keine saisonale Effizienzkennzahl; aussagekräftiger ist saisonal gemessene Energie." }
       : {
-      en: "Estimated heat output divided by estimated electrical input. Both values must cover the same system boundary: with CT currents the UI uses heat after the backup heater when that sensor exists; with inverter current it shows the heat pump alone. The result inherits the water/glycol, sensor, voltage and power-factor assumptions of both estimates. Daikin also describes calculated energy figures as estimates whose accuracy is not guaranteed. Use this as a live indication; metered seasonal energy is more meaningful. With the compressor stopped it shows \"—\".",
-      de: "Geschätzte Wärmeleistung geteilt durch geschätzte elektrische Aufnahme. Beide Werte müssen dieselbe Systemgrenze abdecken: Bei CT-Strömen verwendet die UI die Wärme hinter dem Zusatzheizer, sofern dieser Fühler vorhanden ist; beim Inverterstrom zeigt sie nur die Wärmepumpe. Das Ergebnis übernimmt alle Annahmen zu Wasser oder Glykol, Fühlern, Spannung und Leistungsfaktor aus beiden Schätzungen. Auch Daikin bezeichnet berechnete Energiewerte als Schätzungen ohne garantierte Genauigkeit. Nutze den Wert als Live-Hinweis; aussagekräftiger ist saisonal gemessene Energie. Bei stehendem Verdichter zeigt er „—“.",
+      en: "Estimated heat output divided by estimated electrical input. The two values must describe compatible boundaries: with CT currents the UI uses heat after the backup heater when that sensor exists; with inverter current it shows the heat pump alone. Whether the CTs include every relevant electrical load depends on their installation, so this is not automatically a whole-plant meter. The result inherits the fluid, sensor, voltage and power-factor assumptions of both estimates. Use it as a live indication; metered seasonal energy is more meaningful. With the compressor stopped it shows \"—\".",
+      de: "Geschätzte Wärmeleistung geteilt durch geschätzte elektrische Aufnahme. Beide Werte müssen zueinander passende Bilanzgrenzen beschreiben: Bei Stromwandlern verwendet die UI die Wärme hinter dem Zusatzheizer, sofern dieser Fühler vorhanden ist; beim Inverterstrom zeigt sie nur die Wärmepumpe. Ob die Stromwandler alle relevanten elektrischen Verbraucher erfassen, hängt von ihrem Einbau ab; der Wert ist daher nicht automatisch ein Gesamtanlagen-Zähler. Das Ergebnis übernimmt die Annahmen zu Medium, Fühlern, Spannung und Leistungsfaktor aus beiden Schätzungen. Als Live-Hinweis verwenden; aussagekräftiger ist saisonal gemessene Energie. Bei stehendem Verdichter zeigt er „—“.",
       },
     head: (d) => (d.cop == null ? "—" : d.cop.toFixed(1)),
     // Four outcomes, four sentences. A suppressed wrong claim must not be replaced by another one,
     // so "the heater is firing and this profile has no post-BUH sensor" and "there is no current
     // reading at all" cannot share a sentence — they are different facts about the hardware.
     now: (d) => d.copBlock === "tank_heater"
-      ? { en: "No COP right now — the tank's electric heater is on. Its power is inside the whole-unit current this COP would divide by, but its heat goes straight into the tank and crosses neither leaving-water sensor, so no measurement here can balance the two. This is not a gap in the profile: there is no reading anywhere on the bus that would.",
-          de: "Derzeit kein COP — der Heizstab im Speicher läuft. Seine Leistung steckt im Gesamtstrom, durch den hier geteilt würde, seine Wärme geht aber direkt in den Speicher und passiert keinen der Vorlauffühler; kein Messwert kann die beiden also ausgleichen. Das ist keine Lücke des Profils: auf dem Bus gibt es keinen Wert, der es könnte." }
+      ? { en: "No COP right now — the tank's electric heater is on. Its electrical load may be included in the available current boundary, while its heat goes straight into the tank and crosses neither leaving-water sensor. These readings cannot form a matching efficiency balance.",
+          de: "Derzeit kein COP — der Heizstab im Speicher läuft. Seine elektrische Last kann in der verfügbaren Strombilanz enthalten sein; seine Wärme geht jedoch direkt in den Speicher und passiert keinen der Vorlauffühler. Aus diesen Messwerten entsteht deshalb keine passende Effizienzbilanz." }
       : d.copBlock === "buh_no_r2t"
-      ? { en: "No COP right now — the backup heater is firing, and the electrical figure covers the whole unit while this profile has no leaving-water sensor after the heater to match it. Dividing the two would compare the heat pump's heat against the whole plant's electricity and understate the result.",
-          de: "Derzeit kein COP — der Zusatzheizer heizt, und der Strommesswert erfasst das ganze Gerät, während dieses Profil keinen Vorlauffühler hinter dem Heizer hat, der dazu passt. Beides zu teilen, hielte die Wärme der Wärmepumpe gegen den Strom der ganzen Anlage und fiele zu niedrig aus." }
+      ? { en: "No COP right now — the backup heater is firing, but this profile has no leaving-water sensor after it. The electrical estimate can include heater load while the heat estimate stops before the heater, so the two boundaries do not match.",
+          de: "Derzeit kein COP — der Zusatzheizer heizt, aber dieses Profil hat keinen Vorlauffühler hinter ihm. Die Stromschätzung kann die Heizlast enthalten, während die Wärmeschätzung vor dem Heizer endet; beide Bilanzgrenzen passen daher nicht zusammen." }
       : d.cop == null ? null
       : d.efficiencyKind === "eer"
       ? { en: `${d.cop.toFixed(1)} kW of cooling per kW of electricity — ≈ ${fmt1(d.copPth)} kW removed for ≈ ${fmt1(d.pel)} kW in.`,
           de: `${d.cop.toFixed(1)} kW Kälteleistung je kW Strom — ≈ ${fmt1(d.copPth)} kW entzogen bei ≈ ${fmt1(d.pel)} kW Aufnahme.` }
       : d.copScope === "plant"
-      ? { en: `${d.cop.toFixed(1)} kW of heat per kW of electricity for the whole plant — ≈ ${fmt1(d.copPth)} kW out for ≈ ${fmt1(d.pel)} kW in, both counted after the backup heater.`,
-          de: `${d.cop.toFixed(1)} kW Wärme je kW Strom für die ganze Anlage — ≈ ${fmt1(d.copPth)} kW raus für ≈ ${fmt1(d.pel)} kW rein, beides hinter dem Zusatzheizer gezählt.` }
-      : { en: `${d.cop.toFixed(1)} kW of heat per kW of electricity for the heat pump itself — ≈ ${fmt1(d.copPth)} kW out for ≈ ${fmt1(d.pel)} kW in. The backup heater is outside both figures, so this does not fall when it fires; what the plant as a whole draws is higher.`,
-          de: `${d.cop.toFixed(1)} kW Wärme je kW Strom für die Wärmepumpe selbst — ≈ ${fmt1(d.copPth)} kW raus für ≈ ${fmt1(d.pel)} kW rein. Der Zusatzheizer steht außerhalb beider Werte, der COP sinkt also nicht, wenn er heizt; die Anlage insgesamt zieht mehr.` },
+      ? { en: `${d.cop.toFixed(1)} kW of post-BUH water-side heat per kW of CT-estimated electricity — ≈ ${fmt1(d.copPth)} kW out for ≈ ${fmt1(d.pel)} kW in. The CT installation determines which electrical loads are included.`,
+          de: `${d.cop.toFixed(1)} kW wasserseitige Wärme hinter dem BUH je kW aus Stromwandlern geschätzter Aufnahme — ≈ ${fmt1(d.copPth)} kW raus für ≈ ${fmt1(d.pel)} kW rein. Welche elektrischen Lasten enthalten sind, bestimmt der Einbau der Stromwandler.` }
+      : { en: `${d.cop.toFixed(1)} kW of heat per kW of electricity for the heat-pump boundary — ≈ ${fmt1(d.copPth)} kW out for ≈ ${fmt1(d.pel)} kW in. The backup heater is outside both figures; whole-plant efficiency therefore cannot be derived from this value while the heater runs.`,
+          de: `${d.cop.toFixed(1)} kW Wärme je kW Strom innerhalb der Wärmepumpen-Bilanz — ≈ ${fmt1(d.copPth)} kW raus für ≈ ${fmt1(d.pel)} kW rein. Der Zusatzheizer liegt außerhalb beider Bilanzgrößen; die Effizienz der Gesamtanlage lässt sich daraus während seines Betriebs nicht ableiten.` },
     // The numerator's own row, but ONLY while the plan actually uses it (d.copPostBuh) — listing it
     // under a heat-pump COP would name an input that figure never touched. Resolved through the one
     // postBuhRow(), never a second pattern: a looser copy here is exactly how the (R2T) tag would
@@ -948,17 +961,20 @@ const INSPECT = {
     re: /3.?way valve/i, sample: "3-way valve (On:DHW/Off:Space)",
     trend: "valve_dhw",
     now: (d) => d.valveDhw == null ? null
-      : d.valveDhw ? { en: "Diverted to the hot-water tank — the space circuit is paused meanwhile.",
-                       de: "Auf den Warmwasserspeicher geschaltet — der Raumkreis pausiert solange." }
-                   : { en: "Diverted to the space circuit.", de: "Auf den Raumkreis geschaltet." },
+      : d.valveDhw ? { en: "The controller reports the tank route selected. This is not mechanical position feedback and does not by itself prove flow or tank charging.",
+                       de: "Die Regelung meldet den Speicherweg als gewählt. Das ist keine mechanische Stellungsrückmeldung und belegt allein weder Durchfluss noch Speicherladung." }
+                   : { en: "The controller reports the space route selected. This is not mechanical position feedback and does not by itself prove circulation.",
+                       de: "Die Regelung meldet den Raumweg als gewählt. Das ist keine mechanische Stellungsrückmeldung und belegt allein keine Zirkulation." },
   },
   valve2: {
     t: { en: "2-way valve · heating/cooling", de: "2-Wege-Ventil · Heizen/Kühlen" },
     re: /2.?way valve/i, sample: "2way valve(On:Heat_Off:Cool)", trend: "valve_heat",
     head: (d) => d.valveHeat == null ? "—" : t(d.valveHeat ? "enum.heating" : "enum.cooling"),
     now: (d) => d.valveHeat == null ? null : d.valveHeat
-      ? { en: "Heating position selected.", de: "Heizstellung gewählt." }
-      : { en: "Cooling position selected.", de: "Kühlstellung gewählt." },
+      ? { en: "The controller reports the heating route selected; this is not mechanical position feedback.",
+          de: "Die Regelung meldet den Heizweg als gewählt; das ist keine mechanische Stellungsrückmeldung." }
+      : { en: "The controller reports the cooling route selected; this is not mechanical position feedback.",
+          de: "Die Regelung meldet den Kühlweg als gewählt; das ist keine mechanische Stellungsrückmeldung." },
   },
   tank: {
     t: { en: "DHW tank / thermal store", de: "Warmwasser-/Wärmespeicher" },
@@ -976,19 +992,20 @@ const INSPECT = {
       ? { en: "Heating circuit", de: "Heizkreis" }
       : { en: "Space circuit", de: "Raumkreis" },
     what: {
-      en: "The installation's room emitters on the space branch. Depending on the installed emitters and configuration they can deliver heating, cooling, or both. The 3-way valve and flow show routing; R1T/R4T are upstream inside the hydro module and do not confirm the downstream emitter temperature.",
-      de: "Die Raumflächen der Installation am Raumzweig. Je nach verbauten Flächen und Konfiguration können sie heizen, kühlen oder beides. 3-Wege-Ventil und Durchfluss zeigen den hydraulischen Weg; R1T/R4T liegen davor in der Inneneinheit und bestätigen nicht die Temperatur an den nachgeschalteten Flächen.",
+      en: "The installation's room emitters on the space branch. Depending on the installed emitters and configuration they can deliver heating, cooling, or both. The selected valve route and measured flow describe the hydraulic path; R1T/R4T are measured at the heat pump's hydraulic circuit and do not confirm the downstream emitter temperature.",
+      de: "Die Raumflächen der Installation am Raumzweig. Je nach verbauten Flächen und Konfiguration können sie heizen, kühlen oder beides. Gewählter Ventilweg und gemessener Durchfluss beschreiben den hydraulischen Pfad; R1T/R4T werden im Hydraulikkreis der Wärmepumpe erfasst und bestätigen nicht die Temperatur an den nachgeschalteten Flächen.",
     },
     now: (d) => d.valveDhw === true
-      ? { en: "Paused — the valve is feeding the hot-water tank right now.",
-          de: "Pausiert — das Ventil versorgt gerade den Warmwasserspeicher." }
-      : (d.pumpOn ?? (d.flow != null && d.flow > 1))
+      ? { en: "The space route is not selected. Whether water is actually moving through the tank branch is shown separately by pump and flow readings.",
+          de: "Der Raumweg ist nicht gewählt. Ob tatsächlich Wasser durch den Speicherzweig fließt, zeigen Pumpen- und Durchflusswert separat." }
+      : waterMoving(d)
         ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0
           ? { en: `Residual-hot water is routed into the hydraulic space branch. Internal R1T is ${degC(d.lwt)}; no downstream sensor confirms the emitter temperature. This is not active cooling.`,
               de: `Restwarmes Wasser wird hydraulisch in den Raumzweig geführt. Der interne R1T misst ${degC(d.lwt)}; kein nachgeschalteter Fühler bestätigt die Temperatur an den Flächen. Das ist kein aktiver Kühlbetrieb.` }
           : { en: `Water is routed toward the ${activeSpaceKind(d) === "cool" ? "cooling" : activeSpaceKind(d) === "heat" ? "heating" : "space"} circuit. Internal R1T is ${degC(d.lwt)}; no downstream sensor confirms the emitter temperature.`,
               de: `Wasser wird zum ${activeSpaceKind(d) === "cool" ? "Kühlkreis" : activeSpaceKind(d) === "heat" ? "Heizkreis" : "Raumkreis"} geführt. Der interne R1T misst ${degC(d.lwt)}; kein nachgeschalteter Fühler bestätigt die Flächentemperatur.` }
-        : { en: "No circulation — the pump is stopped.", de: "Keine Zirkulation — die Pumpe steht." },
+        : { en: "Current pump and flow readings do not establish circulation through the space branch.",
+            de: "Die aktuellen Pumpen- und Durchflusswerte belegen keine Zirkulation durch den Raumzweig." },
     rows: [/^indoor ambient temp/i, /^rt setpoint/i, /^space heating operation/i],
   },
   // This catalog row is normal space heat/cool operation, not a heating demand. "Thermostat ON/OFF"
@@ -1014,11 +1031,33 @@ const INSPECT = {
     re: /water pump operation/i, sample: "Water pump operation",
     // 0 % is a stopped pump, not a pump "running at 0 %" — the old wording asserted circulation on
     // an idle plant, next to a flow pill reading 0.0 l/min.
-    now: (d) => d.pump == null ? null
-      : d.pump > 0
-        ? { en: `Running at ${fmt0(d.pump)} % of full speed, moving ${fmt1(d.flow)} l/min.`,
-            de: `Läuft mit ${fmt0(d.pump)} % der vollen Drehzahl und fördert ${fmt1(d.flow)} l/min.` }
-        : { en: "Stopped — no water is circulating.", de: "Steht — es zirkuliert kein Wasser." },
+    now: (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
+      : pumpFlowConflict(d)
+        ? { en: `The internal pump reports stopped, but the flow sensor reports ${fmt1(d.flow)} l/min. External circulation, coast-down or conflicting/stale signals can cause this; the two readings must be checked together.`,
+            de: `Die interne Pumpe meldet Stillstand, der Durchflusssensor jedoch ${fmt1(d.flow)} l/min. Externe Umwälzung, Nachlauf oder widersprüchliche beziehungsweise veraltete Signale kommen infrage; beide Werte müssen gemeinsam geprüft werden.` }
+      : d.pump != null && d.pump > 0
+        ? d.flow != null
+          ? { en: `The speed signal reports ${fmt0(d.pump)} %; measured flow is ${fmt1(d.flow)} l/min.`,
+              de: `Das Drehzahlsignal meldet ${fmt0(d.pump)} %; der gemessene Volumenstrom beträgt ${fmt1(d.flow)} l/min.` }
+          : { en: `The speed signal reports ${fmt0(d.pump)} %, but no flow measurement is available; circulation is not confirmed.`,
+              de: `Das Drehzahlsignal meldet ${fmt0(d.pump)} %, ein Durchflussmesswert fehlt jedoch; Zirkulation ist damit nicht bestätigt.` }
+      : waterMoving(d)
+        ? { en: `The flow sensor reports ${fmt1(d.flow)} l/min even though no usable pump-speed value is available.`,
+            de: `Der Durchflusssensor meldet ${fmt1(d.flow)} l/min, obwohl kein nutzbarer Pumpendrehzahlwert vorliegt.` }
+      : d.pumpOn === true
+        ? d.flow != null
+          ? { en: `The pump status is ON, but the flow sensor reports only ${fmt1(d.flow)} l/min; water circulation is not established.`,
+              de: `Der Pumpenstatus ist ON, der Durchflusssensor meldet jedoch nur ${fmt1(d.flow)} l/min; Wasserzirkulation ist damit nicht belegt.` }
+          : { en: "The pump status is ON, but no flow measurement is available; water circulation is not confirmed.",
+              de: "Der Pumpenstatus ist ON, ein Durchflussmesswert fehlt jedoch; Wasserzirkulation ist damit nicht bestätigt." }
+      : d.pumpOn === false || d.pump === 0
+        ? d.flow != null
+          ? { en: `The pump reports stopped; the flow sensor reports ${fmt1(d.flow)} l/min. These readings do not establish water circulation.`,
+              de: `Die Pumpe meldet Stillstand; der Durchflusssensor meldet ${fmt1(d.flow)} l/min. Diese Werte belegen keine Wasserzirkulation.` }
+          : { en: "The pump reports stopped and no flow measurement is available.",
+              de: "Die Pumpe meldet Stillstand; ein Durchflussmesswert ist nicht verfügbar." }
+        : { en: `No reliable pump state is available; the flow sensor reports ${fmt1(d.flow)} l/min and does not establish circulation.`,
+            de: `Kein verlässlicher Pumpenstatus ist verfügbar; der Durchflusssensor meldet ${fmt1(d.flow)} l/min und belegt keine Zirkulation.` },
     rows: [/water pump signal/i, /flow sensor/i, /^water pressure$/i],
   },
   pel: PEL_INSPECT,
@@ -1058,8 +1097,8 @@ const INSPECT = {
             de: `Durchströmt — ${fmt1(d.circP)} bar bei ${fmt0(d.disch)} °C.` }
         : { en: "Flowing — the HomeHub confirms compressor operation; pressure and discharge temperature require X10A.",
             de: "Durchströmt — der HomeHub bestätigt Verdichterbetrieb; Druck und Heißgastemperatur benötigen X10A." }
-      : { en: "Still — the compressor is stopped, so the circuit is at rest and simply equalised.",
-          de: "Steht — der Verdichter ist OFF, der Kreis ruht und ist einfach ausgeglichen." },
+      : { en: "No active refrigerant circulation — the compressor is stopped. Pressure equalisation depends on the circuit and how long it has been idle.",
+          de: "Kein aktiver Kältemittelumlauf — der Verdichter steht. Ob und wie weit sich die Drücke angeglichen haben, hängt vom Kältekreis und der Stillstandszeit ab." },
     rows: [/^high pressure$/i, /discharge pipe temp/i],
   },
   rcold: {
@@ -1083,11 +1122,11 @@ const INSPECT = {
       en: "Supply water leaving the plate heat exchanger at R1T. In the split-system layout shown it passes the electric backup heater and circulation pump before the 3-way valve routes it to the space or tank circuit. In heating/DHW it is the warm side; in active cooling it is the cold side. R1T describes the heat-pump exchanger before the backup heater and field branches; a post-BUH sensor also includes electric heat added downstream.",
       de: "Vorlaufwasser am Austritt des Plattenwärmetauschers bei R1T. Im gezeigten Split-System-Aufbau passiert es den elektrischen Zusatzheizer und die Umwälzpumpe, bevor das 3-Wege-Ventil es zum Raum- oder Speicherkreis leitet. Beim Heizen bzw. bei Warmwasser ist dies die warme Seite, beim aktiven Kühlen die kalte. R1T beschreibt den Wärmepumpen-Wärmetauscher vor Zusatzheizer und bauseitigen Zweigen; ein Fühler hinter dem BUH enthält zusätzlich die danach eingebrachte elektrische Wärme.",
     },
-    now: (d) => (d.pumpOn ?? (d.flow != null && d.flow > 1))
-      ? { en: `Carrying ${degC(d.lwt)} at ${fmt1(d.flow)} l/min${d.buh1 || d.buh2 ? ", reheated by the backup heater" : ""}.`,
-          de: `Führt ${degC(d.lwt)} bei ${fmt1(d.flow)} l/min${d.buh1 || d.buh2 ? ", vom Zusatzheizer nachgeheizt" : ""}.` }
-      : { en: "No circulation — the pump is stopped, so this water is standing still.",
-          de: "Keine Zirkulation — die Pumpe steht, dieses Wasser steht still." },
+    now: (d) => waterMoving(d)
+      ? { en: `R1T reports ${degC(d.lwt)} before the backup heater at ${fmt1(d.flow)} l/min${d.buh1 || d.buh2 ? "; a backup-heater stage is active downstream" : ""}.`,
+          de: `R1T meldet vor dem Zusatzheizer ${degC(d.lwt)} bei ${fmt1(d.flow)} l/min${d.buh1 || d.buh2 ? "; dahinter ist eine Zusatzheizerstufe aktiv" : ""}.` }
+      : { en: "Current pump and flow readings do not establish circulation in this pipe.",
+          de: "Die aktuellen Pumpen- und Durchflusswerte belegen keine Zirkulation in dieser Leitung." },
     rows: [lwtRow, /flow sensor/i],
   },
   wtank: {
@@ -1097,10 +1136,13 @@ const INSPECT = {
       de: "Der hydraulische Zweig zum Laden des Warmwasser- oder Wärmespeichers. Der genaue Wärmetauscher hängt von der Speicherbauart ab: möglich sind eine Wendel, ein integrierter Ladekreis oder ein Frischwasserspeicher-Aufbau. Die Zeichnung zeigt die Funktion, nicht den modellspezifischen Innenaufbau. In diesem Umschaltaufbau pausiert während der Speicherladung der direkte Durchfluss zum Raumkreis.",
     },
     now: (d) => d.valveDhw === true
-      ? { en: `Charging the tank — ${degC(d.lwt)} in, tank at ${degC(d.tank)}.`,
-          de: `Lädt den Speicher — ${degC(d.lwt)} hinein, Speicher bei ${degC(d.tank)}.` }
-      : { en: "Closed — the valve is feeding the space circuit instead.",
-          de: "Geschlossen — das Ventil versorgt stattdessen den Raumkreis." },
+      ? waterMoving(d)
+        ? { en: `The tank route is selected and measured flow is ${fmt1(d.flow)} l/min; water at the PHE outlet is ${degC(d.lwt)} and the tank sensor reads ${degC(d.tank)}.`,
+            de: `Der Speicherweg ist gewählt und der gemessene Volumenstrom beträgt ${fmt1(d.flow)} l/min; am PHE-Austritt liegen ${degC(d.lwt)} an, der Speicherfühler meldet ${degC(d.tank)}.` }
+        : { en: "The tank route is selected, but current pump and flow readings do not establish an active tank charge.",
+            de: "Der Speicherweg ist gewählt, die aktuellen Pumpen- und Durchflusswerte belegen jedoch keine aktive Speicherladung." }
+      : { en: "The tank route is not selected; the controller reports the space route instead.",
+          de: "Der Speicherweg ist nicht gewählt; die Regelung meldet stattdessen den Raumweg." },
     rows: [/dhw tank temp/i, /dhw setpoint/i, /3.?way valve/i],
   },
   wheat: {
@@ -1112,19 +1154,20 @@ const INSPECT = {
       ? { en: "Heating branch", de: "Heizkreis" }
       : { en: "Space branch", de: "Raumkreis" },
     what: {
-      en: "The branch supplying radiators, underfloor loops, fan coils or other room emitters. The installed emitters and controller configuration decide whether it can heat, cool, or both. In heating the return is normally cooler; in cooling it is normally warmer. R1T/R4T are measured back at the hydro module, so they cannot prove temperatures at this field branch. The displayed ΔT also includes pipe and distribution effects and is not a direct room-load measurement.",
-      de: "Der Zweig zu Heizkörpern, Fußbodenheizung, Gebläsekonvektoren oder anderen Raumflächen. Verbaute Flächen und Reglerkonfiguration entscheiden, ob er heizen, kühlen oder beides kann. Beim Heizen ist der Rücklauf normalerweise kühler, beim Kühlen wärmer. R1T/R4T werden in der Inneneinheit gemessen und belegen daher nicht die Temperaturen an diesem bauseitigen Zweig. Das angezeigte ΔT enthält zudem Rohr- und Verteileffekte und ist keine direkte Messung der Raumlast.",
+      en: "The branch supplying radiators, underfloor loops, fan coils or other room emitters. The installed emitters and controller configuration decide whether it can heat, cool, or both. In heating the return is normally cooler; in cooling it is normally warmer. R1T/R4T are measured at the heat pump's hydraulic circuit, so they cannot prove temperatures at this field branch. The displayed ΔT also includes pipe and distribution effects and is not a direct room-load measurement.",
+      de: "Der Zweig zu Heizkörpern, Fußbodenheizung, Gebläsekonvektoren oder anderen Raumflächen. Verbaute Flächen und Reglerkonfiguration entscheiden, ob er heizen, kühlen oder beides kann. Beim Heizen ist der Rücklauf normalerweise kühler, beim Kühlen wärmer. R1T/R4T werden am Wärmepumpen-Hydraulikkreis gemessen und belegen daher nicht die Temperaturen an diesem bauseitigen Zweig. Das angezeigte ΔT enthält zudem Rohr- und Verteileffekte und ist keine direkte Messung der Raumlast.",
     },
     now: (d) => d.valveDhw === true
-      ? { en: "Paused — the valve is diverted to the hot-water tank.",
-          de: "Pausiert — das Ventil ist auf den Warmwasserspeicher umgeschaltet." }
-      : (d.pumpOn ?? (d.flow != null && d.flow > 1))
+      ? { en: "The space route is not selected; the controller reports the tank route instead.",
+          de: "Der Raumweg ist nicht gewählt; die Regelung meldet stattdessen den Speicherweg." }
+      : waterMoving(d)
         ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0
           ? { en: `Residual-heat circulation toward the hydraulic space branch at ${fmt1(d.flow)} l/min; no active cooling. Internal PHE sensors read R1T ${degC(d.lwt)} and R4T ${degC(d.ret)}; the field-side temperature is not measured.`,
               de: `Restwärme-Umlauf zum hydraulischen Raumzweig mit ${fmt1(d.flow)} l/min; keine aktive Kühlung. Die internen PHE-Fühler messen R1T ${degC(d.lwt)} und R4T ${degC(d.ret)}; die Temperatur auf der Feldseite wird nicht gemessen.` }
           : { en: `Circulating toward the space branch at ${fmt1(d.flow)} l/min. Internal PHE sensors read R1T ${degC(d.lwt)} and R4T ${degC(d.ret)}.`,
               de: `Zirkulation zum Raumkreis mit ${fmt1(d.flow)} l/min. Die internen PHE-Fühler messen R1T ${degC(d.lwt)} und R4T ${degC(d.ret)}.` }
-        : { en: "No circulation — the pump is stopped.", de: "Keine Zirkulation — die Pumpe steht." },
+        : { en: "Current pump and flow readings do not establish circulation through the space branch.",
+            de: "Die aktuellen Pumpen- und Durchflusswerte belegen keine Zirkulation durch den Raumzweig." },
     rows: [lwtRow, /inlet water/i, /^space heating operation/i],
   },
   wret: {
@@ -1133,10 +1176,11 @@ const INSPECT = {
       en: "The common return pipe into the PHE water inlet R4T after the tank and space branches merge. In the split-system layout shown it passes the water-side sensors before reaching the exchanger. In heating it is normally cooler than R1T; in active cooling it is normally warmer. Return temperature and flow together help describe transfer, but R4T is not a dedicated sensor at the building emitters and alone does not measure the building load.",
       de: "Die gemeinsame Rücklaufleitung zum PHE-Wassereintritt R4T, nachdem Speicher- und Raumzweig zusammengeführt wurden. Im gezeigten Split-System-Aufbau passiert sie die wasserseitigen Fühler vor dem Wärmetauscher. Beim Heizen ist sie normalerweise kühler als R1T, beim aktiven Kühlen wärmer. Rücklauftemperatur und Durchfluss beschreiben gemeinsam den Übergang; R4T ist jedoch kein eigener Fühler an den Gebäudeflächen und misst allein nicht die Gebäudelast.",
     },
-    now: (d) => (d.pumpOn ?? (d.flow != null && d.flow > 1))
+    now: (d) => waterMoving(d)
       ? { en: `Returning at ${degC(d.ret)}, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.`,
           de: `Kommt mit ${degC(d.ret)} zurück, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.` }
-      : { en: "No circulation — the pump is stopped.", de: "Keine Zirkulation — die Pumpe steht." },
+      : { en: "Current pump and flow readings do not establish circulation in the return pipe.",
+          de: "Die aktuellen Pumpen- und Durchflusswerte belegen keine Zirkulation in der Rücklaufleitung." },
     rows: [/inlet water/i, /flow sensor/i, /^water pressure$/i],
   },
   flow: {
@@ -1145,12 +1189,14 @@ const INSPECT = {
     rows: [/flow sensor/i, /^water pressure$/i, /water pump signal/i],
   },
   flow_switch: {
-    t: { en: "Water flow switch", de: "Wasserströmungsschalter" },
+    t: { en: "Water-flow-switch status", de: "Status „Water flow switch“" },
     re: /water flow switch/i, sample: "Water flow switch", trend: "water_flow_switch",
     head: (d) => d.flowSwitch == null ? "—" : t(d.flowSwitch ? "state.on" : "state.off"),
     now: (d) => d.flowSwitch == null ? null : d.flowSwitch
-      ? { en: "Closed — the controller has a binary flow proof.", de: "Geschlossen — die Regelung hat eine binäre Strömungsfreigabe." }
-      : { en: "Open — no binary flow proof. Compare this with the measured flow rate.", de: "Offen — keine binäre Strömungsfreigabe. Mit dem gemessenen Volumenstrom vergleichen." },
+      ? { en: `The X10A binary status is ON. It is not a flow-rate measurement or proof that the model-specific minimum is met; compare it with the pump and ${fmt1(d.flow)} l/min flow reading.`,
+          de: `Der binäre X10A-Status ist ON. Er ist weder eine Durchflussmessung noch ein Nachweis des modellspezifischen Mindestwerts; mit Pumpe und dem Messwert von ${fmt1(d.flow)} l/min vergleichen.` }
+      : { en: `The X10A binary status is OFF. That is normally expected with a stopped pump; if the pump runs, compare it with the ${fmt1(d.flow)} l/min flow reading and any 7H/C0 fault.`,
+          de: `Der binäre X10A-Status ist OFF. Bei stehender Pumpe ist das normalerweise zu erwarten; läuft die Pumpe, mit dem Messwert von ${fmt1(d.flow)} l/min und einer möglichen 7H-/C0-Störung vergleichen.` },
     rows: [/water flow switch/i, /flow sensor/i, /water pump operation/i],
   },
   wp: {
@@ -1435,7 +1481,7 @@ function renderInspect() {
   // void when there is no reading. Never the headline either: a sentence in a 19px number slot
   // reads as a broken value.
   const sentence = inspNowText(e, d);
-  const desc = e.sample ? descFor(e.sample) : null;
+  const desc = e.sample ? descFor(e.sample, row || fb) : null;
   const ownWhat = typeof e.what === "function" ? e.what(d) : e.what;
   const what = ownWhat ? descParaHtml(esc(tx(ownWhat)))
                        : (desc ? descBodyHtml(desc, (row || fb)?.value) : "");
