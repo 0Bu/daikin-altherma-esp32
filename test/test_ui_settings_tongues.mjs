@@ -122,6 +122,21 @@ const labels = {
   "ref.detail.eligibility_label": "Verwertbar:",
   "aria.ota": "Nach Firmware-Updates suchen",
   "ota.title_check": "Nach Updates suchen",
+  "settings.diagnostics": "Anlagendiagnose",
+  "circ.title": "Quelle der Zirkulationspumpe",
+  "circ.row": "Warmwasser-Zirkulationspumpe",
+  "circ.not_configured": "Nicht konfiguriert",
+  "circ.unavailable": "Nicht verfügbar",
+  "circ.running": "Läuft",
+  "circ.stopped": "Steht",
+  "circ.checking": "Prüft",
+  "circ.stale": "Veraltet",
+  "circ.waiting": "Warte auf Nachricht",
+  "circ.detail.source": "Quelle",
+  "circ.detail.power": "Wirkleistung",
+  "circ.detail.state": "Erkannter Zustand",
+  "circ.detail.age": "Alter des Messwerts",
+  "circ.settings_help": "Nur lesende Pumpendiagnose.",
 };
 const t = (key, ...args) => (labels[key] || key).replace(/\{(\d+)\}/g, (_, i) => args[Number(i)]);
 const esc = (value) => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;")
@@ -131,9 +146,10 @@ const descNoteHtml = (lead, text) =>
   `<div class="vdesc-p"><span class="vdesc-n">${esc(lead)}</span> ${esc(text)}</div>`;
 const sandbox = vm.createContext({
   S, LANG: "de", t, esc, descNoteHtml, setTimeout, clearTimeout,
-  MODEL_DESCRIPTIONS: {}, hasHist: () => false,
+  MODEL_DESCRIPTIONS: {}, hasHist: () => false, checkupDuration: (seconds) => `${seconds} s`,
+  histHtml: () => `<div class="vhist vhist-state">TIMELINE</div>`,
 });
-vm.runInContext(`${source}\nthis.__renderDynamic = dynamicControlCardHtml; this.__renderEsp32 = esp32CardHtml;`, sandbox,
+vm.runInContext(`${source}\nthis.__renderDynamic = dynamicControlCardHtml; this.__renderEsp32 = esp32CardHtml; this.__renderCirculation = circulationSettingsCardHtml;`, sandbox,
   { filename: "main/www/js/dashboard.js" });
 
 S.status = {
@@ -151,7 +167,33 @@ S.status = {
     supported: true, enabled: true, fresh: true,
     temperature_c: 20.2, humidity_pct: 46, pressure_hpa: 1009,
   },
+  circulation_source: {
+    configured: true, name: "Example pump model", has_value: true, fresh: true,
+    power_w: 4.2, age_s: 17, state: "on",
+  },
 };
+let circulationHtml = sandbox.__renderCirculation();
+let circulationButton = circulationHtml.match(/<button[^>]*data-act="circulation"[\s\S]*?<\/button>/)?.[0] || "";
+assert.match(circulationButton, /<span>Example pump model<\/span>/,
+  "the editable row header must identify the configured pump");
+assert.doesNotMatch(circulationButton, /Läuft|Steht|Prüft|Nicht verfügbar/,
+  "the moment status belongs to the diagnostic tongue, not in place of the pump name");
+let circulationTongue = circulationHtml.match(/id="diagnostics-circulation-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
+assert.match(circulationTongue, /<span class="vdesc-n">Erkannter Zustand<\/span> Läuft/);
+assert.match(circulationTongue, /<div class="vhist vhist-state">TIMELINE/,
+  "the current assessment and its categorical history must share the information tongue");
+
+S.status.circulation_source = {
+  configured: true, name: "Example pump model", has_value: false, error: "timeout",
+};
+circulationHtml = sandbox.__renderCirculation();
+circulationButton = circulationHtml.match(/<button[^>]*data-act="circulation"[\s\S]*?<\/button>/)?.[0] || "";
+circulationTongue = circulationHtml.match(/id="diagnostics-circulation-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
+assert.match(circulationButton, /Example pump model/,
+  "an MQTT outage must not replace the configured pump identity in the row header");
+assert.match(circulationTongue, /<span class="vdesc-n">Erkannter Zustand<\/span> Nicht verfügbar/,
+  "an unavailable source without a power sample must still expose its current status inside");
+
 let html = sandbox.__renderDynamic();
 assert.doesNotMatch(html, /section-badge|Experimentell/,
   "the enabled bottom card must not carry an experimental pill");

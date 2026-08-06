@@ -4987,6 +4987,31 @@ static void test_circulation_source() {
     tracker.observe(0.0, 70'000, 30, 10, 60);
     tracker.observe(0.1, 130'000, 30, 10, 60);
     CHECK(tracker.confirmed == CirculationPowerState::Off);
+
+    tracker.reset();
+    tracker.observe(0.0, 1'000, 30, 10, 60);
+    tracker.observe(0.1, 60'999, 30, 10, 60);
+    CHECK(tracker.confirmed == CirculationPowerState::Unknown);
+    tracker.observe(0.0, 61'000, 30, 10, 60);
+    CHECK(tracker.confirmed == CirculationPowerState::Off);
+
+    // The live Wilo witness is a pulsed load: roughly five seconds above 3 W followed by about
+    // 27 seconds at 0 W. The pulse train is operating evidence, not a new unconfirmed transition on
+    // every edge. It still takes the configured minute to prove ON, and a full quiet minute to turn
+    // the last confirmed ON state back to OFF.
+    tracker.reset();
+    tracker.observe(5.5, 1'000, 30, 10, 60);
+    tracker.observe(0.0, 6'000, 30, 10, 60);
+    tracker.observe(5.4, 33'000, 30, 10, 60);
+    tracker.observe(0.0, 38'000, 30, 10, 60);
+    tracker.observe(2.0, 45'000, 30, 10, 60);  // hysteresis cannot prove OFF
+    tracker.observe(5.3, 65'000, 30, 10, 60);
+    CHECK(tracker.confirmed == CirculationPowerState::On);
+    tracker.observe(0.0, 70'000, 30, 10, 60);
+    tracker.observe(0.0, 129'999, 30, 10, 60);
+    CHECK(tracker.confirmed == CirculationPowerState::On);
+    tracker.observe(0.0, 130'000, 30, 10, 60);
+    CHECK(tracker.confirmed == CirculationPowerState::Off);
 }
 
 static void test_heating_curve_diagnosis() {

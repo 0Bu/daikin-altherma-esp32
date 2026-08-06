@@ -498,7 +498,7 @@ const STATE_HIST = Object.freeze({
     classify: (v) => [0, 10].includes(v) ? v === 10 : null,
     primary: "x10a", total: "hist.circ_total", run: "hist.state_phase_run",
     none: "hist.circ_none", active: "hist.circ_on", inactive: "hist.circ_off",
-    aria: "hist.circ_aria",
+    missing: "hist.circ_unavailable", gaps: "hist.circ_gaps", aria: "hist.circ_aria",
     levels: [
       { match: (v) => [0, 10].includes(v) ? v === 0 : null,
         cls: "state-off", label: "hist.circ_off" },
@@ -597,7 +597,9 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   }).join("");
   const levelLegend = cfg.levels
     ? `<div class="vhist-legend vhist-level-legend">${cfg.levels.map((level) =>
-        `<span class="vhist-level ${level.cls}"><i></i>${esc(t(level.label))}</span>`).join("")}</div>`
+        `<span class="vhist-level ${level.cls}"><i></i>${esc(t(level.label))}</span>`).join("")}` +
+        (cfg.missing ? `<span class="vhist-level state-unavailable"><i></i>${esc(t(cfg.missing))}</span>` : "") +
+      `</div>`
     : "";
 
   const pi = histPinIndex(id, view);
@@ -621,7 +623,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
       `</div>` +
     `</div>` +
     `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
-      (gaps ? `<span class="vhist-gap">${esc(t("hist.gaps", gaps))}</span>` : "") +
+      (gaps ? `<span class="vhist-gap">${esc(t(cfg.gaps || "hist.gaps", gaps))}</span>` : "") +
       `<span>${esc(t("hist.now"))}</span></div>`
   , "vhist-state");
 }
@@ -959,7 +961,7 @@ function scrubText(h, i) {
         ? `${t(`sg.mode${mode}`)}${mode === 2 ? ` · ${label}` : ""}` : t("hist.nm");
     }
     return v != null ? (v / 10).toFixed(1) + (s.unit ? " " + s.unit : "")
-         : histHeld(s, i) ? t("hist.held") : t("hist.nm");
+         : histHeld(s, i) ? t("hist.held") : cfg?.missing ? t(cfg.missing) : t("hist.nm");
   };
   if (h.id === ENV3_COMBINED_ID) {
     const locale = LANG === "de" ? "de-DE" : "en-US";

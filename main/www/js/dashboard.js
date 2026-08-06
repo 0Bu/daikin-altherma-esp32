@@ -211,13 +211,12 @@ function firmwareRow(version) {
 
 function circulationSettingsCardHtml() {
   const c = S.status?.circulation_source || {};
-  let value = t("circ.not_configured"), cls = "dim";
+  let value = t("circ.not_configured");
   if (c.configured) {
-    if (c.error) { value = t("circ.unavailable"); cls = "err"; }
+    if (c.error) value = t("circ.unavailable");
     else if (c.has_value && c.fresh) {
       value = c.state === "on" ? t("circ.running") : c.state === "off" ? t("circ.stopped") : t("circ.checking");
-      cls = c.state === "unknown" ? "warn" : "ok";
-    } else { value = c.has_value ? t("circ.stale") : t("circ.waiting"); cls = "warn"; }
+    } else value = c.has_value ? t("circ.stale") : t("circ.waiting");
   }
   let body = `<div class="vdesc-p">${esc(t("circ.settings_help"))}</div>`;
   if (c.configured) {
@@ -227,15 +226,19 @@ function circulationSettingsCardHtml() {
       const power = Number(c.power_w).toLocaleString(LANG === "de" ? "de-DE" : "en-US",
         { maximumFractionDigits: 1 });
       body += descNoteHtml(t("circ.detail.power"), `${power} W`);
-      body += descNoteHtml(t("circ.detail.state"), value);
-      if (Number.isFinite(c.age_s)) body += descNoteHtml(t("circ.detail.age"), checkupDuration(c.age_s));
     }
+    // The row header identifies WHICH pump is configured. Its current assessment belongs here with
+    // the evidence, including waiting/error states that do not have a power value yet.
+    body += descNoteHtml(t("circ.detail.state"), value);
+    if (c.has_value && Number.isFinite(c.age_s))
+      body += descNoteHtml(t("circ.detail.age"), checkupDuration(c.age_s));
     body += `<div class="vdesc-p">${esc(t("circ.settings_help"))}</div>`;
   }
   body += typeof histHtml === "function" ? histHtml("circulation_state", "", t("circ.row")) : "";
-  const right = `<button class="settings-split-action vrow-val settings-wrap ${cls}" type="button" ` +
-    `data-act="circulation" aria-label="${esc(`${t("circ.title")}: ${value}`)}">` +
-    `<span>${esc(value)}</span>${editIcon}</button>`;
+  const sourceName = c.configured ? (c.name || "MQTT") : t("circ.not_configured");
+  const right = `<button class="settings-split-action vrow-val settings-wrap${c.configured ? "" : " dim"}" type="button" ` +
+    `data-act="circulation" aria-label="${esc(`${t("circ.title")}: ${sourceName}`)}">` +
+    `<span>${esc(sourceName)}</span>${editIcon}</button>`;
   const row = settingsInfoRow("diagnostics:circulation", "diagnostics-circulation-detail",
     t("circ.row"), right, body, "", "circulation_state");
 
