@@ -17,6 +17,7 @@ namespace daik {
 static const char* BOOT_FAILS_KEY = "boot_fails";
 
 static bool s_safe_mode = false;
+static esp_timer_handle_t s_healthy_timer = nullptr;
 
 void safe_mode_begin() {
     const int reason = static_cast<int>(esp_reset_reason());
@@ -55,7 +56,7 @@ void safe_mode_begin() {
 
 bool safe_mode_active() { return s_safe_mode; }
 
-static void healthy_timer_cb(void*) {
+static void healthy_timer_cb(void* arg) {
     if (nvs_get_i32(BOOT_FAILS_KEY, 0) != 0) {
         const esp_err_t err = nvs_set_i32(BOOT_FAILS_KEY, 0);
         if (err == ESP_OK)
@@ -65,16 +66,50 @@ static void healthy_timer_cb(void*) {
                         "crash boots keep accumulating and may false-trip safe mode\n",
                         BOOT_HEALTHY_S, esp_err_to_name(err));
     }
+
+    // esp_timer stops a one-shot before entering its callback, but keeps the timer object allocated
+    // until the owner deletes it. `arg` points at static handle storage (not at this function's old
+    // stack), so clearing it after a successful delete also makes an accidental second arm safe.
+    auto* const timer = static_cast<esp_timer_handle_t*>(arg);
+    if (timer != nullptr && *timer != nullptr) {
+        const esp_err_t err = esp_timer_delete(*timer);
+        if (err == ESP_OK)
+            *timer = nullptr;
+        else
+            diag_printf("boot: FAILED to delete healthy timer (err=%s)\n", esp_err_to_name(err));
+    }
 }
 
 void safe_mode_arm_healthy() {
+    if (s_healthy_timer != nullptr) {
+        diag_printf("boot: healthy timer already armed\n");
+        return;
+    }
+
     esp_timer_create_args_t args = {};
     args.callback        = &healthy_timer_cb;
+    args.arg             = &s_healthy_timer;
     args.dispatch_method = ESP_TIMER_TASK;
     args.name            = "safe_healthy";
-    esp_timer_handle_t h = nullptr;
-    if (esp_timer_create(&args, &h) == ESP_OK)
-        esp_timer_start_once(h, static_cast<uint64_t>(BOOT_HEALTHY_S) * 1000000ULL);
+    const esp_err_t create_err = esp_timer_create(&args, &s_healthy_timer);
+    if (create_err != ESP_OK) {
+        diag_printf("boot: FAILED to create healthy timer (err=%s) — crash counter will not age "
+                    "out this boot\n", esp_err_to_name(create_err));
+        return;
+    }
+
+    const esp_err_t start_err = esp_timer_start_once(
+        s_healthy_timer, static_cast<uint64_t>(BOOT_HEALTHY_S) * 1000000ULL);
+    if (start_err != ESP_OK) {
+        diag_printf("boot: FAILED to start healthy timer (err=%s) — crash counter will not age "
+                    "out this boot\n", esp_err_to_name(start_err));
+        const esp_err_t delete_err = esp_timer_delete(s_healthy_timer);
+        if (delete_err == ESP_OK)
+            s_healthy_timer = nullptr;
+        else
+            diag_printf("boot: FAILED to delete unstarted healthy timer (err=%s)\n",
+                        esp_err_to_name(delete_err));
+    }
 }
 
 } // namespace daik
