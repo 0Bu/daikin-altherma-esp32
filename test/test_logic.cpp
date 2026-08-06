@@ -3214,7 +3214,7 @@ static void test_homehub_map() {
         CHECK(trend_by_id(c.concept_id) != nullptr);
         CHECK(homehub_concept_index(c.concept_id) == static_cast<int>(i));
     }
-    // The history set repeats the six measurement plus BSH, 3-way-valve and Quiet pairings, then
+    // The history set repeats the eight measurement plus BSH, 3-way-valve and Quiet pairings, then
     // adds one unpaired state: Smart-Grid mode. Every entry still names a real register and a real
     // trend, and the lookup is exact.
     CHECK(HOMEHUB_HISTORY_COUNT == HOMEHUB_CONCEPT_COUNT + 1);
@@ -3236,12 +3236,13 @@ static void test_homehub_map() {
     // Lookup both ways.
     CHECK(std::string(homehub_concept_for(43)) == "dhw_tank");
     CHECK(std::string(homehub_concept_for(40)) == "leaving_water");
+    CHECK(std::string(homehub_concept_for(41)) == "leaving_water_post_buh");
+    CHECK(std::string(homehub_concept_for(45)) == "refrigerant_liquid");
     CHECK(std::string(homehub_concept_for(32)) == "bsh_state");
     CHECK(std::string(homehub_concept_for(37)) == "valve_dhw");
     CHECK(std::string(homehub_concept_for(9)) == "quiet_state");
     CHECK(homehub_concept_for(56) == nullptr);   // historied state, but not a one-row X10A pairing
     CHECK(homehub_concept_for(51) == nullptr);   // power: X10A has no equivalent, deliberately unpaired
-    CHECK(homehub_concept_for(41) == nullptr);   // post-BUH: a DIFFERENT measurement point, not leaving_water
     CHECK(homehub_concept_for(999) == nullptr);
     CHECK(homehub_concept_index("heat_pump_power") == -1);
     CHECK(homehub_concept_index(nullptr) == -1);
@@ -3250,6 +3251,8 @@ static void test_homehub_map() {
     // construction. Spot-check the locators the pairings above depend on.
     CHECK(std::string(x10a_concept_for(0x61, 10, "°C", 0)) == "dhw_tank");
     CHECK(std::string(x10a_concept_for(0x61,  2, "°C", 0)) == "leaving_water");
+    CHECK(std::string(x10a_concept_for(0x61,  4, "°C", 0)) == "leaving_water_post_buh");
+    CHECK(std::string(x10a_concept_for(0x61,  6, "°C", 0)) == "refrigerant_liquid");
     CHECK(std::string(x10a_concept_for(0x61,  8, "°C", 0)) == "return_water");
     CHECK(std::string(x10a_concept_for(0x60, 12, "", 305)) == "bsh_state");
     CHECK(std::string(x10a_concept_for(0x60, 12, "", 306)) == "valve_dhw");
@@ -6219,6 +6222,8 @@ static void test_history() {
         { "dhw_tank",         39, 1,  2 },
         { "leaving_water",    39, 1,  2 },
         { "return_water",     39, 1,  2 },
+        { "leaving_water_post_buh", 39, 1, 2 },
+        { "refrigerant_liquid", 39, 1, 2 },
         { "water_pressure",   39, 2,  1 },   // the one bar row that is WATER, not refrigerant
         { "flow",             39, -1, 2 },   // unit lives in the label ("Flow sensor (l/min)")
         { "pump_signal",      39, -1, 1 },
@@ -6226,6 +6231,7 @@ static void test_history() {
         { "comp_rps",         26, -1, 1 },   // 13 detection profiles carry no 0x30 page at all
         { "eev",              26, -1, 2 },   // same 0x30 page as comp_rps — the same 26 profiles
         { "outdoor_air",      39, 1,  2 },
+        { "outdoor_heat_exchanger", 39, 1, 2 }, // outdoor coil / deicer R4T at exact page+offset
         { "discharge",        39, 1,  2 },
         { "room_temp",        39, 1,  2 },   // "Indoor ambient temp. (R1T)" / "RT Temp." — one locator
         { "inv_current",      39, -1, 2 },   // every profile has it; only ~half have CT clamps
@@ -6238,6 +6244,8 @@ static void test_history() {
         { "buh_step1",        39, -1, 1 },   // exact event-folded BUH stage bits 304/303
         { "buh_step2",        39, -1, 1 },
         { "valve_dhw",        39, -1, 1 },   // exact bit 306; persistent DHW/space selector state
+        { "valve_heat",       39, -1, 1 },   // exact bit 307; persistent heat/cool selector state
+        { "water_flow_switch",39, -1, 1 },   // exact bit 307 on the preceding state byte
         // Derived from two structurally identified contact rows, so it resolves no SINGLE catalog
         // row. Its truth table is asserted above; test_binary_semantics pins both contacts' catalog
         // coverage independently.
@@ -6247,6 +6255,7 @@ static void test_history() {
         // are listed so the static_assert keeps forcing a decision for every TRENDS entry.
         { "free_heap",        0,  0,  0 },
         { "max_alloc",        0,  0,  0 },
+        { "circulation_state", 0, 0, 0 },
     };
     static_assert(sizeof(kExpect) / sizeof(kExpect[0]) == TREND_COUNT,
                   "every TRENDS entry needs its measured catalog expectation here");
@@ -6341,6 +6350,7 @@ static void test_history() {
     // locator failure modes. Every one carries its own label and resolves NO single catalog row.
     int board_trends = 0;
     int state_trends = 0;
+    int circulation_trends = 0;
     for (size_t t = 0; t < TREND_COUNT; t++) {
         if (TRENDS[t].kind == TrendKind::Row || TRENDS[t].kind == TrendKind::BinaryState ||
             TRENDS[t].kind == TrendKind::BinaryEvent) {
@@ -6352,6 +6362,9 @@ static void test_history() {
         if (TRENDS[t].kind == TrendKind::SmartGridMode) {
             state_trends++;
             CHECK(TRENDS[t].unit[0] == '\0');
+        } else if (TRENDS[t].kind == TrendKind::CirculationState) {
+            circulation_trends++;
+            CHECK(TRENDS[t].unit[0] == '\0');
         } else {
             board_trends++;
             CHECK(trend_cstr_eq(TRENDS[t].unit, "KiB"));
@@ -6359,6 +6372,7 @@ static void test_history() {
     }
     CHECK(board_trends == 2);
     CHECK(state_trends == 1);
+    CHECK(circulation_trends == 1);
     {
         // The locator of a board trend is (0, 0) — which is a REAL byte window. Nothing may make it
         // match: the kind is checked first, so even a row crafted to look exactly like it is refused.

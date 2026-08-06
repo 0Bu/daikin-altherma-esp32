@@ -252,6 +252,12 @@ assert.match(app, /r\.freshness_reason === "retained_without_timestamp"[\s\S]*re
 // not Shelly relay intent, and shares the same live-test-before-persist safety boundary.
 assert.match(html, /id="circulationModal"[\s\S]*id="circTopic"[\s\S]*id="circPowerPath"[\s\S]*id="circTimePath"[\s\S]*id="circOn"[\s\S]*id="circOff"[\s\S]*id="circMaxAge"[\s\S]*id="circConfirm"/,
   "circulation settings must expose the exact topic, JSON paths, freshness, hysteresis and confirmation");
+assert.match(html, /id="svR2t"[\s\S]*id="svValve2"[\s\S]*id="svFlowSwitch"[\s\S]*id="svR3t"/,
+  "R2T, the heating-cooling valve, flow switch and R3T must remain visible in the plant schematic");
+assert.match(html, /data-insp="ouhx"[\s\S]*id="svOuHx"/,
+  "the outdoor heat-exchanger R4T must remain visible inside the outdoor unit");
+assert.match(app, /ouhx:[\s\S]*trend: "outdoor_heat_exchanger"/,
+  "the outdoor heat-exchanger R4T inspector must expose its 24-hour history");
 assert.match(app, /circulationForm[^]*post\("\/test_circulation", input\)[^]*testResult\.test_proof[^]*post\("\/set_circulation", \{ \.\.\.input, test_proof: testResult\.test_proof \}\)/,
   "circulation Save must test the exact live mapping before persisting it");
 assert.match(app, /\$\("circDeleteBtn"\)\.onclick[^]*post\("\/set_circulation", \{[^]*name: "", topic: "", power_path: "", timestamp_path: ""/,

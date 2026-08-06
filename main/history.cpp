@@ -6,6 +6,7 @@
 #include "logic/binary_semantics.hpp"
 #include "logic/homehub_map.hpp"
 #include "logic/history.hpp"
+#include "mqtt_ha.hpp"
 
 #include "esp_heap_caps.h"      // heap_caps_get_largest_free_block — the max_alloc trend
 #include "esp_system.h"         // esp_get_free_heap_size — the free_heap trend
@@ -54,8 +55,8 @@ Trend             s_ring[TREND_COUNT];
 // X10A trends,
 // their labels/units are fixed by def/homehub.hpp, so this side needs no per-ring string buffers.
 logic::TrendRing  s_mb_ring[HOMEHUB_HISTORY_COUNT];
-static_assert(HOMEHUB_HISTORY_COUNT * logic::HISTORY_BYTES_PER_TREND == 5760,
-              "ten HomeHub schematic histories should cost exactly 5760 bytes");
+static_assert(HOMEHUB_HISTORY_COUNT * logic::HISTORY_BYTES_PER_TREND == 6912,
+              "twelve HomeHub schematic histories should cost exactly 6912 bytes");
 uint32_t          s_bucket = 0;                    // the bucket s_ring[*].pending belongs to
 bool              s_have_bucket = false;
 uint32_t          s_mb_bucket = 0;
@@ -71,6 +72,7 @@ int64_t           s_last_commit_bucket = -1;
 int64_t           s_mb_last_commit_bucket = -1;
 std::atomic<bool> s_reset_requested{false};
 std::atomic<bool> s_mb_reset_requested{false};
+std::atomic<bool> s_circulation_reset_requested{false};
 SemaphoreHandle_t s_mtx = nullptr;
 
 // RAII lock, same idiom as hp_poll.cpp/config.cpp. Everything inside a critical section here is a
@@ -100,6 +102,14 @@ inline bool board_trend(const logic::TrendDef& d) {
     return d.kind == logic::TrendKind::FreeHeap || d.kind == logic::TrendKind::MaxAlloc;
 }
 
+inline bool circulation_trend(const logic::TrendDef& d) {
+    return d.kind == logic::TrendKind::CirculationState;
+}
+
+inline bool independent_trend(const logic::TrendDef& d) {
+    return board_trend(d) || circulation_trend(d);
+}
+
 } // namespace
 
 void history_start() {
@@ -119,6 +129,10 @@ void history_modbus_reset() {
     // Same deferred-reset boundary as X10A: a HomeHub host/port/unit edit can race the old poll
     // cycle, so the Modbus task clears and reseeds its rings before folding the new identity.
     s_mb_reset_requested.store(true);
+}
+
+void history_circulation_reset() {
+    s_circulation_reset_requested.store(true);
 }
 
 void history_record(const CachedValue* v, size_t n) {
@@ -211,6 +225,7 @@ void history_record(const CachedValue* v, size_t n) {
     const HistorySample free_heap = logic::history_bytes_tenths_kib(esp_get_free_heap_size());
     const HistorySample max_alloc =
         logic::history_bytes_tenths_kib(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+    const CirculationPumpSample circulation = circulation_pump_sample();
 
     Lock lk(s_mtx);
     if (!lk.held) return;
@@ -247,7 +262,16 @@ void history_record(const CachedValue* v, size_t n) {
     if (s_reset_requested.exchange(false) || identity_changed) {
         const size_t completed = logic::history_completed_samples(bucket);
         for (size_t t = 0; t < TREND_COUNT; t++) {
-            if (board_trend(logic::TRENDS[t])) continue;
+            if (independent_trend(logic::TRENDS[t])) continue;
+            s_ring[t].ring.reset_with_gaps(completed);
+            s_ring[t].label[0] = '\0';
+            s_ring[t].unit[0] = '\0';
+        }
+    }
+    if (s_circulation_reset_requested.exchange(false)) {
+        const size_t completed = logic::history_completed_samples(bucket);
+        for (size_t t = 0; t < TREND_COUNT; t++) {
+            if (!circulation_trend(logic::TRENDS[t])) continue;
             s_ring[t].ring.reset_with_gaps(completed);
             s_ring[t].label[0] = '\0';
             s_ring[t].unit[0] = '\0';
@@ -280,6 +304,14 @@ void history_record(const CachedValue* v, size_t n) {
             continue;
         }
 
+        if (d.kind == logic::TrendKind::CirculationState) {
+            copy_field(tr.label, sizeof(tr.label), d.label);
+            copy_field(tr.unit, sizeof(tr.unit), d.unit);
+            const HistorySample sample = circulation.configured && circulation.known
+                ? static_cast<HistorySample>(circulation.on ? 10 : 0) : HISTORY_NO_READING;
+            tr.ring.fold(sample);
+            continue;
+        }
         const int idx = selected[t];
         // Missing in this sweep means NO READING, not NO FEATURE. Keep the established label, unit
         // and ring; pending is already NO_READING and the bucket commit will preserve the gap.
@@ -351,7 +383,8 @@ size_t history_snapshot(size_t t, HistorySample* out, size_t max) {
     if (t >= TREND_COUNT || !out || !max || !s_mtx) return 0;
     Lock lk(s_mtx);
     // Do not expose the old physical identity while its deferred reset is waiting for the poll task.
-    if (!lk.held || (s_reset_requested.load() && !board_trend(logic::TRENDS[t]))) return 0;
+    if (!lk.held || (s_reset_requested.load() && !independent_trend(logic::TRENDS[t])) ||
+        (s_circulation_reset_requested.load() && circulation_trend(logic::TRENDS[t]))) return 0;
     return s_ring[t].ring.snapshot(out, max);
 }
 
@@ -408,7 +441,8 @@ size_t history_label(size_t t, char* out, size_t max) {
     out[0] = '\0';
     if (t >= TREND_COUNT || !s_mtx) return 0;
     Lock lk(s_mtx);
-    if (!lk.held || (s_reset_requested.load() && !board_trend(logic::TRENDS[t]))) return 0;
+    if (!lk.held || (s_reset_requested.load() && !independent_trend(logic::TRENDS[t])) ||
+        (s_circulation_reset_requested.load() && circulation_trend(logic::TRENDS[t]))) return 0;
     return copy_under_lock(s_ring[t].label, out, max);
 }
 
@@ -417,7 +451,8 @@ size_t history_unit(size_t t, char* out, size_t max) {
     out[0] = '\0';
     if (t >= TREND_COUNT || !s_mtx) return 0;
     Lock lk(s_mtx);
-    if (!lk.held || (s_reset_requested.load() && !board_trend(logic::TRENDS[t]))) return 0;
+    if (!lk.held || (s_reset_requested.load() && !independent_trend(logic::TRENDS[t])) ||
+        (s_circulation_reset_requested.load() && circulation_trend(logic::TRENDS[t]))) return 0;
     return copy_under_lock(s_ring[t].unit, out, max);
 }
 

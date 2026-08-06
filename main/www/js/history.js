@@ -1,6 +1,6 @@
 // ── 24-hour trend (a historied value row's explainer carries a sparkline under the text) ──────
 // WHICH rows have a trend is the FIRMWARE's answer. /status.history.rows names X10A rings;
-// modbus_rows names the six paired HomeHub measurements plus BSH, 3-way-valve, Quiet and Smart-Grid
+// modbus_rows names the eight paired HomeHub measurements plus BSH, 3-way-valve, Quiet and Smart-Grid
 // state timelines.
 // The device keeps both at one fixed cadence and reports the labels each source owns. The
 // browser never pattern-matches its own candidates: offering a trend the device isn't buffering
@@ -110,12 +110,12 @@ const DERIVED = {
   //   running — the live pill's own (rps > 5, ΔT > 0.5); a COP of a stopped plant is not a small
   //             COP, it is not one at all.
   //   scope   — cop_scope.hpp: the CT clamps see the whole unit INCLUDING both resistive heaters
-  //             while the heat side buffered here is the pre-BUH outlet. BUH stages now have their
-  //             own timeline, but the post-BUH R2T history needed to apply the live boundary switch
-  //             is not buffered, and tank-heater heat crosses neither water sensor. So a CT-sourced
-  //             sample still draws NOTHING here. That is the same refusal the live pill makes when
-  //             it cannot pair the boundaries, not a rounding of it: an INV-sourced sample has the
-  //             heaters outside both sides and needs no such evidence, which is why it survives.
+  //             while this historical quotient deliberately retains the pre-BUH boundary. R2T now
+  //             has its own curve, but tank-heater heat crosses neither water sensor and the five-
+  //             minute rings keep last readings/events rather than one synchronised plant sample.
+  //             A CT-sourced sample therefore still draws NOTHING instead of splicing together a
+  //             plausible whole-plant quotient. An INV-sourced sample has the heaters outside both
+  //             sides and needs no such evidence, which is why it survives.
   cop: {
     unit: "", ins: ["flow", "leaving_water", "return_water", "comp_rps", "inv_current",
                     "ct_l1", "ct_l2", "ct_l3"],
@@ -304,8 +304,9 @@ function histScale(pts, sampleCount) {
 // choice, and tail alignment is the backwards-compatible fallback for an older response. A missing
 // sample stays null in its own series — the other instrument may still draw at that instant.
 function historyView(id) {
+  const x10aName = id === "circulation_state" ? "MQTT" : "X10A";
   const raw = [
-    { source: "x10a", name: "X10A", h: S.hist.get(id) },
+    { source: "x10a", name: x10aName, h: S.hist.get(id) },
     { source: "modbus", name: "HomeHub · Modbus", h: S.hist.get(histCacheKey(id, "modbus")) },
   ].filter((s) => s.h && !s.h.err && Array.isArray(s.h.v) && s.h.v.length);
   if (!raw.length) return null;
@@ -457,6 +458,42 @@ const STATE_HIST = Object.freeze({
         cls: "valve-dhw", label: "hist.valve_dhw" },
     ],
   },
+  circulation_state: {
+    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
+    primary: "x10a", total: "hist.circ_total", run: "hist.state_phase_run",
+    none: "hist.circ_none", active: "hist.circ_on", inactive: "hist.circ_off",
+    aria: "hist.circ_aria",
+    levels: [
+      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
+        cls: "state-off", label: "hist.circ_off" },
+      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
+        cls: "circulation-on", label: "hist.circ_on" },
+    ],
+  },
+  valve_heat: {
+    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
+    primary: "x10a", total: "hist.valve_heat_total", inactiveTotal: "hist.valve_cool_total",
+    run: "hist.state_phase_run", none: "hist.valve_none",
+    active: "hist.valve_heat", inactive: "hist.valve_cool", aria: "hist.valve_heat_aria",
+    levels: [
+      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
+        cls: "valve-cool", label: "hist.valve_cool" },
+      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
+        cls: "valve-heat", label: "hist.valve_heat" },
+    ],
+  },
+  water_flow_switch: {
+    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
+    primary: "x10a", total: "hist.flow_switch_total", run: "hist.state_phase_run",
+    none: "hist.flow_switch_none", active: "hist.flow_switch_on", inactive: "hist.flow_switch_off",
+    aria: "hist.flow_switch_aria",
+    levels: [
+      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
+        cls: "state-off", label: "hist.flow_switch_off" },
+      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
+        cls: "flow-switch-on", label: "hist.flow_switch_on" },
+    ],
+  },
 });
 function stateRuns(series, wanted, classify) {
   const out = [];
@@ -516,7 +553,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     )).join("");
     const missing = stateRuns(s, null, cfg.classify).map(([from, count]) =>
       `<span class="vhist-state-gap" style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
-    const sourceLabel = s.source === "modbus" ? "Modbus" : "X10A";
+    const sourceLabel = s.source === "modbus" ? "Modbus" : s.name;
     return `<div class="vhist-state-lane">` +
       `<span class="vhist-state-lane-label${s.source === "modbus" ? " mb" : ""}">${sourceLabel}</span>` +
       `<div class="vhist-state-track ${s.source}" aria-hidden="true">${on}${missing}</div>` +
@@ -784,7 +821,7 @@ function scrubText(h, i) {
     const blocks = h.series.map((s) => {
       const [from, count] = sampleRunAt(s.v, i);
       return {
-        source: s.source === "modbus" ? "Modbus" : "X10A",
+        source: s.source === "modbus" ? "Modbus" : s.name,
         detail: t(cfg.run, valueText(s), stateRunWhen(h, from, count), histDuration(count * h.dt)),
       };
     });
@@ -797,7 +834,7 @@ function scrubText(h, i) {
   // no source timestamp, so its popup also states the complete observed plateau and the unknown
   // measurement age — a fresh TCP read must not be mislabeled as a fresh sensor observation.
   const sourceText = (s) => {
-    let out = `${s.source === "modbus" ? "Modbus" : "X10A"} ${valueText(s)}`;
+    let out = `${s.source === "modbus" ? "Modbus" : s.name} ${valueText(s)}`;
     if (h.id === "outdoor_air" && s.source === "modbus" && s.v[i] != null) {
       const [from, count] = sampleRunAt(s.v, i);
       out += ` · ${t("hist.modbus_plateau", stateRunWhen(h, from, count), histDuration(count * h.dt))}`;

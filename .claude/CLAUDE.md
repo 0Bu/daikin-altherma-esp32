@@ -686,16 +686,17 @@ weather_forecast.cpp  the Open-Meteo forecast client (provider + model pinned in
                 entities (four are RETIRED and actively retracted): this is a metrics stream, and a
                 forecast is not a state of this device
 history.cpp     the 24-hour trend rings: one fixed-cadence buffer per logic/history.hpp TREND, fed by
-                the X10A poll task (history_record), plus nine HomeHub rings fed by the independent
+                the X10A poll task (history_record), plus twelve HomeHub rings fed by the independent
                 Modbus task (history_record_modbus). Both calls happen BEFORE their cache commit and
                 OUTSIDE the cache mutex; this file has its own lock, created before either task starts.
-                GET /history defaults to X10A and takes source=modbus for the second ring. STATIC
+                GET /history defaults to X10A, identifies the circulation witness as MQTT, and takes
+                source=modbus for the second instrument. STATIC
                 (.data), never heap: the binding limit on this board is the largest CONTIGUOUS block,
-                and a static array does not compete for it — twenty-one X10A/board/state trends cost
-                12096 B and the nine label-free HomeHub rings another 5184 B, for 17280 B of ring total, plus
-                ~78 B of labels/units/counters each (the ceiling assert moved 7168 -> 12096 with that
+                and a static array does not compete for it — thirty-one X10A/board/state trends cost
+                17856 B and the twelve label-free HomeHub rings another 6912 B, for 24768 B of ring
+                total, plus ~78 B of labels/units/counters each (the ceiling assert is 17856 with that
                 arithmetic; the rule that keeps it this low is that a trend follows the SCHEMATIC's
-                ~16 numeric pills plus the explicit Boost, BSH and 3-way-valve state timelines, not
+                schematic's numeric pills plus the explicit component state timelines, not
                 the ~66 numeric rows
                 a profile publishes, which would be ~38 KB). RAM only ON PURPOSE: a 576 B blob rewritten every
                 5 minutes is ~100k NVS writes a year in the partition holding the WiFi credentials,
@@ -706,8 +707,9 @@ history.cpp     the 24-hour trend rings: one fixed-cadence buffer per logic/hist
                 (the converters stay the one source of what a value means, so the domain audit still
                 sees them unchanged). The rows are found by (reg, off, unit) straight off the poll
                 cache — CachedValue carries `off` for exactly this, and for nothing else — so no
-                label matching happens on the poll path at all. THREE trends are not catalog rows:
-                Smart-Grid mode combines two contact bits, while the BOARD's own free heap and
+                label matching happens on the poll path at all. FOUR trends are not catalog rows:
+                Smart-Grid mode combines two contact bits, the external circulation witness is a
+                confirmed MQTT power state, while the BOARD's own free heap and
                 largest contiguous block are sampled here (before the lock — heap_caps takes its
                 own) in tenths of a KiB. They ride the same ring, route and browser as the catalog
                 trends; the board pair answers the one question a single /status number never could
@@ -1337,24 +1339,27 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 CONSEQUENCES of addressing a row this way rather than conditions on it, asserted over
                 the catalog instead of re-checked per sample: a trend cannot reach a SETPOINT (a
                 target sits at its own offset), and the held-over page class IS the locator's reg, so
-                no second page field can drift from it. EIGHTEEN of the twenty-one are catalog rows
-                (sixteen numeric plus the converter-qualified BSH and 3-way-valve bits), and WHICH rows is a rule
+                no second page field can drift from it. TWENTY-SEVEN of the thirty-one are catalog rows
+                (nineteen numeric plus eight converter-qualified component-state rows), and WHICH rows is a rule
                 rather than a taste: every supported numeric value the SCHEMATIC draws gets a curve, because
-                those are the readings someone is actually looking at — leaving/return water, DHW
-                tank, water pressure, flow, pump signal, refrigerant pressure (0x62/15, the one that
+                those are the readings someone is actually looking at — pre-/post-BUH leaving water,
+                return water, DHW tank, water pressure, flow, pump signal, refrigerant pressure
+                (0x62/15, the one that
                 stays LIVE — the 0x20 transducers read 0.0 bar even at 42 rps on the measured unit,
                 and 30 days of the reference install's published series show a flat 0.0 from BOTH,
                 so a ring on them would be a permanently empty chart, which is why the drawing's
                 LOW-pressure pill is the one numeric pill with no trend), compressor rps, expansion
-                valve, outdoor air, discharge temp, room temp — plus the ELECTRICAL inputs
+                valve, outdoor air, outdoor-coil, discharge and liquid-refrigerant temperatures,
+                room temp — plus the ELECTRICAL inputs
                 (inv_current, ct_l1..3), which are inputs first and rows second: the drawing's
                 computed pills (pump speed, ΔT, heat output, electrical input, COP) have no register
                 matching the displayed figure to buffer,
                 so www/js/history.js's DERIVED assembles their curve from these rings with the same
                 expressions liveData() uses for the live number — one definition per figure instead
-                of a firmware copy and a browser copy free to drift. The other THREE are not rows at
+                of a firmware copy and a browser copy free to drift. The other FOUR are not rows at
                 all — a TrendKind tag splits "addressed by (reg, off, unit)" from "sampled from the board", and the
-                combined Smart-Grid mode plus the board pair (free_heap/max_alloc, KiB) carry their
+                combined Smart-Grid mode, the confirmed external circulation witness, plus the board
+                pair (free_heap/max_alloc, KiB) carry their
                 own fixed labels because no profile
                 has one to give; trend_row_matches refuses them against a row even when the row is
                 crafted to look like their (0,0) locator. Two absences are

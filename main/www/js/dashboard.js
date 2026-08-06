@@ -126,11 +126,12 @@ const settingsChevIcon = `<svg class="vrow-chev" width="13" height="13" viewBox=
 // owns the explanation action; `rightHtml` remains an independent readout or control. Keeping the
 // split generic lets Protocol, Firmware, Board Hardware and the experimental controller explain
 // their values without turning a select, OTA action or switch into an accidental accordion toggle.
-function settingsInfoRow(stateKey, detailId, label, rightHtml, bodyHtml, itemCls = "") {
+function settingsInfoRow(stateKey, detailId, label, rightHtml, bodyHtml, itemCls = "", trendId = "") {
   const open = S.descOpen?.has(stateKey) === true;
   return `<div class="vitem${open ? " open" : ""} settings-info-item${itemCls ? ` ${itemCls}` : ""}">` +
     `<div class="vrow settings-split-row settings-info-row">` +
     `<button class="settings-split-info settings-info-toggle" type="button" data-desc="${stateKey}" ` +
+    `${trendId ? `data-trend="${esc(trendId)}" ` : ""}` +
     `aria-expanded="${open ? "true" : "false"}" aria-controls="${detailId}">` +
     `<span class="vrow-label">${esc(label)}</span>${settingsChevIcon}</button>${rightHtml}</div>` +
     `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body settings-info-tongue" ` +
@@ -224,11 +225,13 @@ function circulationSettingsCardHtml() {
     }
     body += `<div class="vdesc-p">${esc(t("circ.settings_help"))}</div>`;
   }
+  body += typeof histHtml === "function" ? histHtml("circulation_state", "", t("circ.row")) : "";
   const right = `<button class="settings-split-action vrow-val settings-wrap ${cls}" type="button" ` +
     `data-act="circulation" aria-label="${esc(`${t("circ.title")}: ${value}`)}">` +
     `<span>${esc(value)}</span>${editIcon}</button>`;
   const row = settingsInfoRow("diagnostics:circulation", "diagnostics-circulation-detail",
-    t("circ.row"), right, body);
+    t("circ.row"), right, body, "", "circulation_state");
+
   return vcard(t("settings.diagnostics"), row);
 }
 

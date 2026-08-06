@@ -47,13 +47,6 @@ struct HomeHubConcept {
 // trend locators address — NOT from any resemblance between the two sides' label text.
 //
 // NOT PAIRED, and each for a stated reason rather than an oversight:
-//   41 LWT-BUH        — the POST-BUH outlet (logic/cop_scope.hpp's R2T row). It is a different
-//                       measurement point from `leaving_water` (which is pre-BUH by definition), and
-//                       pairing them would be the substitution lwt_select.hpp refuses. No trend
-//                       addresses the post-BUH row today, so it stays unpaired rather than borrowing
-//                       the pre-BUH one.
-//   45 liquid refrig. — X10A has the row (0x61/6, R3T) but no trend addresses it, so there is no
-//                       concept id to name. Adding one is a history.hpp decision, not this file's.
 //   51 power          — the real electrical input. X10A has NO equivalent at all: the dashboard
 //                       ESTIMATES it from CT clamps at an assumed 230 V. Deliberately unpaired —
 //                       pairing a measurement with an estimate would hide which one is which.
@@ -62,9 +55,11 @@ struct HomeHubConcept {
 //                       offset 56 is the unpaired Smart-Grid state-timeline exception.
 inline constexpr HomeHubConcept HOMEHUB_CONCEPTS[] = {
     { 40, "leaving_water" },   // LWT PHE     ↔ 0x61/2  pre-BUH heat-exchanger outlet
+    { 41, "leaving_water_post_buh" }, // LWT BUH ↔ 0x61/4 post-BUH outlet (R2T)
     { 42, "return_water"  },   // return      ↔ 0x61/8  Inlet water temp. (R4T)
     { 43, "dhw_tank"      },   // DHW tank    ↔ 0x61/10 DHW tank temp. (R5T)
     { 44, "outdoor_air"   },   // outdoor air ↔ 0x20/0  R1T-Outdoor air temp.
+    { 45, "refrigerant_liquid" }, // liquid refrigerant ↔ 0x61/6 R3T
     { 49, "flow"          },   // flow        ↔ 0x62/9  Flow sensor (l/min)
     { 50, "room_temp"     },   // room        ↔ 0x61/12 Indoor ambient temp. (R1T)
     { 32, "bsh_state"     },   // booster run ↔ 0x60/12 conv 305 BSH (DHW immersion heater)
@@ -74,7 +69,7 @@ inline constexpr HomeHubConcept HOMEHUB_CONCEPTS[] = {
 inline constexpr size_t HOMEHUB_CONCEPT_COUNT =
     sizeof(HOMEHUB_CONCEPTS) / sizeof(HOMEHUB_CONCEPTS[0]);
 
-// Histories are a slightly wider contract than source PAIRING. The six measurements and three exact
+// Histories are a slightly wider contract than source PAIRING. The eight measurements and three exact
 // state flags/selectors above are still paired one-for-one, while Smart-Grid mode is
 // assembled from TWO X10A contacts and
 // therefore cannot honestly be attached to either source row as its twin. It can still share one
@@ -89,9 +84,11 @@ struct HomeHubHistory {
 };
 inline constexpr HomeHubHistory HOMEHUB_HISTORIES[] = {
     { 40, "leaving_water"   },
+    { 41, "leaving_water_post_buh" },
     { 42, "return_water"    },
     { 43, "dhw_tank"        },
     { 44, "outdoor_air"     },
+    { 45, "refrigerant_liquid" },
     { 49, "flow"            },
     { 50, "room_temp"       },
     { 32, "bsh_state"       },

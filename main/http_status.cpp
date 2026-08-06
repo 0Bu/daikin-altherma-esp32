@@ -1024,8 +1024,8 @@ static esp_err_t h_models(httpd_req_t* req) {
 }
 
 // GET /history?row=<trend id>[&source=modbus] — one 24-hour series, oldest sample first. X10A is the
-// backwards-compatible default; Modbus is available for the six structurally paired schematic
-// measurements plus the Smart-Grid state timeline in logic/homehub_map.hpp.
+// backwards-compatible default; the external circulation witness identifies itself as MQTT in the
+// response, while Modbus is available for the structurally paired histories in homehub_map.hpp.
 //
 //   {"id":"outdoor_air","source":"x10a","label":"R1T-Outdoor air temp.","dt":300,
 //    "unit":"°C","t0":1784926349,"b0":5931421,"v":[131,null,…],
@@ -1094,7 +1094,8 @@ static esp_err_t h_history(httpd_req_t* req) {
     std::string j = "{\"id\":";
     j += jstr(def_->id);
     j += ",\"source\":";
-    j += jstr(modbus ? "modbus" : "x10a");
+    const bool mqtt_source = def_->kind == logic::TrendKind::CirculationState;
+    j += jstr(modbus ? "modbus" : mqtt_source ? "mqtt" : "x10a");
     j += ",\"label\":";
     j += jstr(lbl);
     j += ",\"dt\":";

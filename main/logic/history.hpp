@@ -3,8 +3,8 @@
 // rather than a repeat of one.
 //
 // The firmware keeps a fixed-cadence ring per trended X10A/board row and serves it from GET
-// /history; history.cpp also instantiates ten rings for the HomeHub histories in homehub_map.hpp:
-// six structurally paired measurements, tank-heater, 3-way-valve and Quiet states, plus Smart-Grid
+// /history; history.cpp also instantiates twelve rings for the HomeHub histories in homehub_map.hpp:
+// eight structurally paired measurements, tank-heater, 3-way-valve and Quiet states, plus Smart-Grid
 // mode. The web UI draws either or both under a value row's explainer. Everything that
 // decides *what* is trended and *whether an X10A sample counts* lives here rather than at the call
 // site, for the same reason lwt_select.hpp and ou_stale.hpp do: the rule runs against the generated
@@ -125,6 +125,7 @@ enum class TrendKind : uint8_t {
     SmartGridMode, // four-state combination of X10A Smart-Grid contact 1 + contact 2
     FreeHeap,   // esp_get_free_heap_size()
     MaxAlloc,   // largest CONTIGUOUS free block — the real OOM ceiling on this board
+    CirculationState,      // external MQTT power witness, latest confirmed ON/OFF
 };
 
 // `reg`/`off`/`unit` are the LOCATOR for an ordinary Row (see the header note). BinaryState and
@@ -160,6 +161,8 @@ inline constexpr TrendDef TRENDS[] = {
     { "dhw_tank",         TrendKind::Row, 0x61, 10, "°C",  "" },  // DHW tank temp. (R5T)
     { "leaving_water",    TrendKind::Row, 0x61,  2, "°C",  "" },  // pre-BUH outlet — lwt_select's row
     { "return_water",     TrendKind::Row, 0x61,  8, "°C",  "" },  // Inlet water temp. (R4T)
+    { "leaving_water_post_buh", TrendKind::Row, 0x61, 4, "°C", "" }, // post-BUH outlet (R2T)
+    { "refrigerant_liquid", TrendKind::Row, 0x61, 6, "°C", "" }, // liquid-side R3T
     { "water_pressure",   TrendKind::Row, 0x62, 11, "bar", "" },  // the WATER circuit, not refrigerant
     { "flow",             TrendKind::Row, 0x62,  9, "",    "" },  // Flow sensor (l/min) — unit in label
     { "pump_signal",      TrendKind::Row, 0x62, 12, "",    "" },  // INVERTED (0 = max, 100 = stop)
@@ -178,6 +181,7 @@ inline constexpr TrendDef TRENDS[] = {
     // Outdoor — 0x20/0x21 freeze while the compressor rests, so every sample passes the held-over
     // gate below and the chart shows gaps rather than a staircase of the last run's numbers.
     { "outdoor_air",      TrendKind::Row, 0x20,  0, "°C",  "" },  // R1T-Outdoor air temp.
+    { "outdoor_heat_exchanger", TrendKind::Row, 0x20, 2, "°C", "" }, // outdoor coil R4T
     { "discharge",        TrendKind::Row, 0x20,  4, "°C",  "" },  // Discharge pipe temp. — the hot side
     { "room_temp",        TrendKind::Row, 0x61, 12, "°C",  "" },  // Indoor ambient temp. (R1T)
     // The ELECTRICAL inputs. They are here as INPUTS, not as charts of their own: the dashboard's
@@ -219,6 +223,8 @@ inline constexpr TrendDef TRENDS[] = {
     // wins, so the timeline shows which branch was selected at each five-minute sample. Converter
     // 306 is the load-bearing half of the locator in the shared 0x60/12 state byte.
     { "valve_dhw",          TrendKind::BinaryState, 0x60, 12, "", "", 306 },
+    { "valve_heat",         TrendKind::BinaryState, 0x60, 12, "", "", 307 },
+    { "water_flow_switch",  TrendKind::BinaryState, 0x60, 11, "", "", 307 },
     // A STATE timeline rather than a numeric sensor curve. X10A exposes the mode through two
     // independent contact bits, so no single catalog row can be its locator. The recorder combines
     // both structurally identified rows into the documented 0..3 mode and stores it in tenths like
@@ -233,9 +239,10 @@ inline constexpr TrendDef TRENDS[] = {
     // Both are in KiB: bytes would overflow the int16 ring at 32.8 kB of heap.
     { "free_heap",        TrendKind::FreeHeap, 0, 0, "KiB", "Free heap" },
     { "max_alloc",        TrendKind::MaxAlloc, 0, 0, "KiB", "Largest free block" },
+    { "circulation_state", TrendKind::CirculationState, 0, 0, "", "DHW circulation pump" },
 };
 constexpr size_t TREND_COUNT = sizeof(TRENDS) / sizeof(TRENDS[0]);
-// 25 trends = 14400 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
+// 31 trends = 17856 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
 // ceiling is a deliberate stop sign, not a hardware limit: .bss does not compete for the largest
 // CONTIGUOUS free block, which is what actually binds on this board, so the cost of a trend is a
 // few per cent of free heap and nothing at all of the fragmentation budget. Raise it only with the
@@ -257,7 +264,7 @@ constexpr size_t TREND_COUNT = sizeof(TRENDS) / sizeof(TRENDS[0]);
 // non-competition with the largest contiguous block, which is what the paragraph above is actually
 // about; the difference is that each ring also costs its own size AGAIN in the flash image. Worth
 // knowing before anyone adds trends by the dozen.
-static_assert(TREND_COUNT * HISTORY_BYTES_PER_TREND <= 14400,
+static_assert(TREND_COUNT * HISTORY_BYTES_PER_TREND <= 17856,
               "trend buffers are static data on a heap-tight board — justify growth before raising this");
 
 // A board metric in bytes, as the ring stores it: tenths of a KiB (~102-byte resolution, finer than
