@@ -122,26 +122,33 @@ const vcard = (label, rows, badge, badgeCls) => `<div class="vgroup"><div class=
 const editIcon = `<svg class="vcard-edit-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
 const settingsChevIcon = `<svg class="vrow-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>`;
 
-// One Settings row with the same pull-out explanation tongue used by measured values. The label
-// owns the explanation action; `rightHtml` remains an independent readout or control. Keeping the
-// split generic lets Protocol, Firmware, Board Hardware and the experimental controller explain
-// their values without turning a select, OTA action or switch into an accidental accordion toggle.
-function settingsInfoRow(stateKey, detailId, label, rightHtml, bodyHtml, itemCls = "", trendId = "") {
+// One Settings row with the same pull-out explanation tongue used by measured values. A passive
+// readout makes the WHOLE row one accordion button; only a real second control (editor, selector or
+// OTA action) keeps the split interaction. This avoids a dead value-shaped patch on otherwise
+// read-only rows while still preventing a select or editor tap from toggling the explanation too.
+function settingsInfoRow(stateKey, detailId, label, rightHtml, bodyHtml, itemCls = "", trendId = "",
+                         wholeRow = false) {
   const open = S.descOpen?.has(stateKey) === true;
-  return `<div class="vitem${open ? " open" : ""} settings-info-item${itemCls ? ` ${itemCls}` : ""}">` +
-    `<div class="vrow settings-split-row settings-info-row">` +
-    `<button class="settings-split-info settings-info-toggle" type="button" data-desc="${stateKey}" ` +
+  const attrs = `data-desc="${stateKey}" ` +
     `${trendId ? `data-trend="${esc(trendId)}" ` : ""}` +
-    `aria-expanded="${open ? "true" : "false"}" aria-controls="${detailId}">` +
-    `<span class="vrow-label">${esc(label)}</span>${settingsChevIcon}</button>${rightHtml}</div>` +
+    `aria-expanded="${open ? "true" : "false"}" aria-controls="${detailId}"`;
+  const row = wholeRow
+    ? `<button class="vrow settings-whole-info-row settings-info-row" type="button" ${attrs}>` +
+      `<span class="settings-whole-info-label"><span class="vrow-label">${esc(label)}</span>` +
+      `${settingsChevIcon}</span>${rightHtml}</button>`
+    : `<div class="vrow settings-split-row settings-info-row">` +
+      `<button class="settings-split-info settings-info-toggle" type="button" ${attrs}>` +
+      `<span class="vrow-label">${esc(label)}</span>${settingsChevIcon}</button>${rightHtml}</div>`;
+  return `<div class="vitem${open ? " open" : ""} settings-info-item${itemCls ? ` ${itemCls}` : ""}">` +
+    row +
     `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body settings-info-tongue" ` +
     `id="${detailId}">${bodyHtml}</div></div></div></div>`;
 }
 
 function settingsValueInfoRow(scope, key, label, value, valueCls, help) {
-  const right = `<span class="settings-split-value vrow-val settings-wrap ${valueCls || ""}">${esc(value)}</span>`;
+  const right = `<span class="settings-info-value vrow-val settings-wrap ${valueCls || ""}">${esc(value)}</span>`;
   return settingsInfoRow(`${scope}:${key}`, `${scope}-${key}-detail`, label, right,
-    `<div class="vdesc-p">${esc(help)}</div>`);
+    `<div class="vdesc-p">${esc(help)}</div>`, "", "", true);
 }
 
 // RX/TX pin dropdown row — shown only when auto-detection hasn't locked a working pin pair, so the
@@ -301,9 +308,9 @@ function dynamicInfoRow(key, label, value, valueCls, bodyHtml, action = "", titl
     ? `<button class="settings-split-action dynamic-config-open vrow-val settings-wrap ${valueCls}" ` +
       `type="button" data-act="${action}" aria-label="${esc(`${title}: ${value}`)}">` +
       `<span>${esc(value)}</span>${editIcon}</button>`
-    : `<span class="settings-split-value vrow-val settings-wrap ${valueCls}">${esc(value)}</span>`;
+    : `<span class="settings-info-value vrow-val settings-wrap ${valueCls}">${esc(value)}</span>`;
   return settingsInfoRow(`dynamic:${key}`, `dynamic-${key}-detail`, label, right, bodyHtml,
-    "dynamic-info-item");
+    "dynamic-info-item", "", !action);
 }
 
 // The weather tongue explains the two derived forecast numbers instead of compressing them into

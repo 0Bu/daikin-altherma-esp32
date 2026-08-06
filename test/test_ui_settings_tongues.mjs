@@ -170,16 +170,20 @@ assert.doesNotMatch(html, /Betriebsart|Sicherheit & Ausgabe|Nur lesend/,
 assert.match(html, /Raum-Sollwert minus Ist-Raumtemperatur: positiv bedeutet zu kalt/,
   "the method tongue must pin the canonical room-error sign");
 for (const key of ["state", "room-sources", "weather", "strategy"]) {
-  const infoButton = html.match(new RegExp(`<button class="settings-split-info[^"]*"[^>]*data-desc="dynamic:${key}"[\\s\\S]*?<\\/button>`))?.[0] || "";
+  const infoButton = html.match(new RegExp(`<button class="[^"]*(?:settings-split-info|settings-whole-info-row)[^"]*"[^>]*data-desc="dynamic:${key}"[\\s\\S]*?<\\/button>`))?.[0] || "";
   assert.match(infoButton, /aria-expanded="false"/,
     `${key} label must be a closed explanation action on first render`);
   assert.doesNotMatch(infoButton, /data-act=/,
     `${key} label must never open a configuration popup`);
 }
+for (const key of ["state", "strategy"]) {
+  assert.match(html, new RegExp(`<button class="vrow settings-whole-info-row settings-info-row"[^>]*data-desc="dynamic:${key}"[\\s\\S]*class="settings-info-value`),
+    `${key} has no second action, so its label and value must share one full-row accordion button`);
+}
 assert.equal((html.match(/class="settings-split-action dynamic-config-open/g) || []).length, 2,
   "only room-temperature and weather values may be popup actions");
-assert.equal((html.match(/class="settings-split-value/g) || []).length, 2,
-  "state and method values must remain non-interactive readouts");
+assert.equal((html.match(/class="settings-info-value/g) || []).length, 2,
+  "state and method values must stay passive inside their full-row accordion buttons");
 assert.doesNotMatch(html, /settings-source-summary|Konfiguriert · 25,1 °C|Open-Meteo · 22,6 °C \/ 2 h/,
   "obsolete green summary lines must not duplicate values inside the tongues");
 const roomTongue = html.match(/<div class="vdesc-body settings-info-tongue" id="dynamic-room-sources-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
@@ -319,6 +323,14 @@ for (const key of ["protocol:link", "protocol:framing", "protocol:rx", "protocol
                    "firmware:version", "firmware:channel", "firmware:language"]) {
   assert.match(html, new RegExp(`data-desc="${key}"`), `${key} must expose an information tongue`);
 }
+for (const key of ["link", "framing", "rx", "tx"]) {
+  assert.match(html, new RegExp(`<button class="vrow settings-whole-info-row settings-info-row"[^>]*data-desc="protocol:${key}"[\\s\\S]*class="settings-info-value`),
+    `locked protocol ${key} has no second action, so tapping its value must toggle its tongue`);
+}
+S.status.hp = { connected: false, proto: "", rx: 2, tx: 1, last_ok_s: 31 };
+html = sandbox.__renderEsp32();
+assert.match(html, /<button class="vrow settings-whole-info-row settings-info-row"[^>]*data-desc="protocol:link"[\s\S]*<span class="settings-info-value vrow-val settings-wrap err">Offline<\/span><\/button>/,
+  "the reported Offline value must live inside the full-row heat-pump-link accordion button");
 for (const explanation of ["Verbindungs-Erklärung", "Protokoll-Erklärung", "RX-Erklärung", "TX-Erklärung",
                            "Firmware-Erklärung", "Kanal-Erklärung", "Sprach-Erklärung"])
   assert.ok(html.includes(explanation), `Protocol/Firmware explanation must include: ${explanation}`);

@@ -548,6 +548,13 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .settings-split-info::before, .settings-split-action::before {
   content: ""; position: absolute; inset: -9px 0;
 }
+.settings-whole-info-row {
+  width: 100%; font: inherit; background: none; border: 0; cursor: pointer; text-align: left;
+  color: inherit; -webkit-tap-highlight-color: transparent;
+}
+.settings-whole-info-label {
+  min-width: 0; display: inline-flex; align-items: center; gap: 7px; text-align: left;
+}
 .settings-split-info {
   flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 7px; text-align: left;
 }
@@ -555,11 +562,13 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   flex: 0 1 auto; min-width: 0; max-width: 72%; display: inline-flex; align-items: center;
   justify-content: flex-end; gap: 6px; text-align: right;
 }
-.settings-split-value { flex: 0 1 auto; min-width: 0; max-width: 72%; text-align: right; }
+.settings-info-value { flex: 0 1 auto; min-width: 0; max-width: 72%; text-align: right; }
 .settings-split-action > span { min-width: 0; overflow-wrap: anywhere; }
 .settings-split-action .vcard-edit-icon { flex: none; }
 .settings-split-info:hover .vrow-label,
 .settings-split-info:hover .vrow-chev,
+.settings-whole-info-row:hover .vrow-label,
+.settings-whole-info-row:hover .vrow-chev,
 .settings-split-action:hover { color: var(--brand-strong); }
 /* Native checkbox semantics with a compact switch presentation. The input remains focusable and
    announces its checked state through role=switch; the painted track carries no text or meaning on
