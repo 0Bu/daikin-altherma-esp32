@@ -822,9 +822,9 @@ Body, ordered:
    `manufacturer` is the documented water-pressure boundary; `heuristic` marks DHW-loss/cycling/defrost
    patterns that can only be hints; `observation` is a measured fact with no universal judgement;
    and `experimental` marks retry-counter semantics that are not yet manufacturer-validated. The
-   firmware classifies and supplies the evidence. The collapsed row shows the reading and one of
-   `OK`, `HINWEIS`, `WARNUNG`, `PRÜFT`, `NUR MESSWERT`, `EXPERIMENTELL` or
-   `NICHT VERFÜGBAR`; its short expander carries evidence progress, basis and limits. Observation-only
+   firmware classifies and supplies the evidence. The collapsed row shows only one of `OK`,
+   `HINWEIS`, `WARNUNG`, `PRÜFT`, `NUR MESSWERT`, `EXPERIMENTELL` or `NICHT VERFÜGBAR`.
+   Its short expander carries the reading, assessment, evidence progress, basis and limits. Observation-only
    and experimental rows must never be promoted to `OK`. A threshold
    decided in `js/schematic.js` would be a second, ungated definition of the same rule.
    **The badge summarizes evidence, not plant health.** Its text distinguishes an active/device or
