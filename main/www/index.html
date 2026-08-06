@@ -131,6 +131,18 @@
                   <text class="sc-mode" id="svMode" x="50" y="34">—</text>
                   <text class="sc-status" id="svStatus" x="50" y="56"></text>
                 </g>
+                <!-- Independent outdoor climate from the optional ENV III. It is not a Daikin
+                     outdoor-unit reading and therefore sits in the schematic header rather than
+                     on the unit itself. The group stays absent until the configured sensor exists;
+                     once configured it remains visible and blanks to "— °C" when the sample is not
+                     fresh. Tapping it opens one inspector with all three readings and their shared
+                     timeline. -->
+                <g id="gEnv3" class="sc-env3 sc-hit" data-insp="env3" role="button" tabindex="0"
+                   style="display:none">
+                  <rect class="sc-env3-box" x="624" y="16" width="74" height="24" rx="12"/>
+                  <text class="sc-val" id="svEnv3Temp" x="661" y="32" text-anchor="middle"
+                        style="font-size:10px">— °C</text>
+                </g>
                 <!-- System-wide boost state, separate from both hydronic branches. evcc boost
                      arrives as Smart Grid mode 2 (Recommended on): that is evidence of the REQUEST,
                      not evidence that the tank is already being charged. The pill always says only
@@ -1031,6 +1043,7 @@
             <span class="field-label plain">SCL</span>
             <select class="input mono num" id="envScl"></select>
           </label>
+          <p class="hint" data-i18n="env.atoms3_header_hint">AtomS3 Lite: use Grove GPIO2/1 or two offered header pins such as GPIO7/8. GPIO39 is unavailable for ENV III.</p>
         </div>
       </fieldset>
       <p class="hint err" id="bdError" hidden></p>

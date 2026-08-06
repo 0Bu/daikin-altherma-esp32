@@ -116,6 +116,16 @@ them in the RX/TX dropdown under **⚙ Settings → Protocol** (`POST /set_hp`) 
 [README.md § Wiring — X10A](../README.md#wiring--x10a-breaker-off) for why the firmware won't find
 them on its own until you do.
 
+That table is deliberately the generic **X10A UART** policy. ENV III is stricter about physical and
+tested board pins: with **M5Stack AtomS3 Lite** selected, its I²C dropdown contains only
+`1, 2, 5, 6, 7, 8, 38`. GPIO39 remains excluded even though it is physically exposed, because ENV III
+communication on that pad was not reliable in hardware tests. Use Grove GPIO2/1 or two offered
+header pins such as GPIO7/8.
+
+When ENV III is enabled, Save probes the selected pair first as shown and then once with SDA/SCL
+exchanged. If only the exchanged order answers with a CRC-valid SHT30 sample and QMP6988 chip id,
+the firmware stores that corrected order automatically. It never scans unrelated GPIO pairs.
+
 ## Status LED and recovery button
 
 These are the board's own onboard parts, and they are **runtime settings**, not build options: CI

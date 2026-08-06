@@ -4,6 +4,7 @@
 #include "history.hpp"
 #include "diag_log.hpp"
 #include "logic/binary_semantics.hpp"
+#include "logic/env3.hpp"
 #include "logic/homehub_map.hpp"
 #include "logic/history.hpp"
 #include "mqtt_ha.hpp"
@@ -51,16 +52,21 @@ struct Trend {
 };
 
 Trend             s_ring[TREND_COUNT];
-// Six paired HomeHub measurements plus BSH, 3-way-valve, Quiet and Smart-Grid states get a second ring. Unlike
-// X10A trends,
+// Eight paired HomeHub measurements plus BSH, 3-way-valve, Quiet and Smart-Grid states get a
+// second ring. Unlike X10A trends,
 // their labels/units are fixed by def/homehub.hpp, so this side needs no per-ring string buffers.
 logic::TrendRing  s_mb_ring[HOMEHUB_HISTORY_COUNT];
 static_assert(HOMEHUB_HISTORY_COUNT * logic::HISTORY_BYTES_PER_TREND == 6912,
               "twelve HomeHub schematic histories should cost exactly 6912 bytes");
+logic::TrendRing  s_env3_ring[ENV3_HISTORY_COUNT];
+static_assert(ENV3_HISTORY_COUNT * logic::HISTORY_BYTES_PER_TREND == 1728,
+              "three ENV III histories should cost exactly 1728 bytes");
 uint32_t          s_bucket = 0;                    // the bucket s_ring[*].pending belongs to
 bool              s_have_bucket = false;
 uint32_t          s_mb_bucket = 0;
 bool              s_mb_have_bucket = false;
+uint32_t          s_env3_bucket = 0;
+bool              s_env3_have_bucket = false;
 // When the newest sample was committed, on the MONOTONIC clock. The route turns this into the
 // series' t0 (logic/history_t0): without it t0 was derived from `now` and drifted by up to a full
 // bucket between commits, which mislabelled every timestamp and let a PINNED readout round onto
@@ -68,8 +74,10 @@ bool              s_mb_have_bucket = false;
 // wall-clock instant is then unknowable, but its age never is. -1 = nothing committed yet.
 int64_t           s_last_commit_us = -1;
 int64_t           s_mb_last_commit_us = -1;
+int64_t           s_env3_last_commit_us = -1;
 int64_t           s_last_commit_bucket = -1;
 int64_t           s_mb_last_commit_bucket = -1;
+int64_t           s_env3_last_commit_bucket = -1;
 std::atomic<bool> s_reset_requested{false};
 std::atomic<bool> s_mb_reset_requested{false};
 std::atomic<bool> s_circulation_reset_requested{false};
@@ -379,6 +387,44 @@ void history_record_modbus(const CachedValue* v, size_t n) {
     }
 }
 
+void history_record_env3(bool valid, float temperature_c, float humidity_pct, float pressure_hpa) {
+    if (!s_mtx) return;
+    const int64_t now_us = esp_timer_get_time();
+    const uint32_t bucket = logic::history_bucket(now_us);
+    HistorySample sample[ENV3_HISTORY_COUNT] = {
+        HISTORY_NO_READING, HISTORY_NO_READING, HISTORY_NO_READING,
+    };
+    const bool accepted = valid && env3_sample_plausible(temperature_c, humidity_pct, pressure_hpa);
+    if (accepted) {
+        sample[0] = static_cast<HistorySample>(std::lround(temperature_c * 10.0f));
+        sample[1] = static_cast<HistorySample>(std::lround(humidity_pct * 10.0f));
+        sample[2] = static_cast<HistorySample>(std::lround(pressure_hpa * 10.0f));
+    }
+
+    Lock lk(s_mtx);
+    if (!lk.held) return;
+    if (!s_env3_have_bucket) {
+        const size_t completed = logic::history_completed_samples(bucket);
+        for (auto& ring : s_env3_ring) ring.reset_with_gaps(completed);
+        if (completed) {
+            s_env3_last_commit_us = static_cast<int64_t>(bucket) * logic::HISTORY_DT_S * 1000000;
+            s_env3_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
+        }
+    } else if (bucket != s_env3_bucket) {
+        const uint32_t skipped = logic::history_skipped(s_env3_bucket, bucket);
+        for (auto& ring : s_env3_ring) ring.commit(skipped);
+        s_env3_last_commit_us = now_us;
+        s_env3_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
+    }
+    s_env3_bucket = bucket;
+    s_env3_have_bucket = true;
+    // An intermittent error later in a bucket must not erase an earlier complete observation. If
+    // the whole bucket has no valid sample, its untouched pending sentinel commits as an honest gap.
+    if (accepted) {
+        for (size_t t = 0; t < ENV3_HISTORY_COUNT; ++t) s_env3_ring[t].fold(sample[t]);
+    }
+}
+
 size_t history_snapshot(size_t t, HistorySample* out, size_t max) {
     if (t >= TREND_COUNT || !out || !max || !s_mtx) return 0;
     Lock lk(s_mtx);
@@ -393,6 +439,13 @@ size_t history_modbus_snapshot(size_t t, HistorySample* out, size_t max) {
     Lock lk(s_mtx);
     if (!lk.held || s_mb_reset_requested.load()) return 0;
     return s_mb_ring[t].snapshot(out, max);
+}
+
+size_t history_env3_snapshot(size_t t, HistorySample* out, size_t max) {
+    if (t >= ENV3_HISTORY_COUNT || !out || !max || !s_mtx) return 0;
+    Lock lk(s_mtx);
+    if (!lk.held) return 0;
+    return s_env3_ring[t].snapshot(out, max);
 }
 
 // Copied out under the lock rather than returning the pointer: the poll task rewrites these buffers
@@ -419,6 +472,14 @@ int32_t history_modbus_newest_age_s() {
     return age_us < 0 ? 0 : static_cast<int32_t>(age_us / 1000000);
 }
 
+int32_t history_env3_newest_age_s() {
+    if (!s_mtx) return -1;
+    Lock lk(s_mtx);
+    if (!lk.held || s_env3_last_commit_us < 0) return -1;
+    const int64_t age_us = esp_timer_get_time() - s_env3_last_commit_us;
+    return age_us < 0 ? 0 : static_cast<int32_t>(age_us / 1000000);
+}
+
 static int64_t oldest_bucket_under_lock(int64_t newest, size_t sample_count) {
     return newest < 0 || !sample_count ? -1 : newest - static_cast<int64_t>(sample_count - 1);
 }
@@ -434,6 +495,12 @@ int64_t history_modbus_oldest_bucket(size_t sample_count) {
     Lock lk(s_mtx);
     return lk.held && !s_mb_reset_requested.load()
         ? oldest_bucket_under_lock(s_mb_last_commit_bucket, sample_count) : -1;
+}
+
+int64_t history_env3_oldest_bucket(size_t sample_count) {
+    if (!s_mtx) return -1;
+    Lock lk(s_mtx);
+    return lk.held ? oldest_bucket_under_lock(s_env3_last_commit_bucket, sample_count) : -1;
 }
 
 size_t history_label(size_t t, char* out, size_t max) {

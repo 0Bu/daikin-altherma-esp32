@@ -74,7 +74,7 @@ explicit choice of *Custom* removes that identity and its M5Stack accessory capa
 
 **The Grove port is the tidy way in.** HY2.0-4P carries **GND, 5 V, G2, G1** — the same four wires
 X10A needs — so one Grove breakout cable reaches the service port. Without one, the female header on
-the case carries `5V`, `GND` and G5–G8/G38 for plain jumper wires. The 5 V level-shifter advice and
+the case carries `5V`, `GND` and G5–G8/G38/G39 for plain jumper wires. The 5 V level-shifter advice and
 "power the board from USB, not off X10A's 50 mA" still apply exactly as in [WIRING.md](WIRING.md).
 
 **Watch out:**
@@ -83,8 +83,9 @@ the case carries `5V`, `GND` and G5–G8/G38 for plain jumper wires. The 5 V lev
   picker to keep an external debug probe usable — a preference, not a hardware conflict — but the
   LED/button picker offers them, because that is where this board's button physically is. Configuring
   the button costs you nothing unless you actually attach a JTAG probe.
-- **GPIO39 is silkscreened "CLK_OUT3"** but is chip-level JTAG (MTCK) regardless of the label, so it
-  is not offered for X10A.
+- **GPIO39 is silkscreened "CLK_OUT3"** but is chip-level JTAG (MTCK) regardless of the label. It is
+  not offered in the generic X10A picker and is also withheld from ENV III: repeated hardware tests
+  did not establish reliable ENV III communication on that pad.
 - **GPIO35 is only safe because this build uses Quad (DIO) flash and no PSRAM.** On a build with
   Octal flash/PSRAM, GPIO33–37 carry SPIIO4-7/DQS and the firmware refuses them — for the indicator
   as well as for X10A.
@@ -139,19 +140,25 @@ JSON key, so `{}` makes them unavailable without hiding unrelated heat-pump enti
 |---|---:|---:|---|
 | AtomS3 Lite, ENV III in Grove | **GPIO2 (G2)** | **GPIO1 (G1)** | Grove is then unavailable to X10A; move X10A to two free header pins, for example RX 5 / TX 6. |
 | AtomS3 Lite, X10A stays in Grove | choose two free header GPIOs, e.g. **5** | e.g. **6** | ENV III needs a Grove breakout/adapter to those header pins. |
+| AtomS3 Lite, side-header adapter | choose two offered pins, e.g. **GPIO7** | e.g. **GPIO8** | GPIO39 is intentionally unavailable for ENV III; power remains **5V (red)** / **GND (black)**. |
 
 ENV III is exposed only when the pending board selection has firmware metadata identifying the
-vendor as **M5Stack**. Its section is hidden and disabled for Seeed and Custom, the driver cannot
-start there, and an enabled raw `POST /set_env3` is rejected. This is vendor-based rather than hard-coded to the
-AtomS3 Lite: a future supported M5Stack board preset inherits the capability when it is added to the
-same table. Custom cannot assert a vendor, so it deliberately fails closed.
+vendor as **M5Stack** and declaring at least two physical I²C pins. Its section is hidden and disabled
+for Seeed and Custom, the driver cannot start there, and an enabled raw `POST /set_env3` is rejected.
+A future supported M5Stack preset must add its own connector-pin inventory to the same table; it
+cannot silently inherit the AtomS3 Lite layout. Custom cannot assert either fact, so it deliberately
+fails closed.
 
-The GPIO selectors preselect the AtomS3 Lite Grove mapping only when its pins are actually free. A
-save is rejected if ENV III overlaps X10A, the status LED, the recovery button, or a chip-reserved
-pad; the same check runs again at boot and disables an invalid persisted mapping. Board identity,
+The GPIO selectors preselect the AtomS3 Lite Grove mapping only when its pins are actually free and
+otherwise list only the tested board pins `1, 2, 5, 6, 7, 8, 38`. A save is rejected if
+ENV III uses any other chip pad or overlaps X10A, the status LED or the recovery button; the same
+check runs again at boot and disables an invalid persisted mapping. Board identity,
 LED/button and sensor are validated as one proposed snapshot. Enabling is **test-before-persist**:
 on the selected pair, the SHT30 must return one CRC-valid measurement and the QMP6988 must return its
-`0x5c` chip id before the firmware writes that snapshot once. If either device is not reachable, the
+`0x5c` chip id before the firmware writes that snapshot once. If that sensor-level probe fails, the
+firmware tries exactly the same two selected GPIOs once more with SDA/SCL exchanged. A successful
+opposite order is written back as the corrected mapping; when neither order works, the original
+component-specific error remains visible. If either device is not reachable, the
 Board Hardware dialog stays open with the matching error and none of its changes are saved. Selecting
 **No sensor** remains directly saveable because disabling is the recovery path and requires no
 attached hardware. A running ENV III is accepted only while its latest sample is fresh. To move an
@@ -162,12 +169,11 @@ owns its bus.
 This matters on the AtomS3 Lite because its one Grove connector cannot carry X10A and ENV III at the
 same time even though both use the same four-colour cable.
 
-I²C cannot discover which physical GPIOs carry SDA and SCL. It can probe the ENV III addresses only
-after the firmware has configured a candidate GPIO pair as an I²C bus. Therefore the dialog keeps
-explicit SDA/SCL selection: with Grove free it starts with GPIO2/1; with X10A on Grove it removes
-GPIO2/1 and selects two free header pins as the editable starting point. A future
-"search sensor" action could explicitly try board-safe free pairs, but an automatic boot-time scan
-would reconfigure unknown external pins and is deliberately not part of this implementation.
+I²C cannot discover the physical GPIO pair without configuring candidate pins as a bus. Therefore
+the dialog keeps explicit pin selection: with Grove free it starts with GPIO2/1; with X10A on Grove
+it removes GPIO2/1 and selects two free header pins as the editable starting point. Save safely
+handles the common wire-order mistake by probing only that selected pair in both directions. It does
+not scan other free GPIO combinations or reconfigure unknown external pins at boot.
 
 Grove wire colours are **red 5 V, black GND, yellow SDA, white SCL**. M5Stack specifies a maximum
 temperature-measurement range of **−40–120 °C**. Its highest stated accuracy, **±0.2 °C**, applies

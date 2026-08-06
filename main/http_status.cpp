@@ -269,6 +269,16 @@ void http_append_status_json(std::string& j, bool redact) {
         j += ",\"led_inverted\":";    j += presets[i]->led_inverted ? "true" : "false";
         j += ",\"btn_gpio\":";        j += std::to_string(presets[i]->btn_gpio);
         j += ",\"btn_active_low\":";  j += presets[i]->btn_active_low ? "true" : "false";
+        // Candidate pins are board-specific and filtered by the live X10A link. The browser applies
+        // the pending LED/button reservations because those can change before this atomic form is
+        // submitted. AtomS3 Lite therefore exposes exactly 1/2/5/6/7/8/38; GPIO39 and chip-only
+        // pads stay unavailable for ENV III.
+        int bipins[BOARD_I2C_PINS_MAX];
+        const int nbipins = board_preset_i2c_pins_offerable(
+            presets[i], bipins, BOARD_I2C_PINS_MAX, hw_octal_spi(), config_link_pins(c));
+        j += ",\"i2c_pins\":[";
+        for (int k = 0; k < nbipins; ++k) { if (k) j += ","; j += std::to_string(bipins[k]); }
+        j += "]";
         j += "}";
     }
     j += "]},";
@@ -281,10 +291,11 @@ void http_append_status_json(std::string& j, bool redact) {
     const bool env_supported = env3_board_supported(c);
     const bool env_enabled = env_supported && c.env3_enabled;
     const Env3Status env = env3_status();
-    int epins[BOARD_PINS_MAX];
-    const int nepins = board_pins_offerable(epins, BOARD_PINS_MAX, hw_octal_spi(), config_link_pins(c));
+    int epins[BOARD_I2C_PINS_MAX];
+    const int nepins = board_preset_i2c_pins_offerable(
+        selected_board, epins, BOARD_I2C_PINS_MAX, hw_octal_spi(), config_link_pins(c));
     const Env3Preset* epresets[ENV3_PRESETS_MAX];
-    const int nepre = env3_presets_offerable(epresets, ENV3_PRESETS_MAX, hw_octal_spi(),
+    const int nepre = env3_presets_offerable(epresets, ENV3_PRESETS_MAX, selected_board, hw_octal_spi(),
                                              config_link_pins(c));
     const bool env_fresh = env_enabled && env.fresh;
     char env_temp[24] = {0}, env_hum[24] = {0}, env_press[24] = {0};
@@ -657,6 +668,20 @@ void http_append_status_json(std::string& j, bool redact) {
             j += jstr(hh.trend_id);
             j += ",\"label\":";
             j += jstr(r->label);
+            j += "}";
+        }
+    }
+    j += "],\"env3_rows\":[";
+    // ENV III has its own producer task and therefore its own rings: an X10A outage must not stop
+    // outdoor-climate history. Offer the fixed vocabulary only while this board has the sensor
+    // enabled; a disabled accessory is absent rather than three permanently empty charts.
+    if (env_enabled) {
+        for (size_t et = 0; et < ENV3_HISTORY_COUNT; ++et) {
+            if (et) j += ",";
+            j += "{\"id\":";
+            j += jstr(ENV3_HISTORIES[et].id);
+            j += ",\"label\":";
+            j += jstr(ENV3_HISTORIES[et].label);
             j += "}";
         }
     }
@@ -1068,9 +1093,10 @@ static esp_err_t h_models(httpd_req_t* req) {
     return http_send_json(req, def::MODELS_JSON);
 }
 
-// GET /history?row=<trend id>[&source=modbus] — one 24-hour series, oldest sample first. X10A is the
-// backwards-compatible default; the external circulation witness identifies itself as MQTT in the
-// response, while Modbus is available for the structurally paired histories in homehub_map.hpp.
+// GET /history?row=<trend id>[&source=modbus|env3] — one 24-hour series, oldest sample first. X10A
+// is the backwards-compatible default; the external circulation witness identifies itself as MQTT,
+// Modbus carries paired HomeHub measurements/state timelines, and ENV III owns three independent
+// outdoor-climate rings.
 //
 //   {"id":"outdoor_air","source":"x10a","label":"R1T-Outdoor air temp.","dt":300,
 //    "unit":"°C","t0":1784926349,"b0":5931421,"v":[131,null,…],
@@ -1085,7 +1111,7 @@ static esp_err_t h_models(httpd_req_t* req) {
 // monotonic age — the ring itself advances on the monotonic clock, so it survives SNTP setting the
 // time mid-boot. Omitted entirely when the clock has never synced: the UI then reads out an AGE,
 // which is the same refusal-to-fabricate logic/timestamp.hpp already makes for syslog timestamps.
-// `b0` is sample zero's monotonic bucket and aligns X10A and Modbus exactly even without wall time.
+// `b0` is sample zero's monotonic bucket and aligns every source exactly even without wall time.
 //
 // Sent in CHUNKS. The body is ~1.5 KB — smaller than /values' ~6 KB — but it is a new allocation on
 // a heap where the largest contiguous block is the binding limit, and chunking costs nothing here.
@@ -1100,7 +1126,8 @@ static esp_err_t h_history(httpd_req_t* req) {
     char source[12] = {0};
     const bool has_source = httpd_query_key_value(q, "source", source, sizeof(source)) == ESP_OK;
     const bool modbus = has_source && std::strcmp(source, "modbus") == 0;
-    if (has_source && !modbus && std::strcmp(source, "x10a") != 0) {
+    const bool env3_source = has_source && std::strcmp(source, "env3") == 0;
+    if (has_source && !modbus && !env3_source && std::strcmp(source, "x10a") != 0) {
         httpd_resp_set_status(req, "400 Bad Request");
         return http_send_json(req, "{\"ok\":false,\"error\":\"unknown source\"}");
     }
@@ -1110,20 +1137,24 @@ static esp_err_t h_history(httpd_req_t* req) {
     size_t t = 0;
     if (def_) { while (t < logic::TREND_COUNT && &logic::TRENDS[t] != def_) t++; }
     const int mb_t = modbus ? logic::homehub_history_index(id) : -1;
-    if (!def_ || t >= logic::TREND_COUNT || (modbus && mb_t < 0)) {
+    const int env_t = env3_source ? env3_history_index(id) : -1;
+    const bool x10a_unknown = !modbus && !env3_source && (!def_ || t >= logic::TREND_COUNT);
+    if (x10a_unknown || (modbus && (!def_ || mb_t < 0)) || (env3_source && env_t < 0)) {
         httpd_resp_set_status(req, "404 Not Found");
         return http_send_json(req, "{\"ok\":false,\"error\":\"unknown trend\"}");
     }
 
-    // Both are function-static rather than stack: this handler runs on the httpd task, whose stack
+    // Both buffers are function-static rather than stack: this handler runs on the httpd task, whose stack
     // is the one that overflowed in v1.0.12, and 576 + 576 bytes of locals is not worth the risk.
     // Safe because esp_http_server dispatches requests one at a time on that single task.
     static logic::HistorySample samples[logic::HISTORY_SAMPLES];
     static uint16_t             runs[logic::HISTORY_MAX_RUNS][2];
     const size_t n = modbus
         ? history_modbus_snapshot(static_cast<size_t>(mb_t), samples, logic::HISTORY_SAMPLES)
-        : history_snapshot(t, samples, logic::HISTORY_SAMPLES);
-    const size_t nruns = modbus ? 0
+        : env3_source
+            ? history_env3_snapshot(static_cast<size_t>(env_t), samples, logic::HISTORY_SAMPLES)
+            : history_snapshot(t, samples, logic::HISTORY_SAMPLES);
+    const size_t nruns = (modbus || env3_source) ? 0
         : logic::history_held_runs(samples, n, runs, logic::HISTORY_MAX_RUNS);
 
     char lbl[80], unit[8];
@@ -1131,16 +1162,20 @@ static esp_err_t h_history(httpd_req_t* req) {
         const def::HomeHubReg* r = def::homehub_find(logic::HOMEHUB_HISTORIES[mb_t].offset);
         std::snprintf(lbl, sizeof(lbl), "%s", r ? r->label : "");
         std::snprintf(unit, sizeof(unit), "%s", r ? r->unit : "");
+    } else if (env3_source) {
+        std::snprintf(lbl, sizeof(lbl), "%s", ENV3_HISTORIES[env_t].label);
+        std::snprintf(unit, sizeof(unit), "%s", ENV3_HISTORIES[env_t].unit);
     } else {
         history_label(t, lbl, sizeof(lbl));
         history_unit(t, unit, sizeof(unit));
     }
 
     std::string j = "{\"id\":";
-    j += jstr(def_->id);
+    j += jstr(env3_source ? ENV3_HISTORIES[env_t].id : def_->id);
     j += ",\"source\":";
-    const bool mqtt_source = def_->kind == logic::TrendKind::CirculationState;
-    j += jstr(modbus ? "modbus" : mqtt_source ? "mqtt" : "x10a");
+    const bool mqtt_source = !modbus && !env3_source &&
+                             def_->kind == logic::TrendKind::CirculationState;
+    j += jstr(modbus ? "modbus" : env3_source ? "env3" : mqtt_source ? "mqtt" : "x10a");
     j += ",\"label\":";
     j += jstr(lbl);
     j += ",\"dt\":";
@@ -1151,7 +1186,8 @@ static esp_err_t h_history(httpd_req_t* req) {
     j += ",\"unit\":";
     j += jstr(unit);
     const TimeStatus ts = time_status();
-    const int32_t newest_age = modbus ? history_modbus_newest_age_s() : history_newest_age_s();
+    const int32_t newest_age = modbus ? history_modbus_newest_age_s()
+        : env3_source ? history_env3_newest_age_s() : history_newest_age_s();
     if (ts.synced && n && newest_age >= 0) {
         // Derived from the AGE of the newest sample, not from `now`: the ring commits a bucket every
         // HISTORY_DT_S, so between commits the newest sample ages while `now` moves on. Measured on a
@@ -1163,9 +1199,10 @@ static esp_err_t h_history(httpd_req_t* req) {
         j += std::to_string(logic::history_t0(ts.unix_time, static_cast<uint32_t>(newest_age),
                                               n, logic::HISTORY_DT_S));
     }
-    const int64_t b0 = modbus ? history_modbus_oldest_bucket(n) : history_oldest_bucket(n);
+    const int64_t b0 = modbus ? history_modbus_oldest_bucket(n)
+        : env3_source ? history_env3_oldest_bucket(n) : history_oldest_bucket(n);
     if (b0 >= 0) {
-        // Exact source alignment even before SNTP: both recorders derive this monotonic bucket from
+        // Exact source alignment even before SNTP: all recorders derive this monotonic bucket from
         // the same esp_timer clock, so a Modbus line cannot slide onto the neighbouring X10A sample.
         j += ",\"b0\":";
         j += std::to_string(b0);

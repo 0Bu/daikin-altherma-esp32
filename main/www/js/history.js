@@ -1,8 +1,9 @@
 // ── 24-hour trend (a historied value row's explainer carries a sparkline under the text) ──────
 // WHICH rows have a trend is the FIRMWARE's answer. /status.history.rows names X10A rings;
 // modbus_rows names the eight paired HomeHub measurements plus BSH, 3-way-valve, Quiet and Smart-Grid
-// state timelines.
-// The device keeps both at one fixed cadence and reports the labels each source owns. The
+// state timelines; env3_rows names temperature, humidity and pressure from the independent outdoor
+// sensor.
+// The device keeps every source at one fixed cadence and reports the labels each source owns. The
 // browser never pattern-matches its own candidates: offering a trend the device isn't buffering
 // would be an empty chart by design.
 // Each entry is {id, label}: the ID is the concept (logic/history.hpp's TRENDS — "dhw_tank",
@@ -11,7 +12,7 @@
 // rendered VALUE row finds its own trend. Adding a trend is a row in TRENDS — nothing here changes.
 //
 // Everything below is keyed by the ID, never by the label; the second instrument uses the explicit
-// `modbus:<id>` namespace. A label is per-profile, so a cache keyed by it would be re-keyed by a
+// `modbus:<id>` or `env3:<id>` namespace. A label is per-profile, so a cache keyed by it would be re-keyed by a
 // model change mid-session — and not every trended thing IS a catalog row. The board's own memory
 // (free_heap, max_alloc) is drawn on the Settings ESP32 card, whose row labels are TRANSLATED, so
 // there is no label to match on at all; it attaches by id like the firmware always intended.
@@ -19,6 +20,10 @@ function histSpec() { const h = S.status && S.status.history; return h && Array.
 function modbusHistRows() {
   const h = histSpec();
   return h && Array.isArray(h.modbus_rows) ? h.modbus_rows : [];
+}
+function env3HistRows() {
+  const h = histSpec();
+  return h && Array.isArray(h.env3_rows) ? h.env3_rows : [];
 }
 function histFor(label) {
   const h = histSpec();
@@ -31,6 +36,7 @@ function histIdFor(label) { const r = histFor(label); return r ? r.id : ""; }
 // rather than an empty one.
 function hasDeviceHist(id) { return !!id && !!histSpec() && histSpec().rows.some((r) => r && r.id === id); }
 function hasModbusHist(id) { return !!id && modbusHistRows().some((r) => r && r.id === id); }
+function hasEnv3Hist(id) { return !!id && env3HistRows().some((r) => r && r.id === id); }
 function hasHist(id) {
   const D = DERIVED[id];
   return D ? D.ready(Object.fromEntries(D.ins.map((k) => [k, hasDeviceHist(k)]))) : hasDeviceHist(id);
@@ -151,18 +157,21 @@ function histHeld(h, i) {
 // Fetch a row's series at most once a minute. The buffer moves one sample per `dt` (300 s), so a
 // per-poll refetch would send ~300 identical responses per new data point — and each response is a
 // ~1 KB contiguous string on the single httpd task (CLAUDE.md → Memory constraints).
-const histCacheKey = (id, source) => source === "modbus" ? `modbus:${id}` : id;
+const histCacheKey = (id, source) => source === "modbus" ? `modbus:${id}`
+  : source === "env3" ? `env3:${id}` : id;
 async function ensureHist(id, source = "x10a") {
   const key = histCacheKey(id, source);
-  const offered = source === "modbus" ? hasModbusHist(id) : hasHist(id);
+  const offered = source === "modbus" ? hasModbusHist(id)
+    : source === "env3" ? hasEnv3Hist(id) : hasHist(id);
   if (!offered || S.histBusy.has(key)) return;
   const c = S.hist.get(key);
   if (c && Date.now() - c.at < 60000) return;
   if (source === "x10a" && DERIVED[id]) { await ensureDerived(id); return; }
   S.histBusy.add(key);
   try {
-    const r = await fetch("/history?row=" + encodeURIComponent(id) +
-                          (source === "modbus" ? "&source=modbus" : ""));
+    const suffix = source === "modbus" ? "&source=modbus"
+      : source === "env3" ? "&source=env3" : "";
+    const r = await fetch("/history?row=" + encodeURIComponent(id) + suffix);
     const j = await r.json();
     // t0 = the unix instant of sample 0, present only when the device's SNTP clock is synced. Null
     // means the scrub readout falls back to an AGE ("vor 6.3 h") — never a fabricated wall-clock
@@ -189,7 +198,11 @@ async function ensureHist(id, source = "x10a") {
 // Direct schematic measurements may have two independent rings. Fetch both together only for a
 // chart the user actually opened; derived figures continue to fetch their X10A inputs alone.
 async function ensureHistPair(id) {
-  await Promise.all([ensureHist(id), hasModbusHist(id) ? ensureHist(id, "modbus") : null]);
+  await Promise.all([
+    hasHist(id) ? ensureHist(id) : null,
+    hasModbusHist(id) ? ensureHist(id, "modbus") : null,
+    hasEnv3Hist(id) ? ensureHist(id, "env3") : null,
+  ]);
 }
 
 // A derived series: fetch every input (each through ensureHist above, so each is cached and
@@ -299,17 +312,19 @@ function histScale(pts, sampleCount) {
   };
 }
 
-// One timeline carrying one or two independent instruments. `b0` is the firmware's monotonic
+const ENV3_COMBINED_ID = "env3_combined";
+const ENV3_COMBINED_SERIES = Object.freeze([
+  { id: "env3_temperature", label: "env.temperature" },
+  { id: "env3_humidity", label: "env.humidity" },
+  { id: "env3_pressure", label: "env.pressure" },
+]);
+
+// One timeline carrying one or more independent instruments. `b0` is the firmware's monotonic
 // 5-minute bucket and therefore the authoritative alignment even before SNTP; wall time is the next
 // choice, and tail alignment is the backwards-compatible fallback for an older response. A missing
 // sample stays null in its own series — the other instrument may still draw at that instant.
-function historyView(id, source = "") {
-  const x10aName = id === "circulation_state" ? "MQTT" : "X10A";
-  const raw = [
-    { source: "x10a", name: x10aName, h: S.hist.get(id) },
-    { source: "modbus", name: "HomeHub · Modbus", h: S.hist.get(histCacheKey(id, "modbus")) },
-  ].filter((s) => (!source || s.source === source) &&
-    s.h && !s.h.err && Array.isArray(s.h.v) && s.h.v.length);
+function alignedHistoryView(id, raw) {
+  raw = raw.filter((s) => s.h && !s.h.err && Array.isArray(s.h.v) && s.h.v.length);
   if (!raw.length) return null;
 
   const dt = raw[0].h.dt || 300;
@@ -348,7 +363,8 @@ function historyView(id, source = "") {
     return { source: s.source, name: s.name, unit: s.h.unit || "", v,
              held: toRuns(heldFlags), raw: s.h };
   });
-  const primary = series.find((s) => s.source === "x10a") || series[0];
+  const primary = series.find((s) => s.source === "x10a") ||
+                  series.find((s) => s.source === "env3") || series[0];
   const wall = raw.find((s) => typeof s.h.t0 === "number");
   const t0 = mode === "time" ? start
            : mode === "bucket" && wall ? wall.h.t0 - (wall.h.b0 - start) * dt
@@ -365,6 +381,20 @@ function historyView(id, source = "") {
            b0: mode === "bucket" ? start : null,
            gen: series.map((s) => `${s.source}:${s.raw.gen || 0}`).join("/"),
            v: union, series };
+}
+
+function historyView(id, source = "") {
+  if (id === ENV3_COMBINED_ID) {
+    return alignedHistoryView(id, ENV3_COMBINED_SERIES.map((s) => ({
+      source: s.id, name: t(s.label), h: S.hist.get(histCacheKey(s.id, "env3")),
+    })));
+  }
+  const x10aName = id === "circulation_state" ? "MQTT" : "X10A";
+  return alignedHistoryView(id, [
+    { source: "x10a", name: x10aName, h: S.hist.get(id) },
+    { source: "modbus", name: "HomeHub · Modbus", h: S.hist.get(histCacheKey(id, "modbus")) },
+    { source: "env3", name: "ENV III", h: S.hist.get(histCacheKey(id, "env3")) },
+  ].filter((s) => !source || s.source === source));
 }
 
 // Categorical states need timelines, not numeric curves. Every valid state gets an explicit level,
@@ -602,16 +632,18 @@ function stateHistHtml(id, name, view, wrap, cfg) {
 // interpolating across them would draw a measurement that was never taken, which is exactly the
 // failure the blanked pills elsewhere in this UI exist to prevent.
 function histHtml(id, unit, name, source = "") {
-  const offeredX = source !== "modbus" && hasHist(id);
-  const offeredM = source !== "x10a" && hasModbusHist(id);
-  if (!offeredX && !offeredM) return "";
+  const offeredX = (!source || source === "x10a") && hasHist(id);
+  const offeredM = (!source || source === "modbus") && hasModbusHist(id);
+  const offeredE = (!source || source === "env3") && hasEnv3Hist(id);
+  if (!offeredX && !offeredM && !offeredE) return "";
   const hx = offeredX ? S.hist.get(id) : null;
   const hm = offeredM ? S.hist.get(histCacheKey(id, "modbus")) : null;
+  const he = offeredE ? S.hist.get(histCacheKey(id, "env3")) : null;
   const wrap = (body, cls) => `<div class="vhist${cls ? " " + cls : ""}">${body}</div>`;
   const view = historyView(id, source);
-  if (!view && ((offeredX && !hx) || (offeredM && !hm)))
+  if (!view && ((offeredX && !hx) || (offeredM && !hm) || (offeredE && !he)))
     return wrap(`<div class="vhist-note">${esc(t("hist.loading"))}</div>`, "vhist-flat");
-  if (!view && [hx, hm].filter(Boolean).every((h) => h.err))
+  if (!view && [hx, hm, he].filter(Boolean).every((h) => h.err))
     return wrap(`<div class="vhist-note">${esc(t("hist.err"))}</div>`, "vhist-flat");
   if (!view) {
     const D = DERIVED[id];
@@ -669,7 +701,7 @@ function histHtml(id, unit, name, source = "") {
       if (pts[i] == null) {
         // The compact axis summary remains about X10A: held-over is an X10A fact. Modbus dropouts
         // are visible as breaks in its petrol line without borrowing X10A's reason vocabulary.
-        if (s.source === "x10a") {
+        if (s.source === "x10a" || s.source === "env3") {
           if (histHeld(s, i)) { held++; prevGap = false; }
           else { if (!prevGap) gaps++; prevGap = true; }
         }
@@ -748,6 +780,108 @@ function histHtml(id, unit, name, source = "") {
   );
 }
 
+function env3SeriesClass(source) {
+  return source === "env3_temperature" ? "env-temperature"
+       : source === "env3_humidity" ? "env-humidity" : "env-pressure";
+}
+
+// ENV III has three different units, so putting the raw values on one Y axis would flatten
+// temperature and humidity underneath pressure. One full-width chart therefore gives every line
+// its own honest local range while sharing the exact same time raster. The legend explicitly says
+// so, and the cursor always reports the three raw measurements together at the selected instant.
+function env3HistHtml() {
+  const offered = ENV3_COMBINED_SERIES.filter((s) => hasEnv3Hist(s.id));
+  if (!offered.length) return "";
+  const cached = offered.map((s) => S.hist.get(histCacheKey(s.id, "env3")));
+  const wrap = (body, cls = "") => `<div class="vhist vhist-env3${cls ? " " + cls : ""}">${body}</div>`;
+  const view = historyView(ENV3_COMBINED_ID);
+  if (!view && cached.some((h) => !h))
+    return wrap(`<div class="vhist-note">${esc(t("hist.loading"))}</div>`, "vhist-flat");
+  if (!view && cached.filter(Boolean).every((h) => h.err))
+    return wrap(`<div class="vhist-note">${esc(t("hist.err"))}</div>`, "vhist-flat");
+  if (!view) return wrap(`<div class="vhist-note">${esc(t("hist.none"))}</div>`, "vhist-flat");
+
+  const plotted = view.series.filter((s) => s.v.some((v) => v != null));
+  if (!plotted.length)
+    return wrap(`<div class="vhist-note">${esc(t("hist.none"))}</div>`, "vhist-flat");
+
+  const n = view.v.length;
+  const spanH = Math.max(1, Math.round((n * view.dt) / 3600));
+  const full = n * view.dt >= 23.5 * 3600;
+  let curves = "", dots = "", nowDots = "";
+  for (const s of plotted) {
+    const pts = s.v.map((v) => v == null ? null : v / 10);
+    const { X, Y } = histScale(pts, n);
+    const cls = env3SeriesClass(s.source);
+    let run = [];
+    const flush = () => {
+      if (!run.length) return;
+      if (run.length === 1) {
+        dots += `<circle class="vhist-pt ${cls}" cx="${X(run[0]).toFixed(1)}" ` +
+          `cy="${Y(pts[run[0]]).toFixed(1)}" r="1.8"/>`;
+      } else {
+        const d = run.map((i, k) => `${k ? "L" : "M"}${X(i).toFixed(1)} ${Y(pts[i]).toFixed(1)}`).join("");
+        curves += `<path class="vhist-line ${cls}" d="${d}" vector-effect="non-scaling-stroke"/>`;
+      }
+      run = [];
+    };
+    for (let i = 0; i < n; i++) {
+      if (pts[i] == null) flush(); else run.push(i);
+    }
+    flush();
+    const last = s.v[n - 1];
+    if (last != null) {
+      nowDots += `<span class="vhist-now ${cls}" ` +
+        `style="top:${((Y(last / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
+    }
+  }
+
+  let gaps = 0, inGap = false;
+  for (const v of view.v) {
+    if (v == null) { if (!inGap) gaps++; inGap = true; } else inGap = false;
+  }
+  const legend = `<div class="vhist-legend">${plotted.map((s) =>
+    `<span class="vhist-source ${env3SeriesClass(s.source)}"><i></i>${esc(s.name)}` +
+      `${s.unit ? ` <small>${esc(s.unit)}</small>` : ""}</span>`).join("")}</div>`;
+
+  const pi = histPinIndex(ENV3_COMBINED_ID, view);
+  let pinTip = "", pinCross = "", pinMarks = "";
+  if (pi >= 0) {
+    const pxNumber = scrubFrac(pi, n) * 100;
+    const px = pxNumber.toFixed(3);
+    const edge = pxNumber < 24 ? " tip-start" : pxNumber > 76 ? " tip-end" : "";
+    pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
+    pinMarks = plotted.map((s) => {
+      if (s.v[pi] == null) return "";
+      const { Y } = histScale(s.v.map((v) => v == null ? null : v / 10), n);
+      return `<span class="vhist-mark vhist-pinned ${env3SeriesClass(s.source)}" ` +
+        `style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
+    }).join("");
+    pinTip = `<div class="vhist-tip vhist-pinned mono num${edge}" style="left:${px}%">` +
+      `${esc(scrubText(view, pi))}</div>`;
+  }
+
+  return wrap(
+    `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
+      `<span class="vhist-range">${esc(t("env.history_scales"))}</span></div>` + legend +
+    `<div class="vhist-graph${pi >= 0 ? " has-pin" : ""}">` +
+      `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +
+      `<div class="vhist-plot" data-hist="${ENV3_COMBINED_ID}" data-n="${n}" tabindex="0" role="img" ` +
+        `aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", t("env.history_title"),
+          pi >= 0 ? scrubText(view, pi) : ""))}">` +
+        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">` +
+          `${curves}${dots}</svg>${nowDots}${pinCross}${pinMarks}` +
+        `<span class="vhist-cross vhist-live" hidden></span>` +
+        plotted.map((s) => `<span class="vhist-mark vhist-live ${env3SeriesClass(s.source)}" ` +
+          `data-source="${s.source}" hidden></span>`).join("") +
+      `</div>` +
+    `</div>` +
+    `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
+      (gaps ? `<span class="vhist-gap">${esc(t("hist.gaps", gaps))}</span>` : "") +
+      `<span>${esc(t("hist.now"))}</span></div>`
+  );
+}
+
 // ── Scrubbing a trend (hover with a mouse, drag with a finger — one code path) ─────────────────
 // Pointer Events rather than mouse+touch pairs: one set of handlers covers mouse, touch and pen,
 // and pointer capture keeps a drag tracking after it leaves the plot. The plot is `touch-action:
@@ -800,6 +934,14 @@ function histPinToggle(id, i, source = "") {
 // (history carries t0, the unix instant of sample 0), else its age. A gap says so rather than
 // showing the neighbouring reading, which would attribute a measurement to a minute that has none.
 function scrubText(h, i) {
+  const pointWhen = () => {
+    if (h.t0 != null) {
+      return new Date((h.t0 + i * h.dt) * 1000)
+        .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
+    }
+    const ageH = ((h.v.length - 1 - i) * h.dt) / 3600;
+    return ageH < 0.05 ? t("hist.now") : t("hist.rel", ageH.toFixed(1));
+  };
   const valueText = (s) => {
     const v = s.v[i];
     const cfg = STATE_HIST[h.id];
@@ -819,6 +961,17 @@ function scrubText(h, i) {
     return v != null ? (v / 10).toFixed(1) + (s.unit ? " " + s.unit : "")
          : histHeld(s, i) ? t("hist.held") : t("hist.nm");
   };
+  if (h.id === ENV3_COMBINED_ID) {
+    const locale = LANG === "de" ? "de-DE" : "en-US";
+    const rows = h.series.map((s) => {
+      const v = s.v[i];
+      const shown = v == null ? t("hist.nm")
+        : (v / 10).toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) +
+          (s.unit ? " " + s.unit : "");
+      return `${s.name}  ${shown}`;
+    });
+    return [pointWhen(), ...rows].join("\n");
+  }
   const cfg = STATE_HIST[h.id];
   if (cfg) {
     // BOOST, BSH and BUH keep the popup deliberately terse: the complete phase interval followed
@@ -871,15 +1024,7 @@ function scrubText(h, i) {
   const val = h.series && (h.series.length > 1 || h.series[0].source === "modbus")
     ? h.series.map(sourceText).join(h.id === "outdoor_air" ? "\n" : " · ")
     : valueText(h.series ? h.series[0] : h);
-  let when;
-  if (h.t0 != null) {
-    when = new Date((h.t0 + i * h.dt) * 1000)
-      .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
-  } else {
-    const ageH = ((h.v.length - 1 - i) * h.dt) / 3600;
-    when = ageH < 0.05 ? t("hist.now") : t("hist.rel", ageH.toFixed(1));
-  }
-  return when + " · " + val;
+  return pointWhen() + " · " + val;
 }
 
 // Paint the crosshair for sample `i`. Pure DOM writes on the existing nodes — no innerHTML, so a
@@ -903,12 +1048,15 @@ function scrubMove(plot, i) {
   cross.style.left = x.toFixed(1) + "px";
   // One marker per instrument. Both share the crosshair and scale; a gap hides only that source's
   // marker, never the other one.
+  const separateScales = h.id === ENV3_COMBINED_ID;
   const allPts = h.series.flatMap((s) => s.v.map((z) => z == null ? null : z / 10));
-  const { Y } = histScale(allPts, n);
+  const sharedY = separateScales ? null : histScale(allPts, n).Y;
   for (const mark of marks) {
     const s = h.series.find((q) => q.source === mark.dataset.source);
     const v = s ? s.v[i] : null;
     if (v == null) { mark.hidden = true; continue; }
+    const Y = separateScales
+      ? histScale(s.v.map((z) => z == null ? null : z / 10), n).Y : sharedY;
     mark.hidden = false;
     mark.style.left = x.toFixed(1) + "px";
     mark.style.top = ((Y(v / 10) / HIST_H) * 100).toFixed(2) + "%";
@@ -1291,14 +1439,16 @@ function toggleDesc(btn) {
   if (!item) return;
   const key = btn.dataset.desc || "";
   const trend = btn.dataset.trend || "";
+  const trends = (btn.dataset.trends || "").split(",").filter(Boolean);
+  if (trend) trends.unshift(trend);
   const open = !item.classList.contains("open");
   item.classList.toggle("open", open);
   btn.setAttribute("aria-expanded", open ? "true" : "false");
   if (open) S.descOpen.add(key);
-  else { S.descOpen.delete(key); if (trend) S.histPin.delete(trend); }
+  else { S.descOpen.delete(key); for (const id of trends) S.histPin.delete(id); }
   // Fetch the trend only once the panel is actually opened — a device that buffers eleven series
   // would otherwise answer a request per row on every page load, for panels nobody looked at.
-  if (open && trend) ensureHistPair(trend);
+  if (open) for (const id of trends) ensureHistPair(id);
 }
 
 // Heat-pump value groups (grouped by domain, §6) as card markup. Hidden entirely while the

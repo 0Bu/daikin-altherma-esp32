@@ -2,6 +2,7 @@
 
 #include "config.hpp"
 #include "diag_log.hpp"
+#include "history.hpp"
 #include "logic/env3.hpp"
 
 #include "driver/i2c_master.h"
@@ -36,6 +37,7 @@ void publish_error(const char* error) {
     g_runtime.status.error = error;
     ++g_runtime.status.errors;
     portEXIT_CRITICAL(&g_mux);
+    history_record_env3(false, 0.0f, 0.0f, 0.0f);
 }
 
 void publish_sample(float temperature_c, float humidity_pct, float pressure_hpa) {
@@ -49,6 +51,7 @@ void publish_sample(float temperature_c, float humidity_pct, float pressure_hpa)
     ++g_runtime.status.samples;
     g_runtime.sample_us = esp_timer_get_time();
     portEXIT_CRITICAL(&g_mux);
+    history_record_env3(true, temperature_c, humidity_pct, pressure_hpa);
 }
 
 esp_err_t write_reg(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t value) {
@@ -60,19 +63,57 @@ esp_err_t read_reg(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t* data, size
     return i2c_master_transmit_receive(dev, &reg, 1, data, size, I2C_TIMEOUT_MS);
 }
 
+bool write_reg_verified(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t value) {
+    // QMP6988 configuration writes can ACK while the preceding internal operation is still being
+    // committed. M5's reference driver leaves 20 ms after every individual setting. Verify the
+    // stored byte as well, retrying twice instead of accepting an ACK for an ignored write.
+    esp_err_t last_write = ESP_FAIL;
+    esp_err_t last_read = ESP_FAIL;
+    uint8_t stored = 0xff;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        last_write = write_reg(dev, reg, value);
+        if (last_write == ESP_OK) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+            last_read = read_reg(dev, reg, &stored, 1);
+            if (last_read == ESP_OK && stored == value) return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    diag_printf("env3: qmp6988 config rejected reg=%02x wanted=%02x stored=%02x write=%s read=%s\n",
+                reg, value, stored, esp_err_to_name(last_write), esp_err_to_name(last_read));
+    return false;
+}
+
 struct SensorBus {
     i2c_master_bus_handle_t bus = nullptr;
     i2c_master_dev_handle_t sht = nullptr;
     i2c_master_dev_handle_t qmp = nullptr;
     Env3QmpCalibration calibration;
+    uint8_t calibration_raw[25] = {};
+    uint8_t implausible_logs = 0;
     bool initialized = false;
 };
+
+void hex_bytes(const uint8_t* bytes, size_t size, char* out, size_t capacity) {
+    static constexpr char HEX[] = "0123456789abcdef";
+    if (capacity < size * 2 + 1) {
+        if (capacity) out[0] = '\0';
+        return;
+    }
+    for (size_t i = 0; i < size; ++i) {
+        out[i * 2] = HEX[bytes[i] >> 4];
+        out[i * 2 + 1] = HEX[bytes[i] & 0x0f];
+    }
+    out[size * 2] = '\0';
+}
 
 bool add_device(i2c_master_bus_handle_t bus, uint8_t address, i2c_master_dev_handle_t& out) {
     i2c_device_config_t cfg = {};
     cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
     cfg.device_address = address;
-    cfg.scl_speed_hz = 400000;
+    // The ENV III's short transactions do not benefit meaningfully from Fast Mode. Standard Mode
+    // gives Grove/side-header wiring and the module's level circuitry much more signal margin.
+    cfg.scl_speed_hz = 100000;
     return i2c_master_bus_add_device(bus, &cfg, &out) == ESP_OK;
 }
 
@@ -115,17 +156,22 @@ bool initialize(SensorBus& sensor, int sda, int scl) {
 
     uint8_t chip_id = 0;
     if (read_reg(sensor.qmp, 0xd1, &chip_id, 1) != ESP_OK || chip_id != 0x5c) return false;
-    if (write_reg(sensor.qmp, 0xe0, 0xe6) != ESP_OK) return false;
+    // Do not soft-reset on every recovery attempt. A partially started but reachable sensor can be
+    // restored through the verified control writes below; repeatedly resetting it before those
+    // writes can keep a slow/stuck part from ever leaving reset. Power-on reset still establishes
+    // the documented defaults after a real power cycle.
     vTaskDelay(pdMS_TO_TICKS(20));
-    if (write_reg(sensor.qmp, 0xe0, 0x00) != ESP_OK) return false;
-    vTaskDelay(pdMS_TO_TICKS(20));
-    uint8_t calibration[25] = {};
-    if (read_reg(sensor.qmp, 0xa0, calibration, sizeof(calibration)) != ESP_OK) return false;
-    sensor.calibration = env3_qmp_calibration(calibration);
-    // M5's reference setup: IIR coefficient 4, pressure 8x, temperature 1x, normal mode.
-    if (write_reg(sensor.qmp, 0xf1, 0x02) != ESP_OK ||
-        write_reg(sensor.qmp, 0xf4, 0x33) != ESP_OK) return false;
-    vTaskDelay(pdMS_TO_TICKS(20));
+    if (read_reg(sensor.qmp, 0xa0, sensor.calibration_raw,
+                 sizeof(sensor.calibration_raw)) != ESP_OK) return false;
+    sensor.calibration = env3_qmp_calibration(sensor.calibration_raw);
+    // Match M5's reference sequence exactly: enter normal mode first, then set filter, pressure
+    // oversampling and temperature oversampling as separate, settled writes. A back-to-back F1/F4
+    // pair was ACKed by the real ENV III while F4 remained 0x00, leaving the ADC asleep forever.
+    if (!write_reg_verified(sensor.qmp, 0xf4, 0x03) ||  // normal; P/T initially skipped
+        !write_reg_verified(sensor.qmp, 0xf1, 0x02) ||  // IIR coefficient 4
+        !write_reg_verified(sensor.qmp, 0xf4, 0x13) ||  // pressure 8x
+        !write_reg_verified(sensor.qmp, 0xf4, 0x33))    // temperature 1x
+        return false;
     sensor.initialized = true;
     return true;
 }
@@ -150,7 +196,35 @@ bool read_sample(SensorBus& sensor, float& temperature_c, float& humidity_pct,
     }
     float qmp_temperature = 0.0f;
     env3_decode_qmp6988(sensor.calibration, qmp_raw, qmp_temperature, pressure_hpa);
-    if (!env3_sample_plausible(temperature_c, humidity_pct, pressure_hpa)) {
+    const char* implausibility = env3_sample_implausibility(
+        temperature_c, humidity_pct, pressure_hpa);
+    if (implausibility) {
+        // A small, boot-bounded capture makes a real sensor's compensation failure reproducible
+        // without turning a persistent fault into /diag + Syslog spam. These are sensor bytes only:
+        // no configuration, network address or credential is included.
+        if (sensor.implausible_logs < 3) {
+            uint8_t qmp_status = 0xff;
+            uint8_t qmp_control = 0xff;
+            const esp_err_t status_read = read_reg(sensor.qmp, 0xf3, &qmp_status, 1);
+            const esp_err_t control_read = read_reg(sensor.qmp, 0xf4, &qmp_control, 1);
+            char sht_hex[sizeof(sht_raw) * 2 + 1];
+            char qmp_hex[sizeof(qmp_raw) * 2 + 1];
+            hex_bytes(sht_raw, sizeof(sht_raw), sht_hex, sizeof(sht_hex));
+            hex_bytes(qmp_raw, sizeof(qmp_raw), qmp_hex, sizeof(qmp_hex));
+            diag_printf("env3: implausible=%s sht=%s t=%.3fC h=%.3f%% qmp=%s qt=%.3fC p=%.3fhPa stat=%02x/%s ctrl=%02x/%s\n",
+                        implausibility, sht_hex, static_cast<double>(temperature_c),
+                        static_cast<double>(humidity_pct), qmp_hex,
+                        static_cast<double>(qmp_temperature), static_cast<double>(pressure_hpa),
+                        qmp_status, esp_err_to_name(status_read), qmp_control,
+                        esp_err_to_name(control_read));
+            if (sensor.implausible_logs == 0) {
+                char calibration_hex[sizeof(sensor.calibration_raw) * 2 + 1];
+                hex_bytes(sensor.calibration_raw, sizeof(sensor.calibration_raw),
+                          calibration_hex, sizeof(calibration_hex));
+                diag_printf("env3: qmp6988 calibration=%s\n", calibration_hex);
+            }
+            ++sensor.implausible_logs;
+        }
         error = "implausible_sample"; return false;
     }
     return true;
@@ -169,7 +243,11 @@ void task(void*) {
                 publish_sample(temperature, humidity, pressure);
             } else {
                 publish_error(error);
-                sensor.initialized = false;
+                // A compensated value can be invalid while the bus and both devices remain fully
+                // reachable. Keep normal mode running so a not-yet-ready first QMP conversion gets
+                // another observation instead of being trapped in a reset-before-first-sample loop.
+                // Transaction/CRC failures still force the previous reinitialization path.
+                if (std::strcmp(error, "implausible_sample") != 0) sensor.initialized = false;
             }
         }
         vTaskDelay(pdMS_TO_TICKS(POLL_MS));

@@ -121,7 +121,10 @@ and its meaning may appear; unavailable and unknown values have explicit, non-in
 pins the first-boot case where the build defaults equal the Seeed XIAO values but the board selector
 must still open on **Custom**, then verifies that an explicitly chosen AtomS3 Lite remains selected
 when LED/reset are disabled. It also covers the integrated ENV III section: hidden and disabled for
-Custom/Seeed, visible for M5Stack, with safe distinct SDA/SCL defaults and explicit disable payload.
+Custom/Seeed, visible for M5Stack, with safe distinct SDA/SCL defaults, the board-physical AtomS3
+Lite I2C set (explicitly excluding GPIO39 and unexposed chip pads), automatic proof of the selected or
+reversed order before persistence, an explicit disable payload, and three live/history charts in the
+expanded Hardware infobox.
 
 `node test/test_ui_checkup.mjs` executes the production plant-diagnostics card renderer without a
 browser. It pins status-only collapsed rows, values and assessments in the row explainers, the

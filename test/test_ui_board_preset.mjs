@@ -45,6 +45,9 @@ const presets = [
     led_inverted: false,
     btn_gpio: 41,
     btn_active_low: true,
+    // Server-side filtering has already removed live X10A GPIO1/2. GPIO39 is intentionally absent:
+    // the firmware must not offer an ENV III combination that fails on the physical board.
+    i2c_pins: [5, 6, 7, 8, 38],
   },
   {
     id: "seeed_xiao_esp32s3",
@@ -152,6 +155,12 @@ assert.equal(elements.envSda.value, "5");
 assert.equal(elements.envScl.value, "6");
 assert.doesNotMatch(elements.envSda.innerHTML, /value="[12]"/);
 assert.doesNotMatch(elements.envScl.innerHTML, /value="[12]"/);
+assert.doesNotMatch(elements.envSda.innerHTML, /value="39">GPIO 39<\/option>/,
+  "AtomS3 Lite GPIO39 must not be selectable as ENV III SDA");
+assert.doesNotMatch(elements.envScl.innerHTML, /value="39">GPIO 39<\/option>/,
+  "AtomS3 Lite GPIO39 must not be selectable as ENV III SCL");
+assert.doesNotMatch(elements.envSda.innerHTML, /value="(?:9|10|33|34|36|37|47|48)"/,
+  "chip-safe pads absent from the AtomS3 Lite headers must not be listed");
 assert.equal(elements.envSensor.value, "", "an unconfigured sensor is represented by the select, not a checkbox");
 assert.equal(elements.bdEnvSection.hidden, false);
 assert.equal(elements.envPinFields.hidden, true);
@@ -169,7 +178,8 @@ assert.equal(JSON.stringify(sandbox.__env3FormPayload()), '{"enabled":true,"sda"
 
 // If Grove is free, the same stored defaults intentionally resolve to the official AtomS3 Lite
 // ENV III mapping directly in the GPIO selectors.
-context.S.status.env3.pins_avail = [1, 2, 5, 6, 7];
+presets[0].i2c_pins = [1, 2, 5, 6, 7, 8, 38];
+context.S.status.env3.pins_avail = [1, 2, 5, 6, 7]; // legacy fallback must not override preset metadata
 context.S.status.env3.enabled = true;
 sandbox.__fillEnv3();
 assert.equal(elements.envSda.value, "2");

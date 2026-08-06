@@ -60,6 +60,11 @@ const DEMO = (() => {
     ["valve_dhw", "3-way valve"],
     ["smart_grid_mode", "Smart Grid operation mode"],
   ].map(([id, label]) => ({ id, label }));
+  const env3HistRows = [
+    ["env3_temperature", "ENV III temperature"],
+    ["env3_humidity", "ENV III humidity"],
+    ["env3_pressure", "ENV III air pressure"],
+  ].map(([id, label]) => ({ id, label }));
   const histBase = {
     leaving_water: [381, 383, 384, 386, 385, 387, 388, 386, 384, 382, 381, 380],
     leaving_water_post_buh: [382, 384, 385, 387, 386, 388, 389, 387, 385, 383, 382, 381],
@@ -84,18 +89,25 @@ const DEMO = (() => {
     smart_grid_mode: [0, 0, 10, 10, 20, 20, 30, 30, null, 0, 20, 20],
     circulation_state: [0, 0, 10, 10, 10, 0, 0, 10, 10, 0, 0, 0],
   };
+  const env3HistBase = {
+    env3_temperature: [198, 199, 201, 202, 204, 205, 204, 203, 202, 202, 203, 203],
+    env3_humidity:    [490, 486, 480, 474, 468, 463, 459, 456, 452, 450, 452, 455],
+    env3_pressure:    [10072, 10073, 10075, 10077, 10078, 10080,
+                       10082, 10084, 10086, 10087, 10088, 10088],
+  };
   const hist = (id, source) => {
-    const x = histBase[id];
+    const x = source === "env3" ? env3HistBase[id] : histBase[id];
     if (!x) return null;
     // Keep both instruments recognisably close but not identical. Modbus continues through the
     // deliberate X10A outdoor-air gap, which makes the dual-source contract visible in an inspector.
     const state = id === "smart_grid_mode" || id === "bsh_state" || id === "defrost_state" ||
       id === "quiet_state" || id === "valve_dhw" || id === "valve_heat" ||
       id === "water_flow_switch" || id === "circulation_state" || id.startsWith("buh_step");
-    const v = state ? x : source === "modbus"
+    const v = state || source === "env3" ? x : source === "modbus"
       ? x.map((n, i) => n == null ? 53 + i : n + (i % 3 === 0 ? 1 : 0))
       : x;
-    const unit = state ? "" : id === "flow" ? "l/min" : "°C";
+    const unit = state ? "" : id === "flow" ? "l/min"
+      : id === "env3_humidity" ? "%" : id === "env3_pressure" ? "hPa" : "°C";
     return { id, source: id === "circulation_state" ? "mqtt" : source,
              label: id, dt: 300, unit, t0: 1768720920, b0: 5895736,
              v, held: source === "x10a" && id === "outdoor_air" ? [[3, 2]] : [] };
@@ -285,7 +297,7 @@ const DEMO = (() => {
     sys: { free_heap: 118432, min_free_heap: 96120, max_alloc: 61440,
            reset_reason: "power_on", safe_mode: false },
     last_crash: null,
-    history: { dt: 300, rows: histRows, modbus_rows: mbHistRows },
+    history: { dt: 300, rows: histRows, modbus_rows: mbHistRows, env3_rows: env3HistRows },
     detect: { proto: "S", valid: true, capacity_kw: 6.0, capacity_kw_iu: 8.0, ou_eeprom: "1A2B3C",
               candidates: ["altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw"],
               families: ["Altherma 3 R"], ambiguous: false,
@@ -330,7 +342,9 @@ try {
     });
     if (u.startsWith("/history")) {
       const p = new URL(u, location.origin).searchParams;
-      const h = DEMO.history(p.get("row"), p.get("source") === "modbus" ? "modbus" : "x10a");
+      const source = p.get("source");
+      const h = DEMO.history(p.get("row"), source === "modbus" ? "modbus"
+        : source === "env3" ? "env3" : "x10a");
       return h ? json(h) : { ok: false, status: 404, json: async () => ({}), text: async () => "" };
     }
     if (u.startsWith("/diag")) return { ok: true, status: 200, text: async () => "[uptime 48213] demo", json: async () => ({}) };
