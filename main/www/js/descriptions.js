@@ -417,9 +417,9 @@ const DESCRIPTIONS = [
     de: { what: "Die ON/OFF-Rückmeldung des HomeHub für den elektrischen Tauchheizer im Warmwasserspeicher (Eingangsregister 32). Sie meldet den Einsatz, nicht die Leistung. Eingangsregister 51 ist die gemessene elektrische Gesamtaufnahme der Wärmepumpenanlage und darf nicht als eigene Heizstableistung bezeichnet werden.",
           normal: "OFF, solange der Speicherheizstab nicht aktiv ist; ON bedeutet, dass die Regelung den laufenden Heizstab meldet." } },
   { re: /^bsh$/i,
-    what: "The electric immersion heater in the domestic-hot-water tank. It can heat the tank without the compressor or water circulation pump running. X10A reports BSH only as ON/OFF; HomeHub input register 32 provides the same run state. Neither source carries dedicated heater power, and HomeHub input 51 is whole-system electrical input only.",
+    what: "The electric immersion heater in the domestic-hot-water tank. It can heat the tank without the compressor or water circulation pump running. X10A reports BSH as an ON/OFF state; it does not provide dedicated heater power.",
     normal: "OFF while the tank heater is not requested. Depending on the configuration it can be ON for powerful DHW, scheduled assistance, disinfection or emergency operation.",
-    de: { what: "Der elektrische Tauchheizer im Warmwasserspeicher. Er kann den Speicher erwärmen, ohne dass Verdichter oder Wasserpumpe laufen. X10A meldet BSH nur als ON/OFF; HomeHub-Eingangsregister 32 liefert denselben Laufzustand. Keine der Quellen enthält eine eigene Heizstableistung, und HomeHub-Eingang 51 ist nur die elektrische Gesamtaufnahme.",
+    de: { what: "Der elektrische Tauchheizer im Warmwasserspeicher. Er kann den Speicher erwärmen, ohne dass Verdichter oder Wasserpumpe laufen. X10A meldet BSH als ON/OFF-Zustand; eine eigene Heizstableistung liefert X10A nicht.",
           normal: "OFF, solange der Speicherheizer nicht angefordert ist. Je nach Konfiguration kann er für Warmwasser-Hochleistungsbetrieb, geplante Unterstützung, Desinfektion oder Notbetrieb ON sein." } },
   { re: /thermal protector/i,
     what: "The thermal cut-out that protects an electric heater from overheating.",
@@ -654,9 +654,9 @@ const mbForInspect = (key) => {
   // needs to prove that an external energy manager's request reached the HomeHub.
   if (key === "sgrequest") return mbRow(MB_OFF_SMART_GRID);
   if (!mbLive()) return null;
-  // These exact state pairs are not numeric pills in MB_PAIRS. Their inspectors still need the
-  // matching HomeHub row as a named source, including while X10A is live as the second opinion.
-  if (key === "bsh") return mbByConcept("bsh_state");
+  // Quiet is not a numeric pill in MB_PAIRS. Its inspector still needs the matching HomeHub row as
+  // a named source, including while X10A is live as the second opinion. The BSH inspector is
+  // intentionally X10A-only and therefore has no equivalent exception here.
   if (key === "quiet") return mbByConcept("quiet_state");
   const p = MB_PAIRS.find((q) => q.insp === key);
   // Normally only a silent X10A link makes the gateway lead. `mbFields` is the per-reading exception:
