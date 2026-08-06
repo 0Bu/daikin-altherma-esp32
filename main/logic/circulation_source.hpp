@@ -61,40 +61,63 @@ inline CirculationPowerState circulation_power_class(double power_w, uint16_t on
     return CirculationPowerState::Unknown;           // hysteresis band: keep the last proof
 }
 
-// A threshold crossing is accepted only after a later sample confirms that the same class persisted
-// for `confirm_s`.  Merely waiting after one retained message is not enough evidence.  Values in the
-// hysteresis band cancel a pending transition but preserve an already confirmed state.
+// A threshold crossing is accepted only after later samples confirm it for `confirm_s`. The Wilo
+// witness is a pulsed load in practice: while its controller is active, apower rises above the ON
+// threshold for roughly five seconds and returns to zero between pulses. Treat repeated ON evidence
+// with no gap longer than `confirm_s` as one activity train, while OFF still needs `confirm_s` of
+// uninterrupted OFF evidence. A lone spike therefore cannot switch the state, but a real pulse train
+// can. Values in the hysteresis band interrupt OFF confirmation and preserve an already confirmed
+// state; merely waiting after one retained message is never evidence.
 struct CirculationPowerTracker {
     CirculationPowerState confirmed = CirculationPowerState::Unknown;
-    CirculationPowerState candidate = CirculationPowerState::Unknown;
-    uint64_t candidate_since_ms = 0;
+    uint64_t on_since_ms = 0, last_on_ms = 0, off_since_ms = 0, last_observed_ms = 0;
+    bool has_on_evidence = false, has_off_evidence = false, has_observation = false;
 
-    void reset() { confirmed = candidate = CirculationPowerState::Unknown; candidate_since_ms = 0; }
+    void reset() {
+        confirmed = CirculationPowerState::Unknown;
+        on_since_ms = last_on_ms = off_since_ms = last_observed_ms = 0;
+        has_on_evidence = has_off_evidence = has_observation = false;
+    }
 
     void observe(double power_w, uint64_t received_ms, uint16_t on_tenths_w,
                  uint16_t off_tenths_w, uint16_t confirm_s) {
+        if (has_observation && received_ms < last_observed_ms) reset();
+        has_observation = true;
+        last_observed_ms = received_ms;
+
         const CirculationPowerState sample =
             circulation_power_class(power_w, on_tenths_w, off_tenths_w);
+        const uint64_t confirm_ms = static_cast<uint64_t>(confirm_s) * 1000;
         if (sample == CirculationPowerState::Unknown) {
-            candidate = CirculationPowerState::Unknown;
-            candidate_since_ms = 0;
+            // A hysteresis-band value proves neither OFF nor a new ON pulse. It must break the
+            // continuous OFF clock, but the last decisive ON sample still anchors pulse activity.
+            has_off_evidence = false;
+            off_since_ms = 0;
             return;
         }
-        if (sample == confirmed) {
-            candidate = CirculationPowerState::Unknown;
-            candidate_since_ms = 0;
+
+        if (sample == CirculationPowerState::On) {
+            has_off_evidence = false;
+            off_since_ms = 0;
+            if (!has_on_evidence || received_ms - last_on_ms > confirm_ms)
+                on_since_ms = received_ms;
+            has_on_evidence = true;
+            last_on_ms = received_ms;
+            if (confirmed != CirculationPowerState::On &&
+                received_ms - on_since_ms >= confirm_ms)
+                confirmed = CirculationPowerState::On;
             return;
         }
-        if (sample != candidate || received_ms < candidate_since_ms) {
-            candidate = sample;
-            candidate_since_ms = received_ms;
-            return;
+
+        if (!has_off_evidence) off_since_ms = received_ms;
+        has_off_evidence = true;
+        if (has_on_evidence && received_ms - last_on_ms >= confirm_ms) {
+            has_on_evidence = false;
+            on_since_ms = last_on_ms = 0;
         }
-        if (received_ms - candidate_since_ms >= static_cast<uint64_t>(confirm_s) * 1000) {
-            confirmed = sample;
-            candidate = CirculationPowerState::Unknown;
-            candidate_since_ms = 0;
-        }
+        if (confirmed != CirculationPowerState::Off &&
+            received_ms - off_since_ms >= confirm_ms)
+            confirmed = CirculationPowerState::Off;
     }
 };
 

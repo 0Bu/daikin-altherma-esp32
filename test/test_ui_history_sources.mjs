@@ -8,6 +8,7 @@ import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 const firmwareHistory = fs.readFileSync(new URL("../main/history.cpp", import.meta.url), "utf8");
+const mqtt = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "utf8");
 assert.match(style, /\.vhist-state-graph \.vhist-tip \{[^}]*z-index:\s*2[^}]*white-space:\s*pre;/,
   "state tooltips must paint over the timeline and honor only their deliberate vertical breaks");
 assert.ok(style.lastIndexOf(".vhist-state-on.mb { background: var(--src-mb); }") >
@@ -21,6 +22,12 @@ assert.match(firmwareHistory,
   "HomeHub rings must use the same boot-aligned raster when enabled later");
 assert.match(firmwareHistory, /void history_record\([^)]*\) \{\s*if \(!s_mtx\) return;\s*if \(!v\) n = 0;/m,
   "an empty X10A sweep must still advance board histories and the shared gap raster");
+assert.match(firmwareHistory,
+  /void history_record_circulation\(\)[\s\S]*advance_raster_locked\(now_us, bucket\);[\s\S]*fold_circulation_locked\(circulation\);/,
+  "the MQTT witness must own a lightweight recorder that advances the common raster without X10A");
+assert.match(mqtt,
+  /service_reference_frames\(ref_config\);[\s\S]{0,500}history_record_circulation\(\);[\s\S]{0,500}if \(gate\.publish_offline\)/,
+  "circulation history must tick on the subscriber path before every X10A publication gate");
 
 const S = {
   status: { history: {
@@ -37,6 +44,7 @@ const S = {
       { id: "buh_step2", label: "BUH Step2" },
       { id: "valve_dhw", label: "3way valve(On:DHW_Off:Space)" },
       { id: "smart_grid_mode", label: "Smart Grid operation mode" },
+      { id: "circulation_state", label: "DHW circulation pump" },
     ],
     modbus_rows: [
       { id: "dhw_tank", label: "Domestic Hot Water temperature" },
@@ -109,6 +117,13 @@ const context = {
     if (key === "hist.valve_dhw") return "Warmwasser";
     if (key === "hist.valve_space") return "Raumkreis";
     if (key === "hist.valve_aria") return `${arg} — 3-Wege-Ventil-Verlauf. ${arg2}`;
+    if (key === "hist.circ_total") return `Pumpe laufend erfasst · ${arg} Rasterzeit`;
+    if (key === "hist.circ_none") return "Kein Pumpenlauf erfasst.";
+    if (key === "hist.circ_on") return "Läuft";
+    if (key === "hist.circ_off") return "Steht";
+    if (key === "hist.circ_unavailable") return "Nicht verfügbar";
+    if (key === "hist.circ_gaps") return `${arg} Phase · nicht verfügbar`;
+    if (key === "hist.circ_aria") return `${arg} — Zirkulationsverlauf. ${arg2}`;
     if (key.startsWith("sg.mode")) return ["Freier Betrieb", "Zwangsabschaltung", "Empfehlung ein", "Erzwungen ein"][+key.at(-1)];
     return labels[key] || key;
   },
@@ -229,6 +244,26 @@ assert.match(boostModbusHtml, /data-source="modbus"/,
   "scrubbing and pinning must resolve the same Modbus-only view that the chart renders");
 assert.match(h.scrubText(boostModbusView, 2), /^\d{2}:\d{2}–\d{2}:\d{2} · Aktiv$/);
 assert.doesNotMatch(h.scrubText(boostModbusView, 2), /X10A|Modbus|Boost|Empfehlung|ca\.|min/);
+
+// The external circulation witness is a three-outcome history: confirmed running, confirmed
+// stopped, or unavailable evidence. The configured name lives in the Settings row; the chart lane
+// names its transport and must keep absent MQTT evidence visible instead of colouring it stopped.
+S.hist.set("circulation_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
+  held: [], v: [null, 0, 0, 10, 10, null] });
+const circulationView = h.historyView("circulation_state");
+const circulationHtml = h.histHtml("circulation_state", "", "Warmwasser-Zirkulationspumpe");
+assert.equal(circulationView.series[0].name, "MQTT");
+assert.match(circulationHtml, /vhist-state-lane-label">MQTT/);
+assert.match(circulationHtml, /vhist-state-on state-off/);
+assert.match(circulationHtml, /vhist-state-on circulation-on/);
+assert.match(circulationHtml, /vhist-state-gap/);
+for (const label of ["Läuft", "Steht", "Nicht verfügbar"])
+  assert.match(circulationHtml, new RegExp(`>${label}<`), `${label} must be an explicit timeline state`);
+assert.match(circulationHtml, /2 Phase · nicht verfügbar/);
+assert.match(h.scrubText(circulationView, 0), /MQTT\nNicht verfügbar/,
+  "an absent pump sample must read unavailable, never stopped");
+assert.match(h.scrubText(circulationView, 1), /MQTT\nSteht/);
+assert.match(h.scrubText(circulationView, 3), /MQTT\nLäuft/);
 
 // BSH is also categorical. Its active buckets render as intervals and the wording calls the sum
 // raster time rather than exact runtime; X10A is the preferred physical-state source.

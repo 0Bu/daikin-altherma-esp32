@@ -1889,6 +1889,10 @@ static void mqtt_task(void*) {
             service_circulation_subscription(ref_config);
             service_circulation_probe_subscription(ref_config);
             service_reference_frames(ref_config);
+            // The circulation witness is MQTT-owned and remains meaningful while X10A auto-detect
+            // is backing off on a silent bus. Record it on this task's independent one-second tick;
+            // tying it to hp_poll would leave /status.history.rows empty exactly in that case.
+            history_record_circulation();
             service_requested_topic_cleanup(ref_config);
             evaluate_heating_curve(ref_config, hp);
 

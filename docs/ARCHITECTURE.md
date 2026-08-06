@@ -576,7 +576,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
   report their maximum R5T drop; at least 0.8 K/h is an `Info` project heuristic, while `Ok` requires
   a complete 24-hour lifecycle and six clean hours. When configured, the board subscribes to the
   Shelly's exact MQTT status topic and uses mapped active power with hysteresis, freshness and
-  confirmation. A high window is labelled “with pump” only with at least five minutes of confirmed
+  pulse-train-aware confirmation. Repeated motor-power pulses with no gap longer than the configured
+  confirmation window are one activity train; OFF still needs an uninterrupted confirmation window.
+  A high window is labelled “with pump” only with at least five minutes of confirmed
   run time, and “pump off” only after at least two hours of confirmed off time plus 90% source
   coverage. R5T is a point sensor in a stratified tank: even high loss with the external pump off is
   not proof of a leaking diverter/check valve, a gravity loop, insulation loss or a draw.

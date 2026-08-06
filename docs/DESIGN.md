@@ -868,7 +868,8 @@ Body, ordered:
    charging, internal-pump/BSH operation, 45 minutes of settling and draw-like temperature steps are
    excluded. At least 0.8 K/h raises only `HINWEIS`; a green absence result needs a full 24-hour
    lifecycle plus six clean hours. Settings → **Anlagendiagnose** configures the exact Shelly MQTT
-   topic, `apower`/source-time JSON paths, maximum age, ON/OFF hysteresis and confirmation. The row
+   topic, `apower`/source-time JSON paths, maximum age, ON/OFF hysteresis and pulse-train-aware
+   confirmation. The row
    distinguishes high loss during confirmed pump operation from high loss persisting after two hours
    of confirmed pump-off evidence. It never turns either correlation into proof of a diverter/check-
    valve or insulation defect: R5T is one point in a stratified tank, and draws/gravity circulation

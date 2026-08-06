@@ -33,6 +33,12 @@ void history_start();
 // and only touches the ring when a bucket boundary is crossed (once per HISTORY_DT_S).
 void history_record(const CachedValue* v, size_t n);
 
+// Feed the external MQTT circulation witness from the MQTT task's own one-second cadence. This is
+// deliberately separate from history_record(): an installation whose X10A bus is silent remains in
+// auto-detection and therefore has no X10A poll cycle, but its configured MQTT witness is still a
+// valid independent source and must keep its timeline moving.
+void history_record_circulation();
+
 // Feed one HomeHub cycle. The eight paired measurements plus BSH, 3-way-valve, Quiet and Smart-Grid
 // states named in logic/homehub_map.hpp are buffered; other states, setpoints and Modbus-only values do not
 // acquire a chart. An empty cycle advances the source's time raster with gaps, so an outage does not

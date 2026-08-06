@@ -118,6 +118,52 @@ inline bool independent_trend(const logic::TrendDef& d) {
     return board_trend(d) || circulation_trend(d);
 }
 
+// Move the shared X10A/board/MQTT raster to `bucket`. Both the X10A poll task and the independent
+// MQTT witness call this under s_mtx; whichever arrives first closes the old bucket exactly once.
+// Committing every ring preserves a common boot-aligned axis and writes explicit gaps for sources
+// that did not answer during that bucket.
+inline void advance_raster_locked(int64_t now_us, uint32_t bucket) {
+    if (!s_have_bucket) {
+        const size_t completed = logic::history_completed_samples(bucket);
+        for (auto& tr : s_ring) tr.ring.reset_with_gaps(completed);
+        if (completed) {
+            s_last_commit_us = static_cast<int64_t>(bucket) * logic::HISTORY_DT_S * 1000000;
+            s_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
+        }
+    } else if (bucket != s_bucket) {
+        const uint32_t skipped = logic::history_skipped(s_bucket, bucket);
+        for (auto& tr : s_ring) tr.ring.commit(skipped);
+        s_last_commit_us = now_us;
+        s_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
+    }
+    s_bucket = bucket;
+    s_have_bucket = true;
+}
+
+inline void reset_circulation_locked(uint32_t bucket) {
+    if (!s_circulation_reset_requested.exchange(false)) return;
+    const size_t completed = logic::history_completed_samples(bucket);
+    for (size_t t = 0; t < TREND_COUNT; t++) {
+        if (!circulation_trend(logic::TRENDS[t])) continue;
+        s_ring[t].ring.reset_with_gaps(completed);
+        s_ring[t].label[0] = '\0';
+        s_ring[t].unit[0] = '\0';
+    }
+}
+
+inline void fold_circulation_locked(const CirculationPumpSample& circulation) {
+    for (size_t t = 0; t < TREND_COUNT; t++) {
+        const logic::TrendDef& d = logic::TRENDS[t];
+        if (!circulation_trend(d)) continue;
+        Trend& tr = s_ring[t];
+        copy_field(tr.label, sizeof(tr.label), d.label);
+        copy_field(tr.unit, sizeof(tr.unit), d.unit);
+        const HistorySample sample = circulation.configured && circulation.known
+            ? static_cast<HistorySample>(circulation.on ? 10 : 0) : HISTORY_NO_READING;
+        tr.ring.fold(sample);
+    }
+}
+
 } // namespace
 
 void history_start() {
@@ -141,6 +187,19 @@ void history_modbus_reset() {
 
 void history_circulation_reset() {
     s_circulation_reset_requested.store(true);
+}
+
+void history_record_circulation() {
+    if (!s_mtx) return;
+    const CirculationPumpSample circulation = circulation_pump_sample();
+    const int64_t now_us = esp_timer_get_time();
+    const uint32_t bucket = logic::history_bucket(now_us);
+
+    Lock lk(s_mtx);
+    if (!lk.held) return;
+    advance_raster_locked(now_us, bucket);
+    reset_circulation_locked(bucket);
+    fold_circulation_locked(circulation);
 }
 
 void history_record(const CachedValue* v, size_t n) {
@@ -241,23 +300,7 @@ void history_record(const CachedValue* v, size_t n) {
     // Every X10A and board ring shares the monotonic boot epoch. If polling starts late, seed the
     // already-completed part of the 24-hour window with explicit gaps instead of giving each source
     // a different apparent start time.
-    if (!s_have_bucket) {
-        const size_t completed = logic::history_completed_samples(bucket);
-        for (auto& tr : s_ring) tr.ring.reset_with_gaps(completed);
-        if (completed) {
-            s_last_commit_us = static_cast<int64_t>(bucket) * logic::HISTORY_DT_S * 1000000;
-            s_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
-        }
-    } else if (bucket != s_bucket) {
-        // Crossing into a new bucket closes every trend's open one (TrendRing::commit fills whatever
-        // was skipped, so the time axis stays linear — see logic/history.hpp).
-        const uint32_t skipped = logic::history_skipped(s_bucket, bucket);
-        for (auto& tr : s_ring) tr.ring.commit(skipped);
-        s_last_commit_us = now_us;
-        s_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
-    }
-    s_bucket = bucket;
-    s_have_bucket = true;
+    advance_raster_locked(now_us, bucket);
 
     bool identity_changed = false;
     for (size_t t = 0; t < TREND_COUNT; t++) {
@@ -276,15 +319,7 @@ void history_record(const CachedValue* v, size_t n) {
             s_ring[t].unit[0] = '\0';
         }
     }
-    if (s_circulation_reset_requested.exchange(false)) {
-        const size_t completed = logic::history_completed_samples(bucket);
-        for (size_t t = 0; t < TREND_COUNT; t++) {
-            if (!circulation_trend(logic::TRENDS[t])) continue;
-            s_ring[t].ring.reset_with_gaps(completed);
-            s_ring[t].label[0] = '\0';
-            s_ring[t].unit[0] = '\0';
-        }
-    }
+    reset_circulation_locked(bucket);
 
     for (size_t t = 0; t < TREND_COUNT; t++) {
         Trend& tr = s_ring[t];
@@ -312,14 +347,7 @@ void history_record(const CachedValue* v, size_t n) {
             continue;
         }
 
-        if (d.kind == logic::TrendKind::CirculationState) {
-            copy_field(tr.label, sizeof(tr.label), d.label);
-            copy_field(tr.unit, sizeof(tr.unit), d.unit);
-            const HistorySample sample = circulation.configured && circulation.known
-                ? static_cast<HistorySample>(circulation.on ? 10 : 0) : HISTORY_NO_READING;
-            tr.ring.fold(sample);
-            continue;
-        }
+        if (d.kind == logic::TrendKind::CirculationState) continue;
         const int idx = selected[t];
         // Missing in this sweep means NO READING, not NO FEATURE. Keep the established label, unit
         // and ring; pending is already NO_READING and the bucket commit will preserve the gap.
@@ -335,6 +363,7 @@ void history_record(const CachedValue* v, size_t n) {
         if (d.kind == logic::TrendKind::BinaryEvent) tr.ring.fold_binary_event(sample);
         else tr.ring.fold(sample);
     }
+    fold_circulation_locked(circulation);
 }
 
 void history_record_modbus(const CachedValue* v, size_t n) {
