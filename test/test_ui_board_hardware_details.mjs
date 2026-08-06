@@ -77,6 +77,10 @@ assert.match(style, /\.settings-split-info::before, \.settings-split-action::bef
   "compact split actions must retain full-row click targets through the row padding");
 assert.match(style, /\.settings-split-info\s*\{[^}]*flex:\s*1 1 auto;/,
   "the explanation action must own the otherwise empty left-hand row area");
+assert.match(style, /\.settings-whole-info-row\s*\{[^}]*width:\s*100%;[^}]*cursor:\s*pointer;/,
+  "a Settings information row without a second action must expose one full-width button target");
+assert.match(style, /\.settings-whole-info-label\s*\{[^}]*display:\s*inline-flex;[^}]*gap:\s*7px;/,
+  "the full-row target must keep the label and chevron grouped at the left");
 assert.match(style, /\.settings-split-action\s*\{[^}]*flex:\s*0 1 auto;/,
   "the board editor action must shrink-wrap the visible board name instead of owning empty row space");
 assert.doesNotMatch(style, /\.settings-split-row\s*\{[^}]*padding:/,
