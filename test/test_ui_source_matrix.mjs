@@ -82,9 +82,9 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     " MB_PAIRS, MB_OFF_POWER, MB_OFF_SMART_GRID, mbPower, modbusEnumNumber, mbSmartGridMode, mbForInspect," +
     " mbUnitAbnormality," +
     " SMART_GRID_MODE_VALUE, x10aSmartGridModeFrom, x10aSmartGridMode, x10aSmartGridRow," +
-    " sgModeText, mbNoteHtml, descFor, inspCurRow, inspMember," +
+    " sgModeText, mbNoteHtml, mbDeltaHtml, descFor, inspCurRow, inspMember," +
     " inspMembers, inspValues, inspComparisonHtml, inspHeld, liveData, compressorRunning," +
-    " waterThermalKind, activeSpaceKind, ouReadingText, updateSchematicStateA11y, INSPECT," +
+    " waterMoving, pumpFlowConflict, waterThermalKind, activeSpaceKind, ouReadingText, updateSchematicStateA11y, INSPECT," +
     " pelMeasured, pelApproxText, PEL_INSPECT };",
     context, { filename: "main/www/app.sources" });
   context.__api.S = context.S;
@@ -194,6 +194,84 @@ const M_BSH = (on) => M_FLAG(32, "Booster heater run", on, "bsh_state");
 const X_QUIET = (on) => ({ label: "Silent Mode", value: on ? "1" : "0", unit: "", reg: 0x60,
                            binary: true, concept: "quiet_state" });
 const M_QUIET = (on) => M_FLAG(9, "Quiet mode operation", on, "quiet_state");
+
+// Explanation semantics are part of source arbitration too: several catalog labels overlap while
+// naming different sensors, units or protocols. Pin the distinctions that the installer manuals
+// establish so a broad first-match regex cannot silently turn a green coverage audit into bad copy.
+{
+  const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true });
+
+  const hx = c.descFor("Outdoor heat exchanger temp.", { reg: 0x20 });
+  assert.match(hx.what, /sensor at the outdoor heat exchanger/i);
+  assert.doesNotMatch(hx.what, /outside air temperature measured at the unit/i,
+    "the outdoor-coil sensor must never inherit ambient-air copy");
+
+  for (const label of ["Pressure(T)", "Pressure sensor(T)", "High pressure(Sat. °C)"]) {
+    const d = c.descFor(label, { reg: 0x20 });
+    assert.match(d.what, /saturation temperature/i, `${label} is a calculated temperature`);
+    assert.match(d.what, /not a pressure value in bar/i, `${label} must not be explained as bar`);
+  }
+
+  const beCop = c.descFor("BE_COP", { reg: 0x10 });
+  assert.match(beCop.what, /threshold used to choose between heat pump and boiler/i);
+  assert.match(beCop.what, /not the plant's currently measured COP/i);
+
+  const output = c.descFor("Space H Operation output", { reg: 0x60 });
+  assert.match(output.what, /output terminal/i);
+  assert.doesNotMatch(output.what, /thermostat demand/i);
+
+  const pipeFreeze = c.descFor("Freeze Protection for water piping", { reg: 0x60 });
+  const genericFreeze = c.descFor("Freeze Protection", { reg: 0x60 });
+  assert.match(pipeFreeze.what, /water piping/i);
+  assert.match(genericFreeze.what, /proprietary service bit/i);
+  assert.notEqual(pipeFreeze, genericFreeze, "room/general and pipe frost protection stay distinct");
+
+  const xMode = c.descFor("Operation Mode", { reg: 0x10 });
+  const mbMode = c.descFor("Operation Mode", { off: 3 });
+  assert.match(xMode.what, /currently reported by the outdoor unit/i);
+  assert.doesNotMatch(xMode.what, /configured HomeHub/i);
+  assert.match(mbMode.what, /configured HomeHub heat\/cool selection/i);
+  assert.match(mbMode.what, /holding register 3/i);
+
+  const flowSwitch = c.descFor("Water flow switch", { reg: 0x60 });
+  assert.match(flowSwitch.what, /binary X10A status/i);
+  assert.match(flowSwitch.what, /does not prove that the model-specific minimum is met/i);
+  assert.doesNotMatch(flowSwitch.what, /safety input|sufficient flow has been proven|binary flow proof/i);
+
+  assert.doesNotMatch(c.mbDeltaHtml(LWT_X, LWT_M), /plate heat exchanger|backup heater/i,
+    "the two leaving-water sources must not be assigned invented different measurement points");
+
+  assert.equal(c.waterMoving({ pumpOn: false, flow: 5 }), true,
+    "measured flow takes precedence over a contradictory internal-pump status");
+  assert.equal(c.waterMoving({ pumpOn: true, flow: null }), null,
+    "pump ON without a flow reading must remain unknown, not measured circulation");
+  assert.match(c.INSPECT.pump.now({ pump: 0, pumpOn: false, flow: 5 }).en,
+    /pump reports stopped, but the flow sensor reports/i);
+  const pumpOnNoFlow = c.INSPECT.pump.now({ pump: null, pumpOn: true, flow: null }).en;
+  assert.match(pumpOnNoFlow, /pump status is ON.*no flow measurement/i);
+  assert.doesNotMatch(pumpOnNoFlow, /pump reports stopped|measured flow is/i);
+  const pumpUnknown = c.INSPECT.pump.now({ pump: null, pumpOn: null, flow: 0 }).en;
+  assert.match(pumpUnknown, /No reliable pump state/i);
+  assert.doesNotMatch(pumpUnknown, /pump reports stopped/i);
+  assert.match(c.INSPECT.pump.now({ pump: 45, pumpOn: true, flow: null }).en,
+    /no flow measurement is available; circulation is not confirmed/i);
+  assert.doesNotMatch(c.INSPECT.wtank.now({ valveDhw: true, pumpOn: false, flow: 0,
+                                            lwt: 40, tank: 35 }).en, /Charging the tank/i,
+    "a selected valve route alone must not be called an active tank charge");
+  assert.doesNotMatch(c.INSPECT.wsup.now({ pumpOn: true, flow: null, lwt: 40,
+                                            buh1: false, buh2: false }).en, /— l\/min|R1T reports/i,
+    "pump ON without a flow value must not become a measured pipe flow");
+  const postBuh = c.INSPECT.wsup.now({ pumpOn: true, flow: 5, lwt: 40,
+                                        buh1: true, buh2: false }).en;
+  assert.match(postBuh, /R1T reports 40\.0 °C before the backup heater/);
+  assert.match(postBuh, /backup-heater stage is active downstream/);
+  assert.doesNotMatch(postBuh, /reheated by the backup heater/i);
+  assert.match(c.INSPECT.valve.now({ valveDhw: true }).en, /not mechanical position feedback/i);
+
+  const mbPowerCopy = c.PEL_INSPECT.what({ pelSrc: "MB" }).en;
+  assert.match(mbPowerCopy, /reported.*HomeHub input register 51/i);
+  assert.doesNotMatch(mbPowerCopy, /MEASURED by the HomeHub|covers the whole unit/i);
+}
 
 // The README recording drives the same production parser. Keep its fake HomeHub on the real API
 // boundary (raw numeric enum plus semantic metadata), or a regression to text could stay hidden.
@@ -579,7 +657,8 @@ const M_QUIET = (on) => M_FLAG(9, "Quiet mode operation", on, "quiet_state");
 
 // ── 13. …and with both live the comparison is exactly as before ────────────────────────────────
 // The guard above must not cost the feature it is guarding. Same rows, healthy bus: the line names
-// the GATEWAY's own register and states the difference.
+// the GATEWAY's own register and states the difference. Both sources represent the same paired
+// leaving-water quantity, so the UI must not invent two different measurement points as a reason.
 {
   const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
                   values: [LWT_X], modbus: [LWT_M] });
@@ -587,8 +666,8 @@ const M_QUIET = (on) => M_FLAG(9, "Quiet mode operation", on, "quiet_state");
   assert.ok(html.includes("Leaving water temperature PHE"),
     "both live: the line names the MODBUS register, not the X10A row");
   assert.ok(html.includes("Difference 0.5"), "both live: the difference is stated");
-  assert.ok(html.includes("plate heat exchanger"),
-    "leaving water is one of the three pairings with a stated reason");
+  assert.ok(!html.includes("X10A before the backup heater"),
+    "the paired leaving-water rows must not be assigned invented different sensor locations");
 }
 
 // ── 14. A discrete CONTRADICTION prints, agreement does not ────────────────────────────────────
@@ -706,8 +785,8 @@ assert.doesNotMatch(SOURCE, /inspSourceNoteHtml/,
 assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
   "source comparison notes stay attached to their value inside the divided values section");
 
-// ── 18. The MEASURED power is addressed by its offset, never by its unit ───────────────────────
-// Three rows in the HomeHub map carry "kW": the measured consumption at input 51 and the two power
+// ── 18. The REPORTED power is addressed by its offset, never by its unit ───────────────────────
+// Three rows in the HomeHub map carry "kW": the consumption value at input 51 and the two power
 // LIMIT setpoints at holding 57/58. A first-match on the unit promoted an installer's configured
 // ceiling to the plant's measured draw the moment 51 was unavailable — and the Modbus card went on
 // labelling it correctly one card below, so the substitution was visible only on the drawing.
@@ -717,17 +796,17 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
                      modbus: [P(51, "Heat pump power consumption", "1.42"),
                               P(57, "Power limit during Recommended on / buffering", "5.00"),
                               P(58, "General power limit", "7.00")] });
-  assert.equal(both.MB_OFF_POWER, 51, "the measured power is EKRHH input register 51");
-  assert.equal(both.mbPower()?.value, "1.42", "the measurement is what is read");
+  assert.equal(both.MB_OFF_POWER, 51, "the reported power is EKRHH input register 51");
+  assert.equal(both.mbPower()?.value, "1.42", "the reported consumption value is what is read");
   assert.equal(both.mbForInspect("pel")?.label, "Heat pump power consumption",
     "the measured schematic headline remains traceable to its Modbus register");
 
-  const measured = { pel: 1.42, pelSrc: "MB", pelHeld: false };
-  assert.equal(both.pelApproxText(measured), "", "a measured gateway value has no approximation mark");
-  assert.equal(both.PEL_INSPECT.t(measured).en, "Electrical input (measured)");
-  assert.equal(both.PEL_INSPECT.head(measured), "1.4 kW");
-  assert.match(both.PEL_INSPECT.what(measured).en, /MEASURED by the HomeHub/);
-  assert.match(both.PEL_INSPECT.now(measured).en, /Measured at the HomeHub/);
+  const reported = { pel: 1.42, pelSrc: "MB", pelHeld: false };
+  assert.equal(both.pelApproxText(reported), "", "a gateway-reported value has no UI estimate mark");
+  assert.equal(both.PEL_INSPECT.t(reported).en, "Electrical input (HomeHub)");
+  assert.equal(both.PEL_INSPECT.head(reported), "1.4 kW");
+  assert.match(both.PEL_INSPECT.what(reported).en, /reported.*HomeHub input register 51/i);
+  assert.match(both.PEL_INSPECT.now(reported).en, /Reported through HomeHub input register 51/);
 
   const estimated = { pel: 1.42, pelSrc: "INV", pelHeld: false };
   assert.equal(both.pelApproxText(estimated), "≈ ", "an X10A current-derived value stays approximate");
@@ -746,7 +825,7 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
                               P(57, "Power limit during Recommended on / buffering", "5.00"),
                               P(58, "General power limit", "7.00")] });
   assert.equal(gone.mbPower(), null,
-    "no measured power: the answer is nothing, never a power LIMIT that happens to share the unit");
+    "no reported power: the answer is nothing, never a power LIMIT that happens to share the unit");
   // Prove the trap is really set — a unit-keyed lookup over this very fixture picks a limit.
   const byUnit = [P(51, "Heat pump power consumption", null),
                   P(57, "Power limit during Recommended on / buffering", "5.00")]

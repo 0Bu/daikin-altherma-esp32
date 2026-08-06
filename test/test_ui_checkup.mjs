@@ -455,7 +455,7 @@ const retryCopy = JSON.stringify(descriptionContext.__copy.model.health_retries)
 assert.match(retryCopy, /while stopped or at a compressor-state boundary/);
 assert.match(retryCopy, /im Stillstand oder an einer Verdichter-Zustandsgrenze/);
 assert.match(retryCopy, /stable or decreasing values, gaps and resets do not/);
-assert.match(retryCopy, /stabile oder abnehmende Werte, Lücken und Rücksetzungen nicht/);
+assert.match(retryCopy, /stabile oder abnehmende Werte, Lücken und Rücksetzungen zählen nicht/);
 assert.doesNotMatch(retryCopy, /with the compressor running|bei laufendem Verdichter/);
 
 const pressureCopy = JSON.stringify(descriptionContext.__copy.model.health_pressure);

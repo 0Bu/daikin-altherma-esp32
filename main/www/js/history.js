@@ -120,8 +120,8 @@ const DERIVED = {
     unit: "", ins: ["flow", "leaving_water", "return_water", "comp_rps", "inv_current",
                     "ct_l1", "ct_l2", "ct_l3"],
     none: {
-      en: "No COP curve while the electrical figure comes from the CT clamps — that current covers the whole plant, but the buffered heat side ends before the backup heater and cannot include heat added by the tank heater.",
-      de: "Kein COP-Verlauf, solange der Stromwert von den Stromwandlern kommt — dieser Strom umfasst die ganze Anlage, die gepufferte Wärmeseite endet jedoch vor dem Zusatzheizer und kann die Wärme des Heizstabs im Speicher nicht erfassen.",
+      en: "No COP curve while the electrical figure comes from the CT clamps. Which loads those clamps include depends on their wiring, while the buffered heat side ends before the backup heater and cannot include heat added directly by the tank heater; a matching boundary is therefore not guaranteed.",
+      de: "Kein COP-Verlauf, solange der Stromwert von den Stromwandlern kommt. Welche Lasten sie erfassen, hängt von ihrer Verdrahtung ab; die gepufferte Wärmeseite endet zugleich vor dem Zusatzheizer und kann direkt eingebrachte Wärme des Speicherheizstabs nicht erfassen. Eine passende Bilanzgrenze ist daher nicht gesichert.",
     },
     ready: (h) => h.flow && h.leaving_water && h.return_water && h.comp_rps && h.inv_current,
     fn: (s) => {
@@ -1121,7 +1121,7 @@ function vDescRow(v) {
   const shownLabel = v.displayLabel || displayReadingLabel(label);
   const key = v.key || label;
   let cls = v.state || v.class || "";
-  const d = descFor(label);
+  const d = descFor(label, v);
   const hid = histIdFor(label);          // this profile's spelling -> the concept the device buffers
   // The SECOND source for this row, if the HomeHub carries the same quantity (paired on the concept
   // the firmware resolved — see mbByConcept). Two distinct uses, and they must not be confused:
@@ -1222,7 +1222,7 @@ const MODEL_DESCRIPTIONS = {
   health_retries: {
     what: "Experimental check of five protection counters. Only a strict increase between continuous comparable samples counts, including one first visible while stopped or at a compressor-state boundary. Baseline, stable or decreasing values, gaps and resets do not.",
     normal: "An increase gives a NOTE, not a fault diagnosis. No increase does not prove that no limiting occurred because reset and wrap semantics are undocumented.",
-    de: { what: "Experimentelle Prüfung von fünf Schutzzählern. Nur ein strenger Anstieg zwischen lückenlosen vergleichbaren Messungen zählt, auch wenn er erst im Stillstand oder an einer Verdichter-Zustandsgrenze sichtbar wird. Basiswert, stabile oder abnehmende Werte, Lücken und Rücksetzungen nicht.",
+    de: { what: "Experimentelle Prüfung von fünf Schutzzählern. Nur ein strenger Anstieg zwischen lückenlosen vergleichbaren Messungen zählt, auch wenn er erst im Stillstand oder an einer Verdichter-Zustandsgrenze sichtbar wird. Basiswert, stabile oder abnehmende Werte, Lücken und Rücksetzungen zählen nicht.",
           normal: "Ein Anstieg ergibt HINWEIS, keine Störungsdiagnose. Kein Anstieg beweist nicht, dass keine Begrenzung stattfand, weil Rücksetz- und Überlaufverhalten undokumentiert sind." } },
   // The two board-memory rows on the ESP32 card. The copy has one job beyond naming the number: to
   // say what the SHAPE of the curve means, because that is the whole reason these rows exist rather
@@ -1236,7 +1236,7 @@ const MODEL_DESCRIPTIONS = {
     what: "The largest contiguous block of free RAM. Some operations, including TLS setup and OTA work, need one sufficiently large block even when the total free RAM is higher.",
     normal: "it is always at or below total free RAM. If total free RAM stays stable while this value keeps falling, the heap is becoming fragmented; that can make a large allocation fail before all RAM is used.",
     de: { what: "Der größte zusammenhängende freie RAM-Block. Manche Vorgänge, darunter TLS-Aufbau und OTA-Arbeiten, benötigen einen ausreichend großen Block, auch wenn insgesamt noch mehr RAM frei ist.",
-          normal: "der Wert liegt immer höchstens so hoch wie der gesamte freie RAM. Bleibt der freie RAM stabil, während dieser Wert dauerhaft sinkt, wird der Speicher fragmentiert; dann kann eine große Reservierung scheitern, obwohl noch RAM frei ist." } },
+          normal: "der Wert liegt nie über dem gesamten freien RAM. Bleibt der freie RAM stabil, während dieser Wert dauerhaft sinkt, wird der Speicher fragmentiert; dann kann eine große Reservierung scheitern, obwohl noch RAM frei ist." } },
   capacity: {
     what: "The outdoor unit's rated capacity, read from its own identification page. It is a size class of the hardware — what the unit is built for, not what it is producing right now.",
     de: { what: "Die Nennleistung der Außeneinheit, aus ihrer eigenen Kennungsseite gelesen. Eine Größenklasse der Hardware — wofür das Gerät gebaut ist, nicht was es gerade liefert." } },
@@ -1389,7 +1389,7 @@ function modbusOnlyGroupHtml(all) {
     const unit = displayUnit(m);
     const val = esc(displayValue(m)) +
       (unit ? `<span class="vrow-unit">${esc(unit)}</span>` : "");
-    const d = descFor(label);
+    const d = descFor(label, m);
     const hid = m.concept && hasModbusHist(m.concept) ? m.concept : "";
     if (!d && !hid) {
       return `<div class="vrow"><span class="vrow-label">${esc(shown)}</span>` +
