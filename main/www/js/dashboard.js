@@ -40,7 +40,7 @@ function groupOf(v) {
 // Deliberately does NOT call markUnreachable(): /status is the reachability probe (it runs on the
 // same loop and says so on failure), and a values fetch that lost a race with a reboot must not
 // overwrite a banner the status fetch is about to set correctly either way.
-async function refreshValues() {
+async function refreshValues(paint = true) {
   let r;
   try { r = await j("/values", { signal: pollSignal() }); } catch { return false; }
   S._values = r.values || r || [];
@@ -54,7 +54,7 @@ async function refreshValues() {
   // frame as the next reload's bounded fallback.
   S.otaCached = false;
   if (S.otaInstalling) otaCacheStore();
-  renderApp();
+  if (paint) renderApp();
   return true;
 }
 // Dashboard cards: the rolling plant diagnostics first, directly below the live diagram, followed by the

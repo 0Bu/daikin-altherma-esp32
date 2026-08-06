@@ -820,15 +820,22 @@ async function pollTick() {
 
   _pollBusy = true;
   let ok = true;
+  let deferredPaint = false;
   try {
     const now = performance.now();
     if (now >= _statusDue) {
-      ok = await refreshStatus();                  // its own failure path shows the banner
+      // /values follows immediately.  Defer this full paint so the first load and every 8-second
+      // status cycle build the 2,700-node UI once from the complete status+values frame, not once
+      // with the previous values and again a few milliseconds later.  On a values failure the
+      // status frame is still painted below; only unreachable status skips it via its own banner.
+      ok = await refreshStatus(false);
+      deferredPaint = ok;
       if (ok) _statusDue = now + POLL_STATUS_MS;
     }
     // /status just failed => the device is unreachable; a second doomed request per tick only
     // doubles the wait for the timeout that decides the backoff.
-    if (ok) ok = await refreshValues();
+    if (ok) ok = await refreshValues(!deferredPaint);
+    if (deferredPaint) renderApp();
   } finally {
     _pollBusy = false;
   }
