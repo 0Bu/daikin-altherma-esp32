@@ -486,12 +486,13 @@
                   <path d="M598 180 h24 M610 168 v12" stroke="var(--muted)" stroke-width="2" fill="none"/>
                   <text class="sc-state" x="620" y="205" id="svValve">3WV</text>
                 </g>
-                <!-- 2-way heating/cooling selector. Its state is distinct from the downstream 3WV.
-                     The selector belongs above the space-supply branch; putting it below the pipe
+                <!-- Optional 2-way-valve output. Its state is distinct from the configured/current
+                     operating mode and from the downstream 3WV. The pill belongs above the
+                     space-supply branch; putting it below the pipe
                      made it compete with R2T and the tank inlet for the same narrow band. -->
                 <g id="g2wv" class="sc-selector sc-hit" data-insp="valve2" role="button" tabindex="0">
                   <rect class="sc-pill" x="620" y="144" width="86" height="22" rx="11"/>
-                  <text class="sc-val" x="663" y="159" text-anchor="middle"><tspan data-i18n="schem.valve_heat">2WV</tspan> · <tspan id="svValve2">—</tspan></text>
+                  <text class="sc-val" x="663" y="159" text-anchor="middle"><tspan data-i18n="schem.valve2">2WV</tspan> · <tspan id="svValve2">—</tspan></text>
                   <path class="sc-tie" d="M663 166 V176"/>
                 </g>
                 <!-- DHW tank branch (hidden via .no-dhw when the model has no tank values).

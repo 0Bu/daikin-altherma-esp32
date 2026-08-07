@@ -357,9 +357,11 @@ GET  /values                       # decoded readings
                                    #   (last poll);
                                    #   reg = the X10A register page the row was decoded from;
                                    #   binary:true marks converter-300..307 bit flags. Their value
-                                   #   remains numeric text "1"/"0". For the two valve selectors,
-                                   #   binary_semantic names the structural meaning and the web UI
-                                   #   presents the selected path/mode; ordinary flags stay ON/OFF.
+                                   #   remains numeric text "1"/"0". binary_semantic names the
+                                   #   structural meaning; for the 3-way valve the web UI presents
+                                   #   the selected path, while the 2-way-valve OUTPUT stays ON/OFF
+                                   #   (it is separate from the configured/current mode, so OFF is
+                                   #   not proof of Cooling); ordinary flags stay ON/OFF.
                                    #   The two marked Smart-Grid contacts additionally produce one
                                    #   combined four-state mode in the UI. It also omits redundant
                                    #   ON/OFF / On:…_Off:… legends from visible labels. Raw labels

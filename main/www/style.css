@@ -302,10 +302,10 @@ svg .sc-snow .sc-val, svg .sc-quiet .sc-val {
 #gSpaceH.on .sc-pill { stroke: var(--ok); }
 #gSpaceH.on .sc-val { fill: var(--ok); }
 .sc-selector .sc-pill { fill: var(--hatch); stroke: var(--pipe); transition: fill .3s, stroke .3s; }
-.valve-heat #g2wv .sc-pill, .flow-switch-on #gFlowSwitch .sc-pill {
+.valve2-on #g2wv .sc-pill, .flow-switch-on #gFlowSwitch .sc-pill {
   fill: var(--brand); fill-opacity: .11; stroke: var(--brand);
 }
-.valve-heat #g2wv .sc-val, .flow-switch-on #gFlowSwitch .sc-val { fill: var(--brand-strong); }
+.valve2-on #g2wv .sc-val, .flow-switch-on #gFlowSwitch .sc-val { fill: var(--brand-strong); }
 /* ── Clickable schematic: every value pill and component is a hit target ──────────────────────
    Hover/focus/selected all reinforce the SAME affordance (the shape's outline turns brand) so the
    picture reads as explorable without adding a single visual element to the drawing. Selected is
@@ -757,8 +757,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 }
 .vhist-state-on.quiet-on, .vhist-level.quiet-on i,
 .vhist-state-on.step1, .vhist-level.step1 i,
-.vhist-state-on.valve-space, .vhist-level.valve-space i,
-.vhist-state-on.valve-cool, .vhist-level.valve-cool i {
+.vhist-state-on.valve-space, .vhist-level.valve-space i {
   background: var(--brand-sky);
 }
 .vhist-state-on.heater-on, .vhist-level.heater-on i,
@@ -767,7 +766,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-state-on.sg-forced-on, .vhist-level.sg-forced-on i {
   background: var(--warn);
 }
-.vhist-state-on.valve-heat, .vhist-level.valve-heat i { background: var(--brand); }
+.vhist-state-on.valve2-on, .vhist-level.valve2-on i { background: var(--brand); }
 .vhist-state-on.circulation-on, .vhist-level.circulation-on i,
 .vhist-state-on.flow-switch-on, .vhist-level.flow-switch-on i { background: var(--ok); }
 .vhist-state-on.sg-forced-off, .vhist-level.sg-forced-off i {

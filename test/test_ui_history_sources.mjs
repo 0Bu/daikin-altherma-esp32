@@ -43,6 +43,7 @@ const S = {
       { id: "buh_step1", label: "BUH Step1" },
       { id: "buh_step2", label: "BUH Step2" },
       { id: "valve_dhw", label: "3way valve(On:DHW_Off:Space)" },
+      { id: "valve_heat", label: "2way valve(On:Heat_Off:Cool)" },
       { id: "smart_grid_mode", label: "Smart Grid operation mode" },
       { id: "circulation_state", label: "DHW circulation pump" },
     ],
@@ -124,6 +125,12 @@ const context = {
     if (key === "hist.circ_unavailable") return "Nicht verfügbar";
     if (key === "hist.circ_gaps") return `${arg} Phase · nicht verfügbar`;
     if (key === "hist.circ_aria") return `${arg} — Zirkulationsverlauf. ${arg2}`;
+    if (key === "hist.valve2_on_total") return `2WV-Ausgang ON · ${arg}`;
+    if (key === "hist.valve2_off_total") return `2WV-Ausgang OFF · ${arg}`;
+    if (key === "hist.valve2_none") return "Kein ON-Zustand des 2WV-Ausgangs erfasst.";
+    if (key === "hist.valve2_on") return "2WV-Ausgang ON";
+    if (key === "hist.valve2_off") return "2WV-Ausgang OFF";
+    if (key === "hist.valve2_aria") return `${arg} — Verlauf des 2WV-Ausgangs. ${arg2}`;
     if (key.startsWith("sg.mode")) return ["Freier Betrieb", "Zwangsabschaltung", "Empfehlung ein", "Erzwungen ein"][+key.at(-1)];
     return labels[key] || key;
   },
@@ -377,6 +384,21 @@ assert.match(valveHtml, /vhist-state-on valve-dhw/);
 assert.doesNotMatch(valveHtml, /vhist-state-runs|· Phasen/);
 assert.match(h.scrubText(valveView, 0), /X10A \+ Modbus\nRaumkreis\n.* · ca\. 10 min/);
 assert.match(h.scrubText(valveView, 2), /X10A \+ Modbus\nWarmwasser\n.* · ca\. 10 min/);
+
+// The legacy history id `valve_heat` stores the optional 2-way/heating-cooling OUTPUT. It is not the
+// configured/current operating mode, so the timeline must retain ON/OFF and never turn idle periods
+// into a Cooling position (or ON into proof of Heating).
+S.hist.set("valve_heat", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
+  held: [], v: [0, 0, 10, 10, 0, 10] });
+const valve2View = h.historyView("valve_heat");
+const valve2Html = h.histHtml("valve_heat", "", "Ausgang 2-Wege-/Absperrventil");
+assert.equal(valve2View.series.length, 1);
+assert.match(valve2Html, /2WV-Ausgang ON · 15 min · 2WV-Ausgang OFF · 15 min/);
+assert.match(valve2Html, /vhist-state-on state-off/);
+assert.match(valve2Html, /vhist-state-on valve2-on/);
+assert.doesNotMatch(valve2Html, /Kühlstellung|Heizstellung|>Kühlen<|>Heizen</);
+assert.match(h.scrubText(valve2View, 0), /2WV-Ausgang OFF\n.* · ca\. 10 min/);
+assert.match(h.scrubText(valve2View, 2), /2WV-Ausgang ON\n.* · ca\. 10 min/);
 
 // Bucket alignment, not array index: Modbus starts one raster later and must leave the first slot
 // empty rather than sliding its first sample under the older X10A point.

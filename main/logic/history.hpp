@@ -223,7 +223,7 @@ inline constexpr TrendDef TRENDS[] = {
     // wins, so the timeline shows which branch was selected at each five-minute sample. Converter
     // 306 is the load-bearing half of the locator in the shared 0x60/12 state byte.
     { "valve_dhw",          TrendKind::BinaryState, 0x60, 12, "", "", 306 },
-    { "valve_heat",         TrendKind::BinaryState, 0x60, 12, "", "", 307 },
+    { "valve_heat",         TrendKind::BinaryState, 0x60, 12, "", "", 307 }, // legacy id: 2WV output ON/OFF
     { "water_flow_switch",  TrendKind::BinaryState, 0x60, 11, "", "", 307 },
     // A STATE timeline rather than a numeric sensor curve. X10A exposes the mode through two
     // independent contact bits, so no single catalog row can be its locator. The recorder combines

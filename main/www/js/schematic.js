@@ -186,7 +186,10 @@ function liveData() {
     // documented data model (§9.2.2) and are the one thing about a HomeHub row that cannot be
     // re-spelled.
     valveDhw: stateOf(/3.?way valve/i, 37),        // label documents On:DHW / Off:Space
-    valveHeat: stateOf(/2.?way valve/i),           // true = heating, false = cooling
+    // Historical X10A catalogs call this bit "On:Heat_Off:Cool", but it is a logical output state,
+    // not the separate configured/current operating mode or mechanical position feedback. At idle
+    // the live unit demonstrates that the two can differ, so retain the electrical ON/OFF fact.
+    valve2On: stateOf(/2.?way valve/i),
     flowSwitch: stateOf(/water flow switch/i),
     buh1: vOn(/buh step ?1/i),
     buh2: vOn(/buh step ?2/i),
@@ -428,8 +431,8 @@ function updateSchematicStateA11y(d) {
       !d || d.defrost == null ? "—" : t(d.defrost ? "state.on" : "state.off"));
   set("gQuietState", t("chip.quiet"),
       !d || d.quiet == null ? "—" : t(d.quiet ? "state.on" : "state.off"));
-  set("g2wv", t("schem.valve_heat"),
-      !d || d.valveHeat == null ? "—" : t(d.valveHeat ? "enum.heating" : "enum.cooling"));
+  set("g2wv", t("schem.valve2"),
+      !d || d.valve2On == null ? "—" : t(d.valve2On ? "state.on" : "state.off"));
   set("gFlowSwitch", t("schem.flow_switch"),
       !d || d.flowSwitch == null ? "—" : t(d.flowSwitch ? "state.on" : "state.off"));
 }
@@ -486,7 +489,7 @@ function clearSchematic() {
   setTxt("svCopLabel", "COP");
   const sc = $("schem");
   ["fan-on", "pump-on", "buh-on", "bsh-on", "defrost-on", "quiet-on", "sg-boost-on",
-   "cooling-mode", "water-neutral", "valve-heat", "flow-switch-on"].forEach((c) => sc.classList.remove(c));
+   "cooling-mode", "water-neutral", "valve2-on", "flow-switch-on"].forEach((c) => sc.classList.remove(c));
   updateSchematicStateA11y(null);
   sc.classList.add("no-spaceh");       // no flag to show; the pill would otherwise sit stale
   $("schem").querySelectorAll(".sc-flow, .sc-rflow").forEach((el) => el.classList.remove("on", "rev"));
@@ -544,7 +547,7 @@ function renderLive() {
   setTxt("svDisch", ouReadingText(d, "disch", d.disch, fmt0)); setTxt("svEev", fmt0(d.eev));
   setTxt("svLwt", fmt1(d.lwt)); setTxt("svRwt", fmt1(d.ret));
   setTxt("svR2t", fmt1(d.r2t)); setTxt("svR3t", fmt1(d.r3t));
-  setTxt("svValve2", d.valveHeat == null ? "—" : t(d.valveHeat ? "enum.heating" : "enum.cooling"));
+  setTxt("svValve2", d.valve2On == null ? "—" : t(d.valve2On ? "state.on" : "state.off"));
   setTxt("svFlowSwitch", d.flowSwitch == null ? "—" : t(d.flowSwitch ? "state.on" : "state.off"));
   // ΔT only means something with water moving (d.dtStale, decided in liveData so the explainer
   // gates on the very same fact). Same reasoning as the derived kW/COP, which already gate.
@@ -578,7 +581,7 @@ function renderLive() {
   sc.classList.toggle("bsh-on", bshActive);
   sc.classList.toggle("defrost-on", d.defrost === true);
   sc.classList.toggle("quiet-on", d.quiet === true);
-  sc.classList.toggle("valve-heat", d.valveHeat === true);
+  sc.classList.toggle("valve2-on", d.valve2On === true);
   sc.classList.toggle("flow-switch-on", d.flowSwitch === true);
   // Water always moves in the same hydraulic direction, but its THERMAL role reverses in cooling:
   // the supply is cold and the return warm. With the compressor stopped neither colour is earned —
@@ -1020,14 +1023,14 @@ const INSPECT = {
                        de: "Die Regelung meldet den Raumweg als gewählt. Das ist keine mechanische Stellungsrückmeldung und belegt allein keine Zirkulation." },
   },
   valve2: {
-    t: { en: "2-way valve · heating/cooling", de: "2-Wege-Ventil · Heizen/Kühlen" },
+    t: { en: "2-way-valve output", de: "2-Wege-Ventil-Ausgang" },
     re: /2.?way valve/i, sample: "2way valve(On:Heat_Off:Cool)", trend: "valve_heat",
-    head: (d) => d.valveHeat == null ? "—" : t(d.valveHeat ? "enum.heating" : "enum.cooling"),
-    now: (d) => d.valveHeat == null ? null : d.valveHeat
-      ? { en: "The controller reports the heating route selected; this is not mechanical position feedback.",
-          de: "Die Regelung meldet den Heizweg als gewählt; das ist keine mechanische Stellungsrückmeldung." }
-      : { en: "The controller reports the cooling route selected; this is not mechanical position feedback.",
-          de: "Die Regelung meldet den Kühlweg als gewählt; das ist keine mechanische Stellungsrückmeldung." },
+    head: (d) => d.valve2On == null ? "—" : t(d.valve2On ? "state.on" : "state.off"),
+    now: (d) => d.valve2On == null ? null : d.valve2On
+      ? { en: "X10A reports the 2-way-valve output ON. This alone proves neither active Heating nor the mechanical valve position; check operating mode and space operation separately.",
+          de: "X10A meldet für den 2WV-Ausgang ON. Das allein beweist weder aktiven Heizbetrieb noch die mechanische Ventilstellung; Betriebsart und Raumbetrieb separat prüfen." }
+      : { en: "X10A reports the 2-way-valve output OFF. This alone does not mean Cooling or contradict a configured Heating mode, especially while space operation is idle.",
+          de: "X10A meldet für den 2WV-Ausgang OFF. Daraus allein folgt weder Kühlbetrieb noch ein Widerspruch zur eingestellten Betriebsart Heizen – besonders wenn der Raumbetrieb ruht." },
   },
   tank: {
     t: { en: "DHW tank / thermal store", de: "Warmwasser-/Wärmespeicher" },
