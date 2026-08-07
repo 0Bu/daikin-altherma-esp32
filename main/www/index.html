@@ -959,7 +959,10 @@
       <div class="field">
         <label class="field-label plain" for="hhHost" data-i18n="homehub.host">Host · IP or .local name</label>
         <div class="input-action">
-          <input class="input" name="host" id="hhHost" placeholder="homehub-524288-9.local" autocomplete="off">
+          <!-- maxlength mirrors CONFIG_BLOB_MAX_STR: an over-long address used to save with ok:true
+               and then make the whole config blob unreadable. The device refuses it now, but the
+               browser should not offer to type something the device will reject. -->
+          <input class="input" name="host" id="hhHost" placeholder="homehub-524288-9.local" autocomplete="off" maxlength="512">
           <button class="input-action-btn" type="button" id="hhSearch" data-i18n="hh.search">Search</button>
         </div>
       </div>

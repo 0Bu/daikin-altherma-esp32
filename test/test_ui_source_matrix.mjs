@@ -78,7 +78,8 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
   // `const` is lexical and never becomes a property of the context, so the helpers are handed out
   // explicitly — the same trick test_ui_live_i18n.mjs uses for its production function.
   vm.runInContext(
-    SOURCE + "\nthis.__api = { mbByConcept, mbTwin, mbFallbackFor, mbLive, mbBool, mbVal, stateOf," +
+    SOURCE + "\nthis.__api = { mbByConcept, mbTwin, mbFallbackFor, mbStandInFor, rowNotMeasuring," +
+    " mbLive, mbBool, mbVal, stateOf," +
     " MB_PAIRS, MB_OFF_POWER, MB_OFF_SMART_GRID, mbPower, modbusEnumNumber, mbSmartGridMode, mbForInspect," +
     " mbUnitAbnormality," +
     " SMART_GRID_MODE_VALUE, x10aSmartGridModeFrom, x10aSmartGridMode, x10aSmartGridRow," +
@@ -440,6 +441,23 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
     "the unpaired held-over reading still explains why it is blank");
   assert.equal(c.INSPECT.disch.trend, "discharge",
     "the held-over discharge inspector still offers the measured history from the last run");
+
+  // The §6 VALUE TABLES must reach the same verdict as the pill above them. They read every row
+  // straight off /values, so before this rule they printed the retained outdoor-unit numbers as
+  // ordinary current readings — well-formed, plausible and hours old — while the drawing, the
+  // inspector, the chart and MQTT all refused them. Same fact, four refusals and one statement.
+  assert.equal(c.rowNotMeasuring(OUT_X), true,
+    "a row on a held-over outdoor-unit page is not a current measurement");
+  assert.equal(c.rowNotMeasuring(LWT_X), false,
+    "a hydronic row keeps measuring while the outdoor unit rests");
+  assert.equal(c.mbStandInFor(OUT_X), OUT_M,
+    "the independently polled HomeHub twin stands in for the held row");
+  assert.equal(c.mbStandInFor(DISCH_X), null,
+    "an unpaired held row gets no stand-in, so the table blanks it");
+  // The device's own marker is authoritative and needs no page rule to be re-derived: a row the
+  // firmware marked held is not current even where the browser could not have worked that out.
+  assert.equal(c.rowNotMeasuring({ ...LWT_X, held: true }), true,
+    "the firmware's own `held` marker is honoured on any row");
 }
 
 // Zero degrees is a valid outdoor measurement, not a missing-value sentinel.
@@ -945,4 +963,130 @@ assert.match(style, /\.cooling-mode \.water-flow\.hot/);
 assert.match(style, /\.water-neutral \.water-flow\.hot[\s\S]*\.water-neutral \.water-flow\.cold/);
 assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
 
+// ── §6 value-table grouping, measured over the REAL catalog ─────────────────────────────────────
+// The grouping is substring keys with first-match-wins over machine-generated labels, so it cannot
+// be checked by reading it: the labels change without this repo being touched, and a misfiled row is
+// invisible on any single profile — it is present, correct and simply in the wrong card. 66 of 169
+// labels had drifted into the bottom catch-all, the unit's own Error Code among them.
+//
+// Executes the PRODUCTION groupOf over every label the shipped tables contain.
+{
+  const dash = readAppFragments(["dashboard.js"]);
+  const gctx = {}; vm.createContext(gctx);
+  vm.runInContext(dash.slice(0, dash.indexOf("async function refreshValues")) +
+                  "\nthis.__api = { groupOf, GROUPS, GROUP_ORDER };", gctx,
+                  { filename: "main/www/js/dashboard.js" });
+  const { groupOf, GROUPS, GROUP_ORDER } = gctx.__api;
+
+  const labels = new Set();
+  for (const f of fs.readdirSync(new URL("../main/def", import.meta.url))) {
+    if (!f.endsWith(".hpp")) continue;
+    const t = fs.readFileSync(new URL(`../main/def/${f}`, import.meta.url), "utf8");
+    for (const m of t.matchAll(/\{0x[0-9A-Fa-f]{2},\s*\d+,\s*\d+,\s*\d+,\s*-?\d+,\s*"([^"]+)"/g))
+      labels.add(m[1]);
+  }
+  assert.ok(labels.size > 150, "the catalog scrape must actually find labels");
+
+  // The two orders are separate; neither may lose a group the other has.
+  // Spread both into host arrays: `.map` on a VM-realm array returns a VM-realm array, and
+  // deepStrictEqual compares prototypes too.
+  assert.deepEqual([...GROUP_ORDER].sort(), [...GROUPS].map((g) => g[0]).sort(),
+    "GROUP_ORDER and GROUPS must name the same groups");
+  assert.equal(GROUPS[0][0], "Protection",
+    "Protection matches first: it is the one group with an exactly-known membership");
+
+  // THE REGRESSION THIS PINS: giving another group a broader key silently took two rows out of
+  // Protection, which then showed 9 of its 11 and looked complete.
+  const protection = [...labels].filter((l) => /drop|retry/i.test(l));
+  assert.equal(protection.length, 11,
+    "the page-0x10 protection words are 5 retry counters + 6 drop flags");
+  for (const l of protection)
+    assert.equal(groupOf({ label: l }), "Protection", `"${l}" must stay in Protection`);
+  // …and the reason the keys are "drop"/"retry" rather than "protection": these two are normally ON.
+  for (const l of ["Freeze Protection", "Freeze Protection for water piping"])
+    assert.notEqual(groupOf({ label: l }), "Protection",
+      `"${l}" is a default-on flag, not a unit backing off`);
+
+  // Rows DESIGN.md §6 names by group. Spellings are the catalog's own, checked to still exist so a
+  // renamed label fails here rather than quietly moving a row to the bottom of the page.
+  const filed = {
+    "Error Code": "Operation", "Error type": "Operation", "Silent Mode": "Operation",
+    "2nd Domestic hot water temperature": "Domestic hot water",
+    "Inlet water temp.(R4T)": "Water circuit",
+    "Outlet Water Heat Exch. Temp. (R1T)": "Water circuit",
+    "Outlet Water BUH Temp. (R2T)": "Water circuit",
+    "LW setpoint (main)": "Water circuit",
+    "INV frequency (rps)": "Refrigerant / outdoor",
+    "Target Evap. Temp.": "Refrigerant / outdoor",
+    "Target Cond. Temp.": "Refrigerant / outdoor",
+    "Expansion valve 1 (pls)": "Refrigerant / outdoor",
+    "Discharge pipe temp.": "Refrigerant / outdoor",
+    "O/U Heat Exch. Temp.": "Refrigerant / outdoor",
+    "Suction pipe temp.": "Refrigerant / outdoor",
+    "CT Sensor (L1)": "Electrical",
+    "Current measured by CT sensor of L1": "Electrical",
+    "BUH Step1": "Electrical",
+  };
+  for (const [label, group] of Object.entries(filed)) {
+    assert.ok(labels.has(label), `"${label}" must still exist in the catalog`);
+    assert.equal(groupOf({ label }), group, `"${label}" belongs in ${group}`);
+  }
+  // Water pressure must keep beating the refrigerant group's bare "pressure" key.
+  for (const l of ["Water Pressure", "Water pressure"])
+    assert.equal(groupOf({ label: l }), "Water circuit", `"${l}" is a water reading`);
+
+  // A firmware-stamped group always wins, unchanged.
+  assert.equal(groupOf({ label: "Error Code", group: "Custom" }), "Custom");
+}
+
+// ── Every COP block reason reaches a sentence ───────────────────────────────────────────────────
+// cop_scope's rule is that suppressing one wrong claim must not substitute another, so a blank COP
+// pill owes the reader the reason it is blank. Two of the four codes named a reason no explainer
+// rendered: `mb_scope` (X10A silent, HomeHub carrying) and `no_pel` (no usable electrical input)
+// fell through to the generic copy while the pill's own title still claimed a heat-pump boundary.
+// Asserted over the codes liveData can actually PRODUCE, so a fifth added without copy fails here.
+{
+  const c = ctx({ x10a: true, mbEnabled: false, mbConnected: false, values: [] });
+  const sentence = (d) => c.INSPECT.cop.now(d);
+
+  // Each block reason, in both languages, and each distinct from the others.
+  const seen = new Map();
+  for (const block of ["tank_heater", "buh_no_r2t", "mb_scope", "no_pel"]) {
+    const d = { cop: null, copBlock: block, pelHeld: false };
+    const s = sentence(d);
+    assert.ok(s && s.en && s.de, `copBlock "${block}" must reach a sentence in both languages`);
+    assert.ok(!seen.has(s.en), `copBlock "${block}" must not reuse another reason's sentence`);
+    seen.set(s.en, block);
+  }
+  // no_pel splits: "held over from the last run" and "this profile has no current row" are different
+  // facts about the hardware, and saying the wrong one substitutes a second false claim.
+  const held = sentence({ cop: null, copBlock: "no_pel", pelHeld: true });
+  const absent = sentence({ cop: null, copBlock: "no_pel", pelHeld: false });
+  assert.notEqual(held.en, absent.en, "a held-over current must not read as an absent row");
+  assert.match(held.de, /letzten Lauf/, "the held case names the previous run");
+  assert.match(absent.de, /keine elektrische Aufnahme/, "the absent case names the missing input");
+
+  // Every reason the production code can set must be one of the codes covered above.
+  // Scraped per LINE, not per `copBlock = "x"`: one of the four is assigned through a ternary
+  // (`copBlock = heaterQuiet ? null : "buh_no_r2t"`), which a naive assignment regex misses — and a
+  // scrape that silently finds three of four would make this assertion pass by not looking.
+  const covered = new Set(seen.values());
+  const src = fs.readFileSync(new URL("../main/www/js/schematic.js", import.meta.url), "utf8");
+  // Scoped to the copBlock ASSIGNMENT EXPRESSION, not the whole line: these are written as
+  // `{ d.copScope = "plant"; d.copBlock = "tank_heater"; … }`, so a per-line scrape also collects
+  // copScope's values and the set stops meaning what it says.
+  // [a-z0-9_] — `buh_no_r2t` carries a DIGIT, and a name pattern without one silently found three of
+  // four while the assertion still read as if it had checked them all.
+  const set = new Set();
+  for (const m of src.matchAll(/\bcopBlock\s*=\s*([^;}\n]*)/g))
+    for (const q of m[1].matchAll(/"([a-z0-9_]+)"/g)) set.add(q[1]);
+  assert.deepEqual([...set].sort(), ["buh_no_r2t", "mb_scope", "no_pel", "tank_heater"],
+    "the scrape must find exactly the four block reasons liveData assigns");
+  for (const block of set)
+    assert.ok(covered.has(block),
+      `copBlock "${block}" is set by liveData but has no explainer sentence`);
+}
+
 console.log("UI source matrix: arbitration, Smart-Grid and mode-aware cooling semantics correct");
+console.log("value-table grouping: §6 groups resolved over the real catalog, Protection intact");
+console.log("cop block reasons: every code liveData sets reaches its own bilingual sentence");

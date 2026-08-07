@@ -373,7 +373,36 @@ struct DhwLossState {
 constexpr uint32_t DHW_LOSS_WINDOW_S = 3600;             // R5T resolves only 0.1 K
 constexpr uint32_t DHW_LOSS_SETTLE_S = 45 * 60;          // issue #349 method after a tank charge
 constexpr uint32_t DHW_LOSS_DRAW_WINDOW_S = 10 * 60;
-constexpr int      DHW_LOSS_DRAW_DROP_TENTHS = 4;        // >0.35 K in ten minutes at 0.1 K resolution
+// KNOWN BLIND BAND — read this before tuning either constant.
+//
+// The anchor is re-established every <= DHW_LOSS_DRAW_WINDOW_S and a drop of this many tenths from it
+// resets the candidate segment. A STEADY decline therefore trips the draw filter as soon as it moves
+// this far inside the window, so above that rate no one-hour window ever completes and the check
+// reports `collecting` FOREVER rather than a finding.
+//
+// Measured against this header (12 h of ideal 1 Hz samples, tank standing, pump/BSH off,
+// circulation known-off; completed windows out of 11):
+//     0.3 K/h -> 11    (healthy, no circulation — the project's own reference figure)
+//     1.2 K/h -> 11    (healthy WITH circulation — the reference figure the leak must beat)
+//     1.8 K/h -> 11
+//     1.84 K/h -> 10   (degradation starts)
+//     1.90 K/h -> 0    (blind from here up)
+//     6.0 K/h -> 0
+// So the usable band is DHW_LOSS_HIGH_TENTHS_K_H (0.8 K/h) up to ~1.85 K/h. A leaking diverter — the
+// case this check exists for, and by definition worse than the 1.2 K/h healthy-with-circulation
+// figure — can sit in or above the blind band, where the symptom is indistinguishable from a window
+// that is merely young.
+//
+// Widening it is a DOMAIN decision, not a code cleanup, and it trades in the direction this project
+// normally refuses: a higher cut lets a real draw be counted as a standing loss, i.e. it buys
+// coverage with the risk of reporting a leak that is not there. That wants the reference
+// installation's own draw profile, so it belongs with a measurement and /domain-review rather than
+// with a guessed constant.
+//
+// The stated cut and the real one also differ: at 0.1 K resolution both the anchor and the sample are
+// floored, so 4 tenths is reached at ~1.85 K/h rather than at the 2.1 K/h ">0.35 K in ten minutes"
+// arithmetic suggests.
+constexpr int      DHW_LOSS_DRAW_DROP_TENTHS = 4;        // ~1.85 K/h effective, see above
 constexpr int      DHW_LOSS_HIGH_TENTHS_K_H = 8;         // project heuristic, not a Daikin limit
 constexpr uint32_t DHW_LOSS_CIRC_KNOWN_PCT = 90;
 constexpr uint32_t DHW_LOSS_CIRC_MIN_ON_S = 5 * 60;
@@ -396,7 +425,10 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
     if (continuous && s.circulation_configured && s.circulation_known && !s.circulation_on)
         st.circulation_off_run_s =
             std::min<uint32_t>(UINT32_MAX - dt, st.circulation_off_run_s) + dt;
-    else if (!continuous || !s.circulation_configured || !s.circulation_known || s.circulation_on)
+    else
+        // Plain `else`: the condition this replaced was the exact De Morgan negation of the `if`,
+        // so it was unconditionally true where it was reached — stating it twice invited an edit to
+        // one half that silently stopped clearing the run.
         st.circulation_off_run_s = 0;
 
     const bool states_known = s.valve_known && s.pump_known && s.bsh_known;
@@ -988,8 +1020,16 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
     if (!dhw_supported) {
         set(CheckupCheck::DhwLoss, CheckupVerdict::Unavailable, 0, DHW_LOSS_REQUIRED_S);
     } else if (dhw.high_windows > 0) {
+        // `-1` for an unestablished figure in EVERY branch, not only the Collecting one. Both of the
+        // other branches imply a completed window today, which always sets the maximum — so this is
+        // unreachable rather than wrong, and that is exactly the asymmetry worth removing: one edit
+        // to the branch conditions and the raw CHECKUP_ABSENT sentinel would arrive here. It would
+        // not reach a reader as -32768 — http_status.cpp's tenths() emits null for ANY negative — so
+        // the damage is that a check with no established figure would be indistinguishable from one
+        // that established nothing, which is the distinction `-1` exists to make explicit.
         set(CheckupCheck::DhwLoss, CheckupVerdict::Info,
-            dhw.observed_s, DHW_LOSS_REQUIRED_S, dhw.max_loss_tenths_k_h,
+            dhw.observed_s, DHW_LOSS_REQUIRED_S,
+            dhw.max_loss_tenths_k_h == CHECKUP_ABSENT ? -1 : dhw.max_loss_tenths_k_h,
             static_cast<int>(dhw.windows), static_cast<int>(dhw.high_windows),
             static_cast<int>(dhw.high_with_pump), static_cast<int>(dhw.high_pump_off),
             static_cast<int>(dhw.circulation_on_s),
@@ -1003,7 +1043,8 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
             static_cast<int>(dhw.circulation_known_s));
     } else {
         set(CheckupCheck::DhwLoss, CheckupVerdict::Ok,
-            dhw.observed_s, DHW_LOSS_REQUIRED_S, dhw.max_loss_tenths_k_h,
+            dhw.observed_s, DHW_LOSS_REQUIRED_S,
+            dhw.max_loss_tenths_k_h == CHECKUP_ABSENT ? -1 : dhw.max_loss_tenths_k_h,
             static_cast<int>(dhw.windows), 0, 0, 0,
             static_cast<int>(dhw.circulation_on_s),
             static_cast<int>(dhw.circulation_known_s));

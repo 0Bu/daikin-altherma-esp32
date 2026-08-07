@@ -244,7 +244,12 @@ jobs:
           BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          relevant='^(main/|CMakeLists\.txt$|sdkconfig\.defaults$|partitions\.csv$|version\.txt$|docs/index\.html$|\.github/workflows/build\.yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version)\.sh$|scripts/check-web-installer-plan\.py$|tools/version/)'
+          # tools/web_asset/ is a BUILD INPUT, not tooling: main/CMakeLists.txt runs its minifier over
+          # the web UI and embeds the result in the image, so a change there changes the firmware
+          # bytes exactly like a change under main/ does. It was missing until it caused the failure
+          # this pattern exists to prevent — a minifier edit merging with no compile behind it, and
+          # the changed UI bytes never reaching the dev feed.
+          relevant='^(main/|CMakeLists\.txt$|sdkconfig\.defaults$|partitions\.csv$|version\.txt$|docs/index\.html$|\.github/workflows/build\.yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version)\.sh$|scripts/check-web-installer-plan\.py$|tools/(version|web_asset)/)'
           case "${{ github.event_name }}" in
             pull_request)
               # HEAD is the PR's merge ref, so HEAD^1 is the base tip: the diff is exactly what
@@ -262,12 +267,16 @@ jobs:
               # A manual dispatch is an explicit request to build (and possibly to cut a release).
               range="" ;;
           esac
+          # NOT `git diff … | grep -q`: under `set -o pipefail`, grep -q exits at the first match and
+          # git diff then dies of SIGPIPE, making the whole pipeline non-zero — so a LONG changed-file
+          # list with an early relevant match would take the else branch and skip the build in exactly
+          # the case that needs one. Materialise the list first; the failure direction matters more
+          # than the pipe.
           if [ -z "$range" ]; then
             changed=yes
-          elif git diff --name-only $range | grep -qE "$relevant"; then
-            changed=yes
           else
-            changed=no
+            git diff --name-only $range > /tmp/changed-files.txt
+            if grep -qE "$relevant" /tmp/changed-files.txt; then changed=yes; else changed=no; fi
           fi
           echo "firmware=$changed" >> "$GITHUB_OUTPUT"
           echo "build-relevant changes: $changed"

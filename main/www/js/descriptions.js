@@ -657,6 +657,25 @@ const mbLive = () => !!(S.status && S.status.modbus && S.status.modbus.enabled &
 // Returns null in normal operation: with both sources up, X10A leads everywhere and Modbus appears
 // only as the second opinion inside the explainer.
 const mbFallbackFor = (cid) => (x10aDown() && mbLive() ? mbByConcept(cid) : null);
+
+// Has this row stopped being a MEASUREMENT while the link is still up? The outdoor unit refreshes
+// pages 0x20/0x21 only while it runs and otherwise answers with the last run's numbers, so a
+// perfectly plausible temperature can be hours old (logic/ou_stale.hpp).
+//
+// The DEVICE's own marker is preferred: /values carries `held` precisely so a consumer need not
+// re-derive the page rule (#209 defect 5), and it travels WITH the row instead of being recomputed
+// against a snapshot taken elsewhere. rowHeldOver stays as the fallback for a board on an older
+// build that does not send the marker yet — the same rule either way, never a looser second copy.
+const rowNotMeasuring = (v) => !!v && (v.held === true || rowHeldOver(v, S.live));
+
+// The Modbus row that stands in for an X10A row, for EITHER reason that row has stopped being a
+// current reading: the link is silent, or the unit is no longer refreshing it. From a reader's side
+// those are one fact — the number under that label is not being measured now — and one answer
+// follows: an independent sensor that IS still measuring may stand in, and nothing else may. The
+// schematic and the inspector have refused a held reading since #209; this is what lets the value
+// tables refuse it the same way instead of printing it as an ordinary current row.
+const mbStandInFor = (v) =>
+  v && (x10aDown() || rowNotMeasuring(v)) && mbLive() ? mbByConcept(v.concept) : null;
 // The Modbus reading of the SAME quantity as an X10A row — its second opinion, for the explainer.
 // Takes the row rather than a concept id so every caller resolves it the one way: `concept` is put
 // on the row by the FIRMWARE (logic/homehub_map.hpp, structurally by reg/offset/unit), and a browser

@@ -19,7 +19,11 @@ const configSource = fs.readFileSync(new URL("../main/http_config.cpp", import.m
 // The checkup is the dashboard's first card after the live diagram, before the Model and live
 // "Operation" cards. Its bounded 24-hour verdict is therefore visible before the reader scans
 // current operating state, and a future card reshuffle cannot silently bury it below that group.
-assert.match(dashboardSource, /const GROUPS = \[\s*\["Operation"/s,
+// Asserted against GROUP_ORDER, which is what the page is laid out by. It used to be asserted
+// against the first entry of GROUPS — true only while that one array carried both the reading order
+// and the match precedence, and quietly wrong the moment precedence had to put an exactly-bounded
+// group first. A display claim has to be checked against the display order.
+assert.match(dashboardSource, /const GROUP_ORDER = \["Operation"/s,
              "Operation must remain the first live-value group");
 assert.match(dashboardSource,
              /const checkup = S\.status\?\.hp\?\.connected \? checkupCardHtml\(\) : "";\s*setHtml\("valueGroups",\s*checkup\s*\+\s*statusCardsHtml\(\)\s*\+\s*valueGroupsHtml\(/s,

@@ -474,9 +474,16 @@ function renderHeaderMeta() {
 }
 // The status block INSIDE the schematic (#scStatus): the operation mode is the drawing's headline —
 // or the offline state, when there is no mode to report — over one status line, with a state dot.
-// `tone` is "" (running), "err" (fault) or "dim" (no data / unreachable); it colours the line and the
-// dot, but the words always say the state too, so colour is never the only carrier (DESIGN.md §9).
-const TONE_FILL = { err: "var(--err)", dim: "var(--muted)", idle: "var(--muted)", "": "var(--ok)" };
+// `tone` is "" (running), "err" (fault), "warn" (an abnormality the HomeHub reports, or no derivable
+// mode while it carries the drawing), "dim" or "idle" (no data / unreachable); it colours the line
+// and the dot, but the words always say the state too, so colour is never the only carrier
+// (DESIGN.md §9). EVERY tone modbusStatusView/plantState can return needs an entry here AND a
+// `svg .sc-status.<tone>` rule: an unmapped tone writes the string "undefined" into the dot's fill,
+// which is not a paint, so the dot silently falls back to black — and it did exactly that for
+// "warn", i.e. in the two states that exist to draw attention.
+const TONE_FILL = {
+  err: "var(--err)", warn: "var(--warn)", dim: "var(--muted)", idle: "var(--muted)", "": "var(--ok)",
+};
 // What the plant is actually DOING, read off the machine rather than off the fact that the X10A bus
 // answers. "Operating" used to be printed unconditionally whenever the link was up, so an idle unit
 // — compressor stopped, pump at 0 %, no flow — was announced as running, in green, directly above
@@ -762,6 +769,29 @@ const REPO = "0Bu/daikin-altherma-esp32";
 // A failed fetch is WRITTEN INTO the report, never dropped: a section that is silently absent reads
 // as "the device had nothing to say", which is a different and much more misleading claim than "this
 // could not be read". Same reason the /diag truncation below announces itself.
+// Which fields the DEVICE actually scrubbed, read off the redacted response itself rather than
+// listed here. A hand-kept list is the second copy of logic/redact.hpp that this whole flow exists
+// to avoid: it shipped nine of fourteen fields for two releases, so every public issue carried a
+// false claim about its own scrubbing (the coordinates and the HomeHub address WERE redacted and
+// the report said they were not). Walking the response cannot drift — a field the firmware starts
+// or stops redacting moves this line with it, including on a device running an older build than
+// this page.
+function redactedPaths(statusText) {
+  let doc;
+  try { doc = JSON.parse(statusText); } catch { return null; }
+  const found = [];
+  const walk = (node, path) => {
+    if (node === REDACTED_TOKEN) { found.push(path); return; }
+    if (!node || typeof node !== "object" || Array.isArray(node)) return;
+    for (const k of Object.keys(node)) walk(node[k], path ? `${path}.${k}` : k);
+  };
+  walk(doc, "");
+  return found;
+}
+
+// The token logic/redact.hpp substitutes. Kept as one constant because bug-triage keys on it too.
+const REDACTED_TOKEN = "<redacted>";
+
 async function collectBugReport() {
   const s = S.status || {};
   const parts = [
@@ -782,13 +812,18 @@ async function collectBugReport() {
       fetched.push([title, kind, null, String(e && e.message ? e.message : e)]);
     }
   }
+  // fetched[0] is the redacted /status; [2] is its text, or null when the fetch failed.
+  const scrubbed = fetched[0] && fetched[0][2] != null ? redactedPaths(fetched[0][2]) : null;
   const head = [
     "# daikin-altherma-esp32 bug report",
     "",
     `firmware: ${s.version || "?"} (${s.platform || "?"})`,
     `app_elf_sha256: ${s.app_elf_sha256 || "?"}`,
     `generated: ${s.ntp?.time || "unknown — the device clock has not synced this boot"}`,
-    "redacted: wifi.ssid, wifi.ip, wifi.bssid, wifi.mac, mqtt.broker, reference_temperature.name, reference_temperature.topic, syslog.host, ntp.server",
+    scrubbed && scrubbed.length
+      ? `redacted: ${scrubbed.join(", ")}`
+      : "redacted: could not be read from this report — check the /status section below for "
+        + `${REDACTED_TOKEN} before posting`,
     "",
     "",
   ].join("\n");

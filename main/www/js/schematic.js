@@ -954,15 +954,34 @@ const INSPECT = {
       de: "Geschätzte Wärmeleistung geteilt durch geschätzte elektrische Aufnahme. Beide Werte müssen zueinander passende Bilanzgrenzen beschreiben: Bei Stromwandlern verwendet die UI die Wärme hinter dem Zusatzheizer, sofern dieser Fühler vorhanden ist; beim Inverterstrom zeigt sie nur die Wärmepumpe. Ob die Stromwandler alle relevanten elektrischen Verbraucher erfassen, hängt von ihrem Einbau ab; der Wert ist daher nicht automatisch ein Gesamtanlagen-Zähler. Das Ergebnis übernimmt die Annahmen zu Medium, Fühlern, Spannung und Leistungsfaktor aus beiden Schätzungen. Als Live-Hinweis verwenden; aussagekräftiger ist saisonal gemessene Energie. Bei stehendem Verdichter zeigt er „—“.",
       },
     head: (d) => (d.cop == null ? "—" : d.cop.toFixed(1)),
-    // Four outcomes, four sentences. A suppressed wrong claim must not be replaced by another one,
-    // so "the heater is firing and this profile has no post-BUH sensor" and "there is no current
-    // reading at all" cannot share a sentence — they are different facts about the hardware.
+    // Every block reason gets its OWN sentence. A suppressed wrong claim must not be replaced by
+    // another one, so "the heater is firing and this profile has no post-BUH sensor", "the gateway
+    // measures a different system" and "there is no current reading at all" cannot share a sentence
+    // — they are different facts about the hardware, and two of them named a code that reached no
+    // sentence at all, leaving the generic explainer beside a blank pill whose title still claimed
+    // a heat-pump boundary.
     now: (d) => d.copBlock === "tank_heater"
       ? { en: "No COP right now — the tank's electric heater is on. Its electrical load may be included in the available current boundary, while its heat goes straight into the tank and crosses neither leaving-water sensor. These readings cannot form a matching efficiency balance.",
           de: "Derzeit kein COP — der Heizstab im Speicher läuft. Seine elektrische Last kann in der verfügbaren Strombilanz enthalten sein; seine Wärme geht jedoch direkt in den Speicher und passiert keinen der Vorlauffühler. Aus diesen Messwerten entsteht deshalb keine passende Effizienzbilanz." }
       : d.copBlock === "buh_no_r2t"
       ? { en: "No COP right now — the backup heater is firing, but this profile has no leaving-water sensor after it. The electrical estimate can include heater load while the heat estimate stops before the heater, so the two boundaries do not match.",
           de: "Derzeit kein COP — der Zusatzheizer heizt, aber dieses Profil hat keinen Vorlauffühler hinter ihm. Die Stromschätzung kann die Heizlast enthalten, während die Wärmeschätzung vor dem Heizer endet; beide Bilanzgrenzen passen daher nicht zusammen." }
+      // The X10A bus is silent and the HomeHub is carrying the drawing. Its power register measures
+      // the WHOLE unit including both heaters, while the heat figure is the plate exchanger alone —
+      // and the gateway map carries neither heater state nor a post-BUH row, so unlike the X10A path
+      // there is nothing here to decide the pairing WITH.
+      : d.copBlock === "mb_scope"
+      ? { en: "No COP right now — the X10A bus is silent, so these readings come from the HomeHub. Its power figure covers the whole unit including both electric heaters, while the heat figure covers the heat exchanger alone, and this source reports neither heater state nor a post-heater sensor to match the two boundaries. A quotient of the two would describe two different systems.",
+          de: "Derzeit kein COP — der X10A-Bus schweigt, daher stammen diese Messwerte vom HomeHub. Dessen Leistungswert erfasst das gesamte Gerät einschließlich beider Elektroheizer, der Wärmewert dagegen nur den Wärmetauscher; zudem meldet diese Quelle weder den Heizerzustand noch einen Fühler hinter dem Heizer, um beide Bilanzgrenzen anzugleichen. Ein Quotient aus beiden beschriebe zwei verschiedene Systeme." }
+      // No usable electrical input at all. Which of the two reasons it is matters — the pill's own
+      // explainer draws the same distinction, and saying "this profile has no row" about a profile
+      // that has one would substitute a second wrong claim for the suppressed one.
+      : d.copBlock === "no_pel"
+      ? (d.pelHeld
+        ? { en: "No COP right now — the compressor is off, so the inverter current this profile reads is left over from the last run rather than measured now. Without a current electrical input there is nothing to divide by.",
+            de: "Derzeit kein COP — der Verdichter steht, daher stammt der Inverterstrom dieses Profils vom letzten Lauf und ist kein aktueller Messwert. Ohne aktuelle Leistungsaufnahme lässt sich kein Effizienzquotient bilden." }
+        : { en: "No COP right now — this profile reports no electrical input at all (neither CT clamps nor an inverter current), so no efficiency quotient can be formed.",
+            de: "Derzeit kein COP — dieses Profil meldet überhaupt keine elektrische Aufnahme (weder Stromwandler noch Inverterstrom), daher lässt sich kein Effizienzquotient bilden." })
       : d.cop == null ? null
       : d.efficiencyKind === "eer"
       ? { en: `${d.cop.toFixed(1)} kW of cooling per kW of electricity — ≈ ${fmt1(d.copPth)} kW removed for ≈ ${fmt1(d.pel)} kW in.`,

@@ -32,6 +32,11 @@ by the object id alone — see below for why.
 <base>/status                                      online | offline   (LWT, retained)
 <base>/x10a                                        {<group>: {<object_id>: value, …}, …}  (retained JSON)
 <base>/modbus                                      {<object_id>: value, …}  (retained JSON; enabled HomeHub only)
+<base>/env3                                        {temperature_c, humidity_pct, pressure_hpa}  (retained
+                                                   JSON; optional M5Stack ENV III sensor only)
+<base>/weather/openmeteo/forecast                  outdoor/solar forecast evidence (retained JSON; only
+                                                   while a location is saved. No HA entities — a
+                                                   forecast is not a state of this device)
 <base>/heartbeat                                   board/link diagnostics (flat JSON, 10 s cadence)
 <base>/heating_curve                               grouped room-source + diagnosis evidence (10 s cadence)
 <base>/crash                                       crash report, retained — ONLY while a fault/dump is pending
@@ -70,7 +75,8 @@ shared topic and pulls its value out with a `value_template`:
 When the HomeHub stack is enabled, its available register values are published independently as a
 flat retained object on `<base>/modbus`; a disconnected HomeHub produces `{}` and disabling the
 source removes that data topic. This stream intentionally has **no Home
-Assistant discovery configs**: HA exposes only X10A values plus board/link diagnostics. Builds up to
+Assistant discovery configs**: HA exposes X10A values, board/link diagnostics and — where the
+optional M5Stack ENV III sensor is fitted — its three readings. Builds up to
 `v1.0.0-dev.257` did announce 27 Modbus entities; connect-time and five-minute retained tombstones
 to those exact retired discovery topics remove them from existing HA installations
 without affecting `<base>/modbus`. Named HomeHub selectors keep their raw numeric constants in that
@@ -160,7 +166,8 @@ is also directly consumable by a Telegraf MQTT `json_v2` parser (→ VictoriaMet
 
 ### Device identity
 
-X10A values, board diagnostics and the crash flag belong to one **Daikin Altherma** Home Assistant
+X10A values, board diagnostics, the crash flag and the optional ENV III readings belong to one
+**Daikin Altherma** Home Assistant
 device, identified by the **slugified MQTT base topic** (`daikin-altherma-esp32` →
 `daikin_altherma_esp32`) in `dev.ids` and as the prefix of every `uniq_id` (whose remainder is the
 entity's `<group>_<object_id>`). The id therefore names
@@ -251,6 +258,26 @@ the rest in, so an install created by an older, MAC-identified build keeps its e
 > The #221 entity-id migration did not alter JSON keys or metric suffixes. The later source-topic
 > split intentionally moves that same grouped X10A payload from `<base>/state` to `<base>/x10a`;
 > keys inside it and therefore VictoriaMetrics series names remain unchanged.
+
+### Three ENV III entities, when that sensor is fitted
+
+A board carrying the optional M5Stack ENV III sensor publishes a retained flat JSON on
+`<base>/env3` and announces three entities — **ENV III Temperature** (°C), **ENV III Humidity** (%)
+and **ENV III Air Pressure** (hPa), with the matching `device_class` on each. They belong to the
+same device as everything else.
+
+Two properties are worth knowing before you build automations on them:
+
+- Their discovery configs carry a **two-entry availability list** (`mode: "all"`): the device LWT
+  *and* a template over the state topic itself. A stale or failed sensor therefore marks **only
+  these three** entities unavailable while the rest of the device stays online — an I2C fault on an
+  accessory must not make the heat pump look offline.
+- An error publishes `{}` rather than carrying the last plausible reading forward. The reading is
+  outdoor climate; a value that quietly stops updating while still looking current is exactly what
+  the rest of this firmware refuses to do (see *Values the firmware refuses to publish*).
+
+They republish whenever the sample counter advances, even if the rounded text is identical, so a
+time-series consumer sees the sensor's real 10 s cadence instead of a gap that reads like a dropout.
 
 ### Two diagnostic entities are retired
 

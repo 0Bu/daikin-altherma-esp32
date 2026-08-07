@@ -9,7 +9,7 @@
 // copies of a rule the CI gate can only see in one place.
 //
 // TWO SHAPES, because the two routes leak differently:
-//   * /status leaks by FIELD — twelve named values in a JSON object built field by field, so the
+//   * /status leaks by FIELD — fourteen named values in a JSON object built field by field, so the
 //     substitution happens where the value is written (http_status.cpp calls redact_or) and never as
 //     a post-processing pass over the finished string. That matters: http_append_status_json() runs
 //     on the httpd task whose stack overflow killed v1.0.12, and a second full-size buffer is

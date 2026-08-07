@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 #include "crc.hpp"
+#include "config_store.hpp" // CONFIG_BLOB_MAX_STR — the persisted-field bound validate() enforces
 #include "board_pins.hpp"   // board_pin_offerable — the chip-reserved-pin rule validate() enforces
 #include "led_pattern.hpp"  // LedType — the indicator back-end, now a runtime choice not a Kconfig one
 #include "ota_channel.hpp"  // OtaChannel — which published feed this device follows
@@ -377,6 +378,13 @@ inline bool validate(const Config& c, std::string& reason, int max_gpio = 48,
     // Modbus TCP link params. Checked UNCONDITIONALLY (not gated on transport): the struct defaults
     // 502/1 pass for every X10A config, so this only bites a bad Modbus setting. mb_host is free text
     // like syslog_host — empty disables the optional HomeHub stack and is valid.
+    // mb_host is free text, but NOT unbounded: it is persisted in the atomic blob, whose decoder
+    // rejects the entire blob when any string exceeds CONFIG_BLOB_MAX_STR. Every other blob string is
+    // already bounded by its own validator or by its route's body buffer; this one is read from a
+    // 2048-byte body, so it was the one field that could be saved with {"ok":true} and then make the
+    // whole config unreadable on the next boot. config_save refuses it too — this check exists so the
+    // user gets a 400 naming the field instead of a 500 saying the write failed.
+    if (c.mb_host.size() > CONFIG_BLOB_MAX_STR) { reason = "mb_host is too long"; return false; }
     if (c.mb_port < 1 || c.mb_port > 65535)   { reason = "mb_port out of range"; return false; }
     if (c.mb_unit_id < 1 || c.mb_unit_id > 247) { reason = "mb_unit_id out of range"; return false; }
     const char* circulation_why = nullptr;

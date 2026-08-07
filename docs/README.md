@@ -227,7 +227,7 @@ User credentials + the X10A link cache are persisted; the model is re-detected o
 
 | NVS key | Meaning |
 |---------|---------|
-| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + rollback flags, MQTT, syslog, SNTP, from v2 board hardware, v3 OTA channel, v4 UI language, v5 HomeHub, v7/v8 reference-temperature mapping/freshness, v9 (retired actuation bit, now ignored), v10 Open-Meteo location, v11 ENV III wiring, v12 explicit board-preset identity, v13 reference target/readiness mappings and **v14 (retired dynamic-LWT mode byte, now written zero and ignored)**. Preset id and board pins are one atomic statement. A non-empty `mb_host` polls; empty disables the stack. Older blobs remain readable; the v9 actuation-consent bit and v14 mode byte are discarded because what they gated no longer exists. Heating-curve diagnosis derives arming from the timestamped room mapping; forecast is optional. |
+| `cfg` | **Atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials + rollback flags, MQTT, syslog, SNTP, from v2 board hardware, v3 OTA channel, v4 UI language, v5 HomeHub, v7/v8 reference-temperature mapping/freshness, v9 (retired actuation bit, now ignored), v10 Open-Meteo location, v11 ENV III wiring, v12 explicit board-preset identity, v13 reference target/readiness mappings, **v14 (retired dynamic-LWT mode byte, now written zero and ignored)** and v15 the external circulation-power witness (topic/paths/thresholds/confirm window — the independent evidence the `dhw_loss` checkup correlates against). Preset id and board pins are one atomic statement. A non-empty `mb_host` polls; empty disables the stack. Older blobs remain readable; the v9 actuation-consent bit and v14 mode byte are discarded because what they gated no longer exists. Heating-curve diagnosis derives arming from the timestamped room mapping; forecast is optional. |
 | *(legacy per-key)* | `wifi_ssid`/`wifi_pass`/`wifi_ssid_back`/`wifi_pass_back`/`wifi_rollback`/`wifi_rolledbk`/`mqtt_*`/`syslog_*`/`ntp_server` — the pre-blob layout, still **read** as a fallback when `cfg` is absent (fresh device / OTA from an older build); superseded on the next save. |
 | `rx_pin` / `tx_pin` / `proto` | X10A link cache (physical wiring + framing) — kept as separate self-healing keys, tried first by the sweep, re-saved on change, re-validated on load. |
 | `board_set` | **Legacy migration input only.** Pre-v12 builds stored this bit without a concrete preset id. On upgrade, `true` plus an exact historical field match is migrated to the same board the old UI displayed; untouched defaults (`false`) remain unidentified. New saves store `board_user_set` and the stable preset id atomically in `cfg`. |
@@ -256,11 +256,13 @@ LAN only, see [SECURITY.md](SECURITY.md).
 
 ```
 GET  /  (alias /index.html)        # embedded web UI (gzipped into the app binary)
-GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this payload: the twelve
+GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this payload: the fourteen
                                    #   reporter-identifying values (wifi.ssid/ip/bssid/mac,
-                                   #   mqtt.broker, reference_temperature.name/topic, syslog.host,
+                                   #   mqtt.broker, reference_temperature.name/topic,
+                                   #   circulation_source.name/topic, syslog.host,
                                    #   ntp.server, modbus.host plus the weather latitude/longitude
-                                   #   — network/location identifiers) read "<redacted>"
+                                   #   — network/location identifiers, plus two names the user
+                                   #   typed) read "<redacted>"
                                    #   (logic/redact.hpp). The KEY is always emitted — an omitted
                                    #   field is indistinguishable from an older build, and "which
                                    #   build produced this?" is the first question a frozen report
@@ -472,7 +474,9 @@ POST /set_hp                       # { profile?, rx?, tx?, mb_host?, mb_port?,
                                    #   mb_host controls the SECOND, independent Modbus stack — it does
                                    #   NOT stop the X10A poll. Non-empty polls that address; empty
                                    #   disables task, discovery and requests, including after reboot.
-                                   #   mb_port 1..65535, mb_unit_id 1..247 — docs/MODBUS_PROTOCOL.md.
+                                   #   mb_port 1..65535, mb_unit_id 1..247, mb_host at most 512
+                                   #   chars (the persisted blob's field bound; longer is a 400
+                                   #   "mb_host is too long") — docs/MODBUS_PROTOCOL.md.
                                    #   The link is READ-ONLY: no actuation field is accepted and no
                                    #   HTTP raw-register route exists (docs/MODBUS_PROTOCOL.md).
 POST /discover_homehub             # {} → bounded mDNS search started only by the HomeHub dialog's

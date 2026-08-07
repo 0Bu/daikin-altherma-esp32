@@ -8,4 +8,6 @@
 # main/logic/redact.hpp instead. This ledger only records lines the heuristic flags for the shape of
 # their arguments while the value itself is safe.
 #
-# Empty right now: all eight flagged lines carry a real redaction rule.
+# Empty right now: all nine flagged lines carry a real redaction rule. (The count is what the audit
+# reports on the current firmware — it moves whenever a diag line starts or stops interpolating a
+# config value, so read it out of `scripts/run-redaction-audit.sh` rather than trusting this line.)

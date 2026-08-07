@@ -10,6 +10,8 @@
 //
 // The task exists only while a saved address is active. Empty configuration creates no task, socket,
 // mDNS browse or HomeHub traffic; explicit discovery runs on the HTTP request that the user starts.
+#include <atomic>
+
 #include "hp_modbus.hpp"
 #include "config.hpp"
 #include "def/homehub.hpp"
@@ -76,7 +78,12 @@ static uint32_t s_cache_generation = 0;      // guarded by s_cache_mtx; session 
 // loop; normal connect failures reuse the X10A sweep's host-tested policy.
 static TaskHandle_t  s_task = nullptr;
 static DetectBackoff s_backoff;
-static int64_t       s_next_try_us = 0;
+// ATOMIC because mb_reconfigure() writes it from the HTTPD task while mb_task reads it — an int64_t
+// is two stores on a 32-bit target, so a torn read was possible. Every outcome of a torn read here
+// happened to be a SHORTER wait, so nothing broke; it is made atomic because hp_poll.cpp's
+// equivalent httpd->poll one-shot already says in so many words that it must be, and a formal race
+// left in place because today's consequence is benign is one nobody re-checks after the next edit.
+static std::atomic<int64_t> s_next_try_us{0};
 
 enum class MbFailureType {
     None,
@@ -834,16 +841,25 @@ static void mb_task(void*) {
 static void mb_task_start_if_enabled() {
     const Config& c = config();
     if (!config_modbus_enabled(c)) return;
-    Lock lk(s_mtx);
-    if (s_task) return;
-    s_status.enabled = true;
-    s_backoff.silent = 0;
-    s_next_try_us    = 0;
-    if (xTaskCreate(mb_task, "hp_modbus", 6144, nullptr, 4, &s_task) != pdPASS) {
-        s_task = nullptr;
-        s_status.enabled = false;
-        diag_printf("modbus: task alloc failed — HomeHub readings unavailable this boot\n");
+    bool alloc_failed = false;
+    {
+        Lock lk(s_mtx);
+        if (s_task) return;
+        s_status.enabled = true;
+        s_backoff.silent = 0;
+        s_next_try_us    = 0;
+        if (xTaskCreate(mb_task, "hp_modbus", 6144, nullptr, 4, &s_task) != pdPASS) {
+            s_task = nullptr;
+            s_status.enabled = false;
+            alloc_failed = true;
+        }
     }
+    // Logged OUTSIDE s_mtx — the rule status_error() in this file states and enforces for exactly
+    // this reason ("logging while holding s_mtx would invert the status/diag mutex order and invite
+    // a deadlock"). No deadlock is reachable today, since nothing takes the diag mutex and then this
+    // one, but a convention that holds everywhere except the failure path is not a convention.
+    if (alloc_failed)
+        diag_printf("modbus: task alloc failed — HomeHub readings unavailable this boot\n");
 }
 
 void mb_start() {

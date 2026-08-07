@@ -24,7 +24,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 fail=0
-run_case() {   # run_case <name> <sed-expression> ; grep -c run_case = the case count
+run_case() {   # run_case <name> <sed-expression> ; `grep -c '^run_case '` = the case count (anchored:
+               # the bare word matches this definition line and the comments about it too)
     local name="$1" expr="$2"
     rm -rf "$TMP/t"
     mkdir -p "$TMP/t"

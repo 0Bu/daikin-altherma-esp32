@@ -43,11 +43,30 @@ case "$mode" in
     *)       echo "publish gate: unknown mode '$mode'" >&2; exit 2 ;;
 esac
 
-# A shallow fetch of the one branch: this runs before the ~5-minute build, and the guard has no use
-# for gh-pages history. A missing branch is the FIRST publish ever, not a failure.
-if ! git fetch --no-tags --depth=1 "$remote" gh-pages >/dev/null 2>&1; then
+# ASK WHETHER THE BRANCH EXISTS BEFORE FETCHING IT, because those are two different answers and only
+# one of them is safe to pass on. `git fetch` fails identically for "no such branch" and for a DNS
+# blip, an expired token or a GitHub outage — so treating a fetch failure as "first publish, nothing
+# to compare" is precisely the fail-OPEN this file's own header rules out ("a network hiccup must not
+# read as 'nothing published yet'"). ls-remote separates them: --exit-code returns 2 when the ref is
+# absent, and anything else is a transport failure that leaves the reference unknown.
+set +e
+git ls-remote --exit-code --heads "$remote" gh-pages >/dev/null 2>&1
+lsr=$?
+set -e
+if [ "$lsr" -eq 2 ]; then
     echo "publish gate: no gh-pages branch on '$remote' yet — first publish, nothing to compare"
     exit 0
+elif [ "$lsr" -ne 0 ]; then
+    echo "publish gate: cannot reach '$remote' to read the published manifest (git ls-remote exit $lsr)" >&2
+    echo "publish gate: the reference is UNKNOWN — refusing rather than assuming nothing is published" >&2
+    exit 2
+fi
+
+# A shallow fetch of the one branch: this runs before the ~5-minute build, and the guard has no use
+# for gh-pages history. The branch is known to exist now, so a failure here is a transport failure.
+if ! git fetch --no-tags --depth=1 "$remote" gh-pages >/dev/null 2>&1; then
+    echo "publish gate: gh-pages exists on '$remote' but could not be fetched" >&2
+    exit 2
 fi
 
 if ! published_json="$(git show "FETCH_HEAD:$manifest" 2>/dev/null)"; then
