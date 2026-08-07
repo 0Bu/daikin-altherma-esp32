@@ -1347,10 +1347,10 @@ const MODEL_DESCRIPTIONS = {
   // are not on this bus — and a reader who assumes the firmware is asserting more than it is will draw
   // the wrong conclusion from a correct number.
   health_fault: {
-    what: "The unit's own fault class. Error is a direct device finding; Warning and Caution produce a note. OK requires every supported fault-class row to be readable.",
-    normal: "A fault seen in this RAM window remains listed after it clears. Rebooting or changing the X10A identity starts a new window. The exact code remains under Operation.",
-    de: { what: "Die geräteeigene Störungsklasse. Fehler ist ein direkter Gerätebefund; Warnung und Vorsicht ergeben einen Hinweis. Für OK müssen alle unterstützten Klassenzeilen lesbar sein.",
-          normal: "Eine in diesem RAM-Fenster erkannte Störung bleibt nach dem Verschwinden vermerkt. Neustart oder Änderung der X10A-Identität beginnen ein neues Fenster. Der genaue Code steht unter „Betrieb“." } },
+    what: "The unit's own fault class, not a project heuristic. An error gives WARNING; a warning or caution gives NOTE; a message that appeared in the 24-hour window and has since cleared also gives NOTE. OK needs every supported class row readable and clear.",
+    normal: "A cleared message stays listed for up to 24 hours, because this window lives in the board's RAM and is the only record of it. Rebooting or changing the X10A identity starts a new window and drops it. A still-active code is under Operation.",
+    de: { what: "Die geräteeigene Störungsklasse, keine Projekt-Heuristik. Ein Fehler ergibt WARNUNG; eine Warnung oder Vorsicht ergibt HINWEIS; eine Meldung, die im 24-Stunden-Fenster auftrat und wieder verschwand, ebenfalls HINWEIS. Für OK müssen alle Klassenzeilen lesbar und frei sein.",
+          normal: "Eine verschwundene Meldung bleibt bis zu 24 Stunden vermerkt; dieses Fenster liegt allein im Arbeitsspeicher des Boards. Neustart oder Änderung der X10A-Identität beginnen ein neues Fenster. Ein noch anstehender Code steht unter „Betrieb“." } },
   health_dhw_loss: {
     what: "Maximum R5T drop in clean one-hour windows: tank charging, internal-pump operation, BSH, the 45-minute settling period and draw-like drops are excluded. Actual MQTT plug power attributes high loss to the DHW circulation pump.",
     normal: "At least 0.8 K/h gives a NOTE as a project heuristic. R5T is one point in a stratified tank: even high loss with the external pump off does not by itself prove a leaking valve, check valve or insulation defect. OK needs a full 24-hour lifecycle and six clean hours.",

@@ -812,6 +812,24 @@ function checkupStatusText(c) {
   return t(`check.status.${checkupStatusKey(c)}`);
 }
 
+// The fault row is the ONE check whose verdict comes from the DEVICE rather than from a project
+// heuristic, so the generic per-verdict sentence ("a notable value or pattern") explains nothing a
+// reader can act on there: NOTE means one of THREE different device states — a warning class active
+// right now, a message that has since cleared, or an unreadable class with history behind it — and
+// they call for different follow-up (read the code under Operation / nothing / check the link).
+// Naming which one is the whole point of the sentence, so this check gets its own copy.
+function checkupDetailKey(c, statusKey) {
+  if (c.id === "fault") {
+    if (statusKey === "warn") return "check.detail.fault.error";
+    if (statusKey === "info") {
+      if (c.active === 1) return "check.detail.fault.warning";
+      if (c.active === 0) return "check.detail.fault.past";
+      return "check.detail.fault.past_unknown";
+    }
+  }
+  return `check.detail.${statusKey}`;
+}
+
 function checkupDetailHtml(c) {
   const statusKey = checkupStatusKey(c);
   const value = checkupMetricValue(c);
@@ -821,7 +839,7 @@ function checkupDetailHtml(c) {
       ? t("check.detail.collecting", checkupDuration(c.observed_s), checkupDuration(c.required_s))
       : t("check.detail.collecting_unknown");
   } else {
-    detail = t(`check.detail.${statusKey}`);
+    detail = t(checkupDetailKey(c, statusKey));
   }
   const reading = value ? descNoteHtml(t("check.detail.value_label"), value) : "";
   return reading + descNoteHtml(t("check.detail.assessment_label"),
