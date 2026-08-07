@@ -2817,6 +2817,83 @@ one, not the numbers: **anything that grows /status grows every stack that build
 change that hands a task a large new builder raises that task's stack in the same commit. Nothing on
 `/status` reports stack headroom — the task table in a core dump is the only place it is visible.
 
+**Re-measured 2026-08-07 on `main` (f686dff), and the headline margin was the wrong number.** The
+builder's fixed frame is now **0x2e00 = 11776** bytes (dev.295 9776 → dev.296 10576 → f686dff 11616
+→ 11776 on `main` @ 7524b4c), so 1200 bytes were consumed since #318 with no single change
+announcing it — and 160 of them arrived in the two commits merged *during* this measurement. Reproduce it — this is the
+prescribed method, off the ELF, never off an idle heap reading:
+
+```bash
+scripts/idf-docker.sh bash -c 'A=$(xtensa-esp32s3-elf-nm build/daikin-altherma-esp32.elf | grep " T _ZN4daik23http_append_status_json" | cut -d" " -f1); xtensa-esp32s3-elf-objdump -d --start-address=0x$A --stop-address=$((0x$A+8)) build/daikin-altherma-esp32.elf | grep entry'
+```
+
+Two corrections came out of it, and both matter more than the frame number:
+
+**(1) The httpd ceiling is not `h_status`, it is `mcp_post`.** 16384 − 11776 = 4608 reads like the
+margin and is not: the frame is one node of a call chain. Walking every `entry a1,N` over the whole
+disassembly, the deepest httpd path is `httpd_thread`(32) → `httpd_server`(80) →
+`httpd_process_session`(32) → `httpd_uri`(64) → `handle_all`(32) → **`mcp_post`(1456)** →
+`http_append_status_json`(11776) → `circulation_source_status`(800) → `config`(48) →
+`Config`copy(112) → `_M_construct`(48) → `_M_create`(32) = **14512 bytes**, leaving **~1872** of
+16384 — before ISR frames (Xtensa nests them on the current task stack) and before the ~700-byte
+`_Unwind_RaiseException` path a `std::bad_alloc` costs *below* the throwing frame. MCP `get_status`
+reuses the exact HTTP snapshot builder (mcp_server.cpp), so it pays the builder's frame *plus* its
+own — the `/status` route was measured for years while the deeper caller was not. **Measure the
+worst PATH, not the biggest FRAME.** The builder is a 3.5× outlier over the next-largest frame in
+the firmware (`history_record`, 3296, on the poll task) and nothing else is close.
+
+**(2) Most of that frame is a `-Og` artifact, not live data.** The named locals sum to ~2.2 KB
+(`Config` 656 — `const Config& c = config()` lifetime-extends a by-value temporary across the whole
+function — `CheckupReport` 332, `WeatherForecastStatus` 208, `ReferenceTemperatureStatus` 168,
+`CrashInfo` 164, …). The other ~9 KB is one distinct stack slot per `jstr()`/`std::to_string()`
+temporary, because this project builds at IDF's default **`CONFIG_COMPILER_OPTIMIZATION_DEBUG`
+(`-Og`)**, which barely coalesces slots across a 760-line function full of EH cleanup regions.
+Compiling *only this translation unit* at `-Os` takes the frame **11776 → 3744** and the whole
+`mcp_post` path **14512 → 6480** (~9904 free of 16384), with no source change. **This is APPLIED** —
+`set_source_files_properties(http_status.cpp PROPERTIES COMPILE_OPTIONS "-Os")` in
+`main/CMakeLists.txt`, which carries the full rationale beside the warning contract, and is
+per-source-file rather than a `CONFIG_COMPILER_*` key for that contract's own two reasons (a Kconfig
+key is global and would re-optimise IDF and the managed components; `sdkconfig.defaults` is hashed
+into CI's ccache key). The builder is no longer an outlier at all — 3744 against `history_record`'s
+3296. The COST is real and accepted: `-Og`'s precise backtraces are what diagnosed both overflows,
+and this is the file whose dumps mattered, so a dump from here is now less exact. A frame two thirds
+smaller prevents more dumps than it obscures.
+
+**Verified ON HARDWARE, not just on the ELF.** Both images were built from ONE source base
+(`main` @ 7524b4c), signed and USB-flashed to the XIAO bench board in turn — distinct ELF shas
+(`de3c4d995` at `-Og`, `14f7fe37f` at `-Os`), each confirmed stable across its own capture.
+`/status`, `/status?redact=1`, `/values` and `POST /mcp` `get_status` were captured on both and
+compared by JSON PATH: **403 paths on each status surface and 151 on /values, structurally
+identical**, with every value difference live-varying state (ENV III drift, the MQTT circulation
+witness, heap, RSSI, counters). An `-O` level cannot change semantics for well-defined code, so what
+this rules out is LATENT UB that `-Og` happened to mask — the one real risk of the change. Two traps
+worth knowing, each of which produced a convincing false alarm first:
+- **The bench board OTA'd itself mid-test.** It follows the `dev` channel, and a locally-flashed
+  image stamps `1.0.0`, which every `dev.N` outranks — so the board silently replaced the build
+  under measurement with the CI one, rebooted (`esp_restart()` after install → reset reason **`sw`**,
+  `last_crash: null`) and made a clean stress run read as a crash. Guard every on-hardware
+  comparison by reading `app_elf_sha256` BEFORE and AFTER, and treat a changed sha as a void run.
+- **Flashing an older build onto an OTA'd board opens the setup portal.** The dev build had already
+  rewritten NVS in a NEWER config-blob version, and the older image correctly REFUSED it (the
+  exact-length/CRC rule) instead of misreading it — no credentials, so `provisioning.cpp` opened the
+  AP. That is the blob contract working, not a fault: rebuilding from the matching base restored the
+  board from its own intact NVS with no password re-entry. Only serial shows this (an AP-mode board
+  withholds `/diag`), and `cat /dev/cu.*` drops the log often enough to read as a dead board — use
+  pyserial.
+
+**Splitting the builder into helpers is the weaker lever, and the measurement says so.** Extracting
+the already-braced `health` block dropped the frame 11616 → 11184 (−432; measured on the f686dff
+base, before the two commits that took the frame to 11776) but the standalone helper
+costs 736, so the *peak* got 304 bytes WORSE; adding `history` gave 10816 + max(736, 496) = 11552,
+i.e. 64 bytes better than where it started. The frame is a SUM of block contributions while the peak
+is `builder + max(helper)`, so extraction only pays once ~10 blocks are out (~4 KB, extrapolated) —
+a large mechanical edit to the most stack-critical function in the firmware, for half of what one
+build line buys. **`cfg.stack_size` stays 16384 and was deliberately NOT raised**: 4 KB of permanent
+RAM on a board whose binding limit is the largest CONTIGUOUS free block, spent on a compiler
+artefact, while `-Os` buys twice as much for one line. Should the `-Os` scoping ever be reverted,
+the stack must go to 20480 in the same commit — ~1872 bytes free is under this file's own "anything
+under ~1 KB free wants raising" line once ISRs and the unwind path are counted.
+
 **Every allocating FreeRTOS task loop must self-guard.** A task is a C frame boundary like a
 handler is: an escaping `std::bad_alloc` → `std::terminate` → reboot. Wrap the loop *body* in
 `try/catch (const std::exception&)` + `catch (...)`, `diag_printf` once, skip the cycle keeping the

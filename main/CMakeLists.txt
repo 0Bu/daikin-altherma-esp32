@@ -103,6 +103,50 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
     -Werror=unused-result
 )
 
+# THE STACK CONTRACT for the /status builder — the one file in this component whose OPTIMISATION
+# LEVEL is a correctness setting rather than a taste. `http_append_status_json()` has overflowed a
+# task stack twice (v1.0.12 on httpd, #318 on httpd again through an OTA that double-faulted and
+# rolled back a fleet), and both times the fix was to raise a stack against a frame nobody had
+# questioned. Measured on 2026-08-07 (main @ 7524b4c), the frame was 0x2e00 = 11776 bytes while the
+# NAMED LOCALS in that function sum to ~2.2 KB. The other ~9 KB is not live data: this project
+# builds at ESP-IDF's default CONFIG_COMPILER_OPTIMIZATION_DEBUG (-Og), which allocates a distinct
+# stack slot per `jstr()`/`std::to_string()` temporary instead of coalescing them, and a 760-line
+# function dense with EH cleanup regions is the worst case for that. -Os on this ONE translation
+# unit takes the frame to 0xea0 = 3744 (−68%), and the deepest httpd path — `mcp_post`, NOT
+# `h_status`, because MCP's get_status reuses this same builder and pays its frame plus its own —
+# from 14512 bytes of a 16384 stack (~1872 free, before ISR frames and before the ~700-byte
+# _Unwind_RaiseException path a std::bad_alloc costs below the throwing frame) to 6480.
+#
+# Verified on hardware too, not only on the ELF: both images built from this one base, signed and
+# flashed to the bench board in turn, produced byte-for-byte structurally identical /status,
+# /status?redact=1, /values and MCP get_status payloads (403 JSON paths each; every value delta was
+# live-varying state). That is what rules out latent UB -Og happened to mask.
+#
+# Chosen over the two alternatives because both are worse, measured rather than assumed:
+#   raising cfg.stack_size again  — 4 KB of permanent RAM on a board whose binding limit is the
+#                                   largest CONTIGUOUS free block, spent on a compiler artefact.
+#   splitting the builder up      — the frame is a SUM of block contributions but the peak is
+#                                   `builder + max(helper)`. Extracting the already-braced `health`
+#                                   block moved the frame 11616 → 11184 (on the f686dff base, before
+#                                   the frame reached 11776) while the standalone helper
+#                                   cost 736, i.e. the PEAK got 304 bytes WORSE; a second block
+#                                   (`history`) reached 10816 + max(736, 496) = 11552, 64 bytes
+#                                   better than the start. It only pays past ~10 extracted blocks.
+#
+# THE COST, stated because it is real: -Og's precise backtraces are what diagnosed both overflows,
+# and this is the file whose core dumps mattered. Inlining makes a dump from here less exact. That
+# is accepted deliberately — a frame two thirds smaller prevents more dumps than it obscures.
+#
+# Per-SOURCE-FILE, and NOT a CONFIG_COMPILER_* key in sdkconfig.defaults, for the same two reasons
+# the warning contract above is component-PRIVATE: a Kconfig key is global and would re-optimise
+# ESP-IDF and the managed components too, and sdkconfig.defaults is hashed into CI's ccache key
+# (scripts/idf-version.sh), so this would discard every cached object it cannot invalidate. Scoped
+# this way the command line changes for exactly one object.
+#
+# Re-measure after anything that grows this builder (the command is in .claude/CLAUDE.md under
+# "Memory constraints"); read the worst PATH, never the biggest FRAME, and never an idle heap number.
+set_source_files_properties(http_status.cpp PROPERTIES COMPILE_OPTIONS "-Os")
+
 # Assemble, minify and pre-compress the web UI at build time. The sources are split for edit locality —
 # www/index.html, www/style.css and the ordered JavaScript fragments in www/app.sources — and
 # inline_assets.cmake splices them back into the ONE self-contained page the device serves.
