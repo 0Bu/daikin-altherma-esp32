@@ -159,19 +159,24 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     gSgRequest: { values: new Map() },
     gDefrostState: { values: new Map() },
     gQuietState: { values: new Map() },
+    g2wv: { values: new Map() },
   };
   Object.keys(elements).forEach((id) => Object.assign(elements[id], attrs(id)));
   const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true, elements });
-  c.updateSchematicStateA11y({ bsh: false, defrost: false, quiet: false, sgMode: 0 });
+  c.updateSchematicStateA11y({ bsh: false, defrost: false, quiet: false, sgMode: 0,
+                                valve2On: false });
   assert.equal(elements.gBshState.values.get("aria-label"), "schem.bsh_label: state.off");
   assert.equal(elements.gSgRequest.values.get("aria-label"), "schem.sg_boost: sg.mode0");
   assert.equal(elements.gDefrostState.values.get("aria-label"), "schem.defrost_pill: state.off");
   assert.equal(elements.gQuietState.values.get("aria-label"), "chip.quiet: state.off");
-  c.updateSchematicStateA11y({ bsh: true, defrost: true, quiet: true, sgMode: 2 });
+  assert.equal(elements.g2wv.values.get("aria-label"), "schem.valve2: state.off");
+  c.updateSchematicStateA11y({ bsh: true, defrost: true, quiet: true, sgMode: 2,
+                                valve2On: true });
   assert.equal(elements.gBshState.values.get("aria-label"), "schem.bsh_label: state.on");
   assert.equal(elements.gSgRequest.values.get("aria-label"), "schem.sg_boost: sg.mode2");
   assert.equal(elements.gDefrostState.values.get("aria-label"), "schem.defrost_pill: state.on");
   assert.equal(elements.gQuietState.values.get("aria-label"), "chip.quiet: state.on");
+  assert.equal(elements.g2wv.values.get("aria-label"), "schem.valve2: state.on");
 }
 
 const LWT_X = X("Leaving water temp. before BUH (R1T)", "38.6", "leaving_water");
@@ -194,6 +199,8 @@ const M_BSH = (on) => M_FLAG(32, "Booster heater run", on, "bsh_state");
 const X_QUIET = (on) => ({ label: "Silent Mode", value: on ? "1" : "0", unit: "", reg: 0x60,
                            binary: true, concept: "quiet_state" });
 const M_QUIET = (on) => M_FLAG(9, "Quiet mode operation", on, "quiet_state");
+const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" : "0",
+                         unit: "", reg: 0x60, binary: true, binary_semantic: "valve_heat" });
 
 // Explanation semantics are part of source arbitration too: several catalog labels overlap while
 // naming different sensors, units or protocols. Pin the distinctions that the installer manuals
@@ -238,6 +245,29 @@ const M_QUIET = (on) => M_FLAG(9, "Quiet mode operation", on, "quiet_state");
   assert.match(flowSwitch.what, /does not prove that the model-specific minimum is met/i);
   assert.doesNotMatch(flowSwitch.what, /safety input|sufficient flow has been proven|binary flow proof/i);
 
+  const valve2 = c.descFor("2way valve(On:Heat_Off:Cool)", { reg: 0x60 });
+  assert.match(valve2.what, /controller output for an optional field-supplied 2-way valve/i);
+  assert.match(valve2.normal, /OFF alone neither proves Cooling/i);
+  assert.match(valve2.normal, /confirms the physical valve position/i);
+  assert.doesNotMatch(valve2.what, /selects the water path|Heating or Cooling/i);
+
+  const idle2wv = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+                         values: [X_2WV(false)] }).liveData();
+  assert.equal(idle2wv.valve2On, false, "the X10A bit remains the logical 2WV output state");
+  assert.equal(c.INSPECT.valve2.head(idle2wv), "state.off");
+  assert.match(c.INSPECT.valve2.now(idle2wv).en, /does not mean Cooling/i,
+    "an OFF output must not be promoted to the configured/current operating mode");
+  assert.match(c.INSPECT.valve2.now({ valve2On: true }).en, /neither active Heating/i,
+    "an ON output likewise cannot prove the operating mode");
+
+  const heatingWithOutputOff = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
+    values: [{ label: "I/U operation mode", value: "Heating", unit: "", reg: 0x60 }, X_2WV(false)],
+  }).liveData();
+  assert.equal(heatingWithOutputOff.spaceMode, "heat",
+    "the authoritative I/U mode remains Heating when the independent 2WV output is OFF");
+  assert.equal(heatingWithOutputOff.valve2On, false,
+    "the output remains separately visible instead of being overwritten by the mode");
+
   assert.doesNotMatch(c.mbDeltaHtml(LWT_X, LWT_M), /plate heat exchanger|backup heater/i,
     "the two leaving-water sources must not be assigned invented different measurement points");
 
@@ -281,7 +311,7 @@ const M_QUIET = (on) => M_FLAG(9, "Quiet mode operation", on, "quiet_state");
   const demoContext = {};
   vm.runInNewContext(demo.slice(0, end + "\n})();".length) +
     "\nthis.__smartGrid = DEMO.smartGrid; this.__outdoorAir = DEMO.outdoorAir;" +
-    " this.__standbyMbOut = DEMO.scenes[0].mbOut;", demoContext,
+    " this.__standbyMbOut = DEMO.scenes[0].mbOut; this.__standbyValues = DEMO.scenes[0].v;", demoContext,
   { filename: "tools/uigif/scenes.js" });
   assert.equal(demoContext.__smartGrid(0).value, 0);
   assert.equal(demoContext.__smartGrid(0).enum, "smart_grid_mode");
@@ -290,6 +320,10 @@ const M_QUIET = (on) => M_FLAG(9, "Quiet mode operation", on, "quiet_state");
   assert.equal(demoOut.off, 44);
   assert.equal(demoOut.concept, "outdoor_air");
   assert.equal(demoOut.value, "6.8", "the standby recording exercises the live Modbus fallback");
+  const standby2wv = demoContext.__standbyValues.find((r) => /2.?way valve/i.test(r.label));
+  assert.equal(standby2wv.value, "0",
+    "the standby recording reproduces the reported Heating-selected / 2WV-output-OFF split");
+  assert.equal(standby2wv.binary, true, "the demo crosses the real binary presentation boundary");
 }
 
 // Quiet is the outdoor-unit state with an exact second source. X10A leads disagreements; HomeHub

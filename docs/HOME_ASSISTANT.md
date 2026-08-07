@@ -290,8 +290,10 @@ Assistant but never a graph. The same reasoning applies to `wifi_connected` / `m
 `bus_connected` on the heartbeat topic, which are `1`/`0` for the same reason.
 
 `GET /values` reports the same numeric `1`/`0` values from the poll cache. The web UI translates only
-at its visual boundary: ordinary flags become `ON`/`OFF`, the two documented valve selectors become
-their named paths/modes, and the two Smart-Grid contacts additionally form one named four-state row.
+at its visual boundary: ordinary flags become `ON`/`OFF`, the 3-way valve selector becomes its named
+path, and the two Smart-Grid contacts additionally form one named four-state row. The 2-way-valve
+output is marked too but deliberately stays `ON`/`OFF`: it is separate from the configured/current
+operating mode, so its `OFF` neither proves Cooling nor contradicts a configured Heating mode.
 The optional `/values.binary_semantic` metadata drives that presentation; it does not change the
 MQTT or Home Assistant contract.
 

@@ -2,9 +2,11 @@
 // NAMED MEANINGS FOR THE FEW X10A BIT ROWS THAT ARE NOT PLAIN ON/OFF FLAGS.
 //
 // Converter family 300-307 deliberately keeps one common wire/publication contract: numeric 0/1.
-// Most rows really are activity flags (pump running, defrost active, thermostat demand), but two
-// valves encode a selected path and the two Smart-Grid contacts form one four-state mode. Rendering
-// all of those as ON/OFF throws away meaning the generated catalog itself documents.
+// Most rows really are activity/output flags (pump running, defrost active, thermostat demand), the
+// 3-way valve encodes a selected path and the two Smart-Grid contacts form one four-state mode. The
+// historical `valve_heat` id for the 2-way/heating-cooling output is retained for API/history
+// compatibility, but its presentation remains ON/OFF: this output is separate from the controller's
+// configured/current mode and its zero cannot safely be promoted to Cooling.
 //
 // The rule is structural rather than label-based. Labels are generated, vary between profiles and
 // are an API/history identity; (register page, byte offset, converter) is the actual bit identity.

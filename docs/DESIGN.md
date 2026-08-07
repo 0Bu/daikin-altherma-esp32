@@ -391,8 +391,9 @@ Body, ordered:
    schematic inspector: `/values` retains the shared numeric `1`/`0` value and adds the structural
    marker `binary:true`. The browser's final display boundary renders ordinary activity flags as
    **ON/OFF**. A second optional structural marker, `binary_semantic`, names the exceptional selector
-   bits: the 3-way valve becomes **Space heating/DHW**, the 2-way valve **Cooling/Heating**, and the
-   two Smart-Grid contacts additionally form one four-state **Free running/Forced off/Recommended
+   bits: the 3-way valve becomes **Space heating/DHW**, while the optional 2-way/shut-off-valve
+   output remains **OFF/ON** (it is separate from the configured/current mode, so OFF is not proof of
+   Cooling), and the two Smart-Grid contacts additionally form one four-state **Free running/Forced off/Recommended
    on/Forced on** row. This metadata changes presentation only; API, MQTT, history and HA remain
    numeric `0`/`1`. Labels and numeric magnitude are deliberately not used for type inference —
    several binary rows do not say "ON/OFF", while ordinary counters and stages can legitimately

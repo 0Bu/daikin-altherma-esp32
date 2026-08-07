@@ -154,7 +154,7 @@ const DEMO = (() => {
     R("Water pump signal (0:max-100:stop)", o.pumpSig, "", 0x62),
     B("Water pump operation", o.pumpOn, 0x60),
     B("3way valve(On:DHW_Off:Space)", o.valveDhw, 0x60),
-    B("2way valve(On:Heat_Off:Cool)", o.valveHeat, 0x60),
+    B("2way valve(On:Heat_Off:Cool)", o.valve2On, 0x60),
     B("Water flow switch", Number(o.flow) > 1, 0x60),
     B("Thermostat ON/OFF", o.thermo, 0x60),
     B("Space heating Operation ON/OFF", o.spaceOn, 0x62),
@@ -192,7 +192,7 @@ const DEMO = (() => {
                 rps: "0", disch: "24.5", hp: "0.0",
                 lp: "0.0", eev: "0", inv: "0.0", fan: "0", lwt: "28.4", ret: "28.0", tank: "48.2",
                 tankSet: "50.0", lwSet: "35.0", room: "21.4", roomSet: "21.0", flow: "0.0",
-                wp: "1.8", rp: "14.2", pumpSig: "100", pumpOn: false, valveDhw: false, valveHeat: true,
+                wp: "1.8", rp: "14.2", pumpSig: "100", pumpOn: false, valveDhw: false, valve2On: false,
                 thermo: false, spaceOn: false, defrost: false, quiet: true, ct: "0.1" }) },
 
     { name: "Heating", caption: "Heizen · Heating", mbOut: "5.4", mbPower: "1.4", sgMode: 0,
@@ -200,7 +200,7 @@ const DEMO = (() => {
                 rps: "45", disch: "68.1", hp: "26.2",
                 lp: "6.4", eev: "280", inv: "6.1", fan: "4", lwt: "38.4", ret: "33.9", tank: "49.5",
                 tankSet: "50.0", lwSet: "38.0", room: "21.4", roomSet: "21.5", flow: "21.0",
-                wp: "1.8", rp: "26.2", pumpSig: "12", pumpOn: true, valveDhw: false, valveHeat: true,
+                wp: "1.8", rp: "26.2", pumpSig: "12", pumpOn: true, valveDhw: false, valve2On: true,
                 thermo: true, spaceOn: true, defrost: false, quiet: false, ct: "6.0" }) },
 
     { name: "Defrost", caption: "Abtauen · Defrost", mbOut: "0.8", mbPower: "2.0", sgMode: 0,
@@ -208,7 +208,7 @@ const DEMO = (() => {
                 rps: "70", disch: "31.0", hp: "29.4",
                 lp: "7.8", eev: "410", inv: "8.8", fan: "0", lwt: "26.0", ret: "31.0", tank: "48.7",
                 tankSet: "50.0", lwSet: "38.0", room: "21.2", roomSet: "21.5", flow: "22.0",
-                wp: "1.8", rp: "29.4", pumpSig: "10", pumpOn: true, valveDhw: false, valveHeat: true,
+                wp: "1.8", rp: "29.4", pumpSig: "10", pumpOn: true, valveDhw: false, valve2On: true,
                 thermo: true, spaceOn: true, defrost: true, quiet: false, ct: "8.7" }) },
 
     { name: "Circulation", caption: "Nachlauf · Circulation", mbOut: "4.8", mbPower: "0.2", sgMode: 0,
@@ -216,7 +216,7 @@ const DEMO = (() => {
                 rps: "0", disch: "58.0", hp: "0.0",
                 lp: "0.0", eev: "0", inv: "0.0", fan: "0", lwt: "32.1", ret: "31.9", tank: "48.5",
                 tankSet: "50.0", lwSet: "38.0", room: "21.3", roomSet: "21.5", flow: "12.0",
-                wp: "1.8", rp: "15.0", pumpSig: "38", pumpOn: true, valveDhw: false, valveHeat: true,
+                wp: "1.8", rp: "15.0", pumpSig: "38", pumpOn: true, valveDhw: false, valve2On: true,
                 thermo: false, spaceOn: false, defrost: false, quiet: true, ct: "0.8" }) },
 
     { name: "DHW + BSH", caption: "Warmwasser + Heizstab · DHW + immersion heater",
@@ -225,7 +225,7 @@ const DEMO = (() => {
                 rps: "62", disch: "78.4", hp: "36.8",
                 lp: "7.1", eev: "320", inv: "7.9", fan: "6", lwt: "54.8", ret: "49.8", tank: "44.0",
                 tankSet: "50.0", lwSet: "35.0", room: "21.2", roomSet: "21.0", flow: "14.0",
-                wp: "1.8", rp: "36.8", pumpSig: "22", pumpOn: true, valveDhw: true, valveHeat: true,
+                wp: "1.8", rp: "36.8", pumpSig: "22", pumpOn: true, valveDhw: true, valve2On: true,
                 thermo: false, spaceOn: false, bshOn: true, defrost: false, quiet: false, ct: "8.0" }) },
 
     { name: "Heating + DHW", caption: "Heizen + Warmwasser · Heating + hot water",
@@ -235,7 +235,7 @@ const DEMO = (() => {
                 hp: "34.6", lp: "6.8", eev: "305", inv: "7.4", fan: "5", lwt: "51.6", ret: "46.9",
                 tank: "46.8", tankSet: "50.0", lwSet: "38.0", room: "21.1", roomSet: "21.5",
                 flow: "15.5", wp: "1.8", rp: "34.6", pumpSig: "18", pumpOn: true, valveDhw: true,
-                valveHeat: true,
+                valve2On: true,
                 thermo: true, spaceOn: true, defrost: false, quiet: false, ct: "7.4" }) },
 
     { name: "Cooling + DHW", caption: "Kühlen + Warmwasser · Cooling + hot water",
@@ -245,7 +245,7 @@ const DEMO = (() => {
                 hp: "35.2", lp: "7.6", eev: "330", inv: "7.8", fan: "6", lwt: "52.0", ret: "47.2",
                 tank: "45.8", tankSet: "50.0", lwSet: "18.0", room: "24.0", roomSet: "23.0",
                 flow: "15.0", wp: "1.8", rp: "35.2", pumpSig: "18", pumpOn: true, valveDhw: true,
-                valveHeat: false,
+                valve2On: false,
                 thermo: true, spaceOn: true, defrost: false, quiet: false, ct: "7.7" }) },
 
     { name: "Cooling", caption: "Kühlen · Cooling", mbOut: "30.2", mbPower: "1.2", sgMode: 0,
@@ -253,7 +253,7 @@ const DEMO = (() => {
                 rps: "44", disch: "69.0", hp: "28.2",
                 lp: "7.4", eev: "295", inv: "5.4", fan: "5", lwt: "12.0", ret: "16.0", tank: "48.0",
                 tankSet: "50.0", lwSet: "18.0", room: "24.2", roomSet: "23.0", flow: "21.0",
-                wp: "1.8", rp: "28.2", pumpSig: "14", pumpOn: true, valveDhw: false, valveHeat: false,
+                wp: "1.8", rp: "28.2", pumpSig: "14", pumpOn: true, valveDhw: false, valve2On: false,
                 thermo: false, spaceOn: true, defrost: false, quiet: false, ct: "5.3" }) },
 
     { name: "Cooling residual", caption: "Restwärme-Nachlauf · Cooling residual circulation",
@@ -262,7 +262,7 @@ const DEMO = (() => {
                 rps: "0", disch: "64.0", hp: "0.0",
                 lp: "0.0", eev: "0", inv: "0.0", fan: "0", lwt: "42.0", ret: "38.0", tank: "48.0",
                 tankSet: "50.0", lwSet: "18.0", room: "24.0", roomSet: "23.0", flow: "14.0",
-                wp: "1.8", rp: "17.0", pumpSig: "34", pumpOn: true, valveDhw: false, valveHeat: false,
+                wp: "1.8", rp: "17.0", pumpSig: "34", pumpOn: true, valveDhw: false, valve2On: false,
                 thermo: false, spaceOn: true, defrost: false, quiet: true, ct: "0.8" }) },
   ];
 

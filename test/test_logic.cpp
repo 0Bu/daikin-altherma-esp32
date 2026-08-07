@@ -6318,7 +6318,7 @@ static void test_history() {
         { "buh_step1",        39, -1, 1 },   // exact event-folded BUH stage bits 304/303
         { "buh_step2",        39, -1, 1 },
         { "valve_dhw",        39, -1, 1 },   // exact bit 306; persistent DHW/space selector state
-        { "valve_heat",       39, -1, 1 },   // exact bit 307; persistent heat/cool selector state
+        { "valve_heat",       39, -1, 1 },   // legacy id; exact bit 307, persistent 2WV output state
         { "water_flow_switch",39, -1, 1 },   // exact bit 307 on the preceding state byte
         // Derived from two structurally identified contact rows, so it resolves no SINGLE catalog
         // row. Its truth table is asserted above; test_binary_semantics pins both contacts' catalog

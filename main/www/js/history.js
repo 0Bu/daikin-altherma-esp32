@@ -508,14 +508,14 @@ const STATE_HIST = Object.freeze({
   },
   valve_heat: {
     classify: (v) => [0, 10].includes(v) ? v === 10 : null,
-    primary: "x10a", total: "hist.valve_heat_total", inactiveTotal: "hist.valve_cool_total",
-    run: "hist.state_phase_run", none: "hist.valve_none",
-    active: "hist.valve_heat", inactive: "hist.valve_cool", aria: "hist.valve_heat_aria",
+    primary: "x10a", total: "hist.valve2_on_total", inactiveTotal: "hist.valve2_off_total",
+    run: "hist.state_phase_run", none: "hist.valve2_none",
+    active: "hist.valve2_on", inactive: "hist.valve2_off", aria: "hist.valve2_aria",
     levels: [
       { match: (v) => [0, 10].includes(v) ? v === 0 : null,
-        cls: "valve-cool", label: "hist.valve_cool" },
+        cls: "state-off", label: "hist.valve2_off" },
       { match: (v) => [0, 10].includes(v) ? v === 10 : null,
-        cls: "valve-heat", label: "hist.valve_heat" },
+        cls: "valve2-on", label: "hist.valve2_on" },
     ],
   },
   water_flow_switch: {
@@ -1130,12 +1130,14 @@ const HOMEHUB_ENUM_VALUE_I18N = Object.freeze({
   ]),
 });
 
-// Most converter-300..307 rows are genuine flags and remain ON/OFF. These two structural ids are
-// selectors: their bit chooses a path/mode, so name that selected state instead of displaying the
-// electrical bit. The public value itself remains 0/1.
+// Most converter-300..307 rows are genuine flags and remain ON/OFF. The 3-way valve is the one
+// structural selector whose bit chooses a named path. `valve_heat` is a legacy stable semantic id
+// for the 2-way/heating-cooling OUTPUT, so it deliberately remains ON/OFF: this output is separate
+// from the configured/current mode and must never be promoted to Cooling. The public value itself
+// remains 0/1.
 const BINARY_VALUE_I18N = Object.freeze({
   valve_dhw: Object.freeze({ "0": "enum.space_heating", "1": "enum.dhw" }),
-  valve_heat: Object.freeze({ "0": "enum.cooling", "1": "enum.heating" }),
+  valve_heat: Object.freeze({ "0": "state.off", "1": "state.on" }),
 });
 
 // /values keeps the firmware-wide numeric 0/1 contract and marks true flags with binary:true.
