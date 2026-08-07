@@ -78,6 +78,7 @@ import re, sys
 p = sys.argv[1]
 s = open(p).read()
 seed = re.sub(r"        if \(!circulation\.configured\) \{\n"
+              r"            if \(tr\.label\[0\] \|\| tr\.unit\[0\]\) s_persist_dirty = true;\n"
               r"            tr\.label\[0\] = '\\0';\n"
               r"            tr\.unit\[0\] = '\\0';\n"
               r"            continue;\n"

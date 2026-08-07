@@ -44,8 +44,12 @@ assert.match(history, /if \(board_trend\(d\)\) continue;/,
 // The circulation ring used to be labelled unconditionally, so /status.history.rows offered a trend
 // the device could never fill and the Diagnostics card drew "no readings yet" under a row reading
 // "not configured". Its two siblings were already gated; this is that rule for the third.
+// The window is bounded rather than "the very next line": the branch also carries the persistence
+// seal's dirty bookkeeping (#391), and pinning adjacency would make this fail for a change that
+// cannot affect what it asserts. What it still asserts is the thing that matters — inside the
+// not-configured branch, the label is cleared.
 assert.match(history,
-  /fold_circulation_locked[\s\S]*?if \(!circulation\.configured\) \{\s*\n\s*tr\.label\[0\] = '\\0';/,
+  /fold_circulation_locked[\s\S]*?if \(!circulation\.configured\) \{[\s\S]{0,240}?tr\.label\[0\] = '\\0';/,
   "an unconfigured circulation witness must clear its trend label so /status stops offering it");
 assert.match(status, /if \(mb\.enabled\) \{[\s\S]*?HOMEHUB_HISTORIES/,
   "HomeHub trends must be offered only while that stack is enabled");

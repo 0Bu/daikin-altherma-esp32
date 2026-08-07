@@ -294,9 +294,15 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form of this pay
                                    #           error?,error_code?,error_detail?,error_register?},
                                    #        # link diagnostics; read-only, no write API
                                    #        field is a command. Empty host disables polling/search.
-                                   #   history:{dt,rows:[{id,label}]},   # rows with a 24 h trend;
+                                   #   history:{dt,persist,rows:[{id,label}]},  # rows with a 24 h trend;
                                    #        id = the concept (what /history takes), label = how the
                                    #        detected profile spells it. Absent rows are omitted.
+                                   #        persist = how THIS boot's rings came to be: "accept"
+                                   #        (adopted from .noinit DRAM across a reset that kept
+                                   #        power) or why they started empty — "power_cycle",
+                                   #        "wrong_catalog" after an update, "bad_crc", "no_record",
+                                   #        "wrong_version". A chart that emptied itself has a
+                                   #        stated cause instead of looking like a defect.
                                    #   health:{covered_s,full_span,status,available,assessable,evaluated,
                                    #        checks:[{id,verdict,evidence,observed_s,required_s,…}]},
                                    #        # rolling X10A operating OBSERVATION, not a whole-plant

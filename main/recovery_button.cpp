@@ -3,6 +3,7 @@
 #include "recovery_button.hpp"
 #include "config.hpp"
 #include "diag_log.hpp"
+#include "history.hpp"
 #include "nvs_storage.hpp"
 #include "status_led.hpp"
 #include "logic/button.hpp"
@@ -34,6 +35,10 @@ void factory_reset() {
     vTaskDelay(pdMS_TO_TICKS(WIPE_LEAD_MS));
 
     const esp_err_t e = nvs_erase_all();
+    // The day of plant readings recorded beside that config is the user's too, so it goes with it.
+    // This ALSO suppresses the shutdown handler that would otherwise write the whole snapshot back
+    // out milliseconds later, on the very reboot this reset triggers.
+    history_flash_forget();
 
     // Hold the signal to its full visible duration regardless of how fast the erase ran.
     const int elapsed = static_cast<int>((esp_timer_get_time() - t0) / 1000);

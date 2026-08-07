@@ -10,12 +10,30 @@
 // twelve HomeHub rings another 6912 bytes and three ENV III rings 1728 bytes — see
 // logic/history.hpp's HISTORY_BYTES_PER_TREND and the ceiling asserts beside the arrays.
 //
-// RAM only, and deliberately not persisted: a 576-byte blob rewritten every 5 minutes is ~100k NVS
-// writes a year in the partition that holds the WiFi credentials, to save a history that is only
-// ever nice-to-have. After a reboot/OTA the common raster therefore grows from zero to 24 hours.
-// A later X10A/HomeHub identity change removes the old readings but preserves that boot-aligned
-// raster as explicit gaps, so every chart shows the same elapsed window without splicing devices.
-// The UI draws the span actually retained ("Aufzeichnung · 11 h" until the first full day).
+// NOT in NVS, and that has not changed: a 576-byte blob rewritten every 5 minutes is ~100k writes a
+// year in the partition that holds the WiFi credentials, to save a history that is only ever
+// nice-to-have. What DID change is that "not in NVS" stopped meaning "gone on every reboot" —
+// the rings now survive one, through two media that each cover what the other cannot
+// (logic/history_persist.hpp carries the reasoning; this header carries the seams):
+//
+//   .noinit DRAM   — the live arrays are simply no longer zeroed at startup, so any reset that kept
+//                    power keeps the readings. Costs no flash write and no extra RAM. The one seam
+//                    is the bucket that was open when the device went down: it is dropped, so the
+//                    restored series can be up to one HISTORY_DT_S adrift on the axis.
+//   hist partition — a coarse (30-minute) snapshot written once per intentional reboot, which is
+//                    what carries the history across an OTA. OPTIONAL: a partition table is not
+//                    delivered by OTA, so boards updated over the air simply do not have it.
+//
+// LOSING POWER is still unrecovered, on purpose: only a medium off this board could survive it, and
+// that is a different feature with a different owner. /status.history.persist then reports
+// "power_cycle" and the rings start empty, exactly as they always did.
+//
+// The coarse path is SPLICED IN BEHIND the live samples by absolute wall-clock bucket, never
+// appended, and is skipped entirely while the clock is unsynced — an unanchored curve has no
+// honest position on the axis. A later X10A/HomeHub identity change removes the old readings but
+// preserves the boot-aligned raster as explicit gaps, so every chart shows the same elapsed window
+// without splicing devices. The UI draws the span actually retained ("Aufzeichnung · 11 h" until the
+// first full day).
 #include "hp_poll.hpp"          // CachedValue
 #include "logic/history.hpp"
 
@@ -99,6 +117,28 @@ int64_t history_env3_oldest_bucket(size_t sample_count);
 // when the model changes, so a returned pointer could be read mid-write. The web UI matches its
 // value rows against this string; the trend ID is what /history takes.
 size_t history_label(size_t t, char* out, size_t max);
+
+// ── Persistence seams ───────────────────────────────────────────────────────────────────────────
+
+// How this boot's rings came to be: "accept" (adopted from RAM across a reset that kept power) or
+// the reason they started empty ("power_cycle", "wrong_catalog" after an update, "bad_crc", …).
+// Reported on /status.history so a chart that emptied itself has a stated cause rather than looking
+// like a bug — logic/history_persist.hpp's HistoryRestore vocabulary.
+const char* history_persist_state();
+
+// Write the coarse snapshot to the optional `hist` partition. Registered as an esp_restart shutdown
+// handler by history_start(), so the ordinary caller is the reboot itself.
+void history_flash_save();
+
+// Drop the stored snapshot AND suppress the shutdown-handler write that the same reboot would
+// otherwise perform. The factory reset's counterpart for the plant history: the configuration being
+// erased is the user's, and so is the day of readings recorded beside it.
+void history_flash_forget();
+
+// Splice at most ONE stored ring back per call, driven off the poll task's unconditional top-of-cycle
+// tick. Bounded deliberately: 46 flash reads and splices in one go would stall the task that owns
+// the X10A UART, and every splice is positioned absolutely, so arriving a minute late costs nothing.
+void history_service_flash_restore();
 
 // The row's OWN unit ("°C", "bar", "A", … — whatever `unit_for_datatype` gave the cached value), or
 // empty when the profile carries no such row. Reported rather than assumed: the trends mix °C, bar

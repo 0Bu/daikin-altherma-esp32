@@ -52,6 +52,7 @@
 #include "logic/link_watch.hpp"
 #include "logic/feature_gate.hpp"
 #include "logic/history.hpp"
+#include "logic/history_persist.hpp"
 #include "logic/lwt_select.hpp"
 #include "logic/profile_view.hpp"
 #include "logic/ou_stale.hpp"
@@ -9259,6 +9260,250 @@ static void test_feature_gate() {
     CHECK(!uc5_supported(ghost_cov));
 }
 
+// ── logic/history_persist.hpp ───────────────────────────────────────────────────────────────────
+// Persisting the rings is the one feature here whose failure mode is a CONFIDENTLY WRONG chart
+// rather than an absent one, so the tests are written against the ways a restore can be wrong while
+// looking right: adopted after a power cycle, adopted across a catalog change, or placed at the
+// wrong instant on the axis.
+static void test_history_persist() {
+    using namespace logic;
+
+    // --- the streaming CRC is the SAME function the config blob is sealed with -------------------
+    // Split into update/final so the ring seal can skip the open bucket's `pending` (see the header).
+    // The property every caller depends on is that feeding two regions equals feeding their
+    // concatenation — if that broke, the blob's own integrity check would break with it.
+    const char* v = "123456789";
+    CHECK(config_crc32(reinterpret_cast<const uint8_t*>(v), 9) == 0xCBF43926u);   // the standard vector
+    uint32_t split = CONFIG_CRC32_INIT;
+    split = config_crc32_update(split, reinterpret_cast<const uint8_t*>(v), 4);
+    split = config_crc32_update(split, reinterpret_cast<const uint8_t*>(v) + 4, 5);
+    CHECK(config_crc32_final(split) == 0xCBF43926u);
+    CHECK(config_crc32_update(CONFIG_CRC32_INIT, nullptr, 0) == CONFIG_CRC32_INIT);
+
+    // --- which resets leave DRAM intact ---------------------------------------------------------
+    // The allow list, stated both ways. The refusals are the load-bearing half: adopting garbage as
+    // a day of plant readings is the failure this check exists for, and POWERON is not the only way
+    // to reach it — a brown-out leaves the chip powered while the contents are unproven.
+    CHECK(history_reset_preserves_ram(static_cast<uint32_t>(CrashReason::SW)));
+    CHECK(history_reset_preserves_ram(static_cast<uint32_t>(CrashReason::PANIC)));
+    CHECK(history_reset_preserves_ram(static_cast<uint32_t>(CrashReason::TASK_WDT)));
+    CHECK(history_reset_preserves_ram(static_cast<uint32_t>(CrashReason::INT_WDT)));
+    CHECK(history_reset_preserves_ram(static_cast<uint32_t>(CrashReason::OTHER_WDT)));
+    CHECK(history_reset_preserves_ram(static_cast<uint32_t>(CrashReason::CPU_LOCKUP)));
+    CHECK(history_reset_preserves_ram(static_cast<uint32_t>(CrashReason::EXT)));
+    CHECK(history_reset_preserves_ram(static_cast<uint32_t>(CrashReason::USB)));
+    CHECK(history_reset_preserves_ram(static_cast<uint32_t>(CrashReason::JTAG)));
+    CHECK(history_reset_preserves_ram(static_cast<uint32_t>(CrashReason::SDIO)));
+    CHECK(!history_reset_preserves_ram(static_cast<uint32_t>(CrashReason::POWERON)));
+    CHECK(!history_reset_preserves_ram(static_cast<uint32_t>(CrashReason::BROWNOUT)));
+    CHECK(!history_reset_preserves_ram(static_cast<uint32_t>(CrashReason::PWR_GLITCH)));
+    CHECK(!history_reset_preserves_ram(static_cast<uint32_t>(CrashReason::DEEPSLEEP)));
+    CHECK(!history_reset_preserves_ram(static_cast<uint32_t>(CrashReason::EFUSE)));
+    CHECK(!history_reset_preserves_ram(static_cast<uint32_t>(CrashReason::UNKNOWN)));
+    CHECK(!history_reset_preserves_ram(9999));            // a newer IDF code: refused, not guessed
+
+    // --- the verdict, and the ORDER it decides in -----------------------------------------------
+    const uint32_t fp = history_catalog_fingerprint();
+    const uint32_t sw = static_cast<uint32_t>(CrashReason::SW);
+    CHECK(history_restore_verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp, fp, 7, 7)
+          == HistoryRestore::Accept);
+    // A power-cycled board is full of bytes that would ALSO fail the magic and the CRC. Reporting
+    // the cheapest true cause keeps a reader from hunting a memory fault that is not there.
+    CHECK(history_restore_verdict(static_cast<uint32_t>(CrashReason::POWERON), 0, 0, 0, fp, 1, 2)
+          == HistoryRestore::PowerCycle);
+    CHECK(history_restore_verdict(sw, 0, HISTORY_PERSIST_VERSION, fp, fp, 7, 7)
+          == HistoryRestore::NoRecord);
+    CHECK(history_restore_verdict(sw, HISTORY_PERSIST_MAGIC, 99, fp, fp, 7, 7)
+          == HistoryRestore::WrongVersion);
+    CHECK(history_restore_verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp ^ 1u, fp, 7, 7)
+          == HistoryRestore::WrongCatalog);
+    CHECK(history_restore_verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp, fp, 7, 8)
+          == HistoryRestore::BadCrc);
+    CHECK(std::strcmp(history_restore_slug(HistoryRestore::Accept), "accept") == 0);
+    CHECK(std::strcmp(history_restore_slug(HistoryRestore::NoRecord), "no_record") == 0);
+    CHECK(std::strcmp(history_restore_slug(HistoryRestore::PowerCycle), "power_cycle") == 0);
+    CHECK(std::strcmp(history_restore_slug(HistoryRestore::WrongVersion), "wrong_version") == 0);
+    CHECK(std::strcmp(history_restore_slug(HistoryRestore::WrongCatalog), "wrong_catalog") == 0);
+    CHECK(std::strcmp(history_restore_slug(HistoryRestore::BadCrc), "bad_crc") == 0);
+    CHECK(std::strcmp(history_restore_slug(static_cast<HistoryRestore>(200)), "unknown") == 0);
+
+    // --- the fingerprint separates what it must ------------------------------------------------
+    // Deterministic (two calls agree) and it distinguishes the pieces a trend is made of. The
+    // NUL terminator is what stops "ab"+"c" and "a"+"bc" hashing alike, which is the collision a
+    // reordered pair of trend ids would otherwise slip through.
+    CHECK(history_catalog_fingerprint() == fp);
+    CHECK(history_fp_str(CONFIG_CRC32_INIT, "ab") != history_fp_str(CONFIG_CRC32_INIT, "ba"));
+    CHECK(history_fp_str(history_fp_str(CONFIG_CRC32_INIT, "ab"), "c") !=
+          history_fp_str(history_fp_str(CONFIG_CRC32_INIT, "a"), "bc"));
+    CHECK(history_fp_str(CONFIG_CRC32_INIT, nullptr) == history_fp_str(CONFIG_CRC32_INIT, ""));
+    CHECK(history_fp_u32(CONFIG_CRC32_INIT, 1) != history_fp_u32(CONFIG_CRC32_INIT, 256));
+
+    // --- absolute buckets -----------------------------------------------------------------------
+    CHECK(history_bucket_from_unix(0) == 0);
+    CHECK(history_bucket_from_unix(299) == 0);
+    CHECK(history_bucket_from_unix(300) == 1);
+    CHECK(history_bucket_from_unix(1'700'000'000) == 1'700'000'000 / 300);
+    // Floors toward minus infinity rather than truncating toward zero, so the grid has no wide cell
+    // straddling the epoch. Unreachable with a real clock; a grid with one odd cell is not the kind
+    // of thing that announces itself.
+    CHECK(history_bucket_from_unix(-1) == -1);
+    CHECK(history_bucket_from_unix(-300) == -1);
+    CHECK(history_bucket_from_unix(-301) == -2);
+    CHECK(history_bucket_from_unix(5, 0) == 0);           // degenerate dt: 0, never a divide by zero
+
+    // --- decimation is ANCHORED ON THE NEWEST ---------------------------------------------------
+    // The last coarse sample must be the last real one: a reader looks at the newest point first, so
+    // it is the one that must never be the one dropped by the grid.
+    HistorySample full[HISTORY_SAMPLES];
+    for (size_t i = 0; i < HISTORY_SAMPLES; i++) full[i] = static_cast<HistorySample>(i);
+    HistorySample coarse[HISTORY_COARSE_SAMPLES];
+    size_t m = history_coarse_encode(full, HISTORY_SAMPLES, HISTORY_COARSE_STRIDE,
+                                     coarse, HISTORY_COARSE_SAMPLES);
+    CHECK(m == HISTORY_COARSE_SAMPLES);
+    CHECK(coarse[m - 1] == static_cast<HistorySample>(HISTORY_SAMPLES - 1));
+    CHECK(coarse[m - 2] == static_cast<HistorySample>(HISTORY_SAMPLES - 1 - HISTORY_COARSE_STRIDE));
+    CHECK(coarse[0] == static_cast<HistorySample>(HISTORY_SAMPLES - 1 -
+                                                  (m - 1) * HISTORY_COARSE_STRIDE));
+    // A partly-filled ring yields fewer coarse samples, still ending on the newest.
+    m = history_coarse_encode(full, 10, 6, coarse, HISTORY_COARSE_SAMPLES);
+    CHECK(m == 2);
+    CHECK(coarse[1] == 9);
+    CHECK(coarse[0] == 3);
+    // A tight output buffer truncates the OLD end, never the new one.
+    m = history_coarse_encode(full, HISTORY_SAMPLES, HISTORY_COARSE_STRIDE, coarse, 3);
+    CHECK(m == 3);
+    CHECK(coarse[2] == static_cast<HistorySample>(HISTORY_SAMPLES - 1));
+    CHECK(history_coarse_encode(nullptr, 10, 6, coarse, 4) == 0);
+    CHECK(history_coarse_encode(full, 0, 6, coarse, 4) == 0);
+    CHECK(history_coarse_encode(full, 10, 0, coarse, 4) == 0);
+    CHECK(history_coarse_encode(full, 10, 6, coarse, 0) == 0);
+    CHECK(history_coarse_encode(full, 10, 6, nullptr, 4) == 0);
+
+    // --- event rows are OR-folded, not decimated --------------------------------------------------
+    // A defrost or a BUH step is shorter than one 5-minute bucket, which is why these rows are
+    // event-folded going in. Decimating them going out would drop five buckets in six and a restored
+    // day would show no defrost at all — an artefact that reads like a finding.
+    HistorySample ev[HISTORY_SAMPLES];
+    for (size_t i = 0; i < HISTORY_SAMPLES; i++) ev[i] = 0;          // measured OFF throughout
+    ev[HISTORY_SAMPLES - 4] = 10;                                     // one ON, in a bucket that
+    HistorySample evc[HISTORY_COARSE_SAMPLES];                        // pure decimation would drop
+    size_t em = history_coarse_encode(ev, HISTORY_SAMPLES, HISTORY_COARSE_STRIDE,
+                                      evc, HISTORY_COARSE_SAMPLES, /*event=*/false);
+    CHECK(em == HISTORY_COARSE_SAMPLES);
+    CHECK(evc[em - 1] == 0);                                          // decimated: the pulse is gone
+    em = history_coarse_encode(ev, HISTORY_SAMPLES, HISTORY_COARSE_STRIDE,
+                               evc, HISTORY_COARSE_SAMPLES, /*event=*/true);
+    CHECK(em == HISTORY_COARSE_SAMPLES);
+    CHECK(evc[em - 1] == 10);                                         // OR-folded: it survives
+    CHECK(evc[em - 2] == 0);                                          // and does not smear backwards
+    // The fold itself: ON wins over anything, a measured OFF beats an absence, HELD_OVER beats
+    // NO_READING, and an all-absent group stays absent.
+    HistorySample g1[3] = { HISTORY_NO_READING, 10, 0 };
+    CHECK(history_coarse_event_fold(g1, 0, 2) == 10);
+    HistorySample g2[3] = { HISTORY_NO_READING, 0, HISTORY_NO_READING };
+    CHECK(history_coarse_event_fold(g2, 0, 2) == 0);
+    HistorySample g3[2] = { HISTORY_NO_READING, HISTORY_HELD_OVER };
+    CHECK(history_coarse_event_fold(g3, 0, 1) == HISTORY_HELD_OVER);
+    HistorySample g4[2] = { HISTORY_NO_READING, HISTORY_NO_READING };
+    CHECK(history_coarse_event_fold(g4, 0, 1) == HISTORY_NO_READING);
+    // A HELD_OVER anywhere must not outrank a real ON.
+    HistorySample g5[3] = { HISTORY_HELD_OVER, 10, HISTORY_HELD_OVER };
+    CHECK(history_coarse_event_fold(g5, 0, 2) == 10);
+    // The oldest group clamps at the array start rather than reading before it.
+    HistorySample shortv[4] = { 10, 0, 0, 0 };
+    em = history_coarse_encode(shortv, 4, 6, evc, HISTORY_COARSE_SAMPLES, /*event=*/true);
+    CHECK(em == 1);
+    CHECK(evc[0] == 10);
+
+    // --- dropping the write-side padding ----------------------------------------------------------
+    // The stored block is right-aligned and pads its OLD end with NO_READING. Those slots must not
+    // reach the splice, or a ring holding one real reading claims a 24-hour span it never recorded.
+    HistorySample pad[HISTORY_COARSE_SAMPLES];
+    for (size_t i = 0; i < HISTORY_COARSE_SAMPLES; i++) pad[i] = HISTORY_NO_READING;
+    CHECK(history_coarse_lead_skip(pad, HISTORY_COARSE_SAMPLES) == HISTORY_COARSE_SAMPLES);
+    pad[HISTORY_COARSE_SAMPLES - 1] = 231;
+    CHECK(history_coarse_lead_skip(pad, HISTORY_COARSE_SAMPLES) == HISTORY_COARSE_SAMPLES - 1);
+    // An INTERIOR gap is a real observation and survives; only the leading run goes.
+    pad[HISTORY_COARSE_SAMPLES - 3] = 200;
+    CHECK(history_coarse_lead_skip(pad, HISTORY_COARSE_SAMPLES) == HISTORY_COARSE_SAMPLES - 3);
+    // HELD_OVER is a recorded state ("outdoor unit resting"), never padding — it stops the skip.
+    HistorySample held[4] = { HISTORY_NO_READING, HISTORY_HELD_OVER, HISTORY_NO_READING, 55 };
+    CHECK(history_coarse_lead_skip(held, 4) == 1);
+    // Nothing to skip, and the null guard.
+    HistorySample dense[3] = { 1, 2, 3 };
+    CHECK(history_coarse_lead_skip(dense, 3) == 0);
+    CHECK(history_coarse_lead_skip(nullptr, 3) == 3);
+
+    // --- the splice -----------------------------------------------------------------------------
+    // The restored samples go BEHIND what this boot recorded, each at the absolute bucket it was
+    // actually taken in — the whole point, since a snapshot that is merely appended slides a
+    // day-old curve onto today.
+    HistorySample out[HISTORY_SAMPLES];
+    const HistorySample oldv[3] = { 100, 200, 300 };
+    const HistorySample livev[2] = { 11, 22 };
+    HistorySnapshotView snap;
+    snap.v = oldv; snap.n = 3; snap.stride = 2; snap.newest_bucket = 1000;
+
+    // Live holds buckets 1004..1005; the snapshot holds 996, 998, 1000. Everything between is a gap.
+    size_t n = history_splice(snap, livev, 2, 1005, out, HISTORY_SAMPLES);
+    CHECK(n == 10);                                   // 996 .. 1005
+    CHECK(out[0] == 100);                             // 996
+    CHECK(history_is_absent(out[1]));                 // 997 — the stride's own gap, not a failure
+    CHECK(out[2] == 200);                             // 998
+    CHECK(out[4] == 300);                             // 1000
+    CHECK(history_is_absent(out[5]));                 // 1001 — the outage between the two lives
+    CHECK(out[8] == 11);                              // 1004
+    CHECK(out[9] == 22);                              // 1005
+
+    // THE LIVE SAMPLE WINS in an overlap, including when it is an absence: this boot observed that
+    // bucket itself, and a retained payload from a previous life of the same five minutes must not
+    // overwrite the observation.
+    const HistorySample gap_live[3] = { HISTORY_NO_READING, 11, 22 };
+    snap.newest_bucket = 1005;                        // snapshot buckets 1001, 1003, 1005
+    n = history_splice(snap, gap_live, 3, 1005, out, HISTORY_SAMPLES);
+    CHECK(n == 5);                                    // 1001 .. 1005
+    CHECK(out[0] == 100);                             // 1001 — outside the live range, snapshot only
+    CHECK(history_is_absent(out[1]));                 // 1002 — between two coarse samples
+    CHECK(history_is_absent(out[2]));                 // 1003 — live absence beats the snapshot's 200
+    CHECK(out[3] == 11);
+    CHECK(out[4] == 22);                              // 1005 — live beats the snapshot's 300
+
+    // A snapshot claiming to be NEWER than the live ring is refused rather than clamped — the two
+    // anchors disagree about the present, and every position for it would be a guess.
+    snap.newest_bucket = 2000;
+    n = history_splice(snap, livev, 2, 1005, out, HISTORY_SAMPLES);
+    CHECK(n == 2);
+    CHECK(out[0] == 11 && out[1] == 22);              // live alone, snapshot ignored
+
+    // Aged wholly out of the 24-hour window: not an error, just nothing to contribute.
+    snap.newest_bucket = 1005 - static_cast<int64_t>(HISTORY_SAMPLES);
+    n = history_splice(snap, livev, 2, 1005, out, HISTORY_SAMPLES);
+    CHECK(n == 2);
+    CHECK(out[0] == 11 && out[1] == 22);
+
+    // An EMPTY live ring is the normal case right after a power-loss boot: the snapshot alone
+    // defines the window, and it must still land on its own buckets.
+    snap.newest_bucket = 1000;
+    n = history_splice(snap, nullptr, 0, 1005, out, HISTORY_SAMPLES);
+    CHECK(n == 10);
+    CHECK(out[4] == 300);
+    CHECK(history_is_absent(out[9]));                 // 1005 — open, nothing recorded there yet
+
+    // Nothing on either side.
+    CHECK(history_splice(HistorySnapshotView{}, nullptr, 0, 1005, out, HISTORY_SAMPLES) == 0);
+    CHECK(history_splice(snap, livev, 2, 1005, nullptr, HISTORY_SAMPLES) == 0);
+    CHECK(history_splice(snap, livev, 2, 1005, out, 0) == 0);
+
+    // The window CAP truncates the old end: a snapshot older than the ring can hold contributes only
+    // the part that still fits, and the axis stays exactly 24 hours.
+    snap.newest_bucket = 1005 - static_cast<int64_t>(HISTORY_SAMPLES) + 1;   // oldest still inside
+    n = history_splice(snap, livev, 2, 1005, out, HISTORY_SAMPLES);
+    CHECK(n == HISTORY_SAMPLES);
+    CHECK(out[0] == 300);                             // its newest sample sits at the window edge
+    CHECK(out[HISTORY_SAMPLES - 1] == 22);
+}
+
+
 // ── The converter adjudication (logic/conv_override.hpp) — #194 ──────────────────────────────────
 // The ledger asserts a DIFFERENT value, not merely a withheld one, so what is pinned here is the
 // evidence itself: the wire integers. If a future generator run, a REGISTERS.md edit or a converter
@@ -9939,6 +10184,7 @@ int main() {
     test_tie_break_reach();
     test_entity_identity();
     test_feature_gate();
+    test_history_persist();
     if (g_failures == 0) { std::printf("all logic tests passed\n"); return 0; }
     std::printf("%d logic test(s) FAILED\n", g_failures);
     return 1;

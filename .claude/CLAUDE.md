@@ -748,10 +748,51 @@ history.cpp     the 24-hour trend rings: one fixed-cadence buffer per logic/hist
                 arithmetic; the rule that keeps it this low is that a trend follows the SCHEMATIC's
                 schematic's numeric pills plus the explicit component state timelines, not
                 the ~66 numeric rows
-                a profile publishes, which would be ~38 KB). RAM only ON PURPOSE: a 576 B blob rewritten every
-                5 minutes is ~100k NVS writes a year in the partition holding the WiFi credentials,
-                so a reboot empties the rings and the UI draws the span it actually has rather than
-                padding a 24 h axis with absence. The mechanics (bucket folding, wrap-around,
+                a profile publishes, which would be ~38 KB). NOT IN NVS, still on purpose: a 576 B blob
+                rewritten every 5 minutes is ~100k writes a year in the partition holding the WiFi
+                credentials. What changed in #391 is that "not in NVS" stopped meaning "gone on every
+                reboot" (logic/history_persist.hpp). TWO media, each covering what the other
+                structurally cannot: the ring arrays now live in .noinit DRAM, so any reset that KEPT
+                POWER (a /set_* save, an OTA install, a panic, the task watchdog) keeps the readings
+                at zero cost — the same memory, no shadow copy, and the flash image SHRANK by ~26.5 KB
+                because .data no longer carries an initialiser for them; and a COARSE 30-minute
+                snapshot is written to the optional 8 KB `hist` partition from an esp_restart
+                shutdown handler, which is what survives an OTA (the .noinit region cannot: the new
+                image's sections move). LOSING POWER stays unrecovered ON PURPOSE — only a medium
+                off this board could survive it, and taking the plant history off the device is a
+                different feature with a different owner (the broker already stores every published
+                value). The coarse path is SPLICED IN BEHIND the
+                live samples by ABSOLUTE wall-clock bucket and is skipped entirely while the clock
+                is unsynced — an unanchored curve has no honest position on the axis, and there is no
+                defensible default. A source that has not closed its first bucket yet is WAITED FOR
+                rather than skipped (bounded at six buckets): the cursor only moves forward, so a
+                HomeHub that powers up with the house would otherwise lose all twelve of its rings
+                for the whole boot. The block's write-side padding is TRIMMED before the splice, or a
+                ring holding one reading claims a 24 h span it never recorded — history.js reads the
+                span off the array length. BinaryEvent rows are OR-FOLDED rather than decimated:
+                defrost/BSH/BUH pulses are shorter than a bucket, and keeping one bucket in six
+                would erase them from a restored day.
+                The RAM path needs no clock at all, and that is a property of the
+                medium rather than an assumption: if the bytes survived, power was never lost, so the
+                downtime is bounded to about a second and the rings are adopted in place. Its one
+                seam is the bucket that was open when the device went down — dropped, so the restore
+                can be up to one HISTORY_DT_S adrift. Every path is guarded by a CATALOG FINGERPRINT
+                over every trend id/kind/locator plus the geometry, because a ring is addressed by its
+                INDEX: insert or reorder a trend and slot 12 stops meaning what it meant when the
+                bytes were written, which would hand the expansion valve's day to the DHW tank — the
+                #35-#39 substitution arriving through a firmware update. The seal EXCLUDES the open
+                bucket's `pending`, and that is load-bearing: covering it would make the CRC stale
+                for all but microseconds of every five minutes, so a crash — the case this exists for
+                most — would discard a day of intact readings essentially always. The `hist` partition
+                is OPTIONAL BY CONSTRUCTION: esp_https_ota writes the app slot and never the table at
+                0x8000, so a device updated over the air has no such partition and the feature is
+                simply absent there (feature_gate.hpp's rule), reachable only by a re-flash. A factory
+                reset erases it and suppresses the shutdown-handler write that same reboot would
+                otherwise make — the configuration being erased is the user's, and so is the day of
+                readings beside it. /status.history.persist NAMES how this boot's rings came to be
+                ("accept", "power_cycle", "wrong_catalog", "bad_crc", …) so a chart that emptied
+                itself has a stated cause instead of looking like a defect. The UI still draws the
+                span it actually has rather than padding a 24 h axis with absence. The mechanics (bucket folding, wrap-around,
                 skipped-bucket filling) live in logic/history.hpp where they are host-tested; this
                 file is storage + mutex + the parse of the cache's FORMATTED value back to tenths
                 (the converters stay the one source of what a value means, so the domain audit still
@@ -1163,7 +1204,8 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 raw_capture, conv_override, label_override, checkup,
                 binary_semantics, circulation_source, env3, heating_curve_diagnosis,
                 heating_curve_mqtt, hp_query_log, http_cache, modbus_snapshot, mqtt_publish_gate,
-                open_meteo, reference_temperature, weather_forecast, weather_mqtt).
+                open_meteo, reference_temperature, weather_forecast, weather_mqtt,
+                history_persist).
                 The list is the DIRECTORY, not a curated subset: a header missing from it reads as
                 "there is no pure rule for that", which is the one thing this inventory must never
                 say about a rule that exists — ten of them had accumulated unlisted.
@@ -1515,6 +1557,34 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 buckets are FILLED, never compressed: compressing them slides every earlier sample
                 forward in time and mislabels the whole curve. HISTORY_BYTES_PER_TREND carries a
                 static_assert so a future trend addition meets the memory budget where it is stated
+                history_persist.hpp = WHEN a persisted ring may be believed, and where its samples
+                belong on the axis once it is. The sibling of history.hpp and a different shape of
+                question: recording judges one reading, a restore adopts ~28 KB of prior state in one
+                act, and every field in it is a claim about a moment that has already passed. Get it
+                wrong and the chart is not empty but CONFIDENTLY WRONG, which is strictly worse than
+                the blank axis this firmware shipped with. Four rules, all pure so they are asserted
+                rather than discovered on a board: (1) which reset reasons leave DRAM intact, as an
+                ALLOW list with everything unrecognised refused — POWERON is the obvious no, while
+                BROWNOUT and PWR_GLITCH are the interesting ones (the supply dipped, so the contents
+                are not proven, and they are refused rather than left to the CRC); (2) the CATALOG
+                FINGERPRINT over every trend id/kind/locator and the ring geometry, derived rather
+                than a hand-maintained version byte precisely so nobody can forget to bump it; (3)
+                the ABSOLUTE wall-clock bucket grid, which is the same on every device and every
+                boot, so two snapshots taken years apart still line up sample-for-sample; (4) the
+                SPLICE, which places an older snapshot BEHIND what this boot recorded, at the bucket
+                each sample was actually taken in — a snapshot that is merely appended slides a
+                day-old curve onto today. Two refusals are the interesting part of the splice: one
+                claiming to be NEWER than the live ring is refused outright rather than clamped (the
+                anchors disagree about the present, and every position for it would be a guess), and
+                THE LIVE SAMPLE ALWAYS WINS in an overlap, including when it is an absence — this
+                boot observed that bucket itself, and a retained payload from a previous life of the
+                same five minutes must not overwrite the observation. The coarse form is PURE
+                DECIMATION, never a fold of each group down to "the last reading in it": that would
+                look like more data and would be a lie about WHEN, drawing a reading from 25 minutes
+                earlier at the group's own instant. The verdict is a named enum rather than a bool
+                because each outcome is a different thing to say on /diag and a different thing to do
+                about it — "wrong_catalog" after an OTA is expected and uninteresting, "bad_crc" on a
+                board that was never power-cycled is a memory fault worth knowing about.
                 ou_stale.hpp = which readings stop being CURRENT while the compressor is off. The
                 outdoor unit refreshes its OWN pages (0x20 sensors, 0x21 inverter) only while it
                 RUNS; stopped, it answers with the LAST RUN's values. Measured on a live unit:
@@ -2071,6 +2141,16 @@ www/            web UI sources (index.html + style.css + app.sources fragments -
 |-----------|---------|
 | `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials and rollback state; MQTT (broker, credentials AND this installation's base topic, v16); syslog and SNTP; board-local hardware; OTA channel/language; HomeHub; the MQTT reference-room mapping/freshness/readiness fields; optional Open-Meteo location; ENV III; the v15 external circulation-power witness (name/topic/paths/max_age/on+off thresholds/confirm window — the independent evidence the `dhw_loss` checkup correlates against); and board-preset identity. The v9 actuation bit and v14 dynamic-LWT mode byte are layout-compatible retired bytes: both serialize as zero and are ignored on read. Heating-curve diagnosis derives arming from the timestamped MQTT room mapping only; forecast is optional and has its own location-consent boundary. Blob versions v1–v16 remain exact-length/CRC checked, so a truncated newer blob is never accepted as an older one. Non-empty `mb_host` enables read-only polling; no setting enables writing. Legacy per-key credentials remain read-only fallback; `boot_fails` is the boot-loop crash counter. |
 
+**Flash partitions beyond NVS.** `hist` (0x1e000, 8 KB) fills the gap that already existed between
+`coredump` and `ota_0`'s 64 KB boundary, and holds the COARSE 24-hour trend snapshot `history.cpp`
+writes from an `esp_restart` shutdown handler. It is deliberately NOT in `nvs`: 24 KB shared with the
+WiFi credentials cannot hold it, and it would put the credentials' partition under write traffic for
+a nice-to-have. It is OPTIONAL AT RUNTIME and has to be — `esp_https_ota` writes the inactive APP slot
+and never the partition table at 0x8000, so every device updated over the air keeps the table it was
+flashed with and simply has no such partition. A missing lookup is an ABSENT FEATURE, never an error
+and never a retry; the only way a deployed board gains it is a re-flash over USB or the web installer.
+Keep the `nvs` offset/size stable as always.
+
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
 self-heals), and re-persisted only when they change. The **model** (`profile` + fingerprint `fp_*`) is
@@ -2308,7 +2388,13 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   reason/summary from the boot-time cache, `coredump` re-read from flash per request
                   so a cleared dump can't strand the banner; drives the crash banner, whose title keys
                   on `fault` — an orphan dump alone is NOT "restarted after a crash"),
-                  history{dt,rows[{id,label}],modbus_rows[{id,label}],env3_rows[{id,label}]} — which
+                  history{dt,persist,rows[{id,label}],modbus_rows[{id,label}],env3_rows[{id,label}]}
+                  — `persist` is how THIS boot's rings came to be: "accept" (adopted from .noinit
+                  DRAM across a reset that kept power) or the named reason they started empty
+                  ("power_cycle", "wrong_catalog" after an update moved the trend set, "bad_crc",
+                  "wrong_version", "no_record"). Reported because a chart that emptied itself
+                  otherwise reads as a defect, and only the device knows which of those happened —
+                  plus which
                   X10A/board rows,
                   which structurally paired HomeHub schematic measurements and which ENV III
                   accessory readings carry a 24-hour trend,
