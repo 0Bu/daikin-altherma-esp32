@@ -608,14 +608,14 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   if (pi >= 0) {
     const px = (scrubFrac(pi, n) * 100).toFixed(3);
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
-    pinTip = `<div class="vhist-tip vhist-pinned mono num" style="left:${px}%">${esc(scrubText(view, pi))}</div>`;
+    pinTip = `<div class="vhist-tip vhist-pinned mono num" style="--tip-p:${px}">${esc(scrubText(view, pi))}</div>`;
   }
   const totalText = t(cfg.total, histDuration(total)) + (cfg.inactiveTotal
     ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "");
   return wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
       `<span class="vhist-range mono num">${esc(totalText)}</span></div>` + levelLegend +
-    `<div class="vhist-graph vhist-state-graph${pi >= 0 ? " has-pin" : ""}">` +
+    `<div class="vhist-graph vhist-state-graph">` +
       `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +
       `<div class="vhist-plot vhist-state-plot" data-hist="${esc(id)}"${sourceAttr} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(cfg.aria, name || id, totalText))}">` + tracks + pinCross +
@@ -752,9 +752,10 @@ function histHtml(id, unit, name, source = "") {
     pinMarks = view.series.map((s) => s.v[pi] == null ? ""
       : `<span class="vhist-mark vhist-pinned${s.source === "modbus" ? " mb" : ""}"` +
         ` style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`).join("");
-    // The bubble is clamped by CSS translate + margins rather than measured pixels: this runs at
-    // render time, before layout, so offsetWidth is not available the way it is during a scrub.
-    pinTip = `<div class="vhist-tip vhist-pinned mono num" style="left:${px}%">${esc(scrubText(view, pi))}</div>`;
+    // The bubble carries its POSITION rather than a measured offset: this runs at render time,
+    // before layout, so offsetWidth is not available the way it is during a scrub — and the sliding
+    // anchor keyed on --tip-p needs neither (style.css, .vhist-tip).
+    pinTip = `<div class="vhist-tip vhist-pinned mono num" style="--tip-p:${px}">${esc(scrubText(view, pi))}</div>`;
   }
   const legend = view.series.length > 1 || view.series[0].source === "modbus"
     ? `<div class="vhist-legend">${view.series.map((s) =>
@@ -763,7 +764,7 @@ function histHtml(id, unit, name, source = "") {
   return wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
     `<span class="vhist-range mono num">${esc(rng)}</span></div>` + legend +
-    `<div class="vhist-graph${pi >= 0 ? " has-pin" : ""}">` +
+    `<div class="vhist-graph">` +
       `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +
       `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", name || id, pi >= 0 ? scrubText(view, pi) : ""))}">` +
@@ -849,9 +850,7 @@ function env3HistHtml() {
   const pi = histPinIndex(ENV3_COMBINED_ID, view);
   let pinTip = "", pinCross = "", pinMarks = "";
   if (pi >= 0) {
-    const pxNumber = scrubFrac(pi, n) * 100;
-    const px = pxNumber.toFixed(3);
-    const edge = pxNumber < 24 ? " tip-start" : pxNumber > 76 ? " tip-end" : "";
+    const px = (scrubFrac(pi, n) * 100).toFixed(3);
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
     pinMarks = plotted.map((s) => {
       if (s.v[pi] == null) return "";
@@ -859,14 +858,14 @@ function env3HistHtml() {
       return `<span class="vhist-mark vhist-pinned ${env3SeriesClass(s.source)}" ` +
         `style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
     }).join("");
-    pinTip = `<div class="vhist-tip vhist-pinned mono num${edge}" style="left:${px}%">` +
+    pinTip = `<div class="vhist-tip vhist-pinned mono num" style="--tip-p:${px}">` +
       `${esc(scrubText(view, pi))}</div>`;
   }
 
   return wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
       `<span class="vhist-range">${esc(t("env.history_scales"))}</span></div>` + legend +
-    `<div class="vhist-graph${pi >= 0 ? " has-pin" : ""}">` +
+    `<div class="vhist-graph">` +
       `<div class="vhist-tip vhist-live mono num" hidden></div>` + pinTip +
       `<div class="vhist-plot" data-hist="${ENV3_COMBINED_ID}" data-n="${n}" tabindex="0" role="img" ` +
         `aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", t("env.history_title"),
@@ -1044,7 +1043,8 @@ function scrubMove(plot, i) {
   const cross = plot.querySelector(".vhist-cross.vhist-live");
   const marks = [...plot.querySelectorAll(".vhist-mark.vhist-live")];
   const w = plot.clientWidth;
-  const x = scrubFrac(i, n) * w;
+  const frac = scrubFrac(i, n);
+  const x = frac * w;
 
   cross.hidden = false;
   cross.style.left = x.toFixed(1) + "px";
@@ -1065,10 +1065,12 @@ function scrubMove(plot, i) {
   }
   tip.hidden = false;
   tip.textContent = scrubText(h, i);
-  // Clamp inside the plot so the bubble never hangs off the card edge; measured after the text is
-  // written, since its width depends on it.
-  const half = tip.offsetWidth / 2;
-  tip.style.left = Math.max(half, Math.min(w - half, x)).toFixed(1) + "px";
+  // The bubble is placed by POSITION, never by measured width: --tip-p slides its anchor from its
+  // own left edge at 0 to its right edge at 100, so it stays inside the card at every sample and
+  // at every panel width (style.css, .vhist-tip). Measuring here is what made the right edge
+  // unreadable — offsetWidth was read while the previous, edge-squeezed left was still applied, so
+  // the clamp saw a 59 px bubble that "already fit" and left it wrapped over the curve.
+  tip.style.setProperty("--tip-p", (frac * 100).toFixed(3));
 }
 
 function scrubIndex(plot, clientX) {

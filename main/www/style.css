@@ -804,25 +804,40 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    persistent rather than transient — the line is solid instead of translucent and the bubble carries
    the brand border — so a reading that is being held on screen is never mistaken for the live one.
    `pointer-events: none` throughout: the pin must not shadow the plot underneath it, or re-pinning
-   somewhere else would need two taps.
-   Clamped with margins rather than measured pixels, because this is emitted at render time (before
-   layout) so the bubble's own width isn't known yet — the transient one measures instead. */
+   somewhere else would need two taps. */
 .vhist-cross.vhist-pinned { opacity: 1; background: var(--brand-strong); }
 .vhist-mark.vhist-pinned { background: var(--brand-strong); }
-.vhist-tip.vhist-pinned { border-color: var(--brand); color: var(--fg); font-weight: 600;
-  max-width: calc(100% - 8px); }
-.vhist-graph.has-pin .vhist-tip.vhist-pinned { margin: 0 4px; }
-.vhist-tip { position: absolute; top: 0; transform: translateX(-50%); white-space: pre-line;
+.vhist-tip.vhist-pinned { border-color: var(--brand); color: var(--fg); font-weight: 600; }
+/* WHERE THE BUBBLE SITS, and why it is expressed this way. `--tip-p` is the sample's position as a
+   percentage NUMBER (0..100), written by scrubMove() for the live readout and inlined at render
+   time for a pinned one — one value from all four call sites, so no two can drift apart.
+   Two declarations carry the whole geometry:
+   `width: max-content` decouples the bubble's WIDTH from its position. Without it an absolutely
+   positioned box with only `left` set is shrink-to-fit against `container - left`, so at the right
+   end of the plot the available width collapses and the readout wraps to its minimum-content width
+   — measured, "08:23 · X10A 46.3 °C · Modbus 46.3 °C" became a 59 px column of SEVEN lines that
+   hung down over the curve it was reading. `transform` cannot undo that: it shifts a painted box,
+   it does not give back width the box was never laid out with. Nor could scrubMove()'s measured
+   clamp recover — it read the squeezed width and concluded the bubble already fit.
+   The ANCHOR then slides from the bubble's left edge at p=0 to its right edge at p=100, instead of
+   staying centred and being clamped at the ends. `left` is p% of the container (C) and the
+   translate is the same p% of the bubble (W), so the box sits at p/100 * (C-W) — travel exactly
+   [0, C-W] for every p and every panel width. Two properties follow by construction rather than by
+   threshold: it can never leave the card at either end, and the crosshair (p% of the same plot)
+   always falls inside the bubble it belongs to. A percentage cut-off ("anchor left below 24%")
+   promises neither once a narrow panel makes the bubble nearly as wide as the container. It also
+   needs no measurement, so a pinned readout emitted before layout is positioned by the same one
+   rule as the live one that is scrubbed. */
+.vhist-tip { position: absolute; top: 0; --tip-p: 0; white-space: pre-line;
+  left: calc(var(--tip-p) * 1%); transform: translateX(calc(var(--tip-p) * -1%));
   pointer-events: none; font-size: 12px; color: var(--fg); background: var(--card);
-  max-width: calc(100% - 8px); line-height: 1.35;
+  width: max-content; max-width: 100%; line-height: 1.35;
   border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px;
   box-shadow: 0 1px 3px rgba(0,0,0,.10); }
 .vhist-env3 .vhist-graph { padding-top: 96px; }
-.vhist-env3 .vhist-tip { min-width: min(220px, calc(100% - 8px)); white-space: pre;
+.vhist-env3 .vhist-tip { min-width: min(220px, 100%); white-space: pre;
   padding: 7px 10px; line-height: 1.55; border-radius: 8px;
   box-shadow: 0 4px 14px rgba(16,20,28,.12); }
-.vhist-env3 .vhist-tip.tip-start { transform: none; margin-left: 4px; }
-.vhist-env3 .vhist-tip.tip-end { transform: translateX(-100%); margin-left: -4px; }
 .vhist-line { fill: none; stroke: var(--brand-sky); stroke-width: 1.6px; stroke-linejoin: round; stroke-linecap: round; }
 .vhist-area { fill: var(--brand-sky); opacity: .13; stroke: none; }
 .vhist-pt { fill: var(--brand-sky); stroke: none; }

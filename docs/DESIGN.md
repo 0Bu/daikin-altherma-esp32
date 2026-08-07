@@ -780,6 +780,18 @@ Body, ordered:
      together: a resume that refreshed only one would leave the other showing a pin the user has since
      moved. Closing the *inspector* therefore leaves the pin alone — it belongs to the row, which may
      still be open in the value list — while collapsing a value row's own panel clears it, as before.
+   - **The readout stays one shape at both ends of the chart.** The newest sample sits at the right
+     edge and is where a reader looks first, so the bubble must be as legible there as in the middle.
+     It is not automatic: an absolutely positioned box carrying only `left` is shrink-to-fit against
+     `container − left`, so at the last sample the space it may lay out in collapses and the text
+     wraps to its minimum-content width — shipped, "08:23 · X10A 46.3 °C · Modbus 46.3 °C" became a
+     59 px column of seven lines hanging down over the very curve it was reading. Its width is
+     therefore decoupled from its position, and its anchor SLIDES from the bubble's own left edge at
+     the oldest sample to its right edge at the newest (`--tip-p`, `.vhist-tip`). Sliding rather than
+     centre-and-clamp is what makes it exact rather than tuned: the bubble travels `[0, C−W]` at any
+     panel width, so it can never leave the card and the crosshair always falls inside the bubble
+     that belongs to it — neither of which a percentage cut-off ("anchor left below 24 %") can
+     promise once a narrow panel makes the bubble nearly as wide as the chart.
 4. **Model card** — styled exactly like the value groups (§6), full-width below the live section:
    the model name (full-width heading) + detected capacity, from `detect{capacity_kw,
    capacity_kw_iu, model}`. Both are bus-derived, so they show **only while the link is live**
