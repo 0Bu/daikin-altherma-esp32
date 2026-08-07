@@ -400,9 +400,28 @@ host-testable core is unusually large and valuable, because the risky parts are 
   marker, `reading_plausible()` catches a number that is *impossible*, `ValueDef::no_publish` carries
   what the generator knew. What is left is a field that decodes to an entirely ordinary number which
   is not a measurement of anything, and only per-row evidence can identify it. Three row verdicts
-  exist and two are in force. `ZeroMeansAbsent` (`Target Cond. Temp.`'s raw `0x0000`, flat through a
-  full compressor cycle) withholds only that exact value, because a global "0 °C is unavailable" rule
-  would destroy every thermistor reading that crosses zero. `AboveRangeIsAbsent`
+  exist and two are in force. `ZeroMeansAbsent` withholds only an exact zero from an adjudicated row,
+  because a global "0 °C is unavailable" rule would destroy every thermistor reading that crosses
+  zero. Four rows carry it: `Target Cond. Temp.` (raw `0x0000` flat through a full compressor cycle)
+  and, since [#224](https://github.com/0Bu/daikin-altherma-esp32/issues/224), the page-`0x21`
+  *Fan1/Fan2 Fin temp.* and *Compressor outlet temperature*. Those three are measured rather than
+  argued: page `0x21` stops being refreshed while the outdoor unit rests, so **every** stored sample
+  is a running sample — 1140 of them over 7 days, in each of which the neighbouring `INV fin temp.`
+  (same page, same converter) read 16.5–55.5 °C, the discharge pipe 28.5–101 °C and ambient never
+  fell below 17.5 °C, while all three read *exactly* 0.0. A heatsink is not at 0.00 °C in 25 °C air
+  and a compressor outlet is not at 0.00 °C while the pipe it feeds is at 101 °C. **The label is part
+  of the key for these three**, and that is load-bearing rather than defensive: the catalog puts
+  *Brine inlet/outlet temp.* and *Refrig. temp. evap. In/Out* at the same `(page, offset, converter)`
+  on the geothermal profiles, and brine and evaporating refrigerant sit **at** 0 °C in normal
+  operation — a coordinate-only rule would delete those units' most load-bearing reading exactly
+  where it matters. The catalog test pins both directions (19/19/21 adjudicated rows, 10 shared
+  geothermal rows that must reach the ledger and be told nothing). This is not the label *matching*
+  `lwt_select.hpp` warns against — that is a pattern hunting for a quantity; this is an exact
+  discriminator among spellings the catalog demonstrably carries, the same key
+  `logic/label_override.hpp` uses. The three `0x20` rows #224 also lists (outdoor coil, suction pipe,
+  liquid line) are deliberately **not** adjudicated: 0 °C is where those sensors live for much of a
+  heating season, so withholding their zero would cost a real reading far more often than it removes
+  a false one. `AboveRangeIsAbsent`
   is the **expansion
   valve** pulse rows (conv 151): 30 days of published samples run 0-474 pulses and then carry six
   samples of exactly `0xFFF8`, with **nothing in between** — a discrete out-of-band integer rather
@@ -424,9 +443,11 @@ host-testable core is unusually large and valuable, because the risky parts are 
   `Target Evap. Temp.` while that row's scale was unknown, and [#194](https://github.com/0Bu/daikin-altherma-esp32/issues/194) then showed the row was
   mis-*decoded* rather than unmeasurable, so the verdict moved to `logic/conv_override.hpp`. A
   quarantine and a mis-decode are different findings; recording them as one would make the fix read
-  as a suppression quietly lifted. Rules are keyed on `(page, offset, converter)`
-  — the row's structural identity, never its label, and deliberately not scoped to a profile id: the
-  catalog test proves the rule selects the adjudicated quantity across all 45 profiles. Adding a rule is an adjudication
+  as a suppression quietly lifted. Rules are keyed on `(page, offset, converter)` — the row's
+  structural identity — plus, where that coordinate is demonstrably **not** one quantity, the exact
+  generated label as a fourth component (the three `0x21` zero rows above, and nothing else). Never
+  a profile id: the catalog test proves each rule selects the adjudicated quantity across all 45
+  profiles. Adding a rule is an adjudication
   with the same evidentiary bar as `tools/domain/audit_exceptions.txt`, not a way to make an
   inconvenient number disappear.
   A **fourth** verdict is not about a row at all. `PAGE_ABSENCE_RULES` is keyed on the register

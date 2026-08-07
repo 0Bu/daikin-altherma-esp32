@@ -400,6 +400,23 @@ the I/U capacity code (`0x60` offset 6).
 | 8 | 2 | 105 |  | °C | Fan2 Fin temp. |
 | 10 | 2 | 105 |  | °C | Compressor outlet temperature |
 
+> **Unpopulated on the audited unit (#224).** Offsets 6, 8 and 10 publish exactly `0.0 °C` and
+> nothing else. The measurement behind that is stronger than "it reads zero", because of *which*
+> samples it is made of: this page stops being refreshed while the outdoor unit rests
+> (`logic/ou_stale.hpp`), so every stored sample is a **running** sample — 1140 over 7 days, and in
+> each one `INV fin temp.` at offset 4 (same page, same converter) read 16.5–55.5 °C, the discharge
+> pipe 28.5–101 °C, and ambient never fell below 17.5 °C. A heatsink is not at 0.00 °C in 25 °C air,
+> and a compressor outlet is not at 0.00 °C while the pipe it feeds reads 101 °C. All three are
+> adjudicated `AvailabilityPolicy::ZeroMeansAbsent`; the entities stay, since these fields *can* be
+> populated on a larger unit.
+>
+> **The label is part of the key for these three.** On the geothermal profiles the catalog puts a
+> different quantity at these same coordinates — *Brine inlet temp.* / *Brine outlet temp.* at 6 and
+> 8, *Refrig. temp. evap. In* at 8, *Refrig. temp. evap.Out* at 10 — and brine and evaporating
+> refrigerant sit **at** 0 °C in normal operation. A coordinate-only rule would take those units'
+> most load-bearing reading away exactly where it matters, so each rule names the air-source label it
+> is about and the catalog test pins both directions.
+
 #### Register `0x30`
 
 | Off | Len | Conv | Bit | Type | Value |

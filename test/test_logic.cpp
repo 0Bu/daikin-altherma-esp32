@@ -9268,6 +9268,45 @@ static void test_availability() {
     // A text/enum row has no number to judge and passes through untouched.
     CHECK(value_available(cond, false, 0.0));
 
+    // ── The page-0x21 zero rows, and the label key that makes them safe (#224) ───────────────────
+    // The three air-source rows are withheld at exactly 0.0 …
+    const ValueDef fan1{0x21, 6, 105, 2, 1, "Fan1 Fin temp."};
+    const ValueDef fan2{0x21, 8, 105, 2, 1, "Fan2 Fin temp."};
+    const ValueDef cout{0x21, 10, 105, 2, 1, "Compressor outlet temperature"};
+    for (const ValueDef* d : {&fan1, &fan2, &cout}) {
+        CHECK(availability_policy(*d) == AvailabilityPolicy::ZeroMeansAbsent);
+        CHECK(row_publishable(*d));               // the ENTITY stays — the field CAN be populated
+        CHECK(!value_available(*d, true, 0.0));   // the unpopulated field
+        CHECK(value_available(*d, true, 42.0));   // a real heatsink reading still publishes
+        CHECK(value_available(*d, true, -0.1));   // exact zero, not a band
+        CHECK(value_available(*d, true, 0.1));
+    }
+
+    // … and the GEOTHERMAL rows at the very same (reg, offset, conv) are NOT. This is the half that
+    // matters: brine circulates near 0 °C and evaporating refrigerant sits at it, so a
+    // coordinate-only rule would delete those units' most load-bearing reading exactly where it
+    // counts. A byte-identical coordinate with a different label must stay Always.
+    const ValueDef brine_in{0x21, 6, 105, 2, 1, "Brine inlet temp."};
+    const ValueDef brine_out{0x21, 8, 105, 2, 1, "Brine outlet temp."};
+    const ValueDef evap_in{0x21, 8, 105, 2, 1, "Refrig. temp. evap. In"};
+    const ValueDef evap_out{0x21, 10, 105, 2, 1, "Refrig. temp. evap.Out"};
+    for (const ValueDef* d : {&brine_in, &brine_out, &evap_in, &evap_out}) {
+        CHECK(availability_rule(*d) == nullptr);
+        CHECK(availability_policy(*d) == AvailabilityPolicy::Always);
+        CHECK(value_available(*d, true, 0.0));    // 0 °C brine is a reading, not an absence
+    }
+
+    // The three 0x20 rows #224 also lists are deliberately NOT here: an outdoor coil, a suction pipe
+    // and a liquid line sit AT 0 °C for much of a heating season, so withholding their zero would
+    // cost a real reading far more often than it removes a false one. They still publish.
+    const ValueDef ou_hx{0x20, 2, 105, 2, 1, "O/U Heat Exch. Temp."};
+    const ValueDef suction{0x20, 6, 105, 2, 1, "Suction pipe temp."};
+    const ValueDef liquid{0x20, 10, 105, 2, 1, "Liquid pipe temp.(R6T)"};
+    for (const ValueDef* d : {&ou_hx, &suction, &liquid}) {
+        CHECK(availability_policy(*d) == AvailabilityPolicy::Always);
+        CHECK(value_available(*d, true, 0.0));
+    }
+
     // ── Expansion valve pulses: raw 0xFFF8 is not a position ─────────────────────────────────────
     // BYTE LEVEL, because the whole finding is about which integer arrives on the wire. conv 151 is
     // u16 little-endian, so the field is {low, high}.
@@ -9410,6 +9449,7 @@ static void test_availability() {
     // ── Against the real catalog ──────────────────────────────────────────────────────────────────
     int profiles_total = 0, evap_rows = 0, cond_rows = 0, suppressed = 0, odd_label = 0;
     int eev_rows = 0, conv151_rows = 0, page_absence_rows = 0;
+    int zero_rows = 0, fan1_rows = 0, fan2_rows = 0, cout_rows = 0, geo_shared_rows = 0;
     for (const auto& p : def::profiles) {
         profiles_total++;
         const auto view = def::resolved(p);
@@ -9435,9 +9475,33 @@ static void test_availability() {
                 else CHECK(logic::lwt_ci_contains(d.label, "target evap"));
             }
             if (pol == AvailabilityPolicy::ZeroMeansAbsent) {
-                CHECK(logic::lwt_ci_contains(d.label, "target cond"));
-                cond_rows++;
+                zero_rows++;
+                // Every zero verdict lands on one of the four adjudicated quantities and NOTHING
+                // else. The 0x21 three are label-keyed, so this also proves the key discriminates:
+                // the geothermal rows sharing their coordinates are counted below and must never
+                // appear here.
+                if (d.reg == 0x10) { CHECK(logic::lwt_ci_contains(d.label, "target cond")); cond_rows++; }
+                else if (d.reg == 0x21 && d.offset == 6)  { CHECK(logic::lwt_ci_contains(d.label, "fan1 fin")); fan1_rows++; }
+                else if (d.reg == 0x21 && d.offset == 8)  { CHECK(logic::lwt_ci_contains(d.label, "fan2 fin")); fan2_rows++; }
+                else if (d.reg == 0x21 && d.offset == 10) { CHECK(logic::lwt_ci_contains(d.label, "compressor outlet")); cout_rows++; }
+                else CHECK(false);   // an unadjudicated coordinate acquired a zero verdict
+                CHECK(row_publishable(d));
             }
+            // THE OTHER DIRECTION, and the one the label key exists for. A brine or evaporating-
+            // refrigerant row sits at exactly the coordinates the 0x21 rules use, and its real
+            // reading is 0 °C in normal operation — it must reach the ledger and be told nothing.
+            if (logic::lwt_ci_contains(d.label, "brine") ||
+                logic::lwt_ci_contains(d.label, "refrig. temp. evap")) {
+                if (d.reg == 0x21 && (d.offset == 6 || d.offset == 8 || d.offset == 10)) {
+                    geo_shared_rows++;
+                    CHECK(availability_rule(d) == nullptr);
+                    CHECK(value_available(d, true, 0.0));
+                }
+            }
+            // The three 0x20 rows #224 lists are deliberately unadjudicated — 0 °C is where an
+            // outdoor coil, a suction line and a liquid line live for much of a heating season.
+            if (d.reg == 0x20 && (d.offset == 2 || d.offset == 6 || d.offset == 10))
+                CHECK(pol == AvailabilityPolicy::Always);
             // The pulse ceiling and conv 151 must be the SAME set, in both directions. Left to
             // right: nothing but an expansion valve may acquire a ceiling meant for one. Right to
             // left: every conv-151 row is covered, since a coordinate the ledger missed would
@@ -9503,6 +9567,16 @@ static void test_availability() {
     // generator starts emitting a row on either page, and either is a reason to re-read the
     // adjudication rather than let it silently re-scope itself.
     CHECK(page_absence_rows == 194);
+    // The #224 zero verdicts, pinned per quantity so a moved count names WHICH one moved. 19/19/21
+    // are the air-source profiles carrying each row; 44 is Target Cond. Temp. as before, and the
+    // sum is every zero verdict in the catalog.
+    CHECK(fan1_rows == 19 && fan2_rows == 19 && cout_rows == 21);
+    CHECK(zero_rows == cond_rows + fan1_rows + fan2_rows + cout_rows);
+    // And the direction that keeps a geothermal unit whole: 10 rows share those three coordinates
+    // with a brine or evaporating-refrigerant quantity, and not one of them is adjudicated. If this
+    // count moves, the catalog has put another quantity behind a zero rule and the label key needs
+    // re-reading before the rule is allowed to follow it there.
+    CHECK(geo_shared_rows == 10);
 }
 
 // ── Numeric fault state beside the textual code (logic/fault_state.hpp) — #209 defect 4 ──────────

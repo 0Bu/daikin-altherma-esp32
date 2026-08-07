@@ -47,12 +47,23 @@
 // (c) the whole thing is IDF-free, so the CI logic test asserts the verdicts against the real
 // catalog instead of anyone asserting them in prose.
 //
-// A rule is keyed on (page, offset, converter) — the row's structural identity, never its label,
-// for the reason lwt_select.hpp states at length: an alias or a re-spelling would silently move the
-// verdict onto a different quantity. It is deliberately NOT scoped to a profile id: each verdict is
-// about the wire structure at that coordinate — sometimes a single value, sometimes a whole-page
-// presence signature — and the catalog test pins its complete cross-profile reach. A profile-id list
-// would claim a per-model fact nobody established, and would go stale on the next generator run.
+// A rule is keyed on (page, offset, converter) — the row's structural identity. It is deliberately
+// NOT scoped to a profile id: each verdict is about the wire structure at that coordinate —
+// sometimes a single value, sometimes a whole-page presence signature — and the catalog test pins
+// its complete cross-profile reach. A profile-id list would claim a per-model fact nobody
+// established, and would go stale on the next generator run.
+//
+// That key is necessary but, for a ZERO verdict, not always SUFFICIENT — measured, not assumed. The
+// catalog puts DIFFERENT PHYSICAL QUANTITIES at the same coordinate: 0x21/6 conv 105 is
+// "Fan1 Fin temp." on 19 profiles and "Brine inlet temp." on two geothermal ones, 0x21/8 is a fan
+// heatsink on 19 and "Brine outlet temp."/"Refrig. temp. evap. In" on four, 0x21/10 is the
+// compressor outlet on 21 and "Refrig. temp. evap.Out" on two. Brine and evaporating refrigerant sit
+// AT 0 °C in normal operation, so a coordinate-only zero rule would withhold those units' most
+// load-bearing reading precisely when it matters. Hence the optional `label` component below. This
+// is NOT the label matching lwt_select.hpp warns against — that is a PATTERN hunting for a quantity,
+// which breaks on the next re-spelling; this is an exact discriminator among the spellings the
+// catalog demonstrably carries, pinned in both directions by the catalog test, exactly as
+// logic/label_override.hpp keys its `from`.
 //
 // ADDING A RULE IS AN ADJUDICATION, not a way to make an inconvenient number go away — the same
 // contract tools/domain/audit_exceptions.txt states. It needs a live capture or a documented model
@@ -60,6 +71,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "label_override.hpp"   // label_str_eq — the ledger's optional fourth key component
 #include "value_def.hpp"
 
 namespace daik {
@@ -76,6 +88,16 @@ struct AvailabilityRule {
     uint8_t            reg;
     uint8_t            offset;
     int                conv;
+    // OPTIONAL fourth key component: the generated label this rule is about, or nullptr for "every
+    // spelling at this coordinate". It exists because (reg, offset, conv) is NOT always one
+    // quantity — see the #224 block below, where 0x21/6 conv 105 is a fan-inverter heatsink on 19
+    // profiles and a GEOTHERMAL BRINE INLET on two. This is not the label MATCHING lwt_select.hpp
+    // warns about (a pattern hunting for a quantity, which goes wrong the moment the catalog
+    // re-spells it); it is an exact discriminator among the spellings the catalog actually carries,
+    // pinned in both directions by the catalog test — the same key logic/label_override.hpp uses,
+    // for the same reason. It is compared against the RAW generated label, not the adjudicated one:
+    // the verdict is about the row on the wire, so a future label override must not move it.
+    const char*        label;
     AvailabilityPolicy policy;
     double             ceiling;  // AboveRangeIsAbsent only; ignored (and 0) for every other policy
     const char*        why;      // the evidence, on record beside the rule
@@ -206,8 +228,47 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // syslog detect line says so at every boot on record) — #213's "two unit families" read the
     // hardware identification in #209's scope section as if it were the running profile. The verdict
     // stands on the raw 0x0000 through full cycles; the second family does not exist yet.
-    {0x10, 8, 114, AvailabilityPolicy::ZeroMeansAbsent, 0.0,
+    {0x10, 8, 114, nullptr, AvailabilityPolicy::ZeroMeansAbsent, 0.0,
      "#209: raw 0x0000 through a full compressor cycle (one unit, two audits)"},
+
+    // ── Page 0x21 inverter rows that are not populated on this unit (#224) ───────────────────────
+    // MEASURED over 60 days of the reference unit's published series, and the measurement is
+    // stronger than "it reads zero" because of WHICH samples it is made of. Page 0x21 stops being
+    // refreshed while the outdoor unit rests (logic/ou_stale.hpp), so those rows are already
+    // withheld at rest — every sample in the store is therefore a RUNNING sample. Over the last 7
+    // days that is 1140 of them, and in each one:
+    //
+    //     INV fin temp.        (0x21/4, same page, same converter)   16.5 - 55.5 °C
+    //     Discharge pipe temp. (0x20/4)                              28.5 - 101.0 °C
+    //     R1T-Outdoor air temp.(0x20/0)                              17.5 - 25.0 °C
+    //     Fan1 Fin temp. / Fan2 Fin temp. / Compressor outlet        EXACTLY 0.0 °C, all 1140
+    //
+    // That is the Target Cond. Temp. bar reached without a second installation: not "zero on one
+    // unit", but zero SIMULTANEOUSLY with a proven-live page whose neighbouring heatsink is at
+    // 55.5 °C and whose ambient never drops below 17.5 °C. A heatsink cannot be at exactly 0.00 °C
+    // while the air around it is at 25 °C, and a compressor OUTLET cannot be at 0.00 °C while the
+    // discharge pipe it feeds reads 101 °C. The fields are not populated.
+    //
+    // THE LABEL IS PART OF THE KEY HERE, and it is load-bearing rather than defensive: at all three
+    // coordinates the catalog carries a geothermal row instead, whose real value sits AT the zero
+    // this rule refuses (brine circulates near 0 °C; so does evaporating refrigerant). A
+    // coordinate-only rule would take those units' most important reading away, permanently, at the
+    // operating point that matters most. The catalog test pins both directions — every rule matches
+    // its air-source label and no rule is ever reachable from a brine/evaporator one.
+    //
+    // RESIDUAL COST, stated rather than glossed: on an air-source model that DOES populate one of
+    // these, a genuine reading of exactly 0.0 °C is withheld for as long as it holds. That is the
+    // same trade Target Cond. Temp. already makes, and it is acceptable here for the same reason —
+    // a heatsink or compressor-outlet temperature at exactly zero is a rare transit, not the
+    // quantity's normal operating point. It is NOT acceptable for the 0x20 rows this issue also
+    // lists (outdoor coil, suction pipe, liquid line), where 0 °C is where those sensors LIVE for
+    // much of a heating season; those stay published and still need their own evidence.
+    {0x21, 6, 105, "Fan1 Fin temp.", AvailabilityPolicy::ZeroMeansAbsent, 0.0,
+     "#224: exactly 0.0 in 1140/1140 running samples while INV fin read 16.5-55.5 and ambient >=17.5"},
+    {0x21, 8, 105, "Fan2 Fin temp.", AvailabilityPolicy::ZeroMeansAbsent, 0.0,
+     "#224: same, and a 4-8 kW monobloc has one fan — there is no second fan inverter to measure"},
+    {0x21, 10, 105, "Compressor outlet temperature", AvailabilityPolicy::ZeroMeansAbsent, 0.0,
+     "#224: exactly 0.0 in 1140/1140 running samples while the discharge pipe it feeds read 101 °C"},
 
     // The four 0xA1 rows USED TO BE HERE, one ZeroPageMeansAbsent entry each. The verdict has not
     // changed — it moved to PAGE_ABSENCE_RULES above, where a fact about a page is stated once and
@@ -241,15 +302,15 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     // offset) pairs — so the ceiling is a fact about the ACTUATOR, not about the row that happened
     // to be observed. Covering only 0x30/3 would let the identical wire value publish as a real
     // position on valve 2 of the same unit. The catalog test pins that reach.
-    {0x30, 3, 151, AvailabilityPolicy::AboveRangeIsAbsent, EEV_PULSE_CEILING,
+    {0x30, 3, 151, nullptr, AvailabilityPolicy::AboveRangeIsAbsent, EEV_PULSE_CEILING,
      "30 d of published samples: range 0-474, then 6x exactly 0xFFF8 and nothing between"},
-    {0x30, 5, 151, AvailabilityPolicy::AboveRangeIsAbsent, EEV_PULSE_CEILING,
+    {0x30, 5, 151, nullptr, AvailabilityPolicy::AboveRangeIsAbsent, EEV_PULSE_CEILING,
      "same actuator, same converter — conv 151 is EEV pulses and nothing else"},
-    {0x30, 7, 151, AvailabilityPolicy::AboveRangeIsAbsent, EEV_PULSE_CEILING,
+    {0x30, 7, 151, nullptr, AvailabilityPolicy::AboveRangeIsAbsent, EEV_PULSE_CEILING,
      "same actuator, same converter — conv 151 is EEV pulses and nothing else"},
-    {0x30, 9, 151, AvailabilityPolicy::AboveRangeIsAbsent, EEV_PULSE_CEILING,
+    {0x30, 9, 151, nullptr, AvailabilityPolicy::AboveRangeIsAbsent, EEV_PULSE_CEILING,
      "same actuator, same converter — conv 151 is EEV pulses and nothing else"},
-    {0xA0, 8, 151, AvailabilityPolicy::AboveRangeIsAbsent, EEV_PULSE_CEILING,
+    {0xA0, 8, 151, nullptr, AvailabilityPolicy::AboveRangeIsAbsent, EEV_PULSE_CEILING,
      "same actuator, same converter — conv 151 is EEV pulses and nothing else"},
 };
 
@@ -260,7 +321,11 @@ inline constexpr size_t AVAILABILITY_RULE_COUNT =
 inline constexpr const AvailabilityRule* availability_rule(const ValueDef& d) {
     for (size_t i = 0; i < AVAILABILITY_RULE_COUNT; i++) {
         const AvailabilityRule& r = AVAILABILITY_RULES[i];
-        if (r.reg == d.reg && r.offset == d.offset && r.conv == d.conv) return &r;
+        if (r.reg != d.reg || r.offset != d.offset || r.conv != d.conv) continue;
+        // A rule with no label covers every spelling at the coordinate; one WITH a label covers
+        // exactly that generated row, so a different quantity sharing the coordinate is untouched.
+        if (r.label && !logic::label_str_eq(d.label, r.label)) continue;
+        return &r;
     }
     return nullptr;
 }
