@@ -2551,6 +2551,24 @@ static void test_board_presets() {
         &all[0], i2c_buf, BOARD_I2C_PINS_MAX, false, ReservedPins{1, 35});
     CHECK(ni2c == all[0].i2c_pin_count - 1);      // GPIO1 occupied; non-header GPIO35 changes nothing
     CHECK(i2c_buf[0] == 2 && i2c_buf[ni2c - 1] == 38);
+    // The DOCUMENTED AtomS3 Lite wiring (docs/WIRING.md: X10A over the Grove port, RX=1/TX=2) takes
+    // BOTH Grove pads, so ENV III is left with the case header alone — GPIO5-GPIO8 and GPIO38. This
+    // is the configuration a user reported as "GPIO1/2 are not offered at all": correct, because one
+    // pad cannot carry the X10A UART and the I2C bus at once. Pinned because the Hardware modal's
+    // hint (i18n `env.atoms3_header_hint`) states exactly this set, and a hint that names pins the
+    // picker cannot offer is how that report happened the first time — the earlier copy led with
+    // "use Grove GPIO2/1", the one pair this wiring can never produce.
+    const int grove_x10a = board_preset_i2c_pins_offerable(
+        &all[0], i2c_buf, BOARD_I2C_PINS_MAX, false, ReservedPins{1, 2});
+    CHECK(grove_x10a == 5);
+    CHECK(i2c_buf[0] == 5 && i2c_buf[1] == 6 && i2c_buf[2] == 7 && i2c_buf[3] == 8 &&
+          i2c_buf[4] == 38);
+    // ...and the only shipped ENV III preset IS the Grove pair, so that same wiring offers none.
+    // The web UI never renders /status.env3.presets, so this absence is invisible there; the hint
+    // above is the only thing that can explain it, which is why it must not promise Grove.
+    const Env3Preset* epre[ENV3_PRESETS_MAX];
+    CHECK(env3_presets_offerable(epre, ENV3_PRESETS_MAX, &all[0], false, ReservedPins{1, 2}) == 0);
+    CHECK(env3_presets_offerable(epre, ENV3_PRESETS_MAX, &all[0], false, ReservedPins{44, 43}) == 1);
     CHECK(board_preset_i2c_pins_offerable(&all[0], i2c_buf, 2, false) == 2);
     CHECK(board_preset_i2c_pins_offerable(nullptr, i2c_buf, BOARD_I2C_PINS_MAX, false) == 0);
 

@@ -247,4 +247,30 @@ assert.doesNotMatch(boardButton, /GPIO|LED|ENV III|Keine/,
 assert.doesNotMatch(rendered, /LED-Farben und Blinkmuster|LED-Blinkmuster/,
   "None must keep the LED explanation out of the Hardware tongue");
 
+// The ENV III pin hint must not name a pin the picker structurally cannot offer. On the DOCUMENTED
+// AtomS3 Lite wiring (docs/WIRING.md: X10A over the Grove port, RX=1/TX=2) both Grove pads carry the
+// serial link, so `board_preset_i2c_pins_offerable` leaves exactly the case header — GPIO5-GPIO8 and
+// GPIO38 — and the dropdown shows no GPIO1 or GPIO2. The earlier copy led with "use Grove GPIO2/1",
+// i.e. it recommended the one pair that wiring can never produce, and the omission carried no reason;
+// that combination was reported as a bug. The hint must lead with the header pins and state the
+// condition attached to Grove. test_logic.cpp pins the pin sets this copy describes.
+for (const [lang, header, grove, why] of [
+  ["en", /GPIO5.{1,3}GPIO8 and GPIO38/, /Grove port \(GPIO2\/1\) appears only while the X10A link is not on it/i,
+   /one pad cannot carry both the serial link and the I2C bus/i],
+  ["de", /GPIO5.{1,3}GPIO8 und GPIO38/, /Grove-Port \(GPIO2\/1\) erscheint nur, solange die X10A-Verbindung nicht darauf liegt/i,
+   /ein Pad kann nicht zugleich die serielle Verbindung und den I2C-Bus führen/i],
+]) {
+  const hint = I18N[lang]["env.atoms3_header_hint"];
+  assert.match(hint, header, `${lang} ENV III hint must lead with the header pins that are offered`);
+  assert.match(hint, grove, `${lang} ENV III hint must make Grove conditional, not recommended`);
+  assert.match(hint, why, `${lang} ENV III hint must say why the pins cannot be shared`);
+  assert.doesNotMatch(hint, /(use|verwenden)[^.]*Grove GPIO2\/1/i,
+    `${lang} ENV III hint must not recommend the Grove pair outright`);
+}
+// The inline fallback in index.html is what a client sees before applyStaticI18n runs, so it must
+// carry the same claim rather than the superseded recommendation.
+const inlineHint = html.match(/data-i18n="env\.atoms3_header_hint"[^>]*>([^<]*)</)?.[1] || "";
+assert.equal(inlineHint, I18N.en["env.atoms3_header_hint"],
+  "the index.html fallback must match the English hint it stands in for");
+
 console.log("board hardware details: concise backend-specific LED legends, pin row and tongue verified");
