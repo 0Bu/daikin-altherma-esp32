@@ -1282,24 +1282,32 @@ function vDescRow(v) {
   //   `mb`  — the comparison shown inside the explainer while BOTH sources are up.
   //   `fb`  — the stand-in shown IN PLACE of the X10A value while the X10A bus is down.
   const mb = mbByConcept(v.concept);
-  const fb = mbFallbackFor(v.concept);
-  // While X10A is down: a row the HomeHub can supply shows the Modbus reading, marked as such; a row
-  // it cannot shows nothing at all. Blanking is the right answer there, not a stale X10A number —
-  // the same refusal the held-over outdoor pills already make (logic/ou_stale.hpp).
+  const fb = mbStandInFor(v);
+  // A row stops being a reading for two reasons — the X10A bus is silent, or the outdoor unit is no
+  // longer refreshing this page — and both get the same treatment: the HomeHub reading stands in
+  // where it carries the same quantity, marked as such, and where it does not the row shows nothing
+  // at all. Blanking is the right answer, not a stale X10A number: this table is the "exact-value
+  // reference", so it is the LAST place a value the unit is not measuring may appear as an ordinary
+  // current row while the pill above it, the inspector, the chart and MQTT all refuse it.
+  const notCurrent = x10aDown() || rowNotMeasuring(v);
   const src = fb || v;
   if (fb) cls = (cls ? cls + " " : "") + "src-val-mb";
   const unit = displayUnit(src);
-  const val = (x10aDown() && !fb)
+  const val = (notCurrent && !fb)
     ? "—"
     : esc(displayValue(src)) + (unit ? `<span class="vrow-unit">${esc(unit)}</span>` : "");
-  if (!d && !hid && !mb) {
+  // With the gateway's value already standing IN for the row, the explainer must not also print it
+  // as a second opinion with a difference against the X10A number — that difference is measured
+  // against a reading this row has just refused to state.
+  const cmp = fb ? null : mb;
+  if (!d && !hid && !cmp) {
     return `<div class="vrow"><span class="vrow-label">${esc(shownLabel)}</span>` +
       `<span class="vrow-val ${cls}">${val}</span></div>`;
   }
   // Body = the explainer, then the second source's reading, then the trend. Any part may be absent,
   // which is why the builder takes finished markup rather than a description.
   return descAccordion(key, shownLabel, val, cls,
-                       (d ? descBodyHtml(d, src.value) : "") + mbNoteHtml(v, mb) +
+                       (d ? descBodyHtml(d, src.value) : "") + mbNoteHtml(v, cmp) +
                        histHtml(hid, displayUnit(v), shownLabel), hid);
 }
 
@@ -1478,7 +1486,9 @@ function valueGroupsHtml(vals, connected) {
     if (mbLive() && (S._modbus || []).some((m) => m && m.value != null)) return modbusOnlyGroupHtml(true);
     return `<div class="vgroup"><div class="card"><span class="empty">${esc(t("values.waiting"))}</span></div></div>`;
   }
-  const order = [...GROUPS.map((g) => g[0]), "Other values"];
+  // Reading order is GROUP_ORDER (DESIGN.md §6), NOT the GROUPS array — that one is match
+  // precedence, and the two stopped agreeing the moment a key had to be made more specific.
+  const order = [...GROUP_ORDER, "Other values"];
   const buckets = new Map();
   for (const v of rows) { const g = groupOf(v); (buckets.get(g) || buckets.set(g, []).get(g)).push(v); }
   const grouped = buckets.size > 1;

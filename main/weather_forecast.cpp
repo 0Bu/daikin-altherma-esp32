@@ -289,9 +289,25 @@ void weather_task(void*) {
                                                   : WEATHER_RETRY_INTERVAL_S * 1000u));
         } catch (const std::exception& e) {
             diag_printf("weather: task exception: %s\n", e.what());
+            // These three assignments run while the original throw was most likely a bad_alloc, and
+            // they are safe only because "error" (5), "fetch_failed" (12) and "out_of_memory" (13)
+            // all fit libstdc++'s 15-char SSO buffer and therefore cannot allocate. That is
+            // load-bearing: a 16-character reason string here turns this handler into a re-throw out
+            // of the task, i.e. std::terminate and a reboot.
             { Lock lk(s_mtx); s_status.fetching = false; s_status.available = false;
               s_status.state = "error"; s_status.reason = "fetch_failed";
               s_status.error = "out_of_memory"; s_status.errors++; }
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(WEATHER_RETRY_INTERVAL_S * 1000u));
+        } catch (...) {
+            // The task boundary is a C frame boundary: an escaping non-std throw is std::terminate
+            // and a reboot. Nothing in the fetch path throws a non-std type today (the HTTP client
+            // and the JSON parser are C, and only std::string/std::vector throw) — this is the
+            // GUARANTEE, which every other task loop here already has (mqtt_task, poll_task,
+            // mb_task, syslog_task, status_led_task) and which this one was missing.
+            diag_printf("weather: task exception (non-std)\n");
+            { Lock lk(s_mtx); s_status.fetching = false; s_status.available = false;
+              s_status.state = "error"; s_status.reason = "fetch_failed";
+              s_status.error = "internal_error"; s_status.errors++; }
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(WEATHER_RETRY_INTERVAL_S * 1000u));
         }
     }

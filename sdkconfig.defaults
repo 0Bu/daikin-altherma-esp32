@@ -37,11 +37,14 @@ CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=n
 # WiFi
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
-# Dynamic TX buffers. ESP-IDF 6 dropped the CONFIG_ESP_WIFI_TX_BUFFER_TYPE_DYNAMIC boolean and
-# selects the policy through CONFIG_ESP_WIFI_TX_BUFFER instead (0 = static, 1 = dynamic); the old
-# symbol is now "unknown" and silently ignored at build time, so pinning it pinned nothing. 1 keeps
-# the intended dynamic-TX-buffer policy actually in effect.
-CONFIG_ESP_WIFI_TX_BUFFER_TYPE=1
+# Dynamic TX buffers. The policy is a Kconfig CHOICE (ESP_WIFI_TX_BUFFER), whose options are the
+# booleans ESP_WIFI_STATIC_TX_BUFFER / ESP_WIFI_DYNAMIC_TX_BUFFER — so the dynamic option is what a
+# defaults file can actually select. CONFIG_ESP_WIFI_TX_BUFFER_TYPE is a promptless int the choice
+# DERIVES, and a promptless symbol cannot be set from here: the `=1` this line used to carry pinned
+# nothing, and dynamic buffers held only because they are upstream's default anyway. That is the
+# inert-setting-that-reads-like-a-guarantee shape the HTTPD_QUEUE_WORK_BLOCKING and
+# COREDUMP_DATA_FORMAT_ELF notes below already warn about, so it is spelled as the real symbol.
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER=y
 
 # HTTP Server
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024

@@ -116,7 +116,9 @@ left of the junction it derives from the drawing). `tools/schematic/audit_except
 ledger — the two refrigerant pressures carrying no name is an ADJUDICATION citing DESIGN.md §5.3,
 while `S001` (a hit target that opens nothing) and `E002` (a pill on a branch its sensor does not
 read) are refused outright — and `tools/schematic/selftest.sh` re-seeds every historical defect (one
-`run_case` each, so `grep -c run_case` is the count) into a throwaway copy to prove it still catches
+`run_case` each, counted with the ANCHORED `grep -c '^run_case ' tools/schematic/selftest.sh` —
+the bare word also matches the helper's own definition and the comments about it, which is how a
+"the count is N" claim comes to overstate by three) into a throwaway copy to prove it still catches
 them. The judgement half is the `/schematic-review`
 skill: whether the drawing is still TRUE of the plant, whether a new part is in the right place and
 whether the copy is right in both languages is not mechanically decidable, and the audit stays quiet
@@ -229,7 +231,9 @@ right order, or from the only file entitled to: "no source can frame a Modbus wr
 about a whole component, and the only instrument that can settle it is source TEXT. So each
 `test/test_*_contract.mjs` reads the relevant firmware tree and asserts a boundary —
 the X10A-gated MQTT lifecycle, the single X10A-free tombstone exception, the explicit-action-only
-mDNS browse, and the heating-curve CONSENT/DIAGNOSIS boundary. The last recursively scans all C++
+mDNS browse, the embedded-UI delivery budget (#371) and the heating-curve CONSENT/DIAGNOSIS
+boundary. Count them with the glob rather than from this sentence; a fifth landed here without
+moving it. The last recursively scans all C++
 sources and asserts that no write entry point, actuator type, FC06/FC16 function vocabulary, echo
 parser or value encoder survives. It pins the current consent shape: saving the room source starts
 that subscription; saving coordinates independently starts optional forecast traffic; deleting each
@@ -287,8 +291,11 @@ a job each (the version gate itself runs inside `build`, where the stamped versi
 tests are a `gates` step). The recording is the stated exception: `run-ui-gif-audit.sh` and
 `tools/uigif/selftest.sh` are NOT steps, because their only remedy is a local re-record CI cannot
 perform, so enforcing them would buy re-stamping rather than re-recording. Count them with
-`grep -c 'run: \./\(scripts\|tools\)/' .github/workflows/build.yml` rather than trusting a number
-written here, which drifts the moment one is added. Actions bills every JOB rounded up to a whole
+`sed -n '/^  gates:/,/^  build:/p' .github/workflows/build.yml | grep -c 'run: \./\(scripts\|tools\)/'`
+rather than trusting a number written here, which drifts the moment one is added — and scope the
+count to the JOB, since the same pattern run over the whole file also picks up the `build` job's own
+script steps (22 workflow-wide vs 17 gates today), i.e. answers a different question than the one
+being asked. Actions bills every JOB rounded up to a whole
 minute, so N ~15 s jobs cost N billed minutes for well under one minute of work. The same budget rule shapes the rest of
 `.github/workflows/build.yml`, and it is worth knowing before editing it: the ~5-minute firmware
 build is SKIPPED (not failed — a skipped job still reports its check, which is why the gate is a
@@ -694,13 +701,18 @@ weather_forecast.cpp  the Open-Meteo forecast client (provider + model pinned in
                 forecast is not a state of this device
 history.cpp     the 24-hour trend rings: one fixed-cadence buffer per logic/history.hpp TREND, fed by
                 the X10A poll task (history_record), plus twelve HomeHub rings fed by the independent
-                Modbus task (history_record_modbus). Both calls happen BEFORE their cache commit and
+                Modbus task (history_record_modbus) and three ENV III rings fed by the sensor task
+                (#366). Both calls happen BEFORE their cache commit and
                 OUTSIDE the cache mutex; this file has its own lock, created before either task starts.
                 GET /history defaults to X10A, identifies the circulation witness as MQTT, and takes
-                source=modbus for the second instrument. STATIC
+                source=modbus for the second instrument and source=env3 for the third — THREE
+                independent instruments, never merged into one series, for the reason /values keeps
+                two arrays: they have separate liveness, so "is this reading current?" must stay
+                answerable per source. STATIC
                 (.data), never heap: the binding limit on this board is the largest CONTIGUOUS block,
                 and a static array does not compete for it — thirty-one X10A/board/state trends cost
-                17856 B and the twelve label-free HomeHub rings another 6912 B, for 24768 B of ring
+                17856 B, the twelve label-free HomeHub rings another 6912 B and the three ENV III
+                rings 1728 B, for 26496 B of ring
                 total, plus ~78 B of labels/units/counters each (the ceiling assert is 17856 with that
                 arithmetic; the rule that keeps it this low is that a trend follows the SCHEMATIC's
                 schematic's numeric pills plus the explicit component state timelines, not
@@ -768,15 +780,18 @@ http_status.cpp GET / (setup.html in AP mode, else gzip UI) /favicon.ico /heat-p
                 catch-all. http_append_status_json() runs
                 on the httpd task ALONE — it used to run on the poll task too, which is what
                 overflowed that task's stack (#241)
-http_config.cpp POST /set_wifi /set_mqtt /test_ref_temp /set_ref_temp /set_syslog /set_ntp
+http_config.cpp POST /set_wifi /set_mqtt /test_ref_temp /set_ref_temp /test_circulation
+                /set_circulation /set_syslog /set_ntp
                 /set_weather /set_hp /discover_homehub /set_board /set_env3
-                /set_ota /set_lang /detect — ALL FOURTEEN write routes, and the count is the point:
+                /set_ota /set_lang /detect — ALL SIXTEEN write routes, and the count is the point:
                 http_server.cpp's cfg.max_uri_handlers is sized exactly to the trusted-LAN route
-                total, so a route added here without raising it there overflows onto the SPA
+                total (34), so a route added here without raising it there overflows onto the SPA
                 catch-all — and one RETIRED here without lowering it there leaves a comment that has
-                stopped describing the code depending on it (#357 retired /set_dynamic_lwt: 33 -> 32).
-                Three of the fourteen are not config writers: /test_ref_temp writes nothing
-                at all (it earns the proof /set_ref_temp then demands), /discover_homehub only
+                stopped describing the code depending on it (#357 retired /set_dynamic_lwt: 33 -> 32;
+                #361 added the circulation test/persist pair: 32 -> 34).
+                FOUR of the sixteen are not config writers: /test_ref_temp and /test_circulation
+                write nothing at all (each earns the proof its /set_ sibling then demands),
+                /discover_homehub only
                 resolves an address for the dialog to fill in, and /detect resets profile +
                 fingerprint in RAM alone, since detection is re-run every boot anyway
 http_ota.cpp    /ota/check|update|status
@@ -899,9 +914,13 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; X10A p
                 most of the day. Also RETAINS the boot-time crash summary
                 on <base>/crash (logic/crashinfo.hpp) once per (re)connect — but ONLY when the boot is
                 NOTABLE (a real fault or a core-dump still in flash, crash_is_notable). A normal boot
-                (USB re-enumeration, config-save/OTA reboot, clean power-on) publishes a zero-length
-                RETAINED payload that CLEARS the topic (build_crash_mqtt_payload returns ""), so no
-                crash message lingers once the problem is resolved; the reset reason is not lost — the
+                (USB re-enumeration, config-save/OTA reboot, clean power-on) PROBES the topic with a
+                bounded retained read and sends the zero-length RETAINED payload that clears it only
+                when the broker actually still holds an older crash — so no
+                crash message lingers once the problem is resolved, while a CLEAN broker receives no
+                empty publish at all (an unconditional one made every fresh install invent a
+                payload-less /crash node, the same repeating-empty-topic shape the retired
+                <base>/state and <base>/modbus/status probes exist to avoid); the reset reason is not lost — the
                 heartbeat carries it as its own "Reset Reason" sensor. PLUS a republish on the
                 heartbeat cadence whenever the "dump waiting" flag changes (diag_crash_info_live();
                 a retained true would otherwise latch ON in HA until the next reconnect once the dump
@@ -916,7 +935,10 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; X10A p
                 connect/publish, so a long broker outage can't false-trip) PLUS once per publish inside
                 mqtt_publish() (so a ~30-publish reconnect burst on a slow link can't exceed the 20s
                 budget) — a wedged publish reboots, a slow-but-progressing one never does.
-                TWO things that are not publishing also live on this task, both because they are
+                THREE things that are not publishing also live on this task (the third being the
+                external CIRCULATION witness of #361 — its probe behind POST /test_circulation and
+                its live subscription decode, which are the room source's two halves one source
+                over), all because they are
                 driven by INBOUND frames on this same authenticated client. (1) The REFERENCE-SOURCE
                 PROBE behind POST /test_ref_temp: a candidate room mapping is subscribed on the
                 EXISTING client (never a second connection, never a Config write), decoded by the
@@ -927,7 +949,8 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; X10A p
                 save consumes it, a reboot forgets it — which is exactly right for evidence about a
                 broker that may have changed since. (2) The HEATING-CURVE DIAGNOSIS SAMPLER
                 (logic/heating_curve_diagnosis.hpp), evaluated once per 1s cycle but COUNTED only while
-                armed. `/status.heating_curve.evaluations` and `heating_curve_evaluations` measure
+                armed. `/status.heating_curve.evaluations` and the `<base>/heating_curve` document's
+                `diagnosis.counters.evaluations` measure
                 armed cycles rather than seconds of uptime, so an unconfigured board reads 0 instead
                 of a number that looks like activity. It lives here rather
                 than in a file of its own because its one input arrives as an MQTT frame, it can
@@ -960,8 +983,16 @@ mqtt_ha.cpp     HA MQTT-Discovery bridge: esp-mqtt client + publish task; X10A p
                 transient HOLD/BLOCK retains cadence and the last event so recovery cannot fabricate
                 a new sample; deleting the room source disarms and clears sample memory. Forecast is
                 optional comparison evidence (Recording vs Degraded), never a control term.
-                The outside contract is `/status.heating_curve` plus flat `heating_curve_*` heartbeat
-                fields. Consumers detect events by a sequence increase, use `last_sample_unix_s`, and
+                The outside contract is `/status.heating_curve` plus the RETAINED
+                `<base>/heating_curve` document (logic/heating_curve_mqtt.hpp), which is NESTED and
+                carries its own `schema_version` — room{}, diagnosis{gates, room_evidence,
+                last_sample, counters{}}. It left the heartbeat in #373: the heartbeat is a fixed-
+                cadence board/link vital-signs stream, while this is evidence about the PLANT with a
+                versioned shape and its own publish decision, and a growing block of `heating_curve_*`
+                keys in the middle of the vitals made both harder to read and coupled their cadences.
+                Booleans still ride as 1/0 NUMBERS (the metrics-consumer rule, unchanged); what the
+                nesting buys is that the leaf keys no longer repeat the prefix.
+                Consumers detect events by a sequence increase, use `last_sample_unix_s`, and
                 treat a sequence/uptime reset as reboot. No HA entities: this is analysis evidence,
                 not a plant command. ARMING is derived by `heating_curve_diagnosis_armed()` from the
                 MQTT room mapping only; there is no mode enum, live blob byte or route
@@ -1098,7 +1129,13 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 hexdump, led_pattern, button, captive,
                 lwt_select, ou_stale, cop_scope, profile_view, feature_gate, availability,
                 fault_state,
-                raw_capture, conv_override, label_override, checkup).
+                raw_capture, conv_override, label_override, checkup,
+                binary_semantics, circulation_source, env3, heating_curve_diagnosis,
+                heating_curve_mqtt, hp_query_log, http_cache, modbus_snapshot, mqtt_publish_gate,
+                open_meteo, reference_temperature, weather_forecast, weather_mqtt).
+                The list is the DIRECTORY, not a curated subset: a header missing from it reads as
+                "there is no pure rule for that", which is the one thing this inventory must never
+                say about a rule that exists — ten of them had accumulated unlisted.
                 checkup.hpp = the 24-HOUR PLANT CHECKUP (#208) — the third question the dashboard
                 asks, after "what is it doing now" (the schematic) and "what did this reading do
                 today" (history.hpp): IS ANYTHING WORTH REPORTING. Counted events and window minima,
@@ -1124,15 +1161,24 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 Collecting outranks Ok in the aggregation and Unavailable does not, which is the
                 whole honesty property: a board that has been up ten minutes has not established
                 that the plant is fine, while a check the model cannot run says nothing either way.
-                THREE of #208's six checks are deliberately NOT built, each because the bus cannot
-                support the claim: 3-way-valve leakage from the DHW cooling rate (measured on the
-                reference installation, a healthy plant loses 0.30 K/h without DHW circulation and
-                1.20 K/h with it, so the verdict would fire daily on a normal install — and the
-                sensors sit UPSTREAM of the diverter anyway); an absolute minimum-flow threshold (per
+                TWO of #208's six checks are deliberately NOT built, each because the bus cannot
+                support the claim: an absolute minimum-flow threshold (per
                 model over a 3-18 kW catalog, and the unit raises 7H itself, so the flow minimum is
                 REPORTED with no verdict attached); and a flat daily start count (24 starts is one an
                 hour in January and a control problem in April — the MEAN RUN LENGTH is what knows
                 the load, so cycling warns only on >=12 starts AND a mean under 10 min).
+                The THIRD was refused on the same grounds and then BUILT (#361), which is worth
+                reading as a pattern rather than a reversal. DHW-tank leakage was rejected because
+                the measured rate does not separate the two causes — a healthy plant loses 0.30 K/h
+                without DHW circulation and 1.20 K/h with it, so a verdict on the rate alone fires
+                daily on a normal install. What changed is not the threshold but the EVIDENCE: an
+                independent external witness (POST /set_circulation — a power meter on the
+                circulation pump) says which of the two a given hour was, so `dhw_loss` correlates
+                high-loss windows against a KNOWN pump state and reports circulation_known_s beside
+                them. The objection was never "this is unmeasurable", it was "this reading cannot
+                carry that claim alone" — so the way past it is a second source, not a looser rule.
+                It still refuses what it cannot see: a window whose pump state is unknown buys no
+                observed seconds, so the check answers `collecting` rather than attributing a loss.
                 availability.hpp = the ADJUDICATED per-row answer to "is this decoded number a
                 MEASUREMENT, or merely something the firmware could decode?" (#209). Every other gate
                 answers something narrower: convert() handles the wire format's own 0x8000 no-data
@@ -1778,13 +1824,22 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 addressed structurally by (reg, offset, unit)", and its catalog test already proves
                 each locator resolves to exactly one row per profile. A static_assert pins every
                 pairing to a real trend id, so a renamed trend is a BUILD ERROR rather than a pairing
-                that silently stops happening. SIX registers pair and — measured — all six resolve on
-                all 39 detectable profiles. The rest are unpaired on purpose, each with a stated
-                reason: the post-BUH outlet is a DIFFERENT measurement point (pairing it would be the
-                substitution lwt_select refuses); the real power measurement has no X10A equivalent at
+                that silently stops happening. ELEVEN registers pair — eight measurements plus three
+                component STATES (bsh_state, valve_dhw, quiet_state), each an exact same-point pair.
+                The post-BUH outlet (offset 41) is among them and is the worked example of what the
+                rule actually forbids: it was unpaired while X10A had no post-BUH trend of its own,
+                because the only available partner was the PRE-BUH row and pairing those two would
+                have been the substitution lwt_select refuses — a different measurement point under
+                one name. It pairs now that X10A carries `leaving_water_post_buh`, i.e. once there is
+                a partner describing the SAME point. The rule was never "few pairings", it is
+                "same quantity, same point, or nothing".
+                The rest stay unpaired, each with a stated
+                reason: the real power measurement has no X10A equivalent at
                 all (X10A ESTIMATES it from CT clamps at an assumed 230 V, so pairing a measurement
-                with an estimate would hide which is which); setpoints, modes and faults are not
-                readings and no trend addresses them
+                with an estimate would hide which is which); setpoints, other modes and faults are not
+                readings and no trend addresses them. Offset 56 (Smart-Grid) is the one deliberate
+                exception in the other direction: it carries a state TIMELINE with no X10A concept
+                to pair against
                 timestamp.hpp = rfc3339_utc(unix_s, ms) — the ONE UTC formatter the SNTP wall clock
                 (sntp_time.cpp) renders through, for syslog.cpp's RFC 5424 TIMESTAMP field,
                 /status.ntp.time, and mqtt_ha.cpp's heartbeat "time" field. A negative unix_s
@@ -1910,7 +1965,7 @@ www/            web UI sources (index.html + style.css + app.sources fragments -
 
 | Namespace | Content |
 |-----------|---------|
-| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials and rollback state; MQTT, syslog and SNTP; board-local hardware; OTA channel/language; HomeHub; the MQTT reference-room mapping/freshness/readiness fields; optional Open-Meteo location; ENV III; and board-preset identity. The v9 actuation bit and v14 dynamic-LWT mode byte are layout-compatible retired bytes: both serialize as zero and are ignored on read. Heating-curve diagnosis derives arming from the timestamped MQTT room mapping only; forecast is optional and has its own location-consent boundary. Blob versions v1–v14 remain exact-length/CRC checked, so a truncated newer blob is never accepted as an older one. Non-empty `mb_host` enables read-only polling; no setting enables writing. Legacy per-key credentials remain read-only fallback; `boot_fails` is the boot-loop crash counter. |
+| `daik_cfg` | `cfg` — the **atomic credential/service blob** (`logic/config_store.hpp`): WiFi credentials and rollback state; MQTT, syslog and SNTP; board-local hardware; OTA channel/language; HomeHub; the MQTT reference-room mapping/freshness/readiness fields; optional Open-Meteo location; ENV III; the v15 external circulation-power witness (name/topic/paths/max_age/on+off thresholds/confirm window — the independent evidence the `dhw_loss` checkup correlates against); and board-preset identity. The v9 actuation bit and v14 dynamic-LWT mode byte are layout-compatible retired bytes: both serialize as zero and are ignored on read. Heating-curve diagnosis derives arming from the timestamped MQTT room mapping only; forecast is optional and has its own location-consent boundary. Blob versions v1–v15 remain exact-length/CRC checked, so a truncated newer blob is never accepted as an older one. Non-empty `mb_host` enables read-only polling; no setting enables writing. Legacy per-key credentials remain read-only fallback; `boot_fails` is the boot-loop crash counter. |
 
 **The link is persisted; the model is not.** The RX/TX pins + protocol are the physical, boot-invariant
 X10A link — cached in NVS, tried FIRST by the detection sweep (defaults as fallback, so a stale cache
@@ -1970,7 +2025,8 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   NARROWER by the X10A link's own rx/tx (board_hw_valid refuses a local pin that
                   equals either, so offering them was offering a guaranteed 400) — it
                   drives the two pin pickers in the ESP32 card's Hardware modal; presets[] =
-                  {name,led_gpio,led_type,led_inverted,btn_gpio,btn_active_low} per DOCUMENTED board
+                  {id,name,vendor,led_gpio,led_type,led_inverted,btn_gpio,btn_active_low,i2c_pins[]}
+                  per DOCUMENTED board
                   (logic/board_presets.hpp), the modal's "Board" dropdown, which only FILLS the five
                   fields — nothing is saved until the user submits. Carried in this payload rather
                   than a route of its own because the modal already reads pins_local from it: one
@@ -2014,7 +2070,8 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   source_unix_s,timestamp_source,age_s,fresh,freshness_reason,
                   temperature_valid,setpoint_valid,control_eligible,room_error_k,reason,reason_code,
                   retained,messages,errors,rejections[,error][,eligibility_error]} — the decoded and
-                  canonical MQTT living-room input. The flat heartbeat archives its numeric accepted
+                  canonical MQTT living-room input. The `<base>/heating_curve` document's `room`
+                  object archives its numeric accepted
                   view. It is the required heating-curve-diagnosis input; `room_error_k` is recorded
                   raw and is not an LWT correction. It feeds no heat-pump write.
                   SAVING the topic is the whole consent to subscribe to it (#357 removed the second
@@ -2025,6 +2082,19 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   unusable, and the diagnosis card must say WHICH rather than call the input missing.
                   POST /test_ref_temp stays outside all of it, so a candidate can be proved before it
                   is saved,
+                  circulation_source{configured,name,topic,power_path,timestamp_path,max_age_s,
+                  on_threshold_w,off_threshold_w,confirm_s,subscribed,has_value,power_w,state,
+                  source_at,source_unix_s,timestamp_source,age_s,fresh,freshness_reason,retained,
+                  messages,errors,rejections[,error]} — the EXTERNAL CIRCULATION WITNESS (#361): an
+                  independent MQTT power meter on the DHW circulation pump, decoded on the mqtt task
+                  beside the room source and following the same consent boundary (the saved topic IS
+                  the subscription; deleting it clears every captured field). `state` is the
+                  CONFIRMED class from logic/circulation_source.hpp — on/off/unknown — never the raw
+                  sample: the witness is a PULSED load, so a lone spike must not flip the state and a
+                  hysteresis-band reading must not read as off. It exists because the `dhw_loss`
+                  checkup cannot otherwise tell a leaking 3-way valve from ordinary circulation
+                  losses, and `name`/`topic` are redacted like the room source's for the same reason
+                  (a typed name, a topic embedding a device id),
                   weather_forecast{configured,provider,model,fetch_interval_s,max_age_s,fetching,
                   available,has_value,latitude,longitude,state,outdoor_mean_2h_c,
                   solar_energy_2h_wh_m2,issued_at,fetched_at,valid_for_decision_at,last_attempt_at,
@@ -2084,8 +2154,9 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   register did not answer and must never read as an inactive plant. `host` is the configured persistent
                   target (redacted like the other reporter-identifying values); empty means disabled.
                   Explicit discovery is request-local and therefore not a status mode; `discovering`
-                  remains false for wire compatibility. The flat MQTT heartbeat mirrors the actuator's
-                  numeric state, reasons, values, timestamps and counters but creates no writable entity,
+                  remains false for wire compatibility. The plant-gate pair also reaches MQTT through
+                  the `<base>/heating_curve` document's diagnosis.gates block — as EVIDENCE for the
+                  diagnosis, never as a writable entity: there is no actuator here to mirror,
                   sys{free_heap,min_free_heap,max_alloc,reset_reason,safe_mode} — heap
                   headroom (free / since-boot low-water / largest-contiguous) + why the device last
                   booted, ALWAYS present (unlike last_crash, and unlike the MQTT heartbeat needs no
@@ -2098,22 +2169,31 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   reason/summary from the boot-time cache, `coredump` re-read from flash per request
                   so a cleared dump can't strand the banner; drives the crash banner, whose title keys
                   on `fault` — an orphan dump alone is NOT "restarted after a crash"),
-                  history{dt,rows[{id,label}],modbus_rows[{id,label}]} — which X10A/board rows and
-                  which structurally paired HomeHub schematic measurements carry a 24-hour trend,
+                  history{dt,rows[{id,label}],modbus_rows[{id,label}],env3_rows[{id,label}]} — which
+                  X10A/board rows,
+                  which structurally paired HomeHub schematic measurements and which ENV III
+                  accessory readings carry a 24-hour trend,
                   and at what
                   cadence. The ID is the CONCEPT (logic/history.hpp's TRENDS — what GET /history
                   takes, so a request is model-independent); the LABEL is how the DETECTED profile
                   spells that row, which is what lets the UI attach a trend to the value row it is
                   already rendering. Rows this profile does not carry are omitted entirely,
-                  health{covered_s,status,checks[{id,verdict,…}]} — the 24-hour plant CHECKUP
+                  health{covered_s,full_span,available,assessable,evaluated,status,
+                  checks[{id,verdict,evidence,observed_s,required_s,…}]} — the 24-hour plant CHECKUP
                   (logic/checkup.hpp, checkup.cpp), judged on the DEVICE: `status` is the worst
                   verdict across the checks and `covered_s` how much of the day was actually
                   OBSERVED (seconds, not whole hours — the first hour after a reboot must read as the
-                  small number it is rather than rounding to "0 h"). Seven checks in READING order,
+                  small number it is rather than rounding to "0 h"). covered_s is CARD-level context;
+                  each check carries its OWN evidence clock (observed_s/required_s), because a
+                  mostly-readable pressure row cannot lend 24 hours to an RPS row seen for two
+                  seconds. EIGHT checks in READING order,
                   fault first, each `unavailable` | `collecting` | `ok` | `info` | `warn` plus its
-                  own named numbers: fault{active}, cycling{starts,mean_run_s},
-                  defrost{count,share_pct}, pressure{min_bar}, flow{min_l_min},
-                  heater{buh_min,bsh_min}, retries{seen}. Named per check rather than a generic pair,
+                  own named numbers: fault{active},
+                  dhw_loss{max_k_h,windows,high_windows,high_with_pump,high_pump_off,
+                  circulation_on_s,circulation_known_s}, cycling{starts,mean_run_s},
+                  defrost{count,share_pct,paired_count,defrost_s,run_s}, pressure{min_bar},
+                  flow{min_l_min},
+                  heater{buh_min,bsh_min,buh_s,bsh_s}, retries{seen}. Named per check rather than a generic pair,
                   so the browser needs no table saying what field N means for which id — that table
                   would be a second definition of the check, free to drift. A number the check did
                   not establish is `null`, never an omitted key (redact.hpp's rule: an absent field
@@ -2167,20 +2247,33 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus "binary":true 
                   the previous session's rows under that guarantee. Not live -> the KEY IS OMITTED,
                   never emitted empty: an absent array and an empty one are different claims, and
                   only absence says "no current reading"
-GET  /history?row=<trend id>[&source=modbus]   one source's 24-hour series, oldest sample first;
-                  X10A is the backwards-compatible default and Modbus is accepted only for the six
-                  paired schematic measurements. Payload:
+GET  /history?row=<trend id>[&source=x10a|modbus|env3]   one source's 24-hour series, oldest sample
+                  first;
+                  X10A is the backwards-compatible default, Modbus is accepted only for the eleven
+                  paired concepts (logic/homehub_map.hpp) plus the unpaired Smart-Grid timeline, and
+                  env3 only for the three accessory rings. Payload:
                   {id,source,label,dt,unit,t0,b0,v[],held[[from,count],…]}. `unit` is the ROW's own unit, read
-                  from the cached value — never a hardcoded "°C": the eighteen trends mix °C, bar, KiB
+                  from the cached value — never a hardcoded "°C": the thirty-one X10A trends mix °C,
+                  bar, KiB
                   and unitless rows, and the browser prints this string into the range readout and the
                   crosshair, so a bar row labelled °C would be the #35-#39 shape. A catalog test pins
                   that each trend resolves to EXACTLY ONE row per profile, of one type code and one
-                  width (which is what makes the tenths exact), across all profiles. Ids:
-                  dhw_tank, leaving_water, return_water, water_pressure, flow, pump_signal,
-                  circuit_pressure, comp_rps, eev, outdoor_air, discharge, room_temp, inv_current,
-                  ct_l1, ct_l2, ct_l3, plus the two BOARD trends free_heap and
+                  width (which is what makes the tenths exact), across all profiles. Ids — the
+                  authoritative list is logic/history.hpp's TRENDS, which is what a request takes:
+                  numeric rows dhw_tank, leaving_water, leaving_water_post_buh, return_water,
+                  refrigerant_liquid, water_pressure, flow, pump_signal,
+                  circuit_pressure, comp_rps, eev, outdoor_air, outdoor_heat_exchanger, discharge,
+                  room_temp, inv_current,
+                  ct_l1, ct_l2, ct_l3; component-STATE timelines defrost_state, quiet_state,
+                  bsh_state, buh_step1, buh_step2, valve_dhw, valve_heat, water_flow_switch; and the
+                  four that are not catalog rows at all — smart_grid_mode (two contact bits),
+                  circulation_state (the confirmed external MQTT witness) and the two BOARD trends
+                  free_heap and
                   max_alloc (the ESP32's own memory in KiB — no register, fixed English labels, and
-                  they resolve no catalog row by construction). `v` is TENTHS of that unit (the
+                  they resolve no catalog row by construction). The ENV III ids are
+                  env3_temperature, env3_humidity and env3_pressure, offered on /status.history
+                  .env3_rows only while the sensor is enabled — a disabled accessory is absent rather
+                  than three permanently empty charts. `v` is TENTHS of that unit (the
                   resolution the converters produce, so a sample is exact rather than rounded on the
                   way in — the browser scales by 10) or null. `held` run-length-marks WHICH nulls
                   were the outdoor unit RESTING rather than a failure to measure: `v` stays a plain
@@ -2215,14 +2308,16 @@ GET  /diag[?verbose=0|1][?clear=1][?redact=1]   in-memory diag log. ?redact=1 sc
                   to CHUNKED: a replacement is longer than most values it replaces, so the redacted
                   text can GROW past the static dump buffer, and the alternatives are a second ~8 KB
                   .bss buffer or a ~6 KB contiguous heap allocation
-GET  /status?redact=1   the bug-report form of /status: the twelve reporter-identifying values
+GET  /status?redact=1   the bug-report form of /status: the fourteen reporter-identifying values
                   (wifi.ssid/ip/bssid/mac, mqtt.broker, reference_temperature.name/topic,
+                  circulation_source.name/topic,
                   weather_forecast.latitude/longitude, syslog.host, ntp.server, modbus.host — the
                   last is the saved HomeHub LAN address or `.local` hostname) read "<redacted>".
-                  TWO entries are in the set for a reason the network addresses are not: the
-                  coordinates are the reporter's HOUSE to six decimals, and
+                  FOUR entries are in the set for a reason the network addresses are not: the
+                  coordinates are the reporter's HOUSE to six decimals,
                   reference_temperature.name is a word the user typed — usually a room, sometimes a
-                  person. The count is DERIVED from the call sites by the redaction audit, so this
+                  person — and the circulation witness adds the same pair one source over, its topic
+                  normally embedding a smart-plug device id. The count is DERIVED from the call sites by the redaction audit, so this
                   list and logic/redact.hpp's cannot silently disagree with the builder again.
                   The KEY is always emitted — an omitted field is indistinguishable from an older
                   build that never had it, and "which build produced this?" is the first question a
@@ -2330,6 +2425,23 @@ POST /set_ref_temp   {name,topic,temperature_path,setpoint_path,timestamp_path,e
                   which is right for evidence about a broker that may have changed since. Deleting a
                   source (empty topic) needs no proof: removal must never depend on the thing being
                   removed still working
+POST /test_circulation  {name,topic,power_path,time_path,max_age_s,on_tenths_w,off_tenths_w,
+                  confirm_s} -> subscribe the CANDIDATE mapping on the existing authenticated MQTT
+                  client, wait up to 12 s for a frame, decode it through the path the live witness
+                  uses, and answer {ok,test_proof,power_w,state,retained} — or 422 with the reason it
+                  did not. Writes NOTHING (the /test_ref_temp shape, for the same reason): an empty
+                  topic is 400, since "test nothing" is not a question
+POST /set_circulation   {name,topic,power_path,time_path,max_age_s,on_tenths_w,off_tenths_w,
+                  confirm_s,test_proof} -> validate, persist and apply live (no reboot). The
+                  EXTERNAL CIRCULATION WITNESS: an independent power meter (in practice a smart plug
+                  on the DHW circulation pump) whose confirmed on/off state is what lets the checkup
+                  tell a real 3-way-valve leak from ordinary circulation losses. Empty topic is the
+                  explicit disabled state; a non-empty one REQUIRES a valid `test_proof` from
+                  /test_circulation or answers 409, exactly like the room source — a mistyped witness
+                  does not fail loudly, it silently re-attributes a tank's cooling rate. The proof
+                  binds the seven BEHAVIOURAL fields (not the cosmetic name). An unchanged mapping
+                  short-circuits to {ok:true,saved:false,reboot:false}; only a change to those seven
+                  reconfigures the subscription, so renaming the source does not retire its evidence
 POST /set_weather {latitude,longitude} -> validate + persist + notify the weather task (no reboot,
                   and no DNS/TLS/JSON on the request path). SAVING THE LOCATION IS THE CONSENT to
                   hand these coordinates — and this device's public source IP — to a third party, so
@@ -2378,7 +2490,11 @@ POST /set_hp      {profile,rx,tx,mb_host,mb_port,mb_unit_id}
                   flipping anyone onto Modbus — and lets the HomeHub modal POST only its three fields.
                   `mb_host` is the complete HomeHub intent: non-empty polls exactly that address;
                   empty suppresses tasks, searches and sockets. This SECOND stack never stops X10A.
-                  mb_port 1..65535 and mb_unit_id 1..247 are range-checked by validate(). The three
+                  mb_port 1..65535, mb_unit_id 1..247 and mb_host's LENGTH (at most
+                  CONFIG_BLOB_MAX_STR = 512 chars) are checked by validate() — the length bound is
+                  not cosmetic: the atomic blob's decoder rejects the WHOLE blob on a longer string,
+                  so a saved over-long address discarded the entire configuration on the next boot.
+                  A refusal is 400 "mb_host is too long"; config_save refuses independently. The three
                   HomeHub fields (host, port, unit) persist in the atomic blob and apply live: the
                   httpd route calls mb_reconfigure(), while the Modbus task remains the sole socket
                   owner and retires/restarts itself as needed. `actuation_enabled` is NOT accepted —

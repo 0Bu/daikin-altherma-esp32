@@ -909,6 +909,13 @@ Body, ordered:
    detected profile is shown. A value that timed out this cycle shows "—" (not 0). The schematic
    answers "what is happening"; these tables stay as the exact-value reference — both read the same
    `/values` dataset.
+   - **A row that is no longer a MEASUREMENT blanks here too**, for both reasons: the X10A link is
+     silent, or the outdoor unit has stopped refreshing that page (`logic/ou_stale.hpp`). Where the
+     HomeHub carries the same quantity its reading *stands in*, marked as the other source; where it
+     does not, the row shows "—". Being the exact-value reference is exactly why: this is the last
+     place a value the unit is not measuring could still be read as current, and the pill above it,
+     the inspector, the chart and MQTT all already refuse it. The device says so itself — `/values`
+     carries `held` — so the tables key on that rather than re-deriving the page rule.
    - **Tap a value → plain-language explainer.** Each value row whose label is recognised is a button
      (trailing chevron affordance, like the ESP32 card's Hardware row); tapping it slides open a short description
      beneath the row — what the reading means and, where useful, what is normal vs worth a look. The
@@ -1386,26 +1393,39 @@ native dropdown is destroyed by an `innerHTML` write, and the poll is ~1×/s.)
 Values are grouped by domain and ordered from "what is it doing" → detail. Grouping is derived from
 the value's register/label (the generator can also stamp a `group` tag per row). Order of groups:
 
-1. **Operation** — operation mode, thermostat/space-heating/DHW on-off, fault code, defrost.
-2. **Domestic hot water** — tank temp (R5T), DHW setpoint, DHW mode, extra DHW sensor.
+1. **Operation** — operation mode, thermostat/space-heating, fault **and error** code, defrost,
+   silent mode. (The catalog spells the DHW on-off flag "Powerful DHW Operation. ON/OFF", so it
+   lands in group 2 with the rest of the DHW rows rather than here.)
+2. **Domestic hot water** — tank temp (R5T), DHW setpoint, DHW mode, the DHW on-off flag,
+   extra DHW sensor.
 3. **Water circuit** — leaving water temp (after PHE / after BUH), return water temp, flow (l/min),
    water pressure, heating-flow setpoint, target ΔT, pump speed, 3-way valve.
 4. **Refrigerant / outdoor** — outdoor air temp, O/U heat-exchanger temp, high/low pressure (°C),
    refrigerant liquid temp, compressor speed, fan step.
 5. **Protection** — the page-`0x10` protection words: five retry counters + six drop-control flags.
-   Ahead of **Electrical** by necessity, not taste — grouping takes the first matching key and two of
-   the eleven carry "current" in their label, so below it they would split off into Electrical and
-   the group would quietly show 9 of its 11 rows. Matched on "drop"/"retry" and deliberately **not**
-   on "protection", which would also collect the two `default_on` *Freeze Protection* flags and
-   present a normally-ON row as a unit in trouble.
+   Matched on "drop"/"retry" and deliberately **not** on "protection", which would also collect the
+   two `default_on` *Freeze Protection* flags and present a normally-ON row as a unit in trouble.
+
+   > **Reading order and match precedence are two different lists.** This numbered order is the
+   > reading order (`GROUP_ORDER`); which group a label *belongs* to is decided by `GROUPS`, which is
+   > ordered by specificity and puts **Protection first** — it is the one group whose membership is
+   > exactly known, so it must not lose a row to a broader key in any other group. They were one
+   > array until that cost the group two rows twice: first to Electrical (two of the eleven carry
+   > "current"), then to Refrigerant (two carry "discharge"), each time leaving a group that showed
+   > 9 of 11 and looked complete. A key can now be made specific without moving anything on screen.
+   > `test_ui_source_matrix.mjs` resolves the real `groupOf` over every catalog label and asserts
+   > both the eleven and the two lists naming the same groups.
    A flag reading ON means the unit is limiting itself **right now**, so the heading carries a
    `--warn` dot plus the words *"limiting now" / "regelt zurück"* while any is ON, and those rows'
    values go `--warn`. The **counters are not** highlighted: they are cumulative, and marking both
    alike would merge *"is happening"* into *"has happened"* — the one distinction these rows exist
    to draw. Nothing shows when nothing is limiting. Scoped to this group, since ON is the normal
    resting state of plenty of rows elsewhere (pump running, thermostat, freeze protection).
-6. **Electrical** — INV primary current, INV compressor current, CT L1/L2/L3, backup-heater
-   capacity + stages.
+6. **Electrical** — INV primary current, INV compressor current, CT L1/L2/L3 (the catalog spells
+   these two ways — "CT Sensor (L1)" and "Current measured by CT sensor of L1" — and both belong
+   here), backup-heater capacity + stages, and the inverter's own cooling: heat-sink and fin
+   temperatures. NOT the unit nameplate ratings (O/U, I/U, Indoor Unit capacity): those are not
+   electrical readings and stay in the catch-all.
 7. **Device** — WiFi/MQTT/HP link, poll counters, firmware (WiFi/MQTT and HP link/protocol in
    Settings, §5.6 — the Connections tile and the Protokoll card; firmware version in the dashboard's
    header meta line §5.4; model name in the Model card, §5.3 item 4). Uptime and the heap/reset

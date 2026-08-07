@@ -1,18 +1,33 @@
 
 // ── Values (dashboard) ───────────────────────────────────────────────────
+// TWO orders, deliberately separate — they were ONE array until a key edit proved they conflict.
+// `GROUPS` is MATCH PRECEDENCE (groupOf takes the first matching key); `GROUP_ORDER` below is
+// DESIGN.md §6's reading order, which is what history.js renders by. Fusing them meant a group could
+// only be made to win a label by also being MOVED UP THE PAGE, and the Protection group has carried
+// a comment about that trap since it was written. The trap then sprang from the other side: giving
+// the refrigerant group "discharge" — correct for Target/Discharge pipe temp. — silently took
+// "Discharge Temp. Drop" and "Discharge Temp. Protection Retry Qty" out of Protection, which then
+// showed 9 of its 11 rows exactly as that comment predicted. Precedence now says what it means, so a
+// key can be made specific without anything moving on screen.
+//
+// Each key below was measured over the real catalog rather than guessed:
+//   node -e '…read main/def/*.hpp labels…' | check which group each lands in
+// Measured before this list was last edited: 66 of the 169 published labels fell into the catch-all
+// "Other values" at the bottom, including the unit's own Error Code on 44 of 45 profiles — §6 group
+// 1's named row, sitting below everything because "fault" was a key and "error" was not. Four keys
+// were also claiming rows from the group after them ("target" took the three REFRIGERANT targets,
+// "valve" took the five expansion valves, "domestic hot water" took the extra DHW SENSOR into
+// Operation, "inv " took compressor speed into Electrical). None of that is visible from a single
+// profile, which is why it survived: every row is present and plausible, just filed where nobody
+// reading about the water circuit would look for it.
 const GROUPS = [
-  ["Operation", ["operation mode", "thermostat", "space heat", "domestic hot water", "fault", "defrost"]],
-  ["Domestic hot water", ["tank", "dhw", "hot water"]],
-  ["Water circuit", ["leaving water", "return water", "flow", "water pressure", "heating-flow", "heating flow", "target", "delta", "pump", "valve", "3-way"]],
-  ["Refrigerant / outdoor", ["outdoor", "heat-exchanger", "heat exchanger", "high pressure", "low pressure", "refrigerant", "compressor", "fan"]],
-  // The page-0x10 protection words (def/overlay.hpp): five retry counters + six drop-control flags.
-  // They are the "silent protection retries" signal — a unit meeting demand while quietly backing
-  // off degrades in a way no temperature row shows — and before this group nine of the eleven fell
-  // into the "Other values" catch-all at the bottom, which is where a signal goes to not be read.
-  //
-  // MUST stay ABOVE "Electrical": groupOf takes the FIRST match, and "Comp. INV Current Drop"/
-  // "…Current Protection Retry Qty" contain "current", so below it those two would split off into
-  // Electrical and the group would silently show 9 of its 11 rows.
+  // FIRST, because it is the one group with an exactly-known membership: the eleven page-0x10
+  // protection words (def/overlay.hpp), five retry counters + six drop-control flags. Every other
+  // group is a family of labels that may grow; this one is a fixed set that must never lose a row to
+  // a broader key, and putting it first is what makes that true from ALL directions instead of only
+  // from Electrical's. Before it existed nine of the eleven sat in "Other values" — where a signal
+  // goes to not be read — and the signal is precisely a unit that meets demand while quietly backing
+  // off, which no temperature row shows.
   //
   // Keys are "drop" + "retry", NOT "protection", and that is MEASURED rather than assumed. Over the
   // published catalog labels, "drop" matches exactly the 6 flags and "retry" exactly the 5 counters,
@@ -25,12 +40,48 @@ const GROUPS = [
   // when these 11 labels can change out from under the patterns:
   //   grep -rhoE '\{0x[0-9A-Fa-f]{2}, *[0-9]+, *[0-9]+, *[0-9]+, *-?[0-9]+, *"[^"]+"' main/def/ \
   //     | sed -E 's/.*"([^"]+)"$/\1/' | sort -u | grep -icE 'drop|retry'      # must be 11
-  // NOT yet a mechanical gate: a lost row would just go quiet in "Other values", the same silent
-  // shape tools/descriptions/ exists to catch one layer over. Worth one there.
+  // test_ui_source_matrix.mjs now asserts that count through the real groupOf, so a broader key
+  // elsewhere can no longer take a row from here in silence.
   ["Protection", ["drop", "retry"]],
-  ["Electrical", ["current", "ct l", "inv ", "backup-heater", "backup heater", "stage", "capacity"]],
+  // "error" catches exactly "Error type" + "Error Code" and nothing else in the catalog. The DHW
+  // on-off flag §6 names here spells itself "Powerful DHW Operation. ON/OFF", so it lands in the DHW
+  // group below; the old "domestic hot water" key matched ONLY the 2nd-tank SENSOR, i.e. it never
+  // did the job it was written for and did one it should not have.
+  ["Operation", ["operation mode", "thermostat", "space heat", "fault", "error", "defrost", "silent mode"]],
+  ["Domestic hot water", ["tank", "dhw", "hot water"]],
+  // "heating target" for the hybrid/boiler water targets, NOT bare "target": that also took
+  // Target Evap./Cond./Discharge Temp. — refrigerant-circuit control targets — into the water group.
+  // Same for the valves: bare "valve" took all five expansion valves off the refrigerant circuit.
+  ["Water circuit", ["leaving water", "return water", "inlet water", "outlet water", "mixed water",
+                     "flow", "water pressure", "heating-flow", "heating flow", "heating target",
+                     "lw setpoint", "delta", "pump", "2way valve", "3way valve", "3-way", "mix valve"]],
+  // Bare "pressure" is safe HERE and only here: the two water-pressure spellings are claimed by the
+  // group above, so what is left ("Pressure", "Pressure sensor(T)", …) is refrigerant — the same
+  // generically-named rows logic/hp_convert.cpp documents as its known is_refrigerant_pressure gap.
+  ["Refrigerant / outdoor", ["outdoor", "heat-exchanger", "heat exchanger", "o/u heat exch",
+                             "pressure", "refrigerant", "refrig.", "compressor", "fan",
+                             "expansion valve", "discharge", "suction", "liquid", "deicer",
+                             "target evap", "target cond", "inv frequency"]],
+  // "ct sensor" beside "ct l": the catalog spells the clamps BOTH ways ("CT Sensor (L1)" and
+  // "Current measured by CT sensor of L1") and only the second contains "current", so the short
+  // spelling fell through to "Other values". "buh" brings BUH Step1/Step2 — §6's "backup-heater …
+  // stages" — in from the same place, and MEASURED it cannot reach a leaving-water row: all five
+  // "…BUH…" temperature spellings are claimed by the water group above it. "stage" is gone with
+  // "capacity": it matched ZERO catalog labels, so it read as covering §6's "backup-heater … stages"
+  // while doing nothing — the inert-setting shape this project rejects elsewhere. "capacity" is gone
+  // for the opposite reason: it caught three unit NAMEPLATE ratings
+  // (O/U, I/U, Indoor Unit) that are not electrical readings at all, while the one row it was meant
+  // for, "BUH output capacity", is already claimed by "buh".
+  ["Electrical", ["current", "ct l", "ct sensor", "inv ", "backup-heater", "backup heater", "buh",
+                  "heat sink", "fin temp"]],
   ["Device", ["wi-fi", "wifi", "mqtt", "hp link", "link", "poll", "uptime", "firmware", "rssi"]],
 ];
+// DESIGN.md §6's reading order — "what is it doing" first, then detail. This is what the page is
+// laid out by; GROUPS above decides only which group a label BELONGS to. Every name here must exist
+// in GROUPS and vice versa (asserted in test_ui_source_matrix.mjs), so a group added to one and
+// forgotten in the other cannot silently vanish from the page or render in an arbitrary place.
+const GROUP_ORDER = ["Operation", "Domestic hot water", "Water circuit", "Refrigerant / outdoor",
+                     "Protection", "Electrical", "Device"];
 function groupOf(v) {
   if (v.group) return v.group;
   const l = (v.label || "").toLowerCase();

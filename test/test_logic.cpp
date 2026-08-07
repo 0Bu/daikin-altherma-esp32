@@ -4734,6 +4734,75 @@ static void test_config_store() {
     CHECK(!v9rt.has_env3 && !v9rt.env3_enabled && v9rt.env3_sda == 2 && v9rt.env3_scl == 1);
 }
 
+// THE WRITE SIDE OF CONFIG_BLOB_MAX_STR — the invariant the atomic-blob design rests on and the one
+// it did not actually have: what config_save writes, config_load must be able to read back.
+//
+// The decoder rejects the WHOLE blob when any string exceeds the bound, and the fallback is the
+// legacy per-key layout a blob-era device has never populated — so an over-long field does not save a
+// slightly-wrong config, it destroys the entire config at the next boot and lands the board in the
+// setup portal with WiFi, MQTT, syslog, NTP, board hardware, OTA channel, language, ENV III, both
+// MQTT sources and the weather location gone. Every string was bounded by its own validator or by its
+// route's body buffer EXCEPT mb_host, whose route reads a 2048-byte body: a >512-character HomeHub
+// address answered {"ok":true} and took the config with it.
+//
+// Asserted as the IMPLICATION rather than as a list of field lengths — fit() ⟹ it round-trips — so a
+// string field added to ConfigBlob and forgotten in fit() fails HERE rather than in someone's flash.
+static void test_config_blob_strings_fit() {
+    const std::string at_max(CONFIG_BLOB_MAX_STR, 'x');
+    const std::string over(CONFIG_BLOB_MAX_STR + 1, 'x');
+
+    // Exactly at the bound is legal and must survive the round trip.
+    ConfigBlob max_all;
+    max_all.wifi_ssid = max_all.wifi_pass = max_all.wifi_ssid_backup = max_all.wifi_pass_backup =
+        max_all.mqtt_uri = max_all.mqtt_user = max_all.mqtt_pass = max_all.syslog_host =
+        max_all.ntp_server = max_all.mb_host = max_all.ref_temp_name = max_all.ref_temp_topic =
+        max_all.ref_temp_path = max_all.ref_temp_setpoint_path = max_all.ref_temp_time_path =
+        max_all.ref_temp_enabled_path = max_all.ref_temp_hvac_mode_path =
+        max_all.circulation_name = max_all.circulation_topic = max_all.circulation_power_path =
+        max_all.circulation_time_path = at_max;
+    CHECK(config_blob_strings_fit(max_all));
+    const std::vector<uint8_t> maxbuf = config_blob_serialize(max_all);
+    ConfigBlob maxrt;
+    CHECK(config_blob_deserialize(maxbuf.data(), maxbuf.size(), maxrt));
+    CHECK(maxrt.mb_host == at_max && maxrt.wifi_ssid == at_max &&
+          maxrt.circulation_time_path == at_max);
+
+    // ONE field over the bound at a time: fit() must refuse it, AND the blob it would have produced
+    // must genuinely be unreadable — that second half is what makes fit() a real guard rather than a
+    // stricter opinion. Every string field is exercised, so one missing from fit() fails here.
+    std::string ConfigBlob::*const kStrings[] = {
+        &ConfigBlob::wifi_ssid, &ConfigBlob::wifi_pass,
+        &ConfigBlob::wifi_ssid_backup, &ConfigBlob::wifi_pass_backup,
+        &ConfigBlob::mqtt_uri, &ConfigBlob::mqtt_user, &ConfigBlob::mqtt_pass,
+        &ConfigBlob::syslog_host, &ConfigBlob::ntp_server, &ConfigBlob::mb_host,
+        &ConfigBlob::ref_temp_name, &ConfigBlob::ref_temp_topic, &ConfigBlob::ref_temp_path,
+        &ConfigBlob::ref_temp_setpoint_path, &ConfigBlob::ref_temp_time_path,
+        &ConfigBlob::ref_temp_enabled_path, &ConfigBlob::ref_temp_hvac_mode_path,
+        &ConfigBlob::circulation_name, &ConfigBlob::circulation_topic,
+        &ConfigBlob::circulation_power_path, &ConfigBlob::circulation_time_path,
+    };
+    CHECK(sizeof(kStrings) / sizeof(kStrings[0]) == 21);
+    for (std::string ConfigBlob::*field : kStrings) {
+        ConfigBlob c;
+        c.wifi_ssid = "net";
+        c.*field = over;
+        CHECK(!config_blob_strings_fit(c));
+        const std::vector<uint8_t> buf = config_blob_serialize(c);
+        ConfigBlob rt; rt.wifi_ssid = "sentinel";
+        CHECK(!config_blob_deserialize(buf.data(), buf.size(), rt));
+        CHECK(rt.wifi_ssid == "sentinel");   // a rejected blob leaves the caller's config untouched
+    }
+
+    // The mb_host case reached this through validate(), which now answers 400 instead of letting the
+    // save reach config_save's refusal. The other fields cannot: each is bounded before it gets here.
+    Config cfg;
+    cfg.mb_host = over;
+    std::string why;
+    CHECK(!validate(cfg, why) && why == "mb_host is too long");
+    cfg.mb_host = at_max;
+    CHECK(validate(cfg, why));
+}
+
 static void test_env3() {
     const uint8_t crc_bytes[2] = {0xbe, 0xef};
     CHECK(env3_sht_crc(crc_bytes, 2) == 0x92);
@@ -7215,6 +7284,31 @@ static void test_checkup() {
         }
         CHECK(draw_b.windows == 0 && draw_b.high_windows == 0);
 
+        // THE BLIND BAND, pinned so it stays visible and so widening the filter shows up HERE as a
+        // deliberate change rather than as a quiet behavioural drift. The draw filter cannot tell a
+        // steady decline from a draw, so above ~1.85 K/h no window ever completes and the check
+        // answers `collecting` forever — in the severity range it exists to find (a leaking diverter
+        // is by definition worse than the 1.2 K/h healthy-with-circulation reference figure). The
+        // constant carries the measurement and why raising it is a domain decision.
+        auto windows_at = [](int tenths_per_h) {
+            DhwLossState rs; DhwLossBucket rb; CheckupSample r;
+            r.valve_known = r.pump_known = r.bsh_known = true;
+            r.valve_dhw = r.pump_on = r.bsh_on = false;
+            r.r5t_ok = true;
+            r.circulation_configured = r.circulation_known = true;
+            r.circulation_on = false;
+            for (int sec = 0; sec <= 4 * 3600; sec += 10) {
+                r.r5t_tenths = 900 - (sec * tenths_per_h) / 3600;
+                dhw_loss_step(rs, rb, r, static_cast<int64_t>(sec) * 1000000);
+            }
+            return static_cast<int>(rb.windows);
+        };
+        CHECK(windows_at(8) == 3);      // 0.8 K/h — the high-loss threshold itself, seen
+        CHECK(windows_at(12) == 3);     // 1.2 K/h — the healthy-with-circulation reference, seen
+        CHECK(windows_at(18) == 3);     // 1.8 K/h — the last rate fully seen
+        CHECK(windows_at(19) == 0);     // 1.9 K/h — and from here the check is structurally blind
+        CHECK(windows_at(60) == 0);     // 6.0 K/h — a severe standing loss reports nothing at all
+
         // A positive tank-charge witness starts the 45-minute settling guard even when a different
         // state row timed out in the same sweep. Recovering that row must not admit the charge tail.
         DhwLossState settle_st;
@@ -9479,6 +9573,7 @@ int main() {
     test_query_flag();
     test_redact();
     test_config_store();
+    test_config_blob_strings_fit();
     test_env3();
     test_reference_temperature_config();
     test_circulation_source();

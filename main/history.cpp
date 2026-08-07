@@ -130,13 +130,22 @@ inline void advance_raster_locked(int64_t now_us, uint32_t bucket) {
             s_last_commit_us = static_cast<int64_t>(bucket) * logic::HISTORY_DT_S * 1000000;
             s_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
         }
-    } else if (bucket != s_bucket) {
+    } else if (bucket > s_bucket) {
+        // `>`, not `!=`. Both callers read the clock and compute the bucket BEFORE taking s_mtx, so
+        // if the other task crosses a five-minute boundary inside that window the loser arrives with
+        // a bucket BEHIND the raster. history_skipped() correctly answers 0 there, but commit(0)
+        // still ran: every ring took a spurious NO_READING sample and s_bucket moved BACKWARDS,
+        // skewing the whole time axis by one slot and making history_newest_age_s() read from an
+        // older instant. Only reachable since #367 gave the raster a second, independent advancer.
         const uint32_t skipped = logic::history_skipped(s_bucket, bucket);
         for (auto& tr : s_ring) tr.ring.commit(skipped);
         s_last_commit_us = now_us;
         s_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
     }
-    s_bucket = bucket;
+    // MONOTONIC for the same reason the branch above is: the loser of the read-clock-then-lock race
+    // must not drag the raster back a slot, which would make the NEXT advance commit a skip that
+    // never happened.
+    if (!s_have_bucket || bucket > s_bucket) s_bucket = bucket;
     s_have_bucket = true;
 }
 

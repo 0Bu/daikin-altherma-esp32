@@ -97,6 +97,19 @@ rm -rf "$T/pages"; git init -q "$T/pages"
 )
 run release 9.9.9; check "malformed manifest refuses" "$?" "2"
 
+# An UNREACHABLE remote is not an empty one. Both make `git fetch` fail, and reading that failure as
+# "nothing published yet" made the guard pass on every network blip, expired token and GitHub outage
+# — fail-open in the one script written to fail loud. Point the checkout at a remote that does not
+# exist: the reference is unknown, so the answer must be 2 (refuse), never 0.
+(
+  cd "$T/work" || exit 1
+  git remote set-url origin "$T/does-not-exist.git"
+) >/dev/null 2>&1
+run release 9.9.9; check "an unreachable remote refuses (fail closed)" "$?" "2"
+check "and it says the reference is unknown" \
+      "$(grep -c 'reference is UNKNOWN' "$T/out.log")" "1"
+( cd "$T/work" && git remote set-url origin "$T/origin.git" ) >/dev/null 2>&1
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "publish version gate: all $pass checks passed"

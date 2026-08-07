@@ -2,6 +2,7 @@
 // the assembled production UI in a tiny DOM-free VM harness: a persistent surface must repaint when LANG changes
 // even though every device/status value in its ordinary render signature remains identical.
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import vm from "node:vm";
 import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
@@ -96,6 +97,38 @@ function assertPersistentBannerRepaints(name, status) {
   assert.equal(unknownMode.mode, "sys.x10a_down");
   assert.equal(unknownMode.status, "sys.mb_carrying");
   assert.equal(unknownMode.tone, "warn", "an unknown Modbus mode keeps the existing warning state");
+}
+
+// A tone that can be RETURNED must be DRAWABLE. The block above pinned that "warn" is produced, and
+// nothing pinned that anything could paint it: TONE_FILL had no "warn" key, so sysSet handed the
+// status dot the string "undefined" — not a valid SVG paint — and it fell back to black, in exactly
+// the two HomeHub states that exist to draw attention. Asserted over EVERY tone the two producers
+// can return, so a future tone added to one side and forgotten on the other fails here.
+{
+  const { api } = productionApi(
+    appStateSource,
+    ["plantState", "modbusStatusView", "TONE_FILL"],
+    { compressorRunning: (d) => d?.rps != null ? d.rps > 0 : d?.compressorOn === true,
+      t: (key) => key },
+  );
+  const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
+  const produced = new Set();
+  for (const d of [{ rps: 0, pumpOn: false, flow: 0 },
+                   { rps: 42, pumpOn: true, flow: 19, thermalMode: "heat", pthRaw: 7 },
+                   { rps: 0, pumpOn: true, flow: 19, thermalMode: "cool", pthRaw: 0.4 }])
+    produced.add(api.plantState(d).tone);
+  for (const [mode, d] of [[null, { rps: null, compressorOn: false, pumpOn: false, flow: 0 }],
+                           ["mode.dhw", { rps: null, compressorOn: true, pumpOn: true, flow: 14 }]])
+    produced.add(api.modbusStatusView(mode, d).tone);
+  assert.ok(produced.has("warn"), "the fixture set must actually reach the warn tone");
+  for (const tone of produced) {
+    const fill = api.TONE_FILL[tone || ""];
+    assert.ok(typeof fill === "string" && fill.startsWith("var(--"),
+      `tone "${tone}" must map to a real paint, not ${String(fill)}`);
+    // "" is the default class-less state; every named tone also needs its own text rule.
+    if (tone) assert.match(style, new RegExp(`svg \\.sc-status\\.${tone}\\s*\\{`),
+      `tone "${tone}" must have a .sc-status rule so the line is coloured too`);
+  }
 }
 
 assertPersistentBannerRepaints(

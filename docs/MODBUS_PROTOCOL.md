@@ -290,7 +290,7 @@ Everything is runtime — no reflash, and no reboot.
 
 | Field | Meaning |
 |---|---|
-| `mb_host` | HomeHub IP or `.local`/DNS hostname; empty disables discovery, task and requests |
+| `mb_host` | HomeHub IP or `.local`/DNS hostname; empty disables discovery, task and requests. Validated at most 512 chars — the atomic config blob rejects any longer string on read, which would discard the WHOLE saved configuration on the next boot, so an over-long address is a 400 |
 | `mb_port` | Modbus TCP port, default `502` (validated 1–65535) |
 | `mb_unit_id` | Modbus unit id, default `1` (validated 1–247) |
 | *(retired)* | The v9 `actuation_enabled` consent bit is no longer a config field. It is still present in the blob layout as a permanently-zero bit and is discarded on decode |

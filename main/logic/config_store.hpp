@@ -170,6 +170,36 @@ inline constexpr uint8_t  CONFIG_BLOB_VERSION_MIN = 1;
 // huge length is a garbled blob, not a value. Bounds the work and rejects a hostile/garbled length.
 inline constexpr uint16_t CONFIG_BLOB_MAX_STR = 512;
 
+// THE WRITE SIDE OF THAT SAME BOUND. The decoder rejects the WHOLE BLOB when any string exceeds it,
+// so a serializer that writes one is not producing a slightly-wrong config — it is producing a config
+// that cannot be read back at all, and the fallback is the legacy per-key layout a blob-era device has
+// never populated. The board then boots into the setup portal having silently lost WiFi, MQTT, syslog,
+// NTP, board hardware, OTA channel, language, ENV III, both MQTT sources and the weather location.
+//
+// It was reachable: every other string here is bounded by its own validator or by its route's body
+// buffer, but `mb_host` was documented as "free text like syslog_host" while its route reads a 2048-byte
+// body — so a >512-character HomeHub address saved with {"ok":true} and destroyed the config on the
+// next boot. Checked HERE rather than only in validate() because this is where the constant that
+// decides it lives: a bound enforced next to the decode rule it must agree with cannot drift from it,
+// and a future field added to ConfigBlob is covered without anyone remembering to add a check.
+// Every std::string in ConfigBlob, in declaration order. A new string field belongs in this list AND
+// in test_config_blob_strings_fit()'s own field list, which is what proves the invariant this exists
+// for (fit() ⟹ the blob round-trips). Stated precisely because the test cannot discover a member
+// nobody added to it: C++ gives it no way to enumerate the struct, so the `== 21` pin catches a field
+// dropped from the TEST, not one added to the STRUCT and forgotten in both places.
+inline bool config_blob_strings_fit(const ConfigBlob& c) {
+    for (const std::string* s : {
+             &c.wifi_ssid, &c.wifi_pass, &c.wifi_ssid_backup, &c.wifi_pass_backup,
+             &c.mqtt_uri, &c.mqtt_user, &c.mqtt_pass, &c.syslog_host, &c.ntp_server,
+             &c.mb_host,
+             &c.ref_temp_name, &c.ref_temp_topic, &c.ref_temp_path, &c.ref_temp_setpoint_path,
+             &c.ref_temp_time_path, &c.ref_temp_enabled_path, &c.ref_temp_hvac_mode_path,
+             &c.circulation_name, &c.circulation_topic, &c.circulation_power_path,
+             &c.circulation_time_path })
+        if (s->size() > CONFIG_BLOB_MAX_STR) return false;
+    return true;
+}
+
 namespace detail {
 inline void blob_put_u16(std::vector<uint8_t>& v, uint16_t x) { v.push_back(x & 0xFF); v.push_back((x >> 8) & 0xFF); }
 inline void blob_put_u32(std::vector<uint8_t>& v, uint32_t x) {

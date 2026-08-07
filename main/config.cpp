@@ -380,6 +380,18 @@ bool config_save(const Config& requested, bool require_link) {
     b.mb_host           = c.mb_host;
     b.mb_port           = c.mb_port;
     b.mb_unit_id        = c.mb_unit_id;
+    // REFUSE TO WRITE A BLOB THIS BUILD COULD NOT READ BACK. The decoder rejects the whole blob if any
+    // string exceeds CONFIG_BLOB_MAX_STR, and the fallback is the legacy per-key layout a blob-era
+    // device never populated — so writing one does not save a slightly-wrong config, it silently
+    // destroys the whole config at the next boot (WiFi, MQTT, syslog, NTP, board, OTA channel,
+    // language, ENV III, both MQTT sources, the weather location) and comes up in the setup portal.
+    // Checked here rather than trusted from the routes because this is the last point where every
+    // field is together, and it is the one guarantee the atomic-blob design rests on.
+    if (!config_blob_strings_fit(b)) {
+        diag_printf("config: refusing to save — a setting exceeds the %u-byte field limit\n",
+                    static_cast<unsigned>(CONFIG_BLOB_MAX_STR));
+        return false;
+    }
     const std::vector<uint8_t> blob = config_blob_serialize(b);
 
     const esp_err_t e = nvs_set_blob("cfg", blob.data(), blob.size());

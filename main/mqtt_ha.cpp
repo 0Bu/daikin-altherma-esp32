@@ -128,9 +128,32 @@ static bool start_current_client();
 static bool promote_client_to_publisher();
 
 // MQTT_EVENT_DATA runs on esp-mqtt's unguarded event task. It therefore only copies into this one
-// bounded frame and overwrites a length-1 queue; JSON parsing and all std::string work stay on the
+// bounded frame and posts it to a queue; JSON parsing and all std::string work stay on the
 // exception-guarded mqtt_task. 1024 B comfortably covers the 435 B Shelly test payload while keeping
 // an accidentally huge subscribed document from consuming the ESP32 heap.
+//
+// THE QUEUE HOLDS MORE THAN ONE FRAME, and that is not headroom for its own sake. It was length 1
+// with xQueueOverwrite (keep-newest) when exactly ONE topic was subscribed (#318). Since then the
+// circulation witness (#361) added a second SAVED source, each source has a pre-save probe, and the
+// retained-cleanup migration added four more subscriptions — while the drain still happens once per
+// mqtt_task cycle, i.e. once a SECOND. Every frame arriving inside one cycle but the last was
+// discarded, unread, with nothing logged.
+//
+// That is not a rare race: the circulation witness is a smart plug publishing at roughly 1 Hz, which
+// is precisely what #367's pulse tracking is written for. With a room source configured beside it,
+// room frames were being dropped continuously — and the sharp edge is the pre-save probe, which
+// re-subscribes specifically to make the broker re-deliver the retained value so that pressing Test
+// has a bounded answer. That one frame lost a coin-toss with the next circulation publish, the 12 s
+// probe timed out, and POST /set_ref_temp then refused the save with "Test this MQTT mapping
+// successfully before saving" — a correct mapping that could not be saved, blaming the mapping.
+//
+// Three slots (3 x ~1.2 KB, allocated once at MQTT start) cover both saved sources plus a probe's
+// retained delivery inside one drain interval. On overflow the NEWEST frame is dropped rather than
+// the oldest: everything queued is drained in the same cycle a moment later, so the difference is
+// at most one second of age, and drop-newest needs no second 1.2 KB scratch frame to shuffle
+// through. The count is reported, because a silent drop here is exactly what hid this for two
+// releases.
+static constexpr size_t REF_QUEUE_DEPTH = 3;
 static constexpr size_t REF_TEMP_PAYLOAD_MAX = 1024;
 struct ReferenceMqttFrame {
     char   topic[REF_TEMP_TOPIC_MAX + 1] = {0};
@@ -144,6 +167,11 @@ static QueueHandle_t       s_ref_queue = nullptr;
 static ReferenceMqttFrame  s_ref_rx;
 static ReferenceMqttFrame  s_ref_task_frame;          // mqtt_task-owned; keeps ~1.2 KB off its stack
 static bool                s_ref_rx_active = false;
+// Written by the event task, read + reported by mqtt_task — the same split as the flags above, and
+// std::atomic for the reason stated there. Relaxed ordering: it is a counter, ordering nothing and
+// synchronising nothing, and taking a lock on the event task is what this hand-off exists to avoid.
+static std::atomic<uint32_t> s_ref_dropped{0};
+static uint32_t            s_ref_dropped_reported = 0;
 static ReferenceTemperatureStatus s_ref_status;
 static logic::HeatingCurveDiagnosis s_heating_curve_diagnosis;  // guarded by s_mtx
 struct ReferenceProbeState {
@@ -420,8 +448,10 @@ static std::vector<GroupedValue> current_modbus_values(bool& live) {
 // Only THIS board's own legacy topics can be retracted — a board that has already been swapped out
 // is gone and cannot clean up after itself. docs/HOME_ASSISTANT.md says how to remove its leftovers.
 static void retract_legacy_fixed() {   // heartbeat + crash entities (no profile needed)
-    s_legacy_fixed_retracted = true;
-    if (s_board == s_node) return;     // ids coincide -> there is no separate legacy identity
+    if (s_board == s_node) {           // ids coincide -> there is no separate legacy identity
+        s_legacy_fixed_retracted = true;
+        return;
+    }
     for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++)
         mqtt_publish(heartbeat_discovery_topic(s_prefix, s_board, HEARTBEAT_SENSORS[i]), "", 0, 0, 1);
     for (int i = 0; i < RETIRED_HEARTBEAT_SENSOR_COUNT; i++)
@@ -433,6 +463,12 @@ static void retract_legacy_fixed() {   // heartbeat + crash entities (no profile
     for (int i = 0; i < RETIRED_CRASH_SENSOR_COUNT; i++)
         mqtt_publish(crash_discovery_topic(s_prefix, RETIRED_CRASH_SENSORS[i].component, s_board,
                                            RETIRED_CRASH_SENSORS[i].object_id), "", 0, 0, 1);
+    // Latched AFTER the publishes, the rule retract_stale_values states and this function did not
+    // follow: the topic builders allocate, so a bad_alloc part-way through unwinds to mqtt_task's
+    // catch — and a guard already set would mean the remaining legacy configs are never retried for
+    // the rest of the boot, leaving permanently-unavailable duplicate entities in HA with nothing
+    // logged. On the equal-ids path above there is nothing to publish, so latching there is right.
+    s_legacy_fixed_retracted = true;
 }
 
 // ── Ungrouped (pre-#221) value discovery configs ─────────────────────────────────────────────────
@@ -994,7 +1030,8 @@ static void capture_reference_frame(esp_mqtt_event_handle_t e) {
                     static_cast<size_t>(e->data_len));
     if (e->current_data_offset + e->data_len == e->total_data_len) {
         s_ref_rx.payload[s_ref_rx.payload_len] = '\0';
-        xQueueOverwrite(s_ref_queue, &s_ref_rx);   // queue length is exactly one
+        if (xQueueSend(s_ref_queue, &s_ref_rx, 0) != pdTRUE)
+            s_ref_dropped.fetch_add(1, std::memory_order_relaxed);
         s_ref_rx_active = false;
     }
 }
@@ -1303,10 +1340,13 @@ static void service_circulation_probe_subscription(const Config& saved) {
         return;
     }
     if (s_circulation_probe_task_generation == generation) return;
-    const bool already_subscribed = candidate.topic == saved.circulation_topic &&
-                                    s_circulation_subscribed_topic == candidate.topic;
-    const int id = already_subscribed ? 0 :
-        esp_mqtt_client_subscribe(s_client, candidate.topic.c_str(), 0);
+    // Re-subscribe UNCONDITIONALLY, including when this exact topic is already the saved source's —
+    // the same deliberate choice the room probe makes, for the same reason: it asks the broker to
+    // deliver the retained value again, so pressing Test has a bounded answer instead of depending on
+    // when the source happens to publish next. Skipping it here made re-testing an unchanged mapping
+    // wait for a live publish inside the 12 s window, so an on-change-only meter answered 422 and
+    // /set_circulation then refused the save with the proof gate — the mapping blamed for the probe.
+    const int id = esp_mqtt_client_subscribe(s_client, candidate.topic.c_str(), 0);
     bool signal = false;
     {
         Lock lk(s_mtx);
@@ -1319,7 +1359,9 @@ static void service_circulation_probe_subscription(const Config& saved) {
             }
         }
     }
-    if (id >= 0 && !already_subscribed)
+    // Recorded only when this topic is not already owned by another subscription, so the cleanup
+    // above cannot unsubscribe a topic the saved source still needs.
+    if (id >= 0 && candidate.topic != saved.circulation_topic)
         s_circulation_probe_subscribed_topic = candidate.topic;
     s_circulation_probe_task_generation = generation;
     if (signal && s_circulation_probe_sem) xSemaphoreGive(s_circulation_probe_sem);
@@ -1716,6 +1758,16 @@ static void service_circulation_frame(const ReferenceMqttFrame& frame, const Con
 
 static void service_reference_frames(const Config& c) {
     if (!s_ref_queue) return;
+    // Report a dropped frame ONCE per new drop rather than per frame: this is the failure that hid
+    // for two releases behind a keep-newest queue of one, so it must never be silent again, and a
+    // per-frame line would evict the rest of the boot from the 6 KB diag ring under the very
+    // overload it is reporting.
+    const uint32_t dropped = s_ref_dropped.load(std::memory_order_relaxed);
+    if (dropped != s_ref_dropped_reported) {
+        diag_printf("mqtt: %lu inbound source frame(s) dropped — queue full\n",
+                    static_cast<unsigned long>(dropped - s_ref_dropped_reported));
+        s_ref_dropped_reported = dropped;
+    }
     while (xQueueReceive(s_ref_queue, &s_ref_task_frame, 0) == pdTRUE) {
         const ReferenceMqttFrame& frame = s_ref_task_frame;
         service_circulation_frame(frame, c);
@@ -2206,7 +2258,7 @@ void mqtt_ha_start() {
         diag_printf("mqtt: circulation-source test semaphore alloc failed\n");
     if (!s_status.configured) return;
 
-    s_ref_queue = xQueueCreate(1, sizeof(ReferenceMqttFrame));
+    s_ref_queue = xQueueCreate(REF_QUEUE_DEPTH, sizeof(ReferenceMqttFrame));
     if (!s_ref_queue) {
         s_ref_status.error = "receive queue alloc failed";
         s_ref_status.errors++;

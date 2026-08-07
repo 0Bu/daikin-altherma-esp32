@@ -179,6 +179,7 @@ svg .sc-state { fill: var(--muted); font: 600 10px var(--font-sans); }
 svg .sc-mode { fill: var(--fg); font: 650 24px var(--font-sans); letter-spacing: -.4px; }
 svg .sc-status { fill: var(--brand-strong); font: 600 11.5px var(--font-sans); }
 svg .sc-status.err { fill: var(--err); }
+svg .sc-status.warn { fill: var(--warn); }
 svg .sc-status.dim { fill: var(--muted); }
 /* Standby — the plant is healthy but not running. Only the DOT is muted (TONE_FILL in app.js); the
    text keeps its normal colour, which is what separates it from .dim (no data at all, both muted).
