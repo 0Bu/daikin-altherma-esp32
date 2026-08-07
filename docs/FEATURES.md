@@ -107,6 +107,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 62 | **Configurable MQTT living-room source** — an exact topic with bounded JSON paths, **test-before-persist** against a single-use mapping-bound proof | ✅ 🧪 | [`logic/reference_temperature.hpp`](../main/logic/reference_temperature.hpp), [`http_config.cpp`](../main/http_config.cpp) |
 | 66 | **Complete UI interaction merge gate** — the assembled production UI is *executed* in a deterministic DOM harness, covering every modal in the production registry | ✅ 🧪 | [`test_ui_use_cases.mjs`](../test/test_ui_use_cases.mjs), [`run-ui-use-case-tests.sh`](../scripts/run-ui-use-case-tests.sh) |
 | 68 | **Source-boundary contract gate** — source-text assertions about `main/*.cpp` the host suite structurally cannot make (task, order, and which file is entitled) | ✅ | [`run-contract-tests.sh`](../scripts/run-contract-tests.sh), [`test_heating_curve_diagnosis_contract.mjs`](../test/test_heating_curve_diagnosis_contract.mjs) |
+| 69 | **Source-absence matrix gate** — every optional source (broker, room source, circulation witness, HomeHub, ENV III, weather, X10A, safe mode) can be absent independently, so the firmware invariants and the browser copy are checked over that cross product, not one feature at a time | ✅ | [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs), [`test_ui_absence_matrix.mjs`](../test/test_ui_absence_matrix.mjs), [`selftest.sh`](../tools/absence/selftest.sh) |
 
 ---
 

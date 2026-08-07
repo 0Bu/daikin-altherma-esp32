@@ -363,6 +363,12 @@ static void poll_task(void*) {
     for (;;) {
         esp_task_wdt_reset();                                  // top of cycle; poll_once also resets per register
         try {
+            // The BOARD's own memory trends, before any decision about the bus. They describe the
+            // ESP32, not the heat pump, so they must not depend on a profile being resolved: folding
+            // them inside history_record() (i.e. inside poll_once) meant a board whose X10A never
+            // answers — wrong pins, unplugged cable, unit off — recorded no heap curve at all, on
+            // exactly the board someone is debugging. Cheap: two counter reads and one mutex.
+            history_record_board();
             if (config().profile == "auto") {
                 // Silent-bus detect backoff: sweep at the poll floor at first, then stretch toward the
                 // ceiling the longer the bus stays quiet (logic/detect_backoff.hpp). Applied by SKIPPING

@@ -613,10 +613,15 @@ host-testable core is unusually large and valuable, because the risky parts are 
   which is the non-trivial half the `CHECK`s cover. That count is **derived** from the call sites by
   the redaction audit rather than restated here, because it had already been wrong in four places at
   once — the header said ten, the audit tool eight, this file eight, and the builder wrapped twelve.
+  An UNSET identifier is left empty rather than substituted (`redact_identifier`, not the
+  `redact_or` primitive): `<redacted>` over an empty value manufactures a source the
+  installation does not have, and "which optional sources is this device even running" is the
+  first question a frozen report has to answer — `mqtt.broker` sharpest of all, where empty
+  *is* the disabled state.
   It **fails closed**: a rule whose end token is
   missing — a line the ring truncated mid-value, precisely when a value sits unterminated at the
   end — redacts to end of line rather than giving up, while the trailing newline survives so the
-  ring's line structure does. The **value** is replaced and the **key** kept: a dropped field is
+  ring's line structure does. A **set** value is replaced and the **key** kept: a dropped field is
   indistinguishable from an older build, and forging that signal would mislead the very triage the
   report exists to feed. Its `/diag` half is an allowlist, so
   [`scripts/run-redaction-audit.sh`](../scripts/run-redaction-audit.sh) gates it — a new

@@ -33,6 +33,14 @@ void history_start();
 // and only touches the ring when a bucket boundary is crossed (once per HISTORY_DT_S).
 void history_record(const CachedValue* v, size_t n);
 
+// Feed the BOARD's own trends (free heap, largest contiguous block). Called from the poll task at
+// the top of EVERY cycle, before it decides whether to detect or to sweep, because these describe the
+// ESP32 and not the heat pump: routing them through history_record() made them vanish on a board
+// whose X10A bus never answers (the profile stays "auto", so poll_once() — and with it
+// history_record() — never runs), which is precisely the board someone is diagnosing. One producer,
+// no branch that can skip it.
+void history_record_board();
+
 // Feed the external MQTT circulation witness from the MQTT task's own one-second cadence. This is
 // deliberately separate from history_record(): an installation whose X10A bus is silent remains in
 // auto-detection and therefore has no X10A poll cycle, but its configured MQTT witness is still a

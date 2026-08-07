@@ -144,6 +144,15 @@ jobs:
       # test/test_*_contract.mjs, so one now joins the gate without a workflow edit.
       - name: Test firmware source-boundary contracts
         run: ./scripts/run-contract-tests.sh
+      # The SOURCE-ABSENCE matrix runs inside the two suites above (test_source_absence_contract.mjs
+      # rides the contract glob, test_ui_absence_matrix.mjs the UI one), so only its selftest needs a
+      # step. It earns one for the reason the domain/schematic/redaction selftests do, and more
+      # sharply: BOTH halves of that matrix assert over TEXT — firmware source and rendered markup —
+      # so a check that has stopped matching the code it describes reports SUCCESS. A broken check
+      # and a correct one are indistinguishable without re-seeding the defects, which is what this
+      # does. It has already caught one of its own assertions written so that it could never fire.
+      - name: Prove the source-absence matrix still catches its defects
+        run: ./tools/absence/selftest.sh
       # Domain-correctness gate: are the published values physically RIGHT? The logic tests above
       # verify the logic they are handed; they cannot see a well-formed value that is simply
       # false — a wrong converter compiles, passes them all, and publishes -971.5 °C to Home

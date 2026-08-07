@@ -33,6 +33,7 @@ scripts/run-description-audit.sh   # can a user find out what each value IS?
 scripts/run-schematic-audit.sh     # does the DRAWING still say what it means?
 scripts/run-ui-use-case-tests.sh   # do all visible UI actions actually work?
 scripts/run-redaction-audit.sh     # can a bug report still leak the USER's data?
+tools/absence/selftest.sh          # can the source-absence matrix still go red?
 scripts/run-ui-gif-audit.sh        # is the README's RECORDING still of this UI?
 scripts/run-doc-entity-audit.sh    # do the docs' copy-paste ENTITY IDS exist?
 ```
@@ -51,6 +52,17 @@ the right task, in the right order, or not at all. "No source file can issue a M
 claim about a whole component, and the only way to check it is to read the source text, which is
 what each `test/test_*_contract.mjs` does. The glob is deliberate:
 a new sibling joins the gate with no workflow edit, the same property `test_ui_*.mjs` already had.
+
+Both globs also carry the **source-absence matrix** — `test_source_absence_contract.mjs` and
+`test_ui_absence_matrix.mjs` — which is why it has no runner of its own. It asks what the other
+gates do not: every source this firmware reads except the board is optional (the MQTT broker, the
+MQTT room source, the circulation witness, the HomeHub, ENV III, the weather location, the X10A bus
+itself), safe mode removes all of them at once, and each can be absent independently. That cross
+product is where defects have shipped with every other gate green — the board's own heap trends
+stopped recording because the *X10A bus* did not answer, and a card told a reader to set up a room
+source they had already configured. Run `tools/absence/selftest.sh` if you touch either test file:
+both halves assert over text, so a check that has stopped matching the code it describes reports
+success, and the selftest is what re-seeds the defects to prove otherwise.
 
 `run-domain-audit.sh` is separate on purpose, and the distinction matters:
 
@@ -125,6 +137,13 @@ undefined close function. CI runs the same command in the required `gates` job. 
 changes, the maintainer's `/ui-use-case-review` adds real narrow/desktop click-through and records a
 SHA-stamped result; `.claude/hooks/require-ui-use-case-review.sh` requires that current record and
 reruns the deterministic suite immediately before a command-line merge.
+
+`/absence-review` is the same shape for the states above: **conditional**, required when a PR
+touches an optional source's lifecycle or a surface that reports one, with
+`.claude/hooks/require-absence-review.sh` as the single definition of that set. Like the schematic
+gate it exists because the mechanical half cannot judge whether a *new* source is in the matrix,
+whether removing one source quietly removed another, or whether the copy names a blocker the reader
+can actually act on.
 
 `run-redaction-audit.sh` is the only gate here whose subject is the **user's data** rather than the
 firmware's correctness, and it is the one an outside contributor is most likely to need without
@@ -304,9 +323,9 @@ silence a *new* finding on code your PR touches — that is the gate working.
 
 ## Pull requests
 
-Fill in [the template](.github/pull_request_template.md). Five checkboxes on it
+Fill in [the template](.github/pull_request_template.md). Six checkboxes on it
 (`/project-review`, `/feature-docs`, `/domain-review`, `/schematic-review`,
-`/ui-use-case-review`) are **maintainer-only** —
+`/ui-use-case-review`, `/absence-review`) are **maintainer-only** —
 they invoke Claude Code skills in this repo's `.claude/` directory and are not something an outside
 contributor can run. Leave them unchecked; the maintainer runs them before merge. Your equivalents
 are the scripts above plus an honest note about hardware.

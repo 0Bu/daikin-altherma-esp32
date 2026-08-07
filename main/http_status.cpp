@@ -81,7 +81,12 @@ static std::string jstr(const std::string& s) { return json_quote(s); }
 // no room for. The KEY is always emitted — an omitted field is indistinguishable from an older
 // build that never had it, and "which build produced this?" is the first question a frozen bug
 // report has to answer.
-static std::string jstr_r(const std::string& s, bool redact) { return json_quote(redact_or(s, redact)); }
+// redact_identifier, not redact_or: an UNSET identifier is left empty rather than substituted, so
+// "this installation has no HomeHub / no room source / no broker" survives into the report instead of
+// being spelled the same way as "it has one and hid it" (logic/redact.hpp carries the reasoning).
+static std::string jstr_r(const std::string& s, bool redact) {
+    return json_quote(redact_identifier(s, redact));
+}
 
 // Is a SoftAP live, i.e. are we the provisioning portal rather than the dashboard? The setup portal
 // runs AP-only (provisioning.cpp); APSTA is matched too because it is never the normal operating
@@ -441,13 +446,24 @@ void http_append_status_json(std::string& j, bool redact) {
     // Heating-curve diagnosis v2: raw room error sampled only in confirmed HEATING operation. The
     // absolute timestamp + monotonic sequence is the durable event contract; no actuator-derived
     // P/quantized/bounded/requested-offset vocabulary remains.
+    // `armed` is the CONFIGURATION's answer (is a room mapping saved), while state/reason come from a
+    // snapshot the MQTT publish task owns. Those two can disagree, and only in one direction: with no
+    // broker configured, or in safe mode, that task is never created, so the snapshot stays
+    // default-constructed at Off/Disabled while armed reads true. Published raw, that was a payload
+    // contradicting itself — and "disabled" is the evaluator's word for "no room source is mapped",
+    // which is exactly what the reader has already done. logic/heating_curve_diagnosis.hpp names the
+    // situation instead (host-tested), so the state stays honestly `off` while the reason says the
+    // sampler is not running.
+    const bool heating_curve_armed = heating_curve_diagnosis_armed(c);
+    const logic::HeatingCurveReason heating_curve_reason = logic::heating_curve_reported_reason(
+        heating_curve_armed, heating_curve.state, heating_curve.reason);
     j += "\"heating_curve\":{\"method_version\":";
     j += std::to_string(logic::HEATING_CURVE_DIAGNOSIS_METHOD_VERSION);
-    j += ",\"armed\":"; j += heating_curve_diagnosis_armed(c) ? "true" : "false";
+    j += ",\"armed\":"; j += heating_curve_armed ? "true" : "false";
     j += ",\"state\":\""; j += logic::heating_curve_state_name(heating_curve.state); j += "\"";
     j += ",\"state_code\":"; j += std::to_string(static_cast<unsigned>(heating_curve.state));
-    j += ",\"reason\":\""; j += logic::heating_curve_reason_name(heating_curve.reason); j += "\"";
-    j += ",\"reason_code\":"; j += std::to_string(static_cast<unsigned>(heating_curve.reason));
+    j += ",\"reason\":\""; j += logic::heating_curve_reason_name(heating_curve_reason); j += "\"";
+    j += ",\"reason_code\":"; j += std::to_string(static_cast<unsigned>(heating_curve_reason));
     j += ",\"sample_eligible\":"; j += heating_curve.sample_eligible ? "true" : "false";
     j += ",\"current_room_error_k\":";
     j += heating_curve.has_current_room_error
