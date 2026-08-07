@@ -430,11 +430,22 @@ for (const scenario of SCENARIOS) {
   // sampler while the sensor keeps measuring, and warning there sends the reader to check hardware
   // that is fine. Only a running recorder that is not being fed may warn, and an absent sensor is
   // never a fault at all — the axis gates no sampling.
-  // Scoped to the diagnosis row: the ESP32 card's Hardware button carries the same data-act.
-  const outdoorItem = rendered.dynamicControlCardHtml
-    .match(/data-desc="dynamic:outdoor"[\s\S]*?<\/button>[\s\S]*?<\/button>/)?.[0] || "";
-  const outdoorFace = outdoorItem.match(/<button[^>]*data-act="board"[\s\S]*?<\/button>/)?.[0] || "";
-  if (outdoorFace) {
+  // The row is PASSIVE — label and value share one accordion button, since the sensor's only editor
+  // is the Board Hardware modal on the ESP32 card. The match runs to the TONGUE, not to the first
+  // </button>, and that is the load-bearing part rather than a tidier regex: a row that regains a
+  // configuration action becomes a SPLIT row, whose first </button> closes the info toggle — so a
+  // face stopping there would never contain the `data-act` it is checking for, and the guard below
+  // would pass vacuously on exactly the change it exists to catch. Measured, not reasoned: with the
+  // action put back, the first version of this matcher reported success.
+  // Asserted to be found rather than guarded by `if (face)` for the same reason — this selector used
+  // to name the removed button, and a face that stops matching retires the rule in silence.
+  const outdoorFace = rendered.dynamicControlCardHtml
+    .match(/data-desc="dynamic:outdoor"[\s\S]*?<div class="vdesc">/)?.[0] || "";
+  assert.ok(outdoorFace, `${scenario.name}: the outdoor axis row must render`);
+  assert.doesNotMatch(outdoorFace, /data-act=/,
+    `${scenario.name}: the outdoor axis must not offer an editor — the Board modal owns the sensor`);
+  checks += 2;
+  {
     const sensorOk = status.env3 && status.env3.enabled && status.env3.fresh;
     const axisMissing = status.heating_curve.outdoor_temperature_c == null;
     const recording = status.heating_curve.armed &&

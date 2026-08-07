@@ -560,6 +560,19 @@ function dynamicStateRow(d, room, weather, modbus, mqtt, sys) {
 //
 // An absent sensor is styled DIM, not warn: the axis is optional and its absence stops no sampling,
 // so it must not read as a fault — the same rule that keeps the summer cooling HOLD unstyled.
+//
+// The FACE names the SOURCE, like every other source row on this card ("Open-Meteo", the room
+// source's own name) — not the reading, and not a configuration action. Two reasons, and the second
+// is why the row header changed rather than merely losing its pencil:
+//  - There is exactly ONE editor for this sensor, the Board Hardware modal on the ESP32 card, where
+//    it is saved in one atomic POST /set_board beside the board identity that decides whether the
+//    Grove port exists at all. A second door into that modal from a DIAGNOSIS card invited editing
+//    hardware from a place that reports evidence, and offered it on a row whose own copy says the
+//    value changes nothing about what gets recorded.
+//  - A measurement in the face made this the one source row whose header was a reading, so the card
+//    showed two outdoor temperatures (this and the forecast) in two different shapes. The reading is
+//    not lost: it is stated inside, beside the recorded event's own value, which is where the
+//    durable half already lived.
 function outdoorAxisRow(d, env) {
   // typeof, NOT Number(): the device sends JSON `null` for every absent figure here, and
   // `Number(null)` is 0, which `Number.isFinite` then accepts. Read that way an unrecorded event
@@ -577,30 +590,40 @@ function outdoorAxisRow(d, env) {
   // this the row would warn about the sensor and send the reader to check hardware that is fine —
   // the same mistake as telling someone to set up the room source sitting one row below.
   const evaluating = d.armed === true && d.reason !== "sampler_inactive";
-  // NO-BREAK SPACE before the unit. These value cells carry `settings-wrap`, which the room and
-  // pump rows need because a saved NAME must wrap rather than overflow — but a MEASUREMENT split
-  // across two lines ("22,2" over "°C") reads as a layout fault, and at a phone width the long
-  // label squeezes this column enough to do it.
+  // NO-BREAK SPACE before the unit. Both readings this formats now sit in the tongue, where a lead-in
+  // ("Aktueller Messwert") and the number share one wrapping paragraph — so a plain space still puts
+  // "22,2" and "°C" on two lines at a phone width, which reads as a layout fault rather than as a
+  // measurement.
   const fmt = (n) => `${n.toLocaleString(LANG === "de" ? "de-DE" : "en-US",
     { minimumFractionDigits: 1, maximumFractionDigits: 1 })} °C`;
 
-  // Precedence states the ACTIONABLE thing: a value wins; then "no sensor"; then "the recorder is
-  // not running" (which the state row above explains); only a running recorder that is not being
-  // fed warrants a warning, because only then is the sensor the thing to go and look at.
+  // The sensor's product name, untranslated and inline like "Open-Meteo" one row above: it is what
+  // the hardware is called in both languages, so a translation key would be two spellings of one
+  // proper noun waiting to disagree.
+  const SENSOR = "ENV III";
+  // Precedence states the ACTIONABLE thing: a set-up sensor names itself; an absent one says so;
+  // only a running recorder that is not being fed warrants a warning, because only then is the
+  // sensor the thing to go and look at. The COLOUR carries the condition the face no longer spells
+  // out, and the tongue's status line says it in words.
   let cls = "dim";
   let value = t("dyn.not_configured");
   let statusKey = "dyn.outdoor_status_absent";
   if (hasLive) {
-    cls = "ok"; value = fmt(live); statusKey = "dyn.outdoor_status_live";
+    cls = "ok"; value = SENSOR; statusKey = "dyn.outdoor_status_live";
   } else if (!enabled) {
     statusKey = "dyn.outdoor_status_absent";
   } else if (!evaluating) {
-    value = t("dyn.outdoor_none"); statusKey = "dyn.outdoor_status_idle";
+    value = SENSOR; statusKey = "dyn.outdoor_status_idle";
   } else {
-    cls = "warn"; value = t("dyn.outdoor_none"); statusKey = "dyn.outdoor_status_unavailable";
+    cls = "warn"; value = SENSOR; statusKey = "dyn.outdoor_status_unavailable";
   }
 
   let body = descNoteHtml(t("dyn.outdoor_detail_status"), t(statusKey));
+  // The LIVE reading, which the face used to carry. It says what the axis would record NOW — worth
+  // stating, and distinct from the event value below it, which is what a recorded sample actually
+  // holds. Only when there IS one: "—" here would be a third way of saying what the status line
+  // above has already said in a sentence.
+  if (hasLive) body += descNoteHtml(t("dyn.outdoor_detail_now"), fmt(live));
   // What the LAST EVENT actually carries, which is the durable half — the live reading says only
   // what the axis would record now. An event recorded without the axis says so rather than going
   // unmentioned, since that is precisely the gap a later analysis would trip over.
@@ -611,8 +634,9 @@ function outdoorAxisRow(d, env) {
   // whether this number is outdoor air at all is the reader's fact to supply, not the device's.
   body += `<div class="vdesc-p">${esc(t(enabled ? "dyn.outdoor_help_placement"
                                                 : "dyn.outdoor_help_setup"))}</div>`;
-  return dynamicInfoRow("outdoor", t("dyn.outdoor"), value, cls, body,
-    "board", t("board.title"));
+  // NO action argument: the row is passive, and the Board Hardware modal stays the sensor's one
+  // editor. Passing "board" here is what made this row a second door into it.
+  return dynamicInfoRow("outdoor", t("dyn.outdoor"), value, cls, body);
 }
 
 function dynamicControlCardHtml() {

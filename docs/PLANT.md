@@ -206,7 +206,12 @@ The card in the UI always renders, stating recording, optional-forecast degradat
 excluded cooling or the exact missing input — and it says out loud that room kelvin is not calibrated
 water kelvin. It also carries the optional outdoor axis as its own row, whose number comes from the
 diagnosis rather than from the sensor read a second time, so a live sensor cannot show green there
-while the state row reports that nothing is being recorded.
+while the state row reports that nothing is being recorded. That row NAMES the sensor (`ENV III`) and
+is **passive**, like every other reported row on the card: the readings live inside its explanation,
+and the sensor's one editor stays the Board Hardware modal on the ESP32 card, which saves it in a
+single atomic `POST /set_board` beside the board identity that decides whether the Grove port exists
+at all. A second door into that modal from a card that reports EVIDENCE offered hardware
+configuration on a row whose own copy says the value changes nothing about what gets recorded.
 
 ---
 

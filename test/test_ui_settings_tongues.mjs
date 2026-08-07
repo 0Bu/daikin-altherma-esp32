@@ -30,8 +30,8 @@ const labels = {
   "dyn.not_configured": "Nicht konfiguriert",
   "dyn.configured": "Konfiguriert",
   "dyn.outdoor": "Gemessene Außenluft",
-  "dyn.outdoor_none": "Kein Wert",
   "dyn.outdoor_detail_status": "Status",
+  "dyn.outdoor_detail_now": "Aktueller Messwert",
   "dyn.outdoor_detail_sample": "Beim letzten aufgezeichneten Ereignis",
   "dyn.outdoor_status_live": "ENV-III-Messwert aktuell, wird mitaufgezeichnet.",
   "dyn.outdoor_status_unavailable": "Sensor eingerichtet, aber kein aktueller Messwert erreicht die Aufzeichnung.",
@@ -236,13 +236,18 @@ assert.match(html, /Raum-Sollwert minus Ist-Raumtemperatur: positiv bedeutet zu 
 // DIAGNOSIS, never from /status.env3 read a second time — those disagree exactly when the sensor is
 // live but the sampler is not evaluating, and a green reading beside a blocked state row is the
 // mistake the room-source row already documents.
-// Scoped to the diagnosis row, not to data-act="board" alone: the ESP32 card's Hardware button
-// carries that same action (both open the one Board Hardware modal), so a bare selector would
-// silently start matching the wrong row if these renders were ever combined.
-const outdoorFace = (h) => {
-  const item = h.match(/data-desc="dynamic:outdoor"[\s\S]*?<\/button>[\s\S]*?<\/button>/)?.[0] || "";
-  return item.match(/<button[^>]*data-act="board"[\s\S]*?<\/button>/)?.[0] || "";
-};
+//
+// The FACE names the SENSOR, like every other source row on this card, and is PASSIVE: the ENV III
+// has exactly one editor (the Board Hardware modal on the ESP32 card, which saves it atomically
+// beside the board identity that decides whether the Grove port exists), and this row used to be a
+// second door into it — a configuration action offered from a card that reports evidence.
+//
+// The match runs to the TONGUE, never to the first </button>. A row that regains a configuration
+// action becomes a SPLIT row whose first </button> closes the info toggle, so a face stopping there
+// contains neither the value nor the `data-act` — and the no-editor guard below would pass on
+// exactly the change it exists to catch.
+const outdoorFace = (h) =>
+  h.match(/data-desc="dynamic:outdoor"[\s\S]*?<div class="vdesc">/)?.[0] || "";
 const fixtureEnv3 = S.status.env3;
 const fixtureCurve = S.status.heating_curve;
 assert.match(html, /Gemessene Außenluft/,
@@ -251,11 +256,18 @@ assert.notEqual(html.indexOf("Gemessene Außenluft"), html.indexOf("Wetterprogno
   "the measured axis and the forecast must be two distinct rows");
 
 // (a) sensor live, but nothing has reached the recorder: warn, and the tongue explains the gap
-// rather than letting the reader assume the sensor is broken.
-assert.match(outdoorFace(html), /Kein Wert/);
+// rather than letting the reader assume the sensor is broken. The face names the SENSOR in every
+// set-up state — the colour carries the condition and the tongue says it in words, so the header
+// stays the stable identity a reader recognises rather than flipping to "no value".
+assert.match(outdoorFace(html), /ENV III/,
+  "a set-up sensor is named on the face, exactly as the room source and Open-Meteo are");
 assert.match(outdoorFace(html), /vrow-val settings-wrap warn/,
   "a CONFIGURED sensor whose value never arrives is worth a warning");
 assert.match(html, /Sensor eingerichtet, aber kein aktueller Messwert erreicht die Aufzeichnung\./);
+// The row must not be an editor. The ENV III has ONE editor, the Board Hardware modal, which saves
+// it atomically beside the board identity deciding whether the Grove port exists at all.
+assert.doesNotMatch(outdoorFace(html), /data-act=|dynamic-config-open/,
+  "the outdoor axis must not offer a second door into the Board Hardware modal");
 
 // (b) no sensor at all: DIM, never warn — the axis gates no sampling, so its absence is not a
 // fault, the same rule that keeps the summer idle-plant state unstyled.
@@ -277,8 +289,10 @@ S.status.heating_curve = {
   outdoor_temperature_c: -4.25, last_sample_room_error_k: 0.4,
 };
 outdoorHtml = sandbox.__renderDynamic();
-assert.match(outdoorFace(outdoorHtml), /−4,3\u00a0°C|-4,3\u00a0°C/,
-  "the live axis prints the DIAGNOSIS value in the German locale");
+assert.match(outdoorHtml, /Aktueller Messwert<\/span> −4,3\u00a0°C|Aktueller Messwert<\/span> -4,3\u00a0°C/,
+  "the live axis prints the DIAGNOSIS value in the German locale, inside the tongue");
+assert.match(outdoorFace(outdoorHtml), /ENV III/,
+  "the face keeps naming the sensor once a reading arrives; the reading is stated inside");
 assert.match(outdoorFace(outdoorHtml), /vrow-val settings-wrap ok/);
 assert.match(outdoorHtml, /Ohne Außenwert aufgezeichnet/,
   "an event recorded without the axis must say so rather than borrow the live reading");
@@ -297,8 +311,9 @@ S.status.heating_curve = {
   last_sample_room_error_k: null, last_sample_unix_s: null, samples: 0, sequence: 0,
 };
 outdoorHtml = sandbox.__renderDynamic();
-assert.match(outdoorFace(outdoorHtml), /22,2\u00a0°C/,
+assert.match(outdoorHtml, /Aktueller Messwert<\/span> 22,2\u00a0°C/,
   "a live axis still prints while no event has been recorded");
+assert.match(outdoorFace(outdoorHtml), /ENV III/);
 assert.doesNotMatch(outdoorHtml, /Beim letzten aufgezeichneten Ereignis/,
   "with no recorded event there is nothing to state about one — null must not read as 0.0 °C");
 assert.doesNotMatch(outdoorHtml, /0,0\u00a0°C/,
@@ -314,17 +329,19 @@ for (const key of ["state", "room-sources", "weather", "outdoor", "strategy"]) {
   assert.doesNotMatch(infoButton, /data-act=/,
     `${key} label must never open a configuration popup`);
 }
-for (const key of ["state", "strategy"]) {
+for (const key of ["state", "outdoor", "strategy"]) {
   assert.match(html, new RegExp(`<button class="vrow settings-whole-info-row settings-info-row"[^>]*data-desc="dynamic:${key}"[\\s\\S]*class="settings-info-value`),
     `${key} has no second action, so its label and value must share one full-row accordion button`);
 }
-// A row's value is a popup action exactly when the user can CONFIGURE that value — room source,
-// forecast location and the ENV III sensor each have an editor. The reported rows (state, method)
-// have none and must stay passive, which is the assertion below.
-assert.equal((html.match(/class="settings-split-action dynamic-config-open/g) || []).length, 3,
-  "the three configurable sources may be popup actions; the reported rows may not");
-assert.equal((html.match(/class="settings-info-value/g) || []).length, 2,
-  "state and method values must stay passive inside their full-row accordion buttons");
+// A row's value is a popup action exactly when THIS card owns the editor for it — the room source
+// and the forecast location are configured here and nowhere else. The ENV III is not: its editor is
+// the Board Hardware modal on the ESP32 card, which saves it atomically beside the board identity
+// deciding whether the Grove port exists, so this row reports it and links nowhere. The reported
+// rows (state, axis, method) all stay passive, which is the assertion below.
+assert.equal((html.match(/class="settings-split-action dynamic-config-open/g) || []).length, 2,
+  "only the two sources this card owns may be popup actions; the reported rows may not");
+assert.equal((html.match(/class="settings-info-value/g) || []).length, 3,
+  "state, outdoor axis and method values must stay passive inside their full-row accordion buttons");
 assert.doesNotMatch(html, /settings-source-summary|Konfiguriert · 25,1 °C|Open-Meteo · 22,6 °C \/ 2 h/,
   "obsolete green summary lines must not duplicate values inside the tongues");
 const roomTongue = html.match(/<div class="vdesc-body settings-info-tongue" id="dynamic-room-sources-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
@@ -384,8 +401,10 @@ S.status.env3 = {};
 html = sandbox.__renderDynamic();
 assert.equal((html.match(/class="vdesc-body settings-info-tongue"/g) || []).length, 5,
   "unconfigured sources must retain their explanation tongues");
-assert.equal((html.match(/<span>Nicht konfiguriert<\/span>/g) || []).length, 3,
+assert.equal((html.match(/<span>Nicht konfiguriert<\/span>/g) || []).length, 2,
   "each empty editable source must expose Not configured as its popup value");
+assert.match(html, /data-desc="dynamic:outdoor"[\s\S]*?class="settings-info-value[^"]*">Nicht konfiguriert<\/span>/,
+  "the outdoor axis says the same thing PASSIVELY — it reports the sensor, it does not edit it");
 assert.ok(html.includes("Raumquellen-Erklärung") && html.includes("Wetter-Einrichtung"),
   "unconfigured sources must still explain how their inputs work");
 assert.match(html, /id="dynamic-room-sources-detail"[^]*<span class="vdesc-n">Konfiguration:<\/span> Nicht konfiguriert/,
