@@ -9097,6 +9097,10 @@ static void test_availability() {
     const ValueDef r1t{0x61, 8, 105, 2, 1, "Inlet water temp.(R4T)"};
     CHECK(availability_policy(r1t) == AvailabilityPolicy::Always);
     CHECK(row_publishable(r1t) && value_available(r1t, true, 0.0));
+
+    // ── Page-level absence: 0xA1, the all-zero reply ─────────────────────────────────────────────
+    // The verdict is on the PAGE, so no row on it carries a policy of its own — asserted here,
+    // because that is exactly what changed when the four row entries became one page entry.
     const ValueDef tdis{0xA1, 5, 114, 2, 1, "Target Discharge Temp."};
     const ValueDef twin{0xA1, 0, 119, 2, 1, "(Raw data)Water heat exchanger inlet temp."};
     const ValueDef twout{0xA1, 2, 119, 2, 1, "(Raw data)Water heat exchanger outlet temp."};
@@ -9105,8 +9109,14 @@ static void test_availability() {
     const uint8_t short_a1[9] = {};
     uint8_t populated_a1[16] = {};
     populated_a1[9] = 0x01;  // Altherma-LT setting bit: page exists, even if this row is exactly 0 °C
+    CHECK(page_absence_rule(0xA1) != nullptr);
+    CHECK(page_absence_rule(0xA1)->signature == PageAbsence::AllBytesZero);
+    CHECK(page_absent(0xA1, absent_a1, sizeof(absent_a1)));
+    CHECK(!page_absent(0xA1, populated_a1, sizeof(populated_a1)));
+    CHECK(!page_absent(0xA1, short_a1, sizeof(short_a1)));   // too short to reach the flag byte
+    CHECK(!page_absent(0xA1, nullptr, 0));                   // no reply is not an absence
     for (const ValueDef* d : {&twin, &twout, &tdis, &tport}) {
-        CHECK(availability_policy(*d) == AvailabilityPolicy::ZeroPageMeansAbsent);
+        CHECK(availability_policy(*d) == AvailabilityPolicy::Always);   // the PAGE carries it now
         CHECK(row_publishable(*d));
         CHECK(value_available(*d, true, 0.0)); // no page context: never invent an absence verdict
         CHECK(value_available(*d, true, 0.0, short_a1, sizeof(short_a1)));
@@ -9114,6 +9124,72 @@ static void test_availability() {
         CHECK(!value_available(*d, true, 35.0, absent_a1, sizeof(absent_a1)));
         CHECK(value_available(*d, true, 0.0, populated_a1, sizeof(populated_a1)));
         CHECK(value_available(*d, true, 35.0, populated_a1, sizeof(populated_a1)));
+    }
+
+    // ── Page-level absence: 0xA0, the unidentified unit ──────────────────────────────────────────
+    // BYTE LEVEL, because the whole finding is which bytes the absent unit answers with. This is the
+    // reference installation's reply verbatim (#224): every field zero except the O/U MPU id, which
+    // reads 0xFFFF, and the 0x800C at offset 2 whose low byte never leaves 0x00/0x80 and which is
+    // therefore not a ×0.1 temperature at all.
+    const uint8_t absent_a0[16] = {0x00, 0x00, 0x80, 0x0C, 0x00, 0x00, 0x00, 0x00,
+                                   0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00};
+    CHECK(page_absence_rule(0xA0) != nullptr);
+    CHECK(page_absence_rule(0xA0)->signature == PageAbsence::UnidentifiedUnit);
+    CHECK(page_absent(0xA0, absent_a0, sizeof(absent_a0)));
+    CHECK(!page_absent(0xA0, absent_a0, A0_PRESENCE_BYTES - 1));  // short of the flag words
+    CHECK(page_absent(0xA0, absent_a0, A0_PRESENCE_BYTES));       // exactly reaching them is enough
+
+    // It fails OPEN on anything that is not the full signature. An MPU that identifies itself is a
+    // fitted unit however quiet it is; a unit that asserts ANY output is fitted however it identifies
+    // itself. Both halves are required, so either one alone publishes the whole page.
+    uint8_t a0[16];
+    for (size_t i = 0; i < sizeof(a0); i++) a0[i] = absent_a0[i];
+    a0[10] = 0x01;                                          // an MPU id — a second unit answers
+    CHECK(!page_absent(0xA0, a0, sizeof(a0)));
+    a0[10] = 0xFF; a0[11] = 0x02;                           // the other id byte, same conclusion
+    CHECK(!page_absent(0xA0, a0, sizeof(a0)));
+    a0[11] = 0xFF; a0[12] = 0x01;                           // 52C output asserted
+    CHECK(!page_absent(0xA0, a0, sizeof(a0)));
+    a0[12] = 0x00; a0[13] = 0x08;                           // discharge-temp-drop flag
+    CHECK(!page_absent(0xA0, a0, sizeof(a0)));
+    a0[13] = 0x00;
+    CHECK(page_absent(0xA0, a0, sizeof(a0)));               // back to the absence signature
+
+    // A populated page: an MPU answers, so nothing on it is withheld.
+    uint8_t a0_live[16];
+    for (size_t i = 0; i < sizeof(a0_live); i++) a0_live[i] = absent_a0[i];
+    a0_live[10] = 0x21;
+    CHECK(!page_absent(0xA0, a0_live, sizeof(a0_live)));
+
+    // Every row on the page goes, whatever it decoded to and whatever else it carries. The two that
+    // matter are the ones a row-level ledger could not have reached: the expansion valve, which
+    // already carries the conv-151 pulse ceiling, and the 0xA0/2 field that decodes to an ordinary
+    // 192 °C rather than to a zero.
+    const ValueDef a0_suction{0xA0, 0, 119, 2, 1, "Suction temp"};
+    const ValueDef a0_hx{0xA0, 2, 119, 2, 1, "Outdoor heat exchanger temp."};
+    const ValueDef a0_liquid{0xA0, 4, 119, 2, 1, "Liquid pipe temp."};
+    const ValueDef a0_press{0xA0, 6, 119, 2, 2, "Pressure"};
+    const ValueDef a0_eev{0xA0, 8, 151, 2, -1, "Expansion valve 3 (pls) [OU-II]"};
+    const ValueDef a0_port{0xA0, 14, 105, 2, 1, "Compressor port temperature"};
+    for (const ValueDef* d : {&a0_suction, &a0_hx, &a0_liquid, &a0_press, &a0_eev, &a0_port}) {
+        CHECK(row_publishable(*d));                          // the ENTITY stays: a second O/U is real
+        CHECK(value_available(*d, true, 0.0));               // no page context: no absence invented
+        CHECK(!value_available(*d, true, 0.0,  absent_a0, sizeof(absent_a0)));
+        CHECK(!value_available(*d, true, 192.0, absent_a0, sizeof(absent_a0)));
+        CHECK(!value_available(*d, false, 0.0, absent_a0, sizeof(absent_a0)));  // text rows too
+        CHECK(value_available(*d, true, 35.0, a0_live, sizeof(a0_live)));  // populated: publishes
+    }
+    // The valve keeps its OWN verdict on a populated page — the page rule composes with the ledger
+    // rather than replacing it, so 0xFFF8 is still not a position when a second unit IS fitted.
+    CHECK(availability_policy(a0_eev) == AvailabilityPolicy::AboveRangeIsAbsent);
+    CHECK(value_available(a0_eev, true, 450.0, a0_live, sizeof(a0_live)));
+    CHECK(!value_available(a0_eev, true, 65528.0, a0_live, sizeof(a0_live)));
+
+    // NO OTHER PAGE MAY ACQUIRE ONE. The hydronic pages carry every reading #209 found correct, and
+    // an absence signature on one of them would withhold a whole page of good measurements at once.
+    for (int reg = 0; reg <= 0xFF; reg++) {
+        const bool has = page_absence_rule(static_cast<uint8_t>(reg)) != nullptr;
+        CHECK(has == (reg == 0xA0 || reg == 0xA1));
     }
 
     // The generated detect-only flag composes with the ledger rather than competing with it: both
@@ -9124,7 +9200,7 @@ static void test_availability() {
 
     // ── Against the real catalog ──────────────────────────────────────────────────────────────────
     int profiles_total = 0, evap_rows = 0, cond_rows = 0, suppressed = 0, odd_label = 0;
-    int eev_rows = 0, conv151_rows = 0, zero_page_rows = 0;
+    int eev_rows = 0, conv151_rows = 0, page_absence_rows = 0;
     for (const auto& p : def::profiles) {
         profiles_total++;
         const auto view = def::resolved(p);
@@ -9171,14 +9247,18 @@ static void test_availability() {
                       (d.reg == 0xA0 && d.offset == 8));
                 CHECK(row_publishable(d));   // the valve is real — only the bad integer is withheld
             }
-            if (pol == AvailabilityPolicy::ZeroPageMeansAbsent) {
-                zero_page_rows++;
-                CHECK(d.reg == 0xA1);
-                CHECK((d.offset == 0 && d.conv == 119) ||
-                      (d.offset == 2 && d.conv == 119) ||
-                      (d.offset == 5 && d.conv == 114) ||
-                      (d.offset == 7 && d.conv == 114));
+            // Every row on a page that has an absence rule is covered by it, and covered whatever
+            // else it carries — this is the property the row-level shape could not give, and the
+            // reason the count is taken from the CATALOG rather than from the ledger: a row the
+            // generator adds to one of these pages tomorrow is inside it the day it appears.
+            if (page_absence_rule(d.reg)) {
+                page_absence_rows++;
+                CHECK(d.reg == 0xA0 || d.reg == 0xA1);
                 CHECK(row_publishable(d));   // entity stays; only the absent-page reply is withheld
+                CHECK(!value_available(d, true, 0.0, absent_a1, sizeof(absent_a1)) ||
+                      d.reg != 0xA1);
+                CHECK(!value_available(d, true, 0.0, absent_a0, sizeof(absent_a0)) ||
+                      d.reg != 0xA0);
             }
             // NO CORE HYDRONIC ROW MAY BE TOUCHED. The audit in #209 is explicit that the hydronic
             // decode is excellent and must not be collaterally damaged: leaving/return water, tank,
@@ -9208,8 +9288,12 @@ static void test_availability() {
     // re-reading before the ceiling is allowed to follow it there.
     CHECK(conv151_rows == 113);
     CHECK(eev_rows == conv151_rows);
-    // 21 profiles carry the two raw Water-HX rows; 19 of those also carry both target rows.
-    CHECK(zero_page_rows == 80);
+    // The reach of the two page rules, pinned as one number over the real catalog. 21 profiles carry
+    // the two raw Water-HX rows and 19 of those carry both 0xA1 target rows (80 rows), while 19
+    // carry all six 0xA0 rows (114) — 194 in total. It moves when a profile is added or when the
+    // generator starts emitting a row on either page, and either is a reason to re-read the
+    // adjudication rather than let it silently re-scope itself.
+    CHECK(page_absence_rows == 194);
 }
 
 // ── Numeric fault state beside the textual code (logic/fault_state.hpp) — #209 defect 4 ──────────

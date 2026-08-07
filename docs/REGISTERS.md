@@ -442,6 +442,24 @@ the I/U capacity code (`0x60` offset 6).
 | 13 | 1 | 300 | 0 |  | Powerful bit (MT setting bit) |
 | 14 | 2 | 105 |  | °C | Compressor port temperature |
 
+> **Absent second-outdoor-unit signature (#224).** On the audited installation this page answers
+> `00 00 80 0c 00 00 00 00 00 00 ff ff 00 00 00 00` — and both non-zero fields are themselves
+> absence markers: the O/U MPU id at offsets 10-11 reads `0xFFFF` (no MPU answers from that bus
+> position) and the two operation words at 12-13 have never had a bit set. `logic/availability.hpp`
+> (`PAGE_ABSENCE_RULES`, signature `UnidentifiedUnit`) therefore withholds **every row on this page**
+> while both hold, and a reply shorter than 14 bytes proves nothing. Both conditions are required so
+> that anything ambiguous publishes: an MPU that identifies itself is a fitted unit however quiet it
+> is, and a unit asserting any output is fitted however it identifies itself.
+>
+> What it withholds, measured on that installation: `Suction temp`, `Liquid pipe temp.` and
+> `Compressor port temperature` published exactly `0.0 °C` for 316 771 consecutive samples over 60
+> days, and `Outdoor heat exchanger temp.` at offset 2 published `89.6-192.0 °C` — seven distinct
+> values in seven days, every one an exact multiple of `12.8 °C`, because its raw low byte never
+> leaves `0x00`/`0x80`. That last one is not a temperature under any scale, and the ±200 °C envelope
+> of `reading_plausible()` cannot refuse it. `Expansion valve 3 (pls) [OU-II]` at offset 8 is covered
+> too while keeping its own conv-151 pulse ceiling (§3.1) for the populated case — the reason the
+> verdict is keyed on the page rather than on the rows.
+
 #### Register `0xA1`
 
 | Off | Len | Conv | Bit | Type | Value |
@@ -462,10 +480,11 @@ the I/U capacity code (`0x60` offset 6).
 
 > **Absent second-outdoor-unit signature (#224).** On the audited installation this complete page
 > answered with 16 zero bytes through a real DHW compressor cycle — including all unit-family flags
-> at offset 9. `logic/availability.hpp` therefore withholds the four analog rows at offsets 0, 2, 5
-> and 7 while the complete reply through byte 9 is all zero. This is deliberately a **page** rule:
-> an individual inlet, outlet or target of exactly 0 °C remains publishable when any other byte proves
-> the page populated, and a short reply that does not reach the flags proves nothing.
+> at offset 9. `logic/availability.hpp` (`PAGE_ABSENCE_RULES`, signature `AllBytesZero`) therefore
+> withholds **every row on this page** while the complete reply through byte 9 is all zero. This is
+> deliberately a **page** rule: an individual inlet, outlet or target of exactly 0 °C remains
+> publishable when any other byte proves the page populated, and a short reply that does not reach
+> the flags proves nothing. Page `0xA0` above carries the same finding under a different signature.
 
 #### Register `0x60`
 

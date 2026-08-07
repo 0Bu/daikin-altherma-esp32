@@ -1139,9 +1139,28 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 marker, reading_plausible() catches a number that is IMPOSSIBLE, ValueDef::no_publish
                 carries what the GENERATOR knew. What is left is a field that decodes to an entirely
                 ordinary number which measures nothing, and only per-row evidence can name it. THREE
-                verdicts exist; TWO are currently in force. ZeroMeansAbsent (Target Cond. Temp. 0x10/8
+                ROW verdicts exist; TWO are currently in force. ZeroMeansAbsent (Target Cond. Temp. 0x10/8
                 — raw 0x0000 through a full compressor cycle, which is also why ou_stale.hpp already
-                calls it a useless witness) withholds only that exact value. AboveRangeIsAbsent is
+                calls it a useless witness) withholds only that exact value. A FOURTH verdict is not
+                about a row at all: PAGE_ABSENCE_RULES is keyed on the register PAGE and reaches every
+                row on it, because "the hardware behind this reply is not fitted" is a fact about the
+                page. Both entries are the ABSENT SECOND OUTDOOR UNIT of #224 — 0xA1 answers with 16
+                zero bytes including its unit-family flags at byte 9 (AllBytesZero), while 0xA0 is NOT
+                all-zero and is the reason the key had to move off the row: its reply reads
+                00 00 80 0c 00 00 00 00 00 00 ff ff 00 00 00 00, and both non-zero fields are
+                themselves absence markers (the O/U MPU id at 10-11 reads 0xFFFF, i.e. no MPU answers;
+                the operation words at 12-13 have never had a bit set), so UnidentifiedUnit requires
+                BOTH and anything ambiguous publishes. Behind that signature three rows published
+                exactly 0.0 °C for 316771 consecutive samples over 60 days and 0xA0/2 published
+                89.6-192.0 °C in exact multiples of 12.8 °C — its raw low byte never leaves 0x00/0x80,
+                which is not a thermistor read at 0.1 °C, and 192 is INSIDE reading_plausible()'s
+                ±200 °C envelope. The signature is re-evaluated against the LIVE reply every cycle,
+                which is what makes a page rule safe across all 45 profiles where a static per-model
+                claim would not be: a fitted second unit answers with something that does not match
+                and every row publishes untouched — including 0xA0/8, which KEEPS its own conv-151
+                pulse ceiling. That composition is the point: a row already carrying a value rule
+                cannot carry a second one, and a row a future generator run adds to either page would
+                otherwise be covered by nothing. AboveRangeIsAbsent is
                 the EXPANSION VALVE pulse rows (conv 151, all five coordinates): 30 d of published
                 samples run 0-474 pulses and then carry six samples of exactly 0xFFF8, with NOTHING
                 in between — a discrete out-of-band integer, not a distribution's tail. The obvious
