@@ -139,7 +139,14 @@ failed sensor marks only those three entities unavailable while the rest of the 
 and an error publishes `{}` rather than carrying the last plausible value forward.
 
 **Where it deliberately does not appear:** `/values` and the plant checkup. Those describe the heat
-pump, and an accessory measuring the board's surroundings is not a plant reading. It does carry its
+pump, and an accessory measuring the board's surroundings is not a plant reading. Its one firmware
+consumer is the [heating-curve diagnosis](#heating-curve-diagnosis) below, which records the
+temperature as optional context with each event — never as a condition for one.
+
+**The firmware cannot know where the sensor hangs.** Beside the indoor unit this is room air; over a
+long I²C run to a sheltered outdoor position it is genuine outdoor air, and only the latter makes the
+diagnosis axis mean anything. The device states the reading, not its meaning — placement is the
+owner's fact, and anything downstream that depends on it has to record it. It does carry its
 own 24-hour rings (served as a separate `/history` source, not mixed into the X10A set) and one
 schematic pill, and it does not pretend to replace the Daikin outdoor sensor.
 
@@ -170,6 +177,16 @@ thousands of failsafes when the order was the other way round.
   unknown mode or gate. Unknown evidence blocks; it is never assumed benign.
 - A transient hold or block **preserves** the cadence and the last durable event, so recovery cannot
   fabricate a new sample.
+
+**An optional outdoor axis rides with each event.** Where the [ENV III](#optional-env-iii-climate-input)
+accessory is configured and fresh, the outdoor air temperature *at the moment of the event* is recorded
+beside the room deviation — without it the record is underdetermined, since a room error alone cannot
+separate a curve that is too **steep** from one shifted too **high** (+0.5 K at −5 °C and at +12 °C call
+for opposite corrections and record identically). It is **context, never a gate**: nothing branches on
+it, an absent sensor moves no state, reason or counter, and a source-boundary test refuses a hold or
+block on it. Absence is null, not 0 °C; a sample taken without the sensor clears the previous event's
+reading rather than inheriting it. The sampling *method* is unchanged, so archived events stay
+comparable.
 
 **Arming is derived, not switched.** It follows from the timestamped MQTT room mapping alone
 ([`FEATURES.md`](FEATURES.md) #62 — the source is test-before-persist, since a typo here does not fail

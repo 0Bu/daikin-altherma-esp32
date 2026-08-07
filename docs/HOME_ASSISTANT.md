@@ -103,6 +103,14 @@ sampler state. Inside `diagnosis`, `gates`, `room_evidence`, `last_sample`, and 
 facts together. This topic creates no Home Assistant Discovery entities; it is intended for direct
 MQTT, Telegraf and VictoriaMetrics consumers.
 
+Schema **v2** adds the optional outdoor axis: `diagnosis.outdoor_available` and, inside
+`last_sample`, `outdoor_temperature_c` — the outdoor air temperature **as it stood at the recorded
+event**, from an ENV III sensor where one is configured and fresh. It is what makes an archived
+sample interpretable, since a room deviation alone cannot separate a heating curve that is too
+*steep* from one shifted too *high*. It is `null` when no sensor contributed, never `0`. The change
+is purely additive and `method_version` deliberately stayed `2`, so samples recorded before and
+after remain directly comparable.
+
 Numeric leaves remain numeric and boolean facts remain `1`/`0`, so the existing metrics pipeline
 does not drop them. The canonical live paths include `room.temperature_valid`,
 `room.setpoint_valid`, `room.control_eligible`, nullable `room.temperature_c`, `room.setpoint_c`,

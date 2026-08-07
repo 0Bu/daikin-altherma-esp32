@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <initializer_list>
+#include <limits>
 #include <map>
 #include <set>
 #include <string>
@@ -2037,6 +2038,9 @@ static void test_heartbeat() {
     cf.reason = 10;
     cf.sample_eligible = true;
     cf.forecast_available = true;
+    cf.outdoor_available = true;
+    cf.has_last_sample_outdoor = true;
+    cf.last_sample_outdoor_temperature_c = -4.25;
     cf.plant_gate_known = true;
     cf.plant_gate_active = true;
     cf.heating_mode_known = true;
@@ -2056,19 +2060,20 @@ static void test_heartbeat() {
     cf.holds = 2;
     cf.blocks = 3;
     const std::string cj = build_heating_curve_mqtt_json(cf);
-    CHECK(cj == "{\"schema_version\":1,\"room\":{"
+    CHECK(cj == "{\"schema_version\":2,\"room\":{"
                 "\"source_id\":\"living_room\",\"calibration_k\":0,"
                 "\"temperature_valid\":1,\"setpoint_valid\":1,\"control_eligible\":1,"
                 "\"temperature_c\":20.500000,\"setpoint_c\":22.000000,\"error_k\":1.500000,"
                 "\"source_unix_s\":1785830400,\"age_s\":17,\"reason_code\":0,"
                 "\"counters\":{\"messages\":42,\"errors\":2,\"rejections\":7}},"
                 "\"diagnosis\":{\"method_version\":2,\"armed\":1,\"state\":3,\"reason\":10,"
-                "\"sample_eligible\":1,\"forecast_available\":1,"
+                "\"sample_eligible\":1,\"forecast_available\":1,\"outdoor_available\":1,"
                 "\"gates\":{\"plant_known\":1,\"plant_active\":1,"
                 "\"heating_mode_known\":1,\"heating_mode_active\":1},"
                 "\"room_evidence\":{\"current_error_k\":-2.900000,"
                 "\"source_unix_s\":1770000000,\"age_s\":12},"
-                "\"last_sample\":{\"room_error_k\":-2.800000,\"unix_s\":1770000001,"
+                "\"last_sample\":{\"room_error_k\":-2.800000,"
+                "\"outdoor_temperature_c\":-4.250000,\"unix_s\":1770000001,"
                 "\"sequence\":7},\"counters\":{\"evaluations\":12,\"samples\":7,"
                 "\"holds\":2,\"blocks\":3}}}");
     CHECK(cj.find("lwt_controller_") == std::string::npos);
@@ -2077,6 +2082,9 @@ static void test_heartbeat() {
     CHECK(empty_curve.find("\"setpoint_c\":null") != std::string::npos);
     CHECK(empty_curve.find("\"current_error_k\":null") != std::string::npos);
     CHECK(empty_curve.find("\"room_error_k\":null") != std::string::npos);
+    // No sensor -> null, never 0: a metrics consumer must not read absence as a freezing day.
+    CHECK(empty_curve.find("\"outdoor_available\":0") != std::string::npos);
+    CHECK(empty_curve.find("\"outdoor_temperature_c\":null") != std::string::npos);
     CHECK(empty_curve.find("\"unix_s\":null") != std::string::npos);
     CHECK(empty_curve.find("true") == std::string::npos);
     CHECK(empty_curve.find("false") == std::string::npos);
@@ -5127,6 +5135,8 @@ static void test_heating_curve_diagnosis() {
     CHECK(approx(sample.current_room_error_k, 0.6) && approx(sample.last_sample_room_error_k, 0.6));
     CHECK(sample.last_sample_unix_s == 1770000000 && sample.sequence == 1 && sample.samples == 1 &&
           sample.room_source_unix_s == 1234 && sample.room_age_s == 5);
+    // No ENV III configured: the event records, and the outdoor axis is ABSENT rather than 0 C.
+    CHECK(!sample.has_outdoor_temperature && !sample.has_last_sample_outdoor);
 
     in.now_ms = 1000;
     in.now_unix_s++;
@@ -5146,6 +5156,63 @@ static void test_heating_curve_diagnosis() {
     CHECK(sample.reason == HeatingCurveReason::SampleRecorded && sample.sequence == 2);
     CHECK(approx(sample.last_sample_room_error_k, -2.3456) &&
           sample.last_sample_unix_s == 1770001800);
+
+    // The optional ENV III outdoor axis (#env3). It is CONTEXT, never a gate, and the value stored
+    // with an event is the one that stood AT the event.
+    {
+        HeatingCurveDiagnosis outdoor;
+        HeatingCurveInputs oi = ready();
+        oi.outdoor_available = true;
+        oi.outdoor_temperature_c = -4.25;
+        HeatingCurveSnapshot s = outdoor.evaluate(oi);
+        CHECK(s.reason == HeatingCurveReason::SampleRecorded);
+        CHECK(s.has_outdoor_temperature && approx(s.outdoor_temperature_c, -4.25));
+        CHECK(s.has_last_sample_outdoor && approx(s.last_sample_outdoor_temperature_c, -4.25));
+
+        // Live value moves between events; the recorded event keeps the temperature it was taken at.
+        oi.now_ms = 1000; oi.now_unix_s++; oi.outdoor_temperature_c = 3.5;
+        s = outdoor.evaluate(oi);
+        CHECK(s.reason == HeatingCurveReason::SamplingInterval);
+        CHECK(approx(s.outdoor_temperature_c, 3.5) &&
+              approx(s.last_sample_outdoor_temperature_c, -4.25));
+
+        // Sensor lost before the NEXT event: the event still records, and the stale outdoor value
+        // is CLEARED rather than carried forward under a fresh timestamp.
+        oi.now_ms = HEATING_CURVE_SAMPLE_CADENCE_MS; oi.now_unix_s = 1770001800;
+        oi.outdoor_available = false; oi.room_error_k = 0.9;
+        s = outdoor.evaluate(oi);
+        CHECK(s.reason == HeatingCurveReason::SampleRecorded && s.sequence == 2);
+        CHECK(approx(s.last_sample_room_error_k, 0.9));
+        CHECK(!s.has_outdoor_temperature && !s.has_last_sample_outdoor &&
+              s.last_sample_outdoor_temperature_c == 0.0);
+
+        // A non-finite reading is absent, not a number: NaN must never reach a recorded event.
+        HeatingCurveDiagnosis nan_case;
+        HeatingCurveInputs ni = ready();
+        ni.outdoor_available = true;
+        ni.outdoor_temperature_c = std::numeric_limits<double>::quiet_NaN();
+        s = nan_case.evaluate(ni);
+        CHECK(s.reason == HeatingCurveReason::SampleRecorded);
+        CHECK(!s.has_outdoor_temperature && !s.has_last_sample_outdoor);
+
+        // NEVER a gate: with the sensor present but every other input identical, the state, reason
+        // and counters must match the run without it — otherwise a board without ENV III would
+        // sample differently from one with it.
+        HeatingCurveDiagnosis with, without;
+        HeatingCurveInputs wi = ready(); wi.outdoor_available = true; wi.outdoor_temperature_c = 7.0;
+        const HeatingCurveSnapshot a = with.evaluate(wi);
+        const HeatingCurveSnapshot b = without.evaluate(ready());
+        CHECK(a.state == b.state && a.reason == b.reason && a.armed == b.armed);
+        CHECK(a.sample_eligible == b.sample_eligible && a.sequence == b.sequence &&
+              a.samples == b.samples && a.holds == b.holds && a.blocks == b.blocks);
+        CHECK(approx(a.last_sample_room_error_k, b.last_sample_room_error_k));
+
+        // Disarming clears the event, and the outdoor value must not outlive it either.
+        HeatingCurveInputs off_in;  // unarmed
+        const HeatingCurveSnapshot cleared = with.evaluate(off_in);
+        CHECK(!cleared.has_last_sample && !cleared.has_last_sample_outdoor &&
+              cleared.last_sample_outdoor_temperature_c == 0.0);
+    }
 
     HeatingCurveDiagnosis degraded_diagnosis;
     in = ready(); in.forecast_available = false;

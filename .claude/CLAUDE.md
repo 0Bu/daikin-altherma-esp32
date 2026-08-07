@@ -643,7 +643,16 @@ env3.cpp        OPTIONAL local climate sensor — the M5Stack ENV III Grove unit
                 reads like a dropout. The QMP6988's own temperature is decoded and DISCARDED — one
                 quantity, one sensor, so nothing has to explain which of two temperatures a reading
                 is. Deliberately NOT in /values or the checkup: those describe the heat pump, and an
-                accessory on the board is not a plant reading. It DOES carry its own 24-hour rings
+                accessory on the board is not a plant reading. Its ONE firmware consumer is the
+                HEATING-CURVE DIAGNOSIS (mqtt_ha.cpp), which records the temperature as the optional
+                OUTDOOR AXIS of each sample — gated on the same fresh-AND-plausible pair as the MQTT
+                document, so a reading this firmware will not publish cannot reach a sample instead;
+                and CONTEXT, never a gate, so a board without the sensor samples identically. What
+                the firmware CANNOT know is WHERE the sensor hangs: beside the indoor unit it is
+                room air, over a long I2C run to a sheltered outdoor position it is genuine outdoor
+                air, and only the latter makes that axis mean anything. The device states the
+                READING, not its MEANING — placement is the owner's fact, so anything downstream
+                that depends on it has to record it. It DOES carry its own 24-hour rings
                 (ENV3_HISTORIES in logic/env3.hpp, served as the separate GET /history?source=env3
                 rather than mixed into the X10A trend set) and one schematic pill. NOT
                 watchdog-subscribed either — every transaction is bounded by a 100ms I2C timeout, so
@@ -2112,7 +2121,8 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   latitude/longitude are null when unconfigured and "<redacted>" under ?redact=1,
                   heating_curve{method_version,armed,state,state_code,reason,reason_code,
                   sample_eligible,current_room_error_k,last_sample_room_error_k,
-                  last_sample_unix_s,forecast_available,plant_gate_known,plant_gate_active,
+                  last_sample_unix_s,outdoor_temperature_c,last_sample_outdoor_temperature_c,
+                  forecast_available,plant_gate_known,plant_gate_active,
                   heating_mode_known,heating_mode_active,room_source_unix_s,room_age_s,sequence,
                   evaluations,samples,holds,blocks} — versioned raw heating-curve diagnosis
                   (mqtt_ha.cpp, logic/heating_curve_diagnosis.hpp). `armed` is derived from the
@@ -2124,7 +2134,24 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   3/4 remain unused after removal of deadband/rate-limit semantics. Nullable raw
                   errors are facts only while eligible/recorded; sequence + absolute timestamp form
                   the durable event contract. Room error is not an LWT offset. There is no actuator
-                  result in this block and cannot be one,
+                  result in this block and cannot be one.
+                  The OUTDOOR pair is the optional local axis from ENV III (env3.cpp), gated on the
+                  same fresh-AND-plausible pair the ENV III MQTT document uses, so a reading this
+                  firmware refuses to publish cannot reach a sample. `outdoor_temperature_c` is LIVE;
+                  `last_sample_outdoor_temperature_c` is the value AS IT STOOD at the recorded event,
+                  which is the one an archive needs — a room error alone cannot separate a heating
+                  curve that is too STEEP from one shifted too HIGH (+0.5 K at -5 C and at +12 C ask
+                  for opposite corrections and record identically without it). It is CONTEXT, NEVER a
+                  gate: no branch of the evaluation reads it, an absent sensor changes no state,
+                  reason or counter, and the contract test refuses a `blocked`/`hold` on it — a gate
+                  here would silently stop sampling on every board without the accessory, which
+                  looks exactly like the feature merely being idle. Absent or non-finite records as
+                  null, never 0 (which would read as a freezing day), a sample taken without the
+                  sensor CLEARS the previous event's reading rather than inheriting it, and
+                  disarming drops it with the rest of sample memory. Adding it did NOT move
+                  `method_version` — the room error is derived exactly as before, so archived events
+                  stay comparable; the MQTT payload's own `schema_version` went 1 -> 2 instead,
+                  since payload SHAPE is what changed,
                   syslog{configured,resolved,reachable,host,port,error},
                   ota{channel} — "release"|"dev", the FEED the next OTA check reads (POST /set_ota).
                   On /status and not only /ota/status because the Settings Firmware card renders its
