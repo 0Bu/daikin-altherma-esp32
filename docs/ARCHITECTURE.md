@@ -399,8 +399,8 @@ host-testable core is unusually large and valuable, because the risky parts are 
   else answers a narrower question — `convert()` handles the wire format's own `0x8000` no-data
   marker, `reading_plausible()` catches a number that is *impossible*, `ValueDef::no_publish` carries
   what the generator knew. What is left is a field that decodes to an entirely ordinary number which
-  is not a measurement of anything, and only per-row evidence can identify it. Three row verdicts
-  exist and two are in force. `ZeroMeansAbsent` withholds only an exact zero from an adjudicated row,
+  is not a measurement of anything, and only per-row evidence can identify it. Four row verdicts
+  exist and three are in force. `ZeroMeansAbsent` withholds only an exact zero from an adjudicated row,
   because a global "0 °C is unavailable" rule would destroy every thermistor reading that crosses
   zero. Four rows carry it: `Target Cond. Temp.` (raw `0x0000` flat through a full compressor cycle)
   and, since [#224](https://github.com/0Bu/daikin-altherma-esp32/issues/224), the page-`0x21`
@@ -419,24 +419,52 @@ host-testable core is unusually large and valuable, because the risky parts are 
   `lwt_select.hpp` warns against — that is a pattern hunting for a quantity; this is an exact
   discriminator among spellings the catalog demonstrably carries, the same key
   `logic/label_override.hpp` uses. The three `0x20` rows #224 also lists (outdoor coil, suction pipe,
-  liquid line) are deliberately **not** adjudicated: 0 °C is where those sensors live for much of a
-  heating season, so withholding their zero would cost a real reading far more often than it removes
-  a false one. The attempt to close them anyway is **recorded in the ledger as a refusal**, because
-  the obvious fix looks available and is not: a *conditional* zero rule keyed on the unit's own
-  saturation temperatures in the **same 16-byte reply** (`0x20/12` *High Pressure(T)*, `0x20/14`
-  *Low Pressure(T)*, conv 405) would invert the winter objection rather than accept it — in the
-  January where the coil really does sit at 0 °C the saturation temperature is near 0 °C too, so the
-  condition switches *itself* off and the real reading publishes, on any model, in any season. It
-  fails because **the witness does not exist** on the only installation available: those transducers
-  read exactly 0.0 bar in 56433/56433 published samples over 120 days, at rest and at 42 rps alike,
-  and conv 405 drops `bar <= 0` before it converts, so neither `(T)` row has ever published one
-  sample in the store's whole retention. That is the rule's own safety property firing — so it would
-  be *permanently silent* on the very unit whose zeros motivated it, and its live verification is
-  unperformable on this board forever. The cross-page `0x62/15` conv-405 twin *does* publish here
-  (3.2–64.1 °C over the same 1419 running samples) and is a **separate** proposal needing its own
-  evidence: `value_available()` is handed only the decoded row's own page reply, so reaching it needs
-  cross-page state this ledger has never carried, plus an argument about how the two pages' sample
-  instants relate (`0x20` holds over at rest, `0x62` does not). `AboveRangeIsAbsent`
+  liquid line) cannot take a **flat** `ZeroMeansAbsent`: 0 °C is where those sensors live for much of
+  a heating season, so an unconditional rule would withhold a real reading far more often than it
+  removes a false one. `ZeroAbsentAboveSaturation` is the conditional answer — it withholds an exact
+  zero only while a **cross-page saturation witness** refutes it, and fails open otherwise. The way
+  past the winter objection is not a better threshold but a **second source**: a quantity measured at
+  the same instant that makes the zero impossible rather than merely unlikely.
+
+  **Which side of the circuit a row sits on decides whether the witness can speak for it**, and that
+  is the whole adjudication. The only witness the catalog carries is `(0x62, 15, conv 405)` — the
+  refrigerant pressure sensor's saturation temperature on the hydronic page — and it is measurably
+  the **high side**: over 1419 running samples it tracks *leaving water* across a 55 K span
+  (3.2–64.1 °C against LWT 9.5–64.8 °C, paired mean difference −0.9 K) while outdoor air stayed
+  inside a 7 K band. So exactly one of the three rows is adjudicated:
+
+  | row | side | outcome |
+  |---|---|---|
+  | `0x20/2` outdoor coil (the *evaporator* in heating) | low | **published** — a high-side witness cannot refute it |
+  | `0x20/6` suction pipe (low side + superheat) | low | **published** — same |
+  | `0x20/10` liquid line (downstream of the condenser) | high | **adjudicated** — `liquid = condensing − subcooling` |
+
+  A coil or suction pipe at 0 °C while the refrigerant condenses at 49 °C is not a contradiction, it
+  is an ordinary January afternoon; keying either to this witness would withhold a real reading in
+  exactly the season it matters. A future *low-side* witness would settle them, and this one says
+  nothing about them. The liquid line is different: 0.00 °C against a condensing 49 °C claims ~49 K
+  of subcooling, which is impossible rather than unlikely — the `Target Cond. Temp.` bar reached
+  against a *simultaneously measured* quantity instead of against a second installation, which is
+  what [#224](https://github.com/0Bu/daikin-altherma-esp32/issues/224) asked for and one unit could
+  not otherwise supply.
+
+  The bound (`LIQUID_LINE_SAT_CEILING`, 30 °C) is impossible rather than tight — real subcooling is
+  3–10 K, and the reference unit sits above it in 1231 of 1352 running samples — and it carries the
+  **mode** safety property for free: in cooling the circuit reverses and this same sensor becomes the
+  low side, which never reaches 30 °C, so the rule switches *itself* off rather than anyone having to
+  detect the mode. The on-page witness that would have needed no cross-page state at all (`0x20/12`,
+  `0x20/14`, conv 405) is unusable: those transducers read exactly 0.0 bar in 56433/56433 samples over
+  120 days, and conv 405 drops `bar <= 0`, so neither `(T)` row has ever published one sample.
+
+  Two gates keep the witness honest. The capture is **gated on the profile declaring the row** — on a
+  model without it, bytes 15–16 of the hydronic page are whatever that model puts there, and a
+  pressure read off them would be an *invented* witness, the one direction that must be impossible
+  since a witness can only ever take a reading away. And it **expires every cycle**, so a witness page
+  that goes silent falls open within one poll interval rather than authorizing a withholding forever.
+  Reach is deliberately narrow and pinned: 39 rows carry the rule, but only **8 profiles carry the
+  witness**, so on the other 31 it is armed and permanently silent. The **label is part of the key**,
+  as for the `0x21` rows and with a sharper case — *Leaving brine temp.(R6T)* sits at the identical
+  coordinate on four geothermal profiles and really does read 0 °C. `AboveRangeIsAbsent`
   is the **expansion
   valve** pulse rows (conv 151): 30 days of published samples run 0-474 pulses and then carry six
   samples of exactly `0xFFF8`, with **nothing in between** — a discrete out-of-band integer rather

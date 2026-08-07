@@ -9,7 +9,7 @@
 namespace daik {
 
 bool hp_format(const ValueDef& def, const uint8_t* payload, int payload_len, int rtype,
-               std::string& out, const ValueDef* profile, size_t count) {
+               std::string& out, const ValueDef* profile, size_t count, SaturationWitness sat) {
     if (def.offset + def.size > payload_len) return false;
     Reading r = convert(def, payload + def.offset, rtype);   // rtype selects the conv-405 curve
     if (r.unimpl) return false;
@@ -26,7 +26,11 @@ bool hp_format(const ValueDef& def, const uint8_t* payload, int payload_len, int
     // second outdoor unit — while a zero in one populated thermistor row does not. Passing the whole
     // current reply keeps that distinction structural, and it is what lets the verdict reach a row
     // that carries a value rule of its own (0xA0/8, the expansion valve).
-    if (!value_available(def, r.ok, r.value, payload, static_cast<size_t>(payload_len))) return false;
+    // The CROSS-PAGE witness rides along for the same reason the page does, one page wider: a
+    // high-side row's exact zero is refuted only by a saturation temperature measured elsewhere in
+    // the circuit, and a default-constructed witness fails the rule OPEN.
+    if (!value_available(def, r.ok, r.value, payload, static_cast<size_t>(payload_len), sat))
+        return false;
     if (!r.ok && r.text[0] == '\0') return false;
     // conv 204 (fault code) gets an English description appended when the table covers it. Exact
     // ON/OFF text is normalized defensively even though all current binary/fan converters are

@@ -82,7 +82,84 @@ enum class AvailabilityPolicy : uint8_t {
     ZeroMeansAbsent,    // an exact decoded zero is an unpopulated field on THIS row, not a reading
     Unproven,           // the decode itself is not trusted here — publish nothing, keep the evidence
     AboveRangeIsAbsent, // a decoded value above this row's physical ceiling is not a reading
+    ZeroAbsentAboveSaturation,  // an exact zero REFUTED by a simultaneously-measured saturation
+                                // temperature — conditional, and silent without that witness
 };
+
+// ── THE CROSS-PAGE SATURATION WITNESS ─────────────────────────────────────────────────────────────
+// Where the co-witness for ZeroAbsentAboveSaturation is read from, and what it is.
+//
+// A flat ZeroMeansAbsent cannot be used on the outdoor unit's own thermistors: unlike a fan
+// heatsink, 0 °C is where those sensors LIVE for much of a heating season, so an unconditional rule
+// would withhold a real reading far more often than it removes a false one. The way past that is not
+// a better threshold but a SECOND SOURCE — a quantity measured at the same instant that makes the
+// zero impossible rather than merely unlikely — and the same move that let PAGE_ABSENCE_RULES be
+// safe across 45 unmeasured profiles applies here: the witness is re-read from the LIVE reply, so an
+// installation where the zero is genuine answers differently and the row publishes untouched.
+//
+// The witness is the refrigerant pressure sensor's saturation temperature on the HYDRONIC page,
+// (0x62, 15, conv 405). Two facts about it decide everything below, and BOTH were measured rather
+// than assumed — getting either wrong is the #35-#39 shape with a second sensor in front of it:
+//
+//   (1) IT IS THE HIGH SIDE. Over 1419 running samples its value tracks the LEAVING WATER across a
+//       55 K span (3.2-64.1 °C against LWT 9.5-64.8 °C; paired mean difference -0.9 K) while outdoor
+//       air stayed inside a 7 K band. It is the condensing pressure, not the evaporating one.
+//   (2) IT IS THE ONLY REFRIGERANT PRESSURE ROW ON THAT PAGE. There is no low-side witness anywhere
+//       in the catalog's hydronic page, and the page-0x20 transducers that would carry one read
+//       exactly 0.0 bar in 56433/56433 samples over 120 days (conv 405 drops bar <= 0, so their own
+//       (T) twins have never published a sample).
+//
+// (1) is why this rule reaches exactly ONE of the three page-0x20 zero rows, and why the pairing
+// INVERTS the one first proposed for them. A high-side witness says nothing about the low side: an
+// outdoor coil (the EVAPORATOR in heating) at 0 °C while the refrigerant condenses at 49 °C is not
+// a contradiction, it is a January afternoon — and so is a suction pipe at 0 °C. Keying either of
+// those to this witness would withhold a real reading in exactly the season it matters, which is the
+// failure direction #224 says a wrong adjudication must never take. The LIQUID LINE is downstream of
+// the condenser, so it IS the high side: liquid temperature = condensing temperature - subcooling,
+// and that is a relation this witness can refute.
+inline constexpr uint8_t SAT_WITNESS_REG    = 0x62;
+inline constexpr uint8_t SAT_WITNESS_OFFSET = 15;
+inline constexpr int     SAT_WITNESS_CONV   = 405;
+
+// The bound above which an exact zero on a high-side row is refuted. IMPOSSIBLE, not tight — the
+// same discipline as EEV_PULSE_CEILING, and for the reason logic/conv_override.hpp names: a
+// threshold fitted to the observed data is not evidence. Real subcooling is 3-10 K, so a liquid line
+// reading 0.00 while the refrigerant condenses above 30 °C claims ~30 K of it and is already absurd;
+// measured, the reference unit sits above this bound in 1231 of 1352 running samples and above
+// 50 °C in 874 of them, so the bound refuses what it must while leaving three times the real
+// subcooling range as headroom.
+//
+// It also carries the MODE safety property, which is why a high bound is doing more work here than
+// just being generous. In COOLING the circuit reverses: the indoor heat exchanger becomes the
+// evaporator, so this same sensor becomes the LOW side and the pairing with an outdoor liquid line
+// no longer holds. A low-side saturation temperature does not reach 30 °C, so the rule simply never
+// fires there — the mode dependence resolves by the condition switching itself off, not by anyone
+// having to detect the mode.
+inline constexpr double LIQUID_LINE_SAT_CEILING = 30.0;
+
+// What the caller knows about the witness at the moment a row is judged. Default-constructed means
+// "no witness", which every rule below FAILS OPEN on — the same contract page_absent() states, and
+// for the same reason: a caller that cannot see the witness must never invent the verdict.
+struct SaturationWitness {
+    bool   ok     = false;  // a conv-405 value was decoded from the witness row recently enough
+    double temp_c = 0.0;
+};
+
+// Does THIS profile actually declare the witness row? The capture must be gated on it: reading the
+// witness bytes out of a page reply the profile does not describe would be decoding a field nobody
+// established is there — on a model without this row, bytes 15-16 of the hydronic page are whatever
+// that model puts there, and a pressure read off them is an INVENTED witness. Since the witness can
+// only ever take a reading away, inventing one is the direction that must be impossible; a profile
+// without the row simply supplies no witness and every liquid-line zero publishes.
+inline constexpr bool profile_has_saturation_witness(const ValueDef* profile, size_t count) {
+    if (!profile) return false;
+    for (size_t i = 0; i < count; i++) {
+        if (profile[i].reg == SAT_WITNESS_REG && profile[i].offset == SAT_WITNESS_OFFSET &&
+            profile[i].conv == SAT_WITNESS_CONV)
+            return true;
+    }
+    return false;
+}
 
 struct AvailabilityRule {
     uint8_t            reg;
@@ -272,61 +349,76 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     {0x21, 10, 105, "Compressor outlet temperature", AvailabilityPolicy::ZeroMeansAbsent, 0.0,
      "#224: exactly 0.0 in 1140/1140 running samples while the discharge pipe it feeds read 101 °C"},
 
-    // ── Page 0x20 outdoor coil / suction / liquid line — REFUSED, and why (#224) ─────────────────
-    // NO RULE IS ADDED HERE. This block is the record of an adjudication that was attempted and
-    // failed its evidence gate, kept because the next person to read the three zeros below will
-    // reach for exactly the rule that does not work, and an absent entry cannot say why.
+    // ── Page 0x20: the liquid line is adjudicated, the coil and suction pipe are REFUSED (#224) ──
+    // All three read exactly 0.0 in 1419/1419 running samples over 7 days (min == max == 0.0 on
+    // each, selected on INV frequency > 0), while the same page's Heat exchanger mid-temp. — same
+    // page, same converter — never drops below 3.0 °C in those samples. So the page is live and the
+    // reply is being decoded: the standard 0x21 argument, reproduced exactly.
     //
-    //     0x20/2  conv 105  O/U Heat Exch. Temp.      exactly 0.0 in 1419/1419 running samples
-    //     0x20/6  conv 105  Suction pipe temp.        exactly 0.0 in 1419/1419 running samples
-    //     0x20/10 conv 105  Liquid temperature(R3T)   exactly 0.0 in 1419/1419 running samples
+    //     0x20/2  conv 105  O/U Heat Exch. Temp.      REFUSED  — stays published, see below
+    //     0x20/6  conv 105  Suction pipe temp.        REFUSED  — stays published, see below
+    //     0x20/10 conv 105  Liquid pipe temp.         ADJUDICATED, conditional on the witness
     //
-    // (7 days, min == max == 0.0 on each, selected on INV frequency > 0. The same page's Heat
-    // exchanger mid-temp., same converter, never drops below 3.0 °C in those samples, so the page
-    // is live and the reply is being decoded — the standard 0x21 argument, reproduced exactly.)
+    // WHY ONLY ONE OF THE THREE, and why it is the one first predicted least likely to survive. The
+    // three rows do not sit on the same side of the circuit, and the only witness that exists is the
+    // HIGH side (see SAT_WITNESS_* above — measured, it tracks leaving water across a 55 K span):
     //
-    // The proposed close was a CONDITIONAL zero rule rather than a flat one, and the design was
-    // sound: page 0x20 carries the unit's own saturation temperatures in the same 16-byte reply
-    // (0x20/12 High Pressure(T), 0x20/14 Low Pressure(T), both conv 405), value_available() is
-    // already handed the whole raw page, and a coil reading 0.00 while the refrigerant in the same
-    // sample boils at +7 °C is refuted rather than merely unlikely. It also inverts the winter
-    // objection that blocks a flat rule: in the January where the coil really does sit at 0 °C the
-    // saturation temperature is near 0 °C too — that is WHY the coil is there — so the condition
-    // switches itself off and the real reading publishes, on any model, in any season.
+    //     0x20/2  outdoor coil    = the EVAPORATOR in heating  -> LOW side  -> not refutable here
+    //     0x20/6  suction pipe    = low side + superheat       -> LOW side  -> not refutable here
+    //     0x20/10 liquid line     = downstream of the condenser -> HIGH side -> REFUTABLE
     //
-    // IT IS REFUSED BECAUSE THE WITNESS DOES NOT EXIST ON THE ONLY INSTALLATION AVAILABLE, and the
-    // failure is structural rather than marginal:
+    // For the first two, a high-side witness proves nothing whatever: a coil or a suction pipe at
+    // 0 °C while the refrigerant condenses at 49 °C is not a contradiction, it is an ordinary
+    // January afternoon. Keying them to this witness would withhold a REAL reading in exactly the
+    // season the reading matters, which is the failure direction #224 exists to refuse — so they
+    // stay published, and a visible zero someone can question stays better than an invisible
+    // withheld reading nobody can. THE ROW'S SIDE OF THE CIRCUIT IS PART OF THE ADJUDICATION; a
+    // future witness on the low side would settle those two and this one says nothing about them.
     //
-    //   • The 0x20 pressure transducers read exactly 0.0 bar in 56433/56433 published samples over
-    //     120 days — max 0.0 on BOTH High Pressure (0x20/12) and Low Pressure (0x20/14), at rest
-    //     and at 42 rps alike. Those transducers are themselves unpopulated on this unit.
-    //   • conv 405 drops bar <= 0 before it converts (r.ok stays false), so High Pressure(T) and
-    //     Low Pressure(T) have never published ONE sample in the whole retention of the reference
-    //     store. The witness is not near zero; it is absent.
-    //   • That is the rule's own advertised safety property firing — "a unit without a low-side
-    //     pressure sensor produces no witness, so the rule stays silent instead of guessing" — and
-    //     it means the rule would be PERMANENTLY SILENT on the very unit whose zeros motivated it.
-    //     It could never withhold anything here, and its live verification (three rows against a
-    //     non-zero LP(T) with the compressor running) is unperformable on this board, forever.
+    // The liquid line is the high side, so the relation is liquid temperature = condensing
+    // temperature - subcooling, and 0.00 °C against a condensing 49 °C claims ~49 K of subcooling.
+    // That is impossible rather than unlikely — the Target Cond. Temp. bar, reached against a
+    // SIMULTANEOUSLY MEASURED quantity instead of against a second installation, which is what #224
+    // asked for and what one unit could not otherwise supply.
     //
-    // Shipping it anyway would put an unexercised conditional into the ledger whose only supporting
-    // evidence is the absence of evidence, and have it fire first on a model nobody has measured —
-    // which is the claim #224 exists to refuse. So the three rows STAY PUBLISHED. A visible zero
-    // someone can question is better than an invisible withheld reading nobody can.
+    // WHAT THE ON-PAGE WITNESS WOULD HAVE BEEN, and why it is not used: page 0x20 carries its own
+    // saturation temperatures in the same 16-byte reply (0x20/12, 0x20/14, conv 405), which would
+    // have needed no cross-page state at all. They are unusable here — those transducers read
+    // exactly 0.0 bar in 56433/56433 samples over 120 days, at rest and at 42 rps alike, and conv
+    // 405 drops bar <= 0, so neither (T) row has ever published one sample in the store's whole
+    // retention. A rule keyed to them would be permanently silent on the very unit whose zeros
+    // motivated it, and unverifiable live on this board forever. The high side is also the thinner
+    // of the two on-page witnesses by catalog reach — 0x20/12 is carried by 23 of 44 profile tables
+    // against 43 for 0x20/14 — which is a second reason not to build on it.
     //
-    // THE CROSS-PAGE WITNESS IS NOT A LOOPHOLE TO TAKE. Page 0x62/15 conv 405 (Pressure sensor(T))
-    // DOES publish on this unit — 3.2 to 64.1 °C across those same 1419 running samples, 1st
-    // percentile 8.6 °C, only 2 samples under 5 °C — so it would refute a 0.00 coil on the numbers.
-    // It is deliberately not built: it is a DIFFERENT PAGE, and value_available() is handed only
-    // the reply of the row being decoded, so reaching it needs cross-page state this ledger has
-    // never carried and a separate argument about how two pages' sample instants relate (0x20 holds
-    // over at rest, 0x62 does not). That is its own proposal needing its own evidence, not this one
-    // with a wider reach.
+    // THE LABEL IS PART OF THE KEY, for the reason the 0x21 block states and with a sharper case:
+    // at this coordinate the catalog carries Leaving brine temp.(R6T) on four geothermal profiles,
+    // and a brine LEAVING temperature sits at 0 °C in normal operation. All three air-source
+    // spellings need an entry or the rule silently misses most of the catalog (29 + 6 + 4 = 39
+    // rows); the geothermal one must never be reachable from it. The catalog test pins both
+    // directions.
     //
-    // 0x20/10 fails a second, independent way, which is worth keeping even if the first is ever
-    // resolved: its natural witness is the HIGH side, carried by 23 of 44 profile tables against 43
-    // for the low side, and the liquid line's offset from it (subcooling) is mode-dependent in a way
-    // the low-side rows' is not. No clean mode-independent bound can be stated from the same reply.
+    // HOW FAR IT ACTUALLY REACHES, which is much narrower than the 39 rows carrying it: the witness
+    // row exists on only EIGHT profiles, so on the other 31 the rule is armed and PERMANENTLY
+    // SILENT. That is the intended fail-open rather than a gap to close by loosening the witness —
+    // a rule that reaches fewer models because fewer models can evidence it is behaving correctly.
+    // The reference unit is one of the eight, which is what makes it verifiable on hardware at all,
+    // and every witness-carrying profile also carries the liquid line, so no witness judges nothing.
+    //
+    // RESIDUAL COST: on an air-source model that DOES populate this row, a genuine liquid-line
+    // reading of exactly 0.00 °C is withheld while the refrigerant is simultaneously condensing
+    // above 30 °C. That state is not a rare transit, it is thermodynamically unreachable — which is
+    // why this trade is cheaper than the flat rule's, not merely the same one again.
+    {0x20, 10, 105, "Liquid pipe temp.(R6T)", AvailabilityPolicy::ZeroAbsentAboveSaturation,
+     LIQUID_LINE_SAT_CEILING,
+     "#224: exactly 0.0 in 1419/1419 running samples; 1231 of them with the refrigerant condensing "
+     "above 30 °C, which would be ~30 K of subcooling"},
+    {0x20, 10, 105, "Liquid temperature(R3T)", AvailabilityPolicy::ZeroAbsentAboveSaturation,
+     LIQUID_LINE_SAT_CEILING,
+     "#224: same row, second of three air-source spellings the catalog carries at this coordinate"},
+    {0x20, 10, 105, "Liquid pipe temp.", AvailabilityPolicy::ZeroAbsentAboveSaturation,
+     LIQUID_LINE_SAT_CEILING,
+     "#224: same row, third of three air-source spellings the catalog carries at this coordinate"},
 
     // The four 0xA1 rows USED TO BE HERE, one ZeroPageMeansAbsent entry each. The verdict has not
     // changed — it moved to PAGE_ABSENCE_RULES above, where a fact about a page is stated once and
@@ -425,7 +517,8 @@ inline constexpr bool row_publishable(const ValueDef& d) {
 // Unproven is decided BEFORE the `ok` check — it is a verdict on the row, not on the number, so a
 // quarantined row publishes nothing whatever it decoded to.
 inline constexpr bool value_available(const ValueDef& d, bool ok, double value,
-                                      const uint8_t* page = nullptr, size_t page_len = 0) {
+                                      const uint8_t* page = nullptr, size_t page_len = 0,
+                                      SaturationWitness sat = {}) {
     if (page_absent(d.reg, page, page_len)) return false;
     const AvailabilityRule* r = availability_rule(d);
     if (!r) return true;
@@ -433,6 +526,14 @@ inline constexpr bool value_available(const ValueDef& d, bool ok, double value,
     if (!ok) return true;
     if (r->policy == AvailabilityPolicy::ZeroMeansAbsent && value == 0.0) return false;
     if (r->policy == AvailabilityPolicy::AboveRangeIsAbsent && value > r->ceiling) return false;
+    // CONDITIONAL, and the two `sat` terms are the whole safety property: with no witness (a caller
+    // that does not supply one, a profile with no witness row, a cycle where the witness page did
+    // not answer, or a unit whose pressure sensor conv 405 refused) this FAILS OPEN and the zero
+    // publishes. The rule can only ever take a reading away when something else was measured saying
+    // it cannot be one.
+    if (r->policy == AvailabilityPolicy::ZeroAbsentAboveSaturation && value == 0.0 && sat.ok &&
+        sat.temp_c > r->ceiling)
+        return false;
     return true;
 }
 

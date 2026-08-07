@@ -629,7 +629,17 @@ hp_poll.cpp     poll engine task: X10A ONLY — the HomeHub is a separate stack 
                 marked, NOT dropped: history.cpp needs it to tell HELD_OVER from NO_READING), and
                 DUMPS the raw 0x10/0x20 payloads to /diag while the compressor RUNS
                 (logic/raw_capture.hpp — #194's decisive experiment, which the detect-pass dump
-                structurally cannot take, since a detect pass is always a unit at rest)
+                structurally cannot take, since a detect pass is always a unit at rest).
+                It also CAPTURES the cross-page SATURATION WITNESS (logic/availability.hpp) as the
+                hydronic page goes by and carries it to the NEXT cycle, poll-task-owned and
+                mutex-free. Carried rather than used in-cycle because the sweep reads pages in table
+                order and the witness page (0x62) comes AFTER the page it judges (0x20): the
+                alternatives were a second bus round-trip per cycle, or a read-all-then-decode
+                restructure that would move every row's verdict out of value_available() into a
+                post-pass — the one thing row_publishable() exists to prevent. Staleness is bounded
+                at one poll interval (1 s) against a condensing temperature with 20 K of bound
+                headroom, and it EXPIRES unconditionally each cycle, so a witness page that goes
+                silent falls open rather than authorizing a withholding forever
 env3.cpp        OPTIONAL local climate sensor — the M5Stack ENV III Grove unit (SHT30 temperature +
                 humidity at 0x44, QMP6988 pressure at 0x70 on one I2C bus). A THIRD reading source
                 beside X10A and the HomeHub, sharing nothing with either: its own task (4096, prio 4),
@@ -1257,8 +1267,8 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 answers something narrower: convert() handles the wire format's own 0x8000 no-data
                 marker, reading_plausible() catches a number that is IMPOSSIBLE, ValueDef::no_publish
                 carries what the GENERATOR knew. What is left is a field that decodes to an entirely
-                ordinary number which measures nothing, and only per-row evidence can name it. THREE
-                ROW verdicts exist; TWO are currently in force. ZeroMeansAbsent withholds only an exact
+                ordinary number which measures nothing, and only per-row evidence can name it. FOUR
+                ROW verdicts exist; THREE are currently in force. ZeroMeansAbsent withholds only an exact
                 zero from an adjudicated row, and FOUR rows carry it: Target Cond. Temp. 0x10/8 (raw
                 0x0000 through a full compressor cycle, which is also why ou_stale.hpp already calls it
                 a useless witness) plus #224's page-0x21 Fan1/Fan2 Fin temp. and Compressor outlet
@@ -1275,30 +1285,44 @@ logic/          IDF-free, host-tested pure headers (crc, convert, error_codes, r
                 exact discriminator among the spellings the catalog demonstrably carries, the same key
                 label_override.hpp uses, pinned in BOTH directions by the catalog test (19/19/21
                 adjudicated rows, 10 shared geothermal rows that reach the ledger and are told nothing).
-                The three 0x20 rows #224 also lists (outdoor coil, suction pipe, liquid line) are
-                deliberately NOT adjudicated: 0 °C is where those sensors LIVE for much of a heating
-                season, so withholding their zero would cost a real reading far more often than it
-                removes a false one — the trade inverts. The attempt to close them anyway is
-                RECORDED AS A REFUSAL beside the rules it did not become, because the obvious fix
-                looks available and is not. It was a CONDITIONAL zero rule keyed on the unit's own
-                saturation temperatures in the SAME 16-byte reply (0x20/12 High Pressure(T),
-                0x20/14 Low Pressure(T), conv 405), which would have inverted the winter objection
-                rather than accepting it — in the January where the coil really sits at 0 °C the
-                saturation temperature is near 0 °C too, so the condition switches ITSELF off and
-                the real reading publishes on any model in any season. It fails because THE WITNESS
-                DOES NOT EXIST on the only installation available: the 0x20 transducers read exactly
-                0.0 bar in 56433/56433 published samples over 120 days (at rest and at 42 rps
-                alike), and conv 405 drops bar <= 0 before converting, so both (T) rows have never
-                published ONE sample in the store's whole retention. That is the rule's own safety
-                property firing, and it means the rule would be PERMANENTLY SILENT on the very unit
-                whose zeros motivated it, with its live verification unperformable on this board
-                forever — an unexercised conditional whose only evidence is the absence of evidence,
-                firing first on a model nobody has measured. The cross-page 0x62/15 conv 405 twin
-                DOES publish here (3.2-64.1 °C over the same 1419 running samples) and is a
-                SEPARATE proposal needing its own evidence, not this one with a wider reach:
-                value_available() is handed only the decoded row's own page reply, so reaching it
-                needs cross-page state this ledger has never carried plus an argument about how two
-                pages' sample instants relate (0x20 holds over at rest, 0x62 does not).
+                A FIFTH verdict, ZeroAbsentAboveSaturation, is the CONDITIONAL zero — the answer to
+                the three page-0x20 rows #224 lists (outdoor coil, suction pipe, liquid line), where
+                a FLAT ZeroMeansAbsent is unusable because 0 °C is where those sensors LIVE for much
+                of a heating season, so an unconditional rule would withhold a real reading far more
+                often than it removes a false one. The way past that is not a better threshold but a
+                SECOND SOURCE: a quantity measured at the same instant that makes the zero
+                impossible rather than merely unlikely. It withholds an exact zero only while a
+                CROSS-PAGE saturation witness refutes it, and FAILS OPEN in every other case.
+                WHICH SIDE OF THE CIRCUIT a row sits on decides whether the witness can speak for
+                it, and this is the whole adjudication. The only witness the catalog carries is
+                (0x62, 15, conv 405), the refrigerant pressure sensor's saturation temperature on
+                the HYDRONIC page — measured, it is the HIGH side: over 1419 running samples it
+                tracks LEAVING WATER across a 55 K span (3.2-64.1 °C vs LWT 9.5-64.8 °C, paired mean
+                difference -0.9 K) while outdoor air stayed inside a 7 K band. So only the LIQUID
+                LINE (0x20/10, downstream of the condenser, therefore high side) is adjudicated:
+                liquid temperature = condensing temperature - subcooling, and an exact 0.00 against
+                a condensing 49 °C claims ~49 K of subcooling. The outdoor coil (0x20/2, the
+                EVAPORATOR in heating) and the suction pipe (0x20/6) are LOW side and stay
+                PUBLISHED — a high-side witness cannot refute them, since a coil at 0 °C while the
+                refrigerant condenses at 49 °C is an ordinary January afternoon, and keying them to
+                it would withhold a real reading in exactly the season it matters. A future
+                low-side witness would settle those two; this one says nothing about them. The bound
+                is LIQUID_LINE_SAT_CEILING = 30 °C, impossible rather than tight (real subcooling is
+                3-10 K; measured, the reference unit is above it in 1231 of 1352 running samples),
+                and it carries the MODE safety property for free: in COOLING the same sensor becomes
+                the LOW side, which never reaches 30 °C, so the rule switches itself off rather than
+                anyone having to detect the mode. The ON-PAGE witness that would have needed no
+                cross-page state at all (0x20/12, 0x20/14, conv 405) is unusable — those transducers
+                read exactly 0.0 bar in 56433/56433 samples over 120 days and conv 405 drops
+                bar <= 0, so neither (T) row has ever published one sample. Two gates keep the
+                witness honest: the capture is GATED on the profile DECLARING the row
+                (profile_has_saturation_witness — on a model without it those bytes are whatever
+                that model puts there, and a witness read off them would be INVENTED, which is the
+                one direction that must be impossible since a witness can only take a reading away),
+                and it EXPIRES every cycle. Reach is deliberately narrow and pinned: 39 rows carry
+                the rule but only EIGHT profiles carry the witness, so on the other 31 it is armed
+                and permanently silent. The LABEL is part of the key — Leaving brine temp.(R6T) sits
+                at the identical coordinate on four geothermal profiles and really does read 0 °C.
                 A FOURTH verdict is not
                 about a row at all: PAGE_ABSENCE_RULES is keyed on the register PAGE and reaches every
                 row on it, because "the hardware behind this reply is not fitted" is a fact about the
