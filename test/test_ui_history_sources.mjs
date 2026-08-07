@@ -143,7 +143,7 @@ const context = {
 vm.createContext(context);
 vm.runInContext(readAppFragments(["history.js"]) +
   "\nthis.__api = { hasHist, hasModbusHist, histCacheKey, historyView, histHtml, scrubText," +
-  " ensureHist, ensureHistPair, ensureDerived };", context, { filename: "main/www/js/history.js" });
+  " scrubMove, ensureHist, ensureHistPair, ensureDerived };", context, { filename: "main/www/js/history.js" });
 const h = context.__api;
 
 const x10a = { at: 1, gen: 1, dt: 300, unit: "°C", t0: null, b0: 100,
@@ -199,6 +199,61 @@ assert.doesNotMatch(outdoorHtml, /Messalter unbekannt/,
 assert.match(h.scrubText(outdoorView, 1),
   /Modbus 20\.5 °C · Register unverändert .* ca\. 15 min · Messalter unbekannt/,
   "the popup distinguishes a repeated register value from a proven fresh measurement");
+
+// THE READOUT AT THE ENDS OF THE CHART. An absolutely positioned bubble carrying only `left` is
+// shrink-to-fit against `container - left`, so at the last sample — where the live value sits and
+// where a reader looks first — the available width collapses and the text wraps to its
+// minimum-content width. Shipped, that turned "08:23 · X10A 46.3 °C · Modbus 46.3 °C" into a 59 px
+// column of SEVEN lines hanging over the curve it was reading, and the measured clamp in scrubMove
+// could not recover: it read offsetWidth while the squeezed `left` was still applied and concluded
+// the bubble already fit. Both halves of the fix are pinned here, since neither is visible in any
+// rendering this suite can perform.
+assert.match(style, /\.vhist-tip \{[^}]*width:\s*max-content;/,
+  "the readout's width must not depend on its position, or the last sample wraps it to one word per line");
+assert.match(style,
+  /\.vhist-tip \{[^}]*left:\s*calc\(var\(--tip-p\) \* 1%\);\s*transform:\s*translateX\(calc\(var\(--tip-p\) \* -1%\)\);/,
+  "the readout must slide its own anchor with --tip-p, so it stays inside the card at both ends " +
+  "without a measurement or a percentage cut-off");
+S.histPin.set("outdoor_air", { t: 1768720000 + 3 * 300 });        // the newest sample: p = 100
+assert.match(h.histHtml("outdoor_air", "°C", "Außentemperatur"),
+  /<div class="vhist-tip vhist-pinned mono num" style="--tip-p:100\.000">/,
+  "a pinned readout carries its POSITION, so the one CSS rule places it before layout too");
+S.histPin.delete("outdoor_air");
+
+// The LIVE half is the handler, not a stylesheet, so execute it rather than grep it: scrubMove must
+// place the bubble from the sample's position and must not MEASURE it. The measurement is what made
+// the defect self-reinforcing — offsetWidth was read while the squeezed `left` was still applied —
+// so the fake node counts reads of it and reports any as a failure. `left` is likewise never written
+// on the tip any more; the cross and the marker keep their own px placement inside the plot.
+{
+  const styleSpy = () => {
+    const props = new Map(), written = [];
+    return { props, written,
+      setProperty: (k, v) => { props.set(k, v); written.push(k); },
+      set left(v) { written.push("left=" + v); }, get left() { return ""; } };
+  };
+  let offsetWidthReads = 0;
+  const node = (cls) => ({ className: cls, hidden: true, dataset: {}, style: styleSpy(),
+    get offsetWidth() { offsetWidthReads++; return 0; } });
+  const tipNode = node("vhist-tip vhist-live");
+  const crossNode = node("vhist-cross vhist-live");
+  const markNode = node("vhist-mark vhist-live");     // never spread: that reads the offsetWidth spy
+  markNode.dataset.source = "modbus";
+  const plot = {
+    clientWidth: 600, dataset: { hist: "outdoor_air", source: "modbus", n: "4" },
+    querySelector: () => crossNode,
+    querySelectorAll: () => [markNode],
+    parentElement: { querySelector: () => tipNode },
+  };
+  h.scrubMove(plot, 3);                                    // the newest sample of the 4-sample ring
+  assert.equal(tipNode.style.props.get("--tip-p"), "100.000",
+    "the live readout is placed from the sample's position, like the pinned one");
+  assert.deepEqual(tipNode.style.written, ["--tip-p"],
+    "scrubMove must write only --tip-p on the bubble — a px `left` reintroduces the edge squeeze");
+  assert.equal(offsetWidthReads, 0,
+    "the bubble's placement must not depend on measuring it: the squeezed width measured as fitting");
+  assert.equal(tipNode.hidden, false, "the readout is still revealed by a scrub");
+}
 
 // Smart-Grid mode is a complete categorical state timeline, not a misleading numeric 0..3 line.
 // Every manufacturer mode and a measurement gap are visible in both source lanes. Exact phase
