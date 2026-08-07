@@ -204,7 +204,9 @@ analysis evidence, not a plant command.
 
 The card in the UI always renders, stating recording, optional-forecast degradation, a summer wait,
 excluded cooling or the exact missing input — and it says out loud that room kelvin is not calibrated
-water kelvin.
+water kelvin. It also carries the optional outdoor axis as its own row, whose number comes from the
+diagnosis rather than from the sensor read a second time, so a live sensor cannot show green there
+while the state row reports that nothing is being recorded.
 
 ---
 

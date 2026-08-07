@@ -549,6 +549,72 @@ function dynamicStateRow(d, room, weather, modbus, mqtt, sys) {
   return { key: blocked || "dyn.state_blocked", cls: "warn", help: "dyn.state_help_blocked" };
 }
 
+// The OUTDOOR AXIS of the recorded evidence, from the optional ENV III sensor.
+//
+// The number is the one the DIAGNOSIS holds (/status.heating_curve), never /status.env3 read a
+// second time. Those two disagree exactly when it matters: the sensor can be live while the sampler
+// is not evaluating at all (safe mode, no broker), and a green reading here beside a blocked state
+// row is the same mistake the room-source row above documents — one row on the card looking fine
+// while the card's subject is doing nothing. The env3 block is consulted only to tell "no sensor"
+// apart from "sensor configured, value not reaching the sampler", which are different findings.
+//
+// An absent sensor is styled DIM, not warn: the axis is optional and its absence stops no sampling,
+// so it must not read as a fault — the same rule that keeps the summer cooling HOLD unstyled.
+function outdoorAxisRow(d, env) {
+  // typeof, NOT Number(): the device sends JSON `null` for every absent figure here, and
+  // `Number(null)` is 0, which `Number.isFinite` then accepts. Read that way an unrecorded event
+  // prints "0,0 °C" — a real reading invented out of absence, the one thing this row's own copy
+  // promises it does not do. undefined happens to be safe (NaN); null is not.
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const live = num(d.outdoor_temperature_c);
+  const hasLive = live !== null;
+  const sample = num(d.last_sample_outdoor_temperature_c);
+  const hasSample = sample !== null;
+  const hasEvent = num(d.last_sample_room_error_k) !== null;
+  const enabled = env.enabled === true;
+  // Whether the RECORDER is running at all, which decides who is to blame for a missing value.
+  // Clearing the broker disarms the diagnosis while leaving ENV III perfectly healthy, so without
+  // this the row would warn about the sensor and send the reader to check hardware that is fine —
+  // the same mistake as telling someone to set up the room source sitting one row below.
+  const evaluating = d.armed === true && d.reason !== "sampler_inactive";
+  // NO-BREAK SPACE before the unit. These value cells carry `settings-wrap`, which the room and
+  // pump rows need because a saved NAME must wrap rather than overflow — but a MEASUREMENT split
+  // across two lines ("22,2" over "°C") reads as a layout fault, and at a phone width the long
+  // label squeezes this column enough to do it.
+  const fmt = (n) => `${n.toLocaleString(LANG === "de" ? "de-DE" : "en-US",
+    { minimumFractionDigits: 1, maximumFractionDigits: 1 })} °C`;
+
+  // Precedence states the ACTIONABLE thing: a value wins; then "no sensor"; then "the recorder is
+  // not running" (which the state row above explains); only a running recorder that is not being
+  // fed warrants a warning, because only then is the sensor the thing to go and look at.
+  let cls = "dim";
+  let value = t("dyn.not_configured");
+  let statusKey = "dyn.outdoor_status_absent";
+  if (hasLive) {
+    cls = "ok"; value = fmt(live); statusKey = "dyn.outdoor_status_live";
+  } else if (!enabled) {
+    statusKey = "dyn.outdoor_status_absent";
+  } else if (!evaluating) {
+    value = t("dyn.outdoor_none"); statusKey = "dyn.outdoor_status_idle";
+  } else {
+    cls = "warn"; value = t("dyn.outdoor_none"); statusKey = "dyn.outdoor_status_unavailable";
+  }
+
+  let body = descNoteHtml(t("dyn.outdoor_detail_status"), t(statusKey));
+  // What the LAST EVENT actually carries, which is the durable half — the live reading says only
+  // what the axis would record now. An event recorded without the axis says so rather than going
+  // unmentioned, since that is precisely the gap a later analysis would trip over.
+  if (hasSample) body += descNoteHtml(t("dyn.outdoor_detail_sample"), fmt(sample));
+  else if (hasEvent) body += descNoteHtml(t("dyn.outdoor_detail_sample"), t("dyn.outdoor_sample_none"));
+  body += `<div class="vdesc-p">${esc(t("dyn.outdoor_help_axis"))}</div>`;
+  // The placement caveat is not a footnote: the firmware cannot know where the sensor hangs, so
+  // whether this number is outdoor air at all is the reader's fact to supply, not the device's.
+  body += `<div class="vdesc-p">${esc(t(enabled ? "dyn.outdoor_help_placement"
+                                                : "dyn.outdoor_help_setup"))}</div>`;
+  return dynamicInfoRow("outdoor", t("dyn.outdoor"), value, cls, body,
+    "board", t("board.title"));
+}
+
 function dynamicControlCardHtml() {
   const r = S.status?.reference_temperature || {};
   const w = S.status?.weather_forecast || {};
@@ -618,6 +684,11 @@ function dynamicControlCardHtml() {
     `<div class="vdesc-p">${esc(t(w.configured ? "wx.hint.configured" : "wx.hint.setup"))}</div>`;
   rows += dynamicInfoRow("weather", t("dyn.weather"), weatherValue, weatherCls,
     weatherBody, "weather", t("wx.title"));
+
+  // Beside the forecast row on purpose: both are optional outdoor evidence, and the two labels have
+  // to keep MEASURED apart from FORECAST or a reader sees two outdoor temperatures and no way to
+  // tell which is which.
+  rows += outdoorAxisRow(d, S.status?.env3 || {});
 
   rows += dynamicInfoRow("strategy", t("dyn.strategy"), t("dyn.shadow_strategy"), "",
     `<div class="vdesc-p">${esc(t("dyn.strategy_help"))}</div>`);

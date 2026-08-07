@@ -29,6 +29,18 @@ const labels = {
   "dyn.card": "Heizkurven-Diagnose",
   "dyn.not_configured": "Nicht konfiguriert",
   "dyn.configured": "Konfiguriert",
+  "dyn.outdoor": "Gemessene Außenluft",
+  "dyn.outdoor_none": "Kein Wert",
+  "dyn.outdoor_detail_status": "Status",
+  "dyn.outdoor_detail_sample": "Beim letzten aufgezeichneten Ereignis",
+  "dyn.outdoor_status_live": "ENV-III-Messwert aktuell, wird mitaufgezeichnet.",
+  "dyn.outdoor_status_unavailable": "Sensor eingerichtet, aber kein aktueller Messwert erreicht die Aufzeichnung.",
+  "dyn.outdoor_status_absent": "Kein ENV-III-Sensor eingerichtet. Ereignisse werden ohne Außenwert aufgezeichnet.",
+  "dyn.outdoor_sample_none": "Ohne Außenwert aufgezeichnet",
+  "dyn.outdoor_help_axis": "Aussenachse macht die Raumabweichung lesbar.",
+  "dyn.outdoor_help_placement": "Was der Sensor dort misst, wo er haengt.",
+  "dyn.outdoor_help_setup": "Ein M5Stack ENV III am Grove-Port kann diesen Wert liefern.",
+  "board.title": "Board-Hardware",
   "dyn.input_error": "Eingabefehler",
   "ref.title": "Raumtemperaturquelle",
   "ref.ago": "vor {0} s",
@@ -206,8 +218,8 @@ assert.match(circulationTongue, /<span class="vdesc-n">Erkannter Zustand<\/span>
 let html = sandbox.__renderDynamic();
 assert.doesNotMatch(html, /section-badge|Experimentell/,
   "the enabled bottom card must not carry an experimental pill");
-assert.equal((html.match(/class="vdesc-body settings-info-tongue"/g) || []).length, 4,
-  "all four diagnosis rows must render an information tongue");
+assert.equal((html.match(/class="vdesc-body settings-info-tongue"/g) || []).length, 5,
+  "all five diagnosis rows must render an information tongue");
 // The idle-plant state is the reading a user sees for months. It must say what it means and must
 // not be styled as a fault, or the row becomes noise exactly when it is the only thing to read.
 assert.match(html, /Wartet auf Heizbetrieb/,
@@ -220,7 +232,82 @@ assert.doesNotMatch(html, /Betriebsart|Sicherheit & Ausgabe|Nur lesend/,
   "the duplicate mode row and the constant read-only row must be gone");
 assert.match(html, /Raum-Sollwert minus Ist-Raumtemperatur: positiv bedeutet zu kalt/,
   "the method tongue must pin the canonical room-error sign");
-for (const key of ["state", "room-sources", "weather", "strategy"]) {
+// The optional outdoor axis, in all three states it can be in. The number always comes from the
+// DIAGNOSIS, never from /status.env3 read a second time — those disagree exactly when the sensor is
+// live but the sampler is not evaluating, and a green reading beside a blocked state row is the
+// mistake the room-source row already documents.
+// Scoped to the diagnosis row, not to data-act="board" alone: the ESP32 card's Hardware button
+// carries that same action (both open the one Board Hardware modal), so a bare selector would
+// silently start matching the wrong row if these renders were ever combined.
+const outdoorFace = (h) => {
+  const item = h.match(/data-desc="dynamic:outdoor"[\s\S]*?<\/button>[\s\S]*?<\/button>/)?.[0] || "";
+  return item.match(/<button[^>]*data-act="board"[\s\S]*?<\/button>/)?.[0] || "";
+};
+const fixtureEnv3 = S.status.env3;
+const fixtureCurve = S.status.heating_curve;
+assert.match(html, /Gemessene Außenluft/,
+  "the row must distinguish a MEASURED outdoor value from the forecast row beside it");
+assert.notEqual(html.indexOf("Gemessene Außenluft"), html.indexOf("Wetterprognose"),
+  "the measured axis and the forecast must be two distinct rows");
+
+// (a) sensor live, but nothing has reached the recorder: warn, and the tongue explains the gap
+// rather than letting the reader assume the sensor is broken.
+assert.match(outdoorFace(html), /Kein Wert/);
+assert.match(outdoorFace(html), /vrow-val settings-wrap warn/,
+  "a CONFIGURED sensor whose value never arrives is worth a warning");
+assert.match(html, /Sensor eingerichtet, aber kein aktueller Messwert erreicht die Aufzeichnung\./);
+
+// (b) no sensor at all: DIM, never warn — the axis gates no sampling, so its absence is not a
+// fault, the same rule that keeps the summer idle-plant state unstyled.
+S.status.env3 = {};
+let outdoorHtml = sandbox.__renderDynamic();
+assert.match(outdoorFace(outdoorHtml), /Nicht konfiguriert/);
+assert.match(outdoorFace(outdoorHtml), /vrow-val settings-wrap dim/,
+  "an absent OPTIONAL axis must be dim, never warn or err");
+assert.match(outdoorHtml, /Ereignisse werden ohne Außenwert aufgezeichnet\./,
+  "the tongue must state that recording continues without the outdoor value");
+assert.match(outdoorHtml, /Ein M5Stack ENV III am Grove-Port kann diesen Wert liefern\./,
+  "an unconfigured axis must say how to supply one");
+
+// (c) a live value, and an EVENT recorded without one. The event's own value is the durable half,
+// so it is stated separately from the live reading instead of the live number standing in for it.
+S.status.env3 = { supported: true, enabled: true, fresh: true, temperature_c: -4.2 };
+S.status.heating_curve = {
+  method_version: 2, armed: true, state: "hold", reason: "plant_inactive",
+  outdoor_temperature_c: -4.25, last_sample_room_error_k: 0.4,
+};
+outdoorHtml = sandbox.__renderDynamic();
+assert.match(outdoorFace(outdoorHtml), /−4,3\u00a0°C|-4,3\u00a0°C/,
+  "the live axis prints the DIAGNOSIS value in the German locale");
+assert.match(outdoorFace(outdoorHtml), /vrow-val settings-wrap ok/);
+assert.match(outdoorHtml, /Ohne Außenwert aufgezeichnet/,
+  "an event recorded without the axis must say so rather than borrow the live reading");
+S.status.heating_curve.last_sample_outdoor_temperature_c = -6.5;
+outdoorHtml = sandbox.__renderDynamic();
+assert.match(outdoorHtml, /Beim letzten aufgezeichneten Ereignis<\/span> −6,5\u00a0°C|Beim letzten aufgezeichneten Ereignis<\/span> -6,5\u00a0°C/,
+  "the recorded event keeps its own outdoor value, distinct from the live one");
+// (d) THE SHAPE THE DEVICE ACTUALLY SENDS. /status emits explicit `null` for every absent figure,
+// and `Number(null)` is 0 — which `Number.isFinite` accepts. Read that way an installation with no
+// recorded event yet printed "0,0 °C" as the temperature of an event that never happened. A fixture
+// that merely OMITS the keys cannot see this: undefined becomes NaN and is rejected correctly.
+S.status.env3 = { supported: true, enabled: true, fresh: true, temperature_c: 22.24 };
+S.status.heating_curve = {
+  method_version: 2, armed: true, state: "hold", reason: "plant_inactive",
+  outdoor_temperature_c: 22.236, last_sample_outdoor_temperature_c: null,
+  last_sample_room_error_k: null, last_sample_unix_s: null, samples: 0, sequence: 0,
+};
+outdoorHtml = sandbox.__renderDynamic();
+assert.match(outdoorFace(outdoorHtml), /22,2\u00a0°C/,
+  "a live axis still prints while no event has been recorded");
+assert.doesNotMatch(outdoorHtml, /Beim letzten aufgezeichneten Ereignis/,
+  "with no recorded event there is nothing to state about one — null must not read as 0.0 °C");
+assert.doesNotMatch(outdoorHtml, /0,0\u00a0°C/,
+  "an absent figure must never be rendered as a real zero reading");
+
+S.status.env3 = fixtureEnv3;
+S.status.heating_curve = fixtureCurve;
+
+for (const key of ["state", "room-sources", "weather", "outdoor", "strategy"]) {
   const infoButton = html.match(new RegExp(`<button class="[^"]*(?:settings-split-info|settings-whole-info-row)[^"]*"[^>]*data-desc="dynamic:${key}"[\\s\\S]*?<\\/button>`))?.[0] || "";
   assert.match(infoButton, /aria-expanded="false"/,
     `${key} label must be a closed explanation action on first render`);
@@ -231,8 +318,11 @@ for (const key of ["state", "strategy"]) {
   assert.match(html, new RegExp(`<button class="vrow settings-whole-info-row settings-info-row"[^>]*data-desc="dynamic:${key}"[\\s\\S]*class="settings-info-value`),
     `${key} has no second action, so its label and value must share one full-row accordion button`);
 }
-assert.equal((html.match(/class="settings-split-action dynamic-config-open/g) || []).length, 2,
-  "only room-temperature and weather values may be popup actions");
+// A row's value is a popup action exactly when the user can CONFIGURE that value — room source,
+// forecast location and the ENV III sensor each have an editor. The reported rows (state, method)
+// have none and must stay passive, which is the assertion below.
+assert.equal((html.match(/class="settings-split-action dynamic-config-open/g) || []).length, 3,
+  "the three configurable sources may be popup actions; the reported rows may not");
 assert.equal((html.match(/class="settings-info-value/g) || []).length, 2,
   "state and method values must stay passive inside their full-row accordion buttons");
 assert.doesNotMatch(html, /settings-source-summary|Konfiguriert · 25,1 °C|Open-Meteo · 22,6 °C \/ 2 h/,
@@ -290,10 +380,11 @@ S.descOpen.clear();
 
 S.status.reference_temperature = {};
 S.status.weather_forecast = {};
+S.status.env3 = {};
 html = sandbox.__renderDynamic();
-assert.equal((html.match(/class="vdesc-body settings-info-tongue"/g) || []).length, 4,
+assert.equal((html.match(/class="vdesc-body settings-info-tongue"/g) || []).length, 5,
   "unconfigured sources must retain their explanation tongues");
-assert.equal((html.match(/<span>Nicht konfiguriert<\/span>/g) || []).length, 2,
+assert.equal((html.match(/<span>Nicht konfiguriert<\/span>/g) || []).length, 3,
   "each empty editable source must expose Not configured as its popup value");
 assert.ok(html.includes("Raumquellen-Erklärung") && html.includes("Wetter-Einrichtung"),
   "unconfigured sources must still explain how their inputs work");
